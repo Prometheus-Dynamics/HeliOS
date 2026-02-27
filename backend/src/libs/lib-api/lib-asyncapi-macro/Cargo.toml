@@ -1,0 +1,17 @@
+[package]
+name = "lib-asyncapi-macro"
+version.workspace = true
+edition = "2024"
+
+[lib]
+proc-macro = true
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+quote = { workspace = true }
+syn = { workspace = true }
+proc-macro2 = { workspace = true }
+lib-asyncapi = { path = "../lib-asyncapi" }

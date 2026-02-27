@@ -1,0 +1,33 @@
+[package]
+name = "lib-ipc"
+version.workspace = true
+edition = "2024"
+
+[features]
+default = []
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+bytes = { workspace = true }
+bincode = { workspace = true }
+bitflags = { workspace = true }
+tracing = { workspace = true }
+serde_bytes = { workspace = true }
+url = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+
+
+[dev-dependencies]
+proptest = "1.5.0"
+tempfile = "3.12.0"

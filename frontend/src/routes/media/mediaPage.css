@@ -1,0 +1,35 @@
+  :global([data-upload-toast='true']) {
+    position: relative;
+    padding-bottom: 1rem;
+    min-width: 16rem;
+  }
+
+  :global([data-upload-toast='true']::after) {
+    content: '';
+    display: block;
+    height: 0.25rem;
+    margin-top: 0.4rem;
+    border-radius: 9999px;
+    background: linear-gradient(90deg, var(--color-primary-500, #0ea5e9), var(--color-primary-300, #7dd3fc));
+    width: var(--upload-progress, 35%);
+    animation: upload-toast-indeterminate 1.4s ease infinite;
+  }
+
+  :global([data-upload-toast='true'][data-upload-state='determinate']::after) {
+    animation: none;
+  }
+
+  @keyframes upload-toast-indeterminate {
+    0% {
+      width: 20%;
+      transform: translateX(-40%);
+    }
+    50% {
+      width: 60%;
+      transform: translateX(10%);
+    }
+    100% {
+      width: 20%;
+      transform: translateX(120%);
+    }
+  }

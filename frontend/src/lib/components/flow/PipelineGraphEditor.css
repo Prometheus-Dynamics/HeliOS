@@ -1,0 +1,110 @@
+  :global(.pipeline-flow .svelte-flow) {
+    background-color: var(--flow-surface, #0f172a);
+    --background-color: var(--flow-surface, #0f172a);
+    --background-color-default: var(--flow-surface, #0f172a);
+    --xy-background-color: var(--flow-surface, #0f172a);
+    --xy-background-color-default: var(--flow-surface, #0f172a);
+    --xy-background-pattern-dots-color: var(--flow-border, #1f2937);
+    --xy-background-pattern-lines-color: var(--flow-border, #1f2937);
+    --xy-background-pattern-cross-color: var(--flow-border, #1f2937);
+    --xy-node-background-color: var(--flow-surface-soft, rgba(15, 23, 42, 0.82));
+    --xy-node-color: var(--flow-text, #f8fafc);
+    --xy-controls-button-background-color: var(--flow-surface-soft, rgba(15, 23, 42, 0.82));
+    --xy-controls-button-background-color-hover: var(--flow-surface, #0f172a);
+    --xy-controls-button-border-color: var(--flow-border, #1f2937);
+    --xy-controls-button-color: var(--flow-text, #f8fafc);
+  }
+
+  :global(.pipeline-flow .svelte-flow__background) {
+    background-color: var(--flow-surface, #0f172a);
+  }
+
+  :global(.pipeline-flow .svelte-flow__pane) {
+    background-color: transparent;
+  }
+
+  :global(.pipeline-flow .svelte-flow__edge.selected path) {
+    stroke: var(--flow-edge-highlight);
+    stroke-width: 2;
+    opacity: 1;
+  }
+
+  :global(.pipeline-flow .svelte-flow__edge.selected .svelte-flow__edge-text),
+  :global(.pipeline-flow .svelte-flow__edge.selected .svelte-flow__edge-textbg) {
+    opacity: 1;
+  }
+
+  :global(.pipeline-flow .svelte-flow__controls > button) {
+    background: var(--flow-surface-soft);
+    color: var(--flow-text);
+    border-color: var(--flow-border);
+  }
+
+  :global(.pipeline-flow .svelte-flow__minimap) {
+    background: color-mix(in srgb, var(--flow-surface) 85%, transparent);
+    border-color: var(--flow-border);
+  }
+
+  :global(.pipeline-flow .svelte-flow__handle),
+  :global(.pipeline-flow .react-flow__handle) {
+    width: 16px;
+    height: 16px;
+    border-radius: 999px;
+    border: none;
+    background: var(--pipeline-handle-color, var(--flow-accent));
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--pipeline-handle-color, var(--flow-accent)) 40%, var(--flow-border, #1f2937) 60%),
+      0 0 10px color-mix(in srgb, var(--pipeline-handle-color, var(--flow-accent)) 35%, transparent);
+  }
+
+  :global(.pipeline-flow .svelte-flow__attribution) {
+    display: none;
+  }
+
+  :global(.pipeline-flow .svelte-flow__node),
+  :global(.pipeline-flow .svelte-flow__node-pipeline) {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0;
+  }
+
+  :global(.edge-style-menu) {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    z-index: 20;
+    display: flex;
+    gap: 8px;
+    padding: 10px;
+    border-radius: 12px;
+    border: 1px solid var(--flow-border, #1f2937);
+    background: color-mix(in srgb, var(--flow-surface, #0f172a) 92%, transparent);
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(4px);
+  }
+
+  :global(.edge-style-button) {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    border: 1px solid var(--flow-border, #1f2937);
+    background: color-mix(in srgb, var(--flow-surface-soft, rgba(15, 23, 42, 0.82)) 85%, transparent);
+    color: var(--flow-text, #f8fafc);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+  }
+
+  :global(.edge-style-button:hover) {
+    transform: translateY(-1px);
+    border-color: var(--flow-accent);
+    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.25);
+  }
+
+  :global(.edge-style-button--active) {
+    border-color: var(--flow-accent);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3), 0 0 0 1px color-mix(in srgb, var(--flow-accent) 50%, transparent);
+  }

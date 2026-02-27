@@ -1,0 +1,11 @@
+[units."helios-dropbear"]
+enabled = false
+src = "assets/services/ssh/etc/systemd/system/helios-dropbear.service"
+targets = ["multi-user"]
+
+# Use distro-provided OpenSSH unit as the single SSH daemon.
+[units."sshd"]
+enabled = true
+vendor = true
+unit = "sshd.service"
+targets = ["multi-user"]

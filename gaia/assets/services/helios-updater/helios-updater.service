@@ -1,0 +1,42 @@
+[Unit]
+Description=Helios Updater Service
+After=network.target systemd-remount-fs.service
+Wants=helios-updater.socket
+Requires=helios-updater.socket
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios
+ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios/panics
+ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios/updater
+ExecStartPre=/bin/sh -lc 'echo 1 > /proc/sys/kernel/core_uses_pid; echo /var/log/helios/core-%%e-%%p > /proc/sys/kernel/core_pattern; ulimit -c unlimited'
+Environment=UPDATER_SOCKET=/run/helios/updater.sock
+Environment=UPDATER_JOURNAL_PATH=/var/lib/helios/journal/updater.log
+Environment=LOG_FOLDER=/var/log/helios
+Environment=UPDATER_METRICS_ADDR=0.0.0.0:9102
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+EnvironmentFile=-/etc/default/helios-updater
+ExecStart=/usr/bin/helios-updater
+Restart=always
+RestartSec=5
+TimeoutStopSec=60
+User=root
+Group=root
+WorkingDirectory=/var/lib/helios
+StateDirectory=helios helios/journal helios/state
+LogsDirectory=helios
+LimitNOFILE=65536
+LimitCORE=0
+TasksMax=infinity
+OOMScoreAdjust=-200
+IOSchedulingClass=best-effort
+IOSchedulingPriority=0
+CPUAffinity=0 1
+Nice=-3
+
+[Install]
+WantedBy=network.target
+WantedBy=multi-user.target
+Also=helios-updater.socket

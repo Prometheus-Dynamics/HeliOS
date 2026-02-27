@@ -1,0 +1,14 @@
+[custom]
+enabled = true
+workspace_dir = "../frontend"
+check_ids = []
+
+[[custom.artifacts]]
+id = "helios-frontend"
+profile = "host"
+mode = "auto"
+prebuilt_path = "../frontend/build"
+# Uses an input fingerprint over frontend + docs + API schema sources to
+# avoid rebuilding when nothing changed.
+build_command = ["bun", "./scripts/build-if-changed.mjs"]
+output_path = "../frontend/build"

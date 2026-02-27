@@ -1,0 +1,10 @@
+[Unit]
+Description=Set CPU governor
+
+[Service]
+Type=oneshot
+ExecStart=/opt/set-governor.sh
+
+[Install]
+WantedBy=multi-user.target
+

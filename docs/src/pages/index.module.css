@@ -1,0 +1,290 @@
+.hero {
+  position: relative;
+  overflow: hidden;
+  padding: 6.5rem 1.5rem 4.5rem;
+}
+
+.heroBackdrop {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(900px circle at 12% 15%, color-mix(in oklch, var(--color-primary-500) 38%, transparent), transparent 60%),
+    radial-gradient(800px circle at 80% 8%, color-mix(in oklch, var(--color-secondary-400) 32%, transparent), transparent 55%),
+    radial-gradient(900px circle at 72% 72%, color-mix(in oklch, var(--color-tertiary-400) 22%, transparent), transparent 60%),
+    linear-gradient(135deg, rgba(9, 11, 17, 0.96), rgba(6, 8, 12, 0.99));
+  z-index: 0;
+}
+
+.heroBackdrop::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  background-image: repeating-linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.06) 0,
+      rgba(255, 255, 255, 0.06) 1px,
+      transparent 1px,
+      transparent 64px
+    ),
+    repeating-linear-gradient(
+      0deg,
+      rgba(255, 255, 255, 0.045) 0,
+      rgba(255, 255, 255, 0.045) 1px,
+      transparent 1px,
+      transparent 64px
+    );
+  opacity: 0.35;
+  mask-image: radial-gradient(circle at 35% 35%, black 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.heroInner {
+  position: relative;
+  z-index: 1;
+  max-width: 1200px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  gap: 2.5rem;
+  align-items: center;
+}
+
+.heroContent {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.heroKicker {
+  text-transform: uppercase;
+  letter-spacing: 0.32em;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: color-mix(in oklch, var(--color-surface-50) 60%, transparent);
+}
+
+.heroTitle {
+  font-size: clamp(2.6rem, 4vw, 4.4rem);
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+}
+
+.heroSubtitle {
+  font-size: clamp(1rem, 1.4vw, 1.2rem);
+  color: color-mix(in oklch, var(--color-surface-50) 75%, transparent);
+  max-width: 32rem;
+}
+
+.heroPills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.heroPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklch, var(--color-surface-50) 14%, transparent);
+  background: color-mix(in oklch, var(--color-surface-900) 55%, transparent);
+  text-decoration: none;
+  color: color-mix(in oklch, var(--color-surface-50) 88%, transparent);
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-weight: 600;
+  transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.heroPill:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in oklch, var(--color-primary-500) 55%, transparent);
+  background: color-mix(in oklch, var(--color-surface-900) 70%, transparent);
+}
+
+.heroPill:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--color-primary-500) 75%, white);
+  outline-offset: 3px;
+}
+
+.heroActions {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.heroButtonPrimary,
+.heroButtonGhost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.85rem 1.6rem;
+  border-radius: var(--radius-container);
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  text-decoration: none;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.heroButtonPrimary {
+  background: linear-gradient(
+    120deg,
+    color-mix(in oklch, var(--color-primary-500) 85%, black),
+    color-mix(in oklch, var(--color-secondary-500) 78%, black)
+  );
+  color: var(--color-primary-contrast-light, #fff);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.45);
+}
+
+.heroButtonGhost {
+  border: 1px solid color-mix(in oklch, var(--color-surface-50) 20%, transparent);
+  color: var(--color-surface-50);
+  background: color-mix(in oklch, var(--color-surface-900) 60%, transparent);
+}
+
+.heroButtonPrimary:hover,
+.heroButtonGhost:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 32px rgba(0, 0, 0, 0.4);
+}
+
+.heroPanel {
+  position: relative;
+  padding: 2.2rem;
+  border-radius: 1rem;
+  background: color-mix(in oklch, var(--color-surface-900) 92%, transparent);
+  color: var(--color-surface-50);
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.45);
+  border: 1px solid color-mix(in oklch, var(--color-surface-700) 65%, transparent);
+  overflow: hidden;
+}
+
+.heroPanelHeader {
+  display: grid;
+  gap: 0.25rem;
+  margin-bottom: 1.4rem;
+}
+
+.heroPanelKicker {
+  font-size: 0.65rem;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: color-mix(in oklch, var(--color-secondary-300) 88%, transparent);
+}
+
+.heroPanelHint {
+  color: color-mix(in oklch, var(--color-surface-50) 62%, transparent);
+  font-size: 0.95rem;
+}
+
+.heroPanelGrid {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.heroStat {
+  display: grid;
+  gap: 0.35rem;
+  text-decoration: none;
+  color: inherit;
+  padding: 0.9rem 1rem;
+  border-radius: 0.8rem;
+  border: 1px solid color-mix(in oklch, var(--color-surface-700) 55%, transparent);
+  background: color-mix(in oklch, var(--color-surface-950) 60%, transparent);
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.heroStat:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in oklch, var(--color-primary-500) 55%, transparent);
+}
+
+.heroStat:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--color-primary-500) 75%, white);
+  outline-offset: 4px;
+}
+
+.heroStatLabel {
+  font-size: 0.65rem;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: color-mix(in oklch, var(--color-surface-50) 55%, transparent);
+}
+
+.heroStatValue {
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.heroPanelFooter {
+  margin-top: 1.6rem;
+  padding-top: 1.2rem;
+  border-top: 1px solid color-mix(in oklch, var(--color-surface-700) 55%, transparent);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: center;
+  color: color-mix(in oklch, var(--color-surface-50) 70%, transparent);
+  font-size: 0.75rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.heroPanelFooterLabel {
+  color: color-mix(in oklch, var(--color-surface-50) 55%, transparent);
+  font-weight: 700;
+}
+
+.heroPanelFooterLink {
+  text-decoration: none;
+  color: color-mix(in oklch, var(--color-surface-50) 88%, transparent);
+}
+
+.heroPanelFooterLink:hover {
+  color: var(--color-primary-300);
+}
+
+.heroPanelFooterDot {
+  color: color-mix(in oklch, var(--color-surface-50) 35%, transparent);
+}
+
+.heroPulse {
+  position: absolute;
+  inset: auto auto 1.5rem -3rem;
+  width: 160px;
+  height: 160px;
+  background: radial-gradient(circle, color-mix(in oklch, var(--color-secondary-400) 50%, transparent), transparent 70%);
+  filter: blur(2px);
+  animation: float 8s ease-in-out infinite;
+}
+
+.main {
+  padding: 3rem 0 5rem;
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-12px);
+  }
+}
+
+@media screen and (max-width: 996px) {
+  .hero {
+    padding-top: 5rem;
+  }
+
+  .heroInner {
+    grid-template-columns: 1fr;
+  }
+
+  .heroPanel {
+    order: 2;
+  }
+}

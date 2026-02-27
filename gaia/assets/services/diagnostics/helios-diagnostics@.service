@@ -1,0 +1,34 @@
+[Unit]
+Description=Collect diagnostics snapshot for %I failure (helios-diagnostics)
+Documentation=man:systemd.unit(5)
+# Order after journald so logs are available, but avoid coupling to
+# provisioning targets to allow OnFailure from early boot stages.
+After=systemd-journald.service local-fs.target
+RequiresMountsFor=/var/lib/helios
+ConditionPathExists=!/run/helios-diagnostics/once-%i
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+EnvironmentFile=-/etc/helios/diagnostics.conf
+StandardOutput=journal+console
+StandardError=journal+console
+ExecStartPre=/bin/mkdir -p /var/lib/helios/diagnostics
+ExecStartPre=/bin/mkdir -p /run/helios-diagnostics
+ExecStartPre=/bin/chmod 0755 /var/lib/helios/diagnostics /run/helios-diagnostics
+# Stamp to avoid repeated snapshots for the same unit within a boot
+ExecStartPre=/bin/sh -c 'touch /run/helios-diagnostics/once-%i'
+ExecStart=/bin/sh -c "exec /usr/bin/helios-diagnostics --trigger failure --unit %i ${SNAPSHOT_KEEP:+--keep \"$SNAPSHOT_KEEP\"} ${SNAPSHOT_MAX_MB:+--max-mb \"$SNAPSHOT_MAX_MB\"} ${SNAPSHOT_TAR}"
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+RuntimeDirectory=helios-diagnostics
+RuntimeDirectoryMode=0755
+ReadWritePaths=/var/lib/helios/diagnostics /run/helios-diagnostics
+# Make bundles world-readable by default (dirs 755, files 644)
+UMask=0022
+
+[Install]
+WantedBy=multi-user.target

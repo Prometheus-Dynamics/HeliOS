@@ -1,0 +1,687 @@
+{
+  "id": "daedalus_ai_coral_inference",
+  "name": "Coral AI Inference",
+  "summary": "Run an Edge TPU-compiled model on the Coral TPU and emit detections.",
+  "tags": [
+    "ai",
+    "coral",
+    "inference",
+    "tpu"
+  ],
+  "graph": {
+    "nodes": [
+      {
+        "id": "io.host_bridge",
+        "label": "Input:frame",
+        "inputs": [],
+        "outputs": [
+          "frame",
+          "crosshair_x",
+          "crosshair_y"
+        ],
+        "metadata": {
+          "host_bridge": {
+            "type": "Bool",
+            "value": true
+          },
+          "host_bridge_outputs": {
+            "type": "String",
+            "value": "frame:image:dynamic,crosshair_x:int,crosshair_y:int"
+          },
+          "helios.host_input_port": {
+            "type": "String",
+            "value": "frame"
+          }
+        }
+      },
+      {
+        "id": "ai:preprocess",
+        "label": "AI Preprocess",
+        "inputs": [
+          "frame",
+          "model_id",
+          "resize"
+        ],
+        "outputs": [
+          "frame"
+        ],
+        "const_inputs": [
+          [
+            "model_id",
+            {
+              "type": "String",
+              "value": ""
+            }
+          ],
+          [
+            "resize",
+            {
+              "type": "Bool",
+              "value": false
+            }
+          ]
+        ]
+      },
+      {
+        "id": "ai:encode",
+        "label": "AI Encode",
+        "inputs": [
+          "frame",
+          "model_id",
+          "device_path",
+          "min_score",
+          "max_results",
+          "normalize"
+        ],
+        "outputs": [
+          "tensor",
+          "config"
+        ],
+        "const_inputs": [
+          [
+            "model_id",
+            {
+              "type": "String",
+              "value": ""
+            }
+          ],
+          [
+            "device_path",
+            {
+              "type": "String",
+              "value": "Auto|auto"
+            }
+          ],
+          [
+            "min_score",
+            {
+              "type": "Float",
+              "value": 0.5
+            }
+          ],
+          [
+            "max_results",
+            {
+              "type": "Int",
+              "value": 25
+            }
+          ],
+          [
+            "normalize",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ]
+        ]
+      },
+      {
+        "id": "ai:run",
+        "label": "AI Run",
+        "inputs": [
+          "tensor",
+          "config"
+        ],
+        "outputs": [
+          "results",
+          "config"
+        ]
+      },
+      {
+        "id": "ai:detections",
+        "label": "AI Detections",
+        "inputs": [
+          "results",
+          "config"
+        ],
+        "outputs": [
+          "detections"
+        ]
+      },
+      {
+        "id": "ai:overlay_detections",
+        "label": "AI Overlay",
+        "inputs": [
+          "frame",
+          "detections",
+          "enabled",
+          "show_label",
+          "show_score",
+          "show_class_id",
+          "show_crosshair",
+          "thickness",
+          "label_scale",
+          "crosshair_scale"
+        ],
+        "outputs": [
+          "frame"
+        ],
+        "const_inputs": [
+          [
+            "enabled",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ],
+          [
+            "show_label",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ],
+          [
+            "show_score",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ],
+          [
+            "show_class_id",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ],
+          [
+            "show_crosshair",
+            {
+              "type": "Bool",
+              "value": false
+            }
+          ],
+          [
+            "thickness",
+            {
+              "type": "Int",
+              "value": 2
+            }
+          ],
+          [
+            "label_scale",
+            {
+              "type": "Float",
+              "value": 1.0
+            }
+          ],
+          [
+            "crosshair_scale",
+            {
+              "type": "Float",
+              "value": 0.25
+            }
+          ]
+        ]
+      },
+      {
+        "id": "io.host_output",
+        "label": "Output:ai",
+        "inputs": [
+          "frame",
+          "detections",
+          "target_detections",
+          "tv",
+          "tid",
+          "tx",
+          "ty",
+          "ta",
+          "distance_px",
+          "target_cx",
+          "target_cy",
+          "thor",
+          "tvert",
+          "tshort",
+          "tlong"
+        ],
+        "outputs": [],
+        "metadata": {
+          "host_bridge": {
+            "type": "Bool",
+            "value": true
+          }
+        }
+      },
+      {
+        "id": "ai:detections_crosshair_target",
+        "label": "Crosshair Target",
+        "inputs": [
+          "detections",
+          "crosshair_x",
+          "crosshair_y"
+        ],
+        "outputs": [
+          "detections",
+          "tv",
+          "tid",
+          "tx",
+          "ty",
+          "ta",
+          "distance_px",
+          "cx",
+          "cy",
+          "thor",
+          "tvert",
+          "tshort",
+          "tlong"
+        ],
+        "const_inputs": []
+      }
+    ],
+    "edges": [
+      {
+        "from": {
+          "node": 0,
+          "port": "frame"
+        },
+        "to": {
+          "node": 1,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 1,
+          "port": "frame"
+        },
+        "to": {
+          "node": 2,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 2,
+          "port": "tensor"
+        },
+        "to": {
+          "node": 3,
+          "port": "tensor"
+        }
+      },
+      {
+        "from": {
+          "node": 2,
+          "port": "config"
+        },
+        "to": {
+          "node": 3,
+          "port": "config"
+        }
+      },
+      {
+        "from": {
+          "node": 3,
+          "port": "results"
+        },
+        "to": {
+          "node": 4,
+          "port": "results"
+        }
+      },
+      {
+        "from": {
+          "node": 3,
+          "port": "config"
+        },
+        "to": {
+          "node": 4,
+          "port": "config"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "frame"
+        },
+        "to": {
+          "node": 5,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 4,
+          "port": "detections"
+        },
+        "to": {
+          "node": 5,
+          "port": "detections"
+        }
+      },
+      {
+        "from": {
+          "node": 5,
+          "port": "frame"
+        },
+        "to": {
+          "node": 6,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 4,
+          "port": "detections"
+        },
+        "to": {
+          "node": 6,
+          "port": "detections"
+        }
+      },
+      {
+        "from": {
+          "node": 4,
+          "port": "detections"
+        },
+        "to": {
+          "node": 7,
+          "port": "detections"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "crosshair_x"
+        },
+        "to": {
+          "node": 7,
+          "port": "crosshair_x"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "crosshair_y"
+        },
+        "to": {
+          "node": 7,
+          "port": "crosshair_y"
+        }
+      },
+      {
+        "from": {
+          "node": 7,
+          "port": "detections"
+        },
+        "to": {
+          "node": 6,
+          "port": "target_detections"
+        }
+      },
+      {
+        "from": {
+          "node": 7,
+          "port": "tv"
+        },
+        "to": {
+          "node": 6,
+          "port": "tv"
+        }
+      },
+      {
+        "from": {
+          "node": 7,
+          "port": "tid"
+        },
+        "to": {
+          "node": 6,
+          "port": "tid"
+        }
+      },
+      {
+        "from": {
+          "node": 7,
+          "port": "tx"
+        },
+        "to": {
+          "node": 6,
+          "port": "tx"
+        }
+      },
+      {
+        "from": {
+          "node": 7,
+          "port": "ty"
+        },
+        "to": {
+          "node": 6,
+          "port": "ty"
+        }
+      },
+      {
+        "from": {
+          "node": 7,
+          "port": "ta"
+        },
+        "to": {
+          "node": 6,
+          "port": "ta"
+        }
+      },
+      {
+        "from": {
+          "node": 7,
+          "port": "distance_px"
+        },
+        "to": {
+          "node": 6,
+          "port": "distance_px"
+        }
+      },
+      {
+        "from": {
+          "node": 7,
+          "port": "cx"
+        },
+        "to": {
+          "node": 6,
+          "port": "target_cx"
+        }
+      },
+      {
+        "from": {
+          "node": 7,
+          "port": "cy"
+        },
+        "to": {
+          "node": 6,
+          "port": "target_cy"
+        }
+      },
+      {
+        "from": {
+          "node": 7,
+          "port": "thor"
+        },
+        "to": {
+          "node": 6,
+          "port": "thor"
+        }
+      },
+      {
+        "from": {
+          "node": 7,
+          "port": "tvert"
+        },
+        "to": {
+          "node": 6,
+          "port": "tvert"
+        }
+      },
+      {
+        "from": {
+          "node": 7,
+          "port": "tshort"
+        },
+        "to": {
+          "node": 6,
+          "port": "tshort"
+        }
+      },
+      {
+        "from": {
+          "node": 7,
+          "port": "tlong"
+        },
+        "to": {
+          "node": 6,
+          "port": "tlong"
+        }
+      }
+    ],
+    "metadata": {
+      "helios.pipeline.alias": "Coral AI Inference (Daedalus)",
+      "helios.pipeline.ui": {
+        "title": "Coral AI Inference",
+        "description": "Tune model selection and inference thresholds.",
+        "layout": {
+          "type": "tabs",
+          "tabs": [
+            {
+              "id": "model",
+              "title": "Model",
+              "content": [
+                {
+                  "type": "text",
+                  "id": "model_intro",
+                  "text": "Select the model and runtime device used for inference."
+                },
+                {
+                  "type": "select",
+                  "id": "model_id",
+                  "label": "Model ID",
+                  "bind": "2.model_id"
+                },
+                {
+                  "type": "select",
+                  "id": "device_path",
+                  "label": "Device",
+                  "bind": "2.device_path"
+                },
+                {
+                  "type": "accordion",
+                  "id": "model_advanced",
+                  "title": "Advanced",
+                  "items": [
+                    {
+                      "type": "select",
+                      "id": "preprocess_model_id",
+                      "label": "Preprocess model ID",
+                      "bind": "1.model_id",
+                      "help": "Keep this aligned with the encode model."
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "inference",
+              "title": "Inference",
+              "content": [
+                {
+                  "type": "slider",
+                  "id": "min_score",
+                  "label": "Minimum score",
+                  "bind": "2.min_score",
+                  "min": 0,
+                  "max": 1,
+                  "step": 0.01,
+                  "trackGradient": "linear-gradient(90deg, #334155, #38bdf8)"
+                },
+                {
+                  "type": "slider",
+                  "id": "max_results",
+                  "label": "Max results",
+                  "bind": "2.max_results",
+                  "min": 1,
+                  "max": 100,
+                  "step": 1
+                },
+                {
+                  "type": "accordion",
+                  "id": "inference_advanced",
+                  "title": "Advanced",
+                  "items": [
+                    {
+                      "type": "toggle",
+                      "id": "normalize",
+                      "label": "Normalize input",
+                      "bind": "2.normalize",
+                      "help": "Enable if the model expects normalized inputs."
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "overlay",
+              "title": "Overlay",
+              "content": [
+                {
+                  "type": "toggle",
+                  "id": "overlay_enabled",
+                  "label": "Enable overlay",
+                  "bind": "5.enabled"
+                },
+                {
+                  "type": "toggle",
+                  "id": "show_label",
+                  "label": "Show label text",
+                  "bind": "5.show_label"
+                },
+                {
+                  "type": "toggle",
+                  "id": "show_score",
+                  "label": "Show confidence",
+                  "bind": "5.show_score"
+                },
+                {
+                  "type": "toggle",
+                  "id": "show_class_id",
+                  "label": "Show class id",
+                  "bind": "5.show_class_id"
+                },
+                {
+                  "type": "toggle",
+                  "id": "show_crosshair",
+                  "label": "Show crosshair",
+                  "bind": "5.show_crosshair"
+                },
+                {
+                  "type": "slider",
+                  "id": "overlay_thickness",
+                  "label": "Box thickness",
+                  "bind": "5.thickness",
+                  "min": 1,
+                  "max": 16,
+                  "step": 1
+                },
+                {
+                  "type": "slider",
+                  "id": "label_scale",
+                  "label": "Label scale",
+                  "bind": "5.label_scale",
+                  "min": 0.2,
+                  "max": 3.0,
+                  "step": 0.1
+                },
+                {
+                  "type": "slider",
+                  "id": "crosshair_scale",
+                  "label": "Crosshair scale",
+                  "bind": "5.crosshair_scale",
+                  "min": 0.05,
+                  "max": 1.0,
+                  "step": 0.05
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "connections": []
+  }
+}

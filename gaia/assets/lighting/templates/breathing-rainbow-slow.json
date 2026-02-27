@@ -1,0 +1,24 @@
+{
+  "id": "breathing-rainbow-slow",
+  "name": "Breathing Rainbow Slow",
+  "summary": "Built-in breathing_rainbow lighting animation template.",
+  "tags": [
+    "lighting",
+    "animation",
+    "builtin",
+    "breathing_rainbow"
+  ],
+  "command": {
+    "brightness": 170,
+    "animation": {
+      "kind": "breathing_rainbow",
+      "speed_hz": 5.0,
+      "low": 10,
+      "high": 255,
+      "period_ms": 2000
+    }
+  },
+  "duration_ms": null,
+  "sequence": null,
+  "timeline": null
+}

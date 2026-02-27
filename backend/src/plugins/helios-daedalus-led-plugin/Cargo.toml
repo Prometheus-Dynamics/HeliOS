@@ -1,0 +1,14 @@
+[package]
+name = "helios-daedalus-led-plugin"
+version.workspace = true
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+daedalus = { workspace = true, features = ["ffi", "plugins", "gpu"] }
+lib-led-plugin = { path = "../../libs/lib-led-plugin" }

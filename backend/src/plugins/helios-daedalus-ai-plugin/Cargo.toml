@@ -1,0 +1,14 @@
+[package]
+name = "helios-daedalus-ai-plugin"
+version.workspace = true
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+daedalus = { workspace = true, features = ["ffi", "plugins", "gpu"] }
+lib-ai = { path = "../../libs/lib-ai", features = ["backend-coral"] }

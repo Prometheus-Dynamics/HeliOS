@@ -1,0 +1,14 @@
+[package]
+name = "lib-led-animations"
+version.workspace = true
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+helios-peripherals = { path = "../../helios-peripherals", default-features = false, features = ["dto"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }

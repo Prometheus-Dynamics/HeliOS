@@ -1,0 +1,15 @@
+[package]
+name = "lib-test"
+version.workspace = true
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+lib-test-macro = { path = "../lib-test-macro" }
+libloading = "0.8"
+
+[features]
+default = []

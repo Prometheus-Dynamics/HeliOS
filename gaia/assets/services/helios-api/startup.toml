@@ -1,0 +1,63 @@
+# HeliOS first-boot startup preset.
+# This file is consumed once by helios-api to seed pipelines/streams on brand-new devices.
+
+[[pipelines]]
+id = "4fca14eb-e218-48e4-adf9-b957d645c604"
+name = "Default ArUco Fast"
+templateId = "daedalus_aruco_fast"
+
+[[streams]]
+cameraId = "/base/axi/pcie@1000120000/rp1/i2c@88000/ov9782@60"
+streamId = "4ba04815-ea63-4bd6-b273-e4a7f52f30aa"
+
+[streams.manifest.identity]
+id = "4ba04815-ea63-4bd6-b273-e4a7f52f30aa"
+hardware_id = "/base/axi/pcie@1000120000/rp1/i2c@88000/ov9782@60"
+
+[streams.manifest.capture]
+backend = "Libcamera"
+target_fps = 30
+enable_tdn_output = true
+device_keys = ["/base/axi/pcie@1000120000/rp1/i2c@88000/ov9782@60", "ov9782"]
+
+[streams.manifest.capture.handle]
+type = "libcamera"
+id = "/base/axi/pcie@1000120000/rp1/i2c@88000/ov9782@60"
+
+[streams.manifest.capture.mode.format]
+code = "NV12"
+color = "Srgb"
+resolution = { width = 1280, height = 800 }
+
+[[streams.manifest.capture.controls]]
+id = 10002
+value = { kind = "int", value = 1 }
+
+[streams.manifest]
+host_buffer = 8
+internal = false
+pipeline_enabled = false
+pipelines = []
+pipeline_wires = []
+pipeline_host_inputs = {}
+encoder_id = "ffmpeg"
+decoder_id = "nv12-cpu"
+shadow_recorder_enabled = false
+start_on_boot = false
+
+[streams.manifest.encoder_settings]
+output_resolution = { width = 640, height = 400 }
+
+[streams.manifest.decoder_settings]
+rotation_degrees = 0
+mirror_horizontal = false
+
+[streams.manifest.pose.translation]
+x = 0.0
+y = 0.0
+z = 0.0
+
+[streams.manifest.pose.rotation]
+roll = 0.0
+pitch = 0.0
+yaw = 0.0

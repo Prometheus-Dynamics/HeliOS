@@ -1,0 +1,27 @@
+[fan]
+enabled = true
+# Let helios-peripherals auto-discover the active pwmfan hwmon path on CM5.
+pwm_path = "auto"
+tacho_path = "auto"
+# Keep minimum duty high enough to avoid stall at runtime.
+min_percent = 35
+max_percent = 100
+poll_interval_ms = 5000
+# CM5 pwm-fan is active-high; do not invert duty.
+invert_pwm = false
+
+[[fan.curve]]
+temp_c = 40.0
+percent = 35
+
+[[fan.curve]]
+temp_c = 50.0
+percent = 55
+
+[[fan.curve]]
+temp_c = 60.0
+percent = 75
+
+[[fan.curve]]
+temp_c = 70.0
+percent = 100

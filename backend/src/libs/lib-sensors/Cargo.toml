@@ -1,0 +1,31 @@
+[package]
+name = "lib-sensors"
+version.workspace = true
+edition = "2024"
+
+[features]
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+tracing = { workspace = true }
+thiserror = { workspace = true }
+linux-embedded-hal = { workspace = true }
+embedded-hal = "1.0.0"
+tokio = { workspace = true, features = ["sync", "time"] }
+futures = { workspace = true }
+serde = { workspace = true }
+utoipa = { workspace = true }
+lib-asyncapi = { path = "../lib-api/lib-asyncapi" }
+lib-asyncapi-macro = { path = "../lib-api/lib-asyncapi-macro" }
+schemars = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+lib-math = { path = "../lib-math" }
+uuid = { workspace = true}
+chrono = { workspace = true }
+bincode = { workspace = true, features = ["serde"] }

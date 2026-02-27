@@ -1,0 +1,18 @@
+# Target: Raspberry Pi CM5
+#
+# CM5-specific Buildroot target overrides.
+
+imports = [
+  "./base.toml",
+]
+
+[buildroot]
+expand_size_mb = 2300
+
+[buildroot.rpi]
+board = "cm5"
+defconfig = "raspberrypicm5io_defconfig"
+overlay = "assets/overlays/cm5"
+
+[program.profiles.aarch64-linux.env]
+RUSTFLAGS = "-C target-cpu=cortex-a76 --cfg feature=\"ffmpeg_8_0\""

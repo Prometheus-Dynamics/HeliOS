@@ -1,0 +1,55 @@
+# Target base: Raspberry Pi family defaults (kernel/firmware/toolchain/cross settings).
+#
+# V2 note: this file intentionally does not import legacy presets; it is self-contained.
+
+[buildroot.rpi]
+enabled = true
+arch = "aarch64"
+config_file = "assets/buildroot/config.txt"
+cmdline_file = "assets/buildroot/cmdline.txt"
+
+[buildroot.rpi.steps.validate]
+label = "Check Raspberry Pi target"
+
+[buildroot.rpi.steps.prepare]
+label = "Prepare Raspberry Pi target assets"
+
+[buildroot.kernel]
+github_owner = "raspberrypi"
+github_repo = "linux"
+reference = "stable_20250916"
+version_value = "6.12.47"
+tarball = "https://github.com/raspberrypi/linux/archive/refs/tags/stable_20250916.tar.gz"
+hash = "4639fe79697970b71cf708234b71d855a58ce5e28c377a4f7cf6ecbbe40647f3"
+patches = ["assets/buildroot/kernel-patches"]
+
+[buildroot.firmware]
+github_owner = "raspberrypi"
+github_repo = "firmware"
+version = "1.20250915"
+hash = "55a5d58c59bf7171562f1f1289c638e97e2b8d90374084887bfe5fc83e57cb1d"
+boot_image_url = "https://downloads.raspberrypi.com/raspios_arm64/images/raspios_arm64-2025-12-04/2025-12-04-raspios-trixie-arm64.img.xz"
+boot_image_sha256 = "f7afb40e587746128538d84f217bf478a23af59484d4db77f2d06bf647f7c82e"
+
+[buildroot.toolchain]
+# Bootlin external toolchain channel: "stable" or "bleeding-edge"
+bootlin_channel = "stable"
+# Minimum headers version needed by packages; if the active Bootlin headers
+# are older than this, the builder will switch to the bleeding-edge channel.
+headers_min = "5.4"
+
+[buildroot.boot_config]
+gpu_freq = "500"
+gpu_mem = "128"
+cma = "512"
+
+[program.profiles.aarch64-linux]
+target = "aarch64-unknown-linux-gnu"
+container_image = "helios-cross"
+
+  [program.profiles.aarch64-linux.env]
+  DOCKERFILE = "docker/aarch64/Dockerfile.aarch64-rpi4"
+  CARGO_TARGET_DIR = "../.gaia-target/aarch64-linux"
+  LIBCAMERA_BRANCH = "v0.6.0"
+  FFMPEG_VERSION = "8.0.1"
+  TURBOJPEG_VERSION = "3.1.2"

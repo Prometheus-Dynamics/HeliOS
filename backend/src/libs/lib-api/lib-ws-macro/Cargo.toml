@@ -1,0 +1,28 @@
+[package]
+name = "lib-ws-macro"
+edition = "2024"
+version.workspace = true
+
+[lib]
+proc-macro = true
+doctest = false
+
+[dependencies]
+quote = { workspace = true }
+syn = { workspace = true }
+proc-macro2 = { workspace = true }
+lib-asyncapi = { path = "../lib-asyncapi" }
+lib-asyncapi-macro = { path = "../lib-asyncapi-macro" }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }
+lib-ws = { path = "../lib-ws" }
+actix-web-actors = { workspace = true }
+futures = { workspace = true }
+serde_json = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+schemars = { workspace = true, features = ["derive"] }
+lib-test.workspace = true

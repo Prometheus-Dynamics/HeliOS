@@ -1,0 +1,20 @@
+[package]
+name = "lib-math"
+version.workspace = true
+edition = "2024"
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+rand = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+quickcheck = "1.0.3"
+quickcheck_macros = "1.0.0"
+criterion = "0.5.1"

@@ -1,0 +1,2748 @@
+{
+  "id": "daedalus_aruco_fast",
+  "name": "ArUco Fast",
+  "summary": "Low-latency CPU ArUco 36h11 graph focused on runtime speed for live operation.",
+  "tags": [
+    "aruco",
+    "tags",
+    "cpu_only",
+    "clahe",
+    "adaptive_threshold",
+    "temporal",
+    "roi",
+    "crosshair",
+    "ordering",
+    "fast_path",
+    "latency_optimized",
+    "fast_profile"
+  ],
+  "graph": {
+    "edges": [
+      {
+        "from": {
+          "node": 1,
+          "port": "mask"
+        },
+        "to": {
+          "node": 2,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 2,
+          "port": "mask"
+        },
+        "to": {
+          "node": 3,
+          "port": "mask"
+        }
+      },
+      {
+        "from": {
+          "node": 3,
+          "port": "quads"
+        },
+        "to": {
+          "node": 4,
+          "port": "quads"
+        }
+      },
+      {
+        "from": {
+          "node": 4,
+          "port": "detections"
+        },
+        "to": {
+          "node": 5,
+          "port": "detections"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "frame"
+        },
+        "to": {
+          "node": 6,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 1,
+          "port": "mask"
+        },
+        "to": {
+          "node": 7,
+          "port": "clahe"
+        }
+      },
+      {
+        "from": {
+          "node": 2,
+          "port": "mask"
+        },
+        "to": {
+          "node": 7,
+          "port": "adaptive"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "roi_x"
+        },
+        "to": {
+          "node": 8,
+          "port": "roi_x"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "roi_y"
+        },
+        "to": {
+          "node": 8,
+          "port": "roi_y"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "roi_w"
+        },
+        "to": {
+          "node": 8,
+          "port": "roi_w"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "roi_h"
+        },
+        "to": {
+          "node": 8,
+          "port": "roi_h"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "frame"
+        },
+        "to": {
+          "node": 8,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 8,
+          "port": "frame"
+        },
+        "to": {
+          "node": 1,
+          "port": "mask"
+        }
+      },
+      {
+        "from": {
+          "node": 8,
+          "port": "frame"
+        },
+        "to": {
+          "node": 4,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 5,
+          "port": "deduped"
+        },
+        "to": {
+          "node": 10,
+          "port": "detections"
+        }
+      },
+      {
+        "from": {
+          "node": 8,
+          "port": "frame"
+        },
+        "to": {
+          "node": 10,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 8,
+          "port": "offset_x"
+        },
+        "to": {
+          "node": 9,
+          "port": "offset_x"
+        }
+      },
+      {
+        "from": {
+          "node": 8,
+          "port": "offset_y"
+        },
+        "to": {
+          "node": 9,
+          "port": "offset_y"
+        }
+      },
+      {
+        "from": {
+          "node": 10,
+          "port": "detections"
+        },
+        "to": {
+          "node": 9,
+          "port": "detections"
+        }
+      },
+      {
+        "from": {
+          "node": 9,
+          "port": "detections"
+        },
+        "to": {
+          "node": 13,
+          "port": "detections"
+        }
+      },
+      {
+        "from": {
+          "node": 13,
+          "port": "detections"
+        },
+        "to": {
+          "node": 6,
+          "port": "detections"
+        }
+      },
+      {
+        "from": {
+          "node": 13,
+          "port": "detections"
+        },
+        "to": {
+          "node": 7,
+          "port": "detections"
+        }
+      },
+      {
+        "from": {
+          "node": 6,
+          "port": "frame"
+        },
+        "to": {
+          "node": 11,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 11,
+          "port": "frame"
+        },
+        "to": {
+          "node": 7,
+          "port": "overlay"
+        }
+      },
+      {
+        "from": {
+          "node": 13,
+          "port": "detections"
+        },
+        "to": {
+          "node": 12,
+          "port": "detections"
+        }
+      },
+      {
+        "from": {
+          "node": 12,
+          "port": "detections"
+        },
+        "to": {
+          "node": 7,
+          "port": "target_detections"
+        }
+      },
+      {
+        "from": {
+          "node": 12,
+          "port": "tv"
+        },
+        "to": {
+          "node": 7,
+          "port": "tv"
+        }
+      },
+      {
+        "from": {
+          "node": 12,
+          "port": "tid"
+        },
+        "to": {
+          "node": 7,
+          "port": "tid"
+        }
+      },
+      {
+        "from": {
+          "node": 12,
+          "port": "tx"
+        },
+        "to": {
+          "node": 7,
+          "port": "tx"
+        }
+      },
+      {
+        "from": {
+          "node": 12,
+          "port": "ty"
+        },
+        "to": {
+          "node": 7,
+          "port": "ty"
+        }
+      },
+      {
+        "from": {
+          "node": 12,
+          "port": "ta"
+        },
+        "to": {
+          "node": 7,
+          "port": "ta"
+        }
+      },
+      {
+        "from": {
+          "node": 12,
+          "port": "distance_px"
+        },
+        "to": {
+          "node": 7,
+          "port": "distance_px"
+        }
+      },
+      {
+        "from": {
+          "node": 12,
+          "port": "cx"
+        },
+        "to": {
+          "node": 7,
+          "port": "target_cx"
+        }
+      },
+      {
+        "from": {
+          "node": 12,
+          "port": "cy"
+        },
+        "to": {
+          "node": 7,
+          "port": "target_cy"
+        }
+      },
+      {
+        "from": {
+          "node": 12,
+          "port": "thor"
+        },
+        "to": {
+          "node": 7,
+          "port": "thor"
+        }
+      },
+      {
+        "from": {
+          "node": 12,
+          "port": "tvert"
+        },
+        "to": {
+          "node": 7,
+          "port": "tvert"
+        }
+      },
+      {
+        "from": {
+          "node": 12,
+          "port": "tshort"
+        },
+        "to": {
+          "node": 7,
+          "port": "tshort"
+        }
+      },
+      {
+        "from": {
+          "node": 12,
+          "port": "tlong"
+        },
+        "to": {
+          "node": 7,
+          "port": "tlong"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "order_mode"
+        },
+        "to": {
+          "node": 13,
+          "port": "mode"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "crosshair_x"
+        },
+        "to": {
+          "node": 13,
+          "port": "crosshair_x"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "crosshair_y"
+        },
+        "to": {
+          "node": 13,
+          "port": "crosshair_y"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "crosshair_x"
+        },
+        "to": {
+          "node": 12,
+          "port": "crosshair_x"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "crosshair_y"
+        },
+        "to": {
+          "node": 12,
+          "port": "crosshair_y"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "crosshair_x"
+        },
+        "to": {
+          "node": 11,
+          "port": "x"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "crosshair_y"
+        },
+        "to": {
+          "node": 11,
+          "port": "y"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "draw_crosshair"
+        },
+        "to": {
+          "node": 11,
+          "port": "enabled"
+        }
+      }
+    ],
+    "metadata": {
+      "helios.daedalus.gpu_backend": "cpu",
+      "helios.daedalus.planner.enable_gpu": "false",
+      "helios.pipeline.alias": "aruco-fast",
+      "helios.pipeline.ui": {
+        "description": "Fast single-branch CPU ArUco: CLAHE -> adaptive threshold -> adaptive quads -> decode -> dedup -> overlay.",
+        "layout": {
+          "tabs": [
+            {
+              "id": "clahe",
+              "title": "CLAHE",
+              "content": [
+                {
+                  "id": "tile_size",
+                  "label": "Tile size",
+                  "type": "slider",
+                  "bind": "1.tile_size",
+                  "min": 1,
+                  "max": 64,
+                  "step": 1
+                },
+                {
+                  "id": "clip_limit",
+                  "label": "Clip limit",
+                  "type": "slider",
+                  "bind": "1.clip_limit",
+                  "min": 0,
+                  "max": 10,
+                  "step": 0.1
+                },
+                {
+                  "id": "mix",
+                  "label": "CLAHE mix",
+                  "type": "slider",
+                  "bind": "1.mix",
+                  "min": 0,
+                  "max": 1,
+                  "step": 0.01
+                },
+                {
+                  "id": "clahe_mode",
+                  "label": "CLAHE mode",
+                  "type": "select",
+                  "bind": "1.mode",
+                  "options": [
+                    "cpu",
+                    "auto",
+                    "gpu"
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "pre",
+              "title": "Preprocess",
+              "content": [
+                {
+                  "id": "window",
+                  "label": "Adaptive window",
+                  "type": "slider",
+                  "bind": "2.window",
+                  "min": 3,
+                  "max": 101,
+                  "step": 2
+                },
+                {
+                  "id": "offset",
+                  "label": "Adaptive offset",
+                  "type": "slider",
+                  "bind": "2.offset",
+                  "min": -50,
+                  "max": 50,
+                  "step": 1
+                },
+                {
+                  "id": "threshold_offset",
+                  "label": "Threshold offset",
+                  "type": "slider",
+                  "bind": "2.threshold_offset",
+                  "min": -50,
+                  "max": 50,
+                  "step": 1
+                },
+                {
+                  "id": "border_guard_px",
+                  "label": "Border guard px",
+                  "type": "slider",
+                  "bind": "2.border_guard_px",
+                  "min": 0,
+                  "max": 32,
+                  "step": 1
+                },
+                {
+                  "id": "invert",
+                  "label": "Invert mask",
+                  "type": "toggle",
+                  "bind": "2.invert"
+                },
+                {
+                  "id": "adaptive_mode",
+                  "label": "Adaptive mode",
+                  "type": "select",
+                  "bind": "2.mode",
+                  "options": [
+                    "cpu",
+                    "auto",
+                    "gpu"
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "quads",
+              "title": "Quads",
+              "content": [
+                {
+                  "id": "enabled",
+                  "label": "Enable quads",
+                  "type": "toggle",
+                  "bind": "3.enabled"
+                },
+                {
+                  "id": "epsilon",
+                  "label": "Epsilon",
+                  "type": "slider",
+                  "bind": "3.epsilon",
+                  "min": 0.01,
+                  "max": 0.2,
+                  "step": 0.005
+                },
+                {
+                  "id": "min_area",
+                  "label": "Min area",
+                  "type": "slider",
+                  "bind": "3.min_area",
+                  "min": 0,
+                  "max": 5000,
+                  "step": 5
+                },
+                {
+                  "id": "fallback_max_contours",
+                  "label": "Fallback contours",
+                  "type": "slider",
+                  "bind": "3.fallback_max_contours",
+                  "min": 1,
+                  "max": 512,
+                  "step": 1
+                },
+                {
+                  "id": "max_quads",
+                  "label": "Max quads",
+                  "type": "slider",
+                  "bind": "3.max_quads",
+                  "min": 0,
+                  "max": 512,
+                  "step": 1
+                },
+                {
+                  "id": "min_side_px",
+                  "label": "Min side px",
+                  "type": "slider",
+                  "bind": "3.min_side_px",
+                  "min": 0,
+                  "max": 64,
+                  "step": 0.5
+                }
+              ]
+            },
+            {
+              "id": "decode",
+              "title": "Decode",
+              "content": [
+                {
+                  "id": "sample_scale",
+                  "label": "Sample scale",
+                  "type": "slider",
+                  "bind": "4.sample_scale",
+                  "min": 1,
+                  "max": 4,
+                  "step": 1
+                },
+                {
+                  "id": "max_hamming",
+                  "label": "Max hamming",
+                  "type": "slider",
+                  "bind": "4.max_hamming",
+                  "min": 0,
+                  "max": 10,
+                  "step": 1
+                },
+                {
+                  "id": "min_quad_side_px",
+                  "label": "Min quad side px",
+                  "type": "slider",
+                  "bind": "4.min_quad_side_px",
+                  "min": 0,
+                  "max": 64,
+                  "step": 0.5
+                }
+              ]
+            },
+            {
+              "id": "ordering",
+              "title": "Ordering",
+              "content": [
+                {
+                  "id": "detections_order_mode",
+                  "label": "Detection order",
+                  "type": "select",
+                  "bind": "13.mode",
+                  "options": [
+                    "none",
+                    "largest_to_smallest",
+                    "smallest_to_largest",
+                    "top_most",
+                    "top_right",
+                    "top_left",
+                    "left_most",
+                    "center_most",
+                    "crosshair"
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "overlay",
+              "title": "Overlay",
+              "content": [
+                {
+                  "id": "overlay_draw_boxes",
+                  "label": "Draw boxes",
+                  "type": "toggle",
+                  "bind": "6.draw_boxes"
+                },
+                {
+                  "id": "overlay_draw_corners",
+                  "label": "Draw corners",
+                  "type": "toggle",
+                  "bind": "6.draw_corners"
+                },
+                {
+                  "id": "overlay_draw_hud",
+                  "label": "Draw HUD",
+                  "type": "toggle",
+                  "bind": "6.draw_hud"
+                },
+                {
+                  "id": "overlay_draw_ids",
+                  "label": "Draw IDs",
+                  "type": "toggle",
+                  "bind": "6.draw_ids"
+                },
+                {
+                  "id": "overlay_draw_crosshair",
+                  "label": "Draw detection crosshair",
+                  "type": "toggle",
+                  "bind": "6.draw_crosshair"
+                },
+                {
+                  "id": "overlay_crosshair_scale",
+                  "label": "Crosshair scale",
+                  "type": "slider",
+                  "bind": "6.crosshair_scale",
+                  "min": 0.05,
+                  "max": 1.5,
+                  "step": 0.05
+                },
+                {
+                  "id": "overlay_crosshair_thickness",
+                  "label": "Crosshair thickness (0=auto)",
+                  "type": "slider",
+                  "bind": "6.crosshair_thickness",
+                  "min": 0,
+                  "max": 16,
+                  "step": 1
+                },
+                {
+                  "id": "overlay_thickness",
+                  "label": "Overlay thickness",
+                  "type": "slider",
+                  "bind": "6.thickness",
+                  "min": 1,
+                  "max": 8,
+                  "step": 1
+                }
+              ]
+            }
+          ],
+          "type": "tabs"
+        },
+        "title": "ArUco Fast"
+      }
+    },
+    "nodes": [
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [],
+        "id": "io.host_bridge",
+        "inputs": [],
+        "label": "Input",
+        "metadata": {
+          "host_bridge": {
+            "type": "Bool",
+            "value": true
+          },
+          "helios.host_input_port": {
+            "type": "String",
+            "value": "frame"
+          },
+          "host_bridge_outputs": {
+            "type": "String",
+            "value": "frame:image:dynamic,roi_x:int,roi_y:int,roi_w:int,roi_h:int,crosshair_x:int,crosshair_y:int,draw_crosshair:bool,order_mode:string"
+          }
+        },
+        "outputs": [
+          "frame",
+          "roi_h",
+          "roi_w",
+          "roi_x",
+          "roi_y",
+          "crosshair_x",
+          "crosshair_y",
+          "draw_crosshair",
+          "order_mode"
+        ]
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [
+          [
+            "tile_size",
+            {
+              "type": "Int",
+              "value": 2
+            }
+          ],
+          [
+            "clip_limit",
+            {
+              "type": "Float",
+              "value": 3.5
+            }
+          ],
+          [
+            "mix",
+            {
+              "type": "Float",
+              "value": 1
+            }
+          ],
+          [
+            "mode",
+            {
+              "type": "String",
+              "value": "cpu"
+            }
+          ]
+        ],
+        "id": "cv:image:clahe",
+        "inputs": [
+          "mask",
+          "tile_size",
+          "clip_limit",
+          "mix",
+          "mode"
+        ],
+        "label": "CLAHE",
+        "metadata": {
+          "inputs.clip_limit.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.clip_limit.ui_max": {
+            "type": "Float",
+            "value": 10
+          },
+          "inputs.clip_limit.ui_min": {
+            "type": "Float",
+            "value": 0
+          },
+          "inputs.clip_limit.ui_step": {
+            "type": "Float",
+            "value": 0.1
+          },
+          "inputs.mask.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.mix.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.mix.ui_max": {
+            "type": "Float",
+            "value": 1
+          },
+          "inputs.mix.ui_min": {
+            "type": "Float",
+            "value": 0
+          },
+          "inputs.mix.ui_step": {
+            "type": "Float",
+            "value": 0.01
+          },
+          "inputs.mode.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.tile_size.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.tile_size.ui_max": {
+            "type": "Int",
+            "value": 64
+          },
+          "inputs.tile_size.ui_min": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.tile_size.ui_step": {
+            "type": "Int",
+            "value": 1
+          }
+        },
+        "outputs": [
+          "mask"
+        ]
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [
+          [
+            "window",
+            {
+              "type": "Int",
+              "value": 61
+            }
+          ],
+          [
+            "offset",
+            {
+              "type": "Float",
+              "value": 10
+            }
+          ],
+          [
+            "threshold_offset",
+            {
+              "type": "Float",
+              "value": 0
+            }
+          ],
+          [
+            "border_guard_px",
+            {
+              "type": "Int",
+              "value": 0
+            }
+          ],
+          [
+            "invert",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ],
+          [
+            "mode",
+            {
+              "type": "String",
+              "value": "cpu"
+            }
+          ]
+        ],
+        "id": "cv:image:adaptive_threshold",
+        "inputs": [
+          "frame",
+          "window",
+          "offset",
+          "threshold_offset",
+          "border_guard_px",
+          "invert",
+          "mode"
+        ],
+        "label": "Adaptive Threshold",
+        "metadata": {
+          "inputs.border_guard_px.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.border_guard_px.ui_max": {
+            "type": "Int",
+            "value": 32
+          },
+          "inputs.border_guard_px.ui_min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.border_guard_px.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.frame.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.invert.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.mode.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.offset.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.offset.ui_max": {
+            "type": "Float",
+            "value": 50
+          },
+          "inputs.offset.ui_min": {
+            "type": "Float",
+            "value": -50
+          },
+          "inputs.offset.ui_step": {
+            "type": "Float",
+            "value": 1
+          },
+          "inputs.threshold.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.threshold.ui_max": {
+            "type": "Int",
+            "value": 255
+          },
+          "inputs.threshold.ui_min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.threshold.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.threshold_offset.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.threshold_offset.ui_max": {
+            "type": "Float",
+            "value": 50
+          },
+          "inputs.threshold_offset.ui_min": {
+            "type": "Float",
+            "value": -50
+          },
+          "inputs.threshold_offset.ui_step": {
+            "type": "Float",
+            "value": 1
+          },
+          "inputs.window.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.window.ui_max": {
+            "type": "Int",
+            "value": 101
+          },
+          "inputs.window.ui_min": {
+            "type": "Int",
+            "value": 3
+          },
+          "inputs.window.ui_step": {
+            "type": "Int",
+            "value": 2
+          }
+        },
+        "outputs": [
+          "mask"
+        ]
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [
+          [
+            "enabled",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ],
+          [
+            "min_perimeter_rate",
+            {
+              "type": "Float",
+              "value": 0.008
+            }
+          ],
+          [
+            "max_perimeter_rate",
+            {
+              "type": "Float",
+              "value": 8
+            }
+          ],
+          [
+            "epsilon",
+            {
+              "type": "Float",
+              "value": 0.05
+            }
+          ],
+          [
+            "min_area",
+            {
+              "type": "Float",
+              "value": 60
+            }
+          ],
+          [
+            "max_area",
+            {
+              "type": "Float",
+              "value": 0
+            }
+          ],
+          [
+            "min_angle_deg",
+            {
+              "type": "Float",
+              "value": 0
+            }
+          ],
+          [
+            "max_angle_deg",
+            {
+              "type": "Float",
+              "value": 180
+            }
+          ],
+          [
+            "max_side_cv",
+            {
+              "type": "Float",
+              "value": 3
+            }
+          ],
+          [
+            "min_corner_distance_rate",
+            {
+              "type": "Float",
+              "value": 0.03
+            }
+          ],
+          [
+            "min_distance_to_border",
+            {
+              "type": "Int",
+              "value": 3
+            }
+          ],
+          [
+            "fallback_max_contours",
+            {
+              "type": "Int",
+              "value": 128
+            }
+          ],
+          [
+            "expand_inner_scale",
+            {
+              "type": "Float",
+              "value": 1
+            }
+          ],
+          [
+            "expand_inner_max_side_px",
+            {
+              "type": "Float",
+              "value": 0
+            }
+          ],
+          [
+            "min_side_px",
+            {
+              "type": "Float",
+              "value": 0
+            }
+          ],
+          [
+            "max_quads",
+            {
+              "type": "Int",
+              "value": 0
+            }
+          ]
+        ],
+        "id": "cv:aruco:adaptive_quads_from_mask",
+        "inputs": [
+          "enabled",
+          "mask",
+          "min_perimeter_rate",
+          "max_perimeter_rate",
+          "epsilon",
+          "min_area",
+          "max_area",
+          "min_angle_deg",
+          "max_angle_deg",
+          "max_side_cv",
+          "min_corner_distance_rate",
+          "min_distance_to_border",
+          "min_side_px",
+          "fallback_max_contours",
+          "max_quads",
+          "expand_inner_scale",
+          "expand_inner_max_side_px"
+        ],
+        "label": "Adaptive Quads",
+        "metadata": {
+          "inputs.enabled.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.epsilon.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.epsilon.ui_max": {
+            "type": "Float",
+            "value": 1000
+          },
+          "inputs.epsilon.ui_min": {
+            "type": "Float",
+            "value": 0.01
+          },
+          "inputs.epsilon.ui_step": {
+            "type": "Float",
+            "value": 0.1
+          },
+          "inputs.expand_inner_max_side_px.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.expand_inner_max_side_px.ui_max": {
+            "type": "Float",
+            "value": 512
+          },
+          "inputs.expand_inner_max_side_px.ui_min": {
+            "type": "Float",
+            "value": 0
+          },
+          "inputs.expand_inner_max_side_px.ui_step": {
+            "type": "Float",
+            "value": 1
+          },
+          "inputs.expand_inner_scale.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.expand_inner_scale.ui_max": {
+            "type": "Float",
+            "value": 4
+          },
+          "inputs.expand_inner_scale.ui_min": {
+            "type": "Float",
+            "value": 1
+          },
+          "inputs.expand_inner_scale.ui_step": {
+            "type": "Float",
+            "value": 0.05
+          },
+          "inputs.fallback_max_contours.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.fallback_max_contours.ui_max": {
+            "type": "Int",
+            "value": 1000
+          },
+          "inputs.fallback_max_contours.ui_min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.fallback_max_contours.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.mask.access": {
+            "type": "String",
+            "value": "borrowed"
+          },
+          "inputs.max_angle_deg.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.max_angle_deg.ui_max": {
+            "type": "Float",
+            "value": 180
+          },
+          "inputs.max_angle_deg.ui_min": {
+            "type": "Float",
+            "value": 0
+          },
+          "inputs.max_angle_deg.ui_step": {
+            "type": "Float",
+            "value": 1
+          },
+          "inputs.max_area.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.max_area.ui_max": {
+            "type": "Float",
+            "value": 1000000
+          },
+          "inputs.max_area.ui_min": {
+            "type": "Float",
+            "value": 0
+          },
+          "inputs.max_area.ui_step": {
+            "type": "Float",
+            "value": 1000
+          },
+          "inputs.max_perimeter_rate.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.max_perimeter_rate.ui_max": {
+            "type": "Float",
+            "value": 20
+          },
+          "inputs.max_perimeter_rate.ui_min": {
+            "type": "Float",
+            "value": 0
+          },
+          "inputs.max_perimeter_rate.ui_step": {
+            "type": "Float",
+            "value": 0.1
+          },
+          "inputs.max_side_cv.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.max_side_cv.ui_max": {
+            "type": "Float",
+            "value": 20
+          },
+          "inputs.max_side_cv.ui_min": {
+            "type": "Float",
+            "value": 0.05
+          },
+          "inputs.max_side_cv.ui_step": {
+            "type": "Float",
+            "value": 0.1
+          },
+          "inputs.min_angle_deg.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_angle_deg.ui_max": {
+            "type": "Float",
+            "value": 180
+          },
+          "inputs.min_angle_deg.ui_min": {
+            "type": "Float",
+            "value": 0
+          },
+          "inputs.min_angle_deg.ui_step": {
+            "type": "Float",
+            "value": 1
+          },
+          "inputs.min_area.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_area.ui_max": {
+            "type": "Float",
+            "value": 1000000
+          },
+          "inputs.min_area.ui_min": {
+            "type": "Float",
+            "value": 0
+          },
+          "inputs.min_area.ui_step": {
+            "type": "Float",
+            "value": 1000
+          },
+          "inputs.min_corner_distance_rate.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_corner_distance_rate.ui_max": {
+            "type": "Float",
+            "value": 1
+          },
+          "inputs.min_corner_distance_rate.ui_min": {
+            "type": "Float",
+            "value": 0
+          },
+          "inputs.min_corner_distance_rate.ui_step": {
+            "type": "Float",
+            "value": 0.01
+          },
+          "inputs.min_distance_to_border.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_distance_to_border.ui_max": {
+            "type": "Int",
+            "value": 128
+          },
+          "inputs.min_distance_to_border.ui_min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.min_distance_to_border.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.min_perimeter_rate.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_perimeter_rate.ui_max": {
+            "type": "Float",
+            "value": 1
+          },
+          "inputs.min_perimeter_rate.ui_min": {
+            "type": "Float",
+            "value": 0
+          },
+          "inputs.min_perimeter_rate.ui_step": {
+            "type": "Float",
+            "value": 0.01
+          }
+        },
+        "outputs": [
+          "quads"
+        ]
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [
+          [
+            "dictionary",
+            {
+              "type": "String",
+              "value": "apriltag_36h11"
+            }
+          ],
+          [
+            "sample_scale",
+            {
+              "type": "Int",
+              "value": 2
+            }
+          ],
+          [
+            "max_hamming",
+            {
+              "type": "Int",
+              "value": 0
+            }
+          ],
+          [
+            "border_error_divisor",
+            {
+              "type": "Int",
+              "value": 6
+            }
+          ],
+          [
+            "refine_corners_warp",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ],
+          [
+            "refine_corners_warp_scale",
+            {
+              "type": "Int",
+              "value": 2
+            }
+          ],
+          [
+            "min_id",
+            {
+              "type": "Int",
+              "value": 0
+            }
+          ],
+          [
+            "max_id",
+            {
+              "type": "Int",
+              "value": 999
+            }
+          ],
+          [
+            "min_warped_patch_contrast_range",
+            {
+              "type": "Int",
+              "value": 8
+            }
+          ],
+          [
+            "warp_fallback_on_decode_fail",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ],
+          [
+            "warp_fallback_max_hamming_extra",
+            {
+              "type": "Int",
+              "value": 0
+            }
+          ],
+          [
+            "warp_fallback_border_slack",
+            {
+              "type": "Int",
+              "value": 14
+            }
+          ],
+          [
+            "warp_fallback_on_low_contrast",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ],
+          [
+            "warp_min_sample_scale",
+            {
+              "type": "Int",
+              "value": 4
+            }
+          ],
+          [
+            "min_quad_side_px",
+            {
+              "type": "Float",
+              "value": 0
+            }
+          ],
+          [
+            "min_quiet_zone_delta",
+            {
+              "type": "Float",
+              "value": 2.5
+            }
+          ],
+          [
+            "quiet_zone_texture_penalty",
+            {
+              "type": "Float",
+              "value": 12
+            }
+          ],
+          [
+            "verify_warp_min_best_distance",
+            {
+              "type": "Int",
+              "value": 99
+            }
+          ],
+          [
+            "verify_warp_only_if_border_mismatch",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ],
+          [
+            "verify_warp_reject_on_fail",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ],
+          [
+            "min_decode_score",
+            {
+              "type": "Float",
+              "value": 2
+            }
+          ],
+          [
+            "cell_sample_grid",
+            {
+              "type": "Int",
+              "value": 0
+            }
+          ],
+          [
+            "cell_sample_margin",
+            {
+              "type": "Float",
+              "value": 0.25
+            }
+          ],
+          [
+            "min_cell_means_contrast_range",
+            {
+              "type": "Float",
+              "value": 10
+            }
+          ],
+          [
+            "min_hamming_margin",
+            {
+              "type": "Int",
+              "value": 4
+            }
+          ],
+          [
+            "min_hamming_margin_min_dist",
+            {
+              "type": "Int",
+              "value": 2
+            }
+          ],
+          [
+            "min_hamming_margin_only_if_border_mismatch",
+            {
+              "type": "Bool",
+              "value": false
+            }
+          ],
+          [
+            "min_bit_delta",
+            {
+              "type": "Float",
+              "value": 3
+            }
+          ]
+        ],
+        "id": "cv:aruco:decode_quads_hamming",
+        "inputs": [
+          "frame",
+          "quads",
+          "dictionary",
+          "sample_scale",
+          "max_hamming",
+          "border_error_divisor",
+          "refine_corners_warp",
+          "refine_corners_warp_scale",
+          "min_id",
+          "max_id",
+          "min_warped_patch_contrast_range",
+          "warp_fallback_on_decode_fail",
+          "warp_fallback_max_hamming_extra",
+          "warp_fallback_border_slack",
+          "warp_fallback_on_low_contrast",
+          "warp_min_sample_scale",
+          "min_quad_side_px",
+          "min_quiet_zone_delta",
+          "quiet_zone_texture_penalty",
+          "verify_warp_min_best_distance",
+          "verify_warp_only_if_border_mismatch",
+          "verify_warp_reject_on_fail",
+          "min_decode_score",
+          "cell_sample_grid",
+          "cell_sample_margin",
+          "min_cell_means_contrast_range",
+          "min_hamming_margin",
+          "min_hamming_margin_min_dist",
+          "min_hamming_margin_only_if_border_mismatch",
+          "min_bit_delta"
+        ],
+        "label": "Decode",
+        "metadata": {
+          "inputs.border_error_divisor.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.border_error_divisor.ui_max": {
+            "type": "Int",
+            "value": 50
+          },
+          "inputs.border_error_divisor.ui_min": {
+            "type": "Int",
+            "value": -1
+          },
+          "inputs.border_error_divisor.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.cell_sample_grid.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.cell_sample_grid.ui_max": {
+            "type": "Int",
+            "value": 7
+          },
+          "inputs.cell_sample_grid.ui_min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.cell_sample_grid.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.cell_sample_margin.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.cell_sample_margin.ui_max": {
+            "type": "Float",
+            "value": 0.45
+          },
+          "inputs.cell_sample_margin.ui_min": {
+            "type": "Float",
+            "value": 0
+          },
+          "inputs.cell_sample_margin.ui_step": {
+            "type": "Float",
+            "value": 0.01
+          },
+          "inputs.dictionary.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.frame.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.max_hamming.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.max_hamming.ui_max": {
+            "type": "Int",
+            "value": 4
+          },
+          "inputs.max_hamming.ui_min": {
+            "type": "Int",
+            "value": -1
+          },
+          "inputs.max_hamming.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.max_id.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.max_id.ui_max": {
+            "type": "Int",
+            "value": 10000
+          },
+          "inputs.max_id.ui_min": {
+            "type": "Int",
+            "value": -1
+          },
+          "inputs.max_id.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.min_bit_delta.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_bit_delta.ui_max": {
+            "type": "Float",
+            "value": 255
+          },
+          "inputs.min_bit_delta.ui_min": {
+            "type": "Float",
+            "value": 0
+          },
+          "inputs.min_bit_delta.ui_step": {
+            "type": "Float",
+            "value": 1
+          },
+          "inputs.min_cell_means_contrast_range.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_cell_means_contrast_range.ui_max": {
+            "type": "Float",
+            "value": 255
+          },
+          "inputs.min_cell_means_contrast_range.ui_min": {
+            "type": "Float",
+            "value": 0
+          },
+          "inputs.min_cell_means_contrast_range.ui_step": {
+            "type": "Float",
+            "value": 1
+          },
+          "inputs.min_decode_score.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_decode_score.ui_max": {
+            "type": "Float",
+            "value": 100
+          },
+          "inputs.min_decode_score.ui_min": {
+            "type": "Float",
+            "value": -100
+          },
+          "inputs.min_decode_score.ui_step": {
+            "type": "Float",
+            "value": 1
+          },
+          "inputs.min_hamming_margin.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_hamming_margin.ui_max": {
+            "type": "Int",
+            "value": 32
+          },
+          "inputs.min_hamming_margin.ui_min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.min_hamming_margin.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.min_hamming_margin_min_dist.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_hamming_margin_min_dist.ui_max": {
+            "type": "Int",
+            "value": 32
+          },
+          "inputs.min_hamming_margin_min_dist.ui_min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.min_hamming_margin_min_dist.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.min_hamming_margin_only_if_border_mismatch.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_id.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_id.ui_max": {
+            "type": "Int",
+            "value": 10000
+          },
+          "inputs.min_id.ui_min": {
+            "type": "Int",
+            "value": -1
+          },
+          "inputs.min_id.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.min_quad_side_px.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_quad_side_px.ui_max": {
+            "type": "Float",
+            "value": 200
+          },
+          "inputs.min_quad_side_px.ui_min": {
+            "type": "Float",
+            "value": 0
+          },
+          "inputs.min_quad_side_px.ui_step": {
+            "type": "Float",
+            "value": 0.5
+          },
+          "inputs.min_quiet_zone_delta.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_quiet_zone_delta.ui_max": {
+            "type": "Float",
+            "value": 64
+          },
+          "inputs.min_quiet_zone_delta.ui_min": {
+            "type": "Float",
+            "value": 0
+          },
+          "inputs.min_quiet_zone_delta.ui_step": {
+            "type": "Float",
+            "value": 0.5
+          },
+          "inputs.min_warped_patch_contrast_range.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_warped_patch_contrast_range.ui_max": {
+            "type": "Int",
+            "value": 255
+          },
+          "inputs.min_warped_patch_contrast_range.ui_min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.min_warped_patch_contrast_range.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.quads.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.quiet_zone_texture_penalty.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.quiet_zone_texture_penalty.ui_max": {
+            "type": "Float",
+            "value": 64
+          },
+          "inputs.quiet_zone_texture_penalty.ui_min": {
+            "type": "Float",
+            "value": 0
+          },
+          "inputs.quiet_zone_texture_penalty.ui_step": {
+            "type": "Float",
+            "value": 0.5
+          },
+          "inputs.refine_corners_warp.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.refine_corners_warp_scale.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.refine_corners_warp_scale.ui_max": {
+            "type": "Int",
+            "value": 8
+          },
+          "inputs.refine_corners_warp_scale.ui_min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.refine_corners_warp_scale.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.sample_scale.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.sample_scale.ui_max": {
+            "type": "Int",
+            "value": 8
+          },
+          "inputs.sample_scale.ui_min": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.sample_scale.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.verify_warp_min_best_distance.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.verify_warp_min_best_distance.ui_max": {
+            "type": "Int",
+            "value": 99
+          },
+          "inputs.verify_warp_min_best_distance.ui_min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.verify_warp_min_best_distance.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.verify_warp_only_if_border_mismatch.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.verify_warp_reject_on_fail.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.warp_fallback_border_slack.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.warp_fallback_border_slack.ui_max": {
+            "type": "Int",
+            "value": 32
+          },
+          "inputs.warp_fallback_border_slack.ui_min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.warp_fallback_border_slack.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.warp_fallback_max_hamming_extra.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.warp_fallback_max_hamming_extra.ui_max": {
+            "type": "Int",
+            "value": 32
+          },
+          "inputs.warp_fallback_max_hamming_extra.ui_min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.warp_fallback_max_hamming_extra.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.warp_fallback_on_decode_fail.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.warp_fallback_on_low_contrast.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.warp_min_sample_scale.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.warp_min_sample_scale.ui_max": {
+            "type": "Int",
+            "value": 32
+          },
+          "inputs.warp_min_sample_scale.ui_min": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.warp_min_sample_scale.ui_step": {
+            "type": "Int",
+            "value": 1
+          }
+        },
+        "outputs": [
+          "detections"
+        ]
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [
+          [
+            "center_dist_px",
+            {
+              "type": "Float",
+              "value": 8
+            }
+          ],
+          [
+            "min_area_ratio",
+            {
+              "type": "Float",
+              "value": 0
+            }
+          ],
+          [
+            "max_corner_dist_px",
+            {
+              "type": "Float",
+              "value": 2.5
+            }
+          ],
+          [
+            "max_center_dist_ratio",
+            {
+              "type": "Float",
+              "value": 0
+            }
+          ],
+          [
+            "min_iou",
+            {
+              "type": "Float",
+              "value": 0
+            }
+          ]
+        ],
+        "id": "cv:aruco:dedup_detections_spatial",
+        "inputs": [
+          "detections",
+          "center_dist_px",
+          "min_area_ratio",
+          "max_corner_dist_px",
+          "max_center_dist_ratio",
+          "min_iou"
+        ],
+        "label": "Deduplicate detections",
+        "metadata": {
+          "inputs.center_dist_px.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.center_dist_px.ui_max": {
+            "type": "Float",
+            "value": 50
+          },
+          "inputs.center_dist_px.ui_min": {
+            "type": "Float",
+            "value": 0
+          },
+          "inputs.center_dist_px.ui_step": {
+            "type": "Float",
+            "value": 0.5
+          },
+          "inputs.detections.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.max_center_dist_ratio.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.max_center_dist_ratio.ui_max": {
+            "type": "Float",
+            "value": 2
+          },
+          "inputs.max_center_dist_ratio.ui_min": {
+            "type": "Float",
+            "value": 0
+          },
+          "inputs.max_center_dist_ratio.ui_step": {
+            "type": "Float",
+            "value": 0.05
+          },
+          "inputs.max_corner_dist_px.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.max_corner_dist_px.ui_max": {
+            "type": "Float",
+            "value": 10
+          },
+          "inputs.max_corner_dist_px.ui_min": {
+            "type": "Float",
+            "value": 0
+          },
+          "inputs.max_corner_dist_px.ui_step": {
+            "type": "Float",
+            "value": 0.1
+          },
+          "inputs.min_area_ratio.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_area_ratio.ui_max": {
+            "type": "Float",
+            "value": 2
+          },
+          "inputs.min_area_ratio.ui_min": {
+            "type": "Float",
+            "value": 0
+          },
+          "inputs.min_area_ratio.ui_step": {
+            "type": "Float",
+            "value": 0.05
+          },
+          "inputs.min_iou.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_iou.ui_max": {
+            "type": "Float",
+            "value": 1
+          },
+          "inputs.min_iou.ui_min": {
+            "type": "Float",
+            "value": 0
+          },
+          "inputs.min_iou.ui_step": {
+            "type": "Float",
+            "value": 0.05
+          }
+        },
+        "outputs": [
+          "deduped"
+        ]
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [
+          [
+            "thickness",
+            {
+              "type": "Int",
+              "value": 1
+            }
+          ],
+          [
+            "draw_boxes",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ],
+          [
+            "draw_corners",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ],
+          [
+            "draw_crosshair",
+            {
+              "type": "Bool",
+              "value": false
+            }
+          ],
+          [
+            "draw_ids",
+            {
+              "type": "Bool",
+              "value": false
+            }
+          ],
+          [
+            "crosshair_scale",
+            {
+              "type": "Float",
+              "value": 0.25
+            }
+          ],
+          [
+            "crosshair_thickness",
+            {
+              "type": "Int",
+              "value": 0
+            }
+          ],
+          [
+            "draw_hud",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ]
+        ],
+        "id": "cv:aruco:overlay_detections",
+        "inputs": [
+          "frame",
+          "detections",
+          "thickness",
+          "draw_boxes",
+          "draw_corners",
+          "draw_crosshair",
+          "draw_ids",
+          "draw_hud",
+          "crosshair_scale",
+          "crosshair_thickness"
+        ],
+        "label": "Overlay",
+        "metadata": {
+          "inputs.detections.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.draw_boxes.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.draw_corners.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.draw_crosshair.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.draw_hud.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.draw_ids.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.crosshair_scale.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.crosshair_scale.ui_max": {
+            "type": "Float",
+            "value": 1.5
+          },
+          "inputs.crosshair_scale.ui_min": {
+            "type": "Float",
+            "value": 0.05
+          },
+          "inputs.crosshair_scale.ui_step": {
+            "type": "Float",
+            "value": 0.05
+          },
+          "inputs.crosshair_thickness.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.crosshair_thickness.ui_max": {
+            "type": "Int",
+            "value": 16
+          },
+          "inputs.crosshair_thickness.ui_min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.crosshair_thickness.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.frame.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.thickness.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.thickness.ui_max": {
+            "type": "Int",
+            "value": 16
+          },
+          "inputs.thickness.ui_min": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.thickness.ui_step": {
+            "type": "Int",
+            "value": 1
+          }
+        },
+        "outputs": [
+          "frame"
+        ]
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [],
+        "id": "io.host_output",
+        "inputs": [
+          "overlay",
+          "detections",
+          "clahe",
+          "adaptive",
+          "target_detections",
+          "tv",
+          "tid",
+          "tx",
+          "ty",
+          "ta",
+          "distance_px",
+          "target_cx",
+          "target_cy",
+          "thor",
+          "tvert",
+          "tshort",
+          "tlong"
+        ],
+        "label": "Output",
+        "metadata": {
+          "host_bridge": {
+            "type": "Bool",
+            "value": true
+          },
+          "host_bridge_inputs": {
+            "type": "String",
+            "value": "overlay:image:dynamic,detections:list<cv:aruco_detection_2d>,clahe:image:dynamic,adaptive:image:dynamic,target_detections:list<cv:aruco_detection_2d>,tv:float,tid:float,tx:float,ty:float,ta:float,distance_px:float,target_cx:float,target_cy:float,thor:float,tvert:float,tshort:float,tlong:float"
+          }
+        },
+        "outputs": []
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [],
+        "id": "cv:image:crop_roi",
+        "inputs": [
+          "frame",
+          "roi_x",
+          "roi_y",
+          "roi_w",
+          "roi_h"
+        ],
+        "label": "ROI Crop",
+        "metadata": {},
+        "outputs": [
+          "frame",
+          "offset_x",
+          "offset_y"
+        ]
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [],
+        "id": "cv:aruco:offset_detections",
+        "inputs": [
+          "detections",
+          "offset_x",
+          "offset_y"
+        ],
+        "label": "Offset Detections",
+        "metadata": {},
+        "outputs": [
+          "detections"
+        ]
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [
+          [
+            "corner_smooth_alpha",
+            {
+              "type": "Float",
+              "value": 0.18
+            }
+          ],
+          [
+            "corner_smooth_max_corner_shift_ratio",
+            {
+              "type": "Float",
+              "value": 0.55
+            }
+          ],
+          [
+            "corner_smooth_max_center_shift_px",
+            {
+              "type": "Float",
+              "value": 18
+            }
+          ],
+          [
+            "corner_smooth_max_area_ratio",
+            {
+              "type": "Float",
+              "value": 1.45
+            }
+          ],
+          [
+            "corner_smooth_only_age1",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ],
+          [
+            "max_track_age_frames",
+            {
+              "type": "Int",
+              "value": 2
+            }
+          ],
+          [
+            "max_tracks",
+            {
+              "type": "Int",
+              "value": 96
+            }
+          ],
+          [
+            "scene_cut_threshold",
+            {
+              "type": "Float",
+              "value": 0.12
+            }
+          ]
+        ],
+        "id": "cv:aruco:temporal_smooth_detections",
+        "inputs": [
+          "frame",
+          "detections",
+          "max_tracks",
+          "max_track_age_frames",
+          "scene_cut_threshold",
+          "corner_smooth_alpha",
+          "corner_smooth_max_corner_shift_ratio",
+          "corner_smooth_max_center_shift_px",
+          "corner_smooth_max_area_ratio",
+          "corner_smooth_only_age1"
+        ],
+        "label": "Temporal Smooth Detections",
+        "metadata": {
+          "inputs.corner_smooth_alpha.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.corner_smooth_alpha.ui_max": {
+            "type": "Float",
+            "value": 0.6
+          },
+          "inputs.corner_smooth_alpha.ui_min": {
+            "type": "Float",
+            "value": 0
+          },
+          "inputs.corner_smooth_alpha.ui_step": {
+            "type": "Float",
+            "value": 0.01
+          },
+          "inputs.corner_smooth_max_area_ratio.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.corner_smooth_max_area_ratio.ui_max": {
+            "type": "Float",
+            "value": 10
+          },
+          "inputs.corner_smooth_max_area_ratio.ui_min": {
+            "type": "Float",
+            "value": 1
+          },
+          "inputs.corner_smooth_max_area_ratio.ui_step": {
+            "type": "Float",
+            "value": 0.05
+          },
+          "inputs.corner_smooth_max_center_shift_px.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.corner_smooth_max_center_shift_px.ui_max": {
+            "type": "Float",
+            "value": 256
+          },
+          "inputs.corner_smooth_max_center_shift_px.ui_min": {
+            "type": "Float",
+            "value": 0
+          },
+          "inputs.corner_smooth_max_center_shift_px.ui_step": {
+            "type": "Float",
+            "value": 1
+          },
+          "inputs.corner_smooth_max_corner_shift_ratio.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.corner_smooth_max_corner_shift_ratio.ui_max": {
+            "type": "Float",
+            "value": 2
+          },
+          "inputs.corner_smooth_max_corner_shift_ratio.ui_min": {
+            "type": "Float",
+            "value": 0.05
+          },
+          "inputs.corner_smooth_max_corner_shift_ratio.ui_step": {
+            "type": "Float",
+            "value": 0.01
+          },
+          "inputs.corner_smooth_only_age1.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.max_track_age_frames.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.max_track_age_frames.ui_max": {
+            "type": "Int",
+            "value": 16
+          },
+          "inputs.max_track_age_frames.ui_min": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.max_track_age_frames.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.max_tracks.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.max_tracks.ui_max": {
+            "type": "Int",
+            "value": 512
+          },
+          "inputs.max_tracks.ui_min": {
+            "type": "Int",
+            "value": 4
+          },
+          "inputs.max_tracks.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.scene_cut_threshold.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.scene_cut_threshold.ui_max": {
+            "type": "Float",
+            "value": 0.5
+          },
+          "inputs.scene_cut_threshold.ui_min": {
+            "type": "Float",
+            "value": 0.02
+          },
+          "inputs.scene_cut_threshold.ui_step": {
+            "type": "Float",
+            "value": 0.01
+          }
+        },
+        "outputs": [
+          "detections"
+        ]
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [
+          [
+            "size",
+            {
+              "type": "Int",
+              "value": 32
+            }
+          ],
+          [
+            "thickness",
+            {
+              "type": "Int",
+              "value": 2
+            }
+          ],
+          [
+            "enabled",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ],
+          [
+            "x",
+            {
+              "type": "Int",
+              "value": 640
+            }
+          ],
+          [
+            "y",
+            {
+              "type": "Int",
+              "value": 400
+            }
+          ]
+        ],
+        "id": "cv:draw:drawcrosshairat",
+        "inputs": [
+          "frame",
+          "x",
+          "y",
+          "size",
+          "thickness",
+          "enabled"
+        ],
+        "label": "Crosshair",
+        "metadata": {},
+        "outputs": [
+          "frame"
+        ]
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [
+          [
+            "crosshair_x",
+            {
+              "type": "Int",
+              "value": 640
+            }
+          ],
+          [
+            "crosshair_y",
+            {
+              "type": "Int",
+              "value": 400
+            }
+          ]
+        ],
+        "id": "cv:aruco:detections_crosshair_target",
+        "inputs": [
+          "detections",
+          "crosshair_x",
+          "crosshair_y"
+        ],
+        "label": "Crosshair Target",
+        "metadata": {},
+        "outputs": [
+          "detections",
+          "tv",
+          "tid",
+          "tx",
+          "ty",
+          "ta",
+          "distance_px",
+          "cx",
+          "cy",
+          "thor",
+          "tvert",
+          "tshort",
+          "tlong"
+        ]
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [
+          [
+            "mode",
+            {
+              "type": "String",
+              "value": "none"
+            }
+          ],
+          [
+            "crosshair_x",
+            {
+              "type": "Int",
+              "value": 640
+            }
+          ],
+          [
+            "crosshair_y",
+            {
+              "type": "Int",
+              "value": 400
+            }
+          ]
+        ],
+        "id": "cv:aruco:detections_order",
+        "inputs": [
+          "detections",
+          "mode",
+          "crosshair_x",
+          "crosshair_y"
+        ],
+        "label": "Order Detections",
+        "metadata": {},
+        "outputs": [
+          "detections"
+        ]
+      }
+    ]
+  }
+}

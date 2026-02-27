@@ -1,0 +1,13 @@
+[package]
+name = "lib-asyncapi"
+version.workspace = true
+edition = "2021"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+url = { workspace = true }
+schemars = { workspace = true }

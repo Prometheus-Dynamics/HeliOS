@@ -1,0 +1,9 @@
+[units."systemd-networkd"]
+enabled = true
+vendor = true
+targets = ["sysinit", "multi-user"]
+
+[units."systemd-networkd-wait-online"]
+enabled = false
+vendor = true
+targets = ["network-online"]

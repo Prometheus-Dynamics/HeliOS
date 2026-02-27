@@ -1,0 +1,81 @@
+[rust]
+enabled = true
+workspace_dir = "../backend"
+check_ids = []
+
+[[rust.artifacts]]
+id = "helios-api"
+package = "helios-api"
+kind = "bin"
+profile = "aarch64-linux"
+mode = "auto"
+
+[[rust.artifacts]]
+id = "helios-engine"
+package = "helios-engine"
+kind = "bin"
+profile = "aarch64-linux"
+mode = "auto"
+
+[[rust.artifacts]]
+id = "helios-updater"
+package = "helios-updater"
+kind = "bin"
+profile = "aarch64-linux"
+mode = "auto"
+
+[[rust.artifacts]]
+id = "helios-usb-recoveryd"
+package = "helios-usb-recoveryd"
+kind = "bin"
+profile = "aarch64-linux"
+mode = "auto"
+
+[[rust.artifacts]]
+id = "helios-peripherals"
+package = "helios-peripherals"
+kind = "bin"
+profile = "aarch64-linux"
+mode = "auto"
+
+[[rust.artifacts]]
+id = "helios-boot-buttond"
+package = "helios-boot-buttond"
+kind = "bin"
+profile = "aarch64-linux"
+mode = "auto"
+
+[[rust.artifacts]]
+id = "helios-provision"
+package = "helios-provision"
+kind = "bin"
+profile = "aarch64-linux"
+mode = "auto"
+
+[[rust.artifacts]]
+id = "daedalus-cv"
+package = "helios-daedalus-cv-plugin"
+kind = "cdylib"
+profile = "aarch64-linux"
+mode = "auto"
+
+[[rust.artifacts]]
+id = "daedalus-ai"
+package = "helios-daedalus-ai-plugin"
+kind = "cdylib"
+profile = "aarch64-linux"
+mode = "auto"
+
+[[rust.artifacts]]
+id = "daedalus-nt4"
+package = "helios-daedalus-nt4-plugin"
+kind = "cdylib"
+profile = "aarch64-linux"
+mode = "auto"
+
+[[rust.artifacts]]
+id = "daedalus-led"
+package = "helios-daedalus-led-plugin"
+kind = "cdylib"
+profile = "aarch64-linux"
+mode = "auto"

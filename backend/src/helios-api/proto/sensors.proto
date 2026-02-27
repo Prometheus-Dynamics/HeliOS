@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package helios.api.sensors.v1;
+
+message Empty {}
+
+message SensorSubscription {
+  string scope = 1;
+}
+
+message SensorSnapshot {
+  string scope = 1;
+  string payload_json = 2;
+}
+
+message OperationAck {
+  string command_id = 1;
+}
+
+service Sensors {
+  rpc Subscribe(SensorSubscription) returns (stream SensorSnapshot);
+  rpc Snapshot(SensorSubscription) returns (SensorSnapshot);
+  rpc Unsubscribe(SensorSubscription) returns (OperationAck);
+}

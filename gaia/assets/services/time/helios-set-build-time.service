@@ -1,0 +1,17 @@
+[Unit]
+Description=Set system clock from build timestamp
+DefaultDependencies=no
+Before=time-sync.target
+After=systemd-remount-fs.service local-fs.target
+Wants=time-sync.target
+ConditionPathExists=/etc/helios/build.epoch
+RequiresMountsFor=/var/lib/systemd/timesync
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/helios-set-build-time.sh
+Environment=PATH=/bin:/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+RemainAfterExit=no
+
+[Install]
+WantedBy=sysinit.target

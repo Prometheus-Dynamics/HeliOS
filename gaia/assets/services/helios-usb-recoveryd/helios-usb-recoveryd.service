@@ -1,0 +1,31 @@
+[Unit]
+Description=Helios USB Recovery Daemon
+After=systemd-remount-fs.service helios-usb-gadget.service
+Wants=helios-usb-gadget.service
+
+[Service]
+Type=simple
+ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios
+ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios/usb-recovery
+ExecStartPre=/usr/bin/install -d -m0755 /var/lib/helios
+ExecStartPre=/usr/bin/install -d -m0755 /var/lib/helios/usb-recovery
+Environment=RUST_LOG=info
+Environment=HELIOS_USB_RECOVERY_PORTS=/dev/ttyGS0,/dev/ttyGS1
+Environment=HELIOS_USB_RECOVERY_STAGING_DIR=/var/lib/helios/usb-recovery
+EnvironmentFile=-/etc/default/helios-usb-recoveryd
+ExecStart=/usr/bin/helios-usb-recoveryd
+Restart=always
+RestartSec=2
+TimeoutStopSec=20
+User=root
+Group=root
+WorkingDirectory=/var/lib/helios
+StateDirectory=helios
+LogsDirectory=helios
+LimitNOFILE=65536
+TasksMax=infinity
+OOMScoreAdjust=-200
+
+[Install]
+WantedBy=sysinit.target
+WantedBy=multi-user.target

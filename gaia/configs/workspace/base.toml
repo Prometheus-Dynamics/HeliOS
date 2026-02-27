@@ -1,0 +1,15 @@
+[workspace]
+# Defaults to the directory where `gaia` is run.
+# Set this if your config/assets live in another workspace folder.
+root_dir = "."
+build_dir = "build"
+out_dir = "output"
+# One of: "none", "build", "out", "all"
+clean = "none"
+
+[workspace.paths]
+# Optional named roots referenced as `@name/...` in path fields.
+# Examples:
+# assets = "assets"
+# packages = "assets/buildroot/packages"
+# helios = ".."

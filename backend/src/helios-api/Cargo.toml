@@ -1,0 +1,79 @@
+[package]
+name = "helios-api"
+version.workspace = true
+edition = "2024"
+publish = false
+build = "build.rs"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "helios-api"
+path = "src/main.rs"
+
+[dependencies]
+axum = { version = "0.7.5", features = ["http1", "macros", "ws", "multipart"] }
+helios-engine = { path = "../helios-engine", default-features = false, features = ["dto", "runtime"] }
+helios-peripherals = { path = "../helios-peripherals", default-features = false, features = ["dto", "schema", "tracing"] }
+helios-updater = { path = "../helios-updater", default-features = false, features = ["dto", "updater-ipc"] }
+lib-asyncapi = { path = "../libs/lib-api/lib-asyncapi" }
+lib-led-animations = { path = "../libs/lib-led-animations" }
+lib-ipc = { path = "../libs/lib-ipc" }
+lib-net = { path = "../libs/lib-net" }
+lib-sensors = { path = "../libs/lib-sensors" }
+chrono = { workspace = true }
+url = { workspace = true }
+once_cell = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tokio-util = { workspace = true }
+tower-http = { version = "0.5.2", features = ["cors"] }
+schemars = { workspace = true, features = ["uuid1"] }
+sysinfo = { workspace = true }
+prost = "0.12.6"
+prost-types = "0.12.6"
+tracing = { workspace = true }
+tracing-appender = "0.2.3"
+tracing-subscriber = { workspace = true }
+async-trait = { workspace = true }
+uuid = { workspace = true }
+thiserror = "1.0.63"
+serde_json = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+utoipa.workspace = true
+anyhow = { workspace = true }
+sha2 = { workspace = true }
+hex = "0.4"
+tempfile = "3.12"
+blake3 = "1.5"
+nix = { version = "0.29", default-features = false, features = ["process", "term"] }
+rustix = { version = "1.0.7", features = ["process", "termios"] }
+toml = "0.9.5"
+styx = { workspace = true, features = ["serde", "schema"] }
+mime_guess = "2.0.5"
+image = { workspace = true }
+imageproc = { workspace = true }
+daedalus = { workspace = true }
+lib-cv = { path = "../libs/lib-cv" }
+lib-ai = { path = "../libs/lib-ai" }
+nalgebra = { workspace = true }
+lopdf = "0.36.0"
+flate2 = "1.1.2"
+zip = { version = "2.2.2", default-features = false, features = ["deflate"] }
+reqwest.workspace = true
+nt_client = "0.4.0"
+base64 = "0.22.1"
+rmpv = "1.3.0"
+pprof = { version = "0.15.0", default-features = false, features = ["flamegraph", "prost-codec"], optional = true }
+
+[features]
+default = []
+pprof = ["dep:pprof"]
+
+[dev-dependencies]
+tempfile = "3.12.0"
+lib-test.workspace = true
+tower = "0.5.2"

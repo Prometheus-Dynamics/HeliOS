@@ -1,0 +1,1 @@
+SUBSYSTEM=="usb", ACTION=="add", ENV{DEVTYPE}=="usb_device", RUN+="/usr/local/bin/helios-usb-power-setup.sh --device $env{DEVPATH}"

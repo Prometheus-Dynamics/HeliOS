@@ -1,0 +1,10 @@
+[package]
+name = "helios-boot-buttond"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+evdev = "0.13"
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

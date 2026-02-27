@@ -1,0 +1,8 @@
+/var/log/helios/*.log {
+    size 10M
+    rotate 5
+    missingok
+    compress
+    notifempty
+    copytruncate
+}

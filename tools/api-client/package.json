@@ -1,0 +1,9 @@
+{
+  "name": "helios-api-client",
+  "version": "0.1.0",
+  "private": true,
+  "devDependencies": {
+    "openapi-typescript": "7.8.0",
+    "openapi-typescript-codegen": "0.29.0"
+  }
+}

@@ -1,0 +1,9 @@
+[Unit]
+Description=Helios Provisioning (first-boot sequencing)
+DefaultDependencies=no
+After=systemd-remount-fs.service local-fs-pre.target
+Before=local-fs.target basic.target
+Wants=helios-provision.service
+
+[Install]
+WantedBy=local-fs.target

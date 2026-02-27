@@ -1,0 +1,101 @@
+external = ["assets/buildroot"]
+
+[packages]
+avahi = true
+nss-mdns = true
+libv4l = true
+libv4l_utils = true
+turbojpeg = true
+linux-firmware = true
+linux-firmware-rp2 = true
+rpi_userland = true
+coraltpu = true
+tensorflow-lite = true
+openssl = true
+openssh = true
+bash = true
+git = true
+util-linux = true
+e2fsprogs = true
+nodejs-npm = true
+python3 = true
+python3-pip = true
+python-setuptools = true
+python-wheel = true
+openjdk = true
+rust = true
+gcc = true
+binutils = true
+clang = true
+llvm = true
+cmake = true
+make = true
+ninja = true
+gdb = true
+pkgconf = true
+systemd = true
+systemd_networkd = true
+nmap = true
+dnsmasq = true
+libcamera-apps = false
+libdrm = true
+libopenh264 = true
+libpisp = true
+liburcu = true
+libyuv = true
+lttng_libust = true
+numactl = true
+elfutils = true
+bzip2 = true
+x264 = true
+x265 = true
+openvscode-server = false
+parted = true
+lighttpd = true
+nodejs = true
+ffmpeg = true
+libcamera = true
+
+[symbols]
+# System init / service manager
+BR2_INIT_SYSTEMD = true
+BR2_INIT_BUSYBOX = false
+BR2_INIT_NONE = false
+# Force Raspberry Pi kernel parity with old-method HeliOS booting images.
+BR2_LINUX_KERNEL_CUSTOM_TARBALL = true
+BR2_LINUX_KERNEL_CUSTOM_TARBALL_LOCATION = "https://github.com/raspberrypi/linux/archive/refs/tags/stable_20250916.tar.gz"
+# Keep rootfs label stable for diagnostics/recovery workflows.
+BR2_TARGET_ROOTFS_EXT2_LABEL = "ACTIVE"
+# Match known-good HeliOS root login behavior (root password: "root").
+BR2_TARGET_GENERIC_ROOT_PASSWD = "$$6$$1SRZhQNcL0XX7FM/$$NcrwlDSRGm0D7yD6SJ38PlpvB7vGvbj5Tvx9NWguLHuu2yva2bCPvb2Ec0z0McEZ.kWfGTglt6unXdevojnfB1"
+# Ensure the expected default user exists in the rootfs.
+BR2_ROOTFS_USERS_TABLES = "board/raspberrypicm5io/users.table"
+
+# Lighttpd features
+BR2_PACKAGE_LIGHTTPD_PCRE = true
+
+# Required by first-boot partition provisioning (helios-provision)
+BR2_PACKAGE_UTIL_LINUX_BINARIES = true
+BR2_PACKAGE_E2FSPROGS_RESIZE2FS = true
+BR2_PACKAGE_E2FSPROGS_E2FSCK = true
+BR2_PACKAGE_E2FSPROGS_TUNE2FS = true
+BR2_PACKAGE_E2FSPROGS_MKE2FS = true
+
+# FFmpeg tuning
+BR2_PACKAGE_FFMPEG_GPL = true
+BR2_PACKAGE_FFMPEG_SWSCALE = true
+BR2_PACKAGE_FFMPEG_ENCODERS = "mjpeg libx264 libopenh264 libx265"
+BR2_PACKAGE_FFMPEG_DECODERS = "mjpeg h264 h264_v4l2m2m hevc hevc_v4l2m2m"
+BR2_PACKAGE_FFMPEG_PROTOCOLS = "file"
+BR2_PACKAGE_FFMPEG_FILTERS = "scale"
+
+# Node modules
+BR2_PACKAGE_NODEJS_MODULES_ADDITIONAL = "typescript esbuild"
+
+# libcamera tuning
+BR2_PACKAGE_LIBCAMERA_V4L2 = true
+BR2_PACKAGE_LIBCAMERA_PIPELINE_RPI_VC4 = true
+BR2_PACKAGE_LIBCAMERA_PIPELINE_RPI_PISP = true
+BR2_PACKAGE_LIBCAMERA_PIPELINE_UVCVIDEO = true
+BR2_PACKAGE_LIBCAMERA_PIPELINE_VIMC = true
+BR2_PACKAGE_LIBCAMERA_PIPELINE_SIMPLE = true

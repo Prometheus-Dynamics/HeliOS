@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package helios.api.logs.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+message ListStreamsRequest {}
+
+message LogStream {
+  string id = 1;
+  string display_name = 2;
+  uint32 retention_count = 3;
+  uint64 rotation_max_bytes = 4;
+}
+
+message ListStreamsResponse {
+  repeated LogStream streams = 1;
+}
+
+message TailStreamRequest {
+  string stream_id = 1;
+  google.protobuf.UInt32Value lines = 2;
+  google.protobuf.Timestamp since = 3;
+}
+
+message LogLine {
+  uint64 sequence = 1;
+  string file_id = 2;
+  string json_payload = 3;
+  google.protobuf.Timestamp timestamp = 4;
+}
+
+message Heartbeat {
+  google.protobuf.Timestamp timestamp = 1;
+}
+
+message LogEnvelope {
+  uint64 sequence = 1;
+  string file_id = 2;
+  oneof frame {
+    LogLine line = 3;
+    Heartbeat heartbeat = 4;
+  }
+}
+
+message DownloadArchiveRequest {
+  string stream_id = 1;
+  google.protobuf.Timestamp from = 2;
+  google.protobuf.Timestamp to = 3;
+  google.protobuf.Duration window = 4;
+}
+
+message ArchiveChunk {
+  bytes data = 1;
+  bool eof = 2;
+  string checksum = 3;
+}
+
+service Logs {
+  rpc ListStreams(ListStreamsRequest) returns (ListStreamsResponse);
+  rpc TailStream(TailStreamRequest) returns (stream LogEnvelope);
+  rpc DownloadArchive(DownloadArchiveRequest) returns (stream ArchiveChunk);
+}

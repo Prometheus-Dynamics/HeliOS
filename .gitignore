@@ -1,0 +1,16 @@
+tools/api-client/node_modules/
+frontend/src/lib/ts-bindings/
+target/
+build/
+output/
+gaia/build/
+gaia/output/
+backend/third_party
+*/.codex-*/*
+.cache/
+.vscode/
+*target*/
+tmp/
+__pycache__/
+*.pyc
+configs/sdk/offline

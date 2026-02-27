@@ -1,0 +1,60 @@
+[package]
+name = "lib-cv"
+version.workspace = true
+edition = "2024"
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[features]
+default = ["all", "engine", "plugins"]
+all = ["contour", "ai", "draw", "aruco"]
+contour = []
+ai = []
+draw = []
+aruco = []
+engine = ["dep:daedalus", "dep:daedalus-data", "dep:daedalus-macros", "dep:paste", "daedalus/engine", "daedalus/plugins"]
+plugins = ["engine"]
+gpu = ["engine", "dep:wgpu", "daedalus/gpu-wgpu"]
+
+[dependencies]
+tokio = {workspace = true}
+tracing = {workspace = true}
+image = {workspace = true}
+imageproc = {workspace = true}
+rayon = {workspace = true}
+ffmpeg = {workspace = true}
+async-trait = {workspace = true}
+serde = {workspace = true}
+utoipa = {workspace = true}
+uuid = {workspace = true}
+daedalus = { workspace = true, features = ["engine", "plugins", "gpu"], optional = true }
+daedalus-data = { workspace = true, optional = true }
+daedalus-macros = { workspace = true, optional = true }
+
+fast_image_resize = { version = "5.2.2", features = ["image", "rayon"] }
+libblur = { version = "0.19.4", features = ["image"] }
+num = "0.4.3"
+ab_glyph = "0.2.31"
+serde_json = {workspace = true}
+bytemuck = "1.23.2"
+wide = "0.7.33"
+geo = { workspace = true }
+nalgebra = "0.32.5"
+rand = { workspace = true }
+once_cell = { workspace = true }
+serde_bytes = { workspace = true }
+paste = { workspace = true, optional = true }
+wgpu = { version = "27.0.1", default-features = false, features = ["wgsl"], optional = true }
+memchr = "2.7.4"
+smallvec = "1.13.2"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+
+[build-dependencies]
+naga = { version = "0.20", features = ["wgsl-in"] }

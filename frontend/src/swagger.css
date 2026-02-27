@@ -1,0 +1,219 @@
+.swagger-ui {
+  /* Apply Skeleton typography without forcing text colours on inputs */
+  color: var(--base-font-color-dark) !important;
+  font-family: var(--base-font-family) !important;
+  font-size: var(--base-font-size) !important;
+  line-height: var(--base-line-height) !important;
+  font-weight: var(--base-font-weight) !important;
+  font-style: var(--base-font-style) !important;
+  letter-spacing: var(--base-letter-spacing) !important;
+  background-color: var(--body-background-color-dark) !important;
+}
+
+/* Ensure nested elements inherit fonts but not the forced colour */
+.swagger-ui * {
+  font-family: inherit !important;
+}
+
+.swagger-ui h1,
+.swagger-ui h2,
+.swagger-ui h3,
+.swagger-ui h4,
+.swagger-ui h5,
+.swagger-ui h6 {
+  font-family: var(--heading-font-family) !important;
+  font-weight: var(--heading-font-weight) !important;
+  font-style: var(--heading-font-style) !important;
+  letter-spacing: var(--heading-letter-spacing) !important;
+  color: var(--heading-font-color-dark) !important;
+}
+.swagger-ui .topbar {
+  background-color: var(--color-primary-600) !important;
+  color: var(--color-primary-contrast-600) !important;
+  border-bottom: 1px solid var(--color-primary-700) !important;
+}
+.swagger-ui a {
+  color: var(--base-font-color-dark) !important;
+}
+
+/* Collapse headers use light backgrounds by default. Force a dark surface */
+.swagger-ui .opblock.opblock-get .opblock-section-header {
+  background-color: color-mix(in srgb, var(--color-success-600) 15%, transparent) !important;
+  color: var(--base-font-color-dark) !important;
+}
+
+.swagger-ui .opblock.opblock-put .opblock-section-header {
+  background-color: color-mix(in srgb, var(--color-warning-600) 15%, transparent) !important;
+  color: var(--base-font-color-dark) !important;
+}
+
+.swagger-ui .opblock.opblock-delete .opblock-section-header {
+  background-color: color-mix(in srgb, var(--color-error-600) 15%, transparent) !important;
+  color: var(--base-font-color-dark) !important;
+}
+
+.swagger-ui .opblock.opblock-patch .opblock-section-header {
+  background-color: color-mix(in srgb, var(--color-secondary-600) 15%, transparent) !important;
+  color: var(--base-font-color-dark) !important;
+}
+
+
+/* Ensure dropdowns and text inputs use readable colours */
+.swagger-ui select,
+.swagger-ui input,
+.swagger-ui textarea {
+  background-color: var(--color-surface-800) !important;
+  color: var(--base-font-color-dark) !important;
+}
+
+/* HTTP method colors */
+.swagger-ui .opblock.opblock-get {
+  border-color: var(--color-success-600) !important;
+  background-color: color-mix(in srgb, var(--color-success-600) 15%, transparent) !important;
+}
+.swagger-ui .opblock.opblock-get .opblock-summary-method {
+  background-color: var(--color-success-600) !important;
+}
+.swagger-ui .opblock.opblock-post {
+  border-color: var(--color-primary-600) !important;
+  background-color: color-mix(in srgb, var(--color-primary-600) 15%, transparent) !important;
+}
+.swagger-ui .opblock.opblock-post .opblock-summary-method {
+  background-color: var(--color-primary-600) !important;
+}
+.swagger-ui .opblock.opblock-put {
+  border-color: var(--color-warning-600) !important;
+  background-color: color-mix(in srgb, var(--color-warning-600) 15%, transparent) !important;
+}
+.swagger-ui .opblock.opblock-put .opblock-summary-method {
+  background-color: var(--color-warning-600) !important;
+}
+.swagger-ui .opblock.opblock-delete {
+  border-color: var(--color-error-600) !important;
+  background-color: color-mix(in srgb, var(--color-error-600) 15%, transparent) !important;
+}
+.swagger-ui .opblock.opblock-delete .opblock-summary-method {
+  background-color: var(--color-error-600) !important;
+}
+.swagger-ui .opblock.opblock-patch {
+  border-color: var(--color-secondary-600) !important;
+  background-color: color-mix(in srgb, var(--color-secondary-600) 15%, transparent) !important;
+}
+.swagger-ui .opblock.opblock-patch .opblock-summary-method {
+  background-color: var(--color-secondary-600) !important;
+}
+.swagger-ui .opblock.opblock-head {
+  border-color: var(--color-tertiary-600) !important;
+  background-color: color-mix(in srgb, var(--color-tertiary-600) 15%, transparent) !important;
+}
+.swagger-ui .opblock.opblock-head .opblock-summary-method {
+  background-color: var(--color-tertiary-600) !important;
+}
+
+/* Typography - inherit Skeleton base styles */
+
+/* Ensure all operation summary text uses Skeleton colors */
+.swagger-ui .opblock .opblock-summary-path,
+.swagger-ui .opblock .opblock-summary-path__deprecated,
+.swagger-ui .opblock .opblock-summary-operation-id,
+.swagger-ui .opblock .opblock-summary-description,
+.swagger-ui .opblock-tag {
+  color: var(--base-font-color-dark) !important;
+}
+
+.swagger-ui .opblock-description-wrapper p {
+   color: var(--base-font-color-dark) !important;
+}
+
+.swagger-ui table thead tr td {
+   color: var(--base-font-color-dark) !important;
+}
+
+.swagger-ui .response-col_status {
+  color: var(--base-font-color-dark) !important;
+}
+
+.swagger-ui .tab li button.tablinks {
+    color: var(--base-font-color-dark) !important;
+}
+
+.swagger-ui .btn {
+      color: var(--base-font-color-dark) !important;
+      border-color: var(--base-font-color-dark) !important;
+}
+
+.swagger-ui .response-col_links {
+  color: var(--base-font-color-dark) !important;
+}
+
+.swagger-ui .opblock-description-wrapper {
+    color: var(--base-font-color-dark) !important;
+}
+
+.swagger-ui .parameter__name {
+    color: var(--base-font-color-dark) !important;
+}
+
+.swagger-ui .parameter__type {
+      color: var(--base-font-color-dark) !important;
+}
+
+.swagger-ui .parameter__in {
+   color: var(--base-font-color-dark) !important;
+}
+
+.swagger-ui table thead tr th {
+      color: var(--base-font-color-dark) !important;
+}
+
+.swagger-ui input[type="text"]{
+  background-color: color-mix(in srgb, var(--color-surface-600) 30%, transparent) !important;
+  border-color: color-mix(in srgb, var(--color-surface-800) 30%, transparent) !important;
+
+}
+
+.swagger-ui select {
+  background-color: color-mix(in srgb, var(--color-surface-600) 30%, transparent) !important;
+  border-color: color-mix(in srgb, var(--color-surface-800) 30%, transparent) !important;
+
+}
+
+/* Schema text */
+.swagger-ui .model-title,
+.swagger-ui .model-hint,
+.swagger-ui .prop-type,
+.swagger-ui .prop-format,
+.swagger-ui .model {
+  color: var(--base-font-color-dark) !important;
+}
+
+/* JSON schema examples */
+.swagger-ui .opblock-body pre.microlight,
+.swagger-ui .highlight-code > .microlight {
+  background-color: var(--color-surface-950) !important;
+  color: var(--color-surface-contrast-950) !important;
+  border-radius: var(--radius-container) !important;
+  font-family: var(--font-mono) !important;
+  font-size: var(--text-xs) !important;
+}
+.swagger-ui code {
+  font-family: var(--font-mono) !important;
+}
+.swagger-ui .opblock-body pre.microlight code {
+  color: inherit !important;
+}
+/* JSON token colors */
+.swagger-ui span.token-string,
+.swagger-ui span.token-not-formatted {
+  color: inherit !important;
+}
+/* Schema controls and JSON schema names */
+.swagger-ui .models-control,
+.swagger-ui .models-control * {
+  color: var(--base-font-color-dark) !important;
+}
+.swagger-ui [class^="json-schema-"],
+.swagger-ui [class^="json-schema-"] * {
+  color: var(--base-font-color-dark) !important;
+}
+

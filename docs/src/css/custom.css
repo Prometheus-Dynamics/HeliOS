@@ -1,0 +1,205 @@
+@import url('https://fonts.googleapis.com/css2?family=Geologica:wght@400;500;600;700&display=swap');
+
+:root {
+  --color-primary-50: oklch(100% 0 none);
+  --color-primary-100: oklch(89.11% 0.04 13.61deg);
+  --color-primary-200: oklch(78.29% 0.08 14.03deg);
+  --color-primary-300: oklch(68.03% 0.12 16.32deg);
+  --color-primary-400: oklch(58.9% 0.17 19.52deg);
+  --color-primary-500: oklch(51.98% 0.2 24.71deg);
+  --color-primary-600: oklch(51.05% 0.19 24.17deg);
+  --color-primary-contrast-light: var(--color-surface-50);
+
+  --color-secondary-300: oklch(76.18% 0.1 254.11deg);
+  --color-secondary-400: oklch(68.62% 0.13 253.79deg);
+  --color-secondary-500: oklch(61.37% 0.16 255.34deg);
+
+  --color-tertiary-300: oklch(71.15% 0.1 317.52deg);
+  --color-tertiary-400: oklch(61.65% 0.14 317.03deg);
+  --color-tertiary-500: oklch(52.54% 0.18 316.66deg);
+
+  --color-surface-50: oklch(100% 0 none);
+  --color-surface-100: oklch(90.67% 0 none);
+  --color-surface-200: oklch(81.41% 0 none);
+  --color-surface-400: oklch(61.67% 0 none);
+  --color-surface-600: oklch(44.93% 0 264.58deg);
+  --color-surface-700: oklch(38.92% 0 247.92deg);
+  --color-surface-800: oklch(32.36% 0.01 255.56deg);
+  --color-surface-900: oklch(25.79% 0.01 248.19deg);
+  --color-surface-950: oklch(18.44% 0.01 253.2deg);
+
+  --spacing-unit: 0.22rem;
+  --radius-base: 0.125rem;
+  --radius-container: 0.25rem;
+
+  --ifm-font-family-base: 'Geologica', system-ui, -apple-system, sans-serif;
+  --ifm-heading-font-family: var(--ifm-font-family-base);
+  --ifm-heading-font-weight: 600;
+  --ifm-line-height-base: 1.5;
+  --ifm-color-primary: var(--color-primary-500);
+  --ifm-color-primary-dark: var(--color-primary-600);
+  --ifm-color-primary-darker: var(--color-primary-600);
+  --ifm-color-primary-darkest: var(--color-primary-600);
+  --ifm-color-primary-light: var(--color-primary-400);
+  --ifm-color-primary-lighter: var(--color-primary-300);
+  --ifm-color-primary-lightest: var(--color-primary-200);
+  --ifm-code-font-size: 90%;
+  --ifm-navbar-height: 3.25rem;
+  --ifm-spacing-horizontal: calc(4 * var(--spacing-unit));
+  --ifm-button-border-radius: var(--radius-container);
+  --ifm-card-border-radius: var(--radius-container);
+  --docusaurus-highlighted-code-line-bg: color-mix(in oklch, var(--color-primary-500) 24%, transparent);
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: var(--color-primary-400);
+  --ifm-color-primary-dark: var(--color-primary-500);
+  --ifm-color-primary-darker: var(--color-primary-500);
+  --ifm-color-primary-darkest: var(--color-primary-600);
+  --ifm-color-primary-light: var(--color-primary-300);
+  --ifm-color-primary-lighter: var(--color-primary-200);
+  --ifm-color-primary-lightest: var(--color-primary-200);
+
+  --ifm-background-color: var(--color-surface-950);
+  --ifm-background-surface-color: color-mix(in oklch, var(--color-surface-900) 75%, black);
+  --ifm-font-color-base: var(--color-surface-50);
+  --ifm-navbar-background-color: rgba(15, 18, 26, 0.9);
+  --ifm-navbar-link-hover-color: var(--color-primary-300);
+  --ifm-menu-color-background-active: color-mix(in oklch, var(--color-surface-800) 80%, transparent);
+  --docusaurus-highlighted-code-line-bg: color-mix(in oklch, var(--color-secondary-500) 22%, transparent);
+}
+
+html {
+  font-size: 16px !important;
+  line-height: var(--ifm-line-height-base) !important;
+  background-color: var(--ifm-background-color) !important;
+  color: var(--ifm-font-color-base) !important;
+}
+
+body {
+  font-family: var(--ifm-font-family-base) !important;
+  background-color: var(--ifm-background-color) !important;
+  color: var(--ifm-font-color-base) !important;
+  letter-spacing: 0.01em;
+}
+
+.navbar {
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid color-mix(in oklch, var(--color-surface-700) 70%, transparent);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 0.75rem;
+}
+
+.navbar__title {
+  font-size: 0.7rem;
+  letter-spacing: 0.38em;
+  font-weight: 600;
+}
+
+.navbar__brand:hover {
+  color: var(--color-primary-300);
+}
+
+.navbar__items .navbar__item {
+  font-weight: 500;
+}
+
+.navbar__items .navbar__item:hover {
+  color: var(--color-primary-300);
+}
+
+/* Apply the global page background to the Docusaurus main wrapper only.
+   Styling the `main` tag also hits nested home-page <main> sections. */
+.main-wrapper {
+  background: linear-gradient(180deg, rgba(7, 8, 12, 0.8), rgba(7, 8, 12, 0.95)),
+    radial-gradient(circle at top, rgba(20, 22, 30, 0.8), transparent 70%);
+  padding-top: 2rem;
+  min-height: calc(100vh - var(--ifm-navbar-height));
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.markdown h2 {
+  border-bottom: 1px solid color-mix(in oklch, var(--color-surface-700) 80%, transparent);
+  padding-bottom: 0.6rem;
+}
+
+.markdown code {
+  background: color-mix(in oklch, var(--color-surface-800) 90%, transparent);
+  border: 1px solid color-mix(in oklch, var(--color-surface-700) 70%, transparent);
+  border-radius: var(--radius-base);
+  padding: 0.15rem 0.4rem;
+  font-size: 0.85rem;
+}
+
+.theme-doc-sidebar-menu .menu__link--active,
+.menu__link:hover {
+  background: color-mix(in oklch, var(--color-secondary-400) 12%, transparent);
+  border-radius: var(--radius-container);
+  color: var(--color-secondary-300);
+}
+
+.card {
+  background: color-mix(in oklch, var(--color-surface-900) 88%, transparent);
+  border: 1px solid color-mix(in oklch, var(--color-surface-700) 80%, transparent);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+}
+
+.card__header {
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 0.72rem;
+  color: var(--color-secondary-300);
+}
+
+.card__body {
+  color: var(--color-surface-50);
+}
+
+.footer {
+  border-top: 1px solid color-mix(in oklch, var(--color-surface-700) 70%, transparent);
+  background: rgba(6, 7, 11, 0.9);
+  letter-spacing: 0.08em;
+}
+
+.footer__title {
+  text-transform: uppercase;
+  letter-spacing: 0.3em;
+  font-size: 0.7rem;
+  color: var(--color-secondary-300);
+}
+
+.footer__link-item:hover {
+  color: var(--color-primary-300);
+}
+
+.table-of-contents__link:hover,
+.table-of-contents__link--active {
+  color: var(--color-primary-300);
+}
+
+.theme-code-block {
+  border: 1px solid color-mix(in oklch, var(--color-surface-700) 70%, transparent);
+  border-radius: 0.5rem;
+  background: color-mix(in oklch, var(--color-surface-900) 90%, black);
+}
+
+.theme-code-block .token.comment {
+  color: color-mix(in oklch, var(--color-secondary-400) 65%, transparent);
+}
+
+.badge {
+  background: color-mix(in oklch, var(--color-tertiary-400) 35%, transparent);
+  border: 1px solid color-mix(in oklch, var(--color-tertiary-500) 40%, transparent);
+  border-radius: var(--radius-base);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  font-size: 0.65rem;
+}

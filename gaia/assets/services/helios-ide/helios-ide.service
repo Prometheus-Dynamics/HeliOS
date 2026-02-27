@@ -1,0 +1,27 @@
+[Unit]
+Description=Helios OpenVSCode Server
+After=network.target var-lib-helios.mount
+RequiresMountsFor=/var/lib/helios
+# Skip startup if the IDE payload isn't installed.
+ConditionPathExists=/opt/helios/ide/bin/openvscode-server
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+EnvironmentFile=-/etc/default/helios-ide
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+PermissionsStartOnly=true
+ExecStartPre=/usr/local/bin/helios-ide-setup.sh
+ExecStart=/opt/helios/ide/bin/openvscode-server --host=${IDE_BIND_ADDR} --port=${IDE_PORT} --accept-server-license-terms --without-connection-token --telemetry-level=off --user-data-dir=${IDE_DATA_DIR} --extensions-dir=${IDE_EXTENSIONS_DIR} --server-data-dir=${IDE_SERVER_DATA_DIR} --default-folder=${IDE_WORKSPACE_DIR}
+Restart=on-failure
+RestartSec=3
+# Keep the IDE from stealing CPU on the CM5.
+Nice=10
+CPUSchedulingPolicy=idle
+IOSchedulingClass=idle
+CPUAccounting=true
+CPUQuota=5%
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,8 @@
+{
+  "label": "Pipelines",
+  "position": 5,
+  "link": {
+    "type": "generated-index",
+    "description": "Architecture, authoring, and orchestration of Helios pipelines."
+  }
+}

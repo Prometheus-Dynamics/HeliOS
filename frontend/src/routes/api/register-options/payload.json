@@ -1,0 +1,426 @@
+{
+  "backends": [
+    "LibcameraCaptureBackend",
+    "V4L2CaptureBackend",
+    "alpha",
+    "edge",
+    "beta",
+    "gamma"
+  ],
+  "devices": [
+    {
+      "id": "device-usb-uvc-046d-0825",
+      "hardware_id": "046d:0825",
+      "drivers": {
+        "LibcameraCaptureBackend": {
+          "camera_id": "\\_SB_.PCI0.GP13.XHC0.RHUB.PRT3-3.2.3:1.0-046d:0825",
+          "display_name": "UVC Camera (046d:0825)",
+          "formats": [
+            {
+              "fourcc": { "bits": [77, 74, 80, 71], "name": "MJPG" },
+              "description": "",
+              "resolutions": [
+                { "resolution": { "Discrete": { "width": 160, "height": 120 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 176, "height": 144 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 320, "height": 176 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 320, "height": 240 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 352, "height": 288 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 432, "height": 240 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 544, "height": 288 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 640, "height": 360 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 640, "height": 480 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 752, "height": 416 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 800, "height": 448 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 864, "height": 480 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 800, "height": 600 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 960, "height": 544 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 1024, "height": 576 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 960, "height": 720 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 1184, "height": 656 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 1280, "height": 720 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 1280, "height": 960 } }, "intervals": [] }
+              ]
+            },
+            {
+              "fourcc": { "bits": [89, 85, 89, 86], "name": "YUYV" },
+              "description": "",
+              "resolutions": [
+                { "resolution": { "Discrete": { "width": 160, "height": 120 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 176, "height": 144 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 320, "height": 176 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 320, "height": 240 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 352, "height": 288 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 432, "height": 240 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 544, "height": 288 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 640, "height": 360 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 640, "height": 480 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 752, "height": 416 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 800, "height": 448 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 864, "height": 480 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 800, "height": 600 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 960, "height": 544 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 1024, "height": 576 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 960, "height": 720 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 1184, "height": 656 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 1280, "height": 720 } }, "intervals": [] },
+                { "resolution": { "Discrete": { "width": 1280, "height": 960 } }, "intervals": [] }
+              ]
+            }
+          ],
+          "controls": [
+            { "id": 8, "name": "ExposureTimeMode", "min": { "Int32": 0 }, "max": { "Int32": 1 }, "default": { "Int32": 0 }, "values": [{ "Int32": 0 }, { "Int32": 1 }], "flags": "READ_ONLY | WRITE_ONLY" },
+            { "id": 15, "name": "Contrast", "min": { "Float": 0.56950676 }, "max": { "Float": 4 }, "default": { "Float": 1 }, "values": [], "flags": "READ_ONLY | WRITE_ONLY" },
+            { "id": 22, "name": "Saturation", "min": { "Float": 0 }, "max": { "Float": 7.96875 }, "default": { "Float": 1 }, "values": [], "flags": "READ_ONLY | WRITE_ONLY" },
+            { "id": 9, "name": "AnalogueGain", "min": { "Float": 0.5 }, "max": { "Float": 2.4921875 }, "default": { "Float": 1 }, "values": [], "flags": "READ_ONLY | WRITE_ONLY" },
+            { "id": 1, "name": "AeEnable", "min": { "Bool": false }, "max": { "Bool": true }, "default": { "Bool": true }, "values": [], "flags": "WRITE_ONLY" },
+            { "id": 14, "name": "Brightness", "min": { "Float": -1 }, "max": { "Float": 0.9921875 }, "default": { "Float": 0 }, "values": [], "flags": "READ_ONLY | WRITE_ONLY" },
+            { "id": 7, "name": "ExposureTime", "min": { "Int32": 100 }, "max": { "Int32": 1000000 }, "default": { "Int32": 16600 }, "values": [], "flags": "READ_ONLY | WRITE_ONLY" }
+          ],
+          "properties": [
+            { "name": "SystemDevices", "value": { "Int64": 20737 } },
+            { "name": "PixelArrayActiveAreas", "value": { "Rectangle": { "x": 0, "y": 0, "width": 1280, "height": 960 } } },
+            { "name": "PixelArraySize", "value": { "Size": { "width": 1280, "height": 960 } } },
+            { "name": "Location", "value": { "Int32": 2 } },
+            { "name": "Model", "value": { "String": "UVC Camera (046d:0825)" } }
+          ]
+        },
+        "V4L2CaptureBackend": {
+          "camera_id": "/dev/video1",
+          "display_name": "UVC Camera (046d:0825)",
+          "formats": [
+            {
+              "fourcc": { "bits": [89, 85, 89, 86], "name": "YUYV" },
+              "description": "YUYV 4:2:2",
+              "resolutions": [
+                {
+                  "resolution": { "Discrete": { "width": 640, "height": 480 } },
+                  "intervals": [
+                    { "Discrete": { "numerator": 1, "denominator": 30 } },
+                    { "Discrete": { "numerator": 1, "denominator": 25 } },
+                    { "Discrete": { "numerator": 1, "denominator": 20 } },
+                    { "Discrete": { "numerator": 1, "denominator": 15 } },
+                    { "Discrete": { "numerator": 1, "denominator": 10 } },
+                    { "Discrete": { "numerator": 1, "denominator": 5 } }
+                  ]
+                },
+                {
+                  "resolution": { "Discrete": { "width": 160, "height": 120 } },
+                  "intervals": [
+                    { "Discrete": { "numerator": 1, "denominator": 30 } },
+                    { "Discrete": { "numerator": 1, "denominator": 25 } },
+                    { "Discrete": { "numerator": 1, "denominator": 20 } },
+                    { "Discrete": { "numerator": 1, "denominator": 15 } },
+                    { "Discrete": { "numerator": 1, "denominator": 10 } },
+                    { "Discrete": { "numerator": 1, "denominator": 5 } }
+                  ]
+                },
+                {
+                  "resolution": { "Discrete": { "width": 320, "height": 240 } },
+                  "intervals": [
+                    { "Discrete": { "numerator": 1, "denominator": 30 } },
+                    { "Discrete": { "numerator": 1, "denominator": 25 } },
+                    { "Discrete": { "numerator": 1, "denominator": 20 } },
+                    { "Discrete": { "numerator": 1, "denominator": 15 } },
+                    { "Discrete": { "numerator": 1, "denominator": 10 } },
+                    { "Discrete": { "numerator": 1, "denominator": 5 } }
+                  ]
+                },
+                {
+                  "resolution": { "Discrete": { "width": 864, "height": 480 } },
+                  "intervals": [
+                    { "Discrete": { "numerator": 1, "denominator": 20 } },
+                    { "Discrete": { "numerator": 1, "denominator": 15 } },
+                    { "Discrete": { "numerator": 1, "denominator": 10 } },
+                    { "Discrete": { "numerator": 1, "denominator": 5 } }
+                  ]
+                },
+                {
+                  "resolution": { "Discrete": { "width": 1280, "height": 720 } },
+                  "intervals": [
+                    { "Discrete": { "numerator": 2, "denominator": 15 } },
+                    { "Discrete": { "numerator": 1, "denominator": 5 } }
+                  ]
+                },
+                {
+                  "resolution": { "Discrete": { "width": 1280, "height": 960 } },
+                  "intervals": [
+                    { "Discrete": { "numerator": 2, "denominator": 15 } },
+                    { "Discrete": { "numerator": 1, "denominator": 5 } }
+                  ]
+                }
+              ]
+            },
+            {
+              "fourcc": { "bits": [77, 74, 80, 71], "name": "MJPG" },
+              "description": "Motion-JPEG",
+              "resolutions": [
+                {
+                  "resolution": { "Discrete": { "width": 640, "height": 480 } },
+                  "intervals": [
+                    { "Discrete": { "numerator": 1, "denominator": 30 } },
+                    { "Discrete": { "numerator": 1, "denominator": 25 } },
+                    { "Discrete": { "numerator": 1, "denominator": 20 } },
+                    { "Discrete": { "numerator": 1, "denominator": 15 } },
+                    { "Discrete": { "numerator": 1, "denominator": 10 } },
+                    { "Discrete": { "numerator": 1, "denominator": 5 } }
+                  ]
+                },
+                {
+                  "resolution": { "Discrete": { "width": 432, "height": 240 } },
+                  "intervals": [
+                    { "Discrete": { "numerator": 1, "denominator": 30 } },
+                    { "Discrete": { "numerator": 1, "denominator": 25 } },
+                    { "Discrete": { "numerator": 1, "denominator": 20 } },
+                    { "Discrete": { "numerator": 1, "denominator": 15 } },
+                    { "Discrete": { "numerator": 1, "denominator": 10 } },
+                    { "Discrete": { "numerator": 1, "denominator": 5 } }
+                  ]
+                },
+                {
+                  "resolution": { "Discrete": { "width": 544, "height": 288 } },
+                  "intervals": [
+                    { "Discrete": { "numerator": 1, "denominator": 30 } },
+                    { "Discrete": { "numerator": 1, "denominator": 25 } },
+                    { "Discrete": { "numerator": 1, "denominator": 20 } },
+                    { "Discrete": { "numerator": 1, "denominator": 15 } },
+                    { "Discrete": { "numerator": 1, "denominator": 10 } },
+                    { "Discrete": { "numerator": 1, "denominator": 5 } }
+                  ]
+                },
+                {
+                  "resolution": { "Discrete": { "width": 832, "height": 480 } },
+                  "intervals": [
+                    { "Discrete": { "numerator": 1, "denominator": 30 } },
+                    { "Discrete": { "numerator": 1, "denominator": 25 } },
+                    { "Discrete": { "numerator": 1, "denominator": 20 } },
+                    { "Discrete": { "numerator": 1, "denominator": 15 } },
+                    { "Discrete": { "numerator": 1, "denominator": 10 } },
+                    { "Discrete": { "numerator": 1, "denominator": 5 } }
+                  ]
+                },
+                {
+                  "resolution": { "Discrete": { "width": 1024, "height": 576 } },
+                  "intervals": [
+                    { "Discrete": { "numerator": 1, "denominator": 30 } },
+                    { "Discrete": { "numerator": 1, "denominator": 25 } },
+                    { "Discrete": { "numerator": 1, "denominator": 20 } },
+                    { "Discrete": { "numerator": 1, "denominator": 15 } },
+                    { "Discrete": { "numerator": 1, "denominator": 10 } },
+                    { "Discrete": { "numerator": 1, "denominator": 5 } }
+                  ]
+                },
+                {
+                  "resolution": { "Discrete": { "width": 1280, "height": 720 } },
+                  "intervals": [
+                    { "Discrete": { "numerator": 1, "denominator": 30 } },
+                    { "Discrete": { "numerator": 1, "denominator": 25 } },
+                    { "Discrete": { "numerator": 1, "denominator": 20 } },
+                    { "Discrete": { "numerator": 1, "denominator": 15 } },
+                    { "Discrete": { "numerator": 1, "denominator": 10 } },
+                    { "Discrete": { "numerator": 1, "denominator": 5 } }
+                  ]
+                }
+              ]
+            }
+          ],
+          "controls": [
+            { "id": 9961473, "name": "User Controls", "min": { "Int64": 0 }, "max": { "Int64": 0 }, "default": { "Int64": 0 }, "values": [], "flags": "READ_ONLY | WRITE_ONLY" },
+            { "id": 9963776, "name": "Brightness", "min": { "Int64": 0 }, "max": { "Int64": 255 }, "default": { "Int64": 128 }, "values": [], "flags": "" },
+            { "id": 9963777, "name": "Contrast", "min": { "Int64": 0 }, "max": { "Int64": 255 }, "default": { "Int64": 32 }, "values": [], "flags": "" },
+            { "id": 9963778, "name": "Saturation", "min": { "Int64": 0 }, "max": { "Int64": 255 }, "default": { "Int64": 32 }, "values": [], "flags": "" },
+            { "id": 9963788, "name": "White Balance, Automatic", "min": { "Bool": false }, "max": { "Bool": true }, "default": { "Bool": true }, "values": [], "flags": "" },
+            { "id": 9963795, "name": "Gain", "min": { "Int64": 0 }, "max": { "Int64": 255 }, "default": { "Int64": 64 }, "values": [], "flags": "" },
+            { "id": 9963800, "name": "Power Line Frequency", "min": { "Int64": 0 }, "max": { "Int64": 2 }, "default": { "Int64": 2 }, "values": [{ "String": "Disabled" }, { "String": "50 Hz" }, { "String": "60 Hz" }], "flags": "" },
+            { "id": 9963802, "name": "White Balance Temperature", "min": { "Int64": 0 }, "max": { "Int64": 10000 }, "default": { "Int64": 4000 }, "values": [], "flags": "INACTIVE" },
+            { "id": 9963803, "name": "Sharpness", "min": { "Int64": 0 }, "max": { "Int64": 255 }, "default": { "Int64": 24 }, "values": [], "flags": "" },
+            { "id": 9963804, "name": "Backlight Compensation", "min": { "Int64": 0 }, "max": { "Int64": 1 }, "default": { "Int64": 0 }, "values": [], "flags": "" },
+            { "id": 10092545, "name": "Camera Controls", "min": { "Int64": 0 }, "max": { "Int64": 0 }, "default": { "Int64": 0 }, "values": [], "flags": "READ_ONLY | WRITE_ONLY" },
+            { "id": 10094849, "name": "Auto Exposure", "min": { "Int64": 0 }, "max": { "Int64": 3 }, "default": { "Int64": 3 }, "values": [{ "String": "Manual Mode" }, { "String": "Aperture Priority Mode" }], "flags": "" },
+            { "id": 10094850, "name": "Exposure Time, Absolute", "min": { "Int64": 1 }, "max": { "Int64": 10000 }, "default": { "Int64": 166 }, "values": [], "flags": "INACTIVE" },
+            { "id": 10094851, "name": "Exposure, Dynamic Framerate", "min": { "Bool": false }, "max": { "Bool": true }, "default": { "Bool": false }, "values": [], "flags": "" }
+          ],
+          "properties": [
+            { "name": "bus", "value": { "String": "usb-0000:0c:00.3-3.2.3" } },
+            { "name": "card", "value": { "String": "UVC Camera (046d:0825)" } },
+            { "name": "driver", "value": { "String": "uvcvideo" } },
+            { "name": "version", "value": { "String": "6.17.1" } },
+            { "name": "capabilities", "value": { "String": "VIDEO_CAPTURE, EXT_PIX_FORMAT, STREAMING" } }
+          ]
+        }
+      }
+    },
+    {
+      "id": "device-front-array",
+      "hardware_id": "CSI::000-1A",
+      "name": "Front mast array",
+      "drivers": {
+        "alpha": {
+          "camera_id": "alpha/front-wide",
+          "display_name": "Front Wide",
+          "suggested_pipeline": "vision/front-wide",
+          "properties": [
+            { "name": "Sensor", "value": { "String": "IMX477" } },
+            { "name": "Bus", "value": { "String": "CSI-2" } },
+            { "name": "Sync", "value": { "String": "Hardware" } }
+          ],
+          "formats": [
+            {
+              "fourcc": { "name": "H264" },
+              "description": "Low-latency AVC tuned for driving and teleop.",
+              "encoders": ["nvenc", "hevchead"],
+              "decoders": ["ffmpeg", "gstreamer"],
+              "resolutions": [
+                {
+                  "resolution": { "Discrete": { "width": 3840, "height": 2160 } },
+                  "intervals": [
+                    { "Discrete": { "numerator": 1, "denominator": 30 } },
+                    { "Discrete": { "numerator": 1, "denominator": 24 } }
+                  ]
+                },
+                {
+                  "resolution": { "Discrete": { "width": 1920, "height": 1080 } },
+                  "intervals": [
+                    { "Discrete": { "numerator": 1, "denominator": 60 } },
+                    { "Discrete": { "numerator": 1, "denominator": 48 } }
+                  ]
+                }
+              ]
+            },
+            {
+              "fourcc": { "name": "MJPG" },
+              "description": "High fidelity MJPEG for calibration and inspection.",
+              "encoders": ["libjpeg", "software"],
+              "decoders": ["browser", "ffmpeg"],
+              "resolutions": [
+                {
+                  "resolution": { "Discrete": { "width": 1920, "height": 1080 } },
+                  "intervals": [
+                    { "Discrete": { "numerator": 1, "denominator": 120 } },
+                    { "Discrete": { "numerator": 1, "denominator": 90 } }
+                  ]
+                },
+                {
+                  "resolution": { "Discrete": { "width": 1280, "height": 720 } },
+                  "intervals": [
+                    { "Discrete": { "numerator": 1, "denominator": 180 } },
+                    { "Discrete": { "numerator": 1, "denominator": 144 } }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "edge": {
+          "camera_id": "edge/front-tight",
+          "display_name": "Front Tight",
+          "suggested_pipeline": "vision/front-tight",
+          "properties": [
+            { "name": "Sensor", "value": { "String": "IMX477" } },
+            { "name": "Mode", "value": { "String": "Tele" } }
+          ],
+          "formats": [
+            {
+              "fourcc": { "name": "RW12" },
+              "description": "12-bit Bayer for perception ingestion.",
+              "encoders": ["direct"],
+              "decoders": ["custom-bayer"],
+              "resolutions": [
+                {
+                  "resolution": { "Discrete": { "width": 2048, "height": 1536 } },
+                  "intervals": [
+                    { "Discrete": { "numerator": 1, "denominator": 90 } },
+                    { "Discrete": { "numerator": 1, "denominator": 60 } }
+                  ]
+                },
+                {
+                  "resolution": { "Discrete": { "width": 1280, "height": 960 } },
+                  "intervals": [
+                    { "Discrete": { "numerator": 1, "denominator": 180 } }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "device-cabin-stack",
+      "hardware_id": "USB::C920-44",
+      "name": "Cabin stack",
+      "drivers": {
+        "beta": {
+          "camera_id": "beta/cabin-01",
+          "display_name": "Cabin Cam 01",
+          "suggested_pipeline": "supervisory/cabin",
+          "properties": [
+            { "name": "Bus", "value": { "String": "USB2" } },
+            { "name": "Sensor", "value": { "String": "OV2720" } }
+          ],
+          "formats": [
+            {
+              "fourcc": { "name": "H264" },
+              "description": "Baseline profile for remote preview.",
+              "encoders": ["hardware"],
+              "decoders": ["ffmpeg"],
+              "resolutions": [
+                {
+                  "resolution": { "Discrete": { "width": 1920, "height": 1080 } },
+                  "intervals": [
+                    { "Discrete": { "numerator": 1, "denominator": 30 } }
+                  ]
+                },
+                {
+                  "resolution": { "Discrete": { "width": 1280, "height": 720 } },
+                  "intervals": [
+                    { "Discrete": { "numerator": 1, "denominator": 60 } },
+                    { "Discrete": { "numerator": 1, "denominator": 30 } }
+                  ]
+                }
+              ]
+            },
+            {
+              "fourcc": { "name": "MJPG" },
+              "description": "Fallback MJPEG mode.",
+              "encoders": ["software"],
+              "decoders": ["browser"],
+              "resolutions": [
+                {
+                  "resolution": { "Discrete": { "width": 1920, "height": 1080 } },
+                  "intervals": [
+                    { "Discrete": { "numerator": 1, "denominator": 30 } }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "gamma": {
+          "camera_id": "gamma/cabin-thermal",
+          "display_name": "Thermal Cabin",
+          "suggested_pipeline": "supervisory/thermal",
+          "properties": [
+            { "name": "Spectrum", "value": { "String": "8-14μm" } },
+            { "name": "Sensor", "value": { "String": "LWIR 206×156" } }
+          ],
+          "formats": [
+            {
+              "fourcc": { "name": "Y16" },
+              "description": "16-bit grayscale thermal imagery.",
+              "encoders": ["software"],
+              "decoders": ["thermal-vis"],
+              "resolutions": [
+                {
+                  "resolution": { "Discrete": { "width": 320, "height": 240 } },
+                  "intervals": [
+                    { "Discrete": { "numerator": 1, "denominator": 15 } }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

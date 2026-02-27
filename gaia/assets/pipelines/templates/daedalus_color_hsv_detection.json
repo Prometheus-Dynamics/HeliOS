@@ -1,0 +1,595 @@
+{
+  "id": "daedalus_color_hsv_detection",
+  "name": "HSV Color Detection",
+  "summary": "HSV range mask with contour extraction and JSON summaries.",
+  "tags": [
+    "color",
+    "hsv",
+    "contours"
+  ],
+  "graph": {
+    "nodes": [
+      {
+        "id": "io.host_bridge",
+        "label": "Input:frame",
+        "inputs": [],
+        "outputs": [
+          "frame"
+        ],
+        "metadata": {
+          "host_bridge": {
+            "type": "Bool",
+            "value": true
+          }
+        }
+      },
+      {
+        "id": "cv:image:downscale",
+        "label": "Downscale",
+        "inputs": [
+          "frame",
+          "factor",
+          "mode"
+        ],
+        "outputs": [
+          "frame",
+          "factor"
+        ],
+        "const_inputs": [
+          [
+            "factor",
+            {
+              "type": "Int",
+              "value": 1
+            }
+          ],
+          [
+            "mode",
+            {
+              "type": "String",
+              "value": "cpu"
+            }
+          ]
+        ]
+      },
+      {
+        "id": "cv:image.blur:blur",
+        "label": "Blur",
+        "inputs": [
+          "frame",
+          "sigma",
+          "mode"
+        ],
+        "outputs": [
+          "frame"
+        ],
+        "const_inputs": [
+          [
+            "sigma",
+            {
+              "type": "Float",
+              "value": 0.8
+            }
+          ],
+          [
+            "mode",
+            {
+              "type": "String",
+              "value": "cpu"
+            }
+          ]
+        ]
+      },
+      {
+        "id": "cv:color:hsv_multi_range_mask",
+        "label": "HSV Mask",
+        "inputs": [
+          "frame",
+          "ranges",
+          "mode"
+        ],
+        "outputs": [
+          "mask"
+        ],
+        "const_inputs": [
+          [
+            "ranges",
+            {
+              "type": "List",
+              "value": [
+                {
+                  "type": "Tuple",
+                  "value": [
+                    {
+                      "type": "Float",
+                      "value": 50.0
+                    },
+                    {
+                      "type": "Float",
+                      "value": 160.0
+                    },
+                    {
+                      "type": "Float",
+                      "value": 0.25
+                    },
+                    {
+                      "type": "Float",
+                      "value": 1.0
+                    },
+                    {
+                      "type": "Float",
+                      "value": 0.2
+                    },
+                    {
+                      "type": "Float",
+                      "value": 1.0
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          [
+            "mode",
+            {
+              "type": "String",
+              "value": "cpu"
+            }
+          ]
+        ]
+      },
+      {
+        "id": "cv:color:apply_mask",
+        "label": "Apply Mask",
+        "inputs": [
+          "frame",
+          "mask",
+          "mode"
+        ],
+        "outputs": [
+          "frame"
+        ],
+        "const_inputs": [
+          [
+            "mode",
+            {
+              "type": "String",
+              "value": "cpu"
+            }
+          ]
+        ]
+      },
+      {
+        "id": "cv:contour:contours",
+        "label": "Contours",
+        "inputs": [
+          "mask"
+        ],
+        "outputs": [
+          "contours"
+        ]
+      },
+      {
+        "id": "cv:contour:approx_contours_dp",
+        "label": "Simplify Contours",
+        "inputs": [
+          "contours",
+          "epsilon"
+        ],
+        "outputs": [
+          "contours"
+        ],
+        "const_inputs": [
+          [
+            "epsilon",
+            {
+              "type": "Float",
+              "value": 2.5
+            }
+          ]
+        ]
+      },
+      {
+        "id": "cv:analysis:filter_contours_bbox",
+        "label": "Filter Contours",
+        "inputs": [
+          "contours",
+          "min_width",
+          "min_height",
+          "min_area",
+          "max_area"
+        ],
+        "outputs": [
+          "contours"
+        ],
+        "const_inputs": [
+          [
+            "min_width",
+            {
+              "type": "Int",
+              "value": 0
+            }
+          ],
+          [
+            "min_height",
+            {
+              "type": "Int",
+              "value": 0
+            }
+          ],
+          [
+            "min_area",
+            {
+              "type": "Int",
+              "value": 0
+            }
+          ],
+          [
+            "max_area",
+            {
+              "type": "Int",
+              "value": 0
+            }
+          ]
+        ]
+      },
+      {
+        "id": "cv:analysis:contours_json",
+        "label": "Contours JSON",
+        "inputs": [
+          "contours",
+          "max_items"
+        ],
+        "outputs": [
+          "json"
+        ],
+        "const_inputs": [
+          [
+            "max_items",
+            {
+              "type": "Int",
+              "value": 50
+            }
+          ]
+        ]
+      },
+      {
+        "id": "io.host_output",
+        "label": "Output:color",
+        "inputs": [
+          "frame",
+          "raw",
+          "mask",
+          "contours",
+          "json"
+        ],
+        "outputs": [],
+        "metadata": {
+          "host_bridge": {
+            "type": "Bool",
+            "value": true
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from": {
+          "node": 0,
+          "port": "frame"
+        },
+        "to": {
+          "node": 1,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 1,
+          "port": "frame"
+        },
+        "to": {
+          "node": 2,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 2,
+          "port": "frame"
+        },
+        "to": {
+          "node": 3,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 2,
+          "port": "frame"
+        },
+        "to": {
+          "node": 4,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 3,
+          "port": "mask"
+        },
+        "to": {
+          "node": 4,
+          "port": "mask"
+        }
+      },
+      {
+        "from": {
+          "node": 3,
+          "port": "mask"
+        },
+        "to": {
+          "node": 5,
+          "port": "mask"
+        }
+      },
+      {
+        "from": {
+          "node": 5,
+          "port": "contours"
+        },
+        "to": {
+          "node": 6,
+          "port": "contours"
+        }
+      },
+      {
+        "from": {
+          "node": 6,
+          "port": "contours"
+        },
+        "to": {
+          "node": 7,
+          "port": "contours"
+        }
+      },
+      {
+        "from": {
+          "node": 7,
+          "port": "contours"
+        },
+        "to": {
+          "node": 8,
+          "port": "contours"
+        }
+      },
+      {
+        "from": {
+          "node": 4,
+          "port": "frame"
+        },
+        "to": {
+          "node": 9,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "frame"
+        },
+        "to": {
+          "node": 9,
+          "port": "raw"
+        }
+      },
+      {
+        "from": {
+          "node": 3,
+          "port": "mask"
+        },
+        "to": {
+          "node": 9,
+          "port": "mask"
+        }
+      },
+      {
+        "from": {
+          "node": 7,
+          "port": "contours"
+        },
+        "to": {
+          "node": 9,
+          "port": "contours"
+        }
+      },
+      {
+        "from": {
+          "node": 8,
+          "port": "json"
+        },
+        "to": {
+          "node": 9,
+          "port": "json"
+        }
+      }
+    ],
+    "metadata": {
+      "helios.pipeline.alias": "HSV Color Detection (Daedalus)",
+      "helios.pipeline.ui": {
+        "title": "HSV Color Detection",
+        "description": "Curated controls for HSV masking and contour filtering.",
+        "layout": {
+          "type": "tabs",
+          "tabs": [
+            {
+              "id": "preprocess",
+              "title": "Preprocess",
+              "content": [
+                {
+                  "type": "text",
+                  "id": "preprocess_intro",
+                  "text": "Prepare the frame before masking."
+                },
+                {
+                  "type": "slider",
+                  "id": "preprocess_downscale_factor",
+                  "label": "Downscale factor",
+                  "bind": "1.factor",
+                  "min": 1,
+                  "max": 8,
+                  "step": 1
+                },
+                {
+                  "type": "slider",
+                  "id": "preprocess_blur_sigma",
+                  "label": "Blur sigma",
+                  "bind": "2.sigma",
+                  "min": 0,
+                  "max": 10,
+                  "step": 0.1
+                },
+                {
+                  "type": "accordion",
+                  "id": "preprocess_advanced",
+                  "title": "Advanced",
+                  "items": [
+                    {
+                      "type": "select",
+                      "id": "preprocess_blur_mode",
+                      "label": "Blur mode",
+                      "bind": "2.mode"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "mask",
+              "title": "Mask",
+              "content": [
+                {
+                  "type": "text",
+                  "id": "mask_intro",
+                  "text": "Define the HSV range used to build the mask."
+                },
+                {
+                  "type": "hsv_range",
+                  "id": "mask_hsv_range",
+                  "label": "HSV Range",
+                  "hsvRangeMode": "include",
+                  "hsvRangeDefaults": {
+                    "h": [
+                      50,
+                      160
+                    ],
+                    "s": [
+                      0.25,
+                      1
+                    ],
+                    "v": [
+                      0.2,
+                      1
+                    ]
+                  }
+                },
+                {
+                  "type": "accordion",
+                  "id": "mask_advanced",
+                  "title": "Advanced",
+                  "items": [
+                    {
+                      "type": "select",
+                      "id": "mask_mode",
+                      "label": "Mask mode",
+                      "bind": "3.mode"
+                    },
+                    {
+                      "type": "select",
+                      "id": "apply_mask_mode",
+                      "label": "Apply mask mode",
+                      "bind": "4.mode"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "contours",
+              "title": "Contours",
+              "content": [
+                {
+                  "type": "text",
+                  "id": "contours_intro",
+                  "text": "Filter contours and reduce noise."
+                },
+                {
+                  "type": "slider",
+                  "id": "contours_epsilon",
+                  "label": "Simplify epsilon",
+                  "bind": "6.epsilon",
+                  "min": 0,
+                  "max": 20,
+                  "step": 0.1
+                },
+                {
+                  "type": "slider",
+                  "id": "contours_min_area",
+                  "label": "Min area",
+                  "bind": "7.min_area",
+                  "min": 0,
+                  "max": 200000,
+                  "step": 10
+                },
+                {
+                  "type": "slider",
+                  "id": "contours_max_area",
+                  "label": "Max area",
+                  "bind": "7.max_area",
+                  "min": 0,
+                  "max": 200000,
+                  "step": 10
+                },
+                {
+                  "type": "slider",
+                  "id": "contours_min_width",
+                  "label": "Min width",
+                  "bind": "7.min_width",
+                  "min": 0,
+                  "max": 1000,
+                  "step": 1
+                },
+                {
+                  "type": "slider",
+                  "id": "contours_min_height",
+                  "label": "Min height",
+                  "bind": "7.min_height",
+                  "min": 0,
+                  "max": 1000,
+                  "step": 1
+                },
+                {
+                  "type": "accordion",
+                  "id": "contours_advanced",
+                  "title": "Advanced",
+                  "items": [
+                    {
+                      "type": "slider",
+                      "id": "contours_max_items",
+                      "label": "Max JSON items",
+                      "bind": "8.max_items",
+                      "min": 1,
+                      "max": 500,
+                      "step": 1
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "connections": []
+  }
+}

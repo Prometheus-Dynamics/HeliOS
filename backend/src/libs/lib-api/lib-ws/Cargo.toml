@@ -1,0 +1,36 @@
+[package]
+name = "lib-ws"
+version.workspace = true
+edition = "2021"
+
+[dependencies]
+actix-web = { workspace = true }
+actix-web-actors = { workspace = true }
+actix = { workspace = true }
+serde_json.workspace = true
+futures.workspace = true
+async-trait = "0.1.89"
+tokio.workspace = true
+tracing.workspace = true
+serde = { workspace = true, features = ["derive"] }
+url.workspace = true
+schemars.workspace = true
+lib-asyncapi = { path = "../lib-asyncapi" }
+lib-transport = { path = "../lib-transport" }
+chrono.workspace = true
+
+[dependencies.lib-ws-macro]
+path = "../lib-ws-macro"
+optional = true
+
+[features]
+macros = ["lib-ws-macro"]
+
+[dev-dependencies]
+
+actix-rt = "2.11.0"
+actix-test = "0.1.5"
+bytes = "1.10.1"
+futures-util = "0.3.31"
+lib-ws-macro = { path = "../lib-ws-macro" }
+lib-asyncapi-macro = { path = "../lib-asyncapi-macro" }

@@ -1,0 +1,22 @@
+[package]
+name = "lib-led-plugin"
+version.workspace = true
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+default = ["plugins"]
+plugins = []
+
+[dependencies]
+daedalus = { workspace = true, features = ["engine", "plugins"] }
+helios-peripherals = { path = "../../helios-peripherals", default-features = false, features = ["dto"] }
+lib-ipc = { path = "../lib-ipc" }
+lib-led-animations = { path = "../lib-led-animations" }
+paste = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

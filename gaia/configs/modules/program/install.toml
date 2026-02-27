@@ -1,0 +1,60 @@
+enabled = true
+
+[[items]]
+artifact = "helios-api"
+dest = "/usr/bin/helios-api"
+mode = 493
+
+[[items]]
+artifact = "helios-engine"
+dest = "/usr/bin/helios-engine"
+mode = 493
+
+[[items]]
+artifact = "helios-updater"
+dest = "/usr/bin/helios-updater"
+mode = 493
+
+[[items]]
+artifact = "helios-usb-recoveryd"
+dest = "/usr/bin/helios-usb-recoveryd"
+mode = 493
+
+[[items]]
+artifact = "helios-peripherals"
+dest = "/usr/bin/helios-peripherals"
+mode = 493
+
+[[items]]
+artifact = "helios-boot-buttond"
+dest = "/usr/bin/helios-boot-buttond"
+mode = 493
+
+[[items]]
+artifact = "helios-provision"
+dest = "/usr/local/bin/helios-provision"
+mode = 493
+
+[[items]]
+artifact = "daedalus-cv"
+dest = "/usr/lib/helios/plugins/daedalus/libhelios_daedalus_cv_plugin.so"
+mode = 420
+
+[[items]]
+artifact = "daedalus-ai"
+dest = "/usr/lib/helios/plugins/daedalus/libhelios_daedalus_ai_plugin.so"
+mode = 420
+
+[[items]]
+artifact = "daedalus-nt4"
+dest = "/usr/lib/helios/plugins/daedalus/libhelios_daedalus_nt4_plugin.so"
+mode = 420
+
+[[items]]
+artifact = "daedalus-led"
+dest = "/usr/lib/helios/plugins/daedalus/libhelios_daedalus_led_plugin.so"
+mode = 420
+
+[[items]]
+artifact = "helios-frontend"
+dest = "/opt/helios/frontend"

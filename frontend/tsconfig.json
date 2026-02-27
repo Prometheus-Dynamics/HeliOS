@@ -1,0 +1,21 @@
+{
+  "extends": "./.svelte-kit/tsconfig.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "types": ["bun-types"],
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "sourceMap": true,
+    "strict": false,
+    "moduleResolution": "bundler"
+  },
+  "exclude": [
+    "src/lib/api/**",
+    "src/lib/features/pipelines/**",
+    "src/lib/features/devices/camera/CameraDevicePage.svelte",
+    "src/lib/components/FloatingStreamViewer.svelte"
+  ]
+}

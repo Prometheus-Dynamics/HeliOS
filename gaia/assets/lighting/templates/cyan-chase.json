@@ -1,0 +1,27 @@
+{
+  "id": "cyan-chase",
+  "name": "Cyan Chase",
+  "summary": "Built-in chase lighting animation template.",
+  "tags": [
+    "lighting",
+    "animation",
+    "builtin",
+    "chase"
+  ],
+  "command": {
+    "brightness": 190,
+    "animation": {
+      "kind": "chase",
+      "color": {
+        "r": 0,
+        "g": 190,
+        "b": 255,
+        "w": 0
+      },
+      "speed_hz": 7.5
+    }
+  },
+  "duration_ms": null,
+  "sequence": null,
+  "timeline": null
+}

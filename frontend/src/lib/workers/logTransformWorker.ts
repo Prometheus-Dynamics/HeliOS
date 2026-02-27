@@ -1,0 +1,2 @@
+import './logTransform/workerEntry';
+export {};

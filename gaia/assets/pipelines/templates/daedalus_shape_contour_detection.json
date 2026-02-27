@@ -1,0 +1,555 @@
+{
+  "id": "daedalus_shape_contour_detection",
+  "name": "Shape Detection (Contours)",
+  "summary": "Binary threshold + contour extraction with shape summaries.",
+  "tags": [
+    "shape",
+    "contours",
+    "threshold"
+  ],
+  "graph": {
+    "nodes": [
+      {
+        "id": "io.host_bridge",
+        "label": "Input:frame",
+        "inputs": [],
+        "outputs": [
+          "frame"
+        ],
+        "metadata": {
+          "host_bridge": {
+            "type": "Bool",
+            "value": true
+          }
+        }
+      },
+      {
+        "id": "cv:image:downscale",
+        "label": "Downscale",
+        "inputs": [
+          "frame",
+          "factor",
+          "mode"
+        ],
+        "outputs": [
+          "frame",
+          "factor"
+        ],
+        "const_inputs": [
+          [
+            "factor",
+            {
+              "type": "Int",
+              "value": 1
+            }
+          ],
+          [
+            "mode",
+            {
+              "type": "String",
+              "value": "cpu"
+            }
+          ]
+        ]
+      },
+      {
+        "id": "cv:image.blur:blur",
+        "label": "Blur",
+        "inputs": [
+          "frame",
+          "sigma",
+          "mode"
+        ],
+        "outputs": [
+          "frame"
+        ],
+        "const_inputs": [
+          [
+            "sigma",
+            {
+              "type": "Float",
+              "value": 1.2
+            }
+          ],
+          [
+            "mode",
+            {
+              "type": "String",
+              "value": "cpu"
+            }
+          ]
+        ]
+      },
+      {
+        "id": "cv:image:binary_mask",
+        "label": "Binary Mask",
+        "inputs": [
+          "frame",
+          "threshold"
+        ],
+        "outputs": [
+          "mask"
+        ],
+        "const_inputs": [
+          [
+            "threshold",
+            {
+              "type": "Int",
+              "value": 90
+            }
+          ]
+        ]
+      },
+      {
+        "id": "cv:contour:contours",
+        "label": "Contours",
+        "inputs": [
+          "mask"
+        ],
+        "outputs": [
+          "contours"
+        ]
+      },
+      {
+        "id": "cv:contour:approx_contours_dp",
+        "label": "Simplify Contours",
+        "inputs": [
+          "contours",
+          "epsilon"
+        ],
+        "outputs": [
+          "contours"
+        ],
+        "const_inputs": [
+          [
+            "epsilon",
+            {
+              "type": "Float",
+              "value": 2.5
+            }
+          ]
+        ]
+      },
+      {
+        "id": "cv:analysis:filter_contours",
+        "label": "Filter by Vertices",
+        "inputs": [
+          "contours",
+          "min",
+          "max"
+        ],
+        "outputs": [
+          "contours"
+        ],
+        "const_inputs": [
+          [
+            "min",
+            {
+              "type": "Int",
+              "value": 0
+            }
+          ],
+          [
+            "max",
+            {
+              "type": "Int",
+              "value": 0
+            }
+          ]
+        ]
+      },
+      {
+        "id": "cv:analysis:filter_contours_bbox",
+        "label": "Filter by Size",
+        "inputs": [
+          "contours",
+          "min_width",
+          "min_height",
+          "min_area",
+          "max_area"
+        ],
+        "outputs": [
+          "contours"
+        ],
+        "const_inputs": [
+          [
+            "min_width",
+            {
+              "type": "Int",
+              "value": 0
+            }
+          ],
+          [
+            "min_height",
+            {
+              "type": "Int",
+              "value": 0
+            }
+          ],
+          [
+            "min_area",
+            {
+              "type": "Int",
+              "value": 0
+            }
+          ],
+          [
+            "max_area",
+            {
+              "type": "Int",
+              "value": 0
+            }
+          ]
+        ]
+      },
+      {
+        "id": "cv:analysis:contours_json",
+        "label": "Contours JSON",
+        "inputs": [
+          "contours",
+          "max_items"
+        ],
+        "outputs": [
+          "json"
+        ],
+        "const_inputs": [
+          [
+            "max_items",
+            {
+              "type": "Int",
+              "value": 50
+            }
+          ]
+        ]
+      },
+      {
+        "id": "io.host_output",
+        "label": "Output:shape",
+        "inputs": [
+          "frame",
+          "raw",
+          "mask",
+          "contours",
+          "json"
+        ],
+        "outputs": [],
+        "metadata": {
+          "host_bridge": {
+            "type": "Bool",
+            "value": true
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from": {
+          "node": 0,
+          "port": "frame"
+        },
+        "to": {
+          "node": 1,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 1,
+          "port": "frame"
+        },
+        "to": {
+          "node": 2,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 2,
+          "port": "frame"
+        },
+        "to": {
+          "node": 3,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 3,
+          "port": "mask"
+        },
+        "to": {
+          "node": 4,
+          "port": "mask"
+        }
+      },
+      {
+        "from": {
+          "node": 4,
+          "port": "contours"
+        },
+        "to": {
+          "node": 5,
+          "port": "contours"
+        }
+      },
+      {
+        "from": {
+          "node": 5,
+          "port": "contours"
+        },
+        "to": {
+          "node": 6,
+          "port": "contours"
+        }
+      },
+      {
+        "from": {
+          "node": 6,
+          "port": "contours"
+        },
+        "to": {
+          "node": 7,
+          "port": "contours"
+        }
+      },
+      {
+        "from": {
+          "node": 7,
+          "port": "contours"
+        },
+        "to": {
+          "node": 8,
+          "port": "contours"
+        }
+      },
+      {
+        "from": {
+          "node": 2,
+          "port": "frame"
+        },
+        "to": {
+          "node": 9,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "frame"
+        },
+        "to": {
+          "node": 9,
+          "port": "raw"
+        }
+      },
+      {
+        "from": {
+          "node": 3,
+          "port": "mask"
+        },
+        "to": {
+          "node": 9,
+          "port": "mask"
+        }
+      },
+      {
+        "from": {
+          "node": 7,
+          "port": "contours"
+        },
+        "to": {
+          "node": 9,
+          "port": "contours"
+        }
+      },
+      {
+        "from": {
+          "node": 8,
+          "port": "json"
+        },
+        "to": {
+          "node": 9,
+          "port": "json"
+        }
+      }
+    ],
+    "metadata": {
+      "helios.pipeline.alias": "Shape Detection (Contours, Daedalus)",
+      "helios.pipeline.ui": {
+        "title": "Shape Contour Detection",
+        "description": "Curated controls for binary masking and contour filters.",
+        "layout": {
+          "type": "tabs",
+          "tabs": [
+            {
+              "id": "preprocess",
+              "title": "Preprocess",
+              "content": [
+                {
+                  "type": "text",
+                  "id": "preprocess_intro",
+                  "text": "Prepare the frame before thresholding."
+                },
+                {
+                  "type": "slider",
+                  "id": "preprocess_downscale_factor",
+                  "label": "Downscale factor",
+                  "bind": "1.factor",
+                  "min": 1,
+                  "max": 8,
+                  "step": 1
+                },
+                {
+                  "type": "slider",
+                  "id": "preprocess_blur_sigma",
+                  "label": "Blur sigma",
+                  "bind": "2.sigma",
+                  "min": 0,
+                  "max": 10,
+                  "step": 0.1
+                },
+                {
+                  "type": "accordion",
+                  "id": "preprocess_advanced",
+                  "title": "Advanced",
+                  "items": [
+                    {
+                      "type": "select",
+                      "id": "preprocess_blur_mode",
+                      "label": "Blur mode",
+                      "bind": "2.mode"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "mask",
+              "title": "Mask",
+              "content": [
+                {
+                  "type": "text",
+                  "id": "mask_intro",
+                  "text": "Define the binary threshold used to build the mask."
+                },
+                {
+                  "type": "slider",
+                  "id": "mask_threshold",
+                  "label": "Threshold",
+                  "bind": "3.threshold",
+                  "min": 0,
+                  "max": 255,
+                  "step": 1
+                },
+                {
+                  "type": "accordion",
+                  "id": "mask_advanced",
+                  "title": "Advanced",
+                  "items": [
+                    {
+                      "type": "input",
+                      "id": "mask_threshold_exact",
+                      "label": "Threshold (exact)",
+                      "bind": "3.threshold"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "contours",
+              "title": "Contours",
+              "content": [
+                {
+                  "type": "text",
+                  "id": "contours_intro",
+                  "text": "Filter and simplify contour candidates."
+                },
+                {
+                  "type": "slider",
+                  "id": "contours_epsilon",
+                  "label": "Simplify epsilon",
+                  "bind": "5.epsilon",
+                  "min": 0,
+                  "max": 20,
+                  "step": 0.1
+                },
+                {
+                  "type": "slider",
+                  "id": "contours_min_vertices",
+                  "label": "Min vertices",
+                  "bind": "6.min",
+                  "min": 0,
+                  "max": 20,
+                  "step": 1
+                },
+                {
+                  "type": "slider",
+                  "id": "contours_max_vertices",
+                  "label": "Max vertices",
+                  "bind": "6.max",
+                  "min": 0,
+                  "max": 20,
+                  "step": 1
+                },
+                {
+                  "type": "slider",
+                  "id": "contours_min_area",
+                  "label": "Min area",
+                  "bind": "7.min_area",
+                  "min": 0,
+                  "max": 200000,
+                  "step": 10
+                },
+                {
+                  "type": "slider",
+                  "id": "contours_max_area",
+                  "label": "Max area",
+                  "bind": "7.max_area",
+                  "min": 0,
+                  "max": 200000,
+                  "step": 10
+                },
+                {
+                  "type": "slider",
+                  "id": "contours_min_width",
+                  "label": "Min width",
+                  "bind": "7.min_width",
+                  "min": 0,
+                  "max": 1000,
+                  "step": 1
+                },
+                {
+                  "type": "slider",
+                  "id": "contours_min_height",
+                  "label": "Min height",
+                  "bind": "7.min_height",
+                  "min": 0,
+                  "max": 1000,
+                  "step": 1
+                },
+                {
+                  "type": "accordion",
+                  "id": "contours_advanced",
+                  "title": "Advanced",
+                  "items": [
+                    {
+                      "type": "slider",
+                      "id": "contours_max_items",
+                      "label": "Max JSON items",
+                      "bind": "8.max_items",
+                      "min": 1,
+                      "max": 500,
+                      "step": 1
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "connections": []
+  }
+}

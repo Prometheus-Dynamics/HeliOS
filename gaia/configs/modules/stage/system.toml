@@ -1,0 +1,126 @@
+[[files]]
+dst = "/etc/hostname"
+content = "helios\n"
+mode = 420
+
+[[files]]
+dst = "/etc/os-release"
+content = "NAME=\"Helios\"\nID=helios\nPRETTY_NAME=\"Helios\"\n"
+mode = 420
+
+[[files]]
+dst = "/etc/default/helios-identity"
+content = "HOSTNAME=helios\nOS_ID=helios\nOS_NAME=Helios\nOS_PRETTY_NAME=Helios\nCPU_GOVERNOR=performance\n"
+mode = 420
+
+[[files]]
+dst = "/etc/locale.conf"
+content = "LANG=en_US.UTF-8\n"
+mode = 420
+
+[[files]]
+dst = "/etc/default/locale"
+content = "LANG=en_US.UTF-8\n"
+mode = 420
+
+[[files]]
+dst = "/etc/timezone"
+content = "America/Vancouver\n"
+mode = 420
+
+[[files]]
+dst = "/etc/systemd/network/10-usb0.network"
+content = "[Match]\nName=usb0\n\n[Network]\nDHCP=no\nAddress=172.31.250.1/24\nConfigureWithoutCarrier=yes\nLinkLocalAddressing=no\n"
+mode = 420
+
+[[files]]
+dst = "/etc/systemd/network/10-eth0.network"
+content = "[Match]\nName=eth0\n\n[Network]\nDHCP=yes\n"
+mode = 420
+
+[[files]]
+dst = "/etc/modules-load.d/i2c-dev.conf"
+content = "i2c-dev\n"
+mode = 420
+
+[[files]]
+src = "assets/services/helios-peripherals/sensors.toml"
+dst = "/etc/helios/sensors.toml"
+mode = 420
+
+[[files]]
+src = "assets/services/helios-peripherals/fan.toml"
+dst = "/etc/helios/fan.toml"
+mode = 420
+
+[[files]]
+src = "assets/libcamera/ipa/rpi/pisp/ov9782.json"
+dst = "/usr/share/libcamera/ipa/rpi/pisp/ov9782.json"
+mode = 420
+
+[[files]]
+src = "assets/libcamera/ipa/rpi/vc4/ov9782.json"
+dst = "/usr/share/libcamera/ipa/rpi/vc4/ov9782.json"
+mode = 420
+
+[[files]]
+src = "assets/pipelines/templates"
+dst = "/usr/share/helios/pipeline-templates"
+
+[[files]]
+src = "assets/lighting/templates"
+dst = "/usr/share/helios/lighting-templates"
+
+[[files]]
+dst = "/etc/ssh/sshd_config"
+content = "Port 22\nProtocol 2\nPermitRootLogin yes\nPasswordAuthentication yes\nChallengeResponseAuthentication no\nPermitEmptyPasswords no\n"
+mode = 420
+
+[[files]]
+dst = "/etc/systemd/system.conf.d/50-helios-watchdog.conf"
+content = "[Manager]\nRuntimeWatchdogSec=45s\nRebootWatchdogSec=45s\n"
+mode = 420
+
+[[env.files]]
+path = "/etc/helios/user.env"
+mode = 420
+  [env.files.vars]
+  SYSTEM_USER = "pi"
+  SYSTEM_USER_PASSWORD = "raspberry"
+  SYSTEM_ROOT_PASSWORD = "root"
+  SYSTEM_ROOT_ENABLED = "1"
+  SYSTEM_SSH_ENABLED = "1"
+
+[[env.files]]
+path = "/etc/helios/gadget.env"
+mode = 420
+  [env.files.vars]
+  GADGET_MODE = "configfs"
+  USE_ACM = "1"
+  USE_ECM = "1"
+  USE_RNDIS = "1"
+  USE_NCM = "1"
+  VID = "0x1209"
+  PID = "0xF001"
+  MANUFACTURER = "Prometheus Dynamics"
+  PRODUCT = "Helios Vision System"
+  SERIAL = "AUTO"
+  DEV_ADDR = "AUTO"
+  HOST_ADDR = "AUTO"
+  OS_DESC = "1"
+
+[[env.files]]
+path = "/etc/helios/usb-power.env"
+mode = 420
+  [env.files.vars]
+  USB_POWER_ENABLED = "1"
+  USB_POWER_USB_A_GPIO = "20"
+  USB_POWER_USB_C_GPIO = "16"
+  USB_POWER_USB_A_ACTIVE_HIGH = "1"
+  USB_POWER_USB_C_ACTIVE_HIGH = "1"
+  USB_POWER_USB_A_ENABLED = "1"
+  USB_POWER_USB_C_ENABLED = "1"
+  USB_POWER_TUNING_ENABLED = "1"
+  USB_POWER_DISABLE_AUTOSUSPEND = "1"
+  USB_POWER_DISABLE_USB2_LPM = "1"
+  USB_POWER_FORCE_POWER_CONTROL_ON = "1"

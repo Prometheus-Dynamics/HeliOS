@@ -1,0 +1,20 @@
+{
+  "id": "all-off",
+  "name": "All Off",
+  "summary": "Built-in off lighting animation template.",
+  "tags": [
+    "lighting",
+    "animation",
+    "builtin",
+    "off"
+  ],
+  "command": {
+    "brightness": 128,
+    "animation": {
+      "kind": "off"
+    }
+  },
+  "duration_ms": null,
+  "sequence": null,
+  "timeline": null
+}

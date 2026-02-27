@@ -1,0 +1,21 @@
+{
+  "id": "rainbow-fast",
+  "name": "Rainbow Fast",
+  "summary": "Built-in rainbow lighting animation template.",
+  "tags": [
+    "lighting",
+    "animation",
+    "builtin",
+    "rainbow"
+  ],
+  "command": {
+    "brightness": 195,
+    "animation": {
+      "kind": "rainbow",
+      "speed_hz": 11.0
+    }
+  },
+  "duration_ms": null,
+  "sequence": null,
+  "timeline": null
+}

@@ -1,0 +1,177 @@
+syntax = "proto3";
+
+package helios.api.device.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+message GetDeviceInfoRequest {}
+
+message SoftwareVersions {
+  string api = 1;
+  string engine = 2;
+  string updater = 3;
+  string build_id = 4;
+}
+
+message LogPolicy {
+  uint64 rotation_max_bytes = 1;
+  uint32 rotation_max_age_secs = 2;
+  uint32 retention_count = 3;
+}
+
+message BinaryVersion {
+  string id = 1;
+  string version = 2;
+}
+
+message DeviceInfo {
+  string device_id = 1;
+  string serial = 2;
+  string sku = 3;
+  SoftwareVersions software = 4;
+  LogPolicy log_policy = 5;
+  repeated BinaryVersion binaries = 6;
+}
+
+enum HealthStatus {
+  HEALTH_STATUS_UNSPECIFIED = 0;
+  HEALTH_STATUS_HEALTHY = 1;
+  HEALTH_STATUS_DEGRADED = 2;
+  HEALTH_STATUS_UNAVAILABLE = 3;
+}
+
+message HealthIssue {
+  string code = 1;
+  string description = 2;
+}
+
+message GetDeviceHealthRequest {}
+
+message DeviceHealth {
+  HealthStatus status = 1;
+  repeated HealthIssue issues = 2;
+  google.protobuf.Timestamp checked_at = 3;
+}
+
+message DeviceIpAssignment {
+  enum Mode {
+    MODE_UNSPECIFIED = 0;
+    MODE_DHCP = 1;
+    MODE_STATIC = 2;
+  }
+
+  Mode mode = 1;
+  google.protobuf.StringValue address = 2;
+  google.protobuf.UInt32Value prefix = 3;
+  google.protobuf.StringValue gateway = 4;
+}
+
+message DeviceIpv4Lease {
+  google.protobuf.StringValue address = 1;
+  google.protobuf.UInt32Value prefix = 2;
+  google.protobuf.StringValue gateway = 3;
+}
+
+message DeviceNetworkInterface {
+  string name = 1;
+  DeviceIpAssignment assignment = 2;
+  google.protobuf.StringValue mac = 3;
+  DeviceIpv4Lease dhcp_ipv4 = 4;
+}
+
+message LedConfig {
+  bool enabled = 1;
+  uint32 gpio = 2;
+  uint32 count = 3;
+  string color_order = 4;
+  uint32 frequency_hz = 5;
+  bool use_pwm = 6;
+  google.protobuf.UInt32Value brightness = 7;
+  google.protobuf.StringValue label = 8;
+  string protocol = 9;
+}
+
+message FanCurvePoint {
+  float temp_c = 1;
+  uint32 percent = 2;
+}
+
+message FanConfig {
+  bool enabled = 1;
+  string pwm_path = 2;
+  uint32 min_percent = 3;
+  uint32 max_percent = 4;
+  google.protobuf.UInt32Value manual_percent = 5;
+  uint32 poll_interval_ms = 6;
+  repeated FanCurvePoint curve = 7;
+  string tacho_path = 8;
+}
+
+enum FanMode {
+  FAN_MODE_UNSPECIFIED = 0;
+  FAN_MODE_DISABLED = 1;
+  FAN_MODE_MANUAL = 2;
+  FAN_MODE_CURVE = 3;
+}
+
+message FanStatus {
+  FanMode mode = 1;
+  uint32 target_percent = 2;
+  google.protobuf.FloatValue temperature_c = 3;
+  string path_in_use = 4;
+  string last_error = 5;
+  google.protobuf.UInt64Value updated_at_ms = 6;
+  uint32 rpm = 7;
+}
+
+message DiagnosticsSettings {
+  uint32 keep = 1;
+  uint32 max_mb = 2;
+  bool tar = 3;
+}
+
+message DeviceSettings {
+  string hostname = 1;
+  google.protobuf.UInt32Value team_number = 2;
+  repeated DeviceNetworkInterface interfaces = 3;
+  string revision = 4;
+  LedConfig lighting = 5;
+  DiagnosticsSettings diagnostics = 6;
+  FanConfig fan = 7;
+  FanStatus fan_status = 8;
+}
+
+message GetDeviceSettingsRequest {}
+
+message DeviceInterfacePatch {
+  string name = 1;
+  DeviceIpAssignment assignment = 2;
+}
+
+message DeviceSettingsPatch {
+  google.protobuf.StringValue hostname = 1;
+  google.protobuf.UInt32Value team_number = 2;
+  repeated DeviceInterfacePatch interfaces = 3;
+  LedConfig lighting = 4;
+  DiagnosticsSettings diagnostics = 5;
+  FanConfig fan = 6;
+}
+
+message UpdateDeviceSettingsRequest {
+  DeviceSettingsPatch patch = 1;
+  google.protobuf.StringValue expected_revision = 2;
+  string requested_by = 3;
+}
+
+message OperationAck {
+  string command_id = 1;
+  string revision = 2;
+}
+
+service Device {
+  rpc GetDeviceInfo(GetDeviceInfoRequest) returns (DeviceInfo);
+  rpc GetDeviceHealth(GetDeviceHealthRequest) returns (DeviceHealth);
+  rpc GetDeviceSettings(GetDeviceSettingsRequest) returns (DeviceSettings);
+  rpc UpdateDeviceSettings(UpdateDeviceSettingsRequest) returns (OperationAck);
+}

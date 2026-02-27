@@ -1,0 +1,49 @@
+[Unit]
+Description=Helios API Service
+After=network.target helios-provision.target local-fs.target var-lib-helios.mount helios-engine.socket helios-updater.socket
+RequiresMountsFor=/var/lib/helios
+Wants=network.target helios-provision.target helios-engine.socket helios-updater.socket
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStartPre=/bin/sh -lc 'i=0; while [ $i -lt 60 ]; do awk '\''$5==\"/var/lib/helios\"{found=1} END{exit !found}'\'' /proc/self/mountinfo && exit 0; i=$((i+1)); sleep 1; done; echo \"DATA mount missing: /var/lib/helios is not a mountpoint\" >&2; exit 1'
+ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios
+ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios/panics
+ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios/api
+ExecStartPre=/usr/bin/install -d -m0755 /var/lib/helios/api-data
+ExecStartPre=/usr/bin/install -d -m0755 /usr/lib/helios/plugins/daedalus
+ExecStartPre=/usr/bin/install -d -m0755 /var/lib/helios/plugins/daedalus
+ExecStartPre=/usr/local/bin/helios-api-startup-sanitize.sh
+# Ensure core dumps land under DATA-backed storage
+ExecStartPre=/bin/sh -lc 'echo 1 > /proc/sys/kernel/core_uses_pid; echo /var/log/helios/core-%%e-%%p > /proc/sys/kernel/core_pattern; ulimit -c unlimited'
+Environment=ENGINE_SOCKET=/run/helios/engine.sock
+Environment=UPDATER_SOCKET=/run/helios/updater.sock
+Environment=ENGINE_JOURNAL_PATH=/var/lib/helios/journal/engine.log
+Environment=UPDATER_JOURNAL_PATH=/var/lib/helios/journal/updater.log
+Environment=LOG_FOLDER=/var/log/helios
+Environment=METRICS_BIND_ADDR=0.0.0.0:5803
+Environment=LD_LIBRARY_PATH=/usr/lib/edgetpu:/usr/lib
+Environment=RUST_LOG=info
+Environment=HELIOS_DAEDALUS_PLUGIN_DIRS=/usr/lib/helios/plugins/daedalus:/var/lib/helios/plugins/daedalus
+Environment=HELIOS_API_BIND=0.0.0.0:5801
+Environment=HELIOS_API_DATA_DIR=/var/lib/helios/api-data
+EnvironmentFile=-/etc/default/helios-api
+ExecStart=/usr/bin/helios-api
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=2
+TimeoutStopSec=45
+User=root
+Group=root
+WorkingDirectory=/var/lib/helios
+StateDirectory=helios helios/journal helios/snapshots
+LogsDirectory=helios
+LimitNOFILE=65536
+LimitCORE=0
+TasksMax=infinity
+OOMScoreAdjust=-300
+
+[Install]
+WantedBy=multi-user.target

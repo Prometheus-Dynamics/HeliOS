@@ -1,0 +1,2034 @@
+{
+  "id": "daedalus_aruco",
+  "name": "ArUco Robust",
+  "summary": "Robust CPU ArUco detector tuned for calibration media replay quality and low false positives.",
+  "tags": [
+    "aruco",
+    "tags",
+    "cpu_only",
+    "clahe",
+    "adaptive_threshold",
+    "roi",
+    "robust_profile"
+  ],
+  "graph": {
+    "edges": [
+      {
+        "from": {
+          "node": 1,
+          "port": "mask"
+        },
+        "to": {
+          "node": 2,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 3,
+          "port": "contours"
+        },
+        "to": {
+          "node": 4,
+          "port": "contours"
+        }
+      },
+      {
+        "from": {
+          "node": 1,
+          "port": "mask"
+        },
+        "to": {
+          "node": 4,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 4,
+          "port": "detections"
+        },
+        "to": {
+          "node": 5,
+          "port": "detections"
+        }
+      },
+      {
+        "from": {
+          "node": 5,
+          "port": "detections"
+        },
+        "to": {
+          "node": 6,
+          "port": "detections"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "frame"
+        },
+        "to": {
+          "node": 7,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 1,
+          "port": "mask"
+        },
+        "to": {
+          "node": 8,
+          "port": "clahe"
+        }
+      },
+      {
+        "from": {
+          "node": 2,
+          "port": "mask"
+        },
+        "to": {
+          "node": 8,
+          "port": "adaptive"
+        }
+      },
+      {
+        "from": {
+          "node": 2,
+          "port": "mask"
+        },
+        "to": {
+          "node": 9,
+          "port": "mask"
+        }
+      },
+      {
+        "from": {
+          "node": 9,
+          "port": "mask"
+        },
+        "to": {
+          "node": 3,
+          "port": "mask"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "roi_x"
+        },
+        "to": {
+          "node": 10,
+          "port": "roi_x"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "roi_y"
+        },
+        "to": {
+          "node": 10,
+          "port": "roi_y"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "roi_w"
+        },
+        "to": {
+          "node": 10,
+          "port": "roi_w"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "roi_h"
+        },
+        "to": {
+          "node": 10,
+          "port": "roi_h"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "frame"
+        },
+        "to": {
+          "node": 10,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 10,
+          "port": "frame"
+        },
+        "to": {
+          "node": 1,
+          "port": "mask"
+        }
+      },
+      {
+        "from": {
+          "node": 10,
+          "port": "offset_x"
+        },
+        "to": {
+          "node": 11,
+          "port": "offset_x"
+        }
+      },
+      {
+        "from": {
+          "node": 10,
+          "port": "offset_y"
+        },
+        "to": {
+          "node": 11,
+          "port": "offset_y"
+        }
+      },
+      {
+        "from": {
+          "node": 11,
+          "port": "detections"
+        },
+        "to": {
+          "node": 14,
+          "port": "detections"
+        }
+      },
+      {
+        "from": {
+          "node": 14,
+          "port": "detections"
+        },
+        "to": {
+          "node": 7,
+          "port": "detections"
+        }
+      },
+      {
+        "from": {
+          "node": 14,
+          "port": "detections"
+        },
+        "to": {
+          "node": 8,
+          "port": "detections"
+        }
+      },
+      {
+        "from": {
+          "node": 14,
+          "port": "detections"
+        },
+        "to": {
+          "node": 13,
+          "port": "detections"
+        }
+      },
+      {
+        "from": {
+          "node": 13,
+          "port": "detections"
+        },
+        "to": {
+          "node": 8,
+          "port": "target_detections"
+        }
+      },
+      {
+        "from": {
+          "node": 13,
+          "port": "tv"
+        },
+        "to": {
+          "node": 8,
+          "port": "tv"
+        }
+      },
+      {
+        "from": {
+          "node": 13,
+          "port": "tid"
+        },
+        "to": {
+          "node": 8,
+          "port": "tid"
+        }
+      },
+      {
+        "from": {
+          "node": 13,
+          "port": "tx"
+        },
+        "to": {
+          "node": 8,
+          "port": "tx"
+        }
+      },
+      {
+        "from": {
+          "node": 13,
+          "port": "ty"
+        },
+        "to": {
+          "node": 8,
+          "port": "ty"
+        }
+      },
+      {
+        "from": {
+          "node": 13,
+          "port": "ta"
+        },
+        "to": {
+          "node": 8,
+          "port": "ta"
+        }
+      },
+      {
+        "from": {
+          "node": 13,
+          "port": "distance_px"
+        },
+        "to": {
+          "node": 8,
+          "port": "distance_px"
+        }
+      },
+      {
+        "from": {
+          "node": 13,
+          "port": "cx"
+        },
+        "to": {
+          "node": 8,
+          "port": "target_cx"
+        }
+      },
+      {
+        "from": {
+          "node": 13,
+          "port": "cy"
+        },
+        "to": {
+          "node": 8,
+          "port": "target_cy"
+        }
+      },
+      {
+        "from": {
+          "node": 13,
+          "port": "thor"
+        },
+        "to": {
+          "node": 8,
+          "port": "thor"
+        }
+      },
+      {
+        "from": {
+          "node": 13,
+          "port": "tvert"
+        },
+        "to": {
+          "node": 8,
+          "port": "tvert"
+        }
+      },
+      {
+        "from": {
+          "node": 13,
+          "port": "tshort"
+        },
+        "to": {
+          "node": 8,
+          "port": "tshort"
+        }
+      },
+      {
+        "from": {
+          "node": 13,
+          "port": "tlong"
+        },
+        "to": {
+          "node": 8,
+          "port": "tlong"
+        }
+      },
+      {
+        "from": {
+          "node": 7,
+          "port": "frame"
+        },
+        "to": {
+          "node": 12,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 12,
+          "port": "frame"
+        },
+        "to": {
+          "node": 8,
+          "port": "overlay"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "order_mode"
+        },
+        "to": {
+          "node": 14,
+          "port": "mode"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "crosshair_x"
+        },
+        "to": {
+          "node": 14,
+          "port": "crosshair_x"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "crosshair_y"
+        },
+        "to": {
+          "node": 14,
+          "port": "crosshair_y"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "crosshair_x"
+        },
+        "to": {
+          "node": 13,
+          "port": "crosshair_x"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "crosshair_y"
+        },
+        "to": {
+          "node": 13,
+          "port": "crosshair_y"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "crosshair_x"
+        },
+        "to": {
+          "node": 12,
+          "port": "x"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "crosshair_y"
+        },
+        "to": {
+          "node": 12,
+          "port": "y"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "draw_crosshair"
+        },
+        "to": {
+          "node": 12,
+          "port": "enabled"
+        }
+      },
+      {
+        "from": {
+          "node": 6,
+          "port": "deduped"
+        },
+        "to": {
+          "node": 15,
+          "port": "sources0+"
+        }
+      },
+      {
+        "from": {
+          "node": 15,
+          "port": "detections"
+        },
+        "to": {
+          "node": 11,
+          "port": "detections"
+        }
+      }
+    ],
+    "metadata": {
+      "helios.daedalus.gpu_backend": "cpu",
+      "helios.daedalus.planner.enable_gpu": "false",
+      "helios.pipeline.alias": "ArUco Smart C40 clahe + mask_open",
+      "helios.pipeline.ui": {
+        "description": "Single adaptive + one contour pass + one detect path. No redundant fallback/temporal branches."
+      }
+    },
+    "nodes": [
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [],
+        "id": "io.host_bridge",
+        "inputs": [],
+        "label": "Input",
+        "metadata": {
+          "helios.ui.node_id": {
+            "type": "String",
+            "value": "0"
+          },
+          "helios.ui.x": {
+            "type": "Float",
+            "value": -5198.0
+          },
+          "helios.ui.y": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "host_bridge": {
+            "type": "Bool",
+            "value": true
+          },
+          "host_bridge_outputs": {
+            "type": "String",
+            "value": "frame:image:dynamic,roi_x:int,roi_y:int,roi_w:int,roi_h:int,crosshair_x:int,crosshair_y:int,draw_crosshair:bool,order_mode:string"
+          },
+          "helios.host_input_port": {
+            "type": "String",
+            "value": "frame"
+          }
+        },
+        "outputs": [
+          "frame",
+          "roi_h",
+          "roi_w",
+          "roi_x",
+          "roi_y",
+          "crosshair_x",
+          "crosshair_y",
+          "draw_crosshair",
+          "order_mode"
+        ]
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [
+          [
+            "clip_limit",
+            {
+              "type": "Float",
+              "value": 3.5
+            }
+          ],
+          [
+            "mix",
+            {
+              "type": "Int",
+              "value": 1
+            }
+          ],
+          [
+            "mode",
+            {
+              "type": "String",
+              "value": "cpu"
+            }
+          ],
+          [
+            "tile_size",
+            {
+              "type": "Int",
+              "value": 2
+            }
+          ]
+        ],
+        "id": "cv:image:clahe",
+        "inputs": [
+          "clip_limit",
+          "mask",
+          "mix",
+          "mode",
+          "tile_size"
+        ],
+        "label": "CLAHE",
+        "metadata": {
+          "helios.ui.node_id": {
+            "type": "String",
+            "value": "1"
+          },
+          "helios.ui.x": {
+            "type": "Float",
+            "value": -3836.0
+          },
+          "helios.ui.y": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "inputs.clip_limit.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.clip_limit.ui_max": {
+            "type": "Float",
+            "value": 10.0
+          },
+          "inputs.clip_limit.ui_min": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "inputs.clip_limit.ui_step": {
+            "type": "Float",
+            "value": 0.1
+          },
+          "inputs.mask.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.mix.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.mix.ui_max": {
+            "type": "Float",
+            "value": 1.0
+          },
+          "inputs.mix.ui_min": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "inputs.mix.ui_step": {
+            "type": "Float",
+            "value": 0.01
+          },
+          "inputs.mode.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.tile_size.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.tile_size.ui_max": {
+            "type": "Int",
+            "value": 64
+          },
+          "inputs.tile_size.ui_min": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.tile_size.ui_step": {
+            "type": "Int",
+            "value": 1
+          }
+        },
+        "outputs": [
+          "mask"
+        ]
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [
+          [
+            "border_guard_px",
+            {
+              "type": "Int",
+              "value": 0
+            }
+          ],
+          [
+            "invert",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ],
+          [
+            "mode",
+            {
+              "type": "Int",
+              "value": 1
+            }
+          ],
+          [
+            "offset",
+            {
+              "type": "Int",
+              "value": 12
+            }
+          ],
+          [
+            "threshold_offset",
+            {
+              "type": "Int",
+              "value": 0
+            }
+          ],
+          [
+            "window",
+            {
+              "type": "Int",
+              "value": 31
+            }
+          ]
+        ],
+        "id": "cv:image:adaptive_threshold",
+        "inputs": [
+          "border_guard_px",
+          "frame",
+          "invert",
+          "mode",
+          "offset",
+          "threshold_offset",
+          "window"
+        ],
+        "label": "Adaptive Threshold",
+        "metadata": {
+          "helios.ui.node_id": {
+            "type": "String",
+            "value": "2"
+          },
+          "helios.ui.x": {
+            "type": "Float",
+            "value": -3087.0
+          },
+          "helios.ui.y": {
+            "type": "Float",
+            "value": -2666.0
+          },
+          "inputs.border_guard_px.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.border_guard_px.ui_max": {
+            "type": "Int",
+            "value": 32
+          },
+          "inputs.border_guard_px.ui_min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.border_guard_px.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.frame.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.invert.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.mode.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.offset.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.offset.ui_max": {
+            "type": "Float",
+            "value": 50.0
+          },
+          "inputs.offset.ui_min": {
+            "type": "Float",
+            "value": -50.0
+          },
+          "inputs.offset.ui_step": {
+            "type": "Float",
+            "value": 1.0
+          },
+          "inputs.threshold.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.threshold.ui_max": {
+            "type": "Int",
+            "value": 255
+          },
+          "inputs.threshold.ui_min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.threshold.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.threshold_offset.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.threshold_offset.ui_max": {
+            "type": "Float",
+            "value": 50.0
+          },
+          "inputs.threshold_offset.ui_min": {
+            "type": "Float",
+            "value": -50.0
+          },
+          "inputs.threshold_offset.ui_step": {
+            "type": "Float",
+            "value": 1.0
+          },
+          "inputs.window.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.window.ui_max": {
+            "type": "Int",
+            "value": 101
+          },
+          "inputs.window.ui_min": {
+            "type": "Int",
+            "value": 3
+          },
+          "inputs.window.ui_step": {
+            "type": "Int",
+            "value": 2
+          }
+        },
+        "outputs": [
+          "mask"
+        ]
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [],
+        "id": "cv:contour:contours",
+        "inputs": [
+          "mask"
+        ],
+        "label": "Contours",
+        "metadata": {
+          "helios.ui.node_id": {
+            "type": "String",
+            "value": "18"
+          },
+          "helios.ui.x": {
+            "type": "Float",
+            "value": -3087.0
+          },
+          "helios.ui.y": {
+            "type": "Float",
+            "value": 2903.0
+          },
+          "inputs.frame.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.mask.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.mask.description": {
+            "type": "String",
+            "value": "Binary/grayscale mask image (foreground > 0)."
+          },
+          "outputs.contours.description": {
+            "type": "String",
+            "value": "List of contours; each contour is a list of points."
+          }
+        },
+        "outputs": [
+          "contours"
+        ]
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [
+          [
+            "dictionary",
+            {
+              "type": "String",
+              "value": "apriltag_36h11"
+            }
+          ],
+          [
+            "downscale",
+            {
+              "type": "Int",
+              "value": 1
+            }
+          ],
+          [
+            "epsilon",
+            {
+              "type": "Float",
+              "value": 0.03
+            }
+          ],
+          [
+            "max_angle_deg",
+            {
+              "type": "Int",
+              "value": 160
+            }
+          ],
+          [
+            "max_area",
+            {
+              "type": "Int",
+              "value": 0
+            }
+          ],
+          [
+            "max_hamming",
+            {
+              "type": "Int",
+              "value": 0
+            }
+          ],
+          [
+            "max_side_cv",
+            {
+              "type": "Float",
+              "value": 0.8
+            }
+          ],
+          [
+            "min_angle_deg",
+            {
+              "type": "Int",
+              "value": 10
+            }
+          ],
+          [
+            "min_area",
+            {
+              "type": "Float",
+              "value": 140.0
+            }
+          ],
+          [
+            "sample_scale",
+            {
+              "type": "Int",
+              "value": 4
+            }
+          ]
+        ],
+        "id": "cv:aruco:detect_detections_from_contours",
+        "inputs": [
+          "frame",
+          "contours",
+          "dictionary",
+          "max_hamming",
+          "downscale",
+          "sample_scale",
+          "epsilon",
+          "min_angle_deg",
+          "max_angle_deg",
+          "max_side_cv",
+          "min_area",
+          "max_area"
+        ],
+        "label": "Detect Detections Fallback",
+        "metadata": {
+          "helios.ui.node_id": {
+            "type": "String",
+            "value": "14"
+          },
+          "helios.ui.x": {
+            "type": "Float",
+            "value": -3087.0
+          },
+          "helios.ui.y": {
+            "type": "Float",
+            "value": -464.0
+          },
+          "inputs.blur_sigma.ui_max": {
+            "type": "Float",
+            "value": 10.0
+          },
+          "inputs.blur_sigma.ui_min": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "inputs.blur_sigma.ui_step": {
+            "type": "Float",
+            "value": 0.1
+          },
+          "inputs.cell_sample_margin.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.cell_sample_margin.ui_max": {
+            "type": "Float",
+            "value": 0.45
+          },
+          "inputs.cell_sample_margin.ui_min": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "inputs.cell_sample_margin.ui_step": {
+            "type": "Float",
+            "value": 0.01
+          },
+          "inputs.contours.access": {
+            "type": "String",
+            "value": "borrowed"
+          },
+          "inputs.detect_every_n.ui_max": {
+            "type": "Int",
+            "value": 120
+          },
+          "inputs.detect_every_n.ui_min": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.detect_every_n.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.dictionary.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.downscale.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.downscale.ui_max": {
+            "type": "Int",
+            "value": 8
+          },
+          "inputs.downscale.ui_min": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.downscale.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.epsilon.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.epsilon.ui_max": {
+            "type": "Float",
+            "value": 1.0
+          },
+          "inputs.epsilon.ui_min": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "inputs.epsilon.ui_step": {
+            "type": "Float",
+            "value": 0.01
+          },
+          "inputs.frame.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.gamma.ui_max": {
+            "type": "Float",
+            "value": 5.0
+          },
+          "inputs.gamma.ui_min": {
+            "type": "Float",
+            "value": 0.1
+          },
+          "inputs.gamma.ui_step": {
+            "type": "Float",
+            "value": 0.1
+          },
+          "inputs.max_angle_deg.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.max_angle_deg.ui_max": {
+            "type": "Float",
+            "value": 180.0
+          },
+          "inputs.max_angle_deg.ui_min": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "inputs.max_angle_deg.ui_step": {
+            "type": "Float",
+            "value": 1.0
+          },
+          "inputs.max_area.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.max_area.ui_max": {
+            "type": "Float",
+            "value": 1000000.0
+          },
+          "inputs.max_area.ui_min": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "inputs.max_area.ui_step": {
+            "type": "Float",
+            "value": 1000.0
+          },
+          "inputs.max_hamming.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.max_hamming.ui_max": {
+            "type": "Int",
+            "value": 4
+          },
+          "inputs.max_hamming.ui_min": {
+            "type": "Int",
+            "value": -1
+          },
+          "inputs.max_hamming.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.max_side_cv.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.max_side_cv.ui_max": {
+            "type": "Float",
+            "value": 10.0
+          },
+          "inputs.max_side_cv.ui_min": {
+            "type": "Float",
+            "value": 0.1
+          },
+          "inputs.max_side_cv.ui_step": {
+            "type": "Float",
+            "value": 0.1
+          },
+          "inputs.min_angle_deg.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_angle_deg.ui_max": {
+            "type": "Float",
+            "value": 180.0
+          },
+          "inputs.min_angle_deg.ui_min": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "inputs.min_angle_deg.ui_step": {
+            "type": "Float",
+            "value": 1.0
+          },
+          "inputs.min_area.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_area.ui_max": {
+            "type": "Float",
+            "value": 1000000.0
+          },
+          "inputs.min_area.ui_min": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "inputs.min_area.ui_step": {
+            "type": "Float",
+            "value": 1000.0
+          },
+          "inputs.min_bit_delta.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_bit_delta.ui_max": {
+            "type": "Float",
+            "value": 255.0
+          },
+          "inputs.min_bit_delta.ui_min": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "inputs.min_bit_delta.ui_step": {
+            "type": "Float",
+            "value": 1.0
+          },
+          "inputs.min_cell_means_contrast_range.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_cell_means_contrast_range.ui_max": {
+            "type": "Float",
+            "value": 255.0
+          },
+          "inputs.min_cell_means_contrast_range.ui_min": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "inputs.min_cell_means_contrast_range.ui_step": {
+            "type": "Float",
+            "value": 0.5
+          },
+          "inputs.min_decode_score.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_decode_score.ui_max": {
+            "type": "Float",
+            "value": 255.0
+          },
+          "inputs.min_decode_score.ui_min": {
+            "type": "Float",
+            "value": -100.0
+          },
+          "inputs.min_decode_score.ui_step": {
+            "type": "Float",
+            "value": 1.0
+          },
+          "inputs.min_hamming_margin.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_hamming_margin.ui_max": {
+            "type": "Int",
+            "value": 32
+          },
+          "inputs.min_hamming_margin.ui_min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.min_hamming_margin.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.min_hamming_margin_min_dist.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_hamming_margin_min_dist.ui_max": {
+            "type": "Int",
+            "value": 32
+          },
+          "inputs.min_hamming_margin_min_dist.ui_min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.min_hamming_margin_min_dist.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.min_hamming_margin_only_if_border_mismatch.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_quiet_zone_delta.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_quiet_zone_delta.ui_max": {
+            "type": "Float",
+            "value": 64.0
+          },
+          "inputs.min_quiet_zone_delta.ui_min": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "inputs.min_quiet_zone_delta.ui_step": {
+            "type": "Float",
+            "value": 0.5
+          },
+          "inputs.sample_scale.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.sample_scale.ui_max": {
+            "type": "Int",
+            "value": 8
+          },
+          "inputs.sample_scale.ui_min": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.sample_scale.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.threshold_offset.ui_max": {
+            "type": "Float",
+            "value": 50.0
+          },
+          "inputs.threshold_offset.ui_min": {
+            "type": "Float",
+            "value": -50.0
+          },
+          "inputs.threshold_offset.ui_step": {
+            "type": "Float",
+            "value": 1.0
+          },
+          "inputs.threshold_window.ui_max": {
+            "type": "Int",
+            "value": 101
+          },
+          "inputs.threshold_window.ui_min": {
+            "type": "Int",
+            "value": 3
+          },
+          "inputs.threshold_window.ui_step": {
+            "type": "Int",
+            "value": 2
+          }
+        },
+        "outputs": [
+          "detections"
+        ]
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [
+          [
+            "min_area",
+            {
+              "type": "Float",
+              "value": 220.0
+            }
+          ],
+          [
+            "max_area",
+            {
+              "type": "Float",
+              "value": 0.0
+            }
+          ],
+          [
+            "suppress_nested",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ],
+          [
+            "nested_area_ratio_max",
+            {
+              "type": "Float",
+              "value": 0.75
+            }
+          ]
+        ],
+        "id": "cv:aruco:detections_filter_area",
+        "inputs": [
+          "detections",
+          "min_area",
+          "max_area",
+          "suppress_nested",
+          "nested_area_ratio_max"
+        ],
+        "label": "Area Filter",
+        "metadata": {
+          "inputs.detections.access": {
+            "type": "String",
+            "value": "borrowed"
+          },
+          "inputs.max_area.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.max_area.ui_max": {
+            "type": "Float",
+            "value": 1000000.0
+          },
+          "inputs.max_area.ui_min": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "inputs.max_area.ui_step": {
+            "type": "Float",
+            "value": 10.0
+          },
+          "inputs.min_area.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_area.ui_max": {
+            "type": "Float",
+            "value": 1000000.0
+          },
+          "inputs.min_area.ui_min": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "inputs.min_area.ui_step": {
+            "type": "Float",
+            "value": 10.0
+          },
+          "inputs.nested_area_ratio_max.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.nested_area_ratio_max.ui_max": {
+            "type": "Float",
+            "value": 1.0
+          },
+          "inputs.nested_area_ratio_max.ui_min": {
+            "type": "Float",
+            "value": 0.1
+          },
+          "inputs.nested_area_ratio_max.ui_step": {
+            "type": "Float",
+            "value": 0.01
+          },
+          "inputs.suppress_nested.access": {
+            "type": "String",
+            "value": "owned"
+          }
+        },
+        "outputs": [
+          "detections"
+        ]
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [
+          [
+            "center_dist_px",
+            {
+              "type": "Int",
+              "value": 8
+            }
+          ],
+          [
+            "max_center_dist_ratio",
+            {
+              "type": "Int",
+              "value": 0
+            }
+          ],
+          [
+            "max_corner_dist_px",
+            {
+              "type": "Float",
+              "value": 2.5
+            }
+          ],
+          [
+            "min_area_ratio",
+            {
+              "type": "Int",
+              "value": 0
+            }
+          ],
+          [
+            "min_iou",
+            {
+              "type": "Int",
+              "value": 0
+            }
+          ]
+        ],
+        "id": "cv:aruco:dedup_detections_spatial",
+        "inputs": [
+          "center_dist_px",
+          "detections",
+          "max_center_dist_ratio",
+          "max_corner_dist_px",
+          "min_area_ratio",
+          "min_iou"
+        ],
+        "label": "Deduplicate detections",
+        "metadata": {
+          "helios.ui.node_id": {
+            "type": "String",
+            "value": "5"
+          },
+          "helios.ui.x": {
+            "type": "Float",
+            "value": 2363.0
+          },
+          "helios.ui.y": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "inputs.center_dist_px.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.center_dist_px.ui_max": {
+            "type": "Float",
+            "value": 50.0
+          },
+          "inputs.center_dist_px.ui_min": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "inputs.center_dist_px.ui_step": {
+            "type": "Float",
+            "value": 0.5
+          },
+          "inputs.detections.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.max_center_dist_ratio.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.max_center_dist_ratio.ui_max": {
+            "type": "Float",
+            "value": 2.0
+          },
+          "inputs.max_center_dist_ratio.ui_min": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "inputs.max_center_dist_ratio.ui_step": {
+            "type": "Float",
+            "value": 0.05
+          },
+          "inputs.max_corner_dist_px.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.max_corner_dist_px.ui_max": {
+            "type": "Float",
+            "value": 10.0
+          },
+          "inputs.max_corner_dist_px.ui_min": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "inputs.max_corner_dist_px.ui_step": {
+            "type": "Float",
+            "value": 0.1
+          },
+          "inputs.min_area_ratio.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_area_ratio.ui_max": {
+            "type": "Float",
+            "value": 2.0
+          },
+          "inputs.min_area_ratio.ui_min": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "inputs.min_area_ratio.ui_step": {
+            "type": "Float",
+            "value": 0.05
+          },
+          "inputs.min_iou.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.min_iou.ui_max": {
+            "type": "Float",
+            "value": 1.0
+          },
+          "inputs.min_iou.ui_min": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "inputs.min_iou.ui_step": {
+            "type": "Float",
+            "value": 0.05
+          }
+        },
+        "outputs": [
+          "deduped"
+        ]
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [
+          [
+            "draw_boxes",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ],
+          [
+            "draw_corners",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ],
+          [
+            "draw_hud",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ],
+          [
+            "draw_ids",
+            {
+              "type": "Bool",
+              "value": false
+            }
+          ],
+          [
+            "thickness",
+            {
+              "type": "Int",
+              "value": 1
+            }
+          ]
+        ],
+        "id": "cv:aruco:overlay_detections",
+        "inputs": [
+          "detections",
+          "draw_boxes",
+          "draw_corners",
+          "draw_hud",
+          "draw_ids",
+          "frame",
+          "thickness"
+        ],
+        "label": "Overlay",
+        "metadata": {
+          "helios.ui.node_id": {
+            "type": "String",
+            "value": "6"
+          },
+          "helios.ui.x": {
+            "type": "Float",
+            "value": 4329.0
+          },
+          "helios.ui.y": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "inputs.detections.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.draw_boxes.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.draw_corners.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.draw_hud.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.draw_ids.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.frame.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.thickness.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.thickness.ui_max": {
+            "type": "Int",
+            "value": 16
+          },
+          "inputs.thickness.ui_min": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.thickness.ui_step": {
+            "type": "Int",
+            "value": 1
+          }
+        },
+        "outputs": [
+          "frame"
+        ]
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [],
+        "id": "io.host_output",
+        "inputs": [
+          "adaptive",
+          "clahe",
+          "detections",
+          "overlay",
+          "target_detections",
+          "tv",
+          "tid",
+          "tx",
+          "ty",
+          "ta",
+          "distance_px",
+          "target_cx",
+          "target_cy",
+          "thor",
+          "tvert",
+          "tshort",
+          "tlong"
+        ],
+        "label": "Output",
+        "metadata": {
+          "helios.ui.node_id": {
+            "type": "String",
+            "value": "7"
+          },
+          "helios.ui.x": {
+            "type": "Float",
+            "value": 5140.0
+          },
+          "helios.ui.y": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "host_bridge": {
+            "type": "Bool",
+            "value": true
+          },
+          "host_bridge_inputs": {
+            "type": "String",
+            "value": "adaptive:image:dynamic,clahe:image:dynamic,detections:list<cv:aruco_detection_2d>,overlay:image:dynamic,target_detections:list<cv:aruco_detection_2d>,tv:float,tid:float,tx:float,ty:float,ta:float,distance_px:float,target_cx:float,target_cy:float,thor:float,tvert:float,tshort:float,tlong:float"
+          }
+        },
+        "outputs": []
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [
+          [
+            "k",
+            {
+              "type": "Int",
+              "value": 1
+            }
+          ]
+        ],
+        "id": "cv:aruco:mask_open",
+        "inputs": [
+          "mask",
+          "k"
+        ],
+        "label": "Mask Open",
+        "metadata": {
+          "helios.ui.node_id": {
+            "type": "String",
+            "value": "9"
+          },
+          "helios.ui.x": {
+            "type": "Float",
+            "value": -1200.0
+          },
+          "helios.ui.y": {
+            "type": "Float",
+            "value": 2200.0
+          },
+          "inputs.k.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.k.ui_max": {
+            "type": "Int",
+            "value": 255
+          },
+          "inputs.k.ui_min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.k.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.mask.access": {
+            "type": "String",
+            "value": "owned"
+          }
+        },
+        "outputs": [
+          "mask"
+        ]
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [],
+        "id": "cv:image:crop_roi",
+        "inputs": [
+          "frame",
+          "roi_x",
+          "roi_y",
+          "roi_w",
+          "roi_h"
+        ],
+        "label": "ROI Crop",
+        "metadata": {},
+        "outputs": [
+          "frame",
+          "offset_x",
+          "offset_y"
+        ]
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [],
+        "id": "cv:aruco:offset_detections",
+        "inputs": [
+          "detections",
+          "offset_x",
+          "offset_y"
+        ],
+        "label": "Offset Detections",
+        "metadata": {},
+        "outputs": [
+          "detections"
+        ]
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [
+          [
+            "size",
+            {
+              "type": "Int",
+              "value": 32
+            }
+          ],
+          [
+            "thickness",
+            {
+              "type": "Int",
+              "value": 2
+            }
+          ],
+          [
+            "enabled",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ],
+          [
+            "x",
+            {
+              "type": "Int",
+              "value": 640
+            }
+          ],
+          [
+            "y",
+            {
+              "type": "Int",
+              "value": 400
+            }
+          ]
+        ],
+        "id": "cv:draw:drawcrosshairat",
+        "inputs": [
+          "frame",
+          "x",
+          "y",
+          "size",
+          "thickness",
+          "enabled"
+        ],
+        "label": "Crosshair",
+        "metadata": {},
+        "outputs": [
+          "frame"
+        ]
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [
+          [
+            "crosshair_x",
+            {
+              "type": "Int",
+              "value": 640
+            }
+          ],
+          [
+            "crosshair_y",
+            {
+              "type": "Int",
+              "value": 400
+            }
+          ]
+        ],
+        "id": "cv:aruco:detections_crosshair_target",
+        "inputs": [
+          "detections",
+          "crosshair_x",
+          "crosshair_y"
+        ],
+        "label": "Crosshair Target",
+        "metadata": {},
+        "outputs": [
+          "detections",
+          "tv",
+          "tid",
+          "tx",
+          "ty",
+          "ta",
+          "distance_px",
+          "cx",
+          "cy",
+          "thor",
+          "tvert",
+          "tshort",
+          "tlong"
+        ]
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [
+          [
+            "mode",
+            {
+              "type": "String",
+              "value": "none"
+            }
+          ],
+          [
+            "crosshair_x",
+            {
+              "type": "Int",
+              "value": 640
+            }
+          ],
+          [
+            "crosshair_y",
+            {
+              "type": "Int",
+              "value": 400
+            }
+          ]
+        ],
+        "id": "cv:aruco:detections_order",
+        "inputs": [
+          "detections",
+          "mode",
+          "crosshair_x",
+          "crosshair_y"
+        ],
+        "label": "Order Detections",
+        "metadata": {},
+        "outputs": [
+          "detections"
+        ]
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [
+          [
+            "min_sources",
+            {
+              "type": "Int",
+              "value": 1
+            }
+          ],
+          [
+            "center_dist_px",
+            {
+              "type": "Float",
+              "value": 10.0
+            }
+          ],
+          [
+            "min_id",
+            {
+              "type": "Int",
+              "value": 0
+            }
+          ],
+          [
+            "max_id",
+            {
+              "type": "Int",
+              "value": 54
+            }
+          ]
+        ],
+        "id": "cv:aruco:consensus_detections",
+        "inputs": [
+          "sources0+",
+          "min_sources",
+          "center_dist_px",
+          "min_id",
+          "max_id"
+        ],
+        "label": "ID Filter",
+        "metadata": {
+          "helios.ui.node_id": {
+            "type": "String",
+            "value": "15"
+          },
+          "helios.ui.x": {
+            "type": "Float",
+            "value": 2670.0
+          },
+          "helios.ui.y": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "inputs.min_id.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.max_id.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.sources.access": {
+            "type": "String",
+            "value": "borrowed"
+          },
+          "inputs.min_sources.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.center_dist_px.access": {
+            "type": "String",
+            "value": "owned"
+          }
+        },
+        "outputs": [
+          "detections"
+        ]
+      }
+    ]
+  }
+}

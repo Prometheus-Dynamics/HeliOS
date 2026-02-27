@@ -1,0 +1,15 @@
+[Unit]
+Description=Helios Engine IPC Socket
+PartOf=helios-engine.service
+
+[Socket]
+ListenStream=/run/helios/engine.sock
+SocketMode=0660
+SocketUser=root
+SocketGroup=root
+DirectoryMode=0755
+Service=helios-engine.service
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

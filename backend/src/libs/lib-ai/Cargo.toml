@@ -1,0 +1,54 @@
+[package]
+name = "lib-ai"
+version.workspace = true
+edition = "2024"
+
+[features]
+default = ["engine", "backend-cpu", "plugins"]
+
+api = []
+schema = ["dep:utoipa"]
+
+engine = ["api", "dep:image", "dep:paste", "daedalus/engine", "daedalus/plugins"]
+plugins = ["engine"]
+backend-cpu = ["backend-tflite", "backend-onnx"]
+backend-tflite = ["dep:tract-tflite", "dep:tract-core"]
+backend-onnx = ["dep:tract-onnx", "dep:tract-core"]
+backend-coral = ["dep:rusb", "dep:tract-tflite", "dep:tract-core", "dep:libc"]
+docs = []
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+libloading = { version = "0.8.6" }
+bincode = { workspace = true }
+serde_json = { workspace = true }
+image = { workspace = true, optional = true }
+imageproc = { workspace = true }
+ab_glyph = "0.2.31"
+lib-cv = { path = "../lib-cv", features = ["gpu"] }
+tracing = { workspace = true }
+rayon = { workspace = true }
+bytemuck = { workspace = true }
+daedalus = { workspace = true, features = ["engine", "plugins"] }
+paste = { workspace = true, optional = true }
+utoipa = { workspace = true, optional = true }
+
+tract-core = { version = "0.22.0", optional = true }
+tract-tflite = { version = "0.22.0", optional = true }
+tract-onnx = { version = "0.22.0", optional = true }
+rusb = { version = "0.9.4", optional = true }
+tokio = { workspace = true }
+libc = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+tempfile = "3.12.0"

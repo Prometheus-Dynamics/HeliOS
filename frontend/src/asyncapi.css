@@ -1,0 +1,307 @@
+/*
+  AsyncAPI React component overrides tuned for the Helios dark theme.
+  The default package ships with hard-coded Tailwind colours which clash
+  with the Skeleton palette used elsewhere in the UI. These rules remap
+  the component primitives to shared theme tokens and tidy up typography,
+  spacing, and panel layout so the docs feel consistent with the rest of
+  the dashboard.
+*/
+
+.aui-root {
+  --asyncapi-border: var(--color-surface-800);
+  --asyncapi-panel: var(--color-surface-950);
+  --asyncapi-sidebar: var(--color-surface-900);
+  --asyncapi-heading: var(--color-surface-50);
+  --asyncapi-body: var(--color-surface-300);
+  --asyncapi-muted: var(--color-surface-500);
+  background-color: var(--body-background-color-dark) !important;
+  color: var(--base-font-color-dark) !important;
+  font-family: var(--base-font-family) !important;
+  font-size: var(--text-sm, 0.875rem) !important;
+  line-height: 1.6 !important;
+  padding: 1.5rem 1.25rem !important;
+}
+
+.aui-root a {
+  color: var(--color-primary-500) !important;
+}
+
+.aui-root a:hover {
+  color: var(--color-primary-400) !important;
+}
+
+.aui-root h1,
+.aui-root h2,
+.aui-root h3,
+.aui-root h4 {
+  color: var(--asyncapi-heading) !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.01em !important;
+}
+
+.aui-root p,
+.aui-root li,
+.aui-root dt,
+.aui-root dd {
+  color: var(--asyncapi-body) !important;
+}
+
+.aui-root code,
+.aui-root pre {
+  background-color: var(--color-surface-950) !important;
+  color: var(--color-surface-contrast-950) !important;
+  border-radius: var(--radius-container, 0.75rem) !important;
+  font-family: var(--font-mono) !important;
+  font-size: var(--text-xs, 0.75rem) !important;
+}
+
+.aui-root pre {
+  padding: 1rem !important;
+  border: 1px solid var(--asyncapi-border) !important;
+}
+
+.aui-root code {
+  padding: 0.15rem 0.45rem !important;
+}
+
+/* Layout */
+.aui-root .container\:base {
+  gap: 1.5rem !important;
+  align-items: flex-start !important;
+}
+
+.aui-root .container\:base .panel--left {
+  background-color: var(--asyncapi-sidebar) !important;
+  border: 1px solid var(--asyncapi-border) !important;
+  border-radius: var(--radius-container, 0.75rem) !important;
+  padding: 1.25rem 1rem !important;
+  box-shadow: none !important;
+  max-width: 21rem !important;
+  position: sticky !important;
+  top: 1rem !important;
+  max-height: calc(100vh - 4rem) !important;
+  overflow-y: auto !important;
+}
+
+@supports (height: 100dvh) {
+  .aui-root .container\:base .panel--left {
+    max-height: calc(100dvh - 4rem) !important;
+  }
+}
+
+.aui-root .container\:base .panel-item--center {
+  background-color: var(--asyncapi-panel) !important;
+  border: 1px solid var(--asyncapi-border) !important;
+  border-radius: var(--radius-container, 0.75rem) !important;
+  padding: 1.75rem !important;
+  box-shadow: none !important;
+}
+
+.aui-root .container\:base .panel-item--right {
+  display: none !important;
+}
+
+/* Typography helpers */
+.aui-root strong {
+  color: var(--color-surface-100) !important;
+}
+
+.aui-root small,
+.aui-root .text-xs,
+.aui-root .text-sm {
+  color: var(--asyncapi-muted) !important;
+}
+
+/* Tables */
+.aui-root table {
+  width: 100% !important;
+  border-collapse: collapse !important;
+  background: transparent !important;
+}
+
+.aui-root thead {
+  background-color: var(--color-surface-900) !important;
+}
+
+.aui-root th {
+  text-transform: uppercase !important;
+  letter-spacing: 0.08em !important;
+  font-size: 0.7rem !important;
+  color: var(--asyncapi-muted) !important;
+  border-bottom: 1px solid var(--asyncapi-border) !important;
+  padding: 0.5rem 0.75rem !important;
+}
+
+.aui-root td {
+  border-bottom: 1px solid var(--asyncapi-border) !important;
+  padding: 0.65rem 0.75rem !important;
+  color: var(--asyncapi-body) !important;
+}
+
+.aui-root tr:last-child td {
+  border-bottom: none !important;
+}
+
+/* Tags, badges, pills */
+.aui-root .rounded,
+.aui-root .rounded-md,
+.aui-root .rounded-lg,
+.aui-root .rounded-full {
+  border-radius: var(--radius-container, 0.75rem) !important;
+}
+
+.aui-root .uppercase {
+  letter-spacing: 0.08em !important;
+}
+
+.aui-root .font-semibold,
+.aui-root .font-bold {
+  font-weight: 600 !important;
+}
+
+.aui-root .bg-blue-600,
+.aui-root .text-blue-600 {
+  background-color: var(--color-primary-600) !important;
+  color: var(--color-primary-contrast-600) !important;
+}
+
+.aui-root .bg-blue-500,
+.aui-root .text-blue-500,
+.aui-root .bg-blue-400 {
+  background-color: var(--color-primary-500) !important;
+  color: var(--color-primary-contrast-500) !important;
+}
+
+.aui-root .bg-indigo-400,
+.aui-root .bg-purple-600,
+.aui-root .text-purple-500 {
+  background-color: var(--color-secondary-600) !important;
+  color: var(--color-secondary-contrast-600) !important;
+}
+
+.aui-root .bg-teal-500,
+.aui-root .text-teal-500,
+.aui-root .bg-green-600 {
+  background-color: var(--color-success-600) !important;
+  color: var(--color-success-contrast-600) !important;
+}
+
+.aui-root .bg-yellow-600,
+.aui-root .bg-orange-600,
+.aui-root .text-orange-500,
+.aui-root .text-orange-600 {
+  background-color: var(--color-warning-600) !important;
+  color: var(--color-warning-contrast-600) !important;
+}
+
+.aui-root .bg-red-600,
+.aui-root .text-red-600,
+.aui-root .border-red-500 {
+  background-color: var(--color-error-600) !important;
+  color: var(--color-error-contrast-600) !important;
+  border-color: var(--color-error-600) !important;
+}
+
+.aui-root .bg-gray-50,
+.aui-root .bg-gray-100,
+.aui-root .bg-slate-100 {
+  background-color: var(--color-surface-900) !important;
+}
+
+.aui-root .bg-gray-200,
+.aui-root .bg-gray-300,
+.aui-root .bg-slate-200 {
+  background-color: var(--color-surface-800) !important;
+}
+
+.aui-root .bg-gray-800,
+.aui-root .bg-gray-900,
+.aui-root .bg-slate-800,
+.aui-root .bg-slate-900 {
+  background-color: var(--color-surface-950) !important;
+}
+
+.aui-root .bg-white {
+  background-color: var(--color-surface-950) !important;
+}
+
+.aui-root .text-gray-200,
+.aui-root .text-slate-200 {
+  color: var(--color-surface-200) !important;
+}
+
+.aui-root .text-gray-400,
+.aui-root .text-gray-500,
+.aui-root .text-slate-400,
+.aui-root .text-slate-500 {
+  color: var(--asyncapi-muted) !important;
+}
+
+.aui-root .text-gray-600,
+.aui-root .text-gray-700,
+.aui-root .text-slate-600,
+.aui-root .text-slate-700 {
+  color: var(--color-surface-600) !important;
+}
+
+.aui-root .text-gray-800,
+.aui-root .text-slate-800 {
+  color: var(--color-surface-700) !important;
+}
+
+.aui-root .text-white {
+  color: var(--color-surface-50) !important;
+}
+
+.aui-root .border,
+.aui-root .border-gray-200,
+.aui-root .border-gray-300,
+.aui-root .border-gray-400,
+.aui-root .border-slate-700,
+.aui-root .border-slate-800 {
+  border-color: var(--asyncapi-border) !important;
+}
+
+.aui-root .shadow,
+.aui-root .shadow-sm,
+.aui-root .shadow-md,
+.aui-root .shadow-lg,
+.aui-root .shadow-xl {
+  box-shadow: none !important;
+}
+
+.aui-root input,
+.aui-root select,
+.aui-root textarea {
+  background-color: var(--color-surface-900) !important;
+  border: 1px solid var(--asyncapi-border) !important;
+  color: var(--asyncapi-body) !important;
+  border-radius: var(--radius-container, 0.75rem) !important;
+  padding: 0.5rem 0.75rem !important;
+}
+
+.aui-root input::placeholder,
+.aui-root textarea::placeholder {
+  color: var(--asyncapi-muted) !important;
+}
+
+.aui-root button {
+  border-radius: var(--radius-container, 0.75rem) !important;
+  border: 1px solid transparent !important;
+  transition: background-color 0.15s ease, border-color 0.15s ease !important;
+}
+
+.aui-root button:hover {
+  filter: brightness(1.08) !important;
+}
+
+/* Keep examples stacked even on ultra-wide breakpoints */
+@media (min-width: 1536px) {
+  .aui-root .container\:base .panel--center .panel-item--center,
+  .aui-root .container\:base .panel--center .panel-item--right {
+    width: 100% !important;
+  }
+  .aui-root .container\:base .panel--right {
+    display: none !important;
+  }
+}

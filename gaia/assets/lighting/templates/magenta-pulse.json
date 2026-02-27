@@ -1,0 +1,29 @@
+{
+  "id": "magenta-pulse",
+  "name": "Magenta Pulse",
+  "summary": "Built-in pulse lighting animation template.",
+  "tags": [
+    "lighting",
+    "animation",
+    "builtin",
+    "pulse"
+  ],
+  "command": {
+    "brightness": 190,
+    "animation": {
+      "kind": "pulse",
+      "color": {
+        "r": 255,
+        "g": 20,
+        "b": 170,
+        "w": 0
+      },
+      "low": 8,
+      "high": 255,
+      "period_ms": 1100
+    }
+  },
+  "duration_ms": null,
+  "sequence": null,
+  "timeline": null
+}

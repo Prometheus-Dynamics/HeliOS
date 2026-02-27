@@ -1,0 +1,12 @@
+[Unit]
+Description=Update login banner with OS version and IP addresses
+After=network.target
+Wants=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/helios-update-issue.sh
+Environment=PATH=/bin:/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+
+[Install]
+WantedBy=multi-user.target

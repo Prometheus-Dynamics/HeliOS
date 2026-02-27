@@ -1,0 +1,82 @@
+repo = "https://github.com/buildroot/buildroot.git"
+version = "2025.11"
+compression = "none"
+shrink_ext = true
+archive_format = "img.xz"
+archive_name = "sdcard"
+# Source checkout lives under workspace.build_dir by default.
+src_dir = "buildroot/src"
+# Buildroot output (O=) also lives under workspace.build_dir by default.
+br_output_dir = "buildroot/output"
+# Performance profile: "max" | "balanced" | "safe"
+# max = aggressive default (BR2_JLEVEL=cores, make -j 2x cores, no load cap)
+performance_profile = "max"
+# BR2_JLEVEL: jobs inside a single package build (overrides profile when set).
+# threads = 0  # 0 uses all cores
+# Top-level `make -j` package scheduling jobs (0 = all cores).
+# top_level_jobs = 0
+# Optional top-level `make -l` load cap.
+# top_level_load = 20.0
+# Enable Buildroot per-package directories for safe package-level parallelism
+# (overrides profile when set).
+# per_package_dirs = true
+# x265 (4.1) can race when shared+static targets generate the same AArch64
+# assembly objects in parallel; with ccache enabled this surfaces as
+# "Failed to read *.S.o: No such file or directory". Disable ccache for
+# deterministic package builds.
+use_ccache = true
+# Guard git-based package downloads against hanging forever on dead links.
+# If throughput stays under this threshold for the configured window, git
+# aborts and Buildroot can fall back to mirrors.
+git_http_low_speed_limit = 1024
+git_http_low_speed_time = 60
+# Prefer HTTP/1.1 for git HTTPS transport stability.
+git_http_version = "HTTP/1.1"
+# Optional ccache dir (absolute or workspace-relative).
+# ccache_dir = "build/.ccache"
+# Optional Buildroot external trees. For Gaia package trees, point at "assets/buildroot".
+# external = ["assets/buildroot"]
+# Optional collect output directory for copied images (absolute or workspace-relative).
+# Supports templates: {build}, {version} (requires [build].version).
+# collect_out_dir = "output/{build}/{version}/images"
+# Optional expensive refresh in collect phase (`make target-post-image`).
+# Keep false for fast incremental runs; set true only if stage/boot artifacts
+# were modified after buildroot.build completed.
+# collect_refresh_post_image = false
+# Shrink copied ext rootfs images with `resize2fs -M`.
+# shrink_ext = true
+# Optional archive format:
+# - tar variants archive directories/files
+# - img variants produce raw disk-image artifacts suitable for direct flashing
+# none | tar | tar.gz | tar.xz | tar.zst | img | img.xz | img.gz | img.zst
+# archive_format = "img.xz"
+# Optional archive mode:
+# all (archive the full collected images directory) | image (archive only sdcard.img / primary .img).
+# archive_mode = "image"
+# Optional archive base filename (extension auto-added when missing).
+# Supports templates: {build}, {version} (requires [build].version).
+# archive_name = "{build}-{version}-images"
+# Emit image report JSON and include file hashes.
+# report = true
+# report_hashes = true
+
+# Optional package toggles (maps to BR2_PACKAGE_*).
+# [packages]
+# libcamera = true
+# ffmpeg = true
+
+# Optional raw symbol overrides (bool/int/float/string).
+# [symbols]
+# BR2_INIT_SYSTEMD = true
+
+[steps.fetch]
+label = "Fetch Buildroot sources"
+
+[steps.configure]
+label = "Apply Buildroot configuration"
+
+[steps.build]
+label = "Compile Buildroot"
+
+[steps.collect]
+label = "Collect image artifacts"

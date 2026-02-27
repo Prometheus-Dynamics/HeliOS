@@ -1,0 +1,11 @@
+[package]
+name = "helios-provision"
+version = "0.1.1"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
+toml = "0.8.19"
+thiserror = { workspace = true }

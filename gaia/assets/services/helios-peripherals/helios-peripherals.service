@@ -1,0 +1,28 @@
+[Unit]
+Description=Helios Peripherals Service
+After=network.target local-fs.target var-lib-helios.mount
+RequiresMountsFor=/var/lib/helios
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios/peripherals
+Environment=LOG_FOLDER=/var/log/helios
+Environment=LIBAI_CORAL_RUNTIME_ENUMERATION=0
+EnvironmentFile=-/etc/default/helios-peripherals
+ExecStart=/usr/bin/helios-peripherals
+Restart=always
+RestartSec=2
+TimeoutStopSec=30
+User=root
+Group=root
+WorkingDirectory=/var/lib/helios
+StateDirectory=helios
+LogsDirectory=helios
+LimitNOFILE=65536
+TasksMax=infinity
+OOMScoreAdjust=-200
+
+[Install]
+WantedBy=multi-user.target

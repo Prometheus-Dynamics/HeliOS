@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 5ac009d77abd0c5cf65c7c137f5d425f32b9b31d3591abb749301668d465a0a8 # shrinks to payload = [], kind = Handshake, flags = FrameFlags(0x0)

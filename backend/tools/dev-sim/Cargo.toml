@@ -1,0 +1,25 @@
+[package]
+name = "dev-sim"
+version.workspace = true
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+clap = { workspace = true, features = ["derive"] }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+toml = "0.8.19"
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+url = { workspace = true }
+helios-engine = { path = "../../src/helios-engine", default-features = false, features = ["dto"] }
+image = { workspace = true }
+bincode = { workspace = true }
+chrono = { workspace = true }
+anyhow = { workspace = true }
+lib-cv = { path = "../../src/libs/lib-cv" }
