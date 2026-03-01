@@ -142,7 +142,7 @@
         </div>
       </div>
 
-      <div class="mt-4 grid gap-4 lg:grid-cols-[22rem,minmax(0,1fr)]">
+      <div class="mt-4 grid gap-4 xl:grid-cols-[22rem,minmax(0,1fr)]">
         <div class="space-y-4">
           <div class="rounded border border-surface-800/60 bg-surface-900/40 p-4">
             <p class="text-2xs uppercase tracking-[0.3em] text-surface-500">Presets</p>

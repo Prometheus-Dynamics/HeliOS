@@ -274,9 +274,9 @@
       <p class="mt-1 text-sm font-semibold text-surface-100">{calibrationTool === 'lens' ? 'Lens calibration' : 'Color correction'}</p>
     </div>
     {#if calibrationTool === 'lens'}
-      <div class="flex items-center gap-1">
+      <div class="flex flex-wrap items-center justify-end gap-1">
         <select
-          class="h-8 min-w-[14rem] rounded border border-surface-700/70 bg-surface-950/70 px-2 text-xs text-surface-200 focus-visible:outline-none"
+          class="h-8 w-full rounded border border-surface-700/70 bg-surface-950/70 px-2 text-xs text-surface-200 focus-visible:outline-none sm:min-w-[14rem]"
           value={calibrationImportSourceId}
           onchange={(event) => onSetCalibrationImportSourceId((event.currentTarget as HTMLSelectElement).value)}
           disabled={calibrationImporting || calibrationImportSourcesLoading || calibrationImportSources.length === 0}

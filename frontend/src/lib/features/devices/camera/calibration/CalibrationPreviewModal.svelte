@@ -94,7 +94,7 @@
         </div>
       </div>
 
-      <div class="mt-4 grid gap-6 lg:grid-cols-[1.2fr_1fr]">
+      <div class="mt-4 grid gap-6 xl:grid-cols-[1.2fr_1fr]">
         <div class="min-w-0 rounded border border-surface-800/60 bg-surface-900/40 p-3">
           <p class="text-xs uppercase tracking-[0.3em] text-surface-500">Preview</p>
           <div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-surface-400">

@@ -127,7 +127,7 @@
       </div>
     </div>
 
-    <div class={`mt-4 grid gap-3 ${calibrationTool === 'lens' ? 'lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]' : ''}`}>
+    <div class={`mt-4 grid gap-3 ${calibrationTool === 'lens' ? 'xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]' : ''}`}>
       <div class="rounded border border-surface-800/60 bg-surface-950/10 p-3">
         <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
           <div class="min-w-0">

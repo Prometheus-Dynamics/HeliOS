@@ -10,7 +10,7 @@
 </script>
 
 <header class="flex flex-wrap items-center gap-2 rounded border border-surface-800 bg-surface-900/70 px-3 py-2 shadow-sm">
-  <div class="min-w-[10rem]">
+  <div class="min-w-0 flex-1 sm:flex-none sm:min-w-[10rem]">
     <p class="text-micro-tight uppercase tracking-[0.22em] text-surface-500">Stream</p>
     <p class="mt-1 font-mono text-xs text-surface-50 break-all">{streamId}</p>
   </div>
