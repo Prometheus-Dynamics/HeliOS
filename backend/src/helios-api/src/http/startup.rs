@@ -123,7 +123,7 @@ pub(crate) async fn apply_startup_preset(state: AppState) {
     };
 
     let pipeline_ids = seed_pipelines(&state, &preset.pipelines, registry.as_ref()).await;
-    let seeded_streams = seed_streams(&preset.streams, &pipeline_ids).await;
+    let seeded_streams = seed_streams(&preset.streams).await;
 
     info!(
         path = %preset_path.display(),
@@ -296,7 +296,7 @@ async fn resolve_preset_graph(preset: &StartupPipelinePreset) -> Result<JsonValu
     pipelines::load_template_graph(template_id).await.map_err(|err| format!("failed to load template {template_id}: {err}"))
 }
 
-async fn seed_streams(presets: &[StartupStreamPreset], seeded_pipeline_ids: &HashSet<Uuid>) -> usize {
+async fn seed_streams(presets: &[StartupStreamPreset]) -> usize {
     let mut seeded = 0usize;
     let mut seen_camera_ids: HashSet<String> = HashSet::new();
 
@@ -317,10 +317,31 @@ async fn seed_streams(presets: &[StartupStreamPreset], seeded_pipeline_ids: &Has
             manifest.identity.id = Some(stream_id);
         }
 
-        if let Err(err) = validate_stream_manifest(&manifest, seeded_pipeline_ids).await {
-            warn!(camera_id, error = %err, "startup stream preset references an invalid pipeline; skipping");
-            continue;
-        }
+        let validation = streams::validation::validate_stream_manifest(manifest).await;
+        let manifest = match validation {
+            Ok(validated) => {
+                if !validated.warnings.is_empty() {
+                    warn!(
+                        camera_id,
+                        warning_count = validated.warnings.len(),
+                        warnings = ?validated.warnings,
+                        "startup stream preset required sanitization"
+                    );
+                }
+                validated.manifest
+            }
+            Err(err) => {
+                warn!(
+                    camera_id,
+                    issue_count = err.issues.len(),
+                    warning_count = err.warnings.len(),
+                    issues = ?err.issues,
+                    warnings = ?err.warnings,
+                    "startup stream preset failed semantic validation; skipping"
+                );
+                continue;
+            }
+        };
 
         let stream_id = manifest.identity.id;
         streams_persist::persist_manifest(camera_id, stream_id, manifest).await;
@@ -328,36 +349,6 @@ async fn seed_streams(presets: &[StartupStreamPreset], seeded_pipeline_ids: &Has
     }
 
     seeded
-}
-
-async fn validate_stream_manifest(manifest: &StreamManifest, seeded_pipeline_ids: &HashSet<Uuid>) -> Result<(), String> {
-    for binding in &manifest.pipelines {
-        if binding.pipeline_graph.is_some() && binding.pipeline_id != streams::CALIBRATION_MODE_PIPELINE_UUID {
-            return Err(format!("inline pipeline graph for pipeline {} is not allowed; pipeline must be persisted under /pipelines/graphs", binding.pipeline_id));
-        }
-
-        let pipeline_id = binding.pipeline_id;
-        if pipeline_id == streams::RAW_PIPELINE_UUID || pipeline_id == streams::CALIBRATION_MODE_PIPELINE_UUID {
-            continue;
-        }
-
-        if seeded_pipeline_ids.contains(&pipeline_id) {
-            continue;
-        }
-
-        if !pipeline_document_exists(pipeline_id).await {
-            return Err(format!("pipeline {pipeline_id} is not persisted under /pipelines/graphs"));
-        }
-    }
-    Ok(())
-}
-
-async fn pipeline_document_exists(pipeline_id: Uuid) -> bool {
-    let dir = match storage::ensure_subdir_async("pipelines").await {
-        Ok(dir) => dir,
-        Err(_) => return false,
-    };
-    fs::metadata(dir.join(format!("{pipeline_id}.json"))).await.map(|meta| meta.is_file()).unwrap_or(false)
 }
 
 #[cfg(test)]

@@ -5,14 +5,28 @@ type ErrorPayload = {
   error?: string | null;
   message?: string | null;
   details?: string | null;
+  issues?: Array<{
+    path?: string | null;
+    code?: string | null;
+    message?: string | null;
+  }> | null;
+  warnings?: Array<{
+    path?: string | null;
+    code?: string | null;
+    message?: string | null;
+  }> | null;
   timestamp_ms?: number | null;
+  timestampMs?: number | null;
   source?: string | null;
   operation?: string | null;
   request_id?: string | null;
+  requestId?: string | null;
   trace_id?: string | null;
+  traceId?: string | null;
   retryable?: boolean | null;
   remediation?: string | null;
   reported_by?: string | null;
+  reportedBy?: string | null;
 };
 
 const CODE_MESSAGES: Record<string, string> = {
@@ -39,19 +53,53 @@ export function mapErrorCode(code: string | null | undefined): string | null {
   return CODE_MESSAGES[normalized] ?? null;
 }
 
+type ValidationEntry = {
+  path?: string | null;
+  code?: string | null;
+  message?: string | null;
+};
+
+function formatValidationEntry(entry: ValidationEntry): string | null {
+  const message = typeof entry.message === 'string' ? entry.message.trim() : '';
+  if (!message.length) return null;
+  const path = typeof entry.path === 'string' ? entry.path.trim() : '';
+  return path.length ? `${path}: ${message}` : message;
+}
+
+function summarizeValidationEntries(entries: ValidationEntry[] | null | undefined): string | null {
+  if (!Array.isArray(entries) || entries.length === 0) return null;
+  const messages = entries.map((entry) => formatValidationEntry(entry)).filter((entry): entry is string => Boolean(entry));
+  if (!messages.length) return null;
+  const primary = messages.slice(0, 3).join('; ');
+  const remaining = messages.length - 3;
+  return remaining > 0 ? `${primary}; +${remaining} more` : primary;
+}
+
+function formatPayloadMessage(payload: ErrorPayload): string | null {
+  const codeMessage = mapErrorCode(payload.code ?? undefined);
+  const message = typeof payload.error === 'string' && payload.error.trim().length ? payload.error.trim() : null;
+  const apiMessage = typeof payload.message === 'string' && payload.message.trim().length ? payload.message.trim() : null;
+  const details = typeof payload.details === 'string' && payload.details.trim().length ? payload.details.trim() : null;
+  const issues = summarizeValidationEntries(payload.issues ?? null);
+  if (message && issues) return `${message} ${issues}`;
+  if (apiMessage && issues) return `${apiMessage} ${issues}`;
+  if (codeMessage && issues) return `${codeMessage} ${issues}`;
+  if (issues) return issues;
+  if (codeMessage && message) return `${codeMessage} ${message}`;
+  if (codeMessage && apiMessage) return `${codeMessage} ${apiMessage}`;
+  if (codeMessage && details) return `${codeMessage} ${details}`;
+  if (codeMessage) return codeMessage;
+  return message ?? apiMessage ?? details;
+}
+
 export function summarizeErrorBody(raw: string | null | undefined, statusLabel: string): string {
   if (!raw) return statusLabel;
   try {
     const parsed = JSON.parse(raw) as ErrorPayload | string;
     if (typeof parsed === 'string' && parsed.trim().length) return parsed.trim();
     if (parsed && typeof parsed === 'object') {
-      const codeMessage = mapErrorCode(parsed.code ?? undefined);
-      const message = typeof parsed.error === 'string' && parsed.error.trim().length ? parsed.error.trim() : null;
-      const details = typeof parsed.details === 'string' && parsed.details.trim().length ? parsed.details.trim() : null;
-      if (codeMessage && message) return `${codeMessage} ${message}`;
-      if (codeMessage) return codeMessage;
-      if (message) return message;
-      if (details) return details;
+      const payloadMessage = formatPayloadMessage(parsed);
+      if (payloadMessage) return payloadMessage;
     }
   } catch {
     // not JSON; fall through
@@ -72,16 +120,7 @@ function formatErrorPayload(payload: unknown): string | null {
     return trimmed.length ? trimmed : null;
   }
   if (typeof payload !== 'object') return null;
-  const record = payload as ErrorPayload;
-  const codeMessage = mapErrorCode(record.code ?? undefined);
-  const message = typeof record.error === 'string' && record.error.trim().length ? record.error.trim() : null;
-  const details = typeof record.details === 'string' && record.details.trim().length ? record.details.trim() : null;
-  const apiMessage = typeof record.message === 'string' && record.message.trim().length ? record.message.trim() : null;
-  if (codeMessage && message) return `${codeMessage} ${message}`;
-  if (codeMessage && apiMessage) return `${codeMessage} ${apiMessage}`;
-  if (codeMessage && details) return `${codeMessage} ${details}`;
-  if (codeMessage) return codeMessage;
-  return message ?? apiMessage ?? details;
+  return formatPayloadMessage(payload as ErrorPayload);
 }
 
 export function extractError(err: unknown): string {
@@ -116,14 +155,19 @@ export function extractErrorMetadata(err: unknown): ErrorMetadata | null {
   if (!payload || typeof payload !== 'object') return null;
   return {
     code: payload.code ?? null,
-    timestampMs: typeof payload.timestamp_ms === 'number' ? payload.timestamp_ms : null,
+    timestampMs:
+      typeof payload.timestampMs === 'number'
+        ? payload.timestampMs
+        : typeof payload.timestamp_ms === 'number'
+          ? payload.timestamp_ms
+          : null,
     source: payload.source ?? null,
     operation: payload.operation ?? null,
-    requestId: payload.request_id ?? null,
-    traceId: payload.trace_id ?? null,
+    requestId: payload.requestId ?? payload.request_id ?? null,
+    traceId: payload.traceId ?? payload.trace_id ?? null,
     retryable: payload.retryable ?? null,
     remediation: payload.remediation ?? null,
-    reportedBy: payload.reported_by ?? null
+    reportedBy: payload.reportedBy ?? payload.reported_by ?? null
   };
 }
 
@@ -135,12 +179,8 @@ export function extractMessage(raw: string | null | undefined): string | null {
     const parsed = JSON.parse(trimmed) as ErrorPayload | string;
     if (typeof parsed === 'string' && parsed.trim().length) return parsed.trim();
     if (parsed && typeof parsed === 'object') {
-      const codeMessage = mapErrorCode(parsed.code ?? undefined);
-      const message = typeof parsed.error === 'string' && parsed.error.trim().length ? parsed.error.trim() : null;
-      if (codeMessage && message) return `${codeMessage} ${message}`;
-      if (codeMessage) return codeMessage;
-      if (message) return message;
-      if (typeof parsed.message === 'string' && parsed.message.trim().length) return parsed.message.trim();
+      const payloadMessage = formatPayloadMessage(parsed);
+      if (payloadMessage) return payloadMessage;
     }
   } catch {
     // not JSON; fall through

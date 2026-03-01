@@ -7,10 +7,8 @@ import {
   fetchLocalizationPipelineStatus
 } from '$lib/features/localization/localizationPipeline';
 import {
-  fetchLocalizationPipelineSources,
-  fetchPipelineOutputSample
+  fetchLocalizationPipelineSources
 } from '$lib/features/localization/pipelineSources';
-import { isPoseSample, looksLikePoseOutputKey } from '$lib/features/localization/markerUtils';
 
 type FeedStatus = 'idle' | 'connecting' | 'live' | 'error';
 
@@ -44,31 +42,9 @@ export const createLocalizationPageState = (options: {
     nextSources: LocalizationPipelineSource[]
   ): Promise<Record<string, boolean>> => {
     const compatibility: Record<string, boolean> = {};
-    const sampleTargets: LocalizationPipelineSource[] = [];
-
     for (const source of nextSources) {
-      const looksPose = looksLikePoseOutputKey(source.outputKey);
-      compatibility[source.id] = looksPose;
-      if (!looksPose) {
-        sampleTargets.push(source);
-      }
+      compatibility[source.id] = true;
     }
-
-    if (sampleTargets.length === 0) {
-      return compatibility;
-    }
-
-    await Promise.all(
-      sampleTargets.map(async (source) => {
-        try {
-          const sample = await fetchPipelineOutputSample(source.streamId, source.pipelineId, source.outputKey);
-          compatibility[source.id] = Boolean(sample && isPoseSample(sample.value));
-        } catch {
-          compatibility[source.id] = false;
-        }
-      })
-    );
-
     return compatibility;
   };
 

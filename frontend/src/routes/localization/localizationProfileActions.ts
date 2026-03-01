@@ -70,13 +70,15 @@ export const createLocalizationProfileActions = (deps: LocalizationProfileAction
     if (!profile) return;
     const raw = deps.tagSizeInput().trim();
     if (!raw) {
-      deps.setTagSizeError('Tag size is required.');
+      deps.setTagSizeError(null);
+      if (profile.tagSizeM == null) return;
+      void deps.localizationProfiles.persistProfileUpdate({ ...profile, tagSizeM: null });
       return;
     }
     const parsed = deps.parseLengthToMeters(raw, 'm');
     const meters = parsed?.meters ?? NaN;
-    if (!Number.isFinite(meters) || meters <= 0) {
-      deps.setTagSizeError('Tag size must be a positive length (e.g. 0.03175m or 1.25in).');
+    if (!Number.isFinite(meters)) {
+      deps.setTagSizeError('Unable to parse length (e.g. 0.03175m or 1.25in).');
       return;
     }
     deps.setTagSizeError(null);

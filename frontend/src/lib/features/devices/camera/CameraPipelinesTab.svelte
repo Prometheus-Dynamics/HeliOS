@@ -2,12 +2,10 @@
   import { PipelineIcon } from '$lib';
   import FaIcon from '$lib/components/icons/FaIcon.svelte';
   import PipelineProfilerModal from '$lib/components/pipelines/PipelineProfilerModal.svelte';
-  import { RAW_PIPELINE_UUID as RAW_PIPELINE_UUID_CONST } from '$lib/features/devices/camera/page/cameraPipelineTuningController';
   import { faCamera, faCode, faPlus, faSliders, faStopwatch, faTrash, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons';
   import { floatingPipelineOutputsViewer } from '$lib/stores/floatingPipelineOutputsViewer';
   import { extractGraphOutputPortTypes } from '$lib/features/pipelines/outputFilters';
   import type { PipelineDataType, PipelineTemplateSummary } from '$lib/types/pipeline';
-  const DEFAULT_RAW_PIPELINE_UUID: string = RAW_PIPELINE_UUID_CONST;
 
   let {
     pipelineGraphError,
@@ -16,7 +14,7 @@
     assignedPipelineIds,
     handlePipelineDragStart,
     RAW_PIPELINE_ID,
-    RAW_PIPELINE_UUID = DEFAULT_RAW_PIPELINE_UUID,
+    RAW_PIPELINE_UUID = '',
     pipelineLabel,
     openPipelineTuningPanel,
     openPipelineRemoveModal,

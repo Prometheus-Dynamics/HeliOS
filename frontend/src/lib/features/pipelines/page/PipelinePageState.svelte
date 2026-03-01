@@ -107,7 +107,7 @@
   const { registry: registryHelpers } = controller.helpers;
 
   const RAW_STREAM_PIPELINE_ID = '__raw__';
-  const RAW_STREAM_PIPELINE_UUID = '00000000-0000-0000-0000-0000000000aa';
+  let rawStreamPipelineUuid = $state('');
 
   const {
     pipelineLabelById,
@@ -461,6 +461,18 @@
     }
   }
 
+  const loadStreamCapabilities = async (): Promise<void> => {
+    try {
+      const capabilities = await StreamsApi.streamCapabilities();
+      const normalized = String(capabilities?.rawPipelineId ?? '').trim().toLowerCase();
+      if (normalized.length) {
+        rawStreamPipelineUuid = normalized;
+      }
+    } catch {
+      // Keep previously loaded IDs; avoid local hardcoded fallback IDs.
+    }
+  };
+
   let iconModalOpen = $state(false);
   let iconModalPipelineId = $state<string | null>(null);
   let iconModalIconId = $state<string>(DEFAULT_PIPELINE_ICON_ID);
@@ -673,6 +685,7 @@
   });
 
   onMount(() => {
+    void loadStreamCapabilities();
     void loadPipelineOverview({ bootstrap: true, preserveDirty: false });
     void loadPipelineDetailPanel();
     connectLiveUpdates();
@@ -717,7 +730,7 @@
     PipelineTunePanel,
     PipelinesApi,
     RAW_STREAM_PIPELINE_ID,
-    RAW_STREAM_PIPELINE_UUID,
+    RAW_STREAM_PIPELINE_UUID: rawStreamPipelineUuid,
     SUPPORTED_PIPELINE_EXPORT_VERSIONS,
     StreamsApi,
     accessBadgeClass,
@@ -952,7 +965,7 @@
   {buildNodeValueFromInput}
   {extractTuneConstantEntries}
   {RAW_STREAM_PIPELINE_ID}
-  {RAW_STREAM_PIPELINE_UUID}
+  RAW_STREAM_PIPELINE_UUID={rawStreamPipelineUuid}
   {PipelinesApi}
   {StreamsApi}
 >

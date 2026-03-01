@@ -2,7 +2,7 @@ import { EngineStreamsService } from '$lib/ts-bindings/http/client';
 import { apiUrl } from '$lib/api/httpClient';
 import { runApiRequest, type ApiRequestOptions } from '$lib/api/requestManager';
 import { DEFAULT_REQUEST_TIMEOUT_MS, fetchWithRetry } from '$lib/api/requestUtils';
-import type { StreamManifest } from '$lib/ts-bindings/http/client';
+import type { StreamCapabilitiesResponse, StreamManifest } from '$lib/ts-bindings/http/client';
 
 type CacheEntry<T> = {
   fetchedAt: number;
@@ -10,15 +10,26 @@ type CacheEntry<T> = {
 };
 
 const DEFAULT_STREAMS_CACHE_MS = 750;
-const RAW_STREAM_PIPELINE_UUID = '00000000-0000-0000-0000-0000000000aa';
+const DEFAULT_STREAM_CAPABILITIES_CACHE_MS = 10_000;
 type StreamsList = Awaited<ReturnType<typeof EngineStreamsService.listStreams>>;
+type StreamCapabilities = Awaited<ReturnType<typeof EngineStreamsService.streamCapabilitiesHandler>>;
 let streamsCache: CacheEntry<StreamsList> | null = null;
 let streamsInflight: Promise<StreamsList> | null = null;
+let streamCapabilitiesCache: CacheEntry<StreamCapabilities> | null = null;
+let streamCapabilitiesInflight: Promise<StreamCapabilities> | null = null;
 
 function resolveStreamsCacheMs(options?: ApiRequestOptions): number {
   const raw = options?.cacheMs;
   if (typeof raw !== 'number' || !Number.isFinite(raw)) {
     return DEFAULT_STREAMS_CACHE_MS;
+  }
+  return Math.max(0, Math.floor(raw));
+}
+
+function resolveStreamCapabilitiesCacheMs(options?: ApiRequestOptions): number {
+  const raw = options?.cacheMs;
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) {
+    return DEFAULT_STREAM_CAPABILITIES_CACHE_MS;
   }
   return Math.max(0, Math.floor(raw));
 }
@@ -50,6 +61,36 @@ async function listStreamsSingleflight(options?: ApiRequestOptions) {
   return streamsInflight;
 }
 
+async function streamCapabilitiesSingleflight(options?: ApiRequestOptions): Promise<StreamCapabilities> {
+  const cacheMs = resolveStreamCapabilitiesCacheMs(options);
+  const now = Date.now();
+  if (!options?.forceRefresh && cacheMs > 0 && streamCapabilitiesCache && now - streamCapabilitiesCache.fetchedAt < cacheMs) {
+    return streamCapabilitiesCache.value;
+  }
+
+  if (streamCapabilitiesInflight) {
+    return streamCapabilitiesInflight;
+  }
+
+  streamCapabilitiesInflight = runApiRequest(() => EngineStreamsService.streamCapabilitiesHandler(), {
+    label: 'streamCapabilities',
+    ...options
+  })
+    .then((value) => {
+      if (cacheMs > 0) {
+        streamCapabilitiesCache = { fetchedAt: Date.now(), value };
+      } else {
+        streamCapabilitiesCache = null;
+      }
+      return value;
+    })
+    .finally(() => {
+      streamCapabilitiesInflight = null;
+    });
+
+  return streamCapabilitiesInflight;
+}
+
 export type RegisterNetcamStreamInput = {
   url: string;
   name?: string | null;
@@ -59,12 +100,17 @@ export type RegisterNetcamStreamInput = {
   startOnBoot?: boolean | null;
 };
 
-function makeNetcamManifest(input: RegisterNetcamStreamInput): StreamManifest {
+function makeNetcamManifest(input: RegisterNetcamStreamInput, capabilities: StreamCapabilitiesResponse): StreamManifest {
   const url = input.url.trim();
   const fps = typeof input.fps === 'number' && Number.isFinite(input.fps) ? Math.max(1, Math.min(120, Math.trunc(input.fps))) : 30;
   const width = typeof input.width === 'number' && Number.isFinite(input.width) ? Math.max(0, Math.trunc(input.width)) : 0;
   const height = typeof input.height === 'number' && Number.isFinite(input.height) ? Math.max(0, Math.trunc(input.height)) : 0;
   const alias = input.name?.trim().length ? input.name.trim() : `Netcam ${url}`;
+  const rawPipelineId = String(capabilities.rawPipelineId ?? '').trim();
+  const rawOutput = String(capabilities.defaults?.rawOutput ?? '').trim();
+  if (!rawPipelineId || !rawOutput) {
+    throw new Error('Stream capabilities missing raw pipeline defaults');
+  }
 
   // The backend's `StreamManifest.identity` is `DeviceIdentity { id, alias, hardware_id }`.
   // TS bindings may lag, so cast to `any` here to keep runtime JSON correct.
@@ -94,13 +140,13 @@ function makeNetcamManifest(input: RegisterNetcamStreamInput): StreamManifest {
       controls: [],
     },
     pipeline_enabled: true,
-    active_pipeline_id: RAW_STREAM_PIPELINE_UUID,
-    active_pipeline_output: 'raw',
-    pipelines: [{ pipeline_id: RAW_STREAM_PIPELINE_UUID, pipeline_graph: null, pipeline_output: 'raw' }],
+    active_pipeline_id: rawPipelineId,
+    active_pipeline_output: rawOutput,
+    pipelines: [{ pipeline_id: rawPipelineId, pipeline_graph: null, pipeline_output: rawOutput }],
     pipeline_layout: {
       rows: 1,
       columns: 1,
-      slots: [{ row: 0, column: 0, pipeline_id: RAW_STREAM_PIPELINE_UUID, output_key: 'raw' }]
+      slots: [{ row: 0, column: 0, pipeline_id: rawPipelineId, output_key: rawOutput }]
     },
     start_on_boot: Boolean(input.startOnBoot),
   } as any;
@@ -108,6 +154,7 @@ function makeNetcamManifest(input: RegisterNetcamStreamInput): StreamManifest {
 
 export const StreamsApi = {
   listStreams: (options?: ApiRequestOptions) => listStreamsSingleflight(options),
+  streamCapabilities: (options?: ApiRequestOptions) => streamCapabilitiesSingleflight(options),
   getStream: (args: Parameters<typeof EngineStreamsService.getStream>[0], options?: ApiRequestOptions) =>
     runApiRequest(() => EngineStreamsService.getStream(args), { label: 'getStream', ...options }),
   getMetrics: (args: Parameters<typeof EngineStreamsService.getMetrics>[0], options?: ApiRequestOptions) =>
@@ -330,14 +377,16 @@ export const StreamsApi = {
     runApiRequest(() => EngineStreamsService.listCodecs(), { label: 'listCodecs', ...options }),
   startStream: (args: Parameters<typeof EngineStreamsService.startStream>[0], options?: ApiRequestOptions) =>
     runApiRequest(() => EngineStreamsService.startStream(args), { label: 'startStream', timeoutMs: 45_000, ...options }),
-  registerNetcamStream: (input: RegisterNetcamStreamInput, options?: ApiRequestOptions) =>
-    runApiRequest(
+  registerNetcamStream: async (input: RegisterNetcamStreamInput, options?: ApiRequestOptions) => {
+    const capabilities = await streamCapabilitiesSingleflight(options);
+    return runApiRequest(
       () =>
         EngineStreamsService.startStream({
-          requestBody: makeNetcamManifest(input),
+          requestBody: makeNetcamManifest(input, capabilities),
         }),
       { label: 'registerNetcamStream', timeoutMs: 45_000, ...options }
-    ),
+    );
+  },
   setControl: (args: Parameters<typeof EngineStreamsService.setControl>[0], options?: ApiRequestOptions) =>
     runApiRequest(() => EngineStreamsService.setControl(args), { label: 'setControl', ...options }),
   updateStreamPose: (args: Parameters<typeof EngineStreamsService.updateStreamPose>[0], options?: ApiRequestOptions) =>

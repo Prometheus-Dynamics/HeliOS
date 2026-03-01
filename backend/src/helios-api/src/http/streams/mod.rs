@@ -14,6 +14,7 @@ pub(crate) mod sensor_bench;
 pub(crate) mod snapshot;
 pub(crate) mod types;
 pub(crate) mod util;
+pub(crate) mod validation;
 mod wait;
 
 use axum::{
@@ -38,6 +39,7 @@ use helios_engine::capture::{CaptureControl, CaptureControlValue};
 use helios_engine::ipc::{EngineErrorCode, EngineEvent, GraphOutputPortDescriptor, StreamManifest, StreamPipelineBinding};
 
 use self::types::{CodecInfo, StartStreamResponse, StreamFormatInfo, StreamInfo};
+use self::validation::{StreamCapabilitiesResponse, StreamValidateResponse, stream_capabilities, validate_stream_manifest};
 
 pub(crate) const RAW_PIPELINE_UUID: Uuid = Uuid::from_u128(0x000000000000000000000000000000aa);
 /// Reserved internal pipeline UUID used by the engine for transient calibration-mode graphs.
@@ -49,6 +51,8 @@ pub(crate) const CALIBRATION_MODE_PIPELINE_UUID: Uuid = Uuid::from_u128(0x000000
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_streams).post(start_stream))
+        .route("/validate", post(validate_stream))
+        .route("/capabilities", get(stream_capabilities_handler))
         .route("/replay/media", post(replay::start_media_replay_stream))
         .route("/backends", get(list_backends))
         .route("/bench/formats", post(bench_formats))
@@ -119,10 +123,40 @@ async fn list_streams(State(state): State<AppState>) -> impl IntoResponse {
     path = "/streams",
     tag = "EngineStreams",
     request_body = StreamManifest,
-    responses((status = 200, description = "Stream started", body = StartStreamResponse))
+    responses(
+        (status = 200, description = "Stream started", body = StartStreamResponse),
+        (status = 422, description = "Semantic validation failure", body = crate::http::validation::ValidationErrorBody)
+    )
 )]
 async fn start_stream(State(state): State<AppState>, Json(manifest): Json<StreamManifest>) -> impl IntoResponse {
     lifecycle::start_stream(state, manifest).await
+}
+
+#[utoipa::path(
+    post,
+    path = "/streams/validate",
+    tag = "EngineStreams",
+    request_body = StreamManifest,
+    responses(
+        (status = 200, description = "Validated + canonicalized stream manifest", body = StreamValidateResponse),
+        (status = 422, description = "Semantic validation failure", body = crate::http::validation::ValidationErrorBody)
+    )
+)]
+async fn validate_stream(Json(manifest): Json<StreamManifest>) -> impl IntoResponse {
+    match validate_stream_manifest(manifest).await {
+        Ok(result) => Json(StreamValidateResponse { manifest: result.manifest, warnings: result.warnings }).into_response(),
+        Err(err) => crate::http::validation::validation_error_response("stream manifest failed semantic validation", err.issues, err.warnings),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/streams/capabilities",
+    tag = "EngineStreams",
+    responses((status = 200, description = "Stream validation constraints and defaults", body = StreamCapabilitiesResponse))
+)]
+async fn stream_capabilities_handler() -> impl IntoResponse {
+    Json(stream_capabilities())
 }
 
 #[utoipa::path(

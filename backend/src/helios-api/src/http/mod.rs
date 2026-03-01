@@ -19,6 +19,7 @@ pub mod startup;
 pub mod storage;
 pub mod streams;
 pub mod streams_persist;
+pub mod validation;
 
 use crate::ipc;
 use axum::Router;
@@ -32,6 +33,8 @@ use utoipa::OpenApi;
         health::health,
         streams::list_streams,
         streams::start_stream,
+        streams::validate_stream,
+        streams::stream_capabilities_handler,
         streams::delete_stream,
         streams::get_controls,
         streams::set_control,
@@ -163,6 +166,8 @@ use utoipa::OpenApi;
         plugins::disable_plugin,
         plugins::enable_plugin,
         localization::sources::list_sources,
+        localization::validate_localization,
+        localization::localization_capabilities_handler,
         localization::config::get_config,
         localization::config::update_config,
         localization::external::list_external_sources,
@@ -176,9 +181,6 @@ use utoipa::OpenApi;
         localization::maps::list_maps,
         localization::maps::fetch_map,
         localization::maps::upload_limelight_fmap,
-        integrations::limelight::list_limelight_adapters,
-        integrations::limelight::limelight_status,
-        integrations::limelight::limelight_results,
     ),
     components(
         schemas(
@@ -186,6 +188,10 @@ use utoipa::OpenApi;
             helios_engine::stream::StreamMetrics,
             streams::bench::BenchFormatsRequest,
             streams::bench::BenchFormatsResponse,
+            streams::validation::StreamValidateResponse,
+            streams::validation::StreamCapabilitiesResponse,
+            streams::validation::StreamValidationDefaults,
+            streams::validation::StreamValidationConstraints,
             streams::sensor_bench::StartSensorBenchmarkRequest,
             streams::sensor_bench::SensorBenchmarkStarted,
             streams::sensor_bench::SensorBenchmarkProgress,
@@ -295,6 +301,9 @@ use utoipa::OpenApi;
             plugins::PluginInstallResponse,
             plugins::PluginToggleResponse,
             error::ErrorBody,
+            validation::ValidationErrorBody,
+            validation::ValidationIssue,
+            validation::ValidationWarning,
             error_history::ErrorHistoryEntry,
             error_history::ErrorHistoryResponse,
             console::CreateConsoleSessionRequest,
@@ -343,12 +352,15 @@ use utoipa::OpenApi;
             helios_engine::localization::maps::FieldQuaternion,
             helios_engine::localization::maps::FieldMapSource,
             helios_engine::localization::maps::FieldMapTagBits,
+            localization::validation::LocalizationValidateResponse,
+            localization::validation::LocalizationCapabilitiesResponse,
+            localization::validation::LocalizationValidationDefaults,
+            localization::validation::LocalizationValidationConstraints,
             crate::nt4::limelight::LimelightAdapterRegistryStatus,
             crate::nt4::limelight::LimelightAdapterStatus,
             crate::nt4::limelight_types::LimelightAdapterId,
             crate::nt4::limelight_types::LimelightReadSnapshot,
             crate::nt4::limelight_types::LimelightControlState,
-            integrations::limelight::LimelightResultsStagedResponse,
         )
     ),
     tags(
@@ -388,6 +400,5 @@ pub fn router(state: AppState) -> Router {
         .nest("/localization", localization::router())
         .nest("/peers", peers::router())
         .nest("/nt4", nt4::router())
-        .nest("/limelight", integrations::limelight::router())
         .with_state(state)
 }

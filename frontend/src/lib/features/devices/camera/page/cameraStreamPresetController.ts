@@ -7,10 +7,8 @@ import { normalizeGridSlots } from './cameraPipelineState';
 import { fpsToFrameRate } from './cameraStreamState';
 import {
   PIPELINE_OUTPUT_CELL_KEY,
-  RAW_LOOPBACK_GRAPH,
   RAW_PIPELINE_ID,
-  RAW_PIPELINE_UUID,
-  normalizeAssignedPipelineIds
+  RAW_PIPELINE_UUID
 } from './cameraPipelineTuningController';
 
 type PresetState = {
@@ -85,6 +83,19 @@ type PresetDeps = {
 };
 
 export function createCameraStreamPresetController(state: PresetState, deps: PresetDeps) {
+  function selectStableHardwareId(keys: unknown): string | null {
+    if (!Array.isArray(keys)) return null;
+    const normalized = keys
+      .map((value) => (typeof value === 'string' ? value.trim() : ''))
+      .filter((value): value is string => value.length > 0);
+    const withSlash = normalized.find((value) => value.includes('/'));
+    if (withSlash) return withSlash;
+    const withColon = normalized.find((value) => value.includes(':'));
+    if (withColon) return withColon;
+    const sorted = [...normalized].sort();
+    return sorted[0] ?? null;
+  }
+
   function ensureApiBase(): void {
     try {
       getHttpClientBase();
@@ -129,10 +140,15 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
     }
     state.applying = true;
     try {
+      const existingHardwareId =
+        typeof state.stream?.manifest?.identity?.hardware_id === 'string' && state.stream.manifest.identity.hardware_id.trim().length > 0
+          ? state.stream.manifest.identity.hardware_id.trim()
+          : null;
+
       const identity = {
         id: state.stream?.id ?? null,
         alias: state.cameraAlias.trim().length ? state.cameraAlias.trim() : null,
-        hardware_id: device.identity?.keys?.[0] ?? null
+        hardware_id: existingHardwareId ?? selectStableHardwareId(device.identity?.keys) ?? null
       } as any;
 
       const normalizedAssigned = Array.from(new Set((state.assignedPipelineIds ?? []).map((id) => String(id).trim()).filter(Boolean)));
@@ -146,59 +162,19 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
         normalizedActive = effectiveAssigned[0];
       }
 
-      const pipelineAssignments: any[] = [];
-      const missingPipelines: string[] = [];
-      for (const pipelineId of effectiveAssigned) {
-        if (pipelineId === RAW_PIPELINE_ID) {
-          pipelineAssignments.push({
-            pipeline_id: RAW_PIPELINE_UUID,
-            pipeline_graph: null,
-            pipeline_output: deps.outputSelectionForPipeline(RAW_PIPELINE_ID)
-          });
-          continue;
-        }
-        try {
-          const doc = await deps.pipelinesApi.fetchGraph({ id: pipelineId });
-          const graph = (doc as any)?.graph ?? null;
-          if (!graph) throw new Error(`Pipeline graph missing: ${pipelineId}`);
-          pipelineAssignments.push({
-            pipeline_id: pipelineId,
-            pipeline_graph: null,
-            pipeline_output: deps.outputSelectionForPipeline(pipelineId)
-          });
-        } catch (err) {
-          console.warn('Pipeline graph missing', pipelineId, err);
-          missingPipelines.push(pipelineId);
-        }
-      }
-
-      if (missingPipelines.length) {
-        missingPipelines.forEach((id) => deps.dropPipelineEverywhere(id));
-        state.assignedPipelineIds = normalizeAssignedPipelineIds(state.assignedPipelineIds.filter((id) => !missingPipelines.includes(id)));
-        if (normalizedActive && missingPipelines.includes(normalizedActive)) {
-          state.selectedPipelineId = null;
-          state.selectedPipelineOutput = null;
-        }
-        deps.reportError({
-          title: 'Missing pipeline graphs',
-          error: new Error(`Removed ${missingPipelines.length} missing pipeline(s) from the layout.`),
-          fallback: `Removed ${missingPipelines.length} missing pipeline(s) from the layout.`
-        });
-      }
-      normalizedActive = state.selectedPipelineId ? String(state.selectedPipelineId).trim() : null;
-      normalizedLayoutSlots = normalizeGridSlots(state.pipelineGridRows, state.pipelineGridColumns, state.pipelineGridSlots);
-
-      // Keep layout slots/active selection consistent with the resolved assignment set so stale
-      // IDs from rapid remove/apply cycles cannot reach the backend payload.
-      const validPipelineIds = new Set(
-        pipelineAssignments.map((binding) => (binding.pipeline_id === RAW_PIPELINE_UUID ? RAW_PIPELINE_ID : String(binding.pipeline_id)))
+      const pipelineAssignments = effectiveAssigned.map((pipelineId) =>
+        pipelineId === RAW_PIPELINE_ID
+          ? {
+              pipeline_id: RAW_PIPELINE_UUID,
+              pipeline_graph: null,
+              pipeline_output: deps.outputSelectionForPipeline(RAW_PIPELINE_ID)
+            }
+          : {
+              pipeline_id: pipelineId,
+              pipeline_graph: null,
+              pipeline_output: deps.outputSelectionForPipeline(pipelineId)
+            }
       );
-      normalizedLayoutSlots = Object.fromEntries(
-        Object.entries(normalizedLayoutSlots).map(([key, value]) => [key, value && validPipelineIds.has(value) ? value : null])
-      );
-      if (normalizedActive && !validPipelineIds.has(normalizedActive)) {
-        normalizedActive = null;
-      }
 
       let hasAnySlot = Object.values(normalizedLayoutSlots).some((v) => typeof v === 'string' && v.trim().length > 0);
       const hasAnyPipelineAssignment = pipelineAssignments.length > 0;
@@ -253,9 +229,6 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
           }
           output_key = typeof output_key === 'string' && output_key.trim().length ? output_key.trim() : null;
           if (pipelineId === RAW_PIPELINE_ID) {
-            if (typeof output_key === 'string' && output_key.trim().toLowerCase() === 'frame') {
-              output_key = 'raw';
-            }
             return { row, column, pipeline_id: RAW_PIPELINE_UUID, output_key };
           }
           return { row, column, pipeline_id: pipelineId, output_key };
@@ -278,25 +251,7 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
       const decoderId = (() => {
         if (!state.decoderEnabled) return null;
         const selected = String(state.decoderImpl ?? '').trim();
-        if (!selected.length) return null;
-        const compatibleDecoders = deps.decodersForCaptureFormat(state.selectedFormat);
-        const decoderPool = compatibleDecoders.length ? compatibleDecoders : state.decoders;
-        const resolved = deps.pickCodecId(decoderPool, selected, []);
-        if (!resolved) {
-          console.warn('Selected decoder unavailable for capture format; disabling decoder for apply', {
-            selected,
-            format: state.selectedFormat
-          });
-          return null;
-        }
-        if (resolved !== selected) {
-          console.warn('Selected decoder was not compatible; using first compatible decoder', {
-            selected,
-            resolved,
-            format: state.selectedFormat
-          });
-        }
-        return resolved;
+        return selected.length ? selected : null;
       })();
       const decoderEnabled = state.decoderEnabled && Boolean(decoderId);
       const modeWidth = Number((mode as any)?.format?.resolution?.width ?? 0);
@@ -321,11 +276,11 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
           : [];
         const parsedFps = Number(state.fileBackendFps ?? NaN);
         const fallbackFps = Number(backendFileHandle?.fps ?? NaN);
-        const fps = Number.isFinite(parsedFps) && parsedFps > 0
-          ? Math.max(1, Math.round(parsedFps))
-          : Number.isFinite(fallbackFps) && fallbackFps > 0
-            ? Math.max(1, Math.round(fallbackFps))
-            : 30;
+        const fps = Number.isFinite(parsedFps)
+          ? parsedFps
+          : Number.isFinite(fallbackFps)
+            ? fallbackFps
+            : null;
         captureHandle = {
           type: 'file',
           fps,

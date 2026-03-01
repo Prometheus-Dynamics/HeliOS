@@ -10,21 +10,6 @@ import {
 
 export type LocalizationProfileStore = ReturnType<typeof createLocalizationProfileStore>;
 
-function mergeBackendCompatibilityFields(updated: LocalizationConfig, requested: LocalizationConfig): LocalizationConfig {
-  const requestedById = new Map(requested.profiles.map((profile) => [profile.id, profile] as const));
-  const profiles = updated.profiles.map((profile) => {
-    const requestedProfile = requestedById.get(profile.id) ?? null;
-    if (!requestedProfile) return profile;
-    const mode = profile.fieldOrigin?.mode;
-    const hasFieldOrigin =
-      mode === 'center' || mode === 'blue' || mode === 'red' || mode === 'custom';
-    if (hasFieldOrigin) return profile;
-    if (!requestedProfile.fieldOrigin) return profile;
-    return { ...profile, fieldOrigin: requestedProfile.fieldOrigin };
-  });
-  return { ...updated, profiles };
-}
-
 export function createLocalizationProfileStore() {
   const config = writable<LocalizationConfig | null>(null);
   const loading = writable(false);
@@ -73,8 +58,7 @@ export function createLocalizationProfileStore() {
     activeProfileId.set(optimisticActiveId);
 
     const run = async (): Promise<LocalizationConfig> => {
-      const updatedRaw = await updateLocalizationConfig(next);
-      const updated = mergeBackendCompatibilityFields(updatedRaw, next);
+      const updated = await updateLocalizationConfig(next);
       config.set(updated);
       error.set(null);
       const nextActiveId = updated.activeProfileId ?? updated.profiles[0]?.id ?? get(activeProfileId) ?? null;

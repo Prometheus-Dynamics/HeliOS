@@ -79,6 +79,7 @@
     pipelineDataTypeFromTypeExpr,
     registryPortMetadataFor,
     registryPortTypeFor,
+    setRawPipelineUuid,
     safeCloneGraph
   } from './cameraPipelineTuningController';
 
@@ -112,7 +113,8 @@
     | 'center_most'
     | 'crosshair';
   const streamState = createCameraStreamState();
-  const CALIBRATION_MODE_PIPELINE_UUID = '00000000-0000-0000-0000-00000000c411';
+  let calibrationModePipelineUuid = $state('');
+  let rawPipelineUuid = $state(RAW_PIPELINE_UUID);
   let streamLookupDebug = $state<string | null>(null);
   let streamApiBase = $state<string | null>(null);
   let descriptor = streamState.stream?.descriptor ?? { modes: [], controls: [] };
@@ -140,7 +142,8 @@
     return trimmed.length ? trimmed : null;
   };
 
-  const isCalibrationPipeline = (value: unknown): boolean => normalizePipelineUuid(value) === CALIBRATION_MODE_PIPELINE_UUID;
+  const isCalibrationPipeline = (value: unknown): boolean =>
+    normalizePipelineUuid(value) === normalizePipelineUuid(calibrationModePipelineUuid);
 
   const clampCropValue = (value: number): number => {
     if (!Number.isFinite(value)) return 0;
@@ -571,7 +574,7 @@
   let stopStream = async () => {};
 
   const parseManifestLayout = (layout: unknown) =>
-    parsePipelineManifestLayout(layout, { rawPipelineId: RAW_PIPELINE_ID, rawPipelineUuid: RAW_PIPELINE_UUID });
+    parsePipelineManifestLayout(layout, { rawPipelineId: RAW_PIPELINE_ID, rawPipelineUuid });
 
   const pipelineStateBindings = {
     get pipelineGridRows() {
@@ -1084,11 +1087,28 @@
 
   const tabs: Array<{ id: TabId; label: string; ready: boolean }> = buildCameraTabs(mediaTabReady);
 
-  onMount(() =>
-    setupStreamViewerResize(streamViewerHost, (bounds) => {
+  const loadStreamCapabilities = async (): Promise<void> => {
+    try {
+      const capabilities = await StreamsApi.streamCapabilities();
+      const rawId = normalizePipelineUuid(capabilities?.rawPipelineId);
+      if (rawId) {
+        rawPipelineUuid = setRawPipelineUuid(rawId);
+      }
+      const calibrationId = normalizePipelineUuid(capabilities?.calibrationModePipelineId);
+      if (calibrationId) {
+        calibrationModePipelineUuid = calibrationId;
+      }
+    } catch {
+      // Keep previously loaded IDs; avoid local hardcoded fallback IDs.
+    }
+  };
+
+  onMount(() => {
+    void loadStreamCapabilities();
+    return setupStreamViewerResize(streamViewerHost, (bounds) => {
       streamViewerBounds = bounds;
-    })
-  );
+    });
+  });
 
   const {
     timeoutApplyHint,
@@ -1868,16 +1888,18 @@
     faCamera
   });
 
-  const constants = buildCameraPageConstants({
-    DEFAULT_LIBCAMERA_TARGET_FPS,
-    DEFAULT_PIPELINE_UI,
-    PIPELINE_OUTPUT_CELL_KEY,
-    PIPELINE_UI_METADATA_KEY,
-    PIPELINE_UI_STORAGE_PREFIX,
-    RAW_LOOPBACK_GRAPH,
-    RAW_PIPELINE_ID,
-    RAW_PIPELINE_UUID
-  });
+  const constants = $derived.by(() =>
+    buildCameraPageConstants({
+      DEFAULT_LIBCAMERA_TARGET_FPS,
+      DEFAULT_PIPELINE_UI,
+      PIPELINE_OUTPUT_CELL_KEY,
+      PIPELINE_UI_METADATA_KEY,
+      PIPELINE_UI_STORAGE_PREFIX,
+      RAW_LOOPBACK_GRAPH,
+      RAW_PIPELINE_ID,
+      RAW_PIPELINE_UUID: rawPipelineUuid
+    })
+  );
 
   const services = {
       OpenAPI,

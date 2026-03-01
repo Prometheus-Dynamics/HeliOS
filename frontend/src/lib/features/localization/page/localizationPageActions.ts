@@ -24,6 +24,7 @@ type LocalizationPageActionsOptions = {
   getActiveProfile: () => LocalizationProfile | null;
   getActiveSolverConfig: () => LocalizationSolverConfig | null;
   getSolvePoseSpaces: () => LocalizationPoseSpace[];
+  getSupportedPoseSpaces?: () => LocalizationPoseSpace[];
   setFieldMapSelection: (next: string) => void;
   assignMapToSelectedField: (mapId: string | null) => void;
   persistProfileUpdate: PersistProfileUpdate;
@@ -55,8 +56,13 @@ export const createLocalizationPageActions = (options: LocalizationPageActionsOp
     if (!profile || !activeSolverConfig) return;
 
     const requiredFieldSpaces: LocalizationPoseSpace[] = ['camera_in_field', 'robot_in_field'];
+    const supportedPoseSpaces = new Set<LocalizationPoseSpace>(
+      options.getSupportedPoseSpaces?.() ?? requiredFieldSpaces
+    );
     const currentOutputs = activeSolverConfig.outputSpaces ?? [];
-    const missing = requiredFieldSpaces.filter((space) => !currentOutputs.includes(space));
+    const missing = requiredFieldSpaces.filter(
+      (space) => supportedPoseSpaces.has(space) && !currentOutputs.includes(space)
+    );
     if (missing.length === 0) return;
 
     void options.persistProfileUpdate(

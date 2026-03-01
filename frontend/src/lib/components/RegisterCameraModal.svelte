@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { toaster } from '$lib';
-  import { OpenAPI, PeersService, PeripheralsService } from '$lib/ts-bindings/http/client';
+  import { ApiError, OpenAPI, PeersService, PeripheralsService } from '$lib/ts-bindings/http/client';
   import { connectDevicesUpdatesStream } from '$lib/api/devicesUpdates';
   import { PipelinesApi } from '$lib/api/pipelinesApi';
   import { StreamsApi } from '$lib/api/streamsApi';
@@ -19,6 +19,7 @@
     ProbedDevice,
     PeerInfo,
     StreamInfo,
+    StreamCapabilitiesResponse,
     StreamManifest
   } from '$lib/ts-bindings/http/client';
   import { registerCameraModal } from '$lib/stores/modals';
@@ -137,7 +138,7 @@
     return { width: Math.trunc(width), height: Math.trunc(height) };
   });
   const isRegistered = (device: ProbedDevice | null): boolean => isDeviceRegistered(device, registeredHardwareIds);
-  const RAW_STREAM_PIPELINE_UUID = '00000000-0000-0000-0000-0000000000aa';
+  let streamCapabilities = $state<StreamCapabilitiesResponse | null>(null);
   const encoderSelectionId = (codec: CodecInfo | null | undefined): string | null => {
     if (!codec) return null;
     const name = String(codec.name ?? '').trim();
@@ -184,14 +185,7 @@
   });
   const simpleCanSubmit = $derived.by(() => {
     if (!currentDevice() || !currentBackend()) return false;
-    if (!simpleResolutionModes.length) return false;
-    if (simplePipelineSource === 'existing') {
-      return Boolean(simplePipelineId && availablePipelines.some((entry) => entry.id === simplePipelineId));
-    }
-    if (simplePipelineSource === 'template') {
-      return Boolean(simpleTemplateId && availableTemplates.some((entry) => entry.templateId === simpleTemplateId));
-    }
-    return true;
+    return simpleResolutionModes.length > 0;
   });
   const pipelineDisplayName = (entry: PipelineSummary | null | undefined): string => {
     const name = String(entry?.name ?? '').trim();
@@ -340,13 +334,14 @@
     const prevFormat = preserveSelection ? selectedFormat : null;
     const prevResolution = preserveSelection ? selectedResolutionKey : null;
     try {
-      const [cameraResp, codecResp, streamsResp, peersResp, pipelineResp, templateResp] = await Promise.all([
+      const [cameraResp, codecResp, streamsResp, peersResp, pipelineResp, templateResp, streamCapabilitiesResp] = await Promise.all([
         PeripheralsService.listCameras(),
         StreamsApi.listCodecs().catch(() => null) as Promise<CodecInfo[] | null>,
         StreamsApi.listStreams().catch(() => []) as Promise<StreamInfo[]>,
         PeersService.listPeers().catch(() => null) as Promise<{ peers?: PeerInfo[] } | null>,
         PipelinesApi.listGraphs().catch(() => []) as Promise<PipelineSummary[]>,
-        PipelinesApi.listTemplates().catch(() => []) as Promise<PipelineTemplateSummary[]>
+        PipelinesApi.listTemplates().catch(() => []) as Promise<PipelineTemplateSummary[]>,
+        StreamsApi.streamCapabilities().catch(() => null) as Promise<StreamCapabilitiesResponse | null>
       ]);
 
       const allCodecs = Array.isArray(codecResp) ? codecResp.filter((c) => c?.fourcc) : [];
@@ -416,6 +411,7 @@
           }
         }
       }
+      streamCapabilities = streamCapabilitiesResp;
 
       const list = Array.isArray(cameraResp?.cameras) ? cameraResp.cameras.filter(Boolean) : [];
       const usedKeys = streamAssignedKeys(Array.isArray(streamsResp) ? streamsResp : []);
@@ -759,15 +755,10 @@
     }
     if (simplePipelineSource === 'existing') {
       const id = String(simplePipelineId ?? '').trim();
-      if (!id) {
-        throw new Error('Select a pipeline to attach.');
-      }
-      return id;
+      return id || null;
     }
     const templateId = String(simpleTemplateId ?? '').trim();
-    if (!templateId) {
-      throw new Error('Select a template to attach.');
-    }
+    if (!templateId) return null;
     const templateDoc = await PipelinesApi.fetchTemplate({ id: templateId });
     const templateGraph = templateDoc?.graph;
     if (!templateGraph || typeof templateGraph !== 'object') {
@@ -778,9 +769,37 @@
       String(alias).trim() ||
       String(device.identity?.display ?? '').trim() ||
       'Camera';
-    const uploadName = `${templateName} - ${aliasSeed}`;
-    const created = await PipelinesApi.uploadGraph({ requestBody: { graph: templateGraph, name: uploadName } });
-    const createdId = String(created?.id ?? '').trim();
+    const baseUploadName = `${templateName} - ${aliasSeed}`;
+
+    const isIdentityConflict = (error: unknown): boolean => {
+      if (!(error instanceof ApiError)) return false;
+      if (error.status !== 409) return false;
+      const message =
+        typeof error.body === 'string'
+          ? error.body
+          : typeof (error.body as any)?.error === 'string'
+            ? (error.body as any).error
+            : '';
+      const normalized = message.toLowerCase();
+      return normalized.includes('identity token already in use') || normalized.includes('collide within the requested pipeline');
+    };
+
+    let createdId: string | null = null;
+    const MAX_ATTEMPTS = 8;
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+      const uploadName = attempt === 0 ? baseUploadName : `${baseUploadName} (${attempt + 1})`;
+      try {
+        const created = await PipelinesApi.uploadGraph({ requestBody: { graph: templateGraph, name: uploadName } });
+        createdId = String(created?.id ?? '').trim() || null;
+        if (createdId) break;
+      } catch (error) {
+        if (isIdentityConflict(error) && attempt < MAX_ATTEMPTS - 1) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
     if (!createdId) {
       throw new Error('Failed to create pipeline from template.');
     }
@@ -852,23 +871,7 @@
     };
 
     const normalizedEncoderImpl = encoderImpl && encoderImpl.trim().length ? encoderImpl : null;
-    const compatibleDecoders = decodersForFormat();
-    const requestedDecoder = decoderImpl && decoderImpl.trim().length ? decoderImpl.trim() : null;
-    const decoderMatch =
-      requestedDecoder == null
-        ? null
-        : compatibleDecoders.find((codec) => String(codec.implementation ?? '').trim() === requestedDecoder)
-          ?? compatibleDecoders.find((codec) => String(codec.name ?? '').trim() === requestedDecoder)
-          ?? null;
-    const normalizedDecoderImpl = decoderMatch
-      ? (String(decoderMatch.implementation ?? '').trim() || String(decoderMatch.name ?? '').trim() || null)
-      : null;
-    if (requestedDecoder && !normalizedDecoderImpl) {
-      toaster.warning({
-        title: 'Decoder reset',
-        description: 'Selected decoder is not available for this capture format.'
-      });
-    }
+    const normalizedDecoderImpl = decoderImpl && decoderImpl.trim().length ? decoderImpl.trim() : null;
     const modeWidth = Number(mode.format?.resolution?.width ?? 0);
     const modeHeight = Number(mode.format?.resolution?.height ?? 0);
     const defaultEncoderOutputResolution =
@@ -877,6 +880,16 @@
         : null;
     const backendKind = String(backend.kind ?? '').trim().toLowerCase();
     const isMediaBackend = backendKind === 'file' || backendKind === 'netcam';
+    const rawPipelineId = String(streamCapabilities?.rawPipelineId ?? '').trim();
+    const rawPipelineOutput = String(streamCapabilities?.defaults?.rawOutput ?? '').trim();
+    if (isMediaBackend && (!rawPipelineId || !rawPipelineOutput)) {
+      submitting = false;
+      toaster.error({
+        title: 'Stream capabilities unavailable',
+        description: 'Unable to determine raw pipeline defaults from backend capabilities.'
+      });
+      return;
+    }
     const shouldAttachSelectedPipeline = Boolean(attachedPipelineId);
     const useRawMediaPipelineInSimpleMode = isSimpleRegistration && !shouldAttachSelectedPipeline && isMediaBackend;
 
@@ -894,25 +907,25 @@
           ? shouldAttachSelectedPipeline || useRawMediaPipelineInSimpleMode
           : isMediaBackend,
         active_pipeline_id: isSimpleRegistration
-          ? attachedPipelineId ?? (useRawMediaPipelineInSimpleMode ? RAW_STREAM_PIPELINE_UUID : null)
+          ? attachedPipelineId ?? (useRawMediaPipelineInSimpleMode ? rawPipelineId : null)
           : isMediaBackend
-            ? RAW_STREAM_PIPELINE_UUID
+            ? rawPipelineId
             : null,
         active_pipeline_output: isSimpleRegistration
           ? useRawMediaPipelineInSimpleMode
-            ? 'raw'
+            ? rawPipelineOutput
             : null
           : isMediaBackend
-            ? 'raw'
+            ? rawPipelineOutput
             : null,
         pipelines: isSimpleRegistration
           ? attachedPipelineId
             ? [{ pipeline_id: attachedPipelineId, pipeline_graph: null, pipeline_output: null }]
             : useRawMediaPipelineInSimpleMode
-              ? [{ pipeline_id: RAW_STREAM_PIPELINE_UUID, pipeline_graph: null, pipeline_output: 'raw' }]
+              ? [{ pipeline_id: rawPipelineId, pipeline_graph: null, pipeline_output: rawPipelineOutput }]
               : []
           : isMediaBackend
-            ? [{ pipeline_id: RAW_STREAM_PIPELINE_UUID, pipeline_graph: null, pipeline_output: 'raw' }]
+            ? [{ pipeline_id: rawPipelineId, pipeline_graph: null, pipeline_output: rawPipelineOutput }]
             : [],
         pipeline_layout: isSimpleRegistration
           ? attachedPipelineId
@@ -925,14 +938,14 @@
               ? {
                   rows: 1,
                   columns: 1,
-                  slots: [{ row: 0, column: 0, pipeline_id: RAW_STREAM_PIPELINE_UUID, output_key: 'raw' }]
+                  slots: [{ row: 0, column: 0, pipeline_id: rawPipelineId, output_key: rawPipelineOutput }]
                 }
               : null
           : isMediaBackend
             ? {
                 rows: 1,
                 columns: 1,
-                slots: [{ row: 0, column: 0, pipeline_id: RAW_STREAM_PIPELINE_UUID, output_key: 'raw' }]
+                slots: [{ row: 0, column: 0, pipeline_id: rawPipelineId, output_key: rawPipelineOutput }]
               }
             : null,
         encoder_id: normalizedEncoderImpl,
@@ -959,7 +972,7 @@
               decode_fps_limit: encoderSettings.decodeFps
             }
           : null,
-        host_buffer: Number.isFinite(hostBuffer) && hostBuffer > 0 ? Math.round(hostBuffer) : undefined,
+        host_buffer: Number.isFinite(hostBuffer) ? hostBuffer : undefined,
         start_on_boot: false
       };
 

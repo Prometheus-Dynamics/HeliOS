@@ -227,6 +227,63 @@ export type LocalizationPose = {
   };
 };
 
+type ValidationEntry = {
+  path?: string | null;
+  code?: string | null;
+  message?: string | null;
+};
+
+type ApiErrorBody = {
+  code?: string | null;
+  error?: string | null;
+  message?: string | null;
+  details?: string | null;
+  issues?: ValidationEntry[] | null;
+  warnings?: ValidationEntry[] | null;
+};
+
+function summarizeValidation(entries: ValidationEntry[] | null | undefined): string | null {
+  if (!Array.isArray(entries) || entries.length === 0) return null;
+  const parts = entries
+    .map((entry) => {
+      const message = String(entry?.message ?? '').trim();
+      if (!message) return null;
+      const path = String(entry?.path ?? '').trim();
+      return path ? `${path}: ${message}` : message;
+    })
+    .filter((entry): entry is string => Boolean(entry));
+  if (!parts.length) return null;
+  const first = parts.slice(0, 3).join('; ');
+  const remaining = parts.length - 3;
+  return remaining > 0 ? `${first}; +${remaining} more` : first;
+}
+
+async function readErrorMessage(response: Response): Promise<string> {
+  const statusLabel = `Request failed (${response.status})`;
+  try {
+    const body = (await response.json()) as ApiErrorBody | string;
+    if (typeof body === 'string') {
+      const message = body.trim();
+      return message || statusLabel;
+    }
+    if (body && typeof body === 'object') {
+      const primary =
+        String(body.error ?? '').trim() ||
+        String(body.message ?? '').trim() ||
+        String(body.details ?? '').trim();
+      const issues = summarizeValidation(body.issues);
+      if (primary && issues) return `${primary} ${issues}`;
+      if (issues) return issues;
+      if (primary) return primary;
+    }
+  } catch {
+    const text = await response.text().catch(() => '');
+    const trimmed = text.trim();
+    if (trimmed) return trimmed;
+  }
+  return statusLabel;
+}
+
 export async function fetchLocalizationConfig(): Promise<LocalizationConfig> {
   const response = await fetch(apiUrl('/localization/config'), {
     method: 'GET',
@@ -234,8 +291,7 @@ export async function fetchLocalizationConfig(): Promise<LocalizationConfig> {
   });
 
   if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(text || `Request failed (${response.status})`);
+    throw new Error(await readErrorMessage(response));
   }
 
   return (await response.json()) as LocalizationConfig;
@@ -249,8 +305,7 @@ export async function updateLocalizationConfig(config: LocalizationConfig): Prom
   });
 
   if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(text || `Request failed (${response.status})`);
+    throw new Error(await readErrorMessage(response));
   }
 
   return (await response.json()) as LocalizationConfig;
@@ -263,8 +318,7 @@ export async function fetchLocalizationSolve(profileId?: string, signal?: AbortS
   const response = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' }, signal });
 
   if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(text || `Request failed (${response.status})`);
+    throw new Error(await readErrorMessage(response));
   }
 
   return (await response.json()) as LocalizationSolveResponse;

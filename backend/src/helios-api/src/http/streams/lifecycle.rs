@@ -17,16 +17,16 @@ use uuid::Uuid;
 
 use crate::http::AppState;
 use crate::http::identity_tokens;
-use crate::http::pipelines;
 use crate::http::streams_persist;
+use crate::http::validation::validation_error_response;
 
 use super::sensor_bench;
 use super::types::{CodecInfo, CodecTunables, StartStreamResponse, StreamInfo};
 use super::util::{
     apply_effective_pipeline_layout, camera_id_for_manifest, default_ffmpeg_settings_descriptor, engine_error_body, list_streams_timeout, map_client_error, normalize_pipeline_manifest,
 };
+use super::validation::validate_stream_manifest;
 use super::wait::{wait_for_stream_gone, wait_for_stream_started};
-use super::{CALIBRATION_MODE_PIPELINE_UUID, RAW_PIPELINE_UUID};
 
 fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
@@ -624,45 +624,6 @@ pub(crate) async fn list_streams(state: AppState) -> Response {
     stream_list_response(out, stale)
 }
 
-pub(in crate::http::streams) struct PipelineLoadError {
-    pub(in crate::http::streams) status: StatusCode,
-    pub(in crate::http::streams) message: String,
-}
-
-pub(in crate::http::streams) async fn fill_manifest_pipeline(manifest: &mut StreamManifest) -> Result<(), PipelineLoadError> {
-    if manifest.pipeline_enabled == Some(false) {
-        manifest.pipelines.clear();
-        manifest.active_pipeline_id = None;
-        manifest.active_pipeline_output = None;
-        manifest.pipeline_layout = None;
-        return Ok(());
-    }
-
-    for binding in &mut manifest.pipelines {
-        if binding.pipeline_graph.is_some() && binding.pipeline_id != CALIBRATION_MODE_PIPELINE_UUID {
-            return Err(PipelineLoadError {
-                status: StatusCode::BAD_REQUEST,
-                message: format!("inline pipeline graphs are not allowed for stream manifests (pipeline {}); persist the graph under /pipelines/graphs first", binding.pipeline_id),
-            });
-        }
-        binding.pipeline_graph = None;
-        let pipeline_id = binding.pipeline_id;
-        if pipeline_id == RAW_PIPELINE_UUID || pipeline_id == CALIBRATION_MODE_PIPELINE_UUID {
-            continue;
-        }
-        match pipelines::load_graph_document(pipeline_id).await {
-            Ok(_) => {}
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                return Err(PipelineLoadError { status: StatusCode::BAD_REQUEST, message: format!("pipeline {pipeline_id} is not persisted under /pipelines/graphs") });
-            }
-            Err(err) => {
-                return Err(PipelineLoadError { status: StatusCode::BAD_GATEWAY, message: format!("failed to load pipeline {pipeline_id}: {err}") });
-            }
-        }
-    }
-    Ok(())
-}
-
 pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> Response {
     // Serialize stream starts so identity uniqueness checks (active + persisted) remain reliable.
     let _guard = stream_start_lock().lock().await;
@@ -694,8 +655,29 @@ pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> R
         manifest.shadow_recorder_enabled = false;
     }
 
-    if let Err(err) = fill_manifest_pipeline(&mut manifest).await {
-        return (err.status, Json(engine_error_body(Some(EngineErrorCode::Internal), err.message))).into_response();
+    match validate_stream_manifest(manifest).await {
+        Ok(validated) => {
+            if !validated.warnings.is_empty() {
+                tracing::info!(
+                    stream_id = %requested_id,
+                    warning_count = validated.warnings.len(),
+                    warnings = ?validated.warnings,
+                    "stream manifest sanitized during semantic validation"
+                );
+            }
+            manifest = validated.manifest;
+        }
+        Err(err) => {
+            tracing::warn!(
+                stream_id = %requested_id,
+                issue_count = err.issues.len(),
+                warning_count = err.warnings.len(),
+                issues = ?err.issues,
+                warnings = ?err.warnings,
+                "stream start rejected by semantic validator"
+            );
+            return validation_error_response("stream manifest failed semantic validation", err.issues, err.warnings);
+        }
     }
     if let Some(response) = ensure_unique_stream_identity(&state, &manifest, requested_id, &camera_id).await {
         return response;

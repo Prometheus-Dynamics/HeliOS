@@ -132,8 +132,10 @@
   const TARGET_FAR = 2;
   const TARGET_SKEW = 3;
   const TARGET_CORNERS = 4;
-  const CALIBRATION_MODE_PIPELINE_UUID = '00000000-0000-0000-0000-00000000c411';
-  const RAW_PIPELINE_UUID = '00000000-0000-0000-0000-0000000000aa';
+  let calibrationModePipelineUuid = $state('');
+  let rawPipelineUuid = $state('');
+  let streamCapabilitiesLoaded = false;
+  let streamCapabilitiesPromise: Promise<void> | null = null;
   const graphNameCache = new Map<string, string>();
 
   function persistGuidedState(streamUuid: string): void {
@@ -865,6 +867,26 @@
     return normalized.length ? normalized : null;
   }
 
+  async function ensureStreamCapabilities(): Promise<void> {
+    if (streamCapabilitiesLoaded) return;
+    if (streamCapabilitiesPromise) return streamCapabilitiesPromise;
+    streamCapabilitiesPromise = (async () => {
+      try {
+        const capabilities = await StreamsApi.streamCapabilities();
+        const rawId = normalizePipelineId(capabilities?.rawPipelineId);
+        if (rawId) rawPipelineUuid = rawId;
+        const calibrationId = normalizePipelineId(capabilities?.calibrationModePipelineId);
+        if (calibrationId) calibrationModePipelineUuid = calibrationId;
+      } catch {
+        // Keep previously loaded IDs; avoid local hardcoded fallback IDs.
+      } finally {
+        streamCapabilitiesLoaded = true;
+        streamCapabilitiesPromise = null;
+      }
+    })();
+    return streamCapabilitiesPromise;
+  }
+
   function readErrorStatus(error: unknown): number | null {
     if (!error || typeof error !== 'object') return null;
     const status = Number((error as { status?: unknown }).status);
@@ -912,8 +934,8 @@
 
   async function resolveGraphName(pipelineId: string | null): Promise<string> {
     if (!pipelineId) return 'none';
-    if (pipelineId === RAW_PIPELINE_UUID) return 'raw';
-    if (pipelineId === CALIBRATION_MODE_PIPELINE_UUID) return 'daedalus_aruco';
+    if (pipelineId === rawPipelineUuid) return 'raw';
+    if (pipelineId === calibrationModePipelineUuid) return 'daedalus_aruco';
     const cached = graphNameCache.get(pipelineId);
     if (cached) return cached;
     try {
@@ -1036,6 +1058,7 @@
 
   function startPolling(): void {
     stopPolling();
+    void ensureStreamCapabilities();
     pollTimer = setInterval(() => void pollOnce(), 200);
     metricsTimer = setInterval(() => void pollMetricsOnce(), 1000);
     void pollOnce();

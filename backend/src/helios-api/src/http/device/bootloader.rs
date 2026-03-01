@@ -55,6 +55,7 @@ struct BootloaderConfig {
     get,
     path = "/device/bootloader",
     tag = "Device",
+    operation_id = "bootloader_status",
     responses((status = 200, description = "Bootloader firmware status", body = BootloaderStatus))
 )]
 pub async fn status() -> ApiResult<impl axum::response::IntoResponse> {

@@ -6,7 +6,12 @@
   import { StreamsApi } from '$lib/api/streamsApi';
   import { connectRealtimeUpdatesStream, type RealtimeUpdateEvent } from '$lib/api/realtimeUpdates';
   import { imuQuaternionToThree } from '$lib/utils/imuFrames';
-  import type { StreamInfo, StreamMetrics } from '$lib/ts-bindings/http/client';
+  import {
+    LocalizationService,
+    type LocalizationCapabilitiesResponse,
+    type StreamInfo,
+    type StreamMetrics
+  } from '$lib/ts-bindings/http/client';
   import type { LocalizationMarker, LocalizationViewMode } from '$lib';
   import type { PipelineTemplateSummary } from '$lib/types/pipeline';
   import type { RigCameraInfo, RobotDimensions } from '$lib/types/rig';
@@ -47,6 +52,7 @@
     type LocalizationPoseSpace,
     type LocalizationSolveResponse,
     type LocalizationSolverConfig,
+    type LocalizationSolverMode,
     type LocalizationSolverRuntimeTuningConfig,
     type LocalizationSolverOutputs,
     type LocalizationSolverResult,
@@ -63,12 +69,11 @@
   } from '$lib/features/localization/fieldMaps';
   import type { CameraExtrinsics, CustomField, CustomFieldOrigin } from '$lib/features/localization/types';
   import { createLocalizationStorageStore } from '$lib/features/localization/storage';
-  import { createFeedPoller, pollIntervalMs } from '$lib/features/localization/feedPoller';
+  import { createFeedPoller, normalizePollHz, pollIntervalMs, type PollRateLimits } from '$lib/features/localization/feedPoller';
   import LocalizationWorkspace from '$lib/features/localization/page/LocalizationWorkspace.svelte';
   import {
     SOURCE_COLORS,
     PROFILE_COLORS,
-    POSE_SPACE_OPTIONS,
     SOLVE_POSE_SPACES,
     DERIVED_POSE_SPACES,
     poseSpaceLabel,
@@ -194,12 +199,10 @@
   const LIVE_UPDATES_RECONNECT_MS = 1_500;
   const LIVE_UPDATES_REFRESH_DEBOUNCE_MS = 400;
   const LIVE_SOURCES_REFRESH_MIN_INTERVAL_MS = 5_000;
-
   const bumperId = '0000';
   let sources = $state<LocalizationPipelineSource[]>([]);
   let sourcesLoading = $state(false);
   let sourcesError = $state<string | null>(null);
-  let sourceCompatibility = $state<Record<string, boolean>>({});
   let selectedSourceIds = $state<string[]>([]);
   let primarySourceId = $state<string | null>(null);
   const localizationProfiles = createLocalizationProfileStore();
@@ -220,6 +223,7 @@
   let pipelineOutputs = $state<string[]>([]);
   let pipelineOutputsLoading = $state(false);
   let pipelineOutputsError = $state<string | null>(null);
+  let localizationCapabilities = $state<LocalizationCapabilitiesResponse | null>(null);
 
   let feedStatus = $state<FeedStatus>('idle');
   let feedMessage = $state<string | null>(null);
@@ -419,13 +423,13 @@
   };
 
   const temporalFieldParsers = {
-    singleTagTranslationAlpha: { min: 0, max: 1 },
-    singleTagRotationAlpha: { min: 0, max: 1 },
-    multiTagTranslationAlpha: { min: 0, max: 1 },
-    multiTagRotationAlpha: { min: 0, max: 1 },
-    maxTranslationJumpM: { min: 0.01, max: 50 },
-    maxRotationJumpDeg: { min: 0.1, max: 180 },
-    reanchorRejectWindowMs: { min: 50, max: 5000, integer: true }
+    singleTagTranslationAlpha: {},
+    singleTagRotationAlpha: {},
+    multiTagTranslationAlpha: {},
+    multiTagRotationAlpha: {},
+    maxTranslationJumpM: {},
+    maxRotationJumpDeg: {},
+    reanchorRejectWindowMs: { integer: true }
   } as const;
   type TemporalNumericField = keyof typeof temporalFieldParsers;
 
@@ -436,28 +440,49 @@
     settings?: LocalizationTemporalStabilizationConfig | null
   ): LocalizationTemporalStabilizationConfig => {
     const merged = { ...DEFAULT_TEMPORAL_STABILIZATION, ...(settings ?? {}) };
-    const clamp = (value: number, min: number, max: number): number =>
-      Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : min;
+    const numberOrDefault = (value: number, fallback: number): number =>
+      Number.isFinite(value) ? Number(value) : fallback;
     return {
       enabled: Boolean(merged.enabled),
-      singleTagTranslationAlpha: clamp(merged.singleTagTranslationAlpha, 0, 1),
-      singleTagRotationAlpha: clamp(merged.singleTagRotationAlpha, 0, 1),
-      multiTagTranslationAlpha: clamp(merged.multiTagTranslationAlpha, 0, 1),
-      multiTagRotationAlpha: clamp(merged.multiTagRotationAlpha, 0, 1),
-      maxTranslationJumpM: clamp(merged.maxTranslationJumpM, 0.01, 50),
-      maxRotationJumpDeg: clamp(merged.maxRotationJumpDeg, 0.1, 180),
-      reanchorRejectWindowMs: Math.round(clamp(merged.reanchorRejectWindowMs, 50, 5000))
+      singleTagTranslationAlpha: numberOrDefault(
+        merged.singleTagTranslationAlpha,
+        DEFAULT_TEMPORAL_STABILIZATION.singleTagTranslationAlpha
+      ),
+      singleTagRotationAlpha: numberOrDefault(
+        merged.singleTagRotationAlpha,
+        DEFAULT_TEMPORAL_STABILIZATION.singleTagRotationAlpha
+      ),
+      multiTagTranslationAlpha: numberOrDefault(
+        merged.multiTagTranslationAlpha,
+        DEFAULT_TEMPORAL_STABILIZATION.multiTagTranslationAlpha
+      ),
+      multiTagRotationAlpha: numberOrDefault(
+        merged.multiTagRotationAlpha,
+        DEFAULT_TEMPORAL_STABILIZATION.multiTagRotationAlpha
+      ),
+      maxTranslationJumpM: numberOrDefault(
+        merged.maxTranslationJumpM,
+        DEFAULT_TEMPORAL_STABILIZATION.maxTranslationJumpM
+      ),
+      maxRotationJumpDeg: numberOrDefault(
+        merged.maxRotationJumpDeg,
+        DEFAULT_TEMPORAL_STABILIZATION.maxRotationJumpDeg
+      ),
+      reanchorRejectWindowMs: Math.round(
+        numberOrDefault(
+          merged.reanchorRejectWindowMs,
+          DEFAULT_TEMPORAL_STABILIZATION.reanchorRejectWindowMs
+        )
+      )
     };
   };
 
   const parseTemporalNumericValue = (field: TemporalNumericField, rawValue: string): number | null => {
     const parsed = Number(rawValue);
     if (!Number.isFinite(parsed)) return null;
-    const bounds = temporalFieldParsers[field];
-    const { min, max } = bounds;
-    const integer = 'integer' in bounds ? Boolean(bounds.integer) : false;
-    const clamped = Math.min(max, Math.max(min, parsed));
-    return integer ? Math.round(clamped) : clamped;
+    const parser = temporalFieldParsers[field];
+    const integer = 'integer' in parser ? Boolean(parser.integer) : false;
+    return integer ? Math.round(parsed) : parsed;
   };
 
   const setProfileTemporalEnabled = (enabled: boolean): void => {
@@ -533,34 +558,34 @@
   };
 
   const solverRuntimeFieldParsers = {
-    minObservationWeight: { min: 0, max: 5 },
-    minSingleTagSolveWeight: { min: 0, max: 5 },
-    minMultiTagTotalWeight: { min: 0, max: 20 },
-    minMultiTagEffectiveCount: { min: 0, max: 20 },
-    weakSingleTagMargin: { min: 0, max: 5 },
-    coplanarHeightDeltaM: { min: 0, max: 5 },
-    severeObservedHeightDeltaM: { min: 0, max: 10 },
-    moderateObservedHeightDeltaM: { min: 0, max: 10 },
-    mildObservedHeightDeltaM: { min: 0, max: 10 },
-    severePenalty: { min: 0, max: 1 },
-    moderatePenalty: { min: 0, max: 1 },
-    mildPenalty: { min: 0, max: 1 },
-    dtScaleMin: { min: 0.01, max: 20 },
-    dtScaleMax: { min: 0.01, max: 20 },
-    switchedSingleTagMaxTranslationJumpM: { min: 0.001, max: 50 },
-    switchedSingleTagMaxRotationJumpDeg: { min: 0.01, max: 180 },
-    droppedMultiToSingleMaxTranslationJumpM: { min: 0.001, max: 50 },
-    droppedMultiToSingleMaxRotationJumpDeg: { min: 0.01, max: 180 },
-    switchedSingleTagRejectWindowScale: { min: 0.1, max: 10 },
-    switchedSingleTagRejectWindowMinMs: { min: 0, max: 20000, integer: true },
-    droppedMultiToSingleRejectWindowScale: { min: 0.1, max: 10 },
-    droppedMultiToSingleRejectWindowMinMs: { min: 0, max: 20000, integer: true },
-    switchedSingleTagGainDamp: { min: 0, max: 1 },
-    switchedSingleTagMinTranslationGain: { min: 0, max: 1 },
-    switchedSingleTagMinRotationGain: { min: 0, max: 1 },
-    droppedMultiToSingleGainDamp: { min: 0, max: 1 },
-    droppedMultiToSingleMinTranslationGain: { min: 0, max: 1 },
-    droppedMultiToSingleMinRotationGain: { min: 0, max: 1 }
+    minObservationWeight: {},
+    minSingleTagSolveWeight: {},
+    minMultiTagTotalWeight: {},
+    minMultiTagEffectiveCount: {},
+    weakSingleTagMargin: {},
+    coplanarHeightDeltaM: {},
+    severeObservedHeightDeltaM: {},
+    moderateObservedHeightDeltaM: {},
+    mildObservedHeightDeltaM: {},
+    severePenalty: {},
+    moderatePenalty: {},
+    mildPenalty: {},
+    dtScaleMin: {},
+    dtScaleMax: {},
+    switchedSingleTagMaxTranslationJumpM: {},
+    switchedSingleTagMaxRotationJumpDeg: {},
+    droppedMultiToSingleMaxTranslationJumpM: {},
+    droppedMultiToSingleMaxRotationJumpDeg: {},
+    switchedSingleTagRejectWindowScale: {},
+    switchedSingleTagRejectWindowMinMs: { integer: true },
+    droppedMultiToSingleRejectWindowScale: {},
+    droppedMultiToSingleRejectWindowMinMs: { integer: true },
+    switchedSingleTagGainDamp: {},
+    switchedSingleTagMinTranslationGain: {},
+    switchedSingleTagMinRotationGain: {},
+    droppedMultiToSingleGainDamp: {},
+    droppedMultiToSingleMinTranslationGain: {},
+    droppedMultiToSingleMinRotationGain: {}
   } as const;
   type SolverRuntimeNumericField = keyof typeof solverRuntimeFieldParsers;
 
@@ -571,50 +596,122 @@
     settings?: LocalizationSolverRuntimeTuningConfig | null
   ): LocalizationSolverRuntimeTuningConfig => {
     const merged = { ...DEFAULT_SOLVER_RUNTIME_TUNING, ...(settings ?? {}) };
-    const clamp = (value: number, min: number, max: number): number =>
-      Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : min;
-    const dtScaleMin = clamp(merged.dtScaleMin, 0.01, 20);
-    const dtScaleMax = Math.max(dtScaleMin, clamp(merged.dtScaleMax, 0.01, 20));
+    const numberOrDefault = (value: number, fallback: number): number =>
+      Number.isFinite(value) ? Number(value) : fallback;
     return {
-      minObservationWeight: clamp(merged.minObservationWeight, 0, 5),
-      minSingleTagSolveWeight: clamp(merged.minSingleTagSolveWeight, 0, 5),
-      minMultiTagTotalWeight: clamp(merged.minMultiTagTotalWeight, 0, 20),
-      minMultiTagEffectiveCount: clamp(merged.minMultiTagEffectiveCount, 0, 20),
-      weakSingleTagMargin: clamp(merged.weakSingleTagMargin, 0, 5),
-      coplanarHeightDeltaM: clamp(merged.coplanarHeightDeltaM, 0, 5),
-      severeObservedHeightDeltaM: clamp(merged.severeObservedHeightDeltaM, 0, 10),
-      moderateObservedHeightDeltaM: clamp(merged.moderateObservedHeightDeltaM, 0, 10),
-      mildObservedHeightDeltaM: clamp(merged.mildObservedHeightDeltaM, 0, 10),
-      severePenalty: clamp(merged.severePenalty, 0, 1),
-      moderatePenalty: clamp(merged.moderatePenalty, 0, 1),
-      mildPenalty: clamp(merged.mildPenalty, 0, 1),
-      dtScaleMin,
-      dtScaleMax,
-      switchedSingleTagMaxTranslationJumpM: clamp(merged.switchedSingleTagMaxTranslationJumpM, 0.001, 50),
-      switchedSingleTagMaxRotationJumpDeg: clamp(merged.switchedSingleTagMaxRotationJumpDeg, 0.01, 180),
-      droppedMultiToSingleMaxTranslationJumpM: clamp(merged.droppedMultiToSingleMaxTranslationJumpM, 0.001, 50),
-      droppedMultiToSingleMaxRotationJumpDeg: clamp(merged.droppedMultiToSingleMaxRotationJumpDeg, 0.01, 180),
-      switchedSingleTagRejectWindowScale: clamp(merged.switchedSingleTagRejectWindowScale, 0.1, 10),
-      switchedSingleTagRejectWindowMinMs: Math.round(clamp(merged.switchedSingleTagRejectWindowMinMs, 0, 20000)),
-      droppedMultiToSingleRejectWindowScale: clamp(merged.droppedMultiToSingleRejectWindowScale, 0.1, 10),
-      droppedMultiToSingleRejectWindowMinMs: Math.round(clamp(merged.droppedMultiToSingleRejectWindowMinMs, 0, 20000)),
-      switchedSingleTagGainDamp: clamp(merged.switchedSingleTagGainDamp, 0, 1),
-      switchedSingleTagMinTranslationGain: clamp(merged.switchedSingleTagMinTranslationGain, 0, 1),
-      switchedSingleTagMinRotationGain: clamp(merged.switchedSingleTagMinRotationGain, 0, 1),
-      droppedMultiToSingleGainDamp: clamp(merged.droppedMultiToSingleGainDamp, 0, 1),
-      droppedMultiToSingleMinTranslationGain: clamp(merged.droppedMultiToSingleMinTranslationGain, 0, 1),
-      droppedMultiToSingleMinRotationGain: clamp(merged.droppedMultiToSingleMinRotationGain, 0, 1)
+      minObservationWeight: numberOrDefault(
+        merged.minObservationWeight,
+        DEFAULT_SOLVER_RUNTIME_TUNING.minObservationWeight
+      ),
+      minSingleTagSolveWeight: numberOrDefault(
+        merged.minSingleTagSolveWeight,
+        DEFAULT_SOLVER_RUNTIME_TUNING.minSingleTagSolveWeight
+      ),
+      minMultiTagTotalWeight: numberOrDefault(
+        merged.minMultiTagTotalWeight,
+        DEFAULT_SOLVER_RUNTIME_TUNING.minMultiTagTotalWeight
+      ),
+      minMultiTagEffectiveCount: numberOrDefault(
+        merged.minMultiTagEffectiveCount,
+        DEFAULT_SOLVER_RUNTIME_TUNING.minMultiTagEffectiveCount
+      ),
+      weakSingleTagMargin: numberOrDefault(
+        merged.weakSingleTagMargin,
+        DEFAULT_SOLVER_RUNTIME_TUNING.weakSingleTagMargin
+      ),
+      coplanarHeightDeltaM: numberOrDefault(
+        merged.coplanarHeightDeltaM,
+        DEFAULT_SOLVER_RUNTIME_TUNING.coplanarHeightDeltaM
+      ),
+      severeObservedHeightDeltaM: numberOrDefault(
+        merged.severeObservedHeightDeltaM,
+        DEFAULT_SOLVER_RUNTIME_TUNING.severeObservedHeightDeltaM
+      ),
+      moderateObservedHeightDeltaM: numberOrDefault(
+        merged.moderateObservedHeightDeltaM,
+        DEFAULT_SOLVER_RUNTIME_TUNING.moderateObservedHeightDeltaM
+      ),
+      mildObservedHeightDeltaM: numberOrDefault(
+        merged.mildObservedHeightDeltaM,
+        DEFAULT_SOLVER_RUNTIME_TUNING.mildObservedHeightDeltaM
+      ),
+      severePenalty: numberOrDefault(merged.severePenalty, DEFAULT_SOLVER_RUNTIME_TUNING.severePenalty),
+      moderatePenalty: numberOrDefault(
+        merged.moderatePenalty,
+        DEFAULT_SOLVER_RUNTIME_TUNING.moderatePenalty
+      ),
+      mildPenalty: numberOrDefault(merged.mildPenalty, DEFAULT_SOLVER_RUNTIME_TUNING.mildPenalty),
+      dtScaleMin: numberOrDefault(merged.dtScaleMin, DEFAULT_SOLVER_RUNTIME_TUNING.dtScaleMin),
+      dtScaleMax: numberOrDefault(merged.dtScaleMax, DEFAULT_SOLVER_RUNTIME_TUNING.dtScaleMax),
+      switchedSingleTagMaxTranslationJumpM: numberOrDefault(
+        merged.switchedSingleTagMaxTranslationJumpM,
+        DEFAULT_SOLVER_RUNTIME_TUNING.switchedSingleTagMaxTranslationJumpM
+      ),
+      switchedSingleTagMaxRotationJumpDeg: numberOrDefault(
+        merged.switchedSingleTagMaxRotationJumpDeg,
+        DEFAULT_SOLVER_RUNTIME_TUNING.switchedSingleTagMaxRotationJumpDeg
+      ),
+      droppedMultiToSingleMaxTranslationJumpM: numberOrDefault(
+        merged.droppedMultiToSingleMaxTranslationJumpM,
+        DEFAULT_SOLVER_RUNTIME_TUNING.droppedMultiToSingleMaxTranslationJumpM
+      ),
+      droppedMultiToSingleMaxRotationJumpDeg: numberOrDefault(
+        merged.droppedMultiToSingleMaxRotationJumpDeg,
+        DEFAULT_SOLVER_RUNTIME_TUNING.droppedMultiToSingleMaxRotationJumpDeg
+      ),
+      switchedSingleTagRejectWindowScale: numberOrDefault(
+        merged.switchedSingleTagRejectWindowScale,
+        DEFAULT_SOLVER_RUNTIME_TUNING.switchedSingleTagRejectWindowScale
+      ),
+      switchedSingleTagRejectWindowMinMs: Math.round(
+        numberOrDefault(
+          merged.switchedSingleTagRejectWindowMinMs,
+          DEFAULT_SOLVER_RUNTIME_TUNING.switchedSingleTagRejectWindowMinMs
+        )
+      ),
+      droppedMultiToSingleRejectWindowScale: numberOrDefault(
+        merged.droppedMultiToSingleRejectWindowScale,
+        DEFAULT_SOLVER_RUNTIME_TUNING.droppedMultiToSingleRejectWindowScale
+      ),
+      droppedMultiToSingleRejectWindowMinMs: Math.round(
+        numberOrDefault(
+          merged.droppedMultiToSingleRejectWindowMinMs,
+          DEFAULT_SOLVER_RUNTIME_TUNING.droppedMultiToSingleRejectWindowMinMs
+        )
+      ),
+      switchedSingleTagGainDamp: numberOrDefault(
+        merged.switchedSingleTagGainDamp,
+        DEFAULT_SOLVER_RUNTIME_TUNING.switchedSingleTagGainDamp
+      ),
+      switchedSingleTagMinTranslationGain: numberOrDefault(
+        merged.switchedSingleTagMinTranslationGain,
+        DEFAULT_SOLVER_RUNTIME_TUNING.switchedSingleTagMinTranslationGain
+      ),
+      switchedSingleTagMinRotationGain: numberOrDefault(
+        merged.switchedSingleTagMinRotationGain,
+        DEFAULT_SOLVER_RUNTIME_TUNING.switchedSingleTagMinRotationGain
+      ),
+      droppedMultiToSingleGainDamp: numberOrDefault(
+        merged.droppedMultiToSingleGainDamp,
+        DEFAULT_SOLVER_RUNTIME_TUNING.droppedMultiToSingleGainDamp
+      ),
+      droppedMultiToSingleMinTranslationGain: numberOrDefault(
+        merged.droppedMultiToSingleMinTranslationGain,
+        DEFAULT_SOLVER_RUNTIME_TUNING.droppedMultiToSingleMinTranslationGain
+      ),
+      droppedMultiToSingleMinRotationGain: numberOrDefault(
+        merged.droppedMultiToSingleMinRotationGain,
+        DEFAULT_SOLVER_RUNTIME_TUNING.droppedMultiToSingleMinRotationGain
+      )
     };
   };
 
   const parseSolverRuntimeNumericValue = (field: SolverRuntimeNumericField, rawValue: string): number | null => {
     const parsed = Number(rawValue);
     if (!Number.isFinite(parsed)) return null;
-    const bounds = solverRuntimeFieldParsers[field];
-    const { min, max } = bounds;
-    const integer = 'integer' in bounds ? Boolean(bounds.integer) : false;
-    const clamped = Math.min(max, Math.max(min, parsed));
-    return integer ? Math.round(clamped) : clamped;
+    const parser = solverRuntimeFieldParsers[field];
+    const integer = 'integer' in parser ? Boolean(parser.integer) : false;
+    return integer ? Math.round(parsed) : parsed;
   };
 
   const setSolverRuntimeTuningNumeric = (field: string, rawValue: string): void => {
@@ -702,6 +799,7 @@
     setMapUploadSuccess: (summary) => {
       fieldMaps = [...fieldMaps, summary];
     },
+    getMaxMapUploadBytes: () => maxMapUploadBytes,
     toaster,
     getNewOriginName: () => newOriginName,
     getNewOriginX: () => newOriginX,
@@ -836,9 +934,7 @@
     setSourcesError: (next) => {
       sourcesError = next;
     },
-    setSourceCompatibility: (next) => {
-      sourceCompatibility = next;
-    },
+    setSourceCompatibility: () => {},
     getSelectedSourceIds: () => selectedSourceIds,
     applySourceSelection,
     toaster,
@@ -849,6 +945,13 @@
         next as (typeof import('$lib/components/LocalizationViewers.svelte'))['default'];
     }
   });
+  const loadLocalizationCapabilities = async (): Promise<void> => {
+    try {
+      localizationCapabilities = await LocalizationService.localizationCapabilitiesHandler();
+    } catch {
+      localizationCapabilities = null;
+    }
+  };
   let cameraPoseInputsKey: string | null = null;
 
   const customFields = localizationStorage.customFields;
@@ -1833,7 +1936,6 @@
   const compatibleSources = $derived.by<LocalizationPipelineSource[]>(() => {
     const selfProfileStreamId = activeProfileSourceStreamId;
     return sources.filter((entry) => {
-      if (!(sourceCompatibility[entry.id] ?? false)) return false;
       if (selfProfileStreamId && entry.streamId.trim() === selfProfileStreamId) return false;
       return true;
     });
@@ -2156,9 +2258,82 @@
     return null;
   });
 
+  const supportedSolverModes = $derived.by<LocalizationSolverMode[]>(() => {
+    const supported = localizationCapabilities?.constraints?.supportedSolverModes ?? [];
+    const seen = new Set<string>();
+    const ordered: LocalizationSolverMode[] = [];
+    for (const mode of supported) {
+      const normalized = String(mode ?? '').trim();
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      ordered.push(mode);
+    }
+    if (ordered.length > 0) return ordered;
+
+    const configuredModes = $profiles.flatMap((profile) => profile.solvers.map((solver) => solver.mode));
+    for (const mode of configuredModes) {
+      const normalized = String(mode ?? '').trim();
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      ordered.push(mode);
+    }
+    return ordered;
+  });
+  const supportedPoseSpaces = $derived.by<LocalizationPoseSpace[]>(() => {
+    const supported = localizationCapabilities?.constraints?.supportedPoseSpaces ?? [];
+    const seen = new Set<string>();
+    const ordered: LocalizationPoseSpace[] = [];
+    for (const space of supported) {
+      const normalized = String(space ?? '').trim();
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      ordered.push(space);
+    }
+    if (ordered.length > 0) return ordered;
+
+    const configuredSpaces = $profiles.flatMap((profile) =>
+      profile.solvers.flatMap((solver) => (solver.outputSpaces ?? []).filter(Boolean))
+    );
+    for (const space of configuredSpaces) {
+      const normalized = String(space ?? '').trim();
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      ordered.push(space);
+    }
+    return ordered;
+  });
+  const supportedPoseSpaceSet = $derived.by(() => new Set(supportedPoseSpaces));
+  const maxMapUploadBytes = $derived.by<number | null>(() => {
+    const raw = Number(localizationCapabilities?.constraints?.maxMapUploadBytes ?? Number.NaN);
+    if (!Number.isFinite(raw) || raw <= 0) return null;
+    return Math.trunc(raw);
+  });
+  const pollRateLimits = $derived.by<PollRateLimits | null>(() => {
+    const minRaw = Number(localizationCapabilities?.constraints?.minPollHz ?? Number.NaN);
+    const maxRaw = Number(localizationCapabilities?.constraints?.maxPollHz ?? Number.NaN);
+    const defaultRaw = Number(localizationCapabilities?.constraints?.defaultPollHz ?? Number.NaN);
+    if (!Number.isFinite(minRaw) || !Number.isFinite(maxRaw) || !Number.isFinite(defaultRaw)) return null;
+    const minHz = Math.max(1, Math.floor(minRaw));
+    const maxHz = Math.max(minHz, Math.floor(maxRaw));
+    const defaultHz = Math.min(maxHz, Math.max(minHz, Math.floor(defaultRaw)));
+    return { minHz, maxHz, defaultHz };
+  });
+  const pollHzStep = $derived.by<number>(() => {
+    const raw = Number(localizationCapabilities?.constraints?.pollStepHz ?? Number.NaN);
+    return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 1;
+  });
+  const pollHzMin = $derived.by<number>(() => pollRateLimits?.minHz ?? 1);
+  const pollHzMax = $derived.by<number>(() => pollRateLimits?.maxHz ?? Math.max(1, pollHzMin));
+  $effect(() => {
+    const normalized = normalizePollHz(pollHz, pollRateLimits);
+    if (normalized !== pollHz) pollHz = normalized;
+  });
   const solverOutputSpaces = $derived.by<LocalizationPoseSpace[]>(() => activeSolverConfig?.outputSpaces ?? []);
+  const supportedSolvePoseSpaces = $derived.by<LocalizationPoseSpace[]>(() =>
+    SOLVE_POSE_SPACES.filter((space) => supportedPoseSpaceSet.has(space))
+  );
   const solvePoseSpaces = $derived.by<LocalizationPoseSpace[]>(() => {
-    return SOLVE_POSE_SPACES.filter((space) => solverOutputSpaces.includes(space));
+    return supportedSolvePoseSpaces.filter((space) => solverOutputSpaces.includes(space));
   });
   const derivedPoseSpaces = $derived.by<LocalizationPoseSpace[]>(() => {
     const derived = new Set<LocalizationPoseSpace>();
@@ -2169,13 +2344,13 @@
         derived.add(next);
       }
     }
-    return Array.from(derived.values()).filter((space) => POSE_SPACE_OPTIONS.includes(space));
+    return Array.from(derived.values()).filter((space) => supportedPoseSpaceSet.has(space));
   });
   const availableCoordinateSpaces = $derived.by<LocalizationPoseSpace[]>(() => {
     const next: LocalizationPoseSpace[] = [];
     const seen = new Set<string>();
     for (const space of solverOutputSpaces.concat(derivedPoseSpaces)) {
-      if (!POSE_SPACE_OPTIONS.includes(space)) continue;
+      if (!supportedPoseSpaceSet.has(space)) continue;
       if (seen.has(space)) continue;
       seen.add(space);
       next.push(space);
@@ -2189,7 +2364,7 @@
       // Compute support from the persisted config (stable even when a profile isn't being polled).
       const outputSpaces = (profile.solvers ?? [])
         .flatMap((solver) => solver.outputSpaces ?? [])
-        .filter((space) => POSE_SPACE_OPTIONS.includes(space));
+        .filter((space) => supportedPoseSpaceSet.has(space));
       const supported = new Set<LocalizationPoseSpace>(outputSpaces);
       // Field spaces require a field map selection on the profile.
       if (!profile.fieldMapId) {
@@ -2202,7 +2377,7 @@
   });
 
   const feedPoller = createFeedPoller({
-    getIntervalMs: () => pollIntervalMs(pollHz),
+    getIntervalMs: () => pollIntervalMs(pollHz, pollRateLimits),
     hasSources: () => hasAnyFeedSources,
     onPoll: runFeedPoll
   });
@@ -2211,6 +2386,7 @@
     getActiveProfile: () => $activeProfile ?? null,
     getActiveSolverConfig: () => activeSolverConfig,
     getSolvePoseSpaces: () => solvePoseSpaces,
+    getSupportedPoseSpaces: () => supportedPoseSpaces,
     setFieldMapSelection: (next) => {
       fieldMapSelection = next;
     },
@@ -2250,11 +2426,15 @@
   const {
     setFieldMapSelection,
     toggleSolverOutputSpace,
-    setActiveSolverMode,
+    setActiveSolverMode: setActiveSolverModeBase,
     setSolveSpaceEnabled,
     setPipelineTemplateId,
     setSourceInputKey
   } = localizationActions;
+  const setActiveSolverMode = (mode: LocalizationSolverMode): void => {
+    if (!supportedSolverModes.includes(mode)) return;
+    setActiveSolverModeBase(mode);
+  };
 
   const setActiveSolverIdForUi = (nextId: string): void => {
     activeSolverId = nextId;
@@ -2283,11 +2463,43 @@
     }
 
     const template = activeSolverConfig ?? profile.solvers[0] ?? null;
+    const capabilityDefaultMode = localizationCapabilities?.defaults?.defaultSolverMode ?? null;
+    const modeCandidates: Array<LocalizationSolverMode | null | undefined> = [
+      template?.mode,
+      capabilityDefaultMode,
+      supportedSolverModes[0],
+      profile.solvers[0]?.mode
+    ];
+    const supportedModeSet = new Set(supportedSolverModes);
+    const mode =
+      modeCandidates.find(
+        (candidate): candidate is LocalizationSolverMode =>
+          Boolean(candidate) && (supportedModeSet.size === 0 || supportedModeSet.has(candidate))
+      ) ?? null;
+    if (!mode) {
+      toaster.error({
+        title: 'Unable to add solver',
+        description: 'No backend-supported solver mode is available.'
+      });
+      return;
+    }
+    const capabilityDefaultOutputSpaces = (localizationCapabilities?.defaults?.defaultSolverOutputSpaces ?? []).filter((space) =>
+      supportedPoseSpaceSet.has(space)
+    );
+    const templateOutputSpaces = (template?.outputSpaces ?? []).filter((space) => supportedPoseSpaceSet.has(space));
+    const fallbackSolveSpaces = supportedSolvePoseSpaces.slice(0, 2);
+    const outputSpaces = templateOutputSpaces.length
+      ? [...templateOutputSpaces]
+      : capabilityDefaultOutputSpaces.length
+        ? [...capabilityDefaultOutputSpaces]
+        : fallbackSolveSpaces.length
+          ? [...fallbackSolveSpaces]
+          : [];
     const nextSolver: LocalizationSolverConfig = {
       id,
       name: `Group ${profile.solvers.length + 1}`,
-      mode: template?.mode ?? 'group_solve',
-      outputSpaces: template?.outputSpaces?.length ? [...template.outputSpaces] : ['tag_in_camera', 'robot_in_field'],
+      mode,
+      outputSpaces,
       sourceIds: [],
       color: null,
       runtimeTuning: normalizeSolverRuntimeTuning(template?.runtimeTuning),
@@ -2346,7 +2558,7 @@
     if (!profile) return;
     const parsed = Number(rawValue);
     if (!Number.isFinite(parsed)) return;
-    const nextWeight = Math.max(0, Math.min(10, parsed));
+    const nextWeight = parsed;
     const nextSources = profile.sources.map((source) =>
       source.id === sourceId ? { ...source, weight: nextWeight } : source
     );
@@ -2553,12 +2765,6 @@
       } else {
         coordinateSpace = availableCoordinateSpaces[0] ?? 'tag_in_camera';
       }
-    }
-    if (
-      (coordinateSpace === 'camera_in_field' || coordinateSpace === 'robot_in_field') &&
-      !fieldSpaceAllowed
-    ) {
-      coordinateSpace = availableCoordinateSpaces.find((space) => space === 'tag_in_camera') ?? 'tag_in_camera';
     }
   });
 
@@ -4007,6 +4213,7 @@
   onMount(() => {
     void rigLayoutStore.refresh();
     connectLiveUpdates();
+    void loadLocalizationCapabilities();
     void (async () => {
       await loadLocalizationConfig();
       await loadSources();
@@ -4274,6 +4481,9 @@
 	      liveMarkerCount={liveMarkers.length}
 	      lastPollMs={lastPollMs}
       bind:pollHz={pollHz}
+	      pollHzMin={pollHzMin}
+	      pollHzMax={pollHzMax}
+	      pollHzStep={pollHzStep}
 	      feedMessage={feedMessage}
 	      targetSpaceOverlay={targetSpaceOverlay}
 	      baseFrame={baseFrame}
@@ -4302,6 +4512,7 @@
       bind:solverNameInput={solverNameInput}
       onCommitSolverName={commitSolverName}
       activeSolverMode={activeSolverConfig?.mode ?? null}
+      supportedSolverModes={supportedSolverModes}
       onSetSolverMode={setActiveSolverMode}
       activeSolverSourceIds={activeSolverConfig?.sourceIds ?? []}
       onSetActiveSolverUseAllSources={setActiveSolverUseAllSources}

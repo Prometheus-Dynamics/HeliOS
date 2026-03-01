@@ -7,6 +7,7 @@ use super::super::error::{ApiError, ApiResult};
     get,
     path = "/device/resource-guard",
     tag = "Device",
+    operation_id = "resource_guard_status",
     responses((status = 200, description = "Resource guard status", body = crate::resource_guard::ResourceGuardStatus))
 )]
 pub async fn status() -> ApiResult<impl axum::response::IntoResponse> {

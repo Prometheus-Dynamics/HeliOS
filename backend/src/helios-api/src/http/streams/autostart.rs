@@ -10,8 +10,8 @@ use uuid::Uuid;
 use crate::engine_guard;
 use crate::http::AppState;
 
-use super::lifecycle::fill_manifest_pipeline;
 use super::util::camera_id_for_manifest;
+use super::validation::validate_stream_manifest;
 use super::wait::wait_for_stream_started;
 use crate::http::streams_persist::manifests_conflict;
 
@@ -52,9 +52,29 @@ pub(super) async fn restore_autostart_streams(state: AppState) {
             let state = state.clone();
             let reserved_keys = reserved_keys.clone();
             async move {
-                if let Err(err) = fill_manifest_pipeline(&mut manifest).await {
-                    warn!(camera_id, status = %err.status, error = %err.message, "skipping autostart manifest with unresolved pipeline");
-                    return;
+                match validate_stream_manifest(manifest).await {
+                    Ok(validated) => {
+                        if !validated.warnings.is_empty() {
+                            warn!(
+                                camera_id,
+                                warning_count = validated.warnings.len(),
+                                warnings = ?validated.warnings,
+                                "autostart manifest required semantic sanitization"
+                            );
+                        }
+                        manifest = validated.manifest;
+                    }
+                    Err(err) => {
+                        warn!(
+                            camera_id,
+                            issue_count = err.issues.len(),
+                            warning_count = err.warnings.len(),
+                            issues = ?err.issues,
+                            warnings = ?err.warnings,
+                            "skipping autostart manifest that failed semantic validation"
+                        );
+                        return;
+                    }
                 }
 
                 let mut device_keys = manifest.capture.device_keys.clone();

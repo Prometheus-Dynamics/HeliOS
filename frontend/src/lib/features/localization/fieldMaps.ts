@@ -49,14 +49,49 @@ export type FieldMapDocument = {
   overlay?: FieldMapOverlay | null;
 };
 
+type ValidationEntry = {
+  path?: string | null;
+  code?: string | null;
+  message?: string | null;
+};
+
+type ErrorPayload = {
+  error?: string | null;
+  message?: string | null;
+  details?: string | null;
+  issues?: ValidationEntry[] | null;
+  warnings?: ValidationEntry[] | null;
+};
+
+function summarizeValidation(entries: ValidationEntry[] | null | undefined): string | null {
+  if (!Array.isArray(entries) || entries.length === 0) return null;
+  const messages = entries
+    .map((entry) => {
+      const message = String(entry?.message ?? '').trim();
+      if (!message) return null;
+      const path = String(entry?.path ?? '').trim();
+      return path ? `${path}: ${message}` : message;
+    })
+    .filter((entry): entry is string => Boolean(entry));
+  if (!messages.length) return null;
+  const primary = messages.slice(0, 3).join('; ');
+  const remaining = messages.length - 3;
+  return remaining > 0 ? `${primary}; +${remaining} more` : primary;
+}
+
 async function readJsonOrThrow<T>(response: Response): Promise<T> {
   if (response.ok) {
     return (await response.json()) as T;
   }
   let message = `${response.status} ${response.statusText}`;
   try {
-    const payload = (await response.json()) as { error?: string; message?: string };
-    message = payload.error || payload.message || message;
+    const payload = (await response.json()) as ErrorPayload;
+    const primary =
+      String(payload?.error ?? '').trim() ||
+      String(payload?.message ?? '').trim() ||
+      String(payload?.details ?? '').trim();
+    const issues = summarizeValidation(payload?.issues ?? null);
+    message = primary && issues ? `${primary} ${issues}` : primary || issues || message;
   } catch {
     // ignore
   }

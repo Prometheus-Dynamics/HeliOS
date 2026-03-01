@@ -108,6 +108,9 @@
     liveMarkerCount?: number;
     lastPollMs?: number | null;
     pollHz?: number;
+    pollHzMin?: number;
+    pollHzMax?: number;
+    pollHzStep?: number;
     feedMessage?: string | null;
     targetSpaceOverlay?: {
       header: string;
@@ -146,6 +149,7 @@
     solverNameInput?: string;
     onCommitSolverName?: () => void;
     activeSolverMode?: LocalizationSolverMode | null;
+    supportedSolverModes?: LocalizationSolverMode[];
     onSetSolverMode?: (mode: LocalizationSolverMode) => void;
     activeSolverSourceIds?: string[];
     onSetActiveSolverUseAllSources?: (useAll: boolean) => void;
@@ -270,6 +274,9 @@
     liveMarkerCount = 0,
     lastPollMs = null,
     pollHz = $bindable(30),
+    pollHzMin = 1,
+    pollHzMax = 240,
+    pollHzStep = 1,
     feedMessage = null,
     targetSpaceOverlay = null,
     showOriginAxes = $bindable(true),
@@ -299,6 +306,7 @@
     solverNameInput = $bindable(''),
     onCommitSolverName,
     activeSolverMode = null,
+    supportedSolverModes = [],
     onSetSolverMode,
     activeSolverSourceIds = [],
     onSetActiveSolverUseAllSources,
@@ -757,7 +765,14 @@
                 <span class="text-micro font-semibold text-surface-50">{pollHz} Hz</span>
               </div>
             </div>
-            <input type="range" min="5" max="120" step="5" class="range range-xs mt-2 w-full" bind:value={pollHz} />
+            <input
+              type="range"
+              min={pollHzMin}
+              max={pollHzMax}
+              step={pollHzStep}
+              class="range range-xs mt-2 w-full"
+              bind:value={pollHz}
+            />
 
             <div class="mt-3 border-t border-surface-800/70 pt-3">
               <p class="text-micro uppercase tracking-[0.35em] text-surface-500">Viewer</p>
@@ -802,8 +817,7 @@
           bind:value={coordinateSpace}
         >
           {#each availableCoordinateSpaces as space (space)}
-            {@const isField = space === 'camera_in_field' || space === 'robot_in_field'}
-            <option value={space} disabled={isField && !fieldSpaceAllowed}>
+            <option value={space}>
               {poseSpaceLabel(space)}
             </option>
           {/each}
@@ -1035,6 +1049,7 @@
       bind:solverNameInput={solverNameInput}
       onCommitSolverName={onCommitSolverName}
       activeSolverMode={activeSolverMode}
+      supportedSolverModes={supportedSolverModes}
       onSetSolverMode={onSetSolverMode}
       activeSolverSourceIds={activeSolverSourceIds}
       onSetActiveSolverUseAllSources={onSetActiveSolverUseAllSources}
