@@ -190,6 +190,79 @@ fn stream_identity_token_set(stream_id: Uuid, manifest: &StreamManifest) -> std:
     out
 }
 
+const DEFAULT_LIBCAMERA_TARGET_FPS: u32 = 30;
+const OV9782_DEFAULT_LIBCAMERA_TARGET_FPS: u32 = 60;
+const MAX_INHERITED_LIBCAMERA_TARGET_FPS: u32 = 60;
+const LIBCAMERA_AE_EXPOSURE_MODE: u32 = 5;
+const LIBCAMERA_SHARPNESS: u32 = 24;
+const LIBCAMERA_NOISE_REDUCTION_MODE: u32 = 10002;
+const OV9782_AE_EXPOSURE_SHORT: i32 = 1;
+const OV9782_NOISE_REDUCTION_FAST: i32 = 1;
+const OV9782_DEFAULT_SHARPNESS: f32 = 1.25;
+
+fn token_mentions_ov9782(raw: &str) -> bool {
+    raw.to_ascii_lowercase().contains("ov9782")
+}
+
+fn manifest_targets_ov9782(manifest: &StreamManifest) -> bool {
+    if manifest.capture.backend != styx::BackendKind::Libcamera {
+        return false;
+    }
+    if manifest.capture.device_keys.iter().any(|key| token_mentions_ov9782(key)) {
+        return true;
+    }
+    if let styx::BackendHandle::Libcamera { id } = &manifest.capture.handle
+        && token_mentions_ov9782(id)
+    {
+        return true;
+    }
+    if let Some(alias) = manifest.identity.alias.as_deref()
+        && token_mentions_ov9782(alias)
+    {
+        return true;
+    }
+    if let Some(hw) = manifest.identity.hardware_id.as_deref()
+        && token_mentions_ov9782(hw)
+    {
+        return true;
+    }
+    false
+}
+
+fn insert_manifest_control_if_missing(manifest: &mut StreamManifest, id: u32, value: helios_engine::capture::CaptureControlValue) {
+    if manifest.capture.controls.iter().any(|control| control.id == id) {
+        return;
+    }
+    manifest.capture.controls.push(helios_engine::capture::ControlAssignment { id, value });
+}
+
+fn apply_new_ov9782_defaults(manifest: &mut StreamManifest) {
+    if !manifest_targets_ov9782(manifest) {
+        return;
+    }
+
+    if manifest.capture.target_fps.is_none() {
+        manifest.capture.target_fps = Some(OV9782_DEFAULT_LIBCAMERA_TARGET_FPS);
+    }
+
+    insert_manifest_control_if_missing(
+        manifest,
+        LIBCAMERA_AE_EXPOSURE_MODE,
+        helios_engine::capture::CaptureControlValue::Int(OV9782_AE_EXPOSURE_SHORT),
+    );
+    insert_manifest_control_if_missing(
+        manifest,
+        LIBCAMERA_NOISE_REDUCTION_MODE,
+        helios_engine::capture::CaptureControlValue::Int(OV9782_NOISE_REDUCTION_FAST),
+    );
+    insert_manifest_control_if_missing(
+        manifest,
+        LIBCAMERA_SHARPNESS,
+        helios_engine::capture::CaptureControlValue::Float(OV9782_DEFAULT_SHARPNESS.max(0.0)),
+    );
+    manifest.capture.enable_tdn_output = true;
+}
+
 async fn resolve_stream_owner_camera_id(state: &AppState, requested_id: Uuid) -> Option<String> {
     if let Ok(active) = state.engine.list_streams().await
         && let Some(stream) = active.into_iter().find(|stream| stream.stream_id == requested_id)
@@ -261,10 +334,6 @@ async fn ensure_unique_stream_identity(state: &AppState, manifest: &StreamManife
 }
 
 async fn merge_stream_manifest_state(state: &AppState, manifest: &mut StreamManifest, camera_id_override: Option<&str>) {
-    const DEFAULT_LIBCAMERA_TARGET_FPS: u32 = 30;
-    const MAX_INHERITED_LIBCAMERA_TARGET_FPS: u32 = 60;
-    const NOISE_REDUCTION_MODE: u32 = 10002;
-
     let camera_id = camera_id_override.map(|value| value.to_string()).unwrap_or_else(|| camera_id_for_manifest(manifest));
     let requested_id = manifest.identity.id;
 
@@ -307,6 +376,7 @@ async fn merge_stream_manifest_state(state: &AppState, manifest: &mut StreamMani
     }
 
     let Some(base) = base_manifest else {
+        apply_new_ov9782_defaults(manifest);
         if manifest.pose.is_none() {
             manifest.pose = Some(default_identity_rig_pose());
         }
@@ -483,7 +553,7 @@ async fn merge_stream_manifest_state(state: &AppState, manifest: &mut StreamMani
     manifest.capture.controls = merged.into_iter().map(|(id, value)| helios_engine::capture::ControlAssignment { id, value }).collect();
 
     if manifest.capture.backend == styx::BackendKind::Libcamera {
-        let tdn_value = manifest.capture.controls.iter().find(|ctl| ctl.id == NOISE_REDUCTION_MODE).map(|ctl| match &ctl.value {
+        let tdn_value = manifest.capture.controls.iter().find(|ctl| ctl.id == LIBCAMERA_NOISE_REDUCTION_MODE).map(|ctl| match &ctl.value {
             helios_engine::capture::CaptureControlValue::Int(v) => *v != 0,
             helios_engine::capture::CaptureControlValue::Uint(v) => *v != 0,
             helios_engine::capture::CaptureControlValue::Float(v) => *v != 0.0,

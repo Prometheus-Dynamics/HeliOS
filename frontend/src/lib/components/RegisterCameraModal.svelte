@@ -138,6 +138,14 @@
   });
   const isRegistered = (device: ProbedDevice | null): boolean => isDeviceRegistered(device, registeredHardwareIds);
   const RAW_STREAM_PIPELINE_UUID = '00000000-0000-0000-0000-0000000000aa';
+  const OV9782_TOKEN = 'ov9782';
+  const LIBCAMERA_AE_EXPOSURE_MODE_CONTROL_ID = 5;
+  const LIBCAMERA_SHARPNESS_CONTROL_ID = 24;
+  const LIBCAMERA_NOISE_REDUCTION_MODE_CONTROL_ID = 10002;
+  const OV9782_DEFAULT_TARGET_FPS = 60;
+  const OV9782_AE_EXPOSURE_SHORT = 1;
+  const OV9782_NOISE_REDUCTION_FAST = 1;
+  const OV9782_DEFAULT_SHARPNESS = 1.25;
   const encoderSelectionId = (codec: CodecInfo | null | undefined): string | null => {
     if (!codec) return null;
     const name = String(codec.name ?? '').trim();
@@ -798,6 +806,88 @@
     return sorted[0] ?? null;
   }
 
+  function normalizeIdentityToken(value: unknown): string {
+    return String(value ?? '').trim().toLowerCase();
+  }
+
+  function controlIdFromMeta(raw: any): number | null {
+    const direct = Number(raw?.id);
+    if (Number.isFinite(direct)) return Math.trunc(direct);
+    const nested = raw?.id;
+    if (nested && typeof nested === 'object') {
+      const tuple = Number((nested as any)[0]);
+      if (Number.isFinite(tuple)) return Math.trunc(tuple);
+      const value = Number((nested as any).value);
+      if (Number.isFinite(value)) return Math.trunc(value);
+    }
+    return null;
+  }
+
+  function controlNumber(raw: any): number | null {
+    if (raw == null) return null;
+    if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+    if (typeof raw === 'object') {
+      if ('Int' in raw) return Number(raw.Int);
+      if ('Uint' in raw) return Number(raw.Uint);
+      if ('Float' in raw) return Number(raw.Float);
+      const kind = normalizeIdentityToken((raw as any).kind);
+      const value = Number((raw as any).value);
+      if (kind && Number.isFinite(value)) return value;
+    }
+    return null;
+  }
+
+  function clampToControlRange(backend: ProbedBackend | null, controlId: number, value: number): number {
+    const controls = backend?.descriptor?.controls ?? [];
+    const meta = controls.find((entry: any) => controlIdFromMeta(entry) === controlId);
+    if (!meta) return value;
+    const min = controlNumber((meta as any).min);
+    const max = controlNumber((meta as any).max);
+    let next = value;
+    if (min != null && Number.isFinite(min)) next = Math.max(min, next);
+    if (max != null && Number.isFinite(max)) next = Math.min(max, next);
+    return next;
+  }
+
+  function upsertCaptureControl(capture: CaptureConfig, controlId: number, value: any): void {
+    const controls = Array.isArray(capture.controls) ? [...capture.controls] : [];
+    const idx = controls.findIndex((entry: any) => Number(entry?.id) === controlId);
+    const assignment = { id: controlId, value } as any;
+    if (idx >= 0) controls[idx] = assignment;
+    else controls.push(assignment);
+    capture.controls = controls as any;
+  }
+
+  function isLibcameraOv9782(device: ProbedDevice, backend: ProbedBackend): boolean {
+    if (normalizeIdentityToken(backend?.kind) !== 'libcamera') return false;
+    const tokens: string[] = [
+      ...((device.identity?.keys ?? []) as string[]),
+      device.identity?.display ?? '',
+      (backend.handle as any)?.id ?? ''
+    ];
+    return tokens.some((token) => normalizeIdentityToken(token).includes(OV9782_TOKEN));
+  }
+
+  function applyOv9782Defaults(capture: CaptureConfig, device: ProbedDevice, backend: ProbedBackend): void {
+    if (!isLibcameraOv9782(device, backend)) return;
+    capture.target_fps = OV9782_DEFAULT_TARGET_FPS;
+    capture.interval = null;
+    (capture as any).enable_tdn_output = true;
+    upsertCaptureControl(capture, LIBCAMERA_AE_EXPOSURE_MODE_CONTROL_ID, {
+      kind: 'int',
+      value: OV9782_AE_EXPOSURE_SHORT
+    });
+    upsertCaptureControl(capture, LIBCAMERA_NOISE_REDUCTION_MODE_CONTROL_ID, {
+      kind: 'int',
+      value: OV9782_NOISE_REDUCTION_FAST
+    });
+    const sharpness = clampToControlRange(backend, LIBCAMERA_SHARPNESS_CONTROL_ID, OV9782_DEFAULT_SHARPNESS);
+    upsertCaptureControl(capture, LIBCAMERA_SHARPNESS_CONTROL_ID, {
+      kind: 'float',
+      value: sharpness
+    });
+  }
+
   async function submit(): Promise<void> {
     const device = currentDevice();
     const backend = currentBackend();
@@ -850,6 +940,7 @@
           : selectedInterval ?? mode.intervals?.[0] ?? null,
       controls: []
     };
+    applyOv9782Defaults(capture, device, backend);
 
     const normalizedEncoderImpl = encoderImpl && encoderImpl.trim().length ? encoderImpl : null;
     const compatibleDecoders = decodersForFormat();
