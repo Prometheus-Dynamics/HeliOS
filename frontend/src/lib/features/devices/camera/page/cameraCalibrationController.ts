@@ -624,6 +624,11 @@ export function createCameraCalibrationController(state: CalibrationState, deps:
         },
         includeOverlays: state.calibrationIncludeOverlays,
         config: {
+          minViews: 1,
+          minPointsPerView: 8,
+          refineDistortion: true,
+          undistortIters: 5,
+          refineUndistortIters: 8,
           lensModel: state.calibrationLensModel
         }
       };
