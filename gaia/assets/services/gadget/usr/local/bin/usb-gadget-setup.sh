@@ -401,11 +401,12 @@ else
 fi
 
 # Bring up possible gadget netdevs so the bridge/enslaving has carriers
-for ifc in usb0 usb1 end0 end1; do
+for ifc in usbbr0 usb0 usb1 end0 end1; do
   ip link set dev "$ifc" up 2>/dev/null || true
 done
-# Quiet early sysctl warnings by disabling IPv6 on usb0 after it exists
-log "interfaces brought up (best-effort): usb0 usb1 end0 end1"
+# Quiet early sysctl warnings by disabling IPv6 on gadget interfaces after they exist
+log "interfaces brought up (best-effort): usbbr0 usb0 usb1 end0 end1"
+sysctl -w net.ipv6.conf.usbbr0.disable_ipv6=1 >/dev/null 2>&1 && log "ipv6 disabled on usbbr0" || true
 sysctl -w net.ipv6.conf.usb0.disable_ipv6=1 >/dev/null 2>&1 && log "ipv6 disabled on usb0" || true
 log "summary: udc=${UDC:-none} functions=acm:${USE_ACM} ecm:${USE_ECM} ncm:${USE_NCM} rndis:${USE_RNDIS} cfg1=c.1 cfg2=c.2"
 sleep 0.2 || true

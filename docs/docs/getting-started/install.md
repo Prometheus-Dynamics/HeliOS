@@ -28,7 +28,7 @@ The detailed rpiboot instructions (Linux + Windows) live here:
 ## Power + network
 
 - Ethernet is `10/100`. (It uses DHCP by default unless changed in your image/config.)
-- Current HVS - Raze images enable USB gadget networking and bring up `usb0` as `172.31.250.1/24`.
+- Current HVS - Raze images enable USB gadget networking and bring up `usbbr0` as `172.31.250.1/24`.
 
 Power + port details:
 

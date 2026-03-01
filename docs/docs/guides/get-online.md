@@ -47,9 +47,9 @@ Tips:
 - If you see multiple devices, open each result and confirm the device identity.
 - If scanning finds nothing, you are probably on the wrong subnet/VLAN or a firewall is blocking it.
 
-## Option 4: USB Gadget Networking (usb0)
+## Option 4: USB Gadget Networking (usbbr0)
 
-As of current images, `usb0` gadget networking is enabled.
+As of current images, `usbbr0` gadget networking is enabled.
 
 1. Plug your laptop into the device-mode USB-C port.
 2. Confirm your laptop sees a new network interface.

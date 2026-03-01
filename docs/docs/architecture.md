@@ -98,7 +98,7 @@ The image can expose a USB network gadget for direct host connection (ECM for ma
 Key points:
 
 - The gadget is configured by a boot-time service and a config file at `/etc/helios/gadget.env` (if present).
-- A usb network interface `usb0` is configured on-device with a static address `172.31.250.1/24`.
+- A usb gadget bridge `usbbr0` is configured on-device with a static address `172.31.250.1/24` (backed by gadget NICs such as `usb0`/`usb1`).
 - A `dnsmasq` service can run to provide DHCP on the USB gadget network.
 
 Practically: if Ethernet isn't available, you can connect the USB-C port that enumerates in device mode to a laptop
