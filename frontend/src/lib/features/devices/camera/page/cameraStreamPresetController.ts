@@ -85,6 +85,69 @@ type PresetDeps = {
 };
 
 export function createCameraStreamPresetController(state: PresetState, deps: PresetDeps) {
+  const SUPPORTED_FILE_MEDIA_EXTENSIONS = new Set([
+    'bmp',
+    'gif',
+    'heic',
+    'heif',
+    'jpeg',
+    'jpg',
+    'png',
+    'tif',
+    'tiff',
+    'webp',
+    'h264',
+    'avc',
+    'h265',
+    'hevc',
+    'm4v',
+    'mjpeg',
+    'mjpg',
+    'mov',
+    'mp4',
+    'mpe',
+    'mpeg',
+    'mpg',
+    'webm',
+    'wmv',
+    'y4m'
+  ]);
+
+  function normalizeFileBackendPaths(raw: unknown): string[] {
+    if (typeof raw !== 'string') return [];
+    return Array.from(
+      new Set(
+        raw
+          .split('\n')
+          .map((value) => value.trim())
+          .filter((value) => value.length > 0)
+      )
+    );
+  }
+
+  function isSupportedFileBackendPath(path: string): boolean {
+    const value = String(path ?? '').trim();
+    if (!value.length) return false;
+    const extRaw = value.split('/').pop()?.split('\\').pop() ?? '';
+    const ext = extRaw.includes('.') ? extRaw.slice(extRaw.lastIndexOf('.') + 1).toLowerCase() : '';
+    return ext.length > 0 && SUPPORTED_FILE_MEDIA_EXTENSIONS.has(ext);
+  }
+
+  function selectStableHardwareId(device: ProbedDevice, stream: any | null): string | null {
+    const existing = typeof stream?.manifest?.identity?.hardware_id === 'string' ? stream.manifest.identity.hardware_id.trim() : '';
+    if (existing.length) return existing;
+
+    const keys = Array.isArray(device.identity?.keys)
+      ? device.identity.keys.map((value) => String(value ?? '').trim()).filter((value) => value.length > 0)
+      : [];
+    const slashKey = keys.find((value) => value.includes('/'));
+    if (slashKey) return slashKey;
+    const colonKey = keys.find((value) => value.includes(':'));
+    if (colonKey) return colonKey;
+    if (keys.length) return [...keys].sort((a, b) => a.localeCompare(b))[0];
+    return null;
+  }
+
   function ensureApiBase(): void {
     try {
       getHttpClientBase();
@@ -132,7 +195,7 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
       const identity = {
         id: state.stream?.id ?? null,
         alias: state.cameraAlias.trim().length ? state.cameraAlias.trim() : null,
-        hardware_id: device.identity?.keys?.[0] ?? null
+        hardware_id: selectStableHardwareId(device, state.stream)
       } as any;
 
       const normalizedAssigned = Array.from(new Set((state.assignedPipelineIds ?? []).map((id) => String(id).trim()).filter(Boolean)));
@@ -311,14 +374,31 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
       let captureHandle: any = backend.handle;
       if (normalizedBackendKind === 'file') {
         const backendFileHandle = backend.handle as { paths?: unknown; fps?: unknown; loop_forever?: unknown } | null;
-        const parsedPaths = String(state.fileBackendPathsText ?? '')
-          .split('\n')
-          .map((value) => value.trim())
-          .filter((value) => value.length > 0);
-        const dedupedPaths = Array.from(new Set(parsedPaths));
+        const parsedPaths = normalizeFileBackendPaths(state.fileBackendPathsText);
+        const unsupportedPaths = parsedPaths.filter((value) => !isSupportedFileBackendPath(value));
+        if (unsupportedPaths.length) {
+          deps.reportError({
+            title: 'Unsupported media path type',
+            error: new Error(`Unsupported media file extension for ${unsupportedPaths.length} path(s).`),
+            fallback: 'Only image/video files are supported for File backend replay.'
+          });
+          return;
+        }
         const fallbackPaths = Array.isArray(backendFileHandle?.paths)
-          ? backendFileHandle.paths.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+          ? backendFileHandle.paths
+              .map((value) => (typeof value === 'string' ? value.trim() : ''))
+              .filter((value): value is string => value.length > 0)
+              .filter((value) => isSupportedFileBackendPath(value))
           : [];
+        const resolvedPaths = parsedPaths.length ? parsedPaths : fallbackPaths;
+        if (resolvedPaths.length === 0) {
+          deps.reportError({
+            title: 'Missing media files',
+            error: new Error('File backend apply requires at least one valid media file path.'),
+            fallback: 'Add at least one image/video media file path before applying.'
+          });
+          return;
+        }
         const parsedFps = Number(state.fileBackendFps ?? NaN);
         const fallbackFps = Number(backendFileHandle?.fps ?? NaN);
         const fps = Number.isFinite(parsedFps) && parsedFps > 0
@@ -330,7 +410,7 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
           type: 'file',
           fps,
           loop_forever: Boolean(state.fileBackendLoop),
-          paths: dedupedPaths.length ? dedupedPaths : fallbackPaths
+          paths: resolvedPaths
         };
       }
 

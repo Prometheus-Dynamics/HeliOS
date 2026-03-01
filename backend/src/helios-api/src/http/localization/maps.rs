@@ -7,6 +7,7 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::Value;
+use std::collections::BTreeSet;
 use tokio::fs;
 use uuid::Uuid;
 
@@ -25,6 +26,33 @@ pub(crate) async fn load_map_document(id: &str) -> ApiResult<FieldMapDocument> {
     hydrate_map_document(&mut doc);
     maybe_backfill_overlay_from_media(id, &mut doc).await;
     Ok(doc)
+}
+
+pub(crate) async fn bootstrap_seeded_field_maps() -> ApiResult<usize> {
+    let media_dir = storage::ensure_subdir_async("media").await.map_err(|err| ApiError::internal(format!("failed to open media storage: {err}")))?;
+    let mut entries = fs::read_dir(&media_dir).await.map_err(|err| ApiError::internal(format!("failed to list media storage: {err}")))?;
+    let mut registered = 0usize;
+
+    while let Some(entry) = entries.next_entry().await.map_err(|err| ApiError::internal(format!("failed to scan media storage: {err}")))? {
+        let is_file = entry.file_type().await.map(|ty| ty.is_file()).unwrap_or(false);
+        if !is_file {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.to_ascii_lowercase().ends_with(".fmap") {
+            continue;
+        }
+        let bytes = match fs::read(entry.path()).await {
+            Ok(bytes) if !bytes.is_empty() => bytes,
+            Ok(_) => continue,
+            Err(_) => continue,
+        };
+        if ensure_map_registered_from_media_file(&name, &bytes).await.is_ok() {
+            registered += 1;
+        }
+    }
+
+    Ok(registered)
 }
 
 #[utoipa::path(
@@ -116,8 +144,7 @@ async fn upload_limelight_fmap(mut multipart: Multipart) -> ApiResult<impl IntoR
         return Err(ApiError::bad_request("multipart payload missing file part"));
     };
 
-    let raw: Value = serde_json::from_slice(&bytes).map_err(|err| ApiError::bad_request(format!("invalid .fmap json: {err}")))?;
-    let fmap: LimelightFmap = serde_json::from_value(raw.clone()).map_err(|err| ApiError::bad_request(format!("invalid .fmap json: {err}")))?;
+    let (raw, fmap) = parse_limelight_fmap_bytes(&bytes)?;
     let id = Uuid::new_v4().to_string();
     let name = derive_map_name(&filename);
     let overlay = extract_overlay(&raw);
@@ -139,10 +166,93 @@ async fn store_map_media_copy(id: &str, name: &str, filename: &str, bytes: &[u8]
     let path = media_dir.join(&media_name);
     fs::write(&path, bytes).await.map_err(|err| ApiError::internal(format!("failed to store map in media library: {err}")))?;
 
-    let description = format!("Field map: {name} (source: {filename})");
-    let meta = MediaMetadata { kind: Some("field-map".to_string()), description: Some(description), tags: vec!["field-map".to_string(), "localization".to_string()], ..Default::default() };
-    write_media_metadata(&media_name, meta).await?;
+    ensure_field_map_media_metadata(&media_name, name, filename).await?;
     Ok(media_name)
+}
+
+async fn ensure_map_registered_from_media_file(media_name: &str, bytes: &[u8]) -> ApiResult<String> {
+    let (raw, fmap) = parse_limelight_fmap_bytes(bytes)?;
+    let map_name = derive_map_name(media_name);
+    let map_id = if let Some(existing_id) = find_map_id_for_source_file(media_name).await? {
+        existing_id
+    } else {
+        let map_id = deterministic_seed_map_id(media_name);
+        let overlay = extract_overlay(&raw);
+        let doc = convert_limelight_fmap(&map_id, &map_name, media_name, fmap, overlay)?;
+        let dir = storage::ensure_subdir_async("localization/maps").await.map_err(|err| ApiError::internal(format!("failed to open map storage: {err}")))?;
+        let path = dir.join(format!("{map_id}.json"));
+        json_store::write_json(path, &doc).await.map_err(|err| ApiError::internal(format!("failed to store map: {err}")))?;
+        map_id
+    };
+    ensure_field_map_media_metadata(media_name, &map_name, media_name).await?;
+    Ok(map_id)
+}
+
+async fn ensure_field_map_media_metadata(media_name: &str, map_name: &str, source_filename: &str) -> ApiResult<()> {
+    let meta_dir = storage::ensure_subdir_async("media-meta").await.map_err(|err| ApiError::internal(format!("failed to open media metadata: {err}")))?;
+    let meta_path = meta_dir.join(format!("{media_name}.json"));
+    let mut meta: MediaMetadata = match fs::read(&meta_path).await {
+        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
+        Err(_) => MediaMetadata::default(),
+    };
+
+    meta.kind = Some("field-map".to_string());
+    if meta.description.as_deref().map(str::trim).is_none_or(|value| value.is_empty()) {
+        meta.description = Some(format!("Field map: {map_name} (source: {source_filename})"));
+    }
+
+    let mut tags = BTreeSet::new();
+    for tag in meta.tags {
+        let trimmed = tag.trim();
+        if !trimmed.is_empty() {
+            tags.insert(trimmed.to_string());
+        }
+    }
+    tags.insert("field-map".to_string());
+    tags.insert("localization".to_string());
+    meta.tags = tags.into_iter().collect();
+
+    write_media_metadata(media_name, meta).await
+}
+
+async fn find_map_id_for_source_file(filename: &str) -> ApiResult<Option<String>> {
+    let dir = storage::ensure_subdir_async("localization/maps").await.map_err(|err| ApiError::internal(format!("failed to open map storage: {err}")))?;
+    let mut entries = fs::read_dir(&dir).await.map_err(|err| ApiError::internal(format!("failed to list map storage: {err}")))?;
+    let sanitized = storage::sanitize_name(filename).unwrap_or_else(|| filename.to_string());
+    while let Some(entry) = entries.next_entry().await.map_err(|err| ApiError::internal(format!("failed to scan map storage: {err}")))? {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let bytes = match fs::read(&path).await {
+            Ok(bytes) => bytes,
+            Err(_) => continue,
+        };
+        let doc: FieldMapDocument = match serde_json::from_slice(&bytes) {
+            Ok(doc) => doc,
+            Err(_) => continue,
+        };
+        if let FieldMapSource::LimelightFmap { original_file_name: Some(original), .. } = doc.source
+            && original == sanitized
+        {
+            return Ok(Some(stem.to_string()));
+        }
+    }
+    Ok(None)
+}
+
+fn deterministic_seed_map_id(filename: &str) -> String {
+    let key = storage::sanitize_name(filename).unwrap_or_else(|| filename.to_string());
+    Uuid::new_v5(&Uuid::NAMESPACE_OID, format!("helios:seeded-field-map:{key}").as_bytes()).to_string()
+}
+
+fn parse_limelight_fmap_bytes(bytes: &[u8]) -> Result<(Value, LimelightFmap), ApiError> {
+    let raw: Value = serde_json::from_slice(bytes).map_err(|err| ApiError::bad_request(format!("invalid .fmap json: {err}")))?;
+    let fmap: LimelightFmap = serde_json::from_value(raw.clone()).map_err(|err| ApiError::bad_request(format!("invalid .fmap json: {err}")))?;
+    Ok((raw, fmap))
 }
 
 fn derive_map_name(filename: &str) -> String {

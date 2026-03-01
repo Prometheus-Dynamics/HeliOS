@@ -196,6 +196,14 @@ async fn async_main() {
     tokio::spawn(http::pipelines::warm_registry_cache(handles.clone()));
     http::peers::init_peers_from_disk().await;
     http::startup::apply_startup_preset(handles.clone()).await;
+    match http::localization::maps::bootstrap_seeded_field_maps().await {
+        Ok(registered) => {
+            if registered > 0 {
+                info!(registered, "seeded .fmap assets registered");
+            }
+        }
+        Err(err) => error!(%err, "failed to bootstrap seeded field maps"),
+    }
     streams::restore_autostart_streams(handles.clone()).await;
     streams_persist::restore_persisted_streams(handles.clone()).await;
     {

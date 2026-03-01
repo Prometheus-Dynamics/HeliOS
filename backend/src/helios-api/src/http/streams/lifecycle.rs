@@ -3,15 +3,17 @@ use axum::{
     http::{HeaderValue, StatusCode},
     response::{IntoResponse, Response},
 };
-use helios_engine::capture::CaptureDescriptor;
+use helios_engine::capture::{BackendHandle, CaptureDescriptor};
 use helios_engine::ipc::{EngineErrorCode, EngineEvent, StreamManifest, StreamSummary};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::OnceLock;
 use std::time::Instant;
 use std::time::{SystemTime, UNIX_EPOCH};
 use styx::capture::prelude::Mode as CaptureMode;
 use styx::codec::CodecKind;
 use styx::codec::CodecRegistry;
+use tokio::fs;
 use tokio::time::Duration;
 use uuid::Uuid;
 
@@ -166,6 +168,42 @@ fn sanitize_file_stream_identity(manifest: &mut StreamManifest) {
     if manifest.identity.hardware_id.as_deref().is_some_and(is_legacy_media_file_token) {
         manifest.identity.hardware_id = manifest.identity.alias.clone().or_else(|| manifest.identity.id.map(|id| id.to_string()));
     }
+}
+
+fn file_replay_content_type(path: &Path) -> String {
+    mime_guess::from_path(path).first_raw().unwrap_or("application/octet-stream").to_ascii_lowercase()
+}
+
+fn is_supported_file_replay_path(path: &Path) -> bool {
+    let content_type = file_replay_content_type(path);
+    if content_type.starts_with("image/") || content_type.starts_with("video/") {
+        return true;
+    }
+    let ext = path.extension().and_then(|value| value.to_str()).unwrap_or_default().to_ascii_lowercase();
+    matches!(ext.as_str(), "h264" | "avc" | "h265" | "hevc")
+}
+
+async fn validate_file_backend_media_paths(manifest: &StreamManifest) -> Result<(), String> {
+    if manifest.capture.backend != styx::BackendKind::File {
+        return Ok(());
+    }
+    let BackendHandle::File { paths, .. } = &manifest.capture.handle else {
+        return Err("invalid file backend handle".to_string());
+    };
+    if paths.is_empty() {
+        return Err("file backend requires at least one media file path".to_string());
+    }
+    for path in paths {
+        let meta = fs::metadata(path).await.map_err(|_| format!("media path not found: {}", path.display()))?;
+        if !meta.is_file() {
+            return Err(format!("media path is not a file: {}", path.display()));
+        }
+        if !is_supported_file_replay_path(path) {
+            let content_type = file_replay_content_type(path);
+            return Err(format!("unsupported media type for file replay: {} ({content_type}); only image/video assets are allowed", path.display()));
+        }
+    }
+    Ok(())
 }
 
 fn stream_identity_token_set(stream_id: Uuid, manifest: &StreamManifest) -> std::collections::BTreeSet<String> {
@@ -688,6 +726,10 @@ pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> R
     // After merge, ensure the manifest has a concrete id (either client-provided, re-used, or new).
     let requested_id = *manifest.identity.id.get_or_insert_with(Uuid::new_v4);
     let camera_id = owner_camera_id.clone().unwrap_or_else(|| camera_id_for_manifest(&manifest));
+
+    if let Err(reason) = validate_file_backend_media_paths(&manifest).await {
+        return (StatusCode::BAD_REQUEST, Json(engine_error_body(Some(EngineErrorCode::InvalidInput), reason))).into_response();
+    }
 
     // Global feature gate: force shadow recorder off even if a client/persisted manifest requests it.
     if !crate::features::shadow_recorder_enabled() {

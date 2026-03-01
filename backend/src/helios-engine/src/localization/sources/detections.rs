@@ -33,28 +33,34 @@ fn reprojection_quality_weight(reprojection_error_px: Option<f64>) -> f32 {
     if !err.is_finite() || err <= 0.0 {
         return 1.0;
     }
-    // Keep noisy detections in play at low weight so multi-tag solves remain constrained, but
-    // suppress severe outliers that cause tag-switch teleports under motion blur/skew.
-    if err >= 5.0 {
+    // Keep moderate reprojection-error detections in play (small/far tags under mild blur), while
+    // still suppressing severe outliers that cause tag-switch teleports.
+    if err >= 8.0 {
         return 0.0;
     }
-    if err >= 4.0 {
-        return 0.02;
-    }
-    if err >= 3.0 {
+    if err >= 6.0 {
         return 0.08;
     }
-    if err >= 2.5 {
+    if err >= 5.0 {
         return 0.18;
     }
+    if err >= 4.0 {
+        return 0.32;
+    }
+    if err >= 3.0 {
+        return 0.5;
+    }
+    if err >= 2.5 {
+        return 0.62;
+    }
     if err >= 2.0 {
-        return 0.35;
+        return 0.74;
     }
     if err >= 1.5 {
-        return 0.55;
+        return 0.84;
     }
     if err >= 1.0 {
-        return 0.78;
+        return 0.92;
     }
     1.0
 }
