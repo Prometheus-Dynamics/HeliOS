@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::ipc::{UpdateStage, UpdaterEvent};
+use serde::Deserialize;
 use tokio::fs;
 use tokio::process::Command;
 use tokio::sync::mpsc;
@@ -19,8 +20,7 @@ use crate::error::{Error, Result};
 use crate::state::ServiceState;
 use crate::util::{
     ProgressSender, ProgressUpdate, StreamFlashOutcome, blockdev_size_bytes, by_label_path, decompress_if_needed, detect_compression_kind, detect_ext4_partition_in_disk_image,
-    detect_fat_partition_in_disk_image, ensure_directory, flash_compressed_image_to_target, resolve_boot_block_device, resolve_boot_dir_rw, rewrite_cmdline_root,
-    select_target_slot, sync_filesystem,
+    detect_fat_partition_in_disk_image, ensure_directory, flash_compressed_image_to_target, resolve_boot_block_device, resolve_boot_dir_rw, rewrite_cmdline_root, select_target_slot, sync_filesystem,
 };
 
 #[cfg(test)]
@@ -33,6 +33,24 @@ const APPLY_PROGRESS_START: u8 = 10;
 const APPLY_PROGRESS_END: u8 = 85;
 const PERSIST_NETWORKD_DIR: &str = "/var/lib/helios/networkd";
 const PERSIST_NETWORKD_PREFIX: &str = "00-helios-persisted-";
+
+#[derive(Debug, Clone, Deserialize)]
+struct ApplyManifestMetadata {
+    #[serde(default = "default_true")]
+    delete_image_after_apply: bool,
+    #[serde(default)]
+    source_media_path: Option<String>,
+}
+
+impl Default for ApplyManifestMetadata {
+    fn default() -> Self {
+        Self { delete_image_after_apply: true, source_media_path: None }
+    }
+}
+
+const fn default_true() -> bool {
+    true
+}
 
 #[cfg(test)]
 fn fake_apply_requested() -> bool {
@@ -86,6 +104,7 @@ async fn run_apply_job(config: Arc<UpdaterConfig>, state: Arc<RwLock<ServiceStat
 
 async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<ServiceState>>, events: &Sender<UpdaterEvent>, update_id: Uuid) -> Result<()> {
     let metadata = load_metadata(config, update_id).await?;
+    let manifest_metadata = parse_apply_manifest_metadata(&metadata);
     info!(%update_id, staged = %metadata_path(config, update_id).display(), "applying staged release");
 
     // Some platforms can't switch root via bootloader; allow forcing single-slot mode detection.
@@ -113,9 +132,7 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
         single_slot = single_slot_final;
 
         if single_slot && !allow_single_slot_inplace {
-            return Err(Error::InvalidState(
-                "single-slot OTA is disabled: inactive RESERVE slot not found; in-place flashing the live root risks filesystem corruption".into(),
-            ));
+            return Err(Error::InvalidState("single-slot OTA is disabled: inactive RESERVE slot not found; in-place flashing the live root risks filesystem corruption".into()));
         }
         if single_slot {
             warn!(
@@ -254,6 +271,10 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
     }
 
     if !simulate {
+        cleanup_source_media_after_apply(config, update_id, &manifest_metadata).await;
+    }
+
+    if !simulate {
         let tryboot = !single_slot;
         match reboot_with_args(if tryboot { &["tryboot"] } else { &[] }).await {
             Ok(output) if reboot_output_is_expected_success(&output) => {
@@ -278,6 +299,53 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
 
 fn ensure_artifacts_present(update_id: Uuid, metadata: &StagedMetadata) -> Result<()> {
     if metadata.artifacts.is_empty() { Err(crate::error::Error::InvalidState(format!("no artifacts staged for update {update_id}"))) } else { Ok(()) }
+}
+
+fn parse_apply_manifest_metadata(metadata: &StagedMetadata) -> ApplyManifestMetadata {
+    let raw = metadata.manifest.metadata_json.trim();
+    if raw.is_empty() || raw == "{}" {
+        return ApplyManifestMetadata::default();
+    }
+    serde_json::from_str::<ApplyManifestMetadata>(raw).unwrap_or_default()
+}
+
+async fn cleanup_source_media_after_apply(config: &UpdaterConfig, update_id: Uuid, metadata: &ApplyManifestMetadata) {
+    if !metadata.delete_image_after_apply {
+        return;
+    }
+    let Some(media_path) = metadata.source_media_path.as_deref().map(str::trim).filter(|value| !value.is_empty()).map(PathBuf::from) else {
+        return;
+    };
+    if !media_path.is_absolute() {
+        return;
+    }
+    let Some(filename) = media_path.file_name().and_then(|name| name.to_str()).and_then(sanitize_media_filename) else {
+        return;
+    };
+
+    match fs::remove_file(&media_path).await {
+        Ok(()) => info!(%update_id, path = %media_path.display(), "removed source OTA media file after apply"),
+        Err(err) if err.kind() == ErrorKind::NotFound => {}
+        Err(err) => warn!(%update_id, path = %media_path.display(), error = %err, "failed to remove source OTA media file"),
+    }
+
+    let media_meta_path = media_path
+        .parent()
+        .and_then(|media_dir| media_dir.parent().map(|api_data_dir| api_data_dir.join("media-meta").join(format!("{filename}.json"))))
+        .unwrap_or_else(|| config.data_dir().join("api-data").join("media-meta").join(format!("{filename}.json")));
+    match fs::remove_file(&media_meta_path).await {
+        Ok(()) => {}
+        Err(err) if err.kind() == ErrorKind::NotFound => {}
+        Err(err) => warn!(%update_id, path = %media_meta_path.display(), error = %err, "failed to remove source OTA media metadata"),
+    }
+}
+
+fn sanitize_media_filename(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Path::new(trimmed).file_name().map(|name| name.to_string_lossy().to_string())
 }
 
 pub(crate) async fn flash_image_to_target(expanded_path: &Path, target_label: &str, target_device: &str, progress: Option<ProgressSender>) -> Result<()> {

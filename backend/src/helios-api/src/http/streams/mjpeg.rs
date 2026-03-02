@@ -143,9 +143,7 @@ fn run_mjpeg_loop(stream_id: Uuid, sender: broadcast::Sender<Bytes>, interval: D
             last_touch = std::time::Instant::now();
         }
         let (header, bytes) = match read_latest_frame_with_header(stream_id) {
-            Ok((header, bytes)) => {
-                (header, bytes)
-            }
+            Ok((header, bytes)) => (header, bytes),
             Err(_) => {
                 let now = std::time::Instant::now();
                 first_unavailable_at.get_or_insert(now);

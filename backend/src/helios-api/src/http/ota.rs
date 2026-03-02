@@ -91,6 +91,8 @@ pub struct ApplyUpdateRequest {
     pub size_bytes: Option<u64>,
     #[serde(default)]
     pub checksum: Option<String>,
+    #[serde(default = "default_true")]
+    pub delete_image_after_apply: bool,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -217,7 +219,7 @@ pub async fn apply_update(State(state): State<AppState>, Json(payload): Json<App
     let Some(image_url) = payload.image_url.as_deref() else {
         return (StatusCode::BAD_REQUEST, Json(UploadUpdateError { error: "image_url is required (staging removed)".into() })).into_response();
     };
-    let update_id = match stage_update_for_auto_apply(&state, image_url, payload.size_bytes, payload.checksum.as_deref()).await {
+    let update_id = match stage_update_for_auto_apply(&state, image_url, payload.size_bytes, payload.checksum.as_deref(), payload.delete_image_after_apply).await {
         Ok(update_id) => update_id,
         Err(err) => return err.into_response(),
     };
@@ -282,7 +284,7 @@ async fn stop_streams_for_update(state: &AppState) -> Option<usize> {
     Some(stopped)
 }
 
-async fn stage_update_for_auto_apply(state: &AppState, image_url: &str, size_bytes: Option<u64>, checksum: Option<&str>) -> Result<Uuid, UploadUpdateError> {
+async fn stage_update_for_auto_apply(state: &AppState, image_url: &str, size_bytes: Option<u64>, checksum: Option<&str>, delete_image_after_apply: bool) -> Result<Uuid, UploadUpdateError> {
     let image_url = Url::parse(image_url.trim()).map_err(|_| UploadUpdateError { error: "invalid image_url".into() })?;
 
     let mut artifact = ManifestArtifact { url: image_url.clone(), filename: None, size_bytes, sha256: checksum.map(|s| s.to_string()), signature: None, kind: Some("disk-image".into()) };
@@ -298,11 +300,50 @@ async fn stage_update_for_auto_apply(state: &AppState, image_url: &str, size_byt
     }
 
     let update_id = Uuid::new_v4();
-    let metadata_json = serde_json::json!({ "auto_apply": true }).to_string();
+    let source_media_path = source_media_path_for_image_url(&image_url).await;
+    let metadata_json = serde_json::json!({
+        "auto_apply": true,
+        "delete_image_after_apply": delete_image_after_apply,
+        "source_media_path": source_media_path,
+    })
+    .to_string();
     let manifest = ReleaseManifest { update_id: Some(update_id), version: None, artifacts: vec![artifact], metadata_json };
     let command = UpdaterCommand::StageRelease { command_id: command_id_from_context("ota_stage_apply"), update_id, manifest };
     send_updater_command(state, command, true).await?;
     Ok(update_id)
+}
+
+async fn source_media_path_for_image_url(image_url: &Url) -> Option<String> {
+    let media_dir = storage::ensure_subdir_async("media").await.ok()?;
+
+    if image_url.scheme() == "file" {
+        let source_path = image_url.to_file_path().ok()?;
+        let file_name = source_path.file_name()?.to_str()?;
+        let sanitized = sanitize_name(file_name)?;
+        let candidate = media_dir.join(&sanitized);
+        if source_path == candidate {
+            return Some(candidate.to_string_lossy().to_string());
+        }
+        return None;
+    }
+
+    if image_url.scheme() != "http" && image_url.scheme() != "https" {
+        return None;
+    }
+
+    let segments: Vec<&str> = image_url.path_segments().map(|it| it.collect()).unwrap_or_default();
+    for (index, segment) in segments.iter().enumerate() {
+        if !segment.eq_ignore_ascii_case("media") {
+            continue;
+        }
+        if segments.len() != index + 2 {
+            continue;
+        }
+        let file_name = sanitize_name(segments[index + 1])?;
+        return Some(media_dir.join(file_name).to_string_lossy().to_string());
+    }
+
+    None
 }
 
 #[utoipa::path(
@@ -495,6 +536,10 @@ fn command_id(command: &UpdaterCommand) -> CommandId {
 fn max_ota_bytes() -> u64 {
     const DEFAULT_MB: u64 = 2 * 1024; // 2GB default
     env::var("HELIOS_OTA_MAX_UPLOAD_MB").ok().and_then(|raw| raw.parse::<u64>().ok()).filter(|v| *v > 0).map(|mb| mb.saturating_mul(1024 * 1024)).unwrap_or(DEFAULT_MB * 1024 * 1024)
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 async fn with_updater<F, Fut, T>(state: &AppState, f: F) -> Result<T, UploadUpdateError>

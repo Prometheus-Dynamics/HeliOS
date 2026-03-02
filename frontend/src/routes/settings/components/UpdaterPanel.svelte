@@ -44,6 +44,7 @@
   let applyStatus = $state<string | null>(null);
   let applyConfirmOpen = $state(false);
   let applyConfirmChecked = $state(false);
+  let deleteImageAfterApply = $state(true);
 
   // State + info
   let stateLoading = $state(false);
@@ -392,7 +393,10 @@
     applyError = null;
     applyStatus = null;
     try {
-      const payload: { requested_by: string; image_url?: string; size_bytes?: number; checksum?: string } = { requested_by: REQUESTED_BY };
+      const payload: { requested_by: string; image_url?: string; size_bytes?: number; checksum?: string; delete_image_after_apply: boolean } = {
+        requested_by: REQUESTED_BY,
+        delete_image_after_apply: deleteImageAfterApply
+      };
       payload.image_url = imageUrl;
       if (sourceKind === 'upload' && uploadInfo) {
         payload.size_bytes = uploadInfo.size_bytes;
@@ -585,8 +589,10 @@
     applyBusy={applyBusy}
     isStageInProgress={isStageInProgress}
     imageUrl={imageUrl}
+    deleteImageAfterApply={deleteImageAfterApply}
     onOpenConfirm={openApplyConfirm}
     onCancelUpdate={() => cancelUpdate()}
+    onDeleteImageAfterApplyChange={(enabled) => (deleteImageAfterApply = enabled)}
   />
 
   <UpdaterStatePanel

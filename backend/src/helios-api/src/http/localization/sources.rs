@@ -39,11 +39,7 @@ fn is_media_imu_output_key(output_key: &str) -> bool {
 
 fn output_key_looks_detection(output_key: &str) -> bool {
     let key = output_key.trim().to_ascii_lowercase();
-    key.contains("aruco")
-        || key.contains("detect")
-        || key.contains("detection")
-        || key.contains("tag_poses")
-        || key.contains("tag_pose")
+    key.contains("aruco") || key.contains("detect") || key.contains("detection") || key.contains("tag_poses") || key.contains("tag_pose")
 }
 
 fn output_key_looks_pose(output_key: &str) -> bool {
@@ -64,10 +60,7 @@ fn output_key_looks_image(output_key: &str) -> bool {
 }
 
 fn data_type_text(data_type: Option<&JsonValue>) -> String {
-    data_type
-        .and_then(|value| serde_json::to_string(value).ok())
-        .unwrap_or_default()
-        .to_ascii_lowercase()
+    data_type.and_then(|value| serde_json::to_string(value).ok()).unwrap_or_default().to_ascii_lowercase()
 }
 
 fn data_type_looks_localization(data_type: Option<&JsonValue>) -> bool {
@@ -92,14 +85,7 @@ fn data_type_looks_image(data_type: Option<&JsonValue>) -> bool {
     if text.is_empty() {
         return false;
     }
-    text.contains("image")
-        || text.contains("frame")
-        || text.contains("rgb")
-        || text.contains("bgr")
-        || text.contains("nv12")
-        || text.contains("yuv")
-        || text.contains("jpeg")
-        || text.contains("png")
+    text.contains("image") || text.contains("frame") || text.contains("rgb") || text.contains("bgr") || text.contains("nv12") || text.contains("yuv") || text.contains("jpeg") || text.contains("png")
 }
 
 fn is_localization_compatible_output(output_key: &str, data_type: Option<&JsonValue>) -> bool {

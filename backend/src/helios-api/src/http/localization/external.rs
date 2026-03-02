@@ -145,9 +145,7 @@ async fn fetch_device_imu_sample(state: &AppState) -> ApiResult<PipelineOutputSa
     // IMU position is usually clamped/zeroed (`dr_lock_position=true`) and should not be treated
     // as an absolute robot-field translation source for localization.
     // Only publish translation when dead-reckoned position is explicitly unlocked *and* non-zero.
-    let translation = status.position_world.filter(|position| {
-        status.dr_lock_position == Some(false) && (position.x.abs() > 1e-6 || position.y.abs() > 1e-6 || position.z.abs() > 1e-6)
-    });
+    let translation = status.position_world.filter(|position| status.dr_lock_position == Some(false) && (position.x.abs() > 1e-6 || position.y.abs() > 1e-6 || position.z.abs() > 1e-6));
     let velocity = status.velocity_world.map(|value| {
         serde_json::json!({
             "x": value.x,

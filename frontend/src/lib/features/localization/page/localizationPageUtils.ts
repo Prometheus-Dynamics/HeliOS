@@ -31,7 +31,7 @@ export const applyDeviceSeparation = (params: {
   const sourceIndex = new Map<string, number>(cameraOrder.map((key, index) => [key, index]));
   return markers.map((marker) => {
     const source = marker.source;
-    const key = (source?.cameraUid || source?.streamId || source?.id || '').trim();
+    const key = cameraKeyForSource(source ?? null) ?? '';
     const index = key ? sourceIndex.get(key) ?? 0 : 0;
     if (!index) return marker;
     const [x, y, z] = marker.position;

@@ -57,6 +57,8 @@ struct StartupPresetMarker {
 }
 
 pub(crate) async fn apply_startup_preset(state: AppState) {
+    super::localization::maps::seed_bundled_field_maps().await;
+
     let preset_path = startup_preset_path();
     let marker_path = startup_marker_path();
 

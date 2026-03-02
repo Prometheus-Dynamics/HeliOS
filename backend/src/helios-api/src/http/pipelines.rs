@@ -558,6 +558,20 @@ pub struct GpuEdgeBufferInfo {
 #[derive(Clone, Debug)]
 struct GraphValidationState {
     diagnostics: Vec<PlannerDiagnostic>,
+    updated_at_ms: i64,
+}
+
+const GRAPH_VALIDATION_CACHE_MAX_AGE_MS: i64 = 60_000;
+
+fn now_timestamp_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
+fn graph_validation_state_stale(state: &GraphValidationState, graph_updated_at_ms: i64, now_ms: i64) -> bool {
+    if graph_updated_at_ms > 0 && state.updated_at_ms < graph_updated_at_ms {
+        return true;
+    }
+    now_ms.saturating_sub(state.updated_at_ms) > GRAPH_VALIDATION_CACHE_MAX_AGE_MS
 }
 
 fn graph_validation_cache() -> &'static RwLock<HashMap<Uuid, GraphValidationState>> {
@@ -574,7 +588,7 @@ fn map_planner_diagnostics(diagnostics: Vec<helios_engine::ipc::PlannerDiagnosti
 
 async fn set_graph_validation_state(graph_id: Uuid, diagnostics: Vec<PlannerDiagnostic>) {
     let mut cache = graph_validation_cache().write().await;
-    cache.insert(graph_id, GraphValidationState { diagnostics });
+    cache.insert(graph_id, GraphValidationState { diagnostics, updated_at_ms: now_timestamp_ms() });
 }
 
 async fn set_graph_validation_error(graph_id: Uuid, code: Option<EngineErrorCode>, message: String) {
@@ -1033,14 +1047,14 @@ async fn update_graph(State(state): State<AppState>, Path(id): Path<Uuid>, Json(
     tag = "Pipelines",
     responses((status = 200, description = "List stored graphs", body = [PipelineSummary]), (status = 500, description = "Storage error", body = PipelineError))
 )]
-async fn list_graphs() -> impl IntoResponse {
+async fn list_graphs(State(state): State<AppState>) -> impl IntoResponse {
     let dir = match pipeline_dir() {
         Ok(dir) => dir,
         Err(resp) => return *resp,
     };
-    let mut summaries = Vec::new();
+    let mut loaded_docs: Vec<(PipelineDocument, i64)> = Vec::new();
     let mut existing_ids = HashSet::new();
-    let validation_snapshot = snapshot_graph_validation().await;
+    let mut validation_snapshot = snapshot_graph_validation().await;
     let mut entries = match fs::read_dir(dir).await {
         Ok(entries) => entries,
         Err(err) => return map_io_error(err, "failed to read pipeline directory"),
@@ -1064,22 +1078,44 @@ async fn list_graphs() -> impl IntoResponse {
             Err(err) => return map_io_error(err, "failed to read pipeline file"),
         };
         if let Ok(doc) = serde_json::from_str::<PipelineDocument>(&data) {
-            let issue_count = validation_snapshot.get(&doc.id).map(|state| state.diagnostics.len()).unwrap_or(0);
-            summaries.push(PipelineSummary { id: doc.id, name: doc.name, updated_at_ms: doc.updated_at_ms.max(0), issue_count });
-            existing_ids.insert(doc.id);
+            let doc_id = doc.id;
+            let mut updated_at_ms = doc.updated_at_ms.max(0);
+            // Fallback to file modification time if the stored value is zero.
+            if updated_at_ms == 0
+                && let Ok(modified) = meta.modified()
+                && let Ok(ts) = modified.duration_since(std::time::UNIX_EPOCH)
+            {
+                updated_at_ms = ts.as_millis() as i64;
+            }
+            loaded_docs.push((doc, updated_at_ms));
+            existing_ids.insert(doc_id);
         } else {
             // Skip malformed entries; they were not written by this API.
             continue;
         }
-        // Fallback to file modification time if the stored value is zero.
-        if let Some(last) = summaries.last_mut()
-            && last.updated_at_ms == 0
-            && let Ok(modified) = meta.modified()
-            && let Ok(ts) = modified.duration_since(std::time::UNIX_EPOCH)
-        {
-            last.updated_at_ms = ts.as_millis() as i64;
+    }
+
+    let now_ms = now_timestamp_ms();
+    for (doc, updated_at_ms) in &loaded_docs {
+        let needs_refresh = match validation_snapshot.get(&doc.id) {
+            Some(state) => graph_validation_state_stale(state, *updated_at_ms, now_ms),
+            None => true,
+        };
+        if needs_refresh {
+            refresh_graph_validation(&state, doc.id, &doc.graph).await;
         }
     }
+    if !loaded_docs.is_empty() {
+        validation_snapshot = snapshot_graph_validation().await;
+    }
+
+    let summaries: Vec<PipelineSummary> = loaded_docs
+        .into_iter()
+        .map(|(doc, updated_at_ms)| {
+            let issue_count = validation_snapshot.get(&doc.id).map(|state| state.diagnostics.len()).unwrap_or(0);
+            PipelineSummary { id: doc.id, name: doc.name, updated_at_ms, issue_count }
+        })
+        .collect();
 
     prune_graph_validation_cache(&existing_ids).await;
     Json(summaries).into_response()

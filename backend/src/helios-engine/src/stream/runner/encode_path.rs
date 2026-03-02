@@ -134,6 +134,13 @@ impl StreamRunner {
         self.session = Some(session);
         self.capture_started_wall = Some(Instant::now());
         tracing::info!("capture session attached to stream runner");
+        // `stop()` tears down the preview worker, and capture recovery restarts reuse this same
+        // runner instance. Recreate the worker on start so preview shmem resumes after restarts.
+        if self.preview_worker.is_none() && self.shmem.is_some() && self.preview_generation_enabled() {
+            self.preview_worker = Some(super::PreviewWorker::start());
+            self.last_preview_encode_wall = None;
+            tracing::info!("preview worker restarted");
+        }
 
         if (self.encoder_id.is_some() || self.decoder_id.is_some()) && self.codecs.is_none() {
             tracing::info!(encoder = self.encoder_id.as_deref().unwrap_or("none"), decoder = self.decoder_id.as_deref().unwrap_or("none"), "initializing codec registry");
@@ -544,6 +551,10 @@ impl StreamRunner {
 
     pub(super) fn stream_label(&self) -> &str {
         self.stream_label.as_ref()
+    }
+
+    fn preview_generation_enabled(&self) -> bool {
+        !(self.encoder_id.is_none() && self.decoder_id.is_none() && self.capture_config.backend != styx::BackendKind::File)
     }
 
     pub(super) fn is_encoded_preview_fourcc(fourcc: FourCc) -> bool {

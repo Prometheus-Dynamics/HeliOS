@@ -2085,31 +2085,31 @@ fn shadow_data_root() -> PathBuf {
         .clone()
 }
 
+fn env_flag_enabled(var: &str, default_value: bool) -> bool {
+    let raw = match std::env::var(var) {
+        Ok(value) => value,
+        Err(_) => return default_value,
+    };
+    let value = raw.trim().to_ascii_lowercase();
+    if value.is_empty() {
+        return default_value;
+    }
+    matches!(value.as_str(), "1" | "true" | "yes" | "y" | "on" | "enabled")
+}
+
 fn shadow_recorder_feature_enabled() -> bool {
     static VALUE: OnceLock<bool> = OnceLock::new();
-    *VALUE.get_or_init(|| {
-        let raw = std::env::var("HELIOS_ENABLE_SHADOW_RECORDER").ok().unwrap_or_default();
-        let v = raw.trim().to_ascii_lowercase();
-        matches!(v.as_str(), "1" | "true" | "yes" | "y" | "on" | "enabled")
-    })
+    *VALUE.get_or_init(|| env_flag_enabled("HELIOS_ENABLE_SHADOW_RECORDER", true))
 }
 
 fn recording_encoded_passthrough_enabled() -> bool {
     static VALUE: OnceLock<bool> = OnceLock::new();
-    *VALUE.get_or_init(|| {
-        let raw = std::env::var("HELIOS_RECORDING_USE_ENCODED_PASSTHROUGH").ok().unwrap_or_default();
-        let v = raw.trim().to_ascii_lowercase();
-        matches!(v.as_str(), "1" | "true" | "yes" | "y" | "on" | "enabled")
-    })
+    *VALUE.get_or_init(|| env_flag_enabled("HELIOS_RECORDING_USE_ENCODED_PASSTHROUGH", false))
 }
 
 fn recording_shadow_start_stop_enabled() -> bool {
     static VALUE: OnceLock<bool> = OnceLock::new();
-    *VALUE.get_or_init(|| {
-        let raw = std::env::var("HELIOS_RECORDING_USE_SHADOW_START_STOP").ok().unwrap_or_default();
-        let v = raw.trim().to_ascii_lowercase();
-        matches!(v.as_str(), "1" | "true" | "yes" | "y" | "on" | "enabled")
-    })
+    *VALUE.get_or_init(|| env_flag_enabled("HELIOS_RECORDING_USE_SHADOW_START_STOP", false))
 }
 
 fn shadow_dir_for_stream(stream_id: Uuid) -> PathBuf {

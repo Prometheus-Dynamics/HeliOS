@@ -273,8 +273,12 @@ async fn stage_release_job(
 
 #[derive(Deserialize)]
 struct ManifestMetadata {
-    #[serde(default)]
+    #[serde(default = "default_true")]
     auto_apply: bool,
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 fn manifest_auto_apply(manifest: &ReleaseManifest) -> bool {

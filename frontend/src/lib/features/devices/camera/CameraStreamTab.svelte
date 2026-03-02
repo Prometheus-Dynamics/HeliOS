@@ -376,9 +376,7 @@
     const nextBackendKind = String((backendOptions[value] as { kind?: string } | null)?.kind ?? '')
       .trim()
       .toLowerCase();
-    if (nextBackendKind === 'file') {
-      shadowRecorderEnabled = false;
-    }
+    shadowRecorderEnabled = nextBackendKind !== 'file';
     selectedFormat = firstFormat();
     selectedResolution = firstResolution();
     selectedIntervalIdx = 0;

@@ -394,7 +394,7 @@ export function createCameraBackendController(state: BackendState, deps: Backend
     }
 
     state.hostBuffer = manifest?.host_buffer ?? state.hostBuffer;
-    state.shadowRecorderEnabled = manifest?.shadow_recorder_enabled ?? false;
+    state.shadowRecorderEnabled = isFileBackend(capture?.backend) ? false : (manifest?.shadow_recorder_enabled ?? true);
     state.cameraAlias = String((manifest as any)?.identity?.alias ?? (manifest as any)?.identity?.display ?? '').trim();
     const encoderEnabledFlag = (manifest as any)?.encoder_enabled;
     const decoderEnabledFlag = (manifest as any)?.decoder_enabled;

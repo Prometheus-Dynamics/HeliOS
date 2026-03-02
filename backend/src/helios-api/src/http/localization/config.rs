@@ -97,11 +97,7 @@ pub async fn update_config(State(_state): State<AppState>, Json(body): Json<Loca
 )]
 pub async fn export_profiles(State(_state): State<AppState>) -> ApiResult<Json<LocalizationProfilesExportEnvelope>> {
     let config = normalize_config(load_config().await?);
-    Ok(Json(LocalizationProfilesExportEnvelope {
-        schema: LOCALIZATION_PROFILES_SCHEMA_V1.to_string(),
-        exported_at: chrono::Utc::now().to_rfc3339(),
-        config,
-    }))
+    Ok(Json(LocalizationProfilesExportEnvelope { schema: LOCALIZATION_PROFILES_SCHEMA_V1.to_string(), exported_at: chrono::Utc::now().to_rfc3339(), config }))
 }
 
 #[utoipa::path(
@@ -168,17 +164,12 @@ fn extract_imported_config(body: Value) -> Result<LocalizationConfig, ApiError> 
     if let Ok(payload) = serde_json::from_value::<LocalizationProfilesImportRequest>(body.clone()) {
         if let Some(schema) = payload.schema.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
             if schema != LOCALIZATION_PROFILES_SCHEMA_V1 {
-                return Err(ApiError::bad_request(format!(
-                    "unsupported localization profiles schema `{schema}`; expected `{LOCALIZATION_PROFILES_SCHEMA_V1}`"
-                )));
+                return Err(ApiError::bad_request(format!("unsupported localization profiles schema `{schema}`; expected `{LOCALIZATION_PROFILES_SCHEMA_V1}`")));
             }
         }
         return Ok(payload.config);
     }
 
-    serde_json::from_value::<LocalizationConfig>(body).map_err(|err| {
-        ApiError::bad_request(format!(
-            "invalid localization profiles payload: expected `{LOCALIZATION_PROFILES_SCHEMA_V1}` envelope or localization config: {err}"
-        ))
-    })
+    serde_json::from_value::<LocalizationConfig>(body)
+        .map_err(|err| ApiError::bad_request(format!("invalid localization profiles payload: expected `{LOCALIZATION_PROFILES_SCHEMA_V1}` envelope or localization config: {err}")))
 }

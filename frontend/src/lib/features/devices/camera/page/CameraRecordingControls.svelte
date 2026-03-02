@@ -149,7 +149,12 @@
   });
   onDestroy(() => unsubscribeBackendFeatures());
 
-  const shadowEnabled = $derived(shadowRecorderSupported && ((ctx.stream?.manifest as any)?.shadow_recorder_enabled ?? false));
+  const shadowEnabled = $derived.by(() => {
+    if (!shadowRecorderSupported) return false;
+    const backend = String((ctx.stream?.manifest as any)?.capture?.backend ?? '').trim().toLowerCase();
+    if (backend === 'file') return false;
+    return Boolean((ctx.stream?.manifest as any)?.shadow_recorder_enabled ?? true);
+  });
   const preferredMultiplexCodec = $derived.by(() => {
     const encoderId = String((ctx.stream?.manifest as any)?.encoder_id ?? '').toLowerCase();
     if (encoderId.includes('265') || encoderId.includes('hevc')) return 'h265';

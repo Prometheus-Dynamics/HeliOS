@@ -22,7 +22,11 @@ import {
   transformFromFieldCenter,
   type PlanarFieldOrigin
 } from '$lib/features/localization/fieldOrigins';
-import { cameraKeyForSource, profileColorForId } from '$lib/features/localization/utils';
+import {
+  cameraKeyForSource,
+  mediaImuParentStreamIdForSource,
+  profileColorForId
+} from '$lib/features/localization/utils';
 import { pipelineGraphTotalMs } from '$lib/features/localization/page/localizationMetricsUtils';
 
 export type LocalizationBaseFrame = 'camera' | 'robot' | 'field';
@@ -60,29 +64,6 @@ export const groupLocalizationSources = (
 ): LocalizationSourceGroup[] => {
   const UUID_LIKE_RE =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  const MEDIA_IMU_STREAM_RE =
-    /^external:media-imu-([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i;
-  const MEDIA_IMU_ID_RE =
-    /^external:media-imu-([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}):/i;
-  const MEDIA_IMU_CAMERA_RE =
-    /^media-imu:([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i;
-
-  const mediaImuParentStreamId = (source: LocalizationPipelineSource): string | null => {
-    const streamId = (source.streamId ?? '').trim();
-    const id = (source.id ?? '').trim();
-    const cameraUid = (source.cameraUid ?? '').trim();
-
-    const byStream = streamId.match(MEDIA_IMU_STREAM_RE)?.[1];
-    if (byStream) return byStream;
-
-    const byId = id.match(MEDIA_IMU_ID_RE)?.[1];
-    if (byId) return byId;
-
-    const byCamera = cameraUid.match(MEDIA_IMU_CAMERA_RE)?.[1];
-    if (byCamera) return byCamera;
-
-    return null;
-  };
 
   const sourceKind = (source: LocalizationPipelineSource): LocalizationSourceGroup['kind'] => {
     const streamId = (source.streamId ?? '').trim();
@@ -121,7 +102,7 @@ export const groupLocalizationSources = (
   for (const source of compatibleSources) {
     const streamId = (source.streamId ?? '').trim();
     if (!UUID_LIKE_RE.test(streamId)) continue;
-    const key = source.cameraUid || source.streamId || source.id;
+    const key = cameraKeyForSource(source) ?? source.id;
     if (!key) continue;
     parentStreamGroups.set(streamId, {
       key,
@@ -144,7 +125,7 @@ export const groupLocalizationSources = (
 
   for (const source of compatibleSources) {
     const incomingKind = sourceKind(source);
-    const parentStreamId = mediaImuParentStreamId(source);
+    const parentStreamId = mediaImuParentStreamIdForSource(source);
     const parentGroup = parentStreamId ? parentStreamGroups.get(parentStreamId) : null;
 
     const kind: LocalizationSourceGroup['kind'] = parentGroup ? 'stream' : parentStreamId ? 'stream' : incomingKind;
@@ -258,10 +239,7 @@ export const getViewerCameraIdForMarker = (options: {
     return options.rigCameraForMarker(options.marker)?.uid ?? null;
   }
   const source = options.marker.source;
-  if (options.baseFrame === 'field') {
-    return (source?.cameraUid || source?.streamId || '').trim() || source?.id || null;
-  }
-  return (source?.cameraUid || source?.streamId || '').trim() || source?.id || null;
+  return cameraKeyForSource(source ?? null) || source?.id || null;
 };
 
 export const buildSourceStatusRows = (options: {

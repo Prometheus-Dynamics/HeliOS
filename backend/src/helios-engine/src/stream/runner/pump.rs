@@ -1,5 +1,6 @@
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::mpsc::TrySendError;
 use std::time::{Duration, Instant};
 
 use metrics::histogram;
@@ -527,8 +528,20 @@ impl StreamRunner {
             return;
         };
         let output_resolution = self.preview_output_resolution_hint();
-        if worker.req_tx.try_send(super::PreviewEncodeRequest { ts, image, output_resolution }).is_ok() {
-            self.last_preview_encode_wall = Some(now);
+        match worker.req_tx.try_send(super::PreviewEncodeRequest { ts, image, output_resolution }) {
+            Ok(()) => {
+                self.last_preview_encode_wall = Some(now);
+            }
+            Err(TrySendError::Full(_)) => {}
+            Err(TrySendError::Disconnected(req)) => {
+                tracing::warn!("preview worker channel disconnected; restarting preview worker");
+                self.preview_worker = Some(super::PreviewWorker::start());
+                if let Some(worker) = self.preview_worker.as_ref() {
+                    if worker.req_tx.try_send(req).is_ok() {
+                        self.last_preview_encode_wall = Some(now);
+                    }
+                }
+            }
         }
     }
 
