@@ -22,6 +22,8 @@ pub fn router() -> Router<AppState> {
         .route("/capabilities", get(localization_capabilities_handler))
         .route("/sources", get(sources::list_sources))
         .route("/config", get(config::get_config).put(config::update_config))
+        .route("/profiles/export", get(config::export_profiles))
+        .route("/profiles/import", post(config::import_profiles))
         .route("/solve", get(solve::solve))
         .route("/streams/:id/outputs/:output_key", get(sources::sample_output))
         .route("/peers/:id/outputs/:output_key", get(sources::sample_peer_output))

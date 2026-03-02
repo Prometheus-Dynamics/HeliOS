@@ -13,9 +13,6 @@ These endpoints live under `/v1/*` (see also `GET /openapi.json`).
 |---|---|---|
 | `GET` | `/v1/device/nt4` | NT4 settings |
 | `POST` | `/v1/device/nt4` | NT4 settings updated |
-| `GET` | `/v1/limelight` | Limelight adapter registry status |
-| `GET` | `/v1/limelight/{table}/results` | Limelight results staging status |
-| `GET` | `/v1/limelight/{table}/status` | Limelight adapter status |
 | `POST` | `/v1/nt4/topics` | Discovered topics |
 | `POST` | `/v1/nt4/value` | Topic value |
 

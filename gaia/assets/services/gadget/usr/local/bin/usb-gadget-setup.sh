@@ -404,6 +404,11 @@ fi
 for ifc in usbbr0 usb0 usb1 end0 end1; do
   ip link set dev "$ifc" up 2>/dev/null || true
 done
+# Reconcile stale addressing from legacy networkd configs: gadget slave links
+# must not carry the service subnet address; only the bridge should.
+for ifc in usb0 usb1 end0 end1; do
+  ip addr flush dev "$ifc" scope global 2>/dev/null || true
+done
 # Quiet early sysctl warnings by disabling IPv6 on gadget interfaces after they exist
 log "interfaces brought up (best-effort): usbbr0 usb0 usb1 end0 end1"
 sysctl -w net.ipv6.conf.usbbr0.disable_ipv6=1 >/dev/null 2>&1 && log "ipv6 disabled on usbbr0" || true

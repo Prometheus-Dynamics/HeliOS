@@ -22,6 +22,108 @@ export type PipelineOutputSample = {
   value: unknown;
 };
 
+const toLower = (value: string | null | undefined): string => clean(value).toLowerCase();
+
+const outputKeyLooksImage = (outputKey: string): boolean => {
+  const key = outputKey.trim().toLowerCase();
+  return key === 'frame' || key === 'raw' || key === 'undistorted' || key.includes('image') || key.includes('frame');
+};
+
+export const isLocalizationDetectionSource = (source: LocalizationPipelineSource): boolean => {
+  const key = toLower(source.outputKey);
+  if (!key) return false;
+  const detectionLike =
+    key.includes('aruco') ||
+    key.includes('detect') ||
+    key.includes('detection') ||
+    key.includes('tag_pose') ||
+    key.includes('tag_poses') ||
+    key.startsWith('tag_in_') ||
+    key.startsWith('camera_in_tag') ||
+    key.startsWith('robot_in_tag');
+  if (!detectionLike) return false;
+  return !outputKeyLooksImage(key);
+};
+
+export const isLocalizationImuSource = (source: LocalizationPipelineSource): boolean => {
+  const streamId = toLower(source.streamId);
+  const outputKey = toLower(source.outputKey);
+  const cameraUid = toLower(source.cameraUid);
+  return (
+    streamId.startsWith('external:imu') ||
+    outputKey.includes('imu_pose') ||
+    outputKey.startsWith('imu_') ||
+    cameraUid === 'imu'
+  );
+};
+
+export const isLocalizationPoseSource = (source: LocalizationPipelineSource): boolean => {
+  const key = toLower(source.outputKey);
+  if (!key) return false;
+  const poseLike =
+    key.startsWith('solver:') ||
+    key.startsWith('tag_in_') ||
+    key.startsWith('camera_in_') ||
+    key.startsWith('robot_in_') ||
+    key.includes('pose');
+  if (!poseLike) return false;
+  if (isLocalizationDetectionSource(source)) return true;
+  if (isLocalizationImuSource(source)) return true;
+  return !outputKeyLooksImage(key);
+};
+
+const stringifyDataType = (value: PipelineDataType | null | undefined): string => {
+  if (value == null) return '';
+  if (typeof value === 'string') return value.toLowerCase();
+  try {
+    return JSON.stringify(value).toLowerCase();
+  } catch {
+    return '';
+  }
+};
+
+const dataTypeLooksLocalization = (value: PipelineDataType | null | undefined): boolean => {
+  const text = stringifyDataType(value);
+  if (!text) return false;
+  return (
+    text.includes('localization') ||
+    text.includes('detection') ||
+    text.includes('aruco') ||
+    text.includes('tag_pose') ||
+    text.includes('tag_poses') ||
+    text.includes('tag_in_') ||
+    text.includes('camera_in_') ||
+    text.includes('robot_in_') ||
+    text.includes('imu') ||
+    text.includes('pose')
+  );
+};
+
+const dataTypeLooksImage = (value: PipelineDataType | null | undefined): boolean => {
+  const text = stringifyDataType(value);
+  if (!text) return false;
+  return (
+    text.includes('image') ||
+    text.includes('frame') ||
+    text.includes('rgb') ||
+    text.includes('bgr') ||
+    text.includes('nv12') ||
+    text.includes('yuv') ||
+    text.includes('jpeg') ||
+    text.includes('png')
+  );
+};
+
+export const isLocalizationCompatibleSource = (source: LocalizationPipelineSource): boolean => {
+  const outputKey = clean(source.outputKey);
+  if (!outputKey) return false;
+  if (outputKey.toLowerCase() === 'frame') return false;
+  if (isLocalizationDetectionSource(source) || isLocalizationImuSource(source) || isLocalizationPoseSource(source)) {
+    return true;
+  }
+  return dataTypeLooksLocalization(source.dataType) && !dataTypeLooksImage(source.dataType);
+};
+
 const UUID_LIKE_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 

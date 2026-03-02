@@ -20,7 +20,7 @@ HeliOS exposes an HTTP API under the `/v1` prefix.
 | Method | Path | Description | Responses |
 |---|---|---|---|
 | `GET` | `/v1/streams` | List active streams | `200` |
-| `POST` | `/v1/streams` | Stream started | `200` |
+| `POST` | `/v1/streams` | Stream started | `200, 422` |
 | `GET` | `/v1/streams/{id}` | Stream info | `200, 404` |
 | `DELETE` | `/v1/streams/{id}` | Stream stopped | `204` |
 | `POST` | `/v1/streams/{id}/calibration/apply` | Updated stream manifest | `200` |
@@ -47,7 +47,9 @@ HeliOS exposes an HTTP API under the `/v1` prefix.
 | `POST` | `/v1/streams/{id}/snapshot` | Snapshot stored | `201, 400, 404, 502, 503` |
 | `GET` | `/v1/streams/backends` | Available capture backends/devices | `200` |
 | `POST` | `/v1/streams/bench/formats` | Benchmark results | `200` |
+| `GET` | `/v1/streams/capabilities` | Stream validation constraints and defaults | `200` |
 | `GET` | `/v1/streams/codecs` | Available codecs (encoders + decoders) | `200` |
+| `POST` | `/v1/streams/validate` | Validated + canonicalized stream manifest | `200, 422` |
 
 ### Device
 
@@ -148,8 +150,9 @@ HeliOS exposes an HTTP API under the `/v1` prefix.
 
 | Method | Path | Description | Responses |
 |---|---|---|---|
+| `GET` | `/v1/localization/capabilities` | Localization validation constraints and defaults | `200` |
 | `GET` | `/v1/localization/config` | Localization config | `200` |
-| `PUT` | `/v1/localization/config` | Updated localization config | `200` |
+| `PUT` | `/v1/localization/config` | Updated localization config | `200, 422` |
 | `GET` | `/v1/localization/external/{id}/outputs/{output_key}` | Latest output sample | `200, 400, 404` |
 | `GET` | `/v1/localization/external/sources` | External localization sources | `200` |
 | `PUT` | `/v1/localization/external/sources/{id}` | Upserted external source | `200` |
@@ -157,11 +160,14 @@ HeliOS exposes an HTTP API under the `/v1` prefix.
 | `POST` | `/v1/localization/external/sources/{id}/sample` | Updated sample | `200` |
 | `GET` | `/v1/localization/maps` | Available field maps | `200` |
 | `GET` | `/v1/localization/maps/{id}` | Field map document | `200, 404` |
-| `POST` | `/v1/localization/maps/upload` | Map uploaded | `201, 400, 413` |
+| `POST` | `/v1/localization/maps/upload` | Map uploaded | `201, 400, 413, 422` |
 | `GET` | `/v1/localization/peers/{id}/outputs/{output_key}` | Latest output sample | `200, 400, 404, 502` |
+| `GET` | `/v1/localization/profiles/export` | Exported localization profiles envelope | `200` |
+| `POST` | `/v1/localization/profiles/import` | Imported localization config | `200, 400, 422` |
 | `GET` | `/v1/localization/solve` | Localization solve outputs | `200` |
 | `GET` | `/v1/localization/sources` | Available localization pipeline outputs | `200` |
 | `GET` | `/v1/localization/streams/{id}/outputs/{output_key}` | Latest output sample | `200, 404, 502` |
+| `POST` | `/v1/localization/validate` | Validated + canonicalized localization config | `200, 422` |
 
 ### Peers
 
@@ -178,9 +184,6 @@ HeliOS exposes an HTTP API under the `/v1` prefix.
 
 | Method | Path | Description | Responses |
 |---|---|---|---|
-| `GET` | `/v1/limelight` | Limelight adapter registry status | `200` |
-| `GET` | `/v1/limelight/{table}/results` | Limelight results staging status | `200, 404` |
-| `GET` | `/v1/limelight/{table}/status` | Limelight adapter status | `200, 404` |
 | `POST` | `/v1/nt4/topics` | Discovered topics | `200, 400, 502` |
 | `POST` | `/v1/nt4/value` | Topic value | `200, 400, 404, 502` |
 

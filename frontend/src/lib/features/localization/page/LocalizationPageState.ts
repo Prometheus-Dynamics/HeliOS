@@ -7,7 +7,8 @@ import {
   fetchLocalizationPipelineStatus
 } from '$lib/features/localization/localizationPipeline';
 import {
-  fetchLocalizationPipelineSources
+  fetchLocalizationPipelineSources,
+  isLocalizationCompatibleSource
 } from '$lib/features/localization/pipelineSources';
 
 type FeedStatus = 'idle' | 'connecting' | 'live' | 'error';
@@ -43,7 +44,7 @@ export const createLocalizationPageState = (options: {
   ): Promise<Record<string, boolean>> => {
     const compatibility: Record<string, boolean> = {};
     for (const source of nextSources) {
-      compatibility[source.id] = true;
+      compatibility[source.id] = isLocalizationCompatibleSource(source);
     }
     return compatibility;
   };

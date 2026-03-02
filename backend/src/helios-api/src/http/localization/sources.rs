@@ -37,6 +37,97 @@ fn is_media_imu_output_key(output_key: &str) -> bool {
     output_key.eq_ignore_ascii_case(media_imu::MEDIA_IMU_OUTPUT_KEY) || output_key.eq_ignore_ascii_case(media_imu::MEDIA_IMU_OUTPUT_KEY_LEGACY)
 }
 
+fn output_key_looks_detection(output_key: &str) -> bool {
+    let key = output_key.trim().to_ascii_lowercase();
+    key.contains("aruco")
+        || key.contains("detect")
+        || key.contains("detection")
+        || key.contains("tag_poses")
+        || key.contains("tag_pose")
+}
+
+fn output_key_looks_pose(output_key: &str) -> bool {
+    let key = output_key.trim().to_ascii_lowercase();
+    key.starts_with("solver:")
+        || key.starts_with("tag_in_")
+        || key.starts_with("camera_in_")
+        || key.starts_with("robot_in_")
+        || key.contains("imu_pose")
+        || key.contains(" pose")
+        || key.contains("_pose")
+        || key.ends_with("pose")
+}
+
+fn output_key_looks_image(output_key: &str) -> bool {
+    let key = output_key.trim().to_ascii_lowercase();
+    key == "frame" || key == "raw" || key == "undistorted" || key.contains("image") || key.contains("frame")
+}
+
+fn data_type_text(data_type: Option<&JsonValue>) -> String {
+    data_type
+        .and_then(|value| serde_json::to_string(value).ok())
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+}
+
+fn data_type_looks_localization(data_type: Option<&JsonValue>) -> bool {
+    let text = data_type_text(data_type);
+    if text.is_empty() {
+        return false;
+    }
+    text.contains("localization")
+        || text.contains("detection")
+        || text.contains("aruco")
+        || text.contains("tag_pose")
+        || text.contains("tag_poses")
+        || text.contains("tag_in_")
+        || text.contains("camera_in_")
+        || text.contains("robot_in_")
+        || text.contains("imu")
+        || text.contains("pose")
+}
+
+fn data_type_looks_image(data_type: Option<&JsonValue>) -> bool {
+    let text = data_type_text(data_type);
+    if text.is_empty() {
+        return false;
+    }
+    text.contains("image")
+        || text.contains("frame")
+        || text.contains("rgb")
+        || text.contains("bgr")
+        || text.contains("nv12")
+        || text.contains("yuv")
+        || text.contains("jpeg")
+        || text.contains("png")
+}
+
+fn is_localization_compatible_output(output_key: &str, data_type: Option<&JsonValue>) -> bool {
+    let key = output_key.trim();
+    if key.is_empty() {
+        return false;
+    }
+    if key.eq_ignore_ascii_case("frame") {
+        return false;
+    }
+
+    let looks_detection = output_key_looks_detection(key);
+    let looks_pose = output_key_looks_pose(key);
+    let looks_image = output_key_looks_image(key);
+    let type_localization = data_type_looks_localization(data_type);
+    let type_image = data_type_looks_image(data_type);
+
+    if looks_detection || looks_pose {
+        // Prevent obvious frame/image outputs from leaking in via weak naming heuristics.
+        if looks_image && !type_localization {
+            return false;
+        }
+        return true;
+    }
+
+    type_localization && !type_image
+}
+
 #[derive(Clone)]
 pub struct ApiLocalizationSourceFetcher {
     state: AppState,
@@ -93,8 +184,6 @@ pub async fn list_sources(State(state): State<AppState>) -> ApiResult<Json<Vec<L
             Ok(_) => Vec::new(),
             Err(_) => Vec::new(),
         };
-        let ports = outputs.into_iter().map(|desc| desc.name).filter(|port| !port.eq_ignore_ascii_case("frame"));
-
         let stream_label = stream.manifest.identity.alias.clone().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| stream_id.to_string());
 
         let camera_uid = stream.manifest.identity.hardware_id.clone().or(stream.manifest.identity.alias.clone()).unwrap_or_else(|| stream_id.to_string());
@@ -124,7 +213,12 @@ pub async fn list_sources(State(state): State<AppState>) -> ApiResult<Json<Vec<L
             ("none".to_string(), "Raw".to_string())
         };
 
-        for output_key in ports {
+        for desc in outputs {
+            let output_key = desc.name;
+            let data_type = desc.ty.map(|value| value.0);
+            if !is_localization_compatible_output(&output_key, data_type.as_ref()) {
+                continue;
+            }
             out.push(LocalizationPipelineSource {
                 id: format!("{stream_id}:{output_key}"),
                 stream_id: stream_id.to_string(),
@@ -134,7 +228,7 @@ pub async fn list_sources(State(state): State<AppState>) -> ApiResult<Json<Vec<L
                 pipeline_id: pipeline_id.clone(),
                 pipeline_label: pipeline_label.clone(),
                 output_key,
-                data_type: None,
+                data_type,
             });
         }
     }

@@ -2,6 +2,7 @@
   import { browser } from '$app/environment';
   import { onDestroy, onMount } from 'svelte';
   import { toaster } from '$lib';
+  import { apiUrl } from '$lib/api/httpClient';
   import { openStreamMetricsSocket } from '$lib/api/streamMetrics';
   import { StreamsApi } from '$lib/api/streamsApi';
   import { connectRealtimeUpdatesStream, type RealtimeUpdateEvent } from '$lib/api/realtimeUpdates';
@@ -34,6 +35,9 @@
   import { frcOriginDefinition, transformFromFieldCenter, type PlanarFieldOrigin } from '$lib/features/localization/fieldOrigins';
   import {
     fetchPipelineOutputSample,
+    isLocalizationCompatibleSource,
+    isLocalizationDetectionSource,
+    isLocalizationImuSource,
     type LocalizationPipelineSource
   } from '$lib/features/localization/pipelineSources';
   import {
@@ -43,7 +47,10 @@
     DEFAULT_FIELD_ORIGIN,
     DEFAULT_SOLVER_RUNTIME_TUNING,
     DEFAULT_TEMPORAL_STABILIZATION,
+    fetchLocalizationProfilesExport,
     fetchLocalizationSolve,
+    importLocalizationProfiles as importLocalizationProfilesApi,
+    type LocalizationConfig,
     type LocalizationCustomFieldOrigin,
     type LocalizationDetectionPose,
     type LocalizationFieldOriginConfig,
@@ -56,7 +63,9 @@
     type LocalizationSolverRuntimeTuningConfig,
     type LocalizationSolverOutputs,
     type LocalizationSolverResult,
+    type LocalizationSourceConfig,
     type LocalizationSourceSampleStatus,
+    type LocalizationProfilesExportEnvelope,
     type LocalizationTemporalStabilizationConfig
   } from '$lib/features/localization/localizationConfig';
   import { createLocalizationProfileStore } from '$lib/features/localization/profileStore';
@@ -192,6 +201,21 @@
     translation: { x: number; y: number; z: number } | null;
     sampleTimestampMs: number | null;
   };
+  const UUID_LIKE_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const DEFAULT_LOCALIZATION_CALIBRATION = {
+    fx: 608.2823560574243,
+    fy: 610.5489059894065,
+    cx: 638.8193727530946,
+    cy: 397.5372092494376,
+    k1: -0.04766182849174875,
+    k2: -0.023041409826196887,
+    k3: -0.012694098622574222,
+    p1: -0.0027334920956789644,
+    p2: 0,
+    undistortIters: 5,
+    lensModel: 'fisheye'
+  } as const;
   const LOCAL_TAG_POSE_LINGER_MS = 5000;
   const LOCAL_TAG_POSE_REFRESH_MS = 250;
   const FIELD_POSE_LINGER_MS = 5000;
@@ -254,6 +278,8 @@
   let pendingProfileDelete = $state<{ id: string; name: string } | null>(null);
   let profileDeleteBusy = $state(false);
   let profileDeleteError = $state<string | null>(null);
+  let profileTransferBusy = $state(false);
+  let profileImportInputEl: HTMLInputElement | null = null;
 
   const localizationStorage = createLocalizationStorageStore();
   const cameraExtrinsics = localizationStorage.cameraExtrinsics;
@@ -329,6 +355,207 @@
     } finally {
       profileDeleteBusy = false;
     }
+  };
+
+  const buildSourceConfigFromSource = (
+    source: LocalizationPipelineSource,
+    existing: LocalizationSourceConfig | null = null
+  ): LocalizationSourceConfig => ({
+    id: source.id,
+    streamId: source.streamId,
+    outputKey: source.outputKey,
+    cameraUid: source.cameraUid,
+    poseSpace: existing?.poseSpace ?? null,
+    inputKey: existing?.inputKey ?? null,
+    enabled: true,
+    weight: existing?.weight ?? 1
+  });
+
+  const exportLocalizationProfiles = async (): Promise<void> => {
+    profileTransferBusy = true;
+    try {
+      const payload = await fetchLocalizationProfilesExport();
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `localization-profiles-${stamp}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      const description = error instanceof Error ? error.message : 'Profile export failed';
+      toaster.error({
+        title: 'Unable to export profiles',
+        description
+      });
+    } finally {
+      profileTransferBusy = false;
+    }
+  };
+
+  const openImportProfilesDialog = (): void => {
+    profileImportInputEl?.click();
+  };
+
+  const importLocalizationProfiles = async (file: File): Promise<void> => {
+    profileTransferBusy = true;
+    try {
+      const text = await file.text();
+      let parsed: LocalizationProfilesExportEnvelope | LocalizationConfig;
+      try {
+        parsed = JSON.parse(text) as LocalizationProfilesExportEnvelope | LocalizationConfig;
+      } catch {
+        throw new Error('Selected file is not valid JSON.');
+      }
+      const imported = await importLocalizationProfilesApi(parsed);
+      await localizationProfiles.load();
+      await loadSources();
+      await loadStreamsSnapshot();
+      await loadFieldMapList();
+      const profileId = imported.activeProfileId ?? imported.profiles[0]?.id ?? null;
+      await loadPipelineStatus(profileId);
+      if (profileId) {
+        await loadPipelineOutputs(profileId);
+      }
+      toaster.success({
+        title: 'Profiles imported',
+        description: `Loaded ${imported.profiles.length} localization profile(s).`
+      });
+    } catch (error) {
+      const description = error instanceof Error ? error.message : 'Profile import failed';
+      toaster.error({
+        title: 'Unable to import profiles',
+        description
+      });
+    } finally {
+      profileTransferBusy = false;
+      if (profileImportInputEl) {
+        profileImportInputEl.value = '';
+      }
+    }
+  };
+
+  const saveDefaultCalibrationForStreamIfMissing = async (streamId: string): Promise<void> => {
+    const stream = streamInfos.find((entry) => String(entry.id ?? '').trim() === streamId) ?? null;
+    if (!stream) return;
+    const manifest = (stream.manifest as Record<string, unknown>) ?? {};
+    const calibration = manifest.calibration as Record<string, unknown> | null | undefined;
+    if (calibration && typeof calibration === 'object') {
+      return;
+    }
+    const response = await fetch(apiUrl(`/streams/${encodeURIComponent(streamId)}/calibration/save`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(DEFAULT_LOCALIZATION_CALIBRATION)
+    });
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new Error(body || `Failed to save default calibration (${response.status})`);
+    }
+  };
+
+  const maybeSeedDefaultLocalizationProfile = async (): Promise<boolean> => {
+    const config = $localizationConfig;
+    if (!config || config.profiles.length !== 1) return false;
+
+    const profile = config.profiles[0] ?? null;
+    if (!profile) return false;
+    const profileId = String(profile.id ?? '').trim().toLowerCase();
+    const profileName = String(profile.name ?? '').trim().toLowerCase();
+    const isDefaultProfile = profileId === 'default' || profileName === 'default';
+    if (!isDefaultProfile) return false;
+
+    const hasSources = (profile.sources ?? []).length > 0;
+    const hasFieldMap = Boolean(String(profile.fieldMapId ?? '').trim());
+    const hasSnapSettings =
+      Boolean(profile.snapZToGround) ||
+      Boolean(profile.snapRollToGround) ||
+      Boolean(profile.snapPitchToGround);
+    const hasTemplate = Boolean(String(profile.pipelineTemplateId ?? '').trim());
+
+    // Only seed untouched default profiles so existing user setups are not overwritten.
+    if (hasSources || hasFieldMap || hasSnapSettings || hasTemplate) {
+      return false;
+    }
+
+    const streamDetectionSource =
+      sources.find(
+        (source) =>
+          isLocalizationDetectionSource(source) &&
+          !source.streamId.startsWith('profile:') &&
+          !source.streamId.startsWith('peer:') &&
+          !source.streamId.startsWith('external:')
+      ) ?? null;
+    const fallbackDetectionSource = sources.find((source) => isLocalizationDetectionSource(source)) ?? null;
+    const detectionSource = streamDetectionSource ?? fallbackDetectionSource;
+    const imuSource =
+      sources.find((source) => source.streamId.startsWith('external:imu') && isLocalizationImuSource(source)) ??
+      sources.find((source) => isLocalizationImuSource(source)) ??
+      null;
+    const fieldMapId = fieldMaps[0]?.id ?? null;
+
+    if (!detectionSource && !imuSource && !fieldMapId) {
+      return false;
+    }
+
+    const existingById = new Map((profile.sources ?? []).map((entry) => [entry.id, entry]));
+    const seededSources: LocalizationSourceConfig[] = [];
+    const pushSeedSource = (source: LocalizationPipelineSource | null) => {
+      if (!source) return;
+      const current = existingById.get(source.id) ?? null;
+      seededSources.push(buildSourceConfigFromSource(source, current));
+      existingById.delete(source.id);
+    };
+    pushSeedSource(detectionSource);
+    pushSeedSource(imuSource);
+
+    for (const source of existingById.values()) {
+      seededSources.push({ ...source, enabled: true });
+    }
+
+    const nextProfile: LocalizationProfile = {
+      ...profile,
+      fieldMapId,
+      snapZToGround: true,
+      snapRollToGround: true,
+      snapPitchToGround: true,
+      sources: seededSources
+    };
+    const nextConfig: LocalizationConfig = {
+      ...config,
+      activeProfileId: profile.id,
+      profiles: [nextProfile]
+    };
+
+    await localizationProfiles.persist(nextConfig);
+
+    const streamsToSeed = Array.from(
+      new Set(
+        seededSources
+          .map((source) => String(source.streamId ?? '').trim())
+          .filter((streamId) => UUID_LIKE_RE.test(streamId))
+      )
+    );
+    for (const streamId of streamsToSeed) {
+      try {
+        await saveDefaultCalibrationForStreamIfMissing(streamId);
+      } catch (error) {
+        const description = error instanceof Error ? error.message : `Failed to apply default calibration for stream ${streamId}`;
+        toaster.error({
+          title: 'Default calibration not applied',
+          description
+        });
+      }
+    }
+
+    toaster.success({
+      title: 'Localization seeded',
+      description: 'Default profile now uses field map + ArUco + IMU with ground snapping enabled.'
+    });
+    return true;
   };
 
   const normalizeFieldOriginConfig = (
@@ -1937,7 +2164,7 @@
     const selfProfileStreamId = activeProfileSourceStreamId;
     return sources.filter((entry) => {
       if (selfProfileStreamId && entry.streamId.trim() === selfProfileStreamId) return false;
-      return true;
+      return isLocalizationCompatibleSource(entry);
     });
   });
 
@@ -4215,22 +4442,29 @@
     connectLiveUpdates();
     void loadLocalizationCapabilities();
     void (async () => {
-      await loadLocalizationConfig();
-      await loadSources();
-      await loadStreamsSnapshot();
-      await loadPipelineTemplates();
-      const profileId = $localizationConfig?.activeProfileId ?? $localizationConfig?.profiles?.[0]?.id ?? null;
-      await loadPipelineStatus(profileId);
-      const profile = $localizationConfig?.profiles?.find((entry) => entry.id === profileId) ?? $localizationConfig?.profiles?.[0] ?? null;
-      if (profile?.pipelineTemplateId) {
-        await loadPipelineOutputs(profile.id);
+      try {
+        await loadLocalizationConfig();
+        await Promise.all([loadSources(), loadStreamsSnapshot(), loadFieldMapList()]);
+        const seeded = await maybeSeedDefaultLocalizationProfile();
+        if (seeded) {
+          await Promise.all([loadLocalizationConfig(), loadSources(), loadStreamsSnapshot(), loadFieldMapList()]);
+        }
+        await loadPipelineTemplates();
+        const profileId = $localizationConfig?.activeProfileId ?? $localizationConfig?.profiles?.[0]?.id ?? null;
+        await loadPipelineStatus(profileId);
+        const profile = $localizationConfig?.profiles?.find((entry) => entry.id === profileId) ?? $localizationConfig?.profiles?.[0] ?? null;
+        if (profile?.pipelineTemplateId) {
+          await loadPipelineOutputs(profile.id);
+        }
+      } catch (error) {
+        const description = error instanceof Error ? error.message : 'Failed to initialize localization page';
+        toaster.error({ title: 'Localization setup failed', description });
       }
     })();
     void loadLocalizationViewers();
     localizationStorage.loadFromStorage();
     selectedCustomFieldId = $customFields[0]?.id ?? null;
     selectedCustomFieldOriginId = $customFields[0]?.origins[0]?.id ?? null;
-    void loadFieldMapList();
     if (browser) {
       visibilityHandler = () => {
         if (document.hidden) {
@@ -4305,13 +4539,45 @@
 <div class="flex h-full min-h-0 flex-1 flex-col gap-4 overflow-hidden">
   <section class="flex min-h-0 flex-1 gap-4 overflow-hidden lg:gap-6">
     <aside class="w-full shrink-0 space-y-3 overflow-visible rounded border border-surface-800/60 bg-surface-950/40 p-3 text-xs text-surface-400 lg:max-w-[16rem] xl:max-w-[16.75rem] 2xl:max-w-[17.5rem]">
-    <button
-      class="btn btn-xs preset-filled-primary-500 w-full uppercase tracking-[0.22em]"
-      type="button"
-      onclick={addProfile}
-    >
-      New Profile
-    </button>
+    <div class="space-y-2">
+      <button
+        class="btn btn-xs preset-filled-primary-500 w-full uppercase tracking-[0.22em]"
+        type="button"
+        onclick={addProfile}
+      >
+        New Profile
+      </button>
+      <div class="grid grid-cols-2 gap-1.5">
+        <button
+          class="btn btn-2xs preset-tonal uppercase tracking-[0.22em]"
+          type="button"
+          onclick={() => void exportLocalizationProfiles()}
+          disabled={profileTransferBusy || !$localizationConfig}
+        >
+          Export
+        </button>
+        <button
+          class="btn btn-2xs preset-tonal uppercase tracking-[0.22em]"
+          type="button"
+          onclick={openImportProfilesDialog}
+          disabled={profileTransferBusy}
+        >
+          Import
+        </button>
+      </div>
+      <input
+        type="file"
+        accept=".json,application/json"
+        class="sr-only"
+        bind:this={profileImportInputEl}
+        onchange={(event) => {
+          const input = event.currentTarget as HTMLInputElement;
+          const file = input.files?.[0] ?? null;
+          if (!file) return;
+          void importLocalizationProfiles(file);
+        }}
+      />
+    </div>
 
     <SidebarSearchSection
       label="Search profiles"

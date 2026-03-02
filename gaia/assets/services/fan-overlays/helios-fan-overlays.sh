@@ -54,6 +54,15 @@ seed_fan_defaults() {
     && grep -q 'pwm_path = "/sys/class/hwmon/hwmon0/pwm1"' "${runtime_cfg}"
   then
     cp "${default_cfg}" "${runtime_cfg}" 2>/dev/null || true
+    return 0
+  fi
+
+  # Migrate the old CM5 seed that shipped with inverted fan behavior.
+  # The old seed included this comment + invert=false; preserve user-edited configs.
+  if grep -q 'CM5 pwm-fan is active-high; do not invert duty' "${runtime_cfg}" \
+    && grep -q 'invert_pwm = false' "${runtime_cfg}"
+  then
+    cp "${default_cfg}" "${runtime_cfg}" 2>/dev/null || true
   fi
 }
 

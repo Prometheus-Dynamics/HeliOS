@@ -27,6 +27,12 @@ export type LocalizationConfig = {
   profiles: LocalizationProfile[];
 };
 
+export type LocalizationProfilesExportEnvelope = {
+  schema: string;
+  exportedAt: string;
+  config: LocalizationConfig;
+};
+
 export type LocalizationProfile = {
   id: string;
   name: string;
@@ -302,6 +308,35 @@ export async function updateLocalizationConfig(config: LocalizationConfig): Prom
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify(config)
+  });
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response));
+  }
+
+  return (await response.json()) as LocalizationConfig;
+}
+
+export async function fetchLocalizationProfilesExport(): Promise<LocalizationProfilesExportEnvelope> {
+  const response = await fetch(apiUrl('/localization/profiles/export'), {
+    method: 'GET',
+    headers: { Accept: 'application/json' }
+  });
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response));
+  }
+
+  return (await response.json()) as LocalizationProfilesExportEnvelope;
+}
+
+export async function importLocalizationProfiles(
+  payload: LocalizationProfilesExportEnvelope | LocalizationConfig
+): Promise<LocalizationConfig> {
+  const response = await fetch(apiUrl('/localization/profiles/import'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(payload)
   });
 
   if (!response.ok) {

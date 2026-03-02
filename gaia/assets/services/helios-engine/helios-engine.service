@@ -23,7 +23,10 @@ Environment=ENGINE_JOURNAL_PATH=/var/lib/helios/journal/engine.log
 Environment=LOG_FOLDER=/var/log/helios
 Environment=ENGINE_METRICS_ADDR=0.0.0.0:5804
 Environment=LD_LIBRARY_PATH=/usr/lib/edgetpu:/usr/lib
-Environment=HELIOS_CAPTURE_STALL_MS=1500
+# Keep stall recovery enabled, but avoid overly aggressive 1s restart churn under
+# heavy graph load; repeated restart loops correlate with large RSS growth.
+Environment=HELIOS_CAPTURE_STALL_MS=6000
+Environment=HELIOS_CAPTURE_ACTIVE_STALL_MS=5000
 Environment=HELIOS_DAEDALUS_PLUGIN_DIRS=/usr/lib/helios/plugins/daedalus:/var/lib/helios/plugins/daedalus
 Environment=HELIOS_API_DATA_DIR=/var/lib/helios/api-data
 EnvironmentFile=-/etc/default/helios-engine
