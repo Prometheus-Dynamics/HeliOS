@@ -92,43 +92,56 @@ fn detection_geometry_quality(detection: &ArucoDetection2D) -> f32 {
     let mut quality = 1.0_f32;
 
     // Tiny quads and extremely stretched quads are the most unstable under blur/skew.
-    if min_edge < 6.0 {
-        quality *= 0.08;
+    // Keep far/small tags in play at reduced weight instead of hard-dropping early.
+    if min_edge < 4.0 {
+        quality *= 0.06;
+    } else if min_edge < 6.0 {
+        quality *= 0.22;
     } else if min_edge < 8.0 {
-        quality *= 0.25;
+        quality *= 0.42;
     } else if min_edge < 10.0 {
-        quality *= 0.45;
+        quality *= 0.62;
     } else if min_edge < 14.0 {
-        quality *= 0.72;
+        quality *= 0.82;
     }
 
-    if edge_ratio < 0.22 {
+    if edge_ratio < 0.18 {
         quality *= 0.12;
-    } else if edge_ratio < 0.32 {
-        quality *= 0.34;
-    } else if edge_ratio < 0.42 {
-        quality *= 0.58;
-    } else if edge_ratio < 0.52 {
-        quality *= 0.8;
+    } else if edge_ratio < 0.28 {
+        quality *= 0.3;
+    } else if edge_ratio < 0.38 {
+        quality *= 0.55;
+    } else if edge_ratio < 0.48 {
+        quality *= 0.78;
     }
 
-    if compactness < 0.14 {
+    if compactness < 0.1 {
         quality *= 0.2;
-    } else if compactness < 0.24 {
+    } else if compactness < 0.18 {
         quality *= 0.45;
-    } else if compactness < 0.34 {
+    } else if compactness < 0.28 {
         quality *= 0.72;
     }
 
     if let Some(score) = detection.score {
         if score.is_finite() {
-            if score < 10.0 {
+            if score < 8.0 {
                 quality *= 0.2;
-            } else if score < 16.0 {
+            } else if score < 12.0 {
                 quality *= 0.45;
-            } else if score < 22.0 {
+            } else if score < 18.0 {
                 quality *= 0.72;
             }
+        }
+    }
+
+    if let Some(best) = detection.best_distance {
+        if best >= 4 {
+            quality *= 0.25;
+        } else if best == 3 {
+            quality *= 0.45;
+        } else if best == 2 {
+            quality *= 0.72;
         }
     }
 
@@ -146,23 +159,27 @@ fn detection_geometry_quality(detection: &ArucoDetection2D) -> f32 {
     }
 
     if let Some(mismatches) = detection.border_mismatches {
-        if mismatches >= 4 {
+        if mismatches >= 6 {
             quality *= 0.28;
+        } else if mismatches >= 4 {
+            quality *= 0.45;
         } else if mismatches >= 2 {
-            quality *= 0.55;
+            quality *= 0.68;
         } else if mismatches >= 1 {
-            quality *= 0.8;
+            quality *= 0.84;
         }
     }
 
     if let Some(contrast) = detection.contrast_range {
         if contrast.is_finite() {
-            if contrast < 10.0 {
+            if contrast < 8.0 {
                 quality *= 0.18;
-            } else if contrast < 16.0 {
+            } else if contrast < 12.0 {
                 quality *= 0.4;
+            } else if contrast < 18.0 {
+                quality *= 0.62;
             } else if contrast < 24.0 {
-                quality *= 0.7;
+                quality *= 0.82;
             }
         }
     }

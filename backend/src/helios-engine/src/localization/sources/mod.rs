@@ -174,6 +174,7 @@ async fn fetch_source_sample<F: LocalizationSourceFetcher>(
             let ctx = SourceParserContext { source, default_tag_size_m, calibrations };
             match registry.parse(&value, &ctx) {
                 Ok(SourceParse::Detections(mut parsed)) => {
+                    collapse_duplicate_tag_detections(source, &mut parsed.detections);
                     apply_pair_distance_consistency(source, &mut parsed.detections);
                     for detection in &mut parsed.detections {
                         detection.source_id = source.id.clone();
@@ -242,6 +243,101 @@ fn pose_reliability_quality(camera_from_tag: &PoseTransform) -> f32 {
     }
 
     quality as f32
+}
+
+fn collapse_duplicate_tag_detections(source: &LocalizationSourceConfig, detections: &mut Vec<LocalizationDetection>) {
+    if detections.len() < 2 {
+        return;
+    }
+
+    let mut first_seen = HashMap::<u32, usize>::new();
+    let mut grouped = HashMap::<u32, Vec<LocalizationDetection>>::new();
+    for (idx, detection) in std::mem::take(detections).into_iter().enumerate() {
+        first_seen.entry(detection.tag_id).or_insert(idx);
+        grouped.entry(detection.tag_id).or_default().push(detection);
+    }
+    if grouped.values().all(|group| group.len() <= 1) {
+        let mut ordered_ids = grouped.keys().copied().collect::<Vec<_>>();
+        ordered_ids.sort_by_key(|tag_id| first_seen.get(tag_id).copied().unwrap_or(usize::MAX));
+        detections.extend(ordered_ids.into_iter().filter_map(|tag_id| grouped.remove(&tag_id).and_then(|mut group| group.pop())));
+        return;
+    }
+
+    let now = Instant::now();
+    let stale_after = Duration::from_millis(900);
+    let state_store = TAG_POSE_TEMPORAL_STATE.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut prior_translation_by_tag = HashMap::<u32, Vector3<f64>>::new();
+    if let Ok(state_store) = state_store.lock() {
+        for (tag_id, group) in &grouped {
+            if group.len() <= 1 {
+                continue;
+            }
+            let key = format!("{}:{}:{tag_id}", source.stream_id.trim(), source.id.trim());
+            if let Some(state) = state_store.get(&key) {
+                if now.saturating_duration_since(state.updated_at) <= stale_after {
+                    prior_translation_by_tag.insert(*tag_id, state.translation);
+                }
+            }
+        }
+    }
+
+    let mut ordered_ids = grouped.keys().copied().collect::<Vec<_>>();
+    ordered_ids.sort_by_key(|tag_id| first_seen.get(tag_id).copied().unwrap_or(usize::MAX));
+
+    for tag_id in ordered_ids {
+        let Some(group) = grouped.remove(&tag_id) else {
+            continue;
+        };
+        if group.len() == 1 {
+            detections.extend(group);
+            continue;
+        }
+
+        let prior_translation = prior_translation_by_tag.get(&tag_id).copied();
+        let mut scored = group
+            .into_iter()
+            .map(|detection| {
+                let mut score = (detection.quality as f64).clamp(0.0, 1.0);
+                let pose_quality = (pose_reliability_quality(&detection.camera_from_tag) as f64).clamp(0.0, 1.0);
+                score *= 0.68 + (0.32 * pose_quality);
+                if let Some(previous_translation) = prior_translation {
+                    let shift = (detection.camera_from_tag.translation - previous_translation).norm();
+                    if shift.is_finite() {
+                        if shift > 2.0 {
+                            score *= 0.22;
+                        } else if shift > 1.2 {
+                            score *= 0.36;
+                        } else if shift > 0.7 {
+                            score *= 0.55;
+                        } else if shift > 0.35 {
+                            score *= 0.78;
+                        }
+                    }
+                }
+                (detection, score.max(0.0))
+            })
+            .collect::<Vec<_>>();
+        scored.sort_by(|left, right| right.1.partial_cmp(&left.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        let selected_score = scored.first().map(|entry| entry.1).unwrap_or(0.0);
+        let mut selected = scored.remove(0).0;
+
+        if let Some((runner_up, runner_score)) = scored.first() {
+            let separation = (selected.camera_from_tag.translation - runner_up.camera_from_tag.translation).norm();
+            if separation.is_finite() && selected_score > 1e-6 {
+                let ambiguity = (runner_score / selected_score).clamp(0.0, 1.0);
+                if ambiguity >= 0.85 && separation > 1.0 {
+                    selected.quality *= 0.45;
+                } else if ambiguity >= 0.72 && separation > 0.55 {
+                    selected.quality *= 0.62;
+                } else if ambiguity >= 0.58 && separation > 0.30 {
+                    selected.quality *= 0.78;
+                }
+            }
+        }
+
+        detections.push(selected);
+    }
 }
 
 fn detection_pose_state_key(source: &LocalizationSourceConfig, detection: &LocalizationDetection) -> String {
@@ -873,4 +969,57 @@ pub(crate) fn imu_pose_to_viewer_frame(pose: PoseTransform) -> PoseTransform {
     let translation = basis.transform_vector(&pose.translation);
     let rotation = basis * pose.rotation * basis.inverse();
     PoseTransform { translation, rotation }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::localization::config::LocalizationSourceConfig;
+
+    fn source_config() -> LocalizationSourceConfig {
+        LocalizationSourceConfig {
+            id: "cam-front".to_string(),
+            stream_id: "stream-a".to_string(),
+            output_key: "detections".to_string(),
+            camera_uid: "cam-front".to_string(),
+            pose_space: None,
+            input_key: None,
+            enabled: true,
+            weight: 1.0,
+        }
+    }
+
+    fn detection(tag_id: u32, quality: f32, x: f64, y: f64, z: f64) -> LocalizationDetection {
+        LocalizationDetection {
+            source_id: String::new(),
+            camera_uid: String::new(),
+            tag_id,
+            camera_from_tag: PoseTransform { translation: Vector3::new(x, y, z), rotation: UnitQuaternion::identity() },
+            tag_size: Some(0.165),
+            code_rotation: Some(0),
+            tag_bits: None,
+            weight: 1.0,
+            quality,
+        }
+    }
+
+    #[test]
+    fn collapse_duplicates_keeps_best_quality_detection() {
+        let source = source_config();
+        let mut detections = vec![detection(7, 0.25, 0.0, 0.0, 2.0), detection(7, 0.91, 0.12, 0.0, 2.1)];
+        collapse_duplicate_tag_detections(&source, &mut detections);
+        assert_eq!(detections.len(), 1);
+        assert_eq!(detections[0].tag_id, 7);
+        assert!((detections[0].camera_from_tag.translation.x - 0.12).abs() < 1e-6);
+    }
+
+    #[test]
+    fn collapse_duplicates_penalizes_ambiguous_far_apart_candidates() {
+        let source = source_config();
+        let mut detections = vec![detection(3, 0.90, 0.0, 0.0, 2.0), detection(3, 0.82, 1.45, 0.0, 2.0)];
+        collapse_duplicate_tag_detections(&source, &mut detections);
+        assert_eq!(detections.len(), 1);
+        assert_eq!(detections[0].tag_id, 3);
+        assert!(detections[0].quality <= 0.5);
+    }
 }

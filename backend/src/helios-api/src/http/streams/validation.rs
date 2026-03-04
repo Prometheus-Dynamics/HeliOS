@@ -1,7 +1,7 @@
 use helios_engine::ipc::StreamManifest;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use styx::{BackendHandle, BackendKind};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -42,6 +42,7 @@ pub struct StreamValidationDefaults {
 pub struct StreamValidationConstraints {
     pub requires_backend_handle_match: bool,
     pub file_backend_requires_non_empty_paths: bool,
+    pub file_backend_supported_extensions: Vec<String>,
     pub min_layout_rows: u8,
     pub min_layout_columns: u8,
     pub reserved_pipeline_ids: Vec<Uuid>,
@@ -60,6 +61,9 @@ pub struct StreamValidationError {
     pub warnings: Vec<ValidationWarning>,
 }
 
+const FILE_BACKEND_SUPPORTED_EXTENSIONS: &[&str] =
+    &["bmp", "gif", "heic", "heif", "jpeg", "jpg", "png", "tif", "tiff", "webp", "h264", "avc", "h265", "hevc", "m4v", "mjpeg", "mjpg", "mov", "mp4", "mpe", "mpeg", "mpg", "webm", "wmv", "y4m"];
+
 pub fn stream_capabilities() -> StreamCapabilitiesResponse {
     StreamCapabilitiesResponse {
         raw_pipeline_id: RAW_PIPELINE_UUID,
@@ -68,6 +72,7 @@ pub fn stream_capabilities() -> StreamCapabilitiesResponse {
         constraints: StreamValidationConstraints {
             requires_backend_handle_match: true,
             file_backend_requires_non_empty_paths: true,
+            file_backend_supported_extensions: FILE_BACKEND_SUPPORTED_EXTENSIONS.iter().map(|value| value.to_string()).collect(),
             min_layout_rows: 1,
             min_layout_columns: 1,
             reserved_pipeline_ids: vec![CALIBRATION_MODE_PIPELINE_UUID],
@@ -82,6 +87,7 @@ pub async fn validate_stream_manifest(mut manifest: StreamManifest) -> Result<St
 
     validate_backend_and_handle(&manifest, &mut issues);
     sanitize_file_backend_paths(&mut manifest, &mut issues, &mut warnings);
+    validate_file_backend_media_paths(&manifest, &mut issues).await;
     sanitize_reserved_pipeline_ids(&mut manifest, &mut warnings);
     validate_pipeline_layout(&manifest, &mut issues);
     validate_pipeline_wires(&manifest, &mut issues);
@@ -146,6 +152,49 @@ fn sanitize_file_backend_paths(manifest: &mut StreamManifest, issues: &mut Vec<V
     *paths = deduped;
     if paths.is_empty() {
         issues.push(issue("/capture/handle/paths", "missing_paths", "file backend requires at least one non-empty path"));
+    }
+}
+
+fn file_replay_content_type(path: &Path) -> String {
+    mime_guess::from_path(path).first_raw().unwrap_or("application/octet-stream").to_ascii_lowercase()
+}
+
+fn is_supported_file_replay_path(path: &Path) -> bool {
+    let content_type = file_replay_content_type(path);
+    if content_type.starts_with("image/") || content_type.starts_with("video/") {
+        return true;
+    }
+    let ext = path.extension().and_then(|value| value.to_str()).unwrap_or_default().to_ascii_lowercase();
+    FILE_BACKEND_SUPPORTED_EXTENSIONS.contains(&ext.as_str())
+}
+
+async fn validate_file_backend_media_paths(manifest: &StreamManifest, issues: &mut Vec<ValidationIssue>) {
+    if manifest.capture.backend != BackendKind::File {
+        return;
+    }
+
+    let BackendHandle::File { paths, .. } = &manifest.capture.handle else {
+        issues.push(issue("/capture/handle", "invalid_file_handle", "file backend requires a file handle"));
+        return;
+    };
+
+    for (index, path) in paths.iter().enumerate() {
+        let pointer = format!("/capture/handle/paths/{index}");
+        let metadata = match tokio::fs::metadata(path).await {
+            Ok(meta) => meta,
+            Err(_) => {
+                issues.push(issue(pointer, "media_path_not_found", format!("media path not found: {}", path.display())));
+                continue;
+            }
+        };
+        if !metadata.is_file() {
+            issues.push(issue(pointer, "media_path_not_file", format!("media path is not a file: {}", path.display())));
+            continue;
+        }
+        if !is_supported_file_replay_path(path) {
+            let content_type = file_replay_content_type(path);
+            issues.push(issue(pointer, "unsupported_media_type", format!("unsupported media type `{content_type}` for file replay path: {}", path.display())));
+        }
     }
 }
 
@@ -365,14 +414,14 @@ mod tests {
         serde_json::from_value(value).expect("valid stream manifest json")
     }
 
-    fn base_manifest() -> StreamManifest {
+    fn base_manifest(path: &Path) -> StreamManifest {
         manifest_from_json(json!({
             "identity": { "alias": "cam0", "hardware_id": "cam0" },
             "capture": {
                 "backend": "File",
                 "handle": {
                     "type": "file",
-                    "paths": ["/tmp/test.mp4"],
+                    "paths": [path.display().to_string()],
                     "fps": 30,
                     "loop_forever": false
                 },
@@ -397,19 +446,28 @@ mod tests {
         }))
     }
 
+    async fn create_temp_media_file(ext: &str) -> PathBuf {
+        let file = std::env::temp_dir().join(format!("helios-stream-validation-{}.{}", Uuid::new_v4(), ext));
+        tokio::fs::write(&file, b"test").await.expect("create temporary media file");
+        file
+    }
+
     #[tokio::test]
     async fn rejects_empty_file_paths() {
-        let mut manifest = base_manifest();
+        let file = create_temp_media_file("mp4").await;
+        let mut manifest = base_manifest(&file);
         manifest.capture.handle = BackendHandle::File { paths: vec![PathBuf::from(""), PathBuf::from("   ")], fps: 30, loop_forever: false };
 
         let result = validate_stream_manifest(manifest).await;
         let err = result.expect_err("expected semantic validation failure");
         assert!(err.issues.iter().any(|issue| issue.code == "missing_paths"));
+        let _ = tokio::fs::remove_file(&file).await;
     }
 
     #[tokio::test]
     async fn rejects_dangling_layout_pipeline_references() {
-        let mut manifest = base_manifest();
+        let file = create_temp_media_file("mp4").await;
+        let mut manifest = base_manifest(&file);
         manifest.pipeline_layout = Some(helios_engine::ipc::StreamPipelineLayout {
             rows: 1,
             columns: 1,
@@ -419,16 +477,30 @@ mod tests {
         let result = validate_stream_manifest(manifest).await;
         let err = result.expect_err("expected dangling pipeline reference failure");
         assert!(err.issues.iter().any(|issue| issue.code == "unknown_pipeline"));
+        let _ = tokio::fs::remove_file(&file).await;
     }
 
     #[tokio::test]
     async fn warns_for_raw_output_alias_normalization() {
-        let mut manifest = base_manifest();
+        let file = create_temp_media_file("mp4").await;
+        let mut manifest = base_manifest(&file);
         manifest.active_pipeline_id = Some(RAW_PIPELINE_UUID);
         manifest.active_pipeline_output = Some("FRAME".to_string());
 
         let result = validate_stream_manifest(manifest).await.expect("validation should succeed");
         assert_eq!(result.manifest.active_pipeline_output.as_deref(), Some("raw"));
         assert!(result.warnings.iter().any(|warning| warning.code == "raw_output_canonicalized"));
+        let _ = tokio::fs::remove_file(&file).await;
+    }
+
+    #[tokio::test]
+    async fn rejects_unsupported_file_replay_media_type() {
+        let file = create_temp_media_file("txt").await;
+        let manifest = base_manifest(&file);
+
+        let result = validate_stream_manifest(manifest).await;
+        let err = result.expect_err("expected unsupported media type failure");
+        assert!(err.issues.iter().any(|issue| issue.code == "unsupported_media_type"));
+        let _ = tokio::fs::remove_file(&file).await;
     }
 }
