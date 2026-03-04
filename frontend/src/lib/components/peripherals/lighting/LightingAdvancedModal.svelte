@@ -12,6 +12,10 @@
     maxFreqKhz: number;
     frequencyKhz: number;
     defaultCount: number;
+    defaultAnimationEvents: ReadonlyArray<{ key: string; label: string }>;
+    defaultAnimationNameOptions: string[];
+    resolveDefaultAnimationForEvent: (eventKey: string) => string;
+    onDefaultAnimationChange: (eventKey: string, animationName: string) => void;
     onClose: () => void;
     onReset: () => void;
     onRetryLoad: () => void;
@@ -31,6 +35,10 @@
     maxFreqKhz,
     frequencyKhz,
     defaultCount,
+    defaultAnimationEvents,
+    defaultAnimationNameOptions,
+    resolveDefaultAnimationForEvent,
+    onDefaultAnimationChange,
     onClose,
     onReset,
     onRetryLoad,
@@ -145,6 +153,30 @@
           <span class="text-micro uppercase tracking-[0.3em] text-surface-500">Label</span>
           <input class="input w-full" bind:value={form.label} placeholder="Status ring" />
         </label>
+      </div>
+
+      <div class="space-y-2 rounded border border-surface-800/80 bg-surface-900/50 p-3">
+        <p class="text-micro uppercase tracking-[0.3em] text-surface-500">Default event animations</p>
+        <div class="grid gap-3 md:grid-cols-2">
+          {#each defaultAnimationEvents as eventOption (eventOption.key)}
+            <label class="space-y-1 text-sm">
+              <span class="text-xs text-surface-300">{eventOption.label}</span>
+              <select
+                class="input w-full"
+                value={resolveDefaultAnimationForEvent(eventOption.key)}
+                onchange={(event) => onDefaultAnimationChange(eventOption.key, (event.target as HTMLSelectElement).value)}
+              >
+                <option value="">Built-in default</option>
+                {#each defaultAnimationNameOptions as animationName (animationName)}
+                  <option value={animationName}>{animationName}</option>
+                {/each}
+              </select>
+            </label>
+          {/each}
+        </div>
+        {#if defaultAnimationNameOptions.length === 0}
+          <p class="text-xs text-surface-500">Save or install animations first, then assign them here.</p>
+        {/if}
       </div>
 
       <p class="text-xs text-surface-500">

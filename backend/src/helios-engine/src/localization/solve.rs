@@ -243,17 +243,18 @@ fn apply_temporal_pose_stabilization(profile: &LocalizationProfile, solver_resul
         let tag_count = tag_ids.len();
         let solve_confidence = solver_detection_confidence(&solver.outputs);
         let solver_prefix = format!("{}{}", profile_prefix, solver.id);
+        let smoothing_input = LocalizationPoseSmoothingInput { settings: &settings, runtime_tuning: &runtime_tuning, tag_count, tag_ids: &tag_ids, solve_confidence, now };
 
         if let Some(robot_pose) = solver.outputs.robot_in_field.as_mut() {
             let state_key = format!("{solver_prefix}:robot");
-            smooth_localization_pose(&mut state_store, &state_key, &mut robot_pose.pose, &settings, &runtime_tuning, tag_count, &tag_ids, solve_confidence, now);
+            smooth_localization_pose(&mut state_store, &state_key, &mut robot_pose.pose, smoothing_input);
             continue;
         }
 
         if let Some(camera_poses) = solver.outputs.camera_in_field.as_mut() {
             for entry in camera_poses {
                 let state_key = format!("{solver_prefix}:camera:{}", entry.camera_uid);
-                smooth_localization_pose(&mut state_store, &state_key, &mut entry.pose, &settings, &runtime_tuning, tag_count, &tag_ids, solve_confidence, now);
+                smooth_localization_pose(&mut state_store, &state_key, &mut entry.pose, smoothing_input);
             }
         }
     }
@@ -340,17 +341,24 @@ fn update_localization_pose(pose: &mut crate::localization::types::LocalizationP
     pose.rotation.quaternion.w = rotation.w;
 }
 
-fn smooth_localization_pose(
-    state_store: &mut HashMap<String, TemporalPoseState>,
-    state_key: &str,
-    pose: &mut crate::localization::types::LocalizationPose,
-    settings: &LocalizationTemporalStabilizationConfig,
-    runtime_tuning: &LocalizationSolverRuntimeTuningConfig,
+#[derive(Clone, Copy)]
+struct LocalizationPoseSmoothingInput<'a> {
+    settings: &'a LocalizationTemporalStabilizationConfig,
+    runtime_tuning: &'a LocalizationSolverRuntimeTuningConfig,
     tag_count: usize,
-    tag_ids: &[u32],
+    tag_ids: &'a [u32],
     solve_confidence: f64,
     now: Instant,
-) {
+}
+
+fn smooth_localization_pose(state_store: &mut HashMap<String, TemporalPoseState>, state_key: &str, pose: &mut crate::localization::types::LocalizationPose, input: LocalizationPoseSmoothingInput<'_>) {
+    let settings = input.settings;
+    let runtime_tuning = input.runtime_tuning;
+    let tag_count = input.tag_count;
+    let tag_ids = input.tag_ids;
+    let solve_confidence = input.solve_confidence;
+    let now = input.now;
+
     let Some((measurement_translation, measurement_rotation)) = localization_pose_components(pose) else {
         state_store.remove(state_key);
         return;
@@ -807,7 +815,7 @@ mod tests {
                     family: "36h11".to_string(),
                     size_m: 0.165,
                     position: [1.0, 0.0, 0.0],
-                    quaternion: FieldQuaternion { x: 0.0, y: 0.7071067811865475, z: 0.0, w: 0.7071067811865476 },
+                    quaternion: FieldQuaternion { x: 0.0, y: std::f64::consts::FRAC_1_SQRT_2, z: 0.0, w: std::f64::consts::FRAC_1_SQRT_2 },
                     heading_deg: 180.0,
                     tag_bits: None,
                     unique: true,
@@ -851,7 +859,7 @@ mod tests {
                     family: "36h11".to_string(),
                     size_m: 0.165,
                     position: [1.0, 0.0, 0.0],
-                    quaternion: FieldQuaternion { x: 0.0, y: 0.7071067811865475, z: 0.0, w: 0.7071067811865476 },
+                    quaternion: FieldQuaternion { x: 0.0, y: std::f64::consts::FRAC_1_SQRT_2, z: 0.0, w: std::f64::consts::FRAC_1_SQRT_2 },
                     heading_deg: 180.0,
                     tag_bits: None,
                     unique: true,
@@ -1267,10 +1275,21 @@ mod tests {
         let now = Instant::now();
 
         let mut first = dummy_pose(0.0, 0.0, 0.0);
-        smooth_localization_pose(&mut state_store, "k", &mut first, &settings, &LocalizationSolverRuntimeTuningConfig::default(), 1, &[1], 0.50, now);
+        let runtime_tuning = LocalizationSolverRuntimeTuningConfig::default();
+        smooth_localization_pose(
+            &mut state_store,
+            "k",
+            &mut first,
+            LocalizationPoseSmoothingInput { settings: &settings, runtime_tuning: &runtime_tuning, tag_count: 1, tag_ids: &[1], solve_confidence: 0.50, now },
+        );
 
         let mut switched = dummy_pose(1.0, 0.0, 0.0);
-        smooth_localization_pose(&mut state_store, "k", &mut switched, &settings, &LocalizationSolverRuntimeTuningConfig::default(), 1, &[2], 0.50, now + Duration::from_millis(33));
+        smooth_localization_pose(
+            &mut state_store,
+            "k",
+            &mut switched,
+            LocalizationPoseSmoothingInput { settings: &settings, runtime_tuning: &runtime_tuning, tag_count: 1, tag_ids: &[2], solve_confidence: 0.50, now: now + Duration::from_millis(33) },
+        );
 
         assert!(switched.translation.x < 0.2, "single-tag switch should be strongly damped, got {}", switched.translation.x);
     }
@@ -1291,7 +1310,13 @@ mod tests {
         let now = Instant::now();
 
         let mut initial = dummy_pose(0.0, 0.0, 0.0);
-        smooth_localization_pose(&mut state_store, "k", &mut initial, &settings, &LocalizationSolverRuntimeTuningConfig::default(), 1, &[1], 0.50, now);
+        let runtime_tuning = LocalizationSolverRuntimeTuningConfig::default();
+        smooth_localization_pose(
+            &mut state_store,
+            "k",
+            &mut initial,
+            LocalizationPoseSmoothingInput { settings: &settings, runtime_tuning: &runtime_tuning, tag_count: 1, tag_ids: &[1], solve_confidence: 0.50, now },
+        );
 
         let mut latest = initial;
         for step in 1..=20 {
@@ -1302,12 +1327,14 @@ mod tests {
                 &mut state_store,
                 "k",
                 &mut latest,
-                &settings,
-                &LocalizationSolverRuntimeTuningConfig::default(),
-                1,
-                &[tag],
-                0.50,
-                now + Duration::from_millis((step * 40) as u64),
+                LocalizationPoseSmoothingInput {
+                    settings: &settings,
+                    runtime_tuning: &runtime_tuning,
+                    tag_count: 1,
+                    tag_ids: &[tag],
+                    solve_confidence: 0.50,
+                    now: now + Duration::from_millis((step * 40) as u64),
+                },
             );
         }
 
@@ -1330,12 +1357,30 @@ mod tests {
         let now = Instant::now();
 
         let mut initial = dummy_pose(0.0, 0.0, 0.0);
-        smooth_localization_pose(&mut state_store, "k", &mut initial, &settings, &LocalizationSolverRuntimeTuningConfig::default(), 1, &[1], 0.50, now);
+        let runtime_tuning = LocalizationSolverRuntimeTuningConfig::default();
+        smooth_localization_pose(
+            &mut state_store,
+            "k",
+            &mut initial,
+            LocalizationPoseSmoothingInput { settings: &settings, runtime_tuning: &runtime_tuning, tag_count: 1, tag_ids: &[1], solve_confidence: 0.50, now },
+        );
 
         let mut latest = initial;
         for step in 1..=30 {
             latest = dummy_pose(1.6, 0.0, 0.0);
-            smooth_localization_pose(&mut state_store, "k", &mut latest, &settings, &LocalizationSolverRuntimeTuningConfig::default(), 1, &[2], 0.50, now + Duration::from_millis((step * 50) as u64));
+            smooth_localization_pose(
+                &mut state_store,
+                "k",
+                &mut latest,
+                LocalizationPoseSmoothingInput {
+                    settings: &settings,
+                    runtime_tuning: &runtime_tuning,
+                    tag_count: 1,
+                    tag_ids: &[2],
+                    solve_confidence: 0.50,
+                    now: now + Duration::from_millis((step * 50) as u64),
+                },
+            );
         }
 
         assert!(latest.translation.x > 1.0, "persistent single-tag regime should eventually re-anchor, got {}", latest.translation.x);

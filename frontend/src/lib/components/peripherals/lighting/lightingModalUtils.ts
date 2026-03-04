@@ -101,6 +101,15 @@ export function normalizeLighting(raw: LightingSettings | undefined, defaults: L
   if (!raw) return { ...defaults };
   const brightness =
     typeof raw.brightness === 'number' && Number.isFinite(raw.brightness) ? raw.brightness : defaults.brightness ?? null;
+  const defaultAnimationsRaw = raw.default_animations ?? defaults.default_animations ?? {};
+  const defaultAnimations =
+    defaultAnimationsRaw && typeof defaultAnimationsRaw === 'object'
+      ? Object.fromEntries(
+          Object.entries(defaultAnimationsRaw)
+            .map(([key, value]) => [String(key).trim().toLowerCase(), String(value ?? '').trim()])
+            .filter(([key, value]) => key.length > 0 && value.length > 0)
+        )
+      : {};
   return {
     ...defaults,
     ...raw,
@@ -110,7 +119,8 @@ export function normalizeLighting(raw: LightingSettings | undefined, defaults: L
     brightness,
     label: raw.label ?? defaults.label ?? null,
     color_order: (raw.color_order ?? defaults.color_order).trim(),
-    protocol: (raw.protocol ?? defaults.protocol).trim()
+    protocol: (raw.protocol ?? defaults.protocol).trim(),
+    default_animations: defaultAnimations
   };
 }
 

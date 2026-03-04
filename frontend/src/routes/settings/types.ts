@@ -115,6 +115,7 @@ export type LightingSettings = {
   brightness?: number | null;
   label?: string | null;
   protocol: string;
+  default_animations?: Record<string, string> | null;
 };
 
 export type FanSettings = {

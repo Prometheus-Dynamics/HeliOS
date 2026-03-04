@@ -5,6 +5,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use futures::FutureExt;
+use lib_sensors::led_config::{DEFAULT_ANIMATION_EVENT_STARTUP, DEFAULT_ANIMATION_EVENT_STARTUP_IDLE, LedConfig};
+use serde::Deserialize;
 use tokio::fs;
 use tokio::net::UnixListener;
 use tokio::task::JoinSet;
@@ -21,6 +23,8 @@ use crate::usb_proxy;
 
 use self::session::handle_connection;
 use self::shutdown::wait_for_shutdown;
+
+const LED_ANIMATIONS_PATH: &str = "/etc/helios/led-animations.json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RuntimeState {
@@ -61,6 +65,29 @@ impl BootLightingConfig {
             hold_delay: Duration::from_millis(env_u64("HELIOS_LED_BOOT_HOLD_MS", 200)),
         }
     }
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct StoredAnimationDoc {
+    #[serde(default)]
+    animations: Vec<StoredAnimationEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct StoredAnimationEntry {
+    name: String,
+    #[serde(default)]
+    command: LightingCommand,
+    #[serde(default)]
+    sequence: Vec<StoredAnimationFrame>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct StoredAnimationFrame {
+    #[serde(default)]
+    frame: Vec<LightingColor>,
+    #[serde(default)]
+    duration_ms: u32,
 }
 
 impl SensorsRuntime {
@@ -206,7 +233,12 @@ fn spawn_boot_lighting_animation(service: Arc<SensorsService>, shutdown: Cancell
         return;
     }
     let brightness = service.led_config().brightness.unwrap_or(0xFF);
+    let led_config = service.led_config().clone();
     tokio::spawn(async move {
+        if run_configured_startup_animation(&service, &led_config, &shutdown).await {
+            return;
+        }
+
         let mut first_frame = true;
         for filled in 1..=led_count {
             if shutdown.is_cancelled() {
@@ -231,10 +263,103 @@ fn spawn_boot_lighting_animation(service: Arc<SensorsService>, shutdown: Cancell
             return;
         }
 
+        if try_apply_default_event_command(&service, &led_config, DEFAULT_ANIMATION_EVENT_STARTUP_IDLE).await {
+            return;
+        }
+
         let idle =
             LightingCommand { frame: None, brightness: Some(brightness), animation: Some(crate::dto::LightingAnimation::Pulse { color: cfg.color.clone(), low: 60, high: 200, period_ms: 2400 }) };
         let _ = service.lighting_command(idle).await;
     });
+}
+
+async fn run_configured_startup_animation(service: &SensorsService, led_config: &LedConfig, shutdown: &CancellationToken) -> bool {
+    let Some(animation_name) = led_config.animation_for_event(DEFAULT_ANIMATION_EVENT_STARTUP).map(ToOwned::to_owned) else {
+        return false;
+    };
+    let doc = load_stored_animation_doc().await;
+
+    if let Some(sequence) = stored_sequence_for_name(&doc, &animation_name) {
+        for frame in sequence {
+            if shutdown.is_cancelled() {
+                return true;
+            }
+            let command = LightingCommand { frame: Some(frame.frame), brightness: led_config.brightness, animation: None };
+            if let Err(err) = service.lighting_command(command).await {
+                warn!(
+                    %err,
+                    event = DEFAULT_ANIMATION_EVENT_STARTUP,
+                    animation = %animation_name,
+                    "failed to apply configured startup sequence frame"
+                );
+            }
+            let wait_ms = u64::from(frame.duration_ms.max(20));
+            if wait_or_cancel(Duration::from_millis(wait_ms), shutdown).await {
+                return true;
+            }
+        }
+        let _ = try_apply_default_event_command(service, led_config, DEFAULT_ANIMATION_EVENT_STARTUP_IDLE).await;
+        return true;
+    }
+
+    if let Some(command) = stored_command_for_name(&doc, &animation_name, led_config.brightness) {
+        if let Err(err) = service.lighting_command(command).await {
+            warn!(
+                %err,
+                event = DEFAULT_ANIMATION_EVENT_STARTUP,
+                animation = %animation_name,
+                "failed to apply configured startup animation command"
+            );
+        }
+        let _ = try_apply_default_event_command(service, led_config, DEFAULT_ANIMATION_EVENT_STARTUP_IDLE).await;
+        return true;
+    }
+
+    warn!(event = DEFAULT_ANIMATION_EVENT_STARTUP, animation = %animation_name, "configured default animation was not found; using built-in startup animation");
+    false
+}
+
+async fn try_apply_default_event_command(service: &SensorsService, led_config: &LedConfig, event: &str) -> bool {
+    let Some(animation_name) = led_config.animation_for_event(event).map(ToOwned::to_owned) else {
+        return false;
+    };
+    let doc = load_stored_animation_doc().await;
+    let Some(command) = stored_command_for_name(&doc, &animation_name, led_config.brightness) else {
+        warn!(event, animation = %animation_name, "configured default animation was not found");
+        return false;
+    };
+    if let Err(err) = service.lighting_command(command).await {
+        warn!(%err, event, animation = %animation_name, "failed to apply configured default animation");
+    }
+    true
+}
+
+async fn load_stored_animation_doc() -> StoredAnimationDoc {
+    match fs::read_to_string(LED_ANIMATIONS_PATH).await {
+        Ok(raw) => serde_json::from_str::<StoredAnimationDoc>(&raw).unwrap_or_default(),
+        Err(_) => StoredAnimationDoc::default(),
+    }
+}
+
+fn find_stored_animation_entry<'a>(doc: &'a StoredAnimationDoc, name: &str) -> Option<&'a StoredAnimationEntry> {
+    let target = name.trim();
+    if target.is_empty() {
+        return None;
+    }
+    doc.animations.iter().find(|entry| entry.name.trim().eq_ignore_ascii_case(target))
+}
+
+fn stored_command_for_name(doc: &StoredAnimationDoc, name: &str, fallback_brightness: Option<u8>) -> Option<LightingCommand> {
+    let entry = find_stored_animation_entry(doc, name)?;
+    if entry.command.frame.is_some() || entry.command.animation.is_some() {
+        return Some(LightingCommand { frame: entry.command.frame.clone(), brightness: entry.command.brightness.or(fallback_brightness), animation: entry.command.animation.clone() });
+    }
+    entry.sequence.first().map(|frame| LightingCommand { frame: Some(frame.frame.clone()), brightness: entry.command.brightness.or(fallback_brightness), animation: None })
+}
+
+fn stored_sequence_for_name(doc: &StoredAnimationDoc, name: &str) -> Option<Vec<StoredAnimationFrame>> {
+    let entry = find_stored_animation_entry(doc, name)?;
+    if entry.sequence.is_empty() { None } else { Some(entry.sequence.clone()) }
 }
 
 async fn triple_blink(service: &SensorsService, led_count: usize, color: &LightingColor, brightness: u8, shutdown: &CancellationToken) -> bool {

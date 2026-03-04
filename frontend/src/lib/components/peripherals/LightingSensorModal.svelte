@@ -68,6 +68,14 @@
   const MAX_FREQ_KHZ = 2_000;
   const SAVED_REF_PREFIX = 'saved:';
   const TEMPLATE_REF_PREFIX = 'template:';
+  const DEFAULT_ANIMATION_EVENT_OPTIONS = [
+    { key: 'startup', label: 'Startup' },
+    { key: 'startup_idle', label: 'Startup idle' },
+    { key: 'reboot', label: 'Reboot' },
+    { key: 'update', label: 'Update' },
+    { key: 'update_error', label: 'Update error' },
+    { key: 'engine_crash', label: 'Engine crash' }
+  ] as const;
   const BUILTIN_TEMPLATE_NAMES = [
     'All Off',
     'Static Warm White',
@@ -89,7 +97,8 @@
     frequency_hz: 800_000,
     brightness: 128,
     label: 'Status ring',
-    protocol: 'sk6812-ec20'
+    protocol: 'sk6812-ec20',
+    default_animations: {}
   };
 
   const deviceState = $derived($deviceSettingsStore as DeviceSettingsState);
@@ -215,6 +224,21 @@
         templateNameKeys.has(normalizedAnimationKey(entry.name)) &&
         !lightingTemplates.some((template) => normalizedAnimationKey(template.name) === normalizedAnimationKey(entry.name))
     )
+  );
+  const defaultAnimationNameOptions = $derived(
+    (() => {
+      const names = new Set<string>();
+      for (const entry of savedAnimations) {
+        names.add(entry.name);
+      }
+      const configured = form.default_animations ?? {};
+      for (const value of Object.values(configured)) {
+        if (typeof value === 'string' && value.trim().length > 0) {
+          names.add(value.trim());
+        }
+      }
+      return [...names].sort((a, b) => a.localeCompare(b));
+    })()
   );
 
   function isTemplateNamedAnimation(name: string): boolean {
@@ -408,6 +432,34 @@
       syncEditorFromSelection();
     }
   });
+
+  function defaultAnimationRefForEvent(eventKey: string): string {
+    const normalizedEvent = eventKey.trim().toLowerCase();
+    if (!normalizedEvent.length) return '';
+    const mapping = form.default_animations ?? {};
+    for (const [key, value] of Object.entries(mapping)) {
+      if (key.trim().toLowerCase() === normalizedEvent && typeof value === 'string') {
+        return value.trim();
+      }
+    }
+    return '';
+  }
+
+  function setDefaultAnimationRefForEvent(eventKey: string, animationName: string): void {
+    const normalizedEvent = eventKey.trim().toLowerCase();
+    if (!normalizedEvent.length) return;
+    const next = { ...(form.default_animations ?? {}) } as Record<string, string>;
+    const trimmedName = animationName.trim();
+    if (!trimmedName.length) {
+      delete next[normalizedEvent];
+    } else {
+      next[normalizedEvent] = trimmedName;
+    }
+    form = {
+      ...form,
+      default_animations: next
+    };
+  }
 
   $effect(() => {
     if (sequenceBusy || timelineKeyframes.length === 0) return;
@@ -1486,6 +1538,11 @@
 
     busy = true;
     const brightnessValue = typeof form.brightness === 'number' ? form.brightness : null;
+    const defaultAnimations = Object.fromEntries(
+      Object.entries(form.default_animations ?? {})
+        .map(([eventKey, animationName]) => [eventKey.trim().toLowerCase(), String(animationName ?? '').trim()])
+        .filter(([eventKey, animationName]) => eventKey.length > 0 && animationName.length > 0)
+    );
 
     const payload = {
       requested_by: REQUESTED_BY,
@@ -1498,7 +1555,8 @@
         frequency_hz: coerceInt(form.frequency_hz),
         brightness: brightnessValue == null ? null : Math.min(255, Math.max(0, coerceInt(brightnessValue))),
         label: form.label?.trim() ? form.label.trim() : null,
-        protocol: form.protocol.trim() || DEFAULT_LIGHTING.protocol
+        protocol: form.protocol.trim() || DEFAULT_LIGHTING.protocol,
+        default_animations: defaultAnimations
       }
     };
 
@@ -1796,6 +1854,10 @@
     maxFreqKhz={MAX_FREQ_KHZ}
     {frequencyKhz}
     defaultCount={DEFAULT_LIGHTING.count}
+    defaultAnimationEvents={DEFAULT_ANIMATION_EVENT_OPTIONS}
+    {defaultAnimationNameOptions}
+    resolveDefaultAnimationForEvent={(eventKey) => defaultAnimationRefForEvent(eventKey)}
+    onDefaultAnimationChange={(eventKey, animationName) => setDefaultAnimationRefForEvent(eventKey, animationName)}
     onClose={() => (showAdvanced = false)}
     onReset={() => void resetLightingConfig()}
     onRetryLoad={() => void ensureDeviceSettings()}

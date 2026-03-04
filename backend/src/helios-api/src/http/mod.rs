@@ -403,6 +403,7 @@ pub fn router(state: AppState) -> Router {
         .nest("/errors", error_history::router())
         .nest("/localization", localization::router())
         .nest("/peers", peers::router())
+        .nest("/integrations/limelight", integrations::limelight::router())
         .nest("/nt4", nt4::router())
         .with_state(state)
 }

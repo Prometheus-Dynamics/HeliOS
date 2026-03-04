@@ -7,6 +7,8 @@ use helios_peripherals::dto::{LightingAnimation, LightingColor, LightingCommand}
 use helios_updater::client::UpdaterSession;
 use helios_updater::ipc::{UpdateStage, UpdateState, UpdaterCommand, UpdaterEvent};
 use lib_ipc::types::CommandId;
+use lib_led_animations::{LED_ANIMATIONS_PATH, command_for_animation_name, load_led_animations};
+use lib_sensors::led_config::{self, DEFAULT_ANIMATION_EVENT_ENGINE_CRASH, DEFAULT_ANIMATION_EVENT_REBOOT, DEFAULT_ANIMATION_EVENT_UPDATE, DEFAULT_ANIMATION_EVENT_UPDATE_ERROR};
 use tokio::time::sleep;
 use tracing::{info, warn};
 
@@ -18,6 +20,7 @@ enum UpdateLedMode {
     Idle = 0,
     Updating = 1,
     Error = 2,
+    Rebooting = 3,
 }
 
 impl UpdateLedMode {
@@ -25,6 +28,7 @@ impl UpdateLedMode {
         match value {
             1 => Self::Updating,
             2 => Self::Error,
+            3 => Self::Rebooting,
             _ => Self::Idle,
         }
     }
@@ -175,7 +179,7 @@ async fn send_query_state(updater: &UpdaterConnection, session: &mut UpdaterSess
 fn update_mode_from_event(event: &UpdaterEvent, reboot_grace: Duration) -> Option<UpdateLedMode> {
     match event {
         UpdaterEvent::StateSnapshot { active_update, .. } => Some(update_mode_from_state(active_update.as_ref(), reboot_grace)),
-        UpdaterEvent::ApplyComplete { reboot_required, .. } => Some(if *reboot_required { UpdateLedMode::Updating } else { UpdateLedMode::Idle }),
+        UpdaterEvent::ApplyComplete { reboot_required, .. } => Some(if *reboot_required { UpdateLedMode::Rebooting } else { UpdateLedMode::Idle }),
         UpdaterEvent::StageProgress { .. } | UpdaterEvent::StageComplete { .. } | UpdaterEvent::ApplyScheduled { .. } => Some(UpdateLedMode::Updating),
         UpdaterEvent::RollbackTriggered { reason, .. } => Some(rollback_mode_from_reason(reason)),
         _ => None,
@@ -197,7 +201,7 @@ fn update_mode_from_state(state: Option<&UpdateState>, reboot_grace: Duration) -
             .and_then(|s| s.finished_at)
             .map(|finished_at| {
                 let age = Utc::now().signed_duration_since(finished_at);
-                if age.num_seconds() >= 0 && age.to_std().map(|d| d <= reboot_grace).unwrap_or(false) { UpdateLedMode::Updating } else { UpdateLedMode::Idle }
+                if age.num_seconds() >= 0 && age.to_std().map(|d| d <= reboot_grace).unwrap_or(false) { UpdateLedMode::Rebooting } else { UpdateLedMode::Idle }
             })
             .unwrap_or(UpdateLedMode::Idle),
         Some(_) => UpdateLedMode::Updating,
@@ -209,6 +213,24 @@ async fn apply_update_lighting(handles: &Arc<IpcHandles>, cfg: &UpdateLightingCo
         // Don't clear LEDs on idle; avoid turning off boot/idle animations.
         return true;
     }
+
+    let fallback_brightness = match mode {
+        UpdateLedMode::Updating | UpdateLedMode::Rebooting => Some(cfg.brightness),
+        UpdateLedMode::Error => {
+            if cfg.error_enabled {
+                Some(cfg.error_brightness)
+            } else {
+                None
+            }
+        }
+        UpdateLedMode::Idle => None,
+    };
+    if let Some(event_key) = default_event_key_for_mode(mode)
+        && apply_configured_event_animation(handles, event_key, fallback_brightness).await
+    {
+        return true;
+    }
+
     let Some(sensors) = handles.ensure_sensors().await else {
         warn!("update lighting: peripherals IPC unavailable");
         return false;
@@ -216,7 +238,9 @@ async fn apply_update_lighting(handles: &Arc<IpcHandles>, cfg: &UpdateLightingCo
 
     let command = match mode {
         UpdateLedMode::Idle => return true,
-        UpdateLedMode::Updating => LightingCommand { frame: None, brightness: Some(cfg.brightness), animation: Some(LightingAnimation::Chase { color: cfg.color.clone(), speed_hz: cfg.speed_hz }) },
+        UpdateLedMode::Updating | UpdateLedMode::Rebooting => {
+            LightingCommand { frame: None, brightness: Some(cfg.brightness), animation: Some(LightingAnimation::Chase { color: cfg.color.clone(), speed_hz: cfg.speed_hz }) }
+        }
         UpdateLedMode::Error => {
             if !cfg.error_enabled {
                 return true;
@@ -259,6 +283,10 @@ async fn run_engine_crash_led_loop(handles: Arc<IpcHandles>, cfg: EngineCrashLig
 }
 
 async fn flash_engine_crash_led(handles: &Arc<IpcHandles>, cfg: &EngineCrashLightingConfig) {
+    if apply_configured_event_animation(handles, DEFAULT_ANIMATION_EVENT_ENGINE_CRASH, Some(cfg.brightness)).await {
+        return;
+    }
+
     let Some(sensors) = handles.ensure_sensors().await else {
         warn!("engine crash lighting: peripherals IPC unavailable");
         return;
@@ -269,6 +297,45 @@ async fn flash_engine_crash_led(handles: &Arc<IpcHandles>, cfg: &EngineCrashLigh
     let _ = sensors.lighting_command(start).await;
     sleep(Duration::from_millis(cfg.flash_ms)).await;
     let _ = sensors.lighting_command(LightingCommand { frame: Some(Vec::new()), brightness: None, animation: None }).await;
+}
+
+fn default_event_key_for_mode(mode: UpdateLedMode) -> Option<&'static str> {
+    match mode {
+        UpdateLedMode::Idle => None,
+        UpdateLedMode::Updating => Some(DEFAULT_ANIMATION_EVENT_UPDATE),
+        UpdateLedMode::Error => Some(DEFAULT_ANIMATION_EVENT_UPDATE_ERROR),
+        UpdateLedMode::Rebooting => Some(DEFAULT_ANIMATION_EVENT_REBOOT),
+    }
+}
+
+async fn apply_configured_event_animation(handles: &Arc<IpcHandles>, event_key: &str, fallback_brightness: Option<u8>) -> bool {
+    let paths = led_config::default_paths();
+    let Some(led_config) = led_config::load_led_config(&paths) else {
+        return false;
+    };
+    let Some(animation_name) = led_config.animation_for_event(event_key).map(ToOwned::to_owned) else {
+        return false;
+    };
+    let doc = load_led_animations(LED_ANIMATIONS_PATH).await;
+    let Some(command) = command_for_animation_name(&doc, &animation_name, fallback_brightness) else {
+        warn!(event = event_key, animation = %animation_name, "configured default animation was not found");
+        return false;
+    };
+    let Some(sensors) = handles.ensure_sensors().await else {
+        warn!(event = event_key, "peripherals IPC unavailable");
+        return false;
+    };
+    match sensors.lighting_command(command).await {
+        Ok(Ok(())) => true,
+        Ok(Err(reason)) => {
+            warn!(event = event_key, %reason, "peripheral rejected configured default animation");
+            false
+        }
+        Err(err) => {
+            warn!(event = event_key, %err, "failed to apply configured default animation");
+            false
+        }
+    }
 }
 
 fn env_bool(key: &str, default: bool) -> bool {

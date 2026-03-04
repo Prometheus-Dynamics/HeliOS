@@ -21,17 +21,9 @@ struct RotationPair {
     weight: f64,
 }
 
-fn lateral_ratio_scale(
-    lateral_ratio: f64,
-    mild_threshold: f64,
-    medium_threshold: f64,
-    high_threshold: f64,
-    extreme_threshold: f64,
-    mild_scale: f64,
-    medium_scale: f64,
-    high_scale: f64,
-    extreme_scale: f64,
-) -> f64 {
+fn lateral_ratio_scale(lateral_ratio: f64, thresholds: [f64; 4], scales: [f64; 4]) -> f64 {
+    let [mild_threshold, medium_threshold, high_threshold, extreme_threshold] = thresholds;
+    let [mild_scale, medium_scale, high_scale, extreme_scale] = scales;
     if lateral_ratio > extreme_threshold {
         extreme_scale
     } else if lateral_ratio > high_threshold {
@@ -97,14 +89,8 @@ fn rotation_observation_quality(robot_from_tag_t: &Vector3<f64>, runtime_tuning:
     let lateral_ratio = (robot_from_tag_t.x.abs() / depth).clamp(0.0, 10.0);
     quality *= lateral_ratio_scale(
         lateral_ratio,
-        runtime_tuning.lateral_ratio_mild,
-        runtime_tuning.lateral_ratio_medium,
-        runtime_tuning.lateral_ratio_high,
-        runtime_tuning.lateral_ratio_extreme,
-        runtime_tuning.rotation_lateral_mild_scale,
-        runtime_tuning.rotation_lateral_medium_scale,
-        runtime_tuning.rotation_lateral_high_scale,
-        runtime_tuning.rotation_lateral_extreme_scale,
+        [runtime_tuning.lateral_ratio_mild, runtime_tuning.lateral_ratio_medium, runtime_tuning.lateral_ratio_high, runtime_tuning.lateral_ratio_extreme],
+        [runtime_tuning.rotation_lateral_mild_scale, runtime_tuning.rotation_lateral_medium_scale, runtime_tuning.rotation_lateral_high_scale, runtime_tuning.rotation_lateral_extreme_scale],
     );
 
     quality.clamp(floor, 1.0)
@@ -143,14 +129,13 @@ fn translation_observation_quality(robot_from_tag_t: &Vector3<f64>, runtime_tuni
     let lateral_ratio = (robot_from_tag_t.x.abs() / depth).clamp(0.0, 10.0);
     quality *= lateral_ratio_scale(
         lateral_ratio,
-        runtime_tuning.lateral_ratio_mild,
-        runtime_tuning.lateral_ratio_medium,
-        runtime_tuning.lateral_ratio_high,
-        runtime_tuning.lateral_ratio_extreme,
-        runtime_tuning.translation_lateral_mild_scale,
-        runtime_tuning.translation_lateral_medium_scale,
-        runtime_tuning.translation_lateral_high_scale,
-        runtime_tuning.translation_lateral_extreme_scale,
+        [runtime_tuning.lateral_ratio_mild, runtime_tuning.lateral_ratio_medium, runtime_tuning.lateral_ratio_high, runtime_tuning.lateral_ratio_extreme],
+        [
+            runtime_tuning.translation_lateral_mild_scale,
+            runtime_tuning.translation_lateral_medium_scale,
+            runtime_tuning.translation_lateral_high_scale,
+            runtime_tuning.translation_lateral_extreme_scale,
+        ],
     );
 
     quality.clamp(floor, 1.0)
@@ -869,7 +854,7 @@ pub(crate) fn estimate_field_from_robot(map: &MarkerMap, observations: &[MarkerO
 
     let min_observation_weight = runtime_tuning.min_observation_weight.max(0.0);
     for (index, obs) in observations.iter().enumerate() {
-        let base_weight = adjusted_weights.get(index).copied().unwrap_or_else(|| obs.weight as f64);
+        let base_weight = adjusted_weights.get(index).copied().unwrap_or(obs.weight as f64);
         if !base_weight.is_finite() || base_weight <= 0.0 {
             continue;
         }
@@ -935,7 +920,7 @@ pub(crate) fn estimate_field_from_robot(map: &MarkerMap, observations: &[MarkerO
 
     // Single-tag low-confidence solves are especially vulnerable to wrong attitude branches.
     // In that regime, prefer translation-only fallback over forcing rotation consensus.
-    let allow_rotation_consensus = !rotation_pairs.is_empty() && !(low_confidence_observations && pairs.len() == 1);
+    let allow_rotation_consensus = !(rotation_pairs.is_empty() || (low_confidence_observations && pairs.len() == 1));
     if allow_rotation_consensus {
         if let Some(pose) = solve_with_rotation_consensus(&pairs, &rotation_pairs, runtime_tuning) {
             let refined = bundle_refine_pose(pose, &pairs, &rotation_pairs, runtime_tuning);

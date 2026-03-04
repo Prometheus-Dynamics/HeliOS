@@ -1,6 +1,6 @@
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::sync::mpsc::TrySendError;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use metrics::histogram;

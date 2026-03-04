@@ -59,10 +59,11 @@ pub struct LocalizationFieldOriginConfig {
     pub custom: Option<LocalizationCustomFieldOrigin>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum LocalizationFieldOriginMode {
     Center,
+    #[default]
     Blue,
     Red,
     Custom,
@@ -544,12 +545,6 @@ impl Default for LocalizationTemporalStabilizationConfig {
 impl Default for LocalizationFieldOriginConfig {
     fn default() -> Self {
         Self { mode: LocalizationFieldOriginMode::Blue, custom: None }
-    }
-}
-
-impl Default for LocalizationFieldOriginMode {
-    fn default() -> Self {
-        Self::Blue
     }
 }
 

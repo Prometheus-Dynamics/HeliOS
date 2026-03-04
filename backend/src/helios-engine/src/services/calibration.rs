@@ -816,7 +816,7 @@ fn compact_calibration_graph_error(raw: &str) -> String {
             .find(" on node ")
             .map(|node_idx| {
                 let after_node = &after_port[node_idx + " on node ".len()..];
-                let end = after_node.find(|ch: char| ch == ' ' || ch == '(' || ch == ',' || ch == '"').unwrap_or(after_node.len());
+                let end = after_node.find([' ', '(', ',', '"']).unwrap_or(after_node.len());
                 after_node[..end].trim()
             })
             .unwrap_or_default();

@@ -188,3 +188,32 @@ pub async fn persist_led_animations(path: impl AsRef<Path>, doc: &LedAnimationDo
     let serialized = serde_json::to_string_pretty(doc).unwrap_or_else(|_| "{\"animations\":[]}".to_string());
     tokio::fs::write(path, serialized).await
 }
+
+#[must_use]
+pub fn find_animation_entry<'a>(doc: &'a LedAnimationDoc, name: &str) -> Option<&'a LedAnimationEntry> {
+    let needle = name.trim();
+    if needle.is_empty() {
+        return None;
+    }
+    doc.animations.iter().find(|entry| entry.name.trim().eq_ignore_ascii_case(needle))
+}
+
+#[must_use]
+pub fn command_from_entry(entry: &LedAnimationEntry, fallback_brightness: Option<u8>) -> Option<LightingCommand> {
+    if entry.command.frame.is_some() || entry.command.animation.is_some() {
+        return Some(LightingCommand { frame: entry.command.frame.clone(), brightness: entry.command.brightness.or(fallback_brightness), animation: entry.command.animation.clone() });
+    }
+    entry.sequence.first().map(|frame| LightingCommand { frame: Some(frame.frame.clone()), brightness: entry.command.brightness.or(fallback_brightness), animation: None })
+}
+
+#[must_use]
+pub fn command_for_animation_name(doc: &LedAnimationDoc, name: &str, fallback_brightness: Option<u8>) -> Option<LightingCommand> {
+    let entry = find_animation_entry(doc, name)?;
+    command_from_entry(entry, fallback_brightness)
+}
+
+#[must_use]
+pub fn sequence_for_animation_name(doc: &LedAnimationDoc, name: &str) -> Option<Vec<LedAnimationFrame>> {
+    let entry = find_animation_entry(doc, name)?;
+    if entry.sequence.is_empty() { None } else { Some(entry.sequence.clone()) }
+}

@@ -71,13 +71,14 @@ async fn prefer_jpeg_preview_header(id: Uuid, header: ShmemFrameHeader) -> Shmem
         let mut best = header;
         while Instant::now() < deadline {
             let _ = touch_stream_preview(id);
-            if let Ok(candidate) = read_latest_header(id) {
-                if candidate.len > 0 && candidate.fourcc.to_u32() != 0 {
-                    if is_mjpeg_fourcc(candidate.fourcc) {
-                        return candidate;
-                    }
-                    best = candidate;
+            if let Ok(candidate) = read_latest_header(id)
+                && candidate.len > 0
+                && candidate.fourcc.to_u32() != 0
+            {
+                if is_mjpeg_fourcc(candidate.fourcc) {
+                    return candidate;
                 }
+                best = candidate;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }

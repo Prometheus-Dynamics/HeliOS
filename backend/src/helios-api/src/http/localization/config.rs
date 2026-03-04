@@ -119,7 +119,7 @@ pub async fn import_profiles(State(_state): State<AppState>, Json(body): Json<Va
 
     let imported = match extract_imported_config(body) {
         Ok(config) => config,
-        Err(err) => return err.into_response(),
+        Err(err) => return ApiError::bad_request(err).into_response(),
     };
 
     let validated = match validate_localization_config(imported).await {
@@ -160,16 +160,16 @@ async fn config_path() -> std::io::Result<PathBuf> {
     Ok(dir.join("config.json"))
 }
 
-fn extract_imported_config(body: Value) -> Result<LocalizationConfig, ApiError> {
+fn extract_imported_config(body: Value) -> Result<LocalizationConfig, String> {
     if let Ok(payload) = serde_json::from_value::<LocalizationProfilesImportRequest>(body.clone()) {
-        if let Some(schema) = payload.schema.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
-            if schema != LOCALIZATION_PROFILES_SCHEMA_V1 {
-                return Err(ApiError::bad_request(format!("unsupported localization profiles schema `{schema}`; expected `{LOCALIZATION_PROFILES_SCHEMA_V1}`")));
-            }
+        if let Some(schema) = payload.schema.as_deref().map(str::trim).filter(|value| !value.is_empty())
+            && schema != LOCALIZATION_PROFILES_SCHEMA_V1
+        {
+            return Err(format!("unsupported localization profiles schema `{schema}`; expected `{LOCALIZATION_PROFILES_SCHEMA_V1}`"));
         }
         return Ok(payload.config);
     }
 
     serde_json::from_value::<LocalizationConfig>(body)
-        .map_err(|err| ApiError::bad_request(format!("invalid localization profiles payload: expected `{LOCALIZATION_PROFILES_SCHEMA_V1}` envelope or localization config: {err}")))
+        .map_err(|err| format!("invalid localization profiles payload: expected `{LOCALIZATION_PROFILES_SCHEMA_V1}` envelope or localization config: {err}"))
 }

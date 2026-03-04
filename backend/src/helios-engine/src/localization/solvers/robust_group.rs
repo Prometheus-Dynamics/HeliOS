@@ -488,12 +488,14 @@ mod tests {
     }
 
     fn solver_config(mode: LocalizationSolverMode) -> LocalizationSolverConfig {
-        let mut runtime_tuning = LocalizationSolverRuntimeTuningConfig::default();
         // Make the base estimator deliberately permissive so outlier handling differences between
         // group and robust-group solvers are measurable in this regression test.
-        runtime_tuning.translation_consensus_inlier_scale = 3.0;
-        runtime_tuning.rotation_consensus_inlier_translation_scale = 2.6;
-        runtime_tuning.rotation_consensus_inlier_rotation_scale = 2.2;
+        let runtime_tuning = LocalizationSolverRuntimeTuningConfig {
+            translation_consensus_inlier_scale: 3.0,
+            rotation_consensus_inlier_translation_scale: 2.6,
+            rotation_consensus_inlier_rotation_scale: 2.2,
+            ..LocalizationSolverRuntimeTuningConfig::default()
+        };
 
         LocalizationSolverConfig {
             id: format!("solver_{mode:?}"),
@@ -583,7 +585,7 @@ mod tests {
 
             // Inject duplicate noisy observations for a subset of tags each frame. Group solve
             // uses all observations, while robust group solve keeps only the strongest one.
-            if ((frame_idx + marker.id as usize) % 3) == 0 {
+            if (frame_idx + marker.id as usize).is_multiple_of(3) {
                 let bad_pose = perturb_pose(&robot_from_tag, frame_idx + 11, marker.id + 100, true);
                 out.push(LocalizationDetection {
                     source_id: source.id.clone(),

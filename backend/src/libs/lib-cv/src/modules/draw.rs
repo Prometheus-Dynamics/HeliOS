@@ -16,7 +16,7 @@ pub mod nodes {
     use crate::{Pixel, Point};
     use daedalus::data::model::Value as DaedalusValue;
     use daedalus::declare_plugin;
-    use daedalus::macros::node;
+    use daedalus::macros::{NodeConfig, node};
     use daedalus::runtime::NodeError;
     use daedalus::runtime::state::ExecutionContext;
     #[cfg(feature = "gpu")]
@@ -210,6 +210,18 @@ pub mod nodes {
         Ok(out)
     }
 
+    #[derive(Clone, Debug, NodeConfig)]
+    struct BboxAnchorPointConfig {
+        #[port(default = false)]
+        input_is_xyxy: bool,
+        #[port(default = 0.5f64, meta(ui_min = -1.0, ui_max = 2.0, ui_step = 0.01))]
+        anchor_x: f64,
+        #[port(default = 0.5f64, meta(ui_min = -1.0, ui_max = 2.0, ui_step = 0.01))]
+        anchor_y: f64,
+        #[port(default = true)]
+        clamp_anchor: bool,
+    }
+
     #[node(
         id = "bboxanchorpoint",
         summary = "Compute an anchor point inside a bounding box.",
@@ -219,19 +231,16 @@ pub mod nodes {
             port(name = "y", meta(ui_min = -4096.0, ui_max = 4096.0, ui_step = 1.0)),
             port(name = "width", meta(ui_min = -4096.0, ui_max = 4096.0, ui_step = 1.0)),
             port(name = "height", meta(ui_min = -4096.0, ui_max = 4096.0, ui_step = 1.0)),
-            port(name = "input_is_xyxy", default = false),
-            port(name = "anchor_x", default = 0.5f64, meta(ui_min = -1.0, ui_max = 2.0, ui_step = 0.01)),
-            port(name = "anchor_y", default = 0.5f64, meta(ui_min = -1.0, ui_max = 2.0, ui_step = 0.01)),
-            port(name = "clamp_anchor", default = true)
+            config = BboxAnchorPointConfig
         ),
         outputs("x", "y", "x_f", "y_f")
     )]
-    fn bbox_anchor_point(x: f64, y: f64, width: f64, height: f64, input_is_xyxy: bool, anchor_x: f64, anchor_y: f64, clamp_anchor: bool) -> Result<(i64, i64, f64, f64), NodeError> {
+    fn bbox_anchor_point(x: f64, y: f64, width: f64, height: f64, cfg: BboxAnchorPointConfig) -> Result<(i64, i64, f64, f64), NodeError> {
         if !(x.is_finite() && y.is_finite() && width.is_finite() && height.is_finite()) {
             return Err(NodeError::InvalidInput("bboxanchorpoint requires finite x/y/width/height".to_string()));
         }
 
-        let (min_x, max_x, min_y, max_y) = if input_is_xyxy {
+        let (min_x, max_x, min_y, max_y) = if cfg.input_is_xyxy {
             (x.min(width), x.max(width), y.min(height), y.max(height))
         } else {
             let x2 = x + width;
@@ -239,8 +248,8 @@ pub mod nodes {
             (x.min(x2), x.max(x2), y.min(y2), y.max(y2))
         };
 
-        let ax = if clamp_anchor { anchor_x.clamp(0.0, 1.0) } else { anchor_x };
-        let ay = if clamp_anchor { anchor_y.clamp(0.0, 1.0) } else { anchor_y };
+        let ax = if cfg.clamp_anchor { cfg.anchor_x.clamp(0.0, 1.0) } else { cfg.anchor_x };
+        let ay = if cfg.clamp_anchor { cfg.anchor_y.clamp(0.0, 1.0) } else { cfg.anchor_y };
         let out_x = min_x + (max_x - min_x) * ax;
         let out_y = min_y + (max_y - min_y) * ay;
         Ok((out_x.round() as i64, out_y.round() as i64, out_x, out_y))

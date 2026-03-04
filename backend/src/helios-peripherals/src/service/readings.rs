@@ -5,6 +5,7 @@ use std::time::Duration;
 use crate::dto::{SensorData, SensorKind, SensorScope, SensorSnapshot};
 use crate::error::{Error, Result};
 use crate::imu::{ImuFusionMethod, ImuRange, ImuSample, ImuSettings};
+use crate::orchestrator::ImuSettingsUpdate;
 use crate::power::PowerReading;
 use lib_math::linalg::Quaternion;
 use lib_sensors::model::{AxesReading, ImuReading, PowerSnapshot, PowerSourceReading, SensorReading};
@@ -26,7 +27,7 @@ impl SensorsService {
             } else {
                 entry.remove(&SensorKind::Magnetometer);
             }
-            entry.insert(SensorKind::Imu, SensorReading::Imu(ImuReading::from_sample(&sample)));
+            entry.insert(SensorKind::Imu, SensorReading::Imu(Box::new(ImuReading::from_sample(&sample))));
         }
         self.publish_snapshot(None, &scope).await;
     }
@@ -37,7 +38,7 @@ impl SensorsService {
         {
             let mut state = self.state.write().await;
             let entry = state.readings.entry(scope.clone()).or_default();
-            entry.insert(SensorKind::Imu, SensorReading::Imu(ImuReading::error(message)));
+            entry.insert(SensorKind::Imu, SensorReading::Imu(Box::new(ImuReading::error(message))));
         }
         self.publish_snapshot(None, &scope).await;
     }
@@ -93,7 +94,11 @@ impl SensorsService {
         self.ensure_scope_registered(scope).await;
         let payload_value = payload.to_value().map_err(|err| Error::InvalidConfig(format!("sensor payload must be valid JSON: {err}")))?;
         let applied_payload = if sensor == SensorKind::Imu {
-            if let Some(settings) = self.apply_imu_config_payload(&payload_value).await? { SensorReading::Imu(ImuReading::from_settings(&settings)) } else { SensorReading::Raw(payload_value) }
+            if let Some(settings) = self.apply_imu_config_payload(&payload_value).await? {
+                SensorReading::Imu(Box::new(ImuReading::from_settings(&settings)))
+            } else {
+                SensorReading::Raw(payload_value)
+            }
         } else {
             SensorReading::Raw(payload_value)
         };
@@ -191,11 +196,11 @@ impl SensorsService {
         };
 
         let settings = self
-            .update_imu_settings(
+            .update_imu_settings(ImuSettingsUpdate {
                 fusion,
                 range,
                 interval,
-                None,
+                yaw_offset_deg: None,
                 mount_correction,
                 dr_velocity_damp_tau_seconds,
                 dr_still_velocity_zero_tau_seconds,
@@ -203,7 +208,7 @@ impl SensorsService {
                 dr_max_speed_mps,
                 dr_max_position_m,
                 dr_lock_position,
-            )
+            })
             .await?;
         if reset_pose {
             self.reset_imu_pose().await?;

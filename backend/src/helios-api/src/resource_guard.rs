@@ -306,11 +306,9 @@ async fn run_resource_guard_loop(handles: Arc<IpcHandles>, cfg: GuardConfig, mut
 
         if mem_available_kb >= cfg.mem_recover_kb {
             let now = now_ms();
-            if !degraded.is_empty() && now.saturating_sub(last_action_ms) >= cfg.cooldown_ms {
-                if restore_one_stream(&handles, &running, &mut degraded, cfg, mem_available_kb).await {
-                    last_action_ms = now_ms();
-                    update_runtime_state(cfg, mem_available_kb, &degraded);
-                }
+            if !degraded.is_empty() && now.saturating_sub(last_action_ms) >= cfg.cooldown_ms && restore_one_stream(&handles, &running, &mut degraded, cfg, mem_available_kb).await {
+                last_action_ms = now_ms();
+                update_runtime_state(cfg, mem_available_kb, &degraded);
             }
             continue;
         }

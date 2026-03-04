@@ -245,21 +245,9 @@ fn apply_new_ov9782_defaults(manifest: &mut StreamManifest) {
         manifest.capture.target_fps = Some(OV9782_DEFAULT_LIBCAMERA_TARGET_FPS);
     }
 
-    insert_manifest_control_if_missing(
-        manifest,
-        LIBCAMERA_AE_EXPOSURE_MODE,
-        helios_engine::capture::CaptureControlValue::Int(OV9782_AE_EXPOSURE_SHORT),
-    );
-    insert_manifest_control_if_missing(
-        manifest,
-        LIBCAMERA_NOISE_REDUCTION_MODE,
-        helios_engine::capture::CaptureControlValue::Int(OV9782_NOISE_REDUCTION_FAST),
-    );
-    insert_manifest_control_if_missing(
-        manifest,
-        LIBCAMERA_SHARPNESS,
-        helios_engine::capture::CaptureControlValue::Float(OV9782_DEFAULT_SHARPNESS.max(0.0)),
-    );
+    insert_manifest_control_if_missing(manifest, LIBCAMERA_AE_EXPOSURE_MODE, helios_engine::capture::CaptureControlValue::Int(OV9782_AE_EXPOSURE_SHORT));
+    insert_manifest_control_if_missing(manifest, LIBCAMERA_NOISE_REDUCTION_MODE, helios_engine::capture::CaptureControlValue::Int(OV9782_NOISE_REDUCTION_FAST));
+    insert_manifest_control_if_missing(manifest, LIBCAMERA_SHARPNESS, helios_engine::capture::CaptureControlValue::Float(OV9782_DEFAULT_SHARPNESS.max(0.0)));
     manifest.capture.enable_tdn_output = true;
 }
 

@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
 };
@@ -42,6 +43,13 @@ fn default_use_pwm() -> bool {
     true
 }
 
+pub const DEFAULT_ANIMATION_EVENT_STARTUP: &str = "startup";
+pub const DEFAULT_ANIMATION_EVENT_STARTUP_IDLE: &str = "startup_idle";
+pub const DEFAULT_ANIMATION_EVENT_REBOOT: &str = "reboot";
+pub const DEFAULT_ANIMATION_EVENT_UPDATE: &str = "update";
+pub const DEFAULT_ANIMATION_EVENT_UPDATE_ERROR: &str = "update_error";
+pub const DEFAULT_ANIMATION_EVENT_ENGINE_CRASH: &str = "engine_crash";
+
 /// Declarative configuration for a single addressable LED chain.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 pub struct LedConfig {
@@ -63,6 +71,8 @@ pub struct LedConfig {
     pub label: Option<String>,
     #[serde(default = "default_protocol")]
     pub protocol: String,
+    #[serde(default)]
+    pub default_animations: BTreeMap<String, String>,
 }
 
 impl Default for LedConfig {
@@ -77,7 +87,33 @@ impl Default for LedConfig {
             brightness: default_brightness(),
             label: None,
             protocol: default_protocol(),
+            default_animations: BTreeMap::new(),
         }
+    }
+}
+
+impl LedConfig {
+    #[must_use]
+    pub fn animation_for_event(&self, event: &str) -> Option<&str> {
+        let key = event.trim();
+        if key.is_empty() {
+            return None;
+        }
+        if let Some(value) = self.default_animations.get(key) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed);
+            }
+        }
+        self.default_animations.iter().find_map(|(candidate_key, value)| {
+            if candidate_key.trim().eq_ignore_ascii_case(key) {
+                let trimmed = value.trim();
+                if !trimmed.is_empty() {
+                    return Some(trimmed);
+                }
+            }
+            None
+        })
     }
 }
 

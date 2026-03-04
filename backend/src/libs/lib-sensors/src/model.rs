@@ -211,7 +211,7 @@ pub enum SensorReading {
     Accelerometer(AxesReading),
     Gyroscope(AxesReading),
     Magnetometer(AxesReading),
-    Imu(ImuReading),
+    Imu(Box<ImuReading>),
     Power(PowerSnapshot),
     Fan(FanSnapshot),
     Raw(#[bincode(with_serde)] JsonValue),
@@ -452,7 +452,7 @@ pub fn json_from_fan_snapshot(value: &FanSnapshot) -> JsonValue {
 pub fn json_from_sensor_reading(value: &SensorReading) -> JsonValue {
     match value {
         SensorReading::Accelerometer(axes) | SensorReading::Gyroscope(axes) | SensorReading::Magnetometer(axes) => json_from_axes(axes),
-        SensorReading::Imu(reading) => json_from_imu(reading),
+        SensorReading::Imu(reading) => json_from_imu(reading.as_ref()),
         SensorReading::Power(snapshot) => json_from_power_snapshot(snapshot),
         SensorReading::Fan(snapshot) => json_from_fan_snapshot(snapshot),
         SensorReading::Raw(raw) => raw.clone(),

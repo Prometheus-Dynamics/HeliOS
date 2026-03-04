@@ -160,14 +160,16 @@ pub(crate) async fn fetch_media_imu_sample(state: &AppState, source_id: &str, ou
     let stream_started_at_ms = stream.status.started_at_ms.map(|value| value as i64).filter(|value| *value > 0);
     let replay_frame_clock = read_stream_frame_clock(binding.stream_id).await;
     let Some(idx) = select_event_index(
-        binding.stream_id,
-        &binding.signature(),
-        binding.loop_forever,
-        binding.playback_fps,
-        stream_started_at_ms,
-        binding.playback_duration_ms,
-        replay_frame_clock,
-        frame_timeline.as_deref().map(Vec::as_slice),
+        EventSelectionInput {
+            stream_id: binding.stream_id,
+            signature: &binding.signature(),
+            loop_forever: binding.loop_forever,
+            playback_fps: binding.playback_fps,
+            replay_started_at_ms: stream_started_at_ms,
+            playback_duration_ms: binding.playback_duration_ms,
+            replay_frame_clock,
+            frame_timeline: frame_timeline.as_deref().map(Vec::as_slice),
+        },
         events.as_ref(),
     )
     .await
@@ -444,17 +446,18 @@ fn playback_wrapped_elapsed_ms(elapsed_ms: i64, playback_span_ms: i64, loop_fore
     if loop_forever { elapsed_ms.rem_euclid(playback_span_ms) } else { elapsed_ms.clamp(0, playback_span_ms) }
 }
 
-async fn select_event_index(
+struct EventSelectionInput<'a> {
     stream_id: Uuid,
-    signature: &str,
+    signature: &'a str,
     loop_forever: bool,
     playback_fps: Option<f64>,
     replay_started_at_ms: Option<i64>,
     playback_duration_ms: Option<i64>,
     replay_frame_clock: Option<ReplayFrameClock>,
-    frame_timeline: Option<&[i64]>,
-    events: &[MediaImuEvent],
-) -> Option<usize> {
+    frame_timeline: Option<&'a [i64]>,
+}
+
+async fn select_event_index(input: EventSelectionInput<'_>, events: &[MediaImuEvent]) -> Option<usize> {
     if events.is_empty() {
         return None;
     }
@@ -467,20 +470,20 @@ async fn select_event_index(
     if max_sample_t <= 0 {
         return Some(events.len().saturating_sub(1));
     }
-    let playback_span_ms = playback_duration_ms.filter(|value| *value > 0).unwrap_or(max_sample_t).max(1);
+    let playback_span_ms = input.playback_duration_ms.filter(|value| *value > 0).unwrap_or(max_sample_t).max(1);
 
     let now_ms = Utc::now().timestamp_millis();
     let elapsed_ms = {
         let mut cursors = media_imu_cursors().lock().await;
-        let started_at_ms = replay_started_at_ms.filter(|value| *value <= now_ms).unwrap_or(now_ms);
-        let reset_for_idle = |cursor: &MediaImuCursor, now_ms: i64| replay_started_at_ms.is_none() && now_ms.saturating_sub(cursor.last_seen_ms) > MEDIA_IMU_CURSOR_IDLE_RESET_MS;
+        let started_at_ms = input.replay_started_at_ms.filter(|value| *value <= now_ms).unwrap_or(now_ms);
+        let reset_for_idle = |cursor: &MediaImuCursor, now_ms: i64| input.replay_started_at_ms.is_none() && now_ms.saturating_sub(cursor.last_seen_ms) > MEDIA_IMU_CURSOR_IDLE_RESET_MS;
         let wall_elapsed_ms = now_ms.saturating_sub(started_at_ms);
-        let replay_frame_seq = replay_frame_clock.map(|clock| clock.seq).filter(|value| *value > 0);
-        let replay_frame_ts = replay_frame_clock.map(|clock| clock.ts).filter(|value| *value > 0);
-        let frame_interval_ms = playback_fps.filter(|value| value.is_finite() && *value > 0.0).map(|value| 1000.0 / value);
+        let replay_frame_seq = input.replay_frame_clock.map(|clock| clock.seq).filter(|value| *value > 0);
+        let replay_frame_ts = input.replay_frame_clock.map(|clock| clock.ts).filter(|value| *value > 0);
+        let frame_interval_ms = input.playback_fps.filter(|value| value.is_finite() && *value > 0.0).map(|value| 1000.0 / value);
 
-        let entry = cursors.entry(stream_id).or_insert_with(|| MediaImuCursor {
-            signature: signature.to_string(),
+        let entry = cursors.entry(input.stream_id).or_insert_with(|| MediaImuCursor {
+            signature: input.signature.to_string(),
             started_at_ms,
             last_seen_ms: now_ms,
             frame_anchor_seq: replay_frame_seq,
@@ -489,15 +492,15 @@ async fn select_event_index(
             frame_ts_scale: None,
             last_frame_ts: replay_frame_ts,
         });
-        if entry.signature != signature || reset_for_idle(entry, now_ms) {
-            entry.signature = signature.to_string();
+        if entry.signature != input.signature || reset_for_idle(entry, now_ms) {
+            entry.signature = input.signature.to_string();
             entry.started_at_ms = started_at_ms;
             entry.frame_anchor_seq = replay_frame_seq;
             entry.frame_anchor_ts = replay_frame_ts;
             entry.frame_anchor_elapsed_ms = wall_elapsed_ms;
             entry.frame_ts_scale = None;
             entry.last_frame_ts = replay_frame_ts;
-        } else if replay_started_at_ms.is_some() {
+        } else if input.replay_started_at_ms.is_some() {
             // Replay streams expose their actual start time; keep cursor anchored to that clock so
             // IMU sampling tracks playback even when localization polling starts late.
             entry.started_at_ms = started_at_ms;
@@ -554,12 +557,12 @@ async fn select_event_index(
         });
 
         let timeline_elapsed_ms = replay_frame_seq.and_then(|current_seq| {
-            let timeline = frame_timeline?;
+            let timeline = input.frame_timeline?;
             if timeline.is_empty() {
                 return None;
             }
             let mut index = current_seq.saturating_sub(1) as usize;
-            if loop_forever {
+            if input.loop_forever {
                 index %= timeline.len();
             } else if index >= timeline.len() {
                 index = timeline.len().saturating_sub(1);
@@ -572,7 +575,7 @@ async fn select_event_index(
         timeline_elapsed_ms.or(frame_elapsed_ms).or(seq_elapsed_ms).unwrap_or(wall_elapsed_ms)
     };
 
-    let playback_offset_ms = playback_wrapped_elapsed_ms(elapsed_ms, playback_span_ms, loop_forever);
+    let playback_offset_ms = playback_wrapped_elapsed_ms(elapsed_ms, playback_span_ms, input.loop_forever);
     let target_t = playback_offset_ms.clamp(0, max_sample_t);
     let insertion = events.partition_point(|event| event.t_ms <= target_t);
     if insertion == 0 {

@@ -3973,16 +3973,13 @@ fn patch_calibration_mode_detection_strictness(graph: &mut serde_json::Value, di
         let Some(id) = node.get("id").and_then(|v| v.as_str()) else {
             continue;
         };
-        match id {
-            "cv:aruco:overlay_detections" => {
-                // Keep calibration stream clean by default; overlays are for explicit debug only.
-                let _ = upsert_const_input_bool(node, "draw_boxes", false);
-                let _ = upsert_const_input_bool(node, "draw_corners", false);
-                let _ = upsert_const_input_bool(node, "draw_ids", false);
-                let _ = upsert_const_input_bool(node, "draw_hud", false);
-                overlay_nodes += 1;
-            }
-            _ => {}
+        if id == "cv:aruco:overlay_detections" {
+            // Keep calibration stream clean by default; overlays are for explicit debug only.
+            let _ = upsert_const_input_bool(node, "draw_boxes", false);
+            let _ = upsert_const_input_bool(node, "draw_corners", false);
+            let _ = upsert_const_input_bool(node, "draw_ids", false);
+            let _ = upsert_const_input_bool(node, "draw_hud", false);
+            overlay_nodes += 1;
         }
     }
 

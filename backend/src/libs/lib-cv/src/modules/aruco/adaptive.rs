@@ -197,20 +197,14 @@ fn contour_to_f32(points: &[CvPoint<i32>], out: &mut Vec<CvPoint<f32>>, off_x: i
     if len == 0 {
         return;
     }
-    out.reserve(len);
-    // SAFETY: we immediately initialize every element before any read.
-    unsafe {
-        out.set_len(len);
-    }
+    out.resize(len, CvPoint::new(0.0, 0.0));
     if off_x == 0 && off_y == 0 {
-        for i in 0..len {
-            let p = points[i];
-            out[i] = CvPoint::new(p.x as f32, p.y as f32);
+        for (dst, p) in out.iter_mut().zip(points.iter()) {
+            *dst = CvPoint::new(p.x as f32, p.y as f32);
         }
     } else {
-        for i in 0..len {
-            let p = points[i];
-            out[i] = CvPoint::new((p.x + off_x) as f32, (p.y + off_y) as f32);
+        for (dst, p) in out.iter_mut().zip(points.iter()) {
+            *dst = CvPoint::new((p.x + off_x) as f32, (p.y + off_y) as f32);
         }
     }
 }

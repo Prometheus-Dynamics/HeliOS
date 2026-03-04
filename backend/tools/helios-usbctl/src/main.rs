@@ -308,11 +308,11 @@ fn run_ota_push(client: &mut UsbClient, image: &Path, chunk_size: usize, chunk_r
         bail!("image file is empty: {}", image.display());
     }
 
-    if let Some((max_chunk, recommended_chunk)) = query_device_chunk_limits(client)? {
-        if chunk_size > max_chunk {
-            let recommendation = recommended_chunk.map(|value| format!(", recommended {value}")).unwrap_or_default();
-            bail!("--chunk-size {chunk_size} exceeds device limit {max_chunk}{recommendation}");
-        }
+    if let Some((max_chunk, recommended_chunk)) = query_device_chunk_limits(client)?
+        && chunk_size > max_chunk
+    {
+        let recommendation = recommended_chunk.map(|value| format!(", recommended {value}")).unwrap_or_default();
+        bail!("--chunk-size {chunk_size} exceeds device limit {max_chunk}{recommendation}");
     }
 
     let sha256 = hash_file_sha256(image)?;

@@ -523,7 +523,7 @@ async fn attach_media_imu(Path(name): Path<String>, mut multipart: Multipart) ->
     };
 
     let sidecar_name = uploaded_name.unwrap_or_else(|| format!("{filename}.imu.jsonl.gz"));
-    let samples = count_imu_sidecar_samples(&sidecar_name, &sidecar_bytes)?;
+    let samples = count_imu_sidecar_samples(&sidecar_name, &sidecar_bytes).map_err(ApiError::bad_request)?;
     fs::write(meta_dir.join(&sidecar_name), &sidecar_bytes).await.map_err(|err| map_io_error(err, "failed to write IMU sidecar"))?;
 
     let mut md = ensure_media_metadata(&meta_dir, &filename, &media_path, &content_type).await.unwrap_or_default();
@@ -604,7 +604,7 @@ async fn delete_media_imu(Path(name): Path<String>) -> ApiResult<impl IntoRespon
     }))
 }
 
-fn count_imu_sidecar_samples(sidecar_name: &str, bytes: &[u8]) -> Result<u64, ApiError> {
+fn count_imu_sidecar_samples(sidecar_name: &str, bytes: &[u8]) -> Result<u64, String> {
     let gz_magic = bytes.len() >= 2 && bytes[0] == 0x1f && bytes[1] == 0x8b;
     let gz_hint = sidecar_name.to_ascii_lowercase().ends_with(".gz");
     if gz_magic || gz_hint {
@@ -615,15 +615,15 @@ fn count_imu_sidecar_samples(sidecar_name: &str, bytes: &[u8]) -> Result<u64, Ap
     count_imu_jsonl_lines(BufReader::new(Cursor::new(bytes)))
 }
 
-fn count_imu_jsonl_lines<R: BufRead>(reader: R) -> Result<u64, ApiError> {
+fn count_imu_jsonl_lines<R: BufRead>(reader: R) -> Result<u64, String> {
     let mut count: u64 = 0;
     for line in reader.lines() {
-        let line = line.map_err(|err| ApiError::bad_request(format!("failed to read IMU sidecar: {err}")))?;
+        let line = line.map_err(|err| format!("failed to read IMU sidecar: {err}"))?;
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
-        serde_json::from_str::<serde_json::Value>(trimmed).map_err(|err| ApiError::bad_request(format!("invalid IMU sidecar JSONL: {err}")))?;
+        serde_json::from_str::<serde_json::Value>(trimmed).map_err(|err| format!("invalid IMU sidecar JSONL: {err}"))?;
         count = count.saturating_add(1);
     }
     Ok(count)
@@ -2009,14 +2009,18 @@ mod tests {
         let body = to_bytes(response.into_body(), usize::MAX).await.expect("archive body");
         let mut archive = zip::ZipArchive::new(std::io::Cursor::new(body.to_vec())).expect("valid zip archive");
 
-        let mut file_a = archive.by_name(&name_a).expect("first archive entry");
-        let mut content_a = String::new();
-        file_a.read_to_string(&mut content_a).expect("read first archive entry");
-        assert_eq!(content_a, "alpha");
+        {
+            let mut file_a = archive.by_name(&name_a).expect("first archive entry");
+            let mut content_a = String::new();
+            file_a.read_to_string(&mut content_a).expect("read first archive entry");
+            assert_eq!(content_a, "alpha");
+        }
 
-        let mut file_b = archive.by_name(&name_b).expect("second archive entry");
-        let mut content_b = String::new();
-        file_b.read_to_string(&mut content_b).expect("read second archive entry");
-        assert_eq!(content_b, "beta");
+        {
+            let mut file_b = archive.by_name(&name_b).expect("second archive entry");
+            let mut content_b = String::new();
+            file_b.read_to_string(&mut content_b).expect("read second archive entry");
+            assert_eq!(content_b, "beta");
+        }
     }
 }

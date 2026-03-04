@@ -349,11 +349,13 @@ fn decode_relaxed_candidates(frame: &DynamicImage, quads: &[[CvPoint<f32>; 4]], 
             return Err(NodeError::InvalidInput(format!("unknown ArUco dictionary '{dict_name}'")));
         };
 
-        let mut decode_cfg = ArucoDecodeConfig::default();
-        decode_cfg.min_warped_patch_contrast_range = u8::try_from(cfg.rescue_min_warped_patch_contrast_range.max(0)).unwrap_or(6);
-        decode_cfg.min_cell_means_contrast_range = cfg.rescue_min_cell_means_contrast_range.max(0.0) as f32;
-        decode_cfg.min_quad_side_px = cfg.rescue_min_quad_side_px.max(0.0) as f32;
-        decode_cfg.min_bit_delta = cfg.rescue_min_bit_delta.max(0.0) as f32;
+        let mut decode_cfg = ArucoDecodeConfig {
+            min_warped_patch_contrast_range: u8::try_from(cfg.rescue_min_warped_patch_contrast_range.max(0)).unwrap_or(6),
+            min_cell_means_contrast_range: cfg.rescue_min_cell_means_contrast_range.max(0.0) as f32,
+            min_quad_side_px: cfg.rescue_min_quad_side_px.max(0.0) as f32,
+            min_bit_delta: cfg.rescue_min_bit_delta.max(0.0) as f32,
+            ..ArucoDecodeConfig::default()
+        };
 
         if cfg.rescue_max_hamming >= 0 {
             let max_hamming = u32::try_from(cfg.rescue_max_hamming).unwrap_or(0);
@@ -384,20 +386,24 @@ fn decode_relaxed_candidates(frame: &DynamicImage, quads: &[[CvPoint<f32>; 4]], 
         family = family.with_border_error_divisor(u8::try_from(cfg.rescue_border_error_divisor).unwrap_or(6));
     }
 
-    let mut decode_cfg = ArucoTagDecodeConfig::default();
-    decode_cfg.min_warped_patch_contrast_range = u8::try_from(cfg.rescue_min_warped_patch_contrast_range.max(0)).unwrap_or(6);
-    decode_cfg.warp_fallback_on_decode_fail = true;
-    decode_cfg.warp_fallback_on_low_contrast = true;
-    decode_cfg.warp_fallback_max_hamming_extra = u32::try_from(cfg.rescue_warp_fallback_max_hamming_extra.max(0)).unwrap_or(6);
-    decode_cfg.warp_fallback_border_slack = usize::try_from(cfg.rescue_warp_fallback_border_slack.max(0)).unwrap_or(12);
-    decode_cfg.warp_min_sample_scale = sample_scale.max(1);
-    decode_cfg.min_quad_side_px = cfg.rescue_min_quad_side_px.max(0.0) as f32;
-    decode_cfg.min_decode_score = -1.0;
-    decode_cfg.cell_decode.min_cell_means_contrast_range = cfg.rescue_min_cell_means_contrast_range.max(0.0) as f32;
-    decode_cfg.cell_decode.min_hamming_margin = 0;
-    decode_cfg.cell_decode.min_hamming_margin_min_dist = 0;
-    decode_cfg.cell_decode.min_hamming_margin_only_if_border_mismatch = false;
-    decode_cfg.cell_decode.min_bit_delta = cfg.rescue_min_bit_delta.max(0.0) as f32;
+    let decode_cfg = ArucoTagDecodeConfig {
+        min_warped_patch_contrast_range: u8::try_from(cfg.rescue_min_warped_patch_contrast_range.max(0)).unwrap_or(6),
+        warp_fallback_on_decode_fail: true,
+        warp_fallback_on_low_contrast: true,
+        warp_fallback_max_hamming_extra: u32::try_from(cfg.rescue_warp_fallback_max_hamming_extra.max(0)).unwrap_or(6),
+        warp_fallback_border_slack: usize::try_from(cfg.rescue_warp_fallback_border_slack.max(0)).unwrap_or(12),
+        warp_min_sample_scale: sample_scale.max(1),
+        min_quad_side_px: cfg.rescue_min_quad_side_px.max(0.0) as f32,
+        min_decode_score: -1.0,
+        cell_decode: crate::modules::aruco::tag::ArucoTagDecodeTuning {
+            min_cell_means_contrast_range: cfg.rescue_min_cell_means_contrast_range.max(0.0) as f32,
+            min_hamming_margin: 0,
+            min_hamming_margin_min_dist: 0,
+            min_hamming_margin_only_if_border_mismatch: false,
+            min_bit_delta: cfg.rescue_min_bit_delta.max(0.0) as f32,
+        },
+        ..ArucoTagDecodeConfig::default()
+    };
 
     Ok(decode_quads_with_config_no_bits(frame, quads, sample_scale, &family, &decode_cfg))
 }
@@ -500,9 +506,9 @@ fn cv_aruco_temporal_stabilize_detections(
             let shift = best_corner_alignment_shift(&prev.det.corners, &det.corners);
             let aligned = rotated_corners(&det.corners, shift);
             let mut mean_corner_dist = 0.0f64;
-            for i in 0..4usize {
-                let dx = aligned[i].x - prev.det.corners[i].x;
-                let dy = aligned[i].y - prev.det.corners[i].y;
+            for (aligned_corner, prev_corner) in aligned.iter().zip(prev.det.corners.iter()) {
+                let dx = aligned_corner.x - prev_corner.x;
+                let dy = aligned_corner.y - prev_corner.y;
                 mean_corner_dist += (dx * dx + dy * dy).sqrt();
             }
             mean_corner_dist *= 0.25;
@@ -599,8 +605,7 @@ fn cv_aruco_temporal_stabilize_detections(
         let rescue_cap = usize::try_from(cfg.rescue_max_quads.clamp(4, 512)).unwrap_or(64);
 
         // (quad, normalized_distance, area)
-        let mut candidates: Vec<(Quad, f64, f64)> = Vec::new();
-        candidates.reserve(quads.len());
+        let mut candidates: Vec<(Quad, f64, f64)> = Vec::with_capacity(quads.len());
 
         for quad in &quads {
             if min_quad_side > 0.0 && quad_min_side(quad) < min_quad_side {
@@ -627,7 +632,7 @@ fn cv_aruco_temporal_stabilize_detections(
                 }
             }
             if best_norm_dist.is_finite() {
-                candidates.push((quad.clone(), best_norm_dist, quad_area(quad)));
+                candidates.push((*quad, best_norm_dist, quad_area(quad)));
             }
         }
 
@@ -951,9 +956,9 @@ fn cv_aruco_temporal_smooth_detections(
             let shift = best_corner_alignment_shift(&prev.det.corners, &det.corners);
             let aligned = rotated_corners(&det.corners, shift);
             let mut mean_corner_dist = 0.0f64;
-            for i in 0..4usize {
-                let dx = aligned[i].x - prev.det.corners[i].x;
-                let dy = aligned[i].y - prev.det.corners[i].y;
+            for (aligned_corner, prev_corner) in aligned.iter().zip(prev.det.corners.iter()) {
+                let dx = aligned_corner.x - prev_corner.x;
+                let dy = aligned_corner.y - prev_corner.y;
                 mean_corner_dist += (dx * dx + dy * dy).sqrt();
             }
             mean_corner_dist *= 0.25;

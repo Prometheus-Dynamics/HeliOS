@@ -149,7 +149,7 @@ fn cv_otsu(frame: DynamicImage, exec_ctx: &ExecutionContext) -> Result<GrayImage
     let mask = crate::modules::image::luma::with_luma8_frame(&frame, |gray| {
         let sig = signature_8x8(gray);
         let can_reuse = state.last_signature_8x8.as_ref().map(|prev| signature_delta_norm(prev, &sig) <= MAX_SIG_DELTA).unwrap_or(false);
-        let periodic_refresh = (state.frame_idx % RECOMPUTE_INTERVAL) == 0;
+        let periodic_refresh = state.frame_idx.is_multiple_of(RECOMPUTE_INTERVAL);
         let threshold = if can_reuse && !periodic_refresh { state.last_threshold } else { crate::modules::image::binary::otsu_level_gray(gray) };
         state.last_threshold = threshold;
         match state.last_signature_8x8.as_mut() {
