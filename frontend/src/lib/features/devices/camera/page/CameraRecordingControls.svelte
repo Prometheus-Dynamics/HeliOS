@@ -468,9 +468,9 @@
 </script>
 
 <div class="flex flex-wrap items-center gap-3">
-  <div class="flex flex-nowrap items-center gap-3">
+  <div class="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap sm:gap-3">
     <select
-      class="select select-2xs h-8 w-56 max-w-full flex-none leading-none text-micro-tight uppercase tracking-[0.3em] text-surface-100"
+      class="select select-2xs h-8 w-full max-w-full flex-none leading-none text-micro-tight uppercase tracking-[0.3em] text-surface-100 sm:w-56"
       aria-label="Recording source"
       value={recordingSourceSelection}
       onchange={(event) => applyRecordingSelection((event.target as HTMLSelectElement).value)}
@@ -506,7 +506,7 @@
       {/if}
     </select>
   <button
-    class={`btn btn-2xs h-8 min-w-[8rem] flex-none uppercase tracking-[0.3em] font-semibold ${recordingLive ? 'preset-filled-error-500' : 'preset-filled-primary-500'}`}
+    class={`btn btn-2xs h-8 flex-none uppercase tracking-[0.3em] font-semibold ${recordingLive ? 'preset-filled-error-500' : 'preset-filled-primary-500'}`}
     type="button"
     disabled={!ctx.streamId || recordingBusy || snapshotBusy}
     onclick={takeSnapshot}
@@ -517,7 +517,7 @@
       {snapshotBusy ? 'Working…' : 'Snapshot'}
     </button>
   <button
-    class={`btn btn-2xs h-8 min-w-[6.5rem] flex-none uppercase tracking-[0.3em] font-semibold ${recordingLive ? 'preset-filled-error-500' : 'preset-filled-primary-500'}`}
+    class={`btn btn-2xs h-8 flex-none uppercase tracking-[0.3em] font-semibold ${recordingLive ? 'preset-filled-error-500' : 'preset-filled-primary-500'}`}
     type="button"
     disabled={!ctx.streamId || recordingBusy || snapshotBusy}
     onclick={toggleRecording}
@@ -530,7 +530,7 @@
   </div>
   {#if shadowRecorderSupported}
     <button
-      class="btn btn-2xs h-8 min-w-[6.5rem] uppercase tracking-[0.3em] border border-primary-500/40 bg-primary-500/10 text-primary-100 hover:bg-primary-500/20"
+      class="btn btn-2xs h-8 uppercase tracking-[0.3em] border border-primary-500/40 bg-primary-500/10 text-primary-100 hover:bg-primary-500/20"
       type="button"
       disabled={captureDisabled}
       title={captureDisabledTitle}
@@ -542,7 +542,7 @@
       5s
     </button>
     <button
-      class="btn btn-2xs h-8 min-w-[6.5rem] uppercase tracking-[0.3em] border border-primary-500/40 bg-primary-500/10 text-primary-100 hover:bg-primary-500/20"
+      class="btn btn-2xs h-8 uppercase tracking-[0.3em] border border-primary-500/40 bg-primary-500/10 text-primary-100 hover:bg-primary-500/20"
       type="button"
       disabled={captureDisabled}
       title={captureDisabledTitle}
@@ -554,7 +554,7 @@
       30s
     </button>
     <button
-      class="btn btn-2xs h-8 min-w-[6.5rem] uppercase tracking-[0.3em] border border-primary-500/40 bg-primary-500/10 text-primary-100 hover:bg-primary-500/20"
+      class="btn btn-2xs h-8 uppercase tracking-[0.3em] border border-primary-500/40 bg-primary-500/10 text-primary-100 hover:bg-primary-500/20"
       type="button"
       disabled={captureDisabled}
       title={captureDisabledTitle}
@@ -567,7 +567,7 @@
     </button>
   {/if}
   <button
-    class="btn btn-2xs h-8 min-w-[6.5rem] preset-tonal text-surface-100"
+    class="btn btn-2xs h-8 preset-tonal text-surface-100"
     type="button"
     aria-label="Recording settings"
     title="Recording settings"

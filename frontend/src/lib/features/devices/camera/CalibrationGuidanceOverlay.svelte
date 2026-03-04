@@ -116,7 +116,7 @@
     coverageSamples: 0
   });
 
-  const MIN_TAGS = 3;
+  const MIN_TAGS = 2;
   const TARGET_TAGS = 6;
   const MIN_AREA_RATIO = 0.003;
   const MAX_AREA_RATIO = 0.08;
@@ -126,12 +126,12 @@
   const MIN_PLAUSIBLE_SIDE_RATIO = 0.18;
   const CLOSE_EXTENT_RATIO = 0.12;
   const FAR_EXTENT_RATIO = 0.05;
-  const MIN_FRAME_COVERAGE = 0.25;
+  const MIN_FRAME_COVERAGE = 0.12;
   const EDGE_PAD_RATIO = 0.08;
   const TARGET_CLOSE = 1;
-  const TARGET_FAR = 2;
-  const TARGET_SKEW = 3;
-  const TARGET_CORNERS = 4;
+  const TARGET_FAR = 1;
+  const TARGET_SKEW = 1;
+  const TARGET_CORNERS = 2;
   let calibrationModePipelineUuid = $state('');
   let rawPipelineUuid = $state('');
   let streamCapabilitiesLoaded = false;
@@ -819,10 +819,10 @@
     ctx2d.fillText(chipText, chipX + chipPad * 1.1, chipY + chipH / 2);
 
     const needs = [
-      { label: `Closer ${captureStats.close}/${TARGET_CLOSE}`, missing: captureStats.close < TARGET_CLOSE },
-      { label: `Farther ${captureStats.far}/${TARGET_FAR}`, missing: captureStats.far < TARGET_FAR },
-      { label: `Skewed ${captureStats.skew}/${TARGET_SKEW}`, missing: captureStats.skew < TARGET_SKEW },
-      { label: `Corners ${captureStats.cornersUnique}/${TARGET_CORNERS}`, missing: captureStats.cornersUnique < TARGET_CORNERS }
+      { label: `Closer ${captureStats.close}/${TARGET_CLOSE}`, pending: captureStats.close < TARGET_CLOSE },
+      { label: `Farther ${captureStats.far}/${TARGET_FAR}`, pending: captureStats.far < TARGET_FAR },
+      { label: `Skewed ${captureStats.skew}/${TARGET_SKEW}`, pending: captureStats.skew < TARGET_SKEW },
+      { label: `Corners ${captureStats.cornersUnique}/${TARGET_CORNERS}`, pending: captureStats.cornersUnique < TARGET_CORNERS }
     ];
 
     const subPadX = Math.max(6, Math.round(content.width / 230));
@@ -839,9 +839,9 @@
       const x = Math.max(content.x + chipPad, content.x + content.width - w - chipPad);
       const y = nextY;
 
-      const fill = item.missing ? 'rgba(239, 68, 68, 0.8)' : 'rgba(34, 197, 94, 0.7)';
-      const stroke = item.missing ? 'rgba(255, 150, 150, 0.8)' : 'rgba(160, 255, 200, 0.8)';
-      const text = item.missing ? 'rgba(255,255,255,0.98)' : 'rgba(10,10,10,0.95)';
+      const fill = item.pending ? 'rgba(245, 158, 11, 0.78)' : 'rgba(34, 197, 94, 0.7)';
+      const stroke = item.pending ? 'rgba(255, 226, 140, 0.82)' : 'rgba(160, 255, 200, 0.8)';
+      const text = item.pending ? 'rgba(24, 24, 24, 0.96)' : 'rgba(10,10,10,0.95)';
 
       ctx2d.fillStyle = fill;
       ctx2d.strokeStyle = stroke;

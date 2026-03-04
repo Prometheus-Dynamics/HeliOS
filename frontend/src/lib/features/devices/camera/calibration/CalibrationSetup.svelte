@@ -127,7 +127,7 @@
       </div>
     </div>
 
-    <div class={`mt-4 grid gap-3 ${calibrationTool === 'lens' ? 'lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]' : ''}`}>
+    <div class={`mt-4 grid gap-3 ${calibrationTool === 'lens' ? 'xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]' : ''}`}>
       <div class="rounded border border-surface-800/60 bg-surface-950/10 p-3">
         <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
           <div class="min-w-0">
@@ -224,7 +224,7 @@
           {#if !streamUuid}
             <p class="mt-2 text-2xs text-surface-500">Waiting for stream UUID…</p>
           {:else if guidedModeEnabled}
-            <p class="mt-2 text-2xs text-surface-500">Use snapshots to build coverage guidance.</p>
+            <p class="mt-2 text-2xs text-surface-500">Use snapshots to build guidance coverage. Missing targets are recommendations, not hard blockers.</p>
           {/if}
         </div>
       {/if}
@@ -236,7 +236,7 @@
       <div class="min-w-0">
         <p class="text-2xs uppercase tracking-[0.3em] text-surface-500">Snapshots</p>
         <p class="mt-1 text-sm font-semibold text-surface-100">Capture & select images</p>
-        <p class="mt-1 text-xs text-surface-500">Get 8–15 sharp shots at different angles/distances; avoid motion blur and glare.</p>
+        <p class="mt-1 text-xs text-surface-500">3+ snapshots can solve; 8–15 sharp shots at different angles/distances are recommended.</p>
         <p class="mt-2 text-xs text-surface-500">
           <span class="text-surface-200">{visibleSnapshots.length}</span> shown ·
           {#if calibrationTool === 'lens'}
