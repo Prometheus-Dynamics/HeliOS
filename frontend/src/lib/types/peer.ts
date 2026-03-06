@@ -127,6 +127,76 @@ export interface PeerProbeInput {
   timeoutMs?: number | null;
 }
 
+export interface PeerStreamOutputSummary {
+  outputKey: string;
+  dataType?: unknown | null;
+}
+
+export interface PeerRemotePoseVector {
+  x: number;
+  y: number;
+  z: number;
+}
+
+export interface PeerRemotePoseRotation {
+  roll: number;
+  pitch: number;
+  yaw: number;
+}
+
+export interface PeerRemoteRigPose {
+  translation: PeerRemotePoseVector;
+  rotation: PeerRemotePoseRotation;
+  updatedAt?: string | null;
+}
+
+export interface PeerRemoteStreamSummary {
+  peerId: string;
+  peerAlias?: string | null;
+  peerKind: PeerIntegrationKind;
+  streamRef: string;
+  remoteStreamId: string;
+  streamAlias?: string | null;
+  displayName?: string | null;
+  backend?: string | null;
+  state?: string | null;
+  activePipelineId?: string | null;
+  activePipelineOutput?: string | null;
+  cameraUid?: string | null;
+  pose?: PeerRemoteRigPose | null;
+  outputs: PeerStreamOutputSummary[];
+  imuOutputKeys: string[];
+  proxyPreviewUrl: string;
+  proxyFrameUrl: string;
+  proxyFormatUrl: string;
+}
+
+export interface PeerResourceError {
+  peerId: string;
+  peerAlias?: string | null;
+  error: string;
+}
+
+export interface PeerRemoteStreamsPayload {
+  streams: PeerRemoteStreamSummary[];
+  errors: PeerResourceError[];
+  fetchedAt: string;
+}
+
+export interface PeerPipelineSyncItem {
+  remotePipelineId: string;
+  localPipelineId: string;
+  name?: string | null;
+  updated: boolean;
+}
+
+export interface PeerPipelineSyncResponse {
+  peerId: string;
+  peerAlias?: string | null;
+  synced: PeerPipelineSyncItem[];
+  errors: string[];
+}
+
 export interface PeerSummary {
   id: string;
   alias: string | null;

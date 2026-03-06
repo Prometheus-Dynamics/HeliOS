@@ -362,6 +362,7 @@ mod tests {
                 name: "Default".to_string(),
                 tag_size_m: None,
                 allowed_tag_ids: Vec::new(),
+                excluded_tag_ids: Vec::new(),
                 field_map_id: None,
                 field_origin: helios_engine::localization::config::LocalizationFieldOriginConfig::default(),
                 snap_z_to_ground: false,

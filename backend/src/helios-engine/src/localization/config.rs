@@ -21,6 +21,8 @@ pub struct LocalizationProfile {
     #[serde(default)]
     pub allowed_tag_ids: Vec<u32>,
     #[serde(default)]
+    pub excluded_tag_ids: Vec<u32>,
+    #[serde(default)]
     pub field_map_id: Option<String>,
     #[serde(default)]
     pub field_origin: LocalizationFieldOriginConfig,
@@ -316,6 +318,7 @@ impl Default for LocalizationConfig {
             name: "Default".to_string(),
             tag_size_m: None,
             allowed_tag_ids: Vec::new(),
+            excluded_tag_ids: Vec::new(),
             field_map_id: None,
             field_origin: LocalizationFieldOriginConfig::default(),
             snap_z_to_ground: false,
@@ -338,6 +341,8 @@ pub fn normalize_config(mut config: LocalizationConfig) -> LocalizationConfig {
         if profile.solvers.is_empty() {
             profile.solvers = default_solver_configs();
         }
+        profile.allowed_tag_ids = normalize_tag_id_list(std::mem::take(&mut profile.allowed_tag_ids));
+        profile.excluded_tag_ids = normalize_tag_id_list(std::mem::take(&mut profile.excluded_tag_ids));
         let has_field_map = profile.field_map_id.as_deref().map(str::trim).is_some_and(|value| !value.is_empty());
         let enabled_source_refs =
             profile.sources.iter().filter(|source| source.enabled).map(|source| (source.id.trim().to_string(), source.camera_uid.trim().to_ascii_lowercase())).collect::<Vec<_>>();
@@ -351,6 +356,13 @@ pub fn normalize_config(mut config: LocalizationConfig) -> LocalizationConfig {
         }
     }
     config
+}
+
+fn normalize_tag_id_list(values: Vec<u32>) -> Vec<u32> {
+    let mut out = values;
+    out.sort_unstable();
+    out.dedup();
+    out
 }
 
 fn normalize_solver_source_ids(solver: &mut LocalizationSolverConfig) {
@@ -1088,6 +1100,7 @@ mod tests {
             name: "p".to_string(),
             tag_size_m: None,
             allowed_tag_ids: vec![],
+            excluded_tag_ids: vec![],
             field_map_id: Some("map".to_string()),
             field_origin: LocalizationFieldOriginConfig::default(),
             snap_z_to_ground: false,
@@ -1136,5 +1149,17 @@ mod tests {
         let spaces = &normalized.profiles[0].solvers[0].output_spaces;
         assert!(spaces.contains(&LocalizationPoseSpace::RobotInField));
         assert!(spaces.contains(&LocalizationPoseSpace::CameraInField));
+    }
+
+    #[test]
+    fn normalize_config_sorts_and_deduplicates_tag_filters() {
+        let mut profile = base_profile();
+        profile.allowed_tag_ids = vec![9, 2, 9, 3];
+        profile.excluded_tag_ids = vec![4, 1, 4, 2];
+
+        let normalized = normalize_config(LocalizationConfig { active_profile_id: Some(profile.id.clone()), profiles: vec![profile] });
+        let normalized_profile = &normalized.profiles[0];
+        assert_eq!(normalized_profile.allowed_tag_ids, vec![2, 3, 9]);
+        assert_eq!(normalized_profile.excluded_tag_ids, vec![1, 2, 4]);
     }
 }

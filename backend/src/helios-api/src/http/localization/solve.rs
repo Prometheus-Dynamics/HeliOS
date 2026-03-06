@@ -4,7 +4,7 @@ use axum::{
 };
 use nalgebra::{UnitQuaternion, Vector3};
 use serde::Deserialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -211,12 +211,8 @@ pub(crate) async fn inject_imu_leveling_rig_pose(state: &AppState, profile: &hel
     // as an explicit configuration term and compose it here.
     // Only apply IMU leveling when the profile explicitly includes an IMU source.
     // This keeps "stream only" profiles deterministic and avoids surprising users.
-    let has_imu_source = profile.sources.iter().any(|source| {
-        if !source.enabled {
-            return false;
-        }
-        source_looks_like_imu(source)
-    });
+    let enabled_sources: Vec<&LocalizationSourceConfig> = profile.sources.iter().filter(|source| source.enabled).collect();
+    let has_imu_source = enabled_sources.iter().any(|source| source_looks_like_imu(source));
     if !has_imu_source {
         return;
     }
@@ -224,13 +220,55 @@ pub(crate) async fn inject_imu_leveling_rig_pose(state: &AppState, profile: &hel
     // If the profile already carries an explicit IMU pose/orientation source, do not also force
     // a camera rig leveling override from raw accel. Doing both applies two independent IMU
     // rotations and causes yaw/roll/pitch frame drift.
-    let has_explicit_imu_pose_source = profile.sources.iter().any(|source| source.enabled && source_looks_like_imu_pose(source));
+    let has_explicit_imu_pose_source = enabled_sources.iter().any(|source| source_looks_like_imu_pose(source));
     if has_explicit_imu_pose_source {
         return;
     }
 
-    let camera_uids: Vec<String> =
-        profile.sources.iter().filter(|source| source.enabled).map(|source| source.camera_uid.trim()).filter(|uid| !uid.is_empty() && *uid != "imu").map(|uid| uid.to_string()).collect();
+    let mut camera_uid_set = BTreeSet::<String>::new();
+    for imu_source in enabled_sources.iter().copied().filter(|source| source_looks_like_imu(source)) {
+        let imu_camera_uid = imu_source.camera_uid.trim();
+        if !imu_camera_uid.is_empty() && !imu_camera_uid.eq_ignore_ascii_case("imu") && !imu_camera_uid.starts_with("peer:") {
+            camera_uid_set.insert(imu_camera_uid.to_string());
+            continue;
+        }
+
+        let imu_stream_id = imu_source.stream_id.trim();
+        if imu_stream_id.is_empty() {
+            continue;
+        }
+        for source in enabled_sources.iter().copied().filter(|source| !source_looks_like_imu(source)) {
+            if source.stream_id.trim() != imu_stream_id {
+                continue;
+            }
+            let camera_uid = source.camera_uid.trim();
+            if camera_uid.is_empty() || camera_uid.eq_ignore_ascii_case("imu") || camera_uid.starts_with("peer:") {
+                continue;
+            }
+            camera_uid_set.insert(camera_uid.to_string());
+        }
+    }
+
+    // If the IMU source is global and only one non-IMU camera is active, bind leveling to that one.
+    if camera_uid_set.is_empty() {
+        let non_imu_camera_uids = enabled_sources
+            .iter()
+            .copied()
+            .filter(|source| !source_looks_like_imu(source))
+            .filter_map(|source| {
+                let camera_uid = source.camera_uid.trim();
+                if camera_uid.is_empty() || camera_uid.eq_ignore_ascii_case("imu") || camera_uid.starts_with("peer:") {
+                    return None;
+                }
+                Some(camera_uid.to_string())
+            })
+            .collect::<BTreeSet<_>>();
+        if non_imu_camera_uids.len() == 1 {
+            camera_uid_set = non_imu_camera_uids;
+        }
+    }
+
+    let camera_uids: Vec<String> = camera_uid_set.into_iter().collect();
     if camera_uids.is_empty() {
         return;
     }

@@ -40,7 +40,7 @@ mode = 420
 
 [[files]]
 dst = "/etc/systemd/network/11-usb-gadget-slaves.network"
-content = "[Match]\nName=usb1 end0 end1\n\n[Network]\nBridge=usbbr0\nLinkLocalAddressing=no\nConfigureWithoutCarrier=yes\n"
+content = "[Match]\nName=usb1\n\n[Network]\nBridge=usbbr0\nLinkLocalAddressing=no\nConfigureWithoutCarrier=yes\n"
 mode = 420
 
 [[files]]
@@ -50,7 +50,7 @@ mode = 420
 
 [[files]]
 dst = "/etc/systemd/network/10-eth0.network"
-content = "[Match]\nName=eth0\n\n[Network]\nDHCP=yes\n"
+content = "[Match]\nName=end0 end1 eth0 eth1\n\n[Network]\nDHCP=yes\n"
 mode = 420
 
 [[files]]

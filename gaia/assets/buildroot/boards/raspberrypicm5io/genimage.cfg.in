@@ -10,6 +10,8 @@ image boot.vfat {
 
 image sdcard.img {
 	hdimage {
+		# Required for stable root=PARTUUID boot across CM5 variants.
+		disk-signature = 0x48454c49
 	}
 
 	partition boot {

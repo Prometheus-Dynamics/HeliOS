@@ -162,6 +162,9 @@
     tagSizeInput?: string;
     tagSizeError?: string | null;
     onCommitTagSize?: () => void;
+    excludedTagIdsInput?: string;
+    excludedTagIdsError?: string | null;
+    onCommitExcludedTagIds?: () => void;
     fieldOriginCustom?: LocalizationCustomFieldOrigin | null;
     onSetFieldOriginMode?: (mode: LocalizationFieldOriginMode) => void;
     onSetFieldOriginCustomNumeric?: (field: 'x' | 'z' | 'yawDeg', value: string) => void;
@@ -319,6 +322,9 @@
     tagSizeInput = $bindable(''),
     tagSizeError = null,
     onCommitTagSize,
+    excludedTagIdsInput = $bindable(''),
+    excludedTagIdsError = null,
+    onCommitExcludedTagIds,
     fieldOriginCustom = { x: 0, z: 0, yawDeg: 0 },
     onSetFieldOriginMode,
     onSetFieldOriginCustomNumeric,
@@ -1063,6 +1069,9 @@
       bind:tagSizeInput={tagSizeInput}
       tagSizeError={tagSizeError}
       onCommitTagSize={onCommitTagSize}
+      bind:excludedTagIdsInput={excludedTagIdsInput}
+      excludedTagIdsError={excludedTagIdsError}
+      onCommitExcludedTagIds={onCommitExcludedTagIds}
       fieldOriginMode={fieldOriginMode}
       fieldOriginCustom={fieldOriginCustom}
       onSetFieldOriginMode={onSetFieldOriginMode}

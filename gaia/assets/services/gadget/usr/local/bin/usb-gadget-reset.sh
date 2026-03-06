@@ -118,8 +118,8 @@ if ! echo "$UDC" > "$G/UDC" 2>/dev/null; then
   echo "$UDC" > "$G/UDC" 2>/dev/null || true
 fi
 
-# Best-effort: bring interfaces up; do not fail reset if ip is missing.
-for ifc in usbbr0 usb0 usb1 end0 end1; do
+# Best-effort: bring gadget-facing interfaces up; do not fail reset if ip is missing.
+for ifc in usbbr0 usb0 usb1; do
   ip link set dev "$ifc" up 2>/dev/null || true
 done
 

@@ -475,6 +475,10 @@
       if (!peer || typeof peer !== 'object') continue;
       const labelBase = String(peer.alias ?? peer.id ?? 'Peer').trim() || 'Peer';
       const integration: any = (peer as any).integration ?? {};
+      const integrationKind = String(integration.kind ?? '').trim().toLowerCase();
+      if (integrationKind === 'helios') {
+        continue;
+      }
       const urls = [
         ...(Array.isArray(integration.streamUrls) ? integration.streamUrls : []),
         ...(Array.isArray(integration.stream_urls) ? integration.stream_urls : []),

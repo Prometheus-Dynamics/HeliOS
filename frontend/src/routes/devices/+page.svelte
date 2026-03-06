@@ -514,10 +514,11 @@
   }
 
   function sessionRefFromCamera(camera: CameraRow): string | null {
+    const id = camera.captureSessionId?.toString().trim() ?? '';
+    if (id.startsWith('peer:')) return null;
     const alias = camera.captureSessionAlias?.trim();
     if (alias) return alias;
-    const id = camera.captureSessionId?.toString().trim();
-    return id && id.length ? id : null;
+    return id.length ? id : null;
   }
 
   async function unregisterCameraStream(camera: CameraRow): Promise<void> {

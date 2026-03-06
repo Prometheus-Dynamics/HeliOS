@@ -120,6 +120,9 @@ export function cameraLink(cam: CameraCard): string {
     normalizeKey(cam.driverCameraId) ??
     normalizeKey(cam.hardwareId) ??
     'unknown';
+  if (ref.startsWith('peer:')) {
+    return '/peers';
+  }
   return `/devices/${encodeURIComponent(ref)}`;
 }
 

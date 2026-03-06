@@ -64,7 +64,7 @@ pub(crate) async fn list_peer_sources(peer: &PeerInfo) -> Vec<LocalizationPipeli
                     if !allow_all && !allowed_camera_names.contains(&camera.name) {
                         continue;
                     }
-                    let camera_uid = format!("{}:{}", peer.id, camera.name);
+                    let camera_uid = format!("peer:{}:{}", peer.id, camera.name);
                     let camera_path = format!("{host}:5810");
                     sources.push(build_peer_source(
                         peer,
@@ -216,8 +216,20 @@ async fn fetch_helios_output(peer: &PeerInfo, stream_suffix: Option<&str>, outpu
         return Err("peer api_base_url missing".to_string());
     }
 
-    let stream_id = if let Some(camera) = stream_suffix { format!("peer:{}:{}", peer.id, camera) } else { format!("peer:{}", peer.id) };
-    let path = format!("/localization/streams/{stream_id}/outputs/{output_key}");
+    let remote_stream_id = stream_suffix
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            if let Some(scoped) = value.strip_prefix("peer:") {
+                let (scoped_peer_id, scoped_stream) = parse_peer_stream_id(scoped);
+                if scoped_peer_id == peer.id {
+                    return scoped_stream.unwrap_or(scoped_peer_id);
+                }
+            }
+            value.to_string()
+        })
+        .ok_or_else(|| "peer stream id missing".to_string())?;
+    let path = format!("/localization/streams/{remote_stream_id}/outputs/{output_key}");
     let url = build_peer_url(base, &path)?;
 
     let resp = PEER_HTTP.get(url).header(ACCEPT, "application/json").timeout(std::time::Duration::from_millis(1500)).send().await.map_err(|e| format!("helios request failed: {e}"))?;
@@ -321,10 +333,20 @@ fn map_helios_sources(peer: &PeerInfo, sources: Vec<LocalizationPipelineSource>)
     sources
         .into_iter()
         .map(|mut source| {
-            source.stream_id = format!("peer:{}", source.stream_id);
-            source.id = format!("peer:{}", source.id);
+            let remote_stream_id = source.stream_id.clone();
+            source.stream_id = format!("peer:{}:{remote_stream_id}", peer.id);
+            source.id = format!("peer:{}:{}", peer.id, source.id);
             source.stream_label = format!("{} · {}", peer_label(peer), source.stream_label);
             source.pipeline_label = format!("{} (peer)", source.pipeline_label);
+            let scoped_camera_uid = source.camera_uid.trim().to_string();
+            let scoped_camera_uid = if scoped_camera_uid.is_empty() {
+                format!("peer:{}:{remote_stream_id}", peer.id)
+            } else if scoped_camera_uid.starts_with("peer:") {
+                scoped_camera_uid
+            } else {
+                format!("peer:{}:{scoped_camera_uid}", peer.id)
+            };
+            source.camera_uid = scoped_camera_uid;
             source
         })
         .collect()
@@ -342,12 +364,18 @@ struct PeerSourceArgs<'a> {
 
 fn build_peer_source(peer: &PeerInfo, args: PeerSourceArgs<'_>) -> LocalizationPipelineSource {
     let stream_id = if let Some(stream_suffix) = args.stream_suffix { format!("peer:{}:{}", peer.id, stream_suffix) } else { format!("peer:{}", peer.id) };
+    let scoped_camera_uid = args
+        .camera_uid
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| if value.starts_with("peer:") { value.to_string() } else { format!("peer:{}:{value}", peer.id) })
+        .unwrap_or_else(|| format!("peer:{}", peer.id));
 
     LocalizationPipelineSource {
         id: format!("{stream_id}:{}", args.output_key),
         stream_id,
         stream_label: format!("{}{}", peer_label(peer), args.label.map(|value| format!(" · {value}")).unwrap_or_default()),
-        camera_uid: args.camera_uid.map(|value| value.to_string()).unwrap_or_else(|| peer.id.clone()),
+        camera_uid: scoped_camera_uid,
         camera_path: args.camera_path.map(|value| value.to_string()).unwrap_or_else(|| peer.api_base_url.clone()),
         pipeline_id: "peer".to_string(),
         pipeline_label: args.pipeline_label.to_string(),
@@ -361,8 +389,13 @@ fn peer_label(peer: &PeerInfo) -> String {
 }
 
 fn build_peer_url(base: &str, path: &str) -> Result<String, String> {
-    let url = Url::parse(base).map_err(|err| format!("invalid url: {err}"))?;
-    url.join(path).map(|url| url.to_string()).map_err(|err| format!("invalid url: {err}"))
+    let base = base.trim().trim_end_matches('/');
+    if base.is_empty() {
+        return Err("peer api_base_url missing".to_string());
+    }
+    let path = if path.starts_with('/') { path.to_string() } else { format!("/{path}") };
+    let candidate = if base.ends_with("/v1") { format!("{base}{path}") } else { format!("{base}/v1{path}") };
+    Url::parse(&candidate).map(|url| url.to_string()).map_err(|err| format!("invalid url: {err}"))
 }
 
 #[derive(Debug, Clone)]

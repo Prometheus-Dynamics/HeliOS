@@ -64,6 +64,9 @@
     tagSizeInput?: string;
     tagSizeError?: string | null;
     onCommitTagSize?: () => void;
+    excludedTagIdsInput?: string;
+    excludedTagIdsError?: string | null;
+    onCommitExcludedTagIds?: () => void;
     fieldOriginMode?: LocalizationFieldOriginMode;
     fieldOriginCustom?: LocalizationCustomFieldOrigin | null;
     onSetFieldOriginMode?: (mode: LocalizationFieldOriginMode) => void;
@@ -141,6 +144,9 @@
     tagSizeInput = $bindable(''),
     tagSizeError = null,
     onCommitTagSize,
+    excludedTagIdsInput = $bindable(''),
+    excludedTagIdsError = null,
+    onCommitExcludedTagIds,
     fieldOriginMode = 'blue',
     fieldOriginCustom = { x: 0, z: 0, yawDeg: 0 },
     onSetFieldOriginMode,
@@ -1275,6 +1281,21 @@
                     <p class="text-micro text-rose-200">{tagSizeError}</p>
                   {/if}
                   <p class="text-micro text-surface-500">Required for pose solving; field map sizes are ignored.</p>
+                </div>
+
+                <div class="grid gap-2">
+                  <p class="text-micro-tight uppercase tracking-[0.35em] text-surface-500">Excluded tag IDs</p>
+                  <input
+                    class="w-full rounded border border-surface-800 bg-surface-950/70 px-3 py-2 text-xs text-surface-100 placeholder:text-surface-600 focus:border-primary-400 focus:outline-none"
+                    placeholder="e.g. 1, 2 5"
+                    bind:value={excludedTagIdsInput}
+                    onchange={onCommitExcludedTagIds}
+                    disabled={!hasActiveProfile || localizationConfigLoading}
+                  />
+                  {#if excludedTagIdsError}
+                    <p class="text-micro text-rose-200">{excludedTagIdsError}</p>
+                  {/if}
+                  <p class="text-micro text-surface-500">Comma/space-separated IDs to ignore during localization solve.</p>
                 </div>
 
                 <div class="grid gap-2">

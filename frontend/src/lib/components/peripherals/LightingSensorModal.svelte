@@ -225,11 +225,32 @@
         !lightingTemplates.some((template) => normalizedAnimationKey(template.name) === normalizedAnimationKey(entry.name))
     )
   );
+  const templateAnimationNameOptions = $derived(
+    (() => {
+      const names = new Set<string>();
+      for (const template of lightingTemplates) {
+        if (template.name.trim().length > 0) {
+          names.add(template.name.trim());
+        }
+      }
+      for (const entry of fallbackTemplateAnimations) {
+        if (entry.name.trim().length > 0) {
+          names.add(entry.name.trim());
+        }
+      }
+      return [...names].sort((a, b) => a.localeCompare(b));
+    })()
+  );
   const defaultAnimationNameOptions = $derived(
     (() => {
       const names = new Set<string>();
       for (const entry of savedAnimations) {
-        names.add(entry.name);
+        if (entry.name.trim().length > 0) {
+          names.add(entry.name.trim());
+        }
+      }
+      for (const templateName of templateAnimationNameOptions) {
+        names.add(templateName);
       }
       const configured = form.default_animations ?? {};
       for (const value of Object.values(configured)) {
@@ -1465,6 +1486,58 @@
     }
   }
 
+  async function ensureDefaultAnimationEntries(defaultAnimations: Record<string, string>): Promise<void> {
+    const requiredKeys = new Set<string>();
+    for (const animationName of Object.values(defaultAnimations)) {
+      const key = normalizedAnimationKey(animationName);
+      if (key.length > 0) {
+        requiredKeys.add(key);
+      }
+    }
+    if (requiredKeys.size === 0) {
+      return;
+    }
+
+    const savedKeys = new Set<string>();
+    for (const entry of savedAnimations) {
+      const key = normalizedAnimationKey(entry.name);
+      if (key.length > 0) {
+        savedKeys.add(key);
+      }
+    }
+
+    const templateByNameKey = new Map<string, LightingAnimationTemplateSummary>();
+    for (const template of lightingTemplates) {
+      const key = normalizedAnimationKey(template.name);
+      if (key.length > 0 && !templateByNameKey.has(key)) {
+        templateByNameKey.set(key, template);
+      }
+    }
+
+    let importedTemplate = false;
+    for (const key of requiredKeys) {
+      if (savedKeys.has(key)) {
+        continue;
+      }
+      const template = templateByNameKey.get(key);
+      if (!template) {
+        continue;
+      }
+      const templateDoc = await fetchLightingTemplate(apiFetch, template.template_id);
+      const saveBody = buildSaveBodyFromImportedEntry(templateToSavedAnimation(templateDoc), templateDoc.name);
+      if (!saveBody) {
+        continue;
+      }
+      await saveLightingAnimation(apiFetch, saveBody);
+      savedKeys.add(key);
+      importedTemplate = true;
+    }
+
+    if (importedTemplate) {
+      await loadSavedAnimations();
+    }
+  }
+
   function coerceInt(value: number | string): number {
     const num = typeof value === 'string' ? Number(value) : value;
     return Number.isFinite(num) ? Math.trunc(num) : 0;
@@ -1561,6 +1634,7 @@
     };
 
     try {
+      await ensureDefaultAnimationEntries(defaultAnimations);
       await saveLightingConfig(deviceSettingsStore, payload);
       status = `Saved at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
       onRefresh();

@@ -97,12 +97,17 @@ fn infer_tag_size_from_field_map(field_map: Option<&FieldMapDocument>) -> Option
 }
 
 fn apply_profile_tag_filter(profile: &LocalizationProfile, samples: &mut [SourceSample]) {
-    if profile.allowed_tag_ids.is_empty() {
+    if profile.allowed_tag_ids.is_empty() && profile.excluded_tag_ids.is_empty() {
         return;
     }
     let allowed = profile.allowed_tag_ids.iter().copied().collect::<HashSet<_>>();
+    let excluded = profile.excluded_tag_ids.iter().copied().collect::<HashSet<_>>();
     for sample in samples {
-        sample.detections.retain(|detection| allowed.contains(&detection.tag_id));
+        sample.detections.retain(|detection| {
+            let tag_id = detection.tag_id;
+            let allowed_match = allowed.is_empty() || allowed.contains(&tag_id);
+            allowed_match && !excluded.contains(&tag_id)
+        });
     }
 }
 
@@ -596,17 +601,23 @@ fn marker_map_from_field_map(doc: &FieldMapDocument) -> MarkerMap {
             let quaternion_is_finite = quaternion.x.is_finite() && quaternion.y.is_finite() && quaternion.z.is_finite() && quaternion.w.is_finite();
             let quaternion_is_identity = quaternion_is_finite && (quaternion.x.abs() + quaternion.y.abs() + quaternion.z.abs() <= 1e-9) && ((quaternion.w - 1.0).abs() <= 1e-9);
 
-            let rotation_from_quaternion = if quaternion_is_finite {
+            let (rotation_from_quaternion, heading_ambiguous_from_quaternion) = if quaternion_is_finite {
                 let norm_sq = quaternion.x * quaternion.x + quaternion.y * quaternion.y + quaternion.z * quaternion.z + quaternion.w * quaternion.w;
                 if norm_sq > f64::EPSILON {
                     let q = UnitQuaternion::new_normalize(Quaternion::new(quaternion.w, quaternion.x, quaternion.y, quaternion.z));
                     let (roll, pitch, yaw) = q.euler_angles();
-                    Some(Rotation3 { roll, pitch, yaw })
+
+                    // `headingDeg` only captures horizontal heading of the tag normal.
+                    // When the normal is close to vertical, heading becomes unstable and can
+                    // collapse non-coplanar orientations into yaw-only results.
+                    let normal = q.transform_vector(&nalgebra::Vector3::new(1.0, 0.0, 0.0));
+                    let horizontal_norm = (normal.x * normal.x + normal.z * normal.z).sqrt();
+                    (Some(Rotation3 { roll, pitch, yaw }), horizontal_norm < 0.20)
                 } else {
-                    None
+                    (None, false)
                 }
             } else {
-                None
+                (None, false)
             };
             let heading_rad = marker.heading_deg.to_radians();
             let rotation_from_heading = if marker.heading_deg.is_finite() {
@@ -626,7 +637,7 @@ fn marker_map_from_field_map(doc: &FieldMapDocument) -> MarkerMap {
             // Some maps contain mixed data: a subset of markers have calibrated quaternions while
             // others are left at identity with a meaningful heading. For identity quaternions, let
             // heading win to avoid 90deg side-of-tag errors on those markers.
-            let prefer_heading = heading_has_signal && (prefer_heading_for_source || quaternion_is_identity);
+            let prefer_heading = if prefer_heading_for_source { heading_has_signal && !heading_ambiguous_from_quaternion } else { heading_has_signal && quaternion_is_identity };
             let rotation = if prefer_heading { rotation_from_heading.or(rotation_from_quaternion) } else { rotation_from_quaternion.or(rotation_from_heading) };
             MarkerDefinition { id: marker.id, translation: Translation3 { x: marker.position[0], y: marker.position[1], z: marker.position[2] }, rotation }
         })
@@ -676,6 +687,67 @@ mod tests {
         d.abs()
     }
 
+    fn source_sample_with_tag_ids(tag_ids: &[u32]) -> SourceSample {
+        SourceSample {
+            source: LocalizationSourceConfig {
+                id: "src0".to_string(),
+                stream_id: "stream0".to_string(),
+                output_key: "tag_poses".to_string(),
+                camera_uid: "cam0".to_string(),
+                pose_space: None,
+                input_key: None,
+                enabled: true,
+                weight: 1.0,
+            },
+            detections: tag_ids
+                .iter()
+                .copied()
+                .map(|tag_id| crate::localization::sources::LocalizationDetection {
+                    source_id: "src0".to_string(),
+                    camera_uid: "cam0".to_string(),
+                    tag_id,
+                    camera_from_tag: PoseTransform { translation: nalgebra::Vector3::zeros(), rotation: UnitQuaternion::identity() },
+                    tag_size: None,
+                    code_rotation: None,
+                    tag_bits: None,
+                    weight: 1.0,
+                    quality: 1.0,
+                })
+                .collect(),
+            pose: None,
+            poll_ms: 0.0,
+            tag_size: None,
+            error: None,
+        }
+    }
+
+    #[test]
+    fn tag_filter_applies_allowed_and_excluded_lists() {
+        let profile = LocalizationProfile {
+            id: "p_filter".to_string(),
+            name: "p".to_string(),
+            tag_size_m: None,
+            allowed_tag_ids: vec![1, 2, 3],
+            excluded_tag_ids: vec![2],
+            field_map_id: None,
+            field_origin: crate::localization::config::LocalizationFieldOriginConfig::default(),
+            snap_z_to_ground: false,
+            snap_roll_to_ground: false,
+            snap_pitch_to_ground: false,
+            pipeline_template_id: None,
+            color: None,
+            view_enabled: true,
+            temporal_stabilization: crate::localization::config::LocalizationTemporalStabilizationConfig::default(),
+            sources: vec![],
+            solvers: vec![],
+        };
+
+        let mut samples = vec![source_sample_with_tag_ids(&[1, 2, 3, 4])];
+        apply_profile_tag_filter(&profile, &mut samples);
+        let retained = samples[0].detections.iter().map(|d| d.tag_id).collect::<Vec<_>>();
+        assert_eq!(retained, vec![1, 3]);
+    }
+
     #[test]
     fn snap_z_to_ground_clamps_field_height() {
         let profile = LocalizationProfile {
@@ -683,6 +755,7 @@ mod tests {
             name: "p".to_string(),
             tag_size_m: None,
             allowed_tag_ids: vec![],
+            excluded_tag_ids: vec![],
             field_map_id: None,
             field_origin: crate::localization::config::LocalizationFieldOriginConfig::default(),
             snap_z_to_ground: true,
@@ -730,6 +803,7 @@ mod tests {
             name: "p".to_string(),
             tag_size_m: None,
             allowed_tag_ids: vec![],
+            excluded_tag_ids: vec![],
             field_map_id: None,
             field_origin: crate::localization::config::LocalizationFieldOriginConfig::default(),
             snap_z_to_ground: false,
@@ -834,6 +908,38 @@ mod tests {
     }
 
     #[test]
+    fn marker_map_from_field_map_preserves_tilted_quaternion_for_limelight_maps() {
+        use crate::localization::maps::{FieldMapDocument, FieldMapMarker, FieldMapSource, FieldQuaternion};
+
+        let doc = FieldMapDocument {
+            schema_version: 1,
+            id: "map".to_string(),
+            name: "map".to_string(),
+            width_m: 8.0,
+            depth_m: 16.0,
+            markers: vec![FieldMapMarker {
+                id: 3,
+                family: "36h11".to_string(),
+                size_m: 0.165,
+                position: [0.0, 0.0, 0.0],
+                quaternion: FieldQuaternion { x: 0.0, y: 0.0, z: std::f64::consts::FRAC_1_SQRT_2, w: std::f64::consts::FRAC_1_SQRT_2 },
+                heading_deg: 0.0,
+                tag_bits: None,
+                unique: true,
+            }],
+            source: FieldMapSource::LimelightFmap { original_file_name: None, map_type: None },
+            overlay: None,
+        };
+
+        let map = marker_map_from_field_map(&doc);
+        let rotation = map.markers[0].rotation.expect("rotation");
+        let q = UnitQuaternion::from_euler_angles(rotation.roll, rotation.pitch, rotation.yaw);
+        let normal = q.transform_vector(&nalgebra::Vector3::new(1.0, 0.0, 0.0));
+        let horizontal_norm = (normal.x * normal.x + normal.z * normal.z).sqrt();
+        assert!(horizontal_norm < 0.20, "tilted Limelight tags should keep quaternion tilt instead of yaw-only heading");
+    }
+
+    #[test]
     fn marker_map_from_field_map_uses_heading_for_identity_quat_in_mixed_maps() {
         use crate::localization::maps::{FieldMapDocument, FieldMapMarker, FieldMapSource, FieldQuaternion};
 
@@ -884,6 +990,7 @@ mod tests {
             name: "p".to_string(),
             tag_size_m: None,
             allowed_tag_ids: vec![],
+            excluded_tag_ids: vec![],
             field_map_id: None,
             field_origin: crate::localization::config::LocalizationFieldOriginConfig::default(),
             snap_z_to_ground: false,
@@ -936,6 +1043,7 @@ mod tests {
             name: "p".to_string(),
             tag_size_m: None,
             allowed_tag_ids: vec![],
+            excluded_tag_ids: vec![],
             field_map_id: None,
             field_origin: crate::localization::config::LocalizationFieldOriginConfig::default(),
             snap_z_to_ground: false,
@@ -990,6 +1098,7 @@ mod tests {
             name: "p".to_string(),
             tag_size_m: None,
             allowed_tag_ids: vec![],
+            excluded_tag_ids: vec![],
             field_map_id: None,
             field_origin: crate::localization::config::LocalizationFieldOriginConfig::default(),
             snap_z_to_ground: false,
@@ -1044,6 +1153,7 @@ mod tests {
             name: "p".to_string(),
             tag_size_m: None,
             allowed_tag_ids: vec![],
+            excluded_tag_ids: vec![],
             field_map_id: None,
             field_origin: crate::localization::config::LocalizationFieldOriginConfig::default(),
             snap_z_to_ground: false,
@@ -1092,6 +1202,7 @@ mod tests {
             name: "p".to_string(),
             tag_size_m: None,
             allowed_tag_ids: vec![],
+            excluded_tag_ids: vec![],
             field_map_id: None,
             field_origin: crate::localization::config::LocalizationFieldOriginConfig::default(),
             snap_z_to_ground: false,
@@ -1151,6 +1262,7 @@ mod tests {
             name: "p".to_string(),
             tag_size_m: None,
             allowed_tag_ids: vec![],
+            excluded_tag_ids: vec![],
             field_map_id: None,
             field_origin: crate::localization::config::LocalizationFieldOriginConfig::default(),
             snap_z_to_ground: false,
@@ -1209,6 +1321,7 @@ mod tests {
             name: "p".to_string(),
             tag_size_m: None,
             allowed_tag_ids: vec![],
+            excluded_tag_ids: vec![],
             field_map_id: None,
             field_origin: crate::localization::config::LocalizationFieldOriginConfig::default(),
             snap_z_to_ground: false,

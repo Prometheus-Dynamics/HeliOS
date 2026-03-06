@@ -652,15 +652,15 @@ if [[ "$UPLOAD" == "1" ]]; then
       for f in "${files[@]}"; do
         printf ' %q' "$f"
       done
-      printf ' | ssh %q %q\n' "$SSH_TARGET" "tar --warning=no-timestamp --no-same-owner -xf - -C \"$remote_dir\""
+      printf ' | ssh %q %q\n' "$SSH_TARGET" "tar -x -o -f - -C \"$remote_dir\""
       return 0
     fi
     if [[ -n "${SSH_PASS// }" ]]; then
       tar -C "$base_dir" -cf - "${files[@]}" | \
-        sshpass -p "$SSH_PASS" ssh "${ssh_opts[@]}" "$SSH_TARGET" "sh -lc 'tar --warning=no-timestamp --no-same-owner -xf - -C \"$remote_dir\"'"
+        sshpass -p "$SSH_PASS" ssh "${ssh_opts[@]}" "$SSH_TARGET" "sh -lc 'tar -x -o -f - -C \"$remote_dir\"'"
     else
       tar -C "$base_dir" -cf - "${files[@]}" | \
-        ssh "${ssh_opts[@]}" "$SSH_TARGET" "sh -lc 'tar --warning=no-timestamp --no-same-owner -xf - -C \"$remote_dir\"'"
+        ssh "${ssh_opts[@]}" "$SSH_TARGET" "sh -lc 'tar -x -o -f - -C \"$remote_dir\"'"
     fi
   }
 

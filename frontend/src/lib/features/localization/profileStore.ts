@@ -128,6 +128,7 @@ export function createLocalizationProfileStore() {
       name: nextProfileName(current.profiles),
       tagSizeM: null,
       allowedTagIds: [],
+      excludedTagIds: [],
       fieldMapId: null,
       fieldOrigin: { ...DEFAULT_FIELD_ORIGIN },
       snapZToGround: false,

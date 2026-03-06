@@ -38,6 +38,7 @@ export type LocalizationProfile = {
   name: string;
   tagSizeM?: number | null;
   allowedTagIds?: number[];
+  excludedTagIds?: number[];
   fieldMapId: string | null;
   fieldOrigin?: LocalizationFieldOriginConfig;
   // Snap the reported field-space height to the ground plane.

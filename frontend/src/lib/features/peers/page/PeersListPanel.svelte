@@ -34,10 +34,12 @@
     peerProbeCache: Record<string, PeerProbeResponse | null>;
     customPending: { probe: boolean };
     onOpenMapping: (peer: PeerSummary) => void;
+    onSyncPipelines: (peer: PeerSummary) => void;
     onProbePeer: (peer: PeerSummary) => void;
     onOpenManagement: (peer: PeerSummary) => void;
     onRemove: (peerId: string) => void;
     isRemoving: (peerId: string) => boolean;
+    isSyncingPipelines: (peerId: string) => boolean;
   };
 
   const {
@@ -50,10 +52,12 @@
     peerProbeCache,
     customPending,
     onOpenMapping,
+    onSyncPipelines,
     onProbePeer,
     onOpenManagement,
     onRemove,
-    isRemoving
+    isRemoving,
+    isSyncingPipelines
   }: Props = $props();
 
   const resolvedFilterLabel = (value: string) => filters.find((filter) => filter.id === value)?.label ?? 'selected';
@@ -291,6 +295,16 @@
             >
               Configure mapping
             </button>
+            {#if peer.integration.kind === 'helios'}
+              <button
+                class="rounded border border-primary-500/60 px-3 py-1 text-xs font-semibold text-primary-100 transition hover:bg-primary-600/20 disabled:opacity-50"
+                type="button"
+                onclick={() => onSyncPipelines(peer)}
+                disabled={isSyncingPipelines(peer.id)}
+              >
+                {isSyncingPipelines(peer.id) ? 'Syncing…' : 'Sync pipelines'}
+              </button>
+            {/if}
             <button
               class="rounded border border-surface-600 px-3 py-1 text-xs font-semibold text-surface-100 transition hover:bg-surface-700/40 disabled:opacity-50"
               type="button"

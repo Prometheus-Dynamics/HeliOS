@@ -65,6 +65,7 @@ OFFICIAL_BOOT="${BOOT_CACHE}/bootfs"
 extract_boot_partition "${BOOT_IMG}" "${OFFICIAL_BOOT}"
 rm -rf "${BINARIES_DIR}/rpi-firmware"
 mkdir -p "${BINARIES_DIR}/rpi-firmware"
+cp -a "${OFFICIAL_BOOT}/." "${BINARIES_DIR}/rpi-firmware/"
 # Prevent stale EEPROM update payloads from being re-included on incremental builds.
 rm -f "${BINARIES_DIR}/pieeprom.upd" "${BINARIES_DIR}/pieeprom.sig"
 
@@ -91,30 +92,9 @@ if [ "${HELIOS_STAGE_PIEEPROM_UPDATE:-0}" = "1" ]; then
 	fi
 fi
 
-# Only stage essentials for Pi5/CM5 to keep boot.vfat lean.
-ESSENTIAL_FILES=(
-	"start4.elf" "start4cd.elf" "start4db.elf" "start4x.elf"
-	"fixup4.dat" "fixup4cd.dat" "fixup4db.dat" "fixup4x.dat"
-	"bootcode.bin"
-	"rp1.bin" # optional; copy if present
-)
-for f in "${ESSENTIAL_FILES[@]}"; do
-	if [ -f "${OFFICIAL_BOOT}/${f}" ]; then
-		install -m 0644 "${OFFICIAL_BOOT}/${f}" "${BINARIES_DIR}/rpi-firmware/${f}"
-	fi
-done
-
-# DTBs: include Pi5/CM5 DTBs only.
-mkdir -p "${BINARIES_DIR}/rpi-firmware"
-for dtb in "${OFFICIAL_BOOT}"/bcm2712*.dtb; do
-	[ -f "${dtb}" ] || continue
-	install -m 0644 "${dtb}" "${BINARIES_DIR}/rpi-firmware/$(basename "${dtb}")"
-done
-
-# Overlays: keep all.
-if [ -d "${OFFICIAL_BOOT}/overlays" ]; then
-	mkdir -p "${BINARIES_DIR}/rpi-firmware/overlays"
-	cp -a "${OFFICIAL_BOOT}/overlays/." "${BINARIES_DIR}/rpi-firmware/overlays/"
+# Keep EEPROM update payloads opt-in only (avoid accidental early EEPROM writes).
+if [ "${STAGE_PIEEPROM_UPDATE}" != "1" ]; then
+	rm -f "${BINARIES_DIR}/rpi-firmware/pieeprom.upd" "${BINARIES_DIR}/rpi-firmware/pieeprom.sig"
 fi
 
 # Prefer repo-supplied boot configuration so kernel and overlays match our image.
@@ -127,12 +107,41 @@ if [ -f "${REPO_CMDLINE_TXT}" ]; then
 	install -m 0644 "${REPO_CMDLINE_TXT}" "${BINARIES_DIR}/rpi-firmware/cmdline.txt"
 fi
 
-# Copy staged firmware into the root of BINARIES_DIR (without clobbering our built DTBs)
-# so the FAT image has the expected layout for start4/config/cmdline/overlays.
-rsync -a --exclude 'bcm*.dtb' "${BINARIES_DIR}/rpi-firmware/" "${BINARIES_DIR}/"
+# Copy staged firmware into the root of BINARIES_DIR and keep Buildroot-generated
+# DTBs authoritative: `--ignore-existing` prevents overwriting files we already
+# built (e.g. patched bcm2712 CM5 DTBs), while still copying extra fallback DTBs.
+rsync -a --ignore-existing "${BINARIES_DIR}/rpi-firmware/" "${BINARIES_DIR}/"
 if [ -d "${BINARIES_DIR}/rpi-firmware/overlays" ]; then
 	mkdir -p "${BINARIES_DIR}/overlays"
 	rsync -a "${BINARIES_DIR}/rpi-firmware/overlays/" "${BINARIES_DIR}/overlays/"
+fi
+
+# Keep Buildroot-generated DTBs authoritative, but add upstream bcm2712 aliases
+# not produced by our kernel build. Older CM5 EEPROM revisions may fall back to
+# alternate DTB names before CM5 carrier auto-detection is available.
+for dtb in "${BINARIES_DIR}"/rpi-firmware/bcm2712*.dtb; do
+	[ -f "${dtb}" ] || continue
+	dtb_name="$(basename "${dtb}")"
+	if [ ! -f "${BINARIES_DIR}/${dtb_name}" ]; then
+		install -m 0644 "${dtb}" "${BINARIES_DIR}/${dtb_name}"
+	fi
+done
+
+# Older CM5 EEPROM revisions may ignore/partially parse config.txt and try the
+# default Pi 5 kernel name. Provide a compatibility copy so both old/new EEPROM
+# loaders can boot the same image.
+KERNEL_FROM_CONFIG="$(sed -n 's/^kernel=//p' "${BINARIES_DIR}/rpi-firmware/config.txt" | head -n 1)"
+if [ -n "${KERNEL_FROM_CONFIG}" ] && [ -f "${BINARIES_DIR}/${KERNEL_FROM_CONFIG}" ]; then
+	if [ "${KERNEL_FROM_CONFIG}" != "kernel_2712.img" ] && [ ! -f "${BINARIES_DIR}/kernel_2712.img" ]; then
+		install -m 0644 "${BINARIES_DIR}/${KERNEL_FROM_CONFIG}" "${BINARIES_DIR}/kernel_2712.img"
+	fi
+	if [ "${KERNEL_FROM_CONFIG}" != "kernel8.img" ] && [ ! -f "${BINARIES_DIR}/kernel8.img" ]; then
+		install -m 0644 "${BINARIES_DIR}/${KERNEL_FROM_CONFIG}" "${BINARIES_DIR}/kernel8.img"
+	fi
+fi
+
+if [ "${HELIOS_ROOT_BY_LABEL:-0}" = "1" ] && [ -f "${BINARIES_DIR}/rpi-firmware/cmdline.txt" ]; then
+	sed -E -i 's#root=/dev/mmcblk0p2#root=LABEL=ACTIVE#g' "${BINARIES_DIR}/rpi-firmware/cmdline.txt"
 fi
 
 # Compile repo-owned DT overlays (e.g. OV9782) into rpi-firmware overlays right before genimage.
@@ -170,7 +179,7 @@ if [ ! -e "${GENIMAGE_CFG}" ]; then
 	for i in "${BINARIES_DIR}"/bcm*.dtb; do
 		[ -f "${i}" ] && FILES+=( "$(basename "${i}")" )
 	done
-	for f in start4.elf start4cd.elf start4db.elf start4x.elf fixup4.dat fixup4cd.dat fixup4db.dat fixup4x.dat bootcode.bin config.txt cmdline.txt rp1.bin; do
+	for f in start.elf start_cd.elf start_db.elf start_x.elf start4.elf start4cd.elf start4db.elf start4x.elf fixup.dat fixup_cd.dat fixup_db.dat fixup_x.dat fixup4.dat fixup4cd.dat fixup4db.dat fixup4x.dat bootcode.bin config.txt cmdline.txt rp1.bin kernel_2712.img kernel8.img; do
 		[ -e "${BINARIES_DIR}/${f}" ] && FILES+=( "${f}" )
 	done
 	if [ "${STAGE_PIEEPROM_UPDATE}" = "1" ]; then
@@ -180,8 +189,8 @@ if [ ! -e "${GENIMAGE_CFG}" ]; then
 	fi
 	[ -d "${BINARIES_DIR}/overlays" ] && FILES+=( "overlays" )
 	
-	# Ensure firmware sees Pi 5 compatibility metadata; bootloader expects it in the FAT root
-	if [ -f "${BOARD_DIR}/os_config.json" ]; then
+	# Keep Pi 5 os_config metadata opt-in for compatibility with older CM5 EEPROMs.
+	if [ "${HELIOS_INCLUDE_OS_CONFIG:-0}" = "1" ] && [ -f "${BOARD_DIR}/os_config.json" ]; then
 		install -m 0644 "${BOARD_DIR}/os_config.json" "${BINARIES_DIR}/os_config.json"
 		case " ${FILES[*]} " in
 			*" os_config.json "*) ;; *) FILES+=( "os_config.json" ) ;;
@@ -190,7 +199,9 @@ if [ ! -e "${GENIMAGE_CFG}" ]; then
 
 	KERNEL=$(sed -n 's/^kernel=//p' "${BINARIES_DIR}/rpi-firmware/config.txt")
 	if [ -n "${KERNEL}" ]; then
-		FILES+=( "${KERNEL}" )
+		case " ${FILES[*]} " in
+			*" ${KERNEL} "*) ;; *) FILES+=( "${KERNEL}" ) ;;
+		esac
 	fi
 
 	BOOT_FILES=$(printf '\\t\\t\\t"%s",\\n' "${FILES[@]}")

@@ -15,11 +15,44 @@ export type LocalizationProfileActionsDeps = {
   profileNameInput: () => string;
   tagSizeInput: () => string;
   setTagSizeError: (message: string | null) => void;
+  excludedTagIdsInput: () => string;
+  setExcludedTagIdsError: (message: string | null) => void;
   parseLengthToMeters: (value: string, unit?: string) => LengthValue | null;
   localizationProfiles: LocalizationProfilesStore;
 };
 
 export const createLocalizationProfileActions = (deps: LocalizationProfileActionsDeps) => {
+  const parseExcludedTagIds = (raw: string): number[] | null => {
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+    const tokens = trimmed
+      .split(/[,\s]+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length > 0);
+    const parsed: number[] = [];
+    for (const token of tokens) {
+      if (!/^\d+$/.test(token)) {
+        return null;
+      }
+      const value = Number(token);
+      if (!Number.isSafeInteger(value) || value < 0 || value > 0xffffffff) {
+        return null;
+      }
+      parsed.push(value);
+    }
+    return Array.from(new Set(parsed)).sort((left, right) => left - right);
+  };
+
+  const sameTagIdList = (left: number[] | null | undefined, right: number[] | null | undefined): boolean => {
+    const a = Array.isArray(left) ? left : [];
+    const b = Array.isArray(right) ? right : [];
+    if (a.length !== b.length) return false;
+    for (let index = 0; index < a.length; index += 1) {
+      if (a[index] !== b[index]) return false;
+    }
+    return true;
+  };
+
   const persistLocalizationConfig = async (next: LocalizationConfig): Promise<void> => {
     await deps.localizationProfiles.persist(next);
   };
@@ -86,6 +119,19 @@ export const createLocalizationProfileActions = (deps: LocalizationProfileAction
     void deps.localizationProfiles.persistProfileUpdate({ ...profile, tagSizeM: meters });
   };
 
+  const commitExcludedTagIds = (): void => {
+    const profile = deps.activeProfile();
+    if (!profile) return;
+    const parsed = parseExcludedTagIds(deps.excludedTagIdsInput());
+    if (!parsed) {
+      deps.setExcludedTagIdsError('Use comma/space-separated non-negative integer tag IDs (e.g. `1, 2 3`).');
+      return;
+    }
+    deps.setExcludedTagIdsError(null);
+    if (sameTagIdList(profile.excludedTagIds, parsed)) return;
+    void deps.localizationProfiles.persistProfileUpdate({ ...profile, excludedTagIds: parsed });
+  };
+
   return {
     persistLocalizationConfig,
     setProfileColor,
@@ -95,6 +141,7 @@ export const createLocalizationProfileActions = (deps: LocalizationProfileAction
     addProfile,
     removeActiveProfile,
     commitProfileName,
-    commitTagSize
+    commitTagSize,
+    commitExcludedTagIds
   };
 };

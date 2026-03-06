@@ -1,4 +1,5 @@
 import { env } from '$env/dynamic/public';
+import type { PeerRemoteStreamSummary } from '$lib/types/peer';
 import type { Interval, SensorPeripheral, StreamInfo, UsbPeripheral } from '$lib/ts-bindings/http/client';
 import type { CameraCard, CameraStatus, PeripheralEntry, SummaryTile, TaskEntry } from '$lib/types/devices';
 import type { ImuStatus } from '$lib/types/systems';
@@ -49,10 +50,8 @@ export function extractHealth(
   return payload ?? null;
 }
 
-export function buildCameraCards(streams: StreamInfo[]): CameraCard[] {
-  if (!streams.length) return [];
-
-  return streams.map((stream) => {
+export function buildCameraCards(streams: StreamInfo[], peerStreams: PeerRemoteStreamSummary[] = []): CameraCard[] {
+  const localCards = streams.map((stream) => {
     const activeModeId = (stream.manifest as any)?.capture?.mode ?? null;
     const activeMode =
       activeModeId && Array.isArray(stream.descriptor.modes)
@@ -86,6 +85,32 @@ export function buildCameraCards(streams: StreamInfo[]): CameraCard[] {
       lastSeen: 'just now'
     };
   });
+
+  const remoteCards = peerStreams.map((stream) => {
+    const rawState = String(stream.state ?? '').trim().toLowerCase();
+    const status: CameraStatus = rawState === 'disabled' ? 'degraded' : rawState === 'offline' || rawState === 'unreachable' ? 'offline' : 'live';
+    const display = String(stream.displayName ?? stream.streamAlias ?? `${stream.peerAlias ?? stream.peerId} · ${stream.remoteStreamId}`).trim();
+    return {
+      id: stream.streamRef,
+      cameraUid: String(stream.cameraUid ?? stream.streamRef).trim() || stream.streamRef,
+      captureSessionId: stream.streamRef,
+      captureSessionAlias: String(stream.streamAlias ?? stream.displayName ?? '').trim() || null,
+      driverNamespace: 'peer',
+      driverId: stream.peerId,
+      driverCameraId: stream.remoteStreamId,
+      hardwareId: stream.remoteStreamId,
+      name: display,
+      status,
+      recordingActive: false,
+      recordingSinceMs: null,
+      resolution: 'remote',
+      pipeline: stream.activePipelineId ?? null,
+      bandwidth: 'proxy',
+      lastSeen: 'peer'
+    } satisfies CameraCard;
+  });
+
+  return [...localCards, ...remoteCards];
 }
 
 function describeResolution(formats: FormatInfo[]): string {

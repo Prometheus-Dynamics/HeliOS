@@ -6,7 +6,7 @@ imports = [
 ]
 
 [build]
-version = "v2026.0.0"
+version = "v2026.1.0"
 
 [buildroot]
 # Final copied images directory.

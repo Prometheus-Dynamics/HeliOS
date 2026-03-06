@@ -238,6 +238,11 @@ fn resolve_interface_name(name: &str) -> String {
     name.to_string()
 }
 
+fn should_include_without_addresses(settings: &NetworkInterfaceSettings) -> bool {
+    let name = settings.name.as_str();
+    settings.vlan.is_some() || settings.bond.is_some() || name.starts_with("eth") || name.starts_with("en") || name.starts_with("wl") || name.starts_with("ww")
+}
+
 async fn read_dns_config() -> Result<DnsConfig> {
     let path = dns_config_path();
     let content = match tokio::fs::read_to_string(&path).await {
@@ -356,7 +361,7 @@ async fn fetch_interface_settings(handle: &Handle, link: &LinkMessage) -> Result
         }
     }
 
-    if settings.ipv4.is_empty() && settings.ipv6.is_empty() {
+    if settings.ipv4.is_empty() && settings.ipv6.is_empty() && !should_include_without_addresses(&settings) {
         return Ok(None);
     }
 
@@ -858,6 +863,18 @@ mod tests {
         });
 
         set_test_dns_path(None);
+    }
+
+    #[test]
+    fn unaddressed_uplink_interfaces_are_kept() {
+        let end0 = NetworkInterfaceSettings { name: "end0".into(), ..NetworkInterfaceSettings::default() };
+        assert!(should_include_without_addresses(&end0));
+
+        let usb0 = NetworkInterfaceSettings { name: "usb0".into(), ..NetworkInterfaceSettings::default() };
+        assert!(!should_include_without_addresses(&usb0));
+
+        let vlan = NetworkInterfaceSettings { name: "vlan100".into(), vlan: Some(VlanConfig { id: 100, parent: Some("end0".into()) }), ..NetworkInterfaceSettings::default() };
+        assert!(should_include_without_addresses(&vlan));
     }
 
     fn set_test_dns_path(path: Option<PathBuf>) {

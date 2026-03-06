@@ -1,4 +1,5 @@
 import { DeviceService, PeripheralsService } from '$lib/ts-bindings/http/client';
+import { fetchPeerStreams } from '$lib/api/peers';
 import { StreamsApi } from '$lib/api/streamsApi';
 import { emptyImuStatus } from '$lib/api/systemsPage';
 import { cancellableWithTimeout } from '$lib/api/requestUtils';
@@ -11,7 +12,7 @@ import type { DevicesPayload, DevicesPeripheralsSnapshot } from './types';
  * Compose the device dashboard payload from multiple backend endpoints.
  */
 export async function fetchDevicesPageData(): Promise<DevicesPayload> {
-  const [metricsResult, peripheralsResult, camerasResult, usbResult, fanResult, lightingResult, i2cResult, streamsResult] = await Promise.allSettled([
+  const [metricsResult, peripheralsResult, camerasResult, usbResult, fanResult, lightingResult, i2cResult, streamsResult, peerStreamsResult] = await Promise.allSettled([
     cancellableWithTimeout(() => DeviceService.metrics(), REQUEST_TIMEOUT_MS),
     cancellableWithTimeout(() => PeripheralsService.listPeripherals(), REQUEST_TIMEOUT_MS),
     cancellableWithTimeout(() => PeripheralsService.listCameras(), REQUEST_TIMEOUT_MS),
@@ -19,11 +20,12 @@ export async function fetchDevicesPageData(): Promise<DevicesPayload> {
     cancellableWithTimeout(() => PeripheralsService.fanStatus(), REQUEST_TIMEOUT_MS),
     cancellableWithTimeout(() => PeripheralsService.ledStatus(), REQUEST_TIMEOUT_MS),
     cancellableWithTimeout(() => PeripheralsService.listI2C(), I2C_TIMEOUT_MS),
-    StreamsApi.listStreams({ timeoutMs: REQUEST_TIMEOUT_MS })
+    StreamsApi.listStreams({ timeoutMs: REQUEST_TIMEOUT_MS }),
+    fetchPeerStreams(REQUEST_TIMEOUT_MS)
   ]);
 
-  const failedCount = [metricsResult, peripheralsResult, camerasResult, usbResult, fanResult, lightingResult, i2cResult, streamsResult].filter((result) => result.status === 'rejected').length;
-  if (failedCount === 8) {
+  const failedCount = [metricsResult, peripheralsResult, camerasResult, usbResult, fanResult, lightingResult, i2cResult, streamsResult, peerStreamsResult].filter((result) => result.status === 'rejected').length;
+  if (failedCount === 9) {
     throw new Error('All device data requests failed');
   }
 
@@ -51,9 +53,13 @@ export async function fetchDevicesPageData(): Promise<DevicesPayload> {
   if (streamsResult.status === 'rejected') {
     console.warn('Stream list request failed', streamsResult.reason);
   }
+  if (peerStreamsResult.status === 'rejected') {
+    console.warn('Peer stream list request failed', peerStreamsResult.reason);
+  }
 
   const streamsRaw = streamsResult.status === 'fulfilled' ? streamsResult.value ?? [] : [];
   const streams = Array.isArray(streamsRaw) ? streamsRaw : [];
+  const peerStreams = peerStreamsResult.status === 'fulfilled' ? peerStreamsResult.value?.streams ?? [] : [];
   const peripheralFailure =
     [camerasResult, usbResult, fanResult, lightingResult, i2cResult]
       .filter((result) => result.status === 'rejected')
@@ -62,7 +68,7 @@ export async function fetchDevicesPageData(): Promise<DevicesPayload> {
     peripherals: peripheralFailure
   };
 
-  const cameras = buildCameraCards(streams);
+  const cameras = buildCameraCards(streams, peerStreams);
 
   const health = extractHealth(metricsResult.status === 'fulfilled' ? metricsResult.value : null);
   const imu = emptyImuStatus();
@@ -93,9 +99,14 @@ export async function fetchDevicesPageData(): Promise<DevicesPayload> {
 }
 
 export async function fetchDevicesCamerasSnapshot(): Promise<DevicesPayload['cameras']> {
-  const streamsRaw = await StreamsApi.listStreams({ timeoutMs: REQUEST_TIMEOUT_MS });
+  const [streamsResult, peerStreamsResult] = await Promise.allSettled([
+    StreamsApi.listStreams({ timeoutMs: REQUEST_TIMEOUT_MS }),
+    fetchPeerStreams(REQUEST_TIMEOUT_MS)
+  ]);
+  const streamsRaw = streamsResult.status === 'fulfilled' ? streamsResult.value ?? [] : [];
   const streams = Array.isArray(streamsRaw) ? streamsRaw : [];
-  return buildCameraCards(streams);
+  const peerStreams = peerStreamsResult.status === 'fulfilled' ? peerStreamsResult.value?.streams ?? [] : [];
+  return buildCameraCards(streams, peerStreams);
 }
 
 export async function fetchDevicesPeripheralsSnapshot(): Promise<DevicesPeripheralsSnapshot> {

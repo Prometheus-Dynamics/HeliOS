@@ -300,7 +300,8 @@
     addProfile,
     removeActiveProfile,
     commitProfileName,
-    commitTagSize
+    commitTagSize,
+    commitExcludedTagIds
   } = createLocalizationProfileActions({
     profiles: () => $profiles,
     activeProfile: () => $activeProfile ?? null,
@@ -308,6 +309,10 @@
     tagSizeInput: () => tagSizeInput,
     setTagSizeError: (message) => {
       tagSizeError = message;
+    },
+    excludedTagIdsInput: () => excludedTagIdsInput,
+    setExcludedTagIdsError: (message) => {
+      excludedTagIdsError = message;
     },
     parseLengthToMeters,
     localizationProfiles
@@ -1210,6 +1215,9 @@
   let tagSizeInput = $state('');
   let tagSizeTargetId = $state<string | null>(null);
   let tagSizeError = $state<string | null>(null);
+  let excludedTagIdsInput = $state('');
+  let excludedTagIdsTargetId = $state<string | null>(null);
+  let excludedTagIdsError = $state<string | null>(null);
   let fieldMapSelection = $state('');
   let openSourceGroups = $state<string[]>([]);
   let streamInfos = $state<StreamInfo[]>([]);
@@ -2884,6 +2892,22 @@
       tagSizeInput = next;
       tagSizeTargetId = profile.id;
       tagSizeError = null;
+    }
+  });
+
+  $effect(() => {
+    const profile = $activeProfile;
+    if (!profile) {
+      excludedTagIdsInput = '';
+      excludedTagIdsTargetId = null;
+      excludedTagIdsError = null;
+      return;
+    }
+    if (excludedTagIdsTargetId !== profile.id) {
+      const nextIds = Array.isArray(profile.excludedTagIds) ? profile.excludedTagIds : [];
+      excludedTagIdsInput = nextIds.join(', ');
+      excludedTagIdsTargetId = profile.id;
+      excludedTagIdsError = null;
     }
   });
 
@@ -4791,6 +4815,9 @@
       bind:tagSizeInput={tagSizeInput}
       tagSizeError={tagSizeError}
       onCommitTagSize={commitTagSize}
+      bind:excludedTagIdsInput={excludedTagIdsInput}
+      excludedTagIdsError={excludedTagIdsError}
+      onCommitExcludedTagIds={commitExcludedTagIds}
       snapZToGround={$activeProfile?.snapZToGround ?? false}
       snapRollToGround={$activeProfile?.snapRollToGround ?? false}
       snapPitchToGround={$activeProfile?.snapPitchToGround ?? false}

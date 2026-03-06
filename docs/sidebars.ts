@@ -117,6 +117,7 @@ const sidebars: SidebarsConfig = {
           items: [
             'guides/networktables-nt4',
             'guides/peers-discovery-and-registration',
+            'guides/helios-interdevice-protocol',
           ],
         },
       ],
