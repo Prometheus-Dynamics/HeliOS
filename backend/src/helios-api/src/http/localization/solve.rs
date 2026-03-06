@@ -31,6 +31,12 @@ pub(crate) struct LocalizationSolveQuery {
     // Keep the canonical field name `profile_id` so generated OpenAPI matches the docs.
     #[serde(default, rename = "profile_id", alias = "profileId")]
     profile_id: Option<String>,
+    #[serde(default = "default_apply_field_origin", rename = "apply_field_origin", alias = "applyFieldOrigin")]
+    apply_field_origin: bool,
+}
+
+fn default_apply_field_origin() -> bool {
+    true
 }
 
 const RAW_STREAM_PIPELINE_UUID: Uuid = Uuid::from_u128(0x00000000_0000_0000_0000_0000000000aa);
@@ -39,7 +45,10 @@ const RAW_STREAM_PIPELINE_UUID: Uuid = Uuid::from_u128(0x00000000_0000_0000_0000
     get,
     path = "/localization/solve",
     tag = "Localization",
-    params(("profile_id" = Option<String>, Query, description = "Profile id override")),
+    params(
+        ("profile_id" = Option<String>, Query, description = "Profile id override"),
+        ("apply_field_origin" = Option<bool>, Query, description = "Apply profile fieldOrigin transform to field-space outputs (default true)")
+    ),
     responses((status = 200, description = "Localization solve outputs", body = LocalizationSolveResponse))
 )]
 pub async fn solve(State(state): State<AppState>, Query(query): Query<LocalizationSolveQuery>) -> ApiResult<Json<LocalizationSolveResponse>> {
@@ -54,7 +63,7 @@ pub async fn solve(State(state): State<AppState>, Query(query): Query<Localizati
     let calibrations = load_stream_calibrations(&state).await;
 
     let fetcher = ApiLocalizationSourceFetcher::new(state.clone());
-    let response = solve_localization(profile, &sources, &rig_poses, field_map.as_ref(), &calibrations, &fetcher).await;
+    let response = solve_localization(profile, &sources, &rig_poses, field_map.as_ref(), &calibrations, &fetcher, query.apply_field_origin).await;
 
     Ok(Json(response))
 }

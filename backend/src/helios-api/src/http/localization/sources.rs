@@ -576,7 +576,7 @@ async fn fetch_profile_output_inner(fetcher: &ApiLocalizationSourceFetcher, prof
     solve::inject_imu_leveling_rig_pose(&fetcher.state, profile, &mut rig_poses).await;
     let field_map = if let Some(map_id) = profile.field_map_id.as_deref() { maps::load_map_document(map_id).await.ok() } else { None };
     let calibrations = solve::load_stream_calibrations(&fetcher.state).await;
-    let response = solve_localization(profile, &sources, &rig_poses, field_map.as_ref(), &calibrations, fetcher).await;
+    let response = solve_localization(profile, &sources, &rig_poses, field_map.as_ref(), &calibrations, fetcher, true).await;
 
     let selector = parse_profile_output_selector(output_key)?;
     let Some(solver) = response.solvers.into_iter().find(|solver| solver.id == selector.solver_id) else {

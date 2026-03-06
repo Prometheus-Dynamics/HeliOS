@@ -349,8 +349,8 @@ export async function importLocalizationProfiles(
 
 export async function fetchLocalizationSolve(profileId?: string, signal?: AbortSignal): Promise<LocalizationSolveResponse> {
   const url = profileId
-    ? apiUrl(`/localization/solve?profile_id=${encodeURIComponent(profileId)}`)
-    : apiUrl('/localization/solve');
+    ? apiUrl(`/localization/solve?profile_id=${encodeURIComponent(profileId)}&apply_field_origin=false`)
+    : apiUrl('/localization/solve?apply_field_origin=false');
   const response = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' }, signal });
 
   if (!response.ok) {

@@ -7,9 +7,12 @@ use lib_cv::modules::localization::{MarkerDefinition, MarkerMap};
 use lib_cv::{Rotation3, Translation3};
 use nalgebra::{Quaternion, UnitQuaternion};
 
-use super::config::{LocalizationPoseSpace, LocalizationProfile, LocalizationSolverConfig, LocalizationSolverRuntimeTuningConfig, LocalizationSourceConfig, LocalizationTemporalStabilizationConfig};
+use super::config::{
+    LocalizationFieldOriginMode, LocalizationPoseSpace, LocalizationProfile, LocalizationSolverConfig, LocalizationSolverRuntimeTuningConfig, LocalizationSourceConfig,
+    LocalizationTemporalStabilizationConfig,
+};
 use super::maps::{FieldMapDocument, FieldMapSource};
-use super::math::{compose_transforms, PoseTransform};
+use super::math::{compose_transforms, invert_transform, PoseTransform};
 use super::solvers::{SolverContext, SolverRegistry};
 use super::sources::{fetch_source_samples_with_registry, LocalizationSourceFetcher, SourceParserRegistry, SourceSample};
 use super::types::{LocalizationSolveResponse, LocalizationSolverOutputs, LocalizationSolverResult, LocalizationSourceSampleStatus};
@@ -34,10 +37,11 @@ pub async fn solve_localization<F: LocalizationSourceFetcher>(
     field_map: Option<&FieldMapDocument>,
     calibrations: &HashMap<String, TagPoseCalibration>,
     fetcher: &F,
+    apply_field_origin: bool,
 ) -> LocalizationSolveResponse {
     let solver_registry = SolverRegistry::with_defaults();
     let parser_registry = SourceParserRegistry::with_defaults();
-    let ctx = LocalizationSolveContext { profile, sources, rig_poses, field_map, calibrations, fetcher, solver_registry: &solver_registry, parser_registry: &parser_registry };
+    let ctx = LocalizationSolveContext { profile, sources, rig_poses, field_map, calibrations, fetcher, solver_registry: &solver_registry, parser_registry: &parser_registry, apply_field_origin };
     solve_localization_with_registry(ctx).await
 }
 
@@ -50,6 +54,7 @@ pub struct LocalizationSolveContext<'a, F> {
     pub fetcher: &'a F,
     pub solver_registry: &'a SolverRegistry,
     pub parser_registry: &'a SourceParserRegistry,
+    pub apply_field_origin: bool,
 }
 
 pub async fn solve_localization_with_registry<F: LocalizationSourceFetcher>(ctx: LocalizationSolveContext<'_, F>) -> LocalizationSolveResponse {
@@ -73,7 +78,7 @@ pub async fn solve_localization_with_registry<F: LocalizationSourceFetcher>(ctx:
         .collect();
 
     let mut solver_results = ctx.profile.solvers.iter().map(|solver| solve_for_solver(ctx.solver_registry, solver, &source_samples, ctx.rig_poses, marker_map.as_ref())).collect::<Vec<_>>();
-    apply_profile_postprocessing(ctx.profile, &mut solver_results, ctx.rig_poses);
+    apply_profile_postprocessing(ctx.profile, &mut solver_results, ctx.rig_poses, ctx.field_map, ctx.apply_field_origin);
 
     LocalizationSolveResponse { profile_id: ctx.profile.id.clone(), solvers: solver_results, sources: source_statuses }
 }
@@ -111,7 +116,13 @@ fn apply_profile_tag_filter(profile: &LocalizationProfile, samples: &mut [Source
     }
 }
 
-fn apply_profile_postprocessing(profile: &LocalizationProfile, solver_results: &mut [LocalizationSolverResult], rig_poses: &HashMap<String, PoseTransform>) {
+fn apply_profile_postprocessing(
+    profile: &LocalizationProfile,
+    solver_results: &mut [LocalizationSolverResult],
+    rig_poses: &HashMap<String, PoseTransform>,
+    field_map: Option<&FieldMapDocument>,
+    apply_field_origin: bool,
+) {
     apply_temporal_pose_stabilization(profile, solver_results);
 
     let snap_height = profile.snap_z_to_ground;
@@ -146,9 +157,81 @@ fn apply_profile_postprocessing(profile: &LocalizationProfile, solver_results: &
         }
     }
 
+    if apply_field_origin {
+        apply_profile_field_origin(profile, field_map, solver_results);
+    }
+
     for solver in solver_results {
         enforce_camera_pose_consistency(&mut solver.outputs, rig_poses);
     }
+}
+
+fn apply_profile_field_origin(profile: &LocalizationProfile, field_map: Option<&FieldMapDocument>, solver_results: &mut [LocalizationSolverResult]) {
+    let origin_from_center = field_origin_from_center_transform(profile, field_map);
+    if is_identity_transform(&origin_from_center) {
+        return;
+    }
+
+    for solver in solver_results.iter_mut() {
+        if let Some(robot_pose) = solver.outputs.robot_in_field.as_mut() {
+            transform_localization_pose_in_place(&mut robot_pose.pose, &origin_from_center);
+        }
+        if let Some(camera_poses) = solver.outputs.camera_in_field.as_mut() {
+            for entry in camera_poses {
+                transform_localization_pose_in_place(&mut entry.pose, &origin_from_center);
+            }
+        }
+    }
+}
+
+fn transform_localization_pose_in_place(pose: &mut crate::localization::types::LocalizationPose, parent_from_child: &PoseTransform) {
+    let Some((translation, rotation)) = localization_pose_components(pose) else {
+        return;
+    };
+    let child = PoseTransform { translation, rotation };
+    let transformed = compose_transforms(parent_from_child, &child);
+    update_localization_pose(pose, transformed.translation, transformed.rotation);
+}
+
+fn is_identity_transform(transform: &PoseTransform) -> bool {
+    transform.translation.norm_squared() <= 1e-12 && transform.rotation.angle().abs() <= 1e-12
+}
+
+fn field_origin_from_center_transform(profile: &LocalizationProfile, field_map: Option<&FieldMapDocument>) -> PoseTransform {
+    let (field_width_m, field_depth_m) = field_dimensions_for_origin(field_map);
+    let half_width = field_width_m * 0.5;
+    let half_depth = field_depth_m * 0.5;
+
+    let sanitized_origin = profile.field_origin.sanitized();
+    let (origin_x, origin_z, origin_yaw_deg) = match sanitized_origin.mode {
+        LocalizationFieldOriginMode::Center => (0.0, 0.0, 0.0),
+        LocalizationFieldOriginMode::Blue => (-half_width, -half_depth, 0.0),
+        LocalizationFieldOriginMode::Red => (half_width, half_depth, 180.0),
+        LocalizationFieldOriginMode::Custom => {
+            if let Some(custom) = sanitized_origin.custom {
+                (custom.x, custom.z, custom.yaw_deg)
+            } else {
+                (-half_width, -half_depth, 0.0)
+            }
+        }
+    };
+
+    let center_from_origin =
+        PoseTransform { translation: nalgebra::Vector3::new(origin_x, 0.0, origin_z), rotation: UnitQuaternion::from_axis_angle(&nalgebra::Vector3::y_axis(), origin_yaw_deg.to_radians()) };
+    invert_transform(&center_from_origin)
+}
+
+fn field_dimensions_for_origin(field_map: Option<&FieldMapDocument>) -> (f64, f64) {
+    const DEFAULT_FIELD_WIDTH_M: f64 = 8.2296;
+    const DEFAULT_FIELD_DEPTH_M: f64 = 16.4592;
+
+    if let Some(map) = field_map {
+        if map.width_m.is_finite() && map.width_m > 0.0 && map.depth_m.is_finite() && map.depth_m > 0.0 {
+            return (map.width_m, map.depth_m);
+        }
+    }
+
+    (DEFAULT_FIELD_WIDTH_M, DEFAULT_FIELD_DEPTH_M)
 }
 
 fn enforce_camera_pose_consistency(outputs: &mut LocalizationSolverOutputs, rig_poses: &HashMap<String, PoseTransform>) {
@@ -788,7 +871,7 @@ mod tests {
         }];
 
         let rig_poses: HashMap<String, PoseTransform> = HashMap::new();
-        apply_profile_postprocessing(&profile, &mut results, &rig_poses);
+        apply_profile_postprocessing(&profile, &mut results, &rig_poses, None, false);
 
         let robot_y = results[0].outputs.robot_in_field.as_ref().unwrap().pose.translation.y;
         let cam_y = results[0].outputs.camera_in_field.as_ref().unwrap()[0].pose.translation.y;
@@ -827,8 +910,69 @@ mod tests {
         }];
 
         let rig_poses: HashMap<String, PoseTransform> = HashMap::new();
-        apply_profile_postprocessing(&profile, &mut results, &rig_poses);
+        apply_profile_postprocessing(&profile, &mut results, &rig_poses, None, false);
         assert_eq!(results[0].outputs.robot_in_field.as_ref().unwrap().pose.translation.y, -0.5);
+    }
+
+    #[test]
+    fn field_origin_blue_offsets_field_space_outputs() {
+        use crate::localization::config::LocalizationFieldOriginConfig;
+        use crate::localization::maps::{FieldMapDocument, FieldMapSource};
+
+        let profile = LocalizationProfile {
+            id: "p_origin_blue".to_string(),
+            name: "p".to_string(),
+            tag_size_m: None,
+            allowed_tag_ids: vec![],
+            excluded_tag_ids: vec![],
+            field_map_id: Some("map".to_string()),
+            field_origin: LocalizationFieldOriginConfig::default(),
+            snap_z_to_ground: false,
+            snap_roll_to_ground: false,
+            snap_pitch_to_ground: false,
+            pipeline_template_id: None,
+            color: None,
+            view_enabled: true,
+            temporal_stabilization: crate::localization::config::LocalizationTemporalStabilizationConfig { enabled: false, ..Default::default() },
+            sources: vec![],
+            solvers: vec![],
+        };
+
+        let field_map = FieldMapDocument {
+            schema_version: 1,
+            id: "map".to_string(),
+            name: "map".to_string(),
+            width_m: 8.046,
+            depth_m: 16.520,
+            markers: vec![],
+            source: FieldMapSource::LimelightFmap { original_file_name: None, map_type: None },
+            overlay: None,
+        };
+
+        let mut results = vec![LocalizationSolverResult {
+            id: "s".to_string(),
+            name: "s".to_string(),
+            mode: LocalizationSolverMode::GroupSolve,
+            output_spaces: vec![LocalizationPoseSpace::RobotInField],
+            outputs: LocalizationSolverOutputs {
+                robot_in_field: Some(LocalizationSolverPose {
+                    pose: LocalizationPose {
+                        translation: LocalizationVector { x: 0.377, y: 0.0, z: 2.684 },
+                        rotation: LocalizationRotation { roll: 0.0, pitch: 0.0, yaw: 7.9, quaternion: LocalizationQuaternion { x: 0.0, y: 0.068843223, z: 0.0, w: 0.997627343 } },
+                    },
+                    source_ids: vec![],
+                }),
+                ..Default::default()
+            },
+            errors: vec![],
+        }];
+
+        let rig_poses: HashMap<String, PoseTransform> = HashMap::new();
+        apply_profile_postprocessing(&profile, &mut results, &rig_poses, Some(&field_map), true);
+
+        let pose = &results[0].outputs.robot_in_field.as_ref().unwrap().pose;
+        assert!((pose.translation.x - 4.4).abs() < 1e-3);
+        assert!((pose.translation.z - 10.944).abs() < 1e-3);
     }
 
     #[test]
@@ -1024,7 +1168,7 @@ mod tests {
         }];
 
         let rig_poses: HashMap<String, PoseTransform> = HashMap::new();
-        apply_profile_postprocessing(&profile, &mut results, &rig_poses);
+        apply_profile_postprocessing(&profile, &mut results, &rig_poses, None, false);
 
         let rotation = &results[0].outputs.robot_in_field.as_ref().unwrap().pose.rotation;
         let actual = &rotation.quaternion;
@@ -1074,7 +1218,7 @@ mod tests {
         }];
 
         let rig_poses: HashMap<String, PoseTransform> = HashMap::new();
-        apply_profile_postprocessing(&profile, &mut results, &rig_poses);
+        apply_profile_postprocessing(&profile, &mut results, &rig_poses, None, false);
 
         let actual = &results[0].outputs.robot_in_field.as_ref().unwrap().pose.rotation.quaternion;
         let actual_q = UnitQuaternion::new_normalize(Quaternion::new(actual.w, actual.x, actual.y, actual.z));
@@ -1129,7 +1273,7 @@ mod tests {
         }];
 
         let rig_poses: HashMap<String, PoseTransform> = HashMap::new();
-        apply_profile_postprocessing(&profile, &mut results, &rig_poses);
+        apply_profile_postprocessing(&profile, &mut results, &rig_poses, None, false);
 
         let actual = &results[0].outputs.robot_in_field.as_ref().unwrap().pose.rotation.quaternion;
         let actual_q = UnitQuaternion::new_normalize(Quaternion::new(actual.w, actual.x, actual.y, actual.z));
@@ -1184,7 +1328,7 @@ mod tests {
         }];
 
         let rig_poses: HashMap<String, PoseTransform> = HashMap::new();
-        apply_profile_postprocessing(&profile, &mut results, &rig_poses);
+        apply_profile_postprocessing(&profile, &mut results, &rig_poses, None, false);
 
         let actual = &results[0].outputs.robot_in_field.as_ref().unwrap().pose.rotation.quaternion;
         let actual_q = UnitQuaternion::new_normalize(Quaternion::new(actual.w, actual.x, actual.y, actual.z));
@@ -1242,7 +1386,7 @@ mod tests {
         let robot_from_camera = PoseTransform { translation: nalgebra::Vector3::new(0.0, 0.3048, 0.0), rotation: UnitQuaternion::identity() };
         rig_poses.insert("cam".to_string(), robot_from_camera);
 
-        apply_profile_postprocessing(&profile, &mut results, &rig_poses);
+        apply_profile_postprocessing(&profile, &mut results, &rig_poses, None, false);
 
         let camera_pose = &results[0].outputs.camera_in_field.as_ref().unwrap()[0].pose;
         let expected = compose_transforms(
@@ -1304,9 +1448,9 @@ mod tests {
         }];
         let rig_poses: HashMap<String, PoseTransform> = HashMap::new();
 
-        apply_profile_postprocessing(&profile, &mut results, &rig_poses);
+        apply_profile_postprocessing(&profile, &mut results, &rig_poses, None, false);
         results[0].outputs.robot_in_field.as_mut().unwrap().pose.translation.x = 1.0;
-        apply_profile_postprocessing(&profile, &mut results, &rig_poses);
+        apply_profile_postprocessing(&profile, &mut results, &rig_poses, None, false);
 
         let x = results[0].outputs.robot_in_field.as_ref().unwrap().pose.translation.x;
         assert!(x > 0.02 && x < 0.9, "expected smoothing to keep x between prior and measurement, got {x}");
@@ -1363,9 +1507,9 @@ mod tests {
         }];
         let rig_poses: HashMap<String, PoseTransform> = HashMap::new();
 
-        apply_profile_postprocessing(&profile, &mut results, &rig_poses);
+        apply_profile_postprocessing(&profile, &mut results, &rig_poses, None, false);
         results[0].outputs.robot_in_field.as_mut().unwrap().pose.translation.x = 1.0;
-        apply_profile_postprocessing(&profile, &mut results, &rig_poses);
+        apply_profile_postprocessing(&profile, &mut results, &rig_poses, None, false);
 
         let x = results[0].outputs.robot_in_field.as_ref().unwrap().pose.translation.x;
         assert!((x - 1.0).abs() < 1e-9, "solver override disabled smoothing, expected raw measurement, got {x}");
