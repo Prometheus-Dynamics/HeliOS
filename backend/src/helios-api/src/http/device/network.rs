@@ -3,12 +3,13 @@ use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::net::TcpStream;
 use tokio::sync::RwLock;
 use tokio::time::{Duration, Instant, timeout};
 use tracing::{info, warn};
 use utoipa::ToSchema;
+use uuid::Uuid;
 
 use super::super::error::{ApiError, ApiResult};
 use lib_net::interface::{IpAssignment, IpMode, NetworkInterfaceSettings, get_interfaces, set_interface};
@@ -350,12 +351,65 @@ fn render_networkd_config(settings: &NetworkInterfaceSettings) -> String {
     out
 }
 
-async fn write_atomic(path: &PathBuf, content: &str) -> Result<(), ApiError> {
-    let file_name = path.file_name().ok_or_else(|| ApiError::internal("network config path missing filename"))?.to_string_lossy();
-    let tmp_path = path.with_file_name(format!("{file_name}.tmp"));
-    tokio::fs::write(&tmp_path, content).await.map_err(|err| ApiError::internal(format!("failed to write {tmp_path:?}: {err}")))?;
-    tokio::fs::rename(&tmp_path, path).await.map_err(|err| ApiError::internal(format!("failed to rename {tmp_path:?}: {err}")))?;
+async fn write_atomic(path: &Path, content: &str) -> Result<(), ApiError> {
+    let path_buf = path.to_path_buf();
+    let path_display = path_buf.display().to_string();
+    let content = content.to_owned();
+    tokio::task::spawn_blocking(move || write_atomic_durable(&path_buf, content.as_bytes()))
+        .await
+        .map_err(|err| ApiError::internal(format!("failed to join network config write for {path_display}: {err}")))?
+        .map_err(|err| ApiError::internal(format!("failed to persist {path_display}: {err}")))
+}
+
+fn write_atomic_durable(path: &Path, content: &[u8]) -> std::io::Result<()> {
+    use std::fs::{self, OpenOptions};
+    use std::io::{Error, ErrorKind, Write};
+
+    let file_name = path.file_name().ok_or_else(|| Error::new(ErrorKind::InvalidInput, "network config path missing filename"))?.to_string_lossy();
+    let tmp_path = path.with_file_name(format!("{file_name}.tmp-{}", Uuid::new_v4()));
+
+    let mut tmp = OpenOptions::new().create(true).truncate(true).write(true).open(&tmp_path)?;
+    tmp.write_all(content)?;
+    tmp.sync_all()?;
+    drop(tmp);
+
+    if let Err(err) = fs::rename(&tmp_path, path) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(err);
+    }
+
+    sync_parent_dir(path)?;
     Ok(())
+}
+
+fn sync_parent_dir(path: &Path) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        sync_dir(parent)?;
+    }
+    Ok(())
+}
+
+fn sync_dir(path: &Path) -> std::io::Result<()> {
+    let dir = std::fs::File::open(path)?;
+    dir.sync_all()
+}
+
+async fn create_dir_all_durable(path: &Path) -> Result<(), ApiError> {
+    let path_buf = path.to_path_buf();
+    let path_display = path_buf.display().to_string();
+    tokio::task::spawn_blocking(move || create_dir_all_durable_blocking(&path_buf))
+        .await
+        .map_err(|err| ApiError::internal(format!("failed to join directory create for {path_display}: {err}")))?
+        .map_err(|err| ApiError::internal(format!("failed to create {path_display}: {err}")))
+}
+
+fn create_dir_all_durable_blocking(path: &Path) -> std::io::Result<()> {
+    if path.is_dir() {
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(path)?;
+    sync_parent_dir(path)
 }
 
 async fn persist_networkd_config(settings: &NetworkInterfaceSettings) -> Result<(), ApiError> {
@@ -363,14 +417,55 @@ async fn persist_networkd_config(settings: &NetworkInterfaceSettings) -> Result<
     let content = render_networkd_config(settings);
 
     let persist_dir = PathBuf::from(PERSIST_NETWORKD_DIR);
-    tokio::fs::create_dir_all(&persist_dir).await.map_err(|err| ApiError::internal(format!("failed to create {PERSIST_NETWORKD_DIR}: {err}")))?;
+    create_dir_all_durable(&persist_dir).await?;
     let persist_path = persist_dir.join(&file_name);
     write_atomic(&persist_path, &content).await?;
 
     let systemd_dir = PathBuf::from("/etc/systemd/network");
-    tokio::fs::create_dir_all(&systemd_dir).await.map_err(|err| ApiError::internal(format!("failed to create /etc/systemd/network: {err}")))?;
+    create_dir_all_durable(&systemd_dir).await?;
     let systemd_path = systemd_dir.join(&file_name);
     write_atomic(&systemd_path, &content).await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_networkd_config_static_ipv4_uses_assignments_gateway_and_dns() {
+        let settings = NetworkInterfaceSettings {
+            name: "eth0".into(),
+            mode: IpMode::Static,
+            ipv6_mode: IpMode::Dynamic,
+            ipv4: vec![IpAssignment { address: IpAddr::V4(Ipv4Addr::new(10, 12, 34, 56)), prefix: 24 }],
+            gateways: vec![IpAddr::V4(Ipv4Addr::new(10, 12, 34, 1))],
+            dns: lib_net::interface::DnsConfig { servers: vec![IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1))], search: vec!["lan.local".into()] },
+            ..NetworkInterfaceSettings::default()
+        };
+
+        let rendered = render_networkd_config(&settings);
+        assert!(rendered.contains("Name=eth0\n"));
+        assert!(rendered.contains("Address=10.12.34.56/24\n"));
+        assert!(rendered.contains("Gateway=10.12.34.1\n"));
+        assert!(rendered.contains("DNS=1.1.1.1\n"));
+        assert!(rendered.contains("Domains=lan.local\n"));
+        assert!(rendered.contains("DHCP=ipv6\n"));
+    }
+
+    #[test]
+    fn write_atomic_durable_replaces_existing_content_without_temp_files() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("eth0.network");
+
+        write_atomic_durable(&path, b"first").expect("write first version");
+        write_atomic_durable(&path, b"second").expect("write second version");
+
+        let written = std::fs::read_to_string(&path).expect("read final file");
+        assert_eq!(written, "second");
+
+        let leftovers = std::fs::read_dir(dir.path()).expect("list dir").filter_map(|entry| entry.ok()).filter(|entry| entry.file_name().to_string_lossy().contains(".tmp-")).count();
+        assert_eq!(leftovers, 0);
+    }
 }

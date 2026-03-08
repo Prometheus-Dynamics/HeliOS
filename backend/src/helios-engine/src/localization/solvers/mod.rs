@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
 use lib_cv::modules::localization::MarkerMap;
-use nalgebra::UnitQuaternion;
+use nalgebra::{UnitQuaternion, Vector3};
 
 use super::config::{LocalizationPoseSpace, LocalizationSolverConfig, LocalizationSolverMode, LocalizationSolverRuntimeTuningConfig, LocalizationSourceConfig};
-use super::math::PoseTransform;
-use super::sources::{LocalizationDetection, SourceSample};
+use super::math::{compose_transforms, invert_transform, PoseTransform};
+use super::sources::{LocalizationDetection, PoseSample, SourceSample};
 use super::types::{LocalizationDetectionPose, LocalizationSolverOutputs};
 
 pub mod group;
@@ -91,6 +91,42 @@ pub(crate) fn source_looks_like_imu(source: &LocalizationSourceConfig) -> bool {
     [source.id.as_str(), source.stream_id.as_str(), source.output_key.as_str(), source.camera_uid.as_str()].iter().any(|value| has_imu_token(value))
 }
 
+pub(crate) fn camera_field_pose_from_sample(pose_sample: &PoseSample) -> Option<PoseTransform> {
+    if pose_sample.has_translation {
+        Some(pose_sample.pose)
+    } else if pose_sample.has_rotation {
+        Some(PoseTransform { translation: Vector3::zeros(), rotation: pose_sample.pose.rotation })
+    } else {
+        None
+    }
+}
+
+pub(crate) fn robot_field_pose_from_camera_sample(sample: &SourceSample, rig_poses: &HashMap<String, PoseTransform>) -> Result<Option<PoseSample>, String> {
+    let Some(pose_sample) = sample.pose.as_ref() else {
+        return Ok(None);
+    };
+    if sample.source.pose_space.unwrap_or(LocalizationPoseSpace::RobotInField) != LocalizationPoseSpace::CameraInField || source_looks_like_imu(&sample.source) {
+        return Ok(None);
+    }
+
+    let Some(field_from_camera) = camera_field_pose_from_sample(pose_sample) else {
+        return Ok(None);
+    };
+    let Some(robot_from_camera) = rig_poses.get(&sample.source.camera_uid) else {
+        return Err(format!("missing rig pose for camera {}", sample.source.camera_uid));
+    };
+
+    let mut field_from_robot = compose_transforms(&field_from_camera, &invert_transform(robot_from_camera));
+    if !pose_sample.has_translation {
+        field_from_robot.translation = Vector3::zeros();
+    }
+    if !pose_sample.has_rotation {
+        field_from_robot.rotation = UnitQuaternion::identity();
+    }
+
+    Ok(Some(PoseSample { pose: field_from_robot, has_translation: pose_sample.has_translation, has_rotation: pose_sample.has_rotation }))
+}
+
 pub(crate) fn apply_imu_rotation_prior(
     visual_rotation: UnitQuaternion<f64>,
     imu_rotation: Option<(UnitQuaternion<f64>, Vec<String>)>,
@@ -122,4 +158,83 @@ pub(crate) fn apply_imu_rotation_prior(
     }
 
     (visual_rotation.slerp(&imu_rotation, alpha), source_ids)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::localization::config::{LocalizationSolverConfig, LocalizationSolverMode, LocalizationSourceConfig};
+    use crate::localization::solvers::group::GroupSolveSolver;
+    use crate::localization::solvers::per_camera_merge::PerCameraMergeSolver;
+    use crate::localization::solvers::robust_group::RobustGroupSolveSolver;
+    use crate::localization::types::LocalizationSolverPose;
+
+    fn solver_config(mode: LocalizationSolverMode) -> LocalizationSolverConfig {
+        LocalizationSolverConfig {
+            id: format!("solver_{mode:?}"),
+            name: format!("solver_{mode:?}"),
+            mode,
+            output_spaces: vec![LocalizationPoseSpace::RobotInField, LocalizationPoseSpace::CameraInField],
+            source_ids: Vec::new(),
+            color: None,
+            runtime_tuning: LocalizationSolverRuntimeTuningConfig::default(),
+            temporal_stabilization: None,
+        }
+    }
+
+    fn source_config() -> LocalizationSourceConfig {
+        LocalizationSourceConfig {
+            id: "src_cam0".to_string(),
+            stream_id: "stream_cam0".to_string(),
+            output_key: "camera_pose".to_string(),
+            camera_uid: "cam0".to_string(),
+            pose_space: Some(LocalizationPoseSpace::CameraInField),
+            input_key: None,
+            enabled: true,
+            weight: 1.0,
+        }
+    }
+
+    fn sample() -> SourceSample {
+        SourceSample {
+            source: source_config(),
+            detections: Vec::new(),
+            pose: Some(PoseSample { pose: PoseTransform { translation: Vector3::new(5.0, 0.0, 1.0), rotation: UnitQuaternion::identity() }, has_translation: true, has_rotation: true }),
+            poll_ms: 0.0,
+            tag_size: None,
+            error: None,
+        }
+    }
+
+    fn robot_pose_translation(pose: &LocalizationSolverPose) -> Vector3<f64> {
+        Vector3::new(pose.pose.translation.x, pose.pose.translation.y, pose.pose.translation.z)
+    }
+
+    fn run_camera_pose_projection_test<S: LocalizationSolver>(solver: &S, mode: LocalizationSolverMode) {
+        let sample = sample();
+        let samples = vec![&sample];
+        let output_spaces = vec![LocalizationPoseSpace::RobotInField, LocalizationPoseSpace::CameraInField];
+        let mut rig_poses = HashMap::new();
+        rig_poses.insert(sample.source.camera_uid.clone(), PoseTransform { translation: Vector3::new(1.0, 0.0, 0.25), rotation: UnitQuaternion::identity() });
+
+        let outcome =
+            solver.solve(SolverContext { solver_id: "solver", solver_config: &solver_config(mode), output_spaces: &output_spaces, samples: &samples, rig_poses: &rig_poses, marker_map: None });
+
+        assert!(outcome.errors.is_empty(), "unexpected solver errors: {:?}", outcome.errors);
+        let robot = outcome.outputs.robot_in_field.as_ref().expect("robot pose");
+        let camera = outcome.outputs.camera_in_field.as_ref().and_then(|entries| entries.first()).expect("camera pose");
+
+        let robot_translation = robot_pose_translation(robot);
+        assert!((robot_translation.x - 4.0).abs() < 1e-9, "expected camera x offset to shift robot x, got {}", robot_translation.x);
+        assert!((robot_translation.z - 0.75).abs() < 1e-9, "expected camera z offset to shift robot z, got {}", robot_translation.z);
+        assert!((camera.pose.translation.x - 5.0).abs() < 1e-9, "expected camera pose to remain unchanged");
+        assert!((camera.pose.translation.z - 1.0).abs() < 1e-9, "expected camera pose to remain unchanged");
+    }
+
+    #[test]
+    fn camera_in_field_pose_sources_project_through_rig_layout() {
+        run_camera_pose_projection_test(&GroupSolveSolver::new(), LocalizationSolverMode::GroupSolve);
+        run_camera_pose_projection_test(&RobustGroupSolveSolver::new(), LocalizationSolverMode::RobustGroupSolve);
+        run_camera_pose_projection_test(&PerCameraMergeSolver::new(), LocalizationSolverMode::PerCameraMerge);
+    }
 }

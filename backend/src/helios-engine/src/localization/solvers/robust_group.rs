@@ -4,7 +4,10 @@ use std::collections::{HashMap, HashSet};
 use lib_cv::modules::localization::{MarkerMap, MarkerObservation};
 use lib_cv::Rotation3;
 
-use super::{apply_imu_rotation_prior, default_supports_mode, push_detection_pose, source_looks_like_imu, LocalizationSolver, SolverContext, SolverOutcome};
+use super::{
+    apply_imu_rotation_prior, camera_field_pose_from_sample, default_supports_mode, push_detection_pose, robot_field_pose_from_camera_sample, source_looks_like_imu, LocalizationSolver, SolverContext,
+    SolverOutcome,
+};
 use crate::localization::config::{LocalizationPoseSpace, LocalizationSolverMode, LocalizationSolverRuntimeTuningConfig};
 use crate::localization::math::{compose_transforms, invert_transform, transform_to_pose, transform_to_rotation, transform_to_translation, PoseTransform};
 use crate::localization::merge::{merge_robot_estimates, merge_rotation_estimates};
@@ -369,20 +372,26 @@ impl LocalizationSolver for RobustGroupSolveSolver {
                     }
                     LocalizationPoseSpace::CameraInField => {
                         if needs_camera_in_field && !source_looks_like_imu(&sample.source) {
-                            let pose = if pose_sample.has_translation {
-                                Some(pose_sample.pose)
-                            } else if pose_sample.has_rotation {
-                                Some(PoseTransform { translation: Vector3::zeros(), rotation: pose_sample.pose.rotation })
-                            } else {
-                                None
-                            };
-                            if let Some(pose) = pose {
+                            if let Some(pose) = camera_field_pose_from_sample(pose_sample) {
                                 camera_outputs.push(LocalizationSourcePose {
                                     source_id: sample.source.id.clone(),
                                     camera_uid: sample.source.camera_uid.clone(),
                                     weight: sample.source.weight,
                                     pose: transform_to_pose(&pose),
                                 });
+                            }
+                        }
+                        if needs_robot_in_field && !source_looks_like_imu(&sample.source) {
+                            match robot_field_pose_from_camera_sample(sample, rig_poses) {
+                                Ok(Some(robot_pose)) => {
+                                    if robot_pose.has_translation {
+                                        translation_estimates.push((robot_pose.pose, sample.source.weight, sample.source.id.clone()));
+                                    } else if robot_pose.has_rotation {
+                                        non_imu_rotation_overrides.push((robot_pose.pose.rotation, sample.source.weight, sample.source.id.clone()));
+                                    }
+                                }
+                                Ok(None) => {}
+                                Err(err) => errors.push(err),
                             }
                         }
                     }
