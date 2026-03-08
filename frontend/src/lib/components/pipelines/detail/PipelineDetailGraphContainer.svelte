@@ -15,12 +15,12 @@
   import {
     formatHeatDuration,
     formatTimestamp,
-    metricsRowKey,
     normalizeHeatmapNodeId,
     shouldIncludeHeatmapNode
   } from '$lib/components/pipelines/detail/pipelineDetailMetricsUtils';
   import PipelineDetailGraphSection from '$lib/components/pipelines/detail/PipelineDetailGraphSection.svelte';
   import { resolveStreamLabel } from '$lib/utils/streamLabels';
+  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
   type PipelineBreadcrumb = {
     id: string;
@@ -184,7 +184,7 @@
   });
 
   const registryByBackendId = $derived.by(() => {
-    const map = new Map<string, PipelineRegistryEntry>();
+    const map = new SvelteMap<string, PipelineRegistryEntry>();
     for (const entry of registryEntries ?? []) {
       const id = entry?.id?.trim();
       if (!id) continue;
@@ -228,7 +228,7 @@
       if (!normalizedId) return;
       const normalizedLabel = label.trim().length > 0 ? label.trim() : normalizedId;
       const existing = index[normalizedId];
-      const tokens = new Set(
+      const tokens = new SvelteSet(
         (existing?.keywords ?? '')
           .split(' ')
           .map((token) => token.trim())
@@ -312,7 +312,7 @@
     const segments = validationSegments.length > 0 ? validationSegments : detected.segments;
     const gpuNodeIds =
       validationSegments.length > 0
-        ? new Set<string>(validationSegments.flatMap((segment) => segment.nodes))
+        ? new SvelteSet<string>(validationSegments.flatMap((segment) => segment.nodes))
         : detected.gpuNodeIds;
     const nodes = graphPlan?.nodes ?? {};
     const resolveLabel = (nodeId: string): string => {
@@ -330,7 +330,7 @@
       );
       return (label ?? nodeId).trim();
     };
-    const assigned = new Set<string>();
+    const assigned = new SvelteSet<string>();
     const decoratedSegments = segments.map((segment) => {
       segment.nodes.forEach((id) => assigned.add(id));
       return {
@@ -462,7 +462,7 @@
 
   const heatmapStreamOptions = $derived.by<HeatmapStreamOption[]>(() => {
     const options: HeatmapStreamOption[] = [];
-    const seen = new Set<string>();
+    const seen = new SvelteSet<string>();
     const metrics = context.metrics ?? [];
 
     if (metrics && metrics.length > 0) {
@@ -543,7 +543,7 @@
       return null;
     }
 
-    const includeCache = new Map<string, string | null>();
+    const includeCache = new SvelteMap<string, string | null>();
     const resolveIncludedNodeId = (nodeId: string): string | null => {
       if (includeCache.has(nodeId)) {
         return includeCache.get(nodeId) ?? null;

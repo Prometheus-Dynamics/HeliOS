@@ -1,5 +1,7 @@
 import { buildWsUrlFromHttpBase, canUseWebSockets } from '$lib/api/wsClient';
 
+type UnknownRecord = Record<string, unknown>;
+
 export type StreamOutputsListEvent = {
   outputs: Array<{ name: string; ty?: unknown; previewable: boolean }>;
   timestamp_ms?: number;
@@ -25,6 +27,9 @@ export type StreamOutputsSocket = {
   subscribe: (ports: string[], options?: { intervalMs?: number }) => void;
   close: () => void;
 };
+
+const asRecord = (value: unknown): UnknownRecord | null =>
+  value && typeof value === 'object' ? (value as UnknownRecord) : null;
 
 export function buildStreamOutputsUrl(streamId: string, options: { portsIntervalMs?: number } = {}): string {
   const baseUrl = buildWsUrlFromHttpBase(['v1', 'ws', 'streams', encodeURIComponent(streamId), 'outputs']);
@@ -149,15 +154,22 @@ function parsePayload(data: unknown):
   if (typeof data !== 'string') return null;
   try {
     const parsed = JSON.parse(data);
-    if (!parsed || typeof parsed !== 'object') return null;
-    if ('outputs' in parsed) {
+    const parsedRecord = asRecord(parsed);
+    if (!parsedRecord) return null;
+    if ('outputs' in parsedRecord) {
       return { type: 'outputs', event: normalizeOutputs(parsed) };
     }
-    if ('port' in parsed && ('value' in parsed || 'error' in parsed)) {
+    if ('port' in parsedRecord && ('value' in parsedRecord || 'error' in parsedRecord)) {
       return { type: 'sample', event: normalizeSample(parsed) };
     }
-    if ('type' in parsed && (parsed as any).type === 'error' && 'error' in parsed) {
-      return { type: 'error', error: { error: String((parsed as any).error ?? 'Unknown error'), request_id: ((parsed as any).request_id ?? null) as any } };
+    if (parsedRecord.type === 'error' && 'error' in parsedRecord) {
+      return {
+        type: 'error',
+        error: {
+          error: String(parsedRecord.error ?? 'Unknown error'),
+          request_id: typeof parsedRecord.request_id === 'string' ? parsedRecord.request_id : null
+        }
+      };
     }
   } catch (err) {
     console.warn('Failed to parse stream outputs payload', err);
@@ -165,28 +177,30 @@ function parsePayload(data: unknown):
   return null;
 }
 
-function normalizeOutputs(value: any): StreamOutputsListEvent {
+function normalizeOutputs(value: unknown): StreamOutputsListEvent {
+  const record = asRecord(value);
+  const outputList = Array.isArray(record?.outputs) ? record.outputs : [];
   return {
-    outputs: Array.isArray(value?.outputs)
-      ? value.outputs
-          .map((v: any) => {
-            if (!v || typeof v !== 'object') return null;
-            const name = typeof v.name === 'string' ? v.name.trim() : '';
-            if (!name) return null;
-            return { name, ty: (v as any).ty, previewable: Boolean((v as any).previewable) };
-          })
-          .filter(Boolean)
-      : [],
-    timestamp_ms: typeof value?.timestamp_ms === 'number' ? value.timestamp_ms : undefined,
-    request_id: typeof value?.request_id === 'string' ? value.request_id : null
+    outputs: outputList
+      .map((entry) => {
+        const output = asRecord(entry);
+        if (!output) return null;
+        const name = typeof output.name === 'string' ? output.name.trim() : '';
+        if (!name) return null;
+        return { name, ty: output.ty, previewable: Boolean(output.previewable) };
+      })
+      .filter((entry): entry is { name: string; ty: unknown; previewable: boolean } => entry !== null),
+    timestamp_ms: typeof record?.timestamp_ms === 'number' ? record.timestamp_ms : undefined,
+    request_id: typeof record?.request_id === 'string' ? record.request_id : null
   };
 }
 
-function normalizeSample(value: any): StreamOutputSampleEvent {
+function normalizeSample(value: unknown): StreamOutputSampleEvent {
+  const record = asRecord(value);
   return {
-    port: String(value?.port ?? ''),
-    value: 'value' in value ? value.value : undefined,
-    error: typeof value?.error === 'string' ? value.error : null,
-    timestamp_ms: typeof value?.timestamp_ms === 'number' ? value.timestamp_ms : undefined
+    port: String(record?.port ?? ''),
+    value: record && 'value' in record ? record.value : undefined,
+    error: typeof record?.error === 'string' ? record.error : null,
+    timestamp_ms: typeof record?.timestamp_ms === 'number' ? record.timestamp_ms : undefined
   };
 }

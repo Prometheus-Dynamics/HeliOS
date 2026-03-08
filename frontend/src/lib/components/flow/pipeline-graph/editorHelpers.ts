@@ -34,7 +34,7 @@ export const deriveAutoPortName = (
 ): string => {
   const fallback = direction === 'input' ? 'input' : 'output';
   const normalizedBase = normalizePipelinePortName(base ?? fallback);
-  let candidate = normalizedBase || fallback;
+  const candidate = normalizedBase || fallback;
   const record = existing ?? {};
   if (!record[candidate]) {
     return candidate;

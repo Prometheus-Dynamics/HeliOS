@@ -6,7 +6,6 @@ import type {
   PhotonvisionDiscoverStreamsResponse,
   PeerDiscoveryInfo,
   PeerDiscoveryScope,
-  PeerEndpointSummary,
   PeerCustomIntegrationConfig,
   PeerIntegrationKind,
   PeerIntegrationMetadata,
@@ -15,14 +14,8 @@ import type {
   PeerIntegrationArucoMapping,
   PeerIntegrationPose,
   PeerIntegrationPoseMapping,
-  PeerStatus,
   PeerSummary
 } from '$lib/types/peer';
-
-type ApiPeerEndpoint = {
-  host?: unknown;
-  port?: unknown;
-};
 
 type ApiPeerVector = {
   x?: unknown;

@@ -161,6 +161,8 @@
       viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
       preserveAspectRatio="xMidYMid meet"
       class="h-full w-full"
+      role="application"
+      aria-label="Fan curve editor"
       onpointermove={handlePointerMove}
       onpointerup={stopDrag}
       onpointercancel={stopDrag}

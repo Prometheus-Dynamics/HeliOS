@@ -1,5 +1,5 @@
 <script lang="ts">
-  const { ctx } = $props<{ ctx: any }>();
+  const { ctx } = $props<{ ctx: Record<string, unknown> }>();
 
   const PipelineDetailPanelComponent = $derived.by(() => ctx.PipelineDetailPanelComponent);
   const PipelineGraphContextMenu = $derived.by(() => ctx.PipelineGraphContextMenu);
@@ -7,21 +7,21 @@
   const PipelineInspectorPanel = $derived.by(() => ctx.PipelineInspectorPanel);
   const PipelineTunePanel = $derived.by(() => ctx.PipelineTunePanel);
 
-  const activeTab = ctx.activeTab;
-  const loadError = ctx.loadError;
-  const registryLoading = ctx.registryLoading;
-  const registryError = ctx.registryError;
-  const registry = ctx.registry;
-  const detailContext = ctx.detailContext;
-  const editingPlan = ctx.editingPlan;
-  const editingBreadcrumbs = ctx.editingBreadcrumbs;
-  const dataTypes = ctx.dataTypes;
-  const pipelines = ctx.pipelines;
-  const pipelineInputEntries = ctx.pipelineInputEntries;
-  const pipelineOutputEntries = ctx.pipelineOutputEntries;
-  const inspectorTab = ctx.inspectorTab;
-  const captureDevices = ctx.captureDevices;
-  const selectedPipeline = ctx.selectedPipeline;
+  const activeTab = $derived.by(() => ctx.activeTab);
+  const loadError = $derived.by(() => ctx.loadError);
+  const registryLoading = $derived.by(() => ctx.registryLoading);
+  const registryError = $derived.by(() => ctx.registryError);
+  const registry = $derived.by(() => ctx.registry);
+  const detailContext = $derived.by(() => ctx.detailContext);
+  const editingPlan = $derived.by(() => ctx.editingPlan);
+  const editingBreadcrumbs = $derived.by(() => ctx.editingBreadcrumbs);
+  const dataTypes = $derived.by(() => ctx.dataTypes);
+  const pipelines = $derived.by(() => ctx.pipelines);
+  const pipelineInputEntries = $derived.by(() => ctx.pipelineInputEntries);
+  const pipelineOutputEntries = $derived.by(() => ctx.pipelineOutputEntries);
+  const inspectorTab = $derived.by(() => ctx.inspectorTab);
+  const captureDevices = $derived.by(() => ctx.captureDevices);
+  const selectedPipeline = $derived.by(() => ctx.selectedPipeline);
 </script>
 
 {#snippet content()}
@@ -37,37 +37,17 @@
   addNodeFromRegistry,
   clearTuneMultiplexCell,
   clearTuneNodeDraft,
-  closeAssignModal,
   closeGraphContextMenu,
   clearValidation,
   controlMax,
   controlMin,
   controlStep,
   contextRegistryOptions,
-  createModalOpen,
-  createMode,
-  createName,
-  createSourcePipelineId,
-  createSourceTemplateId,
-  createBusy,
-  createError,
-  customNodeSearch,
-  deleteModalBusy,
-  deleteModalError,
-  deleteModalOpen,
-  deleteModalPipeline,
-  detailPanelRef,
-  diffDaedalusNodeValues,
   displayControlValue,
   dropTuneMultiplexOn,
   emptyPipelineGraphPlan,
-  ensureTuneControlSocket,
-  ensureTunePipelinesApplied,
   exportCurrentPipeline,
   extractControlValue,
-  extractNodeOverridesFromGraph,
-  fetchTuneMetricsSnapshots,
-  fetchTuneStreams,
   groupSelection,
   graphContextMenu,
   graphContextSearch,
@@ -93,7 +73,6 @@
   handlePlanChange,
   handleTuneAssign,
   isDaedalusPlan,
-  isInitialLoading,
   menuOptions,
   metricsSource,
   metricsStatusLabel,
@@ -108,8 +87,6 @@
   organizeGraphNodes,
   pipelineLabelById,
   pipelineMetricsSummary,
-  pipelineSearch,
-  pipelinesRefreshing,
   readTuneNodeDraft,
   readTuneStreamNodeDraft,
   refreshPipelineMetrics,
@@ -117,8 +94,6 @@
   removeGraphConnection,
   removeGraphNode,
   registryDrawerOpen,
-  resolveTunePipelineGraph,
-  resolveTunePipelineOutput,
   resetTunePipelineUi,
   safeClonePlan,
   saveCurrentPipeline,
@@ -126,11 +101,9 @@
   scheduleControlApply,
   scheduleTuneGlobalAutoSave,
   scheduleTuneMultiplexAutoApply,
-  scheduleTuneStreamAutoApply,
   setActiveTab,
   setBoundaryDraftDirection,
   setBoundaryDraftPortName,
-  setBoundaryDraftPortType,
   setGraphContextMenuElement,
   setGroupDraftColor,
   setGroupDraftName,
@@ -142,105 +115,44 @@
   setSelectedPipeline,
   setTuneLivePipelineOutput,
   setTuneMultiplexGridDimensions,
-  setTuneNodeDraft,
   setTuneNodeError,
   setTuneOutputKeyForCell,
   setTuneOutputSelectionForPipeline,
-  setTuneStreamNodeDraft,
-  setTuneStreamNodeError,
   startTuneMultiplexDrag,
   streamLabel,
   ungroupSelection,
   graphBindings,
   tuneBindings,
-  tuneActiveStreamId,
   tuneAllowDrop,
   tuneConstantGroups,
-  tuneConstantSearch,
-  tuneControlAppliedState,
-  tuneControlBusy,
-  tuneControlSocket,
-  tuneControlState,
   tuneControlsError,
-  tuneControlsLoadedStreamId,
   tuneControlsLoading,
-  tuneControlsQuery,
-  tuneControlsRequestId,
   tuneFilteredConstantGroups,
   tuneFilteredControls,
-  tuneMetricsError,
-  tuneMetricsInFlight,
-  tuneMetricsPollTimer,
-  tuneMetricsRefreshPipelineId,
-  tuneMetricsRequestId,
-  tuneMetricsSnapshots,
-  tuneMetricsStatus,
-  tuneMetricsUpdatedAt,
-  tuneMultiplexAutoApplyTimer,
-  tuneMultiplexBusy,
   tuneMultiplexColumnIndices,
-  tuneMultiplexColumns,
-  tuneMultiplexDirty,
-  tuneMultiplexDragPipelineId,
-  tuneMultiplexDragSource,
   tuneMultiplexError,
   tuneMultiplexGridIsSingle,
-  tuneMultiplexHydratedSignature,
-  tuneMultiplexHydratedStreamId,
   tuneMultiplexLayoutSignature,
-  tuneMultiplexLastAppliedSignature,
   tuneMultiplexOutputOptionsCache,
   tuneMultiplexPalettePipelineIds,
   tuneMultiplexRowIndices,
-  tuneMultiplexRows,
-  tuneMultiplexSlotOutputs,
-  tuneMultiplexSlots,
   tuneNodeDescriptors,
-  tuneNodeDrafts,
   tuneNodeErrors,
   tuneOutputKeyForCell,
   tuneOutputSelectionForPipeline,
-  tunePerformanceTab,
-  tunePipelineAssignDraft,
   tunePipelineAssignFilteredGraphs,
-  tunePipelineAssignModalOpen,
-  tunePipelineAssignQuery,
   tunePipelineForCell,
   tunePipelineGraphs,
-  tunePipelineRemoveCandidateId,
-  tunePipelineRemoveModalOpen,
-  tunePipelineUiDraft,
-  tunePipelineUiSearch,
   tunePlan,
   tunePreviewStream,
-  tuneRuntimeFromStats,
-  tuneScopeTab,
-  tuneSelectedPipelineOutput,
-  tuneSelectedStream,
-  tuneShowReadOnlyControls,
-  tuneStreamApplyBusyById,
   tuneStreamApplyErrorById,
-  tuneStreamApplyQueuedById,
-  tuneStreamApplyRafById,
-  tuneStreamAutoApplyTimerById,
   tuneStreamControls,
-  tuneStreamInputOverridesById,
-  tuneStreamLastAppliedNodeOverridesById,
-  tuneStreamLastAppliedSignatureById,
-  tuneStreamNodeDraftsById,
   tuneStreamNodeErrorsById,
   tuneStreamNodeOverridesById,
-  tuneStreamOverridesLoaded,
-  tuneStreams,
   tuneStreamsError,
   tuneStreamsForPipeline,
-  tuneStreamsLoaded,
   tuneStreamsLoading,
-  tuneUiActiveTabId,
-  tuneUiEditMode,
   tuneUiMode,
-  tuneUiSelectedItemAnchor,
-  tuneUiSelectedItemId,
   updateGlobalNodeValue,
   updateStreamNodeValue
 } = ctx}
@@ -320,7 +232,6 @@
       addBoundaryDraftPort={addBoundaryDraftPort}
       removeBoundaryDraftPort={removeBoundaryDraftPort}
       setBoundaryDraftPortName={setBoundaryDraftPortName}
-      setBoundaryDraftPortType={setBoundaryDraftPortType}
       setBoundaryDraftDirection={setBoundaryDraftDirection}
       applyBoundaryDraft={applyBoundaryDraft}
       setGroupDraftName={setGroupDraftName}

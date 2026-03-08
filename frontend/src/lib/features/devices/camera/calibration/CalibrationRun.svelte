@@ -1,16 +1,7 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import CalibrationResults from './CalibrationResults.svelte';
   import { estimateCalibrationFovDegs } from '../cameraCalibrationUtils';
-
-  type CalibrationBoard = {
-    squaresX: number;
-    squaresY: number;
-    squareMm: number;
-    markerMm: number;
-    marginMm: number;
-    dpi: number;
-    dictionary?: string;
-  };
 
   type CalibrationImage = {
     name: string;
@@ -74,7 +65,7 @@
 
   type CalibrationRunProps = {
     calibrationTool: 'lens' | 'color';
-    calibrationBoard: CalibrationBoard;
+    calibrationBoard: unknown;
     streamUuid: string | null;
     currentCalibrationParams: CalibrationParams | null;
     sourceResolution: { width: number; height: number } | null;
@@ -169,6 +160,7 @@
     onOpenIpaChartSolverForImage,
     onApplyIpaCcm
   }: CalibrationRunProps = $props();
+  untrack(() => calibrationBoard);
 
   export type $$Props = CalibrationRunProps;
 
@@ -264,6 +256,11 @@
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
+  }
+
+  function openIpaDownload(url: string): void {
+    if (typeof window === 'undefined') return;
+    window.open(url, '_blank', 'noopener,noreferrer');
   }
 </script>
 
@@ -497,8 +494,20 @@
           <p class="text-xs text-surface-500">Solve a 3×3 CCM from a ColorChecker Classic 24 photo and write it into the IPA JSON.</p>
         </div>
         <div class="flex flex-wrap gap-2">
-          <a class="btn btn-xs preset-tonal" href={apiPath('/device/ipa/download?target=pisp')}>pisp JSON</a>
-          <a class="btn btn-xs preset-tonal" href={apiPath('/device/ipa/download?target=vc4')}>vc4 JSON</a>
+          <button
+            class="btn btn-xs preset-tonal"
+            type="button"
+            onclick={() => openIpaDownload(apiPath('/device/ipa/download?target=pisp'))}
+          >
+            pisp JSON
+          </button>
+          <button
+            class="btn btn-xs preset-tonal"
+            type="button"
+            onclick={() => openIpaDownload(apiPath('/device/ipa/download?target=vc4'))}
+          >
+            vc4 JSON
+          </button>
         </div>
       </div>
 

@@ -18,6 +18,7 @@
   import { buildTypeOptions, describePortType } from '$lib/features/pipelines/inspector/inspectorTypeUtils';
   import { channelPolicyOptions } from './channelPolicies';
   import BoundaryRules from './BoundaryRules.svelte';
+  import { SvelteSet } from 'svelte/reactivity';
 
   type PortConfigEvent =
     | { direction: 'input'; name: string; config: PipelineInputQueueConfig }
@@ -80,7 +81,7 @@
   $effect(() => {
     const nextDrafts = { ...portEditDrafts };
     const nextOpen = { ...portEditOpen };
-    const activeKeys = new Set<string>();
+    const activeKeys = new SvelteSet<string>();
     inputs.forEach((entry) => {
       const key = portEditKey('input', entry.nodeId);
       activeKeys.add(key);
@@ -214,12 +215,11 @@
 </script>
 
 <InspectorSection title="Inputs">
-  {#snippet children()}
-    {#if inputs.length === 0}
-      <p class="mt-2 text-xs text-surface-500">No inputs defined.</p>
-    {:else}
-      <ul class="mt-2 space-y-2">
-        {#each inputs as entry (entry.name)}
+  {#if inputs.length === 0}
+    <p class="mt-2 text-xs text-surface-500">No inputs defined.</p>
+  {:else}
+    <ul class="mt-2 space-y-2">
+      {#each inputs as entry (entry.name)}
           {@const variants = getDataTypeVariants(entry.dataType)}
           {@const entrySettable = isDataTypeSettable(entry.dataType)}
           {@const editKey = portEditKey('input', entry.nodeId)}
@@ -318,10 +318,9 @@
               onClear={() => clearPipelineInputValue(entry.name, entry.dataType)}
             />
           </li>
-        {/each}
-      </ul>
-    {/if}
-  {/snippet}
+      {/each}
+    </ul>
+  {/if}
 </InspectorSection>
 
 <section class="grid gap-3 rounded border border-surface-800/70 bg-surface-900/30 p-4 md:grid-cols-[1fr_auto]">
@@ -358,12 +357,11 @@
 </section>
 
 <InspectorSection title="Outputs">
-  {#snippet children()}
-    {#if outputs.length === 0}
-      <p class="mt-2 text-xs text-surface-500">No outputs defined.</p>
-    {:else}
-      <ul class="mt-2 space-y-2">
-        {#each outputs as entry (entry.name)}
+  {#if outputs.length === 0}
+    <p class="mt-2 text-xs text-surface-500">No outputs defined.</p>
+  {:else}
+    <ul class="mt-2 space-y-2">
+      {#each outputs as entry (entry.name)}
           {@const editKey = portEditKey('output', entry.nodeId)}
           {@const editOpen = Boolean(portEditOpen[editKey])}
           {@const editDraft = portEditDrafts[editKey] ?? { name: entry.name, dataTypeKey: resolveDataTypeKey(entry.dataType) ?? 'generic' }}
@@ -434,53 +432,52 @@
               </div>
             {/if}
           </li>
-        {/each}
-      </ul>
-    {/if}
-    {#if outputs.length > 0}
-      <div class="rounded border border-surface-800/60 bg-surface-950/30 p-3 text-micro space-y-2">
-        <p class="uppercase tracking-[0.3em] text-surface-500">Capacity</p>
-        {#each outputs as entry (entry.name)}
-          <BoundaryRules
-            direction="output"
-            name={entry.name}
-            capacity={pipelineOutputConfigs?.[entry.name]?.capacity ?? 4}
-            onCapacityChange={(value) => updateOutputCapacity(entry.name, value)}
-          />
-        {/each}
-      </div>
-    {/if}
-    <div class="grid gap-3 rounded border border-surface-800/70 bg-surface-900/30 p-4 md:grid-cols-[1fr_auto]">
-      <div>
-        <p class="text-micro uppercase tracking-[0.3em] text-surface-500">Add output</p>
-        <div class="mt-1 grid gap-2 md:grid-cols-2">
-          <input
-            class="w-full rounded border border-surface-700 bg-surface-900/70 px-3 py-2 text-sm"
-            placeholder="name"
-            value={newOutputName}
-            oninput={(e) => (newOutputName = (e.currentTarget as HTMLInputElement).value)}
-          />
-          <select
-            class="w-full rounded border border-surface-700 bg-surface-900/70 px-3 py-2 text-sm"
-            value={newOutputTypeKey}
-            onchange={(e) => (newOutputTypeKey = (e.currentTarget as HTMLSelectElement).value)}
-          >
-            {#each boundaryTypeOptions as option (option.key)}
-              <option value={option.key}>{option.label}</option>
-            {/each}
-          </select>
-        </div>
-      </div>
-      <div class="flex items-end">
-        <button
-          class="btn btn-3xs preset-filled uppercase tracking-[0.3em]"
-          type="button"
-          onclick={() => addPort('output')}
-          disabled={!newOutputName.trim()}
+      {/each}
+    </ul>
+  {/if}
+  {#if outputs.length > 0}
+    <div class="rounded border border-surface-800/60 bg-surface-950/30 p-3 text-micro space-y-2">
+      <p class="uppercase tracking-[0.3em] text-surface-500">Capacity</p>
+      {#each outputs as entry (entry.name)}
+        <BoundaryRules
+          direction="output"
+          name={entry.name}
+          capacity={pipelineOutputConfigs?.[entry.name]?.capacity ?? 4}
+          onCapacityChange={(value) => updateOutputCapacity(entry.name, value)}
+        />
+      {/each}
+    </div>
+  {/if}
+  <div class="grid gap-3 rounded border border-surface-800/70 bg-surface-900/30 p-4 md:grid-cols-[1fr_auto]">
+    <div>
+      <p class="text-micro uppercase tracking-[0.3em] text-surface-500">Add output</p>
+      <div class="mt-1 grid gap-2 md:grid-cols-2">
+        <input
+          class="w-full rounded border border-surface-700 bg-surface-900/70 px-3 py-2 text-sm"
+          placeholder="name"
+          value={newOutputName}
+          oninput={(e) => (newOutputName = (e.currentTarget as HTMLInputElement).value)}
+        />
+        <select
+          class="w-full rounded border border-surface-700 bg-surface-900/70 px-3 py-2 text-sm"
+          value={newOutputTypeKey}
+          onchange={(e) => (newOutputTypeKey = (e.currentTarget as HTMLSelectElement).value)}
         >
-          Add
-        </button>
+          {#each boundaryTypeOptions as option (option.key)}
+            <option value={option.key}>{option.label}</option>
+          {/each}
+        </select>
       </div>
     </div>
-  {/snippet}
+    <div class="flex items-end">
+      <button
+        class="btn btn-3xs preset-filled uppercase tracking-[0.3em]"
+        type="button"
+        onclick={() => addPort('output')}
+        disabled={!newOutputName.trim()}
+      >
+        Add
+      </button>
+    </div>
+  </div>
 </InspectorSection>

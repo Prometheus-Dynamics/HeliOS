@@ -224,14 +224,24 @@
       onfocusin={onImuFormFocus}
       onfocusout={onImuFormBlur}
     >
-      <div class="mb-3">
-        <p class="text-micro uppercase tracking-[0.35em] text-surface-500">Runtime config</p>
-        <p class="text-sm text-surface-300">Tune fusion and alignment</p>
-        {#if imu.lastError}
-          <p class="mt-1 text-xs text-error-200">Last error: {formatLoadError(imu.lastError)}</p>
-        {:else if tabErrorsImu}
-          <p class="mt-1 text-xs text-error-200">{tabErrorsImu}</p>
-        {/if}
+      <div class="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <p class="text-micro uppercase tracking-[0.35em] text-surface-500">Runtime config</p>
+          <p class="text-sm text-surface-300">Tune fusion and alignment</p>
+          {#if imu.lastError}
+            <p class="mt-1 text-xs text-error-200">Last error: {formatLoadError(imu.lastError)}</p>
+          {:else if tabErrorsImu}
+            <p class="mt-1 text-xs text-error-200">{tabErrorsImu}</p>
+          {/if}
+        </div>
+        <button
+          class="btn btn-3xs preset-tonal uppercase tracking-[0.25em]"
+          type="button"
+          onclick={onRefreshImu}
+          disabled={imuLoading || isApplyingImuConfig}
+        >
+          Refresh
+        </button>
       </div>
 
       <div class="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">

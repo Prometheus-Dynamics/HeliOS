@@ -1,5 +1,10 @@
 import type { PipelineUi } from '$lib/features/pipelines/pipelineUiTypes';
 
+type PipelineGraphDocument = {
+  name?: string;
+  graph?: unknown;
+};
+
 export const createPipelineTuneUiActions = (options: {
   browser: boolean;
   PIPELINE_UI_METADATA_KEY: string;
@@ -20,7 +25,7 @@ export const createPipelineTuneUiActions = (options: {
     const pipelineId = options.getSelectedPipelineId();
     if (!options.browser || !pipelineId) return;
     try {
-      const doc = await options.PipelinesApi.fetchGraph({ id: pipelineId });
+      const doc = (await options.PipelinesApi.fetchGraph({ id: pipelineId })) as PipelineGraphDocument;
       const graph = (doc as { graph?: unknown })?.graph as Record<string, unknown> | undefined;
       const graphDoc = graph ?? {};
       if (typeof graphDoc !== 'object' || Array.isArray(graphDoc) || !graphDoc) {
@@ -33,7 +38,7 @@ export const createPipelineTuneUiActions = (options: {
       };
       await options.PipelinesApi.updateGraph({
         id: pipelineId,
-        requestBody: { name: (doc as any)?.name ?? undefined, graph: graphDoc }
+        requestBody: { name: doc.name ?? undefined, graph: graphDoc }
       });
       options.toaster.success({ title: 'Pipeline UI saved', description: options.pipelineLabelById(pipelineId) });
     } catch (error) {
@@ -50,7 +55,7 @@ export const createPipelineTuneUiActions = (options: {
     options.setPipelineUiDraft(options.DEFAULT_PIPELINE_UI);
     if (!options.browser || !pipelineId) return;
     try {
-      const doc = await options.PipelinesApi.fetchGraph({ id: pipelineId });
+      const doc = (await options.PipelinesApi.fetchGraph({ id: pipelineId })) as PipelineGraphDocument;
       const graph = (doc as { graph?: unknown })?.graph as Record<string, unknown> | undefined;
       const graphDoc = graph ?? {};
       if (typeof graphDoc !== 'object' || Array.isArray(graphDoc) || !graphDoc) {
@@ -61,7 +66,7 @@ export const createPipelineTuneUiActions = (options: {
       (graphDoc as { metadata: Record<string, unknown> }).metadata = metadata;
       await options.PipelinesApi.updateGraph({
         id: pipelineId,
-        requestBody: { name: (doc as any)?.name ?? undefined, graph: graphDoc }
+        requestBody: { name: doc.name ?? undefined, graph: graphDoc }
       });
       options.toaster.success({ title: 'Pipeline UI reset', description: options.pipelineLabelById(pipelineId) });
     } catch (error) {

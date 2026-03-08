@@ -42,25 +42,6 @@ export interface MediaAsset {
   frameTimestampsUrl?: string;
 }
 
-type MediaAssetDto = {
-  id: string;
-};
-
-type AssetListResponse = {
-  assets: MediaAssetDto[];
-  total?: number;
-  page?: number;
-  page_size?: number;
-  counts?: {
-    by_kind?: Record<string, number>;
-    by_camera_source?: Record<string, number>;
-  };
-};
-
-type AssetCreatedResponse = {
-  asset: MediaAssetDto;
-};
-
 function mediaUrl(path: string): string {
   const normalized = path.startsWith('/') ? path : `/${path}`;
   return apiUrl(normalized);
@@ -263,7 +244,7 @@ async function transformMediaList(options: {
   const assetsForCounts = options.includeCounts
     ? applyClientFilters(options.allItems)
     : applyClientFilters(sourceItems);
-  let assets = applyClientFilters(sourceItems);
+  const assets = applyClientFilters(sourceItems);
 
   if (options.sort === 'name') assets.sort(compareMediaName);
   else assets.sort(compareMediaRecent);
@@ -559,7 +540,7 @@ export interface VideoEditPayload {
 }
 
 export async function applyVideoEdits(assetId: string, payload: VideoEditPayload): Promise<MediaAsset> {
-  const _ = payload;
+  void payload;
   invalidateSWRPrefix('media:');
   const asset = mapAssetFromItem({ name: assetId, size_bytes: 0, content_type: 'application/octet-stream' });
   emitMediaMutation({

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { PipelineGraphNode } from '$lib/types/pipeline';
+  import { SvelteSet } from 'svelte/reactivity';
 
   type DaedalusSyncPolicy = 'AllReady' | 'Latest' | 'ZipByTag';
   type DaedalusBackpressureStrategy = 'None' | 'BoundedQueues' | 'ErrorOnOverflow';
@@ -64,11 +65,7 @@
 
   const portOptions = $derived(Object.keys(node.inputs ?? {}).sort((a, b) => a.localeCompare(b)));
 
-  let groups = $state<DaedalusSyncGroup[]>(readSyncGroups());
-
-  $effect(() => {
-    groups = readSyncGroups();
-  });
+  let groups = $derived.by<DaedalusSyncGroup[]>(() => readSyncGroups());
 
   const persist = () => {
     onChange?.({
@@ -110,7 +107,7 @@
     if (!current) return;
     const normalized = port.trim();
     if (!normalized) return;
-    const set = new Set(current.ports);
+    const set = new SvelteSet(current.ports);
     if (set.has(normalized)) {
       set.delete(normalized);
     } else {

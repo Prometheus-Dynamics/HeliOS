@@ -1,22 +1,23 @@
 <script lang="ts">
   import type { PipelineSummaryCounts } from './types';
+  type SummaryTile = { label: string; value: number; className?: string };
 
   const {
     summary = { total: 0, live: 0, degraded: 0, drafts: 0 },
     items
   }: {
     summary?: PipelineSummaryCounts;
-    items?: Array<{ label: string; value: number; className?: string }>;
+    items?: SummaryTile[];
   } = $props();
 
-  const tiles =
-    items ??
-    [
+  const tiles = $derived.by<SummaryTile[]>(() =>
+    items ?? [
       { label: 'Total', value: summary.total, className: 'border-surface-700 bg-surface-900/70' },
       { label: 'Live', value: summary.live, className: 'border-emerald-700/50 bg-emerald-950/40 text-emerald-100' },
       { label: 'Degraded', value: summary.degraded, className: 'border-amber-700/50 bg-amber-950/40 text-amber-100' },
       { label: 'Drafts', value: summary.drafts, className: 'border-surface-700 bg-surface-900/70' }
-    ];
+    ]
+  );
 </script>
 
 <section class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

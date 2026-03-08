@@ -1,22 +1,36 @@
 <script lang="ts">
+  import type PipelineDetailPanel from '$lib/components/pipelines/PipelineDetailPanel.svelte';
+  import type { StreamInfo } from '$lib/ts-bindings/http/client';
+  import type { InspectorTabKey } from '$lib/features/pipelines/controller';
+  import type { PipelineDetailContext, PipelineOutputEntry, PipelinePortEntry } from '$lib/components/pipelines/types';
+  import type { PipelineGraphPlan, PipelineOverviewPipeline, PipelineRegistryEntry, PipelineTypeDescriptor } from '$lib/types/pipeline';
+
+  type PipelineGraphWorkspaceEvent = CustomEvent<Record<string, unknown>>;
+  type PipelineBreadcrumb = {
+    id: string;
+    name: string;
+    status?: 'embedded' | 'linked' | 'mismatch' | 'unresolved';
+    targetId?: string | null;
+  };
+
   type PipelineGraphWorkspaceProps = {
     loadError?: string | null;
     registryLoading?: boolean;
     registryError?: string | null;
-    registryEntries?: any[];
-    detailPanelComponent?: any | null;
-    detailPanelRef?: any;
-    detailContext?: any;
-    editingPlan?: any;
-    editingBreadcrumbs?: any;
-    dataTypes?: any;
-    pipelines?: any[];
-    pipelineInputEntries?: any;
-    pipelineOutputEntries?: any;
-    inspectorTab?: any;
-    captureDevices?: any;
-    selectedPipeline?: any;
-    emptyPlan?: () => any;
+    registryEntries?: PipelineRegistryEntry[];
+    detailPanelComponent?: typeof PipelineDetailPanel | null;
+    detailPanelRef?: unknown;
+    detailContext?: PipelineDetailContext;
+    editingPlan?: PipelineGraphPlan | null;
+    editingBreadcrumbs?: PipelineBreadcrumb[];
+    dataTypes?: Record<string, PipelineTypeDescriptor>;
+    pipelines?: PipelineOverviewPipeline[];
+    pipelineInputEntries?: PipelinePortEntry[];
+    pipelineOutputEntries?: PipelineOutputEntry[];
+    inspectorTab?: InspectorTabKey;
+    captureDevices?: StreamInfo[];
+    selectedPipeline?: PipelineOverviewPipeline | null;
+    emptyPlan?: () => PipelineGraphPlan;
     onOrganize?: () => void;
     onAssign?: () => void;
     onSave?: () => void;
@@ -24,27 +38,27 @@
     onExport?: (inlineExternals: boolean) => void;
     onClearValidation?: () => void;
     onRefreshMetrics?: () => void;
-    onPlanChange?: (plan: any) => void;
-    onGraphSelect?: (event: any) => void;
-    onEnterEmbedded?: (event: any) => void;
+    onPlanChange?: (event: PipelineGraphWorkspaceEvent) => void;
+    onGraphSelect?: (event: PipelineGraphWorkspaceEvent) => void;
+    onEnterEmbedded?: (event: PipelineGraphWorkspaceEvent) => void;
     onOpenPipeline?: (pipelineId: string) => void;
     onExitEmbedded?: () => void;
-    onGraphContext?: (event: any) => void;
-    onGraphLayout?: (event: any) => void;
-    onAddPipelinePort?: (event: any) => void;
-    onAddHostIoPort?: (event: any) => void;
-    onRemovePipelinePort?: (event: any) => void;
-    onRemoveHostIoPort?: (event: any) => void;
-    onEditPipelinePort?: (event: any) => void;
-    onSetPipelinePortValue?: (event: any) => void;
-    onSetPipelinePortConfig?: (event: any) => void;
-    onSetNodeConstantValue?: (event: any) => void;
-    onSetNodeSyncConfig?: (event: any) => void;
-    onSetDaedalusNodeRuntime?: (event: any) => void;
-    onSetConnectionPolicy?: (event: any) => void;
-    onSetConnectionStyle?: (event: any) => void;
-    onRename?: (event: any) => void;
-    onSetNodeMetadata?: (event: any) => void;
+    onGraphContext?: (event: PipelineGraphWorkspaceEvent) => void;
+    onGraphLayout?: (event: PipelineGraphWorkspaceEvent) => void;
+    onAddPipelinePort?: (event: PipelineGraphWorkspaceEvent) => void;
+    onAddHostIoPort?: (event: PipelineGraphWorkspaceEvent) => void;
+    onRemovePipelinePort?: (event: PipelineGraphWorkspaceEvent) => void;
+    onRemoveHostIoPort?: (event: PipelineGraphWorkspaceEvent) => void;
+    onEditPipelinePort?: (event: PipelineGraphWorkspaceEvent) => void;
+    onSetPipelinePortValue?: (event: PipelineGraphWorkspaceEvent) => void;
+    onSetPipelinePortConfig?: (event: PipelineGraphWorkspaceEvent) => void;
+    onSetNodeConstantValue?: (event: PipelineGraphWorkspaceEvent) => void;
+    onSetNodeSyncConfig?: (event: PipelineGraphWorkspaceEvent) => void;
+    onSetDaedalusNodeRuntime?: (event: PipelineGraphWorkspaceEvent) => void;
+    onSetConnectionPolicy?: (event: PipelineGraphWorkspaceEvent) => void;
+    onSetConnectionStyle?: (event: PipelineGraphWorkspaceEvent) => void;
+    onRename?: (event: PipelineGraphWorkspaceEvent) => void;
+    onSetNodeMetadata?: (event: PipelineGraphWorkspaceEvent) => void;
     onOpenRegistryDrawer?: () => void;
   };
 
@@ -58,14 +72,14 @@
     detailContext,
     editingPlan = null,
     editingBreadcrumbs = null,
-    dataTypes = [],
+    dataTypes = {},
     pipelines = [],
     pipelineInputEntries = [],
     pipelineOutputEntries = [],
     inspectorTab,
     captureDevices = [],
     selectedPipeline = null,
-    emptyPlan = () => ({}),
+    emptyPlan = () => ({ nodes: {}, connections: [] }),
     onOrganize = () => {},
     onAssign = () => {},
     onSave = () => {},

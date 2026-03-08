@@ -43,6 +43,7 @@
     normalizeProgress,
     type UploadToastContext
   } from '$lib/features/media/page/mediaUploadProgress';
+  import { SvelteURL } from 'svelte/reactivity';
 
   type FilterOption = 'all' | MediaAssetType;
   type SortMode = MediaClientSort;
@@ -195,7 +196,7 @@ const {
       }
     }
     if (typeof Worker !== 'undefined') {
-      mediaFilterWorker = new Worker(new URL('$lib/workers/mediaFilterWorker.ts', import.meta.url), { type: 'module' });
+      mediaFilterWorker = new Worker(new SvelteURL('$lib/workers/mediaFilterWorker.ts', import.meta.url), { type: 'module' });
       mediaFilterWorker.onmessage = (event) => {
         const payload = event.data as { requestId: number; filtered?: MediaAsset[] };
         if (payload.requestId < mediaFilterLastHandled) return;
@@ -253,7 +254,7 @@ const {
 
   onMount(() => {
     if (typeof Worker === 'undefined') return;
-    mediaDisplayWorker = new Worker(new URL('$lib/workers/mediaDisplayWorker.ts', import.meta.url), { type: 'module' });
+    mediaDisplayWorker = new Worker(new SvelteURL('$lib/workers/mediaDisplayWorker.ts', import.meta.url), { type: 'module' });
     mediaDisplayWorker.onmessage = (event) => {
       const payload = event.data as { display?: typeof mediaDisplay };
       mediaDisplay = payload?.display ?? {};

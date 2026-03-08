@@ -21,11 +21,6 @@
   const accel = $derived<ImuAxes>(imu?.accel ?? { x: 0, y: 0, z: 0 });
   const isMoving = $derived(Boolean(imu?.isMoving));
   const motionG = $derived(Number.isFinite(imu?.motionG) ? imu.motionG : 0);
-  const hasSample = $derived(
-    Boolean(imu?.hasSample) ||
-      Boolean(imu?.updatedAt) ||
-      [accel.x, accel.y, accel.z].some((value) => Number.isFinite(value) && Math.abs(value) > 1e-6)
-  );
   const intervalLabel = $derived(formatInterval(imu?.updateIntervalMs));
   const updatedLabel = $derived(formatTimestamp(imu?.updatedAt));
   const statusLabel = $derived(computeStatus());

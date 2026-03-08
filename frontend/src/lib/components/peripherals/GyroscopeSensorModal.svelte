@@ -19,11 +19,6 @@
   let { peripheral, imu, imuError = null, onClose, onCalibrate = null }: Props = $props();
 
   const gyro = $derived<ImuAxes>(imu?.gyro ?? { x: 0, y: 0, z: 0 });
-  const hasSample = $derived(
-    Boolean(imu?.hasSample) ||
-      Boolean(imu?.updatedAt) ||
-      [gyro.x, gyro.y, gyro.z].some((value) => Number.isFinite(value) && Math.abs(value) > 1e-6)
-  );
   const intervalLabel = $derived(formatInterval(imu?.updateIntervalMs));
   const updatedLabel = $derived(formatTimestamp(imu?.updatedAt));
   const statusLabel = $derived(computeStatus());

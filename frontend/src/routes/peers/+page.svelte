@@ -14,7 +14,7 @@
   } from '$lib/types/peer';
   import { faCamera, faWrench } from '@fortawesome/free-solid-svg-icons';
 
-  import type { CustomMappingForm, CustomMappingPreview, PeerFilterDefinition, PeerFilterOption } from '$lib/features/peers/types';
+  import type { CustomMappingPreview, PeerFilterDefinition, PeerFilterOption } from '$lib/features/peers/types';
   import { createPeersStore } from '$lib/features/peers/store';
   import {
     blankMappingForm,
@@ -48,11 +48,11 @@
   import type { PageData } from './$types';
 
   const { data } = $props<{ data: PageData }>();
-  const peersStore = createPeersStore(data.payload);
-  const peersPayload = peersStore.payload;
+  const readPayload = () => data.payload;
+  const peersStore = createPeersStore(readPayload());
   const pending = peersStore.pending;
   const hasLoadedOnce = peersStore.hasLoadedOnce;
-  let loadError = $state<string | null>(data.payload.errorMessage ?? null);
+  let loadError = $state<string | null>(readPayload().errorMessage ?? null);
   let customPending = $state({ customSave: false, customTest: false, probe: false });
   let customForm = $state({
     peerId: null as string | null,
@@ -489,10 +489,6 @@
 
   function upsertPeer(peer: PeerSummary): void {
     peersStore.upsertPeer(peer);
-  }
-
-  function removePeerById(peerId: string): void {
-    peersStore.removePeerLocal(peerId);
   }
 
   function openManagementUi(peer: PeerSummary): void {

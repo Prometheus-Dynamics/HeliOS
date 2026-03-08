@@ -1,11 +1,58 @@
 <script lang="ts">
+  import type { ComponentProps } from 'svelte';
   import { StreamMetricsPanel, StreamPreview } from '$lib';
+  import type { StreamInfo } from '$lib/api/httpClient';
   import type { StreamMetricsError } from '$lib/api/streamMetrics';
   import StreamMetricsBanners from '$lib/components/StreamMetricsBanners.svelte';
   import CalibrationGuidanceOverlay from '$lib/features/devices/camera/CalibrationGuidanceOverlay.svelte';
 
-  const { ctx } = $props<{ ctx: any }>();
-  let streamBindings = $state(ctx.streamBindings);
+  type StreamMetricsPanelProps = ComponentProps<typeof StreamMetricsPanel>;
+  type StreamBindings = {
+    streamMetrics: StreamMetricsPanelProps['metrics'];
+  };
+  type ActiveMode = {
+    format?: {
+      resolution?: {
+        width?: number | null;
+        height?: number | null;
+      } | null;
+    } | null;
+  } | null;
+  type StreamStateCtx = {
+    activeTab: string;
+    streamCrop?: unknown;
+    streamCropGuidesEnabled: boolean;
+  };
+  type PipelineStateCtx = {
+    selectedPipelineId: string | null;
+    selectedPipelineOutput?: string | null;
+  } | null;
+  type CalibrationStateCtx = {
+    calibrationGuidedMode: boolean;
+    calibrationGuidedResetToken: unknown;
+    calibrationGuidedCaptureToken: unknown;
+    calibrationGuidedAccumulateLive: boolean;
+  };
+  type LegacyStreamManifest = StreamInfo['manifest'] & {
+    pipeline_output?: string | null;
+  };
+  type LegacyStreamIdentity = StreamInfo['manifest']['identity'] & {
+    alias?: string | null;
+  };
+  type CameraStreamSectionCtx = {
+    streamBindings: StreamBindings;
+    stream: StreamInfo | null;
+    streamState: StreamStateCtx;
+    pipelineState: PipelineStateCtx;
+    activeMode: ActiveMode;
+    calibrationState: CalibrationStateCtx;
+    RAW_PIPELINE_ID: string;
+    streamViewerHost: HTMLDivElement | null;
+    streamId: string;
+    outputSelectionForPipeline?: (pipelineId: string) => string | null;
+  };
+
+  const { ctx } = $props<{ ctx: CameraStreamSectionCtx }>();
 
   let metricsError = $state<StreamMetricsError | null>(null);
   let metricsStaleMessage = $state<string | null>(null);
@@ -13,6 +60,11 @@
   let cropGuideHostHeight = $state(0);
   const recordingActive = $derived(Boolean(ctx.stream?.status?.recording_active));
   const streamStatus = $derived.by(() => (ctx.stream?.status?.state === 'disabled' ? 'degraded' : 'live'));
+  const streamAlias = $derived.by(() => {
+    const identity = ctx.stream?.manifest?.identity as LegacyStreamIdentity | undefined;
+    const alias = identity?.alias;
+    return typeof alias === 'string' && alias.trim().length > 0 ? alias : null;
+  });
   const normalizedStreamCrop = $derived.by(() => {
     const raw = Array.isArray(ctx.streamState?.streamCrop) && ctx.streamState.streamCrop.length === 4 ? ctx.streamState.streamCrop : [-1, 1, -1, 1];
     const clamp = (value: number) => Math.max(-1, Math.min(1, Number.isFinite(value) ? value : 0));
@@ -58,10 +110,10 @@
     return `left:${left}px;top:${top}px;width:${width}px;height:${height}px;`;
   });
   const undistortCalibrationWarning = $derived.by(() => {
-    const manifest: any = ctx.stream?.manifest ?? null;
+    const manifest = (ctx.stream?.manifest as LegacyStreamManifest | null) ?? null;
     if (!manifest) return null;
     const calib = manifest?.calibration ?? null;
-    const pipelineState: any = ctx.pipelineState ?? null;
+    const pipelineState = ctx.pipelineState;
     // Only warn when the active viewer slot is showing the RAW stream.
     if (pipelineState?.selectedPipelineId !== ctx.RAW_PIPELINE_ID) return null;
 
@@ -93,7 +145,7 @@
             status={streamStatus}
             recording={recordingActive}
             captureSessionId={ctx.stream?.id ?? ctx.streamId}
-            captureSessionAlias={(ctx.stream?.manifest as any)?.identity?.alias ?? null}
+            captureSessionAlias={streamAlias}
             hideControls={false}
             enforceAspect={false}
             fitMode="contain"
@@ -150,7 +202,7 @@
 
   <StreamMetricsPanel
     captureSessionId={ctx.streamId}
-    captureSessionAlias={(ctx.stream?.manifest as any)?.identity?.alias ?? null}
+    captureSessionAlias={streamAlias}
     showHeader={false}
     hideHostMetrics
     showBanners={false}
@@ -158,6 +210,6 @@
     summaryBar={true}
     bind:metricsError={metricsError}
     bind:metricsStaleMessage={metricsStaleMessage}
-    bind:metrics={streamBindings.streamMetrics}
+    bind:metrics={ctx.streamBindings.streamMetrics}
   />
 </div>

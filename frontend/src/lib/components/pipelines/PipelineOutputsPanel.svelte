@@ -8,6 +8,7 @@
   import { isEncoderCompatibleOutput } from '$lib/features/pipelines/outputFilters';
   import { resolveDataTypeKey } from '$lib/features/pipelines/valueFormatting';
   import type { PipelineDataType, PipelineTypeDescriptor } from '$lib/types/pipeline';
+  import { SvelteSet } from 'svelte/reactivity';
 
   type SampleState =
     | { status: 'idle' }
@@ -30,7 +31,7 @@
 
   let portSearch = $state('');
   let sampleByPort = $state<Record<string, SampleState>>({});
-  let expandedPorts = $state<Set<string>>(new Set());
+  let expandedPorts = new SvelteSet<string>();
   let socket = $state<StreamOutputsSocket | null>(null);
   let socketStreamId = $state<string | null>(null);
 
@@ -62,7 +63,7 @@
   function toggleExpanded(port: string): void {
     const normalized = port.trim();
     if (!normalized) return;
-    const next = new Set(expandedPorts);
+    const next = new SvelteSet(expandedPorts);
     if (next.has(normalized)) {
       next.delete(normalized);
       expandedPorts = next;
@@ -141,7 +142,7 @@
       availablePorts = [];
       portPreviewableByName = {};
       sampleByPort = {};
-      expandedPorts = new Set();
+      expandedPorts = new SvelteSet();
       portsError = null;
       portsLoading = false;
       socket?.close();
@@ -156,7 +157,7 @@
     availablePorts = [];
     portPreviewableByName = {};
     sampleByPort = {};
-    expandedPorts = new Set();
+    expandedPorts = new SvelteSet();
     portsLoading = true;
     portsError = null;
     socket?.close();
@@ -165,19 +166,19 @@
         // Port list comes from the engine's output descriptor list; whether a port is previewable
         // is determined by solved typing (not port name).
         const descriptors = (event.outputs ?? [])
-          .map((v) =>
-            v && typeof v === 'object'
-              ? { name: String((v as any).name ?? '').trim(), previewable: Boolean((v as any).previewable) }
-              : null
-          )
+          .map((output) => {
+            const name = String(output?.name ?? '').trim();
+            if (!name) return null;
+            return { name, previewable: Boolean(output?.previewable) };
+          })
           .filter((v): v is { name: string; previewable: boolean } => Boolean(v && v.name));
         const next = descriptors.map((v) => v.name);
         portPreviewableByName = Object.fromEntries(descriptors.map((v) => [v.name, v.previewable]));
         availablePorts = next;
         portsLoading = false;
         portsError = null;
-        const allowed = new Set(next);
-        expandedPorts = new Set([...expandedPorts].filter((p) => allowed.has(p)));
+        const allowed = new SvelteSet(next);
+        expandedPorts = new SvelteSet([...expandedPorts].filter((p) => allowed.has(p)));
       },
       onSample: (event) => {
         const port = String(event.port ?? '').trim();

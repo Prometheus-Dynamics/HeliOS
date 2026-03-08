@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Interval, Mode, ProbedBackend, ProbedDevice } from '$lib/ts-bindings/http/client';
+  import type { Interval, Mode, ProbedDevice } from '$lib/ts-bindings/http/client';
 
   type Props = {
     device: ProbedDevice | null;
@@ -52,7 +52,7 @@
       <p class="text-sm text-surface-400">No backends reported for this device.</p>
     {:else}
       <div class="flex flex-wrap gap-2">
-        {#each device?.backends ?? [] as backend, index}
+        {#each device?.backends ?? [] as backend, index (backend.kind ?? backend.handle ?? `${index}`)}
           <button
             type="button"
             class={`rounded-md border px-3 py-2 text-sm transition ${
@@ -73,7 +73,7 @@
         <p class="text-micro uppercase tracking-[0.2em] text-surface-500">Format</p>
         {#if formats().length}
           <div class="flex flex-wrap gap-2">
-            {#each formats() as fmt}
+            {#each formats() as fmt (fmt)}
               <button
                 type="button"
                 class={`rounded-md border px-3 py-2 text-sm transition ${
@@ -96,7 +96,7 @@
         <p class="text-micro uppercase tracking-[0.2em] text-surface-500">Resolution</p>
         {#if resolutionsForSelectedFormat().length}
           <div class="flex flex-wrap gap-2">
-            {#each resolutionsForSelectedFormat() as mode}
+            {#each resolutionsForSelectedFormat() as mode (resolutionKey(mode))}
               <button
                 type="button"
                 class={`rounded-md border px-3 py-2 text-sm transition ${
@@ -119,7 +119,7 @@
         <p class="text-micro uppercase tracking-[0.2em] text-surface-500">Interval / FPS</p>
         {#if intervalsForSelected().length}
           <div class="flex flex-wrap gap-2">
-            {#each intervalsForSelected() as interval, idx}
+            {#each intervalsForSelected() as interval, idx (`${interval.numerator ?? 0}:${interval.denominator ?? 0}:${idx}`)}
               <button
                 type="button"
                 class={`rounded-md border px-3 py-2 text-sm transition ${

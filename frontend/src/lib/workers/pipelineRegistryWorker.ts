@@ -3,12 +3,14 @@
 import { normalizeDaedalusRegistry } from '$lib/features/pipelines/controller/daedalusRegistry';
 import { cloneRegistryEntry } from '$lib/features/pipelines/cloneHelpers';
 import { buildRegistryVariants } from '$lib/features/pipelines/registryUtils';
+import type { DaedalusRegistryNode } from '$lib/ts-bindings/http/client';
 import type { PipelineRegistryEntry, PipelineTypeDescriptor } from '$lib/types/pipeline';
+import type { DaedalusRegistryType } from '$lib/features/pipelines/controller/daedalusRegistry/types';
 
 type RegistryNormalizeRequest = {
   requestId: number;
-  nodes?: unknown[];
-  types?: unknown[] | null;
+  nodes?: DaedalusRegistryNode[];
+  types?: DaedalusRegistryType[] | null;
   palette?: Record<string, PipelineTypeDescriptor>;
 };
 
@@ -50,7 +52,7 @@ function normalizeString(value: string | null | undefined): string {
 function handleNormalizeRequest(payload: RegistryNormalizeRequest): RegistryNormalizeResponse {
   const { requestId, nodes, types, palette } = payload;
   const paletteMap = (palette ?? {}) as Record<string, PipelineTypeDescriptor>;
-  const normalized = normalizeDaedalusRegistry((nodes ?? []) as any[], (types ?? null) as any[] | null);
+  const normalized = normalizeDaedalusRegistry(nodes ?? [], types ?? null);
   const processed = buildRegistryVariants(normalized);
   const entries = processed.entries.map((entry) => cloneRegistryEntry(entry, paletteMap));
   return {

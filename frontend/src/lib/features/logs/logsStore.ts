@@ -389,7 +389,7 @@ export function createLogsStore(): LogsStore {
       }
       const blob = await response.blob();
       const disposition = response.headers.get('content-disposition') ?? '';
-      const match = disposition.match(/filename=\"(.+?)\"/i);
+      const match = disposition.match(/filename="(.+?)"/i);
       const filename = match?.[1] ?? `${snapshot.selectedLogStream}.tar.gz`;
       const blobUrl = URL.createObjectURL(blob);
       const anchor = document.createElement('a');

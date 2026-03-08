@@ -18,6 +18,7 @@
     PipelineOverviewPipeline
   } from '$lib/types/pipeline';
   import type { PipelineGraphDiagnostics } from '$lib/components/flow/pipeline-graph/types';
+  import { SvelteURL } from 'svelte/reactivity';
 
   const {
     context,
@@ -87,7 +88,7 @@
   let diagnosticsLookup = $state<PipelineGraphDiagnostics>({});
 
   if (typeof Worker !== 'undefined') {
-    diagnosticsWorker = new Worker(new URL('$lib/workers/pipelineDiagnosticsWorker.ts', import.meta.url), { type: 'module' });
+    diagnosticsWorker = new Worker(new SvelteURL('$lib/workers/pipelineDiagnosticsWorker.ts', import.meta.url), { type: 'module' });
     diagnosticsWorker.onmessage = (event) => {
       const payload = event.data as { requestId?: number; map?: PipelineGraphDiagnostics };
       if (!payload || payload.requestId !== diagnosticsRequestId) return;
@@ -224,48 +225,46 @@
   <InspectorEmptyState message="Select a node in the graph to view configuration." />
 {:else}
   <InspectorCard className="space-y-5">
-    {#snippet children()}
-      <NodeSummary
-        {selectedNode}
-        registrySummary={registrySummary}
-        docHref={docHref}
-        docBadge={docBadge}
-        nodeWarnings={nodeWarnings}
-      />
+    <NodeSummary
+      {selectedNode}
+      registrySummary={registrySummary}
+      docHref={docHref}
+      docBadge={docBadge}
+      nodeWarnings={nodeWarnings}
+    />
 
-      <NodeMetadata
-        canEditNodeMetadata={canEditNodeMetadata}
-        bind:nodeNameDraft={nodeNameDraft}
-        bind:nodeSummaryDraft={nodeSummaryDraft}
-        metadataDirty={metadataDirty}
-        onApply={applyMetadata}
-      />
+    <NodeMetadata
+      canEditNodeMetadata={canEditNodeMetadata}
+      bind:nodeNameDraft={nodeNameDraft}
+      bind:nodeSummaryDraft={nodeSummaryDraft}
+      metadataDirty={metadataDirty}
+      onApply={applyMetadata}
+    />
 
-      <NodeOutputs
-        {ioNodeContext}
-        childLinkState={childLinkState}
-        pipelines={pipelines}
-        pipelineId={context.pipeline?.id ?? null}
-        graphSelectionNodeId={context.graphSelectionNodeId}
-        typePalette={typePalette}
-        onAddIoPort={onAddIoPort}
-        onRemoveIoPort={onRemoveIoPort}
-        onRelinkExternal={onRelinkExternal}
-        onOpenExternal={onOpenExternal}
-      />
+    <NodeOutputs
+      {ioNodeContext}
+      childLinkState={childLinkState}
+      pipelines={pipelines}
+      pipelineId={context.pipeline?.id ?? null}
+      graphSelectionNodeId={context.graphSelectionNodeId}
+      typePalette={typePalette}
+      onAddIoPort={onAddIoPort}
+      onRemoveIoPort={onRemoveIoPort}
+      onRelinkExternal={onRelinkExternal}
+      onOpenExternal={onOpenExternal}
+    />
 
-      <NodeInputs
-        {context}
-        {selectedNode}
-        registryEntries={registryEntries}
-        typePalette={typePalette}
-        constantsReadOnly={constantsReadOnly}
-        onSetConstantValue={onSetConstantValue}
-      />
+    <NodeInputs
+      {context}
+      {selectedNode}
+      registryEntries={registryEntries}
+      typePalette={typePalette}
+      constantsReadOnly={constantsReadOnly}
+      onSetConstantValue={onSetConstantValue}
+    />
 
-      {#if !isDaedalusGraph}
-        <NodeSyncPolicyEditor context={context} onSetSyncConfig={onSetSyncConfig} />
-      {/if}
-    {/snippet}
+    {#if !isDaedalusGraph}
+      <NodeSyncPolicyEditor context={context} onSetSyncConfig={onSetSyncConfig} />
+    {/if}
   </InspectorCard>
 {/if}

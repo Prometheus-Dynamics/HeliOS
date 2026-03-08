@@ -1,14 +1,63 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { toaster } from '$lib';
+  import type { StreamInfo, StreamManifest, StreamPipelineBinding } from '$lib/api/httpClient';
   import FaIcon from '$lib/components/icons/FaIcon.svelte';
   import { emitMediaMutation } from '$lib/features/media/mutations';
   import { reportError } from '$lib/ui/errorPolicy';
   import { backendFeatures } from '$lib/api/backendFeatures';
   import { extractGraphOutputPortTypes, filterEncoderCompatibleOutputs } from '$lib/features/pipelines/outputFilters';
   import { faCamera, faCircle, faClock, faGear, faStop, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons';
+  import { SvelteSet } from 'svelte/reactivity';
 
-  const { ctx } = $props<{ ctx: any }>();
+  type PipelineBindingLike = StreamPipelineBinding & {
+    pipelineId?: string | null;
+    id?: string | null;
+    pipelineGraph?: unknown;
+    graph?: unknown;
+  };
+
+  type RecordingManifest = StreamManifest & {
+    pipeline_id?: string | null;
+    pipeline_output?: string | null;
+    pipelines?: PipelineBindingLike[] | null;
+  };
+
+  type PipelineState = {
+    selectedPipelineId?: string | null;
+    assignedPipelineIds?: string[] | null;
+    pipelineGridSlots?: Record<string, string | null> | null;
+  };
+
+  type PipelineOutputOptionsCache = Map<string, string[]> | Record<string, string[]>;
+
+  type RecordingControlsContext = {
+    stream: StreamInfo | null;
+    streamId: string | null;
+    activePipelineIds?: string[] | null;
+    pipelineState?: PipelineState | null;
+    RAW_PIPELINE_ID: string;
+    RAW_PIPELINE_UUID: string;
+    extractGraphOutputPorts?: ((graph: unknown) => string[]) | null;
+    pipelineOutputOptionsCache?: PipelineOutputOptionsCache | (() => PipelineOutputOptionsCache | null | undefined) | null;
+    pipelineLabel?: ((pipelineId: string) => string) | null;
+    apiPath: (path: string) => string;
+    refresh?: (() => Promise<void> | void) | null;
+    ensurePipelineOutputsLoaded?: ((pipelineId: string) => void) | null;
+  };
+
+  const { ctx } = $props<{ ctx: RecordingControlsContext }>();
+
+  const asRecord = (value: unknown): Record<string, unknown> | null =>
+    value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+
+  const manifestFor = (stream: StreamInfo | null): RecordingManifest | null => {
+    const manifest = stream?.manifest ?? null;
+    return manifest ? (manifest as RecordingManifest) : null;
+  };
+
+  const pipelineBindingsFor = (manifest: RecordingManifest | null): PipelineBindingLike[] =>
+    Array.isArray(manifest?.pipelines) ? manifest.pipelines.filter((entry): entry is PipelineBindingLike => Boolean(entry)) : [];
 
   const DEFAULT_RECORDING_FPS: number | null = null;
   const DEFAULT_RECORDING_CODEC: 'h264' | 'h265' = 'h264';
@@ -41,7 +90,7 @@
     if (filteredExisting.length) return filteredExisting;
     const pipelineState = ctx.pipelineState ?? null;
     if (pipelineState) {
-      const collected = new Set<string>();
+      const collected = new SvelteSet<string>();
       const add = (value: unknown) => {
         const raw = typeof value === 'string' ? value.trim() : '';
         if (!raw) return;
@@ -55,7 +104,8 @@
       if (collected.size) return Array.from(collected);
     }
     const manifest = ctx.stream?.manifest ?? null;
-    const collected = new Set<string>();
+    const manifestState = manifestFor(ctx.stream);
+    const collected = new SvelteSet<string>();
     const add = (value: unknown) => {
       const raw = typeof value === 'string' ? value.trim() : '';
       if (!raw) return;
@@ -63,16 +113,15 @@
       if (normalized === ctx.RAW_PIPELINE_ID) return;
       collected.add(normalized);
     };
-    add((manifest as any)?.pipeline_id);
-    add((manifest as any)?.active_pipeline_id);
-    if (Array.isArray((manifest as any)?.pipelines)) {
-      (manifest as any).pipelines.forEach((entry: any) => add(entry?.pipeline_id ?? entry?.pipelineId ?? entry?.id));
-    }
+    void manifest;
+    add(manifestState?.pipeline_id);
+    add(manifestState?.active_pipeline_id);
+    pipelineBindingsFor(manifestState).forEach((entry) => add(entry.pipeline_id ?? entry.pipelineId ?? entry.id));
     return Array.from(collected);
   });
   const manifestOutputOptionsById = $derived.by(() => {
     const outputsById: Record<string, string[]> = {};
-    const manifest = ctx.stream?.manifest ?? null;
+    const manifest = manifestFor(ctx.stream);
     const extractor = ctx.extractGraphOutputPorts;
     if (!manifest || typeof extractor !== 'function') return outputsById;
     const normalizeId = (value: unknown) => {
@@ -82,7 +131,10 @@
       if (normalized === ctx.RAW_PIPELINE_ID) return null;
       return normalized;
     };
-    const readGraph = (value: any) => value?.pipeline_graph ?? value?.pipelineGraph ?? value?.graph ?? null;
+    const readGraph = (value: unknown) => {
+      const record = asRecord(value);
+      return record?.pipeline_graph ?? record?.pipelineGraph ?? record?.graph ?? null;
+    };
     const addOutputs = (id: unknown, graph: unknown, fallback?: unknown) => {
       const normalized = normalizeId(id);
       if (!normalized || outputsById[normalized]?.length) return;
@@ -100,15 +152,13 @@
       }
     };
     addOutputs(
-      (manifest as any)?.active_pipeline_id ?? (manifest as any)?.pipeline_id,
+      manifest.active_pipeline_id ?? manifest.pipeline_id,
       readGraph(manifest),
-      (manifest as any)?.active_pipeline_output ?? (manifest as any)?.pipeline_output
+      manifest.active_pipeline_output ?? manifest.pipeline_output
     );
-    if (Array.isArray((manifest as any)?.pipelines)) {
-      (manifest as any).pipelines.forEach((entry: any) => {
-        addOutputs(entry?.pipeline_id ?? entry?.pipelineId ?? entry?.id, readGraph(entry), entry?.pipeline_output);
-      });
-    }
+    pipelineBindingsFor(manifest).forEach((entry) => {
+      addOutputs(entry.pipeline_id ?? entry.pipelineId ?? entry.id, readGraph(entry), entry.pipeline_output);
+    });
     return outputsById;
   });
 
@@ -151,12 +201,13 @@
 
   const shadowEnabled = $derived.by(() => {
     if (!shadowRecorderSupported) return false;
-    const backend = String((ctx.stream?.manifest as any)?.capture?.backend ?? '').trim().toLowerCase();
+    const manifest = manifestFor(ctx.stream);
+    const backend = String(manifest?.capture?.backend ?? '').trim().toLowerCase();
     if (backend === 'file') return false;
-    return Boolean((ctx.stream?.manifest as any)?.shadow_recorder_enabled ?? true);
+    return Boolean(manifest?.shadow_recorder_enabled ?? true);
   });
   const preferredMultiplexCodec = $derived.by(() => {
-    const encoderId = String((ctx.stream?.manifest as any)?.encoder_id ?? '').toLowerCase();
+    const encoderId = String(manifestFor(ctx.stream)?.encoder_id ?? '').toLowerCase();
     if (encoderId.includes('265') || encoderId.includes('hevc')) return 'h265';
     if (encoderId.includes('264') || encoderId.includes('avc')) return 'h264';
     return null;
@@ -188,7 +239,7 @@
   });
 
   const availablePipelineSelections = $derived.by(() => {
-    const values = new Set<string>();
+    const values = new SvelteSet<string>();
     pipelineGroups.forEach((group) => {
       group.outputs.forEach((output) => values.add(encodePipelineSelection(group.id, output)));
       if (!group.outputs.length) values.add(encodePipelineSelection(group.id, null));

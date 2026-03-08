@@ -233,6 +233,11 @@
       </div>
     </div>
   {/if}
+  {#if bootloaderLoading}
+    <div class="rounded border border-surface-700/60 bg-surface-900/40 px-4 py-3 text-sm text-surface-300">
+      Checking bootloader status…
+    </div>
+  {/if}
   {#if bootloaderError}
     <div class="rounded border border-warning-500/40 bg-warning-500/10 px-4 py-3 text-sm text-warning-100">
       Bootloader status unavailable · {bootloaderError}
@@ -270,25 +275,23 @@
                   stateLabelInactive=""
                   stateLabelActive=""
                 >
-                  {#snippet children()}
-                    <div
-                      class={`flex items-start justify-between gap-3 border px-3 py-2 transition ${
-                        activeWorkspaceTab === tab.id
-                          ? 'border-primary-300/70 bg-primary-500/10 text-primary-50'
-                          : 'border-surface-700 bg-surface-950/40 text-surface-100 hover:border-surface-500'
-                      }`}
-                    >
-                      <div class="flex items-center gap-2">
-                        <div class={`grid h-8 w-8 place-items-center border ${activeWorkspaceTab === tab.id ? 'border-primary-300/60 bg-primary-500/15 text-primary-50' : 'border-surface-700/80 bg-surface-900/60 text-surface-400'}`}>
-                          <FaIcon icon={workspaceTabIcons[tab.id]} class="h-4 w-4" />
-                        </div>
-                        <div>
-                          <p class="text-sm font-semibold">{tab.label}</p>
-                          <p class="text-[0.7rem] text-surface-500">{tab.detail}</p>
-                        </div>
+                  <div
+                    class={`flex items-start justify-between gap-3 border px-3 py-2 transition ${
+                      activeWorkspaceTab === tab.id
+                        ? 'border-primary-300/70 bg-primary-500/10 text-primary-50'
+                        : 'border-surface-700 bg-surface-950/40 text-surface-100 hover:border-surface-500'
+                    }`}
+                  >
+                    <div class="flex items-center gap-2">
+                      <div class={`grid h-8 w-8 place-items-center border ${activeWorkspaceTab === tab.id ? 'border-primary-300/60 bg-primary-500/15 text-primary-50' : 'border-surface-700/80 bg-surface-900/60 text-surface-400'}`}>
+                        <FaIcon icon={workspaceTabIcons[tab.id]} class="h-4 w-4" />
+                      </div>
+                      <div>
+                        <p class="text-sm font-semibold">{tab.label}</p>
+                        <p class="text-[0.7rem] text-surface-500">{tab.detail}</p>
                       </div>
                     </div>
-                  {/snippet}
+                  </div>
                 </Tabs.Control>
               {/each}
             </div>

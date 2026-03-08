@@ -22,6 +22,43 @@ const isImageTypeKey = (raw: string): boolean => {
   return key === 'image' || key.startsWith('image:');
 };
 
+type UnknownRecord = Record<string, unknown>;
+
+const asRecord = (value: unknown): UnknownRecord | null =>
+  value && typeof value === 'object' ? (value as UnknownRecord) : null;
+
+const coerceDataType = (value: unknown): PipelineDataType =>
+  value == null ? 'Generic' : (value as PipelineDataType);
+
+const isOutputNode = (node: UnknownRecord | null): boolean => {
+  const backendId = String(node?.backendId ?? node?.backend_id ?? node?.backend ?? '').toLowerCase();
+  const id = String(node?.id ?? asRecord(node?.info)?.id ?? '').toLowerCase();
+  return (
+    backendId === PIPELINE_OUTPUT_BACKEND_ID ||
+    backendId.endsWith(`:${PIPELINE_OUTPUT_BACKEND_ID}`) ||
+    backendId === 'io.host_output' ||
+    backendId.endsWith(':io.host_output') ||
+    id === PIPELINE_OUTPUT_BACKEND_ID ||
+    id.endsWith(`:${PIPELINE_OUTPUT_BACKEND_ID}`) ||
+    id === 'io.host_output' ||
+    id.endsWith(':io.host_output')
+  );
+};
+
+const applyPortTypes = (
+  target: Record<string, PipelineDataType>,
+  source: UnknownRecord | null,
+  overwrite = false
+): void => {
+  if (!source) return;
+  Object.entries(source).forEach(([name, dataType]) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    if (!overwrite && target[trimmed]) return;
+    target[trimmed] = coerceDataType(dataType);
+  });
+};
+
 export const isEncoderCompatibleOutput = (name: string, dataType?: PipelineDataType | null): boolean => {
   void name;
   const key = resolveDataTypeKey(dataType ?? undefined);
@@ -35,77 +72,30 @@ export const filterEncoderCompatibleOutputs = (
 ): string[] =>
   outputs.filter((name) => isEncoderCompatibleOutput(name, types[name]));
 
-export const extractGraphOutputPortTypes = (graph: any): Record<string, PipelineDataType> => {
+export const extractGraphOutputPortTypes = (graph: unknown): Record<string, PipelineDataType> => {
   const types: Record<string, PipelineDataType> = {};
-  if (!graph || typeof graph !== 'object') return types;
-  const nested = (graph as any)?.graph ?? (graph as any)?.pipeline_graph ?? (graph as any)?.pipelineGraph;
-  const target = nested && nested !== graph ? nested : graph;
-  if (!target || typeof target !== 'object') return types;
-  const pipelineOutputs = (target as any).pipelineOutputs ?? (target as any).pipeline_outputs;
-  if (pipelineOutputs && typeof pipelineOutputs === 'object' && !Array.isArray(pipelineOutputs)) {
-    Object.entries(pipelineOutputs as Record<string, PipelineDataType>).forEach(([name, dataType]) => {
-      const trimmed = name.trim();
-      if (trimmed) types[trimmed] = dataType ?? 'Generic';
-    });
-  }
-  const signatureOutputs = (target as any)?.signature?.outputs;
-  if (signatureOutputs && typeof signatureOutputs === 'object' && !Array.isArray(signatureOutputs)) {
-    Object.entries(signatureOutputs as Record<string, PipelineDataType>).forEach(([name, dataType]) => {
-      const trimmed = name.trim();
-      if (trimmed && !types[trimmed]) types[trimmed] = dataType ?? 'Generic';
-    });
-  }
-  const nodesArray = Array.isArray((target as any)?.nodes) ? (target as any).nodes : null;
+  const graphRecord = asRecord(graph);
+  if (!graphRecord) return types;
+  const nested = graphRecord.graph ?? graphRecord.pipeline_graph ?? graphRecord.pipelineGraph;
+  const nestedRecord = asRecord(nested);
+  const target = nestedRecord && nested !== graph ? nestedRecord : graphRecord;
+  applyPortTypes(types, asRecord(target.pipelineOutputs ?? target.pipeline_outputs), true);
+  applyPortTypes(types, asRecord(asRecord(target.signature)?.outputs));
+
+  const nodesArray = Array.isArray(target.nodes) ? target.nodes : null;
   if (nodesArray) {
-    nodesArray.forEach((node: any) => {
-      if (!node) return;
-      const backendId = String(node?.backendId ?? node?.backend_id ?? node?.backend ?? '').toLowerCase();
-      const id = String(node?.id ?? node?.info?.id ?? '').toLowerCase();
-      const isOutput =
-        backendId === PIPELINE_OUTPUT_BACKEND_ID ||
-        backendId.endsWith(`:${PIPELINE_OUTPUT_BACKEND_ID}`) ||
-        backendId === 'io.host_output' ||
-        backendId.endsWith(':io.host_output') ||
-        id === PIPELINE_OUTPUT_BACKEND_ID ||
-        id.endsWith(`:${PIPELINE_OUTPUT_BACKEND_ID}`) ||
-        id === 'io.host_output' ||
-        id.endsWith(':io.host_output');
-      if (!isOutput) return;
-      const inputs = node?.inputs;
-      if (!inputs || typeof inputs !== 'object' || Array.isArray(inputs)) return;
-      Object.entries(inputs as Record<string, PipelineDataType>).forEach(([name, dataType]) => {
-        const trimmed = name.trim();
-        if (!trimmed) return;
-        if (!types[trimmed]) types[trimmed] = dataType ?? 'Generic';
-      });
+    nodesArray.forEach((nodeValue) => {
+      const node = asRecord(nodeValue);
+      if (!isOutputNode(node)) return;
+      applyPortTypes(types, asRecord(node?.inputs));
     });
   }
-  const nodesRecord =
-    (target as any)?.nodes && typeof (target as any).nodes === 'object' && !Array.isArray((target as any).nodes)
-      ? ((target as any).nodes as Record<string, any>)
-      : null;
-  if (nodesRecord) {
-    Object.values(nodesRecord).forEach((node) => {
-      if (!node) return;
-      const backendId = String(node?.backendId ?? '').toLowerCase();
-      const id = String(node?.id ?? node?.info?.id ?? '').toLowerCase();
-      const isOutput =
-        backendId === PIPELINE_OUTPUT_BACKEND_ID ||
-        backendId.endsWith(`:${PIPELINE_OUTPUT_BACKEND_ID}`) ||
-        backendId === 'io.host_output' ||
-        backendId.endsWith(':io.host_output') ||
-        id === PIPELINE_OUTPUT_BACKEND_ID ||
-        id.endsWith(`:${PIPELINE_OUTPUT_BACKEND_ID}`) ||
-        id === 'io.host_output' ||
-        id.endsWith(':io.host_output');
-      if (!isOutput) return;
-      const inputs = node?.inputs;
-      if (!inputs || typeof inputs !== 'object' || Array.isArray(inputs)) return;
-      Object.entries(inputs as Record<string, PipelineDataType>).forEach(([name, dataType]) => {
-        const trimmed = name.trim();
-        if (!trimmed) return;
-        if (!types[trimmed]) types[trimmed] = dataType ?? 'Generic';
-      });
+  const nodesRecord = asRecord(target.nodes);
+  if (nodesRecord && !Array.isArray(target.nodes)) {
+    Object.values(nodesRecord).forEach((nodeValue) => {
+      const node = asRecord(nodeValue);
+      if (!isOutputNode(node)) return;
+      applyPortTypes(types, asRecord(node?.inputs));
     });
   }
   return types;

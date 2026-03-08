@@ -4,6 +4,7 @@ import { toaster } from "$lib";
 import { StreamsApi } from "$lib/api/streamsApi";
 import { cancellableWithTimeout } from "$lib/api/requestUtils";
 import type { Readable, Writable } from "svelte/store";
+import type { StreamInfo } from "$lib/ts-bindings/http/client";
 import type {
   PipelineOverviewPipeline,
   PipelineStreamNodeMetrics,
@@ -36,6 +37,26 @@ export function createPipelineMetricsManager(deps: PipelineMetricsManagerDeps) {
   const PIPELINE_METRICS_SNAPSHOT_POLL_MS = 3_000;
   // Keep below poll interval so one stuck stream can't freeze the UI.
   const PIPELINE_METRICS_REQUEST_TIMEOUT_MS = 2500;
+  const asRecord = (value: unknown): Record<string, unknown> | null =>
+    value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  const extractGraphAlias = (graph: unknown): string | null => {
+    const graphRecord = asRecord(graph);
+    if (!graphRecord) return null;
+    const metadata = asRecord(graphRecord.metadata);
+    if (!metadata) return null;
+    const raw = metadata["helios.pipeline.alias"] ?? null;
+    if (typeof raw === "string") return raw.trim();
+    const rawRecord = asRecord(raw);
+    return typeof rawRecord?.value === "string" ? rawRecord.value.trim() : null;
+  };
+  const asStreamInfo = (value: unknown): StreamInfo | null => {
+    const record = asRecord(value);
+    return typeof record?.id === "string" && asRecord(record.manifest) ? (value as StreamInfo) : null;
+  };
+  const numberOr = (value: unknown, fallback = 0): number =>
+    typeof value === "number" && Number.isFinite(value) ? value : fallback;
+  const nullableNumber = (value: unknown): number | null =>
+    typeof value === "number" && Number.isFinite(value) ? value : null;
   let pipelineMetricsSnapshotTimer: ReturnType<typeof setInterval> | null = null;
   let activeMetricsPipelineId: string | null = null;
   const pipelineMetricsErrorLog = new Map<
@@ -114,10 +135,11 @@ export function createPipelineMetricsManager(deps: PipelineMetricsManagerDeps) {
         () => StreamsApi.listStreams(),
         PIPELINE_METRICS_REQUEST_TIMEOUT_MS,
       );
-      const streams: any[] = Array.isArray(listResult)
+      const listRecord = asRecord(listResult);
+      const streams = Array.isArray(listResult)
         ? listResult
-        : Array.isArray((listResult as any)?.items)
-          ? (listResult as any).items
+        : Array.isArray(listRecord?.items)
+          ? listRecord.items
           : [];
       const pipelineRecord = get(deps.pipelines).find((entry) => entry.id === pipelineId) ?? null;
       const pipelineAliases = new Set<string>();
@@ -131,48 +153,46 @@ export function createPipelineMetricsManager(deps: PipelineMetricsManagerDeps) {
         }
       }
 
-      const extractAlias = (graph: any): string | null => {
-        if (!graph || typeof graph !== "object") return null;
-        const raw = graph?.metadata?.["helios.pipeline.alias"] ?? null;
-        if (typeof raw === "string") return raw.trim();
-        if (raw && typeof raw === "object") {
-          const value = (raw as any).value;
-          if (typeof value === "string") return value.trim();
-        }
-        return null;
-      };
-      const aliasMatches = (graph: any): boolean => {
+      const aliasMatches = (graph: unknown): boolean => {
         if (!pipelineAliases.size) return false;
-        const alias = extractAlias(graph);
+        const alias = extractGraphAlias(graph);
         if (!alias) return false;
         return pipelineAliases.has(alias.toLowerCase());
       };
 
       const matching = streams.filter((stream) => {
-        const streamId = typeof stream?.id === "string" ? stream.id.trim() : "";
+        const streamInfo = asStreamInfo(stream);
+        if (!streamInfo) return false;
+        const streamId = streamInfo.id.trim();
         if (streamId && attachmentStreamIds.has(streamId)) {
           return true;
         }
-        const manifest: any = stream?.manifest ?? null;
+        const manifest = asRecord(streamInfo.manifest);
         const direct =
           String(manifest?.active_pipeline_id ?? "").trim() ||
           String(manifest?.pipeline_id ?? "").trim() ||
           String(manifest?.pipelineId ?? "").trim() ||
-          String(manifest?.pipeline?.id ?? "").trim();
+          String(asRecord(manifest?.pipeline)?.id ?? "").trim();
         if (direct && direct === pipelineId) {
           return true;
         }
 
-        const assignments: any = manifest?.pipelines ?? null;
+        const assignments = manifest?.pipelines ?? null;
         if (Array.isArray(assignments)) {
-          return assignments.some((entry: any) => {
-            const id = String(entry?.pipeline_id ?? entry?.pipelineId ?? entry?.pipeline?.id ?? "").trim();
-            return id === pipelineId;
+          return assignments.some((entry) => {
+            const entryRecord = asRecord(entry);
+            const resolvedId = String(
+              entryRecord?.pipeline_id ?? entryRecord?.pipelineId ?? asRecord(entryRecord?.pipeline)?.id ?? "",
+            ).trim();
+            return resolvedId === pipelineId;
           });
         }
         if (assignments && typeof assignments === "object") {
-          return Object.values(assignments).some((entry: any) => {
-            const id = String(entry?.pipeline_id ?? entry?.pipelineId ?? entry?.pipeline?.id ?? "").trim();
+          return Object.values(assignments).some((entry) => {
+            const entryRecord = asRecord(entry);
+            const id = String(
+              entryRecord?.pipeline_id ?? entryRecord?.pipelineId ?? asRecord(entryRecord?.pipeline)?.id ?? "",
+            ).trim();
             return id === pipelineId;
           });
         }
@@ -180,7 +200,7 @@ export function createPipelineMetricsManager(deps: PipelineMetricsManagerDeps) {
           return true;
         }
         if (Array.isArray(manifest?.pipelines)) {
-          return manifest.pipelines.some((entry: any) => aliasMatches(entry?.pipeline_graph));
+          return manifest.pipelines.some((entry) => aliasMatches(asRecord(entry)?.pipeline_graph));
         }
         return false;
       });
@@ -204,7 +224,7 @@ export function createPipelineMetricsManager(deps: PipelineMetricsManagerDeps) {
         }),
       );
 
-      const snapshots: Array<{ stream: any; metrics: unknown }> = [];
+      const snapshots: Array<{ stream: StreamInfo; metrics: unknown }> = [];
       let errorMessage: string | null = null;
       results.forEach((result, index) => {
         if (result.status === "fulfilled") {
@@ -212,7 +232,7 @@ export function createPipelineMetricsManager(deps: PipelineMetricsManagerDeps) {
           return;
         }
         if (!errorMessage) {
-          const streamId = String((matching[index] as any)?.id ?? "").trim() || "<unknown stream>";
+          const streamId = asStreamInfo(matching[index])?.id?.trim() || "<unknown stream>";
           errorMessage = `Unable to load metrics for ${streamId}.`;
         }
       });
@@ -283,30 +303,30 @@ export function createPipelineMetricsManager(deps: PipelineMetricsManagerDeps) {
       const pipelinePlan: PipelineGraphPlan | null = pipelineRecord?.graph ?? null;
       const runtimeIdToPlanNodeId = runtimeIdMapForPlan(pipelinePlan);
 
-      function mapRuntimeMetrics(runtime: any): PipelineNodeRuntimeMetrics {
-        const stats = runtime?.metrics ?? {};
-        const mappedChildren = mapNodeMetrics(runtime?.children ?? null);
+      function mapRuntimeMetrics(runtime: unknown): PipelineNodeRuntimeMetrics {
+        const runtimeRecord = asRecord(runtime);
+        const stats = asRecord(runtimeRecord?.metrics) ?? {};
+        const mappedChildren = mapNodeMetrics(runtimeRecord?.children ?? null);
         return {
           metrics: {
-            averageTimeMs: stats.average_time_ms ?? 0,
-            averageFps: stats.average_fps ?? 0,
-            sampleCount: stats.sample_count ?? 0,
-            windowSize: stats.window_size ?? 60,
-            lastSampleAgeMs:
-              typeof stats.last_sample_age_ms === "number" ? stats.last_sample_age_ms : null,
+            averageTimeMs: numberOr(stats.average_time_ms),
+            averageFps: numberOr(stats.average_fps),
+            sampleCount: numberOr(stats.sample_count),
+            windowSize: numberOr(stats.window_size, 60),
+            lastSampleAgeMs: nullableNumber(stats.last_sample_age_ms),
           },
           outputEdges: [],
           inputQueues: undefined,
           outputSinks: undefined,
           inputSources: undefined,
           inputSync: undefined,
-          lastError: runtime?.last_error ?? null,
-          lastErrorAt: runtime?.last_error_at ?? null,
+          lastError: typeof runtimeRecord?.last_error === "string" ? runtimeRecord.last_error : null,
+          lastErrorAt: typeof runtimeRecord?.last_error_at === "number" ? runtimeRecord.last_error_at : null,
           children: mappedChildren ?? null,
         };
       }
 
-      function mapNodeMetrics(nodes: any): PipelineNodeMetricMap | null {
+      function mapNodeMetrics(nodes: unknown): PipelineNodeMetricMap | null {
         if (!nodes || typeof nodes !== "object") return null;
         const mapped: PipelineNodeMetricMap = {};
         Object.entries(nodes).forEach(([runtimeNodeId, runtime]) => {
@@ -317,57 +337,56 @@ export function createPipelineMetricsManager(deps: PipelineMetricsManagerDeps) {
       }
 
       const mapped: PipelineStreamNodeMetrics[] = snapshots.map(({ stream, metrics }) => {
-        const nodeMetrics: Record<string, any> = {};
-        const captureStats = (metrics as any)?.capture ?? null;
+        const metricsRecord = asRecord(metrics);
+        const pipelineRecord = asRecord(metricsRecord?.pipeline);
+        const nodeMetrics: PipelineNodeMetricMap = {};
+        const captureStats = asRecord(metricsRecord?.capture);
         nodeMetrics["capture"] = toRuntime(
-          captureStats?.average_time_ms ?? 0,
-          captureStats?.fps ?? 0,
-          captureStats?.sample_count ?? 0,
+          numberOr(captureStats?.average_time_ms),
+          numberOr(captureStats?.fps),
+          numberOr(captureStats?.sample_count),
         );
-        const encoderStats = (metrics as any)?.encoder ?? null;
+        const encoderStats = asRecord(metricsRecord?.encoder);
         if (encoderStats) {
           nodeMetrics["encoder"] = toRuntime(
-            encoderStats?.average_time_ms ?? 0,
-            encoderStats?.fps ?? 0,
-            encoderStats?.sample_count ?? 0,
+            numberOr(encoderStats.average_time_ms),
+            numberOr(encoderStats.fps),
+            numberOr(encoderStats.sample_count),
           );
         }
-        const decoderStats = (metrics as any)?.decoder ?? null;
+        const decoderStats = asRecord(metricsRecord?.decoder);
         if (decoderStats) {
           nodeMetrics["decoder"] = toRuntime(
-            decoderStats?.average_time_ms ?? 0,
-            decoderStats?.fps ?? 0,
-            decoderStats?.sample_count ?? 0,
+            numberOr(decoderStats.average_time_ms),
+            numberOr(decoderStats.fps),
+            numberOr(decoderStats.sample_count),
           );
         }
 
-        const pipelineNodes = mapNodeMetrics((metrics as any)?.pipeline?.nodes ?? null);
+        const pipelineNodes = mapNodeMetrics(pipelineRecord?.nodes ?? null);
         if (pipelineNodes) {
           Object.assign(nodeMetrics, pipelineNodes);
         }
 
-        const groupNodes = mapNodeMetrics((metrics as any)?.pipeline?.groups ?? null);
+        const groupNodes = mapNodeMetrics(pipelineRecord?.groups ?? null);
 
-        const perf = (metrics as any)?.pipeline?.perf ?? null;
-        const flamegraph = (metrics as any)?.pipeline?.flamegraph ?? null;
+        const perf = asRecord(pipelineRecord?.perf);
+        const flamegraph = asRecord(pipelineRecord?.flamegraph);
         const perfMetrics = perf
           ? {
-              averageCacheMisses: perf.average_cache_misses ?? 0,
-              averageBranchInstructions: perf.average_branch_instructions ?? 0,
-              averageBranchMisses: perf.average_branch_misses ?? 0,
-              sampleCount: perf.sample_count ?? 0,
-              windowSize: perf.window_size ?? 0,
-              lastSampleAgeMs:
-                typeof perf.last_sample_age_ms === "number"
-                  ? perf.last_sample_age_ms
-                  : null,
+              averageCacheMisses: numberOr(perf.average_cache_misses),
+              averageBranchInstructions: numberOr(perf.average_branch_instructions),
+              averageBranchMisses: numberOr(perf.average_branch_misses),
+              sampleCount: numberOr(perf.sample_count),
+              windowSize: numberOr(perf.window_size),
+              lastSampleAgeMs: nullableNumber(perf.last_sample_age_ms),
             }
           : null;
         const flamegraphMetrics = flamegraph
           ? {
-              path: flamegraph.path ?? "",
-              sizeBytes: flamegraph.size_bytes ?? 0,
-              capturedAtMs: flamegraph.captured_at_ms ?? 0,
+              path: typeof flamegraph.path === "string" ? flamegraph.path : "",
+              sizeBytes: numberOr(flamegraph.size_bytes),
+              capturedAtMs: numberOr(flamegraph.captured_at_ms),
             }
           : null;
 
@@ -451,7 +470,7 @@ export function createPipelineMetricsManager(deps: PipelineMetricsManagerDeps) {
       status: "connecting",
       error: null,
     });
-    void fetchPipelineMetricsSnapshot(pipelineId, { quiet: true });
+    void fetchPipelineMetricsSnapshot(pipelineId, { quiet });
     ensureSnapshotPolling(pipelineId);
   }
 

@@ -14,8 +14,9 @@
     resolveDataTypeKey
   } from '$lib/features/pipelines/valueFormatting';
   import ColorDropperButton from '$lib/components/controls/ColorDropperButton.svelte';
-  import type { PipelineDataType, PipelineNodeValue, PipelinePortMetadata } from '$lib/types/pipeline';
+  import type { PipelineDataType, PipelineNodeValue } from '$lib/types/pipeline';
   import type { PipelineTuningConstantGroup } from '$lib/components/pipelines/types';
+  import { SvelteSet } from 'svelte/reactivity';
 
   type Props = {
     streamLabel: string;
@@ -31,7 +32,7 @@
     onSearch: (value: string) => void;
   };
 
-  const NUMERIC_TYPE_KEYS = new Set(['uint', 'sint', 'int', 'float', 'double', 'number']);
+  const NUMERIC_TYPE_KEYS = new SvelteSet(['uint', 'sint', 'int', 'float', 'double', 'number']);
 
   let {
     streamLabel,
@@ -93,7 +94,7 @@
                 {@const typeKey = resolveDataTypeKey(entry.dataType ?? undefined) ?? 'string'}
                 {@const typeKeyLower = typeKey.toLowerCase()}
                 {@const variants = getDataTypeVariants(entry.dataType ?? undefined)}
-                {@const meta = entry.metadata as any}
+                {@const meta = entry.metadata}
                 {@const metadataOptions = getMetadataEnumOptions(meta)}
                 {@const allowedValues = metadataOptions.length ? metadataOptions : variants}
                 {@const isBool = typeKeyLower === 'bool' || typeKeyLower === 'boolean'}

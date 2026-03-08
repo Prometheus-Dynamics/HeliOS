@@ -71,7 +71,7 @@
     formatHeatDuration: (value: number | null | undefined) => string;
     formatTimestamp: (value: number | null | undefined) => string;
     onPlanChange: (plan: PipelineGraphPlan) => void;
-    onGraphSelect: (payload: { nodeId: string | null; nodes: string[]; edge: any }) => void;
+    onGraphSelect: (payload: { nodeId: string | null; nodes: string[]; edge: unknown }) => void;
     onEnterEmbedded: (nodeId: string) => void;
     onGraphContext: (payload: {
       type: 'pane' | 'node' | 'palette' | 'port';
@@ -282,7 +282,7 @@
       {/key}
     </div>
     {#if heatmapEnabled}
-      {#if !graphHeatmap && context.metricsStatus === 'connecting'}
+      {#if !graphHeatmap && metricsStatus === 'connecting'}
         <p class="mt-3 text-micro text-surface-500">Connecting to metrics stream…</p>
       {/if}
     {/if}

@@ -14,9 +14,20 @@ export type PipelineLayoutPersistenceState = {
   streamId: string;
 };
 
+type PersistedPipelineUiState = {
+  grid?: {
+    rows?: number;
+    columns?: number;
+    slots?: Record<string, string | null>;
+    outputKeys?: Record<string, string | null>;
+  };
+  assignedPipelineIds?: string[];
+  pipelineOutputs?: Record<string, string | null>;
+};
+
 export function hydratePipelineUi(state: PipelineLayoutPersistenceState, storagePrefix: string, key: string): void {
   try {
-    const parsed = readJson<any>(`${storagePrefix}${key}`, null);
+    const parsed = readJson<PersistedPipelineUiState | null>(`${storagePrefix}${key}`, null);
     if (!parsed) return;
     const rows = Math.min(Math.max(Number(parsed?.grid?.rows ?? state.pipelineGridRows), 1), 6);
     const columns = Math.min(Math.max(Number(parsed?.grid?.columns ?? state.pipelineGridColumns), 1), 6);

@@ -8,8 +8,7 @@ import {
 import type { ApiGraphNode, ApiPortDescriptor } from '$lib/types/pipeline-api';
 import {
   normalizeColor,
-  resolveThemeColor,
-  type NodeColorPalette
+  resolveThemeColor
 } from '../nodePalette';
 import { clampChannel } from '../nodeColors';
 import type {

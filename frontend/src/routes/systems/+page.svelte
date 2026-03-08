@@ -2,7 +2,7 @@
   import { browser } from '$app/environment';
   import { onDestroy, onMount } from 'svelte';
   import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rig';
-  import type { I2cInventory, ImuAxes, ImuStatus, SystemsPageData } from '$lib/types/systems';
+  import type { ImuAxes, ImuStatus, SystemsPageData } from '$lib/types/systems';
   import type { SensorOrientation } from '$lib/types/devices';
   import DeviceLogsPanel from './components/DeviceLogsPanel.svelte';
   import ConsolePanel from './components/ConsolePanel.svelte';
@@ -26,6 +26,7 @@
   import { connectImuStream, emptyImuStatus, fetchI2cInventorySnapshot, refreshI2cInventory, refreshImuStatus, updateImuConfig } from '$lib/api/systemsPage';
   import { connectionState } from '$lib/api/connection';
   import { createRefreshableResource } from '$lib/utils/refreshableResource';
+  import { SvelteSet } from 'svelte/reactivity';
 
   const EMPTY_PAYLOAD: SystemsPageData = {
     summary: [],
@@ -44,14 +45,15 @@
   };
 
   const { data } = $props<{ data: { payload: SystemsPageData } }>();
-  let systems = $state<SystemsPageData>(clonePayload(data.payload ?? EMPTY_PAYLOAD));
-  let loadError = $state<string | null>(data.payload.errorMessage ?? null);
+  const readPayload = () => data.payload ?? EMPTY_PAYLOAD;
+  let systems = $state<SystemsPageData>(clonePayload(readPayload()));
+  let loadError = $state<string | null>(readPayload().errorMessage ?? null);
   let isRefreshing = $state(false);
   let i2cLoading = $state(false);
   let imuLoading = $state(false);
   let isRescanningI2c = $state(false);
-  let i2cError = $state<string | null>(data.payload.errors?.i2c ?? null);
-  let imuError = $state<string | null>(data.payload.errors?.imu ?? null);
+  let i2cError = $state<string | null>(readPayload().errors?.i2c ?? null);
+  let imuError = $state<string | null>(readPayload().errors?.imu ?? null);
   let isRefreshingImu = $state(false);
   let isApplyingImuConfig = $state(false);
   let imuHistory = $state<
@@ -99,7 +101,7 @@
   const imuHasPendingChange = $derived(imuFormDirty && Object.keys(buildImuConfigPayload()).length > 0);
   const imuStatusBadge = $derived(buildImuStatusBadge(imu, systems.errors));
   const i2cBusOrder = $derived(
-    [...new Set(i2cInventory.buses.map((bus) => bus.bus).concat(i2cInventory.devices.map((d) => d.bus)))].sort((a, b) => a - b)
+    [...new SvelteSet(i2cInventory.buses.map((bus) => bus.bus).concat(i2cInventory.devices.map((d) => d.bus)))].sort((a, b) => a - b)
   );
   const imuAccelSeries = $derived(imuHistory.length ? imuHistory.map((entry) => entry.accel) : imu.hasSample ? [imu.accel] : []);
   const imuGyroSeries = $derived(imuHistory.length ? imuHistory.map((entry) => entry.gyro) : imu.hasSample ? [imu.gyro] : []);

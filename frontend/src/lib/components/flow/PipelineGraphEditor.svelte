@@ -4,7 +4,6 @@
   import '@xyflow/svelte/dist/style.css';
   import {
     type EdgeTypes,
-    type Connection,
     type Edge,
     type Node,
     type NodeTypes
@@ -75,6 +74,7 @@
     normalizeSearchTokens,
     resolveClientPosition
   } from './pipeline-graph/editorHelpers';
+  import { emptyPipelineGraphPlan } from '$lib/features/pipelines/graph';
 
   const EDGE_INTERACTIONS_ENABLED = true;
   const VIEWPORT_MIN_ZOOM = 0.03;
@@ -113,8 +113,13 @@
     searchQuery = '',
     graphStore: graphStoreProp = null
   }: PipelineGraphEditorProps = $props();
-  const graphStore = graphStoreProp ?? createPipelineGraphStore();
-  const ownsGraphStore = graphStoreProp == null;
+  const getGraphStoreProp = () => graphStoreProp;
+  const resolveInitialPlan = (): PipelineGraphPlan =>
+    ensurePlanPortMetadata(clonePlan(plan ?? emptyPipelineGraphPlan()));
+  const resolveInteractive = (): boolean => interactive;
+  const resolveGpuOverlayMode = (): boolean => gpuOverlayMode;
+  const graphStore = getGraphStoreProp() ?? createPipelineGraphStore();
+  const ownsGraphStore = getGraphStoreProp() == null;
   const dispatch = createEventDispatcher<{
     change: { plan: PipelineGraphPlan };
     select: { nodeId: string | null; nodes: string[]; edge: EdgeSelection | null };
@@ -124,8 +129,7 @@
     layout: { nodes: PipelineNodeLayout };
     runtime: { nodeId: string; syncGroups: unknown[] };
   }>();
-  const initialPlan = ensurePlanPortMetadata(clonePlan(plan));
-  let internalPlan = $state(initialPlan);
+  let internalPlan = $state<PipelineGraphPlan>(resolveInitialPlan());
   let nodes = $state<Node[]>([]);
   let edges = $state<Edge[]>([]);
   let flowViewport = $state<Viewport>({ x: 0, y: 0, zoom: 1 });
@@ -140,11 +144,11 @@
   let portEditorDraft = $state('');
   let portEditorError = $state<string | null>(null);
   let lastLayoutHash: string | null = null;
-  const history = createHistoryManager(initialPlan, { interactive });
+  const history = createHistoryManager(resolveInitialPlan(), { interactive: resolveInteractive() });
   let flowApi: FlowApi | null = null;
   let pendingFocusRequest: FocusRequest | null = null;
   let focusHighlight = $state<FocusHighlight | null>(null);
-  let gpuOverlay = $state(gpuOverlayMode);
+  let gpuOverlay = $state(resolveGpuOverlayMode());
   const HEATMAP_NODE_REFRESH_MS = 520;
   let heatmapForNodes = $state<PipelineGraphHeatmap | null>(null);
   const searchTokens = $derived.by(() => normalizeSearchTokens(searchQuery));

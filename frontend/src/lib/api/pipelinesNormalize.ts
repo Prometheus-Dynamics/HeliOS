@@ -137,7 +137,7 @@ function normalizeAttachment(entry: unknown): PipelineAttachmentSummary | null {
       : typeof record.camera_path === 'string'
         ? (record.camera_path as string)
         : null;
-  const planHash = normalizePlanHash((record.planHash ?? (record as any).plan_hash) as any);
+  const planHash = normalizePlanHash(record.planHash ?? record.plan_hash);
   const priority = normalizeNumber(record.priority);
   if (!captureSessionId || !cameraUid || !cameraPath || planHash === null || priority === null) {
     return null;

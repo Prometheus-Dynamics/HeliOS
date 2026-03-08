@@ -10,6 +10,7 @@
   } from '$lib/features/localization/localizationConfig';
   import type { LocalizationPipelineSource } from '$lib/features/localization/pipelineSources';
   import type { FieldMapSummary } from '$lib/features/localization/fieldMaps';
+  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
   type RuntimeTuningFieldKey = Extract<keyof LocalizationSolverRuntimeTuningConfig, string>;
 
@@ -109,10 +110,6 @@
     onSetSourceWeight?: (sourceId: string, value: string) => void;
     sourceUsedByProfilesById?: Record<string, string[]>;
     sourceStatusRows?: SourceStatusRow[];
-    feedMessage?: string | null;
-    pipelineStatusError?: string | null;
-    pipelineOutputsError?: string | null;
-    localizationConfigError?: string | null;
   };
 
   let {
@@ -228,18 +225,14 @@
     groupedSources = [],
     openSourceGroups = [],
     onToggleSourceGroup,
-    calibratedCameraIds = new Set<string>(),
+    calibratedCameraIds = new SvelteSet<string>(),
     isSourceCalibrated = () => true,
     selectedSourceIds = [],
     onToggleSource,
     sourceWeightsById = {},
     onSetSourceWeight,
     sourceUsedByProfilesById = {},
-    sourceStatusRows = [],
-    feedMessage = null,
-    pipelineStatusError = null,
-    pipelineOutputsError = null,
-    localizationConfigError = null
+    sourceStatusRows = []
   }: LocalizationConfigPanelProps = $props();
 
   const hasActiveProfile = $derived(Boolean(activeProfileId));
@@ -261,9 +254,9 @@
         return mode;
     }
   };
-  const supportedSolverModeSet = $derived.by(() => new Set(supportedSolverModes));
+  const supportedSolverModeSet = $derived.by(() => new SvelteSet(supportedSolverModes));
   const visibleSolverModes = $derived.by<LocalizationSolverMode[]>(() => {
-    const seen = new Set<string>();
+    const seen = new SvelteSet<string>();
     const ordered: LocalizationSolverMode[] = [];
     for (const mode of supportedSolverModes) {
       const normalized = String(mode ?? '').trim();
@@ -293,10 +286,10 @@
   let sourceSearch = $state('');
   let sourceFilter = $state<'all' | 'selected'>('all');
 
-  const selectedSourceSet = $derived.by(() => new Set(selectedSourceIds));
+  const selectedSourceSet = $derived.by(() => new SvelteSet(selectedSourceIds));
   const sourceStatusById = $derived.by(() => {
     const entries: Array<[string, SourceStatusRow]> = sourceStatusRows.map((entry) => [entry.source.id, entry]);
-    return new Map(entries);
+    return new SvelteMap(entries);
   });
   const normalizedSourceSearch = $derived.by(() => sourceSearch.trim().toLowerCase());
   const showSelectedOnly = $derived.by(() => sourceFilter === 'selected');
@@ -396,14 +389,14 @@
       .filter((group): group is SourceGroup => Boolean(group))
   );
   const solverSourceSet = $derived.by<Set<string>>(() =>
-    solverUsesAllSources ? new Set(selectedSourceIds) : new Set(activeSolverSourceIds)
+    solverUsesAllSources ? new SvelteSet(selectedSourceIds) : new SvelteSet(activeSolverSourceIds)
   );
   const solverModeLabel = $derived.by(() => {
     if (!activeSolverMode) return 'Unset';
     return solverModeDisplayLabel(activeSolverMode);
   });
   const solverSourceCount = $derived.by(() => {
-    const compatibleIds = new Set(
+    const compatibleIds = new SvelteSet(
       groupedSources.flatMap((group) => group.pipelines.flatMap((pipeline) => pipeline.sources.map((source) => source.id)))
     );
     let count = 0;

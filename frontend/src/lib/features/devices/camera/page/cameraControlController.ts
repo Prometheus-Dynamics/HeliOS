@@ -1,12 +1,16 @@
-import type { StreamInfo, StreamManifest } from '$lib/api/httpClient';
+import type { ControlMeta, ControlValue, StreamInfo, StreamManifest } from '$lib/api/httpClient';
 import type { StreamsApi } from '$lib/api/streamsApi';
-import type { ControlMeta } from '$lib/api/httpClient';
 import type { ResourceSample } from '$lib/api/telemetry';
 
 export type ControlSocket = {
   ready: () => boolean;
-  send: (payload: any) => void;
+  send: (payload: unknown) => void;
 } | null;
+
+type UnknownRecord = Record<string, unknown>;
+
+const asRecord = (value: unknown): UnknownRecord | null =>
+  value && typeof value === 'object' ? (value as UnknownRecord) : null;
 
 type ControlState = {
   get stream(): StreamInfo | null;
@@ -73,52 +77,55 @@ export function createCameraControlController(state: ControlState, deps: Control
   function seedControlState(entries: ControlMeta[]): Record<number, number | boolean | null> {
     const map: Record<number, number | boolean | null> = {};
     for (const ctrl of entries) {
-      const current = extractValue((ctrl as any).value ?? ctrl.default);
+      const current = extractValue(asRecord(ctrl)?.value ?? ctrl.default);
       map[ctrl.id] = current;
     }
     return map;
   }
 
-  function extractValue(value: any): number | boolean | null {
+  function extractValue(value: unknown): number | boolean | null {
     if (!value) return null;
     if (value === 'None') return null;
-    if (typeof value === 'object') {
-      if ('Bool' in value) return value.Bool;
-      if ('Int' in value) return value.Int;
-      if ('Uint' in value) return value.Uint;
-      if ('Float' in value) return value.Float;
+    const record = asRecord(value);
+    if (!record) return null;
+    if (typeof record.Bool === 'boolean') return record.Bool;
+    if (typeof record.Int === 'number') return record.Int;
+    if (typeof record.Uint === 'number') return record.Uint;
+    if (typeof record.Float === 'number') return record.Float;
 
-      const kind = typeof value.kind === 'string' ? value.kind : null;
-      const payload = value.value;
-      if (!kind) return null;
-      if (kind === 'none') return null;
-      if (kind === 'bool') return Boolean(payload);
-      if (kind === 'int' || kind === 'int32' || kind === 'int64') return Number(payload);
-      if (kind === 'uint' || kind === 'uint32' || kind === 'uint16' || kind === 'byte') return Math.max(0, Number(payload));
-      if (kind === 'float') return Number(payload);
-    }
+    const kind = typeof record.kind === 'string' ? record.kind : null;
+    const payload = record.value;
+    if (!kind) return null;
+    if (kind === 'none') return null;
+    if (kind === 'bool') return Boolean(payload);
+    if (kind === 'int' || kind === 'int32' || kind === 'int64') return Number(payload);
+    if (kind === 'uint' || kind === 'uint32' || kind === 'uint16' || kind === 'byte') return Math.max(0, Number(payload));
+    if (kind === 'float') return Number(payload);
     return null;
   }
 
   function controlStep(ctrl: ControlMeta): number | null {
-    const step = ctrl.step ? extractValue(ctrl.step as any) : null;
+    const step = ctrl.step ? extractValue(ctrl.step) : null;
     return typeof step === 'number' && Number.isFinite(step) && step > 0 ? step : null;
   }
 
   function menuOptions(ctrl: ControlMeta): Array<{ value: number; label: string }> {
-    const list = Array.isArray(ctrl.menu) ? ctrl.menu : [];
+    const list: unknown[] = Array.isArray(ctrl.menu) ? ctrl.menu : [];
     const options: Array<{ value: number; label: string }> = [];
     list.forEach((entry, idx) => {
       if (typeof entry === 'number') {
         options.push({ value: entry, label: String(entry) });
       } else if (typeof entry === 'string') {
         options.push({ value: idx, label: entry });
-      } else if (entry && typeof entry === 'object') {
-        const val = Number((entry as any).value ?? (entry as any).id ?? idx);
-        const label = String((entry as any).label ?? (entry as any).name ?? val);
-        options.push({ value: Number.isFinite(val) ? val : idx, label });
       } else {
-        options.push({ value: idx, label: `Option ${idx + 1}` });
+        const entryRecord = asRecord(entry);
+        if (entryRecord) {
+          const val = Number(entryRecord.value ?? entryRecord.id ?? idx);
+          const label = String(entryRecord.label ?? entryRecord.name ?? val);
+          options.push({ value: Number.isFinite(val) ? val : idx, label });
+        } else {
+          options.push({ value: idx, label: `Option ${idx + 1}` });
+        }
       }
     });
     return options.length ? options : [{ value: 0, label: '0' }];
@@ -189,7 +196,7 @@ export function createCameraControlController(state: ControlState, deps: Control
     return state.controlState[ctrl.id] !== state.controlAppliedState[ctrl.id];
   }
 
-  function buildControlValue(kind: ControlMeta['kind'], next: number | boolean | null): any {
+  function buildControlValue(kind: ControlMeta['kind'], next: number | boolean | null): Record<string, unknown> {
     if (next == null) return { kind: 'none' };
     switch (kind) {
       case 'Bool':
@@ -294,7 +301,7 @@ export function createCameraControlController(state: ControlState, deps: Control
     }
     state.controlBusy = { ...state.controlBusy, [ctrl.id]: true };
     try {
-      const requestBody = buildControlValue(ctrl.kind, normalized);
+      const requestBody = buildControlValue(ctrl.kind, normalized) as unknown as ControlValue;
       await deps.streamsApi.setControl({ id: state.stream?.id ?? state.streamId, controlId: ctrl.id, requestBody });
       if (state.controlApplySeqById.get(ctrl.id) === seq) {
         state.controlAppliedState = { ...state.controlAppliedState, [ctrl.id]: normalized };

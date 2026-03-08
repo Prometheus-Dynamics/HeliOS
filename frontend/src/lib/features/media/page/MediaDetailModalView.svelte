@@ -104,6 +104,11 @@
     metadataDirty = true;
   }
 
+  function openAsset(path: string): void {
+    if (typeof window === 'undefined') return;
+    window.open(path, '_blank', 'noopener,noreferrer');
+  }
+
   function syncImageEditFromAsset(current: MediaAsset | null) {
     if (!current || current.kind !== 'image') return;
     if (current.imageCrop) {
@@ -463,9 +468,9 @@
                 onerror={(event) => ((event.currentTarget as HTMLImageElement).src = assetOriginalSrc)}
               />
             </div>
-            <a class="btn btn-3xs mt-3 preset-outline uppercase tracking-[0.3em]" href={assetOriginalSrc} target="_blank" rel="noreferrer">
+            <button class="btn btn-3xs mt-3 preset-outline uppercase tracking-[0.3em]" type="button" onclick={() => openAsset(assetOriginalSrc)}>
               Download
-            </a>
+            </button>
           </div>
         {:else if current.kind === 'video'}
           <div class="rounded border border-surface-800/60 bg-surface-900/40 p-3">
@@ -487,32 +492,32 @@
             </video>
             {#if current.mp4DownloadUrl}
               <div class="mt-3 flex flex-wrap items-center gap-2">
-                <a class="btn btn-3xs preset-outline uppercase tracking-[0.3em]" href={assetOriginalSrc} target="_blank" rel="noreferrer">
+                <button class="btn btn-3xs preset-outline uppercase tracking-[0.3em]" type="button" onclick={() => openAsset(assetOriginalSrc)}>
                   Download raw
-                </a>
-                <a class="btn btn-3xs preset-outline uppercase tracking-[0.3em]" href={assetMp4DownloadSrc} target="_blank" rel="noreferrer">
+                </button>
+                <button class="btn btn-3xs preset-outline uppercase tracking-[0.3em]" type="button" onclick={() => openAsset(assetMp4DownloadSrc)}>
                   Download MP4
-                </a>
+                </button>
               </div>
             {:else}
-              <a class="btn btn-3xs mt-3 preset-outline uppercase tracking-[0.3em]" href={assetOriginalSrc} target="_blank" rel="noreferrer">
+              <button class="btn btn-3xs mt-3 preset-outline uppercase tracking-[0.3em]" type="button" onclick={() => openAsset(assetOriginalSrc)}>
                 Download
-              </a>
+              </button>
             {/if}
           </div>
         {:else if current.kind === 'model'}
           <div class="rounded border border-surface-800/60 bg-surface-900/40 p-3">
             <p class="text-xs uppercase tracking-[0.3em] text-surface-500">Model file</p>
-            <a class="btn btn-3xs mt-3 preset-outline uppercase tracking-[0.3em]" href={assetOriginalSrc} target="_blank" rel="noreferrer">
+            <button class="btn btn-3xs mt-3 preset-outline uppercase tracking-[0.3em]" type="button" onclick={() => openAsset(assetOriginalSrc)}>
               Download model
-            </a>
+            </button>
           </div>
         {:else}
           <div class="rounded border border-surface-800/60 bg-surface-900/40 p-3">
             <p class="text-xs uppercase tracking-[0.3em] text-surface-500">{mediaKindLabel(current.kind)}</p>
-            <a class="btn btn-3xs mt-3 preset-outline uppercase tracking-[0.3em]" href={assetOriginalSrc} target="_blank" rel="noreferrer">
+            <button class="btn btn-3xs mt-3 preset-outline uppercase tracking-[0.3em]" type="button" onclick={() => openAsset(assetOriginalSrc)}>
               Download
-            </a>
+            </button>
           </div>
         {/if}
       </div>

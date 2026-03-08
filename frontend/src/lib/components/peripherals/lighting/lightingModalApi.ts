@@ -36,8 +36,8 @@ export async function fetchLightingRuntimeState(
 }
 
 export async function saveLightingConfig(
-  deviceSettingsStore: { patch: (payload: any) => Promise<void> },
-  payload: any
+  deviceSettingsStore: { patch: (payload: Record<string, unknown>) => Promise<void> },
+  payload: Record<string, unknown>
 ): Promise<void> {
   await deviceSettingsStore.patch(payload);
 }

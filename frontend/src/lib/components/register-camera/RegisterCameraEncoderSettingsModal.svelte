@@ -62,139 +62,137 @@
     {#snippet actions()}
       <button class="btn btn-ghost" type="button" onclick={props.onClose}>Close</button>
     {/snippet}
-    {#snippet children()}
-      <div class="space-y-3">
-        {#if props.currentEncoder()?.tunables?.encoder_settings}
+    <div class="space-y-3">
+      {#if props.currentEncoder()?.tunables?.encoder_settings}
+        <p class="text-micro text-surface-500">
+          Defaults: bitrate {props.currentEncoder()?.tunables?.encoder_settings?.bitrate ?? 'auto'} · threads {props.currentEncoder()?.tunables?.encoder_settings?.thread_count ?? 'auto'}
+        </p>
+        <div class="grid gap-3 md:grid-cols-3">
+          <label class="block space-y-1">
+            <span class="text-xs uppercase tracking-[0.25em] text-surface-500">Bitrate (bps)</span>
+            <input
+              class="input w-full bg-surface-950"
+              type="number"
+              min="0"
+              step="100000"
+              value={props.encoderSettings.bitrate ?? ''}
+              oninput={(e) => (props.encoderSettings.bitrate = Number((e.currentTarget as HTMLInputElement).value) || null)}
+              placeholder="Auto"
+            />
+          </label>
+          <label class="block space-y-1">
+            <span class="text-xs uppercase tracking-[0.25em] text-surface-500">GOP</span>
+            <input
+              class="input w-full bg-surface-950"
+              type="number"
+              min="0"
+              step="1"
+              value={props.encoderSettings.gop ?? ''}
+              oninput={(e) => (props.encoderSettings.gop = Number((e.currentTarget as HTMLInputElement).value) || null)}
+              placeholder="Auto"
+            />
+          </label>
+          <label class="block space-y-1">
+            <span class="text-xs uppercase tracking-[0.25em] text-surface-500">Threads</span>
+            <input
+              class="input w-full bg-surface-950"
+              type="number"
+              min="0"
+              step="1"
+              value={props.encoderSettings.threadCount ?? ''}
+              oninput={(e) => (props.encoderSettings.threadCount = Number((e.currentTarget as HTMLInputElement).value) || null)}
+              placeholder="Auto"
+            />
+          </label>
+        </div>
+
+        <div class="grid gap-3 md:grid-cols-3">
+          <label class="block space-y-1">
+            <span class="text-xs uppercase tracking-[0.25em] text-surface-500">Framerate numerator</span>
+            <input
+              class="input w-full bg-surface-950"
+              type="number"
+              min="0"
+              step="1"
+              value={props.encoderSettings.framerateNum ?? ''}
+              oninput={(e) => (props.encoderSettings.framerateNum = Number((e.currentTarget as HTMLInputElement).value) || null)}
+              placeholder="Leave blank"
+            />
+          </label>
+          <label class="block space-y-1">
+            <span class="text-xs uppercase tracking-[0.25em] text-surface-500">Framerate denominator</span>
+            <input
+              class="input w-full bg-surface-950"
+              type="number"
+              min="0"
+              step="1"
+              value={props.encoderSettings.framerateDen ?? ''}
+              oninput={(e) => (props.encoderSettings.framerateDen = Number((e.currentTarget as HTMLInputElement).value) || null)}
+              placeholder="Leave blank"
+            />
+          </label>
+          <label class="block space-y-1">
+            <span class="text-xs uppercase tracking-[0.25em] text-surface-500">Decode FPS</span>
+            <input
+              class="input w-full bg-surface-950"
+              type="number"
+              min="0"
+              step="1"
+              value={props.encoderSettings.decodeFps ?? ''}
+              oninput={(e) => (props.encoderSettings.decodeFps = Number((e.currentTarget as HTMLInputElement).value) || null)}
+              placeholder="Auto"
+            />
+          </label>
+        </div>
+
+        <div class="space-y-2">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-xs uppercase tracking-[0.25em] text-surface-500">Output scale</span>
+            <button class="btn btn-xs preset-tonal" type="button" onclick={() => applyOutputScale(1)} disabled={!normalizedSourceResolution}>1x</button>
+            <button class="btn btn-xs preset-tonal" type="button" onclick={() => applyOutputScale(2)} disabled={!normalizedSourceResolution}>2x</button>
+            <button class="btn btn-xs preset-tonal" type="button" onclick={() => applyOutputScale(3)} disabled={!normalizedSourceResolution}>3x</button>
+            <button class="btn btn-xs preset-tonal" type="button" onclick={() => applyOutputScale(4)} disabled={!normalizedSourceResolution}>4x</button>
+          </div>
           <p class="text-micro text-surface-500">
-            Defaults: bitrate {props.currentEncoder()?.tunables?.encoder_settings?.bitrate ?? 'auto'} · threads {props.currentEncoder()?.tunables?.encoder_settings?.thread_count ?? 'auto'}
+            {#if normalizedSourceResolution}
+              Source {normalizedSourceResolution.width}x{normalizedSourceResolution.height} · 2x-4x is recommended for higher encode FPS.
+            {:else}
+              Select a format/resolution to enable scaling presets.
+            {/if}
           </p>
-          <div class="grid gap-3 md:grid-cols-3">
-            <label class="block space-y-1">
-              <span class="text-xs uppercase tracking-[0.25em] text-surface-500">Bitrate (bps)</span>
-              <input
-                class="input w-full bg-surface-950"
-                type="number"
-                min="0"
-                step="100000"
-                value={props.encoderSettings.bitrate ?? ''}
-                oninput={(e) => (props.encoderSettings.bitrate = Number((e.currentTarget as HTMLInputElement).value) || null)}
-                placeholder="Auto"
-              />
-            </label>
-            <label class="block space-y-1">
-              <span class="text-xs uppercase tracking-[0.25em] text-surface-500">GOP</span>
-              <input
-                class="input w-full bg-surface-950"
-                type="number"
-                min="0"
-                step="1"
-                value={props.encoderSettings.gop ?? ''}
-                oninput={(e) => (props.encoderSettings.gop = Number((e.currentTarget as HTMLInputElement).value) || null)}
-                placeholder="Auto"
-              />
-            </label>
-            <label class="block space-y-1">
-              <span class="text-xs uppercase tracking-[0.25em] text-surface-500">Threads</span>
-              <input
-                class="input w-full bg-surface-950"
-                type="number"
-                min="0"
-                step="1"
-                value={props.encoderSettings.threadCount ?? ''}
-                oninput={(e) => (props.encoderSettings.threadCount = Number((e.currentTarget as HTMLInputElement).value) || null)}
-                placeholder="Auto"
-              />
-            </label>
-          </div>
+        </div>
 
-          <div class="grid gap-3 md:grid-cols-3">
-            <label class="block space-y-1">
-              <span class="text-xs uppercase tracking-[0.25em] text-surface-500">Framerate numerator</span>
-              <input
-                class="input w-full bg-surface-950"
-                type="number"
-                min="0"
-                step="1"
-                value={props.encoderSettings.framerateNum ?? ''}
-                oninput={(e) => (props.encoderSettings.framerateNum = Number((e.currentTarget as HTMLInputElement).value) || null)}
-                placeholder="Leave blank"
-              />
-            </label>
-            <label class="block space-y-1">
-              <span class="text-xs uppercase tracking-[0.25em] text-surface-500">Framerate denominator</span>
-              <input
-                class="input w-full bg-surface-950"
-                type="number"
-                min="0"
-                step="1"
-                value={props.encoderSettings.framerateDen ?? ''}
-                oninput={(e) => (props.encoderSettings.framerateDen = Number((e.currentTarget as HTMLInputElement).value) || null)}
-                placeholder="Leave blank"
-              />
-            </label>
-            <label class="block space-y-1">
-              <span class="text-xs uppercase tracking-[0.25em] text-surface-500">Decode FPS</span>
-              <input
-                class="input w-full bg-surface-950"
-                type="number"
-                min="0"
-                step="1"
-                value={props.encoderSettings.decodeFps ?? ''}
-                oninput={(e) => (props.encoderSettings.decodeFps = Number((e.currentTarget as HTMLInputElement).value) || null)}
-                placeholder="Auto"
-              />
-            </label>
-          </div>
-
-          <div class="space-y-2">
-            <div class="flex flex-wrap items-center gap-2">
-              <span class="text-xs uppercase tracking-[0.25em] text-surface-500">Output scale</span>
-              <button class="btn btn-xs preset-tonal" type="button" onclick={() => applyOutputScale(1)} disabled={!normalizedSourceResolution}>1x</button>
-              <button class="btn btn-xs preset-tonal" type="button" onclick={() => applyOutputScale(2)} disabled={!normalizedSourceResolution}>2x</button>
-              <button class="btn btn-xs preset-tonal" type="button" onclick={() => applyOutputScale(3)} disabled={!normalizedSourceResolution}>3x</button>
-              <button class="btn btn-xs preset-tonal" type="button" onclick={() => applyOutputScale(4)} disabled={!normalizedSourceResolution}>4x</button>
-            </div>
-            <p class="text-micro text-surface-500">
-              {#if normalizedSourceResolution}
-                Source {normalizedSourceResolution.width}x{normalizedSourceResolution.height} · 2x-4x is recommended for higher encode FPS.
-              {:else}
-                Select a format/resolution to enable scaling presets.
-              {/if}
-            </p>
-          </div>
-
-          <div class="grid gap-3 md:grid-cols-2">
-            <label class="block space-y-1">
-              <span class="text-xs uppercase tracking-[0.25em] text-surface-500">Output width</span>
-              <input
-                class="input w-full bg-surface-950"
-                type="number"
-                min="0"
-                step="1"
-                value={props.encoderSettings.outWidth ?? ''}
-                oninput={(e) => (props.encoderSettings.outWidth = Number((e.currentTarget as HTMLInputElement).value) || null)}
-                placeholder="Auto"
-              />
-            </label>
-            <label class="block space-y-1">
-              <span class="text-xs uppercase tracking-[0.25em] text-surface-500">Output height</span>
-              <input
-                class="input w-full bg-surface-950"
-                type="number"
-                min="0"
-                step="1"
-                value={props.encoderSettings.outHeight ?? ''}
-                oninput={(e) => (props.encoderSettings.outHeight = Number((e.currentTarget as HTMLInputElement).value) || null)}
-                placeholder="Auto"
-              />
-            </label>
-          </div>
-        {:else}
-          <div class="rounded border border-surface-800 bg-surface-950/60 px-4 py-3 text-sm text-surface-300">
-            No encoder settings available for this codec.
-          </div>
-        {/if}
-      </div>
-    {/snippet}
+        <div class="grid gap-3 md:grid-cols-2">
+          <label class="block space-y-1">
+            <span class="text-xs uppercase tracking-[0.25em] text-surface-500">Output width</span>
+            <input
+              class="input w-full bg-surface-950"
+              type="number"
+              min="0"
+              step="1"
+              value={props.encoderSettings.outWidth ?? ''}
+              oninput={(e) => (props.encoderSettings.outWidth = Number((e.currentTarget as HTMLInputElement).value) || null)}
+              placeholder="Auto"
+            />
+          </label>
+          <label class="block space-y-1">
+            <span class="text-xs uppercase tracking-[0.25em] text-surface-500">Output height</span>
+            <input
+              class="input w-full bg-surface-950"
+              type="number"
+              min="0"
+              step="1"
+              value={props.encoderSettings.outHeight ?? ''}
+              oninput={(e) => (props.encoderSettings.outHeight = Number((e.currentTarget as HTMLInputElement).value) || null)}
+              placeholder="Auto"
+            />
+          </label>
+        </div>
+      {:else}
+        <div class="rounded border border-surface-800 bg-surface-950/60 px-4 py-3 text-sm text-surface-300">
+          No encoder settings available for this codec.
+        </div>
+      {/if}
+    </div>
   </ModalShell>
 {/if}

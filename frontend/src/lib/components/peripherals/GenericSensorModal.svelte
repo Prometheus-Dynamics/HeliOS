@@ -4,6 +4,42 @@
   import SensorModalShell from './SensorModalShell.svelte';
   import PeripheralStats from './PeripheralStats.svelte';
 
+  type GenericSensorMetric = {
+    index?: number | string | null;
+    kind?: string | null;
+    label?: string | null;
+    value: number;
+    units?: string | null;
+  };
+
+  type GenericSensorChannel = {
+    name?: string | null;
+    metrics?: GenericSensorMetric[] | null;
+  };
+
+  type GenericSensorDevfreq = {
+    current_freq_hz?: number | null;
+    target_freq_hz?: number | null;
+    min_freq_hz?: number | null;
+    max_freq_hz?: number | null;
+    load_percent?: number | null;
+    governor?: string | null;
+    busy_time_us?: number | null;
+    total_time_us?: number | null;
+  };
+
+  type GenericSensorTelemetry = {
+    status?: string | null;
+    message?: string | null;
+    collected_at_ms?: number | null;
+    device_path?: string | null;
+    usb_device_path?: string | null;
+    class_path?: string | null;
+    debugfs_path?: string | null;
+    devfreq?: GenericSensorDevfreq | null;
+    hwmon?: GenericSensorChannel[] | null;
+  };
+
   type Props = {
     peripheral: PeripheralEntry;
     onClose: () => void;
@@ -12,7 +48,7 @@
 
   let { peripheral, onClose, onCalibrate = null }: Props = $props();
 
-  const telemetry = $derived((peripheral.telemetry ?? null) as any);
+  const telemetry = $derived((peripheral.telemetry ?? null) as GenericSensorTelemetry | null);
   const telemetryStatus = $derived(telemetry?.status ?? telemetry?.message ?? null);
   const hwmonSensors = $derived(telemetry?.hwmon ?? []);
 

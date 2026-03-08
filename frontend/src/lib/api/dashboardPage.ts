@@ -110,7 +110,7 @@ function buildSummaryStats(
 
 function buildTimeline(metrics: DeviceMetrics | null): TimelineItem[] {
   const checkedLabel = formatTimestamp(new Date().toISOString());
-  const issues: any[] = [];
+  const issues: Array<{ code?: string; description?: string }> = [];
   const items: TimelineItem[] = [
     {
       title: 'Health check',

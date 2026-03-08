@@ -72,9 +72,7 @@
     };
   };
 
-  const initialPreviewPlan = buildPreviewPlan(entry);
-  hydrateGraphWithRegistry(initialPreviewPlan, [entry]);
-  let previewPlan = $state<PipelineGraphPlan>(initialPreviewPlan);
+  let previewPlan = $state<PipelineGraphPlan>({ nodes: {}, connections: [] });
 
   $effect(() => {
     const plan = buildPreviewPlan(entry);

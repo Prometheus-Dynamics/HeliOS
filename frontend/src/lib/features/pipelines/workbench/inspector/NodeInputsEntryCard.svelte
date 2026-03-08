@@ -3,31 +3,23 @@
   import { describePortType } from '$lib/features/pipelines/inspector/inspectorTypeUtils';
   import { formatPipelineValue, parseEnumVariant, resolveDataTypeKey } from '$lib/features/pipelines/valueFormatting';
   import { isNumericTypeKey, isPixelTypeKey } from '$lib/components/flow/pipeline-graph/editorUtils';
-  import type { PipelineDataType, PipelinePortMetadata } from '$lib/types/pipeline';
+  import type { PipelineDataType, PipelineNodeValue, PipelinePortMetadata, PipelineTypeDescriptor } from '$lib/types/pipeline';
+  import { SvelteSet } from 'svelte/reactivity';
 
   type NodeParameterEntry = {
     port: string;
     key: string;
     dataType: PipelineDataType | string | undefined;
-    baseValue: any;
-    overrideValue: any;
+    baseValue: PipelineNodeValue | undefined;
+    overrideValue: PipelineNodeValue | undefined;
     variants: string[];
     settable: boolean;
     metadata?: PipelinePortMetadata;
   };
 
-  const {
-    entry,
-    typePalette,
-    draftValue,
-    error,
-    constantsReadOnly,
-    onDraftChange,
-    onApply,
-    onClear
-  } = $props<{
+  const props = $props<{
     entry: NodeParameterEntry;
-    typePalette: Record<string, any>;
+    typePalette: Record<string, PipelineTypeDescriptor>;
     draftValue: string;
     error: string | null;
     constantsReadOnly: boolean;
@@ -36,23 +28,35 @@
     onClear: () => void;
   }>();
 
-  const resolvedTypeKey = resolveDataTypeKey(entry.dataType ?? entry.baseValue?.dataType ?? entry.overrideValue?.dataType) ?? 'string';
-  const sliderMin = entry.metadata?.uiMin ?? entry.metadata?.min;
-  const sliderMax = entry.metadata?.uiMax ?? entry.metadata?.max;
-  const sliderStep = entry.metadata?.uiStep ?? entry.metadata?.step ?? (['int', 'uint', 'sint'].includes(resolvedTypeKey) ? 1 : undefined);
-  const uiControl = entry.metadata?.uiControl?.trim().toLowerCase();
-  const hasOverride = Boolean(entry.overrideValue);
-  const isPixel = isPixelTypeKey(resolvedTypeKey ?? null);
-  const isNumeric = isNumericTypeKey(resolvedTypeKey);
-  const enumLabelDelimiter = '\u00b7';
-  const runtimeTokens = new Set(['CPU', 'TPU', 'CORAL', 'EDGE TPU', 'EDGE-TPU']);
-  const precisionTokens = new Set(['INT8', 'UINT8', 'F16', 'F32', 'FLOAT16', 'FLOAT32']);
+  const entry = $derived.by(() => props.entry);
+  const typePalette = $derived.by(() => props.typePalette);
+  const draftValue = $derived.by(() => props.draftValue);
+  const error = $derived.by(() => props.error);
+  const constantsReadOnly = $derived.by(() => props.constantsReadOnly);
+  const onDraftChange = (value: string): void => props.onDraftChange(value);
+  const onApply = (): void => props.onApply();
+  const onClear = (): void => props.onClear();
 
-  const isModelIdEntry = (() => {
+  const resolvedTypeKey = $derived.by(
+    () => resolveDataTypeKey(entry.dataType ?? entry.baseValue?.dataType ?? entry.overrideValue?.dataType) ?? 'string'
+  );
+  const resolvedEntryType = $derived.by<PipelineDataType | string>(() => entry.dataType ?? entry.baseValue?.dataType ?? 'generic');
+  const sliderMin = $derived.by(() => entry.metadata?.uiMin ?? entry.metadata?.min);
+  const sliderMax = $derived.by(() => entry.metadata?.uiMax ?? entry.metadata?.max);
+  const sliderStep = $derived.by(() => entry.metadata?.uiStep ?? entry.metadata?.step ?? (['int', 'uint', 'sint'].includes(resolvedTypeKey) ? 1 : undefined));
+  const uiControl = $derived.by(() => entry.metadata?.uiControl?.trim().toLowerCase());
+  const hasOverride = $derived.by(() => Boolean(entry.overrideValue));
+  const isPixel = $derived.by(() => isPixelTypeKey(resolvedTypeKey ?? null));
+  const isNumeric = $derived.by(() => isNumericTypeKey(resolvedTypeKey));
+  const enumLabelDelimiter = '\u00b7';
+  const runtimeTokens = new SvelteSet(['CPU', 'TPU', 'CORAL', 'EDGE TPU', 'EDGE-TPU']);
+  const precisionTokens = new SvelteSet(['INT8', 'UINT8', 'F16', 'F32', 'FLOAT16', 'FLOAT32']);
+
+  const isModelIdEntry = $derived.by(() => {
     const portKey = entry.port?.trim().toLowerCase();
     const entryKey = entry.key?.trim().toLowerCase();
     return portKey === 'model_id' || entryKey === 'model_id';
-  })();
+  });
 
   const resolveEnumVariant = (raw: string, variants: string[]): string | null => {
     if (!variants.length) return null;
@@ -114,7 +118,7 @@
     <div>
       <p class="text-sm font-semibold text-white">{entry.port}</p>
       <p class="text-[0.7rem] text-surface-400">
-        {describePortType(entry.dataType ?? (entry.baseValue?.dataType as PipelineDataType) ?? 'generic', typePalette)}
+        {describePortType(resolvedEntryType, typePalette)}
       </p>
     </div>
     {#if hasOverride}

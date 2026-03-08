@@ -107,7 +107,7 @@ export async function cancellableWithTimeout<T>(
     const timer = setTimeout(() => {
       try {
         // Some generated clients expose a cancel method; ignore failures if absent.
-        (request as any)?.cancel?.();
+        (request as { cancel?: () => void })?.cancel?.();
       } catch {
         // ignore cancel errors
       }

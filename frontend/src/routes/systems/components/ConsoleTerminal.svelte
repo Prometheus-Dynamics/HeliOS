@@ -5,6 +5,7 @@
   import type { FitAddon as XtermFitAddon } from 'xterm-addon-fit';
   import { createTerminal, loadXtermDeps, type XtermDeps } from '$lib/components/terminal/xtermUtils';
   import 'xterm/css/xterm.css';
+  import { SvelteURLSearchParams } from 'svelte/reactivity';
 
   type ServerEvent =
     | { type: 'ready'; session_id: string; shell: string; cols: number; rows: number }
@@ -47,7 +48,8 @@
   let shouldAttemptReconnect = true;
   let currentCols = 0;
   let currentRows = 0;
-  let activeSessionId = $state<string | null>(sessionId);
+  const readSessionId = () => sessionId;
+  let activeSessionId = $state<string | null>(readSessionId());
   let pendingEcho: Array<{ sentAt: number; data: string }> = [];
   const textEncoder = new TextEncoder();
 
@@ -75,6 +77,8 @@
   const connectionBadge = $derived.by<{ label: string; tone: 'success' | 'warning' | 'muted' }>(() => {
     const value: { label: string; tone: 'success' | 'warning' | 'muted' } = connected
       ? { label: 'Connected', tone: 'success' }
+      : reconnectPlanned
+        ? { label: 'Reconnecting', tone: 'warning' }
       : connecting
         ? { label: 'Connecting', tone: 'warning' }
         : { label: 'Disconnected', tone: 'muted' };
@@ -264,7 +268,7 @@
   function openSocket(cols: number, rows: number): void {
     const base = getHttpClientBase().replace(/\/$/, '');
     const wsBase = base.replace(/^http/, 'ws');
-    const params = new URLSearchParams({ cols: cols.toString(), rows: rows.toString() });
+    const params = new SvelteURLSearchParams({ cols: cols.toString(), rows: rows.toString() });
     if (sessionId) {
       params.set('sessionId', sessionId);
     }

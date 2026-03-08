@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { CodecInfo, ProbedBackend, ProbedDevice, Interval } from '$lib/ts-bindings/http/client';
+  import type { CodecInfo, ProbedBackend, ProbedDevice } from '$lib/ts-bindings/http/client';
   import type { SensorBenchCodecStat, SensorBenchListItem, SensorBenchModeResult } from './sensorBenchTypes';
   import FormField from '$lib/components/ui/FormField.svelte';
 
@@ -125,7 +125,7 @@
           {#if !decodersForFormat().length}
             <option value="" disabled>No decoders for format</option>
           {:else}
-            {#each decodersForFormat() as decoder}
+            {#each decodersForFormat() as decoder (`${decoder.implementation ?? decoder.name ?? decoder.fourcc ?? ''}:${decoder.input ?? decoder.fourcc ?? ''}`)}
               <option value={decoder.implementation}>
                 {formatLabel(decoder.input || decoder.fourcc)} ({decoder.implementation || decoder.name || 'unknown'})
               </option>
@@ -184,7 +184,7 @@
             {#if codecs.length === 0}
               <option value="" disabled>No codecs reported</option>
             {:else}
-              {#each codecs as codec}
+              {#each codecs as codec (`${codec.implementation ?? codec.name ?? codec.fourcc ?? ''}:${codec.output ?? codec.input ?? ''}`)}
                 <option value={(String(codec.implementation ?? '').trim() || String(codec.name ?? '').trim())}>
                   {(codec.name || codec.output?.toUpperCase()) ?? codec.fourcc?.toUpperCase()} ({codec.implementation || 'unknown'})
                 </option>

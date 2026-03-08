@@ -86,6 +86,7 @@
   const mode = $derived(form.enabled ? (form.manual_percent != null ? 'fixed' : 'curve') : 'disabled');
   const statusMode = $derived(normalizeStatusMode(fanStatus?.mode));
   const displayMode = $derived(dirty ? mode : statusMode ?? mode);
+  const statusMessage = $derived.by(() => status ?? (refreshingStatus ? 'Refreshing status…' : null));
   const currentTemp = $derived(telemetry.cpu.temperature_c ?? null);
   const previewTarget = $derived(computeTarget(form, currentTemp));
   const ensureDeviceSettings = createSettingsLoader({
@@ -501,7 +502,7 @@
       {busy}
       {dirty}
       {settingsError}
-      {status}
+      status={statusMessage}
       {error}
       onSelectPoint={(index) => (selectedPointIndex = index)}
       onAddPoint={() => addPoint()}

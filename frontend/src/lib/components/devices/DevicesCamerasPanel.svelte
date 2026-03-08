@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { getVirtualWindow, virtualViewport } from '$lib/ui/virtualViewport';
   import type { Snippet } from 'svelte';
   import { Panel, StreamPreview } from '$lib';
@@ -17,7 +18,7 @@
     captureSessionId?: string | null;
     captureSessionAlias?: string | null;
     cameraUid?: string | null;
-    href?: string | null;
+    href?: '/devices' | '/peers' | `/devices/${string}` | null;
     statusClass?: string;
   };
 
@@ -121,7 +122,7 @@
                 >
                   <a
                     class="flex flex-1 flex-col focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40"
-                    href={camera.href ?? '#'}
+                    href={resolve(camera.href ?? '/devices')}
                   >
                     <div class="relative aspect-video overflow-hidden">
                       <div class="stream-card__preview">
@@ -194,7 +195,7 @@
           <article class="stream-card group flex flex-col overflow-hidden rounded border border-surface-800/80 bg-surface-950/30 shadow shadow-black/30 transition hover:border-primary-500/60 focus-within:border-primary-500/60">
             <a
               class="flex flex-1 flex-col focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40"
-              href={camera.href ?? '#'}
+              href={resolve(camera.href ?? '/devices')}
             >
               <div class="relative aspect-video overflow-hidden">
                 <div class="stream-card__preview">

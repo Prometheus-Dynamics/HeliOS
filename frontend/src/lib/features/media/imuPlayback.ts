@@ -31,7 +31,8 @@ async function decodeImuPayload(bytes: Uint8Array): Promise<string> {
   const DecompressionStreamCtor = (globalThis as unknown as { DecompressionStream?: new (format: string) => TransformStream })
     .DecompressionStream;
   if (DecompressionStreamCtor) {
-    const decompressedResponse = new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStreamCtor('gzip')));
+    const compressedBytes = Uint8Array.from(bytes);
+    const decompressedResponse = new Response(new Blob([compressedBytes]).stream().pipeThrough(new DecompressionStreamCtor('gzip')));
     return await decompressedResponse.text();
   }
 

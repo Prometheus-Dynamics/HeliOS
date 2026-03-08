@@ -11,79 +11,110 @@
   import { extractGraphOutputPorts } from '$lib/features/pipelines/graphOutputPorts';
   import PipelineOutputsPanel from '$lib/components/pipelines/PipelineOutputsPanel.svelte';
   import { StreamsApi } from '$lib/api/streamsApi';
-  import type { PipelineOutputEntry } from '$lib/components/pipelines/types';
-  import type { PipelineDataType, PipelineTypeDescriptor } from '$lib/types/pipeline';
+  import type { ControlMeta, StreamInfo, StreamPipelineGridSlot, StreamPipelineWire } from '$lib/ts-bindings/http/client';
+  import type { PipelineOutputEntry, PipelineTuningConstantGroup } from '$lib/components/pipelines/types';
+  import type {
+    PipelineDataType,
+    PipelineGraphPlan,
+    PipelineNodeValue,
+    PipelineOverviewPipeline,
+    PipelineStreamNodeMetrics,
+    PipelineTypeDescriptor
+  } from '$lib/types/pipeline';
+  import type { PipelineUi } from '$lib/features/pipelines/pipelineUiTypes';
+  import type { PipelineNodeValueDescriptor } from '$lib/features/devices/camera/page/cameraPipelineTuningController';
+  import type { StreamMetricsSummary } from './pipelineTuneMetricsRuntime';
+
+  type TuneNodeErrorMap = Record<string, Record<string, string | null>>;
+  type TuneStreamNodeErrorMap = Record<string, Record<string, Record<string, string | null>>>;
+  type TuneStreamNodeOverrideMap = Record<string, Record<string, Record<string, PipelineNodeValue>>>;
+  type TuneControlValueMap = Record<number, number | boolean | null>;
+  type TuneControlBusyMap = Record<number, boolean>;
+  type MetricsSource = {
+    error?: string | null;
+    metrics?: PipelineStreamNodeMetrics[];
+  };
+  type PipelineGraphListEntry = Record<string, unknown> & {
+    id?: string;
+    name?: string | null;
+  };
 
   type PipelineTunePanelProps = {
-    selectedPipeline?: any;
-    tuneStreamsForPipeline?: any[];
+    selectedPipeline?: PipelineOverviewPipeline | null;
+    tuneStreamsForPipeline?: StreamInfo[];
     tuneStreamsLoading?: boolean;
     tuneStreamsError?: string | null;
-    tunePlan?: any;
-    tuneNodeDescriptors?: any[];
-    tuneNodeErrors?: Record<string, Record<string, string | null>>;
-    tuneConstantGroups?: any[];
-    tuneFilteredConstantGroups?: any[];
-    tuneStreamNodeOverridesById?: Record<string, any>;
-    tuneStreamNodeErrorsById?: Record<string, any>;
+    tunePlan?: PipelineGraphPlan | null;
+    tuneNodeDescriptors?: PipelineNodeValueDescriptor[];
+    tuneNodeErrors?: TuneNodeErrorMap;
+    tuneConstantGroups?: PipelineTuningConstantGroup[];
+    tuneFilteredConstantGroups?: PipelineTuningConstantGroup[];
+    tuneStreamNodeOverridesById?: TuneStreamNodeOverrideMap;
+    tuneStreamNodeErrorsById?: TuneStreamNodeErrorMap;
     tuneStreamApplyErrorById?: Record<string, string | null>;
-    tunePreviewStream?: any;
+    tunePreviewStream?: StreamInfo | null;
     tuneUiMode?: 'pipeline' | 'advanced';
-    tuneStreamControls?: any[];
+    tuneStreamControls?: ControlMeta[];
     tuneControlsLoading?: boolean;
     tuneControlsError?: string | null;
-    tuneFilteredControls?: () => any[];
+    tuneFilteredControls?: () => ControlMeta[];
     metricsStatusLabel?: string;
     metricsUpdatedLabel?: string;
-    metricsSource?: { error?: string | null; metrics?: any[] };
-    pipelineMetricsSummary?: any[];
-    menuOptions?: (ctrl: any) => Array<{ value: number; label: string }>;
+    metricsSource?: MetricsSource;
+    pipelineMetricsSummary?: StreamMetricsSummary[];
+    menuOptions?: (ctrl: ControlMeta) => Array<{ value: number; label: string }>;
     tuneMultiplexError?: string | null;
     tuneMultiplexPalettePipelineIds?: string[];
     tuneMultiplexRowIndices?: number[];
     tuneMultiplexColumnIndices?: number[];
-    tuneMultiplexOutputOptionsCache?: Record<string, any>;
+    tuneMultiplexOutputOptionsCache?: Record<string, string[]>;
     tuneMultiplexLayoutSignature?: string | null;
-    tunePipelineGraphs?: any[];
-    tunePipelineAssignFilteredGraphs?: any[];
+    tunePipelineGraphs?: PipelineGraphListEntry[];
+    tunePipelineAssignFilteredGraphs?: PipelineGraphListEntry[];
     tuneMultiplexGridIsSingle?: boolean;
     tuneAllowDrop?: (event: DragEvent) => void;
-    streamLabel: (stream: any) => string;
+    streamLabel: (stream: StreamInfo) => string;
     normalizePortKey: (value: string) => string;
     readTuneNodeDraft: (nodeId: string, portKey: string) => string | null;
-    updateGlobalNodeValue: (nodeId: string, portKey: string, dataType: any, raw: string) => void;
+    updateGlobalNodeValue: (nodeId: string, portKey: string, dataType: PipelineDataType | null, raw: string) => void;
     clearTuneNodeDraft: (nodeId: string, portKey: string) => void;
     setTuneNodeError: (nodeId: string, portKey: string, error: string | null) => void;
     scheduleTuneGlobalAutoSave: () => void;
     scheduleTuneMultiplexAutoApply?: () => void;
-    setNodeConstantValue: (nodeId: string, portKey: string, value: any) => void;
-    handlePlanChange: (plan: any) => void;
-    isDaedalusPlan: (plan: any) => boolean;
-    safeClonePlan: (plan: any) => any;
+    setNodeConstantValue: (nodeId: string, portKey: string, value: PipelineNodeValue) => void;
+    handlePlanChange: (plan: PipelineGraphPlan) => void;
+    isDaedalusPlan: (plan: PipelineGraphPlan | null | undefined) => boolean;
+    safeClonePlan: (plan: PipelineGraphPlan) => PipelineGraphPlan;
     readTuneStreamNodeDraft: (streamId: string, nodeId: string, portKey: string) => string | null;
-    updateStreamNodeValue: (streamId: string, nodeId: string, portKey: string, dataType: any, raw: string) => void;
+    updateStreamNodeValue: (
+      streamId: string,
+      nodeId: string,
+      portKey: string,
+      dataType: PipelineDataType | null,
+      raw: string
+    ) => void;
     saveTunePipelineUi: () => void;
     resetTunePipelineUi: () => void;
-    applyStreamControl: (...args: any[]) => void;
-    scheduleControlApply: (...args: any[]) => void;
-    displayControlValue: (ctrl: any, value: number | boolean | null) => string;
-    extractControlValue: (value: any) => number | boolean | null;
-    controlMin: (ctrl: any) => number | null;
-    controlMax: (ctrl: any) => number | null;
-    controlStep: (ctrl: any) => number | null;
-    accessLabel: (ctrl: any) => string;
-    accessBadgeClass: (ctrl: any) => string;
+    applyStreamControl: (ctrl: ControlMeta, next: number | boolean | null) => void | Promise<void>;
+    scheduleControlApply: (ctrl: ControlMeta, next: number | boolean | null) => void;
+    displayControlValue: (ctrl: ControlMeta, value: number | boolean | null) => string;
+    extractControlValue: (value: unknown) => number | boolean | null;
+    controlMin: (ctrl: ControlMeta) => number | null;
+    controlMax: (ctrl: ControlMeta) => number | null;
+    controlStep: (ctrl: ControlMeta) => number | null;
+    accessLabel: (access: ControlMeta['access'] | string | null | undefined) => string;
+    accessBadgeClass: (access: ControlMeta['access'] | string | null | undefined) => string;
     startTuneMultiplexDrag: (pipelineId: string, source?: { row: number; column: number }) => (event: DragEvent) => void;
     pipelineLabelById: (pipelineId: string) => string;
     setTuneMultiplexGridDimensions: (rows: number, columns: number) => void;
-    dropTuneMultiplexOn: (...args: any[]) => void;
-    clearTuneMultiplexCell: (...args: any[]) => void;
+    dropTuneMultiplexOn: (row: number, column: number) => (event: DragEvent) => void;
+    clearTuneMultiplexCell: (row: number, column: number) => void;
     tunePipelineForCell: (row: number, column: number) => string | null;
-    tuneOutputSelectionForPipeline: (pipelineId: string) => any;
+    tuneOutputSelectionForPipeline: (pipelineId: string) => string | null;
     tuneOutputKeyForCell: (row: number, column: number) => string | null;
-    setTuneOutputSelectionForPipeline: (...args: any[]) => void;
-    setTuneOutputKeyForCell: (...args: any[]) => void;
-    setTuneLivePipelineOutput: (...args: any[]) => void;
+    setTuneOutputSelectionForPipeline: (pipelineId: string, output: string | null) => void;
+    setTuneOutputKeyForCell: (row: number, column: number, outputKey: string | null) => void;
+    setTuneLivePipelineOutput: (output: string | null) => void | Promise<void>;
     onRequestAssign: () => void;
     RAW_STREAM_PIPELINE_ID: string;
     RAW_STREAM_PIPELINE_UUID: string;
@@ -91,7 +122,7 @@
     tuneUiEditMode?: boolean;
     tuneScopeTab?: string;
     tunePipelineUiSearch?: string;
-    tunePipelineUiDraft?: any;
+    tunePipelineUiDraft?: PipelineUi | null;
     tuneUiActiveTabId?: string;
     tuneUiSelectedItemId?: string | null;
     tuneUiSelectedItemAnchor?: { x: number; y: number } | null;
@@ -99,17 +130,17 @@
     tunePerformanceTab?: 'metrics' | 'controls' | 'layout' | 'outputs';
     tuneControlsQuery?: string;
     tuneShowReadOnlyControls?: boolean;
-    tuneControlState?: any;
-    tuneControlAppliedState?: any;
-    tuneControlBusy?: any;
+    tuneControlState?: TuneControlValueMap;
+    tuneControlAppliedState?: TuneControlValueMap;
+    tuneControlBusy?: TuneControlBusyMap;
     tuneMultiplexRows?: number;
     tuneMultiplexColumns?: number;
-    tuneSelectedPipelineOutput?: string;
+    tuneSelectedPipelineOutput?: string | null;
     tunePipelineRemoveModalOpen?: boolean;
     tunePipelineRemoveCandidateId?: string | null;
     tunePipelineAssignModalOpen?: boolean;
     tunePipelineAssignQuery?: string;
-    tunePipelineAssignDraft?: any;
+    tunePipelineAssignDraft?: string[];
 
     pipelineOutputEntries?: PipelineOutputEntry[];
     typePalette?: Record<string, PipelineTypeDescriptor>;
@@ -217,24 +248,6 @@
 
   export type $$Props = PipelineTunePanelProps;
 
-  type AnyNodeRuntime = {
-    metrics?: {
-      averageTimeMs?: number;
-      averageFps?: number;
-      sampleCount?: number;
-      windowSize?: number;
-      lastSampleAgeMs?: number | null;
-    };
-    lastError?: string | null;
-    lastErrorAt?: number | null;
-  };
-
-  type AnyMetricsSnapshot = {
-    streamId?: string;
-    streamPath?: string;
-    metrics?: Record<string, AnyNodeRuntime>;
-  };
-
   type NodeTimingRow = {
     nodeId: string;
     timeMs: number | null;
@@ -260,7 +273,7 @@
     for (const entry of pipelineOutputEntries ?? []) {
       const name = String(entry?.name ?? '').trim();
       if (!name) continue;
-      map[name] = (entry as any)?.dataType ?? null;
+      map[name] = entry.dataType ?? null;
     }
     return map;
   });
@@ -269,9 +282,9 @@
     tuneScopeTab === 'global' ? null : tuneStreamsForPipeline.find((stream) => stream.id === tuneScopeTab) ?? null
   );
 
-  const activeMetricsSnapshot: AnyMetricsSnapshot | null = $derived.by(() => {
+  const activeMetricsSnapshot: PipelineStreamNodeMetrics | null = $derived.by(() => {
     if (tuneScopeTab === 'global') return null;
-    const snapshots = (metricsSource?.metrics ?? []) as AnyMetricsSnapshot[];
+    const snapshots = metricsSource?.metrics ?? [];
     return snapshots.find((snapshot) => snapshot?.streamId === tuneScopeTab) ?? null;
   });
 
@@ -322,23 +335,27 @@
     if (normalized === RAW_STREAM_PIPELINE_UUID) return RAW_STREAM_PIPELINE_ID;
     return normalized;
   };
-  const readManifestWires = (stream: any): any[] => {
-    const wires = stream?.manifest?.pipeline_wires ?? stream?.manifest?.pipelineWires ?? [];
+  const readManifestWires = (stream: StreamInfo | null | undefined): StreamPipelineWire[] => {
+    const manifestRecord =
+      stream?.manifest && typeof stream.manifest === 'object'
+        ? (stream.manifest as Record<string, unknown>)
+        : null;
+    const wires = stream?.manifest?.pipeline_wires ?? manifestRecord?.pipelineWires ?? [];
     return Array.isArray(wires) ? wires : [];
   };
   const buildNextPipelineWires = (
-    previous: any[],
+    previous: StreamPipelineWire[],
     args: {
       to: { pipelineId: string; outputKey?: string | null };
       from: { pipelineId: string; outputKey?: string | null; port?: string | null } | null;
     }
-  ): any[] => {
+  ): StreamPipelineWire[] => {
     const toId = normalizeId(args.to?.pipelineId);
     if (!toId.length) return previous;
     const toWireId = toId === RAW_STREAM_PIPELINE_ID ? RAW_STREAM_PIPELINE_UUID : toId;
     const toOutputKey = normalizeKey(args.to?.outputKey);
     const next = previous.filter((wire) => {
-      const to = (wire as any)?.to ?? null;
+      const to = wire?.to ?? null;
       const wireToId = normalizeId(to?.pipeline_id);
       if (!wireToId.length) return true;
       if (wireToId !== toWireId) return true;
@@ -366,10 +383,10 @@
     return next;
   };
 
-  let tuneWiresByStreamId = $state<Record<string, any[]>>({});
+  let tuneWiresByStreamId = $state<Record<string, StreamPipelineWire[]>>({});
 
   async function setFrameSourceForStream(
-    stream: any,
+    stream: StreamInfo | null | undefined,
     args: {
       to: { pipelineId: string; outputKey?: string | null };
       from: { pipelineId: string; outputKey?: string | null; port?: string | null } | null;
@@ -416,10 +433,10 @@
   });
   const tuneInputLayoutSlots = $derived.by(() => {
     const slots = Array.isArray(tuneInputConfigStream?.manifest?.pipeline_layout?.slots)
-      ? tuneInputConfigStream.manifest.pipeline_layout.slots
+      ? (tuneInputConfigStream.manifest.pipeline_layout.slots as StreamPipelineGridSlot[])
       : [];
     return slots
-      .map((slot: any) => {
+      .map((slot) => {
         const row = Math.trunc(Number(slot?.row));
         const column = Math.trunc(Number(slot?.column));
         if (!Number.isInteger(row) || !Number.isInteger(column)) return null;
@@ -455,7 +472,7 @@
     if (!tuneInputTargetPipelineId.length) return 'raw|raw';
     const toWireId = tuneInputTargetPipelineId === RAW_STREAM_PIPELINE_ID ? RAW_STREAM_PIPELINE_UUID : tuneInputTargetPipelineId;
     const frameWire = tuneInputWires.find((wire) => {
-      const to = (wire as any)?.to ?? null;
+      const to = wire?.to ?? null;
       const wireToId = normalizeId(to?.pipeline_id);
       if (!wireToId.length) return false;
       if (wireToId !== toWireId) return false;
@@ -464,7 +481,7 @@
       const wireToKey = normalizeKey(to?.output_key);
       return (wireToKey ?? null) === (tuneInputTargetOutputKey ?? null);
     });
-    const from = (frameWire as any)?.from ?? null;
+    const from = frameWire?.from ?? null;
     const fromIdRaw = normalizeId(from?.pipeline_id);
     if (!fromIdRaw.length) return 'raw|raw';
     const fromId = normalizePipelineIdForUi(fromIdRaw);
@@ -786,7 +803,6 @@
             onChange={(next) => (tunePipelineUiDraft = next)}
             onSave={saveTunePipelineUi}
             onReset={resetTunePipelineUi}
-            activeTabId={tuneUiActiveTabId}
           />
         </div>
       {:else}
@@ -962,7 +978,7 @@
                         <p class="truncate text-micro-tight text-surface-500">
                           FPS: <span class="text-surface-200">{row.fps === null ? '—' : row.fps.toFixed(1)}</span>
                           · Samples: <span class="text-surface-200">{row.sampleCount}</span>
-                          · Age:{' '}
+                          · Age:
                           <span class="text-surface-200">{row.lastSampleAgeMs === null ? '—' : `${Math.round(row.lastSampleAgeMs)} ms`}</span>
                         </p>
                         {#if row.lastError}

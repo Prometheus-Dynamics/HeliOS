@@ -20,7 +20,7 @@
   let val = $state(1);
   let alpha = $state(1);
   let dragging = $state(false);
-  let lastPropValue = value;
+  let lastPropValue = '';
 
   function clamp(value: number, min: number, max: number): number {
     return Math.min(max, Math.max(min, value));

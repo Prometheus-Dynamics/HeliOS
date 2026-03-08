@@ -88,6 +88,8 @@
 <div
   class="relative h-56 w-full overflow-hidden border border-surface-700/60 bg-surface-950"
   bind:this={container}
+  role="img"
+  aria-label="Usage trend chart"
   onpointermove={handlePointerMove}
   onpointerleave={clearHover}
   onpointercancel={clearHover}

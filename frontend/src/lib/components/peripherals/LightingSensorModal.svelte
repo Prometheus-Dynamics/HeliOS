@@ -44,6 +44,7 @@
   import type { LightingSettings } from '../../../routes/settings/types';
   import { REQUESTED_BY, apiFetch } from '../../../routes/settings/api';
   import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
+  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
   type Props = {
     peripheral: PeripheralEntry;
@@ -213,7 +214,7 @@
   }
 
   const templateNameKeys = $derived(
-    new Set([...BUILTIN_TEMPLATE_NAMES.map((name) => normalizedAnimationKey(name)), ...lightingTemplates.map((entry) => normalizedAnimationKey(entry.name))])
+    new SvelteSet([...BUILTIN_TEMPLATE_NAMES.map((name) => normalizedAnimationKey(name)), ...lightingTemplates.map((entry) => normalizedAnimationKey(entry.name))])
   );
   const visibleSavedAnimations = $derived(
     savedAnimations.filter((entry) => !templateNameKeys.has(normalizedAnimationKey(entry.name)))
@@ -227,7 +228,7 @@
   );
   const templateAnimationNameOptions = $derived(
     (() => {
-      const names = new Set<string>();
+      const names = new SvelteSet<string>();
       for (const template of lightingTemplates) {
         if (template.name.trim().length > 0) {
           names.add(template.name.trim());
@@ -243,7 +244,7 @@
   );
   const defaultAnimationNameOptions = $derived(
     (() => {
-      const names = new Set<string>();
+      const names = new SvelteSet<string>();
       for (const entry of savedAnimations) {
         if (entry.name.trim().length > 0) {
           names.add(entry.name.trim());
@@ -443,7 +444,7 @@
       ledSelectionBrightness = Array.from({ length: count }, (_, idx) => clampNumber(ledSelectionBrightness[idx] ?? 255, 0, 255));
     }
     const safeSelection = Array.from(
-      new Set(selectedLedIndices.map((index) => clampNumber(index, 0, Math.max(0, count - 1))).filter((index) => index >= 0 && index < count))
+      new SvelteSet(selectedLedIndices.map((index) => clampNumber(index, 0, Math.max(0, count - 1))).filter((index) => index >= 0 && index < count))
     );
     const nextSelection = safeSelection;
     const changed =
@@ -1487,7 +1488,7 @@
   }
 
   async function ensureDefaultAnimationEntries(defaultAnimations: Record<string, string>): Promise<void> {
-    const requiredKeys = new Set<string>();
+    const requiredKeys = new SvelteSet<string>();
     for (const animationName of Object.values(defaultAnimations)) {
       const key = normalizedAnimationKey(animationName);
       if (key.length > 0) {
@@ -1498,7 +1499,7 @@
       return;
     }
 
-    const savedKeys = new Set<string>();
+    const savedKeys = new SvelteSet<string>();
     for (const entry of savedAnimations) {
       const key = normalizedAnimationKey(entry.name);
       if (key.length > 0) {
@@ -1506,7 +1507,7 @@
       }
     }
 
-    const templateByNameKey = new Map<string, LightingAnimationTemplateSummary>();
+    const templateByNameKey = new SvelteMap<string, LightingAnimationTemplateSummary>();
     for (const template of lightingTemplates) {
       const key = normalizedAnimationKey(template.name);
       if (key.length > 0 && !templateByNameKey.has(key)) {
@@ -1562,7 +1563,7 @@
       const next = clampNumber(index, 0, Math.max(0, ledColors.length - 1));
       const exists = selectedLedIndices.includes(next);
       const updated = exists ? selectedLedIndices.filter((item) => item !== next) : [...selectedLedIndices, next];
-      selectedLedIndices = Array.from(new Set(updated)).sort((a, b) => a - b);
+      selectedLedIndices = Array.from(new SvelteSet(updated)).sort((a, b) => a - b);
       syncEditorFromSelection();
     });
   }
@@ -1585,7 +1586,7 @@
     commitEditorChange(() => {
       editorColor = value;
       if (selectedLedIndices.length === 0) return;
-      const selectedSet = new Set(selectedLedIndices.map((idx) => clampNumber(idx, 0, Math.max(0, ledColors.length - 1))));
+      const selectedSet = new SvelteSet(selectedLedIndices.map((idx) => clampNumber(idx, 0, Math.max(0, ledColors.length - 1))));
       ledColors = ledColors.map((current, i) => (selectedSet.has(i) ? value : current));
     });
   }
@@ -1595,7 +1596,7 @@
       const next = clampNumber(value, 0, 255);
       editorBrightness = next;
       if (selectedLedIndices.length === 0) return;
-      const selectedSet = new Set(selectedLedIndices.map((idx) => clampNumber(idx, 0, Math.max(0, ledSelectionBrightness.length - 1))));
+      const selectedSet = new SvelteSet(selectedLedIndices.map((idx) => clampNumber(idx, 0, Math.max(0, ledSelectionBrightness.length - 1))));
       ledSelectionBrightness = ledSelectionBrightness.map((current, i) => (selectedSet.has(i) ? next : current));
     });
   }

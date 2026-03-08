@@ -1,7 +1,6 @@
 import { derived, get, writable, type Readable } from 'svelte/store';
-import { DeviceService } from '$lib/ts-bindings/http/client';
+import { DeviceService, type CameraLayoutResponse } from '$lib/ts-bindings/http/client';
 import { createRefreshableResource } from '$lib/utils/refreshableResource';
-import type { MediaAssetListResult } from './api';
 import { createMediaListStore, type MediaListStore } from './store';
 import { createSelectionStore, type SelectionStore } from './selectionStore';
 import { resolveStreamLabel } from '$lib/utils/streamLabels';
@@ -29,9 +28,9 @@ const DEFAULT_STREAM_LABELS_CACHE_STALE_MS = 30_000;
 const DEFAULT_STREAM_LABELS_CACHE_MAX_MS = 120_000;
 
 function defaultStreamLabelLoader(): Promise<Record<string, string>> {
-  return DeviceService.getCameraLayout().then((response) => {
+  return DeviceService.getCameraLayout().then((response: CameraLayoutResponse) => {
     const next: Record<string, string> = {};
-    const cams = Array.isArray((response as any)?.cameras) ? (response as any).cameras : [];
+    const cams = Array.isArray(response.cameras) ? response.cameras : [];
     for (const cam of cams) {
       const id = typeof cam?.stream_id === 'string' ? cam.stream_id.trim() : '';
       if (!id) continue;

@@ -1,23 +1,10 @@
 import type { StreamInfo } from '$lib/api/httpClient';
+import type { CalibrationBoard, CalibrationImage, CalibrationParams, IpaStatus } from '$lib/features/devices/camera/cameraCalibrationTypes';
 import { StreamsApi } from '$lib/api/streamsApi';
 import { emitMediaMutation } from '$lib/features/media/mutations';
 import { compareMediaRecent } from '$lib/features/media/sort';
 import { resolveStreamLabel } from '$lib/utils/streamLabels';
 import type { CalibrationSolveResult } from './cameraCalibrationStore.svelte';
-
-type CalibrationParams = {
-  fx: number;
-  fy: number;
-  cx: number;
-  cy: number;
-  k1: number;
-  k2: number;
-  p1: number;
-  p2: number;
-  k3: number;
-  undistortIters: number;
-  lensModel?: 'pinhole' | 'fisheye';
-};
 
 type CalibrationImportSource = {
   id: string;
@@ -25,14 +12,16 @@ type CalibrationImportSource = {
   calibration: CalibrationParams;
 };
 
+type IpaStatusFile = IpaStatus['files'][number];
+
 type CalibrationState = {
   get stream(): StreamInfo | null;
   get streamId(): string;
-  get calibrationBoard(): any;
+  get calibrationBoard(): CalibrationBoard;
   get calibrationLensModel(): 'pinhole' | 'fisheye';
   set calibrationLensModel(value: 'pinhole' | 'fisheye');
-  get calibrationImages(): Array<{ name: string; size_bytes: number; content_type: string; stream_id?: string; kind?: string; captured_at_ms?: number }>;
-  set calibrationImages(value: Array<{ name: string; size_bytes: number; content_type: string; stream_id?: string; kind?: string; captured_at_ms?: number }>);
+  get calibrationImages(): CalibrationImage[];
+  set calibrationImages(value: CalibrationImage[]);
   get calibrationOwnPhotosOnly(): boolean;
   set calibrationOwnPhotosOnly(value: boolean);
   get calibrationSelected(): Record<string, boolean>;
@@ -73,12 +62,12 @@ type CalibrationState = {
   set calibrationImportSources(value: CalibrationImportSource[]);
   get calibrationPreviewOpen(): boolean;
   set calibrationPreviewOpen(value: boolean);
-  get calibrationPreviewItem(): any;
-  set calibrationPreviewItem(value: any);
+  get calibrationPreviewItem(): CalibrationImage | null;
+  set calibrationPreviewItem(value: CalibrationImage | null);
   get ipaLoading(): boolean;
   set ipaLoading(value: boolean);
-  get ipaStatus(): any;
-  set ipaStatus(value: any);
+  get ipaStatus(): IpaStatus | null;
+  set ipaStatus(value: IpaStatus | null);
   get ipaTarget(): string;
   set ipaTarget(value: string);
   get ipaCt(): number;
@@ -99,8 +88,8 @@ type CalibrationState = {
   set ipaChartSolveBusy(value: boolean);
   get ipaChartSolveError(): string | null;
   set ipaChartSolveError(value: string | null);
-  get ipaChartSolveResult(): { ccm: number[][] | null; rmsError: number } | null;
-  set ipaChartSolveResult(value: { ccm: number[][] | null; rmsError: number } | null);
+  get ipaChartSolveResult(): { ccm: number[][]; rmsError: number } | null;
+  set ipaChartSolveResult(value: { ccm: number[][]; rmsError: number } | null);
 };
 
 type CalibrationDeps = {
@@ -116,8 +105,58 @@ type CalibrationDeps = {
     inline?: (message: string) => void;
   }) => string | void;
   refresh: () => Promise<void>;
-  normalizeCalibrationSolveResult: (value: any) => CalibrationSolveResult | null;
+  normalizeCalibrationSolveResult: (value: unknown) => CalibrationSolveResult | null;
   normalizeCalibrationParams: (value: unknown) => CalibrationParams | null;
+};
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+
+const asFiniteNumber = (value: unknown): number | null => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+};
+
+const asFixedNumberArray = (value: unknown, expectedLength: number): number[] | null => {
+  if (!Array.isArray(value) || value.length !== expectedLength) return null;
+  const normalized = value.map((entry) => Number(entry));
+  return normalized.every((entry) => Number.isFinite(entry)) ? normalized : null;
+};
+
+const asCcmMatrix = (value: unknown): number[][] | null => {
+  if (!Array.isArray(value) || value.length !== 3) return null;
+  const rows = value.map((entry) => asFixedNumberArray(entry, 3));
+  return rows.every((entry): entry is number[] => entry !== null) ? rows : null;
+};
+
+const ccmMatrixFromFlat = (value: number[]): number[][] => [
+  [value[0] ?? 1, value[1] ?? 0, value[2] ?? 0],
+  [value[3] ?? 0, value[4] ?? 1, value[5] ?? 0],
+  [value[6] ?? 0, value[7] ?? 0, value[8] ?? 1]
+];
+
+const normalizeIpaStatusFile = (value: unknown): IpaStatusFile | null => {
+  const record = asRecord(value);
+  if (!record) return null;
+  const target = typeof record.target === 'string' ? record.target.trim() : '';
+  const path = typeof record.path === 'string' ? record.path.trim() : '';
+  if (!target || !path) return null;
+  return {
+    target,
+    path,
+    exists: Boolean(record.exists),
+    ccm: record.ccm === null ? null : (asFixedNumberArray(record.ccm, 9) ?? undefined),
+    ccmCt: record.ccmCt === null ? null : (asFiniteNumber(record.ccmCt) ?? undefined)
+  };
+};
+
+const normalizeIpaStatus = (value: unknown): IpaStatus | null => {
+  const record = asRecord(value);
+  if (!record) return null;
+  const files = Array.isArray(record.files)
+    ? record.files.map((entry) => normalizeIpaStatusFile(entry)).filter((entry): entry is IpaStatusFile => entry !== null)
+    : [];
+  return { files };
 };
 
 export function createCameraCalibrationController(state: CalibrationState, deps: CalibrationDeps) {
@@ -138,20 +177,25 @@ export function createCameraCalibrationController(state: CalibrationState, deps:
   }
 
   function extractImportedCalibration(payload: unknown): CalibrationParams | null {
-    const root = payload as any;
+    const root = asRecord(payload);
+    const manifest = asRecord(root?.manifest);
+    const manifestCamera = asRecord(manifest?.camera);
+    const stream = asRecord(root?.stream);
+    const streamManifest = asRecord(stream?.manifest);
+    const streamManifestCamera = asRecord(streamManifest?.camera);
     const candidates = [
-      root,
+      payload,
       root?.calibration,
       root?.camera,
       root?.params,
-      root?.manifest?.calibration,
-      root?.manifest?.camera?.calibration,
-      root?.manifest?.camera?.intrinsics,
-      root?.manifest?.intrinsics,
-      root?.stream?.manifest?.calibration,
-      root?.stream?.manifest?.camera?.calibration,
-      root?.stream?.manifest?.camera?.intrinsics,
-      root?.stream?.manifest?.intrinsics
+      manifest?.calibration,
+      manifestCamera?.calibration,
+      manifestCamera?.intrinsics,
+      manifest?.intrinsics,
+      streamManifest?.calibration,
+      streamManifestCamera?.calibration,
+      streamManifestCamera?.intrinsics,
+      streamManifest?.intrinsics
     ];
 
     for (const candidate of candidates) {
@@ -209,7 +253,7 @@ export function createCameraCalibrationController(state: CalibrationState, deps:
       for (const stream of streams ?? []) {
         const id = stream?.id?.trim();
         if (!id || id === currentId) continue;
-        const params = deps.normalizeCalibrationParams((stream as any)?.manifest?.calibration ?? null);
+        const params = deps.normalizeCalibrationParams(stream.manifest?.calibration ?? null);
         if (!params) continue;
         nextSources.push({
           id,
@@ -282,15 +326,12 @@ export function createCameraCalibrationController(state: CalibrationState, deps:
     try {
       const resp = await fetch(deps.apiPath('/device/ipa'));
       if (!resp.ok) throw new Error(`Failed to load IPA status (${resp.status})`);
-      const json = (await resp.json()) as any;
-      state.ipaStatus = json ?? null;
-      const first = Array.isArray(json?.files) ? json.files.find((f: any) => Array.isArray(f?.ccm) && f.ccm.length === 9) : null;
+      const json = (await resp.json()) as unknown;
+      const status = normalizeIpaStatus(json);
+      state.ipaStatus = status;
+      const first = status?.files.find((file) => Array.isArray(file.ccm) && file.ccm.length === 9) ?? null;
       if (first?.ccm) {
-        state.ipaCcm = [
-          [Number(first.ccm[0] ?? 1), Number(first.ccm[1] ?? 0), Number(first.ccm[2] ?? 0)],
-          [Number(first.ccm[3] ?? 0), Number(first.ccm[4] ?? 1), Number(first.ccm[5] ?? 0)],
-          [Number(first.ccm[6] ?? 0), Number(first.ccm[7] ?? 0), Number(first.ccm[8] ?? 1)]
-        ];
+        state.ipaCcm = ccmMatrixFromFlat(first.ccm);
       }
       if (typeof first?.ccmCt === 'number') {
         state.ipaCt = Number(first.ccmCt) || 4000;
@@ -335,7 +376,7 @@ export function createCameraCalibrationController(state: CalibrationState, deps:
     }
   }
 
-  function openCalibrationPreview(item: any) {
+  function openCalibrationPreview(item: CalibrationImage) {
     state.calibrationPreviewItem = item;
     state.calibrationPreviewOpen = true;
   }
@@ -399,14 +440,18 @@ export function createCameraCalibrationController(state: CalibrationState, deps:
         const text = await resp.text().catch(() => '');
         throw new Error(text || `Solve failed (${resp.status})`);
       }
-      const json = (await resp.json()) as any;
-      state.ipaChartSolveResult = { ccm: json?.ccm ?? null, rmsError: Number(json?.rmsError ?? 0) };
-      if (Array.isArray(json?.ccm) && json.ccm.length === 3) {
-        state.ipaCcm = json.ccm as number[][];
+      const json = (await resp.json()) as unknown;
+      const payload = asRecord(json);
+      const ccm = asCcmMatrix(payload?.ccm);
+      if (!ccm) {
+        throw new Error('CCM solve returned an invalid matrix.');
       }
+      const rmsError = asFiniteNumber(payload?.rmsError ?? payload?.rms_error) ?? 0;
+      state.ipaChartSolveResult = { ccm, rmsError };
+      state.ipaCcm = ccm;
       deps.toaster.success({
         title: 'Solved CCM',
-        description: `RMS error ${Number(json?.rmsError ?? 0).toFixed(4)}`
+        description: `RMS error ${rmsError.toFixed(4)}`
       });
     } catch (err) {
       deps.reportError({
@@ -641,7 +686,7 @@ export function createCameraCalibrationController(state: CalibrationState, deps:
         const text = await resp.text().catch(() => '');
         throw new Error(text || `Solve failed (${resp.status})`);
       }
-      const result = (await resp.json()) as any;
+      const result = (await resp.json()) as unknown;
       const normalized = deps.normalizeCalibrationSolveResult(result);
       if (!normalized) {
         throw new Error(`Solve returned unexpected payload: ${JSON.stringify(result)}`);

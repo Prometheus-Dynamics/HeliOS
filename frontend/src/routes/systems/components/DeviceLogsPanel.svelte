@@ -4,6 +4,7 @@
   import { buildLogsDownloadUrl, fetchLogSources, type LogSource } from '$lib/api/deviceLogs';
   import { createAsyncState } from '$lib/utils/asyncState';
   import { createRefreshableResource } from '$lib/utils/refreshableResource';
+  import { SvelteMap } from 'svelte/reactivity';
 
   let sources = $state<LogSource[]>([]);
   const sourcesState = createAsyncState();
@@ -35,7 +36,7 @@
   });
 
   const grouped = $derived.by(() => {
-    const map = new Map<string, LogSource[]>();
+    const map = new SvelteMap<string, LogSource[]>();
     for (const source of sources) {
       const key = source.group || 'Other';
       const list = map.get(key) ?? [];
@@ -92,8 +93,6 @@
     findDirection = direction;
     findToken += 1;
   }
-
-  const selectedSource = $derived.by(() => sources.find((s) => s.id === selectedSourceId) ?? null);
 
   function formatUnitStatus(source: LogSource): string | null {
     if (!source.status) return null;

@@ -76,7 +76,7 @@
         value={selectedBackendIndex}
         onchange={(event) => onBackendChange(Number((event.currentTarget as HTMLSelectElement).value))}
       >
-        {#each backends as backend, idx}
+        {#each backends as backend, idx (`${backend?.kind ?? 'backend'}-${idx}`)}
           <option value={idx}>{backendLabel(backend)}</option>
         {/each}
       </select>

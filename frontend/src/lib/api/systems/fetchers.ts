@@ -19,6 +19,22 @@ type DeviceSettingsSnapshot = {
   }> | null;
 };
 
+type HostnamePayload = { hostname?: unknown };
+type TeamPayload = { team_number?: unknown };
+type NetworkIpv4Payload = { prefix?: unknown };
+type NetworkInterfacePayload = {
+  name?: unknown;
+  mode?: unknown;
+  mac?: unknown;
+  address?: unknown;
+  ipv4?: unknown;
+  gateway?: unknown;
+};
+
+function asRecord<T extends Record<string, unknown>>(value: unknown): T | null {
+  return value && typeof value === 'object' ? (value as T) : null;
+}
+
 export async function fetchSystemsPageData(): Promise<SystemsPageData> {
   // The Systems page no longer depends on legacy RouterRoutes* shims.
   // Fetch only data that is still rendered (I2C + IMU + basic settings).
@@ -74,28 +90,33 @@ async function fetchDeviceSettings(timeoutMs: number): Promise<DeviceSettingsSna
     requestOptionalJson<unknown>('/device/network', { method: 'GET' }, { timeoutMs, retry: SYSTEMS_RETRY_OPTIONS })
   ]);
 
+  const hostnameRecord = asRecord<HostnamePayload>(hostnameRaw);
   const hostname =
-    typeof (hostnameRaw as any)?.hostname === 'string'
-      ? String((hostnameRaw as any).hostname)
+    typeof hostnameRecord?.hostname === 'string'
+      ? hostnameRecord.hostname
       : typeof hostnameRaw === 'string'
         ? hostnameRaw
         : 'helios';
-  const team_number = typeof (teamRaw as any)?.team_number === 'number' ? (teamRaw as any).team_number : null;
+  const teamRecord = asRecord<TeamPayload>(teamRaw);
+  const team_number = typeof teamRecord?.team_number === 'number' ? teamRecord.team_number : null;
 
   const interfaces = Array.isArray(networkRaw)
-    ? (networkRaw as any[])
-        .filter(Boolean)
+    ? networkRaw
+        .map((entry) => asRecord<NetworkInterfacePayload>(entry))
+        .filter((entry): entry is NetworkInterfacePayload => Boolean(entry))
         .map((entry) => {
-          const name = typeof entry?.name === 'string' ? entry.name : null;
-          const mac = typeof entry?.mac === 'string' ? entry.mac : null;
-          const modeRaw = typeof entry?.mode === 'string' ? entry.mode.toLowerCase() : '';
+          const name = typeof entry.name === 'string' ? entry.name : null;
+          const mac = typeof entry.mac === 'string' ? entry.mac : null;
+          const modeRaw = typeof entry.mode === 'string' ? entry.mode.toLowerCase() : '';
           const mode: 'dhcp' | 'static' = modeRaw.includes('static') ? 'static' : 'dhcp';
-          const address = typeof entry?.address === 'string' ? entry.address : null;
+          const address = typeof entry.address === 'string' ? entry.address : null;
+          const ipv4Entries = Array.isArray(entry.ipv4) ? entry.ipv4 : [];
+          const firstIpv4 = asRecord<NetworkIpv4Payload>(ipv4Entries[0]);
           const prefix =
-            Array.isArray(entry?.ipv4) && entry.ipv4.length && typeof entry.ipv4[0]?.prefix === 'number'
-              ? entry.ipv4[0].prefix
+            typeof firstIpv4?.prefix === 'number'
+              ? firstIpv4.prefix
               : 24;
-          const gateway = typeof entry?.gateway === 'string' ? entry.gateway : null;
+          const gateway = typeof entry.gateway === 'string' ? entry.gateway : null;
 
           return {
             name,
@@ -154,8 +175,8 @@ async function fetchImuStatus(timeoutMs: number): Promise<ImuStatusResponse> {
 export async function refreshImuStatus(): Promise<ImuStatus> {
   try {
     return mapImuStatus(await fetchImuStatus(SENSOR_REQUEST_TIMEOUT_MS));
-  } catch (err: any) {
-    const message = err?.message || '';
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err ?? '');
     // Gracefully degrade if the IMU endpoint isn’t present or disabled.
     if (message.includes('404')) {
       return emptyImuStatus();

@@ -1,7 +1,7 @@
 <script lang="ts">
 
   import { browser } from '$app/environment';
-  import { onDestroy, onMount, type Snippet } from 'svelte';
+  import { onDestroy, onMount, untrack, type Snippet } from 'svelte';
   import { derived, get, writable } from 'svelte/store';
   import { toaster, OpenAPI } from '$lib';
   import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
@@ -11,22 +11,12 @@
   import { createPipelinePageStore } from '$lib/features/pipelines/pageStore';
   import type { PageData } from '../../../../routes/pipelines/$types';
   import type {
-    ChannelPolicy,
-    PipelineConnectionStyle,
     PipelineDataType,
     PipelineGraphPlan,
-    PipelineNodeValue,
-    PipelineInputQueueConfig,
-    PipelineOutputSinkConfig,
     PipelineOverviewPipeline,
-    PipelineNodeLayout,
-    PipelineNodeMetadata,
-    PipelinePortMetadata,
-    PipelineTemplateSummary
   } from '$lib/types/pipeline';
-  import type { PipelineGraphPoint, PipelineGraphEdgeSelection } from '$lib';
   import { serializeGraphPlan, applyPaletteToGraphPlan, emptyPipelineGraphPlan } from '$lib/features/pipelines/graph';
-  import { buildDaedalusGraphPatch, type DaedalusGraphPatch } from '$lib/features/pipelines/daedalusGraph';
+  import { buildDaedalusGraphPatch } from '$lib/features/pipelines/daedalusGraph';
   import { collectPipelineOutputs } from '$lib/features/pipelines/boundary';
   import { refreshPipelineIoCaches } from '$lib/features/pipelines/boundary';
   import { fromApiGraphPlan } from '$lib/features/pipelines/model';
@@ -75,10 +65,10 @@
     safeClonePlan
   } from './pipelineTuneConstantUtils';
 
-  const { data, children: routeChildren } = $props<{ data: PageData; children?: Snippet<[ { ctx: any } ]> }>();
-  const initial: PipelinePagePayload = data;
+  const { data, children: routeChildren } = $props<{ data: PageData; children?: Snippet<[ { ctx: Record<string, unknown> } ]> }>();
+  const initial = untrack(() => data as PipelinePagePayload);
 
-  const pageStore = createPipelinePageStore(initial);
+  const pageStore = untrack(() => createPipelinePageStore(initial));
   const { controller, pipelineUpdates, activeTab, registryDrawerOpen, dispose: disposePageStore } = pageStore;
   const pipelineUpdatesReady = pipelineUpdates.pipelineReady;
   const streamUpdatesReadyById = pipelineUpdates.streamReadyById;
@@ -634,7 +624,7 @@
     }
   }
 
-  const registryState = setupPipelineRegistryState({
+  setupPipelineRegistryState({
     activeTab,
     registryDrawerOpen,
     registry,

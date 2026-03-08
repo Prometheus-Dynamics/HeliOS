@@ -4,6 +4,7 @@ import type { PipelinePagePayload, PipelineTypeDescriptor } from '$lib/types/pip
 import type { PipelineLifecycleStatus, PipelineOverviewEntry, PipelineOverviewResponse } from '$lib/types/pipeline-api';
 
 export async function fetchPipelinePagePayload(_: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>): Promise<PipelinePagePayload> {
+  void _;
   try {
     const [summaries, templates] = await Promise.all([
       PipelinesApi.listGraphs(),

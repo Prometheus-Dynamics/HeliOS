@@ -1,8 +1,26 @@
 <script lang="ts">
+  import type { Component } from 'svelte';
   import type { PipelineDataType, PipelineNodeValue } from '$lib/types/pipeline';
-  import type { PipelineUiItem, PipelineUiNodeDescriptor } from '$lib/features/pipelines/pipelineUiTypes';
+  import type { PipelineUiItem, PipelineUiNodeDescriptor, PipelineUiStackItem } from '$lib/features/pipelines/pipelineUiTypes';
   import FaIcon from '$lib/components/icons/FaIcon.svelte';
   import { faGear, faGripVertical } from '@fortawesome/free-solid-svg-icons';
+
+  type RendererProps = {
+    items: ReadonlyArray<PipelineUiItem>;
+    nodeDescriptors: PipelineUiNodeDescriptor[];
+    streamNodeOverrides: Record<string, Record<string, PipelineNodeValue>>;
+    streamNodeErrors: Record<string, Record<string, string | null>>;
+    readNodeDraft: (nodeId: string, portKey: string) => string | null;
+    updateStreamNodeValue: (nodeId: string, portKey: string, dataType: PipelineDataType | null, raw: string) => void;
+    readLocalValue: (key: string, fallback: string) => string;
+    setLocalValue: (key: string, value: string) => void;
+    grid: boolean;
+    editMode: boolean;
+    selectedItemId: string | null;
+    onEditItem?: (item: PipelineUiItem, anchor?: { x: number; y: number }) => void;
+    onMoveItem?: (sourceId: string, targetId: string, position: 'before' | 'after' | 'inside') => void;
+    onInsertItem?: (type: PipelineUiItem['type'], targetId: string, position: 'before' | 'after' | 'inside') => void;
+  };
 
   const {
     item,
@@ -33,8 +51,8 @@
     onInsideDragLeave,
     onInsideDrop
   } = $props<{
-    item: PipelineUiItem;
-    Renderer: any;
+    item: PipelineUiStackItem;
+    Renderer: Component<RendererProps>;
     nodeDescriptors: PipelineUiNodeDescriptor[];
     streamNodeOverrides: Record<string, Record<string, PipelineNodeValue>>;
     streamNodeErrors: Record<string, Record<string, string | null>>;
@@ -62,7 +80,10 @@
     onInsideDrop: (event: DragEvent, item: PipelineUiItem) => void;
   }>();
 
-  const wrapperClass = `${grid ? 'md:col-span-2' : ''} relative group ${editMode ? 'rounded border border-dashed border-surface-700/70 p-2' : ''} ${selectedItemId === item.id ? 'ring-1 ring-primary-400/70' : ''} ${draggingItemId === item.id ? 'opacity-40' : ''}`;
+  const wrapperClass = $derived.by(
+    () =>
+      `${grid ? 'md:col-span-2' : ''} relative group ${editMode ? 'rounded border border-dashed border-surface-700/70 p-2' : ''} ${selectedItemId === item.id ? 'ring-1 ring-primary-400/70' : ''} ${draggingItemId === item.id ? 'opacity-40' : ''}`
+  );
 </script>
 
 <div data-ui-item role="group" class={wrapperClass} ondragover={(event) => onDragOver(event, item)} ondragleave={(event) => onDragLeave(event, item)} ondrop={(event) => onDrop(event, item)}>
@@ -101,15 +122,15 @@
       {/if}
     </div>
   {/if}
-  {#if (item as any).title}
-    <p class="text-xs uppercase tracking-[0.3em] text-surface-500">{(item as any).title}</p>
+  {#if item.title}
+    <p class="text-xs uppercase tracking-[0.3em] text-surface-500">{item.title}</p>
   {/if}
-  {#if (item as any).description}
-    <p class="text-xs text-surface-400">{(item as any).description}</p>
+  {#if item.description}
+    <p class="text-xs text-surface-400">{item.description}</p>
   {/if}
   <div class="mt-2">
     <Renderer
-      items={(item as any).items}
+      items={item.items}
       nodeDescriptors={nodeDescriptors}
       streamNodeOverrides={streamNodeOverrides}
       streamNodeErrors={streamNodeErrors}
@@ -127,7 +148,7 @@
     {#if editMode && item.id}
       <div
         class={`mt-2 rounded border border-dashed px-2 py-2 text-micro-tight ${
-          dragInsideId === item.id || (item as any).items.length === 0
+          dragInsideId === item.id || item.items.length === 0
             ? 'border-primary-400/70 bg-primary-500/10 text-primary-100'
             : 'border-surface-800/40 text-transparent'
         }`}

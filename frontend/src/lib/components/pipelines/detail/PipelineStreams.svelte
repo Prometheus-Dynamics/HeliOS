@@ -63,6 +63,7 @@
   <div class="pointer-events-none absolute right-4 top-4 z-20 flex flex-col items-end gap-2">
     <div
       class="pointer-events-auto rounded border border-white/15 bg-surface-950/85 px-3 py-2 text-micro-tight uppercase tracking-[0.22em] text-surface-100 shadow-2xl backdrop-blur"
+      role="presentation"
       onpointerenter={onHeatmapSelectorEnter}
       onpointerleave={onHeatmapSelectorLeave}
     >

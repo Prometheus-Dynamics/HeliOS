@@ -32,10 +32,8 @@
     {#snippet actions()}
       <button class="btn btn-ghost" type="button" onclick={onClose}>Close</button>
     {/snippet}
-    {#snippet children()}
-      <div class="max-h-[calc(90dvh-10rem)] overflow-y-auto pr-1">
-        <CameraSensorBenchmarkTab {apiPath} {device} {backend} />
-      </div>
-    {/snippet}
+    <div class="max-h-[calc(90dvh-10rem)] overflow-y-auto pr-1">
+      <CameraSensorBenchmarkTab {apiPath} {device} {backend} />
+    </div>
   </ModalShell>
 {/if}

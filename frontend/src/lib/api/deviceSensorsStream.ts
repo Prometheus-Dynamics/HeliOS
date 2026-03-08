@@ -24,6 +24,16 @@ export type DeviceSensorsStreamHandlers = {
   onClose?: () => void;
 };
 
+function isFirmwareUpdatePayload(value: unknown): value is FirmwareUpdatePayload {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.device_id === 'string' &&
+    typeof record.firmware === 'string' &&
+    typeof record.status === 'string'
+  );
+}
+
 export function connectDeviceSensorsStream(
   kinds: DeviceSensorKind[],
   intervalMs: number,
@@ -50,7 +60,7 @@ export function connectDeviceSensorsStream(
     const data = event.data;
     if (typeof data !== 'string') return;
     try {
-      const parsed = JSON.parse(data) as any;
+      const parsed = JSON.parse(data) as Record<string, unknown>;
       if (parsed?.status === 'sensors_stream_unavailable') {
         handlers.onError?.(typeof parsed.reason === 'string' ? parsed.reason : 'Sensors stream unavailable');
         return;
@@ -61,7 +71,7 @@ export function connectDeviceSensorsStream(
       if (parsed?.power != null) {
         handlers.onPower?.(parsed.power);
       }
-      if (parsed?.firmware != null) {
+      if (isFirmwareUpdatePayload(parsed?.firmware)) {
         handlers.onFirmware?.(parsed.firmware);
       }
     } catch {

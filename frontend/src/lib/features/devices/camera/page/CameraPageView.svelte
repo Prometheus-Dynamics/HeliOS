@@ -1,11 +1,18 @@
 <script lang="ts">
+  import type { ComponentProps } from 'svelte';
   import CameraPageLayout from './CameraPageLayout.svelte';
   import CameraPipelineOverridesSection from './CameraPipelineOverridesSection.svelte';
   import CameraRecordingControls from './CameraRecordingControls.svelte';
   import CameraSidebarSection from './CameraSidebarSection.svelte';
   import CameraStreamSection from './CameraStreamSection.svelte';
 
-  const { ctx } = $props<{ ctx: any }>();
+  type CameraPageViewCtx = ComponentProps<typeof CameraPageLayout>['ctx'] &
+    ComponentProps<typeof CameraPipelineOverridesSection>['ctx'] &
+    ComponentProps<typeof CameraRecordingControls>['ctx'] &
+    ComponentProps<typeof CameraSidebarSection>['ctx'] &
+    ComponentProps<typeof CameraStreamSection>['ctx'];
+
+  const { ctx } = $props<{ ctx: CameraPageViewCtx }>();
 </script>
 
 {#snippet headerActions()}

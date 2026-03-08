@@ -1,12 +1,9 @@
 import type {
   PipelineDataType,
   PipelineGraphNode,
-  PipelineNodeStyle,
-  PipelineNodeValue,
-  PipelineRegistryEntry,
-  PipelineSyncGroupConfig
+  PipelineRegistryEntry
 } from '$lib/types/pipeline';
-import type { ApiGraphNode, ApiPortDescriptor } from '$lib/types/pipeline-api';
+import type { ApiGraphNode } from '$lib/types/pipeline-api';
 import type {
   ActiveConnection,
   EnumSelectionHandler,

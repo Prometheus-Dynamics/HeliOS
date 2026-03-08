@@ -15,6 +15,24 @@ type CalibrationParams = {
   lensModel?: 'pinhole' | 'fisheye';
 };
 
+type SolveDebugView = NonNullable<CalibrationSolveResult['debugViews']>[number];
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+
+const asNumber = (value: unknown): number | null => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+};
+
+const asFiniteNumberArray = (value: unknown): number[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const normalized = value
+    .map((entry) => Number(entry))
+    .filter((entry): entry is number => Number.isFinite(entry));
+  return normalized.length ? normalized : undefined;
+};
+
 export function resolvePoseCameraRef(streamInfo: StreamInfo | null, fallback: string): string {
   const keys = streamInfo?.manifest?.capture?.device_keys;
   if (Array.isArray(keys) && keys.length) {
@@ -26,63 +44,61 @@ export function resolvePoseCameraRef(streamInfo: StreamInfo | null, fallback: st
     const sorted = [...normalized].sort();
     if (sorted.length) return sorted[0];
   }
-  const identity = streamInfo?.manifest?.identity;
+  const identity = asRecord(streamInfo?.manifest?.identity);
   const identityFallback =
     // Current backend shape: `DeviceIdentity { id, alias, hardware_id }`.
-    (identity as any)?.hardware_id?.trim?.() ||
-    (identity as any)?.alias?.trim?.() ||
-    identity?.display?.trim() ||
-    (Array.isArray(identity?.keys) ? identity.keys.find((value) => value?.trim?.())?.trim() : '') ||
+    (typeof identity?.hardware_id === 'string' ? identity.hardware_id.trim() : '') ||
+    (typeof identity?.alias === 'string' ? identity.alias.trim() : '') ||
+    (typeof identity?.display === 'string' ? identity.display.trim() : '') ||
+    (Array.isArray(identity?.keys)
+      ? identity.keys.find((value): value is string => typeof value === 'string' && value.trim().length > 0)?.trim()
+      : '') ||
     '';
   return identityFallback || fallback;
 }
 
-export function normalizeCalibrationSolveResult(value: any): CalibrationSolveResult | null {
-  if (!value || typeof value !== 'object') return null;
-  const calibration = (value as any).calibration ?? (value as any).camera ?? value;
-  if (!calibration || typeof calibration !== 'object') return null;
-  const num = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : null);
-  const fx = num((calibration as any).fx);
-  const fy = num((calibration as any).fy);
-  const cx = num((calibration as any).cx);
-  const cy = num((calibration as any).cy);
-  const k1 = num((calibration as any).k1);
-  const k2 = num((calibration as any).k2);
-  const p1 = num((calibration as any).p1);
-  const p2 = num((calibration as any).p2);
-  const k3 = num((calibration as any).k3);
+export function normalizeCalibrationSolveResult(value: unknown): CalibrationSolveResult | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const calibration = asRecord(record.calibration) ?? asRecord(record.camera) ?? record;
+  const fx = asNumber(calibration.fx);
+  const fy = asNumber(calibration.fy);
+  const cx = asNumber(calibration.cx);
+  const cy = asNumber(calibration.cy);
+  const k1 = asNumber(calibration.k1);
+  const k2 = asNumber(calibration.k2);
+  const p1 = asNumber(calibration.p1);
+  const p2 = asNumber(calibration.p2);
+  const k3 = asNumber(calibration.k3);
   if ([fx, fy, cx, cy, k1, k2, p1, p2, k3].some((v) => v === null)) return null;
-  const lensModelRaw = (calibration as any).lensModel ?? (calibration as any).lens_model ?? null;
+  const lensModelRaw = calibration.lensModel ?? calibration.lens_model ?? null;
   const lensModel = lensModelRaw === 'fisheye' || lensModelRaw === 'pinhole' ? lensModelRaw : undefined;
-  const undistortIters = num((calibration as any).undistortIters) ?? 5;
-  const viewsUsed = num((value as any).viewsUsed ?? (value as any).views_used) ?? undefined;
-  const pointsUsed = num((value as any).pointsUsed ?? (value as any).points_used) ?? undefined;
-  const warnings = Array.isArray((value as any).warnings)
-    ? (value as any).warnings.map((warn: any) => String(warn)).filter((warn: string) => warn.length)
+  const undistortIters = asNumber(calibration.undistortIters) ?? 5;
+  const viewsUsed = asNumber(record.viewsUsed ?? record.views_used) ?? undefined;
+  const pointsUsed = asNumber(record.pointsUsed ?? record.points_used) ?? undefined;
+  const warnings = Array.isArray(record.warnings)
+    ? record.warnings.map((warn) => String(warn)).filter((warn) => warn.length > 0)
     : undefined;
-  const rawDebugViews = (value as any).debugViews ?? (value as any).debug_views;
-  const debugViews = Array.isArray(rawDebugViews)
+  const rawDebugViews = record.debugViews ?? record.debug_views;
+  const debugViews: SolveDebugView[] | undefined = Array.isArray(rawDebugViews)
     ? rawDebugViews
-        .map((view: any) => {
-          if (!view || typeof view !== 'object') return null;
-          const image = typeof view.image === 'string' ? view.image : '';
+        .map((view): SolveDebugView | null => {
+          const viewRecord = asRecord(view);
+          if (!viewRecord) return null;
+          const image = typeof viewRecord.image === 'string' ? viewRecord.image : '';
           if (!image) return null;
-          const tagsDetected = num(view.tagsDetected ?? view.tags_detected) ?? 0;
-          const pointsDetected = num(view.pointsDetected ?? view.points_detected) ?? 0;
-          const used = Boolean(view.used);
-          const coverageRatio = num(view.coverageRatio ?? view.coverage_ratio) ?? 0;
+          const tagsDetected = asNumber(viewRecord.tagsDetected ?? viewRecord.tags_detected) ?? 0;
+          const pointsDetected = asNumber(viewRecord.pointsDetected ?? viewRecord.points_detected) ?? 0;
+          const used = Boolean(viewRecord.used);
+          const coverageRatio = asNumber(viewRecord.coverageRatio ?? viewRecord.coverage_ratio) ?? 0;
           const overlay =
-            typeof view.overlay === 'string' || view.overlay === null ? (view.overlay as string | null) : undefined;
-          const rawTagsDetected = num(view.rawTagsDetected ?? view.raw_tags_detected) ?? undefined;
-          const rawIds = Array.isArray(view.rawIds ?? view.raw_ids)
-            ? (view.rawIds ?? view.raw_ids).map((id: any) => Number(id)).filter((id: number) => Number.isFinite(id))
-            : undefined;
-          const rawDuplicateIds = Array.isArray(view.rawDuplicateIds ?? view.raw_duplicate_ids)
-            ? (view.rawDuplicateIds ?? view.raw_duplicate_ids).map((id: any) => Number(id)).filter((id: number) => Number.isFinite(id))
-            : undefined;
-          const rawOutOfRangeIds = Array.isArray(view.rawOutOfRangeIds ?? view.raw_out_of_range_ids)
-            ? (view.rawOutOfRangeIds ?? view.raw_out_of_range_ids).map((id: any) => Number(id)).filter((id: number) => Number.isFinite(id))
-            : undefined;
+            typeof viewRecord.overlay === 'string' || viewRecord.overlay === null
+              ? (viewRecord.overlay as string | null)
+              : undefined;
+          const rawTagsDetected = asNumber(viewRecord.rawTagsDetected ?? viewRecord.raw_tags_detected) ?? undefined;
+          const rawIds = asFiniteNumberArray(viewRecord.rawIds ?? viewRecord.raw_ids);
+          const rawDuplicateIds = asFiniteNumberArray(viewRecord.rawDuplicateIds ?? viewRecord.raw_duplicate_ids);
+          const rawOutOfRangeIds = asFiniteNumberArray(viewRecord.rawOutOfRangeIds ?? viewRecord.raw_out_of_range_ids);
           return {
             image,
             overlay,
@@ -96,7 +112,7 @@ export function normalizeCalibrationSolveResult(value: any): CalibrationSolveRes
             rawOutOfRangeIds
           };
         })
-        .filter(Boolean)
+        .filter((view): view is SolveDebugView => Boolean(view))
     : undefined;
   return {
     calibration: {
@@ -112,7 +128,7 @@ export function normalizeCalibrationSolveResult(value: any): CalibrationSolveRes
       undistortIters,
       lensModel
     },
-    reprojectionErrorPx: num((value as any).reprojectionErrorPx ?? (value as any).reprojection_error_px) ?? undefined,
+    reprojectionErrorPx: asNumber(record.reprojectionErrorPx ?? record.reprojection_error_px) ?? undefined,
     viewsUsed,
     pointsUsed,
     warnings,
@@ -120,37 +136,38 @@ export function normalizeCalibrationSolveResult(value: any): CalibrationSolveRes
   };
 }
 
-export function normalizeCalibrationParams(value: any): CalibrationParams | null {
-  if (!value || typeof value !== 'object') return null;
-  const num = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : null);
-  const fx = num((value as any).fx);
-  const fy = num((value as any).fy);
-  const cx = num((value as any).cx);
-  const cy = num((value as any).cy);
-  const k1 = num((value as any).k1);
-  const k2 = num((value as any).k2);
-  const p1 = num((value as any).p1);
-  const p2 = num((value as any).p2);
-  const k3 = num((value as any).k3);
+export function normalizeCalibrationParams(value: unknown): CalibrationParams | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const fx = asNumber(record.fx);
+  const fy = asNumber(record.fy);
+  const cx = asNumber(record.cx);
+  const cy = asNumber(record.cy);
+  const k1 = asNumber(record.k1);
+  const k2 = asNumber(record.k2);
+  const p1 = asNumber(record.p1);
+  const p2 = asNumber(record.p2);
+  const k3 = asNumber(record.k3);
   if ([fx, fy, cx, cy, k1, k2, p1, p2, k3].some((v) => v === null)) return null;
-  const lensModelRaw = (value as any).lensModel ?? (value as any).lens_model ?? null;
+  const lensModelRaw = record.lensModel ?? record.lens_model ?? null;
   const lensModel = lensModelRaw === 'fisheye' || lensModelRaw === 'pinhole' ? lensModelRaw : undefined;
-  const undistortIters = num((value as any).undistortIters) ?? 5;
+  const undistortIters = asNumber(record.undistortIters) ?? 5;
   return { fx, fy, cx, cy, k1, k2, p1, p2, k3, undistortIters, lensModel };
 }
 
 export function extractCurrentCalibrationParams(manifestState: StreamManifest | null, stream: StreamInfo | null): CalibrationParams | null {
-  const manifest = (manifestState as any) ?? (stream as any)?.manifest ?? null;
+  const manifest = asRecord(manifestState) ?? asRecord(stream?.manifest);
+  const camera = asRecord(manifest?.camera);
   const calibration =
     manifest?.calibration ??
-    manifest?.camera?.calibration ??
-    manifest?.camera?.intrinsics ??
+    camera?.calibration ??
+    camera?.intrinsics ??
     manifest?.intrinsics ??
     null;
   return normalizeCalibrationParams(calibration);
 }
 
-export function parseMetadataValue(value: string | null | undefined): any {
+export function parseMetadataValue(value: string | null | undefined): unknown {
   if (value === null || value === undefined) return null;
   const raw = String(value).trim();
   if (!raw.length) return null;

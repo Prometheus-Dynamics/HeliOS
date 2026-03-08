@@ -6,6 +6,7 @@
   import { floatingPipelineOutputsViewer } from '$lib/stores/floatingPipelineOutputsViewer';
   import { extractGraphOutputPortTypes } from '$lib/features/pipelines/outputFilters';
   import type { PipelineDataType, PipelineTemplateSummary } from '$lib/types/pipeline';
+  import { SvelteSet } from 'svelte/reactivity';
 
   let {
     pipelineGraphError,
@@ -62,15 +63,51 @@
     listPipelineTemplatesForAssign = undefined,
     createPipelineFromTemplateAndAssign = undefined
   } = $props();
-  void pipelineGridRowIndices;
-  void pipelineGridColumnIndices;
 
   let profilerOpen = $state(false);
   let profilerPipelineId = $state<string | null>(null);
   let profilerPipelineLabel = $state<string | null>(null);
 
+  type PipelineGraphEntry = Record<string, unknown> & {
+    id?: string | null;
+    name?: string | null;
+    issue_count?: number | null;
+    issueCount?: number | null;
+  };
+
+  type PipelineWireEndpoint = {
+    pipeline_id?: string | null;
+    output_key?: string | null;
+    port?: string | null;
+  };
+
+  type EnsurePipelineGraphResult = {
+    filtered?: string[] | null;
+    types?: Record<string, PipelineDataType | null | undefined> | null;
+    graphJson?: unknown;
+  };
+
+  type Subscribable<T> = {
+    subscribe: (run: (value: T) => void) => (() => void) | { unsubscribe?: () => void } | void;
+  };
+
+  const asRecord = (value: unknown): Record<string, unknown> | null =>
+    value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+
+  const asGraphEntry = (value: unknown): PipelineGraphEntry | null => {
+    const record = asRecord(value);
+    return record ? (record as PipelineGraphEntry) : null;
+  };
+
+  const isSubscribable = <T,>(value: unknown): value is Subscribable<T> =>
+    Boolean(value) && typeof value === 'object' && typeof (value as { subscribe?: unknown }).subscribe === 'function';
+
   const normalizeStreamId = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
   const normalizedStreamId = $derived.by(() => normalizeStreamId(streamId));
+  $effect(() => {
+    void pipelineGridRowIndices;
+    void pipelineGridColumnIndices;
+  });
   const profilerStreamOptions = $derived.by(() => {
     if (!normalizedStreamId) return [];
     const label = typeof streamLabel === 'string' && streamLabel.trim().length ? streamLabel.trim() : normalizedStreamId;
@@ -101,12 +138,12 @@
       typeof ensurePipelineGraphAndOutputs === 'function'
     ) {
       try {
-        const result = await ensurePipelineGraphAndOutputs(normalizedPipelineId, false);
-        const hydrated = (result as any)?.types ?? null;
+        const result = (await ensurePipelineGraphAndOutputs(normalizedPipelineId, false)) as EnsurePipelineGraphResult | null;
+        const hydrated = result?.types ?? null;
         if (hydrated && typeof hydrated === 'object') {
           portTypesByName = hydrated as Record<string, PipelineDataType | null | undefined>;
         } else {
-          const graphJson = (result as any)?.graphJson ?? null;
+          const graphJson = result?.graphJson ?? null;
           if (graphJson) {
             portTypesByName = extractGraphOutputPortTypes(graphJson);
           }
@@ -124,7 +161,7 @@
   };
 
   let outputOptionsFallback = $state<Record<string, string[]>>({});
-  let outputOptionsLoading = $state<Set<string>>(new Set());
+  let outputOptionsLoading = new SvelteSet<string>();
   const safeRows = $derived.by(() => Math.min(Math.max(Math.trunc(pipelineGridRows ?? 1), 1), 6));
   const safeColumns = $derived.by(() => Math.min(Math.max(Math.trunc(pipelineGridColumns ?? 1), 1), 6));
   const rowIndices = $derived.by(() => Array.from({ length: safeRows }, (_, i) => i));
@@ -132,7 +169,7 @@
   const normalizeId = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
   const dedupePipelineIds = (ids: unknown[]): string[] => {
     const out: string[] = [];
-    const seen = new Set<string>();
+    const seen = new SvelteSet<string>();
     for (const value of ids ?? []) {
       const id = normalizeId(value);
       if (!id.length || seen.has(id)) continue;
@@ -141,17 +178,18 @@
     }
     return out;
   };
-  const dedupeGraphsById = (graphs: unknown[]): any[] => {
-    const out: any[] = [];
-    const seen = new Set<string>();
+  const dedupeGraphsById = (graphs: unknown[]): PipelineGraphEntry[] => {
+    const out: PipelineGraphEntry[] = [];
+    const seen = new SvelteSet<string>();
     for (const graph of graphs ?? []) {
-      const id = normalizeId((graph as any)?.id);
+      const graphRecord = asGraphEntry(graph);
+      const id = normalizeId(graphRecord?.id);
       if (!id.length || seen.has(id)) continue;
       seen.add(id);
-      if (graph && typeof graph === 'object' && (graph as any).id !== id) {
-        out.push({ ...(graph as Record<string, unknown>), id });
-      } else {
-        out.push(graph);
+      if (graphRecord && graphRecord.id !== id) {
+        out.push({ ...graphRecord, id });
+      } else if (graphRecord) {
+        out.push(graphRecord);
       }
     }
     return out;
@@ -210,7 +248,8 @@
     if (!target.length || target === RAW_PIPELINE_ID) return 'raw|raw';
     const targetWireId = target === RAW_PIPELINE_ID ? normalizeId(RAW_PIPELINE_UUID) : target;
     const frameWire = normalizedPipelineWires.find((wire) => {
-      const to = (wire as any)?.to ?? null;
+      const wireRecord = asRecord(wire);
+      const to = asRecord(wireRecord?.to) as PipelineWireEndpoint | null;
       const wireToId = normalizeId(to?.pipeline_id);
       if (!wireToId.length) return false;
       if (wireToId !== targetWireId) return false;
@@ -219,7 +258,8 @@
       const wireToKey = normalizeKey(to?.output_key);
       return (wireToKey ?? null) === (targetOutputKey ?? null);
     });
-    const from = (frameWire as any)?.from ?? null;
+    const frameWireRecord = asRecord(frameWire);
+    const from = asRecord(frameWireRecord?.from) as PipelineWireEndpoint | null;
     const fromIdRaw = normalizeId(from?.pipeline_id);
     if (!fromIdRaw.length) return 'raw|raw';
     const fromId = normalizePipelineIdForUi(fromIdRaw);
@@ -279,7 +319,7 @@
   const requestOutputOptions = async (pipelineId: string) => {
     if (!ensurePipelineGraphAndOutputs) return;
     if (outputOptionsLoading.has(pipelineId)) return;
-    outputOptionsLoading = new Set(outputOptionsLoading).add(pipelineId);
+    outputOptionsLoading = new SvelteSet(outputOptionsLoading).add(pipelineId);
     try {
       const result = await ensurePipelineGraphAndOutputs(pipelineId);
       const outputs = Array.isArray(result?.filtered) ? result.filtered : [];
@@ -289,7 +329,7 @@
     } catch {
       // ignore fetch errors
     } finally {
-      const next = new Set(outputOptionsLoading);
+      const next = new SvelteSet(outputOptionsLoading);
       next.delete(pipelineId);
       outputOptionsLoading = next;
     }
@@ -297,7 +337,7 @@
 
   $effect(() => {
     if (!ensurePipelineOutputsLoaded) return;
-    const missing = new Set<string>();
+    const missing = new SvelteSet<string>();
     (assignedPipelineIds ?? []).forEach((id) => {
       const normalized = String(id ?? '').trim();
       if (!normalized || normalized === RAW_PIPELINE_ID) return;
@@ -317,7 +357,7 @@
     });
   });
 
-  function issueCountForGraph(graph: any): number {
+  function issueCountForGraph(graph: PipelineGraphEntry | null | undefined): number {
     const raw = graph?.issue_count ?? graph?.issueCount ?? 0;
     const count = Number(raw);
     return Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
@@ -329,10 +369,10 @@
     return entry ? issueCountForGraph(entry) : 0;
   }
 
-  const normalizeGraphList = (value: unknown): any[] | null =>
+  const normalizeGraphList = (value: unknown): PipelineGraphEntry[] | null =>
     (Array.isArray(value) ? dedupeGraphsById(value) : null);
 
-  function filterAndSortGraphs(graphs: any[], query: string): any[] {
+  function filterAndSortGraphs(graphs: PipelineGraphEntry[], query: string): PipelineGraphEntry[] {
     const q = query?.trim?.().toLowerCase?.() ?? '';
     const filtered = dedupeGraphsById(graphs).filter((graph) => {
       const id = String(graph?.id ?? '');
@@ -343,16 +383,24 @@
     return filtered.slice().sort((a, b) => String(a?.name ?? a?.id ?? '').localeCompare(String(b?.name ?? b?.id ?? '')));
   }
 
-  let pipelineGraphsSnapshot = $state<any[]>([]);
+  let pipelineGraphsSnapshot = $state<PipelineGraphEntry[]>([]);
 
   $effect(() => {
-    if (pipelineGraphs && typeof pipelineGraphs === 'object' && 'subscribe' in pipelineGraphs) {
-      const unsubscribe = (pipelineGraphs as any).subscribe((value: unknown) => {
+    if (isSubscribable<unknown>(pipelineGraphs)) {
+      const unsubscribe = pipelineGraphs.subscribe((value: unknown) => {
         const next = normalizeGraphList(value) ?? [];
         if (pipelineAssignModalOpen && next.length === 0 && pipelineGraphsSnapshot.length > 0) return;
         pipelineGraphsSnapshot = next;
       });
-      return () => unsubscribe?.();
+      return () => {
+        if (typeof unsubscribe === 'function') {
+          unsubscribe();
+          return;
+        }
+        if (unsubscribe && typeof unsubscribe === 'object') {
+          unsubscribe.unsubscribe?.();
+        }
+      };
     }
     const next = normalizeGraphList(pipelineGraphs) ?? [];
     if (pipelineAssignModalOpen && next.length === 0 && pipelineGraphsSnapshot.length > 0) return;
@@ -370,7 +418,7 @@
   const normalizeTemplateList = (value: unknown): PipelineTemplateSummary[] => {
     if (!Array.isArray(value)) return [];
     const out: PipelineTemplateSummary[] = [];
-    const seen = new Set<string>();
+    const seen = new SvelteSet<string>();
     for (const entry of value) {
       if (!entry || typeof entry !== 'object') continue;
       const record = entry as Record<string, unknown>;
@@ -440,7 +488,7 @@
       const created = await createPipelineFromTemplateAndAssign(templateId);
       const createdId = normalizeId((created as { id?: string } | null)?.id ?? '');
       if (createdId.length && !pipelineAssignDraft.includes(createdId)) {
-        pipelineAssignDraft = Array.from(new Set([...pipelineAssignDraft, createdId]));
+        pipelineAssignDraft = Array.from(new SvelteSet([...pipelineAssignDraft, createdId]));
       }
       const createdName = typeof (created as { name?: string } | null)?.name === 'string' ? created.name.trim() : '';
       pipelineTemplateStatus = createdName.length
@@ -1053,7 +1101,7 @@
                   checked={checked}
                   onchange={(e) => {
                     const next = (e.currentTarget as HTMLInputElement).checked;
-                    const current = new Set(pipelineAssignDraft);
+                    const current = new SvelteSet(pipelineAssignDraft);
                     if (next) current.add(id);
                     else current.delete(id);
                     pipelineAssignDraft = Array.from(current);

@@ -2,6 +2,7 @@
   import type { PipelineDataType, PipelineGraphPlan, PipelineNodeValue, PipelinePortMetadata } from '$lib/types/pipeline';
   import type { PipelineUi } from '$lib/features/pipelines/pipelineUiTypes';
   import type { ResourceSample } from '$lib/api/telemetry';
+  import type { DaedalusRegistryResponse } from '$lib/ts-bindings/http/client';
   import { resourceTelemetryStore } from '$lib/api/telemetry';
   import { get } from 'svelte/store';
   import { fromApiGraphPlan } from '$lib/features/pipelines/model';
@@ -18,6 +19,12 @@
     registryPortTypeFor,
     type PipelineNodeValueDescriptor
   } from './cameraPipelineTuningController';
+  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+
+  type PipelineGraphListEntry = Record<string, unknown> & {
+    id?: string;
+    name?: string | null;
+  };
 
   type DerivedState = {
     get selectedPipelineId(): string | null;
@@ -27,19 +34,19 @@
     get pipelineGridRows(): number;
     get pipelineGridColumns(): number;
     get pipelineAssignQuery(): string;
-    get pipelineGraphs(): any[];
+    get pipelineGraphs(): PipelineGraphListEntry[];
     get pipelineTuningPipelineId(): string | null;
-    get pipelineGraphCache(): Record<string, any>;
-    get pipelineTuningLiveGraph(): any;
+    get pipelineGraphCache(): Record<string, unknown>;
+    get pipelineTuningLiveGraph(): unknown;
     get pipelineTuningUiOverride(): PipelineUi | null;
-    get pipelineTuningGraphOverride(): any;
+    get pipelineTuningGraphOverride(): unknown;
     get pipelineNodeOverridesById(): Record<string, Record<string, Record<string, PipelineNodeValue>>>;
-    get pipelineRegistrySnapshot(): any;
+    get pipelineRegistrySnapshot(): DaedalusRegistryResponse | null;
     get PIPELINE_UI_METADATA_KEY(): string;
     get DEFAULT_PIPELINE_UI(): PipelineUi;
     get RAW_PIPELINE_ID(): string;
     get RAW_PIPELINE_UUID(): string;
-    get RAW_LOOPBACK_GRAPH(): any;
+    get RAW_LOOPBACK_GRAPH(): unknown;
   };
 
   export function createCameraPageDerived(state: DerivedState) {
@@ -85,12 +92,15 @@
       }
       const baseKey = (resolveDataTypeKey(base ?? undefined) ?? '').toLowerCase();
       const liveKey = (resolveDataTypeKey(live ?? undefined) ?? '').toLowerCase();
-      const genericKeys = new Set(['generic', 'any', 'unknown', 'dynamic']);
+      const genericKeys = new SvelteSet(['generic', 'any', 'unknown', 'dynamic']);
       if (genericKeys.has(baseKey) && liveKey && !genericKeys.has(liveKey)) return live;
       return base;
     };
 
-    const resolveRegistrySnapshotNodeId = (snapshot: any, backendId: string | null | undefined): string | null => {
+    const resolveRegistrySnapshotNodeId = (
+      snapshot: DaedalusRegistryResponse | null | undefined,
+      backendId: string | null | undefined
+    ): string | null => {
       if (!snapshot || !backendId) return null;
       const nodes = Array.isArray(snapshot?.nodes) ? snapshot.nodes : [];
       if (!nodes.length) return null;
@@ -123,7 +133,7 @@
       return best?.id ?? null;
     };
 
-    const coercePlanFromGraph = (graph: any): PipelineGraphPlan | null => {
+    const coercePlanFromGraph = (graph: unknown): PipelineGraphPlan | null => {
       if (!graph || typeof graph !== 'object') return null;
       const nodes = (graph as { nodes?: unknown }).nodes;
       const connections = (graph as { connections?: unknown }).connections;
@@ -149,9 +159,9 @@
 
     const buildDescriptorMap = (
       plan: PipelineGraphPlan | null,
-      resolveRegistryEntryForNode: ((node: PipelineGraphPlan['nodes'][string] | undefined) => any) | null
+      resolveRegistryEntryForNode: ReturnType<typeof createRegistryResolver> | null
     ): Map<string, PipelineNodeValueDescriptor> => {
-      const map = new Map<string, PipelineNodeValueDescriptor>();
+      const map = new SvelteMap<string, PipelineNodeValueDescriptor>();
       if (!plan) return map;
       const overrides = extractNodeOverrides(plan);
       for (const [nodeId, node] of Object.entries(plan.nodes ?? {})) {
@@ -178,7 +188,7 @@
         const values =
           (infoValues && Object.keys(infoValues).length ? infoValues : sourceValues) ??
           {};
-        const portKeys = new Set<string>([
+        const portKeys = new SvelteSet<string>([
           ...Object.keys(inputs),
           ...Object.keys(registryInputs),
           ...Object.keys(portMeta),
@@ -264,7 +274,7 @@
     const telemetrySample = $derived.by<ResourceSample>(() => get(resourceTelemetryStore) as ResourceSample);
 
     const activePipelineIds = $derived.by(() => {
-      const seen = new Set<string>();
+      const seen = new SvelteSet<string>();
       const primary: string[] = [];
       const fallback: string[] = [];
       const normalizeId = (value: unknown): string | null => {

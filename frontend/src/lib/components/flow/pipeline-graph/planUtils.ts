@@ -1,5 +1,5 @@
 import { connectionSignature, extractPortFromHandle } from './utils';
-import type { ChannelPolicy, PipelineGraphPlan } from '$lib/types/pipeline';
+import type { ChannelPolicy, PipelineConnectionStyle, PipelineGraphPlan } from '$lib/types/pipeline';
 import type { Edge, Node } from '@xyflow/svelte';
 import type { PipelineEdgeData } from './types';
 import { DEFAULT_CONNECTION_STYLE } from './edgeStyle';
@@ -62,7 +62,7 @@ export const rebuildPlan = (
 
   const edgeMap = new Map<
     string,
-    { fromNode: string; fromPort: string; toNode: string; toPort: string; style: Record<string, unknown> | null }
+    { fromNode: string; fromPort: string; toNode: string; toPort: string; style: PipelineConnectionStyle | null }
   >();
   const edgeSignatureOrder: string[] = [];
   edges.forEach((edge) => {
@@ -122,7 +122,7 @@ export const rebuildPlan = (
       from: { node: match.fromNode, port: match.fromPort },
       to: { node: match.toNode, port: match.toPort },
       policy: nextPolicy,
-      ...(styleOut ? { style: styleOut as any } : {})
+      ...(styleOut ? { style: styleOut } : {})
     });
   });
 
@@ -139,7 +139,7 @@ export const rebuildPlan = (
       from: { node: match.fromNode, port: match.fromPort },
       to: { node: match.toNode, port: match.toPort },
       policy: 'NewestWins',
-      ...(styleOut ? { style: styleOut as any } : {})
+      ...(styleOut ? { style: styleOut } : {})
     });
   });
 

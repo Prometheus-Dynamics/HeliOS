@@ -28,9 +28,9 @@ import {
 import { createPortHandlers } from './pipeline-node/portHandlers';
 import {
   type PipelineNodeData,
-  type PortRenderInfo,
   type PortSyncAssignments
 } from './pipeline-node/types';
+  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 const SYNC_GROUP_COLORS = ['#38bdf8', '#f472b6', '#a855f7', '#f97316', '#22d3ee', '#facc15'];
 
 const props = $props<{ selected?: boolean; data?: PipelineNodeData }>();
@@ -70,8 +70,8 @@ const nodeHasDiagnostics = $derived(
         nodeDiagnostics.outputPorts.length > 0)
   )
 );
-const inputPortIssues = $derived(new Set(nodeDiagnostics?.inputPorts ?? []));
-const outputPortIssues = $derived(new Set(nodeDiagnostics?.outputPorts ?? []));
+const inputPortIssues = $derived(new SvelteSet(nodeDiagnostics?.inputPorts ?? []));
+const outputPortIssues = $derived(new SvelteSet(nodeDiagnostics?.outputPorts ?? []));
 const portIssueMessages = $derived((nodeDiagnostics?.portMessages ?? null) as Record<string, string[]> | null);
 const nodeHighlight = $derived(
   (data?.highlight ?? null) as { port: string | null; token: number | null } | null
@@ -84,7 +84,7 @@ const nodeSyncModeActive = $derived(Boolean(nodeSyncOverlay?.enabled));
 const nodeSyncFocusActive = $derived(Boolean(nodeSyncOverlay?.enabled && nodeSyncOverlay.focus));
 type DaedalusSyncGroup = { name?: string; ports?: string[] };
 const nodeSyncPortAssignments = $derived.by<PortSyncAssignments>(() => {
-  const assignments = new Map<string, { groupId: string; color: string }>();
+  const assignments = new SvelteMap<string, { groupId: string; color: string }>();
   if (!nodeSyncOverlay?.enabled) {
     return assignments;
   }

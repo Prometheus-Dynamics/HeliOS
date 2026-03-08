@@ -48,8 +48,9 @@
   } from '$lib/features/dashboard/page/dashboardTelemetryUtils';
 
   const { data } = $props<{ data: { payload: DashboardPayload } }>();
-  const emptyDashboard = clonePayload(data.payload);
-  let dashboard = $state<DashboardPayload>(clonePayload(data.payload));
+  const readPayload = () => data.payload;
+  const emptyDashboard = clonePayload(readPayload());
+  let dashboard = $state<DashboardPayload>(clonePayload(readPayload()));
   let dataLoadError = $state<string | null>(null);
   let isRefreshing = $state(false);
   let hasLoadedOnce = $state(false);

@@ -13,6 +13,7 @@
   import StreamManifestDetails from './stream/StreamManifestDetails.svelte';
   import StreamControls from './stream/StreamControls.svelte';
   import StreamPreviewPanel from './stream/StreamPreviewPanel.svelte';
+  import { SvelteSet } from 'svelte/reactivity';
 
   let {
     cameraAlias = $bindable(),
@@ -107,6 +108,7 @@
     decoders?: BenchCodecStat[];
     encoders?: BenchCodecStat[];
   };
+  type StreamModeDescriptor = { id: string } & Record<string, unknown>;
   type StreamCrop = [number, number, number, number];
   type StreamCrosshair = [number, number];
   type StreamOrderingMode =
@@ -204,7 +206,7 @@
   }
 
   const selectedMediaNames = $derived((() => {
-    const names = new Set<string>();
+    const names = new SvelteSet<string>();
     const lines = String(fileBackendPathsText ?? '').split('\n');
     for (const line of lines) {
       const name = normalizeMediaName(line);
@@ -703,10 +705,10 @@
     try {
       const fps = Math.max(1, Math.trunc(Number(benchTargetFps) || 120));
       const sampleMs = Math.max(250, Math.trunc(Number(benchSampleMs) || 1500));
-      const descriptorModes = effectiveModes();
+      const descriptorModes = effectiveModes() as StreamModeDescriptor[];
       const selectedModes = descriptorModes
-        .filter((m: any) => resolutionKey(m) === selectedResolution)
-        .map((m: any) => ({ id: m.id }));
+        .filter((mode) => resolutionKey(mode) === selectedResolution)
+        .map((mode) => ({ id: mode.id }));
 
       const payload = {
         backend: backend.kind,

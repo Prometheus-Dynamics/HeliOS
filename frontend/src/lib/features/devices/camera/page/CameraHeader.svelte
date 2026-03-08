@@ -1,9 +1,11 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte';
+
   type Props = {
     streamId: string;
     downloadDisabled: boolean;
     onDownload: () => void;
-    actions?: any;
+    actions?: Snippet;
   };
 
   const { streamId, downloadDisabled, onDownload, actions }: Props = $props();

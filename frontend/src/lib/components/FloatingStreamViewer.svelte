@@ -218,15 +218,15 @@
     <div
       class="flex cursor-move items-center justify-between border-b border-surface-800/70 px-3 py-2"
       onpointerdown={startDrag}
+      role="button"
+      tabindex="-1"
+      aria-label="Drag floating stream viewer"
     >
       <div class="min-w-0 flex-1">
         <p class="truncate text-xs font-semibold text-surface-100">
           {streamHeaderLabel(viewer.stream)}
         </p>
-        <div
-          class="mt-1 flex items-center gap-2 cursor-auto"
-          onpointerdown={(event) => event.stopPropagation()}
-        >
+        <div class="mt-1 flex items-center gap-2 cursor-auto">
           {#if availableStreams.length}
             <select
               class="h-7 min-w-0 flex-1 rounded border border-surface-800/70 bg-surface-950/70 px-2 text-micro leading-none text-surface-200"
@@ -236,6 +236,7 @@
                 selectedStreamId = value;
                 applySelectedStream(value);
               }}
+              onpointerdown={(event) => event.stopPropagation()}
               onclick={(event) => event.stopPropagation()}
               ondblclick={(event) => event.stopPropagation()}
             >
@@ -246,7 +247,7 @@
           {:else}
             <p class="text-micro text-surface-400">No streams found.</p>
           {/if}
-          <button class="btn btn-2xs preset-outline" type="button" onclick={close}>
+          <button class="btn btn-2xs preset-outline" type="button" onpointerdown={(event) => event.stopPropagation()} onclick={close}>
             Close
           </button>
         </div>
@@ -275,11 +276,13 @@
         </div>
       {/if}
     </div>
-    <div
+    <button
+      type="button"
       class="absolute bottom-1 right-1 h-4 w-4 cursor-se-resize rounded bg-surface-800/60"
       onpointerdown={startResize}
       title="Resize"
-    ></div>
+      aria-label="Resize floating stream viewer"
+    ></button>
   </div>
 {:else}
   <button

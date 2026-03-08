@@ -99,7 +99,7 @@ export async function probePeer(input: PeerProbeInput, timeoutMs: number = DEFAU
   if (input.managementUrl?.trim()) payload.management_url = input.managementUrl.trim();
   if (input.deviceIp?.trim()) payload.device_ip = input.deviceIp.trim();
   if (input.streamUrl?.trim()) payload.stream_url = input.streamUrl.trim();
-  if ((input as any).networkTable?.trim()) payload.network_table = (input as any).networkTable.trim();
+  if (input.networkTable?.trim()) payload.network_table = input.networkTable.trim();
   if (Array.isArray(input.streamUrls) && input.streamUrls.length > 0) {
     payload.stream_urls = input.streamUrls.map((value) => value.trim()).filter((value) => value.length > 0);
   }

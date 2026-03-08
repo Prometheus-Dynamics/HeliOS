@@ -14,23 +14,26 @@
     parsePixelValue,
     pixelToHex
   } from '$lib/components/flow/pipeline-graph/editorUtils';
+  import type { PipelineDataType, PipelineGraphPlan, PipelineNodeValue } from '$lib/types/pipeline';
+  import type { PipelineTuningConstantGroup } from '$lib/components/pipelines/types';
+  import { SvelteSet } from 'svelte/reactivity';
 
   type Props = {
     tuneConstantSearch: string;
-    tuneConstantGroups: any[];
-    tuneFilteredConstantGroups: any[];
+    tuneConstantGroups: PipelineTuningConstantGroup[];
+    tuneFilteredConstantGroups: PipelineTuningConstantGroup[];
     tuneNodeErrors: Record<string, Record<string, string | null>>;
-    tunePlan: any;
-    isDaedalusPlan: (plan: any) => boolean;
-    safeClonePlan: (plan: any) => any;
-    handlePlanChange: (plan: any) => void;
+    tunePlan: PipelineGraphPlan | null | undefined;
+    isDaedalusPlan: (plan: PipelineGraphPlan | null | undefined) => boolean;
+    safeClonePlan: (plan: PipelineGraphPlan) => PipelineGraphPlan;
+    handlePlanChange: (plan: PipelineGraphPlan) => void;
     normalizePortKey: (value: string) => string;
     readTuneNodeDraft: (nodeId: string, portKey: string) => string | null;
-    updateGlobalNodeValue: (nodeId: string, portKey: string, dataType: any, raw: string) => void;
+    updateGlobalNodeValue: (nodeId: string, portKey: string, dataType: PipelineDataType | null, raw: string) => void;
     clearTuneNodeDraft: (nodeId: string, portKey: string) => void;
     setTuneNodeError: (nodeId: string, portKey: string, error: string | null) => void;
     scheduleTuneGlobalAutoSave: () => void;
-    setNodeConstantValue: (nodeId: string, portKey: string, value: any) => void;
+    setNodeConstantValue: (nodeId: string, portKey: string, value: PipelineNodeValue) => void;
     onSearch: (value: string) => void;
   };
 
@@ -53,7 +56,15 @@
     onSearch
   }: Props = $props();
 
-  const NUMERIC_TYPE_KEYS = new Set(['uint', 'sint', 'int', 'float', 'double', 'number']);
+  const NUMERIC_TYPE_KEYS = new SvelteSet(['uint', 'sint', 'int', 'float', 'double', 'number']);
+  const clearNodeConstantValue = (nodeId: string, portKey: string): void => {
+    const clearValue = setNodeConstantValue as unknown as (
+      nodeId: string,
+      portKey: string,
+      value: PipelineNodeValue | null
+    ) => void;
+    clearValue(nodeId, portKey, null);
+  };
 </script>
 
 <div class="space-y-4">
@@ -150,7 +161,7 @@
                               handlePlanChange(next);
                             }
                           } else {
-                            setNodeConstantValue(entry.nodeId, entry.portKey, null);
+                            clearNodeConstantValue(entry.nodeId, entry.portKey);
                           }
                           clearTuneNodeDraft(entry.nodeId, normalizedPort);
                           setTuneNodeError(entry.nodeId, normalizedPort, null);

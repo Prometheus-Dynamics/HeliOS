@@ -25,6 +25,7 @@
   import { buildThrottleBanner, normalizePeripheralToken } from '$lib/features/devices/utils';
   import { fetchLocalizationConfig, type LocalizationConfig } from '$lib/features/localization/localizationConfig';
   import { PROFILE_COLORS, profileColorForId } from '$lib/features/localization/utils';
+  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
   const AUTO_REFRESH_MS = 10_000;
   const DEVICES_CAMERAS_CACHE_KEY = 'devices:cameras:v1';
@@ -49,13 +50,15 @@
   });
 
   const { data } = $props<{ data: PageData }>();
-  let devices = $state<DevicesPageData>(clone(data.initial));
+  const readInitialDevices = () => data.initial;
+  const readReceivedAt = () => data.receivedAt;
+  let devices = $state<DevicesPageData>(clone(readInitialDevices()));
   let loadError = $state<string | null>(null);
   let isRefreshing = $state(false);
   let camerasLoading = $state(false);
   let peripheralsLoading = $state(false);
   let localizationConfig = $state<LocalizationConfig | null>(null);
-  let fetchedAt = $state<number>(data.receivedAt);
+  let fetchedAt = $state<number>(readReceivedAt());
   let hasLoadedOnce = $state(false);
 
   let refreshTimer: number | null = null;
@@ -119,7 +122,7 @@
   ]);
 
   const profileIndexById = $derived.by(() => {
-    const indexById = new Map<string, number>();
+    const indexById = new SvelteMap<string, number>();
     const profiles = localizationConfig?.profiles ?? [];
     profiles.forEach((profile, idx) => {
       indexById.set(profile.id, idx);
@@ -154,7 +157,7 @@
     captureSessionAlias?: string | null;
     cameraUid?: string | null;
   }): string[] {
-    const out = new Set<string>();
+    const out = new SvelteSet<string>();
     for (const value of [camera.captureSessionId, camera.captureSessionAlias, camera.cameraUid]) {
       const trimmed = String(value ?? '').trim();
       if (trimmed) out.add(trimmed);
@@ -167,7 +170,7 @@
     captureSessionAlias?: string | null;
     cameraUid?: string | null;
   }): LocalizationProfileBadge[] {
-    const badgesById = new Map<string, LocalizationProfileBadge>();
+    const badgesById = new SvelteMap<string, LocalizationProfileBadge>();
     for (const key of cameraProfileLookupKeys(camera)) {
       const matches = localizationProfilesByStreamKey[key] ?? [];
       for (const match of matches) {
@@ -217,14 +220,14 @@
 
 
   const registeredHardwareIds = $derived<string[]>([
-    ...new Set(
+    ...new SvelteSet(
       cameras
         .map((cam) => cam.hardwareId?.trim())
         .filter((value): value is string => Boolean(value))
     )
   ]);
   const registeredIds = $derived<string[]>([
-    ...new Set(
+    ...new SvelteSet(
       cameras
         .flatMap((cam) => [
           cam.captureSessionId?.toString().trim(),
@@ -250,7 +253,7 @@
   let streamActionBusy = $state<Record<string, StreamActionBusyState>>({});
   let resourceGuardStatus = $state<ResourceGuardStatus | null>(null);
   const resourceGuardDegradedStreamIds = $derived.by(() => {
-    const ids = new Set<string>();
+    const ids = new SvelteSet<string>();
     for (const stream of resourceGuardStatus?.degraded_streams ?? []) {
       const id = String(stream?.stream_id ?? '').trim();
       if (id) ids.add(id);

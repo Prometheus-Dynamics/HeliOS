@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { PipelineNodeValue } from '$lib/types/pipeline';
+  import type { PipelineDataType, PipelineNodeValue } from '$lib/types/pipeline';
   import type { PipelineUiItem, PipelineUiNodeDescriptor, PipelineUiTab } from '$lib/features/pipelines/pipelineUiTypes';
   import PipelineUiBlocks from '$lib/components/pipelines/PipelineUiBlocks.svelte';
   import OverridesActions from './OverridesActions.svelte';
@@ -24,7 +24,7 @@
     streamNodeOverrides: Record<string, Record<string, PipelineNodeValue>>;
     streamNodeErrors: Record<string, Record<string, string | null>>;
     readNodeDraft: (nodeId: string, portKey: string) => string | null;
-    updateStreamNodeValue: (nodeId: string, portKey: string, dataType: any, raw: string) => void;
+    updateStreamNodeValue: (nodeId: string, portKey: string, dataType: PipelineDataType, raw: string) => void;
     readLocalValue: (key: string, fallback: string) => string;
     setLocalValue: (key: string, value: string) => void;
     selectedItemId: string | null;

@@ -53,23 +53,21 @@
   <InspectorEmptyState message="Select a pipeline to configure pipeline IO ports." />
 {:else}
   <InspectorCard>
-    {#snippet children()}
-      <InspectorHeader
-        eyebrow="Pipeline IO"
-        title="Pipeline IO"
-        summary="Manage ingress/egress ports. Add, rename, and configure pipeline IO ports."
-      />
-      <BoundaryPorts
-        inputs={inputs}
-        outputs={outputs}
-        pipelineOutputConfigs={pipelineOutputConfigs}
-        onRemovePort={onRemovePort}
-        onSetPortConfig={onSetPortConfig}
-        onSetPortValue={onSetPortValue}
-        onEditPort={onEditPort}
-        onAddPort={onAddPort}
-        typePalette={typePalette}
-      />
-    {/snippet}
+    <InspectorHeader
+      eyebrow="Pipeline IO"
+      title="Pipeline IO"
+      summary="Manage ingress/egress ports. Add, rename, and configure pipeline IO ports."
+    />
+    <BoundaryPorts
+      inputs={inputs}
+      outputs={outputs}
+      pipelineOutputConfigs={pipelineOutputConfigs}
+      onRemovePort={onRemovePort}
+      onSetPortConfig={onSetPortConfig}
+      onSetPortValue={onSetPortValue}
+      onEditPort={onEditPort}
+      onAddPort={onAddPort}
+      typePalette={typePalette}
+    />
   </InspectorCard>
 {/if}

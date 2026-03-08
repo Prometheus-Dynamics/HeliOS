@@ -55,12 +55,13 @@
   } from '$lib/components/register-camera/registerCameraSelectors';
   import type {
     SensorBenchListItem,
-    SensorBenchModeResult,
-    SensorBenchResult,
-    SensorBenchSummary
+    SensorBenchResult
   } from '$lib/components/register-camera/sensorBenchTypes';
+  import { SvelteSet, SvelteURL } from 'svelte/reactivity';
 
   const dispatch = createEventDispatcher<{ create: { streamId?: string; descriptor?: unknown } }>();
+  const asRecord = (value: unknown): Record<string, unknown> | null =>
+    value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
 
   let { registeredIds = [], registeredHardwareIds = [] } = $props();
 
@@ -169,7 +170,7 @@
     return index >= 0 ? index : 0;
   };
   const dedupeModesByResolution = (modes: Mode[]): Mode[] => {
-    const seen = new Set<string>();
+    const seen = new SvelteSet<string>();
     const out: Mode[] = [];
     for (const mode of modes) {
       const key = resolutionKey(mode);
@@ -243,20 +244,27 @@
     devicesUpdates.disconnectUpdates();
   });
 
+  $effect(() => {
+    void registeredIds.length;
+  });
+
+  type SensorBenchmarksResponse = { benchmarks?: SensorBenchListItem[] };
+  type SensorBenchStatusResponse = { status?: string; result?: SensorBenchResult | null };
+
   async function refreshSensorBenchmarks(): Promise<void> {
     sensorBenchError = null;
     sensorBenchLoading = true;
     try {
       const resp = await fetch(apiPath('/streams/bench/sensor'));
       if (!resp.ok) throw new Error(`Failed (${resp.status})`);
-      const json = (await resp.json()) as any;
+      const json = (await resp.json()) as SensorBenchmarksResponse;
       sensorBenchmarks = Array.isArray(json?.benchmarks) ? (json.benchmarks as SensorBenchListItem[]) : [];
       const filtered = filterSensorBenchmarks(
         sensorBenchmarks,
         String(currentBackend()?.kind ?? '').toLowerCase(),
         (currentDevice()?.identity?.keys ?? [])[0] ?? null
       );
-      const ids = new Set(filtered.map((b) => b?.summary?.benchmark_id).filter(Boolean) as string[]);
+      const ids = new SvelteSet(filtered.map((b) => b?.summary?.benchmark_id).filter(Boolean) as string[]);
       if (!sensorBenchSelectedId || !ids.has(sensorBenchSelectedId)) {
         sensorBenchSelectedId = filtered[0]?.summary?.benchmark_id ?? null;
       }
@@ -276,7 +284,7 @@
     try {
       const resp = await fetch(apiPath(`/streams/bench/sensor/${encodeURIComponent(id)}`));
       if (!resp.ok) throw new Error(`Failed (${resp.status})`);
-      const status = (await resp.json()) as any;
+      const status = (await resp.json()) as SensorBenchStatusResponse;
       if (status?.status === 'completed' && status?.result) {
         sensorBenchSelectedResult = status.result as SensorBenchResult;
       }
@@ -346,7 +354,7 @@
 
       const allCodecs = Array.isArray(codecResp) ? codecResp.filter((c) => c?.fourcc) : [];
       const dedupeCodecs = (items: CodecInfo[], keyFor: (codec: CodecInfo) => string): CodecInfo[] => {
-        const seen = new Set<string>();
+        const seen = new SvelteSet<string>();
         const result: CodecInfo[] = [];
         for (const codec of items) {
           const key = keyFor(codec);
@@ -474,21 +482,21 @@
     for (const peer of peers) {
       if (!peer || typeof peer !== 'object') continue;
       const labelBase = String(peer.alias ?? peer.id ?? 'Peer').trim() || 'Peer';
-      const integration: any = (peer as any).integration ?? {};
-      const integrationKind = String(integration.kind ?? '').trim().toLowerCase();
+      const integration = asRecord(peer.integration);
+      const integrationKind = String(peer.integration?.kind ?? '').trim().toLowerCase();
       if (integrationKind === 'helios') {
         continue;
       }
       const urls = [
-        ...(Array.isArray(integration.streamUrls) ? integration.streamUrls : []),
-        ...(Array.isArray(integration.stream_urls) ? integration.stream_urls : []),
-        integration.streamUrl,
-        integration.stream_url
+        ...(Array.isArray(integration?.streamUrls) ? integration.streamUrls : []),
+        ...(Array.isArray(peer.integration?.stream_urls) ? peer.integration.stream_urls : []),
+        integration?.streamUrl,
+        peer.integration?.stream_url
       ]
-        .map((value: any) => (typeof value === 'string' ? value.trim() : ''))
+        .map((value) => (typeof value === 'string' ? value.trim() : ''))
         .filter((value: string) => value.length > 0);
 
-      const deduped = Array.from(new Set(urls));
+      const deduped = Array.from(new SvelteSet(urls));
       for (const url of deduped) {
         const parsed = safeParseUrl(url);
         const portLabel = parsed?.port ? parsed.port : '';
@@ -513,7 +521,7 @@
               // The API expects the same serde-tagged handle shape that `/v1/streams` returns
               // (e.g. `{ type: "libcamera", ... }`), so don't use the older `{ Netcam: {...} }`
               // OpenAPI union.
-              handle: { type: 'netcam', url, width: 0, height: 0, fps: 30 } as any,
+              handle: { type: 'netcam', url, width: 0, height: 0, fps: 30 } as unknown as ProbedBackend['handle'],
               properties: [],
               descriptor: {
                 controls: [],
@@ -540,7 +548,7 @@
     const trimmed = raw.trim();
     if (!trimmed) return null;
     try {
-      const url = new URL(trimmed);
+      const url = new SvelteURL(trimmed);
       const port = url.port || (url.protocol === 'http:' ? '80' : url.protocol === 'https:' ? '443' : url.protocol === 'rtsp:' ? '554' : '');
       const endpoint = (() => {
         const path = url.pathname?.trim() ?? '';
@@ -591,13 +599,13 @@
 	    }
 	  }
 
-	  function fpsOf(interval: Interval | null | undefined): number | null {
-	    if (!interval) return null;
-	    const num = Number((interval as any).numerator);
-	    const den = Number((interval as any).denominator);
-	    if (!Number.isFinite(num) || !Number.isFinite(den) || num <= 0 || den <= 0) return null;
-	    return den / num;
-	  }
+  function fpsOf(interval: Interval | null | undefined): number | null {
+    if (!interval) return null;
+    const num = Number(interval.numerator);
+    const den = Number(interval.denominator);
+    if (!Number.isFinite(num) || !Number.isFinite(den) || num <= 0 || den <= 0) return null;
+    return den / num;
+  }
 
 	  function bestIntervalIndex(target: Interval | null | undefined, candidates: Interval[]): number | null {
 	    const want = fpsOf(target);
@@ -781,8 +789,8 @@
       const message =
         typeof error.body === 'string'
           ? error.body
-          : typeof (error.body as any)?.error === 'string'
-            ? (error.body as any).error
+          : typeof asRecord(error.body)?.error === 'string'
+            ? String(asRecord(error.body)?.error)
             : '';
       const normalized = message.toLowerCase();
       return normalized.includes('identity token already in use') || normalized.includes('collide within the requested pipeline');
@@ -897,15 +905,16 @@
     const shouldAttachSelectedPipeline = Boolean(attachedPipelineId);
     const useRawMediaPipelineInSimpleMode = isSimpleRegistration && !shouldAttachSelectedPipeline && isMediaBackend;
 
-    const manifest: StreamManifest = {
+      const manifest: StreamManifest = {
         // Backend expects `DeviceIdentity { id, alias, hardware_id }` for stream manifests.
-        // The TS bindings can lag (some shapes still show `{ display, keys }`), so cast to `any`
+        // The TS bindings can lag (some shapes still show `{ display, keys }`), so cast through
+        // `unknown` to keep the runtime JSON correct without widening the rest of the payload.
         // to keep the runtime JSON correct.
         identity: {
           id: null,
           alias: alias.trim().length ? alias.trim() : null,
           hardware_id: selectStableHardwareId(device.identity?.keys) ?? device.identity?.display?.trim?.() ?? null
-        } as any,
+        } as unknown as StreamManifest['identity'],
         capture,
         pipeline_enabled: isSimpleRegistration
           ? shouldAttachSelectedPipeline || useRawMediaPipelineInSimpleMode
@@ -982,12 +991,12 @@
 
     try {
       const response = await StreamsApi.startStream({ requestBody: manifest });
-      const streamId = (response as any)?.stream_id ?? (response as any)?.streamId;
+      const streamId = response.stream_id;
       toaster.success({ title: 'Stream created', description: streamId ? `Stream ${streamId} started` : 'Capture stream started' });
       invalidateSWRPrefix('devices:');
       invalidateSWRPrefix('media:');
       invalidateSWR('media:stream-labels:v1');
-      dispatch('create', { streamId, descriptor: (response as any)?.descriptor });
+      dispatch('create', { streamId, descriptor: response.descriptor });
       registerCameraModal.set(false);
     } catch (err) {
       reportError({
@@ -1006,9 +1015,7 @@
 
 {#if loading}
   <ModalShell open title="Loading cameras…" closeOnBackdrop={false} closeOnEsc={false} className="z-50" panelClassName="max-w-sm">
-    {#snippet children()}
-      <div class="py-6 text-center text-sm text-surface-300">Fetching available cameras…</div>
-    {/snippet}
+    <div class="py-6 text-center text-sm text-surface-300">Fetching available cameras…</div>
   </ModalShell>
 {:else if error}
   <ModalShell open title="Unable to load cameras" subtitle={error} className="z-50" onClose={close}>
@@ -1085,7 +1092,6 @@
       {/if}
       <button class="btn btn-ghost" type="button" onclick={close}>Close</button>
     {/snippet}
-    {#snippet children()}
       {#if devices.length === 0}
         <div class="rounded-lg border border-surface-800 bg-surface-950/70 px-4 py-6 text-sm text-surface-300">
           No cameras detected. Ensure the engine is running and the device is connected, then retry.
@@ -1279,7 +1285,6 @@
           </div>
         {/if}
       {/if}
-    {/snippet}
   </ModalShell>
 {/if}
 

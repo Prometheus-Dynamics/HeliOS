@@ -169,6 +169,7 @@
 
   <div
     class="flex-1 min-h-0 min-w-0 overflow-auto overflow-x-hidden rounded border border-surface-800/60 bg-surface-950/20 p-4"
+    role="presentation"
     use:virtualViewport={{
       onScroll: (top) => onScroll?.(top),
       onResize: (size) => onResize?.(size)

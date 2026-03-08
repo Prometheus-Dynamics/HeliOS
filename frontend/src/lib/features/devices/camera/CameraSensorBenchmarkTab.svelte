@@ -9,8 +9,6 @@
   import {
     availableFormats,
     availableResolutions,
-    cpuDeltaEngine,
-    cpuDeltaSystem,
     formatCpu,
     formatLabel,
     rankRows,
@@ -26,6 +24,15 @@
     SensorBenchmarkStatus
   } from './benchmark/benchmarkUtils';
   import { etaMs, maxEtaMs, updateEtaEstimator, type EtaEstimator } from './benchmark/benchmarkState';
+  import { SvelteSet } from 'svelte/reactivity';
+
+  type BenchmarksResponse = {
+    benchmarks?: BenchmarkListItem[];
+  };
+
+  type BenchmarkStartResponse = {
+    benchmark_id?: string;
+  };
 
   let { apiPath, device, backend } = $props<{
     apiPath: (path: string) => string;
@@ -87,6 +94,17 @@
 
   const rankRowsView = $derived.by(() => (selectedResult ? rankRows(selectedResult, benchTargetFps) : []));
 
+  function asRecord<T extends Record<string, unknown>>(value: unknown): T | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    return value as T;
+  }
+
+  function isBenchmarkListItem(value: unknown): value is BenchmarkListItem {
+    const item = asRecord<{ summary?: unknown }>(value);
+    const summary = asRecord<{ benchmark_id?: unknown }>(item?.summary);
+    return typeof summary?.benchmark_id === 'string' && summary.benchmark_id.length > 0;
+  }
+
   function stopPolling(): void {
     if (pollTimer) {
       window.clearInterval(pollTimer);
@@ -107,8 +125,8 @@
   }
 
   function selectedModes(): Mode[] {
-    const formats = new Set(includedFormats);
-    const resolutions = new Set(includedResolutions);
+    const formats = new SvelteSet(includedFormats);
+    const resolutions = new SvelteSet(includedResolutions);
     return allModes().filter((mode) => formats.has(formatLabel(mode.format?.code)) && resolutions.has(resolutionKey(mode) ?? ''));
   }
 
@@ -139,12 +157,13 @@
         const text = await resp.text().catch(() => '');
         throw new Error(text || `Failed (${resp.status})`);
       }
-      const json = (await resp.json()) as any;
-      benchmarks = Array.isArray(json?.benchmarks) ? json.benchmarks : [];
+      const json = (await resp.json()) as unknown;
+      const payload = asRecord<BenchmarksResponse>(json);
+      benchmarks = Array.isArray(payload?.benchmarks) ? payload.benchmarks.filter(isBenchmarkListItem) : [];
       if (benchmarks.length) {
-        const ids = new Set(benchmarks.map((b) => b?.summary?.benchmark_id).filter(Boolean) as string[]);
+        const ids = new SvelteSet(benchmarks.map((entry) => entry.summary.benchmark_id));
         if (!selectedBenchmarkId || !ids.has(selectedBenchmarkId)) {
-          selectedBenchmarkId = benchmarks[0]?.summary?.benchmark_id ?? null;
+          selectedBenchmarkId = benchmarks[0]?.summary.benchmark_id ?? null;
         }
       } else {
         selectedBenchmarkId = null;
@@ -182,9 +201,6 @@
       selectedResult = null;
     }
   }
-
-  const rankRowsForTarget = (result: { modes: any[] } | null) =>
-    rankRows(result, benchTargetFps);
 
   async function cancelBenchmark(): Promise<void> {
     if (!runningId) return;
@@ -240,8 +256,9 @@
         throw new Error(text || `Start failed (${resp.status})`);
       }
 
-      const json = (await resp.json()) as any;
-      const id = String(json?.benchmark_id ?? '');
+      const json = (await resp.json()) as unknown;
+      const startResponse = asRecord<BenchmarkStartResponse>(json);
+      const id = typeof startResponse?.benchmark_id === 'string' ? startResponse.benchmark_id : '';
       if (!id) throw new Error('Missing benchmark id');
 
       runningId = id;

@@ -21,6 +21,7 @@
   import SolverPanel from '$lib/features/localization/page/SolverPanel.svelte';
   import CameraPoseOverlay from '$lib/features/localization/page/CameraPoseOverlay.svelte';
   import FieldMapManager from '$lib/features/localization/page/FieldMapManager.svelte';
+  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
   type ViewerTransform = { position: Vec3; quaternion?: PoseQuaternion } | null;
   type ViewProfileOverlay = {
@@ -205,9 +206,6 @@
     sourceWeightsById?: Record<string, number>;
     onSetSourceWeight?: (sourceId: string, value: string) => void;
     sourceUsedByProfilesById?: Record<string, string[]>;
-    pipelineStatusError?: string | null;
-    pipelineOutputsError?: string | null;
-    localizationConfigError?: string | null;
     sourceStatusRows?: SourceStatusRow[];
     showCameraPoseOverlay?: boolean;
     showCustomFieldsOverlay?: boolean;
@@ -405,16 +403,13 @@
     groupedSources = [],
     openSourceGroups = [],
     onToggleSourceGroup,
-    calibratedCameraIds = new Set<string>(),
+    calibratedCameraIds = new SvelteSet<string>(),
     isSourceCalibrated = () => true,
     selectedSourceIds = [],
     onToggleSource,
     sourceWeightsById = {},
     onSetSourceWeight,
     sourceUsedByProfilesById = {},
-    pipelineStatusError = null,
-    pipelineOutputsError = null,
-    localizationConfigError = null,
     sourceStatusRows = [],
     showCameraPoseOverlay = $bindable(false),
     showCustomFieldsOverlay = $bindable(false),
@@ -456,11 +451,11 @@
 
   const ViewersComponent = $derived(viewersComponent);
   const groupedCameraPovOptions = $derived.by<CameraPovOptionGroup[]>(() => {
-    const groups = new Map<string, Map<string, CameraPovOption[]>>();
+    const groups = new SvelteMap<string, Map<string, CameraPovOption[]>>();
     for (const option of cameraPovOptions) {
       const groupKey = (option.groupLabel ?? '').trim() || 'Profile';
       const subgroupKey = (option.subgroupLabel ?? '').trim() || 'Camera';
-      const subgroups = groups.get(groupKey) ?? new Map<string, CameraPovOption[]>();
+      const subgroups = groups.get(groupKey) ?? new SvelteMap<string, CameraPovOption[]>();
       const list = subgroups.get(subgroupKey) ?? [];
       list.push(option);
       subgroups.set(subgroupKey, list);
@@ -1114,10 +1109,6 @@
       onSetSourceWeight={onSetSourceWeight}
       sourceUsedByProfilesById={sourceUsedByProfilesById}
       sourceStatusRows={sourceStatusRows}
-      feedMessage={feedMessage}
-      pipelineStatusError={pipelineStatusError}
-      pipelineOutputsError={pipelineOutputsError}
-      localizationConfigError={localizationConfigError}
     />
   {/if}
 

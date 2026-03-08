@@ -24,9 +24,12 @@ export const removeStreamMetrics = (params: {
   streamMetricsErrorById: Record<string, string>;
 } => {
   const { streamId, streamMetricsById, streamMetricsUpdatedAtById, streamMetricsErrorById } = params;
-  const { [streamId]: _, ...rest } = streamMetricsById;
-  const { [streamId]: __, ...restUpdated } = streamMetricsUpdatedAtById;
-  const { [streamId]: ___, ...restErr } = streamMetricsErrorById;
+  const rest = { ...streamMetricsById };
+  delete rest[streamId];
+  const restUpdated = { ...streamMetricsUpdatedAtById };
+  delete restUpdated[streamId];
+  const restErr = { ...streamMetricsErrorById };
+  delete restErr[streamId];
   return {
     streamMetricsById: rest,
     streamMetricsUpdatedAtById: restUpdated,

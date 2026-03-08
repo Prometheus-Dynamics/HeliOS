@@ -204,7 +204,7 @@ export function createFirmwareController(): FirmwareController {
       pendingSelection = null;
     }
 
-    let selection = pendingSelection ? pendingSelection : canonicalFirmware(nextFirmware);
+    const selection = pendingSelection ? pendingSelection : canonicalFirmware(nextFirmware);
     let status = nextFirmware;
     if (pendingSelection) {
       status = {

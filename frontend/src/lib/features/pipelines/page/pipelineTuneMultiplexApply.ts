@@ -2,6 +2,12 @@ import type { StreamInfo } from '$lib/ts-bindings/http/client';
 import type { PipelineGraphPlan } from '$lib/types/pipeline';
 import { normalizeMultiplexSlots, multiplexKey } from './pipelineMultiplexUtils';
 
+type TuneMultiplexLayout = {
+  rows: number;
+  columns: number;
+  slots: Array<{ row: number; column: number; pipeline_id: string | null; output_key: string | null }>;
+};
+
 export type TuneMultiplexApplyDeps = {
   browser: boolean;
   RAW_STREAM_PIPELINE_ID: string;
@@ -28,7 +34,7 @@ export type TuneMultiplexApplyDeps = {
   pipelines: { get: () => Array<{ id: string; graph?: PipelineGraphPlan | null }> };
   serializeGraphPlan: (plan: PipelineGraphPlan) => unknown;
   StreamsApi: {
-    setPipelineLayout: (params: { id: string; requestBody: { pipeline_layout: any | null } }) => Promise<unknown>;
+    setPipelineLayout: (params: { id: string; requestBody: { pipeline_layout: TuneMultiplexLayout | null } }) => Promise<unknown>;
     smokePipelineGraph: (params: { id: string; timeoutMs: number }) => Promise<{ ok: boolean; errors?: string[] }>;
     setPipelineGraph: (params: { id: string; requestBody: { graph: unknown; pipeline_id: string; output: string | null } }) => Promise<unknown>;
     setPipelineOutput: (params: { id: string; requestBody: { output: string | null } }) => Promise<unknown>;
@@ -41,7 +47,7 @@ export type TuneMultiplexApplyDeps = {
 };
 
 export const createTuneMultiplexApply = (deps: TuneMultiplexApplyDeps) => {
-  const buildTuneMultiplexLayout = (): { rows: number; columns: number; slots: Array<{ row: number; column: number; pipeline_id: string | null; output_key: string | null }> } | null => {
+  const buildTuneMultiplexLayout = (): TuneMultiplexLayout | null => {
     const rows = Math.min(6, Math.max(1, Math.trunc(deps.getTuneMultiplexRows())));
     const columns = Math.min(6, Math.max(1, Math.trunc(deps.getTuneMultiplexColumns())));
     const normalizedSlots = normalizeMultiplexSlots(rows, columns, deps.getTuneMultiplexSlots());

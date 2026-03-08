@@ -1,5 +1,6 @@
 <script lang="ts" module>
   import { onDestroy, onMount, untrack } from 'svelte';
+  import type { DaedalusRegistryResponse } from '$lib/ts-bindings/http/client';
   import type { StreamInfo, StreamManifest, StreamMetrics } from '$lib/api/httpClient';
   import type { PipelineUi } from '$lib/features/pipelines/pipelineUiTypes';
   import { createCameraPipelineState } from './cameraPipelineStore.svelte';
@@ -12,6 +13,7 @@
   } from './cameraPipelineTuningController';
   import { createCameraPipelineLayoutRuntime } from './cameraPipelineLayoutRuntime';
   import { createCameraPipelineTuningRuntime } from './cameraPipelineTuningRuntime';
+  import { SvelteSet } from 'svelte/reactivity';
 
   type PipelineRuntimeDeps = {
     streamId: string;
@@ -27,7 +29,7 @@
     PIPELINE_UI_METADATA_KEY: string;
     DEFAULT_PIPELINE_UI: PipelineUi;
     RAW_PIPELINE_ID: string;
-    RAW_LOOPBACK_GRAPH: any;
+    RAW_LOOPBACK_GRAPH: unknown;
   };
 
   export function createCameraPagePipelineRuntime(deps: PipelineRuntimeDeps) {
@@ -67,9 +69,12 @@
       outputDurationForPipeline
     } = pipelineMetricsController;
 
-    let pipelineRegistrySnapshot = $state<any | null>(null);
+    const asRecord = (value: unknown): Record<string, unknown> | null =>
+      value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+
+    let pipelineRegistrySnapshot = $state<DaedalusRegistryResponse | null>(null);
     let pipelineOutputOptionsCache = $state<Record<string, string[]>>({});
-    let pipelineGraphCache = $state<Record<string, any>>({});
+    let pipelineGraphCache = $state<Record<string, unknown>>({});
     const derived = createCameraPageDerived({
       get selectedPipelineId() {
         return pipelineState.selectedPipelineId;
@@ -133,7 +138,7 @@
       }
     });
 
-    let applyPipelineOverridesToGraphRef = (pipelineId: string, graph: any) => graph;
+    let applyPipelineOverridesToGraphRef = (_pipelineId: string, graph: unknown) => graph;
 
     const pipelineLayoutController = createCameraPipelineLayoutRuntime({
       streamId,
@@ -212,7 +217,9 @@
       stream,
       pipelineState,
       derived,
-      ensurePipelineRegistry,
+      ensurePipelineRegistry: async () => {
+        await ensurePipelineRegistry();
+      },
       ensurePipelineGraphAndOutputs,
       awaitStreamUpdatesSocket,
       pipelineGraphCache: () => pipelineGraphCache,
@@ -288,7 +295,7 @@
       void pipelineState.pipelineGridSlots;
       void pipelineState.selectedPipelineId;
       if (!pipelineState.pipelineUiHydrated) return;
-      const ids = new Set<string>();
+      const ids = new SvelteSet<string>();
       (pipelineState.assignedPipelineIds ?? []).forEach((id) => {
         const normalized = String(id ?? '').trim();
         if (normalized.length) ids.add(normalized);
@@ -307,7 +314,7 @@
       const manifest = manifestState();
       if (!manifest) return;
       void pipelineOutputOptionsCache;
-      const ids = new Set<string>();
+      const ids = new SvelteSet<string>();
       const add = (value: unknown) => {
         const raw = typeof value === 'string' ? value.trim() : '';
         if (!raw) return;
@@ -316,10 +323,14 @@
         if (Object.prototype.hasOwnProperty.call(pipelineOutputOptionsCache, normalized)) return;
         ids.add(normalized);
       };
-      add((manifest as any)?.active_pipeline_id);
-      add((manifest as any)?.pipeline_id);
-      if (Array.isArray((manifest as any)?.pipelines)) {
-        (manifest as any).pipelines.forEach((entry: any) => add(entry?.pipeline_id ?? entry?.pipelineId ?? entry?.id));
+      const manifestRecord = asRecord(manifest);
+      add(manifest.active_pipeline_id);
+      add(manifestRecord?.pipeline_id);
+      if (Array.isArray(manifestRecord?.pipelines)) {
+        manifestRecord.pipelines.forEach((entry) => {
+          const pipeline = asRecord(entry);
+          add(pipeline?.pipeline_id ?? pipeline?.pipelineId ?? pipeline?.id);
+        });
       }
       if (!ids.size) return;
       untrack(() => {
@@ -497,8 +508,12 @@
       pipelineLayoutApplyTimer: pipelineState.pipelineLayoutApplyTimer,
       pipelineTuningApplyRafById: pipelineState.pipelineTuningApplyRafById
     }));
+    type PipelineRuntime = typeof runtime;
 
-    // svelte-ignore state_referenced_locally
-    return runtime;
+    return new Proxy({} as PipelineRuntime, {
+      get(_target, property) {
+        return runtime[property as keyof PipelineRuntime];
+      }
+    });
   }
 </script>

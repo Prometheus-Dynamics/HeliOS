@@ -1,10 +1,62 @@
-import type { StreamMetrics } from '$lib/api/httpClient';
+import type {
+  PipelineGraphMetrics,
+  PipelineNodeRuntimeMetrics,
+  StreamManifest,
+  StreamMetrics,
+  StreamPipelineBinding
+} from '$lib/api/httpClient';
 import { RAW_PIPELINE_ID, RAW_PIPELINE_UUID } from './cameraPipelineTuningController';
 
+type UnknownRecord = Record<string, unknown>;
+type LegacyPipelineBinding = {
+  pipelineId?: string | null;
+  id?: string | null;
+  pipeline?: { id?: string | null; graph?: unknown } | null;
+};
+
 type PipelineMetricsState = {
-  get manifestState(): any;
+  get manifestState(): StreamManifest | null;
   get streamMetrics(): StreamMetrics | null;
 };
+
+const asRecord = (value: unknown): UnknownRecord | null =>
+  value && typeof value === 'object' ? (value as UnknownRecord) : null;
+
+const readString = (record: UnknownRecord | null, ...keys: string[]): string | null => {
+  for (const key of keys) {
+    const value = record?.[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return null;
+};
+
+const pipelineIdFromBinding = (binding: StreamPipelineBinding | LegacyPipelineBinding): string | null => {
+  const bindingRecord = asRecord(binding);
+  return (
+    readString(bindingRecord, 'pipeline_id', 'pipelineId', 'id') ??
+    readString(asRecord(bindingRecord?.pipeline), 'id')
+  );
+};
+
+const manifestBindings = (manifest: StreamManifest | null): Array<StreamPipelineBinding | LegacyPipelineBinding> => {
+  if (Array.isArray(manifest?.pipelines)) {
+    return manifest.pipelines;
+  }
+  const legacyBindings = asRecord(manifest)?.pipelines;
+  if (Array.isArray(legacyBindings)) {
+    return legacyBindings.filter((entry): entry is LegacyPipelineBinding => asRecord(entry) !== null);
+  }
+  const bindingsRecord = asRecord(legacyBindings);
+  if (!bindingsRecord) {
+    return [];
+  }
+  return Object.values(bindingsRecord).filter((entry): entry is LegacyPipelineBinding => asRecord(entry) !== null);
+};
+
+const asPipelineGraphMetrics = (value: unknown): PipelineGraphMetrics | null =>
+  asRecord(value) ? (value as PipelineGraphMetrics) : null;
 
 export function createCameraPipelineMetricsController(state: PipelineMetricsState) {
   function normalizePipelineIdForMetrics(pipelineId: string | null): string | null {
@@ -15,42 +67,47 @@ export function createCameraPipelineMetricsController(state: PipelineMetricsStat
   }
 
   function activePipelineWireId(): string | null {
-    const active = (state.manifestState as any)?.active_pipeline_id ?? (state.manifestState as any)?.pipeline_id ?? null;
-    if (typeof active !== 'string') return null;
-    return normalizePipelineIdForMetrics(active);
+    const manifestRecord = asRecord(state.manifestState);
+    const active =
+      state.manifestState?.active_pipeline_id ??
+      readString(manifestRecord, 'pipeline_id', 'activePipelineId', 'pipelineId');
+    return normalizePipelineIdForMetrics(active ?? null);
   }
 
-  function pipelineMetricsForId(metrics: StreamMetrics | null, pipelineId: string | null): any | null {
+  function pipelineMetricsForId(metrics: StreamMetrics | null, pipelineId: string | null): PipelineGraphMetrics | null {
     if (!metrics) return null;
     const wireId = normalizePipelineIdForMetrics(pipelineId);
     if (!wireId) return null;
-    const instances = (metrics as any)?.pipeline_instances ?? null;
-    if (instances && typeof instances === 'object' && wireId in instances) {
-      return instances[wireId];
+    const instances = asRecord(metrics.pipeline_instances);
+    const instanceMetrics = instances?.[wireId];
+    const resolvedInstance = asPipelineGraphMetrics(instanceMetrics);
+    if (resolvedInstance) {
+      return resolvedInstance;
     }
     const active = activePipelineWireId();
     if (active && active === wireId) {
-      return (metrics as any).pipeline ?? null;
+      return metrics.pipeline ?? null;
     }
     // Fallback: when manifest active pipeline lags briefly, still map single-pipeline metrics.
-    const bindingsRaw = (state.manifestState as any)?.pipelines;
-    const bindings = Array.isArray(bindingsRaw) ? bindingsRaw : [];
-    const bindingIds = bindings
-      .map((entry: any) => normalizePipelineIdForMetrics(entry?.pipeline_id ?? entry?.pipelineId ?? entry?.id ?? null))
+    const bindingIds = manifestBindings(state.manifestState)
+      .map((entry) => normalizePipelineIdForMetrics(pipelineIdFromBinding(entry)))
       .filter((id: string | null): id is string => typeof id === 'string' && id.length > 0);
     if (bindingIds.length === 1 && bindingIds[0] === wireId) {
-      return (metrics as any).pipeline ?? null;
+      return metrics.pipeline ?? null;
     }
     return null;
   }
 
-  function findOutputNodeMetrics(graphMetrics: any, outputKey: string | null): any | null {
+  function findOutputNodeMetrics(
+    graphMetrics: PipelineGraphMetrics | null,
+    outputKey: string | null
+  ): PipelineNodeRuntimeMetrics | null {
     const nodes = graphMetrics?.nodes ?? null;
-    if (!nodes || typeof nodes !== 'object') return null;
+    if (!nodes) return null;
     const entries = Object.values(nodes);
     if (!entries.length) return null;
     const normalizedOutput = typeof outputKey === 'string' ? outputKey.trim().toLowerCase() : null;
-    const outputNodes = entries.filter((node: any) => {
+    const outputNodes = entries.filter((node) => {
       const label = typeof node?.node_label === 'string' ? node.node_label.toLowerCase() : '';
       return label.startsWith('output:');
     });
@@ -58,26 +115,29 @@ export function createCameraPipelineMetricsController(state: PipelineMetricsStat
     if (!normalizedOutput) {
       return outputNodes[0] ?? null;
     }
-    const match = outputNodes.find((node: any) => {
+    const match = outputNodes.find((node) => {
       const label = typeof node?.node_label === 'string' ? node.node_label.toLowerCase() : '';
       return label === `output:${normalizedOutput}`;
     });
     return match ?? outputNodes[0] ?? null;
   }
 
-  function pipelineDurationMs(graphMetrics: any, outputKey: string | null): number | null {
+  function pipelineDurationMs(graphMetrics: PipelineGraphMetrics | null, outputKey: string | null): number | null {
     if (!graphMetrics) return null;
     const nodes = graphMetrics?.nodes ?? null;
-    if (!nodes || typeof nodes !== 'object') return null;
-    const graphNode = (nodes as any).graph ?? Object.values(nodes).find((node: any) => node?.node_type === 'graph');
-    const graphMsRaw = graphNode?.metrics?.average_time_ms ?? graphNode?.metrics?.averageTimeMs ?? null;
+    if (!nodes) return null;
+    const graphNode = nodes.graph ?? Object.values(nodes).find((node) => node?.node_type === 'graph');
+    const graphMetricsRecord = asRecord(graphNode?.metrics);
+    const graphMsRaw =
+      graphNode?.metrics?.average_time_ms ??
+      (typeof graphMetricsRecord?.averageTimeMs === 'number' ? graphMetricsRecord.averageTimeMs : null);
     if (typeof graphMsRaw === 'number' && Number.isFinite(graphMsRaw) && graphMsRaw > 0) {
       return graphMsRaw;
     }
     const values = Object.values(nodes)
-      .filter((node: any) => node?.node_type !== 'graph')
-      .map((node: any) => node?.metrics?.average_time_ms)
-      .filter((value: any) => typeof value === 'number' && Number.isFinite(value)) as number[];
+      .filter((node) => node?.node_type !== 'graph')
+      .map((node) => node?.metrics?.average_time_ms)
+      .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
     if (!values.length) return null;
     const total = values.reduce((sum, value) => sum + value, 0);
     if (total >= 0.5) {

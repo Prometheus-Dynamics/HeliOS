@@ -220,6 +220,15 @@
               Reset coverage
             </button>
           </div>
+          <label class="mt-3 flex items-center gap-2 text-2xs uppercase tracking-[0.3em] text-surface-400">
+            <input
+              type="checkbox"
+              checked={guidedAccumulateLive}
+              onchange={(event) => setGuidedAccumulateLive((event.currentTarget as HTMLInputElement).checked)}
+              disabled={!streamUuid}
+            />
+            Accumulate live coverage
+          </label>
           <p class="mt-2 text-2xs text-surface-500">Overlays are never saved.</p>
           {#if !streamUuid}
             <p class="mt-2 text-2xs text-surface-500">Waiting for stream UUID…</p>

@@ -14,7 +14,6 @@
     type StreamMetrics
   } from '$lib/ts-bindings/http/client';
   import type { LocalizationMarker, LocalizationViewMode } from '$lib';
-  import type { PipelineTemplateSummary } from '$lib/types/pipeline';
   import type { RigCameraInfo, RobotDimensions } from '$lib/types/rig';
   import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rig';
   import { rigLayoutStore } from '$lib/stores/rigLayout';
@@ -40,9 +39,6 @@
     isLocalizationImuSource,
     type LocalizationPipelineSource
   } from '$lib/features/localization/pipelineSources';
-  import {
-    type LocalizationPipelineStatus
-  } from '$lib/features/localization/localizationPipeline';
   import {
     DEFAULT_FIELD_ORIGIN,
     DEFAULT_SOLVER_RUNTIME_TUNING,
@@ -76,7 +72,7 @@
     type FieldMapDocument,
     type FieldMapSummary
   } from '$lib/features/localization/fieldMaps';
-  import type { CameraExtrinsics, CustomField, CustomFieldOrigin } from '$lib/features/localization/types';
+  import type { CustomField } from '$lib/features/localization/types';
   import { createLocalizationStorageStore } from '$lib/features/localization/storage';
   import { createFeedPoller, normalizePollHz, pollIntervalMs, type PollRateLimits } from '$lib/features/localization/feedPoller';
   import LocalizationWorkspace from '$lib/features/localization/page/LocalizationWorkspace.svelte';
@@ -111,7 +107,6 @@
     buildActiveFieldOrigin,
     buildSourceStatusRows,
     buildFieldSceneTransform,
-    buildFieldSpaceLabel,
     buildViewProfileOverlays,
     buildViewerCameraTransforms,
     buildViewerCameras,
@@ -123,6 +118,7 @@
     type LocalizationBaseFrame
   } from '$lib/features/localization/page/localizationPageViewHelpers';
   import { estimateCalibrationFovDegs } from '$lib/features/devices/camera/cameraCalibrationUtils';
+  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
   type FeedStatus = 'idle' | 'connecting' | 'live' | 'error';
 
@@ -201,6 +197,8 @@
     translation: { x: number; y: number; z: number } | null;
     sampleTimestampMs: number | null;
   };
+  const asRecord = (value: unknown): Record<string, unknown> | null =>
+    value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
   const UUID_LIKE_RE =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   const DEFAULT_LOCALIZATION_CALIBRATION = {
@@ -232,21 +230,11 @@
   const localizationProfiles = createLocalizationProfileStore();
   const localizationConfig = localizationProfiles.config;
   const localizationConfigLoading = localizationProfiles.loading;
-  const localizationConfigError = localizationProfiles.error;
   const activeProfileId = localizationProfiles.activeProfileId;
   const profiles = localizationProfiles.profiles;
   const activeProfile = localizationProfiles.activeProfile;
   let solveResponse = $state<LocalizationSolveResponse | null>(null);
   let solveResponsesByProfile = $state<Record<string, LocalizationSolveResponse>>({});
-  let pipelineTemplates = $state<PipelineTemplateSummary[]>([]);
-  let pipelineTemplatesLoading = $state(false);
-  let pipelineTemplatesError = $state<string | null>(null);
-  let pipelineStatus = $state<LocalizationPipelineStatus | null>(null);
-  let pipelineStatusLoading = $state(false);
-  let pipelineStatusError = $state<string | null>(null);
-  let pipelineOutputs = $state<string[]>([]);
-  let pipelineOutputsLoading = $state(false);
-  let pipelineOutputsError = $state<string | null>(null);
   let localizationCapabilities = $state<LocalizationCapabilitiesResponse | null>(null);
 
   let feedStatus = $state<FeedStatus>('idle');
@@ -292,7 +280,6 @@
   let cameraPoseYawDeg = $state('0');
 
   const {
-    persistLocalizationConfig,
     setProfileColor,
     setProfileViewEnabled,
     persistProfileUpdate,
@@ -506,7 +493,7 @@
       return false;
     }
 
-    const existingById = new Map((profile.sources ?? []).map((entry) => [entry.id, entry]));
+    const existingById = new SvelteMap((profile.sources ?? []).map((entry) => [entry.id, entry]));
     const seededSources: LocalizationSourceConfig[] = [];
     const pushSeedSource = (source: LocalizationPipelineSource | null) => {
       if (!source) return;
@@ -538,7 +525,7 @@
     await localizationProfiles.persist(nextConfig);
 
     const streamsToSeed = Array.from(
-      new Set(
+      new SvelteSet(
         seededSources
           .map((source) => String(source.streamId ?? '').trim())
           .filter((streamId) => UUID_LIKE_RE.test(streamId))
@@ -968,7 +955,6 @@
     createCustomField,
     loadFieldMapList,
     ensureFieldMapLoaded,
-    createCustomFieldFromMap,
     assignMapToSelectedField,
     handleMapUploadFile,
     uploadSelectedMapFile,
@@ -1070,7 +1056,6 @@
   });
 
   const {
-    markerQuaternion,
     cameraExtrinsicsTransform,
     rigCameraForSource,
     applyPrimaryCameraPose,
@@ -1130,33 +1115,15 @@
     setFeedMessage: (next) => {
       feedMessage = next;
     },
-    setPipelineTemplates: (next) => {
-      pipelineTemplates = next;
-    },
-    setPipelineTemplatesLoading: (next) => {
-      pipelineTemplatesLoading = next;
-    },
-    setPipelineTemplatesError: (next) => {
-      pipelineTemplatesError = next;
-    },
-    setPipelineStatus: (next) => {
-      pipelineStatus = next;
-    },
-    setPipelineStatusLoading: (next) => {
-      pipelineStatusLoading = next;
-    },
-    setPipelineStatusError: (next) => {
-      pipelineStatusError = next;
-    },
-    setPipelineOutputs: (next) => {
-      pipelineOutputs = next;
-    },
-    setPipelineOutputsLoading: (next) => {
-      pipelineOutputsLoading = next;
-    },
-    setPipelineOutputsError: (next) => {
-      pipelineOutputsError = next;
-    },
+    setPipelineTemplates: () => {},
+    setPipelineTemplatesLoading: () => {},
+    setPipelineTemplatesError: () => {},
+    setPipelineStatus: () => {},
+    setPipelineStatusLoading: () => {},
+    setPipelineStatusError: () => {},
+    setPipelineOutputs: () => {},
+    setPipelineOutputsLoading: () => {},
+    setPipelineOutputsError: () => {},
     setSources: (next) => {
       sources = next;
     },
@@ -1235,7 +1202,7 @@
   let streamMetricsById = $state<Record<string, StreamMetrics>>({});
   let streamMetricsUpdatedAtById = $state<Record<string, number>>({});
   let streamMetricsErrorById = $state<Record<string, string>>({});
-  const streamMetricsCleanup = new Map<string, () => void>();
+  const streamMetricsCleanup = new SvelteMap<string, () => void>();
 
   let pollVisibilityPaused = false;
   let visibilityHandler: (() => void) | null = null;
@@ -1285,8 +1252,8 @@
     sources: LocalizationPipelineSource[]
   ): LocalizationPipelineSource[] {
     const viewProfiles = computeViewProfiles(profiles, activeProfile);
-    const enabledIds = new Set<string>();
-    const enabledStreamOutputs = new Set<string>();
+    const enabledIds = new SvelteSet<string>();
+    const enabledStreamOutputs = new SvelteSet<string>();
     for (const profile of viewProfiles) {
       for (const source of profile.sources ?? []) {
         if (!source.enabled) continue;
@@ -1487,7 +1454,7 @@
   function cameraKeyVariants(value: string | null | undefined): string[] {
     const trimmed = typeof value === 'string' ? value.trim() : '';
     if (!trimmed) return [];
-    const out = new Set<string>([trimmed]);
+    const out = new SvelteSet<string>([trimmed]);
     const stripped = trimmed.startsWith('device:')
       ? trimmed.slice('device:'.length)
       : trimmed.startsWith('stream:')
@@ -1502,7 +1469,7 @@
   }
 
   function collectKeyVariants(values: Array<string | null | undefined>): string[] {
-    const out = new Set<string>();
+    const out = new SvelteSet<string>();
     for (const value of values) {
       for (const key of cameraKeyVariants(value)) {
         out.add(key);
@@ -1656,7 +1623,7 @@
       const direct = rigCameraForSource(source);
       if (direct) return direct;
     }
-    const keySet = new Set(
+    const keySet = new SvelteSet(
       collectKeyVariants([
         detection.cameraUid,
         detection.sourceId,
@@ -1733,7 +1700,7 @@
     }
 
     const out: LocalizationDetectionPose[] = [];
-    const seen = new Set<string>();
+    const seen = new SvelteSet<string>();
     for (const detection of outputs.tagInCamera ?? []) {
       const fieldFromTag = detectionToFieldTransform(detection, sourceById, fieldFromRobot, fieldFromCameraByKey);
       if (!fieldFromTag) continue;
@@ -1759,8 +1726,8 @@
   }
 
   function extractResolutionCandidate(value: unknown): { width: number; height: number } | null {
-    if (!value || typeof value !== 'object') return null;
-    const record = value as any;
+    const record = asRecord(value);
+    if (!record) return null;
     const width = toFinite(record?.width ?? record?.w ?? record?.cols);
     const height = toFinite(record?.height ?? record?.h ?? record?.rows);
     if (width == null || height == null) return null;
@@ -1769,22 +1736,28 @@
   }
 
   function resolvePovResolution(
-    manifest: any,
-    calibration: any,
+    manifest: Record<string, unknown> | null,
+    calibration: Record<string, unknown> | null,
     cx: number,
     cy: number
   ): { width: number; height: number } | null {
+    const capture = asRecord(manifest?.capture);
+    const captureMode = asRecord(capture?.mode);
+    const captureModeFormat = asRecord(captureMode?.format);
+    const captureFormat = asRecord(capture?.format);
+    const encoderSettings = asRecord(manifest?.encoder_settings);
+    const encoder = asRecord(manifest?.encoder);
     const candidates = [
-      manifest?.capture?.mode?.format?.resolution,
-      manifest?.capture?.mode?.resolution,
-      manifest?.capture?.mode?.format,
-      manifest?.capture?.format?.resolution,
-      manifest?.capture?.format,
-      manifest?.capture?.resolution,
-      manifest?.encoder_settings?.output_resolution,
-      manifest?.encoder_settings?.resolution,
-      manifest?.encoder?.output?.resolution,
-      manifest?.encoder?.resolution,
+      captureModeFormat?.resolution,
+      captureMode?.resolution,
+      captureModeFormat,
+      captureFormat?.resolution,
+      captureFormat,
+      capture?.resolution,
+      encoderSettings?.output_resolution,
+      encoderSettings?.resolution,
+      asRecord(encoder?.output)?.resolution,
+      encoder?.resolution,
       calibration?.resolution,
       calibration?.imageSize,
       calibration?.frameSize,
@@ -1900,19 +1873,20 @@
   function extractPovIntrinsicsSet(
     stream: StreamInfo
   ): { undistorted: CameraPovIntrinsics | null; raw: CameraPovIntrinsics | null } | null {
-    const manifest = stream.manifest as any;
+    const manifest = asRecord(stream.manifest);
+    const camera = asRecord(manifest?.camera);
     const calibration =
-      manifest?.calibration ??
-      manifest?.camera?.calibration ??
-      manifest?.camera?.intrinsics ??
-      manifest?.intrinsics ??
+      asRecord(manifest?.calibration) ??
+      asRecord(camera?.calibration) ??
+      asRecord(camera?.intrinsics) ??
+      asRecord(manifest?.intrinsics) ??
       null;
-    if (!calibration || typeof calibration !== 'object') return null;
+    if (!calibration) return null;
 
-    const fx = toFinite((calibration as any).fx);
-    const fy = toFinite((calibration as any).fy);
-    const cx = toFinite((calibration as any).cx);
-    const cy = toFinite((calibration as any).cy);
+    const fx = toFinite(calibration.fx);
+    const fy = toFinite(calibration.fy);
+    const cx = toFinite(calibration.cx);
+    const cy = toFinite(calibration.cy);
     if ([fx, fy].some((value) => value == null || value <= 0)) return null;
     if ([cx, cy].some((value) => value == null)) return null;
 
@@ -1921,12 +1895,12 @@
     const { width, height } = resolution;
     const undistorted: CameraPovIntrinsics = { fx, fy, cx, cy, width, height };
 
-    const k1 = toFinite((calibration as any).k1) ?? 0;
-    const k2 = toFinite((calibration as any).k2) ?? 0;
-    const p1 = toFinite((calibration as any).p1) ?? 0;
-    const p2 = toFinite((calibration as any).p2) ?? 0;
-    const k3 = toFinite((calibration as any).k3) ?? 0;
-    const lensModelRaw = String((calibration as any).lensModel ?? (calibration as any).lens_model ?? 'pinhole')
+    const k1 = toFinite(calibration.k1) ?? 0;
+    const k2 = toFinite(calibration.k2) ?? 0;
+    const p1 = toFinite(calibration.p1) ?? 0;
+    const p2 = toFinite(calibration.p2) ?? 0;
+    const k3 = toFinite(calibration.k3) ?? 0;
+    const lensModelRaw = String(calibration.lensModel ?? calibration.lens_model ?? 'pinhole')
       .trim()
       .toLowerCase();
     const lensModel = lensModelRaw === 'fisheye' ? 'fisheye' : 'pinhole';
@@ -1981,18 +1955,23 @@
   }
 
   function streamIdentityKeys(stream: StreamInfo): string[] {
-    const manifest = stream.manifest as any;
-    const identity = manifest?.identity ?? null;
+    const manifest = asRecord(stream.manifest);
+    const identity = asRecord(manifest?.identity);
+    const capture = asRecord(manifest?.capture);
     const identityKeys = Array.isArray(identity?.keys) ? identity.keys.map((value: unknown) => String(value ?? '').trim()) : [];
-    const captureKeys = Array.isArray(manifest?.capture?.device_keys)
-      ? manifest.capture.device_keys.map((value: unknown) => String(value ?? '').trim())
+    const captureKeys = Array.isArray(capture?.device_keys)
+      ? capture.device_keys.map((value: unknown) => String(value ?? '').trim())
       : [];
+    const identityDisplay = typeof identity?.display === 'string' ? identity.display : null;
+    const identityHardwareId = typeof identity?.hardware_id === 'string' ? identity.hardware_id : null;
+    const identityAlias = typeof identity?.alias === 'string' ? identity.alias : null;
+    const identityId = typeof identity?.id === 'string' ? identity.id : null;
     return collectKeyVariants([
       stream.id,
-      identity?.display ?? null,
-      identity?.hardware_id ?? null,
-      identity?.alias ?? null,
-      identity?.id ?? null,
+      identityDisplay,
+      identityHardwareId,
+      identityAlias,
+      identityId,
       ...identityKeys,
       ...captureKeys
     ]);
@@ -2147,7 +2126,7 @@
   }
 
   function computeProfileIndexById(profiles: LocalizationProfile[]): Map<string, number> {
-    const map = new Map<string, number>();
+    const map = new SvelteMap<string, number>();
     profiles.forEach((profile, index) => {
       map.set(profile.id, index);
     });
@@ -2176,11 +2155,6 @@
     });
   });
 
-  const localizationTemplates = $derived.by(() => {
-    const tagged = pipelineTemplates.filter((entry) => entry.tags?.includes('localization'));
-    return tagged.length > 0 ? tagged : pipelineTemplates;
-  });
-
   const profileFieldOrigin = $derived.by<LocalizationFieldOriginConfig>(() =>
     normalizeFieldOriginConfig(($activeProfile ?? null)?.fieldOrigin)
   );
@@ -2188,9 +2162,9 @@
     profileFieldOrigin.custom ?? { x: 0, z: 0, yawDeg: 0 }
   );
 
-  const sourceIdById = $derived.by<Map<string, string>>(() => new Map(sources.map((source) => [source.id, source.id])));
+  const sourceIdById = $derived.by<Map<string, string>>(() => new SvelteMap(sources.map((source) => [source.id, source.id])));
   const sourceIdByStreamOutput = $derived.by<Map<string, string>>(() => {
-    const map = new Map<string, string>();
+    const map = new SvelteMap<string, string>();
     for (const source of sources) {
       const key = sourceStreamOutputKey(source.streamId, source.outputKey);
       if (!key) continue;
@@ -2199,10 +2173,10 @@
     return map;
   });
   const compatibleSourceIdById = $derived.by<Map<string, string>>(
-    () => new Map(compatibleSources.map((source) => [source.id, source.id]))
+    () => new SvelteMap(compatibleSources.map((source) => [source.id, source.id]))
   );
   const compatibleSourceIdByStreamOutput = $derived.by<Map<string, string>>(() => {
-    const map = new Map<string, string>();
+    const map = new SvelteMap<string, string>();
     for (const source of compatibleSources) {
       const key = sourceStreamOutputKey(source.streamId, source.outputKey);
       if (!key) continue;
@@ -2333,7 +2307,7 @@
   }
 
   function enabledSourcesForProfile(profile: LocalizationProfile): LocalizationPipelineSource[] {
-    const enabledIds = new Set(
+    const enabledIds = new SvelteSet(
       (profile.sources ?? [])
         .filter((source) => source.enabled)
         .map((source) => source.id)
@@ -2452,7 +2426,7 @@
 
   const hasAnyFeedSources = $derived.by(() => activeHasSources || viewProfilesWithSources.length > 0);
   const activeImuSource = $derived.by<LocalizationPipelineSource | null>(() => {
-    const unique = new Map<string, LocalizationPipelineSource>();
+    const unique = new SvelteMap<string, LocalizationPipelineSource>();
     for (const source of [...viewOverlaySources, ...selectedSources]) {
       if (!isImuSource(source)) continue;
       unique.set(source.id, source);
@@ -2495,7 +2469,7 @@
 
   const supportedSolverModes = $derived.by<LocalizationSolverMode[]>(() => {
     const supported = localizationCapabilities?.constraints?.supportedSolverModes ?? [];
-    const seen = new Set<string>();
+    const seen = new SvelteSet<string>();
     const ordered: LocalizationSolverMode[] = [];
     for (const mode of supported) {
       const normalized = String(mode ?? '').trim();
@@ -2516,7 +2490,7 @@
   });
   const supportedPoseSpaces = $derived.by<LocalizationPoseSpace[]>(() => {
     const supported = localizationCapabilities?.constraints?.supportedPoseSpaces ?? [];
-    const seen = new Set<string>();
+    const seen = new SvelteSet<string>();
     const ordered: LocalizationPoseSpace[] = [];
     for (const space of supported) {
       const normalized = String(space ?? '').trim();
@@ -2537,7 +2511,7 @@
     }
     return ordered;
   });
-  const supportedPoseSpaceSet = $derived.by(() => new Set(supportedPoseSpaces));
+  const supportedPoseSpaceSet = $derived.by(() => new SvelteSet(supportedPoseSpaces));
   const maxMapUploadBytes = $derived.by<number | null>(() => {
     const raw = Number(localizationCapabilities?.constraints?.maxMapUploadBytes ?? Number.NaN);
     if (!Number.isFinite(raw) || raw <= 0) return null;
@@ -2571,7 +2545,7 @@
     return supportedSolvePoseSpaces.filter((space) => solverOutputSpaces.includes(space));
   });
   const derivedPoseSpaces = $derived.by<LocalizationPoseSpace[]>(() => {
-    const derived = new Set<LocalizationPoseSpace>();
+    const derived = new SvelteSet<LocalizationPoseSpace>();
     // Derived outputs should be discoverable from whichever pose spaces the solver emits.
     // Example: when `tag_in_camera` is enabled, the API can also provide `tag_in_robot` + `robot_in_tag`.
     for (const space of solverOutputSpaces) {
@@ -2583,7 +2557,7 @@
   });
   const availableCoordinateSpaces = $derived.by<LocalizationPoseSpace[]>(() => {
     const next: LocalizationPoseSpace[] = [];
-    const seen = new Set<string>();
+    const seen = new SvelteSet<string>();
     for (const space of solverOutputSpaces.concat(derivedPoseSpaces)) {
       if (!supportedPoseSpaceSet.has(space)) continue;
       if (seen.has(space)) continue;
@@ -2600,7 +2574,7 @@
       const outputSpaces = (profile.solvers ?? [])
         .flatMap((solver) => solver.outputSpaces ?? [])
         .filter((space) => supportedPoseSpaceSet.has(space));
-      const supported = new Set<LocalizationPoseSpace>(outputSpaces);
+      const supported = new SvelteSet<LocalizationPoseSpace>(outputSpaces);
       // Field spaces require a field map selection on the profile.
       if (!profile.fieldMapId) {
         supported.delete('robot_in_field');
@@ -2660,11 +2634,7 @@
   applySourceSelectionImpl = localizationActions.applySourceSelection;
   const {
     setFieldMapSelection,
-    toggleSolverOutputSpace,
     setActiveSolverMode: setActiveSolverModeBase,
-    setSolveSpaceEnabled,
-    setPipelineTemplateId,
-    setSourceInputKey
   } = localizationActions;
   const setActiveSolverMode = (mode: LocalizationSolverMode): void => {
     if (!supportedSolverModes.includes(mode)) return;
@@ -2688,7 +2658,7 @@
   const addSolver = (): void => {
     const profile = $activeProfile;
     if (!profile) return;
-    const existing = new Set(profile.solvers.map((solver) => solver.id));
+    const existing = new SvelteSet(profile.solvers.map((solver) => solver.id));
     const base = 'group';
     let id = `${base}-${Date.now().toString(36)}`;
     let counter = 0;
@@ -2705,7 +2675,7 @@
       supportedSolverModes[0],
       profile.solvers[0]?.mode
     ];
-    const supportedModeSet = new Set(supportedSolverModes);
+    const supportedModeSet = new SvelteSet(supportedSolverModes);
     const mode =
       modeCandidates.find(
         (candidate): candidate is LocalizationSolverMode =>
@@ -2761,7 +2731,7 @@
     const profile = $activeProfile;
     const solver = activeSolverConfig;
     if (!profile || !solver) return;
-    const unique = Array.from(new Set(nextIds.map((id) => id.trim()).filter(Boolean)));
+    const unique = Array.from(new SvelteSet(nextIds.map((id) => id.trim()).filter(Boolean)));
     const current = solver.sourceIds ?? [];
     const same = current.length === unique.length && current.every((id) => unique.includes(id));
     if (same) return;
@@ -2784,7 +2754,7 @@
     const current = solver.sourceIds ?? [];
     // Empty means "all sources" in the backend; expand to the current selection when customizing.
     const expanded = current.length === 0 ? [...selectedSourceIds] : [...current];
-    const next = enabled ? Array.from(new Set([...expanded, sourceId])) : expanded.filter((id) => id !== sourceId);
+    const next = enabled ? Array.from(new SvelteSet([...expanded, sourceId])) : expanded.filter((id) => id !== sourceId);
     setActiveSolverSourceIds(next);
   };
 
@@ -2836,7 +2806,7 @@
       $activeProfileId = profile.id;
     }
     const selfProfileStreamId = `profile:${profile.id}`;
-    const enabled = Array.from(new Set(profile.sources
+    const enabled = Array.from(new SvelteSet(profile.sources
       .filter((source) => source.enabled)
       .map((source) => resolveProfileSourceId(source))
       .filter((id): id is string => Boolean(id))
@@ -3059,7 +3029,7 @@
   });
 
   const calibratedCameraIds = $derived.by(() => {
-    const ids = new Set<string>();
+    const ids = new SvelteSet<string>();
     for (const camera of rigLayoutState.layout.cameras ?? []) {
       if (!camera.pose) continue;
       if (camera.uid) ids.add(camera.uid);
@@ -3105,10 +3075,6 @@
     })
   );
 
-  const fieldSpaceLabel = $derived.by(() =>
-    buildFieldSpaceLabel({ viewMode, activeFieldOrigin, selectedCustomField })
-  );
-
   const fieldSceneTransform = $derived.by<PoseTransform | null>(() =>
     buildFieldSceneTransform({ baseFrame, activeFieldOrigin })
   );
@@ -3146,7 +3112,7 @@
   $effect(() => {
     if (!browser) return;
     const streamIds = Array.from(
-      new Set(
+      new SvelteSet(
         selectedSources
           .filter((source) => !isImuSource(source))
           .map((source) => source.streamId)
@@ -3179,7 +3145,8 @@
             streamMetricsById = { ...streamMetricsById, [streamId]: event.metrics };
             streamMetricsUpdatedAtById = { ...streamMetricsUpdatedAtById, [streamId]: Date.now() };
             if (streamMetricsErrorById[streamId]) {
-              const { [streamId]: _, ...restErr } = streamMetricsErrorById;
+              const restErr = { ...streamMetricsErrorById };
+              delete restErr[streamId];
               streamMetricsErrorById = restErr;
             }
           },
@@ -3265,7 +3232,7 @@
     const imuSource = activeImuSource;
     const imuCamera = imuSource ? syntheticCameraFromSource(imuSource) : null;
     if (imuCamera) {
-      const imuKeys = new Set(sourceKeys(imuSource));
+      const imuKeys = new SvelteSet(sourceKeys(imuSource));
       const hasImuCamera = cameras.some((camera) => rigCameraKeys(camera).some((key) => imuKeys.has(key)));
       if (!hasImuCamera) {
         cameras.push(imuCamera);
@@ -3281,7 +3248,7 @@
     const cameraInField = activeSolverOutputs?.cameraInField ?? [];
     if (!cameraInField.length) return cameras;
 
-    const seen = new Set(cameras.map((camera) => camera.uid));
+    const seen = new SvelteSet(cameras.map((camera) => camera.uid));
     const fallback = [...cameras];
     for (const entry of cameraInField) {
       const key = (entry.cameraUid || entry.sourceId || '').trim();
@@ -3335,7 +3302,7 @@
         position: [pose.translation.x, pose.translation.y, pose.translation.z],
         quaternion: pose.rotation.quaternion
       };
-      const keys = new Set<string>();
+      const keys = new SvelteSet<string>();
       const addKeys = (value: string | null | undefined) => {
         for (const key of cameraKeyVariants(value)) keys.add(key);
       };
@@ -3352,7 +3319,7 @@
         for (const key of source.cameraKeys ?? []) addKeys(key);
       }
 
-      const sourceKeys = new Set(keys);
+      const sourceKeys = new SvelteSet(keys);
       const rigMatch = rigLayoutState.layout.cameras.find((camera) => {
         const candidates = [
           camera.uid,
@@ -3407,7 +3374,7 @@
           position: robotFromCamera.position,
           quaternion: robotFromCamera.quaternion
         };
-        const keys = new Set<string>();
+        const keys = new SvelteSet<string>();
         const addKeys = (value: string | null | undefined) => {
           for (const key of cameraKeyVariants(value)) keys.add(key);
         };
@@ -3441,7 +3408,7 @@
     if (!tagInCamera || !tagInRobot) return null;
     if (tagInCamera.length === 0 || tagInRobot.length === 0) return null;
 
-    const cameraByKey = new Map<string, (typeof tagInCamera)[number]>();
+    const cameraByKey = new SvelteMap<string, (typeof tagInCamera)[number]>();
     for (const det of tagInCamera) {
       cameraByKey.set(`${det.sourceId}|${det.cameraUid}|${det.tagId}`, det);
     }
@@ -3560,7 +3527,7 @@
     const out: Record<string, { position: Vec3; quaternion?: PoseQuaternion }> = { ...(baseTransforms ?? {}) };
 
     const keysForRigCamera = (camera: RigCameraInfo): string[] => {
-      const set = new Set<string>();
+      const set = new SvelteSet<string>();
       const add = (value: string | null | undefined) => {
         for (const key of cameraKeyVariants(value)) {
           set.add(key);
@@ -3576,9 +3543,9 @@
     };
 
     const keysForViewerCamera = (camera: RigCameraInfo): string[] => {
-      const set = new Set<string>(keysForRigCamera(camera));
+      const set = new SvelteSet<string>(keysForRigCamera(camera));
       for (const source of viewOverlaySources) {
-        const sourceKeys = new Set<string>();
+        const sourceKeys = new SvelteSet<string>();
         const addSource = (value: string | null | undefined) => {
           for (const key of cameraKeyVariants(value)) sourceKeys.add(key);
         };
@@ -3597,7 +3564,7 @@
     };
 
     const findRigCamera = (keys: string[]): RigCameraInfo | null => {
-      const lookup = new Set(keys);
+      const lookup = new SvelteSet(keys);
       for (const camera of rigLayoutState.layout.cameras) {
         const candidates = keysForRigCamera(camera);
         if (candidates.some((candidate) => lookup.has(candidate))) {
@@ -3618,7 +3585,7 @@
       if (robotFromCamera) {
         fieldFromCamera = composeTransforms(solverRobotTransform, robotFromCamera);
       } else {
-        const lookup = new Set(keys);
+        const lookup = new SvelteSet(keys);
         const sourcePool = [...viewOverlaySources, ...selectedSources];
         const matchedSource =
           sourcePool.find((source) =>
@@ -3645,9 +3612,9 @@
     const transforms = viewerCameraTransforms ?? {};
     const keys = Object.keys(transforms);
     if (keys.length === 0) return [];
-    const known = new Set(keys);
+    const known = new SvelteSet(keys);
     const matched = viewerCameras.filter((camera) => rigCameraKeys(camera).some((key) => known.has(key)));
-    const covered = new Set<string>();
+    const covered = new SvelteSet<string>();
     for (const camera of matched) {
       for (const key of rigCameraKeys(camera)) {
         covered.add(key);
@@ -3767,8 +3734,8 @@
 
   const cameraPovByOptionId = $derived.by<Record<string, CameraPovState>>(() => {
     const out: Record<string, CameraPovState> = {};
-    const profileById = new Map($profiles.map((profile) => [profile.id, profile]));
-    const sourceById = new Map(sources.map((source) => [source.id, source]));
+    const profileById = new SvelteMap($profiles.map((profile) => [profile.id, profile]));
+    const sourceById = new SvelteMap(sources.map((source) => [source.id, source]));
 
     const toPoseTransform = (pose: { translation: { x: number; y: number; z: number }; rotation: { quaternion: PoseQuaternion } } | null | undefined): PoseTransform | null => {
       if (!pose) return null;
@@ -3786,7 +3753,7 @@
       const outputs = outputsForProfile(profile);
       if (!outputs) continue;
 
-      const sourceKeySet = new Set(sourceKeys(source));
+      const sourceKeySet = new SvelteSet(sourceKeys(source));
       const rigCamera = (() => {
         let best: { camera: RigCameraInfo; score: number } | null = null;
         for (const camera of rigLayoutState.layout.cameras) {
@@ -3839,7 +3806,7 @@
 
       const cameraKey =
         (source.cameraUid || source.streamId || source.id || rigCamera?.uid || '').trim() || null;
-      const allKeys = new Set<string>([...Array.from(sourceKeySet.values()), ...rigCameraKeys(rigCamera)]);
+      const allKeys = new SvelteSet<string>([...Array.from(sourceKeySet.values()), ...rigCameraKeys(rigCamera)]);
       const intrinsicsEntry = Array.from(allKeys.values())
         .map((key) => cameraIntrinsicsByKey[key] ?? null)
         .find(
@@ -3904,7 +3871,7 @@
     const outputs = outputsForProfile(profile);
     if (!outputs) return 1;
 
-    const sourceById = new Map(sources.map((source) => [source.id, source]));
+    const sourceById = new SvelteMap(sources.map((source) => [source.id, source]));
     const detectionsForSpace =
       coordinateSpace === 'camera_in_field' || coordinateSpace === 'robot_in_field'
         ? fieldDetectionsForOutputs(outputs, sourceById)
@@ -3960,7 +3927,7 @@
       const transforms = viewerCameraTransforms ?? {};
       if (!Object.keys(transforms).length) return null;
 
-      const keyCandidates = new Set<string>();
+      const keyCandidates = new SvelteSet<string>();
       const addKeys = (value: string | null | undefined) => {
         for (const key of cameraKeyVariants(value)) {
           keyCandidates.add(key);
@@ -4018,7 +3985,7 @@
       changed = true;
     }
 
-    const validOptions = new Set(cameraPovOptionsBase.map((option) => option.id));
+    const validOptions = new SvelteSet(cameraPovOptionsBase.map((option) => option.id));
     for (const key of Object.keys(next)) {
       if (validOptions.has(key)) continue;
       delete next[key];
@@ -4049,7 +4016,7 @@
     const povForwardSign = viewerCameraPovForwardSign;
     const povProfileId = selectedPov?.profileId ?? null;
     const povSourceId = selectedPov?.sourceId ?? null;
-    const sourceById = new Map(sources.map((source) => [source.id, source]));
+    const sourceById = new SvelteMap(sources.map((source) => [source.id, source]));
     const allDetections = viewProfiles.flatMap<ViewerDetectionPose>((profile) => {
       const resp = solveResponsesByProfile[profile.id] ?? (profile.id === solveResponse?.profileId ? solveResponse : null);
       const solvers = resp?.solvers ?? [];
@@ -4080,7 +4047,7 @@
     if (baseFrame !== 'field') return [];
     const doc = activeFieldMapDoc;
     if (!doc) return [];
-    const detectedColorByTagId = new Map<string, string>();
+    const detectedColorByTagId = new SvelteMap<string, string>();
     for (const detection of detectedFieldTagDetections) {
       const tagKey = String(detection.tagId);
       if (detectedColorByTagId.has(tagKey)) continue;
@@ -4109,11 +4076,11 @@
     if (!showTagLines) return [];
     const doc = activeFieldMapDoc;
     if (!doc) return [];
-    const markerByTagId = new Map<string, (typeof doc.markers)[number]>();
+    const markerByTagId = new SvelteMap<string, (typeof doc.markers)[number]>();
     for (const marker of doc.markers) {
       markerByTagId.set(String(marker.id), marker);
     }
-    const sourceById = new Map(sources.map((source) => [source.id, source]));
+    const sourceById = new SvelteMap(sources.map((source) => [source.id, source]));
     return detectedFieldTagDetections
       .map((detection) => {
         const mapMarker = markerByTagId.get(String(detection.tagId)) ?? null;
@@ -4294,7 +4261,7 @@
     const isFieldSpace = coordinateSpace === 'camera_in_field' || coordinateSpace === 'robot_in_field';
 
     if (!isFieldSpace) {
-      const liveKeys = new Set<string>();
+      const liveKeys = new SvelteSet<string>();
       for (const profile of viewProfilesWithSources) {
         const outputs = outputsForProfile(profile);
         const detections = detectionPosesForSpace(outputs, coordinateSpace);
@@ -4302,7 +4269,7 @@
           liveKeys.add(localTagPoseCacheKey(profile.id, coordinateSpace, detection));
         }
       }
-      const profileIdSet = new Set(viewProfilesWithSources.map((profile) => profile.id));
+      const profileIdSet = new SvelteSet(viewProfilesWithSources.map((profile) => profile.id));
       const rows = Object.values(lastLocalTagPoseByKey)
         .filter((entry) => entry.space === coordinateSpace && profileIdSet.has(entry.profileId))
         .sort((a, b) => {
@@ -4392,7 +4359,14 @@
     if (rows.length === 0) return null;
     const headerOriginLabel = rows.length === 1 ? rows[0]?.originLabel ?? 'field' : 'mixed-origins';
     const header = `${headerOriginLabel} · ${poseSpaceLabel(coordinateSpace)}`;
-    return { header, rows: rows.map(({ originLabel: _originLabel, ...row }) => row) };
+    return {
+      header,
+      rows: rows.map((row) => {
+        const { originLabel, ...rest } = row;
+        void originLabel;
+        return rest;
+      })
+    };
   });
 
 
@@ -4455,8 +4429,6 @@
     void loadPipelineStatus(profile.id);
     if (profile.pipelineTemplateId) {
       void loadPipelineOutputs(profile.id);
-    } else {
-      pipelineOutputs = [];
     }
   });
 
@@ -4855,10 +4827,7 @@
 	      sourceWeightsById={sourceWeightsById}
 	      onSetSourceWeight={setSourceWeight}
       sourceUsedByProfilesById={sourceUsedByProfilesById}
-	      pipelineStatusError={pipelineStatusError}
-	      pipelineOutputsError={pipelineOutputsError}
-      localizationConfigError={$localizationConfigError}
-      sourceStatusRows={sourceStatusRows}
+	      sourceStatusRows={sourceStatusRows}
       bind:showCameraPoseOverlay={showCameraPoseOverlay}
       bind:showCustomFieldsOverlay={showCustomFieldsOverlay}
       bind:showImuRotationOverlay={showImuRotationOverlay}

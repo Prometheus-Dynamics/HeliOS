@@ -2,7 +2,7 @@ import type { Mode } from '$lib/ts-bindings/http/client';
 
 export type CpuSample = { engine_cpu_avg?: number | null; system_cpu_avg?: number | null };
 export type BenchCodecStat = { implementation: string; avg_ms: number; avg_fps: number; errors?: number };
-export type BenchCodecStatCpu = { stat: BenchCodecStat; cpu?: CpuSample; cpu_delta?: CpuSample };
+export type BenchCodecStatCpu = { stat: BenchCodecStat; cpu?: CpuSample; cpu_delta?: CpuSample; cpuDelta?: CpuSample };
 export type ModeResult = {
   format: string;
   resolution: string;
@@ -182,14 +182,14 @@ export function scoreCodec(avgFps: number, cpuDelta: CpuSample | null | undefine
 }
 
 export function bestByScore(
-  list: Array<{ stat: { avg_fps?: number | null; errors?: number | null }; cpu_delta?: CpuSample | null; cpuDelta?: CpuSample | null }>,
+  list: Array<BenchCodecStatCpu | null | undefined>,
   targetFps: number
 ) {
-  let best: any = null;
+  let best: (typeof list)[number] | null = null;
   let bestScore = Infinity;
   for (const item of list ?? []) {
     const fps = Number(item?.stat?.avg_fps ?? 0);
-    const cpuDelta = (item as any).cpu_delta ?? (item as any).cpuDelta ?? null;
+    const cpuDelta = item.cpu_delta ?? item.cpuDelta ?? null;
     const err = Number(item?.stat?.errors ?? 0);
     const s = scoreCodec(fps, cpuDelta, targetFps) + (err > 0 ? 1000 : 0);
     if (s < bestScore) {
@@ -200,7 +200,15 @@ export function bestByScore(
   return best;
 }
 
-export function rankRows(result: { modes: any[] } | null, targetFps: number): ModeRankRow[] {
+type BenchModeResult = Pick<
+  ModeResult,
+  'format' | 'resolution' | 'capture_avg_fps' | 'host_avg_fps' | 'decoders' | 'encoders'
+>;
+
+const cpuDeltaFor = (value: BenchCodecStatCpu | null | undefined): CpuSample | null =>
+  value?.cpu_delta ?? value?.cpu ?? null;
+
+export function rankRows(result: { modes: BenchModeResult[] } | null, targetFps: number): ModeRankRow[] {
   if (!result) return [];
   const target = Math.max(1, Math.trunc(Number(targetFps) || 120));
   const rows: ModeRankRow[] = [];
@@ -209,9 +217,7 @@ export function rankRows(result: { modes: any[] } | null, targetFps: number): Mo
     const bestEnc = bestByScore(m.encoders ?? [], target);
     const decFps = Number(bestDec?.stat?.avg_fps ?? 0);
     const encFps = Number(bestEnc?.stat?.avg_fps ?? 0);
-    const score =
-      scoreCodec(decFps, (bestDec as any)?.cpu_delta ?? null, target) +
-      scoreCodec(encFps, (bestEnc as any)?.cpu_delta ?? null, target);
+    const score = scoreCodec(decFps, cpuDeltaFor(bestDec), target) + scoreCodec(encFps, cpuDeltaFor(bestEnc), target);
     rows.push({
       format: String(m.format ?? ''),
       resolution: String(m.resolution ?? ''),
@@ -219,10 +225,10 @@ export function rankRows(result: { modes: any[] } | null, targetFps: number): Mo
       hostFps: Number(m.host_avg_fps ?? 0),
       bestDecoderImpl: bestDec?.stat?.implementation ?? null,
       bestDecoderFps: decFps,
-      bestDecoderCpu: formatCpu((bestDec as any)?.cpu_delta ?? null),
+      bestDecoderCpu: formatCpu(cpuDeltaFor(bestDec)),
       bestEncoderImpl: bestEnc?.stat?.implementation ?? null,
       bestEncoderFps: encFps,
-      bestEncoderCpu: formatCpu((bestEnc as any)?.cpu_delta ?? null),
+      bestEncoderCpu: formatCpu(cpuDeltaFor(bestEnc)),
       score
     });
   }

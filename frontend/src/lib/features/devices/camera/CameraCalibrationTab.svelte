@@ -19,6 +19,7 @@
     type OrientationChoice,
     type PaperChoice
   } from './cameraCalibrationUtils';
+  import { SvelteMap } from 'svelte/reactivity';
 
   const props = $props<{
     streamId: string;
@@ -422,7 +423,7 @@
 
   let calibrationTool = $state<'lens' | 'color'>('lens');
   const overlayByImage = $derived.by(() => {
-    const map = new Map<string, string>();
+    const map = new SvelteMap<string, string>();
     const views = props.calibrationResult?.debugViews;
     if (Array.isArray(views)) {
       for (const view of views) {

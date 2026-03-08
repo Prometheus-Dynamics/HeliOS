@@ -1,4 +1,4 @@
-import type { ProbedBackend, ProbedDevice, Mode, Interval, CodecInfo } from '$lib/api/httpClient';
+import type { CodecInfo, Interval, Mode, ProbedBackend, ProbedDevice, StreamInfo, StreamManifest } from '$lib/api/httpClient';
 import { OpenAPI, getHttpClientBase } from '$lib/api/httpClient';
 import { extractError } from '$lib/api/errors';
 import type { PipelinesApi } from '$lib/api/pipelinesApi';
@@ -13,9 +13,7 @@ import {
 
 type PresetState = {
   get streamId(): string;
-  // This is an internal controller interface; keep the type loose so we can read through to
-  // the latest manifest shape without fighting generated client types.
-  get stream(): any | null;
+  get stream(): StreamInfo | null;
   get applying(): boolean;
   set applying(value: boolean);
   get pendingStreamPresetApply(): boolean;
@@ -40,7 +38,13 @@ type PresetState = {
   get encoderEnabled(): boolean;
   get decoderEnabled(): boolean;
   get encoderSelectionTouched(): boolean;
-  get encoderSettings(): any;
+  get encoderSettings(): {
+    bitrate: number | null;
+    gop: number | null;
+    threadCount: number | null;
+    outWidth: number | null;
+    outHeight: number | null;
+  };
   get encoderFpsLimit(): number | null;
   get decoderFpsLimit(): number | null;
   get decoderRotationDegrees(): number | null;
@@ -76,13 +80,40 @@ type PresetDeps = {
   decodersForCaptureFormat: (fmt: string | null | undefined) => CodecInfo[];
   pickCodecId: (list: CodecInfo[], desired: string | null | undefined, preferred?: string[]) => string | null;
   outputSelectionForPipeline: (pipelineId: string) => string | null;
-  applyPipelineOverridesToGraph: (pipelineId: string, graph: any) => any;
+  applyPipelineOverridesToGraph: (pipelineId: string, graph: unknown) => unknown;
   dropPipelineEverywhere: (pipelineId: string) => void;
   onExternalLayoutApplied?: () => void;
   reportError: (params: { title: string; error: unknown; fallback: string }) => void;
 };
 
 export function createCameraStreamPresetController(state: PresetState, deps: PresetDeps) {
+  const asRecord = (value: unknown): Record<string, unknown> | null =>
+    value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+
+  const asPositiveNumber = (value: unknown): number | null => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+  };
+
+  const identityRecordFor = (manifest?: StreamManifest | null): Record<string, unknown> | null =>
+    asRecord(manifest?.identity) ?? asRecord(asRecord(manifest)?.identity);
+
+  function extractFileHandle(handle: unknown): { fps?: number; loop_forever?: boolean; paths?: string[] } | null {
+    const record = asRecord(handle);
+    if (!record) return null;
+    const direct = String(record.type ?? '').toLowerCase() === 'file' ? record : null;
+    const legacy = asRecord(record.File);
+    const resolved = direct ?? legacy;
+    if (!resolved) return null;
+    return {
+      fps: asPositiveNumber(resolved.fps) ?? undefined,
+      loop_forever: typeof resolved.loop_forever === 'boolean' ? resolved.loop_forever : undefined,
+      paths: Array.isArray(resolved.paths)
+        ? resolved.paths.filter((path): path is string => typeof path === 'string' && path.trim().length > 0)
+        : undefined
+    };
+  }
+
   function selectStableHardwareId(keys: unknown): string | null {
     if (!Array.isArray(keys)) return null;
     const normalized = keys
@@ -140,16 +171,17 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
     }
     state.applying = true;
     try {
+      const manifestIdentity = identityRecordFor(state.stream?.manifest);
       const existingHardwareId =
-        typeof state.stream?.manifest?.identity?.hardware_id === 'string' && state.stream.manifest.identity.hardware_id.trim().length > 0
-          ? state.stream.manifest.identity.hardware_id.trim()
+        typeof manifestIdentity?.hardware_id === 'string' && manifestIdentity.hardware_id.trim().length > 0
+          ? manifestIdentity.hardware_id.trim()
           : null;
 
       const identity = {
         id: state.stream?.id ?? null,
         alias: state.cameraAlias.trim().length ? state.cameraAlias.trim() : null,
         hardware_id: existingHardwareId ?? selectStableHardwareId(device.identity?.keys) ?? null
-      } as any;
+      } as unknown as StreamManifest['identity'];
 
       const normalizedAssigned = Array.from(new Set((state.assignedPipelineIds ?? []).map((id) => String(id).trim()).filter(Boolean)));
       let normalizedActive = state.selectedPipelineId ? String(state.selectedPipelineId).trim() : null;
@@ -235,7 +267,7 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
         })
         .filter(Boolean);
 
-      const isFileBackend = String((backend as any)?.kind ?? '')
+      const isFileBackend = String(backend.kind ?? '')
         .trim()
         .toLowerCase() === 'file';
       // Shadow recorder (rolling buffer) should stay off for media/file streams by default.
@@ -254,18 +286,18 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
         return selected.length ? selected : null;
       })();
       const decoderEnabled = state.decoderEnabled && Boolean(decoderId);
-      const modeWidth = Number((mode as any)?.format?.resolution?.width ?? 0);
-      const modeHeight = Number((mode as any)?.format?.resolution?.height ?? 0);
+      const modeWidth = Number(mode.format?.resolution?.width ?? 0);
+      const modeHeight = Number(mode.format?.resolution?.height ?? 0);
       const defaultEncoderOutputResolution =
         Number.isFinite(modeWidth) && Number.isFinite(modeHeight) && modeWidth > 0 && modeHeight > 0
           ? { width: Math.max(1, Math.trunc(modeWidth / 2)), height: Math.max(1, Math.trunc(modeHeight / 2)) }
           : null;
 
-      const backendKind = String((backend as any)?.kind ?? '');
+      const backendKind = String(backend.kind ?? '');
       const normalizedBackendKind = backendKind.trim().toLowerCase();
-      let captureHandle: any = backend.handle;
+      let captureHandle: unknown = backend.handle;
       if (normalizedBackendKind === 'file') {
-        const backendFileHandle = backend.handle as { paths?: unknown; fps?: unknown; loop_forever?: unknown } | null;
+        const backendFileHandle = extractFileHandle(backend.handle);
         const parsedPaths = String(state.fileBackendPathsText ?? '')
           .split('\n')
           .map((value) => value.trim())
@@ -288,6 +320,9 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
           paths: dedupedPaths.length ? dedupedPaths : fallbackPaths
         };
       }
+
+      const existingPipelineWires =
+        Array.isArray(state.stream?.manifest?.pipeline_wires) ? state.stream.manifest.pipeline_wires : [];
 
       const payload = {
         identity,
@@ -332,11 +367,9 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
         pipeline_layout: enablePipeline ? { rows: state.pipelineGridRows, columns: state.pipelineGridColumns, slots: pipelineLayoutSlots } : null,
         // Preserve any pipeline wiring (output -> input) when re-applying presets, unless the user
         // explicitly disables pipelines.
-        pipeline_wires: enablePipeline
-          ? (Array.isArray((state.stream?.manifest as any)?.pipeline_wires) ? (state.stream?.manifest as any).pipeline_wires : [])
-          : [],
+        pipeline_wires: enablePipeline ? existingPipelineWires : [],
         pipelines: pipelineAssignments
-      } as any;
+      } as unknown as StreamManifest;
 
       await deps.streamsApi.startStream({ requestBody: payload });
       deps.onExternalLayoutApplied?.();

@@ -15,8 +15,13 @@
     playbackDurationMs?: number | null;
   };
 
-  let { imuDataUrl = null, frameTimestampsUrl: _frameTimestampsUrl = null, imuDataSamples = null, playbackTimeMs = 0, playbackDurationMs = null }: Props = $props();
-  void _frameTimestampsUrl;
+  let {
+    imuDataUrl = null,
+    frameTimestampsUrl = null,
+    imuDataSamples = null,
+    playbackTimeMs = 0,
+    playbackDurationMs = null
+  }: Props = $props();
 
   let samples = $state<MediaImuSample[]>([]);
   let loading = $state(false);
@@ -30,6 +35,7 @@
   );
   const hasData = $derived(samples.length > 0);
   const hasImuSource = $derived((imuDataUrl?.trim()?.length ?? 0) > 0);
+  const hasFrameTimestampsSource = $derived((frameTimestampsUrl?.trim()?.length ?? 0) > 0);
   const playbackLabel = $derived(formatTimeMs(playbackTimeMs));
   const sampleLabel = $derived(currentSample ? formatTimeMs(currentSample.tMs) : '—');
 
@@ -112,6 +118,8 @@
           <p class="text-micro text-surface-400">
             {#if imuDataSamples != null}
               {imuDataSamples.toLocaleString()} samples
+            {:else if hasFrameTimestampsSource}
+              sidecar + timestamps loaded
             {:else}
               sidecar loaded
             {/if}

@@ -16,7 +16,7 @@ export type CameraCardItem = {
   captureSessionId: string | null;
   captureSessionAlias: string | null;
   cameraUid: string;
-  href: string;
+  href: '/devices' | '/peers' | `/devices/${string}`;
   statusClass: string;
 };
 

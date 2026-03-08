@@ -187,7 +187,7 @@
   }
 
   async function handleDelete(asset: MediaAsset) {
-    if (!confirm(`Delete \"${asset.name}\"? This cannot be undone.`)) return;
+    if (!confirm(`Delete "${asset.name}"? This cannot be undone.`)) return;
     try {
       await deleteMediaAsset(asset.id);
       toaster.success({ title: 'Asset deleted' });

@@ -110,7 +110,6 @@
   let layoutEditorColumns = $state(1);
   let layoutEditorOutputKeys = $state<Record<string, string | null>>({});
   let panelPosition = $state<{ x: number; y: number } | null>(null);
-  let panelDragging = $state(false);
   let panelDragOffset = $state({ x: 0, y: 0 });
   let lastSelectedItemId = $state<string | null>(null);
   let bindingPickerOpen = $state(false);
@@ -554,7 +553,6 @@
     if (target.closest('button') || target.closest('input') || target.closest('select') || target.closest('textarea')) {
       return;
     }
-    panelDragging = true;
     const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
     panelDragOffset = { x: event.clientX - rect.left, y: event.clientY - rect.top };
     const move = (moveEvent: PointerEvent) => {
@@ -564,7 +562,6 @@
       };
     };
     const up = () => {
-      panelDragging = false;
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
     };
@@ -987,7 +984,7 @@
   }
 </script>
 
-<div class="space-y-3">
+<section class="space-y-3" aria-label={`${streamLabel} pipeline overrides`}>
   <OverridesList
     {streamId}
     streamError={streamError}
@@ -1012,7 +1009,7 @@
     onDragOver={handleDragOver}
     onDrop={handleDrop}
   />
-</div>
+</section>
 
 <OverridesEditor
   {editMode}

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { PipelineUiItem, PipelineUiTab, PipelineUi } from '$lib/features/pipelines/pipelineUiTypes';
+  import type { PipelineUiItem, PipelineUi } from '$lib/features/pipelines/pipelineUiTypes';
   import PipelineUiBlocks from '$lib/components/pipelines/PipelineUiBlocks.svelte';
 
   type Props = {
@@ -7,25 +7,20 @@
     onChange: (next: PipelineUi) => void;
     onSave: () => void;
     onReset: () => void;
-    activeTabId?: string;
   };
 
   let {
     value,
     onChange,
     onSave,
-    onReset,
-    activeTabId = undefined
+    onReset
   }: Props = $props();
 
-  let jsonDraft = $state('');
+  let jsonDraftOverride = $state<string | null>(null);
   let panelTab = $state<'library' | 'json'>('library');
   let previewLocalValues = $state<Record<string, string>>({});
   let librarySearch = $state('');
-
-  $effect(() => {
-    jsonDraft = JSON.stringify(value, null, 2);
-  });
+  const jsonDraft = $derived.by(() => jsonDraftOverride ?? JSON.stringify(value, null, 2));
 
   const LAYOUT_LIBRARY: PipelineUiItem['type'][] = ['group', 'accordion', 'tabs', 'stack'];
   const COMPONENT_LIBRARY: PipelineUiItem['type'][] = [
@@ -114,11 +109,6 @@
     }
   }
 
-  function updateTabs(nextTabs: PipelineUiTab[]): void {
-    if (!value.layout || value.layout.type !== 'tabs') return;
-    onChange({ ...value, layout: { ...value.layout, tabs: nextTabs } });
-  }
-
   function createPreviewItem(type: PipelineUiItem['type']): PipelineUiItem {
     switch (type) {
       case 'group':
@@ -164,25 +154,6 @@
     }
   }
 
-  function resolveTargetTabId(tabs: PipelineUiTab[]): string {
-    if (activeTabId && tabs.find((tab) => tab.id === activeTabId)) return activeTabId;
-    return tabs[0]?.id ?? 'tab_main';
-  }
-
-  function addLibraryItem(type: PipelineUiItem['type']): void {
-    if (!value.layout || value.layout.type === 'stack') {
-      const items = value.layout && value.layout.type === 'stack' ? [...value.layout.items] : [];
-      items.push(createItem(type));
-      onChange({ ...value, layout: { type: 'stack', items } });
-      return;
-    }
-
-    const tabs = value.layout.tabs.length ? [...value.layout.tabs] : [{ id: 'tab_main', title: 'Main', content: [] }];
-    const targetId = resolveTargetTabId(tabs);
-    const nextTabs = tabs.map((tab) => (tab.id === targetId ? { ...tab, content: [...tab.content, createItem(type)] } : tab));
-    updateTabs(nextTabs);
-  }
-
   function handleDragStart(event: DragEvent, type: PipelineUiItem['type']): void {
     event.dataTransfer?.setData('text/plain', type);
     event.dataTransfer?.setData('application/helios-ui-item', type);
@@ -215,11 +186,16 @@
     previewLocalValues = { ...previewLocalValues, [key]: value };
   }
 
+  function updateJsonDraft(event: Event): void {
+    jsonDraftOverride = (event.currentTarget as HTMLTextAreaElement).value;
+  }
+
 
   function applyJson(): void {
     try {
       const parsed = JSON.parse(jsonDraft) as PipelineUi;
       onChange(parsed);
+      jsonDraftOverride = null;
     } catch {
       // ignore invalid json
     }
@@ -270,7 +246,10 @@
             : 'border-surface-700 text-surface-300 hover:text-primary-200 hover:border-primary-400/60'
         }`}
         type="button"
-        onclick={() => (panelTab = 'json')}
+        onclick={() => {
+          panelTab = 'json';
+          jsonDraftOverride = null;
+        }}
       >
         JSON
       </button>
@@ -356,7 +335,8 @@
           </div>
           <textarea
             class="min-h-0 flex-1 w-full rounded border border-surface-800/70 bg-surface-900/70 p-2 text-micro-tight text-surface-200"
-            bind:value={jsonDraft}
+            value={jsonDraft}
+            oninput={updateJsonDraft}
           ></textarea>
         </div>
       {/if}

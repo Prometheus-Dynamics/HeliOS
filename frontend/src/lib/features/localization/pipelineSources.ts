@@ -3,6 +3,7 @@ import { apiUrl } from '$lib/api/httpClient';
 import { extractGraphOutputPorts } from '$lib/features/pipelines/graphOutputPorts';
 import { extractGraphOutputPortTypes } from '$lib/features/pipelines/outputFilters';
 import { resolveStreamLabel } from '$lib/utils/streamLabels';
+import type { StreamInfo } from '$lib/api/httpClient';
 
 export type LocalizationPipelineSource = {
   id: string;
@@ -21,6 +22,11 @@ export type PipelineOutputSample = {
   dataType: PipelineDataType | null;
   value: unknown;
 };
+
+type UnknownRecord = Record<string, unknown>;
+
+const asRecord = (value: unknown): UnknownRecord | null =>
+  value && typeof value === 'object' ? (value as UnknownRecord) : null;
 
 const toLower = (value: string | null | undefined): string => clean(value).toLowerCase();
 
@@ -291,13 +297,13 @@ const fetchJson = async <T>(url: string): Promise<T> => {
   return (await response.json()) as T;
 };
 
-const normalizeStreamLabel = (stream: any): string => {
+const normalizeStreamLabel = (stream: StreamInfo): string => {
   return resolveStreamLabel(stream, 'Stream');
 };
 
-const normalizeCameraUid = (stream: any): string => {
-  const manifest = stream?.manifest ?? {};
-  const identity = manifest?.identity ?? {};
+const normalizeCameraUid = (stream: StreamInfo): string => {
+  const manifest = asRecord(stream.manifest);
+  const identity = asRecord(manifest?.identity);
   const keys = Array.isArray(identity?.keys)
     ? identity.keys.map((value: unknown) => String(value ?? '').trim()).filter((value: string) => value.length > 0)
     : [];
@@ -308,13 +314,13 @@ const normalizeCameraUid = (stream: any): string => {
   return String(uid).trim() || String(stream?.id ?? '');
 };
 
-const normalizeCameraPath = (stream: any, cameraUid: string): string => {
+const normalizeCameraPath = (stream: StreamInfo, cameraUid: string): string => {
   if (cameraUid) return `device:${cameraUid}`;
   return `stream:${String(stream?.id ?? '').trim()}`;
 };
 
-const collectPipelineIdsForStream = (stream: any): string[] => {
-  const manifest = stream?.manifest ?? {};
+const collectPipelineIdsForStream = (stream: StreamInfo): string[] => {
+  const manifest = asRecord(stream.manifest);
   const ids = new Set<string>();
   const add = (value: unknown) => {
     const raw = typeof value === 'string' ? value.trim() : '';
@@ -323,12 +329,14 @@ const collectPipelineIdsForStream = (stream: any): string[] => {
   add(manifest?.pipeline_id);
   add(manifest?.active_pipeline_id);
   if (Array.isArray(manifest?.pipelines)) {
-    manifest.pipelines.forEach((entry: any) => {
-      add(entry?.pipeline_id ?? entry?.pipelineId ?? entry?.id);
+    manifest.pipelines.forEach((entry) => {
+      const binding = asRecord(entry);
+      add(binding?.pipeline_id ?? binding?.pipelineId ?? binding?.id);
     });
   }
-  if (manifest?.pipeline_layout && Array.isArray(manifest.pipeline_layout.slots)) {
-    manifest.pipeline_layout.slots.forEach((slot: any) => add(slot?.pipeline_id));
+  const pipelineLayout = asRecord(manifest?.pipeline_layout);
+  if (Array.isArray(pipelineLayout?.slots)) {
+    pipelineLayout.slots.forEach((slot) => add(asRecord(slot)?.pipeline_id));
   }
   return Array.from(ids);
 };
@@ -337,12 +345,12 @@ export async function fetchLocalizationPipelineSources(): Promise<LocalizationPi
   const baseSources = await fetchJson<LocalizationPipelineSource[]>(apiUrl('/localization/sources'));
   let streamSources: LocalizationPipelineSource[] = [];
   try {
-    const streams = await fetchJson<any[]>(apiUrl('/streams'));
+    const streams = await fetchJson<StreamInfo[]>(apiUrl('/streams'));
     const pipelineSummaries = await fetchJson<Array<{ id: string; name?: string | null }>>(apiUrl('/pipelines/graphs')).catch(() => []);
     const pipelineNameById = Object.fromEntries(
       (pipelineSummaries ?? []).map((entry) => [String(entry.id), String(entry.name ?? entry.id)])
     );
-    const pipelineGraphCache = new Map<string, any>();
+    const pipelineGraphCache = new Map<string, unknown>();
     for (const stream of streams) {
       const streamId = String(stream?.id ?? '').trim();
       if (!streamId) continue;
@@ -359,12 +367,13 @@ export async function fetchLocalizationPipelineSources(): Promise<LocalizationPi
         if (!pipelineId) continue;
         let graph = pipelineGraphCache.get(pipelineId);
         if (!graph) {
-          const binding = (stream?.manifest?.pipelines ?? []).find((entry: any) => String(entry?.pipeline_id ?? '').trim() === pipelineId);
-          graph = binding?.pipeline_graph ?? stream?.manifest?.pipeline_graph ?? null;
+          const bindings = Array.isArray(stream?.manifest?.pipelines) ? stream.manifest.pipelines : [];
+          const binding = bindings.find((entry) => String(asRecord(entry)?.pipeline_id ?? '').trim() === pipelineId);
+          graph = asRecord(binding)?.pipeline_graph ?? asRecord(stream?.manifest)?.pipeline_graph ?? null;
         }
         if (!graph) {
           try {
-            const doc = await fetchJson<{ graph: any }>(apiUrl(`/pipelines/graphs/${encodeURIComponent(pipelineId)}`));
+            const doc = await fetchJson<{ graph: unknown }>(apiUrl(`/pipelines/graphs/${encodeURIComponent(pipelineId)}`));
             graph = doc?.graph ?? null;
           } catch {
             graph = null;

@@ -121,7 +121,7 @@ export function createPipelineAutosaveManager(deps: PipelineAutosaveDeps) {
             15_000,
             'Pipeline save'
           );
-        } catch (err) {
+        } catch {
           // Fallback for older backends that only support POST create.
           return await withTimeout(
             PipelinesApi.uploadGraph({

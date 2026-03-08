@@ -36,7 +36,7 @@ export default [
       files: ['**/*.svelte', '**/*.svelte.ts', '**/*.svelte.js'],
       languageOptions: {
         parserOptions: {
-          projectService: true,
+          project: ['./tsconfig.eslint.json'],
           extraFileExtensions: ['.svelte'],
           parser: ts.parser,
           svelteConfig

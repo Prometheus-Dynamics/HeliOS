@@ -71,7 +71,7 @@
 
   {#if camerasInitialLoading}
     <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
-      {#each Array.from({ length: 4 }) as _, idx (idx)}
+      {#each [0, 1, 2, 3] as idx (idx)}
         <article class="border border-surface-800/70 bg-surface-900/40 p-4 animate-pulse">
           <p class="text-micro-tight uppercase tracking-[0.22em] text-surface-600">Loading</p>
           <p class="mt-1 h-8 w-16 rounded bg-surface-700/60"></p>
@@ -85,11 +85,11 @@
 
   {#if camerasInitialLoading}
     <div class="grid gap-4 lg:grid-cols-2">
-      {#each Array.from({ length: 2 }) as _, idx (idx)}
+      {#each [0, 1] as idx (idx)}
         <div class="rounded border border-surface-800/70 bg-surface-950/40 p-4 animate-pulse">
           <div class="h-4 w-1/3 rounded bg-surface-800/60"></div>
           <div class="mt-3 grid gap-3 sm:grid-cols-2">
-            {#each Array.from({ length: 4 }) as __, jdx (`${idx}-${jdx}`)}
+            {#each [0, 1, 2, 3] as jdx (`${idx}-${jdx}`)}
               <div class="h-24 rounded border border-surface-800/70 bg-surface-900/50"></div>
             {/each}
           </div>

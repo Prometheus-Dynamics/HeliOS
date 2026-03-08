@@ -1,5 +1,6 @@
 <script lang="ts">
   import type {
+    BackgroundVariant,
     Connection,
     Edge,
     EdgeTypes,
@@ -29,7 +30,7 @@
     maxZoom: number;
     nodeTypes: NodeTypes;
     edgeTypes: EdgeTypes;
-    backgroundVariant: string;
+    backgroundVariant: BackgroundVariant;
     backgroundGap: number;
     backgroundSize: number;
     backgroundColor: string;
@@ -51,7 +52,7 @@
     handleSelectionChange?: (event: { nodes: Node[]; edges: Edge[] }) => void;
     handlePaneContextMenu?: ({ event }: { event: MouseEvent }) => void;
     handleNodeContextMenu?: NodeEventWithPointer<MouseEvent, Node>;
-    handleFlowApi?: (event: CustomEvent<any>) => void;
+    handleFlowApi?: (event: CustomEvent<unknown>) => void;
     selectedEdge: EdgeSelection | null;
     selectedEdgeId: string | null;
     edgeStyleOptions: Array<{ id: PipelineConnectionRoute; label: string; icon: string }>;

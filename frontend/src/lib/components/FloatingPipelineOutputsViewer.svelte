@@ -112,7 +112,13 @@
     class="fixed z-50 flex flex-col overflow-hidden rounded-xl border border-surface-800/70 bg-surface-950/90 shadow-2xl shadow-black/40 backdrop-blur"
     style={`left:${viewer.position.x}px; top:${viewer.position.y}px; width:${viewer.size.width}px; height:${viewer.size.height}px;`}
   >
-    <div class="flex cursor-move items-start justify-between gap-3 border-b border-surface-800/70 px-3 py-2" onpointerdown={startDrag}>
+    <div
+      class="flex cursor-move items-start justify-between gap-3 border-b border-surface-800/70 px-3 py-2"
+      onpointerdown={startDrag}
+      role="button"
+      tabindex="-1"
+      aria-label="Drag floating pipeline outputs viewer"
+    >
       <div class="min-w-0 flex-1">
         <p class="truncate text-xs font-semibold text-surface-100">{headerLabel(viewer)}</p>
         <p class="truncate text-micro text-surface-500 cursor-auto" onpointerdown={(e) => e.stopPropagation()}>
@@ -123,8 +129,10 @@
           {/if}
         </p>
       </div>
-      <div class="flex items-center gap-2 cursor-auto" onpointerdown={(e) => e.stopPropagation()}>
-        <button class="btn btn-2xs preset-outline" type="button" onclick={close}>Close</button>
+      <div class="flex items-center gap-2 cursor-auto">
+        <button class="btn btn-2xs preset-outline" type="button" onpointerdown={(e) => e.stopPropagation()} onclick={close}>
+          Close
+        </button>
       </div>
     </div>
 
@@ -136,11 +144,12 @@
       />
     </div>
 
-    <div
+    <button
+      type="button"
       class="absolute bottom-1 right-1 h-4 w-4 cursor-se-resize rounded bg-surface-800/60"
       onpointerdown={startResize}
       title="Resize"
-    ></div>
+      aria-label="Resize floating pipeline outputs viewer"
+    ></button>
   </div>
 {/if}
-

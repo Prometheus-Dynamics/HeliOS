@@ -50,6 +50,10 @@
     }
   });
 
+  function openAsset(url: string): void {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
   export type $$Props = CalibrationPreviewModalProps;
 </script>
 
@@ -88,9 +92,13 @@
           >
             {calibrationDeleting ? 'Deleting…' : 'Delete'}
           </button>
-          <a class="btn btn-xs preset-outline" href={apiPath(`/media/${encodeURIComponent(item.name)}`)} target="_blank" rel="noreferrer">
+          <button
+            class="btn btn-xs preset-outline"
+            type="button"
+            onclick={() => openAsset(apiPath(`/media/${encodeURIComponent(item.name)}`))}
+          >
             Download
-          </a>
+          </button>
         </div>
       </div>
 

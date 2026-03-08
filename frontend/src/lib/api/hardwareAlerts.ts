@@ -49,11 +49,3 @@ export function createHardwareAlertsStore(pollIntervalMs = DEFAULT_POLL_INTERVAL
     };
   });
 }
-
-function titleCase(value: string): string {
-  return value
-    .split(/[\s_-]+/)
-    .filter(Boolean)
-    .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1).toLowerCase())
-    .join(' ');
-}

@@ -60,7 +60,6 @@ export const createPipelineGraphContext = (deps: PipelineGraphContextDeps) => {
     registry,
     scheduleRegistryRefresh,
     closeGraphContextMenu,
-    resolveDataTypeKey,
     generateNodeId,
     inferPortDataType,
     resolveHostIoDirection,
@@ -284,10 +283,6 @@ export const createPipelineGraphContext = (deps: PipelineGraphContextDeps) => {
     const ports =
       portNames.size > 0
         ? Array.from(portNames).map((portName) => {
-            const normalizedPort = normalizePipelinePortName(portName);
-            const recordEntry = Object.entries(portRecord).find(
-              ([key]) => normalizePipelinePortName(key) === normalizedPort
-            );
             return {
               name: portName,
               originalName: portName,

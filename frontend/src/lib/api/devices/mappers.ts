@@ -1,37 +1,19 @@
 import { env } from '$env/dynamic/public';
 import type { PeerRemoteStreamSummary } from '$lib/types/peer';
-import type { Interval, SensorPeripheral, StreamInfo, UsbPeripheral } from '$lib/ts-bindings/http/client';
+import type {
+  DeviceMetrics,
+  FanStatus,
+  I2cBusInfo,
+  I2cInventory,
+  LightingStatus,
+  SensorPeripheral,
+  StreamInfo,
+  UsbPeripheral
+} from '$lib/ts-bindings/http/client';
 import type { CameraCard, CameraStatus, PeripheralEntry, SummaryTile, TaskEntry } from '$lib/types/devices';
 import type { ImuStatus } from '$lib/types/systems';
 import { CORAL_ICON, PERIPHERAL_ROW_LIMIT } from './constants';
 import { resolveStreamAlias, resolveStreamLabel } from '$lib/utils/streamLabels';
-
-type ResolutionDiscrete = {
-  width: number;
-  height: number;
-};
-
-type ResolutionStepwise = {
-  min_width?: number | null;
-  min_height?: number | null;
-  max_width?: number | null;
-  max_height?: number | null;
-  resolution?: ResolutionDiscrete | null;
-};
-
-type ResolutionCandidate = {
-  Discrete?: ResolutionDiscrete | null;
-  Stepwise?: ResolutionStepwise | null;
-};
-
-type FormatInfo = {
-  fourcc?: { name?: string | null } | null;
-  description?: string | null;
-  resolutions?: Array<{
-    resolution?: ResolutionCandidate | null;
-    intervals?: Interval[] | null;
-  }>;
-};
 
 type PeripheralStatusResponse = SensorPeripheral & {
   identity?: PeripheralEntry['identity'] | null;
@@ -44,15 +26,32 @@ type PeripheralWarning = {
   message: string;
 };
 
-export function extractHealth(
-  payload: Awaited<ReturnType<typeof import('$lib/ts-bindings/http/client').DeviceService.metrics>> | null
-): Awaited<ReturnType<typeof import('$lib/ts-bindings/http/client').DeviceService.metrics>> | null {
+type DeviceHealth = DeviceMetrics & {
+  status?: string | null;
+  issues?: Array<{ code?: string | null; description?: string | null }>;
+};
+
+type PeripheralsPayload = {
+  coralSensors?: PeripheralStatusResponse[] | null;
+  usb?: UsbPeripheral[] | null;
+  peripherals?: {
+    usb?: UsbPeripheral[] | null;
+    i2c?: I2cInventory | null;
+    fan?: FanStatus | null;
+    lighting?: LightingStatus | null;
+  } | null;
+  i2c?: I2cInventory | null;
+  fan?: FanStatus | null;
+  lighting?: LightingStatus | null;
+};
+
+export function extractHealth(payload: DeviceMetrics | null): DeviceMetrics | null {
   return payload ?? null;
 }
 
 export function buildCameraCards(streams: StreamInfo[], peerStreams: PeerRemoteStreamSummary[] = []): CameraCard[] {
   const localCards = streams.map((stream) => {
-    const activeModeId = (stream.manifest as any)?.capture?.mode ?? null;
+    const activeModeId = stream.manifest?.capture?.mode ?? null;
     const activeMode =
       activeModeId && Array.isArray(stream.descriptor.modes)
         ? stream.descriptor.modes.find((mode) => mode?.id === activeModeId) ?? null
@@ -113,73 +112,6 @@ export function buildCameraCards(streams: StreamInfo[], peerStreams: PeerRemoteS
   return [...localCards, ...remoteCards];
 }
 
-function describeResolution(formats: FormatInfo[]): string {
-  if (!Array.isArray(formats) || formats.length === 0) {
-    return 'Resolution unavailable';
-  }
-  let best: { area: number; label: string } | null = null;
-  for (const format of formats) {
-    const codecName = format.fourcc?.name?.trim() || format.description?.trim() || '';
-    for (const resolutionInfo of format.resolutions ?? []) {
-      const dims = extractDimensions(resolutionInfo.resolution ?? undefined);
-      if (!dims) continue;
-      const area = dims.width * dims.height;
-      const fps = extractMaxFps(resolutionInfo.intervals ?? undefined);
-      const resolutionLabel = `${dims.width}x${dims.height}`;
-      const label = fps ? `${resolutionLabel} @ ${fps}fps` : resolutionLabel;
-      const fullLabel = codecName ? `${codecName} · ${label}` : label;
-      if (!best || area > best.area) {
-        best = { area, label: fullLabel };
-      }
-    }
-  }
-  return best?.label ?? 'Resolution unavailable';
-}
-
-function extractDimensions(value: ResolutionCandidate | undefined): { width: number; height: number } | null {
-  if (!value) return null;
-  if ('Discrete' in value && value.Discrete) {
-    return { width: value.Discrete.width, height: value.Discrete.height };
-  }
-  if ('Stepwise' in value && value.Stepwise) {
-    const stepwise: ResolutionStepwise = value.Stepwise ?? {};
-    const candidate = stepwise.resolution ?? ({ width: stepwise.max_width, height: stepwise.max_height } as ResolutionDiscrete);
-    const width = candidate?.width ?? stepwise.max_width ?? stepwise.min_width ?? 0;
-    const height = candidate?.height ?? stepwise.max_height ?? stepwise.min_height ?? 0;
-    if (width && height) {
-      return { width, height };
-    }
-  }
-  return null;
-}
-
-function extractMaxFps(entries: Interval[] | undefined): number | null {
-  if (!Array.isArray(entries) || entries.length === 0) return null;
-  let maxFps = 0;
-  for (const entry of entries) {
-    const fps = fractionToFps(entry);
-    if (fps && fps > maxFps) maxFps = fps;
-  }
-  return maxFps ? Math.round(maxFps) : null;
-}
-
-function fractionToFps(fraction: { numerator: number; denominator: number } | undefined): number | null {
-  if (!fraction) return null;
-  const { numerator, denominator } = fraction;
-  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || numerator === 0) {
-    return null;
-  }
-  return Math.round((numerator / denominator) * 10) / 10;
-}
-
-function formatBandwidth(): string {
-  return 'n/a';
-}
-
-function formatLastSeen(_status: CameraStatus): string {
-  return 'unknown';
-}
-
 function normalizeWarnings(entries: Array<PeripheralWarning> | null | undefined): PeripheralWarning[] {
   if (!Array.isArray(entries)) return [];
   return entries
@@ -204,7 +136,7 @@ function mergeWarnings(...sources: Array<Array<PeripheralWarning> | null | undef
   return out.length ? out : null;
 }
 
-export function extractPeripherals(payload: any, imu: ImuStatus | null): PeripheralEntry[] {
+export function extractPeripherals(payload: PeripheralsPayload | null, imu: ImuStatus | null): PeripheralEntry[] {
   const coralSensors: PeripheralStatusResponse[] = Array.isArray(payload?.coralSensors)
     ? payload.coralSensors
     : [];
@@ -265,9 +197,9 @@ export function extractPeripherals(payload: any, imu: ImuStatus | null): Periphe
       type: overridePeripheralType(sensor, 'coral') ?? sensor.type ?? 'Accelerator',
       orientation: null,
       lastCalibration: null,
-      hardwareId: (sensor as any)?.hardware_id ?? null,
+      hardwareId: sensor.hardware_id ?? null,
       firmware: sensor.firmware ?? null,
-      telemetry: (sensor as any)?.telemetry ?? null,
+      telemetry: sensor.telemetry ?? null,
       icon: CORAL_ICON,
       warnings: mergeWarnings(sensor.warnings ?? null)
     });
@@ -275,11 +207,11 @@ export function extractPeripherals(payload: any, imu: ImuStatus | null): Periphe
 
   if (i2c && Array.isArray(i2c.devices)) {
     const busLabel = (busNum: number | null | undefined) =>
-      i2c.buses?.find((b: any) => b?.bus === busNum)?.label ?? (busNum != null ? `i2c-${busNum}` : 'i2c');
+      i2c.buses?.find((b: I2cBusInfo) => b.bus === busNum)?.label ?? (busNum != null ? `i2c-${busNum}` : 'i2c');
     for (const dev of i2c.devices) {
       if (!dev) continue;
       const bus = dev.bus ?? null;
-      const addr = dev.address_hex ?? dev.address ?? null;
+      const addr = typeof dev.address_hex === 'string' && dev.address_hex.trim().length ? dev.address_hex.trim() : null;
       const descriptor = `${dev.name ?? ''} ${dev.modalias ?? ''} ${dev.driver ?? ''}`;
       const friendly = inferI2CLabel(descriptor) ?? dev.modalias?.trim() ?? dev.driver?.trim() ?? dev.name?.trim() ?? 'I2C device';
       const kind = typeof dev.kind === 'string' && dev.kind.trim().length ? dev.kind.trim() : null;
@@ -368,7 +300,7 @@ function matchCoralSensorForUsbDevice(
   ];
   for (const sensor of sensors) {
     const id = (sensor?.driver_camera_id ?? '').trim();
-    const hardware = (sensor as any)?.hardware_id ? String((sensor as any).hardware_id).trim() : '';
+    const hardware = sensor.hardware_id ? String(sensor.hardware_id).trim() : '';
     if (!id && !hardware) continue;
     if (candidates.some((token) => (id && id.includes(token)) || (hardware && hardware.includes(token)))) {
       return sensor;
@@ -377,7 +309,7 @@ function matchCoralSensorForUsbDevice(
   return sensors.length === 1 ? sensors[0] ?? null : null;
 }
 
-function lightingEnabled(lighting: any): boolean {
+function lightingEnabled(lighting: LightingStatus | null | undefined): boolean {
   const raw = String(env.PUBLIC_ENABLE_LIGHTING_PERIPHERAL ?? 'auto')
     .trim()
     .toLowerCase();
@@ -443,33 +375,6 @@ function overridePeripheralType(entry: PeripheralStatusResponse, driverNamespace
   return base;
 }
 
-function resolvePeripheralInterval(entry: PeripheralStatusResponse, imu: ImuStatus | null, driverNamespace: string): string {
-  const driver = driverNamespace.toLowerCase();
-  if (imu && (driver.includes('bmi088') || driver.includes('bmm150'))) {
-    if (imu.updateIntervalMs && imu.updateIntervalMs > 0) {
-      return `${imu.updateIntervalMs}ms`;
-    }
-    return entry.interval ?? '—';
-  }
-  return entry.interval ?? '—';
-}
-
-function resolvePeripheralIcon(entry: PeripheralStatusResponse): PeripheralEntry['icon'] {
-  if (matchesCoralPeripheral(entry)) {
-    return CORAL_ICON;
-  }
-  return null;
-}
-
-function matchesCoralPeripheral(entry: PeripheralStatusResponse): boolean {
-  const driverLabel = (entry.driver_namespace ?? '').toLowerCase();
-  const typeLabel = (entry.type ?? '').toLowerCase();
-  const nameLabel = (entry.name ?? '').toLowerCase();
-  if (driverLabel.includes('coral')) return true;
-  if (typeLabel.includes('coral')) return true;
-  return nameLabel.includes('coral');
-}
-
 function matchesCoralLabel(label: string): boolean {
   const lower = label.toLowerCase();
   return (
@@ -513,7 +418,7 @@ function inferI2CLabel(label: string): string | null {
 
 export function buildSummary(
   cameras: CameraCard[],
-  health: any | null
+  health: DeviceHealth | null
 ): SummaryTile[] {
   const counts: Record<CameraStatus, number> = { live: 0, degraded: 0, idle: 0, offline: 0 };
   for (const cam of cameras) {
@@ -544,7 +449,7 @@ export function buildSummary(
   return summary;
 }
 
-export function buildTasks(health: any | null): TaskEntry[] {
+export function buildTasks(health: DeviceHealth | null): TaskEntry[] {
   if (!health || !Array.isArray(health.issues) || health.issues.length === 0) {
     return [
       {

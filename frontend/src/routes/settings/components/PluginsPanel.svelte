@@ -4,6 +4,7 @@
   import { apiFetch } from '../api';
   import { buildErrorMessage } from '$lib/ui/errorPolicy';
   import type { RealtimeUpdateEvent } from '$lib/api/realtimeUpdates';
+  import { SvelteMap } from 'svelte/reactivity';
 
   type PluginFile = { name: string; size_bytes: number };
   type PluginCompatibility = {
@@ -97,10 +98,10 @@
       const installed = Array.isArray(payload.installed) ? payload.installed : [];
       const disabled = Array.isArray(payload.disabled) ? payload.disabled : [];
       const compatibilityList = Array.isArray(payload.compatibility) ? payload.compatibility : [];
-      const compatibilityMap = new Map(compatibilityList.map((entry) => [entry.filename, entry]));
+      const compatibilityMap = new SvelteMap(compatibilityList.map((entry) => [entry.filename, entry]));
       engineAvailable = payload.engine_available ?? true;
 
-      const merged = new Map<string, PluginEntry>();
+      const merged = new SvelteMap<string, PluginEntry>();
       for (const plugin of installed) {
         if (plugin?.name) {
           merged.set(plugin.name, { ...plugin, enabled: true, compatibility: compatibilityMap.get(plugin.name) });

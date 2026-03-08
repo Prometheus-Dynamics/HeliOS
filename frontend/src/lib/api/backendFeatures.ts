@@ -11,9 +11,11 @@ export const backendFeatures = {
 };
 
 export function updateBackendFeaturesFromHealthPayload(payload: unknown): void {
-  const obj = payload as any;
-  const features = obj?.features ?? null;
+  const record = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
+  const features =
+    record?.features && typeof record.features === 'object'
+      ? (record.features as Record<string, unknown>)
+      : null;
   const shadowRecorder = Boolean(features?.shadow_recorder);
   store.set({ shadowRecorder });
 }
-

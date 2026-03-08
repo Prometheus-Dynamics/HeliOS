@@ -26,15 +26,16 @@
     onSetStyle?: (payload: { connection: GraphEdgeSelection; style: PipelineConnectionStyle }) => void;
   } = $props();
 
-  const pipeline = context.pipeline;
-  const selectedEdgeId = context.graphSelectionEdgeId;
-  const selectedEdge =
+  const pipeline = $derived.by(() => context.pipeline);
+  const selectedEdgeId = $derived.by(() => context.graphSelectionEdgeId);
+  const selectedEdge = $derived.by(() =>
     pipeline && selectedEdgeId
       ? pipeline.graph.connections?.find(
           (conn, index) =>
             connectionSignature(conn) === selectedEdgeId || buildEdgeId(conn, index) === selectedEdgeId
         ) ?? null
-      : null;
+      : null
+  );
 
   function handlePolicyChange(event: Event) {
     if (!selectedEdge) return;
@@ -112,7 +113,7 @@
         Overflow policy
       </label>
       <select id="inspector-connection-policy" class="input mt-1 text-sm" value={edgePolicy} onchange={handlePolicyChange}>
-        {#each channelPolicyOptions as option}
+        {#each channelPolicyOptions as option (option.value)}
           <option value={option.value}>{option.label}</option>
         {/each}
       </select>

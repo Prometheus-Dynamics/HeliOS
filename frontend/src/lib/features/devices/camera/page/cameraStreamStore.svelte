@@ -2,6 +2,7 @@
   import type { CodecInfo, ControlMeta, ProbedDevice, StreamInfo, StreamManifest, StreamMetrics } from '$lib/ts-bindings/http/client';
   import type { StreamControlSocket } from '$lib/api/streamControls';
   import type { connectStreamUpdates } from '$lib/api/streamUpdates';
+  import { SvelteMap } from 'svelte/reactivity';
 
   export function createCameraStreamState() {
     const state = $state({
@@ -79,8 +80,8 @@
       applying: false,
       pendingStreamPresetApply: false,
       pendingStreamPresetSilent: true,
-      controlApplyTimers: new Map<number, number>(),
-      controlApplySeqById: new Map<number, number>(),
+      controlApplyTimers: new SvelteMap<number, number>(),
+      controlApplySeqById: new SvelteMap<number, number>(),
       streamPresetApplyTimer: null as number | null
     });
 

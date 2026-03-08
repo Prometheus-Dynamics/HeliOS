@@ -1,10 +1,31 @@
 <script lang="ts">
+  import type { ComponentProps } from 'svelte';
+  import type { Writable } from 'svelte/store';
   import { PipelineRegistryPanel } from '$lib';
+
+  type RegistryPanelProps = ComponentProps<typeof PipelineRegistryPanel>;
+  type PipelineRegistryStores = {
+    entries: Writable<RegistryPanelProps['registryEntries']>;
+    search: Writable<RegistryPanelProps['searchTerm']>;
+    tag: Writable<RegistryPanelProps['selectedTag']>;
+    category: Writable<RegistryPanelProps['selectedCategory']>;
+    provider: Writable<RegistryPanelProps['selectedProvider']>;
+    sort: Writable<RegistryPanelProps['sort']>;
+    view: Writable<RegistryPanelProps['view']>;
+    activeGroup: Writable<RegistryPanelProps['activeGroup']>;
+    loading: Writable<RegistryPanelProps['loading']>;
+    error: Writable<RegistryPanelProps['error']>;
+    availableTags: Writable<RegistryPanelProps['availableTags']>;
+    availableCategories: Writable<RegistryPanelProps['availableCategories']>;
+    availableProviders: Writable<RegistryPanelProps['availableProviders']>;
+    hasActiveFilters: Writable<RegistryPanelProps['hasActiveFilters']>;
+    groups: Writable<RegistryPanelProps['registryGroups']>;
+    visibleEntries: Writable<RegistryPanelProps['visibleEntries']>;
+  };
 
   type PipelineRegistryDrawerProps = {
     open?: boolean;
-    stores: any;
-    helpers: any;
+    stores: PipelineRegistryStores;
     onClose?: () => void;
     onRefresh?: () => void;
     onReset?: () => void;
@@ -21,7 +42,6 @@
   let {
     open = false,
     stores,
-    helpers,
     onClose = () => {},
     onRefresh = () => {},
     onReset = () => {},
@@ -35,24 +55,22 @@
     onAddEntry = () => {}
   }: PipelineRegistryDrawerProps = $props();
 
-  const {
-    entries: registry,
-    search: registrySearch,
-    tag: registryTag,
-    category: registryCategory,
-    provider: registryProvider,
-    sort: registrySort,
-    view: registryView,
-    activeGroup: activeRegistryGroup,
-    loading: registryLoading,
-    error: registryError,
-    availableTags,
-    availableCategories,
-    availableProviders,
-    hasActiveFilters: hasActiveRegistryFilters,
-    groups: registryGroups,
-    visibleEntries: visibleRegistryEntries
-  } = stores;
+  const registry = $derived.by(() => stores.entries);
+  const registrySearch = $derived.by(() => stores.search);
+  const registryTag = $derived.by(() => stores.tag);
+  const registryCategory = $derived.by(() => stores.category);
+  const registryProvider = $derived.by(() => stores.provider);
+  const registrySort = $derived.by(() => stores.sort);
+  const registryView = $derived.by(() => stores.view);
+  const activeRegistryGroup = $derived.by(() => stores.activeGroup);
+  const registryLoading = $derived.by(() => stores.loading);
+  const registryError = $derived.by(() => stores.error);
+  const availableTags = $derived.by(() => stores.availableTags);
+  const availableCategories = $derived.by(() => stores.availableCategories);
+  const availableProviders = $derived.by(() => stores.availableProviders);
+  const hasActiveRegistryFilters = $derived.by(() => stores.hasActiveFilters);
+  const registryGroups = $derived.by(() => stores.groups);
+  const visibleRegistryEntries = $derived.by(() => stores.visibleEntries);
 
   export type $$Props = PipelineRegistryDrawerProps;
 </script>

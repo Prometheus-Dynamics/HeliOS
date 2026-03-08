@@ -106,7 +106,7 @@
           {/if}
         </div>
         <p class="mt-2 break-words whitespace-pre-wrap font-mono text-sm leading-relaxed text-surface-100">
-          {@html log.renderedMessage}
+          {log.renderedMessage || log.message}
         </p>
       </article>
     {/each}

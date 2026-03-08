@@ -1,4 +1,6 @@
 <script lang="ts" module>
+  import { SvelteMap as ModuleSvelteMap } from 'svelte/reactivity';
+
   type CaptureStatsState = {
     total: number;
     close: number;
@@ -19,7 +21,7 @@
     lastGridKey: string;
   };
 
-  const guidedStateByStream = new Map<string, GuidedOverlayState>();
+  const guidedStateByStream = new ModuleSvelteMap<string, GuidedOverlayState>();
 
   function emptyCaptureStats(): CaptureStatsState {
     return { total: 0, close: 0, far: 0, skew: 0, corners: 0, cornerMask: 0, cornersUnique: 0, coverageAvg: 0, coverageSamples: 0 };
@@ -50,6 +52,7 @@
 
 <script lang="ts">
   import { onDestroy, untrack } from 'svelte';
+  import { SvelteMap } from 'svelte/reactivity';
   import { PipelinesApi } from '$lib/api/pipelinesApi';
   import { StreamsApi } from '$lib/api/streamsApi';
 
@@ -136,7 +139,7 @@
   let rawPipelineUuid = $state('');
   let streamCapabilitiesLoaded = false;
   let streamCapabilitiesPromise: Promise<void> | null = null;
-  const graphNameCache = new Map<string, string>();
+  const graphNameCache = new SvelteMap<string, string>();
 
   function persistGuidedState(streamUuid: string): void {
     const saved = getGuidedState(streamUuid);

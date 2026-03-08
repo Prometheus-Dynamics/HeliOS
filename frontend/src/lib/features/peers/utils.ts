@@ -461,8 +461,8 @@ export function telemetryAvailable(sample: ResourceSample | null | undefined): b
 
 export function formatCpuTelemetry(sample: ResourceSample | null | undefined): string {
   if (!telemetryAvailable(sample)) return 'Awaiting telemetry';
-  const usage = clampPercent((sample as any)?.cpu?.usage_percent ?? 0);
-  const temp = (sample as any)?.cpu?.temperature_c;
+  const usage = clampPercent(sample?.cpu?.usage_percent ?? 0);
+  const temp = sample?.cpu?.temperature_c;
   if (temp == null) return `${usage.toFixed(0)}%`;
   return `${usage.toFixed(0)}% · ${temp.toFixed(0)}°C`;
 }
@@ -482,24 +482,24 @@ export function formatBytes(bytes: number): string {
 
 export function formatMemoryTelemetry(sample: ResourceSample | null | undefined): string {
   if (!telemetryAvailable(sample)) return '—';
-  const total = (sample as any)?.memory?.total_bytes ?? 0;
+  const total = sample?.memory?.total_bytes ?? 0;
   if (total === 0) return '—';
-  const used = (sample as any)?.memory?.used_bytes ?? 0;
+  const used = sample?.memory?.used_bytes ?? 0;
   const percent = clampPercent((used / total) * 100);
   return `${percent.toFixed(0)}% of ${formatBytes(total)}`;
 }
 
 export function formatGpuTelemetry(sample: ResourceSample | null | undefined): string {
-  if (!(sample as any)?.gpu) return 'Not reported';
-  const usage = clampPercent((sample as any).gpu?.usage_percent ?? 0);
-  const temp = (sample as any).gpu?.temperature_c;
+  if (!sample?.gpu) return 'Not reported';
+  const usage = clampPercent(sample.gpu.usage_percent ?? 0);
+  const temp = sample.gpu.temperature_c;
   if (temp == null) return `${usage.toFixed(0)}%`;
   return `${usage.toFixed(0)}% · ${temp.toFixed(0)}°C`;
 }
 
 export function formatTelemetryAge(sample: ResourceSample | null | undefined): string {
   if (!telemetryAvailable(sample)) return 'No samples yet';
-  const deltaMs = Date.now() - ((sample as any)?.timestamp_ms ?? 0);
+  const deltaMs = Date.now() - (sample?.timestamp_ms ?? 0);
   if (!Number.isFinite(deltaMs) || deltaMs < 0) return 'just now';
   const seconds = Math.floor(deltaMs / 1000);
   if (seconds < 5) return 'just now';

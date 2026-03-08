@@ -40,7 +40,7 @@ type LogFramePayload = {
   fields?: unknown;
 };
 
-const ANSI_ESCAPE_REGEX = /\u001b\[((?:\d{1,3};?)*)m/g;
+const ANSI_ESCAPE_REGEX = new RegExp(`${String.fromCharCode(27)}\\[((?:\\d{1,3};?)*)m`, 'g');
 
 type SegmentState = {
   color?: string;
@@ -52,7 +52,7 @@ type SegmentState = {
 };
 
 function decorateLogMessage(raw: string): DecoratedLogMessage {
-  let segments = parseAnsiSegments(raw);
+  const segments = parseAnsiSegments(raw);
   const sourceSegments = segments;
   const plainWithLevel = segments.map((segment) => segment.text).join('');
   const levelMarker = extractLevelMarker(segments);
@@ -343,7 +343,7 @@ function segmentsToHtml(segments: LogSegment[]): string {
       if (segment.dim) styles.push('opacity:0.7');
       if (segment.italic) styles.push('font-style:italic');
       if (segment.underline) styles.push('text-decoration:underline');
-      const style = styles.length ? ` style=\"${styles.join(';')}\"` : '';
+      const style = styles.length ? ` style="${styles.join(';')}"` : '';
       return `<span${style}>${escapeHtml(segment.text)}</span>`;
     })
     .join('');

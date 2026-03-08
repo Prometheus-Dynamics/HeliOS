@@ -5,6 +5,7 @@
   import type { FitAddon as XtermFitAddon } from 'xterm-addon-fit';
   import { createTerminal, loadXtermDeps, type XtermDeps } from '$lib/components/terminal/xtermUtils';
   import 'xterm/css/xterm.css';
+  import { SvelteURLSearchParams } from 'svelte/reactivity';
 
   type LogSourceKind = 'journal_unit' | 'journal_system' | 'file' | 'dmesg';
 
@@ -210,7 +211,7 @@
     lastError = null;
     connected = false;
 
-    const params = new URLSearchParams({ source: sourceId, lines: String(lines), follow: 'true' });
+    const params = new SvelteURLSearchParams({ source: sourceId, lines: String(lines), follow: 'true' });
     const url = `${apiUrl('/device/logs/stream')}?${params.toString()}`;
 
     const stream = new EventSource(url);

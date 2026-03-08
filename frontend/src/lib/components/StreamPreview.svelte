@@ -11,6 +11,7 @@
     floatingStreamViewer,
     type FloatingStreamStatus
   } from '$lib/stores/floatingStreamViewer';
+  import { SvelteURLSearchParams } from 'svelte/reactivity';
 
   type StreamPreviewProps = {
     className?: string;
@@ -470,7 +471,7 @@
     if (resolvedFormat === 'unknown') {
       return null;
     }
-    const params = new URLSearchParams();
+    const params = new SvelteURLSearchParams();
     if (pipelineId?.trim()) params.set('pipeline', pipelineId.trim());
     if (pipelineOutput?.trim()) params.set('output', pipelineOutput.trim());
     if (previewNonce > 0) params.set('cb', String(previewNonce));
@@ -493,7 +494,7 @@
     const ref = captureSessionId;
     if (!ref) return null;
     const peer = parsePeerStreamRef(ref);
-    const params = new URLSearchParams({ t: String(frameNonce) });
+    const params = new SvelteURLSearchParams({ t: String(frameNonce) });
     if (pipelineId?.trim()) params.set('pipeline', pipelineId.trim());
     if (pipelineOutput?.trim()) params.set('output', pipelineOutput.trim());
     if (peer) {

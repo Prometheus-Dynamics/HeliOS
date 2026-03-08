@@ -1,6 +1,7 @@
 <script lang="ts">
   import Self from './Nt4Tree.svelte';
   import type { NtTreeNode } from './nt4TreeTypes';
+  import { SvelteSet } from 'svelte/reactivity';
 
   type Props = {
     nodes: NtTreeNode[];
@@ -14,7 +15,7 @@
   let props: Partial<Props> = $props();
   const nodes = $derived(Array.isArray(props.nodes) ? props.nodes : []);
   const selectedTopic = $derived(typeof props.selectedTopic === 'string' ? props.selectedTopic : null);
-  const openFolders = $derived(props.openFolders instanceof Set ? props.openFolders : new Set<string>());
+  const openFolders = $derived(props.openFolders instanceof Set ? props.openFolders : new SvelteSet<string>());
 
   const depth = $derived(typeof props.depth === 'number' ? props.depth : 0);
 

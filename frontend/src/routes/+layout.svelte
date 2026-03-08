@@ -1,6 +1,7 @@
 <script lang="ts">
   import '../app.css';
   import '$lib/api/httpClient';
+  import { resolve } from '$app/paths';
   import { page } from '$app/stores';
   import { Toaster } from '@skeletonlabs/skeleton-svelte';
   import type { IconDefinition } from '@fortawesome/free-solid-svg-icons';
@@ -28,14 +29,17 @@
   import NotificationCenter from '$lib/components/NotificationCenter.svelte';
   import { readStorage, writeStorage } from '$lib/utils/storage';
   import type { BootloaderStatus } from '$lib/ts-bindings/http/client';
+  import { SvelteMap } from 'svelte/reactivity';
 
   let { children }: { children: Snippet } = $props();
   const SIDEBAR_COLLAPSED_STORAGE_KEY = 'helios.app.sidebar.collapsed';
   const RUNTIME_ERROR_TOAST_THROTTLE_MS = 5_000;
   let isSidebarCollapsed = $state(false);
-  const recentRuntimeErrors = new Map<string, number>();
+  const recentRuntimeErrors = new SvelteMap<string, number>();
 
-  const navSections: Array<{ href: string; label: string; hint: string; icon: IconDefinition }> = [
+  type NavHref = '/dashboard' | '/pipelines' | '/devices' | '/peers' | '/media' | '/localization' | '/systems' | '/docs' | '/settings';
+
+  const navSections: Array<{ href: Exclude<NavHref, '/settings'>; label: string; hint: string; icon: IconDefinition }> = [
     { href: '/dashboard', label: 'Dashboard', hint: 'Overview & health', icon: faGaugeHigh },
     { href: '/pipelines', label: 'Pipelines', hint: 'Graphs & IO', icon: faDiagramProject },
     { href: '/devices', label: 'Devices', hint: 'Cameras & sensors', icon: faCamera },
@@ -45,7 +49,11 @@
     { href: '/systems', label: 'Systems', hint: 'Runtime internals', icon: faMicrochip },
     { href: '/docs', label: 'Docs', hint: 'Guides & APIs', icon: faBookOpen }
   ];
-  const settingsLink = { href: '/settings', label: 'Settings', icon: faGear };
+  const settingsLink: { href: '/settings'; label: string; icon: IconDefinition } = {
+    href: '/settings',
+    label: 'Settings',
+    icon: faGear
+  };
 
   const isConsolePopout = $derived($page.url.pathname.startsWith('/console/'));
   const isDocsPage = $derived($page.url.pathname === '/docs' || $page.url.pathname.startsWith('/docs/'));
@@ -288,7 +296,7 @@
                     ? 'border-transparent text-surface-400 hover:border-surface-700 hover:bg-surface-900/70 hover:text-surface-50'
                     : 'border-transparent text-surface-400 hover:border-surface-500 hover:text-surface-50'
               }`}
-              href={section.href}
+              href={resolve(section.href)}
               aria-label={section.label}
               title={isSidebarCollapsed ? section.label : undefined}
             >
@@ -321,7 +329,7 @@
                     ? 'text-surface-500 hover:border-surface-700 hover:bg-surface-900/70 hover:text-surface-50'
                     : 'text-surface-500 hover:text-surface-50'
               }`}
-              href={settingsLink.href}
+              href={resolve(settingsLink.href)}
               aria-label={settingsLink.label}
               title={isSidebarCollapsed ? settingsLink.label : undefined}
             >

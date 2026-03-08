@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { SvelteSet } from 'svelte/reactivity';
+
   type Props = {
     count: number;
     colors: string[];
@@ -42,7 +44,7 @@
     selected: boolean;
   };
 
-  const selectedLookup = $derived(new Set(selectedIndices));
+  const selectedLookup = $derived(new SvelteSet(selectedIndices));
   const dots = $derived(buildDots());
 
   function clamp(value: number, min: number, max: number): number {
@@ -126,6 +128,8 @@
             stroke={dot.stroke}
             stroke-width="2"
             class={interactive ? 'cursor-pointer' : 'cursor-default'}
+            role={interactive ? 'button' : undefined}
+            aria-label={interactive ? `Select LED ${dot.index + 1}` : undefined}
             onpointerdown={(event) => {
               event.preventDefault();
               if (interactive) {
