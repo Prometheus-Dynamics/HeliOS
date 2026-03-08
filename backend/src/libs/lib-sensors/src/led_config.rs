@@ -9,7 +9,7 @@ use utoipa::ToSchema;
 
 /// Default locations searched for LED configuration.
 /// Prefer the on-device file, then fall back to the shared preset shipped with the repo.
-pub const DEFAULT_LED_CONFIG_PATHS: &[&str] = &["/etc/helios/leds.toml", "configs/presets/common.toml"];
+pub const DEFAULT_LED_CONFIG_PATHS: &[&str] = &["/var/lib/helios/leds.toml", "/etc/helios/leds.toml", "configs/presets/common.toml"];
 
 fn default_enabled() -> bool {
     true
@@ -127,6 +127,12 @@ struct LedDoc {
 #[must_use]
 pub fn default_paths() -> Vec<PathBuf> {
     DEFAULT_LED_CONFIG_PATHS.iter().map(PathBuf::from).collect()
+}
+
+/// Preferred writable location for runtime LED overrides.
+#[must_use]
+pub fn writable_path() -> PathBuf {
+    PathBuf::from("/var/lib/helios/leds.toml")
 }
 
 /// Loads LED configuration from the first readable document in the provided paths.

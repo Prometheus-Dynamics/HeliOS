@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use utoipa::ToSchema;
 
 use super::super::error::{ApiError, ApiResult};
-use super::super::json_store;
+use crate::http::persisted_files;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -46,12 +46,20 @@ fn default_subscriptions_enabled() -> bool {
     true
 }
 
-fn settings_path() -> PathBuf {
-    std::env::var_os("HELIOS_NT4_SETTINGS_FILE").map(PathBuf::from).unwrap_or_else(|| "/etc/helios/nt4.json".into())
+fn settings_paths() -> (PathBuf, Option<PathBuf>) {
+    match std::env::var_os("HELIOS_NT4_SETTINGS_FILE") {
+        Some(path) => (PathBuf::from(path), None),
+        None => (persisted_files::data_root_file("nt4.json"), Some(persisted_files::legacy_helios_etc_file("nt4.json"))),
+    }
 }
 
 pub(crate) async fn load_settings() -> Nt4Settings {
-    json_store::read_json_or_default(&settings_path()).await
+    let (path, legacy_path) = settings_paths();
+    let bytes = match persisted_files::read(&path, legacy_path.as_deref()).await {
+        Ok(bytes) => bytes,
+        Err(_) => return Nt4Settings::default(),
+    };
+    serde_json::from_slice(&bytes).unwrap_or_default()
 }
 
 #[utoipa::path(
@@ -87,6 +95,8 @@ pub async fn set_nt4_settings(Json(payload): Json<Nt4Settings>) -> ApiResult<imp
         return Err(ApiError::bad_request("server_port must be > 0"));
     }
 
-    json_store::write_json(settings_path(), &next).await.map_err(|err| ApiError::internal(format!("failed to persist nt4 settings: {err}")))?;
+    let (path, legacy_path) = settings_paths();
+    let bytes = serde_json::to_vec(&next).map_err(|err| ApiError::internal(format!("failed to encode nt4 settings: {err}")))?;
+    persisted_files::write_mirrored(&path, legacy_path.as_deref(), &bytes).await.map_err(|err| ApiError::internal(format!("failed to persist nt4 settings: {err}")))?;
     Ok(StatusCode::NO_CONTENT)
 }

@@ -13,6 +13,7 @@ pub mod nt4;
 pub mod ota;
 pub mod peers;
 pub mod peripherals;
+pub(crate) mod persisted_files;
 pub mod pipelines;
 pub mod plugins;
 pub mod startup;

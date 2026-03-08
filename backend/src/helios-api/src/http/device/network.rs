@@ -12,6 +12,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use super::super::error::{ApiError, ApiResult};
+use crate::http::persisted_files;
 use lib_net::interface::{IpAssignment, IpMode, NetworkInterfaceSettings, get_interfaces, set_interface};
 
 const PERSIST_NETWORKD_DIR: &str = "/var/lib/helios/networkd";
@@ -40,13 +41,16 @@ impl TryFrom<u32> for TeamNumber {
     }
 }
 
-fn team_file_path() -> PathBuf {
-    std::env::var_os("HELIOS_TEAM_FILE").map(PathBuf::from).unwrap_or_else(|| "/etc/helios/team".into())
+fn team_file_paths() -> (PathBuf, Option<PathBuf>) {
+    match std::env::var_os("HELIOS_TEAM_FILE") {
+        Some(path) => (PathBuf::from(path), None),
+        None => (persisted_files::data_root_file("team"), Some(persisted_files::legacy_helios_etc_file("team"))),
+    }
 }
 
 async fn read_team_file() -> Result<Option<u32>, ApiError> {
-    let path = team_file_path();
-    let content = match tokio::fs::read_to_string(&path).await {
+    let (path, legacy_path) = team_file_paths();
+    let content = match persisted_files::read_to_string(&path, legacy_path.as_deref()).await {
         Ok(data) => data,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(err) => return Err(ApiError::internal(format!("failed to read team file {}: {err}", path.display()))),
@@ -63,21 +67,15 @@ async fn read_team_file() -> Result<Option<u32>, ApiError> {
 }
 
 async fn write_team_file(team: u32) -> Result<(), ApiError> {
-    let path = team_file_path();
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent).await.map_err(|err| ApiError::internal(format!("failed to create team directory {}: {err}", parent.display())))?;
-    }
-    tokio::fs::write(&path, format!("{team}\n")).await.map_err(|err| ApiError::internal(format!("failed to write team file {}: {err}", path.display())))?;
+    let (path, legacy_path) = team_file_paths();
+    let body = format!("{team}\n");
+    persisted_files::write_mirrored(&path, legacy_path.as_deref(), body.as_bytes()).await.map_err(|err| ApiError::internal(format!("failed to write team file {}: {err}", path.display())))?;
     Ok(())
 }
 
 async fn clear_team_file() -> Result<(), ApiError> {
-    let path = team_file_path();
-    match tokio::fs::remove_file(&path).await {
-        Ok(_) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(ApiError::internal(format!("failed to remove team file {}: {err}", path.display()))),
-    }
+    let (path, legacy_path) = team_file_paths();
+    persisted_files::remove_mirrored(&path, legacy_path.as_deref()).await.map_err(|err| ApiError::internal(format!("failed to remove team file {}: {err}", path.display())))
 }
 
 #[utoipa::path(

@@ -24,7 +24,8 @@ use crate::usb_proxy;
 use self::session::handle_connection;
 use self::shutdown::wait_for_shutdown;
 
-const LED_ANIMATIONS_PATH: &str = "/etc/helios/led-animations.json";
+const LED_ANIMATIONS_PATH: &str = "/var/lib/helios/led-animations.json";
+const LEGACY_LED_ANIMATIONS_PATH: &str = "/etc/helios/led-animations.json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RuntimeState {
@@ -335,10 +336,14 @@ async fn try_apply_default_event_command(service: &SensorsService, led_config: &
 }
 
 async fn load_stored_animation_doc() -> StoredAnimationDoc {
-    match fs::read_to_string(LED_ANIMATIONS_PATH).await {
-        Ok(raw) => serde_json::from_str::<StoredAnimationDoc>(&raw).unwrap_or_default(),
-        Err(_) => StoredAnimationDoc::default(),
+    for path in [LED_ANIMATIONS_PATH, LEGACY_LED_ANIMATIONS_PATH] {
+        match fs::read_to_string(path).await {
+            Ok(raw) => return serde_json::from_str::<StoredAnimationDoc>(&raw).unwrap_or_default(),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => return StoredAnimationDoc::default(),
+        }
     }
+    StoredAnimationDoc::default()
 }
 
 fn find_stored_animation_entry<'a>(doc: &'a StoredAnimationDoc, name: &str) -> Option<&'a StoredAnimationEntry> {

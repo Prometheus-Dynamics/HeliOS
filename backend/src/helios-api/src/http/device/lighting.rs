@@ -5,7 +5,8 @@ use axum::{
     response::IntoResponse,
 };
 use lib_led_animations::{
-    LED_ANIMATIONS_PATH, LedAnimationEntry, LedAnimationFrame, LedAnimationTimeline, LedTimelineEasing, LedTimelineKeyframe, load_led_animations, persist_led_animations, timeline_to_sequence,
+    LED_ANIMATIONS_PATH, LEGACY_LED_ANIMATIONS_PATH, LedAnimationEntry, LedAnimationFrame, LedAnimationTimeline, LedTimelineEasing, LedTimelineKeyframe, load_led_animations, persist_led_animations,
+    timeline_to_sequence,
 };
 use lib_sensors::led_config::{self, LedConfig};
 use serde::{Deserialize, Serialize};
@@ -18,8 +19,9 @@ use helios_peripherals::dto::{LightingAnimation, LightingColor, LightingCommand,
 
 use super::super::AppState;
 use super::super::error::{ApiError, ApiResult, ErrorBody};
+use crate::http::persisted_files;
 
-const LED_SETTINGS_PATH: &str = "/etc/helios/leds.toml";
+const LEGACY_LED_SETTINGS_PATH: &str = "/etc/helios/leds.toml";
 const LIGHTING_TEMPLATE_DIR: &str = "/usr/share/helios/lighting-templates";
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -599,6 +601,7 @@ pub async fn save_lighting_animation(State(state): State<AppState>, Json(payload
     doc.animations.sort_by(|a, b| a.name.to_ascii_lowercase().cmp(&b.name.to_ascii_lowercase()));
 
     persist_led_animations(LED_ANIMATIONS_PATH, &doc).await.map_err(|err| ApiError::internal(format!("failed to persist lighting animations: {err}")))?;
+    persist_led_animations(LEGACY_LED_ANIMATIONS_PATH, &doc).await.map_err(|err| ApiError::internal(format!("failed to mirror lighting animations: {err}")))?;
     let _ = state.engine.refresh_node_registry().await;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -620,6 +623,7 @@ pub async fn delete_lighting_animation(State(state): State<AppState>, Path(name)
     doc.animations.retain(|entry| !entry.name.eq_ignore_ascii_case(trimmed));
     if doc.animations.len() != before {
         persist_led_animations(LED_ANIMATIONS_PATH, &doc).await.map_err(|err| ApiError::internal(format!("failed to persist lighting animations: {err}")))?;
+        persist_led_animations(LEGACY_LED_ANIMATIONS_PATH, &doc).await.map_err(|err| ApiError::internal(format!("failed to mirror lighting animations: {err}")))?;
         let _ = state.engine.refresh_node_registry().await;
     }
 
@@ -697,10 +701,10 @@ async fn load_lighting_config() -> LedConfig {
 async fn persist_lighting_config(config: &LedConfig) -> ApiResult<()> {
     let doc = LightingConfigDoc { leds: config.clone() };
     let serialized = toml::to_string_pretty(&doc).map_err(|err| ApiError::bad_request(format!("failed to serialize lighting config: {err}")))?;
-    if let Some(parent) = std::path::Path::new(LED_SETTINGS_PATH).parent() {
-        fs::create_dir_all(parent).await.map_err(|err| ApiError::internal(format!("failed to create lighting config directory: {err}")))?;
-    }
-    fs::write(LED_SETTINGS_PATH, serialized).await.map_err(|err| ApiError::internal(format!("failed to write lighting config: {err}")))?;
+    let persistent_path = led_config::writable_path();
+    persisted_files::write_mirrored(&persistent_path, Some(std::path::Path::new(LEGACY_LED_SETTINGS_PATH)), serialized.as_bytes())
+        .await
+        .map_err(|err| ApiError::internal(format!("failed to write lighting config: {err}")))?;
     Ok(())
 }
 

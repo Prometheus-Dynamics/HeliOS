@@ -24,6 +24,7 @@ use uuid::Uuid;
 
 use super::AppState;
 use crate::http::device::rig::{CameraLayoutCameraResponse, CameraLayoutResponse};
+use crate::http::persisted_files;
 use crate::http::pipelines::{self, PipelineDocument, PipelineSummary};
 use crate::http::streams::types::StreamInfo;
 use helios_engine::localization::types::LocalizationPipelineSource;
@@ -442,13 +443,16 @@ struct StoredPeer {
     integration: PeerIntegrationMetadata,
 }
 
-fn peers_state_path() -> PathBuf {
-    std::env::var_os("HELIOS_PEERS_FILE").map(PathBuf::from).unwrap_or_else(|| "/etc/helios/peers.json".into())
+fn peers_state_paths() -> (PathBuf, Option<PathBuf>) {
+    match std::env::var_os("HELIOS_PEERS_FILE") {
+        Some(path) => (PathBuf::from(path), None),
+        None => (persisted_files::data_root_file("peers.json"), Some(persisted_files::legacy_helios_etc_file("peers.json"))),
+    }
 }
 
 async fn load_peers_from_disk() -> Vec<PeerInfo> {
-    let path = peers_state_path();
-    let data = match tokio::fs::read(&path).await {
+    let (path, legacy_path) = peers_state_paths();
+    let data = match persisted_files::read(&path, legacy_path.as_deref()).await {
         Ok(data) => data,
         Err(_) => return Vec::new(),
     };
@@ -480,12 +484,7 @@ async fn load_peers_from_disk() -> Vec<PeerInfo> {
 }
 
 async fn persist_peers_to_disk(peers: Vec<PeerInfo>) {
-    let path = peers_state_path();
-    let dir = path.parent().unwrap_or_else(|| std::path::Path::new("/"));
-    if let Err(err) = tokio::fs::create_dir_all(dir).await {
-        warn!(path = %dir.display(), %err, "failed to create peers directory");
-        return;
-    }
+    let (path, legacy_path) = peers_state_paths();
 
     let stored = StoredPeersFile {
         peers: peers
@@ -510,14 +509,8 @@ async fn persist_peers_to_disk(peers: Vec<PeerInfo>) {
         }
     };
 
-    let tmp_path = path.with_extension("json.tmp");
-    if let Err(err) = tokio::fs::write(&tmp_path, &data).await {
-        warn!(path = %tmp_path.display(), %err, "failed to write peers tmp file");
-        return;
-    }
-    if let Err(err) = tokio::fs::rename(&tmp_path, &path).await {
-        warn!(from = %tmp_path.display(), to = %path.display(), %err, "failed to persist peers file");
-        let _ = tokio::fs::remove_file(&tmp_path).await;
+    if let Err(err) = persisted_files::write_mirrored(&path, legacy_path.as_deref(), &data).await {
+        warn!(path = %path.display(), %err, "failed to persist peers file");
     }
 }
 

@@ -34,6 +34,24 @@ const APPLY_PROGRESS_END: u8 = 85;
 const PERSIST_NETWORKD_DIR: &str = "/var/lib/helios/networkd";
 const PERSIST_NETWORKD_PREFIX: &str = "00-helios-persisted-";
 
+#[derive(Debug, Clone, Copy)]
+struct PersistedFileSync {
+    source_candidates: &'static [&'static str],
+    target_path: &'static str,
+}
+
+const PERSISTED_FILE_SYNCS: &[PersistedFileSync] = &[
+    PersistedFileSync { source_candidates: &["/var/lib/helios/hostname", "/etc/hostname"], target_path: "/etc/hostname" },
+    PersistedFileSync { source_candidates: &["/var/lib/helios/team", "/etc/helios/team"], target_path: "/etc/helios/team" },
+    PersistedFileSync { source_candidates: &["/var/lib/helios/nt4.json", "/etc/helios/nt4.json"], target_path: "/etc/helios/nt4.json" },
+    PersistedFileSync { source_candidates: &["/var/lib/helios/peers.json", "/etc/helios/peers.json"], target_path: "/etc/helios/peers.json" },
+    PersistedFileSync { source_candidates: &["/var/lib/helios/usb-power.env", "/etc/helios/usb-power.env"], target_path: "/etc/helios/usb-power.env" },
+    PersistedFileSync { source_candidates: &["/var/lib/helios/leds.toml", "/etc/helios/leds.toml"], target_path: "/etc/helios/leds.toml" },
+    PersistedFileSync { source_candidates: &["/var/lib/helios/led-animations.json", "/etc/helios/led-animations.json"], target_path: "/etc/helios/led-animations.json" },
+    PersistedFileSync { source_candidates: &["/var/lib/helios/sensors.toml", "/etc/helios/sensors.toml"], target_path: "/etc/helios/sensors.toml" },
+    PersistedFileSync { source_candidates: &["/var/lib/helios/fan.toml", "/etc/helios/fan.toml"], target_path: "/etc/helios/fan.toml" },
+];
+
 #[derive(Debug, Clone, Deserialize)]
 struct ApplyManifestMetadata {
     #[serde(default = "default_true")]
@@ -213,8 +231,8 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
                 warn!(%update_id, %target_label, target_device = %target_device, "partition table not detected; streamed full image");
             }
             sync_boot_from_target(&target_device, &work_dir).await?;
-            if let Err(err) = sync_persisted_networkd(&target_device, &work_dir).await {
-                warn!(%err, %update_id, target_device = %target_device, "failed to sync persisted network config to target");
+            if let Err(err) = sync_persisted_state(&target_device, &work_dir).await {
+                warn!(%err, %update_id, target_device = %target_device, "failed to sync persisted device config to target");
             }
         } else {
             let expanded_path = expanded_path.ok_or_else(|| Error::InvalidState("expanded OTA image missing".into()))?;
@@ -224,8 +242,8 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
             if !boot_synced {
                 sync_boot_from_target(&target_device, &work_dir).await?;
             }
-            if let Err(err) = sync_persisted_networkd(&target_device, &work_dir).await {
-                warn!(%err, %update_id, target_device = %target_device, "failed to sync persisted network config to target");
+            if let Err(err) = sync_persisted_state(&target_device, &work_dir).await {
+                warn!(%err, %update_id, target_device = %target_device, "failed to sync persisted device config to target");
             }
 
             if temp_file {
@@ -660,20 +678,19 @@ async fn sync_boot_from_target(target_device: &str, work_dir: &Path) -> Result<(
     result
 }
 
-async fn sync_persisted_networkd(target_device: &str, work_dir: &Path) -> Result<()> {
-    let src_dir = Path::new(PERSIST_NETWORKD_DIR);
-    if !src_dir.is_dir() {
-        return Ok(());
-    }
-
+async fn sync_persisted_state(target_device: &str, work_dir: &Path) -> Result<()> {
     let mountpoint = work_dir.join("mnt-target-rw");
     ensure_directory(&mountpoint).await?;
     let status = Command::new("mount").args(["-o", "rw", target_device, mountpoint.to_str().unwrap()]).status().await.map_err(Error::Io)?;
     if !status.success() {
-        return Err(Error::InvalidState(format!("failed to mount flashed root {} for network sync", target_device)));
+        return Err(Error::InvalidState(format!("failed to mount flashed root {} for config sync", target_device)));
     }
 
-    let result = sync_persisted_networkd_into(&mountpoint, src_dir).await;
+    let result = async {
+        sync_persisted_networkd_into(&mountpoint, Path::new(PERSIST_NETWORKD_DIR)).await?;
+        sync_persisted_files_into(&mountpoint).await
+    }
+    .await;
     sync_filesystem(&mountpoint).await.ok();
     let _ = Command::new("umount").arg(&mountpoint).status().await;
     result
@@ -692,6 +709,10 @@ async fn sync_persisted_networkd_into(root: &Path, src_dir: &Path) -> Result<()>
         }
     }
 
+    if !src_dir.is_dir() {
+        return Ok(());
+    }
+
     let mut src_entries = tokio::fs::read_dir(src_dir).await.map_err(Error::Io)?;
     while let Some(entry) = src_entries.next_entry().await.map_err(Error::Io)? {
         let name = entry.file_name();
@@ -705,6 +726,36 @@ async fn sync_persisted_networkd_into(root: &Path, src_dir: &Path) -> Result<()>
     }
 
     Ok(())
+}
+
+async fn sync_persisted_files_into(root: &Path) -> Result<()> {
+    sync_persisted_files_with_mappings_into(root, PERSISTED_FILE_SYNCS).await
+}
+
+async fn sync_persisted_files_with_mappings_into(root: &Path, mappings: &[PersistedFileSync]) -> Result<()> {
+    for mapping in mappings {
+        let Some(src_path) = resolve_persisted_file_source(mapping).await? else {
+            continue;
+        };
+        let target_path = root.join(mapping.target_path.trim_start_matches('/'));
+        if let Some(parent) = target_path.parent() {
+            tokio::fs::create_dir_all(parent).await.map_err(Error::Io)?;
+        }
+        tokio::fs::copy(&src_path, &target_path).await.map_err(Error::Io)?;
+    }
+    Ok(())
+}
+
+async fn resolve_persisted_file_source(mapping: &PersistedFileSync) -> Result<Option<PathBuf>> {
+    for candidate in mapping.source_candidates {
+        match tokio::fs::metadata(candidate).await {
+            Ok(meta) if meta.is_file() => return Ok(Some(PathBuf::from(candidate))),
+            Ok(_) => continue,
+            Err(err) if err.kind() == ErrorKind::NotFound => continue,
+            Err(err) => return Err(Error::Io(err)),
+        }
+    }
+    Ok(None)
 }
 
 async fn boot_dir_has_payload(root_boot: &Path) -> Result<bool> {
@@ -813,7 +864,8 @@ async fn copy_boot_tree(src: &Path, dst: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_env_flag, reboot_failure_message, reboot_output_is_expected_success};
+    use super::{PersistedFileSync, parse_env_flag, reboot_failure_message, reboot_output_is_expected_success, sync_persisted_files_with_mappings_into, sync_persisted_networkd_into};
+    use std::path::Path;
 
     #[test]
     fn reboot_success_status_is_accepted() {
@@ -847,5 +899,42 @@ mod tests {
         for raw in ["", "0", "false", "no", "off", "2", "enabled"] {
             assert!(!parse_env_flag(raw), "expected falsey: {raw}");
         }
+    }
+
+    #[tokio::test]
+    async fn sync_persisted_files_prefers_data_candidate() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("root");
+        let primary = temp.path().join("primary/team");
+        let legacy = temp.path().join("legacy/team");
+        tokio::fs::create_dir_all(primary.parent().expect("primary parent")).await.expect("create primary parent");
+        tokio::fs::create_dir_all(legacy.parent().expect("legacy parent")).await.expect("create legacy parent");
+        tokio::fs::write(&primary, "2468\n").await.expect("write primary");
+        tokio::fs::write(&legacy, "1111\n").await.expect("write legacy");
+
+        let primary_str: &'static str = Box::leak(primary.display().to_string().into_boxed_str());
+        let legacy_str: &'static str = Box::leak(legacy.display().to_string().into_boxed_str());
+        let candidates: &'static [&'static str] = Box::leak(vec![primary_str, legacy_str].into_boxed_slice());
+        let mappings = [PersistedFileSync { source_candidates: candidates, target_path: "/etc/helios/team" }];
+
+        sync_persisted_files_with_mappings_into(&root, &mappings).await.expect("sync files");
+
+        let written = tokio::fs::read_to_string(root.join("etc/helios/team")).await.expect("read target");
+        assert_eq!(written, "2468\n");
+    }
+
+    #[tokio::test]
+    async fn sync_persisted_networkd_removes_stale_target_files_when_source_missing() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("root");
+        let target_dir = root.join("etc/systemd/network");
+        tokio::fs::create_dir_all(&target_dir).await.expect("create target dir");
+        tokio::fs::write(target_dir.join("00-helios-persisted-eth0.network"), "stale").await.expect("write stale file");
+        tokio::fs::write(target_dir.join("10-default.network"), "keep").await.expect("write packaged file");
+
+        sync_persisted_networkd_into(&root, Path::new("/definitely/missing")).await.expect("sync networkd");
+
+        assert!(!target_dir.join("00-helios-persisted-eth0.network").exists());
+        assert!(target_dir.join("10-default.network").exists());
     }
 }

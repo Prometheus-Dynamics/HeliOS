@@ -492,7 +492,9 @@ pub async fn apply_calibration(State(state): State<AppState>, Path(id): Path<Uui
         }
     }
 
-    streams_persist::persist_manifest_quick(&camera_id_for_manifest(&manifest), Some(id), manifest.clone()).await;
+    if let Err(err) = streams_persist::persist_manifest_quick_checked(&camera_id_for_manifest(&manifest), Some(id), manifest.clone()).await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("calibration applied live but failed to persist: {err}")))).into_response();
+    }
     Json(manifest).into_response()
 }
 
@@ -542,7 +544,9 @@ pub async fn save_calibration(State(state): State<AppState>, Path(id): Path<Uuid
     }
 
     manifest.calibration = Some(calibration);
-    streams_persist::persist_manifest(&camera_id_for_manifest(&manifest), Some(id), manifest.clone()).await;
+    if let Err(err) = streams_persist::persist_manifest_checked(&camera_id_for_manifest(&manifest), Some(id), manifest.clone()).await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("calibration updated live but failed to persist: {err}")))).into_response();
+    }
     Json(manifest).into_response()
 }
 
