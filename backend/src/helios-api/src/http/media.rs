@@ -31,6 +31,7 @@ use zip::write::SimpleFileOptions;
 
 use super::error::{ApiError, ApiResult, ErrorBody};
 use super::storage::{self, sanitize_name};
+use super::upload_integrity;
 
 pub fn router<S>() -> Router<S>
 where
@@ -290,11 +291,12 @@ fn is_internal_media_artifact(name: &str) -> bool {
         (status = 500, description = "Storage error", body = ErrorBody)
     )
 )]
-async fn upload_media(mut multipart: Multipart) -> ApiResult<impl IntoResponse> {
+async fn upload_media(headers: HeaderMap, mut multipart: Multipart) -> ApiResult<impl IntoResponse> {
     let dir = media_dir()?;
     let meta_dir = media_meta_dir()?;
 
     let max_bytes = max_upload_bytes();
+    let expected_upload_bytes = upload_integrity::expected_upload_bytes(&headers).map_err(ApiError::bad_request)?;
     let mut uploaded: Option<(String, u64, String, MediaMetadata)> = None;
     let mut pending_label: Option<(String, Vec<u8>)> = None;
     let mut pending_meta = MediaMetadata::default();
@@ -370,6 +372,21 @@ async fn upload_media(mut multipart: Multipart) -> ApiResult<impl IntoResponse> 
             let _ = fs::remove_file(&path).await;
             return Err(ApiError::bad_request("empty upload"));
         }
+        if let Err(err) = upload_integrity::validate_expected_upload_bytes(written, expected_upload_bytes) {
+            let _ = fs::remove_file(&path).await;
+            return Err(ApiError::bad_request(err));
+        }
+        let stored_bytes = match upload_integrity::finalize_file_upload(&mut file, &path, written).await {
+            Ok(stored_bytes) => stored_bytes,
+            Err(err) => {
+                let _ = fs::remove_file(&path).await;
+                return Err(map_io_error(err, "failed to finalize media upload"));
+            }
+        };
+        if let Err(err) = upload_integrity::validate_expected_upload_bytes(stored_bytes, expected_upload_bytes) {
+            let _ = fs::remove_file(&path).await;
+            return Err(ApiError::bad_request(err));
+        }
 
         let content_type = guess_content_type(&filename);
         hydrate_dimensions(&mut pending_meta, &path, &content_type).await;
@@ -377,7 +394,7 @@ async fn upload_media(mut multipart: Multipart) -> ApiResult<impl IntoResponse> 
         if looks_like_model(&filename, &content_type) {
             pending_model_format = guess_model_format(&filename);
         }
-        uploaded = Some((filename, written, content_type, pending_meta.clone()));
+        uploaded = Some((filename, stored_bytes, content_type, pending_meta.clone()));
     }
 
     match uploaded {
@@ -496,7 +513,7 @@ async fn fetch_media_imu(Path(name): Path<String>, headers: HeaderMap) -> ApiRes
     request_body(content = String, description = "Multipart form-data with an IMU sidecar file part named 'imu'"),
     responses((status = 200, description = "IMU sidecar attached", body = MediaItem), (status = 400, description = "Invalid upload", body = ErrorBody))
 )]
-async fn attach_media_imu(Path(name): Path<String>, mut multipart: Multipart) -> ApiResult<impl IntoResponse> {
+async fn attach_media_imu(Path(name): Path<String>, headers: HeaderMap, mut multipart: Multipart) -> ApiResult<impl IntoResponse> {
     let Some(filename) = sanitize_name(&name) else {
         return Err(ApiError::bad_request("invalid media name"));
     };
@@ -505,6 +522,7 @@ async fn attach_media_imu(Path(name): Path<String>, mut multipart: Multipart) ->
     let media_path = dir.join(&filename);
     let meta = fs::metadata(&media_path).await.map_err(|err| map_io_error(err, "failed to stat media file"))?;
     let content_type = guess_content_type(&filename);
+    let expected_upload_bytes = upload_integrity::expected_upload_bytes(&headers).map_err(ApiError::bad_request)?;
 
     let mut sidecar_bytes: Option<Vec<u8>> = None;
     let mut uploaded_name: Option<String> = None;
@@ -514,6 +532,7 @@ async fn attach_media_imu(Path(name): Path<String>, mut multipart: Multipart) ->
         }
         uploaded_name = field.file_name().and_then(sanitize_name);
         let bytes = field.bytes().await.map_err(|err| ApiError::bad_request(format!("failed to read IMU sidecar bytes: {err}")))?;
+        upload_integrity::validate_expected_upload_bytes(bytes.len() as u64, expected_upload_bytes).map_err(ApiError::bad_request)?;
         sidecar_bytes = Some(bytes.to_vec());
         break;
     }
@@ -919,7 +938,7 @@ async fn fetch_label(Path(name): Path<String>) -> ApiResult<impl IntoResponse> {
     request_body(content = String, description = "Multipart form-data with a label file part named 'label'"),
     responses((status = 200, description = "Label attached", body = MediaItem), (status = 400, description = "Invalid upload", body = ErrorBody))
 )]
-async fn attach_label(Path(name): Path<String>, mut multipart: Multipart) -> ApiResult<impl IntoResponse> {
+async fn attach_label(Path(name): Path<String>, headers: HeaderMap, mut multipart: Multipart) -> ApiResult<impl IntoResponse> {
     let Some(filename) = sanitize_name(&name) else {
         return Err(ApiError::bad_request("invalid media name"));
     };
@@ -928,6 +947,7 @@ async fn attach_label(Path(name): Path<String>, mut multipart: Multipart) -> Api
     let media_path = dir.join(&filename);
     let meta = fs::metadata(&media_path).await.map_err(|err| map_io_error(err, "failed to stat media file"))?;
     let content_type = guess_content_type(&filename);
+    let expected_upload_bytes = upload_integrity::expected_upload_bytes(&headers).map_err(ApiError::bad_request)?;
 
     let mut label_bytes: Option<Vec<u8>> = None;
     let mut label_name: Option<String> = None;
@@ -940,6 +960,7 @@ async fn attach_label(Path(name): Path<String>, mut multipart: Multipart) -> Api
             continue;
         };
         let bytes = field.bytes().await.map_err(|err| ApiError::bad_request(format!("failed to read label bytes: {err}")))?;
+        upload_integrity::validate_expected_upload_bytes(bytes.len() as u64, expected_upload_bytes).map_err(ApiError::bad_request)?;
         label_bytes = Some(bytes.to_vec());
         label_name = Some(source_name);
         break;

@@ -10,6 +10,7 @@ use std::time::Duration;
 use styx::prelude::FourCc;
 use uuid::Uuid;
 
+use crate::http::AppState;
 use crate::http::streams_persist;
 
 use super::CALIBRATION_MODE_PIPELINE_UUID;
@@ -382,7 +383,7 @@ pub(crate) fn apply_pipeline_host_inputs_update(manifest: &mut StreamManifest, i
     }
 }
 
-pub(crate) async fn update_persisted_manifest_by_stream_id<F>(stream_id: Uuid, updater: F) -> Option<StreamManifest>
+pub(crate) async fn update_persisted_manifest_by_stream_id_checked<F>(stream_id: Uuid, updater: F) -> io::Result<Option<StreamManifest>>
 where
     F: FnOnce(&mut StreamManifest),
 {
@@ -399,9 +400,32 @@ where
         }
 
         updater(&mut manifest);
-        streams_persist::persist_manifest(&record.camera_id, Some(stream_id), manifest.clone()).await;
-        return Some(manifest);
+        streams_persist::persist_manifest_checked(&record.camera_id, Some(stream_id), manifest.clone()).await?;
+        return Ok(Some(manifest));
     }
 
-    None
+    Ok(None)
+}
+
+pub(crate) async fn persist_live_stream_manifest_update<F>(state: &AppState, stream_id: Uuid, updater: F) -> Result<StreamManifest, String>
+where
+    F: Fn(&mut StreamManifest),
+{
+    if let Some(manifest) =
+        update_persisted_manifest_by_stream_id_checked(stream_id, |manifest| updater(manifest)).await.map_err(|err| format!("updated live state but failed to persist stream manifest: {err}"))?
+    {
+        return Ok(manifest);
+    }
+
+    let streams = state.engine.list_streams().await.map_err(|err| format!("updated live state but failed to load running stream for persistence: {err}"))?;
+    let Some(stream) = streams.into_iter().find(|stream| stream.stream_id == stream_id) else {
+        return Err("updated live state but stream was not found for persistence".to_string());
+    };
+
+    let mut manifest = stream.manifest;
+    updater(&mut manifest);
+    streams_persist::persist_manifest_checked(&camera_id_for_manifest(&manifest), Some(stream_id), manifest.clone())
+        .await
+        .map_err(|err| format!("updated live state but failed to persist stream manifest: {err}"))?;
+    Ok(manifest)
 }

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { OpenAPI, type MediaItem, type UpdateAckResponse, type UpdateStateResponse, type UploadUpdateResponse } from '$lib/ts-bindings/http/client';
+  import { normalizeUploadError, uploadSizeHeaders, verifyUploadedBytes } from '$lib/api/uploadIntegrity';
   import { apiFetch, REQUESTED_BY } from '../api';
   import { buildErrorMessage } from '$lib/ui/errorPolicy';
   import { connectUpdaterStream } from '$lib/api/otaUpdates';
@@ -361,12 +362,22 @@
     try {
       const form = new FormData();
       form.append('file', uploadTarget);
-      const response = await fetch(`${OpenAPI.BASE}/ota/upload`, { method: 'POST', body: form });
+      let response: Response;
+      try {
+        response = await fetch(`${OpenAPI.BASE}/ota/upload`, {
+          method: 'POST',
+          body: form,
+          headers: uploadSizeHeaders(uploadTarget)
+        });
+      } catch (error) {
+        throw normalizeUploadError(error, 'Update upload');
+      }
       if (!response.ok) {
         const text = await response.text();
         throw new Error(text || `Upload failed (${response.status})`);
       }
       const payload = (await response.json()) as UploadUpdateResponse;
+      verifyUploadedBytes(uploadTarget.size, payload.size_bytes, 'Update upload');
       uploadInfo = payload;
       uploadStatus = `Uploaded ${payload.filename}`;
       sourceKind = 'upload';
@@ -378,7 +389,7 @@
         await fetchState();
       }
     } catch (err) {
-      uploadError = buildErrorMessage({ error: err, fallback: 'Upload failed.' });
+      uploadError = buildErrorMessage({ error: normalizeUploadError(err, 'Update upload'), fallback: 'Upload failed.' });
     } finally {
       uploadBusy = false;
     }

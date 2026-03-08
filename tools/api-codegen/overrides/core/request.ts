@@ -96,7 +96,7 @@ export const getQueryString = (params: Record<string, any>): string => {
 };
 
 const getUrl = (config: OpenAPIConfig, options: ApiRequestOptions): string => {
-    const encoder = config.ENCODE_PATH || encodeURI;
+    const encoder = config.ENCODE_PATH || encodeURIComponent;
 
     let path = options.url
         .replace('{api-version}', config.VERSION)

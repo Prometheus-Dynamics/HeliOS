@@ -1,7 +1,7 @@
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, Multipart, Path},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, post},
 };
@@ -14,6 +14,7 @@ use uuid::Uuid;
 use super::super::AppState;
 use super::super::error::{ApiError, ApiResult};
 use super::super::media::{MediaMetadata, write_media_metadata};
+use super::super::upload_integrity;
 use super::super::validation::validation_error_response;
 use super::super::{json_store, storage};
 use super::validation::validate_limelight_fmap_payload;
@@ -435,8 +436,12 @@ async fn fetch_map(Path(id): Path<String>) -> ApiResult<Json<FieldMapDocument>> 
         (status = 413, description = "Upload too large", body = super::super::error::ErrorBody)
     )
 )]
-async fn upload_limelight_fmap(mut multipart: Multipart) -> axum::response::Response {
+async fn upload_limelight_fmap(headers: HeaderMap, mut multipart: Multipart) -> axum::response::Response {
     let max_bytes = max_upload_bytes();
+    let expected_upload_bytes = match upload_integrity::expected_upload_bytes(&headers) {
+        Ok(value) => value,
+        Err(err) => return ApiError::bad_request(err).into_response(),
+    };
     let mut uploaded: Option<(String, Vec<u8>)> = None;
 
     loop {
@@ -460,6 +465,9 @@ async fn upload_limelight_fmap(mut multipart: Multipart) -> axum::response::Resp
         }
         if data.len() as u64 > max_bytes {
             return ApiError::payload_too_large(format!("upload exceeds limit of {} bytes", max_bytes)).into_response();
+        }
+        if let Err(err) = upload_integrity::validate_expected_upload_bytes(data.len() as u64, expected_upload_bytes) {
+            return ApiError::bad_request(err).into_response();
         }
         uploaded = Some((filename, data.to_vec()));
     }

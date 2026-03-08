@@ -13,6 +13,7 @@ use reqwest::header::{ACCEPT, RANGE};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::io;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -483,7 +484,7 @@ async fn load_peers_from_disk() -> Vec<PeerInfo> {
         .collect()
 }
 
-async fn persist_peers_to_disk(peers: Vec<PeerInfo>) {
+async fn persist_peers_to_disk(peers: Vec<PeerInfo>) -> io::Result<()> {
     let (path, legacy_path) = peers_state_paths();
 
     let stored = StoredPeersFile {
@@ -501,17 +502,8 @@ async fn persist_peers_to_disk(peers: Vec<PeerInfo>) {
             .collect(),
     };
 
-    let data = match serde_json::to_vec_pretty(&stored) {
-        Ok(data) => data,
-        Err(err) => {
-            warn!(%err, "failed to serialize peers file");
-            return;
-        }
-    };
-
-    if let Err(err) = persisted_files::write_mirrored(&path, legacy_path.as_deref(), &data).await {
-        warn!(path = %path.display(), %err, "failed to persist peers file");
-    }
+    let data = serde_json::to_vec_pretty(&stored).map_err(io::Error::other)?;
+    persisted_files::write_mirrored(&path, legacy_path.as_deref(), &data).await
 }
 
 pub(crate) async fn init_peers_from_disk() {
@@ -567,7 +559,6 @@ async fn register_peer(Json(req): Json<RegisterPeerRequest>) -> impl IntoRespons
 
     let endpoints = if req.endpoints.is_empty() { derive_endpoints(&api_base_url) } else { req.endpoints };
 
-    let mut state = PEER_STATE.lock().await;
     let now = Utc::now().to_rfc3339();
     let peer = PeerInfo {
         id: req.peer_id.unwrap_or_else(|| Uuid::new_v4().to_string()),
@@ -583,10 +574,15 @@ async fn register_peer(Json(req): Json<RegisterPeerRequest>) -> impl IntoRespons
         telemetry: None,
     };
 
-    upsert_peer(&mut state.peers, peer.clone());
-    let peers_for_disk = state.peers.clone();
+    let peers_for_disk = {
+        let mut state = PEER_STATE.lock().await;
+        upsert_peer(&mut state.peers, peer.clone());
+        state.peers.clone()
+    };
     invalidate_peer_stream_cache().await;
-    tokio::spawn(async move { persist_peers_to_disk(peers_for_disk).await });
+    if let Err(err) = persist_peers_to_disk(peers_for_disk).await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(PeerError { error: format!("peer registered in memory but failed to persist: {err}") })).into_response();
+    }
     (StatusCode::CREATED, Json(PeerRegistrationResponse { peer })).into_response()
 }
 
@@ -633,65 +629,69 @@ async fn discover_peers(Json(request): Json<PeerDiscoveryRequest>) -> impl IntoR
     discovered_hosts.retain(|addr, _| !local_addresses.contains(addr));
 
     if !discovered_hosts.is_empty() {
-        let mut state = PEER_STATE.lock().await;
-        state.peers.retain(|peer| !peer_matches_any_ip(peer, &local_addresses));
+        let peers_for_disk = {
+            let mut state = PEER_STATE.lock().await;
+            state.peers.retain(|peer| !peer_matches_any_ip(peer, &local_addresses));
 
-        let now = Utc::now().to_rfc3339();
-        let classification_timeout_ms = ((timeout_secs.saturating_mul(1000)) / 2).clamp(300, 1500);
-        for (host_ip, seen_ports) in discovered_hosts {
-            let host = host_ip.to_string();
-            let Some(integration_kind) = infer_discovered_integration_kind(&host, &seen_ports, classification_timeout_ms).await else {
-                continue;
-            };
-            let mut integration = default_integration_metadata(integration_kind.clone());
-            apply_integration_defaults(&mut integration, &host);
-            let api_port = discovered_api_port(&integration_kind, &seen_ports);
-            let api_base_url = format!("http://{host}:{api_port}");
-            if let Some(existing) = state.peers.iter_mut().find(|peer| peer.api_base_url == api_base_url || peer.endpoints.iter().any(|endpoint| endpoint.host == host.as_str())) {
-                existing.status = PeerStatus::Online;
-                existing.last_seen_at = Some(now.clone());
-                if existing.endpoints.is_empty() || !existing.endpoints.iter().any(|endpoint| endpoint.host == host.as_str()) {
-                    existing.endpoints.push(PeerEndpoint { host: host.clone(), port: Some(api_port) });
-                }
-                if !matches!(existing.integration.kind, PeerIntegrationKind::Custom | PeerIntegrationKind::Photonvision) && matches!(integration_kind, PeerIntegrationKind::LimelightOs) {
-                    existing.integration.kind = PeerIntegrationKind::LimelightOs;
-                }
-                if existing.integration.management_url.is_none() && integration.management_url.is_some() {
-                    existing.integration.management_url = integration.management_url.clone();
-                }
-                if existing.integration.stream_url.is_none() && integration.stream_url.is_some() {
-                    existing.integration.stream_url = integration.stream_url.clone();
-                }
-                if existing.integration.stream_urls.is_empty() && !integration.stream_urls.is_empty() {
-                    existing.integration.stream_urls = integration.stream_urls.clone();
-                }
-            } else {
-                let peer = PeerInfo {
-                    id: Uuid::new_v4().to_string(),
-                    alias: None,
-                    status: PeerStatus::Online,
-                    api_base_url,
-                    endpoints: vec![PeerEndpoint { host: host.clone(), port: Some(api_port) }],
-                    version: None,
-                    capabilities: Vec::new(),
-                    integration,
-                    last_seen_at: Some(now.clone()),
-                    latency_ms: None,
-                    telemetry: None,
+            let now = Utc::now().to_rfc3339();
+            let classification_timeout_ms = ((timeout_secs.saturating_mul(1000)) / 2).clamp(300, 1500);
+            for (host_ip, seen_ports) in discovered_hosts {
+                let host = host_ip.to_string();
+                let Some(integration_kind) = infer_discovered_integration_kind(&host, &seen_ports, classification_timeout_ms).await else {
+                    continue;
                 };
-                state.peers.push(peer);
+                let mut integration = default_integration_metadata(integration_kind.clone());
+                apply_integration_defaults(&mut integration, &host);
+                let api_port = discovered_api_port(&integration_kind, &seen_ports);
+                let api_base_url = format!("http://{host}:{api_port}");
+                if let Some(existing) = state.peers.iter_mut().find(|peer| peer.api_base_url == api_base_url || peer.endpoints.iter().any(|endpoint| endpoint.host == host.as_str())) {
+                    existing.status = PeerStatus::Online;
+                    existing.last_seen_at = Some(now.clone());
+                    if existing.endpoints.is_empty() || !existing.endpoints.iter().any(|endpoint| endpoint.host == host.as_str()) {
+                        existing.endpoints.push(PeerEndpoint { host: host.clone(), port: Some(api_port) });
+                    }
+                    if !matches!(existing.integration.kind, PeerIntegrationKind::Custom | PeerIntegrationKind::Photonvision) && matches!(integration_kind, PeerIntegrationKind::LimelightOs) {
+                        existing.integration.kind = PeerIntegrationKind::LimelightOs;
+                    }
+                    if existing.integration.management_url.is_none() && integration.management_url.is_some() {
+                        existing.integration.management_url = integration.management_url.clone();
+                    }
+                    if existing.integration.stream_url.is_none() && integration.stream_url.is_some() {
+                        existing.integration.stream_url = integration.stream_url.clone();
+                    }
+                    if existing.integration.stream_urls.is_empty() && !integration.stream_urls.is_empty() {
+                        existing.integration.stream_urls = integration.stream_urls.clone();
+                    }
+                } else {
+                    let peer = PeerInfo {
+                        id: Uuid::new_v4().to_string(),
+                        alias: None,
+                        status: PeerStatus::Online,
+                        api_base_url,
+                        endpoints: vec![PeerEndpoint { host: host.clone(), port: Some(api_port) }],
+                        version: None,
+                        capabilities: Vec::new(),
+                        integration,
+                        last_seen_at: Some(now.clone()),
+                        latency_ms: None,
+                        telemetry: None,
+                    };
+                    state.peers.push(peer);
+                }
             }
+            state.discovery = Some(discovery.clone());
+            state.peers.clone()
+        };
+        if let Err(err) = persist_peers_to_disk(peers_for_disk).await {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(PeerError { error: format!("peer discovery updated memory state but failed to persist: {err}") })).into_response();
         }
-        state.discovery = Some(discovery.clone());
-        let peers_for_disk = state.peers.clone();
-        tokio::spawn(async move { persist_peers_to_disk(peers_for_disk).await });
     } else {
         let mut state = PEER_STATE.lock().await;
         state.discovery = Some(discovery.clone());
     }
 
     invalidate_peer_stream_cache().await;
-    Json(discovery)
+    Json(discovery).into_response()
 }
 
 fn discovered_api_port(kind: &PeerIntegrationKind, seen_ports: &BTreeSet<u16>) -> u16 {
@@ -742,17 +742,20 @@ fn peer_matches_any_ip(peer: &PeerInfo, addresses: &HashSet<std::net::IpAddr>) -
     responses((status = 200, description = "Peer removed", body = PeerRemovalResponse), (status = 404, description = "Peer not found", body = PeerError))
 )]
 async fn remove_peer(Path(id): Path<String>) -> impl IntoResponse {
-    let mut state = PEER_STATE.lock().await;
-    let before = state.peers.len();
-    state.peers.retain(|peer| peer.id != id);
-    if state.peers.len() == before {
-        (StatusCode::NOT_FOUND, Json(PeerError { error: "peer not found".into() })).into_response()
-    } else {
-        let peers_for_disk = state.peers.clone();
-        invalidate_peer_stream_cache().await;
-        tokio::spawn(async move { persist_peers_to_disk(peers_for_disk).await });
-        (StatusCode::OK, Json(PeerRemovalResponse { removed: true })).into_response()
+    let peers_for_disk = {
+        let mut state = PEER_STATE.lock().await;
+        let before = state.peers.len();
+        state.peers.retain(|peer| peer.id != id);
+        if state.peers.len() == before {
+            return (StatusCode::NOT_FOUND, Json(PeerError { error: "peer not found".into() })).into_response();
+        }
+        state.peers.clone()
+    };
+    invalidate_peer_stream_cache().await;
+    if let Err(err) = persist_peers_to_disk(peers_for_disk).await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(PeerError { error: format!("peer removed from memory but failed to persist: {err}") })).into_response();
     }
+    (StatusCode::OK, Json(PeerRemovalResponse { removed: true })).into_response()
 }
 
 pub(crate) async fn invalidate_peer_stream_cache() {

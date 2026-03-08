@@ -385,7 +385,7 @@ pub fn derived_stream_id(camera_id: &str) -> Uuid {
     Uuid::new_v5(&Uuid::NAMESPACE_OID, camera_id.as_bytes())
 }
 
-pub async fn remove_record_by_stream_id(stream_id: Uuid) -> bool {
+pub async fn remove_record_by_stream_id(stream_id: Uuid) -> io::Result<bool> {
     let records = list_records().await;
     for record in records {
         let Some(manifest) = record.manifest else {
@@ -396,13 +396,14 @@ pub async fn remove_record_by_stream_id(stream_id: Uuid) -> bool {
         if !matches {
             continue;
         }
-        if let Ok(path) = record_path(&record.camera_id).await
-            && fs::remove_file(path).await.is_ok()
-        {
-            return true;
+        let path = record_path(&record.camera_id).await?;
+        match fs::remove_file(path).await {
+            Ok(()) => return Ok(true),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
+            Err(err) => return Err(err),
         }
     }
-    false
+    Ok(false)
 }
 
 pub(crate) fn manifests_conflict(a: &StreamManifest, b: &StreamManifest) -> bool {

@@ -1,4 +1,5 @@
 import { apiUrl } from '$lib/api/httpClient';
+import { normalizeUploadError, uploadSizeHeaders } from '$lib/api/uploadIntegrity';
 
 export type FieldMapSummary = {
   id: string;
@@ -112,11 +113,17 @@ export async function uploadLimelightFmap(file: File, signal?: AbortSignal): Pro
   const form = new FormData();
   form.append('file', file, file.name);
 
-  const response = await fetch(apiUrl('/localization/maps/upload'), {
-    method: 'POST',
-    body: form,
-    signal
-  });
+  let response: Response;
+  try {
+    response = await fetch(apiUrl('/localization/maps/upload'), {
+      method: 'POST',
+      body: form,
+      headers: uploadSizeHeaders(file),
+      signal
+    });
+  } catch (error) {
+    throw normalizeUploadError(error, 'Field map upload');
+  }
 
   return await readJsonOrThrow<FieldMapSummary>(response);
 }

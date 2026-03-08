@@ -20,6 +20,7 @@ pub mod startup;
 pub mod storage;
 pub mod streams;
 pub mod streams_persist;
+pub(crate) mod upload_integrity;
 pub mod validation;
 
 use crate::ipc;

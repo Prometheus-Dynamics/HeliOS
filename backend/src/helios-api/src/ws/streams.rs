@@ -1,9 +1,9 @@
 use crate::http::AppState;
 use crate::http::error_history::{ErrorHistoryEntry, record_error_entry};
 use crate::http::streams::util;
-use crate::http::streams_persist;
 use axum::{
     Router,
+    body::to_bytes,
     extract::{
         Path, Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -241,6 +241,12 @@ enum StreamControlResponse {
         request_id: Option<String>,
         error: String,
     },
+}
+
+#[derive(Debug, Clone)]
+struct PendingControlUpdate {
+    request_id: Option<String>,
+    value: CaptureControlValue,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -543,26 +549,22 @@ async fn handle_stream_updates(mut socket: WebSocket, state: AppState, stream_id
                 };
                 match state.engine.set_pipeline_inputs(stream_id, pipeline_id, inputs.clone()).await {
                     Ok(EngineEvent::Ack { .. }) => {
-                        let updated = util::update_persisted_manifest_by_stream_id(stream_id, |manifest| {
+                        if let Err(err) = util::persist_live_stream_manifest_update(&state, stream_id, |manifest| {
                             util::apply_pipeline_host_inputs_update(manifest, &inputs);
                         })
-                        .await;
-                        if updated.is_none()
-                            && let Ok(streams) = state.engine.list_streams().await
-                            && let Some(stream) = streams.into_iter().find(|summary| summary.stream_id == stream_id)
+                        .await
                         {
-                            let mut manifest = stream.manifest;
-                            util::apply_pipeline_host_inputs_update(&mut manifest, &inputs);
-                            streams_persist::persist_manifest(&util::camera_id_for_manifest(&manifest), Some(stream_id), manifest).await;
+                            StreamUpdateResponse::Error { request_id, error: err }
+                        } else {
+                            state.publish_realtime_update(
+                                crate::ipc::RealtimeUpdateOrigin::Ws,
+                                "streams",
+                                format!("/v1/ws/streams/{stream_id}/updates"),
+                                Some("set_inputs".to_string()),
+                                request_id.clone(),
+                            );
+                            StreamUpdateResponse::Ack { request_id }
                         }
-                        state.publish_realtime_update(
-                            crate::ipc::RealtimeUpdateOrigin::Ws,
-                            "streams",
-                            format!("/v1/ws/streams/{stream_id}/updates"),
-                            Some("set_inputs".to_string()),
-                            request_id.clone(),
-                        );
-                        StreamUpdateResponse::Ack { request_id }
                     }
                     Ok(EngineEvent::Nack { code, reason, .. }) => StreamUpdateResponse::Error { request_id, error: format!("engine rejected inputs: {code:?}: {reason}") },
                     Ok(other) => StreamUpdateResponse::Error { request_id, error: format!("unexpected engine response: {other:?}") },
@@ -581,11 +583,13 @@ async fn handle_stream_updates(mut socket: WebSocket, state: AppState, stream_id
 }
 
 async fn handle_stream_controls(mut socket: WebSocket, state: AppState, stream_id: Uuid) {
-    let pending_controls = Arc::new(Mutex::new(BTreeMap::<u32, CaptureControlValue>::new()));
+    let pending_controls = Arc::new(Mutex::new(BTreeMap::<u32, Vec<PendingControlUpdate>>::new()));
+    let (responses_tx, mut responses_rx) = mpsc::unbounded_channel::<StreamControlResponse>();
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
 
     let worker_state = state.clone();
     let worker_pending_controls = Arc::clone(&pending_controls);
+    let worker_responses = responses_tx;
     tokio::spawn(async move {
         let mut apply_tick = tokio::time::interval(Duration::from_millis(CONTROL_APPLY_INTERVAL_MS));
         apply_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -601,7 +605,29 @@ async fn handle_stream_controls(mut socket: WebSocket, state: AppState, stream_i
                     };
 
                     for (apply_id, apply_value) in latest {
-                        let _ = crate::http::streams::controls::set_control(worker_state.clone(), stream_id, apply_id, apply_value).await;
+                        let Some(latest_update) = apply_value.last().cloned() else {
+                            continue;
+                        };
+                        let result =
+                            control_apply_result(crate::http::streams::controls::set_control(worker_state.clone(), stream_id, apply_id, latest_update.value).await).await;
+                        if result.is_ok() {
+                            worker_state.publish_realtime_update(
+                                crate::ipc::RealtimeUpdateOrigin::Ws,
+                                "streams",
+                                format!("/v1/ws/streams/{stream_id}/controls"),
+                                Some("set_control".to_string()),
+                                latest_update.request_id.clone(),
+                            );
+                        }
+                        for pending in apply_value {
+                            let response = match &result {
+                                Ok(()) => StreamControlResponse::Ack { request_id: pending.request_id.clone() },
+                                Err(err) => StreamControlResponse::Error { request_id: pending.request_id.clone(), error: err.clone() },
+                            };
+                            if worker_responses.send(response).is_err() {
+                                return;
+                            }
+                        }
                     }
                 }
                 changed = shutdown_rx.changed() => {
@@ -613,43 +639,72 @@ async fn handle_stream_controls(mut socket: WebSocket, state: AppState, stream_i
         }
     });
 
-    while let Some(msg) = socket.next().await {
-        let payload = match msg {
-            Ok(Message::Text(text)) => text,
-            Ok(Message::Ping(bytes)) => {
-                let _ = socket.send(Message::Pong(bytes)).await;
-                continue;
-            }
-            Ok(Message::Close(_)) => break,
-            Ok(_) => continue,
-            Err(err) => {
-                debug!(error = %err, "stream controls websocket closed");
-                break;
-            }
-        };
+    loop {
+        tokio::select! {
+            msg = socket.next() => {
+                let payload = match msg {
+                    Some(Ok(Message::Text(text))) => text,
+                    Some(Ok(Message::Ping(bytes))) => {
+                        if socket.send(Message::Pong(bytes)).await.is_err() {
+                            break;
+                        }
+                        continue;
+                    }
+                    Some(Ok(Message::Close(_))) => break,
+                    Some(Ok(_)) => continue,
+                    Some(Err(err)) => {
+                        debug!(error = %err, "stream controls websocket closed");
+                        break;
+                    }
+                    None => break,
+                };
 
-        let parsed = serde_json::from_str::<StreamControlRequest>(&payload);
-        let response = match parsed {
-            Ok(StreamControlRequest::Ping { request_id }) => StreamControlResponse::Ack { request_id },
-            Ok(StreamControlRequest::SetControl { request_id, control_id, value }) => {
+                let parsed = serde_json::from_str::<StreamControlRequest>(&payload);
+                let immediate = match parsed {
+                    Ok(StreamControlRequest::Ping { request_id }) => Some(StreamControlResponse::Ack { request_id }),
+                    Ok(StreamControlRequest::SetControl { request_id, control_id, value }) => {
+                        let mut guard = pending_controls.lock().await;
+                        guard.entry(control_id).or_default().push(PendingControlUpdate { request_id, value });
+                        None
+                    }
+                    Err(err) => Some(StreamControlResponse::Error { request_id: None, error: format!("invalid request: {err}") }),
+                };
+
+                if let Some(response) = immediate
+                    && let Ok(text) = serde_json::to_string(&response)
+                    && socket.send(Message::Text(text)).await.is_err()
                 {
-                    let mut guard = pending_controls.lock().await;
-                    guard.insert(control_id, value);
+                    break;
                 }
-                state.publish_realtime_update(crate::ipc::RealtimeUpdateOrigin::Ws, "streams", format!("/v1/ws/streams/{stream_id}/controls"), Some("set_control".to_string()), request_id.clone());
-                StreamControlResponse::Ack { request_id }
             }
-            Err(err) => StreamControlResponse::Error { request_id: None, error: format!("invalid request: {err}") },
-        };
-
-        if let Ok(text) = serde_json::to_string(&response)
-            && socket.send(Message::Text(text)).await.is_err()
-        {
-            break;
+            response = responses_rx.recv() => {
+                let Some(response) = response else {
+                    break;
+                };
+                if let Ok(text) = serde_json::to_string(&response)
+                    && socket.send(Message::Text(text)).await.is_err()
+                {
+                    break;
+                }
+            }
         }
     }
 
     let _ = shutdown_tx.send(true);
+}
+
+async fn control_apply_result(response: axum::response::Response) -> Result<(), String> {
+    let status = response.status();
+    if status.is_success() {
+        return Ok(());
+    }
+    let body = to_bytes(response.into_body(), 64 * 1024).await.ok();
+    let detail = body
+        .as_deref()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(bytes).ok())
+        .and_then(|json| json.get("error").and_then(|value| value.as_str()).map(str::to_string))
+        .unwrap_or_else(|| format!("control update failed ({status})"));
+    Err(detail)
 }
 
 async fn apply_stream_graph_update(state: &AppState, stream_id: Uuid, graph: serde_json::Value, pipeline_id: Option<Uuid>, output: Option<String>) -> Result<(), String> {
@@ -665,11 +720,8 @@ async fn apply_stream_graph_update(state: &AppState, stream_id: Uuid, graph: ser
 
     match state.engine.set_graph(stream_id, doc.graph.clone(), Some(pipeline_id), output.clone()).await {
         Ok(EngineEvent::Ack { .. }) => {
-            if let Ok(streams) = state.engine.list_streams().await
-                && let Some(stream) = streams.iter().find(|s| s.stream_id == stream_id)
-            {
-                let mut manifest = stream.manifest.clone();
-                util::normalize_pipeline_manifest(&mut manifest);
+            util::persist_live_stream_manifest_update(state, stream_id, |manifest| {
+                util::normalize_pipeline_manifest(manifest);
 
                 let mut updated = false;
                 for binding in &mut manifest.pipelines {
@@ -692,13 +744,12 @@ async fn apply_stream_graph_update(state: &AppState, stream_id: Uuid, graph: ser
                 if output.is_some() && manifest.active_pipeline_id == Some(pipeline_id) {
                     manifest.active_pipeline_output = output.clone();
                 }
-
-                streams_persist::persist_manifest(&util::camera_id_for_manifest(&manifest), Some(stream_id), manifest).await;
-            }
+            })
+            .await?;
             Ok(())
         }
         Ok(EngineEvent::Nack { code: EngineErrorCode::NotFound, .. }) => {
-            let updated = util::update_persisted_manifest_by_stream_id(stream_id, |manifest| {
+            let updated = util::update_persisted_manifest_by_stream_id_checked(stream_id, |manifest| {
                 util::normalize_pipeline_manifest(manifest);
 
                 let mut replaced = false;
@@ -724,7 +775,8 @@ async fn apply_stream_graph_update(state: &AppState, stream_id: Uuid, graph: ser
                     manifest.active_pipeline_output = output.clone();
                 }
             })
-            .await;
+            .await
+            .map_err(|err| format!("failed to persist stream manifest: {err}"))?;
             if updated.is_some() { Ok(()) } else { Err("stream not found".to_string()) }
         }
         Ok(EngineEvent::Nack { code, reason, .. }) => Err(format!("engine rejected graph: {code:?}: {reason}")),
@@ -753,11 +805,8 @@ async fn apply_stream_graph_patch(state: &AppState, stream_id: Uuid, patch: serd
 
     match state.engine.set_graph(stream_id, doc.graph.clone(), Some(pipeline_id), None).await {
         Ok(EngineEvent::Ack { .. }) => {
-            if let Ok(streams) = state.engine.list_streams().await
-                && let Some(stream) = streams.iter().find(|s| s.stream_id == stream_id)
-            {
-                let mut manifest = stream.manifest.clone();
-                util::normalize_pipeline_manifest(&mut manifest);
+            util::persist_live_stream_manifest_update(state, stream_id, |manifest| {
+                util::normalize_pipeline_manifest(manifest);
 
                 let mut updated = false;
                 for binding in &mut manifest.pipelines {
@@ -774,13 +823,12 @@ async fn apply_stream_graph_patch(state: &AppState, stream_id: Uuid, patch: serd
                 if manifest.active_pipeline_id.is_none() {
                     manifest.active_pipeline_id = Some(pipeline_id);
                 }
-
-                streams_persist::persist_manifest(&util::camera_id_for_manifest(&manifest), Some(stream_id), manifest).await;
-            }
+            })
+            .await?;
             Ok(())
         }
         Ok(EngineEvent::Nack { code: EngineErrorCode::NotFound, .. }) => {
-            let updated = util::update_persisted_manifest_by_stream_id(stream_id, |manifest| {
+            let updated = util::update_persisted_manifest_by_stream_id_checked(stream_id, |manifest| {
                 util::normalize_pipeline_manifest(manifest);
 
                 let mut replaced = false;
@@ -800,7 +848,8 @@ async fn apply_stream_graph_patch(state: &AppState, stream_id: Uuid, patch: serd
                     manifest.active_pipeline_id = Some(pipeline_id);
                 }
             })
-            .await;
+            .await
+            .map_err(|err| format!("failed to persist stream manifest: {err}"))?;
             if updated.is_some() { Ok(()) } else { Err("stream not found".to_string()) }
         }
         Ok(EngineEvent::Nack { code, reason, .. }) => Err(format!("engine rejected graph: {code:?}: {reason}")),

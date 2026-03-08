@@ -330,6 +330,7 @@
     if (!selectedCamera) return;
     cameraPoseError = null;
     cameraPoseMessage = null;
+    const cameraUid = selectedCamera.cameraUid ?? selectedCamera.uid;
 
     const parseTranslation = (label: string, raw: string): number => {
       const value = parseLengthToMeters(raw);
@@ -368,7 +369,7 @@
     cameraPoseBusy = true;
     try {
       await DeviceService.updateCameraPose({
-        cameraUid: selectedCamera.uid,
+        cameraUid,
         requestBody: {
           translation: { x: Number(x.toFixed(6)), y: Number(y.toFixed(6)), z: Number(z.toFixed(6)) },
           rotation: { roll: Number(roll.toFixed(4)), pitch: Number(pitch.toFixed(4)), yaw: Number(yaw.toFixed(4)) }
@@ -389,8 +390,9 @@
     cameraPoseError = null;
     cameraPoseMessage = null;
     cameraPoseBusy = true;
+    const cameraUid = selectedCamera.cameraUid ?? selectedCamera.uid;
     try {
-      await DeviceService.clearCameraPose({ cameraUid: selectedCamera.uid });
+      await DeviceService.clearCameraPose({ cameraUid });
       cameraPoseDirty = false;
       cameraPoseMessage = 'Cleared';
       await rigLayoutStore.refresh({ force: true }).catch(() => {});

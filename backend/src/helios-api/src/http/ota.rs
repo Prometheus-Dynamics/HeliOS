@@ -9,7 +9,7 @@ use std::{
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, Multipart, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, post},
 };
@@ -35,6 +35,7 @@ use crate::ipc::updater::UpdaterConnection;
 use super::AppState;
 use super::media::{MediaMetadata, write_media_metadata};
 use super::storage::{self, sanitize_name};
+use super::upload_integrity;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -122,17 +123,31 @@ pub struct UpdateStateResponse {
         (status = 500, description = "Storage error", body = UploadUpdateError)
     )
 )]
-pub async fn upload_update(mut multipart: Multipart) -> impl IntoResponse {
+pub async fn upload_update(headers: HeaderMap, mut multipart: Multipart) -> impl IntoResponse {
     let media_dir = match storage::ensure_subdir("media") {
         Ok(dir) => dir,
         Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(UploadUpdateError { error: err.to_string() })).into_response(),
     };
+    let expected_upload_bytes = match upload_integrity::expected_upload_bytes(&headers) {
+        Ok(value) => value,
+        Err(err) => return (StatusCode::BAD_REQUEST, Json(UploadUpdateError { error: err })).into_response(),
+    };
 
     let mut uploaded: Option<UploadedTemp> = None;
 
-    while let Ok(Some(field)) = multipart.next_field().await {
+    loop {
+        let next = match multipart.next_field().await {
+            Ok(next) => next,
+            Err(err) => return (StatusCode::BAD_REQUEST, Json(UploadUpdateError { error: format!("failed to read upload payload: {err}") })).into_response(),
+        };
+        let Some(field) = next else {
+            break;
+        };
         if let Some("file") = field.name() {
-            match process_upload_field(field).await {
+            if uploaded.is_some() {
+                return (StatusCode::BAD_REQUEST, Json(UploadUpdateError { error: "only one file may be uploaded per request".into() })).into_response();
+            }
+            match process_upload_field(field, expected_upload_bytes).await {
                 Ok(info) => uploaded = Some(info),
                 Err(err) => {
                     return (StatusCode::BAD_REQUEST, Json(UploadUpdateError { error: err })).into_response();
@@ -151,7 +166,10 @@ pub async fn upload_update(mut multipart: Multipart) -> impl IntoResponse {
     let original_name = upload.filename.clone();
     let filename = match unique_media_name(&media_dir, &upload.filename).await {
         Ok(name) => name,
-        Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(UploadUpdateError { error: err.to_string() })).into_response(),
+        Err(err) => {
+            let _ = fs::remove_file(&upload.temp_path).await;
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(UploadUpdateError { error: err.to_string() })).into_response();
+        }
     };
     let image_path = media_dir.join(&filename);
     if let Some(parent) = image_path.parent() {
@@ -168,6 +186,7 @@ pub async fn upload_update(mut multipart: Multipart) -> impl IntoResponse {
             }
             let _ = fs::remove_file(&upload.temp_path).await;
         } else {
+            let _ = fs::remove_file(&upload.temp_path).await;
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(UploadUpdateError { error: format!("failed to store upload: {err}") })).into_response();
         }
     }
@@ -373,7 +392,7 @@ struct UploadedTemp {
     sha256: String,
 }
 
-async fn process_upload_field(mut field: axum::extract::multipart::Field<'_>) -> Result<UploadedTemp, String> {
+async fn process_upload_field(mut field: axum::extract::multipart::Field<'_>, expected_upload_bytes: Option<u64>) -> Result<UploadedTemp, String> {
     let filename = match field.file_name().and_then(sanitize_name) {
         Some(name) => name,
         None => return Err("upload missing filename".into()),
@@ -403,12 +422,23 @@ async fn process_upload_field(mut field: axum::extract::multipart::Field<'_>) ->
         hasher.update(&chunk);
     }
 
-    if let Err(err) = file.flush().await {
+    if let Err(err) = upload_integrity::validate_expected_upload_bytes(written, expected_upload_bytes) {
         let _ = fs::remove_file(&temp_path).await;
-        return Err(format!("failed to finish upload: {err}"));
+        return Err(err);
+    }
+    let stored_bytes = match upload_integrity::finalize_file_upload(&mut file, &temp_path, written).await {
+        Ok(stored_bytes) => stored_bytes,
+        Err(err) => {
+            let _ = fs::remove_file(&temp_path).await;
+            return Err(format!("failed to finish upload: {err}"));
+        }
+    };
+    if let Err(err) = upload_integrity::validate_expected_upload_bytes(stored_bytes, expected_upload_bytes) {
+        let _ = fs::remove_file(&temp_path).await;
+        return Err(err);
     }
     let sha256 = hex::encode(hasher.finalize());
-    Ok(UploadedTemp { filename, temp_path, size_bytes: written, sha256 })
+    Ok(UploadedTemp { filename, temp_path, size_bytes: stored_bytes, sha256 })
 }
 
 async fn unique_media_name(dir: &Path, filename: &str) -> Result<String, std::io::Error> {

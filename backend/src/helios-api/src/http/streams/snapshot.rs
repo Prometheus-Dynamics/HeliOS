@@ -23,11 +23,10 @@ use crate::http::error::{ApiError, ApiResult};
 use crate::http::media::{MediaItem, MediaMetadata, write_media_metadata};
 use crate::http::pipelines;
 use crate::http::storage;
-use crate::http::streams_persist;
 
 use super::preview::latest_frame_jpeg_bytes;
+use super::util::apply_pipeline_host_inputs_update;
 use super::util::is_engine_unavailable;
-use super::util::{apply_pipeline_host_inputs_update, update_persisted_manifest_by_stream_id};
 
 static SNAPSHOT_LOCKS: Lazy<Mutex<HashMap<Uuid, Arc<Mutex<()>>>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
@@ -254,15 +253,12 @@ pub(crate) async fn apply_stream_crop(state: &AppState, stream_id: Uuid, crop: [
         }
     }
 
-    if update_persisted_manifest_by_stream_id(stream_id, |manifest| {
+    if let Err(err) = super::util::persist_live_stream_manifest_update(state, stream_id, |manifest| {
         apply_pipeline_host_inputs_update(manifest, &persisted_inputs);
     })
     .await
-    .is_none()
     {
-        let mut manifest = summary.manifest.clone();
-        apply_pipeline_host_inputs_update(&mut manifest, &persisted_inputs);
-        streams_persist::persist_manifest(&super::util::camera_id_for_manifest(&manifest), Some(stream_id), manifest).await;
+        return Err(ApiError::internal(err));
     }
 
     Ok(SetStreamCropResponse { stream_id, crop, roi_x, roi_y, roi_w, roi_h, pipeline_id: target_pipeline_id, disabled, roi_inputs_used: roi_usage.used, warnings: roi_usage.warnings })
@@ -300,15 +296,12 @@ pub(crate) async fn apply_stream_crosshair(state: &AppState, stream_id: Uuid, cr
         }
     }
 
-    if update_persisted_manifest_by_stream_id(stream_id, |manifest| {
+    if let Err(err) = super::util::persist_live_stream_manifest_update(state, stream_id, |manifest| {
         apply_pipeline_host_inputs_update(manifest, &persisted_inputs);
     })
     .await
-    .is_none()
     {
-        let mut manifest = summary.manifest.clone();
-        apply_pipeline_host_inputs_update(&mut manifest, &persisted_inputs);
-        streams_persist::persist_manifest(&super::util::camera_id_for_manifest(&manifest), Some(stream_id), manifest).await;
+        return Err(ApiError::internal(err));
     }
 
     Ok(SetStreamCrosshairResponse {
@@ -347,15 +340,12 @@ pub(crate) async fn apply_stream_ordering(state: &AppState, stream_id: Uuid, mod
         }
     }
 
-    if update_persisted_manifest_by_stream_id(stream_id, |manifest| {
+    if let Err(err) = super::util::persist_live_stream_manifest_update(state, stream_id, |manifest| {
         apply_pipeline_host_inputs_update(manifest, &persisted_inputs);
     })
     .await
-    .is_none()
     {
-        let mut manifest = summary.manifest.clone();
-        apply_pipeline_host_inputs_update(&mut manifest, &persisted_inputs);
-        streams_persist::persist_manifest(&super::util::camera_id_for_manifest(&manifest), Some(stream_id), manifest).await;
+        return Err(ApiError::internal(err));
     }
 
     Ok(SetStreamOrderingResponse { stream_id, mode: normalized_mode, pipeline_id: target_pipeline_id, ordering_inputs_used: ordering_usage.used, warnings: ordering_usage.warnings })

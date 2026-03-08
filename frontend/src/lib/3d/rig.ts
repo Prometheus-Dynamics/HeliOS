@@ -533,12 +533,15 @@ function addDirectionIndicator(group: THREE.Group, dims: RobotDimensions, vertic
 }
 
 export function createBumperGeometry(dimensions: RobotDimensions): THREE.ExtrudeGeometry {
-  const outerRadius = Math.max(dimensions.bumperThickness / 2, 0.02);
-  const innerWidth = Math.max(dimensions.width - dimensions.bumperThickness * 2, 0.05);
-  const innerLength = Math.max(dimensions.length - dimensions.bumperThickness * 2, 0.05);
+  const bumperThickness = Math.max(dimensions.bumperThickness, 0.001);
+  const innerWidth = Math.max(dimensions.width, 0.05);
+  const innerLength = Math.max(dimensions.length, 0.05);
+  const outerWidth = innerWidth + bumperThickness * 2;
+  const outerLength = innerLength + bumperThickness * 2;
+  const outerRadius = Math.max(bumperThickness / 2, 0.02);
 
   const shape = new THREE.Shape();
-  roundedRect(shape, -dimensions.width / 2, -dimensions.length / 2, dimensions.width, dimensions.length, outerRadius);
+  roundedRect(shape, -outerWidth / 2, -outerLength / 2, outerWidth, outerLength, outerRadius);
 
   const hole = new THREE.Path();
   roundedRect(
@@ -547,7 +550,7 @@ export function createBumperGeometry(dimensions: RobotDimensions): THREE.Extrude
     -innerLength / 2,
     innerWidth,
     innerLength,
-    Math.max(0, outerRadius - dimensions.bumperThickness / 2)
+    Math.max(0, outerRadius - bumperThickness / 2)
   );
   shape.holes.push(hole);
 

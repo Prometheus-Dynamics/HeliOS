@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
+  import { normalizeUploadError, uploadSizeHeaders, verifyUploadedBytes } from '$lib/api/uploadIntegrity';
   import { apiFetch } from '../api';
   import { buildErrorMessage } from '$lib/ui/errorPolicy';
   import type { RealtimeUpdateEvent } from '$lib/api/realtimeUpdates';
@@ -137,7 +138,12 @@
     try {
       const form = new FormData();
       form.append('file', uploadFile, uploadFile.name);
-      const upload = await apiFetch<PluginUploadResponse>('/plugins/upload', { method: 'POST', body: form });
+      const upload = await apiFetch<PluginUploadResponse>('/plugins/upload', {
+        method: 'POST',
+        body: form,
+        headers: uploadSizeHeaders(uploadFile)
+      });
+      verifyUploadedBytes(uploadFile.size, upload.size_bytes, 'Plugin upload');
       await apiFetch('/plugins/install', {
         method: 'POST',
         body: JSON.stringify({ upload_name: upload.name })
@@ -145,7 +151,7 @@
       await loadPlugins();
       closeUploadModal();
     } catch (err) {
-      uploadError = buildErrorMessage({ error: err, fallback: 'Unable to upload plugin.' });
+      uploadError = buildErrorMessage({ error: normalizeUploadError(err, 'Plugin upload'), fallback: 'Unable to upload plugin.' });
     } finally {
       uploadBusy = false;
     }

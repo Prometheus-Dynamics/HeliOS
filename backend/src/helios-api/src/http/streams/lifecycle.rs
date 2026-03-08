@@ -784,7 +784,9 @@ pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> R
         match state.engine.start_stream(manifest.clone()).await {
             Ok(EngineEvent::Started { stream_id, descriptor, .. }) => {
                 let persist_id = owner_camera_id.clone().unwrap_or_else(|| camera_id_for_manifest(&manifest));
-                streams_persist::persist_manifest(&persist_id, Some(stream_id), manifest.clone()).await;
+                if let Err(err) = streams_persist::persist_manifest_checked(&persist_id, Some(stream_id), manifest.clone()).await {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("stream started live but failed to persist: {err}")))).into_response();
+                }
                 return (StatusCode::OK, Json(StartStreamResponse { stream_id, descriptor })).into_response();
             }
             Ok(EngineEvent::Nack { code, reason, .. }) => {
@@ -807,7 +809,10 @@ pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> R
             Ok(_) | Err(_) => match wait_for_stream_started(&state, requested_id, Duration::from_secs(20)).await {
                 Ok(Some(descriptor)) => {
                     let persist_id = owner_camera_id.clone().unwrap_or_else(|| camera_id_for_manifest(&manifest));
-                    streams_persist::persist_manifest(&persist_id, Some(requested_id), manifest.clone()).await;
+                    if let Err(err) = streams_persist::persist_manifest_checked(&persist_id, Some(requested_id), manifest.clone()).await {
+                        return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("stream started live but failed to persist: {err}"))))
+                            .into_response();
+                    }
                     return (StatusCode::OK, Json(StartStreamResponse { stream_id: requested_id, descriptor })).into_response();
                 }
                 Ok(None) => {
@@ -825,7 +830,9 @@ pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> R
 pub(crate) async fn delete_stream(state: AppState, id: Uuid) -> Response {
     // Unregister should be fast and resilient: remove persisted state immediately, and stop the
     // running stream on a best-effort basis (without blocking the HTTP request on engine IPC).
-    let _ = streams_persist::remove_record_by_stream_id(id).await;
+    if let Err(err) = streams_persist::remove_record_by_stream_id(id).await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("failed to remove persisted stream record: {err}")))).into_response();
+    }
 
     // If the stream isn't running, we're done.
     if let Ok(streams) = state.engine.list_streams_with_timeout(list_streams_timeout()).await

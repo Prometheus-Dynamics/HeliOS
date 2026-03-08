@@ -1221,7 +1221,7 @@ fn detach_pipeline_from_manifest(manifest: &mut StreamManifest, pipeline_id: Uui
     changed
 }
 
-async fn detach_pipeline_from_streams(state: &AppState, pipeline_id: Uuid) {
+async fn detach_pipeline_from_streams(state: &AppState, pipeline_id: Uuid) -> Result<(), String> {
     let mut updated_streams: HashSet<Uuid> = HashSet::new();
     let running = match state.engine.list_streams().await {
         Ok(list) => list,
@@ -1262,8 +1262,12 @@ async fn detach_pipeline_from_streams(state: &AppState, pipeline_id: Uuid) {
             continue;
         }
         manifest.identity.id = Some(stream_id);
-        streams_persist::persist_manifest(&record.camera_id, Some(stream_id), manifest).await;
+        streams_persist::persist_manifest_checked(&record.camera_id, Some(stream_id), manifest)
+            .await
+            .map_err(|err| format!("deleted graph but failed to persist detached stream manifest for {}: {err}", record.camera_id))?;
     }
+
+    Ok(())
 }
 
 #[utoipa::path(
@@ -1289,8 +1293,10 @@ async fn delete_graph(State(state): State<AppState>, Path(id): Path<Uuid>) -> im
     match fs::remove_file(&path).await {
         Ok(()) => {
             clear_graph_validation_state(id).await;
-            detach_pipeline_from_streams(&state, id).await;
-            StatusCode::NO_CONTENT.into_response()
+            match detach_pipeline_from_streams(&state, id).await {
+                Ok(()) => StatusCode::NO_CONTENT.into_response(),
+                Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, Json(PipelineError { error: err })).into_response(),
+            }
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => (StatusCode::NOT_FOUND, Json(PipelineError { error: "graph not found".into() })).into_response(),
         Err(err) => map_io_error(err, "failed to delete graph"),

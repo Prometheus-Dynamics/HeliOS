@@ -1,4 +1,5 @@
 import { apiUrl } from '$lib';
+import { normalizeUploadError, uploadSizeHeaders, verifyUploadedBytes } from '$lib/api/uploadIntegrity';
 import { invalidateSWRPrefix } from '$lib/utils/swrCache';
 import { classifyMediaKind, type MediaAssetType } from './mediaKind';
 import { emitMediaMutation } from './mutations';
@@ -383,12 +384,18 @@ export async function uploadMediaAsset(request: MediaUploadRequest): Promise<Med
 
   const endpoint = mediaUrl('/media');
   if (typeof XMLHttpRequest === 'undefined') {
-    const response = await fetch(endpoint, { method: 'POST', body: form });
+    let response: Response;
+    try {
+      response = await fetch(endpoint, { method: 'POST', body: form, headers: uploadSizeHeaders(file) });
+    } catch (error) {
+      throw normalizeUploadError(error, 'Media upload');
+    }
     if (!response.ok) {
       const text = await response.text();
       throw new Error(text || `Upload failed (${response.status})`);
     }
     const payload = (await response.json()) as MediaItem;
+    verifyUploadedBytes(file.size, payload.size_bytes, 'Media upload');
     return mapAssetFromItem(payload);
   }
 
@@ -397,19 +404,26 @@ export async function uploadMediaAsset(request: MediaUploadRequest): Promise<Med
     xhr.open('POST', endpoint);
     xhr.responseType = 'json';
     xhr.onerror = () => {
-      reject(new Error('Network error during upload'));
+      reject(normalizeUploadError(new Error('Network error during upload'), 'Media upload'));
     };
+    const uploadHeaders = uploadSizeHeaders(file);
+    for (const [headerName, headerValue] of Object.entries(uploadHeaders)) {
+      xhr.setRequestHeader(headerName, headerValue);
+    }
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
           if (xhr.response) {
-            resolve(xhr.response as MediaItem);
+            const responsePayload = xhr.response as MediaItem;
+            verifyUploadedBytes(file.size, responsePayload.size_bytes, 'Media upload');
+            resolve(responsePayload);
             return;
           }
           const parsed = JSON.parse(xhr.responseText) as MediaItem;
+          verifyUploadedBytes(file.size, parsed.size_bytes, 'Media upload');
           resolve(parsed);
         } catch (error) {
-          reject(new Error('Failed to parse upload response'));
+          reject(error instanceof Error ? error : new Error('Failed to parse upload response'));
         }
         return;
       }
@@ -483,7 +497,16 @@ export async function deleteMediaAsset(assetId: string): Promise<void> {
 export async function attachLabelFile(assetId: string, file: File): Promise<MediaAsset> {
   const form = new FormData();
   form.set('label', file, file.name);
-  const response = await fetch(mediaUrl(`/media/${encodeURIComponent(assetId)}/label`), { method: 'POST', body: form });
+  let response: Response;
+  try {
+    response = await fetch(mediaUrl(`/media/${encodeURIComponent(assetId)}/label`), {
+      method: 'POST',
+      body: form,
+      headers: uploadSizeHeaders(file)
+    });
+  } catch (error) {
+    throw normalizeUploadError(error, 'Label upload');
+  }
   if (!response.ok) {
     const text = await response.text();
     throw new Error(text || `Failed to attach label (${response.status})`);

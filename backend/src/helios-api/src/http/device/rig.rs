@@ -428,7 +428,9 @@ async fn update_running_stream_pose(state: &std::sync::Arc<IpcHandles>, camera_u
         }
         let mut manifest = stream.manifest.clone();
         manifest.pose = pose.clone();
-        streams_persist::persist_manifest(&camera_id_for_manifest(&manifest), Some(stream.stream_id), manifest).await;
+        streams_persist::persist_manifest_checked(&camera_id_for_manifest(&manifest), Some(stream.stream_id), manifest)
+            .await
+            .map_err(|err| format!("updated live stream pose but failed to persist: {err}"))?;
         return Ok(true);
     }
     Ok(false)
