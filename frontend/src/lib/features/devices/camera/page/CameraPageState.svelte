@@ -1754,19 +1754,20 @@
     
   };
 
-  const ctx = $derived.by(() => ({
-    ...core,
-    ...streamState,
-    ...pipelineRuntime,
-    ...calibrationRuntime,
-    ...ui,
-    ...constants,
-    ...services,
-    ...helpers,
-    ...derivedState,
-    streamBindings,
-    pipelineBindings
-  }));
+  const mergeCtxParts = (...sources: object[]): CameraPageCtx => {
+    const merged: Record<string, unknown> = {};
+    for (const source of sources) {
+      Object.defineProperties(merged, Object.getOwnPropertyDescriptors(source));
+    }
+    return merged as CameraPageCtx;
+  };
+
+  const ctx = $derived.by(() =>
+    mergeCtxParts(core, streamState, pipelineRuntime, calibrationRuntime, ui, constants, services, helpers, derivedState, {
+      streamBindings,
+      pipelineBindings
+    })
+  );
 
 </script>
 

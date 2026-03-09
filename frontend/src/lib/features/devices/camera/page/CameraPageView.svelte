@@ -12,20 +12,20 @@
     ComponentProps<typeof CameraSidebarSection>['ctx'] &
     ComponentProps<typeof CameraStreamSection>['ctx'];
 
-  const { ctx } = $props<{ ctx: CameraPageViewCtx }>();
+  let { ctx = $bindable() }: { ctx: CameraPageViewCtx } = $props();
 </script>
 
 {#snippet headerActions()}
   <CameraRecordingControls {ctx} />
 {/snippet}
 
-<CameraPageLayout {ctx} headerActions={headerActions}>
+<CameraPageLayout bind:ctx={ctx} headerActions={headerActions}>
   {#snippet main()}
     <CameraStreamSection {ctx} />
   {/snippet}
 
   {#snippet sidebar()}
-    <CameraSidebarSection {ctx} />
+    <CameraSidebarSection bind:ctx={ctx} />
   {/snippet}
 
   {#snippet overlays()}

@@ -25,7 +25,7 @@ const DEFAULT_MEDIA_SEED_DIR: &str = "/usr/share/helios/media";
 const MEDIA_SEED_DIR_ENV: &str = "HELIOS_API_MEDIA_SEED_DIR";
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/", get(list_maps)).route("/:id", get(fetch_map)).route("/upload", post(upload_limelight_fmap)).route_layer(DefaultBodyLimit::disable())
+    Router::new().route("/", get(list_maps)).route("/{id}", get(fetch_map)).route("/upload", post(upload_limelight_fmap)).route_layer(DefaultBodyLimit::disable())
 }
 
 pub(crate) async fn load_map_document(id: &str) -> ApiResult<FieldMapDocument> {

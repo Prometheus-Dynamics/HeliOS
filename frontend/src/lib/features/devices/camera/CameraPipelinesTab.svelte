@@ -90,6 +90,8 @@
   type Subscribable<T> = {
     subscribe: (run: (value: T) => void) => (() => void) | { unsubscribe?: () => void } | void;
   };
+  type DragStartHandler = (event: DragEvent) => void;
+  type GridDropHandler = (event: DragEvent) => void;
 
   const asRecord = (value: unknown): Record<string, unknown> | null =>
     value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
@@ -101,8 +103,82 @@
 
   const isSubscribable = <T,>(value: unknown): value is Subscribable<T> =>
     Boolean(value) && typeof value === 'object' && typeof (value as { subscribe?: unknown }).subscribe === 'function';
+  const isFunction = <T extends (...args: never[]) => unknown>(value: unknown): value is T => typeof value === 'function';
 
   const normalizeStreamId = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+  const normalizeId = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+  const resolvePipelineLabel = (pipelineId: string | null): string => {
+    const normalizedPipelineId = normalizeId(pipelineId);
+    if (typeof pipelineLabel === 'function') {
+      const resolved = pipelineLabel(normalizedPipelineId);
+      if (typeof resolved === 'string' && resolved.trim().length) {
+        return resolved.trim();
+      }
+    }
+    if (normalizedPipelineId === RAW_PIPELINE_ID) return 'Raw stream';
+    const graphEntry = Array.isArray(pipelineGraphs)
+      ? (pipelineGraphs.map(asGraphEntry).find((entry) => normalizeId(entry?.id) === normalizedPipelineId) ?? null)
+      : null;
+    const graphName = typeof graphEntry?.name === 'string' ? graphEntry.name.trim() : '';
+    if (graphName.length) return graphName;
+    return normalizedPipelineId.length ? normalizedPipelineId : 'Pipeline';
+  };
+  const dragStartHandlerFor = (pipelineId: string, from?: { row: number; column: number }): DragStartHandler => {
+    if (!isFunction<(pipelineId: string, from?: { row: number; column: number }) => DragStartHandler>(handlePipelineDragStart)) {
+      return () => {};
+    }
+    const handler = handlePipelineDragStart(pipelineId, from);
+    return isFunction<DragStartHandler>(handler) ? handler : () => {};
+  };
+  const readPipelineForCell = (row: number, column: number): string | null => {
+    if (!isFunction<(row: number, column: number) => string | null>(pipelineForCell)) return null;
+    return pipelineForCell(row, column);
+  };
+  const readOutputSelectionForPipeline = (pipelineId: string): string | null => {
+    if (!isFunction<(pipelineId: string) => string | null>(outputSelectionForPipeline)) return null;
+    return outputSelectionForPipeline(pipelineId);
+  };
+  const readOutputKeyForCell = (row: number, column: number): string | null => {
+    if (!isFunction<(row: number, column: number) => string | null>(outputKeyForCell)) return null;
+    return outputKeyForCell(row, column);
+  };
+  const applyGridDimensions = (rows: number, columns: number): void => {
+    if (isFunction<(rows: number, columns: number) => void>(setPipelineGridDimensions)) {
+      setPipelineGridDimensions(rows, columns);
+    }
+  };
+  const applyAllowDrop = (event: DragEvent): void => {
+    if (isFunction<(event: DragEvent) => void>(allowDrop)) {
+      allowDrop(event);
+      return;
+    }
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'move';
+    }
+  };
+  const dropHandlerForCell = (row: number, column: number): GridDropHandler => {
+    if (!isFunction<(row: number, column: number) => GridDropHandler>(dropOnCell)) {
+      return (event) => event.preventDefault();
+    }
+    const handler = dropOnCell(row, column);
+    return isFunction<GridDropHandler>(handler) ? handler : (event) => event.preventDefault();
+  };
+  const clearGridCell = (row: number, column: number): void => {
+    if (isFunction<(row: number, column: number) => void>(clearCell)) {
+      clearCell(row, column);
+    }
+  };
+  const setOutputSelection = (pipelineId: string, next: string | null): void => {
+    if (isFunction<(pipelineId: string, next: string | null) => void>(setOutputSelectionForPipeline)) {
+      setOutputSelectionForPipeline(pipelineId, next);
+    }
+  };
+  const setLiveOutputSelection = async (next: string | null): Promise<void> => {
+    if (isFunction<(next: string | null) => Promise<unknown> | unknown>(setLivePipelineOutput)) {
+      await setLivePipelineOutput(next);
+    }
+  };
   const normalizedStreamId = $derived.by(() => normalizeStreamId(streamId));
   $effect(() => {
     void pipelineGridRowIndices;
@@ -121,7 +197,7 @@
     const normalizedPipelineId = typeof pipelineId === 'string' ? pipelineId.trim() : '';
     if (!normalizedPipelineId) return;
     profilerPipelineId = normalizedPipelineId === RAW_PIPELINE_ID ? RAW_PIPELINE_UUID : normalizedPipelineId;
-    profilerPipelineLabel = pipelineLabel(normalizedPipelineId);
+    profilerPipelineLabel = resolvePipelineLabel(normalizedPipelineId);
     profilerOpen = true;
   };
 
@@ -166,7 +242,6 @@
   const safeColumns = $derived.by(() => Math.min(Math.max(Math.trunc(pipelineGridColumns ?? 1), 1), 6));
   const rowIndices = $derived.by(() => Array.from({ length: safeRows }, (_, i) => i));
   const columnIndices = $derived.by(() => Array.from({ length: safeColumns }, (_, i) => i));
-  const normalizeId = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
   const dedupePipelineIds = (ids: unknown[]): string[] => {
     const out: string[] = [];
     const seen = new SvelteSet<string>();
@@ -227,10 +302,10 @@
     const entries: GridPipelineEntry[] = [];
     rowIndices.forEach((row) => {
       columnIndices.forEach((column) => {
-        const pipelineIdRaw = pipelineForCell(row, column);
+        const pipelineIdRaw = readPipelineForCell(row, column);
         const pipelineId = normalizeId(pipelineIdRaw);
         if (!pipelineId.length) return;
-        const outputKey = normalizeKey(outputKeyForCell?.(row, column));
+        const outputKey = normalizeKey(readOutputKeyForCell(row, column));
         entries.push({
           row,
           column,
@@ -345,7 +420,7 @@
     });
     rowIndices.forEach((row) => {
       columnIndices.forEach((column) => {
-        const pipelineId = pipelineForCell(row, column);
+        const pipelineId = readPipelineForCell(row, column);
         const normalized = typeof pipelineId === 'string' ? pipelineId.trim() : '';
         if (!normalized || normalized === RAW_PIPELINE_ID) return;
         if (!hasLoadedOutputOptions(normalized)) missing.add(normalized);
@@ -579,7 +654,7 @@
           role="button"
           tabindex="0"
           draggable="true"
-          ondragstart={handlePipelineDragStart(RAW_PIPELINE_ID)}
+          ondragstart={dragStartHandlerFor(RAW_PIPELINE_ID)}
           title="Raw stream"
           aria-label="Raw stream"
         >
@@ -601,19 +676,19 @@
                   event.preventDefault();
                   return;
                 }
-                handlePipelineDragStart(pipelineId)(event as DragEvent);
+                dragStartHandlerFor(pipelineId)(event as DragEvent);
               }}
               title={pipelineId}
-              aria-label={pipelineLabel(pipelineId)}
+              aria-label={resolvePipelineLabel(pipelineId)}
             >
             <PipelineIcon
               pipelineId={pipelineId}
               size="sm"
               className="shrink-0"
-              ariaLabel={pipelineLabel(pipelineId)}
+              ariaLabel={resolvePipelineLabel(pipelineId)}
               title={pipelineId}
             />
-            <span class="max-w-[180px] truncate text-xs">{pipelineLabel(pipelineId)}</span>
+            <span class="max-w-[180px] truncate text-xs">{resolvePipelineLabel(pipelineId)}</span>
             {#if issueCount > 0}
               <span
                 class="inline-flex h-6 w-6 items-center justify-center rounded-full border border-amber-500/60 bg-amber-500/10 text-amber-200"
@@ -705,7 +780,7 @@
           </p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
-          <button class="btn btn-3xs preset-tonal uppercase tracking-[0.3em]" type="button" onclick={() => setPipelineGridDimensions(1, 1)}>
+          <button class="btn btn-3xs preset-tonal uppercase tracking-[0.3em]" type="button" onclick={() => applyGridDimensions(1, 1)}>
             1×1
           </button>
         </div>
@@ -720,7 +795,7 @@
             min="1"
             max="6"
             value={pipelineGridRows}
-            onchange={(e) => setPipelineGridDimensions(Number((e.currentTarget as HTMLInputElement).value), pipelineGridColumns)}
+            onchange={(e) => applyGridDimensions(Number((e.currentTarget as HTMLInputElement).value), pipelineGridColumns)}
           />
         </label>
         <label class="text-sm">
@@ -731,7 +806,7 @@
             min="1"
             max="6"
             value={pipelineGridColumns}
-            onchange={(e) => setPipelineGridDimensions(pipelineGridRows, Number((e.currentTarget as HTMLInputElement).value))}
+            onchange={(e) => applyGridDimensions(pipelineGridRows, Number((e.currentTarget as HTMLInputElement).value))}
           />
         </label>
       </div>
@@ -745,10 +820,10 @@
       >
         {#each rowIndices as row (row)}
           {#each columnIndices as column (column)}
-            {@const cellPipeline = pipelineForCell(row, column)}
+            {@const cellPipeline = readPipelineForCell(row, column)}
             {@const isOutputCell = row === 0 && column === 0}
             {@const isMultiplex = safeRows * safeColumns > 1}
-            {@const outputValue = cellPipeline ? (isMultiplex ? outputKeyForCell?.(row, column) : outputSelectionForPipeline(cellPipeline)) : null}
+            {@const outputValue = cellPipeline ? (isMultiplex ? readOutputKeyForCell(row, column) : readOutputSelectionForPipeline(cellPipeline)) : null}
             {@const outputOptions =
               cellPipeline
                 ? (cellPipeline === RAW_PIPELINE_ID ? ['raw', 'undistorted'] : pipelineOutputOptionsCache[cellPipeline] ?? outputOptionsFallback[cellPipeline] ?? [])
@@ -773,10 +848,10 @@
                   return;
                 }
                 if (!cellPipeline) return;
-                handlePipelineDragStart(cellPipeline, { row, column })(event as DragEvent);
+                dragStartHandlerFor(cellPipeline, { row, column })(event as DragEvent);
               }}
-              ondragover={allowDrop}
-              ondrop={dropOnCell(row, column)}
+              ondragover={applyAllowDrop}
+              ondrop={dropHandlerForCell(row, column)}
             >
               <div class="absolute right-2 top-2 flex items-center gap-2">
                 {#if cellPipeline}
@@ -785,7 +860,7 @@
                     type="button"
                     onclick={(e) => {
                       e.stopPropagation();
-                      clearCell(row, column);
+                      clearGridCell(row, column);
                     }}
                   >
                     Clear
@@ -863,7 +938,7 @@
                         pipelineId={cellPipeline}
                         size="lg"
                         className={pipelineGridIsSingle ? 'h-24 w-24' : 'h-16 w-16'}
-                        ariaLabel={pipelineLabel(cellPipeline)}
+                        ariaLabel={resolvePipelineLabel(cellPipeline)}
                         title={cellPipeline}
                       />
                     {/if}
@@ -885,7 +960,7 @@
                         {#each gridPipelineEntries as source (`${source.row}:${source.column}`)}
                           {#if source.pipelineId !== cellPipeline && source.pipelineId !== RAW_PIPELINE_ID}
                             <option value={`pipe|${source.pipelineId}|${source.outputKey ?? ''}|${source.resolvedPort}`}>
-                              {pipelineLabel(source.pipelineId)} ({source.row + 1}:{source.column + 1}) - {source.resolvedPort}
+                              {resolvePipelineLabel(source.pipelineId)} ({source.row + 1}:{source.column + 1}) - {source.resolvedPort}
                             </option>
                           {/if}
                         {/each}
@@ -906,10 +981,10 @@
                             setOutputKeyForCell?.(row, column, next);
                             schedulePipelineLayoutApply?.();
                           } else {
-                            setOutputSelectionForPipeline(cellPipeline, next);
+                            setOutputSelection(cellPipeline, next);
                             if (isOutputCell) {
                               selectedPipelineOutput = next;
-                              void setLivePipelineOutput(next);
+                              void setLiveOutputSelection(next);
                             }
                           }
                         }}
@@ -928,7 +1003,7 @@
                     {/if}
                   </div>
                   <div class="min-w-0">
-                    <p class="truncate text-xs text-surface-200">{pipelineLabel(cellPipeline)}</p>
+                    <p class="truncate text-xs text-surface-200">{resolvePipelineLabel(cellPipeline)}</p>
                     <p class="truncate text-micro-tight text-surface-500">{cellPipeline}</p>
                   </div>
                 {:else}
@@ -969,7 +1044,7 @@
           <p class="text-2xs uppercase tracking-[0.3em] text-surface-500">Remove pipeline</p>
           <p class="mt-1 text-sm text-surface-200">Remove this pipeline from the stream?</p>
           {#if pipelineId}
-            <p class="mt-1 text-xs text-surface-500">{pipelineLabel(pipelineId)}</p>
+            <p class="mt-1 text-xs text-surface-500">{resolvePipelineLabel(pipelineId)}</p>
           {/if}
           <p class="mt-2 text-xs text-surface-500">It will be detached and removed from any grid slots.</p>
         </div>

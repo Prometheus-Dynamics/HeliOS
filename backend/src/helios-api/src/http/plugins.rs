@@ -29,11 +29,11 @@ pub fn router() -> Router<AppState> {
         .route("/", get(list_plugins))
         .route("/upload", post(upload_plugin))
         .route("/install", post(install_plugin))
-        .route("/disabled/:name", get(download_disabled))
-        .route("/uploads/:name", get(download_upload))
-        .route("/:name/disable", post(disable_plugin))
-        .route("/:name/enable", post(enable_plugin))
-        .route("/:name", get(download_plugin).delete(delete_plugin))
+        .route("/disabled/{name}", get(download_disabled))
+        .route("/uploads/{name}", get(download_upload))
+        .route("/{name}/disable", post(disable_plugin))
+        .route("/{name}/enable", post(enable_plugin))
+        .route("/{name}", get(download_plugin).delete(delete_plugin))
         .route_layer(DefaultBodyLimit::disable())
 }
 

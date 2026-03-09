@@ -14,6 +14,10 @@ use tracing::warn;
 
 use crate::error::{Error, Result};
 
+// Hold curve-based fan speed briefly on cool-down so minor thermal jitter
+// around a breakpoint does not cause audible speed hunting.
+const CURVE_DOWN_HYSTERESIS_C: f32 = 2.0;
+
 #[derive(Debug, Default)]
 struct FanRuntime {
     config: FanConfig,
@@ -119,13 +123,14 @@ async fn fan_loop(state: Arc<RwLock<FanRuntime>>, shutdown: CancellationToken, n
             }
         }
 
-        let (config, previous_path, last_temp) = {
+        let (config, previous_path, last_temp, previous_curve_target) = {
             let guard = state.read().await;
-            (guard.config.clone(), guard.last_working_pwm.clone(), guard.status.temperature_c)
+            let previous_curve_target = if guard.status.updated_at_ms.is_some() && matches!(guard.status.mode, FanMode::Curve) { Some(guard.status.target_percent) } else { None };
+            (guard.config.clone(), guard.last_working_pwm.clone(), guard.status.temperature_c, previous_curve_target)
         };
 
         let temperature: Option<f32> = tokio::task::spawn_blocking(read_cpu_temperature).await.unwrap_or_default().or(last_temp);
-        let (mode, target_percent) = compute_target(&config, temperature);
+        let (mode, target_percent) = compute_target(&config, temperature, previous_curve_target);
         let ApplyResult { path_used, error } = apply_pwm(&config, previous_path, target_percent).await;
         let rpm_config = config.clone();
         let rpm_path_used = path_used.clone();
@@ -392,7 +397,7 @@ fn resolve_pwm_target(path: &Path) -> Option<PwmTarget> {
     None
 }
 
-fn compute_target(config: &FanConfig, temperature: Option<f32>) -> (FanMode, u8) {
+fn compute_target(config: &FanConfig, temperature: Option<f32>, previous_curve_target: Option<u8>) -> (FanMode, u8) {
     if !config.enabled {
         return (FanMode::Disabled, 0);
     }
@@ -413,17 +418,34 @@ fn compute_target(config: &FanConfig, temperature: Option<f32>) -> (FanMode, u8)
 
     let temp = match temperature {
         Some(value) => value,
-        None => return (FanMode::Curve, clamp_percent(points.first().map(|p| p.percent).unwrap_or(min), min, max)),
+        None => {
+            let fallback = previous_curve_target.unwrap_or_else(|| points.first().map(|p| p.percent).unwrap_or(min));
+            return (FanMode::Curve, clamp_percent(fallback, min, max));
+        }
     };
 
+    let target = curve_target_for_temperature(points, temp, min, max);
+    let previous = previous_curve_target.map(|value| clamp_percent(value, min, max));
+    if let Some(previous) = previous
+        && target < previous
+        && let Some(previous_temp) = curve_temperature_for_percent(points, previous)
+        && temp >= previous_temp - CURVE_DOWN_HYSTERESIS_C
+    {
+        return (FanMode::Curve, previous);
+    }
+
+    (FanMode::Curve, target)
+}
+
+fn curve_target_for_temperature(points: &[fan_config::FanCurvePoint], temp: f32, min: u8, max: u8) -> u8 {
     if temp <= points.first().map(|p| p.temp_c).unwrap_or(temp) {
         let percent = points.first().map(|p| p.percent).unwrap_or(min);
-        return (FanMode::Curve, clamp_percent(percent, min, max));
-    }
+        return clamp_percent(percent, min, max);
+    };
 
     if temp >= points.last().map(|p| p.temp_c).unwrap_or(temp) {
         let percent = points.last().map(|p| p.percent).unwrap_or(max);
-        return (FanMode::Curve, clamp_percent(percent, min, max));
+        return clamp_percent(percent, min, max);
     }
 
     for window in points.windows(2) {
@@ -434,11 +456,42 @@ fn compute_target(config: &FanConfig, temperature: Option<f32>) -> (FanMode, u8)
         }
         let ratio = ((temp - a.temp_c) / (b.temp_c - a.temp_c)).clamp(0.0, 1.0);
         let interpolated = a.percent as f32 + ratio * (b.percent as f32 - a.percent as f32);
-        return (FanMode::Curve, clamp_percent(interpolated.round() as u8, min, max));
+        return clamp_percent(interpolated.round() as u8, min, max);
     }
 
     let percent = points.last().map(|p| p.percent).unwrap_or(max);
-    (FanMode::Curve, clamp_percent(percent, min, max))
+    clamp_percent(percent, min, max)
+}
+
+fn curve_temperature_for_percent(points: &[fan_config::FanCurvePoint], percent: u8) -> Option<f32> {
+    let first = points.first()?;
+    let target = percent as f32;
+    if target <= first.percent as f32 {
+        return Some(first.temp_c);
+    }
+
+    let last = points.last()?;
+    if target >= last.percent as f32 {
+        return Some(last.temp_c);
+    }
+
+    for window in points.windows(2) {
+        let a = &window[0];
+        let b = &window[1];
+        let low = a.percent.min(b.percent) as f32;
+        let high = a.percent.max(b.percent) as f32;
+        if target < low || target > high {
+            continue;
+        }
+        let delta = b.percent as f32 - a.percent as f32;
+        if delta.abs() < f32::EPSILON {
+            return Some(b.temp_c);
+        }
+        let ratio = ((target - a.percent as f32) / delta).clamp(0.0, 1.0);
+        return Some(a.temp_c + ratio * (b.temp_c - a.temp_c));
+    }
+
+    Some(last.temp_c)
 }
 
 fn clamp_percent(value: u8, min: u8, max: u8) -> u8 {
@@ -593,4 +646,50 @@ fn find_fan_input(base: &Path) -> Option<PathBuf> {
 fn read_rpm(path: &Path) -> Option<u32> {
     let text = fs::read_to_string(path).ok()?;
     text.trim().parse::<u32>().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn curve_config() -> FanConfig {
+        fan_config::normalize_fan_config(FanConfig {
+            enabled: true,
+            pwm_path: "auto".into(),
+            tacho_path: Some("auto".into()),
+            min_percent: 35,
+            max_percent: 100,
+            manual_percent: None,
+            poll_interval_ms: 5_000,
+            invert_pwm: true,
+            curve: vec![
+                fan_config::FanCurvePoint { temp_c: 40.0, percent: 35 },
+                fan_config::FanCurvePoint { temp_c: 50.0, percent: 55 },
+                fan_config::FanCurvePoint { temp_c: 60.0, percent: 75 },
+                fan_config::FanCurvePoint { temp_c: 70.0, percent: 100 },
+            ],
+        })
+        .expect("test fan config should be valid")
+    }
+
+    #[test]
+    fn compute_target_holds_previous_curve_target_on_small_cooldown() {
+        let config = curve_config();
+        let (_mode, target) = compute_target(&config, Some(49.0), Some(55));
+        assert_eq!(target, 55);
+    }
+
+    #[test]
+    fn compute_target_reduces_after_hysteresis_band() {
+        let config = curve_config();
+        let (_mode, target) = compute_target(&config, Some(47.5), Some(55));
+        assert!(target < 55, "expected target to drop after cooling beyond hysteresis, got {target}");
+    }
+
+    #[test]
+    fn compute_target_allows_immediate_ramp_up() {
+        let config = curve_config();
+        let (_mode, target) = compute_target(&config, Some(52.0), Some(55));
+        assert!(target > 55, "expected target to rise immediately on heating, got {target}");
+    }
 }

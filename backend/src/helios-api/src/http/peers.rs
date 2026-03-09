@@ -37,12 +37,12 @@ pub fn router() -> Router<AppState> {
         .route("/discover", post(discover_peers))
         .route("/probe", post(probe_peer))
         .route("/integrations/photonvision/streams", post(photonvision_discover_streams))
-        .route("/:id/streams", get(list_peer_streams_for_peer))
-        .route("/:id/streams/:stream_id/format", get(proxy_peer_stream_format))
-        .route("/:id/streams/:stream_id/preview", get(proxy_peer_stream_preview))
-        .route("/:id/streams/:stream_id/frame", get(proxy_peer_stream_frame))
-        .route("/:id/pipelines/sync", post(sync_peer_pipelines))
-        .route("/:id", delete(remove_peer))
+        .route("/{id}/streams", get(list_peer_streams_for_peer))
+        .route("/{id}/streams/{stream_id}/format", get(proxy_peer_stream_format))
+        .route("/{id}/streams/{stream_id}/preview", get(proxy_peer_stream_preview))
+        .route("/{id}/streams/{stream_id}/frame", get(proxy_peer_stream_frame))
+        .route("/{id}/pipelines/sync", post(sync_peer_pipelines))
+        .route("/{id}", delete(remove_peer))
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]

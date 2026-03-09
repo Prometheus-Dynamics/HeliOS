@@ -204,6 +204,7 @@
       | 'pipelineGraphError'
       | 'openPipelineAssignModal'
       | 'pipelineGraphLoading'
+      | 'assignedPipelineIds'
       | 'handlePipelineDragStart'
       | 'RAW_PIPELINE_ID'
       | 'RAW_PIPELINE_UUID'
@@ -230,6 +231,8 @@
       | 'setLivePipelineOutput'
       | 'pipelineAssignFilteredGraphs'
       | 'pipelineGraphs'
+      | 'closePipelineRemoveModal'
+      | 'confirmPipelineRemove'
       | 'closePipelineAssignModal'
       | 'savePipelineAssignModal'
       | 'listPipelineTemplatesForAssign'
@@ -250,7 +253,7 @@
     return isPipelineEndpoint(record?.from) && isPipelineEndpoint(record?.to);
   };
 
-  const { ctx } = $props<{ ctx: CameraSidebarSectionCtx }>();
+  let { ctx = $bindable() }: { ctx: CameraSidebarSectionCtx } = $props();
 
   const pipelineWires = $derived.by<StreamPipelineWire[]>(() => {
     const manifest = (ctx.stream?.manifest as LegacyPipelineWireManifest | null) ?? null;

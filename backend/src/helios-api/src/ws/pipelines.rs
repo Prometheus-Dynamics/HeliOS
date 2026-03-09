@@ -26,7 +26,7 @@ use tracing::debug;
 use uuid::Uuid;
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/:id/updates", get(pipeline_updates))
+    Router::new().route("/{id}/updates", get(pipeline_updates))
 }
 
 async fn pipeline_updates(ws: WebSocketUpgrade, State(state): State<AppState>, Path(id): Path<Uuid>) -> impl IntoResponse {

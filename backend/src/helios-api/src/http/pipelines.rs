@@ -30,9 +30,9 @@ use helios_engine::ipc::{EngineErrorCode, EngineEvent, StreamManifest};
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/graphs", post(upload_graph).get(list_graphs))
-        .route("/graphs/:id", get(fetch_graph).put(update_graph).delete(delete_graph))
+        .route("/graphs/{id}", get(fetch_graph).put(update_graph).delete(delete_graph))
         .route("/templates", get(list_templates))
-        .route("/templates/:id", get(fetch_template))
+        .route("/templates/{id}", get(fetch_template))
         .route("/registry", get(list_registry))
         .route("/validate", post(validate_graph))
 }

@@ -23,7 +23,7 @@ pub fn router() -> Router<std::sync::Arc<IpcHandles>> {
     Router::new()
         .route("/camera-layout", get(get_camera_layout))
         .route("/robot-dimensions", patch(update_robot_dimensions))
-        .route("/cameras/:camera_uid/pose", put(update_camera_pose).delete(clear_camera_pose))
+        .route("/cameras/{camera_uid}/pose", put(update_camera_pose).delete(clear_camera_pose))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

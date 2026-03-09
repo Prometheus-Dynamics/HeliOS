@@ -29,7 +29,7 @@ pub struct UpdaterService {
 
 impl UpdaterService {
     pub fn new(config: Arc<UpdaterConfig>) -> Result<Self> {
-        let client = reqwest::Client::builder().user_agent(config.user_agent().to_string()).build()?;
+        let client = build_http_client(&config)?;
         let (event_bus, _rx) = broadcast::channel(EVENT_BUS_CAPACITY);
         let state = Arc::new(RwLock::new(ServiceState::default()));
         spawn_state_sync(Arc::clone(&state), event_bus.subscribe());
@@ -226,6 +226,15 @@ impl UpdaterService {
 
         Ok(())
     }
+}
+
+fn build_http_client(config: &UpdaterConfig) -> Result<reqwest::Client> {
+    let roots = webpki_root_certs::TLS_SERVER_ROOT_CERTS.iter().map(|cert| reqwest::Certificate::from_der(cert.as_ref())).collect::<core::result::Result<Vec<_>, _>>()?;
+    reqwest::Client::builder()
+        .user_agent(config.user_agent().to_string())
+        .tls_certs_only(roots)
+        .build()
+        .map_err(Into::into)
 }
 
 async fn stage_release_job(

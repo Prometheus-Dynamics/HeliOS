@@ -120,6 +120,17 @@
     filterTuneConstantGroups(constantGroups, constantSearchTokens)
   );
   const normalizeId = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+  const resolvePipelineLabel = (value: string | null): string => {
+    const normalized = normalizeId(value);
+    if (typeof pipelineLabel === 'function') {
+      const resolved = pipelineLabel(normalized || null);
+      if (typeof resolved === 'string' && resolved.trim().length) {
+        return resolved.trim();
+      }
+    }
+    if (normalized === rawPipelineId) return 'Raw stream';
+    return normalized.length ? normalized : 'Pipeline';
+  };
   const normalizeKey = (value: unknown): string | null => {
     const normalized = normalizeId(value);
     return normalized.length ? normalized : null;
@@ -313,12 +324,12 @@
             pipelineId={pipelineId}
             size="sm"
             className="shrink-0"
-            ariaLabel={pipelineLabel(pipelineId)}
+            ariaLabel={resolvePipelineLabel(pipelineId)}
           />
         {/if}
         <div class="min-w-0">
           <p class="text-2xs uppercase tracking-[0.3em] text-surface-500">Pipeline Tuning</p>
-          <p class="truncate text-sm text-surface-100">{pipelineLabel(pipelineId)}</p>
+          <p class="truncate text-sm text-surface-100">{resolvePipelineLabel(pipelineId)}</p>
         </div>
       </div>
       <div class="flex items-center gap-2">
@@ -373,7 +384,7 @@
                 {#each normalizedLayoutSlots as source (`${source.row}:${source.column}`)}
                   {#if source.pipelineId !== pipelineId && source.pipelineId !== rawPipelineId}
                     <option value={`pipe|${source.pipelineId}|${source.outputKey ?? ''}|${source.resolvedPort}`}>
-                      {pipelineLabel(source.pipelineId)} ({source.row + 1}:{source.column + 1}) - {source.resolvedPort}
+                      {resolvePipelineLabel(source.pipelineId)} ({source.row + 1}:{source.column + 1}) - {source.resolvedPort}
                     </option>
                   {/if}
                 {/each}

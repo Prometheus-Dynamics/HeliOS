@@ -30,7 +30,7 @@ struct PipelineQuery {
 }
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/pipeline/status", get(status)).route("/pipeline/outputs", get(list_outputs)).route("/pipeline/outputs/:output_key", get(sample_output))
+    Router::new().route("/pipeline/status", get(status)).route("/pipeline/outputs", get(list_outputs)).route("/pipeline/outputs/{output_key}", get(sample_output))
 }
 
 struct PipelineAdapter;

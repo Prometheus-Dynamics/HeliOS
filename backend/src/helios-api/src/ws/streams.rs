@@ -71,11 +71,11 @@ pub struct OutputsWsParams {
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/:id/metrics", get(stream_metrics))
-        .route("/:id/frames", get(stream_frames))
-        .route("/:id/updates", get(stream_updates))
-        .route("/:id/controls", get(stream_controls))
-        .route("/:id/outputs", get(stream_outputs))
+        .route("/{id}/metrics", get(stream_metrics))
+        .route("/{id}/frames", get(stream_frames))
+        .route("/{id}/updates", get(stream_updates))
+        .route("/{id}/controls", get(stream_controls))
+        .route("/{id}/outputs", get(stream_outputs))
 }
 
 async fn stream_metrics(ws: WebSocketUpgrade, State(state): State<AppState>, Path(id): Path<Uuid>, Query(params): Query<MetricsWsParams>) -> impl IntoResponse {

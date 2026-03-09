@@ -16,9 +16,9 @@ const IMU_EXTERNAL_ID: &str = "imu";
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/external/sources", get(list_external_sources))
-        .route("/external/sources/:id", put(upsert_external_source).delete(delete_external_source))
-        .route("/external/sources/:id/sample", post(update_external_sample))
-        .route("/external/:id/outputs/:output_key", get(sample_external_output))
+        .route("/external/sources/{id}", put(upsert_external_source).delete(delete_external_source))
+        .route("/external/sources/{id}/sample", post(update_external_sample))
+        .route("/external/{id}/outputs/{output_key}", get(sample_external_output))
 }
 
 #[utoipa::path(
