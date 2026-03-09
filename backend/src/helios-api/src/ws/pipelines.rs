@@ -140,7 +140,7 @@ async fn handle_pipeline_updates(mut socket: WebSocket, state: AppState, pipelin
         };
 
         if let Ok(text) = serde_json::to_string(&response)
-            && socket.send(Message::Text(text)).await.is_err()
+            && socket.send(Message::Text(text.into())).await.is_err()
         {
             break;
         }

@@ -1,5 +1,5 @@
-use nt_client::data::Properties;
-use nt_client::data::r#type::{DataType, JsonString};
+use nt_client::data::{DataType, JsonString};
+use nt_client::topic::Properties;
 use std::net::Ipv4Addr;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tracing::warn;
@@ -338,7 +338,7 @@ async fn set_string(handle: &nt_client::ClientHandle, publishers: &mut HashMap<S
 async fn set_json(handle: &nt_client::ClientHandle, publishers: &mut HashMap<String, nt_client::publish::GenericPublisher>, topic: &str, value: &serde_json::Value) -> Result<(), String> {
     let pubr = publisher(handle, publishers, topic, DataType::Json).await?;
     let payload = JsonString(serde_json::to_string(value).map_err(|e| e.to_string())?);
-    pubr.set(payload).await.map_err(|e| e.to_string())?;
+    pubr.set::<JsonString>(payload).await.map_err(|e| e.to_string())?;
     Ok(())
 }
 

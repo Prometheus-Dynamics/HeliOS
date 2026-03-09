@@ -1,4 +1,4 @@
-use nt_client::{Client, ClientHandle, NTAddr, NewClientOptions, data::SubscriptionOptions, subscribe::ReceivedMessage};
+use nt_client::{Client, ClientHandle, NTAddr, NewClientOptions, subscribe::ReceivedMessage, subscribe::SubscriptionOptions};
 use std::{
     collections::BTreeSet,
     collections::HashMap,

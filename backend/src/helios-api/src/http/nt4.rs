@@ -1,7 +1,7 @@
 use axum::{Json, Router, http::StatusCode, response::IntoResponse, routing::post};
 use base64::Engine;
-use nt_client::data::SubscriptionOptions;
 use nt_client::subscribe::ReceivedMessage;
+use nt_client::subscribe::SubscriptionOptions;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;

@@ -161,7 +161,7 @@ pub async fn handle_imu_ws(mut socket: WebSocket, state: AppState) -> Result<(),
                     Ok(Some(SensorEvent::Snapshot { scope: event_scope, values, .. })) if event_scope == scope => {
                         let status = imu_status_from_snapshot(&values);
                         if let Ok(payload) = serde_json::to_string(&status)
-                            && socket.send(Message::Text(payload)).await.is_err()
+                            && socket.send(Message::Text(payload.into())).await.is_err()
                         {
                             break;
                         }
@@ -235,7 +235,7 @@ async fn send_ws_error_with_context(socket: &mut WebSocket, context: &WsErrorCon
         reported_by: Some("helios-api".to_string()),
         transport: Some("ws".to_string()),
     });
-    let _ = socket.send(Message::Text(body.to_string())).await;
+    let _ = socket.send(Message::Text(body.to_string().into())).await;
 }
 
 async fn send_ws_error(socket: &mut WebSocket, context: &WsErrorContext, reason: impl Into<String>, operation: &str) {

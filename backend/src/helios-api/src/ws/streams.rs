@@ -316,25 +316,25 @@ async fn handle_stream_outputs(socket: WebSocket, state: AppState, stream_id: Uu
         Ok(EngineEvent::GraphOutputs { outputs, .. }) => {
             let payload = StreamOutputsList { outputs, timestamp_ms: chrono::Utc::now().timestamp_millis().max(0) as u64, request_id: None };
             if let Ok(text) = serde_json::to_string(&payload) {
-                let _ = out_tx.send(Message::Text(text));
+                let _ = out_tx.send(Message::Text(text.into()));
             }
         }
         Ok(EngineEvent::Nack { code, reason, .. }) => {
             let payload = StreamOutputsResponse::Error { request_id: None, error: format!("engine rejected outputs list: {code:?}: {reason}") };
             if let Ok(text) = serde_json::to_string(&payload) {
-                let _ = out_tx.send(Message::Text(text));
+                let _ = out_tx.send(Message::Text(text.into()));
             }
         }
         Ok(_) => {
             let payload = StreamOutputsResponse::Error { request_id: None, error: "unexpected engine response listing outputs".to_string() };
             if let Ok(text) = serde_json::to_string(&payload) {
-                let _ = out_tx.send(Message::Text(text));
+                let _ = out_tx.send(Message::Text(text.into()));
             }
         }
         Err(err) => {
             let payload = StreamOutputsResponse::Error { request_id: None, error: format!("engine error listing outputs: {err}") };
             if let Ok(text) = serde_json::to_string(&payload) {
-                let _ = out_tx.send(Message::Text(text));
+                let _ = out_tx.send(Message::Text(text.into()));
             }
         }
     }
@@ -380,7 +380,7 @@ async fn handle_stream_outputs(socket: WebSocket, state: AppState, stream_id: Uu
                         last_outputs_local = outputs.clone();
                         let payload = StreamOutputsList { outputs, timestamp_ms: chrono::Utc::now().timestamp_millis().max(0) as u64, request_id: None };
                         if let Ok(text) = serde_json::to_string(&payload) {
-                            let _ = sampler_tx.send(Message::Text(text));
+                            let _ = sampler_tx.send(Message::Text(text.into()));
                         }
                     }
                 }
@@ -398,25 +398,25 @@ async fn handle_stream_outputs(socket: WebSocket, state: AppState, stream_id: Uu
                             Ok(EngineEvent::GraphOutputSample { value, .. }) => {
                                 let payload = StreamOutputSampleEvent { port: port.clone(), value: Some(value.0), error: None, timestamp_ms };
                                 if let Ok(text) = serde_json::to_string(&payload) {
-                                    let _ = sampler_tx.send(Message::Text(text));
+                                    let _ = sampler_tx.send(Message::Text(text.into()));
                                 }
                             }
                             Ok(EngineEvent::Nack { code, reason, .. }) => {
                                 let payload = StreamOutputSampleEvent { port: port.clone(), value: None, error: Some(format!("{code:?}: {reason}")), timestamp_ms };
                                 if let Ok(text) = serde_json::to_string(&payload) {
-                                    let _ = sampler_tx.send(Message::Text(text));
+                                    let _ = sampler_tx.send(Message::Text(text.into()));
                                 }
                             }
                             Ok(other) => {
                                 let payload = StreamOutputSampleEvent { port: port.clone(), value: None, error: Some(format!("unexpected engine response: {other:?}")), timestamp_ms };
                                 if let Ok(text) = serde_json::to_string(&payload) {
-                                    let _ = sampler_tx.send(Message::Text(text));
+                                    let _ = sampler_tx.send(Message::Text(text.into()));
                                 }
                             }
                             Err(err) => {
                                 let payload = StreamOutputSampleEvent { port: port.clone(), value: None, error: Some(err.to_string()), timestamp_ms };
                                 if let Ok(text) = serde_json::to_string(&payload) {
-                                    let _ = sampler_tx.send(Message::Text(text));
+                                    let _ = sampler_tx.send(Message::Text(text.into()));
                                 }
                             }
                         }
@@ -447,32 +447,32 @@ async fn handle_stream_outputs(socket: WebSocket, state: AppState, stream_id: Uu
             Ok(StreamOutputsRequest::Ping { request_id }) => {
                 let response = StreamOutputsResponse::Ack { request_id };
                 if let Ok(text) = serde_json::to_string(&response) {
-                    let _ = out_tx.send(Message::Text(text));
+                    let _ = out_tx.send(Message::Text(text.into()));
                 }
             }
             Ok(StreamOutputsRequest::List { request_id }) => match state.engine.list_graph_outputs_event(stream_id).await {
                 Ok(EngineEvent::GraphOutputs { outputs, .. }) => {
                     let event = StreamOutputsList { outputs, timestamp_ms: chrono::Utc::now().timestamp_millis().max(0) as u64, request_id };
                     if let Ok(text) = serde_json::to_string(&event) {
-                        let _ = out_tx.send(Message::Text(text));
+                        let _ = out_tx.send(Message::Text(text.into()));
                     }
                 }
                 Ok(EngineEvent::Nack { code, reason, .. }) => {
                     let response = StreamOutputsResponse::Error { request_id, error: format!("engine rejected outputs list: {code:?}: {reason}") };
                     if let Ok(text) = serde_json::to_string(&response) {
-                        let _ = out_tx.send(Message::Text(text));
+                        let _ = out_tx.send(Message::Text(text.into()));
                     }
                 }
                 Ok(_) => {
                     let response = StreamOutputsResponse::Error { request_id, error: "unexpected engine response listing outputs".to_string() };
                     if let Ok(text) = serde_json::to_string(&response) {
-                        let _ = out_tx.send(Message::Text(text));
+                        let _ = out_tx.send(Message::Text(text.into()));
                     }
                 }
                 Err(err) => {
                     let response = StreamOutputsResponse::Error { request_id, error: format!("engine error listing outputs: {err}") };
                     if let Ok(text) = serde_json::to_string(&response) {
-                        let _ = out_tx.send(Message::Text(text));
+                        let _ = out_tx.send(Message::Text(text.into()));
                     }
                 }
             },
@@ -484,13 +484,13 @@ async fn handle_stream_outputs(socket: WebSocket, state: AppState, stream_id: Uu
                 let _ = sub_tx.send(OutputsSubscription { ports: normalized, interval });
                 let response = StreamOutputsResponse::Ack { request_id };
                 if let Ok(text) = serde_json::to_string(&response) {
-                    let _ = out_tx.send(Message::Text(text));
+                    let _ = out_tx.send(Message::Text(text.into()));
                 }
             }
             Err(err) => {
                 let response = StreamOutputsResponse::Error { request_id: None, error: format!("invalid request: {err}") };
                 if let Ok(text) = serde_json::to_string(&response) {
-                    let _ = out_tx.send(Message::Text(text));
+                    let _ = out_tx.send(Message::Text(text.into()));
                 }
             }
         }
@@ -575,7 +575,7 @@ async fn handle_stream_updates(mut socket: WebSocket, state: AppState, stream_id
         };
 
         if let Ok(text) = serde_json::to_string(&response)
-            && socket.send(Message::Text(text)).await.is_err()
+            && socket.send(Message::Text(text.into())).await.is_err()
         {
             break;
         }
@@ -672,7 +672,7 @@ async fn handle_stream_controls(mut socket: WebSocket, state: AppState, stream_i
 
                 if let Some(response) = immediate
                     && let Ok(text) = serde_json::to_string(&response)
-                    && socket.send(Message::Text(text)).await.is_err()
+                    && socket.send(Message::Text(text.into())).await.is_err()
                 {
                     break;
                 }
@@ -682,7 +682,7 @@ async fn handle_stream_controls(mut socket: WebSocket, state: AppState, stream_i
                     break;
                 };
                 if let Ok(text) = serde_json::to_string(&response)
-                    && socket.send(Message::Text(text)).await.is_err()
+                    && socket.send(Message::Text(text.into())).await.is_err()
                 {
                     break;
                 }
@@ -905,7 +905,7 @@ async fn handle_stream_frames(socket: WebSocket, state: AppState, stream_id: Uui
         Err(err) => {
             let payload = make_frames_error("snapshot_stream_output", &err);
             record_frames_error(&payload);
-            let _ = sender.send(Message::Text(serde_json::to_string(&payload).unwrap_or_else(|_| format!(r#"{{"type":"error","error":"{err}"}}"#)))).await;
+            let _ = sender.send(Message::Text(serde_json::to_string(&payload).unwrap_or_else(|_| format!(r#"{{"type":"error","error":"{err}"}}"#)).into())).await;
             let _ = sender.close().await;
             return;
         }
@@ -917,7 +917,7 @@ async fn handle_stream_frames(socket: WebSocket, state: AppState, stream_id: Uui
     if let Err(err) = set_stream_output(&state, stream_id, Some(requested_output.clone())).await {
         let payload = make_frames_error("set_stream_output", &err);
         record_frames_error(&payload);
-        let _ = sender.send(Message::Text(serde_json::to_string(&payload).unwrap_or_else(|_| format!(r#"{{"type":"error","error":"{err}"}}"#)))).await;
+        let _ = sender.send(Message::Text(serde_json::to_string(&payload).unwrap_or_else(|_| format!(r#"{{"type":"error","error":"{err}"}}"#)).into())).await;
         let _ = sender.close().await;
         return;
     }
@@ -976,11 +976,11 @@ async fn handle_stream_frames(socket: WebSocket, state: AppState, stream_id: Uui
                 if last_format != Some(format) {
                     last_format = Some(format);
                     let event = FramesEvent::Format { fourcc: hdr.fourcc.to_string(), width: hdr.width, height: hdr.height };
-                    if sender.send(Message::Text(serde_json::to_string(&event).unwrap_or_else(|_| r#"{"type":"format"}"#.to_string()))).await.is_err() {
+                    if sender.send(Message::Text(serde_json::to_string(&event).unwrap_or_else(|_| r#"{"type":"format"}"#.to_string()).into())).await.is_err() {
                         break;
                     }
                 }
-                if sender.send(Message::Binary(payload)).await.is_err() {
+                if sender.send(Message::Binary(payload.into())).await.is_err() {
                     break;
                 }
             }
@@ -1042,7 +1042,7 @@ async fn send_metrics_payload(sender: &mut WsSender, stream_id: Uuid, metrics: S
     let timestamp_ms = chrono::Utc::now().timestamp_millis().max(0) as u64;
     let payload = StreamMetricsEvent { stream_id, metrics, timestamp_ms };
     let text = serde_json::to_string(&payload).map_err(|err| err.to_string())?;
-    sender.send(Message::Text(text)).await.map_err(|err| err.to_string())
+    sender.send(Message::Text(text.into())).await.map_err(|err| err.to_string())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1176,7 +1176,7 @@ async fn send_metrics_error(sender: &mut WsSender, stream_id: Option<Uuid>, oper
     let payload = make_metrics_error(stream_id, operation, reason);
     record_metrics_error(&payload);
     let text = serde_json::to_string(&payload).unwrap_or_else(|_| format!(r#"{{"error":"{reason}"}}"#));
-    sender.send(Message::Text(text)).await.map_err(|err| err.to_string())
+    sender.send(Message::Text(text.into())).await.map_err(|err| err.to_string())
 }
 
 pub struct StreamUuidDoc;

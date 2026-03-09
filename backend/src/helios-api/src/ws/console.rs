@@ -45,7 +45,7 @@ async fn handle_console_socket(mut stream: WebSocket, params: ConsoleParams) -> 
             Some(session) => session,
             None => {
                 let payload = serde_json::to_string(&ConsoleServerEvent::Error { message: "console session not found".into() })?;
-                let _ = stream.send(Message::Text(payload)).await;
+                let _ = stream.send(Message::Text(payload.into())).await;
                 let _ = stream.close().await;
                 return Ok(());
             }
@@ -54,7 +54,7 @@ async fn handle_console_socket(mut stream: WebSocket, params: ConsoleParams) -> 
             Ok(session) => session,
             Err(err) => {
                 let payload = serde_json::to_string(&ConsoleServerEvent::Error { message: err.to_string() })?;
-                let _ = stream.send(Message::Text(payload)).await;
+                let _ = stream.send(Message::Text(payload.into())).await;
                 let _ = stream.close().await;
                 return Ok(());
             }
@@ -66,10 +66,10 @@ async fn handle_console_socket(mut stream: WebSocket, params: ConsoleParams) -> 
     let mut events_rx = session.subscribe();
     let input_tx = session.input_sender();
 
-    ws_tx.send(Message::Text(serde_json::to_string(&session.ready_event())?)).await.ok();
+    ws_tx.send(Message::Text(serde_json::to_string(&session.ready_event())?.into())).await.ok();
     for chunk in session.output_snapshot().await {
         let payload = serde_json::to_string(&ConsoleServerEvent::Output { data: chunk })?;
-        if ws_tx.send(Message::Text(payload)).await.is_err() {
+        if ws_tx.send(Message::Text(payload.into())).await.is_err() {
             return Ok(());
         }
     }
@@ -79,7 +79,7 @@ async fn handle_console_socket(mut stream: WebSocket, params: ConsoleParams) -> 
             event = events_rx.recv() => {
                 let Ok(event) = event else { break; };
                 let payload = serde_json::to_string(&event)?;
-                if ws_tx.send(Message::Text(payload)).await.is_err() {
+                if ws_tx.send(Message::Text(payload.into())).await.is_err() {
                     break;
                 }
                 if matches!(event, ConsoleServerEvent::Exit { .. }) {
@@ -103,7 +103,7 @@ async fn handle_console_socket(mut stream: WebSocket, params: ConsoleParams) -> 
                             Err(err) => {
                                 debug!(error = %err, "invalid console message");
                                 let payload = serde_json::to_string(&ConsoleServerEvent::Error { message: format!("invalid input: {err}") })?;
-                                let _ = ws_tx.send(Message::Text(payload)).await;
+                                let _ = ws_tx.send(Message::Text(payload.into())).await;
                             }
                         }
                     }

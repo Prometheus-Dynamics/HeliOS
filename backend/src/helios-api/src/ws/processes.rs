@@ -72,11 +72,11 @@ async fn processes_loop(socket: WebSocket, interval: Duration, limit: usize) {
         Ok(body) => body,
         Err(err) => {
             let evt = ProcessesServerEvent::Error { message: format!("failed to encode ready event: {err}") };
-            let _ = tx.send(Message::Text(serde_json::to_string(&evt).unwrap_or_default())).await;
+            let _ = tx.send(Message::Text(serde_json::to_string(&evt).unwrap_or_default().into())).await;
             return;
         }
     };
-    if tx.send(Message::Text(ready_body)).await.is_err() {
+    if tx.send(Message::Text(ready_body.into())).await.is_err() {
         return;
     }
 
@@ -97,7 +97,7 @@ async fn processes_loop(socket: WebSocket, interval: Duration, limit: usize) {
                     Ok(body) => body,
                     Err(err) => serde_json::to_string(&ProcessesServerEvent::Error { message: format!("failed to encode snapshot event: {err}") }).unwrap_or_default(),
                 };
-                if tx.send(Message::Text(body)).await.is_err() {
+                if tx.send(Message::Text(body.into())).await.is_err() {
                     break;
                 }
             }

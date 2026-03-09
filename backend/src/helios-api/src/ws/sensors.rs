@@ -144,7 +144,7 @@ async fn sensors_loop(mut socket: WebSocket, state: AppState) -> Result<(), Stri
 
                         if let Some(payload) = build_payload(&requested, &values)
                             && let Ok(body) = serde_json::to_string(&payload)
-                            && socket.send(Message::Text(body)).await.is_err()
+                            && socket.send(Message::Text(body.into())).await.is_err()
                         {
                             break;
                         }
@@ -155,7 +155,7 @@ async fn sensors_loop(mut socket: WebSocket, state: AppState) -> Result<(), Stri
                         }
                         let payload = FirmwarePayload { firmware: update };
                         if let Ok(body) = serde_json::to_string(&payload)
-                            && socket.send(Message::Text(body)).await.is_err()
+                            && socket.send(Message::Text(body.into())).await.is_err()
                         {
                             break;
                         }
@@ -169,7 +169,7 @@ async fn sensors_loop(mut socket: WebSocket, state: AppState) -> Result<(), Stri
                             ..SnapshotPayload::default()
                         };
                         if let Ok(body) = serde_json::to_string(&payload)
-                            && socket.send(Message::Text(body)).await.is_err()
+                            && socket.send(Message::Text(body.into())).await.is_err()
                         {
                             break;
                         }
@@ -319,11 +319,11 @@ async fn send_ws_error(socket: &mut WebSocket, context: &WsErrorContext, reason:
     });
     match serde_json::to_string(&payload) {
         Ok(body) => {
-            let _ = socket.send(Message::Text(body)).await;
+            let _ = socket.send(Message::Text(body.into())).await;
         }
         Err(err) => {
             warn!(%err, "failed to serialize websocket error payload");
-            let _ = socket.send(Message::Text(r#"{"status":"sensors_stream_unavailable","reason":"internal error"}"#.to_string())).await;
+            let _ = socket.send(Message::Text(r#"{"status":"sensors_stream_unavailable","reason":"internal error"}"#.to_string().into())).await;
         }
     }
 }

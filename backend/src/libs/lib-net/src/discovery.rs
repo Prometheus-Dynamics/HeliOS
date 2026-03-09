@@ -64,7 +64,7 @@ pub async fn discover_peers_mdns(timeout_secs: u64) -> Result<Vec<IpAddr>> {
         match timeout(Duration::from_millis(200), receiver.recv_async()).await {
             Ok(Ok(ServiceEvent::ServiceResolved(info))) => {
                 for addr in info.get_addresses().iter() {
-                    peers.push(*addr);
+                    peers.push(addr.to_ip_addr());
                 }
             }
             Ok(Ok(ServiceEvent::SearchStopped(_))) => break,

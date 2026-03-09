@@ -14,16 +14,18 @@ use tracing::{info, warn};
 use utoipa::ToSchema;
 
 use futures::TryStreamExt;
-use netlink_packet_route::{
-    AddressFamily,
-    address::AddressAttribute,
-    link::{BondMode, InfoBond, InfoData, InfoKind, InfoVlan, LinkAttribute, LinkInfo, LinkMessage},
-    route::{RouteAddress, RouteAttribute, RouteMessage, RouteProtocol},
-};
 use nix::errno::Errno;
 use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
-use rtnetlink::{Handle, RouteMessageBuilder, new_connection};
+use rtnetlink::{
+    Handle, RouteMessageBuilder, new_connection,
+    packet_route::{
+        AddressFamily,
+        address::AddressAttribute,
+        link::{BondMode, InfoBond, InfoData, InfoKind, InfoVlan, LinkAttribute, LinkInfo, LinkLayerType, LinkMessage},
+        route::{RouteAddress, RouteAttribute, RouteMessage, RouteProtocol},
+    },
+};
 use serde::{Deserialize, Serialize};
 use tokio::time::Duration;
 use tokio::{process::Command, task};
@@ -512,7 +514,7 @@ pub async fn get_interfaces() -> Result<Vec<NetworkInterfaceSettings>> {
     let mut links = handle.link().get().execute();
 
     while let Some(link) = links.try_next().await.map_err(|e| Error::FailedToIterateInterface(format!("failed to iterate links: {e}")))? {
-        if link.header.link_layer_type == netlink_packet_route::link::LinkLayerType::Loopback {
+        if link.header.link_layer_type == LinkLayerType::Loopback {
             continue;
         }
 
@@ -824,7 +826,7 @@ async fn remove_default_route(handle: &Handle, if_index: u32, family: AddressFam
 #[cfg(test)]
 mod tests {
     use super::*;
-    use netlink_packet_route::link::{BondMode, LinkMessage};
+    use rtnetlink::packet_route::link::{BondMode, LinkMessage};
 
     #[test]
     fn parse_link_info_extracts_vlan_and_bond() {

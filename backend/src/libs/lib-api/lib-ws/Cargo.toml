@@ -30,7 +30,7 @@ macros = ["lib-ws-macro"]
 
 actix-rt = "2.11.0"
 actix-test = "0.1.5"
-bytes = "1.10.1"
-futures-util = "0.3.31"
+bytes = "1.11.1"
+futures-util = "0.3.32"
 lib-ws-macro = { path = "../lib-ws-macro" }
 lib-asyncapi-macro = { path = "../lib-asyncapi-macro" }

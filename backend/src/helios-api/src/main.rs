@@ -16,11 +16,10 @@ use crate::http::streams;
 use crate::http::streams_persist;
 use axum::body::Body;
 use axum::extract::State;
-use axum::http::{HeaderValue, Method, Request};
+use axum::http::{HeaderValue, Method, Request, header};
 use axum::serve;
 use axum::{
     Json, Router,
-    extract::Host,
     middleware::{from_fn, from_fn_with_state},
     routing::get,
 };
@@ -275,7 +274,8 @@ async fn openapi_spec() -> Json<utoipa::openapi::OpenApi> {
     Json(http::ApiDoc::openapi())
 }
 
-async fn asyncapi_spec(Host(host): Host) -> Json<serde_json::Value> {
+async fn asyncapi_spec(headers: axum::http::HeaderMap) -> Json<serde_json::Value> {
+    let host = headers.get(header::HOST).and_then(|value| value.to_str().ok()).unwrap_or_default();
     let server_host = (!host.is_empty()).then(|| format!("{host}/v1/ws"));
     Json(ws::asyncapi_json(server_host))
 }

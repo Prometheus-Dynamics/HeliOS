@@ -87,7 +87,7 @@ async fn telemetry_loop(socket: WebSocket, interval: Duration) {
     let mut latest: Option<TelemetrySample> = match sampler.recv().await {
         Ok(sample) => {
             let payload = serde_json::to_string(&sample).unwrap_or_default();
-            if tx.send(Message::Text(payload)).await.is_err() {
+            if tx.send(Message::Text(payload.into())).await.is_err() {
                 return;
             }
             Some(sample)
@@ -106,7 +106,7 @@ async fn telemetry_loop(socket: WebSocket, interval: Duration) {
             }
             _ = ticker.tick() => {
                 if let Some(sample) = latest.clone()
-                    && tx.send(Message::Text(serde_json::to_string(&sample).unwrap_or_default())).await.is_err() {
+                    && tx.send(Message::Text(serde_json::to_string(&sample).unwrap_or_default().into())).await.is_err() {
                         break;
                     }
             }

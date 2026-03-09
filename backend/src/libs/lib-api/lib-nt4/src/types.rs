@@ -3,7 +3,7 @@ use std::sync::Arc;
 pub use lib_asyncapi::{AsyncApiData, AsyncApiPath, AsyncApiPayload, FromSegments};
 
 use futures::future::BoxFuture;
-use nt_client::data::r#type::NetworkTableData;
+use nt_client::data::NetworkTableData;
 use rmpv::Value as MsgValue;
 
 pub type Value = MsgValue;

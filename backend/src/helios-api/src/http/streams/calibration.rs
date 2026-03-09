@@ -160,20 +160,20 @@ pub async fn board_pdf(Path(_id): Path<Uuid>, Query(params): Query<BoardPdfParam
 
     let fits = |w: f64, h: f64| required_w_mm <= w + 1e-6 && required_h_mm <= h + 1e-6;
 
-    let pick_orientation = |portrait_w: f64, portrait_h: f64| -> ApiResult<(f64, f64)> {
+    let pick_orientation = |portrait_w: f64, portrait_h: f64| -> Result<(f64, f64), &'static str> {
         match orientation.as_str() {
             "portrait" => {
                 if fits(portrait_w, portrait_h) {
                     Ok((portrait_w, portrait_h))
                 } else {
-                    Err(ApiError::bad_request("board does not fit on requested paper (portrait)"))
+                    Err("board does not fit on requested paper (portrait)")
                 }
             }
             "landscape" => {
                 if fits(portrait_h, portrait_w) {
                     Ok((portrait_h, portrait_w))
                 } else {
-                    Err(ApiError::bad_request("board does not fit on requested paper (landscape)"))
+                    Err("board does not fit on requested paper (landscape)")
                 }
             }
             "auto" => {
@@ -182,16 +182,16 @@ pub async fn board_pdf(Path(_id): Path<Uuid>, Query(params): Query<BoardPdfParam
                 } else if fits(portrait_h, portrait_w) {
                     Ok((portrait_h, portrait_w))
                 } else {
-                    Err(ApiError::bad_request("board does not fit on requested paper"))
+                    Err("board does not fit on requested paper")
                 }
             }
-            _ => Err(ApiError::bad_request("invalid orientation; use auto|portrait|landscape")),
+            _ => unreachable!("orientation validated above"),
         }
     };
 
     let (page_w_mm, page_h_mm) = match paper.as_str() {
-        "letter" => pick_orientation(LETTER_W_MM, LETTER_H_MM)?,
-        "a4" => pick_orientation(A4_W_MM, A4_H_MM)?,
+        "letter" => pick_orientation(LETTER_W_MM, LETTER_H_MM).map_err(ApiError::bad_request)?,
+        "a4" => pick_orientation(A4_W_MM, A4_H_MM).map_err(ApiError::bad_request)?,
         "custom" => (required_w_mm, required_h_mm),
         "auto" => {
             if let Ok(dims) = pick_orientation(LETTER_W_MM, LETTER_H_MM) {

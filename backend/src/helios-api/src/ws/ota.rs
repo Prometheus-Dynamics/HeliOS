@@ -143,7 +143,7 @@ async fn send_query_state(conn: &UpdaterConnection, session: &mut helios_updater
 
 async fn send_event(tx: &mut futures::stream::SplitSink<WebSocket, Message>, event: UpdaterServerEvent) -> Result<(), ()> {
     let body = serde_json::to_string(&event).map_err(|_| ())?;
-    tx.send(Message::Text(body)).await.map_err(|_| ())
+    tx.send(Message::Text(body.into())).await.map_err(|_| ())
 }
 
 fn map_event(event: UpdaterEvent) -> Option<UpdaterServerEvent> {

@@ -100,7 +100,7 @@ pub fn binary_image_gray_simd(image: &GrayImage, threshold: u8) -> GrayImage {
         let mut i = 0;
         while i + SIMD_WIDTH <= src_chunk.len() {
             let v = i16x16::from(u8x16::new(src_chunk[i..i + SIMD_WIDTH].try_into().unwrap()));
-            let mask = v.cmp_gt(threshold_simd);
+            let mask = v.simd_gt(threshold_simd);
             let out = mask.blend(on, off).to_array().map(|v| v as u8);
             dst_chunk[i..i + SIMD_WIDTH].copy_from_slice(&out);
             i += SIMD_WIDTH;

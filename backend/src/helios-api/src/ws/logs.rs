@@ -54,19 +54,19 @@ async fn log_stream(socket: WebSocket, params: LogsParams) {
     let sources = logs::hydrate_systemd_statuses(sources).await;
 
     let Some(source) = sources.into_iter().find(|candidate| candidate.id == source_id) else {
-        let _ = tx.send(Message::Text(serde_json::to_string(&LogsServerEvent::Error { message: format!("unknown log source: {source_id}") }).unwrap_or_default())).await;
+        let _ = tx.send(Message::Text(serde_json::to_string(&LogsServerEvent::Error { message: format!("unknown log source: {source_id}") }).unwrap_or_default().into())).await;
         let _ = tx.send(Message::Close(None)).await;
         return;
     };
 
-    if tx.send(Message::Text(serde_json::to_string(&LogsServerEvent::Ready { source: Box::new(source.clone()) }).unwrap_or_default())).await.is_err() {
+    if tx.send(Message::Text(serde_json::to_string(&LogsServerEvent::Ready { source: Box::new(source.clone()) }).unwrap_or_default().into())).await.is_err() {
         return;
     }
 
     let mut child = match spawn_source_process(&source, lines, follow) {
         Ok(child) => child,
         Err(err) => {
-            let _ = tx.send(Message::Text(serde_json::to_string(&LogsServerEvent::Error { message: err }).unwrap_or_default())).await;
+            let _ = tx.send(Message::Text(serde_json::to_string(&LogsServerEvent::Error { message: err }).unwrap_or_default().into())).await;
             let _ = tx.send(Message::Close(None)).await;
             return;
         }
@@ -104,9 +104,9 @@ async fn log_stream(socket: WebSocket, params: LogsParams) {
             }
             status = child.wait() => {
                 if status.is_err() {
-                    let _ = tx.send(Message::Text(serde_json::to_string(&LogsServerEvent::Error { message: "log process failed".into() }).unwrap_or_default())).await;
+                    let _ = tx.send(Message::Text(serde_json::to_string(&LogsServerEvent::Error { message: "log process failed".into() }).unwrap_or_default().into())).await;
                 }
-                let _ = tx.send(Message::Text(serde_json::to_string(&LogsServerEvent::Eof).unwrap_or_default())).await;
+                let _ = tx.send(Message::Text(serde_json::to_string(&LogsServerEvent::Eof).unwrap_or_default().into())).await;
                 break;
             }
         }
@@ -117,7 +117,7 @@ async fn log_stream(socket: WebSocket, params: LogsParams) {
 
 async fn send_line(tx: &mut futures::stream::SplitSink<WebSocket, Message>, line: String) -> Result<(), ()> {
     let evt = LogsServerEvent::Line { timestamp_ms: chrono::Utc::now().timestamp_millis() as u64, line };
-    tx.send(Message::Text(serde_json::to_string(&evt).unwrap_or_default())).await.map_err(|_| ())
+    tx.send(Message::Text(serde_json::to_string(&evt).unwrap_or_default().into())).await.map_err(|_| ())
 }
 
 async fn next_line<R: AsyncRead + Unpin>(stream_opt: &mut Option<FramedRead<R, LinesCodec>>) -> Option<String> {

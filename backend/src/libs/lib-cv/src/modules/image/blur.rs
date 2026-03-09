@@ -1,7 +1,7 @@
 use std::num::NonZero;
 
 use image::{DynamicImage, GrayImage};
-use libblur::{AnisotropicRadius, BlurImageMut, EdgeMode, FastBlurChannels, ThreadingPolicy, fast_gaussian_next, fast_gaussian_next_blur_image};
+use libblur::{AnisotropicRadius, BlurImageMut, EdgeMode, EdgeMode2D, FastBlurChannels, ThreadingPolicy, fast_gaussian_next, fast_gaussian_next_blur_image};
 use rayon::current_num_threads;
 use std::cell::RefCell;
 
@@ -11,7 +11,7 @@ pub fn blur_image(image: DynamicImage, sigma: f32) -> DynamicImage {
     }
     let threads = NonZero::new(current_num_threads()).unwrap_or(NonZero::new(1).unwrap());
 
-    fast_gaussian_next_blur_image(image, AnisotropicRadius::new(sigma as u32), libblur::EdgeMode::Clamp, libblur::ThreadingPolicy::Fixed(threads)).unwrap()
+    fast_gaussian_next_blur_image(image, AnisotropicRadius::new(sigma as u32), EdgeMode2D::new(EdgeMode::Clamp), libblur::ThreadingPolicy::Fixed(threads)).unwrap()
 }
 
 pub fn blur_gray_image(gray: GrayImage, sigma: f32) -> GrayImage {
@@ -37,7 +37,7 @@ pub fn blur_gray_image_in_place(gray: &mut GrayImage, sigma: f32) {
 
     let threads = NonZero::new(current_num_threads()).unwrap_or(NonZero::new(1).unwrap());
     let mut image = BlurImageMut::borrow(gray.as_mut(), width, height, FastBlurChannels::Plane);
-    fast_gaussian_next(&mut image, AnisotropicRadius::new(sigma as u32), ThreadingPolicy::Fixed(threads), EdgeMode::Clamp).unwrap();
+    fast_gaussian_next(&mut image, AnisotropicRadius::new(sigma as u32), ThreadingPolicy::Fixed(threads), EdgeMode2D::new(EdgeMode::Clamp)).unwrap();
 }
 
 thread_local! {
