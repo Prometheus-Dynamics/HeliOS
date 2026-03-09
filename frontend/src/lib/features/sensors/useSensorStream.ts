@@ -56,6 +56,9 @@ export function createSensorStreamStore(options: SensorStreamOptions): SensorStr
 
   let closeStream: (() => void) | null = null;
 
+  const sameKinds = (a: DeviceSensorKind[], b: DeviceSensorKind[]) =>
+    a.length === b.length && a.every((kind, index) => kind === b[index]);
+
   function start(): void {
     stop();
     let snapshot: SensorStreamState | null = null;
@@ -107,18 +110,33 @@ export function createSensorStreamStore(options: SensorStreamOptions): SensorStr
   }
 
   function setEnabled(enabled: boolean): void {
-    state.update((current) => ({ ...current, enabled }));
+    let changed = false;
+    state.update((current) => {
+      changed = current.enabled !== enabled;
+      return changed ? { ...current, enabled } : current;
+    });
+    if (!changed) return;
     if (enabled) start();
     else stop();
   }
 
   function setKinds(kinds: DeviceSensorKind[]): void {
-    state.update((current) => ({ ...current, kinds }));
+    let changed = false;
+    state.update((current) => {
+      changed = !sameKinds(current.kinds, kinds);
+      return changed ? { ...current, kinds } : current;
+    });
+    if (!changed) return;
     start();
   }
 
   function setIntervalMs(intervalMs: number): void {
-    state.update((current) => ({ ...current, intervalMs }));
+    let changed = false;
+    state.update((current) => {
+      changed = current.intervalMs !== intervalMs;
+      return changed ? { ...current, intervalMs } : current;
+    });
+    if (!changed) return;
     start();
   }
 

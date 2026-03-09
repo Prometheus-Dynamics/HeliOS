@@ -6,7 +6,7 @@ pub(crate) mod logs;
 mod ota;
 mod pipelines;
 pub(crate) mod processes;
-mod sensors;
+pub(crate) mod sensors;
 mod streams;
 mod updates;
 

@@ -230,11 +230,7 @@ impl UpdaterService {
 
 fn build_http_client(config: &UpdaterConfig) -> Result<reqwest::Client> {
     let roots = webpki_root_certs::TLS_SERVER_ROOT_CERTS.iter().map(|cert| reqwest::Certificate::from_der(cert.as_ref())).collect::<core::result::Result<Vec<_>, _>>()?;
-    reqwest::Client::builder()
-        .user_agent(config.user_agent().to_string())
-        .tls_certs_only(roots)
-        .build()
-        .map_err(Into::into)
+    reqwest::Client::builder().user_agent(config.user_agent().to_string()).tls_certs_only(roots).build().map_err(Into::into)
 }
 
 async fn stage_release_job(

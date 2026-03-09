@@ -30,6 +30,15 @@ type ProcessesHandlers = {
   onClose?: () => void;
 };
 
+type SharedProcessesConnection = {
+  socket: WebSocket;
+  subscribers: Map<symbol, ProcessesHandlers>;
+  connected: boolean;
+  readyIntervalMs: number | null;
+};
+
+const sharedProcessesConnections = new Map<string, SharedProcessesConnection>();
+
 export function connectProcessesStream(
   handlers: ProcessesHandlers,
   options: { intervalMs?: number; limit?: number } = {}
@@ -39,18 +48,67 @@ export function connectProcessesStream(
     return () => {};
   }
 
-  const url = buildProcessesSocketUrl(options.intervalMs ?? 1000, options.limit ?? 200);
-  let socket: WebSocket | null = null;
-
-  try {
-    socket = new WebSocket(url);
-  } catch (err) {
-    handlers.onError?.((err as Error)?.message ?? 'Unable to open processes socket');
+  const intervalMs = normalizeIntervalMs(options.intervalMs ?? 1000);
+  const limit = normalizeLimit(options.limit ?? 200);
+  const key = `${intervalMs}:${limit}`;
+  const shared = getOrCreateSharedConnection(key, intervalMs, limit);
+  if (!shared) {
+    handlers.onError?.('Unable to open processes socket');
     return () => {};
   }
 
+  const token = Symbol('processes-stream-handler');
+  shared.subscribers.set(token, handlers);
+
+  if (shared.connected) {
+    queueMicrotask(() => {
+      if (shared.subscribers.has(token)) handlers.onOpen?.();
+    });
+  }
+  if (shared.readyIntervalMs != null) {
+    queueMicrotask(() => {
+      if (shared.subscribers.has(token)) handlers.onReady?.(shared.readyIntervalMs ?? intervalMs);
+    });
+  }
+
+  return () => {
+    shared.subscribers.delete(token);
+    if (shared.subscribers.size === 0) {
+      if (sharedProcessesConnections.get(key) === shared) {
+        sharedProcessesConnections.delete(key);
+      }
+      try {
+        shared.socket.close();
+      } catch {
+        // ignore
+      }
+    }
+  };
+}
+
+function getOrCreateSharedConnection(key: string, intervalMs: number, limit: number): SharedProcessesConnection | null {
+  const existing = sharedProcessesConnections.get(key);
+  if (existing) return existing;
+
+  let socket: WebSocket;
+  try {
+    socket = new WebSocket(buildProcessesSocketUrl(intervalMs, limit));
+  } catch {
+    return null;
+  }
+
+  const shared: SharedProcessesConnection = {
+    socket,
+    subscribers: new Map(),
+    connected: false,
+    readyIntervalMs: null
+  };
+
   socket.addEventListener('open', () => {
-    handlers.onOpen?.();
+    shared.connected = true;
+    for (const subscriber of shared.subscribers.values()) {
+      subscriber.onOpen?.();
+    }
   });
 
   socket.addEventListener('message', (event) => {
@@ -63,39 +121,50 @@ export function connectProcessesStream(
     }
     if (!parsed || typeof parsed !== 'object') return;
     if (parsed.type === 'ready') {
-      handlers.onReady?.(typeof parsed.interval_ms === 'number' ? parsed.interval_ms : 1000);
+      shared.readyIntervalMs = typeof parsed.interval_ms === 'number' ? parsed.interval_ms : intervalMs;
+      for (const subscriber of shared.subscribers.values()) {
+        subscriber.onReady?.(shared.readyIntervalMs);
+      }
       return;
     }
     if (parsed.type === 'snapshot' && parsed.snapshot) {
-      handlers.onSnapshot?.(parsed.snapshot);
+      for (const subscriber of shared.subscribers.values()) {
+        subscriber.onSnapshot?.(parsed.snapshot);
+      }
       return;
     }
     if (parsed.type === 'error') {
-      handlers.onError?.(parsed.message || 'Processes stream error');
+      const message = parsed.message || 'Processes stream error';
+      for (const subscriber of shared.subscribers.values()) {
+        subscriber.onError?.(message);
+      }
     }
   });
 
   socket.addEventListener('error', () => {
-    handlers.onError?.('Processes stream connection failed');
+    for (const subscriber of shared.subscribers.values()) {
+      subscriber.onError?.('Processes stream connection failed');
+    }
   });
 
   socket.addEventListener('close', () => {
-    handlers.onClose?.();
+    shared.connected = false;
+    shared.readyIntervalMs = null;
+    if (sharedProcessesConnections.get(key) === shared) {
+      sharedProcessesConnections.delete(key);
+    }
+    for (const subscriber of shared.subscribers.values()) {
+      subscriber.onClose?.();
+    }
   });
 
-  return () => {
-    try {
-      socket?.close();
-    } catch {
-      // ignore
-    }
-    socket = null;
-  };
+  sharedProcessesConnections.set(key, shared);
+  return shared;
 }
 
 function buildProcessesSocketUrl(intervalMs: number, limit: number): string {
-  const interval = Math.max(250, Math.min(10000, Math.floor(intervalMs)));
-  const cappedLimit = Math.max(10, Math.min(2000, Math.floor(limit)));
+  const interval = normalizeIntervalMs(intervalMs);
+  const cappedLimit = normalizeLimit(limit);
   const baseUrl = buildWsUrlFromHttpBase(['v1', 'ws', 'processes']);
   try {
     const parsed = new URL(baseUrl);
@@ -106,4 +175,12 @@ function buildProcessesSocketUrl(intervalMs: number, limit: number): string {
     const params = new URLSearchParams({ interval_ms: String(interval), limit: String(cappedLimit) });
     return `${baseUrl}?${params.toString()}`;
   }
+}
+
+function normalizeIntervalMs(intervalMs: number): number {
+  return Math.max(250, Math.min(10000, Math.floor(intervalMs)));
+}
+
+function normalizeLimit(limit: number): number {
+  return Math.max(10, Math.min(2000, Math.floor(limit)));
 }

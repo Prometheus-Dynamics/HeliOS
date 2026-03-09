@@ -7,8 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::{fs, sync::Arc};
 
 use serde::Serialize;
-use tokio::sync::Mutex;
-use tokio::sync::broadcast;
+use tokio::sync::{Mutex, RwLock, broadcast};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -26,7 +25,8 @@ pub const JOURNAL_DIR: &str = "/tmp/helios-ipc";
 /// Live handles into each service connection.
 pub struct IpcHandles {
     pub engine: EngineConnection,
-    pub sensors: Mutex<Option<Arc<SensorsConnection>>>,
+    sensors: RwLock<Option<Arc<SensorsConnection>>>,
+    sensors_connect: Mutex<()>,
     pub updater: Mutex<Option<Arc<UpdaterConnection>>>,
     pub updates: RealtimeUpdateBus,
 }
@@ -119,20 +119,24 @@ pub async fn connect_all() -> IpcHandles {
         }
     };
 
-    IpcHandles { engine, sensors: Mutex::new(sensors.map(Arc::new)), updater: Mutex::new(updater), updates: RealtimeUpdateBus::default() }
+    IpcHandles { engine, sensors: RwLock::new(sensors.map(Arc::new)), sensors_connect: Mutex::new(()), updater: Mutex::new(updater), updates: RealtimeUpdateBus::default() }
 }
 
 impl IpcHandles {
     /// Ensure a live peripherals connection, attempting to reconnect on demand.
     pub async fn ensure_sensors(&self) -> Option<Arc<SensorsConnection>> {
-        if let Some(conn) = self.sensors.lock().await.as_ref() {
-            return Some(conn.clone());
+        if let Some(conn) = self.sensors.read().await.as_ref().cloned() {
+            return Some(conn);
         }
 
+        let _connect_guard = self.sensors_connect.lock().await;
+        if let Some(conn) = self.sensors.read().await.as_ref().cloned() {
+            return Some(conn);
+        }
         match peripherals::connect_sensors().await {
             Ok(conn) => {
                 let conn = Arc::new(conn);
-                let mut guard = self.sensors.lock().await;
+                let mut guard = self.sensors.write().await;
                 *guard = Some(conn.clone());
                 info!("connected to peripherals IPC");
                 Some(conn)
@@ -146,7 +150,7 @@ impl IpcHandles {
     }
 
     pub async fn invalidate_sensors(&self) {
-        let mut guard = self.sensors.lock().await;
+        let mut guard = self.sensors.write().await;
         *guard = None;
     }
 

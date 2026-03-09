@@ -1,16 +1,18 @@
 use axum::{
     Json, Router,
+    body::Body,
     extract::Path,
     extract::State,
-    http::{HeaderValue, StatusCode},
+    http::{HeaderValue, StatusCode, header::CONTENT_TYPE},
     response::IntoResponse,
     routing::{get, post},
 };
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use tokio::fs;
 use tokio::sync::RwLock;
 use tokio::time::{Duration, Instant};
@@ -386,7 +388,7 @@ pub struct PipelineDocument {
     pub updated_at_ms: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct PipelineSummary {
     pub id: Uuid,
     #[serde(default)]
@@ -611,6 +613,125 @@ async fn snapshot_graph_validation() -> HashMap<Uuid, GraphValidationState> {
     graph_validation_cache().read().await.clone()
 }
 
+#[derive(Clone)]
+struct GraphListCacheEntry {
+    fetched_at: Instant,
+    payload: Arc<Vec<PipelineSummary>>,
+}
+
+fn graph_list_cache() -> &'static RwLock<Option<GraphListCacheEntry>> {
+    static CACHE: OnceLock<RwLock<Option<GraphListCacheEntry>>> = OnceLock::new();
+    CACHE.get_or_init(|| RwLock::new(None))
+}
+
+fn graph_list_refresh_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+async fn invalidate_graph_list_cache() {
+    *graph_list_cache().write().await = None;
+}
+
+async fn get_cached_graph_summaries(state: &AppState) -> Result<Arc<Vec<PipelineSummary>>, Box<axum::response::Response>> {
+    const FRESH_FOR: Duration = Duration::from_secs(2);
+
+    if let Some(entry) = graph_list_cache().read().await.clone()
+        && entry.fetched_at.elapsed() < FRESH_FOR
+    {
+        return Ok(entry.payload);
+    }
+
+    let _refresh_guard = graph_list_refresh_lock().lock().await;
+    if let Some(entry) = graph_list_cache().read().await.clone()
+        && entry.fetched_at.elapsed() < FRESH_FOR
+    {
+        return Ok(entry.payload);
+    }
+
+    let stale = graph_list_cache().read().await.clone();
+    match load_graph_summaries(state).await {
+        Ok(summaries) => {
+            let payload = Arc::new(summaries);
+            *graph_list_cache().write().await = Some(GraphListCacheEntry { fetched_at: Instant::now(), payload: payload.clone() });
+            Ok(payload)
+        }
+        Err(resp) => stale.map(|entry| entry.payload).ok_or(resp),
+    }
+}
+
+async fn load_graph_summaries(state: &AppState) -> Result<Vec<PipelineSummary>, Box<axum::response::Response>> {
+    let dir = pipeline_dir()?;
+    let mut loaded_docs: Vec<(PipelineDocument, i64)> = Vec::new();
+    let mut existing_ids = HashSet::new();
+    let validation_snapshot = snapshot_graph_validation().await;
+    let mut entries = match fs::read_dir(dir).await {
+        Ok(entries) => entries,
+        Err(err) => return Err(Box::new(map_io_error(err, "failed to read pipeline directory"))),
+    };
+
+    loop {
+        let entry = match entries.next_entry().await {
+            Ok(Some(entry)) => entry,
+            Ok(None) => break,
+            Err(err) => return Err(Box::new(map_io_error(err, "failed to read pipeline entry"))),
+        };
+
+        let meta = match entry.metadata().await {
+            Ok(meta) if meta.is_file() => meta,
+            Ok(_) => continue,
+            Err(err) => return Err(Box::new(map_io_error(err, "failed to stat pipeline file"))),
+        };
+
+        let data = match fs::read_to_string(entry.path()).await {
+            Ok(data) => data,
+            Err(err) => return Err(Box::new(map_io_error(err, "failed to read pipeline file"))),
+        };
+        if let Ok(doc) = serde_json::from_str::<PipelineDocument>(&data) {
+            let doc_id = doc.id;
+            let mut updated_at_ms = doc.updated_at_ms.max(0);
+            if updated_at_ms == 0
+                && let Ok(modified) = meta.modified()
+                && let Ok(ts) = modified.duration_since(std::time::UNIX_EPOCH)
+            {
+                updated_at_ms = ts.as_millis() as i64;
+            }
+            loaded_docs.push((doc, updated_at_ms));
+            existing_ids.insert(doc_id);
+        }
+    }
+
+    let now_ms = now_timestamp_ms();
+    let mut refresh_docs = Vec::new();
+    let summaries: Vec<PipelineSummary> = loaded_docs
+        .into_iter()
+        .map(|(doc, updated_at_ms)| {
+            let needs_refresh = match validation_snapshot.get(&doc.id) {
+                Some(state) => graph_validation_state_stale(state, updated_at_ms, now_ms),
+                None => true,
+            };
+            if needs_refresh {
+                refresh_docs.push((doc.id, doc.graph.clone()));
+            }
+            let issue_count = validation_snapshot.get(&doc.id).map(|state| state.diagnostics.len()).unwrap_or(0);
+            PipelineSummary { id: doc.id, name: doc.name, updated_at_ms, issue_count }
+        })
+        .collect();
+
+    prune_graph_validation_cache(&existing_ids).await;
+    if !refresh_docs.is_empty() {
+        let state = state.clone();
+        tokio::spawn(async move {
+            for (graph_id, graph) in refresh_docs {
+                refresh_graph_validation(&state, graph_id, &graph).await;
+            }
+            invalidate_graph_list_cache().await;
+        });
+    }
+
+    Ok(summaries)
+}
+
 pub(crate) async fn refresh_graph_validation(state: &AppState, graph_id: Uuid, graph: &serde_json::Value) {
     match state.engine.validate_graph_event(graph.clone(), Vec::new(), true).await {
         Ok(EngineEvent::GraphValidation { report, .. }) => {
@@ -637,16 +758,122 @@ pub(crate) async fn refresh_graph_validation(state: &AppState, graph_id: Uuid, g
     responses((status = 200, description = "Daedalus node registry", body = DaedalusRegistryResponse))
 )]
 async fn list_registry(State(state): State<AppState>) -> impl IntoResponse {
-    let (snapshot, stale) = match get_cached_registry_snapshot(&state).await {
+    let (payload, stale) = match get_cached_registry_payload(&state).await {
         Some(value) => value,
         None => {
             return (StatusCode::BAD_GATEWAY, Json(PipelineError { error: "registry unavailable".to_string() })).into_response();
         }
     };
 
+    let mut response = axum::response::Response::new(Body::from(payload.body.clone()));
+    *response.status_mut() = StatusCode::OK;
+    response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    if stale {
+        response.headers_mut().insert("x-helios-registry-stale", HeaderValue::from_static("1"));
+    }
+    response
+}
+
+pub async fn warm_registry_cache(state: AppState) {
+    let _ = get_cached_registry_payload(&state).await;
+}
+
+#[derive(Clone)]
+struct CachedRegistryPayload {
+    snapshot: Arc<NodeRegistrySnapshot>,
+    body: Bytes,
+}
+
+#[derive(Clone)]
+struct RegistryCacheEntry {
+    fetched_at: Instant,
+    payload: Arc<CachedRegistryPayload>,
+}
+
+fn registry_cache() -> &'static RwLock<Option<RegistryCacheEntry>> {
+    static CACHE: OnceLock<RwLock<Option<RegistryCacheEntry>>> = OnceLock::new();
+    CACHE.get_or_init(|| RwLock::new(None))
+}
+
+fn registry_refresh_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+async fn get_cached_registry_payload(state: &AppState) -> Option<(Arc<CachedRegistryPayload>, bool)> {
+    // Registry is large but changes rarely; keep it hot so UI interactions don't stall on engine IPC.
+    const FRESH_FOR: Duration = Duration::from_secs(30);
+    const IPC_TIMEOUT: Duration = Duration::from_secs(6);
+    const IPC_RETRY_TIMEOUT: Duration = Duration::from_secs(18);
+
+    if let Some(entry) = registry_cache().read().await.clone()
+        && entry.fetched_at.elapsed() < FRESH_FOR
+    {
+        return Some((entry.payload, false));
+    }
+
+    let _refresh_guard = registry_refresh_lock().lock().await;
+    if let Some(entry) = registry_cache().read().await.clone()
+        && entry.fetched_at.elapsed() < FRESH_FOR
+    {
+        return Some((entry.payload, false));
+    }
+
+    let mut stale_entry = registry_cache().read().await.clone();
+    match state.engine.get_node_registry_with_timeout(IPC_TIMEOUT).await {
+        Ok(snapshot) => match build_cached_registry_payload(snapshot) {
+            Ok(payload) => {
+                *registry_cache().write().await = Some(RegistryCacheEntry { fetched_at: Instant::now(), payload: payload.clone() });
+                Some((payload, false))
+            }
+            Err(error) => {
+                warn!(error = %error, "failed to encode cached node registry response");
+                stale_entry.map(|entry| (entry.payload, true))
+            }
+        },
+        Err(error) => {
+            if stale_entry.is_none() {
+                warn!(
+                    error = ?error,
+                    timeout_ms = IPC_TIMEOUT.as_millis(),
+                    retry_timeout_ms = IPC_RETRY_TIMEOUT.as_millis(),
+                    "node registry fetch timed out; retrying with relaxed timeout"
+                );
+                match state.engine.get_node_registry_with_timeout(IPC_RETRY_TIMEOUT).await {
+                    Ok(snapshot) => match build_cached_registry_payload(snapshot) {
+                        Ok(payload) => {
+                            *registry_cache().write().await = Some(RegistryCacheEntry { fetched_at: Instant::now(), payload: payload.clone() });
+                            return Some((payload, false));
+                        }
+                        Err(error) => {
+                            warn!(error = %error, "failed to encode cached node registry response");
+                        }
+                    },
+                    Err(retry_error) => {
+                        warn!(
+                            error = ?retry_error,
+                            timeout_ms = IPC_RETRY_TIMEOUT.as_millis(),
+                            "node registry fetch failed after retry"
+                        );
+                    }
+                }
+                stale_entry = registry_cache().read().await.clone();
+            }
+            stale_entry.map(|entry| (entry.payload, true))
+        }
+    }
+}
+
+fn build_cached_registry_payload(snapshot: NodeRegistrySnapshot) -> Result<Arc<CachedRegistryPayload>, serde_json::Error> {
+    let body = build_registry_response_body(&snapshot)?;
+    Ok(Arc::new(CachedRegistryPayload { snapshot: Arc::new(snapshot), body }))
+}
+
+fn build_registry_response_body(snapshot: &NodeRegistrySnapshot) -> Result<Bytes, serde_json::Error> {
     let mut nodes: Vec<DaedalusRegistryNode> = snapshot
         .nodes
-        .into_iter()
+        .iter()
+        .cloned()
         .map(|node| DaedalusRegistryNode {
             id: node.id,
             label: node.label,
@@ -676,86 +903,15 @@ async fn list_registry(State(state): State<AppState>) -> impl IntoResponse {
         .collect();
     nodes.sort_by(|a, b| a.id.cmp(&b.id));
 
-    let mut types: Vec<DaedalusRegistryType> = snapshot.types.into_iter().map(|entry| DaedalusRegistryType { rust: entry.rust, ty: entry.ty.into() }).collect();
+    let mut types: Vec<DaedalusRegistryType> = snapshot.types.iter().cloned().map(|entry| DaedalusRegistryType { rust: entry.rust, ty: entry.ty.into() }).collect();
     types.sort_by(|a, b| a.rust.cmp(&b.rust));
 
-    let mut response = Json(DaedalusRegistryResponse { plugins: snapshot.plugins, nodes, types }).into_response();
-    if stale {
-        response.headers_mut().insert("x-helios-registry-stale", HeaderValue::from_static("1"));
-    }
-    response
+    serde_json::to_vec(&DaedalusRegistryResponse { plugins: snapshot.plugins.clone(), nodes, types }).map(Bytes::from)
 }
 
-pub async fn warm_registry_cache(state: AppState) {
-    let _ = get_cached_registry_snapshot(&state).await;
-}
-
-#[derive(Clone)]
-struct RegistryCacheEntry {
-    fetched_at: Instant,
-    snapshot: NodeRegistrySnapshot,
-}
-
-fn registry_cache() -> &'static RwLock<Option<RegistryCacheEntry>> {
-    static CACHE: OnceLock<RwLock<Option<RegistryCacheEntry>>> = OnceLock::new();
-    CACHE.get_or_init(|| RwLock::new(None))
-}
-
-fn registry_refresh_lock() -> &'static tokio::sync::Mutex<()> {
-    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
-}
-
-async fn get_cached_registry_snapshot(state: &AppState) -> Option<(NodeRegistrySnapshot, bool)> {
-    // Registry is large but changes rarely; keep it hot so UI interactions don't stall on engine IPC.
-    const FRESH_FOR: Duration = Duration::from_secs(30);
-    const IPC_TIMEOUT: Duration = Duration::from_secs(6);
-    const IPC_RETRY_TIMEOUT: Duration = Duration::from_secs(18);
-
-    if let Some(entry) = registry_cache().read().await.clone()
-        && entry.fetched_at.elapsed() < FRESH_FOR
-    {
-        return Some((entry.snapshot, false));
-    }
-
-    let _refresh_guard = registry_refresh_lock().lock().await;
-    if let Some(entry) = registry_cache().read().await.clone()
-        && entry.fetched_at.elapsed() < FRESH_FOR
-    {
-        return Some((entry.snapshot, false));
-    }
-
-    let mut stale_entry = registry_cache().read().await.clone();
-    match state.engine.get_node_registry_with_timeout(IPC_TIMEOUT).await {
-        Ok(snapshot) => {
-            *registry_cache().write().await = Some(RegistryCacheEntry { fetched_at: Instant::now(), snapshot: snapshot.clone() });
-            Some((snapshot, false))
-        }
-        Err(error) => {
-            if stale_entry.is_none() {
-                warn!(
-                    error = ?error,
-                    timeout_ms = IPC_TIMEOUT.as_millis(),
-                    retry_timeout_ms = IPC_RETRY_TIMEOUT.as_millis(),
-                    "node registry fetch timed out; retrying with relaxed timeout"
-                );
-                match state.engine.get_node_registry_with_timeout(IPC_RETRY_TIMEOUT).await {
-                    Ok(snapshot) => {
-                        *registry_cache().write().await = Some(RegistryCacheEntry { fetched_at: Instant::now(), snapshot: snapshot.clone() });
-                        return Some((snapshot, false));
-                    }
-                    Err(retry_error) => {
-                        warn!(
-                            error = ?retry_error,
-                            timeout_ms = IPC_RETRY_TIMEOUT.as_millis(),
-                            "node registry fetch failed after retry"
-                        );
-                    }
-                }
-                stale_entry = registry_cache().read().await.clone();
-            }
-            stale_entry.map(|entry| (entry.snapshot, true))
-        }
+async fn inject_cached_port_metadata(state: &AppState, graph: &mut JsonValue) {
+    if let Some((payload, _)) = get_cached_registry_payload(state).await {
+        inject_port_metadata(graph, payload.snapshot.as_ref());
     }
 }
 
@@ -878,12 +1034,8 @@ async fn upload_graph(State(state): State<AppState>, Json(payload): Json<UploadG
             return (StatusCode::BAD_REQUEST, Json(PipelineError { error: format!("invalid daedalus graph: {err}") })).into_response();
         }
     };
-    if let Ok(snapshot) = state.engine.get_node_registry().await {
-        inject_port_metadata(&mut graph_json, &snapshot);
-        merge_edge_metadata(&payload.graph, &mut graph_json);
-    } else {
-        merge_edge_metadata(&payload.graph, &mut graph_json);
-    }
+    inject_cached_port_metadata(&state, &mut graph_json).await;
+    merge_edge_metadata(&payload.graph, &mut graph_json);
 
     let _guard = pipeline_graph_write_lock().lock().await;
     let id = Uuid::new_v4();
@@ -934,6 +1086,7 @@ async fn upload_graph(State(state): State<AppState>, Json(payload): Json<UploadG
     };
     match fs::write(path, data).await {
         Ok(_) => {
+            invalidate_graph_list_cache().await;
             refresh_graph_validation(&state, id, &doc.graph).await;
             (StatusCode::CREATED, Json(doc)).into_response()
         }
@@ -1001,12 +1154,8 @@ async fn update_graph(State(state): State<AppState>, Path(id): Path<Uuid>, Json(
             return (StatusCode::BAD_REQUEST, Json(PipelineError { error: format!("invalid daedalus graph: {err}") })).into_response();
         }
     };
-    if let Ok(snapshot) = state.engine.get_node_registry().await {
-        inject_port_metadata(&mut graph_json, &snapshot);
-        merge_edge_metadata(&payload.graph, &mut graph_json);
-    } else {
-        merge_edge_metadata(&payload.graph, &mut graph_json);
-    }
+    inject_cached_port_metadata(&state, &mut graph_json).await;
+    merge_edge_metadata(&payload.graph, &mut graph_json);
 
     let _guard = pipeline_graph_write_lock().lock().await;
 
@@ -1029,6 +1178,7 @@ async fn update_graph(State(state): State<AppState>, Path(id): Path<Uuid>, Json(
     };
     match fs::write(path, data).await {
         Ok(_) => {
+            invalidate_graph_list_cache().await;
             refresh_graph_validation(&state, id, &doc.graph).await;
             let failures = refresh_pipeline_consumers(&state, id, &doc.graph).await;
             if !failures.is_empty() {
@@ -1048,77 +1198,10 @@ async fn update_graph(State(state): State<AppState>, Path(id): Path<Uuid>, Json(
     responses((status = 200, description = "List stored graphs", body = [PipelineSummary]), (status = 500, description = "Storage error", body = PipelineError))
 )]
 async fn list_graphs(State(state): State<AppState>) -> impl IntoResponse {
-    let dir = match pipeline_dir() {
-        Ok(dir) => dir,
-        Err(resp) => return *resp,
-    };
-    let mut loaded_docs: Vec<(PipelineDocument, i64)> = Vec::new();
-    let mut existing_ids = HashSet::new();
-    let mut validation_snapshot = snapshot_graph_validation().await;
-    let mut entries = match fs::read_dir(dir).await {
-        Ok(entries) => entries,
-        Err(err) => return map_io_error(err, "failed to read pipeline directory"),
-    };
-
-    loop {
-        let entry = match entries.next_entry().await {
-            Ok(Some(entry)) => entry,
-            Ok(None) => break,
-            Err(err) => return map_io_error(err, "failed to read pipeline entry"),
-        };
-
-        let meta = match entry.metadata().await {
-            Ok(meta) if meta.is_file() => meta,
-            Ok(_) => continue,
-            Err(err) => return map_io_error(err, "failed to stat pipeline file"),
-        };
-
-        let data = match fs::read_to_string(entry.path()).await {
-            Ok(data) => data,
-            Err(err) => return map_io_error(err, "failed to read pipeline file"),
-        };
-        if let Ok(doc) = serde_json::from_str::<PipelineDocument>(&data) {
-            let doc_id = doc.id;
-            let mut updated_at_ms = doc.updated_at_ms.max(0);
-            // Fallback to file modification time if the stored value is zero.
-            if updated_at_ms == 0
-                && let Ok(modified) = meta.modified()
-                && let Ok(ts) = modified.duration_since(std::time::UNIX_EPOCH)
-            {
-                updated_at_ms = ts.as_millis() as i64;
-            }
-            loaded_docs.push((doc, updated_at_ms));
-            existing_ids.insert(doc_id);
-        } else {
-            // Skip malformed entries; they were not written by this API.
-            continue;
-        }
+    match get_cached_graph_summaries(&state).await {
+        Ok(summaries) => Json(summaries.as_ref().clone()).into_response(),
+        Err(resp) => *resp,
     }
-
-    let now_ms = now_timestamp_ms();
-    for (doc, updated_at_ms) in &loaded_docs {
-        let needs_refresh = match validation_snapshot.get(&doc.id) {
-            Some(state) => graph_validation_state_stale(state, *updated_at_ms, now_ms),
-            None => true,
-        };
-        if needs_refresh {
-            refresh_graph_validation(&state, doc.id, &doc.graph).await;
-        }
-    }
-    if !loaded_docs.is_empty() {
-        validation_snapshot = snapshot_graph_validation().await;
-    }
-
-    let summaries: Vec<PipelineSummary> = loaded_docs
-        .into_iter()
-        .map(|(doc, updated_at_ms)| {
-            let issue_count = validation_snapshot.get(&doc.id).map(|state| state.diagnostics.len()).unwrap_or(0);
-            PipelineSummary { id: doc.id, name: doc.name, updated_at_ms, issue_count }
-        })
-        .collect();
-
-    prune_graph_validation_cache(&existing_ids).await;
-    Json(summaries).into_response()
 }
 
 #[utoipa::path(
@@ -1137,9 +1220,7 @@ async fn fetch_graph(State(state): State<AppState>, Path(id): Path<Uuid>) -> imp
     match fs::read_to_string(&path).await {
         Ok(data) => match serde_json::from_str::<PipelineDocument>(&data) {
             Ok(mut doc) => {
-                if let Ok(snapshot) = state.engine.get_node_registry().await {
-                    inject_port_metadata(&mut doc.graph, &snapshot);
-                }
+                inject_cached_port_metadata(&state, &mut doc.graph).await;
                 Json(doc).into_response()
             }
             Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, Json(PipelineError { error: format!("failed to decode graph: {err}") })).into_response(),
@@ -1292,6 +1373,7 @@ async fn delete_graph(State(state): State<AppState>, Path(id): Path<Uuid>) -> im
     let path = dir.join(format!("{id}.json"));
     match fs::remove_file(&path).await {
         Ok(()) => {
+            invalidate_graph_list_cache().await;
             clear_graph_validation_state(id).await;
             match detach_pipeline_from_streams(&state, id).await {
                 Ok(()) => StatusCode::NO_CONTENT.into_response(),
@@ -1424,9 +1506,7 @@ async fn fetch_template(State(state): State<AppState>, Path(id): Path<String>) -
         graph = unwrapped;
     }
     normalize_graph_metadata(&mut graph);
-    if let Ok(snapshot) = state.engine.get_node_registry().await {
-        inject_port_metadata(&mut graph, &snapshot);
-    }
+    inject_cached_port_metadata(&state, &mut graph).await;
     let doc = PipelineTemplateDocument { id: template_id, name, summary, tags, graph };
     Json(doc).into_response()
 }

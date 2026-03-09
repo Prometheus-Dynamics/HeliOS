@@ -1,7 +1,6 @@
 use std::{
     io,
     path::PathBuf,
-    sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant},
 };
 
@@ -29,7 +28,6 @@ pub struct SensorsConnection {
     client: std::sync::Arc<SensorsClient>,
     sessions: std::sync::Arc<Mutex<Vec<IdleSession>>>,
     session_idle_timeout: Duration,
-    session_counter: AtomicU64,
 }
 
 #[derive(Debug, Clone)]
@@ -109,7 +107,6 @@ pub struct SensorsStream {
 
 #[derive(Debug)]
 struct IdleSession {
-    id: u64,
     session: SensorsSession,
     last_used: Instant,
 }
@@ -136,7 +133,7 @@ async fn try_connect_sensors(socket: PathBuf, journal_path: PathBuf) -> Result<S
     );
     // Drop the initial session so idle clients do not hold a broadcast receiver open.
     drop(session);
-    Ok(SensorsConnection { client, sessions: std::sync::Arc::new(Mutex::new(Vec::new())), session_idle_timeout: session_idle_timeout(), session_counter: AtomicU64::new(1) })
+    Ok(SensorsConnection { client, sessions: std::sync::Arc::new(Mutex::new(Vec::new())), session_idle_timeout: session_idle_timeout() })
 }
 
 async fn try_connect_sensors_stream(socket: PathBuf, journal_path: PathBuf) -> Result<SensorsStream, Box<dyn std::error::Error + Send + Sync>> {
@@ -201,10 +198,9 @@ impl SensorsConnection {
         if idle_timeout > Duration::from_millis(0) {
             let now = Instant::now();
             let mut guard = self.sessions.lock().await;
-            while let Some(idle) = guard.pop() {
-                if now.duration_since(idle.last_used) <= idle_timeout {
-                    return Ok(idle.session);
-                }
+            guard.retain(|idle| now.duration_since(idle.last_used) <= idle_timeout);
+            if let Some(idle) = guard.pop() {
+                return Ok(idle.session);
             }
         }
         match timeout(Duration::from_secs(5), self.client.handshake()).await {
@@ -219,25 +215,16 @@ impl SensorsConnection {
         if idle_timeout <= Duration::from_millis(0) {
             return;
         }
-        let id = self.session_counter.fetch_add(1, Ordering::Relaxed);
-        let idle = IdleSession { id, session, last_used: Instant::now() };
-        let sessions = self.sessions.clone();
+        let now = Instant::now();
+        let idle = IdleSession { session, last_used: now };
+        let mut guard = self.sessions.lock().await;
+        guard.retain(|entry| now.duration_since(entry.last_used) <= idle_timeout);
+        guard.push(idle);
+        if guard.len() > MAX_IDLE_SESSIONS
+            && let Some((idx, _)) = guard.iter().enumerate().min_by_key(|(_, entry)| entry.last_used)
         {
-            let mut guard = sessions.lock().await;
-            guard.push(idle);
-            if guard.len() > MAX_IDLE_SESSIONS
-                && let Some((idx, _)) = guard.iter().enumerate().min_by_key(|(_, entry)| entry.last_used)
-            {
-                guard.swap_remove(idx);
-            }
+            guard.swap_remove(idx);
         }
-        tokio::spawn(async move {
-            tokio::time::sleep(idle_timeout).await;
-            let mut guard = sessions.lock().await;
-            if let Some(idx) = guard.iter().position(|entry| entry.id == id) {
-                guard.swap_remove(idx);
-            }
-        });
     }
 
     async fn run_command<T, F>(&self, command: SensorCommand, map: F) -> Result<Result<T, String>, ClientTransportError>

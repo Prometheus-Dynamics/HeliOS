@@ -112,14 +112,24 @@ pub fn discover_file_sources() -> Vec<LogSource> {
 }
 
 pub async fn hydrate_systemd_statuses(mut sources: Vec<LogSource>) -> Vec<LogSource> {
-    let mut updated = Vec::with_capacity(sources.len());
-    for mut source in sources.drain(..) {
-        if let Some(unit) = source.unit.clone() {
-            source.status = query_unit_status(&unit).await;
-        }
-        updated.push(source);
+    let mut tasks = tokio::task::JoinSet::new();
+    for (idx, source) in sources.iter().enumerate() {
+        let Some(unit) = source.unit.clone() else {
+            continue;
+        };
+        tasks.spawn(async move { (idx, query_unit_status(&unit).await) });
     }
-    updated
+
+    while let Some(result) = tasks.join_next().await {
+        let Ok((idx, status)) = result else {
+            continue;
+        };
+        if let Some(source) = sources.get_mut(idx) {
+            source.status = status;
+        }
+    }
+
+    sources
 }
 
 async fn query_unit_status(unit: &str) -> Option<SystemdUnitStatus> {

@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{OnceLock, Weak};
+use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
 use std::time::Instant;
 use sysinfo::{Disks, Networks, System};
@@ -33,7 +33,8 @@ static NET_SNAPSHOT: Lazy<std::sync::Mutex<Option<NetSnapshot>>> = Lazy::new(|| 
 static TELEMETRY_HUB: Lazy<TelemetryHub> = Lazy::new(TelemetryHub::new);
 
 struct TelemetryHub {
-    tx: broadcast::Sender<TelemetrySample>,
+    tx: broadcast::Sender<Arc<EncodedTelemetrySample>>,
+    latest: Arc<std::sync::Mutex<Option<Arc<EncodedTelemetrySample>>>>,
     task: Mutex<Option<JoinHandle<()>>>,
     state: std::sync::Mutex<Option<Weak<IpcHandles>>>,
 }
@@ -41,12 +42,13 @@ struct TelemetryHub {
 impl TelemetryHub {
     fn new() -> Self {
         let (tx, _) = broadcast::channel(32);
-        Self { tx, task: Mutex::new(None), state: std::sync::Mutex::new(None) }
+        Self { tx, latest: Arc::new(std::sync::Mutex::new(None)), task: Mutex::new(None), state: std::sync::Mutex::new(None) }
     }
 
-    async fn subscribe(&self) -> broadcast::Receiver<TelemetrySample> {
+    async fn subscribe(&self) -> (broadcast::Receiver<Arc<EncodedTelemetrySample>>, Option<Arc<EncodedTelemetrySample>>) {
         self.ensure_task().await;
-        self.tx.subscribe()
+        let latest = self.latest.lock().ok().and_then(|guard| guard.clone());
+        (self.tx.subscribe(), latest)
     }
 
     fn set_state(&self, state: &AppState) {
@@ -61,10 +63,16 @@ impl TelemetryHub {
         let needs_spawn = guard.as_ref().map(|handle| handle.is_finished()).unwrap_or(true);
         if needs_spawn {
             let tx = self.tx.clone();
+            let latest = self.latest.clone();
             let state = self.state.lock().unwrap().clone();
-            *guard = Some(tokio::spawn(run_telemetry_sampler(tx, state)));
+            *guard = Some(tokio::spawn(run_telemetry_sampler(tx, latest, state)));
         }
     }
+}
+
+#[derive(Clone)]
+struct EncodedTelemetrySample {
+    payload: Arc<str>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -80,35 +88,47 @@ pub async fn telemetry_upgrade(ws: WebSocketUpgrade, State(state): State<AppStat
 
 async fn telemetry_loop(socket: WebSocket, interval: Duration) {
     let (mut tx, mut rx) = socket.split();
-    let mut sampler = TELEMETRY_HUB.subscribe().await;
+    let (mut sampler, initial) = TELEMETRY_HUB.subscribe().await;
     let mut ticker = tokio::time::interval(interval);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-    let mut latest: Option<TelemetrySample> = match sampler.recv().await {
-        Ok(sample) => {
-            let payload = serde_json::to_string(&sample).unwrap_or_default();
-            if tx.send(Message::Text(payload.into())).await.is_err() {
-                return;
-            }
-            Some(sample)
+    let mut latest = initial;
+    let mut last_sent_at = Instant::now().checked_sub(interval).unwrap_or_else(Instant::now);
+
+    if let Some(sample) = latest.as_ref() {
+        if tx.send(Message::Text(sample.payload.as_ref().to_owned().into())).await.is_err() {
+            return;
         }
-        Err(_) => None,
-    };
+        last_sent_at = Instant::now();
+        latest = None;
+    }
 
     loop {
         tokio::select! {
             recv = sampler.recv() => {
                 match recv {
-                    Ok(sample) => latest = Some(sample),
+                    Ok(sample) => {
+                        latest = Some(sample);
+                        if last_sent_at.elapsed() >= interval
+                            && let Some(sample) = latest.take()
+                        {
+                            if tx.send(Message::Text(sample.payload.as_ref().to_owned().into())).await.is_err() {
+                                break;
+                            }
+                            last_sent_at = Instant::now();
+                        }
+                    }
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
             }
             _ = ticker.tick() => {
-                if let Some(sample) = latest.clone()
-                    && tx.send(Message::Text(serde_json::to_string(&sample).unwrap_or_default().into())).await.is_err() {
+                if let Some(sample) = latest.take() {
+                    if tx.send(Message::Text(sample.payload.as_ref().to_owned().into())).await.is_err() {
                         break;
                     }
+                    last_sent_at = Instant::now();
+                }
             }
             Some(msg) = rx.next() => {
                 if matches!(msg, Err(_) | Ok(Message::Close(_))) {
@@ -355,7 +375,7 @@ impl TelemetrySysSampler {
     }
 }
 
-async fn run_telemetry_sampler(tx: broadcast::Sender<TelemetrySample>, state: Option<Weak<IpcHandles>>) {
+async fn run_telemetry_sampler(tx: broadcast::Sender<Arc<EncodedTelemetrySample>>, latest: Arc<std::sync::Mutex<Option<Arc<EncodedTelemetrySample>>>>, state: Option<Weak<IpcHandles>>) {
     let sample_interval = std::env::var("HELIOS_TELEMETRY_SAMPLE_INTERVAL_MS")
         .ok()
         .and_then(|raw| raw.parse::<u64>().ok())
@@ -461,7 +481,12 @@ async fn run_telemetry_sampler(tx: broadcast::Sender<TelemetrySample>, state: Op
                     }
                 }
 
-                let _ = tx.send(sample);
+                let payload = Arc::<str>::from(serde_json::to_string(&sample).unwrap_or_default());
+                let encoded = Arc::new(EncodedTelemetrySample { payload });
+                if let Ok(mut guard) = latest.lock() {
+                    *guard = Some(encoded.clone());
+                }
+                let _ = tx.send(encoded);
             }
         })
     };

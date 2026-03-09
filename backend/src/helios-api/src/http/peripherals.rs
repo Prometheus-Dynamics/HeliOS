@@ -14,7 +14,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tokio::task;
 use tracing::{error, warn};
 use utoipa::ToSchema;
@@ -36,7 +36,7 @@ pub fn router() -> Router<AppState> {
         .route("/sensors/alias", post(configure_sensor_alias))
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Clone, Serialize, ToSchema)]
 pub struct PeripheralErrors {
     #[serde(default)]
     cameras: Vec<String>,
@@ -50,7 +50,7 @@ pub struct PeripheralErrors {
     lighting: Vec<String>,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Clone, Serialize, ToSchema)]
 pub struct PeripheralInventory {
     cameras: Vec<helios_engine::capture::DiscoveredDevice>,
     #[serde(default)]
@@ -67,7 +67,7 @@ pub struct PeripheralInventory {
     fan: Option<FanStatus>,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Clone, Serialize, ToSchema)]
 pub struct UsbPeripheral {
     id: String,
     #[serde(default)]
@@ -86,7 +86,7 @@ pub struct UsbPeripheralWarning {
     pub message: String,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Clone, Serialize, ToSchema)]
 pub struct LightingStatus {
     #[serde(default)]
     present: bool,
@@ -94,7 +94,7 @@ pub struct LightingStatus {
     last_error: Option<String>,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Clone, Serialize, ToSchema)]
 pub struct FanStatus {
     #[serde(default)]
     present: bool,
@@ -182,32 +182,63 @@ impl ErrorBody {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Clone, Serialize, ToSchema)]
 pub struct CameraDiscoveryResponse {
     cameras: Vec<helios_engine::capture::DiscoveredDevice>,
     #[serde(default)]
     errors: Vec<String>,
 }
 
-#[utoipa::path(
-    get,
-    path = "/peripherals",
-    tag = "Peripherals",
-    responses(
-        (status = 200, description = "Peripherals and cameras", body = PeripheralInventory),
-        (status = 502, description = "Peripheral error", body = ErrorBody)
-    )
-)]
-async fn list_peripherals(State(state): State<AppState>) -> impl IntoResponse {
-    let mut errors = PeripheralErrors { cameras: Vec::new(), i2c: Vec::new(), usb: Vec::new(), fan: Vec::new(), lighting: Vec::new() };
-    let cameras = match cached_discover_cameras().await {
-        Ok(cams) => cams,
-        Err(err) => {
-            warn!("camera discovery failed: {err}");
-            return (StatusCode::BAD_GATEWAY, Json(ErrorBody::new("bad_gateway", err))).into_response();
-        }
-    };
+#[derive(Clone)]
+struct PeripheralInventoryCacheEntry {
+    fetched_at: Instant,
+    payload: PeripheralInventory,
+}
 
+fn peripheral_inventory_cache() -> &'static RwLock<Option<PeripheralInventoryCacheEntry>> {
+    static CACHE: OnceLock<RwLock<Option<PeripheralInventoryCacheEntry>>> = OnceLock::new();
+    CACHE.get_or_init(|| RwLock::new(None))
+}
+
+fn peripheral_inventory_refresh_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn peripheral_inventory_cache_ttl() -> Duration {
+    static VALUE: OnceLock<Duration> = OnceLock::new();
+    *VALUE.get_or_init(|| read_timeout_env("HELIOS_PERIPHERALS_CACHE_MS", 1_000, 0, 10_000))
+}
+
+async fn invalidate_peripheral_inventory_cache() {
+    *peripheral_inventory_cache().write().await = None;
+}
+
+async fn load_peripheral_inventory_cached(state: &AppState) -> Result<PeripheralInventory, String> {
+    let ttl = peripheral_inventory_cache_ttl();
+    if ttl != Duration::from_millis(0)
+        && let Some(entry) = peripheral_inventory_cache().read().await.clone()
+        && entry.fetched_at.elapsed() < ttl
+    {
+        return Ok(entry.payload);
+    }
+
+    let _refresh_guard = peripheral_inventory_refresh_lock().lock().await;
+    if ttl != Duration::from_millis(0)
+        && let Some(entry) = peripheral_inventory_cache().read().await.clone()
+        && entry.fetched_at.elapsed() < ttl
+    {
+        return Ok(entry.payload);
+    }
+
+    let payload = build_peripheral_inventory(state).await?;
+    *peripheral_inventory_cache().write().await = Some(PeripheralInventoryCacheEntry { fetched_at: Instant::now(), payload: payload.clone() });
+    Ok(payload)
+}
+
+async fn build_peripheral_inventory(state: &AppState) -> Result<PeripheralInventory, String> {
+    let mut errors = PeripheralErrors { cameras: Vec::new(), i2c: Vec::new(), usb: Vec::new(), fan: Vec::new(), lighting: Vec::new() };
+    let cameras = cached_discover_cameras().await?;
     let usb = list_usb_sysfs();
     let (sensors, i2c, fan, lighting) = match state.ensure_sensors().await {
         Some(sensors) => {
@@ -236,7 +267,7 @@ async fn list_peripherals(State(state): State<AppState>) -> impl IntoResponse {
 
             if inventory.as_ref().is_none_or(|inv| inventory_needs_refresh(inv, &usb))
                 && allow_inventory_refresh().await
-                && let Some(refreshed) = refresh_inventory(&state, sensors.clone()).await
+                && let Some(refreshed) = refresh_inventory(state, sensors.clone()).await
             {
                 inventory = Some(refreshed);
             }
@@ -281,9 +312,26 @@ async fn list_peripherals(State(state): State<AppState>) -> impl IntoResponse {
     };
 
     errors.cameras = cameras.errors;
-    let resp = PeripheralInventory { cameras: cameras.devices, sensors, errors, i2c, usb, lighting, fan };
+    Ok(PeripheralInventory { cameras: cameras.devices, sensors, errors, i2c, usb, lighting, fan })
+}
 
-    Json(resp).into_response()
+#[utoipa::path(
+    get,
+    path = "/peripherals",
+    tag = "Peripherals",
+    responses(
+        (status = 200, description = "Peripherals and cameras", body = PeripheralInventory),
+        (status = 502, description = "Peripheral error", body = ErrorBody)
+    )
+)]
+async fn list_peripherals(State(state): State<AppState>) -> impl IntoResponse {
+    match load_peripheral_inventory_cached(&state).await {
+        Ok(resp) => Json(resp).into_response(),
+        Err(err) => {
+            warn!("camera discovery failed: {err}");
+            (StatusCode::BAD_GATEWAY, Json(ErrorBody::new("bad_gateway", err))).into_response()
+        }
+    }
 }
 
 #[utoipa::path(
@@ -510,7 +558,10 @@ async fn configure_sensor_firmware(State(state): State<AppState>, Json(req): Jso
     }
 
     match sensors.configure_firmware(device_id.to_string(), firmware.to_string()).await {
-        Ok(Ok(())) => StatusCode::NO_CONTENT.into_response(),
+        Ok(Ok(())) => {
+            invalidate_peripheral_inventory_cache().await;
+            StatusCode::NO_CONTENT.into_response()
+        }
         Ok(Err(reason)) => {
             let normalized = reason.to_lowercase();
             if normalized.contains("timed out") || normalized.contains("timeout") {
@@ -554,7 +605,10 @@ async fn configure_sensor_alias(State(state): State<AppState>, Json(req): Json<C
     }
 
     match sensors.configure_alias(hardware_key.to_string(), req.alias).await {
-        Ok(Ok(())) => StatusCode::NO_CONTENT.into_response(),
+        Ok(Ok(())) => {
+            invalidate_peripheral_inventory_cache().await;
+            StatusCode::NO_CONTENT.into_response()
+        }
         Ok(Err(reason)) => (StatusCode::BAD_REQUEST, Json(ErrorBody::new("bad_request", reason))).into_response(),
         Err(err) => {
             error!(%err, "failed to send configure alias command");
@@ -833,6 +887,11 @@ static INVENTORY_REFRESH_AT: Lazy<Mutex<Instant>> = Lazy::new(|| Mutex::new(Inst
 
 const INVENTORY_REFRESH_MIN: Duration = Duration::from_secs(10);
 
+fn camera_refresh_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
 fn read_timeout_env(var: &str, default_ms: u64, min_ms: u64, max_ms: u64) -> Duration {
     let ms = std::env::var(var).ok().and_then(|value| value.trim().parse::<u64>().ok()).unwrap_or(default_ms);
     Duration::from_millis(ms.clamp(min_ms, max_ms))
@@ -856,6 +915,16 @@ fn sensor_refresh_timeout() -> Duration {
 async fn cached_discover_cameras() -> Result<helios_engine::capture::DiscoveryResult, String> {
     const TTL: Duration = Duration::from_secs(5);
 
+    {
+        let guard = CAMERA_CACHE.lock().await;
+        if let Some(cached) = guard.as_ref()
+            && cached.at.elapsed() < TTL
+        {
+            return Ok(cached.result.clone());
+        }
+    }
+
+    let _refresh_guard = camera_refresh_lock().lock().await;
     {
         let guard = CAMERA_CACHE.lock().await;
         if let Some(cached) = guard.as_ref()
