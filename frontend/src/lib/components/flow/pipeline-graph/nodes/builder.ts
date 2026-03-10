@@ -27,6 +27,7 @@ type NodeBuilderData = {
   inputOrder: string[];
   outputOrder: string[];
   activeConnection: ActiveConnection | null;
+  detailLevel: 'minimal' | 'full';
   gpuOverlay: boolean;
   gpuSegment: number | null;
   gpuPeers: number | null;
@@ -113,6 +114,7 @@ const nodeDataEquals = (left: NodeBuilderData, right: NodeBuilderData): boolean 
   left.apiNode === right.apiNode &&
   left.registryEntry === right.registryEntry &&
   left.activeConnection === right.activeConnection &&
+  left.detailLevel === right.detailLevel &&
   left.gpuOverlay === right.gpuOverlay &&
   left.gpuSegment === right.gpuSegment &&
   left.gpuPeers === right.gpuPeers &&
@@ -144,6 +146,7 @@ export type BuildFlowNodesOptions = {
   connection: ActiveConnection | null;
   previousNodes: Node[];
   portOrders: { inputs: Record<string, string[]>; outputs: Record<string, string[]> };
+  detailLevel: 'minimal' | 'full';
   highlight?: { nodeId: string | null; port: string | null; token: number | null } | null;
   searchTokens?: string[];
   resolveRegistryEntryForNode: (node: PipelineGraphPlan['nodes'][string]) => PipelineRegistryEntry | null;
@@ -172,6 +175,7 @@ export const buildFlowNodes = ({
   connection,
   previousNodes,
   portOrders,
+  detailLevel,
   highlight = null,
   searchTokens = [],
   resolveRegistryEntryForNode,
@@ -415,6 +419,7 @@ export const buildFlowNodes = ({
       apiNode,
       registryEntry,
       activeConnection: connection,
+      detailLevel,
       gpuOverlay: gpuOverlayActive,
       gpuSegment: nodeSegmentId,
       gpuPeers: nodeSegmentId == null ? null : (segmentSizeById.get(nodeSegmentId) ?? null),

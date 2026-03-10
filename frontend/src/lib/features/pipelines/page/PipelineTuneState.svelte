@@ -43,7 +43,7 @@
     type TuneMetricsStreamRef
   } from './pipelineTuneMetricsRuntime';
   import { openStreamMetricsSocket } from '$lib/api/streamMetrics';
-  import { canUseWebSockets } from '$lib/api/wsClient';
+  import { canUseWebSockets } from '$lib/api/core/ws';
   import { cancellableWithTimeout } from '$lib/api/requestUtils';
   import { createTuneMultiplexUi } from './pipelineTuneMultiplexUi';
   import { createTuneNodeHandlers } from './pipelineTuneNodeHandlers';
@@ -75,7 +75,7 @@
     streamOverrideSignature
   } from './pipelineTuneState';
   import { isDaedalusPlan, safeClonePlan } from './pipelineTuneConstantUtils';
-  import { fromApiGraphPlan } from '$lib/features/pipelines/model';
+  import { fromApiGraphPlan } from '$lib/features/pipelines/graphConverters';
   import { buildDaedalusGraphPatch } from '$lib/features/pipelines/daedalusGraph';
   import { serializeGraphPlan } from '$lib/features/pipelines/graph';
   import { extractGraphOutputPorts } from '$lib/features/pipelines/graphOutputPorts';

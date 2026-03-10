@@ -1,3 +1,4 @@
+import { fetchDashboardPageData } from '$lib/api/dashboardPage';
 import type { DashboardPayload } from '$lib/types/dashboard';
 import type { PageLoad } from './$types';
 
@@ -22,10 +23,19 @@ type DashboardPageData = {
   payload: DashboardPayload;
 };
 
-export const load: PageLoad<DashboardPageData> = () => {
-  return {
-    payload: cloneDashboardPayload(EMPTY_DASHBOARD)
-  };
+export const ssr = false;
+export const prerender = false;
+
+export const load: PageLoad<DashboardPageData> = async () => {
+  try {
+    return {
+      payload: cloneDashboardPayload(await fetchDashboardPageData())
+    };
+  } catch {
+    return {
+      payload: cloneDashboardPayload(EMPTY_DASHBOARD)
+    };
+  }
 };
 
 function cloneDashboardPayload(payload: DashboardPayload): DashboardPayload {

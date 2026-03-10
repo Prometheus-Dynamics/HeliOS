@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
-  import { getHttpClientBase } from '$lib/api/httpClient';
+  import { buildWsUrlFromHttpBase, connectWebSocketWithFallback, type ManagedWebSocket } from '$lib/api/core/ws';
   import type { Terminal as XtermTerminal } from 'xterm';
   import type { FitAddon as XtermFitAddon } from 'xterm-addon-fit';
   import { createTerminal, loadXtermDeps, type XtermDeps } from '$lib/components/terminal/xtermUtils';
@@ -41,7 +41,7 @@
   let terminal: XtermTerminal | null = null;
   let fitAddon: XtermFitAddon | null = null;
   let resizeObserver: ResizeObserver | null = null;
-  let socket: WebSocket | null = null;
+  let socket: ManagedWebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnectAttempts = 0;
   let pendingManualReconnect = false;
@@ -266,20 +266,34 @@
   }
 
   function openSocket(cols: number, rows: number): void {
-    const base = getHttpClientBase().replace(/\/$/, '');
-    const wsBase = base.replace(/^http/, 'ws');
+    const baseUrl = buildWsUrlFromHttpBase(['v1', 'ws', 'console']);
     const params = new SvelteURLSearchParams({ cols: cols.toString(), rows: rows.toString() });
     if (sessionId) {
       params.set('sessionId', sessionId);
     }
-    const url = `${wsBase}/v1/ws/console?${params.toString()}`;
-    socket = new WebSocket(url);
-    socket.addEventListener('open', handleSocketOpen);
-    socket.addEventListener('message', handleSocketMessage);
-    socket.addEventListener('close', handleSocketClose);
-    socket.addEventListener('error', () => {
+    const url = `${baseUrl}?${params.toString()}`;
+    const connection = connectWebSocketWithFallback(
+      url,
+      {
+        onOpen: handleSocketOpen,
+        onMessage: handleSocketMessage,
+        onClose: handleSocketClose,
+        onError: () => {
+          lastError = 'Connection error';
+        }
+      },
+      { errorMessage: 'Console connection failed' }
+    );
+    if (!connection) {
+      connecting = false;
+      statusText = 'Console unavailable';
       lastError = 'Connection error';
-    });
+      if (shouldAttemptReconnect) {
+        scheduleReconnect();
+      }
+      return;
+    }
+    socket = connection;
   }
 
   function teardownSocket(options?: { suppressReconnect?: boolean }): void {
@@ -288,9 +302,7 @@
     }
     const active = socket;
     socket = null;
-    if (active && (active.readyState === WebSocket.OPEN || active.readyState === WebSocket.CONNECTING)) {
-      active.close();
-    }
+    active?.close();
   }
 
   function handleSocketOpen(): void {
@@ -360,13 +372,17 @@
   }
 
   function sendClientEvent(message: ClientEvent): void {
-    if (!socket || socket.readyState !== WebSocket.OPEN) return;
-    socket.send(JSON.stringify(message));
+    if (!socket?.ready()) return;
+    const active = socket.socket();
+    if (!active) return;
+    active.send(JSON.stringify(message));
   }
 
   function sendInput(data: string): void {
-    if (!socket || socket.readyState !== WebSocket.OPEN) return;
-    socket.send(textEncoder.encode(data));
+    if (!socket?.ready()) return;
+    const active = socket.socket();
+    if (!active) return;
+    active.send(textEncoder.encode(data));
   }
 
   function sendResize(): void {

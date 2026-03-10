@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount, untrack } from 'svelte';
+  import { connectWebSocketWithFallback, type ManagedWebSocket } from '$lib/api/core/ws';
   import { buildLogsSocketUrl, canUseWebSockets } from '$lib/api/deviceLogs';
   import type { LogSource } from '$lib/api/deviceLogs';
   import type { Terminal as XtermTerminal } from 'xterm';
@@ -32,7 +33,7 @@
   let terminal: XtermTerminal | null = null;
   let fitAddon: XtermFitAddon | null = null;
   let resizeObserver: ResizeObserver | null = null;
-  let socket: WebSocket | null = null;
+  let socket: ManagedWebSocket | null = null;
 
   let deps: XtermDeps | null = null;
 
@@ -229,11 +230,7 @@
 
   function disconnect(): void {
     connected = false;
-    try {
-      socket?.close();
-    } catch {
-      // ignore
-    }
+    socket?.close();
     socket = null;
   }
 
@@ -250,48 +247,56 @@
     connected = false;
 
     const url = buildLogsSocketUrl(sourceId, { lines, follow });
-    const ws = new WebSocket(url);
-    socket = ws;
-
-    ws.addEventListener('open', () => {
-      connected = true;
-    });
-
-    ws.addEventListener('message', (event) => {
-      if (typeof event.data !== 'string') return;
-      try {
-        const payload = JSON.parse(event.data) as StreamEvent;
-        if (payload.type === 'ready') {
-          return;
-        }
-        if (payload.type === 'line') {
-          pushLine(payload.line ?? '');
-          return;
-        }
-        if (payload.type === 'eof') {
+    const connection = connectWebSocketWithFallback(
+      url,
+      {
+        onOpen: () => {
+          connected = true;
+        },
+        onMessage: (event) => {
+          if (typeof event.data !== 'string') return;
+          try {
+            const payload = JSON.parse(event.data) as StreamEvent;
+            if (payload.type === 'ready') {
+              return;
+            }
+            if (payload.type === 'line') {
+              pushLine(payload.line ?? '');
+              return;
+            }
+            if (payload.type === 'eof') {
+              connected = false;
+              return;
+            }
+            if (payload.type === 'error') {
+              lastError = payload.message || 'Log stream error';
+              return;
+            }
+          } catch (err) {
+            lastError = `Malformed stream payload: ${String(err)}`;
+          }
+        },
+        onError: () => {
           connected = false;
-          return;
+          if (!lastError) {
+            lastError = 'Log stream connection failed.';
+          }
+          disconnect();
+        },
+        onClose: () => {
+          connected = false;
+          socket = null;
         }
-        if (payload.type === 'error') {
-          lastError = payload.message || 'Log stream error';
-          return;
-        }
-      } catch (err) {
-        lastError = `Malformed stream payload: ${String(err)}`;
-      }
-    });
+      },
+      { errorMessage: 'Log stream connection failed.' }
+    );
 
-    ws.addEventListener('error', () => {
-      connected = false;
-      if (!lastError) {
-        lastError = 'Log stream connection failed.';
-      }
-      disconnect();
-    });
+    if (!connection) {
+      lastError = 'Log stream connection failed.';
+      return;
+    }
 
-    ws.addEventListener('close', () => {
-      connected = false;
-    });
+    socket = connection;
   }
 
   $effect(() => {

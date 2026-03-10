@@ -1,4 +1,5 @@
 import { apiUrl } from '$lib/api/httpClient';
+import { apiFetch, apiFetchResponse } from '$lib/api/core/http';
 import { normalizeUploadError, uploadSizeHeaders } from '$lib/api/uploadIntegrity';
 
 export type FieldMapSummary = {
@@ -100,13 +101,11 @@ async function readJsonOrThrow<T>(response: Response): Promise<T> {
 }
 
 export async function listFieldMaps(signal?: AbortSignal): Promise<FieldMapSummary[]> {
-  const response = await fetch(apiUrl('/localization/maps'), { signal, cache: 'no-store' });
-  return await readJsonOrThrow<FieldMapSummary[]>(response);
+  return apiFetch<FieldMapSummary[]>(apiUrl('/localization/maps'), { signal, cache: 'no-store' });
 }
 
 export async function fetchFieldMap(id: string, signal?: AbortSignal): Promise<FieldMapDocument> {
-  const response = await fetch(apiUrl(`/localization/maps/${encodeURIComponent(id)}`), { signal, cache: 'no-store' });
-  return await readJsonOrThrow<FieldMapDocument>(response);
+  return apiFetch<FieldMapDocument>(apiUrl(`/localization/maps/${encodeURIComponent(id)}`), { signal, cache: 'no-store' });
 }
 
 export async function uploadLimelightFmap(file: File, signal?: AbortSignal): Promise<FieldMapSummary> {
@@ -115,7 +114,7 @@ export async function uploadLimelightFmap(file: File, signal?: AbortSignal): Pro
 
   let response: Response;
   try {
-    response = await fetch(apiUrl('/localization/maps/upload'), {
+    response = await apiFetchResponse(apiUrl('/localization/maps/upload'), {
       method: 'POST',
       body: form,
       headers: uploadSizeHeaders(file),

@@ -1,17 +1,11 @@
 import * as THREE from 'three';
-import { FontLoader, TextGeometry } from 'three/examples/jsm/Addons.js';
-import type { Font } from 'three/examples/jsm/Addons.js';
+import { FontLoader, type Font } from 'three/examples/jsm/loaders/FontLoader.js';
+import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
 import helvetiker from 'three/examples/fonts/helvetiker_regular.typeface.json';
 
 import type { PoseRotation, PoseVector, RigPose, RobotDimensions } from '$lib/types/rig';
-
-export const DEFAULT_ROBOT_DIMENSIONS: RobotDimensions = {
-  width: 0.6,
-  length: 0.6,
-  bumperHeight: 0.127,
-  bumperThickness: 0.0508,
-  groundClearance: 0
-};
+import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rigDefaults';
+export { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rigDefaults';
 
 export const CAMERA_BODY_SIZE = {
   width: 0.06,
@@ -442,8 +436,8 @@ function addOrientationLabels(
   const sideWidth = Math.max(dims.length - dims.bumperThickness * 1.4, 0.05);
   const epsilon = 0.0005;
 
-  const frontFace = dims.length / 2 + dims.bumperThickness / 2;
-  const sideFace = dims.width / 2 + dims.bumperThickness / 2;
+  const frontFace = dims.length / 2 + dims.bumperThickness;
+  const sideFace = dims.width / 2 + dims.bumperThickness;
   const frontPosition = frontFace - textDepth / 2 - epsilon;
   const backPosition = -frontFace + textDepth / 2 + epsilon;
   const leftPosition = -sideFace + textDepth / 2 + epsilon;
@@ -490,7 +484,7 @@ function createCenteredTextGeometry(font: Font, text: string, depth: number, max
 }
 
 function addDirectionIndicator(group: THREE.Group, dims: RobotDimensions, verticalCenter: number) {
-  const frontFace = dims.length / 2 + dims.bumperThickness / 2;
+  const frontFace = dims.length / 2 + dims.bumperThickness;
   const arrowHeight = dims.bumperHeight * 0.82;
   const arrowWidth = dims.width * 0.24;
   const shaftRatio = 0.55;

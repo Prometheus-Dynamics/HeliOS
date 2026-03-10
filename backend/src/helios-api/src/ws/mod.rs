@@ -1,5 +1,5 @@
 mod console;
-mod device;
+pub(crate) mod device;
 mod devices;
 mod imu;
 pub(crate) mod logs;

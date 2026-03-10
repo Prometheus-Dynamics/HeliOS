@@ -4,6 +4,7 @@ import { OpenAPI } from '$lib/ts-bindings/http/client';
 import { PipelinesApi } from '$lib/api/pipelinesApi';
 import { DEFAULT_REQUEST_TIMEOUT_MS } from '$lib/api/requestUtils';
 import { buildPipelinePayloadFromOverview } from '$lib/api/pipelinesNormalize';
+import { normalizeDaedalusRegistry } from '$lib/features/pipelines/controller/daedalusRegistry';
 import type { PipelinePagePayload } from '$lib/types/pipeline';
 import type { PipelineLifecycleStatus, PipelineOverviewEntry, PipelineOverviewResponse } from '$lib/types/pipeline-api';
 
@@ -22,13 +23,31 @@ export const GET: RequestHandler = async ({ url }) => {
 
 async function buildPipelinePayload(): Promise<PipelinePagePayload> {
   void REQUEST_TIMEOUT_MS;
-  const [summaries, templates] = await Promise.all([
+  const [summaries, templates, registrySnapshot] = await Promise.all([
     PipelinesApi.listGraphs(),
     PipelinesApi.listTemplates().catch((error) => {
       console.warn('Failed to load pipeline templates', error);
       return [];
+    }),
+    PipelinesApi.listRegistry().catch((error) => {
+      console.warn('Failed to load pipeline registry', error);
+      return null;
     })
   ]);
+  const sortedSummaries = Array.isArray(summaries)
+    ? [...summaries].sort((a, b) => String(a?.name ?? a?.id ?? '').localeCompare(String(b?.name ?? b?.id ?? '')))
+    : [];
+  const bootstrapPipelineId =
+    typeof sortedSummaries[0]?.id === 'string' && sortedSummaries[0].id.trim().length
+      ? sortedSummaries[0].id
+      : null;
+  const bootstrapGraph =
+    bootstrapPipelineId
+      ? await PipelinesApi.fetchGraph({ id: bootstrapPipelineId }).catch((error) => {
+          console.warn(`Failed to load bootstrap graph for ${bootstrapPipelineId}`, error);
+          return null;
+        })
+      : null;
   const issueCountById = new Map<string, number>();
   for (const entry of summaries ?? []) {
     const id = typeof entry?.id === 'string' ? entry.id : null;
@@ -50,7 +69,10 @@ async function buildPipelinePayload(): Promise<PipelinePagePayload> {
         name,
         alias: name,
         issueCount: issueCountById.get(pipelineId) ?? 0,
-        graph: { nodes: {}, connections: [] } satisfies PipelineOverviewEntry['graph'],
+        graph:
+          pipelineId === bootstrapPipelineId && bootstrapGraph?.graph
+            ? bootstrapGraph.graph
+            : ({} satisfies PipelineOverviewEntry['graph']),
         attachments: [],
         diagnostics: null,
         appearance: null,
@@ -72,5 +94,9 @@ async function buildPipelinePayload(): Promise<PipelinePagePayload> {
     generatedAt: Date.now()
   };
 
-  return buildPipelinePayloadFromOverview(overview);
+  const payload = buildPipelinePayloadFromOverview(overview);
+  if (registrySnapshot?.nodes) {
+    payload.registry = normalizeDaedalusRegistry(registrySnapshot.nodes, registrySnapshot.types ?? undefined);
+  }
+  return payload;
 }

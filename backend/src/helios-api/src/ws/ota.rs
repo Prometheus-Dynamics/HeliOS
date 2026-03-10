@@ -1,5 +1,4 @@
 use crate::http::AppState;
-use crate::ipc::command_id_from_context;
 use axum::{
     extract::{
         State,
@@ -8,15 +7,12 @@ use axum::{
     response::IntoResponse,
 };
 use futures::{SinkExt, StreamExt};
-use helios_updater::ipc::{UpdateStage, UpdateState, UpdaterCommand, UpdaterEvent};
+use helios_updater::ipc::{UpdateStage, UpdateState, UpdaterEvent};
 use lib_asyncapi::registry::SchemaRegistry;
 use lib_asyncapi::{SchemaProvider, Server, Tag, TypeSchema, WsDoc};
 use schemars::{JsonSchema, schema_for};
 use serde::Serialize;
 use std::collections::BTreeMap;
-use std::sync::Arc;
-
-use crate::ipc::updater::UpdaterConnection;
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct UpdaterArtifact {
@@ -82,7 +78,7 @@ pub async fn ota_upgrade(ws: WebSocketUpgrade, State(state): State<AppState>) ->
 
 async fn ota_loop(socket: WebSocket, state: AppState) {
     let (mut tx, mut rx) = socket.split();
-    let conn = match ensure_updater(&state).await {
+    let conn = match state.services.updater.ensure_updater(&state).await {
         Ok(conn) => conn,
         Err(err) => {
             let _ = send_event(&mut tx, UpdaterServerEvent::Error { message: err }).await;
@@ -93,14 +89,14 @@ async fn ota_loop(socket: WebSocket, state: AppState) {
     let mut session = match conn.checkout_session().await {
         Ok(session) => session,
         Err(err) => {
-            invalidate_updater(&state, &conn).await;
+            state.services.updater.invalidate_updater(&state, &conn).await;
             let _ = send_event(&mut tx, UpdaterServerEvent::Error { message: err.to_string() }).await;
             return;
         }
     };
 
-    if let Err(err) = send_query_state(&conn, &mut session).await {
-        invalidate_updater(&state, &conn).await;
+    if let Err(err) = state.services.updater.send_query_state(&conn, &mut session, "ota_ws_state").await {
+        state.services.updater.invalidate_updater(&state, &conn).await;
         let _ = send_event(&mut tx, UpdaterServerEvent::Error { message: err }).await;
         return;
     }
@@ -118,7 +114,7 @@ async fn ota_loop(socket: WebSocket, state: AppState) {
                     Ok(None) => break,
                     Err(err) => {
                         let _ = send_event(&mut tx, UpdaterServerEvent::Error { message: err.to_string() }).await;
-                        invalidate_updater(&state, &conn).await;
+                        state.services.updater.invalidate_updater(&state, &conn).await;
                         break;
                     }
                 }
@@ -132,13 +128,6 @@ async fn ota_loop(socket: WebSocket, state: AppState) {
     }
 
     conn.recycle_session(session).await;
-}
-
-async fn send_query_state(conn: &UpdaterConnection, session: &mut helios_updater::client::UpdaterSession) -> Result<(), String> {
-    let command = UpdaterCommand::QueryState { command_id: command_id_from_context("ota_ws_state") };
-    conn.client.journal().append(&command).map_err(|err| err.to_string())?;
-    session.send_command(conn.client.journal(), &command).await.map_err(|err| err.to_string())?;
-    Ok(())
 }
 
 async fn send_event(tx: &mut futures::stream::SplitSink<WebSocket, Message>, event: UpdaterServerEvent) -> Result<(), ()> {
@@ -172,30 +161,6 @@ fn map_snapshot(state: UpdateState) -> UpdaterSnapshot {
 
 fn map_stage(stage: &UpdateStage) -> String {
     serde_json::to_value(stage).ok().and_then(|value| value.as_str().map(|value| value.to_string())).unwrap_or_else(|| format!("{stage:?}").to_ascii_lowercase())
-}
-
-async fn ensure_updater(state: &AppState) -> Result<Arc<UpdaterConnection>, String> {
-    let mut guard = state.updater.lock().await;
-    if let Some(conn) = guard.as_ref() {
-        return Ok(conn.clone());
-    }
-    match crate::ipc::updater::connect_updater().await {
-        Ok(conn) => {
-            let conn = Arc::new(conn);
-            *guard = Some(conn.clone());
-            Ok(conn)
-        }
-        Err(err) => Err(err.to_string()),
-    }
-}
-
-async fn invalidate_updater(state: &AppState, conn: &Arc<UpdaterConnection>) {
-    let mut guard = state.updater.lock().await;
-    if let Some(current) = guard.as_ref()
-        && Arc::ptr_eq(current, conn)
-    {
-        *guard = None;
-    }
 }
 
 fn schema<T: JsonSchema>() -> serde_json::Value {

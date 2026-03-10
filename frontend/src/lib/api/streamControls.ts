@@ -1,4 +1,5 @@
-import { buildWsUrlFromHttpBase, connectJsonSocket } from '$lib/api/wsClient';
+import { buildWsUrlFromHttpBase } from '$lib/api/core/ws';
+import { connectSharedJsonSocket } from '$lib/api/sharedJsonSocket';
 
 export type StreamControlSocket = {
   ready: () => boolean;
@@ -14,7 +15,9 @@ type StreamControlHandlers = {
 
 export function connectStreamControls(streamId: string, handlers: StreamControlHandlers = {}): StreamControlSocket | null {
   const url = buildStreamControlsSocketUrl(streamId);
-  return connectJsonSocket(url, handlers, { errorMessage: 'Stream controls socket error' });
+  return connectSharedJsonSocket(`stream-controls:${streamId}`, url, handlers, {
+    errorMessage: 'Stream controls socket error'
+  });
 }
 
 function buildStreamControlsSocketUrl(streamId: string): string {

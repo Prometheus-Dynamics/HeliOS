@@ -3,18 +3,23 @@
   import { onDestroy, onMount } from 'svelte';
   import type { PageData } from './$types';
   import type { DevicesPageData } from '$lib/types/devices';
-  import { RegisterCameraModal, SensorViewerModal, toaster } from '$lib';
-  import type { CameraRow } from '$lib';
+  import RegisterCameraModal from '$lib/components/RegisterCameraModal.svelte';
+  import SensorViewerModal from '$lib/components/SensorViewerModal.svelte';
+  import { toaster } from '$lib/toaster';
+  import type { CameraRow } from '$lib/components/devices/DevicesCamerasPanel.svelte';
   import DevicesPageSidebar from '$lib/features/devices/page/DevicesPageSidebar.svelte';
   import DevicesPageContent from '$lib/features/devices/page/DevicesPageContent.svelte';
   import DevicesUnregisterDialog from '$lib/features/devices/page/DevicesUnregisterDialog.svelte';
+  import { createDomainResource, subscribeDomainResourceInvalidations } from '$lib/api/domainResources';
+  import { scheduleWhenIdle } from '$lib/utils/browserSchedule';
+  import { resourceGuardStatusResource, type ResourceGuardStatus } from '$lib/api/deviceStatusResources';
   import { connectDevicesUpdatesStream } from '$lib/api/devicesUpdates';
+  import { startRefreshScheduler } from '$lib/api/refreshScheduler';
   import { StreamsApi } from '$lib/api/streamsApi';
-  import { apiFetch } from '$lib/api/apiFetch';
+  import { apiFetch } from '$lib/api/core/http';
   import { connectionState } from '$lib/api/connection';
   import { resourceTelemetryStore, type ResourceSample } from '$lib/api/telemetry';
   import { invalidateSWR, invalidateSWRPrefix } from '$lib/utils/swrCache';
-  import { createRefreshableResource } from '$lib/utils/refreshableResource';
   import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
   import { createBackoffTimer } from '$lib/utils/backoff';
   import type { IconDefinition } from '@fortawesome/free-solid-svg-icons';
@@ -23,7 +28,7 @@
   import { registerCameraModal } from '$lib/stores/modals';
   import { createDevicesUiStore } from '$lib/features/devices/store';
   import { buildThrottleBanner, normalizePeripheralToken } from '$lib/features/devices/utils';
-  import { fetchLocalizationConfig, type LocalizationConfig } from '$lib/features/localization/localizationConfig';
+  import { localizationConfigResource, type LocalizationConfig } from '$lib/features/localization/localizationConfig';
   import { PROFILE_COLORS, profileColorForId } from '$lib/features/localization/utils';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
@@ -36,17 +41,19 @@
   const DEVICES_UPDATES_RECONNECT_MS = 750;
   const DEVICES_UPDATES_RECONNECT_MAX_MS = 15_000;
   const LOCALIZATION_CONFIG_REFRESH_MS = 30_000;
-  const devicesCamerasResource = createRefreshableResource({
+  const devicesCamerasResource = createDomainResource({
     key: DEVICES_CAMERAS_CACHE_KEY,
     loader: fetchDevicesCamerasSnapshot,
     staleMs: DEVICES_CACHE_STALE_MS,
-    maxAgeMs: DEVICES_CACHE_MAX_MS
+    maxAgeMs: DEVICES_CACHE_MAX_MS,
+    kinds: ['device', 'settings', 'streams']
   });
-  const devicesPeripheralsResource = createRefreshableResource({
+  const devicesPeripheralsResource = createDomainResource({
     key: DEVICES_PERIPHERALS_CACHE_KEY,
     loader: fetchDevicesPeripheralsSnapshot,
     staleMs: DEVICES_CACHE_STALE_MS,
-    maxAgeMs: DEVICES_CACHE_MAX_MS
+    maxAgeMs: DEVICES_CACHE_MAX_MS,
+    kinds: ['device', 'settings']
   });
 
   const { data } = $props<{ data: PageData }>();
@@ -59,15 +66,23 @@
   let peripheralsLoading = $state(false);
   let localizationConfig = $state<LocalizationConfig | null>(null);
   let fetchedAt = $state<number>(readReceivedAt());
-  let hasLoadedOnce = $state(false);
+  let hasLoadedOnce = $state(
+    Boolean(
+      readInitialDevices().summary?.length ||
+        readInitialDevices().cameras?.length ||
+        readInitialDevices().peripherals?.length
+    )
+  );
 
-  let refreshTimer: number | null = null;
-  let resourceGuardTimer: number | null = null;
-  let localizationRefreshTimer: number | null = null;
+  let stopRefreshScheduler: (() => void) | null = null;
+  let stopResourceGuardScheduler: (() => void) | null = null;
+  let stopLocalizationScheduler: (() => void) | null = null;
   let wsRefreshTimer: number | null = null;
   let updatesCleanup: (() => void) | null = null;
+  let stopDomainInvalidation: (() => void) | null = null;
   let updatesNonce = 0;
   let updatesReconnectPending = false;
+  let cancelBootstrapRefresh: (() => void) | null = null;
   const updatesReconnectBackoff = createBackoffTimer({
     baseMs: DEVICES_UPDATES_RECONNECT_MS,
     maxMs: DEVICES_UPDATES_RECONNECT_MAX_MS
@@ -244,12 +259,6 @@
       restore?: boolean;
   };
 
-  type ResourceGuardStatus = {
-    degraded_streams?: Array<{
-      stream_id: string;
-    }>;
-  };
-
   let streamActionBusy = $state<Record<string, StreamActionBusyState>>({});
   let resourceGuardStatus = $state<ResourceGuardStatus | null>(null);
   const resourceGuardDegradedStreamIds = $derived.by(() => {
@@ -280,45 +289,64 @@
         fetchedAt = Math.max(fetchedAt, cachedPeripherals.fetchedAt);
         hasLoadedOnce = true;
       }
+      const cachedLocalization = localizationConfigResource.read();
+      if (cachedLocalization?.data) {
+        localizationConfig = cachedLocalization.data;
+      }
+      const cachedResourceGuard = resourceGuardStatusResource.read();
+      if (cachedResourceGuard?.data) {
+        resourceGuardStatus = cachedResourceGuard.data;
+      }
     }
-    void refreshDevices({ bootstrap: true });
-    void refreshLocalizationConfig();
-    void refreshResourceGuardStatus();
-    connectDevicesUpdates();
-    refreshTimer = window.setInterval(() => {
-      if (!document.hidden && !isBackendUnavailable) {
+    if (hasLoadedOnce) {
+      cancelBootstrapRefresh = scheduleWhenIdle(() => {
+        if (document.hidden) return;
         void refreshDevices();
-      }
-    }, AUTO_REFRESH_MS);
-    resourceGuardTimer = window.setInterval(() => {
-      if (!document.hidden && !isBackendUnavailable) {
-        void refreshResourceGuardStatus();
-      }
-    }, 4_000);
-    localizationRefreshTimer = window.setInterval(() => {
-      if (!document.hidden && !isBackendUnavailable) {
         void refreshLocalizationConfig();
-      }
-    }, LOCALIZATION_CONFIG_REFRESH_MS);
+        void refreshResourceGuardStatus();
+      }, { timeoutMs: 1800, fallbackMs: 650 });
+    } else {
+      void refreshDevices({ bootstrap: true });
+      void refreshLocalizationConfig();
+      void refreshResourceGuardStatus();
+    }
+    connectDevicesUpdates();
+    stopDomainInvalidation = subscribeDomainResourceInvalidations(['device', 'localization', 'media', 'settings', 'streams'], [devicesCamerasResource, devicesPeripheralsResource], () => {
+      void refreshDevices({ force: true });
+      void refreshLocalizationConfig();
+      void refreshResourceGuardStatus();
+    }, { debounceMs: WS_REFRESH_DEBOUNCE_MS });
+    stopRefreshScheduler = startRefreshScheduler(() => refreshDevices(), {
+      intervalMs: AUTO_REFRESH_MS,
+      immediate: false,
+      enabled: () => !isBackendUnavailable
+    });
+    stopResourceGuardScheduler = startRefreshScheduler(refreshResourceGuardStatus, {
+      intervalMs: 4_000,
+      immediate: false,
+      enabled: () => !isBackendUnavailable
+    });
+    stopLocalizationScheduler = startRefreshScheduler(refreshLocalizationConfig, {
+      intervalMs: LOCALIZATION_CONFIG_REFRESH_MS,
+      immediate: false,
+      enabled: () => !isBackendUnavailable
+    });
   });
 
   onDestroy(() => {
-	    if (refreshTimer) {
-	      clearInterval(refreshTimer);
-	      refreshTimer = null;
-	    }
-    if (resourceGuardTimer) {
-      clearInterval(resourceGuardTimer);
-      resourceGuardTimer = null;
-    }
-    if (localizationRefreshTimer) {
-      clearInterval(localizationRefreshTimer);
-      localizationRefreshTimer = null;
-    }
+    cancelBootstrapRefresh?.();
+    cancelBootstrapRefresh = null;
+    stopRefreshScheduler?.();
+    stopRefreshScheduler = null;
+    stopResourceGuardScheduler?.();
+    stopResourceGuardScheduler = null;
+    stopLocalizationScheduler?.();
+    stopLocalizationScheduler = null;
     if (wsRefreshTimer) {
       clearTimeout(wsRefreshTimer);
       wsRefreshTimer = null;
     }
+    stopDomainInvalidation?.();
     disconnectDevicesUpdates();
     devicesUiStore.destroy();
   });
@@ -374,7 +402,7 @@
       onError: (message) => {
         if (nonce !== updatesNonce) return;
         if (connectionStatus === 'online') {
-          console.warn('Devices updates socket error', message);
+          reportError({ context: 'Devices updates socket', error: message, toast: false });
         }
         scheduleDevicesUpdatesReconnect();
       }
@@ -387,10 +415,10 @@
 
   async function refreshLocalizationConfig(): Promise<void> {
     try {
-      localizationConfig = await fetchLocalizationConfig();
+      localizationConfig = await localizationConfigResource.refresh();
     } catch (error) {
       if (connectionStatus === 'online' && !isAbortError(error)) {
-        console.warn('Failed to refresh localization config for devices page', error);
+        reportError({ context: 'Devices localization refresh', error, toast: false });
       }
     }
   }
@@ -440,7 +468,7 @@
         camerasLoading = false;
         if (!isAbortError(error)) {
           if (connectionStatus === 'online') {
-            console.error('Failed to refresh device cameras', error);
+            reportError({ context: 'Devices cameras refresh', error, toast: false });
           }
         }
         devicesCamerasResource.invalidate();
@@ -466,7 +494,7 @@
         peripheralsLoading = false;
         if (!isAbortError(error)) {
           if (connectionStatus === 'online') {
-            console.error('Failed to refresh device peripherals', error);
+            reportError({ context: 'Devices peripherals refresh', error, toast: false });
           }
           const message = buildErrorMessage({ error, fallback: 'Unable to load peripherals right now.' });
           devices = { ...devices, errors: { ...(devices.errors ?? {}), peripherals: message } };
@@ -478,7 +506,7 @@
 
   async function refreshResourceGuardStatus(): Promise<void> {
     try {
-      resourceGuardStatus = await apiFetch<ResourceGuardStatus>('/device/resource-guard');
+      resourceGuardStatus = await resourceGuardStatusResource.refresh();
     } catch {
       resourceGuardStatus = null;
     }
@@ -546,7 +574,6 @@
       invalidateSWR('media:stream-labels:v1');
       await refreshDevices();
     } catch (error) {
-      console.error('Failed to unregister capture session', error);
       reportError({
         title: 'Delete failed',
         error,
@@ -594,7 +621,6 @@
         description: `${camera.name} manifest saved`
       });
     } catch (error) {
-      console.error('Failed to download manifest', error);
       reportError({
         title: 'Download failed',
         error,

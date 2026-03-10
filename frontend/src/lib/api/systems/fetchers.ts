@@ -1,7 +1,7 @@
-import { OpenAPI, apiUrl } from '$lib/api/httpClient';
+import { apiUrl } from '$lib/api/httpClient';
 import { formatFailureReason, requestOptionalJson } from '$lib/api/pagePayload/request';
 import { fetchWithRetry } from '$lib/api/requestUtils';
-import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rig';
+import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rigDefaults';
 import type { I2cInventory, ImuStatus, SystemsPageData } from '$lib/types/systems';
 import { FAILURE_MESSAGE_ALL, REQUEST_TIMEOUT_MS, SENSOR_REQUEST_TIMEOUT_MS, SYSTEMS_RETRY_OPTIONS } from './constants';
 import { emptyImuStatus, mapI2cInventory, mapImuStatus } from './mappers';
@@ -141,8 +141,7 @@ export async function fetchI2cInventorySnapshot(timeoutMs: number = SENSOR_REQUE
 }
 
 async function postI2cRescan(timeoutMs: number): Promise<void> {
-  const base = OpenAPI.BASE || '';
-  const url = `${base}/v1/peripherals/i2c/scan`;
+  const url = apiUrl('/peripherals/i2c/scan');
   const response = await fetchWithRetry(
     url,
     {

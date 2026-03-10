@@ -5,7 +5,7 @@
   import type { DaedalusRegistryResponse } from '$lib/ts-bindings/http/client';
   import { resourceTelemetryStore } from '$lib/api/telemetry';
   import { get } from 'svelte/store';
-  import { fromApiGraphPlan } from '$lib/features/pipelines/model';
+  import { fromApiGraphPlan } from '$lib/features/pipelines/graphConverters';
   import { createRegistryResolver } from '$lib/components/flow/pipeline-graph/registry';
   import { getDataTypeVariants, resolveDataTypeKey } from '$lib/features/pipelines/valueFormatting';
   import { normalizeDaedalusRegistry } from '$lib/features/pipelines/controller/daedalusRegistry';

@@ -25,6 +25,7 @@ export type WebSocketHandlers = {
 
 export type ManagedWebSocket = {
   close: () => void;
+  ready: () => boolean;
   socket: () => WebSocket | null;
   url: () => string | null;
 };
@@ -193,6 +194,10 @@ export function connectWebSocketWithFallback(
         socket.close();
       }
     },
+    ready: () => {
+      const socket = activeSocket;
+      return socket?.readyState === WebSocket.OPEN;
+    },
     socket: () => activeSocket,
     url: () => activeUrl
   };
@@ -229,18 +234,19 @@ export function connectJsonSocket(
 
   return {
     ready: () => isReady,
-    send: (payload: Record<string, unknown>) => {
-      const socket = connection.socket();
-      if (!socket || socket.readyState !== WebSocket.OPEN) return false;
-      socket.send(JSON.stringify(payload));
-      return true;
-    },
+    send: (payload: Record<string, unknown>) => sendJson(connection, payload),
     close: () => {
       connection.close();
       isReady = false;
-      handlers.onClose?.();
     }
   };
+}
+
+export function sendJson(connection: ManagedWebSocket | null, payload: Record<string, unknown>): boolean {
+  const socket = connection?.socket();
+  if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+  socket.send(JSON.stringify(payload));
+  return true;
 }
 
 function parseWsUrl(url: string): URL | null {

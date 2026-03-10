@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { apiFetch } from '$lib/api/apiFetch';
+  import { apiFetch } from '$lib/api/core/http';
   import type { Nt4TopicInfo, Nt4TopicsResponse, Nt4ValueResponse } from '../types';
   import { buildErrorMessage } from '$lib/ui/errorPolicy';
   import Nt4Tree from './Nt4Tree.svelte';

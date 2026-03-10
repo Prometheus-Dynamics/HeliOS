@@ -1,9 +1,11 @@
 import { apiUrl } from '$lib';
+import { apiFetch, apiFetchResponse } from '$lib/api/core/http';
 import { normalizeUploadError, uploadSizeHeaders, verifyUploadedBytes } from '$lib/api/uploadIntegrity';
 import { invalidateSWRPrefix } from '$lib/utils/swrCache';
 import { classifyMediaKind, type MediaAssetType } from './mediaKind';
 import { emitMediaMutation } from './mutations';
 import { compareMediaName, compareMediaRecent, mediaTimestampIso } from './sort';
+import { createMediaListWorker } from '$lib/workers/factories';
 
 export type { MediaAssetType } from './mediaKind';
 
@@ -176,7 +178,7 @@ const MEDIA_LIST_WORKER_TIMEOUT_MS = 2_000;
 function ensureMediaListWorker(): Worker | null {
   if (mediaListWorker) return mediaListWorker;
   if (typeof Worker === 'undefined') return null;
-  mediaListWorker = new Worker(new URL('$lib/workers/mediaListWorker.ts', import.meta.url), { type: 'module' });
+  mediaListWorker = createMediaListWorker();
   mediaListWorker.onmessage = (event) => {
     const payload = event.data as { requestId: number; assets?: MediaAsset[]; counts?: MediaAssetListResult['counts'] };
     const resolver = mediaListResolvers.get(payload.requestId);
@@ -273,9 +275,7 @@ export async function listMediaAssets(_options: MediaListOptions = {}): Promise<
 
   const fetchItems = async (query: URLSearchParams | null): Promise<MediaItem[]> => {
     const url = query && query.toString().length ? mediaUrl(`/media?${query.toString()}`) : mediaUrl('/media');
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`Failed to load assets (${response.status})`);
-    return ((await response.json()) as MediaItem[]) ?? [];
+    return (await apiFetch<MediaItem[]>(url)) ?? [];
   };
 
   const filteredQuery = wantsServerFilter ? new URLSearchParams({ stream_id: _options.cameraSource as string }) : null;
@@ -367,7 +367,7 @@ export async function uploadMediaAsset(request: MediaUploadRequest): Promise<Med
   if (typeof XMLHttpRequest === 'undefined') {
     let response: Response;
     try {
-      response = await fetch(endpoint, { method: 'POST', body: form, headers: uploadSizeHeaders(file) });
+      response = await apiFetchResponse(endpoint, { method: 'POST', body: form, headers: uploadSizeHeaders(file) });
     } catch (error) {
       throw normalizeUploadError(error, 'Media upload');
     }
@@ -435,22 +435,16 @@ export async function updateMediaAssetMetadata(
   assetId: string,
   payload: { name?: string; description?: string; tags?: string[]; modelInputResolution?: string | null; modelTensorSpec?: string | null }
 ): Promise<MediaAsset> {
-  const response = await fetch(mediaUrl(`/media/${encodeURIComponent(assetId)}/metadata`), {
+  const item = await apiFetch<MediaItem>(mediaUrl(`/media/${encodeURIComponent(assetId)}/metadata`), {
     method: 'PATCH',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
+    body: {
       name: payload.name,
       description: payload.description,
       tags: payload.tags,
       model_input_resolution: payload.modelInputResolution,
       model_tensor_spec: payload.modelTensorSpec
-    })
+    }
   });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || `Failed to update metadata (${response.status})`);
-  }
-  const item = (await response.json()) as MediaItem;
   invalidateSWRPrefix('media:');
   const asset = mapAssetFromItem(item);
   emitMediaMutation({
@@ -463,10 +457,7 @@ export async function updateMediaAssetMetadata(
 }
 
 export async function deleteMediaAsset(assetId: string): Promise<void> {
-  const response = await fetch(mediaUrl(`/media/${encodeURIComponent(assetId)}`), { method: 'DELETE' });
-  if (!response.ok) {
-    throw new Error(`Failed to delete asset (${response.status})`);
-  }
+  await apiFetchResponse(mediaUrl(`/media/${encodeURIComponent(assetId)}`), { method: 'DELETE' });
   invalidateSWRPrefix('media:');
   emitMediaMutation({
     mutation: 'deleted',
@@ -480,7 +471,7 @@ export async function attachLabelFile(assetId: string, file: File): Promise<Medi
   form.set('label', file, file.name);
   let response: Response;
   try {
-    response = await fetch(mediaUrl(`/media/${encodeURIComponent(assetId)}/label`), {
+    response = await apiFetchResponse(mediaUrl(`/media/${encodeURIComponent(assetId)}/label`), {
       method: 'POST',
       body: form,
       headers: uploadSizeHeaders(file)
@@ -510,19 +501,13 @@ export interface ImageEditPayload {
 }
 
 export async function applyImageEdits(assetId: string, payload: ImageEditPayload): Promise<MediaAsset> {
-  const response = await fetch(mediaUrl(`/media/${encodeURIComponent(assetId)}/image/edits`), {
+  const item = await apiFetch<MediaItem>(mediaUrl(`/media/${encodeURIComponent(assetId)}/image/edits`), {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
+    body: {
       rotate_degrees: payload.rotateDegrees,
       crop: payload.crop
-    })
+    }
   });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || `Failed to apply image edits (${response.status})`);
-  }
-  const item = (await response.json()) as MediaItem;
   invalidateSWRPrefix('media:');
   const asset = mapAssetFromItem(item);
   emitMediaMutation({
@@ -553,10 +538,8 @@ export async function applyVideoEdits(assetId: string, payload: VideoEditPayload
 }
 
 export async function fetchLabelText(assetId: string): Promise<string> {
-  const response = await fetch(mediaUrl(`/media/${encodeURIComponent(assetId)}/label`));
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || `Failed to fetch label (${response.status})`);
-  }
-  return await response.text();
+  return apiFetch<string>(mediaUrl(`/media/${encodeURIComponent(assetId)}/label`), {
+    method: 'GET',
+    responseMode: 'text'
+  });
 }

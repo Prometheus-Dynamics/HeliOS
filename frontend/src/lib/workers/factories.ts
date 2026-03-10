@@ -1,0 +1,23 @@
+import DeviceCardsWorker from './deviceCardsWorker.ts?worker';
+import DeviceCountsWorker from './deviceCountsWorker.ts?worker';
+import LogFilterWorker from './logFilterWorker.ts?worker';
+import LogTransformWorker from './logTransformWorker.ts?worker';
+import MediaDisplayWorker from './mediaDisplayWorker.ts?worker';
+import MediaFilterWorker from './mediaFilterWorker.ts?worker';
+import MediaListWorker from './mediaListWorker.ts?worker';
+import PipelineDiagnosticsWorker from './pipelineDiagnosticsWorker.ts?worker';
+import PipelineListWorker from './pipelineListWorker.ts?worker';
+import PipelineRegistryWorker from './pipelineRegistryWorker.ts?worker';
+import PipelineValidationWorker from './pipelineValidationWorker.ts?worker';
+
+export const createDeviceCardsWorker = (): Worker => new DeviceCardsWorker();
+export const createDeviceCountsWorker = (): Worker => new DeviceCountsWorker();
+export const createLogFilterWorker = (): Worker => new LogFilterWorker();
+export const createLogTransformWorker = (): Worker => new LogTransformWorker();
+export const createMediaDisplayWorker = (): Worker => new MediaDisplayWorker();
+export const createMediaFilterWorker = (): Worker => new MediaFilterWorker();
+export const createMediaListWorker = (): Worker => new MediaListWorker();
+export const createPipelineDiagnosticsWorker = (): Worker => new PipelineDiagnosticsWorker();
+export const createPipelineListWorker = (): Worker => new PipelineListWorker();
+export const createPipelineRegistryWorker = (): Worker => new PipelineRegistryWorker();
+export const createPipelineValidationWorker = (): Worker => new PipelineValidationWorker();

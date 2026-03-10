@@ -3,19 +3,16 @@ use axum::{
     body::Body,
     extract::Path,
     extract::State,
-    http::{HeaderValue, StatusCode, header::CONTENT_TYPE},
+    http::{HeaderMap, HeaderValue, StatusCode, header::CONTENT_TYPE},
     response::IntoResponse,
     routing::{get, post},
 };
-use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io;
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 use tokio::fs;
-use tokio::sync::RwLock;
-use tokio::time::{Duration, Instant};
 use tracing::warn;
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -25,7 +22,10 @@ use super::identity_tokens;
 use super::storage;
 use crate::http::streams::types::EngineErrorBody;
 use crate::http::streams::util::{engine_error_body, map_client_error, normalize_pipeline_manifest};
-use crate::http::{streams, streams_persist};
+use crate::http::{
+    revision::{apply_revision_headers, matches_if_none_match, not_modified_response},
+    streams, streams_persist,
+};
 use helios_engine::ipc::NodeRegistrySnapshot;
 use helios_engine::ipc::{EngineErrorCode, EngineEvent, StreamManifest};
 
@@ -557,30 +557,6 @@ pub struct GpuEdgeBufferInfo {
     pub buffer_id: Option<usize>,
 }
 
-#[derive(Clone, Debug)]
-struct GraphValidationState {
-    diagnostics: Vec<PlannerDiagnostic>,
-    updated_at_ms: i64,
-}
-
-const GRAPH_VALIDATION_CACHE_MAX_AGE_MS: i64 = 60_000;
-
-fn now_timestamp_ms() -> i64 {
-    chrono::Utc::now().timestamp_millis()
-}
-
-fn graph_validation_state_stale(state: &GraphValidationState, graph_updated_at_ms: i64, now_ms: i64) -> bool {
-    if graph_updated_at_ms > 0 && state.updated_at_ms < graph_updated_at_ms {
-        return true;
-    }
-    now_ms.saturating_sub(state.updated_at_ms) > GRAPH_VALIDATION_CACHE_MAX_AGE_MS
-}
-
-fn graph_validation_cache() -> &'static RwLock<HashMap<Uuid, GraphValidationState>> {
-    static CACHE: OnceLock<RwLock<HashMap<Uuid, GraphValidationState>>> = OnceLock::new();
-    CACHE.get_or_init(|| RwLock::new(HashMap::new()))
-}
-
 fn map_planner_diagnostics(diagnostics: Vec<helios_engine::ipc::PlannerDiagnostic>) -> Vec<PlannerDiagnostic> {
     diagnostics
         .into_iter()
@@ -588,167 +564,24 @@ fn map_planner_diagnostics(diagnostics: Vec<helios_engine::ipc::PlannerDiagnosti
         .collect()
 }
 
-async fn set_graph_validation_state(graph_id: Uuid, diagnostics: Vec<PlannerDiagnostic>) {
-    let mut cache = graph_validation_cache().write().await;
-    cache.insert(graph_id, GraphValidationState { diagnostics, updated_at_ms: now_timestamp_ms() });
+async fn set_graph_validation_state(state: &AppState, graph_id: Uuid, diagnostics: Vec<PlannerDiagnostic>) {
+    state.services.pipelines.set_graph_validation_state(graph_id, diagnostics).await;
 }
 
-async fn set_graph_validation_error(graph_id: Uuid, code: Option<EngineErrorCode>, message: String) {
-    let fallback = code.map(|code| format!("{code:?}")).unwrap_or_else(|| "validation_error".to_string());
-    let diag = PlannerDiagnostic { code: fallback, message, span: PlannerDiagnosticSpan { pass: "engine".to_string(), node: None, port: None } };
-    set_graph_validation_state(graph_id, vec![diag]).await;
+async fn set_graph_validation_error(state: &AppState, graph_id: Uuid, code: Option<EngineErrorCode>, message: String) {
+    state.services.pipelines.set_graph_validation_error(graph_id, code, message).await;
 }
 
-async fn clear_graph_validation_state(graph_id: Uuid) {
-    let mut cache = graph_validation_cache().write().await;
-    cache.remove(&graph_id);
+async fn clear_graph_validation_state(state: &AppState, graph_id: Uuid) {
+    state.services.pipelines.clear_graph_validation_state(graph_id).await;
 }
 
-async fn prune_graph_validation_cache(valid_ids: &HashSet<Uuid>) {
-    let mut cache = graph_validation_cache().write().await;
-    cache.retain(|id, _| valid_ids.contains(id));
-}
-
-async fn snapshot_graph_validation() -> HashMap<Uuid, GraphValidationState> {
-    graph_validation_cache().read().await.clone()
-}
-
-#[derive(Clone)]
-struct GraphListCacheEntry {
-    fetched_at: Instant,
-    payload: Arc<Vec<PipelineSummary>>,
-}
-
-fn graph_list_cache() -> &'static RwLock<Option<GraphListCacheEntry>> {
-    static CACHE: OnceLock<RwLock<Option<GraphListCacheEntry>>> = OnceLock::new();
-    CACHE.get_or_init(|| RwLock::new(None))
-}
-
-fn graph_list_refresh_lock() -> &'static tokio::sync::Mutex<()> {
-    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
-}
-
-async fn invalidate_graph_list_cache() {
-    *graph_list_cache().write().await = None;
-}
-
-async fn get_cached_graph_summaries(state: &AppState) -> Result<Arc<Vec<PipelineSummary>>, Box<axum::response::Response>> {
-    const FRESH_FOR: Duration = Duration::from_secs(2);
-
-    if let Some(entry) = graph_list_cache().read().await.clone()
-        && entry.fetched_at.elapsed() < FRESH_FOR
-    {
-        return Ok(entry.payload);
-    }
-
-    let _refresh_guard = graph_list_refresh_lock().lock().await;
-    if let Some(entry) = graph_list_cache().read().await.clone()
-        && entry.fetched_at.elapsed() < FRESH_FOR
-    {
-        return Ok(entry.payload);
-    }
-
-    let stale = graph_list_cache().read().await.clone();
-    match load_graph_summaries(state).await {
-        Ok(summaries) => {
-            let payload = Arc::new(summaries);
-            *graph_list_cache().write().await = Some(GraphListCacheEntry { fetched_at: Instant::now(), payload: payload.clone() });
-            Ok(payload)
-        }
-        Err(resp) => stale.map(|entry| entry.payload).ok_or(resp),
-    }
-}
-
-async fn load_graph_summaries(state: &AppState) -> Result<Vec<PipelineSummary>, Box<axum::response::Response>> {
-    let dir = pipeline_dir()?;
-    let mut loaded_docs: Vec<(PipelineDocument, i64)> = Vec::new();
-    let mut existing_ids = HashSet::new();
-    let validation_snapshot = snapshot_graph_validation().await;
-    let mut entries = match fs::read_dir(dir).await {
-        Ok(entries) => entries,
-        Err(err) => return Err(Box::new(map_io_error(err, "failed to read pipeline directory"))),
-    };
-
-    loop {
-        let entry = match entries.next_entry().await {
-            Ok(Some(entry)) => entry,
-            Ok(None) => break,
-            Err(err) => return Err(Box::new(map_io_error(err, "failed to read pipeline entry"))),
-        };
-
-        let meta = match entry.metadata().await {
-            Ok(meta) if meta.is_file() => meta,
-            Ok(_) => continue,
-            Err(err) => return Err(Box::new(map_io_error(err, "failed to stat pipeline file"))),
-        };
-
-        let data = match fs::read_to_string(entry.path()).await {
-            Ok(data) => data,
-            Err(err) => return Err(Box::new(map_io_error(err, "failed to read pipeline file"))),
-        };
-        if let Ok(doc) = serde_json::from_str::<PipelineDocument>(&data) {
-            let doc_id = doc.id;
-            let mut updated_at_ms = doc.updated_at_ms.max(0);
-            if updated_at_ms == 0
-                && let Ok(modified) = meta.modified()
-                && let Ok(ts) = modified.duration_since(std::time::UNIX_EPOCH)
-            {
-                updated_at_ms = ts.as_millis() as i64;
-            }
-            loaded_docs.push((doc, updated_at_ms));
-            existing_ids.insert(doc_id);
-        }
-    }
-
-    let now_ms = now_timestamp_ms();
-    let mut refresh_docs = Vec::new();
-    let summaries: Vec<PipelineSummary> = loaded_docs
-        .into_iter()
-        .map(|(doc, updated_at_ms)| {
-            let needs_refresh = match validation_snapshot.get(&doc.id) {
-                Some(state) => graph_validation_state_stale(state, updated_at_ms, now_ms),
-                None => true,
-            };
-            if needs_refresh {
-                refresh_docs.push((doc.id, doc.graph.clone()));
-            }
-            let issue_count = validation_snapshot.get(&doc.id).map(|state| state.diagnostics.len()).unwrap_or(0);
-            PipelineSummary { id: doc.id, name: doc.name, updated_at_ms, issue_count }
-        })
-        .collect();
-
-    prune_graph_validation_cache(&existing_ids).await;
-    if !refresh_docs.is_empty() {
-        let state = state.clone();
-        tokio::spawn(async move {
-            for (graph_id, graph) in refresh_docs {
-                refresh_graph_validation(&state, graph_id, &graph).await;
-            }
-            invalidate_graph_list_cache().await;
-        });
-    }
-
-    Ok(summaries)
+async fn invalidate_graph_list_cache(state: &AppState) {
+    state.services.pipelines.invalidate_graph_list_cache().await;
 }
 
 pub(crate) async fn refresh_graph_validation(state: &AppState, graph_id: Uuid, graph: &serde_json::Value) {
-    match state.engine.validate_graph_event(graph.clone(), Vec::new(), true).await {
-        Ok(EngineEvent::GraphValidation { report, .. }) => {
-            let diagnostics = map_planner_diagnostics(report.diagnostics);
-            set_graph_validation_state(graph_id, diagnostics).await;
-        }
-        Ok(EngineEvent::Nack { code, reason, .. }) => {
-            set_graph_validation_error(graph_id, Some(code), reason).await;
-        }
-        Ok(_) => {
-            set_graph_validation_error(graph_id, Some(EngineErrorCode::Internal), "unexpected engine response".to_string()).await;
-        }
-        Err(err) => {
-            warn!(error = %err, graph_id = %graph_id, "graph validation failed");
-            set_graph_validation_error(graph_id, Some(EngineErrorCode::Internal), format!("validation failed: {err}")).await;
-        }
-    }
+    state.services.pipelines.refresh_graph_validation(state, graph_id, graph).await;
 }
 
 #[utoipa::path(
@@ -757,17 +590,22 @@ pub(crate) async fn refresh_graph_validation(state: &AppState, graph_id: Uuid, g
     tag = "Pipelines",
     responses((status = 200, description = "Daedalus node registry", body = DaedalusRegistryResponse))
 )]
-async fn list_registry(State(state): State<AppState>) -> impl IntoResponse {
-    let (payload, stale) = match get_cached_registry_payload(&state).await {
+async fn list_registry(State(state): State<AppState>, headers: HeaderMap) -> impl IntoResponse {
+    let (payload, stale, revision) = match state.services.pipelines.get_cached_registry_response_snapshot(&state).await {
         Some(value) => value,
         None => {
             return (StatusCode::BAD_GATEWAY, Json(PipelineError { error: "registry unavailable".to_string() })).into_response();
         }
     };
 
-    let mut response = axum::response::Response::new(Body::from(payload.body.clone()));
+    if matches_if_none_match(&headers, revision) {
+        return not_modified_response(revision);
+    }
+
+    let mut response = axum::response::Response::new(Body::from(payload));
     *response.status_mut() = StatusCode::OK;
     response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    apply_revision_headers(response.headers_mut(), revision);
     if stale {
         response.headers_mut().insert("x-helios-registry-stale", HeaderValue::from_static("1"));
     }
@@ -775,144 +613,11 @@ async fn list_registry(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 pub async fn warm_registry_cache(state: AppState) {
-    let _ = get_cached_registry_payload(&state).await;
-}
-
-#[derive(Clone)]
-struct CachedRegistryPayload {
-    snapshot: Arc<NodeRegistrySnapshot>,
-    body: Bytes,
-}
-
-#[derive(Clone)]
-struct RegistryCacheEntry {
-    fetched_at: Instant,
-    payload: Arc<CachedRegistryPayload>,
-}
-
-fn registry_cache() -> &'static RwLock<Option<RegistryCacheEntry>> {
-    static CACHE: OnceLock<RwLock<Option<RegistryCacheEntry>>> = OnceLock::new();
-    CACHE.get_or_init(|| RwLock::new(None))
-}
-
-fn registry_refresh_lock() -> &'static tokio::sync::Mutex<()> {
-    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
-}
-
-async fn get_cached_registry_payload(state: &AppState) -> Option<(Arc<CachedRegistryPayload>, bool)> {
-    // Registry is large but changes rarely; keep it hot so UI interactions don't stall on engine IPC.
-    const FRESH_FOR: Duration = Duration::from_secs(30);
-    const IPC_TIMEOUT: Duration = Duration::from_secs(6);
-    const IPC_RETRY_TIMEOUT: Duration = Duration::from_secs(18);
-
-    if let Some(entry) = registry_cache().read().await.clone()
-        && entry.fetched_at.elapsed() < FRESH_FOR
-    {
-        return Some((entry.payload, false));
-    }
-
-    let _refresh_guard = registry_refresh_lock().lock().await;
-    if let Some(entry) = registry_cache().read().await.clone()
-        && entry.fetched_at.elapsed() < FRESH_FOR
-    {
-        return Some((entry.payload, false));
-    }
-
-    let mut stale_entry = registry_cache().read().await.clone();
-    match state.engine.get_node_registry_with_timeout(IPC_TIMEOUT).await {
-        Ok(snapshot) => match build_cached_registry_payload(snapshot) {
-            Ok(payload) => {
-                *registry_cache().write().await = Some(RegistryCacheEntry { fetched_at: Instant::now(), payload: payload.clone() });
-                Some((payload, false))
-            }
-            Err(error) => {
-                warn!(error = %error, "failed to encode cached node registry response");
-                stale_entry.map(|entry| (entry.payload, true))
-            }
-        },
-        Err(error) => {
-            if stale_entry.is_none() {
-                warn!(
-                    error = ?error,
-                    timeout_ms = IPC_TIMEOUT.as_millis(),
-                    retry_timeout_ms = IPC_RETRY_TIMEOUT.as_millis(),
-                    "node registry fetch timed out; retrying with relaxed timeout"
-                );
-                match state.engine.get_node_registry_with_timeout(IPC_RETRY_TIMEOUT).await {
-                    Ok(snapshot) => match build_cached_registry_payload(snapshot) {
-                        Ok(payload) => {
-                            *registry_cache().write().await = Some(RegistryCacheEntry { fetched_at: Instant::now(), payload: payload.clone() });
-                            return Some((payload, false));
-                        }
-                        Err(error) => {
-                            warn!(error = %error, "failed to encode cached node registry response");
-                        }
-                    },
-                    Err(retry_error) => {
-                        warn!(
-                            error = ?retry_error,
-                            timeout_ms = IPC_RETRY_TIMEOUT.as_millis(),
-                            "node registry fetch failed after retry"
-                        );
-                    }
-                }
-                stale_entry = registry_cache().read().await.clone();
-            }
-            stale_entry.map(|entry| (entry.payload, true))
-        }
-    }
-}
-
-fn build_cached_registry_payload(snapshot: NodeRegistrySnapshot) -> Result<Arc<CachedRegistryPayload>, serde_json::Error> {
-    let body = build_registry_response_body(&snapshot)?;
-    Ok(Arc::new(CachedRegistryPayload { snapshot: Arc::new(snapshot), body }))
-}
-
-fn build_registry_response_body(snapshot: &NodeRegistrySnapshot) -> Result<Bytes, serde_json::Error> {
-    let mut nodes: Vec<DaedalusRegistryNode> = snapshot
-        .nodes
-        .iter()
-        .cloned()
-        .map(|node| DaedalusRegistryNode {
-            id: node.id,
-            label: node.label,
-            plugin: node.plugin,
-            feature_flags: node.feature_flags,
-            sync_groups: node
-                .sync_groups
-                .into_iter()
-                .map(|group| DaedalusSyncGroup { name: group.name, policy: group.policy, ports: group.ports, capacity: group.capacity, backpressure: group.backpressure })
-                .collect(),
-            inputs: node.inputs,
-            outputs: node.outputs,
-            input_ports: node
-                .input_ports
-                .into_iter()
-                .map(|port| DaedalusRegistryPort { name: port.name, ty: Some(port.ty.into()), source: port.source, const_value: port.const_value.map(|value| value.into()) })
-                .collect(),
-            fanin_inputs: node.fanin_inputs.into_iter().map(|port| DaedalusRegistryFanInPort { prefix: port.prefix, start: port.start, ty: port.ty.into() }).collect(),
-            output_ports: node
-                .output_ports
-                .into_iter()
-                .map(|port| DaedalusRegistryPort { name: port.name, ty: Some(port.ty.into()), source: port.source, const_value: port.const_value.map(|value| value.into()) })
-                .collect(),
-            default_compute: node.default_compute,
-            metadata: node.metadata.into_iter().map(|(k, v)| (k, v.into())).collect(),
-        })
-        .collect();
-    nodes.sort_by(|a, b| a.id.cmp(&b.id));
-
-    let mut types: Vec<DaedalusRegistryType> = snapshot.types.iter().cloned().map(|entry| DaedalusRegistryType { rust: entry.rust, ty: entry.ty.into() }).collect();
-    types.sort_by(|a, b| a.rust.cmp(&b.rust));
-
-    serde_json::to_vec(&DaedalusRegistryResponse { plugins: snapshot.plugins.clone(), nodes, types }).map(Bytes::from)
+    state.services.pipelines.warm_registry_cache(state.clone()).await;
 }
 
 async fn inject_cached_port_metadata(state: &AppState, graph: &mut JsonValue) {
-    if let Some((payload, _)) = get_cached_registry_payload(state).await {
-        inject_port_metadata(graph, payload.snapshot.as_ref());
-    }
+    state.services.pipelines.inject_cached_port_metadata(state, graph).await;
 }
 
 #[utoipa::path(
@@ -931,19 +636,19 @@ async fn validate_graph(State(state): State<AppState>, Json(payload): Json<Valid
         Ok(EngineEvent::GraphValidation { report, .. }) => report,
         Ok(EngineEvent::Nack { code, reason, .. }) => {
             if let Some(graph_id) = payload.graph_id {
-                set_graph_validation_error(graph_id, Some(code), reason.clone()).await;
+                set_graph_validation_error(&state, graph_id, Some(code), reason.clone()).await;
             }
             return (StatusCode::BAD_REQUEST, Json(engine_error_body(Some(code), reason))).into_response();
         }
         Ok(_) => {
             if let Some(graph_id) = payload.graph_id {
-                set_graph_validation_error(graph_id, Some(EngineErrorCode::Internal), "unexpected engine response".to_string()).await;
+                set_graph_validation_error(&state, graph_id, Some(EngineErrorCode::Internal), "unexpected engine response".to_string()).await;
             }
             return (StatusCode::BAD_GATEWAY, Json(engine_error_body(Some(EngineErrorCode::Internal), "unexpected engine response"))).into_response();
         }
         Err(err) => {
             if let Some(graph_id) = payload.graph_id {
-                set_graph_validation_error(graph_id, Some(EngineErrorCode::Internal), format!("validation failed: {err}")).await;
+                set_graph_validation_error(&state, graph_id, Some(EngineErrorCode::Internal), format!("validation failed: {err}")).await;
             }
             return map_client_error(err);
         }
@@ -952,7 +657,7 @@ async fn validate_graph(State(state): State<AppState>, Json(payload): Json<Valid
     let helios_engine::ipc::GraphValidationReport { ok, diagnostics: raw_diagnostics, gpu_segments, gpu_edges, node_ids } = report;
     let diagnostics = map_planner_diagnostics(raw_diagnostics);
     if let Some(graph_id) = payload.graph_id {
-        set_graph_validation_state(graph_id, diagnostics.clone()).await;
+        set_graph_validation_state(&state, graph_id, diagnostics.clone()).await;
     }
 
     Json(ValidateGraphResponse {
@@ -1086,7 +791,7 @@ async fn upload_graph(State(state): State<AppState>, Json(payload): Json<UploadG
     };
     match fs::write(path, data).await {
         Ok(_) => {
-            invalidate_graph_list_cache().await;
+            invalidate_graph_list_cache(&state).await;
             refresh_graph_validation(&state, id, &doc.graph).await;
             (StatusCode::CREATED, Json(doc)).into_response()
         }
@@ -1178,7 +883,7 @@ async fn update_graph(State(state): State<AppState>, Path(id): Path<Uuid>, Json(
     };
     match fs::write(path, data).await {
         Ok(_) => {
-            invalidate_graph_list_cache().await;
+            invalidate_graph_list_cache(&state).await;
             refresh_graph_validation(&state, id, &doc.graph).await;
             let failures = refresh_pipeline_consumers(&state, id, &doc.graph).await;
             if !failures.is_empty() {
@@ -1197,9 +902,16 @@ async fn update_graph(State(state): State<AppState>, Path(id): Path<Uuid>, Json(
     tag = "Pipelines",
     responses((status = 200, description = "List stored graphs", body = [PipelineSummary]), (status = 500, description = "Storage error", body = PipelineError))
 )]
-async fn list_graphs(State(state): State<AppState>) -> impl IntoResponse {
-    match get_cached_graph_summaries(&state).await {
-        Ok(summaries) => Json(summaries.as_ref().clone()).into_response(),
+async fn list_graphs(State(state): State<AppState>, headers: HeaderMap) -> impl IntoResponse {
+    match state.services.pipelines.get_cached_graph_summaries_snapshot(&state).await {
+        Ok((summaries, revision)) => {
+            if matches_if_none_match(&headers, revision) {
+                return not_modified_response(revision);
+            }
+            let mut response = Json(summaries.as_ref().clone()).into_response();
+            apply_revision_headers(response.headers_mut(), revision);
+            response
+        }
         Err(resp) => *resp,
     }
 }
@@ -1373,8 +1085,8 @@ async fn delete_graph(State(state): State<AppState>, Path(id): Path<Uuid>) -> im
     let path = dir.join(format!("{id}.json"));
     match fs::remove_file(&path).await {
         Ok(()) => {
-            invalidate_graph_list_cache().await;
-            clear_graph_validation_state(id).await;
+            invalidate_graph_list_cache(&state).await;
+            clear_graph_validation_state(&state, id).await;
             match detach_pipeline_from_streams(&state, id).await {
                 Ok(()) => StatusCode::NO_CONTENT.into_response(),
                 Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, Json(PipelineError { error: err })).into_response(),
@@ -1385,7 +1097,7 @@ async fn delete_graph(State(state): State<AppState>, Path(id): Path<Uuid>) -> im
     }
 }
 
-fn pipeline_dir() -> Result<std::path::PathBuf, Box<axum::response::Response>> {
+pub(crate) fn pipeline_dir() -> Result<std::path::PathBuf, Box<axum::response::Response>> {
     storage::ensure_subdir("pipelines").map_err(|err| Box::new(map_io_error(err, "failed to prepare pipeline directory")))
 }
 
@@ -1511,7 +1223,7 @@ async fn fetch_template(State(state): State<AppState>, Path(id): Path<String>) -
     Json(doc).into_response()
 }
 
-fn map_io_error<E: Into<std::io::Error>>(err: E, context: &str) -> axum::response::Response {
+pub(crate) fn map_io_error<E: Into<std::io::Error>>(err: E, context: &str) -> axum::response::Response {
     let err = err.into();
     let status = if err.kind() == std::io::ErrorKind::NotFound { StatusCode::NOT_FOUND } else { StatusCode::INTERNAL_SERVER_ERROR };
     (status, Json(PipelineError { error: format!("{context}: {err}") })).into_response()

@@ -9,6 +9,45 @@ import type {
   ApiPortDescriptor
 } from '$lib/types/pipeline-api';
 
+let warnedLegacyGraphPayload = false;
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+}
+
+function unwrapGraphPayload(value: unknown): unknown {
+  let current = value;
+  for (let depth = 0; depth < 3; depth += 1) {
+    const record = asRecord(current);
+    if (!record) return current;
+    if (record.__helios_resource_cache__ === true && 'data' in record) {
+      current = record.data;
+      continue;
+    }
+    const nested =
+      asRecord(record.graph) ??
+      asRecord(record.pipeline_graph) ??
+      asRecord(record.pipelineGraph);
+    if (!nested) return current;
+    current = nested;
+  }
+  return current;
+}
+
+function isEmptyLegacyGraphStub(value: unknown): boolean {
+  const record = asRecord(value);
+  if (!record) return false;
+  const nodes = asRecord(record.nodes);
+  const connections = record.connections;
+  if (!nodes || !Array.isArray(connections)) return false;
+  if (Object.keys(nodes).length > 0 || connections.length > 0) return false;
+  const pipelineInputs = asRecord(record.pipelineInputs);
+  const pipelineOutputs = asRecord(record.pipelineOutputs);
+  if (pipelineInputs && Object.keys(pipelineInputs).length > 0) return false;
+  if (pipelineOutputs && Object.keys(pipelineOutputs).length > 0) return false;
+  return true;
+}
+
 export function fromApiPortDescriptor(
   descriptor: ApiPortDescriptor | null | undefined
 ): PipelineDataType | null {
@@ -57,8 +96,20 @@ export function fromApiPortDescriptor(
 }
 
 export function fromApiGraphPlan(plan: unknown): PipelineGraphPlan {
-  if (!plan) return emptyPipelineGraphPlan();
-  if (isDaedalusGraph(plan)) return fromDaedalusGraph(plan);
-  console.warn('Legacy pipeline graph format is no longer supported; expected a Daedalus graph.');
+  const unwrapped = unwrapGraphPayload(plan);
+  if (!unwrapped) return emptyPipelineGraphPlan();
+  if (isDaedalusGraph(unwrapped)) return fromDaedalusGraph(unwrapped);
+  if (isEmptyLegacyGraphStub(unwrapped)) {
+    return emptyPipelineGraphPlan();
+  }
+  if (
+    !warnedLegacyGraphPayload &&
+    typeof unwrapped === 'object' &&
+    unwrapped !== null &&
+    Object.keys(unwrapped as Record<string, unknown>).length > 0
+  ) {
+    warnedLegacyGraphPayload = true;
+    console.warn('Ignoring stale non-Daedalus graph payload; expected a Daedalus graph.');
+  }
   return emptyPipelineGraphPlan();
 }

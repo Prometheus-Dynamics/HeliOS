@@ -2,7 +2,7 @@
   import '../app.css';
   import '$lib/api/httpClient';
   import { resolve } from '$app/paths';
-  import { page } from '$app/stores';
+  import { page, updated } from '$app/stores';
   import { Toaster } from '@skeletonlabs/skeleton-svelte';
   import type { IconDefinition } from '@fortawesome/free-solid-svg-icons';
   import {
@@ -20,8 +20,10 @@
   } from '@fortawesome/free-solid-svg-icons';
   import { onMount } from 'svelte';
   import type { Snippet } from 'svelte';
-  import { toaster } from '$lib';
-  import { apiFetch } from '$lib/api/apiFetch';
+  import { toaster } from '$lib/toaster';
+  import { bootloaderStatusResource, resourceGuardStatusResource, type ResourceGuardStatus } from '$lib/api/deviceStatusResources';
+  import { startDomainInvalidationBridge } from '$lib/api/invalidation';
+  import { startRefreshScheduler } from '$lib/api/refreshScheduler';
   import FaIcon from '$lib/components/icons/FaIcon.svelte';
   import FloatingStreamViewer from '$lib/components/FloatingStreamViewer.svelte';
   import FloatingPipelineOutputsViewer from '$lib/components/FloatingPipelineOutputsViewer.svelte';
@@ -68,34 +70,6 @@
 
   let bootloaderStatus = $state<BootloaderStatus | null>(null);
   const showSettingsBootloaderWarning = $derived(Boolean(bootloaderStatus?.supported && bootloaderStatus?.needs_update));
-  type ResourceGuardActionKind = 'disable_decoder' | 'disable_all_codecs' | 'stop_stream' | 'restore_codecs';
-  type ResourceGuardAction = {
-    at_ms: number;
-    kind: ResourceGuardActionKind;
-    stream_id: string;
-    alias?: string | null;
-    score: number;
-    reason: string;
-    mem_available_kb?: number | null;
-  };
-  type ResourceGuardDegradedStream = {
-    stream_id: string;
-    alias?: string | null;
-    stage: 'decoder_disabled' | 'codecs_disabled';
-    changed_at_ms: number;
-  };
-  type ResourceGuardStatus = {
-    enabled: boolean;
-    poll_ms: number;
-    cooldown_ms: number;
-    mem_low_kb: number;
-    mem_recover_kb: number;
-    last_mem_available_kb?: number | null;
-    pressure_active: boolean;
-    degraded_streams: ResourceGuardDegradedStream[];
-    last_action?: ResourceGuardAction | null;
-    recent_actions: ResourceGuardAction[];
-  };
 
   type ResourceGuardBannerState = {
     title: string;
@@ -114,6 +88,31 @@
     const trimmed = value.trim();
     if (!trimmed.length) return 'Unexpected UI error';
     return trimmed.length > 320 ? `${trimmed.slice(0, 320)}...` : trimmed;
+  };
+
+  const isIgnorableRuntimeMessage = (value: string): boolean => {
+    const normalized = value.trim().toLowerCase();
+    return (
+      normalized.includes('resizeobserver loop completed with undelivered notifications') ||
+      normalized.includes('resizeobserver loop limit exceeded') ||
+      normalized === 'the operation was aborted.' ||
+      normalized === 'operation was aborted' ||
+      normalized === 'signal is aborted without reason'
+    );
+  };
+
+  const isIgnorableRuntimeError = (error: unknown, fallback?: string): boolean => {
+    const message = runtimeErrorMessage(error, fallback);
+    if (isIgnorableRuntimeMessage(message)) {
+      return true;
+    }
+    if (error && typeof error === 'object' && 'name' in error) {
+      const name = String((error as { name?: unknown }).name ?? '').trim().toLowerCase();
+      if (name === 'aborterror') {
+        return true;
+      }
+    }
+    return false;
   };
 
   const runtimeErrorMessage = (error: unknown, fallback?: string): string => {
@@ -153,24 +152,37 @@
   };
 
   onMount(() => {
+    startDomainInvalidationBridge();
     isSidebarCollapsed = readStorage(SIDEBAR_COLLAPSED_STORAGE_KEY) === '1';
-    void refreshBootloaderStatus();
-    void refreshResourceGuardStatus();
-
-    // Keep the nav warning reasonably fresh without being noisy.
-    const bootloaderInterval = window.setInterval(() => {
-      void refreshBootloaderStatus();
-    }, 120_000);
-    const resourceGuardInterval = window.setInterval(() => {
-      void refreshResourceGuardStatus();
-    }, 4_000);
+    const cachedBootloader = bootloaderStatusResource.read();
+    if (cachedBootloader?.data) {
+      bootloaderStatus = cachedBootloader.data;
+    }
+    const cachedResourceGuard = resourceGuardStatusResource.read();
+    if (cachedResourceGuard?.data) {
+      resourceGuardStatus = cachedResourceGuard.data;
+    }
+    const stopBootloaderRefresh = startRefreshScheduler(refreshBootloaderStatus, {
+      intervalMs: 120_000,
+      immediate: true
+    });
+    const stopResourceGuardRefresh = startRefreshScheduler(refreshResourceGuardStatus, {
+      intervalMs: 4_000,
+      immediate: true
+    });
+    const stopVersionWatch = updated.subscribe((isUpdated) => {
+      if (!isUpdated) return;
+      globalThis.location?.reload();
+    });
 
     const handleWindowError = (event: Event): void => {
       if (!(event instanceof ErrorEvent)) return;
+      if (isIgnorableRuntimeError(event.error, event.message)) return;
       const message = runtimeErrorMessage(event.error, event.message);
       notifyRuntimeError(message);
     };
     const handleUnhandledRejection = (event: PromiseRejectionEvent): void => {
+      if (isIgnorableRuntimeError(event.reason, 'Unhandled promise rejection')) return;
       const message = runtimeErrorMessage(event.reason, 'Unhandled promise rejection');
       notifyRuntimeError(message);
     };
@@ -178,8 +190,9 @@
     window.addEventListener('unhandledrejection', handleUnhandledRejection);
 
     return () => {
-      window.clearInterval(bootloaderInterval);
-      window.clearInterval(resourceGuardInterval);
+      stopBootloaderRefresh();
+      stopResourceGuardRefresh();
+      stopVersionWatch();
       window.removeEventListener('error', handleWindowError);
       window.removeEventListener('unhandledrejection', handleUnhandledRejection);
     };
@@ -187,7 +200,7 @@
 
   async function refreshBootloaderStatus(): Promise<void> {
     try {
-      bootloaderStatus = await apiFetch<BootloaderStatus>('/device/bootloader');
+      bootloaderStatus = await bootloaderStatusResource.refresh();
     } catch {
       // If the backend is offline (or this device doesn't expose the endpoint), just omit the warning icon.
       bootloaderStatus = null;
@@ -196,7 +209,7 @@
 
   async function refreshResourceGuardStatus(): Promise<void> {
     try {
-      resourceGuardStatus = await apiFetch<ResourceGuardStatus>('/device/resource-guard');
+      resourceGuardStatus = await resourceGuardStatusResource.refresh();
     } catch {
       resourceGuardStatus = null;
     }

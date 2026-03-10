@@ -1,5 +1,6 @@
 import type { PipelineDataType } from '$lib/types/pipeline';
 import { apiUrl } from '$lib/api/httpClient';
+import { apiFetch, apiFetchResponse } from '$lib/api/core/http';
 import { extractGraphOutputPorts } from '$lib/features/pipelines/graphOutputPorts';
 import { extractGraphOutputPortTypes } from '$lib/features/pipelines/outputFilters';
 import { resolveStreamLabel } from '$lib/utils/streamLabels';
@@ -289,12 +290,7 @@ const dedupeLocalizationSources = (
 };
 
 const fetchJson = async <T>(url: string): Promise<T> => {
-  const response = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' } });
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(text || `Request failed (${response.status})`);
-  }
-  return (await response.json()) as T;
+  return apiFetch<T>(url, { method: 'GET', headers: { Accept: 'application/json' } });
 };
 
 const normalizeStreamLabel = (stream: StreamInfo): string => {
@@ -423,7 +419,7 @@ export async function fetchPipelineOutputSample(
           `/localization/external/${encodeURIComponent(streamId.slice('external:'.length))}/outputs/${encodeURIComponent(outputKey)}`
         )
       : apiUrl(`/localization/streams/${encodeURIComponent(streamId)}/outputs/${encodeURIComponent(outputKey)}`);
-  const response = await fetch(url, {
+  const response = await apiFetchResponse(url, {
     method: 'GET',
     headers: {
       Accept: 'application/json'

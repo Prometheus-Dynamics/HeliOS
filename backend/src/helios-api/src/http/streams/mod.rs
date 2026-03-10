@@ -3,8 +3,8 @@ pub(crate) mod bench;
 pub(crate) mod bench_util;
 pub(crate) mod calibration;
 pub(crate) mod controls;
-mod lifecycle;
-mod mjpeg;
+pub(crate) mod lifecycle;
+pub(crate) mod mjpeg;
 mod preview;
 mod profiling;
 pub(crate) mod recording;
@@ -113,8 +113,8 @@ pub(crate) async fn restart_stream_with_manifest(state: AppState, manifest: Stre
     tag = "EngineStreams",
     responses((status = 200, description = "List active streams", body = [StreamInfo]))
 )]
-async fn list_streams(State(state): State<AppState>) -> impl IntoResponse {
-    lifecycle::list_streams(state).await
+async fn list_streams(State(state): State<AppState>, headers: axum::http::HeaderMap) -> impl IntoResponse {
+    lifecycle::list_streams(state, headers).await
 }
 
 #[utoipa::path(
@@ -887,8 +887,8 @@ async fn stream_format(Path(id): Path<Uuid>) -> impl IntoResponse {
         (status = 200, description = "Live stream preview (MJPEG multipart or length-prefixed encoded)", content_type = "application/octet-stream")
     )
 )]
-async fn preview_stream(Path(id): Path<Uuid>) -> impl IntoResponse {
-    preview::preview_stream(id).await
+async fn preview_stream(State(state): State<AppState>, Path(id): Path<Uuid>) -> impl IntoResponse {
+    preview::preview_stream(state, id).await
 }
 
 #[utoipa::path(

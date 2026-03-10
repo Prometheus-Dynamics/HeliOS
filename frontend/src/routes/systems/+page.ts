@@ -1,6 +1,6 @@
 import type { PageLoad } from './$types';
-import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rig';
-import { emptyImuStatus } from '$lib/api/systemsPage';
+import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rigDefaults';
+import { emptyImuStatus, fetchSystemsPageData } from '$lib/api/systemsPage';
 import type { SystemsPageData } from '$lib/types/systems';
 
 type SystemsPageLoadResult = {
@@ -32,7 +32,11 @@ export const ssr = false;
 export const prerender = false;
 
 export const load: PageLoad<SystemsPageLoadResult> = async () => {
-  return { payload: clonePayload(EMPTY_PAYLOAD) };
+  try {
+    return { payload: clonePayload(await fetchSystemsPageData()) };
+  } catch {
+    return { payload: clonePayload(EMPTY_PAYLOAD) };
+  }
 };
 
 function clonePayload(value: SystemsPageData): SystemsPageData {

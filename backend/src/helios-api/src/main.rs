@@ -1,14 +1,24 @@
+mod api_observability;
+mod app_state;
 mod config;
 mod console_protocol;
 mod console_sessions;
 mod engine_guard;
 mod features;
+mod hardware_read_model;
 mod http;
 mod ipc;
 mod led_status;
 mod logs;
+mod media_read_model;
 mod nt4;
+mod pipeline_command_service;
+mod pipelines_read_model;
 mod resource_guard;
+mod stream_command_service;
+mod streams_read_model;
+mod system_read_model;
+mod updater_service;
 mod ws;
 
 use crate::config::ApiConfig;
@@ -186,23 +196,25 @@ async fn async_main() {
     }
 
     let handles = Arc::new(ipc::connect_all().await);
+    let state = Arc::new(app_state::ApiAppState::new(handles.clone()));
     engine_guard::spawn_engine_crash_guard_task(handles.clone());
     resource_guard::spawn_resource_guard_task(handles.clone());
-    http::device::network::spawn_team_autodetect_task();
+    state.services.network.spawn_team_autodetect_task();
     nt4::bridge::init(handles.clone());
     let update_active = led_status::spawn_update_led_task(handles.clone());
     led_status::spawn_engine_crash_led_task(handles.clone(), update_active);
-    tokio::spawn(http::pipelines::warm_registry_cache(handles.clone()));
-    http::peers::init_peers_from_disk().await;
-    http::startup::apply_startup_preset(handles.clone()).await;
-    streams::restore_autostart_streams(handles.clone()).await;
+    tokio::spawn(http::pipelines::warm_registry_cache(state.clone()));
+    http::peers::init_peers_from_disk(&state).await;
+    http::startup::apply_startup_preset(state.clone()).await;
+    streams::restore_autostart_streams(state.clone()).await;
     streams_persist::restore_persisted_streams(handles.clone()).await;
     {
         let handles = handles.clone();
+        let state = state.clone();
         let mut engine_reconnects = handles.engine.subscribe_connect_events();
         tokio::spawn(async move {
             while engine_reconnects.recv().await.is_ok() {
-                streams::restore_autostart_streams(handles.clone()).await;
+                streams::restore_autostart_streams(state.clone()).await;
                 streams_persist::restore_persisted_streams(handles.clone()).await;
             }
         });
@@ -212,8 +224,8 @@ async fn async_main() {
     // frontend and backend share an origin again.
     let cors = CorsLayer::new().allow_origin(Any).allow_methods([Method::GET, Method::POST, Method::PUT, Method::PATCH, Method::DELETE, Method::OPTIONS]).allow_headers(Any);
 
-    let http_router = http::router(handles.clone());
-    let ws_router = ws::router(handles.clone());
+    let http_router = http::router(state.clone());
+    let ws_router = ws::router(state.clone());
     let config = ApiConfig::from_env();
 
     let app: Router = Router::new()
@@ -223,7 +235,7 @@ async fn async_main() {
         .route("/asyncapi.json", get(asyncapi_spec))
         .route("/v1/openapi.json", get(openapi_spec))
         .route("/v1/asyncapi.json", get(asyncapi_spec))
-        .layer(from_fn_with_state(handles.clone(), realtime_updates_middleware))
+        .layer(from_fn_with_state(state.clone(), realtime_updates_middleware))
         .layer(from_fn(request_context_middleware))
         .layer(cors);
 
@@ -306,27 +318,57 @@ fn is_mutating_method(method: &Method) -> bool {
     matches!(*method, Method::POST | Method::PUT | Method::PATCH | Method::DELETE)
 }
 
-fn update_kind_for_path(path: &str) -> &'static str {
-    if path.starts_with("/v1/streams") {
-        "streams"
+fn update_kind_for_path(path: &str) -> ipc::RealtimeUpdateKind {
+    if path.starts_with("/v1/streams/") {
+        if path.contains("/controls") {
+            ipc::RealtimeUpdateKind::StreamsControls
+        } else if path.contains("/pipeline") {
+            ipc::RealtimeUpdateKind::StreamsPipeline
+        } else {
+            ipc::RealtimeUpdateKind::StreamsLifecycle
+        }
+    } else if path == "/v1/streams" {
+        ipc::RealtimeUpdateKind::StreamsLifecycle
     } else if path.starts_with("/v1/pipelines") {
-        "pipelines"
+        ipc::RealtimeUpdateKind::PipelinesGraphs
+    } else if path.starts_with("/v1/localization/config") {
+        ipc::RealtimeUpdateKind::LocalizationConfig
+    } else if path.starts_with("/v1/localization/maps") {
+        ipc::RealtimeUpdateKind::LocalizationMaps
+    } else if path.starts_with("/v1/localization/profile") || path.starts_with("/v1/localization/profiles") {
+        ipc::RealtimeUpdateKind::LocalizationProfiles
     } else if path.starts_with("/v1/localization") {
-        "localization"
+        ipc::RealtimeUpdateKind::LocalizationSources
+    } else if path.starts_with("/v1/media/") {
+        if path.ends_with("/metadata") {
+            ipc::RealtimeUpdateKind::MediaMetadata
+        } else if path.ends_with("/label") {
+            ipc::RealtimeUpdateKind::MediaLabels
+        } else if path.ends_with("/imu") {
+            ipc::RealtimeUpdateKind::MediaImu
+        } else {
+            ipc::RealtimeUpdateKind::MediaAssets
+        }
     } else if path.starts_with("/v1/media") {
-        "media"
+        ipc::RealtimeUpdateKind::MediaAssets
+    } else if path.starts_with("/v1/peripherals") {
+        ipc::RealtimeUpdateKind::DeviceHardware
     } else if path.starts_with("/v1/device/imu") || path.starts_with("/v1/device/i2c") {
-        "imu"
+        ipc::RealtimeUpdateKind::DeviceImu
     } else if path.starts_with("/v1/device") {
-        "device"
+        ipc::RealtimeUpdateKind::DeviceSettings
+    } else if path.starts_with("/v1/plugins") {
+        ipc::RealtimeUpdateKind::SettingsPlugins
+    } else if path.starts_with("/v1/ota") {
+        ipc::RealtimeUpdateKind::SettingsUpdater
     } else if path.starts_with("/v1/settings") {
-        "settings"
+        ipc::RealtimeUpdateKind::SettingsDevice
     } else {
-        "api"
+        ipc::RealtimeUpdateKind::Api
     }
 }
 
-async fn realtime_updates_middleware(State(state): State<Arc<ipc::IpcHandles>>, req: Request<Body>, next: axum::middleware::Next) -> axum::response::Response {
+async fn realtime_updates_middleware(State(state): State<http::AppState>, req: Request<Body>, next: axum::middleware::Next) -> axum::response::Response {
     let method = req.method().clone();
     let path = req.uri().path().to_string();
     let request_id_header = req.headers().get("x-request-id").and_then(|value| value.to_str().ok()).map(|value| value.to_string());

@@ -1,4 +1,5 @@
 import { apiUrl } from '$lib/api/httpClient';
+import { apiFetch, apiFetchResponse } from '$lib/api/core/http';
 import type { PipelineOutputSample } from '$lib/features/localization/pipelineSources';
 
 export type LocalizationPipelineStatus = {
@@ -15,7 +16,7 @@ function profileQuery(profileId?: string | null): string {
 }
 
 async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' }, signal });
+  const response = await apiFetchResponse(url, { method: 'GET', headers: { Accept: 'application/json' }, signal });
   if (response.status === 404) {
     throw new Error('Not found');
   }
@@ -28,12 +29,12 @@ async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
 
 export async function fetchLocalizationPipelineStatus(profileId?: string | null): Promise<LocalizationPipelineStatus> {
   const url = apiUrl(`/localization/pipeline/status${profileQuery(profileId)}`);
-  return fetchJson<LocalizationPipelineStatus>(url);
+  return apiFetch<LocalizationPipelineStatus>(url, { method: 'GET', headers: { Accept: 'application/json' } });
 }
 
 export async function fetchLocalizationPipelineOutputs(profileId?: string | null): Promise<string[]> {
   const url = apiUrl(`/localization/pipeline/outputs${profileQuery(profileId)}`);
-  return fetchJson<string[]>(url);
+  return apiFetch<string[]>(url, { method: 'GET', headers: { Accept: 'application/json' } });
 }
 
 export async function fetchLocalizationPipelineOutputSample(

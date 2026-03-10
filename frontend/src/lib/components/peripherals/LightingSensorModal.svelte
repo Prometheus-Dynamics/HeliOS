@@ -35,6 +35,7 @@
     fetchLightingRuntimeState,
     fetchSavedAnimations,
     openLightingStateSocket,
+    postLightingFrame,
     resetLightingConfig as resetLightingConfigApi,
     saveLightingAnimation,
     saveLightingConfig,
@@ -42,7 +43,7 @@
   } from './lighting/lightingModalApi';
   import { deviceSettingsStore, type DeviceSettingsState } from '../../../routes/settings/deviceSettingsStore';
   import type { LightingSettings } from '../../../routes/settings/types';
-  import { REQUESTED_BY, apiFetch } from '../../../routes/settings/api';
+  import { REQUESTED_BY } from '../../../routes/settings/api';
   import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
@@ -306,7 +307,7 @@
     savedBusy = true;
     const previousSelection = selectedLoadAnimationRef;
     try {
-      savedAnimations = await fetchSavedAnimations(apiFetch);
+      savedAnimations = await fetchSavedAnimations();
       syncLoadAnimationRef(previousSelection);
     } catch (err) {
       liveError = buildErrorMessage({ error: err, fallback: 'Unable to load saved animations.' });
@@ -321,7 +322,7 @@
     templatesBusy = true;
     const previousSelection = selectedLoadAnimationRef;
     try {
-      lightingTemplates = await fetchLightingTemplates(apiFetch);
+      lightingTemplates = await fetchLightingTemplates();
       syncLoadAnimationRef(previousSelection);
     } catch (err) {
       animationFormError = buildErrorMessage({ error: err, fallback: 'Unable to load built-in lighting templates.' });
@@ -387,7 +388,7 @@
 
   async function loadLightingRuntimeState(): Promise<void> {
     try {
-      const state = await fetchLightingRuntimeState(apiFetch);
+      const state = await fetchLightingRuntimeState();
       syncFromRuntimeState(state, 'http');
     } catch (err) {
       const message = buildErrorMessage({ error: err, fallback: 'Unable to load live lighting state.' });
@@ -1072,12 +1073,7 @@
           if (options?.updateCursor) {
             setTimelineCursorMs(loopCursor, false);
           }
-          const body: Record<string, unknown> = {
-            requested_by: REQUESTED_BY,
-            frame: frame.frame,
-            brightness
-          };
-          await apiFetch('/device/lighting', { method: 'POST', body: JSON.stringify(body) });
+          await postLightingFrame(frame.frame, brightness, REQUESTED_BY);
           const frameDuration = Math.max(50, frame.duration_ms || 0);
           await new Promise((resolve) => setTimeout(resolve, frameDuration));
           loopCursor += frameDuration;
@@ -1123,15 +1119,12 @@
     liveStatus = null;
     liveError = null;
     try {
-      const body: Record<string, unknown> = {
-        requested_by: REQUESTED_BY,
-        frame: buildCurrentFramePayloadForOutput(),
-        brightness: clampNumber(liveBrightness)
-      };
-      await apiFetch('/device/lighting', { method: 'POST', body: JSON.stringify(body) });
+      const frame = buildCurrentFramePayloadForOutput();
+      const brightness = clampNumber(liveBrightness);
+      await postLightingFrame(frame, brightness, REQUESTED_BY);
       if (!previewPrimed) {
         previewPrimed = true;
-        await apiFetch('/device/lighting', { method: 'POST', body: JSON.stringify(body) });
+        await postLightingFrame(frame, brightness, REQUESTED_BY);
       }
       liveStatus = 'Previewed current frame';
     } catch (err) {
@@ -1148,10 +1141,10 @@
     liveStatus = null;
     try {
       const offFrame = Array.from({ length: Math.max(1, lightingCount || DEFAULT_LIGHTING.count) }, () => ({ r: 0, g: 0, b: 0, w: 0 }));
-      await stopLightingOutput(apiFetch, offFrame, REQUESTED_BY);
+      await stopLightingOutput(offFrame, REQUESTED_BY);
       liveStatus = 'Stopped device output';
       stopLightingAnimationTicker();
-      const state = await fetchLightingRuntimeState(apiFetch);
+      const state = await fetchLightingRuntimeState();
       syncFromRuntimeState(state, 'http');
     } catch (err) {
       liveError = buildErrorMessage({ error: err, fallback: 'Unable to stop lighting output.' });
@@ -1262,7 +1255,7 @@
           (entry) => entry.template_id === selected.value || normalizedAnimationKey(entry.name) === selectedKey
         );
         if (matchedTemplate) {
-          const template = await fetchLightingTemplate(apiFetch, matchedTemplate.template_id);
+          const template = await fetchLightingTemplate(matchedTemplate.template_id);
           const entry = templateToSavedAnimation(template);
           animationName = entry.name;
           if (applyAnimationEntryToEditor(entry)) {
@@ -1399,7 +1392,7 @@
         const fallbackName = `Imported Animation ${idx + 1}`;
         const body = buildSaveBodyFromImportedEntry(entries[idx], fallbackName);
         if (!body) continue;
-        await saveLightingAnimation(apiFetch, body);
+        await saveLightingAnimation(body);
         imported += 1;
       }
       if (imported === 0) {
@@ -1475,7 +1468,7 @@
 
     animationSaveBusy = true;
     try {
-      await saveLightingAnimation(apiFetch, body);
+      await saveLightingAnimation(body);
       animationFormStatus = `Saved ${name}`;
       await loadSavedAnimations();
       selectedLoadAnimationRef = encodeLoadAnimationRef('saved', name);
@@ -1524,12 +1517,12 @@
       if (!template) {
         continue;
       }
-      const templateDoc = await fetchLightingTemplate(apiFetch, template.template_id);
+      const templateDoc = await fetchLightingTemplate(template.template_id);
       const saveBody = buildSaveBodyFromImportedEntry(templateToSavedAnimation(templateDoc), templateDoc.name);
       if (!saveBody) {
         continue;
       }
-      await saveLightingAnimation(apiFetch, saveBody);
+      await saveLightingAnimation(saveBody);
       savedKeys.add(key);
       importedTemplate = true;
     }
@@ -1657,7 +1650,7 @@
   async function deleteSavedAnimation(name: string, source: 'panel' | 'toolbar' = 'panel'): Promise<void> {
     savedBusy = true;
     try {
-      await deleteLightingAnimation(apiFetch, name);
+      await deleteLightingAnimation(name);
       await loadSavedAnimations();
       if (source === 'toolbar') {
         animationFormStatus = `Deleted ${name}`;
@@ -1697,7 +1690,7 @@
     settingsBusy = true;
     settingsError = null;
     try {
-      const payload = await resetLightingConfigApi(apiFetch);
+      const payload = await resetLightingConfigApi();
       form = normalizeLighting(payload, DEFAULT_LIGHTING);
       lightingCount = form.count || DEFAULT_LIGHTING.count;
       frequencyKhzTouched = false;

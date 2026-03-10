@@ -1,9 +1,11 @@
 import { get, writable, type Readable } from 'svelte/store';
-import { OpenAPI, DeviceService } from '$lib/ts-bindings/http/client';
+import { OpenAPI } from '$lib/ts-bindings/http/client';
+import { apiFetchResponse } from '$lib/api/core/http';
+import { createDomainResource } from '$lib/api/domainResources';
 import { extractMessage } from '$lib/api/errors';
+import { fetchLogSources } from '$lib/api/deviceLogs';
 import { buildErrorMessage } from '$lib/ui/errorPolicy';
 import { createBackoffTimer } from '$lib/utils/backoff';
-import { createRefreshableResource } from '$lib/utils/refreshableResource';
 import { extractStreamError, parseLogFrame, parseNdjson } from './logFormatting';
 import {
   LOG_SOURCES_CACHE_KEY,
@@ -38,11 +40,12 @@ const MAX_LOG_ENTRIES = 400;
 const DEFAULT_TAIL_SNAPSHOT_LINES = 200;
 const LOG_RECONNECT_BASE_MS = 2_000;
 const LOG_RECONNECT_MAX_MS = 30_000;
-const logSourcesResource = createRefreshableResource({
+const logSourcesResource = createDomainResource({
   key: LOG_SOURCES_CACHE_KEY,
-  loader: () => DeviceService.sources(),
+  loader: fetchLogSources,
   staleMs: LOG_SOURCES_CACHE_STALE_MS,
-  maxAgeMs: LOG_SOURCES_CACHE_MAX_MS
+  maxAgeMs: LOG_SOURCES_CACHE_MAX_MS,
+  kinds: ['device', 'settings']
 });
 
 export type LogsStore = {
@@ -85,6 +88,7 @@ export function createLogsStore(): LogsStore {
   let logFlushMode: 'raf' | 'timeout' | null = null;
   let logEventSource: EventSource | null = null;
   let tailingStream: string | null = null;
+  let stopInvalidations: (() => void) | null = null;
   const logReconnectTimer = createBackoffTimer({ baseMs: LOG_RECONNECT_BASE_MS, maxMs: LOG_RECONNECT_MAX_MS });
   let filterRequestId = 0;
 
@@ -205,7 +209,7 @@ export function createLogsStore(): LogsStore {
     const params = new URLSearchParams();
     params.set('lines', lineCount.toString());
     const url = `${OpenAPI.BASE}/logs/${streamId}/tail?${params.toString()}`;
-    const response = await fetch(url);
+    const response = await apiFetchResponse(url);
     if (!response.ok) {
       const text = await response.text().catch(() => '');
       throw new Error(extractMessage(text) || `Tail failed (${response.status})`);
@@ -380,7 +384,7 @@ export function createLogsStore(): LogsStore {
         params.set('window', windowExpr);
       }
       const query = params.toString();
-      const response = await fetch(
+      const response = await apiFetchResponse(
         `${OpenAPI.BASE}/logs/${snapshot.selectedLogStream}/download${query ? `?${query}` : ''}`
       );
       if (!response.ok) {
@@ -408,10 +412,16 @@ export function createLogsStore(): LogsStore {
   }
 
   function start(): void {
+    stopInvalidations?.();
+    stopInvalidations = logSourcesResource.subscribeInvalidations(() => {
+      void loadLogStreams();
+    }, { debounceMs: 250 });
     void loadLogStreams();
   }
 
   function destroy(): void {
+    stopInvalidations?.();
+    stopInvalidations = null;
     stopLogTail();
     logWorker.destroy();
   }

@@ -10,8 +10,7 @@ use crate::http::localization::peers::custom as localization_peer_custom;
 use crate::http::peers::{PeerInfo, PeerIntegrationKind, PeerIntegrationMapping};
 use helios_engine::localization::types::{LocalizationPipelineSource, PipelineOutputSample};
 
-static PEER_HTTP: Lazy<reqwest::Client> =
-    Lazy::new(|| reqwest::Client::builder().redirect(reqwest::redirect::Policy::limited(3)).user_agent("HeliOS/localization-peers").build().expect("reqwest client"));
+static PEER_HTTP: Lazy<reqwest::Client> = Lazy::new(|| crate::http::reqwest_client::build_http_client("HeliOS/localization-peers").expect("reqwest client"));
 static PHOTONVISION_CACHE: Lazy<Mutex<HashMap<String, PhotonvisionCacheEntry>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 const PHOTONVISION_CACHE_TTL: Duration = Duration::from_secs(2);
 

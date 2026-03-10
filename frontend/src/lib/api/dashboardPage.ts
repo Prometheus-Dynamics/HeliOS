@@ -1,7 +1,8 @@
-import { DeviceService, PeripheralsService } from '$lib/ts-bindings/http/client';
+import { PeripheralsApi } from '$lib/api/peripheralsApi';
 import { PipelinesApi } from '$lib/api/pipelinesApi';
 import { StreamsApi } from '$lib/api/streamsApi';
-import { cancellableWithTimeout, DEFAULT_REQUEST_TIMEOUT_MS } from '$lib/api/requestUtils';
+import { DeviceApi } from '$lib/api/deviceApi';
+import { DEFAULT_REQUEST_TIMEOUT_MS } from '$lib/api/requestUtils';
 import type { DashboardFetchMeta, DashboardPayload, DashboardSourceStatus, PipelineWatchEntry, StreamGalleryItem, SummaryStat, TimelineItem } from '$lib/types/dashboard';
 import type { DaedalusRegistryNode, DeviceMetrics, ProbedDevice, StreamInfo } from '$lib/ts-bindings/http/client';
 import { resolveStreamAlias, resolveStreamLabel } from '$lib/utils/streamLabels';
@@ -11,9 +12,9 @@ const REQUEST_TIMEOUT_MS = DEFAULT_REQUEST_TIMEOUT_MS;
 export async function fetchDashboardPageData(): Promise<DashboardPayload> {
   const [streamsResult, camerasResult, nodesResult, metricsResult] = await Promise.allSettled([
     StreamsApi.listStreams({ timeoutMs: REQUEST_TIMEOUT_MS }),
-    cancellableWithTimeout(() => PeripheralsService.listCameras(), REQUEST_TIMEOUT_MS),
+    PeripheralsApi.listCameras({ timeoutMs: REQUEST_TIMEOUT_MS }),
     PipelinesApi.listRegistry({ timeoutMs: REQUEST_TIMEOUT_MS }),
-    cancellableWithTimeout(() => DeviceService.metrics(), REQUEST_TIMEOUT_MS)
+    DeviceApi.metrics({ timeoutMs: REQUEST_TIMEOUT_MS })
   ]);
 
   const failures = [streamsResult, camerasResult, nodesResult, metricsResult].filter((result) => result.status === 'rejected').length;

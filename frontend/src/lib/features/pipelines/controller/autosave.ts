@@ -2,7 +2,7 @@ import { get } from 'svelte/store';
 import { toaster } from '$lib';
 import { PipelinesApi } from '$lib/api/pipelinesApi';
 import { serializeGraphPlan } from '../graph';
-import { fromApiGraphPlan } from '../model';
+import { fromApiGraphPlan } from '../graphConverters';
 import { describeError } from './utils';
 import { hydrateGraphWithRegistry } from '../styleHydration';
 import type { Readable, Writable } from 'svelte/store';

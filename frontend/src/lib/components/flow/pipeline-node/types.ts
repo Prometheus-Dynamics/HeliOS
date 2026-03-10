@@ -36,6 +36,7 @@ export interface PipelineNodeData extends Record<string, unknown> {
   inputOrder: string[];
   outputOrder: string[];
   activeConnection: ActiveConnection | null;
+  detailLevel?: 'minimal' | 'full';
   searchActive?: boolean;
   searchMatch?: boolean;
   searchTokens?: string[];
@@ -101,6 +102,13 @@ export type PortRenderInfo = {
   hasIssue: boolean;
   isHighlighted: boolean;
   syncState: PortSyncState;
+};
+
+export type CompactPortHandle = {
+  name: string;
+  handleId: string;
+  hasIssue: boolean;
+  isHighlighted: boolean;
 };
 
 export type BasePortRenderInfo = Omit<

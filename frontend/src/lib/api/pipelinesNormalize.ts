@@ -1,6 +1,7 @@
 import { applyPaletteToGraphPlan } from '$lib/features/pipelines/graph';
 import { normalizeDiagnostics } from '$lib/features/pipelines/diagnostics';
-import { fromApiGraphPlan, fromApiPortDescriptor, normalizeNodeStyle } from '$lib/features/pipelines/model';
+import { fromApiGraphPlan, fromApiPortDescriptor } from '$lib/features/pipelines/graphConverters';
+import { normalizeNodeStyle } from '$lib/features/pipelines/model';
 import { hydratePipelinesWithRegistry } from '$lib/features/pipelines/styleHydration';
 import type {
   PipelineAppearance,

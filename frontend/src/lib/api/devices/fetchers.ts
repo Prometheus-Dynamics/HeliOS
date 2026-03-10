@@ -1,6 +1,8 @@
-import { DeviceService, PeripheralsService } from '$lib/ts-bindings/http/client';
+import { PeripheralsService } from '$lib/ts-bindings/http/client';
 import { fetchPeerStreams } from '$lib/api/peers';
 import { StreamsApi } from '$lib/api/streamsApi';
+import { PeripheralsApi } from '$lib/api/peripheralsApi';
+import { DeviceApi } from '$lib/api/deviceApi';
 import { emptyImuStatus } from '$lib/api/systemsPage';
 import { cancellableWithTimeout } from '$lib/api/requestUtils';
 import { formatFailureReason } from '$lib/api/pagePayload/request';
@@ -13,8 +15,8 @@ import type { DevicesPayload, DevicesPeripheralsSnapshot } from './types';
  */
 export async function fetchDevicesPageData(): Promise<DevicesPayload> {
   const [metricsResult, peripheralsResult, streamsResult, peerStreamsResult] = await Promise.allSettled([
-    cancellableWithTimeout(() => DeviceService.metrics(), REQUEST_TIMEOUT_MS),
-    cancellableWithTimeout(() => PeripheralsService.listPeripherals(), REQUEST_TIMEOUT_MS),
+    DeviceApi.metrics({ timeoutMs: REQUEST_TIMEOUT_MS }),
+    PeripheralsApi.listPeripherals({ timeoutMs: REQUEST_TIMEOUT_MS }),
     StreamsApi.listStreams({ timeoutMs: REQUEST_TIMEOUT_MS }),
     fetchPeerStreams(REQUEST_TIMEOUT_MS)
   ]);
@@ -111,7 +113,7 @@ export async function fetchDevicesCamerasSnapshot(): Promise<DevicesPayload['cam
 }
 
 export async function fetchDevicesPeripheralsSnapshot(): Promise<DevicesPeripheralsSnapshot> {
-  const peripheralsResult = await Promise.allSettled([cancellableWithTimeout(() => PeripheralsService.listPeripherals(), REQUEST_TIMEOUT_MS)]).then(([result]) => result);
+  const peripheralsResult = await Promise.allSettled([PeripheralsApi.listPeripherals({ timeoutMs: REQUEST_TIMEOUT_MS })]).then(([result]) => result);
   if (peripheralsResult.status === 'fulfilled') {
     const coralSensors = (peripheralsResult.value?.sensors ?? []).filter((entry) => {
       const driver = (entry?.driver_namespace ?? '').trim().toLowerCase();

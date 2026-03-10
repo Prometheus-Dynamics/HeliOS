@@ -1,6 +1,6 @@
 import { browser } from '$app/environment';
 import { getHttpClientBase } from '$lib/api/httpClient';
-import { buildWsUrl } from '$lib/api/wsClient';
+import { buildWsUrl, connectWebSocketWithFallback, sendJson, type ManagedWebSocket } from '$lib/api/core/ws';
 
 export type DeviceSensorKind = 'imu' | 'power' | 'firmware';
 
@@ -32,7 +32,7 @@ type DeviceSensorsSubscriber = {
 };
 
 type SharedDeviceSensorsSocket = {
-  socket: WebSocket;
+  connection: ManagedWebSocket;
   subscribers: Map<symbol, DeviceSensorsSubscriber>;
   connected: boolean;
   activeKindsKey: string;
@@ -92,89 +92,86 @@ export function connectDeviceSensorsStream(
 function getOrCreateSharedDeviceSensorsSocket(): SharedDeviceSensorsSocket | null {
   if (sharedDeviceSensorsSocket) return sharedDeviceSensorsSocket;
 
-  let socket: WebSocket;
-  try {
-    socket = new WebSocket(buildSensorsSocketUrl());
-  } catch {
-    return null;
-  }
-
   const shared: SharedDeviceSensorsSocket = {
-    socket,
+    connection: null as unknown as ManagedWebSocket,
     subscribers: new Map(),
     connected: false,
     activeKindsKey: '',
     activeIntervalMs: 100
   };
 
-  socket.addEventListener('open', () => {
-    shared.connected = true;
-    for (const subscriber of shared.subscribers.values()) {
-      subscriber.handlers.onOpen?.();
-    }
-    syncSharedSubscription(shared);
-  });
+  const connection = connectWebSocketWithFallback(
+    buildSensorsSocketUrl(),
+    {
+      onOpen: () => {
+        shared.connected = true;
+        for (const subscriber of shared.subscribers.values()) {
+          subscriber.handlers.onOpen?.();
+        }
+        syncSharedSubscription(shared);
+      },
+      onMessage: (event) => {
+        const data = event.data;
+        if (typeof data !== 'string') return;
 
-  socket.addEventListener('message', (event) => {
-    const data = event.data;
-    if (typeof data !== 'string') return;
+        let parsed: Record<string, unknown>;
+        try {
+          parsed = JSON.parse(data) as Record<string, unknown>;
+        } catch {
+          return;
+        }
 
-    let parsed: Record<string, unknown>;
-    try {
-      parsed = JSON.parse(data) as Record<string, unknown>;
-    } catch {
-      return;
-    }
+        if (parsed?.status === 'sensors_stream_unavailable') {
+          const message = typeof parsed.reason === 'string' ? parsed.reason : 'Sensors stream unavailable';
+          for (const subscriber of shared.subscribers.values()) {
+            subscriber.handlers.onError?.(message);
+          }
+          return;
+        }
 
-    if (parsed?.status === 'sensors_stream_unavailable') {
-      const message = typeof parsed.reason === 'string' ? parsed.reason : 'Sensors stream unavailable';
-      for (const subscriber of shared.subscribers.values()) {
-        subscriber.handlers.onError?.(message);
+        for (const subscriber of shared.subscribers.values()) {
+          if (parsed.imu != null && subscriber.kinds.includes('imu')) {
+            subscriber.handlers.onImu?.(parsed.imu);
+          }
+          if (parsed.power != null && subscriber.kinds.includes('power')) {
+            subscriber.handlers.onPower?.(parsed.power);
+          }
+          if (subscriber.kinds.includes('firmware') && isFirmwareUpdatePayload(parsed.firmware)) {
+            subscriber.handlers.onFirmware?.(parsed.firmware);
+          }
+        }
+      },
+      onError: (message) => {
+        const errorMessage = message || 'Sensors stream connection failed';
+        for (const subscriber of shared.subscribers.values()) {
+          subscriber.handlers.onError?.(errorMessage);
+        }
+      },
+      onClose: () => {
+        shared.connected = false;
+        shared.activeKindsKey = '';
+        if (sharedDeviceSensorsSocket === shared) {
+          sharedDeviceSensorsSocket = null;
+        }
+        for (const subscriber of shared.subscribers.values()) {
+          subscriber.handlers.onClose?.();
+        }
       }
-      return;
-    }
+    },
+    { errorMessage: 'Sensors stream connection failed' }
+  );
 
-    for (const subscriber of shared.subscribers.values()) {
-      if (parsed.imu != null && subscriber.kinds.includes('imu')) {
-        subscriber.handlers.onImu?.(parsed.imu);
-      }
-      if (parsed.power != null && subscriber.kinds.includes('power')) {
-        subscriber.handlers.onPower?.(parsed.power);
-      }
-      if (subscriber.kinds.includes('firmware') && isFirmwareUpdatePayload(parsed.firmware)) {
-        subscriber.handlers.onFirmware?.(parsed.firmware);
-      }
-    }
-  });
+  if (!connection) {
+    return null;
+  }
 
-  socket.addEventListener('error', () => {
-    for (const subscriber of shared.subscribers.values()) {
-      subscriber.handlers.onError?.('Sensors stream connection failed');
-    }
-    try {
-      socket.close();
-    } catch {
-      // ignore
-    }
-  });
-
-  socket.addEventListener('close', () => {
-    shared.connected = false;
-    shared.activeKindsKey = '';
-    if (sharedDeviceSensorsSocket === shared) {
-      sharedDeviceSensorsSocket = null;
-    }
-    for (const subscriber of shared.subscribers.values()) {
-      subscriber.handlers.onClose?.();
-    }
-  });
-
+  shared.connection = connection;
   sharedDeviceSensorsSocket = shared;
   return shared;
 }
 
 function syncSharedSubscription(shared: SharedDeviceSensorsSocket): void {
-  if (!shared.connected || shared.socket.readyState !== WebSocket.OPEN) return;
+  if (!shared.connected || !shared.connection.ready()) return;
 
   const desiredKinds = new Set<DeviceSensorKind>();
   let desiredIntervalMs = Number.POSITIVE_INFINITY;
@@ -186,7 +183,7 @@ function syncSharedSubscription(shared: SharedDeviceSensorsSocket): void {
   }
 
   if (desiredKinds.size === 0) {
-    sendSharedMessage(shared.socket, { op: 'unsubscribe' });
+    sendSharedMessage(shared.connection, { op: 'unsubscribe' });
     shared.activeKindsKey = '';
     return;
   }
@@ -198,8 +195,8 @@ function syncSharedSubscription(shared: SharedDeviceSensorsSocket): void {
     return;
   }
 
-  sendSharedMessage(shared.socket, { op: 'unsubscribe' });
-  sendSharedMessage(shared.socket, {
+  sendSharedMessage(shared.connection, { op: 'unsubscribe' });
+  sendSharedMessage(shared.connection, {
     op: 'subscribe',
     kinds: normalizedKinds,
     interval_ms: nextIntervalMs
@@ -208,12 +205,8 @@ function syncSharedSubscription(shared: SharedDeviceSensorsSocket): void {
   shared.activeIntervalMs = nextIntervalMs;
 }
 
-function sendSharedMessage(socket: WebSocket, message: Record<string, unknown>): void {
-  try {
-    socket.send(JSON.stringify(message));
-  } catch {
-    // ignore
-  }
+function sendSharedMessage(connection: ManagedWebSocket, message: Record<string, unknown>): void {
+  sendJson(connection, message);
 }
 
 function closeSharedDeviceSensorsSocket(shared: SharedDeviceSensorsSocket): void {
@@ -222,20 +215,8 @@ function closeSharedDeviceSensorsSocket(shared: SharedDeviceSensorsSocket): void
   }
   shared.connected = false;
   shared.activeKindsKey = '';
-  try {
-    if (shared.socket.readyState === WebSocket.OPEN) {
-      shared.socket.send(JSON.stringify({ op: 'unsubscribe' }));
-    }
-  } catch {
-    // ignore
-  }
-  try {
-    if (shared.socket.readyState === WebSocket.OPEN || shared.socket.readyState === WebSocket.CONNECTING) {
-      shared.socket.close();
-    }
-  } catch {
-    // ignore
-  }
+  sendJson(shared.connection, { op: 'unsubscribe' });
+  shared.connection.close();
 }
 
 function buildSensorsSocketUrl(): string {

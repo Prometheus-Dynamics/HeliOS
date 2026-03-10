@@ -1,8 +1,11 @@
+import type { ResourceCacheMetadata } from '$lib/api/resourceCache';
+
 type SwrEntry<T> = {
   data?: T;
   fetchedAt: number;
   promise?: Promise<T>;
   error?: unknown;
+  meta?: ResourceCacheMetadata;
 };
 
 export type SwrReadOptions = {
@@ -16,12 +19,25 @@ type SwrFetchOptions = {
   force?: boolean;
 };
 
-type SwrSnapshot<T> = {
+export type SwrSnapshot<T> = {
   data: T;
   fetchedAt: number;
   ageMs: number;
   isStale: boolean;
+  etag?: string | null;
+  revision?: number | null;
 };
+
+export type SwrWrite<T> = {
+  __heliosSwrWrite: true;
+  data: T;
+  meta?: ResourceCacheMetadata;
+};
+
+function isSwrWrite<T>(value: unknown): value is SwrWrite<T> {
+  if (!value || typeof value !== "object") return false;
+  return (value as { __heliosSwrWrite?: unknown }).__heliosSwrWrite === true;
+}
 
 const cache = new Map<string, SwrEntry<unknown>>();
 
@@ -38,12 +54,14 @@ export function readSWR<T>(key: string, options: SwrReadOptions = {}): SwrSnapsh
     data: entry.data,
     fetchedAt: entry.fetchedAt,
     ageMs,
-    isStale
+    isStale,
+    etag: entry.meta?.etag ?? null,
+    revision: entry.meta?.revision ?? null
   };
 }
 
-export function primeSWR<T>(key: string, data: T): void {
-  cache.set(key, { data, fetchedAt: Date.now() });
+export function primeSWR<T>(key: string, data: T, meta?: ResourceCacheMetadata): void {
+  cache.set(key, { data, fetchedAt: Date.now(), meta });
 }
 
 export function invalidateSWR(key: string): void {
@@ -61,7 +79,7 @@ export function invalidateSWRPrefix(prefix: string): void {
 
 export async function revalidateSWR<T>(
   key: string,
-  fetcher: () => Promise<T>,
+  fetcher: () => Promise<T | SwrWrite<T>>,
   options: SwrFetchOptions
 ): Promise<T> {
   const now = Date.now();
@@ -77,9 +95,10 @@ export async function revalidateSWR<T>(
   }
 
   const promise = fetcher()
-    .then((data) => {
-      cache.set(key, { data, fetchedAt: Date.now() });
-      return data;
+    .then((result) => {
+      const write: SwrWrite<T> = isSwrWrite<T>(result) ? result : { __heliosSwrWrite: true, data: result };
+      cache.set(key, { data: write.data, fetchedAt: Date.now(), meta: write.meta });
+      return write.data;
     })
     .catch((error) => {
       if (entry) {

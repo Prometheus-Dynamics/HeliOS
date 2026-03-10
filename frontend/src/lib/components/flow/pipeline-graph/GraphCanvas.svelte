@@ -103,7 +103,7 @@
   bind:viewport={viewport}
   class="h-full"
   colorMode="dark"
-  fitView
+  onlyRenderVisibleElements
   height={fluid ? undefined : resolvedHeight}
   minZoom={minZoom}
   maxZoom={maxZoom}

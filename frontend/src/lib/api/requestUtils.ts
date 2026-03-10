@@ -49,7 +49,11 @@ export async function fetchWithRetry(url: string, init: RequestInit = {}, option
       throw new DOMException('Request aborted', 'AbortError');
     }
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), resolved.timeoutMs);
+    let timedOut = false;
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, resolved.timeoutMs);
     const signal = controller.signal;
     let abortListener: (() => void) | null = null;
 
@@ -74,8 +78,9 @@ export async function fetchWithRetry(url: string, init: RequestInit = {}, option
       if (externalSignal?.aborted) {
         throw error;
       }
+      const resolvedError = timedOut ? new Error('Request timed out') : error;
       if (!retryEligible || attempt + 1 >= maxAttempts) {
-        throw error;
+        throw resolvedError;
       }
       attempt += 1;
       await sleep(nextDelay(attempt, resolved));

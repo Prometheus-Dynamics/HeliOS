@@ -27,7 +27,7 @@ Environment=LD_LIBRARY_PATH=/usr/lib/edgetpu:/usr/lib
 # heavy graph load; repeated restart loops correlate with large RSS growth.
 Environment=HELIOS_CAPTURE_STALL_MS=6000
 Environment=HELIOS_CAPTURE_ACTIVE_STALL_MS=5000
-Environment=HELIOS_DAEDALUS_PLUGIN_DIRS=/usr/lib/helios/plugins/daedalus:/var/lib/helios/plugins/daedalus
+Environment=HELIOS_DAEDALUS_PLUGIN_DIRS=/var/lib/helios/plugins/daedalus:/usr/lib/helios/plugins/daedalus
 Environment=HELIOS_API_DATA_DIR=/var/lib/helios/api-data
 EnvironmentFile=-/etc/default/helios-engine
 ExecStart=/usr/bin/helios-engine

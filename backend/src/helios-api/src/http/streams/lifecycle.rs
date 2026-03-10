@@ -5,9 +5,6 @@ use axum::{
 };
 use helios_engine::capture::CaptureDescriptor;
 use helios_engine::ipc::{EngineErrorCode, EngineEvent, StreamManifest, StreamSummary};
-use std::collections::HashMap;
-use std::sync::OnceLock;
-use std::time::Instant;
 use std::time::{SystemTime, UNIX_EPOCH};
 use styx::capture::prelude::Mode as CaptureMode;
 use styx::codec::CodecKind;
@@ -17,6 +14,7 @@ use uuid::Uuid;
 
 use crate::http::AppState;
 use crate::http::identity_tokens;
+use crate::http::revision::{apply_revision_headers, matches_if_none_match, not_modified_response};
 use crate::http::streams_persist;
 use crate::http::validation::validation_error_response;
 
@@ -32,7 +30,7 @@ fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
-fn descriptor_from_persisted_manifest(manifest: &StreamManifest) -> CaptureDescriptor {
+pub(crate) fn descriptor_from_persisted_manifest(manifest: &StreamManifest) -> CaptureDescriptor {
     // Persisted records may exist even when the stream isn't currently running.
     // Synthesize a minimal descriptor so the UI can still render format/resolution and
     // allow the user to re-apply/start the stream without first selecting a backend.
@@ -45,7 +43,7 @@ fn descriptor_from_persisted_manifest(manifest: &StreamManifest) -> CaptureDescr
     CaptureDescriptor { modes: vec![mode], controls: Vec::new() }
 }
 
-fn ensure_descriptor_has_mode(descriptor: &mut CaptureDescriptor, manifest: &StreamManifest) {
+pub(crate) fn ensure_descriptor_has_mode(descriptor: &mut CaptureDescriptor, manifest: &StreamManifest) {
     if !descriptor.modes.is_empty() {
         return;
     }
@@ -53,32 +51,6 @@ fn ensure_descriptor_has_mode(descriptor: &mut CaptureDescriptor, manifest: &Str
     let format = mode_id.format;
     let intervals = mode_id.interval.into_iter().collect();
     descriptor.modes.push(CaptureMode { id: mode_id, format, intervals, interval_stepwise: None });
-}
-
-#[derive(Clone)]
-struct StreamListCacheEntry {
-    fetched_at: Instant,
-    payload: Vec<StreamInfo>,
-}
-
-fn stream_list_cache() -> &'static tokio::sync::RwLock<Option<StreamListCacheEntry>> {
-    static CACHE: OnceLock<tokio::sync::RwLock<Option<StreamListCacheEntry>>> = OnceLock::new();
-    CACHE.get_or_init(|| tokio::sync::RwLock::new(None))
-}
-
-fn stream_start_lock() -> &'static tokio::sync::Mutex<()> {
-    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
-}
-
-fn stream_list_cache_ttl() -> Duration {
-    const DEFAULT_MS: u64 = 750;
-    const MIN_MS: u64 = 0;
-    const MAX_MS: u64 = 5_000;
-
-    let ms = std::env::var("HELIOS_API_STREAMS_CACHE_MS").ok().and_then(|value| value.trim().parse::<u64>().ok()).unwrap_or(DEFAULT_MS);
-
-    Duration::from_millis(ms.clamp(MIN_MS, MAX_MS))
 }
 
 fn stream_list_response(payload: Vec<StreamInfo>, stale: bool) -> Response {
@@ -599,92 +571,20 @@ pub(crate) async fn get_stream(state: AppState, id: Uuid) -> Response {
     }
 }
 
-pub(crate) async fn list_streams(state: AppState) -> Response {
-    // Avoid blocking the HTTP handler if the engine IPC stalls.
-    let ttl = stream_list_cache_ttl();
-    if ttl != Duration::from_millis(0)
-        && let Some(entry) = stream_list_cache().read().await.clone()
-        && entry.fetched_at.elapsed() < ttl
-    {
-        return stream_list_response(entry.payload, false);
+pub(crate) async fn list_streams(state: AppState, headers: axum::http::HeaderMap) -> Response {
+    let (payload, stale, revision) = state.services.streams.get_cached_streams_snapshot_with_revision(&state).await;
+    if matches_if_none_match(&headers, revision) {
+        return not_modified_response(revision);
     }
 
-    let mut stale = false;
-    let mut out: Vec<StreamInfo> = match state.engine.list_streams_with_timeout(list_streams_timeout()).await {
-        Ok(streams) => streams
-            .into_iter()
-            .filter(|s| !s.manifest.internal)
-            .map(|StreamSummary { stream_id, mut descriptor, mut manifest, status }| {
-                normalize_pipeline_manifest(&mut manifest);
-                apply_effective_pipeline_layout(&mut manifest);
-                ensure_descriptor_has_mode(&mut descriptor, &manifest);
-                StreamInfo { id: stream_id, descriptor, manifest, status: Some(status) }
-            })
-            .collect(),
-        Err(err) => {
-            tracing::warn!(error = %err, "engine list_streams timed out");
-            stale = true;
-            if let Some(entry) = stream_list_cache().read().await.clone() {
-                return stream_list_response(entry.payload, true);
-            }
-            Vec::new()
-        }
-    };
-
-    let mut seen_ids: std::collections::BTreeSet<Uuid> = out.iter().map(|s| s.id).collect();
-    let mut persisted_ids: std::collections::BTreeSet<Uuid> = std::collections::BTreeSet::new();
-    let persisted = streams_persist::list_persisted_records().await;
-    let mut pose_by_stream: HashMap<Uuid, _> = HashMap::new();
-    for record in &persisted {
-        let Some(manifest) = record.manifest.as_ref() else {
-            continue;
-        };
-        if manifest.internal {
-            continue;
-        }
-        let stream_id = manifest.identity.id.or(record.last_stream_id).unwrap_or_else(|| streams_persist::derived_stream_id(&record.camera_id));
-        if let Some(pose) = manifest.pose.clone() {
-            pose_by_stream.insert(stream_id, pose);
-        }
-    }
-    for stream in &mut out {
-        if stream.manifest.pose.is_none()
-            && let Some(pose) = pose_by_stream.get(&stream.id).cloned()
-        {
-            stream.manifest.pose = Some(pose);
-        }
-    }
-    for record in persisted {
-        let Some(mut manifest) = record.manifest else {
-            continue;
-        };
-        if manifest.internal {
-            continue;
-        }
-        let stream_id = manifest.identity.id.or(record.last_stream_id).unwrap_or_else(|| streams_persist::derived_stream_id(&record.camera_id));
-        if !persisted_ids.insert(stream_id) {
-            tracing::warn!(camera_id = %record.camera_id, stream_id = %stream_id, "duplicate persisted stream id; keeping first record");
-            continue;
-        }
-        if seen_ids.contains(&stream_id) {
-            tracing::debug!(camera_id = %record.camera_id, stream_id = %stream_id, "persisted stream already running; skipping");
-            continue;
-        }
-        manifest.identity.id = Some(stream_id);
-        normalize_pipeline_manifest(&mut manifest);
-        apply_effective_pipeline_layout(&mut manifest);
-        let descriptor = descriptor_from_persisted_manifest(&manifest);
-        out.push(StreamInfo { id: stream_id, descriptor, manifest, status: None });
-        seen_ids.insert(stream_id);
-    }
-
-    *stream_list_cache().write().await = Some(StreamListCacheEntry { fetched_at: Instant::now(), payload: out.clone() });
-    stream_list_response(out, stale)
+    let mut response = stream_list_response(payload, stale);
+    apply_revision_headers(response.headers_mut(), revision);
+    response
 }
 
 pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> Response {
     // Serialize stream starts so identity uniqueness checks (active + persisted) remain reliable.
-    let _guard = stream_start_lock().lock().await;
+    let _guard = state.services.streams.stream_start_guard().await;
 
     let mut manifest = manifest;
     let start_ms = now_ms();
@@ -787,6 +687,7 @@ pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> R
                 if let Err(err) = streams_persist::persist_manifest_checked(&persist_id, Some(stream_id), manifest.clone()).await {
                     return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("stream started live but failed to persist: {err}")))).into_response();
                 }
+                state.services.streams.invalidate_stream_list_cache().await;
                 return (StatusCode::OK, Json(StartStreamResponse { stream_id, descriptor })).into_response();
             }
             Ok(EngineEvent::Nack { code, reason, .. }) => {
@@ -813,6 +714,7 @@ pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> R
                         return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("stream started live but failed to persist: {err}"))))
                             .into_response();
                     }
+                    state.services.streams.invalidate_stream_list_cache().await;
                     return (StatusCode::OK, Json(StartStreamResponse { stream_id: requested_id, descriptor })).into_response();
                 }
                 Ok(None) => {
@@ -833,6 +735,7 @@ pub(crate) async fn delete_stream(state: AppState, id: Uuid) -> Response {
     if let Err(err) = streams_persist::remove_record_by_stream_id(id).await {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("failed to remove persisted stream record: {err}")))).into_response();
     }
+    state.services.streams.invalidate_stream_list_cache().await;
 
     // If the stream isn't running, we're done.
     if let Ok(streams) = state.engine.list_streams_with_timeout(list_streams_timeout()).await
@@ -843,14 +746,21 @@ pub(crate) async fn delete_stream(state: AppState, id: Uuid) -> Response {
 
     // Request stop, but don't wait long enough for the UI to time out.
     match state.engine.stop_stream_with_timeout(id, Duration::from_secs(2)).await {
-        Ok(EngineEvent::Stopped { .. }) => StatusCode::NO_CONTENT.into_response(),
+        Ok(EngineEvent::Stopped { .. }) => {
+            state.services.streams.invalidate_stream_list_cache().await;
+            StatusCode::NO_CONTENT.into_response()
+        }
         Ok(EngineEvent::Nack { .. }) => StatusCode::NO_CONTENT.into_response(),
-        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Ok(_) => {
+            state.services.streams.invalidate_stream_list_cache().await;
+            StatusCode::NO_CONTENT.into_response()
+        }
         Err(_) => {
             // Fire-and-forget: keep trying in the background so the stream actually stops.
             let state = state.clone();
             tokio::spawn(async move {
                 let _ = state.engine.stop_stream_with_timeout(id, Duration::from_secs(20)).await;
+                state.services.streams.invalidate_stream_list_cache().await;
             });
             StatusCode::NO_CONTENT.into_response()
         }

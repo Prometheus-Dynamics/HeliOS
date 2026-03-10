@@ -1,9 +1,9 @@
-use axum::{Json, http::StatusCode, response::IntoResponse};
-use once_cell::sync::Lazy;
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio::sync::RwLock;
 use tokio::time::{Duration, Instant, timeout};
@@ -12,6 +12,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use super::super::error::{ApiError, ApiResult};
+use crate::http::AppState;
 use crate::http::persisted_files;
 use lib_net::interface::{IpAssignment, IpMode, NetworkInterfaceSettings, get_interfaces, set_interface};
 
@@ -23,7 +24,10 @@ struct DeviceState {
     team: Option<TeamNumber>,
 }
 
-static DEVICE_STATE: Lazy<RwLock<DeviceState>> = Lazy::new(|| RwLock::new(DeviceState::default()));
+#[derive(Default)]
+pub(crate) struct DeviceNetworkState {
+    team: RwLock<DeviceState>,
+}
 
 #[derive(Copy, Clone, Debug)]
 struct TeamNumber(u32);
@@ -108,23 +112,8 @@ pub async fn set_network(Json(payload): Json<NetworkInterfaceSettings>) -> ApiRe
     tag = "Device",
     responses((status = 200, description = "Team number", body = TeamNumberPayload))
 )]
-pub async fn team() -> ApiResult<impl IntoResponse> {
-    let mut team_value = {
-        let state = DEVICE_STATE.read().await;
-        state.team.map(|team| team.0)
-    };
-
-    if team_value.is_none() {
-        match read_team_file().await {
-            Ok(value) => team_value = value,
-            Err(err) => warn!(error = ?err, "failed to load team file"),
-        }
-        if let Some(value) = team_value {
-            DEVICE_STATE.write().await.team = Some(TeamNumber::try_from(value)?);
-        }
-    }
-
-    Ok(Json(TeamNumberPayload { team_number: team_value }))
+pub async fn team(State(state): State<AppState>) -> ApiResult<impl IntoResponse> {
+    Ok(Json(TeamNumberPayload { team_number: state.services.network.inner().team_value().await? }))
 }
 
 #[utoipa::path(
@@ -134,20 +123,9 @@ pub async fn team() -> ApiResult<impl IntoResponse> {
     request_body(content = TeamNumberPayload, content_type = "application/json"),
     responses((status = 204, description = "Team updated"), (status = 400, description = "Invalid request", body = super::super::error::ErrorBody))
 )]
-pub async fn set_team(Json(payload): Json<TeamNumberPayload>) -> ApiResult<impl IntoResponse> {
-    match payload.team_number {
-        None => {
-            DEVICE_STATE.write().await.team = None;
-            clear_team_file().await?;
-            Ok(StatusCode::NO_CONTENT)
-        }
-        Some(value) => {
-            let team = TeamNumber::try_from(value)?;
-            DEVICE_STATE.write().await.team = Some(team);
-            write_team_file(value).await?;
-            Ok(StatusCode::NO_CONTENT)
-        }
-    }
+pub async fn set_team(State(state): State<AppState>, Json(payload): Json<TeamNumberPayload>) -> ApiResult<impl IntoResponse> {
+    state.services.network.inner().set_team_value(payload.team_number).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 fn candidate_team_bytes_from_ipv4(ip: Ipv4Addr) -> Option<(u8, u8)> {
@@ -222,55 +200,91 @@ async fn infer_team_from_interfaces(ifaces: &[NetworkInterfaceSettings]) -> Opti
     None
 }
 
-pub fn spawn_team_autodetect_task() {
-    tokio::spawn(async move {
-        // One-time, best-effort bootstrap (avoids fighting user overrides later).
-        let deadline = Instant::now() + Duration::from_secs(75);
-        let mut tick = tokio::time::interval(Duration::from_secs(4));
+impl DeviceNetworkState {
+    pub(crate) async fn team_value(&self) -> Result<Option<u32>, ApiError> {
+        let mut team_value = {
+            let state = self.team.read().await;
+            state.team.map(|team| team.0)
+        };
 
-        loop {
-            tick.tick().await;
-            if Instant::now() > deadline {
-                break;
+        if team_value.is_none() {
+            match read_team_file().await {
+                Ok(value) => team_value = value,
+                Err(err) => warn!(error = ?err, "failed to load team file"),
             }
-
-            if DEVICE_STATE.read().await.team.is_some() {
-                break;
+            if let Some(value) = team_value {
+                self.team.write().await.team = Some(TeamNumber::try_from(value)?);
             }
+        }
 
-            if let Ok(Some(team)) = read_team_file().await {
-                if let Ok(valid) = TeamNumber::try_from(team) {
-                    DEVICE_STATE.write().await.team = Some(valid);
+        Ok(team_value)
+    }
+
+    pub(crate) async fn set_team_value(&self, team_number: Option<u32>) -> Result<(), ApiError> {
+        match team_number {
+            None => {
+                self.team.write().await.team = None;
+                clear_team_file().await?;
+            }
+            Some(value) => {
+                let team = TeamNumber::try_from(value)?;
+                self.team.write().await.team = Some(team);
+                write_team_file(value).await?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn spawn_team_autodetect_task(self: Arc<Self>) {
+        tokio::spawn(async move {
+            // One-time, best-effort bootstrap (avoids fighting user overrides later).
+            let deadline = Instant::now() + Duration::from_secs(75);
+            let mut tick = tokio::time::interval(Duration::from_secs(4));
+
+            loop {
+                tick.tick().await;
+                if Instant::now() > deadline {
+                    break;
                 }
-                break;
-            }
 
-            let ifaces = match get_interfaces().await {
-                Ok(ifaces) => ifaces,
-                Err(err) => {
-                    warn!(error = ?err, "team autodetect: failed to read interfaces");
+                if self.team.read().await.team.is_some() {
+                    break;
+                }
+
+                if let Ok(Some(team)) = read_team_file().await {
+                    if let Ok(valid) = TeamNumber::try_from(team) {
+                        self.team.write().await.team = Some(valid);
+                    }
+                    break;
+                }
+
+                let ifaces = match get_interfaces().await {
+                    Ok(ifaces) => ifaces,
+                    Err(err) => {
+                        warn!(error = ?err, "team autodetect: failed to read interfaces");
+                        continue;
+                    }
+                };
+
+                let Some(team) = infer_team_from_interfaces(&ifaces).await else {
+                    continue;
+                };
+
+                if TeamNumber::try_from(team).is_err() {
                     continue;
                 }
-            };
 
-            let Some(team) = infer_team_from_interfaces(&ifaces).await else {
-                continue;
-            };
+                if let Err(err) = write_team_file(team).await {
+                    warn!(error = ?err, team, "team autodetect: failed to write team file");
+                    continue;
+                }
 
-            if TeamNumber::try_from(team).is_err() {
-                continue;
+                self.team.write().await.team = Some(TeamNumber(team));
+                info!(team, "team autodetect: persisted team number");
+                break;
             }
-
-            if let Err(err) = write_team_file(team).await {
-                warn!(error = ?err, team, "team autodetect: failed to write team file");
-                continue;
-            }
-
-            DEVICE_STATE.write().await.team = Some(TeamNumber(team));
-            info!(team, "team autodetect: persisted team number");
-            break;
-        }
-    });
+        });
+    }
 }
 
 fn sanitize_iface_name(name: &str) -> String {

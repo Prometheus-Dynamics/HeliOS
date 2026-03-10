@@ -8,11 +8,12 @@
   import DashboardSummarySection from '$lib/features/dashboard/page/DashboardSummarySection.svelte';
   import DashboardTelemetryPanel from '$lib/features/dashboard/page/DashboardTelemetryPanel.svelte';
   import DashboardStreamsSection from '$lib/features/dashboard/page/DashboardStreamsSection.svelte';
+  import { createDomainResource } from '$lib/api/domainResources';
+  import { scheduleWhenIdle } from '$lib/utils/browserSchedule';
   import { resourceTelemetryStore, EMPTY_RESOURCE_SAMPLE, type ResourceSample } from '$lib/api/telemetry';
   import { fetchDashboardPageData } from '$lib/api/dashboardPage';
   import { connectionState } from '$lib/api/connection';
   import { createBackoffTimer } from '$lib/utils/backoff';
-  import { createRefreshableResource } from '$lib/utils/refreshableResource';
   import {
     buildCoreSeries,
     buildCpuThrottleBadges,
@@ -53,17 +54,26 @@
   let dashboard = $state<DashboardPayload>(clonePayload(readPayload()));
   let dataLoadError = $state<string | null>(null);
   let isRefreshing = $state(false);
-  let hasLoadedOnce = $state(false);
+  let hasLoadedOnce = $state(
+    Boolean(
+      readPayload().summaryStats?.length ||
+        readPayload().timelineItems?.length ||
+        readPayload().pipelineWatch?.length ||
+        readPayload().streamGallery?.length ||
+        readPayload().meta?.fetchedAt
+    )
+  );
   const AUTO_REFRESH_MS = 15_000;
   const AUTO_REFRESH_MAX_MS = 60_000;
   const DASHBOARD_CACHE_KEY = 'dashboard:payload:v1';
   const DASHBOARD_CACHE_STALE_MS = 12_000;
   const DASHBOARD_CACHE_MAX_MS = 120_000;
-  const dashboardResource = createRefreshableResource({
+  const dashboardResource = createDomainResource({
     key: DASHBOARD_CACHE_KEY,
     loader: fetchDashboardPageData,
     staleMs: DASHBOARD_CACHE_STALE_MS,
-    maxAgeMs: DASHBOARD_CACHE_MAX_MS
+    maxAgeMs: DASHBOARD_CACHE_MAX_MS,
+    kinds: ['device', 'localization', 'media', 'pipelines', 'settings', 'streams']
   });
   const refreshTimer = createBackoffTimer({ baseMs: AUTO_REFRESH_MS, maxMs: AUTO_REFRESH_MAX_MS });
   let selectedMetric = $state<string | null>(null);
@@ -84,6 +94,8 @@
   let telemetrySample = $state<ResourceSample>(cloneSample(EMPTY_RESOURCE_SAMPLE));
   let telemetryHistory = $state<ResourceSample[]>([]);
   let unsubscribe: (() => void) | null = null;
+  let stopDomainInvalidation: (() => void) | null = null;
+  let cancelBootstrapRefresh: (() => void) | null = null;
 
   let pendingSamples: ResourceSample[] = [];
   let rafHandle: number | null = null;
@@ -115,7 +127,18 @@
       dashboard = clonePayload(cached.data);
       hasLoadedOnce = true;
     }
-    void refreshDashboard({ bootstrap: true });
+    stopDomainInvalidation = dashboardResource.subscribeInvalidations(() => {
+      void refreshDashboard();
+    }, { debounceMs: 250 });
+    if (hasLoadedOnce) {
+      cancelBootstrapRefresh = scheduleWhenIdle(() => {
+        if (!document.hidden) {
+          void refreshDashboard();
+        }
+      }, { timeoutMs: 1800, fallbackMs: 600 });
+    } else {
+      void refreshDashboard({ bootstrap: true });
+    }
     if (browser) {
       scheduleDashboardRefresh();
     }
@@ -123,7 +146,10 @@
   });
 
   onDestroy(() => {
+    cancelBootstrapRefresh?.();
+    cancelBootstrapRefresh = null;
     unsubscribe?.();
+    stopDomainInvalidation?.();
     refreshTimer.cancel();
     if (rafHandle != null && typeof cancelAnimationFrame === 'function') {
       cancelAnimationFrame(rafHandle);

@@ -1,6 +1,7 @@
 import type { PipelineDataType, PipelineRegistryEntry } from '$lib/types/pipeline';
 import type { ApiPortDescriptor } from '$lib/types/pipeline-api';
-import { fromApiPortDescriptor, normalizeNodeStyle } from '../model';
+import { fromApiPortDescriptor } from '../graphConverters';
+import { normalizeNodeStyle } from '../model';
 
 function normalizeRegistryPorts(value: unknown): Record<string, PipelineDataType> | undefined {
   if (!value || typeof value !== 'object') return undefined;

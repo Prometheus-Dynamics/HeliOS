@@ -5,7 +5,6 @@ use axum::{
     response::IntoResponse,
 };
 use chrono::Utc;
-use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path as StdPath;
@@ -28,11 +27,16 @@ use super::preview::latest_frame_jpeg_bytes;
 use super::util::apply_pipeline_host_inputs_update;
 use super::util::is_engine_unavailable;
 
-static SNAPSHOT_LOCKS: Lazy<Mutex<HashMap<Uuid, Arc<Mutex<()>>>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+#[derive(Default)]
+pub(crate) struct SnapshotLocksState {
+    locks: Mutex<HashMap<Uuid, Arc<Mutex<()>>>>,
+}
 
-pub(crate) async fn snapshot_guard(stream_id: Uuid) -> Arc<Mutex<()>> {
-    let mut guard = SNAPSHOT_LOCKS.lock().await;
-    guard.entry(stream_id).or_insert_with(|| Arc::new(Mutex::new(()))).clone()
+impl SnapshotLocksState {
+    pub(crate) async fn guard(&self, stream_id: Uuid) -> Arc<Mutex<()>> {
+        let mut guard = self.locks.lock().await;
+        guard.entry(stream_id).or_insert_with(|| Arc::new(Mutex::new(()))).clone()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
@@ -212,7 +216,7 @@ pub async fn get_input_usage(State(state): State<AppState>, Path(id): Path<Uuid>
 
 pub(crate) async fn capture_snapshot_for_stream(state: &AppState, stream_id: Uuid, req: CaptureSnapshotRequest) -> ApiResult<MediaItem> {
     let kind = normalize_snapshot_kind(req.kind.as_deref()).map_err(ApiError::bad_request)?;
-    let snapshot_lock = snapshot_guard(stream_id).await;
+    let snapshot_lock = state.services.streams.snapshot_guard(stream_id).await;
     let _snapshot_guard = snapshot_lock.lock().await;
 
     // Calibration snapshots default to RAW if caller did not specify a source.

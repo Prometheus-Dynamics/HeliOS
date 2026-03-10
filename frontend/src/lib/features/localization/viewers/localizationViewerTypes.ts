@@ -1,4 +1,4 @@
-import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rig';
+import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rigDefaults';
 import type { FieldMapOverlay } from '$lib/features/localization/fieldMaps';
 import type { RigCameraInfo, RobotDimensions } from '$lib/types/rig';
 

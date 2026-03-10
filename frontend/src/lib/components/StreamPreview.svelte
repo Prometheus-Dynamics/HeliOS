@@ -4,6 +4,8 @@
   import { connectionState } from '$lib/api/connection';
   import { buildHttpCandidateUrls } from '$lib/api/httpCandidates';
   import { apiUrl } from '$lib/api/httpClient';
+  import { fetchPeerStreamFormat } from '$lib/api/peers';
+  import { resolveStreamPreviewFormat, type StreamPreviewFormat } from '$lib/api/streamPreviewFormat';
   import { StreamsApi } from '$lib/api/streamsApi';
   import EncodedStreamPlayer from '$lib/components/EncodedStreamPlayer.svelte';
   import MjpegStreamPlayer from '$lib/components/MjpegStreamPlayer.svelte';
@@ -123,7 +125,11 @@
   }
 
 
-  function mapEncodedInfoFormat(raw: unknown): ResolvedPreviewFormat | null {
+  function previewFormatCacheKey(peer: PeerStreamRef | null, sessionId: string): string {
+    return peer ? `peer:${peer.peerId}:${peer.streamId}` : `stream:${sessionId}`;
+  }
+
+  function mapEncodedInfoFormat(raw: unknown): StreamPreviewFormat | null {
     if (!raw || typeof raw !== 'object' || !('format' in raw)) return null;
     const format = (raw as { format?: unknown }).format;
     if (format === 'mjpeg' || format === 'h264' || format === 'h265') return format;
@@ -137,18 +143,16 @@
       return;
     }
     if (!captureSessionId) return;
+    const sessionId = captureSessionId;
+    const peer = parsePeerStreamRef(sessionId);
     try {
-      const peer = parsePeerStreamRef(captureSessionId);
-      const json = peer
-        ? await fetch(apiUrl(peerProxyPath(peer, 'format'))).then((response) => {
-            if (!response.ok) {
-              throw new Error(`Failed (${response.status})`);
-            }
-            return response.json();
-          })
-        : await StreamsApi.streamFormat({ id: captureSessionId });
-      const mapped = mapEncodedInfoFormat(json);
-      if (mapped) {
+      const mapped = await resolveStreamPreviewFormat(previewFormatCacheKey(peer, sessionId), async () => {
+        const json = peer
+          ? await fetchPeerStreamFormat(peer.peerId, peer.streamId)
+          : await StreamsApi.streamFormat({ id: sessionId });
+        return mapEncodedInfoFormat(json);
+      });
+      if (mapped && captureSessionId === sessionId) {
         resolvedFormat = mapped;
       }
     } catch {

@@ -1,4 +1,4 @@
-import { buildWsUrlFromHttpBase, connectJsonSocket } from '$lib/api/wsClient';
+import { buildWsUrlFromHttpBase, connectJsonSocket } from '$lib/api/core/ws';
 
 export type PipelineUpdateSocket = {
   ready: () => boolean;

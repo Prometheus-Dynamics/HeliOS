@@ -14,6 +14,7 @@ use tokio::time::Duration;
 use tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
 
+use crate::http::AppState;
 use helios_engine::ipc::EngineErrorCode;
 use helios_engine::stream::{ShmemFrameHeader, read_latest_frame_with_header, read_latest_header, touch_stream_preview};
 
@@ -108,7 +109,7 @@ pub(crate) async fn stream_format(id: Uuid) -> Response {
     Json(StreamFormatInfo { fourcc: header.fourcc.to_string(), format: fourcc_to_format(header.fourcc).to_string(), width: header.width, height: header.height }).into_response()
 }
 
-pub(crate) async fn preview_stream(id: Uuid) -> Response {
+pub(crate) async fn preview_stream(state: AppState, id: Uuid) -> Response {
     let header = match tokio::time::timeout(
         Duration::from_secs(2),
         tokio::task::spawn_blocking(move || {
@@ -127,7 +128,7 @@ pub(crate) async fn preview_stream(id: Uuid) -> Response {
     }
 
     if is_mjpeg_fourcc(header.fourcc) {
-        return mjpeg::mjpeg_stream(id).await;
+        return mjpeg::mjpeg_stream(state.clone(), id).await;
     }
 
     let (tx, rx) = mpsc::channel::<Result<Bytes, Infallible>>(4);

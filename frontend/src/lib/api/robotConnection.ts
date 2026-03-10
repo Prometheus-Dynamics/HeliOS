@@ -1,6 +1,6 @@
 import { readable } from 'svelte/store';
 import { browser } from '$app/environment';
-import { apiFetch } from '$lib/api/apiFetch';
+import { apiFetch } from '$lib/api/core/http';
 import type { Nt4Settings, Nt4TopicsResponse, TeamNumberPayload } from '$lib/ts-bindings/http/client';
 
 export type RobotConnectionState = {

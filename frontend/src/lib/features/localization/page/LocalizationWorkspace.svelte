@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { browser } from '$app/environment';
   import type { LocalizationMarker, LocalizationViewMode, LocalizationFieldDefinition } from '$lib/features/localization/viewers/localizationViewerTypes';
   import type {
     LocalizationCustomFieldOrigin,
@@ -16,12 +17,18 @@
   import type { PoseQuaternion, Vec3 } from '$lib/features/localization/poseMath';
   import type { SensorOrientation } from '$lib/types/devices';
   import type LocalizationViewers from '$lib/components/LocalizationViewers.svelte';
-  import ImuOrientationViewer from '$lib/components/ImuOrientationViewer.svelte';
   import LocalizationConfigPanel from '$lib/features/localization/page/LocalizationConfigPanel.svelte';
   import SolverPanel from '$lib/features/localization/page/SolverPanel.svelte';
   import CameraPoseOverlay from '$lib/features/localization/page/CameraPoseOverlay.svelte';
   import FieldMapManager from '$lib/features/localization/page/FieldMapManager.svelte';
+  import { createLazySvelteComponentLoader } from '$lib/utils/lazySvelteComponent';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+
+  type ImuOrientationViewerComponent = (typeof import('$lib/components/ImuOrientationViewer.svelte'))['default'];
+
+  const imuOrientationViewerLoader = createLazySvelteComponentLoader<ImuOrientationViewerComponent>(
+    () => import('$lib/components/ImuOrientationViewer.svelte')
+  );
 
   type ViewerTransform = { position: Vec3; quaternion?: PoseQuaternion } | null;
   type ViewProfileOverlay = {
@@ -449,6 +456,10 @@
     onUploadSelectedMapFile
   }: LocalizationWorkspaceProps = $props();
 
+  let ImuOrientationViewerComponent = $state<ImuOrientationViewerComponent | null>(
+    imuOrientationViewerLoader.current()
+  );
+
   const ViewersComponent = $derived(viewersComponent);
   const groupedCameraPovOptions = $derived.by<CameraPovOptionGroup[]>(() => {
     const groups = new SvelteMap<string, Map<string, CameraPovOption[]>>();
@@ -470,6 +481,15 @@
     const selected = cameraPovSelectionId.trim();
     if (!selected || selected === ROBOT_FOLLOW_POV_OPTION_ID) return null;
     return cameraPovOptions.find((option) => option.id === selected) ?? null;
+  });
+
+  async function ensureImuOrientationViewer(): Promise<void> {
+    ImuOrientationViewerComponent ??= await imuOrientationViewerLoader.load();
+  }
+
+  $effect(() => {
+    if (!browser || !showImuRotationOverlay || !imuRotationData) return;
+    void ensureImuOrientationViewer();
   });
   const selectedCameraPovIsGhost = $derived.by<boolean>(() => Boolean(selectedCameraPovOption?.ghost));
   const robotFollowPovEnabled = $derived.by(
@@ -942,14 +962,20 @@
     >
       {#if imuRotationData}
         <div class="relative h-full w-full">
-          <ImuOrientationViewer
-            orientation={imuOrientationForViewer}
-            showReferenceControls={false}
-            showLegend={false}
-            showWorldDecorations={false}
-            showGroundPlane={true}
-            cameraDistanceScale={0.22}
-          />
+          {#if ImuOrientationViewerComponent}
+            <ImuOrientationViewerComponent
+              orientation={imuOrientationForViewer}
+              showReferenceControls={false}
+              showLegend={false}
+              showWorldDecorations={false}
+              showGroundPlane={true}
+              cameraDistanceScale={0.22}
+            />
+          {:else}
+            <div class="flex h-full w-full items-center justify-center bg-surface-950/60 text-xs text-surface-500">
+              Loading IMU viewer…
+            </div>
+          {/if}
           <div class="pointer-events-none absolute inset-0 flex flex-col justify-between p-3">
             <div class="flex items-start justify-between gap-2">
               <div

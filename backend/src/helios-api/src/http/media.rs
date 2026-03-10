@@ -1,7 +1,7 @@
 use axum::{
     Json, Router,
     body::Body,
-    extract::{DefaultBodyLimit, Multipart, Path, Query},
+    extract::{DefaultBodyLimit, Multipart, Path, Query, State},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, patch, post},
@@ -14,11 +14,10 @@ use lib_ai::model::{ModelFormat, ModelId, ModelMetadata};
 use lib_ipc::types::Timestamp;
 use mime_guess::MimeGuess;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Cursor, Read, Seek, SeekFrom, Write};
 use std::path::Path as StdPath;
 use std::process::Command;
-use std::sync::{Arc, OnceLock};
 use tokio::{
     fs,
     io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
@@ -29,14 +28,12 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 use zip::write::SimpleFileOptions;
 
+use super::AppState;
 use super::error::{ApiError, ApiResult, ErrorBody};
 use super::storage::{self, sanitize_name};
 use super::upload_integrity;
 
-pub fn router<S>() -> Router<S>
-where
-    S: Clone + Send + Sync + 'static,
-{
+pub fn router() -> Router<AppState> {
     // Media uploads frequently exceed Axum's default 2MB body limit; handle limits ourselves.
     Router::new()
         .route("/", get(list_media).post(upload_media))
@@ -655,7 +652,7 @@ fn count_imu_jsonl_lines<R: BufRead>(reader: R) -> Result<u64, String> {
     params(("name" = String, Path, description = "Media file name")),
     responses((status = 200, description = "Media preview content"), (status = 404, description = "Not found", body = ErrorBody))
 )]
-async fn fetch_media_preview(Path(name): Path<String>, headers: HeaderMap) -> ApiResult<impl IntoResponse> {
+async fn fetch_media_preview(State(state): State<AppState>, Path(name): Path<String>, headers: HeaderMap) -> ApiResult<impl IntoResponse> {
     let Some(filename) = sanitize_name(&name) else {
         return Err(ApiError::bad_request("invalid media name"));
     };
@@ -691,10 +688,7 @@ async fn fetch_media_preview(Path(name): Path<String>, headers: HeaderMap) -> Ap
     let preview_fps = preview_fps_hint(&meta_dir, &md).await;
     let preview_path = media_preview_cache_path(&meta_dir, &filename, preview_fps);
     if !preview_cache_fresh(&path, &preview_path).await.unwrap_or(false) {
-        let transcode_lock = {
-            let mut locks = media_preview_transcode_locks().lock().await;
-            locks.entry(filename.clone()).or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))).clone()
-        };
+        let transcode_lock = state.services.media.preview_generation_lock(&filename).await;
         let _guard = transcode_lock.lock().await;
         if !preview_cache_fresh(&path, &preview_path).await.unwrap_or(false) {
             transcode_preview_h264(&path, &preview_path, preview_fps, codec.as_deref()).await.map_err(|err| ApiError::internal(format!("failed to build video preview: {err}")))?;
@@ -716,7 +710,7 @@ async fn fetch_media_preview(Path(name): Path<String>, headers: HeaderMap) -> Ap
     params(("name" = String, Path, description = "Media file name")),
     responses((status = 200, description = "Media thumbnail content"), (status = 404, description = "Not found", body = ErrorBody))
 )]
-async fn fetch_media_thumbnail(Path(name): Path<String>) -> ApiResult<impl IntoResponse> {
+async fn fetch_media_thumbnail(State(state): State<AppState>, Path(name): Path<String>) -> ApiResult<impl IntoResponse> {
     let Some(filename) = sanitize_name(&name) else {
         return Err(ApiError::bad_request("invalid media name"));
     };
@@ -742,10 +736,7 @@ async fn fetch_media_thumbnail(Path(name): Path<String>) -> ApiResult<impl IntoR
     let codec = md.video_codec.as_deref().and_then(normalize_video_codec);
     let thumbnail_path = media_thumbnail_cache_path(&meta_dir, &filename);
     if !preview_cache_fresh(&path, &thumbnail_path).await.unwrap_or(false) {
-        let thumbnail_lock = {
-            let mut locks = media_thumbnail_generation_locks().lock().await;
-            locks.entry(filename.clone()).or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))).clone()
-        };
+        let thumbnail_lock = state.services.media.thumbnail_generation_lock(&filename).await;
         let _guard = thumbnail_lock.lock().await;
         if !preview_cache_fresh(&path, &thumbnail_path).await.unwrap_or(false) {
             render_video_thumbnail_jpeg(&path, &thumbnail_path, codec.as_deref()).await.map_err(|err| ApiError::internal(format!("failed to build video thumbnail: {err}")))?;
@@ -1350,18 +1341,8 @@ fn media_preview_cache_path(meta_dir: &std::path::Path, filename: &str, fps: Opt
     meta_dir.join(format!("{filename}.preview.h264.{fps_tag}.mp4"))
 }
 
-fn media_preview_transcode_locks() -> &'static tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>> {
-    static LOCKS: OnceLock<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
-    LOCKS.get_or_init(|| tokio::sync::Mutex::new(HashMap::new()))
-}
-
 fn media_thumbnail_cache_path(meta_dir: &std::path::Path, filename: &str) -> std::path::PathBuf {
     meta_dir.join(format!("{filename}.thumb.jpg"))
-}
-
-fn media_thumbnail_generation_locks() -> &'static tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>> {
-    static LOCKS: OnceLock<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
-    LOCKS.get_or_init(|| tokio::sync::Mutex::new(HashMap::new()))
 }
 
 async fn preview_cache_fresh(source: &std::path::Path, preview: &std::path::Path) -> Result<bool, std::io::Error> {
@@ -1922,7 +1903,7 @@ mod tests {
         header::{CONTENT_LENGTH, CONTENT_TYPE},
     };
     use std::io::Read;
-    use std::sync::OnceLock;
+    use std::sync::{Arc, OnceLock};
     use tower::ServiceExt;
 
     fn init_data_dir() -> &'static std::path::Path {
@@ -1957,11 +1938,16 @@ mod tests {
         body
     }
 
+    async fn test_app() -> Router {
+        let state = Arc::new(crate::app_state::ApiAppState::new(Arc::new(crate::ipc::connect_all().await)));
+        Router::new().nest("/media", router()).with_state(state)
+    }
+
     #[tokio::test]
     async fn upload_accepts_metadata_before_file() {
         let root = init_data_dir();
 
-        let app = Router::new().nest("/media", router::<()>());
+        let app = test_app().await;
         let boundary = "BOUNDARY";
         let body = multipart(boundary, &[("kind", None, "text/plain", b"image"), ("files", Some("hello.png"), "image/png", b"PNGDATA")]);
         let content_len = body.len();
@@ -1989,7 +1975,7 @@ mod tests {
     async fn upload_rejects_multiple_files() {
         let _ = init_data_dir();
 
-        let app = Router::new().nest("/media", router::<()>());
+        let app = test_app().await;
         let boundary = "BOUNDARY2";
         let body = multipart(boundary, &[("files", Some("a.txt"), "text/plain", b"A"), ("files", Some("b.txt"), "text/plain", b"B")]);
         let content_len = body.len();
@@ -2021,7 +2007,7 @@ mod tests {
         std::fs::write(media_dir.join(&name_a), b"alpha").expect("write first media file");
         std::fs::write(media_dir.join(&name_b), b"beta").expect("write second media file");
 
-        let app = Router::new().nest("/media", router::<()>());
+        let app = test_app().await;
         let response = app.oneshot(Request::builder().method("GET").uri(format!("/media/download.zip?name={name_a}&name={name_b}")).body(Body::empty()).expect("request")).await.expect("response");
 
         assert_eq!(response.status(), StatusCode::OK);

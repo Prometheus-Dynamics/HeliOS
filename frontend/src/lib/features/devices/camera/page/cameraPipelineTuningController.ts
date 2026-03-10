@@ -7,7 +7,7 @@ import type {
   PipelineRegistryEntry
 } from '$lib/types/pipeline';
 import type { PipelineUi } from '$lib/features/pipelines/pipelineUiTypes';
-import { fromApiGraphPlan } from '$lib/features/pipelines/model';
+import { fromApiGraphPlan } from '$lib/features/pipelines/graphConverters';
 import { decodeDaedalusValue } from '$lib/features/pipelines/daedalusGraph/valueCodec';
 import { getDataTypeVariants } from '$lib/features/pipelines/valueFormatting';
 import { serializeGraphPlan } from '$lib/features/pipelines/graph';

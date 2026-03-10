@@ -16,6 +16,8 @@ pub mod peripherals;
 pub(crate) mod persisted_files;
 pub mod pipelines;
 pub mod plugins;
+pub(crate) mod reqwest_client;
+pub(crate) mod revision;
 pub mod startup;
 pub mod storage;
 pub mod streams;
@@ -23,7 +25,6 @@ pub mod streams_persist;
 pub(crate) mod upload_integrity;
 pub mod validation;
 
-use crate::ipc;
 use axum::Router;
 use axum::routing::{get, post};
 use std::sync::Arc;
@@ -388,7 +389,7 @@ use utoipa::OpenApi;
 pub struct ApiDoc;
 
 /// Top-level HTTP router; currently stubs only.
-pub type AppState = Arc<ipc::IpcHandles>;
+pub type AppState = Arc<crate::app_state::ApiAppState>;
 
 pub fn router(state: AppState) -> Router {
     Router::new()
@@ -398,7 +399,7 @@ pub fn router(state: AppState) -> Router {
         .nest("/peripherals", peripherals::router())
         .nest("/device", device::router())
         .nest("/console", console::router())
-        .nest("/media", media::router::<AppState>())
+        .nest("/media", media::router())
         .nest("/ota", ota::router())
         .nest("/pipelines", pipelines::router())
         .nest("/plugins", plugins::router())

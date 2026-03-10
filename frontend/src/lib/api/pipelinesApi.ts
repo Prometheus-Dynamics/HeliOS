@@ -1,10 +1,12 @@
 import { PipelinesService } from '$lib/ts-bindings/http/client';
-import { runApiRequest, type ApiRequestOptions } from '$lib/api/requestManager';
+import { apiFetchCachedJson, runApiRequest, type ApiRequestOptions } from '$lib/api/core/http';
 import { invalidateSWRPrefix } from '$lib/utils/swrCache';
 
 type CacheEntry<T> = {
   fetchedAt: number;
   value: T;
+  etag?: string | null;
+  revision?: number | null;
 };
 
 const DEFAULT_REGISTRY_CACHE_MS = 5_000;
@@ -39,10 +41,28 @@ async function listRegistrySingleflight(options?: ApiRequestOptions) {
     return registryInflight;
   }
 
-  registryInflight = runApiRequest(() => PipelinesService.listRegistry(), { label: 'listRegistry', ...options })
-    .then((value) => {
+  registryInflight = apiFetchCachedJson<RegistrySnapshot>(
+    '/pipelines/registry',
+    {
+      cached: registryCache?.value,
+      etag: registryCache?.etag ?? null,
+      revision: registryCache?.revision ?? null
+    },
+    { headers: { Accept: 'application/json' } },
+    { label: 'listRegistry', ...options }
+  )
+    .then((result) => {
+      const value = result.status === 'not_modified' ? registryCache?.value : result.data;
+      if (!value) {
+        throw new Error('Pipeline registry unavailable');
+      }
       if (cacheMs > 0) {
-        registryCache = { fetchedAt: Date.now(), value };
+        registryCache = {
+          fetchedAt: Date.now(),
+          value,
+          etag: result.etag ?? registryCache?.etag ?? null,
+          revision: result.revision ?? registryCache?.revision ?? null
+        };
       } else {
         registryCache = null;
       }
@@ -66,10 +86,28 @@ async function listGraphsSingleflight(options?: ApiRequestOptions) {
     return graphsInflight;
   }
 
-  graphsInflight = runApiRequest(() => PipelinesService.listGraphs(), { label: 'listGraphs', ...options })
-    .then((value) => {
+  graphsInflight = apiFetchCachedJson<GraphList>(
+    '/pipelines/graphs',
+    {
+      cached: graphsCache?.value,
+      etag: graphsCache?.etag ?? null,
+      revision: graphsCache?.revision ?? null
+    },
+    { headers: { Accept: 'application/json' } },
+    { label: 'listGraphs', ...options }
+  )
+    .then((result) => {
+      const value = result.status === 'not_modified' ? graphsCache?.value : result.data;
+      if (!value) {
+        throw new Error('Pipeline graph list unavailable');
+      }
       if (cacheMs > 0) {
-        graphsCache = { fetchedAt: Date.now(), value };
+        graphsCache = {
+          fetchedAt: Date.now(),
+          value,
+          etag: result.etag ?? graphsCache?.etag ?? null,
+          revision: result.revision ?? graphsCache?.revision ?? null
+        };
       } else {
         graphsCache = null;
       }

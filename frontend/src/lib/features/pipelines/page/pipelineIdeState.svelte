@@ -2,6 +2,7 @@
   import { browser } from '$app/environment';
   import { env as publicEnv } from '$env/dynamic/public';
   import { OpenAPI } from '$lib';
+  import { apiFetch, apiFetchResponse } from '$lib/api/core/http';
   import { buildErrorMessage } from '$lib/ui/errorPolicy';
   import { SvelteSet, SvelteURL } from 'svelte/reactivity';
 
@@ -60,11 +61,9 @@
       if (!browser) return;
       try {
         const prevIdeUrl = state.ideUrl;
-        const response = await fetch(`${OpenAPI.BASE}/device/ide`, {
+        const payload = await apiFetch<Record<string, unknown>>(`${OpenAPI.BASE}/device/ide`, {
           headers: { Accept: 'application/json' }
         });
-        if (!response.ok) return;
-        const payload = await response.json();
         if (typeof payload?.enabled === 'boolean') {
           state.ideEnabled = payload.enabled;
         }
@@ -91,11 +90,9 @@
     async function refreshIdeProjects(): Promise<void> {
       if (!browser) return;
       try {
-        const response = await fetch(`${OpenAPI.BASE}/device/ide/projects`, {
+        const payload = await apiFetch<Record<string, unknown>>(`${OpenAPI.BASE}/device/ide/projects`, {
           headers: { Accept: 'application/json' }
         });
-        if (!response.ok) return;
-        const payload = await response.json();
         if (Array.isArray(payload?.projects)) {
           state.ideProjects = payload.projects
             .map((entry: { name?: string } | null) => (typeof entry?.name === 'string' ? entry.name.trim() : ''))
@@ -132,7 +129,7 @@
       state.pluginProjectBusy = true;
       state.pluginProjectError = null;
       try {
-        const response = await fetch(`${OpenAPI.BASE}/device/ide/projects`, {
+        const response = await apiFetchResponse(`${OpenAPI.BASE}/device/ide/projects`, {
           method: 'POST',
           headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
           body: JSON.stringify({

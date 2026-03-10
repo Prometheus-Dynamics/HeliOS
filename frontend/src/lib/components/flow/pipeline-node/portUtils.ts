@@ -18,7 +18,12 @@ import type {
   PipelinePortMetadata,
   PipelineRegistryEntry
 } from '$lib/types/pipeline';
-import type { BasePortRenderInfo, EnumVariantOption, PortRenderInfo } from './types';
+import type {
+  BasePortRenderInfo,
+  CompactPortHandle,
+  EnumVariantOption,
+  PortRenderInfo
+} from './types';
 
 export const DEFAULT_PORT_COLOR = 'var(--color-primary-300, #38bdf8)';
 const BOOLEAN_TYPE_KEYS = new Set(['bool', 'boolean']);
@@ -321,6 +326,11 @@ export type BuildPortListOptions = {
   syncModeActive: boolean;
 };
 
+type BasePortListContext = Pick<
+  BuildPortListOptions,
+  'direction' | 'node' | 'apiNode' | 'order'
+>;
+
 const normalizeSearchValue = (value: string | null | undefined): string | null => {
   if (!value) return null;
   const trimmed = value.trim().toLowerCase();
@@ -335,6 +345,68 @@ const matchesSearchTokens = (tokens: string[], values: Array<string | null | und
     .join(' ');
   if (!haystack) return false;
   return tokens.every((token) => haystack.includes(token));
+};
+
+const resolveOrderedPortNames = ({ direction, node, apiNode, order }: BasePortListContext): string[] => {
+  const record = (direction === 'input' ? node?.inputs : node?.outputs) ?? {};
+  const descriptorRecord = (
+    direction === 'input' ? apiNode?.inputs : apiNode?.outputs
+  ) as Record<string, ApiPortDescriptor> | undefined;
+  const fallbackSet = new Set<string>([
+    ...Object.keys(record),
+    ...(descriptorRecord ? Object.keys(descriptorRecord) : [])
+  ]);
+  const fallback = Array.from(fallbackSet);
+  const baseOrder = order && order.length ? order : fallback;
+  return baseOrder.filter(
+    (name: string | null | undefined): name is string => typeof name === 'string' && name.length > 0
+  );
+};
+
+const resolveHandleId = (
+  nodeBaseId: string,
+  name: string,
+  duplicateCount: number,
+  occurrenceIndex: number
+): string => {
+  const baseId = `${nodeBaseId}__${name}`;
+  return duplicateCount > 1 ? `${baseId}-${occurrenceIndex}` : baseId;
+};
+
+export const buildCompactPortHandleList = ({
+  direction,
+  node,
+  apiNode,
+  order,
+  nodeBaseId,
+  issuePortNames = [],
+  highlightedPortName = null
+}: BasePortListContext & {
+  nodeBaseId: string;
+  issuePortNames?: string[];
+  highlightedPortName?: string | null;
+}): CompactPortHandle[] => {
+  const orderedPorts = resolveOrderedPortNames({ direction, node, apiNode, order });
+  if (orderedPorts.length === 0) {
+    return [];
+  }
+  const duplicateCounts: Record<string, number> = {};
+  for (const name of orderedPorts) {
+    duplicateCounts[name] = (duplicateCounts[name] ?? 0) + 1;
+  }
+  const issues = new Set(issuePortNames);
+  const occurrence = new Map<string, number>();
+  return orderedPorts.map((name) => {
+    const occurrenceIndex = occurrence.get(name) ?? 0;
+    occurrence.set(name, occurrenceIndex + 1);
+    const normalized = normalizePortName(name);
+    return {
+      name,
+      handleId: resolveHandleId(nodeBaseId, name, duplicateCounts[name] ?? 1, occurrenceIndex),
+      hasIssue: issues.has(name),
+      isHighlighted: Boolean(highlightedPortName && normalized && normalized === highlightedPortName)
+    };
+  });
 };
 
 export function buildPortList(options: BuildPortListOptions): PortRenderInfo[] {
@@ -363,15 +435,7 @@ export function buildPortList(options: BuildPortListOptions): PortRenderInfo[] {
       ? (registryEntry?.metadata?.inputPorts ?? node?.metadata?.inputPorts ?? {})
       : (registryEntry?.metadata?.outputPorts ?? node?.metadata?.outputPorts ?? {});
   const constantValues = node?.info?.values;
-  const fallbackSet = new Set<string>([
-    ...Object.keys(record),
-    ...(descriptorRecord ? Object.keys(descriptorRecord) : [])
-  ]);
-  const fallback = Array.from(fallbackSet);
-  const baseOrder = order && order.length ? order : fallback;
-  const orderedPorts = baseOrder.filter(
-    (name: string | null | undefined): name is string => typeof name === 'string' && name.length > 0
-  );
+  const orderedPorts = resolveOrderedPortNames({ direction, node, apiNode, order });
   const shouldHighlightSync = syncModeActive && direction === 'input';
   const resolveSyncState = (portName: string | null) => {
     if (!shouldHighlightSync || !portName) {
@@ -384,34 +448,7 @@ export function buildPortList(options: BuildPortListOptions): PortRenderInfo[] {
     return { role: 'unsynced' as const, groupId: null, color: null };
   };
   if (orderedPorts.length === 0) {
-    return fallback.map((name) => {
-      const info = createPortInfo(
-        name,
-        nodeBaseId,
-        record,
-        descriptorRecord,
-        portMetadataRecord,
-        constantValues,
-        issuePortMessages ?? undefined,
-        1,
-        0
-      );
-      const normalized = normalizePortName(info.name);
-      const isHighlighted = Boolean(highlightedPortName && normalized && normalized === highlightedPortName);
-      const syncState = resolveSyncState(normalized);
-      const isSearchMatch = searchActive
-        ? matchesSearchTokens(activeSearchTokens, [
-            info.name,
-            info.label,
-            info.detail,
-            info.dataTypeKey,
-            info.kind,
-            info.constantDisplay,
-            info.constantRaw
-          ])
-        : false;
-      return { ...info, hasIssue: issuePortSet.has(info.name), isHighlighted, syncState, isSearchMatch };
-    });
+    return [];
   }
   const duplicateCounts: Record<string, number> = {};
   for (const name of orderedPorts) {
@@ -461,8 +498,7 @@ function createPortInfo(
   duplicateCount = 1,
   occurrenceIndex = 0
 ): BasePortRenderInfo {
-  const baseId = `${nodeBaseId}__${name}`;
-  const handleId = duplicateCount > 1 ? `${baseId}-${occurrenceIndex}` : baseId;
+  const handleId = resolveHandleId(nodeBaseId, name, duplicateCount, occurrenceIndex);
   const type = record?.[name] ?? 'Generic';
   const descriptor = descriptorRecord?.[name];
   const portMetadata = portMetadataRecord?.[name] ?? null;

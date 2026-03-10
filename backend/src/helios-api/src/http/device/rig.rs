@@ -11,15 +11,15 @@ use reqwest::header::ACCEPT;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::http::AppState;
 use crate::http::json_store;
 use crate::http::peers;
 use crate::http::storage;
 use crate::http::streams::util::camera_id_for_manifest;
 use crate::http::streams_persist;
-use crate::ipc::IpcHandles;
 pub use helios_engine::ipc::{PoseRotation, PoseVector, RigPose};
 
-pub fn router() -> Router<std::sync::Arc<IpcHandles>> {
+pub fn router() -> Router<AppState> {
     Router::new()
         .route("/camera-layout", get(get_camera_layout))
         .route("/robot-dimensions", patch(update_robot_dimensions))
@@ -74,7 +74,7 @@ pub struct UpdateCameraPoseRequest {
 }
 
 const DEFAULT_ROBOT: RobotDimensions = RobotDimensions { width_m: 0.6, length_m: 0.6, bumper_height_m: 0.127, bumper_thickness_m: 0.0508, ground_clearance_m: 0.0 };
-static PEER_RIG_HTTP: Lazy<reqwest::Client> = Lazy::new(|| reqwest::Client::builder().redirect(reqwest::redirect::Policy::limited(3)).user_agent("HeliOS/rig-sync").build().expect("reqwest client"));
+static PEER_RIG_HTTP: Lazy<reqwest::Client> = Lazy::new(|| crate::http::reqwest_client::build_http_client("HeliOS/rig-sync").expect("reqwest client"));
 
 impl Default for RobotDimensions {
     fn default() -> Self {
@@ -158,7 +158,7 @@ fn stream_matches_device(stream: &helios_engine::ipc::StreamSummary, device: &he
     tag = "Device",
     responses((status = 200, description = "Camera + rig layout snapshot", body = CameraLayoutResponse))
 )]
-async fn get_camera_layout(State(state): State<std::sync::Arc<IpcHandles>>) -> impl IntoResponse {
+async fn get_camera_layout(State(state): State<AppState>) -> impl IntoResponse {
     let robot = load_robot_dimensions().await;
     let mut pose_map = streams_persist::list_pose_map().await;
 
@@ -241,7 +241,7 @@ async fn get_camera_layout(State(state): State<std::sync::Arc<IpcHandles>>) -> i
         });
     }
 
-    let peer_streams = peers::snapshot_peer_streams().await;
+    let peer_streams = peers::snapshot_peer_streams(&state).await;
     for peer_stream in peer_streams.streams {
         let peer_camera_uid = peer_stream.camera_uid.as_deref().map(str::trim).filter(|value| !value.is_empty()).map(|value| value.to_string()).unwrap_or_else(|| peer_stream.stream_ref.clone());
         if camera_uids.contains(&peer_camera_uid) {
@@ -281,7 +281,7 @@ async fn get_camera_layout(State(state): State<std::sync::Arc<IpcHandles>>) -> i
     request_body = UpdateRobotDimensionsRequest,
     responses((status = 200, description = "Updated camera layout snapshot", body = CameraLayoutResponse))
 )]
-async fn update_robot_dimensions(State(state): State<std::sync::Arc<IpcHandles>>, Json(patch_req): Json<UpdateRobotDimensionsRequest>) -> impl IntoResponse {
+async fn update_robot_dimensions(State(state): State<AppState>, Json(patch_req): Json<UpdateRobotDimensionsRequest>) -> impl IntoResponse {
     let apply = |field: &mut f64, value: Option<f64>, allow_zero: bool| -> bool {
         let Some(v) = value else {
             return false;
@@ -324,9 +324,9 @@ async fn update_robot_dimensions(State(state): State<std::sync::Arc<IpcHandles>>
     request_body = UpdateCameraPoseRequest,
     responses((status = 204, description = "Pose updated"))
 )]
-pub async fn update_camera_pose(State(state): State<std::sync::Arc<IpcHandles>>, Path(camera_uid): Path<String>, Json(req): Json<UpdateCameraPoseRequest>) -> impl IntoResponse {
+pub async fn update_camera_pose(State(state): State<AppState>, Path(camera_uid): Path<String>, Json(req): Json<UpdateCameraPoseRequest>) -> impl IntoResponse {
     if let Some((peer_id, remote_camera_uid)) = peers::parse_peer_scoped_ref(camera_uid.as_str()) {
-        return forward_peer_camera_pose(&peer_id, &remote_camera_uid, Some(req)).await;
+        return forward_peer_camera_pose(&state, &peer_id, &remote_camera_uid, Some(req)).await;
     }
 
     let clamp = |v: f64| if v.is_finite() { v } else { 0.0 };
@@ -354,9 +354,9 @@ pub async fn update_camera_pose(State(state): State<std::sync::Arc<IpcHandles>>,
     params(("camera_uid" = String, Path, description = "Camera UID (driver key)")),
     responses((status = 204, description = "Pose cleared"))
 )]
-pub async fn clear_camera_pose(State(state): State<std::sync::Arc<IpcHandles>>, Path(camera_uid): Path<String>) -> impl IntoResponse {
+pub async fn clear_camera_pose(State(state): State<AppState>, Path(camera_uid): Path<String>) -> impl IntoResponse {
     if let Some((peer_id, remote_camera_uid)) = peers::parse_peer_scoped_ref(camera_uid.as_str()) {
-        return forward_peer_camera_pose(&peer_id, &remote_camera_uid, None).await;
+        return forward_peer_camera_pose(&state, &peer_id, &remote_camera_uid, None).await;
     }
 
     match streams_persist::update_manifest_pose_by_camera_id(&camera_uid, None).await {
@@ -382,8 +382,8 @@ fn encode_path_segment(value: &str) -> String {
     url::form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>().replace('+', "%20")
 }
 
-async fn forward_peer_camera_pose(peer_id: &str, remote_camera_uid: &str, req: Option<UpdateCameraPoseRequest>) -> axum::response::Response {
-    let peers = peers::snapshot_peers().await;
+async fn forward_peer_camera_pose(state: &AppState, peer_id: &str, remote_camera_uid: &str, req: Option<UpdateCameraPoseRequest>) -> axum::response::Response {
+    let peers = peers::snapshot_peers(state).await;
     let Some(peer) = peers.into_iter().find(|peer| peer.id == peer_id) else {
         return (StatusCode::NOT_FOUND, Json(crate::http::error::ErrorBody::new("not_found", "peer not found"))).into_response();
     };
@@ -418,7 +418,7 @@ async fn forward_peer_camera_pose(peer_id: &str, remote_camera_uid: &str, req: O
     (StatusCode::BAD_GATEWAY, Json(crate::http::error::ErrorBody::new("bad_gateway", detail))).into_response()
 }
 
-async fn update_running_stream_pose(state: &std::sync::Arc<IpcHandles>, camera_uid: &str, pose: Option<RigPose>) -> Result<bool, String> {
+async fn update_running_stream_pose(state: &AppState, camera_uid: &str, pose: Option<RigPose>) -> Result<bool, String> {
     let streams = state.engine.list_streams().await.map_err(|err| err.to_string())?;
     for stream in streams {
         let fallback = stream.manifest.identity.alias.as_deref().or(stream.manifest.identity.hardware_id.as_deref());

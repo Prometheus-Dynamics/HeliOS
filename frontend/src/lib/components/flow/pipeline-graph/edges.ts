@@ -206,7 +206,7 @@ export const buildFlowEdges = (
       source: conn.from.node,
       target: conn.to.node,
       type: 'pipeline',
-      animated: true,
+      animated: isSelected || Boolean(connection),
       selected: isSelected,
       selectable: true,
       class: mergedClass,

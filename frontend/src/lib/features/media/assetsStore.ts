@@ -1,6 +1,6 @@
 import { derived, get, writable, type Readable } from 'svelte/store';
 import { DeviceService, type CameraLayoutResponse } from '$lib/ts-bindings/http/client';
-import { createRefreshableResource } from '$lib/utils/refreshableResource';
+import { createDomainResource } from '$lib/api/domainResources';
 import { createMediaListStore, type MediaListStore } from './store';
 import { createSelectionStore, type SelectionStore } from './selectionStore';
 import { resolveStreamLabel } from '$lib/utils/streamLabels';
@@ -79,27 +79,33 @@ export function createMediaAssetsStore(options: {
   });
 
   const streamLabels = derived(streamLabelsState, ($state) => $state.labels);
+  const streamLabelsResource = createDomainResource({
+    key: options.streamLabels?.cacheKey ?? DEFAULT_STREAM_LABELS_CACHE_KEY,
+    loader: options.streamLabels?.loader ?? defaultStreamLabelLoader,
+    staleMs: options.streamLabels?.staleMs ?? DEFAULT_STREAM_LABELS_CACHE_STALE_MS,
+    maxAgeMs: options.streamLabels?.maxAgeMs ?? DEFAULT_STREAM_LABELS_CACHE_MAX_MS,
+    kinds: ['device', 'media', 'streams'],
+    matches: (event) =>
+      event.kind === 'device.hardware' ||
+      event.kind === 'streams.lifecycle' ||
+      event.kind === 'streams.pipeline' ||
+      event.kind === 'media.metadata'
+  });
 
   async function refreshStreamLabels(): Promise<void> {
-    const cacheKey = options.streamLabels?.cacheKey ?? DEFAULT_STREAM_LABELS_CACHE_KEY;
-    const staleMs = options.streamLabels?.staleMs ?? DEFAULT_STREAM_LABELS_CACHE_STALE_MS;
-    const maxAgeMs = options.streamLabels?.maxAgeMs ?? DEFAULT_STREAM_LABELS_CACHE_MAX_MS;
-    const loader = options.streamLabels?.loader ?? defaultStreamLabelLoader;
-    const resource = createRefreshableResource({ key: cacheKey, loader, staleMs, maxAgeMs });
-
     streamLabelsState.update((current) => ({ ...current, loading: true, error: null }));
 
     try {
-      const cached = resource.read();
+      const cached = streamLabelsResource.read();
       if (cached?.data && Object.keys(cached.data).length) {
         streamLabelsState.update((current) => ({ ...current, labels: cached.data }));
       }
-      const labels = await resource.refresh();
+      const labels = await streamLabelsResource.refresh();
       streamLabelsState.update(() => ({ labels, loading: false, error: null }));
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to load stream labels.';
       streamLabelsState.update((current) => ({ ...current, loading: false, error: message, labels: {} }));
-      resource.invalidate();
+      streamLabelsResource.invalidate();
     }
   }
 

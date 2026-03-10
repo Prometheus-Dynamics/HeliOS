@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { toaster } from '$lib';
+  import { apiFetch } from '$lib/api/core/http';
   import { ApiError, OpenAPI, PeersService, PeripheralsService } from '$lib/ts-bindings/http/client';
   import { connectDevicesUpdatesStream } from '$lib/api/devicesUpdates';
   import { PipelinesApi } from '$lib/api/pipelinesApi';
@@ -255,9 +256,7 @@
     sensorBenchError = null;
     sensorBenchLoading = true;
     try {
-      const resp = await fetch(apiPath('/streams/bench/sensor'));
-      if (!resp.ok) throw new Error(`Failed (${resp.status})`);
-      const json = (await resp.json()) as SensorBenchmarksResponse;
+      const json = await apiFetch<SensorBenchmarksResponse>(apiPath('/streams/bench/sensor'));
       sensorBenchmarks = Array.isArray(json?.benchmarks) ? (json.benchmarks as SensorBenchListItem[]) : [];
       const filtered = filterSensorBenchmarks(
         sensorBenchmarks,
@@ -282,9 +281,7 @@
     sensorBenchSelectedResult = null;
     sensorBenchError = null;
     try {
-      const resp = await fetch(apiPath(`/streams/bench/sensor/${encodeURIComponent(id)}`));
-      if (!resp.ok) throw new Error(`Failed (${resp.status})`);
-      const status = (await resp.json()) as SensorBenchStatusResponse;
+      const status = await apiFetch<SensorBenchStatusResponse>(apiPath(`/streams/bench/sensor/${encodeURIComponent(id)}`));
       if (status?.status === 'completed' && status?.result) {
         sensorBenchSelectedResult = status.result as SensorBenchResult;
       }

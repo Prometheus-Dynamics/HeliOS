@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { toaster } from '$lib';
+  import { apiFetchResponse } from '$lib/api/core/http';
   import type { StreamInfo, StreamManifest, StreamPipelineBinding } from '$lib/api/httpClient';
   import FaIcon from '$lib/components/icons/FaIcon.svelte';
   import { emitMediaMutation } from '$lib/features/media/mutations';
@@ -357,7 +358,7 @@
     recordingBusy = true;
     try {
       const payload = buildRecordingPayload(durationMs);
-      const response = await fetch(ctx.apiPath(`/streams/${encodeURIComponent(streamId)}/recording/start`), {
+      const response = await apiFetchResponse(ctx.apiPath(`/streams/${encodeURIComponent(streamId)}/recording/start`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(payload)
@@ -391,7 +392,7 @@
     recordingBusy = true;
     clearRecordingTimer();
     try {
-      const response = await fetch(ctx.apiPath(`/streams/${encodeURIComponent(streamId)}/recording/stop`), { method: 'POST' });
+      const response = await apiFetchResponse(ctx.apiPath(`/streams/${encodeURIComponent(streamId)}/recording/stop`), { method: 'POST' });
       if (!response.ok) {
         const text = await response.text().catch(() => '');
         throw new Error(text || `Failed to stop recording (${response.status})`);
@@ -431,7 +432,7 @@
     try {
       const durationMs = Math.max(1, Math.round(seconds)) * 1000;
       const payload: Record<string, unknown> = { window_ms: durationMs, container: recordingFormat };
-      const response = await fetch(ctx.apiPath(`/streams/${encodeURIComponent(streamId)}/recording/capture`), {
+      const response = await apiFetchResponse(ctx.apiPath(`/streams/${encodeURIComponent(streamId)}/recording/capture`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(payload)
@@ -476,7 +477,7 @@
       const payload: Record<string, unknown> = {};
       const sourcePayload = buildRecordingSourcePayload();
       if (sourcePayload) payload.source = sourcePayload;
-      const response = await fetch(ctx.apiPath(`/streams/${encodeURIComponent(streamId)}/snapshot`), {
+      const response = await apiFetchResponse(ctx.apiPath(`/streams/${encodeURIComponent(streamId)}/snapshot`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(payload)

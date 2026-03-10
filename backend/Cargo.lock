@@ -2847,6 +2847,7 @@ dependencies = [
  "url",
  "utoipa",
  "uuid",
+ "webpki-root-certs",
  "zip",
 ]
 

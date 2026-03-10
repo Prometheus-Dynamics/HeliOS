@@ -35,9 +35,10 @@ import {
   cloneGraphPlan,
   cloneDataType as cloneDataTypeModel,
   cloneNodeValue as cloneNodeValueModel,
-  cloneNodeSyncConfig,
-  fromApiGraphPlan
+  cloneNodeSyncConfig
 } from './model';
+import { fromApiGraphPlan } from './graphConverters';
+import { createPipelineValidationWorker } from '$lib/workers/factories';
 import { getDataTypeVariants, resolveDataTypeKey } from './valueFormatting';
 import {
   refreshPipelineIoCaches
@@ -845,7 +846,7 @@ export function createPipelineController(initial: PipelinePagePayload, options: 
       return formatFallback();
     }
     if (!validationWorker) {
-      validationWorker = new Worker(new URL('$lib/workers/pipelineValidationWorker.ts', import.meta.url), { type: 'module' });
+      validationWorker = createPipelineValidationWorker();
       validationWorker.onmessage = (event) => {
         const payload = event.data as { requestId: number; warnings?: string[] };
         const resolver = validationResolvers.get(payload.requestId);
@@ -978,14 +979,14 @@ export function createPipelineController(initial: PipelinePagePayload, options: 
   }
 
   async function refreshPipelineOverview(options: { preserveDirty?: boolean } = {}) {
-    if (!browser || typeof fetch !== 'function') {
+    if (!browser) {
       return;
     }
     try {
       const preserveDirty = options.preserveDirty ?? true;
       const previousPipelinesById = new Map(get(pipelines).map((pipeline) => [pipeline.id, pipeline]));
       const previousDirtyState: Record<string, boolean> = preserveDirty ? get(dirtyState) : {};
-      const payload = await fetchPipelinePagePayload(fetch);
+      const payload = await fetchPipelinePagePayload();
       applyPipelinePayload(payload, { preserveDirty });
       const activePipelineId = get(selectedPipelineId);
       if (activePipelineId) {

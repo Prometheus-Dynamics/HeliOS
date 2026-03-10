@@ -1,30 +1,33 @@
 import { PipelinesApi } from '$lib/api/pipelinesApi';
-import { buildPipelinePayloadFromOverview, emptyPipelinePayload } from '$lib/api/pipelinesNormalize';
-import type { PipelinePagePayload, PipelineTypeDescriptor } from '$lib/types/pipeline';
-import type { PipelineLifecycleStatus, PipelineOverviewEntry, PipelineOverviewResponse } from '$lib/types/pipeline-api';
+import type { PipelineGraphPlan, PipelineOverviewPipeline, PipelinePagePayload, PipelineTypeDescriptor } from '$lib/types/pipeline';
+import type { PipelineLifecycleStatus } from '$lib/types/pipeline-api';
 
-export async function fetchPipelinePagePayload(_: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>): Promise<PipelinePagePayload> {
-  void _;
+function createEmptyShellGraph(): PipelineGraphPlan {
+  return {
+    format: 'daedalus',
+    nodes: {},
+    connections: []
+  };
+}
+
+export async function fetchPipelinePagePayload(): Promise<PipelinePagePayload> {
   try {
-    const [summaries, templates] = await Promise.all([
-      PipelinesApi.listGraphs(),
-      PipelinesApi.listTemplates().catch((error) => {
-        console.warn('Failed to load pipeline templates', error);
-        return [];
-      })
-    ]);
+    const summaries = await PipelinesApi.listGraphs();
     const issueCountById = new Map<string, number>();
     for (const entry of summaries ?? []) {
       const id = typeof entry?.id === 'string' ? entry.id : null;
       if (!id) continue;
-      const rawIssueCount = (entry as { issue_count?: number; issueCount?: number }).issue_count ?? (entry as { issue_count?: number; issueCount?: number }).issueCount ?? 0;
+      const rawIssueCount =
+        (entry as { issue_count?: number; issueCount?: number }).issue_count ??
+        (entry as { issue_count?: number; issueCount?: number }).issueCount ??
+        0;
       const parsed = Number(rawIssueCount);
       const count = Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
       issueCountById.set(id, count);
     }
 
-    const pipelines: PipelineOverviewEntry[] = (summaries ?? [])
-      .map((entry): PipelineOverviewEntry | null => {
+    const pipelines: PipelineOverviewPipeline[] = (summaries ?? [])
+      .map((entry): PipelineOverviewPipeline | null => {
         const pipelineId = typeof entry?.id === 'string' ? entry.id : null;
         if (!pipelineId) return null;
         const rawName = typeof entry?.name === 'string' ? entry.name.trim() : '';
@@ -35,7 +38,8 @@ export async function fetchPipelinePagePayload(_: (input: RequestInfo | URL, ini
           name,
           alias: name,
           issueCount: issueCountById.get(pipelineId) ?? 0,
-          graph: { nodes: {}, connections: [] } satisfies PipelineOverviewEntry['graph'],
+          id: pipelineId,
+          graph: createEmptyShellGraph(),
           attachments: [],
           diagnostics: null,
           appearance: null,
@@ -46,24 +50,34 @@ export async function fetchPipelinePagePayload(_: (input: RequestInfo | URL, ini
           updatedAt: updatedAtMs ?? null
         };
       })
-      .filter((entry): entry is PipelineOverviewEntry => Boolean(entry))
+      .filter((entry): entry is PipelineOverviewPipeline => Boolean(entry))
       .sort((a, b) => a.name.localeCompare(b.name));
 
-    const overview: PipelineOverviewResponse = {
+    return {
       pipelines,
       summary: { total: pipelines.length, live: 0, degraded: 0, drafts: pipelines.length },
-      templates: Array.isArray(templates) ? templates : [],
+      templates: [],
       registry: [],
-      dataTypes: [],
-      generatedAt: Date.now()
+      dataTypes: {},
+      generatedAt: Math.floor(Date.now() / 1000)
     };
-
-    return buildPipelinePayloadFromOverview(overview);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unexpected error loading pipeline overview';
     console.warn(message, error);
     return emptyPipelinePayload(message);
   }
+}
+
+export function emptyPipelinePayload(errorMessage?: string): PipelinePagePayload {
+  return {
+    pipelines: [],
+    summary: { total: 0, live: 0, degraded: 0, drafts: 0 },
+    templates: [],
+    registry: [],
+    dataTypes: {},
+    generatedAt: Math.floor(Date.now() / 1000),
+    errorMessage
+  };
 }
 
 export function validatePipelinePayload(payload: unknown): PipelinePagePayload | null {
@@ -88,9 +102,6 @@ export function validatePipelinePayload(payload: unknown): PipelinePagePayload |
   };
   return normalized;
 }
-
-export { emptyPipelinePayload } from '$lib/api/pipelinesNormalize';
-
 function normalizeGeneratedAt(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value;

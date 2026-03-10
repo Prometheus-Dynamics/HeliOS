@@ -1,13 +1,13 @@
-<script lang="ts">
-  import { onDestroy, onMount } from 'svelte';
-  import { OpenAPI } from '$lib/api/httpClient';
+  <script lang="ts">
+  import { onMount } from 'svelte';
+  import { subscribeDomainInvalidations } from '$lib/api/invalidation';
   import type { UpdateDeviceSettingsRequest } from '../types';
-  import { apiFetch, REQUESTED_BY } from '../api';
+  import { apiFetch, REQUESTED_BY, downloadSnapshotArchive } from '../api';
   import { buildErrorMessage } from '$lib/ui/errorPolicy';
   import { formatBytes, formatTimestamp } from '../utils';
   import { deviceSettingsStore, type DeviceSettingsState } from '../deviceSettingsStore';
   import type { DeviceSnapshotResponse, DeviceSnapshotsResponse } from '../types';
-  import type { RealtimeUpdateEvent } from '$lib/api/realtimeUpdates';
+  import { realtimeUpdateMatchesKind, type RealtimeUpdateEvent } from '$lib/api/realtimeUpdates';
 
   type DiagnosticsForm = {
     keep: string;
@@ -26,41 +26,23 @@
   let diagnosticsBusy = $state(false);
   let diagnosticsError = $state<string | null>(null);
   let diagnosticsStatus = $state<string | null>(null);
-  let liveRefreshHandle: number | null = null;
-
   function shouldApplyLiveUpdate(event: RealtimeUpdateEvent): boolean {
     if (event.path.startsWith('/v1/device/snapshots')) return true;
     if (event.path.startsWith('/v1/device') && event.path.includes('diagnostics')) return true;
-    if (event.kind === 'api') return false;
-    return event.kind === 'device' || event.kind === 'settings';
-  }
-
-  function scheduleLiveRefresh(): void {
-    if (liveRefreshHandle != null) return;
-    liveRefreshHandle = window.setTimeout(() => {
-      liveRefreshHandle = null;
-      void loadSnapshots();
-    }, 300);
+    if (realtimeUpdateMatchesKind(event, 'api')) return false;
+    return realtimeUpdateMatchesKind(event, 'device') || realtimeUpdateMatchesKind(event, 'settings');
   }
 
   onMount(() => {
     void loadSnapshots();
-    const onRealtimeUpdate = (rawEvent: Event) => {
-      const event = rawEvent as CustomEvent<RealtimeUpdateEvent>;
-      if (!event.detail || !shouldApplyLiveUpdate(event.detail)) return;
-      scheduleLiveRefresh();
-    };
-    window.addEventListener('helios:settings-realtime-update', onRealtimeUpdate as EventListener);
-    return () => {
-      window.removeEventListener('helios:settings-realtime-update', onRealtimeUpdate as EventListener);
-    };
-  });
-
-  onDestroy(() => {
-    if (liveRefreshHandle != null) {
-      clearTimeout(liveRefreshHandle);
-      liveRefreshHandle = null;
-    }
+    return subscribeDomainInvalidations(
+      ['device', 'settings'],
+      (event) => {
+        if (!shouldApplyLiveUpdate(event)) return;
+        void loadSnapshots();
+      },
+      { debounceMs: 300 }
+    );
   });
 
   $effect(() => {
@@ -174,7 +156,7 @@
     snapshotStatus = 'Preparing download…';
     snapshotsError = null;
     try {
-      const response = await fetch(`${OpenAPI.BASE}/device/snapshots/${id}/download`);
+      const response = await downloadSnapshotArchive(id);
       if (!response.ok) {
         const text = await response.text().catch(() => '');
         throw new Error(text || `Download failed (${response.status})`);

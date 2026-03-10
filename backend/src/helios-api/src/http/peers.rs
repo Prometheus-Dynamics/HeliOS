@@ -8,14 +8,13 @@ use axum::{
 };
 use chrono::{Duration, Utc};
 use futures::StreamExt;
-use once_cell::sync::Lazy;
 use reqwest::header::{ACCEPT, RANGE};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io;
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 use tokio::sync::Mutex;
 use tracing::warn;
@@ -413,10 +412,25 @@ struct PeerStreamCacheEntry {
     errors: Vec<PeerResourceError>,
 }
 
-static PEER_STATE: Lazy<Mutex<PeerState>> = Lazy::new(|| Mutex::new(PeerState::default()));
-static PEERS_LOADED: OnceLock<()> = OnceLock::new();
-static PEER_STREAM_CACHE: Lazy<Mutex<Option<PeerStreamCacheEntry>>> = Lazy::new(|| Mutex::new(None));
-static PEER_HTTP_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| reqwest::Client::builder().redirect(reqwest::redirect::Policy::limited(3)).user_agent("HeliOS/peers").build().expect("reqwest client"));
+pub(crate) struct PeersServiceState {
+    loaded: AtomicBool,
+    peers: Mutex<PeerState>,
+    stream_cache: Mutex<Option<PeerStreamCacheEntry>>,
+    http_client: reqwest::Client,
+    probe_client: reqwest::Client,
+}
+
+impl Default for PeersServiceState {
+    fn default() -> Self {
+        Self {
+            loaded: AtomicBool::new(false),
+            peers: Mutex::new(PeerState::default()),
+            stream_cache: Mutex::new(None),
+            http_client: crate::http::reqwest_client::build_http_client("HeliOS/peers").expect("reqwest client"),
+            probe_client: crate::http::reqwest_client::build_http_client("HeliOS/peers-probe").expect("reqwest client"),
+        }
+    }
+}
 
 const PEER_STREAM_CACHE_TTL_SECS: u64 = 2;
 const PEER_JSON_TIMEOUT_MS: u64 = 1800;
@@ -506,22 +520,66 @@ async fn persist_peers_to_disk(peers: Vec<PeerInfo>) -> io::Result<()> {
     persisted_files::write_mirrored(&path, legacy_path.as_deref(), &data).await
 }
 
-pub(crate) async fn init_peers_from_disk() {
-    if PEERS_LOADED.set(()).is_err() {
-        return;
+impl PeersServiceState {
+    pub(crate) async fn init_from_disk(&self) {
+        if self.loaded.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let peers = load_peers_from_disk().await;
+        if peers.is_empty() {
+            return;
+        }
+        let mut state = self.peers.lock().await;
+        for peer in peers {
+            upsert_peer(&mut state.peers, peer);
+        }
     }
-    let peers = load_peers_from_disk().await;
-    if peers.is_empty() {
-        return;
+
+    pub(crate) async fn snapshot_peers(&self) -> Vec<PeerInfo> {
+        self.peers.lock().await.peers.clone()
     }
-    let mut state = PEER_STATE.lock().await;
-    for peer in peers {
-        upsert_peer(&mut state.peers, peer);
+
+    pub(crate) async fn snapshot_peer_streams(&self, state: &AppState) -> PeerRemoteStreamsResponse {
+        let now = Instant::now();
+        {
+            let cache = self.stream_cache.lock().await;
+            if let Some(entry) = cache.as_ref()
+                && now.saturating_duration_since(entry.fetched_at) < std::time::Duration::from_secs(PEER_STREAM_CACHE_TTL_SECS)
+            {
+                return PeerRemoteStreamsResponse { streams: entry.streams.clone(), errors: entry.errors.clone(), fetched_at: entry.fetched_at_rfc3339.clone() };
+            }
+        }
+
+        let peers = self.snapshot_peers().await;
+        let (streams, errors) = collect_peer_stream_inventory(state, &peers).await;
+        let fetched_at = Utc::now().to_rfc3339();
+        let entry = PeerStreamCacheEntry { fetched_at: now, fetched_at_rfc3339: fetched_at.clone(), streams: streams.clone(), errors: errors.clone() };
+        let mut cache = self.stream_cache.lock().await;
+        *cache = Some(entry);
+
+        PeerRemoteStreamsResponse { streams, errors, fetched_at }
+    }
+
+    pub(crate) async fn invalidate_peer_stream_cache(&self) {
+        let mut cache = self.stream_cache.lock().await;
+        *cache = None;
+    }
+
+    fn http_client(&self) -> &reqwest::Client {
+        &self.http_client
+    }
+
+    fn probe_client(&self) -> &reqwest::Client {
+        &self.probe_client
     }
 }
 
-pub(crate) async fn snapshot_peers() -> Vec<PeerInfo> {
-    PEER_STATE.lock().await.peers.clone()
+pub(crate) async fn init_peers_from_disk(state: &AppState) {
+    state.services.peers.init_from_disk().await;
+}
+
+pub(crate) async fn snapshot_peers(state: &AppState) -> Vec<PeerInfo> {
+    state.services.peers.snapshot_peers().await
 }
 
 #[utoipa::path(
@@ -530,9 +588,9 @@ pub(crate) async fn snapshot_peers() -> Vec<PeerInfo> {
     tag = "Peers",
     responses((status = 200, description = "Known peers", body = PeerInventoryResponse))
 )]
-async fn list_peers() -> impl IntoResponse {
-    let state = PEER_STATE.lock().await;
-    Json(PeerInventoryResponse { peers: state.peers.clone(), discovery: state.discovery.clone() })
+async fn list_peers(State(state): State<AppState>) -> impl IntoResponse {
+    let peer_state = state.services.peers.inner().peers.lock().await;
+    Json(PeerInventoryResponse { peers: peer_state.peers.clone(), discovery: peer_state.discovery.clone() })
 }
 
 #[utoipa::path(
@@ -545,7 +603,7 @@ async fn list_peers() -> impl IntoResponse {
         (status = 400, description = "Invalid payload", body = PeerError)
     )
 )]
-async fn register_peer(Json(req): Json<RegisterPeerRequest>) -> impl IntoResponse {
+async fn register_peer(State(state): State<AppState>, Json(req): Json<RegisterPeerRequest>) -> impl IntoResponse {
     let integration_kind = req.integration.as_ref().map(|integration| integration.kind.clone()).unwrap_or(PeerIntegrationKind::Helios);
     let api_base_url = match normalize_api_base(req.api_base_url.as_deref(), req.device_ip.as_deref(), &integration_kind) {
         Ok(value) => value,
@@ -575,11 +633,11 @@ async fn register_peer(Json(req): Json<RegisterPeerRequest>) -> impl IntoRespons
     };
 
     let peers_for_disk = {
-        let mut state = PEER_STATE.lock().await;
-        upsert_peer(&mut state.peers, peer.clone());
-        state.peers.clone()
+        let mut peer_state = state.services.peers.inner().peers.lock().await;
+        upsert_peer(&mut peer_state.peers, peer.clone());
+        peer_state.peers.clone()
     };
-    invalidate_peer_stream_cache().await;
+    state.services.peers.inner().invalidate_peer_stream_cache().await;
     if let Err(err) = persist_peers_to_disk(peers_for_disk).await {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(PeerError { error: format!("peer registered in memory but failed to persist: {err}") })).into_response();
     }
@@ -593,7 +651,7 @@ async fn register_peer(Json(req): Json<RegisterPeerRequest>) -> impl IntoRespons
     request_body = PeerDiscoveryRequest,
     responses((status = 200, description = "Discovery scheduled", body = PeerDiscoveryResponse))
 )]
-async fn discover_peers(Json(request): Json<PeerDiscoveryRequest>) -> impl IntoResponse {
+async fn discover_peers(State(state): State<AppState>, Json(request): Json<PeerDiscoveryRequest>) -> impl IntoResponse {
     let scopes = if request.scopes.is_empty() { vec![PeerDiscoveryScope::Mdns, PeerDiscoveryScope::Broadcast] } else { request.scopes.clone() };
     let timeout_secs = request.timeout_secs.unwrap_or(5);
     let started_at = Utc::now();
@@ -630,21 +688,21 @@ async fn discover_peers(Json(request): Json<PeerDiscoveryRequest>) -> impl IntoR
 
     if !discovered_hosts.is_empty() {
         let peers_for_disk = {
-            let mut state = PEER_STATE.lock().await;
-            state.peers.retain(|peer| !peer_matches_any_ip(peer, &local_addresses));
+            let mut peer_state = state.services.peers.inner().peers.lock().await;
+            peer_state.peers.retain(|peer| !peer_matches_any_ip(peer, &local_addresses));
 
             let now = Utc::now().to_rfc3339();
             let classification_timeout_ms = ((timeout_secs.saturating_mul(1000)) / 2).clamp(300, 1500);
             for (host_ip, seen_ports) in discovered_hosts {
                 let host = host_ip.to_string();
-                let Some(integration_kind) = infer_discovered_integration_kind(&host, &seen_ports, classification_timeout_ms).await else {
+                let Some(integration_kind) = infer_discovered_integration_kind(state.services.peers.inner(), &host, &seen_ports, classification_timeout_ms).await else {
                     continue;
                 };
                 let mut integration = default_integration_metadata(integration_kind.clone());
                 apply_integration_defaults(&mut integration, &host);
                 let api_port = discovered_api_port(&integration_kind, &seen_ports);
                 let api_base_url = format!("http://{host}:{api_port}");
-                if let Some(existing) = state.peers.iter_mut().find(|peer| peer.api_base_url == api_base_url || peer.endpoints.iter().any(|endpoint| endpoint.host == host.as_str())) {
+                if let Some(existing) = peer_state.peers.iter_mut().find(|peer| peer.api_base_url == api_base_url || peer.endpoints.iter().any(|endpoint| endpoint.host == host.as_str())) {
                     existing.status = PeerStatus::Online;
                     existing.last_seen_at = Some(now.clone());
                     if existing.endpoints.is_empty() || !existing.endpoints.iter().any(|endpoint| endpoint.host == host.as_str()) {
@@ -676,21 +734,21 @@ async fn discover_peers(Json(request): Json<PeerDiscoveryRequest>) -> impl IntoR
                         latency_ms: None,
                         telemetry: None,
                     };
-                    state.peers.push(peer);
+                    peer_state.peers.push(peer);
                 }
             }
-            state.discovery = Some(discovery.clone());
-            state.peers.clone()
+            peer_state.discovery = Some(discovery.clone());
+            peer_state.peers.clone()
         };
         if let Err(err) = persist_peers_to_disk(peers_for_disk).await {
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(PeerError { error: format!("peer discovery updated memory state but failed to persist: {err}") })).into_response();
         }
     } else {
-        let mut state = PEER_STATE.lock().await;
-        state.discovery = Some(discovery.clone());
+        let mut peer_state = state.services.peers.inner().peers.lock().await;
+        peer_state.discovery = Some(discovery.clone());
     }
 
-    invalidate_peer_stream_cache().await;
+    state.services.peers.inner().invalidate_peer_stream_cache().await;
     Json(discovery).into_response()
 }
 
@@ -704,20 +762,20 @@ fn discovered_api_port(kind: &PeerIntegrationKind, seen_ports: &BTreeSet<u16>) -
     }
 }
 
-async fn infer_discovered_integration_kind(host: &str, seen_ports: &BTreeSet<u16>, timeout_ms: u64) -> Option<PeerIntegrationKind> {
+async fn infer_discovered_integration_kind(peers: &PeersServiceState, host: &str, seen_ports: &BTreeSet<u16>, timeout_ms: u64) -> Option<PeerIntegrationKind> {
     if seen_ports.contains(&5800) {
         let api_base = format!("http://{host}:5800");
-        if probe_helios_api(&api_base, timeout_ms).await.ok {
+        if probe_helios_api(peers, &api_base, timeout_ms).await.ok {
             return Some(PeerIntegrationKind::Helios);
         }
     }
 
     if seen_ports.contains(&5801) || seen_ports.contains(&5800) {
-        let limelight_management = probe_http_any(&format!("http://{host}:5801"), timeout_ms).await;
+        let limelight_management = probe_http_any(peers, &format!("http://{host}:5801"), timeout_ms).await;
         if limelight_management.ok {
             return Some(PeerIntegrationKind::LimelightOs);
         }
-        let limelight_stream = probe_mjpegish(&format!("http://{host}:5800/stream.mjpeg"), timeout_ms).await;
+        let limelight_stream = probe_mjpegish(peers, &format!("http://{host}:5800/stream.mjpeg"), timeout_ms).await;
         if limelight_stream.ok {
             return Some(PeerIntegrationKind::LimelightOs);
         }
@@ -741,47 +799,25 @@ fn peer_matches_any_ip(peer: &PeerInfo, addresses: &HashSet<std::net::IpAddr>) -
     params(("id" = String, Path, description = "Peer identifier")),
     responses((status = 200, description = "Peer removed", body = PeerRemovalResponse), (status = 404, description = "Peer not found", body = PeerError))
 )]
-async fn remove_peer(Path(id): Path<String>) -> impl IntoResponse {
+async fn remove_peer(State(state): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
     let peers_for_disk = {
-        let mut state = PEER_STATE.lock().await;
-        let before = state.peers.len();
-        state.peers.retain(|peer| peer.id != id);
-        if state.peers.len() == before {
+        let mut peer_state = state.services.peers.inner().peers.lock().await;
+        let before = peer_state.peers.len();
+        peer_state.peers.retain(|peer| peer.id != id);
+        if peer_state.peers.len() == before {
             return (StatusCode::NOT_FOUND, Json(PeerError { error: "peer not found".into() })).into_response();
         }
-        state.peers.clone()
+        peer_state.peers.clone()
     };
-    invalidate_peer_stream_cache().await;
+    state.services.peers.inner().invalidate_peer_stream_cache().await;
     if let Err(err) = persist_peers_to_disk(peers_for_disk).await {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(PeerError { error: format!("peer removed from memory but failed to persist: {err}") })).into_response();
     }
     (StatusCode::OK, Json(PeerRemovalResponse { removed: true })).into_response()
 }
 
-pub(crate) async fn invalidate_peer_stream_cache() {
-    let mut cache = PEER_STREAM_CACHE.lock().await;
-    *cache = None;
-}
-
-pub(crate) async fn snapshot_peer_streams() -> PeerRemoteStreamsResponse {
-    let now = Instant::now();
-    {
-        let cache = PEER_STREAM_CACHE.lock().await;
-        if let Some(entry) = cache.as_ref()
-            && now.saturating_duration_since(entry.fetched_at) < std::time::Duration::from_secs(PEER_STREAM_CACHE_TTL_SECS)
-        {
-            return PeerRemoteStreamsResponse { streams: entry.streams.clone(), errors: entry.errors.clone(), fetched_at: entry.fetched_at_rfc3339.clone() };
-        }
-    }
-
-    let peers = snapshot_peers().await;
-    let (streams, errors) = collect_peer_stream_inventory(&peers).await;
-    let fetched_at = Utc::now().to_rfc3339();
-    let entry = PeerStreamCacheEntry { fetched_at: now, fetched_at_rfc3339: fetched_at.clone(), streams: streams.clone(), errors: errors.clone() };
-    let mut cache = PEER_STREAM_CACHE.lock().await;
-    *cache = Some(entry);
-
-    PeerRemoteStreamsResponse { streams, errors, fetched_at }
+pub(crate) async fn snapshot_peer_streams(state: &AppState) -> PeerRemoteStreamsResponse {
+    state.services.peers.snapshot_peer_streams(state).await
 }
 
 pub(crate) fn parse_peer_scoped_ref(value: &str) -> Option<(String, String)> {
@@ -806,8 +842,8 @@ pub(crate) fn peer_v1_url(peer: &PeerInfo, path: &str) -> Result<String, String>
     tag = "Peers",
     responses((status = 200, description = "Aggregated remote Helios stream inventory", body = PeerRemoteStreamsResponse))
 )]
-async fn list_peer_streams() -> impl IntoResponse {
-    Json(snapshot_peer_streams().await)
+async fn list_peer_streams(State(state): State<AppState>) -> impl IntoResponse {
+    Json(snapshot_peer_streams(&state).await)
 }
 
 #[utoipa::path(
@@ -821,8 +857,8 @@ async fn list_peer_streams() -> impl IntoResponse {
         (status = 400, description = "Unsupported peer type", body = PeerError)
     )
 )]
-async fn list_peer_streams_for_peer(Path(id): Path<String>) -> impl IntoResponse {
-    let peers = snapshot_peers().await;
+async fn list_peer_streams_for_peer(State(state): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
+    let peers = snapshot_peers(&state).await;
     let Some(peer) = peers.into_iter().find(|peer| peer.id == id) else {
         return (StatusCode::NOT_FOUND, Json(PeerError { error: "peer not found".to_string() })).into_response();
     };
@@ -830,7 +866,7 @@ async fn list_peer_streams_for_peer(Path(id): Path<String>) -> impl IntoResponse
         return (StatusCode::BAD_REQUEST, Json(PeerError { error: "stream inventory is only available for helios peers".to_string() })).into_response();
     }
 
-    match collect_peer_streams_for_peer(&peer).await {
+    match collect_peer_streams_for_peer(&state, &peer).await {
         Ok(mut streams) => {
             streams.sort_by(|a, b| a.display_name.cmp(&b.display_name).then_with(|| a.remote_stream_id.cmp(&b.remote_stream_id)));
             Json(PeerRemoteStreamsResponse { streams, errors: Vec::new(), fetched_at: Utc::now().to_rfc3339() }).into_response()
@@ -852,8 +888,8 @@ async fn list_peer_streams_for_peer(Path(id): Path<String>) -> impl IntoResponse
     ),
     responses((status = 200, description = "Proxied remote format response"))
 )]
-async fn proxy_peer_stream_format(Path((id, stream_id)): Path<(String, String)>, raw_query: RawQuery, headers: HeaderMap) -> impl IntoResponse {
-    proxy_peer_stream_resource(id, stream_id, "format", raw_query.0, headers).await
+async fn proxy_peer_stream_format(State(state): State<AppState>, Path((id, stream_id)): Path<(String, String)>, raw_query: RawQuery, headers: HeaderMap) -> impl IntoResponse {
+    proxy_peer_stream_resource(&state, id, stream_id, "format", raw_query.0, headers).await
 }
 
 #[utoipa::path(
@@ -866,8 +902,8 @@ async fn proxy_peer_stream_format(Path((id, stream_id)): Path<(String, String)>,
     ),
     responses((status = 200, description = "Proxied remote preview response"))
 )]
-async fn proxy_peer_stream_preview(Path((id, stream_id)): Path<(String, String)>, raw_query: RawQuery, headers: HeaderMap) -> impl IntoResponse {
-    proxy_peer_stream_resource(id, stream_id, "preview", raw_query.0, headers).await
+async fn proxy_peer_stream_preview(State(state): State<AppState>, Path((id, stream_id)): Path<(String, String)>, raw_query: RawQuery, headers: HeaderMap) -> impl IntoResponse {
+    proxy_peer_stream_resource(&state, id, stream_id, "preview", raw_query.0, headers).await
 }
 
 #[utoipa::path(
@@ -880,8 +916,8 @@ async fn proxy_peer_stream_preview(Path((id, stream_id)): Path<(String, String)>
     ),
     responses((status = 200, description = "Proxied remote frame response"))
 )]
-async fn proxy_peer_stream_frame(Path((id, stream_id)): Path<(String, String)>, raw_query: RawQuery, headers: HeaderMap) -> impl IntoResponse {
-    proxy_peer_stream_resource(id, stream_id, "frame", raw_query.0, headers).await
+async fn proxy_peer_stream_frame(State(state): State<AppState>, Path((id, stream_id)): Path<(String, String)>, raw_query: RawQuery, headers: HeaderMap) -> impl IntoResponse {
+    proxy_peer_stream_resource(&state, id, stream_id, "frame", raw_query.0, headers).await
 }
 
 #[utoipa::path(
@@ -897,7 +933,7 @@ async fn proxy_peer_stream_frame(Path((id, stream_id)): Path<(String, String)>, 
     )
 )]
 async fn sync_peer_pipelines(State(state): State<AppState>, Path(id): Path<String>, Json(req): Json<PeerPipelineSyncRequest>) -> impl IntoResponse {
-    let peers = snapshot_peers().await;
+    let peers = snapshot_peers(&state).await;
     let Some(peer) = peers.into_iter().find(|peer| peer.id == id) else {
         return (StatusCode::NOT_FOUND, Json(PeerError { error: "peer not found".to_string() })).into_response();
     };
@@ -907,7 +943,7 @@ async fn sync_peer_pipelines(State(state): State<AppState>, Path(id): Path<Strin
 
     let force = req.force.unwrap_or(false);
     let mut errors = Vec::new();
-    let remote_summaries: Vec<PipelineSummary> = match fetch_peer_json(&peer, "/pipelines/graphs", 2500).await {
+    let remote_summaries: Vec<PipelineSummary> = match fetch_peer_json(&state, &peer, "/pipelines/graphs", 2500).await {
         Ok(value) => value,
         Err(err) => {
             return (StatusCode::BAD_GATEWAY, Json(PeerPipelineSyncResponse { peer_id: peer.id, peer_alias: peer.alias, synced: Vec::new(), errors: vec![err] })).into_response();
@@ -941,7 +977,7 @@ async fn sync_peer_pipelines(State(state): State<AppState>, Path(id): Path<Strin
     let mut synced = Vec::new();
     for (remote_pipeline_id, summary_name) in selected {
         let path = format!("/pipelines/graphs/{remote_pipeline_id}");
-        let remote_doc: PipelineDocument = match fetch_peer_json(&peer, &path, 4500).await {
+        let remote_doc: PipelineDocument = match fetch_peer_json(&state, &peer, &path, 4500).await {
             Ok(doc) => doc,
             Err(err) => {
                 errors.push(format!("{}: {err}", remote_pipeline_id));
@@ -967,8 +1003,8 @@ async fn sync_peer_pipelines(State(state): State<AppState>, Path(id): Path<Strin
     Json(PeerPipelineSyncResponse { peer_id: peer.id, peer_alias: peer.alias, synced, errors }).into_response()
 }
 
-async fn proxy_peer_stream_resource(peer_id: String, stream_id: String, endpoint: &str, raw_query: Option<String>, request_headers: HeaderMap) -> Response {
-    let peers = snapshot_peers().await;
+async fn proxy_peer_stream_resource(state: &AppState, peer_id: String, stream_id: String, endpoint: &str, raw_query: Option<String>, request_headers: HeaderMap) -> Response {
+    let peers = snapshot_peers(state).await;
     let Some(peer) = peers.into_iter().find(|peer| peer.id == peer_id) else {
         return (StatusCode::NOT_FOUND, Json(PeerError { error: "peer not found".to_string() })).into_response();
     };
@@ -987,7 +1023,7 @@ async fn proxy_peer_stream_resource(peer_id: String, stream_id: String, endpoint
         upstream_url.push_str(query.as_str());
     }
 
-    let mut request = PEER_HTTP_CLIENT.get(upstream_url);
+    let mut request = state.services.peers.inner().http_client().get(upstream_url);
     if endpoint != "preview" {
         request = request.timeout(std::time::Duration::from_millis(PEER_JSON_TIMEOUT_MS));
     }
@@ -1030,14 +1066,14 @@ async fn proxy_peer_stream_resource(peer_id: String, stream_id: String, endpoint
     response
 }
 
-async fn collect_peer_stream_inventory(peers: &[PeerInfo]) -> (Vec<PeerRemoteStreamSummary>, Vec<PeerResourceError>) {
+async fn collect_peer_stream_inventory(state: &AppState, peers: &[PeerInfo]) -> (Vec<PeerRemoteStreamSummary>, Vec<PeerResourceError>) {
     let mut streams = Vec::new();
     let mut errors = Vec::new();
     for peer in peers {
         if !matches!(peer.integration.kind, PeerIntegrationKind::Helios) {
             continue;
         }
-        match collect_peer_streams_for_peer(peer).await {
+        match collect_peer_streams_for_peer(state, peer).await {
             Ok(mut peer_streams) => streams.append(&mut peer_streams),
             Err(err) => errors.push(PeerResourceError { peer_id: peer.id.clone(), peer_alias: peer.alias.clone(), error: err }),
         }
@@ -1052,10 +1088,10 @@ async fn collect_peer_stream_inventory(peers: &[PeerInfo]) -> (Vec<PeerRemoteStr
     (streams, errors)
 }
 
-async fn collect_peer_streams_for_peer(peer: &PeerInfo) -> Result<Vec<PeerRemoteStreamSummary>, String> {
-    let remote_streams: Vec<StreamInfo> = fetch_peer_json(peer, "/streams", PEER_JSON_TIMEOUT_MS).await?;
-    let remote_sources: Vec<LocalizationPipelineSource> = fetch_peer_json(peer, "/localization/sources", PEER_JSON_TIMEOUT_MS).await.unwrap_or_default();
-    let remote_layout: Option<CameraLayoutResponse> = fetch_peer_json(peer, "/device/camera-layout", PEER_JSON_TIMEOUT_MS).await.ok();
+async fn collect_peer_streams_for_peer(state: &AppState, peer: &PeerInfo) -> Result<Vec<PeerRemoteStreamSummary>, String> {
+    let remote_streams: Vec<StreamInfo> = fetch_peer_json(state, peer, "/streams", PEER_JSON_TIMEOUT_MS).await?;
+    let remote_sources: Vec<LocalizationPipelineSource> = fetch_peer_json(state, peer, "/localization/sources", PEER_JSON_TIMEOUT_MS).await.unwrap_or_default();
+    let remote_layout: Option<CameraLayoutResponse> = fetch_peer_json(state, peer, "/device/camera-layout", PEER_JSON_TIMEOUT_MS).await.ok();
 
     let mut outputs_by_stream: HashMap<String, Vec<PeerStreamOutputSummary>> = HashMap::new();
     for source in remote_sources {
@@ -1150,9 +1186,19 @@ async fn collect_peer_streams_for_peer(peer: &PeerInfo) -> Result<Vec<PeerRemote
     Ok(summaries)
 }
 
-async fn fetch_peer_json<T: DeserializeOwned>(peer: &PeerInfo, path: &str, timeout_ms: u64) -> Result<T, String> {
+async fn fetch_peer_json<T: DeserializeOwned>(state: &AppState, peer: &PeerInfo, path: &str, timeout_ms: u64) -> Result<T, String> {
     let url = peer_v1_url(peer, path)?;
-    let resp = PEER_HTTP_CLIENT.get(url).header(ACCEPT, "application/json").timeout(std::time::Duration::from_millis(timeout_ms)).send().await.map_err(|err| format!("peer request failed: {err}"))?;
+    let resp = state
+        .services
+        .peers
+        .inner()
+        .http_client()
+        .get(url)
+        .header(ACCEPT, "application/json")
+        .timeout(std::time::Duration::from_millis(timeout_ms))
+        .send()
+        .await
+        .map_err(|err| format!("peer request failed: {err}"))?;
     if !resp.status().is_success() {
         return Err(format!("peer returned {}", resp.status()));
     }
@@ -1409,8 +1455,6 @@ pub struct PeerProbeResponse {
     pub nt4: Option<Nt4PeerProbe>,
 }
 
-static PROBE_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| reqwest::Client::builder().redirect(reqwest::redirect::Policy::limited(3)).user_agent("HeliOS/peers-probe").build().expect("reqwest client"));
-
 #[utoipa::path(
     post,
     path = "/peers/integrations/photonvision/streams",
@@ -1421,7 +1465,7 @@ static PROBE_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| reqwest::Client::build
         (status = 400, description = "Invalid payload", body = PeerError)
     )
 )]
-async fn photonvision_discover_streams(Json(req): Json<PhotonvisionDiscoverStreamsRequest>) -> impl IntoResponse {
+async fn photonvision_discover_streams(State(state): State<AppState>, Json(req): Json<PhotonvisionDiscoverStreamsRequest>) -> impl IntoResponse {
     let host = normalize_device_host(req.host.as_str()).ok_or_else(|| "host is required".to_string());
     let host = match host {
         Ok(value) => value,
@@ -1431,7 +1475,7 @@ async fn photonvision_discover_streams(Json(req): Json<PhotonvisionDiscoverStrea
     let max_streams = req.max_streams.unwrap_or(8).clamp(1, 32);
     let timeout_ms = req.timeout_ms.unwrap_or(900).clamp(100, 10_000);
 
-    let streams = discover_photonvision_streams(&host, base_port, max_streams, timeout_ms).await;
+    let streams = discover_photonvision_streams(state.services.peers.inner(), &host, base_port, max_streams, timeout_ms).await;
     (StatusCode::OK, Json(PhotonvisionDiscoverStreamsResponse { host, streams })).into_response()
 }
 
@@ -1445,7 +1489,8 @@ async fn photonvision_discover_streams(Json(req): Json<PhotonvisionDiscoverStrea
         (status = 400, description = "Invalid payload", body = PeerError)
     )
 )]
-async fn probe_peer(Json(req): Json<PeerProbeRequest>) -> impl IntoResponse {
+async fn probe_peer(State(state): State<AppState>, Json(req): Json<PeerProbeRequest>) -> impl IntoResponse {
+    let peers = state.services.peers.inner();
     let timeout_ms = req.timeout_ms.unwrap_or(1200).clamp(100, 15_000);
 
     let mut api = None;
@@ -1460,8 +1505,8 @@ async fn probe_peer(Json(req): Json<PeerProbeRequest>) -> impl IntoResponse {
         match url {
             Ok(base) => {
                 api = Some(match req.kind {
-                    PeerIntegrationKind::Helios => probe_helios_api(&base, timeout_ms).await,
-                    _ => probe_http_any(&base, timeout_ms).await,
+                    PeerIntegrationKind::Helios => probe_helios_api(peers, &base, timeout_ms).await,
+                    _ => probe_http_any(peers, &base, timeout_ms).await,
                 });
             }
             Err(err) => api = Some(ProbeResult { url: api_base_url.to_string(), ok: false, status: None, content_type: None, latency_ms: None, error: Some(err) }),
@@ -1469,17 +1514,17 @@ async fn probe_peer(Json(req): Json<PeerProbeRequest>) -> impl IntoResponse {
     } else if let Some(device_ip) = req.device_ip.as_deref().and_then(normalize_device_host) {
         let base = format!("http://{device_ip}:{}", default_api_port(&req.kind));
         api = Some(match req.kind {
-            PeerIntegrationKind::Helios => probe_helios_api(&base, timeout_ms).await,
-            _ => probe_http_any(&base, timeout_ms).await,
+            PeerIntegrationKind::Helios => probe_helios_api(peers, &base, timeout_ms).await,
+            _ => probe_http_any(peers, &base, timeout_ms).await,
         });
     }
 
     if let Some(management_url) = req.management_url.as_deref().filter(|value| !value.trim().is_empty()) {
-        management = Some(probe_http_any(management_url, timeout_ms).await);
+        management = Some(probe_http_any(peers, management_url, timeout_ms).await);
     } else if let Some(device_ip) = req.device_ip.as_deref().and_then(normalize_device_host) {
         let defaults = integration_defaults(&req.kind, device_ip.as_str());
         if let Some(url) = defaults.management_url {
-            management = Some(probe_http_any(&url, timeout_ms).await);
+            management = Some(probe_http_any(peers, &url, timeout_ms).await);
         }
     }
 
@@ -1510,7 +1555,7 @@ async fn probe_peer(Json(req): Json<PeerProbeRequest>) -> impl IntoResponse {
             .or_else(|| req.management_url.as_deref().and_then(|value| Url::parse(value).ok()).and_then(|url| url.host_str().map(|host| host.to_string())))
             .or_else(|| req.api_base_url.as_deref().and_then(|value| Url::parse(value).ok()).and_then(|url| url.host_str().map(|host| host.to_string())));
         if let Some(host) = host {
-            let discovered = discover_photonvision_streams(&host, 1181, 8, timeout_ms.min(2500)).await;
+            let discovered = discover_photonvision_streams(peers, &host, 1181, 8, timeout_ms.min(2500)).await;
             let discovered_urls = discovered.iter().map(|stream| stream.url.clone()).collect::<Vec<_>>();
             if !discovered_urls.is_empty() {
                 candidate_stream_urls = merge_urls(candidate_stream_urls, discovered_urls);
@@ -1531,10 +1576,10 @@ async fn probe_peer(Json(req): Json<PeerProbeRequest>) -> impl IntoResponse {
     }
 
     if let Some(first) = candidate_stream_urls.first() {
-        stream = Some(probe_mjpegish(first, timeout_ms).await);
+        stream = Some(probe_mjpegish(peers, first, timeout_ms).await);
     }
     for url in candidate_stream_urls.into_iter() {
-        streams.push(probe_mjpegish(&url, timeout_ms).await);
+        streams.push(probe_mjpegish(peers, &url, timeout_ms).await);
     }
 
     (StatusCode::OK, Json(PeerProbeResponse { kind: req.kind, api, management, stream, streams, photonvision, nt4 })).into_response()
@@ -1573,14 +1618,14 @@ fn merge_urls(mut seed: Vec<String>, additions: Vec<String>) -> Vec<String> {
     seed
 }
 
-async fn discover_photonvision_streams(host: &str, base_port: u16, max_streams: u16, timeout_ms: u64) -> Vec<DiscoveredStream> {
+async fn discover_photonvision_streams(peers: &PeersServiceState, host: &str, base_port: u16, max_streams: u16, timeout_ms: u64) -> Vec<DiscoveredStream> {
     let mut discovered = Vec::new();
     let paths = ["/stream.mjpg", "/?action=stream"];
     for idx in 0..max_streams {
         let port = base_port.saturating_add(idx);
         for path in paths {
             let url = format!("http://{host}:{port}{path}");
-            let result = probe_mjpegish(&url, timeout_ms).await;
+            let result = probe_mjpegish(peers, &url, timeout_ms).await;
             if result.ok {
                 discovered.push(DiscoveredStream { url: result.url, port, status: result.status.unwrap_or(200), content_type: result.content_type });
                 break;
@@ -1590,13 +1635,13 @@ async fn discover_photonvision_streams(host: &str, base_port: u16, max_streams: 
     discovered
 }
 
-async fn probe_http_any(url: &str, timeout_ms: u64) -> ProbeResult {
+async fn probe_http_any(peers: &PeersServiceState, url: &str, timeout_ms: u64) -> ProbeResult {
     let url = url.trim();
     if url.is_empty() {
         return ProbeResult { url: url.to_string(), ok: false, status: None, content_type: None, latency_ms: None, error: Some("url is required".into()) };
     }
     let start = std::time::Instant::now();
-    let request = PROBE_CLIENT.get(url).timeout(std::time::Duration::from_millis(timeout_ms));
+    let request = peers.probe_client().get(url).timeout(std::time::Duration::from_millis(timeout_ms));
     match request.send().await {
         Ok(resp) => {
             let status = resp.status().as_u16();
@@ -1607,13 +1652,13 @@ async fn probe_http_any(url: &str, timeout_ms: u64) -> ProbeResult {
     }
 }
 
-async fn probe_mjpegish(url: &str, timeout_ms: u64) -> ProbeResult {
+async fn probe_mjpegish(peers: &PeersServiceState, url: &str, timeout_ms: u64) -> ProbeResult {
     let url = url.trim();
     if url.is_empty() {
         return ProbeResult { url: url.to_string(), ok: false, status: None, content_type: None, latency_ms: None, error: Some("url is required".into()) };
     }
     let start = std::time::Instant::now();
-    let request = PROBE_CLIENT.get(url).timeout(std::time::Duration::from_millis(timeout_ms)).header(ACCEPT, "multipart/x-mixed-replace, image/jpeg, */*").header(RANGE, "bytes=0-1023");
+    let request = peers.probe_client().get(url).timeout(std::time::Duration::from_millis(timeout_ms)).header(ACCEPT, "multipart/x-mixed-replace, image/jpeg, */*").header(RANGE, "bytes=0-1023");
     match request.send().await {
         Ok(resp) => {
             let status = resp.status().as_u16();
@@ -1640,11 +1685,11 @@ async fn probe_mjpegish(url: &str, timeout_ms: u64) -> ProbeResult {
     }
 }
 
-async fn probe_helios_api(base: &str, timeout_ms: u64) -> ProbeResult {
+async fn probe_helios_api(peers: &PeersServiceState, base: &str, timeout_ms: u64) -> ProbeResult {
     let base = base.trim_end_matches('/');
     let candidate = if base.ends_with("/v1") { format!("{base}/device/hostname") } else { format!("{base}/v1/device/hostname") };
     let start = std::time::Instant::now();
-    let request = PROBE_CLIENT.get(&candidate).timeout(std::time::Duration::from_millis(timeout_ms)).header(ACCEPT, "application/json, */*;q=0.1");
+    let request = peers.probe_client().get(&candidate).timeout(std::time::Duration::from_millis(timeout_ms)).header(ACCEPT, "application/json, */*;q=0.1");
     match request.send().await {
         Ok(resp) => {
             let status = resp.status().as_u16();

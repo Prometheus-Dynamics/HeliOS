@@ -114,7 +114,6 @@
   const alertButtonLabel = $derived.by(() => (alertCount > 0 ? `Alerts (${alertCount})` : 'Alerts'));
 
   onMount(() => {
-    void syncBackendErrors();
     const id = setInterval(() => {
       if (open) {
         void syncBackendErrors();

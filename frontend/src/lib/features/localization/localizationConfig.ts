@@ -1,4 +1,7 @@
 import { apiUrl } from '$lib/api/httpClient';
+import { createDomainResource } from '$lib/api/domainResources';
+import { apiFetch, apiFetchCachedJson } from '$lib/api/core/http';
+import { cacheResourceData, type ResourceCacheContext, type ResourceCacheResult } from '$lib/api/resourceCache';
 
 export type LocalizationPoseSpace =
   | 'tag_in_camera'
@@ -234,128 +237,71 @@ export type LocalizationPose = {
   };
 };
 
-type ValidationEntry = {
-  path?: string | null;
-  code?: string | null;
-  message?: string | null;
-};
-
-type ApiErrorBody = {
-  code?: string | null;
-  error?: string | null;
-  message?: string | null;
-  details?: string | null;
-  issues?: ValidationEntry[] | null;
-  warnings?: ValidationEntry[] | null;
-};
-
-function summarizeValidation(entries: ValidationEntry[] | null | undefined): string | null {
-  if (!Array.isArray(entries) || entries.length === 0) return null;
-  const parts = entries
-    .map((entry) => {
-      const message = String(entry?.message ?? '').trim();
-      if (!message) return null;
-      const path = String(entry?.path ?? '').trim();
-      return path ? `${path}: ${message}` : message;
-    })
-    .filter((entry): entry is string => Boolean(entry));
-  if (!parts.length) return null;
-  const first = parts.slice(0, 3).join('; ');
-  const remaining = parts.length - 3;
-  return remaining > 0 ? `${first}; +${remaining} more` : first;
-}
-
-async function readErrorMessage(response: Response): Promise<string> {
-  const statusLabel = `Request failed (${response.status})`;
-  try {
-    const body = (await response.json()) as ApiErrorBody | string;
-    if (typeof body === 'string') {
-      const message = body.trim();
-      return message || statusLabel;
-    }
-    if (body && typeof body === 'object') {
-      const primary =
-        String(body.error ?? '').trim() ||
-        String(body.message ?? '').trim() ||
-        String(body.details ?? '').trim();
-      const issues = summarizeValidation(body.issues);
-      if (primary && issues) return `${primary} ${issues}`;
-      if (issues) return issues;
-      if (primary) return primary;
-    }
-  } catch {
-    const text = await response.text().catch(() => '');
-    const trimmed = text.trim();
-    if (trimmed) return trimmed;
-  }
-  return statusLabel;
-}
-
-export async function fetchLocalizationConfig(): Promise<LocalizationConfig> {
-  const response = await fetch(apiUrl('/localization/config'), {
+export async function fetchLocalizationConfig(): Promise<LocalizationConfig>;
+export async function fetchLocalizationConfig(
+  context: ResourceCacheContext<LocalizationConfig>
+): Promise<LocalizationConfig | ResourceCacheResult<LocalizationConfig>>;
+export async function fetchLocalizationConfig(
+  context?: ResourceCacheContext<LocalizationConfig>
+): Promise<LocalizationConfig | ResourceCacheResult<LocalizationConfig>> {
+  const payload = await apiFetchCachedJson<LocalizationConfig>(apiUrl('/localization/config'), context ?? {}, {
     method: 'GET',
     headers: { Accept: 'application/json' }
   });
-
-  if (!response.ok) {
-    throw new Error(await readErrorMessage(response));
+  if (typeof context === 'undefined') {
+    if (payload.status === 'not_modified') {
+      if (typeof payload.data !== 'undefined') {
+        return payload.data;
+      }
+      throw new Error('Localization config was not modified but no cached payload was available.');
+    }
+    return payload.data;
   }
-
-  return (await response.json()) as LocalizationConfig;
+  if (payload.status === 'not_modified') {
+    return payload;
+  }
+  return cacheResourceData(payload.data, {
+    etag: payload.etag ?? null,
+    revision: payload.revision ?? null
+  });
 }
 
+export const localizationConfigResource = createDomainResource({
+  key: 'localization:config:v1',
+  loader: fetchLocalizationConfig,
+  staleMs: 30_000,
+  maxAgeMs: 180_000,
+  kinds: ['localization.config', 'localization.profiles', 'localization.sources', 'streams.lifecycle', 'streams.pipeline', 'device.hardware']
+});
+
 export async function updateLocalizationConfig(config: LocalizationConfig): Promise<LocalizationConfig> {
-  const response = await fetch(apiUrl('/localization/config'), {
+  return apiFetch<LocalizationConfig>(apiUrl('/localization/config'), {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify(config)
+    headers: { Accept: 'application/json' },
+    body: config
   });
-
-  if (!response.ok) {
-    throw new Error(await readErrorMessage(response));
-  }
-
-  return (await response.json()) as LocalizationConfig;
 }
 
 export async function fetchLocalizationProfilesExport(): Promise<LocalizationProfilesExportEnvelope> {
-  const response = await fetch(apiUrl('/localization/profiles/export'), {
+  return apiFetch<LocalizationProfilesExportEnvelope>(apiUrl('/localization/profiles/export'), {
     method: 'GET',
     headers: { Accept: 'application/json' }
   });
-
-  if (!response.ok) {
-    throw new Error(await readErrorMessage(response));
-  }
-
-  return (await response.json()) as LocalizationProfilesExportEnvelope;
 }
 
 export async function importLocalizationProfiles(
   payload: LocalizationProfilesExportEnvelope | LocalizationConfig
 ): Promise<LocalizationConfig> {
-  const response = await fetch(apiUrl('/localization/profiles/import'), {
+  return apiFetch<LocalizationConfig>(apiUrl('/localization/profiles/import'), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify(payload)
+    headers: { Accept: 'application/json' },
+    body: payload
   });
-
-  if (!response.ok) {
-    throw new Error(await readErrorMessage(response));
-  }
-
-  return (await response.json()) as LocalizationConfig;
 }
 
 export async function fetchLocalizationSolve(profileId?: string, signal?: AbortSignal): Promise<LocalizationSolveResponse> {
   const url = profileId
     ? apiUrl(`/localization/solve?profile_id=${encodeURIComponent(profileId)}&apply_field_origin=false`)
     : apiUrl('/localization/solve?apply_field_origin=false');
-  const response = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' }, signal });
-
-  if (!response.ok) {
-    throw new Error(await readErrorMessage(response));
-  }
-
-  return (await response.json()) as LocalizationSolveResponse;
+  return apiFetch<LocalizationSolveResponse>(url, { method: 'GET', headers: { Accept: 'application/json' }, signal });
 }

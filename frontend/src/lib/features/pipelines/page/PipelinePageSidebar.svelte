@@ -11,7 +11,7 @@
   };
 
   type PipelinePageSidebarCtx = {
-    PipelineListPanel: (typeof import('./PipelineListPanel.svelte'))['default'];
+    PipelineListPanel: (typeof import('./PipelineListPanel.svelte'))['default'] | null;
     ideBindings: { customNodeSearch: string };
     pipelinesRefreshing: boolean;
     isInitialLoading: boolean;
@@ -46,17 +46,24 @@
   };
 </script>
 
-<PipelineListPanel
-  bind:customNodeSearch={ideBindings.customNodeSearch}
-  {pipelinesRefreshing}
-  {isInitialLoading}
-  pipelineListItems={$pipelineListItems}
-  pipelineMap={$pipelineMap}
-  selectedPipelineId={$selectedPipelineId}
-  {pipelineSearch}
-  onOpenCreateModal={openCreateModal}
-  onSelectPipeline={setSelectedPipeline}
-  onOpenPipelineIcon={openPipelineIconModal}
-  onOpenDeleteModal={handleOpenDeleteModal}
-  onPipelineCardKeydown={handlePipelineCardKeydown}
-/>
+{#if PipelineListPanel}
+  {@const ListPanel = PipelineListPanel}
+  <ListPanel
+    bind:customNodeSearch={ideBindings.customNodeSearch}
+    {pipelinesRefreshing}
+    {isInitialLoading}
+    pipelineListItems={$pipelineListItems}
+    pipelineMap={$pipelineMap}
+    selectedPipelineId={$selectedPipelineId}
+    {pipelineSearch}
+    onOpenCreateModal={openCreateModal}
+    onSelectPipeline={setSelectedPipeline}
+    onOpenPipelineIcon={openPipelineIconModal}
+    onOpenDeleteModal={handleOpenDeleteModal}
+    onPipelineCardKeydown={handlePipelineCardKeydown}
+  />
+{:else}
+  <aside class="flex min-h-0 min-w-0 flex-col rounded border border-surface-800/60 bg-surface-950/60 p-4 text-xs uppercase tracking-[0.24em] text-surface-400 xl:w-[22rem]">
+    Loading pipelines…
+  </aside>
+{/if}

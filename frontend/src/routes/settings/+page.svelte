@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { onDestroy, onMount } from 'svelte';
+  import { onMount } from 'svelte';
   import { Tabs } from '@skeletonlabs/skeleton-svelte';
   import type { IconDefinition } from '@fortawesome/free-solid-svg-icons';
   import { faBolt, faCamera, faCloudArrowDown, faImages, faNetworkWired, faPuzzlePiece, faMicrochip } from '@fortawesome/free-solid-svg-icons';
-  import { connectRealtimeUpdatesStream, type RealtimeUpdateEvent } from '$lib/api/realtimeUpdates';
+  import { subscribeDomainInvalidations } from '$lib/api/invalidation';
+  import { realtimeUpdateMatchesKind, type RealtimeUpdateEvent } from '$lib/api/realtimeUpdates';
   import ApiEndpointPanel from './components/ApiEndpointPanel.svelte';
   import CameraLayoutPanel from './components/CameraLayoutPanel.svelte';
   import NetworkingWorkspacePanel from './components/NetworkingWorkspacePanel.svelte';
@@ -13,11 +14,12 @@
   import PluginsPanel from './components/PluginsPanel.svelte';
   import UsbPowerPanel from './components/UsbPowerPanel.svelte';
   import BootloaderPanel from './components/BootloaderPanel.svelte';
-  import { apiFetch, extractError } from './api';
+  import { extractError } from './api';
+  import { bootloaderStatusResource } from '$lib/api/deviceStatusResources';
   import { deviceSettingsStore, type DeviceSettingsState } from './deviceSettingsStore';
   import { rigLayoutStore, type RigLayoutState } from '$lib/stores/rigLayout';
   import FaIcon from '$lib/components/icons/FaIcon.svelte';
-  import { Panel } from '$lib';
+  import Panel from '$lib/components/Panel.svelte';
   import type { BootloaderStatus } from './types';
 
   type WorkspaceTabId = 'network' | 'rig' | 'snapshots' | 'updater' | 'plugins' | 'usb-power' | 'firmware';
@@ -57,12 +59,6 @@
   let bootloaderStatus = $state<BootloaderStatus | null>(null);
   let bootloaderError = $state<string | null>(null);
   let bootloaderLoading = $state(false);
-  let liveUpdatesCleanup: (() => void) | null = null;
-  let liveUpdatesReconnectHandle: number | null = null;
-  let liveUpdatesRefreshHandle: number | null = null;
-  let liveUpdatesNonce = 0;
-
-  const LIVE_UPDATES_RECONNECT_MS = 1_500;
   const LIVE_UPDATES_REFRESH_DEBOUNCE_MS = 400;
 
   const deviceState = $derived($deviceSettingsStore as DeviceSettingsState);
@@ -76,6 +72,10 @@
   );
 
   onMount(() => {
+    const cachedBootloader = bootloaderStatusResource.read();
+    if (cachedBootloader?.data) {
+      bootloaderStatus = cachedBootloader.data;
+    }
     void deviceSettingsStore.load().catch(() => {
       // handled by child panels
     });
@@ -83,11 +83,15 @@
       // viewer panels show fallbacks
     });
     void refreshBootloaderStatus();
-    connectLiveUpdates();
-  });
-
-  onDestroy(() => {
-    disconnectLiveUpdates();
+    return subscribeDomainInvalidations(
+      ['device', 'settings', 'imu', 'media'],
+      (event) => {
+        if (document.hidden) return;
+        if (!shouldApplyLiveUpdate(event)) return;
+        refreshSettingsFromLiveUpdate();
+      },
+      { debounceMs: LIVE_UPDATES_REFRESH_DEBOUNCE_MS }
+    );
   });
 
   function shouldApplyLiveUpdate(event: RealtimeUpdateEvent): boolean {
@@ -100,10 +104,15 @@
     ) {
       return true;
     }
-    if (event.kind === 'api') {
+    if (realtimeUpdateMatchesKind(event, 'api')) {
       return false;
     }
-    return event.kind === 'device' || event.kind === 'settings' || event.kind === 'imu' || event.kind === 'media';
+    return (
+      realtimeUpdateMatchesKind(event, 'device') ||
+      realtimeUpdateMatchesKind(event, 'settings') ||
+      realtimeUpdateMatchesKind(event, 'imu') ||
+      realtimeUpdateMatchesKind(event, 'media')
+    );
   }
 
   function refreshSettingsFromLiveUpdate(): void {
@@ -114,63 +123,6 @@
       // best-effort
     });
     void refreshBootloaderStatus();
-  }
-
-  function scheduleLiveUpdatesRefresh(): void {
-    if (liveUpdatesRefreshHandle != null) return;
-    liveUpdatesRefreshHandle = window.setTimeout(() => {
-      liveUpdatesRefreshHandle = null;
-      if (document.hidden) return;
-      refreshSettingsFromLiveUpdate();
-    }, LIVE_UPDATES_REFRESH_DEBOUNCE_MS);
-  }
-
-  function scheduleLiveUpdatesReconnect(): void {
-    if (liveUpdatesReconnectHandle != null) return;
-    liveUpdatesReconnectHandle = window.setTimeout(() => {
-      liveUpdatesReconnectHandle = null;
-      connectLiveUpdates();
-    }, LIVE_UPDATES_RECONNECT_MS);
-  }
-
-  function disconnectLiveUpdates(): void {
-    liveUpdatesNonce += 1;
-    if (liveUpdatesReconnectHandle != null) {
-      clearTimeout(liveUpdatesReconnectHandle);
-      liveUpdatesReconnectHandle = null;
-    }
-    if (liveUpdatesRefreshHandle != null) {
-      clearTimeout(liveUpdatesRefreshHandle);
-      liveUpdatesRefreshHandle = null;
-    }
-    liveUpdatesCleanup?.();
-    liveUpdatesCleanup = null;
-  }
-
-  function connectLiveUpdates(): void {
-    const nonce = (liveUpdatesNonce += 1);
-    if (liveUpdatesReconnectHandle != null) {
-      clearTimeout(liveUpdatesReconnectHandle);
-      liveUpdatesReconnectHandle = null;
-    }
-    liveUpdatesCleanup?.();
-    liveUpdatesCleanup = null;
-    liveUpdatesCleanup = connectRealtimeUpdatesStream({
-      onChange: (event) => {
-        if (nonce !== liveUpdatesNonce) return;
-        if (!shouldApplyLiveUpdate(event)) return;
-        window.dispatchEvent(new CustomEvent('helios:settings-realtime-update', { detail: event }));
-        scheduleLiveUpdatesRefresh();
-      },
-      onClose: () => {
-        if (nonce !== liveUpdatesNonce) return;
-        scheduleLiveUpdatesReconnect();
-      },
-      onError: () => {
-        if (nonce !== liveUpdatesNonce) return;
-        scheduleLiveUpdatesReconnect();
-      }
-    });
   }
 
   function getWorkspaceComponent(tab: WorkspaceTabId) {
@@ -203,7 +155,7 @@
     bootloaderLoading = true;
     bootloaderError = null;
     try {
-      bootloaderStatus = await apiFetch<BootloaderStatus>('/device/bootloader');
+      bootloaderStatus = await bootloaderStatusResource.refresh();
     } catch (err) {
       bootloaderError = extractError(err);
     } finally {

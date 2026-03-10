@@ -1,6 +1,7 @@
 import { writable, type Readable } from 'svelte/store';
 import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
 import { apiUrl } from '$lib/api/httpClient';
+import { apiFetchResponse } from '$lib/api/core/http';
 import type { PeripheralEntry } from '$lib/types/devices';
 import type { FirmwareUpdatePayload } from '$lib/api/deviceSensorsStream';
 
@@ -366,7 +367,7 @@ export function createFirmwareController(): FirmwareController {
 
     try {
       const url = apiUrl('/peripherals/sensors/firmware');
-      const response = await fetch(url, {
+      const response = await apiFetchResponse(url, {
         method: 'POST',
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
         body: JSON.stringify({ device_id: deviceId, firmware })

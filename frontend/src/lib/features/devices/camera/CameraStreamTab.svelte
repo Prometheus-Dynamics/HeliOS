@@ -6,6 +6,7 @@
   import { MEDIA_KIND_OPTIONS, mediaKindLabel } from '$lib/features/media/mediaKind';
   import { OpenAPI } from '$lib/ts-bindings/http/client';
   import { reportError } from '$lib/ui/errorPolicy';
+  import { apiFetchResponse } from '$lib/api/core/http';
   import { cancelDebounce, scheduleDebounce, type DebounceHandle } from '$lib/utils/debounce';
   import { toaster } from '$lib';
   import RangeBandSlider from '$lib/components/controls/RangeBandSlider.svelte';
@@ -723,7 +724,7 @@
         controls: []
       };
 
-      const resp = await fetch(apiPath('/streams/bench/formats'), {
+      const resp = await apiFetchResponse(apiPath('/streams/bench/formats'), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload)

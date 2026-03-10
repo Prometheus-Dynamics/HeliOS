@@ -18,7 +18,6 @@ use axum::{
 use helios_peripherals::dto::SensorScope;
 use helios_peripherals::ipc::{FirmwareUpdate, SensorCommand, SensorEvent};
 use lib_ipc::types::CommandId;
-use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, broadcast};
 use tokio::task::JoinHandle;
@@ -28,29 +27,29 @@ use uuid::Uuid;
 const HUB_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const HUB_RETRY_DELAY: Duration = Duration::from_millis(500);
 
-static SENSOR_EVENTS_HUB: Lazy<SensorEventsHub> = Lazy::new(SensorEventsHub::new);
-
-struct SensorEventsHub {
+pub(crate) struct SensorEventsState {
     tx: broadcast::Sender<Arc<SharedSensorEvent>>,
     latest: Arc<StdMutex<SharedSensorLatest>>,
     task: Mutex<Option<JoinHandle<()>>>,
     state: StdMutex<Option<Weak<IpcHandles>>>,
 }
 
-impl SensorEventsHub {
-    fn new() -> Self {
+impl Default for SensorEventsState {
+    fn default() -> Self {
         let (tx, _) = broadcast::channel(128);
         Self { tx, latest: Arc::new(StdMutex::new(SharedSensorLatest::default())), task: Mutex::new(None), state: StdMutex::new(None) }
     }
+}
 
-    fn set_state(&self, state: &AppState) {
+impl SensorEventsState {
+    pub(crate) fn bind_state(&self, state: &AppState) {
         let mut guard = self.state.lock().unwrap();
         if guard.as_ref().and_then(|weak| weak.upgrade()).is_none() {
-            *guard = Some(Arc::downgrade(state));
+            *guard = Some(Arc::downgrade(state.ipc()));
         }
     }
 
-    async fn subscribe(&self) -> (broadcast::Receiver<Arc<SharedSensorEvent>>, SharedSensorLatest) {
+    pub(crate) async fn subscribe(&self) -> (broadcast::Receiver<Arc<SharedSensorEvent>>, SharedSensorLatest) {
         self.ensure_task().await;
         let latest = self.latest.lock().ok().map(|guard| guard.clone()).unwrap_or_default();
         (self.tx.subscribe(), latest)
@@ -159,16 +158,8 @@ struct WsErrorContext {
     trace_id: String,
 }
 
-pub(crate) fn register_sensor_events_state(state: &AppState) {
-    SENSOR_EVENTS_HUB.set_state(state);
-}
-
-pub(crate) async fn subscribe_sensor_events() -> (broadcast::Receiver<Arc<SharedSensorEvent>>, SharedSensorLatest) {
-    SENSOR_EVENTS_HUB.subscribe().await
-}
-
 pub async fn sensors_upgrade(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
-    register_sensor_events_state(&state);
+    state.services.hardware.bind_sensor_events_state(&state);
     ws.on_upgrade(move |socket| async move {
         let span = warn_span!("sensors_ws");
         let _guard = span.enter();
@@ -179,10 +170,10 @@ pub async fn sensors_upgrade(ws: WebSocketUpgrade, State(state): State<AppState>
 }
 
 async fn sensors_loop(mut socket: WebSocket, state: AppState) -> Result<(), String> {
-    register_sensor_events_state(&state);
+    state.services.hardware.bind_sensor_events_state(&state);
 
     let error_context = WsErrorContext { request_id: Uuid::new_v4().to_string(), trace_id: Uuid::new_v4().to_string() };
-    let (mut updates, mut latest) = subscribe_sensor_events().await;
+    let (mut updates, mut latest) = state.services.hardware.subscribe_sensor_events().await;
     if let Some(reason) = latest.error.as_ref() {
         send_ws_error(&mut socket, &error_context, reason.as_ref(), "connect").await;
         return Ok(());

@@ -6,10 +6,7 @@ use axum::{
 use helios_engine::capture::{CaptureControlInfo, CaptureControlValue, ControlAssignment};
 use helios_engine::ipc::StreamManifest;
 use helios_engine::ipc::{EngineErrorCode, EngineEvent};
-use once_cell::sync::Lazy;
-use std::collections::HashMap;
-use std::sync::RwLock;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::time::timeout;
 use uuid::Uuid;
 
@@ -21,34 +18,7 @@ use super::util::{engine_error_body, map_client_error, update_persisted_manifest
 use crate::http::streams_persist;
 
 const NOISE_REDUCTION_MODE: u32 = 10002;
-const CONTROL_CACHE_TTL: Duration = Duration::from_secs(30);
 const CONTROL_APPLY_TIMEOUT: Duration = Duration::from_secs(3);
-
-#[derive(Clone)]
-struct ControlCacheEntry {
-    fetched_at: Instant,
-    controls: Vec<CaptureControlInfo>,
-}
-
-static CONTROL_CACHE: Lazy<RwLock<HashMap<Uuid, ControlCacheEntry>>> = Lazy::new(|| RwLock::new(HashMap::new()));
-
-fn cache_controls(stream_id: Uuid, controls: &[CaptureControlInfo]) {
-    let Ok(mut guard) = CONTROL_CACHE.write() else {
-        return;
-    };
-    guard.insert(stream_id, ControlCacheEntry { fetched_at: Instant::now(), controls: controls.to_vec() });
-}
-
-fn cached_controls(stream_id: Uuid) -> Option<Vec<CaptureControlInfo>> {
-    let Ok(guard) = CONTROL_CACHE.read() else {
-        return None;
-    };
-    let entry = guard.get(&stream_id)?;
-    if entry.fetched_at.elapsed() > CONTROL_CACHE_TTL {
-        return None;
-    }
-    Some(entry.controls.clone())
-}
 
 fn numeric_bounds(value: &CaptureControlValue) -> Option<(f64, f64)> {
     match value {
@@ -157,7 +127,7 @@ pub(crate) async fn get_controls(state: AppState, id: Uuid) -> Response {
     }
     match result {
         Ok(EngineEvent::Controls { controls, .. }) => {
-            cache_controls(id, &controls);
+            state.services.streams.cache_controls(id, &controls);
             Json::<Vec<CaptureControlInfo>>(controls).into_response()
         }
         Ok(EngineEvent::Nack { code, reason, .. }) => (StatusCode::BAD_REQUEST, Json(engine_error_body(Some(code), reason))).into_response(),
@@ -180,11 +150,11 @@ async fn apply_engine_control(state: &AppState, stream_id: Uuid, control_id: u32
 pub(crate) async fn set_control(state: AppState, id: Uuid, control_id: u32, value: CaptureControlValue) -> Response {
     // Validate against live control metadata to prevent invalid/out-of-range values from
     // crashing libcamera (or the stack) when clients send raw numbers.
-    let mut controls = cached_controls(id);
+    let mut controls = state.services.streams.cached_controls(id);
     if controls.is_none()
         && let Ok(EngineEvent::Controls { controls: fetched, .. }) = state.engine.get_controls(id).await
     {
-        cache_controls(id, &fetched);
+        state.services.streams.cache_controls(id, &fetched);
         controls = Some(fetched);
     }
     if let Some(ref controls) = controls
@@ -194,7 +164,7 @@ pub(crate) async fn set_control(state: AppState, id: Uuid, control_id: u32, valu
         return (StatusCode::BAD_REQUEST, Json(engine_error_body(Some(EngineErrorCode::InvalidInput), msg))).into_response();
     }
 
-    let stream_manifest = state.engine.list_streams().await.ok().and_then(|streams| streams.into_iter().find(|stream| stream.stream_id == id).map(|stream| stream.manifest));
+    let stream_manifest = state.services.streams.load_live_stream_manifest(&state, id).await;
     let is_file_backend = stream_manifest.as_ref().is_some_and(|manifest| manifest.capture.backend == styx::BackendKind::File);
     let adjusted_pair = match (&controls, &stream_manifest) {
         (Some(controls), Some(manifest)) => replay_frame_range_adjustment(controls, manifest, control_id, &value),
@@ -273,7 +243,7 @@ pub(crate) async fn set_control(state: AppState, id: Uuid, control_id: u32, valu
 
     // File-backend controls are sanitized/applied in-engine as one coherent set. Persist exactly
     // what the engine now holds to avoid writing stale or transiently-invalid frame ranges.
-    if is_file_backend && let Some(manifest) = state.engine.list_streams().await.ok().and_then(|streams| streams.into_iter().find(|stream| stream.stream_id == id).map(|stream| stream.manifest)) {
+    if is_file_backend && let Some(manifest) = state.services.streams.load_live_stream_manifest(&state, id).await {
         if let Err(err) = streams_persist::persist_manifest_checked(&camera_id_for_manifest(&manifest), Some(id), manifest).await {
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("control applied live but failed to persist: {err}")))).into_response();
         }

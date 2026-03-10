@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { PipelineGraphEditor } from '$lib';
+  import { onDestroy, onMount } from 'svelte';
   import type { PipelineDetailContext } from '$lib/components/pipelines/types';
   import type { PipelineDiagnosticWarning, PipelineGraphPlan, PipelineNodeLayout, PipelineNodeSyncConfig, PipelineRegistryEntry } from '$lib/types/pipeline';
   import type { PipelineGraphHeatmap } from '$lib/components/flow/pipeline-graph/types';
@@ -8,6 +8,7 @@
   import PipelineStreams from '$lib/components/pipelines/detail/PipelineStreams.svelte';
   import SyncPolicyOverlay from '$lib/features/pipelines/workbench/SyncPolicyOverlay.svelte';
   import DaedalusEngineConfigPanel from '$lib/features/pipelines/workbench/DaedalusEngineConfigPanel.svelte';
+  import { scheduleWhenIdle } from '$lib/utils/browserSchedule';
 
   type Breadcrumb = {
     id: string;
@@ -17,6 +18,7 @@
   };
 
   type HeatmapStreamOption = { id: string; label: string; hasMetrics: boolean };
+  type PipelineGraphEditorComponent = (typeof import('$lib/components/flow/PipelineGraphEditor.svelte'))['default'];
 
   type HeatmapViewMode = { id: string; label: string; description: string };
 
@@ -139,6 +141,22 @@
     onSetSyncConfig,
     onSetDaedalusNodeRuntime
   }: Props = $props();
+
+  let PipelineGraphEditorComponent = $state<PipelineGraphEditorComponent | null>(null);
+  let cancelEditorBootstrap: (() => void) | null = null;
+
+  onMount(() => {
+    cancelEditorBootstrap = scheduleWhenIdle(() => {
+      void import('$lib/components/flow/PipelineGraphEditor.svelte').then((module) => {
+        PipelineGraphEditorComponent = module.default;
+      });
+    }, { timeoutMs: 900, fallbackMs: 120 });
+  });
+
+  onDestroy(() => {
+    cancelEditorBootstrap?.();
+    cancelEditorBootstrap = null;
+  });
 </script>
 
 <div class="flex flex-1 min-h-0 min-w-0 flex-col gap-4 xl:flex-row">
@@ -239,7 +257,9 @@
         </div>
       {/if}
       {#key context.pipeline?.id ?? 'graph'}
-        <PipelineGraphEditor
+        {#if PipelineGraphEditorComponent}
+          {@const GraphEditor = PipelineGraphEditorComponent}
+        <GraphEditor
           bind:this={graphEditor}
           plan={graphPlan}
           interactive={true}
@@ -279,6 +299,11 @@
           on:layout={(event) => onGraphLayout(event.detail.nodes)}
           on:runtime={(event) => onRuntime(event.detail)}
         />
+        {:else}
+          <div class="flex h-full min-h-[28rem] items-center justify-center rounded border border-surface-800/60 bg-surface-950/40 text-sm text-surface-400">
+            Loading graph canvas…
+          </div>
+        {/if}
       {/key}
     </div>
     {#if heatmapEnabled}

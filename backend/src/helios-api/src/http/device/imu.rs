@@ -1,5 +1,5 @@
 use crate::http::error_history::{ErrorHistoryEntry, record_error_entry};
-use crate::ws::sensors::{SharedSensorEvent, register_sensor_events_state, subscribe_sensor_events};
+use crate::ws::sensors::SharedSensorEvent;
 use axum::{
     Json,
     extract::{
@@ -138,10 +138,10 @@ pub async fn update_imu(State(state): State<AppState>, Json(payload): Json<ImuUp
 }
 
 pub async fn handle_imu_ws(mut socket: WebSocket, state: AppState) -> Result<(), String> {
-    register_sensor_events_state(&state);
+    state.services.hardware.bind_sensor_events_state(&state);
 
     let error_context = WsErrorContext { request_id: Uuid::new_v4().to_string(), trace_id: Uuid::new_v4().to_string() };
-    let (mut updates, latest): (tokio::sync::broadcast::Receiver<Arc<SharedSensorEvent>>, _) = subscribe_sensor_events().await;
+    let (mut updates, latest): (tokio::sync::broadcast::Receiver<Arc<SharedSensorEvent>>, _) = state.services.hardware.subscribe_sensor_events().await;
     if let Some(reason) = latest.error.as_ref() {
         let reason: &str = reason.as_ref();
         send_ws_error(&mut socket, &error_context, reason, "connect").await;

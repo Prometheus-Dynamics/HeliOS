@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { apiFetch, apiFetchResponse } from '$lib/api/core/http';
   import { readStorage, removeStorage, writeStorage } from '$lib/utils/storage';
   import type { Mode, ProbedBackend, ProbedDevice } from '$lib/ts-bindings/http/client';
   import { toaster } from '$lib';
@@ -152,12 +153,7 @@
     listLoading = true;
     listError = null;
     try {
-      const resp = await fetch(apiPath('/streams/bench/sensor'));
-      if (!resp.ok) {
-        const text = await resp.text().catch(() => '');
-        throw new Error(text || `Failed (${resp.status})`);
-      }
-      const json = (await resp.json()) as unknown;
+      const json = (await apiFetch<unknown>(apiPath('/streams/bench/sensor'))) as unknown;
       const payload = asRecord<BenchmarksResponse>(json);
       benchmarks = Array.isArray(payload?.benchmarks) ? payload.benchmarks.filter(isBenchmarkListItem) : [];
       if (benchmarks.length) {
@@ -176,7 +172,7 @@
   }
 
   async function fetchStatus(id: string): Promise<SensorBenchmarkStatus> {
-    const resp = await fetch(apiPath(`/streams/bench/sensor/${encodeURIComponent(id)}`));
+    const resp = await apiFetchResponse(apiPath(`/streams/bench/sensor/${encodeURIComponent(id)}`));
     if (!resp.ok) {
       const text = await resp.text().catch(() => '');
       throw new Error(text || `Fetch failed (${resp.status})`);
@@ -205,7 +201,7 @@
   async function cancelBenchmark(): Promise<void> {
     if (!runningId) return;
     try {
-      const resp = await fetch(apiPath(`/streams/bench/sensor/${encodeURIComponent(runningId)}/cancel`), { method: 'POST' });
+      const resp = await apiFetchResponse(apiPath(`/streams/bench/sensor/${encodeURIComponent(runningId)}/cancel`), { method: 'POST' });
       if (!resp.ok) {
         const text = await resp.text().catch(() => '');
         throw new Error(text || `Cancel failed (${resp.status})`);
@@ -246,7 +242,7 @@
         controls: []
       };
 
-      const resp = await fetch(apiPath('/streams/bench/sensor'), {
+      const resp = await apiFetchResponse(apiPath('/streams/bench/sensor'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -344,7 +340,7 @@
     if (!backend || !device) return;
     void (async () => {
       try {
-        const resp = await fetch(apiPath('/streams/codecs'));
+        const resp = await apiFetchResponse(apiPath('/streams/codecs'));
         if (!resp.ok) return;
         const json = (await resp.json()) as unknown;
         codecInventory = Array.isArray(json) ? (json as CodecInfo[]) : [];

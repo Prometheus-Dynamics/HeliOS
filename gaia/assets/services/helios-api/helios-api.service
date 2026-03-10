@@ -26,7 +26,7 @@ Environment=LOG_FOLDER=/var/log/helios
 Environment=METRICS_BIND_ADDR=0.0.0.0:5803
 Environment=LD_LIBRARY_PATH=/usr/lib/edgetpu:/usr/lib
 Environment=RUST_LOG=info
-Environment=HELIOS_DAEDALUS_PLUGIN_DIRS=/usr/lib/helios/plugins/daedalus:/var/lib/helios/plugins/daedalus
+Environment=HELIOS_DAEDALUS_PLUGIN_DIRS=/var/lib/helios/plugins/daedalus:/usr/lib/helios/plugins/daedalus
 Environment=HELIOS_API_BIND=0.0.0.0:5801
 Environment=HELIOS_API_DATA_DIR=/var/lib/helios/api-data
 EnvironmentFile=-/etc/default/helios-api

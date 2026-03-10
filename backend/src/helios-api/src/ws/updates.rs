@@ -107,12 +107,17 @@ fn realtime_updates_schema() -> serde_json::Value {
                     "type": { "type": "string", "enum": ["change"] },
                     "event": {
                         "type": "object",
-                        "required": ["seq", "timestamp_ms", "origin", "kind", "path"],
+                        "required": ["seq", "timestamp_ms", "origin", "domain", "kind", "operation", "entity", "revision", "path"],
                         "properties": {
                             "seq": { "type": "integer", "minimum": 1 },
                             "timestamp_ms": { "type": "integer", "minimum": 0 },
                             "origin": { "type": "string", "enum": ["http", "ws"] },
+                            "domain": { "type": "string", "enum": ["api", "device", "localization", "media", "pipelines", "settings", "streams"] },
                             "kind": { "type": "string" },
+                            "operation": { "type": "string", "enum": ["create", "update", "delete"] },
+                            "entity": { "type": "string" },
+                            "revision": { "type": "integer", "minimum": 1 },
+                            "resource_id": { "type": "string" },
                             "path": { "type": "string" },
                             "method": { "type": "string" },
                             "request_id": { "type": "string" }

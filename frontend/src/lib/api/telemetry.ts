@@ -1,7 +1,7 @@
 import { browser } from "$app/environment";
 import { readable, type Readable } from "svelte/store";
 import { getHttpClientBase } from "./httpClient";
-import { buildWsUrl } from "$lib/api/wsClient";
+import { buildWsUrl, connectWebSocketWithFallback, type ManagedWebSocket } from "$lib/api/core/ws";
 import { connectionState, type ConnectionStatus } from "./connection";
 import { createBackoffTimer } from "$lib/utils/backoff";
 
@@ -120,7 +120,7 @@ export function createResourceTelemetryStore(): Readable<ResourceSample> {
       return () => {};
     }
 
-    let socket: WebSocket | null = null;
+    let connection: ManagedWebSocket | null = null;
     let closed = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let connectionStatus: ConnectionStatus = "unknown";
@@ -147,24 +147,30 @@ export function createResourceTelemetryStore(): Readable<ResourceSample> {
         scheduleReconnect(OFFLINE_RECONNECT_DELAY_MS);
         return;
       }
-      socket = new WebSocket(url);
-      socket.addEventListener("open", () => {
-        retryBackoff.reset();
-      });
-      socket.addEventListener("message", (event) => {
-        const sample = parseSample(event.data);
-        if (sample) {
-          set(sample);
-        }
-      });
-      socket.addEventListener("close", () => {
-        if (closed) return;
-        retryBackoff.bump();
-        scheduleReconnect();
-      });
-      socket.addEventListener("error", () => {
-        socket?.close();
-      });
+      connection = connectWebSocketWithFallback(
+        url,
+        {
+          onOpen: () => {
+            retryBackoff.reset();
+          },
+          onMessage: (event) => {
+            const sample = parseSample(event.data);
+            if (sample) {
+              set(sample);
+            }
+          },
+          onClose: () => {
+            connection = null;
+            if (closed) return;
+            retryBackoff.bump();
+            scheduleReconnect();
+          },
+          onError: () => {
+            connection?.close();
+          }
+        },
+        { errorMessage: 'Telemetry stream error' }
+      );
     }
 
     const unsubscribeConnection = connectionState.subscribe((snapshot) => {
@@ -175,9 +181,9 @@ export function createResourceTelemetryStore(): Readable<ResourceSample> {
           clearTimeout(retryTimer);
           retryTimer = null;
         }
-        socket?.close();
-        socket = null;
-      } else if (!socket && !closed) {
+        connection?.close();
+        connection = null;
+      } else if (!connection && !closed) {
         retryBackoff.reset();
         scheduleReconnect(0);
       }
@@ -189,7 +195,7 @@ export function createResourceTelemetryStore(): Readable<ResourceSample> {
       closed = true;
       unsubscribeConnection();
       if (retryTimer) clearTimeout(retryTimer);
-      socket?.close();
+      connection?.close();
     };
   });
 }

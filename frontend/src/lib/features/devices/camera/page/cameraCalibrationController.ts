@@ -1,4 +1,5 @@
 import type { StreamInfo } from '$lib/api/httpClient';
+import { apiFetchResponse } from '$lib/api/core/http';
 import type { CalibrationBoard, CalibrationImage, CalibrationParams, IpaStatus } from '$lib/features/devices/camera/cameraCalibrationTypes';
 import { StreamsApi } from '$lib/api/streamsApi';
 import { emitMediaMutation } from '$lib/features/media/mutations';
@@ -212,7 +213,7 @@ export function createCameraCalibrationController(state: CalibrationState, deps:
     state.calibrationImportError = null;
     try {
       const url = deps.apiPath(`/streams/${encodeURIComponent(state.stream?.id ?? state.streamId)}/calibration/save`);
-      const resp = await fetch(url, {
+      const resp = await apiFetchResponse(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(calibrationPayload(params))
@@ -324,7 +325,7 @@ export function createCameraCalibrationController(state: CalibrationState, deps:
   async function refreshIpaStatus(): Promise<void> {
     state.ipaLoading = true;
     try {
-      const resp = await fetch(deps.apiPath('/device/ipa'));
+      const resp = await apiFetchResponse(deps.apiPath('/device/ipa'));
       if (!resp.ok) throw new Error(`Failed to load IPA status (${resp.status})`);
       const json = (await resp.json()) as unknown;
       const status = normalizeIpaStatus(json);
@@ -350,7 +351,7 @@ export function createCameraCalibrationController(state: CalibrationState, deps:
     try {
       const url = deps.apiPath('/device/ipa/ccm');
       const target = state.ipaAdvanced ? state.ipaTarget : 'both';
-      const resp = await fetch(url, {
+      const resp = await apiFetchResponse(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -427,7 +428,7 @@ export function createCameraCalibrationController(state: CalibrationState, deps:
     state.ipaChartSolveError = null;
     try {
       const url = deps.apiPath('/device/ipa/ccm/solve');
-      const resp = await fetch(url, {
+      const resp = await apiFetchResponse(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -481,7 +482,7 @@ export function createCameraCalibrationController(state: CalibrationState, deps:
       }
       const url = deps.apiPath(`/streams/${encodeURIComponent(state.stream.id)}/calibration/mode`);
       const dictionary = (state.calibrationBoard?.dictionary || '4x4_1000').trim();
-      const resp = await fetch(url, {
+      const resp = await apiFetchResponse(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ enabled, dictionary, mode: 'calibration' })
@@ -526,7 +527,7 @@ export function createCameraCalibrationController(state: CalibrationState, deps:
       }
       const suffix = query.toString();
       const url = deps.apiPath(suffix ? `/media?${suffix}` : '/media');
-      const resp = await fetch(url);
+      const resp = await apiFetchResponse(url);
       if (!resp.ok) {
         throw new Error(`Failed to list calibration images (${resp.status})`);
       }
@@ -567,7 +568,7 @@ export function createCameraCalibrationController(state: CalibrationState, deps:
     state.calibrationLoading = true;
     try {
       const url = deps.apiPath(`/streams/${encodeURIComponent(state.stream?.id ?? state.streamId)}/snapshot`);
-      const resp = await fetch(url, {
+      const resp = await apiFetchResponse(url, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -606,7 +607,7 @@ export function createCameraCalibrationController(state: CalibrationState, deps:
     state.calibrationDeleting = true;
     try {
       const url = deps.apiPath(`/media/${encodeURIComponent(name)}`);
-      const resp = await fetch(url, { method: 'DELETE' });
+      const resp = await apiFetchResponse(url, { method: 'DELETE' });
       if (!resp.ok) {
         const text = await resp.text().catch(() => '');
         throw new Error(text || `Delete failed (${resp.status})`);
@@ -677,7 +678,7 @@ export function createCameraCalibrationController(state: CalibrationState, deps:
           lensModel: state.calibrationLensModel
         }
       };
-      const resp = await fetch(url, {
+      const resp = await apiFetchResponse(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
@@ -715,7 +716,7 @@ export function createCameraCalibrationController(state: CalibrationState, deps:
     try {
       const url = deps.apiPath(`/streams/${encodeURIComponent(state.stream?.id ?? state.streamId)}/calibration/save`);
       const params = state.calibrationResult.calibration;
-      const resp = await fetch(url, {
+      const resp = await apiFetchResponse(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(calibrationPayload(params))
@@ -744,14 +745,14 @@ export function createCameraCalibrationController(state: CalibrationState, deps:
     try {
       const streamId = state.stream?.id ?? state.streamId;
       const url = deps.apiPath(`/media?stream_id=${encodeURIComponent(streamId)}&kind=${encodeURIComponent(kind)}`);
-      const resp = await fetch(url);
+      const resp = await apiFetchResponse(url);
       if (!resp.ok) {
         throw new Error(`Failed to list ${kind} media (${resp.status})`);
       }
       const list = (await resp.json()) as Array<{ name: string }>;
       for (const item of list) {
         if (!item?.name) continue;
-        await fetch(deps.apiPath(`/media/${encodeURIComponent(item.name)}`), { method: 'DELETE' });
+        await apiFetchResponse(deps.apiPath(`/media/${encodeURIComponent(item.name)}`), { method: 'DELETE' });
       }
       if (kind === 'calibration') {
         await refreshCalibrationImages();

@@ -241,6 +241,27 @@ export async function syncPeerPipelines(
   };
 }
 
+export async function testPeerEndpointJson(target: string, timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS): Promise<unknown> {
+  const trimmed = target.trim();
+  if (!trimmed.length) {
+    throw new Error('Endpoint URL is required');
+  }
+  return requestJson<unknown>(trimmed, { method: 'GET' }, { timeoutMs });
+}
+
+export async function fetchPeerStreamFormat(peerId: string, streamId: string, timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS): Promise<unknown> {
+  const trimmedPeerId = peerId.trim();
+  const trimmedStreamId = streamId.trim();
+  if (!trimmedPeerId || !trimmedStreamId) {
+    throw new Error('Peer stream reference is required');
+  }
+  return requestJson<unknown>(
+    `${API_PREFIX}/${encodeURIComponent(trimmedPeerId)}/streams/${encodeURIComponent(trimmedStreamId)}/format`,
+    { method: 'GET' },
+    { timeoutMs }
+  );
+}
+
 function normalizePeerStreamSummary(entry: ApiPeerRemoteStreamSummary) {
   const peerId = String(entry?.peer_id ?? '').trim();
   const streamRef = String(entry?.stream_ref ?? '').trim();

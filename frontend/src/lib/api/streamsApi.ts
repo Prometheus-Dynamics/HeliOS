@@ -1,6 +1,6 @@
 import { EngineStreamsService } from '$lib/ts-bindings/http/client';
 import { apiUrl } from '$lib/api/httpClient';
-import { runApiRequest, type ApiRequestOptions } from '$lib/api/requestManager';
+import { apiFetchCachedJson, runApiRequest, type ApiRequestOptions } from '$lib/api/core/http';
 import { DEFAULT_REQUEST_TIMEOUT_MS, fetchWithRetry } from '$lib/api/requestUtils';
 import type {
   CancelablePromise,
@@ -12,6 +12,8 @@ import type {
 type CacheEntry<T> = {
   fetchedAt: number;
   value: T;
+  etag?: string | null;
+  revision?: number | null;
 };
 
 const DEFAULT_STREAMS_CACHE_MS = 750;
@@ -81,10 +83,28 @@ async function listStreamsSingleflight(options?: ApiRequestOptions) {
     return streamsInflight;
   }
 
-  streamsInflight = runApiRequest(() => EngineStreamsService.listStreams(), { label: 'listStreams', ...options })
-    .then((value) => {
+  streamsInflight = apiFetchCachedJson<StreamsList>(
+    '/streams',
+    {
+      cached: streamsCache?.value,
+      etag: streamsCache?.etag ?? null,
+      revision: streamsCache?.revision ?? null
+    },
+    { headers: { Accept: 'application/json' } },
+    { label: 'listStreams', ...options }
+  )
+    .then((result) => {
+      const value = result.status === 'not_modified' ? streamsCache?.value : result.data;
+      if (!value) {
+        throw new Error('Stream inventory unavailable');
+      }
       if (cacheMs > 0) {
-        streamsCache = { fetchedAt: Date.now(), value };
+        streamsCache = {
+          fetchedAt: Date.now(),
+          value,
+          etag: result.etag ?? streamsCache?.etag ?? null,
+          revision: result.revision ?? streamsCache?.revision ?? null
+        };
       } else {
         streamsCache = null;
       }

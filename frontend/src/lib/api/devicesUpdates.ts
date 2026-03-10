@@ -1,4 +1,4 @@
-import { buildWsUrlFromHttpBase, canUseWebSockets, connectWebSocketWithFallback } from '$lib/api/wsClient';
+import { buildWsUrlFromHttpBase, canUseWebSockets, connectWebSocketWithFallback } from '$lib/api/core/ws';
 
 export type DevicesUpdateReason =
   | 'usb'

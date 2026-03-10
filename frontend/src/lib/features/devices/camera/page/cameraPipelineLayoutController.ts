@@ -1,4 +1,5 @@
 import type { StreamInfo, StreamManifest } from '$lib/api/httpClient';
+import { apiFetchResponse } from '$lib/api/core/http';
 import { OpenAPI } from '$lib/ts-bindings/http/client';
 import { getHttpClientBase } from '$lib/api/httpClient';
 import type { PipelinesApi } from '$lib/api/pipelinesApi';
@@ -36,7 +37,7 @@ import {
 } from './layoutValidation';
 import { collectPipelineOutputs } from '$lib/features/pipelines/boundaryOutputs';
 import { normalizeDaedalusRegistry } from '$lib/features/pipelines/controller/daedalusRegistry';
-import { fromApiGraphPlan } from '$lib/features/pipelines/model';
+import { fromApiGraphPlan } from '$lib/features/pipelines/graphConverters';
 import { hydrateGraphWithRegistry } from '$lib/features/pipelines/styleHydration';
 import { extractGraphOutputPortTypes, filterEncoderCompatibleOutputs } from '$lib/features/pipelines/outputFilters';
 import {
@@ -757,7 +758,7 @@ export function createPipelineLayoutController(state: PipelineLayoutState, deps:
   async function setLivePipelineOutput(output: string | null): Promise<void> {
     if (!state.stream?.id) return;
     try {
-      const resp = await fetch(deps.apiPath(`/streams/${encodeURIComponent(state.stream.id)}/pipeline/output`), {
+      const resp = await apiFetchResponse(deps.apiPath(`/streams/${encodeURIComponent(state.stream.id)}/pipeline/output`), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ output })

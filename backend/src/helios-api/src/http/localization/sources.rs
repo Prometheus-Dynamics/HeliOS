@@ -130,7 +130,7 @@ impl LocalizationSourceFetcher for ApiLocalizationSourceFetcher {
     fn fetch_source_value<'a>(&'a self, source: &'a LocalizationSourceConfig) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<JsonValue, String>> + Send + 'a>> {
         Box::pin(async move {
             if source.stream_id.starts_with("peer:") {
-                fetch_peer_output(&source.stream_id, &source.output_key).await
+                fetch_peer_output(&self.state, &source.stream_id, &source.output_key).await
             } else if let Some(source_id) = source.stream_id.strip_prefix("external:") {
                 external::fetch_external_value(&self.state, source_id, &source.output_key).await
             } else if let Some(profile_id) = source.stream_id.strip_prefix(PROFILE_STREAM_PREFIX) {
@@ -158,7 +158,7 @@ pub async fn list_sources(State(state): State<AppState>) -> ApiResult<Json<Vec<L
             continue;
         }
         if let Some(media_meta_dir) = media_meta_dir.as_deref()
-            && let Some(media_imu_source) = media_imu::source_for_stream(&stream, media_meta_dir).await
+            && let Some(media_imu_source) = media_imu::source_for_stream(&state, &stream, media_meta_dir).await
         {
             out.push(media_imu_source);
         }
@@ -228,7 +228,7 @@ pub async fn list_sources(State(state): State<AppState>) -> ApiResult<Json<Vec<L
         }));
     }
 
-    let peers = peers::snapshot_peers().await;
+    let peers = peers::snapshot_peers(&state).await;
     for peer in peers {
         out.extend(localization_peers::sources::list_peer_sources(&peer).await);
     }
@@ -309,9 +309,9 @@ pub async fn sample_output(State(state): State<AppState>, Path((id, output_key))
         (status = 502, description = "Peer error", body = EngineErrorBody)
     )
 )]
-pub async fn sample_peer_output(Path((id, output_key)): Path<(String, String)>) -> axum::response::Response {
+pub async fn sample_peer_output(State(state): State<AppState>, Path((id, output_key)): Path<(String, String)>) -> axum::response::Response {
     let (peer_id, camera) = localization_peers::sources::parse_peer_stream_id(&id);
-    let peers = peers::snapshot_peers().await;
+    let peers = peers::snapshot_peers(&state).await;
     let Some(peer) = peers.into_iter().find(|p| p.id == peer_id) else {
         return (StatusCode::NOT_FOUND, Json(engine_error_body(Some(EngineErrorCode::NotFound), "peer not found"))).into_response();
     };
@@ -361,9 +361,9 @@ pub(crate) async fn fetch_stream_output(state: &AppState, stream_id: &str, outpu
     }
 }
 
-pub(crate) async fn fetch_peer_output(stream_id: &str, output_key: &str) -> Result<JsonValue, String> {
+pub(crate) async fn fetch_peer_output(state: &AppState, stream_id: &str, output_key: &str) -> Result<JsonValue, String> {
     let (peer_id, camera) = localization_peers::sources::parse_peer_stream_id(stream_id.trim_start_matches("peer:"));
-    let peers = peers::snapshot_peers().await;
+    let peers = peers::snapshot_peers(state).await;
     let Some(peer) = peers.into_iter().find(|peer| peer.id == peer_id) else {
         return Err("peer not found".to_string());
     };

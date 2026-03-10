@@ -1,6 +1,6 @@
 import type { StreamInfo } from '$lib/ts-bindings/http/client';
 import type { PipelineGraphPlan, PipelineNodeValue, PipelineOverviewPipeline } from '$lib/types/pipeline';
-import { fromApiGraphPlan } from '$lib/features/pipelines/model';
+import { fromApiGraphPlan } from '$lib/features/pipelines/graphConverters';
 import { serializeGraphPlan } from '$lib/features/pipelines/graph';
 import { nodeOverridesFromDaedalusPatch } from '$lib/features/pipelines/daedalusGraph';
 import { extractInputValues, isDaedalusPlan } from './pipelineTuneConstantUtils';

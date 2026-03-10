@@ -20,6 +20,7 @@ export type GraphNodeUpdateOptions = {
   graph: PipelineGraphPlan;
   activeConnection: ActiveConnection | null;
   previousNodes: Node[];
+  detailLevel: 'minimal' | 'full';
   focusHighlight: { nodeId: string; port: string | null; token: number } | null;
   resolveRegistryEntryForNode: (node: PipelineGraphPlan['nodes'][string]) => PipelineRegistryEntry | null;
   onNodePortDoubleClick: (nodeId: string, direction: 'input' | 'output', port: string, event: MouseEvent) => void;
@@ -50,12 +51,24 @@ export type GraphEdgeUpdateOptions = {
   resolveRegistryEntryForNode: (node: PipelineGraphPlan['nodes'][string]) => PipelineRegistryEntry | null;
 };
 
+let lastPortOrderGraph: PipelineGraphPlan | null = null;
+let lastPortOrders: ReturnType<typeof buildPortOrders> | null = null;
+
+const resolvePortOrders = (graph: PipelineGraphPlan) => {
+  if (graph !== lastPortOrderGraph || !lastPortOrders) {
+    lastPortOrderGraph = graph;
+    lastPortOrders = buildPortOrders(graph);
+  }
+  return lastPortOrders;
+};
+
 export function buildUpdatedNodes(options: GraphNodeUpdateOptions): Node[] {
   return buildFlowNodes({
     graph: options.graph,
     connection: options.activeConnection,
     previousNodes: options.previousNodes,
-    portOrders: buildPortOrders(options.graph),
+    portOrders: resolvePortOrders(options.graph),
+    detailLevel: options.detailLevel,
     highlight: options.focusHighlight,
     resolveRegistryEntryForNode: options.resolveRegistryEntryForNode,
     onNodePortDoubleClick: options.onNodePortDoubleClick,
@@ -85,7 +98,7 @@ export function buildUpdatedEdges(options: GraphEdgeUpdateOptions): Edge[] {
     options.graph,
     options.selectedEdgeId,
     options.activeConnection,
-    buildPortOrders(options.graph),
+    resolvePortOrders(options.graph),
     options.resolveRegistryEntryForNode
   );
 }

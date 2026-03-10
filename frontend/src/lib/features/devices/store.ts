@@ -2,6 +2,7 @@ import { writable, type Readable } from 'svelte/store';
 import type { CameraCard, CameraStatus, PeripheralEntry } from '$lib/types/devices';
 import type { CameraCardItem, CameraStatusCounts, PeripheralItem } from './types';
 import { buildCameraCardsList, buildPeripheralItems, countCameraStatuses, EMPTY_CAMERA_COUNTS } from './utils';
+import { createDeviceCardsWorker, createDeviceCountsWorker } from '$lib/workers/factories';
 
 type CountsWorkerPayload = { requestId: number; statuses: CameraStatus[] };
 type CountsWorkerResponse = { requestId: number; counts: CameraStatusCounts };
@@ -32,7 +33,7 @@ export function createDevicesUiStore(options: { useWorkers?: boolean } = {}): De
   function ensureWorkers() {
     if (!useWorkers) return;
     if (!countsWorker && typeof Worker !== 'undefined') {
-      countsWorker = new Worker(new URL('$lib/workers/deviceCountsWorker.ts', import.meta.url), { type: 'module' });
+      countsWorker = createDeviceCountsWorker();
       countsWorker.onmessage = (event: MessageEvent<CountsWorkerResponse>) => {
         const data = event.data;
         if (data.requestId < countsLastHandled) return;
@@ -43,7 +44,7 @@ export function createDevicesUiStore(options: { useWorkers?: boolean } = {}): De
       };
     }
     if (!cardsWorker && typeof Worker !== 'undefined') {
-      cardsWorker = new Worker(new URL('$lib/workers/deviceCardsWorker.ts', import.meta.url), { type: 'module' });
+      cardsWorker = createDeviceCardsWorker();
       cardsWorker.onmessage = (event: MessageEvent<CardsWorkerResponse>) => {
         const data = event.data;
         if (data.requestId < cardsLastHandled) return;

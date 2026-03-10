@@ -1,4 +1,4 @@
-import { buildWsUrlFromHttpBase, canUseWebSockets } from '$lib/api/wsClient';
+import { buildWsUrlFromHttpBase, canUseWebSockets, connectWebSocketWithFallback, type ManagedWebSocket } from '$lib/api/core/ws';
 
 export type ProcessSample = {
   pid: number;
@@ -31,7 +31,7 @@ type ProcessesHandlers = {
 };
 
 type SharedProcessesConnection = {
-  socket: WebSocket;
+  connection: ManagedWebSocket;
   subscribers: Map<symbol, ProcessesHandlers>;
   connected: boolean;
   readyIntervalMs: number | null;
@@ -77,11 +77,7 @@ export function connectProcessesStream(
       if (sharedProcessesConnections.get(key) === shared) {
         sharedProcessesConnections.delete(key);
       }
-      try {
-        shared.socket.close();
-      } catch {
-        // ignore
-      }
+      shared.connection.close();
     }
   };
 }
@@ -90,74 +86,76 @@ function getOrCreateSharedConnection(key: string, intervalMs: number, limit: num
   const existing = sharedProcessesConnections.get(key);
   if (existing) return existing;
 
-  let socket: WebSocket;
-  try {
-    socket = new WebSocket(buildProcessesSocketUrl(intervalMs, limit));
-  } catch {
-    return null;
-  }
-
   const shared: SharedProcessesConnection = {
-    socket,
+    connection: null as unknown as ManagedWebSocket,
     subscribers: new Map(),
     connected: false,
     readyIntervalMs: null
   };
 
-  socket.addEventListener('open', () => {
-    shared.connected = true;
-    for (const subscriber of shared.subscribers.values()) {
-      subscriber.onOpen?.();
-    }
-  });
-
-  socket.addEventListener('message', (event) => {
-    if (typeof event.data !== 'string') return;
-    let parsed: ProcessesServerEvent | null = null;
-    try {
-      parsed = JSON.parse(event.data) as ProcessesServerEvent;
-    } catch {
-      return;
-    }
-    if (!parsed || typeof parsed !== 'object') return;
-    if (parsed.type === 'ready') {
-      shared.readyIntervalMs = typeof parsed.interval_ms === 'number' ? parsed.interval_ms : intervalMs;
-      for (const subscriber of shared.subscribers.values()) {
-        subscriber.onReady?.(shared.readyIntervalMs);
+  const connection = connectWebSocketWithFallback(
+    buildProcessesSocketUrl(intervalMs, limit),
+    {
+      onOpen: () => {
+        shared.connected = true;
+        for (const subscriber of shared.subscribers.values()) {
+          subscriber.onOpen?.();
+        }
+      },
+      onMessage: (event) => {
+        if (typeof event.data !== 'string') return;
+        let parsed: ProcessesServerEvent | null = null;
+        try {
+          parsed = JSON.parse(event.data) as ProcessesServerEvent;
+        } catch {
+          return;
+        }
+        if (!parsed || typeof parsed !== 'object') return;
+        if (parsed.type === 'ready') {
+          shared.readyIntervalMs = typeof parsed.interval_ms === 'number' ? parsed.interval_ms : intervalMs;
+          for (const subscriber of shared.subscribers.values()) {
+            subscriber.onReady?.(shared.readyIntervalMs);
+          }
+          return;
+        }
+        if (parsed.type === 'snapshot' && parsed.snapshot) {
+          for (const subscriber of shared.subscribers.values()) {
+            subscriber.onSnapshot?.(parsed.snapshot);
+          }
+          return;
+        }
+        if (parsed.type === 'error') {
+          const message = parsed.message || 'Processes stream error';
+          for (const subscriber of shared.subscribers.values()) {
+            subscriber.onError?.(message);
+          }
+        }
+      },
+      onError: (message) => {
+        const errorMessage = message || 'Processes stream connection failed';
+        for (const subscriber of shared.subscribers.values()) {
+          subscriber.onError?.(errorMessage);
+        }
+      },
+      onClose: () => {
+        shared.connected = false;
+        shared.readyIntervalMs = null;
+        if (sharedProcessesConnections.get(key) === shared) {
+          sharedProcessesConnections.delete(key);
+        }
+        for (const subscriber of shared.subscribers.values()) {
+          subscriber.onClose?.();
+        }
       }
-      return;
-    }
-    if (parsed.type === 'snapshot' && parsed.snapshot) {
-      for (const subscriber of shared.subscribers.values()) {
-        subscriber.onSnapshot?.(parsed.snapshot);
-      }
-      return;
-    }
-    if (parsed.type === 'error') {
-      const message = parsed.message || 'Processes stream error';
-      for (const subscriber of shared.subscribers.values()) {
-        subscriber.onError?.(message);
-      }
-    }
-  });
+    },
+    { errorMessage: 'Processes stream connection failed' }
+  );
 
-  socket.addEventListener('error', () => {
-    for (const subscriber of shared.subscribers.values()) {
-      subscriber.onError?.('Processes stream connection failed');
-    }
-  });
+  if (!connection) {
+    return null;
+  }
 
-  socket.addEventListener('close', () => {
-    shared.connected = false;
-    shared.readyIntervalMs = null;
-    if (sharedProcessesConnections.get(key) === shared) {
-      sharedProcessesConnections.delete(key);
-    }
-    for (const subscriber of shared.subscribers.values()) {
-      subscriber.onClose?.();
-    }
-  });
-
+  shared.connection = connection;
   sharedProcessesConnections.set(key, shared);
   return shared;
 }

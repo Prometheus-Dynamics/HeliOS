@@ -1,3 +1,4 @@
+use axum::http::HeaderMap;
 use axum::{Json, extract::State, response::IntoResponse};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -10,6 +11,7 @@ use super::super::{json_store, storage};
 use helios_engine::localization::config::{LocalizationConfig, normalize_config};
 use tracing::{info, warn};
 
+use crate::http::revision::{apply_revision_headers, matches_if_none_match, not_modified_response};
 use crate::http::validation::validation_error_response;
 
 use super::validation::validate_localization_config;
@@ -40,9 +42,16 @@ pub struct LocalizationProfilesImportRequest {
     tag = "Localization",
     responses((status = 200, description = "Localization config", body = LocalizationConfig))
 )]
-pub async fn get_config(State(_state): State<AppState>) -> ApiResult<Json<LocalizationConfig>> {
+pub async fn get_config(State(_state): State<AppState>, headers: HeaderMap) -> ApiResult<axum::response::Response> {
+    let revision = current_config_revision().await;
+    if matches_if_none_match(&headers, revision) {
+        return Ok(not_modified_response(revision));
+    }
+
     let config = load_config().await?;
-    Ok(Json(normalize_config(config)))
+    let mut response = Json(normalize_config(config)).into_response();
+    apply_revision_headers(response.headers_mut(), revision);
+    Ok(response)
 }
 
 #[utoipa::path(
@@ -158,6 +167,16 @@ pub(crate) async fn load_config() -> ApiResult<LocalizationConfig> {
 async fn config_path() -> std::io::Result<PathBuf> {
     let dir = storage::ensure_subdir_async("localization").await?;
     Ok(dir.join("config.json"))
+}
+
+async fn current_config_revision() -> u64 {
+    let Ok(path) = config_path().await else {
+        return 0;
+    };
+    let Ok(metadata) = tokio::fs::metadata(path).await else {
+        return 0;
+    };
+    metadata.modified().ok().and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok()).map(|value| value.as_millis() as u64).unwrap_or(0)
 }
 
 fn extract_imported_config(body: Value) -> Result<LocalizationConfig, String> {

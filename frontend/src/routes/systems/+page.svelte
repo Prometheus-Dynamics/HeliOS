@@ -1,12 +1,15 @@
 <script lang="ts">
   import { browser } from '$app/environment';
   import { onDestroy, onMount } from 'svelte';
-  import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rig';
+  import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rigDefaults';
   import type { ImuAxes, ImuStatus, SystemsPageData } from '$lib/types/systems';
   import type { SensorOrientation } from '$lib/types/devices';
   import DeviceLogsPanel from './components/DeviceLogsPanel.svelte';
   import ConsolePanel from './components/ConsolePanel.svelte';
   import ProcessesPanel from './components/ProcessesPanel.svelte';
+  import { createDomainResource } from '$lib/api/domainResources';
+  import { scheduleWhenIdle } from '$lib/utils/browserSchedule';
+  import { startRefreshScheduler } from '$lib/api/refreshScheduler';
   import SystemsActivityTabs from '$lib/features/systems/page/SystemsActivityTabs.svelte';
   import SystemsI2cPanel from '$lib/features/systems/page/SystemsI2cPanel.svelte';
   import SystemsImuPanel from '$lib/features/systems/page/SystemsImuPanel.svelte';
@@ -25,7 +28,7 @@
   } from '$lib/features/systems/page/systemsPageUtils';
   import { connectImuStream, emptyImuStatus, fetchI2cInventorySnapshot, refreshI2cInventory, refreshImuStatus, updateImuConfig } from '$lib/api/systemsPage';
   import { connectionState } from '$lib/api/connection';
-  import { createRefreshableResource } from '$lib/utils/refreshableResource';
+  import { reportError } from '$lib/ui/errorPolicy';
   import { SvelteSet } from 'svelte/reactivity';
 
   const EMPTY_PAYLOAD: SystemsPageData = {
@@ -66,7 +69,7 @@
     }>
   >([]);
   let lastImuTimestamp = $state<number | null>(null);
-  let imuPollId: ReturnType<typeof setInterval> | null = null;
+  let stopImuPollLoop: (() => void) | null = null;
   let imuPollStartTimer: ReturnType<typeof setTimeout> | null = null;
   let imuStreamClose: (() => void) | null = null;
   let imuStreamReconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -87,7 +90,10 @@
   let imuDrLockPositionChoice = $state<boolean>(true);
   let imuGravityReferenceChoice = $state<string>('+z');
   let imuFormDirty = $state(false);
-  let hasLoadedOnce = $state(false);
+  let hasLoadedOnce = $state((readPayload().fetchedAt ?? 0) > 0);
+  let stopDomainInvalidation: (() => void) | null = null;
+  let stopImuWatchdog: (() => void) | null = null;
+  let cancelBootstrapRefresh: (() => void) | null = null;
 
   const device = $derived(systems.device);
   const i2cInventory = $derived(systems.i2cInventory ?? { buses: [], devices: [] });
@@ -124,17 +130,19 @@
   const IMU_CACHE_KEY = 'systems:imu:v1';
   const SYSTEMS_CACHE_STALE_MS = 10_000;
   const SYSTEMS_CACHE_MAX_MS = 120_000;
-  const i2cResource = createRefreshableResource({
+  const i2cResource = createDomainResource({
     key: I2C_CACHE_KEY,
     loader: fetchI2cInventorySnapshot,
     staleMs: SYSTEMS_CACHE_STALE_MS,
-    maxAgeMs: SYSTEMS_CACHE_MAX_MS
+    maxAgeMs: SYSTEMS_CACHE_MAX_MS,
+    kinds: ['device', 'settings']
   });
-  const imuResource = createRefreshableResource({
+  const imuResource = createDomainResource({
     key: IMU_CACHE_KEY,
     loader: refreshImuStatus,
     staleMs: SYSTEMS_CACHE_STALE_MS,
-    maxAgeMs: SYSTEMS_CACHE_MAX_MS
+    maxAgeMs: SYSTEMS_CACHE_MAX_MS,
+    kinds: ['device', 'imu', 'settings']
   });
 
   type ActivityTabId = 'logs' | 'i2c' | 'imu' | 'console' | 'processes';
@@ -160,9 +168,11 @@
 
   // Watchdog: if the IMU websocket stream stalls, reconnect quickly so the UI doesn't "pause".
   $effect(() => {
+    stopImuWatchdog?.();
+    stopImuWatchdog = null;
     if (activeActivityTab !== 'imu') return;
     if (!imuStreamClose) return;
-    const id = setInterval(() => {
+    stopImuWatchdog = startRefreshScheduler(() => {
       if (activeActivityTab !== 'imu') return;
       if (!imuStreaming) return;
       if (imuPollingPaused) return;
@@ -171,8 +181,15 @@
       if (last == null) return;
       if (Date.now() - last <= currentImuStreamStaleMs()) return;
       forceImuStreamReconnect();
-    }, 250);
-    return () => clearInterval(id);
+    }, {
+      intervalMs: 250,
+      immediate: false,
+      enabled: () => activeActivityTab === 'imu' && imuStreaming && !imuPollingPaused && !isApplyingImuConfig
+    });
+    return () => {
+      stopImuWatchdog?.();
+      stopImuWatchdog = null;
+    };
   });
 
   $effect(() => {
@@ -215,10 +232,32 @@
         hasLoadedOnce = true;
       }
     }
-    void refreshSystems({ bootstrap: true });
+    if (hasLoadedOnce) {
+      cancelBootstrapRefresh = scheduleWhenIdle(() => {
+        if (!document.hidden) {
+          void refreshSystems();
+        }
+      }, { timeoutMs: 1800, fallbackMs: 650 });
+    } else {
+      void refreshSystems({ bootstrap: true });
+    }
+    const stopI2cInvalidations = i2cResource.subscribeInvalidations(() => {
+      void refreshSystems();
+    }, { debounceMs: 250 });
+    const stopImuInvalidations = imuResource.subscribeInvalidations(() => {
+      void refreshSystems();
+      void refreshImu();
+    }, { debounceMs: 250 });
+    stopDomainInvalidation = () => {
+      stopI2cInvalidations();
+      stopImuInvalidations();
+    };
   });
 
   onDestroy(() => {
+    cancelBootstrapRefresh?.();
+    cancelBootstrapRefresh = null;
+    stopDomainInvalidation?.();
     stopImuStream();
     stopImuPolling();
   });
@@ -271,7 +310,7 @@
         failures += 1;
         i2cLoading = false;
         if (connectionStatus === 'online') {
-          console.error('Failed to refresh I2C inventory', error);
+          reportError({ context: 'Systems I2C refresh', error, toast: false });
         }
         const message = formatLoadError(error);
         i2cError = message;
@@ -292,7 +331,7 @@
         failures += 1;
         imuLoading = false;
         if (connectionStatus === 'online') {
-          console.error('Failed to refresh IMU status', error);
+          reportError({ context: 'Systems IMU refresh', error, toast: false });
         }
         const message = formatLoadError(error);
         imuError = message;
@@ -445,7 +484,7 @@
       const nextErrors = { ...(systems.errors ?? {}), i2c: null };
       systems = { ...systems, i2cInventory: inventory, errors: nextErrors, fetchedAt: Date.now() };
     } catch (error) {
-      console.error('Failed to rescan I2C', error);
+      reportError({ context: 'I2C rescan', error, toast: false });
       const message = formatLoadError(error);
       i2cError = message;
       systems = { ...systems, errors: { ...(systems.errors ?? {}), i2c: message } };
@@ -504,7 +543,7 @@
       applyImuStatus(status);
     } catch (error) {
       if (connectionStatus === 'online') {
-        console.error('Failed to refresh IMU', error);
+        reportError({ context: 'IMU status refresh', error, toast: false });
       }
       const message = formatLoadError(error);
       imuError = message;
@@ -563,7 +602,7 @@
         imuFormDirty = false;
       }
     } catch (error) {
-      console.error('Failed to update IMU config', error);
+      reportError({ context: 'Update IMU config', error, toast: false });
       const message = formatLoadError(error);
       imuError = message;
       systems = { ...systems, errors: { ...(systems.errors ?? {}), imu: message } };
@@ -678,22 +717,26 @@
     if (isApplyingImuConfig) return;
     if (imuStreaming) return;
     if (activeActivityTab !== 'imu') return;
-    if (imuPollId) return;
+    if (stopImuPollLoop) return;
     if (!imuPollingPaused) {
       void refreshImu();
     }
-    imuPollId = setInterval(() => {
+    stopImuPollLoop = startRefreshScheduler(() => {
       if (!imuPollingPaused && !imuStreaming) {
         void refreshImu();
       }
-    }, IMU_POLL_MS);
+    }, {
+      intervalMs: IMU_POLL_MS,
+      immediate: false,
+      enabled: () => activeActivityTab === 'imu' && !imuStreaming && !isApplyingImuConfig
+    });
   }
 
   function scheduleImuPollingFallback(): void {
     if (isApplyingImuConfig) return;
     if (imuStreaming) return;
     if (activeActivityTab !== 'imu') return;
-    if (imuPollId) return;
+    if (stopImuPollLoop) return;
     if (imuPollStartTimer) return;
     imuPollStartTimer = setTimeout(() => {
       imuPollStartTimer = null;
@@ -711,10 +754,8 @@
   }
 
   function stopImuPolling(): void {
-    if (imuPollId) {
-      clearInterval(imuPollId);
-      imuPollId = null;
-    }
+    stopImuPollLoop?.();
+    stopImuPollLoop = null;
     clearImuPollingFallback();
     clearImuFocusTimer();
     imuPollingPaused = false;

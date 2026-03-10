@@ -1,10 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { toaster } from '$lib';
+  import { toaster } from '$lib/toaster';
   import PeersDiscoverModal from '$lib/features/peers/page/PeersDiscoverModal.svelte';
   import PeersSidebar from '$lib/features/peers/page/PeersSidebar.svelte';
   import PeersListPanel from '$lib/features/peers/page/PeersListPanel.svelte';
-  import { discoverPhotonvisionStreams, probePeer, registerPeer, syncPeerPipelines } from '$lib/api/peers';
+  import { discoverPhotonvisionStreams, probePeer, registerPeer, syncPeerPipelines, testPeerEndpointJson } from '$lib/api/peers';
   import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
   import type {
     DiscoveredStream,
@@ -471,12 +471,7 @@
     customTest = { ...customTest, running: true, error: null, preview: null, response: null };
     try {
       const target = buildCustomUrl(base, endpoint);
-      const response = await fetch(target, { headers: { accept: 'application/json' } });
-      if (!response.ok) {
-        const detail = await response.text().catch(() => '');
-        throw new Error(detail || `Request failed (${response.status})`);
-      }
-      const payload = await response.json();
+      const payload = await testPeerEndpointJson(target);
       const preview = previewCustomMapping(payload, mappingFromForm(customForm.mapping));
       customTest = { running: false, error: null, response: payload, preview, url: target };
     } catch (error) {

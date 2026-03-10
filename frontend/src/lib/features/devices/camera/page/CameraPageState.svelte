@@ -3,8 +3,9 @@
   import { onDestroy, onMount, untrack, type ComponentProps, type Snippet } from 'svelte';
   import type { PageData } from '../../../../../routes/devices/[cameraId]/$types';
   import { DeviceService, OpenAPI, getHttpClientBase } from '$lib/api/httpClient';
+  import { apiFetchResponse } from '$lib/api/core/http';
   import { PipelinesApi } from '$lib/api/pipelinesApi';
-  import { fromApiGraphPlan } from '$lib/features/pipelines/model';
+  import { fromApiGraphPlan } from '$lib/features/pipelines/graphConverters';
   import { serializeGraphPlan } from '$lib/features/pipelines/graph';
   import { buildDaedalusGraphPatch } from '$lib/features/pipelines/daedalusGraph';
   import { StreamsApi } from '$lib/api/streamsApi';
@@ -13,29 +14,17 @@
   import { resourceTelemetryStore } from '$lib/api/telemetry';
   import { reportError } from '$lib/ui/errorPolicy';
   import { invalidateSWR, invalidateSWRPrefix } from '$lib/utils/swrCache';
-  import { PipelineIcon, StreamMetricsPanel, StreamPreview, toaster } from '$lib';
+  import { toaster } from '$lib';
   import { DEFAULT_PIPELINE_UI } from '$lib/features/pipelines/pipelineUiTypes';
-  import FaIcon from '$lib/components/icons/FaIcon.svelte';
-  import { faCamera } from '@fortawesome/free-solid-svg-icons';
   import { buildNodeValueFromInput, resolveDataTypeKey } from '$lib/features/pipelines/valueFormatting';
-  import CameraPoseTab from '$lib/features/devices/camera/CameraPoseTab.svelte';
-  import CameraStreamTab from '$lib/features/devices/camera/CameraStreamTab.svelte';
-  import CameraControlsTab from '$lib/features/devices/camera/CameraControlsTab.svelte';
-  import CameraMediaTab from '$lib/features/devices/camera/CameraMediaTab.svelte';
-  import CameraPipelinesTab from '$lib/features/devices/camera/CameraPipelinesTab.svelte';
-  import CameraCalibrationTab from '$lib/features/devices/camera/CameraCalibrationTab.svelte';
-  import CameraPageView from './CameraPageView.svelte';
-  import CalibrationGuidanceOverlay from '$lib/features/devices/camera/CalibrationGuidanceOverlay.svelte';
-  import CameraHeader from '$lib/features/devices/camera/page/CameraHeader.svelte';
-  import CameraStreamSidebar from '$lib/features/devices/camera/page/CameraStreamSidebar.svelte';
-  import CameraPipelineOverrides from '$lib/features/devices/camera/page/CameraPipelineOverrides.svelte';
+  import type CameraPageView from './CameraPageView.svelte';
   import { createCameraStreamState } from './cameraStreamStore.svelte';
   import { createCameraPagePipelineRuntime } from './cameraPagePipelineRuntime.svelte';
   import { createCameraPageCalibrationRuntime } from './cameraPageCalibrationRuntime.svelte';
   import { createCameraStreamLifecycleController } from './cameraStreamLifecycleController';
   import { createCameraStreamPresetController } from './cameraStreamPresetController';
   import { createCameraStreamPresetHelpers } from './cameraStreamPresetHelpers';
-  import { buildCameraPageConstants, buildCameraPageCore, buildCameraPageDerived, buildCameraPageUi } from './cameraPageUiBuilders';
+  import { buildCameraPageConstants, buildCameraPageCore, buildCameraPageDerived } from './cameraPageUiBuilders';
   import { buildCameraTabs } from './cameraPageTabs';
   import { setupStreamViewerResize } from './cameraPageViewHelpers';
   import { createCameraPageControllers } from './cameraPageControllers';
@@ -1280,7 +1269,7 @@
     streamState.streamCropApplying = true;
 
     try {
-      const response = await fetch(apiPath(`/streams/${encodeURIComponent(effectiveId)}/crop`), {
+      const response = await apiFetchResponse(apiPath(`/streams/${encodeURIComponent(effectiveId)}/crop`), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ crop: normalized })
@@ -1328,7 +1317,7 @@
     const effectiveId = streamState.stream?.id ?? streamId;
     if (!effectiveId) return;
     try {
-      const response = await fetch(apiPath(`/streams/${encodeURIComponent(effectiveId)}/pipeline/input-usage`), {
+      const response = await apiFetchResponse(apiPath(`/streams/${encodeURIComponent(effectiveId)}/pipeline/input-usage`), {
         method: 'GET',
         headers: { accept: 'application/json' }
       });
@@ -1390,7 +1379,7 @@
     streamState.streamCrosshairApplying = true;
 
     try {
-      const response = await fetch(apiPath(`/streams/${encodeURIComponent(effectiveId)}/crosshair`), {
+      const response = await apiFetchResponse(apiPath(`/streams/${encodeURIComponent(effectiveId)}/crosshair`), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ crosshair: normalized, enabled: normalizedEnabled })
@@ -1399,7 +1388,7 @@
         if (response.status === 404) {
           const px = crosshairToPixels(normalized);
           if (px) {
-            const fallbackResponse = await fetch(apiPath(`/streams/${encodeURIComponent(effectiveId)}/pipeline/inputs`), {
+            const fallbackResponse = await apiFetchResponse(apiPath(`/streams/${encodeURIComponent(effectiveId)}/pipeline/inputs`), {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({
@@ -1466,7 +1455,7 @@
     streamState.streamOrderingApplying = true;
 
     try {
-      const response = await fetch(apiPath(`/streams/${encodeURIComponent(effectiveId)}/ordering`), {
+      const response = await apiFetchResponse(apiPath(`/streams/${encodeURIComponent(effectiveId)}/ordering`), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ mode: normalized })
@@ -1598,24 +1587,6 @@
       tabs
     })
   );
-
-  const ui = buildCameraPageUi({
-    CalibrationGuidanceOverlay,
-    CameraCalibrationTab,
-    CameraControlsTab,
-    CameraHeader,
-    CameraMediaTab,
-    CameraPipelineOverrides,
-    CameraPipelinesTab,
-    CameraPoseTab,
-    CameraStreamSidebar,
-    CameraStreamTab,
-    PipelineIcon,
-    StreamMetricsPanel,
-    StreamPreview,
-    FaIcon,
-    faCamera
-  });
 
   const constants = $derived.by(() =>
     buildCameraPageConstants({
@@ -1763,7 +1734,7 @@
   };
 
   const ctx = $derived.by(() =>
-    mergeCtxParts(core, streamState, pipelineRuntime, calibrationRuntime, ui, constants, services, helpers, derivedState, {
+    mergeCtxParts(core, streamState, pipelineRuntime, calibrationRuntime, constants, services, helpers, derivedState, {
       streamBindings,
       pipelineBindings
     })

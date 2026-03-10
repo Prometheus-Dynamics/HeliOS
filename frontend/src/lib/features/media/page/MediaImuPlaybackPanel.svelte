@@ -1,11 +1,17 @@
 <script lang="ts">
   import { browser } from '$app/environment';
-  import ImuOrientationViewer from '$lib/components/ImuOrientationViewer.svelte';
   import {
     loadMediaImuSamples,
     sampleMediaImuAtMs,
     type MediaImuSample
   } from '$lib/features/media/imuPlayback';
+  import { createLazySvelteComponentLoader } from '$lib/utils/lazySvelteComponent';
+
+  type ImuOrientationViewerComponent = (typeof import('$lib/components/ImuOrientationViewer.svelte'))['default'];
+
+  const imuOrientationViewerLoader = createLazySvelteComponentLoader<ImuOrientationViewerComponent>(
+    () => import('$lib/components/ImuOrientationViewer.svelte')
+  );
 
   type Props = {
     imuDataUrl?: string | null;
@@ -26,6 +32,9 @@
   let samples = $state<MediaImuSample[]>([]);
   let loading = $state(false);
   let errorMessage = $state<string | null>(null);
+  let ImuOrientationViewerComponent = $state<ImuOrientationViewerComponent | null>(
+    imuOrientationViewerLoader.current()
+  );
   let loadSeq = 0;
 
   const currentSample = $derived(
@@ -72,6 +81,15 @@
     };
   });
 
+  async function ensureImuOrientationViewer(): Promise<void> {
+    ImuOrientationViewerComponent ??= await imuOrientationViewerLoader.load();
+  }
+
+  $effect(() => {
+    if (!browser || !hasImuSource) return;
+    void ensureImuOrientationViewer();
+  });
+
   function formatTimeMs(value: number): string {
     if (!Number.isFinite(value) || value < 0) return '0:00.000';
     const totalMs = Math.round(value);
@@ -102,15 +120,21 @@
   {:else if currentSample}
     <div class="relative min-h-0 flex-1">
       <div class="absolute inset-0">
-        <ImuOrientationViewer
-          orientation={currentSample.imu.orientation}
-          imu={currentSample.imu}
-          showLegend={false}
-          showReferenceControls={false}
-          showWorldDecorations={false}
-          showGroundPlane={true}
-          cameraDistanceScale={0.22}
-        />
+        {#if ImuOrientationViewerComponent}
+          <ImuOrientationViewerComponent
+            orientation={currentSample.imu.orientation}
+            imu={currentSample.imu}
+            showLegend={false}
+            showReferenceControls={false}
+            showWorldDecorations={false}
+            showGroundPlane={true}
+            cameraDistanceScale={0.22}
+          />
+        {:else}
+          <div class="flex h-full items-center justify-center bg-surface-950/60 text-xs text-surface-500">
+            Loading IMU viewer…
+          </div>
+        {/if}
       </div>
       <div class="pointer-events-none absolute left-2 right-2 top-2 z-10 rounded border border-surface-700/60 bg-surface-950/65 px-2 py-1 text-xs text-surface-400 backdrop-blur-sm">
         <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">

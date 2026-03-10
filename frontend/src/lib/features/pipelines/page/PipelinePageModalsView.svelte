@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { ComponentProps } from 'svelte';
   import type { Readable, Writable } from 'svelte/store';
-  import PipelineModals from '$lib/features/pipelines/page/PipelineModals.svelte';
+  import type PipelineModals from '$lib/features/pipelines/page/PipelineModals.svelte';
 
   type PipelineModalsProps = ComponentProps<typeof PipelineModals>;
   type RegistryFilterUpdate = {
@@ -11,7 +11,7 @@
     provider?: string | null;
   };
   type PipelinePageModalsViewCtx = {
-    PipelineModals: typeof PipelineModals;
+    PipelineModals: typeof PipelineModals | null;
     assignBusy: Readable<boolean>;
     assignError: Readable<PipelineModalsProps['assignError']>;
     assignModalOpen: Readable<boolean>;
@@ -85,6 +85,7 @@
   const registrySort = $derived.by(() => getPageCtx().registrySort);
   const registryView = $derived.by(() => getPageCtx().registryView);
   const addNodeFromRegistry = $derived.by(() => getPageCtx().addNodeFromRegistry);
+  const PipelineModalsComponent = $derived.by(() => getPageCtx().PipelineModals);
   const iconModalOpen = $derived.by(() => getPageCtx().iconModalOpen);
   const iconModalPipelineId = $derived.by(() => getPageCtx().iconModalPipelineId);
   const pipelineLabelById = $derived.by(() => getPageCtx().pipelineLabelById);
@@ -129,66 +130,84 @@
   const setSelectedCaptureSession = $derived.by(() => getPageCtx().setSelectedCaptureSession);
   const closeAssignModal = $derived.by(() => getPageCtx().closeAssignModal);
   const attachPipelineToDevice = $derived.by(() => getPageCtx().attachPipelineToDevice);
+  const shouldShowLoadingShell = $derived.by(
+    () =>
+      $registryDrawerOpen ||
+      (iconModalOpen && Boolean(iconModalPipelineId)) ||
+      pluginProjectModalOpen ||
+      $createModalOpen ||
+      $deleteModalOpen ||
+      $assignModalOpen
+  );
 </script>
 
-<PipelineModals
-  registryDrawerOpen={$registryDrawerOpen}
-  registryStores={registryStores}
-  onCloseRegistry={() => registryDrawerOpen.set(false)}
-  onRefreshRegistry={refreshRegistry}
-  onResetRegistry={resetRegistryFilters}
-  onSearchRegistry={(term) => updateRegistryFilters({ search: term })}
-  onSelectRegistryTag={(tag) => updateRegistryFilters({ tag })}
-  onSelectRegistryCategory={(category) => updateRegistryFilters({ category })}
-  onSelectRegistryProvider={(provider) => updateRegistryFilters({ provider })}
-  onSelectRegistryGroup={(group) => selectRegistryGroup(group ?? 'all')}
-  onChangeRegistrySort={(sort) => registrySort.set(sort)}
-  onChangeRegistryView={(view) => registryView.set(view)}
-  onAddRegistryEntry={(entryId) => addNodeFromRegistry(entryId)}
-  iconModalOpen={iconModalOpen && Boolean(iconModalPipelineId)}
-  iconModalPipelineLabel={iconModalPipelineId ? pipelineLabelById(iconModalPipelineId) : ''}
-  bind:iconId={modalBindings.iconModalIconId}
-  bind:color={modalBindings.iconModalColor}
-  iconModalError={iconModalError}
-  iconModalSaving={iconModalSaving}
-  onCloseIconModal={closePipelineIconModal}
-  onSaveIcon={savePipelineIconSelection}
-  pluginProjectModalOpen={pluginProjectModalOpen}
-  bind:projectName={ideBindings.pluginProjectName}
-  bind:projectLanguage={ideBindings.pluginProjectLanguage}
-  pluginProjectError={pluginProjectError}
-  pluginProjectBusy={pluginProjectBusy}
-  onClosePluginProject={closePluginProjectModal}
-  onCreatePluginProject={createPluginProject}
-  createModalOpen={$createModalOpen}
-  createMode={createMode}
-  createName={createName}
-  createSourcePipelineId={createSourcePipelineId}
-  createSourceTemplateId={createSourceTemplateId}
-  createBusy={$createBusy}
-  createError={$createError}
-  pipelines={$pipelines}
-  templates={$templates}
-  pipelineForSource={pipelineForSource}
-  templateForSource={templateForSource}
-  onCloseCreate={closeCreateModal}
-  onCreate={createPipeline}
-  onTriggerImport={triggerPipelineImport}
-  onFileChange={handlePipelineImport}
-  bind:importInput={modalBindings.importInput}
-  deleteModalOpen={$deleteModalOpen}
-  deleteModalPipeline={$deleteModalPipeline}
-  deleteModalBusy={$deleteModalBusy}
-  deleteModalError={$deleteModalError}
-  onCloseDelete={closeDeleteModal}
-  onConfirmDelete={confirmDeletePipeline}
-  assignModalOpen={$assignModalOpen}
-  selectedPipeline={$selectedPipeline}
-  assignError={$assignError}
-  assignBusy={$assignBusy}
-  captureDevices={$captureDevices}
-  selectedCaptureSessionId={$selectedCaptureSessionId}
-  onSelectCaptureSession={setSelectedCaptureSession}
-  onCloseAssign={closeAssignModal}
-  onAttachPipeline={attachPipelineToDevice}
-/>
+{#if PipelineModalsComponent}
+  {@const Modals = PipelineModalsComponent}
+  <Modals
+    registryDrawerOpen={$registryDrawerOpen}
+    registryStores={registryStores}
+    onCloseRegistry={() => registryDrawerOpen.set(false)}
+    onRefreshRegistry={refreshRegistry}
+    onResetRegistry={resetRegistryFilters}
+    onSearchRegistry={(term) => updateRegistryFilters({ search: term })}
+    onSelectRegistryTag={(tag) => updateRegistryFilters({ tag })}
+    onSelectRegistryCategory={(category) => updateRegistryFilters({ category })}
+    onSelectRegistryProvider={(provider) => updateRegistryFilters({ provider })}
+    onSelectRegistryGroup={(group) => selectRegistryGroup(group ?? 'all')}
+    onChangeRegistrySort={(sort) => registrySort.set(sort)}
+    onChangeRegistryView={(view) => registryView.set(view)}
+    onAddRegistryEntry={(entryId) => addNodeFromRegistry(entryId)}
+    iconModalOpen={iconModalOpen && Boolean(iconModalPipelineId)}
+    iconModalPipelineLabel={iconModalPipelineId ? pipelineLabelById(iconModalPipelineId) : ''}
+    bind:iconId={modalBindings.iconModalIconId}
+    bind:color={modalBindings.iconModalColor}
+    iconModalError={iconModalError}
+    iconModalSaving={iconModalSaving}
+    onCloseIconModal={closePipelineIconModal}
+    onSaveIcon={savePipelineIconSelection}
+    pluginProjectModalOpen={pluginProjectModalOpen}
+    bind:projectName={ideBindings.pluginProjectName}
+    bind:projectLanguage={ideBindings.pluginProjectLanguage}
+    pluginProjectError={pluginProjectError}
+    pluginProjectBusy={pluginProjectBusy}
+    onClosePluginProject={closePluginProjectModal}
+    onCreatePluginProject={createPluginProject}
+    createModalOpen={$createModalOpen}
+    createMode={createMode}
+    createName={createName}
+    createSourcePipelineId={createSourcePipelineId}
+    createSourceTemplateId={createSourceTemplateId}
+    createBusy={$createBusy}
+    createError={$createError}
+    pipelines={$pipelines}
+    templates={$templates}
+    pipelineForSource={pipelineForSource}
+    templateForSource={templateForSource}
+    onCloseCreate={closeCreateModal}
+    onCreate={createPipeline}
+    onTriggerImport={triggerPipelineImport}
+    onFileChange={handlePipelineImport}
+    bind:importInput={modalBindings.importInput}
+    deleteModalOpen={$deleteModalOpen}
+    deleteModalPipeline={$deleteModalPipeline}
+    deleteModalBusy={$deleteModalBusy}
+    deleteModalError={$deleteModalError}
+    onCloseDelete={closeDeleteModal}
+    onConfirmDelete={confirmDeletePipeline}
+    assignModalOpen={$assignModalOpen}
+    selectedPipeline={$selectedPipeline}
+    assignError={$assignError}
+    assignBusy={$assignBusy}
+    captureDevices={$captureDevices}
+    selectedCaptureSessionId={$selectedCaptureSessionId}
+    onSelectCaptureSession={setSelectedCaptureSession}
+    onCloseAssign={closeAssignModal}
+    onAttachPipeline={attachPipelineToDevice}
+  />
+{:else if shouldShowLoadingShell}
+  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/45 backdrop-blur-sm">
+    <div class="rounded border border-surface-700/70 bg-surface-950/90 px-4 py-3 text-xs uppercase tracking-[0.24em] text-surface-300 shadow-2xl shadow-black/40">
+      Loading pipeline tools…
+    </div>
+  </div>
+{/if}

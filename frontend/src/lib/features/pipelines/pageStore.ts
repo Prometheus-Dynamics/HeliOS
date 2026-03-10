@@ -6,7 +6,7 @@ import type { PipelinePagePayload } from '$lib/types/pipeline';
 export type PipelineActiveTab = 'pipeline' | 'tune';
 
 export function createPipelinePageStore(initial: PipelinePagePayload) {
-  const activeTab = writable<PipelineActiveTab>('tune');
+  const activeTab = writable<PipelineActiveTab>('pipeline');
   const registryDrawerOpen = writable(false);
   const pipelineUpdates = createPipelineUpdatesStore();
   const controller = createPipelineController(initial, { saveOverride: pipelineUpdates.saveOverride });

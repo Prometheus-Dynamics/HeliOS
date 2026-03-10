@@ -1,9 +1,15 @@
 <script lang="ts">
-  import ImuOrientationViewer from '$lib/components/ImuOrientationViewer.svelte';
+  import { browser } from '$app/environment';
   import ImuAxesGraph from '$lib/features/systems/components/ImuAxesGraph.svelte';
   import type { ImuAxes, ImuStatus } from '$lib/types/systems';
+  import { createLazySvelteComponentLoader } from '$lib/utils/lazySvelteComponent';
 
   type ImuStatusBadge = { label: string; tone: 'success' | 'warning' | 'error' | 'muted' };
+  type ImuOrientationViewerComponent = (typeof import('$lib/components/ImuOrientationViewer.svelte'))['default'];
+
+  const imuOrientationViewerLoader = createLazySvelteComponentLoader<ImuOrientationViewerComponent>(
+    () => import('$lib/components/ImuOrientationViewer.svelte')
+  );
 
   type Props = {
     imu: ImuStatus;
@@ -115,6 +121,10 @@
     formatLoadError
   }: Props = $props();
 
+  let ImuOrientationViewerComponent = $state<ImuOrientationViewerComponent | null>(
+    imuOrientationViewerLoader.current()
+  );
+
   const formatVectorValue = (value: number | null | undefined, digits = 2): string => {
     if (typeof value === 'number' && Number.isFinite(value)) {
       return value.toFixed(digits);
@@ -126,6 +136,15 @@
     const clamped = Math.min(1, Math.max(0, value));
     return `${Math.round(clamped * 100)}%`;
   };
+
+  async function ensureImuOrientationViewer(): Promise<void> {
+    ImuOrientationViewerComponent ??= await imuOrientationViewerLoader.load();
+  }
+
+  $effect(() => {
+    if (!browser) return;
+    void ensureImuOrientationViewer();
+  });
 
 </script>
 
@@ -161,7 +180,13 @@
           >
             Reset position
           </button>
-          <ImuOrientationViewer orientation={imu.orientation} imu={imu} />
+          {#if ImuOrientationViewerComponent}
+            <ImuOrientationViewerComponent orientation={imu.orientation} imu={imu} />
+          {:else}
+            <div class="flex h-full min-h-[17rem] items-center justify-center rounded border border-surface-800/60 bg-surface-950/35 text-xs text-surface-500">
+              Loading IMU viewer…
+            </div>
+          {/if}
         </div>
 
         <div class="grid grid-cols-3 gap-2 text-sm text-surface-200">

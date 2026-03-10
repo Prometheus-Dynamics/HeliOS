@@ -3,7 +3,7 @@
   import CameraLayoutEditor from './CameraLayoutEditor.svelte';
   import CameraLayoutViewport from './CameraLayoutViewport.svelte';
   import CameraPoseForm from './CameraPoseForm.svelte';
-  import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rig';
+  import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rigDefaults';
   import { rigLayoutStore } from '$lib/stores/rigLayout';
   import type { RigCameraInfo, RobotDimensions } from '$lib/types/rig';
   import { DeviceService, type UpdateRobotDimensionsRequest } from '$lib/ts-bindings/http/client';

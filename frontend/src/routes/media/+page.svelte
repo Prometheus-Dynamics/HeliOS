@@ -2,13 +2,15 @@
   import { browser } from '$app/environment';
   import { onDestroy, onMount } from 'svelte';
   import { get } from 'svelte/store';
-  import { toaster } from '$lib';
+  import { toaster } from '$lib/toaster';
+  import { subscribeDomainInvalidations } from '$lib/api/invalidation';
+  import { scheduleAfterPaint } from '$lib/utils/browserSchedule';
   import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
   import { getVirtualWindow } from '$lib/ui/virtualViewport';
   import { createBackoffTimer } from '$lib/utils/backoff';
   import { cancelDebounce, scheduleDebounce, type DebounceHandle } from '$lib/utils/debounce';
   import { readStorage, removeStorage } from '$lib/utils/storage';
-  import { connectRealtimeUpdatesStream, type RealtimeUpdateEvent } from '$lib/api/realtimeUpdates';
+  import { realtimeUpdateMatchesKind, type RealtimeUpdateEvent } from '$lib/api/realtimeUpdates';
   import { subscribeMediaMutations } from '$lib/features/media/mutations';
   import MediaFilters from '$lib/components/media/MediaFilters.svelte';
   import MediaLibraryPanel from '$lib/features/media/page/MediaLibraryPanel.svelte';
@@ -43,7 +45,7 @@
     normalizeProgress,
     type UploadToastContext
   } from '$lib/features/media/page/mediaUploadProgress';
-  import { SvelteURL } from 'svelte/reactivity';
+  import { createMediaDisplayWorker, createMediaFilterWorker } from '$lib/workers/factories';
 
   type FilterOption = 'all' | MediaAssetType;
   type SortMode = MediaClientSort;
@@ -82,7 +84,6 @@
   const STREAM_LABELS_CACHE_STALE_MS = 30_000;
   const STREAM_LABELS_CACHE_MAX_MS = 120_000;
   const MEDIA_OPEN_ASSET_KEY = 'helios.media.openAsset';
-  const LIVE_UPDATES_RECONNECT_MS = 1_500;
   const LIVE_UPDATES_REFRESH_DEBOUNCE_MS = 350;
   const MEDIA_MUTATION_REFRESH_DEBOUNCE_MS = 150;
 
@@ -118,6 +119,7 @@ let uploadLabelFile = $state<File | null>(null);
 let uploadModelInputResolution = $state('');
 let uploadModelTensorSpec = $state('');
 let uploading = $state(false);
+let mediaBooting = $state(true);
 let uploadToastId = $state<string | null>(null);
 let viewFilter = $state<FilterOption>('all');
 let streamFilter = $state<string>('all');
@@ -138,14 +140,12 @@ let mediaFilterWorker: Worker | null = null;
 let mediaFilterRequestId = 0;
 let mediaFilterLastHandled = 0;
 let mediaFilterTimeout: DebounceHandle = null;
-let liveUpdatesCleanup: (() => void) | null = null;
-let liveUpdatesReconnectHandle: number | null = null;
-let liveUpdatesRefreshHandle: number | null = null;
 let mediaMutationRefreshHandle: ReturnType<typeof setTimeout> | null = null;
-let liveUpdatesNonce = 0;
 let mediaScrollTop = $state(0);
 let mediaViewportHeight = $state(0);
 let mediaViewportWidth = $state(0);
+let cancelMediaBootstrap: (() => void) | null = null;
+let cancelMediaDisplayBootstrap: (() => void) | null = null;
 const mediaRefreshTimer = createBackoffTimer({ baseMs: MEDIA_REFRESH_BASE_MS, maxMs: MEDIA_REFRESH_MAX_MS });
 
 const unsubscribeMediaMutations = subscribeMediaMutations(() => {
@@ -195,21 +195,29 @@ const {
         pendingOpenAssetId = null;
       }
     }
-    if (typeof Worker !== 'undefined') {
-      mediaFilterWorker = new Worker(new SvelteURL('$lib/workers/mediaFilterWorker.ts', import.meta.url), { type: 'module' });
-      mediaFilterWorker.onmessage = (event) => {
-        const payload = event.data as { requestId: number; filtered?: MediaAsset[] };
-        if (payload.requestId < mediaFilterLastHandled) return;
-        mediaFilterLastHandled = payload.requestId;
-        mediaFilterTimeout = cancelDebounce(mediaFilterTimeout);
-        filteredAssets = Array.isArray(payload.filtered) ? payload.filtered : [];
-      };
-    }
-    syncMediaFilters(true);
-    void mediaAssets.refreshStreamLabels();
-    connectLiveUpdates();
-    scheduleMediaRefresh();
-
+    cancelMediaBootstrap = scheduleAfterPaint(() => {
+      if (typeof Worker !== 'undefined') {
+        mediaFilterWorker = createMediaFilterWorker();
+        mediaFilterWorker.onmessage = (event) => {
+          const payload = event.data as { requestId: number; filtered?: MediaAsset[] };
+          if (payload.requestId < mediaFilterLastHandled) return;
+          mediaFilterLastHandled = payload.requestId;
+          mediaFilterTimeout = cancelDebounce(mediaFilterTimeout);
+          filteredAssets = Array.isArray(payload.filtered) ? payload.filtered : [];
+        };
+      }
+      void bootstrapMediaPage();
+    }, 1);
+    const stopLiveUpdates = subscribeDomainInvalidations(
+      ['media', 'streams', 'pipelines', 'localization'],
+      (event) => {
+        if (document.hidden) return;
+        if (!shouldApplyLiveUpdate(event)) return;
+        void mediaAssets.refreshStreamLabels();
+        void refreshAssets({ resetPage: false, includeCounts: true });
+      },
+      { debounceMs: LIVE_UPDATES_REFRESH_DEBOUNCE_MS }
+    );
     const syncKeys = (event: KeyboardEvent) => {
       shiftDown = event.shiftKey;
       ctrlDown = event.ctrlKey || event.metaKey;
@@ -245,6 +253,9 @@ const {
     window.addEventListener('blur', clearKeys, { passive: true });
     window.addEventListener('pointerup', onPointerUp, { passive: true });
     return () => {
+      stopLiveUpdates();
+      cancelMediaBootstrap?.();
+      cancelMediaBootstrap = null;
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', clearKeys);
@@ -253,12 +264,14 @@ const {
   });
 
   onMount(() => {
-    if (typeof Worker === 'undefined') return;
-    mediaDisplayWorker = new Worker(new SvelteURL('$lib/workers/mediaDisplayWorker.ts', import.meta.url), { type: 'module' });
-    mediaDisplayWorker.onmessage = (event) => {
-      const payload = event.data as { display?: typeof mediaDisplay };
-      mediaDisplay = payload?.display ?? {};
-    };
+    cancelMediaDisplayBootstrap = scheduleAfterPaint(() => {
+      if (typeof Worker === 'undefined') return;
+      mediaDisplayWorker = createMediaDisplayWorker();
+      mediaDisplayWorker.onmessage = (event) => {
+        const payload = event.data as { display?: typeof mediaDisplay };
+        mediaDisplay = payload?.display ?? {};
+      };
+    }, 2);
   });
 
   $effect(() => {
@@ -286,9 +299,10 @@ const {
 
   onDestroy(() => {
     unsubscribeMediaMutations();
-    disconnectLiveUpdates();
     mediaRefreshTimer.cancel();
     mediaAssets.destroy();
+    cancelMediaDisplayBootstrap?.();
+    cancelMediaDisplayBootstrap = null;
     if (mediaMutationRefreshHandle !== null) {
       clearTimeout(mediaMutationRefreshHandle);
       mediaMutationRefreshHandle = null;
@@ -382,70 +396,15 @@ const {
     ) {
       return true;
     }
-    if (event.kind === 'api') {
+    if (realtimeUpdateMatchesKind(event, 'api')) {
       return false;
     }
-    return event.kind === 'media' || event.kind === 'streams' || event.kind === 'pipelines' || event.kind === 'localization';
-  }
-
-  function scheduleLiveUpdatesRefresh(): void {
-    if (!browser) return;
-    if (liveUpdatesRefreshHandle != null) return;
-    liveUpdatesRefreshHandle = window.setTimeout(() => {
-      liveUpdatesRefreshHandle = null;
-      if (document.hidden) return;
-      void mediaAssets.refreshStreamLabels();
-      void refreshAssets({ resetPage: false, includeCounts: true });
-    }, LIVE_UPDATES_REFRESH_DEBOUNCE_MS);
-  }
-
-  function scheduleLiveUpdatesReconnect(): void {
-    if (!browser) return;
-    if (liveUpdatesReconnectHandle != null) return;
-    liveUpdatesReconnectHandle = window.setTimeout(() => {
-      liveUpdatesReconnectHandle = null;
-      connectLiveUpdates();
-    }, LIVE_UPDATES_RECONNECT_MS);
-  }
-
-  function disconnectLiveUpdates(): void {
-    liveUpdatesNonce += 1;
-    if (liveUpdatesReconnectHandle != null) {
-      clearTimeout(liveUpdatesReconnectHandle);
-      liveUpdatesReconnectHandle = null;
-    }
-    if (liveUpdatesRefreshHandle != null) {
-      clearTimeout(liveUpdatesRefreshHandle);
-      liveUpdatesRefreshHandle = null;
-    }
-    liveUpdatesCleanup?.();
-    liveUpdatesCleanup = null;
-  }
-
-  function connectLiveUpdates(): void {
-    if (!browser) return;
-    const nonce = (liveUpdatesNonce += 1);
-    if (liveUpdatesReconnectHandle != null) {
-      clearTimeout(liveUpdatesReconnectHandle);
-      liveUpdatesReconnectHandle = null;
-    }
-    liveUpdatesCleanup?.();
-    liveUpdatesCleanup = null;
-    liveUpdatesCleanup = connectRealtimeUpdatesStream({
-      onChange: (event) => {
-        if (nonce !== liveUpdatesNonce) return;
-        if (!shouldApplyLiveUpdate(event)) return;
-        scheduleLiveUpdatesRefresh();
-      },
-      onClose: () => {
-        if (nonce !== liveUpdatesNonce) return;
-        scheduleLiveUpdatesReconnect();
-      },
-      onError: () => {
-        if (nonce !== liveUpdatesNonce) return;
-        scheduleLiveUpdatesReconnect();
-      }
-    });
+    return (
+      realtimeUpdateMatchesKind(event, 'media') ||
+      realtimeUpdateMatchesKind(event, 'streams') ||
+      realtimeUpdateMatchesKind(event, 'pipelines') ||
+      realtimeUpdateMatchesKind(event, 'localization')
+    );
   }
 
   $effect(() => {
@@ -543,7 +502,20 @@ const {
     });
   }
 
-  function syncMediaFilters(resetPage = true): void {
+  async function bootstrapMediaPage(): Promise<void> {
+    mediaBooting = true;
+    syncMediaFilters(true, false);
+    try {
+      await Promise.all([
+        mediaAssets.refreshStreamLabels(),
+        refreshAssets({ resetPage: true, includeCounts: true })
+      ]);
+    } finally {
+      mediaBooting = false;
+    }
+  }
+
+  function syncMediaFilters(resetPage = true, refresh = true): void {
     if (resetPage) {
       selection.clear();
     }
@@ -555,7 +527,7 @@ const {
         sort: serverSort,
         cameraSource: source
       },
-      { refresh: true, resetPage }
+      { refresh, resetPage }
     );
     if (source) {
       mediaAssets.rememberStream(source);
@@ -851,7 +823,7 @@ const {
 
     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-6 overflow-hidden">
       <MediaLibraryPanel
-        loading={loading}
+        loading={mediaBooting || loading}
         loadingMore={loadingMore}
         hasMore={hasMore}
         filteredCount={filteredAssets.length}

@@ -1,12 +1,19 @@
 <script lang="ts">
-  import ImuOrientationViewer from '$lib/components/ImuOrientationViewer.svelte';
+  import { browser } from '$app/environment';
   import type { PeripheralEntry, SensorOrientation } from '$lib/types/devices';
   import type { ImuStatus } from '$lib/types/systems';
+  import { createLazySvelteComponentLoader } from '$lib/utils/lazySvelteComponent';
 
   import SensorModalShell from './SensorModalShell.svelte';
   import PeripheralStats from './PeripheralStats.svelte';
   import FirmwareUpdaterPanel from './FirmwareUpdaterPanel.svelte';
   import SensorTelemetryPanel from './SensorTelemetryPanel.svelte';
+
+  type ImuOrientationViewerComponent = (typeof import('$lib/components/ImuOrientationViewer.svelte'))['default'];
+
+  const imuOrientationViewerLoader = createLazySvelteComponentLoader<ImuOrientationViewerComponent>(
+    () => import('$lib/components/ImuOrientationViewer.svelte')
+  );
 
   type FirmwareStatus = PeripheralEntry['firmware'];
 
@@ -66,6 +73,10 @@
     onFirmwareSelectionChange
   }: Props = $props();
 
+  let ImuOrientationViewerComponent = $state<ImuOrientationViewerComponent | null>(
+    imuOrientationViewerLoader.current()
+  );
+
   const statusLabel = $derived(() => {
     if (!imu) return 'No samples yet';
     if (imu.lastError && imu.lastError.trim().length) return `Error · ${imu.lastError}`;
@@ -86,6 +97,15 @@
     rollSeries = [...rollSeries, orientation.roll].slice(-HISTORY_MAX);
     pitchSeries = [...pitchSeries, orientation.pitch].slice(-HISTORY_MAX);
     yawSeries = [...yawSeries, orientation.yaw].slice(-HISTORY_MAX);
+  });
+
+  async function ensureImuOrientationViewer(): Promise<void> {
+    ImuOrientationViewerComponent ??= await imuOrientationViewerLoader.load();
+  }
+
+  $effect(() => {
+    if (!browser) return;
+    void ensureImuOrientationViewer();
   });
 </script>
 
@@ -108,7 +128,13 @@
         </div>
       </div>
 
-      <ImuOrientationViewer orientation={orientation} />
+      {#if ImuOrientationViewerComponent}
+        <ImuOrientationViewerComponent orientation={orientation} />
+      {:else}
+        <div class="flex min-h-[18rem] items-center justify-center rounded-xl border border-surface-800 bg-surface-950/50 text-xs text-surface-500">
+          Loading IMU viewer…
+        </div>
+      {/if}
       <PeripheralStats {peripheral} calibrationLabel="Interval" calibrationValue="5ms" />
     </div>
   {/snippet}

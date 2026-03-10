@@ -13,6 +13,7 @@ import type { PipelineNodeDiagnostics, PipelineNodeHeatmapPayload } from './pipe
 import { typeKey } from './pipeline-graph/utils';
 import { gpuSegmentColor } from './pipeline-graph/gpuOverlay';
 import PipelinePortList from './pipeline-node/PipelinePortList.svelte';
+import PipelinePortHandles from './pipeline-node/PipelinePortHandles.svelte';
 import NodeHeader from './pipeline-node/NodeHeader.svelte';
 import NodePorts from './pipeline-node/NodePorts.svelte';
 import NodeStatus from './pipeline-node/NodeStatus.svelte';
@@ -21,16 +22,18 @@ import { pixelColorInputAction } from './pipeline-node/pixelInputs';
 import { formatHeatTime, formatHeatDelta } from './pipeline-node/heatUtils';
 import { buildNodeHeatmapState } from './pipeline-node/nodeHeatmapState';
 import {
+  buildCompactPortHandleList,
   buildPortList,
   normalizePortName,
   normalizeString
 } from './pipeline-node/portUtils';
 import { createPortHandlers } from './pipeline-node/portHandlers';
 import {
+  type CompactPortHandle,
   type PipelineNodeData,
   type PortSyncAssignments
 } from './pipeline-node/types';
-  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+import { SvelteMap } from 'svelte/reactivity';
 const SYNC_GROUP_COLORS = ['#38bdf8', '#f472b6', '#a855f7', '#f97316', '#22d3ee', '#facc15'];
 
 const props = $props<{ selected?: boolean; data?: PipelineNodeData }>();
@@ -40,6 +43,7 @@ const node = $derived(data?.node);
 const apiNode = $derived(data?.apiNode ?? null);
 const registryEntry = $derived((data?.registryEntry ?? null) as PipelineRegistryEntry | null);
 const nodeHeatmapMode = $derived(Boolean(data?.heatmapMode));
+const nodeDetailLevel = $derived((data?.detailLevel ?? 'full') as 'minimal' | 'full');
 const nodeGpuSegment = $derived((data?.gpuSegment ?? null) as number | null);
 const nodeGpuPeers = $derived((data?.gpuPeers ?? null) as number | null);
 const gpuOverlayEnabled = $derived(Boolean(data?.gpuOverlay));
@@ -70,8 +74,8 @@ const nodeHasDiagnostics = $derived(
         nodeDiagnostics.outputPorts.length > 0)
   )
 );
-const inputPortIssues = $derived(new SvelteSet(nodeDiagnostics?.inputPorts ?? []));
-const outputPortIssues = $derived(new SvelteSet(nodeDiagnostics?.outputPorts ?? []));
+const inputPortIssueIds = $derived((nodeDiagnostics?.inputPorts ?? []) as string[]);
+const outputPortIssueIds = $derived((nodeDiagnostics?.outputPorts ?? []) as string[]);
 const portIssueMessages = $derived((nodeDiagnostics?.portMessages ?? null) as Record<string, string[]> | null);
 const nodeHighlight = $derived(
   (data?.highlight ?? null) as { port: string | null; token: number | null } | null
@@ -82,10 +86,21 @@ const nodeSyncOverlay = $derived(
 );
 const nodeSyncModeActive = $derived(Boolean(nodeSyncOverlay?.enabled));
 const nodeSyncFocusActive = $derived(Boolean(nodeSyncOverlay?.enabled && nodeSyncOverlay.focus));
+const activeConnection = $derived(data?.activeConnection ?? null);
+const searchTokens = $derived((data?.searchTokens ?? []) as string[]);
+const searchActive = $derived(Boolean(data?.searchActive) && searchTokens.length > 0);
+const nodeSearchMatch = $derived(Boolean(data?.searchMatch));
+const showDetailedNode = $derived(
+  selected ||
+    nodeDetailLevel === 'full' ||
+    nodeHighlightActive ||
+    Boolean(activeConnection) ||
+    searchActive
+);
 type DaedalusSyncGroup = { name?: string; ports?: string[] };
 const nodeSyncPortAssignments = $derived.by<PortSyncAssignments>(() => {
   const assignments = new SvelteMap<string, { groupId: string; color: string }>();
-  if (!nodeSyncOverlay?.enabled) {
+  if (!showDetailedNode || !nodeSyncOverlay?.enabled) {
     return assignments;
   }
   const legacyGroups = node?.sync?.groups ?? null;
@@ -133,9 +148,6 @@ const nodeStyle = $derived(
 );
 const nodePalette = $derived(buildNodePalette(nodeStyle, nodeHeatmapMode));
 const nodeHeatmap = $derived((data?.heatmap ?? null) as PipelineNodeHeatmapPayload | null);
-const searchTokens = $derived((data?.searchTokens ?? []) as string[]);
-const searchActive = $derived(Boolean(data?.searchActive) && searchTokens.length > 0);
-const nodeSearchMatch = $derived(Boolean(data?.searchMatch));
 const nodeCardBackground = $derived((() => nodePalette.background)());
 const nodeBorderColor = $derived((() => nodePalette.border)());
 const nodeHeaderColor = $derived((() => nodePalette.header)());
@@ -343,6 +355,7 @@ type BadgeTone = 'default' | 'info' | 'warning' | 'error';
 type Badge = { label: string; tone: BadgeTone; tooltip?: string };
 const badges = $derived(
   (() => {
+    if (!showDetailedNode) return [];
     const items: Badge[] = (metaTags ?? []).map((label) => ({ label, tone: 'default' as BadgeTone }));
     if (childLinkState) {
       const statusLabel = (() => {
@@ -379,14 +392,13 @@ const badges = $derived(
     return items;
   })()
 );
-const activeConnection = $derived(data?.activeConnection ?? null);
 const buildPorts = (direction: 'input' | 'output') =>
   buildPortList({
     direction,
     node,
     apiNode,
     registryEntry,
-    issuePortSet: direction === 'input' ? inputPortIssues : outputPortIssues,
+    issuePortSet: new Set(direction === 'input' ? inputPortIssueIds : outputPortIssueIds),
     issuePortMessages: portIssueMessages,
     highlightedPortName,
     searchTokens,
@@ -396,10 +408,23 @@ const buildPorts = (direction: 'input' | 'output') =>
     syncModeActive: nodeSyncModeActive
   });
 
-const inputPorts = $derived(buildPorts('input'));
-const outputPorts = $derived(buildPorts('output'));
+const inputPorts = $derived.by(() => (showDetailedNode ? buildPorts('input') : []));
+const outputPorts = $derived.by(() => (showDetailedNode ? buildPorts('output') : []));
+const buildCompactHandles = (direction: 'input' | 'output'): CompactPortHandle[] =>
+  buildCompactPortHandleList({
+    direction,
+    node,
+    apiNode,
+    order: direction === 'input' ? data?.inputOrder : data?.outputOrder,
+    nodeBaseId,
+    issuePortNames: direction === 'input' ? inputPortIssueIds : outputPortIssueIds,
+    highlightedPortName
+  });
+const compactInputHandles = $derived.by(() => (showDetailedNode ? [] : buildCompactHandles('input')));
+const compactOutputHandles = $derived.by(() => (showDetailedNode ? [] : buildCompactHandles('output')));
 const portSearchMatch = $derived.by(
   () =>
+    showDetailedNode &&
     searchActive &&
     (inputPorts.some((port) => port.isSearchMatch) || outputPorts.some((port) => port.isSearchMatch))
 );
@@ -423,7 +448,7 @@ function resolvePortStateClass(direction: 'input' | 'output', type: PipelineData
 }
 
 const portHandlers = $derived.by(() =>
-  createPortHandlers({ data: data ?? undefined, node: node ?? undefined, nodeBaseId })
+  showDetailedNode ? createPortHandlers({ data: data ?? undefined, node: node ?? undefined, nodeBaseId }) : null
 );
 </script>
 
@@ -446,7 +471,7 @@ const portHandlers = $derived.by(() =>
   data-search-active={searchActive ? 'true' : undefined}
   data-search-match={nodeSearchHit ? 'true' : undefined}
 >
-  {#if badges.length}
+  {#if showDetailedNode && badges.length}
     <div class="pointer-events-none absolute right-16 top-2 flex max-w-[9rem] flex-wrap justify-end gap-[2px] text-[0.45rem] font-semibold uppercase tracking-[0.18em] pipeline-node__badge-list">
       {#each badges as badge (badge.label)}
         <span
@@ -473,7 +498,7 @@ const portHandlers = $derived.by(() =>
       metaClassName="text-micro uppercase tracking-[0.12em]"
     >
       {#snippet meta()}
-        {#if gpuOverlayEnabled && gpuBadge}
+        {#if showDetailedNode && gpuOverlayEnabled && gpuBadge}
           <span
             class="gpu-badge"
             title={gpuBadge.tooltip}
@@ -487,30 +512,30 @@ const portHandlers = $derived.by(() =>
             {/if}
           </span>
         {/if}
-        {#if runtimeWarning}
+        {#if showDetailedNode && runtimeWarning}
           <span class="runtime-warning-chip" title={runtimeWarningTitle}>
             ⚠ Runtime
           </span>
         {/if}
-        {#if nodeWarningMessages.length > 0}
+        {#if showDetailedNode && nodeWarningMessages.length > 0}
           <NodeStatus label={`⚠ ${nodeWarningMessages.length}`} tone="warn" title={nodeWarningMessages.join('\n')} />
         {/if}
       {/snippet}
     </NodeHeader>
-    {#if summary}
+    {#if showDetailedNode && summary}
       <p class="break-words text-xs font-medium leading-4 pipeline-node__summary">{summary}</p>
     {/if}
-    {#if runtimeWarning}
+    {#if showDetailedNode && runtimeWarning}
       <p class="break-words text-[0.72rem] leading-4 text-amber-100/90">
         {runtimeWarning.message}
       </p>
     {/if}
-    {#if nodeWarningMessages.length > 0}
+    {#if showDetailedNode && nodeWarningMessages.length > 0}
       <p class="break-words text-[0.72rem] leading-4 text-amber-100/90">
         {nodeWarningMessages[0]}
       </p>
     {/if}
-    {#if childLinkState}
+    {#if showDetailedNode && childLinkState}
       <p class="text-micro font-semibold uppercase tracking-[0.18em] text-surface-300/80">
         {#if childLinkState.alias}
           Pipeline: {childLinkState.alias}
@@ -521,7 +546,7 @@ const portHandlers = $derived.by(() =>
         {/if}
       </p>
     {/if}
-    {#if nodeHeatLegend}
+    {#if showDetailedNode && nodeHeatLegend}
       <div
         class="mt-1 flex flex-wrap items-center justify-between gap-2 text-[0.58rem] uppercase tracking-[0.18em] pipeline-node__heat"
         title={nodeHeatLegend.tooltip}
@@ -541,30 +566,48 @@ const portHandlers = $derived.by(() =>
     {/if}
   </header>
 
-  <NodeActions
-    isGroup={nodeIsGroup}
-  />
+  {#if showDetailedNode}
+    <NodeActions
+      isGroup={nodeIsGroup}
+    />
+  {/if}
 
   <NodePorts className="px-2 pb-2.5 pt-2" showLabels={false}>
     {#snippet inputs()}
-      <PipelinePortList
-        direction="input"
-        ports={inputPorts}
-        handlers={portHandlers}
-        resolvePortStateClass={resolvePortStateClass}
-        pixelColorInputAction={pixelColorInputAction}
-        emptyLabel="No inputs"
-      />
+      {#if showDetailedNode && portHandlers}
+        <PipelinePortList
+          direction="input"
+          ports={inputPorts}
+          handlers={portHandlers}
+          resolvePortStateClass={resolvePortStateClass}
+          pixelColorInputAction={pixelColorInputAction}
+          emptyLabel="No inputs"
+        />
+      {:else}
+        <PipelinePortHandles
+          direction="input"
+          handles={compactInputHandles}
+          emptyLabel="No inputs"
+        />
+      {/if}
     {/snippet}
     {#snippet outputs()}
-      <PipelinePortList
-        direction="output"
-        ports={outputPorts}
-        handlers={portHandlers}
-        resolvePortStateClass={resolvePortStateClass}
-        pixelColorInputAction={pixelColorInputAction}
-        emptyLabel="No outputs"
-      />
+      {#if showDetailedNode && portHandlers}
+        <PipelinePortList
+          direction="output"
+          ports={outputPorts}
+          handlers={portHandlers}
+          resolvePortStateClass={resolvePortStateClass}
+          pixelColorInputAction={pixelColorInputAction}
+          emptyLabel="No outputs"
+        />
+      {:else}
+        <PipelinePortHandles
+          direction="output"
+          handles={compactOutputHandles}
+          emptyLabel="No outputs"
+        />
+      {/if}
     {/snippet}
   </NodePorts>
 </article>

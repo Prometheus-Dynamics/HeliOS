@@ -3,6 +3,7 @@
 
   import { toaster } from '$lib';
   import { apiUrl } from '$lib/api/httpClient';
+  import { apiFetchResponse } from '$lib/api/core/http';
   import { resourceTelemetryStore, type ResourceSample } from '$lib/api/telemetry';
   import type { PeripheralEntry } from '$lib/types/devices';
   import SensorModalShell from './SensorModalShell.svelte';
@@ -356,7 +357,7 @@
     if (!silent) refreshingStatus = true;
     try {
       const url = apiUrl('/peripherals/fan');
-      const response = await fetch(url, { headers: { Accept: 'application/json' } });
+      const response = await apiFetchResponse(url, { headers: { Accept: 'application/json' } });
       if (!response.ok) {
         const text = await response.text().catch(() => '');
         throw new Error(text || `Fan status request failed (${response.status})`);

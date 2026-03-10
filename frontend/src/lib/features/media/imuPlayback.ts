@@ -1,4 +1,5 @@
 import { browser } from '$app/environment';
+import { apiFetchResponse } from '$lib/api/core/http';
 import { mapImuStatus, type ImuStatusResponse } from '$lib/api/systems/mappers';
 import type { ImuStatus } from '$lib/types/systems';
 
@@ -58,7 +59,7 @@ function parseLine(line: string): MediaImuSample | null {
 
 export async function loadMediaImuSamples(url: string, signal?: AbortSignal): Promise<MediaImuSample[]> {
   if (!browser) return [];
-  const response = await fetch(url, {
+  const response = await apiFetchResponse(url, {
     method: 'GET',
     signal,
     headers: {
@@ -83,7 +84,7 @@ export async function loadMediaImuSamples(url: string, signal?: AbortSignal): Pr
 
 export async function loadMediaFrameTimeline(url: string, signal?: AbortSignal): Promise<MediaFrameTimeline | null> {
   if (!browser) return null;
-  const response = await fetch(url, {
+  const response = await apiFetchResponse(url, {
     method: 'GET',
     signal,
     headers: {

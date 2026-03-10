@@ -1,5 +1,6 @@
 import { writable, type Readable } from 'svelte/store';
 import { apiUrl } from '$lib/api/httpClient';
+import { apiFetch } from '$lib/api/core/http';
 import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
 import { emptyImuStatus, mapImuStatus, refreshImuStatus, updateImuConfig } from '$lib/api/systemsPage';
 import { createBackoffTimer } from '$lib/utils/backoff';
@@ -174,12 +175,7 @@ export function createSensorTelemetryController(options: { pollMs?: number } = {
     state.update((current) => ({ ...current, powerLoading: true, powerError: null }));
     try {
       const url = apiUrl('/device/power');
-      const response = await fetch(url, { headers: { Accept: 'application/json' } });
-      if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        throw new Error(text || `Power request failed (${response.status})`);
-      }
-      const json = await response.json();
+      const json = await apiFetch<unknown>(url, { headers: { Accept: 'application/json' } });
       state.update((current) => ({
         ...current,
         powerStatus: normalizePowerStatus(json),

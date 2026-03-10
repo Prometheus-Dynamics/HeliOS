@@ -707,14 +707,17 @@ if [[ "$UPLOAD" == "1" ]]; then
   }
 
   ensure_remote_plugin_env() {
-    # Keep engine/api pointed at the deploy plugin dir even when doing a plugin-only deploy.
+    # Keep engine/api pointed at both the writable deploy plugin dir and the system plugin dir.
+    # Do not set HELIOS_DAEDALUS_PLUGIN_DIR here: that single-dir override masks system plugins.
+    local plugin_dirs="${PLUGIN_DIR_REMOTE}:/usr/lib/helios/plugins/daedalus"
     ssh_exec "sh -lc 'install -d -m0755 \"$PLUGIN_DIR_REMOTE\"; \
       for f in /etc/default/helios-engine /etc/default/helios-api; do \
         touch \"\$f\"; \
-        if grep -q \"^HELIOS_DAEDALUS_PLUGIN_DIR=\" \"\$f\"; then \
-          sed -i \"s|^HELIOS_DAEDALUS_PLUGIN_DIR=.*|HELIOS_DAEDALUS_PLUGIN_DIR=$PLUGIN_DIR_REMOTE|\" \"\$f\"; \
+        sed -i \"/^HELIOS_DAEDALUS_PLUGIN_DIR=/d\" \"\$f\"; \
+        if grep -q \"^HELIOS_DAEDALUS_PLUGIN_DIRS=\" \"\$f\"; then \
+          sed -i \"s|^HELIOS_DAEDALUS_PLUGIN_DIRS=.*|HELIOS_DAEDALUS_PLUGIN_DIRS=$plugin_dirs|\" \"\$f\"; \
         else \
-          echo \"HELIOS_DAEDALUS_PLUGIN_DIR=$PLUGIN_DIR_REMOTE\" >> \"\$f\"; \
+          echo \"HELIOS_DAEDALUS_PLUGIN_DIRS=$plugin_dirs\" >> \"\$f\"; \
         fi; \
       done'"
   }

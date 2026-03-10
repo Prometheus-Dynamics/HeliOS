@@ -2,8 +2,6 @@
   import FaIcon from '$lib/components/icons/FaIcon.svelte';
   import { faPencil } from '@fortawesome/free-solid-svg-icons';
   import StreamPreview from '$lib/components/StreamPreview.svelte';
-  import CameraControlsTab from '$lib/features/devices/camera/CameraControlsTab.svelte';
-  import CameraPipelinesTab from '$lib/features/devices/camera/CameraPipelinesTab.svelte';
   import PipelineStreamOverridesPanel from '$lib/components/pipelines/PipelineStreamOverridesPanel.svelte';
   import PipelineUiEditorPanel from '$lib/components/pipelines/PipelineUiEditorPanel.svelte';
   import PipelineUiOverridesPanel from '$lib/components/pipelines/PipelineUiOverridesPanel.svelte';
@@ -258,6 +256,47 @@
   };
 
   let tuneMetricsSort = $state<'desc' | 'asc'>('desc');
+  let CameraControlsTabComponent = $state<(typeof import('$lib/features/devices/camera/CameraControlsTab.svelte'))['default'] | null>(null);
+  let CameraPipelinesTabComponent = $state<(typeof import('$lib/features/devices/camera/CameraPipelinesTab.svelte'))['default'] | null>(null);
+  const tunePanelLoads: Partial<Record<'controls' | 'layout', Promise<void>>> = {};
+
+  function loadTunePanelOnce(key: 'controls' | 'layout', loader: () => Promise<void>): Promise<void> {
+    const inFlight = tunePanelLoads[key];
+    if (inFlight) {
+      return inFlight;
+    }
+    const next = loader().finally(() => {
+      tunePanelLoads[key] = undefined;
+    });
+    tunePanelLoads[key] = next;
+    return next;
+  }
+
+  async function loadCameraControlsTab(): Promise<void> {
+    if (CameraControlsTabComponent) return;
+    await loadTunePanelOnce('controls', async () => {
+      const module = await import('$lib/features/devices/camera/CameraControlsTab.svelte');
+      CameraControlsTabComponent = module.default;
+    });
+  }
+
+  async function loadCameraPipelinesTab(): Promise<void> {
+    if (CameraPipelinesTabComponent) return;
+    await loadTunePanelOnce('layout', async () => {
+      const module = await import('$lib/features/devices/camera/CameraPipelinesTab.svelte');
+      CameraPipelinesTabComponent = module.default;
+    });
+  }
+
+  $effect(() => {
+    if (tunePerformanceTab === 'controls') {
+      void loadCameraControlsTab();
+      return;
+    }
+    if (tunePerformanceTab === 'layout') {
+      void loadCameraPipelinesTab();
+    }
+  });
 
   const pipelineOutputOptions = $derived.by(() => {
     if (!tunePlan) return [];
@@ -1009,26 +1048,33 @@
             </div>
           {:else}
             <div class="h-full min-h-0 overflow-y-auto pr-1">
-              <CameraControlsTab
-                controls={tuneStreamControls}
-                bind:controlsQuery={tuneControlsQuery}
-                bind:showReadOnlyControls={tuneShowReadOnlyControls}
-                bind:controlState={tuneControlState}
-                bind:controlAppliedState={tuneControlAppliedState}
-                bind:controlBusy={tuneControlBusy}
-                filteredControls={tuneFilteredControls}
-                menuOptions={menuOptions}
-                applyControl={applyStreamControl}
-                scheduleControlApply={scheduleControlApply}
-                displayValue={displayControlValue}
-                extractValue={extractControlValue}
-                controlMin={controlMin}
-                controlMax={controlMax}
-                controlStep={controlStep}
-                accessLabel={accessLabel}
-                accessBadgeClass={accessBadgeClass}
-                compact
-              />
+              {#if CameraControlsTabComponent}
+                {@const CameraControlsTab = CameraControlsTabComponent}
+                <CameraControlsTab
+                  controls={tuneStreamControls}
+                  bind:controlsQuery={tuneControlsQuery}
+                  bind:showReadOnlyControls={tuneShowReadOnlyControls}
+                  bind:controlState={tuneControlState}
+                  bind:controlAppliedState={tuneControlAppliedState}
+                  bind:controlBusy={tuneControlBusy}
+                  filteredControls={tuneFilteredControls}
+                  menuOptions={menuOptions}
+                  applyControl={applyStreamControl}
+                  scheduleControlApply={scheduleControlApply}
+                  displayValue={displayControlValue}
+                  extractValue={extractControlValue}
+                  controlMin={controlMin}
+                  controlMax={controlMax}
+                  controlStep={controlStep}
+                  accessLabel={accessLabel}
+                  accessBadgeClass={accessBadgeClass}
+                  compact
+                />
+              {:else}
+                <div class="rounded border border-surface-800/60 bg-surface-900/60 px-3 py-2 text-xs uppercase tracking-[0.24em] text-surface-400">
+                  Loading control tools…
+                </div>
+              {/if}
             </div>
           {/if}
         {:else if tunePerformanceTab === 'outputs'}
@@ -1045,53 +1091,60 @@
               Start a stream to manage multiplex layout.
             </div>
           {:else}
-            <CameraPipelinesTab
-              pipelineGraphError={tuneMultiplexError}
-              openPipelineAssignModal={() => {}}
-              pipelineGraphLoading={false}
-              assignedPipelineIds={tuneMultiplexPalettePipelineIds}
-              handlePipelineDragStart={(pipelineId, from) => startTuneMultiplexDrag(pipelineId, from)}
-              RAW_PIPELINE_ID={RAW_STREAM_PIPELINE_ID}
-              RAW_PIPELINE_UUID={RAW_STREAM_PIPELINE_UUID}
-              pipelineLabel={pipelineLabelById}
-              openPipelineTuningPanel={undefined}
-              openPipelineRemoveModal={() => (tunePipelineRemoveModalOpen = true)}
-              pipelineGridIsSingle={tuneMultiplexGridIsSingle}
-              setPipelineGridDimensions={setTuneMultiplexGridDimensions}
-              bind:pipelineGridRows={tuneMultiplexRows}
-              bind:pipelineGridColumns={tuneMultiplexColumns}
-              pipelineGridRowIndices={tuneMultiplexRowIndices}
-              pipelineGridColumnIndices={tuneMultiplexColumnIndices}
-              pipelineForCell={tunePipelineForCell}
-              outputSelectionForPipeline={tuneOutputSelectionForPipeline}
-              outputKeyForCell={tuneOutputKeyForCell}
-              pipelineWires={tuneLayoutWires}
-              setFrameSourceForPipelineInstance={setTuneLayoutFrameSourceForPipelineInstance}
-              pipelineOutputOptionsCache={tuneMultiplexOutputOptionsCache}
-              gridSignature={tuneMultiplexLayoutSignature}
-              allowDrop={tuneAllowDrop}
-              dropOnCell={dropTuneMultiplexOn}
-              clearCell={clearTuneMultiplexCell}
-              refreshPipelineGraphs={undefined}
-              bind:selectedPipelineOutput={tuneSelectedPipelineOutput}
-              setOutputSelectionForPipeline={setTuneOutputSelectionForPipeline}
-              setOutputKeyForCell={setTuneOutputKeyForCell}
-              setLivePipelineOutput={setTuneLivePipelineOutput}
-              bind:pipelineRemoveModalOpen={tunePipelineRemoveModalOpen}
-              bind:pipelineRemoveCandidateId={tunePipelineRemoveCandidateId}
-              closePipelineRemoveModal={() => (tunePipelineRemoveModalOpen = false)}
-              confirmPipelineRemove={() => {}}
-              bind:pipelineAssignModalOpen={tunePipelineAssignModalOpen}
-              bind:pipelineAssignQuery={tunePipelineAssignQuery}
-              bind:pipelineAssignDraft={tunePipelineAssignDraft}
-              pipelineAssignFilteredGraphs={tunePipelineAssignFilteredGraphs}
-              pipelineGraphs={tunePipelineGraphs}
-              closePipelineAssignModal={() => (tunePipelineAssignModalOpen = false)}
-              savePipelineAssignModal={() => {}}
-              showAssignControls={false}
-              showRemoveControls={false}
-              schedulePipelineLayoutApply={scheduleTuneMultiplexAutoApply}
-            />
+            {#if CameraPipelinesTabComponent}
+              {@const CameraPipelinesTab = CameraPipelinesTabComponent}
+              <CameraPipelinesTab
+                pipelineGraphError={tuneMultiplexError}
+                openPipelineAssignModal={() => {}}
+                pipelineGraphLoading={false}
+                assignedPipelineIds={tuneMultiplexPalettePipelineIds}
+                handlePipelineDragStart={(pipelineId, from) => startTuneMultiplexDrag(pipelineId, from)}
+                RAW_PIPELINE_ID={RAW_STREAM_PIPELINE_ID}
+                RAW_PIPELINE_UUID={RAW_STREAM_PIPELINE_UUID}
+                pipelineLabel={pipelineLabelById}
+                openPipelineTuningPanel={undefined}
+                openPipelineRemoveModal={() => (tunePipelineRemoveModalOpen = true)}
+                pipelineGridIsSingle={tuneMultiplexGridIsSingle}
+                setPipelineGridDimensions={setTuneMultiplexGridDimensions}
+                bind:pipelineGridRows={tuneMultiplexRows}
+                bind:pipelineGridColumns={tuneMultiplexColumns}
+                pipelineGridRowIndices={tuneMultiplexRowIndices}
+                pipelineGridColumnIndices={tuneMultiplexColumnIndices}
+                pipelineForCell={tunePipelineForCell}
+                outputSelectionForPipeline={tuneOutputSelectionForPipeline}
+                outputKeyForCell={tuneOutputKeyForCell}
+                pipelineWires={tuneLayoutWires}
+                setFrameSourceForPipelineInstance={setTuneLayoutFrameSourceForPipelineInstance}
+                pipelineOutputOptionsCache={tuneMultiplexOutputOptionsCache}
+                gridSignature={tuneMultiplexLayoutSignature}
+                allowDrop={tuneAllowDrop}
+                dropOnCell={dropTuneMultiplexOn}
+                clearCell={clearTuneMultiplexCell}
+                refreshPipelineGraphs={undefined}
+                bind:selectedPipelineOutput={tuneSelectedPipelineOutput}
+                setOutputSelectionForPipeline={setTuneOutputSelectionForPipeline}
+                setOutputKeyForCell={setTuneOutputKeyForCell}
+                setLivePipelineOutput={setTuneLivePipelineOutput}
+                bind:pipelineRemoveModalOpen={tunePipelineRemoveModalOpen}
+                bind:pipelineRemoveCandidateId={tunePipelineRemoveCandidateId}
+                closePipelineRemoveModal={() => (tunePipelineRemoveModalOpen = false)}
+                confirmPipelineRemove={() => {}}
+                bind:pipelineAssignModalOpen={tunePipelineAssignModalOpen}
+                bind:pipelineAssignQuery={tunePipelineAssignQuery}
+                bind:pipelineAssignDraft={tunePipelineAssignDraft}
+                pipelineAssignFilteredGraphs={tunePipelineAssignFilteredGraphs}
+                pipelineGraphs={tunePipelineGraphs}
+                closePipelineAssignModal={() => (tunePipelineAssignModalOpen = false)}
+                savePipelineAssignModal={() => {}}
+                showAssignControls={false}
+                showRemoveControls={false}
+                schedulePipelineLayoutApply={scheduleTuneMultiplexAutoApply}
+              />
+            {:else}
+              <div class="rounded border border-surface-800/60 bg-surface-900/60 px-3 py-2 text-xs uppercase tracking-[0.24em] text-surface-400">
+                Loading layout tools…
+              </div>
+            {/if}
           {/if}
         {/if}
       </div>

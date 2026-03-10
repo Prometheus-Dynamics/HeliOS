@@ -1,11 +1,14 @@
 <script lang="ts">
   import { browser } from '$app/environment';
   import { onDestroy, onMount } from 'svelte';
-  import { toaster } from '$lib';
+  import { toaster } from '$lib/toaster';
+  import { subscribeDomainInvalidations } from '$lib/api/invalidation';
+  import { apiFetchResponse } from '$lib/api/core/http';
+  import { scheduleAfterPaint, scheduleWhenIdle } from '$lib/utils/browserSchedule';
   import { apiUrl } from '$lib/api/httpClient';
   import { openStreamMetricsSocket } from '$lib/api/streamMetrics';
   import { StreamsApi } from '$lib/api/streamsApi';
-  import { connectRealtimeUpdatesStream, type RealtimeUpdateEvent } from '$lib/api/realtimeUpdates';
+  import { realtimeUpdateMatchesKind, type RealtimeUpdateEvent } from '$lib/api/realtimeUpdates';
   import { imuQuaternionToThree } from '$lib/utils/imuFrames';
   import {
     LocalizationService,
@@ -13,9 +16,9 @@
     type StreamInfo,
     type StreamMetrics
   } from '$lib/ts-bindings/http/client';
-  import type { LocalizationMarker, LocalizationViewMode } from '$lib';
+  import type { LocalizationMarker, LocalizationViewMode } from '$lib/features/localization/viewers/localizationViewerTypes';
   import type { RigCameraInfo, RobotDimensions } from '$lib/types/rig';
-  import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rig';
+  import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rigDefaults';
   import { rigLayoutStore } from '$lib/stores/rigLayout';
   import { formatMeters, parseLengthToMeters } from '$lib/utils/units';
   import SidebarSearchSection from '$lib/components/filters/SidebarSearchSection.svelte';
@@ -218,7 +221,6 @@
   const LOCAL_TAG_POSE_REFRESH_MS = 250;
   const FIELD_POSE_LINGER_MS = 5000;
   const FIELD_POSE_REFRESH_MS = 250;
-  const LIVE_UPDATES_RECONNECT_MS = 1_500;
   const LIVE_UPDATES_REFRESH_DEBOUNCE_MS = 400;
   const LIVE_SOURCES_REFRESH_MIN_INTERVAL_MS = 5_000;
   const bumperId = '0000';
@@ -438,7 +440,7 @@
     if (calibration && typeof calibration === 'object') {
       return;
     }
-    const response = await fetch(apiUrl(`/streams/${encodeURIComponent(streamId)}/calibration/save`), {
+    const response = await apiFetchResponse(apiUrl(`/streams/${encodeURIComponent(streamId)}/calibration/save`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify(DEFAULT_LOCALIZATION_CALIBRATION)
@@ -1188,6 +1190,15 @@
   let fieldMapSelection = $state('');
   let openSourceGroups = $state<string[]>([]);
   let streamInfos = $state<StreamInfo[]>([]);
+  let localizationBootLoading = $state(true);
+  let localizationBootError = $state<string | null>(null);
+  let cancelLocalizationBootstrap: (() => void) | null = null;
+  let cancelLocalizationViewersWarmup: (() => void) | null = null;
+  let localizationDisposed = false;
+  const hasLocalizationBootstrapData = $derived(
+    Boolean(($localizationConfig?.profiles?.length ?? 0) || sources.length || fieldMaps.length)
+  );
+  const showLocalizationBootLoading = $derived(localizationBootLoading && !hasLocalizationBootstrapData);
   let cameraPovSelectionId = $state('');
   let cameraPovFovMode = $state<CameraPovFovMode>('undistorted');
   const ROBOT_FOLLOW_POV_OPTION_ID = '__robot_follow__';
@@ -1206,12 +1217,10 @@
 
   let pollVisibilityPaused = false;
   let visibilityHandler: (() => void) | null = null;
-  let liveUpdatesCleanup: (() => void) | null = null;
-  let liveUpdatesReconnectHandle: number | null = null;
+  let stopLiveUpdates: (() => void) | null = null;
   let liveUpdatesRefreshHandle: number | null = null;
   let liveUpdatesRefreshSourcesPending = false;
   let lastLiveSourcesRefreshAtMs = 0;
-  let liveUpdatesNonce = 0;
 
   let LocalizationViewersComponent = $state<
     (typeof import('$lib/components/LocalizationViewers.svelte'))['default'] | null
@@ -1995,17 +2004,17 @@
     ) {
       return true;
     }
-    if (event.kind === 'api') {
+    if (realtimeUpdateMatchesKind(event, 'api')) {
       return false;
     }
     return (
-      event.kind === 'localization' ||
-      event.kind === 'streams' ||
-      event.kind === 'pipelines' ||
-      event.kind === 'media' ||
-      event.kind === 'imu' ||
-      event.kind === 'device' ||
-      event.kind === 'settings'
+      realtimeUpdateMatchesKind(event, 'localization') ||
+      realtimeUpdateMatchesKind(event, 'streams') ||
+      realtimeUpdateMatchesKind(event, 'pipelines') ||
+      realtimeUpdateMatchesKind(event, 'media') ||
+      realtimeUpdateMatchesKind(event, 'imu') ||
+      realtimeUpdateMatchesKind(event, 'device') ||
+      realtimeUpdateMatchesKind(event, 'settings')
     );
   }
 
@@ -2023,7 +2032,7 @@
     ) {
       return true;
     }
-    if (event.kind === 'streams' || event.kind === 'pipelines') {
+    if (realtimeUpdateMatchesKind(event, 'streams') || realtimeUpdateMatchesKind(event, 'pipelines')) {
       return true;
     }
     return false;
@@ -2062,56 +2071,6 @@
       liveUpdatesRefreshSourcesPending = false;
       refreshLocalizationLiveState({ refreshSources });
     }, LIVE_UPDATES_REFRESH_DEBOUNCE_MS);
-  }
-
-  function scheduleLiveUpdatesReconnect(): void {
-    if (!browser) return;
-    if (liveUpdatesReconnectHandle != null) return;
-    liveUpdatesReconnectHandle = window.setTimeout(() => {
-      liveUpdatesReconnectHandle = null;
-      connectLiveUpdates();
-    }, LIVE_UPDATES_RECONNECT_MS);
-  }
-
-  function disconnectLiveUpdates(): void {
-    liveUpdatesNonce += 1;
-    if (liveUpdatesReconnectHandle != null) {
-      clearTimeout(liveUpdatesReconnectHandle);
-      liveUpdatesReconnectHandle = null;
-    }
-    if (liveUpdatesRefreshHandle != null) {
-      clearTimeout(liveUpdatesRefreshHandle);
-      liveUpdatesRefreshHandle = null;
-    }
-    liveUpdatesRefreshSourcesPending = false;
-    liveUpdatesCleanup?.();
-    liveUpdatesCleanup = null;
-  }
-
-  function connectLiveUpdates(): void {
-    if (!browser) return;
-    const nonce = (liveUpdatesNonce += 1);
-    if (liveUpdatesReconnectHandle != null) {
-      clearTimeout(liveUpdatesReconnectHandle);
-      liveUpdatesReconnectHandle = null;
-    }
-    liveUpdatesCleanup?.();
-    liveUpdatesCleanup = null;
-    liveUpdatesCleanup = connectRealtimeUpdatesStream({
-      onChange: (event) => {
-        if (nonce !== liveUpdatesNonce) return;
-        if (!shouldApplyLiveUpdate(event)) return;
-        scheduleLiveUpdatesRefresh(event);
-      },
-      onClose: () => {
-        if (nonce !== liveUpdatesNonce) return;
-        scheduleLiveUpdatesReconnect();
-      },
-      onError: () => {
-        if (nonce !== liveUpdatesNonce) return;
-        scheduleLiveUpdatesReconnect();
-      }
-    });
   }
 
   function computeActiveSolverConfig(profile: LocalizationProfile | null, requestedSolverId: string): LocalizationSolverConfig | null {
@@ -4432,32 +4391,60 @@
     }
   });
 
+  async function bootstrapLocalizationPage(): Promise<void> {
+    localizationBootLoading = true;
+    localizationBootError = null;
+    try {
+      await Promise.all([rigLayoutStore.refresh(), loadLocalizationCapabilities(), loadLocalizationConfig()]);
+      await Promise.all([loadSources(), loadStreamsSnapshot(), loadFieldMapList()]);
+      const seeded = await maybeSeedDefaultLocalizationProfile();
+      if (seeded) {
+        await Promise.all([loadLocalizationConfig(), loadSources(), loadStreamsSnapshot(), loadFieldMapList()]);
+      }
+      await loadPipelineTemplates();
+      const profileId = $localizationConfig?.activeProfileId ?? $localizationConfig?.profiles?.[0]?.id ?? null;
+      await loadPipelineStatus(profileId);
+      const profile =
+        $localizationConfig?.profiles?.find((entry) => entry.id === profileId) ?? $localizationConfig?.profiles?.[0] ?? null;
+      if (profile?.pipelineTemplateId) {
+        await loadPipelineOutputs(profile.id);
+      }
+    } catch (error) {
+      const description = error instanceof Error ? error.message : 'Failed to initialize localization page';
+      localizationBootError = description;
+      toaster.error({ title: 'Localization setup failed', description });
+    } finally {
+      if (!localizationDisposed) {
+        localizationBootLoading = false;
+      }
+    }
+  }
+
+  function retryLocalizationBootstrap(): void {
+    cancelLocalizationBootstrap?.();
+    cancelLocalizationBootstrap = scheduleAfterPaint(() => {
+      if (!localizationDisposed) {
+        void bootstrapLocalizationPage();
+      }
+    }, 1);
+  }
+
 
   onMount(() => {
-    void rigLayoutStore.refresh();
-    connectLiveUpdates();
-    void loadLocalizationCapabilities();
-    void (async () => {
-      try {
-        await loadLocalizationConfig();
-        await Promise.all([loadSources(), loadStreamsSnapshot(), loadFieldMapList()]);
-        const seeded = await maybeSeedDefaultLocalizationProfile();
-        if (seeded) {
-          await Promise.all([loadLocalizationConfig(), loadSources(), loadStreamsSnapshot(), loadFieldMapList()]);
-        }
-        await loadPipelineTemplates();
-        const profileId = $localizationConfig?.activeProfileId ?? $localizationConfig?.profiles?.[0]?.id ?? null;
-        await loadPipelineStatus(profileId);
-        const profile = $localizationConfig?.profiles?.find((entry) => entry.id === profileId) ?? $localizationConfig?.profiles?.[0] ?? null;
-        if (profile?.pipelineTemplateId) {
-          await loadPipelineOutputs(profile.id);
-        }
-      } catch (error) {
-        const description = error instanceof Error ? error.message : 'Failed to initialize localization page';
-        toaster.error({ title: 'Localization setup failed', description });
+    localizationDisposed = false;
+    stopLiveUpdates = subscribeDomainInvalidations(
+      ['localization', 'streams', 'pipelines', 'media', 'imu', 'device', 'settings'],
+      (event) => {
+        if (!shouldApplyLiveUpdate(event)) return;
+        scheduleLiveUpdatesRefresh(event);
       }
-    })();
-    void loadLocalizationViewers();
+    );
+    retryLocalizationBootstrap();
+    cancelLocalizationViewersWarmup = scheduleWhenIdle(() => {
+      if (!localizationDisposed) {
+        void loadLocalizationViewers();
+      }
+    }, { timeoutMs: 2200, fallbackMs: 900 });
     localizationStorage.loadFromStorage();
     selectedCustomFieldId = $customFields[0]?.id ?? null;
     selectedCustomFieldOriginId = $customFields[0]?.origins[0]?.id ?? null;
@@ -4483,7 +4470,18 @@
   });
 
   onDestroy(() => {
-    disconnectLiveUpdates();
+    localizationDisposed = true;
+    cancelLocalizationBootstrap?.();
+    cancelLocalizationBootstrap = null;
+    cancelLocalizationViewersWarmup?.();
+    cancelLocalizationViewersWarmup = null;
+    stopLiveUpdates?.();
+    stopLiveUpdates = null;
+    if (liveUpdatesRefreshHandle != null) {
+      clearTimeout(liveUpdatesRefreshHandle);
+      liveUpdatesRefreshHandle = null;
+    }
+    liveUpdatesRefreshSourcesPending = false;
     rigLayoutUnsubscribe();
     feedPoller.stop();
     for (const cleanup of streamMetricsCleanup.values()) {
@@ -4709,6 +4707,25 @@
     </aside>
 
     <div class="min-w-0 flex flex-1 flex-col">
+      {#if showLocalizationBootLoading}
+        <section class="flex min-h-0 flex-1 items-center justify-center rounded border border-surface-800/60 bg-surface-950/60 p-6 text-center">
+          <div class="max-w-xl space-y-3">
+            <p class="text-xs uppercase tracking-[0.3em] text-surface-500">Loading localization</p>
+            <h2 class="text-lg font-semibold text-white">Preparing profiles, sources, field maps, and solver state…</h2>
+            <p class="text-sm text-surface-400">The page has painted; the initial workspace data is loading in the background.</p>
+          </div>
+        </section>
+      {:else if localizationBootError && !hasLocalizationBootstrapData}
+        <section class="flex min-h-0 flex-1 items-center justify-center rounded border border-error-500/40 bg-error-500/10 p-6 text-center">
+          <div class="max-w-xl space-y-3">
+            <p class="text-xs uppercase tracking-[0.3em] text-error-200">Localization failed to load</p>
+            <h2 class="text-lg font-semibold text-white">{localizationBootError}</h2>
+            <button class="btn btn-sm preset-filled-primary-500 uppercase tracking-[0.3em]" type="button" onclick={retryLocalizationBootstrap}>
+              Retry
+            </button>
+          </div>
+        </section>
+      {:else}
       <LocalizationWorkspace
       viewersComponent={LocalizationViewersComponent}
 	      markers={viewerMarkers}
@@ -4865,6 +4882,7 @@
       onSetMapUploadFile={(file) => (mapUploadFile = file)}
       onUploadSelectedMapFile={uploadSelectedMapFile}
       />
+      {/if}
     </div>
   </section>
 </div>
