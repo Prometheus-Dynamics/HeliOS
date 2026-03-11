@@ -262,7 +262,7 @@ async function patchDeviceSettings(request: UpdateDeviceSettingsRequest): Promis
     operations.push(
       apiFetch<void>('/device/hostname', {
         method: 'POST',
-        body: JSON.stringify({ hostname: request.hostname })
+        body: { hostname: request.hostname }
       })
     );
     optimistic.hostname = request.hostname;
@@ -272,7 +272,7 @@ async function patchDeviceSettings(request: UpdateDeviceSettingsRequest): Promis
     operations.push(
       apiFetch<void>('/device/team', {
         method: 'POST',
-        body: JSON.stringify({ team_number: request.team_number })
+        body: { team_number: request.team_number }
       })
     );
     optimistic.team_number = typeof request.team_number === 'number' ? request.team_number : null;
@@ -285,7 +285,7 @@ async function patchDeviceSettings(request: UpdateDeviceSettingsRequest): Promis
         operations.push(
           apiFetch<void>('/device/network', {
             method: 'POST',
-            body: JSON.stringify({ name: entry.name, mode: 'Dynamic' })
+            body: { name: entry.name, mode: 'Dynamic' }
           })
         );
         continue;
@@ -297,7 +297,7 @@ async function patchDeviceSettings(request: UpdateDeviceSettingsRequest): Promis
         operations.push(
           apiFetch<void>('/device/network', {
             method: 'POST',
-            body: JSON.stringify({
+            body: {
               name: entry.name,
               mode: 'Static',
               ipv4: [{ address, prefix }],
@@ -305,7 +305,7 @@ async function patchDeviceSettings(request: UpdateDeviceSettingsRequest): Promis
               netmask: prefixToNetmask(prefix),
               gateway: gateway ?? null,
               gateways: gateway ? [gateway] : []
-            })
+            }
           })
         );
       }
@@ -316,7 +316,7 @@ async function patchDeviceSettings(request: UpdateDeviceSettingsRequest): Promis
     operations.push(
       apiFetch<void>('/device/nt4', {
         method: 'POST',
-        body: JSON.stringify(request.nt4)
+        body: request.nt4
       })
     );
     optimistic.nt4 = request.nt4;
@@ -326,7 +326,7 @@ async function patchDeviceSettings(request: UpdateDeviceSettingsRequest): Promis
     operations.push(
       apiFetch<void>('/device/lighting/config', {
         method: 'POST',
-        body: JSON.stringify({ lighting: request.lighting, requested_by: request.requested_by })
+        body: { lighting: request.lighting, requested_by: request.requested_by }
       })
     );
     optimistic.lighting = request.lighting;
@@ -336,7 +336,7 @@ async function patchDeviceSettings(request: UpdateDeviceSettingsRequest): Promis
     operations.push(
       apiFetch<void>('/device/usb-power', {
         method: 'POST',
-        body: JSON.stringify(request.usb_power)
+        body: request.usb_power
       })
     );
     optimistic.usb_power = request.usb_power;
@@ -346,7 +346,7 @@ async function patchDeviceSettings(request: UpdateDeviceSettingsRequest): Promis
     operations.push(
       apiFetch<void>('/device/fan/config', {
         method: 'POST',
-        body: JSON.stringify({ fan: request.fan, requested_by: request.requested_by })
+        body: { fan: request.fan, requested_by: request.requested_by }
       })
     );
     optimistic.fan = request.fan;

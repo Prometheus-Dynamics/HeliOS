@@ -33,8 +33,8 @@ export async function fetchPipelinePagePayload(): Promise<PipelinePagePayload> {
         const rawName = typeof entry?.name === 'string' ? entry.name.trim() : '';
         const name = rawName.length > 0 ? rawName : pipelineId;
         const updatedAtMs = typeof entry?.updated_at_ms === 'number' ? entry.updated_at_ms : null;
+        const timestamp = updatedAtMs ?? 0;
         return {
-          pipelineId,
           name,
           alias: name,
           issueCount: issueCountById.get(pipelineId) ?? 0,
@@ -46,8 +46,8 @@ export async function fetchPipelinePagePayload(): Promise<PipelinePagePayload> {
           status: 'draft' satisfies PipelineLifecycleStatus,
           revision: updatedAtMs ? String(updatedAtMs) : null,
           planHash: null,
-          createdAt: updatedAtMs ?? null,
-          updatedAt: updatedAtMs ?? null
+          createdAt: timestamp,
+          updatedAt: timestamp
         };
       })
       .filter((entry): entry is PipelineOverviewPipeline => Boolean(entry))

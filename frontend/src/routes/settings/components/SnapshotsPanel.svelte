@@ -123,10 +123,10 @@
     try {
       await apiFetch<DeviceSnapshotResponse>('/device/snapshots', {
         method: 'POST',
-        body: JSON.stringify({
+        body: {
           label: snapshotLabel.trim() || undefined,
           requested_by: REQUESTED_BY
-        })
+        }
       });
       snapshotLabel = '';
       snapshotStatus = 'Snapshot captured.';

@@ -84,9 +84,6 @@
   const FALLBACK_MAX_FLOW_HEIGHT = 1100;
   const VIEWPORT_PADDING = 160;
   const VIEWPORT_EPSILON = 0.0001;
-  const FULL_NODE_DETAIL_MIN_ZOOM = 0.55;
-  const MINIMAL_NODE_DETAIL_GRAPH_THRESHOLD = 60;
-
   type FlowApi = ReturnType<typeof useSvelteFlow>;
   let viewportHeight = $state(FALLBACK_MAX_FLOW_HEIGHT);
   if (typeof window !== 'undefined') {
@@ -174,8 +171,7 @@
   let initialFitFrame: number | null = null;
   let lastPublishedViewport: Viewport | null = null;
   let initialFitPending = true;
-  let nodeDetailLevel = $state<'minimal' | 'full'>('minimal');
-  const graphNodeCount = $derived.by(() => Object.keys(internalPlan.nodes ?? {}).length);
+  const nodeDetailLevel = 'full' as const;
 
   const isPixelPortEditor = $derived(Boolean(portEditor) && isPixelTypeKey(portEditor?.dataTypeKey ?? null));
   const pixelEditorState = $derived(
@@ -639,15 +635,6 @@
     scheduleInitialFit();
   });
 
-  $effect(() => {
-    const shouldKeepMinimalNodes =
-      initialFitPending ||
-      (graphNodeCount > MINIMAL_NODE_DETAIL_GRAPH_THRESHOLD && flowViewport.zoom < FULL_NODE_DETAIL_MIN_ZOOM);
-    const nextDetailLevel = shouldKeepMinimalNodes ? 'minimal' : 'full';
-    if (nodeDetailLevel !== nextDetailLevel) {
-      nodeDetailLevel = nextDetailLevel;
-    }
-  });
 </script>
 
 <PipelineGraphEditorView

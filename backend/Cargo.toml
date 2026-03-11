@@ -121,9 +121,10 @@ heck = "0.5.0"
 opt-level = 3  # Maximum optimization level (default for release)
 lto = true
 codegen-units = 1
-# Keep enough info for actionable on-device crash reports.
+# Keep symbol information for actionable on-device crash reports, but drop
+# DWARF debug payloads from production artifacts.
 debug = 1
-strip = "none"
+strip = "debuginfo"
 panic = "unwind"
 
 [profile.dev]

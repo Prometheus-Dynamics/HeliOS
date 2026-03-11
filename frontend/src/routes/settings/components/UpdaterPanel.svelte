@@ -429,7 +429,7 @@
       }
       const response = await apiFetch<UpdateAckResponse>(
         '/ota/apply',
-        { method: 'POST', body: JSON.stringify(payload) },
+        { method: 'POST', body: payload },
         { timeoutMs: 150_000 }
       );
       applyStatus = response.message || 'Apply scheduled';
@@ -471,7 +471,7 @@
     try {
       const response = await apiFetch<UpdateAckResponse>('/ota/cancel', {
         method: 'POST',
-        body: JSON.stringify({ update_id: currentState.update_id, requested_by: REQUESTED_BY })
+        body: { update_id: currentState.update_id, requested_by: REQUESTED_BY }
       });
       applyStatus = response.message || 'Update canceled';
       if (!streamConnected) {

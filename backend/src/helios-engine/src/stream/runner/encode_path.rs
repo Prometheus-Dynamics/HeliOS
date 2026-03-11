@@ -260,6 +260,9 @@ impl StreamRunner {
         self.stop_encoder_worker();
         self.encoder_last_activity_ms.store(0, Ordering::Relaxed);
         self.capture_started_wall = None;
+        self.capture_empty_since = None;
+        self.last_capture_ts = None;
+        self.last_capture_wall = None;
         if let Some(worker) = self.preview_worker.take() {
             worker.stop();
         }
@@ -270,6 +273,18 @@ impl StreamRunner {
         // Drop any cached full-res preview frame, plus per-thread packed frame pools, so repeated
         // start/stop + codec switching doesn't permanently retain peak allocations.
         self.last_preview_frame = None;
+        styx::codec::decoder::clear_packed_frame_pools_all_threads();
+    }
+
+    pub(crate) fn stop_capture_for_restart(&mut self) {
+        self.encoder_last_activity_ms.store(0, Ordering::Relaxed);
+        self.capture_started_wall = None;
+        self.capture_empty_since = None;
+        self.last_capture_ts = None;
+        self.last_capture_wall = None;
+        if let Some(mut session) = self.session.take() {
+            session.stop();
+        }
         styx::codec::decoder::clear_packed_frame_pools_all_threads();
     }
 
@@ -347,6 +362,10 @@ impl StreamRunner {
 
     pub fn descriptor(&self) -> Option<&CaptureDescriptor> {
         self.session.as_ref().and_then(|s| s.descriptor())
+    }
+
+    pub(crate) fn is_running(&self) -> bool {
+        self.session.is_some()
     }
 
     pub fn host(&self) -> GraphHandle {

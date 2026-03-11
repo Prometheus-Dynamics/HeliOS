@@ -672,7 +672,7 @@ async fn discover_peers(State(state): State<AppState>, Json(request): Json<PeerD
     }
     if scopes.iter().any(|scope| matches!(scope, PeerDiscoveryScope::Broadcast)) {
         for port in [5800_u16, 5801_u16] {
-            match lib_net::discover_peers(port).await {
+            match lib_net::discover_peers(port, timeout_secs).await {
                 Ok(peers) => {
                     for host in peers {
                         discovered_hosts.entry(host).or_default().insert(port);

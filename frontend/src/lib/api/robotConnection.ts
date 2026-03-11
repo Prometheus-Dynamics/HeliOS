@@ -53,7 +53,7 @@ async function fetchRobotConnection(): Promise<RobotConnectionState> {
       '/nt4/topics',
       {
         method: 'POST',
-        body: JSON.stringify({ host, port, prefix: '/', scan_ms: 250, limit: 32 })
+        body: { host, port, prefix: '/', scan_ms: 250, limit: 32 }
       },
       { timeoutMs: 1200, recordConnection: false }
     );

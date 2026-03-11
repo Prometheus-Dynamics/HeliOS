@@ -79,7 +79,7 @@
     try {
       const response = await apiFetch<BootloaderUpdateResponse>('/device/bootloader', {
         method: 'POST',
-        body: JSON.stringify({ confirm: true, reboot: true })
+        body: { confirm: true, reboot: true }
       });
       updateStatus = response?.message ?? 'Update staged. Rebooting to apply firmware.';
       await refreshStatus();

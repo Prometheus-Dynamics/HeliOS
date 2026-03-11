@@ -14,20 +14,20 @@ tensorflow-lite = true
 openssl = true
 openssh = true
 bash = true
-git = true
+git = false
 util-linux = true
 e2fsprogs = true
-nodejs-npm = true
+nodejs-npm = false
 python3 = true
-python3-pip = true
-python-setuptools = true
-python-wheel = true
+python-pip = false
+python-setuptools = false
+python-wheel = false
 openjdk = true
 rust = true
 gcc = true
 binutils = true
-clang = true
-llvm = true
+clang = false
+llvm = false
 cmake = true
 make = true
 ninja = true
@@ -35,7 +35,6 @@ gdb = true
 pkgconf = true
 systemd = true
 systemd_networkd = true
-nmap = true
 dnsmasq = true
 libcamera-apps = false
 libdrm = true
@@ -52,7 +51,7 @@ x265 = true
 openvscode-server = false
 parted = true
 lighttpd = true
-nodejs = true
+nodejs = false
 ffmpeg = true
 libcamera = true
 
@@ -90,7 +89,7 @@ BR2_PACKAGE_FFMPEG_PROTOCOLS = "file"
 BR2_PACKAGE_FFMPEG_FILTERS = "scale"
 
 # Node modules
-BR2_PACKAGE_NODEJS_MODULES_ADDITIONAL = "typescript esbuild"
+BR2_PACKAGE_NODEJS_MODULES_ADDITIONAL = ""
 
 # libcamera tuning
 BR2_PACKAGE_LIBCAMERA_V4L2 = true

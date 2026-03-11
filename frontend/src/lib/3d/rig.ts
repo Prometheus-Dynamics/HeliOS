@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { FontLoader, type Font } from 'three/examples/jsm/loaders/FontLoader.js';
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
-import helvetiker from 'three/examples/fonts/helvetiker_regular.typeface.json';
+import helvetikerRaw from 'three/examples/fonts/helvetiker_regular.typeface.json?raw';
 
 import type { PoseRotation, PoseVector, RigPose, RobotDimensions } from '$lib/types/rig';
 import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rigDefaults';
@@ -356,12 +356,15 @@ const DEFAULT_BUMPER_EMISSIVE = 0x330b0b;
 const DEFAULT_LABEL_COLOR = 0xf8fafc;
 
 type FontJson = Parameters<FontLoader['parse']>[0];
-const orientationFontSource = helvetiker as FontJson;
+let orientationFontSource: FontJson | null = null;
 let orientationFont: Font | null = null;
 
 function ensureOrientationFont(): Font | null {
   if (orientationFont) return orientationFont;
   try {
+    if (!orientationFontSource) {
+      orientationFontSource = JSON.parse(helvetikerRaw) as FontJson;
+    }
     orientationFont = new FontLoader().parse(orientationFontSource);
   } catch {
     orientationFont = null;

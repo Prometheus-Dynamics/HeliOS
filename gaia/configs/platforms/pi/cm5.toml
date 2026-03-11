@@ -7,7 +7,9 @@ imports = [
 ]
 
 [buildroot]
-expand_size_mb = 2300
+
+[buildroot.symbols]
+BR2_TARGET_ROOTFS_EXT2_SIZE = "300M"
 
 [buildroot.rpi]
 board = "cm5"

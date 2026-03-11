@@ -58,3 +58,4 @@ mode = 420
 [[items]]
 artifact = "helios-frontend"
 dest = "/opt/helios/frontend"
+replace = true

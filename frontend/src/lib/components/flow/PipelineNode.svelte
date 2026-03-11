@@ -430,6 +430,9 @@ const portSearchMatch = $derived.by(
 );
 const nodeSearchHit = $derived(searchActive && (nodeSearchMatch || portSearchMatch));
 const nodeSearchDim = $derived(searchActive && !nodeSearchHit);
+const showInteractivePortEditors = $derived(
+  selected || nodeHighlightActive || Boolean(activeConnection)
+);
 
 function resolvePortStateClass(direction: 'input' | 'output', type: PipelineDataType): string {
   if (!activeConnection) return '';
@@ -579,6 +582,7 @@ const portHandlers = $derived.by(() =>
           direction="input"
           ports={inputPorts}
           handlers={portHandlers}
+          interactive={showInteractivePortEditors}
           resolvePortStateClass={resolvePortStateClass}
           pixelColorInputAction={pixelColorInputAction}
           emptyLabel="No inputs"
@@ -597,6 +601,7 @@ const portHandlers = $derived.by(() =>
           direction="output"
           ports={outputPorts}
           handlers={portHandlers}
+          interactive={showInteractivePortEditors}
           resolvePortStateClass={resolvePortStateClass}
           pixelColorInputAction={pixelColorInputAction}
           emptyLabel="No outputs"

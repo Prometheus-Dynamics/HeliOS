@@ -195,6 +195,43 @@ pub(crate) fn run_stream_worker(mut runner: StreamRunner, command_rx: mpsc::Rece
             break;
         }
 
+        if !runner.is_running() {
+            let since_last = last_restart.elapsed();
+            if since_last < Duration::from_millis(250) {
+                std::thread::sleep(Duration::from_millis(250) - since_last);
+            }
+
+            restart_attempts = restart_attempts.saturating_add(1);
+            last_restart = Instant::now();
+            let backoff_ms = if restart_attempts <= 5 { 250 } else { 1500 };
+            tracing::warn!(
+                stream_id = ?stream_id,
+                attempt = restart_attempts,
+                backoff_ms,
+                "stream capture is not running; retrying capture session start"
+            );
+            std::thread::sleep(Duration::from_millis(backoff_ms));
+
+            match runner.start() {
+                Ok(()) => {
+                    tracing::info!(stream_id = ?stream_id, "stream capture start retry succeeded");
+                    command_wait = COMMAND_IDLE_MIN;
+                    if restart_attempts > 5 {
+                        restart_attempts = 0;
+                    }
+                    continue;
+                }
+                Err(start_err) => {
+                    tracing::warn!(stream_id = ?stream_id, error = %start_err, "stream capture start retry failed");
+                    command_wait = COMMAND_IDLE_MIN;
+                    if restart_attempts > 5 {
+                        restart_attempts = 0;
+                    }
+                    continue;
+                }
+            }
+        }
+
         match runner.pump_host_once() {
             Ok(true) => {
                 command_wait = COMMAND_IDLE_MIN;
@@ -237,15 +274,21 @@ pub(crate) fn run_stream_worker(mut runner: StreamRunner, command_rx: mpsc::Rece
                         // Reset the counter after the longer backoff so we keep trying forever.
                         1500
                     };
+                    let full_restart = restart_attempts >= 3;
                     tracing::warn!(
                         stream_id = ?stream_id,
                         attempt = restart_attempts,
                         backoff_ms,
+                        full_restart,
                         error = %err,
                         "stream capture stalled; restarting capture session"
                     );
 
-                    runner.stop();
+                    if full_restart {
+                        runner.stop();
+                    } else {
+                        runner.stop_capture_for_restart();
+                    }
                     let mut restart_delay_ms = backoff_ms;
                     if usb_recovery_enabled && restart_attempts >= usb_recovery_attempts && runner.uses_usb_v4l2_capture() {
                         let since_usb_recovery = last_usb_recovery.elapsed();

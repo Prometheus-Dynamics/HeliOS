@@ -131,7 +131,7 @@
       verifyUploadedBytes(uploadFile.size, upload.size_bytes, 'Plugin upload');
       await apiFetch('/plugins/install', {
         method: 'POST',
-        body: JSON.stringify({ upload_name: upload.name })
+        body: { upload_name: upload.name }
       });
       await loadPlugins();
       closeUploadModal();

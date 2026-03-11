@@ -114,13 +114,13 @@
         '/nt4/topics',
         {
           method: 'POST',
-          body: JSON.stringify({
+          body: {
             host,
             port,
             prefix: '/',
             scan_ms: 550,
             limit: 20000
-          })
+          }
         },
         { timeoutMs: 1600, recordConnection: false }
       );
@@ -166,7 +166,7 @@
         '/nt4/value',
         {
           method: 'POST',
-          body: JSON.stringify({ host, port, topic })
+          body: { host, port, topic }
         },
         { timeoutMs: 1600, recordConnection: false }
       );

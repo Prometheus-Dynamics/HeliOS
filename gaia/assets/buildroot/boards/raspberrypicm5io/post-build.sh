@@ -61,6 +61,8 @@ fi
 
 PRUNE_SCRIPT="${REPO_ROOT}/assets/buildroot/post-build/prune-rootfs.sh"
 if [ -n "${REPO_ROOT}" ] && [ -x "${PRUNE_SCRIPT}" ]; then
+    : "${PRUNE_HWDB:=1}"
+    export PRUNE_HWDB
     "${PRUNE_SCRIPT}"
 else
     echo "post-build: prune-rootfs.sh not found/executable (repo_root='${REPO_ROOT}'); skipping prune" >&2
