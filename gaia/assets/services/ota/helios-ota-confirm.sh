@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 
-# Determine current root device
 canon() { readlink -f "$1" 2>/dev/null || echo "$1"; }
+
 set_label() {
   dev="$1"
   label="$2"
@@ -10,23 +10,121 @@ set_label() {
   e2label "$dev" "$label" >/dev/null 2>&1 && return 0
   return 1
 }
-rootdev=""
-root_mm=$(awk '$5=="/"{print $3}' /proc/self/mountinfo | head -n 1)
-if [ -n "$root_mm" ]; then
-  for devpath in /sys/class/block/*/dev; do
-    [ -e "$devpath" ] || continue
-    if [ "$(cat "$devpath" 2>/dev/null)" = "$root_mm" ]; then
-      rootdev="/dev/$(basename "$(dirname "$devpath")")"
-      break
-    fi
-  done
-fi
-if [ -z "$rootdev" ]; then
-  rootdev=$(awk '$2=="/"{print $1}' /proc/mounts)
-fi
-rootcanon=$(canon "$rootdev")
 
-# Find label of current root by matching /dev/disk/by-label symlinks
+disk_from_part() {
+  case "$1" in
+    /dev/mmcblk*p[0-9]*|/dev/nvme*n*p[0-9]*)
+      printf '%s\n' "${1%p[0-9]*}"
+      ;;
+    /dev/*[0-9]*)
+      printf '%s\n' "${1%[0-9]*}"
+      ;;
+    *)
+      printf '%s\n' "$1"
+      ;;
+  esac
+}
+
+part_dev() {
+  base="$1"
+  part="$2"
+  case "$base" in
+    *[0-9]) printf '%s\n' "${base}p${part}" ;;
+    *) printf '%s\n' "${base}${part}" ;;
+  esac
+}
+
+boot_part_from_config() {
+  [ -r /etc/helios/bootloader.conf ] || return 1
+  awk -F= '$1=="boot_partition"{print $2}' /etc/helios/bootloader.conf | head -n 1
+}
+
+find_boot_dev() {
+  boot_dev=""
+  if [ -e /dev/disk/by-label/BOOT ]; then
+    boot_dev=$(canon /dev/disk/by-label/BOOT)
+  fi
+  if [ -z "$boot_dev" ]; then
+    cfg_boot="$(boot_part_from_config || true)"
+    if [ -n "$cfg_boot" ] && [ -e "$cfg_boot" ]; then
+      boot_dev=$(canon "$cfg_boot")
+    fi
+  fi
+  if [ -z "$boot_dev" ] && [ -e /dev/disk/by-label/DATA ]; then
+    data_dev=$(canon /dev/disk/by-label/DATA)
+    boot_dev=$(part_dev "$(disk_from_part "$data_dev")" 1)
+  fi
+  if [ -z "$boot_dev" ] && [ -n "$rootdev" ]; then
+    boot_dev=$(part_dev "$(disk_from_part "$rootdev")" 1)
+  fi
+  [ -b "$boot_dev" ] || return 1
+  printf '%s\n' "$boot_dev"
+}
+
+dev_partuuid() {
+  dev="$1"
+  sys="/sys/class/block/$(basename "$dev")/uevent"
+  awk -F= '$1=="PARTUUID"{print $2}' "$sys" 2>/dev/null || true
+}
+
+slot_from_value() {
+  value="$1"
+  slot_a_name="$2"
+  slot_a_dev="$3"
+  slot_b_name="$4"
+  slot_b_dev="$5"
+
+  case "$value" in
+    "$slot_a_name"|"$slot_b_name")
+      printf '%s\n' "$value"
+      return 0
+      ;;
+    PARTUUID=*)
+      target_puuid="${value#PARTUUID=}"
+      [ -n "$target_puuid" ] || return 1
+      if [ "$target_puuid" = "$(dev_partuuid "$slot_a_dev")" ]; then
+        printf '%s\n' "$slot_a_name"
+        return 0
+      fi
+      if [ "$target_puuid" = "$(dev_partuuid "$slot_b_dev")" ]; then
+        printf '%s\n' "$slot_b_name"
+        return 0
+      fi
+      ;;
+    /dev/*)
+      target_dev=$(canon "$value")
+      if [ "$target_dev" = "$(canon "$slot_a_dev")" ]; then
+        printf '%s\n' "$slot_a_name"
+        return 0
+      fi
+      if [ "$target_dev" = "$(canon "$slot_b_dev")" ]; then
+        printf '%s\n' "$slot_b_name"
+        return 0
+      fi
+      ;;
+  esac
+
+  return 1
+}
+
+find_rootdev() {
+  root_mm=$(awk '$5=="/"{print $3}' /proc/self/mountinfo | head -n 1)
+  if [ -n "$root_mm" ]; then
+    for devpath in /sys/class/block/*/dev; do
+      [ -e "$devpath" ] || continue
+      if [ "$(cat "$devpath" 2>/dev/null)" = "$root_mm" ]; then
+        printf '/dev/%s\n' "$(basename "$(dirname "$devpath")")"
+        return 0
+      fi
+    done
+  fi
+  awk '$2=="/"{print $1}' /proc/mounts | head -n 1
+}
+
+rootdev="$(find_rootdev)"
+rootcanon="$(canon "$rootdev")"
+cmdline_root="$(awk 'BEGIN{RS=" "}/^root=/{print substr($0,6)}' /proc/cmdline | head -n 1)"
+
 rootlabel=""
 for l in /dev/disk/by-label/*; do
   [ -e "$l" ] || continue
@@ -39,98 +137,111 @@ for l in /dev/disk/by-label/*; do
   fi
 done
 
-root_puuid=""
-cmdline_root=$(awk 'BEGIN{RS=" "}/^root=/{print substr($0,6)}' /proc/cmdline | head -n 1)
-case "$cmdline_root" in
-  PARTUUID=*) root_puuid="${cmdline_root#PARTUUID=}" ;;
-esac
-if [ -z "$root_puuid" ] && [ -n "$rootdev" ]; then
-  sys="/sys/class/block/$(basename "$rootdev")/uevent"
-  root_puuid=$(awk -F= '$1=="PARTUUID"{print $2}' "$sys" 2>/dev/null || true)
-fi
-
-dev_partuuid() {
-  dev="$1"
-  sys="/sys/class/block/$dev/uevent"
-  awk -F= '$1=="PARTUUID"{print $2}' "$sys" 2>/dev/null || true
-}
-
-slot_a_dev="/dev/mmcblk0p2"
-slot_b_dev="/dev/mmcblk0p3"
-slot_a_puuid=$(dev_partuuid "mmcblk0p2")
-slot_b_puuid=$(dev_partuuid "mmcblk0p3")
-
-# Mount BOOT to check pending marker
-mkdir -p /mnt/boot
-if mountpoint -q /mnt/boot; then
-  :
+boot_mount="/mnt/boot"
+mounted_boot=0
+if mountpoint -q /boot; then
+  boot_mount="/boot"
 else
-  if [ -e /dev/disk/by-label/BOOT ]; then
-    mount -o rw /dev/disk/by-label/BOOT /mnt/boot || true
+  mkdir -p "$boot_mount"
+  if ! mountpoint -q "$boot_mount"; then
+    if boot_dev=$(find_boot_dev 2>/dev/null); then
+      mount -o rw "$boot_dev" "$boot_mount" || true
+      if mountpoint -q "$boot_mount"; then
+        mounted_boot=1
+      fi
+    fi
   fi
 fi
 
-if [ -f /mnt/boot/helios/ota/pending ]; then
-  target=$(cat /mnt/boot/helios/ota/pending || true)
-  match=0
-  active_dev=""
-  reserve_dev=""
-  case "$target" in
-    PARTUUID=*)
-      target_puuid="${target#PARTUUID=}"
-      if [ -n "$root_puuid" ] && [ "$target_puuid" = "$root_puuid" ]; then
-        match=1
-        if [ "$rootdev" = "$slot_a_dev" ] || [ "$root_puuid" = "$slot_a_puuid" ]; then
-          active_dev="$slot_a_dev"
-          reserve_dev="$slot_b_dev"
-        elif [ "$rootdev" = "$slot_b_dev" ] || [ "$root_puuid" = "$slot_b_puuid" ]; then
-          active_dev="$slot_b_dev"
-          reserve_dev="$slot_a_dev"
-        fi
-      fi
-      ;;
-    *)
-      if [ "$target" = "$rootlabel" ] && [ -n "$rootlabel" ]; then
-        match=1
-      fi
-      ;;
-  esac
+ota_dir="${boot_mount}/helios/ota"
+ota_state_dir="/var/lib/helios/ota"
+mkdir -p "$ota_state_dir"
+pending=""
+if [ -f "$ota_dir/pending" ]; then
+  pending=$(cat "$ota_dir/pending" || true)
+fi
 
-  if [ "$match" -eq 1 ]; then
-    # Success: swap labels so we always update RESERVE next time.
-    if [ -z "$active_dev" ] || [ -z "$reserve_dev" ]; then
-      active_dev=$(canon /dev/disk/by-label/ACTIVE 2>/dev/null || true)
-      reserve_dev=$(canon /dev/disk/by-label/RESERVE 2>/dev/null || true)
-      if [ -z "$reserve_dev" ]; then
-        if [ "$active_dev" = "$slot_a_dev" ]; then
-          reserve_dev="$slot_b_dev"
-        elif [ "$active_dev" = "$slot_b_dev" ]; then
-          reserve_dev="$slot_a_dev"
-        fi
-      fi
+if [ -n "$pending" ]; then
+  if [ -e /dev/disk/by-label/ACTIVE ] || [ -e /dev/disk/by-label/RESERVE ]; then
+    slot_a_dev="$(canon /dev/disk/by-label/ACTIVE 2>/dev/null || true)"
+    slot_b_dev="$(canon /dev/disk/by-label/RESERVE 2>/dev/null || true)"
+    current_slot=""
+    if [ -n "$rootlabel" ]; then
+      current_slot="$rootlabel"
+    elif current_slot=$(slot_from_value "$cmdline_root" "ACTIVE" "$slot_a_dev" "RESERVE" "$slot_b_dev" 2>/dev/null); then
+      :
+    fi
+    target_slot=""
+    if target_slot=$(slot_from_value "$pending" "ACTIVE" "$slot_a_dev" "RESERVE" "$slot_b_dev" 2>/dev/null); then
+      :
     fi
 
-    if [ -n "$active_dev" ] && [ -n "$reserve_dev" ]; then
-      # Avoid label collision by using a temporary label during the swap.
-      # The current root (active_dev) should become ACTIVE; the other slot should become RESERVE.
-      set_label "$reserve_dev" "HELIOS-TMP" || true
-      set_label "$active_dev" "ACTIVE" || true
-      set_label "$reserve_dev" "RESERVE" || true
-      if command -v udevadm >/dev/null 2>&1; then
-        udevadm trigger --subsystem-match=block >/dev/null 2>&1 || true
-        udevadm settle >/dev/null 2>&1 || true
+    if [ -n "$current_slot" ] && [ "$current_slot" = "$target_slot" ]; then
+      active_dev=""
+      reserve_dev=""
+      if [ "$current_slot" = "ACTIVE" ]; then
+        active_dev="$slot_a_dev"
+        reserve_dev="$slot_b_dev"
+      elif [ "$current_slot" = "RESERVE" ]; then
+        active_dev="$slot_b_dev"
+        reserve_dev="$slot_a_dev"
+      fi
+
+      if [ -n "$active_dev" ] && [ -n "$reserve_dev" ]; then
+        set_label "$reserve_dev" "HELIOS-TMP" || true
+        set_label "$active_dev" "ACTIVE" || true
+        set_label "$reserve_dev" "RESERVE" || true
+        if command -v udevadm >/dev/null 2>&1; then
+          udevadm trigger --subsystem-match=block >/dev/null 2>&1 || true
+          udevadm settle >/dev/null 2>&1 || true
+        fi
+      fi
+
+      printf '%s\n' "ACTIVE" > "$ota_dir/active"
+      printf '%s\n' "RESERVE" > "$ota_dir/reserve"
+      printf '%s\n' "ACTIVE" > "$ota_state_dir/active"
+      printf '%s\n' "RESERVE" > "$ota_state_dir/reserve"
+      rm -f "$ota_dir/pending"
+      rm -f "$ota_state_dir/pending" /root/helios-updater/ota/pending
+    fi
+  else
+    data_dev=""
+    if [ -e /dev/disk/by-label/DATA ]; then
+      data_dev="$(canon /dev/disk/by-label/DATA)"
+    fi
+    if [ -n "$data_dev" ]; then
+      disk="$(disk_from_part "$data_dev")"
+      slot_a_dev="$(part_dev "$disk" 2)"
+      slot_b_dev="$(part_dev "$disk" 3)"
+      current_slot=""
+      if current_slot=$(slot_from_value "$cmdline_root" "ROOT_A" "$slot_a_dev" "ROOT_B" "$slot_b_dev" 2>/dev/null); then
+        :
+      elif [ -f "$ota_dir/active" ]; then
+        current_slot=$(cat "$ota_dir/active" || true)
+      fi
+      target_slot=""
+      if target_slot=$(slot_from_value "$pending" "ROOT_A" "$slot_a_dev" "ROOT_B" "$slot_b_dev" 2>/dev/null); then
+        :
+      fi
+
+      if [ -n "$current_slot" ] && [ "$current_slot" = "$target_slot" ]; then
+        if [ "$current_slot" = "ROOT_A" ]; then
+          reserve_slot="ROOT_B"
+        else
+          reserve_slot="ROOT_A"
+        fi
+        printf '%s\n' "$current_slot" > "$ota_dir/active"
+        printf '%s\n' "$reserve_slot" > "$ota_dir/reserve"
+        printf '%s\n' "$current_slot" > "$ota_state_dir/active"
+        printf '%s\n' "$reserve_slot" > "$ota_state_dir/reserve"
+        rm -f "$ota_dir/pending"
+        rm -f "$ota_state_dir/pending" /root/helios-updater/ota/pending
       fi
     fi
-
-    # Mark active and clear pending
-    printf "%s\n" "ACTIVE" > /mnt/boot/helios/ota/active
-    printf "%s\n" "RESERVE" > /mnt/boot/helios/ota/reserve
-    rm -f /mnt/boot/helios/ota/pending
-    rm -f /var/lib/helios/ota/pending /root/helios-updater/ota/pending
   fi
 fi
 
-if mountpoint -q /mnt/boot; then
-  umount /mnt/boot || true
+if [ "$mounted_boot" -eq 1 ] && mountpoint -q "$boot_mount"; then
+  umount "$boot_mount" || true
 fi
 exit 0

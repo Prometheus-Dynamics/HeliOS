@@ -11,6 +11,9 @@ use axum::response::IntoResponse;
 
 #[derive(Debug, Clone, ToSchema, serde::Serialize)]
 pub struct DeviceMetrics {
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub issues: Vec<DeviceHealthIssue>,
     pub cpu_avg_pct: f32,
     pub cpu_freq_mhz: u64,
     pub cpus: Vec<CpuCoreMetrics>,
@@ -22,6 +25,12 @@ pub struct DeviceMetrics {
     pub temps: Vec<TempReading>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api: Option<ApiRuntimeMetrics>,
+}
+
+#[derive(Debug, Clone, ToSchema, serde::Serialize)]
+pub struct DeviceHealthIssue {
+    pub code: String,
+    pub description: String,
 }
 
 #[derive(Debug, Clone, ToSchema, serde::Serialize)]

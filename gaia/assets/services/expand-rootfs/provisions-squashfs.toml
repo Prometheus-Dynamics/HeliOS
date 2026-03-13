@@ -1,0 +1,31 @@
+[defaults]
+align_mib = 4
+gap_mib = 4
+log_file = "/var/log/helios-provision-squashfs.log"
+
+[spans]
+boot_partition = 1
+start_after_partition = 2
+data_size_mib = 0
+
+[[partitions]]
+name = "ROOT_B"
+number = 3
+mode = "mkpart"
+fs_type = "ext4"
+size_mib = 128
+mkfs = false
+wipe_signatures = true
+marker = "/var/lib/helios/.provision.reserve_v1"
+
+[[partitions]]
+name = "DATA"
+number = 4
+label = "DATA"
+mode = "mkpart"
+fs_type = "ext4"
+fill_to_end = true
+marker = "/var/lib/helios/.provision.data_v1"
+mount_point = "/run/helios-provision/data"
+secondary_marker = "/run/helios-provision/data/.provision.data_v1"
+reformat_if_missing_secondary_marker = true

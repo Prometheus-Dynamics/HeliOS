@@ -15,6 +15,7 @@ pub struct Defaults {
 #[derive(Debug, Deserialize, Default)]
 pub struct Spans {
     pub boot_partition: Option<u32>,
+    pub start_after_partition: Option<u32>,
     pub data_size_mib: Option<u64>,
 }
 
@@ -43,11 +44,13 @@ pub struct Partition {
     pub start_mib: Option<u64>,
     pub end_mib: Option<u64>,
     pub mkfs: Option<bool>,
+    pub wipe_signatures: Option<bool>,
     pub run_fsck: Option<bool>,
     pub run_resizefs: Option<bool>,
     pub mount_point: Option<String>,
     pub mount_label: Option<String>,
     pub secondary_marker: Option<String>,
+    pub reformat_if_missing_secondary_marker: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Default)]

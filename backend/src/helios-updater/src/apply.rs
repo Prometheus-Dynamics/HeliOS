@@ -19,8 +19,9 @@ use crate::config::UpdaterConfig;
 use crate::error::{Error, Result};
 use crate::state::ServiceState;
 use crate::util::{
-    ProgressSender, ProgressUpdate, StreamFlashOutcome, blockdev_size_bytes, by_label_path, decompress_if_needed, detect_compression_kind, detect_ext4_partition_in_disk_image,
-    detect_fat_partition_in_disk_image, ensure_directory, flash_compressed_image_to_target, resolve_boot_block_device, resolve_boot_dir_rw, rewrite_cmdline_root, select_target_slot, sync_filesystem,
+    ProgressSender, ProgressUpdate, SlotScheme, SlotSelection, StreamFlashOutcome, blockdev_size_bytes, by_label_path, decompress_if_needed, detect_compression_kind,
+    detect_ext4_partition_in_disk_image, detect_fat_partition_in_disk_image, detect_squashfs_partition_in_disk_image, ensure_directory, flash_compressed_image_to_target, resolve_boot_block_device,
+    resolve_boot_dir_rw, rewrite_cmdline_root, select_target_slot, sync_filesystem,
 };
 
 #[cfg(test)]
@@ -146,8 +147,8 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
         ensure_directory(config.work_dir()).await?;
         ensure_directory(&work_dir).await?;
 
-        let (target_label, target_device, single_slot_final) = select_target_slot(single_slot)?;
-        single_slot = single_slot_final;
+        let slot_selection = select_target_slot(single_slot)?;
+        single_slot = slot_selection.single_slot;
 
         if single_slot && !allow_single_slot_inplace {
             return Err(Error::InvalidState("single-slot OTA is disabled: inactive RESERVE slot not found; in-place flashing the live root risks filesystem corruption".into()));
@@ -159,12 +160,20 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
             );
         }
 
-        info!(%update_id, %target_label, target_device = %target_device, single_slot, "preparing staged image");
+        info!(
+            %update_id,
+            current_slot = %slot_selection.current_slot,
+            target_slot = %slot_selection.target_slot,
+            target_device = %slot_selection.target_device,
+            single_slot,
+            scheme = ?slot_selection.scheme,
+            "preparing staged image"
+        );
 
         let staged_artifact = metadata.artifacts.first().ok_or_else(|| Error::InvalidState("no staged artifact found".into()))?;
         let staged_path = PathBuf::from(&staged_artifact.local_path);
         let compression = detect_compression_kind(&staged_path).map_err(Error::Io)?;
-        let stream_flash_requested = env::var_os("UPDATER_STREAM_FLASH").is_some();
+        let stream_flash_requested = env::var_os("UPDATER_STREAM_FLASH").is_some() && slot_selection.scheme == SlotScheme::Ext4Labels;
         let mut temp_file = false;
         let mut expanded_path: Option<PathBuf> = None;
         let mut streamed = false;
@@ -174,10 +183,10 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
         let progress_sender = ProgressSender::new(progress_tx.clone());
 
         let flash_result = if stream_flash_requested && compression.is_some() {
-            info!(%update_id, %target_label, target_device = %target_device, "streaming staged image");
-            let _ = Command::new("umount").arg(&target_device).status().await;
-            let target_bytes = blockdev_size_bytes(&target_device).await?;
-            let outcome = flash_compressed_image_to_target(&staged_path, &target_device, target_bytes, Some(progress_sender.clone())).await;
+            info!(%update_id, target_slot = %slot_selection.target_slot, target_device = %slot_selection.target_device, "streaming staged image");
+            let _ = Command::new("umount").arg(&slot_selection.target_device).status().await;
+            let target_bytes = blockdev_size_bytes(&slot_selection.target_device).await?;
+            let outcome = flash_compressed_image_to_target(&staged_path, &slot_selection.target_device, target_bytes, Some(progress_sender.clone())).await;
             if let Ok(outcome) = outcome.as_ref() {
                 stream_outcome = Some(*outcome);
             }
@@ -191,14 +200,21 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
                     Ok(())
                 }
                 Err(Error::Io(err)) if err.kind() == ErrorKind::StorageFull && compression.is_some() => {
-                    warn!(%update_id, %target_label, target_device = %target_device, "work dir full; streaming staged image");
+                    if slot_selection.scheme != SlotScheme::Ext4Labels {
+                        return Err(Error::InvalidState(format!(
+                            "OTA work dir is full and streaming fallback is disabled for {:?} updates; need temporary space to decompress {}",
+                            slot_selection.scheme,
+                            staged_path.display()
+                        )));
+                    }
+                    warn!(%update_id, target_slot = %slot_selection.target_slot, target_device = %slot_selection.target_device, "work dir full; streaming staged image");
                     if let Err(err) = fs::remove_dir_all(&work_dir).await {
                         warn!(error = %err, path = %work_dir.display(), "failed to clean work dir after decompression failure");
                     }
                     ensure_directory(&work_dir).await?;
-                    let _ = Command::new("umount").arg(&target_device).status().await;
-                    let target_bytes = blockdev_size_bytes(&target_device).await?;
-                    let outcome = flash_compressed_image_to_target(&staged_path, &target_device, target_bytes, Some(progress_sender.clone())).await;
+                    let _ = Command::new("umount").arg(&slot_selection.target_device).status().await;
+                    let target_bytes = blockdev_size_bytes(&slot_selection.target_device).await?;
+                    let outcome = flash_compressed_image_to_target(&staged_path, &slot_selection.target_device, target_bytes, Some(progress_sender.clone())).await;
                     if let Ok(outcome) = outcome.as_ref() {
                         stream_outcome = Some(*outcome);
                     }
@@ -211,8 +227,8 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
                 && !streamed
             {
                 let expanded_path = expanded_path.as_ref().ok_or_else(|| Error::InvalidState("expanded OTA image missing".into()))?;
-                info!(%update_id, %target_label, target_device = %target_device, "writing staged image");
-                flash_image_to_target(expanded_path, &target_label, &target_device, Some(progress_sender.clone())).await?;
+                info!(%update_id, target_slot = %slot_selection.target_slot, target_device = %slot_selection.target_device, "writing staged image");
+                flash_image_to_target(expanded_path, &slot_selection, Some(progress_sender.clone())).await?;
             }
             expand_result
         };
@@ -223,16 +239,23 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
         flash_result?;
 
         if streamed {
-            relabel_target_filesystem(&target_label, &target_device).await?;
+            if slot_selection.scheme == SlotScheme::Ext4Labels {
+                relabel_target_filesystem(&slot_selection.target_slot, &slot_selection.target_device).await?;
+            }
             sync_filesystem(Path::new("/")).await?;
             if let Some(outcome) = stream_outcome
                 && !outcome.used_partition
             {
-                warn!(%update_id, %target_label, target_device = %target_device, "partition table not detected; streamed full image");
+                if slot_selection.scheme == SlotScheme::SquashfsAb {
+                    return Err(Error::InvalidState("streamed squashfs OTA image did not expose a root partition; refusing to overwrite the inactive slot with the whole disk image".into()));
+                }
+                warn!(%update_id, target_slot = %slot_selection.target_slot, target_device = %slot_selection.target_device, "partition table not detected; streamed full image");
             }
-            sync_boot_from_target(&target_device, &work_dir).await?;
-            if let Err(err) = sync_persisted_state(&target_device, &work_dir).await {
-                warn!(%err, %update_id, target_device = %target_device, "failed to sync persisted device config to target");
+            sync_boot_from_target(&slot_selection.target_device, &work_dir).await?;
+            if slot_selection.scheme == SlotScheme::Ext4Labels
+                && let Err(err) = sync_persisted_state(&slot_selection.target_device, &work_dir).await
+            {
+                warn!(%err, %update_id, target_device = %slot_selection.target_device, "failed to sync persisted device config to target");
             }
         } else {
             let expanded_path = expanded_path.ok_or_else(|| Error::InvalidState("expanded OTA image missing".into()))?;
@@ -240,10 +263,12 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
 
             let boot_synced = sync_boot_from_artifact(&expanded_path).await?;
             if !boot_synced {
-                sync_boot_from_target(&target_device, &work_dir).await?;
+                sync_boot_from_target(&slot_selection.target_device, &work_dir).await?;
             }
-            if let Err(err) = sync_persisted_state(&target_device, &work_dir).await {
-                warn!(%err, %update_id, target_device = %target_device, "failed to sync persisted device config to target");
+            if slot_selection.scheme == SlotScheme::Ext4Labels
+                && let Err(err) = sync_persisted_state(&slot_selection.target_device, &work_dir).await
+            {
+                warn!(%err, %update_id, target_device = %slot_selection.target_device, "failed to sync persisted device config to target");
             }
 
             if temp_file {
@@ -260,7 +285,7 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
         if single_slot {
             // Staying on the same slot: skip tryboot/cmdline juggling and rely on in-place update.
         } else {
-            update_boot_markers(config, &target_label, &target_device).await?;
+            update_boot_markers(config, &slot_selection).await?;
         }
     } else {
         info!(%update_id, "apply running in simulation mode (UPDATER_FAKE_APPLY)");
@@ -366,30 +391,59 @@ fn sanitize_media_filename(raw: &str) -> Option<String> {
     Path::new(trimmed).file_name().map(|name| name.to_string_lossy().to_string())
 }
 
-pub(crate) async fn flash_image_to_target(expanded_path: &Path, target_label: &str, target_device: &str, progress: Option<ProgressSender>) -> Result<()> {
+pub(crate) async fn flash_image_to_target(expanded_path: &Path, slot_selection: &SlotSelection, progress: Option<ProgressSender>) -> Result<()> {
+    let target_device = slot_selection.target_device.as_str();
     let _ = Command::new("umount").arg(target_device).status().await;
 
     let mut offset = 0u64;
     let mut size: Option<u64> = None;
-    if let Some((off, ext4_size)) = detect_ext4_partition_in_disk_image(expanded_path).await? {
-        if let Some(target_bytes) = blockdev_size_bytes(target_device).await?
-            && ext4_size > target_bytes
-        {
-            let size_mib = ext4_size / (1024 * 1024);
-            let target_mib = target_bytes / (1024 * 1024);
-            return Err(Error::InvalidState(format!("target partition {} is {} bytes ({} MiB) but image rootfs is {} bytes ({} MiB)", target_device, target_bytes, target_mib, ext4_size, size_mib)));
+    let mut relabel = false;
+    match slot_selection.scheme {
+        SlotScheme::Ext4Labels => {
+            if let Some((off, ext4_size)) = detect_ext4_partition_in_disk_image(expanded_path).await? {
+                if let Some(target_bytes) = blockdev_size_bytes(target_device).await?
+                    && ext4_size > target_bytes
+                {
+                    let size_mib = ext4_size / (1024 * 1024);
+                    let target_mib = target_bytes / (1024 * 1024);
+                    return Err(Error::InvalidState(format!(
+                        "target partition {} is {} bytes ({} MiB) but image rootfs is {} bytes ({} MiB)",
+                        target_device, target_bytes, target_mib, ext4_size, size_mib
+                    )));
+                }
+                offset = off;
+                size = Some(ext4_size);
+            }
+            relabel = true;
         }
-        offset = off;
-        size = Some(ext4_size);
+        SlotScheme::SquashfsAb => {
+            let Some((off, squashfs_size)) = detect_squashfs_partition_in_disk_image(expanded_path).await? else {
+                return Err(Error::InvalidState(format!("no squashfs partition found inside OTA artifact {}; refusing to flash {}", expanded_path.display(), target_device)));
+            };
+            if let Some(target_bytes) = blockdev_size_bytes(target_device).await?
+                && squashfs_size > target_bytes
+            {
+                let size_mib = squashfs_size / (1024 * 1024);
+                let target_mib = target_bytes / (1024 * 1024);
+                return Err(Error::InvalidState(format!(
+                    "target squashfs slot {} is {} bytes ({} MiB) but image rootfs is {} bytes ({} MiB)",
+                    target_device, target_bytes, target_mib, squashfs_size, size_mib
+                )));
+            }
+            offset = off;
+            size = Some(squashfs_size);
+        }
     }
 
     let expanded_path = expanded_path.to_path_buf();
-    let target_device = target_device.to_string();
+    let target_device = slot_selection.target_device.clone();
     let target_device_copy = target_device.clone();
     let handle = tokio::task::spawn_blocking(move || copy_image_to_target_blocking(&expanded_path, &target_device_copy, offset, size, progress));
     handle.await.map_err(|err| Error::Io(std::io::Error::other(err.to_string())))??;
 
-    relabel_target_filesystem(target_label, &target_device).await?;
+    if relabel {
+        relabel_target_filesystem(&slot_selection.target_slot, &target_device).await?;
+    }
 
     Ok(())
 }
@@ -454,7 +508,7 @@ fn copy_image_to_target_blocking(expanded_path: &Path, target_device: &str, offs
     Ok(())
 }
 
-async fn update_boot_markers(config: &Arc<UpdaterConfig>, target_label: &str, target_device: &str) -> Result<()> {
+async fn update_boot_markers(config: &Arc<UpdaterConfig>, slot_selection: &SlotSelection) -> Result<()> {
     let Some((boot_dir, mounted)) = resolve_boot_dir_rw().await? else {
         return Err(crate::error::Error::InvalidState("cannot mount or find BOOT partition".into()));
     };
@@ -462,26 +516,32 @@ async fn update_boot_markers(config: &Arc<UpdaterConfig>, target_label: &str, ta
 
     // Prefer an explicit device path to avoid PARTUUID churn and LABEL= parsing
     // issues in early kernel root lookup.
-    let tryboot_root = target_device.to_string();
+    let tryboot_root = slot_selection.target_device.to_string();
     let tryboot_content = format!("tryboot_once=1\ntryboot_root={}\n", tryboot_root);
     fs::write(boot_path.join("tryboot.txt"), tryboot_content).await.map_err(Error::Io)?;
 
     let cmdline_path = boot_path.join("cmdline.txt");
     let existing = fs::read_to_string(&cmdline_path).await.unwrap_or_default();
-    let rewritten = rewrite_cmdline_root(&existing, target_label, target_device).await;
+    let rewritten = rewrite_cmdline_root(&existing, &slot_selection.target_slot, &slot_selection.target_device).await;
     fs::write(&cmdline_path, rewritten).await.map_err(Error::Io)?;
 
     let ota_dir = boot_path.join("helios").join("ota");
     ensure_directory(&ota_dir).await?;
-    let pending_value = target_label.to_string();
+    let state_dir = config.data_dir().join("ota");
+    ensure_directory(&state_dir).await?;
+    let pending_value = slot_selection.target_slot.to_string();
     fs::write(ota_dir.join("pending"), pending_value).await.map_err(Error::Io)?;
-    let _ = fs::write(ota_dir.join(format!("pending-{}", target_label)), b"").await;
-    let pending_marker = config.data_dir().join("ota").join("pending");
-    if let Some(parent) = pending_marker.parent() {
-        if let Err(err) = ensure_directory(parent).await {
-            warn!(error = %err, path = %parent.display(), "failed to ensure OTA pending marker dir");
-        } else if let Err(err) = fs::write(&pending_marker, target_label).await {
-            warn!(error = %err, path = %pending_marker.display(), "failed to write OTA pending marker");
+    let _ = fs::write(ota_dir.join("active"), format!("{}\n", slot_selection.current_slot)).await;
+    let _ = fs::write(ota_dir.join("reserve"), format!("{}\n", slot_selection.target_slot)).await;
+    let _ = fs::write(ota_dir.join(format!("pending-{}", slot_selection.target_slot)), b"").await;
+    let state_writes = [
+        (state_dir.join("active"), format!("{}\n", slot_selection.current_slot)),
+        (state_dir.join("reserve"), format!("{}\n", slot_selection.target_slot)),
+        (state_dir.join("pending"), format!("{}\n", slot_selection.target_slot)),
+    ];
+    for (path, value) in state_writes {
+        if let Err(err) = fs::write(&path, value).await {
+            warn!(error = %err, path = %path.display(), "failed to write OTA state marker");
         }
     }
 

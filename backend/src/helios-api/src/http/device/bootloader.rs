@@ -171,7 +171,57 @@ fn load_config() -> BootloaderConfig {
         }
     }
 
+    if !config.boot_partition.exists()
+        && let Some(resolved) = resolve_boot_partition()
+    {
+        config.boot_partition = resolved;
+    }
+
     config
+}
+
+fn resolve_boot_partition() -> Option<PathBuf> {
+    let configured = PathBuf::from(DEFAULT_BOOT_PARTITION);
+    if configured.exists() {
+        return Some(configured);
+    }
+
+    if let Some(data_dev) = canonicalize_existing_path("/dev/disk/by-label/DATA")
+        && let Some(disk) = disk_from_partition_device(&data_dev)
+    {
+        let boot = partition_device(&disk, 1);
+        if boot.exists() {
+            return Some(boot);
+        }
+    }
+
+    ["/dev/mmcblk0p1", "/dev/mmcblk1p1", "/dev/sda1", "/dev/sdb1", "/dev/nvme0n1p1"].iter().map(PathBuf::from).find(|path| path.exists())
+}
+
+fn canonicalize_existing_path(path: &str) -> Option<String> {
+    let raw = Path::new(path);
+    if let Ok(canon) = std::fs::canonicalize(raw) {
+        return Some(canon.to_string_lossy().into_owned());
+    }
+    if raw.exists() {
+        return Some(path.to_string());
+    }
+    None
+}
+
+fn disk_from_partition_device(dev: &str) -> Option<String> {
+    match dev {
+        path if path.starts_with("/dev/mmcblk") || path.starts_with("/dev/nvme") => {
+            let (base, suffix) = path.rsplit_once('p')?;
+            if suffix.chars().all(|ch| ch.is_ascii_digit()) { Some(base.to_string()) } else { None }
+        }
+        path if path.starts_with("/dev/sd") => Some(path.trim_end_matches(char::is_numeric).to_string()),
+        _ => None,
+    }
+}
+
+fn partition_device(disk: &str, part: u32) -> PathBuf {
+    if disk.starts_with("/dev/mmcblk") || disk.starts_with("/dev/nvme") { PathBuf::from(format!("{disk}p{part}")) } else { PathBuf::from(format!("{disk}{part}")) }
 }
 
 fn read_device_tree_string(path: &str) -> Option<String> {

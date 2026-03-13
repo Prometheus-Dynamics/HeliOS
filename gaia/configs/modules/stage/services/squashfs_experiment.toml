@@ -1,0 +1,11 @@
+[units."squashfs-overrides"]
+enabled = true
+vendor = true
+unit = "squashfs-overrides.service"
+assets = [
+  { src = "assets/services/squashfs/helios-api.override.conf", dst = "/etc/systemd/system/helios-api.service.d/override.conf", mode = 420 },
+  { src = "assets/services/squashfs/helios-engine.override.conf", dst = "/etc/systemd/system/helios-engine.service.d/override.conf", mode = 420 },
+  { src = "assets/services/squashfs/helios-peripherals.override.conf", dst = "/etc/systemd/system/helios-peripherals.service.d/override.conf", mode = 420 },
+  { src = "assets/services/squashfs/helios-updater.override.conf", dst = "/etc/systemd/system/helios-updater.service.d/override.conf", mode = 420 },
+  { src = "assets/services/squashfs/systemd-networkd-wait-online.override.conf", dst = "/etc/systemd/system/systemd-networkd-wait-online.service.d/override.conf", mode = 420 },
+]

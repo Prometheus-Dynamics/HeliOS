@@ -1,0 +1,15 @@
+[units.helios-provision]
+enabled = true
+src = "assets/services/expand-rootfs/helios-provision.target"
+unit = "helios-provision.target"
+targets = ["local-fs"]
+
+[units."helios-provision.service"]
+enabled = true
+src = "assets/services/expand-rootfs/helios-provision-squashfs.service"
+unit = "helios-provision.service"
+targets = ["helios-provision", "local-fs"]
+assets = [
+  { src = "assets/services/expand-rootfs/provisions-squashfs.toml", dst = "/etc/helios/provisions.toml", mode = 420 },
+  { src = "assets/services/expand-rootfs/helios-provision-squashfs.sh", dst = "/usr/local/bin/helios-provision-squashfs.sh", mode = 493 },
+]

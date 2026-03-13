@@ -7,6 +7,7 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
+ExecStartPre=/bin/sh -lc 'awk '\''$5==\"/var/lib/helios\"{found=1} END{exit !found}'\'' /proc/self/mountinfo || { echo \"DATA mount missing: /var/lib/helios is not a mountpoint\" >&2; exit 1; }'
 ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios/peripherals
 Environment=LOG_FOLDER=/var/log/helios
 Environment=LIBAI_CORAL_RUNTIME_ENUMERATION=0

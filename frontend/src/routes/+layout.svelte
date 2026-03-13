@@ -21,7 +21,13 @@
   import { onMount } from 'svelte';
   import type { Snippet } from 'svelte';
   import { toaster } from '$lib/toaster';
-  import { bootloaderStatusResource, resourceGuardStatusResource, type ResourceGuardStatus } from '$lib/api/deviceStatusResources';
+  import {
+    bootloaderStatusResource,
+    osHealthStatusResource,
+    resourceGuardStatusResource,
+    type OsHealthStatus,
+    type ResourceGuardStatus
+  } from '$lib/api/deviceStatusResources';
   import { startDomainInvalidationBridge } from '$lib/api/invalidation';
   import { startRefreshScheduler } from '$lib/api/refreshScheduler';
   import FaIcon from '$lib/components/icons/FaIcon.svelte';
@@ -70,14 +76,22 @@
 
   let bootloaderStatus = $state<BootloaderStatus | null>(null);
   const showSettingsBootloaderWarning = $derived(Boolean(bootloaderStatus?.supported && bootloaderStatus?.needs_update));
+  let osHealthStatus = $state<OsHealthStatus | null>(null);
 
   type ResourceGuardBannerState = {
     title: string;
     details: string;
   };
 
+  type OsHealthBannerState = {
+    title: string;
+    details: string;
+  };
+
   let resourceGuardStatus = $state<ResourceGuardStatus | null>(null);
+  const osHealthBanner = $derived(buildOsHealthBanner(osHealthStatus));
   const resourceGuardBanner = $derived(buildResourceGuardBanner(resourceGuardStatus));
+  const showSettingsOsWarning = $derived(Boolean(osHealthBanner));
 
   const isActive = (href: string) => {
     const current = $page.url.pathname;
@@ -158,12 +172,20 @@
     if (cachedBootloader?.data) {
       bootloaderStatus = cachedBootloader.data;
     }
+    const cachedOsHealth = osHealthStatusResource.read();
+    if (cachedOsHealth?.data) {
+      osHealthStatus = cachedOsHealth.data;
+    }
     const cachedResourceGuard = resourceGuardStatusResource.read();
     if (cachedResourceGuard?.data) {
       resourceGuardStatus = cachedResourceGuard.data;
     }
     const stopBootloaderRefresh = startRefreshScheduler(refreshBootloaderStatus, {
       intervalMs: 120_000,
+      immediate: true
+    });
+    const stopOsHealthRefresh = startRefreshScheduler(refreshOsHealthStatus, {
+      intervalMs: 10_000,
       immediate: true
     });
     const stopResourceGuardRefresh = startRefreshScheduler(refreshResourceGuardStatus, {
@@ -191,6 +213,7 @@
 
     return () => {
       stopBootloaderRefresh();
+      stopOsHealthRefresh();
       stopResourceGuardRefresh();
       stopVersionWatch();
       window.removeEventListener('error', handleWindowError);
@@ -213,6 +236,32 @@
     } catch {
       resourceGuardStatus = null;
     }
+  }
+
+  async function refreshOsHealthStatus(): Promise<void> {
+    try {
+      osHealthStatus = await osHealthStatusResource.refresh();
+    } catch {
+      osHealthStatus = null;
+    }
+  }
+
+  function buildOsHealthBanner(status: OsHealthStatus | null): OsHealthBannerState | null {
+    const issues = Array.isArray(status?.issues) ? status.issues : [];
+    if (!issues.length) return null;
+
+    const primary = issues[0];
+    const extraCount = Math.max(0, issues.length - 1);
+    const title = primary?.code?.trim().length ? `Core OS issue: ${primary.code}` : 'Core OS issue detected';
+    const details = primary?.description?.trim().length
+      ? extraCount > 0
+        ? `${primary.description} ${extraCount} additional issue${extraCount === 1 ? '' : 's'} reported.`
+        : primary.description
+      : extraCount > 0
+        ? `${extraCount + 1} core OS issues reported.`
+        : 'Device storage or boot state is degraded.';
+
+    return { title, details };
   }
 
   function buildResourceGuardBanner(status: ResourceGuardStatus | null): ResourceGuardBannerState | null {
@@ -352,11 +401,11 @@
               {:else}
                 <span class="sr-only">{settingsLink.label}</span>
               {/if}
-              {#if showSettingsBootloaderWarning}
-                <span class="sr-only">Bootloader update required</span>
+              {#if showSettingsBootloaderWarning || showSettingsOsWarning}
+                <span class="sr-only">{showSettingsOsWarning ? 'Core OS issue detected' : 'Bootloader update required'}</span>
                 <span
                   class={`helios-nav-warning ${isSidebarCollapsed ? 'absolute -right-0.5 -top-0.5' : 'ml-auto'}`}
-                  title="Bootloader update required"
+                  title={showSettingsOsWarning ? 'Core OS issue detected' : 'Bootloader update required'}
                   aria-hidden="true"
                 >
                   <svg viewBox="0 0 24 24" class="h-4 w-4" focusable="false">
@@ -375,6 +424,17 @@
           isDocsPage ? 'app-main--docs' : 'px-4 py-4'
         }`}
       >
+        {#if osHealthBanner}
+          <div class="mb-3 rounded border border-error-500/40 bg-error-500/10 px-4 py-3 text-error-50 shadow-[0_0_0_1px_rgba(239,68,68,0.12)]" role="alert">
+            <div class="flex items-start gap-3">
+              <FaIcon icon={faTriangleExclamation} class="mt-0.5 h-4 w-4 shrink-0 text-error-200" />
+              <div class="min-w-0">
+                <div class="text-sm font-semibold leading-tight">{osHealthBanner.title}</div>
+                <div class="mt-1 text-xs leading-relaxed text-error-100">{osHealthBanner.details}</div>
+              </div>
+            </div>
+          </div>
+        {/if}
         {#if resourceGuardBanner}
           <div class="mb-3 rounded border border-warning-500/40 bg-warning-500/10 px-4 py-3 text-warning-50 shadow-[0_0_0_1px_rgba(250,204,21,0.12)]" role="alert">
             <div class="flex items-start gap-3">

@@ -1,5 +1,5 @@
 use crate::api_observability::{ApiCacheMetric, ApiRealtimeMetrics, CacheMetricCounters};
-use crate::http::device::metrics::{CpuCoreMetrics, DeviceMetrics, DiskMetrics, TempReading};
+use crate::http::device::metrics::{CpuCoreMetrics, DeviceHealthIssue, DeviceMetrics, DiskMetrics, TempReading};
 use crate::http::storage;
 use crate::http::streams::util::list_streams_timeout;
 use crate::ipc::IpcHandles;
@@ -139,8 +139,13 @@ impl SystemCollector {
         let disks =
             self.disks.iter().map(|disk| DiskMetrics { mount: disk.mount_point().to_string_lossy().to_string(), total_bytes: disk.total_space(), available_bytes: disk.available_space() }).collect();
         let temps = self.components.iter().filter_map(|component| component.temperature().map(|temperature_c| TempReading { label: component.label().to_string(), temperature_c })).collect();
+        let storage_health = storage::probe_storage_health();
+        let issues = storage_health.issues.into_iter().map(|issue| DeviceHealthIssue { code: issue.code.to_string(), description: issue.description }).collect::<Vec<_>>();
+        let status = if issues.is_empty() { "healthy" } else { "degraded" }.to_string();
 
         DeviceMetrics {
+            status,
+            issues,
             cpu_avg_pct,
             cpu_freq_mhz,
             cpus,

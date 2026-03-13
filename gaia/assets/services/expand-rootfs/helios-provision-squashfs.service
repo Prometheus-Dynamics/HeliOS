@@ -1,0 +1,20 @@
+[Unit]
+Description=Provision squashfs reserve and DATA partitions on first boot
+DefaultDependencies=no
+After=systemd-remount-fs.service systemd-udev-settle.service
+Wants=systemd-udev-settle.service
+Before=local-fs.target basic.target
+
+[Service]
+Type=oneshot
+SyslogIdentifier=helios-provision
+ExecStart=/usr/local/bin/helios-provision-squashfs.sh
+Environment=PATH=/bin:/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+TimeoutStartSec=5min
+RemainAfterExit=no
+StandardOutput=journal+console
+StandardError=journal+console
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=helios-provision.target local-fs.target

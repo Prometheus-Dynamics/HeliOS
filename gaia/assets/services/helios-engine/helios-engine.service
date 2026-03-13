@@ -11,7 +11,7 @@ StartLimitBurst=5
 # helios-engine does not emit sd_notify; treat it as a simple service to avoid start timeouts.
 Type=simple
 NotifyAccess=none
-ExecStartPre=/bin/sh -lc 'i=0; while [ $i -lt 60 ]; do awk '\''$5==\"/var/lib/helios\"{found=1} END{exit !found}'\'' /proc/self/mountinfo && exit 0; i=$((i+1)); sleep 1; done; echo \"DATA mount missing: /var/lib/helios is not a mountpoint\" >&2; exit 1'
+ExecStartPre=/bin/sh -lc 'awk '\''$5==\"/var/lib/helios\"{found=1} END{exit !found}'\'' /proc/self/mountinfo || { echo \"DATA mount missing: /var/lib/helios is not a mountpoint\" >&2; exit 1; }'
 ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios
 ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios/panics
 ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios/engine

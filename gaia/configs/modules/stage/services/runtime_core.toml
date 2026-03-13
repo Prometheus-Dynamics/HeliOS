@@ -54,6 +54,14 @@ assets = [
   { src = "assets/services/fan-overlays/helios-fan-overlays.sh", dst = "/usr/local/bin/helios-fan-overlays.sh", mode = 493 },
 ]
 
+[units."helios-os-self-check"]
+enabled = true
+src = "assets/services/storage/helios-os-self-check.service"
+targets = ["multi-user"]
+assets = [
+  { src = "assets/services/storage/helios-os-self-check.sh", dst = "/usr/local/bin/helios-os-self-check.sh", mode = 493 },
+]
+
 [units."helios-api"]
 enabled = true
 src = "assets/services/helios-api/helios-api.service"
