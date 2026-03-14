@@ -4,7 +4,6 @@ use serde_json::Value;
 use std::collections::BTreeSet;
 use utoipa::ToSchema;
 
-use crate::http::pipelines;
 use crate::http::validation::{ValidationIssue, ValidationWarning, issue, warning};
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -232,16 +231,6 @@ async fn validate_profile_references(profile: &mut LocalizationProfile, profile_
         }
     }
 
-    if let Some(template_id) = profile.pipeline_template_id.as_deref().map(str::trim).filter(|id| !id.is_empty()) {
-        if let Err(err) = pipelines::load_template_graph(template_id).await {
-            issues.push(issue(format!("{profile_path}/pipelineTemplateId"), "unknown_pipeline_template", format!("pipeline template `{template_id}` could not be loaded: {err}")));
-        }
-        profile.pipeline_template_id = Some(template_id.to_string());
-    } else if profile.pipeline_template_id.is_some() {
-        warnings.push(warning(format!("{profile_path}/pipelineTemplateId"), "template_cleared", "empty pipeline template id was cleared"));
-        profile.pipeline_template_id = None;
-    }
-
     if let Some(field_map_id) = profile.field_map_id.as_deref().map(str::trim).filter(|id| !id.is_empty()) {
         if !field_map_exists(field_map_id).await {
             issues.push(issue(format!("{profile_path}/fieldMapId"), "unknown_field_map", format!("field map `{field_map_id}` is not present in localization map storage")));
@@ -368,7 +357,6 @@ mod tests {
                 snap_z_to_ground: false,
                 snap_roll_to_ground: false,
                 snap_pitch_to_ground: false,
-                pipeline_template_id: None,
                 color: None,
                 view_enabled: true,
                 temporal_stabilization: helios_engine::localization::config::LocalizationTemporalStabilizationConfig::default(),

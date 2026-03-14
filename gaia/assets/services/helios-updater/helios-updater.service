@@ -17,7 +17,6 @@ ExecStartPre=/bin/sh -lc 'echo 1 > /proc/sys/kernel/core_uses_pid; echo /var/log
 Environment=UPDATER_SOCKET=/run/helios/updater.sock
 Environment=UPDATER_JOURNAL_PATH=/var/lib/helios/journal/updater.log
 Environment=LOG_FOLDER=/var/log/helios
-Environment=UPDATER_METRICS_ADDR=0.0.0.0:9102
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 EnvironmentFile=-/etc/default/helios-updater
 ExecStart=/usr/bin/helios-updater

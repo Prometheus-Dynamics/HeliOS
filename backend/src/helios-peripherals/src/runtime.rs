@@ -1,13 +1,14 @@
 mod session;
 mod shutdown;
 
+use std::fs;
 use std::sync::Arc;
 use std::time::Instant;
 
 use futures::FutureExt;
 use lib_sensors::led_config::{DEFAULT_ANIMATION_EVENT_STARTUP, DEFAULT_ANIMATION_EVENT_STARTUP_IDLE, LedConfig};
 use serde::Deserialize;
-use tokio::fs;
+use tokio::fs as tokio_fs;
 use tokio::net::UnixListener;
 use tokio::task::JoinSet;
 use tokio::time::sleep;
@@ -26,6 +27,7 @@ use self::shutdown::wait_for_shutdown;
 
 const LED_ANIMATIONS_PATH: &str = "/var/lib/helios/led-animations.json";
 const LEGACY_LED_ANIMATIONS_PATH: &str = "/etc/helios/led-animations.json";
+const MEMORY_TRACE_ENV: &str = "HELIOS_PERIPHERALS_MEMORY_TRACE";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RuntimeState {
@@ -91,6 +93,17 @@ struct StoredAnimationFrame {
     duration_ms: u32,
 }
 
+#[derive(Debug, Default, Clone)]
+struct MemoryCheckpoint {
+    threads: u64,
+    rss_bytes: u64,
+    pss_bytes: u64,
+    private_dirty_bytes: u64,
+    executable_pss_bytes: u64,
+    heap_pss_bytes: u64,
+    anonymous_pss_bytes: u64,
+}
+
 impl SensorsRuntime {
     pub fn new() -> Self {
         Self::from_config(SensorsConfig::default())
@@ -123,6 +136,7 @@ impl SensorsRuntime {
         self.started_at = Instant::now();
 
         let service = Arc::new(SensorsService::new(Arc::clone(&self.config), self.shutdown.child_token()));
+        log_memory_checkpoint("after_service_new");
         let initial_inventory = match timeout(Duration::from_secs(5), service.discover_with_options(true, true)).await {
             Ok(Ok(inv)) => inv,
             Ok(Err(err)) => {
@@ -134,6 +148,7 @@ impl SensorsRuntime {
                 SensorInventory { sensors: Vec::new() }
             }
         };
+        log_memory_checkpoint("after_initial_discovery");
         info!(count = initial_inventory.sensors.len(), "loaded initial sensor inventory");
         self.service = Some(service.clone());
         spawn_boot_lighting_animation(service.clone(), self.shutdown.child_token());
@@ -148,18 +163,21 @@ impl SensorsRuntime {
         if let Err(err) = imu_res {
             warn!(%err, "IMU runtime failed to start");
         }
+        log_memory_checkpoint("after_sensor_runtimes_started");
 
         usb_proxy::spawn(self.shutdown.child_token());
+        log_memory_checkpoint("after_usb_proxy_spawn");
 
         if let Some(parent) = self.config.socket_path().parent() {
-            fs::create_dir_all(parent).await?;
+            tokio_fs::create_dir_all(parent).await?;
         }
-        if fs::metadata(self.config.socket_path()).await.is_ok() {
-            fs::remove_file(self.config.socket_path()).await?;
+        if tokio_fs::metadata(self.config.socket_path()).await.is_ok() {
+            tokio_fs::remove_file(self.config.socket_path()).await?;
         }
 
         let listener = UnixListener::bind(self.config.socket_path())?;
         self.state = RuntimeState::Running;
+        log_memory_checkpoint("after_socket_bind");
         info!(path = %self.config.socket_path().display(), "sensors runtime listening");
 
         let mut tasks = JoinSet::new();
@@ -199,7 +217,7 @@ impl SensorsRuntime {
         }
 
         drop(listener);
-        if let Err(err) = fs::remove_file(self.config.socket_path()).await
+        if let Err(err) = tokio_fs::remove_file(self.config.socket_path()).await
             && err.kind() != std::io::ErrorKind::NotFound
         {
             warn!(%err, "failed to remove sensors socket");
@@ -337,7 +355,7 @@ async fn try_apply_default_event_command(service: &SensorsService, led_config: &
 
 async fn load_stored_animation_doc() -> StoredAnimationDoc {
     for path in [LED_ANIMATIONS_PATH, LEGACY_LED_ANIMATIONS_PATH] {
-        match fs::read_to_string(path).await {
+        match tokio_fs::read_to_string(path).await {
             Ok(raw) => return serde_json::from_str::<StoredAnimationDoc>(&raw).unwrap_or_default(),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
             Err(_) => return StoredAnimationDoc::default(),
@@ -426,4 +444,107 @@ fn env_color(key: &str, default: LightingColor) -> LightingColor {
     };
     let w = parse(3).unwrap_or(default.w);
     LightingColor { r, g, b, w }
+}
+
+fn log_memory_checkpoint(phase: &str) {
+    if !env_bool(MEMORY_TRACE_ENV, true) {
+        return;
+    }
+
+    let Some(snapshot) = sample_self_memory() else {
+        warn!(phase, "failed to sample helios-peripherals memory checkpoint");
+        return;
+    };
+
+    info!(
+        phase,
+        threads = snapshot.threads,
+        rss_mib = format_args!("{:.2}", snapshot.rss_bytes as f64 / 1_048_576.0),
+        pss_mib = format_args!("{:.2}", snapshot.pss_bytes as f64 / 1_048_576.0),
+        private_dirty_mib = format_args!("{:.2}", snapshot.private_dirty_bytes as f64 / 1_048_576.0),
+        executable_pss_mib = format_args!("{:.2}", snapshot.executable_pss_bytes as f64 / 1_048_576.0),
+        heap_pss_mib = format_args!("{:.2}", snapshot.heap_pss_bytes as f64 / 1_048_576.0),
+        anonymous_pss_mib = format_args!("{:.2}", snapshot.anonymous_pss_bytes as f64 / 1_048_576.0),
+        "helios-peripherals memory checkpoint"
+    );
+}
+
+fn sample_self_memory() -> Option<MemoryCheckpoint> {
+    let status = fs::read_to_string("/proc/self/status").ok()?;
+    let smaps_rollup = fs::read_to_string("/proc/self/smaps_rollup").ok()?;
+    let smaps = fs::read_to_string("/proc/self/smaps").ok()?;
+    let executable = fs::read_link("/proc/self/exe").ok().map(|path| path.to_string_lossy().to_string());
+
+    let mut snapshot = MemoryCheckpoint {
+        threads: parse_proc_key_bytes(&status, "Threads:").unwrap_or(0),
+        rss_bytes: parse_proc_key_bytes(&status, "VmRSS:").unwrap_or(0),
+        pss_bytes: parse_proc_key_bytes(&smaps_rollup, "Pss:").unwrap_or(0),
+        private_dirty_bytes: parse_proc_key_bytes(&smaps_rollup, "Private_Dirty:").unwrap_or(0),
+        ..MemoryCheckpoint::default()
+    };
+
+    let mut current_kind = "other";
+    for line in smaps.lines() {
+        if let Some(pathname) = parse_smaps_mapping_path(line) {
+            current_kind = classify_memory_mapping(pathname.as_deref(), executable.as_deref());
+            continue;
+        }
+        let Some(pss_bytes) = parse_proc_key_bytes(line, "Pss:") else {
+            continue;
+        };
+        match current_kind {
+            "executable" => snapshot.executable_pss_bytes = snapshot.executable_pss_bytes.saturating_add(pss_bytes),
+            "heap" => snapshot.heap_pss_bytes = snapshot.heap_pss_bytes.saturating_add(pss_bytes),
+            "anonymous" => snapshot.anonymous_pss_bytes = snapshot.anonymous_pss_bytes.saturating_add(pss_bytes),
+            _ => {}
+        }
+    }
+
+    Some(snapshot)
+}
+
+fn parse_proc_key_bytes(text: &str, key: &str) -> Option<u64> {
+    text.lines().find_map(|line| {
+        let value = line.strip_prefix(key)?.trim();
+        let mut parts = value.split_whitespace();
+        let raw = parts.next()?.parse::<u64>().ok()?;
+        match parts.next() {
+            Some(unit) if unit.eq_ignore_ascii_case("kb") => Some(raw.saturating_mul(1024)),
+            _ => Some(raw),
+        }
+    })
+}
+
+fn parse_smaps_mapping_path(line: &str) -> Option<Option<String>> {
+    let fields: Vec<&str> = line.split_whitespace().collect();
+    let first = *fields.first()?;
+    if !first.contains('-') || !first.as_bytes().first().is_some_and(u8::is_ascii_hexdigit) {
+        return None;
+    }
+    if fields.len() <= 5 {
+        return Some(None);
+    }
+    Some(Some(fields[5..].join(" ")))
+}
+
+fn classify_memory_mapping(pathname: Option<&str>, executable: Option<&str>) -> &'static str {
+    let Some(pathname) = pathname.map(str::trim) else {
+        return "anonymous";
+    };
+    if pathname.is_empty() {
+        return "anonymous";
+    }
+    if pathname == "[heap]" {
+        return "heap";
+    }
+    if executable.is_some_and(|candidate| pathname == candidate) {
+        return "executable";
+    }
+    if pathname.starts_with("[anon") {
+        return "anonymous";
+    }
+    if pathname.starts_with('[') || pathname.starts_with("/dev/") || pathname.starts_with('/') || pathname.starts_with("memfd:") {
+        return "other";
+    }
+    "anonymous"
 }

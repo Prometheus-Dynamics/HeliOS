@@ -919,8 +919,8 @@ async fn get_stream(State(state): State<AppState>, Path(id): Path<Uuid>) -> impl
     tag = "EngineStreams",
     responses((status = 200, description = "Available capture backends/devices", body = [helios_engine::capture::DiscoveredDevice]))
 )]
-async fn list_backends() -> impl IntoResponse {
-    lifecycle::list_backends().await
+async fn list_backends(State(state): State<AppState>) -> impl IntoResponse {
+    lifecycle::list_backends(state).await
 }
 
 #[utoipa::path(

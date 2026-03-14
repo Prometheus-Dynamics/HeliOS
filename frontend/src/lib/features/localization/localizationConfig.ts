@@ -51,7 +51,6 @@ export type LocalizationProfile = {
   snapRollToGround?: boolean;
   // Snap field-space pitch to level (0 deg).
   snapPitchToGround?: boolean;
-  pipelineTemplateId?: string | null;
   color?: string | null;
   viewEnabled?: boolean;
   temporalStabilization?: LocalizationTemporalStabilizationConfig;

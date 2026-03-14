@@ -41,8 +41,10 @@
 
   let { children }: { children: Snippet } = $props();
   const SIDEBAR_COLLAPSED_STORAGE_KEY = 'helios.app.sidebar.collapsed';
+  const OS_HEALTH_BANNER_DISMISSED_STORAGE_KEY = 'helios.app.os-health.dismissed';
   const RUNTIME_ERROR_TOAST_THROTTLE_MS = 5_000;
   let isSidebarCollapsed = $state(false);
+  let dismissedOsHealthFingerprint = $state('');
   const recentRuntimeErrors = new SvelteMap<string, number>();
 
   type NavHref = '/dashboard' | '/pipelines' | '/devices' | '/peers' | '/media' | '/localization' | '/systems' | '/docs' | '/settings';
@@ -90,6 +92,8 @@
 
   let resourceGuardStatus = $state<ResourceGuardStatus | null>(null);
   const osHealthBanner = $derived(buildOsHealthBanner(osHealthStatus));
+  const osHealthFingerprint = $derived(buildOsHealthFingerprint(osHealthStatus));
+  const showOsHealthBanner = $derived(Boolean(osHealthBanner) && !isSettingsPage && dismissedOsHealthFingerprint !== osHealthFingerprint);
   const resourceGuardBanner = $derived(buildResourceGuardBanner(resourceGuardStatus));
   const showSettingsOsWarning = $derived(Boolean(osHealthBanner));
 
@@ -168,6 +172,7 @@
   onMount(() => {
     startDomainInvalidationBridge();
     isSidebarCollapsed = readStorage(SIDEBAR_COLLAPSED_STORAGE_KEY) === '1';
+    dismissedOsHealthFingerprint = readStorage(OS_HEALTH_BANNER_DISMISSED_STORAGE_KEY);
     const cachedBootloader = bootloaderStatusResource.read();
     if (cachedBootloader?.data) {
       bootloaderStatus = cachedBootloader.data;
@@ -264,6 +269,15 @@
     return { title, details };
   }
 
+  function buildOsHealthFingerprint(status: OsHealthStatus | null): string {
+    const issues = Array.isArray(status?.issues) ? status.issues : [];
+    return issues
+      .map((issue) => `${issue.code?.trim() ?? ''}:${issue.description?.trim() ?? ''}`)
+      .filter((entry) => entry.length > 1)
+      .sort()
+      .join('|');
+  }
+
   function buildResourceGuardBanner(status: ResourceGuardStatus | null): ResourceGuardBannerState | null {
     if (!status?.enabled) return null;
     const degraded = Array.isArray(status.degraded_streams) ? status.degraded_streams : [];
@@ -302,6 +316,11 @@
   function toggleSidebar(): void {
     isSidebarCollapsed = !isSidebarCollapsed;
     writeStorage(SIDEBAR_COLLAPSED_STORAGE_KEY, isSidebarCollapsed ? '1' : '0');
+  }
+
+  function dismissOsHealthBanner(): void {
+    dismissedOsHealthFingerprint = osHealthFingerprint;
+    writeStorage(OS_HEALTH_BANNER_DISMISSED_STORAGE_KEY, osHealthFingerprint);
   }
 </script>
 
@@ -424,13 +443,17 @@
           isDocsPage ? 'app-main--docs' : 'px-4 py-4'
         }`}
       >
-        {#if osHealthBanner}
+        {#if showOsHealthBanner && osHealthBanner}
           <div class="mb-3 rounded border border-error-500/40 bg-error-500/10 px-4 py-3 text-error-50 shadow-[0_0_0_1px_rgba(239,68,68,0.12)]" role="alert">
             <div class="flex items-start gap-3">
               <FaIcon icon={faTriangleExclamation} class="mt-0.5 h-4 w-4 shrink-0 text-error-200" />
-              <div class="min-w-0">
+              <div class="min-w-0 flex-1">
                 <div class="text-sm font-semibold leading-tight">{osHealthBanner.title}</div>
                 <div class="mt-1 text-xs leading-relaxed text-error-100">{osHealthBanner.details}</div>
+                <div class="mt-3 flex flex-wrap items-center gap-2">
+                  <a class="btn btn-xs variant-soft" href={`${resolve('/settings')}?tab=diagnostics`}>Open diagnostics</a>
+                  <button class="btn btn-xs btn-outline" type="button" onclick={dismissOsHealthBanner}>Dismiss</button>
+                </div>
               </div>
             </div>
           </div>

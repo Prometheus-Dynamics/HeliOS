@@ -26,11 +26,13 @@ use crate::http::streams;
 use crate::http::streams_persist;
 use axum::body::Body;
 use axum::extract::State;
+use axum::http::StatusCode;
 use axum::http::{HeaderValue, Method, Request, header};
 use axum::serve;
 use axum::{
     Json, Router,
     middleware::{from_fn, from_fn_with_state},
+    response::{IntoResponse, Response},
     routing::get,
 };
 use std::sync::Arc;
@@ -48,8 +50,22 @@ fn main() {
     #[cfg(feature = "pprof")]
     spawn_startup_pprof_thread();
 
-    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("tokio runtime");
+    let worker_threads = read_thread_env("HELIOS_API_WORKER_THREADS", default_api_worker_threads(), 1, 8);
+    let max_blocking_threads = read_thread_env("HELIOS_API_MAX_BLOCKING_THREADS", default_api_max_blocking_threads(worker_threads), 1, 32);
+    let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(worker_threads).max_blocking_threads(max_blocking_threads).enable_all().build().expect("tokio runtime");
     runtime.block_on(async_main());
+}
+
+fn read_thread_env(var: &str, default: usize, min: usize, max: usize) -> usize {
+    std::env::var(var).ok().and_then(|value| value.trim().parse::<usize>().ok()).unwrap_or(default).clamp(min, max)
+}
+
+fn default_api_worker_threads() -> usize {
+    std::thread::available_parallelism().map(|value| value.get()).unwrap_or(4).clamp(2, 4)
+}
+
+fn default_api_max_blocking_threads(worker_threads: usize) -> usize {
+    (worker_threads.saturating_mul(2)).clamp(4, 8)
 }
 
 #[cfg(feature = "pprof")]
@@ -228,16 +244,10 @@ async fn async_main() {
     let ws_router = ws::router(state.clone());
     let config = ApiConfig::from_env();
 
-    let app: Router = Router::new()
-        .nest("/v1", http_router)
-        .nest("/v1/ws", ws_router)
-        .route("/openapi.json", get(openapi_spec))
-        .route("/asyncapi.json", get(asyncapi_spec))
-        .route("/v1/openapi.json", get(openapi_spec))
-        .route("/v1/asyncapi.json", get(asyncapi_spec))
-        .layer(from_fn_with_state(state.clone(), realtime_updates_middleware))
-        .layer(from_fn(request_context_middleware))
-        .layer(cors);
+    let app: Router =
+        Router::new().nest("/v1", http_router).nest("/v1/ws", ws_router).layer(from_fn_with_state(state.clone(), realtime_updates_middleware)).layer(from_fn(request_context_middleware)).layer(cors);
+
+    let app = app.route("/openapi.json", get(openapi_spec)).route("/asyncapi.json", get(asyncapi_spec)).route("/v1/openapi.json", get(openapi_spec)).route("/v1/asyncapi.json", get(asyncapi_spec));
 
     let listener = TcpListener::bind(&config.bind_addr).await.unwrap_or_else(|err| panic!("bind http listener {}: {err}", config.bind_addr));
     info!("HTTP server listening on {}", config.bind_addr);
@@ -282,8 +292,27 @@ fn init_tracing() {
     }
 }
 
-async fn openapi_spec() -> Json<utoipa::openapi::OpenApi> {
-    Json(http::ApiDoc::openapi())
+async fn openapi_spec() -> Response {
+    let exe = match std::env::current_exe() {
+        Ok(path) => path,
+        Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("openapi current_exe failed: {err}")).into_response(),
+    };
+
+    let output = match tokio::process::Command::new(exe).arg("apispec").arg("--http").arg("-").output().await {
+        Ok(output) => output,
+        Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("openapi child spawn failed: {err}")).into_response(),
+    };
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return (StatusCode::INTERNAL_SERVER_ERROR, format!("openapi child failed: {stderr}")).into_response();
+    }
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(output.stdout))
+        .unwrap_or_else(|err| (StatusCode::INTERNAL_SERVER_ERROR, format!("openapi response build failed: {err}")).into_response())
 }
 
 async fn asyncapi_spec(headers: axum::http::HeaderMap) -> Json<serde_json::Value> {

@@ -25,8 +25,7 @@ use super::solve;
 
 use helios_engine::ipc::{EngineErrorCode, EngineEvent};
 use helios_engine::localization::config::{LocalizationConfig, LocalizationPoseSpace, LocalizationProfile, LocalizationSourceConfig, select_profile};
-use helios_engine::localization::solve::solve_localization;
-use helios_engine::localization::sources::LocalizationSourceFetcher;
+use helios_engine::localization::fetch::LocalizationSourceFetcher;
 use helios_engine::localization::types::{LocalizationDetectionPose, LocalizationPipelineSource, LocalizationSolverOutputs, PipelineOutputSample};
 
 const IMU_EXTERNAL_ID: &str = "imu";
@@ -575,8 +574,7 @@ async fn fetch_profile_output_inner(fetcher: &ApiLocalizationSourceFetcher, prof
     let mut rig_poses = solve::load_rig_poses(&fetcher.state, &sources).await;
     solve::inject_imu_leveling_rig_pose(&fetcher.state, profile, &mut rig_poses).await;
     let field_map = if let Some(map_id) = profile.field_map_id.as_deref() { maps::load_map_document(map_id).await.ok() } else { None };
-    let calibrations = solve::load_stream_calibrations(&fetcher.state).await;
-    let response = solve_localization(profile, &sources, &rig_poses, field_map.as_ref(), &calibrations, fetcher, true).await;
+    let response = solve::solve_via_engine(&fetcher.state, profile, sources, &rig_poses, field_map.as_ref(), fetcher, true).await?;
 
     let selector = parse_profile_output_selector(output_key)?;
     let Some(solver) = response.solvers.into_iter().find(|solver| solver.id == selector.solver_id) else {

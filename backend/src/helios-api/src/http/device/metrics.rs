@@ -22,6 +22,8 @@ pub struct DeviceMetrics {
     pub swap_total_bytes: u64,
     pub swap_used_bytes: u64,
     pub disks: Vec<DiskMetrics>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub processes: Vec<ProcessMemoryMetrics>,
     pub temps: Vec<TempReading>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api: Option<ApiRuntimeMetrics>,
@@ -38,6 +40,39 @@ pub struct DiskMetrics {
     pub mount: String,
     pub total_bytes: u64,
     pub available_bytes: u64,
+}
+
+#[derive(Debug, Clone, ToSchema, serde::Serialize)]
+pub struct ProcessMemoryMetrics {
+    pub pid: u32,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub executable: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub executable_file_bytes: Option<u64>,
+    pub threads: u64,
+    pub rss_bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pss_bytes: Option<u64>,
+    pub private_dirty_bytes: u64,
+    pub swap_bytes: u64,
+    pub executable_pss_bytes: u64,
+    pub shared_lib_pss_bytes: u64,
+    pub heap_pss_bytes: u64,
+    pub stack_pss_bytes: u64,
+    pub anonymous_pss_bytes: u64,
+    pub device_pss_bytes: u64,
+    pub deleted_pss_bytes: u64,
+    pub other_pss_bytes: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub top_pss_mappings: Vec<ProcessMappingMetrics>,
+}
+
+#[derive(Debug, Clone, ToSchema, serde::Serialize)]
+pub struct ProcessMappingMetrics {
+    pub bucket: String,
+    pub label: String,
+    pub pss_bytes: u64,
 }
 
 #[derive(Debug, Clone, ToSchema, serde::Serialize)]

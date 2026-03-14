@@ -22,8 +22,6 @@ mod service;
 #[cfg(feature = "updater-ipc")]
 mod state;
 #[cfg(feature = "updater-ipc")]
-pub mod telemetry;
-#[cfg(feature = "updater-ipc")]
 mod util;
 
 #[cfg(feature = "updater-ipc")]

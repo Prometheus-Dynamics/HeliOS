@@ -77,6 +77,64 @@ impl EngineRuntime {
                     Err(_) => EngineEvent::Nack { command_id, code: EngineErrorCode::Timeout, reason: format!("calibration solve timed out after {}s", timeout_budget.as_secs()) },
                 }
             }
+            EngineCommand::SolveLocalization { command_id, request } => {
+                let request: crate::ipc::LocalizationSolveRequest = match serde_json::from_value(request.into()) {
+                    Ok(request) => request,
+                    Err(err) => {
+                        return EngineEvent::Nack { command_id, code: EngineErrorCode::InvalidInput, reason: format!("invalid localization solve request: {err}") };
+                    }
+                };
+                match solve_localization_request(request).await {
+                    Ok(response) => match serde_json::to_value(response) {
+                        Ok(response) => EngineEvent::LocalizationSolved { command_id, response: crate::ipc::JsonWire(response) },
+                        Err(err) => EngineEvent::Nack { command_id, code: EngineErrorCode::Internal, reason: format!("failed to encode localization solve response: {err}") },
+                    },
+                    Err(reason) => EngineEvent::Nack { command_id, code: EngineErrorCode::InvalidInput, reason },
+                }
+            }
+            EngineCommand::GetLocalizationPipelineStatus { command_id, request } => {
+                let request: crate::ipc::LocalizationPipelineStatusRequest = match serde_json::from_value(request.into()) {
+                    Ok(request) => request,
+                    Err(err) => {
+                        return EngineEvent::Nack { command_id, code: EngineErrorCode::InvalidInput, reason: format!("invalid localization pipeline status request: {err}") };
+                    }
+                };
+                let response = crate::localization::pipeline::status(&request.profile_id).await;
+                match serde_json::to_value(response) {
+                    Ok(response) => EngineEvent::LocalizationPipelineStatus { command_id, response: crate::ipc::JsonWire(response) },
+                    Err(err) => EngineEvent::Nack { command_id, code: EngineErrorCode::Internal, reason: format!("failed to encode localization pipeline status: {err}") },
+                }
+            }
+            EngineCommand::ListLocalizationPipelineOutputs { command_id, request } => {
+                let request: crate::ipc::LocalizationPipelineGraphRequest = match serde_json::from_value(request.into()) {
+                    Ok(request) => request,
+                    Err(err) => {
+                        return EngineEvent::Nack { command_id, code: EngineErrorCode::InvalidInput, reason: format!("invalid localization pipeline outputs request: {err}") };
+                    }
+                };
+                let graph = localization_pipeline_graph_from_request(&request);
+                match crate::localization::pipeline::list_outputs(&request.profile, &graph).await {
+                    Ok(outputs) => EngineEvent::LocalizationPipelineOutputs { command_id, outputs },
+                    Err(reason) => EngineEvent::Nack { command_id, code: EngineErrorCode::InvalidInput, reason },
+                }
+            }
+            EngineCommand::SampleLocalizationPipelineOutput { command_id, request } => {
+                let request: crate::ipc::LocalizationPipelineSampleRequest = match serde_json::from_value(request.into()) {
+                    Ok(request) => request,
+                    Err(err) => {
+                        return EngineEvent::Nack { command_id, code: EngineErrorCode::InvalidInput, reason: format!("invalid localization pipeline sample request: {err}") };
+                    }
+                };
+                let graph = localization_pipeline_sample_graph_from_request(&request);
+                let fetcher = localization_source_fetcher_from_values(request.source_values.clone());
+                match crate::localization::pipeline::sample_output(&fetcher, &request.profile, &request.sources, &graph, &request.output_key).await {
+                    Ok(response) => match serde_json::to_value(response) {
+                        Ok(response) => EngineEvent::LocalizationPipelineOutputSample { command_id, response: crate::ipc::JsonWire(response) },
+                        Err(err) => EngineEvent::Nack { command_id, code: EngineErrorCode::Internal, reason: format!("failed to encode localization pipeline sample: {err}") },
+                    },
+                    Err(reason) => EngineEvent::Nack { command_id, code: localization_pipeline_error_code(&reason), reason },
+                }
+            }
             EngineCommand::Stop { command_id, stream_id } => match timeout(STOP_STREAM_TIMEOUT, self.services.stop_stream(stream_id)).await {
                 Ok(Ok(_)) => EngineEvent::Stopped { command_id, stream_id },
                 Ok(Err(err)) => EngineEvent::Nack { command_id, code: error_code_for(&err), reason: err.to_string() },
@@ -113,6 +171,10 @@ impl EngineRuntime {
                     Err(err) => EngineEvent::Nack { command_id, code: EngineErrorCode::Internal, reason: format!("failed to build daedalus registry: {err}") },
                 }
             }
+            EngineCommand::DiscoverDevices { command_id } => match tokio::task::spawn_blocking(crate::capture::discover_devices_with_errors).await {
+                Ok(discovery) => EngineEvent::Discovery { command_id, discovery },
+                Err(err) => EngineEvent::Nack { command_id, code: EngineErrorCode::Internal, reason: format!("device discovery task failed: {err}") },
+            },
             EngineCommand::RefreshNodeRegistry { command_id } => match build_node_registry_snapshot() {
                 Ok(snapshot) => {
                     *self.node_registry_snapshot.write().await = Some(snapshot.clone());
@@ -237,6 +299,83 @@ impl EngineRuntime {
             }
         }
     }
+}
+
+struct ProvidedLocalizationSourceFetcher {
+    values: std::collections::HashMap<String, Result<serde_json::Value, String>>,
+}
+
+impl crate::localization::fetch::LocalizationSourceFetcher for ProvidedLocalizationSourceFetcher {
+    fn fetch_source_value<'a>(
+        &'a self,
+        source: &'a crate::localization::config::LocalizationSourceConfig,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<serde_json::Value, String>> + Send + 'a>> {
+        Box::pin(async move { self.values.get(&source.id).cloned().unwrap_or_else(|| Err(format!("missing source value for '{}'", source.id))) })
+    }
+}
+
+fn localization_source_fetcher_from_values(source_values: Vec<crate::ipc::LocalizationSolveSourceValue>) -> ProvidedLocalizationSourceFetcher {
+    ProvidedLocalizationSourceFetcher {
+        values: source_values
+            .into_iter()
+            .map(|source| {
+                (
+                    source.source_id,
+                    match (source.value, source.error) {
+                        (Some(value), _) => Ok(value.into()),
+                        (None, Some(error)) => Err(error),
+                        (None, None) => Err("source value unavailable".to_string()),
+                    },
+                )
+            })
+            .collect(),
+    }
+}
+
+fn localization_pipeline_graph_from_request(request: &crate::ipc::LocalizationPipelineGraphRequest) -> crate::localization::pipeline::LoadedPipelineGraph {
+    crate::localization::pipeline::LoadedPipelineGraph { graph: request.graph.clone().into(), graph_updated_at_ms: request.graph_updated_at_ms, template_mtime_ms: request.template_mtime_ms }
+}
+
+fn localization_pipeline_sample_graph_from_request(request: &crate::ipc::LocalizationPipelineSampleRequest) -> crate::localization::pipeline::LoadedPipelineGraph {
+    crate::localization::pipeline::LoadedPipelineGraph { graph: request.graph.clone().into(), graph_updated_at_ms: request.graph_updated_at_ms, template_mtime_ms: request.template_mtime_ms }
+}
+
+fn localization_pipeline_error_code(reason: &str) -> EngineErrorCode {
+    if reason == "output sample not available" {
+        EngineErrorCode::NotFound
+    } else {
+        EngineErrorCode::InvalidInput
+    }
+}
+
+async fn solve_localization_request(request: crate::ipc::LocalizationSolveRequest) -> Result<crate::localization::types::LocalizationSolveResponse, String> {
+    let crate::ipc::LocalizationSolveRequest { profile, sources, rig_poses, field_map, calibrations, source_values, apply_field_origin } = request;
+
+    let calibrations = calibrations
+        .into_iter()
+        .map(|(stream_id, calibration)| {
+            (
+                stream_id,
+                lib_cv::modules::aruco::pose::TagPoseCalibration {
+                    fx: calibration.fx,
+                    fy: calibration.fy,
+                    cx: calibration.cx,
+                    cy: calibration.cy,
+                    k1: calibration.k1,
+                    k2: calibration.k2,
+                    p1: calibration.p1,
+                    p2: calibration.p2,
+                    k3: calibration.k3,
+                    undistort_iters: calibration.undistort_iters.clamp(0, u8::MAX as i64) as u8,
+                    lens_model: calibration.lens_model,
+                },
+            )
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    let rig_poses = rig_poses.into_iter().map(|(camera_uid, pose)| (camera_uid, crate::localization::math::pose_to_transform(&pose))).collect::<std::collections::HashMap<_, _>>();
+    let fetcher = localization_source_fetcher_from_values(source_values);
+
+    Ok(crate::localization::solve::solve_localization(&profile, &sources, &rig_poses, field_map.as_ref(), &calibrations, &fetcher, apply_field_origin).await)
 }
 
 fn enforce_registry_default_compute_affinity(graph: &mut daedalus::planner::Graph, registry: &daedalus::registry::store::Registry) {

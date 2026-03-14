@@ -1558,7 +1558,6 @@ dependencies = [
 [[package]]
 name = "daedalus-core"
 version = "0.1.1"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=main#a43cdf24c19b820696c7fd4a5ea54b4d92a38e7f"
 dependencies = [
  "crossbeam-queue",
  "serde",
@@ -1568,7 +1567,6 @@ dependencies = [
 [[package]]
 name = "daedalus-data"
 version = "0.1.1"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=main#a43cdf24c19b820696c7fd4a5ea54b4d92a38e7f"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -1579,7 +1577,6 @@ dependencies = [
 [[package]]
 name = "daedalus-engine"
 version = "0.1.1"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=main#a43cdf24c19b820696c7fd4a5ea54b4d92a38e7f"
 dependencies = [
  "daedalus-gpu",
  "daedalus-planner",
@@ -1593,7 +1590,6 @@ dependencies = [
 [[package]]
 name = "daedalus-ffi"
 version = "0.1.1"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=main#a43cdf24c19b820696c7fd4a5ea54b4d92a38e7f"
 dependencies = [
  "base64 0.22.1",
  "daedalus-core",
@@ -1611,7 +1607,6 @@ dependencies = [
 [[package]]
 name = "daedalus-gpu"
 version = "0.1.1"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=main#a43cdf24c19b820696c7fd4a5ea54b4d92a38e7f"
 dependencies = [
  "bitflags 2.11.0",
  "bytemuck",
@@ -1626,7 +1621,6 @@ dependencies = [
 [[package]]
 name = "daedalus-macros"
 version = "0.1.1"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=main#a43cdf24c19b820696c7fd4a5ea54b4d92a38e7f"
 dependencies = [
  "daedalus-runtime",
  "daedalus-wgsl-infer",
@@ -1639,7 +1633,6 @@ dependencies = [
 [[package]]
 name = "daedalus-nodes"
 version = "0.1.1"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=main#a43cdf24c19b820696c7fd4a5ea54b4d92a38e7f"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -1654,7 +1647,6 @@ dependencies = [
 [[package]]
 name = "daedalus-planner"
 version = "0.1.1"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=main#a43cdf24c19b820696c7fd4a5ea54b4d92a38e7f"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -1667,7 +1659,6 @@ dependencies = [
 [[package]]
 name = "daedalus-registry"
 version = "0.1.1"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=main#a43cdf24c19b820696c7fd4a5ea54b4d92a38e7f"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -1680,7 +1671,6 @@ dependencies = [
 [[package]]
 name = "daedalus-rs"
 version = "0.1.1"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=main#a43cdf24c19b820696c7fd4a5ea54b4d92a38e7f"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -1698,7 +1688,6 @@ dependencies = [
 [[package]]
 name = "daedalus-runtime"
 version = "0.1.1"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=main#a43cdf24c19b820696c7fd4a5ea54b4d92a38e7f"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -1717,7 +1706,6 @@ dependencies = [
 [[package]]
 name = "daedalus-wgsl-infer"
 version = "0.1.1"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?branch=main#a43cdf24c19b820696c7fd4a5ea54b4d92a38e7f"
 
 [[package]]
 name = "data-encoding"
@@ -2842,7 +2830,6 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
- "tracing-appender",
  "tracing-subscriber",
  "url",
  "utoipa",
@@ -3002,9 +2989,6 @@ dependencies = [
  "hex",
  "lib-ipc",
  "lib-test",
- "metrics",
- "metrics-exporter-prometheus",
- "once_cell",
  "reqwest",
  "serde",
  "serde_json",
@@ -3013,7 +2997,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "tracing-appender",
  "tracing-subscriber",
  "url",
  "uuid",
@@ -4558,42 +4541,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "metrics-exporter-prometheus"
-version = "0.18.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3589659543c04c7dc5526ec858591015b87cd8746583b51b48ef4353f99dbcda"
-dependencies = [
- "base64 0.22.1",
- "http-body-util",
- "hyper",
- "hyper-util",
- "indexmap",
- "ipnet",
- "metrics",
- "metrics-util",
- "quanta",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "metrics-util"
-version = "0.20.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdfb1365fea27e6dd9dc1dbc19f570198bc86914533ad639dae939635f096be4"
-dependencies = [
- "crossbeam-epoch",
- "crossbeam-utils",
- "hashbrown 0.16.1",
- "metrics",
- "quanta",
- "rand 0.9.2",
- "rand_xoshiro",
- "sketches-ddsketch",
-]
-
-[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5762,21 +5709,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "quanta"
-version = "0.12.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3ab5a9d756f0d97bdc89019bd2e4ea098cf9cde50ee7564dde6b81ccc8f06c7"
-dependencies = [
- "crossbeam-utils",
- "libc",
- "once_cell",
- "raw-cpuid",
- "wasi 0.11.1+wasi-snapshot-preview1",
- "web-sys",
- "winapi 0.3.9",
-]
-
-[[package]]
 name = "quick-error"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6008,15 +5940,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rand_xoshiro"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f703f4665700daf5512dcca5f43afa6af89f09db47fb56be587f80636bda2d41"
-dependencies = [
- "rand_core 0.9.3",
-]
-
-[[package]]
 name = "rangemap"
 version = "1.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6070,15 +5993,6 @@ dependencies = [
  "rav1e",
  "rayon",
  "rgb",
-]
-
-[[package]]
-name = "raw-cpuid"
-version = "11.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "498cd0dc59d73224351ee52a95fee0f1a617a2eae0e7d9d720cc622c73a54186"
-dependencies = [
- "bitflags 2.11.0",
 ]
 
 [[package]]
@@ -6827,12 +6741,6 @@ checksum = "95890f873bec569a0362c235787f3aca6e1e887302ba4840839bcc6459c42da6"
 dependencies = [
  "quote",
 ]
-
-[[package]]
-name = "sketches-ddsketch"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c6f73aeb92d671e0cc4dca167e59b2deb6387c375391bc99ee743f326994a2b"
 
 [[package]]
 name = "slab"
@@ -7619,18 +7527,6 @@ dependencies = [
  "pin-project-lite",
  "tracing-attributes",
  "tracing-core",
-]
-
-[[package]]
-name = "tracing-appender"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "786d480bce6247ab75f005b14ae1624ad978d3029d9113f0a22fa1ac773faeaf"
-dependencies = [
- "crossbeam-channel",
- "thiserror 2.0.18",
- "time",
- "tracing-subscriber",
 ]
 
 [[package]]

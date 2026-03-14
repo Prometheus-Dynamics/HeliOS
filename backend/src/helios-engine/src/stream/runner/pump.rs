@@ -341,21 +341,7 @@ impl StreamRunner {
                 let graph_start = Instant::now();
                 let processed = match self.process_assigned_graphs(image) {
                     Some(img) => img,
-                    None => {
-                        // If the graph fails to produce an output (e.g. execution error),
-                        // keep the preview alive with the last good frame instead of cloning
-                        // the current decoded frame (full-res clones can inflate RSS).
-                        if should_write_preview && self.preview_worker.is_some() && self.shmem.is_some() {
-                            if let Some(fallback) = self.last_preview_frame.clone() {
-                                let host = self.graph.host();
-                                if host.receiver_count() > 0 {
-                                    host.send_frame(fallback.clone());
-                                }
-                                self.try_write_shmem_preview_from_image(fallback, ts);
-                            }
-                        }
-                        return Ok(true);
-                    }
+                    None => return Ok(true),
                 };
                 let graph_ms = graph_start.elapsed().as_secs_f64() * 1000.0;
                 histogram!("helios.stream.graph_ms", "stream" => self.stream_label.clone()).record(graph_ms);
@@ -384,9 +370,6 @@ impl StreamRunner {
                 }
                 if should_write_preview && self.preview_worker.is_some() && self.shmem.is_some() {
                     self.try_write_shmem_preview_from_image(processed.clone(), ts);
-                }
-                if preview_active {
-                    self.last_preview_frame = Some(processed.clone());
                 }
 
                 // Encoder is an optional side-channel; if it’s backed up, drop frames *before*
@@ -591,6 +574,7 @@ impl StreamRunner {
                 tracing::warn!(error = %err, "preview shmem write failed");
                 break;
             }
+            let _ = worker.recycle_tx.try_send(res.jpeg);
         }
     }
 }

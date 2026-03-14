@@ -5,15 +5,26 @@ log_file = "/var/log/helios-provision-squashfs.log"
 
 [spans]
 boot_partition = 1
-start_after_partition = 2
+start_after_partition = 1
 data_size_mib = 0
+
+[[partitions]]
+name = "ROOT_A"
+number = 2
+mode = "noop"
+fs_type = "none"
+size_mib = __ROOT_SLOT_SIZE_MIB__
+mkfs = false
+wipe_signatures = false
+run_fsck = false
+run_resizefs = false
 
 [[partitions]]
 name = "ROOT_B"
 number = 3
 mode = "mkpart"
 fs_type = "ext4"
-size_mib = 128
+size_mib = __ROOT_SLOT_SIZE_MIB__
 mkfs = false
 wipe_signatures = true
 marker = "/var/lib/helios/.provision.reserve_v1"

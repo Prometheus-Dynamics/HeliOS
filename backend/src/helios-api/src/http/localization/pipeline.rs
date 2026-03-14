@@ -5,8 +5,6 @@ use axum::{
     routing::get,
 };
 use serde::Deserialize;
-use std::future::Future;
-use std::pin::Pin;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -14,13 +12,45 @@ use super::super::AppState;
 use super::super::error::ApiError;
 use super::super::pipelines;
 use super::config;
+use super::solve;
 use super::sources::ApiLocalizationSourceFetcher;
 
+use helios_engine::ipc::{EngineEvent, LocalizationPipelineGraphRequest, LocalizationPipelineSampleRequest, LocalizationPipelineStatusRequest};
 use helios_engine::localization::config::select_profile;
-use helios_engine::localization::pipeline::{
-    LocalizationPipelineGraphProvider, LocalizationPipelineStatus, PipelineGraphDocument, list_outputs as list_pipeline_outputs, sample_output as sample_pipeline_output, status as pipeline_status,
-};
-use helios_engine::localization::types::PipelineOutputSample;
+use helios_engine::localization::types::{LocalizationPipelineStatus, PipelineOutputSample};
+
+const LOCALIZATION_PIPELINE_GRAPH_NAME: &str = "daedalus_aruco_fast";
+
+#[derive(Debug, Clone)]
+struct LoadedPipelineGraph {
+    graph: serde_json::Value,
+    graph_updated_at_ms: Option<i64>,
+    template_mtime_ms: Option<i64>,
+}
+
+impl LoadedPipelineGraph {
+    fn into_request(self, profile: helios_engine::localization::config::LocalizationProfile) -> LocalizationPipelineGraphRequest {
+        LocalizationPipelineGraphRequest { profile, graph: self.graph.into(), graph_updated_at_ms: self.graph_updated_at_ms, template_mtime_ms: self.template_mtime_ms }
+    }
+
+    fn into_sample_request(
+        self,
+        profile: helios_engine::localization::config::LocalizationProfile,
+        sources: Vec<helios_engine::localization::config::LocalizationSourceConfig>,
+        source_values: Vec<helios_engine::ipc::LocalizationSolveSourceValue>,
+        output_key: String,
+    ) -> LocalizationPipelineSampleRequest {
+        LocalizationPipelineSampleRequest {
+            profile,
+            sources,
+            graph: self.graph.into(),
+            graph_updated_at_ms: self.graph_updated_at_ms,
+            template_mtime_ms: self.template_mtime_ms,
+            source_values,
+            output_key,
+        }
+    }
+}
 
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -31,25 +61,6 @@ struct PipelineQuery {
 
 pub fn router() -> Router<AppState> {
     Router::new().route("/pipeline/status", get(status)).route("/pipeline/outputs", get(list_outputs)).route("/pipeline/outputs/{output_key}", get(sample_output))
-}
-
-struct PipelineAdapter;
-
-impl LocalizationPipelineGraphProvider for PipelineAdapter {
-    fn load_graph_document<'a>(&'a self, id: Uuid) -> Pin<Box<dyn Future<Output = Result<PipelineGraphDocument, String>> + Send + 'a>> {
-        Box::pin(async move {
-            let doc = pipelines::load_graph_document(id).await.map_err(|err| format!("failed to load pipeline graph: {err}"))?;
-            Ok(PipelineGraphDocument { graph: doc.graph, updated_at_ms: doc.updated_at_ms })
-        })
-    }
-
-    fn load_template_graph<'a>(&'a self, template_id: &'a str) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, String>> + Send + 'a>> {
-        Box::pin(async move { pipelines::load_template_graph(template_id).await.map_err(|err| format!("failed to load pipeline template: {err}")) })
-    }
-
-    fn template_last_modified_ms<'a>(&'a self, template_id: &'a str) -> Pin<Box<dyn Future<Output = Result<Option<i64>, String>> + Send + 'a>> {
-        Box::pin(async move { template_last_modified_ms(template_id).await })
-    }
 }
 
 #[utoipa::path(
@@ -64,10 +75,22 @@ async fn status(State(_state): State<AppState>, Query(query): Query<PipelineQuer
         Ok(cfg) => cfg,
         Err(err) => return ApiError::bad_gateway(err.to_string()).into_response(),
     };
+    let profile = match select_profile(&config, query.profile_id.as_deref()) {
+        Ok(profile) => profile,
+        Err(err) => return ApiError::not_found(err).into_response(),
+    };
+    if let Err(err) = load_pipeline_graph().await {
+        return ApiError::bad_gateway(err).into_response();
+    }
 
-    match pipeline_status(&config, query.profile_id.as_deref()).await {
-        Ok(status) => Json(status).into_response(),
-        Err(err) => ApiError::not_found(err).into_response(),
+    match _state.engine.localization_pipeline_status_event(LocalizationPipelineStatusRequest { profile_id: profile.id.clone() }).await {
+        Ok(EngineEvent::LocalizationPipelineStatus { response, .. }) => match serde_json::from_value::<LocalizationPipelineStatus>(response.into()) {
+            Ok(status) => Json(status).into_response(),
+            Err(err) => ApiError::bad_gateway(format!("invalid localization pipeline status response: {err}")).into_response(),
+        },
+        Ok(EngineEvent::Nack { reason, .. }) => ApiError::bad_gateway(reason).into_response(),
+        Ok(other) => ApiError::bad_gateway(format!("unexpected engine response: {other:?}")).into_response(),
+        Err(err) => ApiError::bad_gateway(err.to_string()).into_response(),
     }
 }
 
@@ -87,14 +110,16 @@ async fn list_outputs(State(_state): State<AppState>, Query(query): Query<Pipeli
         Ok(profile) => profile,
         Err(err) => return ApiError::not_found(err).into_response(),
     };
-    let Some(template_id) = profile.pipeline_template_id.as_ref().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) else {
-        return ApiError::not_found("localization pipeline not configured").into_response();
+    let graph = match load_pipeline_graph().await {
+        Ok(graph) => graph,
+        Err(err) => return ApiError::bad_gateway(err).into_response(),
     };
 
-    let provider = PipelineAdapter;
-    match list_pipeline_outputs(&provider, profile, &template_id).await {
-        Ok(outputs) => Json(outputs).into_response(),
-        Err(err) => ApiError::bad_gateway(err).into_response(),
+    match _state.engine.localization_pipeline_outputs_event(graph.into_request(profile.clone())).await {
+        Ok(EngineEvent::LocalizationPipelineOutputs { outputs, .. }) => Json(outputs).into_response(),
+        Ok(EngineEvent::Nack { reason, .. }) => ApiError::bad_gateway(reason).into_response(),
+        Ok(other) => ApiError::bad_gateway(format!("unexpected engine response: {other:?}")).into_response(),
+        Err(err) => ApiError::bad_gateway(err.to_string()).into_response(),
     }
 }
 
@@ -118,33 +143,43 @@ async fn sample_output(State(state): State<AppState>, Query(query): Query<Pipeli
         Ok(profile) => profile,
         Err(err) => return ApiError::not_found(err).into_response(),
     };
-    let Some(template_id) = profile.pipeline_template_id.as_ref().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) else {
-        return ApiError::not_found("localization pipeline not configured").into_response();
+    let graph = match load_pipeline_graph().await {
+        Ok(graph) => graph,
+        Err(err) => return ApiError::bad_gateway(err).into_response(),
     };
-
-    let provider = PipelineAdapter;
     let fetcher = ApiLocalizationSourceFetcher::new(state.clone());
+    let source_values = solve::fetch_localization_source_values(&fetcher, &profile.sources).await;
+    let request = graph.into_sample_request(profile.clone(), profile.sources.clone(), source_values, output_key.clone());
 
-    match sample_pipeline_output(&provider, &fetcher, profile, &template_id, &output_key).await {
-        Ok(sample) => Json(sample).into_response(),
-        Err(err) if err == "output sample not available" => ApiError::not_found(err).into_response(),
-        Err(err) => ApiError::bad_gateway(err).into_response(),
+    match state.engine.localization_pipeline_output_sample_event(request).await {
+        Ok(EngineEvent::LocalizationPipelineOutputSample { response, .. }) => match serde_json::from_value::<PipelineOutputSample>(response.into()) {
+            Ok(sample) => Json(sample).into_response(),
+            Err(err) => ApiError::bad_gateway(format!("invalid localization pipeline sample response: {err}")).into_response(),
+        },
+        Ok(EngineEvent::Nack { code, reason, .. }) if code == helios_engine::ipc::EngineErrorCode::NotFound => ApiError::not_found(reason).into_response(),
+        Ok(EngineEvent::Nack { reason, .. }) => ApiError::bad_gateway(reason).into_response(),
+        Ok(other) => ApiError::bad_gateway(format!("unexpected engine response: {other:?}")).into_response(),
+        Err(err) => ApiError::bad_gateway(err.to_string()).into_response(),
     }
 }
 
-async fn template_last_modified_ms(template_id: &str) -> Result<Option<i64>, String> {
-    let path = pipelines::pipeline_template_dir().join(format!("{template_id}.json"));
-    match tokio::fs::metadata(&path).await {
-        Ok(meta) => match meta.modified() {
-            Ok(time) => {
-                let ms = time.duration_since(std::time::UNIX_EPOCH).map_err(|err| format!("invalid template mtime: {err}"))?.as_millis() as i64;
-                Ok(Some(ms))
-            }
-            Err(err) => Err(format!("failed to read template mtime: {err}")),
-        },
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(err) => Err(format!("failed to stat template: {err}")),
+async fn load_pipeline_graph() -> Result<LoadedPipelineGraph, String> {
+    let graph_name = LOCALIZATION_PIPELINE_GRAPH_NAME;
+    if let Ok(id) = Uuid::parse_str(graph_name) {
+        let doc = pipelines::load_graph_document(id).await.map_err(|err| format!("failed to load pipeline graph: {err}"))?;
+        return Ok(LoadedPipelineGraph { graph: doc.graph, graph_updated_at_ms: Some(doc.updated_at_ms), template_mtime_ms: None });
     }
+    let graph = pipelines::load_template_graph(graph_name).await.map_err(|err| format!("failed to load localization pipeline graph: {err}"))?;
+    let path = pipelines::pipeline_template_dir().join(format!("{graph_name}.json"));
+    let template_mtime_ms = match tokio::fs::metadata(&path).await {
+        Ok(meta) => match meta.modified() {
+            Ok(time) => Some(time.duration_since(std::time::UNIX_EPOCH).map_err(|err| format!("invalid template mtime: {err}"))?.as_millis() as i64),
+            Err(err) => return Err(format!("failed to read template mtime: {err}")),
+        },
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+        Err(err) => return Err(format!("failed to stat template: {err}")),
+    };
+    Ok(LoadedPipelineGraph { graph, graph_updated_at_ms: None, template_mtime_ms })
 }
 
 // Re-export types for OpenAPI schema resolution.

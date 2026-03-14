@@ -125,6 +125,7 @@ BOOT_CANDIDATES="/dev/mmcblk0p1 /dev/mmcblk1p1 /dev/sda1 /dev/sdb1 /dev/nvme0n1p
 DATA_DEV_EXPLICIT=0
 BOOT_DEBUG=0
 OVERLAY_SLOT="root-a"
+ROOT_SLOT="ROOT_A"
 
 is_mounted() {
 	local target="$1"
@@ -214,18 +215,172 @@ mark() {
 	fi
 }
 
+record_selection() {
+	[ "${BOOT_DEBUG}" -eq 1 ] || return 0
+	if mount_boot_debug; then
+		mkdir -p "${DEBUG_MOUNT}/helios/squashfs-debug" 2>/dev/null || true
+		{
+			printf 'root_cmd=%s\n' "${ROOT_DEV}"
+			printf 'root_slot=%s\n' "${ROOT_SLOT}"
+			printf 'overlay_slot=%s\n' "${OVERLAY_SLOT}"
+			printf 'data_dev=%s\n' "${DATA_DEV}"
+		} > "${DEBUG_MOUNT}/helios/squashfs-debug/selection.txt" 2>/dev/null || true
+		sync 2>/dev/null || true
+	fi
+	if is_mounted /mnt/data; then
+		mkdir -p /mnt/data/helios/squashfs-debug 2>/dev/null || true
+		{
+			printf 'root_cmd=%s\n' "${ROOT_DEV}"
+			printf 'root_slot=%s\n' "${ROOT_SLOT}"
+			printf 'overlay_slot=%s\n' "${OVERLAY_SLOT}"
+			printf 'data_dev=%s\n' "${DATA_DEV}"
+		} > /mnt/data/helios/squashfs-debug/selection.txt 2>/dev/null || true
+		sync 2>/dev/null || true
+	fi
+}
+
 resolve_root_dev() {
-	local candidate
+	local candidate slot
 
 	mkdir -p /mnt/probe
+	case "${ROOT_DEV}" in
+		/dev/*)
+			wait_for_block "${ROOT_DEV}" || return 1
+			[ -b "${ROOT_DEV}" ] || return 1
+			if mount -t squashfs -o ro "${ROOT_DEV}" /mnt/probe 2>/dev/null; then
+				umount /mnt/probe 2>/dev/null || true
+				echo "${ROOT_DEV}"
+				return 0
+			fi
+			return 1
+			;;
+	esac
+
+	if slot="$(resolve_requested_root_slot)"; then
+		ROOT_SLOT="${slot}"
+		candidate="$(root_device_for_slot "${slot}")" || return 1
+		wait_for_block "${candidate}" || return 1
+		[ -b "${candidate}" ] || return 1
+		if mount -t squashfs -o ro "${candidate}" /mnt/probe 2>/dev/null; then
+			umount /mnt/probe 2>/dev/null || true
+			echo "${candidate}"
+			return 0
+		fi
+		return 1
+	fi
+
 	for candidate in "${ROOT_DEV}" ${ROOT_CANDIDATES}; do
 		[ -n "${candidate}" ] || continue
 		wait_for_block "${candidate}" || continue
 		[ -b "${candidate}" ] || continue
 		if mount -t squashfs -o ro "${candidate}" /mnt/probe 2>/dev/null; then
 			umount /mnt/probe 2>/dev/null || true
+			case "${candidate}" in
+				*p3|*3)
+					ROOT_SLOT="ROOT_B"
+					;;
+				*)
+					ROOT_SLOT="ROOT_A"
+					;;
+			esac
 			echo "${candidate}"
 			return 0
+		fi
+	done
+
+	return 1
+}
+
+resolve_requested_root_slot() {
+	case "${ROOT_DEV}" in
+		/dev/helios-rootfs)
+			read_active_slot_marker || printf '%s\n' "ROOT_A"
+			;;
+		/dev/*p2|/dev/*2)
+			printf '%s\n' "ROOT_A"
+			;;
+		/dev/*p3|/dev/*3)
+			printf '%s\n' "ROOT_B"
+			;;
+		*)
+			return 1
+			;;
+	esac
+}
+
+resolve_base_disk() {
+	local candidate
+
+	case "${ROOT_DEV}" in
+		/dev/helios-rootfs) ;;
+		/dev/*)
+			partition_base "${ROOT_DEV}"
+			return 0
+			;;
+	esac
+
+	for candidate in "${BOOT_DEV}" ${BOOT_CANDIDATES} ${DATA_CANDIDATES}; do
+		[ -n "${candidate}" ] || continue
+		wait_for_block "${candidate}" || continue
+		[ -b "${candidate}" ] || continue
+		partition_base "${candidate}"
+		return 0
+	done
+
+	return 1
+}
+
+root_device_for_slot() {
+	local slot="$1"
+	local base
+
+	base="$(resolve_base_disk)" || return 1
+	case "${slot}" in
+		ROOT_A)
+			partition_dev "${base}" 2
+			;;
+		ROOT_B)
+			partition_dev "${base}" 3
+			;;
+		*)
+			return 1
+			;;
+	esac
+}
+
+read_active_slot_marker() {
+	local candidate mountpoint active
+
+	mountpoint="/mnt/slot-marker"
+	mkdir -p "${mountpoint}"
+
+	for candidate in ${DATA_CANDIDATES}; do
+		[ -n "${candidate}" ] || continue
+		wait_for_block "${candidate}" || continue
+		if mount -t ext4 -o ro "${candidate}" "${mountpoint}" 2>/dev/null; then
+			active="$(cat "${mountpoint}/ota/active" 2>/dev/null || true)"
+			umount "${mountpoint}" 2>/dev/null || true
+			case "${active}" in
+				ROOT_A|ROOT_B)
+					printf '%s\n' "${active}"
+					return 0
+					;;
+			esac
+		fi
+	done
+
+	for candidate in "${BOOT_DEV}" ${BOOT_CANDIDATES}; do
+		[ -n "${candidate}" ] || continue
+		wait_for_block "${candidate}" || continue
+		if mount -t vfat -o ro "${candidate}" "${mountpoint}" 2>/dev/null; then
+			active="$(cat "${mountpoint}/helios/ota/active" 2>/dev/null || true)"
+			umount "${mountpoint}" 2>/dev/null || true
+			case "${active}" in
+				ROOT_A|ROOT_B)
+					printf '%s\n' "${active}"
+					return 0
+					;;
+			esac
 		fi
 	done
 
@@ -246,12 +401,23 @@ derive_related_devices() {
 }
 
 set_overlay_slot() {
-	case "${ROOT_DEV}" in
-		*p3|*3)
+	case "${ROOT_SLOT}" in
+		ROOT_B)
 			OVERLAY_SLOT="root-b"
 			;;
 		*)
 			OVERLAY_SLOT="root-a"
+			;;
+	esac
+}
+
+slot_for_root_dev() {
+	case "$1" in
+		*p3|*3)
+			printf '%s\n' "ROOT_B"
+			;;
+		*)
+			printf '%s\n' "ROOT_A"
 			;;
 	esac
 }
@@ -295,8 +461,10 @@ mount -t sysfs sysfs /sys 2>/dev/null || true
 mark "10-dev-proc-sys-mounted"
 
 ROOT_DEV="$(resolve_root_dev)" || panic_shell "root device not found"
+ROOT_SLOT="$(slot_for_root_dev "${ROOT_DEV}")"
 derive_related_devices || panic_shell "failed to derive related devices"
 set_overlay_slot
+record_selection
 mark "20-root-device-found"
 
 mount -t squashfs -o ro "${ROOT_DEV}" /mnt/lower || panic_shell "failed to mount lower squashfs"
@@ -317,6 +485,7 @@ else
 	mount -t tmpfs -o mode=0755 tmpfs /mnt/data || panic_shell "failed to mount tmpfs writable store"
 fi
 mark "40-data-mounted"
+record_selection
 
 mkdir -p "/mnt/data/root-overlay/${OVERLAY_SLOT}/upper" "/mnt/data/root-overlay/${OVERLAY_SLOT}/work"
 mkdir -p /newroot

@@ -4,6 +4,7 @@ set -eu
 status_file=/run/helios/provision-status.env
 provision_status=unknown
 booted_tmpfs=0
+effective_provisions=/run/helios/provisions.effective.toml
 
 canon() {
   readlink -f "$1" 2>/dev/null || printf '%s\n' "$1"
@@ -40,6 +41,60 @@ part_dev() {
     *[0-9]) printf '%s\n' "${base}p${part}" ;;
     *) printf '%s\n' "${base}${part}" ;;
   esac
+}
+
+align_up_mib() {
+  value="$1"
+  align="${2:-4}"
+  if [ "$align" -le 0 ]; then
+    printf '%s\n' "$value"
+    return 0
+  fi
+  printf '%s\n' $(( ((value + align - 1) / align) * align ))
+}
+
+read_block_size_mib() {
+  dev="$(canon "$1")"
+  [ -b "$dev" ] || return 1
+  bn=$(basename "$dev")
+  sectors=$(cat "/sys/class/block/$bn/size" 2>/dev/null || true)
+  sector_bytes=$(cat "/sys/class/block/$bn/queue/logical_block_size" 2>/dev/null || printf '512\n')
+  [ -n "$sectors" ] || return 1
+  [ -n "$sector_bytes" ] || sector_bytes=512
+  printf '%s\n' $(( (sectors * sector_bytes + 1048576 - 1) / 1048576 ))
+}
+
+compute_root_slot_size_mib() {
+  boot_dev="$(find_boot_dev || true)"
+  if [ -z "$boot_dev" ]; then
+    printf '%s\n' "112"
+    return 0
+  fi
+
+  disk=$(disk_from_part "$boot_dev")
+  root_a_dev=$(part_dev "$disk" 2)
+  root_a_size_mib=$(read_block_size_mib "$root_a_dev" 2>/dev/null || true)
+  boot_size_mib=$(read_block_size_mib "$boot_dev" 2>/dev/null || true)
+  if [ -z "$root_a_size_mib" ] || [ -z "$boot_size_mib" ]; then
+    printf '%s\n' "112"
+    return 0
+  fi
+
+  slot_start_mib=$(align_up_mib "$boot_size_mib" 4)
+  slot_size_mib=$(( root_a_size_mib - (slot_start_mib - boot_size_mib) ))
+  if [ "$slot_size_mib" -le 0 ]; then
+    printf '%s\n' "112"
+    return 0
+  fi
+
+  align_up_mib "$slot_size_mib" 4
+}
+
+render_provision_config() {
+  slot_size_mib="$(compute_root_slot_size_mib)"
+  install -d -m0755 /run/helios
+  sed "s/__ROOT_SLOT_SIZE_MIB__/${slot_size_mib}/g" /etc/helios/provisions.toml > "$effective_provisions"
+  printf '%s\n' "$effective_provisions"
 }
 
 boot_part_from_config() {
@@ -181,7 +236,8 @@ fi
 install -d -m0755 /run/helios /run/helios-provision/data /var/lib/helios
 rm -f "$status_file"
 
-/usr/local/bin/helios-provision --config /etc/helios/provisions.toml --status-file "$status_file"
+provision_config="$(render_provision_config)"
+/usr/local/bin/helios-provision --config "$provision_config" --status-file "$status_file"
 
 if [ -r "$status_file" ]; then
   # shellcheck source=/dev/null

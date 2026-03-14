@@ -8,7 +8,6 @@ pub mod error;
 pub mod graph;
 pub mod identity;
 pub mod ipc;
-#[cfg(feature = "runtime")]
 pub mod localization;
 #[cfg(feature = "runtime")]
 pub mod pipelines;

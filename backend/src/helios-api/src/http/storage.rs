@@ -169,8 +169,7 @@ fn evaluate_storage_health(snapshot: &StorageProbeSnapshot) -> StorageHealthSnap
 
     let visible_repairs: Vec<String> = snapshot.self_check_repairs.iter().filter(|code| !is_benign_self_repair(code)).cloned().collect();
     if !visible_repairs.is_empty() {
-        issues
-            .push(StorageHealthIssue { code: "self_repair_applied", description: format!("Automatic OS self-check repaired this boot: {}.", describe_self_check_codes(&visible_repairs)) });
+        issues.push(StorageHealthIssue { code: "self_repair_applied", description: format!("Automatic OS self-check repaired this boot: {}.", describe_self_check_codes(&visible_repairs)) });
     }
 
     StorageHealthSnapshot { root_fs_type: snapshot.root_fs_type.clone(), data_fs_type: snapshot.data_fs_type.clone(), overlay_data_fs_type: snapshot.overlay_data_fs_type.clone(), issues }
@@ -342,12 +341,19 @@ fn evaluate_ota_health(root_fs: Option<&str>) -> Vec<StorageHealthIssue> {
         });
     }
 
-    if let (Some(slot_a_bytes), Some(slot_b_bytes)) = (read_block_size_bytes(&layout.slot_a_partition), read_block_size_bytes(&layout.slot_b_partition))
-        && slot_b_bytes < slot_a_bytes
+    if let Some((active_slot, reserve_slot)) = active.as_deref().zip(reserve.as_deref())
+        && let (Some(active_bytes), Some(reserve_bytes)) = (slot_size_for_marker(&layout, active_slot), slot_size_for_marker(&layout, reserve_slot))
+        && reserve_bytes < active_bytes
     {
         issues.push(StorageHealthIssue {
             code: "ota_inactive_slot_too_small",
-            description: format!("Inactive squashfs slot is smaller than the active slot ({} MiB vs {} MiB) and may not fit the next OTA.", slot_b_bytes / (1024 * 1024), slot_a_bytes / (1024 * 1024)),
+            description: format!(
+                "Inactive squashfs slot {} is smaller than the active slot {} ({} MiB vs {} MiB) and may not fit the next OTA.",
+                reserve_slot,
+                active_slot,
+                reserve_bytes / (1024 * 1024),
+                active_bytes / (1024 * 1024)
+            ),
         });
     }
 
@@ -418,6 +424,14 @@ fn read_block_size_bytes(dev: &str) -> Option<u64> {
     let sectors = std::fs::read_to_string(sys_root.join("size")).ok()?.trim().parse::<u64>().ok()?;
     let sector_bytes = std::fs::read_to_string(sys_root.join("queue/logical_block_size")).ok()?.trim().parse::<u64>().ok().unwrap_or(512);
     Some(sectors.saturating_mul(sector_bytes))
+}
+
+fn slot_size_for_marker(layout: &SquashfsOtaLayout, slot: &str) -> Option<u64> {
+    match slot {
+        "ROOT_A" => read_block_size_bytes(&layout.slot_a_partition),
+        "ROOT_B" => read_block_size_bytes(&layout.slot_b_partition),
+        _ => None,
+    }
 }
 
 fn boot_ota_marker(name: &str) -> Option<String> {
@@ -559,11 +573,7 @@ mod tests {
         };
 
         let health = evaluate_storage_health(&snapshot);
-        let issue = health
-            .issues
-            .iter()
-            .find(|issue| issue.code == "self_repair_applied")
-            .expect("expected non-benign repair issue");
+        let issue = health.issues.iter().find(|issue| issue.code == "self_repair_applied").expect("expected non-benign repair issue");
         assert!(issue.description.contains("mounted the DATA partition"));
         assert!(!issue.description.contains("created missing HeliOS state directories"));
     }

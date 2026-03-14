@@ -335,7 +335,7 @@ use utoipa::OpenApi;
             helios_engine::localization::config::LocalizationSolverConfig,
             helios_engine::localization::config::LocalizationSolverMode,
             helios_engine::localization::config::LocalizationPoseSpace,
-            helios_engine::localization::pipeline::LocalizationPipelineStatus,
+            helios_engine::localization::types::LocalizationPipelineStatus,
             helios_engine::localization::types::LocalizationSolveResponse,
             helios_engine::localization::types::LocalizationSolverResult,
             helios_engine::localization::types::LocalizationSolverOutputs,

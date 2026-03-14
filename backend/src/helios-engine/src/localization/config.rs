@@ -39,8 +39,6 @@ pub struct LocalizationProfile {
     #[serde(default)]
     pub snap_pitch_to_ground: bool,
     #[serde(default)]
-    pub pipeline_template_id: Option<String>,
-    #[serde(default)]
     pub color: Option<String>,
     #[serde(default = "default_view_enabled")]
     pub view_enabled: bool,
@@ -324,7 +322,6 @@ impl Default for LocalizationConfig {
             snap_z_to_ground: false,
             snap_roll_to_ground: false,
             snap_pitch_to_ground: false,
-            pipeline_template_id: None,
             color: None,
             view_enabled: true,
             temporal_stabilization: LocalizationTemporalStabilizationConfig::default(),
@@ -1106,7 +1103,6 @@ mod tests {
             snap_z_to_ground: false,
             snap_roll_to_ground: false,
             snap_pitch_to_ground: false,
-            pipeline_template_id: None,
             color: None,
             view_enabled: true,
             temporal_stabilization: LocalizationTemporalStabilizationConfig::default(),

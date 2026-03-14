@@ -5,7 +5,17 @@ mode = 420
 
 [[files]]
 dst = "/etc/os-release"
-content = "NAME=\"Helios\"\nID=helios\nPRETTY_NAME=\"Helios\"\n"
+content = "NAME=\"Helios\"\nID=helios\nVERSION_ID=\"v2026.1.0\"\nBUILD_ID=\"v2026.1.0\"\nPRETTY_NAME=\"Helios v2026.1.0\"\n"
+mode = 420
+
+[[files]]
+dst = "/etc/helios/version"
+content = "v2026.1.0\n"
+mode = 420
+
+[[files]]
+dst = "/etc/helios/build-id"
+content = "v2026.1.0\n"
 mode = 420
 
 [[files]]

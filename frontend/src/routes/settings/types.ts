@@ -18,6 +18,7 @@ export type OsReleaseInfo = {
   version_id?: string | null;
   build_id?: string | null;
   pretty_name?: string | null;
+  active_root?: string | null;
 };
 
 export type UpdateDeviceSettingsRequest = {

@@ -7,6 +7,18 @@ use super::config::{LocalizationPoseSpace, LocalizationSolverMode};
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct LocalizationPipelineStatus {
+    pub configured: bool,
+    #[serde(default)]
+    pub profile_id: Option<String>,
+    #[serde(default)]
+    pub last_error: Option<String>,
+    #[serde(default)]
+    pub last_run_ms: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct LocalizationPipelineSource {
     pub id: String,
     pub stream_id: String,

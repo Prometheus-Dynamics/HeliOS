@@ -1,4 +1,4 @@
-use super::{derive_host_aliases, infer_host_output_incoming_types};
+use super::{build_demand_sinks, derive_host_aliases, infer_host_output_incoming_types};
 
 use daedalus::data::model::{EnumVariant, TypeExpr, Value};
 use daedalus::gpu::ErasedPayload;
@@ -9,7 +9,8 @@ use daedalus::runtime::plugins::PluginRegistry;
 use daedalus::runtime::{EdgePolicyKind, RuntimeNode, RuntimePlan, RuntimeSegment};
 use image::DynamicImage;
 use image::GenericImageView;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::time::Instant;
 
 #[test]
 fn normalize_graph_enum_consts_unwraps_struct_wrapped_values() {
@@ -298,6 +299,31 @@ fn host_bridge_injects_any_payload_into_graph() {
 }
 
 #[test]
+fn pipeline_edge_metrics_fall_back_to_planned_bounded_capacity() {
+    let mut rolling = super::RollingGraphMetrics::new(
+        8,
+        vec![],
+        vec![super::EdgeInfo {
+            from_node_index: 0,
+            from_node_label: Some("Input".into()),
+            from_port: "frame".into(),
+            to_node_index: 1,
+            to_node_label: Some("Output".into()),
+            to_port: "preview".into(),
+            queue_capacity: Some(4),
+            policy: "Bounded { cap: 4 }".into(),
+        }],
+    );
+
+    rolling.edge_samples.insert(0, VecDeque::from([(Instant::now(), daedalus::runtime::executor::EdgeMetrics { samples: 1, max_depth: 2, current_depth: 1, ..Default::default() })]));
+
+    let metrics = rolling.snapshot();
+    let edge = metrics.edges.expect("edge metrics").get("edge_0").cloned().expect("edge_0");
+    assert_eq!(edge.capacity, Some(4));
+    assert_eq!(edge.policy.as_deref(), Some("Bounded { cap: 4 }"));
+}
+
+#[test]
 fn host_bridge_input_port_infers_frame_from_solved_types() {
     let frame_ty = TypeExpr::opaque("image:dynamic");
     let roi_ty = TypeExpr::opaque("int");
@@ -359,4 +385,44 @@ fn host_bridge_input_port_infers_frame_from_solved_types() {
 
     let (_input_alias, input_port, _output_aliases) = derive_host_aliases(plan.as_ref(), &host_mgr).expect("host alias resolve");
     assert_eq!(input_port, "frame");
+}
+
+#[test]
+fn demand_driven_sinks_skip_non_preview_image_outputs() {
+    let host_output = RuntimeNode {
+        id: "io.host_output".into(),
+        stable_id: 0,
+        bundle: None,
+        label: Some("Output".into()),
+        compute: ComputeAffinity::CpuOnly,
+        const_inputs: vec![],
+        sync_groups: vec![],
+        metadata: std::collections::BTreeMap::from([("host_bridge".into(), Value::Bool(true))]),
+    };
+
+    let plan = RuntimePlan {
+        default_policy: EdgePolicyKind::Fifo,
+        backpressure: daedalus::runtime::BackpressureStrategy::None,
+        lockfree_queues: false,
+        graph_metadata: std::collections::BTreeMap::new(),
+        nodes: vec![host_output],
+        edges: vec![],
+        gpu_segments: vec![],
+        gpu_edges: vec![],
+        gpu_entries: vec![],
+        gpu_exits: vec![],
+        segments: vec![RuntimeSegment { nodes: vec![daedalus::planner::NodeRef(0)], compute: ComputeAffinity::CpuOnly }],
+        schedule_order: vec![],
+    };
+
+    let mut port_types = BTreeMap::new();
+    port_types.insert("overlay".to_string(), TypeExpr::opaque("image:dynamic"));
+    port_types.insert("detections".to_string(), TypeExpr::list(TypeExpr::scalar(daedalus::data::model::ValueType::Int)));
+
+    let sinks = build_demand_sinks(&plan, &["Output".to_string()], &["raw".to_string()], &["raw".to_string(), "overlay".to_string(), "detections".to_string()], &port_types, true);
+
+    let ports = sinks.into_iter().filter_map(|sink| sink.port).collect::<BTreeSet<_>>();
+    assert!(ports.contains("raw"));
+    assert!(ports.contains("detections"));
+    assert!(!ports.contains("overlay"));
 }

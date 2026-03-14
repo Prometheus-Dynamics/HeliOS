@@ -34,6 +34,7 @@ const APPLY_PROGRESS_START: u8 = 10;
 const APPLY_PROGRESS_END: u8 = 85;
 const PERSIST_NETWORKD_DIR: &str = "/var/lib/helios/networkd";
 const PERSIST_NETWORKD_PREFIX: &str = "00-helios-persisted-";
+const REQUIRED_BOOTABLE_ROOT_PATHS: &[&str] = &["/sbin/init", "/bin/sh", "/lib", "/lib64", "/usr/lib/systemd/systemd", "/etc/os-release"];
 
 #[derive(Debug, Clone, Copy)]
 struct PersistedFileSync {
@@ -274,6 +275,10 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
             if temp_file {
                 let _ = fs::remove_file(expanded_path).await;
             }
+        }
+
+        if slot_selection.scheme == SlotScheme::SquashfsAb {
+            validate_bootable_squashfs_root(&slot_selection.target_device, &work_dir).await?;
         }
 
         {
@@ -818,6 +823,43 @@ async fn resolve_persisted_file_source(mapping: &PersistedFileSync) -> Result<Op
     Ok(None)
 }
 
+async fn validate_bootable_squashfs_root(target_device: &str, work_dir: &Path) -> Result<()> {
+    let mountpoint = work_dir.join("mnt-target-validate");
+    if fs::metadata(&mountpoint).await.is_ok() {
+        let _ = Command::new("umount").arg(&mountpoint).status().await;
+        let _ = fs::remove_dir_all(&mountpoint).await;
+    }
+    ensure_directory(&mountpoint).await?;
+
+    let mount_status = Command::new("mount").args(["-t", "squashfs", "-o", "ro", target_device, mountpoint.to_str().unwrap()]).status().await.map_err(Error::Io)?;
+
+    if !mount_status.success() {
+        let _ = fs::remove_dir_all(&mountpoint).await;
+        return Err(Error::InvalidState(format!("flashed squashfs slot {} is not mountable; refusing to switch boot slots", target_device)));
+    }
+
+    let missing = missing_bootable_root_paths(&mountpoint).await?;
+    let _ = Command::new("umount").arg(&mountpoint).status().await;
+    let _ = fs::remove_dir_all(&mountpoint).await;
+
+    if !missing.is_empty() {
+        return Err(Error::InvalidState(format!("flashed squashfs slot {} is not bootable; missing {}", target_device, missing.join(", "))));
+    }
+
+    Ok(())
+}
+
+async fn missing_bootable_root_paths(root: &Path) -> Result<Vec<&'static str>> {
+    let mut missing = Vec::new();
+    for required in REQUIRED_BOOTABLE_ROOT_PATHS {
+        let relative = required.trim_start_matches('/');
+        if fs::symlink_metadata(root.join(relative)).await.is_err() {
+            missing.push(*required);
+        }
+    }
+    Ok(missing)
+}
+
 async fn boot_dir_has_payload(root_boot: &Path) -> Result<bool> {
     let mut entries = fs::read_dir(root_boot).await.map_err(Error::Io)?;
     while let Some(entry) = entries.next_entry().await.map_err(Error::Io)? {
@@ -924,7 +966,10 @@ async fn copy_boot_tree(src: &Path, dst: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{PersistedFileSync, parse_env_flag, reboot_failure_message, reboot_output_is_expected_success, sync_persisted_files_with_mappings_into, sync_persisted_networkd_into};
+    use super::{
+        PersistedFileSync, missing_bootable_root_paths, parse_env_flag, reboot_failure_message, reboot_output_is_expected_success, sync_persisted_files_with_mappings_into,
+        sync_persisted_networkd_into,
+    };
     use std::path::Path;
 
     #[test]
@@ -996,5 +1041,45 @@ mod tests {
 
         assert!(!target_dir.join("00-helios-persisted-eth0.network").exists());
         assert!(target_dir.join("10-default.network").exists());
+    }
+
+    #[tokio::test]
+    async fn bootable_root_validation_reports_missing_paths() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("root");
+        tokio::fs::create_dir_all(root.join("usr/lib/systemd")).await.expect("create systemd dir");
+        tokio::fs::create_dir_all(root.join("etc")).await.expect("create etc dir");
+        tokio::fs::write(root.join("usr/lib/systemd/systemd"), b"systemd").await.expect("write systemd");
+        tokio::fs::write(root.join("etc/os-release"), b"NAME=Helios\n").await.expect("write os-release");
+
+        let missing = missing_bootable_root_paths(&root).await.expect("missing paths");
+        assert!(missing.contains(&"/sbin/init"));
+        assert!(missing.contains(&"/bin/sh"));
+        assert!(missing.contains(&"/lib"));
+        assert!(missing.contains(&"/lib64"));
+        assert!(!missing.contains(&"/usr/lib/systemd/systemd"));
+        assert!(!missing.contains(&"/etc/os-release"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn bootable_root_validation_accepts_expected_layout() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("root");
+        tokio::fs::create_dir_all(root.join("usr/lib/systemd")).await.expect("create systemd dir");
+        tokio::fs::create_dir_all(root.join("sbin")).await.expect("create sbin dir");
+        tokio::fs::create_dir_all(root.join("bin")).await.expect("create bin dir");
+        tokio::fs::create_dir_all(root.join("lib")).await.expect("create lib dir");
+        tokio::fs::create_dir_all(root.join("etc")).await.expect("create etc dir");
+        tokio::fs::write(root.join("usr/lib/systemd/systemd"), b"systemd").await.expect("write systemd");
+        tokio::fs::write(root.join("bin/sh"), b"#!/bin/sh\n").await.expect("write shell");
+        tokio::fs::write(root.join("etc/os-release"), b"NAME=Helios\n").await.expect("write os-release");
+        symlink("../usr/lib/systemd/systemd", root.join("sbin/init")).expect("symlink init");
+        symlink("lib", root.join("lib64")).expect("symlink lib64");
+
+        let missing = missing_bootable_root_paths(&root).await.expect("missing paths");
+        assert!(missing.is_empty(), "unexpected missing paths: {missing:?}");
     }
 }

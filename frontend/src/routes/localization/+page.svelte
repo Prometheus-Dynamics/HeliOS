@@ -468,10 +468,8 @@
       Boolean(profile.snapZToGround) ||
       Boolean(profile.snapRollToGround) ||
       Boolean(profile.snapPitchToGround);
-    const hasTemplate = Boolean(String(profile.pipelineTemplateId ?? '').trim());
-
     // Only seed untouched default profiles so existing user setups are not overwritten.
-    if (hasSources || hasFieldMap || hasSnapSettings || hasTemplate) {
+    if (hasSources || hasFieldMap || hasSnapSettings) {
       return false;
     }
 
@@ -1104,7 +1102,6 @@
 
   const {
     loadLocalizationConfig,
-    loadPipelineTemplates,
     loadPipelineStatus,
     loadPipelineOutputs,
     loadSources,
@@ -1117,9 +1114,6 @@
     setFeedMessage: (next) => {
       feedMessage = next;
     },
-    setPipelineTemplates: () => {},
-    setPipelineTemplatesLoading: () => {},
-    setPipelineTemplatesError: () => {},
     setPipelineStatus: () => {},
     setPipelineStatusLoading: () => {},
     setPipelineStatusError: () => {},
@@ -2050,7 +2044,6 @@
       }
     }
     void loadStreamsSnapshot();
-    void loadPipelineTemplates();
     void loadPipelineStatus(profileId);
     if (profileId) {
       void loadPipelineOutputs(profileId);
@@ -4386,9 +4379,7 @@
     const profile = $activeProfile;
     if (!profile) return;
     void loadPipelineStatus(profile.id);
-    if (profile.pipelineTemplateId) {
-      void loadPipelineOutputs(profile.id);
-    }
+    void loadPipelineOutputs(profile.id);
   });
 
   async function bootstrapLocalizationPage(): Promise<void> {
@@ -4401,12 +4392,11 @@
       if (seeded) {
         await Promise.all([loadLocalizationConfig(), loadSources(), loadStreamsSnapshot(), loadFieldMapList()]);
       }
-      await loadPipelineTemplates();
       const profileId = $localizationConfig?.activeProfileId ?? $localizationConfig?.profiles?.[0]?.id ?? null;
       await loadPipelineStatus(profileId);
       const profile =
         $localizationConfig?.profiles?.find((entry) => entry.id === profileId) ?? $localizationConfig?.profiles?.[0] ?? null;
-      if (profile?.pipelineTemplateId) {
+      if (profile) {
         await loadPipelineOutputs(profile.id);
       }
     } catch (error) {

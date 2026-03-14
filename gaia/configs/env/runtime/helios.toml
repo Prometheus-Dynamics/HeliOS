@@ -17,7 +17,6 @@ METRICS_BIND_ADDR = "0.0.0.0:5803"
 LD_LIBRARY_PATH = "/usr/lib/edgetpu:/usr/lib"
 
 [sets.helios-engine]
-ENGINE_METRICS_ADDR = "0.0.0.0:5804"
 LOG_FOLDER = "/var/log/helios"
 MALLOC_ARENA_MAX = "2"
 MALLOC_MMAP_THRESHOLD_ = "131072"

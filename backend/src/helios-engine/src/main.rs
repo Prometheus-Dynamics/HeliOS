@@ -5,8 +5,26 @@ use helios_engine::runtime::EngineRuntime;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-#[tokio::main(flavor = "multi_thread")]
-async fn main() {
+fn main() {
+    let worker_threads = read_thread_env("HELIOS_ENGINE_WORKER_THREADS", default_engine_worker_threads(), 1, 4);
+    let max_blocking_threads = read_thread_env("HELIOS_ENGINE_MAX_BLOCKING_THREADS", default_engine_max_blocking_threads(worker_threads), 1, 16);
+    let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(worker_threads).max_blocking_threads(max_blocking_threads).enable_all().build().expect("tokio runtime");
+    runtime.block_on(async_main());
+}
+
+fn read_thread_env(var: &str, default: usize, min: usize, max: usize) -> usize {
+    std::env::var(var).ok().and_then(|value| value.trim().parse::<usize>().ok()).unwrap_or(default).clamp(min, max)
+}
+
+fn default_engine_worker_threads() -> usize {
+    std::thread::available_parallelism().map(|value| value.get()).unwrap_or(4).clamp(2, 4)
+}
+
+fn default_engine_max_blocking_threads(worker_threads: usize) -> usize {
+    (worker_threads.saturating_mul(2)).clamp(2, 8)
+}
+
+async fn async_main() {
     ensure_backtraces();
     handle_cli();
     init_tracing();

@@ -75,8 +75,8 @@ impl HardwareReadModelService {
         self.state.load_peripheral_inventory_snapshot(state).await
     }
 
-    pub async fn cached_discover_cameras_snapshot(&self) -> Result<(helios_engine::capture::DiscoveryResult, u64), String> {
-        self.state.cached_discover_cameras_snapshot().await
+    pub async fn cached_discover_cameras_snapshot(&self, state: &crate::http::AppState) -> Result<(helios_engine::capture::DiscoveryResult, u64), String> {
+        self.state.cached_discover_cameras_snapshot(state).await
     }
 
     pub async fn allow_inventory_refresh(&self) -> bool {

@@ -43,6 +43,10 @@ function syncDocs() {
   rmSync(frontendStaticDocsDir, { recursive: true, force: true });
   mkdirSync(frontendStaticDocsDir, { recursive: true });
   cpSync(sourceDir, frontendStaticDocsDir, { recursive: true });
+  rmSync(join(frontendStaticDocsDir, 'img', 'docusaurus-social-card.jpg'), { force: true });
+  rmSync(join(frontendStaticDocsDir, 'img', 'docusaurus.png'), { force: true });
+  rmSync(join(frontendStaticDocsDir, 'img', 'favicon.png'), { force: true });
+  rmSync(join(frontendStaticDocsDir, 'img', 'favicon.ico'), { force: true });
   console.log(`Copied docs build from ${sourceDir} to ${frontendStaticDocsDir}`);
 }
 

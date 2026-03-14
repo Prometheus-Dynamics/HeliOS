@@ -113,7 +113,6 @@ sha2 = "0.10.9"
 ed25519-dalek = { version = "2.2.0", default-features = false, features = ["std"] }
 hex = "0.4.3"
 metrics = "0.24.3"
-metrics-exporter-prometheus = { version = "0.18.1", default-features = false, features = ["http-listener"] }
 lib-test = { path = "src/libs/lib-test" }
 heck = "0.5.0"
 
@@ -144,4 +143,9 @@ libcamera = { path = "vendor/libcamera" }
 
 [patch."https://github.com/Prometheus-Dynamics/Styx.git"]
 styx = { path = "/home/sozo/Documents/GitHub/Styx/crates/styx" }
+
+[patch."https://github.com/Prometheus-Dynamics/Daedalus.git"]
+daedalus-rs = { path = "/home/sozo/Documents/GitHub/Daedalus/crates/daedalus" }
+daedalus-data = { path = "/home/sozo/Documents/GitHub/Daedalus/crates/data" }
+daedalus-macros = { path = "/home/sozo/Documents/GitHub/Daedalus/crates/macros" }
                                        

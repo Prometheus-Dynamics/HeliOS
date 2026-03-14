@@ -270,6 +270,72 @@ pub enum RecordingSource {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+pub struct LocalizationSolveSourceValue {
+    pub source_id: String,
+    #[serde(default)]
+    #[bincode(with_serde)]
+    pub value: Option<JsonWire>,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+pub struct LocalizationSolveRequest {
+    #[bincode(with_serde)]
+    pub profile: crate::localization::config::LocalizationProfile,
+    #[bincode(with_serde)]
+    pub sources: Vec<crate::localization::config::LocalizationSourceConfig>,
+    #[serde(default)]
+    #[bincode(with_serde)]
+    pub rig_poses: BTreeMap<String, crate::localization::types::LocalizationPose>,
+    #[serde(default)]
+    #[bincode(with_serde)]
+    pub field_map: Option<crate::localization::maps::FieldMapDocument>,
+    #[serde(default)]
+    #[bincode(with_serde)]
+    pub calibrations: BTreeMap<String, StreamCalibration>,
+    #[serde(default)]
+    #[bincode(with_serde)]
+    pub source_values: Vec<LocalizationSolveSourceValue>,
+    pub apply_field_origin: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+pub struct LocalizationPipelineStatusRequest {
+    pub profile_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+pub struct LocalizationPipelineGraphRequest {
+    #[bincode(with_serde)]
+    pub profile: crate::localization::config::LocalizationProfile,
+    #[bincode(with_serde)]
+    pub graph: JsonWire,
+    #[serde(default)]
+    pub graph_updated_at_ms: Option<i64>,
+    #[serde(default)]
+    pub template_mtime_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+pub struct LocalizationPipelineSampleRequest {
+    #[bincode(with_serde)]
+    pub profile: crate::localization::config::LocalizationProfile,
+    #[bincode(with_serde)]
+    pub sources: Vec<crate::localization::config::LocalizationSourceConfig>,
+    #[bincode(with_serde)]
+    pub graph: JsonWire,
+    #[serde(default)]
+    pub graph_updated_at_ms: Option<i64>,
+    #[serde(default)]
+    pub template_mtime_ms: Option<i64>,
+    #[serde(default)]
+    #[bincode(with_serde)]
+    pub source_values: Vec<LocalizationSolveSourceValue>,
+    pub output_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
 pub enum EngineCommand {
     List {
         #[bincode(with_serde)]
@@ -320,6 +386,30 @@ pub enum EngineCommand {
         #[bincode(with_serde)]
         request: super::CalibrationSolveRequest,
     },
+    SolveLocalization {
+        #[bincode(with_serde)]
+        command_id: CommandId,
+        #[bincode(with_serde)]
+        request: JsonWire,
+    },
+    GetLocalizationPipelineStatus {
+        #[bincode(with_serde)]
+        command_id: CommandId,
+        #[bincode(with_serde)]
+        request: JsonWire,
+    },
+    ListLocalizationPipelineOutputs {
+        #[bincode(with_serde)]
+        command_id: CommandId,
+        #[bincode(with_serde)]
+        request: JsonWire,
+    },
+    SampleLocalizationPipelineOutput {
+        #[bincode(with_serde)]
+        command_id: CommandId,
+        #[bincode(with_serde)]
+        request: JsonWire,
+    },
     Stop {
         #[bincode(with_serde)]
         command_id: CommandId,
@@ -363,6 +453,10 @@ pub enum EngineCommand {
         source: Option<RecordingSource>,
     },
     GetNodeRegistry {
+        #[bincode(with_serde)]
+        command_id: CommandId,
+    },
+    DiscoverDevices {
         #[bincode(with_serde)]
         command_id: CommandId,
     },
@@ -729,6 +823,12 @@ pub enum EngineEvent {
         #[bincode(with_serde)]
         snapshot: NodeRegistrySnapshot,
     },
+    Discovery {
+        #[bincode(with_serde)]
+        command_id: CommandId,
+        #[bincode(with_serde)]
+        discovery: crate::capture::DiscoveryResult,
+    },
     GraphValidation {
         #[bincode(with_serde)]
         command_id: CommandId,
@@ -741,6 +841,30 @@ pub enum EngineEvent {
         #[bincode(with_serde)]
         response: super::CalibrationSolveResponse,
     },
+    LocalizationSolved {
+        #[bincode(with_serde)]
+        command_id: CommandId,
+        #[bincode(with_serde)]
+        response: JsonWire,
+    },
+    LocalizationPipelineStatus {
+        #[bincode(with_serde)]
+        command_id: CommandId,
+        #[bincode(with_serde)]
+        response: JsonWire,
+    },
+    LocalizationPipelineOutputs {
+        #[bincode(with_serde)]
+        command_id: CommandId,
+        #[bincode(with_serde)]
+        outputs: Vec<String>,
+    },
+    LocalizationPipelineOutputSample {
+        #[bincode(with_serde)]
+        command_id: CommandId,
+        #[bincode(with_serde)]
+        response: JsonWire,
+    },
 }
 
 impl EngineCommand {
@@ -752,12 +876,17 @@ impl EngineCommand {
             | EngineCommand::SetCalibration { command_id, .. }
             | EngineCommand::SetCalibrationMode { command_id, .. }
             | EngineCommand::SolveCalibration { command_id, .. }
+            | EngineCommand::SolveLocalization { command_id, .. }
+            | EngineCommand::GetLocalizationPipelineStatus { command_id, .. }
+            | EngineCommand::ListLocalizationPipelineOutputs { command_id, .. }
+            | EngineCommand::SampleLocalizationPipelineOutput { command_id, .. }
             | EngineCommand::Stop { command_id, .. }
             | EngineCommand::SetControl { command_id, .. }
             | EngineCommand::GetControls { command_id, .. }
             | EngineCommand::GetMetrics { command_id, .. }
             | EngineCommand::SnapshotJpeg { command_id, .. }
             | EngineCommand::GetNodeRegistry { command_id }
+            | EngineCommand::DiscoverDevices { command_id }
             | EngineCommand::RefreshNodeRegistry { command_id }
             | EngineCommand::ValidateGraph { command_id, .. }
             | EngineCommand::SetGraph { command_id, .. }
@@ -793,8 +922,13 @@ impl ServerEvent for EngineEvent {
             | Self::StreamList { .. }
             | Self::MetricsUpdate { .. }
             | Self::NodeRegistry { .. }
+            | Self::Discovery { .. }
             | Self::GraphValidation { .. }
-            | Self::CalibrationSolved { .. } => MessageKind::Event,
+            | Self::CalibrationSolved { .. }
+            | Self::LocalizationSolved { .. }
+            | Self::LocalizationPipelineStatus { .. }
+            | Self::LocalizationPipelineOutputs { .. }
+            | Self::LocalizationPipelineOutputSample { .. } => MessageKind::Event,
         }
     }
 
@@ -826,8 +960,13 @@ impl EngineEvent {
             | EngineEvent::GraphOutputs { command_id, .. }
             | EngineEvent::GraphOutputSample { command_id, .. }
             | EngineEvent::NodeRegistry { command_id, .. }
+            | EngineEvent::Discovery { command_id, .. }
             | EngineEvent::GraphValidation { command_id, .. }
-            | EngineEvent::CalibrationSolved { command_id, .. } => Some(*command_id),
+            | EngineEvent::CalibrationSolved { command_id, .. }
+            | EngineEvent::LocalizationSolved { command_id, .. }
+            | EngineEvent::LocalizationPipelineStatus { command_id, .. }
+            | EngineEvent::LocalizationPipelineOutputs { command_id, .. }
+            | EngineEvent::LocalizationPipelineOutputSample { command_id, .. } => Some(*command_id),
             EngineEvent::MetricsUpdate { .. } => None,
         }
     }

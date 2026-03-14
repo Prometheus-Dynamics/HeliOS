@@ -4,7 +4,7 @@ use axum::{
 };
 use nalgebra::{UnitQuaternion, Vector3};
 use serde::Deserialize;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -15,15 +15,14 @@ use super::config;
 use super::maps;
 use super::sources::ApiLocalizationSourceFetcher;
 
-use helios_engine::ipc::{RigPose as StreamRigPose, StreamSummary};
+use helios_engine::ipc::{EngineEvent, LocalizationSolveRequest, LocalizationSolveSourceValue, RigPose as StreamRigPose, StreamCalibration, StreamSummary};
 use helios_engine::localization::config::LocalizationSourceConfig;
 use helios_engine::localization::config::select_profile;
-use helios_engine::localization::math::{PoseTransform, RigPose, RigRotation, RigTranslation, rig_pose_to_viewer_transform};
-use helios_engine::localization::solve::solve_localization;
-use helios_engine::localization::sources::imu_vec_to_viewer_frame;
+use helios_engine::localization::fetch::LocalizationSourceFetcher;
+use helios_engine::localization::fetch::imu_vec_to_viewer_frame;
+use helios_engine::localization::math::{PoseTransform, RigPose, RigRotation, RigTranslation, rig_pose_to_viewer_transform, transform_to_pose};
 use helios_engine::localization::types::LocalizationSolveResponse;
 use helios_peripherals::dto::SensorScope;
-use lib_cv::modules::aruco::pose::TagPoseCalibration;
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct LocalizationSolveQuery {
@@ -60,12 +59,55 @@ pub async fn solve(State(state): State<AppState>, Query(query): Query<Localizati
     let mut rig_poses = load_rig_poses(&state, &sources).await;
     inject_imu_leveling_rig_pose(&state, profile, &mut rig_poses).await;
     let field_map = if let Some(map_id) = profile.field_map_id.as_deref() { maps::load_map_document(map_id).await.ok() } else { None };
-    let calibrations = load_stream_calibrations(&state).await;
-
     let fetcher = ApiLocalizationSourceFetcher::new(state.clone());
-    let response = solve_localization(profile, &sources, &rig_poses, field_map.as_ref(), &calibrations, &fetcher, query.apply_field_origin).await;
+    let response = solve_via_engine(&state, profile, sources, &rig_poses, field_map.as_ref(), &fetcher, query.apply_field_origin).await.map_err(ApiError::bad_gateway)?;
 
     Ok(Json(response))
+}
+
+pub(crate) async fn solve_via_engine(
+    state: &AppState,
+    profile: &helios_engine::localization::config::LocalizationProfile,
+    sources: Vec<LocalizationSourceConfig>,
+    rig_poses: &HashMap<String, PoseTransform>,
+    field_map: Option<&helios_engine::localization::maps::FieldMapDocument>,
+    fetcher: &ApiLocalizationSourceFetcher,
+    apply_field_origin: bool,
+) -> Result<LocalizationSolveResponse, String> {
+    let request = build_localization_solve_request(state, profile, sources, rig_poses, field_map, fetcher, apply_field_origin).await?;
+    match state.engine.solve_localization_event(request).await {
+        Ok(EngineEvent::LocalizationSolved { response, .. }) => serde_json::from_value(response.into()).map_err(|err| format!("invalid localization solve response: {err}")),
+        Ok(EngineEvent::Nack { reason, .. }) => Err(reason),
+        Ok(other) => Err(format!("unexpected engine response: {other:?}")),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+async fn build_localization_solve_request(
+    state: &AppState,
+    profile: &helios_engine::localization::config::LocalizationProfile,
+    sources: Vec<LocalizationSourceConfig>,
+    rig_poses: &HashMap<String, PoseTransform>,
+    field_map: Option<&helios_engine::localization::maps::FieldMapDocument>,
+    fetcher: &ApiLocalizationSourceFetcher,
+    apply_field_origin: bool,
+) -> Result<LocalizationSolveRequest, String> {
+    let source_values = fetch_localization_source_values(fetcher, &sources).await;
+    let calibrations = load_stream_calibrations(state).await.into_iter().collect::<BTreeMap<_, _>>();
+    let rig_poses = rig_poses.iter().map(|(camera_uid, pose)| (camera_uid.clone(), transform_to_pose(pose))).collect::<BTreeMap<_, _>>();
+
+    Ok(LocalizationSolveRequest { profile: profile.clone(), sources, rig_poses, field_map: field_map.cloned(), calibrations, source_values, apply_field_origin })
+}
+
+pub(crate) async fn fetch_localization_source_values(fetcher: &ApiLocalizationSourceFetcher, sources: &[LocalizationSourceConfig]) -> Vec<LocalizationSolveSourceValue> {
+    let mut values = Vec::with_capacity(sources.len());
+    for source in sources {
+        match LocalizationSourceFetcher::fetch_source_value(fetcher, source).await {
+            Ok(value) => values.push(LocalizationSolveSourceValue { source_id: source.id.clone(), value: Some(value.into()), error: None }),
+            Err(error) => values.push(LocalizationSolveSourceValue { source_id: source.id.clone(), value: None, error: Some(error) }),
+        }
+    }
+    values
 }
 
 pub(crate) fn dedupe_enabled_sources(sources: Vec<LocalizationSourceConfig>) -> Vec<LocalizationSourceConfig> {
@@ -349,29 +391,14 @@ pub(crate) async fn inject_imu_leveling_rig_pose(state: &AppState, profile: &hel
     }
 }
 
-pub(crate) async fn load_stream_calibrations(state: &AppState) -> HashMap<String, TagPoseCalibration> {
+pub(crate) async fn load_stream_calibrations(state: &AppState) -> HashMap<String, StreamCalibration> {
     let mut out = HashMap::new();
     let streams = state.engine.list_streams().await.unwrap_or_default();
     for stream in streams {
         let Some(calib) = stream.manifest.calibration else {
             continue;
         };
-        out.insert(
-            stream.stream_id.to_string(),
-            TagPoseCalibration {
-                fx: calib.fx,
-                fy: calib.fy,
-                cx: calib.cx,
-                cy: calib.cy,
-                k1: calib.k1,
-                k2: calib.k2,
-                p1: calib.p1,
-                p2: calib.p2,
-                k3: calib.k3,
-                undistort_iters: calib.undistort_iters.clamp(0, u8::MAX as i64) as u8,
-                lens_model: calib.lens_model,
-            },
-        );
+        out.insert(stream.stream_id.to_string(), calib);
     }
     out
 }

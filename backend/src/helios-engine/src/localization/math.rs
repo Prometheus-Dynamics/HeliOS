@@ -60,6 +60,15 @@ pub fn transform_to_pose(transform: &PoseTransform) -> LocalizationPose {
     }
 }
 
+pub fn pose_to_transform(pose: &LocalizationPose) -> PoseTransform {
+    let translation = Vector3::new(pose.translation.x, pose.translation.y, pose.translation.z);
+    let rotation = {
+        let quat = &pose.rotation.quaternion;
+        UnitQuaternion::from_quaternion(Quaternion::new(quat.w, quat.x, quat.y, quat.z))
+    };
+    PoseTransform { translation, rotation }
+}
+
 pub fn device_pose_to_transform(pose: &lib_cv::DevicePose) -> PoseTransform {
     let rotation = UnitQuaternion::from_euler_angles(pose.rotation.roll, pose.rotation.pitch, pose.rotation.yaw);
     PoseTransform { translation: Vector3::new(pose.translation.x, pose.translation.y, pose.translation.z), rotation }

@@ -20,7 +20,7 @@ const EVENT_BUS_CAPACITY: usize = 128;
 pub struct UpdaterService {
     config: Arc<UpdaterConfig>,
     state: Arc<RwLock<ServiceState>>,
-    client: reqwest::Client,
+    client: tokio::sync::OnceCell<reqwest::Client>,
     command_lock: Mutex<()>,
     event_bus: broadcast::Sender<UpdaterEvent>,
     apply_tasks: Mutex<Vec<JoinHandle<()>>>,
@@ -29,12 +29,11 @@ pub struct UpdaterService {
 
 impl UpdaterService {
     pub fn new(config: Arc<UpdaterConfig>) -> Result<Self> {
-        let client = build_http_client(&config)?;
         let (event_bus, _rx) = broadcast::channel(EVENT_BUS_CAPACITY);
         let state = Arc::new(RwLock::new(ServiceState::default()));
         spawn_state_sync(Arc::clone(&state), event_bus.subscribe());
 
-        Ok(Self { config, state, client, command_lock: Mutex::new(()), event_bus, apply_tasks: Mutex::new(Vec::new()), stage_tasks: Mutex::new(Vec::new()) })
+        Ok(Self { config, state, client: tokio::sync::OnceCell::new(), command_lock: Mutex::new(()), event_bus, apply_tasks: Mutex::new(Vec::new()), stage_tasks: Mutex::new(Vec::new()) })
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<UpdaterEvent> {
@@ -85,7 +84,7 @@ impl UpdaterService {
 
         self.publish_snapshot().await;
 
-        let client = self.client.clone();
+        let client = self.http_client().await?.clone();
         let config = Arc::clone(&self.config);
         let state = Arc::clone(&self.state);
         let events = self.event_bus.clone();
@@ -225,6 +224,10 @@ impl UpdaterService {
         }
 
         Ok(())
+    }
+
+    async fn http_client(&self) -> Result<&reqwest::Client> {
+        self.client.get_or_try_init(|| async { build_http_client(&self.config) }).await
     }
 }
 

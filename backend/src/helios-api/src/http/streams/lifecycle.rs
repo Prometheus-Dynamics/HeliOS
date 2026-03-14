@@ -767,9 +767,9 @@ pub(crate) async fn delete_stream(state: AppState, id: Uuid) -> Response {
     }
 }
 
-pub(crate) async fn list_backends() -> Response {
-    match tokio::task::spawn_blocking(helios_engine::capture::discover_devices).await {
-        Ok(devices) => Json(devices).into_response(),
+pub(crate) async fn list_backends(state: AppState) -> Response {
+    match state.engine.discover_devices().await {
+        Ok(discovery) => Json(discovery.devices).into_response(),
         Err(err) => (StatusCode::BAD_GATEWAY, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("device discovery failed: {err}")))).into_response(),
     }
 }

@@ -8,7 +8,6 @@ use axum::{
 use serde::Deserialize;
 use serde::Serialize;
 use std::fs;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -767,10 +766,6 @@ pub(crate) fn map_fan_status(status: lib_sensors::fan_config::FanStatus) -> FanS
     FanStatus { present: true, rpm: status.rpm, mode: Some(format!("{:?}", status.mode)), target_percent: Some(status.target_percent), last_error: status.last_error }
 }
 
-pub(crate) fn safe_discover_cameras() -> Result<helios_engine::capture::DiscoveryResult, String> {
-    catch_unwind(AssertUnwindSafe(helios_engine::capture::discover_devices_with_errors)).map_err(|_| "camera discovery panicked".to_string())
-}
-
 fn read_timeout_env(var: &str, default_ms: u64, min_ms: u64, max_ms: u64) -> Duration {
     let ms = std::env::var(var).ok().and_then(|value| value.trim().parse::<u64>().ok()).unwrap_or(default_ms);
     Duration::from_millis(ms.clamp(min_ms, max_ms))
@@ -787,7 +782,7 @@ fn sensor_refresh_timeout() -> Duration {
 }
 
 async fn cached_discover_cameras_snapshot(state: &AppState) -> Result<(helios_engine::capture::DiscoveryResult, u64), String> {
-    state.services.hardware.cached_discover_cameras_snapshot().await
+    state.services.hardware.cached_discover_cameras_snapshot(state).await
 }
 
 async fn allow_inventory_refresh(state: &AppState) -> bool {

@@ -8,7 +8,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use helios_engine::ipc::{CalibrationSolveRequest, EngineCommand, EngineEvent, JsonWire, NodeRegistrySnapshot, StreamCalibration, StreamManifest};
+use helios_engine::ipc::{
+    CalibrationSolveRequest, EngineCommand, EngineEvent, JsonWire, LocalizationPipelineGraphRequest, LocalizationPipelineSampleRequest, LocalizationPipelineStatusRequest, LocalizationSolveRequest,
+    NodeRegistrySnapshot, StreamCalibration, StreamManifest,
+};
 use lib_ipc::client::{Client as GenericClient, Session as GenericSession, TransportConfig};
 use lib_ipc::types::CommandId;
 use lib_ipc::types::FeatureSet;
@@ -37,6 +40,12 @@ fn calibration_solve_timeout() -> Duration {
     const MAX_SECS: u64 = 1800;
     let secs = std::env::var("HELIOS_CALIBRATION_SOLVE_TIMEOUT_SECS").ok().and_then(|value| value.trim().parse::<u64>().ok()).unwrap_or(DEFAULT_SECS).clamp(MIN_SECS, MAX_SECS);
     Duration::from_secs(secs)
+}
+fn localization_solve_timeout() -> Duration {
+    const DEFAULT_MS: u64 = 30_000;
+    const MIN_MS: u64 = 1_000;
+    const MAX_MS: u64 = 300_000;
+    read_timeout_env("HELIOS_ENGINE_LOCALIZATION_SOLVE_TIMEOUT_MS", DEFAULT_MS, MIN_MS, MAX_MS)
 }
 const ENGINE_RECONNECT_INITIAL: Duration = Duration::from_millis(200);
 const ENGINE_RECONNECT_MAX: Duration = Duration::from_secs(5);
@@ -281,6 +290,17 @@ impl EngineConnection {
         }
     }
 
+    pub async fn discover_devices(&self) -> Result<helios_engine::capture::DiscoveryResult, lib_ipc::client::ClientTransportError> {
+        match self.request(|command_id| EngineCommand::DiscoverDevices { command_id }, ExpectedEvent::Discovery, "discover_devices", ENGINE_RESPONSE_TIMEOUT).await? {
+            EngineEvent::Discovery { discovery, .. } => Ok(discovery),
+            EngineEvent::Nack { reason, .. } => Err(lib_ipc::client::ClientTransportError::Io(io::Error::other(reason))),
+            other => {
+                warn!(?other, "engine returned unexpected event for discover_devices after filtering");
+                Err(lib_ipc::client::ClientTransportError::UnexpectedMessage { expected: lib_ipc::frame::MessageKind::Event, received: lib_ipc::frame::MessageKind::Event })
+            }
+        }
+    }
+
     pub async fn refresh_node_registry(&self) -> Result<NodeRegistrySnapshot, lib_ipc::client::ClientTransportError> {
         match self.request(|command_id| EngineCommand::RefreshNodeRegistry { command_id }, ExpectedEvent::NodeRegistry, "refresh_node_registry", ENGINE_RESPONSE_TIMEOUT).await? {
             EngineEvent::NodeRegistry { snapshot, .. } => Ok(snapshot),
@@ -386,6 +406,51 @@ impl EngineConnection {
         self.request(|command_id| EngineCommand::SolveCalibration { command_id, request }, ExpectedEvent::CalibrationSolved, "solve_calibration", calibration_solve_timeout()).await
     }
 
+    pub async fn solve_localization_event(&self, request: LocalizationSolveRequest) -> Result<EngineEvent, lib_ipc::client::ClientTransportError> {
+        let request =
+            serde_json::to_value(request).map(JsonWire).map_err(|err| lib_ipc::client::ClientTransportError::Io(io::Error::other(format!("failed to encode localization request: {err}"))))?;
+        self.request(|command_id| EngineCommand::SolveLocalization { command_id, request }, ExpectedEvent::LocalizationSolved, "solve_localization", localization_solve_timeout()).await
+    }
+
+    pub async fn localization_pipeline_status_event(&self, request: LocalizationPipelineStatusRequest) -> Result<EngineEvent, lib_ipc::client::ClientTransportError> {
+        let request = serde_json::to_value(request)
+            .map(JsonWire)
+            .map_err(|err| lib_ipc::client::ClientTransportError::Io(io::Error::other(format!("failed to encode localization pipeline status request: {err}"))))?;
+        self.request(
+            |command_id| EngineCommand::GetLocalizationPipelineStatus { command_id, request },
+            ExpectedEvent::LocalizationPipelineStatus,
+            "localization_pipeline_status",
+            ENGINE_RESPONSE_TIMEOUT,
+        )
+        .await
+    }
+
+    pub async fn localization_pipeline_outputs_event(&self, request: LocalizationPipelineGraphRequest) -> Result<EngineEvent, lib_ipc::client::ClientTransportError> {
+        let request = serde_json::to_value(request)
+            .map(JsonWire)
+            .map_err(|err| lib_ipc::client::ClientTransportError::Io(io::Error::other(format!("failed to encode localization pipeline outputs request: {err}"))))?;
+        self.request(
+            |command_id| EngineCommand::ListLocalizationPipelineOutputs { command_id, request },
+            ExpectedEvent::LocalizationPipelineOutputs,
+            "localization_pipeline_outputs",
+            ENGINE_RESPONSE_TIMEOUT,
+        )
+        .await
+    }
+
+    pub async fn localization_pipeline_output_sample_event(&self, request: LocalizationPipelineSampleRequest) -> Result<EngineEvent, lib_ipc::client::ClientTransportError> {
+        let request = serde_json::to_value(request)
+            .map(JsonWire)
+            .map_err(|err| lib_ipc::client::ClientTransportError::Io(io::Error::other(format!("failed to encode localization pipeline sample request: {err}"))))?;
+        self.request(
+            |command_id| EngineCommand::SampleLocalizationPipelineOutput { command_id, request },
+            ExpectedEvent::LocalizationPipelineOutputSample,
+            "localization_pipeline_output_sample",
+            ENGINE_RESPONSE_TIMEOUT,
+        )
+        .await
+    }
+
     pub async fn list_streams(&self) -> Result<Vec<helios_engine::ipc::StreamSummary>, lib_ipc::client::ClientTransportError> {
         self.list_streams_with_timeout(ENGINE_RESPONSE_TIMEOUT).await
     }
@@ -444,8 +509,13 @@ enum ExpectedEvent {
     Ack,
     StreamList,
     NodeRegistry,
+    Discovery,
     GraphValidation,
     CalibrationSolved,
+    LocalizationSolved,
+    LocalizationPipelineStatus,
+    LocalizationPipelineOutputs,
+    LocalizationPipelineOutputSample,
 }
 
 impl ExpectedEvent {
@@ -461,8 +531,15 @@ impl ExpectedEvent {
             ExpectedEvent::Ack => matches!(event, EngineEvent::Ack { .. } | EngineEvent::Nack { .. }),
             ExpectedEvent::StreamList => matches!(event, EngineEvent::StreamList { .. }),
             ExpectedEvent::NodeRegistry => matches!(event, EngineEvent::NodeRegistry { .. } | EngineEvent::Nack { .. }),
+            ExpectedEvent::Discovery => matches!(event, EngineEvent::Discovery { .. } | EngineEvent::Nack { .. }),
             ExpectedEvent::GraphValidation => matches!(event, EngineEvent::GraphValidation { .. } | EngineEvent::Nack { .. }),
             ExpectedEvent::CalibrationSolved => matches!(event, EngineEvent::CalibrationSolved { .. } | EngineEvent::Nack { .. }),
+            ExpectedEvent::LocalizationSolved => matches!(event, EngineEvent::LocalizationSolved { .. } | EngineEvent::Nack { .. }),
+            ExpectedEvent::LocalizationPipelineStatus => matches!(event, EngineEvent::LocalizationPipelineStatus { .. } | EngineEvent::Nack { .. }),
+            ExpectedEvent::LocalizationPipelineOutputs => matches!(event, EngineEvent::LocalizationPipelineOutputs { .. } | EngineEvent::Nack { .. }),
+            ExpectedEvent::LocalizationPipelineOutputSample => {
+                matches!(event, EngineEvent::LocalizationPipelineOutputSample { .. } | EngineEvent::Nack { .. })
+            }
         }
     }
 }

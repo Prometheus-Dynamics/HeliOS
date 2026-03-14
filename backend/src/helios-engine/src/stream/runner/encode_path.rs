@@ -1,3 +1,4 @@
+use std::fs;
 use std::process::Command;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -13,13 +14,103 @@ use uuid::Uuid;
 use crate::capture::{CaptureControlInfo, CaptureControlValue, CaptureDescriptor, CaptureSession, ControlAssignment};
 use crate::error::{Error, Result};
 use crate::graph::GraphHandle;
-use crate::stream::{CodecMetrics, EncodedFrame, StreamMetrics};
+use crate::stream::{
+    CodecMetrics, EncodedFrame, StreamBufferPoolMetrics, StreamExternalBackingMetrics, StreamMemoryMetrics, StreamMetrics, StreamPackedPoolMetrics, StreamProcessMemoryMetrics,
+    StreamQueueMemoryMetrics, StreamStagingCopyMetrics,
+};
 
 use super::super::encode::{stage_to_capture_metrics, to_codec_metrics};
 use super::super::encoder_worker::EncoderWorkerStart;
 use super::StreamRunner;
 
 impl StreamRunner {
+    fn parse_proc_key_bytes(text: &str, key: &str) -> Option<u64> {
+        text.lines().find_map(|line| {
+            let trimmed = line.trim_start();
+            if !trimmed.starts_with(key) {
+                return None;
+            }
+            let value = trimmed[key.len()..].trim();
+            let number = value.split_whitespace().next().and_then(|raw| raw.parse::<u64>().ok())?;
+            if value.contains("kB") {
+                Some(number.saturating_mul(1024))
+            } else {
+                Some(number)
+            }
+        })
+    }
+
+    fn process_memory_metrics() -> Option<StreamProcessMemoryMetrics> {
+        let status = fs::read_to_string("/proc/self/status").ok()?;
+        let rss_bytes = Self::parse_proc_key_bytes(&status, "VmRSS:")?;
+
+        Some(StreamProcessMemoryMetrics {
+            sampled_at_ms: Self::unix_now_ms(),
+            rss_bytes,
+            pss_bytes: fs::read_to_string("/proc/self/smaps_rollup").ok().and_then(|text| Self::parse_proc_key_bytes(&text, "Pss:")),
+            rss_anon_bytes: Self::parse_proc_key_bytes(&status, "RssAnon:").unwrap_or(0),
+            rss_file_bytes: Self::parse_proc_key_bytes(&status, "RssFile:").unwrap_or(0),
+            rss_shmem_bytes: Self::parse_proc_key_bytes(&status, "RssShmem:").unwrap_or(0),
+            vm_data_bytes: Self::parse_proc_key_bytes(&status, "VmData:").unwrap_or(0),
+            swap_bytes: Self::parse_proc_key_bytes(&status, "VmSwap:").unwrap_or(0),
+        })
+    }
+
+    fn styx_pool_metrics(stats: styx::core::buffer::BufferPoolStats) -> StreamBufferPoolMetrics {
+        StreamBufferPoolMetrics {
+            chunk_size_bytes: stats.chunk_size as u64,
+            free_buffers: stats.free as u64,
+            free_bytes: stats.free_bytes as u64,
+            max_free_buffers: stats.max_free as u64,
+            retained_buffers: stats.retained as u64,
+            retained_bytes: stats.retained_bytes as u64,
+            in_use_buffers: stats.in_use as u64,
+            in_use_bytes: stats.in_use_bytes as u64,
+            peak_in_use_buffers: stats.peak_in_use as u64,
+            peak_in_use_bytes: stats.peak_in_use_bytes as u64,
+            hits: stats.hits,
+            misses: stats.misses,
+            allocations: stats.allocations,
+        }
+    }
+
+    fn styx_memory_metrics(&self) -> Option<StreamMemoryMetrics> {
+        let process = Self::process_memory_metrics();
+        let pool_stats = self.session.as_ref().and_then(|session| session.handle()).map(|handle| handle.memory_stats());
+        let capture_queue = pool_stats.as_ref().and_then(|stats| stats.capture_queue.as_ref().map(|queue| StreamQueueMemoryMetrics { depth: queue.depth, capacity: queue.capacity }));
+        let external_backings: Vec<StreamExternalBackingMetrics> = pool_stats
+            .as_ref()
+            .map(|stats| {
+                stats
+                    .external_backings
+                    .iter()
+                    .map(|backing| StreamExternalBackingMetrics {
+                        label: backing.label.clone(),
+                        current_buffers: backing.current_buffers,
+                        current_bytes: backing.current_bytes,
+                        peak_buffers: backing.peak_buffers,
+                        peak_bytes: backing.peak_bytes,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let transform_pool = pool_stats.as_ref().and_then(|stats| stats.transform_pool.clone()).map(Self::styx_pool_metrics);
+        let image_pool = pool_stats.as_ref().and_then(|stats| stats.image_pool.clone()).map(Self::styx_pool_metrics);
+        let packed_pools: Vec<StreamPackedPoolMetrics> = pool_stats
+            .as_ref()
+            .map(|stats| stats.packed_pools.iter().map(|pool| StreamPackedPoolMetrics { min_len_bytes: pool.min_len as u64, pool: Self::styx_pool_metrics(pool.stats.clone()) }).collect())
+            .unwrap_or_default();
+        let staging_copy = pool_stats
+            .as_ref()
+            .and_then(|stats| stats.staging_copy.as_ref().map(|staging| StreamStagingCopyMetrics { copies: staging.copies, bytes: staging.bytes, peak_copy_bytes: staging.peak_copy_bytes }));
+
+        if process.is_none() && capture_queue.is_none() && external_backings.is_empty() && transform_pool.is_none() && image_pool.is_none() && packed_pools.is_empty() && staging_copy.is_none() {
+            return None;
+        }
+
+        Some(StreamMemoryMetrics { process, capture_queue, external_backings, transform_pool, image_pool, packed_pools, staging_copy })
+    }
+
     fn metrics_stale_base_ms() -> u64 {
         std::env::var("HELIOS_STREAM_METRICS_STALE_MS").ok().and_then(|raw| raw.parse::<u64>().ok()).unwrap_or(1_500).clamp(250, 60_000)
     }
@@ -270,9 +361,8 @@ impl StreamRunner {
             session.stop();
         }
 
-        // Drop any cached full-res preview frame, plus per-thread packed frame pools, so repeated
-        // start/stop + codec switching doesn't permanently retain peak allocations.
-        self.last_preview_frame = None;
+        // Clear per-thread packed frame pools so repeated start/stop + codec switching doesn't
+        // permanently retain peak allocations.
         styx::codec::decoder::clear_packed_frame_pools_all_threads();
     }
 
@@ -331,6 +421,7 @@ impl StreamRunner {
 
         let pipeline = self.graph.pipeline_metrics();
         let pipeline_instances = self.graph.pipeline_metrics_by_pipeline();
+        let memory = self.styx_memory_metrics();
         let mut encoder = self.encode_fourcc.map(|_| to_codec_metrics(&self.encoder_stats));
         if let Some(metrics) = encoder.as_mut() {
             let activity_ms = self.encoder_last_activity_ms.load(Ordering::Relaxed);
@@ -357,7 +448,7 @@ impl StreamRunner {
                 }
             }
         }
-        StreamMetrics { capture, host, encoder, decoder, pipeline, pipeline_instances }
+        StreamMetrics { capture, host, encoder, decoder, memory, pipeline, pipeline_instances }
     }
 
     pub fn descriptor(&self) -> Option<&CaptureDescriptor> {
@@ -584,5 +675,18 @@ impl StreamRunner {
         self.decoder_stats.record_duration(decode_start.elapsed());
         let decode_ms = decode_start.elapsed().as_secs_f64() * 1000.0;
         histogram!("helios.stream.decode_ms", "stream" => self.stream_label.clone()).record(decode_ms);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::StreamRunner;
+
+    #[test]
+    fn parse_proc_key_bytes_reads_kib_and_plain_values() {
+        let text = "VmRSS:\t1234 kB\nThreads:\t7\n";
+        assert_eq!(StreamRunner::parse_proc_key_bytes(text, "VmRSS:"), Some(1_263_616));
+        assert_eq!(StreamRunner::parse_proc_key_bytes(text, "Threads:"), Some(7));
+        assert_eq!(StreamRunner::parse_proc_key_bytes(text, "VmSize:"), None);
     }
 }

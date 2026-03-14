@@ -14,7 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 axum = { version = "0.8.8", features = ["http1", "macros", "ws", "multipart"] }
-helios-engine = { path = "../helios-engine", default-features = false, features = ["dto", "runtime"] }
+helios-engine = { path = "../helios-engine", default-features = false, features = ["dto"] }
 helios-peripherals = { path = "../helios-peripherals", default-features = false, features = ["dto", "schema", "tracing"] }
 helios-updater = { path = "../helios-updater", default-features = false, features = ["dto", "updater-ipc"] }
 lib-asyncapi = { path = "../libs/lib-api/lib-asyncapi" }
@@ -35,7 +35,6 @@ sysinfo = { workspace = true }
 prost = "0.14.3"
 prost-types = "0.14.3"
 tracing = { workspace = true }
-tracing-appender = "0.2.4"
 tracing-subscriber = { workspace = true }
 async-trait = { workspace = true }
 uuid = { workspace = true }
@@ -49,14 +48,14 @@ sha2 = { workspace = true }
 hex = "0.4"
 tempfile = "3.26"
 blake3 = "1.8"
-nix = { version = "0.31", default-features = false, features = ["process", "term"] }
+nix = { version = "0.31", default-features = false, features = ["process", "term", "fs"] }
 rustix = { version = "1.1.4", features = ["process", "termios"] }
 toml = "1.0.6"
 styx = { workspace = true, features = ["serde", "schema"] }
 mime_guess = "2.0.5"
 image = { workspace = true }
 imageproc = { workspace = true }
-daedalus = { workspace = true }
+daedalus = { workspace = true, features = ["ffi"] }
 lib-cv = { path = "../libs/lib-cv" }
 lib-ai = { path = "../libs/lib-ai" }
 nalgebra = { workspace = true }

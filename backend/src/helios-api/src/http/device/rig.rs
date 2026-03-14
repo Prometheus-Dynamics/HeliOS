@@ -162,10 +162,8 @@ async fn get_camera_layout(State(state): State<AppState>) -> impl IntoResponse {
     let robot = load_robot_dimensions().await;
     let mut pose_map = streams_persist::list_pose_map().await;
 
-    let discovery = match tokio::task::spawn_blocking(helios_engine::capture::discover_devices_with_errors).await {
-        Ok(result) => result,
-        Err(_) => helios_engine::capture::DiscoveryResult { devices: Vec::new(), errors: vec!["camera discovery task failed".into()] },
-    };
+    let discovery =
+        state.engine.discover_devices().await.unwrap_or_else(|err| helios_engine::capture::DiscoveryResult { devices: Vec::new(), errors: vec![format!("camera discovery failed: {err}")] });
 
     let streams = state.engine.list_streams().await.unwrap_or_default();
     for stream in &streams {

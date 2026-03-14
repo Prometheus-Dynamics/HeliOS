@@ -37,21 +37,12 @@ impl PathConfig {
         dirs.push(self.state_root.join("run"));
         dirs
     }
-
-    pub fn engine_metrics(&self) -> &str {
-        &self.engine.metrics_addr
-    }
-
-    pub fn updater_metrics(&self) -> &str {
-        &self.updater.metrics_addr
-    }
 }
 
 pub struct EnginePaths {
     pub socket: PathBuf,
     pub journal: PathBuf,
     pub data_dir: PathBuf,
-    pub metrics_addr: String,
 }
 
 impl EnginePaths {
@@ -59,8 +50,8 @@ impl EnginePaths {
         let socket = state_root.join("run/engine.sock");
         let journal = state_root.join("engine/journal/engine.log");
         let data_dir = state_root.join("engine");
-        let metrics_addr = format!("{}:{}", args.bind_address, args.engine_metrics_port);
-        Self { socket, journal, data_dir, metrics_addr }
+        let _ = args;
+        Self { socket, journal, data_dir }
     }
 
     pub fn runtime_dirs(&self) -> Vec<PathBuf> {
@@ -86,7 +77,6 @@ pub struct UpdaterPaths {
     pub data_dir: PathBuf,
     pub cache_dir: PathBuf,
     pub work_dir: PathBuf,
-    pub metrics_addr: String,
 }
 
 impl UpdaterPaths {
@@ -96,8 +86,8 @@ impl UpdaterPaths {
         let data_dir = state_root.join("updater");
         let cache_dir = data_dir.join("ota/cache");
         let work_dir = data_dir.join("ota/work");
-        let metrics_addr = format!("{}:{}", args.bind_address, args.updater_metrics_port);
-        Self { socket, journal, data_dir, cache_dir, work_dir, metrics_addr }
+        let _ = args;
+        Self { socket, journal, data_dir, cache_dir, work_dir }
     }
 
     pub fn runtime_dirs(&self) -> Vec<PathBuf> {

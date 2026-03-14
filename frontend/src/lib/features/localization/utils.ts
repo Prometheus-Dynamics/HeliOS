@@ -138,10 +138,6 @@ export function updateProfileSources(
   return { ...profile, sources: nextSources };
 }
 
-export function updateProfilePipelineTemplate(profile: LocalizationProfile, templateId: string | null): LocalizationProfile {
-  return { ...profile, pipelineTemplateId: templateId };
-}
-
 export function updateProfileSourceInputKey(
   profile: LocalizationProfile,
   sourceId: string,

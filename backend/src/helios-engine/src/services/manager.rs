@@ -587,11 +587,9 @@ impl StreamManager {
                     streams.remove(&stream_id)
                 };
                 if let Some(ctx) = ctx {
-                    cleanup_stream_files(stream_id);
-                    if let Some(join) = ctx.worker_join.lock().await.take() {
-                        let _ = tokio::task::spawn_blocking(move || join.join()).await;
-                    }
-                    if let StreamExit::Stopped(Err(err)) = ctx.exit_rx.borrow().clone() {
+                    let exit_state = ctx.exit_rx.borrow().clone();
+                    manager.finalize_stream_teardown(stream_id, ctx).await;
+                    if let StreamExit::Stopped(Err(err)) = exit_state {
                         tracing::warn!(stream_id = %stream_id, error = %err, "stream worker exited with error");
                     }
                 }
@@ -641,13 +639,54 @@ impl StreamManager {
             streams.remove(&stream_id)
         };
         if let Some(ctx) = ctx {
-            if let Some(join) = ctx.worker_join.lock().await.take() {
-                let _ = tokio::task::spawn_blocking(move || join.join()).await;
-            }
-            cleanup_stream_files(stream_id);
+            self.finalize_stream_teardown(stream_id, ctx).await;
         }
         tracing::info!(stream_id = %stream_id, "stream stop completed");
         Ok(())
+    }
+
+    async fn finalize_stream_teardown(&self, stream_id: Uuid, ctx: Arc<StreamContext>) {
+        cleanup_stream_files(stream_id);
+        if let Some(join) = ctx.worker_join.lock().await.take() {
+            let _ = tokio::task::spawn_blocking(move || join.join()).await;
+        }
+        self.trim_after_last_stream_teardown(stream_id).await;
+    }
+
+    async fn trim_after_last_stream_teardown(&self, stream_id: Uuid) {
+        let active_streams = {
+            let streams = self.streams.read().await;
+            streams.len()
+        };
+        if active_streams != 0 {
+            tracing::debug!(stream_id = %stream_id, active_streams, "skipping allocator trim; other streams are still active");
+            return;
+        }
+
+        let before = read_process_memory_rollup();
+        let trim_result = trim_process_allocators();
+        let after = read_process_memory_rollup();
+
+        tracing::info!(
+            stream_id = %stream_id,
+            active_streams,
+            trim_supported = trim_result.is_some(),
+            trim_result = trim_result.unwrap_or_default(),
+            before_pss_kib = ?before.pss_bytes.map(bytes_to_kib),
+            after_pss_kib = ?after.pss_bytes.map(bytes_to_kib),
+            delta_pss_kib = ?delta_kib(before.pss_bytes, after.pss_bytes),
+            before_private_dirty_kib = ?before.private_dirty_bytes.map(bytes_to_kib),
+            after_private_dirty_kib = ?after.private_dirty_bytes.map(bytes_to_kib),
+            delta_private_dirty_kib = ?delta_kib(before.private_dirty_bytes, after.private_dirty_bytes),
+            before_anon_kib = ?before.anonymous_bytes.map(bytes_to_kib),
+            after_anon_kib = ?after.anonymous_bytes.map(bytes_to_kib),
+            delta_anon_kib = ?delta_kib(before.anonymous_bytes, after.anonymous_bytes),
+            before_rss_kib = ?before.rss_bytes.map(bytes_to_kib),
+            after_rss_kib = ?after.rss_bytes.map(bytes_to_kib),
+            delta_rss_kib = ?delta_kib(before.rss_bytes, after.rss_bytes),
+            threads = ?after.threads,
+            "last stream stopped; trimmed allocator state"
+        );
     }
 
     pub async fn set_control(&self, stream_id: Uuid, control_id: ControlId, value: CaptureControlValue) -> Result<()> {
@@ -3838,6 +3877,81 @@ fn write_rgb24(image: &image::DynamicImage, out: &mut [u8]) -> bool {
 
 fn normalize_alias(alias: Option<&str>) -> Option<String> {
     alias.map(str::trim).filter(|value| !value.is_empty()).map(|value| value.to_ascii_lowercase())
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct ProcessMemoryRollup {
+    pss_bytes: Option<u64>,
+    private_dirty_bytes: Option<u64>,
+    anonymous_bytes: Option<u64>,
+    rss_bytes: Option<u64>,
+    threads: Option<u64>,
+}
+
+fn bytes_to_kib(bytes: u64) -> u64 {
+    bytes / 1024
+}
+
+fn delta_kib(before: Option<u64>, after: Option<u64>) -> Option<i64> {
+    Some(bytes_to_kib(after?) as i64 - bytes_to_kib(before?) as i64)
+}
+
+fn parse_proc_key_bytes(text: &str, key: &str) -> Option<u64> {
+    text.lines().find_map(|line| {
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with(key) {
+            return None;
+        }
+        let value = trimmed[key.len()..].trim();
+        let number = value.split_whitespace().next().and_then(|raw| raw.parse::<u64>().ok())?;
+        if value.contains("kB") {
+            Some(number.saturating_mul(1024))
+        } else {
+            Some(number)
+        }
+    })
+}
+
+fn parse_proc_key_u64(text: &str, key: &str) -> Option<u64> {
+    text.lines().find_map(|line| {
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with(key) {
+            return None;
+        }
+        trimmed[key.len()..].trim().parse::<u64>().ok()
+    })
+}
+
+fn read_process_memory_rollup() -> ProcessMemoryRollup {
+    let smaps = std::fs::read_to_string("/proc/self/smaps_rollup").ok();
+    let status = std::fs::read_to_string("/proc/self/status").ok();
+    ProcessMemoryRollup {
+        pss_bytes: smaps.as_deref().and_then(|text| parse_proc_key_bytes(text, "Pss:")),
+        private_dirty_bytes: smaps.as_deref().and_then(|text| parse_proc_key_bytes(text, "Private_Dirty:")),
+        anonymous_bytes: smaps.as_deref().and_then(|text| parse_proc_key_bytes(text, "Anonymous:")),
+        rss_bytes: status.as_deref().and_then(|text| parse_proc_key_bytes(text, "VmRSS:")),
+        threads: status.as_deref().and_then(|text| parse_proc_key_u64(text, "Threads:")),
+    }
+}
+
+#[allow(unsafe_code)]
+fn trim_process_allocators() -> Option<i32> {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        unsafe extern "C" {
+            fn malloc_trim(pad: usize) -> i32;
+        }
+
+        // Reclaim free pages from glibc arenas after the last stream tears down. Repeated
+        // start/stop churn can otherwise leave large anonymous arenas resident long after the
+        // frame/graph objects are dropped.
+        Some(unsafe { malloc_trim(0) })
+    }
+
+    #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+    {
+        None
+    }
 }
 
 fn single_view_slot_pipeline_id(manifest: &StreamManifest) -> Option<Uuid> {

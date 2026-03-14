@@ -16,14 +16,21 @@ API_FEATURES="${API_FEATURES:-}"
 
 DOCKERFILE="${DOCKERFILE:-gaia/docker/aarch64/Dockerfile.aarch64-rpi4}"
 DOCKER_CONTEXT="${DOCKER_CONTEXT:-$ROOT_DIR/gaia}"
-IMAGE_TAG="${IMAGE_TAG:-helios-cross}"
+IMAGE_TAG="${IMAGE_TAG:-helios-cross-rust194}"
 REBUILD_IMAGE="0"
 
 # Optional local checkouts used when you want to patch these dependencies during development.
 # In a clean/public clone, leave unset.
-DAEDALUS_HOST_PATH="${DAEDALUS_HOST_PATH:-}"
-STYX_HOST_PATH="${STYX_HOST_PATH:-}"
-LIBCAMERA_RS_HOST_PATH="${LIBCAMERA_RS_HOST_PATH:-}"
+default_checkout_path() {
+  local path="$1"
+  if [[ -d "$path" ]]; then
+    printf '%s' "$path"
+  fi
+}
+
+DAEDALUS_HOST_PATH="${DAEDALUS_HOST_PATH:-$(default_checkout_path /home/sozo/Documents/GitHub/Daedalus)}"
+STYX_HOST_PATH="${STYX_HOST_PATH:-$(default_checkout_path /home/sozo/Documents/GitHub/Styx)}"
+LIBCAMERA_RS_HOST_PATH="${LIBCAMERA_RS_HOST_PATH:-$(default_checkout_path /home/sozo/Documents/GitHub/libcamera-rs)}"
 
 BINS_DIR_DEFAULT="$ROOT_DIR/output/cm5/binaries"
 PLUGINS_DIR_DEFAULT="$ROOT_DIR/output/cm5/plugins/daedalus"
@@ -40,6 +47,7 @@ FRONTEND_DIR_LOCAL="${FRONTEND_DIR_LOCAL:-$ROOT_DIR/frontend/build}"
 FRONTEND_DIR_REMOTE="${FRONTEND_DIR_REMOTE:-/opt/helios/frontend}"
 
 ONLY="all" # all|binaries|plugins
+STRICT_BINARIES_ONLY="0"
 BUILD="1"
 UPLOAD="1"
 RESTART_SERVICES="1"
@@ -64,6 +72,8 @@ Options:
   --engine-features <f> Cargo features for helios-engine (default: $ENGINE_FEATURES)
   --api-features <f>   Cargo features for helios-api (default: $API_FEATURES)
   --only <what>         all|binaries|plugins (default: all)
+  --strict-binaries-only
+                        Do not auto-sync Daedalus plugins when deploying binaries
   --no-build            Skip build; only upload/restart
   --no-upload           Only build; skip upload/restart
   --no-restart          Upload but do not restart services
@@ -167,6 +177,7 @@ while [[ $# -gt 0 ]]; do
     --engine-features) ENGINE_FEATURES="${2:-}"; shift 2 ;;
     --api-features) API_FEATURES="${2:-}"; shift 2 ;;
     --only) ONLY="${2:-}"; shift 2 ;;
+    --strict-binaries-only) STRICT_BINARIES_ONLY="1"; shift ;;
     --no-build) BUILD="0"; shift ;;
     --no-upload) UPLOAD="0"; shift ;;
     --no-restart) RESTART_SERVICES="0"; shift ;;
@@ -216,6 +227,10 @@ case "$ONLY" in
   binaries) do_binaries="1" ;;
   plugins) do_plugins="1" ;;
 esac
+
+if [[ "$do_binaries" == "1" && "$ONLY" == "binaries" && "$STRICT_BINARIES_ONLY" != "1" ]]; then
+  do_plugins="1"
+fi
 
 docker_image_built="0"
 
@@ -269,6 +284,7 @@ docker_run_cargo_build() {
   local profile_flag="$3"
   local repo_root="$4"
   local features="${5:-}"
+  local build_kind="${6:-package}"
 
   local -a docker_args=(
     --rm
@@ -314,10 +330,15 @@ docker_run_cargo_build() {
     features_arg="--features '$features'"
   fi
 
+  local target_arg="-p '$package'"
+  if [[ "$build_kind" == "bin" ]]; then
+    target_arg="-p '$package' --bin '$package'"
+  fi
+
   run docker run "${docker_args[@]}" "$IMAGE_TAG" bash -lc \
     "export GIT_CONFIG_GLOBAL=/tmp/gitconfig; \
      : > \"\$GIT_CONFIG_GLOBAL\"; \
-     cargo build --target '$target_triple' $profile_flag ${features_arg:+$features_arg }-p '$package'"
+     cargo build --target '$target_triple' $profile_flag ${features_arg:+$features_arg }$target_arg"
 }
 
 copy_binary_out() {
@@ -572,7 +593,7 @@ if [[ "$BUILD" == "1" ]]; then
         elif [[ "$pkg" == "helios-api" ]]; then
           pkg_features="$API_FEATURES"
         fi
-        docker_run_cargo_build "$pkg" "$TARGET_TRIPLE" "$PROFILE_FLAG" "$ROOT_DIR" "$pkg_features"
+        docker_run_cargo_build "$pkg" "$TARGET_TRIPLE" "$PROFILE_FLAG" "$ROOT_DIR" "$pkg_features" "bin"
       else
         echo "Skipping $pkg (up to date)"
       fi
@@ -682,12 +703,13 @@ if [[ "$UPLOAD" == "1" ]]; then
     fi
 
     # Extract into a temp dir first so a partial transfer can't brick /usr/bin.
-    local ts tmpdir backup_dir
+    local ts tmpdir backup_dir staging_root
     ts="$(date +%s)"
-    tmpdir="/tmp/helios-deploy-bins.$ts"
+    staging_root="/var/lib/helios/deploy-staging"
+    tmpdir="$staging_root/bins.$ts"
     backup_dir="/var/lib/helios/deploy-backups/bins-$ts"
 
-    ssh_exec "sh -lc 'set -e; rm -rf \"$tmpdir\"; install -d -m0755 \"$tmpdir\"'"
+    ssh_exec "sh -lc 'set -e; install -d -m0755 \"$staging_root\"; rm -rf \"$tmpdir\"; install -d -m0755 \"$tmpdir\"'"
     ssh_upload_tar "$BINS_DIR" "$tmpdir" "${bins[@]}"
 
     # Validate all uploads before touching the live paths.
@@ -912,6 +934,9 @@ if [[ "$UPLOAD" == "1" ]]; then
         # On some setups this may briefly impact the USB gadget/network link; don't fail the deploy if so.
         if ! ssh_exec "systemctl restart helios-peripherals.service"; then
           echo "Warning: failed to restart helios-peripherals.service; binary was uploaded but service may still be running old code."
+        fi
+        if ! ssh_exec "systemctl restart helios-updater.service"; then
+          echo "Warning: failed to restart helios-updater.service; binary was uploaded but service may still be running old code."
         fi
       else
         echo "Skipping restart (RESTART_SERVICES=0)"

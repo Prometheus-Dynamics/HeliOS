@@ -3,6 +3,11 @@ name = "helios-engine"
 version = "0.1.0"
 edition = "2021"
 publish = false
+autobins = false
+
+[[bin]]
+name = "helios-engine"
+path = "src/main.rs"
 
 [features]
 default = ["runtime"]
@@ -18,6 +23,8 @@ dto = [
     "styx",
     "tokio",
     "tracing",
+    "lib-cv",
+    "nalgebra",
 ]
 runtime = [
     "dto",

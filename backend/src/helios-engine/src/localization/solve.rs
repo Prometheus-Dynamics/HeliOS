@@ -11,10 +11,11 @@ use super::config::{
     LocalizationFieldOriginMode, LocalizationPoseSpace, LocalizationProfile, LocalizationSolverConfig, LocalizationSolverRuntimeTuningConfig, LocalizationSourceConfig,
     LocalizationTemporalStabilizationConfig,
 };
+use super::fetch::LocalizationSourceFetcher;
 use super::maps::{FieldMapDocument, FieldMapSource};
 use super::math::{compose_transforms, invert_transform, PoseTransform};
 use super::solvers::{SolverContext, SolverRegistry};
-use super::sources::{fetch_source_samples_with_registry, LocalizationSourceFetcher, SourceParserRegistry, SourceSample};
+use super::sources::{fetch_source_samples_with_registry, SourceParserRegistry, SourceSample};
 use super::types::{LocalizationSolveResponse, LocalizationSolverOutputs, LocalizationSolverResult, LocalizationSourceSampleStatus};
 
 #[derive(Debug, Clone)]
@@ -817,7 +818,6 @@ mod tests {
             snap_z_to_ground: false,
             snap_roll_to_ground: false,
             snap_pitch_to_ground: false,
-            pipeline_template_id: None,
             color: None,
             view_enabled: true,
             temporal_stabilization: crate::localization::config::LocalizationTemporalStabilizationConfig::default(),
@@ -844,7 +844,6 @@ mod tests {
             snap_z_to_ground: true,
             snap_roll_to_ground: false,
             snap_pitch_to_ground: false,
-            pipeline_template_id: None,
             color: None,
             view_enabled: true,
             temporal_stabilization: crate::localization::config::LocalizationTemporalStabilizationConfig::default(),
@@ -892,7 +891,6 @@ mod tests {
             snap_z_to_ground: false,
             snap_roll_to_ground: false,
             snap_pitch_to_ground: false,
-            pipeline_template_id: None,
             color: None,
             view_enabled: true,
             temporal_stabilization: crate::localization::config::LocalizationTemporalStabilizationConfig::default(),
@@ -930,7 +928,6 @@ mod tests {
             snap_z_to_ground: false,
             snap_roll_to_ground: false,
             snap_pitch_to_ground: false,
-            pipeline_template_id: None,
             color: None,
             view_enabled: true,
             temporal_stabilization: crate::localization::config::LocalizationTemporalStabilizationConfig { enabled: false, ..Default::default() },
@@ -1140,7 +1137,6 @@ mod tests {
             snap_z_to_ground: false,
             snap_roll_to_ground: true,
             snap_pitch_to_ground: true,
-            pipeline_template_id: None,
             color: None,
             view_enabled: true,
             temporal_stabilization: crate::localization::config::LocalizationTemporalStabilizationConfig::default(),
@@ -1193,7 +1189,6 @@ mod tests {
             snap_z_to_ground: false,
             snap_roll_to_ground: false,
             snap_pitch_to_ground: true,
-            pipeline_template_id: None,
             color: None,
             view_enabled: true,
             temporal_stabilization: crate::localization::config::LocalizationTemporalStabilizationConfig::default(),
@@ -1248,7 +1243,6 @@ mod tests {
             snap_z_to_ground: false,
             snap_roll_to_ground: true,
             snap_pitch_to_ground: false,
-            pipeline_template_id: None,
             color: None,
             view_enabled: true,
             temporal_stabilization: crate::localization::config::LocalizationTemporalStabilizationConfig::default(),
@@ -1303,7 +1297,6 @@ mod tests {
             snap_z_to_ground: false,
             snap_roll_to_ground: true,
             snap_pitch_to_ground: true,
-            pipeline_template_id: None,
             color: None,
             view_enabled: true,
             temporal_stabilization: crate::localization::config::LocalizationTemporalStabilizationConfig::default(),
@@ -1352,7 +1345,6 @@ mod tests {
             snap_z_to_ground: false,
             snap_roll_to_ground: false,
             snap_pitch_to_ground: false,
-            pipeline_template_id: None,
             color: None,
             view_enabled: true,
             temporal_stabilization: crate::localization::config::LocalizationTemporalStabilizationConfig::default(),
@@ -1412,7 +1404,6 @@ mod tests {
             snap_z_to_ground: false,
             snap_roll_to_ground: false,
             snap_pitch_to_ground: false,
-            pipeline_template_id: None,
             color: None,
             view_enabled: true,
             temporal_stabilization: LocalizationTemporalStabilizationConfig {
@@ -1471,7 +1462,6 @@ mod tests {
             snap_z_to_ground: false,
             snap_roll_to_ground: false,
             snap_pitch_to_ground: false,
-            pipeline_template_id: None,
             color: None,
             view_enabled: true,
             temporal_stabilization: LocalizationTemporalStabilizationConfig {

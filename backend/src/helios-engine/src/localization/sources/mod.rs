@@ -1,25 +1,20 @@
 use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use lib_cv::modules::aruco::pose::TagPoseCalibration;
 use lib_cv::modules::aruco::ArucoBitGrid;
 use lib_cv::Translation3;
-use nalgebra::{Quaternion, UnitQuaternion, Vector3};
+use nalgebra::{UnitQuaternion, Vector3};
 
 use super::config::LocalizationSourceConfig;
+use super::fetch::{imu_backend_to_viewer_basis, LocalizationSourceFetcher};
 use super::math::{pose_from_detection, PoseTransform};
 use super::types::LocalizationQuaternion;
 
 mod aruco;
 mod detections;
 mod pose;
-
-pub trait LocalizationSourceFetcher: Send + Sync {
-    fn fetch_source_value<'a>(&'a self, source: &'a LocalizationSourceConfig) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, String>> + Send + 'a>>;
-}
 
 pub enum SourceParse {
     Detections(ParsedDetections),
@@ -126,7 +121,6 @@ struct TagPairDistanceTemporalState {
 
 static TAG_POSE_TEMPORAL_STATE: OnceLock<Mutex<HashMap<String, TagPoseTemporalState>>> = OnceLock::new();
 static TAG_PAIR_DISTANCE_TEMPORAL_STATE: OnceLock<Mutex<HashMap<String, TagPairDistanceTemporalState>>> = OnceLock::new();
-static IMU_BACKEND_TO_VIEWER_BASIS: OnceLock<UnitQuaternion<f64>> = OnceLock::new();
 
 pub async fn fetch_source_samples<F: LocalizationSourceFetcher>(
     fetcher: &F,
@@ -948,18 +942,6 @@ fn has_imu_token(value: &str) -> bool {
 
 pub(crate) fn source_looks_like_imu(source: &LocalizationSourceConfig) -> bool {
     [source.id.as_str(), source.stream_id.as_str(), source.output_key.as_str(), source.camera_uid.as_str()].iter().any(|value| has_imu_token(value))
-}
-
-pub fn imu_backend_to_viewer_basis() -> UnitQuaternion<f64> {
-    *IMU_BACKEND_TO_VIEWER_BASIS.get_or_init(|| {
-        // Matches frontend imuQuaternionToThree() basis conversion:
-        // backend IMU (+X forward, +Y right, +Z up) -> viewer (+X right, +Y up, +Z forward).
-        UnitQuaternion::new_normalize(Quaternion::new(0.5, -0.5, -0.5, -0.5))
-    })
-}
-
-pub fn imu_vec_to_viewer_frame(vector: Vector3<f64>) -> Vector3<f64> {
-    imu_backend_to_viewer_basis().transform_vector(&vector)
 }
 
 pub(crate) fn imu_pose_to_viewer_frame(pose: PoseTransform) -> PoseTransform {

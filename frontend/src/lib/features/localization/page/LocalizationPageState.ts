@@ -1,7 +1,5 @@
-import type { PipelineTemplateSummary } from '$lib/types/pipeline';
 import type { LocalizationPipelineStatus } from '$lib/features/localization/localizationPipeline';
 import type { LocalizationPipelineSource } from '$lib/features/localization/pipelineSources';
-import { PipelinesApi } from '$lib/api/pipelinesApi';
 import {
   fetchLocalizationPipelineOutputs,
   fetchLocalizationPipelineStatus
@@ -19,9 +17,6 @@ export const createLocalizationPageState = (options: {
   localizationProfiles: LocalizationProfileLoader;
   setFeedStatus: (status: FeedStatus) => void;
   setFeedMessage: (message: string | null) => void;
-  setPipelineTemplates: (templates: PipelineTemplateSummary[]) => void;
-  setPipelineTemplatesLoading: (loading: boolean) => void;
-  setPipelineTemplatesError: (message: string | null) => void;
   setPipelineStatus: (status: LocalizationPipelineStatus | null) => void;
   setPipelineStatusLoading: (loading: boolean) => void;
   setPipelineStatusError: (message: string | null) => void;
@@ -56,18 +51,6 @@ export const createLocalizationPageState = (options: {
       const message = error instanceof Error ? error.message : 'Failed to load localization config';
       options.setFeedStatus('error');
       options.setFeedMessage(message);
-    }
-  };
-
-  const loadPipelineTemplates = async (): Promise<void> => {
-    options.setPipelineTemplatesLoading(true);
-    options.setPipelineTemplatesError(null);
-    try {
-      options.setPipelineTemplates(await PipelinesApi.listTemplates());
-    } catch (error) {
-      options.setPipelineTemplatesError(error instanceof Error ? error.message : 'Failed to load pipeline templates');
-    } finally {
-      options.setPipelineTemplatesLoading(false);
     }
   };
 
@@ -127,7 +110,6 @@ export const createLocalizationPageState = (options: {
 
   return {
     loadLocalizationConfig,
-    loadPipelineTemplates,
     loadPipelineStatus,
     loadPipelineOutputs,
     loadSources,

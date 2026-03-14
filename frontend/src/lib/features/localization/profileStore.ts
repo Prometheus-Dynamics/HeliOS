@@ -134,7 +134,6 @@ export function createLocalizationProfileStore() {
       snapZToGround: false,
       snapRollToGround: false,
       snapPitchToGround: false,
-      pipelineTemplateId: null,
       color: null,
       viewEnabled: true,
       temporalStabilization: { ...DEFAULT_TEMPORAL_STABILIZATION },

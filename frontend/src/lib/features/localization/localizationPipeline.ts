@@ -5,7 +5,6 @@ import type { PipelineOutputSample } from '$lib/features/localization/pipelineSo
 export type LocalizationPipelineStatus = {
   configured: boolean;
   profileId?: string | null;
-  templateId?: string | null;
   lastError?: string | null;
   lastRunMs?: number | null;
 };

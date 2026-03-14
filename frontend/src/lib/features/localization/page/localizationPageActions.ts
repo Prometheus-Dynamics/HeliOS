@@ -8,7 +8,6 @@ import type { LocalizationPipelineSource } from '$lib/features/localization/pipe
 import {
   buildOutputSpacesFromSolve,
   normalizeInputKey,
-  updateProfilePipelineTemplate,
   updateProfileSourceInputKey,
   updateProfileSources,
   updateSolverOutputSpaces
@@ -108,14 +107,6 @@ export const createLocalizationPageActions = (options: LocalizationPageActionsOp
     void options.persistProfileUpdate(updateSolverOutputSpaces(profile, activeSolverConfig.id, nextOutputs));
   };
 
-  const setPipelineTemplateId = (templateId: string): void => {
-    const profile = options.getActiveProfile();
-    if (!profile) return;
-    const normalized = templateId.trim();
-    const nextId = normalized.length > 0 ? normalized : null;
-    void options.persistProfileUpdate(updateProfilePipelineTemplate(profile, nextId));
-  };
-
   const setSourceInputKey = (sourceId: string, rawValue: string): void => {
     const profile = options.getActiveProfile();
     if (!profile) return;
@@ -161,7 +152,6 @@ export const createLocalizationPageActions = (options: LocalizationPageActionsOp
     toggleSolverOutputSpace,
     setActiveSolverMode,
     setSolveSpaceEnabled,
-    setPipelineTemplateId,
     setSourceInputKey,
     applySourceSelection
   };

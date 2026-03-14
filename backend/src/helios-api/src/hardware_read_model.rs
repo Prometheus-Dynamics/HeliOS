@@ -1,11 +1,10 @@
 use crate::api_observability::{ApiCacheMetric, CacheMetricCounters};
 use crate::http::AppState;
-use crate::http::peripherals::{PeripheralErrors, PeripheralInventory, UsbPeripheral, derive_lighting_status, list_usb_sysfs, map_fan_status, map_sensor_inventory, safe_discover_cameras};
+use crate::http::peripherals::{PeripheralErrors, PeripheralInventory, UsbPeripheral, derive_lighting_status, list_usb_sysfs, map_fan_status, map_sensor_inventory};
 use crate::ipc::peripherals::SensorsConnection;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, RwLock};
-use tokio::task;
 use tracing::warn;
 
 #[derive(Clone)]
@@ -113,7 +112,7 @@ impl HardwareReadModelState {
 
     async fn build_peripheral_inventory(&self, state: &AppState) -> Result<PeripheralInventory, String> {
         let mut errors = PeripheralErrors { cameras: Vec::new(), i2c: Vec::new(), usb: Vec::new(), fan: Vec::new(), lighting: Vec::new() };
-        let (cameras, _) = self.cached_discover_cameras_snapshot().await?;
+        let (cameras, _) = self.cached_discover_cameras_snapshot(state).await?;
         let usb = list_usb_sysfs();
         let (sensors, i2c, fan, lighting) = match state.ensure_sensors().await {
             Some(sensors) => {
@@ -190,7 +189,7 @@ impl HardwareReadModelState {
         Ok(PeripheralInventory { cameras: cameras.devices, sensors, errors, i2c, usb, lighting, fan })
     }
 
-    pub async fn cached_discover_cameras_snapshot(&self) -> Result<(helios_engine::capture::DiscoveryResult, u64), String> {
+    pub async fn cached_discover_cameras_snapshot(&self, state: &AppState) -> Result<(helios_engine::capture::DiscoveryResult, u64), String> {
         const TTL: Duration = Duration::from_secs(5);
 
         {
@@ -215,12 +214,9 @@ impl HardwareReadModelState {
             }
         }
 
-        let handle = task::spawn_blocking(safe_discover_cameras);
-        let discovery = match tokio::time::timeout(camera_discovery_timeout(), handle).await {
-            Ok(joined) => match joined {
-                Ok(result) => result,
-                Err(_) => Err("camera discovery task panicked".to_string()),
-            },
+        let discovery = match tokio::time::timeout(camera_discovery_timeout(), state.engine.discover_devices()).await {
+            Ok(Ok(result)) => Ok(result),
+            Ok(Err(err)) => Err(err.to_string()),
             Err(_) => Err("camera discovery timed out".to_string()),
         };
 
