@@ -85,7 +85,7 @@
   });
   let localRegistrySnapshot = $state<unknown | null>(null);
   $effect(() => {
-    if (localRegistrySnapshot || !ctx?.ensurePipelineRegistry) return;
+    if (localRegistrySnapshot || !ctx?.ensurePipelineRegistry || !panelOpen) return;
     let cancelled = false;
     ctx.ensurePipelineRegistry()
       .then((snapshot: unknown) => {

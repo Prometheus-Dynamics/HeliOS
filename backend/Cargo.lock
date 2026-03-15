@@ -6906,6 +6906,7 @@ dependencies = [
  "futures-util",
  "image",
  "jpeg-decoder",
+ "libc",
  "libcamera",
  "once_cell",
  "reqwest",

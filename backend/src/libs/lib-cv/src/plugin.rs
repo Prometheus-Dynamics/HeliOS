@@ -5,7 +5,7 @@ use daedalus::runtime::plugins::RegistryPluginExt;
 use daedalus::{Plugin, PluginRegistry};
 use image::{DynamicImage, GrayAlphaImage, GrayImage, RgbImage, RgbaImage};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::{Point, modules};
 
@@ -68,6 +68,7 @@ impl Plugin for CvPlugin {
     }
 
     fn install(&self, registry: &mut PluginRegistry) -> Result<(), &'static str> {
+        register_payload_size_inspectors();
         registry.register_enum::<ExecMode>(["auto", "cpu", "gpu"]);
         registry.register_enum::<crate::modules::aruco::ArucoCandidateQuadsMode>(["robust", "fast"]);
         registry.register_enum::<crate::modules::aruco::ArucoMaskMode>(["adaptive_mean", "otsu"]);
@@ -220,4 +221,106 @@ impl Plugin for CvPlugin {
 
 pub fn plugin() -> CvPlugin {
     CvPlugin
+}
+
+fn register_payload_size_inspectors() {
+    static REGISTERED: OnceLock<()> = OnceLock::new();
+    REGISTERED.get_or_init(|| {
+        daedalus::runtime::register_payload_size_inspector(cv_payload_size_bytes);
+    });
+}
+
+fn cv_payload_size_bytes(any: &(dyn std::any::Any + Send + Sync)) -> Option<u64> {
+    if let Some(image) = any.downcast_ref::<crate::BinaryImage>() {
+        return Some(binary_image_size_bytes(image));
+    }
+    if let Some(quads) = any.downcast_ref::<Vec<[Point; 4]>>() {
+        return Some(vec_inline_bytes(quads) as u64);
+    }
+    if let Some(quads) = any.downcast_ref::<Arc<Vec<[Point; 4]>>>() {
+        return Some(vec_inline_bytes(quads.as_ref()) as u64);
+    }
+    if let Some(contours) = any.downcast_ref::<Vec<Vec<Point>>>() {
+        return Some(contours_size_bytes(contours));
+    }
+    if let Some(detections) = any.downcast_ref::<Vec<crate::modules::aruco::ArucoDetection2D>>() {
+        return Some(aruco_detection_vec_size_bytes(detections));
+    }
+    if let Some(detections) = any.downcast_ref::<Arc<Vec<crate::modules::aruco::ArucoDetection2D>>>() {
+        return Some(aruco_detection_vec_size_bytes(detections.as_ref()));
+    }
+    if let Some(output) = any.downcast_ref::<crate::modules::aruco::DetectionPoseOutput>() {
+        return Some(detection_pose_output_size_bytes(output));
+    }
+    if let Some(detections) = any.downcast_ref::<Vec<crate::modules::aruco::DetectionPose>>() {
+        return Some(detection_pose_vec_size_bytes(detections));
+    }
+    None
+}
+
+fn vec_inline_bytes<T>(values: &Vec<T>) -> usize {
+    std::mem::size_of::<Vec<T>>() + values.capacity() * std::mem::size_of::<T>()
+}
+
+fn binary_image_size_bytes(image: &crate::BinaryImage) -> u64 {
+    let raw = serde_json::to_vec(image).map(|bytes| bytes.len() as u64).unwrap_or(0);
+    raw.max(std::mem::size_of::<crate::BinaryImage>() as u64)
+}
+
+fn contours_size_bytes(contours: &Vec<Vec<Point>>) -> u64 {
+    let mut total = vec_inline_bytes(contours) as u64;
+    total = total.saturating_add(contours.iter().map(|contour| vec_inline_bytes(contour) as u64).sum::<u64>());
+    total
+}
+
+fn aruco_bit_grid_size_bytes(grid: &crate::modules::aruco::ArucoBitGrid) -> u64 {
+    let mut total = std::mem::size_of::<crate::modules::aruco::ArucoBitGrid>() as u64;
+    total = total.saturating_add(vec_inline_bytes(&grid.rows) as u64);
+    total.saturating_add(grid.rows.iter().map(|row| row.capacity() as u64).sum::<u64>())
+}
+
+fn aruco_detection_size_bytes(detection: &crate::modules::aruco::ArucoDetection2D) -> u64 {
+    let mut total = std::mem::size_of::<crate::modules::aruco::ArucoDetection2D>() as u64;
+    if let Some(bits) = detection.bits.as_ref() {
+        total = total.saturating_add(aruco_bit_grid_size_bytes(bits));
+    }
+    total
+}
+
+fn aruco_detection_vec_size_bytes(detections: &Vec<crate::modules::aruco::ArucoDetection2D>) -> u64 {
+    let mut total = vec_inline_bytes(detections) as u64;
+    total = total.saturating_add(detections.iter().map(aruco_detection_size_bytes).sum::<u64>());
+    total
+}
+
+fn detection_pose_size_bytes(detection: &crate::modules::aruco::DetectionPose) -> u64 {
+    let mut total = std::mem::size_of::<crate::modules::aruco::DetectionPose>() as u64;
+    total = total.saturating_add(detection.pose_method.capacity() as u64);
+    if let Some(bits) = detection.bits.as_ref() {
+        total = total.saturating_add(aruco_bit_grid_size_bytes(bits));
+    }
+    total
+}
+
+fn detection_pose_failure_sample_size_bytes(sample: &crate::modules::aruco::DetectionPoseFailureSample) -> u64 {
+    std::mem::size_of::<crate::modules::aruco::DetectionPoseFailureSample>() as u64 + sample.reason.capacity() as u64
+}
+
+fn detection_pose_stats_size_bytes(stats: &crate::modules::aruco::DetectionPoseStats) -> u64 {
+    let mut total = std::mem::size_of::<crate::modules::aruco::DetectionPoseStats>() as u64;
+    total = total.saturating_add(stats.pose_method.capacity() as u64);
+    if let Some(first_failure) = stats.first_failure.as_ref() {
+        total = total.saturating_add(detection_pose_failure_sample_size_bytes(first_failure));
+    }
+    total
+}
+
+fn detection_pose_vec_size_bytes(detections: &Vec<crate::modules::aruco::DetectionPose>) -> u64 {
+    let mut total = vec_inline_bytes(detections) as u64;
+    total = total.saturating_add(detections.iter().map(detection_pose_size_bytes).sum::<u64>());
+    total
+}
+
+fn detection_pose_output_size_bytes(output: &crate::modules::aruco::DetectionPoseOutput) -> u64 {
+    std::mem::size_of::<crate::modules::aruco::DetectionPoseOutput>() as u64 + detection_pose_vec_size_bytes(&output.detections) + detection_pose_stats_size_bytes(&output.stats)
 }

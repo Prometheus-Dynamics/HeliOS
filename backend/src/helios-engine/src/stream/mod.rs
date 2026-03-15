@@ -57,6 +57,8 @@ pub struct StreamMemoryMetrics {
     #[serde(default)]
     pub process: Option<StreamProcessMemoryMetrics>,
     #[serde(default)]
+    pub runner: Option<StreamRunnerMemoryMetrics>,
+    #[serde(default)]
     pub capture_queue: Option<StreamQueueMemoryMetrics>,
     #[serde(default)]
     pub external_backings: Vec<StreamExternalBackingMetrics>,
@@ -120,6 +122,26 @@ pub struct StreamProcessMemoryMetrics {
     pub vm_data_bytes: u64,
     #[serde(default)]
     pub swap_bytes: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+pub struct StreamRunnerMemoryMetrics {
+    #[serde(default)]
+    pub current_decoded_frame_bytes: u64,
+    #[serde(default)]
+    pub peak_decoded_frame_bytes: u64,
+    #[serde(default)]
+    pub current_raw_clone_bytes: u64,
+    #[serde(default)]
+    pub peak_raw_clone_bytes: u64,
+    #[serde(default)]
+    pub current_processed_frame_bytes: u64,
+    #[serde(default)]
+    pub peak_processed_frame_bytes: u64,
+    #[serde(default)]
+    pub current_frame_working_set_bytes: u64,
+    #[serde(default)]
+    pub peak_frame_working_set_bytes: u64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
@@ -197,6 +219,16 @@ pub struct PipelineNodeRuntimeMetrics {
     pub metrics: PipelineNodeMetrics,
     #[serde(default)]
     pub perf: Option<PipelineNodePerfMetrics>,
+    #[serde(default)]
+    pub average_input_payload_bytes: f64,
+    #[serde(default)]
+    pub average_output_payload_bytes: f64,
+    #[serde(default)]
+    pub peak_input_payload_bytes: u64,
+    #[serde(default)]
+    pub peak_output_payload_bytes: u64,
+    #[serde(default)]
+    pub peak_payload_working_set_bytes: u64,
     /// Nested metrics for grouped nodes, keyed by node/group id.
     #[schema(no_recursion)]
     #[serde(default)]
@@ -234,9 +266,25 @@ pub struct PipelineGraphMetrics {
     #[serde(default)]
     pub sample_cache: Option<PipelineSampleCacheMetrics>,
     #[serde(default)]
+    pub image_working_set: Option<PipelineImageWorkingSetMetrics>,
+    #[serde(default)]
     pub perf: Option<PipelinePerfMetrics>,
     #[serde(default)]
     pub flamegraph: Option<PipelineFlamegraphMetrics>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+pub struct PipelineImageWorkingSetMetrics {
+    #[serde(default)]
+    pub input_image_bytes: u64,
+    #[serde(default)]
+    pub host_output_image_bytes: u64,
+    #[serde(default)]
+    pub preview_image_bytes: u64,
+    #[serde(default)]
+    pub total_materialized_image_bytes: u64,
+    #[serde(default)]
+    pub peak_total_materialized_image_bytes: u64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]

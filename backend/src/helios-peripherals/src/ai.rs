@@ -1,10 +1,10 @@
-use crate::dto::{AiModelDescriptor, AiModelHealth, AiModelHealthStatus, AiModelUpload};
+use crate::dto::{AiModelDescriptor, AiModelFormat, AiModelHealth, AiModelHealthStatus, AiModelId, AiModelMetadata, AiModelTensorMetadata, AiModelUpload, AiTensorElementType, AiTensorQuantization};
 use crate::error::{Error, Result};
 use chrono::Utc;
 use lib_ai::backend::AiBackend;
 use lib_ai::backend::{coral::CoralBackend, tflite::TfliteBackend};
 use lib_ai::model::{
-    ModelFormat, ModelId, ModelLoadRequest, ModelMetadata, ModelSource,
+    ModelLoadRequest, ModelSource,
     introspect::{ModelInspection, inspect_model},
 };
 use lib_ai::registry::Registry;
@@ -33,9 +33,9 @@ struct AiModelManifest {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct AiModelManifestEntry {
-    id: ModelId,
-    format: ModelFormat,
-    metadata: ModelMetadata,
+    id: AiModelId,
+    format: AiModelFormat,
+    metadata: AiModelMetadata,
     artifact: String,
     #[serde(default)]
     label_artifact: Option<String>,
@@ -50,7 +50,7 @@ pub struct AiModelManager {
     storage_dir: PathBuf,
     manifest_path: PathBuf,
     initialized: OnceCell<()>,
-    models: RwLock<HashMap<ModelId, AiModelEntry>>,
+    models: RwLock<HashMap<AiModelId, AiModelEntry>>,
 }
 
 impl AiModelManager {
@@ -84,12 +84,13 @@ impl AiModelManager {
 
         let AiModelUpload { id, format, mut metadata, bytes, label_bytes } = upload;
 
-        let id = id.unwrap_or_else(ModelId::new);
+        let id = id.unwrap_or_else(AiModelId::new);
         let artifact = artifact_name(&id, &format);
         let path = self.storage_dir.join(&artifact);
         fs::write(&path, &bytes)?;
 
-        let inspection = inspect_model(&bytes, &format);
+        let lib_format = to_lib_model_format(&format);
+        let inspection = inspect_model(&bytes, &lib_format);
         Self::hydrate_metadata(&mut metadata, &inspection);
 
         let label_artifact = if let Some(label_bytes) = label_bytes {
@@ -104,7 +105,7 @@ impl AiModelManager {
             None
         };
 
-        let request = ModelLoadRequest { id: id.clone(), format: format.clone(), source: ModelSource::File(path.clone()), metadata: metadata.clone() };
+        let request = ModelLoadRequest { id: to_lib_model_id(&id), format: lib_format.clone(), source: ModelSource::File(path.clone()), metadata: to_lib_model_metadata(&metadata) };
 
         let runtime = Runtime::new(&self.registry);
         let loaded = runtime.load_model(&request).await?;
@@ -122,7 +123,7 @@ impl AiModelManager {
         Ok(descriptor)
     }
 
-    pub async fn delete_model(&self, model_id: &ModelId) -> Result<bool> {
+    pub async fn delete_model(&self, model_id: &AiModelId) -> Result<bool> {
         self.ensure_initialized().await?;
         let mut models = self.models.write().await;
         if let Some(entry) = models.remove(model_id) {
@@ -171,7 +172,8 @@ impl AiModelManager {
                 continue;
             }
 
-            let request = ModelLoadRequest { id: record.id.clone(), format: record.format.clone(), source: ModelSource::File(path), metadata: record.metadata.clone() };
+            let request =
+                ModelLoadRequest { id: to_lib_model_id(&record.id), format: to_lib_model_format(&record.format), source: ModelSource::File(path), metadata: to_lib_model_metadata(&record.metadata) };
             match runtime.load_model(&request).await {
                 Ok(loaded) => {
                     let mut descriptor = AiModelDescriptor {
@@ -213,19 +215,19 @@ impl AiModelManager {
         Ok(())
     }
 
-    fn hydrate_metadata(metadata: &mut ModelMetadata, inspection: &ModelInspection) {
+    fn hydrate_metadata(metadata: &mut AiModelMetadata, inspection: &ModelInspection) {
         if metadata.tags.is_empty() && !inspection.suggested_tags.is_empty() {
             metadata.tags = inspection.suggested_tags.clone();
         }
         if metadata.inputs.is_empty() && !inspection.inputs.is_empty() {
-            metadata.inputs = inspection.inputs.clone();
+            metadata.inputs = inspection.inputs.iter().cloned().map(ai_model_tensor_metadata_from_lib).collect();
         }
         if metadata.outputs.is_empty() && !inspection.outputs.is_empty() {
-            metadata.outputs = inspection.outputs.clone();
+            metadata.outputs = inspection.outputs.iter().cloned().map(ai_model_tensor_metadata_from_lib).collect();
         }
     }
 
-    fn hydrate_metadata_from_label_bytes(metadata: &mut ModelMetadata, bytes: &[u8]) -> Result<()> {
+    fn hydrate_metadata_from_label_bytes(metadata: &mut AiModelMetadata, bytes: &[u8]) -> Result<()> {
         if bytes.is_empty() {
             return Ok(());
         }
@@ -234,12 +236,12 @@ impl AiModelManager {
         if trimmed.is_empty() {
             return Ok(());
         }
-        if let Ok(parsed) = serde_json::from_str::<ModelMetadata>(trimmed) {
+        if let Ok(parsed) = serde_json::from_str::<AiModelMetadata>(trimmed) {
             Self::merge_metadata(metadata, parsed);
             return Ok(());
         }
         if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
-            if let Ok(meta) = serde_json::from_value::<ModelMetadata>(value.clone()) {
+            if let Ok(meta) = serde_json::from_value::<AiModelMetadata>(value.clone()) {
                 Self::merge_metadata(metadata, meta);
                 return Ok(());
             }
@@ -248,26 +250,26 @@ impl AiModelManager {
             {
                 let labels: Vec<String> = array.iter().filter_map(|entry| entry.as_str().map(|s| s.to_string())).collect();
                 if !labels.is_empty() {
-                    Self::merge_metadata(metadata, ModelMetadata { labels, ..ModelMetadata::default() });
+                    Self::merge_metadata(metadata, AiModelMetadata { labels, ..AiModelMetadata::default() });
                 }
                 return Ok(());
             }
             if let Some(array) = value.as_array() {
                 let labels: Vec<String> = array.iter().filter_map(|entry| entry.as_str().map(|s| s.to_string())).collect();
                 if !labels.is_empty() {
-                    Self::merge_metadata(metadata, ModelMetadata { labels, ..ModelMetadata::default() });
+                    Self::merge_metadata(metadata, AiModelMetadata { labels, ..AiModelMetadata::default() });
                 }
                 return Ok(());
             }
         }
         let labels: Vec<String> = trimmed.lines().map(|line| line.trim()).filter(|line| !line.is_empty()).map(|line| line.to_string()).collect();
         if !labels.is_empty() {
-            Self::merge_metadata(metadata, ModelMetadata { labels, ..ModelMetadata::default() });
+            Self::merge_metadata(metadata, AiModelMetadata { labels, ..AiModelMetadata::default() });
         }
         Ok(())
     }
 
-    fn merge_metadata(target: &mut ModelMetadata, incoming: ModelMetadata) {
+    fn merge_metadata(target: &mut AiModelMetadata, incoming: AiModelMetadata) {
         if target.display_name.is_none() && incoming.display_name.is_some() {
             target.display_name = incoming.display_name;
         }
@@ -299,7 +301,7 @@ impl AiModelManager {
         }
     }
 
-    fn save_manifest_locked(&self, models: &HashMap<ModelId, AiModelEntry>) -> Result<()> {
+    fn save_manifest_locked(&self, models: &HashMap<AiModelId, AiModelEntry>) -> Result<()> {
         let manifest = AiModelManifest {
             models: models
                 .values()
@@ -336,11 +338,83 @@ fn resolve_storage_dir() -> PathBuf {
     lib_ai::storage::default_model_dir()
 }
 
-fn artifact_name(id: &ModelId, format: &ModelFormat) -> String {
+fn artifact_name(id: &AiModelId, format: &AiModelFormat) -> String {
     let extension = match format {
-        ModelFormat::TensorFlowLite => "tflite",
-        ModelFormat::Onnx => "onnx",
-        ModelFormat::Raw => "bin",
+        AiModelFormat::TensorFlowLite => "tflite",
+        AiModelFormat::Onnx => "onnx",
+        AiModelFormat::Raw => "bin",
     };
     format!("{}.{}", id.0, extension)
+}
+
+fn to_lib_model_id(id: &AiModelId) -> lib_ai::model::ModelId {
+    lib_ai::model::ModelId(id.0)
+}
+
+fn to_lib_model_format(format: &AiModelFormat) -> lib_ai::model::ModelFormat {
+    match format {
+        AiModelFormat::TensorFlowLite => lib_ai::model::ModelFormat::TensorFlowLite,
+        AiModelFormat::Onnx => lib_ai::model::ModelFormat::Onnx,
+        AiModelFormat::Raw => lib_ai::model::ModelFormat::Raw,
+    }
+}
+
+fn to_lib_tensor_element_type(element_type: &AiTensorElementType) -> lib_ai::tensor::TensorElementType {
+    match element_type {
+        AiTensorElementType::U8 => lib_ai::tensor::TensorElementType::U8,
+        AiTensorElementType::I8 => lib_ai::tensor::TensorElementType::I8,
+        AiTensorElementType::I16 => lib_ai::tensor::TensorElementType::I16,
+        AiTensorElementType::I32 => lib_ai::tensor::TensorElementType::I32,
+        AiTensorElementType::F16 => lib_ai::tensor::TensorElementType::F16,
+        AiTensorElementType::F32 => lib_ai::tensor::TensorElementType::F32,
+    }
+}
+
+fn to_lib_tensor_quantization(quantization: &AiTensorQuantization) -> lib_ai::model::TensorQuantization {
+    lib_ai::model::TensorQuantization { zero_point: quantization.zero_point.clone(), scale: quantization.scale.clone() }
+}
+
+fn to_lib_model_tensor_metadata(tensor: &AiModelTensorMetadata) -> lib_ai::model::ModelTensorMetadata {
+    lib_ai::model::ModelTensorMetadata {
+        name: tensor.name.clone(),
+        element_type: to_lib_tensor_element_type(&tensor.element_type),
+        shape: tensor.shape.clone(),
+        quantization: tensor.quantization.as_ref().map(to_lib_tensor_quantization),
+    }
+}
+
+fn to_lib_model_metadata(metadata: &AiModelMetadata) -> lib_ai::model::ModelMetadata {
+    lib_ai::model::ModelMetadata {
+        display_name: metadata.display_name.clone(),
+        description: metadata.description.clone(),
+        tags: metadata.tags.clone(),
+        preferred_batch_size: metadata.preferred_batch_size,
+        inputs: metadata.inputs.iter().map(to_lib_model_tensor_metadata).collect(),
+        outputs: metadata.outputs.iter().map(to_lib_model_tensor_metadata).collect(),
+        labels: metadata.labels.clone(),
+    }
+}
+
+fn ai_tensor_element_type_from_lib(element_type: lib_ai::tensor::TensorElementType) -> AiTensorElementType {
+    match element_type {
+        lib_ai::tensor::TensorElementType::U8 => AiTensorElementType::U8,
+        lib_ai::tensor::TensorElementType::I8 => AiTensorElementType::I8,
+        lib_ai::tensor::TensorElementType::I16 => AiTensorElementType::I16,
+        lib_ai::tensor::TensorElementType::I32 => AiTensorElementType::I32,
+        lib_ai::tensor::TensorElementType::F16 => AiTensorElementType::F16,
+        lib_ai::tensor::TensorElementType::F32 => AiTensorElementType::F32,
+    }
+}
+
+fn ai_tensor_quantization_from_lib(quantization: lib_ai::model::TensorQuantization) -> AiTensorQuantization {
+    AiTensorQuantization { zero_point: quantization.zero_point, scale: quantization.scale }
+}
+
+fn ai_model_tensor_metadata_from_lib(tensor: lib_ai::model::ModelTensorMetadata) -> AiModelTensorMetadata {
+    AiModelTensorMetadata {
+        name: tensor.name,
+        element_type: ai_tensor_element_type_from_lib(tensor.element_type),
+        shape: tensor.shape,
+        quantization: tensor.quantization.map(ai_tensor_quantization_from_lib),
+    }
 }

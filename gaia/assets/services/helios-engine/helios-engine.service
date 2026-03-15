@@ -15,6 +15,7 @@ ExecStartPre=/bin/sh -lc 'awk '\''$5==\"/var/lib/helios\"{found=1} END{exit !fou
 ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios
 ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios/panics
 ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios/engine
+ExecStartPre=/usr/bin/install -d -m0755 /var/lib/helios/state
 ExecStartPre=/usr/bin/install -d -m0755 /usr/lib/helios/plugins/daedalus
 ExecStartPre=/usr/bin/install -d -m0755 /var/lib/helios/plugins/daedalus
 ExecStartPre=/bin/sh -lc 'echo 1 > /proc/sys/kernel/core_uses_pid; echo /var/log/helios/core-%%e-%%p > /proc/sys/kernel/core_pattern; ulimit -c unlimited'
@@ -26,13 +27,17 @@ Environment=MALLOC_ARENA_MAX=2
 Environment=MALLOC_TRIM_THRESHOLD_=131072
 Environment=HELIOS_ENGINE_WORKER_THREADS=2
 Environment=HELIOS_ENGINE_MAX_BLOCKING_THREADS=4
+Environment=HELIOS_ENGINE_CACHE_NODE_REGISTRY=0
+Environment=HELIOS_NODE_REGISTRY_SNAPSHOT_PATH=/var/lib/helios/state/node-registry.snapshot.json
 Environment=STYX_LIBCAMERA_STOP_WHEN_IDLE=1
+Environment=HELIOS_STYX_CAPTURE_QUEUE_DEPTH=2
 # Keep stall recovery enabled, but avoid overly aggressive 1s restart churn under
 # heavy graph load; repeated restart loops correlate with large RSS growth.
 Environment=HELIOS_CAPTURE_STALL_MS=6000
 Environment=HELIOS_CAPTURE_ACTIVE_STALL_MS=5000
 Environment=HELIOS_DAEDALUS_PLUGIN_DIRS=/var/lib/helios/plugins/daedalus:/usr/lib/helios/plugins/daedalus
 Environment=HELIOS_DAEDALUS_DEMAND_DRIVEN=1
+Environment=DAEDALUS_METRICS_LEVEL=detailed
 Environment=HELIOS_API_DATA_DIR=/var/lib/helios/api-data
 EnvironmentFile=-/etc/default/helios-engine
 ExecStart=/usr/bin/helios-engine

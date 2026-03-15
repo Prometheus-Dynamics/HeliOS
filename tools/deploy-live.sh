@@ -19,6 +19,11 @@ DOCKER_CONTEXT="${DOCKER_CONTEXT:-$ROOT_DIR/gaia}"
 IMAGE_TAG="${IMAGE_TAG:-helios-cross-rust194}"
 REBUILD_IMAGE="0"
 
+CROSS_BUILD_ROOT_DEFAULT="/var/tmp/helios-cross/${IMAGE_TAG}"
+TARGET_BUILD_DIR="${TARGET_BUILD_DIR:-$CROSS_BUILD_ROOT_DEFAULT/target}"
+CROSS_CARGO_HOME="${CROSS_CARGO_HOME:-$CROSS_BUILD_ROOT_DEFAULT/cargo}"
+CROSS_SCCACHE_DIR="${CROSS_SCCACHE_DIR:-$CROSS_BUILD_ROOT_DEFAULT/sccache}"
+
 # Optional local checkouts used when you want to patch these dependencies during development.
 # In a clean/public clone, leave unset.
 default_checkout_path() {
@@ -106,6 +111,9 @@ Env vars (optional):
   STYX_HOST_PATH         Host path to a Styx checkout (optional dev override)
   LIBCAMERA_RS_HOST_PATH Host path to a libcamera-rs checkout (optional dev override)
   DOCKER_CONTEXT         Docker build context for the cross image
+  TARGET_BUILD_DIR       Host path for cross-built Cargo target artifacts
+  CROSS_CARGO_HOME       Host path for cross-build Cargo cache
+  CROSS_SCCACHE_DIR      Host path for cross-build sccache data
 EOF
 }
 
@@ -285,13 +293,14 @@ docker_run_cargo_build() {
   local repo_root="$4"
   local features="${5:-}"
   local build_kind="${6:-package}"
+  local bin_name="${7:-$package}"
 
   local -a docker_args=(
     --rm
     -v "$repo_root/backend:/work/backend"
-    -v "$repo_root/target:/work/target"
-    -v "$repo_root/.cache/cargo:/work/.cargo"
-    -v "$repo_root/.cache/sccache:/root/.cache/sccache"
+    -v "$TARGET_BUILD_DIR:/work/target"
+    -v "$CROSS_CARGO_HOME:/work/.cargo"
+    -v "$CROSS_SCCACHE_DIR:/root/.cache/sccache"
     -e "CARGO_HOME=/work/.cargo"
     -e "CARGO_TARGET_DIR=/work/target"
     -e "SCCACHE_DIR=/root/.cache/sccache"
@@ -332,7 +341,7 @@ docker_run_cargo_build() {
 
   local target_arg="-p '$package'"
   if [[ "$build_kind" == "bin" ]]; then
-    target_arg="-p '$package' --bin '$package'"
+    target_arg="-p '$package' --bin '$bin_name'"
   fi
 
   run docker run "${docker_args[@]}" "$IMAGE_TAG" bash -lc \
@@ -341,16 +350,27 @@ docker_run_cargo_build() {
      cargo build --target '$target_triple' $profile_flag ${features_arg:+$features_arg }$target_arg"
 }
 
+binary_output_path() {
+  local package="$1"
+  local profile_flag="$2"
+  local target_triple="$3"
+  local bin_name="${4:-$package}"
+
+  local profile_dir
+  profile_dir=$(profile_dir_from_flag "$profile_flag")
+
+  echo "$TARGET_BUILD_DIR/$target_triple/$profile_dir/$bin_name"
+}
+
 copy_binary_out() {
   local package="$1"
   local profile_flag="$2"
   local target_triple="$3"
   local out_dir="$4"
+  local bin_name="${5:-$package}"
 
-  local profile_dir
-  profile_dir=$(profile_dir_from_flag "$profile_flag")
-
-  local bin_path="$ROOT_DIR/target/$target_triple/$profile_dir/$package"
+  local bin_path
+  bin_path=$(binary_output_path "$package" "$profile_flag" "$target_triple" "$bin_name")
   if [[ ! -f "$bin_path" ]]; then
     die "expected output not found: $bin_path"
   fi
@@ -391,7 +411,7 @@ copy_plugins_out() {
   local profile_dir
   profile_dir=$(profile_dir_from_flag "$profile_flag")
 
-  local so_glob="$ROOT_DIR/target/$target_triple/$profile_dir/libhelios_daedalus_*_plugin.so"
+  local so_glob="$TARGET_BUILD_DIR/$target_triple/$profile_dir/libhelios_daedalus_*_plugin.so"
   shopt -s nullglob
   local so_files=( $so_glob )
   shopt -u nullglob
@@ -436,11 +456,10 @@ needs_binary_build() {
   local package="$1"
   local profile_flag="$2"
   local target_triple="$3"
+  local bin_name="${4:-$package}"
 
-  local profile_dir
-  profile_dir=$(profile_dir_from_flag "$profile_flag")
-
-  local bin_path="$ROOT_DIR/target/$target_triple/$profile_dir/$package"
+  local bin_path
+  bin_path=$(binary_output_path "$package" "$profile_flag" "$target_triple" "$bin_name")
   if [[ ! -f "$bin_path" ]]; then
     return 0
   fi
@@ -496,7 +515,7 @@ plugin_output_path() {
   profile_dir=$(profile_dir_from_flag "$profile_flag")
 
   local crate_name="${package//-/_}"
-  echo "$ROOT_DIR/target/$target_triple/$profile_dir/lib${crate_name}.so"
+  echo "$TARGET_BUILD_DIR/$target_triple/$profile_dir/lib${crate_name}.so"
 }
 
 needs_plugin_build() {
@@ -558,7 +577,7 @@ needs_plugin_build() {
 }
 
 if [[ "$BUILD" == "1" ]]; then
-  run mkdir -p "$ROOT_DIR/.cache/cargo" "$ROOT_DIR/.cache/sccache"
+  run mkdir -p "$TARGET_BUILD_DIR" "$CROSS_CARGO_HOME" "$CROSS_SCCACHE_DIR"
   ensure_docker_image
 
   if [[ "$do_plugins" == "1" ]]; then
@@ -582,22 +601,29 @@ if [[ "$BUILD" == "1" ]]; then
   fi
 
   if [[ "$do_binaries" == "1" ]]; then
-    packages=("helios-engine" "helios-api" "helios-peripherals" "helios-updater")
-    pkg=""
-    for pkg in "${packages[@]}"; do
-      if needs_binary_build "$pkg" "$PROFILE_FLAG" "$TARGET_TRIPLE"; then
-        echo "Building $pkg ($TARGET_TRIPLE) $(profile_label)..."
+    bin_specs=(
+      "helios-engine:helios-engine"
+      "helios-api:helios-api"
+      "helios-api:helios-api-tools"
+      "helios-peripherals:helios-peripherals"
+      "helios-updater:helios-updater"
+    )
+    spec=""
+    for spec in "${bin_specs[@]}"; do
+      IFS=: read -r pkg bin_name <<<"$spec"
+      if needs_binary_build "$pkg" "$PROFILE_FLAG" "$TARGET_TRIPLE" "$bin_name"; then
+        echo "Building $bin_name ($TARGET_TRIPLE) $(profile_label)..."
         pkg_features=""
         if [[ "$pkg" == "helios-engine" ]]; then
           pkg_features="$ENGINE_FEATURES"
         elif [[ "$pkg" == "helios-api" ]]; then
           pkg_features="$API_FEATURES"
         fi
-        docker_run_cargo_build "$pkg" "$TARGET_TRIPLE" "$PROFILE_FLAG" "$ROOT_DIR" "$pkg_features" "bin"
+        docker_run_cargo_build "$pkg" "$TARGET_TRIPLE" "$PROFILE_FLAG" "$ROOT_DIR" "$pkg_features" "bin" "$bin_name"
       else
-        echo "Skipping $pkg (up to date)"
+        echo "Skipping $bin_name (up to date)"
       fi
-      copy_binary_out "$pkg" "$PROFILE_FLAG" "$TARGET_TRIPLE" "$BINS_DIR"
+      copy_binary_out "$pkg" "$PROFILE_FLAG" "$TARGET_TRIPLE" "$BINS_DIR" "$bin_name"
     done
   fi
 fi
@@ -777,7 +803,7 @@ if [[ "$UPLOAD" == "1" ]]; then
   }
 
   if [[ "$do_binaries" == "1" ]]; then
-    bins=("helios-engine" "helios-api" "helios-peripherals" "helios-updater")
+    bins=("helios-engine" "helios-api" "helios-api-tools" "helios-peripherals" "helios-updater")
     b=""
     for b in "${bins[@]}"; do
       [[ -f "$BINS_DIR/$b" ]] || die "missing binary: $BINS_DIR/$b"

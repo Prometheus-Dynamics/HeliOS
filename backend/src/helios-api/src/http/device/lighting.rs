@@ -602,7 +602,7 @@ pub async fn save_lighting_animation(State(state): State<AppState>, Json(payload
 
     persist_led_animations(LED_ANIMATIONS_PATH, &doc).await.map_err(|err| ApiError::internal(format!("failed to persist lighting animations: {err}")))?;
     persist_led_animations(LEGACY_LED_ANIMATIONS_PATH, &doc).await.map_err(|err| ApiError::internal(format!("failed to mirror lighting animations: {err}")))?;
-    let _ = state.engine.refresh_node_registry().await;
+    state.services.pipelines.invalidate_registry_cache().await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -624,7 +624,7 @@ pub async fn delete_lighting_animation(State(state): State<AppState>, Path(name)
     if doc.animations.len() != before {
         persist_led_animations(LED_ANIMATIONS_PATH, &doc).await.map_err(|err| ApiError::internal(format!("failed to persist lighting animations: {err}")))?;
         persist_led_animations(LEGACY_LED_ANIMATIONS_PATH, &doc).await.map_err(|err| ApiError::internal(format!("failed to mirror lighting animations: {err}")))?;
-        let _ = state.engine.refresh_node_registry().await;
+        state.services.pipelines.invalidate_registry_cache().await;
     }
 
     Ok(StatusCode::NO_CONTENT)

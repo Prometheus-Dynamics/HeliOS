@@ -8,9 +8,7 @@ use axum::{
 };
 use chrono::Utc;
 use flate2::read::GzDecoder;
-use helios_peripherals::AiModelHealth;
-use image::GenericImageView;
-use lib_ai::model::{ModelFormat, ModelId, ModelMetadata};
+use helios_peripherals::{AiModelFormat, AiModelHealth, AiModelId, AiModelMetadata, AiModelTensorMetadata};
 use lib_ipc::types::Timestamp;
 use mime_guess::MimeGuess;
 use serde::{Deserialize, Serialize};
@@ -32,6 +30,8 @@ use super::AppState;
 use super::error::{ApiError, ApiResult, ErrorBody};
 use super::storage::{self, sanitize_name};
 use super::upload_integrity;
+use crate::api_tools_client;
+use crate::api_tools_protocol::ToolCropRect;
 
 pub fn router() -> Router<AppState> {
     // Media uploads frequently exceed Axum's default 2MB body limit; handle limits ourselves.
@@ -277,6 +277,8 @@ fn is_internal_media_artifact(name: &str) -> bool {
     lower.ends_with(".frame_ts.txt")
 }
 
+const AI_MODEL_MANIFEST_NAME: &str = "manifest.json";
+
 #[utoipa::path(
     post,
     path = "/media",
@@ -297,7 +299,7 @@ async fn upload_media(headers: HeaderMap, mut multipart: Multipart) -> ApiResult
     let mut uploaded: Option<(String, u64, String, MediaMetadata)> = None;
     let mut pending_label: Option<(String, Vec<u8>)> = None;
     let mut pending_meta = MediaMetadata::default();
-    let mut pending_model_format: Option<lib_ai::ModelFormat> = None;
+    let mut pending_model_format: Option<AiModelFormat> = None;
 
     loop {
         let field = match multipart.next_field().await {
@@ -996,6 +998,12 @@ struct CropRect {
     height: u32,
 }
 
+impl From<CropRect> for ToolCropRect {
+    fn from(value: CropRect) -> Self {
+        Self { x: value.x, y: value.y, width: value.width, height: value.height }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 struct ImageEditsRequest {
     #[serde(default)]
@@ -1025,16 +1033,15 @@ async fn apply_image_edits(Path(name): Path<String>, Json(payload): Json<ImageEd
     }
 
     let bytes = fs::read(&path).await.map_err(|err| map_io_error(err, "failed to read image"))?;
-    let content_type_for_task = content_type.clone();
-    let edited = tokio::task::spawn_blocking(move || edit_image_bytes(&bytes, &content_type_for_task, payload)).await.map_err(|err| ApiError::internal(format!("image edit task failed: {err}")))??;
+    let (edited_bytes, width, height) = api_tools_client::image_edit(&bytes, content_type.clone(), payload.rotate_degrees, payload.crop.map(Into::into)).await?;
 
     let mut file = fs::File::create(&path).await.map_err(|err| map_io_error(err, "failed to write image"))?;
-    file.write_all(&edited.bytes).await.map_err(|err| map_io_error(err, "failed to write image"))?;
-    let size_bytes = edited.bytes.len() as u64;
+    file.write_all(&edited_bytes).await.map_err(|err| map_io_error(err, "failed to write image"))?;
+    let size_bytes = edited_bytes.len() as u64;
 
     let mut md = ensure_media_metadata(&meta_dir, &filename, &path, &content_type).await.unwrap_or_default();
-    md.width = Some(edited.width);
-    md.height = Some(edited.height);
+    md.width = Some(width);
+    md.height = Some(height);
     write_media_metadata(&filename, md.clone()).await?;
 
     Ok(Json(MediaItem {
@@ -1060,41 +1067,6 @@ async fn apply_image_edits(Path(name): Path<String>, Json(payload): Json<ImageEd
     }))
 }
 
-struct EditedImage {
-    bytes: Vec<u8>,
-    width: u32,
-    height: u32,
-}
-
-fn edit_image_bytes(bytes: &[u8], content_type: &str, payload: ImageEditsRequest) -> Result<EditedImage, Box<ApiError>> {
-    let mut image = image::load_from_memory(bytes).map_err(|err| Box::new(ApiError::bad_request(format!("failed to decode image: {err}"))))?;
-    if let Some(crop) = payload.crop {
-        let (w, h) = image.dimensions();
-        if crop.width == 0 || crop.height == 0 || crop.x >= w || crop.y >= h {
-            return Err(Box::new(ApiError::bad_request("invalid crop rectangle")));
-        }
-        let crop_w = crop.width.min(w - crop.x);
-        let crop_h = crop.height.min(h - crop.y);
-        image = image.crop_imm(crop.x, crop.y, crop_w, crop_h);
-    }
-
-    let rotation = payload.rotate_degrees.unwrap_or(0).rem_euclid(360);
-    if rotation != 0 {
-        image = match rotation {
-            90 => image.rotate90(),
-            180 => image.rotate180(),
-            270 => image.rotate270(),
-            _ => return Err(Box::new(ApiError::bad_request("rotation must be 0/90/180/270"))),
-        };
-    }
-
-    let (width, height) = image.dimensions();
-    let mut out = Vec::new();
-    let format = if content_type == "image/png" { image::ImageFormat::Png } else { image::ImageFormat::Jpeg };
-    image.write_to(&mut Cursor::new(&mut out), format).map_err(|err| Box::new(ApiError::internal(format!("failed to encode image: {err}"))))?;
-    Ok(EditedImage { bytes: out, width, height })
-}
-
 fn parse_tags(raw: &str) -> Vec<String> {
     raw.split(',').map(|value| value.trim().to_string()).filter(|value| !value.is_empty()).collect()
 }
@@ -1108,21 +1080,24 @@ fn looks_like_model(filename: &str, content_type: &str) -> bool {
     filename.to_lowercase().ends_with(".tflite") || filename.to_lowercase().ends_with(".onnx")
 }
 
-fn guess_model_format(filename: &str) -> Option<lib_ai::ModelFormat> {
+fn guess_model_format(filename: &str) -> Option<AiModelFormat> {
     let ext = filename.split('.').next_back()?.to_lowercase();
     match ext.as_str() {
-        "tflite" => Some(lib_ai::ModelFormat::TensorFlowLite),
-        "onnx" => Some(lib_ai::ModelFormat::Onnx),
+        "tflite" => Some(AiModelFormat::TensorFlowLite),
+        "onnx" => Some(AiModelFormat::Onnx),
         _ => None,
     }
 }
 
-async fn hydrate_model_metadata(meta: &mut MediaMetadata, path: &std::path::Path, format: lib_ai::ModelFormat) {
+async fn hydrate_model_metadata(meta: &mut MediaMetadata, path: &std::path::Path, format: AiModelFormat) {
     let bytes = match fs::read(path).await {
         Ok(bytes) => bytes,
         Err(_) => return,
     };
-    let inspection = lib_ai::model::introspect::inspect_model(&bytes, &format);
+    let inspection = match api_tools_client::model_inspect(&bytes, format).await {
+        Ok(inspection) => inspection,
+        Err(_) => return,
+    };
     if meta.model_tensor_spec.is_none() {
         meta.model_tensor_spec = Some(format_tensor_spec(&inspection.inputs, &inspection.outputs));
     }
@@ -1134,8 +1109,8 @@ async fn hydrate_model_metadata(meta: &mut MediaMetadata, path: &std::path::Path
     }
 }
 
-fn format_tensor_spec(inputs: &[lib_ai::ModelTensorMetadata], outputs: &[lib_ai::ModelTensorMetadata]) -> String {
-    let format_tensors = |prefix: &str, tensors: &[lib_ai::ModelTensorMetadata]| -> String {
+fn format_tensor_spec(inputs: &[AiModelTensorMetadata], outputs: &[AiModelTensorMetadata]) -> String {
+    let format_tensors = |prefix: &str, tensors: &[AiModelTensorMetadata]| -> String {
         let entries = tensors
             .iter()
             .enumerate()
@@ -1153,7 +1128,7 @@ fn format_tensor_spec(inputs: &[lib_ai::ModelTensorMetadata], outputs: &[lib_ai:
     format!("{input_section}|{output_section}")
 }
 
-fn derive_input_resolution(inputs: &[lib_ai::ModelTensorMetadata]) -> Option<String> {
+fn derive_input_resolution(inputs: &[AiModelTensorMetadata]) -> Option<String> {
     for tensor in inputs {
         let shape = &tensor.shape;
         if shape.len() == 4 {
@@ -1211,10 +1186,11 @@ async fn hydrate_dimensions(meta: &mut MediaMetadata, path: &std::path::Path, co
         Ok(bytes) => bytes,
         Err(_) => return,
     };
-    let dims = tokio::task::spawn_blocking(move || image::load_from_memory(&bytes).ok().map(|img| img.dimensions())).await.ok().flatten();
-    if let Some((w, h)) = dims {
-        meta.width = Some(w);
-        meta.height = Some(h);
+    if let Ok((width, height)) = api_tools_client::image_dimensions(&bytes).await
+        && let (Some(width), Some(height)) = (width, height)
+    {
+        meta.width = Some(width);
+        meta.height = Some(height);
     }
 }
 
@@ -1701,13 +1677,13 @@ fn parse_label_bytes(bytes: &[u8]) -> Option<Vec<String>> {
         return None;
     }
 
-    if let Ok(parsed) = serde_json::from_str::<ModelMetadata>(trimmed)
+    if let Ok(parsed) = serde_json::from_str::<AiModelMetadata>(trimmed)
         && !parsed.labels.is_empty()
     {
         return Some(parsed.labels);
     }
     if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
-        if let Ok(meta) = serde_json::from_value::<ModelMetadata>(value.clone())
+        if let Ok(meta) = serde_json::from_value::<AiModelMetadata>(value.clone())
             && !meta.labels.is_empty()
         {
             return Some(meta.labels);
@@ -1738,9 +1714,9 @@ struct AiModelManifest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AiModelManifestEntry {
-    id: ModelId,
-    format: ModelFormat,
-    metadata: ModelMetadata,
+    id: AiModelId,
+    format: AiModelFormat,
+    metadata: AiModelMetadata,
     artifact: String,
     #[serde(default)]
     label_artifact: Option<String>,
@@ -1759,13 +1735,13 @@ async fn register_ai_model_for_media(filename: &str, path: &StdPath, content_typ
         return Ok(());
     };
 
-    let model_dir = lib_ai::storage::default_model_dir();
+    let model_dir = ai_model_dir();
     fs::create_dir_all(&model_dir).await.map_err(|err| map_io_error(err, "failed to prepare AI model directory"))?;
-    let manifest_path = model_dir.join(lib_ai::storage::MANIFEST_NAME);
+    let manifest_path = model_dir.join(AI_MODEL_MANIFEST_NAME);
 
     let mut manifest = load_ai_model_manifest(&manifest_path).await?;
     let model_uuid = meta.model_id.unwrap_or_else(Uuid::new_v4);
-    let model_id = ModelId(model_uuid);
+    let model_id = AiModelId(model_uuid);
 
     let label_bytes = load_media_label_bytes(filename).await?;
     let labels = label_bytes.as_deref().and_then(parse_label_bytes);
@@ -1796,9 +1772,9 @@ async fn register_ai_model_for_media(filename: &str, path: &StdPath, content_typ
     }
 
     let bytes = fs::read(path).await.map_err(|err| map_io_error(err, "failed to read AI model payload"))?;
-    let inspection = lib_ai::model::introspect::inspect_model(&bytes, &format);
+    let inspection = api_tools_client::model_inspect(&bytes, format.clone()).await?;
 
-    let mut metadata = ModelMetadata { display_name: Some(model_display_name(filename)), inputs: inspection.inputs, outputs: inspection.outputs, ..Default::default() };
+    let mut metadata = AiModelMetadata { display_name: Some(model_display_name(filename)), inputs: inspection.inputs, outputs: inspection.outputs, ..Default::default() };
     if !inspection.suggested_tags.is_empty() {
         metadata.tags = inspection.suggested_tags;
     }
@@ -1825,10 +1801,10 @@ async fn register_ai_model_for_media(filename: &str, path: &StdPath, content_typ
 }
 
 async fn remove_ai_model(model_id: Uuid) -> Result<(), ApiError> {
-    let model_dir = lib_ai::storage::default_model_dir();
-    let manifest_path = model_dir.join(lib_ai::storage::MANIFEST_NAME);
+    let model_dir = ai_model_dir();
+    let manifest_path = model_dir.join(AI_MODEL_MANIFEST_NAME);
     let mut manifest = load_ai_model_manifest(&manifest_path).await?;
-    let target = ModelId(model_id);
+    let target = AiModelId(model_id);
 
     if let Some(idx) = manifest.models.iter().position(|entry| entry.id == target) {
         let entry = manifest.models.remove(idx);
@@ -1857,17 +1833,33 @@ async fn save_ai_model_manifest(path: &StdPath, manifest: &AiModelManifest) -> R
     Ok(())
 }
 
-fn artifact_name(id: &ModelId, format: &ModelFormat) -> String {
+fn artifact_name(id: &AiModelId, format: &AiModelFormat) -> String {
     let extension = match format {
-        ModelFormat::TensorFlowLite => "tflite",
-        ModelFormat::Onnx => "onnx",
-        ModelFormat::Raw => "bin",
+        AiModelFormat::TensorFlowLite => "tflite",
+        AiModelFormat::Onnx => "onnx",
+        AiModelFormat::Raw => "bin",
     };
     format!("{}.{}", id.0, extension)
 }
 
 fn model_display_name(filename: &str) -> String {
     StdPath::new(filename).file_stem().and_then(|stem| stem.to_str()).map(|value| value.trim()).filter(|value| !value.is_empty()).unwrap_or(filename).to_string()
+}
+
+fn ai_model_dir() -> std::path::PathBuf {
+    if let Some(value) = std::env::var_os("PERIPHERALS_AI_MODEL_DIR").filter(|value| !value.is_empty()) {
+        return value.into();
+    }
+    if let Some(value) = std::env::var_os("SENSORS_AI_MODEL_DIR").filter(|value| !value.is_empty()) {
+        return value.into();
+    }
+    if let Some(value) = std::env::var_os("PERIPHERALS_STATE_DIR").filter(|value| !value.is_empty()) {
+        return StdPath::new(&value).join("ai-models");
+    }
+    if let Some(value) = std::env::var_os("SENSORS_STATE_DIR").filter(|value| !value.is_empty()) {
+        return StdPath::new(&value).join("ai-models");
+    }
+    StdPath::new("/var/lib/helios/ai-models").to_path_buf()
 }
 
 fn map_io_error(err: std::io::Error, context: &str) -> ApiError {

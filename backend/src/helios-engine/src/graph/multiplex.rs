@@ -10,7 +10,7 @@ use lib_cv::modules::calibration::LensModel;
 
 use crate::stream::PipelineGraphMetrics;
 
-use super::{DaedalusValue, GraphExecutor, GraphHandle};
+use super::{DaedalusValue, GraphExecutor, GraphHandle, GraphProcessOptions};
 
 #[derive(Clone)]
 pub(crate) struct MultiplexPipeline {
@@ -335,14 +335,18 @@ impl GraphExecutor for MultiplexGraphExecutor {
     }
 
     fn process(&self, image: DynamicImage) -> Option<DynamicImage> {
+        self.process_with_options(image, GraphProcessOptions::default())
+    }
+
+    fn process_with_options(&self, image: DynamicImage, options: GraphProcessOptions) -> Option<DynamicImage> {
         let (width, height) = image.dimensions();
         if width == 0 || height == 0 {
-            return Some(image);
+            return if options.require_image_output { Some(image) } else { None };
         }
 
         if self.used_indices.is_empty() {
             // No pipelines selected: emit an empty (black) canvas.
-            return Some(DynamicImage::ImageRgba8(RgbaImage::new(width, height)));
+            return if options.require_image_output { Some(DynamicImage::ImageRgba8(RgbaImage::new(width, height))) } else { None };
         }
 
         const INPUT_FILTER: FilterType = FilterType::Nearest;
@@ -473,7 +477,11 @@ impl GraphExecutor for MultiplexGraphExecutor {
                 }
             }
 
-            outputs[idx] = pipeline.graph.process(input_image);
+            outputs[idx] = pipeline.graph.process_with_options(input_image, options);
+        }
+
+        if !options.require_image_output {
+            return None;
         }
 
         let outputs_rgba: Vec<Option<RgbaImage>> = outputs.into_iter().map(|img| img.map(|img| img.into_rgba8())).collect();

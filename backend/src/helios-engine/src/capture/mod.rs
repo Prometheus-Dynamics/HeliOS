@@ -37,13 +37,12 @@ pub struct CaptureConfig {
     pub backend: BackendKind,
     pub handle: BackendHandle,
     pub mode: ModeId,
-    /// Target FPS hint used by the engine for pacing/metrics.
+    /// Target FPS request used by the engine for pacing/metrics and libcamera frame timing.
     ///
-    /// For libcamera, this is intentionally *not* translated into a hard `FrameDurationLimits`
-    /// pin. Hard-pinning frame duration from stream metadata has proven unstable on PiSP cameras
-    /// under varying exposure conditions and can wedge capture into repeated stall/restart loops.
-    /// Operators can still request an explicit frame duration via `interval` or control `30`
-    /// (`FrameDurationLimits`) when they actually want a hard capture-rate constraint.
+    /// When `interval` is not explicitly set, `target_fps` is translated into a frame interval for
+    /// all backends, including libcamera. The live OV9782 path can sustain higher rates than the
+    /// default 33.3 ms cadence, and treating `target_fps` as a no-op leaves the sensor parked at
+    /// ~30 fps even when the requested stream target is higher.
     #[serde(default)]
     pub target_fps: Option<u32>,
     #[serde(default)]
@@ -70,10 +69,7 @@ impl CaptureConfig {
 
     fn effective_interval_for_backend(&self, backend: BackendKind) -> Option<Interval> {
         match backend {
-            // Libcamera frame duration should only be pinned by an explicit request, not by the
-            // stream metadata FPS hint. This keeps auto-exposure free to lengthen cadence when the
-            // sensor/scene cannot sustain the nominal target FPS.
-            BackendKind::Libcamera => self.interval,
+            BackendKind::Libcamera => self.interval.or_else(|| self.target_fps.and_then(Self::interval_from_target_fps)),
             _ => self.target_fps.and_then(Self::interval_from_target_fps).or(self.interval),
         }
     }
@@ -199,9 +195,9 @@ mod tests {
     }
 
     #[test]
-    fn libcamera_target_fps_does_not_force_interval() {
+    fn libcamera_target_fps_maps_to_interval() {
         let config = sample_config();
-        assert_eq!(config.effective_interval_for_backend(BackendKind::Libcamera), None);
+        assert_eq!(config.effective_interval_for_backend(BackendKind::Libcamera), Some(Interval { numerator: NonZeroU32::new(1).unwrap(), denominator: NonZeroU32::new(60).unwrap() }));
     }
 
     #[test]
@@ -409,7 +405,7 @@ impl CaptureSession {
                     let handle = match request.start() {
                         Ok(handle) => handle,
                         Err(err) => {
-                            if !tdn_disabled && should_disable_tdn(&err) {
+                            if !tdn_disabled && err.requires_disabling_tdn() {
                                 tdn_disabled = disable_noise_reduction(&mut config.controls);
                                 if tdn_disabled {
                                     tracing::warn!(attempt, error = %err, "capture start failed with TDN enabled; retrying with NoiseReductionMode=Off");
@@ -417,7 +413,7 @@ impl CaptureSession {
                                     continue;
                                 }
                             }
-                            if !controls_cleared && config.backend == BackendKind::Libcamera && !config.controls.is_empty() && should_drop_controls(&err) {
+                            if !controls_cleared && config.backend == BackendKind::Libcamera && !config.controls.is_empty() && err.requires_dropping_controls() {
                                 controls_cleared = true;
                                 config.controls.clear();
                                 config.enable_tdn_output = false;
@@ -425,7 +421,7 @@ impl CaptureSession {
                                 std::thread::sleep(Duration::from_millis(250));
                                 continue;
                             }
-                            if is_transient_start_error(&err) && attempt < 29 {
+                            if err.is_transient_start() && attempt < 29 {
                                 tracing::warn!(attempt, error = %err, "capture start transient failure; retrying");
                                 std::thread::sleep(Duration::from_millis(250));
                                 continue;
@@ -473,7 +469,7 @@ impl CaptureSession {
                         let handle = match handle.reconfigure(request) {
                             Ok(handle) => handle,
                             Err(err) => {
-                                if !tdn_disabled && should_disable_tdn(&err) {
+                                if !tdn_disabled && err.requires_disabling_tdn() {
                                     tdn_disabled = disable_noise_reduction(&mut config.controls);
                                     if tdn_disabled {
                                         tracing::warn!(attempt, error = %err, "capture reconfigure failed with TDN enabled; retrying with NoiseReductionMode=Off");
@@ -483,7 +479,7 @@ impl CaptureSession {
                                         continue;
                                     }
                                 }
-                                if !controls_cleared && config.backend == BackendKind::Libcamera && !config.controls.is_empty() && should_drop_controls(&err) {
+                                if !controls_cleared && config.backend == BackendKind::Libcamera && !config.controls.is_empty() && err.requires_dropping_controls() {
                                     controls_cleared = true;
                                     config.controls.clear();
                                     config.enable_tdn_output = false;
@@ -493,7 +489,7 @@ impl CaptureSession {
                                     self.stop();
                                     continue;
                                 }
-                                if is_transient_start_error(&err) && attempt < 29 {
+                                if err.is_transient_start() && attempt < 29 {
                                     tracing::warn!(attempt, error = %err, "capture reconfigure transient failure; retrying");
                                     std::thread::sleep(Duration::from_millis(250));
                                     // Ensure any partially-started worker is torn down before retry.
@@ -510,7 +506,7 @@ impl CaptureSession {
                         let handle = match request.start() {
                             Ok(handle) => handle,
                             Err(err) => {
-                                if is_transient_start_error(&err) && attempt < 29 {
+                                if err.is_transient_start() && attempt < 29 {
                                     tracing::warn!(attempt, error = %err, "capture start transient failure; retrying");
                                     std::thread::sleep(Duration::from_millis(250));
                                     continue;
@@ -592,36 +588,6 @@ impl CaptureSession {
 
     pub fn handle(&self) -> Option<&CaptureHandle> {
         self.handle.as_ref()
-    }
-}
-
-fn is_transient_start_error(err: &CaptureError) -> bool {
-    match err {
-        CaptureError::Backend(msg) => {
-            let msg = msg.to_ascii_lowercase();
-            msg.contains("device or resource busy") || msg.contains("camera in running state") || msg.contains("resource busy")
-        }
-        _ => false,
-    }
-}
-
-fn should_disable_tdn(err: &CaptureError) -> bool {
-    match err {
-        CaptureError::Backend(msg) => {
-            let msg = msg.to_ascii_lowercase();
-            msg.contains("tdn output not enabled") || msg.contains("tdn enabled")
-        }
-        _ => false,
-    }
-}
-
-fn should_drop_controls(err: &CaptureError) -> bool {
-    match err {
-        CaptureError::Backend(msg) => {
-            let msg = msg.to_ascii_lowercase();
-            msg.contains("set controls") || msg.contains("unable to set controls") || msg.contains("permission denied") || msg.contains("invalid argument")
-        }
-        _ => false,
     }
 }
 

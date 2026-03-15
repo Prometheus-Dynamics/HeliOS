@@ -2,6 +2,7 @@
   import { onDestroy, onMount, untrack } from 'svelte';
   import type { DaedalusRegistryResponse } from '$lib/ts-bindings/http/client';
   import type { StreamInfo, StreamManifest, StreamMetrics } from '$lib/api/httpClient';
+  import { backendFeatures } from '$lib/api/backendFeatures';
   import type { PipelineUi } from '$lib/features/pipelines/pipelineUiTypes';
   import { createCameraPipelineState } from './cameraPipelineStore.svelte';
   import { createCameraPipelineMetricsController } from './cameraPipelineMetricsController';
@@ -258,7 +259,17 @@
 
     applyPipelineOverridesToGraphRef = applyPipelineOverridesToGraph;
 
+    let pipelineRegistryPrefetchHint = false;
+    let pipelineRegistryPrefetchIssued = false;
+    const unsubscribeBackendFeatures = backendFeatures.subscribe((value) => {
+      pipelineRegistryPrefetchHint = Boolean(value?.pipelineRegistryPrefetch);
+      if (!pipelineRegistryPrefetchHint || pipelineRegistryPrefetchIssued) return;
+      pipelineRegistryPrefetchIssued = true;
+      void ensurePipelineRegistry();
+    });
+
     onDestroy(() => {
+      unsubscribeBackendFeatures();
       stopPipelineTuningPointerTracking();
     });
 
@@ -266,6 +277,10 @@
       pipelineState.pipelineAssignDraft = normalizeAssignedPipelineIds(pipelineState.assignedPipelineIds);
       void refresh();
       void refreshPipelineGraphs();
+      if (pipelineRegistryPrefetchHint && !pipelineRegistryPrefetchIssued) {
+        pipelineRegistryPrefetchIssued = true;
+        void ensurePipelineRegistry();
+      }
     });
 
     $effect(() => {

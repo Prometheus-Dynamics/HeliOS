@@ -9,7 +9,7 @@ use daedalus::runtime::executor::ExecutionTelemetry as DaedalusExecutionTelemetr
 use daedalus::runtime::executor::OwnedExecutor as DaedalusOwnedExecutor;
 use daedalus::runtime::handler_registry::HandlerRegistry as DaedalusHandlers;
 use daedalus::runtime::host_bridge::HOST_BRIDGE_META_KEY;
-use daedalus::runtime::{BackpressureStrategy, EdgePolicyKind, HostBridgeManager as DaedalusBridgeManager, RuntimePlan, RuntimeSink};
+use daedalus::runtime::{BackpressureStrategy, EdgePolicyKind, HostBridgeManager as DaedalusBridgeManager, MetricsLevel as DaedalusMetricsLevel, RuntimePlan, RuntimeSink};
 use daedalus::Payload;
 use image::{DynamicImage, GrayImage, Rgba, RgbaImage};
 use lib_cv::modules::aruco::ArucoDetection2D;
@@ -30,7 +30,10 @@ use thiserror::Error;
 use tokio::sync::broadcast;
 
 use crate::daedalus_registry::build_daedalus_runtime_registry;
-use crate::stream::{PipelineFlamegraphMetrics, PipelineGraphMetrics, PipelineNodeMetrics, PipelineNodePerfMetrics, PipelineNodeRuntimeMetrics, PipelinePerfMetrics, PipelineSampleCacheMetrics};
+use crate::stream::{
+    PipelineFlamegraphMetrics, PipelineGraphMetrics, PipelineImageWorkingSetMetrics, PipelineNodeMetrics, PipelineNodePerfMetrics, PipelineNodeRuntimeMetrics, PipelinePerfMetrics,
+    PipelineSampleCacheMetrics,
+};
 
 mod builder;
 pub(crate) mod context;
@@ -72,9 +75,26 @@ pub struct GraphDisabledState {
     pub disabled_reason: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct GraphProcessOptions {
+    pub require_image_output: bool,
+}
+
+impl Default for GraphProcessOptions {
+    fn default() -> Self {
+        Self { require_image_output: true }
+    }
+}
+
 pub trait GraphExecutor: Send + Sync {
     /// Process an incoming frame and optionally emit a transformed frame.
     fn process(&self, image: DynamicImage) -> Option<DynamicImage>;
+
+    /// Process a frame with explicit image-output demand.
+    fn process_with_options(&self, image: DynamicImage, options: GraphProcessOptions) -> Option<DynamicImage> {
+        let _ = options;
+        self.process(image)
+    }
 
     /// Update per-stream calibration used by graph nodes that accept it.
     fn set_calibration(&self, _calibration: Option<crate::ipc::StreamCalibration>) {}
@@ -661,10 +681,16 @@ impl GraphHandle {
     }
 
     pub fn process(&self, image: DynamicImage) -> Option<DynamicImage> {
+        self.process_with_options(image, GraphProcessOptions::default())
+    }
+
+    pub fn process_with_options(&self, image: DynamicImage, options: GraphProcessOptions) -> Option<DynamicImage> {
         if let Some(exec) = &self.executor {
-            exec.process(image)
-        } else {
+            exec.process_with_options(image, options)
+        } else if options.require_image_output {
             Some(image)
+        } else {
+            None
         }
     }
 
@@ -813,11 +839,13 @@ struct DaedalusGraphExecutor {
     preview_ports: Vec<String>,
     preview_ports_lc: BTreeSet<String>,
     run_mode: RuntimeMode,
+    run_metrics_level: DaedalusMetricsLevel,
     executor: Arc<std::sync::Mutex<DaedalusOwnedExecutor<DaedalusHandlers>>>,
     metrics: Mutex<RollingGraphMetrics>,
     json_samples: Mutex<BTreeMap<String, Value>>,
     value_samples: Mutex<BTreeMap<String, DaedalusValue>>,
     image_samples: Mutex<BTreeMap<String, DynamicImage>>,
+    image_working_set: GraphImageWorkingSetTracker,
     process_calls: AtomicU64,
     perf_enabled: AtomicBool,
     pprof_pending: AtomicBool,
@@ -832,6 +860,55 @@ struct DaedalusGraphExecutor {
     disabled: AtomicBool,
     disabled_since_ms: AtomicU64,
     rebuild_requested: AtomicBool,
+}
+
+#[derive(Debug, Default)]
+struct GraphImageWorkingSetTracker {
+    input_image_bytes: AtomicU64,
+    host_output_image_bytes: AtomicU64,
+    preview_image_bytes: AtomicU64,
+    total_materialized_image_bytes: AtomicU64,
+    peak_total_materialized_image_bytes: AtomicU64,
+}
+
+impl GraphImageWorkingSetTracker {
+    fn update_peak(slot: &AtomicU64, value: u64) {
+        let mut current = slot.load(Ordering::Relaxed);
+        while value > current {
+            match slot.compare_exchange_weak(current, value, Ordering::Relaxed, Ordering::Relaxed) {
+                Ok(_) => break,
+                Err(next) => current = next,
+            }
+        }
+    }
+
+    fn record(&self, input: u64, host_output: u64, preview: u64) {
+        let total = input.saturating_add(host_output).saturating_add(preview);
+        self.input_image_bytes.store(input, Ordering::Relaxed);
+        self.host_output_image_bytes.store(host_output, Ordering::Relaxed);
+        self.preview_image_bytes.store(preview, Ordering::Relaxed);
+        self.total_materialized_image_bytes.store(total, Ordering::Relaxed);
+        Self::update_peak(&self.peak_total_materialized_image_bytes, total);
+    }
+
+    fn snapshot(&self) -> Option<PipelineImageWorkingSetMetrics> {
+        let input = self.input_image_bytes.load(Ordering::Relaxed);
+        let host_output = self.host_output_image_bytes.load(Ordering::Relaxed);
+        let preview = self.preview_image_bytes.load(Ordering::Relaxed);
+        let total = self.total_materialized_image_bytes.load(Ordering::Relaxed);
+        let peak = self.peak_total_materialized_image_bytes.load(Ordering::Relaxed);
+        if input == 0 && host_output == 0 && preview == 0 && total == 0 && peak == 0 {
+            None
+        } else {
+            Some(PipelineImageWorkingSetMetrics {
+                input_image_bytes: input,
+                host_output_image_bytes: host_output,
+                preview_image_bytes: preview,
+                total_materialized_image_bytes: total,
+                peak_total_materialized_image_bytes: peak,
+            })
+        }
+    }
 }
 
 const NODE_METRICS_WINDOW: usize = 100;
@@ -863,6 +940,15 @@ struct NodePerfSample {
     branch_misses: f64,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct NodePayloadSample {
+    average_input_payload_bytes: f64,
+    average_output_payload_bytes: f64,
+    peak_input_payload_bytes: u64,
+    peak_output_payload_bytes: u64,
+    peak_payload_working_set_bytes: u64,
+}
+
 #[derive(Debug, Default)]
 struct RollingGraphMetrics {
     window: usize,
@@ -870,9 +956,11 @@ struct RollingGraphMetrics {
     edge_info: Vec<EdgeInfo>,
     samples: BTreeMap<usize, VecDeque<(Instant, f64)>>,
     node_perf_samples: BTreeMap<usize, VecDeque<(Instant, NodePerfSample)>>,
+    node_payload_samples: BTreeMap<usize, VecDeque<(Instant, NodePayloadSample)>>,
     edge_samples: BTreeMap<usize, VecDeque<(Instant, daedalus::runtime::executor::EdgeMetrics)>>,
     group_samples: BTreeMap<String, VecDeque<(Instant, f64)>>,
     group_perf_samples: BTreeMap<String, VecDeque<(Instant, NodePerfSample)>>,
+    group_payload_samples: BTreeMap<String, VecDeque<(Instant, NodePayloadSample)>>,
     graph_samples: VecDeque<(Instant, f64)>,
     perf_samples: VecDeque<(Instant, perf::PerfSample)>,
     last_flamegraph: Option<flamegraph::FlamegraphCapture>,
@@ -888,9 +976,11 @@ impl RollingGraphMetrics {
             edge_info,
             samples: BTreeMap::new(),
             node_perf_samples: BTreeMap::new(),
+            node_payload_samples: BTreeMap::new(),
             edge_samples: BTreeMap::new(),
             group_samples: BTreeMap::new(),
             group_perf_samples: BTreeMap::new(),
+            group_payload_samples: BTreeMap::new(),
             graph_samples: VecDeque::new(),
             perf_samples: VecDeque::new(),
             last_flamegraph: None,
@@ -939,6 +1029,20 @@ impl RollingGraphMetrics {
                     perf_deque.pop_front();
                 }
             }
+            if let Some(payload) = node_metrics.payload.as_ref() {
+                let sample = NodePayloadSample {
+                    average_input_payload_bytes: payload.in_bytes as f64 / calls,
+                    average_output_payload_bytes: payload.out_bytes as f64 / calls,
+                    peak_input_payload_bytes: payload.peak_input_bytes,
+                    peak_output_payload_bytes: payload.peak_output_bytes,
+                    peak_payload_working_set_bytes: payload.peak_working_set_bytes,
+                };
+                let payload_deque = self.node_payload_samples.entry(*node_idx).or_default();
+                payload_deque.push_back((now, sample));
+                while payload_deque.len() > self.window {
+                    payload_deque.pop_front();
+                }
+            }
         }
         for (group_id, group_metrics) in &telemetry.group_metrics {
             let total_ms = group_metrics.total_duration.as_secs_f64() * 1000.0;
@@ -953,6 +1057,21 @@ impl RollingGraphMetrics {
                 perf_deque.push_back((now, sample));
                 while perf_deque.len() > self.window {
                     perf_deque.pop_front();
+                }
+            }
+            if let Some(payload) = group_metrics.payload.as_ref() {
+                let calls = group_metrics.calls.max(1) as f64;
+                let sample = NodePayloadSample {
+                    average_input_payload_bytes: payload.in_bytes as f64 / calls,
+                    average_output_payload_bytes: payload.out_bytes as f64 / calls,
+                    peak_input_payload_bytes: payload.peak_input_bytes,
+                    peak_output_payload_bytes: payload.peak_output_bytes,
+                    peak_payload_working_set_bytes: payload.peak_working_set_bytes,
+                };
+                let payload_deque = self.group_payload_samples.entry(group_id.clone()).or_default();
+                payload_deque.push_back((now, sample));
+                while payload_deque.len() > self.window {
+                    payload_deque.pop_front();
                 }
             }
         }
@@ -1006,9 +1125,11 @@ impl RollingGraphMetrics {
     fn reset(&mut self) {
         self.samples.clear();
         self.node_perf_samples.clear();
+        self.node_payload_samples.clear();
         self.edge_samples.clear();
         self.group_samples.clear();
         self.group_perf_samples.clear();
+        self.group_payload_samples.clear();
         self.graph_samples.clear();
         self.perf_samples.clear();
         self.last_flamegraph = None;
@@ -1018,6 +1139,15 @@ impl RollingGraphMetrics {
 
     fn snapshot(&self) -> PipelineGraphMetrics {
         let now = Instant::now();
+        let summarize_payload = |payload_deque: &VecDeque<(Instant, NodePayloadSample)>| {
+            let sample_count = payload_deque.len() as f64;
+            let average_input_payload_bytes = payload_deque.iter().map(|(_, sample)| sample.average_input_payload_bytes).sum::<f64>() / sample_count.max(1.0);
+            let average_output_payload_bytes = payload_deque.iter().map(|(_, sample)| sample.average_output_payload_bytes).sum::<f64>() / sample_count.max(1.0);
+            let peak_input_payload_bytes = payload_deque.iter().map(|(_, sample)| sample.peak_input_payload_bytes).max().unwrap_or(0);
+            let peak_output_payload_bytes = payload_deque.iter().map(|(_, sample)| sample.peak_output_payload_bytes).max().unwrap_or(0);
+            let peak_payload_working_set_bytes = payload_deque.iter().map(|(_, sample)| sample.peak_payload_working_set_bytes).max().unwrap_or(0);
+            (average_input_payload_bytes, average_output_payload_bytes, peak_input_payload_bytes, peak_output_payload_bytes, peak_payload_working_set_bytes)
+        };
         let mut out = BTreeMap::new();
         let mut type_counts: BTreeMap<&str, usize> = BTreeMap::new();
         for node_idx in self.samples.keys().copied() {
@@ -1068,11 +1198,17 @@ impl RollingGraphMetrics {
                     last_sample_age_ms: last_age_ms,
                 })
             });
+            let payload = self.node_payload_samples.get(node_idx).map(&summarize_payload);
             out.insert(
                 key,
                 PipelineNodeRuntimeMetrics {
                     metrics: PipelineNodeMetrics { average_time_ms, average_fps, sample_count, window_size: self.window as u64, last_sample_age_ms },
                     perf,
+                    average_input_payload_bytes: payload.map(|p| p.0).unwrap_or(0.0),
+                    average_output_payload_bytes: payload.map(|p| p.1).unwrap_or(0.0),
+                    peak_input_payload_bytes: payload.map(|p| p.2).unwrap_or(0),
+                    peak_output_payload_bytes: payload.map(|p| p.3).unwrap_or(0),
+                    peak_payload_working_set_bytes: payload.map(|p| p.4).unwrap_or(0),
                     children: None,
                     node_type: info.map(|info| info.type_id.clone()),
                     node_label: info.and_then(|info| info.label.clone()),
@@ -1100,6 +1236,11 @@ impl RollingGraphMetrics {
                 PipelineNodeRuntimeMetrics {
                     metrics: PipelineNodeMetrics { average_time_ms, average_fps, sample_count, window_size: self.window as u64, last_sample_age_ms },
                     perf: None,
+                    average_input_payload_bytes: 0.0,
+                    average_output_payload_bytes: 0.0,
+                    peak_input_payload_bytes: 0,
+                    peak_output_payload_bytes: 0,
+                    peak_payload_working_set_bytes: 0,
                     children: None,
                     node_type: Some("graph".to_string()),
                     node_label: Some("graph".to_string()),
@@ -1122,6 +1263,11 @@ impl RollingGraphMetrics {
                 PipelineNodeRuntimeMetrics {
                     metrics: PipelineNodeMetrics { average_time_ms: 0.0, average_fps: 0.0, sample_count: 0, window_size: self.window as u64, last_sample_age_ms: None },
                     perf: None,
+                    average_input_payload_bytes: 0.0,
+                    average_output_payload_bytes: 0.0,
+                    peak_input_payload_bytes: 0,
+                    peak_output_payload_bytes: 0,
+                    peak_payload_working_set_bytes: 0,
                     children: None,
                     node_type: Some(node_type.clone()),
                     node_label: label,
@@ -1139,6 +1285,11 @@ impl RollingGraphMetrics {
             let entry = out.entry("graph".to_string()).or_insert(PipelineNodeRuntimeMetrics {
                 metrics: PipelineNodeMetrics { average_time_ms: 0.0, average_fps: 0.0, sample_count: 0, window_size: self.window as u64, last_sample_age_ms: None },
                 perf: None,
+                average_input_payload_bytes: 0.0,
+                average_output_payload_bytes: 0.0,
+                peak_input_payload_bytes: 0,
+                peak_output_payload_bytes: 0,
+                peak_payload_working_set_bytes: 0,
                 children: None,
                 node_type: Some("graph".to_string()),
                 node_label: Some("graph".to_string()),
@@ -1184,11 +1335,17 @@ impl RollingGraphMetrics {
                     last_sample_age_ms: last_age_ms,
                 })
             });
+            let payload = self.group_payload_samples.get(group_id).map(&summarize_payload);
             group_entries.insert(
                 group_id.clone(),
                 PipelineNodeRuntimeMetrics {
                     metrics: PipelineNodeMetrics { average_time_ms, average_fps, sample_count, window_size: self.window as u64, last_sample_age_ms },
                     perf,
+                    average_input_payload_bytes: payload.map(|p| p.0).unwrap_or(0.0),
+                    average_output_payload_bytes: payload.map(|p| p.1).unwrap_or(0.0),
+                    peak_input_payload_bytes: payload.map(|p| p.2).unwrap_or(0),
+                    peak_output_payload_bytes: payload.map(|p| p.3).unwrap_or(0),
+                    peak_payload_working_set_bytes: payload.map(|p| p.4).unwrap_or(0),
                     children: None,
                     node_type: Some("group".to_string()),
                     node_label: Some(group_id.clone()),
@@ -1220,6 +1377,11 @@ impl RollingGraphMetrics {
             let entry = group_entries.entry(group_id.clone()).or_insert(PipelineNodeRuntimeMetrics {
                 metrics: PipelineNodeMetrics { average_time_ms: 0.0, average_fps: 0.0, sample_count: 0, window_size: self.window as u64, last_sample_age_ms: None },
                 perf: None,
+                average_input_payload_bytes: 0.0,
+                average_output_payload_bytes: 0.0,
+                peak_input_payload_bytes: 0,
+                peak_output_payload_bytes: 0,
+                peak_payload_working_set_bytes: 0,
                 children: None,
                 node_type: Some("group".to_string()),
                 node_label: Some(group_id.clone()),
@@ -1338,6 +1500,7 @@ impl RollingGraphMetrics {
             groups: if root_groups.is_empty() { None } else { Some(root_groups) },
             edges: if edge_entries.is_empty() { None } else { Some(edge_entries) },
             sample_cache: None,
+            image_working_set: None,
             perf,
             flamegraph,
         }
@@ -1585,6 +1748,7 @@ impl DaedalusGraphExecutor {
 
         let host_outputs_in_graph = host_outputs_in_graph_enabled(Some(plan.as_ref()));
         let demand_driven = demand_driven_enabled(Some(plan.as_ref()));
+        let run_metrics_level = engine.config().runtime.metrics_level;
         let mut executor = DaedalusOwnedExecutor::new(plan.clone(), handlers.clone_arc())
             .with_host_bridges(host_mgr.clone())
             .with_const_coercers(const_coercers.clone())
@@ -1592,6 +1756,7 @@ impl DaedalusGraphExecutor {
             // Daedalus error-isolation: keep the graph running and surface errors via telemetry
             // instead of killing the whole run on the first failing node.
             .with_fail_fast(false)
+            .with_metrics_level(run_metrics_level)
             // Host output execution can be moved "in graph" for responsiveness, but this changes
             // scheduling semantics and can cause missing outputs depending on executor ordering.
             // Keep it opt-in until Daedalus scheduling guarantees sink ordering.
@@ -1646,11 +1811,13 @@ impl DaedalusGraphExecutor {
             preview_ports,
             preview_ports_lc,
             run_mode: engine.config().runtime.mode.clone(),
+            run_metrics_level,
             executor: Arc::new(std::sync::Mutex::new(executor)),
             metrics: Mutex::new(RollingGraphMetrics::new(NODE_METRICS_WINDOW, node_info, edge_info)),
             json_samples: Mutex::new(BTreeMap::new()),
             value_samples: Mutex::new(BTreeMap::new()),
             image_samples: Mutex::new(BTreeMap::new()),
+            image_working_set: GraphImageWorkingSetTracker::default(),
             process_calls: AtomicU64::new(0),
             perf_enabled: AtomicBool::new(perf_counters_enabled_from_env()),
             pprof_pending: AtomicBool::new(pprof_enabled),
@@ -1675,6 +1842,7 @@ impl DaedalusGraphExecutor {
             .with_const_coercers(self.const_coercers.clone())
             .with_output_movers(self.output_movers.clone())
             .with_fail_fast(false)
+            .with_metrics_level(self.run_metrics_level)
             .with_host_outputs_in_graph(host_outputs_in_graph);
         let demand_sinks = build_demand_sinks(self.plan.as_ref(), &self.output_hosts, &self.preview_ports, &self.host_output_ports, &self.host_output_port_types, demand_driven);
         if !demand_sinks.is_empty() {
@@ -1724,6 +1892,10 @@ impl GraphExecutor for DaedalusGraphExecutor {
     }
 
     fn process(&self, image: DynamicImage) -> Option<DynamicImage> {
+        self.process_with_options(image, GraphProcessOptions::default())
+    }
+
+    fn process_with_options(&self, image: DynamicImage, options: GraphProcessOptions) -> Option<DynamicImage> {
         let call_idx = self.process_calls.fetch_add(1, Ordering::Relaxed);
         if call_idx < 3 {
             tracing::debug!(call_idx, "daedalus graph: processing frame");
@@ -1734,6 +1906,7 @@ impl GraphExecutor for DaedalusGraphExecutor {
                 tracing::warn!(call_idx, disabled_since, "graph disabled after repeated errors; emitting error frame");
             }
             let detail = self.last_error_detail.read().ok().map(|guard| guard.trim().to_string()).filter(|text| !text.is_empty());
+            self.image_working_set.record(dynamic_image_size_bytes(&image), 0, 0);
             return Some(error_frame_like(&image, "GRAPH DISABLED", detail.as_deref()));
         }
         if !self.dedicated_executor && self.rebuild_requested.swap(false, Ordering::Relaxed) {
@@ -1745,8 +1918,8 @@ impl GraphExecutor for DaedalusGraphExecutor {
                 }
             }
         }
-        // Keep a copy of the input image so we can fall back to passthrough when the graph fails.
-        let input_image = image.clone();
+        let input_image_bytes = dynamic_image_size_bytes(&image);
+        let input_dims = (image.width(), image.height());
         for alias in &self.output_hosts {
             let Some(output_host) = self.host_mgr.handle(alias) else { continue };
             for port in output_host.incoming_port_names() {
@@ -1836,6 +2009,7 @@ impl GraphExecutor for DaedalusGraphExecutor {
                 .with_const_coercers(self.const_coercers.clone())
                 .with_output_movers(self.output_movers.clone())
                 .with_fail_fast(false)
+                .with_metrics_level(self.run_metrics_level)
                 .with_host_outputs_in_graph(host_outputs_in_graph);
             if let Some(handle) = self.gpu.clone() {
                 exec = exec.with_gpu(handle);
@@ -1921,7 +2095,8 @@ impl GraphExecutor for DaedalusGraphExecutor {
                 if let Ok(mut guard) = self.last_error_detail.write() {
                     *guard = detail.clone();
                 }
-                return Some(error_frame_like(&input_image, "GRAPH ERROR", Some(&detail)));
+                self.image_working_set.record(input_image_bytes, 0, 0);
+                return Some(error_frame(input_dims, "GRAPH ERROR", Some(&detail)));
             }
         };
         let perf_sample = perf_guard.and_then(|guard| guard.finish().ok());
@@ -1981,6 +2156,7 @@ impl GraphExecutor for DaedalusGraphExecutor {
         let mut json_updates: Vec<(String, Value)> = Vec::new();
         let mut value_updates: Vec<(String, DaedalusValue)> = Vec::new();
         let mut popped_outputs = 0usize;
+        let image_output_requested = options.require_image_output;
 
         for alias in &self.output_hosts {
             let Some(output_host) = self.host_mgr.handle(alias) else { continue };
@@ -1996,7 +2172,7 @@ impl GraphExecutor for DaedalusGraphExecutor {
                     let _ = output_host.drain(port_name);
                     continue;
                 }
-                let wants_preview = self.preview_ports_lc.contains(&port_lc);
+                let wants_preview = image_output_requested && self.preview_ports_lc.contains(&port_lc);
                 let wants_image_sample = wants_preview;
                 let port_type = port.resolved_type();
                 let is_image_type = port_type.map(is_image_payload).unwrap_or(false);
@@ -2211,15 +2387,24 @@ impl GraphExecutor for DaedalusGraphExecutor {
                     preview_image = Some(img);
                 }
             }
+            let host_output_image_bytes: u64 = image_updates.iter().map(|(_, image)| dynamic_image_size_bytes(image)).sum();
+            let preview_image_bytes = preview_image.as_ref().map(dynamic_image_size_bytes).unwrap_or(0);
+            self.image_working_set.record(input_image_bytes, host_output_image_bytes, preview_image_bytes);
             if let Ok(mut guard) = self.image_samples.lock() {
                 for (port, value) in image_updates {
                     guard.insert(port, value);
                 }
             }
+        } else {
+            let preview_image_bytes = preview_image.as_ref().map(dynamic_image_size_bytes).unwrap_or(0);
+            self.image_working_set.record(input_image_bytes, 0, preview_image_bytes);
         }
 
         if let Some(img) = preview_image {
             return Some(img);
+        }
+        if !image_output_requested {
+            return None;
         }
         // If no output port produced a frame, report it and keep the last good preview frame.
         if call_idx < 3 || call_idx.is_multiple_of(120) {
@@ -2235,6 +2420,7 @@ impl GraphExecutor for DaedalusGraphExecutor {
         self.metrics.lock().ok().map(|metrics| {
             let mut snapshot = metrics.snapshot();
             snapshot.sample_cache = sample_cache_metrics(&self.image_samples, &self.json_samples, &self.value_samples);
+            snapshot.image_working_set = self.image_working_set.snapshot();
             annotate_retained_output_metrics(&mut snapshot, &self.host_output_port_owners);
             snapshot
         })
@@ -2485,6 +2671,17 @@ fn error_frame_like(image: &DynamicImage, title: &str, detail: Option<&str>) -> 
         lines.push(detail);
     }
 
+    draw_centered_text(&mut out, &lines);
+    DynamicImage::ImageRgba8(out)
+}
+
+fn error_frame(dims: (u32, u32), title: &str, detail: Option<&str>) -> DynamicImage {
+    let (width, height) = dims;
+    let mut out = RgbaImage::from_pixel(width.max(1), height.max(1), Rgba([0, 0, 0, 255]));
+    let mut lines = vec![sanitize_error_text(title)];
+    if let Some(detail) = detail.map(sanitize_error_text).filter(|s| !s.is_empty()) {
+        lines.push(detail);
+    }
     draw_centered_text(&mut out, &lines);
     DynamicImage::ImageRgba8(out)
 }

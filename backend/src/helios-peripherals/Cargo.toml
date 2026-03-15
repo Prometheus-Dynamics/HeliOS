@@ -12,7 +12,6 @@ dto = [
     "lib-ipc",
     "derive_more",
     "bincode",
-    "lib-ai",
     "lib-sensors",
 ]
 runtime = [

@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-use lib_ai::model::ModelId;
 use lib_ipc::frame::MessageKind;
 use lib_ipc::protocol::ControlEvent;
 use lib_ipc::server::ServerEvent;
@@ -19,7 +18,7 @@ macro_rules! error {
     ($($tt:tt)*) => {};
 }
 
-use crate::dto::{AiModelDescriptor, AiModelInventory, AiModelUpload, I2cInventory, LightingCommand, LightingRuntimeState, SensorData, SensorInventory, SensorKind, SensorScope};
+use crate::dto::{AiModelDescriptor, AiModelId, AiModelInventory, AiModelUpload, I2cInventory, LightingCommand, LightingRuntimeState, SensorData, SensorInventory, SensorKind, SensorScope};
 use lib_sensors::fan_config::{FanConfig, FanStatus};
 use lib_sensors::model::SensorReading;
 
@@ -96,7 +95,7 @@ pub enum SensorCommand {
     AiUploadModel { command_id: CommandId, model: AiModelUpload },
     /// Delete a registered AI model and its artifact.
     #[serde(rename = "ai_delete_model")]
-    AiDeleteModel { command_id: CommandId, model_id: ModelId },
+    AiDeleteModel { command_id: CommandId, model_id: AiModelId },
     /// Inspect I2C buses and attached devices.
     #[serde(rename = "i2c_inventory")]
     I2cInventory { command_id: CommandId },
@@ -184,7 +183,7 @@ pub enum SensorEvent {
     #[serde(rename = "ai_model_deleted")]
     AiModelDeleted {
         command_id: CommandId,
-        model_id: ModelId,
+        model_id: AiModelId,
     },
     /// Snapshot of available I2C buses and devices.
     #[serde(rename = "i2c_inventory")]
@@ -397,7 +396,7 @@ const _: () = {
             struct ConfigureAlias { command_id: CommandId, hardware_key: String, alias: String },
             struct AiListModels { command_id: CommandId },
             struct AiUploadModel { command_id: CommandId, model: AiModelUpload },
-            struct AiDeleteModel { command_id: CommandId, model_id: ModelId },
+            struct AiDeleteModel { command_id: CommandId, model_id: AiModelId },
             struct I2cInventory { command_id: CommandId },
             struct Lighting { command_id: CommandId, command: LightingCommand },
             struct LightingState { command_id: CommandId },
@@ -418,7 +417,7 @@ const _: () = {
             struct Unsubscribed { scope: SensorScope },
             struct AiModelInventory { command_id: CommandId, inventory: AiModelInventory },
             struct AiModelUploaded { command_id: CommandId, model: Box<AiModelDescriptor> },
-            struct AiModelDeleted { command_id: CommandId, model_id: ModelId },
+            struct AiModelDeleted { command_id: CommandId, model_id: AiModelId },
             struct I2cInventory { command_id: CommandId, inventory: I2cInventory },
             struct FirmwareUpdate { update: FirmwareUpdate },
             struct FanStatus { command_id: CommandId, status: FanStatus },

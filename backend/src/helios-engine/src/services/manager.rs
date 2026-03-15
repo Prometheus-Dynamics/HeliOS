@@ -41,6 +41,7 @@ const SNAPSHOT_SOURCE_TIMEOUT: Duration = Duration::from_secs(3);
 const RECORDING_STOP_GRACE_DEFAULT_MS: u64 = 0;
 const RECORDING_STOP_GRACE_MIN_MS: u64 = 0;
 const RECORDING_STOP_GRACE_MAX_MS: u64 = 2_000;
+const POST_TEARDOWN_TRIM_DELAY: Duration = Duration::from_secs(2);
 const SHADOW_STOP_TIMEOUT: Duration = Duration::from_secs(10);
 const SHADOW_WINDOW_DEFAULT_MS: u64 = 120_000;
 const SHADOW_WINDOW_MIN_MS: u64 = 5_000;
@@ -650,16 +651,25 @@ impl StreamManager {
         if let Some(join) = ctx.worker_join.lock().await.take() {
             let _ = tokio::task::spawn_blocking(move || join.join()).await;
         }
-        self.trim_after_last_stream_teardown(stream_id).await;
+        self.trim_after_last_stream_teardown(stream_id, "immediate").await;
+        self.schedule_delayed_trim_after_last_stream(stream_id);
     }
 
-    async fn trim_after_last_stream_teardown(&self, stream_id: Uuid) {
+    fn schedule_delayed_trim_after_last_stream(&self, stream_id: Uuid) {
+        let manager = self.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(POST_TEARDOWN_TRIM_DELAY).await;
+            manager.trim_after_last_stream_teardown(stream_id, "delayed").await;
+        });
+    }
+
+    async fn trim_after_last_stream_teardown(&self, stream_id: Uuid, phase: &'static str) {
         let active_streams = {
             let streams = self.streams.read().await;
             streams.len()
         };
         if active_streams != 0 {
-            tracing::debug!(stream_id = %stream_id, active_streams, "skipping allocator trim; other streams are still active");
+            tracing::debug!(stream_id = %stream_id, phase, active_streams, "skipping allocator trim; other streams are still active");
             return;
         }
 
@@ -669,6 +679,7 @@ impl StreamManager {
 
         tracing::info!(
             stream_id = %stream_id,
+            phase,
             active_streams,
             trim_supported = trim_result.is_some(),
             trim_result = trim_result.unwrap_or_default(),

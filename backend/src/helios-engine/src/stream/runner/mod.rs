@@ -65,6 +65,70 @@ pub struct StreamRunner {
     pub(super) preview_encode_interval: Duration,
     pub(super) last_preview_encode_wall: Option<Instant>,
     pub(super) preview_worker: Option<PreviewWorker>,
+    pub(super) runner_memory: RunnerMemoryTracker,
+}
+
+#[derive(Debug, Default)]
+pub(super) struct RunnerMemoryTracker {
+    pub(super) current_decoded_frame_bytes: u64,
+    pub(super) peak_decoded_frame_bytes: u64,
+    pub(super) current_raw_clone_bytes: u64,
+    pub(super) peak_raw_clone_bytes: u64,
+    pub(super) current_processed_frame_bytes: u64,
+    pub(super) peak_processed_frame_bytes: u64,
+    pub(super) current_frame_working_set_bytes: u64,
+    pub(super) peak_frame_working_set_bytes: u64,
+}
+
+impl RunnerMemoryTracker {
+    fn update_peak(slot: &mut u64, value: u64) {
+        if value > *slot {
+            *slot = value;
+        }
+    }
+
+    pub(super) fn reset_current(&mut self) {
+        self.current_decoded_frame_bytes = 0;
+        self.current_raw_clone_bytes = 0;
+        self.current_processed_frame_bytes = 0;
+        self.current_frame_working_set_bytes = 0;
+    }
+
+    pub(super) fn set_decoded_frame_bytes(&mut self, bytes: u64) {
+        self.current_decoded_frame_bytes = bytes;
+        Self::update_peak(&mut self.peak_decoded_frame_bytes, bytes);
+        self.refresh_total();
+    }
+
+    pub(super) fn set_raw_clone_bytes(&mut self, bytes: u64) {
+        self.current_raw_clone_bytes = bytes;
+        Self::update_peak(&mut self.peak_raw_clone_bytes, bytes);
+        self.refresh_total();
+    }
+
+    pub(super) fn set_processed_frame_bytes(&mut self, bytes: u64) {
+        self.current_processed_frame_bytes = bytes;
+        Self::update_peak(&mut self.peak_processed_frame_bytes, bytes);
+        self.refresh_total();
+    }
+
+    fn refresh_total(&mut self) {
+        self.current_frame_working_set_bytes = self.current_decoded_frame_bytes.saturating_add(self.current_raw_clone_bytes).saturating_add(self.current_processed_frame_bytes);
+        Self::update_peak(&mut self.peak_frame_working_set_bytes, self.current_frame_working_set_bytes);
+    }
+
+    pub(super) fn snapshot(&self) -> crate::stream::StreamRunnerMemoryMetrics {
+        crate::stream::StreamRunnerMemoryMetrics {
+            current_decoded_frame_bytes: self.current_decoded_frame_bytes,
+            peak_decoded_frame_bytes: self.peak_decoded_frame_bytes,
+            current_raw_clone_bytes: self.current_raw_clone_bytes,
+            peak_raw_clone_bytes: self.peak_raw_clone_bytes,
+            current_processed_frame_bytes: self.current_processed_frame_bytes,
+            peak_processed_frame_bytes: self.peak_processed_frame_bytes,
+            current_frame_working_set_bytes: self.current_frame_working_set_bytes,
+            peak_frame_working_set_bytes: self.peak_frame_working_set_bytes,
+        }
+    }
 }
 
 pub(super) struct PreviewWorker {

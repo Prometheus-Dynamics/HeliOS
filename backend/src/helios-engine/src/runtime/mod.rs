@@ -1,6 +1,7 @@
 use crate::ipc::{EngineCommand, EngineErrorCode, EngineEvent};
 use crate::services::EngineServices;
 use crate::stream::read_latest_frame_async;
+use std::sync::OnceLock;
 use tokio::sync::RwLock;
 use tokio::time::{timeout, Duration};
 use uuid::Uuid;
@@ -18,6 +19,24 @@ const START_STREAM_TIMEOUT: Duration = Duration::from_secs(60);
 // leak worker threads / hold devices busy across restarts.
 const STOP_STREAM_TIMEOUT: Duration = Duration::from_secs(30);
 const METRICS_TIMEOUT: Duration = Duration::from_secs(3);
+
+fn env_flag_enabled(var: &str, default_value: bool) -> bool {
+    let raw = match std::env::var(var) {
+        Ok(v) => v,
+        Err(_) => return default_value,
+    };
+    let v = raw.trim().to_ascii_lowercase();
+    if v.is_empty() {
+        return default_value;
+    }
+    matches!(v.as_str(), "1" | "true" | "yes" | "y" | "on" | "enabled")
+}
+
+fn cache_node_registry_snapshot_enabled() -> bool {
+    static VALUE: OnceLock<bool> = OnceLock::new();
+    *VALUE.get_or_init(|| env_flag_enabled("HELIOS_ENGINE_CACHE_NODE_REGISTRY", false))
+}
+
 fn calibration_solve_timeout() -> Duration {
     const DEFAULT_SECS: u64 = 300;
     const MIN_SECS: u64 = 30;
@@ -159,13 +178,18 @@ impl EngineRuntime {
                 Err(_) => EngineEvent::Nack { command_id, code: EngineErrorCode::Timeout, reason: "snapshot timed out".into() },
             },
             EngineCommand::GetNodeRegistry { command_id } => {
-                if let Some(snapshot) = self.node_registry_snapshot.read().await.clone() {
-                    return EngineEvent::NodeRegistry { command_id, snapshot };
+                if cache_node_registry_snapshot_enabled() {
+                    let cached = self.node_registry_snapshot.read().await.clone();
+                    if let Some(snapshot) = cached {
+                        return EngineEvent::NodeRegistry { command_id, snapshot };
+                    }
                 }
 
                 match build_node_registry_snapshot() {
                     Ok(snapshot) => {
-                        *self.node_registry_snapshot.write().await = Some(snapshot.clone());
+                        if cache_node_registry_snapshot_enabled() {
+                            *self.node_registry_snapshot.write().await = Some(snapshot.clone());
+                        }
                         EngineEvent::NodeRegistry { command_id, snapshot }
                     }
                     Err(err) => EngineEvent::Nack { command_id, code: EngineErrorCode::Internal, reason: format!("failed to build daedalus registry: {err}") },
@@ -177,7 +201,11 @@ impl EngineRuntime {
             },
             EngineCommand::RefreshNodeRegistry { command_id } => match build_node_registry_snapshot() {
                 Ok(snapshot) => {
-                    *self.node_registry_snapshot.write().await = Some(snapshot.clone());
+                    if cache_node_registry_snapshot_enabled() {
+                        *self.node_registry_snapshot.write().await = Some(snapshot.clone());
+                    } else {
+                        *self.node_registry_snapshot.write().await = None;
+                    }
                     EngineEvent::NodeRegistry { command_id, snapshot }
                 }
                 Err(err) => EngineEvent::Nack { command_id, code: EngineErrorCode::Internal, reason: format!("failed to build daedalus registry: {err}") },
@@ -414,7 +442,7 @@ fn planner_enable_gpu_for_validation(graph: &daedalus::planner::Graph) -> bool {
     enable_gpu
 }
 
-fn build_node_registry_snapshot() -> Result<crate::ipc::NodeRegistrySnapshot, String> {
+pub fn build_node_registry_snapshot() -> Result<crate::ipc::NodeRegistrySnapshot, String> {
     let host_mgr = daedalus::runtime::host_bridge::HostBridgeManager::new();
     let built = build_daedalus_runtime_registry(&host_mgr, None).map_err(|err| err.to_string())?;
 

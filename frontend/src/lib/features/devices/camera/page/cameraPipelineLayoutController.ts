@@ -36,9 +36,7 @@ import {
   type PipelineLayoutPayload
 } from './layoutValidation';
 import { collectPipelineOutputs } from '$lib/features/pipelines/boundaryOutputs';
-import { normalizeDaedalusRegistry } from '$lib/features/pipelines/controller/daedalusRegistry';
 import { fromApiGraphPlan } from '$lib/features/pipelines/graphConverters';
-import { hydrateGraphWithRegistry } from '$lib/features/pipelines/styleHydration';
 import { extractGraphOutputPortTypes, filterEncoderCompatibleOutputs } from '$lib/features/pipelines/outputFilters';
 import {
   gridKey as gridKeyFn,
@@ -292,16 +290,10 @@ export function createPipelineLayoutController(state: PipelineLayoutState, deps:
     const portTypes = extractGraphOutputPortTypes(graphJson);
     let planOutputs: string[] = [];
     let planTypes: Record<string, PipelineDataType> = {};
-    const registrySnapshot = await ensurePipelineRegistry();
-    const registryEntries =
-      registrySnapshot && Array.isArray(registrySnapshot.nodes)
-        ? normalizeDaedalusRegistry(registrySnapshot.nodes, registrySnapshot.types ?? undefined)
-        : [];
     if (graphJson) {
       try {
         const plan = coercePlanFromGraph(graphJson);
         if (!plan) throw new Error('Invalid plan');
-        hydrateGraphWithRegistry(plan, registryEntries);
         const derived = derivePlanOutputs(plan, rawOutputs);
         planOutputs = derived.outputs;
         planTypes = derived.types;
@@ -313,6 +305,9 @@ export function createPipelineLayoutController(state: PipelineLayoutState, deps:
     const candidates = rawOutputs.length ? rawOutputs : planOutputs;
     let resolvedTypes: Record<string, PipelineDataType | null | undefined> = { ...portTypes, ...planTypes };
     let filtered = filterEncoderCompatibleOutputs(candidates, resolvedTypes);
+    if (!filtered.length && candidates.length) {
+      filtered = candidates;
+    }
     if (!filtered.length && pipelineId !== RAW_PIPELINE_ID) {
       try {
         const doc = await deps.pipelinesApi.fetchGraph({ id: pipelineId });
@@ -322,13 +317,15 @@ export function createPipelineLayoutController(state: PipelineLayoutState, deps:
           const docPortTypes = extractGraphOutputPortTypes(docGraph);
           const plan = coercePlanFromGraph(docGraph);
           if (!plan) throw new Error('Invalid plan');
-          hydrateGraphWithRegistry(plan, registryEntries);
           const derived = derivePlanOutputs(plan, docRawOutputs);
           const docOutputs = derived.outputs;
           const docTypes = derived.types;
           const docResolvedTypes: Record<string, PipelineDataType | null | undefined> = { ...docPortTypes, ...docTypes };
           resolvedTypes = { ...resolvedTypes, ...docResolvedTypes };
           filtered = filterEncoderCompatibleOutputs(docOutputs, docResolvedTypes);
+          if (!filtered.length && docOutputs.length) {
+            filtered = docOutputs;
+          }
         }
       } catch {
         // ignore fallback errors

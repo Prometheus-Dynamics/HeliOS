@@ -1,11 +1,19 @@
 use std::sync::Arc;
+use std::{fs, io::Write, path::PathBuf};
 
 use helios_engine::ipc::server::EngineIpcServer;
+use helios_engine::ipc::NodeRegistrySnapshot;
 use helios_engine::runtime::EngineRuntime;
+use styx::prelude::{set_capture_tunables, CaptureTunables};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 fn main() {
+    if let Some(action) = handle_cli() {
+        run_cli_action(action);
+        return;
+    }
+
     let worker_threads = read_thread_env("HELIOS_ENGINE_WORKER_THREADS", default_engine_worker_threads(), 1, 4);
     let max_blocking_threads = read_thread_env("HELIOS_ENGINE_MAX_BLOCKING_THREADS", default_engine_max_blocking_threads(worker_threads), 1, 16);
     let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(worker_threads).max_blocking_threads(max_blocking_threads).enable_all().build().expect("tokio runtime");
@@ -26,9 +34,9 @@ fn default_engine_max_blocking_threads(worker_threads: usize) -> usize {
 
 async fn async_main() {
     ensure_backtraces();
-    handle_cli();
     init_tracing();
     init_ffmpeg_logging();
+    apply_styx_capture_tunables_from_env();
 
     let runtime = Arc::new(EngineRuntime::new());
     let shutdown = CancellationToken::new();
@@ -53,6 +61,37 @@ fn init_ffmpeg_logging() {
     ffmpeg::util::log::set_level(ffmpeg::util::log::Level::Error);
 }
 
+fn apply_styx_capture_tunables_from_env() {
+    let mut tunables = CaptureTunables::default();
+    let mut changed = false;
+
+    if let Some(value) = read_usize_env("HELIOS_STYX_CAPTURE_QUEUE_DEPTH") {
+        tunables.queue_depth = value;
+        changed = true;
+    }
+    if let Some(value) = read_usize_env("HELIOS_STYX_CAPTURE_POOL_MIN") {
+        tunables.pool_min = value;
+        changed = true;
+    }
+    if let Some(value) = read_usize_env("HELIOS_STYX_CAPTURE_POOL_BYTES") {
+        tunables.pool_bytes = value;
+        changed = true;
+    }
+    if let Some(value) = read_usize_env("HELIOS_STYX_CAPTURE_POOL_SPARE") {
+        tunables.pool_spare = value;
+        changed = true;
+    }
+
+    if changed {
+        set_capture_tunables(tunables);
+        info!(queue_depth = tunables.queue_depth, pool_min = tunables.pool_min, pool_bytes = tunables.pool_bytes, pool_spare = tunables.pool_spare, "applied Styx capture tunables from env");
+    }
+}
+
+fn read_usize_env(var: &str) -> Option<usize> {
+    std::env::var(var).ok()?.trim().parse::<usize>().ok()
+}
+
 fn ensure_backtraces() {
     if std::env::var_os("RUST_BACKTRACE").is_none() {
         std::env::set_var("RUST_BACKTRACE", "1");
@@ -62,10 +101,14 @@ fn ensure_backtraces() {
     }
 }
 
-fn handle_cli() {
+enum CliAction {
+    DumpNodeRegistry { output: PathBuf },
+}
+
+fn handle_cli() -> Option<CliAction> {
     let mut args = std::env::args().skip(1);
     let Some(first) = args.next() else {
-        return;
+        return None;
     };
 
     match first.as_str() {
@@ -77,6 +120,31 @@ fn handle_cli() {
             println!("helios-engine {}", helios_engine::VERSION);
             std::process::exit(0);
         }
+        "dump-node-registry" => {
+            let mut output = default_registry_snapshot_path();
+            while let Some(arg) = args.next() {
+                match arg.as_str() {
+                    "--output" | "-o" => {
+                        let Some(path) = args.next() else {
+                            eprintln!("helios-engine: --output requires a path");
+                            std::process::exit(2);
+                        };
+                        output = PathBuf::from(path);
+                    }
+                    "-h" | "--help" => {
+                        print_help();
+                        std::process::exit(0);
+                    }
+                    other => {
+                        eprintln!("helios-engine: unknown dump-node-registry argument: {other}");
+                        eprintln!();
+                        print_help();
+                        std::process::exit(2);
+                    }
+                }
+            }
+            Some(CliAction::DumpNodeRegistry { output })
+        }
         other => {
             eprintln!("helios-engine: unknown argument: {other}");
             eprintln!();
@@ -84,6 +152,44 @@ fn handle_cli() {
             std::process::exit(2);
         }
     }
+}
+
+fn run_cli_action(action: CliAction) {
+    ensure_backtraces();
+    match action {
+        CliAction::DumpNodeRegistry { output } => {
+            if let Err(err) = dump_node_registry_snapshot(&output) {
+                eprintln!("helios-engine: failed to dump node registry: {err}");
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
+fn dump_node_registry_snapshot(output: &std::path::Path) -> Result<(), String> {
+    let snapshot = helios_engine::runtime::build_node_registry_snapshot()?;
+    write_snapshot_json_atomic(output, &snapshot)
+}
+
+fn write_snapshot_json_atomic(path: &std::path::Path, snapshot: &NodeRegistrySnapshot) -> Result<(), String> {
+    let Some(parent) = path.parent() else {
+        return Err(format!("invalid output path: {}", path.display()));
+    };
+    fs::create_dir_all(parent).map_err(|err| format!("create output dir failed: {err}"))?;
+
+    let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
+    let payload = serde_json::to_vec(snapshot).map_err(|err| format!("serialize snapshot failed: {err}"))?;
+    {
+        let mut file = fs::File::create(&tmp).map_err(|err| format!("create temp snapshot failed: {err}"))?;
+        file.write_all(&payload).map_err(|err| format!("write temp snapshot failed: {err}"))?;
+        file.sync_all().map_err(|err| format!("sync temp snapshot failed: {err}"))?;
+    }
+    fs::rename(&tmp, path).map_err(|err| format!("publish snapshot failed: {err}"))?;
+    Ok(())
+}
+
+fn default_registry_snapshot_path() -> PathBuf {
+    std::env::var("HELIOS_NODE_REGISTRY_SNAPSHOT_PATH").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/var/lib/helios/state/node-registry.snapshot.json"))
 }
 
 fn print_help() {
@@ -94,10 +200,14 @@ Runs the HeliOS engine daemon (IPC server). This binary is typically launched vi
 \n\
 USAGE:\n\
     helios-engine\n\
+    helios-engine dump-node-registry [--output PATH]\n\
 \n\
 OPTIONS:\n\
     -h, --help       Print help\n\
-    -V, --version    Print version\n",
+    -V, --version    Print version\n\
+\n\
+COMMANDS:\n\
+    dump-node-registry    Build a registry snapshot in a short-lived helper process\n",
         version = helios_engine::VERSION
     );
 }

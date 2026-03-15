@@ -124,7 +124,9 @@ fn normalize_backend_id(value: &str) -> String {
     }
 }
 
-fn build_registry_port_metadata_lookup(snapshot: &NodeRegistrySnapshot) -> HashMap<String, BTreeMap<String, serde_json::Value>> {
+pub(crate) type RegistryPortMetadataLookup = HashMap<String, BTreeMap<String, serde_json::Value>>;
+
+pub(crate) fn build_registry_port_metadata_lookup(snapshot: &NodeRegistrySnapshot) -> RegistryPortMetadataLookup {
     let mut out = HashMap::new();
     for node in &snapshot.nodes {
         let key = normalize_backend_id(&node.id);
@@ -144,12 +146,11 @@ fn build_registry_port_metadata_lookup(snapshot: &NodeRegistrySnapshot) -> HashM
     out
 }
 
-pub(crate) fn inject_port_metadata(graph: &mut serde_json::Value, registry: &NodeRegistrySnapshot) {
+pub(crate) fn inject_port_metadata_lookup(graph: &mut serde_json::Value, lookup: &RegistryPortMetadataLookup) {
     let nodes = match graph.get_mut("nodes").and_then(|v| v.as_array_mut()) {
         Some(nodes) => nodes,
         None => return,
     };
-    let lookup = build_registry_port_metadata_lookup(registry);
     if lookup.is_empty() {
         return;
     }
@@ -170,6 +171,11 @@ pub(crate) fn inject_port_metadata(graph: &mut serde_json::Value, registry: &Nod
             metadata_obj.entry(key.clone()).or_insert_with(|| value.clone());
         }
     }
+}
+
+pub(crate) fn inject_port_metadata(graph: &mut serde_json::Value, registry: &NodeRegistrySnapshot) {
+    let lookup = build_registry_port_metadata_lookup(registry);
+    inject_port_metadata_lookup(graph, &lookup);
 }
 
 pub(crate) fn inject_pipeline_alias_metadata(graph: &mut serde_json::Value, name: Option<&str>) {

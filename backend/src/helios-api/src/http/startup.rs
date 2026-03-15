@@ -1,4 +1,5 @@
 use super::AppState;
+use crate::features;
 use crate::http::{pipelines, storage, streams, streams_persist};
 use chrono::Utc;
 use helios_engine::ipc::{NodeRegistrySnapshot, StreamManifest};
@@ -116,12 +117,16 @@ pub(crate) async fn apply_startup_preset(state: AppState) {
         return;
     }
 
-    let registry = match state.engine.get_node_registry().await {
-        Ok(snapshot) => Some(snapshot),
-        Err(err) => {
-            warn!(error = %err, "failed to fetch node registry during startup preset apply; continuing without injected port metadata");
-            None
+    let registry = if features::startup_pipeline_metadata_injection_enabled() {
+        match state.engine.get_node_registry().await {
+            Ok(snapshot) => Some(snapshot),
+            Err(err) => {
+                warn!(error = %err, "failed to fetch node registry during startup preset apply; continuing without injected port metadata");
+                None
+            }
         }
+    } else {
+        None
     };
 
     let pipeline_ids = seed_pipelines(&state, &preset.pipelines, registry.as_ref()).await;

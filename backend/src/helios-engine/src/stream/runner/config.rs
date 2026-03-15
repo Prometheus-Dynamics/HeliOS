@@ -133,6 +133,7 @@ impl StreamRunner {
             preview_encode_interval,
             last_preview_encode_wall: None,
             preview_worker,
+            runner_memory: super::RunnerMemoryTracker::default(),
         }
     }
 }

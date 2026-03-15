@@ -2,15 +2,17 @@ use crate::api_observability::{ApiCacheMetric, CacheMetricCounters};
 use crate::http::AppState;
 use crate::http::pipelines::{
     DaedalusRegistryFanInPort, DaedalusRegistryNode, DaedalusRegistryPort, DaedalusRegistryResponse, DaedalusRegistryType, DaedalusSyncGroup, PipelineDocument, PipelineSummary, PlannerDiagnostic,
-    PlannerDiagnosticSpan, inject_port_metadata, map_io_error, pipeline_dir,
+    PlannerDiagnosticSpan, RegistryPortMetadataLookup, build_registry_port_metadata_lookup, inject_port_metadata_lookup, map_io_error, pipeline_dir,
 };
 use axum::response::Response;
 use bytes::Bytes;
 use helios_engine::ipc::{EngineErrorCode, EngineEvent, NodeRegistrySnapshot};
 use serde_json::Value as JsonValue;
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
+use tokio::process::Command;
 use tokio::sync::RwLock;
 use tokio::time::{Duration, Instant};
 use tracing::warn;
@@ -31,7 +33,7 @@ struct GraphListCacheEntry {
 
 #[derive(Clone)]
 struct CachedRegistryPayload {
-    snapshot: Arc<NodeRegistrySnapshot>,
+    port_metadata_lookup: Arc<RegistryPortMetadataLookup>,
     body: Bytes,
 }
 
@@ -43,6 +45,8 @@ struct RegistryCacheEntry {
 }
 
 const GRAPH_VALIDATION_CACHE_MAX_AGE_MS: i64 = 60_000;
+const REGISTRY_CACHE_MAX_AGE: Duration = Duration::from_secs(30);
+const REGISTRY_HELPER_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Default)]
 pub struct PipelinesReadModelState {
@@ -50,7 +54,7 @@ pub struct PipelinesReadModelState {
     graph_list_cache: RwLock<Option<GraphListCacheEntry>>,
     graph_list_refresh_lock: tokio::sync::Mutex<()>,
     graph_list_stats: CacheMetricCounters,
-    registry_cache: RwLock<Option<RegistryCacheEntry>>,
+    registry_cache: Arc<RwLock<Option<RegistryCacheEntry>>>,
     registry_refresh_lock: tokio::sync::Mutex<()>,
     registry_stats: CacheMetricCounters,
 }
@@ -74,6 +78,19 @@ fn map_planner_diagnostics(diagnostics: Vec<helios_engine::ipc::PlannerDiagnosti
 }
 
 impl PipelinesReadModelState {
+    fn schedule_registry_cache_expiry(&self, revision: u64) {
+        let registry_cache = Arc::clone(&self.registry_cache);
+        tokio::spawn(async move {
+            tokio::time::sleep(REGISTRY_CACHE_MAX_AGE).await;
+            let mut cache = registry_cache.write().await;
+            if cache.as_ref().is_some_and(|entry| entry.revision == revision) {
+                *cache = None;
+                drop(cache);
+                trim_process_allocator();
+            }
+        });
+    }
+
     pub fn graph_list_cache_metrics(&self) -> ApiCacheMetric {
         self.graph_list_stats.snapshot()
     }
@@ -94,6 +111,11 @@ impl PipelinesReadModelState {
     pub async fn set_graph_validation_state(&self, graph_id: Uuid, diagnostics: Vec<PlannerDiagnostic>) {
         let mut cache = self.graph_validation_cache.write().await;
         cache.insert(graph_id, GraphValidationState { diagnostics, updated_at_ms: now_timestamp_ms() });
+    }
+
+    pub async fn invalidate_registry_cache(&self) {
+        *self.registry_cache.write().await = None;
+        invalidate_registry_snapshot_file().await;
     }
 
     pub async fn set_graph_validation_error(&self, graph_id: Uuid, code: Option<EngineErrorCode>, message: String) {
@@ -250,17 +272,16 @@ impl PipelinesReadModelState {
 
     pub async fn inject_cached_port_metadata(&self, state: &AppState, graph: &mut JsonValue) {
         if let Some((payload, _, _)) = self.get_cached_registry_payload(state).await {
-            inject_port_metadata(graph, payload.snapshot.as_ref());
+            inject_port_metadata_lookup(graph, payload.port_metadata_lookup.as_ref());
         }
     }
 
     async fn get_cached_registry_payload(&self, state: &AppState) -> Option<(Arc<CachedRegistryPayload>, bool, u64)> {
-        const FRESH_FOR: Duration = Duration::from_secs(30);
         const IPC_TIMEOUT: Duration = Duration::from_secs(6);
         const IPC_RETRY_TIMEOUT: Duration = Duration::from_secs(18);
 
         if let Some(entry) = self.registry_cache.read().await.clone()
-            && entry.fetched_at.elapsed() < FRESH_FOR
+            && entry.fetched_at.elapsed() < REGISTRY_CACHE_MAX_AGE
         {
             self.registry_stats.record_hit();
             return Some((entry.payload, false, entry.revision));
@@ -269,18 +290,36 @@ impl PipelinesReadModelState {
         self.registry_stats.record_miss();
         let _refresh_guard = self.registry_refresh_lock.lock().await;
         if let Some(entry) = self.registry_cache.read().await.clone()
-            && entry.fetched_at.elapsed() < FRESH_FOR
+            && entry.fetched_at.elapsed() < REGISTRY_CACHE_MAX_AGE
         {
             self.registry_stats.record_hit();
             return Some((entry.payload, false, entry.revision));
         }
 
         let mut stale_entry = self.registry_cache.read().await.clone();
+        match load_registry_snapshot_from_disk_or_helper().await {
+            Ok(snapshot) => match build_cached_registry_payload(snapshot) {
+                Ok(payload) => {
+                    let revision = self.registry_stats.record_refresh();
+                    *self.registry_cache.write().await = Some(RegistryCacheEntry { fetched_at: Instant::now(), revision, payload: payload.clone() });
+                    self.schedule_registry_cache_expiry(revision);
+                    return Some((payload, false, revision));
+                }
+                Err(error) => {
+                    warn!(error = %error, "failed to encode file-backed node registry response");
+                }
+            },
+            Err(error) => {
+                warn!(error = %error, "file-backed node registry fetch failed; falling back to engine IPC");
+            }
+        }
+
         match state.engine.get_node_registry_with_timeout(IPC_TIMEOUT).await {
             Ok(snapshot) => match build_cached_registry_payload(snapshot) {
                 Ok(payload) => {
                     let revision = self.registry_stats.record_refresh();
                     *self.registry_cache.write().await = Some(RegistryCacheEntry { fetched_at: Instant::now(), revision, payload: payload.clone() });
+                    self.schedule_registry_cache_expiry(revision);
                     Some((payload, false, revision))
                 }
                 Err(error) => {
@@ -304,6 +343,7 @@ impl PipelinesReadModelState {
                             Ok(payload) => {
                                 let revision = self.registry_stats.record_refresh();
                                 *self.registry_cache.write().await = Some(RegistryCacheEntry { fetched_at: Instant::now(), revision, payload: payload.clone() });
+                                self.schedule_registry_cache_expiry(revision);
                                 return Some((payload, false, revision));
                             }
                             Err(error) => {
@@ -329,9 +369,27 @@ impl PipelinesReadModelState {
     }
 }
 
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn trim_process_allocator() {
+    unsafe extern "C" {
+        fn malloc_trim(pad: usize) -> i32;
+    }
+
+    // The registry cache is a large, bursty heap object graph. Trim immediately after eviction so
+    // the low-memory profile actually returns pages to the OS instead of just freeing Rust objects
+    // back into glibc arenas.
+    unsafe {
+        let _ = malloc_trim(0);
+    }
+}
+
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+fn trim_process_allocator() {}
+
 fn build_cached_registry_payload(snapshot: NodeRegistrySnapshot) -> Result<Arc<CachedRegistryPayload>, serde_json::Error> {
+    let port_metadata_lookup = Arc::new(build_registry_port_metadata_lookup(&snapshot));
     let body = build_registry_response_body(&snapshot)?;
-    Ok(Arc::new(CachedRegistryPayload { snapshot: Arc::new(snapshot), body }))
+    Ok(Arc::new(CachedRegistryPayload { port_metadata_lookup, body }))
 }
 
 fn build_registry_response_body(snapshot: &NodeRegistrySnapshot) -> Result<Bytes, serde_json::Error> {
@@ -372,4 +430,135 @@ fn build_registry_response_body(snapshot: &NodeRegistrySnapshot) -> Result<Bytes
     types.sort_by(|a, b| a.rust.cmp(&b.rust));
 
     serde_json::to_vec(&DaedalusRegistryResponse { plugins: snapshot.plugins.clone(), nodes, types }).map(Bytes::from)
+}
+
+fn registry_snapshot_path() -> PathBuf {
+    std::env::var("HELIOS_NODE_REGISTRY_SNAPSHOT_PATH").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/var/lib/helios/state/node-registry.snapshot.json"))
+}
+
+async fn invalidate_registry_snapshot_file() {
+    let _ = fs::remove_file(registry_snapshot_path()).await;
+}
+
+fn registry_generator_binary() -> PathBuf {
+    std::env::var("HELIOS_ENGINE_BIN").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/usr/bin/helios-engine"))
+}
+
+fn registry_plugin_dirs() -> Vec<PathBuf> {
+    if let Ok(single) = std::env::var("HELIOS_DAEDALUS_PLUGIN_DIR") {
+        let trimmed = single.trim();
+        if !trimmed.is_empty() {
+            return vec![PathBuf::from(trimmed)];
+        }
+    }
+    if let Ok(list) = std::env::var("HELIOS_DAEDALUS_PLUGIN_DIRS") {
+        let dirs: Vec<_> = std::env::split_paths(&list).collect();
+        if !dirs.is_empty() {
+            return dirs;
+        }
+    }
+    vec![PathBuf::from("/var/lib/helios/plugins/daedalus"), PathBuf::from("/usr/lib/helios/plugins/daedalus")]
+}
+
+pub(crate) async fn load_registry_snapshot_from_disk_or_helper() -> Result<NodeRegistrySnapshot, String> {
+    let path = registry_snapshot_path();
+    if registry_snapshot_needs_refresh(&path).await? {
+        refresh_registry_snapshot_via_helper(&path).await?;
+    }
+    let payload = fs::read(&path).await.map_err(|err| format!("read snapshot failed ({}): {err}", path.display()))?;
+    serde_json::from_slice::<NodeRegistrySnapshot>(&payload).map_err(|err| format!("decode snapshot failed ({}): {err}", path.display()))
+}
+
+async fn registry_snapshot_needs_refresh(path: &Path) -> Result<bool, String> {
+    let snapshot_meta = match fs::metadata(path).await {
+        Ok(meta) => meta,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(true),
+        Err(err) => return Err(format!("stat snapshot failed ({}): {err}", path.display())),
+    };
+    let snapshot_mtime = snapshot_meta.modified().map_err(|err| format!("read snapshot mtime failed ({}): {err}", path.display()))?;
+    let newest_source = newest_registry_source_mtime().await?;
+    Ok(newest_source.is_some_and(|mtime| snapshot_mtime < mtime))
+}
+
+async fn newest_registry_source_mtime() -> Result<Option<std::time::SystemTime>, String> {
+    let mut newest: Option<std::time::SystemTime> = None;
+    let engine_bin = registry_generator_binary();
+    if let Some(mtime) = path_modified(&engine_bin).await? {
+        newest = Some(match newest {
+            Some(current) => current.max(mtime),
+            None => mtime,
+        });
+    }
+    for dir in registry_plugin_dirs() {
+        let Some(dir_newest) = newest_plugin_dir_mtime(&dir).await? else {
+            continue;
+        };
+        newest = Some(match newest {
+            Some(current) => current.max(dir_newest),
+            None => dir_newest,
+        });
+    }
+    Ok(newest)
+}
+
+async fn newest_plugin_dir_mtime(dir: &Path) -> Result<Option<std::time::SystemTime>, String> {
+    let mut newest: Option<std::time::SystemTime> = None;
+    let mut entries = match fs::read_dir(dir).await {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(format!("read plugin dir failed ({}): {err}", dir.display())),
+    };
+
+    while let Some(entry) = entries.next_entry().await.map_err(|err| format!("scan plugin dir failed ({}): {err}", dir.display()))? {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if !(name.ends_with(".so") || name.ends_with(".so.disabled")) {
+            continue;
+        }
+        let meta = entry.metadata().await.map_err(|err| format!("stat plugin file failed ({}): {err}", path.display()))?;
+        let modified = meta.modified().map_err(|err| format!("read plugin mtime failed ({}): {err}", path.display()))?;
+        newest = Some(match newest {
+            Some(current) => current.max(modified),
+            None => modified,
+        });
+    }
+
+    Ok(newest)
+}
+
+async fn path_modified(path: &Path) -> Result<Option<std::time::SystemTime>, String> {
+    match fs::metadata(path).await {
+        Ok(meta) => meta.modified().map(Some).map_err(|err| format!("read mtime failed ({}): {err}", path.display())),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(format!("stat path failed ({}): {err}", path.display())),
+    }
+}
+
+async fn refresh_registry_snapshot_via_helper(path: &Path) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).await.map_err(|err| format!("create snapshot dir failed ({}): {err}", parent.display()))?;
+    }
+
+    let engine_bin = registry_generator_binary();
+    let output = tokio::time::timeout(REGISTRY_HELPER_TIMEOUT, Command::new(&engine_bin).arg("dump-node-registry").arg("--output").arg(path).output())
+        .await
+        .map_err(|_| format!("registry helper timed out after {}s", REGISTRY_HELPER_TIMEOUT.as_secs()))?
+        .map_err(|err| format!("spawn registry helper failed ({}): {err}", engine_bin.display()))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let detail = if !stderr.is_empty() {
+        stderr
+    } else if !stdout.is_empty() {
+        stdout
+    } else {
+        format!("exit status {}", output.status)
+    };
+    Err(format!("registry helper failed ({}): {detail}", engine_bin.display()))
 }

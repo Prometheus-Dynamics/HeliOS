@@ -6,11 +6,14 @@ use axum::{
 use helios_engine::capture::{CaptureControlInfo, CaptureControlValue, ControlAssignment};
 use helios_engine::ipc::StreamManifest;
 use helios_engine::ipc::{EngineErrorCode, EngineEvent};
+use std::process::Output;
 use std::time::Duration;
-use tokio::time::timeout;
+use tokio::process::Command;
+use tokio::time::{Instant, sleep, timeout};
 use uuid::Uuid;
 
 use crate::http::AppState;
+use crate::http::streams::types::StartStreamResponse;
 
 use super::lifecycle;
 use super::util::camera_id_for_manifest;
@@ -19,6 +22,7 @@ use crate::http::streams_persist;
 
 const NOISE_REDUCTION_MODE: u32 = 10002;
 const CONTROL_APPLY_TIMEOUT: Duration = Duration::from_secs(3);
+const ENGINE_RESTART_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn numeric_bounds(value: &CaptureControlValue) -> Option<(f64, f64)> {
     match value {
@@ -71,6 +75,10 @@ fn replay_frame_range_adjustment(controls: &[CaptureControlInfo], manifest: &Str
 }
 
 fn validate_control_value(meta: &CaptureControlInfo, value: &CaptureControlValue) -> Result<(), String> {
+    if matches!(meta.access, styx::core::controls::Access::ReadOnly) {
+        return Err("control is read-only".into());
+    }
+
     // Allow explicit "none" as a best-effort reset/clear operation.
     if matches!(value, CaptureControlValue::None) {
         return Ok(());
@@ -118,6 +126,48 @@ fn validate_control_value(meta: &CaptureControlInfo, value: &CaptureControlValue
     }
 
     Ok(())
+}
+
+async fn restart_engine_service() -> std::io::Result<Output> {
+    Command::new("systemctl").args(["restart", "--no-block", "helios-engine.service"]).output().await
+}
+
+async fn restart_engine_and_wait_for_stream(state: &AppState, stream_id: Uuid) -> Result<Option<helios_engine::capture::CaptureDescriptor>, Response> {
+    match restart_engine_service().await {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let message = if !stderr.is_empty() {
+                stderr
+            } else if !stdout.is_empty() {
+                stdout
+            } else {
+                format!("systemctl exited with {}", output.status)
+            };
+            return Err((StatusCode::BAD_GATEWAY, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("failed to restart engine service: {message}")))).into_response());
+        }
+        Err(err) => {
+            return Err((StatusCode::BAD_GATEWAY, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("failed to restart engine service: {err}")))).into_response());
+        }
+    }
+
+    let deadline = Instant::now() + ENGINE_RESTART_TIMEOUT;
+    while Instant::now() < deadline {
+        match state.engine.list_streams_with_timeout(Duration::from_secs(2)).await {
+            Ok(streams) => {
+                if let Some(found) = streams.into_iter().find(|stream| stream.stream_id == stream_id) {
+                    return Ok(Some(found.descriptor));
+                }
+            }
+            Err(_) => {
+                // Expected while the engine service is in the middle of restarting.
+            }
+        }
+        sleep(Duration::from_millis(500)).await;
+    }
+
+    Ok(None)
 }
 
 pub(crate) async fn get_controls(state: AppState, id: Uuid) -> Response {
@@ -180,12 +230,72 @@ pub(crate) async fn set_control(state: AppState, id: Uuid, control_id: u32, valu
         && stream_manifest.as_ref().is_some_and(|manifest| manifest.capture.backend == styx::BackendKind::Libcamera)
         && let Some(mut manifest) = stream_manifest.clone()
     {
+        let previous_manifest = manifest.clone();
         apply_control_to_manifest(&mut manifest, control_id, value.clone());
         if let Err(err) = streams_persist::persist_manifest_checked(&camera_id_for_manifest(&manifest), Some(id), manifest.clone()).await {
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("control update failed to persist before restart: {err}")))).into_response();
         }
-        let _ = state.engine.stop_stream(id).await;
-        return lifecycle::start_stream(state, manifest).await;
+        match restart_engine_and_wait_for_stream(&state, id).await {
+            Ok(Some(descriptor)) => {
+                return (StatusCode::OK, Json(StartStreamResponse { stream_id: id, descriptor })).into_response();
+            }
+            Ok(None) => {}
+            Err(response) => {
+                tracing::warn!(
+                    stream_id = %id,
+                    control_id,
+                    "controlled engine restart did not restore stream; rolling back manifest"
+                );
+
+                if let Err(err) = streams_persist::persist_manifest_checked(&camera_id_for_manifest(&previous_manifest), Some(id), previous_manifest.clone()).await {
+                    tracing::error!(
+                        stream_id = %id,
+                        control_id,
+                        error = %err,
+                        "failed to persist rollback manifest after libcamera control restart failure"
+                    );
+                    return response;
+                }
+
+                let rollback = restart_engine_and_wait_for_stream(&state, id).await;
+                if let Err(rollback_response) = rollback {
+                    tracing::error!(
+                        stream_id = %id,
+                        control_id,
+                        status = %rollback_response.status(),
+                        "rollback restart failed after controlled engine restart failure"
+                    );
+                }
+                return response;
+            }
+        }
+
+        tracing::warn!(
+            stream_id = %id,
+            control_id,
+            "controlled engine restart did not restore stream; rolling back to previous stream manifest"
+        );
+
+        if let Err(err) = streams_persist::persist_manifest_checked(&camera_id_for_manifest(&previous_manifest), Some(id), previous_manifest.clone()).await {
+            tracing::error!(
+                stream_id = %id,
+                control_id,
+                error = %err,
+                "failed to persist rollback manifest after libcamera control restart failure"
+            );
+            return (StatusCode::BAD_GATEWAY, Json(engine_error_body(Some(EngineErrorCode::Internal), "stream did not recover after controlled engine restart"))).into_response();
+        }
+
+        let rollback = restart_engine_and_wait_for_stream(&state, id).await;
+        if let Err(rollback_response) = rollback {
+            tracing::error!(
+                stream_id = %id,
+                control_id,
+                status = %rollback_response.status(),
+                "rollback restart failed after libcamera control restart failure"
+            );
+        }
+        return (StatusCode::BAD_GATEWAY, Json(engine_error_body(Some(EngineErrorCode::Internal), "stream did not recover after controlled engine restart"))).into_response();
     }
 
     // For replay start/stop range corrections, apply the sibling first so we never place the

@@ -145,6 +145,10 @@ pub struct PipelinesReadModelService {
 }
 
 impl PipelinesReadModelService {
+    pub async fn load_registry_snapshot_from_disk_or_helper(&self) -> Result<helios_engine::ipc::NodeRegistrySnapshot, String> {
+        crate::pipelines_read_model::load_registry_snapshot_from_disk_or_helper().await
+    }
+
     pub async fn set_graph_validation_state(&self, graph_id: Uuid, diagnostics: Vec<PlannerDiagnostic>) {
         self.state.set_graph_validation_state(graph_id, diagnostics).await;
     }
@@ -159,6 +163,10 @@ impl PipelinesReadModelService {
 
     pub async fn invalidate_graph_list_cache(&self) {
         self.state.invalidate_graph_list_cache().await;
+    }
+
+    pub async fn invalidate_registry_cache(&self) {
+        self.state.invalidate_registry_cache().await;
     }
 
     pub async fn get_cached_graph_summaries_snapshot(&self, state: &crate::http::AppState) -> Result<(Arc<Vec<PipelineSummary>>, u64), Box<Response>> {

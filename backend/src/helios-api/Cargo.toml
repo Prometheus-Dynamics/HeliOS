@@ -4,6 +4,7 @@ version.workspace = true
 edition = "2024"
 publish = false
 build = "build.rs"
+default-run = "helios-api"
 
 [lints]
 workspace = true
@@ -11,6 +12,10 @@ workspace = true
 [[bin]]
 name = "helios-api"
 path = "src/main.rs"
+
+[[bin]]
+name = "helios-api-tools"
+path = "src/bin/helios-api-tools.rs"
 
 [dependencies]
 axum = { version = "0.8.8", features = ["http1", "macros", "ws", "multipart"] }
@@ -57,7 +62,7 @@ image = { workspace = true }
 imageproc = { workspace = true }
 daedalus = { workspace = true, features = ["ffi"] }
 lib-cv = { path = "../libs/lib-cv" }
-lib-ai = { path = "../libs/lib-ai" }
+lib-ai = { path = "../libs/lib-ai", default-features = false, features = ["engine", "backend-tflite", "backend-onnx", "backend-coral"] }
 nalgebra = { workspace = true }
 lopdf = "0.39.0"
 flate2 = "1.1.9"

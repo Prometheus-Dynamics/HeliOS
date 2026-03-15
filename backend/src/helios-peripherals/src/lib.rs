@@ -37,7 +37,10 @@ pub mod orchestrator;
 #[cfg(feature = "runtime")]
 pub use config::SensorsConfig;
 #[cfg(feature = "dto")]
-pub use dto::{AiModelDescriptor, AiModelHealth, AiModelHealthStatus, AiModelInventory, AiModelUpload, SensorData, SensorDescriptor, SensorInventory, SensorKind, SensorScope};
+pub use dto::{
+    AiModelDescriptor, AiModelFormat, AiModelHealth, AiModelHealthStatus, AiModelId, AiModelInventory, AiModelMetadata, AiModelTensorMetadata, AiModelUpload, AiTensorElementType,
+    AiTensorQuantization, SensorData, SensorDescriptor, SensorInventory, SensorKind, SensorScope,
+};
 #[cfg(feature = "dto")]
 pub use dto::{I2cBusInfo, I2cDeviceInfo, I2cInventory};
 #[cfg(feature = "runtime")]

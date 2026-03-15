@@ -4,7 +4,6 @@ import { OpenAPI } from '$lib/ts-bindings/http/client';
 import { PipelinesApi } from '$lib/api/pipelinesApi';
 import { DEFAULT_REQUEST_TIMEOUT_MS } from '$lib/api/requestUtils';
 import { buildPipelinePayloadFromOverview } from '$lib/api/pipelinesNormalize';
-import { normalizeDaedalusRegistry } from '$lib/features/pipelines/controller/daedalusRegistry';
 import type { PipelinePagePayload } from '$lib/types/pipeline';
 import type { PipelineLifecycleStatus, PipelineOverviewEntry, PipelineOverviewResponse } from '$lib/types/pipeline-api';
 
@@ -23,15 +22,11 @@ export const GET: RequestHandler = async ({ url }) => {
 
 async function buildPipelinePayload(): Promise<PipelinePagePayload> {
   void REQUEST_TIMEOUT_MS;
-  const [summaries, templates, registrySnapshot] = await Promise.all([
+  const [summaries, templates] = await Promise.all([
     PipelinesApi.listGraphs(),
     PipelinesApi.listTemplates().catch((error) => {
       console.warn('Failed to load pipeline templates', error);
       return [];
-    }),
-    PipelinesApi.listRegistry().catch((error) => {
-      console.warn('Failed to load pipeline registry', error);
-      return null;
     })
   ]);
   const sortedSummaries = Array.isArray(summaries)
@@ -95,8 +90,6 @@ async function buildPipelinePayload(): Promise<PipelinePagePayload> {
   };
 
   const payload = buildPipelinePayloadFromOverview(overview);
-  if (registrySnapshot?.nodes) {
-    payload.registry = normalizeDaedalusRegistry(registrySnapshot.nodes, registrySnapshot.types ?? undefined);
-  }
+  payload.registry = [];
   return payload;
 }

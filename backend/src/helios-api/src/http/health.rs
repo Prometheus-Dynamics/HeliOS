@@ -11,6 +11,8 @@ static STARTED_AT: Lazy<Instant> = Lazy::new(Instant::now);
 #[serde(rename_all = "snake_case")]
 pub struct FeaturesPayload {
     pub shadow_recorder: bool,
+    pub pipeline_registry_startup_warm: bool,
+    pub pipeline_registry_prefetch: bool,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -37,7 +39,11 @@ pub async fn health() -> Json<HealthPayload> {
         server_time_ms: Utc::now().timestamp_millis(),
         uptime_ms: STARTED_AT.elapsed().as_millis() as u64,
         version: env!("CARGO_PKG_VERSION").to_string(),
-        features: FeaturesPayload { shadow_recorder: crate::features::shadow_recorder_enabled() },
+        features: FeaturesPayload {
+            shadow_recorder: crate::features::shadow_recorder_enabled(),
+            pipeline_registry_startup_warm: crate::features::warm_pipeline_registry_enabled(),
+            pipeline_registry_prefetch: crate::features::prefetch_pipeline_registry_enabled(),
+        },
     })
 }
 

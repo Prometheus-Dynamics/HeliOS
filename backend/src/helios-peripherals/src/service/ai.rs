@@ -1,6 +1,4 @@
-use lib_ai::model::ModelId;
-
-use crate::dto::{AiModelDescriptor, AiModelInventory, AiModelUpload};
+use crate::dto::{AiModelDescriptor, AiModelId, AiModelInventory, AiModelUpload};
 use crate::error::{Error, Result};
 
 use super::SensorsService;
@@ -15,7 +13,7 @@ impl SensorsService {
         self.ai.upload_model(request).await
     }
 
-    pub async fn delete_ai_model(&self, model_id: ModelId) -> Result<()> {
+    pub async fn delete_ai_model(&self, model_id: AiModelId) -> Result<()> {
         if self.ai.delete_model(&model_id).await? { Ok(()) } else { Err(Error::InvalidState(format!("model {} not found", model_id.0))) }
     }
 }

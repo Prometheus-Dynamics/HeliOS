@@ -76,6 +76,16 @@ impl StreamRunner {
 
     fn styx_memory_metrics(&self) -> Option<StreamMemoryMetrics> {
         let process = Self::process_memory_metrics();
+        let runner = Some(self.runner_memory.snapshot()).filter(|metrics| {
+            metrics.current_decoded_frame_bytes > 0
+                || metrics.peak_decoded_frame_bytes > 0
+                || metrics.current_raw_clone_bytes > 0
+                || metrics.peak_raw_clone_bytes > 0
+                || metrics.current_processed_frame_bytes > 0
+                || metrics.peak_processed_frame_bytes > 0
+                || metrics.current_frame_working_set_bytes > 0
+                || metrics.peak_frame_working_set_bytes > 0
+        });
         let pool_stats = self.session.as_ref().and_then(|session| session.handle()).map(|handle| handle.memory_stats());
         let capture_queue = pool_stats.as_ref().and_then(|stats| stats.capture_queue.as_ref().map(|queue| StreamQueueMemoryMetrics { depth: queue.depth, capacity: queue.capacity }));
         let external_backings: Vec<StreamExternalBackingMetrics> = pool_stats
@@ -104,11 +114,19 @@ impl StreamRunner {
             .as_ref()
             .and_then(|stats| stats.staging_copy.as_ref().map(|staging| StreamStagingCopyMetrics { copies: staging.copies, bytes: staging.bytes, peak_copy_bytes: staging.peak_copy_bytes }));
 
-        if process.is_none() && capture_queue.is_none() && external_backings.is_empty() && transform_pool.is_none() && image_pool.is_none() && packed_pools.is_empty() && staging_copy.is_none() {
+        if process.is_none()
+            && runner.is_none()
+            && capture_queue.is_none()
+            && external_backings.is_empty()
+            && transform_pool.is_none()
+            && image_pool.is_none()
+            && packed_pools.is_empty()
+            && staging_copy.is_none()
+        {
             return None;
         }
 
-        Some(StreamMemoryMetrics { process, capture_queue, external_backings, transform_pool, image_pool, packed_pools, staging_copy })
+        Some(StreamMemoryMetrics { process, runner, capture_queue, external_backings, transform_pool, image_pool, packed_pools, staging_copy })
     }
 
     fn metrics_stale_base_ms() -> u64 {
@@ -203,8 +221,8 @@ impl StreamRunner {
         Ok(())
     }
 
-    pub(super) fn process_assigned_graphs(&self, image: image::DynamicImage) -> Option<image::DynamicImage> {
-        self.graph.process(image)
+    pub(super) fn process_assigned_graphs(&self, image: image::DynamicImage, require_image_output: bool) -> Option<image::DynamicImage> {
+        self.graph.process_with_options(image, crate::graph::GraphProcessOptions { require_image_output })
     }
 
     pub fn start(&mut self) -> Result<()> {
@@ -350,6 +368,7 @@ impl StreamRunner {
     pub fn stop(&mut self) {
         self.stop_encoder_worker();
         self.encoder_last_activity_ms.store(0, Ordering::Relaxed);
+        self.runner_memory.reset_current();
         self.capture_started_wall = None;
         self.capture_empty_since = None;
         self.last_capture_ts = None;
@@ -368,6 +387,7 @@ impl StreamRunner {
 
     pub(crate) fn stop_capture_for_restart(&mut self) {
         self.encoder_last_activity_ms.store(0, Ordering::Relaxed);
+        self.runner_memory.reset_current();
         self.capture_started_wall = None;
         self.capture_empty_since = None;
         self.last_capture_ts = None;

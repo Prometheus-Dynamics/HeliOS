@@ -5,6 +5,7 @@
   import { toaster } from '$lib';
   import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
   import { connectStreamControls, type StreamControlSocket } from '$lib/api/streamControls';
+  import { backendFeatures } from '$lib/api/backendFeatures';
   import type { ControlMeta, StreamInfo, StreamPipelineLayout } from '$lib/ts-bindings/http/client';
   import type {
     PipelineDataType,
@@ -639,6 +640,7 @@
 
   $effect(() => {
     if (!browser) return;
+    if (!get(backendFeatures).pipelineRegistryPrefetch) return;
     if (tuneRegistrySnapshotLoading || tuneRegistrySnapshot) return;
     tuneRegistrySnapshotLoading = true;
     PipelinesApi.listRegistry({ cacheMs: 5_000 })

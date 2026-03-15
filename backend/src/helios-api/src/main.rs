@@ -1,4 +1,8 @@
 mod api_observability;
+mod api_tools_client;
+#[cfg(test)]
+mod api_tools_impl;
+mod api_tools_protocol;
 mod app_state;
 mod config;
 mod console_protocol;
@@ -219,7 +223,12 @@ async fn async_main() {
     nt4::bridge::init(handles.clone());
     let update_active = led_status::spawn_update_led_task(handles.clone());
     led_status::spawn_engine_crash_led_task(handles.clone(), update_active);
-    tokio::spawn(http::pipelines::warm_registry_cache(state.clone()));
+    if features::warm_pipeline_registry_enabled() {
+        let warm_state = state.clone();
+        tokio::spawn(async move {
+            http::pipelines::warm_registry_cache(warm_state).await;
+        });
+    }
     http::peers::init_peers_from_disk(&state).await;
     http::startup::apply_startup_preset(state.clone()).await;
     streams::restore_autostart_streams(state.clone()).await;

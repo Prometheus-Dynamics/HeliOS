@@ -117,15 +117,13 @@ async fn list_plugins(State(state): State<AppState>) -> ApiResult<impl IntoRespo
     let uploads = list_plugins_with_suffix(&upload_dir(), PLUGIN_SUFFIX).await?;
 
     const IPC_TIMEOUT: Duration = Duration::from_secs(3);
-    let mut engine_available = true;
+    let engine_available = state.engine.list_streams_with_timeout(IPC_TIMEOUT).await.is_ok();
     let mut compatibility = Vec::new();
-    match state.engine.get_node_registry_with_timeout(IPC_TIMEOUT).await {
+    match state.services.pipelines.load_registry_snapshot_from_disk_or_helper().await {
         Ok(snapshot) => {
             compatibility = snapshot.plugin_compatibility;
         }
-        Err(_) => {
-            engine_available = false;
-        }
+        Err(_) => {}
     }
 
     let mut compatibility_map: BTreeMap<String, PluginCompatibility> = BTreeMap::new();
@@ -215,6 +213,7 @@ async fn install_plugin(Json(payload): Json<PluginInstallRequest>) -> ApiResult<
     }
     let target = target_dir.join(&upload_name);
     move_upload(&source, &target).await?;
+    invalidate_registry_snapshot_file().await;
     Ok(Json(PluginInstallResponse { name: upload_name, installed: true }))
 }
 
@@ -258,13 +257,19 @@ async fn delete_plugin(Path(name): Path<String>) -> ApiResult<impl IntoResponse>
     ensure_plugin_filename(&name)?;
     let path = install_dir().join(&name);
     match fs::remove_file(&path).await {
-        Ok(_) => return Ok(StatusCode::NO_CONTENT),
+        Ok(_) => {
+            invalidate_registry_snapshot_file().await;
+            return Ok(StatusCode::NO_CONTENT);
+        }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
         Err(err) => return Err(ApiError::internal(format!("failed to delete plugin: {err}"))),
     }
     let disabled_path = install_dir().join(format!("{name}{DISABLED_SUFFIX_SUFFIX}"));
     match fs::remove_file(&disabled_path).await {
-        Ok(_) => Ok(StatusCode::NO_CONTENT),
+        Ok(_) => {
+            invalidate_registry_snapshot_file().await;
+            Ok(StatusCode::NO_CONTENT)
+        }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Err(ApiError::not_found("plugin not found")),
         Err(err) => Err(ApiError::internal(format!("failed to delete plugin: {err}"))),
     }
@@ -285,6 +290,7 @@ async fn disable_plugin(Path(name): Path<String>) -> ApiResult<impl IntoResponse
     if fs::metadata(&source).await.is_ok() {
         let target = install.join(format!("{name}{DISABLED_SUFFIX_SUFFIX}"));
         move_upload(&source, &target).await?;
+        invalidate_registry_snapshot_file().await;
         return Ok(Json(PluginToggleResponse { name, enabled: false }));
     }
 
@@ -297,6 +303,7 @@ async fn disable_plugin(Path(name): Path<String>) -> ApiResult<impl IntoResponse
     if fs::metadata(&marker).await.is_err() {
         let _ = fs::File::create(&marker).await.map_err(|err| ApiError::internal(format!("failed to create disable marker: {err}")))?;
     }
+    invalidate_registry_snapshot_file().await;
     Ok(Json(PluginToggleResponse { name, enabled: false }))
 }
 
@@ -319,6 +326,7 @@ async fn enable_plugin(Path(name): Path<String>) -> ApiResult<impl IntoResponse>
             let target = install.join(&name);
             move_upload(&disabled_path, &target).await?;
         }
+        invalidate_registry_snapshot_file().await;
         return Ok(Json(PluginToggleResponse { name, enabled: true }));
     }
 
@@ -578,6 +586,11 @@ async fn ensure_upload_dir() -> ApiResult<std::path::PathBuf> {
     let dir = upload_dir();
     fs::create_dir_all(&dir).await.map_err(|err| ApiError::internal(format!("failed to create upload dir: {err}")))?;
     Ok(dir)
+}
+
+async fn invalidate_registry_snapshot_file() {
+    let path = std::env::var("HELIOS_NODE_REGISTRY_SNAPSHOT_PATH").map(std::path::PathBuf::from).unwrap_or_else(|_| std::path::PathBuf::from("/var/lib/helios/state/node-registry.snapshot.json"));
+    let _ = fs::remove_file(path).await;
 }
 
 fn ensure_plugin_filename(name: &str) -> Result<(), Box<ApiError>> {

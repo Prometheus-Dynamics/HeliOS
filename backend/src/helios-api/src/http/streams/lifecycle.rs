@@ -477,10 +477,13 @@ async fn merge_stream_manifest_state(state: &AppState, manifest: &mut StreamMani
         manifest.start_on_boot = true;
     }
 
+    let preserve_existing_libcamera_controls = manifest.capture.backend == styx::BackendKind::Libcamera && manifest.capture.controls.is_empty();
+
     // Merge capture controls so applying stream settings doesn't clear previously-set values.
     let mut merged: std::collections::BTreeMap<u32, helios_engine::capture::CaptureControlValue> = std::collections::BTreeMap::new();
 
-    if let Some(id) = base_stream_id
+    if manifest.capture.backend != styx::BackendKind::Libcamera
+        && let Some(id) = base_stream_id
         && let Ok(EngineEvent::Controls { controls, .. }) = state.engine.get_controls(id).await
     {
         for ctl in controls {
@@ -492,7 +495,7 @@ async fn merge_stream_manifest_state(state: &AppState, manifest: &mut StreamMani
         }
     }
 
-    if merged.is_empty() {
+    if merged.is_empty() && (manifest.capture.backend != styx::BackendKind::Libcamera || preserve_existing_libcamera_controls) {
         for ctl in &base.capture.controls {
             merged.insert(ctl.id, ctl.value.clone());
         }

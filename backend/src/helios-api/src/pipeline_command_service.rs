@@ -1,8 +1,6 @@
 use crate::http::AppState;
 use crate::http::pipelines::PipelineDocument;
-use crate::http::pipelines::{
-    inject_pipeline_alias_metadata, inject_port_metadata, merge_edge_metadata, normalize_graph_metadata, normalize_graph_node_ids, refresh_graph_validation, refresh_pipeline_input_consumers,
-};
+use crate::http::pipelines::{inject_pipeline_alias_metadata, merge_edge_metadata, normalize_graph_metadata, normalize_graph_node_ids, refresh_graph_validation, refresh_pipeline_input_consumers};
 use crate::http::storage;
 use chrono::Utc;
 use daedalus::data::model::Value as DaedalusValue;
@@ -92,9 +90,7 @@ pub(crate) async fn update_pipeline_graph(state: &AppState, pipeline_id: Uuid, g
     normalize_graph_node_ids(&mut daedalus_graph);
     let mut graph_json = serde_json::to_value(&daedalus_graph).map_err(|err| format!("failed to encode graph: {err}"))?;
 
-    if let Ok(snapshot) = state.engine.get_node_registry().await {
-        inject_port_metadata(&mut graph_json, &snapshot);
-    }
+    state.services.pipelines.inject_cached_port_metadata(state, &mut graph_json).await;
     merge_edge_metadata(&graph, &mut graph_json);
     inject_pipeline_alias_metadata(&mut graph_json, name.as_deref());
 

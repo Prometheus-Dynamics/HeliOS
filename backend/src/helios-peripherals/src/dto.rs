@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
 use bincode::{Decode, Encode};
-use lib_ai::model::{ModelFormat, ModelId, ModelMetadata};
 use lib_ipc::types::Timestamp;
 use lib_sensors::model::SensorReading;
 use serde::{Deserialize, Serialize};
@@ -138,11 +137,87 @@ pub type SensorSnapshot = BTreeMap<SensorKind, SensorData>;
 /// Typed snapshot map keyed by sensor kind.
 pub type SensorSnapshotTyped = BTreeMap<SensorKind, SensorReading>;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Encode, Decode)]
+#[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
+pub enum AiModelFormat {
+    TensorFlowLite,
+    Onnx,
+    Raw,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Encode, Decode)]
+#[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
+pub struct AiModelId(#[bincode(with_serde)] pub Uuid);
+
+impl AiModelId {
+    #[must_use]
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
+
+impl Default for AiModelId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Encode, Decode)]
+#[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
+pub enum AiTensorElementType {
+    U8,
+    I8,
+    I16,
+    I32,
+    F16,
+    F32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Encode, Decode)]
+#[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
+pub struct AiTensorQuantization {
+    #[serde(default)]
+    pub zero_point: Vec<i64>,
+    #[serde(default)]
+    pub scale: Vec<f32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Encode, Decode)]
+#[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
+pub struct AiModelTensorMetadata {
+    #[serde(default)]
+    pub name: Option<String>,
+    pub element_type: AiTensorElementType,
+    #[serde(default)]
+    pub shape: Vec<usize>,
+    #[serde(default)]
+    pub quantization: Option<AiTensorQuantization>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Encode, Decode)]
+#[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
+pub struct AiModelMetadata {
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub preferred_batch_size: Option<usize>,
+    #[serde(default)]
+    pub inputs: Vec<AiModelTensorMetadata>,
+    #[serde(default)]
+    pub outputs: Vec<AiModelTensorMetadata>,
+    #[serde(default)]
+    pub labels: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
 pub struct AiModelDescriptor {
-    pub id: ModelId,
-    pub format: ModelFormat,
-    pub metadata: ModelMetadata,
+    pub id: AiModelId,
+    pub format: AiModelFormat,
+    pub metadata: AiModelMetadata,
     #[serde(default)]
     pub backend: Option<String>,
     #[serde(default)]
@@ -193,10 +268,10 @@ pub enum AiModelHealthStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
 pub struct AiModelUpload {
     #[serde(default)]
-    pub id: Option<ModelId>,
-    pub format: ModelFormat,
+    pub id: Option<AiModelId>,
+    pub format: AiModelFormat,
     #[serde(default)]
-    pub metadata: ModelMetadata,
+    pub metadata: AiModelMetadata,
     pub bytes: Vec<u8>,
     #[serde(default)]
     pub label_bytes: Option<Vec<u8>>,
