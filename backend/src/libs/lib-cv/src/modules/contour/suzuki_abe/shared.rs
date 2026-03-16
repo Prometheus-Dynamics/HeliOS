@@ -4,6 +4,7 @@ use imageproc::point::Point;
 use memchr::memchr;
 use smallvec::SmallVec;
 use std::cell::RefCell;
+use std::mem::size_of;
 
 thread_local! {
     static ROW_OFFSETS_SCRATCH: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
@@ -14,6 +15,7 @@ pub(super) type ContourPoints = SmallVec<[Point<i32>; 32]>;
 pub(super) fn ensure_scratch_len(buffer: &mut Vec<i32>, len: usize) {
     if buffer.len() != len {
         buffer.resize(len, 0);
+        crate::diagnostics::report_scratch_high_water("contour.suzuki_image_values", buffer.capacity() * size_of::<i32>());
     } else {
         buffer.fill(0);
     }
@@ -24,6 +26,7 @@ pub(super) fn with_row_offsets<R>(width: usize, height: usize, f: impl FnOnce(&[
         let mut rows = scratch.borrow_mut();
         if rows.len() != height {
             rows.resize(height, 0);
+            crate::diagnostics::report_scratch_high_water("contour.row_offsets", rows.capacity() * size_of::<usize>());
         }
         for (y, slot) in rows.iter_mut().enumerate().take(height) {
             *slot = y * width;

@@ -1,6 +1,7 @@
 use image::{DynamicImage, GrayImage, ImageBuffer, Rgb};
 use rayon::prelude::*;
 use std::cell::RefCell;
+use std::mem::size_of;
 use wide::{CmpGt, i16x16, u8x16};
 
 thread_local! {
@@ -225,6 +226,7 @@ fn ensure_mask_buffer(mask: &mut MaskBuffer, width: u32, height: u32) -> &mut [u
         mask.width = width;
         mask.height = height;
         mask.buf.resize(needed, 0);
+        crate::diagnostics::report_scratch_high_water("image.binary_mask", mask.buf.capacity() * size_of::<u8>());
     }
     &mut mask.buf[..]
 }

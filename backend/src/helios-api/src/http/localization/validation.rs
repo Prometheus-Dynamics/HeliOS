@@ -162,17 +162,42 @@ async fn validate_profiles_and_references(config: &mut LocalizationConfig, issue
     }
 
     let known_profile_ids = config.profiles.iter().map(|profile| profile.id.clone()).collect::<BTreeSet<_>>();
+    let first_enabled_profile_id = config.profiles.iter().find(|profile| profile.enabled).map(|profile| profile.id.clone());
     match config.active_profile_id.as_deref().map(str::trim).filter(|id| !id.is_empty()) {
         Some(active_id) if !known_profile_ids.contains(active_id) => {
-            warnings.push(warning("/activeProfileId", "active_profile_defaulted", format!("active profile `{active_id}` not found; defaulting to first profile")));
-            config.active_profile_id = config.profiles.first().map(|profile| profile.id.clone());
+            let message = if first_enabled_profile_id.is_some() {
+                format!("active profile `{active_id}` not found; defaulting to first enabled profile")
+            } else {
+                format!("active profile `{active_id}` not found; localization runtime disabled because no profiles are enabled")
+            };
+            warnings.push(warning("/activeProfileId", "active_profile_defaulted", message));
+            config.active_profile_id = first_enabled_profile_id.clone();
         }
-        Some(active_id) => {
-            config.active_profile_id = Some(active_id.to_string());
-        }
+        Some(active_id) => match config.profiles.iter().find(|profile| profile.id == active_id) {
+            Some(profile) if profile.enabled => {
+                config.active_profile_id = Some(active_id.to_string());
+            }
+            Some(_) => {
+                let message = if first_enabled_profile_id.is_some() {
+                    format!("active profile `{active_id}` is disabled; defaulting to first enabled profile")
+                } else {
+                    format!("active profile `{active_id}` is disabled; localization runtime disabled because no profiles are enabled")
+                };
+                warnings.push(warning("/activeProfileId", "active_profile_defaulted", message));
+                config.active_profile_id = first_enabled_profile_id.clone();
+            }
+            None => {
+                config.active_profile_id = first_enabled_profile_id.clone();
+            }
+        },
         None => {
-            warnings.push(warning("/activeProfileId", "active_profile_defaulted", "active profile was missing; defaulting to first profile"));
-            config.active_profile_id = config.profiles.first().map(|profile| profile.id.clone());
+            if let Some(profile_id) = first_enabled_profile_id.clone() {
+                warnings.push(warning("/activeProfileId", "active_profile_defaulted", "active profile was missing; defaulting to first enabled profile"));
+                config.active_profile_id = Some(profile_id);
+            } else {
+                warnings.push(warning("/activeProfileId", "active_profile_disabled", "all localization profiles are disabled; runtime profile selection is cleared"));
+                config.active_profile_id = None;
+            }
         }
     }
 }
@@ -357,6 +382,7 @@ mod tests {
                 snap_z_to_ground: false,
                 snap_roll_to_ground: false,
                 snap_pitch_to_ground: false,
+                enabled: true,
                 color: None,
                 view_enabled: true,
                 temporal_stabilization: helios_engine::localization::config::LocalizationTemporalStabilizationConfig::default(),
@@ -400,6 +426,26 @@ mod tests {
 
         let result = validate_localization_config(config).await.expect("expected config sanitization");
         assert!(result.warnings.iter().any(|warning| warning.code == "sanitized_value"));
+    }
+
+    #[tokio::test]
+    async fn defaults_active_profile_to_first_enabled_profile() {
+        let mut config = base_config();
+        config.profiles[0].enabled = false;
+        config.profiles.push(helios_engine::localization::config::LocalizationProfile { id: "enabled".to_string(), enabled: true, ..config.profiles[0].clone() });
+
+        let result = validate_localization_config(config).await.expect("expected config sanitization");
+        assert_eq!(result.config.active_profile_id.as_deref(), Some("enabled"));
+    }
+
+    #[tokio::test]
+    async fn clears_active_profile_when_all_profiles_disabled() {
+        let mut config = base_config();
+        config.profiles[0].enabled = false;
+
+        let result = validate_localization_config(config).await.expect("disabled profiles should still validate");
+        assert_eq!(result.config.active_profile_id, None);
+        assert!(result.warnings.iter().any(|warning| warning.code == "active_profile_disabled"));
     }
 
     #[test]

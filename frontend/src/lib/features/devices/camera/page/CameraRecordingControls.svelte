@@ -9,7 +9,6 @@
   import { backendFeatures } from '$lib/api/backendFeatures';
   import { extractGraphOutputPortTypes, filterEncoderCompatibleOutputs } from '$lib/features/pipelines/outputFilters';
   import { faCamera, faCircle, faClock, faGear, faStop, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons';
-  import { SvelteSet } from 'svelte/reactivity';
 
   type PipelineBindingLike = StreamPipelineBinding & {
     pipelineId?: string | null;
@@ -91,7 +90,7 @@
     if (filteredExisting.length) return filteredExisting;
     const pipelineState = ctx.pipelineState ?? null;
     if (pipelineState) {
-      const collected = new SvelteSet<string>();
+      const collected = new Set<string>();
       const add = (value: unknown) => {
         const raw = typeof value === 'string' ? value.trim() : '';
         if (!raw) return;
@@ -106,7 +105,7 @@
     }
     const manifest = ctx.stream?.manifest ?? null;
     const manifestState = manifestFor(ctx.stream);
-    const collected = new SvelteSet<string>();
+    const collected = new Set<string>();
     const add = (value: unknown) => {
       const raw = typeof value === 'string' ? value.trim() : '';
       if (!raw) return;
@@ -240,7 +239,7 @@
   });
 
   const availablePipelineSelections = $derived.by(() => {
-    const values = new SvelteSet<string>();
+    const values = new Set<string>();
     pipelineGroups.forEach((group) => {
       group.outputs.forEach((output) => values.add(encodePipelineSelection(group.id, output)));
       if (!group.outputs.length) values.add(encodePipelineSelection(group.id, null));

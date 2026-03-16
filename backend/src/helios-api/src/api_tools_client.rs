@@ -4,12 +4,19 @@ use crate::api_tools_protocol::{
 use crate::http::error::ApiError;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use helios_peripherals::AiModelFormat;
-#[cfg(not(test))]
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 #[cfg(not(test))]
 use tokio::io::AsyncWriteExt;
 #[cfg(not(test))]
 use tokio::process::Command;
+
+#[derive(Debug, Clone)]
+pub(crate) struct HelperStatus {
+    pub ok: bool,
+    pub path: PathBuf,
+}
 
 #[cfg(test)]
 pub(crate) async fn run_tool(request: ApiToolsRequest) -> Result<ApiToolsResponse, ApiError> {
@@ -41,7 +48,6 @@ pub(crate) async fn run_tool(request: ApiToolsRequest) -> Result<ApiToolsRespons
     serde_json::from_slice::<ApiToolsResponse>(&output.stdout).map_err(|err| ApiError::internal(format!("failed to decode helper output: {err}")))
 }
 
-#[cfg(not(test))]
 fn helper_exe_path() -> PathBuf {
     if let Some(path) = std::env::var_os("HELIOS_API_TOOLS_BIN") {
         return PathBuf::from(path);
@@ -55,6 +61,26 @@ fn helper_exe_path() -> PathBuf {
         }
     }
     PathBuf::from("/usr/bin/helios-api-tools")
+}
+
+pub(crate) fn helper_status() -> HelperStatus {
+    let path = helper_exe_path();
+    let ok = std::fs::metadata(&path)
+        .map(|meta| {
+            if !meta.is_file() {
+                return false;
+            }
+            #[cfg(unix)]
+            {
+                return meta.permissions().mode() & 0o111 != 0;
+            }
+            #[cfg(not(unix))]
+            {
+                true
+            }
+        })
+        .unwrap_or(false);
+    HelperStatus { ok, path }
 }
 
 pub(crate) async fn calibration_board_png(params: CalibrationBoardParams) -> Result<Vec<u8>, ApiError> {

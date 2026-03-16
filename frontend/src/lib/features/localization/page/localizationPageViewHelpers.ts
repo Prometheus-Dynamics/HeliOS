@@ -288,24 +288,84 @@ export const buildViewerCameras = (options: {
     return options.rigCameras;
   }
 
-  const seen = new Set<string>();
-  const out: RigCameraInfo[] = [];
-  for (const source of options.selectedSources) {
-    const key = cameraKeyForSource(source) ?? source.id;
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push({
-      uid: key,
-      streamId: source.streamId,
-      cameraUid: source.cameraUid,
-      streamAlias: source.streamLabel ?? null,
-      driverCameraId: source.cameraPath ?? key,
-      displayName: source.streamLabel || key,
+  const isImuLikeSource = (source: LocalizationPipelineSource): boolean => {
+    const streamId = String(source.streamId ?? '').trim().toLowerCase();
+    const outputKey = String(source.outputKey ?? '').trim().toLowerCase();
+    const cameraUid = String(source.cameraUid ?? '').trim().toLowerCase();
+    return (
+      streamId.startsWith('external:imu') ||
+      streamId.startsWith('external:media-imu-') ||
+      outputKey.includes('imu') ||
+      cameraUid === 'imu'
+    );
+  };
+
+  const sourceScoreForGroup = (source: LocalizationPipelineSource, groupKey: string): number => {
+    let score = 0;
+    const normalizedGroupKey = groupKey.trim();
+    const sourceCameraKey = cameraKeyForSource(source);
+    const parentStreamId = mediaImuParentStreamIdForSource(source);
+    const streamId = String(source.streamId ?? '').trim();
+    const cameraUid = String(source.cameraUid ?? '').trim();
+    if (sourceCameraKey && sourceCameraKey === normalizedGroupKey) score += 100;
+    if (parentStreamId && parentStreamId === normalizedGroupKey) score += 80;
+    if (cameraUid && cameraUid === normalizedGroupKey) score += 60;
+    if (streamId && streamId === normalizedGroupKey) score += 40;
+    if (!isImuLikeSource(source)) score += 50;
+    if (streamId && !streamId.startsWith('external:')) score += 15;
+    if (String(source.cameraPath ?? '').trim()) score += 8;
+    if (String(source.streamLabel ?? '').trim()) score += 4;
+    return score;
+  };
+
+  const canonicalStreamIdForGroup = (sources: LocalizationPipelineSource[]): string | null => {
+    for (const source of sources) {
+      const streamId = String(source.streamId ?? '').trim();
+      if (streamId && !streamId.startsWith('external:')) return streamId;
+    }
+    for (const source of sources) {
+      const parentStreamId = mediaImuParentStreamIdForSource(source);
+      if (parentStreamId) return parentStreamId;
+    }
+    for (const source of sources) {
+      const streamId = String(source.streamId ?? '').trim();
+      if (streamId) return streamId;
+    }
+    return null;
+  };
+
+  const groups = groupLocalizationSources(options.selectedSources);
+  return groups.map((group) => {
+    const sources = group.pipelines.flatMap((pipeline) => pipeline.sources);
+    const representative =
+      [...sources].sort((left, right) => sourceScoreForGroup(right, group.key) - sourceScoreForGroup(left, group.key))[0] ??
+      null;
+    const streamId = canonicalStreamIdForGroup(sources);
+    const nonImuCameraUid =
+      sources
+        .map((source) => String(source.cameraUid ?? '').trim())
+        .find((cameraUid) => cameraUid.length > 0 && cameraUid.toLowerCase() !== 'imu') ?? null;
+    const cameraUid = nonImuCameraUid ?? (representative ? String(representative.cameraUid ?? '').trim() || null : null);
+    const streamAlias =
+      String(group.label ?? '').trim() ||
+      (representative ? String(representative.streamLabel ?? '').trim() : '') ||
+      group.key;
+    const driverCameraId =
+      String(group.path ?? '').trim() ||
+      (representative ? String(representative.cameraPath ?? '').trim() : '') ||
+      group.key;
+
+    return {
+      uid: group.key,
+      streamId,
+      cameraUid,
+      streamAlias,
+      driverCameraId,
+      displayName: streamAlias || group.key,
       backend: 'Localization',
       pose: { translation: { x: 0, y: 0, z: 0 }, rotation: { roll: 0, pitch: 0, yaw: 0 } }
-    });
-  }
-  return out;
+    };
+  });
 };
 
 export const buildViewProfileOverlays = (options: {

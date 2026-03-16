@@ -382,6 +382,9 @@ fn build_profile_output_sources(config: &LocalizationConfig) -> Vec<Localization
     let mut seen = BTreeSet::<(String, String)>::new();
 
     for profile in &config.profiles {
+        if !profile.enabled {
+            continue;
+        }
         let profile_id = profile.id.trim();
         if profile_id.is_empty() {
             continue;
@@ -567,7 +570,7 @@ pub(crate) async fn fetch_profile_output(fetcher: &ApiLocalizationSourceFetcher,
 
 async fn fetch_profile_output_inner(fetcher: &ApiLocalizationSourceFetcher, profile_id: &str, output_key: &str) -> Result<JsonValue, String> {
     let config = config::load_config().await.map_err(|err| err.to_string())?;
-    let profile = select_profile(&config, Some(profile_id)).map_err(|_| format!("profile '{profile_id}' not found"))?;
+    let profile = select_profile(&config, Some(profile_id)).map_err(|err| format!("profile '{profile_id}': {err}"))?;
     let mut sources = solve::dedupe_enabled_sources(profile.sources.iter().filter(|source| source.enabled).cloned().collect::<Vec<_>>());
     solve::enrich_source_input_keys(&fetcher.state, &mut sources).await;
 

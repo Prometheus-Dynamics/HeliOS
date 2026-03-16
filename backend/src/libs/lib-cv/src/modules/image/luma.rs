@@ -126,6 +126,7 @@ pub(crate) fn with_luma8_frame<R>(frame: &DynamicImage, f: impl FnOnce(&GrayImag
                     Ok(mut buf) => {
                         if buf.len() != needed {
                             buf.resize(needed, 0);
+                            crate::diagnostics::report_scratch_high_water("image.luma_scratch", buf.capacity());
                         }
                         for (dst, src) in buf.iter_mut().zip(src.chunks_exact(2)) {
                             *dst = src[0];
@@ -156,6 +157,7 @@ pub(crate) fn with_luma8_frame<R>(frame: &DynamicImage, f: impl FnOnce(&GrayImag
                     Ok(mut buf) => {
                         if buf.len() != needed {
                             buf.resize(needed, 0);
+                            crate::diagnostics::report_scratch_high_water("image.luma_scratch", buf.capacity());
                         }
                         rgb_to_luma_into(buf.as_mut_slice(), src);
                         let img = GrayImage::from_raw(width, height, std::mem::take(&mut *buf)).unwrap_or_else(|| GrayImage::new(width, height));
@@ -182,6 +184,7 @@ pub(crate) fn with_luma8_frame<R>(frame: &DynamicImage, f: impl FnOnce(&GrayImag
                     Ok(mut buf) => {
                         if buf.len() != needed {
                             buf.resize(needed, 0);
+                            crate::diagnostics::report_scratch_high_water("image.luma_scratch", buf.capacity());
                         }
                         rgba_to_luma_into(buf.as_mut_slice(), src);
                         let img = GrayImage::from_raw(width, height, std::mem::take(&mut *buf)).unwrap_or_else(|| GrayImage::new(width, height));

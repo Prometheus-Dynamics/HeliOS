@@ -74,6 +74,13 @@ export const createLocalizationProfileActions = (deps: LocalizationProfileAction
     void deps.localizationProfiles.persistProfileUpdate({ ...profile, viewEnabled: enabled });
   };
 
+  const setProfileEnabled = (profileId: string, enabled: boolean): void => {
+    const profile = deps.profiles().find((entry) => entry.id === profileId) ?? null;
+    if (!profile) return;
+    if ((profile.enabled ?? true) === enabled) return;
+    void deps.localizationProfiles.persistProfileUpdate({ ...profile, enabled });
+  };
+
   const persistProfileUpdate = async (nextProfile: LocalizationProfile): Promise<void> => {
     await deps.localizationProfiles.persistProfileUpdate(nextProfile);
   };
@@ -135,6 +142,7 @@ export const createLocalizationProfileActions = (deps: LocalizationProfileAction
   return {
     persistLocalizationConfig,
     setProfileColor,
+    setProfileEnabled,
     setProfileViewEnabled,
     persistProfileUpdate,
     setActiveProfile,

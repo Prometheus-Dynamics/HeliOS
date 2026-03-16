@@ -265,14 +265,19 @@ fn overlay_id_label_centered(image: &mut DynamicImage, id: u32, center_x: i64, y
         if cache.len() >= OVERLAY_ID_CACHE_MAX && !cache.contains_key(&id) {
             cache.clear();
         }
-        let entry = cache.entry(id).or_insert_with(|| {
-            let text = id.to_string();
-            let width = (text.len() as u32 * 14).max(14);
-            let height = 14 + 5;
-            let mut img = RgbaImage::from_pixel(width, height, Rgba([0, 0, 0, 0]));
-            draw::text::draw_text_x_y(&mut img, text.as_str(), (0u32, 0u32), &draw::font::FontType::SavedByZero, 14, Rgba([0, 255, 0, 255]));
-            img
-        });
+        {
+            cache.entry(id).or_insert_with(|| {
+                let text = id.to_string();
+                let width = (text.len() as u32 * 14).max(14);
+                let height = 14 + 5;
+                let mut img = RgbaImage::from_pixel(width, height, Rgba([0, 0, 0, 0]));
+                draw::text::draw_text_x_y(&mut img, text.as_str(), (0u32, 0u32), &draw::font::FontType::SavedByZero, 14, Rgba([0, 255, 0, 255]));
+                img
+            });
+        }
+        let total = cache.values().map(|image| image.as_raw().capacity() * std::mem::size_of::<u8>()).sum::<usize>();
+        report_overlay_id_cache_bytes(total);
+        let entry = cache.get(&id).expect("overlay id cache entry inserted");
         let x = center_x - (entry.width() as i64 / 2);
         draw::utils::overlay_rgba_image(image, entry, x, y);
     });

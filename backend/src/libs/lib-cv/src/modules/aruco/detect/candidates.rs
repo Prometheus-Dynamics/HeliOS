@@ -94,7 +94,7 @@ fn filter_candidate(contour: &[Point<f32>], config: &ArucoTagDetectorConfig) -> 
         }
     }
     let adaptive_epsilon = contour_epsilon(perimeter, config);
-    DETECT_SCRATCH.with(|scratch| {
+    let result = DETECT_SCRATCH.with(|scratch| {
         let mut scratch = scratch.borrow_mut();
         let (contour, approx) = {
             let DetectScratch { downsampled, approx, .. } = &mut *scratch;
@@ -130,7 +130,9 @@ fn filter_candidate(contour: &[Point<f32>], config: &ArucoTagDetectorConfig) -> 
         sort_corners_clockwise(&mut quad);
         rotate_corners_to_top_left(&mut quad);
         Some(quad)
-    })
+    });
+    report_detect_scratch();
+    result
 }
 
 pub fn candidate_quad_from_contour(contour: &[Point<f32>], config: &ArucoTagDetectorConfig) -> Option<[Point<f32>; 4]> {
@@ -154,7 +156,7 @@ pub fn candidate_quad_from_contour_fast(contour: &[Point<f32>], perimeter: f32, 
     }
 
     let adaptive_epsilon = contour_epsilon(perimeter, config);
-    DETECT_SCRATCH.with(|scratch| {
+    let result = DETECT_SCRATCH.with(|scratch| {
         let mut scratch = scratch.borrow_mut();
         let (contour, approx) = {
             let DetectScratch { downsampled, approx, .. } = &mut *scratch;
@@ -175,7 +177,9 @@ pub fn candidate_quad_from_contour_fast(contour: &[Point<f32>], perimeter: f32, 
             return None;
         }
         Some(quad)
-    })
+    });
+    report_detect_scratch();
+    result
 }
 
 pub fn filter_candidates(contours: &[Vec<Point<f32>>], config: &ArucoTagDetectorConfig) -> Vec<[Point<f32>; 4]> {

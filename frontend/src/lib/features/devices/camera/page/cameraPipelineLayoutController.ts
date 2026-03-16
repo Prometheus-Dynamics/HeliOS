@@ -130,7 +130,17 @@ type PipelineTemplateEntry = {
   summary?: string | null;
 };
 
+const stringArraysEqual = (left: string[] | undefined, right: string[]): boolean => {
+  if (!Array.isArray(left)) return false;
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i += 1) {
+    if (left[i] !== right[i]) return false;
+  }
+  return true;
+};
+
 export function createPipelineLayoutController(state: PipelineLayoutState, deps: PipelineLayoutDeps) {
+  const pipelineOutputsLoadPromises = new Map<string, Promise<void>>();
   const asRecord = (value: unknown): Record<string, unknown> | null =>
     value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
   const asTrimmedString = (value: unknown): string =>
@@ -372,18 +382,33 @@ export function createPipelineLayoutController(state: PipelineLayoutState, deps:
     } else if (!current && filtered.length) {
       state.pipelineOutputByPipelineId = { ...state.pipelineOutputByPipelineId, [pipelineId]: filtered[0] };
     }
-    state.pipelineOutputOptionsCache = { ...state.pipelineOutputOptionsCache, [pipelineId]: filtered };
+    const cachedOutputs = state.pipelineOutputOptionsCache[pipelineId];
+    if (!stringArraysEqual(cachedOutputs, filtered)) {
+      state.pipelineOutputOptionsCache = { ...state.pipelineOutputOptionsCache, [pipelineId]: filtered };
+    }
     return { graphJson, filtered, types: resolvedTypes };
   }
 
   async function ensurePipelineOutputsLoaded(pipelineId: string): Promise<void> {
     const normalized = String(pipelineId ?? '').trim();
     if (!normalized.length) return;
-    try {
-      await ensurePipelineGraphAndOutputs(normalized);
-    } catch (err) {
-      console.warn('Failed to load pipeline outputs', err);
+    if (Object.prototype.hasOwnProperty.call(state.pipelineOutputOptionsCache, normalized)) return;
+    const inFlight = pipelineOutputsLoadPromises.get(normalized);
+    if (inFlight) {
+      await inFlight;
+      return;
     }
+    const loadPromise = (async () => {
+      try {
+        await ensurePipelineGraphAndOutputs(normalized);
+      } catch (err) {
+        console.warn('Failed to load pipeline outputs', err);
+      } finally {
+        pipelineOutputsLoadPromises.delete(normalized);
+      }
+    })();
+    pipelineOutputsLoadPromises.set(normalized, loadPromise);
+    await loadPromise;
   }
 
   function extractGraphOutputPorts(graph: unknown): string[] {

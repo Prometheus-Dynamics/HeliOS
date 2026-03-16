@@ -37,6 +37,7 @@ export interface PipelineNodeData extends Record<string, unknown> {
   outputOrder: string[];
   activeConnection: ActiveConnection | null;
   detailLevel?: 'minimal' | 'full';
+  portEditorsMode?: 'selected' | 'always' | 'never';
   searchActive?: boolean;
   searchMatch?: boolean;
   searchTokens?: string[];

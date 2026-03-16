@@ -22,7 +22,6 @@
   import CameraPoseOverlay from '$lib/features/localization/page/CameraPoseOverlay.svelte';
   import FieldMapManager from '$lib/features/localization/page/FieldMapManager.svelte';
   import { createLazySvelteComponentLoader } from '$lib/utils/lazySvelteComponent';
-  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
   type ImuOrientationViewerComponent = (typeof import('$lib/components/ImuOrientationViewer.svelte'))['default'];
 
@@ -410,7 +409,7 @@
     groupedSources = [],
     openSourceGroups = [],
     onToggleSourceGroup,
-    calibratedCameraIds = new SvelteSet<string>(),
+    calibratedCameraIds = new Set<string>(),
     isSourceCalibrated = () => true,
     selectedSourceIds = [],
     onToggleSource,
@@ -462,11 +461,11 @@
 
   const ViewersComponent = $derived(viewersComponent);
   const groupedCameraPovOptions = $derived.by<CameraPovOptionGroup[]>(() => {
-    const groups = new SvelteMap<string, Map<string, CameraPovOption[]>>();
+    const groups = new Map<string, Map<string, CameraPovOption[]>>();
     for (const option of cameraPovOptions) {
       const groupKey = (option.groupLabel ?? '').trim() || 'Profile';
       const subgroupKey = (option.subgroupLabel ?? '').trim() || 'Camera';
-      const subgroups = groups.get(groupKey) ?? new SvelteMap<string, CameraPovOption[]>();
+      const subgroups = groups.get(groupKey) ?? new Map<string, CameraPovOption[]>();
       const list = subgroups.get(subgroupKey) ?? [];
       list.push(option);
       subgroups.set(subgroupKey, list);

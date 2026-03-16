@@ -135,6 +135,7 @@ pub(super) fn decode_quad_sampled(
                     scratch.sample_positions_total_width = total_width;
                     scratch.sample_positions_grid = config.cell_sample_grid;
                     scratch.sample_positions_margin_bits = margin_bits;
+                    report_decode_scratch_bytes(scratch.warped_buf.capacity() * std::mem::size_of::<u8>() + scratch.sample_positions.capacity() * std::mem::size_of::<(f32, f32)>());
                 }
                 if scratch.sample_positions_per_cell == 0 {
                     return Err(SampledDecodeError::InvalidInput);

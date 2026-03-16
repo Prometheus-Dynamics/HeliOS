@@ -21,6 +21,7 @@ export type GraphNodeUpdateOptions = {
   activeConnection: ActiveConnection | null;
   previousNodes: Node[];
   detailLevel: 'minimal' | 'full';
+  portEditorsMode: 'selected' | 'always' | 'never';
   focusHighlight: { nodeId: string; port: string | null; token: number } | null;
   resolveRegistryEntryForNode: (node: PipelineGraphPlan['nodes'][string]) => PipelineRegistryEntry | null;
   onNodePortDoubleClick: (nodeId: string, direction: 'input' | 'output', port: string, event: MouseEvent) => void;
@@ -69,6 +70,7 @@ export function buildUpdatedNodes(options: GraphNodeUpdateOptions): Node[] {
     previousNodes: options.previousNodes,
     portOrders: resolvePortOrders(options.graph),
     detailLevel: options.detailLevel,
+    portEditorsMode: options.portEditorsMode,
     highlight: options.focusHighlight,
     resolveRegistryEntryForNode: options.resolveRegistryEntryForNode,
     onNodePortDoubleClick: options.onNodePortDoubleClick,

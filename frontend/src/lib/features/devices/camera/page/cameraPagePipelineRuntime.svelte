@@ -14,7 +14,6 @@
   } from './cameraPipelineTuningController';
   import { createCameraPipelineLayoutRuntime } from './cameraPipelineLayoutRuntime';
   import { createCameraPipelineTuningRuntime } from './cameraPipelineTuningRuntime';
-  import { SvelteSet } from 'svelte/reactivity';
 
   type PipelineRuntimeDeps = {
     streamId: string;
@@ -310,7 +309,7 @@
       void pipelineState.pipelineGridSlots;
       void pipelineState.selectedPipelineId;
       if (!pipelineState.pipelineUiHydrated) return;
-      const ids = new SvelteSet<string>();
+      const ids = new Set<string>();
       (pipelineState.assignedPipelineIds ?? []).forEach((id) => {
         const normalized = String(id ?? '').trim();
         if (normalized.length) ids.add(normalized);
@@ -329,7 +328,7 @@
       const manifest = manifestState();
       if (!manifest) return;
       void pipelineOutputOptionsCache;
-      const ids = new SvelteSet<string>();
+      const ids = new Set<string>();
       const add = (value: unknown) => {
         const raw = typeof value === 'string' ? value.trim() : '';
         if (!raw) return;

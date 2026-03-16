@@ -140,7 +140,7 @@ export async function fetchI2cInventorySnapshot(timeoutMs: number = SENSOR_REQUE
   return mapI2cInventory(await fetchI2cInventory(timeoutMs));
 }
 
-async function postI2cRescan(timeoutMs: number): Promise<void> {
+async function postI2cRescan(timeoutMs: number): Promise<I2cInventoryResponse | null> {
   const url = apiUrl('/peripherals/i2c/scan');
   const response = await fetchWithRetry(
     url,
@@ -154,15 +154,36 @@ async function postI2cRescan(timeoutMs: number): Promise<void> {
     if (response.status === 404) {
       // Compatibility: older backends only expose GET /peripherals/i2c.
       // Treat scan as a no-op and let the caller fetch the latest inventory next.
-      return;
+      return null;
     }
     const text = await response.text().catch(() => '');
     throw new Error(text || `I2C rescan failed (${response.status})`);
   }
+  const contentType = response.headers.get('Content-Type') ?? '';
+  if (!contentType.toLowerCase().includes('application/json')) {
+    return null;
+  }
+  return (await response.json()) as I2cInventoryResponse;
 }
 
 export async function refreshI2cInventory(): Promise<I2cInventory> {
-  await postI2cRescan(SENSOR_REQUEST_TIMEOUT_MS);
+  try {
+    const scanned = await postI2cRescan(SENSOR_REQUEST_TIMEOUT_MS);
+    if (scanned) {
+      return mapI2cInventory(scanned);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message.trim().toLowerCase() : String(error ?? '').trim().toLowerCase();
+    const timedOut =
+      message === 'request timed out' ||
+      message === 'timeout' ||
+      message === 'the operation was aborted.' ||
+      message === 'operation was aborted' ||
+      message === 'request aborted';
+    if (!timedOut) {
+      throw error;
+    }
+  }
   return mapI2cInventory(await fetchI2cInventory(SENSOR_REQUEST_TIMEOUT_MS));
 }
 

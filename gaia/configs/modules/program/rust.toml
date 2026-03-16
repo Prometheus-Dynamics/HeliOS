@@ -11,6 +11,13 @@ profile = "aarch64-linux"
 mode = "auto"
 
 [[rust.artifacts]]
+id = "helios-api-tools"
+package = "helios-api"
+kind = "bin"
+profile = "aarch64-linux"
+mode = "auto"
+
+[[rust.artifacts]]
 id = "helios-engine"
 package = "helios-engine"
 kind = "bin"

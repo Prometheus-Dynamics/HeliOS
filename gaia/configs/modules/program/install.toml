@@ -6,6 +6,11 @@ dest = "/usr/bin/helios-api"
 mode = 493
 
 [[items]]
+artifact = "helios-api-tools"
+dest = "/usr/bin/helios-api-tools"
+mode = 493
+
+[[items]]
 artifact = "helios-engine"
 dest = "/usr/bin/helios-engine"
 mode = 493

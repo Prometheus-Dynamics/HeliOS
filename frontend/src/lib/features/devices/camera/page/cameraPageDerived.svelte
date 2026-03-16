@@ -19,7 +19,6 @@
     registryPortTypeFor,
     type PipelineNodeValueDescriptor
   } from './cameraPipelineTuningController';
-  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
   type PipelineGraphListEntry = Record<string, unknown> & {
     id?: string;
@@ -92,7 +91,7 @@
       }
       const baseKey = (resolveDataTypeKey(base ?? undefined) ?? '').toLowerCase();
       const liveKey = (resolveDataTypeKey(live ?? undefined) ?? '').toLowerCase();
-      const genericKeys = new SvelteSet(['generic', 'any', 'unknown', 'dynamic']);
+      const genericKeys = new Set(['generic', 'any', 'unknown', 'dynamic']);
       if (genericKeys.has(baseKey) && liveKey && !genericKeys.has(liveKey)) return live;
       return base;
     };
@@ -161,7 +160,7 @@
       plan: PipelineGraphPlan | null,
       resolveRegistryEntryForNode: ReturnType<typeof createRegistryResolver> | null
     ): Map<string, PipelineNodeValueDescriptor> => {
-      const map = new SvelteMap<string, PipelineNodeValueDescriptor>();
+      const map = new Map<string, PipelineNodeValueDescriptor>();
       if (!plan) return map;
       const overrides = extractNodeOverrides(plan);
       for (const [nodeId, node] of Object.entries(plan.nodes ?? {})) {
@@ -188,7 +187,7 @@
         const values =
           (infoValues && Object.keys(infoValues).length ? infoValues : sourceValues) ??
           {};
-        const portKeys = new SvelteSet<string>([
+        const portKeys = new Set<string>([
           ...Object.keys(inputs),
           ...Object.keys(registryInputs),
           ...Object.keys(portMeta),
@@ -274,7 +273,7 @@
     const telemetrySample = $derived.by<ResourceSample>(() => get(resourceTelemetryStore) as ResourceSample);
 
     const activePipelineIds = $derived.by(() => {
-      const seen = new SvelteSet<string>();
+      const seen = new Set<string>();
       const primary: string[] = [];
       const fallback: string[] = [];
       const normalizeId = (value: unknown): string | null => {

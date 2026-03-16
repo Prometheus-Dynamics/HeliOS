@@ -38,6 +38,8 @@ pub struct LocalizationProfile {
     /// Snap field-space pitch to level (0 deg).
     #[serde(default)]
     pub snap_pitch_to_ground: bool,
+    #[serde(default = "default_profile_enabled")]
+    pub enabled: bool,
     #[serde(default)]
     pub color: Option<String>,
     #[serde(default = "default_view_enabled")]
@@ -322,6 +324,7 @@ impl Default for LocalizationConfig {
             snap_z_to_ground: false,
             snap_roll_to_ground: false,
             snap_pitch_to_ground: false,
+            enabled: true,
             color: None,
             view_enabled: true,
             temporal_stabilization: LocalizationTemporalStabilizationConfig::default(),
@@ -421,20 +424,28 @@ fn solver_uses_multiple_camera_sources(enabled_sources: &[(String, String)], sol
 
 pub fn select_profile<'a>(config: &'a LocalizationConfig, override_id: Option<&str>) -> Result<&'a LocalizationProfile, String> {
     if let Some(id) = override_id {
-        return config.profiles.iter().find(|profile| profile.id == id).ok_or_else(|| "localization profile not found".to_string());
+        let profile = config.profiles.iter().find(|profile| profile.id == id).ok_or_else(|| "localization profile not found".to_string())?;
+        if !profile.enabled {
+            return Err("localization profile disabled".to_string());
+        }
+        return Ok(profile);
     }
 
     if let Some(active_id) = config.active_profile_id.as_deref() {
-        if let Some(profile) = config.profiles.iter().find(|profile| profile.id == active_id) {
+        if let Some(profile) = config.profiles.iter().find(|profile| profile.id == active_id && profile.enabled) {
             return Ok(profile);
         }
     }
 
-    config.profiles.first().ok_or_else(|| "no localization profiles configured".to_string())
+    config.profiles.iter().find(|profile| profile.enabled).ok_or_else(|| "no enabled localization profiles configured".to_string())
 }
 
 fn default_source_weight() -> f32 {
     1.0
+}
+
+fn default_profile_enabled() -> bool {
+    true
 }
 
 fn default_view_enabled() -> bool {
@@ -1103,6 +1114,7 @@ mod tests {
             snap_z_to_ground: false,
             snap_roll_to_ground: false,
             snap_pitch_to_ground: false,
+            enabled: true,
             color: None,
             view_enabled: true,
             temporal_stabilization: LocalizationTemporalStabilizationConfig::default(),
@@ -1157,5 +1169,25 @@ mod tests {
         let normalized_profile = &normalized.profiles[0];
         assert_eq!(normalized_profile.allowed_tag_ids, vec![2, 3, 9]);
         assert_eq!(normalized_profile.excluded_tag_ids, vec![1, 2, 4]);
+    }
+
+    #[test]
+    fn select_profile_skips_disabled_active_profile() {
+        let mut disabled = base_profile();
+        disabled.id = "disabled".to_string();
+        disabled.enabled = false;
+        let mut enabled = base_profile();
+        enabled.id = "enabled".to_string();
+        let config = LocalizationConfig { active_profile_id: Some("disabled".to_string()), profiles: vec![disabled, enabled] };
+        let selected = select_profile(&config, None).expect("enabled profile");
+        assert_eq!(selected.id, "enabled");
+    }
+
+    #[test]
+    fn select_profile_rejects_disabled_override() {
+        let mut profile = base_profile();
+        profile.enabled = false;
+        let err = select_profile(&LocalizationConfig { active_profile_id: Some(profile.id.clone()), profiles: vec![profile] }, Some("p")).expect_err("disabled override should fail");
+        assert_eq!(err, "localization profile disabled");
     }
 }

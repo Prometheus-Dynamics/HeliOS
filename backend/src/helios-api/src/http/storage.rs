@@ -221,6 +221,11 @@ fn describe_self_check_codes(codes: &[String]) -> String {
             "data_partition_mount_failed" => "mounting the DATA partition failed",
             "overlay_data_bind_failed" => "restoring the /.overlay-data bind mount failed",
             "helios_state_dirs_failed" => "creating required HeliOS state directories failed",
+            "helios_api_missing" => "required binary /usr/bin/helios-api is missing",
+            "helios_api_tools_missing" => "required helper binary /usr/bin/helios-api-tools is missing",
+            "helios_engine_missing" => "required binary /usr/bin/helios-engine is missing",
+            "helios_peripherals_missing" => "required binary /usr/bin/helios-peripherals is missing",
+            "helios_updater_missing" => "required binary /usr/bin/helios-updater is missing",
             other => other,
         })
         .collect::<Vec<_>>();

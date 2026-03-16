@@ -44,6 +44,7 @@ const apiNode = $derived(data?.apiNode ?? null);
 const registryEntry = $derived((data?.registryEntry ?? null) as PipelineRegistryEntry | null);
 const nodeHeatmapMode = $derived(Boolean(data?.heatmapMode));
 const nodeDetailLevel = $derived((data?.detailLevel ?? 'full') as 'minimal' | 'full');
+const portEditorsMode = $derived((data?.portEditorsMode ?? 'selected') as 'selected' | 'always' | 'never');
 const nodeGpuSegment = $derived((data?.gpuSegment ?? null) as number | null);
 const nodeGpuPeers = $derived((data?.gpuPeers ?? null) as number | null);
 const gpuOverlayEnabled = $derived(Boolean(data?.gpuOverlay));
@@ -430,9 +431,11 @@ const portSearchMatch = $derived.by(
 );
 const nodeSearchHit = $derived(searchActive && (nodeSearchMatch || portSearchMatch));
 const nodeSearchDim = $derived(searchActive && !nodeSearchHit);
-const showInteractivePortEditors = $derived(
-  selected || nodeHighlightActive || Boolean(activeConnection)
-);
+const showInteractivePortEditors = $derived.by(() => {
+  if (portEditorsMode === 'never') return false;
+  if (portEditorsMode === 'always') return showDetailedNode;
+  return selected || nodeHighlightActive || Boolean(activeConnection);
+});
 
 function resolvePortStateClass(direction: 'input' | 'output', type: PipelineDataType): string {
   if (!activeConnection) return '';

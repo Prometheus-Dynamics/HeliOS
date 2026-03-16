@@ -116,12 +116,21 @@ where
         self.protocol
     }
 
-    pub async fn send_command(&mut self, journal: &JournalWriter<Command>, command: &Command) -> Result<JournalEntry<Command>, ClientTransportError> {
-        let entry = journal.append(command).map_err(ClientTransportError::Io)?;
+    async fn send_frame(&mut self, command: &Command) -> Result<(), ClientTransportError> {
         let envelope = command.encode_envelope().map_err(|err| ClientTransportError::BincodeEncode(err.into_inner()))?;
         let frame = Frame::encode(self.protocol, MessageKind::Command, Uuid::new_v4(), FrameFlags::ACK_REQUIRED, &envelope).map_err(ClientTransportError::BincodeEncode)?;
         self.framed.send(frame).await.map_err(ClientTransportError::Io)?;
+        Ok(())
+    }
+
+    pub async fn send_command(&mut self, journal: &JournalWriter<Command>, command: &Command) -> Result<JournalEntry<Command>, ClientTransportError> {
+        let entry = journal.append(command).map_err(ClientTransportError::Io)?;
+        self.send_frame(command).await?;
         Ok(entry)
+    }
+
+    pub async fn send_ephemeral_command(&mut self, command: &Command) -> Result<(), ClientTransportError> {
+        self.send_frame(command).await
     }
 
     pub async fn next_event(&mut self) -> Result<Option<Event>, ClientTransportError> {

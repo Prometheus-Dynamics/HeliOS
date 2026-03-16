@@ -87,7 +87,8 @@
     poseSpaceLabel,
     profileColorForId,
     isSourceCalibrated,
-    cameraKeyForSource
+    cameraKeyForSource,
+    mediaImuParentStreamIdForSource
   } from '$lib/features/localization/utils';
   import {
     toNumber,
@@ -121,7 +122,6 @@
     type LocalizationBaseFrame
   } from '$lib/features/localization/page/localizationPageViewHelpers';
   import { estimateCalibrationFovDegs } from '$lib/features/devices/camera/cameraCalibrationUtils';
-  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
   type FeedStatus = 'idle' | 'connecting' | 'live' | 'error';
 
@@ -283,6 +283,7 @@
 
   const {
     setProfileColor,
+    setProfileEnabled,
     setProfileViewEnabled,
     persistProfileUpdate,
     setActiveProfile,
@@ -493,7 +494,7 @@
       return false;
     }
 
-    const existingById = new SvelteMap((profile.sources ?? []).map((entry) => [entry.id, entry]));
+    const existingById = new Map((profile.sources ?? []).map((entry) => [entry.id, entry]));
     const seededSources: LocalizationSourceConfig[] = [];
     const pushSeedSource = (source: LocalizationPipelineSource | null) => {
       if (!source) return;
@@ -525,7 +526,7 @@
     await localizationProfiles.persist(nextConfig);
 
     const streamsToSeed = Array.from(
-      new SvelteSet(
+      new Set(
         seededSources
           .map((source) => String(source.streamId ?? '').trim())
           .filter((streamId) => UUID_LIKE_RE.test(streamId))
@@ -1030,7 +1031,7 @@
   });
 
   const { runFeedPoll } = createLocalizationFeedRuntime({
-    getActiveProfile: () => $activeProfile ?? null,
+    getActiveProfile: () => runtimeActiveProfile ?? null,
     getHasAnyFeedSources: () => hasAnyFeedSources,
     getActiveHasSources: () => activeHasSources,
     getViewProfilesWithSources: () => viewProfilesWithSources,
@@ -1207,7 +1208,7 @@
   let streamMetricsById = $state<Record<string, StreamMetrics>>({});
   let streamMetricsUpdatedAtById = $state<Record<string, number>>({});
   let streamMetricsErrorById = $state<Record<string, string>>({});
-  const streamMetricsCleanup = new SvelteMap<string, () => void>();
+  const streamMetricsCleanup = new Map<string, () => void>();
 
   let pollVisibilityPaused = false;
   let visibilityHandler: (() => void) | null = null;
@@ -1236,10 +1237,10 @@
     const hasExplicit = profiles.some((profile) => typeof profile.viewEnabled === 'boolean');
     if (!hasExplicit) {
       // Legacy configs may not have `viewEnabled`; default to showing the active profile until persisted.
-      return activeProfile ? [activeProfile] : [];
+      return activeProfile && activeProfile.enabled !== false ? [activeProfile] : [];
     }
     // Strict: only explicitly enabled profiles drive 3D marker visibility.
-    return profiles.filter((profile) => profile.viewEnabled === true);
+    return profiles.filter((profile) => profile.enabled !== false && profile.viewEnabled === true);
   }
 
   function sourceStreamOutputKey(streamId: string | null | undefined, outputKey: string | null | undefined): string {
@@ -1255,8 +1256,8 @@
     sources: LocalizationPipelineSource[]
   ): LocalizationPipelineSource[] {
     const viewProfiles = computeViewProfiles(profiles, activeProfile);
-    const enabledIds = new SvelteSet<string>();
-    const enabledStreamOutputs = new SvelteSet<string>();
+    const enabledIds = new Set<string>();
+    const enabledStreamOutputs = new Set<string>();
     for (const profile of viewProfiles) {
       for (const source of profile.sources ?? []) {
         if (!source.enabled) continue;
@@ -1457,7 +1458,7 @@
   function cameraKeyVariants(value: string | null | undefined): string[] {
     const trimmed = typeof value === 'string' ? value.trim() : '';
     if (!trimmed) return [];
-    const out = new SvelteSet<string>([trimmed]);
+    const out = new Set<string>([trimmed]);
     const stripped = trimmed.startsWith('device:')
       ? trimmed.slice('device:'.length)
       : trimmed.startsWith('stream:')
@@ -1472,7 +1473,7 @@
   }
 
   function collectKeyVariants(values: Array<string | null | undefined>): string[] {
-    const out = new SvelteSet<string>();
+    const out = new Set<string>();
     for (const value of values) {
       for (const key of cameraKeyVariants(value)) {
         out.add(key);
@@ -1626,7 +1627,7 @@
       const direct = rigCameraForSource(source);
       if (direct) return direct;
     }
-    const keySet = new SvelteSet(
+    const keySet = new Set(
       collectKeyVariants([
         detection.cameraUid,
         detection.sourceId,
@@ -1703,7 +1704,7 @@
     }
 
     const out: LocalizationDetectionPose[] = [];
-    const seen = new SvelteSet<string>();
+    const seen = new Set<string>();
     for (const detection of outputs.tagInCamera ?? []) {
       const fieldFromTag = detectionToFieldTransform(detection, sourceById, fieldFromRobot, fieldFromCameraByKey);
       if (!fieldFromTag) continue;
@@ -2033,7 +2034,7 @@
   }
 
   function refreshLocalizationLiveState(options: { refreshSources?: boolean } = {}): void {
-    const profileId = $activeProfile?.id ?? $localizationConfig?.activeProfileId ?? null;
+    const profileId = $localizationConfig?.activeProfileId ?? null;
     void rigLayoutStore.refresh({ force: true });
     void loadLocalizationConfig();
     if (options.refreshSources) {
@@ -2078,7 +2079,7 @@
   }
 
   function computeProfileIndexById(profiles: LocalizationProfile[]): Map<string, number> {
-    const map = new SvelteMap<string, number>();
+    const map = new Map<string, number>();
     profiles.forEach((profile, index) => {
       map.set(profile.id, index);
     });
@@ -2098,6 +2099,11 @@
     const profileId = ($activeProfile?.id ?? $activeProfileId ?? '').trim();
     return profileId ? `profile:${profileId}` : '';
   });
+  const runtimeActiveProfile = $derived.by<LocalizationProfile | null>(() => {
+    const profileId = ($localizationConfig?.activeProfileId ?? '').trim();
+    if (!profileId) return null;
+    return $profiles.find((profile) => profile.id === profileId && profile.enabled !== false) ?? null;
+  });
 
   const compatibleSources = $derived.by<LocalizationPipelineSource[]>(() => {
     const selfProfileStreamId = activeProfileSourceStreamId;
@@ -2114,9 +2120,9 @@
     profileFieldOrigin.custom ?? { x: 0, z: 0, yawDeg: 0 }
   );
 
-  const sourceIdById = $derived.by<Map<string, string>>(() => new SvelteMap(sources.map((source) => [source.id, source.id])));
+  const sourceIdById = $derived.by<Map<string, string>>(() => new Map(sources.map((source) => [source.id, source.id])));
   const sourceIdByStreamOutput = $derived.by<Map<string, string>>(() => {
-    const map = new SvelteMap<string, string>();
+    const map = new Map<string, string>();
     for (const source of sources) {
       const key = sourceStreamOutputKey(source.streamId, source.outputKey);
       if (!key) continue;
@@ -2125,10 +2131,10 @@
     return map;
   });
   const compatibleSourceIdById = $derived.by<Map<string, string>>(
-    () => new SvelteMap(compatibleSources.map((source) => [source.id, source.id]))
+    () => new Map(compatibleSources.map((source) => [source.id, source.id]))
   );
   const compatibleSourceIdByStreamOutput = $derived.by<Map<string, string>>(() => {
-    const map = new SvelteMap<string, string>();
+    const map = new Map<string, string>();
     for (const source of compatibleSources) {
       const key = sourceStreamOutputKey(source.streamId, source.outputKey);
       if (!key) continue;
@@ -2206,6 +2212,9 @@
   // Sources from profiles with `viewEnabled=true` (the "Views" overlay list).
   // These are the sources that should drive what markers are visible in the 3D viewer.
   const viewOverlaySources = $derived(computeViewOverlaySources($profiles, $activeProfile ?? null, sources));
+  const viewerSourcePool = $derived.by<LocalizationPipelineSource[]>(() =>
+    hasAnyViewsEnabled ? viewOverlaySources : selectedSources
+  );
 
   // Multiple solver configs can exist per profile (solo sources and/or grouped solves).
   // Keep a local "active solver id" for the active profile so the UI can inspect/edit
@@ -2259,7 +2268,7 @@
   }
 
   function enabledSourcesForProfile(profile: LocalizationProfile): LocalizationPipelineSource[] {
-    const enabledIds = new SvelteSet(
+    const enabledIds = new Set(
       (profile.sources ?? [])
         .filter((source) => source.enabled)
         .map((source) => source.id)
@@ -2273,6 +2282,7 @@
       source.id,
       source.cameraUid,
       source.streamId,
+      mediaImuParentStreamIdForSource(source),
       source.cameraPath,
       ...(source.cameraKeys ?? [])
     ]);
@@ -2374,12 +2384,12 @@
     viewProfiles.filter((profile) => profile.sources.some((source) => source.enabled))
   );
 
-  const activeHasSources = $derived.by(() => selectedSourceIds.length > 0);
+  const activeHasSources = $derived.by(() => (runtimeActiveProfile?.sources ?? []).some((source) => source.enabled));
 
   const hasAnyFeedSources = $derived.by(() => activeHasSources || viewProfilesWithSources.length > 0);
   const activeImuSource = $derived.by<LocalizationPipelineSource | null>(() => {
-    const unique = new SvelteMap<string, LocalizationPipelineSource>();
-    for (const source of [...viewOverlaySources, ...selectedSources]) {
+    const unique = new Map<string, LocalizationPipelineSource>();
+    for (const source of viewerSourcePool) {
       if (!isImuSource(source)) continue;
       unique.set(source.id, source);
     }
@@ -2421,7 +2431,7 @@
 
   const supportedSolverModes = $derived.by<LocalizationSolverMode[]>(() => {
     const supported = localizationCapabilities?.constraints?.supportedSolverModes ?? [];
-    const seen = new SvelteSet<string>();
+    const seen = new Set<string>();
     const ordered: LocalizationSolverMode[] = [];
     for (const mode of supported) {
       const normalized = String(mode ?? '').trim();
@@ -2442,7 +2452,7 @@
   });
   const supportedPoseSpaces = $derived.by<LocalizationPoseSpace[]>(() => {
     const supported = localizationCapabilities?.constraints?.supportedPoseSpaces ?? [];
-    const seen = new SvelteSet<string>();
+    const seen = new Set<string>();
     const ordered: LocalizationPoseSpace[] = [];
     for (const space of supported) {
       const normalized = String(space ?? '').trim();
@@ -2463,7 +2473,7 @@
     }
     return ordered;
   });
-  const supportedPoseSpaceSet = $derived.by(() => new SvelteSet(supportedPoseSpaces));
+  const supportedPoseSpaceSet = $derived.by(() => new Set(supportedPoseSpaces));
   const maxMapUploadBytes = $derived.by<number | null>(() => {
     const raw = Number(localizationCapabilities?.constraints?.maxMapUploadBytes ?? Number.NaN);
     if (!Number.isFinite(raw) || raw <= 0) return null;
@@ -2497,7 +2507,7 @@
     return supportedSolvePoseSpaces.filter((space) => solverOutputSpaces.includes(space));
   });
   const derivedPoseSpaces = $derived.by<LocalizationPoseSpace[]>(() => {
-    const derived = new SvelteSet<LocalizationPoseSpace>();
+    const derived = new Set<LocalizationPoseSpace>();
     // Derived outputs should be discoverable from whichever pose spaces the solver emits.
     // Example: when `tag_in_camera` is enabled, the API can also provide `tag_in_robot` + `robot_in_tag`.
     for (const space of solverOutputSpaces) {
@@ -2509,7 +2519,7 @@
   });
   const availableCoordinateSpaces = $derived.by<LocalizationPoseSpace[]>(() => {
     const next: LocalizationPoseSpace[] = [];
-    const seen = new SvelteSet<string>();
+    const seen = new Set<string>();
     for (const space of solverOutputSpaces.concat(derivedPoseSpaces)) {
       if (!supportedPoseSpaceSet.has(space)) continue;
       if (seen.has(space)) continue;
@@ -2526,7 +2536,7 @@
       const outputSpaces = (profile.solvers ?? [])
         .flatMap((solver) => solver.outputSpaces ?? [])
         .filter((space) => supportedPoseSpaceSet.has(space));
-      const supported = new SvelteSet<LocalizationPoseSpace>(outputSpaces);
+      const supported = new Set<LocalizationPoseSpace>(outputSpaces);
       // Field spaces require a field map selection on the profile.
       if (!profile.fieldMapId) {
         supported.delete('robot_in_field');
@@ -2610,7 +2620,7 @@
   const addSolver = (): void => {
     const profile = $activeProfile;
     if (!profile) return;
-    const existing = new SvelteSet(profile.solvers.map((solver) => solver.id));
+    const existing = new Set(profile.solvers.map((solver) => solver.id));
     const base = 'group';
     let id = `${base}-${Date.now().toString(36)}`;
     let counter = 0;
@@ -2627,7 +2637,7 @@
       supportedSolverModes[0],
       profile.solvers[0]?.mode
     ];
-    const supportedModeSet = new SvelteSet(supportedSolverModes);
+    const supportedModeSet = new Set(supportedSolverModes);
     const mode =
       modeCandidates.find(
         (candidate): candidate is LocalizationSolverMode =>
@@ -2683,7 +2693,7 @@
     const profile = $activeProfile;
     const solver = activeSolverConfig;
     if (!profile || !solver) return;
-    const unique = Array.from(new SvelteSet(nextIds.map((id) => id.trim()).filter(Boolean)));
+    const unique = Array.from(new Set(nextIds.map((id) => id.trim()).filter(Boolean)));
     const current = solver.sourceIds ?? [];
     const same = current.length === unique.length && current.every((id) => unique.includes(id));
     if (same) return;
@@ -2706,7 +2716,7 @@
     const current = solver.sourceIds ?? [];
     // Empty means "all sources" in the backend; expand to the current selection when customizing.
     const expanded = current.length === 0 ? [...selectedSourceIds] : [...current];
-    const next = enabled ? Array.from(new SvelteSet([...expanded, sourceId])) : expanded.filter((id) => id !== sourceId);
+    const next = enabled ? Array.from(new Set([...expanded, sourceId])) : expanded.filter((id) => id !== sourceId);
     setActiveSolverSourceIds(next);
   };
 
@@ -2758,7 +2768,7 @@
       $activeProfileId = profile.id;
     }
     const selfProfileStreamId = `profile:${profile.id}`;
-    const enabled = Array.from(new SvelteSet(profile.sources
+    const enabled = Array.from(new Set(profile.sources
       .filter((source) => source.enabled)
       .map((source) => resolveProfileSourceId(source))
       .filter((id): id is string => Boolean(id))
@@ -2981,7 +2991,7 @@
   });
 
   const calibratedCameraIds = $derived.by(() => {
-    const ids = new SvelteSet<string>();
+    const ids = new Set<string>();
     for (const camera of rigLayoutState.layout.cameras ?? []) {
       if (!camera.pose) continue;
       if (camera.uid) ids.add(camera.uid);
@@ -3064,7 +3074,7 @@
   $effect(() => {
     if (!browser) return;
     const streamIds = Array.from(
-      new SvelteSet(
+      new Set(
         selectedSources
           .filter((source) => !isImuSource(source))
           .map((source) => source.streamId)
@@ -3173,23 +3183,13 @@
   const hasAnyViewsEnabled = $derived.by(() => viewProfiles.length > 0);
 
   const viewerCameras = $derived.by<RigCameraInfo[]>(() => {
-    const cameras = hasAnyViewsEnabled
+    const cameras = viewerSourcePool.length > 0
       ? buildViewerCameras({
           baseFrame,
           rigCameras: rigLayoutState.layout.cameras,
-          selectedSources: viewOverlaySources
+          selectedSources: viewerSourcePool
         })
       : [];
-
-    const imuSource = activeImuSource;
-    const imuCamera = imuSource ? syntheticCameraFromSource(imuSource) : null;
-    if (imuCamera) {
-      const imuKeys = new SvelteSet(sourceKeys(imuSource));
-      const hasImuCamera = cameras.some((camera) => rigCameraKeys(camera).some((key) => imuKeys.has(key)));
-      if (!hasImuCamera) {
-        cameras.push(imuCamera);
-      }
-    }
 
     if (cameras.length > 0 || baseFrame !== 'field') {
       return cameras;
@@ -3200,7 +3200,7 @@
     const cameraInField = activeSolverOutputs?.cameraInField ?? [];
     if (!cameraInField.length) return cameras;
 
-    const seen = new SvelteSet(cameras.map((camera) => camera.uid));
+    const seen = new Set(cameras.map((camera) => camera.uid));
     const fallback = [...cameras];
     for (const entry of cameraInField) {
       const key = (entry.cameraUid || entry.sourceId || '').trim();
@@ -3254,7 +3254,7 @@
         position: [pose.translation.x, pose.translation.y, pose.translation.z],
         quaternion: pose.rotation.quaternion
       };
-      const keys = new SvelteSet<string>();
+      const keys = new Set<string>();
       const addKeys = (value: string | null | undefined) => {
         for (const key of cameraKeyVariants(value)) keys.add(key);
       };
@@ -3271,7 +3271,7 @@
         for (const key of source.cameraKeys ?? []) addKeys(key);
       }
 
-      const sourceKeys = new SvelteSet(keys);
+      const sourceKeys = new Set(keys);
       const rigMatch = rigLayoutState.layout.cameras.find((camera) => {
         const candidates = [
           camera.uid,
@@ -3326,7 +3326,7 @@
           position: robotFromCamera.position,
           quaternion: robotFromCamera.quaternion
         };
-        const keys = new SvelteSet<string>();
+        const keys = new Set<string>();
         const addKeys = (value: string | null | undefined) => {
           for (const key of cameraKeyVariants(value)) keys.add(key);
         };
@@ -3360,7 +3360,7 @@
     if (!tagInCamera || !tagInRobot) return null;
     if (tagInCamera.length === 0 || tagInRobot.length === 0) return null;
 
-    const cameraByKey = new SvelteMap<string, (typeof tagInCamera)[number]>();
+    const cameraByKey = new Map<string, (typeof tagInCamera)[number]>();
     for (const det of tagInCamera) {
       cameraByKey.set(`${det.sourceId}|${det.cameraUid}|${det.tagId}`, det);
     }
@@ -3479,7 +3479,7 @@
     const out: Record<string, { position: Vec3; quaternion?: PoseQuaternion }> = { ...(baseTransforms ?? {}) };
 
     const keysForRigCamera = (camera: RigCameraInfo): string[] => {
-      const set = new SvelteSet<string>();
+      const set = new Set<string>();
       const add = (value: string | null | undefined) => {
         for (const key of cameraKeyVariants(value)) {
           set.add(key);
@@ -3495,9 +3495,9 @@
     };
 
     const keysForViewerCamera = (camera: RigCameraInfo): string[] => {
-      const set = new SvelteSet<string>(keysForRigCamera(camera));
+      const set = new Set<string>(keysForRigCamera(camera));
       for (const source of viewOverlaySources) {
-        const sourceKeys = new SvelteSet<string>();
+        const sourceKeys = new Set<string>();
         const addSource = (value: string | null | undefined) => {
           for (const key of cameraKeyVariants(value)) sourceKeys.add(key);
         };
@@ -3516,7 +3516,7 @@
     };
 
     const findRigCamera = (keys: string[]): RigCameraInfo | null => {
-      const lookup = new SvelteSet(keys);
+      const lookup = new Set(keys);
       for (const camera of rigLayoutState.layout.cameras) {
         const candidates = keysForRigCamera(camera);
         if (candidates.some((candidate) => lookup.has(candidate))) {
@@ -3537,7 +3537,7 @@
       if (robotFromCamera) {
         fieldFromCamera = composeTransforms(solverRobotTransform, robotFromCamera);
       } else {
-        const lookup = new SvelteSet(keys);
+        const lookup = new Set(keys);
         const sourcePool = [...viewOverlaySources, ...selectedSources];
         const matchedSource =
           sourcePool.find((source) =>
@@ -3564,9 +3564,9 @@
     const transforms = viewerCameraTransforms ?? {};
     const keys = Object.keys(transforms);
     if (keys.length === 0) return [];
-    const known = new SvelteSet(keys);
+    const known = new Set(keys);
     const matched = viewerCameras.filter((camera) => rigCameraKeys(camera).some((key) => known.has(key)));
-    const covered = new SvelteSet<string>();
+    const covered = new Set<string>();
     for (const camera of matched) {
       for (const key of rigCameraKeys(camera)) {
         covered.add(key);
@@ -3686,8 +3686,8 @@
 
   const cameraPovByOptionId = $derived.by<Record<string, CameraPovState>>(() => {
     const out: Record<string, CameraPovState> = {};
-    const profileById = new SvelteMap($profiles.map((profile) => [profile.id, profile]));
-    const sourceById = new SvelteMap(sources.map((source) => [source.id, source]));
+    const profileById = new Map($profiles.map((profile) => [profile.id, profile]));
+    const sourceById = new Map(sources.map((source) => [source.id, source]));
 
     const toPoseTransform = (pose: { translation: { x: number; y: number; z: number }; rotation: { quaternion: PoseQuaternion } } | null | undefined): PoseTransform | null => {
       if (!pose) return null;
@@ -3705,7 +3705,7 @@
       const outputs = outputsForProfile(profile);
       if (!outputs) continue;
 
-      const sourceKeySet = new SvelteSet(sourceKeys(source));
+      const sourceKeySet = new Set(sourceKeys(source));
       const rigCamera = (() => {
         let best: { camera: RigCameraInfo; score: number } | null = null;
         for (const camera of rigLayoutState.layout.cameras) {
@@ -3758,7 +3758,7 @@
 
       const cameraKey =
         (source.cameraUid || source.streamId || source.id || rigCamera?.uid || '').trim() || null;
-      const allKeys = new SvelteSet<string>([...Array.from(sourceKeySet.values()), ...rigCameraKeys(rigCamera)]);
+      const allKeys = new Set<string>([...Array.from(sourceKeySet.values()), ...rigCameraKeys(rigCamera)]);
       const intrinsicsEntry = Array.from(allKeys.values())
         .map((key) => cameraIntrinsicsByKey[key] ?? null)
         .find(
@@ -3823,7 +3823,7 @@
     const outputs = outputsForProfile(profile);
     if (!outputs) return 1;
 
-    const sourceById = new SvelteMap(sources.map((source) => [source.id, source]));
+    const sourceById = new Map(sources.map((source) => [source.id, source]));
     const detectionsForSpace =
       coordinateSpace === 'camera_in_field' || coordinateSpace === 'robot_in_field'
         ? fieldDetectionsForOutputs(outputs, sourceById)
@@ -3879,7 +3879,7 @@
       const transforms = viewerCameraTransforms ?? {};
       if (!Object.keys(transforms).length) return null;
 
-      const keyCandidates = new SvelteSet<string>();
+      const keyCandidates = new Set<string>();
       const addKeys = (value: string | null | undefined) => {
         for (const key of cameraKeyVariants(value)) {
           keyCandidates.add(key);
@@ -3937,7 +3937,7 @@
       changed = true;
     }
 
-    const validOptions = new SvelteSet(cameraPovOptionsBase.map((option) => option.id));
+    const validOptions = new Set(cameraPovOptionsBase.map((option) => option.id));
     for (const key of Object.keys(next)) {
       if (validOptions.has(key)) continue;
       delete next[key];
@@ -3968,7 +3968,7 @@
     const povForwardSign = viewerCameraPovForwardSign;
     const povProfileId = selectedPov?.profileId ?? null;
     const povSourceId = selectedPov?.sourceId ?? null;
-    const sourceById = new SvelteMap(sources.map((source) => [source.id, source]));
+    const sourceById = new Map(sources.map((source) => [source.id, source]));
     const allDetections = viewProfiles.flatMap<ViewerDetectionPose>((profile) => {
       const resp = solveResponsesByProfile[profile.id] ?? (profile.id === solveResponse?.profileId ? solveResponse : null);
       const solvers = resp?.solvers ?? [];
@@ -3999,7 +3999,7 @@
     if (baseFrame !== 'field') return [];
     const doc = activeFieldMapDoc;
     if (!doc) return [];
-    const detectedColorByTagId = new SvelteMap<string, string>();
+    const detectedColorByTagId = new Map<string, string>();
     for (const detection of detectedFieldTagDetections) {
       const tagKey = String(detection.tagId);
       if (detectedColorByTagId.has(tagKey)) continue;
@@ -4028,11 +4028,11 @@
     if (!showTagLines) return [];
     const doc = activeFieldMapDoc;
     if (!doc) return [];
-    const markerByTagId = new SvelteMap<string, (typeof doc.markers)[number]>();
+    const markerByTagId = new Map<string, (typeof doc.markers)[number]>();
     for (const marker of doc.markers) {
       markerByTagId.set(String(marker.id), marker);
     }
-    const sourceById = new SvelteMap(sources.map((source) => [source.id, source]));
+    const sourceById = new Map(sources.map((source) => [source.id, source]));
     return detectedFieldTagDetections
       .map((detection) => {
         const mapMarker = markerByTagId.get(String(detection.tagId)) ?? null;
@@ -4213,7 +4213,7 @@
     const isFieldSpace = coordinateSpace === 'camera_in_field' || coordinateSpace === 'robot_in_field';
 
     if (!isFieldSpace) {
-      const liveKeys = new SvelteSet<string>();
+      const liveKeys = new Set<string>();
       for (const profile of viewProfilesWithSources) {
         const outputs = outputsForProfile(profile);
         const detections = detectionPosesForSpace(outputs, coordinateSpace);
@@ -4221,7 +4221,7 @@
           liveKeys.add(localTagPoseCacheKey(profile.id, coordinateSpace, detection));
         }
       }
-      const profileIdSet = new SvelteSet(viewProfilesWithSources.map((profile) => profile.id));
+      const profileIdSet = new Set(viewProfilesWithSources.map((profile) => profile.id));
       const rows = Object.values(lastLocalTagPoseByKey)
         .filter((entry) => entry.space === coordinateSpace && profileIdSet.has(entry.profileId))
         .sort((a, b) => {
@@ -4376,7 +4376,7 @@
   });
 
   $effect(() => {
-    const profile = $activeProfile;
+    const profile = runtimeActiveProfile;
     if (!profile) return;
     void loadPipelineStatus(profile.id);
     void loadPipelineOutputs(profile.id);
@@ -4586,7 +4586,8 @@
         {:else}
           {#each filteredProfiles as profile (profile.id)}
             {@const isSelected = $activeProfileId === profile.id}
-            {@const enabled = profile.viewEnabled === true}
+            {@const runtimeEnabled = profile.enabled !== false}
+            {@const visible = profile.viewEnabled === true}
             {@const color = profileColorForId(profile.id, $profiles, profileIndexById, PROFILE_COLORS)}
             {@const supported = (profileSupportedSpacesById?.[profile.id] ?? []).includes(coordinateSpace)}
             <div
@@ -4594,7 +4595,7 @@
                 isSelected
                   ? 'border-primary-400/70 bg-primary-500/10 text-white shadow-lg shadow-primary-500/20'
                   : 'border-surface-700/40 text-surface-300 hover:border-surface-600/80'
-              } ${supported ? '' : 'opacity-60'}`}
+              } ${supported ? '' : 'opacity-60'} ${runtimeEnabled ? '' : 'opacity-70'}`}
               role="button"
               tabindex="0"
               aria-pressed={isSelected ? 'true' : 'false'}
@@ -4631,18 +4632,34 @@
                     <button
                       type="button"
                       class={`shrink-0 rounded border px-1.5 py-[1px] text-micro-tight uppercase tracking-[0.16em] transition ${
-                        enabled
+                        runtimeEnabled
+                          ? 'border-sky-500/60 bg-sky-500/10 text-sky-100 hover:border-sky-400/80 hover:bg-sky-500/20'
+                          : 'border-rose-500/60 bg-rose-500/10 text-rose-100 hover:border-rose-400/80 hover:bg-rose-500/20'
+                      }`}
+                      aria-label={`Toggle ${profile.name} localization runtime`}
+                      title={runtimeEnabled ? `Disable ${profile.name} for localization runtime` : `Enable ${profile.name} for localization runtime`}
+                      onclick={(event) => {
+                        event.stopPropagation();
+                        setProfileEnabled(profile.id, !runtimeEnabled);
+                      }}
+                    >
+                      {runtimeEnabled ? 'Enabled' : 'Disabled'}
+                    </button>
+                    <button
+                      type="button"
+                      class={`shrink-0 rounded border px-1.5 py-[1px] text-micro-tight uppercase tracking-[0.16em] transition ${
+                        visible
                           ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-100 hover:border-emerald-400/80 hover:bg-emerald-500/20'
                           : 'border-surface-600/60 bg-surface-800/40 text-surface-300 hover:border-surface-500/80 hover:bg-surface-700/50'
                       }`}
                       aria-label={`Toggle ${profile.name} visibility in 3D view`}
-                      title={enabled ? `Hide ${profile.name} in 3D view` : `Show ${profile.name} in 3D view`}
+                      title={visible ? `Hide ${profile.name} in 3D view` : `Show ${profile.name} in 3D view`}
                       onclick={(event) => {
                         event.stopPropagation();
-                        setProfileViewEnabled(profile.id, !enabled);
+                        setProfileViewEnabled(profile.id, !visible);
                       }}
                     >
-                      {enabled ? 'Visible' : 'Hidden'}
+                      {visible ? 'Visible' : 'Hidden'}
                     </button>
                     {#if !supported}
                       <span class="shrink-0 rounded border border-amber-500/60 bg-amber-500/10 px-1.5 py-[1px] text-micro-tight uppercase tracking-[0.16em] text-amber-100">

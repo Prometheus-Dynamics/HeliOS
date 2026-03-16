@@ -109,6 +109,7 @@
   const i2cBusOrder = $derived(
     [...new SvelteSet(i2cInventory.buses.map((bus) => bus.bus).concat(i2cInventory.devices.map((d) => d.bus)))].sort((a, b) => a - b)
   );
+  const hasVisibleI2cInventory = $derived(i2cInventory.buses.length > 0 || i2cInventory.devices.length > 0);
   const imuAccelSeries = $derived(imuHistory.length ? imuHistory.map((entry) => entry.accel) : imu.hasSample ? [imu.accel] : []);
   const imuGyroSeries = $derived(imuHistory.length ? imuHistory.map((entry) => entry.gyro) : imu.hasSample ? [imu.gyro] : []);
   const imuMagSeries = $derived(
@@ -313,8 +314,11 @@
           reportError({ context: 'Systems I2C refresh', error, toast: false });
         }
         const message = formatLoadError(error);
-        i2cError = message;
-        systems = { ...systems, errors: { ...(systems.errors ?? {}), i2c: message } };
+        const visibleInventory =
+          systems.i2cInventory.buses.length > 0 ||
+          systems.i2cInventory.devices.length > 0;
+        i2cError = visibleInventory ? null : message;
+        systems = { ...systems, errors: { ...(systems.errors ?? {}), i2c: visibleInventory ? null : message } };
         i2cResource.invalidate();
       })
       .finally(finalize);
@@ -486,8 +490,11 @@
     } catch (error) {
       reportError({ context: 'I2C rescan', error, toast: false });
       const message = formatLoadError(error);
-      i2cError = message;
-      systems = { ...systems, errors: { ...(systems.errors ?? {}), i2c: message } };
+      const visibleInventory =
+        systems.i2cInventory.buses.length > 0 ||
+        systems.i2cInventory.devices.length > 0;
+      i2cError = visibleInventory ? null : message;
+      systems = { ...systems, errors: { ...(systems.errors ?? {}), i2c: visibleInventory ? null : message } };
     } finally {
       isRescanningI2c = false;
     }
@@ -815,7 +822,7 @@
           {:else if activeActivityTab === 'i2c'}
             <SystemsI2cPanel
               {i2cLoading}
-              {i2cError}
+              i2cError={hasVisibleI2cInventory ? null : i2cError}
               {isRescanningI2c}
               {i2cBusOrder}
               {i2cInventory}

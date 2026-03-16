@@ -2,6 +2,7 @@
 
 use super::*;
 
+use std::mem::size_of;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
@@ -277,9 +278,11 @@ fn adaptive_mean_threshold_fast_inner_into(image: &GrayImage, window: u32, offse
     let ring_len = width_usize.saturating_mul(ring_rows);
     if buffers.hsum.len() != ring_len {
         buffers.hsum.resize(ring_len, 0u16);
+        crate::diagnostics::report_scratch_high_water("image.adaptive_hsum", buffers.hsum.capacity() * size_of::<u16>());
     }
     if buffers.col_sum.len() != width_usize {
         buffers.col_sum.resize(width_usize, 0);
+        crate::diagnostics::report_scratch_high_water("image.adaptive_col_sum", buffers.col_sum.capacity() * size_of::<i32>());
     }
 
     let area = (window as i32) * (window as i32);
@@ -495,6 +498,7 @@ fn adaptive_mean_threshold_fast_parallel_into(image: &GrayImage, window: u32, ra
     let hsum_len = width_usize.saturating_mul(height_usize);
     if buffers.hsum.len() != hsum_len {
         buffers.hsum.resize(hsum_len, 0u16);
+        crate::diagnostics::report_scratch_high_water("image.adaptive_hsum", buffers.hsum.capacity() * size_of::<u16>());
     }
     let area = (window as i32) * (window as i32);
     let area_half = area / 2;
@@ -551,6 +555,7 @@ fn adaptive_mean_threshold_fast_parallel_into(image: &GrayImage, window: u32, ra
                 let mut col_sum = scratch.borrow_mut();
                 if col_sum.len() != width_usize {
                     col_sum.resize(width_usize, 0);
+                    crate::diagnostics::report_scratch_high_water("image.adaptive_parallel_col_sum", col_sum.capacity() * size_of::<i32>());
                 } else {
                     col_sum.fill(0);
                 }

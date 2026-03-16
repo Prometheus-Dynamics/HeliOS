@@ -42,7 +42,6 @@
     buildMarker,
     updateMarkerTransform
   } from '$lib/features/localization/viewers/localizationViewerMarkers';
-  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
   const {
     markers = [],
@@ -124,11 +123,11 @@
   let minimapExpanded = $state(false);
   let robotDimensions = $state<RobotDimensions>(normalizeRobot(null));
   let cameraLayout = $state<RigCameraInfo[]>(normalizeCameras(null));
-  const cameraMeshes = new SvelteMap<string, THREE.Group>();
-  const robotOverlayMeshes = new SvelteMap<string, THREE.Group>();
-  const markerMeshes = new SvelteMap<string, THREE.Group>();
-  const referenceMarkerMeshes = new SvelteMap<string, THREE.Group>();
-  const tagLineMeshes = new SvelteMap<string, THREE.Line>();
+  const cameraMeshes = new Map<string, THREE.Group>();
+  const robotOverlayMeshes = new Map<string, THREE.Group>();
+  const markerMeshes = new Map<string, THREE.Group>();
+  const referenceMarkerMeshes = new Map<string, THREE.Group>();
+  const tagLineMeshes = new Map<string, THREE.Line>();
   const activeField = $derived.by<LocalizationFieldDefinition | null>(() => getActiveField(mode, customField));
 
   const resizeObservers: ResizeObserver[] = [];
@@ -157,7 +156,7 @@
   let lastKnownMinimapPoseDot: { position: [number, number, number]; color: string } | null = null;
   let lastKnownRobotTransform: LocalizationViewerProps['robotTransform'] = null;
   let robotGhostActive = false;
-  const arucoTextureCache = new SvelteMap<string, THREE.Texture>();
+  const arucoTextureCache = new Map<string, THREE.Texture>();
   const cameraForward = new THREE.Vector3(0, 0, 1);
   const cameraUp = new THREE.Vector3(0, 1, 0);
   const DEFAULT_MAIN_FOV = 55;
@@ -1037,7 +1036,7 @@
   function updateMarkers() {
     if (!markerGroup || !markers) return;
 
-    const nextIds = new SvelteSet<string>();
+    const nextIds = new Set<string>();
     for (const marker of markers) {
       nextIds.add(marker.id);
     }
@@ -1124,7 +1123,7 @@
   function updateReferenceMarkers() {
     if (!referenceMarkerGroup || !referenceMarkers) return;
 
-    const nextIds = new SvelteSet<string>();
+    const nextIds = new Set<string>();
     for (const marker of referenceMarkers) {
       nextIds.add(marker.id);
     }
@@ -1173,7 +1172,7 @@
   function cameraKeyVariants(value: string | null | undefined): string[] {
     const trimmed = typeof value === 'string' ? value.trim() : '';
     if (!trimmed) return [];
-    const out = new SvelteSet<string>([trimmed]);
+    const out = new Set<string>([trimmed]);
     const stripped = trimmed.startsWith('device:')
       ? trimmed.slice('device:'.length)
       : trimmed.startsWith('stream:')
@@ -1188,7 +1187,7 @@
   }
 
   function cameraLayoutKeys(camera: RigCameraInfo): string[] {
-    const out = new SvelteSet<string>();
+    const out = new Set<string>();
     const add = (value: string | null | undefined) => {
       for (const key of cameraKeyVariants(value)) out.add(key);
     };
@@ -1227,7 +1226,7 @@
   function resolveSourceCameraPosition(marker: LocalizationMarker): [number, number, number] | null {
     const source = marker.source;
     if (!source) return null;
-    const sourceKeys = new SvelteSet<string>();
+    const sourceKeys = new Set<string>();
     const addSourceKey = (value: string | null | undefined) => {
       for (const key of cameraKeyVariants(value)) sourceKeys.add(key);
     };
@@ -1281,7 +1280,7 @@
       return;
     }
 
-    const nextIds = new SvelteSet<string>();
+    const nextIds = new Set<string>();
     for (const target of lineTargets) {
       const marker = target.marker;
       const cameraPosition = resolveSourceCameraPosition(marker);

@@ -197,5 +197,7 @@ pub(super) fn cv_aruco_candidate_quads_extract(
         output
     });
 
+    report_candidate_quad_scratch();
+
     Ok(output)
 }

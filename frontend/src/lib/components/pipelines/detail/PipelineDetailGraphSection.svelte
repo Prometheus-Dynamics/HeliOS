@@ -263,6 +263,7 @@
           bind:this={graphEditor}
           plan={graphPlan}
           interactive={true}
+          portEditorsMode="always"
           height={graphViewportHeight}
           {registryEntries}
           className="h-full w-full"

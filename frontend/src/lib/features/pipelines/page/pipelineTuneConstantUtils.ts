@@ -1,4 +1,11 @@
-import type { PipelineGraphPlan, PipelineNodeValue, PipelinePortMetadata } from '$lib/types/pipeline';
+import { getDataTypeVariants, resolveDataTypeKey } from '$lib/features/pipelines/valueFormatting';
+import type {
+  PipelineDataType,
+  PipelineGraphPlan,
+  PipelineNodeValue,
+  PipelinePortMetadata,
+  PipelineRegistryEntry
+} from '$lib/types/pipeline';
 import type { PipelineTuningConstantEntry } from '$lib/components/pipelines/types';
 import {
   extractNodeOverridesFromGraph,
@@ -8,7 +15,48 @@ import {
   portMetadataFromFlatKeys
 } from './pipelineTuneState';
 
-export type ResolveRegistryEntry = (node: PipelineGraphPlan['nodes'][string]) => { metadata?: { inputPorts?: Record<string, PipelinePortMetadata> } } | null;
+const GENERIC_TYPE_KEYS = new Set(['generic', 'any', 'unknown', 'dynamic']);
+
+export type ResolveRegistryEntry = (
+  node: PipelineGraphPlan['nodes'][string]
+) => Pick<PipelineRegistryEntry, 'inputs' | 'metadata'> | null;
+
+const portTypeFor = (
+  ports: Record<string, PipelineDataType> | null | undefined,
+  portKey: string
+): PipelineDataType | null => {
+  if (!ports) return null;
+  const normalized = normalizePortKey(portKey);
+  if (!normalized) return null;
+  const exact = ports[portKey];
+  if (exact) return exact;
+  if (ports[normalized]) return ports[normalized] ?? null;
+  const resolvedKey = Object.keys(ports).find((key) => normalizePortKey(key) === normalized);
+  return resolvedKey ? ports[resolvedKey] ?? null : null;
+};
+
+const mergeDataType = (
+  base: PipelineTuningConstantEntry['dataType'],
+  candidate: PipelineTuningConstantEntry['dataType']
+): PipelineTuningConstantEntry['dataType'] => {
+  if (!base) return candidate ?? null;
+  if (!candidate) return base ?? null;
+
+  const baseVariants = getDataTypeVariants(base ?? undefined);
+  const candidateVariants = getDataTypeVariants(candidate ?? undefined);
+  if (candidateVariants.length > 0) {
+    if (baseVariants.length === 0) return candidate;
+    if (baseVariants.join('|') !== candidateVariants.join('|')) return candidate;
+  }
+
+  const baseKey = (resolveDataTypeKey(base ?? undefined) ?? '').toLowerCase();
+  const candidateKey = (resolveDataTypeKey(candidate ?? undefined) ?? '').toLowerCase();
+  if (GENERIC_TYPE_KEYS.has(baseKey) && candidateKey && !GENERIC_TYPE_KEYS.has(candidateKey)) {
+    return candidate;
+  }
+
+  return base;
+};
 
 export function portMetadataForConstant(
   node: PipelineGraphPlan['nodes'][string] | undefined,
@@ -79,15 +127,21 @@ export function extractTuneConstantEntries(
     if (!resolvedValues || typeof resolvedValues !== 'object') continue;
     const nodeLabel = node.metadata?.name ?? nodeId;
     const overrideRecord = nodeOverrides?.[nodeId] ?? {};
+    const registryEntry = resolveRegistryEntryForNode(node);
     for (const [portKey, value] of Object.entries(resolvedValues)) {
       const normalizedPort = normalizePortKey(portKey);
       if (!normalizedPort) continue;
       const overrideValue = overrideRecord?.[normalizedPort] ?? null;
+      const nodeInputType = portTypeFor(node.inputs ?? null, portKey);
+      const registryInputType = portTypeFor(registryEntry?.inputs ?? null, portKey);
       entries.push({
         nodeId,
         nodeLabel,
         portKey,
-        dataType: value?.dataType ?? null,
+        dataType: mergeDataType(
+          mergeDataType(value?.dataType ?? null, nodeInputType),
+          registryInputType
+        ),
         baseValue: value ?? null,
         overrideValue,
         metadata: portMetadataForConstant(node, portKey, resolveRegistryEntryForNode)

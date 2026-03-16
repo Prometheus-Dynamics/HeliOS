@@ -20,6 +20,7 @@ use helios_engine::localization::config::LocalizationSourceConfig;
 use helios_engine::localization::config::select_profile;
 use helios_engine::localization::fetch::LocalizationSourceFetcher;
 use helios_engine::localization::fetch::imu_vec_to_viewer_frame;
+use helios_engine::localization::maps::FieldMapDocument;
 use helios_engine::localization::math::{PoseTransform, RigPose, RigRotation, RigTranslation, rig_pose_to_viewer_transform, transform_to_pose};
 use helios_engine::localization::types::LocalizationSolveResponse;
 use helios_peripherals::dto::SensorScope;
@@ -95,8 +96,15 @@ async fn build_localization_solve_request(
     let source_values = fetch_localization_source_values(fetcher, &sources).await;
     let calibrations = load_stream_calibrations(state).await.into_iter().collect::<BTreeMap<_, _>>();
     let rig_poses = rig_poses.iter().map(|(camera_uid, pose)| (camera_uid.clone(), transform_to_pose(pose))).collect::<BTreeMap<_, _>>();
+    let field_map = strip_overlay_from_field_map(field_map);
 
-    Ok(LocalizationSolveRequest { profile: profile.clone(), sources, rig_poses, field_map: field_map.cloned(), calibrations, source_values, apply_field_origin })
+    Ok(LocalizationSolveRequest { profile: profile.clone(), sources, rig_poses, field_map, calibrations, source_values, apply_field_origin })
+}
+
+fn strip_overlay_from_field_map(field_map: Option<&FieldMapDocument>) -> Option<FieldMapDocument> {
+    let mut field_map = field_map.cloned()?;
+    field_map.overlay = None;
+    Some(field_map)
 }
 
 pub(crate) async fn fetch_localization_source_values(fetcher: &ApiLocalizationSourceFetcher, sources: &[LocalizationSourceConfig]) -> Vec<LocalizationSolveSourceValue> {
@@ -388,6 +396,42 @@ pub(crate) async fn inject_imu_leveling_rig_pose(state: &AppState, profile: &hel
                 // Keep translation as-is; it is already expressed in the robot frame.
             })
             .or_insert_with(|| PoseTransform { translation: Vector3::new(0.0, 0.0, 0.0), rotation: level_rot });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_overlay_from_field_map;
+    use helios_engine::localization::maps::{FieldMapDocument, FieldMapOverlay, FieldMapSource};
+
+    #[test]
+    fn strip_overlay_from_field_map_removes_embedded_image_data() {
+        let field_map = FieldMapDocument {
+            schema_version: 1,
+            id: "test".to_string(),
+            name: "Test".to_string(),
+            width_m: 1.0,
+            depth_m: 1.0,
+            markers: Vec::new(),
+            source: FieldMapSource::LimelightFmap { original_file_name: None, map_type: None },
+            overlay: Some(FieldMapOverlay {
+                data_url: "data:image/png;base64,AAAA".to_string(),
+                mime_type: Some("image/png".to_string()),
+                opacity: Some(1.0),
+                width_m: Some(1.0),
+                depth_m: Some(1.0),
+                offset_x_m: Some(0.0),
+                offset_z_m: Some(0.0),
+                rotation_deg: Some(0.0),
+            }),
+        };
+
+        let stripped = strip_overlay_from_field_map(Some(&field_map)).expect("stripped field map");
+
+        assert!(stripped.overlay.is_none());
+        assert_eq!(stripped.markers.len(), field_map.markers.len());
+        assert_eq!(stripped.id, field_map.id);
+        assert_eq!(stripped.name, field_map.name);
     }
 }
 

@@ -1,4 +1,5 @@
 use super::*;
+use std::mem::size_of;
 
 #[derive(Clone)]
 pub(super) struct ArucoDetectionF32 {
@@ -57,6 +58,34 @@ impl Default for DecodeScratch {
 thread_local! {
     pub(super) static DETECT_SCRATCH: RefCell<DetectScratch> = RefCell::new(DetectScratch::default());
     pub(super) static DECODE_SCRATCH: RefCell<DecodeScratch> = RefCell::new(DecodeScratch::default());
+}
+
+fn detect_scratch_bytes(scratch: &DetectScratch) -> usize {
+    scratch.distances.capacity() * size_of::<(f32, Point<f32>)>()
+        + scratch.trimmed.capacity() * size_of::<Point<f32>>()
+        + scratch.inliers.capacity() * size_of::<Point<f32>>()
+        + scratch.best_inliers.capacity() * size_of::<Point<f32>>()
+        + scratch.top_pts.capacity() * size_of::<Point<f32>>()
+        + scratch.bottom_pts.capacity() * size_of::<Point<f32>>()
+        + scratch.left_pts.capacity() * size_of::<Point<f32>>()
+        + scratch.right_pts.capacity() * size_of::<Point<f32>>()
+        + scratch.approx.capacity() * size_of::<Point<f32>>()
+        + scratch.downsampled.capacity() * size_of::<Point<f32>>()
+}
+
+fn decode_scratch_bytes(scratch: &DecodeScratch) -> usize {
+    scratch.warped_buf.capacity() * size_of::<u8>() + scratch.sample_positions.capacity() * size_of::<(f32, f32)>()
+}
+
+pub(super) fn report_detect_scratch() {
+    DETECT_SCRATCH.with(|scratch| {
+        let scratch = scratch.borrow();
+        crate::diagnostics::report_scratch_high_water("aruco.detect_scratch", detect_scratch_bytes(&scratch));
+    });
+}
+
+pub(super) fn report_decode_scratch_bytes(bytes: usize) {
+    crate::diagnostics::report_scratch_high_water("aruco.decode_scratch", bytes);
 }
 
 pub(super) fn marker_f32_to_detection_2d(marker: ArucoDetectionF32, bits: Option<ArucoBitGrid>) -> Option<ArucoDetection2D> {

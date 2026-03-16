@@ -97,6 +97,7 @@
   let {
     plan,
     interactive = true,
+    portEditorsMode = 'selected',
     height = 520,
     fluid = false,
     className = '',
@@ -384,6 +385,7 @@
     getActiveConnection: () => activeConnection,
     buildNodeOptions: () => ({
       detailLevel: nodeDetailLevel,
+      portEditorsMode,
       focusHighlight,
       resolveRegistryEntryForNode: (node) => resolveRegistryEntryForNode(node),
       onNodePortDoubleClick: (nodeId, direction, port, event) =>

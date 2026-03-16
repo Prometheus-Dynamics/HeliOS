@@ -1,4 +1,5 @@
 use super::*;
+use std::mem::size_of;
 
 pub(super) type Quad = [Point; 4];
 
@@ -55,6 +56,50 @@ impl Default for DecodeFamilyScratch {
     }
 }
 
+fn candidate_quad_scratch_bytes(scratch: &CandidateQuadScratch) -> usize {
+    let grouped_inner = scratch.grouped.iter().map(|group| group.capacity() * size_of::<usize>()).sum::<usize>();
+    scratch.pts.capacity() * size_of::<CvPoint<f32>>()
+        + scratch.quads.capacity() * size_of::<[CvPoint<f32>; 4]>()
+        + scratch.quad_centers.capacity() * size_of::<CvPoint<f32>>()
+        + scratch.ordered_centers.capacity() * size_of::<CvPoint<f32>>()
+        + scratch.quad_perimeters.capacity() * size_of::<f32>()
+        + scratch.order.capacity() * size_of::<usize>()
+        + scratch.min_marker_dist_sq.capacity() * size_of::<f32>()
+        + scratch.group_id.capacity() * size_of::<isize>()
+        + scratch.grouped.capacity() * size_of::<Vec<usize>>()
+        + grouped_inner
+        + scratch.is_selected.capacity() * size_of::<bool>()
+        + scratch.keep_sorted.capacity() * size_of::<bool>()
+        + scratch.filtered.capacity() * size_of::<[CvPoint<f32>; 4]>()
+        + scratch.filtered_quads.capacity() * size_of::<Quad>()
+}
+
+fn node_detect_scratch_bytes(scratch: &NodeDetectScratch) -> usize {
+    scratch.distances.capacity() * size_of::<(f32, CvPoint<f32>)>()
+        + scratch.trimmed.capacity() * size_of::<CvPoint<f32>>()
+        + scratch.inliers.capacity() * size_of::<CvPoint<f32>>()
+        + scratch.best_inliers.capacity() * size_of::<CvPoint<f32>>()
+        + scratch.edge_points.iter().map(|points| points.capacity() * size_of::<CvPoint<f32>>()).sum::<usize>()
+}
+
+pub(super) fn report_candidate_quad_scratch() {
+    CANDIDATE_QUAD_SCRATCH.with(|scratch| {
+        let scratch = scratch.borrow();
+        crate::diagnostics::report_scratch_high_water("aruco.candidate_quad_scratch", candidate_quad_scratch_bytes(&scratch));
+    });
+}
+
+pub(super) fn report_node_detect_scratch() {
+    ARUCO_NODE_SCRATCH.with(|scratch| {
+        let scratch = scratch.borrow();
+        crate::diagnostics::report_scratch_high_water("aruco.node_detect_scratch", node_detect_scratch_bytes(&scratch));
+    });
+}
+
+pub(super) fn report_overlay_id_cache_bytes(bytes: usize) {
+    crate::diagnostics::report_scratch_high_water("aruco.overlay_id_cache", bytes);
+}
+
 pub(super) fn expect_cpu_frame(frame: Payload<DynamicImage>, label: &str, exec_ctx: Option<&ExecutionContext>) -> Result<DynamicImage, NodeError> {
     #[cfg(feature = "gpu")]
     {
@@ -83,6 +128,7 @@ pub(super) fn with_integral_scratch<R>(len: usize, f: impl FnOnce(&mut [u32]) ->
         let mut scratch = scratch.borrow_mut();
         if scratch.len() != len {
             scratch.resize(len, 0);
+            crate::diagnostics::report_scratch_high_water("aruco.integral_scratch", scratch.capacity() * size_of::<u32>());
         } else {
             scratch.fill(0);
         }

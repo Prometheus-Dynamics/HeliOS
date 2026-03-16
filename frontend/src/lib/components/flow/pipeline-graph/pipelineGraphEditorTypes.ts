@@ -31,6 +31,7 @@ export type GraphContextEvent =
 export type PipelineGraphEditorProps = {
   plan: PipelineGraphPlan;
   interactive?: boolean;
+  portEditorsMode?: 'selected' | 'always' | 'never';
   height?: number;
   fluid?: boolean;
   className?: string;

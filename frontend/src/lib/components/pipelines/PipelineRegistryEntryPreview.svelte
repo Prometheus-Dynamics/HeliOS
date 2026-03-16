@@ -116,6 +116,7 @@
       <PipelineGraphEditor
         plan={previewPlan}
         interactive={false}
+        portEditorsMode="never"
         fluid={false}
         height={PREVIEW_CANVAS}
         className={editorClass}
@@ -131,6 +132,7 @@
     <PipelineGraphEditor
       plan={previewPlan}
       interactive={false}
+      portEditorsMode="never"
       fluid={true}
       className={`${editorClass} h-full w-full`}
       registryEntries={[entry]}
