@@ -20,9 +20,11 @@ HeliOS exposes a WebSocket endpoint at `/v1/ws`.
 | `console.session` | Interactive console | `console_session`, `console_session_response_0` |
 | `device.telemetry` | Device telemetry | `device_telemetry`, `device_telemetry_response_0` |
 | `devices.updates` | Peripheral + stream inventory changes | `devices_updates`, `devices_updates_response_0` |
+| `imu.stream` | IMU status stream | `imu_stream`, `imu_stream_response_0` |
 | `logs.stream` | Device logs | `logs_stream`, `logs_stream_response_0` |
 | `ota.stream` | OTA update status stream | `ota_stream`, `ota_stream_response_0` |
 | `processes.stream` | Per-process resource usage | `processes_stream`, `processes_stream_response_0` |
+| `sensors.stream` | Peripheral sensor stream | `sensors_stream`, `sensors_stream_response_0` |
 | `streams.{stream_id}.frames` | Stream frames | `streams__stream_id__frames` |
 | `streams.{stream_id}.metrics` | Stream metrics | `streams__stream_id__metrics`, `streams__stream_id__metrics_response_0`, `streams__stream_id__metrics_response_1` |
 | `updates.stream` | Global realtime change stream | `updates_stream`, `updates_stream_response_0` |
@@ -65,6 +67,18 @@ HeliOS exposes a WebSocket endpoint at `/v1/ws`.
 - Summary: Peripheral + stream inventory changes
 - Description: Notifies clients when USB peripherals or registered streams change.
 
+### `imu.stream`
+
+#### `imu_stream`
+
+- Summary: IMU status stream
+- Description: Streams realtime IMU status payloads from the device IMU runtime.
+
+#### `imu_stream_response_0`
+
+- Summary: IMU status stream
+- Description: Streams realtime IMU status payloads from the device IMU runtime.
+
 ### `logs.stream`
 
 #### `logs_stream`
@@ -100,6 +114,18 @@ HeliOS exposes a WebSocket endpoint at `/v1/ws`.
 
 - Summary: Per-process resource usage
 - Description: Periodic snapshots of CPU and memory usage per process.
+
+### `sensors.stream`
+
+#### `sensors_stream`
+
+- Summary: Peripheral sensor stream
+- Description: Streams subscribed IMU, power, lighting, and firmware sensor events from the peripherals runtime.
+
+#### `sensors_stream_response_0`
+
+- Summary: Peripheral sensor stream
+- Description: Streams subscribed IMU, power, lighting, and firmware sensor events from the peripherals runtime.
 
 ### `streams.{stream_id}.frames`
 

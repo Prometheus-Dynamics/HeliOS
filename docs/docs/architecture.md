@@ -53,7 +53,7 @@ Optional/advanced:
 
 On the shipped image, state and logs are kept under these directories:
 
-- `/var/lib/helios/`: persistent device state (API data, engine state, journals, snapshots).
+- `/var/lib/helios/`: persistent device state (API data, engine state, journals, diagnostics bundles).
 - `/var/log/helios/`: logs and crash artifacts.
 
 Plugins (Daedalus) are searched from:
@@ -107,7 +107,7 @@ and reach the Web UI at `http://172.31.250.1:5800/` (assuming the gadget is enab
 ## Failure Diagnostics Bundles
 
 Many early-boot and core services are wired with `OnFailure=helios-diagnostics@...`.
-When a unit fails, the device collects a diagnostics snapshot bundle under:
+When a unit fails, the device collects a diagnostics bundle under:
 
 - `/var/lib/helios/diagnostics/`
 

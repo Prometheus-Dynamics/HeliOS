@@ -6,9 +6,9 @@ Settings is the device-level configuration workspace. Changes here affect the de
 
 ## Tabs (In UI Order)
 
-- **Networking**: hostname + team number, interface addressing (DHCP/static), and NetworkTables (NT4).
+- **Networking**: hostname + team number, interface addressing (DHCP/static), and NetworkTables (NT4) integration settings.
 - **Rig layout**: robot dimensions and camera pose (extrinsics) used by 3D viewers and localization tools.
-- **Snapshots**: capture and download a state archive for support/debugging.
+- **Diagnostics**: capture diagnostics bundles, set retention policy, and review OS health issues.
 - **Updater**: stage and apply OS updates (the device will reboot).
 - **Plugins**: upload and enable/disable Daedalus plugins (`.so`) used by the pipeline runtime.
 - **USB power**: toggle external USB host-port power rails (only available on units that report GPIO rail control).

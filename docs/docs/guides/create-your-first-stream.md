@@ -28,11 +28,15 @@ See: [Stream inventory](/os/devices/streams/inventory)
 ## Step 2: Register Stream
 
 1. Click **Register stream**.
-2. In the modal, select:
+2. Use **Quick camera setup** unless you need a non-default backend.
+3. Select:
    - **Device**: the camera you want
-   - **Backend**: capture implementation
-     - For the built-in OV9782, use `Libcamera` unless you have a specific reason not to.
-   - **Mode**: format + resolution + FPS/interval
+   - **Stream kind**:
+     - `BW` for mono / ArUco-heavy work
+     - `Color` for general color capture
+   - **Resolution**
+   - optional **Template / pipeline** attachment
+4. If you need full backend/mode/codec control, switch to **Advanced**.
 
 ### Format Tips (Good Defaults)
 
@@ -45,8 +49,8 @@ Why:
 - NV12 is cheap to handle.
 - nv12-luma avoids extra decode/color work if you only need luminance.
 
-3. (Optional) set **Session alias**.
-4. Click **Register stream**.
+5. (Optional) set **Session alias**.
+6. Click **Register stream**.
 
 See: [Register stream](/os/devices/streams/register)
 

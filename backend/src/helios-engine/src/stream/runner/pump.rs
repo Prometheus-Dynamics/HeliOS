@@ -550,7 +550,10 @@ impl StreamRunner {
             Err(TrySendError::Full(_)) => {}
             Err(TrySendError::Disconnected(req)) => {
                 tracing::warn!("preview worker channel disconnected; restarting preview worker");
-                self.preview_worker = Some(super::PreviewWorker::start());
+                self.preview_worker = Some(super::PreviewWorker::start(
+                    self.preview_encoder_stats.clone(),
+                    self.preview_encoder_last_activity_ms.clone()
+                ));
                 if let Some(worker) = self.preview_worker.as_ref() {
                     if worker.req_tx.try_send(req).is_ok() {
                         self.last_preview_encode_wall = Some(now);

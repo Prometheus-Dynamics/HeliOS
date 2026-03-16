@@ -2,24 +2,24 @@
 title: Updater
 ---
 
-Updater stages and applies HeliOS OS updates on the device.
+Updater uploads or selects an OS image, then applies it on the device.
 
 Applying an update will reboot the device.
 
 ## Select An Update Image
 
-You must choose exactly one source:
+You must choose exactly one source at apply time:
 
 ### Upload
 
 1. Choose an image file from your computer (`.img`, `.tar.gz`, `.zip`, `.bin`, `.xz`).
 2. Click **Upload image**.
-3. The UI shows the image hash (SHA256) after upload.
+3. The UI shows the detected filename, size, and SHA256 after upload.
 
 Notes:
 
 - Upload stores the file on the device (it becomes available as a Media file source too).
-- The Updater page can remove the uploaded file via **Remove** (this deletes the stored file from the device).
+- The stored upload can be removed from the Updater UI.
 
 ### Media
 
@@ -44,6 +44,7 @@ What to expect:
 - Applying an update stops all streams.
 - The device reboots.
 - The Web UI disconnects during the reboot, then reloads when the device comes back.
+- The updater now applies directly from the selected `image_url`; there is no separate long-lived staging step in the user workflow.
 
 ## Stages (What They Mean)
 
@@ -61,4 +62,5 @@ The UI maps updater stages to labels:
 Notes:
 
 - **Cancel** is only enabled while an update is active and not currently applying/rebooting.
-- The **Current state** panel is driven by `/ota/state` telemetry and shows progress, timestamps, and the active artifact URL/checksum when available.
+- The **Current state** panel is driven by live updater state and shows progress, timestamps, cache usage, and artifact URL/checksum when available.
+- The page can optionally delete the selected image after apply completes.

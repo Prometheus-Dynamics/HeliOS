@@ -274,6 +274,22 @@
     return `${value.toFixed(1)} fps`;
   }
 
+  function isIdleCodecComponent(component: ComponentMetricEntry): boolean {
+    if (component.id !== 'encoder' && component.id !== 'decoder') return false;
+    const sampleCount = Number(component.data.sample_count ?? 0);
+    const processed = Number(component.data.processed ?? 0);
+    const backpressure = Number(component.data.backpressure ?? 0);
+    const errors = Number(component.data.errors ?? 0);
+    return sampleCount <= 0 && processed <= 0 && backpressure <= 0 && errors <= 0;
+  }
+
+  function primaryMetricLabel(component: ComponentMetricEntry): string {
+    if (isIdleCodecComponent(component)) {
+      return component.id === 'encoder' ? 'Idle' : 'Standby';
+    }
+    return formatFps(component.data.average_fps ?? 0);
+  }
+
   function formatTimeMs(value: number | undefined = 0): string {
     if (!Number.isFinite(value) || value <= 0) return '—';
     return `${value.toFixed(2)} ms`;
@@ -516,8 +532,10 @@
             <div class="cursor-help rounded border border-surface-800/60 bg-surface-900/70 px-2 py-1 text-[0.7rem] text-surface-300" title={buildSummaryTooltip(summaryLabel, component.data)}>
               <span class="font-semibold text-surface-100">{summaryLabel}</span>
               <span class="mx-1 text-surface-600">|</span>
-              <span>{formatSummaryFps(component.data.average_fps ?? 0)}</span>
-              <span class="ml-1 text-surface-500">({formatTimeMs(component.data.average_time_ms ?? 0)})</span>
+              <span>{isIdleCodecComponent(component) ? primaryMetricLabel(component) : formatSummaryFps(component.data.average_fps ?? 0)}</span>
+              {#if !isIdleCodecComponent(component)}
+                <span class="ml-1 text-surface-500">({formatTimeMs(component.data.average_time_ms ?? 0)})</span>
+              {/if}
             </div>
           {/each}
         </div>
@@ -540,7 +558,7 @@
                   <div class="mt-1.5 space-y-1 text-xs">
                     <div class="flex items-center justify-between text-surface-300">
                       <span>FPS</span>
-                      <span class="font-semibold text-surface-50">{formatFps(component.data.average_fps ?? 0)}</span>
+                      <span class="font-semibold text-surface-50">{primaryMetricLabel(component)}</span>
                     </div>
                     <div class="flex items-center justify-between text-surface-300">
                       <span>Avg / Last</span>
@@ -566,7 +584,7 @@
                   <dl class="mt-2 space-y-1 text-sm">
                     <div class="flex justify-between text-surface-300">
                       <dt>Average FPS</dt>
-                      <dd class="font-semibold text-surface-50">{formatFps(component.data.average_fps ?? 0)}</dd>
+                      <dd class="font-semibold text-surface-50">{primaryMetricLabel(component)}</dd>
                     </div>
                     <div class="flex justify-between text-surface-300">
                       <dt>Average time</dt>

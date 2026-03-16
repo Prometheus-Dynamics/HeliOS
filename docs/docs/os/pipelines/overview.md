@@ -4,11 +4,10 @@ title: Overview
 
 Pipelines is where you create and manage the graphs that run on the device: capture inputs, processing, detections, and outputs.
 
-The Pipelines page has three tabs:
+The current Pipelines workspace has two primary tabs:
 
 - `Graph`: edit a pipeline graph.
 - `Tune`: adjust pipeline inputs/constants (global defaults) and apply per-stream overrides.
-- `SDK`: an embedded IDE (when enabled) for plugin/node development.
 
 Most teams start from a template or clone an existing pipeline, then attach it to one or more streams.
 
@@ -28,6 +27,7 @@ When a stream is running with a pipeline attached, Helios runs that graph for th
 - Attach a pipeline to a live stream.
 - Tune values globally or per stream.
 - View per-stream runtime metrics (when streams are running and reporting metrics).
+- Use optional IDE / plugin tooling when that service is enabled in the current build.
 
 ## How to use the tabs
 
@@ -132,15 +132,15 @@ Tune includes a performance panel with tabs:
 
 </details>
 
-<details>
-<summary><strong>SDK tab: plugin/node development (optional)</strong></summary>
+## Optional IDE / Plugin Tooling
 
-SDK embeds an IDE (OpenVSCode) when plugins are enabled. It is used for building and editing plugin projects that provide custom nodes and tooling.
+Some builds also expose plugin IDE endpoints and project helpers for custom node development.
 
-</details>
+Treat that as an advanced optional workflow, not as a guaranteed third tab in the main pipelines shell.
 
 ## Related
 
 - Graph editing: see [Workspace](../workspace), [Node Registry](../node-registry), and [Validation](../validation).
 - Tuning and overrides: see [Inputs & Constants](../inputs-constants), [Tuning](../tuning), and [Metrics](../metrics).
 - Moving pipelines between devices: see [Import/Export](../import-export) and [Deploy](../deploy).
+- Advanced plugin tooling: see [SDK](../sdk).

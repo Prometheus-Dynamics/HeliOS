@@ -162,7 +162,7 @@ pub fn candidate_quad_from_contour_fast(contour: &[Point<f32>], perimeter: f32, 
             let DetectScratch { downsampled, approx, .. } = &mut *scratch;
             (downsample_closed_contour_for_fast_dp(contour, downsampled), approx)
         };
-        crate::modules::contour::douglas_peucker::approx_poly_dp_into(contour, true, adaptive_epsilon, approx);
+        crate::modules::contour::douglas_peucker::approx_poly_dp_closed_fast_into(contour, adaptive_epsilon, approx);
         if approx.first() == approx.last() {
             approx.pop();
         }

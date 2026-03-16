@@ -25,8 +25,10 @@ Use when you want a longer capture.
 
 1. Open the stream.
 2. In the header, select a recording source.
-   - raw stream output, or
-   - a pipeline output
+   - multiplex
+   - raw
+   - undistorted
+   - pipeline output
 3. Click **Record**.
 4. Click **Stop** to end.
 
@@ -34,6 +36,7 @@ What to pick as a recording source:
 
 - Use the raw stream output when you want the clean camera feed.
 - Use a pipeline output when you want overlays or a processed view saved in the clip.
+- Use undistorted when you want the calibrated corrected image path.
 
 ## Capture-Last Clips
 
@@ -45,6 +48,12 @@ Capture-last buttons (5s/30s/1m) require the per-stream **shadow recorder**.
 4. Click **Apply stream settings** (stream restarts).
 
 After this, the capture-last buttons should work.
+
+## IMU Sidecars
+
+Continuous recording can also capture IMU data alongside the media file.
+
+Enable **Include IMU** in the recording settings when you want sensor playback/debugging tied to that recording.
 
 ## Verify
 

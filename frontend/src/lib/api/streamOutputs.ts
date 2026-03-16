@@ -207,6 +207,9 @@ function ensureSharedOutputsConnection(shared: SharedOutputsConnection): void {
           }
           return;
         }
+        if (payload.type === 'ack') {
+          return;
+        }
         emitOutputsError(shared, payload.error);
       },
       onError: (message) => {
@@ -349,6 +352,7 @@ function normalizeEventTimestamp(timestampMs?: number): number {
 function parsePayload(data: unknown):
   | { type: 'outputs'; event: StreamOutputsListEvent }
   | { type: 'sample'; event: StreamOutputSampleEvent }
+  | { type: 'ack'; request_id?: string | null }
   | { type: 'error'; error: { error: string; request_id?: string | null } }
   | null {
   if (typeof data !== 'string') return null;
@@ -361,6 +365,12 @@ function parsePayload(data: unknown):
     }
     if ('port' in parsedRecord && ('value' in parsedRecord || 'error' in parsedRecord)) {
       return { type: 'sample', event: normalizeSample(parsed) };
+    }
+    if (parsedRecord.type === 'ack') {
+      return {
+        type: 'ack',
+        request_id: typeof parsedRecord.request_id === 'string' ? parsedRecord.request_id : null
+      };
     }
     if (parsedRecord.type === 'error' && 'error' in parsedRecord) {
       return {

@@ -18,6 +18,7 @@ It has two scopes:
 - Switch between `Pipeline UI` (curated controls) and `Advanced` (raw node/port overrides).
 - Preview a live stream while tuning.
 - View stream metrics, access live camera controls, and manage stream pipeline layout (when a preview stream is running).
+- Inspect non-image outputs through the Outputs panel.
 
 ## How to tune a pipeline (recommended flow)
 
@@ -52,4 +53,4 @@ Tune includes a performance panel with tabs. These are easy to confuse:
 ## Notes
 
 - Per-stream overrides are stored per stream and can diverge from the global defaults and the saved graph.
-- Live `Controls` and `Layout` panels require a running stream.
+- Live `Controls`, `Outputs`, and `Layout` panels require a running stream.

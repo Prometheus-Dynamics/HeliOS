@@ -8,7 +8,6 @@
   import { isEncoderCompatibleOutput } from '$lib/features/pipelines/outputFilters';
   import { resolveDataTypeKey } from '$lib/features/pipelines/valueFormatting';
   import type { PipelineDataType, PipelineTypeDescriptor } from '$lib/types/pipeline';
-  import { SvelteSet } from 'svelte/reactivity';
 
   type SampleState =
     | { status: 'idle' }
@@ -31,14 +30,14 @@
 
   let portSearch = $state('');
   let sampleByPort = $state<Record<string, SampleState>>({});
-  let expandedPorts = new SvelteSet<string>();
+  let expandedPorts = $state<string[]>([]);
   let socket = $state<StreamOutputsSocket | null>(null);
   let socketStreamId = $state<string | null>(null);
 
   let copiedPort = $state<string | null>(null);
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
-  const expandedSet = $derived.by(() => expandedPorts);
+  const expandedSet = $derived.by(() => new Set(expandedPorts));
 
   const filteredPorts = $derived.by(() => {
     const query = portSearch.trim().toLowerCase();
@@ -63,14 +62,11 @@
   function toggleExpanded(port: string): void {
     const normalized = port.trim();
     if (!normalized) return;
-    const next = new SvelteSet(expandedPorts);
-    if (next.has(normalized)) {
-      next.delete(normalized);
-      expandedPorts = next;
+    if (expandedPorts.includes(normalized)) {
+      expandedPorts = expandedPorts.filter((value) => value !== normalized);
       return;
     }
-    next.add(normalized);
-    expandedPorts = next;
+    expandedPorts = [...expandedPorts, normalized];
     const sample = sampleByPort[normalized] ?? null;
     if (!sample || sample.status === 'idle') {
       sampleByPort = { ...sampleByPort, [normalized]: { status: 'loading' } };
@@ -112,6 +108,9 @@
     return false;
   };
 
+  const sameStringList = (left: string[], right: string[]): boolean =>
+    left.length === right.length && left.every((value, index) => value === right[index]);
+
   async function copyPortSample(port: string): Promise<void> {
     const sample = sampleByPort[port];
     const text =
@@ -142,7 +141,7 @@
       availablePorts = [];
       portPreviewableByName = {};
       sampleByPort = {};
-      expandedPorts = new SvelteSet();
+      expandedPorts = [];
       portsError = null;
       portsLoading = false;
       socket?.close();
@@ -157,7 +156,7 @@
     availablePorts = [];
     portPreviewableByName = {};
     sampleByPort = {};
-    expandedPorts = new SvelteSet();
+    expandedPorts = [];
     portsLoading = true;
     portsError = null;
     socket?.close();
@@ -177,8 +176,11 @@
         availablePorts = next;
         portsLoading = false;
         portsError = null;
-        const allowed = new SvelteSet(next);
-        expandedPorts = new SvelteSet([...expandedPorts].filter((p) => allowed.has(p)));
+        const allowed = new Set(next);
+        const nextExpandedPorts = expandedPorts.filter((port) => allowed.has(port));
+        if (!sameStringList(nextExpandedPorts, expandedPorts)) {
+          expandedPorts = nextExpandedPorts;
+        }
       },
       onSample: (event) => {
         const port = String(event.port ?? '').trim();
@@ -214,7 +216,7 @@
     const normalized = typeof streamId === 'string' ? streamId.trim() : '';
     if (!normalized) return;
     if (!socket || socketStreamId !== normalized) return;
-    socket.subscribe([...expandedPorts], { intervalMs: SUBSCRIBE_INTERVAL_MS });
+    socket.subscribe(expandedPorts, { intervalMs: SUBSCRIBE_INTERVAL_MS });
   });
 
   onDestroy(() => {

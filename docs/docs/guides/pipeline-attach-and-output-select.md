@@ -29,6 +29,7 @@ What you should see:
 
 - The pipeline appears in the list for this stream.
 - The UI shows a grid where pipelines can be placed into slots.
+- The UI can also expose an outputs viewer action for structured/non-image outputs.
 
 ## Step 2: Place It In The Grid (Keep It Simple First)
 

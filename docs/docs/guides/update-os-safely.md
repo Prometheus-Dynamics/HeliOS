@@ -18,8 +18,8 @@ You are done when:
 2. Assume the device will reboot.
 3. If you care about your current pipelines, export them first.
    - [Pipeline import export](/guides/pipeline-import-export)
-4. If the system is in a weird state, capture a snapshot before you change anything.
-   - [Snapshots for support](/guides/snapshots-for-support)
+4. If the system is in a weird state, capture a diagnostics bundle before you change anything.
+   - [Diagnostics Bundles For Support](/guides/diagnostics-bundles-for-support)
 
 ## Apply Update (UI)
 
@@ -34,6 +34,7 @@ What to expect:
 - Applying an update stops all streams.
 - The device reboots.
 - The Web UI disconnects briefly and then reloads.
+- The device now applies directly from the selected image source; the user workflow is upload/select, then apply.
 
 ## What To Watch While It Runs
 

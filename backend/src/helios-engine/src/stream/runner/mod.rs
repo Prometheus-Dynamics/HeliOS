@@ -1,4 +1,4 @@
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -53,6 +53,7 @@ pub struct StreamRunner {
     pub(super) encoder_worker: Option<EncoderWorker>,
     pub(super) decoder_stats: styx::codec::CodecStats,
     pub(super) encoder_stats: styx::codec::CodecStats,
+    pub(super) preview_encoder_stats: styx::codec::CodecStats,
     pub(super) capture_stats: styx::prelude::StageMetrics,
     pub(super) last_capture_ts: Option<u64>,
     pub(super) last_capture_wall: Option<Instant>,
@@ -64,6 +65,7 @@ pub struct StreamRunner {
     pub(super) viewer_recently_active: bool,
     pub(super) preview_encode_interval: Duration,
     pub(super) last_preview_encode_wall: Option<Instant>,
+    pub(super) preview_encoder_last_activity_ms: Arc<AtomicU64>,
     pub(super) preview_worker: Option<PreviewWorker>,
     pub(super) runner_memory: RunnerMemoryTracker,
 }
@@ -151,7 +153,7 @@ pub(super) struct PreviewEncodeResult {
 }
 
 impl PreviewWorker {
-    pub(super) fn start() -> Self {
+    pub(super) fn start(stats: styx::codec::CodecStats, activity_ms: Arc<AtomicU64>) -> Self {
         let (req_tx, req_rx) = std::sync::mpsc::sync_channel::<PreviewEncodeRequest>(1);
         let (res_tx, res_rx) = std::sync::mpsc::sync_channel::<PreviewEncodeResult>(1);
         let (recycle_tx, recycle_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(1);
@@ -186,15 +188,21 @@ impl PreviewWorker {
                     rgb.resize(wanted, 0);
                 }
                 if !write_rgb24(source, &mut rgb) {
+                    stats.inc_errors();
                     continue;
                 }
 
                 jpeg.clear();
                 // `Vec<u8>` implements `Write`; keep capacity to avoid allocator churn.
+                let encode_start = Instant::now();
                 let mut enc = JpegEncoder::new_with_quality(&mut jpeg, quality);
                 if enc.encode(&rgb, width, height, ColorType::Rgb8.into()).is_err() {
+                    stats.inc_errors();
                     continue;
                 }
+                stats.inc_processed();
+                stats.record_duration(encode_start.elapsed());
+                activity_ms.store(StreamRunner::unix_now_ms(), Ordering::Relaxed);
                 let dims = (width, height);
                 let ready = std::mem::take(&mut jpeg);
                 match res_tx.try_send(PreviewEncodeResult { ts: req.ts, dims, jpeg: ready }) {
@@ -202,6 +210,7 @@ impl PreviewWorker {
                     // Drop stale results if the consumer is behind, but keep the owned buffer so
                     // the worker can reuse its capacity on the next encode.
                     Err(TrySendError::Full(result)) => {
+                        stats.inc_backpressure();
                         jpeg = result.jpeg;
                     }
                     Err(TrySendError::Disconnected(result)) => {

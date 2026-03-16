@@ -17,8 +17,11 @@ use axum::{
 };
 use helios_peripherals::dto::SensorScope;
 use helios_peripherals::ipc::{FirmwareUpdate, SensorCommand, SensorEvent};
+use lib_asyncapi::registry::SchemaRegistry;
+use lib_asyncapi::{Server, Tag, TypeSchema, WsDoc};
 use lib_ipc::types::CommandId;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use tokio::sync::{Mutex, broadcast};
 use tokio::task::JoinHandle;
 use tracing::{warn, warn_span};
@@ -561,4 +564,21 @@ async fn send_ws_error(socket: &mut WebSocket, context: &WsErrorContext, reason:
             let _ = socket.send(Message::Text(r#"{"status":"sensors_stream_unavailable","reason":"internal error"}"#.to_string().into())).await;
         }
     }
+}
+
+pub fn register_docs(host: Option<String>, _registry: &mut SchemaRegistry, servers: &mut BTreeMap<String, Server>, tags: &mut Vec<Tag>, docs: &mut Vec<WsDoc>) {
+    let doc = WsDoc {
+        path: "sensors.stream",
+        summary: "Peripheral sensor stream",
+        description: "Streams subscribed IMU, power, lighting, and firmware sensor events from the peripherals runtime.",
+        tags: vec!["device".into(), "sensors".into()],
+        payload: None,
+        responses: vec![TypeSchema { name: "SensorsStreamEvent".into(), schema: serde_json::json!({ "type": "object" }) }],
+        params: vec![],
+    };
+
+    let server_host = host.unwrap_or_else(|| "localhost:5800/v1/ws".to_string());
+    servers.entry("primary".into()).or_insert(Server { host: server_host, protocol: "ws".into(), protocol_version: None, description: Some("Primary WebSocket entrypoint".into()) });
+    docs.push(doc);
+    tags.push(Tag { name: "sensors".into(), description: Some("Peripheral sensor events".to_string()), external_docs: None });
 }

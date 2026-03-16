@@ -16,6 +16,7 @@ Most teams only use Peers when they want to ingest a stream from a device that i
 - Save stream URLs that you can use later when creating a Netcam stream in **OS > Devices**.
 - Probe peers to see whether their API/UI/streams are reachable.
 - (Optional) Configure where localization outputs should be read from (HTTP vs NT4) and how to map fields for custom devices.
+- Sync pipelines from compatible HeliOS peers when available.
 - Remove peers you no longer use.
 
 ## What Peers is not

@@ -19,6 +19,7 @@ The Media UI supports:
 - File type is inferred from the file name and MIME type (Image, Video, AI model, Archive, Update image, Data file, Unknown).
 - Uploads are stored on the device under the Media storage directory.
 - If you upload multiple files at once, the UI uploads them one by one.
+- Uploaded files become immediately available to other workflows such as replay streams, updater media selection, and map/model import flows.
 
 ## After upload
 
@@ -30,5 +31,5 @@ Most metadata editing happens after upload:
 
 ## Common failure cases
 
-- Unsupported file type: the UI may refuse to upload files it cannot classify.
-- Upload too large: the API enforces an upload size limit (device-configured).
+- Upload too large: the API enforces an upload size limit.
+- Network interruption: partial uploads fail and need to be retried.

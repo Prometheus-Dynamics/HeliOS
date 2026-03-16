@@ -1,6 +1,6 @@
 ---
 title: Calibration (Per Stream)
-description: Snapshots, solving, saving intrinsics, guided overlays, and how calibration is applied to pipelines.
+description: Guided calibration capture, solving, import/export helpers, and CCM tooling.
 ---
 
 The **Calibration** tab manages calibration workflows for a stream.
@@ -29,6 +29,7 @@ When you **Save**, these values are stored on the stream manifest as `manifest.c
 Guided mode overlays help you spread samples across the image during capture.
 
 - Enable guided mode for on-preview helpers.
+- Optionally accumulate guided coverage live while you capture.
 - Reset coverage if you want to start a new capture session.
 
 ## Calibration Boards (ChArUco)
@@ -69,6 +70,14 @@ Solving is done by the backend calibration solver endpoint (`POST /calibration/s
 
 If **include overlays** is enabled, the solver can also emit overlay/debug images as additional Media items to help you understand which views were used and where detections failed.
 
+## Import And Reuse
+
+The tab can also:
+
+- copy calibration from another stream
+- import calibration JSON from a file
+- review current saved calibration values before solving
+
 ## Save Vs Apply
 
 After you solve:
@@ -89,3 +98,4 @@ When enabled, the tab includes CCM tooling:
 - Pick a chart image.
 - Click corners TL → TR → BR → BL.
 - Solve and apply a CCM to the device.
+- Generate printable color chart PNG/PDF assets directly from the tab.

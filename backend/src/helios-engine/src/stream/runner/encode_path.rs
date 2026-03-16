@@ -1,6 +1,6 @@
 use std::fs;
 use std::process::Command;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -235,6 +235,7 @@ impl StreamRunner {
         self.last_capture_wall = None;
         self.capture_started_wall = None;
         self.encoder_last_activity_ms.store(0, Ordering::Relaxed);
+        self.preview_encoder_last_activity_ms.store(0, Ordering::Relaxed);
         let capture_fourcc = self.capture_input_fourcc().ok_or(Error::InvalidState("capture format unknown"))?;
         self.capture_fourcc = Some(capture_fourcc);
 
@@ -246,7 +247,10 @@ impl StreamRunner {
         // `stop()` tears down the preview worker, and capture recovery restarts reuse this same
         // runner instance. Recreate the worker on start so preview shmem resumes after restarts.
         if self.preview_worker.is_none() && self.shmem.is_some() && self.preview_generation_enabled() {
-            self.preview_worker = Some(super::PreviewWorker::start());
+            self.preview_worker = Some(super::PreviewWorker::start(
+                self.preview_encoder_stats.clone(),
+                self.preview_encoder_last_activity_ms.clone()
+            ));
             self.last_preview_encode_wall = None;
             tracing::info!("preview worker restarted");
         }
@@ -332,12 +336,24 @@ impl StreamRunner {
         // Reset per-stage stats so subsequent metrics samples reflect the new configuration.
         self.decoder_stats = styx::codec::CodecStats::default();
         self.encoder_stats = styx::codec::CodecStats::default();
+        self.preview_encoder_stats = styx::codec::CodecStats::default();
         self.last_decode_wall = None;
         self.last_encode_wall = None;
         self.encoder_last_activity_ms.store(0, Ordering::Relaxed);
+        self.preview_encoder_last_activity_ms = Arc::new(AtomicU64::new(0));
 
         // Encoder worker depends on the selected codec; stop it and let the pump restart it when demanded.
         self.stop_encoder_worker();
+        if let Some(worker) = self.preview_worker.take() {
+            worker.stop();
+        }
+        if self.shmem.is_some() && self.preview_generation_enabled() {
+            self.preview_worker = Some(super::PreviewWorker::start(
+                self.preview_encoder_stats.clone(),
+                self.preview_encoder_last_activity_ms.clone()
+            ));
+            self.last_preview_encode_wall = None;
+        }
 
         if decoder_changed || encoder_changed {
             // Pixel conversion helpers inside Styx cache per-thread buffers (including in the Rayon
@@ -368,6 +384,7 @@ impl StreamRunner {
     pub fn stop(&mut self) {
         self.stop_encoder_worker();
         self.encoder_last_activity_ms.store(0, Ordering::Relaxed);
+        self.preview_encoder_last_activity_ms.store(0, Ordering::Relaxed);
         self.runner_memory.reset_current();
         self.capture_started_wall = None;
         self.capture_empty_since = None;
@@ -387,6 +404,7 @@ impl StreamRunner {
 
     pub(crate) fn stop_capture_for_restart(&mut self) {
         self.encoder_last_activity_ms.store(0, Ordering::Relaxed);
+        self.preview_encoder_last_activity_ms.store(0, Ordering::Relaxed);
         self.runner_memory.reset_current();
         self.capture_started_wall = None;
         self.capture_empty_since = None;
@@ -442,13 +460,35 @@ impl StreamRunner {
         let pipeline = self.graph.pipeline_metrics();
         let pipeline_instances = self.graph.pipeline_metrics_by_pipeline();
         let memory = self.styx_memory_metrics();
-        let mut encoder = self.encode_fourcc.map(|_| to_codec_metrics(&self.encoder_stats));
+        let main_encoder_active = Self::codec_stats_has_activity(&self.encoder_stats);
+        let preview_encoder_active = Self::codec_stats_has_activity(&self.preview_encoder_stats);
+        let prefer_preview_encoder = preview_encoder_active && !main_encoder_active;
+        let mut encoder = if prefer_preview_encoder {
+            Some(to_codec_metrics(&self.preview_encoder_stats))
+        } else if self.encode_fourcc.is_some() {
+            Some(to_codec_metrics(&self.encoder_stats))
+        } else if preview_encoder_active {
+            Some(to_codec_metrics(&self.preview_encoder_stats))
+        } else {
+            None
+        };
         if let Some(metrics) = encoder.as_mut() {
-            let activity_ms = self.encoder_last_activity_ms.load(Ordering::Relaxed);
+            let activity_ms = if prefer_preview_encoder {
+                self.preview_encoder_last_activity_ms.load(Ordering::Relaxed)
+            } else {
+                self.encoder_last_activity_ms.load(Ordering::Relaxed)
+            };
             if activity_ms > 0 {
                 let age = Duration::from_millis(Self::unix_now_ms().saturating_sub(activity_ms));
                 if age >= Self::stale_threshold_for_fps(metrics.fps) {
                     Self::mark_codec_metrics_stale(metrics, age);
+                }
+            } else if prefer_preview_encoder {
+                if let Some(last_encode) = self.last_preview_encode_wall {
+                    let age = now.saturating_duration_since(last_encode);
+                    if age >= Self::stale_threshold_for_fps(metrics.fps) {
+                        Self::mark_codec_metrics_stale(metrics, age);
+                    }
                 }
             } else if let Some(last_encode) = self.last_encode_wall {
                 let age = now.saturating_duration_since(last_encode);
@@ -685,6 +725,10 @@ impl StreamRunner {
 
     fn preview_generation_enabled(&self) -> bool {
         !(self.encoder_id.is_none() && self.decoder_id.is_none() && self.capture_config.backend != styx::BackendKind::File)
+    }
+
+    fn codec_stats_has_activity(stats: &styx::codec::CodecStats) -> bool {
+        stats.samples() > 0 || stats.processed() > 0 || stats.backpressure() > 0 || stats.errors() > 0
     }
 
     pub(super) fn is_encoded_preview_fourcc(fourcc: FourCc) -> bool {

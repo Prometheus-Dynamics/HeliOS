@@ -1,6 +1,6 @@
 ---
 title: Pipelines (Per Stream)
-description: Attach pipelines to a stream, configure the grid, pick preview outputs, and open tuning.
+description: Attach pipelines, configure layout and wiring, pick preview outputs, and jump into tuning.
 ---
 
 The **Pipelines** tab controls which pipelines run on this stream and how their outputs map to the live preview.
@@ -15,10 +15,11 @@ Assigned pipelines can be:
 
 - Dragged into grid slots.
 - Removed/detached from the stream.
+- Opened in the pipeline tuner.
 
 ## Grid Layout
 
-The tab supports a grid layout for multiplexing.
+The tab supports a layout grid for multiplexing and comparison.
 
 - For simple setups, use `1x1`.
 - For multiplexing, increase rows/columns and place pipelines into slots.
@@ -29,10 +30,16 @@ Any grid larger than `1x1` can have a noticeable performance impact (more compos
 
 ## Output Selection (Live Preview)
 
-For each pipeline (or each grid slot) you can select an output port.
+For each pipeline or grid slot you can select an image-like output port.
 
 - The live preview uses the selected output (commonly `frame` for annotated overlays).
 - If outputs are still being fetched, the UI may show **Loading outputs…**.
+
+## Wiring Between Pipelines
+
+When a stream runs multiple pipelines, the page can also persist pipeline-to-pipeline wires.
+
+Use this when one attached pipeline should feed another instead of every pipeline reading directly from the raw stream frame.
 
 ## Tuning
 
