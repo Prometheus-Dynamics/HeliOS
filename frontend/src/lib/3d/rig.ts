@@ -437,20 +437,22 @@ function addOrientationLabels(
   const targetHeight = dims.bumperHeight * 0.65;
   const frontBackWidth = Math.max(dims.width - dims.bumperThickness * 1.4, 0.05);
   const sideWidth = Math.max(dims.length - dims.bumperThickness * 1.4, 0.05);
-  const epsilon = 0.0005;
+  const surfaceInset = 0.0005;
 
   const frontFace = dims.length / 2 + dims.bumperThickness;
   const sideFace = dims.width / 2 + dims.bumperThickness;
-  const frontPosition = frontFace - textDepth / 2 - epsilon;
-  const backPosition = -frontFace + textDepth / 2 + epsilon;
-  const leftPosition = -sideFace + textDepth / 2 + epsilon;
-  const rightPosition = sideFace - textDepth / 2 - epsilon;
+  // Center the mesh so the back of the extruded text sits just inside the bumper skin.
+  // The readable face then lands outside the bumper instead of being buried in the volume.
+  const frontPosition = frontFace + textDepth / 2 - surfaceInset;
+  const backPosition = -frontFace - textDepth / 2 + surfaceInset;
+  const rightPosition = -sideFace - textDepth / 2 + surfaceInset;
+  const leftPosition = sideFace + textDepth / 2 - surfaceInset;
 
   const placements = [
     { text: 'FRONT', maxWidth: frontBackWidth, position: new THREE.Vector3(0, verticalCenter, frontPosition), rotationY: 0 },
     { text: 'BACK', maxWidth: frontBackWidth, position: new THREE.Vector3(0, verticalCenter, backPosition), rotationY: Math.PI },
-    { text: 'RIGHT', maxWidth: sideWidth, position: new THREE.Vector3(leftPosition, verticalCenter, 0), rotationY: -Math.PI / 2 },
-    { text: 'LEFT', maxWidth: sideWidth, position: new THREE.Vector3(rightPosition, verticalCenter, 0), rotationY: Math.PI / 2 }
+    { text: 'RIGHT', maxWidth: sideWidth, position: new THREE.Vector3(rightPosition, verticalCenter, 0), rotationY: -Math.PI / 2 },
+    { text: 'LEFT', maxWidth: sideWidth, position: new THREE.Vector3(leftPosition, verticalCenter, 0), rotationY: Math.PI / 2 }
   ];
 
   placements.forEach(({ text, maxWidth, position, rotationY }) => {
