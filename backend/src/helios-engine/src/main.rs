@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::{fs, io::Write, path::PathBuf};
 
 use helios_engine::ipc::server::EngineIpcServer;
-use helios_engine::ipc::NodeRegistrySnapshot;
+use helios_engine::ipc::{GraphValidationHelperRequest, GraphValidationHelperResponse, NodeRegistrySnapshot};
 use helios_engine::runtime::EngineRuntime;
 use styx::prelude::{set_capture_tunables, CaptureTunables};
 use tokio_util::sync::CancellationToken;
@@ -103,13 +103,12 @@ fn ensure_backtraces() {
 
 enum CliAction {
     DumpNodeRegistry { output: PathBuf },
+    ValidateGraph,
 }
 
 fn handle_cli() -> Option<CliAction> {
     let mut args = std::env::args().skip(1);
-    let Some(first) = args.next() else {
-        return None;
-    };
+    let first = args.next()?;
 
     match first.as_str() {
         "-h" | "--help" => {
@@ -145,6 +144,23 @@ fn handle_cli() -> Option<CliAction> {
             }
             Some(CliAction::DumpNodeRegistry { output })
         }
+        "validate-graph" => {
+            while let Some(arg) = args.next() {
+                match arg.as_str() {
+                    "-h" | "--help" => {
+                        print_help();
+                        std::process::exit(0);
+                    }
+                    other => {
+                        eprintln!("helios-engine: unknown validate-graph argument: {other}");
+                        eprintln!();
+                        print_help();
+                        std::process::exit(2);
+                    }
+                }
+            }
+            Some(CliAction::ValidateGraph)
+        }
         other => {
             eprintln!("helios-engine: unknown argument: {other}");
             eprintln!();
@@ -160,6 +176,12 @@ fn run_cli_action(action: CliAction) {
         CliAction::DumpNodeRegistry { output } => {
             if let Err(err) = dump_node_registry_snapshot(&output) {
                 eprintln!("helios-engine: failed to dump node registry: {err}");
+                std::process::exit(1);
+            }
+        }
+        CliAction::ValidateGraph => {
+            if let Err(err) = validate_graph_from_stdio() {
+                eprintln!("helios-engine: failed to validate graph: {err}");
                 std::process::exit(1);
             }
         }
@@ -192,6 +214,18 @@ fn default_registry_snapshot_path() -> PathBuf {
     std::env::var("HELIOS_NODE_REGISTRY_SNAPSHOT_PATH").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/var/lib/helios/state/node-registry.snapshot.json"))
 }
 
+fn validate_graph_from_stdio() -> Result<(), String> {
+    let stdin = std::io::stdin();
+    let request: GraphValidationHelperRequest = serde_json::from_reader(stdin.lock()).map_err(|err| format!("decode request failed: {err}"))?;
+    let response = match helios_engine::runtime::validate_graph_report(request.graph.into(), request.active_features, request.enable_lints) {
+        Ok(report) => GraphValidationHelperResponse::Report { report },
+        Err(err) => GraphValidationHelperResponse::Error { code: err.code, reason: err.reason },
+    };
+    let stdout = std::io::stdout();
+    serde_json::to_writer(stdout.lock(), &response).map_err(|err| format!("encode response failed: {err}"))?;
+    Ok(())
+}
+
 fn print_help() {
     println!(
         "helios-engine {version}\n\
@@ -201,13 +235,15 @@ Runs the HeliOS engine daemon (IPC server). This binary is typically launched vi
 USAGE:\n\
     helios-engine\n\
     helios-engine dump-node-registry [--output PATH]\n\
+    helios-engine validate-graph < REQUEST.json > RESPONSE.json\n\
 \n\
 OPTIONS:\n\
     -h, --help       Print help\n\
     -V, --version    Print version\n\
 \n\
 COMMANDS:\n\
-    dump-node-registry    Build a registry snapshot in a short-lived helper process\n",
+    dump-node-registry    Build a registry snapshot in a short-lived helper process\n\
+    validate-graph        Validate a Daedalus graph in a short-lived helper process\n",
         version = helios_engine::VERSION
     );
 }

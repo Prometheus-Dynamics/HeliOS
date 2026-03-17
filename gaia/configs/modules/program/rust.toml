@@ -9,6 +9,8 @@ package = "helios-api"
 kind = "bin"
 profile = "aarch64-linux"
 mode = "auto"
+build_command = ["cargo", "build", "-p", "helios-api", "--bin", "helios-api", "--release", "--target", "aarch64-unknown-linux-gnu"]
+output_path = "../.gaia-target/aarch64-linux/aarch64-unknown-linux-gnu/release/helios-api"
 
 [[rust.artifacts]]
 id = "helios-api-tools"
@@ -16,6 +18,8 @@ package = "helios-api"
 kind = "bin"
 profile = "aarch64-linux"
 mode = "auto"
+build_command = ["cargo", "build", "-p", "helios-api", "--bin", "helios-api-tools", "--release", "--target", "aarch64-unknown-linux-gnu"]
+output_path = "../.gaia-target/aarch64-linux/aarch64-unknown-linux-gnu/release/helios-api-tools"
 
 [[rust.artifacts]]
 id = "helios-engine"

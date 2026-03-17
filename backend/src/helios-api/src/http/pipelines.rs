@@ -26,6 +26,7 @@ use crate::http::{
     revision::{apply_revision_headers, matches_if_none_match, not_modified_response},
     streams, streams_persist,
 };
+use crate::pipelines_read_model::{GraphValidationRequestError, validate_graph_report};
 use helios_engine::ipc::NodeRegistrySnapshot;
 use helios_engine::ipc::{EngineErrorCode, EngineEvent, StreamManifest};
 
@@ -638,21 +639,15 @@ async fn inject_cached_port_metadata(state: &AppState, graph: &mut JsonValue) {
     )
 )]
 async fn validate_graph(State(state): State<AppState>, Json(payload): Json<ValidateGraphRequest>) -> impl IntoResponse {
-    let report = match state.engine.validate_graph_event(payload.graph, payload.active_features, payload.enable_lints).await {
-        Ok(EngineEvent::GraphValidation { report, .. }) => report,
-        Ok(EngineEvent::Nack { code, reason, .. }) => {
+    let report = match validate_graph_report(&state, payload.graph, payload.active_features, payload.enable_lints).await {
+        Ok(report) => report,
+        Err(GraphValidationRequestError::Rejected { code, reason }) => {
             if let Some(graph_id) = payload.graph_id {
                 set_graph_validation_error(&state, graph_id, Some(code), reason.clone()).await;
             }
             return (StatusCode::BAD_REQUEST, Json(engine_error_body(Some(code), reason))).into_response();
         }
-        Ok(_) => {
-            if let Some(graph_id) = payload.graph_id {
-                set_graph_validation_error(&state, graph_id, Some(EngineErrorCode::Internal), "unexpected engine response".to_string()).await;
-            }
-            return (StatusCode::BAD_GATEWAY, Json(engine_error_body(Some(EngineErrorCode::Internal), "unexpected engine response"))).into_response();
-        }
-        Err(err) => {
+        Err(GraphValidationRequestError::Transport(err)) => {
             if let Some(graph_id) = payload.graph_id {
                 set_graph_validation_error(&state, graph_id, Some(EngineErrorCode::Internal), format!("validation failed: {err}")).await;
             }

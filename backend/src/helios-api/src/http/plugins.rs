@@ -119,11 +119,8 @@ async fn list_plugins(State(state): State<AppState>) -> ApiResult<impl IntoRespo
     const IPC_TIMEOUT: Duration = Duration::from_secs(3);
     let engine_available = state.engine.list_streams_with_timeout(IPC_TIMEOUT).await.is_ok();
     let mut compatibility = Vec::new();
-    match state.services.pipelines.load_registry_snapshot_from_disk_or_helper().await {
-        Ok(snapshot) => {
-            compatibility = snapshot.plugin_compatibility;
-        }
-        Err(_) => {}
+    if let Ok(snapshot) = state.services.pipelines.load_registry_snapshot_from_disk_or_helper().await {
+        compatibility = snapshot.plugin_compatibility;
     }
 
     let mut compatibility_map: BTreeMap<String, PluginCompatibility> = BTreeMap::new();

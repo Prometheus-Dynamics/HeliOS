@@ -213,8 +213,7 @@ impl PreviewWorker {
                         stats.inc_backpressure();
                         jpeg = result.jpeg;
                     }
-                    Err(TrySendError::Disconnected(result)) => {
-                        jpeg = result.jpeg;
+                    Err(TrySendError::Disconnected(_result)) => {
                         break;
                     }
                 }

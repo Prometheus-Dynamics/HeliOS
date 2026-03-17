@@ -227,7 +227,7 @@ impl StreamRunner {
                 // When the backend already provides encoded frames and there is no graph, skip
                 // expensive decode/graph work unless someone is subscribed to decoded frames.
                 if can_passthrough_encoded {
-                    let decoded_demand = self.raw_tx.receiver_count() > 0 || self.graph.host().receiver_count() > 0;
+                    let decoded_demand = self.raw_tx.receiver_count() > 0 || (self.graph.has_image_output() && self.graph.host().receiver_count() > 0);
                     if !decoded_demand {
                         return Ok(true);
                     }
@@ -243,9 +243,10 @@ impl StreamRunner {
                     self.last_decode_wall = Some(Instant::now());
                 }
                 let graph_host = self.graph.host();
+                let graph_has_image_output = self.graph.has_image_output();
                 let raw_demand = self.raw_tx.receiver_count() > 0;
-                let host_demand = graph_host.receiver_count() > 0;
-                let preview_active = self.preview_demand();
+                let host_demand = graph_has_image_output && graph_host.receiver_count() > 0;
+                let preview_active = graph_has_image_output && self.preview_demand();
                 let encode_demand = self.encoder_id.is_some() && self.encoder_demand();
                 let graph_executor_active = self.graph.has_executor();
                 let needs_decoded_image = raw_demand || host_demand || preview_active || encode_demand || graph_executor_active;
@@ -361,7 +362,7 @@ impl StreamRunner {
                 // In graph/no-viewer mode, value outputs can still be useful while the overlay/
                 // preview image path is pure memory churn.
                 let should_write_preview = preview_active;
-                let graph_image_output_demand = should_write_preview || self.encoder_demand() || graph_host.receiver_count() > 0;
+                let graph_image_output_demand = graph_has_image_output && (should_write_preview || self.encoder_demand() || host_demand);
                 let graph_start = Instant::now();
                 let processed = match self.process_assigned_graphs(image, graph_image_output_demand) {
                     Some(img) => Some(img),
@@ -458,7 +459,7 @@ impl StreamRunner {
                 }
                 let stall_ms = std::env::var("HELIOS_CAPTURE_STALL_MS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(DEFAULT_CAPTURE_STALL_MS).clamp(50, 10_000);
                 let active_stall_ms = std::env::var("HELIOS_CAPTURE_ACTIVE_STALL_MS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(DEFAULT_CAPTURE_ACTIVE_STALL_MS).clamp(250, 10_000);
-                let interactive_demand = self.preview_demand() || self.encoder_demand() || self.graph.host().receiver_count() > 0;
+                let interactive_demand = (self.graph.has_image_output() && (self.preview_demand() || self.graph.host().receiver_count() > 0)) || self.encoder_demand();
                 let file_offset_start = self.file_replay_has_offset_start_frame();
                 // Seeking to late frames on software-decoded file replay can take multiple seconds
                 // before first output. Do not apply the aggressive interactive stall threshold in
@@ -550,10 +551,7 @@ impl StreamRunner {
             Err(TrySendError::Full(_)) => {}
             Err(TrySendError::Disconnected(req)) => {
                 tracing::warn!("preview worker channel disconnected; restarting preview worker");
-                self.preview_worker = Some(super::PreviewWorker::start(
-                    self.preview_encoder_stats.clone(),
-                    self.preview_encoder_last_activity_ms.clone()
-                ));
+                self.preview_worker = Some(super::PreviewWorker::start(self.preview_encoder_stats.clone(), self.preview_encoder_last_activity_ms.clone()));
                 if let Some(worker) = self.preview_worker.as_ref() {
                     if worker.req_tx.try_send(req).is_ok() {
                         self.last_preview_encode_wall = Some(now);

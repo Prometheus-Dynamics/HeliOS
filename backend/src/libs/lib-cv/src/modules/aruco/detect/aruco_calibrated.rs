@@ -1,6 +1,6 @@
 use super::*;
 
-const ARUCO_DECODE_PAR_MIN_QUADS: usize = 96;
+const ARUCO_DECODE_PAR_MIN_QUADS: usize = 512;
 
 fn decode_quad_aruco_calibrated(
     gray: &GrayImage,
@@ -204,6 +204,14 @@ pub fn decode_quads_aruco_with_config_no_bits(frame: &DynamicImage, quads: &[[Po
     decode_quads_aruco_with_config_bits(frame, quads, sample_scale, dict, cfg, false)
 }
 
+pub fn decode_quads_aruco_with_config_gray(gray: &GrayImage, quads: &[[Point<f32>; 4]], sample_scale: u32, dict: &ArucoDictionary, cfg: &ArucoDecodeConfig) -> Vec<ArucoDetection2D> {
+    decode_quads_aruco_with_config_bits_gray(gray, quads, sample_scale, dict, cfg, true)
+}
+
+pub fn decode_quads_aruco_with_config_no_bits_gray(gray: &GrayImage, quads: &[[Point<f32>; 4]], sample_scale: u32, dict: &ArucoDictionary, cfg: &ArucoDecodeConfig) -> Vec<ArucoDetection2D> {
+    decode_quads_aruco_with_config_bits_gray(gray, quads, sample_scale, dict, cfg, false)
+}
+
 fn decode_quads_aruco_with_config_bits(
     frame: &DynamicImage,
     quads: &[[Point<f32>; 4]],
@@ -215,20 +223,33 @@ fn decode_quads_aruco_with_config_bits(
     if quads.is_empty() {
         return Vec::new();
     }
-    with_luma8_frame(frame, |gray| {
-        let decoded: Vec<ArucoDetectionF32> = if quads.len() < ARUCO_DECODE_PAR_MIN_QUADS {
-            quads.iter().filter_map(|quad| decode_quad_aruco_warp(gray, quad, sample_scale, dict, cfg)).collect()
-        } else {
-            quads.par_iter().filter_map(|quad| decode_quad_aruco_warp(gray, quad, sample_scale, dict, cfg)).collect()
-        };
-        decoded
-            .into_iter()
-            .filter_map(|m| {
-                let bits = if include_bits { dict.bit_grid(m.id as usize) } else { None };
-                marker_f32_to_detection_2d(m, bits)
-            })
-            .collect()
-    })
+    with_luma8_frame(frame, |gray| decode_quads_aruco_with_config_bits_gray(gray, quads, sample_scale, dict, cfg, include_bits))
+}
+
+fn decode_quads_aruco_with_config_bits_gray(
+    gray: &GrayImage,
+    quads: &[[Point<f32>; 4]],
+    sample_scale: u32,
+    dict: &ArucoDictionary,
+    cfg: &ArucoDecodeConfig,
+    include_bits: bool,
+) -> Vec<ArucoDetection2D> {
+    if quads.is_empty() {
+        return Vec::new();
+    }
+
+    let decoded: Vec<ArucoDetectionF32> = if quads.len() < ARUCO_DECODE_PAR_MIN_QUADS {
+        quads.iter().filter_map(|quad| decode_quad_aruco_warp(gray, quad, sample_scale, dict, cfg)).collect()
+    } else {
+        quads.par_iter().filter_map(|quad| decode_quad_aruco_warp(gray, quad, sample_scale, dict, cfg)).collect()
+    };
+    decoded
+        .into_iter()
+        .filter_map(|m| {
+            let bits = if include_bits { dict.bit_grid(m.id as usize) } else { None };
+            marker_f32_to_detection_2d(m, bits)
+        })
+        .collect()
 }
 
 pub fn decode_quads_aruco_calibrated_with_config(
@@ -266,17 +287,27 @@ fn decode_quads_aruco_calibrated_with_config_bits(
         return Vec::new();
     }
     with_luma8_frame(frame, |gray| {
-        let decoded: Vec<ArucoDetectionF32> = if quads.len() < ARUCO_DECODE_PAR_MIN_QUADS {
-            quads.iter().filter_map(|quad| decode_quad_aruco_calibrated(gray, quad, sample_scale, dict, calib, cfg)).collect()
+        if quads.len() < ARUCO_DECODE_PAR_MIN_QUADS {
+            let mut out = Vec::with_capacity(quads.len().min(256));
+            for quad in quads {
+                let Some(marker) = decode_quad_aruco_calibrated(gray, quad, sample_scale, dict, calib, cfg) else {
+                    continue;
+                };
+                let bits = if include_bits { dict.bit_grid(marker.id as usize) } else { None };
+                if let Some(detection) = marker_f32_to_detection_2d(marker, bits) {
+                    out.push(detection);
+                }
+            }
+            out
         } else {
-            quads.par_iter().filter_map(|quad| decode_quad_aruco_calibrated(gray, quad, sample_scale, dict, calib, cfg)).collect()
-        };
-        decoded
-            .into_iter()
-            .filter_map(|m| {
-                let bits = if include_bits { dict.bit_grid(m.id as usize) } else { None };
-                marker_f32_to_detection_2d(m, bits)
-            })
-            .collect()
+            quads
+                .par_iter()
+                .filter_map(|quad| {
+                    let marker = decode_quad_aruco_calibrated(gray, quad, sample_scale, dict, calib, cfg)?;
+                    let bits = if include_bits { dict.bit_grid(marker.id as usize) } else { None };
+                    marker_f32_to_detection_2d(marker, bits)
+                })
+                .collect()
+        }
     })
 }

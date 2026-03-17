@@ -156,7 +156,7 @@ async fn sample_output(State(state): State<AppState>, Query(query): Query<Pipeli
             Ok(sample) => Json(sample).into_response(),
             Err(err) => ApiError::bad_gateway(format!("invalid localization pipeline sample response: {err}")).into_response(),
         },
-        Ok(EngineEvent::Nack { code, reason, .. }) if code == helios_engine::ipc::EngineErrorCode::NotFound => ApiError::not_found(reason).into_response(),
+        Ok(EngineEvent::Nack { code: helios_engine::ipc::EngineErrorCode::NotFound, reason, .. }) => ApiError::not_found(reason).into_response(),
         Ok(EngineEvent::Nack { reason, .. }) => ApiError::bad_gateway(reason).into_response(),
         Ok(other) => ApiError::bad_gateway(format!("unexpected engine response: {other:?}")).into_response(),
         Err(err) => ApiError::bad_gateway(err.to_string()).into_response(),

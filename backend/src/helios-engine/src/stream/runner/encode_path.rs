@@ -247,10 +247,7 @@ impl StreamRunner {
         // `stop()` tears down the preview worker, and capture recovery restarts reuse this same
         // runner instance. Recreate the worker on start so preview shmem resumes after restarts.
         if self.preview_worker.is_none() && self.shmem.is_some() && self.preview_generation_enabled() {
-            self.preview_worker = Some(super::PreviewWorker::start(
-                self.preview_encoder_stats.clone(),
-                self.preview_encoder_last_activity_ms.clone()
-            ));
+            self.preview_worker = Some(super::PreviewWorker::start(self.preview_encoder_stats.clone(), self.preview_encoder_last_activity_ms.clone()));
             self.last_preview_encode_wall = None;
             tracing::info!("preview worker restarted");
         }
@@ -348,10 +345,7 @@ impl StreamRunner {
             worker.stop();
         }
         if self.shmem.is_some() && self.preview_generation_enabled() {
-            self.preview_worker = Some(super::PreviewWorker::start(
-                self.preview_encoder_stats.clone(),
-                self.preview_encoder_last_activity_ms.clone()
-            ));
+            self.preview_worker = Some(super::PreviewWorker::start(self.preview_encoder_stats.clone(), self.preview_encoder_last_activity_ms.clone()));
             self.last_preview_encode_wall = None;
         }
 
@@ -473,11 +467,7 @@ impl StreamRunner {
             None
         };
         if let Some(metrics) = encoder.as_mut() {
-            let activity_ms = if prefer_preview_encoder {
-                self.preview_encoder_last_activity_ms.load(Ordering::Relaxed)
-            } else {
-                self.encoder_last_activity_ms.load(Ordering::Relaxed)
-            };
+            let activity_ms = if prefer_preview_encoder { self.preview_encoder_last_activity_ms.load(Ordering::Relaxed) } else { self.encoder_last_activity_ms.load(Ordering::Relaxed) };
             if activity_ms > 0 {
                 let age = Duration::from_millis(Self::unix_now_ms().saturating_sub(activity_ms));
                 if age >= Self::stale_threshold_for_fps(metrics.fps) {

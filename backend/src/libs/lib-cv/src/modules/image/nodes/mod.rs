@@ -24,7 +24,7 @@ use crate::modules::image::{
     components::{ComponentFeature, component_features as extract_component_features, remove_small_components_in_place},
     convolution::{canny_prep, convolve_gray, sobel_edges},
     guided::guided_filter_gray,
-    luma::with_luma8_frame,
+    luma::{crop_luma8_frame, with_luma8_frame},
     morphology::skeleton,
     resize::{downscale_luma8_in_place, resize_fast},
     rotate::{Rotation, rotate_fast},
@@ -405,6 +405,8 @@ impl CvImagePlugin {
         registry.merge::<geometry::cv_rotate90>()?;
         registry.merge::<geometry::cv_crop>()?;
         registry.merge::<geometry::cv_crop_roi>()?;
+        registry.merge::<geometry::cv_crop_roi_gray>()?;
+        registry.merge::<geometry::cv_roi_offsets>()?;
         registry.merge::<geometry::cv_roi>()?;
         registry.merge::<geometry::cv_skew>()?;
         registry.merge::<geometry::cv_setpixel>()?;

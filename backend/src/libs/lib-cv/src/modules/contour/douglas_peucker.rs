@@ -2,6 +2,10 @@ use imageproc::point::Point;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 
+const RDP_RETAIN_POINT_CAP: usize = 4 * 1024;
+const RDP_RETAIN_MARKER_CAP: usize = 4 * 1024;
+const RDP_RETAIN_INDEX_CAP: usize = 4 * 1024;
+
 #[derive(Default)]
 struct RdpScratchF32 {
     stack: Vec<(usize, usize)>,
@@ -17,6 +21,28 @@ struct RdpScratchF32 {
 
 thread_local! {
     static RDP_SCRATCH_F32: RefCell<RdpScratchF32> = RefCell::new(RdpScratchF32::default());
+}
+
+#[inline(always)]
+fn trim_retained_vec<T>(vec: &mut Vec<T>, retain_cap: usize) {
+    vec.clear();
+    if vec.capacity() > retain_cap {
+        vec.shrink_to(retain_cap);
+    }
+}
+
+pub(crate) fn compact_rdp_scratch_after_frame() {
+    RDP_SCRATCH_F32.with(|scratch| {
+        let mut scratch = scratch.borrow_mut();
+        trim_retained_vec(&mut scratch.stack, RDP_RETAIN_MARKER_CAP);
+        trim_retained_vec(&mut scratch.marker_epoch, RDP_RETAIN_MARKER_CAP);
+        trim_retained_vec(&mut scratch.seg1, RDP_RETAIN_POINT_CAP);
+        trim_retained_vec(&mut scratch.seg2, RDP_RETAIN_POINT_CAP);
+        trim_retained_vec(&mut scratch.out2, RDP_RETAIN_POINT_CAP);
+        trim_retained_vec(&mut scratch.idxs, RDP_RETAIN_INDEX_CAP);
+        trim_retained_vec(&mut scratch.uniq, RDP_RETAIN_INDEX_CAP);
+        trim_retained_vec(&mut scratch.hull, RDP_RETAIN_INDEX_CAP);
+    });
 }
 
 /// Approximates a polygonal curve for lib-cv points using Ramer–Douglas–Peucker (f64).
@@ -667,50 +693,6 @@ fn update_best(points: &[crate::Point], a: usize, b: usize, best: &mut (usize, u
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{approx_poly_dp_closed_fast_into, approx_poly_dp_into};
-    use imageproc::point::Point;
-
-    fn dense_rectangle(width: i32, height: i32) -> Vec<Point<f32>> {
-        let mut points = Vec::new();
-        for x in 0..width {
-            points.push(Point::new(x as f32, 0.0));
-        }
-        for y in 1..height {
-            points.push(Point::new((width - 1) as f32, y as f32));
-        }
-        for x in (0..(width - 1)).rev() {
-            points.push(Point::new(x as f32, (height - 1) as f32));
-        }
-        for y in (1..(height - 1)).rev() {
-            points.push(Point::new(0.0, y as f32));
-        }
-        points
-    }
-
-    #[test]
-    fn closed_fast_matches_closed_rdp_on_dense_rectangle() {
-        let contour = dense_rectangle(128, 72);
-        let mut exact = Vec::new();
-        let mut fast = Vec::new();
-
-        approx_poly_dp_into(&contour, true, 2.0, &mut exact);
-        approx_poly_dp_closed_fast_into(&contour, 2.0, &mut fast);
-
-        if exact.first() == exact.last() {
-            exact.pop();
-        }
-        if fast.first() == fast.last() {
-            fast.pop();
-        }
-
-        assert_eq!(exact.len(), 4);
-        assert_eq!(fast.len(), 4);
-        assert_eq!(exact, fast);
-    }
-}
-
 fn update_best_f32(points: &[Point<f32>], a: usize, b: usize, best: &mut (usize, usize), best_dist: &mut f64) {
     let (i, j) = normalize_pair(a, b);
     let dist = dist2_f32(points, i, j);
@@ -762,6 +744,50 @@ fn cross_f32(points: &[Point<f32>], o: usize, a: usize, b: usize) -> f32 {
     let ox = points[o].x;
     let oy = points[o].y;
     (points[a].x - ox) * (points[b].y - oy) - (points[a].y - oy) * (points[b].x - ox)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{approx_poly_dp_closed_fast_into, approx_poly_dp_into};
+    use imageproc::point::Point;
+
+    fn dense_rectangle(width: i32, height: i32) -> Vec<Point<f32>> {
+        let mut points = Vec::new();
+        for x in 0..width {
+            points.push(Point::new(x as f32, 0.0));
+        }
+        for y in 1..height {
+            points.push(Point::new((width - 1) as f32, y as f32));
+        }
+        for x in (0..(width - 1)).rev() {
+            points.push(Point::new(x as f32, (height - 1) as f32));
+        }
+        for y in (1..(height - 1)).rev() {
+            points.push(Point::new(0.0, y as f32));
+        }
+        points
+    }
+
+    #[test]
+    fn closed_fast_matches_closed_rdp_on_dense_rectangle() {
+        let contour = dense_rectangle(128, 72);
+        let mut exact = Vec::new();
+        let mut fast = Vec::new();
+
+        approx_poly_dp_into(&contour, true, 2.0, &mut exact);
+        approx_poly_dp_closed_fast_into(&contour, 2.0, &mut fast);
+
+        if exact.first() == exact.last() {
+            exact.pop();
+        }
+        if fast.first() == fast.last() {
+            fast.pop();
+        }
+
+        assert_eq!(exact.len(), 4);
+        assert_eq!(fast.len(), 4);
+        assert_eq!(exact, fast);
+    }
 }
 
 // pub fn approx_poly_dp(curve: &[Point<u32>], epsilon: f64, closed: bool) -> Vec<Point<u32>> {

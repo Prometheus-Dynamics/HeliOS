@@ -23,7 +23,7 @@ pub fn register_docs(host: Option<String>, _registry: &mut SchemaRegistry, serve
         description: "Streams realtime IMU status payloads from the device IMU runtime.",
         tags: vec!["device".into(), "imu".into()],
         payload: None,
-        responses: vec![TypeSchema { name: "ImuStatusPayload".into(), schema: serde_json::json!({ "type": "object" }) }],
+        responses: vec![TypeSchema { name: "ImuStatusPayload", schema: serde_json::json!({ "type": "object" }) }],
         params: vec![],
     };
 

@@ -4,12 +4,23 @@ use image::GrayImage;
 use rayon::prelude::*;
 use std::cell::RefCell;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 thread_local! {
     static VERT_LUT_SCRATCH: RefCell<Vec<u16>> = const { RefCell::new(Vec::new()) };
 }
 
 const CLAHE_LUT_PAR_MIN_TILES: usize = 24;
+const CLAHE_APPLY_PAR_MIN_PIXELS_DEFAULT: usize = 1920 * 1080;
+
+fn clahe_apply_parallel_min_pixels() -> usize {
+    static MIN_PIXELS: OnceLock<usize> = OnceLock::new();
+    *MIN_PIXELS.get_or_init(|| std::env::var("HELIOS_CLAHE_PARALLEL_MIN_PIXELS").ok().and_then(|value| value.parse::<usize>().ok()).unwrap_or(CLAHE_APPLY_PAR_MIN_PIXELS_DEFAULT))
+}
+
+fn clahe_should_parallelize(width: u32, height: u32) -> bool {
+    (width as usize).saturating_mul(height as usize) >= clahe_apply_parallel_min_pixels() && rayon::current_num_threads() > 1
+}
 
 pub struct ClaheTiles {
     pub luts: Vec<[u8; 256]>,
@@ -37,7 +48,7 @@ pub fn prepare_clahe(gray: &GrayImage, tile_size: u32, clip_limit: f32) -> Clahe
     let tiles_y = height.div_ceil(tile_h).max(1);
 
     let mut luts = vec![[0u8; 256]; (tiles_x * tiles_y) as usize];
-    if luts.len() >= CLAHE_LUT_PAR_MIN_TILES && rayon::current_num_threads() > 1 {
+    if luts.len() >= CLAHE_LUT_PAR_MIN_TILES && clahe_should_parallelize(width, height) {
         luts.par_iter_mut().enumerate().with_min_len(8).for_each(|(idx, lut)| {
             let ty = idx as u32 / tiles_x;
             let tx = idx as u32 % tiles_x;
@@ -90,18 +101,34 @@ pub fn apply_clahe(gray: &GrayImage, tile_size: u32, clip_limit: f32) -> GrayIma
 pub fn apply_clahe_with_tiles(gray: &GrayImage, tiles: &ClaheTiles) -> GrayImage {
     let width = gray.width();
     let height = gray.height();
+    let mut output = GrayImage::new(width, height);
+    apply_clahe_with_tiles_into(gray, tiles, &mut output);
+    output
+}
+
+/// Apply CLAHE using precomputed per-tile LUTs into a reusable output image.
+pub fn apply_clahe_with_tiles_into(gray: &GrayImage, tiles: &ClaheTiles, output: &mut GrayImage) {
+    let width = gray.width();
+    let height = gray.height();
     if width == 0 || height == 0 {
-        return gray.clone();
+        if output.width() != width || output.height() != height {
+            *output = GrayImage::new(width, height);
+        } else {
+            output.as_mut().fill(0);
+        }
+        return;
     }
 
     // Fast path: with a single tile there is no spatial interpolation. Apply one LUT directly.
     if tiles.tiles_x == 1 && tiles.tiles_y == 1 {
         let lut = &tiles.luts[0];
-        let mut output = GrayImage::new(width, height);
+        if output.width() != width || output.height() != height {
+            *output = GrayImage::new(width, height);
+        }
         for (dst, src) in output.as_mut().iter_mut().zip(gray.as_raw().iter()) {
             *dst = lut[*src as usize];
         }
-        return output;
+        return;
     }
 
     let key = (width, height, tiles.tile_w, tiles.tile_h, tiles.tiles_x, tiles.tiles_y);
@@ -119,7 +146,9 @@ pub fn apply_clahe_with_tiles(gray: &GrayImage, tiles: &ClaheTiles) -> GrayImage
     });
 
     let input = gray.as_raw();
-    let mut output = GrayImage::new(width, height);
+    if output.width() != width || output.height() != height {
+        *output = GrayImage::new(width, height);
+    }
     let out_buf = output.as_mut();
     let width_usize = width as usize;
     #[cfg(target_arch = "aarch64")]
@@ -127,7 +156,7 @@ pub fn apply_clahe_with_tiles(gray: &GrayImage, tiles: &ClaheTiles) -> GrayImage
 
     const ROWS_PER_JOB: usize = 128;
 
-    out_buf.par_chunks_mut(width_usize.saturating_mul(ROWS_PER_JOB).max(width_usize)).enumerate().for_each(|(job_idx, rows)| {
+    let apply_rows = |job_idx: usize, rows: &mut [u8]| {
         VERT_LUT_SCRATCH.with(|scratch| {
             let mut scratch = scratch.borrow_mut();
             let tiles_x = tiles.tiles_x as usize;
@@ -170,13 +199,42 @@ pub fn apply_clahe_with_tiles(gray: &GrayImage, tiles: &ClaheTiles) -> GrayImage
 
                 let src_row = &input[y * width_usize..(y + 1) * width_usize];
                 let dst_row = &mut rows[row_offset * width_usize..(row_offset + 1) * width_usize];
-
                 apply_clahe_row_segmented_vert(dst_row, src_row, col_weight_fp.as_ref(), vert_luts, tiles.tile_w as usize);
             }
         });
-    });
+    };
 
-    output
+    let chunk_len = width_usize.saturating_mul(ROWS_PER_JOB).max(width_usize);
+    if clahe_should_parallelize(width, height) {
+        out_buf.par_chunks_mut(chunk_len).enumerate().for_each(|(job_idx, rows)| apply_rows(job_idx, rows));
+    } else {
+        for (job_idx, rows) in out_buf.chunks_mut(chunk_len).enumerate() {
+            apply_rows(job_idx, rows);
+        }
+    }
+}
+
+#[inline]
+pub fn blend_clahe_with_base_into(base: &GrayImage, enhanced: &GrayImage, mix: f32, out: &mut GrayImage) {
+    let alpha = mix.clamp(0.0, 1.0);
+    if out.width() != base.width() || out.height() != base.height() {
+        *out = GrayImage::new(base.width(), base.height());
+    }
+    if alpha >= 0.999 {
+        out.as_mut().copy_from_slice(enhanced.as_raw());
+        return;
+    }
+    if alpha <= 0.001 {
+        out.as_mut().copy_from_slice(base.as_raw());
+        return;
+    }
+
+    let a = (alpha * 256.0).round().clamp(0.0, 256.0) as u32;
+    let ia = 256u32.saturating_sub(a);
+    out.as_mut().par_iter_mut().zip(base.as_raw().par_iter().zip(enhanced.as_raw().par_iter())).for_each(|(dst, (&b, &e))| {
+        let mixed = (e as u32).saturating_mul(a).saturating_add((b as u32).saturating_mul(ia)).saturating_add(128) >> 8;
+        *dst = mixed as u8;
+    });
 }
 
 fn build_interp(length: u32, tile_extent: u32, tiles: u32, max_coord: u32) -> Vec<Interp> {

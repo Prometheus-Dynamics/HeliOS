@@ -350,33 +350,115 @@ fn cv_aruco_adaptive_threshold_mask(
     Ok(crate::modules::image::binary::adaptive_mean_threshold_fast_with_invert(gray, window, offset, invert))
 }
 
-#[node(
-    id = "adaptive_quads_from_mask",
-    summary = "Extract quads from a binary mask.",
-    inputs(
-        port(name = "enabled", default = true),
-        port(name = "mask"),
-        port(name = "min_perimeter_rate", default = 0.03f64, meta(ui_min = 0.0, ui_max = 1.0, ui_step = 0.01)),
-        port(name = "max_perimeter_rate", default = 4.0f64, meta(ui_min = 0.0, ui_max = 20.0, ui_step = 0.1)),
-        port(name = "epsilon", default = 5.0f64, meta(ui_min = 0.01, ui_max = 1000.0, ui_step = 0.1)),
-        port(name = "min_area", default = 120.0f64, meta(ui_min = 0.0, ui_max = 1000000.0, ui_step = 1000.0)),
-        port(name = "max_area", default = 0.0f64, meta(ui_min = 0.0, ui_max = 1000000.0, ui_step = 1000.0)),
-        port(name = "min_angle_deg", default = 5.0f64, meta(ui_min = 0.0, ui_max = 180.0, ui_step = 1.0)),
-        port(name = "max_angle_deg", default = 175.0f64, meta(ui_min = 0.0, ui_max = 180.0, ui_step = 1.0)),
-        port(name = "max_side_cv", default = 4.0f64, meta(ui_min = 0.05, ui_max = 20.0, ui_step = 0.1)),
-        port(name = "min_corner_distance_rate", default = 0.05f64, meta(ui_min = 0.0, ui_max = 1.0, ui_step = 0.01)),
-        port(name = "min_distance_to_border", default = 3i64, meta(ui_min = 0, ui_max = 128, ui_step = 1)),
-        port(name = "min_side_px", default = 0.0f64, meta(ui_min = 0.0, ui_max = 128.0, ui_step = 0.5)),
-        port(name = "fallback_max_contours", default = 120i64, meta(ui_min = 0, ui_max = 1000, ui_step = 1)),
-        port(name = "max_quads", default = 0i64, meta(ui_min = 0, ui_max = 512, ui_step = 1)),
-        port(name = "expand_inner_scale", default = 1.0f64, meta(ui_min = 1.0, ui_max = 4.0, ui_step = 0.05)),
-        port(name = "expand_inner_max_side_px", default = 0.0f64, meta(ui_min = 0.0, ui_max = 512.0, ui_step = 1.0))
-    ),
-    outputs(port(name = "quads", source = "Quads", ty = crate::daedalus_types::quads()))
-)]
+#[derive(Clone, Copy, Debug, Default)]
+struct AdaptiveClaheFrameStats {
+    mean: u16,
+    spread: u16,
+}
+
+struct AdaptiveClahePreparedCache {
+    key: (u32, u32, u32, u32),
+    stats: AdaptiveClaheFrameStats,
+    reuse_streak: u8,
+    tiles: crate::modules::image::clahe::ClaheTiles,
+}
+
+struct AdaptiveFrameNodeScratch {
+    clahe: GrayImage,
+    blended: GrayImage,
+    mask: GrayImage,
+    clahe_cache: Option<AdaptiveClahePreparedCache>,
+}
+
+impl Default for AdaptiveFrameNodeScratch {
+    fn default() -> Self {
+        Self { clahe: GrayImage::new(0, 0), blended: GrayImage::new(0, 0), mask: GrayImage::new(0, 0), clahe_cache: None }
+    }
+}
+
+thread_local! {
+    static ADAPTIVE_FRAME_NODE_SCRATCH: RefCell<AdaptiveFrameNodeScratch> = RefCell::new(AdaptiveFrameNodeScratch::default());
+}
+
+const ADAPTIVE_NODE_CLAHE_MAX_REUSE_STREAK: u8 = 120;
+const ADAPTIVE_NODE_CLAHE_MAX_REUSE_STREAK_TILE1: u8 = 240;
+const ADAPTIVE_NODE_CLAHE_MEAN_DELTA_MAX: u16 = 30;
+const ADAPTIVE_NODE_CLAHE_SPREAD_DELTA_MAX: u16 = 64;
+const ADAPTIVE_NODE_CLAHE_FORCE_REUSE_STREAK: u8 = 32;
+
+#[inline]
+fn adaptive_clahe_frame_stats(gray: &GrayImage) -> AdaptiveClaheFrameStats {
+    let w = gray.width() as usize;
+    let h = gray.height() as usize;
+    if w == 0 || h == 0 {
+        return AdaptiveClaheFrameStats::default();
+    }
+
+    let sx = (w / 24).max(1);
+    let sy = (h / 18).max(1);
+    let raw = gray.as_raw();
+    let mut sum = 0u64;
+    let mut count = 0u64;
+    let mut min_v = u8::MAX;
+    let mut max_v = u8::MIN;
+
+    let mut y = 0usize;
+    while y < h {
+        let row = &raw[y * w..(y + 1) * w];
+        let mut x = 0usize;
+        while x < w {
+            let v = row[x];
+            min_v = min_v.min(v);
+            max_v = max_v.max(v);
+            sum = sum.saturating_add(v as u64);
+            count = count.saturating_add(1);
+            x = x.saturating_add(sx);
+        }
+        y = y.saturating_add(sy);
+    }
+
+    let mean = if count > 0 { (sum / count) as u16 } else { 0 };
+    let spread = max_v.saturating_sub(min_v) as u16;
+    AdaptiveClaheFrameStats { mean, spread }
+}
+
+#[inline]
+fn adaptive_clahe_stats_similar(a: AdaptiveClaheFrameStats, b: AdaptiveClaheFrameStats) -> bool {
+    let mean_delta = a.mean.abs_diff(b.mean);
+    let spread_delta = a.spread.abs_diff(b.spread);
+    mean_delta <= ADAPTIVE_NODE_CLAHE_MEAN_DELTA_MAX && spread_delta <= ADAPTIVE_NODE_CLAHE_SPREAD_DELTA_MAX
+}
+
+#[inline]
+fn apply_cached_clahe_into(gray: &GrayImage, tile_size: u32, clip_limit: f32, cache: &mut Option<AdaptiveClahePreparedCache>, output: &mut GrayImage) {
+    let key = (gray.width(), gray.height(), tile_size, clip_limit.to_bits());
+    let stats = adaptive_clahe_frame_stats(gray);
+    if let Some(entry) = cache.as_mut()
+        && entry.key == key
+    {
+        let max_reuse = if tile_size <= 1 { ADAPTIVE_NODE_CLAHE_MAX_REUSE_STREAK_TILE1 } else { ADAPTIVE_NODE_CLAHE_MAX_REUSE_STREAK };
+        if entry.reuse_streak < max_reuse {
+            if tile_size > 1 && entry.reuse_streak < ADAPTIVE_NODE_CLAHE_FORCE_REUSE_STREAK {
+                entry.reuse_streak = entry.reuse_streak.saturating_add(1);
+                crate::modules::image::clahe::apply_clahe_with_tiles_into(gray, &entry.tiles, output);
+                return;
+            }
+            if adaptive_clahe_stats_similar(entry.stats, stats) {
+                entry.reuse_streak = entry.reuse_streak.saturating_add(1);
+                entry.stats = stats;
+                crate::modules::image::clahe::apply_clahe_with_tiles_into(gray, &entry.tiles, output);
+                return;
+            }
+        }
+    }
+
+    let tiles = crate::modules::image::clahe::prepare_clahe(gray, tile_size, clip_limit);
+    crate::modules::image::clahe::apply_clahe_with_tiles_into(gray, &tiles, output);
+    *cache = Some(AdaptiveClahePreparedCache { key, stats, reuse_streak: 0, tiles });
+}
+
 #[allow(clippy::too_many_arguments)]
-fn cv_aruco_adaptive_quads_from_mask(
-    enabled: bool,
+fn collect_adaptive_quads(
     mask: &GrayImage,
     min_perimeter_rate: f64,
     max_perimeter_rate: f64,
@@ -394,10 +476,6 @@ fn cv_aruco_adaptive_quads_from_mask(
     expand_inner_scale: f64,
     expand_inner_max_side_px: f64,
 ) -> Result<Vec<Quad>, NodeError> {
-    if !enabled {
-        return Ok(Vec::new());
-    }
-
     if mask.width() == 0 || mask.height() == 0 {
         return Ok(Vec::new());
     }
@@ -460,4 +538,360 @@ fn cv_aruco_adaptive_quads_from_mask(
         }
     }
     Ok(out)
+}
+
+#[node(
+    id = "adaptive_quads_from_frame",
+    summary = "Extract adaptive quads from a frame without materializing intermediate graph images.",
+    inputs(
+        port(name = "frame", source = "Frame", ty = daedalus::data::model::TypeExpr::opaque("image:gray8")),
+        port(name = "enabled", default = true),
+        port(name = "tile_size", default = 2i64, meta(ui_min = 1, ui_max = 64, ui_step = 1)),
+        port(name = "clip_limit", default = 3.5f64, meta(ui_min = 0.0, ui_max = 10.0, ui_step = 0.1)),
+        port(name = "mix", default = 1.0f64, meta(ui_min = 0.0, ui_max = 1.0, ui_step = 0.01)),
+        port(name = "adaptive_window", default = 61i64, meta(ui_min = 3, ui_max = 101, ui_step = 2)),
+        port(name = "adaptive_offset", default = 10.0f64, meta(ui_min = -50.0, ui_max = 50.0, ui_step = 1.0)),
+        port(name = "threshold_offset", default = 0.0f64, meta(ui_min = -32.0, ui_max = 32.0, ui_step = 1.0)),
+        port(name = "invert", default = true),
+        port(name = "min_perimeter_rate", default = 0.03f64, meta(ui_min = 0.0, ui_max = 1.0, ui_step = 0.01)),
+        port(name = "max_perimeter_rate", default = 4.0f64, meta(ui_min = 0.0, ui_max = 20.0, ui_step = 0.1)),
+        port(name = "epsilon", default = 5.0f64, meta(ui_min = 0.01, ui_max = 1000.0, ui_step = 0.1)),
+        port(name = "min_area", default = 120.0f64, meta(ui_min = 0.0, ui_max = 1000000.0, ui_step = 1000.0)),
+        port(name = "max_area", default = 0.0f64, meta(ui_min = 0.0, ui_max = 1000000.0, ui_step = 1000.0)),
+        port(name = "min_angle_deg", default = 5.0f64, meta(ui_min = 0.0, ui_max = 180.0, ui_step = 1.0)),
+        port(name = "max_angle_deg", default = 175.0f64, meta(ui_min = 0.0, ui_max = 180.0, ui_step = 1.0)),
+        port(name = "max_side_cv", default = 4.0f64, meta(ui_min = 0.05, ui_max = 20.0, ui_step = 0.1)),
+        port(name = "min_corner_distance_rate", default = 0.05f64, meta(ui_min = 0.0, ui_max = 1.0, ui_step = 0.01)),
+        port(name = "min_distance_to_border", default = 3i64, meta(ui_min = 0, ui_max = 128, ui_step = 1)),
+        port(name = "min_side_px", default = 0.0f64, meta(ui_min = 0.0, ui_max = 128.0, ui_step = 0.5)),
+        port(name = "fallback_max_contours", default = 120i64, meta(ui_min = 0, ui_max = 1000, ui_step = 1)),
+        port(name = "max_quads", default = 0i64, meta(ui_min = 0, ui_max = 512, ui_step = 1)),
+        port(name = "expand_inner_scale", default = 1.0f64, meta(ui_min = 1.0, ui_max = 4.0, ui_step = 0.05)),
+        port(name = "expand_inner_max_side_px", default = 0.0f64, meta(ui_min = 0.0, ui_max = 512.0, ui_step = 1.0))
+    ),
+    outputs(port(name = "quads", source = "Quads", ty = crate::daedalus_types::quads()))
+)]
+#[allow(clippy::too_many_arguments)]
+fn cv_aruco_adaptive_quads_from_frame(
+    frame: std::sync::Arc<crate::modules::image::luma::PooledGrayImage>,
+    enabled: bool,
+    tile_size: i64,
+    clip_limit: f64,
+    mix: f64,
+    adaptive_window: i64,
+    adaptive_offset: f64,
+    threshold_offset: f64,
+    invert: bool,
+    min_perimeter_rate: f64,
+    max_perimeter_rate: f64,
+    epsilon: f64,
+    min_area: f64,
+    max_area: f64,
+    min_angle_deg: f64,
+    max_angle_deg: f64,
+    max_side_cv: f64,
+    min_corner_distance_rate: f64,
+    min_distance_to_border: i64,
+    min_side_px: f64,
+    fallback_max_contours: i64,
+    max_quads: i64,
+    expand_inner_scale: f64,
+    expand_inner_max_side_px: f64,
+) -> Result<Vec<Quad>, NodeError> {
+    collect_adaptive_quads_from_gray_frame(
+        frame.as_ref(),
+        enabled,
+        tile_size,
+        clip_limit,
+        mix,
+        adaptive_window,
+        adaptive_offset,
+        threshold_offset,
+        invert,
+        min_perimeter_rate,
+        max_perimeter_rate,
+        epsilon,
+        min_area,
+        max_area,
+        min_angle_deg,
+        max_angle_deg,
+        max_side_cv,
+        min_corner_distance_rate,
+        min_distance_to_border,
+        min_side_px,
+        fallback_max_contours,
+        max_quads,
+        expand_inner_scale,
+        expand_inner_max_side_px,
+    )
+}
+
+fn roi_bounds_or_full(fw: u32, fh: u32, roi_x: i64, roi_y: i64, roi_w: i64, roi_h: i64) -> (u32, u32, u32, u32) {
+    if fw == 0 || fh == 0 {
+        return (0, 0, 0, 0);
+    }
+    if roi_w <= 0 || roi_h <= 0 {
+        return (0, 0, fw, fh);
+    }
+
+    let x = roi_x.max(0);
+    let y = roi_y.max(0);
+    if x >= i64::from(fw) || y >= i64::from(fh) {
+        return (0, 0, fw, fh);
+    }
+
+    let max_w = i64::from(fw) - x;
+    let max_h = i64::from(fh) - y;
+    if max_w <= 0 || max_h <= 0 {
+        return (0, 0, fw, fh);
+    }
+
+    let w = roi_w.max(1).min(max_w) as u32;
+    let h = roi_h.max(1).min(max_h) as u32;
+    let x = x as u32;
+    let y = y as u32;
+    if x == 0 && y == 0 && w == fw && h == fh { (0, 0, fw, fh) } else { (x, y, w, h) }
+}
+
+fn collect_adaptive_quads_from_gray_frame(
+    frame: &GrayImage,
+    enabled: bool,
+    tile_size: i64,
+    clip_limit: f64,
+    mix: f64,
+    adaptive_window: i64,
+    adaptive_offset: f64,
+    threshold_offset: f64,
+    invert: bool,
+    min_perimeter_rate: f64,
+    max_perimeter_rate: f64,
+    epsilon: f64,
+    min_area: f64,
+    max_area: f64,
+    min_angle_deg: f64,
+    max_angle_deg: f64,
+    max_side_cv: f64,
+    min_corner_distance_rate: f64,
+    min_distance_to_border: i64,
+    min_side_px: f64,
+    fallback_max_contours: i64,
+    max_quads: i64,
+    expand_inner_scale: f64,
+    expand_inner_max_side_px: f64,
+) -> Result<Vec<Quad>, NodeError> {
+    if !enabled {
+        return Ok(Vec::new());
+    }
+
+    let window = u32::try_from(adaptive_window).unwrap_or(0);
+    if window < 3 || frame.width() == 0 || frame.height() == 0 {
+        return Ok(Vec::new());
+    }
+
+    let tile_size = tile_size.clamp(1, u32::MAX as i64) as u32;
+    let clip_limit = (clip_limit.max(0.0) as f32).max(0.0);
+    let mix = (mix as f32).clamp(0.0, 1.0);
+    let offset = adaptive_offset.clamp(0.0, 64.0) as f32 + threshold_offset.clamp(-32.0, 32.0) as f32;
+
+    ADAPTIVE_FRAME_NODE_SCRATCH.with(|scratch| {
+        let mut scratch = scratch.borrow_mut();
+        let AdaptiveFrameNodeScratch { clahe, blended, mask, clahe_cache } = &mut *scratch;
+
+        let threshold_input: &GrayImage = if mix <= 0.001 {
+            frame
+        } else {
+            apply_cached_clahe_into(frame, tile_size, clip_limit, clahe_cache, clahe);
+            if mix >= 0.999 {
+                clahe
+            } else {
+                crate::modules::image::clahe::blend_clahe_with_base_into(frame, clahe, mix, blended);
+                blended
+            }
+        };
+
+        crate::modules::image::binary::adaptive_mean_threshold_fast_into(threshold_input, window, offset, invert, mask);
+        collect_adaptive_quads(
+            mask,
+            min_perimeter_rate,
+            max_perimeter_rate,
+            epsilon,
+            min_area,
+            max_area,
+            min_angle_deg,
+            max_angle_deg,
+            max_side_cv,
+            min_corner_distance_rate,
+            min_distance_to_border,
+            min_side_px,
+            fallback_max_contours,
+            max_quads,
+            expand_inner_scale,
+            expand_inner_max_side_px,
+        )
+    })
+}
+
+#[node(
+    id = "adaptive_quads_from_roi_frame",
+    summary = "Extract adaptive quads directly from an input frame plus ROI inputs.",
+    inputs(
+        port(name = "frame", source = "Frame", ty = daedalus::data::model::TypeExpr::opaque("image:dynamic")),
+        port(name = "roi_x", default = 0i64, meta(ui_min = 0, ui_max = 4096, ui_step = 1)),
+        port(name = "roi_y", default = 0i64, meta(ui_min = 0, ui_max = 4096, ui_step = 1)),
+        port(name = "roi_w", default = 0i64, meta(ui_min = 0, ui_max = 4096, ui_step = 1)),
+        port(name = "roi_h", default = 0i64, meta(ui_min = 0, ui_max = 4096, ui_step = 1)),
+        port(name = "enabled", default = true),
+        port(name = "tile_size", default = 2i64, meta(ui_min = 1, ui_max = 64, ui_step = 1)),
+        port(name = "clip_limit", default = 3.5f64, meta(ui_min = 0.0, ui_max = 10.0, ui_step = 0.1)),
+        port(name = "mix", default = 1.0f64, meta(ui_min = 0.0, ui_max = 1.0, ui_step = 0.01)),
+        port(name = "adaptive_window", default = 61i64, meta(ui_min = 3, ui_max = 101, ui_step = 2)),
+        port(name = "adaptive_offset", default = 10.0f64, meta(ui_min = -50.0, ui_max = 50.0, ui_step = 1.0)),
+        port(name = "threshold_offset", default = 0.0f64, meta(ui_min = -32.0, ui_max = 32.0, ui_step = 1.0)),
+        port(name = "invert", default = true),
+        port(name = "min_perimeter_rate", default = 0.03f64, meta(ui_min = 0.0, ui_max = 1.0, ui_step = 0.01)),
+        port(name = "max_perimeter_rate", default = 4.0f64, meta(ui_min = 0.0, ui_max = 20.0, ui_step = 0.1)),
+        port(name = "epsilon", default = 5.0f64, meta(ui_min = 0.01, ui_max = 1000.0, ui_step = 0.1)),
+        port(name = "min_area", default = 120.0f64, meta(ui_min = 0.0, ui_max = 1000000.0, ui_step = 1000.0)),
+        port(name = "max_area", default = 0.0f64, meta(ui_min = 0.0, ui_max = 1000000.0, ui_step = 1000.0)),
+        port(name = "min_angle_deg", default = 5.0f64, meta(ui_min = 0.0, ui_max = 180.0, ui_step = 1.0)),
+        port(name = "max_angle_deg", default = 175.0f64, meta(ui_min = 0.0, ui_max = 180.0, ui_step = 1.0)),
+        port(name = "max_side_cv", default = 4.0f64, meta(ui_min = 0.05, ui_max = 20.0, ui_step = 0.1)),
+        port(name = "min_corner_distance_rate", default = 0.05f64, meta(ui_min = 0.0, ui_max = 1.0, ui_step = 0.01)),
+        port(name = "min_distance_to_border", default = 3i64, meta(ui_min = 0, ui_max = 128, ui_step = 1)),
+        port(name = "min_side_px", default = 0.0f64, meta(ui_min = 0.0, ui_max = 128.0, ui_step = 0.5)),
+        port(name = "fallback_max_contours", default = 120i64, meta(ui_min = 0, ui_max = 1000, ui_step = 1)),
+        port(name = "max_quads", default = 0i64, meta(ui_min = 0, ui_max = 512, ui_step = 1)),
+        port(name = "expand_inner_scale", default = 1.0f64, meta(ui_min = 1.0, ui_max = 4.0, ui_step = 0.05)),
+        port(name = "expand_inner_max_side_px", default = 0.0f64, meta(ui_min = 0.0, ui_max = 512.0, ui_step = 1.0))
+    ),
+    outputs(port(name = "quads", source = "Quads", ty = crate::daedalus_types::quads()))
+)]
+#[allow(clippy::too_many_arguments)]
+fn cv_aruco_adaptive_quads_from_roi_frame(
+    frame: &DynamicImage,
+    roi_x: i64,
+    roi_y: i64,
+    roi_w: i64,
+    roi_h: i64,
+    enabled: bool,
+    tile_size: i64,
+    clip_limit: f64,
+    mix: f64,
+    adaptive_window: i64,
+    adaptive_offset: f64,
+    threshold_offset: f64,
+    invert: bool,
+    min_perimeter_rate: f64,
+    max_perimeter_rate: f64,
+    epsilon: f64,
+    min_area: f64,
+    max_area: f64,
+    min_angle_deg: f64,
+    max_angle_deg: f64,
+    max_side_cv: f64,
+    min_corner_distance_rate: f64,
+    min_distance_to_border: i64,
+    min_side_px: f64,
+    fallback_max_contours: i64,
+    max_quads: i64,
+    expand_inner_scale: f64,
+    expand_inner_max_side_px: f64,
+) -> Result<Vec<Quad>, NodeError> {
+    let (fw, fh) = frame.dimensions();
+    let (x, y, w, h) = roi_bounds_or_full(fw, fh, roi_x, roi_y, roi_w, roi_h);
+    crate::modules::image::luma::with_cropped_luma8_frame(frame, x, y, w, h, |gray| {
+        collect_adaptive_quads_from_gray_frame(
+            gray,
+            enabled,
+            tile_size,
+            clip_limit,
+            mix,
+            adaptive_window,
+            adaptive_offset,
+            threshold_offset,
+            invert,
+            min_perimeter_rate,
+            max_perimeter_rate,
+            epsilon,
+            min_area,
+            max_area,
+            min_angle_deg,
+            max_angle_deg,
+            max_side_cv,
+            min_corner_distance_rate,
+            min_distance_to_border,
+            min_side_px,
+            fallback_max_contours,
+            max_quads,
+            expand_inner_scale,
+            expand_inner_max_side_px,
+        )
+    })
+}
+
+#[node(
+    id = "adaptive_quads_from_mask",
+    summary = "Extract quads from a binary mask.",
+    inputs(
+        port(name = "enabled", default = true),
+        port(name = "mask"),
+        port(name = "min_perimeter_rate", default = 0.03f64, meta(ui_min = 0.0, ui_max = 1.0, ui_step = 0.01)),
+        port(name = "max_perimeter_rate", default = 4.0f64, meta(ui_min = 0.0, ui_max = 20.0, ui_step = 0.1)),
+        port(name = "epsilon", default = 5.0f64, meta(ui_min = 0.01, ui_max = 1000.0, ui_step = 0.1)),
+        port(name = "min_area", default = 120.0f64, meta(ui_min = 0.0, ui_max = 1000000.0, ui_step = 1000.0)),
+        port(name = "max_area", default = 0.0f64, meta(ui_min = 0.0, ui_max = 1000000.0, ui_step = 1000.0)),
+        port(name = "min_angle_deg", default = 5.0f64, meta(ui_min = 0.0, ui_max = 180.0, ui_step = 1.0)),
+        port(name = "max_angle_deg", default = 175.0f64, meta(ui_min = 0.0, ui_max = 180.0, ui_step = 1.0)),
+        port(name = "max_side_cv", default = 4.0f64, meta(ui_min = 0.05, ui_max = 20.0, ui_step = 0.1)),
+        port(name = "min_corner_distance_rate", default = 0.05f64, meta(ui_min = 0.0, ui_max = 1.0, ui_step = 0.01)),
+        port(name = "min_distance_to_border", default = 3i64, meta(ui_min = 0, ui_max = 128, ui_step = 1)),
+        port(name = "min_side_px", default = 0.0f64, meta(ui_min = 0.0, ui_max = 128.0, ui_step = 0.5)),
+        port(name = "fallback_max_contours", default = 120i64, meta(ui_min = 0, ui_max = 1000, ui_step = 1)),
+        port(name = "max_quads", default = 0i64, meta(ui_min = 0, ui_max = 512, ui_step = 1)),
+        port(name = "expand_inner_scale", default = 1.0f64, meta(ui_min = 1.0, ui_max = 4.0, ui_step = 0.05)),
+        port(name = "expand_inner_max_side_px", default = 0.0f64, meta(ui_min = 0.0, ui_max = 512.0, ui_step = 1.0))
+    ),
+    outputs(port(name = "quads", source = "Quads", ty = crate::daedalus_types::quads()))
+)]
+#[allow(clippy::too_many_arguments)]
+fn cv_aruco_adaptive_quads_from_mask(
+    enabled: bool,
+    mask: &GrayImage,
+    min_perimeter_rate: f64,
+    max_perimeter_rate: f64,
+    epsilon: f64,
+    min_area: f64,
+    max_area: f64,
+    min_angle_deg: f64,
+    max_angle_deg: f64,
+    max_side_cv: f64,
+    min_corner_distance_rate: f64,
+    min_distance_to_border: i64,
+    min_side_px: f64,
+    fallback_max_contours: i64,
+    max_quads: i64,
+    expand_inner_scale: f64,
+    expand_inner_max_side_px: f64,
+) -> Result<Vec<Quad>, NodeError> {
+    if !enabled {
+        return Ok(Vec::new());
+    }
+    collect_adaptive_quads(
+        mask,
+        min_perimeter_rate,
+        max_perimeter_rate,
+        epsilon,
+        min_area,
+        max_area,
+        min_angle_deg,
+        max_angle_deg,
+        max_side_cv,
+        min_corner_distance_rate,
+        min_distance_to_border,
+        min_side_px,
+        fallback_max_contours,
+        max_quads,
+        expand_inner_scale,
+        expand_inner_max_side_px,
+    )
 }

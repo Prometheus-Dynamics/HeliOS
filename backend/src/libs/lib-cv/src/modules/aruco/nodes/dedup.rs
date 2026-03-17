@@ -8,7 +8,7 @@ use super::*;
     ),
     outputs(port(name = "deduped", source = "ArucoDetections2D", ty = crate::daedalus_types::aruco_detections_2d()))
 )]
-fn cv_aruco_dedup_detections(detections: Option<Vec<ArucoDetection2D>>, center_dist_px: f64) -> Result<Vec<ArucoDetection2D>, NodeError> {
+fn cv_aruco_dedup_detections(detections: Option<std::sync::Arc<Vec<ArucoDetection2D>>>, center_dist_px: f64) -> Result<Vec<ArucoDetection2D>, NodeError> {
     fn quad_area(quad: &[Point; 4]) -> f64 {
         let mut area = 0.0f64;
         for i in 0..4 {
@@ -28,15 +28,15 @@ fn cv_aruco_dedup_detections(detections: Option<Vec<ArucoDetection2D>>, center_d
         (x * 0.25, y * 0.25)
     }
 
-    let detections = detections.unwrap_or_default();
+    let detections = detections.as_deref().map(Vec::as_slice).unwrap_or(&[]);
     let dist = center_dist_px.max(0.0);
     if detections.len() <= 1 || dist <= 0.0 {
-        return Ok(detections);
+        return Ok(detections.to_vec());
     }
     let dist2 = dist * dist;
 
     let mut by_id: std::collections::HashMap<u32, Vec<ArucoDetection2D>> = std::collections::HashMap::new();
-    for det in &detections {
+    for det in detections {
         by_id.entry(det.id).or_default().push(det.clone());
     }
 
@@ -100,9 +100,9 @@ struct ArucoDedupSpatialConfig {
     ),
     outputs(port(name = "deduped", source = "ArucoDetections2D", ty = crate::daedalus_types::aruco_detections_2d()))
 )]
-fn cv_aruco_dedup_detections_spatial(detections: Option<Vec<ArucoDetection2D>>, cfg: ArucoDedupSpatialConfig) -> Result<Vec<ArucoDetection2D>, NodeError> {
-    let detections = detections.unwrap_or_default();
-    let merged = merge_detections_spatial_impl(detections, cfg.center_dist_px, cfg.min_area_ratio, cfg.max_corner_dist_px, cfg.max_center_dist_ratio, cfg.min_iou);
+fn cv_aruco_dedup_detections_spatial(detections: Option<std::sync::Arc<Vec<ArucoDetection2D>>>, cfg: ArucoDedupSpatialConfig) -> Result<Vec<ArucoDetection2D>, NodeError> {
+    let detections = detections.as_deref().map(Vec::as_slice).unwrap_or(&[]);
+    let merged = merge_detections_spatial_impl(detections.iter().cloned(), cfg.center_dist_px, cfg.min_area_ratio, cfg.max_corner_dist_px, cfg.max_center_dist_ratio, cfg.min_iou);
     if !cfg.suppress_nested {
         return Ok(merged);
     }

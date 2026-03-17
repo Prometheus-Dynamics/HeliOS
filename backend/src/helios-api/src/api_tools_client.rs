@@ -6,7 +6,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use helios_peripherals::AiModelFormat;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 #[cfg(not(test))]
 use tokio::io::AsyncWriteExt;
 #[cfg(not(test))]
@@ -72,15 +72,25 @@ pub(crate) fn helper_status() -> HelperStatus {
             }
             #[cfg(unix)]
             {
-                return meta.permissions().mode() & 0o111 != 0;
+                if meta.permissions().mode() & 0o111 == 0 {
+                    return false;
+                }
             }
-            #[cfg(not(unix))]
-            {
-                true
-            }
+            helper_self_check(&path)
         })
         .unwrap_or(false);
     HelperStatus { ok, path }
+}
+
+fn helper_self_check(path: &Path) -> bool {
+    std::process::Command::new(path)
+        .arg("--self-check")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
 }
 
 pub(crate) async fn calibration_board_png(params: CalibrationBoardParams) -> Result<Vec<u8>, ApiError> {

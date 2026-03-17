@@ -11,7 +11,7 @@ impl SensorsService {
         if self.event_bus.receiver_count() == 0 {
             return;
         }
-        match self.snapshot(scope).await {
+        match self.cached_snapshot(scope).await {
             Ok(snapshot) => publish_event(self, SensorEvent::Snapshot { command_id, scope: scope.clone(), values: snapshot }),
             Err(err) => warn!(?scope, %err, "failed to publish snapshot"),
         }

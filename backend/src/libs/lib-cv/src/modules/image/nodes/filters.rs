@@ -108,7 +108,7 @@ fn cv_otsu(frame: DynamicImage, exec_ctx: &ExecutionContext) -> Result<GrayImage
     const RECOMPUTE_INTERVAL: u64 = 4;
     const MAX_SIG_DELTA: f64 = 0.03;
 
-    #[derive(Default, Serialize, Deserialize)]
+    #[derive(Clone, Default, Serialize, Deserialize)]
     struct OtsuState {
         frame_idx: u64,
         last_threshold: u8,
@@ -143,7 +143,7 @@ fn cv_otsu(frame: DynamicImage, exec_ctx: &ExecutionContext) -> Result<GrayImage
         acc / (64.0 * 255.0)
     }
 
-    let mut state: OtsuState = exec_ctx.state.get_checked::<OtsuState>(STATE_KEY).map_err(NodeError::Handler)?.unwrap_or_default();
+    let mut state: OtsuState = exec_ctx.state.take_native::<OtsuState>(STATE_KEY).or_else(|_| exec_ctx.state.get_checked::<OtsuState>(STATE_KEY)).map_err(NodeError::Handler)?.unwrap_or_default();
     state.frame_idx = state.frame_idx.saturating_add(1);
 
     let mask = crate::modules::image::luma::with_luma8_frame(&frame, |gray| {
@@ -159,7 +159,7 @@ fn cv_otsu(frame: DynamicImage, exec_ctx: &ExecutionContext) -> Result<GrayImage
         crate::modules::image::binary::binary_image_gray_simd(gray, threshold)
     });
 
-    exec_ctx.state.set_typed(STATE_KEY, &state).map_err(NodeError::Handler)?;
+    exec_ctx.state.set_native(STATE_KEY, state).map_err(NodeError::Handler)?;
     Ok(mask)
 }
 

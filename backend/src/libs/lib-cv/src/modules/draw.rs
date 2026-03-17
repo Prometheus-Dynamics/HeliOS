@@ -14,6 +14,7 @@ pub mod nodes {
     #![allow(clippy::ptr_arg)]
 
     use crate::{Pixel, Point};
+    use daedalus::data::model::TypeExpr;
     use daedalus::data::model::Value as DaedalusValue;
     use daedalus::declare_plugin;
     use daedalus::macros::{NodeConfig, node};
@@ -175,23 +176,23 @@ pub mod nodes {
     #[node(
         id = "drawcrosshairat",
         inputs(
-            "frame",
+            port(name = "frame", ty = TypeExpr::opaque("image:dynamic")),
             port(name = "x", meta(ui_min = 0, ui_max = 4096, ui_step = 1)),
             port(name = "y", meta(ui_min = 0, ui_max = 4096, ui_step = 1)),
             port(name = "size", meta(ui_min = 1, ui_max = 2048, ui_step = 1)),
             port(name = "thickness", meta(ui_min = 1, ui_max = 16, ui_step = 1)),
             port(name = "enabled", default = true)
         ),
-        outputs("frame")
+        outputs(port(name = "frame", ty = TypeExpr::opaque("image:dynamic")))
     )]
-    fn draw_crosshair_at(frame: DynamicImage, x: i64, y: i64, size: u32, thickness: u32, enabled: bool) -> Result<DynamicImage, NodeError> {
-        let mut out = frame;
+    fn draw_crosshair_at(frame: Payload<DynamicImage>, x: i64, y: i64, size: u32, thickness: u32, enabled: bool, exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
         if !enabled {
-            return Ok(out);
+            return Ok(frame);
         }
+        let mut out = expect_cpu_frame(frame, "drawcrosshairat", Some(exec_ctx))?;
         let (width, height) = out.dimensions();
         if width == 0 || height == 0 {
-            return Ok(out);
+            return Ok(Payload::Cpu(out));
         }
 
         let thickness = thickness.max(1);
@@ -207,7 +208,7 @@ pub mod nodes {
         let color = Rgba([0, 255, 0, 255]);
         overlay_line_x_y(&mut out, (left, cy), (right, cy), thickness, color);
         overlay_line_x_y(&mut out, (cx, top), (cx, bottom), thickness, color);
-        Ok(out)
+        Ok(Payload::Cpu(out))
     }
 
     #[derive(Clone, Debug, NodeConfig)]

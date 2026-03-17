@@ -95,11 +95,7 @@ impl StreamRunner {
         // activity from implicitly requiring full stream encoder throughput.
         let preview_encoder_stats = styx::codec::CodecStats::default();
         let preview_encoder_last_activity_ms = Arc::new(AtomicU64::new(0));
-        let preview_worker = if !codecs_disabled {
-            shmem.as_ref().map(|_| PreviewWorker::start(preview_encoder_stats.clone(), preview_encoder_last_activity_ms.clone()))
-        } else {
-            None
-        };
+        let preview_worker = if !codecs_disabled { shmem.as_ref().map(|_| PreviewWorker::start(preview_encoder_stats.clone(), preview_encoder_last_activity_ms.clone())) } else { None };
         Self {
             stream_label,
             stream_id,

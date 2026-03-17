@@ -1,21 +1,48 @@
 use image::{DynamicImage, GrayImage};
 use imageproc::point::Point as CvPoint;
 use memchr::{memchr, memrchr};
-use rayon::prelude::*;
+use std::cell::RefCell;
+use std::mem::size_of;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::detect::{ArucoTagDetectorConfig, candidate_quad_from_contour, candidate_quad_from_contour_fast};
-use crate::contour::suzuki_abe::suzuki_abe_i32;
+use crate::contour::suzuki_abe::{CompactContour, suzuki_abe_i32_compact_capped_into};
 use crate::modules::image::luma::with_luma8_frame;
 
 const ADAPTIVE_FAST_CANDIDATE_CONTOUR_CAP: usize = 96;
 const ADAPTIVE_FAST_CANDIDATE_CONTOUR_CAP_MIN: usize = 24;
-const ADAPTIVE_PREPROCESS_PAR_MIN_CONTOURS: usize = 128;
-const ADAPTIVE_FAST_QUAD_PAR_MIN_CONTOURS: usize = 128;
-const ADAPTIVE_FALLBACK_PAR_MIN_CONTOURS: usize = 128;
 // Trigger the slower contour fallback only when the fast quad path is clearly under-producing.
 // Lowering this threshold trims fallback work on noisy frames while preserving recall on this stream.
 const ADAPTIVE_FALLBACK_TRIGGER_QUADS_MAX: usize = 8;
 const ADAPTIVE_PREPROCESS_CONTOUR_CAP_MAX: usize = 512;
+const ADAPTIVE_RETAIN_CONTOUR_POINTS_CAP: usize = 4 * 1024;
+const ADAPTIVE_RETAIN_POINT_STORE_CAP: usize = 32 * 1024;
+const ADAPTIVE_RETAIN_CONTOUR_COUNT_CAP: usize = ADAPTIVE_PREPROCESS_CONTOUR_CAP_MAX;
+const ADAPTIVE_RETAIN_ROI_BYTES_CAP: usize = 1024 * 1024;
+const ADAPTIVE_TRACE_POINTS_PER_CONTOUR: usize = 2 * 1024;
+const ADAPTIVE_TRACE_POINT_BUDGET_MIN: usize = 128 * 1024;
+const ADAPTIVE_TRACE_POINT_BUDGET_MAX: usize = 512 * 1024;
+const ADAPTIVE_TRACE_CONTOUR_BUDGET_MIN: usize = 128;
+const ADAPTIVE_TRACE_CONTOUR_BUDGET_MAX: usize = 2048;
+
+static ADAPTIVE_TRACE_BUDGET_HITS: AtomicUsize = AtomicUsize::new(0);
+
+#[inline(always)]
+fn adaptive_trace_point_budget(preprocess_cap: usize) -> usize {
+    preprocess_cap.saturating_mul(ADAPTIVE_TRACE_POINTS_PER_CONTOUR).clamp(ADAPTIVE_TRACE_POINT_BUDGET_MIN, ADAPTIVE_TRACE_POINT_BUDGET_MAX)
+}
+
+#[inline(always)]
+fn adaptive_trace_contour_budget(preprocess_cap: usize) -> usize {
+    preprocess_cap.saturating_mul(4).clamp(ADAPTIVE_TRACE_CONTOUR_BUDGET_MIN, ADAPTIVE_TRACE_CONTOUR_BUDGET_MAX)
+}
+
+fn log_adaptive_trace_budget_hit(width: u32, height: u32, point_budget: usize, contour_budget: usize, preprocess_cap: usize) {
+    let hit = ADAPTIVE_TRACE_BUDGET_HITS.fetch_add(1, Ordering::Relaxed) + 1;
+    if hit <= 5 || hit.is_multiple_of(100) {
+        tracing::warn!(width, height, point_budget, contour_budget, preprocess_cap, hit, "adaptive contour trace aborted at safety budget");
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct AdaptiveDetectorConfig {
@@ -167,9 +194,73 @@ fn merge_quads(out: &mut Vec<[CvPoint<f32>; 4]>, mut candidates: Vec<[CvPoint<f3
     }
 }
 
+thread_local! {
+    static ADAPTIVE_EXTRACT_SCRATCH: RefCell<AdaptiveExtractScratch> = RefCell::new(AdaptiveExtractScratch::default());
+}
+
+#[derive(Clone, Copy)]
 struct PreparedContour {
-    pts: Vec<CvPoint<i32>>,
+    start: usize,
+    len: usize,
     perimeter: f32,
+}
+
+#[derive(Default)]
+struct AdaptiveExtractScratch {
+    work_i32: Vec<CvPoint<i32>>,
+    compress_scratch: Vec<CvPoint<i32>>,
+    roi_bytes: Vec<u8>,
+    raw_point_store: Vec<CvPoint<i32>>,
+    raw_contours: Vec<CompactContour>,
+    point_store: Vec<CvPoint<i32>>,
+    prepared: Vec<PreparedContour>,
+    fast_idx: Vec<usize>,
+    fast_success: Vec<bool>,
+    fast_tested: Vec<bool>,
+    fallback_idx: Vec<usize>,
+    pts_f32: Vec<CvPoint<f32>>,
+}
+
+impl AdaptiveExtractScratch {
+    fn compact_after_frame(&mut self) {
+        trim_retained_vec(&mut self.work_i32, ADAPTIVE_RETAIN_CONTOUR_POINTS_CAP);
+        trim_retained_vec(&mut self.compress_scratch, ADAPTIVE_RETAIN_CONTOUR_POINTS_CAP);
+        trim_retained_vec(&mut self.roi_bytes, ADAPTIVE_RETAIN_ROI_BYTES_CAP);
+        trim_retained_vec(&mut self.raw_point_store, ADAPTIVE_RETAIN_POINT_STORE_CAP);
+        trim_retained_vec(&mut self.raw_contours, ADAPTIVE_RETAIN_CONTOUR_COUNT_CAP);
+        trim_retained_vec(&mut self.point_store, ADAPTIVE_RETAIN_POINT_STORE_CAP);
+        trim_retained_vec(&mut self.prepared, ADAPTIVE_RETAIN_CONTOUR_COUNT_CAP);
+        trim_retained_vec(&mut self.fast_idx, ADAPTIVE_RETAIN_CONTOUR_COUNT_CAP);
+        trim_retained_vec(&mut self.fast_success, ADAPTIVE_RETAIN_CONTOUR_COUNT_CAP);
+        trim_retained_vec(&mut self.fast_tested, ADAPTIVE_RETAIN_CONTOUR_COUNT_CAP);
+        trim_retained_vec(&mut self.fallback_idx, ADAPTIVE_RETAIN_CONTOUR_COUNT_CAP);
+        trim_retained_vec(&mut self.pts_f32, ADAPTIVE_RETAIN_CONTOUR_POINTS_CAP);
+    }
+}
+
+#[inline(always)]
+fn report_adaptive_allocation_high_water(name: &'static str, bytes: usize) {
+    crate::diagnostics::report_scratch_high_water(name, bytes);
+}
+
+#[inline(always)]
+fn prepared_contours_bytes(point_store_capacity: usize, prepared_capacity: usize) -> usize {
+    let point_bytes = point_store_capacity * size_of::<CvPoint<i32>>();
+    let vec_bytes = prepared_capacity * size_of::<PreparedContour>();
+    point_bytes + vec_bytes
+}
+
+#[inline(always)]
+fn prepared_contour_points<'a>(contour: &PreparedContour, point_store: &'a [CvPoint<i32>]) -> &'a [CvPoint<i32>] {
+    &point_store[contour.start..contour.start + contour.len]
+}
+
+#[inline(always)]
+fn trim_retained_vec<T>(vec: &mut Vec<T>, retain_cap: usize) {
+    vec.clear();
+    if vec.capacity() > retain_cap {
+        vec.shrink_to(retain_cap);
+    }
 }
 
 #[inline(always)]
@@ -237,13 +328,14 @@ fn compress_chain_turn_points(points: &mut Vec<CvPoint<i32>>, scratch: &mut Vec<
 }
 
 fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig, diag: f32) -> Vec<[CvPoint<f32>; 4]> {
+    let binary_width = binary.width() as usize;
     let width = binary.width() as f32;
     let height = binary.height() as f32;
     let min_perimeter = (config.min_perimeter_rate.max(0.0)) * diag;
     let max_perimeter = (config.max_perimeter_rate.max(config.min_perimeter_rate + f32::EPSILON)) * diag;
     let max_step = std::f32::consts::SQRT_2;
 
-    let (mut contours, contour_off_x, contour_off_y) = {
+    let roi_bounds = {
         let w = binary.width() as usize;
         let h = binary.height() as usize;
         if w == 0 || h == 0 {
@@ -297,17 +389,7 @@ fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig
 
         let use_roi = roi_area > 0 && full_area > 0 && roi_area * 100 < full_area * 85;
 
-        if use_roi {
-            let mut roi = GrayImage::new(roi_w as u32, roi_h as u32);
-            let dst = roi.as_mut();
-            for yy in 0..roi_h {
-                let src_row = &buf[(min_y + yy) * w + min_x..(min_y + yy) * w + min_x + roi_w];
-                dst[yy * roi_w..yy * roi_w + roi_w].copy_from_slice(src_row);
-            }
-            (suzuki_abe_i32(&roi), min_x as i32, min_y as i32)
-        } else {
-            (suzuki_abe_i32(binary), 0, 0)
-        }
+        if use_roi { Some((min_x, min_y, roi_w, roi_h)) } else { None }
     };
 
     // Cap expensive contour-preprocess work under noisy masks. We keep the largest chain-code
@@ -318,91 +400,8 @@ fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig
     } else {
         fast_cap_cfg
     };
-    if contours.len() > preprocess_cap {
-        contours.select_nth_unstable_by(preprocess_cap - 1, |a, b| b.points.len().cmp(&a.points.len()));
-        contours.truncate(preprocess_cap);
-    }
-
-    let preprocess = |mut pts: Vec<CvPoint<i32>>, scratch: &mut Vec<CvPoint<i32>>| -> Option<PreparedContour> {
-        if pts.len() < 4 {
-            return None;
-        }
-        // Cheap chain-code bounds: true geometric perimeter is within [len, len*sqrt(2)].
-        // This rejects obvious out-of-range contours before perimeter estimation/conversion.
-        let contour_len = pts.len() as f32;
-        if contour_len > max_perimeter || contour_len * max_step < min_perimeter {
-            return None;
-        }
-
-        if config.min_area > f32::EPSILON {
-            let mut min_x = i32::MAX;
-            let mut min_y = i32::MAX;
-            let mut max_x = i32::MIN;
-            let mut max_y = i32::MIN;
-            for p in &pts {
-                min_x = min_x.min(p.x);
-                min_y = min_y.min(p.y);
-                max_x = max_x.max(p.x);
-                max_y = max_y.max(p.y);
-            }
-            let bbox_w = (max_x - min_x).unsigned_abs().saturating_add(1);
-            let bbox_h = (max_y - min_y).unsigned_abs().saturating_add(1);
-            let bbox_area = bbox_w as f32 * bbox_h as f32;
-            if bbox_area < config.min_area {
-                return None;
-            }
-            if config.min_side_px > 0.0 {
-                let bbox_min_side = bbox_w.min(bbox_h) as f32;
-                if bbox_min_side < config.min_side_px {
-                    return None;
-                }
-            }
-        } else if config.min_side_px > 0.0 {
-            let mut min_x = i32::MAX;
-            let mut min_y = i32::MAX;
-            let mut max_x = i32::MIN;
-            let mut max_y = i32::MIN;
-            for p in &pts {
-                min_x = min_x.min(p.x);
-                min_y = min_y.min(p.y);
-                max_x = max_x.max(p.x);
-                max_y = max_y.max(p.y);
-            }
-            let bbox_w = (max_x - min_x).unsigned_abs().saturating_add(1);
-            let bbox_h = (max_y - min_y).unsigned_abs().saturating_add(1);
-            let bbox_min_side = bbox_w.min(bbox_h) as f32;
-            if bbox_min_side < config.min_side_px {
-                return None;
-            }
-        }
-
-        // For fast candidate filtering, chain length is a sufficient perimeter proxy and avoids
-        // an extra full contour walk with sqrt-heavy edge accumulation.
-        let geometric_perimeter = contour_len;
-
-        compress_chain_turn_points(&mut pts, scratch);
-        if pts.len() < 4 {
-            return None;
-        }
-        Some(PreparedContour { perimeter: geometric_perimeter, pts })
-    };
-
-    let contour_buffer: Vec<PreparedContour> = if contours.len() >= ADAPTIVE_PREPROCESS_PAR_MIN_CONTOURS && rayon::current_num_threads() > 1 {
-        contours.into_par_iter().map_init(Vec::<CvPoint<i32>>::new, |scratch, contour| preprocess(contour.points, scratch)).filter_map(|contour| contour).collect()
-    } else {
-        let mut scratch: Vec<CvPoint<i32>> = Vec::new();
-        let mut out: Vec<PreparedContour> = Vec::new();
-        for contour in contours {
-            if let Some(contour) = preprocess(contour.points, &mut scratch) {
-                out.push(contour);
-            }
-        }
-        out
-    };
-
-    if contour_buffer.is_empty() {
-        return Vec::new();
-    }
+    let trace_point_budget = adaptive_trace_point_budget(preprocess_cap);
+    let trace_contour_budget = adaptive_trace_contour_budget(preprocess_cap);
 
     let detector_config = ArucoTagDetectorConfig {
         epsilon: config.epsilon,
@@ -420,125 +419,187 @@ fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig
 
     let min_perimeter_for_area = if detector_config.min_area > f32::EPSILON { Some((4.0 * std::f32::consts::PI * detector_config.min_area).sqrt()) } else { None };
 
-    // Fast path: only accept contours that simplify cleanly to a 4-corner polygon.
-    //
-    // Under noisy masks, contour count can spike and DP simplification dominates runtime. Cap the
-    // expensive fast-path candidates to the largest perimeters first; true tags are usually among
-    // those and this trims long-tail contour cost without downscaling/frame skipping.
-    let fast_cap = fast_cap_cfg.min(contour_buffer.len());
-    if config.fallback_max_contours <= fast_cap {
-        let fast_slice = &contour_buffer[..fast_cap];
-        let mut out = if fast_slice.len() >= ADAPTIVE_FAST_QUAD_PAR_MIN_CONTOURS && rayon::current_num_threads() > 1 {
-            fast_slice
-                .par_iter()
-                .map_init(Vec::<CvPoint<f32>>::new, |pts_f32, contour| {
-                    contour_to_f32(&contour.pts, pts_f32, contour_off_x, contour_off_y);
-                    candidate_quad_from_contour_fast(pts_f32, contour.perimeter, min_perimeter_for_area, &detector_config).filter(|quad| quad_passes_post_filters(quad, config, width, height))
-                })
-                .filter_map(|quad| quad)
-                .collect()
+    ADAPTIVE_EXTRACT_SCRATCH.with(|scratch| {
+        let mut scratch = scratch.borrow_mut();
+        let AdaptiveExtractScratch { work_i32, compress_scratch, roi_bytes, raw_point_store, raw_contours, point_store, prepared, fast_idx, fast_success, fast_tested, fallback_idx, pts_f32 } =
+            &mut *scratch;
+
+        work_i32.clear();
+        compress_scratch.clear();
+        roi_bytes.clear();
+        raw_point_store.clear();
+        raw_contours.clear();
+        point_store.clear();
+        prepared.clear();
+        fast_idx.clear();
+        fast_success.clear();
+        fast_tested.clear();
+        fallback_idx.clear();
+        pts_f32.clear();
+
+        let (contour_off_x, contour_off_y, trace_complete) = if let Some((min_x, min_y, roi_w, roi_h)) = roi_bounds {
+            let roi_len = roi_w.saturating_mul(roi_h);
+            if roi_bytes.len() != roi_len {
+                roi_bytes.resize(roi_len, 0);
+                report_adaptive_allocation_high_water("aruco.adaptive_roi_mask", roi_bytes.capacity() * size_of::<u8>());
+            }
+            let src = binary.as_raw();
+            for yy in 0..roi_h {
+                let src_row = &src[(min_y + yy) * binary_width + min_x..(min_y + yy) * binary_width + min_x + roi_w];
+                let dst_row = &mut roi_bytes[yy * roi_w..yy * roi_w + roi_w];
+                dst_row.copy_from_slice(src_row);
+            }
+            let roi = GrayImage::from_raw(roi_w as u32, roi_h as u32, std::mem::take(roi_bytes)).unwrap_or_else(|| GrayImage::new(roi_w as u32, roi_h as u32));
+            let trace_complete = suzuki_abe_i32_compact_capped_into(&roi, raw_point_store, raw_contours, trace_point_budget, trace_contour_budget);
+            *roi_bytes = roi.into_raw();
+            (min_x as i32, min_y as i32, trace_complete)
         } else {
-            let mut out = Vec::with_capacity(fast_slice.len());
-            let mut pts_f32: Vec<CvPoint<f32>> = Vec::new();
-            for contour in fast_slice {
-                contour_to_f32(&contour.pts, &mut pts_f32, contour_off_x, contour_off_y);
-                if let Some(quad) =
-                    candidate_quad_from_contour_fast(&pts_f32, contour.perimeter, min_perimeter_for_area, &detector_config).filter(|quad| quad_passes_post_filters(quad, config, width, height))
-                {
-                    out.push(quad);
-                }
-            }
-            out
+            (0, 0, suzuki_abe_i32_compact_capped_into(binary, raw_point_store, raw_contours, trace_point_budget, trace_contour_budget))
         };
-        cap_quads_by_area(&mut out, config.max_quads);
-        return out;
-    }
-
-    let mut fast_idx: Vec<usize> = (0..contour_buffer.len()).collect();
-    if fast_idx.len() > fast_cap {
-        fast_idx.select_nth_unstable_by(fast_cap - 1, |&a, &b| contour_buffer[b].pts.len().cmp(&contour_buffer[a].pts.len()));
-        fast_idx.truncate(fast_cap);
-    }
-    let mut fast_success = vec![false; contour_buffer.len()];
-    let mut fast_tested = vec![false; contour_buffer.len()];
-    let mut quads: Vec<[CvPoint<f32>; 4]> = if fast_idx.len() >= ADAPTIVE_FAST_QUAD_PAR_MIN_CONTOURS && rayon::current_num_threads() > 1 {
-        let results: Vec<(usize, Option<[CvPoint<f32>; 4]>)> = fast_idx
-            .par_iter()
-            .map_init(Vec::<CvPoint<f32>>::new, |pts_f32, &i| {
-                let contour = &contour_buffer[i];
-                contour_to_f32(&contour.pts, pts_f32, contour_off_x, contour_off_y);
-                (i, candidate_quad_from_contour_fast(pts_f32, contour.perimeter, min_perimeter_for_area, &detector_config).filter(|quad| quad_passes_post_filters(quad, config, width, height)))
-            })
-            .collect();
-        let mut out = Vec::with_capacity(results.len());
-        for (i, quad) in results {
-            fast_tested[i] = true;
-            if let Some(quad) = quad {
-                fast_success[i] = true;
-                out.push(quad);
-            }
+        if !trace_complete {
+            log_adaptive_trace_budget_hit(binary.width(), binary.height(), trace_point_budget, trace_contour_budget, preprocess_cap);
+            scratch.compact_after_frame();
+            crate::modules::aruco::detect::compact_detect_scratch_after_frame();
+            crate::modules::contour::douglas_peucker::compact_rdp_scratch_after_frame();
+            return Vec::new();
         }
-        out
-    } else {
-        let mut out = Vec::with_capacity(fast_idx.len());
-        let mut pts_f32: Vec<CvPoint<f32>> = Vec::new();
-        for i in fast_idx {
-            fast_tested[i] = true;
-            let contour = &contour_buffer[i];
-            contour_to_f32(&contour.pts, &mut pts_f32, contour_off_x, contour_off_y);
-            if let Some(quad) =
-                candidate_quad_from_contour_fast(&pts_f32, contour.perimeter, min_perimeter_for_area, &detector_config).filter(|quad| quad_passes_post_filters(quad, config, width, height))
-            {
-                fast_success[i] = true;
-                out.push(quad);
-            }
+
+        if raw_contours.len() > preprocess_cap {
+            raw_contours.select_nth_unstable_by(preprocess_cap - 1, |a, b| b.len.cmp(&a.len));
+            raw_contours.truncate(preprocess_cap);
         }
-        out
-    };
+        report_adaptive_allocation_high_water("aruco.adaptive_raw_contours", raw_point_store.capacity() * size_of::<CvPoint<i32>>() + raw_contours.capacity() * size_of::<CompactContour>());
 
-    // Fallback: when the fast path yields very few candidates (common under low contrast /
-    // uneven lighting), run a slower but more forgiving quad estimation that can fall back
-    // to a minimum-area rectangle. To keep this bounded, only consider the top-N contours by
-    // perimeter (largest shapes first).
-    if quads.len() < ADAPTIVE_FALLBACK_TRIGGER_QUADS_MAX {
-        let fallback_cap = config.fallback_max_contours;
-        let k = fallback_cap.min(contour_buffer.len());
-        if k > 0 && k > fast_cap {
-            // Avoid a full sort (O(n log n)) just to take the top-K. Partition is enough.
-            let mut idx: Vec<usize> = (0..contour_buffer.len()).collect();
-            idx.select_nth_unstable_by(k - 1, |&a, &b| contour_buffer[b].pts.len().cmp(&contour_buffer[a].pts.len()));
+        for contour in raw_contours.iter().copied() {
+            let points = contour.points(raw_point_store);
+            if points.len() < 4 {
+                continue;
+            }
+            work_i32.clear();
+            work_i32.extend_from_slice(points);
 
-            // IMPORTANT: avoid cloning full contour point vectors here; we only need read-only
-            // slices for the slower candidate filter.
-            let top = &idx[..k];
-            if k >= ADAPTIVE_FALLBACK_PAR_MIN_CONTOURS && rayon::current_num_threads() > 1 {
-                let mut extra: Vec<[CvPoint<f32>; 4]> = top
-                    .par_iter()
-                    .filter(|&&i| !fast_success[i] && !fast_tested[i])
-                    .map_init(Vec::<CvPoint<f32>>::new, |pts_f32, &i| {
-                        contour_to_f32(&contour_buffer[i].pts, pts_f32, contour_off_x, contour_off_y);
-                        candidate_quad_from_contour(pts_f32, &detector_config).filter(|quad| quad_passes_post_filters(quad, config, width, height))
-                    })
-                    .filter_map(|quad| quad)
-                    .collect();
-                quads.append(&mut extra);
-            } else {
-                let mut pts_f32: Vec<CvPoint<f32>> = Vec::new();
-                for &i in top {
-                    if fast_success[i] || fast_tested[i] {
+            let contour_len = work_i32.len() as f32;
+            if contour_len > max_perimeter || contour_len * max_step < min_perimeter {
+                continue;
+            }
+
+            if config.min_area > f32::EPSILON || config.min_side_px > 0.0 {
+                let mut min_x = i32::MAX;
+                let mut min_y = i32::MAX;
+                let mut max_x = i32::MIN;
+                let mut max_y = i32::MIN;
+                for p in work_i32.iter() {
+                    min_x = min_x.min(p.x);
+                    min_y = min_y.min(p.y);
+                    max_x = max_x.max(p.x);
+                    max_y = max_y.max(p.y);
+                }
+                let bbox_w = (max_x - min_x).unsigned_abs().saturating_add(1);
+                let bbox_h = (max_y - min_y).unsigned_abs().saturating_add(1);
+                if config.min_area > f32::EPSILON {
+                    let bbox_area = bbox_w as f32 * bbox_h as f32;
+                    if bbox_area < config.min_area {
                         continue;
                     }
-                    contour_to_f32(&contour_buffer[i].pts, &mut pts_f32, contour_off_x, contour_off_y);
-                    if let Some(quad) = candidate_quad_from_contour(&pts_f32, &detector_config).filter(|quad| quad_passes_post_filters(quad, config, width, height)) {
+                }
+                if config.min_side_px > 0.0 {
+                    let bbox_min_side = bbox_w.min(bbox_h) as f32;
+                    if bbox_min_side < config.min_side_px {
+                        continue;
+                    }
+                }
+            }
+
+            compress_chain_turn_points(work_i32, compress_scratch);
+            if work_i32.len() < 4 {
+                continue;
+            }
+
+            let start = point_store.len();
+            point_store.extend_from_slice(work_i32);
+            prepared.push(PreparedContour { start, len: work_i32.len(), perimeter: contour_len });
+        }
+
+        report_adaptive_allocation_high_water("aruco.adaptive_prepared_contours", prepared_contours_bytes(point_store.capacity(), prepared.capacity()));
+
+        let result = if prepared.is_empty() {
+            Vec::new()
+        } else {
+            let fast_cap = fast_cap_cfg.min(prepared.len());
+            if config.fallback_max_contours <= fast_cap {
+                let mut out = Vec::with_capacity(fast_cap);
+                for contour in prepared.iter().take(fast_cap) {
+                    contour_to_f32(prepared_contour_points(contour, point_store), pts_f32, contour_off_x, contour_off_y);
+                    if let Some(quad) =
+                        candidate_quad_from_contour_fast(pts_f32, contour.perimeter, min_perimeter_for_area, &detector_config).filter(|quad| quad_passes_post_filters(quad, config, width, height))
+                    {
+                        out.push(quad);
+                    }
+                }
+                cap_quads_by_area(&mut out, config.max_quads);
+                report_adaptive_allocation_high_water("aruco.adaptive_quads", out.capacity() * size_of::<[CvPoint<f32>; 4]>());
+                out
+            } else {
+                fast_idx.extend(0..prepared.len());
+                if fast_idx.len() > fast_cap {
+                    fast_idx.select_nth_unstable_by(fast_cap - 1, |&a, &b| prepared[b].len.cmp(&prepared[a].len));
+                    fast_idx.truncate(fast_cap);
+                }
+                fast_success.resize(prepared.len(), false);
+                fast_success.fill(false);
+                fast_tested.resize(prepared.len(), false);
+                fast_tested.fill(false);
+                report_adaptive_allocation_high_water(
+                    "aruco.adaptive_fast_state",
+                    fast_idx.capacity() * size_of::<usize>() + fast_success.capacity() * size_of::<bool>() + fast_tested.capacity() * size_of::<bool>(),
+                );
+
+                let mut quads: Vec<[CvPoint<f32>; 4]> = Vec::with_capacity(fast_idx.len());
+                for &idx in fast_idx.iter() {
+                    fast_tested[idx] = true;
+                    let contour = prepared[idx];
+                    contour_to_f32(prepared_contour_points(&contour, point_store), pts_f32, contour_off_x, contour_off_y);
+                    if let Some(quad) =
+                        candidate_quad_from_contour_fast(pts_f32, contour.perimeter, min_perimeter_for_area, &detector_config).filter(|quad| quad_passes_post_filters(quad, config, width, height))
+                    {
+                        fast_success[idx] = true;
                         quads.push(quad);
                     }
                 }
-            }
-        }
-    }
+                report_adaptive_allocation_high_water("aruco.adaptive_quads", quads.capacity() * size_of::<[CvPoint<f32>; 4]>());
 
-    cap_quads_by_area(&mut quads, config.max_quads);
-    quads
+                if quads.len() < ADAPTIVE_FALLBACK_TRIGGER_QUADS_MAX {
+                    let fallback_cap = config.fallback_max_contours;
+                    let k = fallback_cap.min(prepared.len());
+                    if k > 0 && k > fast_cap {
+                        fallback_idx.extend(0..prepared.len());
+                        fallback_idx.select_nth_unstable_by(k - 1, |&a, &b| prepared[b].len.cmp(&prepared[a].len));
+                        report_adaptive_allocation_high_water("aruco.adaptive_fallback_index", fallback_idx.capacity() * size_of::<usize>());
+
+                        for &idx in fallback_idx.iter().take(k) {
+                            if fast_success[idx] || fast_tested[idx] {
+                                continue;
+                            }
+                            let contour = prepared[idx];
+                            contour_to_f32(prepared_contour_points(&contour, point_store), pts_f32, contour_off_x, contour_off_y);
+                            if let Some(quad) = candidate_quad_from_contour(pts_f32, &detector_config).filter(|quad| quad_passes_post_filters(quad, config, width, height)) {
+                                quads.push(quad);
+                            }
+                        }
+                    }
+                }
+
+                cap_quads_by_area(&mut quads, config.max_quads);
+                report_adaptive_allocation_high_water("aruco.adaptive_quads", quads.capacity() * size_of::<[CvPoint<f32>; 4]>());
+                quads
+            }
+        };
+
+        scratch.compact_after_frame();
+        crate::modules::aruco::detect::compact_detect_scratch_after_frame();
+        crate::modules::contour::douglas_peucker::compact_rdp_scratch_after_frame();
+        result
+    })
 }
 
 pub fn adaptive_quads(frame: &DynamicImage, config: &AdaptiveDetectorConfig) -> Vec<[CvPoint<f32>; 4]> {

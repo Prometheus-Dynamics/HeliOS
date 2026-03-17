@@ -227,6 +227,26 @@ pub struct GraphValidationReport {
     pub node_ids: Vec<String>,
 }
 
+fn default_enable_lints() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphValidationHelperRequest {
+    pub graph: JsonWire,
+    #[serde(default)]
+    pub active_features: Vec<String>,
+    #[serde(default = "default_enable_lints")]
+    pub enable_lints: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum GraphValidationHelperResponse {
+    Report { report: GraphValidationReport },
+    Error { code: EngineErrorCode, reason: String },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
 pub struct GraphGpuSegment {
     pub buffer_id: usize,

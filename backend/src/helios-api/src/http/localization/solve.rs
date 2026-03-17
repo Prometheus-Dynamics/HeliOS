@@ -399,6 +399,25 @@ pub(crate) async fn inject_imu_leveling_rig_pose(state: &AppState, profile: &hel
     }
 }
 
+pub(crate) async fn load_stream_calibrations(state: &AppState) -> HashMap<String, StreamCalibration> {
+    let mut out = HashMap::new();
+    let streams = state.engine.list_streams().await.unwrap_or_default();
+    for stream in streams {
+        let Some(calib) = stream.manifest.calibration else {
+            continue;
+        };
+        out.insert(stream.stream_id.to_string(), calib);
+    }
+    out
+}
+
+fn map_rig_pose(pose: &StreamRigPose) -> RigPose {
+    RigPose {
+        translation: RigTranslation { x: pose.translation.x, y: pose.translation.y, z: pose.translation.z },
+        rotation: RigRotation { roll: pose.rotation.roll, pitch: pose.rotation.pitch, yaw: pose.rotation.yaw },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::strip_overlay_from_field_map;
@@ -432,25 +451,6 @@ mod tests {
         assert_eq!(stripped.markers.len(), field_map.markers.len());
         assert_eq!(stripped.id, field_map.id);
         assert_eq!(stripped.name, field_map.name);
-    }
-}
-
-pub(crate) async fn load_stream_calibrations(state: &AppState) -> HashMap<String, StreamCalibration> {
-    let mut out = HashMap::new();
-    let streams = state.engine.list_streams().await.unwrap_or_default();
-    for stream in streams {
-        let Some(calib) = stream.manifest.calibration else {
-            continue;
-        };
-        out.insert(stream.stream_id.to_string(), calib);
-    }
-    out
-}
-
-fn map_rig_pose(pose: &StreamRigPose) -> RigPose {
-    RigPose {
-        translation: RigTranslation { x: pose.translation.x, y: pose.translation.y, z: pose.translation.z },
-        rotation: RigRotation { roll: pose.rotation.roll, pitch: pose.rotation.pitch, yaw: pose.rotation.yaw },
     }
 }
 

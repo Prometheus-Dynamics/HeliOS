@@ -1,4 +1,4 @@
-use image::{DynamicImage, ImageBuffer, Rgba};
+use image::{DynamicImage, ImageBuffer, Luma, Rgb, Rgba};
 use imageproc::{
     drawing::{Canvas, draw_line_segment_mut, draw_polygon_mut},
     point::Point,
@@ -62,6 +62,25 @@ pub fn draw_line_x_y<C: Canvas, T: NumCast, T2: NumCast, T3: NumCast + Clone>(im
 }
 
 pub fn overlay_line_x_y(image: &mut DynamicImage, start: (u32, u32), end: (u32, u32), thickness: u32, colour: Rgba<u8>) {
+    if colour.0[3] == 255 {
+        match image {
+            DynamicImage::ImageRgba8(buf) => {
+                draw_line_x_y(buf, start, end, thickness.max(1), colour);
+                return;
+            }
+            DynamicImage::ImageRgb8(buf) => {
+                draw_line_x_y(buf, start, end, thickness.max(1), Rgb([colour.0[0], colour.0[1], colour.0[2]]));
+                return;
+            }
+            DynamicImage::ImageLuma8(buf) => {
+                let lum = (0.299 * colour.0[0] as f32 + 0.587 * colour.0[1] as f32 + 0.114 * colour.0[2] as f32).round().clamp(0.0, 255.0) as u8;
+                draw_line_x_y(buf, start, end, thickness.max(1), Luma([lum]));
+                return;
+            }
+            _ => {}
+        }
+    }
+
     let min_x = start.0.min(end.0).saturating_sub(thickness / 2);
     let min_y = start.1.min(end.1).saturating_sub(thickness / 2);
     let max_x = start.0.max(end.0).saturating_add(thickness / 2);

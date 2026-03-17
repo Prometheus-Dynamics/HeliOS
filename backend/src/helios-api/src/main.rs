@@ -1,6 +1,6 @@
 mod api_observability;
 mod api_tools_client;
-#[cfg(test)]
+mod api_tools_entry;
 mod api_tools_impl;
 mod api_tools_protocol;
 mod app_state;
@@ -39,6 +39,8 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tower_http::cors::{Any, CorsLayer};
@@ -47,6 +49,10 @@ use utoipa::OpenApi;
 use uuid::Uuid;
 
 fn main() {
+    if invoked_as_helper_binary() {
+        api_tools_entry::run_process_and_exit();
+    }
+
     if std::env::args().nth(1).as_deref() == Some("console-child") {
         console_child();
     }
@@ -58,6 +64,10 @@ fn main() {
     let max_blocking_threads = read_thread_env("HELIOS_API_MAX_BLOCKING_THREADS", default_api_max_blocking_threads(worker_threads), 1, 32);
     let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(worker_threads).max_blocking_threads(max_blocking_threads).enable_all().build().expect("tokio runtime");
     runtime.block_on(async_main());
+}
+
+fn invoked_as_helper_binary() -> bool {
+    std::env::args_os().next().map(PathBuf::from).as_deref().and_then(Path::file_name).is_some_and(|name| name == OsStr::new("helios-api-tools"))
 }
 
 fn read_thread_env(var: &str, default: usize, min: usize, max: usize) -> usize {

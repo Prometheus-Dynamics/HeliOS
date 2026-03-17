@@ -15,15 +15,22 @@ fn ensure_odd_window(value: u32) -> u32 {
 }
 
 const ADAPTIVE_SHIFT: i32 = 16;
-const ADAPTIVE_PARALLEL_MIN_PIXELS_DEFAULT: usize = 320 * 240;
+const ADAPTIVE_PARALLEL_MIN_PIXELS_DEFAULT: usize = 1920 * 1080;
 
 fn adaptive_parallel_min_pixels() -> usize {
     static MIN_PIXELS: OnceLock<usize> = OnceLock::new();
     *MIN_PIXELS.get_or_init(|| std::env::var("HELIOS_ADAPTIVE_PARALLEL_MIN_PIXELS").ok().and_then(|value| value.parse().ok()).unwrap_or(ADAPTIVE_PARALLEL_MIN_PIXELS_DEFAULT))
 }
 
+fn adaptive_parallel_threads_default() -> usize {
+    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).min(2).max(1)
+}
+
 fn adaptive_available_parallelism() -> usize {
-    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
+    static THREADS: OnceLock<usize> = OnceLock::new();
+    *THREADS.get_or_init(|| {
+        std::env::var("HELIOS_ADAPTIVE_PARALLEL_THREADS").ok().and_then(|value| value.parse::<usize>().ok()).filter(|value| *value > 0).unwrap_or_else(adaptive_parallel_threads_default)
+    })
 }
 
 fn adaptive_thread_pool() -> &'static rayon::ThreadPool {
@@ -62,6 +69,21 @@ pub fn adaptive_mean_threshold_fast_with_invert(image: &GrayImage, window: u32, 
         let mut buffers = buffers.borrow_mut();
         adaptive_mean_threshold_fast_inner(image, window, offset, invert, &mut buffers)
     })
+}
+
+pub fn adaptive_mean_threshold_fast_into(image: &GrayImage, window: u32, offset: f32, invert: bool, output: &mut GrayImage) {
+    let (width, height) = image.dimensions();
+    if output.width() != width || output.height() != height {
+        *output = GrayImage::new(width, height);
+    }
+    if width == 0 || height == 0 {
+        output.as_mut().fill(0);
+        return;
+    }
+    ADAPTIVE_BUFFERS.with(|buffers| {
+        let mut buffers = buffers.borrow_mut();
+        adaptive_mean_threshold_fast_inner_into(image, window, offset, invert, &mut buffers, output.as_mut());
+    });
 }
 
 pub fn with_adaptive_mean_threshold_fast<R>(image: &GrayImage, window: u32, offset: f32, invert: bool, f: impl FnOnce(&GrayImage) -> R) -> R {

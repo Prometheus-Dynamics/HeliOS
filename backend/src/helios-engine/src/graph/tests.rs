@@ -1,4 +1,4 @@
-use super::{build_demand_sinks, derive_host_aliases, infer_host_output_incoming_types};
+use super::{build_demand_sinks, derive_host_aliases, infer_host_output_incoming_types, normalize_graph_json_for_runtime};
 
 use daedalus::data::model::{EnumVariant, TypeExpr, Value};
 use daedalus::gpu::ErasedPayload;
@@ -9,6 +9,7 @@ use daedalus::runtime::plugins::PluginRegistry;
 use daedalus::runtime::{EdgePolicyKind, RuntimeNode, RuntimePlan, RuntimeSegment};
 use image::DynamicImage;
 use image::GenericImageView;
+use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::time::Instant;
 
@@ -419,10 +420,137 @@ fn demand_driven_sinks_skip_non_preview_image_outputs() {
     port_types.insert("overlay".to_string(), TypeExpr::opaque("image:dynamic"));
     port_types.insert("detections".to_string(), TypeExpr::list(TypeExpr::scalar(daedalus::data::model::ValueType::Int)));
 
-    let sinks = build_demand_sinks(&plan, &["Output".to_string()], &["raw".to_string()], &["raw".to_string(), "overlay".to_string(), "detections".to_string()], &port_types, true);
+    let host_output_port_owners = BTreeMap::new();
+    let sinks =
+        build_demand_sinks(&plan, &["Output".to_string()], &["raw".to_string()], &["raw".to_string(), "overlay".to_string(), "detections".to_string()], &port_types, &host_output_port_owners, true);
 
     let ports = sinks.into_iter().filter_map(|sink| sink.port).collect::<BTreeSet<_>>();
     assert!(ports.contains("raw"));
     assert!(ports.contains("detections"));
     assert!(!ports.contains("overlay"));
+}
+
+#[test]
+fn normalize_graph_runtime_prunes_disconnected_host_output_ports() {
+    let graph_json = json!({
+        "nodes": [
+            {
+                "id": "io.host_bridge",
+                "label": "Input",
+                "inputs": [],
+                "outputs": ["frame"],
+                "metadata": {
+                    "host_bridge": { "type": "Bool", "value": true }
+                }
+            },
+            {
+                "id": "io.host_output",
+                "label": "Output",
+                "inputs": ["detections", "tv", "overlay"],
+                "outputs": [],
+                "metadata": {
+                    "host_bridge": { "type": "Bool", "value": true },
+                    "host_bridge_inputs": {
+                        "type": "String",
+                        "value": "detections:list<cv:aruco_detection_2d>,tv:float,overlay:image:dynamic"
+                    },
+                    "host_bridge_inputs_display": {
+                        "type": "String",
+                        "value": "{\"detections\":\"Detections\",\"tv\":\"TV\",\"overlay\":\"Overlay\"}"
+                    }
+                }
+            }
+        ],
+        "edges": [
+            {
+                "from": { "node": 0, "port": "frame" },
+                "to": { "node": 1, "port": "detections" }
+            }
+        ]
+    });
+
+    let normalized = normalize_graph_json_for_runtime(&graph_json);
+    let nodes = normalized.get("nodes").and_then(|value| value.as_array()).expect("nodes");
+    let output = nodes[1].as_object().expect("host output node");
+    let inputs = output.get("inputs").and_then(|value| value.as_array()).expect("inputs");
+    assert_eq!(inputs, &vec![json!("detections")]);
+
+    let metadata = output.get("metadata").and_then(|value| value.as_object()).expect("metadata");
+    assert_eq!(metadata.get("host_bridge_inputs").and_then(|value| value.get("value")).and_then(|value| value.as_str()), Some("detections:list<cv:aruco_detection_2d>"));
+    assert_eq!(metadata.get("host_bridge_inputs_display").and_then(|value| value.get("value")).and_then(|value| value.as_str()), Some("{\"detections\":\"Detections\"}"));
+}
+
+#[test]
+fn normalize_graph_runtime_prunes_isolated_nodes() {
+    let graph_json = json!({
+        "nodes": [
+            {
+                "id": "io.host_bridge",
+                "label": "Input",
+                "inputs": [],
+                "outputs": ["frame"],
+                "metadata": {
+                    "host_bridge": { "type": "Bool", "value": true }
+                }
+            },
+            {
+                "id": "cv:image:crop_roi_gray",
+                "label": "ROI",
+                "inputs": ["frame"],
+                "outputs": ["frame"]
+            },
+            {
+                "id": "io.host_output",
+                "label": "Output",
+                "inputs": ["frame"],
+                "outputs": [],
+                "metadata": {
+                    "host_bridge": { "type": "Bool", "value": true },
+                    "host_bridge_inputs": { "type": "String", "value": "frame:image:dynamic" }
+                }
+            },
+            {
+                "id": "cv:image:clahe",
+                "label": "Dead CLAHE",
+                "inputs": ["mask"],
+                "outputs": ["mask"]
+            },
+            {
+                "id": "io.host_output",
+                "label": "Dead Output",
+                "inputs": ["clahe"],
+                "outputs": [],
+                "metadata": {
+                    "host_bridge": { "type": "Bool", "value": true },
+                    "host_bridge_inputs": { "type": "String", "value": "clahe:image:dynamic" }
+                }
+            }
+        ],
+        "edges": [
+            {
+                "from": { "node": 0, "port": "frame" },
+                "to": { "node": 1, "port": "frame" }
+            },
+            {
+                "from": { "node": 1, "port": "frame" },
+                "to": { "node": 2, "port": "frame" }
+            }
+        ]
+    });
+
+    let normalized = normalize_graph_json_for_runtime(&graph_json);
+    let nodes = normalized.get("nodes").and_then(|value| value.as_array()).expect("nodes");
+    let ids = nodes.iter().map(|node| node.get("id").and_then(|value| value.as_str()).unwrap_or_default().to_string()).collect::<Vec<_>>();
+    assert_eq!(ids, vec!["io.host_bridge", "cv:image:crop_roi_gray", "io.host_output"]);
+
+    let edges = normalized.get("edges").and_then(|value| value.as_array()).expect("edges");
+    let edge_indices = edges
+        .iter()
+        .map(|edge| {
+            let from = edge.get("from").and_then(|value| value.get("node")).and_then(|value| value.as_u64()).expect("from node");
+            let to = edge.get("to").and_then(|value| value.get("node")).and_then(|value| value.as_u64()).expect("to node");
+            (from, to)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(edge_indices, vec![(0, 1), (1, 2)]);
 }

@@ -240,6 +240,30 @@ impl MultiplexGraphExecutor {
         self.pipelines.get(self.active_pipeline_index)
     }
 
+    fn request_downstream_samples_for(&self, pipeline_idx: usize) {
+        let Some(pipeline) = self.pipelines.get(pipeline_idx) else {
+            return;
+        };
+
+        for source in self.frame_sources.values() {
+            if source.src_idx != pipeline_idx {
+                continue;
+            }
+            let port = source.from_port.as_deref().or(pipeline.output_port.as_deref()).unwrap_or("frame");
+            pipeline.graph.request_output_sample(port);
+        }
+
+        for wires in self.value_sources.values() {
+            for wire in wires {
+                if wire.src_idx != pipeline_idx {
+                    continue;
+                }
+                let port = wire.from_port.as_deref().or(pipeline.output_port.as_deref()).unwrap_or("frame");
+                pipeline.graph.request_output_sample(port);
+            }
+        }
+    }
+
     fn cell_extents(total: u32, count: u32, index: u32) -> (u32, u32) {
         let count = count.max(1);
         let base = total / count;
@@ -410,6 +434,7 @@ impl GraphExecutor for MultiplexGraphExecutor {
 
         for idx in self.exec_order.iter().copied() {
             let Some(pipeline) = self.pipelines.get(idx) else { continue };
+            self.request_downstream_samples_for(idx);
 
             // Resolve pipeline frame input.
             let mut input_image: DynamicImage = raw.clone();
@@ -558,6 +583,12 @@ impl GraphExecutor for MultiplexGraphExecutor {
 
     fn host_output_ports(&self) -> Option<Vec<String>> {
         self.active_pipeline().and_then(|pipeline| pipeline.graph.host_output_ports())
+    }
+
+    fn request_output_sample(&self, port: &str) {
+        if let Some(pipeline) = self.active_pipeline() {
+            pipeline.graph.request_output_sample(port);
+        }
     }
 
     fn host_output_port_types(&self) -> Option<BTreeMap<String, daedalus::data::model::TypeExpr>> {

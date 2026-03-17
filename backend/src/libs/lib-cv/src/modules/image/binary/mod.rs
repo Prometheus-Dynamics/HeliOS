@@ -14,7 +14,9 @@ thread_local! {
 mod neon;
 
 mod adaptive;
-pub use adaptive::{adaptive_mean_threshold_fast, adaptive_mean_threshold_fast_with_invert, with_adaptive_mean_threshold_fast, with_adaptive_mean_threshold_fast_timed};
+pub use adaptive::{
+    adaptive_mean_threshold_fast, adaptive_mean_threshold_fast_into, adaptive_mean_threshold_fast_with_invert, with_adaptive_mean_threshold_fast, with_adaptive_mean_threshold_fast_timed,
+};
 
 #[derive(Default)]
 struct AdaptiveBuffers {

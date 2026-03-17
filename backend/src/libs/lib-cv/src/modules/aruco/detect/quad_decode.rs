@@ -206,7 +206,7 @@ pub(super) fn decode_quad_warp_result(
             let warped_len = side_usize.saturating_mul(side_usize);
             if scratch.warped_buf.len() != warped_len {
                 scratch.warped_buf.resize(warped_len, 0);
-                report_decode_scratch_bytes(scratch.warped_buf.capacity() * std::mem::size_of::<u8>() + scratch.sample_positions.capacity() * std::mem::size_of::<(f32, f32)>());
+                report_decode_scratch(&scratch);
             }
             let mut warped = GrayImage::from_raw(side, side, std::mem::take(&mut scratch.warped_buf)).unwrap_or_else(|| GrayImage::new(side, side));
             let result = (|| {

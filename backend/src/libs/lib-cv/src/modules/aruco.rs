@@ -47,7 +47,7 @@ pub struct ArucoDetection2D {
 }
 
 impl ArucoDetection2D {
-    pub fn canonicalize(mut self) -> Self {
+    pub fn canonicalize_in_place(&mut self) {
         // Keep corner ordering as a *cyclic shift* of the incoming indexing. Downstream code
         // assumes corners are a CW quad, and uses `rotation` to map image-ordered corners to
         // tag-canonical corners. A non-cyclic permutation here can silently corrupt rotation
@@ -70,6 +70,10 @@ impl ArucoDetection2D {
         // corners (cyclic shift), rotate `rotation` by the same amount so downstream pose estimation
         // sees a consistent (corners, rotation) pair.
         self.rotation = (self.rotation.wrapping_add((idx_tl & 3) as u8)) & 3;
+    }
+
+    pub fn canonicalize(mut self) -> Self {
+        self.canonicalize_in_place();
         self
     }
 }

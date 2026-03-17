@@ -573,7 +573,7 @@ pub fn register_docs(host: Option<String>, _registry: &mut SchemaRegistry, serve
         description: "Streams subscribed IMU, power, lighting, and firmware sensor events from the peripherals runtime.",
         tags: vec!["device".into(), "sensors".into()],
         payload: None,
-        responses: vec![TypeSchema { name: "SensorsStreamEvent".into(), schema: serde_json::json!({ "type": "object" }) }],
+        responses: vec![TypeSchema { name: "SensorsStreamEvent", schema: serde_json::json!({ "type": "object" }) }],
         params: vec![],
     };
 

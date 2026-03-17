@@ -70,7 +70,7 @@ pub(super) fn fit_edge_line_ransac(points: &[CvPoint<f32>], max_dist: f32, iters
         return None;
     }
     let iters = iters.clamp(8, 128);
-    ARUCO_NODE_SCRATCH.with(|scratch| {
+    let result = ARUCO_NODE_SCRATCH.with(|scratch| {
         let mut scratch = scratch.borrow_mut();
         let NodeDetectScratch { inliers, best_inliers, distances, trimmed, .. } = &mut *scratch;
         best_inliers.clear();
@@ -113,7 +113,9 @@ pub(super) fn fit_edge_line_ransac(points: &[CvPoint<f32>], max_dist: f32, iters
         let base_slice = if best_inliers.len() >= 2 { best_inliers.as_slice() } else { points };
         let base = fit_edge_line(base_slice)?;
         fit_edge_line_refined_with_buffers(base_slice, 0.2, base, distances, trimmed)
-    })
+    });
+    report_node_detect_scratch();
+    result
 }
 
 pub(super) fn intersect_lines(l1: (f32, f32, f32), l2: (f32, f32, f32)) -> Option<CvPoint<f32>> {
@@ -295,6 +297,14 @@ pub(super) fn refine_quad_corners_from_contour(contour: &[CvPoint<f32>], quad: &
         return false;
     }
 
+    fn restore_edge_points(edge_points: [Vec<CvPoint<f32>>; 4]) {
+        ARUCO_NODE_SCRATCH.with(|scratch| {
+            let mut scratch = scratch.borrow_mut();
+            scratch.edge_points = edge_points;
+        });
+        report_node_detect_scratch();
+    }
+
     let mut edge_points = ARUCO_NODE_SCRATCH.with(|scratch| {
         let mut scratch = scratch.borrow_mut();
         std::mem::take(&mut scratch.edge_points)
@@ -309,10 +319,7 @@ pub(super) fn refine_quad_corners_from_contour(contour: &[CvPoint<f32>], quad: &
         let dy = b.y - a.y;
         let len2 = dx * dx + dy * dy;
         if len2 <= f32::EPSILON {
-            ARUCO_NODE_SCRATCH.with(|scratch| {
-                let mut scratch = scratch.borrow_mut();
-                scratch.edge_points = edge_points;
-            });
+            restore_edge_points(edge_points);
             return false;
         }
         let inv_len = 1.0f32 / len2.sqrt();
@@ -334,17 +341,11 @@ pub(super) fn refine_quad_corners_from_contour(contour: &[CvPoint<f32>], quad: &
     let mut lines = [(0.0f32, 0.0f32, 0.0f32); 4];
     for i in 0..4 {
         if edge_points[i].len() < min_points {
-            ARUCO_NODE_SCRATCH.with(|scratch| {
-                let mut scratch = scratch.borrow_mut();
-                scratch.edge_points = edge_points;
-            });
+            restore_edge_points(edge_points);
             return false;
         }
         let Some(line) = fit_edge_line_ransac(&edge_points[i], max_dist, 48) else {
-            ARUCO_NODE_SCRATCH.with(|scratch| {
-                let mut scratch = scratch.borrow_mut();
-                scratch.edge_points = edge_points;
-            });
+            restore_edge_points(edge_points);
             return false;
         };
         lines[i] = line;
@@ -354,19 +355,13 @@ pub(super) fn refine_quad_corners_from_contour(contour: &[CvPoint<f32>], quad: &
     for i in 0..4 {
         let prev = (i + 3) % 4;
         let Some(p) = intersect_lines(lines[prev], lines[i]) else {
-            ARUCO_NODE_SCRATCH.with(|scratch| {
-                let mut scratch = scratch.borrow_mut();
-                scratch.edge_points = edge_points;
-            });
+            restore_edge_points(edge_points);
             return false;
         };
         refined[i] = p;
     }
     sort_corners_clockwise(&mut refined);
     *quad = refined;
-    ARUCO_NODE_SCRATCH.with(|scratch| {
-        let mut scratch = scratch.borrow_mut();
-        scratch.edge_points = edge_points;
-    });
+    restore_edge_points(edge_points);
     true
 }

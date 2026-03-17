@@ -12,6 +12,7 @@ pub(super) struct SensorsState {
     pub(super) inventory: SensorInventory,
     pub(super) scopes: BTreeSet<SensorScope>,
     pub(super) readings: BTreeMap<SensorScope, BTreeMap<SensorKind, SensorReading>>,
+    pub(super) serialized_readings: BTreeMap<SensorScope, SensorSnapshot>,
     pub(super) i2c_inventory: Option<I2cInventory>,
     pub(super) i2c_inventory_updated_at: Option<Instant>,
     pub(super) lighting_state: LightingRuntimeState,
@@ -22,11 +23,8 @@ impl SensorsState {
         let mut state = Self { lighting_state: initial_lighting_state, ..Self::default() };
         state.scopes.insert(SensorScope::Device);
         state.readings.insert(SensorScope::Device, BTreeMap::new());
+        state.serialized_readings.insert(SensorScope::Device, BTreeMap::new());
         state
-    }
-
-    pub(super) fn snapshot(&self, scope: &SensorScope) -> Option<SensorSnapshot> {
-        self.readings.get(scope).map(super::serialize_readings)
     }
 }
 

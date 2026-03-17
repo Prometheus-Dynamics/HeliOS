@@ -332,12 +332,12 @@ struct ArucoOverlayDetectionsConfig {
 )]
 fn cv_aruco_overlay(
     frame: Payload<DynamicImage>,
-    detections: Option<Vec<ArucoDetection2D>>,
+    detections: Option<std::sync::Arc<Vec<ArucoDetection2D>>>,
     cfg: ArucoOverlayDetectionsConfig,
     exec_ctx: &ExecutionContext,
 ) -> Result<Payload<DynamicImage>, NodeError> {
     let thickness = u32::try_from(cfg.thickness).unwrap_or(3).clamp(1, 32);
-    let detections = detections.unwrap_or_default();
+    let detections = detections.as_deref().map(Vec::as_slice).unwrap_or(&[]);
     if (!cfg.draw_boxes && !cfg.draw_corners && !cfg.draw_ids && !cfg.draw_hud && !cfg.draw_crosshair) || (detections.is_empty() && !cfg.draw_hud) {
         return Ok(frame);
     }
@@ -345,7 +345,7 @@ fn cv_aruco_overlay(
     let crosshair_scale = cfg.crosshair_scale.clamp(0.05, 1.5);
     let crosshair_thickness = if cfg.crosshair_thickness <= 0 { thickness } else { u32::try_from(cfg.crosshair_thickness).unwrap_or(thickness).clamp(1, 32) };
 
-    for det in &detections {
+    for det in detections {
         let corners = det.corners;
         let bbox = [
             CvPoint::new(corners[0].x as f32, corners[0].y as f32),
@@ -377,7 +377,7 @@ fn cv_aruco_overlay(
         let mut max_y = 0.0f64;
         let mut center_x = 0i64;
         if cfg.draw_ids {
-            let mut sum_x = 0.0;
+            let mut sum_x = 0.0f64;
             max_y = corners[0].y;
             for c in &corners {
                 max_y = max_y.max(c.y);

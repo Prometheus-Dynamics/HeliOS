@@ -66,6 +66,7 @@ pub async fn sample_output<F: LocalizationSourceFetcher>(
     let run_start = Instant::now();
     if let Some(graph) = runtime.graph.as_ref() {
         graph.set_pipeline_inputs(None, &inputs);
+        graph.request_output_sample(output_key);
         let _ = graph.process(dummy_image());
     }
     runtime.last_run_ms = Some(run_start.elapsed().as_secs_f64() * 1000.0);

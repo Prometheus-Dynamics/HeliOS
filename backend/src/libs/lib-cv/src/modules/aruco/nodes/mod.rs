@@ -23,8 +23,8 @@ use crate::draw;
 use crate::modules::aruco::DetectionPoseOutput;
 use crate::modules::aruco::detect::{
     ArucoDecodeConfig, ArucoTagDecodeConfig, ArucoTagDetectorConfig, CameraCalibration, candidate_quad_from_contour, candidate_quad_from_contour_fast, decode_quads_aruco_calibrated_with_config,
-    decode_quads_aruco_with_config, decode_quads_aruco_with_config_no_bits, decode_quads_calibrated_with_config, decode_quads_warp_with_config, decode_quads_with_config,
-    decode_quads_with_config_no_bits, filter_candidates, quad_satisfies_config, sort_corners_clockwise,
+    decode_quads_aruco_with_config, decode_quads_aruco_with_config_no_bits, decode_quads_aruco_with_config_no_bits_gray, decode_quads_calibrated_with_config, decode_quads_warp_with_config,
+    decode_quads_with_config, decode_quads_with_config_no_bits, decode_quads_with_config_no_bits_gray, filter_candidates, quad_satisfies_config, sort_corners_clockwise,
 };
 use crate::modules::aruco::pose::{TagPoseCalibration, TagPoseMethod, detections_to_tag_pose_output};
 use crate::modules::aruco::tag::{ArucoTagDecoding, ArucoTagFamilyKind, decode_marker_grid};
@@ -54,8 +54,8 @@ mod scale;
 mod temporal;
 
 use adaptive::{
-    cv_aruco_adaptive_merge_quads, cv_aruco_adaptive_quads_from_mask, cv_aruco_adaptive_quads_gate, cv_aruco_adaptive_quads_pass, cv_aruco_adaptive_quads_select_best,
-    cv_aruco_adaptive_threshold_mask, cv_aruco_adaptive_window_select, cv_aruco_quads_concat,
+    cv_aruco_adaptive_merge_quads, cv_aruco_adaptive_quads_from_frame, cv_aruco_adaptive_quads_from_mask, cv_aruco_adaptive_quads_from_roi_frame, cv_aruco_adaptive_quads_gate,
+    cv_aruco_adaptive_quads_pass, cv_aruco_adaptive_quads_select_best, cv_aruco_adaptive_threshold_mask, cv_aruco_adaptive_window_select, cv_aruco_quads_concat,
 };
 use candidate_quads::{
     cv_aruco_candidate_quads, cv_aruco_candidate_quads_extract, cv_aruco_candidate_quads_filter_area, cv_aruco_candidate_quads_filter_corner_spacing, cv_aruco_candidate_quads_filter_geometry,
@@ -65,7 +65,8 @@ use consensus::cv_aruco_consensus_detections;
 use decode::{cv_aruco_decode_quads, cv_aruco_decode_quads_calibrated, cv_aruco_decode_quads_warp};
 use decode_grid::cv_decode_grid;
 use decode_hamming::{
-    cv_aruco_decode_quads_hamming, cv_aruco_decode_quads_hamming_decode_detections, cv_aruco_decode_quads_hamming_finalize_detections, cv_aruco_decode_quads_hamming_refine_detections,
+    cv_aruco_decode_quads_hamming, cv_aruco_decode_quads_hamming_decode_detections, cv_aruco_decode_quads_hamming_finalize_detections, cv_aruco_decode_quads_hamming_from_roi_frame,
+    cv_aruco_decode_quads_hamming_refine_detections,
 };
 use dedup::{cv_aruco_dedup_detections, cv_aruco_dedup_detections_spatial};
 use json::{
@@ -132,6 +133,8 @@ impl CvArucoPlugin {
         registry.merge::<cv_aruco_quads_concat>()?;
         registry.merge::<cv_aruco_adaptive_window_select>()?;
         registry.merge::<cv_aruco_adaptive_threshold_mask>()?;
+        registry.merge::<cv_aruco_adaptive_quads_from_frame>()?;
+        registry.merge::<cv_aruco_adaptive_quads_from_roi_frame>()?;
         registry.merge::<cv_aruco_adaptive_quads_from_mask>()?;
         registry.merge::<cv_aruco_adaptive_quads_gate>()?;
         registry.merge::<cv_aruco_adaptive_quads_select_best>()?;
@@ -141,6 +144,7 @@ impl CvArucoPlugin {
         registry.merge::<cv_aruco_decode_quads_hamming_decode_detections>()?;
         registry.merge::<cv_aruco_decode_quads_hamming_refine_detections>()?;
         registry.merge::<cv_aruco_decode_quads_hamming_finalize_detections>()?;
+        registry.merge::<cv_aruco_decode_quads_hamming_from_roi_frame>()?;
         registry.merge::<cv_aruco_decode_quads_hamming>()?;
         registry.merge::<cv_aruco_decode_quads>()?;
         registry.merge::<cv_aruco_decode_quads_warp>()?;

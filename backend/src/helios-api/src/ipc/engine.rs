@@ -304,17 +304,6 @@ impl EngineConnection {
         }
     }
 
-    pub async fn refresh_node_registry(&self) -> Result<NodeRegistrySnapshot, lib_ipc::client::ClientTransportError> {
-        match self.request(|command_id| EngineCommand::RefreshNodeRegistry { command_id }, ExpectedEvent::NodeRegistry, "refresh_node_registry", ENGINE_RESPONSE_TIMEOUT).await? {
-            EngineEvent::NodeRegistry { snapshot, .. } => Ok(snapshot),
-            EngineEvent::Nack { reason, .. } => Err(lib_ipc::client::ClientTransportError::Io(io::Error::other(reason))),
-            other => {
-                warn!(?other, "engine returned unexpected event for refresh_node_registry after filtering");
-                Err(lib_ipc::client::ClientTransportError::UnexpectedMessage { expected: lib_ipc::frame::MessageKind::Event, received: lib_ipc::frame::MessageKind::Event })
-            }
-        }
-    }
-
     pub async fn validate_graph_event(&self, graph: serde_json::Value, active_features: Vec<String>, enable_lints: bool) -> Result<EngineEvent, lib_ipc::client::ClientTransportError> {
         self.request(
             |command_id| EngineCommand::ValidateGraph { command_id, graph: graph.into(), active_features, enable_lints },

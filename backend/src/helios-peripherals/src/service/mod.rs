@@ -13,7 +13,7 @@ use tokio_util::sync::CancellationToken;
 use crate::ai::AiModelManager;
 use crate::config::SensorsConfig;
 use crate::config_store::SensorConfigStore;
-use crate::dto::{JsonData, LightingCommand, LightingRuntimeState, SensorKind, SensorSnapshot};
+use crate::dto::{JsonData, LightingCommand, LightingRuntimeState, SensorData, SensorKind, SensorSnapshot};
 use crate::fan::FanController;
 use crate::ipc::SensorEvent;
 use crate::lighting::{LightingController, resolve_led_device_path};
@@ -91,14 +91,13 @@ fn build_lighting_controller(config: &led_config::LedConfig) -> Arc<LightingCont
     Arc::new(LightingController::new(device_path, config.count, &config.color_order))
 }
 
+fn serialize_reading(reading: &SensorReading) -> SensorData {
+    let json = json_from_sensor_reading(reading);
+    JsonData::from_value(&json)
+}
+
 fn serialize_readings(readings: &BTreeMap<SensorKind, SensorReading>) -> SensorSnapshot {
-    readings
-        .iter()
-        .map(|(kind, reading)| {
-            let json = json_from_sensor_reading(reading);
-            (kind.clone(), JsonData::from_value(&json))
-        })
-        .collect()
+    readings.iter().map(|(kind, reading)| (kind.clone(), serialize_reading(reading))).collect()
 }
 
 fn now_ms() -> u64 {

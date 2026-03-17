@@ -6,12 +6,14 @@ use crate::http::pipelines::{
 };
 use axum::response::Response;
 use bytes::Bytes;
-use helios_engine::ipc::{EngineErrorCode, EngineEvent, NodeRegistrySnapshot};
+use helios_engine::ipc::{EngineErrorCode, EngineEvent, GraphValidationHelperRequest, GraphValidationHelperResponse, GraphValidationReport, JsonWire, NodeRegistrySnapshot};
 use serde_json::Value as JsonValue;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::sync::Arc;
 use tokio::fs;
+use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::sync::RwLock;
 use tokio::time::{Duration, Instant};
@@ -47,6 +49,13 @@ struct RegistryCacheEntry {
 const GRAPH_VALIDATION_CACHE_MAX_AGE_MS: i64 = 60_000;
 const REGISTRY_CACHE_MAX_AGE: Duration = Duration::from_secs(30);
 const REGISTRY_HELPER_TIMEOUT: Duration = Duration::from_secs(20);
+const GRAPH_VALIDATION_HELPER_TIMEOUT: Duration = Duration::from_secs(20);
+
+#[derive(Debug)]
+pub(crate) enum GraphValidationRequestError {
+    Rejected { code: EngineErrorCode, reason: String },
+    Transport(lib_ipc::client::ClientTransportError),
+}
 
 #[derive(Default)]
 pub struct PipelinesReadModelState {
@@ -244,18 +253,15 @@ impl PipelinesReadModelState {
     }
 
     pub async fn refresh_graph_validation(&self, state: &AppState, graph_id: Uuid, graph: &JsonValue) {
-        match state.engine.validate_graph_event(graph.clone(), Vec::new(), true).await {
-            Ok(EngineEvent::GraphValidation { report, .. }) => {
+        match validate_graph_report(state, graph.clone(), Vec::new(), true).await {
+            Ok(report) => {
                 let diagnostics = map_planner_diagnostics(report.diagnostics);
                 self.set_graph_validation_state(graph_id, diagnostics).await;
             }
-            Ok(EngineEvent::Nack { code, reason, .. }) => {
+            Err(GraphValidationRequestError::Rejected { code, reason }) => {
                 self.set_graph_validation_error(graph_id, Some(code), reason).await;
             }
-            Ok(_) => {
-                self.set_graph_validation_error(graph_id, Some(EngineErrorCode::Internal), "unexpected engine response".to_string()).await;
-            }
-            Err(err) => {
+            Err(GraphValidationRequestError::Transport(err)) => {
                 warn!(error = %err, graph_id = %graph_id, "graph validation failed");
                 self.set_graph_validation_error(graph_id, Some(EngineErrorCode::Internal), format!("validation failed: {err}")).await;
             }
@@ -369,22 +375,32 @@ impl PipelinesReadModelState {
     }
 }
 
-#[cfg(all(target_os = "linux", target_env = "gnu"))]
-fn trim_process_allocator() {
-    unsafe extern "C" {
-        fn malloc_trim(pad: usize) -> i32;
+pub(crate) async fn validate_graph_report(state: &AppState, graph: JsonValue, active_features: Vec<String>, enable_lints: bool) -> Result<GraphValidationReport, GraphValidationRequestError> {
+    match validate_graph_report_via_helper(graph.clone(), active_features.clone(), enable_lints).await {
+        Ok(report) => return Ok(report),
+        Err(GraphValidationRequestError::Rejected { code, reason }) => {
+            return Err(GraphValidationRequestError::Rejected { code, reason });
+        }
+        Err(GraphValidationRequestError::Transport(err)) => {
+            warn!(error = %err, "graph validation helper failed; falling back to live engine IPC");
+        }
     }
 
-    // The registry cache is a large, bursty heap object graph. Trim immediately after eviction so
-    // the low-memory profile actually returns pages to the OS instead of just freeing Rust objects
-    // back into glibc arenas.
-    unsafe {
-        let _ = malloc_trim(0);
+    match state.engine.validate_graph_event(graph, active_features, enable_lints).await {
+        Ok(EngineEvent::GraphValidation { report, .. }) => Ok(report),
+        Ok(EngineEvent::Nack { code, reason, .. }) => Err(GraphValidationRequestError::Rejected { code, reason }),
+        Ok(other) => {
+            warn!(?other, "engine returned unexpected event for graph validation");
+            Err(GraphValidationRequestError::Rejected { code: EngineErrorCode::Internal, reason: "unexpected engine response".to_string() })
+        }
+        Err(err) => Err(GraphValidationRequestError::Transport(err)),
     }
 }
 
-#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
-fn trim_process_allocator() {}
+fn trim_process_allocator() {
+    // Cache eviction already frees the serialized registry payload and metadata; keep the API path
+    // free of glibc-specific unsafe trimming hooks until we have an audited cross-platform helper.
+}
 
 fn build_cached_registry_payload(snapshot: NodeRegistrySnapshot) -> Result<Arc<CachedRegistryPayload>, serde_json::Error> {
     let port_metadata_lookup = Arc::new(build_registry_port_metadata_lookup(&snapshot));
@@ -442,6 +458,58 @@ async fn invalidate_registry_snapshot_file() {
 
 fn registry_generator_binary() -> PathBuf {
     std::env::var("HELIOS_ENGINE_BIN").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/usr/bin/helios-engine"))
+}
+
+async fn validate_graph_report_via_helper(graph: JsonValue, active_features: Vec<String>, enable_lints: bool) -> Result<GraphValidationReport, GraphValidationRequestError> {
+    let engine_bin = registry_generator_binary();
+    let request = GraphValidationHelperRequest { graph: JsonWire(graph), active_features, enable_lints };
+    let payload = serde_json::to_vec(&request).map_err(|err| GraphValidationRequestError::Transport(helper_io_error(format!("encode graph validation request failed: {err}"))))?;
+
+    let mut child = Command::new(&engine_bin)
+        .arg("validate-graph")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| GraphValidationRequestError::Transport(helper_io_error(format!("spawn graph validation helper failed ({}): {err}", engine_bin.display()))))?;
+
+    let Some(mut stdin) = child.stdin.take() else {
+        return Err(GraphValidationRequestError::Transport(helper_io_error(format!("graph validation helper missing stdin pipe ({})", engine_bin.display()))));
+    };
+    stdin.write_all(&payload).await.map_err(|err| GraphValidationRequestError::Transport(helper_io_error(format!("write graph validation helper stdin failed ({}): {err}", engine_bin.display()))))?;
+    drop(stdin);
+
+    let output = tokio::time::timeout(GRAPH_VALIDATION_HELPER_TIMEOUT, child.wait_with_output())
+        .await
+        .map_err(|_| {
+            GraphValidationRequestError::Transport(helper_io_error(format!("graph validation helper timed out after {}s ({})", GRAPH_VALIDATION_HELPER_TIMEOUT.as_secs(), engine_bin.display())))
+        })?
+        .map_err(|err| GraphValidationRequestError::Transport(helper_io_error(format!("wait graph validation helper failed ({}): {err}", engine_bin.display()))))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let detail = if !stderr.is_empty() {
+            stderr
+        } else if !stdout.is_empty() {
+            stdout
+        } else {
+            format!("exit status {}", output.status)
+        };
+        return Err(GraphValidationRequestError::Transport(helper_io_error(format!("graph validation helper failed ({}): {detail}", engine_bin.display()))));
+    }
+
+    let response: GraphValidationHelperResponse = serde_json::from_slice(&output.stdout)
+        .map_err(|err| GraphValidationRequestError::Transport(helper_io_error(format!("decode graph validation helper response failed ({}): {err}", engine_bin.display()))))?;
+
+    match response {
+        GraphValidationHelperResponse::Report { report } => Ok(report),
+        GraphValidationHelperResponse::Error { code, reason } => Err(GraphValidationRequestError::Rejected { code, reason }),
+    }
+}
+
+fn helper_io_error(message: String) -> lib_ipc::client::ClientTransportError {
+    lib_ipc::client::ClientTransportError::Io(std::io::Error::other(message))
 }
 
 fn registry_plugin_dirs() -> Vec<PathBuf> {

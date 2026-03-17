@@ -41,25 +41,26 @@ fn cv_aruco_scale_quads(quads: &Vec<Quad>, factor: i64, invert: bool) -> Result<
     ),
     outputs(port(name = "detections", source = "ArucoDetections2D", ty = crate::daedalus_types::aruco_detections_2d()))
 )]
-fn cv_aruco_scale_detections(detections: &Vec<ArucoDetection2D>, factor: i64, invert: bool) -> Result<Vec<ArucoDetection2D>, NodeError> {
+fn cv_aruco_scale_detections(detections: std::sync::Arc<Vec<ArucoDetection2D>>, factor: i64, invert: bool) -> Result<Vec<ArucoDetection2D>, NodeError> {
+    let mut detections = std::sync::Arc::unwrap_or_clone(detections);
     if detections.is_empty() {
-        return Ok(Vec::new());
+        return Ok(detections);
     }
     let factor = (factor.max(1)) as f64;
     let scale = if invert { 1.0 / factor } else { factor };
-
-    let mut out: Vec<ArucoDetection2D> = Vec::with_capacity(detections.len());
-    for d in detections {
-        let mut dd = d.clone();
-        dd.corners = [
-            Point { x: dd.corners[0].x * scale, y: dd.corners[0].y * scale },
-            Point { x: dd.corners[1].x * scale, y: dd.corners[1].y * scale },
-            Point { x: dd.corners[2].x * scale, y: dd.corners[2].y * scale },
-            Point { x: dd.corners[3].x * scale, y: dd.corners[3].y * scale },
-        ];
-        out.push(dd);
+    if (scale - 1.0).abs() <= f64::EPSILON {
+        return Ok(detections);
     }
-    Ok(out)
+
+    for det in &mut detections {
+        det.corners = [
+            Point { x: det.corners[0].x * scale, y: det.corners[0].y * scale },
+            Point { x: det.corners[1].x * scale, y: det.corners[1].y * scale },
+            Point { x: det.corners[2].x * scale, y: det.corners[2].y * scale },
+            Point { x: det.corners[3].x * scale, y: det.corners[3].y * scale },
+        ];
+    }
+    Ok(detections)
 }
 
 #[node(
@@ -73,26 +74,24 @@ fn cv_aruco_scale_detections(detections: &Vec<ArucoDetection2D>, factor: i64, in
     ),
     outputs(port(name = "detections", source = "ArucoDetections2D", ty = crate::daedalus_types::aruco_detections_2d()))
 )]
-fn cv_aruco_offset_detections(detections: &Vec<ArucoDetection2D>, offset_x: i64, offset_y: i64) -> Result<Vec<ArucoDetection2D>, NodeError> {
+fn cv_aruco_offset_detections(detections: std::sync::Arc<Vec<ArucoDetection2D>>, offset_x: i64, offset_y: i64) -> Result<Vec<ArucoDetection2D>, NodeError> {
     if detections.is_empty() {
         return Ok(Vec::new());
     }
     if offset_x == 0 && offset_y == 0 {
-        return Ok(detections.clone());
+        return Ok(std::sync::Arc::unwrap_or_clone(detections));
     }
 
     let ox = offset_x as f64;
     let oy = offset_y as f64;
-    let mut out: Vec<ArucoDetection2D> = Vec::with_capacity(detections.len());
-    for d in detections {
-        let mut dd = d.clone();
-        dd.corners = [
-            Point { x: dd.corners[0].x + ox, y: dd.corners[0].y + oy },
-            Point { x: dd.corners[1].x + ox, y: dd.corners[1].y + oy },
-            Point { x: dd.corners[2].x + ox, y: dd.corners[2].y + oy },
-            Point { x: dd.corners[3].x + ox, y: dd.corners[3].y + oy },
+    let mut detections = std::sync::Arc::unwrap_or_clone(detections);
+    for det in &mut detections {
+        det.corners = [
+            Point { x: det.corners[0].x + ox, y: det.corners[0].y + oy },
+            Point { x: det.corners[1].x + ox, y: det.corners[1].y + oy },
+            Point { x: det.corners[2].x + ox, y: det.corners[2].y + oy },
+            Point { x: det.corners[3].x + ox, y: det.corners[3].y + oy },
         ];
-        out.push(dd);
     }
-    Ok(out)
+    Ok(detections)
 }

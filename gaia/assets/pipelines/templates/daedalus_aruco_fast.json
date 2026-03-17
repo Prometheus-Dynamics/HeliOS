@@ -20,26 +20,6 @@
     "edges": [
       {
         "from": {
-          "node": 1,
-          "port": "mask"
-        },
-        "to": {
-          "node": 2,
-          "port": "frame"
-        }
-      },
-      {
-        "from": {
-          "node": 2,
-          "port": "mask"
-        },
-        "to": {
-          "node": 3,
-          "port": "mask"
-        }
-      },
-      {
-        "from": {
           "node": 3,
           "port": "quads"
         },
@@ -70,26 +50,6 @@
       },
       {
         "from": {
-          "node": 1,
-          "port": "mask"
-        },
-        "to": {
-          "node": 7,
-          "port": "clahe"
-        }
-      },
-      {
-        "from": {
-          "node": 2,
-          "port": "mask"
-        },
-        "to": {
-          "node": 7,
-          "port": "adaptive"
-        }
-      },
-      {
-        "from": {
           "node": 0,
           "port": "roi_x"
         },
@@ -136,16 +96,6 @@
         "to": {
           "node": 8,
           "port": "frame"
-        }
-      },
-      {
-        "from": {
-          "node": 8,
-          "port": "frame"
-        },
-        "to": {
-          "node": 1,
-          "port": "mask"
         }
       },
       {
@@ -254,7 +204,7 @@
           "port": "frame"
         },
         "to": {
-          "node": 7,
+          "node": 14,
           "port": "overlay"
         }
       },
@@ -476,6 +426,16 @@
         "to": {
           "node": 11,
           "port": "enabled"
+        }
+      },
+      {
+        "from": {
+          "node": 8,
+          "port": "frame"
+        },
+        "to": {
+          "node": 3,
+          "port": "frame"
         }
       }
     ],
@@ -1078,6 +1038,55 @@
             }
           ],
           [
+            "tile_size",
+            {
+              "type": "Int",
+              "value": 2
+            }
+          ],
+          [
+            "clip_limit",
+            {
+              "type": "Float",
+              "value": 3.5
+            }
+          ],
+          [
+            "mix",
+            {
+              "type": "Float",
+              "value": 1
+            }
+          ],
+          [
+            "adaptive_window",
+            {
+              "type": "Int",
+              "value": 61
+            }
+          ],
+          [
+            "adaptive_offset",
+            {
+              "type": "Float",
+              "value": 10
+            }
+          ],
+          [
+            "threshold_offset",
+            {
+              "type": "Float",
+              "value": 0
+            }
+          ],
+          [
+            "invert",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ],
+          [
             "min_perimeter_rate",
             {
               "type": "Float",
@@ -1148,10 +1157,24 @@
             }
           ],
           [
+            "min_side_px",
+            {
+              "type": "Float",
+              "value": 0
+            }
+          ],
+          [
             "fallback_max_contours",
             {
               "type": "Int",
               "value": 128
+            }
+          ],
+          [
+            "max_quads",
+            {
+              "type": "Int",
+              "value": 0
             }
           ],
           [
@@ -1167,26 +1190,19 @@
               "type": "Float",
               "value": 0
             }
-          ],
-          [
-            "min_side_px",
-            {
-              "type": "Float",
-              "value": 0
-            }
-          ],
-          [
-            "max_quads",
-            {
-              "type": "Int",
-              "value": 0
-            }
           ]
         ],
-        "id": "cv:aruco:adaptive_quads_from_mask",
+        "id": "cv:aruco:adaptive_quads_from_frame",
         "inputs": [
+          "frame",
           "enabled",
-          "mask",
+          "tile_size",
+          "clip_limit",
+          "mix",
+          "adaptive_window",
+          "adaptive_offset",
+          "threshold_offset",
+          "invert",
           "min_perimeter_rate",
           "max_perimeter_rate",
           "epsilon",
@@ -1203,8 +1219,152 @@
           "expand_inner_scale",
           "expand_inner_max_side_px"
         ],
-        "label": "Adaptive Quads",
+        "label": "Adaptive Quads (Fused)",
         "metadata": {
+          "inputs.clip_limit.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.clip_limit.ui_max": {
+            "type": "Float",
+            "value": 10
+          },
+          "inputs.clip_limit.ui_min": {
+            "type": "Float",
+            "value": 0
+          },
+          "inputs.clip_limit.ui_step": {
+            "type": "Float",
+            "value": 0.1
+          },
+          "inputs.mask.access": {
+            "type": "String",
+            "value": "borrowed"
+          },
+          "inputs.mix.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.mix.ui_max": {
+            "type": "Float",
+            "value": 1
+          },
+          "inputs.mix.ui_min": {
+            "type": "Float",
+            "value": 0
+          },
+          "inputs.mix.ui_step": {
+            "type": "Float",
+            "value": 0.01
+          },
+          "inputs.mode.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.tile_size.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.tile_size.ui_max": {
+            "type": "Int",
+            "value": 64
+          },
+          "inputs.tile_size.ui_min": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.tile_size.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.border_guard_px.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.border_guard_px.ui_max": {
+            "type": "Int",
+            "value": 32
+          },
+          "inputs.border_guard_px.ui_min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.border_guard_px.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.frame.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.invert.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.offset.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.offset.ui_max": {
+            "type": "Float",
+            "value": 50
+          },
+          "inputs.offset.ui_min": {
+            "type": "Float",
+            "value": -50
+          },
+          "inputs.offset.ui_step": {
+            "type": "Float",
+            "value": 1
+          },
+          "inputs.threshold.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.threshold.ui_max": {
+            "type": "Int",
+            "value": 255
+          },
+          "inputs.threshold.ui_min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.threshold.ui_step": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.threshold_offset.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.threshold_offset.ui_max": {
+            "type": "Float",
+            "value": 50
+          },
+          "inputs.threshold_offset.ui_min": {
+            "type": "Float",
+            "value": -50
+          },
+          "inputs.threshold_offset.ui_step": {
+            "type": "Float",
+            "value": 1
+          },
+          "inputs.window.access": {
+            "type": "String",
+            "value": "owned"
+          },
+          "inputs.window.ui_max": {
+            "type": "Int",
+            "value": 101
+          },
+          "inputs.window.ui_min": {
+            "type": "Int",
+            "value": 3
+          },
+          "inputs.window.ui_step": {
+            "type": "Int",
+            "value": 2
+          },
           "inputs.enabled.access": {
             "type": "String",
             "value": "owned"
@@ -1272,10 +1432,6 @@
           "inputs.fallback_max_contours.ui_step": {
             "type": "Int",
             "value": 1
-          },
-          "inputs.mask.access": {
-            "type": "String",
-            "value": "borrowed"
           },
           "inputs.max_angle_deg.access": {
             "type": "String",
@@ -2342,10 +2498,7 @@
         "const_inputs": [],
         "id": "io.host_output",
         "inputs": [
-          "overlay",
           "detections",
-          "clahe",
-          "adaptive",
           "target_detections",
           "tv",
           "tid",
@@ -2368,7 +2521,7 @@
           },
           "host_bridge_inputs": {
             "type": "String",
-            "value": "overlay:image:dynamic,detections:list<cv:aruco_detection_2d>,clahe:image:dynamic,adaptive:image:dynamic,target_detections:list<cv:aruco_detection_2d>,tv:float,tid:float,tx:float,ty:float,ta:float,distance_px:float,target_cx:float,target_cy:float,thor:float,tvert:float,tshort:float,tlong:float"
+            "value": "detections:list<cv:aruco_detection_2d>,target_detections:list<cv:aruco_detection_2d>,tv:float,tid:float,tx:float,ty:float,ta:float,distance_px:float,target_cx:float,target_cy:float,thor:float,tvert:float,tshort:float,tlong:float"
           }
         },
         "outputs": []
@@ -2377,7 +2530,7 @@
         "bundle": null,
         "compute": "CpuOnly",
         "const_inputs": [],
-        "id": "cv:image:crop_roi",
+          "id": "cv:image:crop_roi_gray",
         "inputs": [
           "frame",
           "roi_x",
@@ -2385,7 +2538,7 @@
           "roi_w",
           "roi_h"
         ],
-        "label": "ROI Crop",
+          "label": "ROI Crop Gray",
         "metadata": {},
         "outputs": [
           "frame",
@@ -2742,6 +2895,69 @@
         "outputs": [
           "detections"
         ]
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [],
+        "id": "io.host_output",
+        "inputs": [
+          "overlay"
+        ],
+        "label": "Output Overlay",
+        "metadata": {
+          "host_bridge": {
+            "type": "Bool",
+            "value": true
+          },
+          "host_bridge_inputs": {
+            "type": "String",
+            "value": "overlay:image:dynamic"
+          }
+        },
+        "outputs": []
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [],
+        "id": "io.host_output",
+        "inputs": [
+          "clahe"
+        ],
+        "label": "Output CLAHE",
+        "metadata": {
+          "host_bridge": {
+            "type": "Bool",
+            "value": true
+          },
+          "host_bridge_inputs": {
+            "type": "String",
+            "value": "clahe:image:dynamic"
+          }
+        },
+        "outputs": []
+      },
+      {
+        "bundle": null,
+        "compute": "CpuOnly",
+        "const_inputs": [],
+        "id": "io.host_output",
+        "inputs": [
+          "adaptive"
+        ],
+        "label": "Output Adaptive",
+        "metadata": {
+          "host_bridge": {
+            "type": "Bool",
+            "value": true
+          },
+          "host_bridge_inputs": {
+            "type": "String",
+            "value": "adaptive:image:dynamic"
+          }
+        },
+        "outputs": []
       }
     ]
   }

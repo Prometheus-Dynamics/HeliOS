@@ -10,6 +10,8 @@ use std::sync::{Arc, OnceLock};
 use crate::{Point, modules};
 
 #[cfg(feature = "gpu")]
+use daedalus::gpu::ErasedPayload;
+#[cfg(feature = "gpu")]
 use daedalus::gpu::GpuError;
 #[cfg(feature = "gpu")]
 pub type ImagePayload = daedalus::gpu::Payload<DynamicImage>;
@@ -133,6 +135,7 @@ impl Plugin for CvPlugin {
         let img_dynamic_opt = TypeExpr::Optional(Box::new(img_dynamic.clone()));
 
         typing::register_type::<image::GrayImage>(img_gray.clone());
+        typing::register_type::<crate::modules::image::luma::PooledGrayImage>(img_gray.clone());
         typing::register_type::<image::GrayAlphaImage>(img_graya.clone());
         typing::register_type::<image::RgbImage>(img_rgb.clone());
         typing::register_type::<image::RgbaImage>(img_rgba.clone());
@@ -175,14 +178,32 @@ impl Plugin for CvPlugin {
             .register_converter(ConverterBuilder::new("image_dynamic_to_gray8", TypeExpr::opaque("image:dynamic"), TypeExpr::opaque("image:gray8"), Ok).build_boxed())
             .map_err(|_| "failed to register image:dynamic -> image:gray8 converter")?;
 
-        registry.register_output_mover::<DynamicImage, _>(|img| EdgePayload::Any(Arc::new(img)));
-        registry.register_output_mover::<GrayImage, _>(|img| EdgePayload::Any(Arc::new(img)));
-        registry.register_output_mover::<GrayAlphaImage, _>(|img| {
-            let dyn_img = DynamicImage::ImageLumaA8(img);
-            EdgePayload::Any(Arc::new(dyn_img))
-        });
-        registry.register_output_mover::<RgbImage, _>(|img| EdgePayload::Any(Arc::new(img)));
-        registry.register_output_mover::<RgbaImage, _>(|img| EdgePayload::Any(Arc::new(img)));
+        #[cfg(feature = "gpu")]
+        {
+            registry.register_output_mover::<DynamicImage, _>(|img| EdgePayload::Payload(ErasedPayload::from_cpu::<DynamicImage>(img)));
+            registry.register_output_mover::<GrayImage, _>(|img| EdgePayload::Payload(ErasedPayload::from_cpu::<GrayImage>(img)));
+            registry.register_output_mover::<crate::modules::image::luma::PooledGrayImage, _>(|img| EdgePayload::Any(Arc::new(Arc::new(img))));
+            registry.register_output_mover::<GrayAlphaImage, _>(|img| EdgePayload::Payload(ErasedPayload::from_cpu::<DynamicImage>(DynamicImage::ImageLumaA8(img))));
+            registry.register_output_mover::<RgbImage, _>(|img| EdgePayload::Payload(ErasedPayload::from_cpu::<RgbImage>(img)));
+            registry.register_output_mover::<RgbaImage, _>(|img| EdgePayload::Payload(ErasedPayload::from_cpu::<RgbaImage>(img)));
+        }
+        #[cfg(not(feature = "gpu"))]
+        {
+            registry.register_output_mover::<DynamicImage, _>(|img| EdgePayload::Any(Arc::new(img)));
+            registry.register_output_mover::<GrayImage, _>(|img| EdgePayload::Any(Arc::new(img)));
+            registry.register_output_mover::<crate::modules::image::luma::PooledGrayImage, _>(|img| EdgePayload::Any(Arc::new(Arc::new(img))));
+            registry.register_output_mover::<GrayAlphaImage, _>(|img| {
+                let dyn_img = DynamicImage::ImageLumaA8(img);
+                EdgePayload::Any(Arc::new(dyn_img))
+            });
+            registry.register_output_mover::<RgbImage, _>(|img| EdgePayload::Any(Arc::new(img)));
+            registry.register_output_mover::<RgbaImage, _>(|img| EdgePayload::Any(Arc::new(img)));
+        }
+        // Typed CV containers are frequently fanned out to multiple nodes and host outputs.
+        // Wrap them in a shared Arc carrier so downstream readers can borrow without cloning
+        // the full vector payload on every frame.
+        registry.register_output_mover::<Vec<crate::modules::aruco::ArucoDetection2D>, _>(|detections| EdgePayload::Any(Arc::new(Arc::new(detections))));
+        registry.register_output_mover::<Vec<[Point; 4]>, _>(|quads| EdgePayload::Any(Arc::new(Arc::new(quads))));
 
         // Use bare values for unit plugins; use `new()` for macro-generated plugins with fields.
         let image = modules::image::nodes::CvImagePlugin;
@@ -234,6 +255,12 @@ fn cv_payload_size_bytes(any: &(dyn std::any::Any + Send + Sync)) -> Option<u64>
     if let Some(image) = any.downcast_ref::<crate::BinaryImage>() {
         return Some(binary_image_size_bytes(image));
     }
+    if let Some(image) = any.downcast_ref::<crate::modules::image::luma::PooledGrayImage>() {
+        return Some(gray_image_size_bytes(image.as_ref()));
+    }
+    if let Some(image) = any.downcast_ref::<Arc<crate::modules::image::luma::PooledGrayImage>>() {
+        return Some(gray_image_size_bytes(image.as_ref().as_ref()));
+    }
     if let Some(quads) = any.downcast_ref::<Vec<[Point; 4]>>() {
         return Some(vec_inline_bytes(quads) as u64);
     }
@@ -265,6 +292,10 @@ fn vec_inline_bytes<T>(values: &Vec<T>) -> usize {
 fn binary_image_size_bytes(image: &crate::BinaryImage) -> u64 {
     let raw = serde_json::to_vec(image).map(|bytes| bytes.len() as u64).unwrap_or(0);
     raw.max(std::mem::size_of::<crate::BinaryImage>() as u64)
+}
+
+fn gray_image_size_bytes(image: &GrayImage) -> u64 {
+    std::mem::size_of::<GrayImage>() as u64 + image.as_raw().capacity() as u64
 }
 
 fn contours_size_bytes(contours: &Vec<Vec<Point>>) -> u64 {

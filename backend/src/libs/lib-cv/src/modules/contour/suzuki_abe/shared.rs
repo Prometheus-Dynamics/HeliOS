@@ -1,5 +1,6 @@
 #![allow(unsafe_code)]
 
+use imageproc::contours::BorderType;
 use imageproc::point::Point;
 use memchr::memchr;
 use smallvec::SmallVec;
@@ -11,6 +12,26 @@ thread_local! {
 }
 
 pub(super) type ContourPoints = SmallVec<[Point<i32>; 32]>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CompactContour {
+    pub start: usize,
+    pub len: usize,
+    pub border_type: BorderType,
+    pub parent: Option<usize>,
+}
+
+impl CompactContour {
+    #[inline(always)]
+    pub fn points<'a>(&self, point_store: &'a [Point<i32>]) -> &'a [Point<i32>] {
+        &point_store[self.start..self.start + self.len]
+    }
+}
+
+#[inline(always)]
+pub(super) fn compact_contours_bytes(point_store_capacity: usize, contours_capacity: usize) -> usize {
+    point_store_capacity * size_of::<Point<i32>>() + contours_capacity * size_of::<CompactContour>()
+}
 
 pub(super) fn ensure_scratch_len(buffer: &mut Vec<i32>, len: usize) {
     if buffer.len() != len {

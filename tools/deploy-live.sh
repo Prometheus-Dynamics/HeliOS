@@ -751,6 +751,14 @@ if [[ "$UPLOAD" == "1" ]]; then
         if [ -f \"$remote_dir/$b\" ]; then cp -f \"$remote_dir/$b\" \"$backup_dir/$b\" || true; fi; \
         install -m0755 \"$tmpdir/$b\" \"$remote_dir/$b\"'"
     done
+    for b in "${bins[@]}"; do
+      local local_hash remote_hash
+      local_hash="$(local_sha256 "$BINS_DIR/$b")"
+      remote_hash="$(remote_sha256 "$remote_dir/$b")"
+      if [[ -z "${remote_hash// }" || "$local_hash" != "$remote_hash" ]]; then
+        die "remote binary hash mismatch after install: $b"
+      fi
+    done
     ssh_exec "sh -lc 'rm -rf \"$tmpdir\"'"
   }
 

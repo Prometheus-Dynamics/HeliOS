@@ -396,15 +396,11 @@ fn cv_aruco_detections_filter(detections: &Vec<ArucoDetection2D>, mode: ArucoDet
     ),
     outputs(port(name = "detections", source = "ArucoDetections2D", ty = crate::daedalus_types::aruco_detections_2d()))
 )]
-fn cv_aruco_detections_order(detections: &Vec<ArucoDetection2D>, mode: String, crosshair_x: i64, crosshair_y: i64) -> Result<Vec<ArucoDetection2D>, NodeError> {
-    #[derive(Clone)]
-    struct Candidate {
-        det: ArucoDetection2D,
-        cx: f64,
-        cy: f64,
-        area: f64,
+fn cv_aruco_detections_order(detections: std::sync::Arc<Vec<ArucoDetection2D>>, mode: String, crosshair_x: i64, crosshair_y: i64) -> Result<Vec<ArucoDetection2D>, NodeError> {
+    if detections.is_empty() {
+        return Ok(Vec::new());
     }
-
+    let mut detections = std::sync::Arc::unwrap_or_clone(detections);
     fn cmp_f64(a: f64, b: f64) -> std::cmp::Ordering {
         if !a.is_finite() && !b.is_finite() {
             return std::cmp::Ordering::Equal;
@@ -439,70 +435,73 @@ fn cv_aruco_detections_order(detections: &Vec<ArucoDetection2D>, mode: String, c
     let mode = parse_order_mode(&mode);
 
     if detections.len() <= 1 || mode == ArucoDetectionsOrderMode::None {
-        return Ok(detections.clone());
-    }
-
-    let mut candidates: Vec<Candidate> = Vec::with_capacity(detections.len());
-    let mut invalid: Vec<ArucoDetection2D> = Vec::new();
-    for det in detections.iter().cloned() {
-        let (cx, cy) = detection_center(&det);
-        let area = detection_area(&det);
-        if !(cx.is_finite() && cy.is_finite() && area.is_finite()) {
-            invalid.push(det);
-            continue;
-        }
-        candidates.push(Candidate { det, cx, cy, area });
-    }
-
-    if candidates.len() <= 1 {
-        let mut out = candidates.into_iter().map(|c| c.det).collect::<Vec<_>>();
-        out.extend(invalid);
-        return Ok(out);
+        return Ok(detections);
     }
 
     let (center_x, center_y) = if mode == ArucoDetectionsOrderMode::CenterMost {
         let mut sx = 0.0;
         let mut sy = 0.0;
-        for c in &candidates {
-            sx += c.cx;
-            sy += c.cy;
+        let mut count = 0usize;
+        for det in &detections {
+            let (cx, cy) = detection_center(det);
+            let area = detection_area(det);
+            if cx.is_finite() && cy.is_finite() && area.is_finite() {
+                sx += cx;
+                sy += cy;
+                count += 1;
+            }
         }
-        let n = candidates.len() as f64;
+        if count == 0 {
+            return Ok(detections);
+        }
+        let n = count as f64;
         (sx / n, sy / n)
     } else {
         (crosshair_x as f64, crosshair_y as f64)
     };
 
-    candidates.sort_by(|a, b| {
+    detections.sort_by(|a, b| {
         use std::cmp::Ordering;
-        let ord = match mode {
-            ArucoDetectionsOrderMode::LargestToSmallest => cmp_f64(b.area, a.area),
-            ArucoDetectionsOrderMode::SmallestToLargest => cmp_f64(a.area, b.area),
-            ArucoDetectionsOrderMode::TopMost => cmp_f64(a.cy, b.cy).then_with(|| cmp_f64(a.cx, b.cx)),
-            ArucoDetectionsOrderMode::BottomMost => cmp_f64(b.cy, a.cy).then_with(|| cmp_f64(a.cx, b.cx)),
-            ArucoDetectionsOrderMode::LeftMost => cmp_f64(a.cx, b.cx).then_with(|| cmp_f64(a.cy, b.cy)),
-            ArucoDetectionsOrderMode::RightMost => cmp_f64(b.cx, a.cx).then_with(|| cmp_f64(a.cy, b.cy)),
-            ArucoDetectionsOrderMode::TopLeft => cmp_f64(a.cy, b.cy).then_with(|| cmp_f64(a.cx, b.cx)),
-            ArucoDetectionsOrderMode::TopRight => cmp_f64(a.cy, b.cy).then_with(|| cmp_f64(b.cx, a.cx)),
-            ArucoDetectionsOrderMode::BottomLeft => cmp_f64(b.cy, a.cy).then_with(|| cmp_f64(a.cx, b.cx)),
-            ArucoDetectionsOrderMode::BottomRight => cmp_f64(b.cy, a.cy).then_with(|| cmp_f64(b.cx, a.cx)),
-            ArucoDetectionsOrderMode::CenterMost | ArucoDetectionsOrderMode::Crosshair => {
-                let adx = a.cx - center_x;
-                let ady = a.cy - center_y;
-                let bdx = b.cx - center_x;
-                let bdy = b.cy - center_y;
-                let ad2 = adx * adx + ady * ady;
-                let bd2 = bdx * bdx + bdy * bdy;
-                cmp_f64(ad2, bd2).then_with(|| cmp_f64(b.area, a.area))
+        let a_center = detection_center(a);
+        let b_center = detection_center(b);
+        let a_area = detection_area(a);
+        let b_area = detection_area(b);
+        let a_valid = a_center.0.is_finite() && a_center.1.is_finite() && a_area.is_finite();
+        let b_valid = b_center.0.is_finite() && b_center.1.is_finite() && b_area.is_finite();
+
+        match (a_valid, b_valid) {
+            (true, true) => {
+                let ord = match mode {
+                    ArucoDetectionsOrderMode::LargestToSmallest => cmp_f64(b_area, a_area),
+                    ArucoDetectionsOrderMode::SmallestToLargest => cmp_f64(a_area, b_area),
+                    ArucoDetectionsOrderMode::TopMost => cmp_f64(a_center.1, b_center.1).then_with(|| cmp_f64(a_center.0, b_center.0)),
+                    ArucoDetectionsOrderMode::BottomMost => cmp_f64(b_center.1, a_center.1).then_with(|| cmp_f64(a_center.0, b_center.0)),
+                    ArucoDetectionsOrderMode::LeftMost => cmp_f64(a_center.0, b_center.0).then_with(|| cmp_f64(a_center.1, b_center.1)),
+                    ArucoDetectionsOrderMode::RightMost => cmp_f64(b_center.0, a_center.0).then_with(|| cmp_f64(a_center.1, b_center.1)),
+                    ArucoDetectionsOrderMode::TopLeft => cmp_f64(a_center.1, b_center.1).then_with(|| cmp_f64(a_center.0, b_center.0)),
+                    ArucoDetectionsOrderMode::TopRight => cmp_f64(a_center.1, b_center.1).then_with(|| cmp_f64(b_center.0, a_center.0)),
+                    ArucoDetectionsOrderMode::BottomLeft => cmp_f64(b_center.1, a_center.1).then_with(|| cmp_f64(a_center.0, b_center.0)),
+                    ArucoDetectionsOrderMode::BottomRight => cmp_f64(b_center.1, a_center.1).then_with(|| cmp_f64(b_center.0, a_center.0)),
+                    ArucoDetectionsOrderMode::CenterMost | ArucoDetectionsOrderMode::Crosshair => {
+                        let adx = a_center.0 - center_x;
+                        let ady = a_center.1 - center_y;
+                        let bdx = b_center.0 - center_x;
+                        let bdy = b_center.1 - center_y;
+                        let ad2 = adx * adx + ady * ady;
+                        let bd2 = bdx * bdx + bdy * bdy;
+                        cmp_f64(ad2, bd2).then_with(|| cmp_f64(b_area, a_area))
+                    }
+                    ArucoDetectionsOrderMode::None => Ordering::Equal,
+                };
+                if ord == Ordering::Equal { a.id.cmp(&b.id) } else { ord }
             }
-            ArucoDetectionsOrderMode::None => Ordering::Equal,
-        };
-        if ord == Ordering::Equal { a.det.id.cmp(&b.det.id) } else { ord }
+            (true, false) => Ordering::Less,
+            (false, true) => Ordering::Greater,
+            (false, false) => Ordering::Equal,
+        }
     });
 
-    let mut out = candidates.into_iter().map(|c| c.det).collect::<Vec<_>>();
-    out.extend(invalid);
-    Ok(out)
+    Ok(detections)
 }
 
 #[derive(Clone, Debug, NodeConfig)]

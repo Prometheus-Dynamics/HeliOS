@@ -1,6 +1,7 @@
 use crate::ipc::{EngineCommand, EngineErrorCode, EngineEvent};
 use crate::services::EngineServices;
 use crate::stream::read_latest_frame_async;
+use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 use tokio::sync::RwLock;
 use tokio::time::{timeout, Duration};
@@ -11,6 +12,12 @@ use crate::daedalus_registry::build_daedalus_runtime_registry;
 pub struct EngineRuntime {
     pub services: EngineServices,
     node_registry_snapshot: RwLock<Option<crate::ipc::NodeRegistrySnapshot>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphValidationFailure {
+    pub code: EngineErrorCode,
+    pub reason: String,
 }
 
 const START_STREAM_TIMEOUT: Duration = Duration::from_secs(60);
@@ -210,57 +217,10 @@ impl EngineRuntime {
                 }
                 Err(err) => EngineEvent::Nack { command_id, code: EngineErrorCode::Internal, reason: format!("failed to build daedalus registry: {err}") },
             },
-            EngineCommand::ValidateGraph { command_id, graph, active_features, enable_lints } => {
-                let mut parsed: daedalus::planner::Graph = match serde_json::from_value(graph.into()) {
-                    Ok(graph) => graph,
-                    Err(err) => {
-                        return EngineEvent::Nack { command_id, code: EngineErrorCode::InvalidInput, reason: format!("invalid daedalus graph: {err}") };
-                    }
-                };
-
-                let host_mgr = daedalus::runtime::host_bridge::HostBridgeManager::new();
-                let built = match build_daedalus_runtime_registry(&host_mgr, Some(&parsed)) {
-                    Ok(built) => built,
-                    Err(err) => {
-                        return EngineEvent::Nack { command_id, code: EngineErrorCode::Internal, reason: format!("failed to build daedalus registry: {err}") };
-                    }
-                };
-
-                let (registry, handlers, _plugins) = built.into_parts();
-                enforce_registry_default_compute_affinity(&mut parsed, &registry.registry);
-                let planner_enable_gpu = planner_enable_gpu_for_validation(&parsed);
-                let config = daedalus::planner::PlannerConfig {
-                    enable_gpu: planner_enable_gpu,
-                    enable_lints,
-                    active_features,
-                    // Helios persists node port lists as part of the graph contract; validate
-                    // them strictly so stale graphs are flagged immediately.
-                    strict_port_declarations: true,
-                    gpu_caps: None,
-                };
-
-                let output = daedalus::planner::build_plan(daedalus::planner::PlannerInput { graph: parsed, registry: &registry.registry }, config);
-                let daedalus::planner::PlannerOutput { plan, diagnostics: planner_diagnostics } = output;
-
-                let ok = planner_diagnostics.iter().all(|d| matches!(d.code, daedalus::planner::DiagnosticCode::LintWarning));
-                let diagnostics = planner_diagnostics
-                    .into_iter()
-                    .map(|diag| crate::ipc::PlannerDiagnostic {
-                        code: format!("{:?}", diag.code),
-                        message: diag.message,
-                        span: crate::ipc::PlannerDiagnosticSpan { pass: diag.span.pass, node: diag.span.node, port: diag.span.port },
-                    })
-                    .collect();
-                let (gpu_segments, gpu_edges) = plan.graph.gpu_buffers();
-                let node_ids = plan.graph.nodes.into_iter().map(|node| node.id.0).collect();
-                let gpu_segments =
-                    gpu_segments.into_iter().map(|segment| crate::ipc::GraphGpuSegment { buffer_id: segment.buffer_id, nodes: segment.nodes.into_iter().map(|node| node.0).collect() }).collect();
-                let gpu_edges =
-                    gpu_edges.into_iter().map(|edge| crate::ipc::GraphGpuEdgeBufferInfo { edge_index: edge.edge_index, gpu_fast_path: edge.gpu_fast_path, buffer_id: edge.buffer_id }).collect();
-
-                drop(handlers);
-                EngineEvent::GraphValidation { command_id, report: crate::ipc::GraphValidationReport { ok, diagnostics, gpu_segments, gpu_edges, node_ids } }
-            }
+            EngineCommand::ValidateGraph { command_id, graph, active_features, enable_lints } => match validate_graph_report(graph.into(), active_features, enable_lints) {
+                Ok(report) => EngineEvent::GraphValidation { command_id, report },
+                Err(err) => EngineEvent::Nack { command_id, code: err.code, reason: err.reason },
+            },
             EngineCommand::SetGraph { command_id, stream_id, graph, pipeline_id, output } => match self.services.set_graph(stream_id, graph.into(), pipeline_id, output).await {
                 Ok(_) => EngineEvent::Ack { command_id, ok: true },
                 Err(err) => EngineEvent::Nack { command_id, code: error_code_for(&err), reason: err.to_string() },
@@ -440,6 +400,48 @@ fn planner_enable_gpu_for_validation(graph: &daedalus::planner::Graph) -> bool {
         }
     }
     enable_gpu
+}
+
+pub fn validate_graph_report(graph: serde_json::Value, active_features: Vec<String>, enable_lints: bool) -> Result<crate::ipc::GraphValidationReport, GraphValidationFailure> {
+    let mut parsed: daedalus::planner::Graph =
+        serde_json::from_value(graph).map_err(|err| GraphValidationFailure { code: EngineErrorCode::InvalidInput, reason: format!("invalid daedalus graph: {err}") })?;
+
+    let host_mgr = daedalus::runtime::host_bridge::HostBridgeManager::new();
+    let built = build_daedalus_runtime_registry(&host_mgr, Some(&parsed))
+        .map_err(|err| GraphValidationFailure { code: EngineErrorCode::Internal, reason: format!("failed to build daedalus registry: {err}") })?;
+
+    let (registry, handlers, _plugins) = built.into_parts();
+    enforce_registry_default_compute_affinity(&mut parsed, &registry.registry);
+    let planner_enable_gpu = planner_enable_gpu_for_validation(&parsed);
+    let config = daedalus::planner::PlannerConfig {
+        enable_gpu: planner_enable_gpu,
+        enable_lints,
+        active_features,
+        // Helios persists node port lists as part of the graph contract; validate
+        // them strictly so stale graphs are flagged immediately.
+        strict_port_declarations: true,
+        gpu_caps: None,
+    };
+
+    let output = daedalus::planner::build_plan(daedalus::planner::PlannerInput { graph: parsed, registry: &registry.registry }, config);
+    let daedalus::planner::PlannerOutput { plan, diagnostics: planner_diagnostics } = output;
+
+    let ok = planner_diagnostics.iter().all(|d| matches!(d.code, daedalus::planner::DiagnosticCode::LintWarning));
+    let diagnostics = planner_diagnostics
+        .into_iter()
+        .map(|diag| crate::ipc::PlannerDiagnostic {
+            code: format!("{:?}", diag.code),
+            message: diag.message,
+            span: crate::ipc::PlannerDiagnosticSpan { pass: diag.span.pass, node: diag.span.node, port: diag.span.port },
+        })
+        .collect();
+    let (gpu_segments, gpu_edges) = plan.graph.gpu_buffers();
+    let node_ids = plan.graph.nodes.into_iter().map(|node| node.id.0).collect();
+    let gpu_segments = gpu_segments.into_iter().map(|segment| crate::ipc::GraphGpuSegment { buffer_id: segment.buffer_id, nodes: segment.nodes.into_iter().map(|node| node.0).collect() }).collect();
+    let gpu_edges = gpu_edges.into_iter().map(|edge| crate::ipc::GraphGpuEdgeBufferInfo { edge_index: edge.edge_index, gpu_fast_path: edge.gpu_fast_path, buffer_id: edge.buffer_id }).collect();
+
+    drop(handlers);
+    Ok(crate::ipc::GraphValidationReport { ok, diagnostics, gpu_segments, gpu_edges, node_ids })
 }
 
 pub fn build_node_registry_snapshot() -> Result<crate::ipc::NodeRegistrySnapshot, String> {
