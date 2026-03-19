@@ -38,8 +38,6 @@ This repo deploys the docs with GitHub Actions via
 The workflow publishes automatically when these inputs change:
 
 - `docs/**`
-- `frontend/src/lib/ts-bindings/http/openapi.json`
-- `frontend/src/lib/ts-bindings/ws/asyncapi.json`
 - `.github/workflows/docusaurus-pages.yml`
 
 Without a custom domain, the published site URL is:
@@ -66,6 +64,11 @@ https://<your-domain>/
 and switches Docusaurus `baseUrl` to `/`.
 
 ### Manual Docusaurus Deploy
+
+`bun run build` regenerates the API reference pages when the local generated
+spec snapshots exist under `frontend/src/lib/ts-bindings/**`. In clean CI
+checkouts those ignored files are absent, so the build reuses the checked-in
+generated API docs pages instead of failing.
 
 Using SSH:
 
