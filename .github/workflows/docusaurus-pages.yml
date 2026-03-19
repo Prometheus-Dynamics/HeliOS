@@ -6,8 +6,6 @@ on:
       - main
     paths:
       - docs/**
-      - frontend/src/lib/ts-bindings/http/openapi.json
-      - frontend/src/lib/ts-bindings/ws/asyncapi.json
       - .github/workflows/docusaurus-pages.yml
   workflow_dispatch:
 
