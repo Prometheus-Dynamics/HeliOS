@@ -4367,11 +4367,31 @@
       // show the selected camera's detections.
       return inFov.length > 0 ? inFov : scoped;
     })();
+    const fallbackMarkersByTagId = new Map(
+      (activeFieldMapDoc?.markers ?? []).map((marker) => [String(marker.id), marker] as const)
+    );
     rawMarkers = markersFromDetections({
       detections,
       sources,
       selectedSources: viewOverlaySources,
       colors: SOURCE_COLORS
+    }).map((marker) => {
+      if (marker.targetType === 'polygon') {
+        return marker;
+      }
+      const tagId = marker.tagId;
+      if (tagId == null || marker.tagBits) {
+        return marker;
+      }
+      const fallback = fallbackMarkersByTagId.get(String(tagId)) ?? null;
+      if (!fallback?.tagBits) {
+        return marker;
+      }
+      return {
+        ...marker,
+        tagBits: fallback.tagBits,
+        tagSize: marker.tagSize ?? fallback.sizeM
+      } satisfies LocalizationMarker;
     });
   });
 

@@ -51,6 +51,18 @@
   const asRecord = (value: unknown): Record<string, unknown> | null =>
     value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
 
+  const dedupePipelineIds = (values: Iterable<string>): string[] => {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const value of values) {
+      const normalized = typeof value === 'string' ? value.trim() : '';
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      out.push(normalized);
+    }
+    return out;
+  };
+
   const manifestFor = (stream: StreamInfo | null): RecordingManifest | null => {
     const manifest = stream?.manifest ?? null;
     return manifest ? (manifest as RecordingManifest) : null;
@@ -86,7 +98,7 @@
   const recordingLive = $derived(Boolean(ctx.stream?.status?.recording_active) || recordingActive);
   const activePipelineIds = $derived.by(() => {
     const existing: string[] = Array.isArray(ctx.activePipelineIds) ? ctx.activePipelineIds : [];
-    const filteredExisting = existing.filter((id) => id && id !== ctx.RAW_PIPELINE_ID);
+    const filteredExisting = dedupePipelineIds(existing).filter((id) => id && id !== ctx.RAW_PIPELINE_ID);
     if (filteredExisting.length) return filteredExisting;
     const pipelineState = ctx.pipelineState ?? null;
     if (pipelineState) {
@@ -101,7 +113,7 @@
       add(pipelineState.selectedPipelineId);
       (pipelineState.assignedPipelineIds ?? []).forEach((id: string) => add(id));
       Object.values(pipelineState.pipelineGridSlots ?? {}).forEach((id: string | null) => add(id));
-      if (collected.size) return Array.from(collected);
+      if (collected.size) return dedupePipelineIds(collected);
     }
     const manifest = ctx.stream?.manifest ?? null;
     const manifestState = manifestFor(ctx.stream);
@@ -117,7 +129,7 @@
     add(manifestState?.pipeline_id);
     add(manifestState?.active_pipeline_id);
     pipelineBindingsFor(manifestState).forEach((entry) => add(entry.pipeline_id ?? entry.pipelineId ?? entry.id));
-    return Array.from(collected);
+    return dedupePipelineIds(collected);
   });
   const manifestOutputOptionsById = $derived.by(() => {
     const outputsById: Record<string, string[]> = {};
@@ -176,8 +188,7 @@
       if (cache && typeof cache === 'object') return (cache as Record<string, string[]>)[id];
       return undefined;
     };
-    return activePipelineIds
-      .map((value) => String(value ?? '').trim())
+    return dedupePipelineIds(activePipelineIds)
       .filter((pipelineId) => pipelineId.length && pipelineId !== ctx.RAW_PIPELINE_ID)
       .map((pipelineId) => {
         const cached = readOutputs(pipelineId);

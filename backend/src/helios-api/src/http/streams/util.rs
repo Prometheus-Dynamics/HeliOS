@@ -227,6 +227,77 @@ pub(crate) fn normalize_pipeline_manifest(manifest: &mut StreamManifest) {
     // Missing graph payloads are handled by the graph builder with explicit errors.
 }
 
+fn normalized_output_value(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+    })
+}
+
+pub(crate) fn preferred_pipeline_output(manifest: &StreamManifest, pipeline_id: Uuid) -> Option<String> {
+    if let Some(layout) = manifest.pipeline_layout.as_ref() {
+        let slot = layout
+            .slots
+            .iter()
+            .find(|slot| slot.row == 0 && slot.column == 0 && slot.pipeline_id == Some(pipeline_id))
+            .or_else(|| layout.slots.iter().find(|slot| slot.pipeline_id == Some(pipeline_id)));
+        if let Some(slot_output) = slot.and_then(|slot| normalized_output_value(slot.output_key.clone())) {
+            return Some(slot_output);
+        }
+    }
+
+    if manifest.active_pipeline_id == Some(pipeline_id)
+        && let Some(output) = normalized_output_value(manifest.active_pipeline_output.clone())
+    {
+        return Some(output);
+    }
+
+    manifest.pipelines.iter().find(|binding| binding.pipeline_id == pipeline_id).and_then(|binding| normalized_output_value(binding.pipeline_output.clone()))
+}
+
+pub(crate) fn promote_single_view_pipeline_selection(manifest: &mut StreamManifest, pipeline_id: Uuid, output: Option<String>) {
+    if pipeline_id == RAW_PIPELINE_UUID || pipeline_id == CALIBRATION_MODE_PIPELINE_UUID {
+        return;
+    }
+
+    let resolved_output = normalized_output_value(output).or_else(|| preferred_pipeline_output(manifest, pipeline_id));
+    let active_is_raw = manifest.active_pipeline_id == Some(RAW_PIPELINE_UUID);
+
+    let Some(layout) = manifest.pipeline_layout.as_mut() else {
+        if active_is_raw {
+            manifest.active_pipeline_id = Some(pipeline_id);
+            manifest.active_pipeline_output = resolved_output;
+        }
+        return;
+    };
+
+    if layout.rows != 1 || layout.columns != 1 {
+        if active_is_raw {
+            manifest.active_pipeline_id = Some(pipeline_id);
+            manifest.active_pipeline_output = resolved_output;
+        }
+        return;
+    }
+
+    let slot_index = layout.slots.iter().position(|slot| slot.row == 0 && slot.column == 0).or_else(|| (!layout.slots.is_empty()).then_some(0));
+
+    let slot_pipeline_id = slot_index.and_then(|idx| layout.slots.get(idx).and_then(|slot| slot.pipeline_id));
+    let should_promote = active_is_raw || slot_pipeline_id.is_none() || slot_pipeline_id == Some(RAW_PIPELINE_UUID);
+    if !should_promote {
+        return;
+    }
+
+    if let Some(slot) = slot_index.and_then(|idx| layout.slots.get_mut(idx)) {
+        slot.pipeline_id = Some(pipeline_id);
+        slot.output_key = resolved_output.clone();
+    } else {
+        layout.slots.push(StreamPipelineGridSlot { row: 0, column: 0, pipeline_id: Some(pipeline_id), output_key: resolved_output.clone() });
+    }
+
+    manifest.active_pipeline_id = Some(pipeline_id);
+    manifest.active_pipeline_output = resolved_output;
+}
+
 fn prune_dangling_pipeline_references(manifest: &mut StreamManifest) -> bool {
     let mut known_pipeline_ids: std::collections::BTreeSet<Uuid> = manifest.pipelines.iter().map(|binding| binding.pipeline_id).collect();
     known_pipeline_ids.insert(RAW_PIPELINE_UUID);

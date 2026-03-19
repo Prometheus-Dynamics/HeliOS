@@ -1,4 +1,5 @@
 import { applyPaletteToGraphPlan } from '$lib/features/pipelines/graph';
+import { dedupePipelineOverview, summarizePipelineOverview } from '$lib/api/pipelinesPageUtils';
 import { normalizeDiagnostics } from '$lib/features/pipelines/diagnostics';
 import { fromApiGraphPlan, fromApiPortDescriptor } from '$lib/features/pipelines/graphConverters';
 import { normalizeNodeStyle } from '$lib/features/pipelines/model';
@@ -35,8 +36,8 @@ export function buildPipelinePayloadFromOverview(overview: PipelineOverviewRespo
   }
 
   const dataTypes = normalizeDataTypeCatalog(overview.dataTypes);
-  const pipelines = normalizePipelines(overview.pipelines, dataTypes);
-  const summary = normalizeSummary(overview);
+  const pipelines = dedupePipelineOverview(normalizePipelines(overview.pipelines, dataTypes));
+  const summary = summarizePipelineOverview(pipelines);
   const templates = normalizeTemplates(overview.templates);
   const registry = normalizeRegistry(overview.registry, dataTypes);
   hydratePipelinesWithRegistry(pipelines, registry);
@@ -167,19 +168,6 @@ function normalizeAppearance(value: unknown): PipelineAppearance | null {
 function parseStatus(value: unknown): PipelineOverviewPipeline['status'] {
   if (value === 'live' || value === 'degraded' || value === 'draft') return value;
   return 'draft';
-}
-
-function normalizeSummary(response: PipelineOverviewResponse): PipelinePagePayload['summary'] {
-  const summary = response.summary;
-  if (!summary || typeof summary !== 'object') {
-    return { total: 0, live: 0, degraded: 0, drafts: 0 };
-  }
-  return {
-    total: normalizeNumber(summary.total) ?? 0,
-    live: normalizeNumber(summary.live) ?? 0,
-    degraded: normalizeNumber(summary.degraded) ?? 0,
-    drafts: normalizeNumber(summary.drafts) ?? 0
-  };
 }
 
 function normalizeTemplates(entries: PipelineOverviewResponse['templates']): PipelineTemplateSummary[] {

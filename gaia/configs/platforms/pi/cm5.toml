@@ -16,10 +16,10 @@ BR2_TARGET_ROOTFS_SQUASHFS = true
 BR2_TARGET_ROOTFS_SQUASHFS4_XZ = true
 BR2_TARGET_ROOTFS_SQUASHFS_BS_1024K = true
 BR2_TARGET_ROOTFS_SQUASHFS_EXTREME_COMP = true
-BR2_ROOTFS_POST_IMAGE_SCRIPT = "board/raspberrypicm5io-squashfs/post-image.sh"
-BR2_PACKAGE_RPI_FIRMWARE_CONFIG_FILE = "board/raspberrypicm5io-squashfs/config_cm5io.txt"
-BR2_PACKAGE_RPI_FIRMWARE_CMDLINE_FILE = "board/raspberrypicm5io-squashfs/cmdline.txt"
-BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES = "board/raspberrypi/linux-4k-page-size.fragment board/raspberrypicm5io-squashfs/linux-squashfs-initramfs.fragment"
+BR2_ROOTFS_POST_IMAGE_SCRIPT = "../../../assets/buildroot/boards/raspberrypicm5io-squashfs/post-image.sh"
+BR2_PACKAGE_RPI_FIRMWARE_CONFIG_FILE = "../../../assets/buildroot/boards/raspberrypicm5io-squashfs/config_cm5io.txt"
+BR2_PACKAGE_RPI_FIRMWARE_CMDLINE_FILE = "../../../assets/buildroot/boards/raspberrypicm5io-squashfs/cmdline.txt"
+BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES = "board/raspberrypi/linux-4k-page-size.fragment ../../../assets/buildroot/boards/raspberrypicm5io-squashfs/linux-squashfs-initramfs.fragment"
 
 [buildroot.rpi]
 board = "cm5"

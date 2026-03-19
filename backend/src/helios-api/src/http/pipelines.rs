@@ -21,7 +21,7 @@ use super::AppState;
 use super::identity_tokens;
 use super::storage;
 use crate::http::streams::types::EngineErrorBody;
-use crate::http::streams::util::{engine_error_body, map_client_error, normalize_pipeline_manifest};
+use crate::http::streams::util::{engine_error_body, map_client_error, normalize_pipeline_manifest, preferred_pipeline_output};
 use crate::http::{
     revision::{apply_revision_headers, matches_if_none_match, not_modified_response},
     streams, streams_persist,
@@ -1275,7 +1275,8 @@ pub(crate) async fn refresh_pipeline_consumers(state: &AppState, pipeline_id: Uu
         if !uses_pipeline {
             continue;
         }
-        if let Err(err) = state.engine.set_graph(stream.stream_id, graph.clone(), Some(pipeline_id), None).await {
+        let output = preferred_pipeline_output(manifest, pipeline_id);
+        if let Err(err) = state.engine.set_graph(stream.stream_id, graph.clone(), Some(pipeline_id), output).await {
             warn!(stream_id = %stream.stream_id, pipeline_id = %pipeline_id, error = %err, "failed to refresh pipeline graph on stream");
             failures.push(PipelineRefreshFailure { stream_id: stream.stream_id, error: err.to_string() });
         }

@@ -433,25 +433,8 @@ fn adaptive_clahe_stats_similar(a: AdaptiveClaheFrameStats, b: AdaptiveClaheFram
 fn apply_cached_clahe_into(gray: &GrayImage, tile_size: u32, clip_limit: f32, cache: &mut Option<AdaptiveClahePreparedCache>, output: &mut GrayImage) {
     let key = (gray.width(), gray.height(), tile_size, clip_limit.to_bits());
     let stats = adaptive_clahe_frame_stats(gray);
-    if let Some(entry) = cache.as_mut()
-        && entry.key == key
-    {
-        let max_reuse = if tile_size <= 1 { ADAPTIVE_NODE_CLAHE_MAX_REUSE_STREAK_TILE1 } else { ADAPTIVE_NODE_CLAHE_MAX_REUSE_STREAK };
-        if entry.reuse_streak < max_reuse {
-            if tile_size > 1 && entry.reuse_streak < ADAPTIVE_NODE_CLAHE_FORCE_REUSE_STREAK {
-                entry.reuse_streak = entry.reuse_streak.saturating_add(1);
-                crate::modules::image::clahe::apply_clahe_with_tiles_into(gray, &entry.tiles, output);
-                return;
-            }
-            if adaptive_clahe_stats_similar(entry.stats, stats) {
-                entry.reuse_streak = entry.reuse_streak.saturating_add(1);
-                entry.stats = stats;
-                crate::modules::image::clahe::apply_clahe_with_tiles_into(gray, &entry.tiles, output);
-                return;
-            }
-        }
-    }
-
+    // Keep fused adaptive preprocessing aligned with standalone CLAHE behavior: build tiles from
+    // the current frame instead of reusing a prior frame's local histogram layout.
     let tiles = crate::modules::image::clahe::prepare_clahe(gray, tile_size, clip_limit);
     crate::modules::image::clahe::apply_clahe_with_tiles_into(gray, &tiles, output);
     *cache = Some(AdaptiveClahePreparedCache { key, stats, reuse_streak: 0, tiles });

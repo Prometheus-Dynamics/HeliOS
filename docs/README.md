@@ -26,6 +26,47 @@ This command generates static content into the `build` directory and can be serv
 
 ## Deployment
 
+This repo deploys the docs with GitHub Actions via
+`.github/workflows/docusaurus-pages.yml`.
+
+### GitHub Pages
+
+1. In the GitHub repo, open `Settings -> Pages`.
+2. Set the source to `GitHub Actions`.
+3. Push to `main`.
+
+The workflow publishes automatically when these inputs change:
+
+- `docs/**`
+- `frontend/src/lib/ts-bindings/http/openapi.json`
+- `frontend/src/lib/ts-bindings/ws/asyncapi.json`
+- `.github/workflows/docusaurus-pages.yml`
+
+Without a custom domain, the published site URL is:
+
+```text
+https://<owner>.github.io/<repo>/
+```
+
+### Custom Domain
+
+Yes. GitHub Pages can serve the docs from a custom domain.
+
+1. Create a repository variable named `DOCS_CUSTOM_DOMAIN`.
+2. Set its value to the hostname you want to serve the docs from, for example `docs.example.com`.
+3. In `Settings -> Pages`, configure the same custom domain.
+4. Point that hostname's DNS at GitHub Pages.
+
+When `DOCS_CUSTOM_DOMAIN` is set, the workflow builds the site for:
+
+```text
+https://<your-domain>/
+```
+
+and switches Docusaurus `baseUrl` to `/`.
+
+### Manual Docusaurus Deploy
+
 Using SSH:
 
 ```bash

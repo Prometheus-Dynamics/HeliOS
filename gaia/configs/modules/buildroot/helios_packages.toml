@@ -68,7 +68,7 @@ BR2_TARGET_ROOTFS_EXT2_LABEL = "ACTIVE"
 # Match known-good HeliOS root login behavior (root password: "root").
 BR2_TARGET_GENERIC_ROOT_PASSWD = "$$6$$1SRZhQNcL0XX7FM/$$NcrwlDSRGm0D7yD6SJ38PlpvB7vGvbj5Tvx9NWguLHuu2yva2bCPvb2Ec0z0McEZ.kWfGTglt6unXdevojnfB1"
 # Ensure the expected default user exists in the rootfs.
-BR2_ROOTFS_USERS_TABLES = "board/raspberrypicm5io/users.table"
+BR2_ROOTFS_USERS_TABLES = "../../../assets/buildroot/boards/raspberrypicm5io/users.table"
 
 # Lighttpd features
 BR2_PACKAGE_LIGHTTPD_PCRE = true

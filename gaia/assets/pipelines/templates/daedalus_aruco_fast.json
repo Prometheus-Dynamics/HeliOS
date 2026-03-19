@@ -20,6 +20,26 @@
     "edges": [
       {
         "from": {
+          "node": 1,
+          "port": "mask"
+        },
+        "to": {
+          "node": 2,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 2,
+          "port": "mask"
+        },
+        "to": {
+          "node": 3,
+          "port": "mask"
+        }
+      },
+      {
+        "from": {
           "node": 3,
           "port": "quads"
         },
@@ -50,6 +70,26 @@
       },
       {
         "from": {
+          "node": 1,
+          "port": "mask"
+        },
+        "to": {
+          "node": 7,
+          "port": "clahe"
+        }
+      },
+      {
+        "from": {
+          "node": 2,
+          "port": "mask"
+        },
+        "to": {
+          "node": 7,
+          "port": "adaptive"
+        }
+      },
+      {
+        "from": {
           "node": 0,
           "port": "roi_x"
         },
@@ -102,6 +142,16 @@
         "from": {
           "node": 8,
           "port": "frame"
+        },
+        "to": {
+          "node": 1,
+          "port": "mask"
+        }
+      },
+      {
+        "from": {
+          "node": 1,
+          "port": "mask"
         },
         "to": {
           "node": 4,
@@ -204,7 +254,7 @@
           "port": "frame"
         },
         "to": {
-          "node": 14,
+          "node": 7,
           "port": "overlay"
         }
       },
@@ -426,16 +476,6 @@
         "to": {
           "node": 11,
           "port": "enabled"
-        }
-      },
-      {
-        "from": {
-          "node": 8,
-          "port": "frame"
-        },
-        "to": {
-          "node": 3,
-          "port": "frame"
         }
       }
     ],
@@ -781,14 +821,14 @@
             "clip_limit",
             {
               "type": "Float",
-              "value": 3.5
+              "value": 0.25
             }
           ],
           [
             "mix",
             {
               "type": "Float",
-              "value": 1
+              "value": 1.0
             }
           ],
           [
@@ -878,21 +918,21 @@
             "window",
             {
               "type": "Int",
-              "value": 61
+              "value": 15
             }
           ],
           [
             "offset",
             {
-              "type": "Float",
-              "value": 10
+              "type": "Int",
+              "value": 31
             }
           ],
           [
             "threshold_offset",
             {
-              "type": "Float",
-              "value": 0
+              "type": "Int",
+              "value": 17
             }
           ],
           [
@@ -906,7 +946,7 @@
             "invert",
             {
               "type": "Bool",
-              "value": true
+              "value": false
             }
           ],
           [
@@ -1038,55 +1078,6 @@
             }
           ],
           [
-            "tile_size",
-            {
-              "type": "Int",
-              "value": 2
-            }
-          ],
-          [
-            "clip_limit",
-            {
-              "type": "Float",
-              "value": 3.5
-            }
-          ],
-          [
-            "mix",
-            {
-              "type": "Float",
-              "value": 1
-            }
-          ],
-          [
-            "adaptive_window",
-            {
-              "type": "Int",
-              "value": 61
-            }
-          ],
-          [
-            "adaptive_offset",
-            {
-              "type": "Float",
-              "value": 10
-            }
-          ],
-          [
-            "threshold_offset",
-            {
-              "type": "Float",
-              "value": 0
-            }
-          ],
-          [
-            "invert",
-            {
-              "type": "Bool",
-              "value": true
-            }
-          ],
-          [
             "min_perimeter_rate",
             {
               "type": "Float",
@@ -1157,24 +1148,10 @@
             }
           ],
           [
-            "min_side_px",
-            {
-              "type": "Float",
-              "value": 0
-            }
-          ],
-          [
             "fallback_max_contours",
             {
               "type": "Int",
               "value": 128
-            }
-          ],
-          [
-            "max_quads",
-            {
-              "type": "Int",
-              "value": 0
             }
           ],
           [
@@ -1190,19 +1167,26 @@
               "type": "Float",
               "value": 0
             }
+          ],
+          [
+            "min_side_px",
+            {
+              "type": "Float",
+              "value": 0
+            }
+          ],
+          [
+            "max_quads",
+            {
+              "type": "Int",
+              "value": 0
+            }
           ]
         ],
-        "id": "cv:aruco:adaptive_quads_from_frame",
+        "id": "cv:aruco:adaptive_quads_from_mask",
         "inputs": [
-          "frame",
           "enabled",
-          "tile_size",
-          "clip_limit",
-          "mix",
-          "adaptive_window",
-          "adaptive_offset",
-          "threshold_offset",
-          "invert",
+          "mask",
           "min_perimeter_rate",
           "max_perimeter_rate",
           "epsilon",
@@ -1219,152 +1203,8 @@
           "expand_inner_scale",
           "expand_inner_max_side_px"
         ],
-        "label": "Adaptive Quads (Fused)",
+        "label": "Adaptive Quads",
         "metadata": {
-          "inputs.clip_limit.access": {
-            "type": "String",
-            "value": "owned"
-          },
-          "inputs.clip_limit.ui_max": {
-            "type": "Float",
-            "value": 10
-          },
-          "inputs.clip_limit.ui_min": {
-            "type": "Float",
-            "value": 0
-          },
-          "inputs.clip_limit.ui_step": {
-            "type": "Float",
-            "value": 0.1
-          },
-          "inputs.mask.access": {
-            "type": "String",
-            "value": "borrowed"
-          },
-          "inputs.mix.access": {
-            "type": "String",
-            "value": "owned"
-          },
-          "inputs.mix.ui_max": {
-            "type": "Float",
-            "value": 1
-          },
-          "inputs.mix.ui_min": {
-            "type": "Float",
-            "value": 0
-          },
-          "inputs.mix.ui_step": {
-            "type": "Float",
-            "value": 0.01
-          },
-          "inputs.mode.access": {
-            "type": "String",
-            "value": "owned"
-          },
-          "inputs.tile_size.access": {
-            "type": "String",
-            "value": "owned"
-          },
-          "inputs.tile_size.ui_max": {
-            "type": "Int",
-            "value": 64
-          },
-          "inputs.tile_size.ui_min": {
-            "type": "Int",
-            "value": 1
-          },
-          "inputs.tile_size.ui_step": {
-            "type": "Int",
-            "value": 1
-          },
-          "inputs.border_guard_px.access": {
-            "type": "String",
-            "value": "owned"
-          },
-          "inputs.border_guard_px.ui_max": {
-            "type": "Int",
-            "value": 32
-          },
-          "inputs.border_guard_px.ui_min": {
-            "type": "Int",
-            "value": 0
-          },
-          "inputs.border_guard_px.ui_step": {
-            "type": "Int",
-            "value": 1
-          },
-          "inputs.frame.access": {
-            "type": "String",
-            "value": "owned"
-          },
-          "inputs.invert.access": {
-            "type": "String",
-            "value": "owned"
-          },
-          "inputs.offset.access": {
-            "type": "String",
-            "value": "owned"
-          },
-          "inputs.offset.ui_max": {
-            "type": "Float",
-            "value": 50
-          },
-          "inputs.offset.ui_min": {
-            "type": "Float",
-            "value": -50
-          },
-          "inputs.offset.ui_step": {
-            "type": "Float",
-            "value": 1
-          },
-          "inputs.threshold.access": {
-            "type": "String",
-            "value": "owned"
-          },
-          "inputs.threshold.ui_max": {
-            "type": "Int",
-            "value": 255
-          },
-          "inputs.threshold.ui_min": {
-            "type": "Int",
-            "value": 0
-          },
-          "inputs.threshold.ui_step": {
-            "type": "Int",
-            "value": 1
-          },
-          "inputs.threshold_offset.access": {
-            "type": "String",
-            "value": "owned"
-          },
-          "inputs.threshold_offset.ui_max": {
-            "type": "Float",
-            "value": 50
-          },
-          "inputs.threshold_offset.ui_min": {
-            "type": "Float",
-            "value": -50
-          },
-          "inputs.threshold_offset.ui_step": {
-            "type": "Float",
-            "value": 1
-          },
-          "inputs.window.access": {
-            "type": "String",
-            "value": "owned"
-          },
-          "inputs.window.ui_max": {
-            "type": "Int",
-            "value": 101
-          },
-          "inputs.window.ui_min": {
-            "type": "Int",
-            "value": 3
-          },
-          "inputs.window.ui_step": {
-            "type": "Int",
-            "value": 2
-          },
           "inputs.enabled.access": {
             "type": "String",
             "value": "owned"
@@ -1432,6 +1272,10 @@
           "inputs.fallback_max_contours.ui_step": {
             "type": "Int",
             "value": 1
+          },
+          "inputs.mask.access": {
+            "type": "String",
+            "value": "borrowed"
           },
           "inputs.max_angle_deg.access": {
             "type": "String",
@@ -1604,7 +1448,7 @@
             "max_hamming",
             {
               "type": "Int",
-              "value": 0
+              "value": 5
             }
           ],
           [
@@ -1646,7 +1490,7 @@
             "min_warped_patch_contrast_range",
             {
               "type": "Int",
-              "value": 8
+              "value": 2
             }
           ],
           [
@@ -1660,7 +1504,7 @@
             "warp_fallback_max_hamming_extra",
             {
               "type": "Int",
-              "value": 0
+              "value": 10
             }
           ],
           [
@@ -1688,21 +1532,21 @@
             "min_quad_side_px",
             {
               "type": "Float",
-              "value": 0
+              "value": 0.0
             }
           ],
           [
             "min_quiet_zone_delta",
             {
               "type": "Float",
-              "value": 2.5
+              "value": 0.0
             }
           ],
           [
             "quiet_zone_texture_penalty",
             {
               "type": "Float",
-              "value": 12
+              "value": 12.0
             }
           ],
           [
@@ -1730,7 +1574,7 @@
             "min_decode_score",
             {
               "type": "Float",
-              "value": 2
+              "value": -1.0
             }
           ],
           [
@@ -1751,21 +1595,21 @@
             "min_cell_means_contrast_range",
             {
               "type": "Float",
-              "value": 10
+              "value": 4.0
             }
           ],
           [
             "min_hamming_margin",
             {
               "type": "Int",
-              "value": 4
+              "value": 0
             }
           ],
           [
             "min_hamming_margin_min_dist",
             {
               "type": "Int",
-              "value": 2
+              "value": 0
             }
           ],
           [
@@ -1779,7 +1623,7 @@
             "min_bit_delta",
             {
               "type": "Float",
-              "value": 3
+              "value": 0.0
             }
           ]
         ],
@@ -2498,7 +2342,10 @@
         "const_inputs": [],
         "id": "io.host_output",
         "inputs": [
+          "overlay",
           "detections",
+          "clahe",
+          "adaptive",
           "target_detections",
           "tv",
           "tid",
@@ -2521,7 +2368,7 @@
           },
           "host_bridge_inputs": {
             "type": "String",
-            "value": "detections:list<cv:aruco_detection_2d>,target_detections:list<cv:aruco_detection_2d>,tv:float,tid:float,tx:float,ty:float,ta:float,distance_px:float,target_cx:float,target_cy:float,thor:float,tvert:float,tshort:float,tlong:float"
+            "value": "overlay:image:dynamic,detections:list<cv:aruco_detection_2d>,clahe:image:dynamic,adaptive:image:dynamic,target_detections:list<cv:aruco_detection_2d>,tv:float,tid:float,tx:float,ty:float,ta:float,distance_px:float,target_cx:float,target_cy:float,thor:float,tvert:float,tshort:float,tlong:float"
           }
         },
         "outputs": []
@@ -2530,7 +2377,7 @@
         "bundle": null,
         "compute": "CpuOnly",
         "const_inputs": [],
-          "id": "cv:image:crop_roi_gray",
+        "id": "cv:image:crop_roi",
         "inputs": [
           "frame",
           "roi_x",
@@ -2538,7 +2385,7 @@
           "roi_w",
           "roi_h"
         ],
-          "label": "ROI Crop Gray",
+        "label": "ROI Crop",
         "metadata": {},
         "outputs": [
           "frame",
@@ -2895,69 +2742,6 @@
         "outputs": [
           "detections"
         ]
-      },
-      {
-        "bundle": null,
-        "compute": "CpuOnly",
-        "const_inputs": [],
-        "id": "io.host_output",
-        "inputs": [
-          "overlay"
-        ],
-        "label": "Output Overlay",
-        "metadata": {
-          "host_bridge": {
-            "type": "Bool",
-            "value": true
-          },
-          "host_bridge_inputs": {
-            "type": "String",
-            "value": "overlay:image:dynamic"
-          }
-        },
-        "outputs": []
-      },
-      {
-        "bundle": null,
-        "compute": "CpuOnly",
-        "const_inputs": [],
-        "id": "io.host_output",
-        "inputs": [
-          "clahe"
-        ],
-        "label": "Output CLAHE",
-        "metadata": {
-          "host_bridge": {
-            "type": "Bool",
-            "value": true
-          },
-          "host_bridge_inputs": {
-            "type": "String",
-            "value": "clahe:image:dynamic"
-          }
-        },
-        "outputs": []
-      },
-      {
-        "bundle": null,
-        "compute": "CpuOnly",
-        "const_inputs": [],
-        "id": "io.host_output",
-        "inputs": [
-          "adaptive"
-        ],
-        "label": "Output Adaptive",
-        "metadata": {
-          "host_bridge": {
-            "type": "Bool",
-            "value": true
-          },
-          "host_bridge_inputs": {
-            "type": "String",
-            "value": "adaptive:image:dynamic"
-          }
-        },
-        "outputs": []
       }
     ]
   }

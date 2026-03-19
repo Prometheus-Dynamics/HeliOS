@@ -1,4 +1,5 @@
 import { PipelinesApi } from '$lib/api/pipelinesApi';
+import { dedupePipelineOverview, summarizePipelineOverview } from '$lib/api/pipelinesPageUtils';
 import type { PipelineGraphPlan, PipelineOverviewPipeline, PipelinePagePayload, PipelineTypeDescriptor } from '$lib/types/pipeline';
 import type { PipelineLifecycleStatus } from '$lib/types/pipeline-api';
 
@@ -26,11 +27,12 @@ export async function fetchPipelinePagePayload(): Promise<PipelinePagePayload> {
       issueCountById.set(id, count);
     }
 
-    const pipelines: PipelineOverviewPipeline[] = (summaries ?? [])
-      .map((entry): PipelineOverviewPipeline | null => {
-        const pipelineId = typeof entry?.id === 'string' ? entry.id : null;
-        if (!pipelineId) return null;
-        const rawName = typeof entry?.name === 'string' ? entry.name.trim() : '';
+    const pipelines = dedupePipelineOverview(
+      (summaries ?? [])
+        .map((entry): PipelineOverviewPipeline | null => {
+          const pipelineId = typeof entry?.id === 'string' ? entry.id : null;
+          if (!pipelineId) return null;
+          const rawName = typeof entry?.name === 'string' ? entry.name.trim() : '';
         const name = rawName.length > 0 ? rawName : pipelineId;
         const updatedAtMs = typeof entry?.updated_at_ms === 'number' ? entry.updated_at_ms : null;
         const timestamp = updatedAtMs ?? 0;
@@ -49,13 +51,14 @@ export async function fetchPipelinePagePayload(): Promise<PipelinePagePayload> {
           createdAt: timestamp,
           updatedAt: timestamp
         };
-      })
-      .filter((entry): entry is PipelineOverviewPipeline => Boolean(entry))
-      .sort((a, b) => a.name.localeCompare(b.name));
+        })
+        .filter((entry): entry is PipelineOverviewPipeline => Boolean(entry))
+        .sort((a, b) => a.name.localeCompare(b.name))
+    );
 
     return {
       pipelines,
-      summary: { total: pipelines.length, live: 0, degraded: 0, drafts: pipelines.length },
+      summary: summarizePipelineOverview(pipelines),
       templates: [],
       registry: [],
       dataTypes: {},
@@ -90,9 +93,10 @@ export function validatePipelinePayload(payload: unknown): PipelinePagePayload |
   if (record.dataTypes && typeof record.dataTypes !== 'object') return null;
   const generatedAt = normalizeGeneratedAt(record.generatedAt);
   if (generatedAt == null) return null;
+  const pipelines = dedupePipelineOverview(Array.isArray(record.pipelines) ? (record.pipelines as PipelinePagePayload['pipelines']) : []);
   const normalized: PipelinePagePayload = {
-    pipelines: Array.isArray(record.pipelines) ? (record.pipelines as PipelinePagePayload['pipelines']) : [],
-    summary: record.summary as PipelinePagePayload['summary'],
+    pipelines,
+    summary: summarizePipelineOverview(pipelines),
     templates: Array.isArray(record.templates) ? (record.templates as PipelinePagePayload['templates']) : [],
     registry: Array.isArray(record.registry) ? (record.registry as PipelinePagePayload['registry']) : [],
     dataTypes:

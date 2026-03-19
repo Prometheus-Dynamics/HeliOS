@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import type { PageData } from './$types';
+  import { dedupePipelineOverview } from '$lib/api/pipelinesPageUtils';
   import { scheduleWhenIdle } from '$lib/utils/browserSchedule';
   import PipelineIcon from '$lib/components/pipelines/PipelineIcon.svelte';
 
@@ -20,7 +21,7 @@
   let requestedPipelineId = $state<string | null>(null);
   let shellLoadStarted = $state(false);
 
-  const shellPipelines = $derived(Array.isArray(data.pipelines) ? data.pipelines : []);
+  const shellPipelines = $derived(dedupePipelineOverview(Array.isArray(data.pipelines) ? data.pipelines : []));
   const filteredShellPipelines = $derived.by(() => {
     const term = shellSearch.trim().toLowerCase();
     if (!term) return shellPipelines;

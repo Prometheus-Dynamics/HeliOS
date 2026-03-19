@@ -700,6 +700,7 @@ async fn set_pipeline_graph(State(state): State<AppState>, Path(id): Path<Uuid>,
                 if req.output.is_some() && manifest.active_pipeline_id == Some(pipeline_id) {
                     manifest.active_pipeline_output = req.output.clone();
                 }
+                util::promote_single_view_pipeline_selection(manifest, pipeline_id, req.output.clone());
             })
             .await
             {
@@ -733,6 +734,7 @@ async fn set_pipeline_graph(State(state): State<AppState>, Path(id): Path<Uuid>,
                 if req.output.is_some() && manifest.active_pipeline_id == Some(pipeline_id) {
                     manifest.active_pipeline_output = req.output.clone();
                 }
+                util::promote_single_view_pipeline_selection(manifest, pipeline_id, req.output.clone());
             })
             .await
             {
@@ -797,6 +799,7 @@ async fn set_pipeline_graph_patch(State(state): State<AppState>, Path(id): Path<
                 if manifest.active_pipeline_id.is_none() {
                     manifest.active_pipeline_id = Some(pipeline_id);
                 }
+                util::promote_single_view_pipeline_selection(manifest, pipeline_id, None);
             })
             .await
             {
@@ -824,6 +827,7 @@ async fn set_pipeline_graph_patch(State(state): State<AppState>, Path(id): Path<
                 if manifest.active_pipeline_id.is_none() {
                     manifest.active_pipeline_id = Some(pipeline_id);
                 }
+                util::promote_single_view_pipeline_selection(manifest, pipeline_id, None);
             })
             .await
             {

@@ -44,6 +44,7 @@ host_buffer = 8
 internal = false
 pipeline_enabled = true
 active_pipeline_id = "4fca14eb-e218-48e4-adf9-b957d645c604"
+active_pipeline_output = "overlay"
 pipeline_wires = []
 pipeline_host_inputs = {}
 encoder_id = "ffmpeg"
@@ -53,6 +54,7 @@ start_on_boot = false
 
 [[streams.manifest.pipelines]]
 pipeline_id = "4fca14eb-e218-48e4-adf9-b957d645c604"
+pipeline_output = "overlay"
 
 [streams.manifest.pipeline_layout]
 rows = 1
@@ -62,6 +64,7 @@ columns = 1
 row = 0
 column = 0
 pipeline_id = "4fca14eb-e218-48e4-adf9-b957d645c604"
+output_key = "overlay"
 
 [streams.manifest.encoder_settings]
 output_resolution = { width = 640, height = 400 }

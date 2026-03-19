@@ -657,23 +657,9 @@ fn apply_clahe_cached(gray: &GrayImage, tile_size: u32, clip_limit: f32) -> Gray
     let stats = clahe_frame_stats(gray);
     CLAHE_PREPARED_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
-        if let Some(entry) = cache.as_mut()
-            && entry.key == key
-        {
-            let max_reuse = if tile_size <= 1 { CLAHE_MAX_REUSE_STREAK_TILE1 } else { CLAHE_MAX_REUSE_STREAK };
-            if entry.reuse_streak < max_reuse {
-                if tile_size > 1 && entry.reuse_streak < CLAHE_FORCE_REUSE_STREAK {
-                    entry.reuse_streak = entry.reuse_streak.saturating_add(1);
-                    return apply_clahe_with_tiles(gray, &entry.tiles);
-                }
-                if clahe_stats_similar(entry.stats, stats) {
-                    entry.reuse_streak = entry.reuse_streak.saturating_add(1);
-                    entry.stats = stats;
-                    return apply_clahe_with_tiles(gray, &entry.tiles);
-                }
-            }
-        }
-
+        // Reusing prepared tiles across different frames can preserve the wrong local histogram
+        // layout even when coarse frame stats look "similar". That is enough to change the
+        // downstream threshold mask and break tag detection. Always prepare from the current frame.
         let tiles = prepare_clahe(gray, tile_size, clip_limit);
         let out = apply_clahe_with_tiles(gray, &tiles);
         *cache = Some(ClahePreparedCache { key, stats, reuse_streak: 0, tiles });

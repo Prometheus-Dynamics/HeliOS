@@ -1724,8 +1724,20 @@ impl StreamManager {
 
     pub async fn get_graph_output_sample(&self, stream_id: Uuid, port: String) -> Result<serde_json::Value> {
         let ctx = self.get_stream(stream_id).await?;
-        let host = ctx.host.read().await;
-        host.sample_json_output(&port).ok_or(Error::NotFound("graph output sample unavailable"))
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(250);
+        loop {
+            {
+                let host = ctx.host.read().await;
+                if let Some(value) = host.sample_json_output(&port) {
+                    return Ok(value);
+                }
+            }
+            if tokio::time::Instant::now() >= deadline {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        Err(Error::NotFound("graph output sample unavailable"))
     }
 
     pub async fn set_graph_perf(&self, stream_id: Uuid, pipeline_id: Option<Uuid>, enabled: bool) -> Result<()> {

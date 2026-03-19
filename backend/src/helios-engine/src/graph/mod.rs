@@ -2467,6 +2467,7 @@ impl GraphExecutor for DaedalusGraphExecutor {
                         target: "helios_engine::graph",
                         port = %port_name,
                         wants_preview,
+                        wants_retained_sample,
                         typed_image,
                         resolved_type = ?port_type,
                         "host output port state"
@@ -2573,16 +2574,10 @@ impl GraphExecutor for DaedalusGraphExecutor {
                     }
                 }
 
-                // Structured outputs: prefer typed CV payloads before `Value`.
-                //
-                // Detection vectors have registered `ToValue` serializers, so trying `Value`
-                // first would rebuild a fresh nested `Value` tree every frame and defeat the
-                // typed sample cache. Keep the shared typed payload when possible and only
-                // synthesize `Value`/JSON later on explicit host requests.
-                if !wants_retained_sample {
-                    popped_outputs += output_host.clear(port_name);
-                    continue;
-                }
+                // Structured outputs are small compared to image outputs, and several engine
+                // features (localization, NT4, diagnostics) expect the latest sample to remain
+                // readable without racing the next frame boundary. Keep a rolling last sample for
+                // non-image host outputs and reserve request-gated retention for image outputs.
 
                 if let Some((_corr, detections)) = port.try_pop_any::<Arc<Vec<ArucoDetection2D>>>() {
                     popped_outputs += 1;
@@ -2851,7 +2846,16 @@ impl DaedalusGraphExecutor {
             return;
         };
         if let Ok(mut guard) = self.requested_sample_ports.lock() {
-            guard.insert(key, now_ms());
+            let requested_at_ms = now_ms();
+            if host_output_debug_enabled() {
+                tracing::info!(
+                    target: "helios_engine::graph",
+                    port = %key,
+                    requested_at_ms,
+                    "host output sample retention requested"
+                );
+            }
+            guard.insert(key, requested_at_ms);
         }
     }
 
@@ -2871,15 +2875,8 @@ impl DaedalusGraphExecutor {
     }
 
     fn prune_unrequested_output_samples(&self, requested_ports: &BTreeSet<String>) {
-        if let Ok(mut guard) = self.json_samples.lock() {
-            guard.retain(|port, _| requested_ports.contains(port));
-        }
-        if let Ok(mut guard) = self.value_samples.lock() {
-            guard.retain(|port, _| requested_ports.contains(port));
-        }
-        if let Ok(mut guard) = self.typed_samples.lock() {
-            guard.retain(|port, _| requested_ports.contains(port));
-        }
+        // Structured outputs are retained as rolling last-sample state. Only image outputs are
+        // aggressively pruned because they materially impact memory use.
         if let Ok(mut guard) = self.image_samples.lock() {
             guard.retain(|port, _| requested_ports.contains(port));
         }

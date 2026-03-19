@@ -1,6 +1,5 @@
 use crate::http::AppState;
 use crate::http::streams::util;
-use crate::pipeline_command_service;
 use axum::body::to_bytes;
 use helios_engine::capture::CaptureControlValue;
 use helios_engine::ipc::{EngineErrorCode, EngineEvent, StreamPipelineBinding};
@@ -34,10 +33,12 @@ pub(crate) async fn apply_stream_graph_update(state: &AppState, stream_id: Uuid,
         None => resolve_stream_pipeline_id(state, stream_id).await?,
     };
 
-    pipeline_command_service::update_pipeline_graph(state, pipeline_id, graph, None).await?;
-    let doc = pipeline_command_service::load_pipeline_doc(pipeline_id).await?;
+    // Stream websocket graph updates are live-stream mutations. They must not rewrite the
+    // persisted pipeline document under `/pipelines`, or opening the UI can permanently alter
+    // the canonical graph for every stream.
+    crate::pipeline_command_service::load_pipeline_doc(pipeline_id).await?;
 
-    match state.engine.set_graph(stream_id, doc.graph.clone(), Some(pipeline_id), output.clone()).await {
+    match state.engine.set_graph(stream_id, graph, Some(pipeline_id), output.clone()).await {
         Ok(EngineEvent::Ack { .. }) => {
             util::persist_live_stream_manifest_update(state, stream_id, |manifest| {
                 util::normalize_pipeline_manifest(manifest);
@@ -63,6 +64,7 @@ pub(crate) async fn apply_stream_graph_update(state: &AppState, stream_id: Uuid,
                 if output.is_some() && manifest.active_pipeline_id == Some(pipeline_id) {
                     manifest.active_pipeline_output = output.clone();
                 }
+                util::promote_single_view_pipeline_selection(manifest, pipeline_id, output.clone());
             })
             .await?;
             Ok(())
@@ -93,6 +95,7 @@ pub(crate) async fn apply_stream_graph_update(state: &AppState, stream_id: Uuid,
                 if output.is_some() && manifest.active_pipeline_id == Some(pipeline_id) {
                     manifest.active_pipeline_output = output.clone();
                 }
+                util::promote_single_view_pipeline_selection(manifest, pipeline_id, output.clone());
             })
             .await
             .map_err(|err| format!("failed to persist stream manifest: {err}"))?;
@@ -110,17 +113,9 @@ pub(crate) async fn apply_stream_graph_patch(state: &AppState, stream_id: Uuid, 
         None => resolve_stream_pipeline_id(state, stream_id).await?,
     };
 
-    let mut doc = pipeline_command_service::load_pipeline_doc(pipeline_id).await?;
-    let mut daedalus_graph: daedalus::planner::Graph = serde_json::from_value(doc.graph.clone()).map_err(|err| format!("failed to decode pipeline graph: {err}"))?;
-    let patch_model: daedalus::planner::GraphPatch = serde_json::from_value(patch).map_err(|err| format!("invalid graph patch: {err}"))?;
-    let _report = patch_model.apply_to_graph(&mut daedalus_graph);
-    doc.graph = serde_json::to_value(&daedalus_graph).map_err(|err| format!("failed to encode patched graph: {err}"))?;
-    doc.updated_at_ms = chrono::Utc::now().timestamp_millis();
-    pipeline_command_service::save_pipeline_doc(pipeline_id, &doc).await?;
-    pipeline_command_service::update_pipeline_graph(state, pipeline_id, doc.graph.clone(), doc.name.clone()).await?;
-    let doc = pipeline_command_service::load_pipeline_doc(pipeline_id).await?;
+    crate::pipeline_command_service::load_pipeline_doc(pipeline_id).await?;
 
-    match state.engine.set_graph(stream_id, doc.graph.clone(), Some(pipeline_id), None).await {
+    match state.engine.set_graph_patch(stream_id, patch.clone(), Some(pipeline_id)).await {
         Ok(EngineEvent::Ack { .. }) => {
             util::persist_live_stream_manifest_update(state, stream_id, |manifest| {
                 util::normalize_pipeline_manifest(manifest);
@@ -128,18 +123,19 @@ pub(crate) async fn apply_stream_graph_patch(state: &AppState, stream_id: Uuid, 
                 let mut updated = false;
                 for binding in &mut manifest.pipelines {
                     if binding.pipeline_id == pipeline_id {
-                        binding.pipeline_patch = None;
+                        binding.pipeline_patch = Some(helios_engine::ipc::JsonWire(patch.clone()));
                         updated = true;
                         break;
                     }
                 }
                 if !updated {
-                    manifest.pipelines.push(StreamPipelineBinding { pipeline_id, pipeline_graph: None, pipeline_output: None, pipeline_patch: None });
+                    manifest.pipelines.push(StreamPipelineBinding { pipeline_id, pipeline_graph: None, pipeline_output: None, pipeline_patch: Some(helios_engine::ipc::JsonWire(patch.clone())) });
                 }
                 manifest.pipeline_enabled = Some(true);
                 if manifest.active_pipeline_id.is_none() {
                     manifest.active_pipeline_id = Some(pipeline_id);
                 }
+                util::promote_single_view_pipeline_selection(manifest, pipeline_id, None);
             })
             .await?;
             Ok(())
@@ -151,19 +147,20 @@ pub(crate) async fn apply_stream_graph_patch(state: &AppState, stream_id: Uuid, 
                 let mut replaced = false;
                 for binding in &mut manifest.pipelines {
                     if binding.pipeline_id == pipeline_id {
-                        binding.pipeline_patch = None;
+                        binding.pipeline_patch = Some(helios_engine::ipc::JsonWire(patch.clone()));
                         replaced = true;
                         break;
                     }
                 }
                 if !replaced {
-                    manifest.pipelines.push(StreamPipelineBinding { pipeline_id, pipeline_graph: None, pipeline_output: None, pipeline_patch: None });
+                    manifest.pipelines.push(StreamPipelineBinding { pipeline_id, pipeline_graph: None, pipeline_output: None, pipeline_patch: Some(helios_engine::ipc::JsonWire(patch.clone())) });
                 }
 
                 manifest.pipeline_enabled = Some(true);
                 if manifest.active_pipeline_id.is_none() {
                     manifest.active_pipeline_id = Some(pipeline_id);
                 }
+                util::promote_single_view_pipeline_selection(manifest, pipeline_id, None);
             })
             .await
             .map_err(|err| format!("failed to persist stream manifest: {err}"))?;

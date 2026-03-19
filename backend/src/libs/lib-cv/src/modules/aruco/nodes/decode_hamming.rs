@@ -248,7 +248,7 @@ fn cv_aruco_decode_quads_hamming_finalize_detections(
 )]
 #[allow(clippy::too_many_arguments)]
 fn cv_aruco_decode_quads_hamming(
-    frame: std::sync::Arc<crate::modules::image::luma::PooledGrayImage>,
+    frame: DynamicImage,
     quads: std::sync::Arc<Vec<Quad>>,
     dictionary: ArucoDictionaryKind,
     sample_scale: i64,
@@ -281,173 +281,41 @@ fn cv_aruco_decode_quads_hamming(
     exec_ctx: &ExecutionContext,
 ) -> Result<Vec<ArucoDetection2D>, NodeError> {
     let _scratch_guard = ArucoDecodeFrameScratchGuard::new();
-    #[inline(always)]
-    fn quad_min_side_px(quad: &Quad) -> f64 {
-        let mut min_side_sq = f64::MAX;
-        for i in 0..4usize {
-            let a = quad[i];
-            let b = quad[(i + 1) % 4];
-            let dx = a.x - b.x;
-            let dy = a.y - b.y;
-            let d2 = dx * dx + dy * dy;
-            min_side_sq = min_side_sq.min(d2);
-        }
-        min_side_sq.sqrt()
-    }
-
     let _ = exec_ctx;
-    let frame = frame.as_ref();
-    let quads = quads.as_ref();
-    let (frame_w, frame_h) = frame.dimensions();
-    let _ = (refine_corners_warp, refine_corners_warp_scale);
-    let tuning = ArucoTagDecodeTuningConfig {
-        min_warped_patch_contrast_range,
-        warp_fallback_on_decode_fail,
-        warp_fallback_max_hamming_extra,
-        warp_fallback_border_slack,
-        warp_fallback_on_low_contrast,
-        warp_min_sample_scale,
-        min_quad_side_px,
-        min_quiet_zone_delta,
-        quiet_zone_texture_penalty,
-        verify_warp_min_best_distance,
-        verify_warp_only_if_border_mismatch,
-        verify_warp_reject_on_fail,
-        min_decode_score,
-        cell_sample_grid,
-        cell_sample_margin,
-        min_cell_means_contrast_range,
-        min_hamming_margin,
-        min_hamming_margin_min_dist,
-        min_hamming_margin_only_if_border_mismatch,
-        min_bit_delta,
-    };
-
-    let min_quad_side_px = min_quad_side_px.max(0.0);
-    let filtered_quads: Option<Vec<Quad>> = if min_quad_side_px > 0.0 { Some(quads.iter().copied().filter(|q| quad_min_side_px(q) >= min_quad_side_px).collect()) } else { None };
-    let quads = filtered_quads.as_ref().unwrap_or(quads);
-
-    let sample_scale_u32 = u32::try_from(sample_scale).unwrap_or(1).max(1);
-    let decoded = if quads.is_empty() {
-        Vec::new()
-    } else if let Some(dict_name) = dictionary.as_aruco_name() {
-        let Some(dict) = aruco_dictionary_from_name(dict_name) else {
-            return Err(NodeError::InvalidInput(format!("unknown ArUco dictionary '{dict_name}'")));
-        };
-        let mut decode_cfg = decode_tuning_to_aruco_config(&tuning);
-        if max_hamming >= 0 {
-            let max_hamming = u32::try_from(max_hamming).unwrap_or(0);
-            let max_corr = dict.max_correction_bits() as u32;
-            decode_cfg.error_correction_rate = if max_corr == 0 { 0.0 } else { (max_hamming as f32 / max_corr as f32).clamp(0.0, 1.0) };
-        }
-        if border_error_divisor > 0 {
-            let div = (border_error_divisor as f32).max(1.0);
-            decode_cfg.max_border_error_rate = decode_cfg.max_border_error_rate.min((1.0 / div).clamp(0.0, 1.0));
-            if border_error_divisor >= 32 {
-                decode_cfg.max_border_error_rate = 0.0;
-            }
-            decode_cfg.min_hamming_margin_only_if_border_mismatch = false;
-        }
-        if dict.marker_size() <= 4 {
-            decode_cfg.min_warped_patch_contrast_range = decode_cfg.min_warped_patch_contrast_range.max(8);
-            decode_cfg.min_cell_means_contrast_range = decode_cfg.min_cell_means_contrast_range.max(10.0);
-            decode_cfg.min_quad_side_px = decode_cfg.min_quad_side_px.max(10.0);
-            decode_cfg.max_border_error_rate = decode_cfg.max_border_error_rate.min(0.2);
-            decode_cfg.error_correction_rate = decode_cfg.error_correction_rate.min(0.4);
-        }
-        DECODE_QUAD_SCRATCH.with(|quad_scratch| {
-            let mut quad_scratch = quad_scratch.borrow_mut();
-            let cv_quads = &mut quad_scratch.quads;
-            cv_quads.resize(quads.len(), [CvPoint::new(0.0, 0.0); 4]);
-            for (i, q) in quads.iter().enumerate() {
-                cv_quads[i] =
-                    [CvPoint::new(q[0].x as f32, q[0].y as f32), CvPoint::new(q[1].x as f32, q[1].y as f32), CvPoint::new(q[2].x as f32, q[2].y as f32), CvPoint::new(q[3].x as f32, q[3].y as f32)];
-            }
-            decode_quads_aruco_with_config_no_bits_gray(frame, cv_quads, sample_scale_u32, &dict, &decode_cfg)
-        })
-    } else {
-        let Some(family) = dictionary.as_apriltag_family() else {
-            return Err(NodeError::InvalidInput("unknown tag dictionary".into()));
-        };
-        let decode_cfg = decode_tuning_to_config(&tuning);
-        DECODE_FAMILY_SCRATCH.with(|family_scratch| {
-            let mut family_scratch = family_scratch.borrow_mut();
-            if family_scratch.kind != Some(family) || family_scratch.max_hamming != max_hamming || family_scratch.border_error_divisor != border_error_divisor {
-                let mut family_impl = family.into_family();
-                if max_hamming >= 0 {
-                    family_impl = family_impl.with_max_hamming(u8::try_from(max_hamming).unwrap_or(0));
-                }
-                if border_error_divisor > 0 {
-                    family_impl = family_impl.with_border_error_divisor(u8::try_from(border_error_divisor).unwrap_or(10));
-                }
-                family_scratch.family = family_impl;
-                family_scratch.kind = Some(family);
-                family_scratch.max_hamming = max_hamming;
-                family_scratch.border_error_divisor = border_error_divisor;
-            }
-            DECODE_QUAD_SCRATCH.with(|quad_scratch| {
-                let mut quad_scratch = quad_scratch.borrow_mut();
-                let cv_quads = &mut quad_scratch.quads;
-                cv_quads.resize(quads.len(), [CvPoint::new(0.0, 0.0); 4]);
-                for (i, q) in quads.iter().enumerate() {
-                    cv_quads[i] = [
-                        CvPoint::new(q[0].x as f32, q[0].y as f32),
-                        CvPoint::new(q[1].x as f32, q[1].y as f32),
-                        CvPoint::new(q[2].x as f32, q[2].y as f32),
-                        CvPoint::new(q[3].x as f32, q[3].y as f32),
-                    ];
-                }
-                decode_quads_with_config_no_bits_gray(frame, cv_quads, sample_scale_u32, &family_scratch.family, &decode_cfg)
-            })
-        })
-    };
-
-    // Keep raw decoded corners; warp-based refinement has shown unstable corner shifts
-    // (including occasional crossed-corner ordering) in field footage.
-    let refined = decoded;
-
-    let finalized = if refined.is_empty() {
-        Vec::new()
-    } else if let Some(dict_name) = dictionary.as_aruco_name() {
-        let Some(dict) = aruco_dictionary_from_name(dict_name) else {
-            return Err(NodeError::InvalidInput(format!("unknown ArUco dictionary '{dict_name}'")));
-        };
-        let max_hamming_u32 = if max_hamming >= 0 { u32::try_from(max_hamming).unwrap_or(0) } else { u32::MAX };
-        let include_bits = aruco_include_bits_enabled();
-        let mut detections = refined;
-        detections.retain(|det| !(max_hamming_u32 != u32::MAX && det.best_distance.is_some_and(|best| best > max_hamming_u32)));
-        filter_detections_id_range_in_place(&mut detections, min_id, max_id);
-        filter_detections_in_frame_in_place(&mut detections, frame_w, frame_h);
-        if include_bits {
-            for det in &mut detections {
-                if det.bits.is_none() {
-                    det.bits = dict.bit_grid(det.id as usize);
-                }
-            }
-        }
-        for det in &mut detections {
-            det.canonicalize_in_place();
-        }
-        detections
-    } else {
-        let Some(family) = dictionary.as_apriltag_family() else {
-            return Err(NodeError::InvalidInput("unknown tag dictionary".into()));
-        };
-        let family_impl = family.into_family();
-        let include_bits = aruco_include_bits_enabled();
-        let mut detections = refined;
-        filter_detections_id_range_in_place(&mut detections, min_id, max_id);
-        filter_detections_in_frame_in_place(&mut detections, frame_w, frame_h);
-        for det in &mut detections {
-            if include_bits && det.bits.is_none() {
-                det.bits = family_impl.bit_grid(det.id as usize);
-            }
-            det.canonicalize_in_place();
-        }
-        detections
-    };
-
-    Ok(finalized)
+    crate::modules::image::luma::with_luma8_frame(&frame, |gray| {
+        decode_quads_hamming_gray_inner(
+            gray,
+            quads.as_slice(),
+            dictionary,
+            sample_scale,
+            max_hamming,
+            border_error_divisor,
+            refine_corners_warp,
+            refine_corners_warp_scale,
+            min_id,
+            max_id,
+            min_warped_patch_contrast_range,
+            warp_fallback_on_decode_fail,
+            warp_fallback_max_hamming_extra,
+            warp_fallback_border_slack,
+            warp_fallback_on_low_contrast,
+            warp_min_sample_scale,
+            min_quad_side_px,
+            min_quiet_zone_delta,
+            quiet_zone_texture_penalty,
+            verify_warp_min_best_distance,
+            verify_warp_only_if_border_mismatch,
+            verify_warp_reject_on_fail,
+            min_decode_score,
+            cell_sample_grid,
+            cell_sample_margin,
+            min_cell_means_contrast_range,
+            min_hamming_margin,
+            min_hamming_margin_min_dist,
+            min_hamming_margin_only_if_border_mismatch,
+            min_bit_delta,
+        )
+    })
 }
 
 #[allow(clippy::too_many_arguments)]

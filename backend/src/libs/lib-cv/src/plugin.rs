@@ -3,7 +3,7 @@ use daedalus::registry::convert::ConverterBuilder;
 use daedalus::runtime::EdgePayload;
 use daedalus::runtime::plugins::RegistryPluginExt;
 use daedalus::{Plugin, PluginRegistry};
-use image::{DynamicImage, GrayAlphaImage, GrayImage, RgbImage, RgbaImage};
+use image::{DynamicImage, GenericImageView, GrayAlphaImage, GrayImage, RgbImage, RgbaImage};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, OnceLock};
 
@@ -161,8 +161,19 @@ impl Plugin for CvPlugin {
         // Runtime CPU conversions between image flavors. These are intentionally registered in the
         // conversion registry (not exposed as nodes) so graphs can focus on the types they want.
         registry.register_conversion::<DynamicImage, GrayImage>(|img| Some(img.to_luma8()));
+        registry.register_conversion::<DynamicImage, crate::modules::image::luma::PooledGrayImage>(|img| {
+            let (w, h) = img.dimensions();
+            Some(crate::modules::image::luma::crop_luma8_frame(img, 0, 0, w, h))
+        });
+        registry.register_conversion::<DynamicImage, Arc<crate::modules::image::luma::PooledGrayImage>>(|img| {
+            let (w, h) = img.dimensions();
+            Some(Arc::new(crate::modules::image::luma::crop_luma8_frame(img, 0, 0, w, h)))
+        });
         registry.register_conversion::<DynamicImage, Option<DynamicImage>>(|img| Some(Some(img.clone())));
         registry.register_conversion::<GrayImage, DynamicImage>(|img| Some(DynamicImage::ImageLuma8(img.clone())));
+        registry.register_conversion::<crate::modules::image::luma::PooledGrayImage, GrayImage>(|img| Some(img.as_ref().clone()));
+        registry.register_conversion::<crate::modules::image::luma::PooledGrayImage, Arc<crate::modules::image::luma::PooledGrayImage>>(|img| Some(Arc::new(img.clone())));
+        registry.register_conversion::<crate::modules::image::luma::PooledGrayImage, DynamicImage>(|img| Some(DynamicImage::ImageLuma8(img.as_ref().clone())));
         registry.register_conversion::<GrayAlphaImage, DynamicImage>(|img| Some(DynamicImage::ImageLumaA8(img.clone())));
         registry.register_conversion::<RgbImage, DynamicImage>(|img| Some(DynamicImage::ImageRgb8(img.clone())));
         registry.register_conversion::<RgbaImage, DynamicImage>(|img| Some(DynamicImage::ImageRgba8(img.clone())));

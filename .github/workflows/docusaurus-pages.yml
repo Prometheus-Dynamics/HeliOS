@@ -6,6 +6,8 @@ on:
       - main
     paths:
       - docs/**
+      - frontend/src/lib/ts-bindings/http/openapi.json
+      - frontend/src/lib/ts-bindings/ws/asyncapi.json
       - .github/workflows/docusaurus-pages.yml
   workflow_dispatch:
 
@@ -21,9 +23,6 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      DOCUSAURUS_URL: https://${{ github.repository_owner }}.github.io
-      DOCUSAURUS_BASE_URL: /${{ github.event.repository.name }}/
     defaults:
       run:
         working-directory: docs
@@ -41,6 +40,26 @@ jobs:
         with:
           bun-version: 1.2.23
 
+      - name: Compute Pages site URL
+        env:
+          DOCS_CUSTOM_DOMAIN: ${{ vars.DOCS_CUSTOM_DOMAIN }}
+          GITHUB_EVENT_REPOSITORY_NAME: ${{ github.event.repository.name }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: |
+          domain="${DOCS_CUSTOM_DOMAIN#https://}"
+          domain="${domain#http://}"
+          domain="${domain%/}"
+
+          if [ -n "$domain" ]; then
+            echo "DOCUSAURUS_URL=https://$domain" >> "$GITHUB_ENV"
+            echo "DOCUSAURUS_BASE_URL=/" >> "$GITHUB_ENV"
+            echo "Publishing docs for custom domain https://$domain/"
+          else
+            echo "DOCUSAURUS_URL=https://$GITHUB_REPOSITORY_OWNER.github.io" >> "$GITHUB_ENV"
+            echo "DOCUSAURUS_BASE_URL=/$GITHUB_EVENT_REPOSITORY_NAME/" >> "$GITHUB_ENV"
+            echo "Publishing docs for project Pages under /$GITHUB_EVENT_REPOSITORY_NAME/"
+          fi
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
@@ -51,7 +70,7 @@ jobs:
         uses: actions/configure-pages@v5
 
       - name: Upload site artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           path: docs/build
 
