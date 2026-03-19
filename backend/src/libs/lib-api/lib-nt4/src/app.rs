@@ -11,7 +11,7 @@ use url::Url;
 use crate::types::{PubHandler, PubSubHandler, SubHandler, SubHandlerFn};
 use lib_asyncapi::{AsyncApiDoc, AsyncApiInfo, ExternalDocs, Server, Tag, WsDoc, WsDocList};
 use lib_transport::{HeartbeatConfig, HeartbeatGuard, TransportContext};
-use nt_client::{data::r#type::NetworkTableData, error::ReconnectError, reconnect, ClientHandle, NewClientOptions};
+use nt_client::{data::NetworkTableData, error::ReconnectError, reconnect, ClientHandle, NewClientOptions};
 
 #[derive(Clone)]
 struct PubEntry {

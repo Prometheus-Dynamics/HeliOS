@@ -1,6 +1,26 @@
 use super::*;
+use std::mem::size_of;
 
 pub(super) type Quad = [Point; 4];
+
+const NODE_RETAIN_POINT_CAP: usize = 2 * 1024;
+const CANDIDATE_RETAIN_POINT_CAP: usize = 4 * 1024;
+const CANDIDATE_RETAIN_QUAD_CAP: usize = 512;
+const CANDIDATE_RETAIN_GROUP_CAP: usize = 128;
+const DECODE_RETAIN_QUAD_CAP: usize = 512;
+
+pub(super) fn aruco_include_bits_enabled() -> bool {
+    static INCLUDE_BITS: LazyLock<bool> = LazyLock::new(|| {
+        std::env::var("HELIOS_ARUCO_INCLUDE_BITS")
+            .ok()
+            .map(|raw| {
+                let raw = raw.trim();
+                raw.eq_ignore_ascii_case("1") || raw.eq_ignore_ascii_case("true") || raw.eq_ignore_ascii_case("yes") || raw.eq_ignore_ascii_case("on")
+            })
+            .unwrap_or(false)
+    });
+    *INCLUDE_BITS
+}
 
 thread_local! {
     pub(super) static INTEGRAL_SCRATCH: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
@@ -55,6 +75,115 @@ impl Default for DecodeFamilyScratch {
     }
 }
 
+fn candidate_quad_scratch_bytes(scratch: &CandidateQuadScratch) -> usize {
+    let grouped_inner = scratch.grouped.iter().map(|group| group.capacity() * size_of::<usize>()).sum::<usize>();
+    scratch.pts.capacity() * size_of::<CvPoint<f32>>()
+        + scratch.quads.capacity() * size_of::<[CvPoint<f32>; 4]>()
+        + scratch.quad_centers.capacity() * size_of::<CvPoint<f32>>()
+        + scratch.ordered_centers.capacity() * size_of::<CvPoint<f32>>()
+        + scratch.quad_perimeters.capacity() * size_of::<f32>()
+        + scratch.order.capacity() * size_of::<usize>()
+        + scratch.min_marker_dist_sq.capacity() * size_of::<f32>()
+        + scratch.group_id.capacity() * size_of::<isize>()
+        + scratch.grouped.capacity() * size_of::<Vec<usize>>()
+        + grouped_inner
+        + scratch.is_selected.capacity() * size_of::<bool>()
+        + scratch.keep_sorted.capacity() * size_of::<bool>()
+        + scratch.filtered.capacity() * size_of::<[CvPoint<f32>; 4]>()
+        + scratch.filtered_quads.capacity() * size_of::<Quad>()
+}
+
+fn node_detect_scratch_bytes(scratch: &NodeDetectScratch) -> usize {
+    scratch.distances.capacity() * size_of::<(f32, CvPoint<f32>)>()
+        + scratch.trimmed.capacity() * size_of::<CvPoint<f32>>()
+        + scratch.inliers.capacity() * size_of::<CvPoint<f32>>()
+        + scratch.best_inliers.capacity() * size_of::<CvPoint<f32>>()
+        + scratch.edge_points.iter().map(|points| points.capacity() * size_of::<CvPoint<f32>>()).sum::<usize>()
+}
+
+#[inline(always)]
+fn trim_retained_vec<T>(vec: &mut Vec<T>, retain_cap: usize) {
+    vec.clear();
+    if vec.capacity() > retain_cap {
+        vec.shrink_to(retain_cap);
+    }
+}
+
+fn compact_candidate_quad_scratch_after_frame(scratch: &mut CandidateQuadScratch) {
+    trim_retained_vec(&mut scratch.pts, CANDIDATE_RETAIN_POINT_CAP);
+    trim_retained_vec(&mut scratch.quads, CANDIDATE_RETAIN_QUAD_CAP);
+    trim_retained_vec(&mut scratch.quad_centers, CANDIDATE_RETAIN_QUAD_CAP);
+    trim_retained_vec(&mut scratch.ordered_centers, CANDIDATE_RETAIN_QUAD_CAP);
+    trim_retained_vec(&mut scratch.quad_perimeters, CANDIDATE_RETAIN_QUAD_CAP);
+    trim_retained_vec(&mut scratch.order, CANDIDATE_RETAIN_QUAD_CAP);
+    trim_retained_vec(&mut scratch.min_marker_dist_sq, CANDIDATE_RETAIN_QUAD_CAP);
+    trim_retained_vec(&mut scratch.group_id, CANDIDATE_RETAIN_QUAD_CAP);
+    for group in &mut scratch.grouped {
+        trim_retained_vec(group, CANDIDATE_RETAIN_GROUP_CAP);
+    }
+    trim_retained_vec(&mut scratch.grouped, CANDIDATE_RETAIN_GROUP_CAP);
+    trim_retained_vec(&mut scratch.is_selected, CANDIDATE_RETAIN_QUAD_CAP);
+    trim_retained_vec(&mut scratch.keep_sorted, CANDIDATE_RETAIN_QUAD_CAP);
+    trim_retained_vec(&mut scratch.filtered, CANDIDATE_RETAIN_QUAD_CAP);
+    trim_retained_vec(&mut scratch.filtered_quads, CANDIDATE_RETAIN_QUAD_CAP);
+}
+
+pub(super) fn compact_shared_scratch_after_frame() {
+    ARUCO_NODE_SCRATCH.with(|scratch| {
+        let mut scratch = scratch.borrow_mut();
+        trim_retained_vec(&mut scratch.distances, NODE_RETAIN_POINT_CAP);
+        trim_retained_vec(&mut scratch.trimmed, NODE_RETAIN_POINT_CAP);
+        trim_retained_vec(&mut scratch.inliers, NODE_RETAIN_POINT_CAP);
+        trim_retained_vec(&mut scratch.best_inliers, NODE_RETAIN_POINT_CAP);
+        for edge in &mut scratch.edge_points {
+            trim_retained_vec(edge, NODE_RETAIN_POINT_CAP);
+        }
+    });
+    CANDIDATE_QUAD_SCRATCH.with(|scratch| {
+        let mut scratch = scratch.borrow_mut();
+        compact_candidate_quad_scratch_after_frame(&mut scratch);
+    });
+    DECODE_QUAD_SCRATCH.with(|scratch| {
+        let mut scratch = scratch.borrow_mut();
+        trim_retained_vec(&mut scratch.quads, DECODE_RETAIN_QUAD_CAP);
+    });
+}
+
+pub(super) struct ArucoDecodeFrameScratchGuard;
+
+impl ArucoDecodeFrameScratchGuard {
+    pub(super) fn new() -> Self {
+        Self
+    }
+}
+
+impl Drop for ArucoDecodeFrameScratchGuard {
+    fn drop(&mut self) {
+        compact_shared_scratch_after_frame();
+        crate::modules::aruco::detect::compact_detect_scratch_after_frame();
+        crate::modules::aruco::detect::compact_decode_scratch_after_frame();
+        crate::modules::contour::douglas_peucker::compact_rdp_scratch_after_frame();
+    }
+}
+
+pub(super) fn report_candidate_quad_scratch() {
+    CANDIDATE_QUAD_SCRATCH.with(|scratch| {
+        let scratch = scratch.borrow();
+        crate::diagnostics::report_scratch_high_water("aruco.candidate_quad_scratch", candidate_quad_scratch_bytes(&scratch));
+    });
+}
+
+pub(super) fn report_node_detect_scratch() {
+    ARUCO_NODE_SCRATCH.with(|scratch| {
+        let scratch = scratch.borrow();
+        crate::diagnostics::report_scratch_high_water("aruco.node_detect_scratch", node_detect_scratch_bytes(&scratch));
+    });
+}
+
+pub(super) fn report_overlay_id_cache_bytes(bytes: usize) {
+    crate::diagnostics::report_scratch_high_water("aruco.overlay_id_cache", bytes);
+}
+
 pub(super) fn expect_cpu_frame(frame: Payload<DynamicImage>, label: &str, exec_ctx: Option<&ExecutionContext>) -> Result<DynamicImage, NodeError> {
     #[cfg(feature = "gpu")]
     {
@@ -83,6 +212,7 @@ pub(super) fn with_integral_scratch<R>(len: usize, f: impl FnOnce(&mut [u32]) ->
         let mut scratch = scratch.borrow_mut();
         if scratch.len() != len {
             scratch.resize(len, 0);
+            crate::diagnostics::report_scratch_high_water("aruco.integral_scratch", scratch.capacity() * size_of::<u32>());
         } else {
             scratch.fill(0);
         }
@@ -177,7 +307,7 @@ pub(super) fn decode_tuning_to_aruco_config(cfg: &ArucoTagDecodeTuningConfig) ->
     out
 }
 
-pub(super) fn filter_detections_in_frame(detections: &[ArucoDetection2D], width: u32, height: u32) -> Vec<ArucoDetection2D> {
+fn detection_in_frame(det: &ArucoDetection2D, width: u32, height: u32) -> bool {
     #[inline(always)]
     fn orient(a: &Point, b: &Point, c: &Point) -> f64 {
         (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
@@ -222,65 +352,72 @@ pub(super) fn filter_detections_in_frame(detections: &[ArucoDetection2D], width:
     let w = width.max(1) as f64;
     let h = height.max(1) as f64;
     let margin = 4.0f64;
-    detections
-        .iter()
-        .filter(|det| {
-            // Corner-placement quality guard:
-            // detections with high border mismatch counts are commonly decoded from unstable
-            // interior quads (ID can decode, but corner placement is visibly wrong).
-            //
-            // Keep this strict enough to avoid accepting visibly unstable corner geometry.
-            if let Some(border_mismatches) = det.border_mismatches {
-                let best_distance = det.best_distance.unwrap_or(0);
-                if border_mismatches >= 3 {
-                    return false;
-                }
-                if border_mismatches == 2 && best_distance >= 2 {
-                    return false;
-                }
-                if border_mismatches == 1 && best_distance >= 3 {
-                    return false;
-                }
-            }
+    // Corner-placement quality guard:
+    // detections with high border mismatch counts are commonly decoded from unstable
+    // interior quads (ID can decode, but corner placement is visibly wrong).
+    //
+    // Keep this strict enough to avoid accepting visibly unstable corner geometry.
+    if let Some(border_mismatches) = det.border_mismatches {
+        let best_distance = det.best_distance.unwrap_or(0);
+        if border_mismatches >= 3 {
+            return false;
+        }
+        if border_mismatches == 2 && best_distance >= 2 {
+            return false;
+        }
+        if border_mismatches == 1 && best_distance >= 3 {
+            return false;
+        }
+    }
 
-            let mut area2 = 0.0f64;
-            let mut min_edge_sq = f64::MAX;
-            for i in 0..4usize {
-                let a = det.corners[i];
-                let b = det.corners[(i + 1) % 4];
-                if !a.x.is_finite() || !a.y.is_finite() {
-                    return false;
-                }
-                if a.x < -margin || a.y < -margin || a.x > (w - 1.0 + margin) || a.y > (h - 1.0 + margin) {
-                    return false;
-                }
-                let dx = b.x - a.x;
-                let dy = b.y - a.y;
-                min_edge_sq = min_edge_sq.min(dx * dx + dy * dy);
-                area2 += a.x * b.y - b.x * a.y;
-            }
-            if min_edge_sq < 4.0 {
-                return false;
-            }
-            if area2.abs() < 4.0 {
-                return false;
-            }
-            if quad_has_crossed_edges(&det.corners) {
-                return false;
-            }
-            quad_is_strictly_convex(&det.corners)
-        })
-        .cloned()
-        .collect()
+    let mut area2 = 0.0f64;
+    let mut min_edge_sq = f64::MAX;
+    for i in 0..4usize {
+        let a = det.corners[i];
+        let b = det.corners[(i + 1) % 4];
+        if !a.x.is_finite() || !a.y.is_finite() {
+            return false;
+        }
+        if a.x < -margin || a.y < -margin || a.x > (w - 1.0 + margin) || a.y > (h - 1.0 + margin) {
+            return false;
+        }
+        let dx = b.x - a.x;
+        let dy = b.y - a.y;
+        min_edge_sq = min_edge_sq.min(dx * dx + dy * dy);
+        area2 += a.x * b.y - b.x * a.y;
+    }
+    if min_edge_sq < 4.0 {
+        return false;
+    }
+    if area2.abs() < 4.0 {
+        return false;
+    }
+    if quad_has_crossed_edges(&det.corners) {
+        return false;
+    }
+    quad_is_strictly_convex(&det.corners)
 }
 
-pub(super) fn filter_detections_id_range(detections: &[ArucoDetection2D], min_id: i64, max_id: i64) -> Vec<ArucoDetection2D> {
+#[allow(dead_code)]
+pub(super) fn filter_detections_in_frame_in_place(detections: &mut Vec<ArucoDetection2D>, width: u32, height: u32) {
+    detections.retain(|det| detection_in_frame(det, width, height));
+}
+
+fn detection_matches_id_range(det: &ArucoDetection2D, min_id: i64, max_id: i64) -> bool {
     if min_id < 0 && max_id < 0 {
-        return detections.to_vec();
+        return true;
     }
     let min = min_id.max(0) as u32;
     let max = if max_id < 0 { u32::MAX } else { max_id.max(0) as u32 };
-    detections.iter().filter(|d| d.id >= min && d.id <= max).cloned().collect()
+    det.id >= min && det.id <= max
+}
+
+pub(super) fn filter_detections_id_range(detections: &[ArucoDetection2D], min_id: i64, max_id: i64) -> Vec<ArucoDetection2D> {
+    detections.iter().filter(|det| detection_matches_id_range(det, min_id, max_id)).cloned().collect()
+}
+
+pub(super) fn filter_detections_id_range_in_place(detections: &mut Vec<ArucoDetection2D>, min_id: i64, max_id: i64) {
+    detections.retain(|det| detection_matches_id_range(det, min_id, max_id));
 }
 
 pub(super) fn merge_detections_spatial_impl<I>(detections: I, center_dist_px: f64, min_area_ratio: f64, max_corner_dist_px: f64, max_center_dist_ratio: f64, min_iou: f64) -> Vec<ArucoDetection2D>

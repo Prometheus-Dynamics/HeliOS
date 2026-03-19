@@ -53,7 +53,7 @@ export const buildTypeOptions = (typePalette: Record<string, PipelineTypeDescrip
     const key = String(id ?? '').trim();
     if (!key || seen.has(key)) continue;
     seen.add(key);
-    const label = String((descriptor as any)?.label ?? key).trim() || key;
+    const label = String(descriptor?.label ?? key).trim() || key;
     options.push({ key, label });
   }
   return options.sort((a, b) => a.label.localeCompare(b.label));

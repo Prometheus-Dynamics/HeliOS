@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { base } from '$app/paths';
   import ImageCropper from '$lib/components/media/ImageCropper.svelte';
   import MediaDetailModal from '$lib/components/media/MediaDetailModal.svelte';
   import { describeTensorEntry } from '$lib/features/media/assetHelpers';
@@ -87,6 +88,15 @@
   function handleVideoEndChange(value: string) {
     videoEdit = { ...videoEdit, endMs: Number(value) };
   }
+
+  function assetHref(path: string): string {
+    return path.startsWith('/') ? `${base}${path}` : path;
+  }
+
+  function openAsset(path: string): void {
+    if (typeof window === 'undefined') return;
+    window.open(assetHref(path), '_blank', 'noopener,noreferrer');
+  }
 </script>
 
 <MediaDetailModal {open} {asset} onClose={onClose}>
@@ -148,9 +158,9 @@
                 onerror={(event) => ((event.currentTarget as HTMLImageElement).src = assetOriginalSrc)}
               />
             </div>
-            <a class="btn btn-3xs mt-3 preset-outline uppercase tracking-[0.3em]" href={assetOriginalSrc} target="_blank" rel="noreferrer">
+            <button class="btn btn-3xs mt-3 preset-outline uppercase tracking-[0.3em]" type="button" onclick={() => openAsset(assetOriginalSrc)}>
               Download
-            </a>
+            </button>
           </div>
         {:else if asset.kind === 'video'}
           <div class="rounded border border-surface-800/60 bg-surface-900/40 p-3">
@@ -160,32 +170,32 @@
             </video>
             {#if asset.mp4DownloadUrl}
               <div class="mt-3 flex flex-wrap items-center gap-2">
-                <a class="btn btn-3xs preset-outline uppercase tracking-[0.3em]" href={assetOriginalSrc} target="_blank" rel="noreferrer">
+                <button class="btn btn-3xs preset-outline uppercase tracking-[0.3em]" type="button" onclick={() => openAsset(assetOriginalSrc)}>
                   Download raw
-                </a>
-                <a class="btn btn-3xs preset-outline uppercase tracking-[0.3em]" href={assetMp4DownloadSrc} target="_blank" rel="noreferrer">
+                </button>
+                <button class="btn btn-3xs preset-outline uppercase tracking-[0.3em]" type="button" onclick={() => openAsset(assetMp4DownloadSrc)}>
                   Download MP4
-                </a>
+                </button>
               </div>
             {:else}
-              <a class="btn btn-3xs mt-3 preset-outline uppercase tracking-[0.3em]" href={assetOriginalSrc} target="_blank" rel="noreferrer">
+              <button class="btn btn-3xs mt-3 preset-outline uppercase tracking-[0.3em]" type="button" onclick={() => openAsset(assetOriginalSrc)}>
                 Download
-              </a>
+              </button>
             {/if}
           </div>
         {:else if asset.kind === 'model'}
           <div class="rounded border border-surface-800/60 bg-surface-900/40 p-3">
             <p class="text-xs uppercase tracking-[0.3em] text-surface-500">Model file</p>
-            <a class="btn btn-3xs mt-3 preset-outline uppercase tracking-[0.3em]" href={assetOriginalSrc} target="_blank" rel="noreferrer">
+            <button class="btn btn-3xs mt-3 preset-outline uppercase tracking-[0.3em]" type="button" onclick={() => openAsset(assetOriginalSrc)}>
               Download model
-            </a>
+            </button>
           </div>
         {:else}
           <div class="rounded border border-surface-800/60 bg-surface-900/40 p-3">
             <p class="text-xs uppercase tracking-[0.3em] text-surface-500">{mediaKindLabel(asset.kind)}</p>
-            <a class="btn btn-3xs mt-3 preset-outline uppercase tracking-[0.3em]" href={assetOriginalSrc} target="_blank" rel="noreferrer">
+            <button class="btn btn-3xs mt-3 preset-outline uppercase tracking-[0.3em]" type="button" onclick={() => openAsset(assetOriginalSrc)}>
               Download
-            </a>
+            </button>
           </div>
         {/if}
       </div>
@@ -285,7 +295,7 @@
               <div>
                 <p class="uppercase tracking-[0.3em] text-micro-tight text-surface-500">Inputs</p>
                 <ul class="ml-4 list-none space-y-0.5 text-surface-400">
-                  {#each tensorDetails.inputs as entry}
+                  {#each tensorDetails.inputs as entry (`input:${entry}`)}
                     {@const tensor = describeTensorEntry(entry)}
                     <li>
                       <span class="font-semibold text-surface-200">{tensor.name}</span>
@@ -301,7 +311,7 @@
               <div>
                 <p class="uppercase tracking-[0.3em] text-micro-tight text-surface-500">Outputs</p>
                 <ul class="ml-4 list-none space-y-0.5 text-surface-400">
-                  {#each tensorDetails.outputs as entry}
+                  {#each tensorDetails.outputs as entry (`output:${entry}`)}
                     {@const tensor = describeTensorEntry(entry)}
                     <li>
                       <span class="font-semibold text-surface-200">{tensor.name}</span>

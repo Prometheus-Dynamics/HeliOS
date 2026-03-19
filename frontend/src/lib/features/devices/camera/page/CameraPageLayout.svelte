@@ -1,7 +1,23 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte';
   import CameraHeader from './CameraHeader.svelte';
 
-  const { ctx, main, sidebar, overlays, headerActions } = $props<{ ctx: any; main?: any; sidebar?: any; overlays?: any; headerActions?: any }>();
+  type CameraPageLayoutCtx = {
+    streamId: string;
+    stream: unknown;
+    manifestState: unknown;
+    loading: boolean;
+    error: string | null;
+    downloadManifest: () => void | Promise<void>;
+  };
+
+  let { ctx = $bindable(), main, sidebar, overlays, headerActions }: {
+    ctx: CameraPageLayoutCtx;
+    main?: Snippet<[]>;
+    sidebar?: Snippet<[]>;
+    overlays?: Snippet<[]>;
+    headerActions?: Snippet<[]>;
+  } = $props();
 </script>
 
 <section class="camera-page-layout flex flex-col gap-3 xl:h-[calc(100vh-5rem)] xl:h-[calc(100svh-5rem)] xl:h-[calc(100dvh-5rem)] xl:min-h-0 xl:overflow-hidden xl:pb-2">

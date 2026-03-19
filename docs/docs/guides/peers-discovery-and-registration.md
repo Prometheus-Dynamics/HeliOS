@@ -36,11 +36,11 @@ Then open candidates in a browser and verify which device it is.
 
 ## Option A: Discover (Fastest When It Works)
 
-1. Open [OS > Peers > Discovery](/os/peers/discovery).
-2. Start a discovery run.
-3. Wait for the run to complete.
-4. Confirm the peer appears in the results list.
-5. Add it to your registry (this should pre-fill registration details).
+1. Open **OS > Peers** and click **Add peer**.
+2. Stay on **Auto discover**.
+3. Start a discovery run.
+4. Wait for the scan to complete.
+5. Confirm the peer is discovered and automatically registered.
 
 If nothing appears:
 
@@ -52,7 +52,7 @@ If discovery fails, use manual registration.
 
 ## Option B: Register Manually (Always Works If Network Is Correct)
 
-1. Open [OS > Peers > Registration](/os/peers/registration).
+1. Open **OS > Peers**.
 2. Click **Add peer**.
 3. Choose an integration kind that matches the device.
 4. Enter the peer host/IP (or an API base URL).
@@ -71,7 +71,7 @@ If you are using PhotonVision:
 
 ## Verify (Probe And Monitor)
 
-1. Open [OS > Peers > Monitoring](/os/peers/monitoring).
+1. Open **OS > Peers**.
 2. Find your peer in the list.
 3. Click **Test connection** (probe).
 4. Confirm API base and stream URL probes succeed.

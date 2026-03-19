@@ -39,7 +39,11 @@ fn cv_aruco_decode_quads(
             decode_cfg.max_border_error_rate = decode_cfg.max_border_error_rate.min(0.2);
             decode_cfg.error_correction_rate = decode_cfg.error_correction_rate.min(0.4);
         }
-        let detections = decode_quads_aruco_with_config(&frame, &cv_quads, sample_scale, &dict, &decode_cfg);
+        let detections = if aruco_include_bits_enabled() {
+            decode_quads_aruco_with_config(&frame, &cv_quads, sample_scale, &dict, &decode_cfg)
+        } else {
+            decode_quads_aruco_with_config_no_bits(&frame, &cv_quads, sample_scale, &dict, &decode_cfg)
+        };
         return Ok(detections);
     }
 
@@ -48,7 +52,11 @@ fn cv_aruco_decode_quads(
     };
     let family_impl = family.into_family();
     let decode_cfg = decode_tuning_to_config(&cfg);
-    Ok(decode_quads_with_config(&frame, &cv_quads, sample_scale, &family_impl, &decode_cfg))
+    if aruco_include_bits_enabled() {
+        Ok(decode_quads_with_config(&frame, &cv_quads, sample_scale, &family_impl, &decode_cfg))
+    } else {
+        Ok(decode_quads_with_config_no_bits(&frame, &cv_quads, sample_scale, &family_impl, &decode_cfg))
+    }
 }
 
 #[node(
@@ -83,7 +91,11 @@ fn cv_aruco_decode_quads_warp(
             return Err(NodeError::InvalidInput(format!("unknown ArUco dictionary '{dict_name}'")));
         };
         let decode_cfg = decode_tuning_to_aruco_config(&cfg);
-        let detections = decode_quads_aruco_with_config(&frame, &cv_quads, sample_scale, &dict, &decode_cfg);
+        let detections = if aruco_include_bits_enabled() {
+            decode_quads_aruco_with_config(&frame, &cv_quads, sample_scale, &dict, &decode_cfg)
+        } else {
+            decode_quads_aruco_with_config_no_bits(&frame, &cv_quads, sample_scale, &dict, &decode_cfg)
+        };
         return Ok(detections);
     }
 
@@ -270,7 +282,11 @@ fn cv_aruco_decode_quads_calibrated(
             decode_cfg.max_border_error_rate = decode_cfg.max_border_error_rate.min((1.0 / div).clamp(0.0, 1.0));
             decode_cfg.min_hamming_margin_only_if_border_mismatch = false;
         }
-        let detections = decode_quads_aruco_calibrated_with_config(&frame, &cv_quads, sample_scale, &dict, calib, &decode_cfg);
+        let detections = if aruco_include_bits_enabled() {
+            decode_quads_aruco_calibrated_with_config(&frame, &cv_quads, sample_scale, &dict, calib, &decode_cfg)
+        } else {
+            crate::modules::aruco::detect::decode_quads_aruco_calibrated_with_config_no_bits(&frame, &cv_quads, sample_scale, &dict, calib, &decode_cfg)
+        };
         return Ok(filter_detections_id_range(&detections, cfg.min_id, cfg.max_id));
     }
 

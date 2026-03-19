@@ -25,8 +25,32 @@ export function formatBytes(bytes: number | null | undefined): string {
 }
 
 export function formatLoadError(err: unknown): string {
-  if (err instanceof Error && err.message) return err.message;
-  if (typeof err === 'string' && err.trim().length) return err.trim();
+  if (err instanceof DOMException && err.name === 'AbortError') return 'Request timed out.';
+  if (err instanceof Error && err.message) {
+    const message = err.message.trim();
+    if (!message) return 'Unable to load systems data.';
+    const normalized = message.toLowerCase();
+    if (
+      normalized === 'the operation was aborted.' ||
+      normalized === 'operation was aborted' ||
+      normalized === 'request aborted'
+    ) {
+      return 'Request timed out.';
+    }
+    return message;
+  }
+  if (typeof err === 'string' && err.trim().length) {
+    const message = err.trim();
+    const normalized = message.toLowerCase();
+    if (
+      normalized === 'the operation was aborted.' ||
+      normalized === 'operation was aborted' ||
+      normalized === 'request aborted'
+    ) {
+      return 'Request timed out.';
+    }
+    return message;
+  }
   return 'Unable to load systems data.';
 }
 

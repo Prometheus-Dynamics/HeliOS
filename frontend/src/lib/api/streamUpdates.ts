@@ -1,4 +1,5 @@
-import { buildWsUrlFromHttpBase, connectJsonSocket } from '$lib/api/wsClient';
+import { buildWsUrlFromHttpBase } from '$lib/api/core/ws';
+import { connectSharedJsonSocket } from '$lib/api/sharedJsonSocket';
 
 export type StreamUpdateSocket = {
   ready: () => boolean;
@@ -14,7 +15,9 @@ type StreamUpdateHandlers = {
 
 export function connectStreamUpdates(streamId: string, handlers: StreamUpdateHandlers = {}): StreamUpdateSocket | null {
   const url = buildStreamUpdatesSocketUrl(streamId);
-  return connectJsonSocket(url, handlers, { errorMessage: 'Stream updates socket error' });
+  return connectSharedJsonSocket(`stream-updates:${streamId}`, url, handlers, {
+    errorMessage: 'Stream updates socket error'
+  });
 }
 
 function buildStreamUpdatesSocketUrl(streamId: string): string {

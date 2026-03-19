@@ -1,6 +1,6 @@
 import type { StreamInfo } from '$lib/ts-bindings/http/client';
 import type { PipelineGraphPlan, PipelineNodeValue, PipelineOverviewPipeline } from '$lib/types/pipeline';
-import { fromApiGraphPlan } from '$lib/features/pipelines/model';
+import { fromApiGraphPlan } from '$lib/features/pipelines/graphConverters';
 import { serializeGraphPlan } from '$lib/features/pipelines/graph';
 import { nodeOverridesFromDaedalusPatch } from '$lib/features/pipelines/daedalusGraph';
 import { extractInputValues, isDaedalusPlan } from './pipelineTuneConstantUtils';
@@ -18,6 +18,15 @@ type StreamsApi = {
   setPipelineInputs: (params: { id: string; requestBody: { pipeline_id?: string | null; inputs: Record<string, unknown | null> } }) => Promise<unknown>;
 };
 
+type ListedStreamsResult = {
+  items?: StreamInfo[] | null;
+};
+
+const asListedStreamsResult = (value: unknown): ListedStreamsResult | null =>
+  value && typeof value === 'object' ? (value as ListedStreamsResult) : null;
+
+type DaedalusPatch = Parameters<typeof nodeOverridesFromDaedalusPatch>[0];
+
 export const createTuneStreamOverrides = (options: {
   StreamsApi: StreamsApi;
   streamGraphForPipeline: (stream: StreamInfo, pipelineId: string) => unknown | null;
@@ -33,8 +42,8 @@ export const createTuneStreamOverrides = (options: {
   const fetchTuneStreams = async (): Promise<StreamInfo[]> => {
     const listResult = await options.StreamsApi.listStreams();
     if (Array.isArray(listResult)) return listResult as StreamInfo[];
-    const items = (listResult as any)?.items ?? null;
-    return Array.isArray(items) ? (items as StreamInfo[]) : [];
+    const items = asListedStreamsResult(listResult)?.items ?? null;
+    return Array.isArray(items) ? items : [];
   };
 
   const seedStreamOverrides = (stream: StreamInfo, pipelineId: string, baseGraph: PipelineGraphPlan | null): void => {
@@ -49,7 +58,7 @@ export const createTuneStreamOverrides = (options: {
 
     if (baseIsDaedalus) {
       if (streamPatch) {
-        const nodeOverrideEntries = nodeOverridesFromDaedalusPatch(streamPatch as any, baseGraph);
+        const nodeOverrideEntries = nodeOverridesFromDaedalusPatch(streamPatch as DaedalusPatch, baseGraph);
         if (Object.keys(nodeOverrideEntries).length > 0) {
           options.setTuneStreamNodeOverridesById({
             ...options.getTuneStreamNodeOverridesById(),
@@ -202,8 +211,9 @@ export const createTuneStreamOverrideRuntime = (deps: TuneStreamOverrideRuntimeD
       }
       const handle = requestAnimationFrame(() => {
         const current = deps.getTuneStreamApplyRafById();
-        const { [streamId]: _omit, ...rest } = current;
-        deps.setTuneStreamApplyRafById(rest);
+        const nextRafs = { ...current };
+        delete nextRafs[streamId];
+        deps.setTuneStreamApplyRafById(nextRafs);
         void applyTuneStreamOverridesFor(streamId, { quiet: true });
       });
       deps.setTuneStreamApplyRafById({ ...deps.getTuneStreamApplyRafById(), [streamId]: handle });
@@ -246,8 +256,9 @@ export const createTuneStreamOverrideRuntime = (deps: TuneStreamOverrideRuntimeD
     const timers = deps.getTuneStreamAutoApplyTimerById();
     if (timers[streamId]) {
       clearTimeout(timers[streamId]);
-      const { [streamId]: _omit, ...rest } = timers;
-      deps.setTuneStreamAutoApplyTimerById(rest);
+      const nextTimers = { ...timers };
+      delete nextTimers[streamId];
+      deps.setTuneStreamAutoApplyTimerById(nextTimers);
     }
 
     try {
@@ -330,8 +341,9 @@ export const createTuneStreamOverrideRuntime = (deps: TuneStreamOverrideRuntimeD
       deps.setTuneStreamApplyBusyById(nextBusy);
       const queued = deps.getTuneStreamApplyQueuedById();
       if (queued[streamId]) {
-        const { [streamId]: _omit, ...rest } = queued;
-        deps.setTuneStreamApplyQueuedById(rest);
+        const nextQueued = { ...queued };
+        delete nextQueued[streamId];
+        deps.setTuneStreamApplyQueuedById(nextQueued);
         void applyTuneStreamOverridesFor(streamId, { quiet: true });
       }
     }

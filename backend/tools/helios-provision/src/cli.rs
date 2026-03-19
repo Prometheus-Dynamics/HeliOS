@@ -8,6 +8,9 @@ pub struct Cli {
     /// Path to provisions config
     #[arg(long, default_value = "/etc/helios/provisions.toml")]
     pub config: PathBuf,
+    /// Optional file to write provisioning outcome into
+    #[arg(long)]
+    pub status_file: Option<PathBuf>,
     /// Override detected disk
     #[arg(long)]
     pub disk: Option<String>,

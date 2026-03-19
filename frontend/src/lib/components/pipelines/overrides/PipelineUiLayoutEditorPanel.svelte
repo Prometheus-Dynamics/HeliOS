@@ -70,7 +70,11 @@
 {#if open}
   <div class="fixed z-[60] w-[32rem] max-w-[95vw]" style={panelStyle} data-floating-panel="layout">
     <div class="flex max-h-[calc(100vh-2rem)] max-h-[calc(100svh-2rem)] max-h-[calc(100dvh-2rem)] flex-col rounded border border-surface-800/80 bg-surface-950/95 shadow-2xl shadow-black/50">
-      <div class="flex cursor-move items-center justify-between gap-2 border-b border-surface-800/70 p-3" onpointerdown={onStartDrag}>
+      <div
+        class="flex cursor-move items-center justify-between gap-2 border-b border-surface-800/70 p-3"
+        role="presentation"
+        onpointerdown={onStartDrag}
+      >
         <div>
           <p class="text-micro-tight uppercase tracking-[0.2em] text-surface-500">Layout Builder</p>
           <p class="text-xs text-surface-400">Drag outputs into the grid.</p>

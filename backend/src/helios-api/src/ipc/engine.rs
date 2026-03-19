@@ -1,4 +1,5 @@
 use std::{
+    collections::{HashSet, VecDeque},
     future, io,
     path::{Path, PathBuf},
     sync::{
@@ -8,8 +9,12 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use helios_engine::ipc::{CalibrationSolveRequest, EngineCommand, EngineEvent, JsonWire, NodeRegistrySnapshot, StreamCalibration, StreamManifest};
+use helios_engine::ipc::{
+    CalibrationSolveRequest, EngineCommand, EngineEvent, JsonWire, LocalizationPipelineGraphRequest, LocalizationPipelineSampleRequest, LocalizationPipelineStatusRequest, LocalizationSolveRequest,
+    NodeRegistrySnapshot, StreamCalibration, StreamManifest,
+};
 use lib_ipc::client::{Client as GenericClient, Session as GenericSession, TransportConfig};
+use lib_ipc::journal::JournalEntry;
 use lib_ipc::types::CommandId;
 use lib_ipc::types::FeatureSet;
 use tokio::sync::{broadcast, mpsc, oneshot};
@@ -37,6 +42,12 @@ fn calibration_solve_timeout() -> Duration {
     const MAX_SECS: u64 = 1800;
     let secs = std::env::var("HELIOS_CALIBRATION_SOLVE_TIMEOUT_SECS").ok().and_then(|value| value.trim().parse::<u64>().ok()).unwrap_or(DEFAULT_SECS).clamp(MIN_SECS, MAX_SECS);
     Duration::from_secs(secs)
+}
+fn localization_solve_timeout() -> Duration {
+    const DEFAULT_MS: u64 = 30_000;
+    const MIN_MS: u64 = 1_000;
+    const MAX_MS: u64 = 300_000;
+    read_timeout_env("HELIOS_ENGINE_LOCALIZATION_SOLVE_TIMEOUT_MS", DEFAULT_MS, MIN_MS, MAX_MS)
 }
 const ENGINE_RECONNECT_INITIAL: Duration = Duration::from_millis(200);
 const ENGINE_RECONNECT_MAX: Duration = Duration::from_secs(5);
@@ -186,8 +197,9 @@ impl EngineConnection {
         let timeout = self.scaled_timeout(timeout);
         let command_id = command_id_from_context(label);
         let command = make_command(command_id);
+        let journal_mode = JournalMode::for_command(&command);
         let (tx, rx) = oneshot::channel();
-        let msg = EngineRequest { command_id, command, expected, respond_to: tx, label, deadline: Instant::now() + timeout, saw_transport_ack: false };
+        let msg = EngineRequest { command_id, command, expected, respond_to: tx, label, deadline: Instant::now() + timeout, saw_transport_ack: false, journal_mode };
         let send_timeout = self.scaled_timeout(engine_request_send_timeout());
         match tokio::time::timeout(send_timeout, self.requests.send(msg)).await {
             Ok(Ok(())) => {}
@@ -281,12 +293,12 @@ impl EngineConnection {
         }
     }
 
-    pub async fn refresh_node_registry(&self) -> Result<NodeRegistrySnapshot, lib_ipc::client::ClientTransportError> {
-        match self.request(|command_id| EngineCommand::RefreshNodeRegistry { command_id }, ExpectedEvent::NodeRegistry, "refresh_node_registry", ENGINE_RESPONSE_TIMEOUT).await? {
-            EngineEvent::NodeRegistry { snapshot, .. } => Ok(snapshot),
+    pub async fn discover_devices(&self) -> Result<helios_engine::capture::DiscoveryResult, lib_ipc::client::ClientTransportError> {
+        match self.request(|command_id| EngineCommand::DiscoverDevices { command_id }, ExpectedEvent::Discovery, "discover_devices", ENGINE_RESPONSE_TIMEOUT).await? {
+            EngineEvent::Discovery { discovery, .. } => Ok(discovery),
             EngineEvent::Nack { reason, .. } => Err(lib_ipc::client::ClientTransportError::Io(io::Error::other(reason))),
             other => {
-                warn!(?other, "engine returned unexpected event for refresh_node_registry after filtering");
+                warn!(?other, "engine returned unexpected event for discover_devices after filtering");
                 Err(lib_ipc::client::ClientTransportError::UnexpectedMessage { expected: lib_ipc::frame::MessageKind::Event, received: lib_ipc::frame::MessageKind::Event })
             }
         }
@@ -386,6 +398,51 @@ impl EngineConnection {
         self.request(|command_id| EngineCommand::SolveCalibration { command_id, request }, ExpectedEvent::CalibrationSolved, "solve_calibration", calibration_solve_timeout()).await
     }
 
+    pub async fn solve_localization_event(&self, request: LocalizationSolveRequest) -> Result<EngineEvent, lib_ipc::client::ClientTransportError> {
+        let request =
+            serde_json::to_value(request).map(JsonWire).map_err(|err| lib_ipc::client::ClientTransportError::Io(io::Error::other(format!("failed to encode localization request: {err}"))))?;
+        self.request(|command_id| EngineCommand::SolveLocalization { command_id, request }, ExpectedEvent::LocalizationSolved, "solve_localization", localization_solve_timeout()).await
+    }
+
+    pub async fn localization_pipeline_status_event(&self, request: LocalizationPipelineStatusRequest) -> Result<EngineEvent, lib_ipc::client::ClientTransportError> {
+        let request = serde_json::to_value(request)
+            .map(JsonWire)
+            .map_err(|err| lib_ipc::client::ClientTransportError::Io(io::Error::other(format!("failed to encode localization pipeline status request: {err}"))))?;
+        self.request(
+            |command_id| EngineCommand::GetLocalizationPipelineStatus { command_id, request },
+            ExpectedEvent::LocalizationPipelineStatus,
+            "localization_pipeline_status",
+            ENGINE_RESPONSE_TIMEOUT,
+        )
+        .await
+    }
+
+    pub async fn localization_pipeline_outputs_event(&self, request: LocalizationPipelineGraphRequest) -> Result<EngineEvent, lib_ipc::client::ClientTransportError> {
+        let request = serde_json::to_value(request)
+            .map(JsonWire)
+            .map_err(|err| lib_ipc::client::ClientTransportError::Io(io::Error::other(format!("failed to encode localization pipeline outputs request: {err}"))))?;
+        self.request(
+            |command_id| EngineCommand::ListLocalizationPipelineOutputs { command_id, request },
+            ExpectedEvent::LocalizationPipelineOutputs,
+            "localization_pipeline_outputs",
+            ENGINE_RESPONSE_TIMEOUT,
+        )
+        .await
+    }
+
+    pub async fn localization_pipeline_output_sample_event(&self, request: LocalizationPipelineSampleRequest) -> Result<EngineEvent, lib_ipc::client::ClientTransportError> {
+        let request = serde_json::to_value(request)
+            .map(JsonWire)
+            .map_err(|err| lib_ipc::client::ClientTransportError::Io(io::Error::other(format!("failed to encode localization pipeline sample request: {err}"))))?;
+        self.request(
+            |command_id| EngineCommand::SampleLocalizationPipelineOutput { command_id, request },
+            ExpectedEvent::LocalizationPipelineOutputSample,
+            "localization_pipeline_output_sample",
+            ENGINE_RESPONSE_TIMEOUT,
+        )
+        .await
+    }
+
     pub async fn list_streams(&self) -> Result<Vec<helios_engine::ipc::StreamSummary>, lib_ipc::client::ClientTransportError> {
         self.list_streams_with_timeout(ENGINE_RESPONSE_TIMEOUT).await
     }
@@ -430,6 +487,25 @@ struct EngineRequest {
     label: &'static str,
     deadline: Instant,
     saw_transport_ack: bool,
+    journal_mode: JournalMode,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum JournalMode {
+    Durable,
+    Ephemeral,
+}
+
+impl JournalMode {
+    fn for_command(command: &EngineCommand) -> Self {
+        match command {
+            EngineCommand::SolveLocalization { .. }
+            | EngineCommand::GetLocalizationPipelineStatus { .. }
+            | EngineCommand::ListLocalizationPipelineOutputs { .. }
+            | EngineCommand::SampleLocalizationPipelineOutput { .. } => Self::Ephemeral,
+            _ => Self::Durable,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -444,8 +520,13 @@ enum ExpectedEvent {
     Ack,
     StreamList,
     NodeRegistry,
+    Discovery,
     GraphValidation,
     CalibrationSolved,
+    LocalizationSolved,
+    LocalizationPipelineStatus,
+    LocalizationPipelineOutputs,
+    LocalizationPipelineOutputSample,
 }
 
 impl ExpectedEvent {
@@ -461,8 +542,15 @@ impl ExpectedEvent {
             ExpectedEvent::Ack => matches!(event, EngineEvent::Ack { .. } | EngineEvent::Nack { .. }),
             ExpectedEvent::StreamList => matches!(event, EngineEvent::StreamList { .. }),
             ExpectedEvent::NodeRegistry => matches!(event, EngineEvent::NodeRegistry { .. } | EngineEvent::Nack { .. }),
+            ExpectedEvent::Discovery => matches!(event, EngineEvent::Discovery { .. } | EngineEvent::Nack { .. }),
             ExpectedEvent::GraphValidation => matches!(event, EngineEvent::GraphValidation { .. } | EngineEvent::Nack { .. }),
             ExpectedEvent::CalibrationSolved => matches!(event, EngineEvent::CalibrationSolved { .. } | EngineEvent::Nack { .. }),
+            ExpectedEvent::LocalizationSolved => matches!(event, EngineEvent::LocalizationSolved { .. } | EngineEvent::Nack { .. }),
+            ExpectedEvent::LocalizationPipelineStatus => matches!(event, EngineEvent::LocalizationPipelineStatus { .. } | EngineEvent::Nack { .. }),
+            ExpectedEvent::LocalizationPipelineOutputs => matches!(event, EngineEvent::LocalizationPipelineOutputs { .. } | EngineEvent::Nack { .. }),
+            ExpectedEvent::LocalizationPipelineOutputSample => {
+                matches!(event, EngineEvent::LocalizationPipelineOutputSample { .. } | EngineEvent::Nack { .. })
+            }
         }
     }
 }
@@ -481,6 +569,8 @@ async fn run_engine_dispatcher(
     use std::collections::HashMap;
 
     let mut pending: HashMap<CommandId, EngineRequest> = HashMap::new();
+    let mut journal_order: VecDeque<(CommandId, JournalEntry<EngineCommand>)> = VecDeque::new();
+    let mut completed_journal_ids: HashSet<CommandId> = HashSet::new();
     let mut session: Option<EngineSession> = None;
     let mut backoff = ENGINE_RECONNECT_INITIAL;
     let mut rx_closed = false;
@@ -497,7 +587,7 @@ async fn run_engine_dispatcher(
                 }
                 Ok(Err(err)) => {
                     error!(%err, "engine handshake failed, will retry");
-                    flush_pending_disconnect(&mut pending);
+                    flush_pending_disconnect(&mut pending, &mut journal_order, &mut completed_journal_ids, client.journal());
                     mark_disconnected(&connected, &last_disconnect_ms);
                     sleep(backoff).await;
                     backoff = (backoff * 2).min(ENGINE_RECONNECT_MAX);
@@ -505,7 +595,7 @@ async fn run_engine_dispatcher(
                 }
                 Err(_) => {
                     error!("engine handshake timed out, will retry");
-                    flush_pending_disconnect(&mut pending);
+                    flush_pending_disconnect(&mut pending, &mut journal_order, &mut completed_journal_ids, client.journal());
                     mark_disconnected(&connected, &last_disconnect_ms);
                     sleep(backoff).await;
                     backoff = (backoff * 2).min(ENGINE_RECONNECT_MAX);
@@ -528,25 +618,38 @@ async fn run_engine_dispatcher(
                         let mut disconnect = false;
                         if let Some(sess) = session.as_mut() {
                             let send_timeout = scale_timeout(engine_command_send_timeout(), timeout_scale_ppm.load(Ordering::Relaxed));
-                            match tokio::time::timeout(send_timeout, sess.send_command(client.journal(), &request.command)).await {
-                                Ok(Ok(_)) => {
+                            let send = match request.journal_mode {
+                                JournalMode::Durable => tokio::time::timeout(send_timeout, sess.send_command(client.journal(), &request.command)).await.map(|result| result.map(Some)),
+                                JournalMode::Ephemeral => {
+                                    tokio::time::timeout(send_timeout, sess.send_ephemeral_command(&request.command)).await.map(|result| result.map(|()| None))
+                                }
+                            };
+                            match send {
+                                Ok(Ok(entry)) => {
+                                    if let Some(entry) = entry {
+                                        journal_order.push_back((request.command_id, entry));
+                                    }
                                     pending.insert(request.command_id, request);
                                 }
                                 Ok(Err(err)) => {
                                     let _ = request.respond_to.send(Err(err));
                                 }
                                 Err(_) => {
+                                    let command_id = request.command_id;
                                     let _ = request.respond_to.send(Err(lib_ipc::client::ClientTransportError::Io(
                                         io::Error::new(io::ErrorKind::TimedOut, "engine command send timed out"),
                                     )));
+                                    retire_journal_entry(command_id, &mut journal_order, &mut completed_journal_ids, client.journal());
                                     disconnect = true;
                                 }
                             }
                         } else {
+                            let command_id = request.command_id;
                             let _ = request.respond_to.send(Err(disconnected_error()));
+                            retire_journal_entry(command_id, &mut journal_order, &mut completed_journal_ids, client.journal());
                         }
                         if disconnect {
-                            flush_pending_disconnect(&mut pending);
+                            flush_pending_disconnect(&mut pending, &mut journal_order, &mut completed_journal_ids, client.journal());
                             session = None;
                             mark_disconnected(&connected, &last_disconnect_ms);
                         }
@@ -569,21 +672,21 @@ async fn run_engine_dispatcher(
                 let event = match event_result {
                     Ok(Some(ev)) => ev,
                     Ok(None) => {
-                        flush_pending_disconnect(&mut pending);
+                        flush_pending_disconnect(&mut pending, &mut journal_order, &mut completed_journal_ids, client.journal());
                         session = None;
                         mark_disconnected(&connected, &last_disconnect_ms);
                         continue;
                     }
                     Err(err) => {
                         error!(%err, "engine session error; reconnecting");
-                        flush_pending_disconnect(&mut pending);
+                        flush_pending_disconnect(&mut pending, &mut journal_order, &mut completed_journal_ids, client.journal());
                         session = None;
                         mark_disconnected(&connected, &last_disconnect_ms);
                         continue;
                     }
                 };
 
-                expire_timeouts(&mut pending);
+                expire_timeouts(&mut pending, &mut journal_order, &mut completed_journal_ids, client.journal());
 
                 update_scale_from_event(&event, &timeout_scale_ppm, &active_streams);
 
@@ -600,6 +703,7 @@ async fn run_engine_dispatcher(
                         delivered = true;
                     } else if req.expected.matches(&event) {
                         let _ = req.respond_to.send(Ok(event.clone()));
+                        retire_journal_entry(command_id, &mut journal_order, &mut completed_journal_ids, client.journal());
                         delivered = true;
                     } else {
                         // The engine IPC layer can emit an early transport-level Ack before the
@@ -622,6 +726,7 @@ async fn run_engine_dispatcher(
                         if let Some(req) = pending.remove(&id) {
                             if req.expected.matches(&event) {
                                 let _ = req.respond_to.send(Ok(event.clone()));
+                                retire_journal_entry(id, &mut journal_order, &mut completed_journal_ids, client.journal());
                                 delivered = true;
                             } else {
                                 pending.insert(id, req);
@@ -650,7 +755,7 @@ async fn run_engine_dispatcher(
                     future::pending::<()>().await;
                 }
             } => {
-                expire_timeouts(&mut pending);
+                expire_timeouts(&mut pending, &mut journal_order, &mut completed_journal_ids, client.journal());
             }
         }
 
@@ -692,20 +797,67 @@ fn update_scale_from_delta(timeout_scale_ppm: &AtomicU64, active_streams: &Atomi
     }
 }
 
-fn expire_timeouts(pending: &mut std::collections::HashMap<CommandId, EngineRequest>) {
+fn expire_timeouts(
+    pending: &mut std::collections::HashMap<CommandId, EngineRequest>,
+    journal_order: &mut VecDeque<(CommandId, JournalEntry<EngineCommand>)>,
+    completed_journal_ids: &mut HashSet<CommandId>,
+    journal: &lib_ipc::journal::JournalWriter<EngineCommand>,
+) {
     let now = Instant::now();
     let expired: Vec<CommandId> = pending.iter().filter_map(|(id, req)| (req.deadline <= now).then_some(*id)).collect();
     for id in expired {
         if let Some(req) = pending.remove(&id) {
             let _ = req.respond_to.send(Err(lib_ipc::client::ClientTransportError::Io(io::Error::new(io::ErrorKind::TimedOut, format!("{} timed out waiting for engine event", req.label)))));
+            retire_journal_entry(id, journal_order, completed_journal_ids, journal);
         }
     }
 }
 
-fn flush_pending_disconnect(pending: &mut std::collections::HashMap<CommandId, EngineRequest>) {
+fn flush_pending_disconnect(
+    pending: &mut std::collections::HashMap<CommandId, EngineRequest>,
+    journal_order: &mut VecDeque<(CommandId, JournalEntry<EngineCommand>)>,
+    completed_journal_ids: &mut HashSet<CommandId>,
+    journal: &lib_ipc::journal::JournalWriter<EngineCommand>,
+) {
     let drained: Vec<EngineRequest> = pending.drain().map(|(_, req)| req).collect();
     for req in drained {
+        let command_id = req.command_id;
         let _ = req.respond_to.send(Err(disconnected_error()));
+        retire_journal_entry(command_id, journal_order, completed_journal_ids, journal);
+    }
+}
+
+fn retire_journal_entry(
+    command_id: CommandId,
+    journal_order: &mut VecDeque<(CommandId, JournalEntry<EngineCommand>)>,
+    completed_journal_ids: &mut HashSet<CommandId>,
+    journal: &lib_ipc::journal::JournalWriter<EngineCommand>,
+) {
+    if !journal_order.iter().any(|(queued_id, _)| *queued_id == command_id) {
+        return;
+    }
+    completed_journal_ids.insert(command_id);
+    truncate_completed_journal_prefix(journal_order, completed_journal_ids, journal);
+}
+
+fn truncate_completed_journal_prefix(
+    journal_order: &mut VecDeque<(CommandId, JournalEntry<EngineCommand>)>,
+    completed_journal_ids: &mut HashSet<CommandId>,
+    journal: &lib_ipc::journal::JournalWriter<EngineCommand>,
+) {
+    let mut truncate_entry: Option<JournalEntry<EngineCommand>> = None;
+    while let Some((command_id, entry)) = journal_order.front() {
+        if !completed_journal_ids.remove(command_id) {
+            break;
+        }
+        truncate_entry = Some(entry.clone());
+        journal_order.pop_front();
+    }
+
+    if let Some(entry) = truncate_entry
+        && let Err(err) = journal.truncate_through(&entry)
+    {
+        warn!(%err, "failed to compact engine journal");
     }
 }
 
@@ -719,10 +871,10 @@ fn mark_disconnected(connected: &AtomicBool, last_disconnect_ms: &AtomicU64) {
     last_disconnect_ms.store(ts, Ordering::Relaxed);
 }
 
-async fn fetch_stream_count_for_tuning(client: &EngineClient, mut session: EngineSession) -> Option<usize> {
+async fn fetch_stream_count_for_tuning(_client: &EngineClient, mut session: EngineSession) -> Option<usize> {
     let command_id = CommandId::new();
     let command = EngineCommand::List { command_id };
-    if session.send_command(client.journal(), &command).await.is_err() {
+    if session.send_ephemeral_command(&command).await.is_err() {
         return None;
     }
 

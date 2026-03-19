@@ -1,7 +1,7 @@
 use crate::http::AppState;
 use crate::http::error_history::{ErrorHistoryEntry, record_error_entry};
-use crate::http::streams::util;
-use crate::http::streams_persist;
+use crate::stream_command_service;
+use crate::system_read_model::{SharedStreamMetricsSnapshot, SharedStreamOutputSample, SharedStreamOutputsEvent, SharedStreamOutputsPortsSnapshot};
 use axum::{
     Router,
     extract::{
@@ -13,7 +13,7 @@ use axum::{
 };
 use futures::{SinkExt, StreamExt};
 use helios_engine::capture::CaptureControlValue;
-use helios_engine::ipc::{EngineErrorCode, EngineEvent, StreamPipelineBinding};
+use helios_engine::ipc::EngineEvent;
 use helios_engine::stream::StreamMetrics;
 use helios_engine::stream::{read_latest_frame_with_header, touch_stream_viewer};
 use lib_asyncapi::registry::SchemaRegistry;
@@ -21,13 +21,9 @@ use lib_asyncapi::{SchemaProvider, Server, Tag, TypeSchema, WsDoc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{Mutex, mpsc, watch};
 use tracing::debug;
 use uuid::Uuid;
-
-use super::pipelines as pipelines_ws;
 
 type WsSender = futures::stream::SplitSink<WebSocket, Message>;
 
@@ -71,11 +67,11 @@ pub struct OutputsWsParams {
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/:id/metrics", get(stream_metrics))
-        .route("/:id/frames", get(stream_frames))
-        .route("/:id/updates", get(stream_updates))
-        .route("/:id/controls", get(stream_controls))
-        .route("/:id/outputs", get(stream_outputs))
+        .route("/{id}/metrics", get(stream_metrics))
+        .route("/{id}/frames", get(stream_frames))
+        .route("/{id}/updates", get(stream_updates))
+        .route("/{id}/controls", get(stream_controls))
+        .route("/{id}/outputs", get(stream_outputs))
 }
 
 async fn stream_metrics(ws: WebSocketUpgrade, State(state): State<AppState>, Path(id): Path<Uuid>, Query(params): Query<MetricsWsParams>) -> impl IntoResponse {
@@ -104,25 +100,35 @@ async fn stream_outputs(ws: WebSocketUpgrade, State(state): State<AppState>, Pat
 
 async fn handle_stream_metrics(socket: WebSocket, state: AppState, stream_id: Uuid, interval: Duration) {
     let (mut sender, mut receiver) = socket.split();
-    let mut events = state.engine.subscribe_events();
+    state.services.system.bind_stream_metrics_state(&state);
+    let (mut metrics_rx, latest) = match state.services.system.subscribe_stream_metrics(stream_id).await {
+        Ok(subscription) => subscription,
+        Err(err) => {
+            let _ = send_metrics_error(&mut sender, Some(stream_id), "snapshot", &err).await;
+            let _ = sender.close().await;
+            return;
+        }
+    };
 
     // Seed with a snapshot so UI can render immediately.
-    if let Err(err) = send_metrics_snapshot(&mut sender, &state, stream_id).await {
+    if let Some(snapshot) = latest.as_deref()
+        && let Err(err) = send_shared_metrics_payload(&mut sender, snapshot).await
+    {
         let _ = send_metrics_error(&mut sender, Some(stream_id), "snapshot", &err).await;
         let _ = sender.close().await;
         return;
     }
 
     let mut min_gap = interval;
-    let mut last_sent = Instant::now();
+    let mut last_sent = if latest.is_some() { Instant::now() } else { Instant::now().checked_sub(interval).unwrap_or_else(Instant::now) };
 
     loop {
         tokio::select! {
-            event = events.recv() => {
+            event = metrics_rx.recv() => {
                 match event {
-                    Ok(EngineEvent::Metrics { stream_id: sid, metrics, .. }) if sid == stream_id => {
+                    Ok(snapshot) => {
                         if last_sent.elapsed() >= min_gap {
-                            if let Err(err) = send_metrics_payload(&mut sender, stream_id, metrics).await {
+                            if let Err(err) = send_shared_metrics_payload(&mut sender, snapshot.as_ref()).await {
                                 let _ = send_metrics_error(&mut sender, Some(stream_id), "send_metrics", &err).await;
                                 let _ = sender.close().await;
                                 break;
@@ -130,17 +136,6 @@ async fn handle_stream_metrics(socket: WebSocket, state: AppState, stream_id: Uu
                             last_sent = Instant::now();
                         }
                     }
-                    Ok(EngineEvent::MetricsUpdate { stream_id: sid, metrics }) if sid == stream_id => {
-                        if last_sent.elapsed() >= min_gap {
-                            if let Err(err) = send_metrics_payload(&mut sender, stream_id, metrics).await {
-                                let _ = send_metrics_error(&mut sender, Some(stream_id), "send_metrics", &err).await;
-                                let _ = sender.close().await;
-                                break;
-                            }
-                            last_sent = Instant::now();
-                        }
-                    }
-                    Ok(_) => {}
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
@@ -303,198 +298,134 @@ struct OutputsSubscription {
 
 async fn handle_stream_outputs(socket: WebSocket, state: AppState, stream_id: Uuid, default_interval: Duration, ports_interval: Duration) {
     let (mut ws_sender, mut ws_receiver) = socket.split();
-    let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Message>();
-
-    // Send initial port list so UI can populate immediately.
-    match state.engine.list_graph_outputs_event(stream_id).await {
-        Ok(EngineEvent::GraphOutputs { outputs, .. }) => {
-            let payload = StreamOutputsList { outputs, timestamp_ms: chrono::Utc::now().timestamp_millis().max(0) as u64, request_id: None };
-            if let Ok(text) = serde_json::to_string(&payload) {
-                let _ = out_tx.send(Message::Text(text));
-            }
-        }
-        Ok(EngineEvent::Nack { code, reason, .. }) => {
-            let payload = StreamOutputsResponse::Error { request_id: None, error: format!("engine rejected outputs list: {code:?}: {reason}") };
-            if let Ok(text) = serde_json::to_string(&payload) {
-                let _ = out_tx.send(Message::Text(text));
-            }
-        }
-        Ok(_) => {
-            let payload = StreamOutputsResponse::Error { request_id: None, error: "unexpected engine response listing outputs".to_string() };
-            if let Ok(text) = serde_json::to_string(&payload) {
-                let _ = out_tx.send(Message::Text(text));
-            }
-        }
+    state.services.system.bind_stream_outputs_state(&state);
+    let (client_id, mut outputs_rx, initial_ports) = match state.services.system.subscribe_stream_outputs(stream_id, default_interval, ports_interval).await {
+        Ok(subscription) => subscription,
         Err(err) => {
-            let payload = StreamOutputsResponse::Error { request_id: None, error: format!("engine error listing outputs: {err}") };
-            if let Ok(text) = serde_json::to_string(&payload) {
-                let _ = out_tx.send(Message::Text(text));
-            }
+            let _ = send_stream_outputs_error(&mut ws_sender, None, err).await;
+            let _ = ws_sender.close().await;
+            return;
         }
+    };
+
+    let mut subscription = OutputsSubscription { ports: Vec::new(), interval: default_interval };
+    let mut last_sample_sent = BTreeMap::<String, Instant>::new();
+
+    if let Err(err) = send_stream_outputs_list(&mut ws_sender, &initial_ports, None).await {
+        let _ = send_stream_outputs_error(&mut ws_sender, None, err).await;
+        let _ = ws_sender.close().await;
+        state.services.system.unsubscribe_stream_outputs(stream_id, client_id).await;
+        return;
     }
 
-    let (sub_tx, mut sub_rx) = watch::channel(OutputsSubscription { ports: Vec::new(), interval: default_interval });
-
-    // Writer task.
-    let writer = tokio::spawn(async move {
-        while let Some(msg) = out_rx.recv().await {
-            if ws_sender.send(msg).await.is_err() {
-                break;
-            }
-        }
-        let _ = ws_sender.close().await;
-    });
-
-    // Sampler task.
-    let sampler_state = state.clone();
-    let sampler_tx = out_tx.clone();
-    let sampler = tokio::spawn(async move {
-        let mut subscription = sub_rx.borrow().clone();
-        let mut sample_tick = tokio::time::interval(subscription.interval);
-        sample_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
-        let mut ports_tick = tokio::time::interval(ports_interval);
-        ports_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
-        let mut last_outputs_local: Vec<helios_engine::ipc::GraphOutputPortDescriptor> = Vec::new();
-        let mut immediate = true;
-
-        loop {
-            tokio::select! {
-                _ = sub_rx.changed() => {
-                    subscription = sub_rx.borrow().clone();
-                    sample_tick = tokio::time::interval(subscription.interval);
-                    sample_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-                    immediate = true;
+    loop {
+        tokio::select! {
+            event = outputs_rx.recv() => {
+                match event {
+                    Ok(event) => match event.as_ref() {
+                        SharedStreamOutputsEvent::Ports(snapshot) => {
+                            if send_stream_outputs_list(&mut ws_sender, snapshot, None).await.is_err() {
+                                break;
+                            }
+                        }
+                        SharedStreamOutputsEvent::Sample(sample) => {
+                            if !subscription.ports.iter().any(|port| port == &sample.port) {
+                                continue;
+                            }
+                            let now = Instant::now();
+                            let allow_send = last_sample_sent
+                                .get(&sample.port)
+                                .map(|last_sent| now.duration_since(*last_sent) >= subscription.interval)
+                                .unwrap_or(true);
+                            if !allow_send {
+                                continue;
+                            }
+                            if send_stream_output_sample(&mut ws_sender, sample).await.is_err() {
+                                break;
+                            }
+                            last_sample_sent.insert(sample.port.clone(), now);
+                        }
+                    },
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
-                _ = ports_tick.tick() => {
-                    if let Ok(EngineEvent::GraphOutputs { outputs, .. }) = sampler_state.engine.list_graph_outputs_event(stream_id).await
-                        && outputs != last_outputs_local
-                    {
-                        last_outputs_local = outputs.clone();
-                        let payload = StreamOutputsList { outputs, timestamp_ms: chrono::Utc::now().timestamp_millis().max(0) as u64, request_id: None };
-                        if let Ok(text) = serde_json::to_string(&payload) {
-                            let _ = sampler_tx.send(Message::Text(text));
+            }
+            msg = ws_receiver.next() => {
+                let payload = match msg {
+                    Some(Ok(Message::Text(text))) => text,
+                    Some(Ok(Message::Ping(bytes))) => {
+                        if ws_sender.send(Message::Pong(bytes)).await.is_err() {
+                            break;
+                        }
+                        continue;
+                    }
+                    Some(Ok(Message::Close(_))) => break,
+                    Some(Ok(_)) => continue,
+                    Some(Err(err)) => {
+                        debug!(error = %err, "stream outputs websocket closed");
+                        break;
+                    }
+                    None => break,
+                };
+
+                let parsed = serde_json::from_str::<StreamOutputsRequest>(&payload);
+                match parsed {
+                    Ok(StreamOutputsRequest::Ping { request_id }) => {
+                        if send_stream_outputs_response(&mut ws_sender, StreamOutputsResponse::Ack { request_id }).await.is_err() {
+                            break;
                         }
                     }
-                }
-                _ = sample_tick.tick() => {
-                    if subscription.ports.is_empty() && !immediate {
-                        continue;
-                    }
-                    immediate = false;
-                    if subscription.ports.is_empty() {
-                        continue;
-                    }
-                    for port in &subscription.ports {
-                        let timestamp_ms = chrono::Utc::now().timestamp_millis().max(0) as u64;
-                        match sampler_state.engine.get_graph_output_sample_event(stream_id, port.clone()).await {
-                            Ok(EngineEvent::GraphOutputSample { value, .. }) => {
-                                let payload = StreamOutputSampleEvent { port: port.clone(), value: Some(value.0), error: None, timestamp_ms };
-                                if let Ok(text) = serde_json::to_string(&payload) {
-                                    let _ = sampler_tx.send(Message::Text(text));
-                                }
-                            }
-                            Ok(EngineEvent::Nack { code, reason, .. }) => {
-                                let payload = StreamOutputSampleEvent { port: port.clone(), value: None, error: Some(format!("{code:?}: {reason}")), timestamp_ms };
-                                if let Ok(text) = serde_json::to_string(&payload) {
-                                    let _ = sampler_tx.send(Message::Text(text));
-                                }
-                            }
-                            Ok(other) => {
-                                let payload = StreamOutputSampleEvent { port: port.clone(), value: None, error: Some(format!("unexpected engine response: {other:?}")), timestamp_ms };
-                                if let Ok(text) = serde_json::to_string(&payload) {
-                                    let _ = sampler_tx.send(Message::Text(text));
+                    Ok(StreamOutputsRequest::List { request_id }) => {
+                        match state.services.system.current_stream_outputs_ports(stream_id).await {
+                            Ok(snapshot) => {
+                                if send_stream_outputs_list(&mut ws_sender, &snapshot, request_id).await.is_err() {
+                                    break;
                                 }
                             }
                             Err(err) => {
-                                let payload = StreamOutputSampleEvent { port: port.clone(), value: None, error: Some(err.to_string()), timestamp_ms };
-                                if let Ok(text) = serde_json::to_string(&payload) {
-                                    let _ = sampler_tx.send(Message::Text(text));
+                                if send_stream_outputs_error(&mut ws_sender, request_id, err).await.is_err() {
+                                    break;
                                 }
                             }
+                        }
+                    }
+                    Ok(StreamOutputsRequest::Subscribe { ports, interval_ms, request_id }) => {
+                        let mut normalized: Vec<String> = ports.into_iter().map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect();
+                        normalized.sort();
+                        normalized.dedup();
+                        let interval = Duration::from_millis(interval_ms.unwrap_or(DEFAULT_OUTPUT_SAMPLE_INTERVAL_MS).clamp(MIN_OUTPUT_SAMPLE_INTERVAL_MS, MAX_OUTPUT_SAMPLE_INTERVAL_MS));
+                        match state
+                            .services
+                            .system
+                            .update_stream_outputs_subscription(stream_id, client_id, normalized.clone(), interval)
+                            .await
+                        {
+                            Ok(()) => {
+                                subscription = OutputsSubscription { ports: normalized, interval };
+                                last_sample_sent.clear();
+                                if send_stream_outputs_response(&mut ws_sender, StreamOutputsResponse::Ack { request_id }).await.is_err() {
+                                    break;
+                                }
+                            }
+                            Err(err) => {
+                                if send_stream_outputs_error(&mut ws_sender, request_id, err).await.is_err() {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        if send_stream_outputs_error(&mut ws_sender, None, format!("invalid request: {err}")).await.is_err() {
+                            break;
                         }
                     }
                 }
             }
         }
-    });
-
-    // Reader loop (in this task) updates the subscription.
-    while let Some(msg) = ws_receiver.next().await {
-        let payload = match msg {
-            Ok(Message::Text(text)) => text,
-            Ok(Message::Ping(bytes)) => {
-                let _ = out_tx.send(Message::Pong(bytes));
-                continue;
-            }
-            Ok(Message::Close(_)) => break,
-            Ok(_) => continue,
-            Err(err) => {
-                debug!(error = %err, "stream outputs websocket closed");
-                break;
-            }
-        };
-
-        let parsed = serde_json::from_str::<StreamOutputsRequest>(&payload);
-        match parsed {
-            Ok(StreamOutputsRequest::Ping { request_id }) => {
-                let response = StreamOutputsResponse::Ack { request_id };
-                if let Ok(text) = serde_json::to_string(&response) {
-                    let _ = out_tx.send(Message::Text(text));
-                }
-            }
-            Ok(StreamOutputsRequest::List { request_id }) => match state.engine.list_graph_outputs_event(stream_id).await {
-                Ok(EngineEvent::GraphOutputs { outputs, .. }) => {
-                    let event = StreamOutputsList { outputs, timestamp_ms: chrono::Utc::now().timestamp_millis().max(0) as u64, request_id };
-                    if let Ok(text) = serde_json::to_string(&event) {
-                        let _ = out_tx.send(Message::Text(text));
-                    }
-                }
-                Ok(EngineEvent::Nack { code, reason, .. }) => {
-                    let response = StreamOutputsResponse::Error { request_id, error: format!("engine rejected outputs list: {code:?}: {reason}") };
-                    if let Ok(text) = serde_json::to_string(&response) {
-                        let _ = out_tx.send(Message::Text(text));
-                    }
-                }
-                Ok(_) => {
-                    let response = StreamOutputsResponse::Error { request_id, error: "unexpected engine response listing outputs".to_string() };
-                    if let Ok(text) = serde_json::to_string(&response) {
-                        let _ = out_tx.send(Message::Text(text));
-                    }
-                }
-                Err(err) => {
-                    let response = StreamOutputsResponse::Error { request_id, error: format!("engine error listing outputs: {err}") };
-                    if let Ok(text) = serde_json::to_string(&response) {
-                        let _ = out_tx.send(Message::Text(text));
-                    }
-                }
-            },
-            Ok(StreamOutputsRequest::Subscribe { ports, interval_ms, request_id }) => {
-                let mut normalized: Vec<String> = ports.into_iter().map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect();
-                normalized.sort();
-                normalized.dedup();
-                let interval = Duration::from_millis(interval_ms.unwrap_or(DEFAULT_OUTPUT_SAMPLE_INTERVAL_MS).clamp(MIN_OUTPUT_SAMPLE_INTERVAL_MS, MAX_OUTPUT_SAMPLE_INTERVAL_MS));
-                let _ = sub_tx.send(OutputsSubscription { ports: normalized, interval });
-                let response = StreamOutputsResponse::Ack { request_id };
-                if let Ok(text) = serde_json::to_string(&response) {
-                    let _ = out_tx.send(Message::Text(text));
-                }
-            }
-            Err(err) => {
-                let response = StreamOutputsResponse::Error { request_id: None, error: format!("invalid request: {err}") };
-                if let Ok(text) = serde_json::to_string(&response) {
-                    let _ = out_tx.send(Message::Text(text));
-                }
-            }
-        }
     }
 
-    // Shutdown background tasks by dropping senders.
-    drop(out_tx);
-    sampler.abort();
-    let _ = sampler.await;
-    let _ = writer.await;
+    state.services.system.unsubscribe_stream_outputs(stream_id, client_id).await;
+    let _ = ws_sender.close().await;
 }
 
 async fn handle_stream_updates(mut socket: WebSocket, state: AppState, stream_id: Uuid) {
@@ -516,18 +447,26 @@ async fn handle_stream_updates(mut socket: WebSocket, state: AppState, stream_id
         let parsed = serde_json::from_str::<StreamUpdateRequest>(&payload);
         let response = match parsed {
             Ok(StreamUpdateRequest::Ping { request_id }) => StreamUpdateResponse::Ack { request_id },
-            Ok(StreamUpdateRequest::SetGraph { request_id, graph, pipeline_id, output }) => match apply_stream_graph_update(&state, stream_id, graph, pipeline_id, output).await {
-                Ok(()) => {
-                    state.publish_realtime_update(crate::ipc::RealtimeUpdateOrigin::Ws, "streams", format!("/v1/ws/streams/{stream_id}/updates"), Some("set_graph".to_string()), request_id.clone());
-                    StreamUpdateResponse::Ack { request_id }
+            Ok(StreamUpdateRequest::SetGraph { request_id, graph, pipeline_id, output }) => {
+                match stream_command_service::apply_stream_graph_update(&state, stream_id, graph, pipeline_id, output).await {
+                    Ok(()) => {
+                        state.publish_realtime_update(
+                            crate::ipc::RealtimeUpdateOrigin::Ws,
+                            crate::ipc::RealtimeUpdateKind::StreamsPipeline,
+                            format!("/v1/ws/streams/{stream_id}/updates"),
+                            Some("set_graph".to_string()),
+                            request_id.clone(),
+                        );
+                        StreamUpdateResponse::Ack { request_id }
+                    }
+                    Err(err) => StreamUpdateResponse::Error { request_id, error: err },
                 }
-                Err(err) => StreamUpdateResponse::Error { request_id, error: err },
-            },
-            Ok(StreamUpdateRequest::SetGraphPatch { request_id, patch, pipeline_id }) => match apply_stream_graph_patch(&state, stream_id, patch, pipeline_id).await {
+            }
+            Ok(StreamUpdateRequest::SetGraphPatch { request_id, patch, pipeline_id }) => match stream_command_service::apply_stream_graph_patch(&state, stream_id, patch, pipeline_id).await {
                 Ok(()) => {
                     state.publish_realtime_update(
                         crate::ipc::RealtimeUpdateOrigin::Ws,
-                        "streams",
+                        crate::ipc::RealtimeUpdateKind::StreamsPipeline,
                         format!("/v1/ws/streams/{stream_id}/updates"),
                         Some("set_graph_patch".to_string()),
                         request_id.clone(),
@@ -536,44 +475,24 @@ async fn handle_stream_updates(mut socket: WebSocket, state: AppState, stream_id
                 }
                 Err(err) => StreamUpdateResponse::Error { request_id, error: err },
             },
-            Ok(StreamUpdateRequest::SetInputs { request_id, pipeline_id, inputs }) => {
-                let pipeline_id = match pipeline_id {
-                    Some(id) => Some(id),
-                    None => resolve_stream_pipeline_id(&state, stream_id).await.ok(),
-                };
-                match state.engine.set_pipeline_inputs(stream_id, pipeline_id, inputs.clone()).await {
-                    Ok(EngineEvent::Ack { .. }) => {
-                        let updated = util::update_persisted_manifest_by_stream_id(stream_id, |manifest| {
-                            util::apply_pipeline_host_inputs_update(manifest, &inputs);
-                        })
-                        .await;
-                        if updated.is_none()
-                            && let Ok(streams) = state.engine.list_streams().await
-                            && let Some(stream) = streams.into_iter().find(|summary| summary.stream_id == stream_id)
-                        {
-                            let mut manifest = stream.manifest;
-                            util::apply_pipeline_host_inputs_update(&mut manifest, &inputs);
-                            streams_persist::persist_manifest(&util::camera_id_for_manifest(&manifest), Some(stream_id), manifest).await;
-                        }
-                        state.publish_realtime_update(
-                            crate::ipc::RealtimeUpdateOrigin::Ws,
-                            "streams",
-                            format!("/v1/ws/streams/{stream_id}/updates"),
-                            Some("set_inputs".to_string()),
-                            request_id.clone(),
-                        );
-                        StreamUpdateResponse::Ack { request_id }
-                    }
-                    Ok(EngineEvent::Nack { code, reason, .. }) => StreamUpdateResponse::Error { request_id, error: format!("engine rejected inputs: {code:?}: {reason}") },
-                    Ok(other) => StreamUpdateResponse::Error { request_id, error: format!("unexpected engine response: {other:?}") },
-                    Err(err) => StreamUpdateResponse::Error { request_id, error: format!("engine error: {err}") },
+            Ok(StreamUpdateRequest::SetInputs { request_id, pipeline_id, inputs }) => match stream_command_service::apply_stream_inputs(&state, stream_id, pipeline_id, inputs).await {
+                Ok(()) => {
+                    state.publish_realtime_update(
+                        crate::ipc::RealtimeUpdateOrigin::Ws,
+                        crate::ipc::RealtimeUpdateKind::StreamsPipeline,
+                        format!("/v1/ws/streams/{stream_id}/updates"),
+                        Some("set_inputs".to_string()),
+                        request_id.clone(),
+                    );
+                    StreamUpdateResponse::Ack { request_id }
                 }
-            }
+                Err(err) => StreamUpdateResponse::Error { request_id, error: err },
+            },
             Err(err) => StreamUpdateResponse::Error { request_id: None, error: format!("invalid request: {err}") },
         };
 
         if let Ok(text) = serde_json::to_string(&response)
-            && socket.send(Message::Text(text)).await.is_err()
+            && socket.send(Message::Text(text.into())).await.is_err()
         {
             break;
         }
@@ -581,245 +500,63 @@ async fn handle_stream_updates(mut socket: WebSocket, state: AppState, stream_id
 }
 
 async fn handle_stream_controls(mut socket: WebSocket, state: AppState, stream_id: Uuid) {
-    let pending_controls = Arc::new(Mutex::new(BTreeMap::<u32, CaptureControlValue>::new()));
-    let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+    let mut worker = stream_command_service::spawn_stream_controls_worker(state.clone(), stream_id, Duration::from_millis(CONTROL_APPLY_INTERVAL_MS));
 
-    let worker_state = state.clone();
-    let worker_pending_controls = Arc::clone(&pending_controls);
-    tokio::spawn(async move {
-        let mut apply_tick = tokio::time::interval(Duration::from_millis(CONTROL_APPLY_INTERVAL_MS));
-        apply_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        loop {
-            tokio::select! {
-                _ = apply_tick.tick() => {
-                    let latest = {
-                        let mut guard = worker_pending_controls.lock().await;
-                        if guard.is_empty() {
-                            continue;
+    loop {
+        tokio::select! {
+            msg = socket.next() => {
+                let payload = match msg {
+                    Some(Ok(Message::Text(text))) => text,
+                    Some(Ok(Message::Ping(bytes))) => {
+                        if socket.send(Message::Pong(bytes)).await.is_err() {
+                            break;
                         }
-                        std::mem::take(&mut *guard)
-                    };
-
-                    for (apply_id, apply_value) in latest {
-                        let _ = crate::http::streams::controls::set_control(worker_state.clone(), stream_id, apply_id, apply_value).await;
+                        continue;
                     }
-                }
-                changed = shutdown_rx.changed() => {
-                    if changed.is_err() || *shutdown_rx.borrow() {
+                    Some(Ok(Message::Close(_))) => break,
+                    Some(Ok(_)) => continue,
+                    Some(Err(err)) => {
+                        debug!(error = %err, "stream controls websocket closed");
                         break;
                     }
-                }
-            }
-        }
-    });
+                    None => break,
+                };
 
-    while let Some(msg) = socket.next().await {
-        let payload = match msg {
-            Ok(Message::Text(text)) => text,
-            Ok(Message::Ping(bytes)) => {
-                let _ = socket.send(Message::Pong(bytes)).await;
-                continue;
-            }
-            Ok(Message::Close(_)) => break,
-            Ok(_) => continue,
-            Err(err) => {
-                debug!(error = %err, "stream controls websocket closed");
-                break;
-            }
-        };
+                let parsed = serde_json::from_str::<StreamControlRequest>(&payload);
+                let immediate = match parsed {
+                    Ok(StreamControlRequest::Ping { request_id }) => Some(StreamControlResponse::Ack { request_id }),
+                    Ok(StreamControlRequest::SetControl { request_id, control_id, value }) => {
+                        worker.enqueue(control_id, request_id, value).await;
+                        None
+                    }
+                    Err(err) => Some(StreamControlResponse::Error { request_id: None, error: format!("invalid request: {err}") }),
+                };
 
-        let parsed = serde_json::from_str::<StreamControlRequest>(&payload);
-        let response = match parsed {
-            Ok(StreamControlRequest::Ping { request_id }) => StreamControlResponse::Ack { request_id },
-            Ok(StreamControlRequest::SetControl { request_id, control_id, value }) => {
+                if let Some(response) = immediate
+                    && let Ok(text) = serde_json::to_string(&response)
+                    && socket.send(Message::Text(text.into())).await.is_err()
                 {
-                    let mut guard = pending_controls.lock().await;
-                    guard.insert(control_id, value);
+                    break;
                 }
-                state.publish_realtime_update(crate::ipc::RealtimeUpdateOrigin::Ws, "streams", format!("/v1/ws/streams/{stream_id}/controls"), Some("set_control".to_string()), request_id.clone());
-                StreamControlResponse::Ack { request_id }
             }
-            Err(err) => StreamControlResponse::Error { request_id: None, error: format!("invalid request: {err}") },
-        };
-
-        if let Ok(text) = serde_json::to_string(&response)
-            && socket.send(Message::Text(text)).await.is_err()
-        {
-            break;
-        }
-    }
-
-    let _ = shutdown_tx.send(true);
-}
-
-async fn apply_stream_graph_update(state: &AppState, stream_id: Uuid, graph: serde_json::Value, pipeline_id: Option<Uuid>, output: Option<String>) -> Result<(), String> {
-    let pipeline_id = match pipeline_id {
-        Some(id) => id,
-        None => resolve_stream_pipeline_id(state, stream_id).await?,
-    };
-
-    // Persist graph updates into the pipeline store first. Streams must only reference pipeline IDs
-    // (no floating inline graphs), otherwise we end up with untracked/undeployable graphs.
-    pipelines_ws::update_pipeline_graph(state, pipeline_id, graph.clone(), None).await?;
-    let doc = pipelines_ws::load_pipeline_doc(pipeline_id).await?;
-
-    match state.engine.set_graph(stream_id, doc.graph.clone(), Some(pipeline_id), output.clone()).await {
-        Ok(EngineEvent::Ack { .. }) => {
-            if let Ok(streams) = state.engine.list_streams().await
-                && let Some(stream) = streams.iter().find(|s| s.stream_id == stream_id)
-            {
-                let mut manifest = stream.manifest.clone();
-                util::normalize_pipeline_manifest(&mut manifest);
-
-                let mut updated = false;
-                for binding in &mut manifest.pipelines {
-                    if binding.pipeline_id == pipeline_id {
-                        if output.is_some() {
-                            binding.pipeline_output = output.clone();
-                        }
-                        binding.pipeline_patch = None;
-                        updated = true;
-                        break;
-                    }
+            response = worker.next_result() => {
+                let Some(response) = response else {
+                    break;
+                };
+                let response = match response.result {
+                    Ok(()) => StreamControlResponse::Ack { request_id: response.request_id },
+                    Err(error) => StreamControlResponse::Error { request_id: response.request_id, error },
+                };
+                if let Ok(text) = serde_json::to_string(&response)
+                    && socket.send(Message::Text(text.into())).await.is_err()
+                {
+                    break;
                 }
-                if !updated {
-                    manifest.pipelines.push(StreamPipelineBinding { pipeline_id, pipeline_graph: None, pipeline_output: output.clone(), pipeline_patch: None });
-                }
-                manifest.pipeline_enabled = Some(true);
-                if manifest.active_pipeline_id.is_none() {
-                    manifest.active_pipeline_id = Some(pipeline_id);
-                }
-                if output.is_some() && manifest.active_pipeline_id == Some(pipeline_id) {
-                    manifest.active_pipeline_output = output.clone();
-                }
-
-                streams_persist::persist_manifest(&util::camera_id_for_manifest(&manifest), Some(stream_id), manifest).await;
             }
-            Ok(())
         }
-        Ok(EngineEvent::Nack { code: EngineErrorCode::NotFound, .. }) => {
-            let updated = util::update_persisted_manifest_by_stream_id(stream_id, |manifest| {
-                util::normalize_pipeline_manifest(manifest);
-
-                let mut replaced = false;
-                for binding in &mut manifest.pipelines {
-                    if binding.pipeline_id == pipeline_id {
-                        if output.is_some() {
-                            binding.pipeline_output = output.clone();
-                        }
-                        binding.pipeline_patch = None;
-                        replaced = true;
-                        break;
-                    }
-                }
-                if !replaced {
-                    manifest.pipelines.push(StreamPipelineBinding { pipeline_id, pipeline_graph: None, pipeline_output: output.clone(), pipeline_patch: None });
-                }
-
-                manifest.pipeline_enabled = Some(true);
-                if manifest.active_pipeline_id.is_none() {
-                    manifest.active_pipeline_id = Some(pipeline_id);
-                }
-                if output.is_some() && manifest.active_pipeline_id == Some(pipeline_id) {
-                    manifest.active_pipeline_output = output.clone();
-                }
-            })
-            .await;
-            if updated.is_some() { Ok(()) } else { Err("stream not found".to_string()) }
-        }
-        Ok(EngineEvent::Nack { code, reason, .. }) => Err(format!("engine rejected graph: {code:?}: {reason}")),
-        Ok(_) => Err("unexpected engine response".to_string()),
-        Err(err) => Err(format!("engine error: {err}")),
     }
-}
 
-async fn apply_stream_graph_patch(state: &AppState, stream_id: Uuid, patch: serde_json::Value, pipeline_id: Option<Uuid>) -> Result<(), String> {
-    let pipeline_id = match pipeline_id {
-        Some(id) => id,
-        None => resolve_stream_pipeline_id(state, stream_id).await?,
-    };
-
-    // Apply patch to the pipeline graph (persist), then push the updated graph to the running stream.
-    // This avoids per-stream floating patches that cannot be reasoned about or deployed.
-    let mut doc = pipelines_ws::load_pipeline_doc(pipeline_id).await?;
-    let mut daedalus_graph: daedalus::planner::Graph = serde_json::from_value(doc.graph.clone()).map_err(|err| format!("failed to decode pipeline graph: {err}"))?;
-    let patch_model: daedalus::planner::GraphPatch = serde_json::from_value(patch.clone()).map_err(|err| format!("invalid graph patch: {err}"))?;
-    let _report = patch_model.apply_to_graph(&mut daedalus_graph);
-    doc.graph = serde_json::to_value(&daedalus_graph).map_err(|err| format!("failed to encode patched graph: {err}"))?;
-    doc.updated_at_ms = chrono::Utc::now().timestamp_millis();
-    pipelines_ws::save_pipeline_doc(pipeline_id, &doc).await?;
-    pipelines_ws::update_pipeline_graph(state, pipeline_id, doc.graph.clone(), doc.name.clone()).await?;
-    let doc = pipelines_ws::load_pipeline_doc(pipeline_id).await?;
-
-    match state.engine.set_graph(stream_id, doc.graph.clone(), Some(pipeline_id), None).await {
-        Ok(EngineEvent::Ack { .. }) => {
-            if let Ok(streams) = state.engine.list_streams().await
-                && let Some(stream) = streams.iter().find(|s| s.stream_id == stream_id)
-            {
-                let mut manifest = stream.manifest.clone();
-                util::normalize_pipeline_manifest(&mut manifest);
-
-                let mut updated = false;
-                for binding in &mut manifest.pipelines {
-                    if binding.pipeline_id == pipeline_id {
-                        binding.pipeline_patch = None;
-                        updated = true;
-                        break;
-                    }
-                }
-                if !updated {
-                    manifest.pipelines.push(StreamPipelineBinding { pipeline_id, pipeline_graph: None, pipeline_output: None, pipeline_patch: None });
-                }
-                manifest.pipeline_enabled = Some(true);
-                if manifest.active_pipeline_id.is_none() {
-                    manifest.active_pipeline_id = Some(pipeline_id);
-                }
-
-                streams_persist::persist_manifest(&util::camera_id_for_manifest(&manifest), Some(stream_id), manifest).await;
-            }
-            Ok(())
-        }
-        Ok(EngineEvent::Nack { code: EngineErrorCode::NotFound, .. }) => {
-            let updated = util::update_persisted_manifest_by_stream_id(stream_id, |manifest| {
-                util::normalize_pipeline_manifest(manifest);
-
-                let mut replaced = false;
-                for binding in &mut manifest.pipelines {
-                    if binding.pipeline_id == pipeline_id {
-                        binding.pipeline_patch = None;
-                        replaced = true;
-                        break;
-                    }
-                }
-                if !replaced {
-                    manifest.pipelines.push(StreamPipelineBinding { pipeline_id, pipeline_graph: None, pipeline_output: None, pipeline_patch: None });
-                }
-
-                manifest.pipeline_enabled = Some(true);
-                if manifest.active_pipeline_id.is_none() {
-                    manifest.active_pipeline_id = Some(pipeline_id);
-                }
-            })
-            .await;
-            if updated.is_some() { Ok(()) } else { Err("stream not found".to_string()) }
-        }
-        Ok(EngineEvent::Nack { code, reason, .. }) => Err(format!("engine rejected graph: {code:?}: {reason}")),
-        Ok(_) => Err("unexpected engine response".to_string()),
-        Err(err) => Err(format!("engine error: {err}")),
-    }
-}
-
-async fn resolve_stream_pipeline_id(state: &AppState, stream_id: Uuid) -> Result<Uuid, String> {
-    let streams = state.engine.list_streams().await.map_err(|err| err.to_string())?;
-    let stream = streams.iter().find(|s| s.stream_id == stream_id).ok_or_else(|| "stream not found".to_string())?;
-    let manifest = &stream.manifest;
-    if let Some(active) = manifest.active_pipeline_id {
-        return Ok(active);
-    }
-    if let Some(binding) = manifest.pipelines.first() {
-        return Ok(binding.pipeline_id);
-    }
-    Err("pipeline_id is required".to_string())
+    worker.shutdown();
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -856,7 +593,7 @@ async fn handle_stream_frames(socket: WebSocket, state: AppState, stream_id: Uui
         Err(err) => {
             let payload = make_frames_error("snapshot_stream_output", &err);
             record_frames_error(&payload);
-            let _ = sender.send(Message::Text(serde_json::to_string(&payload).unwrap_or_else(|_| format!(r#"{{"type":"error","error":"{err}"}}"#)))).await;
+            let _ = sender.send(Message::Text(serde_json::to_string(&payload).unwrap_or_else(|_| format!(r#"{{"type":"error","error":"{err}"}}"#)).into())).await;
             let _ = sender.close().await;
             return;
         }
@@ -868,7 +605,7 @@ async fn handle_stream_frames(socket: WebSocket, state: AppState, stream_id: Uui
     if let Err(err) = set_stream_output(&state, stream_id, Some(requested_output.clone())).await {
         let payload = make_frames_error("set_stream_output", &err);
         record_frames_error(&payload);
-        let _ = sender.send(Message::Text(serde_json::to_string(&payload).unwrap_or_else(|_| format!(r#"{{"type":"error","error":"{err}"}}"#)))).await;
+        let _ = sender.send(Message::Text(serde_json::to_string(&payload).unwrap_or_else(|_| format!(r#"{{"type":"error","error":"{err}"}}"#)).into())).await;
         let _ = sender.close().await;
         return;
     }
@@ -927,11 +664,11 @@ async fn handle_stream_frames(socket: WebSocket, state: AppState, stream_id: Uui
                 if last_format != Some(format) {
                     last_format = Some(format);
                     let event = FramesEvent::Format { fourcc: hdr.fourcc.to_string(), width: hdr.width, height: hdr.height };
-                    if sender.send(Message::Text(serde_json::to_string(&event).unwrap_or_else(|_| r#"{"type":"format"}"#.to_string()))).await.is_err() {
+                    if sender.send(Message::Text(serde_json::to_string(&event).unwrap_or_else(|_| r#"{"type":"format"}"#.to_string()).into())).await.is_err() {
                         break;
                     }
                 }
-                if sender.send(Message::Binary(payload)).await.is_err() {
+                if sender.send(Message::Binary(payload.into())).await.is_err() {
                     break;
                 }
             }
@@ -980,20 +717,13 @@ fn parse_interval_update(raw: &str) -> Option<u64> {
     parsed.get("interval_ms").and_then(|v| v.as_u64())
 }
 
-async fn send_metrics_snapshot(sender: &mut WsSender, state: &AppState, stream_id: Uuid) -> Result<(), String> {
-    match state.engine.get_metrics(stream_id).await {
-        Ok(EngineEvent::Metrics { metrics, .. }) => send_metrics_payload(sender, stream_id, metrics).await,
-        Ok(EngineEvent::Nack { reason, .. }) => Err(reason),
-        Ok(_) => Err("unexpected engine response".into()),
-        Err(err) => Err(err.to_string()),
-    }
+async fn send_shared_metrics_payload(sender: &mut WsSender, snapshot: &SharedStreamMetricsSnapshot) -> Result<(), String> {
+    send_metrics_event(sender, StreamMetricsEvent { stream_id: snapshot.stream_id, metrics: snapshot.metrics.clone(), timestamp_ms: snapshot.timestamp_ms }).await
 }
 
-async fn send_metrics_payload(sender: &mut WsSender, stream_id: Uuid, metrics: StreamMetrics) -> Result<(), String> {
-    let timestamp_ms = chrono::Utc::now().timestamp_millis().max(0) as u64;
-    let payload = StreamMetricsEvent { stream_id, metrics, timestamp_ms };
+async fn send_metrics_event(sender: &mut WsSender, payload: StreamMetricsEvent) -> Result<(), String> {
     let text = serde_json::to_string(&payload).map_err(|err| err.to_string())?;
-    sender.send(Message::Text(text)).await.map_err(|err| err.to_string())
+    sender.send(Message::Text(text.into())).await.map_err(|err| err.to_string())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1127,7 +857,28 @@ async fn send_metrics_error(sender: &mut WsSender, stream_id: Option<Uuid>, oper
     let payload = make_metrics_error(stream_id, operation, reason);
     record_metrics_error(&payload);
     let text = serde_json::to_string(&payload).unwrap_or_else(|_| format!(r#"{{"error":"{reason}"}}"#));
-    sender.send(Message::Text(text)).await.map_err(|err| err.to_string())
+    sender.send(Message::Text(text.into())).await.map_err(|err| err.to_string())
+}
+
+async fn send_stream_outputs_list(sender: &mut WsSender, snapshot: &SharedStreamOutputsPortsSnapshot, request_id: Option<String>) -> Result<(), String> {
+    send_stream_outputs_message(sender, &StreamOutputsList { outputs: snapshot.outputs.clone(), timestamp_ms: snapshot.timestamp_ms, request_id }).await
+}
+
+async fn send_stream_output_sample(sender: &mut WsSender, sample: &SharedStreamOutputSample) -> Result<(), String> {
+    send_stream_outputs_message(sender, &StreamOutputSampleEvent { port: sample.port.clone(), value: sample.value.clone(), error: sample.error.clone(), timestamp_ms: sample.timestamp_ms }).await
+}
+
+async fn send_stream_outputs_response(sender: &mut WsSender, response: StreamOutputsResponse) -> Result<(), String> {
+    send_stream_outputs_message(sender, &response).await
+}
+
+async fn send_stream_outputs_error(sender: &mut WsSender, request_id: Option<String>, error: impl Into<String>) -> Result<(), String> {
+    send_stream_outputs_response(sender, StreamOutputsResponse::Error { request_id, error: error.into() }).await
+}
+
+async fn send_stream_outputs_message(sender: &mut WsSender, payload: &impl Serialize) -> Result<(), String> {
+    let text = serde_json::to_string(payload).map_err(|err| err.to_string())?;
+    sender.send(Message::Text(text.into())).await.map_err(|err| err.to_string())
 }
 
 pub struct StreamUuidDoc;

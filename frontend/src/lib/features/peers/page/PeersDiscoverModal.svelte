@@ -7,7 +7,6 @@
     DiscoveredStream,
     PeerDiscoveryInfo,
     PeerIntegrationKind,
-    PeerIntegrationMetadata,
     PeerSummary
   } from '$lib/types/peer';
 
@@ -20,7 +19,6 @@
   };
 
   type CustomTest = {
-    running: boolean;
     error: string | null;
     response: unknown;
     preview: CustomMappingPreview | null;
@@ -41,7 +39,6 @@
     networkTable: string;
     telemetryEndpoint: string;
     integrationKind: PeerIntegrationKind;
-    integrationBaseline: PeerIntegrationMetadata;
     mapping: CustomMappingForm;
     poseSource: 'http' | 'nt';
     arucoSource: 'http' | 'nt';

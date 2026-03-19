@@ -14,16 +14,18 @@ use tracing::{info, warn};
 use utoipa::ToSchema;
 
 use futures::TryStreamExt;
-use netlink_packet_route::{
-    AddressFamily,
-    address::AddressAttribute,
-    link::{BondMode, InfoBond, InfoData, InfoKind, InfoVlan, LinkAttribute, LinkInfo, LinkMessage},
-    route::{RouteAddress, RouteAttribute, RouteMessage, RouteProtocol},
-};
 use nix::errno::Errno;
 use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
-use rtnetlink::{Handle, RouteMessageBuilder, new_connection};
+use rtnetlink::{
+    Handle, RouteMessageBuilder, new_connection,
+    packet_route::{
+        AddressFamily,
+        address::AddressAttribute,
+        link::{BondMode, InfoBond, InfoData, InfoKind, InfoVlan, LinkAttribute, LinkInfo, LinkLayerType, LinkMessage},
+        route::{RouteAddress, RouteAttribute, RouteMessage, RouteProtocol},
+    },
+};
 use serde::{Deserialize, Serialize};
 use tokio::time::Duration;
 use tokio::{process::Command, task};
@@ -238,6 +240,11 @@ fn resolve_interface_name(name: &str) -> String {
     name.to_string()
 }
 
+fn should_include_without_addresses(settings: &NetworkInterfaceSettings) -> bool {
+    let name = settings.name.as_str();
+    settings.vlan.is_some() || settings.bond.is_some() || name.starts_with("eth") || name.starts_with("en") || name.starts_with("wl") || name.starts_with("ww")
+}
+
 async fn read_dns_config() -> Result<DnsConfig> {
     let path = dns_config_path();
     let content = match tokio::fs::read_to_string(&path).await {
@@ -356,7 +363,7 @@ async fn fetch_interface_settings(handle: &Handle, link: &LinkMessage) -> Result
         }
     }
 
-    if settings.ipv4.is_empty() && settings.ipv6.is_empty() {
+    if settings.ipv4.is_empty() && settings.ipv6.is_empty() && !should_include_without_addresses(&settings) {
         return Ok(None);
     }
 
@@ -507,7 +514,7 @@ pub async fn get_interfaces() -> Result<Vec<NetworkInterfaceSettings>> {
     let mut links = handle.link().get().execute();
 
     while let Some(link) = links.try_next().await.map_err(|e| Error::FailedToIterateInterface(format!("failed to iterate links: {e}")))? {
-        if link.header.link_layer_type == netlink_packet_route::link::LinkLayerType::Loopback {
+        if link.header.link_layer_type == LinkLayerType::Loopback {
             continue;
         }
 
@@ -819,7 +826,7 @@ async fn remove_default_route(handle: &Handle, if_index: u32, family: AddressFam
 #[cfg(test)]
 mod tests {
     use super::*;
-    use netlink_packet_route::link::{BondMode, LinkMessage};
+    use rtnetlink::packet_route::link::{BondMode, LinkMessage};
 
     #[test]
     fn parse_link_info_extracts_vlan_and_bond() {
@@ -858,6 +865,18 @@ mod tests {
         });
 
         set_test_dns_path(None);
+    }
+
+    #[test]
+    fn unaddressed_uplink_interfaces_are_kept() {
+        let end0 = NetworkInterfaceSettings { name: "end0".into(), ..NetworkInterfaceSettings::default() };
+        assert!(should_include_without_addresses(&end0));
+
+        let usb0 = NetworkInterfaceSettings { name: "usb0".into(), ..NetworkInterfaceSettings::default() };
+        assert!(!should_include_without_addresses(&usb0));
+
+        let vlan = NetworkInterfaceSettings { name: "vlan100".into(), vlan: Some(VlanConfig { id: 100, parent: Some("end0".into()) }), ..NetworkInterfaceSettings::default() };
+        assert!(should_include_without_addresses(&vlan));
     }
 
     fn set_test_dns_path(path: Option<PathBuf>) {

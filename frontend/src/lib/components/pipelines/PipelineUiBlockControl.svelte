@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { PipelineDataType, PipelineNodeValue } from '$lib/types/pipeline';
-  import type { PipelineUiItem, PipelineUiNodeDescriptor } from '$lib/features/pipelines/pipelineUiTypes';
+  import type { PipelineUiControl as PipelineUiControlItem, PipelineUiItem, PipelineUiNodeDescriptor } from '$lib/features/pipelines/pipelineUiTypes';
   import PipelineUiControl from '$lib/components/pipelines/PipelineUiControl.svelte';
   import FaIcon from '$lib/components/icons/FaIcon.svelte';
   import { faGear, faGripVertical } from '@fortawesome/free-solid-svg-icons';
@@ -28,7 +28,7 @@
     onDragStart,
     onDragEnd
   } = $props<{
-    item: PipelineUiItem;
+    item: PipelineUiControlItem;
     nodeDescriptors: PipelineUiNodeDescriptor[];
     streamNodeOverrides: Record<string, Record<string, PipelineNodeValue>>;
     streamNodeErrors: Record<string, Record<string, string | null>>;
@@ -51,7 +51,10 @@
     onDragEnd: () => void;
   }>();
 
-  const wrapperClass = `relative group ${selectedItemId === item.id ? 'ring-1 ring-primary-400/70' : ''} ${draggingItemId === item.id ? 'opacity-40' : ''}`;
+  const wrapperClass = $derived.by(
+    () =>
+      `relative group ${selectedItemId === item.id ? 'ring-1 ring-primary-400/70' : ''} ${draggingItemId === item.id ? 'opacity-40' : ''}`
+  );
 </script>
 
 <div data-ui-item role="group" class={wrapperClass} ondragover={(event) => onDragOver(event, item)} ondragleave={(event) => onDragLeave(event, item)} ondrop={(event) => onDrop(event, item)}>
@@ -91,7 +94,7 @@
     </div>
   {/if}
   <PipelineUiControl
-    control={item as any}
+    control={item}
     nodeDescriptors={nodeDescriptors}
     streamNodeOverrides={streamNodeOverrides}
     streamNodeErrors={streamNodeErrors}

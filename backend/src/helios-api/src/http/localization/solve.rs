@@ -4,7 +4,7 @@ use axum::{
 };
 use nalgebra::{UnitQuaternion, Vector3};
 use serde::Deserialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -15,15 +15,15 @@ use super::config;
 use super::maps;
 use super::sources::ApiLocalizationSourceFetcher;
 
-use helios_engine::ipc::{RigPose as StreamRigPose, StreamSummary};
+use helios_engine::ipc::{EngineEvent, LocalizationSolveRequest, LocalizationSolveSourceValue, RigPose as StreamRigPose, StreamCalibration, StreamSummary};
 use helios_engine::localization::config::LocalizationSourceConfig;
 use helios_engine::localization::config::select_profile;
-use helios_engine::localization::math::{PoseTransform, RigPose, RigRotation, RigTranslation, rig_pose_to_viewer_transform};
-use helios_engine::localization::solve::solve_localization;
-use helios_engine::localization::sources::imu_vec_to_viewer_frame;
+use helios_engine::localization::fetch::LocalizationSourceFetcher;
+use helios_engine::localization::fetch::imu_vec_to_viewer_frame;
+use helios_engine::localization::maps::FieldMapDocument;
+use helios_engine::localization::math::{PoseTransform, RigPose, RigRotation, RigTranslation, rig_pose_to_viewer_transform, transform_to_pose};
 use helios_engine::localization::types::LocalizationSolveResponse;
 use helios_peripherals::dto::SensorScope;
-use lib_cv::modules::aruco::pose::TagPoseCalibration;
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct LocalizationSolveQuery {
@@ -31,6 +31,12 @@ pub(crate) struct LocalizationSolveQuery {
     // Keep the canonical field name `profile_id` so generated OpenAPI matches the docs.
     #[serde(default, rename = "profile_id", alias = "profileId")]
     profile_id: Option<String>,
+    #[serde(default = "default_apply_field_origin", rename = "apply_field_origin", alias = "applyFieldOrigin")]
+    apply_field_origin: bool,
+}
+
+fn default_apply_field_origin() -> bool {
+    true
 }
 
 const RAW_STREAM_PIPELINE_UUID: Uuid = Uuid::from_u128(0x00000000_0000_0000_0000_0000000000aa);
@@ -39,7 +45,10 @@ const RAW_STREAM_PIPELINE_UUID: Uuid = Uuid::from_u128(0x00000000_0000_0000_0000
     get,
     path = "/localization/solve",
     tag = "Localization",
-    params(("profile_id" = Option<String>, Query, description = "Profile id override")),
+    params(
+        ("profile_id" = Option<String>, Query, description = "Profile id override"),
+        ("apply_field_origin" = Option<bool>, Query, description = "Apply profile fieldOrigin transform to field-space outputs (default true)")
+    ),
     responses((status = 200, description = "Localization solve outputs", body = LocalizationSolveResponse))
 )]
 pub async fn solve(State(state): State<AppState>, Query(query): Query<LocalizationSolveQuery>) -> ApiResult<Json<LocalizationSolveResponse>> {
@@ -51,12 +60,62 @@ pub async fn solve(State(state): State<AppState>, Query(query): Query<Localizati
     let mut rig_poses = load_rig_poses(&state, &sources).await;
     inject_imu_leveling_rig_pose(&state, profile, &mut rig_poses).await;
     let field_map = if let Some(map_id) = profile.field_map_id.as_deref() { maps::load_map_document(map_id).await.ok() } else { None };
-    let calibrations = load_stream_calibrations(&state).await;
-
     let fetcher = ApiLocalizationSourceFetcher::new(state.clone());
-    let response = solve_localization(profile, &sources, &rig_poses, field_map.as_ref(), &calibrations, &fetcher).await;
+    let response = solve_via_engine(&state, profile, sources, &rig_poses, field_map.as_ref(), &fetcher, query.apply_field_origin).await.map_err(ApiError::bad_gateway)?;
 
     Ok(Json(response))
+}
+
+pub(crate) async fn solve_via_engine(
+    state: &AppState,
+    profile: &helios_engine::localization::config::LocalizationProfile,
+    sources: Vec<LocalizationSourceConfig>,
+    rig_poses: &HashMap<String, PoseTransform>,
+    field_map: Option<&helios_engine::localization::maps::FieldMapDocument>,
+    fetcher: &ApiLocalizationSourceFetcher,
+    apply_field_origin: bool,
+) -> Result<LocalizationSolveResponse, String> {
+    let request = build_localization_solve_request(state, profile, sources, rig_poses, field_map, fetcher, apply_field_origin).await?;
+    match state.engine.solve_localization_event(request).await {
+        Ok(EngineEvent::LocalizationSolved { response, .. }) => serde_json::from_value(response.into()).map_err(|err| format!("invalid localization solve response: {err}")),
+        Ok(EngineEvent::Nack { reason, .. }) => Err(reason),
+        Ok(other) => Err(format!("unexpected engine response: {other:?}")),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+async fn build_localization_solve_request(
+    state: &AppState,
+    profile: &helios_engine::localization::config::LocalizationProfile,
+    sources: Vec<LocalizationSourceConfig>,
+    rig_poses: &HashMap<String, PoseTransform>,
+    field_map: Option<&helios_engine::localization::maps::FieldMapDocument>,
+    fetcher: &ApiLocalizationSourceFetcher,
+    apply_field_origin: bool,
+) -> Result<LocalizationSolveRequest, String> {
+    let source_values = fetch_localization_source_values(fetcher, &sources).await;
+    let calibrations = load_stream_calibrations(state).await.into_iter().collect::<BTreeMap<_, _>>();
+    let rig_poses = rig_poses.iter().map(|(camera_uid, pose)| (camera_uid.clone(), transform_to_pose(pose))).collect::<BTreeMap<_, _>>();
+    let field_map = strip_overlay_from_field_map(field_map);
+
+    Ok(LocalizationSolveRequest { profile: profile.clone(), sources, rig_poses, field_map, calibrations, source_values, apply_field_origin })
+}
+
+fn strip_overlay_from_field_map(field_map: Option<&FieldMapDocument>) -> Option<FieldMapDocument> {
+    let mut field_map = field_map.cloned()?;
+    field_map.overlay = None;
+    Some(field_map)
+}
+
+pub(crate) async fn fetch_localization_source_values(fetcher: &ApiLocalizationSourceFetcher, sources: &[LocalizationSourceConfig]) -> Vec<LocalizationSolveSourceValue> {
+    let mut values = Vec::with_capacity(sources.len());
+    for source in sources {
+        match LocalizationSourceFetcher::fetch_source_value(fetcher, source).await {
+            Ok(value) => values.push(LocalizationSolveSourceValue { source_id: source.id.clone(), value: Some(value.into()), error: None }),
+            Err(error) => values.push(LocalizationSolveSourceValue { source_id: source.id.clone(), value: None, error: Some(error) }),
+        }
+    }
+    values
 }
 
 pub(crate) fn dedupe_enabled_sources(sources: Vec<LocalizationSourceConfig>) -> Vec<LocalizationSourceConfig> {
@@ -211,12 +270,8 @@ pub(crate) async fn inject_imu_leveling_rig_pose(state: &AppState, profile: &hel
     // as an explicit configuration term and compose it here.
     // Only apply IMU leveling when the profile explicitly includes an IMU source.
     // This keeps "stream only" profiles deterministic and avoids surprising users.
-    let has_imu_source = profile.sources.iter().any(|source| {
-        if !source.enabled {
-            return false;
-        }
-        source_looks_like_imu(source)
-    });
+    let enabled_sources: Vec<&LocalizationSourceConfig> = profile.sources.iter().filter(|source| source.enabled).collect();
+    let has_imu_source = enabled_sources.iter().any(|source| source_looks_like_imu(source));
     if !has_imu_source {
         return;
     }
@@ -224,13 +279,55 @@ pub(crate) async fn inject_imu_leveling_rig_pose(state: &AppState, profile: &hel
     // If the profile already carries an explicit IMU pose/orientation source, do not also force
     // a camera rig leveling override from raw accel. Doing both applies two independent IMU
     // rotations and causes yaw/roll/pitch frame drift.
-    let has_explicit_imu_pose_source = profile.sources.iter().any(|source| source.enabled && source_looks_like_imu_pose(source));
+    let has_explicit_imu_pose_source = enabled_sources.iter().any(|source| source_looks_like_imu_pose(source));
     if has_explicit_imu_pose_source {
         return;
     }
 
-    let camera_uids: Vec<String> =
-        profile.sources.iter().filter(|source| source.enabled).map(|source| source.camera_uid.trim()).filter(|uid| !uid.is_empty() && *uid != "imu").map(|uid| uid.to_string()).collect();
+    let mut camera_uid_set = BTreeSet::<String>::new();
+    for imu_source in enabled_sources.iter().copied().filter(|source| source_looks_like_imu(source)) {
+        let imu_camera_uid = imu_source.camera_uid.trim();
+        if !imu_camera_uid.is_empty() && !imu_camera_uid.eq_ignore_ascii_case("imu") && !imu_camera_uid.starts_with("peer:") {
+            camera_uid_set.insert(imu_camera_uid.to_string());
+            continue;
+        }
+
+        let imu_stream_id = imu_source.stream_id.trim();
+        if imu_stream_id.is_empty() {
+            continue;
+        }
+        for source in enabled_sources.iter().copied().filter(|source| !source_looks_like_imu(source)) {
+            if source.stream_id.trim() != imu_stream_id {
+                continue;
+            }
+            let camera_uid = source.camera_uid.trim();
+            if camera_uid.is_empty() || camera_uid.eq_ignore_ascii_case("imu") || camera_uid.starts_with("peer:") {
+                continue;
+            }
+            camera_uid_set.insert(camera_uid.to_string());
+        }
+    }
+
+    // If the IMU source is global and only one non-IMU camera is active, bind leveling to that one.
+    if camera_uid_set.is_empty() {
+        let non_imu_camera_uids = enabled_sources
+            .iter()
+            .copied()
+            .filter(|source| !source_looks_like_imu(source))
+            .filter_map(|source| {
+                let camera_uid = source.camera_uid.trim();
+                if camera_uid.is_empty() || camera_uid.eq_ignore_ascii_case("imu") || camera_uid.starts_with("peer:") {
+                    return None;
+                }
+                Some(camera_uid.to_string())
+            })
+            .collect::<BTreeSet<_>>();
+        if non_imu_camera_uids.len() == 1 {
+            camera_uid_set = non_imu_camera_uids;
+        }
+    }
+
+    let camera_uids: Vec<String> = camera_uid_set.into_iter().collect();
     if camera_uids.is_empty() {
         return;
     }
@@ -302,29 +399,14 @@ pub(crate) async fn inject_imu_leveling_rig_pose(state: &AppState, profile: &hel
     }
 }
 
-pub(crate) async fn load_stream_calibrations(state: &AppState) -> HashMap<String, TagPoseCalibration> {
+pub(crate) async fn load_stream_calibrations(state: &AppState) -> HashMap<String, StreamCalibration> {
     let mut out = HashMap::new();
     let streams = state.engine.list_streams().await.unwrap_or_default();
     for stream in streams {
         let Some(calib) = stream.manifest.calibration else {
             continue;
         };
-        out.insert(
-            stream.stream_id.to_string(),
-            TagPoseCalibration {
-                fx: calib.fx,
-                fy: calib.fy,
-                cx: calib.cx,
-                cy: calib.cy,
-                k1: calib.k1,
-                k2: calib.k2,
-                p1: calib.p1,
-                p2: calib.p2,
-                k3: calib.k3,
-                undistort_iters: calib.undistort_iters.clamp(0, u8::MAX as i64) as u8,
-                lens_model: calib.lens_model,
-            },
-        );
+        out.insert(stream.stream_id.to_string(), calib);
     }
     out
 }
@@ -333,6 +415,42 @@ fn map_rig_pose(pose: &StreamRigPose) -> RigPose {
     RigPose {
         translation: RigTranslation { x: pose.translation.x, y: pose.translation.y, z: pose.translation.z },
         rotation: RigRotation { roll: pose.rotation.roll, pitch: pose.rotation.pitch, yaw: pose.rotation.yaw },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_overlay_from_field_map;
+    use helios_engine::localization::maps::{FieldMapDocument, FieldMapOverlay, FieldMapSource};
+
+    #[test]
+    fn strip_overlay_from_field_map_removes_embedded_image_data() {
+        let field_map = FieldMapDocument {
+            schema_version: 1,
+            id: "test".to_string(),
+            name: "Test".to_string(),
+            width_m: 1.0,
+            depth_m: 1.0,
+            markers: Vec::new(),
+            source: FieldMapSource::LimelightFmap { original_file_name: None, map_type: None },
+            overlay: Some(FieldMapOverlay {
+                data_url: "data:image/png;base64,AAAA".to_string(),
+                mime_type: Some("image/png".to_string()),
+                opacity: Some(1.0),
+                width_m: Some(1.0),
+                depth_m: Some(1.0),
+                offset_x_m: Some(0.0),
+                offset_z_m: Some(0.0),
+                rotation_deg: Some(0.0),
+            }),
+        };
+
+        let stripped = strip_overlay_from_field_map(Some(&field_map)).expect("stripped field map");
+
+        assert!(stripped.overlay.is_none());
+        assert_eq!(stripped.markers.len(), field_map.markers.len());
+        assert_eq!(stripped.id, field_map.id);
+        assert_eq!(stripped.name, field_map.name);
     }
 }
 

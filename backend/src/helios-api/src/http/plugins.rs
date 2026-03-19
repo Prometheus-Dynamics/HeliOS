@@ -2,7 +2,7 @@ use axum::{
     Json, Router,
     body::Body,
     extract::{DefaultBodyLimit, Multipart, Path, State},
-    http::{StatusCode, header},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -22,17 +22,18 @@ use uuid::Uuid;
 use super::AppState;
 use super::error::{ApiError, ApiResult, ErrorBody};
 use super::storage::sanitize_name;
+use super::upload_integrity;
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_plugins))
         .route("/upload", post(upload_plugin))
         .route("/install", post(install_plugin))
-        .route("/disabled/:name", get(download_disabled))
-        .route("/uploads/:name", get(download_upload))
-        .route("/:name/disable", post(disable_plugin))
-        .route("/:name/enable", post(enable_plugin))
-        .route("/:name", get(download_plugin).delete(delete_plugin))
+        .route("/disabled/{name}", get(download_disabled))
+        .route("/uploads/{name}", get(download_upload))
+        .route("/{name}/disable", post(disable_plugin))
+        .route("/{name}/enable", post(enable_plugin))
+        .route("/{name}", get(download_plugin).delete(delete_plugin))
         .route_layer(DefaultBodyLimit::disable())
 }
 
@@ -116,15 +117,10 @@ async fn list_plugins(State(state): State<AppState>) -> ApiResult<impl IntoRespo
     let uploads = list_plugins_with_suffix(&upload_dir(), PLUGIN_SUFFIX).await?;
 
     const IPC_TIMEOUT: Duration = Duration::from_secs(3);
-    let mut engine_available = true;
+    let engine_available = state.engine.list_streams_with_timeout(IPC_TIMEOUT).await.is_ok();
     let mut compatibility = Vec::new();
-    match state.engine.get_node_registry_with_timeout(IPC_TIMEOUT).await {
-        Ok(snapshot) => {
-            compatibility = snapshot.plugin_compatibility;
-        }
-        Err(_) => {
-            engine_available = false;
-        }
+    if let Ok(snapshot) = state.services.pipelines.load_registry_snapshot_from_disk_or_helper().await {
+        compatibility = snapshot.plugin_compatibility;
     }
 
     let mut compatibility_map: BTreeMap<String, PluginCompatibility> = BTreeMap::new();
@@ -167,18 +163,22 @@ async fn list_plugins(State(state): State<AppState>) -> ApiResult<impl IntoRespo
         (status = 500, description = "Storage error", body = ErrorBody)
     )
 )]
-async fn upload_plugin(mut multipart: Multipart) -> ApiResult<impl IntoResponse> {
+async fn upload_plugin(headers: HeaderMap, mut multipart: Multipart) -> ApiResult<impl IntoResponse> {
     let max_bytes = max_upload_bytes();
+    let expected_upload_bytes = upload_integrity::expected_upload_bytes(&headers).map_err(ApiError::bad_request)?;
     let mut uploaded: Option<PluginUploadResponse> = None;
 
     while let Some(field) = multipart.next_field().await.map_err(|err| ApiError::bad_request(format!("failed to read upload payload: {err}")))? {
-        let upload = process_upload_field(field, max_bytes).await?;
         if uploaded.is_some() {
             return Err(ApiError::bad_request("only one file may be uploaded per request"));
         }
+        let upload = process_upload_field(field, max_bytes, expected_upload_bytes).await?;
         let target_dir = ensure_upload_dir().await?;
         let target_path = target_dir.join(&upload.name);
-        store_upload(&upload.temp_path, &target_path).await?;
+        if let Err(err) = store_upload(&upload.temp_path, &target_path).await {
+            let _ = fs::remove_file(&upload.temp_path).await;
+            return Err(err);
+        }
         let _ = fs::remove_file(&upload.temp_path).await;
         uploaded = Some(PluginUploadResponse { name: upload.name, size_bytes: upload.size_bytes, sha256: upload.sha256 });
     }
@@ -210,6 +210,7 @@ async fn install_plugin(Json(payload): Json<PluginInstallRequest>) -> ApiResult<
     }
     let target = target_dir.join(&upload_name);
     move_upload(&source, &target).await?;
+    invalidate_registry_snapshot_file().await;
     Ok(Json(PluginInstallResponse { name: upload_name, installed: true }))
 }
 
@@ -253,13 +254,19 @@ async fn delete_plugin(Path(name): Path<String>) -> ApiResult<impl IntoResponse>
     ensure_plugin_filename(&name)?;
     let path = install_dir().join(&name);
     match fs::remove_file(&path).await {
-        Ok(_) => return Ok(StatusCode::NO_CONTENT),
+        Ok(_) => {
+            invalidate_registry_snapshot_file().await;
+            return Ok(StatusCode::NO_CONTENT);
+        }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
         Err(err) => return Err(ApiError::internal(format!("failed to delete plugin: {err}"))),
     }
     let disabled_path = install_dir().join(format!("{name}{DISABLED_SUFFIX_SUFFIX}"));
     match fs::remove_file(&disabled_path).await {
-        Ok(_) => Ok(StatusCode::NO_CONTENT),
+        Ok(_) => {
+            invalidate_registry_snapshot_file().await;
+            Ok(StatusCode::NO_CONTENT)
+        }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Err(ApiError::not_found("plugin not found")),
         Err(err) => Err(ApiError::internal(format!("failed to delete plugin: {err}"))),
     }
@@ -280,6 +287,7 @@ async fn disable_plugin(Path(name): Path<String>) -> ApiResult<impl IntoResponse
     if fs::metadata(&source).await.is_ok() {
         let target = install.join(format!("{name}{DISABLED_SUFFIX_SUFFIX}"));
         move_upload(&source, &target).await?;
+        invalidate_registry_snapshot_file().await;
         return Ok(Json(PluginToggleResponse { name, enabled: false }));
     }
 
@@ -292,6 +300,7 @@ async fn disable_plugin(Path(name): Path<String>) -> ApiResult<impl IntoResponse
     if fs::metadata(&marker).await.is_err() {
         let _ = fs::File::create(&marker).await.map_err(|err| ApiError::internal(format!("failed to create disable marker: {err}")))?;
     }
+    invalidate_registry_snapshot_file().await;
     Ok(Json(PluginToggleResponse { name, enabled: false }))
 }
 
@@ -314,6 +323,7 @@ async fn enable_plugin(Path(name): Path<String>) -> ApiResult<impl IntoResponse>
             let target = install.join(&name);
             move_upload(&disabled_path, &target).await?;
         }
+        invalidate_registry_snapshot_file().await;
         return Ok(Json(PluginToggleResponse { name, enabled: true }));
     }
 
@@ -456,7 +466,7 @@ struct UploadedTemp {
     sha256: String,
 }
 
-async fn process_upload_field(mut field: axum::extract::multipart::Field<'_>, limit: u64) -> ApiResult<UploadedTemp> {
+async fn process_upload_field(mut field: axum::extract::multipart::Field<'_>, limit: u64, expected_upload_bytes: Option<u64>) -> ApiResult<UploadedTemp> {
     let filename = field.file_name().and_then(sanitize_name).ok_or_else(|| ApiError::bad_request("upload missing filename"))?;
     ensure_plugin_filename(&filename)?;
     let temp_path = std::env::temp_dir().join(format!("helios-plugin-{}", Uuid::new_v4()));
@@ -464,19 +474,42 @@ async fn process_upload_field(mut field: axum::extract::multipart::Field<'_>, li
     let mut hasher = Sha256::new();
     let mut written: u64 = 0;
 
-    while let Some(chunk) = field.chunk().await.map_err(|err| ApiError::bad_request(format!("failed to read upload: {err}")))? {
+    while let Some(chunk) = match field.chunk().await {
+        Ok(chunk) => chunk,
+        Err(err) => {
+            let _ = fs::remove_file(&temp_path).await;
+            return Err(ApiError::bad_request(format!("failed to read upload: {err}")));
+        }
+    } {
         written += chunk.len() as u64;
         if written > limit {
             let _ = fs::remove_file(&temp_path).await;
             return Err(ApiError::payload_too_large(format!("upload exceeds limit of {} bytes", limit)));
         }
-        file.write_all(&chunk).await.map_err(|err| ApiError::internal(format!("failed to write upload: {err}")))?;
+        if let Err(err) = file.write_all(&chunk).await {
+            let _ = fs::remove_file(&temp_path).await;
+            return Err(ApiError::internal(format!("failed to write upload: {err}")));
+        }
         hasher.update(&chunk);
     }
 
-    file.flush().await.map_err(|err| ApiError::internal(format!("failed to finish upload: {err}")))?;
+    if let Err(err) = upload_integrity::validate_expected_upload_bytes(written, expected_upload_bytes) {
+        let _ = fs::remove_file(&temp_path).await;
+        return Err(ApiError::bad_request(err));
+    }
+    let stored_bytes = match upload_integrity::finalize_file_upload(&mut file, &temp_path, written).await {
+        Ok(stored_bytes) => stored_bytes,
+        Err(err) => {
+            let _ = fs::remove_file(&temp_path).await;
+            return Err(ApiError::internal(format!("failed to finish upload: {err}")));
+        }
+    };
+    if let Err(err) = upload_integrity::validate_expected_upload_bytes(stored_bytes, expected_upload_bytes) {
+        let _ = fs::remove_file(&temp_path).await;
+        return Err(ApiError::bad_request(err));
+    }
     let sha256 = hex::encode(hasher.finalize());
-    Ok(UploadedTemp { name: filename, temp_path, size_bytes: written, sha256 })
+    Ok(UploadedTemp { name: filename, temp_path, size_bytes: stored_bytes, sha256 })
 }
 
 async fn store_upload(source: &std::path::Path, target: &std::path::Path) -> ApiResult<()> {
@@ -550,6 +583,11 @@ async fn ensure_upload_dir() -> ApiResult<std::path::PathBuf> {
     let dir = upload_dir();
     fs::create_dir_all(&dir).await.map_err(|err| ApiError::internal(format!("failed to create upload dir: {err}")))?;
     Ok(dir)
+}
+
+async fn invalidate_registry_snapshot_file() {
+    let path = std::env::var("HELIOS_NODE_REGISTRY_SNAPSHOT_PATH").map(std::path::PathBuf::from).unwrap_or_else(|_| std::path::PathBuf::from("/var/lib/helios/state/node-registry.snapshot.json"));
+    let _ = fs::remove_file(path).await;
 }
 
 fn ensure_plugin_filename(name: &str) -> Result<(), Box<ApiError>> {

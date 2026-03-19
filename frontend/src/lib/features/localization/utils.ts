@@ -5,6 +5,19 @@ import type {
 } from './localizationConfig';
 import type { LocalizationPipelineSource } from './pipelineSources';
 
+type LocalizationSourceLike = {
+  id?: string | null;
+  streamId?: string | null;
+  cameraUid?: string | null;
+};
+
+const MEDIA_IMU_STREAM_RE =
+  /^external:media-imu-([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i;
+const MEDIA_IMU_ID_RE =
+  /^external:media-imu-([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}):/i;
+const MEDIA_IMU_CAMERA_RE =
+  /^media-imu:([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i;
+
 export const SOURCE_COLORS = ['#38bdf8', '#f97316', '#a855f7', '#22c55e', '#e11d48', '#facc15', '#0ea5e9', '#10b981'] as const;
 export const PROFILE_COLORS = ['#f97316', '#38bdf8', '#22c55e', '#a855f7', '#e11d48', '#facc15', '#0ea5e9', '#10b981'] as const;
 export const POSE_SPACE_OPTIONS: LocalizationPoseSpace[] = [
@@ -125,10 +138,6 @@ export function updateProfileSources(
   return { ...profile, sources: nextSources };
 }
 
-export function updateProfilePipelineTemplate(profile: LocalizationProfile, templateId: string | null): LocalizationProfile {
-  return { ...profile, pipelineTemplateId: templateId };
-}
-
 export function updateProfileSourceInputKey(
   profile: LocalizationProfile,
   sourceId: string,
@@ -173,8 +182,28 @@ export function buildOutputSpacesFromSolve(
   return Array.from(next.values());
 }
 
-export function cameraKeyForSource(source: LocalizationPipelineSource | null): string | null {
+export function mediaImuParentStreamIdForSource(source: LocalizationSourceLike | null | undefined): string | null {
   if (!source) return null;
+  const streamId = String(source.streamId ?? '').trim();
+  const id = String(source.id ?? '').trim();
+  const cameraUid = String(source.cameraUid ?? '').trim();
+
+  const byStream = streamId.match(MEDIA_IMU_STREAM_RE)?.[1];
+  if (byStream) return byStream;
+
+  const byId = id.match(MEDIA_IMU_ID_RE)?.[1];
+  if (byId) return byId;
+
+  const byCamera = cameraUid.match(MEDIA_IMU_CAMERA_RE)?.[1];
+  if (byCamera) return byCamera;
+
+  return null;
+}
+
+export function cameraKeyForSource(source: LocalizationSourceLike | null | undefined): string | null {
+  if (!source) return null;
+  const parentStreamId = mediaImuParentStreamIdForSource(source);
+  if (parentStreamId) return parentStreamId;
   const cameraUid = String(source.cameraUid ?? '').trim();
   if (cameraUid) return cameraUid;
   const streamId = String(source.streamId ?? '').trim();

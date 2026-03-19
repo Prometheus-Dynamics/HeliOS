@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { PipelineDataType, PipelineNodeValue } from '$lib/types/pipeline';
-  import type { PipelineUiItem, PipelineUiNodeDescriptor } from '$lib/features/pipelines/pipelineUiTypes';
+  import type { PipelineUiItem, PipelineUiNodeDescriptor, PipelineUiTabsItem } from '$lib/features/pipelines/pipelineUiTypes';
   import PipelineUiTabs from '$lib/components/pipelines/PipelineUiTabs.svelte';
   import FaIcon from '$lib/components/icons/FaIcon.svelte';
   import { faGear, faGripVertical } from '@fortawesome/free-solid-svg-icons';
@@ -29,7 +29,7 @@
     onDragStart,
     onDragEnd
   } = $props<{
-    item: PipelineUiItem;
+    item: PipelineUiTabsItem;
     nodeDescriptors: PipelineUiNodeDescriptor[];
     streamNodeOverrides: Record<string, Record<string, PipelineNodeValue>>;
     streamNodeErrors: Record<string, Record<string, string | null>>;
@@ -53,7 +53,10 @@
     onDragEnd: () => void;
   }>();
 
-  const wrapperClass = `${grid ? 'md:col-span-2' : ''} relative group ${editMode ? 'rounded border border-dashed border-surface-700/70 p-2' : ''} ${selectedItemId === item.id ? 'ring-1 ring-primary-400/70' : ''} ${draggingItemId === item.id ? 'opacity-40' : ''}`;
+  const wrapperClass = $derived.by(
+    () =>
+      `${grid ? 'md:col-span-2' : ''} relative group ${editMode ? 'rounded border border-dashed border-surface-700/70 p-2' : ''} ${selectedItemId === item.id ? 'ring-1 ring-primary-400/70' : ''} ${draggingItemId === item.id ? 'opacity-40' : ''}`
+  );
 </script>
 
 <div data-ui-item role="group" class={wrapperClass} ondragover={(event) => onDragOver(event, item)} ondragleave={(event) => onDragLeave(event, item)} ondrop={(event) => onDrop(event, item)}>
@@ -93,7 +96,7 @@
     </div>
   {/if}
   <PipelineUiTabs
-    item={item as any}
+    {item}
     nodeDescriptors={nodeDescriptors}
     streamNodeOverrides={streamNodeOverrides}
     streamNodeErrors={streamNodeErrors}

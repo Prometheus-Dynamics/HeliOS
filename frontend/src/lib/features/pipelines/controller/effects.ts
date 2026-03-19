@@ -9,6 +9,7 @@ import type { DaedalusRegistryNode } from '$lib/ts-bindings/http/client';
 import type { PipelinesStore } from '../pipelinesStore';
 import { ensurePlanPortMetadata } from '$lib/components/flow/pipeline-graph/utils';
 import { replacePlanAtPath, resolvePlanAtPath } from '../nesting';
+import { createPipelineRegistryWorker } from '$lib/workers/factories';
 
 export function createPlanMutations(deps: {
   getSelectedPipeline: () => PipelineOverviewPipeline | null;
@@ -118,7 +119,7 @@ export function createRegistryEffects(deps: {
   >();
 
   if (typeof Worker !== 'undefined') {
-    registryWorker = new Worker(new URL('$lib/workers/pipelineRegistryWorker.ts', import.meta.url), { type: 'module' });
+    registryWorker = createPipelineRegistryWorker();
     registryWorker.onmessage = (event) => {
       const payload = event.data as { requestId?: number; entries?: PipelineRegistryEntry[]; error?: string };
       const requestId = payload?.requestId;

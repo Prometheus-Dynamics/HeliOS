@@ -1,16 +1,7 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import CalibrationResults from './CalibrationResults.svelte';
   import { estimateCalibrationFovDegs } from '../cameraCalibrationUtils';
-
-  type CalibrationBoard = {
-    squaresX: number;
-    squaresY: number;
-    squareMm: number;
-    markerMm: number;
-    marginMm: number;
-    dpi: number;
-    dictionary?: string;
-  };
 
   type CalibrationImage = {
     name: string;
@@ -74,7 +65,7 @@
 
   type CalibrationRunProps = {
     calibrationTool: 'lens' | 'color';
-    calibrationBoard: CalibrationBoard;
+    calibrationBoard: unknown;
     streamUuid: string | null;
     currentCalibrationParams: CalibrationParams | null;
     sourceResolution: { width: number; height: number } | null;
@@ -169,6 +160,7 @@
     onOpenIpaChartSolverForImage,
     onApplyIpaCcm
   }: CalibrationRunProps = $props();
+  untrack(() => calibrationBoard);
 
   export type $$Props = CalibrationRunProps;
 
@@ -210,6 +202,31 @@
 
   // Svelte 5 `{@const}` tags have strict placement rules; compute this in script instead.
   const currentFovs = $derived(estimateCalibrationFovDegs(sourceResolution, currentCalibrationParams));
+  const calibrationQualityTier = $derived.by(() => {
+    if (!calibrationResult) return null;
+    const views = Math.max(0, Number(calibrationResult.viewsUsed ?? 0));
+    const points = Math.max(0, Number(calibrationResult.pointsUsed ?? 0));
+    const reproj = Number(calibrationResult.reprojectionErrorPx ?? Number.POSITIVE_INFINITY);
+    if (views >= 8 && points >= 200 && Number.isFinite(reproj) && reproj <= 1.2) {
+      return {
+        label: 'High quality',
+        detail: 'Strong view diversity and low reprojection error.',
+        className: 'border-success-700/50 bg-success-950/20 text-success-100'
+      };
+    }
+    if (views >= 4 && points >= 80 && Number.isFinite(reproj) && reproj <= 2.0) {
+      return {
+        label: 'Medium quality',
+        detail: 'Usable solve. More diverse snapshots can improve stability.',
+        className: 'border-warning-700/50 bg-warning-950/20 text-warning-100'
+      };
+    }
+    return {
+      label: 'Low quality',
+      detail: 'Solve succeeded, but additional angles/distances are recommended before saving.',
+      className: 'border-warning-700/50 bg-warning-950/20 text-warning-100'
+    };
+  });
 
   let calibrationImportInput = $state<HTMLInputElement | null>(null);
 
@@ -240,6 +257,11 @@
     link.remove();
     URL.revokeObjectURL(url);
   }
+
+  function openIpaDownload(url: string): void {
+    if (typeof window === 'undefined') return;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
 </script>
 
 <section class="rounded border border-surface-800/60 bg-surface-900/40 p-4">
@@ -249,9 +271,9 @@
       <p class="mt-1 text-sm font-semibold text-surface-100">{calibrationTool === 'lens' ? 'Lens calibration' : 'Color correction'}</p>
     </div>
     {#if calibrationTool === 'lens'}
-      <div class="flex items-center gap-1">
+      <div class="flex flex-wrap items-center justify-end gap-1">
         <select
-          class="h-8 min-w-[14rem] rounded border border-surface-700/70 bg-surface-950/70 px-2 text-xs text-surface-200 focus-visible:outline-none"
+          class="h-8 w-full rounded border border-surface-700/70 bg-surface-950/70 px-2 text-xs text-surface-200 focus-visible:outline-none sm:min-w-[14rem]"
           value={calibrationImportSourceId}
           onchange={(event) => onSetCalibrationImportSourceId((event.currentTarget as HTMLSelectElement).value)}
           disabled={calibrationImporting || calibrationImportSourcesLoading || calibrationImportSources.length === 0}
@@ -409,6 +431,12 @@
           {/if}
         </div>
       {:else}
+        {#if calibrationQualityTier}
+          <div class={`rounded border px-4 py-3 text-xs ${calibrationQualityTier.className}`}>
+            <p class="font-semibold uppercase tracking-[0.2em]">{calibrationQualityTier.label}</p>
+            <p class="mt-1">{calibrationQualityTier.detail}</p>
+          </div>
+        {/if}
         <CalibrationResults
           calibrationResult={calibrationResult}
           sourceResolution={sourceResolution}
@@ -466,8 +494,20 @@
           <p class="text-xs text-surface-500">Solve a 3×3 CCM from a ColorChecker Classic 24 photo and write it into the IPA JSON.</p>
         </div>
         <div class="flex flex-wrap gap-2">
-          <a class="btn btn-xs preset-tonal" href={apiPath('/device/ipa/download?target=pisp')}>pisp JSON</a>
-          <a class="btn btn-xs preset-tonal" href={apiPath('/device/ipa/download?target=vc4')}>vc4 JSON</a>
+          <button
+            class="btn btn-xs preset-tonal"
+            type="button"
+            onclick={() => openIpaDownload(apiPath('/device/ipa/download?target=pisp'))}
+          >
+            pisp JSON
+          </button>
+          <button
+            class="btn btn-xs preset-tonal"
+            type="button"
+            onclick={() => openIpaDownload(apiPath('/device/ipa/download?target=vc4'))}
+          >
+            vc4 JSON
+          </button>
         </div>
       </div>
 

@@ -1,6 +1,6 @@
 import type { ResourceSample } from '$lib/api/telemetry';
 import type { CameraCard, CameraStatus, FirmwareAlertInfo, PeripheralEntry } from '$lib/types/devices';
-import type { CameraCardItem, CameraStatusCounts, PeripheralBadge, PeripheralBadgeTone, PeripheralItem, ThrottleBanner } from './types';
+import type { CameraCardItem, CameraStatusCounts, PeripheralBadge, PeripheralItem, ThrottleBanner } from './types';
 
 export const CAMERA_STATUS_CLASS: Record<CameraStatus, string> = {
   live: 'text-success-400',
@@ -113,13 +113,16 @@ export function peripheralKey(peripheral: PeripheralEntry, idx: number): string 
   return normalizeKey(peripheral.driverCameraId ?? peripheral.name) ?? `peripheral-${idx}`;
 }
 
-export function cameraLink(cam: CameraCard): string {
+export function cameraLink(cam: CameraCard): '/peers' | `/devices/${string}` {
   const ref =
     normalizeKey(cam.captureSessionId) ??
     normalizeKey(cam.cameraUid) ??
     normalizeKey(cam.driverCameraId) ??
     normalizeKey(cam.hardwareId) ??
     'unknown';
+  if (ref.startsWith('peer:')) {
+    return '/peers';
+  }
   return `/devices/${encodeURIComponent(ref)}`;
 }
 

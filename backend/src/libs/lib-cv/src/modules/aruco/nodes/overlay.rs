@@ -265,14 +265,19 @@ fn overlay_id_label_centered(image: &mut DynamicImage, id: u32, center_x: i64, y
         if cache.len() >= OVERLAY_ID_CACHE_MAX && !cache.contains_key(&id) {
             cache.clear();
         }
-        let entry = cache.entry(id).or_insert_with(|| {
-            let text = id.to_string();
-            let width = (text.len() as u32 * 14).max(14);
-            let height = 14 + 5;
-            let mut img = RgbaImage::from_pixel(width, height, Rgba([0, 0, 0, 0]));
-            draw::text::draw_text_x_y(&mut img, text.as_str(), (0u32, 0u32), &draw::font::FontType::SavedByZero, 14, Rgba([0, 255, 0, 255]));
-            img
-        });
+        {
+            cache.entry(id).or_insert_with(|| {
+                let text = id.to_string();
+                let width = (text.len() as u32 * 14).max(14);
+                let height = 14 + 5;
+                let mut img = RgbaImage::from_pixel(width, height, Rgba([0, 0, 0, 0]));
+                draw::text::draw_text_x_y(&mut img, text.as_str(), (0u32, 0u32), &draw::font::FontType::SavedByZero, 14, Rgba([0, 255, 0, 255]));
+                img
+            });
+        }
+        let total = cache.values().map(|image| image.as_raw().capacity() * std::mem::size_of::<u8>()).sum::<usize>();
+        report_overlay_id_cache_bytes(total);
+        let entry = cache.get(&id).expect("overlay id cache entry inserted");
         let x = center_x - (entry.width() as i64 / 2);
         draw::utils::overlay_rgba_image(image, entry, x, y);
     });
@@ -296,45 +301,51 @@ fn overlay_detection_crosshair(image: &mut DynamicImage, cx: i64, cy: i64, size_
     draw::line::overlay_line_x_y(image, (cx, top), (cx, bottom), thickness.max(1), color);
 }
 
+#[derive(Clone, Debug, NodeConfig)]
+struct ArucoOverlayDetectionsConfig {
+    #[port(default = 3i64, meta(ui_min = 1, ui_max = 16, ui_step = 1))]
+    thickness: i64,
+    #[port(default = true)]
+    draw_boxes: bool,
+    #[port(default = true)]
+    draw_corners: bool,
+    #[port(default = true)]
+    draw_ids: bool,
+    #[port(default = true)]
+    draw_hud: bool,
+    #[port(default = false)]
+    draw_crosshair: bool,
+    #[port(default = 0.25f64, meta(ui_min = 0.05, ui_max = 1.5, ui_step = 0.05))]
+    crosshair_scale: f64,
+    #[port(default = 0i64, meta(ui_min = 0, ui_max = 16, ui_step = 1))]
+    crosshair_thickness: i64,
+}
+
 #[node(
     id = "overlay_detections",
     inputs(
         port(name = "frame", ty = TypeExpr::opaque("image:dynamic")),
         port(name = "detections", source = "ArucoDetections2D", ty = crate::daedalus_types::aruco_detections_2d()),
-        port(name = "thickness", default = 3i64, meta(ui_min = 1, ui_max = 16, ui_step = 1)),
-        port(name = "draw_boxes", default = true),
-        port(name = "draw_corners", default = true),
-        port(name = "draw_ids", default = true),
-        port(name = "draw_hud", default = true),
-        port(name = "draw_crosshair", default = false),
-        port(name = "crosshair_scale", default = 0.25f64, meta(ui_min = 0.05, ui_max = 1.5, ui_step = 0.05)),
-        port(name = "crosshair_thickness", default = 0i64, meta(ui_min = 0, ui_max = 16, ui_step = 1))
+        config = ArucoOverlayDetectionsConfig
     ),
     outputs(port(name = "frame", ty = TypeExpr::opaque("image:dynamic")))
 )]
 fn cv_aruco_overlay(
     frame: Payload<DynamicImage>,
-    detections: Option<Vec<ArucoDetection2D>>,
-    thickness: i64,
-    draw_boxes: bool,
-    draw_corners: bool,
-    draw_ids: bool,
-    draw_hud: bool,
-    draw_crosshair: bool,
-    crosshair_scale: f64,
-    crosshair_thickness: i64,
+    detections: Option<std::sync::Arc<Vec<ArucoDetection2D>>>,
+    cfg: ArucoOverlayDetectionsConfig,
     exec_ctx: &ExecutionContext,
 ) -> Result<Payload<DynamicImage>, NodeError> {
-    let thickness = u32::try_from(thickness).unwrap_or(3).clamp(1, 32);
-    let detections = detections.unwrap_or_default();
-    if (!draw_boxes && !draw_corners && !draw_ids && !draw_hud && !draw_crosshair) || (detections.is_empty() && !draw_hud) {
+    let thickness = u32::try_from(cfg.thickness).unwrap_or(3).clamp(1, 32);
+    let detections = detections.as_deref().map(Vec::as_slice).unwrap_or(&[]);
+    if (!cfg.draw_boxes && !cfg.draw_corners && !cfg.draw_ids && !cfg.draw_hud && !cfg.draw_crosshair) || (detections.is_empty() && !cfg.draw_hud) {
         return Ok(frame);
     }
     let mut out = expect_cpu_frame(frame, "overlay_detections", Some(exec_ctx))?;
-    let crosshair_scale = crosshair_scale.clamp(0.05, 1.5);
-    let crosshair_thickness = if crosshair_thickness <= 0 { thickness } else { u32::try_from(crosshair_thickness).unwrap_or(thickness).clamp(1, 32) };
+    let crosshair_scale = cfg.crosshair_scale.clamp(0.05, 1.5);
+    let crosshair_thickness = if cfg.crosshair_thickness <= 0 { thickness } else { u32::try_from(cfg.crosshair_thickness).unwrap_or(thickness).clamp(1, 32) };
 
-    for det in &detections {
+    for det in detections {
         let corners = det.corners;
         let bbox = [
             CvPoint::new(corners[0].x as f32, corners[0].y as f32),
@@ -342,11 +353,11 @@ fn cv_aruco_overlay(
             CvPoint::new(corners[2].x as f32, corners[2].y as f32),
             CvPoint::new(corners[3].x as f32, corners[3].y as f32),
         ];
-        if draw_boxes {
+        if cfg.draw_boxes {
             draw::contour::overlay_contour_points(&mut out, &bbox, thickness, Rgba([0, 255, 255, 255]));
         }
 
-        if draw_crosshair {
+        if cfg.draw_crosshair {
             let min_x = corners.iter().map(|p| p.x).fold(f64::INFINITY, f64::min);
             let max_x = corners.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max);
             let min_y = corners.iter().map(|p| p.y).fold(f64::INFINITY, f64::min);
@@ -365,8 +376,8 @@ fn cv_aruco_overlay(
         let dot_radius = (thickness + 2).clamp(3, 16);
         let mut max_y = 0.0f64;
         let mut center_x = 0i64;
-        if draw_ids {
-            let mut sum_x = 0.0;
+        if cfg.draw_ids {
+            let mut sum_x = 0.0f64;
             max_y = corners[0].y;
             for c in &corners {
                 max_y = max_y.max(c.y);
@@ -375,19 +386,19 @@ fn cv_aruco_overlay(
             center_x = (sum_x / 4.0).round() as i64;
         }
 
-        if draw_corners {
+        if cfg.draw_corners {
             for corner in corners {
                 draw::shape::overlay_circle(&mut out, (corner.x.max(0.0) as u32, corner.y.max(0.0) as u32), dot_radius, true, Rgba([255, 64, 0, 255]));
             }
         }
 
-        if draw_ids {
+        if cfg.draw_ids {
             let label_y = (max_y.round() as i64 + (dot_radius as i64) + 4).max(0);
             overlay_id_label_centered(&mut out, det.id, center_x.max(0), label_y);
         }
     }
 
-    if draw_hud {
+    if cfg.draw_hud {
         overlay_tags_count(&mut out, detections.len());
     }
 

@@ -11,10 +11,14 @@ The header includes:
 
 - **Download manifest**: exports the stream manifest JSON.
 - **Recording controls**:
-  - Select a recording source (stream output or a pipeline output).
+  - Select a recording source:
+    - multiplex
+    - raw
+    - undistorted
+    - specific pipeline output
   - **Record / Stop** for continuous recording.
   - Capture-last buttons: **5s**, **30s**, **1m** (requires shadow recorder).
-  - Recording settings (codec/container/bitrate, etc.).
+  - Recording settings (container, codec, FPS, bitrate, GOP, quality, IMU sidecar capture).
 
 ## Main Area
 
@@ -22,7 +26,7 @@ The main area contains:
 
 - Live preview (with overlays when the selected output is an annotated frame).
 - Stream metrics.
-- Active pipeline list with an **Output** selector (this chooses what output drives the live preview).
+- Active pipeline list and multiplex/output controls that choose what drives the live preview.
 
 If the output selector shows **Loading outputs…**, the UI is still fetching/deriving the pipeline's host output ports.
 
@@ -32,9 +36,9 @@ The sidebar contains per-stream tabs:
 
 - **Stream**: capture backend/mode and stream-level settings (apply restarts the stream).
 - **Controls**: live camera controls (backend-dependent).
-- **Pipelines**: attach pipelines and configure grid/output routing.
+- **Pipelines**: attach pipelines, configure layout/wiring, pick preview outputs, and open tuning.
 - **Pose**: extrinsics for this stream (rig frame).
-- **Calibration**: snapshot capture + solve + save; guided/undistort tools.
-- **Media**: per-stream media view (recent assets + detail actions).
+- **Calibration**: guided capture, board/chart generation, solving, import/export helpers, and CCM tooling.
+- **Media**: per-stream media view with the same detail/edit actions as the main Media workspace.
 
 See the per-tab pages in this section for details.

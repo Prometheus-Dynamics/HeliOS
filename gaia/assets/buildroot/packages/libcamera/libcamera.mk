@@ -200,14 +200,12 @@ define LIBCAMERA_INSTALL_TARGET_CMDS
 		$(INSTALL) -m 0755 $(STAGING_DIR)/usr/lib/libcamera/ipa/* $(TARGET_DIR)/usr/lib/libcamera/ipa/; \
 		chmod 0755 $(TARGET_DIR)/usr/lib/libcamera/ipa/*.so; \
 	fi; \
-	# Meson occasionally skips installing RPi IPA binaries/signatures; force copy from build tree when present
-	if test -d $(LIBCAMERA_BUILDDIR)/src/ipa; then \
-		$(INSTALL) -d $(TARGET_DIR)/usr/lib/libcamera/ipa; \
-		cd $(LIBCAMERA_BUILDDIR)/src/ipa && find . -type f \( -name 'ipa_*.so' -o -name 'ipa_*.so.sign' \) | while read f; do \
-			src="$(LIBCAMERA_BUILDDIR)/src/ipa/$$f"; \
-			dst="$(TARGET_DIR)/usr/lib/libcamera/ipa/$$f"; \
-			$(INSTALL) -D -m 0644 "$$src" "$$dst"; \
-			if echo "$$dst" | grep -q '\.so$$'; then chmod 0755 "$$dst"; fi; \
+	# Ensure IPA proxy worker executables are present in the runtime image.
+	# RPi pipelines fail with "Failed to get proxy worker path" when these are missing.
+	if test -d $(STAGING_DIR)/usr/libexec/libcamera; then \
+		$(INSTALL) -d $(TARGET_DIR)/usr/libexec/libcamera; \
+		cd $(STAGING_DIR)/usr/libexec/libcamera && find . -maxdepth 1 -type f | while read f; do \
+			$(INSTALL) -D -m 0755 $(STAGING_DIR)/usr/libexec/libcamera/$$f $(TARGET_DIR)/usr/libexec/libcamera/$$f; \
 		done; \
 	fi; \
 	# Ensure main shared libs land in the image; meson install can occasionally skip when using staging

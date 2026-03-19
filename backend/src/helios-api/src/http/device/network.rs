@@ -1,16 +1,19 @@
-use axum::{Json, http::StatusCode, response::IntoResponse};
-use once_cell::sync::Lazy;
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio::sync::RwLock;
 use tokio::time::{Duration, Instant, timeout};
 use tracing::{info, warn};
 use utoipa::ToSchema;
+use uuid::Uuid;
 
 use super::super::error::{ApiError, ApiResult};
+use crate::http::AppState;
+use crate::http::persisted_files;
 use lib_net::interface::{IpAssignment, IpMode, NetworkInterfaceSettings, get_interfaces, set_interface};
 
 const PERSIST_NETWORKD_DIR: &str = "/var/lib/helios/networkd";
@@ -21,7 +24,10 @@ struct DeviceState {
     team: Option<TeamNumber>,
 }
 
-static DEVICE_STATE: Lazy<RwLock<DeviceState>> = Lazy::new(|| RwLock::new(DeviceState::default()));
+#[derive(Default)]
+pub(crate) struct DeviceNetworkState {
+    team: RwLock<DeviceState>,
+}
 
 #[derive(Copy, Clone, Debug)]
 struct TeamNumber(u32);
@@ -39,13 +45,16 @@ impl TryFrom<u32> for TeamNumber {
     }
 }
 
-fn team_file_path() -> PathBuf {
-    std::env::var_os("HELIOS_TEAM_FILE").map(PathBuf::from).unwrap_or_else(|| "/etc/helios/team".into())
+fn team_file_paths() -> (PathBuf, Option<PathBuf>) {
+    match std::env::var_os("HELIOS_TEAM_FILE") {
+        Some(path) => (PathBuf::from(path), None),
+        None => (persisted_files::data_root_file("team"), Some(persisted_files::legacy_helios_etc_file("team"))),
+    }
 }
 
 async fn read_team_file() -> Result<Option<u32>, ApiError> {
-    let path = team_file_path();
-    let content = match tokio::fs::read_to_string(&path).await {
+    let (path, legacy_path) = team_file_paths();
+    let content = match persisted_files::read_to_string(&path, legacy_path.as_deref()).await {
         Ok(data) => data,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(err) => return Err(ApiError::internal(format!("failed to read team file {}: {err}", path.display()))),
@@ -62,21 +71,15 @@ async fn read_team_file() -> Result<Option<u32>, ApiError> {
 }
 
 async fn write_team_file(team: u32) -> Result<(), ApiError> {
-    let path = team_file_path();
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent).await.map_err(|err| ApiError::internal(format!("failed to create team directory {}: {err}", parent.display())))?;
-    }
-    tokio::fs::write(&path, format!("{team}\n")).await.map_err(|err| ApiError::internal(format!("failed to write team file {}: {err}", path.display())))?;
+    let (path, legacy_path) = team_file_paths();
+    let body = format!("{team}\n");
+    persisted_files::write_mirrored(&path, legacy_path.as_deref(), body.as_bytes()).await.map_err(|err| ApiError::internal(format!("failed to write team file {}: {err}", path.display())))?;
     Ok(())
 }
 
 async fn clear_team_file() -> Result<(), ApiError> {
-    let path = team_file_path();
-    match tokio::fs::remove_file(&path).await {
-        Ok(_) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(ApiError::internal(format!("failed to remove team file {}: {err}", path.display()))),
-    }
+    let (path, legacy_path) = team_file_paths();
+    persisted_files::remove_mirrored(&path, legacy_path.as_deref()).await.map_err(|err| ApiError::internal(format!("failed to remove team file {}: {err}", path.display())))
 }
 
 #[utoipa::path(
@@ -109,23 +112,8 @@ pub async fn set_network(Json(payload): Json<NetworkInterfaceSettings>) -> ApiRe
     tag = "Device",
     responses((status = 200, description = "Team number", body = TeamNumberPayload))
 )]
-pub async fn team() -> ApiResult<impl IntoResponse> {
-    let mut team_value = {
-        let state = DEVICE_STATE.read().await;
-        state.team.map(|team| team.0)
-    };
-
-    if team_value.is_none() {
-        match read_team_file().await {
-            Ok(value) => team_value = value,
-            Err(err) => warn!(error = ?err, "failed to load team file"),
-        }
-        if let Some(value) = team_value {
-            DEVICE_STATE.write().await.team = Some(TeamNumber::try_from(value)?);
-        }
-    }
-
-    Ok(Json(TeamNumberPayload { team_number: team_value }))
+pub async fn team(State(state): State<AppState>) -> ApiResult<impl IntoResponse> {
+    Ok(Json(TeamNumberPayload { team_number: state.services.network.inner().team_value().await? }))
 }
 
 #[utoipa::path(
@@ -135,20 +123,9 @@ pub async fn team() -> ApiResult<impl IntoResponse> {
     request_body(content = TeamNumberPayload, content_type = "application/json"),
     responses((status = 204, description = "Team updated"), (status = 400, description = "Invalid request", body = super::super::error::ErrorBody))
 )]
-pub async fn set_team(Json(payload): Json<TeamNumberPayload>) -> ApiResult<impl IntoResponse> {
-    match payload.team_number {
-        None => {
-            DEVICE_STATE.write().await.team = None;
-            clear_team_file().await?;
-            Ok(StatusCode::NO_CONTENT)
-        }
-        Some(value) => {
-            let team = TeamNumber::try_from(value)?;
-            DEVICE_STATE.write().await.team = Some(team);
-            write_team_file(value).await?;
-            Ok(StatusCode::NO_CONTENT)
-        }
-    }
+pub async fn set_team(State(state): State<AppState>, Json(payload): Json<TeamNumberPayload>) -> ApiResult<impl IntoResponse> {
+    state.services.network.inner().set_team_value(payload.team_number).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 fn candidate_team_bytes_from_ipv4(ip: Ipv4Addr) -> Option<(u8, u8)> {
@@ -223,55 +200,91 @@ async fn infer_team_from_interfaces(ifaces: &[NetworkInterfaceSettings]) -> Opti
     None
 }
 
-pub fn spawn_team_autodetect_task() {
-    tokio::spawn(async move {
-        // One-time, best-effort bootstrap (avoids fighting user overrides later).
-        let deadline = Instant::now() + Duration::from_secs(75);
-        let mut tick = tokio::time::interval(Duration::from_secs(4));
+impl DeviceNetworkState {
+    pub(crate) async fn team_value(&self) -> Result<Option<u32>, ApiError> {
+        let mut team_value = {
+            let state = self.team.read().await;
+            state.team.map(|team| team.0)
+        };
 
-        loop {
-            tick.tick().await;
-            if Instant::now() > deadline {
-                break;
+        if team_value.is_none() {
+            match read_team_file().await {
+                Ok(value) => team_value = value,
+                Err(err) => warn!(error = ?err, "failed to load team file"),
             }
-
-            if DEVICE_STATE.read().await.team.is_some() {
-                break;
+            if let Some(value) = team_value {
+                self.team.write().await.team = Some(TeamNumber::try_from(value)?);
             }
+        }
 
-            if let Ok(Some(team)) = read_team_file().await {
-                if let Ok(valid) = TeamNumber::try_from(team) {
-                    DEVICE_STATE.write().await.team = Some(valid);
+        Ok(team_value)
+    }
+
+    pub(crate) async fn set_team_value(&self, team_number: Option<u32>) -> Result<(), ApiError> {
+        match team_number {
+            None => {
+                self.team.write().await.team = None;
+                clear_team_file().await?;
+            }
+            Some(value) => {
+                let team = TeamNumber::try_from(value)?;
+                self.team.write().await.team = Some(team);
+                write_team_file(value).await?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn spawn_team_autodetect_task(self: Arc<Self>) {
+        tokio::spawn(async move {
+            // One-time, best-effort bootstrap (avoids fighting user overrides later).
+            let deadline = Instant::now() + Duration::from_secs(75);
+            let mut tick = tokio::time::interval(Duration::from_secs(4));
+
+            loop {
+                tick.tick().await;
+                if Instant::now() > deadline {
+                    break;
                 }
-                break;
-            }
 
-            let ifaces = match get_interfaces().await {
-                Ok(ifaces) => ifaces,
-                Err(err) => {
-                    warn!(error = ?err, "team autodetect: failed to read interfaces");
+                if self.team.read().await.team.is_some() {
+                    break;
+                }
+
+                if let Ok(Some(team)) = read_team_file().await {
+                    if let Ok(valid) = TeamNumber::try_from(team) {
+                        self.team.write().await.team = Some(valid);
+                    }
+                    break;
+                }
+
+                let ifaces = match get_interfaces().await {
+                    Ok(ifaces) => ifaces,
+                    Err(err) => {
+                        warn!(error = ?err, "team autodetect: failed to read interfaces");
+                        continue;
+                    }
+                };
+
+                let Some(team) = infer_team_from_interfaces(&ifaces).await else {
+                    continue;
+                };
+
+                if TeamNumber::try_from(team).is_err() {
                     continue;
                 }
-            };
 
-            let Some(team) = infer_team_from_interfaces(&ifaces).await else {
-                continue;
-            };
+                if let Err(err) = write_team_file(team).await {
+                    warn!(error = ?err, team, "team autodetect: failed to write team file");
+                    continue;
+                }
 
-            if TeamNumber::try_from(team).is_err() {
-                continue;
+                self.team.write().await.team = Some(TeamNumber(team));
+                info!(team, "team autodetect: persisted team number");
+                break;
             }
-
-            if let Err(err) = write_team_file(team).await {
-                warn!(error = ?err, team, "team autodetect: failed to write team file");
-                continue;
-            }
-
-            DEVICE_STATE.write().await.team = Some(TeamNumber(team));
-            info!(team, "team autodetect: persisted team number");
-            break;
-        }
-    });
+        });
+    }
 }
 
 fn sanitize_iface_name(name: &str) -> String {
@@ -350,12 +363,65 @@ fn render_networkd_config(settings: &NetworkInterfaceSettings) -> String {
     out
 }
 
-async fn write_atomic(path: &PathBuf, content: &str) -> Result<(), ApiError> {
-    let file_name = path.file_name().ok_or_else(|| ApiError::internal("network config path missing filename"))?.to_string_lossy();
-    let tmp_path = path.with_file_name(format!("{file_name}.tmp"));
-    tokio::fs::write(&tmp_path, content).await.map_err(|err| ApiError::internal(format!("failed to write {tmp_path:?}: {err}")))?;
-    tokio::fs::rename(&tmp_path, path).await.map_err(|err| ApiError::internal(format!("failed to rename {tmp_path:?}: {err}")))?;
+async fn write_atomic(path: &Path, content: &str) -> Result<(), ApiError> {
+    let path_buf = path.to_path_buf();
+    let path_display = path_buf.display().to_string();
+    let content = content.to_owned();
+    tokio::task::spawn_blocking(move || write_atomic_durable(&path_buf, content.as_bytes()))
+        .await
+        .map_err(|err| ApiError::internal(format!("failed to join network config write for {path_display}: {err}")))?
+        .map_err(|err| ApiError::internal(format!("failed to persist {path_display}: {err}")))
+}
+
+fn write_atomic_durable(path: &Path, content: &[u8]) -> std::io::Result<()> {
+    use std::fs::{self, OpenOptions};
+    use std::io::{Error, ErrorKind, Write};
+
+    let file_name = path.file_name().ok_or_else(|| Error::new(ErrorKind::InvalidInput, "network config path missing filename"))?.to_string_lossy();
+    let tmp_path = path.with_file_name(format!("{file_name}.tmp-{}", Uuid::new_v4()));
+
+    let mut tmp = OpenOptions::new().create(true).truncate(true).write(true).open(&tmp_path)?;
+    tmp.write_all(content)?;
+    tmp.sync_all()?;
+    drop(tmp);
+
+    if let Err(err) = fs::rename(&tmp_path, path) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(err);
+    }
+
+    sync_parent_dir(path)?;
     Ok(())
+}
+
+fn sync_parent_dir(path: &Path) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        sync_dir(parent)?;
+    }
+    Ok(())
+}
+
+fn sync_dir(path: &Path) -> std::io::Result<()> {
+    let dir = std::fs::File::open(path)?;
+    dir.sync_all()
+}
+
+async fn create_dir_all_durable(path: &Path) -> Result<(), ApiError> {
+    let path_buf = path.to_path_buf();
+    let path_display = path_buf.display().to_string();
+    tokio::task::spawn_blocking(move || create_dir_all_durable_blocking(&path_buf))
+        .await
+        .map_err(|err| ApiError::internal(format!("failed to join directory create for {path_display}: {err}")))?
+        .map_err(|err| ApiError::internal(format!("failed to create {path_display}: {err}")))
+}
+
+fn create_dir_all_durable_blocking(path: &Path) -> std::io::Result<()> {
+    if path.is_dir() {
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(path)?;
+    sync_parent_dir(path)
 }
 
 async fn persist_networkd_config(settings: &NetworkInterfaceSettings) -> Result<(), ApiError> {
@@ -363,14 +429,55 @@ async fn persist_networkd_config(settings: &NetworkInterfaceSettings) -> Result<
     let content = render_networkd_config(settings);
 
     let persist_dir = PathBuf::from(PERSIST_NETWORKD_DIR);
-    tokio::fs::create_dir_all(&persist_dir).await.map_err(|err| ApiError::internal(format!("failed to create {PERSIST_NETWORKD_DIR}: {err}")))?;
+    create_dir_all_durable(&persist_dir).await?;
     let persist_path = persist_dir.join(&file_name);
     write_atomic(&persist_path, &content).await?;
 
     let systemd_dir = PathBuf::from("/etc/systemd/network");
-    tokio::fs::create_dir_all(&systemd_dir).await.map_err(|err| ApiError::internal(format!("failed to create /etc/systemd/network: {err}")))?;
+    create_dir_all_durable(&systemd_dir).await?;
     let systemd_path = systemd_dir.join(&file_name);
     write_atomic(&systemd_path, &content).await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_networkd_config_static_ipv4_uses_assignments_gateway_and_dns() {
+        let settings = NetworkInterfaceSettings {
+            name: "eth0".into(),
+            mode: IpMode::Static,
+            ipv6_mode: IpMode::Dynamic,
+            ipv4: vec![IpAssignment { address: IpAddr::V4(Ipv4Addr::new(10, 12, 34, 56)), prefix: 24 }],
+            gateways: vec![IpAddr::V4(Ipv4Addr::new(10, 12, 34, 1))],
+            dns: lib_net::interface::DnsConfig { servers: vec![IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1))], search: vec!["lan.local".into()] },
+            ..NetworkInterfaceSettings::default()
+        };
+
+        let rendered = render_networkd_config(&settings);
+        assert!(rendered.contains("Name=eth0\n"));
+        assert!(rendered.contains("Address=10.12.34.56/24\n"));
+        assert!(rendered.contains("Gateway=10.12.34.1\n"));
+        assert!(rendered.contains("DNS=1.1.1.1\n"));
+        assert!(rendered.contains("Domains=lan.local\n"));
+        assert!(rendered.contains("DHCP=ipv6\n"));
+    }
+
+    #[test]
+    fn write_atomic_durable_replaces_existing_content_without_temp_files() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("eth0.network");
+
+        write_atomic_durable(&path, b"first").expect("write first version");
+        write_atomic_durable(&path, b"second").expect("write second version");
+
+        let written = std::fs::read_to_string(&path).expect("read final file");
+        assert_eq!(written, "second");
+
+        let leftovers = std::fs::read_dir(dir.path()).expect("list dir").filter_map(|entry| entry.ok()).filter(|entry| entry.file_name().to_string_lossy().contains(".tmp-")).count();
+        assert_eq!(leftovers, 0);
+    }
 }

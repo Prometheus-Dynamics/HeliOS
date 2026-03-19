@@ -11,6 +11,21 @@ static STARTED_AT: Lazy<Instant> = Lazy::new(Instant::now);
 #[serde(rename_all = "snake_case")]
 pub struct FeaturesPayload {
     pub shadow_recorder: bool,
+    pub pipeline_registry_startup_warm: bool,
+    pub pipeline_registry_prefetch: bool,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct BinaryDependencyPayload {
+    pub ok: bool,
+    pub path: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct DependenciesPayload {
+    pub api_tools_helper: BinaryDependencyPayload,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -21,6 +36,7 @@ pub struct HealthPayload {
     pub uptime_ms: u64,
     pub version: String,
     pub features: FeaturesPayload,
+    pub dependencies: DependenciesPayload,
 }
 
 #[utoipa::path(
@@ -32,12 +48,18 @@ pub struct HealthPayload {
     )
 )]
 pub async fn health() -> Json<HealthPayload> {
+    let helper = crate::api_tools_client::helper_status();
     Json(HealthPayload {
-        ok: true,
+        ok: helper.ok,
         server_time_ms: Utc::now().timestamp_millis(),
         uptime_ms: STARTED_AT.elapsed().as_millis() as u64,
         version: env!("CARGO_PKG_VERSION").to_string(),
-        features: FeaturesPayload { shadow_recorder: crate::features::shadow_recorder_enabled() },
+        features: FeaturesPayload {
+            shadow_recorder: crate::features::shadow_recorder_enabled(),
+            pipeline_registry_startup_warm: crate::features::warm_pipeline_registry_enabled(),
+            pipeline_registry_prefetch: crate::features::prefetch_pipeline_registry_enabled(),
+        },
+        dependencies: DependenciesPayload { api_tools_helper: BinaryDependencyPayload { ok: helper.ok, path: helper.path.display().to_string() } },
     })
 }
 
@@ -48,8 +70,8 @@ mod tests {
     #[tokio::test]
     async fn health_payload_smoke() {
         let Json(payload) = health().await;
-        assert!(payload.ok);
         assert!(payload.server_time_ms > 0);
         assert!(!payload.version.is_empty());
+        assert!(!payload.dependencies.api_tools_helper.path.is_empty());
     }
 }

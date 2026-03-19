@@ -2,6 +2,7 @@ import { browser } from '$app/environment';
 import { writable } from 'svelte/store';
 import { apiUrl } from '$lib/api/httpClient';
 import { updateBackendFeaturesFromHealthPayload } from '$lib/api/backendFeatures';
+import { fetchWithRetry } from '$lib/api/requestUtils';
 
 export type ConnectionStatus = 'unknown' | 'online' | 'offline' | 'degraded';
 
@@ -291,12 +292,16 @@ async function runHeartbeatOnce(): Promise<void> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), HEARTBEAT_TIMEOUT_MS);
   try {
-    const response = await fetch(apiUrl('/health'), {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      signal: controller.signal
-    });
+    const response = await fetchWithRetry(
+      apiUrl('/health'),
+      {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+        signal: controller.signal
+      },
+      { timeoutMs: HEARTBEAT_TIMEOUT_MS, maxAttempts: 1 }
+    );
     const durationMs = Math.max(0, (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt);
 
     // Any HTTP response means the backend is reachable.

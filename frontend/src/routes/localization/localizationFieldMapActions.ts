@@ -35,6 +35,7 @@ export type LocalizationFieldMapDeps = {
   setMapUploadBusy: (busy: boolean) => void;
   setMapUploadError: (message: string | null) => void;
   setMapUploadSuccess: (summary: FieldMapSummary) => void;
+  getMaxMapUploadBytes: () => number | null;
   toaster: { success: (payload: { title: string; description?: string }) => void; error: (payload: { title: string; description?: string }) => void };
   getNewOriginName: () => string;
   getNewOriginX: () => string;
@@ -45,6 +46,15 @@ export type LocalizationFieldMapDeps = {
 };
 
 export const createLocalizationFieldMapActions = (deps: LocalizationFieldMapDeps) => {
+  const formatBytes = (bytes: number): string => {
+    const safe = Number.isFinite(bytes) && bytes > 0 ? bytes : 0;
+    const mib = safe / (1024 * 1024);
+    if (mib >= 1) return `${mib.toFixed(mib >= 10 ? 0 : 1)} MiB`;
+    const kib = safe / 1024;
+    if (kib >= 1) return `${kib.toFixed(kib >= 10 ? 0 : 1)} KiB`;
+    return `${Math.trunc(safe)} B`;
+  };
+
   const hasValidTagSize = (value: number | null | undefined): boolean =>
     typeof value === 'number' && Number.isFinite(value) && value > 0;
 
@@ -201,8 +211,11 @@ export const createLocalizationFieldMapActions = (deps: LocalizationFieldMapDeps
   };
 
   const handleMapUploadFile = (file: File): void => {
-    if (!file.name.toLowerCase().endsWith('.fmap')) {
-      deps.setMapUploadError('Please select a .fmap file.');
+    const maxUploadBytes = deps.getMaxMapUploadBytes();
+    if (typeof maxUploadBytes === 'number' && Number.isFinite(maxUploadBytes) && maxUploadBytes > 0 && file.size > maxUploadBytes) {
+      const message = `Map exceeds backend upload limit (${formatBytes(maxUploadBytes)} max).`;
+      deps.setMapUploadError(message);
+      deps.toaster.error({ title: 'Field map upload failed', description: message });
       return;
     }
     deps.setMapUploadError(null);

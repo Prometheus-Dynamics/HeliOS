@@ -10,6 +10,7 @@ import type { PipelineBreadcrumb } from './types';
 import type { PipelineMetricsState } from './pipelineMetrics';
 import { resolvePlanAtPath } from '../nesting';
 import { formatStatus, statusBadgeClass } from './uiAdapters';
+import { createPipelineListWorker, createPipelineRegistryWorker } from '$lib/workers/factories';
 
 type GraphSelection = { nodeId: string | null; nodes: string[]; edge: { id: string } | null };
 
@@ -71,7 +72,7 @@ export function createPipelineListState(params: {
   };
 
   if (typeof Worker !== 'undefined') {
-    worker = new Worker(new URL('$lib/workers/pipelineListWorker.ts', import.meta.url), { type: 'module' });
+    worker = createPipelineListWorker();
     worker.onmessage = (event) => {
       const data = event.data as {
         requestId: number;
@@ -368,7 +369,7 @@ export function createRegistryFilterState(params: {
   };
 
   if (typeof Worker !== 'undefined') {
-    worker = new Worker(new URL('$lib/workers/pipelineRegistryWorker.ts', import.meta.url), { type: 'module' });
+    worker = createPipelineRegistryWorker();
     worker.onmessage = (event) => {
       const data = event.data as {
         requestId: number;

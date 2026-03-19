@@ -17,9 +17,11 @@
     DEFAULT_ROBOT_WIDTH_M,
     GROUND_CLEARANCE_M,
     ROBOT_HEIGHT_M,
+    type ArucoMarker,
     type LocalizationFieldDefinition,
     type LocalizationMarker,
-    type LocalizationViewerProps
+    type LocalizationViewerProps,
+    type PolygonMarker
   } from '$lib/features/localization/viewers/localizationViewerTypes';
   import {
     buildEnvironment,
@@ -119,8 +121,8 @@
   let minimapPoseDotInnerMaterial: THREE.MeshBasicMaterial | null = null;
   let animationFrame: number | null = null;
   let minimapExpanded = $state(false);
-  let robotDimensions = $state<RobotDimensions>(normalizeRobot(robot));
-  let cameraLayout = $state<RigCameraInfo[]>(normalizeCameras(cameras));
+  let robotDimensions = $state<RobotDimensions>(normalizeRobot(null));
+  let cameraLayout = $state<RigCameraInfo[]>(normalizeCameras(null));
   const cameraMeshes = new Map<string, THREE.Group>();
   const robotOverlayMeshes = new Map<string, THREE.Group>();
   const markerMeshes = new Map<string, THREE.Group>();
@@ -1081,18 +1083,19 @@
   }
 
   function markerVisualKey(marker: LocalizationMarker): string {
+    const arucoMarker: ArucoMarker | null = marker.targetType === 'polygon' ? null : marker;
     const common = [
       marker.targetType ?? 'aruco',
       marker.color ?? '',
       marker.status ?? '',
-      String((marker as any).tagId ?? ''),
-      String((marker as any).tagSize ?? ''),
-      String((marker as any).tagHeight ?? ''),
-      String((marker as any).tagBorderRatio ?? ''),
-      String((marker as any).codeRotation ?? '')
+      String(arucoMarker?.tagId ?? ''),
+      String(arucoMarker?.tagSize ?? ''),
+      String(arucoMarker?.tagHeight ?? ''),
+      String(arucoMarker?.tagBorderRatio ?? ''),
+      String(arucoMarker?.codeRotation ?? '')
     ];
 
-    const bits = (marker as any).tagBits as { width: number; border: number; rows: string[] } | undefined;
+    const bits = arucoMarker?.tagBits;
     if (bits && Number.isFinite(bits.width) && Array.isArray(bits.rows)) {
       common.push(`bits:${bits.width}:${bits.border}:${bits.rows.join('')}`);
     } else {
@@ -1100,7 +1103,7 @@
     }
 
     if (marker.targetType === 'polygon') {
-      const polygon = marker as any;
+      const polygon: PolygonMarker = marker;
       const outline = Array.isArray(polygon.outline)
         ? polygon.outline
             .map((pair: [number, number]) =>

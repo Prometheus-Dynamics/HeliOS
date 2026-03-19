@@ -58,8 +58,8 @@ Use filters to find a specific error:
 If you are filing an issue, include:
 
 - alert export JSON
-- snapshots (optional but useful)
+- diagnostics bundle (optional but useful)
 
 If the failure is hard to reproduce, capture a snapshot right after it happens:
 
-- [Snapshots for support](/guides/snapshots-for-support)
+- [Diagnostics Bundles For Support](/guides/diagnostics-bundles-for-support)

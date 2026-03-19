@@ -10,6 +10,7 @@ impl SensorsService {
         let mut state = self.state.write().await;
         if state.scopes.insert(scope.clone()) {
             state.readings.insert(scope.clone(), BTreeMap::new());
+            state.serialized_readings.insert(scope.clone(), BTreeMap::new());
         }
     }
 
@@ -17,7 +18,8 @@ impl SensorsService {
         let mut state = self.state.write().await;
         let was_new = state.scopes.insert(scope.clone());
         if was_new {
-            state.readings.insert(scope, BTreeMap::new());
+            state.readings.insert(scope.clone(), BTreeMap::new());
+            state.serialized_readings.insert(scope, BTreeMap::new());
         }
         Ok(was_new)
     }
@@ -27,6 +29,7 @@ impl SensorsService {
         let removed = state.scopes.remove(scope);
         if removed {
             state.readings.remove(scope);
+            state.serialized_readings.remove(scope);
         }
         Ok(removed)
     }

@@ -16,8 +16,9 @@
     resolveDataTypeKey
   } from '$lib/features/pipelines/valueFormatting';
   import PipelineUiPixelControl from '$lib/components/pipelines/controls/PipelineUiPixelControl.svelte';
-  import type { PipelineDataType, PipelineNodeValue } from '$lib/types/pipeline';
+  import type { PipelineDataType, PipelineNodeValue, PipelinePortMetadata } from '$lib/types/pipeline';
   import type { PipelineUiControl, PipelineUiControlBind, PipelineUiNodeDescriptor } from '$lib/features/pipelines/pipelineUiTypes';
+  import { SvelteSet } from 'svelte/reactivity';
 
   type Props = {
     control: PipelineUiControl;
@@ -30,7 +31,7 @@
     setLocalValue: (key: string, value: string) => void;
   };
 
-  const NUMERIC_TYPE_KEYS = new Set(['uint', 'sint', 'int', 'float', 'double', 'number']);
+  const NUMERIC_TYPE_KEYS = new SvelteSet(['uint', 'sint', 'int', 'float', 'double', 'number']);
   const HEX_COLOR_PATTERN = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 
   let {
@@ -410,7 +411,7 @@
   {@const typeKey = resolveDataTypeKey(dataType ?? undefined) ?? 'string'}
   {@const typeKeyLower = typeKey.toLowerCase()}
   {@const variants = getDataTypeVariants(dataType ?? undefined)}
-  {@const meta = descriptor?.metadata as any}
+  {@const meta: PipelinePortMetadata | null = descriptor?.metadata ?? null}
   {@const metadataOptions = getMetadataEnumOptions(meta)}
   {@const allowedValues =
     control.type === 'select' && control.options && control.options.length
@@ -488,7 +489,6 @@
   {@const hsvHue = clampNumber(Number(readLocalValue('hsv_h', '120')), 0, 360)}
   {@const hsvSat = clampNumber(Number(readLocalValue('hsv_s', '0.7')), 0, 1)}
   {@const hsvVal = clampNumber(Number(readLocalValue('hsv_v', '0.8')), 0, 1)}
-  {@const hsvHueColor = hsvToHex(hsvHue, 1, 1)}
   {@const hsvSatStart = hsvToHex(hsvHue, 0, hsvVal)}
   {@const hsvSatEnd = hsvToHex(hsvHue, 1, hsvVal)}
   {@const hsvValEnd = hsvToHex(hsvHue, hsvSat, 1)}
@@ -506,12 +506,6 @@
   {@const colorFallback = typeof control.default === 'string' ? control.default : '#1f2937'}
   {@const colorValue = normalizeHex(draftValue, colorFallback)}
   {@const colorTextValue = draftValue ? draftValue : colorValue}
-  {@const hsvDefaults = control.hsvDefaults ?? { h: 120, s: 0.7, v: 0.8 }}
-  {@const hsvRangeDefaults = control.hsvRangeDefaults ?? {
-    h: [0, 360] as const,
-    s: [0.2, 0.9] as const,
-    v: [0.2, 0.95] as const
-  }}
 
   <div class="rounded border border-surface-800/70 bg-surface-950/60 p-3 space-y-2">
   <div class="flex items-start justify-between gap-3">

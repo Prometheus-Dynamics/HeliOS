@@ -781,10 +781,10 @@ async fn start_imu_sidecar_session(
                     last_frame_seen_at = Some(Instant::now());
 
                     for raw_ts in frame_ts_values {
-                        if let Some(prev_ts) = last_frame_ts {
-                            if raw_ts <= prev_ts {
-                                continue;
-                            }
+                        if let Some(prev_ts) = last_frame_ts
+                            && raw_ts <= prev_ts
+                        {
+                            continue;
                         }
 
                         let anchor_ts = *frame_anchor_ts.get_or_insert(raw_ts);
@@ -1009,7 +1009,7 @@ async fn infer_recording_fps(state: &crate::http::AppState, id: Uuid, requested:
     }
 
     let metrics_fps = match state.engine.get_metrics(id).await {
-        Ok(EngineEvent::Metrics { metrics, .. }) => metrics.encoder.as_ref().map(|encoder| encoder.fps as f32).or_else(|| Some(metrics.capture.fps as f32)).filter(|fps| fps.is_finite() && *fps > 0.0),
+        Ok(EngineEvent::Metrics { metrics, .. }) => metrics.encoder.as_ref().map(|encoder| encoder.fps as f32).or(Some(metrics.capture.fps as f32)).filter(|fps| fps.is_finite() && *fps > 0.0),
         _ => None,
     };
     if metrics_fps.is_some() {

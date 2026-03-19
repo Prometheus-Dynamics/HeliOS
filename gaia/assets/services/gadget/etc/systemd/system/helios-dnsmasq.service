@@ -1,6 +1,6 @@
 [Unit]
 Description=Helios USB gadget dnsmasq
-# Start after gadget setup and networkd; bind dynamically to usb0 when it appears
+# Start after gadget setup and networkd; bind dynamically to usbbr0 when it appears
 After=helios-usb-gadget.service systemd-networkd.service
 Wants=systemd-networkd.service
 Requires=helios-usb-gadget.service

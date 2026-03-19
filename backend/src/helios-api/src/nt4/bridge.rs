@@ -1,5 +1,5 @@
-use nt_client::data::Properties;
-use nt_client::data::r#type::{DataType, JsonString};
+use nt_client::data::{DataType, JsonString};
+use nt_client::topic::Properties;
 use std::net::Ipv4Addr;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tracing::warn;
@@ -42,7 +42,11 @@ pub fn init(handles: Arc<IpcHandles>) {
             let client_name = client_name_from_hostname(&hostname);
             let target = (host.clone(), port, client_name.clone());
             if last_target.as_ref() != Some(&target) {
-                // If the hostname changed, we need a reconnect so the NT4 client name updates.
+                // Reconnect when target host/port/client-name changes (for hostname updates and retargeting).
+                if let Some((prev_host, prev_port, _)) = last_target.as_ref() {
+                    let _ = crate::nt4::pool().disconnect(prev_host, *prev_port).await;
+                }
+                // Also clear any stale slot at the new endpoint before reconnecting.
                 let _ = crate::nt4::pool().disconnect(&host, port).await;
                 last_target = Some(target.clone());
                 last_entry_id = None;
@@ -127,21 +131,70 @@ pub fn init(handles: Arc<IpcHandles>) {
             };
 
             let handle = entry.handle().clone();
-            let _ = set_string(&handle, &mut publishers, &format!("{prefix}/info/hostname"), &hostname).await;
-            if let Some(ip) = device_ipv4 {
-                let _ = set_string(&handle, &mut publishers, &format!("{prefix}/info/ip"), &ip.to_string()).await;
+            let mut publish_error: Option<String> = None;
+
+            let hostname_topic = format!("{prefix}/info/hostname");
+            if let Err(err) = set_string(&handle, &mut publishers, &hostname_topic, &hostname).await {
+                publish_error = Some(format!("{hostname_topic}: {err}"));
             }
-            let _ = set_string(&handle, &mut publishers, &format!("{prefix}/info/api_url"), &api_url).await;
-            let _ = set_string(&handle, &mut publishers, &format!("{prefix}/info/ui_url"), &ui_url).await;
-            let _ = set_json(&handle, &mut publishers, &format!("{prefix}/info/streams"), &streams_json).await;
+            if let Some(ip) = device_ipv4 {
+                let ip_topic = format!("{prefix}/info/ip");
+                if publish_error.is_none()
+                    && let Err(err) = set_string(&handle, &mut publishers, &ip_topic, &ip.to_string()).await
+                {
+                    publish_error = Some(format!("{ip_topic}: {err}"));
+                }
+            }
+            let api_url_topic = format!("{prefix}/info/api_url");
+            if publish_error.is_none()
+                && let Err(err) = set_string(&handle, &mut publishers, &api_url_topic, &api_url).await
+            {
+                publish_error = Some(format!("{api_url_topic}: {err}"));
+            }
+            let ui_url_topic = format!("{prefix}/info/ui_url");
+            if publish_error.is_none()
+                && let Err(err) = set_string(&handle, &mut publishers, &ui_url_topic, &ui_url).await
+            {
+                publish_error = Some(format!("{ui_url_topic}: {err}"));
+            }
+            let streams_topic = format!("{prefix}/info/streams");
+            if publish_error.is_none()
+                && let Err(err) = set_json(&handle, &mut publishers, &streams_topic, &streams_json).await
+            {
+                publish_error = Some(format!("{streams_topic}: {err}"));
+            }
             for (topic, payload) in &stream_values {
-                let _ = set_json(&handle, &mut publishers, topic, payload).await;
+                if publish_error.is_none()
+                    && let Err(err) = set_json(&handle, &mut publishers, topic, payload).await
+                {
+                    publish_error = Some(format!("{topic}: {err}"));
+                }
             }
             for (camera_topic, source_name, stream_urls, payload) in &camera_publishers {
-                let _ = set_string(&handle, &mut publishers, &format!("{camera_topic}/source"), source_name).await;
-                let _ = set_string_array(&handle, &mut publishers, &format!("{camera_topic}/streams"), stream_urls).await;
-                let _ = set_json(&handle, &mut publishers, &format!("{camera_topic}/value"), payload).await;
-                let _ = set_bool(&handle, &mut publishers, &format!("{camera_topic}/connected"), true).await;
+                let source_topic = format!("{camera_topic}/source");
+                if publish_error.is_none()
+                    && let Err(err) = set_string(&handle, &mut publishers, &source_topic, source_name).await
+                {
+                    publish_error = Some(format!("{source_topic}: {err}"));
+                }
+                let streams_topic = format!("{camera_topic}/streams");
+                if publish_error.is_none()
+                    && let Err(err) = set_string_array(&handle, &mut publishers, &streams_topic, stream_urls).await
+                {
+                    publish_error = Some(format!("{streams_topic}: {err}"));
+                }
+                let value_topic = format!("{camera_topic}/value");
+                if publish_error.is_none()
+                    && let Err(err) = set_json(&handle, &mut publishers, &value_topic, payload).await
+                {
+                    publish_error = Some(format!("{value_topic}: {err}"));
+                }
+                let connected_topic = format!("{camera_topic}/connected");
+                if publish_error.is_none()
+                    && let Err(err) = set_bool(&handle, &mut publishers, &connected_topic, true).await
+                {
+                    publish_error = Some(format!("{connected_topic}: {err}"));
+                }
             }
 
             let device_value = serde_json::json!({
@@ -153,7 +206,12 @@ pub fn init(handles: Arc<IpcHandles>) {
                 "streams": streams_json,
                 "timestamp_ms": chrono::Utc::now().timestamp_millis().max(0) as u64,
             });
-            let _ = set_json(&handle, &mut publishers, &format!("{prefix}/value"), &device_value).await;
+            let value_topic = format!("{prefix}/value");
+            if publish_error.is_none()
+                && let Err(err) = set_json(&handle, &mut publishers, &value_topic, &device_value).await
+            {
+                publish_error = Some(format!("{value_topic}: {err}"));
+            }
 
             // Small "summary" telemetry blob for NT4 consumers that want a single topic.
             let telemetry = serde_json::json!({
@@ -162,7 +220,20 @@ pub fn init(handles: Arc<IpcHandles>) {
                 "stream_count": streams_json.as_array().map(|v| v.len()).unwrap_or(0),
                 "timestamp_ms": chrono::Utc::now().timestamp_millis().max(0) as u64,
             });
-            let _ = set_json(&handle, &mut publishers, &format!("{prefix}/telemetry"), &telemetry).await;
+            let telemetry_topic = format!("{prefix}/telemetry");
+            if publish_error.is_none()
+                && let Err(err) = set_json(&handle, &mut publishers, &telemetry_topic, &telemetry).await
+            {
+                publish_error = Some(format!("{telemetry_topic}: {err}"));
+            }
+
+            if let Some(err) = publish_error {
+                warn!(target_host = %host, target_port = port, %err, "nt4 publish failed; forcing reconnect");
+                let _ = crate::nt4::pool().disconnect(&host, port).await;
+                last_entry_id = None;
+                publishers.clear();
+                continue;
+            }
         }
     });
 }
@@ -198,8 +269,13 @@ async fn best_local_ipv4() -> Option<Ipv4Addr> {
 }
 
 async fn default_nt4_server_host_from_team_file() -> Option<String> {
-    let path = std::env::var_os("HELIOS_TEAM_FILE").map(std::path::PathBuf::from).unwrap_or_else(|| "/etc/helios/team".into());
-    let content = tokio::fs::read_to_string(&path).await.ok()?;
+    let primary = std::env::var_os("HELIOS_TEAM_FILE").map(std::path::PathBuf::from).unwrap_or_else(|| "/var/lib/helios/team".into());
+    let fallback = (primary.as_path() == std::path::Path::new("/var/lib/helios/team")).then_some(std::path::Path::new("/etc/helios/team"));
+    let content = match tokio::fs::read_to_string(&primary).await {
+        Ok(raw) => raw,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => tokio::fs::read_to_string(fallback?).await.ok()?,
+        Err(_) => return None,
+    };
     let trimmed = content.trim();
     if trimmed.is_empty() {
         return None;
@@ -262,7 +338,7 @@ async fn set_string(handle: &nt_client::ClientHandle, publishers: &mut HashMap<S
 async fn set_json(handle: &nt_client::ClientHandle, publishers: &mut HashMap<String, nt_client::publish::GenericPublisher>, topic: &str, value: &serde_json::Value) -> Result<(), String> {
     let pubr = publisher(handle, publishers, topic, DataType::Json).await?;
     let payload = JsonString(serde_json::to_string(value).map_err(|e| e.to_string())?);
-    pubr.set(payload).await.map_err(|e| e.to_string())?;
+    pubr.set::<JsonString>(payload).await.map_err(|e| e.to_string())?;
     Ok(())
 }
 

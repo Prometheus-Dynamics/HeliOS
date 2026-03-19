@@ -30,8 +30,8 @@ pub fn identity_for_keys(keys: &[String]) -> DeviceIdentity {
     DeviceIdentity { id: None, alias: None, hardware_id: keys.first().cloned() }
 }
 
-pub async fn discover_devices() -> Vec<DiscoveredDevice> {
-    tokio::task::spawn_blocking(helios_engine::capture::discover_devices).await.unwrap_or_default()
+pub async fn discover_devices(state: &AppState) -> Vec<DiscoveredDevice> {
+    state.engine.discover_devices().await.map(|discovery| discovery.devices).unwrap_or_default()
 }
 
 pub fn find_matching_backend(devices: &[DiscoveredDevice], backend: BackendKind, handle: &BackendHandle, device_keys: &[String]) -> Option<(DiscoveredDevice, styx::ProbedBackend)> {

@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { PeripheralEntry } from '$lib/types/devices';
   import type { FirmwareProgressPhase } from '$lib/features/sensors/firmwareController';
+  import { SvelteMap } from 'svelte/reactivity';
 
   type FirmwareStatus = PeripheralEntry['firmware'];
 
@@ -25,7 +26,7 @@
     firmwareSelection = '',
     firmwareSelectionMissing = false,
     firmwareApplyDisabled = true,
-    firmwareLoading: _firmwareLoading = false,
+    firmwareLoading = false,
     firmwareBusy = false,
     firmwareError = null,
     firmwareProgressPhase = 'idle',
@@ -38,7 +39,7 @@
 
   const firmwareOptions = $derived(firmwareStatus?.options ?? []);
   const dedupeFirmwareOptions = (options: typeof firmwareOptions) => {
-    const byVariant = new Map<string, (typeof firmwareOptions)[number]>();
+    const byVariant = new SvelteMap<string, (typeof firmwareOptions)[number]>();
     const order: string[] = [];
 
     for (const option of options) {
@@ -191,7 +192,7 @@
           <select
             class="input border border-surface-700 bg-surface-950"
             value={firmwareSelection}
-            disabled={firmwareBusy}
+            disabled={firmwareBusy || firmwareLoading}
             onchange={(event) => onSelectionChange?.((event.currentTarget as HTMLSelectElement).value)}
           >
             {#each firmwareOptionsUnique as option (option.name + '::' + (option.path ?? option.variant ?? ''))}
@@ -206,10 +207,10 @@
           <button
             class="btn btn-2xs preset-filled-primary-500 uppercase tracking-[0.3em]"
             type="button"
-            disabled={firmwareApplyDisabled}
+            disabled={firmwareApplyDisabled || firmwareLoading}
             onclick={onApply}
           >
-            {firmwareBusy ? 'Applying…' : 'Apply firmware'}
+            {firmwareLoading ? 'Loading…' : firmwareBusy ? 'Applying…' : 'Apply firmware'}
           </button>
         </div>
       {:else}
@@ -230,10 +231,10 @@
               <button
                 class="btn btn-2xs preset-filled-primary-500 uppercase tracking-[0.3em]"
                 type="button"
-                disabled={firmwareApplyDisabled}
+                disabled={firmwareApplyDisabled || firmwareLoading}
                 onclick={onApply}
               >
-                {firmwareBusy ? 'Applying…' : 'Apply firmware'}
+                {firmwareLoading ? 'Loading…' : firmwareBusy ? 'Applying…' : 'Apply firmware'}
               </button>
             </div>
           {/if}

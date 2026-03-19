@@ -4,29 +4,28 @@ use std::time::Duration;
 
 use crate::dto::{SensorData, SensorKind, SensorScope, SensorSnapshot};
 use crate::error::{Error, Result};
-use crate::imu::{ImuFusionMethod, ImuRange, ImuSample, ImuSettings};
+use crate::imu::{ImuFusionMethod, ImuRange, ImuSample, ImuSettings, ImuState};
+use crate::orchestrator::ImuSettingsUpdate;
 use crate::power::PowerReading;
 use lib_math::linalg::Quaternion;
 use lib_sensors::model::{AxesReading, ImuReading, PowerSnapshot, PowerSourceReading, SensorReading};
 use serde_json::Value as JsonValue;
 
 use super::SensorsService;
+use super::serialize_reading;
 
 impl SensorsService {
     pub async fn apply_imu_sample(&self, sample: ImuSample) {
         let scope = SensorScope::Device;
         self.ensure_scope_registered(&scope).await;
+        if self.event_bus.receiver_count() == 0 {
+            return;
+        }
         {
             let mut state = self.state.write().await;
-            let entry = state.readings.entry(scope.clone()).or_default();
-            entry.insert(SensorKind::Accelerometer, SensorReading::Accelerometer(AxesReading::from(sample.accel)));
-            entry.insert(SensorKind::Gyroscope, SensorReading::Gyroscope(AxesReading::from(sample.gyro)));
-            if let Some(mag) = sample.mag {
-                entry.insert(SensorKind::Magnetometer, SensorReading::Magnetometer(AxesReading::from(mag)));
-            } else {
-                entry.remove(&SensorKind::Magnetometer);
-            }
-            entry.insert(SensorKind::Imu, SensorReading::Imu(ImuReading::from_sample(&sample)));
+            let imu_state = ImuState { sample: Some(sample), last_error: None, sources: Default::default() };
+            apply_imu_state_to_typed_readings(state.readings.entry(scope.clone()).or_default(), &imu_state);
+            apply_imu_state_to_cached_snapshot(state.serialized_readings.entry(scope.clone()).or_default(), &imu_state);
         }
         self.publish_snapshot(None, &scope).await;
     }
@@ -34,10 +33,14 @@ impl SensorsService {
     pub async fn apply_imu_error(&self, message: String) {
         let scope = SensorScope::Device;
         self.ensure_scope_registered(&scope).await;
+        if self.event_bus.receiver_count() == 0 {
+            return;
+        }
         {
             let mut state = self.state.write().await;
-            let entry = state.readings.entry(scope.clone()).or_default();
-            entry.insert(SensorKind::Imu, SensorReading::Imu(ImuReading::error(message)));
+            let imu_state = ImuState { sample: None, last_error: Some(message), sources: Default::default() };
+            apply_imu_state_to_typed_readings(state.readings.entry(scope.clone()).or_default(), &imu_state);
+            apply_imu_state_to_cached_snapshot(state.serialized_readings.entry(scope.clone()).or_default(), &imu_state);
         }
         self.publish_snapshot(None, &scope).await;
     }
@@ -60,8 +63,8 @@ impl SensorsService {
         let value = SensorReading::Power(PowerSnapshot::from_sources(sources, errors));
         {
             let mut state = self.state.write().await;
-            let entry = state.readings.entry(scope.clone()).or_default();
-            entry.insert(SensorKind::Power, value);
+            state.serialized_readings.entry(scope.clone()).or_default().insert(SensorKind::Power, serialize_reading(&value));
+            state.readings.entry(scope.clone()).or_default().insert(SensorKind::Power, value);
         }
         self.publish_snapshot(None, &scope).await;
     }
@@ -71,35 +74,56 @@ impl SensorsService {
         self.ensure_scope_registered(&scope).await;
         {
             let mut state = self.state.write().await;
-            let entry = state.readings.entry(scope.clone()).or_default();
-            entry.insert(SensorKind::Power, SensorReading::Power(PowerSnapshot::error(message)));
+            let reading = SensorReading::Power(PowerSnapshot::error(message));
+            state.serialized_readings.entry(scope.clone()).or_default().insert(SensorKind::Power, serialize_reading(&reading));
+            state.readings.entry(scope.clone()).or_default().insert(SensorKind::Power, reading);
         }
         self.publish_snapshot(None, &scope).await;
     }
 
-    pub async fn snapshot(&self, scope: &SensorScope) -> Result<SensorSnapshot> {
+    pub async fn cached_snapshot(&self, scope: &SensorScope) -> Result<SensorSnapshot> {
         self.ensure_scope_registered(scope).await;
-        let state = self.state.read().await;
-        Ok(state.snapshot(scope).unwrap_or_default())
+        let values = {
+            let state = self.state.read().await;
+            state.serialized_readings.get(scope).cloned().unwrap_or_default()
+        };
+        Ok(values)
+    }
+
+    pub async fn snapshot(&self, scope: &SensorScope) -> Result<SensorSnapshot> {
+        let values = self.snapshot_typed(scope).await?;
+        Ok(super::serialize_readings(&values))
     }
 
     pub async fn snapshot_typed(&self, scope: &SensorScope) -> Result<BTreeMap<SensorKind, SensorReading>> {
         self.ensure_scope_registered(scope).await;
-        let state = self.state.read().await;
-        Ok(state.readings.get(scope).cloned().unwrap_or_default())
+        let mut values = {
+            let state = self.state.read().await;
+            state.readings.get(scope).cloned().unwrap_or_default()
+        };
+        if matches!(scope, SensorScope::Device)
+            && let Some(imu_state) = self.imu_state().await
+        {
+            apply_imu_state_to_typed_readings(&mut values, &imu_state);
+        }
+        Ok(values)
     }
 
     pub async fn update_sensor(&self, scope: &SensorScope, sensor: SensorKind, payload: SensorData) -> Result<()> {
         self.ensure_scope_registered(scope).await;
         let payload_value = payload.to_value().map_err(|err| Error::InvalidConfig(format!("sensor payload must be valid JSON: {err}")))?;
         let applied_payload = if sensor == SensorKind::Imu {
-            if let Some(settings) = self.apply_imu_config_payload(&payload_value).await? { SensorReading::Imu(ImuReading::from_settings(&settings)) } else { SensorReading::Raw(payload_value) }
+            if let Some(settings) = self.apply_imu_config_payload(&payload_value).await? {
+                SensorReading::Imu(Box::new(ImuReading::from_settings(&settings)))
+            } else {
+                SensorReading::Raw(payload_value)
+            }
         } else {
             SensorReading::Raw(payload_value)
         };
         let mut state = self.state.write().await;
-        let entry = state.readings.entry(scope.clone()).or_default();
-        entry.insert(sensor, applied_payload);
+        state.serialized_readings.entry(scope.clone()).or_default().insert(sensor.clone(), serialize_reading(&applied_payload));
+        state.readings.entry(scope.clone()).or_default().insert(sensor, applied_payload);
         Ok(())
     }
 
@@ -191,11 +215,11 @@ impl SensorsService {
         };
 
         let settings = self
-            .update_imu_settings(
+            .update_imu_settings(ImuSettingsUpdate {
                 fusion,
                 range,
                 interval,
-                None,
+                yaw_offset_deg: None,
                 mount_correction,
                 dr_velocity_damp_tau_seconds,
                 dr_still_velocity_zero_tau_seconds,
@@ -203,12 +227,65 @@ impl SensorsService {
                 dr_max_speed_mps,
                 dr_max_position_m,
                 dr_lock_position,
-            )
+            })
             .await?;
         if reset_pose {
             self.reset_imu_pose().await?;
         }
         Ok(Some(settings))
+    }
+}
+
+fn apply_imu_state_to_typed_readings(values: &mut BTreeMap<SensorKind, SensorReading>, imu_state: &ImuState) {
+    if let Some(sample) = imu_state.sample.as_ref() {
+        values.insert(SensorKind::Accelerometer, SensorReading::Accelerometer(AxesReading::from(sample.accel)));
+        values.insert(SensorKind::Gyroscope, SensorReading::Gyroscope(AxesReading::from(sample.gyro)));
+        if let Some(mag) = sample.mag {
+            values.insert(SensorKind::Magnetometer, SensorReading::Magnetometer(AxesReading::from(mag)));
+        } else {
+            values.remove(&SensorKind::Magnetometer);
+        }
+        values.insert(SensorKind::Imu, SensorReading::Imu(Box::new(ImuReading::from_sample(sample))));
+        return;
+    }
+
+    values.remove(&SensorKind::Accelerometer);
+    values.remove(&SensorKind::Gyroscope);
+    values.remove(&SensorKind::Magnetometer);
+    if let Some(message) = imu_state.last_error.clone() {
+        values.insert(SensorKind::Imu, SensorReading::Imu(Box::new(ImuReading::error(message))));
+    } else {
+        values.remove(&SensorKind::Imu);
+    }
+}
+
+fn apply_imu_state_to_cached_snapshot(serialized: &mut SensorSnapshot, imu_state: &ImuState) {
+    if let Some(sample) = imu_state.sample.as_ref() {
+        let accel = SensorReading::Accelerometer(AxesReading::from(sample.accel));
+        serialized.insert(SensorKind::Accelerometer, serialize_reading(&accel));
+
+        let gyro = SensorReading::Gyroscope(AxesReading::from(sample.gyro));
+        serialized.insert(SensorKind::Gyroscope, serialize_reading(&gyro));
+
+        if let Some(mag) = sample.mag {
+            let mag = SensorReading::Magnetometer(AxesReading::from(mag));
+            serialized.insert(SensorKind::Magnetometer, serialize_reading(&mag));
+        } else {
+            serialized.remove(&SensorKind::Magnetometer);
+        }
+        let imu = SensorReading::Imu(Box::new(ImuReading::from_sample(sample)));
+        serialized.insert(SensorKind::Imu, serialize_reading(&imu));
+        return;
+    }
+
+    serialized.remove(&SensorKind::Accelerometer);
+    serialized.remove(&SensorKind::Gyroscope);
+    serialized.remove(&SensorKind::Magnetometer);
+    if let Some(message) = imu_state.last_error.clone() {
+        let imu = SensorReading::Imu(Box::new(ImuReading::error(message)));
+        serialized.insert(SensorKind::Imu, serialize_reading(&imu));
+    } else {
+        serialized.remove(&SensorKind::Imu);
     }
 }
 

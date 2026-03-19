@@ -30,14 +30,14 @@
 
   let portSearch = $state('');
   let sampleByPort = $state<Record<string, SampleState>>({});
-  let expandedPorts = $state<Set<string>>(new Set());
+  let expandedPorts = $state<string[]>([]);
   let socket = $state<StreamOutputsSocket | null>(null);
   let socketStreamId = $state<string | null>(null);
 
   let copiedPort = $state<string | null>(null);
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
-  const expandedSet = $derived.by(() => expandedPorts);
+  const expandedSet = $derived.by(() => new Set(expandedPorts));
 
   const filteredPorts = $derived.by(() => {
     const query = portSearch.trim().toLowerCase();
@@ -62,14 +62,11 @@
   function toggleExpanded(port: string): void {
     const normalized = port.trim();
     if (!normalized) return;
-    const next = new Set(expandedPorts);
-    if (next.has(normalized)) {
-      next.delete(normalized);
-      expandedPorts = next;
+    if (expandedPorts.includes(normalized)) {
+      expandedPorts = expandedPorts.filter((value) => value !== normalized);
       return;
     }
-    next.add(normalized);
-    expandedPorts = next;
+    expandedPorts = [...expandedPorts, normalized];
     const sample = sampleByPort[normalized] ?? null;
     if (!sample || sample.status === 'idle') {
       sampleByPort = { ...sampleByPort, [normalized]: { status: 'loading' } };
@@ -111,6 +108,9 @@
     return false;
   };
 
+  const sameStringList = (left: string[], right: string[]): boolean =>
+    left.length === right.length && left.every((value, index) => value === right[index]);
+
   async function copyPortSample(port: string): Promise<void> {
     const sample = sampleByPort[port];
     const text =
@@ -141,7 +141,7 @@
       availablePorts = [];
       portPreviewableByName = {};
       sampleByPort = {};
-      expandedPorts = new Set();
+      expandedPorts = [];
       portsError = null;
       portsLoading = false;
       socket?.close();
@@ -156,7 +156,7 @@
     availablePorts = [];
     portPreviewableByName = {};
     sampleByPort = {};
-    expandedPorts = new Set();
+    expandedPorts = [];
     portsLoading = true;
     portsError = null;
     socket?.close();
@@ -165,11 +165,11 @@
         // Port list comes from the engine's output descriptor list; whether a port is previewable
         // is determined by solved typing (not port name).
         const descriptors = (event.outputs ?? [])
-          .map((v) =>
-            v && typeof v === 'object'
-              ? { name: String((v as any).name ?? '').trim(), previewable: Boolean((v as any).previewable) }
-              : null
-          )
+          .map((output) => {
+            const name = String(output?.name ?? '').trim();
+            if (!name) return null;
+            return { name, previewable: Boolean(output?.previewable) };
+          })
           .filter((v): v is { name: string; previewable: boolean } => Boolean(v && v.name));
         const next = descriptors.map((v) => v.name);
         portPreviewableByName = Object.fromEntries(descriptors.map((v) => [v.name, v.previewable]));
@@ -177,7 +177,10 @@
         portsLoading = false;
         portsError = null;
         const allowed = new Set(next);
-        expandedPorts = new Set([...expandedPorts].filter((p) => allowed.has(p)));
+        const nextExpandedPorts = expandedPorts.filter((port) => allowed.has(port));
+        if (!sameStringList(nextExpandedPorts, expandedPorts)) {
+          expandedPorts = nextExpandedPorts;
+        }
       },
       onSample: (event) => {
         const port = String(event.port ?? '').trim();
@@ -213,7 +216,7 @@
     const normalized = typeof streamId === 'string' ? streamId.trim() : '';
     if (!normalized) return;
     if (!socket || socketStreamId !== normalized) return;
-    socket.subscribe([...expandedPorts], { intervalMs: SUBSCRIBE_INTERVAL_MS });
+    socket.subscribe(expandedPorts, { intervalMs: SUBSCRIBE_INTERVAL_MS });
   });
 
   onDestroy(() => {

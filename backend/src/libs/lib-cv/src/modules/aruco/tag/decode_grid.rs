@@ -2,7 +2,6 @@ use std::cell::RefCell;
 
 use image::GrayImage;
 use imageproc::integral_image::{integral_image, sum_image_pixels};
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use tracing::error;
 
 use super::decoding::{ArucoTagDecode, ArucoTagDecoding};
@@ -353,23 +352,21 @@ pub fn decode_marker_grid(image: &GrayImage, family: &dyn ArucoTagDecoding) -> O
     let invert = false;
     let threshold = best_threshold;
 
-    let binary_grid: Vec<Vec<u8>> = (0..total_width)
-        .into_par_iter()
-        .map(|row| {
-            let mut binary_row = Vec::with_capacity(total_width as usize);
-            for col in 0..total_width {
-                let mean = means[row as usize][col as usize];
-                binary_row.push(if invert {
-                    if mean <= threshold { 1u8 } else { 0u8 }
-                } else if mean <= threshold {
-                    0u8
-                } else {
-                    1u8
-                });
-            }
-            binary_row
-        })
-        .collect();
+    let mut binary_grid: Vec<Vec<u8>> = Vec::with_capacity(total_width as usize);
+    for row in 0..total_width {
+        let mut binary_row = Vec::with_capacity(total_width as usize);
+        for col in 0..total_width {
+            let mean = means[row as usize][col as usize];
+            binary_row.push(if invert {
+                if mean <= threshold { 1u8 } else { 0u8 }
+            } else if mean <= threshold {
+                0u8
+            } else {
+                1u8
+            });
+        }
+        binary_grid.push(binary_row);
+    }
 
     ARUCO_TAG_SCRATCH.with(|scratch| {
         let mut scratch = scratch.borrow_mut();

@@ -13,14 +13,18 @@ pub mod nt4;
 pub mod ota;
 pub mod peers;
 pub mod peripherals;
+pub(crate) mod persisted_files;
 pub mod pipelines;
 pub mod plugins;
+pub(crate) mod reqwest_client;
+pub(crate) mod revision;
 pub mod startup;
 pub mod storage;
 pub mod streams;
 pub mod streams_persist;
+pub(crate) mod upload_integrity;
+pub mod validation;
 
-use crate::ipc;
 use axum::Router;
 use axum::routing::{get, post};
 use std::sync::Arc;
@@ -32,6 +36,8 @@ use utoipa::OpenApi;
         health::health,
         streams::list_streams,
         streams::start_stream,
+        streams::validate_stream,
+        streams::stream_capabilities_handler,
         streams::delete_stream,
         streams::get_controls,
         streams::set_control,
@@ -163,8 +169,12 @@ use utoipa::OpenApi;
         plugins::disable_plugin,
         plugins::enable_plugin,
         localization::sources::list_sources,
+        localization::validate_localization,
+        localization::localization_capabilities_handler,
         localization::config::get_config,
         localization::config::update_config,
+        localization::config::export_profiles,
+        localization::config::import_profiles,
         localization::external::list_external_sources,
         localization::external::upsert_external_source,
         localization::external::delete_external_source,
@@ -176,9 +186,6 @@ use utoipa::OpenApi;
         localization::maps::list_maps,
         localization::maps::fetch_map,
         localization::maps::upload_limelight_fmap,
-        integrations::limelight::list_limelight_adapters,
-        integrations::limelight::limelight_status,
-        integrations::limelight::limelight_results,
     ),
     components(
         schemas(
@@ -186,6 +193,10 @@ use utoipa::OpenApi;
             helios_engine::stream::StreamMetrics,
             streams::bench::BenchFormatsRequest,
             streams::bench::BenchFormatsResponse,
+            streams::validation::StreamValidateResponse,
+            streams::validation::StreamCapabilitiesResponse,
+            streams::validation::StreamValidationDefaults,
+            streams::validation::StreamValidationConstraints,
             streams::sensor_bench::StartSensorBenchmarkRequest,
             streams::sensor_bench::SensorBenchmarkStarted,
             streams::sensor_bench::SensorBenchmarkProgress,
@@ -295,6 +306,9 @@ use utoipa::OpenApi;
             plugins::PluginInstallResponse,
             plugins::PluginToggleResponse,
             error::ErrorBody,
+            validation::ValidationErrorBody,
+            validation::ValidationIssue,
+            validation::ValidationWarning,
             error_history::ErrorHistoryEntry,
             error_history::ErrorHistoryResponse,
             console::CreateConsoleSessionRequest,
@@ -321,7 +335,7 @@ use utoipa::OpenApi;
             helios_engine::localization::config::LocalizationSolverConfig,
             helios_engine::localization::config::LocalizationSolverMode,
             helios_engine::localization::config::LocalizationPoseSpace,
-            helios_engine::localization::pipeline::LocalizationPipelineStatus,
+            helios_engine::localization::types::LocalizationPipelineStatus,
             helios_engine::localization::types::LocalizationSolveResponse,
             helios_engine::localization::types::LocalizationSolverResult,
             helios_engine::localization::types::LocalizationSolverOutputs,
@@ -343,12 +357,17 @@ use utoipa::OpenApi;
             helios_engine::localization::maps::FieldQuaternion,
             helios_engine::localization::maps::FieldMapSource,
             helios_engine::localization::maps::FieldMapTagBits,
+            localization::validation::LocalizationValidateResponse,
+            localization::validation::LocalizationCapabilitiesResponse,
+            localization::validation::LocalizationValidationDefaults,
+            localization::validation::LocalizationValidationConstraints,
+            localization::config::LocalizationProfilesExportEnvelope,
+            localization::config::LocalizationProfilesImportRequest,
             crate::nt4::limelight::LimelightAdapterRegistryStatus,
             crate::nt4::limelight::LimelightAdapterStatus,
             crate::nt4::limelight_types::LimelightAdapterId,
             crate::nt4::limelight_types::LimelightReadSnapshot,
             crate::nt4::limelight_types::LimelightControlState,
-            integrations::limelight::LimelightResultsStagedResponse,
         )
     ),
     tags(
@@ -370,7 +389,7 @@ use utoipa::OpenApi;
 pub struct ApiDoc;
 
 /// Top-level HTTP router; currently stubs only.
-pub type AppState = Arc<ipc::IpcHandles>;
+pub type AppState = Arc<crate::app_state::ApiAppState>;
 
 pub fn router(state: AppState) -> Router {
     Router::new()
@@ -380,14 +399,14 @@ pub fn router(state: AppState) -> Router {
         .nest("/peripherals", peripherals::router())
         .nest("/device", device::router())
         .nest("/console", console::router())
-        .nest("/media", media::router::<AppState>())
+        .nest("/media", media::router())
         .nest("/ota", ota::router())
         .nest("/pipelines", pipelines::router())
         .nest("/plugins", plugins::router())
         .nest("/errors", error_history::router())
         .nest("/localization", localization::router())
         .nest("/peers", peers::router())
+        .nest("/integrations/limelight", integrations::limelight::router())
         .nest("/nt4", nt4::router())
-        .nest("/limelight", integrations::limelight::router())
         .with_state(state)
 }

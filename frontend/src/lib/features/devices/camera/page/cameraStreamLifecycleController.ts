@@ -75,8 +75,8 @@ export function createCameraStreamLifecycleController(state: StreamLifecycleStat
       }
       state.streamLookupDebug = lookup.debug;
       const info = lookup.info;
-      state.stream = info as any;
-      state.manifestState = (info as any)?.manifest ?? null;
+      state.stream = info;
+      state.manifestState = info?.manifest ?? null;
 
       const [controlResp] = await Promise.all([
         deps.streamsApi.getControls({ id: info?.id ?? effectiveId }).catch(() => [])

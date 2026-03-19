@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { toaster } from '$lib';
+  import { apiFetchResponse } from '$lib/api/core/http';
+  import type { StreamInfo, StreamManifest, StreamPipelineBinding } from '$lib/api/httpClient';
   import FaIcon from '$lib/components/icons/FaIcon.svelte';
   import { emitMediaMutation } from '$lib/features/media/mutations';
   import { reportError } from '$lib/ui/errorPolicy';
@@ -8,7 +10,66 @@
   import { extractGraphOutputPortTypes, filterEncoderCompatibleOutputs } from '$lib/features/pipelines/outputFilters';
   import { faCamera, faCircle, faClock, faGear, faStop, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons';
 
-  const { ctx } = $props<{ ctx: any }>();
+  type PipelineBindingLike = StreamPipelineBinding & {
+    pipelineId?: string | null;
+    id?: string | null;
+    pipelineGraph?: unknown;
+    graph?: unknown;
+  };
+
+  type RecordingManifest = StreamManifest & {
+    pipeline_id?: string | null;
+    pipeline_output?: string | null;
+    pipelines?: PipelineBindingLike[] | null;
+  };
+
+  type PipelineState = {
+    selectedPipelineId?: string | null;
+    assignedPipelineIds?: string[] | null;
+    pipelineGridSlots?: Record<string, string | null> | null;
+  };
+
+  type PipelineOutputOptionsCache = Map<string, string[]> | Record<string, string[]>;
+
+  type RecordingControlsContext = {
+    stream: StreamInfo | null;
+    streamId: string | null;
+    activePipelineIds?: string[] | null;
+    pipelineState?: PipelineState | null;
+    RAW_PIPELINE_ID: string;
+    RAW_PIPELINE_UUID: string;
+    extractGraphOutputPorts?: ((graph: unknown) => string[]) | null;
+    pipelineOutputOptionsCache?: PipelineOutputOptionsCache | (() => PipelineOutputOptionsCache | null | undefined) | null;
+    pipelineLabel?: ((pipelineId: string) => string) | null;
+    apiPath: (path: string) => string;
+    refresh?: (() => Promise<void> | void) | null;
+    ensurePipelineOutputsLoaded?: ((pipelineId: string) => void) | null;
+  };
+
+  const { ctx } = $props<{ ctx: RecordingControlsContext }>();
+
+  const asRecord = (value: unknown): Record<string, unknown> | null =>
+    value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+
+  const dedupePipelineIds = (values: Iterable<string>): string[] => {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const value of values) {
+      const normalized = typeof value === 'string' ? value.trim() : '';
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      out.push(normalized);
+    }
+    return out;
+  };
+
+  const manifestFor = (stream: StreamInfo | null): RecordingManifest | null => {
+    const manifest = stream?.manifest ?? null;
+    return manifest ? (manifest as RecordingManifest) : null;
+  };
+
+  const pipelineBindingsFor = (manifest: RecordingManifest | null): PipelineBindingLike[] =>
+    Array.isArray(manifest?.pipelines) ? manifest.pipelines.filter((entry): entry is PipelineBindingLike => Boolean(entry)) : [];
 
   const DEFAULT_RECORDING_FPS: number | null = null;
   const DEFAULT_RECORDING_CODEC: 'h264' | 'h265' = 'h264';
@@ -37,7 +98,7 @@
   const recordingLive = $derived(Boolean(ctx.stream?.status?.recording_active) || recordingActive);
   const activePipelineIds = $derived.by(() => {
     const existing: string[] = Array.isArray(ctx.activePipelineIds) ? ctx.activePipelineIds : [];
-    const filteredExisting = existing.filter((id) => id && id !== ctx.RAW_PIPELINE_ID);
+    const filteredExisting = dedupePipelineIds(existing).filter((id) => id && id !== ctx.RAW_PIPELINE_ID);
     if (filteredExisting.length) return filteredExisting;
     const pipelineState = ctx.pipelineState ?? null;
     if (pipelineState) {
@@ -52,9 +113,10 @@
       add(pipelineState.selectedPipelineId);
       (pipelineState.assignedPipelineIds ?? []).forEach((id: string) => add(id));
       Object.values(pipelineState.pipelineGridSlots ?? {}).forEach((id: string | null) => add(id));
-      if (collected.size) return Array.from(collected);
+      if (collected.size) return dedupePipelineIds(collected);
     }
     const manifest = ctx.stream?.manifest ?? null;
+    const manifestState = manifestFor(ctx.stream);
     const collected = new Set<string>();
     const add = (value: unknown) => {
       const raw = typeof value === 'string' ? value.trim() : '';
@@ -63,16 +125,15 @@
       if (normalized === ctx.RAW_PIPELINE_ID) return;
       collected.add(normalized);
     };
-    add((manifest as any)?.pipeline_id);
-    add((manifest as any)?.active_pipeline_id);
-    if (Array.isArray((manifest as any)?.pipelines)) {
-      (manifest as any).pipelines.forEach((entry: any) => add(entry?.pipeline_id ?? entry?.pipelineId ?? entry?.id));
-    }
-    return Array.from(collected);
+    void manifest;
+    add(manifestState?.pipeline_id);
+    add(manifestState?.active_pipeline_id);
+    pipelineBindingsFor(manifestState).forEach((entry) => add(entry.pipeline_id ?? entry.pipelineId ?? entry.id));
+    return dedupePipelineIds(collected);
   });
   const manifestOutputOptionsById = $derived.by(() => {
     const outputsById: Record<string, string[]> = {};
-    const manifest = ctx.stream?.manifest ?? null;
+    const manifest = manifestFor(ctx.stream);
     const extractor = ctx.extractGraphOutputPorts;
     if (!manifest || typeof extractor !== 'function') return outputsById;
     const normalizeId = (value: unknown) => {
@@ -82,7 +143,10 @@
       if (normalized === ctx.RAW_PIPELINE_ID) return null;
       return normalized;
     };
-    const readGraph = (value: any) => value?.pipeline_graph ?? value?.pipelineGraph ?? value?.graph ?? null;
+    const readGraph = (value: unknown) => {
+      const record = asRecord(value);
+      return record?.pipeline_graph ?? record?.pipelineGraph ?? record?.graph ?? null;
+    };
     const addOutputs = (id: unknown, graph: unknown, fallback?: unknown) => {
       const normalized = normalizeId(id);
       if (!normalized || outputsById[normalized]?.length) return;
@@ -100,15 +164,13 @@
       }
     };
     addOutputs(
-      (manifest as any)?.active_pipeline_id ?? (manifest as any)?.pipeline_id,
+      manifest.active_pipeline_id ?? manifest.pipeline_id,
       readGraph(manifest),
-      (manifest as any)?.active_pipeline_output ?? (manifest as any)?.pipeline_output
+      manifest.active_pipeline_output ?? manifest.pipeline_output
     );
-    if (Array.isArray((manifest as any)?.pipelines)) {
-      (manifest as any).pipelines.forEach((entry: any) => {
-        addOutputs(entry?.pipeline_id ?? entry?.pipelineId ?? entry?.id, readGraph(entry), entry?.pipeline_output);
-      });
-    }
+    pipelineBindingsFor(manifest).forEach((entry) => {
+      addOutputs(entry.pipeline_id ?? entry.pipelineId ?? entry.id, readGraph(entry), entry.pipeline_output);
+    });
     return outputsById;
   });
 
@@ -126,8 +188,7 @@
       if (cache && typeof cache === 'object') return (cache as Record<string, string[]>)[id];
       return undefined;
     };
-    return activePipelineIds
-      .map((value) => String(value ?? '').trim())
+    return dedupePipelineIds(activePipelineIds)
       .filter((pipelineId) => pipelineId.length && pipelineId !== ctx.RAW_PIPELINE_ID)
       .map((pipelineId) => {
         const cached = readOutputs(pipelineId);
@@ -149,9 +210,15 @@
   });
   onDestroy(() => unsubscribeBackendFeatures());
 
-  const shadowEnabled = $derived(shadowRecorderSupported && ((ctx.stream?.manifest as any)?.shadow_recorder_enabled ?? false));
+  const shadowEnabled = $derived.by(() => {
+    if (!shadowRecorderSupported) return false;
+    const manifest = manifestFor(ctx.stream);
+    const backend = String(manifest?.capture?.backend ?? '').trim().toLowerCase();
+    if (backend === 'file') return false;
+    return Boolean(manifest?.shadow_recorder_enabled ?? true);
+  });
   const preferredMultiplexCodec = $derived.by(() => {
-    const encoderId = String((ctx.stream?.manifest as any)?.encoder_id ?? '').toLowerCase();
+    const encoderId = String(manifestFor(ctx.stream)?.encoder_id ?? '').toLowerCase();
     if (encoderId.includes('265') || encoderId.includes('hevc')) return 'h265';
     if (encoderId.includes('264') || encoderId.includes('avc')) return 'h264';
     return null;
@@ -301,7 +368,7 @@
     recordingBusy = true;
     try {
       const payload = buildRecordingPayload(durationMs);
-      const response = await fetch(ctx.apiPath(`/streams/${encodeURIComponent(streamId)}/recording/start`), {
+      const response = await apiFetchResponse(ctx.apiPath(`/streams/${encodeURIComponent(streamId)}/recording/start`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(payload)
@@ -335,7 +402,7 @@
     recordingBusy = true;
     clearRecordingTimer();
     try {
-      const response = await fetch(ctx.apiPath(`/streams/${encodeURIComponent(streamId)}/recording/stop`), { method: 'POST' });
+      const response = await apiFetchResponse(ctx.apiPath(`/streams/${encodeURIComponent(streamId)}/recording/stop`), { method: 'POST' });
       if (!response.ok) {
         const text = await response.text().catch(() => '');
         throw new Error(text || `Failed to stop recording (${response.status})`);
@@ -375,7 +442,7 @@
     try {
       const durationMs = Math.max(1, Math.round(seconds)) * 1000;
       const payload: Record<string, unknown> = { window_ms: durationMs, container: recordingFormat };
-      const response = await fetch(ctx.apiPath(`/streams/${encodeURIComponent(streamId)}/recording/capture`), {
+      const response = await apiFetchResponse(ctx.apiPath(`/streams/${encodeURIComponent(streamId)}/recording/capture`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(payload)
@@ -420,7 +487,7 @@
       const payload: Record<string, unknown> = {};
       const sourcePayload = buildRecordingSourcePayload();
       if (sourcePayload) payload.source = sourcePayload;
-      const response = await fetch(ctx.apiPath(`/streams/${encodeURIComponent(streamId)}/snapshot`), {
+      const response = await apiFetchResponse(ctx.apiPath(`/streams/${encodeURIComponent(streamId)}/snapshot`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify(payload)
@@ -463,9 +530,9 @@
 </script>
 
 <div class="flex flex-wrap items-center gap-3">
-  <div class="flex flex-nowrap items-center gap-3">
+  <div class="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap sm:gap-3">
     <select
-      class="select select-2xs h-8 w-56 max-w-full flex-none leading-none text-micro-tight uppercase tracking-[0.3em] text-surface-100"
+      class="select select-2xs h-8 w-full max-w-full flex-none leading-none text-micro-tight uppercase tracking-[0.3em] text-surface-100 sm:w-56"
       aria-label="Recording source"
       value={recordingSourceSelection}
       onchange={(event) => applyRecordingSelection((event.target as HTMLSelectElement).value)}
@@ -501,7 +568,7 @@
       {/if}
     </select>
   <button
-    class={`btn btn-2xs h-8 min-w-[8rem] flex-none uppercase tracking-[0.3em] font-semibold ${recordingLive ? 'preset-filled-error-500' : 'preset-filled-primary-500'}`}
+    class={`btn btn-2xs h-8 flex-none uppercase tracking-[0.3em] font-semibold ${recordingLive ? 'preset-filled-error-500' : 'preset-filled-primary-500'}`}
     type="button"
     disabled={!ctx.streamId || recordingBusy || snapshotBusy}
     onclick={takeSnapshot}
@@ -512,7 +579,7 @@
       {snapshotBusy ? 'Working…' : 'Snapshot'}
     </button>
   <button
-    class={`btn btn-2xs h-8 min-w-[6.5rem] flex-none uppercase tracking-[0.3em] font-semibold ${recordingLive ? 'preset-filled-error-500' : 'preset-filled-primary-500'}`}
+    class={`btn btn-2xs h-8 flex-none uppercase tracking-[0.3em] font-semibold ${recordingLive ? 'preset-filled-error-500' : 'preset-filled-primary-500'}`}
     type="button"
     disabled={!ctx.streamId || recordingBusy || snapshotBusy}
     onclick={toggleRecording}
@@ -525,7 +592,7 @@
   </div>
   {#if shadowRecorderSupported}
     <button
-      class="btn btn-2xs h-8 min-w-[6.5rem] uppercase tracking-[0.3em] border border-primary-500/40 bg-primary-500/10 text-primary-100 hover:bg-primary-500/20"
+      class="btn btn-2xs h-8 uppercase tracking-[0.3em] border border-primary-500/40 bg-primary-500/10 text-primary-100 hover:bg-primary-500/20"
       type="button"
       disabled={captureDisabled}
       title={captureDisabledTitle}
@@ -537,7 +604,7 @@
       5s
     </button>
     <button
-      class="btn btn-2xs h-8 min-w-[6.5rem] uppercase tracking-[0.3em] border border-primary-500/40 bg-primary-500/10 text-primary-100 hover:bg-primary-500/20"
+      class="btn btn-2xs h-8 uppercase tracking-[0.3em] border border-primary-500/40 bg-primary-500/10 text-primary-100 hover:bg-primary-500/20"
       type="button"
       disabled={captureDisabled}
       title={captureDisabledTitle}
@@ -549,7 +616,7 @@
       30s
     </button>
     <button
-      class="btn btn-2xs h-8 min-w-[6.5rem] uppercase tracking-[0.3em] border border-primary-500/40 bg-primary-500/10 text-primary-100 hover:bg-primary-500/20"
+      class="btn btn-2xs h-8 uppercase tracking-[0.3em] border border-primary-500/40 bg-primary-500/10 text-primary-100 hover:bg-primary-500/20"
       type="button"
       disabled={captureDisabled}
       title={captureDisabledTitle}
@@ -562,7 +629,7 @@
     </button>
   {/if}
   <button
-    class="btn btn-2xs h-8 min-w-[6.5rem] preset-tonal text-surface-100"
+    class="btn btn-2xs h-8 preset-tonal text-surface-100"
     type="button"
     aria-label="Recording settings"
     title="Recording settings"

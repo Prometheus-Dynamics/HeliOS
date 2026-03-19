@@ -159,7 +159,7 @@ where
     .await
 }
 
-pub async fn persist_manifest(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) {
+async fn persist_manifest_impl(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) -> std::io::Result<()> {
     let mut hydrated = hydrate_manifest(manifest).await;
     if let Some(id) = stream_id {
         hydrated.identity.id = Some(id);
@@ -175,7 +175,7 @@ pub async fn persist_manifest(camera_id: &str, stream_id: Option<Uuid>, manifest
         hydrated.capture.controls.retain(|c| c.id != 30);
     }
 
-    match update_record(camera_id, move |mut record| async move {
+    update_record(camera_id, move |mut record| async move {
         if let Some(id) = stream_id {
             record.last_stream_id = Some(id);
         }
@@ -189,13 +189,20 @@ pub async fn persist_manifest(camera_id: &str, stream_id: Option<Uuid>, manifest
         record
     })
     .await
-    {
-        Ok(_) => {}
-        Err(err) => warn!(camera_id, error = %err, "failed to persist stream manifest"),
+    .map(|_| ())
+}
+
+pub async fn persist_manifest_checked(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) -> std::io::Result<()> {
+    persist_manifest_impl(camera_id, stream_id, manifest).await
+}
+
+pub async fn persist_manifest(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) {
+    if let Err(err) = persist_manifest_impl(camera_id, stream_id, manifest).await {
+        warn!(camera_id, error = %err, "failed to persist stream manifest");
     }
 }
 
-pub async fn persist_manifest_quick(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) {
+pub async fn persist_manifest_quick_checked(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) -> std::io::Result<()> {
     let mut hydrated = hydrate_manifest(manifest).await;
     if let Some(id) = stream_id {
         hydrated.identity.id = Some(id);
@@ -211,7 +218,7 @@ pub async fn persist_manifest_quick(camera_id: &str, stream_id: Option<Uuid>, ma
         hydrated.capture.controls.retain(|c| c.id != 30);
     }
 
-    match update_record(camera_id, move |mut record| async move {
+    update_record(camera_id, move |mut record| async move {
         if let Some(id) = stream_id {
             record.last_stream_id = Some(id);
         }
@@ -225,9 +232,12 @@ pub async fn persist_manifest_quick(camera_id: &str, stream_id: Option<Uuid>, ma
         record
     })
     .await
-    {
-        Ok(_) => {}
-        Err(err) => warn!(camera_id, error = %err, "failed to persist stream manifest"),
+    .map(|_| ())
+}
+
+pub async fn persist_manifest_quick(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) {
+    if let Err(err) = persist_manifest_quick_checked(camera_id, stream_id, manifest).await {
+        warn!(camera_id, error = %err, "failed to persist stream manifest");
     }
 }
 
@@ -375,7 +385,7 @@ pub fn derived_stream_id(camera_id: &str) -> Uuid {
     Uuid::new_v5(&Uuid::NAMESPACE_OID, camera_id.as_bytes())
 }
 
-pub async fn remove_record_by_stream_id(stream_id: Uuid) -> bool {
+pub async fn remove_record_by_stream_id(stream_id: Uuid) -> io::Result<bool> {
     let records = list_records().await;
     for record in records {
         let Some(manifest) = record.manifest else {
@@ -386,13 +396,14 @@ pub async fn remove_record_by_stream_id(stream_id: Uuid) -> bool {
         if !matches {
             continue;
         }
-        if let Ok(path) = record_path(&record.camera_id).await
-            && fs::remove_file(path).await.is_ok()
-        {
-            return true;
+        let path = record_path(&record.camera_id).await?;
+        match fs::remove_file(path).await {
+            Ok(()) => return Ok(true),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
+            Err(err) => return Err(err),
         }
     }
-    false
+    Ok(false)
 }
 
 pub(crate) fn manifests_conflict(a: &StreamManifest, b: &StreamManifest) -> bool {

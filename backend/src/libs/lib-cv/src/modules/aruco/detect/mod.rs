@@ -69,12 +69,19 @@ use utils::*;
 #[allow(unused_imports)]
 use warp::*;
 
-pub use aruco_calibrated::{decode_quads_aruco_calibrated_with_config, decode_quads_aruco_calibrated_with_config_no_bits, decode_quads_aruco_with_config, decode_quads_aruco_with_config_no_bits};
+pub use aruco_calibrated::{
+    decode_quads_aruco_calibrated_with_config, decode_quads_aruco_calibrated_with_config_no_bits, decode_quads_aruco_with_config, decode_quads_aruco_with_config_gray,
+    decode_quads_aruco_with_config_no_bits, decode_quads_aruco_with_config_no_bits_gray,
+};
 pub use calibrated::{decode_quads_calibrated, decode_quads_calibrated_with_config};
 pub use candidates::{candidate_quad_from_contour, candidate_quad_from_contour_fast, filter_candidates, filter_candidates_fast, quad_satisfies_config};
 pub use config::{ArucoDecodeConfig, ArucoTagDecodeConfig, ArucoTagDetectorConfig, CameraCalibration};
 pub use debug::{DecodeQuadFailure, DecodeQuadOutcome, decode_quad_debug};
-pub use decode_quads::{DecodeQuadsStats, decode_quads, decode_quads_with_config, decode_quads_with_config_no_bits, decode_quads_with_stats, decode_quads_with_stats_config};
+pub use decode_quads::{
+    DecodeQuadsStats, decode_quads, decode_quads_gray, decode_quads_with_config, decode_quads_with_config_gray, decode_quads_with_config_no_bits, decode_quads_with_config_no_bits_gray,
+    decode_quads_with_stats, decode_quads_with_stats_config,
+};
 pub use refine::{refine_detection_corners_warp, refine_detection_corners_warp_aruco};
+pub(crate) use types::{compact_decode_scratch_after_frame, compact_detect_scratch_after_frame};
 pub use utils::sort_corners_clockwise;
 pub use warp::{decode_quads_warp, decode_quads_warp_with_config};

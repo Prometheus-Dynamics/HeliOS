@@ -12,6 +12,8 @@ Known peers show status, endpoints, and (when provided) telemetry.
 - View saved API base, endpoints, stream URLs, management UI URL.
 - Run a probe ("Test connection") to check reachability of API/UI/streams and NT4 (when configured).
 - Review telemetry (CPU/memory/GPU) when the peer reports it.
+- Review stored calibration pose and localization outputs.
+- Sync pipelines from HeliOS peers when that action is available.
 
 ## Status meanings
 

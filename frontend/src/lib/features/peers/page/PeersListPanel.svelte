@@ -34,10 +34,12 @@
     peerProbeCache: Record<string, PeerProbeResponse | null>;
     customPending: { probe: boolean };
     onOpenMapping: (peer: PeerSummary) => void;
+    onSyncPipelines: (peer: PeerSummary) => void;
     onProbePeer: (peer: PeerSummary) => void;
     onOpenManagement: (peer: PeerSummary) => void;
     onRemove: (peerId: string) => void;
     isRemoving: (peerId: string) => boolean;
+    isSyncingPipelines: (peerId: string) => boolean;
   };
 
   const {
@@ -50,19 +52,26 @@
     peerProbeCache,
     customPending,
     onOpenMapping,
+    onSyncPipelines,
     onProbePeer,
     onOpenManagement,
     onRemove,
-    isRemoving
+    isRemoving,
+    isSyncingPipelines
   }: Props = $props();
 
   const resolvedFilterLabel = (value: string) => filters.find((filter) => filter.id === value)?.label ?? 'selected';
+  const openExternal = (url: string | null | undefined): void => {
+    const target = typeof url === 'string' ? url.trim() : '';
+    if (!target) return;
+    window.open(target, '_blank', 'noopener,noreferrer');
+  };
 </script>
 
 <Panel title="Known peers" className="flex flex-1 flex-col min-h-0">
   {#if isInitialLoading}
     <div class="grid gap-3 lg:grid-cols-2">
-      {#each Array.from({ length: 4 }) as _, idx (idx)}
+      {#each [0, 1, 2, 3] as idx (idx)}
         <article class="rounded border border-surface-800 bg-surface-900/60 p-4 text-sm text-surface-400 animate-pulse">
           <div class="flex items-center gap-3">
             <div class="h-10 w-10 rounded bg-surface-800/70"></div>
@@ -125,9 +134,14 @@
                 <div>
                   <dt class="text-xs text-surface-500">API base</dt>
                   <dd>
-                    <a class="text-primary-300 hover:text-primary-100" href={peer.apiBaseUrl} target="_blank" rel="noreferrer">
+                    <button
+                      type="button"
+                      class="text-primary-300 hover:text-primary-100"
+                      title={peer.apiBaseUrl}
+                      onclick={() => openExternal(peer.apiBaseUrl)}
+                    >
                       {peer.apiBaseUrl}
-                    </a>
+                    </button>
                   </dd>
                 </div>
                 <div>
@@ -174,9 +188,14 @@
                   <dt class="text-xs text-surface-500">Management UI</dt>
                   <dd>
                     {#if managementTarget(peer)}
-                      <a class="text-primary-300 hover:text-primary-100" href={managementTarget(peer)} target="_blank" rel="noreferrer">
+                      <button
+                        type="button"
+                        class="text-primary-300 hover:text-primary-100"
+                        title={managementTarget(peer) ?? undefined}
+                        onclick={() => openExternal(managementTarget(peer))}
+                      >
                         {managementTarget(peer)}
-                      </a>
+                      </button>
                     {:else}
                       <span class="text-surface-500">Not provided</span>
                     {/if}
@@ -189,9 +208,14 @@
                       <div class="space-y-1">
                         {#each peerStreamUrls(peer).slice(0, 6) as url (url)}
                           <div class="flex items-center justify-between gap-2">
-                            <a class="min-w-0 truncate text-primary-300 hover:text-primary-100" href={url} target="_blank" rel="noreferrer">
+                            <button
+                              type="button"
+                              class="min-w-0 truncate text-primary-300 hover:text-primary-100"
+                              title={url}
+                              onclick={() => openExternal(url)}
+                            >
                               {url}
-                            </a>
+                            </button>
                           </div>
                         {/each}
                         {#if peerStreamUrls(peer).length > 6}
@@ -291,6 +315,16 @@
             >
               Configure mapping
             </button>
+            {#if peer.integration.kind === 'helios'}
+              <button
+                class="rounded border border-primary-500/60 px-3 py-1 text-xs font-semibold text-primary-100 transition hover:bg-primary-600/20 disabled:opacity-50"
+                type="button"
+                onclick={() => onSyncPipelines(peer)}
+                disabled={isSyncingPipelines(peer.id)}
+              >
+                {isSyncingPipelines(peer.id) ? 'Syncing…' : 'Sync pipelines'}
+              </button>
+            {/if}
             <button
               class="rounded border border-surface-600 px-3 py-1 text-xs font-semibold text-surface-100 transition hover:bg-surface-700/40 disabled:opacity-50"
               type="button"

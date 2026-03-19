@@ -95,7 +95,7 @@ export const createNodeMutations = (deps: PipelineMutationsDeps) => {
       } else {
         delete baseSource.sync_groups;
       }
-      nodeEntry.source = baseSource as unknown as any;
+      nodeEntry.source = baseSource as unknown as NonNullable<typeof nodeEntry.source>;
     });
   }
 
@@ -160,7 +160,7 @@ export const createNodeMutations = (deps: PipelineMutationsDeps) => {
         inputs.push(nextName);
       }
       baseSource.inputs = inputs;
-      nodeEntry.source = baseSource as unknown as any;
+      nodeEntry.source = baseSource as unknown as NonNullable<typeof nodeEntry.source>;
     });
   }
 

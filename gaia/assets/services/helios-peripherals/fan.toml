@@ -7,8 +7,8 @@ tacho_path = "auto"
 min_percent = 35
 max_percent = 100
 poll_interval_ms = 5000
-# CM5 pwm-fan is active-high; do not invert duty.
-invert_pwm = false
+# CM5 pwm-fan is wired active-low on our target; invert keeps percent->speed intuitive.
+invert_pwm = true
 
 [[fan.curve]]
 temp_c = 40.0

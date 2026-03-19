@@ -21,6 +21,8 @@ pub struct LocalizationProfile {
     #[serde(default)]
     pub allowed_tag_ids: Vec<u32>,
     #[serde(default)]
+    pub excluded_tag_ids: Vec<u32>,
+    #[serde(default)]
     pub field_map_id: Option<String>,
     #[serde(default)]
     pub field_origin: LocalizationFieldOriginConfig,
@@ -36,8 +38,8 @@ pub struct LocalizationProfile {
     /// Snap field-space pitch to level (0 deg).
     #[serde(default)]
     pub snap_pitch_to_ground: bool,
-    #[serde(default)]
-    pub pipeline_template_id: Option<String>,
+    #[serde(default = "default_profile_enabled")]
+    pub enabled: bool,
     #[serde(default)]
     pub color: Option<String>,
     #[serde(default = "default_view_enabled")]
@@ -59,10 +61,11 @@ pub struct LocalizationFieldOriginConfig {
     pub custom: Option<LocalizationCustomFieldOrigin>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum LocalizationFieldOriginMode {
     Center,
+    #[default]
     Blue,
     Red,
     Custom,
@@ -315,12 +318,13 @@ impl Default for LocalizationConfig {
             name: "Default".to_string(),
             tag_size_m: None,
             allowed_tag_ids: Vec::new(),
+            excluded_tag_ids: Vec::new(),
             field_map_id: None,
             field_origin: LocalizationFieldOriginConfig::default(),
             snap_z_to_ground: false,
             snap_roll_to_ground: false,
             snap_pitch_to_ground: false,
-            pipeline_template_id: None,
+            enabled: true,
             color: None,
             view_enabled: true,
             temporal_stabilization: LocalizationTemporalStabilizationConfig::default(),
@@ -337,6 +341,8 @@ pub fn normalize_config(mut config: LocalizationConfig) -> LocalizationConfig {
         if profile.solvers.is_empty() {
             profile.solvers = default_solver_configs();
         }
+        profile.allowed_tag_ids = normalize_tag_id_list(std::mem::take(&mut profile.allowed_tag_ids));
+        profile.excluded_tag_ids = normalize_tag_id_list(std::mem::take(&mut profile.excluded_tag_ids));
         let has_field_map = profile.field_map_id.as_deref().map(str::trim).is_some_and(|value| !value.is_empty());
         let enabled_source_refs =
             profile.sources.iter().filter(|source| source.enabled).map(|source| (source.id.trim().to_string(), source.camera_uid.trim().to_ascii_lowercase())).collect::<Vec<_>>();
@@ -350,6 +356,13 @@ pub fn normalize_config(mut config: LocalizationConfig) -> LocalizationConfig {
         }
     }
     config
+}
+
+fn normalize_tag_id_list(values: Vec<u32>) -> Vec<u32> {
+    let mut out = values;
+    out.sort_unstable();
+    out.dedup();
+    out
 }
 
 fn normalize_solver_source_ids(solver: &mut LocalizationSolverConfig) {
@@ -411,20 +424,28 @@ fn solver_uses_multiple_camera_sources(enabled_sources: &[(String, String)], sol
 
 pub fn select_profile<'a>(config: &'a LocalizationConfig, override_id: Option<&str>) -> Result<&'a LocalizationProfile, String> {
     if let Some(id) = override_id {
-        return config.profiles.iter().find(|profile| profile.id == id).ok_or_else(|| "localization profile not found".to_string());
+        let profile = config.profiles.iter().find(|profile| profile.id == id).ok_or_else(|| "localization profile not found".to_string())?;
+        if !profile.enabled {
+            return Err("localization profile disabled".to_string());
+        }
+        return Ok(profile);
     }
 
     if let Some(active_id) = config.active_profile_id.as_deref() {
-        if let Some(profile) = config.profiles.iter().find(|profile| profile.id == active_id) {
+        if let Some(profile) = config.profiles.iter().find(|profile| profile.id == active_id && profile.enabled) {
             return Ok(profile);
         }
     }
 
-    config.profiles.first().ok_or_else(|| "no localization profiles configured".to_string())
+    config.profiles.iter().find(|profile| profile.enabled).ok_or_else(|| "no enabled localization profiles configured".to_string())
 }
 
 fn default_source_weight() -> f32 {
     1.0
+}
+
+fn default_profile_enabled() -> bool {
+    true
 }
 
 fn default_view_enabled() -> bool {
@@ -544,12 +565,6 @@ impl Default for LocalizationTemporalStabilizationConfig {
 impl Default for LocalizationFieldOriginConfig {
     fn default() -> Self {
         Self { mode: LocalizationFieldOriginMode::Blue, custom: None }
-    }
-}
-
-impl Default for LocalizationFieldOriginMode {
-    fn default() -> Self {
-        Self::Blue
     }
 }
 
@@ -1093,12 +1108,13 @@ mod tests {
             name: "p".to_string(),
             tag_size_m: None,
             allowed_tag_ids: vec![],
+            excluded_tag_ids: vec![],
             field_map_id: Some("map".to_string()),
             field_origin: LocalizationFieldOriginConfig::default(),
             snap_z_to_ground: false,
             snap_roll_to_ground: false,
             snap_pitch_to_ground: false,
-            pipeline_template_id: None,
+            enabled: true,
             color: None,
             view_enabled: true,
             temporal_stabilization: LocalizationTemporalStabilizationConfig::default(),
@@ -1141,5 +1157,37 @@ mod tests {
         let spaces = &normalized.profiles[0].solvers[0].output_spaces;
         assert!(spaces.contains(&LocalizationPoseSpace::RobotInField));
         assert!(spaces.contains(&LocalizationPoseSpace::CameraInField));
+    }
+
+    #[test]
+    fn normalize_config_sorts_and_deduplicates_tag_filters() {
+        let mut profile = base_profile();
+        profile.allowed_tag_ids = vec![9, 2, 9, 3];
+        profile.excluded_tag_ids = vec![4, 1, 4, 2];
+
+        let normalized = normalize_config(LocalizationConfig { active_profile_id: Some(profile.id.clone()), profiles: vec![profile] });
+        let normalized_profile = &normalized.profiles[0];
+        assert_eq!(normalized_profile.allowed_tag_ids, vec![2, 3, 9]);
+        assert_eq!(normalized_profile.excluded_tag_ids, vec![1, 2, 4]);
+    }
+
+    #[test]
+    fn select_profile_skips_disabled_active_profile() {
+        let mut disabled = base_profile();
+        disabled.id = "disabled".to_string();
+        disabled.enabled = false;
+        let mut enabled = base_profile();
+        enabled.id = "enabled".to_string();
+        let config = LocalizationConfig { active_profile_id: Some("disabled".to_string()), profiles: vec![disabled, enabled] };
+        let selected = select_profile(&config, None).expect("enabled profile");
+        assert_eq!(selected.id, "enabled");
+    }
+
+    #[test]
+    fn select_profile_rejects_disabled_override() {
+        let mut profile = base_profile();
+        profile.enabled = false;
+        let err = select_profile(&LocalizationConfig { active_profile_id: Some(profile.id.clone()), profiles: vec![profile] }, Some("p")).expect_err("disabled override should fail");
+        assert_eq!(err, "localization profile disabled");
     }
 }

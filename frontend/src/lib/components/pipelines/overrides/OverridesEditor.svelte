@@ -66,7 +66,11 @@
 {#if editMode && selectedItem}
   <div class="fixed z-50 w-[22rem] max-w-[90vw]" style={panelStyle}>
     <div class="flex max-h-[calc(100vh-2rem)] max-h-[calc(100svh-2rem)] max-h-[calc(100dvh-2rem)] flex-col rounded border border-surface-800/80 bg-surface-950/95 shadow-2xl shadow-black/50">
-      <div class="flex items-start justify-between gap-2 border-b border-surface-800/70 p-3 cursor-move" onpointerdown={onStartPanelDrag}>
+      <div
+        class="flex items-start justify-between gap-2 border-b border-surface-800/70 p-3 cursor-move"
+        onpointerdown={onStartPanelDrag}
+        role="presentation"
+      >
         <div>
           <p class="text-micro-tight uppercase tracking-[0.2em] text-surface-500">Properties</p>
           <p class="text-xs text-surface-400">{selectedItem.type}</p>
@@ -86,148 +90,139 @@
       <div class="min-h-0 flex-1 space-y-3 overflow-auto p-3">
         {#if selectedItem.type === 'title' || selectedItem.type === 'text'}
           <PanelSection title="Text">
-            {#snippet children()}
-              <FormField
-                label="Text"
-                density="compact"
-                labelClassName="text-micro-tight uppercase tracking-[0.2em] text-surface-500"
-              >
-                {#snippet control()}
-                  <input
-                    class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
-                    value={selectedItem.text}
-                    oninput={(event) => onUpdateSelectedItem({ text: (event.currentTarget as HTMLInputElement).value })}
-                  />
-                {/snippet}
-              </FormField>
-            {/snippet}
+            <FormField
+              label="Text"
+              density="compact"
+              labelClassName="text-micro-tight uppercase tracking-[0.2em] text-surface-500"
+            >
+              {#snippet control()}
+                <input
+                  class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
+                  value={selectedItem.text}
+                  oninput={(event) => onUpdateSelectedItem({ text: (event.currentTarget as HTMLInputElement).value })}
+                />
+              {/snippet}
+            </FormField>
           </PanelSection>
         {:else if selectedItem.type === 'group' || selectedItem.type === 'accordion' || selectedItem.type === 'stack'}
           <PanelSection title="Group">
-            {#snippet children()}
-              <FormField
-                label="Title"
-                density="compact"
-                labelClassName="text-micro-tight uppercase tracking-[0.2em] text-surface-500"
-              >
-                {#snippet control()}
-                  <input
-                    class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
-                    placeholder="Title"
-                    value={selectedItem.title ?? ''}
-                    oninput={(event) => onUpdateSelectedItem({ title: (event.currentTarget as HTMLInputElement).value })}
-                  />
-                {/snippet}
-              </FormField>
-              <FormField
-                label="Description"
-                density="compact"
-                labelClassName="text-micro-tight uppercase tracking-[0.2em] text-surface-500"
-              >
-                {#snippet control()}
-                  <input
-                    class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
-                    placeholder="Description"
-                    value={selectedItem.description ?? ''}
-                    oninput={(event) => onUpdateSelectedItem({ description: (event.currentTarget as HTMLInputElement).value })}
-                  />
-                {/snippet}
-              </FormField>
-              {#if selectedItem.type === 'accordion'}
-                <label class="flex items-center gap-2 text-micro-tight text-surface-400">
-                  <input
-                    type="checkbox"
-                    checked={selectedItem.defaultOpen ?? false}
-                    onchange={(event) => onUpdateSelectedItem({ defaultOpen: (event.currentTarget as HTMLInputElement).checked })}
-                  />
-                  Default open
-                </label>
-              {/if}
-            {/snippet}
+            <FormField
+              label="Title"
+              density="compact"
+              labelClassName="text-micro-tight uppercase tracking-[0.2em] text-surface-500"
+            >
+              {#snippet control()}
+                <input
+                  class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
+                  placeholder="Title"
+                  value={selectedItem.title ?? ''}
+                  oninput={(event) => onUpdateSelectedItem({ title: (event.currentTarget as HTMLInputElement).value })}
+                />
+              {/snippet}
+            </FormField>
+            <FormField
+              label="Description"
+              density="compact"
+              labelClassName="text-micro-tight uppercase tracking-[0.2em] text-surface-500"
+            >
+              {#snippet control()}
+                <input
+                  class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
+                  placeholder="Description"
+                  value={selectedItem.description ?? ''}
+                  oninput={(event) => onUpdateSelectedItem({ description: (event.currentTarget as HTMLInputElement).value })}
+                />
+              {/snippet}
+            </FormField>
+            {#if selectedItem.type === 'accordion'}
+              <label class="flex items-center gap-2 text-micro-tight text-surface-400">
+                <input
+                  type="checkbox"
+                  checked={selectedItem.defaultOpen ?? false}
+                  onchange={(event) => onUpdateSelectedItem({ defaultOpen: (event.currentTarget as HTMLInputElement).checked })}
+                />
+                Default open
+              </label>
+            {/if}
           </PanelSection>
         {:else if selectedItem.type === 'tabs'}
           <PanelSection title="Tabs">
             {#snippet actions()}
               <button class="btn btn-3xs preset-outline" type="button" onclick={onAddSelectedTab}>+ Tab</button>
             {/snippet}
-            {#snippet children()}
-              <FormField
-                label="Tabs title"
-                density="compact"
-                labelClassName="text-micro-tight uppercase tracking-[0.2em] text-surface-500"
-              >
-                {#snippet control()}
-                  <input
-                    class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
-                    placeholder="Tabs title"
-                    value={selectedItem.title ?? ''}
-                    oninput={(event) => onUpdateSelectedItem({ title: (event.currentTarget as HTMLInputElement).value })}
-                  />
-                {/snippet}
-              </FormField>
-              <FormField
-                label="Description"
-                density="compact"
-                labelClassName="text-micro-tight uppercase tracking-[0.2em] text-surface-500"
-              >
-                {#snippet control()}
-                  <input
-                    class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
-                    placeholder="Description"
-                    value={selectedItem.description ?? ''}
-                    oninput={(event) => onUpdateSelectedItem({ description: (event.currentTarget as HTMLInputElement).value })}
-                  />
-                {/snippet}
-              </FormField>
-              <div class="space-y-2">
-                {#each selectedItem.tabs as tab, tabIndex (tab.id)}
-                  <div class="flex items-center gap-2">
-                    <FormField
-                      label="Tab title"
-                      density="compact"
-                      className="flex-1"
-                      labelClassName="text-micro-tight uppercase tracking-[0.2em] text-surface-500"
-                    >
-                      {#snippet control()}
-                        <input
-                          class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
-                          value={tab.title}
-                          oninput={(event) => onUpdateSelectedTabTitle(tabIndex, (event.currentTarget as HTMLInputElement).value)}
-                        />
-                      {/snippet}
-                    </FormField>
-                    <button class="btn btn-3xs preset-outline" type="button" onclick={() => onDeleteSelectedTab(tabIndex)}>
-                      Delete
-                    </button>
-                  </div>
-                {/each}
-              </div>
-            {/snippet}
+            <FormField
+              label="Tabs title"
+              density="compact"
+              labelClassName="text-micro-tight uppercase tracking-[0.2em] text-surface-500"
+            >
+              {#snippet control()}
+                <input
+                  class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
+                  placeholder="Tabs title"
+                  value={selectedItem.title ?? ''}
+                  oninput={(event) => onUpdateSelectedItem({ title: (event.currentTarget as HTMLInputElement).value })}
+                />
+              {/snippet}
+            </FormField>
+            <FormField
+              label="Description"
+              density="compact"
+              labelClassName="text-micro-tight uppercase tracking-[0.2em] text-surface-500"
+            >
+              {#snippet control()}
+                <input
+                  class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
+                  placeholder="Description"
+                  value={selectedItem.description ?? ''}
+                  oninput={(event) => onUpdateSelectedItem({ description: (event.currentTarget as HTMLInputElement).value })}
+                />
+              {/snippet}
+            </FormField>
+            <div class="space-y-2">
+              {#each selectedItem.tabs as tab, tabIndex (tab.id)}
+                <div class="flex items-center gap-2">
+                  <FormField
+                    label="Tab title"
+                    density="compact"
+                    className="flex-1"
+                    labelClassName="text-micro-tight uppercase tracking-[0.2em] text-surface-500"
+                  >
+                    {#snippet control()}
+                      <input
+                        class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
+                        value={tab.title}
+                        oninput={(event) => onUpdateSelectedTabTitle(tabIndex, (event.currentTarget as HTMLInputElement).value)}
+                      />
+                    {/snippet}
+                  </FormField>
+                  <button class="btn btn-3xs preset-outline" type="button" onclick={() => onDeleteSelectedTab(tabIndex)}>
+                    Delete
+                  </button>
+                </div>
+              {/each}
+            </div>
           </PanelSection>
         {:else if selectedItem.type === 'divider'}
           <PanelSection title="Divider">
-            {#snippet children()}
-              <FormField
-                label="Label"
-                density="compact"
-                labelClassName="text-micro-tight uppercase tracking-[0.2em] text-surface-500"
-              >
-                {#snippet control()}
-                  <input
-                    class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
-                    placeholder="Divider label"
-                    value={selectedItem.label ?? ''}
-                    oninput={(event) => onUpdateSelectedItem({ label: (event.currentTarget as HTMLInputElement).value })}
-                  />
-                {/snippet}
-              </FormField>
-            {/snippet}
+            <FormField
+              label="Label"
+              density="compact"
+              labelClassName="text-micro-tight uppercase tracking-[0.2em] text-surface-500"
+            >
+              {#snippet control()}
+                <input
+                  class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
+                  placeholder="Divider label"
+                  value={selectedItem.label ?? ''}
+                  oninput={(event) => onUpdateSelectedItem({ label: (event.currentTarget as HTMLInputElement).value })}
+                />
+              {/snippet}
+            </FormField>
           </PanelSection>
         {:else}
           {@const selectedControl = selectedItem as PipelineUiControl}
           <PanelSection title="Control">
-            {#snippet children()}
-              <FormField
+            <FormField
                 label="Label"
                 density="compact"
                 labelClassName="text-micro-tight uppercase tracking-[0.2em] text-surface-500"
@@ -382,59 +377,55 @@
 
               {#if selectedItem.type === 'slider' || selectedItem.type === 'dual_slider'}
                 <PanelSection title="Range">
-                  {#snippet children()}
-                    <div class="grid grid-cols-3 gap-2">
-                      <input
-                        class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
-                        placeholder="Min"
-                        value={selectedControl.min ?? ''}
-                        oninput={(event) => onUpdateSelectedControl({ min: Number((event.currentTarget as HTMLInputElement).value) })}
-                      />
-                      <input
-                        class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
-                        placeholder="Max"
-                        value={selectedControl.max ?? ''}
-                        oninput={(event) => onUpdateSelectedControl({ max: Number((event.currentTarget as HTMLInputElement).value) })}
-                      />
-                      <input
-                        class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
-                        placeholder="Step"
-                        value={selectedControl.step ?? ''}
-                        oninput={(event) => onUpdateSelectedControl({ step: Number((event.currentTarget as HTMLInputElement).value) })}
-                      />
-                    </div>
-                  {/snippet}
+                  <div class="grid grid-cols-3 gap-2">
+                    <input
+                      class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
+                      placeholder="Min"
+                      value={selectedControl.min ?? ''}
+                      oninput={(event) => onUpdateSelectedControl({ min: Number((event.currentTarget as HTMLInputElement).value) })}
+                    />
+                    <input
+                      class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
+                      placeholder="Max"
+                      value={selectedControl.max ?? ''}
+                      oninput={(event) => onUpdateSelectedControl({ max: Number((event.currentTarget as HTMLInputElement).value) })}
+                    />
+                    <input
+                      class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
+                      placeholder="Step"
+                      value={selectedControl.step ?? ''}
+                      oninput={(event) => onUpdateSelectedControl({ step: Number((event.currentTarget as HTMLInputElement).value) })}
+                    />
+                  </div>
                 </PanelSection>
               {/if}
 
               {#if selectedItem.type === 'dual_slider'}
                 <PanelSection title="Default range">
-                  {#snippet children()}
-                    <div class="grid grid-cols-2 gap-2">
-                      <input
-                        class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
-                        placeholder="Default min"
-                        value={Array.isArray(selectedControl.default) ? selectedControl.default?.[0] ?? '' : ''}
-                        oninput={(event) => {
-                          const current = Array.isArray(selectedControl.default) ? selectedControl.default ?? [0, 0] : [0, 0];
-                          onUpdateSelectedControl({
-                            default: [Number((event.currentTarget as HTMLInputElement).value), Number(current[1] ?? 0)]
-                          });
-                        }}
-                      />
-                      <input
-                        class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
-                        placeholder="Default max"
-                        value={Array.isArray(selectedControl.default) ? selectedControl.default?.[1] ?? '' : ''}
-                        oninput={(event) => {
-                          const current = Array.isArray(selectedControl.default) ? selectedControl.default ?? [0, 0] : [0, 0];
-                          onUpdateSelectedControl({
-                            default: [Number(current[0] ?? 0), Number((event.currentTarget as HTMLInputElement).value)]
-                          });
-                        }}
-                      />
-                    </div>
-                  {/snippet}
+                  <div class="grid grid-cols-2 gap-2">
+                    <input
+                      class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
+                      placeholder="Default min"
+                      value={Array.isArray(selectedControl.default) ? selectedControl.default?.[0] ?? '' : ''}
+                      oninput={(event) => {
+                        const current = Array.isArray(selectedControl.default) ? selectedControl.default ?? [0, 0] : [0, 0];
+                        onUpdateSelectedControl({
+                          default: [Number((event.currentTarget as HTMLInputElement).value), Number(current[1] ?? 0)]
+                        });
+                      }}
+                    />
+                    <input
+                      class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
+                      placeholder="Default max"
+                      value={Array.isArray(selectedControl.default) ? selectedControl.default?.[1] ?? '' : ''}
+                      oninput={(event) => {
+                        const current = Array.isArray(selectedControl.default) ? selectedControl.default ?? [0, 0] : [0, 0];
+                        onUpdateSelectedControl({
+                          default: [Number(current[0] ?? 0), Number((event.currentTarget as HTMLInputElement).value)]
+                        });
+                      }}
+                    />
+                  </div>
                 </PanelSection>
               {:else if selectedItem.type === 'toggle' || selectedItem.type === 'layout_toggle'}
                 <label class="flex items-center gap-2 text-micro-tight text-surface-400">
@@ -468,27 +459,25 @@
                       Edit
                     </button>
                   {/snippet}
-                  {#snippet children()}
-                    <div class="flex items-center gap-2">
-                      <button
-                        class="h-8 w-8 rounded border border-surface-700 bg-surface-900/70"
-                        type="button"
-                        aria-label="Pick default color"
-                        onclick={() => onOpenColorPicker('defaultColor')}
-                      >
-                        <span
-                          class="ui-color-swatch block h-full w-full rounded"
-                          style={`--swatch-color:${String(selectedControl.default ?? '#ffffff')};`}
-                        ></span>
-                      </button>
-                      <input
-                        class="flex-1 rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
-                        placeholder="#RRGGBB"
-                        value={selectedControl.default ?? ''}
-                        oninput={(event) => onUpdateSelectedControl({ default: (event.currentTarget as HTMLInputElement).value })}
-                      />
-                    </div>
-                  {/snippet}
+                  <div class="flex items-center gap-2">
+                    <button
+                      class="h-8 w-8 rounded border border-surface-700 bg-surface-900/70"
+                      type="button"
+                      aria-label="Pick default color"
+                      onclick={() => onOpenColorPicker('defaultColor')}
+                    >
+                      <span
+                        class="ui-color-swatch block h-full w-full rounded"
+                        style={`--swatch-color:${String(selectedControl.default ?? '#ffffff')};`}
+                      ></span>
+                    </button>
+                    <input
+                      class="flex-1 rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
+                      placeholder="#RRGGBB"
+                      value={selectedControl.default ?? ''}
+                      oninput={(event) => onUpdateSelectedControl({ default: (event.currentTarget as HTMLInputElement).value })}
+                    />
+                  </div>
                 </PanelSection>
               {:else if selectedItem.type !== 'hsv' && selectedItem.type !== 'hsv_range'}
                 <FormField
@@ -509,9 +498,8 @@
 
               {#if selectedItem.type !== 'layout_toggle'}
                 <PanelSection title="Track styling">
-                  {#snippet children()}
-                    <div class="space-y-2">
-                      <FormField
+                  <div class="space-y-2">
+                    <FormField
                         label="Gradient"
                         density="compact"
                         labelClassName="text-micro-tight uppercase tracking-[0.2em] text-surface-500"
@@ -562,63 +550,60 @@
                         {/snippet}
                       </FormField>
                     </div>
-                  {/snippet}
                 </PanelSection>
 
                 {@const thumbFillColor = selectedControl.thumbFill ?? '#ffffff'}
                 {@const thumbBorderColor = selectedControl.thumbBorder ?? '#ffffff'}
                 <PanelSection title="Thumb styling">
-                  {#snippet children()}
-                    <div class="grid gap-2">
-                      <div class="flex items-center gap-2">
-                        <button
-                          class="h-8 w-8 rounded border border-surface-700 bg-surface-900/70"
-                          type="button"
-                          aria-label="Pick thumb fill color"
-                          onclick={() => onOpenColorPicker('thumbFill')}
-                        >
-                          <span class="ui-color-swatch block h-full w-full rounded" style={`--swatch-color:${thumbFillColor};`}></span>
-                        </button>
-                        <div class="flex-1 space-y-1">
-                          <p class="text-micro-tight uppercase tracking-[0.2em] text-surface-500">Thumb fill</p>
-                          <input
-                            class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
-                            placeholder="Thumb fill"
-                            value={selectedControl.thumbFill ?? ''}
-                            oninput={(event) => onUpdateSelectedControl({ thumbFill: (event.currentTarget as HTMLInputElement).value })}
-                          />
-                        </div>
-                      </div>
-                      <div class="flex items-center gap-2">
-                        <button
-                          class="h-8 w-8 rounded border border-surface-700 bg-surface-900/70"
-                          type="button"
-                          aria-label="Pick thumb border color"
-                          onclick={() => onOpenColorPicker('thumbBorder')}
-                        >
-                          <span class="ui-color-swatch block h-full w-full rounded" style={`--swatch-color:${thumbBorderColor};`}></span>
-                        </button>
-                        <div class="flex-1 space-y-1">
-                          <p class="text-micro-tight uppercase tracking-[0.2em] text-surface-500">Thumb border</p>
-                          <input
-                            class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
-                            placeholder="Thumb border"
-                            value={selectedControl.thumbBorder ?? ''}
-                            oninput={(event) => onUpdateSelectedControl({ thumbBorder: (event.currentTarget as HTMLInputElement).value })}
-                          />
-                        </div>
-                      </div>
-                      <div class="space-y-1">
-                        <p class="text-micro-tight uppercase tracking-[0.2em] text-surface-500">Border width</p>
+                  <div class="grid gap-2">
+                    <div class="flex items-center gap-2">
+                      <button
+                        class="h-8 w-8 rounded border border-surface-700 bg-surface-900/70"
+                        type="button"
+                        aria-label="Pick thumb fill color"
+                        onclick={() => onOpenColorPicker('thumbFill')}
+                      >
+                        <span class="ui-color-swatch block h-full w-full rounded" style={`--swatch-color:${thumbFillColor};`}></span>
+                      </button>
+                      <div class="flex-1 space-y-1">
+                        <p class="text-micro-tight uppercase tracking-[0.2em] text-surface-500">Thumb fill</p>
                         <input
-                          class="w-28 rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
-                          placeholder="Border width"
-                          value={selectedControl.thumbBorderWidth ?? ''}
-                          oninput={(event) => onUpdateSelectedControl({ thumbBorderWidth: Number((event.currentTarget as HTMLInputElement).value) })}
+                          class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
+                          placeholder="Thumb fill"
+                          value={selectedControl.thumbFill ?? ''}
+                          oninput={(event) => onUpdateSelectedControl({ thumbFill: (event.currentTarget as HTMLInputElement).value })}
                         />
                       </div>
                     </div>
-                  {/snippet}
+                    <div class="flex items-center gap-2">
+                      <button
+                        class="h-8 w-8 rounded border border-surface-700 bg-surface-900/70"
+                        type="button"
+                        aria-label="Pick thumb border color"
+                        onclick={() => onOpenColorPicker('thumbBorder')}
+                      >
+                        <span class="ui-color-swatch block h-full w-full rounded" style={`--swatch-color:${thumbBorderColor};`}></span>
+                      </button>
+                      <div class="flex-1 space-y-1">
+                        <p class="text-micro-tight uppercase tracking-[0.2em] text-surface-500">Thumb border</p>
+                        <input
+                          class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
+                          placeholder="Thumb border"
+                          value={selectedControl.thumbBorder ?? ''}
+                          oninput={(event) => onUpdateSelectedControl({ thumbBorder: (event.currentTarget as HTMLInputElement).value })}
+                        />
+                      </div>
+                    </div>
+                    <div class="space-y-1">
+                      <p class="text-micro-tight uppercase tracking-[0.2em] text-surface-500">Border width</p>
+                      <input
+                        class="w-28 rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
+                        placeholder="Border width"
+                        value={selectedControl.thumbBorderWidth ?? ''}
+                        oninput={(event) => onUpdateSelectedControl({ thumbBorderWidth: Number((event.currentTarget as HTMLInputElement).value) })}
+                      />
+                    </div>
+                  </div>
                 </PanelSection>
               {/if}
 
@@ -635,103 +620,94 @@
                       Edit
                     </button>
                   {/snippet}
-                  {#snippet children()}
-                    <div class="text-micro-tight text-surface-500">
-                      {layoutRows}×{layoutColumns} · {layoutSlotCount || 0} slot{layoutSlotCount === 1 ? '' : 's'}
-                    </div>
-                  {/snippet}
+                  <div class="text-micro-tight text-surface-500">
+                    {layoutRows}×{layoutColumns} · {layoutSlotCount || 0} slot{layoutSlotCount === 1 ? '' : 's'}
+                  </div>
                 </PanelSection>
               {/if}
 
               {#if selectedItem.type === 'hsv'}
                 <PanelSection title="HSV defaults">
-                  {#snippet children()}
-                    <div class="grid grid-cols-3 gap-2">
-                      <input
-                        class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
-                        placeholder="H"
-                        value={selectedControl.hsvDefaults?.h ?? ''}
-                        oninput={(event) => {
-                          const current = selectedControl.hsvDefaults ?? { h: 120, s: 0.7, v: 0.8 };
-                          onUpdateSelectedControl({ hsvDefaults: { ...current, h: Number((event.currentTarget as HTMLInputElement).value) } });
-                        }}
-                      />
-                      <input
-                        class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
-                        placeholder="S"
-                        value={selectedControl.hsvDefaults?.s ?? ''}
-                        oninput={(event) => {
-                          const current = selectedControl.hsvDefaults ?? { h: 120, s: 0.7, v: 0.8 };
-                          onUpdateSelectedControl({ hsvDefaults: { ...current, s: Number((event.currentTarget as HTMLInputElement).value) } });
-                        }}
-                      />
-                      <input
-                        class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
-                        placeholder="V"
-                        value={selectedControl.hsvDefaults?.v ?? ''}
-                        oninput={(event) => {
-                          const current = selectedControl.hsvDefaults ?? { h: 120, s: 0.7, v: 0.8 };
-                          onUpdateSelectedControl({ hsvDefaults: { ...current, v: Number((event.currentTarget as HTMLInputElement).value) } });
-                        }}
-                      />
-                    </div>
-                  {/snippet}
+                  <div class="grid grid-cols-3 gap-2">
+                    <input
+                      class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
+                      placeholder="H"
+                      value={selectedControl.hsvDefaults?.h ?? ''}
+                      oninput={(event) => {
+                        const current = selectedControl.hsvDefaults ?? { h: 120, s: 0.7, v: 0.8 };
+                        onUpdateSelectedControl({ hsvDefaults: { ...current, h: Number((event.currentTarget as HTMLInputElement).value) } });
+                      }}
+                    />
+                    <input
+                      class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
+                      placeholder="S"
+                      value={selectedControl.hsvDefaults?.s ?? ''}
+                      oninput={(event) => {
+                        const current = selectedControl.hsvDefaults ?? { h: 120, s: 0.7, v: 0.8 };
+                        onUpdateSelectedControl({ hsvDefaults: { ...current, s: Number((event.currentTarget as HTMLInputElement).value) } });
+                      }}
+                    />
+                    <input
+                      class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
+                      placeholder="V"
+                      value={selectedControl.hsvDefaults?.v ?? ''}
+                      oninput={(event) => {
+                        const current = selectedControl.hsvDefaults ?? { h: 120, s: 0.7, v: 0.8 };
+                        onUpdateSelectedControl({ hsvDefaults: { ...current, v: Number((event.currentTarget as HTMLInputElement).value) } });
+                      }}
+                    />
+                  </div>
                 </PanelSection>
               {/if}
 
               {#if selectedItem.type === 'hsv_range'}
                 <PanelSection title="HSV range mode">
-                  {#snippet children()}
-                    <div class="grid grid-cols-2 gap-2">
-                      <select
-                        class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
-                        value={selectedControl.hsvRangeMode ?? 'include'}
-                        onchange={(event) => onUpdateSelectedControl({ hsvRangeMode: (event.currentTarget as HTMLSelectElement).value as 'include' | 'exclude' })}
-                      >
-                        <option value="include">Include</option>
-                        <option value="exclude">Exclude</option>
-                      </select>
-                      <input
-                        class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
-                        placeholder="H range (min,max)"
-                        value={selectedControl.hsvRangeDefaults?.h?.join(',') ?? ''}
-                        oninput={(event) => {
-                          const current = selectedControl.hsvRangeDefaults ?? { h: [0, 360], s: [0, 1], v: [0, 1] };
-                          const parts = (event.currentTarget as HTMLInputElement).value.split(',').map((val) => Number(val.trim()));
-                          onUpdateSelectedControl({ hsvRangeDefaults: { ...current, h: [parts[0] ?? 0, parts[1] ?? 360] } });
-                        }}
-                      />
-                    </div>
-                  {/snippet}
+                  <div class="grid grid-cols-2 gap-2">
+                    <select
+                      class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
+                      value={selectedControl.hsvRangeMode ?? 'include'}
+                      onchange={(event) => onUpdateSelectedControl({ hsvRangeMode: (event.currentTarget as HTMLSelectElement).value as 'include' | 'exclude' })}
+                    >
+                      <option value="include">Include</option>
+                      <option value="exclude">Exclude</option>
+                    </select>
+                    <input
+                      class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
+                      placeholder="H range (min,max)"
+                      value={selectedControl.hsvRangeDefaults?.h?.join(',') ?? ''}
+                      oninput={(event) => {
+                        const current = selectedControl.hsvRangeDefaults ?? { h: [0, 360], s: [0, 1], v: [0, 1] };
+                        const parts = (event.currentTarget as HTMLInputElement).value.split(',').map((val) => Number(val.trim()));
+                        onUpdateSelectedControl({ hsvRangeDefaults: { ...current, h: [parts[0] ?? 0, parts[1] ?? 360] } });
+                      }}
+                    />
+                  </div>
                 </PanelSection>
                 <PanelSection title="HSV range defaults">
-                  {#snippet children()}
-                    <div class="grid grid-cols-2 gap-2">
-                      <input
-                        class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
-                        placeholder="S range (min,max)"
-                        value={selectedControl.hsvRangeDefaults?.s?.join(',') ?? ''}
-                        oninput={(event) => {
-                          const current = selectedControl.hsvRangeDefaults ?? { h: [0, 360], s: [0, 1], v: [0, 1] };
-                          const parts = (event.currentTarget as HTMLInputElement).value.split(',').map((val) => Number(val.trim()));
-                          onUpdateSelectedControl({ hsvRangeDefaults: { ...current, s: [parts[0] ?? 0, parts[1] ?? 1] } });
-                        }}
-                      />
-                      <input
-                        class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
-                        placeholder="V range (min,max)"
-                        value={selectedControl.hsvRangeDefaults?.v?.join(',') ?? ''}
-                        oninput={(event) => {
-                          const current = selectedControl.hsvRangeDefaults ?? { h: [0, 360], s: [0, 1], v: [0, 1] };
-                          const parts = (event.currentTarget as HTMLInputElement).value.split(',').map((val) => Number(val.trim()));
-                          onUpdateSelectedControl({ hsvRangeDefaults: { ...current, v: [parts[0] ?? 0, parts[1] ?? 1] } });
-                        }}
-                      />
-                    </div>
-                  {/snippet}
+                  <div class="grid grid-cols-2 gap-2">
+                    <input
+                      class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
+                      placeholder="S range (min,max)"
+                      value={selectedControl.hsvRangeDefaults?.s?.join(',') ?? ''}
+                      oninput={(event) => {
+                        const current = selectedControl.hsvRangeDefaults ?? { h: [0, 360], s: [0, 1], v: [0, 1] };
+                        const parts = (event.currentTarget as HTMLInputElement).value.split(',').map((val) => Number(val.trim()));
+                        onUpdateSelectedControl({ hsvRangeDefaults: { ...current, s: [parts[0] ?? 0, parts[1] ?? 1] } });
+                      }}
+                    />
+                    <input
+                      class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
+                      placeholder="V range (min,max)"
+                      value={selectedControl.hsvRangeDefaults?.v?.join(',') ?? ''}
+                      oninput={(event) => {
+                        const current = selectedControl.hsvRangeDefaults ?? { h: [0, 360], s: [0, 1], v: [0, 1] };
+                        const parts = (event.currentTarget as HTMLInputElement).value.split(',').map((val) => Number(val.trim()));
+                        onUpdateSelectedControl({ hsvRangeDefaults: { ...current, v: [parts[0] ?? 0, parts[1] ?? 1] } });
+                      }}
+                    />
+                  </div>
                 </PanelSection>
               {/if}
-            {/snippet}
           </PanelSection>
         {/if}
       </div>

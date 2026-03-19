@@ -1,0 +1,1 @@
+console=serial0,115200 console=tty1 root=/dev/helios-rootfs rootfstype=squashfs ro rootwait log_buf_len=8M printk.devkmsg=on

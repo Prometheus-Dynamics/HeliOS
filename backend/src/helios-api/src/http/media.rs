@@ -1,24 +1,21 @@
 use axum::{
     Json, Router,
     body::Body,
-    extract::{DefaultBodyLimit, Multipart, Path, Query},
+    extract::{DefaultBodyLimit, Multipart, Path, Query, State},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, patch, post},
 };
 use chrono::Utc;
 use flate2::read::GzDecoder;
-use helios_peripherals::AiModelHealth;
-use image::GenericImageView;
-use lib_ai::model::{ModelFormat, ModelId, ModelMetadata};
+use helios_peripherals::{AiModelFormat, AiModelHealth, AiModelId, AiModelMetadata, AiModelTensorMetadata};
 use lib_ipc::types::Timestamp;
 use mime_guess::MimeGuess;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Cursor, Read, Seek, SeekFrom, Write};
 use std::path::Path as StdPath;
 use std::process::Command;
-use std::sync::{Arc, OnceLock};
 use tokio::{
     fs,
     io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
@@ -29,24 +26,25 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 use zip::write::SimpleFileOptions;
 
+use super::AppState;
 use super::error::{ApiError, ApiResult, ErrorBody};
 use super::storage::{self, sanitize_name};
+use super::upload_integrity;
+use crate::api_tools_client;
+use crate::api_tools_protocol::ToolCropRect;
 
-pub fn router<S>() -> Router<S>
-where
-    S: Clone + Send + Sync + 'static,
-{
+pub fn router() -> Router<AppState> {
     // Media uploads frequently exceed Axum's default 2MB body limit; handle limits ourselves.
     Router::new()
         .route("/", get(list_media).post(upload_media))
         .route("/download.zip", get(download_media_archive))
-        .route("/:name/preview", get(fetch_media_preview))
-        .route("/:name/thumbnail", get(fetch_media_thumbnail))
-        .route("/:name/imu", get(fetch_media_imu).post(attach_media_imu).delete(delete_media_imu))
-        .route("/:name", get(fetch_media).delete(delete_media))
-        .route("/:name/metadata", patch(update_metadata))
-        .route("/:name/label", get(fetch_label).post(attach_label))
-        .route("/:name/image/edits", post(apply_image_edits))
+        .route("/{name}/preview", get(fetch_media_preview))
+        .route("/{name}/thumbnail", get(fetch_media_thumbnail))
+        .route("/{name}/imu", get(fetch_media_imu).post(attach_media_imu).delete(delete_media_imu))
+        .route("/{name}", get(fetch_media).delete(delete_media))
+        .route("/{name}/metadata", patch(update_metadata))
+        .route("/{name}/label", get(fetch_label).post(attach_label))
+        .route("/{name}/image/edits", post(apply_image_edits))
         .route_layer(DefaultBodyLimit::disable())
 }
 
@@ -279,6 +277,8 @@ fn is_internal_media_artifact(name: &str) -> bool {
     lower.ends_with(".frame_ts.txt")
 }
 
+const AI_MODEL_MANIFEST_NAME: &str = "manifest.json";
+
 #[utoipa::path(
     post,
     path = "/media",
@@ -290,15 +290,16 @@ fn is_internal_media_artifact(name: &str) -> bool {
         (status = 500, description = "Storage error", body = ErrorBody)
     )
 )]
-async fn upload_media(mut multipart: Multipart) -> ApiResult<impl IntoResponse> {
+async fn upload_media(headers: HeaderMap, mut multipart: Multipart) -> ApiResult<impl IntoResponse> {
     let dir = media_dir()?;
     let meta_dir = media_meta_dir()?;
 
     let max_bytes = max_upload_bytes();
+    let expected_upload_bytes = upload_integrity::expected_upload_bytes(&headers).map_err(ApiError::bad_request)?;
     let mut uploaded: Option<(String, u64, String, MediaMetadata)> = None;
     let mut pending_label: Option<(String, Vec<u8>)> = None;
     let mut pending_meta = MediaMetadata::default();
-    let mut pending_model_format: Option<lib_ai::ModelFormat> = None;
+    let mut pending_model_format: Option<AiModelFormat> = None;
 
     loop {
         let field = match multipart.next_field().await {
@@ -370,6 +371,21 @@ async fn upload_media(mut multipart: Multipart) -> ApiResult<impl IntoResponse> 
             let _ = fs::remove_file(&path).await;
             return Err(ApiError::bad_request("empty upload"));
         }
+        if let Err(err) = upload_integrity::validate_expected_upload_bytes(written, expected_upload_bytes) {
+            let _ = fs::remove_file(&path).await;
+            return Err(ApiError::bad_request(err));
+        }
+        let stored_bytes = match upload_integrity::finalize_file_upload(&mut file, &path, written).await {
+            Ok(stored_bytes) => stored_bytes,
+            Err(err) => {
+                let _ = fs::remove_file(&path).await;
+                return Err(map_io_error(err, "failed to finalize media upload"));
+            }
+        };
+        if let Err(err) = upload_integrity::validate_expected_upload_bytes(stored_bytes, expected_upload_bytes) {
+            let _ = fs::remove_file(&path).await;
+            return Err(ApiError::bad_request(err));
+        }
 
         let content_type = guess_content_type(&filename);
         hydrate_dimensions(&mut pending_meta, &path, &content_type).await;
@@ -377,7 +393,7 @@ async fn upload_media(mut multipart: Multipart) -> ApiResult<impl IntoResponse> 
         if looks_like_model(&filename, &content_type) {
             pending_model_format = guess_model_format(&filename);
         }
-        uploaded = Some((filename, written, content_type, pending_meta.clone()));
+        uploaded = Some((filename, stored_bytes, content_type, pending_meta.clone()));
     }
 
     match uploaded {
@@ -496,7 +512,7 @@ async fn fetch_media_imu(Path(name): Path<String>, headers: HeaderMap) -> ApiRes
     request_body(content = String, description = "Multipart form-data with an IMU sidecar file part named 'imu'"),
     responses((status = 200, description = "IMU sidecar attached", body = MediaItem), (status = 400, description = "Invalid upload", body = ErrorBody))
 )]
-async fn attach_media_imu(Path(name): Path<String>, mut multipart: Multipart) -> ApiResult<impl IntoResponse> {
+async fn attach_media_imu(Path(name): Path<String>, headers: HeaderMap, mut multipart: Multipart) -> ApiResult<impl IntoResponse> {
     let Some(filename) = sanitize_name(&name) else {
         return Err(ApiError::bad_request("invalid media name"));
     };
@@ -505,6 +521,7 @@ async fn attach_media_imu(Path(name): Path<String>, mut multipart: Multipart) ->
     let media_path = dir.join(&filename);
     let meta = fs::metadata(&media_path).await.map_err(|err| map_io_error(err, "failed to stat media file"))?;
     let content_type = guess_content_type(&filename);
+    let expected_upload_bytes = upload_integrity::expected_upload_bytes(&headers).map_err(ApiError::bad_request)?;
 
     let mut sidecar_bytes: Option<Vec<u8>> = None;
     let mut uploaded_name: Option<String> = None;
@@ -514,6 +531,7 @@ async fn attach_media_imu(Path(name): Path<String>, mut multipart: Multipart) ->
         }
         uploaded_name = field.file_name().and_then(sanitize_name);
         let bytes = field.bytes().await.map_err(|err| ApiError::bad_request(format!("failed to read IMU sidecar bytes: {err}")))?;
+        upload_integrity::validate_expected_upload_bytes(bytes.len() as u64, expected_upload_bytes).map_err(ApiError::bad_request)?;
         sidecar_bytes = Some(bytes.to_vec());
         break;
     }
@@ -523,7 +541,7 @@ async fn attach_media_imu(Path(name): Path<String>, mut multipart: Multipart) ->
     };
 
     let sidecar_name = uploaded_name.unwrap_or_else(|| format!("{filename}.imu.jsonl.gz"));
-    let samples = count_imu_sidecar_samples(&sidecar_name, &sidecar_bytes)?;
+    let samples = count_imu_sidecar_samples(&sidecar_name, &sidecar_bytes).map_err(ApiError::bad_request)?;
     fs::write(meta_dir.join(&sidecar_name), &sidecar_bytes).await.map_err(|err| map_io_error(err, "failed to write IMU sidecar"))?;
 
     let mut md = ensure_media_metadata(&meta_dir, &filename, &media_path, &content_type).await.unwrap_or_default();
@@ -604,7 +622,7 @@ async fn delete_media_imu(Path(name): Path<String>) -> ApiResult<impl IntoRespon
     }))
 }
 
-fn count_imu_sidecar_samples(sidecar_name: &str, bytes: &[u8]) -> Result<u64, ApiError> {
+fn count_imu_sidecar_samples(sidecar_name: &str, bytes: &[u8]) -> Result<u64, String> {
     let gz_magic = bytes.len() >= 2 && bytes[0] == 0x1f && bytes[1] == 0x8b;
     let gz_hint = sidecar_name.to_ascii_lowercase().ends_with(".gz");
     if gz_magic || gz_hint {
@@ -615,15 +633,15 @@ fn count_imu_sidecar_samples(sidecar_name: &str, bytes: &[u8]) -> Result<u64, Ap
     count_imu_jsonl_lines(BufReader::new(Cursor::new(bytes)))
 }
 
-fn count_imu_jsonl_lines<R: BufRead>(reader: R) -> Result<u64, ApiError> {
+fn count_imu_jsonl_lines<R: BufRead>(reader: R) -> Result<u64, String> {
     let mut count: u64 = 0;
     for line in reader.lines() {
-        let line = line.map_err(|err| ApiError::bad_request(format!("failed to read IMU sidecar: {err}")))?;
+        let line = line.map_err(|err| format!("failed to read IMU sidecar: {err}"))?;
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
-        serde_json::from_str::<serde_json::Value>(trimmed).map_err(|err| ApiError::bad_request(format!("invalid IMU sidecar JSONL: {err}")))?;
+        serde_json::from_str::<serde_json::Value>(trimmed).map_err(|err| format!("invalid IMU sidecar JSONL: {err}"))?;
         count = count.saturating_add(1);
     }
     Ok(count)
@@ -636,7 +654,7 @@ fn count_imu_jsonl_lines<R: BufRead>(reader: R) -> Result<u64, ApiError> {
     params(("name" = String, Path, description = "Media file name")),
     responses((status = 200, description = "Media preview content"), (status = 404, description = "Not found", body = ErrorBody))
 )]
-async fn fetch_media_preview(Path(name): Path<String>, headers: HeaderMap) -> ApiResult<impl IntoResponse> {
+async fn fetch_media_preview(State(state): State<AppState>, Path(name): Path<String>, headers: HeaderMap) -> ApiResult<impl IntoResponse> {
     let Some(filename) = sanitize_name(&name) else {
         return Err(ApiError::bad_request("invalid media name"));
     };
@@ -672,10 +690,7 @@ async fn fetch_media_preview(Path(name): Path<String>, headers: HeaderMap) -> Ap
     let preview_fps = preview_fps_hint(&meta_dir, &md).await;
     let preview_path = media_preview_cache_path(&meta_dir, &filename, preview_fps);
     if !preview_cache_fresh(&path, &preview_path).await.unwrap_or(false) {
-        let transcode_lock = {
-            let mut locks = media_preview_transcode_locks().lock().await;
-            locks.entry(filename.clone()).or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))).clone()
-        };
+        let transcode_lock = state.services.media.preview_generation_lock(&filename).await;
         let _guard = transcode_lock.lock().await;
         if !preview_cache_fresh(&path, &preview_path).await.unwrap_or(false) {
             transcode_preview_h264(&path, &preview_path, preview_fps, codec.as_deref()).await.map_err(|err| ApiError::internal(format!("failed to build video preview: {err}")))?;
@@ -697,7 +712,7 @@ async fn fetch_media_preview(Path(name): Path<String>, headers: HeaderMap) -> Ap
     params(("name" = String, Path, description = "Media file name")),
     responses((status = 200, description = "Media thumbnail content"), (status = 404, description = "Not found", body = ErrorBody))
 )]
-async fn fetch_media_thumbnail(Path(name): Path<String>) -> ApiResult<impl IntoResponse> {
+async fn fetch_media_thumbnail(State(state): State<AppState>, Path(name): Path<String>) -> ApiResult<impl IntoResponse> {
     let Some(filename) = sanitize_name(&name) else {
         return Err(ApiError::bad_request("invalid media name"));
     };
@@ -723,10 +738,7 @@ async fn fetch_media_thumbnail(Path(name): Path<String>) -> ApiResult<impl IntoR
     let codec = md.video_codec.as_deref().and_then(normalize_video_codec);
     let thumbnail_path = media_thumbnail_cache_path(&meta_dir, &filename);
     if !preview_cache_fresh(&path, &thumbnail_path).await.unwrap_or(false) {
-        let thumbnail_lock = {
-            let mut locks = media_thumbnail_generation_locks().lock().await;
-            locks.entry(filename.clone()).or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))).clone()
-        };
+        let thumbnail_lock = state.services.media.thumbnail_generation_lock(&filename).await;
         let _guard = thumbnail_lock.lock().await;
         if !preview_cache_fresh(&path, &thumbnail_path).await.unwrap_or(false) {
             render_video_thumbnail_jpeg(&path, &thumbnail_path, codec.as_deref()).await.map_err(|err| ApiError::internal(format!("failed to build video thumbnail: {err}")))?;
@@ -919,7 +931,7 @@ async fn fetch_label(Path(name): Path<String>) -> ApiResult<impl IntoResponse> {
     request_body(content = String, description = "Multipart form-data with a label file part named 'label'"),
     responses((status = 200, description = "Label attached", body = MediaItem), (status = 400, description = "Invalid upload", body = ErrorBody))
 )]
-async fn attach_label(Path(name): Path<String>, mut multipart: Multipart) -> ApiResult<impl IntoResponse> {
+async fn attach_label(Path(name): Path<String>, headers: HeaderMap, mut multipart: Multipart) -> ApiResult<impl IntoResponse> {
     let Some(filename) = sanitize_name(&name) else {
         return Err(ApiError::bad_request("invalid media name"));
     };
@@ -928,6 +940,7 @@ async fn attach_label(Path(name): Path<String>, mut multipart: Multipart) -> Api
     let media_path = dir.join(&filename);
     let meta = fs::metadata(&media_path).await.map_err(|err| map_io_error(err, "failed to stat media file"))?;
     let content_type = guess_content_type(&filename);
+    let expected_upload_bytes = upload_integrity::expected_upload_bytes(&headers).map_err(ApiError::bad_request)?;
 
     let mut label_bytes: Option<Vec<u8>> = None;
     let mut label_name: Option<String> = None;
@@ -940,6 +953,7 @@ async fn attach_label(Path(name): Path<String>, mut multipart: Multipart) -> Api
             continue;
         };
         let bytes = field.bytes().await.map_err(|err| ApiError::bad_request(format!("failed to read label bytes: {err}")))?;
+        upload_integrity::validate_expected_upload_bytes(bytes.len() as u64, expected_upload_bytes).map_err(ApiError::bad_request)?;
         label_bytes = Some(bytes.to_vec());
         label_name = Some(source_name);
         break;
@@ -984,6 +998,12 @@ struct CropRect {
     height: u32,
 }
 
+impl From<CropRect> for ToolCropRect {
+    fn from(value: CropRect) -> Self {
+        Self { x: value.x, y: value.y, width: value.width, height: value.height }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 struct ImageEditsRequest {
     #[serde(default)]
@@ -1013,16 +1033,15 @@ async fn apply_image_edits(Path(name): Path<String>, Json(payload): Json<ImageEd
     }
 
     let bytes = fs::read(&path).await.map_err(|err| map_io_error(err, "failed to read image"))?;
-    let content_type_for_task = content_type.clone();
-    let edited = tokio::task::spawn_blocking(move || edit_image_bytes(&bytes, &content_type_for_task, payload)).await.map_err(|err| ApiError::internal(format!("image edit task failed: {err}")))??;
+    let (edited_bytes, width, height) = api_tools_client::image_edit(&bytes, content_type.clone(), payload.rotate_degrees, payload.crop.map(Into::into)).await?;
 
     let mut file = fs::File::create(&path).await.map_err(|err| map_io_error(err, "failed to write image"))?;
-    file.write_all(&edited.bytes).await.map_err(|err| map_io_error(err, "failed to write image"))?;
-    let size_bytes = edited.bytes.len() as u64;
+    file.write_all(&edited_bytes).await.map_err(|err| map_io_error(err, "failed to write image"))?;
+    let size_bytes = edited_bytes.len() as u64;
 
     let mut md = ensure_media_metadata(&meta_dir, &filename, &path, &content_type).await.unwrap_or_default();
-    md.width = Some(edited.width);
-    md.height = Some(edited.height);
+    md.width = Some(width);
+    md.height = Some(height);
     write_media_metadata(&filename, md.clone()).await?;
 
     Ok(Json(MediaItem {
@@ -1048,41 +1067,6 @@ async fn apply_image_edits(Path(name): Path<String>, Json(payload): Json<ImageEd
     }))
 }
 
-struct EditedImage {
-    bytes: Vec<u8>,
-    width: u32,
-    height: u32,
-}
-
-fn edit_image_bytes(bytes: &[u8], content_type: &str, payload: ImageEditsRequest) -> Result<EditedImage, Box<ApiError>> {
-    let mut image = image::load_from_memory(bytes).map_err(|err| Box::new(ApiError::bad_request(format!("failed to decode image: {err}"))))?;
-    if let Some(crop) = payload.crop {
-        let (w, h) = image.dimensions();
-        if crop.width == 0 || crop.height == 0 || crop.x >= w || crop.y >= h {
-            return Err(Box::new(ApiError::bad_request("invalid crop rectangle")));
-        }
-        let crop_w = crop.width.min(w - crop.x);
-        let crop_h = crop.height.min(h - crop.y);
-        image = image.crop_imm(crop.x, crop.y, crop_w, crop_h);
-    }
-
-    let rotation = payload.rotate_degrees.unwrap_or(0).rem_euclid(360);
-    if rotation != 0 {
-        image = match rotation {
-            90 => image.rotate90(),
-            180 => image.rotate180(),
-            270 => image.rotate270(),
-            _ => return Err(Box::new(ApiError::bad_request("rotation must be 0/90/180/270"))),
-        };
-    }
-
-    let (width, height) = image.dimensions();
-    let mut out = Vec::new();
-    let format = if content_type == "image/png" { image::ImageFormat::Png } else { image::ImageFormat::Jpeg };
-    image.write_to(&mut Cursor::new(&mut out), format).map_err(|err| Box::new(ApiError::internal(format!("failed to encode image: {err}"))))?;
-    Ok(EditedImage { bytes: out, width, height })
-}
-
 fn parse_tags(raw: &str) -> Vec<String> {
     raw.split(',').map(|value| value.trim().to_string()).filter(|value| !value.is_empty()).collect()
 }
@@ -1096,21 +1080,24 @@ fn looks_like_model(filename: &str, content_type: &str) -> bool {
     filename.to_lowercase().ends_with(".tflite") || filename.to_lowercase().ends_with(".onnx")
 }
 
-fn guess_model_format(filename: &str) -> Option<lib_ai::ModelFormat> {
+fn guess_model_format(filename: &str) -> Option<AiModelFormat> {
     let ext = filename.split('.').next_back()?.to_lowercase();
     match ext.as_str() {
-        "tflite" => Some(lib_ai::ModelFormat::TensorFlowLite),
-        "onnx" => Some(lib_ai::ModelFormat::Onnx),
+        "tflite" => Some(AiModelFormat::TensorFlowLite),
+        "onnx" => Some(AiModelFormat::Onnx),
         _ => None,
     }
 }
 
-async fn hydrate_model_metadata(meta: &mut MediaMetadata, path: &std::path::Path, format: lib_ai::ModelFormat) {
+async fn hydrate_model_metadata(meta: &mut MediaMetadata, path: &std::path::Path, format: AiModelFormat) {
     let bytes = match fs::read(path).await {
         Ok(bytes) => bytes,
         Err(_) => return,
     };
-    let inspection = lib_ai::model::introspect::inspect_model(&bytes, &format);
+    let inspection = match api_tools_client::model_inspect(&bytes, format).await {
+        Ok(inspection) => inspection,
+        Err(_) => return,
+    };
     if meta.model_tensor_spec.is_none() {
         meta.model_tensor_spec = Some(format_tensor_spec(&inspection.inputs, &inspection.outputs));
     }
@@ -1122,8 +1109,8 @@ async fn hydrate_model_metadata(meta: &mut MediaMetadata, path: &std::path::Path
     }
 }
 
-fn format_tensor_spec(inputs: &[lib_ai::ModelTensorMetadata], outputs: &[lib_ai::ModelTensorMetadata]) -> String {
-    let format_tensors = |prefix: &str, tensors: &[lib_ai::ModelTensorMetadata]| -> String {
+fn format_tensor_spec(inputs: &[AiModelTensorMetadata], outputs: &[AiModelTensorMetadata]) -> String {
+    let format_tensors = |prefix: &str, tensors: &[AiModelTensorMetadata]| -> String {
         let entries = tensors
             .iter()
             .enumerate()
@@ -1141,7 +1128,7 @@ fn format_tensor_spec(inputs: &[lib_ai::ModelTensorMetadata], outputs: &[lib_ai:
     format!("{input_section}|{output_section}")
 }
 
-fn derive_input_resolution(inputs: &[lib_ai::ModelTensorMetadata]) -> Option<String> {
+fn derive_input_resolution(inputs: &[AiModelTensorMetadata]) -> Option<String> {
     for tensor in inputs {
         let shape = &tensor.shape;
         if shape.len() == 4 {
@@ -1199,10 +1186,11 @@ async fn hydrate_dimensions(meta: &mut MediaMetadata, path: &std::path::Path, co
         Ok(bytes) => bytes,
         Err(_) => return,
     };
-    let dims = tokio::task::spawn_blocking(move || image::load_from_memory(&bytes).ok().map(|img| img.dimensions())).await.ok().flatten();
-    if let Some((w, h)) = dims {
-        meta.width = Some(w);
-        meta.height = Some(h);
+    if let Ok((width, height)) = api_tools_client::image_dimensions(&bytes).await
+        && let (Some(width), Some(height)) = (width, height)
+    {
+        meta.width = Some(width);
+        meta.height = Some(height);
     }
 }
 
@@ -1329,18 +1317,8 @@ fn media_preview_cache_path(meta_dir: &std::path::Path, filename: &str, fps: Opt
     meta_dir.join(format!("{filename}.preview.h264.{fps_tag}.mp4"))
 }
 
-fn media_preview_transcode_locks() -> &'static tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>> {
-    static LOCKS: OnceLock<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
-    LOCKS.get_or_init(|| tokio::sync::Mutex::new(HashMap::new()))
-}
-
 fn media_thumbnail_cache_path(meta_dir: &std::path::Path, filename: &str) -> std::path::PathBuf {
     meta_dir.join(format!("{filename}.thumb.jpg"))
-}
-
-fn media_thumbnail_generation_locks() -> &'static tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>> {
-    static LOCKS: OnceLock<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
-    LOCKS.get_or_init(|| tokio::sync::Mutex::new(HashMap::new()))
 }
 
 async fn preview_cache_fresh(source: &std::path::Path, preview: &std::path::Path) -> Result<bool, std::io::Error> {
@@ -1699,13 +1677,13 @@ fn parse_label_bytes(bytes: &[u8]) -> Option<Vec<String>> {
         return None;
     }
 
-    if let Ok(parsed) = serde_json::from_str::<ModelMetadata>(trimmed)
+    if let Ok(parsed) = serde_json::from_str::<AiModelMetadata>(trimmed)
         && !parsed.labels.is_empty()
     {
         return Some(parsed.labels);
     }
     if let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) {
-        if let Ok(meta) = serde_json::from_value::<ModelMetadata>(value.clone())
+        if let Ok(meta) = serde_json::from_value::<AiModelMetadata>(value.clone())
             && !meta.labels.is_empty()
         {
             return Some(meta.labels);
@@ -1736,9 +1714,9 @@ struct AiModelManifest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AiModelManifestEntry {
-    id: ModelId,
-    format: ModelFormat,
-    metadata: ModelMetadata,
+    id: AiModelId,
+    format: AiModelFormat,
+    metadata: AiModelMetadata,
     artifact: String,
     #[serde(default)]
     label_artifact: Option<String>,
@@ -1757,13 +1735,13 @@ async fn register_ai_model_for_media(filename: &str, path: &StdPath, content_typ
         return Ok(());
     };
 
-    let model_dir = lib_ai::storage::default_model_dir();
+    let model_dir = ai_model_dir();
     fs::create_dir_all(&model_dir).await.map_err(|err| map_io_error(err, "failed to prepare AI model directory"))?;
-    let manifest_path = model_dir.join(lib_ai::storage::MANIFEST_NAME);
+    let manifest_path = model_dir.join(AI_MODEL_MANIFEST_NAME);
 
     let mut manifest = load_ai_model_manifest(&manifest_path).await?;
     let model_uuid = meta.model_id.unwrap_or_else(Uuid::new_v4);
-    let model_id = ModelId(model_uuid);
+    let model_id = AiModelId(model_uuid);
 
     let label_bytes = load_media_label_bytes(filename).await?;
     let labels = label_bytes.as_deref().and_then(parse_label_bytes);
@@ -1794,9 +1772,9 @@ async fn register_ai_model_for_media(filename: &str, path: &StdPath, content_typ
     }
 
     let bytes = fs::read(path).await.map_err(|err| map_io_error(err, "failed to read AI model payload"))?;
-    let inspection = lib_ai::model::introspect::inspect_model(&bytes, &format);
+    let inspection = api_tools_client::model_inspect(&bytes, format.clone()).await?;
 
-    let mut metadata = ModelMetadata { display_name: Some(model_display_name(filename)), inputs: inspection.inputs, outputs: inspection.outputs, ..Default::default() };
+    let mut metadata = AiModelMetadata { display_name: Some(model_display_name(filename)), inputs: inspection.inputs, outputs: inspection.outputs, ..Default::default() };
     if !inspection.suggested_tags.is_empty() {
         metadata.tags = inspection.suggested_tags;
     }
@@ -1823,10 +1801,10 @@ async fn register_ai_model_for_media(filename: &str, path: &StdPath, content_typ
 }
 
 async fn remove_ai_model(model_id: Uuid) -> Result<(), ApiError> {
-    let model_dir = lib_ai::storage::default_model_dir();
-    let manifest_path = model_dir.join(lib_ai::storage::MANIFEST_NAME);
+    let model_dir = ai_model_dir();
+    let manifest_path = model_dir.join(AI_MODEL_MANIFEST_NAME);
     let mut manifest = load_ai_model_manifest(&manifest_path).await?;
-    let target = ModelId(model_id);
+    let target = AiModelId(model_id);
 
     if let Some(idx) = manifest.models.iter().position(|entry| entry.id == target) {
         let entry = manifest.models.remove(idx);
@@ -1855,17 +1833,33 @@ async fn save_ai_model_manifest(path: &StdPath, manifest: &AiModelManifest) -> R
     Ok(())
 }
 
-fn artifact_name(id: &ModelId, format: &ModelFormat) -> String {
+fn artifact_name(id: &AiModelId, format: &AiModelFormat) -> String {
     let extension = match format {
-        ModelFormat::TensorFlowLite => "tflite",
-        ModelFormat::Onnx => "onnx",
-        ModelFormat::Raw => "bin",
+        AiModelFormat::TensorFlowLite => "tflite",
+        AiModelFormat::Onnx => "onnx",
+        AiModelFormat::Raw => "bin",
     };
     format!("{}.{}", id.0, extension)
 }
 
 fn model_display_name(filename: &str) -> String {
     StdPath::new(filename).file_stem().and_then(|stem| stem.to_str()).map(|value| value.trim()).filter(|value| !value.is_empty()).unwrap_or(filename).to_string()
+}
+
+fn ai_model_dir() -> std::path::PathBuf {
+    if let Some(value) = std::env::var_os("PERIPHERALS_AI_MODEL_DIR").filter(|value| !value.is_empty()) {
+        return value.into();
+    }
+    if let Some(value) = std::env::var_os("SENSORS_AI_MODEL_DIR").filter(|value| !value.is_empty()) {
+        return value.into();
+    }
+    if let Some(value) = std::env::var_os("PERIPHERALS_STATE_DIR").filter(|value| !value.is_empty()) {
+        return StdPath::new(&value).join("ai-models");
+    }
+    if let Some(value) = std::env::var_os("SENSORS_STATE_DIR").filter(|value| !value.is_empty()) {
+        return StdPath::new(&value).join("ai-models");
+    }
+    StdPath::new("/var/lib/helios/ai-models").to_path_buf()
 }
 
 fn map_io_error(err: std::io::Error, context: &str) -> ApiError {
@@ -1901,7 +1895,7 @@ mod tests {
         header::{CONTENT_LENGTH, CONTENT_TYPE},
     };
     use std::io::Read;
-    use std::sync::OnceLock;
+    use std::sync::{Arc, OnceLock};
     use tower::ServiceExt;
 
     fn init_data_dir() -> &'static std::path::Path {
@@ -1936,11 +1930,16 @@ mod tests {
         body
     }
 
+    async fn test_app() -> Router {
+        let state = Arc::new(crate::app_state::ApiAppState::new(Arc::new(crate::ipc::connect_all().await)));
+        Router::new().nest("/media", router()).with_state(state)
+    }
+
     #[tokio::test]
     async fn upload_accepts_metadata_before_file() {
         let root = init_data_dir();
 
-        let app = Router::new().nest("/media", router::<()>());
+        let app = test_app().await;
         let boundary = "BOUNDARY";
         let body = multipart(boundary, &[("kind", None, "text/plain", b"image"), ("files", Some("hello.png"), "image/png", b"PNGDATA")]);
         let content_len = body.len();
@@ -1968,7 +1967,7 @@ mod tests {
     async fn upload_rejects_multiple_files() {
         let _ = init_data_dir();
 
-        let app = Router::new().nest("/media", router::<()>());
+        let app = test_app().await;
         let boundary = "BOUNDARY2";
         let body = multipart(boundary, &[("files", Some("a.txt"), "text/plain", b"A"), ("files", Some("b.txt"), "text/plain", b"B")]);
         let content_len = body.len();
@@ -2000,7 +1999,7 @@ mod tests {
         std::fs::write(media_dir.join(&name_a), b"alpha").expect("write first media file");
         std::fs::write(media_dir.join(&name_b), b"beta").expect("write second media file");
 
-        let app = Router::new().nest("/media", router::<()>());
+        let app = test_app().await;
         let response = app.oneshot(Request::builder().method("GET").uri(format!("/media/download.zip?name={name_a}&name={name_b}")).body(Body::empty()).expect("request")).await.expect("response");
 
         assert_eq!(response.status(), StatusCode::OK);
@@ -2009,14 +2008,18 @@ mod tests {
         let body = to_bytes(response.into_body(), usize::MAX).await.expect("archive body");
         let mut archive = zip::ZipArchive::new(std::io::Cursor::new(body.to_vec())).expect("valid zip archive");
 
-        let mut file_a = archive.by_name(&name_a).expect("first archive entry");
-        let mut content_a = String::new();
-        file_a.read_to_string(&mut content_a).expect("read first archive entry");
-        assert_eq!(content_a, "alpha");
+        {
+            let mut file_a = archive.by_name(&name_a).expect("first archive entry");
+            let mut content_a = String::new();
+            file_a.read_to_string(&mut content_a).expect("read first archive entry");
+            assert_eq!(content_a, "alpha");
+        }
 
-        let mut file_b = archive.by_name(&name_b).expect("second archive entry");
-        let mut content_b = String::new();
-        file_b.read_to_string(&mut content_b).expect("read second archive entry");
-        assert_eq!(content_b, "beta");
+        {
+            let mut file_b = archive.by_name(&name_b).expect("second archive entry");
+            let mut content_b = String::new();
+            file_b.read_to_string(&mut content_b).expect("read second archive entry");
+            assert_eq!(content_b, "beta");
+        }
     }
 }

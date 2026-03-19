@@ -19,6 +19,7 @@
     type OrientationChoice,
     type PaperChoice
   } from './cameraCalibrationUtils';
+  import { SvelteMap } from 'svelte/reactivity';
 
   const props = $props<{
     streamId: string;
@@ -422,7 +423,7 @@
 
   let calibrationTool = $state<'lens' | 'color'>('lens');
   const overlayByImage = $derived.by(() => {
-    const map = new Map<string, string>();
+    const map = new SvelteMap<string, string>();
     const views = props.calibrationResult?.debugViews;
     if (Array.isArray(views)) {
       for (const view of views) {
@@ -590,7 +591,7 @@
         <p class="mt-3 text-sm text-error-300">{props.ipaChartSolveError}</p>
       {/if}
 
-      <div class="mt-4 grid gap-6 lg:grid-cols-[1.4fr_1fr]">
+      <div class="mt-4 grid gap-6 xl:grid-cols-[1.4fr_1fr]">
 	        <div class="min-w-0">
 	          <div class="relative min-w-0 overflow-hidden rounded border border-surface-800/60 bg-surface-950/40">
 	            <button class="block w-full" type="button" onclick={props.addIpaChartCorner} aria-label="Pick chart corners">

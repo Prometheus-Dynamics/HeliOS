@@ -1,9 +1,12 @@
 <script lang="ts">
-  import type { Snippet } from 'svelte';
+  import type { ComponentProps, Snippet } from 'svelte';
   import type { PageData } from '../../../../../routes/devices/[cameraId]/$types';
   import CameraPageState from './CameraPageState.svelte';
+  import CameraPageView from './CameraPageView.svelte';
 
-  const { data, children: child } = $props<{ data: PageData; children?: Snippet<[ { ctx: unknown } ]> }>();
+  type CameraPageCtx = ComponentProps<typeof CameraPageView>['ctx'];
+
+  const { data, children: child } = $props<{ data: PageData; children?: Snippet<[ { ctx: CameraPageCtx } ]> }>();
 </script>
 
 <CameraPageState {data} children={child} />

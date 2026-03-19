@@ -1,24 +1,73 @@
 import { EngineStreamsService } from '$lib/ts-bindings/http/client';
 import { apiUrl } from '$lib/api/httpClient';
-import { runApiRequest, type ApiRequestOptions } from '$lib/api/requestManager';
+import { apiFetchCachedJson, runApiRequest, type ApiRequestOptions } from '$lib/api/core/http';
 import { DEFAULT_REQUEST_TIMEOUT_MS, fetchWithRetry } from '$lib/api/requestUtils';
-import type { StreamManifest } from '$lib/ts-bindings/http/client';
+import type {
+  CancelablePromise,
+  StreamCapabilitiesResponse,
+  StreamManifest,
+  StreamPipelineWire
+} from '$lib/ts-bindings/http/client';
 
 type CacheEntry<T> = {
   fetchedAt: number;
   value: T;
+  etag?: string | null;
+  revision?: number | null;
 };
 
 const DEFAULT_STREAMS_CACHE_MS = 750;
-const RAW_STREAM_PIPELINE_UUID = '00000000-0000-0000-0000-0000000000aa';
+const DEFAULT_STREAM_CAPABILITIES_CACHE_MS = 10_000;
 type StreamsList = Awaited<ReturnType<typeof EngineStreamsService.listStreams>>;
+type StreamCapabilities = Awaited<ReturnType<typeof EngineStreamsService.streamCapabilitiesHandler>>;
 let streamsCache: CacheEntry<StreamsList> | null = null;
 let streamsInflight: Promise<StreamsList> | null = null;
+let streamCapabilitiesCache: CacheEntry<StreamCapabilities> | null = null;
+let streamCapabilitiesInflight: Promise<StreamCapabilities> | null = null;
+
+function withAbort<T>(task: (controller: AbortController) => Promise<T>): CancelablePromise<T> {
+  const controller = new AbortController();
+  const promise = task(controller) as CancelablePromise<T>;
+  promise.cancel = () => controller.abort();
+  return promise;
+}
+
+async function postJsonRequest(
+  url: string,
+  body: unknown,
+  timeoutMs: number,
+  controller: AbortController
+): Promise<Response> {
+  const response = await fetchWithRetry(
+    url,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    },
+    { timeoutMs, maxAttempts: 1 }
+  );
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    const message = text || `Request failed (${response.status})`;
+    throw new Error(message);
+  }
+  return response;
+}
 
 function resolveStreamsCacheMs(options?: ApiRequestOptions): number {
   const raw = options?.cacheMs;
   if (typeof raw !== 'number' || !Number.isFinite(raw)) {
     return DEFAULT_STREAMS_CACHE_MS;
+  }
+  return Math.max(0, Math.floor(raw));
+}
+
+function resolveStreamCapabilitiesCacheMs(options?: ApiRequestOptions): number {
+  const raw = options?.cacheMs;
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) {
+    return DEFAULT_STREAM_CAPABILITIES_CACHE_MS;
   }
   return Math.max(0, Math.floor(raw));
 }
@@ -34,10 +83,28 @@ async function listStreamsSingleflight(options?: ApiRequestOptions) {
     return streamsInflight;
   }
 
-  streamsInflight = runApiRequest(() => EngineStreamsService.listStreams(), { label: 'listStreams', ...options })
-    .then((value) => {
+  streamsInflight = apiFetchCachedJson<StreamsList>(
+    '/streams',
+    {
+      cached: streamsCache?.value,
+      etag: streamsCache?.etag ?? null,
+      revision: streamsCache?.revision ?? null
+    },
+    { headers: { Accept: 'application/json' } },
+    { label: 'listStreams', ...options }
+  )
+    .then((result) => {
+      const value = result.status === 'not_modified' ? streamsCache?.value : result.data;
+      if (!value) {
+        throw new Error('Stream inventory unavailable');
+      }
       if (cacheMs > 0) {
-        streamsCache = { fetchedAt: Date.now(), value };
+        streamsCache = {
+          fetchedAt: Date.now(),
+          value,
+          etag: result.etag ?? streamsCache?.etag ?? null,
+          revision: result.revision ?? streamsCache?.revision ?? null
+        };
       } else {
         streamsCache = null;
       }
@@ -50,6 +117,36 @@ async function listStreamsSingleflight(options?: ApiRequestOptions) {
   return streamsInflight;
 }
 
+async function streamCapabilitiesSingleflight(options?: ApiRequestOptions): Promise<StreamCapabilities> {
+  const cacheMs = resolveStreamCapabilitiesCacheMs(options);
+  const now = Date.now();
+  if (!options?.forceRefresh && cacheMs > 0 && streamCapabilitiesCache && now - streamCapabilitiesCache.fetchedAt < cacheMs) {
+    return streamCapabilitiesCache.value;
+  }
+
+  if (streamCapabilitiesInflight) {
+    return streamCapabilitiesInflight;
+  }
+
+  streamCapabilitiesInflight = runApiRequest(() => EngineStreamsService.streamCapabilitiesHandler(), {
+    label: 'streamCapabilities',
+    ...options
+  })
+    .then((value) => {
+      if (cacheMs > 0) {
+        streamCapabilitiesCache = { fetchedAt: Date.now(), value };
+      } else {
+        streamCapabilitiesCache = null;
+      }
+      return value;
+    })
+    .finally(() => {
+      streamCapabilitiesInflight = null;
+    });
+
+  return streamCapabilitiesInflight;
+}
+
 export type RegisterNetcamStreamInput = {
   url: string;
   name?: string | null;
@@ -59,17 +156,22 @@ export type RegisterNetcamStreamInput = {
   startOnBoot?: boolean | null;
 };
 
-function makeNetcamManifest(input: RegisterNetcamStreamInput): StreamManifest {
+function makeNetcamManifest(input: RegisterNetcamStreamInput, capabilities: StreamCapabilitiesResponse): StreamManifest {
   const url = input.url.trim();
   const fps = typeof input.fps === 'number' && Number.isFinite(input.fps) ? Math.max(1, Math.min(120, Math.trunc(input.fps))) : 30;
   const width = typeof input.width === 'number' && Number.isFinite(input.width) ? Math.max(0, Math.trunc(input.width)) : 0;
   const height = typeof input.height === 'number' && Number.isFinite(input.height) ? Math.max(0, Math.trunc(input.height)) : 0;
   const alias = input.name?.trim().length ? input.name.trim() : `Netcam ${url}`;
+  const rawPipelineId = String(capabilities.rawPipelineId ?? '').trim();
+  const rawOutput = String(capabilities.defaults?.rawOutput ?? '').trim();
+  if (!rawPipelineId || !rawOutput) {
+    throw new Error('Stream capabilities missing raw pipeline defaults');
+  }
 
   // The backend's `StreamManifest.identity` is `DeviceIdentity { id, alias, hardware_id }`.
-  // TS bindings may lag, so cast to `any` here to keep runtime JSON correct.
+  // TS bindings may lag here, so cast through `unknown` to keep the runtime JSON shape correct.
   return {
-    identity: { id: null, alias, hardware_id: null } as any,
+    identity: { id: null, alias, hardware_id: null } as unknown as StreamManifest['identity'],
     capture: {
       device_keys: [url],
       backend: 'Netcam',
@@ -94,20 +196,21 @@ function makeNetcamManifest(input: RegisterNetcamStreamInput): StreamManifest {
       controls: [],
     },
     pipeline_enabled: true,
-    active_pipeline_id: RAW_STREAM_PIPELINE_UUID,
-    active_pipeline_output: 'raw',
-    pipelines: [{ pipeline_id: RAW_STREAM_PIPELINE_UUID, pipeline_graph: null, pipeline_output: 'raw' }],
+    active_pipeline_id: rawPipelineId,
+    active_pipeline_output: rawOutput,
+    pipelines: [{ pipeline_id: rawPipelineId, pipeline_graph: null, pipeline_output: rawOutput }],
     pipeline_layout: {
       rows: 1,
       columns: 1,
-      slots: [{ row: 0, column: 0, pipeline_id: RAW_STREAM_PIPELINE_UUID, output_key: 'raw' }]
+      slots: [{ row: 0, column: 0, pipeline_id: rawPipelineId, output_key: rawOutput }]
     },
     start_on_boot: Boolean(input.startOnBoot),
-  } as any;
+  } as unknown as StreamManifest;
 }
 
 export const StreamsApi = {
   listStreams: (options?: ApiRequestOptions) => listStreamsSingleflight(options),
+  streamCapabilities: (options?: ApiRequestOptions) => streamCapabilitiesSingleflight(options),
   getStream: (args: Parameters<typeof EngineStreamsService.getStream>[0], options?: ApiRequestOptions) =>
     runApiRequest(() => EngineStreamsService.getStream(args), { label: 'getStream', ...options }),
   getMetrics: (args: Parameters<typeof EngineStreamsService.getMetrics>[0], options?: ApiRequestOptions) =>
@@ -120,149 +223,69 @@ export const StreamsApi = {
     args: { id: string; requestBody: { patch: unknown; pipeline_id?: string | null } },
     options: ApiRequestOptions = {}
   ) =>
-    runApiRequest(() => {
-      const controller = new AbortController();
-      const promise = (async () => {
-        const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
-        const url = apiUrl(`/streams/${encodeURIComponent(args.id)}/pipeline/graph/patch`);
-        const response = await fetchWithRetry(
-          url,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify(args.requestBody),
-            signal: controller.signal
-          },
-          { timeoutMs, maxAttempts: 1 }
-        );
-        if (!response.ok) {
-          const text = await response.text().catch(() => '');
-          const message = text || `Request failed (${response.status})`;
-          throw new Error(message);
-        }
-        return;
-      })();
-      (promise as any).cancel = () => controller.abort();
-      return promise as any;
-    }, { label: 'setPipelineGraphPatch', endpoint: `/streams/${args.id}/pipeline/graph/patch`, ...options }),
+    runApiRequest(
+      () =>
+        withAbort(async (controller) => {
+          const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+          const url = apiUrl(`/streams/${encodeURIComponent(args.id)}/pipeline/graph/patch`);
+          await postJsonRequest(url, args.requestBody, timeoutMs, controller);
+        }),
+      { label: 'setPipelineGraphPatch', endpoint: `/streams/${args.id}/pipeline/graph/patch`, ...options }
+    ),
   setPipelineInputs: (
     args: { id: string; requestBody: { pipeline_id?: string | null; inputs: Record<string, unknown | null> } },
     options: ApiRequestOptions = {}
   ) =>
-    runApiRequest(() => {
-      const controller = new AbortController();
-      const promise = (async () => {
-        const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
-        const url = apiUrl(`/streams/${encodeURIComponent(args.id)}/pipeline/inputs`);
-        const response = await fetchWithRetry(
-          url,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify(args.requestBody),
-            signal: controller.signal
-          },
-          { timeoutMs, maxAttempts: 1 }
-        );
-        if (!response.ok) {
-          const text = await response.text().catch(() => '');
-          const message = text || `Request failed (${response.status})`;
-          throw new Error(message);
-        }
-        return;
-      })();
-      (promise as any).cancel = () => controller.abort();
-      return promise as any;
-    }, { label: 'setPipelineInputs', endpoint: `/streams/${args.id}/pipeline/inputs`, ...options }),
+    runApiRequest(
+      () =>
+        withAbort(async (controller) => {
+          const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+          const url = apiUrl(`/streams/${encodeURIComponent(args.id)}/pipeline/inputs`);
+          await postJsonRequest(url, args.requestBody, timeoutMs, controller);
+        }),
+      { label: 'setPipelineInputs', endpoint: `/streams/${args.id}/pipeline/inputs`, ...options }
+    ),
   setPipelineLayout: (args: Parameters<typeof EngineStreamsService.setPipelineLayout>[0], options?: ApiRequestOptions) =>
     runApiRequest(() => EngineStreamsService.setPipelineLayout(args), { label: 'setPipelineLayout', ...options }),
   setPipelineWires: (
-    args: { id: string; requestBody: { wires: any[] } },
+    args: { id: string; requestBody: { wires: StreamPipelineWire[] } },
     options: ApiRequestOptions = {}
   ) =>
-    runApiRequest(() => {
-      const controller = new AbortController();
-      const promise = (async () => {
-        const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
-        const url = apiUrl(`/streams/${encodeURIComponent(args.id)}/pipeline/wires`);
-        const response = await fetchWithRetry(
-          url,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify(args.requestBody),
-            signal: controller.signal
-          },
-          { timeoutMs, maxAttempts: 1 }
-        );
-        if (!response.ok) {
-          const text = await response.text().catch(() => '');
-          const message = text || `Request failed (${response.status})`;
-          throw new Error(message);
-        }
-        return;
-      })();
-      (promise as any).cancel = () => controller.abort();
-      return promise as any;
-    }, { label: 'setPipelineWires', endpoint: `/streams/${args.id}/pipeline/wires`, ...options }),
+    runApiRequest(
+      () =>
+        withAbort(async (controller) => {
+          const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+          const url = apiUrl(`/streams/${encodeURIComponent(args.id)}/pipeline/wires`);
+          await postJsonRequest(url, args.requestBody, timeoutMs, controller);
+        }),
+      { label: 'setPipelineWires', endpoint: `/streams/${args.id}/pipeline/wires`, ...options }
+    ),
   setPipelinePerf: (
     args: { id: string; requestBody: { pipeline_id?: string | null; enabled: boolean } },
     options: ApiRequestOptions = {}
   ) =>
-    runApiRequest(() => {
-      const controller = new AbortController();
-      const promise = (async () => {
-        const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
-        const url = apiUrl(`/streams/${encodeURIComponent(args.id)}/pipeline/perf`);
-        const response = await fetchWithRetry(
-          url,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify(args.requestBody),
-            signal: controller.signal
-          },
-          { timeoutMs, maxAttempts: 1 }
-        );
-        if (!response.ok) {
-          const text = await response.text().catch(() => '');
-          const message = text || `Request failed (${response.status})`;
-          throw new Error(message);
-        }
-        return;
-      })();
-      (promise as any).cancel = () => controller.abort();
-      return promise as any;
-    }, { label: 'setPipelinePerf', endpoint: `/streams/${args.id}/pipeline/perf`, ...options }),
+    runApiRequest(
+      () =>
+        withAbort(async (controller) => {
+          const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+          const url = apiUrl(`/streams/${encodeURIComponent(args.id)}/pipeline/perf`);
+          await postJsonRequest(url, args.requestBody, timeoutMs, controller);
+        }),
+      { label: 'setPipelinePerf', endpoint: `/streams/${args.id}/pipeline/perf`, ...options }
+    ),
   resetPipelineMetrics: (
     args: { id: string; requestBody: { pipeline_id?: string | null } },
     options: ApiRequestOptions = {}
   ) =>
-    runApiRequest(() => {
-      const controller = new AbortController();
-      const promise = (async () => {
-        const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
-        const url = apiUrl(`/streams/${encodeURIComponent(args.id)}/pipeline/metrics/reset`);
-        const response = await fetchWithRetry(
-          url,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify(args.requestBody),
-            signal: controller.signal
-          },
-          { timeoutMs, maxAttempts: 1 }
-        );
-        if (!response.ok) {
-          const text = await response.text().catch(() => '');
-          const message = text || `Request failed (${response.status})`;
-          throw new Error(message);
-        }
-        return;
-      })();
-      (promise as any).cancel = () => controller.abort();
-      return promise as any;
-    }, { label: 'resetPipelineMetrics', endpoint: `/streams/${args.id}/pipeline/metrics/reset`, ...options }),
+    runApiRequest(
+      () =>
+        withAbort(async (controller) => {
+          const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+          const url = apiUrl(`/streams/${encodeURIComponent(args.id)}/pipeline/metrics/reset`);
+          await postJsonRequest(url, args.requestBody, timeoutMs, controller);
+        }),
+      { label: 'resetPipelineMetrics', endpoint: `/streams/${args.id}/pipeline/metrics/reset`, ...options }
+    ),
   profilePipeline: (
     args: {
       id: string;
@@ -283,30 +306,12 @@ export const StreamsApi = {
       // at the request-manager layer.
       const timeoutMs = options.timeoutMs ?? 45_000;
       return runApiRequest(
-        () => {
-          const controller = new AbortController();
-          const promise = (async () => {
+        () =>
+          withAbort(async (controller) => {
             const url = apiUrl(`/streams/${encodeURIComponent(args.id)}/pipeline/profile`);
-            const response = await fetchWithRetry(
-              url,
-              {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-                body: JSON.stringify(args.requestBody),
-                signal: controller.signal
-              },
-              { timeoutMs, maxAttempts: 1 }
-            );
-            if (!response.ok) {
-              const text = await response.text().catch(() => '');
-              const message = text || `Request failed (${response.status})`;
-              throw new Error(message);
-            }
-            return (await response.json()) as any;
-          })();
-          (promise as any).cancel = () => controller.abort();
-          return promise as any;
-        },
+            const response = await postJsonRequest(url, args.requestBody, timeoutMs, controller);
+            return response.json() as Promise<unknown>;
+          }),
         { label: 'profilePipeline', endpoint: `/streams/${args.id}/pipeline/profile`, timeoutMs, ...options }
       );
     })(),
@@ -330,14 +335,16 @@ export const StreamsApi = {
     runApiRequest(() => EngineStreamsService.listCodecs(), { label: 'listCodecs', ...options }),
   startStream: (args: Parameters<typeof EngineStreamsService.startStream>[0], options?: ApiRequestOptions) =>
     runApiRequest(() => EngineStreamsService.startStream(args), { label: 'startStream', timeoutMs: 45_000, ...options }),
-  registerNetcamStream: (input: RegisterNetcamStreamInput, options?: ApiRequestOptions) =>
-    runApiRequest(
+  registerNetcamStream: async (input: RegisterNetcamStreamInput, options?: ApiRequestOptions) => {
+    const capabilities = await streamCapabilitiesSingleflight(options);
+    return runApiRequest(
       () =>
         EngineStreamsService.startStream({
-          requestBody: makeNetcamManifest(input),
+          requestBody: makeNetcamManifest(input, capabilities),
         }),
       { label: 'registerNetcamStream', timeoutMs: 45_000, ...options }
-    ),
+    );
+  },
   setControl: (args: Parameters<typeof EngineStreamsService.setControl>[0], options?: ApiRequestOptions) =>
     runApiRequest(() => EngineStreamsService.setControl(args), { label: 'setControl', ...options }),
   updateStreamPose: (args: Parameters<typeof EngineStreamsService.updateStreamPose>[0], options?: ApiRequestOptions) =>

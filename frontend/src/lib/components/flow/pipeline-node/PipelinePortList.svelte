@@ -7,6 +7,7 @@
     direction: 'input' | 'output';
     ports: PortRenderInfo[];
     handlers: PortInteractionHandlers;
+    interactive?: boolean;
     resolvePortStateClass: (direction: 'input' | 'output', type: PipelineDataType) => string;
     pixelColorInputAction: (node: HTMLInputElement, handleId: string) => { destroy: () => void };
     emptyLabel?: string;
@@ -15,6 +16,7 @@
   const direction = $derived(props.direction);
   const ports = $derived(props.ports);
   const handlers = $derived(props.handlers);
+  const interactive = $derived(props.interactive ?? true);
   const resolvePortStateClass = $derived(props.resolvePortStateClass);
   const pixelColorInputAction = $derived(props.pixelColorInputAction);
   const isInput = $derived(direction === 'input');
@@ -28,6 +30,7 @@
         {direction}
         {port}
         {handlers}
+        {interactive}
         {resolvePortStateClass}
         {pixelColorInputAction}
       />

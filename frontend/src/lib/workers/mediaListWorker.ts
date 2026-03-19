@@ -161,7 +161,7 @@ self.onmessage = (event: MessageEvent<MediaListWorkerPayload>) => {
   const assetsForCounts = includeCounts
     ? applyClientFilters(allSourceItems)
     : applyClientFilters(sourceItems);
-  let assets = applyClientFilters(sourceItems);
+  const assets = applyClientFilters(sourceItems);
 
   if (options?.sort === 'name') assets.sort(compareMediaName);
   else assets.sort(compareMediaRecent);

@@ -19,26 +19,14 @@
 
   const cloneCrop = (rect: CropRect): CropRect => ({ x: rect?.x ?? 0, y: rect?.y ?? 0, width: rect?.width ?? 0, height: rect?.height ?? 0 });
 
-  let activeCrop = $state<CropRect>(cloneCrop(props.crop));
-  let rotationState = $state(props.rotateDegrees ?? 0);
-  let rotationVisual = $state(props.rotateDegrees ?? 0);
-  let lastPropRotation = $state(props.rotateDegrees ?? 0);
-  let lastRotationSource = $state(props.src);
-
-  $effect(() => {
-    activeCrop = cloneCrop(props.crop);
+  let activeCrop = $derived.by(() => cloneCrop(props.crop));
+  let rotationState = $derived.by(() => {
+    void props.src;
+    return props.rotateDegrees ?? 0;
   });
-
-  $effect(() => {
-    const nextRotation = props.rotateDegrees ?? 0;
-    const nextSrc = props.src;
-    const sourceChanged = nextSrc !== lastRotationSource;
-    if (sourceChanged || nextRotation !== lastPropRotation) {
-      rotationState = nextRotation;
-      rotationVisual = nextRotation;
-      lastPropRotation = nextRotation;
-      lastRotationSource = nextSrc;
-    }
+  let rotationVisual = $derived.by(() => {
+    void props.src;
+    return props.rotateDegrees ?? 0;
   });
 
   const imageSrc = $derived.by(() => props.src);
@@ -307,7 +295,6 @@
   function rotate(delta: number) {
     rotationVisual += delta;
     rotationState = normalizeRotation(rotationState + delta);
-    lastPropRotation = rotationState;
     dispatch('rotateChange', rotationState);
   }
 
@@ -379,7 +366,12 @@
                 <div class="border border-white/10"></div>
               {/each}
             </div>
-            <div class="absolute inset-0 cursor-move" onpointerdown={(event) => startDrag('move', event)}></div>
+            <button
+              type="button"
+              class="absolute inset-0 cursor-move"
+              aria-label="Move crop selection"
+              onpointerdown={(event) => startDrag('move', event)}
+            ></button>
             <button
               type="button"
               class="pointer-events-auto absolute left-1/2 top-0 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white/80 bg-surface-900/90"

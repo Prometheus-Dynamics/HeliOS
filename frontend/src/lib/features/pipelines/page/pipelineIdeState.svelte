@@ -2,12 +2,14 @@
   import { browser } from '$app/environment';
   import { env as publicEnv } from '$env/dynamic/public';
   import { OpenAPI } from '$lib';
+  import { apiFetch, apiFetchResponse } from '$lib/api/core/http';
   import { buildErrorMessage } from '$lib/ui/errorPolicy';
+  import { SvelteSet, SvelteURL } from 'svelte/reactivity';
 
   type PluginListEntry = { name: string; detail: string; description: string };
 
   export function createPipelineIdeState() {
-    const NODE_LANGUAGE_ALIASES = new Set(['node', 'nodejs', 'typescript', 'ts', 'javascript', 'js']);
+    const NODE_LANGUAGE_ALIASES = new SvelteSet(['node', 'nodejs', 'typescript', 'ts', 'javascript', 'js']);
     const IDE_ENABLED_FALLBACK = (publicEnv.PUBLIC_IDE_ENABLED ?? 'true').toLowerCase() !== 'false';
     const IDE_WORKSPACE_DIR_FALLBACK =
       publicEnv.PUBLIC_IDE_WORKSPACE_DIR?.trim() || '/var/lib/helios/sdk/default';
@@ -36,7 +38,7 @@
     });
 
     const visiblePlugins = $derived.by<PluginListEntry[]>(() => {
-      const uniqueNames = new Set<string>();
+      const uniqueNames = new SvelteSet<string>();
       for (const name of state.ideProjects) {
         const trimmed = name.trim();
         if (trimmed) {
@@ -59,11 +61,9 @@
       if (!browser) return;
       try {
         const prevIdeUrl = state.ideUrl;
-        const response = await fetch(`${OpenAPI.BASE}/device/ide`, {
+        const payload = await apiFetch<Record<string, unknown>>(`${OpenAPI.BASE}/device/ide`, {
           headers: { Accept: 'application/json' }
         });
-        if (!response.ok) return;
-        const payload = await response.json();
         if (typeof payload?.enabled === 'boolean') {
           state.ideEnabled = payload.enabled;
         }
@@ -90,11 +90,9 @@
     async function refreshIdeProjects(): Promise<void> {
       if (!browser) return;
       try {
-        const response = await fetch(`${OpenAPI.BASE}/device/ide/projects`, {
+        const payload = await apiFetch<Record<string, unknown>>(`${OpenAPI.BASE}/device/ide/projects`, {
           headers: { Accept: 'application/json' }
         });
-        if (!response.ok) return;
-        const payload = await response.json();
         if (Array.isArray(payload?.projects)) {
           state.ideProjects = payload.projects
             .map((entry: { name?: string } | null) => (typeof entry?.name === 'string' ? entry.name.trim() : ''))
@@ -131,7 +129,7 @@
       state.pluginProjectBusy = true;
       state.pluginProjectError = null;
       try {
-        const response = await fetch(`${OpenAPI.BASE}/device/ide/projects`, {
+        const response = await apiFetchResponse(`${OpenAPI.BASE}/device/ide/projects`, {
           method: 'POST',
           headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -164,7 +162,7 @@
     function openPluginInIde(pluginName: string) {
       if (!state.ideEnabled) return;
       const folderPath = `${state.ideProjectsDir.replace(/\/+$/, '')}/${pluginName}`;
-      const url = new URL(state.ideUrl);
+      const url = new SvelteURL(state.ideUrl);
       url.searchParams.set('folder', folderPath);
       state.ideIframeUrl = url.toString();
     }

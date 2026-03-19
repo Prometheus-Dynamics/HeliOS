@@ -1,10 +1,11 @@
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use helios_peripherals::dto::{LightingColor, LightingCommand};
 use serde::{Deserialize, Serialize};
 
-pub const LED_ANIMATIONS_PATH: &str = "/etc/helios/led-animations.json";
+pub const LED_ANIMATIONS_PATH: &str = "/var/lib/helios/led-animations.json";
+pub const LEGACY_LED_ANIMATIONS_PATH: &str = "/etc/helios/led-animations.json";
 const DEFAULT_TIMELINE_SAMPLE_MS: u32 = 50;
 const MIN_FRAME_DURATION_MS: u32 = 20;
 
@@ -161,23 +162,34 @@ fn normalize_doc(mut doc: LedAnimationDoc) -> LedAnimationDoc {
     doc
 }
 
-pub fn load_led_animations_sync(path: impl AsRef<Path>) -> LedAnimationDoc {
-    let path = path.as_ref();
-    let contents = std::fs::read_to_string(path);
-    match contents {
-        Ok(raw) => normalize_doc(serde_json::from_str::<LedAnimationDoc>(&raw).unwrap_or_default()),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => normalize_doc(LedAnimationDoc::default()),
-        Err(_) => normalize_doc(LedAnimationDoc::default()),
+fn candidate_paths(path: &Path) -> Vec<PathBuf> {
+    let mut candidates = vec![path.to_path_buf()];
+    if path == Path::new(LED_ANIMATIONS_PATH) {
+        candidates.push(PathBuf::from(LEGACY_LED_ANIMATIONS_PATH));
     }
+    candidates
+}
+
+pub fn load_led_animations_sync(path: impl AsRef<Path>) -> LedAnimationDoc {
+    for path in candidate_paths(path.as_ref()) {
+        match std::fs::read_to_string(&path) {
+            Ok(raw) => return normalize_doc(serde_json::from_str::<LedAnimationDoc>(&raw).unwrap_or_default()),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
+            Err(_) => return normalize_doc(LedAnimationDoc::default()),
+        }
+    }
+    normalize_doc(LedAnimationDoc::default())
 }
 
 pub async fn load_led_animations(path: impl AsRef<Path>) -> LedAnimationDoc {
-    let path = path.as_ref();
-    match tokio::fs::read_to_string(path).await {
-        Ok(raw) => normalize_doc(serde_json::from_str::<LedAnimationDoc>(&raw).unwrap_or_default()),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => normalize_doc(LedAnimationDoc::default()),
-        Err(_) => normalize_doc(LedAnimationDoc::default()),
+    for path in candidate_paths(path.as_ref()) {
+        match tokio::fs::read_to_string(&path).await {
+            Ok(raw) => return normalize_doc(serde_json::from_str::<LedAnimationDoc>(&raw).unwrap_or_default()),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
+            Err(_) => return normalize_doc(LedAnimationDoc::default()),
+        }
     }
+    normalize_doc(LedAnimationDoc::default())
 }
 
 pub async fn persist_led_animations(path: impl AsRef<Path>, doc: &LedAnimationDoc) -> io::Result<()> {
@@ -187,4 +199,33 @@ pub async fn persist_led_animations(path: impl AsRef<Path>, doc: &LedAnimationDo
     }
     let serialized = serde_json::to_string_pretty(doc).unwrap_or_else(|_| "{\"animations\":[]}".to_string());
     tokio::fs::write(path, serialized).await
+}
+
+#[must_use]
+pub fn find_animation_entry<'a>(doc: &'a LedAnimationDoc, name: &str) -> Option<&'a LedAnimationEntry> {
+    let needle = name.trim();
+    if needle.is_empty() {
+        return None;
+    }
+    doc.animations.iter().find(|entry| entry.name.trim().eq_ignore_ascii_case(needle))
+}
+
+#[must_use]
+pub fn command_from_entry(entry: &LedAnimationEntry, fallback_brightness: Option<u8>) -> Option<LightingCommand> {
+    if entry.command.frame.is_some() || entry.command.animation.is_some() {
+        return Some(LightingCommand { frame: entry.command.frame.clone(), brightness: entry.command.brightness.or(fallback_brightness), animation: entry.command.animation.clone() });
+    }
+    entry.sequence.first().map(|frame| LightingCommand { frame: Some(frame.frame.clone()), brightness: entry.command.brightness.or(fallback_brightness), animation: None })
+}
+
+#[must_use]
+pub fn command_for_animation_name(doc: &LedAnimationDoc, name: &str, fallback_brightness: Option<u8>) -> Option<LightingCommand> {
+    let entry = find_animation_entry(doc, name)?;
+    command_from_entry(entry, fallback_brightness)
+}
+
+#[must_use]
+pub fn sequence_for_animation_name(doc: &LedAnimationDoc, name: &str) -> Option<Vec<LedAnimationFrame>> {
+    let entry = find_animation_entry(doc, name)?;
+    if entry.sequence.is_empty() { None } else { Some(entry.sequence.clone()) }
 }

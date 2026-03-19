@@ -8,7 +8,6 @@ import type { LocalizationPipelineSource } from '$lib/features/localization/pipe
 import {
   buildOutputSpacesFromSolve,
   normalizeInputKey,
-  updateProfilePipelineTemplate,
   updateProfileSourceInputKey,
   updateProfileSources,
   updateSolverOutputSpaces
@@ -24,6 +23,7 @@ type LocalizationPageActionsOptions = {
   getActiveProfile: () => LocalizationProfile | null;
   getActiveSolverConfig: () => LocalizationSolverConfig | null;
   getSolvePoseSpaces: () => LocalizationPoseSpace[];
+  getSupportedPoseSpaces?: () => LocalizationPoseSpace[];
   setFieldMapSelection: (next: string) => void;
   assignMapToSelectedField: (mapId: string | null) => void;
   persistProfileUpdate: PersistProfileUpdate;
@@ -55,8 +55,13 @@ export const createLocalizationPageActions = (options: LocalizationPageActionsOp
     if (!profile || !activeSolverConfig) return;
 
     const requiredFieldSpaces: LocalizationPoseSpace[] = ['camera_in_field', 'robot_in_field'];
+    const supportedPoseSpaces = new Set<LocalizationPoseSpace>(
+      options.getSupportedPoseSpaces?.() ?? requiredFieldSpaces
+    );
     const currentOutputs = activeSolverConfig.outputSpaces ?? [];
-    const missing = requiredFieldSpaces.filter((space) => !currentOutputs.includes(space));
+    const missing = requiredFieldSpaces.filter(
+      (space) => supportedPoseSpaces.has(space) && !currentOutputs.includes(space)
+    );
     if (missing.length === 0) return;
 
     void options.persistProfileUpdate(
@@ -100,14 +105,6 @@ export const createLocalizationPageActions = (options: LocalizationPageActionsOp
     const nextSolve = enabled ? [...current, space] : current.filter((entry) => entry !== space);
     const nextOutputs = buildOutputSpacesFromSolve(activeSolverConfig.outputSpaces ?? [], nextSolve);
     void options.persistProfileUpdate(updateSolverOutputSpaces(profile, activeSolverConfig.id, nextOutputs));
-  };
-
-  const setPipelineTemplateId = (templateId: string): void => {
-    const profile = options.getActiveProfile();
-    if (!profile) return;
-    const normalized = templateId.trim();
-    const nextId = normalized.length > 0 ? normalized : null;
-    void options.persistProfileUpdate(updateProfilePipelineTemplate(profile, nextId));
   };
 
   const setSourceInputKey = (sourceId: string, rawValue: string): void => {
@@ -155,7 +152,6 @@ export const createLocalizationPageActions = (options: LocalizationPageActionsOp
     toggleSolverOutputSpace,
     setActiveSolverMode,
     setSolveSpaceEnabled,
-    setPipelineTemplateId,
     setSourceInputKey,
     applySourceSelection
   };

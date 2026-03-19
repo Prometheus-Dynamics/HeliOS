@@ -1,25 +1,22 @@
 use axum::{
     Json, Router,
     extract::State,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, post},
 };
-use once_cell::sync::Lazy;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fs;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::OnceLock;
-use std::time::{Duration, Instant};
-use tokio::sync::Mutex;
-use tokio::task;
+use std::time::Duration;
 use tracing::{error, warn};
 use utoipa::ToSchema;
 
 use super::AppState;
+use crate::http::revision::{apply_revision_headers, matches_if_none_match, not_modified_response};
 use crate::ipc::peripherals::SensorsConnection;
 
 pub fn router() -> Router<AppState> {
@@ -36,48 +33,48 @@ pub fn router() -> Router<AppState> {
         .route("/sensors/alias", post(configure_sensor_alias))
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Clone, Serialize, ToSchema)]
 pub struct PeripheralErrors {
     #[serde(default)]
-    cameras: Vec<String>,
+    pub(crate) cameras: Vec<String>,
     #[serde(default)]
-    i2c: Vec<String>,
+    pub(crate) i2c: Vec<String>,
     #[serde(default)]
-    usb: Vec<String>,
+    pub(crate) usb: Vec<String>,
     #[serde(default)]
-    fan: Vec<String>,
+    pub(crate) fan: Vec<String>,
     #[serde(default)]
-    lighting: Vec<String>,
+    pub(crate) lighting: Vec<String>,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Clone, Serialize, ToSchema)]
 pub struct PeripheralInventory {
-    cameras: Vec<helios_engine::capture::DiscoveredDevice>,
+    pub(crate) cameras: Vec<helios_engine::capture::DiscoveredDevice>,
     #[serde(default)]
-    sensors: Vec<SensorPeripheral>,
+    pub(crate) sensors: Vec<SensorPeripheral>,
     #[serde(default)]
-    errors: PeripheralErrors,
+    pub(crate) errors: PeripheralErrors,
     #[serde(default)]
-    i2c: Option<helios_peripherals::dto::I2cInventory>,
+    pub(crate) i2c: Option<helios_peripherals::dto::I2cInventory>,
     #[serde(default)]
-    usb: Vec<UsbPeripheral>,
+    pub(crate) usb: Vec<UsbPeripheral>,
     #[serde(default)]
-    lighting: Option<LightingStatus>,
+    pub(crate) lighting: Option<LightingStatus>,
     #[serde(default)]
-    fan: Option<FanStatus>,
+    pub(crate) fan: Option<FanStatus>,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Clone, Serialize, ToSchema)]
 pub struct UsbPeripheral {
-    id: String,
+    pub(crate) id: String,
     #[serde(default)]
-    kind: Option<String>,
+    pub(crate) kind: Option<String>,
     #[serde(default)]
-    description: Option<String>,
+    pub(crate) description: Option<String>,
     #[serde(default)]
-    present: bool,
+    pub(crate) present: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    warnings: Vec<UsbPeripheralWarning>,
+    pub(crate) warnings: Vec<UsbPeripheralWarning>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -86,7 +83,7 @@ pub struct UsbPeripheralWarning {
     pub message: String,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Clone, Serialize, ToSchema)]
 pub struct LightingStatus {
     #[serde(default)]
     present: bool,
@@ -94,7 +91,7 @@ pub struct LightingStatus {
     last_error: Option<String>,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Clone, Serialize, ToSchema)]
 pub struct FanStatus {
     #[serde(default)]
     present: bool,
@@ -182,11 +179,19 @@ impl ErrorBody {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Clone, Serialize, ToSchema)]
 pub struct CameraDiscoveryResponse {
     cameras: Vec<helios_engine::capture::DiscoveredDevice>,
     #[serde(default)]
     errors: Vec<String>,
+}
+
+async fn invalidate_peripheral_inventory_cache(state: &AppState) {
+    state.services.hardware.invalidate_peripheral_inventory_cache().await;
+}
+
+async fn load_peripheral_inventory_snapshot(state: &AppState) -> Result<(PeripheralInventory, u64), String> {
+    state.services.hardware.load_peripheral_inventory_snapshot(state).await
 }
 
 #[utoipa::path(
@@ -198,92 +203,21 @@ pub struct CameraDiscoveryResponse {
         (status = 502, description = "Peripheral error", body = ErrorBody)
     )
 )]
-async fn list_peripherals(State(state): State<AppState>) -> impl IntoResponse {
-    let mut errors = PeripheralErrors { cameras: Vec::new(), i2c: Vec::new(), usb: Vec::new(), fan: Vec::new(), lighting: Vec::new() };
-    let cameras = match cached_discover_cameras().await {
-        Ok(cams) => cams,
+async fn list_peripherals(State(state): State<AppState>, headers: HeaderMap) -> impl IntoResponse {
+    match load_peripheral_inventory_snapshot(&state).await {
+        Ok((resp, revision)) => {
+            if matches_if_none_match(&headers, revision) {
+                return not_modified_response(revision);
+            }
+            let mut response = Json(resp).into_response();
+            apply_revision_headers(response.headers_mut(), revision);
+            response
+        }
         Err(err) => {
             warn!("camera discovery failed: {err}");
-            return (StatusCode::BAD_GATEWAY, Json(ErrorBody::new("bad_gateway", err))).into_response();
+            (StatusCode::BAD_GATEWAY, Json(ErrorBody::new("bad_gateway", err))).into_response()
         }
-    };
-
-    let usb = list_usb_sysfs();
-    let (sensors, i2c, fan, lighting) = match state.ensure_sensors().await {
-        Some(sensors) => {
-            let (inventory_res, i2c_res, fan_res) = tokio::join!(
-                tokio::time::timeout(sensor_ipc_timeout(), sensors.inventory()),
-                tokio::time::timeout(sensor_ipc_timeout(), sensors.i2c_inventory()),
-                tokio::time::timeout(sensor_ipc_timeout(), sensors.fan_status())
-            );
-
-            let mut inventory = match inventory_res {
-                Ok(Ok(Ok(inv))) => Some(inv),
-                Ok(Ok(Err(reason))) => {
-                    warn!(%reason, "sensor inventory request rejected");
-                    None
-                }
-                Ok(Err(err)) => {
-                    warn!(%err, "sensor inventory request failed");
-                    None
-                }
-                Err(_) => {
-                    state.invalidate_sensors().await;
-                    warn!("sensor inventory request timed out");
-                    None
-                }
-            };
-
-            if inventory.as_ref().is_none_or(|inv| inventory_needs_refresh(inv, &usb))
-                && allow_inventory_refresh().await
-                && let Some(refreshed) = refresh_inventory(&state, sensors.clone()).await
-            {
-                inventory = Some(refreshed);
-            }
-
-            let sensor_peripherals = inventory.as_ref().map(map_sensor_inventory).unwrap_or_default();
-            let i2c_inv = match i2c_res {
-                Ok(Ok(Ok(inv))) => Some(inv),
-                Ok(Ok(Err(reason))) => {
-                    errors.i2c.push(reason);
-                    None
-                }
-                Ok(Err(err)) => {
-                    errors.i2c.push(err.to_string());
-                    None
-                }
-                Err(_) => {
-                    state.invalidate_sensors().await;
-                    errors.i2c.push("i2c inventory request timed out".into());
-                    None
-                }
-            };
-            let fan = match fan_res {
-                Ok(Ok(Ok(status))) => Some(map_fan_status(status)),
-                Ok(Ok(Err(reason))) => {
-                    errors.fan.push(reason);
-                    None
-                }
-                Ok(Err(err)) => {
-                    errors.fan.push(err.to_string());
-                    None
-                }
-                Err(_) => {
-                    state.invalidate_sensors().await;
-                    errors.fan.push("fan status request timed out".into());
-                    None
-                }
-            };
-            let lighting = inventory.as_ref().map(derive_lighting_status);
-            (sensor_peripherals, i2c_inv, fan, lighting)
-        }
-        None => (Vec::new(), None, None, None),
-    };
-
-    errors.cameras = cameras.errors;
-    let resp = PeripheralInventory { cameras: cameras.devices, sensors, errors, i2c, usb, lighting, fan };
-
-    Json(resp).into_response()
+    }
 }
 
 #[utoipa::path(
@@ -295,9 +229,16 @@ async fn list_peripherals(State(state): State<AppState>) -> impl IntoResponse {
         (status = 502, description = "Camera discovery failed", body = ErrorBody)
     )
 )]
-async fn list_cameras() -> impl IntoResponse {
-    match cached_discover_cameras().await {
-        Ok(cameras) => Json(CameraDiscoveryResponse { cameras: cameras.devices, errors: cameras.errors }).into_response(),
+async fn list_cameras(State(state): State<AppState>, headers: HeaderMap) -> impl IntoResponse {
+    match cached_discover_cameras_snapshot(&state).await {
+        Ok((cameras, revision)) => {
+            if matches_if_none_match(&headers, revision) {
+                return not_modified_response(revision);
+            }
+            let mut response = Json(CameraDiscoveryResponse { cameras: cameras.devices, errors: cameras.errors }).into_response();
+            apply_revision_headers(response.headers_mut(), revision);
+            response
+        }
         Err(err) => (StatusCode::BAD_GATEWAY, Json(ErrorBody::new("bad_gateway", err))).into_response(),
     }
 }
@@ -432,7 +373,7 @@ async fn led_status(State(state): State<AppState>) -> impl IntoResponse {
     };
 
     if inventory.as_ref().is_none_or(|inv| !inventory_has_lighting(inv))
-        && allow_inventory_refresh().await
+        && allow_inventory_refresh(&state).await
         && let Some(refreshed) = refresh_inventory(&state, sensors.clone()).await
     {
         inventory = Some(refreshed);
@@ -510,7 +451,10 @@ async fn configure_sensor_firmware(State(state): State<AppState>, Json(req): Jso
     }
 
     match sensors.configure_firmware(device_id.to_string(), firmware.to_string()).await {
-        Ok(Ok(())) => StatusCode::NO_CONTENT.into_response(),
+        Ok(Ok(())) => {
+            invalidate_peripheral_inventory_cache(&state).await;
+            StatusCode::NO_CONTENT.into_response()
+        }
         Ok(Err(reason)) => {
             let normalized = reason.to_lowercase();
             if normalized.contains("timed out") || normalized.contains("timeout") {
@@ -554,7 +498,10 @@ async fn configure_sensor_alias(State(state): State<AppState>, Json(req): Json<C
     }
 
     match sensors.configure_alias(hardware_key.to_string(), req.alias).await {
-        Ok(Ok(())) => StatusCode::NO_CONTENT.into_response(),
+        Ok(Ok(())) => {
+            invalidate_peripheral_inventory_cache(&state).await;
+            StatusCode::NO_CONTENT.into_response()
+        }
         Ok(Err(reason)) => (StatusCode::BAD_REQUEST, Json(ErrorBody::new("bad_request", reason))).into_response(),
         Err(err) => {
             error!(%err, "failed to send configure alias command");
@@ -563,12 +510,12 @@ async fn configure_sensor_alias(State(state): State<AppState>, Json(req): Json<C
     }
 }
 
-fn derive_lighting_status(inv: &helios_peripherals::dto::SensorInventory) -> LightingStatus {
+pub(crate) fn derive_lighting_status(inv: &helios_peripherals::dto::SensorInventory) -> LightingStatus {
     let present = inv.sensors.iter().any(|s| s.metadata.as_ref().map(|m| m.json.to_lowercase().contains("lighting")).unwrap_or(false));
     LightingStatus { present, last_error: None }
 }
 
-fn map_sensor_inventory(inv: &helios_peripherals::dto::SensorInventory) -> Vec<SensorPeripheral> {
+pub(crate) fn map_sensor_inventory(inv: &helios_peripherals::dto::SensorInventory) -> Vec<SensorPeripheral> {
     inv.sensors.iter().filter_map(map_sensor_descriptor).collect()
 }
 
@@ -674,7 +621,7 @@ fn map_firmware_status(meta: &serde_json::Map<String, serde_json::Value>) -> Opt
     Some(SensorPeripheralFirmwareStatus { status, mode, active, desired, last_error, options })
 }
 
-fn list_usb_sysfs() -> Vec<UsbPeripheral> {
+pub(crate) fn list_usb_sysfs() -> Vec<UsbPeripheral> {
     let mut out = Vec::new();
     let root = Path::new("/sys/bus/usb/devices");
     let entries = match fs::read_dir(root) {
@@ -815,23 +762,9 @@ fn read_system_undervoltage() -> Option<bool> {
     Some((value & 0x1) != 0 || (value & (1 << 16)) != 0)
 }
 
-fn map_fan_status(status: lib_sensors::fan_config::FanStatus) -> FanStatus {
+pub(crate) fn map_fan_status(status: lib_sensors::fan_config::FanStatus) -> FanStatus {
     FanStatus { present: true, rpm: status.rpm, mode: Some(format!("{:?}", status.mode)), target_percent: Some(status.target_percent), last_error: status.last_error }
 }
-
-fn safe_discover_cameras() -> Result<helios_engine::capture::DiscoveryResult, String> {
-    catch_unwind(AssertUnwindSafe(helios_engine::capture::discover_devices_with_errors)).map_err(|_| "camera discovery panicked".to_string())
-}
-
-struct CachedDiscovery {
-    result: helios_engine::capture::DiscoveryResult,
-    at: Instant,
-}
-
-static CAMERA_CACHE: Lazy<Mutex<Option<CachedDiscovery>>> = Lazy::new(|| Mutex::new(None));
-static INVENTORY_REFRESH_AT: Lazy<Mutex<Instant>> = Lazy::new(|| Mutex::new(Instant::now() - INVENTORY_REFRESH_MIN));
-
-const INVENTORY_REFRESH_MIN: Duration = Duration::from_secs(10);
 
 fn read_timeout_env(var: &str, default_ms: u64, min_ms: u64, max_ms: u64) -> Duration {
     let ms = std::env::var(var).ok().and_then(|value| value.trim().parse::<u64>().ok()).unwrap_or(default_ms);
@@ -843,69 +776,17 @@ fn sensor_ipc_timeout() -> Duration {
     *VALUE.get_or_init(|| read_timeout_env("HELIOS_PERIPHERALS_TIMEOUT_MS", 1_500, 250, 15_000))
 }
 
-fn camera_discovery_timeout() -> Duration {
-    static VALUE: OnceLock<Duration> = OnceLock::new();
-    *VALUE.get_or_init(|| read_timeout_env("HELIOS_CAMERA_DISCOVERY_TIMEOUT_MS", 1_500, 250, 20_000))
-}
-
 fn sensor_refresh_timeout() -> Duration {
     static VALUE: OnceLock<Duration> = OnceLock::new();
     *VALUE.get_or_init(|| read_timeout_env("HELIOS_PERIPHERALS_REFRESH_TIMEOUT_MS", 2_500, 500, 20_000))
 }
 
-async fn cached_discover_cameras() -> Result<helios_engine::capture::DiscoveryResult, String> {
-    const TTL: Duration = Duration::from_secs(5);
-
-    {
-        let guard = CAMERA_CACHE.lock().await;
-        if let Some(cached) = guard.as_ref()
-            && cached.at.elapsed() < TTL
-        {
-            return Ok(cached.result.clone());
-        }
-    }
-
-    let handle = task::spawn_blocking(safe_discover_cameras);
-    let discovery = match tokio::time::timeout(camera_discovery_timeout(), handle).await {
-        Ok(joined) => match joined {
-            Ok(result) => result,
-            Err(_) => Err("camera discovery task panicked".to_string()),
-        },
-        Err(_) => Err("camera discovery timed out".to_string()),
-    };
-
-    match discovery {
-        Ok(result) => {
-            let mut guard = CAMERA_CACHE.lock().await;
-            *guard = Some(CachedDiscovery { result: result.clone(), at: Instant::now() });
-            Ok(result)
-        }
-        Err(err) => {
-            let mut fallback = {
-                let guard = CAMERA_CACHE.lock().await;
-                guard.as_ref().map(|entry| entry.result.clone()).unwrap_or_else(|| helios_engine::capture::DiscoveryResult { devices: Vec::new(), errors: Vec::new() })
-            };
-            if fallback.errors.iter().all(|entry| entry != &err) {
-                fallback.errors.push(err);
-                if fallback.errors.len() > 5 {
-                    let drain = fallback.errors.len() - 5;
-                    fallback.errors.drain(0..drain);
-                }
-            }
-            let mut guard = CAMERA_CACHE.lock().await;
-            *guard = Some(CachedDiscovery { result: fallback.clone(), at: Instant::now() });
-            Ok(fallback)
-        }
-    }
+async fn cached_discover_cameras_snapshot(state: &AppState) -> Result<(helios_engine::capture::DiscoveryResult, u64), String> {
+    state.services.hardware.cached_discover_cameras_snapshot(state).await
 }
 
-async fn allow_inventory_refresh() -> bool {
-    let mut guard = INVENTORY_REFRESH_AT.lock().await;
-    if guard.elapsed() < INVENTORY_REFRESH_MIN {
-        return false;
-    }
-    *guard = Instant::now();
-    true
+async fn allow_inventory_refresh(state: &AppState) -> bool {
+    state.services.hardware.allow_inventory_refresh().await
 }
 
 async fn refresh_inventory(state: &AppState, sensors: Arc<SensorsConnection>) -> Option<helios_peripherals::dto::SensorInventory> {
@@ -942,33 +823,9 @@ async fn refresh_inventory(state: &AppState, sensors: Arc<SensorsConnection>) ->
     }
 }
 
-fn inventory_needs_refresh(inv: &helios_peripherals::dto::SensorInventory, usb: &[UsbPeripheral]) -> bool {
-    if inv.sensors.is_empty() {
-        return true;
-    }
-    if usb_has_coral(usb) && !inventory_has_coral(inv) {
-        return true;
-    }
-    if !inventory_has_lighting(inv) {
-        return true;
-    }
-    false
-}
-
-fn inventory_has_coral(inv: &helios_peripherals::dto::SensorInventory) -> bool {
-    inv.sensors.iter().any(|sensor| sensor.backend.eq_ignore_ascii_case("coral"))
-}
-
 fn inventory_has_lighting(inv: &helios_peripherals::dto::SensorInventory) -> bool {
     inv.sensors.iter().any(|sensor| {
         let backend = sensor.backend.to_ascii_lowercase();
         backend.contains("led") || backend.contains("lighting")
-    })
-}
-
-fn usb_has_coral(devices: &[UsbPeripheral]) -> bool {
-    devices.iter().any(|device| match device.kind.as_deref() {
-        Some(kind) => kind.eq_ignore_ascii_case("coral"),
-        None => false,
     })
 }

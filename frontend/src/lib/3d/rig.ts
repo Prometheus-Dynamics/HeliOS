@@ -1,17 +1,11 @@
 import * as THREE from 'three';
-import { FontLoader, TextGeometry } from 'three/examples/jsm/Addons.js';
-import type { Font } from 'three/examples/jsm/Addons.js';
-import helvetiker from 'three/examples/fonts/helvetiker_regular.typeface.json';
+import { FontLoader, type Font } from 'three/examples/jsm/loaders/FontLoader.js';
+import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
+import helvetikerRaw from 'three/examples/fonts/helvetiker_regular.typeface.json?raw';
 
 import type { PoseRotation, PoseVector, RigPose, RobotDimensions } from '$lib/types/rig';
-
-export const DEFAULT_ROBOT_DIMENSIONS: RobotDimensions = {
-  width: 0.6,
-  length: 0.6,
-  bumperHeight: 0.127,
-  bumperThickness: 0.0508,
-  groundClearance: 0
-};
+import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rigDefaults';
+export { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rigDefaults';
 
 export const CAMERA_BODY_SIZE = {
   width: 0.06,
@@ -362,12 +356,15 @@ const DEFAULT_BUMPER_EMISSIVE = 0x330b0b;
 const DEFAULT_LABEL_COLOR = 0xf8fafc;
 
 type FontJson = Parameters<FontLoader['parse']>[0];
-const orientationFontSource = helvetiker as FontJson;
+let orientationFontSource: FontJson | null = null;
 let orientationFont: Font | null = null;
 
 function ensureOrientationFont(): Font | null {
   if (orientationFont) return orientationFont;
   try {
+    if (!orientationFontSource) {
+      orientationFontSource = JSON.parse(helvetikerRaw) as FontJson;
+    }
     orientationFont = new FontLoader().parse(orientationFontSource);
   } catch {
     orientationFont = null;
@@ -440,20 +437,22 @@ function addOrientationLabels(
   const targetHeight = dims.bumperHeight * 0.65;
   const frontBackWidth = Math.max(dims.width - dims.bumperThickness * 1.4, 0.05);
   const sideWidth = Math.max(dims.length - dims.bumperThickness * 1.4, 0.05);
-  const epsilon = 0.0005;
+  const surfaceInset = 0.0005;
 
-  const frontFace = dims.length / 2 + dims.bumperThickness / 2;
-  const sideFace = dims.width / 2 + dims.bumperThickness / 2;
-  const frontPosition = frontFace - textDepth / 2 - epsilon;
-  const backPosition = -frontFace + textDepth / 2 + epsilon;
-  const leftPosition = -sideFace + textDepth / 2 + epsilon;
-  const rightPosition = sideFace - textDepth / 2 - epsilon;
+  const frontFace = dims.length / 2 + dims.bumperThickness;
+  const sideFace = dims.width / 2 + dims.bumperThickness;
+  // Center the mesh so the back of the extruded text sits just inside the bumper skin.
+  // The readable face then lands outside the bumper instead of being buried in the volume.
+  const frontPosition = frontFace + textDepth / 2 - surfaceInset;
+  const backPosition = -frontFace - textDepth / 2 + surfaceInset;
+  const rightPosition = -sideFace - textDepth / 2 + surfaceInset;
+  const leftPosition = sideFace + textDepth / 2 - surfaceInset;
 
   const placements = [
     { text: 'FRONT', maxWidth: frontBackWidth, position: new THREE.Vector3(0, verticalCenter, frontPosition), rotationY: 0 },
     { text: 'BACK', maxWidth: frontBackWidth, position: new THREE.Vector3(0, verticalCenter, backPosition), rotationY: Math.PI },
-    { text: 'RIGHT', maxWidth: sideWidth, position: new THREE.Vector3(leftPosition, verticalCenter, 0), rotationY: -Math.PI / 2 },
-    { text: 'LEFT', maxWidth: sideWidth, position: new THREE.Vector3(rightPosition, verticalCenter, 0), rotationY: Math.PI / 2 }
+    { text: 'RIGHT', maxWidth: sideWidth, position: new THREE.Vector3(rightPosition, verticalCenter, 0), rotationY: -Math.PI / 2 },
+    { text: 'LEFT', maxWidth: sideWidth, position: new THREE.Vector3(leftPosition, verticalCenter, 0), rotationY: Math.PI / 2 }
   ];
 
   placements.forEach(({ text, maxWidth, position, rotationY }) => {
@@ -490,7 +489,7 @@ function createCenteredTextGeometry(font: Font, text: string, depth: number, max
 }
 
 function addDirectionIndicator(group: THREE.Group, dims: RobotDimensions, verticalCenter: number) {
-  const frontFace = dims.length / 2 + dims.bumperThickness / 2;
+  const frontFace = dims.length / 2 + dims.bumperThickness;
   const arrowHeight = dims.bumperHeight * 0.82;
   const arrowWidth = dims.width * 0.24;
   const shaftRatio = 0.55;
@@ -533,12 +532,15 @@ function addDirectionIndicator(group: THREE.Group, dims: RobotDimensions, vertic
 }
 
 export function createBumperGeometry(dimensions: RobotDimensions): THREE.ExtrudeGeometry {
-  const outerRadius = Math.max(dimensions.bumperThickness / 2, 0.02);
-  const innerWidth = Math.max(dimensions.width - dimensions.bumperThickness * 2, 0.05);
-  const innerLength = Math.max(dimensions.length - dimensions.bumperThickness * 2, 0.05);
+  const bumperThickness = Math.max(dimensions.bumperThickness, 0.001);
+  const innerWidth = Math.max(dimensions.width, 0.05);
+  const innerLength = Math.max(dimensions.length, 0.05);
+  const outerWidth = innerWidth + bumperThickness * 2;
+  const outerLength = innerLength + bumperThickness * 2;
+  const outerRadius = Math.max(bumperThickness / 2, 0.02);
 
   const shape = new THREE.Shape();
-  roundedRect(shape, -dimensions.width / 2, -dimensions.length / 2, dimensions.width, dimensions.length, outerRadius);
+  roundedRect(shape, -outerWidth / 2, -outerLength / 2, outerWidth, outerLength, outerRadius);
 
   const hole = new THREE.Path();
   roundedRect(
@@ -547,7 +549,7 @@ export function createBumperGeometry(dimensions: RobotDimensions): THREE.Extrude
     -innerLength / 2,
     innerWidth,
     innerLength,
-    Math.max(0, outerRadius - dimensions.bumperThickness / 2)
+    Math.max(0, outerRadius - bumperThickness / 2)
   );
   shape.holes.push(hole);
 

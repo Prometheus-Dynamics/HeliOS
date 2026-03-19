@@ -2,7 +2,7 @@ import { get } from 'svelte/store';
 import { toaster } from '$lib';
 import { PipelinesApi } from '$lib/api/pipelinesApi';
 import { serializeGraphPlan } from '../graph';
-import { fromApiGraphPlan } from '../model';
+import { fromApiGraphPlan } from '../graphConverters';
 import { describeError } from './utils';
 import { hydrateGraphWithRegistry } from '../styleHydration';
 import type { Readable, Writable } from 'svelte/store';
@@ -121,7 +121,7 @@ export function createPipelineAutosaveManager(deps: PipelineAutosaveDeps) {
             15_000,
             'Pipeline save'
           );
-        } catch (err) {
+        } catch {
           // Fallback for older backends that only support POST create.
           return await withTimeout(
             PipelinesApi.uploadGraph({

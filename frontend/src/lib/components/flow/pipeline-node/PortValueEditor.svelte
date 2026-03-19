@@ -6,12 +6,14 @@
     direction: 'input' | 'output';
     port: PortRenderInfo;
     handlers: PortInteractionHandlers;
+    interactive?: boolean;
     pixelColorInputAction: (node: HTMLInputElement, handleId: string) => { destroy: () => void };
   };
 
-  const { direction, port, handlers, pixelColorInputAction }: PortValueEditorProps = $props();
+  const { direction, port, handlers, interactive = true, pixelColorInputAction }: PortValueEditorProps = $props();
 
   const isInput = $derived(direction === 'input');
+  const showInteractiveControls = $derived(interactive);
   const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
   const textWidthCh = (value: string, min: number, max: number) =>
     `${clamp((value?.trim().length ?? 0) + 1, min, max)}ch`;
@@ -39,7 +41,7 @@
   export type $$Props = PortValueEditorProps;
 </script>
 
-{#if port.isEnum && port.hasConstant}
+{#if port.isEnum && port.hasConstant && showInteractiveControls}
   <label class="pipeline-port__enum mt-1 flex flex-col gap-[2px]">
     <span class="pipeline-port__enum-label">Value</span>
     <select
@@ -55,7 +57,19 @@
       {/each}
     </select>
   </label>
-{:else if port.isBoolean && port.hasConstant}
+{:else if port.isEnum && port.hasConstant}
+  <span
+    class={`pipeline-port__constant mt-1 inline-flex max-w-[9.5rem] flex-wrap items-center gap-1 rounded px-2 py-[3px] text-micro-tight font-semibold uppercase tracking-[0.1em] ${
+      isInput ? 'w-full' : 'ml-auto justify-end'
+    }`}
+    title={port.constantTooltip ?? undefined}
+  >
+    Value
+    <span class="pipeline-port__constant-value max-w-full break-words text-micro-tight font-medium normal-case tracking-normal">
+      {enumLabel || port.constantDisplay || '—'}
+    </span>
+  </span>
+{:else if port.isBoolean && port.hasConstant && showInteractiveControls}
   <label
     class="pipeline-port__boolean mt-1 inline-flex items-center gap-2 rounded px-2 py-1 text-micro-tight font-semibold uppercase tracking-[0.1em]"
   >
@@ -69,7 +83,19 @@
     />
     <span class="pipeline-port__boolean-label">{port.booleanValue ? 'True' : 'False'}</span>
   </label>
-{:else if port.isNumeric && port.hasConstant}
+{:else if port.isBoolean && port.hasConstant}
+  <span
+    class={`pipeline-port__constant mt-1 inline-flex max-w-[9.5rem] flex-wrap items-center gap-1 rounded px-2 py-[3px] text-micro-tight font-semibold uppercase tracking-[0.1em] ${
+      isInput ? 'w-full' : 'ml-auto justify-end'
+    }`}
+    title={port.constantTooltip ?? undefined}
+  >
+    Bool
+    <span class="pipeline-port__constant-value max-w-full break-words text-micro-tight font-medium normal-case tracking-normal">
+      {port.booleanValue ? 'True' : 'False'}
+    </span>
+  </span>
+{:else if port.isNumeric && port.hasConstant && showInteractiveControls}
   <div
     class={`pipeline-port__numeric mt-1 inline-flex items-center rounded px-2 py-[3px] ${isInput ? '' : 'ml-auto'}`.trim()}
   >
@@ -101,8 +127,20 @@
       onbeforeinput={(event) => handlers.handleNumericBeforeInput(port, event)}
     />
   </div>
+{:else if port.isNumeric && port.hasConstant}
+  <span
+    class={`pipeline-port__constant mt-1 inline-flex max-w-[9.5rem] flex-wrap items-center gap-1 rounded px-2 py-[3px] text-micro-tight font-semibold uppercase tracking-[0.1em] ${
+      isInput ? 'w-full' : 'ml-auto justify-end'
+    }`}
+    title={port.constantTooltip ?? undefined}
+  >
+    Value
+    <span class="pipeline-port__constant-value max-w-full break-words text-micro-tight font-medium normal-case tracking-normal">
+      {port.numericDisplay ?? port.constantDisplay ?? '—'}
+    </span>
+  </span>
 {:else if port.isPixel && port.hasConstant && port.pixelHex}
-  {#if port.settable}
+  {#if port.settable && showInteractiveControls}
     <div
       class={`pipeline-port__pixel-wrapper mt-1 inline-flex max-w-[9.5rem] flex-col gap-1 ${
         isInput ? 'w-full' : 'items-end ml-auto'

@@ -7,8 +7,6 @@ export type EditingFrame = {
 
 export type EditingPath = string[];
 
-const clonePath = (path: EditingPath): EditingPath => path.slice();
-
 export const rootFrame = (plan: PipelineGraphPlan): EditingFrame => ({ nodeId: null, plan });
 
 export const resolvePlanAtPath = (plan: PipelineGraphPlan, path: EditingPath): PipelineGraphPlan | null => {

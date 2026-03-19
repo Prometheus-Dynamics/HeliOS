@@ -99,6 +99,11 @@
     { value: 'aruco_mip_36h12', label: 'aruco_mip_36h12 (36h12)' }
   ];
 
+  function openBoardPdf(): void {
+    if (typeof window === 'undefined') return;
+    window.open(boardPdfUrl, '_blank', 'noopener,noreferrer');
+  }
+
   $effect(() => {
     if (!open || !calibrationBoard) return;
     if (!Number.isFinite(calibrationBoard.squaresX) || calibrationBoard.squaresX <= 0) calibrationBoard.squaresX = DEFAULT_BOARD.squaresX;
@@ -142,7 +147,7 @@
         </div>
       </div>
 
-      <div class="mt-4 grid gap-4 lg:grid-cols-[22rem,minmax(0,1fr)]">
+      <div class="mt-4 grid gap-4 xl:grid-cols-[22rem,minmax(0,1fr)]">
         <div class="space-y-4">
           <div class="rounded border border-surface-800/60 bg-surface-900/40 p-4">
             <p class="text-2xs uppercase tracking-[0.3em] text-surface-500">Presets</p>
@@ -202,16 +207,16 @@
 
             <div class="mt-3 space-y-1 text-xs text-surface-500">
               <p>
-                <span class="text-surface-200">{boardPaperLabel}</span> · Page{' '}
+                <span class="text-surface-200">{boardPaperLabel}</span> · Page
                 <span class="font-mono text-surface-200">
                   {boardPageWmm.toFixed(1)}×{boardPageHmm.toFixed(1)}mm
                 </span>
               </p>
               <p>
-                Required{' '}
+                Required
                 <span class="font-mono text-surface-200">
                   {boardRequiredWmm.toFixed(1)}×{boardRequiredHmm.toFixed(1)}mm
-                </span>{' '}
+                </span>
                 (board + margins)
               </p>
               {#if !boardFitsOnPaper}
@@ -305,7 +310,7 @@
                     calibrationBoard.dictionary = value || DEFAULT_BOARD.dictionary;
                   }}
                 >
-                  {#each ARUCO_DICTIONARIES as dict}
+                  {#each ARUCO_DICTIONARIES as dict (dict.value)}
                     <option value={dict.value}>{dict.label}</option>
                   {/each}
                 </select>
@@ -321,9 +326,10 @@
             style={`aspect-ratio:${Math.max(1, boardPageWmm)}/${Math.max(1, boardPageHmm)}; transform: translateZ(0);`}
             aria-label="ChArUco board preview"
           >
-            <a
+            <button
               class="absolute right-2 top-2 z-10 inline-flex h-9 w-9 items-center justify-center rounded border border-surface-800/60 bg-white/95 text-surface-900 shadow-sm transition hover:border-primary-500/50 hover:text-primary-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30"
-              href={boardPdfUrl}
+              type="button"
+              onclick={openBoardPdf}
               aria-label="Download board PDF"
               title={boardFitsOnPaper ? 'Download PDF' : 'Board does not fit on selected paper'}
             >
@@ -332,7 +338,7 @@
                   d="M12 3a1 1 0 0 1 1 1v8.586l2.293-2.293a1 1 0 1 1 1.414 1.414l-4 4a1 1 0 0 1-1.414 0l-4-4a1 1 0 1 1 1.414-1.414L11 12.586V4a1 1 0 0 1 1-1ZM5 19a1 1 0 0 1 1-1h12a1 1 0 1 1 0 2H6a1 1 0 0 1-1-1Z"
                 />
               </svg>
-            </a>
+            </button>
 
             <div class="absolute bottom-2 left-2 z-10 rounded border border-surface-800/50 bg-white/95 px-2 py-1 text-micro font-medium text-surface-900 shadow-sm">
               {boardPaperLabel}

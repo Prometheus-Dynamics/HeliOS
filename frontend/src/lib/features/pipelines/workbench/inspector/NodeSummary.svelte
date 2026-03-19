@@ -32,12 +32,10 @@
 
 {#if nodeWarnings.length > 0}
   <InspectorSection title="Warnings" tone="warning">
-    {#snippet children()}
-      <ul class="space-y-1 text-[0.88rem]">
-        {#each nodeWarnings as warning, index}
-          <li class="leading-snug">{index + 1}. {warning}</li>
-        {/each}
-      </ul>
-    {/snippet}
+    <ul class="space-y-1 text-[0.88rem]">
+      {#each nodeWarnings as warning, index (`${index}:${warning}`)}
+        <li class="leading-snug">{index + 1}. {warning}</li>
+      {/each}
+    </ul>
   </InspectorSection>
 {/if}

@@ -4,7 +4,7 @@ use axum::{Json, Router, extract::Path, response::IntoResponse, routing::get};
 use utoipa::ToSchema;
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/", get(list_limelight_adapters)).route("/:table/status", get(limelight_status)).route("/:table/results", get(limelight_results))
+    Router::new().route("/", get(list_limelight_adapters)).route("/{table}/status", get(limelight_status)).route("/{table}/results", get(limelight_results))
 }
 
 #[derive(Debug, Clone, serde::Serialize, ToSchema)]

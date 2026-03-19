@@ -1,59 +1,37 @@
 <script lang="ts">
 
-  import { onDestroy, onMount, untrack, type Snippet } from 'svelte';
+  import { onDestroy, onMount, untrack, type ComponentProps, type Snippet } from 'svelte';
   import type { PageData } from '../../../../../routes/devices/[cameraId]/$types';
   import { DeviceService, OpenAPI, getHttpClientBase } from '$lib/api/httpClient';
-  import type {
-    CodecInfo,
-    ControlMeta,
-    Interval,
-    Mode,
-    ProbedBackend,
-    StreamInfo,
-    StreamManifest,
-    StreamMetrics
-  } from '$lib/api/httpClient';
+  import { apiFetchResponse } from '$lib/api/core/http';
   import { PipelinesApi } from '$lib/api/pipelinesApi';
-  import { fromApiGraphPlan } from '$lib/features/pipelines/model';
+  import { fromApiGraphPlan } from '$lib/features/pipelines/graphConverters';
   import { serializeGraphPlan } from '$lib/features/pipelines/graph';
   import { buildDaedalusGraphPatch } from '$lib/features/pipelines/daedalusGraph';
   import { StreamsApi } from '$lib/api/streamsApi';
   import { connectStreamControls } from '$lib/api/streamControls';
-  import type { StreamControlSocket } from '$lib/api/streamControls';
   import { connectStreamUpdates } from '$lib/api/streamUpdates';
   import { resourceTelemetryStore } from '$lib/api/telemetry';
   import { reportError } from '$lib/ui/errorPolicy';
   import { invalidateSWR, invalidateSWRPrefix } from '$lib/utils/swrCache';
-  import { PipelineIcon, StreamMetricsPanel, StreamPreview, toaster } from '$lib';
+  import { toaster } from '$lib';
   import { DEFAULT_PIPELINE_UI } from '$lib/features/pipelines/pipelineUiTypes';
-  import FaIcon from '$lib/components/icons/FaIcon.svelte';
-  import { faCamera } from '@fortawesome/free-solid-svg-icons';
   import { buildNodeValueFromInput, resolveDataTypeKey } from '$lib/features/pipelines/valueFormatting';
-  import CameraPoseTab from '$lib/features/devices/camera/CameraPoseTab.svelte';
-  import CameraStreamTab from '$lib/features/devices/camera/CameraStreamTab.svelte';
-  import CameraControlsTab from '$lib/features/devices/camera/CameraControlsTab.svelte';
-  import CameraMediaTab from '$lib/features/devices/camera/CameraMediaTab.svelte';
-  import CameraPipelinesTab from '$lib/features/devices/camera/CameraPipelinesTab.svelte';
-  import CameraCalibrationTab from '$lib/features/devices/camera/CameraCalibrationTab.svelte';
-  import CalibrationGuidanceOverlay from '$lib/features/devices/camera/CalibrationGuidanceOverlay.svelte';
-  import CameraHeader from '$lib/features/devices/camera/page/CameraHeader.svelte';
-  import CameraStreamSidebar from '$lib/features/devices/camera/page/CameraStreamSidebar.svelte';
-  import CameraPipelineOverrides from '$lib/features/devices/camera/page/CameraPipelineOverrides.svelte';
+  import type CameraPageView from './CameraPageView.svelte';
   import { createCameraStreamState } from './cameraStreamStore.svelte';
   import { createCameraPagePipelineRuntime } from './cameraPagePipelineRuntime.svelte';
   import { createCameraPageCalibrationRuntime } from './cameraPageCalibrationRuntime.svelte';
   import { createCameraStreamLifecycleController } from './cameraStreamLifecycleController';
   import { createCameraStreamPresetController } from './cameraStreamPresetController';
   import { createCameraStreamPresetHelpers } from './cameraStreamPresetHelpers';
-  import { buildCameraPageConstants, buildCameraPageCore, buildCameraPageDerived, buildCameraPageUi } from './cameraPageUiBuilders';
+  import { buildCameraPageConstants, buildCameraPageCore, buildCameraPageDerived } from './cameraPageUiBuilders';
   import { buildCameraTabs } from './cameraPageTabs';
   import { setupStreamViewerResize } from './cameraPageViewHelpers';
   import { createCameraPageControllers } from './cameraPageControllers';
   import {
     DEFAULT_LIBCAMERA_TARGET_FPS,
     PIPELINE_UI_METADATA_KEY,
-    type CameraPageTabId,
-    type CalibrationParams
+    type CameraPageTabId
   } from './cameraPageStateTypes';
   import { backendLabel, buildApiPath, isTimeoutError, modeKey } from './cameraPageHelpers';
   import { resolvePoseCameraRef, normalizeCalibrationSolveResult, extractCurrentCalibrationParams, parseMetadataValue } from './cameraStateUtils';
@@ -79,11 +57,16 @@
     pipelineDataTypeFromTypeExpr,
     registryPortMetadataFor,
     registryPortTypeFor,
+    setRawPipelineUuid,
     safeCloneGraph
   } from './cameraPipelineTuningController';
 
-  const { data, children } = $props<{ data: PageData; children?: Snippet<[ { ctx: unknown } ]> }>();
-  const streamId = data.streamId;
+  type CameraPageCtx = ComponentProps<typeof CameraPageView>['ctx'];
+
+  const { data, children } = $props<{ data: PageData; children?: Snippet<[ { ctx: CameraPageCtx } ]> }>();
+  const streamId = $derived.by(() => data.streamId);
+  const asRecord = (value: unknown): Record<string, unknown> | null =>
+    value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
   const resolveApiBase = (): string => {
     try {
       return `${getHttpClientBase()}/v1`;
@@ -112,7 +95,8 @@
     | 'center_most'
     | 'crosshair';
   const streamState = createCameraStreamState();
-  const CALIBRATION_MODE_PIPELINE_UUID = '00000000-0000-0000-0000-00000000c411';
+  let calibrationModePipelineUuid = $state('');
+  let rawPipelineUuid = $state(RAW_PIPELINE_UUID);
   let streamLookupDebug = $state<string | null>(null);
   let streamApiBase = $state<string | null>(null);
   let descriptor = streamState.stream?.descriptor ?? { modes: [], controls: [] };
@@ -124,7 +108,7 @@
     currentCalibrationParams = extractCurrentCalibrationParams(streamState.manifestState, streamState.stream);
   });
   let refreshFn = async () => {};
-  let awaitStreamUpdatesSocketFn = async (_streamId: string, _timeoutMs?: number) => null;
+  let awaitStreamUpdatesSocketFn: (streamId: string, timeoutMs?: number) => Promise<unknown> = async () => null;
   let scheduleStreamPresetApplyFn = () => {};
   let inputUsageAuditKey = $state<string | null>(null);
   let inputUsageAuditTimer: ReturnType<typeof setTimeout> | null = null;
@@ -140,7 +124,8 @@
     return trimmed.length ? trimmed : null;
   };
 
-  const isCalibrationPipeline = (value: unknown): boolean => normalizePipelineUuid(value) === CALIBRATION_MODE_PIPELINE_UUID;
+  const isCalibrationPipeline = (value: unknown): boolean =>
+    normalizePipelineUuid(value) === normalizePipelineUuid(calibrationModePipelineUuid);
 
   const clampCropValue = (value: number): number => {
     if (!Number.isFinite(value)) return 0;
@@ -176,14 +161,15 @@
 
   const activeStreamResolution = (): { width: number; height: number } | null => {
     const candidates = [
-      (streamState.stream as any)?.manifest?.capture?.mode?.format?.resolution,
-      (streamState.manifestState as any)?.capture?.mode?.format?.resolution,
+      asRecord(asRecord(asRecord(asRecord(asRecord(streamState.stream)?.manifest)?.capture)?.mode)?.format)?.resolution,
+      asRecord(asRecord(asRecord(asRecord(streamState.manifestState)?.capture)?.mode)?.format)?.resolution,
       parseResolutionText(streamState.selectedResolution)
     ];
     for (const candidate of candidates) {
-      if (!candidate || typeof candidate !== 'object') continue;
-      const width = Number((candidate as any).width ?? 0);
-      const height = Number((candidate as any).height ?? 0);
+      const resolution = asRecord(candidate);
+      if (!resolution) continue;
+      const width = Number(resolution.width ?? 0);
+      const height = Number(resolution.height ?? 0);
       if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
         return { width, height };
       }
@@ -264,314 +250,58 @@
     return false;
   };
 
-  const pipelineRuntime = createCameraPagePipelineRuntime({
-    streamId,
-    stream: () => streamState.stream,
-    manifestState: () => streamState.manifestState,
-    streamMetrics: () => streamState.streamMetrics,
-    refresh: () => refreshFn(),
-    scheduleStreamPresetApply: () => scheduleStreamPresetApplyFn(),
-    onExternalLayoutApplied: () => dismissGuidedCalibrationOverlay(),
-    awaitStreamUpdatesSocket: (id, timeoutMs) => awaitStreamUpdatesSocketFn(id, timeoutMs),
-    apiPath,
-    apiBase,
-    PIPELINE_UI_METADATA_KEY,
-    DEFAULT_PIPELINE_UI,
-    RAW_PIPELINE_ID,
-    RAW_LOOPBACK_GRAPH
-  });
+  const pipelineRuntime = untrack(() =>
+    createCameraPagePipelineRuntime({
+      streamId,
+      stream: () => streamState.stream,
+      manifestState: () => streamState.manifestState,
+      streamMetrics: () => streamState.streamMetrics,
+      refresh: () => refreshFn(),
+      scheduleStreamPresetApply: () => scheduleStreamPresetApplyFn(),
+      onExternalLayoutApplied: () => dismissGuidedCalibrationOverlay(),
+      awaitStreamUpdatesSocket: (id, timeoutMs) => awaitStreamUpdatesSocketFn(id, timeoutMs),
+      apiPath,
+      apiBase,
+      PIPELINE_UI_METADATA_KEY,
+      DEFAULT_PIPELINE_UI,
+      RAW_PIPELINE_ID,
+      RAW_LOOPBACK_GRAPH
+    })
+  );
 
   let {
     pipelineState,
-    pipelineRegistrySnapshot,
-    pipelineOutputOptionsCache,
-    pipelineGraphCache,
-    pipelineUiHydratedFor,
-    telemetrySample,
-    activePipelineIds,
-    pipelineGridRowIndices,
-    pipelineGridColumnIndices,
-    pipelineGridIsSingle,
-    pipelineGridIsMultiplex,
-    pipelineAssignFilteredGraphs,
-    pipelineTuningGraph,
-    pipelineTuningUi,
-    pipelineTuningPlan,
-    canShowTuningEngineConfig,
-    pipelineTuningBaseNodeOverrides,
-    pipelineTuningCameraNodeOverrides,
-    pipelineTuningEffectiveNodeOverrides,
-    pipelineTuningNodeDescriptors,
-    normalizePipelineIdForMetrics,
-    activePipelineWireId,
-    pipelineMetricsForId,
-    findOutputNodeMetrics,
-    pipelineDurationMs,
-    formatDurationMs,
-    outputDurationForPipeline,
-    extractGraphOutputPorts,
-    ensurePipelineRegistry,
-    ensurePipelineGraphAndOutputs,
-    ensurePipelineOutputsLoaded,
     outputSelectionForPipeline,
-    isMultiplexLayout,
-    gridHasUnappliedPipelines,
-    isPipelineApplied,
-    buildPipelineLayoutPayload,
-    applyPipelineGraphForId,
-    applyUnappliedPipelines,
-    schedulePipelineLayoutApply,
     setOutputSelectionForPipeline,
-    refreshPipelineGraphs,
-    refreshPipelineOutputs,
-    setLivePipelineOutput,
-    setFrameSourceForPipelineInstance,
-    pipelineLabel,
-    openPipelineAssignModal,
-    closePipelineAssignModal,
-    savePipelineAssignModal,
     dropPipelineEverywhere,
-    applyAssignedPipelineIds,
-    openPipelineRemoveModal,
-    closePipelineRemoveModal,
-    confirmPipelineRemove,
-    setPipelineGridDimensions,
-    gridKey,
-    pipelineForCell,
-    setPipelineForCell,
-    outputKeyForCell,
-    setOutputKeyForCell,
-    handlePipelineDragStart,
-    readDragPayload,
     allowDrop,
-    dropOnCell,
-    clearCell,
-    hydratePipelineUi,
-    persistPipelineUi,
-    pipelineUiStorageKey,
-    pipelineLayoutSignature,
-    readPipelineInputDraft,
-    readPipelineNodeDraft,
-    setPipelineInputDraft,
-    clearPipelineInputDraft,
-    setPipelineNodeDraft,
-    clearPipelineNodeDraft,
-    setPipelineInputError,
-    setPipelineNodeError,
-    setPipelineInputOverride,
-    setPipelineNodeOverride,
     updatePipelineInputDraft,
     updatePipelineNodeDraft,
     updatePipelineNodeValue,
-    schedulePipelineTuningApply,
-    applyPipelineTuningOverrides,
-    openPipelineTuningPanel,
-    closePipelineTuningPanel,
-    stopPipelineTuningPointerTracking,
-    startPipelineTuningPointerTracking,
-    onPipelineTuningPointerMove,
-    onPipelineTuningPointerUp,
-    startPipelineTuningDrag,
-    startPipelineTuningResize,
-    applyPipelineOverridesToGraph,
-    nodeValueSignature,
-    pipelineOverrideSignature,
-    clamp,
-    pipelineGraphs,
-    pipelineGraphLoading,
-    pipelineGraphError,
-    selectedPipelineId,
-    pipelineOutputOptions,
-    selectedPipelineOutput,
-    selectedPipelineGraph,
-    assignedPipelineIds,
-    pipelineOutputByPipelineId,
-    pipelineAssignModalOpen,
-    pipelineAssignDraft,
-    pipelineAssignQuery,
-    pipelineGridRows,
-    pipelineGridColumns,
-    pipelineGridSlots,
-    pipelineGridSlotOutputKeys,
-    pipelineUiHydrated,
-    pipelineDragPayload,
-    pipelineLayoutTouched,
-    pipelineRemoveModalOpen,
-    pipelineRemoveCandidateId,
-    pipelineTuningPanelOpen,
-    pipelineTuningPipelineId,
-    pipelineTuningEngineConfigOpen,
-    pipelineTuningDragState,
-    pipelineTuningResizeState,
-    pipelineTuningPosition,
-    pipelineTuningSize,
-    pipelineTuningLoading,
-    pipelineTuningError,
-    pipelineInputOverridesById,
-    pipelineNodeOverridesById,
-    pipelineInputDraftsById,
-    pipelineNodeDraftsById,
-    pipelineInputErrorsById,
-    pipelineNodeErrorsById,
-    pipelineTuningApplyBusy,
-    pipelineTuningApplyQueuedById,
-    pipelineTuningLastAppliedSignatureById,
-    pipelineTuningLastAppliedNodeOverridesById,
-    PIPELINE_LAYOUT_DEBOUNCE_MS,
-    pipelineLayoutApplyTimer,
-    pipelineTuningApplyRafById
+    applyPipelineOverridesToGraph
   } = pipelineRuntime;
   $effect(() => {
     ({
       pipelineState,
-      pipelineRegistrySnapshot,
-      pipelineOutputOptionsCache,
-      pipelineGraphCache,
-      pipelineUiHydratedFor,
-      telemetrySample,
-      activePipelineIds,
-      pipelineGridRowIndices,
-      pipelineGridColumnIndices,
-      pipelineGridIsSingle,
-      pipelineGridIsMultiplex,
-      pipelineAssignFilteredGraphs,
-      pipelineTuningGraph,
-      pipelineTuningUi,
-      pipelineTuningPlan,
-      canShowTuningEngineConfig,
-      pipelineTuningBaseNodeOverrides,
-      pipelineTuningCameraNodeOverrides,
-      pipelineTuningEffectiveNodeOverrides,
-      pipelineTuningNodeDescriptors,
-      normalizePipelineIdForMetrics,
-      activePipelineWireId,
-      pipelineMetricsForId,
-      findOutputNodeMetrics,
-      pipelineDurationMs,
-      formatDurationMs,
-      outputDurationForPipeline,
-      extractGraphOutputPorts,
-      ensurePipelineRegistry,
-      ensurePipelineGraphAndOutputs,
-      ensurePipelineOutputsLoaded,
       outputSelectionForPipeline,
-      isMultiplexLayout,
-      gridHasUnappliedPipelines,
-      isPipelineApplied,
-      buildPipelineLayoutPayload,
-      applyPipelineGraphForId,
-      applyUnappliedPipelines,
-      schedulePipelineLayoutApply,
       setOutputSelectionForPipeline,
-      refreshPipelineGraphs,
-      refreshPipelineOutputs,
-      setLivePipelineOutput,
-      setFrameSourceForPipelineInstance,
-      pipelineLabel,
-      openPipelineAssignModal,
-      closePipelineAssignModal,
-      savePipelineAssignModal,
       dropPipelineEverywhere,
-      applyAssignedPipelineIds,
-      openPipelineRemoveModal,
-      closePipelineRemoveModal,
-      confirmPipelineRemove,
-      setPipelineGridDimensions,
-      gridKey,
-      pipelineForCell,
-      setPipelineForCell,
-      outputKeyForCell,
-      setOutputKeyForCell,
-      handlePipelineDragStart,
-      readDragPayload,
       allowDrop,
-      dropOnCell,
-      clearCell,
-      hydratePipelineUi,
-      persistPipelineUi,
-      pipelineUiStorageKey,
-      pipelineLayoutSignature,
-      readPipelineInputDraft,
-      readPipelineNodeDraft,
-      setPipelineInputDraft,
-      clearPipelineInputDraft,
-      setPipelineNodeDraft,
-      clearPipelineNodeDraft,
-      setPipelineInputError,
-      setPipelineNodeError,
-      setPipelineInputOverride,
-      setPipelineNodeOverride,
       updatePipelineInputDraft,
       updatePipelineNodeDraft,
       updatePipelineNodeValue,
-      schedulePipelineTuningApply,
-      applyPipelineTuningOverrides,
-      openPipelineTuningPanel,
-      closePipelineTuningPanel,
-      stopPipelineTuningPointerTracking,
-      startPipelineTuningPointerTracking,
-      onPipelineTuningPointerMove,
-      onPipelineTuningPointerUp,
-      startPipelineTuningDrag,
-      startPipelineTuningResize,
-      applyPipelineOverridesToGraph,
-      nodeValueSignature,
-      pipelineOverrideSignature,
-      clamp,
-      pipelineGraphs,
-      pipelineGraphLoading,
-      pipelineGraphError,
-      selectedPipelineId,
-      pipelineOutputOptions,
-      selectedPipelineOutput,
-      selectedPipelineGraph,
-      assignedPipelineIds,
-      pipelineOutputByPipelineId,
-      pipelineAssignModalOpen,
-      pipelineAssignDraft,
-      pipelineAssignQuery,
-      pipelineGridRows,
-      pipelineGridColumns,
-      pipelineGridSlots,
-      pipelineGridSlotOutputKeys,
-      pipelineUiHydrated,
-      pipelineDragPayload,
-      pipelineLayoutTouched,
-      pipelineRemoveModalOpen,
-      pipelineRemoveCandidateId,
-      pipelineTuningPanelOpen,
-      pipelineTuningPipelineId,
-      pipelineTuningEngineConfigOpen,
-      pipelineTuningDragState,
-      pipelineTuningResizeState,
-      pipelineTuningPosition,
-      pipelineTuningSize,
-      pipelineTuningLoading,
-      pipelineTuningError,
-      pipelineInputOverridesById,
-      pipelineNodeOverridesById,
-      pipelineInputDraftsById,
-      pipelineNodeDraftsById,
-      pipelineInputErrorsById,
-      pipelineNodeErrorsById,
-      pipelineTuningApplyBusy,
-      pipelineTuningApplyQueuedById,
-      pipelineTuningLastAppliedSignatureById,
-      pipelineTuningLastAppliedNodeOverridesById,
-      PIPELINE_LAYOUT_DEBOUNCE_MS,
-      pipelineLayoutApplyTimer,
-      pipelineTuningApplyRafById
+      applyPipelineOverridesToGraph
     } = pipelineRuntime);
   });
 
   let closeControlSocket = () => {};
-  let ensureControlSocket = (_streamId: string) => {};
+  let ensureControlSocket: (streamId: string) => void = () => {};
   let closeStreamUpdatesSocket = () => {};
-  let ensureStreamUpdatesSocket = (_streamId: string) => {};
+  let ensureStreamUpdatesSocket: (streamId: string) => void = () => {};
   let stopStream = async () => {};
 
   const parseManifestLayout = (layout: unknown) =>
-    parsePipelineManifestLayout(layout, { rawPipelineId: RAW_PIPELINE_ID, rawPipelineUuid: RAW_PIPELINE_UUID });
+    parsePipelineManifestLayout(layout, { rawPipelineId: RAW_PIPELINE_ID, rawPipelineUuid });
 
   const pipelineStateBindings = {
     get pipelineGridRows() {
@@ -970,24 +700,26 @@
     }
   });
 
-  const { modeController, controlController, backendController } = createCameraPageControllers({
-    streamState,
-    streamId,
-    StreamsApi,
-    toaster,
-    reportError,
-    modeKey,
-    mediaFormatMatches,
-    intervalToFps,
-    frameRateToFps,
-    normalizeFpsLimit,
-    normalizeRotationDegrees,
-    parseManifestLayout,
-    outputSelectionForPipeline,
-    setOutputSelectionForPipeline,
-    DEFAULT_LIBCAMERA_TARGET_FPS,
-    pipelineState: pipelineStateBindings
-  });
+  const { modeController, controlController, backendController } = untrack(() =>
+    createCameraPageControllers({
+      streamState,
+      streamId,
+      StreamsApi,
+      toaster,
+      reportError,
+      modeKey,
+      mediaFormatMatches,
+      intervalToFps,
+      frameRateToFps,
+      normalizeFpsLimit,
+      normalizeRotationDegrees,
+      parseManifestLayout,
+      outputSelectionForPipeline,
+      setOutputSelectionForPipeline,
+      DEFAULT_LIBCAMERA_TARGET_FPS,
+      pipelineState: pipelineStateBindings
+    })
+  );
 
   const {
     effectiveModes,
@@ -1010,39 +742,26 @@
   let streamViewerHost = $state<HTMLDivElement | null>(null);
   let streamViewerBounds = $state({ width: 0, height: 0 });
 
-  const calibrationRuntime = createCameraPageCalibrationRuntime({
-    streamId,
-    stream: () => streamState.stream,
-    apiPath,
-    refresh
-  });
+  const calibrationRuntime = untrack(() =>
+    createCameraPageCalibrationRuntime({
+      streamId,
+      stream: () => streamState.stream,
+      apiPath,
+      refresh
+    })
+  );
 
   const {
     calibrationState,
     mediaTabReady,
-    benchmarkReady,
     refreshIpaStatus,
-    applyIpaCcm,
-    openCalibrationPreview,
-    closeCalibrationPreview,
-    openIpaChartSolverForImage,
-    closeIpaChartSolver,
-    addIpaChartCorner,
-    solveIpaChartCcm,
-    setGuidedCalibrationMode,
-    resetGuidedCalibrationCoverage,
-    setCalibrationOwnPhotosOnly,
     refreshCalibrationImages,
     refreshCalibrationImportSources,
-    takeCalibrationSnapshot,
-    deleteCalibrationSnapshot,
-    solveCalibration,
-    saveSolvedCalibration
   } = calibrationRuntime;
 
   let lastGuidedModeFromManifest: boolean | null = null;
   $effect(() => {
-    const manifest = streamState.manifestState ?? ((streamState.stream as any)?.manifest ?? null);
+    const manifest = streamState.manifestState ?? asRecord(streamState.stream)?.manifest ?? null;
     const manifestGuided = guidedModeFromManifest(manifest);
     if (manifestGuided === null || manifestGuided === lastGuidedModeFromManifest) return;
     const wasGuided = lastGuidedModeFromManifest === true;
@@ -1084,11 +803,28 @@
 
   const tabs: Array<{ id: TabId; label: string; ready: boolean }> = buildCameraTabs(mediaTabReady);
 
-  onMount(() =>
-    setupStreamViewerResize(streamViewerHost, (bounds) => {
+  const loadStreamCapabilities = async (): Promise<void> => {
+    try {
+      const capabilities = await StreamsApi.streamCapabilities();
+      const rawId = normalizePipelineUuid(capabilities?.rawPipelineId);
+      if (rawId) {
+        rawPipelineUuid = setRawPipelineUuid(rawId);
+      }
+      const calibrationId = normalizePipelineUuid(capabilities?.calibrationModePipelineId);
+      if (calibrationId) {
+        calibrationModePipelineUuid = calibrationId;
+      }
+    } catch {
+      // Keep previously loaded IDs; avoid local hardcoded fallback IDs.
+    }
+  };
+
+  onMount(() => {
+    void loadStreamCapabilities();
+    return setupStreamViewerResize(streamViewerHost, (bounds) => {
       streamViewerBounds = bounds;
-    })
-  );
+    });
+  });
 
   const {
     timeoutApplyHint,
@@ -1533,7 +1269,7 @@
     streamState.streamCropApplying = true;
 
     try {
-      const response = await fetch(apiPath(`/streams/${encodeURIComponent(effectiveId)}/crop`), {
+      const response = await apiFetchResponse(apiPath(`/streams/${encodeURIComponent(effectiveId)}/crop`), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ crop: normalized })
@@ -1581,7 +1317,7 @@
     const effectiveId = streamState.stream?.id ?? streamId;
     if (!effectiveId) return;
     try {
-      const response = await fetch(apiPath(`/streams/${encodeURIComponent(effectiveId)}/pipeline/input-usage`), {
+      const response = await apiFetchResponse(apiPath(`/streams/${encodeURIComponent(effectiveId)}/pipeline/input-usage`), {
         method: 'GET',
         headers: { accept: 'application/json' }
       });
@@ -1643,7 +1379,7 @@
     streamState.streamCrosshairApplying = true;
 
     try {
-      const response = await fetch(apiPath(`/streams/${encodeURIComponent(effectiveId)}/crosshair`), {
+      const response = await apiFetchResponse(apiPath(`/streams/${encodeURIComponent(effectiveId)}/crosshair`), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ crosshair: normalized, enabled: normalizedEnabled })
@@ -1652,7 +1388,7 @@
         if (response.status === 404) {
           const px = crosshairToPixels(normalized);
           if (px) {
-            const fallbackResponse = await fetch(apiPath(`/streams/${encodeURIComponent(effectiveId)}/pipeline/inputs`), {
+            const fallbackResponse = await apiFetchResponse(apiPath(`/streams/${encodeURIComponent(effectiveId)}/pipeline/inputs`), {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({
@@ -1719,7 +1455,7 @@
     streamState.streamOrderingApplying = true;
 
     try {
-      const response = await fetch(apiPath(`/streams/${encodeURIComponent(effectiveId)}/ordering`), {
+      const response = await apiFetchResponse(apiPath(`/streams/${encodeURIComponent(effectiveId)}/ordering`), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ mode: normalized })
@@ -1759,15 +1495,17 @@
 
   $effect(() => {
     const effectiveId = streamState.stream?.id ?? streamId;
-    const manifest = streamState.manifestState ?? ((streamState.stream as any)?.manifest ?? null);
-    const activePipelineId = String((manifest as any)?.active_pipeline_id ?? '');
-    const pipelines = Array.isArray((manifest as any)?.pipelines) ? (manifest as any).pipelines : [];
+    const manifest = streamState.manifestState ?? asRecord(streamState.stream)?.manifest ?? null;
+    const manifestRecord = asRecord(manifest);
+    const activePipelineId = String(manifestRecord?.active_pipeline_id ?? '');
+    const pipelines = Array.isArray(manifestRecord?.pipelines) ? manifestRecord.pipelines : [];
     const pipelineSignature = pipelines
-      .map((binding: any) => {
-        const id = String(binding?.pipeline_id ?? '');
-        const hasPatch = binding?.pipeline_patch ? '1' : '0';
-        const hasInlineGraph = binding?.pipeline_graph ? '1' : '0';
-        const output = String(binding?.pipeline_output ?? '');
+      .map((binding) => {
+        const bindingRecord = asRecord(binding);
+        const id = String(bindingRecord?.pipeline_id ?? '');
+        const hasPatch = bindingRecord?.pipeline_patch ? '1' : '0';
+        const hasInlineGraph = bindingRecord?.pipeline_graph ? '1' : '0';
+        const output = String(bindingRecord?.pipeline_output ?? '');
         return `${id}:${hasPatch}:${hasInlineGraph}:${output}`;
       })
       .join('|');
@@ -1850,34 +1588,18 @@
     })
   );
 
-  const ui = buildCameraPageUi({
-    CalibrationGuidanceOverlay,
-    CameraCalibrationTab,
-    CameraControlsTab,
-    CameraHeader,
-    CameraMediaTab,
-    CameraPipelineOverrides,
-    CameraPipelinesTab,
-    CameraPoseTab,
-    CameraStreamSidebar,
-    CameraStreamTab,
-    PipelineIcon,
-    StreamMetricsPanel,
-    StreamPreview,
-    FaIcon,
-    faCamera
-  });
-
-  const constants = buildCameraPageConstants({
-    DEFAULT_LIBCAMERA_TARGET_FPS,
-    DEFAULT_PIPELINE_UI,
-    PIPELINE_OUTPUT_CELL_KEY,
-    PIPELINE_UI_METADATA_KEY,
-    PIPELINE_UI_STORAGE_PREFIX,
-    RAW_LOOPBACK_GRAPH,
-    RAW_PIPELINE_ID,
-    RAW_PIPELINE_UUID
-  });
+  const constants = $derived.by(() =>
+    buildCameraPageConstants({
+      DEFAULT_LIBCAMERA_TARGET_FPS,
+      DEFAULT_PIPELINE_UI,
+      PIPELINE_OUTPUT_CELL_KEY,
+      PIPELINE_UI_METADATA_KEY,
+      PIPELINE_UI_STORAGE_PREFIX,
+      RAW_LOOPBACK_GRAPH,
+      RAW_PIPELINE_ID,
+      RAW_PIPELINE_UUID: rawPipelineUuid
+    })
+  );
 
   const services = {
       OpenAPI,
@@ -2003,19 +1725,20 @@
     
   };
 
-  const ctx = $derived.by(() => ({
-    ...core,
-    ...streamState,
-    ...pipelineRuntime,
-    ...calibrationRuntime,
-    ...ui,
-    ...constants,
-    ...services,
-    ...helpers,
-    ...derivedState,
-    streamBindings,
-    pipelineBindings
-  }));
+  const mergeCtxParts = (...sources: object[]): CameraPageCtx => {
+    const merged: Record<string, unknown> = {};
+    for (const source of sources) {
+      Object.defineProperties(merged, Object.getOwnPropertyDescriptors(source));
+    }
+    return merged as CameraPageCtx;
+  };
+
+  const ctx = $derived.by(() =>
+    mergeCtxParts(core, streamState, pipelineRuntime, calibrationRuntime, constants, services, helpers, derivedState, {
+      streamBindings,
+      pipelineBindings
+    })
+  );
 
 </script>
 

@@ -13,7 +13,7 @@ Most of the OS flows map to the same loop:
 - **Streams** capture frames (and optionally record/capture-last).
 - **Pipelines** run transforms/inference and produce outputs.
 - **Systems** tells you what the device is doing right now (logs, console, processes, sensors).
-- **Media** stores recordings/snapshots for replay and export.
+- **Media** stores recordings, captures, and uploaded assets for replay and export.
 
 ## Quick Paths
 

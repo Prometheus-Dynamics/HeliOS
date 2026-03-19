@@ -2,7 +2,7 @@
 title: Networking
 ---
 
-Networking is where you set the device identity (hostname/team number), configure network interfaces (DHCP/static), and configure NetworkTables (NT4).
+Networking is where you set device identity, manage interface addressing, and configure NetworkTables (NT4) integration behavior.
 
 ## Identity (Hostname + Team)
 
@@ -44,8 +44,8 @@ Notes:
   - **Gateway**
 - When **Dynamic (DHCP)** is selected and the device has a lease, the UI shows the current lease (address/prefix and optional gateway) so you can confirm what the device actually received.
 - Buttons:
-  - **Request lease** (DHCP)
-  - **Apply static** (Static)
+  - **Persist changes** for identity
+  - **Apply addressing** for the selected interface
 
 ## NetworkTables (NT4)
 
@@ -55,6 +55,8 @@ HeliOS can connect to an NT4 server (commonly the roboRIO) and publish/subscribe
 
 - **Enable NT4 publishing**: toggles publishing from the device to the NT4 server.
 - **Enable NT4 subscriptions**: toggles subscription reads (required for the Explorer).
+- **Emulate Limelight API**: exposes Limelight-style NT4 integration data when enabled.
+- **Emulate PhotonVision API**: exposes PhotonVision-style NT4 integration data when enabled.
 - **Server host override**: if empty, the UI uses the derived roboRIO host from your team number (when available).
 - **Server port**: defaults to `5810`.
 
@@ -72,13 +74,10 @@ HeliOS can connect to an NT4 server (commonly the roboRIO) and publish/subscribe
 ### Public URLs
 
 - **Public API URL (optional)**: a URL you want published for other systems to call the device API.
-- **Public UI URL**: published automatically by the device (the UI describes this as the device IP plus the API port).
+- **Public UI URL**: published automatically by the device from its reported network identity.
 
-### NT4 Explorer
+### Explorer Availability
 
-The Explorer button is disabled unless:
+The NT4 Explorer implementation still exists in the stack, but the current Settings UI build keeps it hidden.
 
-- **Enable NT4 subscriptions** is on, and
-- the UI has an effective NT4 host (team number derived host or a server host override).
-
-When opened, the Explorer periodically scans topics and lets you read individual topic values.
+Treat the Networking tab as the place to configure NT4 connection behavior and protocol emulation, not as a live topic browser.

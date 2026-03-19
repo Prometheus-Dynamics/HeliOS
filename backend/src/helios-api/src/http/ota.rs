@@ -1,40 +1,32 @@
 use std::{
     env,
-    future::Future,
     path::{Path, PathBuf},
-    sync::Arc,
-    time::Duration,
 };
 
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, Multipart, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, post},
 };
-use helios_updater::client::CommandId;
-use helios_updater::ipc::{UpdateState, UpdaterCommand, UpdaterEvent};
+use helios_updater::ipc::{UpdateState, UpdaterCommand};
 use helios_updater::{ManifestArtifact, ReleaseManifest};
-use lib_ipc::protocol::ControlEvent;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
-use tokio::time::timeout;
 use tracing::warn;
 use url::Url;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use crate::ipc;
-use crate::ipc::command_id_from_context;
-use crate::ipc::updater::UpdaterConnection;
-
 use super::AppState;
 use super::media::{MediaMetadata, write_media_metadata};
 use super::storage::{self, sanitize_name};
+use super::upload_integrity;
+use crate::ipc::command_id_from_context;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -91,6 +83,8 @@ pub struct ApplyUpdateRequest {
     pub size_bytes: Option<u64>,
     #[serde(default)]
     pub checksum: Option<String>,
+    #[serde(default = "default_true")]
+    pub delete_image_after_apply: bool,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -120,17 +114,31 @@ pub struct UpdateStateResponse {
         (status = 500, description = "Storage error", body = UploadUpdateError)
     )
 )]
-pub async fn upload_update(mut multipart: Multipart) -> impl IntoResponse {
+pub async fn upload_update(headers: HeaderMap, mut multipart: Multipart) -> impl IntoResponse {
     let media_dir = match storage::ensure_subdir("media") {
         Ok(dir) => dir,
         Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(UploadUpdateError { error: err.to_string() })).into_response(),
     };
+    let expected_upload_bytes = match upload_integrity::expected_upload_bytes(&headers) {
+        Ok(value) => value,
+        Err(err) => return (StatusCode::BAD_REQUEST, Json(UploadUpdateError { error: err })).into_response(),
+    };
 
     let mut uploaded: Option<UploadedTemp> = None;
 
-    while let Ok(Some(field)) = multipart.next_field().await {
+    loop {
+        let next = match multipart.next_field().await {
+            Ok(next) => next,
+            Err(err) => return (StatusCode::BAD_REQUEST, Json(UploadUpdateError { error: format!("failed to read upload payload: {err}") })).into_response(),
+        };
+        let Some(field) = next else {
+            break;
+        };
         if let Some("file") = field.name() {
-            match process_upload_field(field).await {
+            if uploaded.is_some() {
+                return (StatusCode::BAD_REQUEST, Json(UploadUpdateError { error: "only one file may be uploaded per request".into() })).into_response();
+            }
+            match process_upload_field(field, expected_upload_bytes).await {
                 Ok(info) => uploaded = Some(info),
                 Err(err) => {
                     return (StatusCode::BAD_REQUEST, Json(UploadUpdateError { error: err })).into_response();
@@ -149,7 +157,10 @@ pub async fn upload_update(mut multipart: Multipart) -> impl IntoResponse {
     let original_name = upload.filename.clone();
     let filename = match unique_media_name(&media_dir, &upload.filename).await {
         Ok(name) => name,
-        Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(UploadUpdateError { error: err.to_string() })).into_response(),
+        Err(err) => {
+            let _ = fs::remove_file(&upload.temp_path).await;
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(UploadUpdateError { error: err.to_string() })).into_response();
+        }
     };
     let image_path = media_dir.join(&filename);
     if let Some(parent) = image_path.parent() {
@@ -166,6 +177,7 @@ pub async fn upload_update(mut multipart: Multipart) -> impl IntoResponse {
             }
             let _ = fs::remove_file(&upload.temp_path).await;
         } else {
+            let _ = fs::remove_file(&upload.temp_path).await;
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(UploadUpdateError { error: format!("failed to store upload: {err}") })).into_response();
         }
     }
@@ -217,7 +229,7 @@ pub async fn apply_update(State(state): State<AppState>, Json(payload): Json<App
     let Some(image_url) = payload.image_url.as_deref() else {
         return (StatusCode::BAD_REQUEST, Json(UploadUpdateError { error: "image_url is required (staging removed)".into() })).into_response();
     };
-    let update_id = match stage_update_for_auto_apply(&state, image_url, payload.size_bytes, payload.checksum.as_deref()).await {
+    let update_id = match stage_update_for_auto_apply(&state, image_url, payload.size_bytes, payload.checksum.as_deref(), payload.delete_image_after_apply).await {
         Ok(update_id) => update_id,
         Err(err) => return err.into_response(),
     };
@@ -257,9 +269,9 @@ pub async fn cancel_update(State(state): State<AppState>, Json(payload): Json<Ca
     };
 
     let command = UpdaterCommand::Cancel { command_id: command_id_from_context("ota_cancel"), update_id };
-    match send_updater_command(&state, command, true).await {
+    match state.services.updater.send_updater_command(&state, command, true).await {
         Ok(_) => (StatusCode::OK, Json(UpdateAckResponse { update_id: Some(update_id.to_string()), message: "update canceled".into() })).into_response(),
-        Err(err) => err.into_response(),
+        Err(error) => UploadUpdateError { error }.into_response(),
     }
 }
 
@@ -282,7 +294,7 @@ async fn stop_streams_for_update(state: &AppState) -> Option<usize> {
     Some(stopped)
 }
 
-async fn stage_update_for_auto_apply(state: &AppState, image_url: &str, size_bytes: Option<u64>, checksum: Option<&str>) -> Result<Uuid, UploadUpdateError> {
+async fn stage_update_for_auto_apply(state: &AppState, image_url: &str, size_bytes: Option<u64>, checksum: Option<&str>, delete_image_after_apply: bool) -> Result<Uuid, UploadUpdateError> {
     let image_url = Url::parse(image_url.trim()).map_err(|_| UploadUpdateError { error: "invalid image_url".into() })?;
 
     let mut artifact = ManifestArtifact { url: image_url.clone(), filename: None, size_bytes, sha256: checksum.map(|s| s.to_string()), signature: None, kind: Some("disk-image".into()) };
@@ -298,11 +310,50 @@ async fn stage_update_for_auto_apply(state: &AppState, image_url: &str, size_byt
     }
 
     let update_id = Uuid::new_v4();
-    let metadata_json = serde_json::json!({ "auto_apply": true }).to_string();
+    let source_media_path = source_media_path_for_image_url(&image_url).await;
+    let metadata_json = serde_json::json!({
+        "auto_apply": true,
+        "delete_image_after_apply": delete_image_after_apply,
+        "source_media_path": source_media_path,
+    })
+    .to_string();
     let manifest = ReleaseManifest { update_id: Some(update_id), version: None, artifacts: vec![artifact], metadata_json };
     let command = UpdaterCommand::StageRelease { command_id: command_id_from_context("ota_stage_apply"), update_id, manifest };
-    send_updater_command(state, command, true).await?;
+    state.services.updater.send_updater_command(state, command, true).await.map_err(|error| UploadUpdateError { error })?;
     Ok(update_id)
+}
+
+async fn source_media_path_for_image_url(image_url: &Url) -> Option<String> {
+    let media_dir = storage::ensure_subdir_async("media").await.ok()?;
+
+    if image_url.scheme() == "file" {
+        let source_path = image_url.to_file_path().ok()?;
+        let file_name = source_path.file_name()?.to_str()?;
+        let sanitized = sanitize_name(file_name)?;
+        let candidate = media_dir.join(&sanitized);
+        if source_path == candidate {
+            return Some(candidate.to_string_lossy().to_string());
+        }
+        return None;
+    }
+
+    if image_url.scheme() != "http" && image_url.scheme() != "https" {
+        return None;
+    }
+
+    let segments: Vec<&str> = image_url.path_segments().map(|it| it.collect()).unwrap_or_default();
+    for (index, segment) in segments.iter().enumerate() {
+        if !segment.eq_ignore_ascii_case("media") {
+            continue;
+        }
+        if segments.len() != index + 2 {
+            continue;
+        }
+        let file_name = sanitize_name(segments[index + 1])?;
+        return Some(media_dir.join(file_name).to_string_lossy().to_string());
+    }
+
+    None
 }
 
 #[utoipa::path(
@@ -332,7 +383,7 @@ struct UploadedTemp {
     sha256: String,
 }
 
-async fn process_upload_field(mut field: axum::extract::multipart::Field<'_>) -> Result<UploadedTemp, String> {
+async fn process_upload_field(mut field: axum::extract::multipart::Field<'_>, expected_upload_bytes: Option<u64>) -> Result<UploadedTemp, String> {
     let filename = match field.file_name().and_then(sanitize_name) {
         Some(name) => name,
         None => return Err("upload missing filename".into()),
@@ -362,12 +413,23 @@ async fn process_upload_field(mut field: axum::extract::multipart::Field<'_>) ->
         hasher.update(&chunk);
     }
 
-    if let Err(err) = file.flush().await {
+    if let Err(err) = upload_integrity::validate_expected_upload_bytes(written, expected_upload_bytes) {
         let _ = fs::remove_file(&temp_path).await;
-        return Err(format!("failed to finish upload: {err}"));
+        return Err(err);
+    }
+    let stored_bytes = match upload_integrity::finalize_file_upload(&mut file, &temp_path, written).await {
+        Ok(stored_bytes) => stored_bytes,
+        Err(err) => {
+            let _ = fs::remove_file(&temp_path).await;
+            return Err(format!("failed to finish upload: {err}"));
+        }
+    };
+    if let Err(err) = upload_integrity::validate_expected_upload_bytes(stored_bytes, expected_upload_bytes) {
+        let _ = fs::remove_file(&temp_path).await;
+        return Err(err);
     }
     let sha256 = hex::encode(hasher.finalize());
-    Ok(UploadedTemp { filename, temp_path, size_bytes: written, sha256 })
+    Ok(UploadedTemp { filename, temp_path, size_bytes: stored_bytes, sha256 })
 }
 
 async fn unique_media_name(dir: &Path, filename: &str) -> Result<String, std::io::Error> {
@@ -401,95 +463,8 @@ fn append_suffix(filename: &str, suffix: &str, attempt: usize) -> String {
     format!("{filename}-{suffix}")
 }
 
-async fn send_updater_command(state: &AppState, command: UpdaterCommand, wait_for_ack: bool) -> Result<(), UploadUpdateError> {
-    let command_id = command_id(&command);
-    with_updater(state, |conn| async move {
-        let journal = conn.client.journal();
-        let mut session = conn.checkout_session().await.map_err(|err| UploadUpdateError { error: err.to_string() })?;
-
-        journal.append(&command).map_err(|err| UploadUpdateError { error: err.to_string() })?;
-        session.send_command(journal, &command).await.map_err(|err| UploadUpdateError { error: err.to_string() })?;
-
-        if !wait_for_ack {
-            conn.recycle_session(session).await;
-            return Ok(());
-        }
-
-        let deadline = Duration::from_secs(10);
-        let mut attempts = 0;
-        let result = loop {
-            attempts += 1;
-            let event = match timeout(deadline, session.next_event()).await {
-                Ok(Ok(Some(event))) => event,
-                Ok(Ok(None)) => break Err(UploadUpdateError { error: "updater closed connection".into() }),
-                Ok(Err(err)) => break Err(UploadUpdateError { error: err.to_string() }),
-                Err(_) => break Err(UploadUpdateError { error: "timed out waiting for updater response".into() }),
-            };
-
-            match event {
-                UpdaterEvent::Control(ControlEvent::Ack(ack)) if ack.command_id == command_id => break Ok(()),
-                UpdaterEvent::Control(ControlEvent::Nack(nack)) if nack.command_id == command_id => {
-                    break Err(UploadUpdateError { error: nack.reason });
-                }
-                _ => {
-                    if attempts > 32 {
-                        break Err(UploadUpdateError { error: "updater did not acknowledge command".into() });
-                    }
-                }
-            }
-        };
-
-        if result.is_ok() {
-            conn.recycle_session(session).await;
-        }
-        result
-    })
-    .await
-}
-
 async fn fetch_updater_state(state: &AppState) -> Result<(Option<UpdateState>, u64), UploadUpdateError> {
-    with_updater(state, |conn| async move {
-        let journal = conn.client.journal();
-        let command = UpdaterCommand::QueryState { command_id: command_id_from_context("ota_state") };
-        let cmd_id = command_id(&command);
-        let mut session = conn.checkout_session().await.map_err(|err| UploadUpdateError { error: err.to_string() })?;
-        journal.append(&command).map_err(|err| UploadUpdateError { error: err.to_string() })?;
-        session.send_command(journal, &command).await.map_err(|err| UploadUpdateError { error: err.to_string() })?;
-
-        let deadline = Duration::from_secs(5);
-        let result = loop {
-            let event = match timeout(deadline, session.next_event()).await {
-                Ok(Ok(Some(event))) => event,
-                Ok(Ok(None)) => break Err(UploadUpdateError { error: "updater closed connection".into() }),
-                Ok(Err(err)) => break Err(UploadUpdateError { error: err.to_string() }),
-                Err(_) => break Err(UploadUpdateError { error: "timed out waiting for updater state".into() }),
-            };
-
-            match event {
-                UpdaterEvent::StateSnapshot { active_update, cache_usage_bytes } => break Ok((active_update, cache_usage_bytes)),
-                UpdaterEvent::Control(ControlEvent::Nack(nack)) if nack.command_id == cmd_id => {
-                    break Err(UploadUpdateError { error: nack.reason });
-                }
-                _ => continue,
-            }
-        };
-
-        if result.is_ok() {
-            conn.recycle_session(session).await;
-        }
-        result
-    })
-    .await
-}
-
-fn command_id(command: &UpdaterCommand) -> CommandId {
-    match command {
-        UpdaterCommand::StageRelease { command_id, .. }
-        | UpdaterCommand::Cancel { command_id, .. }
-        | UpdaterCommand::ApplyRelease { command_id, .. }
-        | UpdaterCommand::Rollback { command_id, .. }
-        | UpdaterCommand::QueryState { command_id } => *command_id,
-    }
+    state.services.updater.fetch_updater_state(state).await.map_err(|error| UploadUpdateError { error })
 }
 
 fn max_ota_bytes() -> u64 {
@@ -497,35 +472,8 @@ fn max_ota_bytes() -> u64 {
     env::var("HELIOS_OTA_MAX_UPLOAD_MB").ok().and_then(|raw| raw.parse::<u64>().ok()).filter(|v| *v > 0).map(|mb| mb.saturating_mul(1024 * 1024)).unwrap_or(DEFAULT_MB * 1024 * 1024)
 }
 
-async fn with_updater<F, Fut, T>(state: &AppState, f: F) -> Result<T, UploadUpdateError>
-where
-    F: FnOnce(Arc<UpdaterConnection>) -> Fut,
-    Fut: Future<Output = Result<T, UploadUpdateError>>,
-{
-    let conn = {
-        let mut guard = state.updater.lock().await;
-        if let Some(conn) = guard.as_ref() {
-            conn.clone()
-        } else {
-            let conn = Arc::new(ipc::updater::connect_updater().await.map_err(|err| UploadUpdateError { error: err.to_string() })?);
-            *guard = Some(conn.clone());
-            conn
-        }
-    };
-
-    let result = f(conn.clone()).await;
-
-    if result.is_err() {
-        let mut guard = state.updater.lock().await;
-        if let Some(current) = guard.as_ref()
-            && Arc::ptr_eq(current, &conn)
-        {
-            // Force a reconnect on next call after transport/logic errors.
-            *guard = None;
-        }
-    }
-
-    result
+const fn default_true() -> bool {
+    true
 }
 
 impl IntoResponse for UploadUpdateError {

@@ -2,6 +2,6 @@
 passthrough = ["RUSTFLAGS", "SSH_AUTH_SOCK", "CARGO_NET_GIT_FETCH_WITH_CLI"]
 
 [target.aarch64-unknown-linux-gnu]
-# Gaia builds and tags this image via `docker build -t helios-cross ...`.
+# Gaia builds and tags this image via `docker build -t helios-cross-rust194 ...`.
 # Using `image` here avoids `cross` rebuilding the Dockerfile on every invocation.
-image = "helios-cross"
+image = "helios-cross-rust194"

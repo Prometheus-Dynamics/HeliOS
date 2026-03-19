@@ -212,6 +212,7 @@ fn solve_calibration_sync(request: CalibrationSolveRequest) -> Result<Calibratio
         let graph = graph.as_ref().expect("calibration graph missing");
         // Some runtime plans materialize host-output samples one tick later. Run one extra pass
         // before reading detections so per-image calibration solves don't miss outputs.
+        graph.request_output_sample(&detections_port);
         let _frame = graph.process(dyn_img.clone());
         let mut raw = graph.sample_value_output(&detections_port);
         if raw.is_none() {
@@ -816,7 +817,7 @@ fn compact_calibration_graph_error(raw: &str) -> String {
             .find(" on node ")
             .map(|node_idx| {
                 let after_node = &after_port[node_idx + " on node ".len()..];
-                let end = after_node.find(|ch: char| ch == ' ' || ch == '(' || ch == ',' || ch == '"').unwrap_or(after_node.len());
+                let end = after_node.find([' ', '(', ',', '"']).unwrap_or(after_node.len());
                 after_node[..end].trim()
             })
             .unwrap_or_default();

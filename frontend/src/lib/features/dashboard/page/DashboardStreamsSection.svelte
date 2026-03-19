@@ -2,7 +2,7 @@
   import { DashboardStreamsPanel } from '$lib';
   import type { StreamPreviewItem } from '$lib/components/dashboard/DashboardStreamsPanel.svelte';
 
-  type StreamSummary = { live: number; degraded: number; offline: number; idle: number; total: number };
+  type StreamSummary = { live: number; degraded: number; offline: number; total: number };
 
   type Props = {
     streams: StreamPreviewItem[];

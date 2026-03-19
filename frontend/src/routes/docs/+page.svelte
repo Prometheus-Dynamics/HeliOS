@@ -4,6 +4,7 @@
 
 <script lang="ts">
   import { onDestroy } from 'svelte';
+  import { SvelteURL } from 'svelte/reactivity';
 
   let docsFrame = $state<HTMLIFrameElement | null>(null);
   let docsCleanup: (() => void) | null = null;
@@ -15,7 +16,7 @@
   function normalizeDocsHref(href: string, base?: string): string | null {
     try {
       if (href.startsWith('#')) return null;
-      const url = new URL(href, base ?? window.location.origin);
+      const url = new SvelteURL(href, base ?? window.location.origin);
       if (url.origin !== window.location.origin) return null;
       if (!url.pathname.startsWith(docsBasePath)) return null;
 

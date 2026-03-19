@@ -1,5 +1,9 @@
 <script lang="ts">
-  const sections = [
+  import { resolve } from '$app/paths';
+
+  type SectionRoute = '/dashboard' | '/pipelines' | '/devices' | '/media' | '/systems' | '/docs';
+
+  const sections: Array<{ href: SectionRoute; title: string; description: string }> = [
     {
       href: '/dashboard',
       title: 'Dashboard',
@@ -53,7 +57,7 @@
               <p class="text-xs uppercase tracking-wide text-surface-500">{section.href}</p>
               <h2 class="text-xl font-semibold">{section.title}</h2>
             </div>
-            <a class="btn preset-tonal" href={section.href}>Open</a>
+            <a class="btn preset-tonal" href={resolve(section.href)}>Open</a>
           </div>
           <p class="mt-2 text-sm text-surface-400">{section.description}</p>
         </li>

@@ -11,8 +11,10 @@
     applyBusy: boolean;
     isStageInProgress: boolean;
     imageUrl: string;
+    deleteImageAfterApply: boolean;
     onOpenConfirm: () => void;
     onCancelUpdate: () => void;
+    onDeleteImageAfterApplyChange: (enabled: boolean) => void;
   };
 
   const {
@@ -25,8 +27,10 @@
     applyBusy,
     isStageInProgress,
     imageUrl,
+    deleteImageAfterApply,
     onOpenConfirm,
-    onCancelUpdate
+    onCancelUpdate,
+    onDeleteImageAfterApplyChange
   }: UpdaterApplyPanelProps = $props();
 
   export type $$Props = UpdaterApplyPanelProps;
@@ -74,4 +78,12 @@
   <p class="text-xs text-surface-500">
     Selected source: <span class="text-surface-300 break-all">{imageUrl || '—'}</span>
   </p>
+  <label class="flex items-center gap-2 text-xs text-surface-400">
+    <input
+      type="checkbox"
+      checked={deleteImageAfterApply}
+      onchange={(event) => onDeleteImageAfterApplyChange((event.currentTarget as HTMLInputElement).checked)}
+    />
+    <span>Delete source image after successful update.</span>
+  </label>
 </section>

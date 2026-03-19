@@ -2,13 +2,14 @@ use axum::{Json, http::StatusCode, response::IntoResponse};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
-use tokio::fs;
 use tokio::process::Command;
 use utoipa::ToSchema;
 
 use super::super::error::{ApiError, ApiResult, ErrorBody};
+use crate::http::persisted_files;
 
-const USB_POWER_ENV_PATH: &str = "/etc/helios/usb-power.env";
+const USB_POWER_ENV_PATH: &str = "/var/lib/helios/usb-power.env";
+const LEGACY_USB_POWER_ENV_PATH: &str = "/etc/helios/usb-power.env";
 const USB_POWER_SCRIPT_PATH: &str = "/usr/local/bin/helios-usb-power-setup.sh";
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -111,7 +112,7 @@ fn parse_u32(value: Option<&str>) -> Option<u32> {
 }
 
 async fn load_settings() -> UsbPowerSettings {
-    let Ok(raw) = fs::read_to_string(USB_POWER_ENV_PATH).await else {
+    let Ok(raw) = persisted_files::read_to_string(Path::new(USB_POWER_ENV_PATH), Some(Path::new(LEGACY_USB_POWER_ENV_PATH))).await else {
         return UsbPowerSettings::default();
     };
     let env = parse_env_file(&raw);
@@ -131,9 +132,6 @@ async fn load_settings() -> UsbPowerSettings {
 }
 
 async fn persist_settings(settings: &UsbPowerSettings) -> ApiResult<()> {
-    if let Some(parent) = Path::new(USB_POWER_ENV_PATH).parent() {
-        fs::create_dir_all(parent).await.map_err(|err| ApiError::internal(format!("failed to create usb power config directory: {err}")))?;
-    }
     let mut out = String::from("# Updated by API\n");
     out.push_str(&format!("USB_POWER_ENABLED={}\n", if settings.enabled { 1 } else { 0 }));
     if let Some(value) = settings.usb_a_gpio {
@@ -150,7 +148,9 @@ async fn persist_settings(settings: &UsbPowerSettings) -> ApiResult<()> {
     out.push_str(&format!("USB_POWER_DISABLE_AUTOSUSPEND={}\n", if settings.disable_autosuspend { 1 } else { 0 }));
     out.push_str(&format!("USB_POWER_DISABLE_USB2_LPM={}\n", if settings.disable_usb2_lpm { 1 } else { 0 }));
     out.push_str(&format!("USB_POWER_FORCE_POWER_CONTROL_ON={}\n", if settings.force_power_control_on { 1 } else { 0 }));
-    fs::write(USB_POWER_ENV_PATH, out).await.map_err(|err| ApiError::internal(format!("failed to write usb power config: {err}")))?;
+    persisted_files::write_mirrored(Path::new(USB_POWER_ENV_PATH), Some(Path::new(LEGACY_USB_POWER_ENV_PATH)), out.as_bytes())
+        .await
+        .map_err(|err| ApiError::internal(format!("failed to write usb power config: {err}")))?;
     Ok(())
 }
 
@@ -158,7 +158,9 @@ async fn apply_usb_power() -> ApiResult<()> {
     if !Path::new(USB_POWER_SCRIPT_PATH).exists() {
         return Err(ApiError::service_unavailable("usb power setup script not available"));
     }
-    let raw = fs::read_to_string(USB_POWER_ENV_PATH).await.map_err(|err| ApiError::internal(format!("failed to read usb power config: {err}")))?;
+    let raw = persisted_files::read_to_string(Path::new(USB_POWER_ENV_PATH), Some(Path::new(LEGACY_USB_POWER_ENV_PATH)))
+        .await
+        .map_err(|err| ApiError::internal(format!("failed to read usb power config: {err}")))?;
     let env = parse_env_file(&raw);
     let mut cmd = Command::new(USB_POWER_SCRIPT_PATH);
     for (key, value) in env {

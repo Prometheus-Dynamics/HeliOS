@@ -1,12 +1,12 @@
 # Build definition: HeliOS for Raspberry Pi CM5.
 imports = [
   "../workspace/base.toml",
-  "../distros/helios/base.toml",
+  "../distros/helios/squashfs.toml",
   "../platforms/pi/cm5.toml",
 ]
 
 [build]
-version = "v2026.0.0"
+version = "v2026.1.0"
 
 [buildroot]
 # Final copied images directory.

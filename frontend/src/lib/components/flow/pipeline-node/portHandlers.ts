@@ -1,6 +1,6 @@
 import { toaster } from '$lib';
 import { isDataTypeSettable, resolveDataTypeKey } from '$lib/features/pipelines/valueFormatting';
-import type { PipelineDataType, PipelineGraphNode } from '$lib/types/pipeline';
+import type { PipelineGraphNode } from '$lib/types/pipeline';
 import { typeKey } from '../pipeline-graph/utils';
 import { findPixelColorInput } from './pixelInputs';
 import type { PipelineNodeData, PortInteractionHandlers, PortRenderInfo } from './types';

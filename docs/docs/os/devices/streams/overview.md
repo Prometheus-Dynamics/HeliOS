@@ -9,6 +9,7 @@ In the UI:
 
 - **OS > Devices** lists streams as cards (preview + status + quick actions).
 - Clicking a card opens the **stream page** (preview, metrics, pipelines, and per-stream configuration).
+- New streams are usually created through **Quick camera setup**, with an optional advanced registration flow when you need full backend/mode control.
 
 ## What Lives On A Stream
 

@@ -1,17 +1,25 @@
 <script lang="ts" module>
   import type { PipelineNodeValue } from '$lib/types/pipeline';
   import type { PipelineUi } from '$lib/features/pipelines/pipelineUiTypes';
+  import { SvelteMap } from 'svelte/reactivity';
+
+  type PipelineGraphEntry = Record<string, unknown> & {
+    id: string;
+    name?: string | null;
+    issue_count?: number;
+    updated_at_ms?: number;
+  };
 
   export function createCameraPipelineState() {
     const state = $state({
       PIPELINE_LAYOUT_DEBOUNCE_MS: 250,
-      pipelineGraphs: [] as any[],
+      pipelineGraphs: [] as PipelineGraphEntry[],
       pipelineGraphLoading: false,
       pipelineGraphError: null as string | null,
       selectedPipelineId: null as string | null,
       pipelineOutputOptions: [] as string[],
       selectedPipelineOutput: null as string | null,
-      selectedPipelineGraph: null as any | null,
+      selectedPipelineGraph: null as unknown | null,
       assignedPipelineIds: [] as string[],
       pipelineOutputByPipelineId: {} as Record<string, string | null>,
       pipelineAssignModalOpen: false,
@@ -37,8 +45,8 @@
       pipelineTuningLoading: false,
       pipelineTuningError: null as string | null,
       pipelineTuningUiOverride: null as PipelineUi | null,
-      pipelineTuningGraphOverride: null as any | null,
-      pipelineTuningLiveGraph: null as any | null,
+      pipelineTuningGraphOverride: null as unknown | null,
+      pipelineTuningLiveGraph: null as unknown | null,
       pipelineInputOverridesById: {} as Record<string, Record<string, PipelineNodeValue>>,
       pipelineNodeOverridesById: {} as Record<string, Record<string, Record<string, PipelineNodeValue>>>,
       pipelineInputDraftsById: {} as Record<string, Record<string, string>>,
@@ -50,7 +58,7 @@
       pipelineTuningLastAppliedSignatureById: {} as Record<string, string>,
       pipelineTuningLastAppliedNodeOverridesById: {} as Record<string, Record<string, Record<string, PipelineNodeValue>>>,
       pipelineLayoutApplyTimer: null as number | null,
-      pipelineTuningApplyRafById: new Map<string, number>()
+      pipelineTuningApplyRafById: new SvelteMap<string, number>()
     });
     return state;
   }

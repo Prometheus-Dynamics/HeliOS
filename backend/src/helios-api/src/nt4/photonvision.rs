@@ -1,8 +1,8 @@
 use super::photonvision_packet;
 use nt_client::{
-    data::SubscriptionOptions,
-    data::r#type::{NetworkTableData, RawData},
+    data::{NetworkTableData, RawData},
     subscribe::ReceivedMessage,
+    subscribe::SubscriptionOptions,
 };
 use std::{collections::BTreeSet, time::Duration};
 use tokio::time::timeout;
@@ -128,7 +128,7 @@ async fn read_raw(handle: &nt_client::ClientHandle, topic_name: &str, timeout_du
         loop {
             match subscriber.recv().await {
                 Ok(ReceivedMessage::Updated((_topic, value))) => {
-                    let raw = RawData::from_value(&value).map(|raw| raw.0);
+                    let raw = RawData::from_value(value).map(|raw| raw.0);
                     return Ok(raw);
                 }
                 Ok(_) => {}

@@ -37,7 +37,7 @@ Suggested order:
 - "My pipeline runs but I do not see overlays": [Attach pipeline and select output](/guides/pipeline-attach-and-output-select)
 - "I need to inspect numeric/JSON outputs": [Pipeline outputs and debugging](/guides/pipeline-outputs-and-debugging)
 - "I want to keep a preview open while tuning": [Floating stream viewer](/guides/floating-stream-viewer)
-- "I need logs and error history": [Alerts and error history](/guides/alerts-and-error-history), then [Snapshots for support](/guides/snapshots-for-support)
+- "I need logs and error history": [Alerts and error history](/guides/alerts-and-error-history), then [Diagnostics Bundles For Support](/guides/diagnostics-bundles-for-support)
 - "I need to update safely": [Update OS safely](/guides/update-os-safely), then [Firmware bootloader update](/guides/firmware-bootloader-update) if required
 
 ## Where Things Live In The UI
@@ -48,4 +48,4 @@ If you are not sure where a feature is:
 - Attaching pipelines to streams, selecting preview outputs, pipeline outputs viewer: [OS > Devices > Streams](/os/devices/streams/page)
 - Pipeline graph editor, validation, tuning: [OS > Pipelines](/os/pipelines/overview)
 - Alerts menu (Notification Center): [Dashboard](/os/dashboard)
-- Updates, networking, snapshots, restarts: [Settings](/os/settings/overview)
+- Updates, networking, diagnostics, restarts: [Settings](/os/settings/overview)

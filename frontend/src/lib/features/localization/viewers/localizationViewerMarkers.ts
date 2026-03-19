@@ -4,6 +4,7 @@ import type {
   LocalizationMarker,
   PolygonMarker
 } from './localizationViewerTypes';
+import { normalizeArucoBitGrid } from './localizationViewerTagBits';
 
 type MarkerColors = {
   tracking: string;
@@ -203,10 +204,10 @@ function createHeadingArrow(marker: LocalizationMarker): THREE.ArrowHelper | nul
 function ensureArucoTexture(marker: ArucoMarker, deps: MarkerBuildDeps): THREE.Texture | null {
   if (!deps.browser) return null;
   const tagId = marker.tagId ?? marker.id;
-  const bits = marker.tagBits;
-  const bitsKey = bits && bits.rows.length === bits.width ? `${bits.width}:${bits.rows.join('')}` : 'missing-bits';
+  const bits = normalizeArucoBitGrid(marker.tagBits);
+  const bitsKey = bits ? `${bits.width}:${bits.rows.join('')}` : 'missing-bits';
   // Keyed only by bits; `codeRotation` should not affect the rendered reference texture.
-  const cacheKey = `v3:${tagId}-${marker.tagSize ?? 0.6}-${bitsKey}`;
+  const cacheKey = `v4:${tagId}-${marker.tagSize ?? 0.6}-${bitsKey}`;
   const cached = deps.arucoTextureCache.get(cacheKey);
   if (cached) return cached;
 
@@ -222,7 +223,7 @@ function ensureArucoTexture(marker: ArucoMarker, deps: MarkerBuildDeps): THREE.T
 
   const gridWidth = bits?.width ?? 0;
   const rows = bits?.rows ?? [];
-  const safeWidth = Number.isFinite(gridWidth) && gridWidth > 0 && rows.length === gridWidth ? gridWidth : 6;
+  const safeWidth = Number.isFinite(gridWidth) && gridWidth > 0 ? gridWidth : 6;
 
   const margin = Math.round(baseCanvas.width * 0.08);
   const gridSize = baseCanvas.width - margin * 2;
@@ -237,17 +238,7 @@ function ensureArucoTexture(marker: ArucoMarker, deps: MarkerBuildDeps): THREE.T
   context.strokeRect(start, start, gridSize, gridSize);
   context.restore();
 
-  if (safeWidth !== gridWidth || rows.length !== gridWidth) {
-    // Fallback placeholder pattern (checkerboard) to prove texture mapping works.
-    context.fillStyle = '#0f172a';
-    for (let y = 0; y < safeWidth; y += 1) {
-      for (let x = 0; x < safeWidth; x += 1) {
-        if ((x + y) % 2 === 0) {
-          context.fillRect(start + x * cellSize, start + y * cellSize, cellSize, cellSize);
-        }
-      }
-    }
-  } else {
+  if (bits && rows.length === gridWidth) {
     context.fillStyle = '#000000';
     for (let y = 0; y < safeWidth; y += 1) {
       const row = rows[y] ?? '';
@@ -287,15 +278,11 @@ function ensureArucoTexture(marker: ArucoMarker, deps: MarkerBuildDeps): THREE.T
     context.fillText(idLabel, x + padding, y - padding);
     context.restore();
   }
-
-  context.fillStyle = '#38bdf8';
-  context.fillRect(10, 10, 36, 36);
-
   const texture = new THREE.CanvasTexture(baseCanvas);
   texture.needsUpdate = true;
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.generateMipmaps = false;
-  texture.minFilter = THREE.LinearFilter;
+  texture.minFilter = THREE.NearestFilter;
   texture.magFilter = THREE.NearestFilter;
   texture.anisotropy = 8;
   deps.arucoTextureCache.set(cacheKey, texture);

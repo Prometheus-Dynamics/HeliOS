@@ -1,16 +1,24 @@
 <script lang="ts">
   import { browser } from '$app/environment';
   import { onDestroy, onMount } from 'svelte';
-  import { toaster } from '$lib';
+  import { toaster } from '$lib/toaster';
+  import { subscribeDomainInvalidations } from '$lib/api/invalidation';
+  import { apiFetchResponse } from '$lib/api/core/http';
+  import { scheduleAfterPaint, scheduleWhenIdle } from '$lib/utils/browserSchedule';
+  import { apiUrl } from '$lib/api/httpClient';
   import { openStreamMetricsSocket } from '$lib/api/streamMetrics';
   import { StreamsApi } from '$lib/api/streamsApi';
-  import { connectRealtimeUpdatesStream, type RealtimeUpdateEvent } from '$lib/api/realtimeUpdates';
+  import { realtimeUpdateMatchesKind, type RealtimeUpdateEvent } from '$lib/api/realtimeUpdates';
   import { imuQuaternionToThree } from '$lib/utils/imuFrames';
-  import type { StreamInfo, StreamMetrics } from '$lib/ts-bindings/http/client';
-  import type { LocalizationMarker, LocalizationViewMode } from '$lib';
-  import type { PipelineTemplateSummary } from '$lib/types/pipeline';
+  import {
+    LocalizationService,
+    type LocalizationCapabilitiesResponse,
+    type StreamInfo,
+    type StreamMetrics
+  } from '$lib/ts-bindings/http/client';
+  import type { LocalizationMarker, LocalizationViewMode } from '$lib/features/localization/viewers/localizationViewerTypes';
   import type { RigCameraInfo, RobotDimensions } from '$lib/types/rig';
-  import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rig';
+  import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rigDefaults';
   import { rigLayoutStore } from '$lib/stores/rigLayout';
   import { formatMeters, parseLengthToMeters } from '$lib/utils/units';
   import SidebarSearchSection from '$lib/components/filters/SidebarSearchSection.svelte';
@@ -29,16 +37,19 @@
   import { frcOriginDefinition, transformFromFieldCenter, type PlanarFieldOrigin } from '$lib/features/localization/fieldOrigins';
   import {
     fetchPipelineOutputSample,
+    isLocalizationCompatibleSource,
+    isLocalizationDetectionSource,
+    isLocalizationImuSource,
     type LocalizationPipelineSource
   } from '$lib/features/localization/pipelineSources';
-  import {
-    type LocalizationPipelineStatus
-  } from '$lib/features/localization/localizationPipeline';
   import {
     DEFAULT_FIELD_ORIGIN,
     DEFAULT_SOLVER_RUNTIME_TUNING,
     DEFAULT_TEMPORAL_STABILIZATION,
+    fetchLocalizationProfilesExport,
     fetchLocalizationSolve,
+    importLocalizationProfiles as importLocalizationProfilesApi,
+    type LocalizationConfig,
     type LocalizationCustomFieldOrigin,
     type LocalizationDetectionPose,
     type LocalizationFieldOriginConfig,
@@ -47,10 +58,13 @@
     type LocalizationPoseSpace,
     type LocalizationSolveResponse,
     type LocalizationSolverConfig,
+    type LocalizationSolverMode,
     type LocalizationSolverRuntimeTuningConfig,
     type LocalizationSolverOutputs,
     type LocalizationSolverResult,
+    type LocalizationSourceConfig,
     type LocalizationSourceSampleStatus,
+    type LocalizationProfilesExportEnvelope,
     type LocalizationTemporalStabilizationConfig
   } from '$lib/features/localization/localizationConfig';
   import { createLocalizationProfileStore } from '$lib/features/localization/profileStore';
@@ -61,20 +75,20 @@
     type FieldMapDocument,
     type FieldMapSummary
   } from '$lib/features/localization/fieldMaps';
-  import type { CameraExtrinsics, CustomField, CustomFieldOrigin } from '$lib/features/localization/types';
+  import type { CustomField } from '$lib/features/localization/types';
   import { createLocalizationStorageStore } from '$lib/features/localization/storage';
-  import { createFeedPoller, pollIntervalMs } from '$lib/features/localization/feedPoller';
+  import { createFeedPoller, normalizePollHz, pollIntervalMs, type PollRateLimits } from '$lib/features/localization/feedPoller';
   import LocalizationWorkspace from '$lib/features/localization/page/LocalizationWorkspace.svelte';
   import {
     SOURCE_COLORS,
     PROFILE_COLORS,
-    POSE_SPACE_OPTIONS,
     SOLVE_POSE_SPACES,
     DERIVED_POSE_SPACES,
     poseSpaceLabel,
     profileColorForId,
     isSourceCalibrated,
-    cameraKeyForSource
+    cameraKeyForSource,
+    mediaImuParentStreamIdForSource
   } from '$lib/features/localization/utils';
   import {
     toNumber,
@@ -97,7 +111,6 @@
     buildActiveFieldOrigin,
     buildSourceStatusRows,
     buildFieldSceneTransform,
-    buildFieldSpaceLabel,
     buildViewProfileOverlays,
     buildViewerCameraTransforms,
     buildViewerCameras,
@@ -187,39 +200,44 @@
     translation: { x: number; y: number; z: number } | null;
     sampleTimestampMs: number | null;
   };
+  const asRecord = (value: unknown): Record<string, unknown> | null =>
+    value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+  const UUID_LIKE_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const DEFAULT_LOCALIZATION_CALIBRATION = {
+    fx: 608.2823560574243,
+    fy: 610.5489059894065,
+    cx: 638.8193727530946,
+    cy: 397.5372092494376,
+    k1: -0.04766182849174875,
+    k2: -0.023041409826196887,
+    k3: -0.012694098622574222,
+    p1: -0.0027334920956789644,
+    p2: 0,
+    undistortIters: 5,
+    lensModel: 'fisheye'
+  } as const;
   const LOCAL_TAG_POSE_LINGER_MS = 5000;
   const LOCAL_TAG_POSE_REFRESH_MS = 250;
   const FIELD_POSE_LINGER_MS = 5000;
   const FIELD_POSE_REFRESH_MS = 250;
-  const LIVE_UPDATES_RECONNECT_MS = 1_500;
   const LIVE_UPDATES_REFRESH_DEBOUNCE_MS = 400;
   const LIVE_SOURCES_REFRESH_MIN_INTERVAL_MS = 5_000;
-
   const bumperId = '0000';
   let sources = $state<LocalizationPipelineSource[]>([]);
   let sourcesLoading = $state(false);
   let sourcesError = $state<string | null>(null);
-  let sourceCompatibility = $state<Record<string, boolean>>({});
   let selectedSourceIds = $state<string[]>([]);
   let primarySourceId = $state<string | null>(null);
   const localizationProfiles = createLocalizationProfileStore();
   const localizationConfig = localizationProfiles.config;
   const localizationConfigLoading = localizationProfiles.loading;
-  const localizationConfigError = localizationProfiles.error;
   const activeProfileId = localizationProfiles.activeProfileId;
   const profiles = localizationProfiles.profiles;
   const activeProfile = localizationProfiles.activeProfile;
   let solveResponse = $state<LocalizationSolveResponse | null>(null);
   let solveResponsesByProfile = $state<Record<string, LocalizationSolveResponse>>({});
-  let pipelineTemplates = $state<PipelineTemplateSummary[]>([]);
-  let pipelineTemplatesLoading = $state(false);
-  let pipelineTemplatesError = $state<string | null>(null);
-  let pipelineStatus = $state<LocalizationPipelineStatus | null>(null);
-  let pipelineStatusLoading = $state(false);
-  let pipelineStatusError = $state<string | null>(null);
-  let pipelineOutputs = $state<string[]>([]);
-  let pipelineOutputsLoading = $state(false);
-  let pipelineOutputsError = $state<string | null>(null);
+  let localizationCapabilities = $state<LocalizationCapabilitiesResponse | null>(null);
 
   let feedStatus = $state<FeedStatus>('idle');
   let feedMessage = $state<string | null>(null);
@@ -250,6 +268,8 @@
   let pendingProfileDelete = $state<{ id: string; name: string } | null>(null);
   let profileDeleteBusy = $state(false);
   let profileDeleteError = $state<string | null>(null);
+  let profileTransferBusy = $state(false);
+  let profileImportInputEl: HTMLInputElement | null = null;
 
   const localizationStorage = createLocalizationStorageStore();
   const cameraExtrinsics = localizationStorage.cameraExtrinsics;
@@ -262,15 +282,16 @@
   let cameraPoseYawDeg = $state('0');
 
   const {
-    persistLocalizationConfig,
     setProfileColor,
+    setProfileEnabled,
     setProfileViewEnabled,
     persistProfileUpdate,
     setActiveProfile,
     addProfile,
     removeActiveProfile,
     commitProfileName,
-    commitTagSize
+    commitTagSize,
+    commitExcludedTagIds
   } = createLocalizationProfileActions({
     profiles: () => $profiles,
     activeProfile: () => $activeProfile ?? null,
@@ -278,6 +299,10 @@
     tagSizeInput: () => tagSizeInput,
     setTagSizeError: (message) => {
       tagSizeError = message;
+    },
+    excludedTagIdsInput: () => excludedTagIdsInput,
+    setExcludedTagIdsError: (message) => {
+      excludedTagIdsError = message;
     },
     parseLengthToMeters,
     localizationProfiles
@@ -325,6 +350,205 @@
     } finally {
       profileDeleteBusy = false;
     }
+  };
+
+  const buildSourceConfigFromSource = (
+    source: LocalizationPipelineSource,
+    existing: LocalizationSourceConfig | null = null
+  ): LocalizationSourceConfig => ({
+    id: source.id,
+    streamId: source.streamId,
+    outputKey: source.outputKey,
+    cameraUid: source.cameraUid,
+    poseSpace: existing?.poseSpace ?? null,
+    inputKey: existing?.inputKey ?? null,
+    enabled: true,
+    weight: existing?.weight ?? 1
+  });
+
+  const exportLocalizationProfiles = async (): Promise<void> => {
+    profileTransferBusy = true;
+    try {
+      const payload = await fetchLocalizationProfilesExport();
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `localization-profiles-${stamp}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      const description = error instanceof Error ? error.message : 'Profile export failed';
+      toaster.error({
+        title: 'Unable to export profiles',
+        description
+      });
+    } finally {
+      profileTransferBusy = false;
+    }
+  };
+
+  const openImportProfilesDialog = (): void => {
+    profileImportInputEl?.click();
+  };
+
+  const importLocalizationProfiles = async (file: File): Promise<void> => {
+    profileTransferBusy = true;
+    try {
+      const text = await file.text();
+      let parsed: LocalizationProfilesExportEnvelope | LocalizationConfig;
+      try {
+        parsed = JSON.parse(text) as LocalizationProfilesExportEnvelope | LocalizationConfig;
+      } catch {
+        throw new Error('Selected file is not valid JSON.');
+      }
+      const imported = await importLocalizationProfilesApi(parsed);
+      await localizationProfiles.load();
+      await loadSources();
+      await loadStreamsSnapshot();
+      await loadFieldMapList();
+      const profileId = imported.activeProfileId ?? imported.profiles[0]?.id ?? null;
+      await loadPipelineStatus(profileId);
+      if (profileId) {
+        await loadPipelineOutputs(profileId);
+      }
+      toaster.success({
+        title: 'Profiles imported',
+        description: `Loaded ${imported.profiles.length} localization profile(s).`
+      });
+    } catch (error) {
+      const description = error instanceof Error ? error.message : 'Profile import failed';
+      toaster.error({
+        title: 'Unable to import profiles',
+        description
+      });
+    } finally {
+      profileTransferBusy = false;
+      if (profileImportInputEl) {
+        profileImportInputEl.value = '';
+      }
+    }
+  };
+
+  const saveDefaultCalibrationForStreamIfMissing = async (streamId: string): Promise<void> => {
+    const stream = streamInfos.find((entry) => String(entry.id ?? '').trim() === streamId) ?? null;
+    if (!stream) return;
+    const manifest = (stream.manifest as Record<string, unknown>) ?? {};
+    const calibration = manifest.calibration as Record<string, unknown> | null | undefined;
+    if (calibration && typeof calibration === 'object') {
+      return;
+    }
+    const response = await apiFetchResponse(apiUrl(`/streams/${encodeURIComponent(streamId)}/calibration/save`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(DEFAULT_LOCALIZATION_CALIBRATION)
+    });
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new Error(body || `Failed to save default calibration (${response.status})`);
+    }
+  };
+
+  const maybeSeedDefaultLocalizationProfile = async (): Promise<boolean> => {
+    const config = $localizationConfig;
+    if (!config || config.profiles.length !== 1) return false;
+
+    const profile = config.profiles[0] ?? null;
+    if (!profile) return false;
+    const profileId = String(profile.id ?? '').trim().toLowerCase();
+    const profileName = String(profile.name ?? '').trim().toLowerCase();
+    const isDefaultProfile = profileId === 'default' || profileName === 'default';
+    if (!isDefaultProfile) return false;
+
+    const hasSources = (profile.sources ?? []).length > 0;
+    const hasFieldMap = Boolean(String(profile.fieldMapId ?? '').trim());
+    const hasSnapSettings =
+      Boolean(profile.snapZToGround) ||
+      Boolean(profile.snapRollToGround) ||
+      Boolean(profile.snapPitchToGround);
+    // Only seed untouched default profiles so existing user setups are not overwritten.
+    if (hasSources || hasFieldMap || hasSnapSettings) {
+      return false;
+    }
+
+    const streamDetectionSource =
+      sources.find(
+        (source) =>
+          isLocalizationDetectionSource(source) &&
+          !source.streamId.startsWith('profile:') &&
+          !source.streamId.startsWith('peer:') &&
+          !source.streamId.startsWith('external:')
+      ) ?? null;
+    const fallbackDetectionSource = sources.find((source) => isLocalizationDetectionSource(source)) ?? null;
+    const detectionSource = streamDetectionSource ?? fallbackDetectionSource;
+    const imuSource =
+      sources.find((source) => source.streamId.startsWith('external:imu') && isLocalizationImuSource(source)) ??
+      sources.find((source) => isLocalizationImuSource(source)) ??
+      null;
+    const fieldMapId = fieldMaps[0]?.id ?? null;
+
+    if (!detectionSource && !imuSource && !fieldMapId) {
+      return false;
+    }
+
+    const existingById = new Map((profile.sources ?? []).map((entry) => [entry.id, entry]));
+    const seededSources: LocalizationSourceConfig[] = [];
+    const pushSeedSource = (source: LocalizationPipelineSource | null) => {
+      if (!source) return;
+      const current = existingById.get(source.id) ?? null;
+      seededSources.push(buildSourceConfigFromSource(source, current));
+      existingById.delete(source.id);
+    };
+    pushSeedSource(detectionSource);
+    pushSeedSource(imuSource);
+
+    for (const source of existingById.values()) {
+      seededSources.push({ ...source, enabled: true });
+    }
+
+    const nextProfile: LocalizationProfile = {
+      ...profile,
+      fieldMapId,
+      snapZToGround: true,
+      snapRollToGround: true,
+      snapPitchToGround: true,
+      sources: seededSources
+    };
+    const nextConfig: LocalizationConfig = {
+      ...config,
+      activeProfileId: profile.id,
+      profiles: [nextProfile]
+    };
+
+    await localizationProfiles.persist(nextConfig);
+
+    const streamsToSeed = Array.from(
+      new Set(
+        seededSources
+          .map((source) => String(source.streamId ?? '').trim())
+          .filter((streamId) => UUID_LIKE_RE.test(streamId))
+      )
+    );
+    for (const streamId of streamsToSeed) {
+      try {
+        await saveDefaultCalibrationForStreamIfMissing(streamId);
+      } catch (error) {
+        const description = error instanceof Error ? error.message : `Failed to apply default calibration for stream ${streamId}`;
+        toaster.error({
+          title: 'Default calibration not applied',
+          description
+        });
+      }
+    }
+
+    toaster.success({
+      title: 'Localization seeded',
+      description: 'Default profile now uses field map + ArUco + IMU with ground snapping enabled.'
+    });
+    return true;
   };
 
   const normalizeFieldOriginConfig = (
@@ -419,13 +643,13 @@
   };
 
   const temporalFieldParsers = {
-    singleTagTranslationAlpha: { min: 0, max: 1 },
-    singleTagRotationAlpha: { min: 0, max: 1 },
-    multiTagTranslationAlpha: { min: 0, max: 1 },
-    multiTagRotationAlpha: { min: 0, max: 1 },
-    maxTranslationJumpM: { min: 0.01, max: 50 },
-    maxRotationJumpDeg: { min: 0.1, max: 180 },
-    reanchorRejectWindowMs: { min: 50, max: 5000, integer: true }
+    singleTagTranslationAlpha: {},
+    singleTagRotationAlpha: {},
+    multiTagTranslationAlpha: {},
+    multiTagRotationAlpha: {},
+    maxTranslationJumpM: {},
+    maxRotationJumpDeg: {},
+    reanchorRejectWindowMs: { integer: true }
   } as const;
   type TemporalNumericField = keyof typeof temporalFieldParsers;
 
@@ -436,28 +660,49 @@
     settings?: LocalizationTemporalStabilizationConfig | null
   ): LocalizationTemporalStabilizationConfig => {
     const merged = { ...DEFAULT_TEMPORAL_STABILIZATION, ...(settings ?? {}) };
-    const clamp = (value: number, min: number, max: number): number =>
-      Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : min;
+    const numberOrDefault = (value: number, fallback: number): number =>
+      Number.isFinite(value) ? Number(value) : fallback;
     return {
       enabled: Boolean(merged.enabled),
-      singleTagTranslationAlpha: clamp(merged.singleTagTranslationAlpha, 0, 1),
-      singleTagRotationAlpha: clamp(merged.singleTagRotationAlpha, 0, 1),
-      multiTagTranslationAlpha: clamp(merged.multiTagTranslationAlpha, 0, 1),
-      multiTagRotationAlpha: clamp(merged.multiTagRotationAlpha, 0, 1),
-      maxTranslationJumpM: clamp(merged.maxTranslationJumpM, 0.01, 50),
-      maxRotationJumpDeg: clamp(merged.maxRotationJumpDeg, 0.1, 180),
-      reanchorRejectWindowMs: Math.round(clamp(merged.reanchorRejectWindowMs, 50, 5000))
+      singleTagTranslationAlpha: numberOrDefault(
+        merged.singleTagTranslationAlpha,
+        DEFAULT_TEMPORAL_STABILIZATION.singleTagTranslationAlpha
+      ),
+      singleTagRotationAlpha: numberOrDefault(
+        merged.singleTagRotationAlpha,
+        DEFAULT_TEMPORAL_STABILIZATION.singleTagRotationAlpha
+      ),
+      multiTagTranslationAlpha: numberOrDefault(
+        merged.multiTagTranslationAlpha,
+        DEFAULT_TEMPORAL_STABILIZATION.multiTagTranslationAlpha
+      ),
+      multiTagRotationAlpha: numberOrDefault(
+        merged.multiTagRotationAlpha,
+        DEFAULT_TEMPORAL_STABILIZATION.multiTagRotationAlpha
+      ),
+      maxTranslationJumpM: numberOrDefault(
+        merged.maxTranslationJumpM,
+        DEFAULT_TEMPORAL_STABILIZATION.maxTranslationJumpM
+      ),
+      maxRotationJumpDeg: numberOrDefault(
+        merged.maxRotationJumpDeg,
+        DEFAULT_TEMPORAL_STABILIZATION.maxRotationJumpDeg
+      ),
+      reanchorRejectWindowMs: Math.round(
+        numberOrDefault(
+          merged.reanchorRejectWindowMs,
+          DEFAULT_TEMPORAL_STABILIZATION.reanchorRejectWindowMs
+        )
+      )
     };
   };
 
   const parseTemporalNumericValue = (field: TemporalNumericField, rawValue: string): number | null => {
     const parsed = Number(rawValue);
     if (!Number.isFinite(parsed)) return null;
-    const bounds = temporalFieldParsers[field];
-    const { min, max } = bounds;
-    const integer = 'integer' in bounds ? Boolean(bounds.integer) : false;
-    const clamped = Math.min(max, Math.max(min, parsed));
-    return integer ? Math.round(clamped) : clamped;
+    const parser = temporalFieldParsers[field];
+    const integer = 'integer' in parser ? Boolean(parser.integer) : false;
+    return integer ? Math.round(parsed) : parsed;
   };
 
   const setProfileTemporalEnabled = (enabled: boolean): void => {
@@ -533,34 +778,34 @@
   };
 
   const solverRuntimeFieldParsers = {
-    minObservationWeight: { min: 0, max: 5 },
-    minSingleTagSolveWeight: { min: 0, max: 5 },
-    minMultiTagTotalWeight: { min: 0, max: 20 },
-    minMultiTagEffectiveCount: { min: 0, max: 20 },
-    weakSingleTagMargin: { min: 0, max: 5 },
-    coplanarHeightDeltaM: { min: 0, max: 5 },
-    severeObservedHeightDeltaM: { min: 0, max: 10 },
-    moderateObservedHeightDeltaM: { min: 0, max: 10 },
-    mildObservedHeightDeltaM: { min: 0, max: 10 },
-    severePenalty: { min: 0, max: 1 },
-    moderatePenalty: { min: 0, max: 1 },
-    mildPenalty: { min: 0, max: 1 },
-    dtScaleMin: { min: 0.01, max: 20 },
-    dtScaleMax: { min: 0.01, max: 20 },
-    switchedSingleTagMaxTranslationJumpM: { min: 0.001, max: 50 },
-    switchedSingleTagMaxRotationJumpDeg: { min: 0.01, max: 180 },
-    droppedMultiToSingleMaxTranslationJumpM: { min: 0.001, max: 50 },
-    droppedMultiToSingleMaxRotationJumpDeg: { min: 0.01, max: 180 },
-    switchedSingleTagRejectWindowScale: { min: 0.1, max: 10 },
-    switchedSingleTagRejectWindowMinMs: { min: 0, max: 20000, integer: true },
-    droppedMultiToSingleRejectWindowScale: { min: 0.1, max: 10 },
-    droppedMultiToSingleRejectWindowMinMs: { min: 0, max: 20000, integer: true },
-    switchedSingleTagGainDamp: { min: 0, max: 1 },
-    switchedSingleTagMinTranslationGain: { min: 0, max: 1 },
-    switchedSingleTagMinRotationGain: { min: 0, max: 1 },
-    droppedMultiToSingleGainDamp: { min: 0, max: 1 },
-    droppedMultiToSingleMinTranslationGain: { min: 0, max: 1 },
-    droppedMultiToSingleMinRotationGain: { min: 0, max: 1 }
+    minObservationWeight: {},
+    minSingleTagSolveWeight: {},
+    minMultiTagTotalWeight: {},
+    minMultiTagEffectiveCount: {},
+    weakSingleTagMargin: {},
+    coplanarHeightDeltaM: {},
+    severeObservedHeightDeltaM: {},
+    moderateObservedHeightDeltaM: {},
+    mildObservedHeightDeltaM: {},
+    severePenalty: {},
+    moderatePenalty: {},
+    mildPenalty: {},
+    dtScaleMin: {},
+    dtScaleMax: {},
+    switchedSingleTagMaxTranslationJumpM: {},
+    switchedSingleTagMaxRotationJumpDeg: {},
+    droppedMultiToSingleMaxTranslationJumpM: {},
+    droppedMultiToSingleMaxRotationJumpDeg: {},
+    switchedSingleTagRejectWindowScale: {},
+    switchedSingleTagRejectWindowMinMs: { integer: true },
+    droppedMultiToSingleRejectWindowScale: {},
+    droppedMultiToSingleRejectWindowMinMs: { integer: true },
+    switchedSingleTagGainDamp: {},
+    switchedSingleTagMinTranslationGain: {},
+    switchedSingleTagMinRotationGain: {},
+    droppedMultiToSingleGainDamp: {},
+    droppedMultiToSingleMinTranslationGain: {},
+    droppedMultiToSingleMinRotationGain: {}
   } as const;
   type SolverRuntimeNumericField = keyof typeof solverRuntimeFieldParsers;
 
@@ -571,50 +816,122 @@
     settings?: LocalizationSolverRuntimeTuningConfig | null
   ): LocalizationSolverRuntimeTuningConfig => {
     const merged = { ...DEFAULT_SOLVER_RUNTIME_TUNING, ...(settings ?? {}) };
-    const clamp = (value: number, min: number, max: number): number =>
-      Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : min;
-    const dtScaleMin = clamp(merged.dtScaleMin, 0.01, 20);
-    const dtScaleMax = Math.max(dtScaleMin, clamp(merged.dtScaleMax, 0.01, 20));
+    const numberOrDefault = (value: number, fallback: number): number =>
+      Number.isFinite(value) ? Number(value) : fallback;
     return {
-      minObservationWeight: clamp(merged.minObservationWeight, 0, 5),
-      minSingleTagSolveWeight: clamp(merged.minSingleTagSolveWeight, 0, 5),
-      minMultiTagTotalWeight: clamp(merged.minMultiTagTotalWeight, 0, 20),
-      minMultiTagEffectiveCount: clamp(merged.minMultiTagEffectiveCount, 0, 20),
-      weakSingleTagMargin: clamp(merged.weakSingleTagMargin, 0, 5),
-      coplanarHeightDeltaM: clamp(merged.coplanarHeightDeltaM, 0, 5),
-      severeObservedHeightDeltaM: clamp(merged.severeObservedHeightDeltaM, 0, 10),
-      moderateObservedHeightDeltaM: clamp(merged.moderateObservedHeightDeltaM, 0, 10),
-      mildObservedHeightDeltaM: clamp(merged.mildObservedHeightDeltaM, 0, 10),
-      severePenalty: clamp(merged.severePenalty, 0, 1),
-      moderatePenalty: clamp(merged.moderatePenalty, 0, 1),
-      mildPenalty: clamp(merged.mildPenalty, 0, 1),
-      dtScaleMin,
-      dtScaleMax,
-      switchedSingleTagMaxTranslationJumpM: clamp(merged.switchedSingleTagMaxTranslationJumpM, 0.001, 50),
-      switchedSingleTagMaxRotationJumpDeg: clamp(merged.switchedSingleTagMaxRotationJumpDeg, 0.01, 180),
-      droppedMultiToSingleMaxTranslationJumpM: clamp(merged.droppedMultiToSingleMaxTranslationJumpM, 0.001, 50),
-      droppedMultiToSingleMaxRotationJumpDeg: clamp(merged.droppedMultiToSingleMaxRotationJumpDeg, 0.01, 180),
-      switchedSingleTagRejectWindowScale: clamp(merged.switchedSingleTagRejectWindowScale, 0.1, 10),
-      switchedSingleTagRejectWindowMinMs: Math.round(clamp(merged.switchedSingleTagRejectWindowMinMs, 0, 20000)),
-      droppedMultiToSingleRejectWindowScale: clamp(merged.droppedMultiToSingleRejectWindowScale, 0.1, 10),
-      droppedMultiToSingleRejectWindowMinMs: Math.round(clamp(merged.droppedMultiToSingleRejectWindowMinMs, 0, 20000)),
-      switchedSingleTagGainDamp: clamp(merged.switchedSingleTagGainDamp, 0, 1),
-      switchedSingleTagMinTranslationGain: clamp(merged.switchedSingleTagMinTranslationGain, 0, 1),
-      switchedSingleTagMinRotationGain: clamp(merged.switchedSingleTagMinRotationGain, 0, 1),
-      droppedMultiToSingleGainDamp: clamp(merged.droppedMultiToSingleGainDamp, 0, 1),
-      droppedMultiToSingleMinTranslationGain: clamp(merged.droppedMultiToSingleMinTranslationGain, 0, 1),
-      droppedMultiToSingleMinRotationGain: clamp(merged.droppedMultiToSingleMinRotationGain, 0, 1)
+      minObservationWeight: numberOrDefault(
+        merged.minObservationWeight,
+        DEFAULT_SOLVER_RUNTIME_TUNING.minObservationWeight
+      ),
+      minSingleTagSolveWeight: numberOrDefault(
+        merged.minSingleTagSolveWeight,
+        DEFAULT_SOLVER_RUNTIME_TUNING.minSingleTagSolveWeight
+      ),
+      minMultiTagTotalWeight: numberOrDefault(
+        merged.minMultiTagTotalWeight,
+        DEFAULT_SOLVER_RUNTIME_TUNING.minMultiTagTotalWeight
+      ),
+      minMultiTagEffectiveCount: numberOrDefault(
+        merged.minMultiTagEffectiveCount,
+        DEFAULT_SOLVER_RUNTIME_TUNING.minMultiTagEffectiveCount
+      ),
+      weakSingleTagMargin: numberOrDefault(
+        merged.weakSingleTagMargin,
+        DEFAULT_SOLVER_RUNTIME_TUNING.weakSingleTagMargin
+      ),
+      coplanarHeightDeltaM: numberOrDefault(
+        merged.coplanarHeightDeltaM,
+        DEFAULT_SOLVER_RUNTIME_TUNING.coplanarHeightDeltaM
+      ),
+      severeObservedHeightDeltaM: numberOrDefault(
+        merged.severeObservedHeightDeltaM,
+        DEFAULT_SOLVER_RUNTIME_TUNING.severeObservedHeightDeltaM
+      ),
+      moderateObservedHeightDeltaM: numberOrDefault(
+        merged.moderateObservedHeightDeltaM,
+        DEFAULT_SOLVER_RUNTIME_TUNING.moderateObservedHeightDeltaM
+      ),
+      mildObservedHeightDeltaM: numberOrDefault(
+        merged.mildObservedHeightDeltaM,
+        DEFAULT_SOLVER_RUNTIME_TUNING.mildObservedHeightDeltaM
+      ),
+      severePenalty: numberOrDefault(merged.severePenalty, DEFAULT_SOLVER_RUNTIME_TUNING.severePenalty),
+      moderatePenalty: numberOrDefault(
+        merged.moderatePenalty,
+        DEFAULT_SOLVER_RUNTIME_TUNING.moderatePenalty
+      ),
+      mildPenalty: numberOrDefault(merged.mildPenalty, DEFAULT_SOLVER_RUNTIME_TUNING.mildPenalty),
+      dtScaleMin: numberOrDefault(merged.dtScaleMin, DEFAULT_SOLVER_RUNTIME_TUNING.dtScaleMin),
+      dtScaleMax: numberOrDefault(merged.dtScaleMax, DEFAULT_SOLVER_RUNTIME_TUNING.dtScaleMax),
+      switchedSingleTagMaxTranslationJumpM: numberOrDefault(
+        merged.switchedSingleTagMaxTranslationJumpM,
+        DEFAULT_SOLVER_RUNTIME_TUNING.switchedSingleTagMaxTranslationJumpM
+      ),
+      switchedSingleTagMaxRotationJumpDeg: numberOrDefault(
+        merged.switchedSingleTagMaxRotationJumpDeg,
+        DEFAULT_SOLVER_RUNTIME_TUNING.switchedSingleTagMaxRotationJumpDeg
+      ),
+      droppedMultiToSingleMaxTranslationJumpM: numberOrDefault(
+        merged.droppedMultiToSingleMaxTranslationJumpM,
+        DEFAULT_SOLVER_RUNTIME_TUNING.droppedMultiToSingleMaxTranslationJumpM
+      ),
+      droppedMultiToSingleMaxRotationJumpDeg: numberOrDefault(
+        merged.droppedMultiToSingleMaxRotationJumpDeg,
+        DEFAULT_SOLVER_RUNTIME_TUNING.droppedMultiToSingleMaxRotationJumpDeg
+      ),
+      switchedSingleTagRejectWindowScale: numberOrDefault(
+        merged.switchedSingleTagRejectWindowScale,
+        DEFAULT_SOLVER_RUNTIME_TUNING.switchedSingleTagRejectWindowScale
+      ),
+      switchedSingleTagRejectWindowMinMs: Math.round(
+        numberOrDefault(
+          merged.switchedSingleTagRejectWindowMinMs,
+          DEFAULT_SOLVER_RUNTIME_TUNING.switchedSingleTagRejectWindowMinMs
+        )
+      ),
+      droppedMultiToSingleRejectWindowScale: numberOrDefault(
+        merged.droppedMultiToSingleRejectWindowScale,
+        DEFAULT_SOLVER_RUNTIME_TUNING.droppedMultiToSingleRejectWindowScale
+      ),
+      droppedMultiToSingleRejectWindowMinMs: Math.round(
+        numberOrDefault(
+          merged.droppedMultiToSingleRejectWindowMinMs,
+          DEFAULT_SOLVER_RUNTIME_TUNING.droppedMultiToSingleRejectWindowMinMs
+        )
+      ),
+      switchedSingleTagGainDamp: numberOrDefault(
+        merged.switchedSingleTagGainDamp,
+        DEFAULT_SOLVER_RUNTIME_TUNING.switchedSingleTagGainDamp
+      ),
+      switchedSingleTagMinTranslationGain: numberOrDefault(
+        merged.switchedSingleTagMinTranslationGain,
+        DEFAULT_SOLVER_RUNTIME_TUNING.switchedSingleTagMinTranslationGain
+      ),
+      switchedSingleTagMinRotationGain: numberOrDefault(
+        merged.switchedSingleTagMinRotationGain,
+        DEFAULT_SOLVER_RUNTIME_TUNING.switchedSingleTagMinRotationGain
+      ),
+      droppedMultiToSingleGainDamp: numberOrDefault(
+        merged.droppedMultiToSingleGainDamp,
+        DEFAULT_SOLVER_RUNTIME_TUNING.droppedMultiToSingleGainDamp
+      ),
+      droppedMultiToSingleMinTranslationGain: numberOrDefault(
+        merged.droppedMultiToSingleMinTranslationGain,
+        DEFAULT_SOLVER_RUNTIME_TUNING.droppedMultiToSingleMinTranslationGain
+      ),
+      droppedMultiToSingleMinRotationGain: numberOrDefault(
+        merged.droppedMultiToSingleMinRotationGain,
+        DEFAULT_SOLVER_RUNTIME_TUNING.droppedMultiToSingleMinRotationGain
+      )
     };
   };
 
   const parseSolverRuntimeNumericValue = (field: SolverRuntimeNumericField, rawValue: string): number | null => {
     const parsed = Number(rawValue);
     if (!Number.isFinite(parsed)) return null;
-    const bounds = solverRuntimeFieldParsers[field];
-    const { min, max } = bounds;
-    const integer = 'integer' in bounds ? Boolean(bounds.integer) : false;
-    const clamped = Math.min(max, Math.max(min, parsed));
-    return integer ? Math.round(clamped) : clamped;
+    const parser = solverRuntimeFieldParsers[field];
+    const integer = 'integer' in parser ? Boolean(parser.integer) : false;
+    return integer ? Math.round(parsed) : parsed;
   };
 
   const setSolverRuntimeTuningNumeric = (field: string, rawValue: string): void => {
@@ -639,7 +956,6 @@
     createCustomField,
     loadFieldMapList,
     ensureFieldMapLoaded,
-    createCustomFieldFromMap,
     assignMapToSelectedField,
     handleMapUploadFile,
     uploadSelectedMapFile,
@@ -702,6 +1018,7 @@
     setMapUploadSuccess: (summary) => {
       fieldMaps = [...fieldMaps, summary];
     },
+    getMaxMapUploadBytes: () => maxMapUploadBytes,
     toaster,
     getNewOriginName: () => newOriginName,
     getNewOriginX: () => newOriginX,
@@ -714,7 +1031,7 @@
   });
 
   const { runFeedPoll } = createLocalizationFeedRuntime({
-    getActiveProfile: () => $activeProfile ?? null,
+    getActiveProfile: () => runtimeActiveProfile ?? null,
     getHasAnyFeedSources: () => hasAnyFeedSources,
     getActiveHasSources: () => activeHasSources,
     getViewProfilesWithSources: () => viewProfilesWithSources,
@@ -740,7 +1057,6 @@
   });
 
   const {
-    markerQuaternion,
     cameraExtrinsicsTransform,
     rigCameraForSource,
     applyPrimaryCameraPose,
@@ -787,7 +1103,6 @@
 
   const {
     loadLocalizationConfig,
-    loadPipelineTemplates,
     loadPipelineStatus,
     loadPipelineOutputs,
     loadSources,
@@ -800,33 +1115,12 @@
     setFeedMessage: (next) => {
       feedMessage = next;
     },
-    setPipelineTemplates: (next) => {
-      pipelineTemplates = next;
-    },
-    setPipelineTemplatesLoading: (next) => {
-      pipelineTemplatesLoading = next;
-    },
-    setPipelineTemplatesError: (next) => {
-      pipelineTemplatesError = next;
-    },
-    setPipelineStatus: (next) => {
-      pipelineStatus = next;
-    },
-    setPipelineStatusLoading: (next) => {
-      pipelineStatusLoading = next;
-    },
-    setPipelineStatusError: (next) => {
-      pipelineStatusError = next;
-    },
-    setPipelineOutputs: (next) => {
-      pipelineOutputs = next;
-    },
-    setPipelineOutputsLoading: (next) => {
-      pipelineOutputsLoading = next;
-    },
-    setPipelineOutputsError: (next) => {
-      pipelineOutputsError = next;
-    },
+    setPipelineStatus: () => {},
+    setPipelineStatusLoading: () => {},
+    setPipelineStatusError: () => {},
+    setPipelineOutputs: () => {},
+    setPipelineOutputsLoading: () => {},
+    setPipelineOutputsError: () => {},
     setSources: (next) => {
       sources = next;
     },
@@ -836,9 +1130,7 @@
     setSourcesError: (next) => {
       sourcesError = next;
     },
-    setSourceCompatibility: (next) => {
-      sourceCompatibility = next;
-    },
+    setSourceCompatibility: () => {},
     getSelectedSourceIds: () => selectedSourceIds,
     applySourceSelection,
     toaster,
@@ -849,6 +1141,13 @@
         next as (typeof import('$lib/components/LocalizationViewers.svelte'))['default'];
     }
   });
+  const loadLocalizationCapabilities = async (): Promise<void> => {
+    try {
+      localizationCapabilities = await LocalizationService.localizationCapabilitiesHandler();
+    } catch {
+      localizationCapabilities = null;
+    }
+  };
   let cameraPoseInputsKey: string | null = null;
 
   const customFields = localizationStorage.customFields;
@@ -880,9 +1179,21 @@
   let tagSizeInput = $state('');
   let tagSizeTargetId = $state<string | null>(null);
   let tagSizeError = $state<string | null>(null);
+  let excludedTagIdsInput = $state('');
+  let excludedTagIdsTargetId = $state<string | null>(null);
+  let excludedTagIdsError = $state<string | null>(null);
   let fieldMapSelection = $state('');
   let openSourceGroups = $state<string[]>([]);
   let streamInfos = $state<StreamInfo[]>([]);
+  let localizationBootLoading = $state(true);
+  let localizationBootError = $state<string | null>(null);
+  let cancelLocalizationBootstrap: (() => void) | null = null;
+  let cancelLocalizationViewersWarmup: (() => void) | null = null;
+  let localizationDisposed = false;
+  const hasLocalizationBootstrapData = $derived(
+    Boolean(($localizationConfig?.profiles?.length ?? 0) || sources.length || fieldMaps.length)
+  );
+  const showLocalizationBootLoading = $derived(localizationBootLoading && !hasLocalizationBootstrapData);
   let cameraPovSelectionId = $state('');
   let cameraPovFovMode = $state<CameraPovFovMode>('undistorted');
   const ROBOT_FOLLOW_POV_OPTION_ID = '__robot_follow__';
@@ -901,12 +1212,10 @@
 
   let pollVisibilityPaused = false;
   let visibilityHandler: (() => void) | null = null;
-  let liveUpdatesCleanup: (() => void) | null = null;
-  let liveUpdatesReconnectHandle: number | null = null;
+  let stopLiveUpdates: (() => void) | null = null;
   let liveUpdatesRefreshHandle: number | null = null;
   let liveUpdatesRefreshSourcesPending = false;
   let lastLiveSourcesRefreshAtMs = 0;
-  let liveUpdatesNonce = 0;
 
   let LocalizationViewersComponent = $state<
     (typeof import('$lib/components/LocalizationViewers.svelte'))['default'] | null
@@ -928,10 +1237,10 @@
     const hasExplicit = profiles.some((profile) => typeof profile.viewEnabled === 'boolean');
     if (!hasExplicit) {
       // Legacy configs may not have `viewEnabled`; default to showing the active profile until persisted.
-      return activeProfile ? [activeProfile] : [];
+      return activeProfile && activeProfile.enabled !== false ? [activeProfile] : [];
     }
     // Strict: only explicitly enabled profiles drive 3D marker visibility.
-    return profiles.filter((profile) => profile.viewEnabled === true);
+    return profiles.filter((profile) => profile.enabled !== false && profile.viewEnabled === true);
   }
 
   function sourceStreamOutputKey(streamId: string | null | undefined, outputKey: string | null | undefined): string {
@@ -1421,8 +1730,8 @@
   }
 
   function extractResolutionCandidate(value: unknown): { width: number; height: number } | null {
-    if (!value || typeof value !== 'object') return null;
-    const record = value as any;
+    const record = asRecord(value);
+    if (!record) return null;
     const width = toFinite(record?.width ?? record?.w ?? record?.cols);
     const height = toFinite(record?.height ?? record?.h ?? record?.rows);
     if (width == null || height == null) return null;
@@ -1431,22 +1740,28 @@
   }
 
   function resolvePovResolution(
-    manifest: any,
-    calibration: any,
+    manifest: Record<string, unknown> | null,
+    calibration: Record<string, unknown> | null,
     cx: number,
     cy: number
   ): { width: number; height: number } | null {
+    const capture = asRecord(manifest?.capture);
+    const captureMode = asRecord(capture?.mode);
+    const captureModeFormat = asRecord(captureMode?.format);
+    const captureFormat = asRecord(capture?.format);
+    const encoderSettings = asRecord(manifest?.encoder_settings);
+    const encoder = asRecord(manifest?.encoder);
     const candidates = [
-      manifest?.capture?.mode?.format?.resolution,
-      manifest?.capture?.mode?.resolution,
-      manifest?.capture?.mode?.format,
-      manifest?.capture?.format?.resolution,
-      manifest?.capture?.format,
-      manifest?.capture?.resolution,
-      manifest?.encoder_settings?.output_resolution,
-      manifest?.encoder_settings?.resolution,
-      manifest?.encoder?.output?.resolution,
-      manifest?.encoder?.resolution,
+      captureModeFormat?.resolution,
+      captureMode?.resolution,
+      captureModeFormat,
+      captureFormat?.resolution,
+      captureFormat,
+      capture?.resolution,
+      encoderSettings?.output_resolution,
+      encoderSettings?.resolution,
+      asRecord(encoder?.output)?.resolution,
+      encoder?.resolution,
       calibration?.resolution,
       calibration?.imageSize,
       calibration?.frameSize,
@@ -1562,19 +1877,20 @@
   function extractPovIntrinsicsSet(
     stream: StreamInfo
   ): { undistorted: CameraPovIntrinsics | null; raw: CameraPovIntrinsics | null } | null {
-    const manifest = stream.manifest as any;
+    const manifest = asRecord(stream.manifest);
+    const camera = asRecord(manifest?.camera);
     const calibration =
-      manifest?.calibration ??
-      manifest?.camera?.calibration ??
-      manifest?.camera?.intrinsics ??
-      manifest?.intrinsics ??
+      asRecord(manifest?.calibration) ??
+      asRecord(camera?.calibration) ??
+      asRecord(camera?.intrinsics) ??
+      asRecord(manifest?.intrinsics) ??
       null;
-    if (!calibration || typeof calibration !== 'object') return null;
+    if (!calibration) return null;
 
-    const fx = toFinite((calibration as any).fx);
-    const fy = toFinite((calibration as any).fy);
-    const cx = toFinite((calibration as any).cx);
-    const cy = toFinite((calibration as any).cy);
+    const fx = toFinite(calibration.fx);
+    const fy = toFinite(calibration.fy);
+    const cx = toFinite(calibration.cx);
+    const cy = toFinite(calibration.cy);
     if ([fx, fy].some((value) => value == null || value <= 0)) return null;
     if ([cx, cy].some((value) => value == null)) return null;
 
@@ -1583,12 +1899,12 @@
     const { width, height } = resolution;
     const undistorted: CameraPovIntrinsics = { fx, fy, cx, cy, width, height };
 
-    const k1 = toFinite((calibration as any).k1) ?? 0;
-    const k2 = toFinite((calibration as any).k2) ?? 0;
-    const p1 = toFinite((calibration as any).p1) ?? 0;
-    const p2 = toFinite((calibration as any).p2) ?? 0;
-    const k3 = toFinite((calibration as any).k3) ?? 0;
-    const lensModelRaw = String((calibration as any).lensModel ?? (calibration as any).lens_model ?? 'pinhole')
+    const k1 = toFinite(calibration.k1) ?? 0;
+    const k2 = toFinite(calibration.k2) ?? 0;
+    const p1 = toFinite(calibration.p1) ?? 0;
+    const p2 = toFinite(calibration.p2) ?? 0;
+    const k3 = toFinite(calibration.k3) ?? 0;
+    const lensModelRaw = String(calibration.lensModel ?? calibration.lens_model ?? 'pinhole')
       .trim()
       .toLowerCase();
     const lensModel = lensModelRaw === 'fisheye' ? 'fisheye' : 'pinhole';
@@ -1643,18 +1959,23 @@
   }
 
   function streamIdentityKeys(stream: StreamInfo): string[] {
-    const manifest = stream.manifest as any;
-    const identity = manifest?.identity ?? null;
+    const manifest = asRecord(stream.manifest);
+    const identity = asRecord(manifest?.identity);
+    const capture = asRecord(manifest?.capture);
     const identityKeys = Array.isArray(identity?.keys) ? identity.keys.map((value: unknown) => String(value ?? '').trim()) : [];
-    const captureKeys = Array.isArray(manifest?.capture?.device_keys)
-      ? manifest.capture.device_keys.map((value: unknown) => String(value ?? '').trim())
+    const captureKeys = Array.isArray(capture?.device_keys)
+      ? capture.device_keys.map((value: unknown) => String(value ?? '').trim())
       : [];
+    const identityDisplay = typeof identity?.display === 'string' ? identity.display : null;
+    const identityHardwareId = typeof identity?.hardware_id === 'string' ? identity.hardware_id : null;
+    const identityAlias = typeof identity?.alias === 'string' ? identity.alias : null;
+    const identityId = typeof identity?.id === 'string' ? identity.id : null;
     return collectKeyVariants([
       stream.id,
-      identity?.display ?? null,
-      identity?.hardware_id ?? null,
-      identity?.alias ?? null,
-      identity?.id ?? null,
+      identityDisplay,
+      identityHardwareId,
+      identityAlias,
+      identityId,
       ...identityKeys,
       ...captureKeys
     ]);
@@ -1678,17 +1999,17 @@
     ) {
       return true;
     }
-    if (event.kind === 'api') {
+    if (realtimeUpdateMatchesKind(event, 'api')) {
       return false;
     }
     return (
-      event.kind === 'localization' ||
-      event.kind === 'streams' ||
-      event.kind === 'pipelines' ||
-      event.kind === 'media' ||
-      event.kind === 'imu' ||
-      event.kind === 'device' ||
-      event.kind === 'settings'
+      realtimeUpdateMatchesKind(event, 'localization') ||
+      realtimeUpdateMatchesKind(event, 'streams') ||
+      realtimeUpdateMatchesKind(event, 'pipelines') ||
+      realtimeUpdateMatchesKind(event, 'media') ||
+      realtimeUpdateMatchesKind(event, 'imu') ||
+      realtimeUpdateMatchesKind(event, 'device') ||
+      realtimeUpdateMatchesKind(event, 'settings')
     );
   }
 
@@ -1706,14 +2027,14 @@
     ) {
       return true;
     }
-    if (event.kind === 'streams' || event.kind === 'pipelines') {
+    if (realtimeUpdateMatchesKind(event, 'streams') || realtimeUpdateMatchesKind(event, 'pipelines')) {
       return true;
     }
     return false;
   }
 
   function refreshLocalizationLiveState(options: { refreshSources?: boolean } = {}): void {
-    const profileId = $activeProfile?.id ?? $localizationConfig?.activeProfileId ?? null;
+    const profileId = $localizationConfig?.activeProfileId ?? null;
     void rigLayoutStore.refresh({ force: true });
     void loadLocalizationConfig();
     if (options.refreshSources) {
@@ -1724,7 +2045,6 @@
       }
     }
     void loadStreamsSnapshot();
-    void loadPipelineTemplates();
     void loadPipelineStatus(profileId);
     if (profileId) {
       void loadPipelineOutputs(profileId);
@@ -1745,56 +2065,6 @@
       liveUpdatesRefreshSourcesPending = false;
       refreshLocalizationLiveState({ refreshSources });
     }, LIVE_UPDATES_REFRESH_DEBOUNCE_MS);
-  }
-
-  function scheduleLiveUpdatesReconnect(): void {
-    if (!browser) return;
-    if (liveUpdatesReconnectHandle != null) return;
-    liveUpdatesReconnectHandle = window.setTimeout(() => {
-      liveUpdatesReconnectHandle = null;
-      connectLiveUpdates();
-    }, LIVE_UPDATES_RECONNECT_MS);
-  }
-
-  function disconnectLiveUpdates(): void {
-    liveUpdatesNonce += 1;
-    if (liveUpdatesReconnectHandle != null) {
-      clearTimeout(liveUpdatesReconnectHandle);
-      liveUpdatesReconnectHandle = null;
-    }
-    if (liveUpdatesRefreshHandle != null) {
-      clearTimeout(liveUpdatesRefreshHandle);
-      liveUpdatesRefreshHandle = null;
-    }
-    liveUpdatesRefreshSourcesPending = false;
-    liveUpdatesCleanup?.();
-    liveUpdatesCleanup = null;
-  }
-
-  function connectLiveUpdates(): void {
-    if (!browser) return;
-    const nonce = (liveUpdatesNonce += 1);
-    if (liveUpdatesReconnectHandle != null) {
-      clearTimeout(liveUpdatesReconnectHandle);
-      liveUpdatesReconnectHandle = null;
-    }
-    liveUpdatesCleanup?.();
-    liveUpdatesCleanup = null;
-    liveUpdatesCleanup = connectRealtimeUpdatesStream({
-      onChange: (event) => {
-        if (nonce !== liveUpdatesNonce) return;
-        if (!shouldApplyLiveUpdate(event)) return;
-        scheduleLiveUpdatesRefresh(event);
-      },
-      onClose: () => {
-        if (nonce !== liveUpdatesNonce) return;
-        scheduleLiveUpdatesReconnect();
-      },
-      onError: () => {
-        if (nonce !== liveUpdatesNonce) return;
-        scheduleLiveUpdatesReconnect();
-      }
-    });
   }
 
   function computeActiveSolverConfig(profile: LocalizationProfile | null, requestedSolverId: string): LocalizationSolverConfig | null {
@@ -1829,19 +2099,18 @@
     const profileId = ($activeProfile?.id ?? $activeProfileId ?? '').trim();
     return profileId ? `profile:${profileId}` : '';
   });
+  const runtimeActiveProfile = $derived.by<LocalizationProfile | null>(() => {
+    const profileId = ($localizationConfig?.activeProfileId ?? '').trim();
+    if (!profileId) return null;
+    return $profiles.find((profile) => profile.id === profileId && profile.enabled !== false) ?? null;
+  });
 
   const compatibleSources = $derived.by<LocalizationPipelineSource[]>(() => {
     const selfProfileStreamId = activeProfileSourceStreamId;
     return sources.filter((entry) => {
-      if (!(sourceCompatibility[entry.id] ?? false)) return false;
       if (selfProfileStreamId && entry.streamId.trim() === selfProfileStreamId) return false;
-      return true;
+      return isLocalizationCompatibleSource(entry);
     });
-  });
-
-  const localizationTemplates = $derived.by(() => {
-    const tagged = pipelineTemplates.filter((entry) => entry.tags?.includes('localization'));
-    return tagged.length > 0 ? tagged : pipelineTemplates;
   });
 
   const profileFieldOrigin = $derived.by<LocalizationFieldOriginConfig>(() =>
@@ -1943,6 +2212,9 @@
   // Sources from profiles with `viewEnabled=true` (the "Views" overlay list).
   // These are the sources that should drive what markers are visible in the 3D viewer.
   const viewOverlaySources = $derived(computeViewOverlaySources($profiles, $activeProfile ?? null, sources));
+  const viewerSourcePool = $derived.by<LocalizationPipelineSource[]>(() =>
+    hasAnyViewsEnabled ? viewOverlaySources : selectedSources
+  );
 
   // Multiple solver configs can exist per profile (solo sources and/or grouped solves).
   // Keep a local "active solver id" for the active profile so the UI can inspect/edit
@@ -2010,6 +2282,7 @@
       source.id,
       source.cameraUid,
       source.streamId,
+      mediaImuParentStreamIdForSource(source),
       source.cameraPath,
       ...(source.cameraKeys ?? [])
     ]);
@@ -2111,12 +2384,12 @@
     viewProfiles.filter((profile) => profile.sources.some((source) => source.enabled))
   );
 
-  const activeHasSources = $derived.by(() => selectedSourceIds.length > 0);
+  const activeHasSources = $derived.by(() => (runtimeActiveProfile?.sources ?? []).some((source) => source.enabled));
 
   const hasAnyFeedSources = $derived.by(() => activeHasSources || viewProfilesWithSources.length > 0);
   const activeImuSource = $derived.by<LocalizationPipelineSource | null>(() => {
     const unique = new Map<string, LocalizationPipelineSource>();
-    for (const source of [...viewOverlaySources, ...selectedSources]) {
+    for (const source of viewerSourcePool) {
       if (!isImuSource(source)) continue;
       unique.set(source.id, source);
     }
@@ -2156,9 +2429,82 @@
     return null;
   });
 
+  const supportedSolverModes = $derived.by<LocalizationSolverMode[]>(() => {
+    const supported = localizationCapabilities?.constraints?.supportedSolverModes ?? [];
+    const seen = new Set<string>();
+    const ordered: LocalizationSolverMode[] = [];
+    for (const mode of supported) {
+      const normalized = String(mode ?? '').trim();
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      ordered.push(mode);
+    }
+    if (ordered.length > 0) return ordered;
+
+    const configuredModes = $profiles.flatMap((profile) => profile.solvers.map((solver) => solver.mode));
+    for (const mode of configuredModes) {
+      const normalized = String(mode ?? '').trim();
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      ordered.push(mode);
+    }
+    return ordered;
+  });
+  const supportedPoseSpaces = $derived.by<LocalizationPoseSpace[]>(() => {
+    const supported = localizationCapabilities?.constraints?.supportedPoseSpaces ?? [];
+    const seen = new Set<string>();
+    const ordered: LocalizationPoseSpace[] = [];
+    for (const space of supported) {
+      const normalized = String(space ?? '').trim();
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      ordered.push(space);
+    }
+    if (ordered.length > 0) return ordered;
+
+    const configuredSpaces = $profiles.flatMap((profile) =>
+      profile.solvers.flatMap((solver) => (solver.outputSpaces ?? []).filter(Boolean))
+    );
+    for (const space of configuredSpaces) {
+      const normalized = String(space ?? '').trim();
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      ordered.push(space);
+    }
+    return ordered;
+  });
+  const supportedPoseSpaceSet = $derived.by(() => new Set(supportedPoseSpaces));
+  const maxMapUploadBytes = $derived.by<number | null>(() => {
+    const raw = Number(localizationCapabilities?.constraints?.maxMapUploadBytes ?? Number.NaN);
+    if (!Number.isFinite(raw) || raw <= 0) return null;
+    return Math.trunc(raw);
+  });
+  const pollRateLimits = $derived.by<PollRateLimits | null>(() => {
+    const minRaw = Number(localizationCapabilities?.constraints?.minPollHz ?? Number.NaN);
+    const maxRaw = Number(localizationCapabilities?.constraints?.maxPollHz ?? Number.NaN);
+    const defaultRaw = Number(localizationCapabilities?.constraints?.defaultPollHz ?? Number.NaN);
+    if (!Number.isFinite(minRaw) || !Number.isFinite(maxRaw) || !Number.isFinite(defaultRaw)) return null;
+    const minHz = Math.max(1, Math.floor(minRaw));
+    const maxHz = Math.max(minHz, Math.floor(maxRaw));
+    const defaultHz = Math.min(maxHz, Math.max(minHz, Math.floor(defaultRaw)));
+    return { minHz, maxHz, defaultHz };
+  });
+  const pollHzStep = $derived.by<number>(() => {
+    const raw = Number(localizationCapabilities?.constraints?.pollStepHz ?? Number.NaN);
+    return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 1;
+  });
+  const pollHzMin = $derived.by<number>(() => pollRateLimits?.minHz ?? 1);
+  const pollHzMax = $derived.by<number>(() => pollRateLimits?.maxHz ?? Math.max(1, pollHzMin));
+  $effect(() => {
+    const normalized = normalizePollHz(pollHz, pollRateLimits);
+    if (normalized !== pollHz) pollHz = normalized;
+  });
   const solverOutputSpaces = $derived.by<LocalizationPoseSpace[]>(() => activeSolverConfig?.outputSpaces ?? []);
+  const supportedSolvePoseSpaces = $derived.by<LocalizationPoseSpace[]>(() =>
+    SOLVE_POSE_SPACES.filter((space) => supportedPoseSpaceSet.has(space))
+  );
   const solvePoseSpaces = $derived.by<LocalizationPoseSpace[]>(() => {
-    return SOLVE_POSE_SPACES.filter((space) => solverOutputSpaces.includes(space));
+    return supportedSolvePoseSpaces.filter((space) => solverOutputSpaces.includes(space));
   });
   const derivedPoseSpaces = $derived.by<LocalizationPoseSpace[]>(() => {
     const derived = new Set<LocalizationPoseSpace>();
@@ -2169,13 +2515,13 @@
         derived.add(next);
       }
     }
-    return Array.from(derived.values()).filter((space) => POSE_SPACE_OPTIONS.includes(space));
+    return Array.from(derived.values()).filter((space) => supportedPoseSpaceSet.has(space));
   });
   const availableCoordinateSpaces = $derived.by<LocalizationPoseSpace[]>(() => {
     const next: LocalizationPoseSpace[] = [];
     const seen = new Set<string>();
     for (const space of solverOutputSpaces.concat(derivedPoseSpaces)) {
-      if (!POSE_SPACE_OPTIONS.includes(space)) continue;
+      if (!supportedPoseSpaceSet.has(space)) continue;
       if (seen.has(space)) continue;
       seen.add(space);
       next.push(space);
@@ -2189,7 +2535,7 @@
       // Compute support from the persisted config (stable even when a profile isn't being polled).
       const outputSpaces = (profile.solvers ?? [])
         .flatMap((solver) => solver.outputSpaces ?? [])
-        .filter((space) => POSE_SPACE_OPTIONS.includes(space));
+        .filter((space) => supportedPoseSpaceSet.has(space));
       const supported = new Set<LocalizationPoseSpace>(outputSpaces);
       // Field spaces require a field map selection on the profile.
       if (!profile.fieldMapId) {
@@ -2202,7 +2548,7 @@
   });
 
   const feedPoller = createFeedPoller({
-    getIntervalMs: () => pollIntervalMs(pollHz),
+    getIntervalMs: () => pollIntervalMs(pollHz, pollRateLimits),
     hasSources: () => hasAnyFeedSources,
     onPoll: runFeedPoll
   });
@@ -2211,6 +2557,7 @@
     getActiveProfile: () => $activeProfile ?? null,
     getActiveSolverConfig: () => activeSolverConfig,
     getSolvePoseSpaces: () => solvePoseSpaces,
+    getSupportedPoseSpaces: () => supportedPoseSpaces,
     setFieldMapSelection: (next) => {
       fieldMapSelection = next;
     },
@@ -2249,12 +2596,12 @@
   applySourceSelectionImpl = localizationActions.applySourceSelection;
   const {
     setFieldMapSelection,
-    toggleSolverOutputSpace,
-    setActiveSolverMode,
-    setSolveSpaceEnabled,
-    setPipelineTemplateId,
-    setSourceInputKey
+    setActiveSolverMode: setActiveSolverModeBase,
   } = localizationActions;
+  const setActiveSolverMode = (mode: LocalizationSolverMode): void => {
+    if (!supportedSolverModes.includes(mode)) return;
+    setActiveSolverModeBase(mode);
+  };
 
   const setActiveSolverIdForUi = (nextId: string): void => {
     activeSolverId = nextId;
@@ -2283,11 +2630,43 @@
     }
 
     const template = activeSolverConfig ?? profile.solvers[0] ?? null;
+    const capabilityDefaultMode = localizationCapabilities?.defaults?.defaultSolverMode ?? null;
+    const modeCandidates: Array<LocalizationSolverMode | null | undefined> = [
+      template?.mode,
+      capabilityDefaultMode,
+      supportedSolverModes[0],
+      profile.solvers[0]?.mode
+    ];
+    const supportedModeSet = new Set(supportedSolverModes);
+    const mode =
+      modeCandidates.find(
+        (candidate): candidate is LocalizationSolverMode =>
+          Boolean(candidate) && (supportedModeSet.size === 0 || supportedModeSet.has(candidate))
+      ) ?? null;
+    if (!mode) {
+      toaster.error({
+        title: 'Unable to add solver',
+        description: 'No backend-supported solver mode is available.'
+      });
+      return;
+    }
+    const capabilityDefaultOutputSpaces = (localizationCapabilities?.defaults?.defaultSolverOutputSpaces ?? []).filter((space) =>
+      supportedPoseSpaceSet.has(space)
+    );
+    const templateOutputSpaces = (template?.outputSpaces ?? []).filter((space) => supportedPoseSpaceSet.has(space));
+    const fallbackSolveSpaces = supportedSolvePoseSpaces.slice(0, 2);
+    const outputSpaces = templateOutputSpaces.length
+      ? [...templateOutputSpaces]
+      : capabilityDefaultOutputSpaces.length
+        ? [...capabilityDefaultOutputSpaces]
+        : fallbackSolveSpaces.length
+          ? [...fallbackSolveSpaces]
+          : [];
     const nextSolver: LocalizationSolverConfig = {
       id,
       name: `Group ${profile.solvers.length + 1}`,
-      mode: template?.mode ?? 'group_solve',
-      outputSpaces: template?.outputSpaces?.length ? [...template.outputSpaces] : ['tag_in_camera', 'robot_in_field'],
+      mode,
+      outputSpaces,
       sourceIds: [],
       color: null,
       runtimeTuning: normalizeSolverRuntimeTuning(template?.runtimeTuning),
@@ -2346,7 +2725,7 @@
     if (!profile) return;
     const parsed = Number(rawValue);
     if (!Number.isFinite(parsed)) return;
-    const nextWeight = Math.max(0, Math.min(10, parsed));
+    const nextWeight = parsed;
     const nextSources = profile.sources.map((source) =>
       source.id === sourceId ? { ...source, weight: nextWeight } : source
     );
@@ -2445,6 +2824,22 @@
       tagSizeInput = next;
       tagSizeTargetId = profile.id;
       tagSizeError = null;
+    }
+  });
+
+  $effect(() => {
+    const profile = $activeProfile;
+    if (!profile) {
+      excludedTagIdsInput = '';
+      excludedTagIdsTargetId = null;
+      excludedTagIdsError = null;
+      return;
+    }
+    if (excludedTagIdsTargetId !== profile.id) {
+      const nextIds = Array.isArray(profile.excludedTagIds) ? profile.excludedTagIds : [];
+      excludedTagIdsInput = nextIds.join(', ');
+      excludedTagIdsTargetId = profile.id;
+      excludedTagIdsError = null;
     }
   });
 
@@ -2554,12 +2949,6 @@
         coordinateSpace = availableCoordinateSpaces[0] ?? 'tag_in_camera';
       }
     }
-    if (
-      (coordinateSpace === 'camera_in_field' || coordinateSpace === 'robot_in_field') &&
-      !fieldSpaceAllowed
-    ) {
-      coordinateSpace = availableCoordinateSpaces.find((space) => space === 'tag_in_camera') ?? 'tag_in_camera';
-    }
   });
 
   const groupedSources = $derived.by(() => groupLocalizationSources(compatibleSources));
@@ -2648,10 +3037,6 @@
     })
   );
 
-  const fieldSpaceLabel = $derived.by(() =>
-    buildFieldSpaceLabel({ viewMode, activeFieldOrigin, selectedCustomField })
-  );
-
   const fieldSceneTransform = $derived.by<PoseTransform | null>(() =>
     buildFieldSceneTransform({ baseFrame, activeFieldOrigin })
   );
@@ -2722,7 +3107,8 @@
             streamMetricsById = { ...streamMetricsById, [streamId]: event.metrics };
             streamMetricsUpdatedAtById = { ...streamMetricsUpdatedAtById, [streamId]: Date.now() };
             if (streamMetricsErrorById[streamId]) {
-              const { [streamId]: _, ...restErr } = streamMetricsErrorById;
+              const restErr = { ...streamMetricsErrorById };
+              delete restErr[streamId];
               streamMetricsErrorById = restErr;
             }
           },
@@ -2797,23 +3183,13 @@
   const hasAnyViewsEnabled = $derived.by(() => viewProfiles.length > 0);
 
   const viewerCameras = $derived.by<RigCameraInfo[]>(() => {
-    const cameras = hasAnyViewsEnabled
+    const cameras = viewerSourcePool.length > 0
       ? buildViewerCameras({
           baseFrame,
           rigCameras: rigLayoutState.layout.cameras,
-          selectedSources: viewOverlaySources
+          selectedSources: viewerSourcePool
         })
       : [];
-
-    const imuSource = activeImuSource;
-    const imuCamera = imuSource ? syntheticCameraFromSource(imuSource) : null;
-    if (imuCamera) {
-      const imuKeys = new Set(sourceKeys(imuSource));
-      const hasImuCamera = cameras.some((camera) => rigCameraKeys(camera).some((key) => imuKeys.has(key)));
-      if (!hasImuCamera) {
-        cameras.push(imuCamera);
-      }
-    }
 
     if (cameras.length > 0 || baseFrame !== 'field') {
       return cameras;
@@ -3935,7 +4311,14 @@
     if (rows.length === 0) return null;
     const headerOriginLabel = rows.length === 1 ? rows[0]?.originLabel ?? 'field' : 'mixed-origins';
     const header = `${headerOriginLabel} · ${poseSpaceLabel(coordinateSpace)}`;
-    return { header, rows: rows.map(({ originLabel: _originLabel, ...row }) => row) };
+    return {
+      header,
+      rows: rows.map((row) => {
+        const { originLabel, ...rest } = row;
+        void originLabel;
+        return rest;
+      })
+    };
   });
 
 
@@ -3984,46 +4367,97 @@
       // show the selected camera's detections.
       return inFov.length > 0 ? inFov : scoped;
     })();
+    const fallbackMarkersByTagId = new Map(
+      (activeFieldMapDoc?.markers ?? []).map((marker) => [String(marker.id), marker] as const)
+    );
     rawMarkers = markersFromDetections({
       detections,
       sources,
       selectedSources: viewOverlaySources,
       colors: SOURCE_COLORS
+    }).map((marker) => {
+      if (marker.targetType === 'polygon') {
+        return marker;
+      }
+      const tagId = marker.tagId;
+      if (tagId == null || marker.tagBits) {
+        return marker;
+      }
+      const fallback = fallbackMarkersByTagId.get(String(tagId)) ?? null;
+      if (!fallback?.tagBits) {
+        return marker;
+      }
+      return {
+        ...marker,
+        tagBits: fallback.tagBits,
+        tagSize: marker.tagSize ?? fallback.sizeM
+      } satisfies LocalizationMarker;
     });
   });
 
   $effect(() => {
-    const profile = $activeProfile;
+    const profile = runtimeActiveProfile;
     if (!profile) return;
     void loadPipelineStatus(profile.id);
-    if (profile.pipelineTemplateId) {
-      void loadPipelineOutputs(profile.id);
-    } else {
-      pipelineOutputs = [];
-    }
+    void loadPipelineOutputs(profile.id);
   });
+
+  async function bootstrapLocalizationPage(): Promise<void> {
+    localizationBootLoading = true;
+    localizationBootError = null;
+    try {
+      await Promise.all([rigLayoutStore.refresh(), loadLocalizationCapabilities(), loadLocalizationConfig()]);
+      await Promise.all([loadSources(), loadStreamsSnapshot(), loadFieldMapList()]);
+      const seeded = await maybeSeedDefaultLocalizationProfile();
+      if (seeded) {
+        await Promise.all([loadLocalizationConfig(), loadSources(), loadStreamsSnapshot(), loadFieldMapList()]);
+      }
+      const profileId = $localizationConfig?.activeProfileId ?? $localizationConfig?.profiles?.[0]?.id ?? null;
+      await loadPipelineStatus(profileId);
+      const profile =
+        $localizationConfig?.profiles?.find((entry) => entry.id === profileId) ?? $localizationConfig?.profiles?.[0] ?? null;
+      if (profile) {
+        await loadPipelineOutputs(profile.id);
+      }
+    } catch (error) {
+      const description = error instanceof Error ? error.message : 'Failed to initialize localization page';
+      localizationBootError = description;
+      toaster.error({ title: 'Localization setup failed', description });
+    } finally {
+      if (!localizationDisposed) {
+        localizationBootLoading = false;
+      }
+    }
+  }
+
+  function retryLocalizationBootstrap(): void {
+    cancelLocalizationBootstrap?.();
+    cancelLocalizationBootstrap = scheduleAfterPaint(() => {
+      if (!localizationDisposed) {
+        void bootstrapLocalizationPage();
+      }
+    }, 1);
+  }
 
 
   onMount(() => {
-    void rigLayoutStore.refresh();
-    connectLiveUpdates();
-    void (async () => {
-      await loadLocalizationConfig();
-      await loadSources();
-      await loadStreamsSnapshot();
-      await loadPipelineTemplates();
-      const profileId = $localizationConfig?.activeProfileId ?? $localizationConfig?.profiles?.[0]?.id ?? null;
-      await loadPipelineStatus(profileId);
-      const profile = $localizationConfig?.profiles?.find((entry) => entry.id === profileId) ?? $localizationConfig?.profiles?.[0] ?? null;
-      if (profile?.pipelineTemplateId) {
-        await loadPipelineOutputs(profile.id);
+    localizationDisposed = false;
+    stopLiveUpdates = subscribeDomainInvalidations(
+      ['localization', 'streams', 'pipelines', 'media', 'imu', 'device', 'settings'],
+      (event) => {
+        if (!shouldApplyLiveUpdate(event)) return;
+        scheduleLiveUpdatesRefresh(event);
       }
-    })();
-    void loadLocalizationViewers();
+    );
+    retryLocalizationBootstrap();
+    cancelLocalizationViewersWarmup = scheduleWhenIdle(() => {
+      if (!localizationDisposed) {
+        void loadLocalizationViewers();
+      }
+    }, { timeoutMs: 2200, fallbackMs: 900 });
     localizationStorage.loadFromStorage();
     selectedCustomFieldId = $customFields[0]?.id ?? null;
     selectedCustomFieldOriginId = $customFields[0]?.origins[0]?.id ?? null;
-    void loadFieldMapList();
     if (browser) {
       visibilityHandler = () => {
         if (document.hidden) {
@@ -4046,7 +4480,18 @@
   });
 
   onDestroy(() => {
-    disconnectLiveUpdates();
+    localizationDisposed = true;
+    cancelLocalizationBootstrap?.();
+    cancelLocalizationBootstrap = null;
+    cancelLocalizationViewersWarmup?.();
+    cancelLocalizationViewersWarmup = null;
+    stopLiveUpdates?.();
+    stopLiveUpdates = null;
+    if (liveUpdatesRefreshHandle != null) {
+      clearTimeout(liveUpdatesRefreshHandle);
+      liveUpdatesRefreshHandle = null;
+    }
+    liveUpdatesRefreshSourcesPending = false;
     rigLayoutUnsubscribe();
     feedPoller.stop();
     for (const cleanup of streamMetricsCleanup.values()) {
@@ -4098,13 +4543,45 @@
 <div class="flex h-full min-h-0 flex-1 flex-col gap-4 overflow-hidden">
   <section class="flex min-h-0 flex-1 gap-4 overflow-hidden lg:gap-6">
     <aside class="w-full shrink-0 space-y-3 overflow-visible rounded border border-surface-800/60 bg-surface-950/40 p-3 text-xs text-surface-400 lg:max-w-[16rem] xl:max-w-[16.75rem] 2xl:max-w-[17.5rem]">
-    <button
-      class="btn btn-xs preset-filled-primary-500 w-full uppercase tracking-[0.22em]"
-      type="button"
-      onclick={addProfile}
-    >
-      New Profile
-    </button>
+    <div class="space-y-2">
+      <button
+        class="btn btn-xs preset-filled-primary-500 w-full uppercase tracking-[0.22em]"
+        type="button"
+        onclick={addProfile}
+      >
+        New Profile
+      </button>
+      <div class="grid grid-cols-2 gap-1.5">
+        <button
+          class="btn btn-2xs preset-tonal uppercase tracking-[0.22em]"
+          type="button"
+          onclick={() => void exportLocalizationProfiles()}
+          disabled={profileTransferBusy || !$localizationConfig}
+        >
+          Export
+        </button>
+        <button
+          class="btn btn-2xs preset-tonal uppercase tracking-[0.22em]"
+          type="button"
+          onclick={openImportProfilesDialog}
+          disabled={profileTransferBusy}
+        >
+          Import
+        </button>
+      </div>
+      <input
+        type="file"
+        accept=".json,application/json"
+        class="sr-only"
+        bind:this={profileImportInputEl}
+        onchange={(event) => {
+          const input = event.currentTarget as HTMLInputElement;
+          const file = input.files?.[0] ?? null;
+          if (!file) return;
+          void importLocalizationProfiles(file);
+        }}
+      />
+    </div>
 
     <SidebarSearchSection
       label="Search profiles"
@@ -4129,7 +4606,8 @@
         {:else}
           {#each filteredProfiles as profile (profile.id)}
             {@const isSelected = $activeProfileId === profile.id}
-            {@const enabled = profile.viewEnabled === true}
+            {@const runtimeEnabled = profile.enabled !== false}
+            {@const visible = profile.viewEnabled === true}
             {@const color = profileColorForId(profile.id, $profiles, profileIndexById, PROFILE_COLORS)}
             {@const supported = (profileSupportedSpacesById?.[profile.id] ?? []).includes(coordinateSpace)}
             <div
@@ -4137,7 +4615,7 @@
                 isSelected
                   ? 'border-primary-400/70 bg-primary-500/10 text-white shadow-lg shadow-primary-500/20'
                   : 'border-surface-700/40 text-surface-300 hover:border-surface-600/80'
-              } ${supported ? '' : 'opacity-60'}`}
+              } ${supported ? '' : 'opacity-60'} ${runtimeEnabled ? '' : 'opacity-70'}`}
               role="button"
               tabindex="0"
               aria-pressed={isSelected ? 'true' : 'false'}
@@ -4174,18 +4652,34 @@
                     <button
                       type="button"
                       class={`shrink-0 rounded border px-1.5 py-[1px] text-micro-tight uppercase tracking-[0.16em] transition ${
-                        enabled
+                        runtimeEnabled
+                          ? 'border-sky-500/60 bg-sky-500/10 text-sky-100 hover:border-sky-400/80 hover:bg-sky-500/20'
+                          : 'border-rose-500/60 bg-rose-500/10 text-rose-100 hover:border-rose-400/80 hover:bg-rose-500/20'
+                      }`}
+                      aria-label={`Toggle ${profile.name} localization runtime`}
+                      title={runtimeEnabled ? `Disable ${profile.name} for localization runtime` : `Enable ${profile.name} for localization runtime`}
+                      onclick={(event) => {
+                        event.stopPropagation();
+                        setProfileEnabled(profile.id, !runtimeEnabled);
+                      }}
+                    >
+                      {runtimeEnabled ? 'Enabled' : 'Disabled'}
+                    </button>
+                    <button
+                      type="button"
+                      class={`shrink-0 rounded border px-1.5 py-[1px] text-micro-tight uppercase tracking-[0.16em] transition ${
+                        visible
                           ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-100 hover:border-emerald-400/80 hover:bg-emerald-500/20'
                           : 'border-surface-600/60 bg-surface-800/40 text-surface-300 hover:border-surface-500/80 hover:bg-surface-700/50'
                       }`}
                       aria-label={`Toggle ${profile.name} visibility in 3D view`}
-                      title={enabled ? `Hide ${profile.name} in 3D view` : `Show ${profile.name} in 3D view`}
+                      title={visible ? `Hide ${profile.name} in 3D view` : `Show ${profile.name} in 3D view`}
                       onclick={(event) => {
                         event.stopPropagation();
-                        setProfileViewEnabled(profile.id, !enabled);
+                        setProfileViewEnabled(profile.id, !visible);
                       }}
                     >
-                      {enabled ? 'Visible' : 'Hidden'}
+                      {visible ? 'Visible' : 'Hidden'}
                     </button>
                     {#if !supported}
                       <span class="shrink-0 rounded border border-amber-500/60 bg-amber-500/10 px-1.5 py-[1px] text-micro-tight uppercase tracking-[0.16em] text-amber-100">
@@ -4240,6 +4734,25 @@
     </aside>
 
     <div class="min-w-0 flex flex-1 flex-col">
+      {#if showLocalizationBootLoading}
+        <section class="flex min-h-0 flex-1 items-center justify-center rounded border border-surface-800/60 bg-surface-950/60 p-6 text-center">
+          <div class="max-w-xl space-y-3">
+            <p class="text-xs uppercase tracking-[0.3em] text-surface-500">Loading localization</p>
+            <h2 class="text-lg font-semibold text-white">Preparing profiles, sources, field maps, and solver state…</h2>
+            <p class="text-sm text-surface-400">The page has painted; the initial workspace data is loading in the background.</p>
+          </div>
+        </section>
+      {:else if localizationBootError && !hasLocalizationBootstrapData}
+        <section class="flex min-h-0 flex-1 items-center justify-center rounded border border-error-500/40 bg-error-500/10 p-6 text-center">
+          <div class="max-w-xl space-y-3">
+            <p class="text-xs uppercase tracking-[0.3em] text-error-200">Localization failed to load</p>
+            <h2 class="text-lg font-semibold text-white">{localizationBootError}</h2>
+            <button class="btn btn-sm preset-filled-primary-500 uppercase tracking-[0.3em]" type="button" onclick={retryLocalizationBootstrap}>
+              Retry
+            </button>
+          </div>
+        </section>
+      {:else}
       <LocalizationWorkspace
       viewersComponent={LocalizationViewersComponent}
 	      markers={viewerMarkers}
@@ -4274,6 +4787,9 @@
 	      liveMarkerCount={liveMarkers.length}
 	      lastPollMs={lastPollMs}
       bind:pollHz={pollHz}
+	      pollHzMin={pollHzMin}
+	      pollHzMax={pollHzMax}
+	      pollHzStep={pollHzStep}
 	      feedMessage={feedMessage}
 	      targetSpaceOverlay={targetSpaceOverlay}
 	      baseFrame={baseFrame}
@@ -4302,6 +4818,7 @@
       bind:solverNameInput={solverNameInput}
       onCommitSolverName={commitSolverName}
       activeSolverMode={activeSolverConfig?.mode ?? null}
+      supportedSolverModes={supportedSolverModes}
       onSetSolverMode={setActiveSolverMode}
       activeSolverSourceIds={activeSolverConfig?.sourceIds ?? []}
       onSetActiveSolverUseAllSources={setActiveSolverUseAllSources}
@@ -4314,6 +4831,9 @@
       bind:tagSizeInput={tagSizeInput}
       tagSizeError={tagSizeError}
       onCommitTagSize={commitTagSize}
+      bind:excludedTagIdsInput={excludedTagIdsInput}
+      excludedTagIdsError={excludedTagIdsError}
+      onCommitExcludedTagIds={commitExcludedTagIds}
       snapZToGround={$activeProfile?.snapZToGround ?? false}
       snapRollToGround={$activeProfile?.snapRollToGround ?? false}
       snapPitchToGround={$activeProfile?.snapPitchToGround ?? false}
@@ -4351,10 +4871,7 @@
 	      sourceWeightsById={sourceWeightsById}
 	      onSetSourceWeight={setSourceWeight}
       sourceUsedByProfilesById={sourceUsedByProfilesById}
-	      pipelineStatusError={pipelineStatusError}
-	      pipelineOutputsError={pipelineOutputsError}
-      localizationConfigError={$localizationConfigError}
-      sourceStatusRows={sourceStatusRows}
+	      sourceStatusRows={sourceStatusRows}
       bind:showCameraPoseOverlay={showCameraPoseOverlay}
       bind:showCustomFieldsOverlay={showCustomFieldsOverlay}
       bind:showImuRotationOverlay={showImuRotationOverlay}
@@ -4392,6 +4909,7 @@
       onSetMapUploadFile={(file) => (mapUploadFile = file)}
       onUploadSelectedMapFile={uploadSelectedMapFile}
       />
+      {/if}
     </div>
   </section>
 </div>

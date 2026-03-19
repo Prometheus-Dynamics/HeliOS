@@ -35,6 +35,7 @@
     fetchLightingRuntimeState,
     fetchSavedAnimations,
     openLightingStateSocket,
+    postLightingFrame,
     resetLightingConfig as resetLightingConfigApi,
     saveLightingAnimation,
     saveLightingConfig,
@@ -42,8 +43,9 @@
   } from './lighting/lightingModalApi';
   import { deviceSettingsStore, type DeviceSettingsState } from '../../../routes/settings/deviceSettingsStore';
   import type { LightingSettings } from '../../../routes/settings/types';
-  import { REQUESTED_BY, apiFetch } from '../../../routes/settings/api';
+  import { REQUESTED_BY } from '../../../routes/settings/api';
   import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
+  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
   type Props = {
     peripheral: PeripheralEntry;
@@ -68,6 +70,14 @@
   const MAX_FREQ_KHZ = 2_000;
   const SAVED_REF_PREFIX = 'saved:';
   const TEMPLATE_REF_PREFIX = 'template:';
+  const DEFAULT_ANIMATION_EVENT_OPTIONS = [
+    { key: 'startup', label: 'Startup' },
+    { key: 'startup_idle', label: 'Startup idle' },
+    { key: 'reboot', label: 'Reboot' },
+    { key: 'update', label: 'Update' },
+    { key: 'update_error', label: 'Update error' },
+    { key: 'engine_crash', label: 'Engine crash' }
+  ] as const;
   const BUILTIN_TEMPLATE_NAMES = [
     'All Off',
     'Static Warm White',
@@ -89,7 +99,8 @@
     frequency_hz: 800_000,
     brightness: 128,
     label: 'Status ring',
-    protocol: 'sk6812-ec20'
+    protocol: 'sk6812-ec20',
+    default_animations: {}
   };
 
   const deviceState = $derived($deviceSettingsStore as DeviceSettingsState);
@@ -204,7 +215,7 @@
   }
 
   const templateNameKeys = $derived(
-    new Set([...BUILTIN_TEMPLATE_NAMES.map((name) => normalizedAnimationKey(name)), ...lightingTemplates.map((entry) => normalizedAnimationKey(entry.name))])
+    new SvelteSet([...BUILTIN_TEMPLATE_NAMES.map((name) => normalizedAnimationKey(name)), ...lightingTemplates.map((entry) => normalizedAnimationKey(entry.name))])
   );
   const visibleSavedAnimations = $derived(
     savedAnimations.filter((entry) => !templateNameKeys.has(normalizedAnimationKey(entry.name)))
@@ -215,6 +226,42 @@
         templateNameKeys.has(normalizedAnimationKey(entry.name)) &&
         !lightingTemplates.some((template) => normalizedAnimationKey(template.name) === normalizedAnimationKey(entry.name))
     )
+  );
+  const templateAnimationNameOptions = $derived(
+    (() => {
+      const names = new SvelteSet<string>();
+      for (const template of lightingTemplates) {
+        if (template.name.trim().length > 0) {
+          names.add(template.name.trim());
+        }
+      }
+      for (const entry of fallbackTemplateAnimations) {
+        if (entry.name.trim().length > 0) {
+          names.add(entry.name.trim());
+        }
+      }
+      return [...names].sort((a, b) => a.localeCompare(b));
+    })()
+  );
+  const defaultAnimationNameOptions = $derived(
+    (() => {
+      const names = new SvelteSet<string>();
+      for (const entry of savedAnimations) {
+        if (entry.name.trim().length > 0) {
+          names.add(entry.name.trim());
+        }
+      }
+      for (const templateName of templateAnimationNameOptions) {
+        names.add(templateName);
+      }
+      const configured = form.default_animations ?? {};
+      for (const value of Object.values(configured)) {
+        if (typeof value === 'string' && value.trim().length > 0) {
+          names.add(value.trim());
+        }
+      }
+      return [...names].sort((a, b) => a.localeCompare(b));
+    })()
   );
 
   function isTemplateNamedAnimation(name: string): boolean {
@@ -260,7 +307,7 @@
     savedBusy = true;
     const previousSelection = selectedLoadAnimationRef;
     try {
-      savedAnimations = await fetchSavedAnimations(apiFetch);
+      savedAnimations = await fetchSavedAnimations();
       syncLoadAnimationRef(previousSelection);
     } catch (err) {
       liveError = buildErrorMessage({ error: err, fallback: 'Unable to load saved animations.' });
@@ -275,7 +322,7 @@
     templatesBusy = true;
     const previousSelection = selectedLoadAnimationRef;
     try {
-      lightingTemplates = await fetchLightingTemplates(apiFetch);
+      lightingTemplates = await fetchLightingTemplates();
       syncLoadAnimationRef(previousSelection);
     } catch (err) {
       animationFormError = buildErrorMessage({ error: err, fallback: 'Unable to load built-in lighting templates.' });
@@ -341,7 +388,7 @@
 
   async function loadLightingRuntimeState(): Promise<void> {
     try {
-      const state = await fetchLightingRuntimeState(apiFetch);
+      const state = await fetchLightingRuntimeState();
       syncFromRuntimeState(state, 'http');
     } catch (err) {
       const message = buildErrorMessage({ error: err, fallback: 'Unable to load live lighting state.' });
@@ -398,7 +445,7 @@
       ledSelectionBrightness = Array.from({ length: count }, (_, idx) => clampNumber(ledSelectionBrightness[idx] ?? 255, 0, 255));
     }
     const safeSelection = Array.from(
-      new Set(selectedLedIndices.map((index) => clampNumber(index, 0, Math.max(0, count - 1))).filter((index) => index >= 0 && index < count))
+      new SvelteSet(selectedLedIndices.map((index) => clampNumber(index, 0, Math.max(0, count - 1))).filter((index) => index >= 0 && index < count))
     );
     const nextSelection = safeSelection;
     const changed =
@@ -408,6 +455,34 @@
       syncEditorFromSelection();
     }
   });
+
+  function defaultAnimationRefForEvent(eventKey: string): string {
+    const normalizedEvent = eventKey.trim().toLowerCase();
+    if (!normalizedEvent.length) return '';
+    const mapping = form.default_animations ?? {};
+    for (const [key, value] of Object.entries(mapping)) {
+      if (key.trim().toLowerCase() === normalizedEvent && typeof value === 'string') {
+        return value.trim();
+      }
+    }
+    return '';
+  }
+
+  function setDefaultAnimationRefForEvent(eventKey: string, animationName: string): void {
+    const normalizedEvent = eventKey.trim().toLowerCase();
+    if (!normalizedEvent.length) return;
+    const next = { ...(form.default_animations ?? {}) } as Record<string, string>;
+    const trimmedName = animationName.trim();
+    if (!trimmedName.length) {
+      delete next[normalizedEvent];
+    } else {
+      next[normalizedEvent] = trimmedName;
+    }
+    form = {
+      ...form,
+      default_animations: next
+    };
+  }
 
   $effect(() => {
     if (sequenceBusy || timelineKeyframes.length === 0) return;
@@ -998,12 +1073,7 @@
           if (options?.updateCursor) {
             setTimelineCursorMs(loopCursor, false);
           }
-          const body: Record<string, unknown> = {
-            requested_by: REQUESTED_BY,
-            frame: frame.frame,
-            brightness
-          };
-          await apiFetch('/device/lighting', { method: 'POST', body: JSON.stringify(body) });
+          await postLightingFrame(frame.frame, brightness, REQUESTED_BY);
           const frameDuration = Math.max(50, frame.duration_ms || 0);
           await new Promise((resolve) => setTimeout(resolve, frameDuration));
           loopCursor += frameDuration;
@@ -1049,15 +1119,12 @@
     liveStatus = null;
     liveError = null;
     try {
-      const body: Record<string, unknown> = {
-        requested_by: REQUESTED_BY,
-        frame: buildCurrentFramePayloadForOutput(),
-        brightness: clampNumber(liveBrightness)
-      };
-      await apiFetch('/device/lighting', { method: 'POST', body: JSON.stringify(body) });
+      const frame = buildCurrentFramePayloadForOutput();
+      const brightness = clampNumber(liveBrightness);
+      await postLightingFrame(frame, brightness, REQUESTED_BY);
       if (!previewPrimed) {
         previewPrimed = true;
-        await apiFetch('/device/lighting', { method: 'POST', body: JSON.stringify(body) });
+        await postLightingFrame(frame, brightness, REQUESTED_BY);
       }
       liveStatus = 'Previewed current frame';
     } catch (err) {
@@ -1074,10 +1141,10 @@
     liveStatus = null;
     try {
       const offFrame = Array.from({ length: Math.max(1, lightingCount || DEFAULT_LIGHTING.count) }, () => ({ r: 0, g: 0, b: 0, w: 0 }));
-      await stopLightingOutput(apiFetch, offFrame, REQUESTED_BY);
+      await stopLightingOutput(offFrame, REQUESTED_BY);
       liveStatus = 'Stopped device output';
       stopLightingAnimationTicker();
-      const state = await fetchLightingRuntimeState(apiFetch);
+      const state = await fetchLightingRuntimeState();
       syncFromRuntimeState(state, 'http');
     } catch (err) {
       liveError = buildErrorMessage({ error: err, fallback: 'Unable to stop lighting output.' });
@@ -1188,7 +1255,7 @@
           (entry) => entry.template_id === selected.value || normalizedAnimationKey(entry.name) === selectedKey
         );
         if (matchedTemplate) {
-          const template = await fetchLightingTemplate(apiFetch, matchedTemplate.template_id);
+          const template = await fetchLightingTemplate(matchedTemplate.template_id);
           const entry = templateToSavedAnimation(template);
           animationName = entry.name;
           if (applyAnimationEntryToEditor(entry)) {
@@ -1325,7 +1392,7 @@
         const fallbackName = `Imported Animation ${idx + 1}`;
         const body = buildSaveBodyFromImportedEntry(entries[idx], fallbackName);
         if (!body) continue;
-        await saveLightingAnimation(apiFetch, body);
+        await saveLightingAnimation(body);
         imported += 1;
       }
       if (imported === 0) {
@@ -1401,7 +1468,7 @@
 
     animationSaveBusy = true;
     try {
-      await saveLightingAnimation(apiFetch, body);
+      await saveLightingAnimation(body);
       animationFormStatus = `Saved ${name}`;
       await loadSavedAnimations();
       selectedLoadAnimationRef = encodeLoadAnimationRef('saved', name);
@@ -1410,6 +1477,58 @@
       animationFormError = buildErrorMessage({ error: err, fallback: 'Unable to save animation.' });
     } finally {
       animationSaveBusy = false;
+    }
+  }
+
+  async function ensureDefaultAnimationEntries(defaultAnimations: Record<string, string>): Promise<void> {
+    const requiredKeys = new SvelteSet<string>();
+    for (const animationName of Object.values(defaultAnimations)) {
+      const key = normalizedAnimationKey(animationName);
+      if (key.length > 0) {
+        requiredKeys.add(key);
+      }
+    }
+    if (requiredKeys.size === 0) {
+      return;
+    }
+
+    const savedKeys = new SvelteSet<string>();
+    for (const entry of savedAnimations) {
+      const key = normalizedAnimationKey(entry.name);
+      if (key.length > 0) {
+        savedKeys.add(key);
+      }
+    }
+
+    const templateByNameKey = new SvelteMap<string, LightingAnimationTemplateSummary>();
+    for (const template of lightingTemplates) {
+      const key = normalizedAnimationKey(template.name);
+      if (key.length > 0 && !templateByNameKey.has(key)) {
+        templateByNameKey.set(key, template);
+      }
+    }
+
+    let importedTemplate = false;
+    for (const key of requiredKeys) {
+      if (savedKeys.has(key)) {
+        continue;
+      }
+      const template = templateByNameKey.get(key);
+      if (!template) {
+        continue;
+      }
+      const templateDoc = await fetchLightingTemplate(template.template_id);
+      const saveBody = buildSaveBodyFromImportedEntry(templateToSavedAnimation(templateDoc), templateDoc.name);
+      if (!saveBody) {
+        continue;
+      }
+      await saveLightingAnimation(saveBody);
+      savedKeys.add(key);
+      importedTemplate = true;
+    }
+
+    if (importedTemplate) {
+      await loadSavedAnimations();
     }
   }
 
@@ -1437,7 +1556,7 @@
       const next = clampNumber(index, 0, Math.max(0, ledColors.length - 1));
       const exists = selectedLedIndices.includes(next);
       const updated = exists ? selectedLedIndices.filter((item) => item !== next) : [...selectedLedIndices, next];
-      selectedLedIndices = Array.from(new Set(updated)).sort((a, b) => a - b);
+      selectedLedIndices = Array.from(new SvelteSet(updated)).sort((a, b) => a - b);
       syncEditorFromSelection();
     });
   }
@@ -1460,7 +1579,7 @@
     commitEditorChange(() => {
       editorColor = value;
       if (selectedLedIndices.length === 0) return;
-      const selectedSet = new Set(selectedLedIndices.map((idx) => clampNumber(idx, 0, Math.max(0, ledColors.length - 1))));
+      const selectedSet = new SvelteSet(selectedLedIndices.map((idx) => clampNumber(idx, 0, Math.max(0, ledColors.length - 1))));
       ledColors = ledColors.map((current, i) => (selectedSet.has(i) ? value : current));
     });
   }
@@ -1470,7 +1589,7 @@
       const next = clampNumber(value, 0, 255);
       editorBrightness = next;
       if (selectedLedIndices.length === 0) return;
-      const selectedSet = new Set(selectedLedIndices.map((idx) => clampNumber(idx, 0, Math.max(0, ledSelectionBrightness.length - 1))));
+      const selectedSet = new SvelteSet(selectedLedIndices.map((idx) => clampNumber(idx, 0, Math.max(0, ledSelectionBrightness.length - 1))));
       ledSelectionBrightness = ledSelectionBrightness.map((current, i) => (selectedSet.has(i) ? next : current));
     });
   }
@@ -1486,6 +1605,11 @@
 
     busy = true;
     const brightnessValue = typeof form.brightness === 'number' ? form.brightness : null;
+    const defaultAnimations = Object.fromEntries(
+      Object.entries(form.default_animations ?? {})
+        .map(([eventKey, animationName]) => [eventKey.trim().toLowerCase(), String(animationName ?? '').trim()])
+        .filter(([eventKey, animationName]) => eventKey.length > 0 && animationName.length > 0)
+    );
 
     const payload = {
       requested_by: REQUESTED_BY,
@@ -1498,11 +1622,13 @@
         frequency_hz: coerceInt(form.frequency_hz),
         brightness: brightnessValue == null ? null : Math.min(255, Math.max(0, coerceInt(brightnessValue))),
         label: form.label?.trim() ? form.label.trim() : null,
-        protocol: form.protocol.trim() || DEFAULT_LIGHTING.protocol
+        protocol: form.protocol.trim() || DEFAULT_LIGHTING.protocol,
+        default_animations: defaultAnimations
       }
     };
 
     try {
+      await ensureDefaultAnimationEntries(defaultAnimations);
       await saveLightingConfig(deviceSettingsStore, payload);
       status = `Saved at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
       onRefresh();
@@ -1524,7 +1650,7 @@
   async function deleteSavedAnimation(name: string, source: 'panel' | 'toolbar' = 'panel'): Promise<void> {
     savedBusy = true;
     try {
-      await deleteLightingAnimation(apiFetch, name);
+      await deleteLightingAnimation(name);
       await loadSavedAnimations();
       if (source === 'toolbar') {
         animationFormStatus = `Deleted ${name}`;
@@ -1564,7 +1690,7 @@
     settingsBusy = true;
     settingsError = null;
     try {
-      const payload = await resetLightingConfigApi(apiFetch);
+      const payload = await resetLightingConfigApi();
       form = normalizeLighting(payload, DEFAULT_LIGHTING);
       lightingCount = form.count || DEFAULT_LIGHTING.count;
       frequencyKhzTouched = false;
@@ -1796,6 +1922,10 @@
     maxFreqKhz={MAX_FREQ_KHZ}
     {frequencyKhz}
     defaultCount={DEFAULT_LIGHTING.count}
+    defaultAnimationEvents={DEFAULT_ANIMATION_EVENT_OPTIONS}
+    {defaultAnimationNameOptions}
+    resolveDefaultAnimationForEvent={(eventKey) => defaultAnimationRefForEvent(eventKey)}
+    onDefaultAnimationChange={(eventKey, animationName) => setDefaultAnimationRefForEvent(eventKey, animationName)}
     onClose={() => (showAdvanced = false)}
     onReset={() => void resetLightingConfig()}
     onRetryLoad={() => void ensureDeviceSettings()}

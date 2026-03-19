@@ -1,13 +1,17 @@
 use axum::{
     Json,
+    extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use lib_led_animations::{LED_ANIMATIONS_PATH, command_for_animation_name, load_led_animations};
+use lib_sensors::led_config::{self, DEFAULT_ANIMATION_EVENT_REBOOT};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tracing::{debug, warn};
 use utoipa::ToSchema;
 
+use crate::http::AppState;
 use crate::http::error::ErrorBody;
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -77,7 +81,7 @@ async fn reboot_now() -> std::io::Result<std::process::Output> {
         (status = 502, description = "systemctl failed", body = ErrorBody)
     )
 )]
-pub async fn restart(Json(req): Json<RestartRequest>) -> Response {
+pub async fn restart(State(state): State<AppState>, Json(req): Json<RestartRequest>) -> Response {
     if let Some(requested_by) = req.requested_by.as_deref() {
         debug!(requested_by, target = ?req.target, "restart requested");
     } else {
@@ -86,11 +90,8 @@ pub async fn restart(Json(req): Json<RestartRequest>) -> Response {
 
     let output = match req.target {
         RestartTargetId::Device => {
-            if ota_pending_marker_exists() {
-                reboot_tryboot().await
-            } else {
-                reboot_now().await
-            }
+            apply_reboot_default_animation(&state).await;
+            if ota_pending_marker_exists() { reboot_tryboot().await } else { reboot_now().await }
         }
         target => {
             let Some(unit) = target_unit(target) else {
@@ -116,5 +117,33 @@ pub async fn restart(Json(req): Json<RestartRequest>) -> Response {
             (StatusCode::BAD_GATEWAY, Json(ErrorBody::new("bad_gateway", message))).into_response()
         }
         Err(err) => (StatusCode::BAD_GATEWAY, Json(ErrorBody::new("bad_gateway", err.to_string()))).into_response(),
+    }
+}
+
+async fn apply_reboot_default_animation(state: &AppState) {
+    let paths = led_config::default_paths();
+    let Some(config) = led_config::load_led_config(&paths) else {
+        return;
+    };
+    let Some(animation_name) = config.animation_for_event(DEFAULT_ANIMATION_EVENT_REBOOT).map(ToOwned::to_owned) else {
+        return;
+    };
+    let doc = load_led_animations(LED_ANIMATIONS_PATH).await;
+    let Some(command) = command_for_animation_name(&doc, &animation_name, config.brightness) else {
+        warn!(event = DEFAULT_ANIMATION_EVENT_REBOOT, animation = %animation_name, "configured default animation was not found");
+        return;
+    };
+    let Some(sensors) = state.ensure_sensors().await else {
+        warn!(event = DEFAULT_ANIMATION_EVENT_REBOOT, "peripherals IPC unavailable");
+        return;
+    };
+    match sensors.lighting_command(command).await {
+        Ok(Ok(())) => {}
+        Ok(Err(reason)) => {
+            warn!(event = DEFAULT_ANIMATION_EVENT_REBOOT, %reason, "peripheral rejected configured default animation");
+        }
+        Err(err) => {
+            warn!(event = DEFAULT_ANIMATION_EVENT_REBOOT, %err, "failed to apply configured default animation");
+        }
     }
 }

@@ -29,6 +29,20 @@ async function buildPipelinePayload(): Promise<PipelinePagePayload> {
       return [];
     })
   ]);
+  const sortedSummaries = Array.isArray(summaries)
+    ? [...summaries].sort((a, b) => String(a?.name ?? a?.id ?? '').localeCompare(String(b?.name ?? b?.id ?? '')))
+    : [];
+  const bootstrapPipelineId =
+    typeof sortedSummaries[0]?.id === 'string' && sortedSummaries[0].id.trim().length
+      ? sortedSummaries[0].id
+      : null;
+  const bootstrapGraph =
+    bootstrapPipelineId
+      ? await PipelinesApi.fetchGraph({ id: bootstrapPipelineId }).catch((error) => {
+          console.warn(`Failed to load bootstrap graph for ${bootstrapPipelineId}`, error);
+          return null;
+        })
+      : null;
   const issueCountById = new Map<string, number>();
   for (const entry of summaries ?? []) {
     const id = typeof entry?.id === 'string' ? entry.id : null;
@@ -50,7 +64,10 @@ async function buildPipelinePayload(): Promise<PipelinePagePayload> {
         name,
         alias: name,
         issueCount: issueCountById.get(pipelineId) ?? 0,
-        graph: { nodes: {}, connections: [] } satisfies PipelineOverviewEntry['graph'],
+        graph:
+          pipelineId === bootstrapPipelineId && bootstrapGraph?.graph
+            ? bootstrapGraph.graph
+            : ({} satisfies PipelineOverviewEntry['graph']),
         attachments: [],
         diagnostics: null,
         appearance: null,
@@ -72,5 +89,7 @@ async function buildPipelinePayload(): Promise<PipelinePagePayload> {
     generatedAt: Date.now()
   };
 
-  return buildPipelinePayloadFromOverview(overview);
+  const payload = buildPipelinePayloadFromOverview(overview);
+  payload.registry = [];
+  return payload;
 }

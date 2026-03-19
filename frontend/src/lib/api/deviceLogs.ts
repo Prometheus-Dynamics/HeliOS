@@ -1,5 +1,7 @@
+import { apiFetchCachedJson } from '$lib/api/core/http';
 import { getHttpClientBase } from '$lib/api/httpClient';
-import { buildWsUrlFromHttpBase, canUseWebSockets } from '$lib/api/wsClient';
+import { buildWsUrlFromHttpBase, canUseWebSockets } from '$lib/api/core/ws';
+import { cacheResourceData, type ResourceCacheContext, type ResourceCacheResult } from '$lib/api/resourceCache';
 
 export type LogSourceKind = 'journal_system' | 'journal_unit' | 'dmesg' | 'file';
 
@@ -24,16 +26,16 @@ export type LogSource = {
   status?: SystemdUnitStatus | null;
 };
 
-export async function fetchLogSources(): Promise<LogSource[]> {
-  const base = getHttpClientBase();
-  const url = `${base.replace(/\/+$/, '')}/v1/device/logs/sources`;
-  const resp = await fetch(url, { headers: { accept: 'application/json' } });
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => '');
-    throw new Error(text || `Failed to load log sources (${resp.status})`);
+export async function fetchLogSources(context: ResourceCacheContext<LogSource[]> = {}): Promise<LogSource[] | ResourceCacheResult<LogSource[]>> {
+  const payload = await apiFetchCachedJson<unknown>('/device/logs/sources', context);
+  if (payload.status === 'not_modified') {
+    return payload as ResourceCacheResult<LogSource[]>;
   }
-  const payload = (await resp.json()) as unknown;
-  return Array.isArray(payload) ? (payload as LogSource[]) : [];
+  const sources = Array.isArray(payload.data) ? (payload.data as LogSource[]) : [];
+  return cacheResourceData(sources, {
+    etag: payload.etag ?? null,
+    revision: payload.revision ?? null
+  });
 }
 
 export function buildLogsSocketUrl(sourceId: string, options: { lines?: number; follow?: boolean } = {}): string {

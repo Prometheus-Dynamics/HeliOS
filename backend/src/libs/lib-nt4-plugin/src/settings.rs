@@ -54,13 +54,34 @@ pub fn sanitize_segment(raw: &str, fallback: &str) -> String {
     if filtered.is_empty() { fallback.to_string() } else { filtered }
 }
 
-fn settings_path() -> PathBuf {
-    std::env::var_os("HELIOS_NT4_SETTINGS_FILE").map(PathBuf::from).unwrap_or_else(|| "/etc/helios/nt4.json".into())
+fn settings_paths() -> (PathBuf, Option<PathBuf>) {
+    match std::env::var_os("HELIOS_NT4_SETTINGS_FILE") {
+        Some(path) => (PathBuf::from(path), None),
+        None => (PathBuf::from("/var/lib/helios/nt4.json"), Some(PathBuf::from("/etc/helios/nt4.json"))),
+    }
+}
+
+fn team_file_paths() -> (PathBuf, Option<PathBuf>) {
+    match std::env::var_os("HELIOS_TEAM_FILE") {
+        Some(path) => (PathBuf::from(path), None),
+        None => (PathBuf::from("/var/lib/helios/team"), Some(PathBuf::from("/etc/helios/team"))),
+    }
+}
+
+fn read_to_string_with_fallback(path: &PathBuf, fallback: Option<&PathBuf>) -> std::io::Result<String> {
+    match std::fs::read_to_string(path) {
+        Ok(raw) => Ok(raw),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => match fallback {
+            Some(fallback) => std::fs::read_to_string(fallback),
+            None => Err(err),
+        },
+        Err(err) => Err(err),
+    }
 }
 
 pub fn read_settings_file() -> Nt4SettingsFile {
-    let path = settings_path();
-    let Ok(data) = std::fs::read_to_string(&path) else {
+    let (path, legacy_path) = settings_paths();
+    let Ok(data) = read_to_string_with_fallback(&path, legacy_path.as_ref()) else {
         return Nt4SettingsFile::default();
     };
     serde_json::from_str::<Nt4SettingsFile>(&data).unwrap_or_default()
@@ -69,13 +90,14 @@ pub fn read_settings_file() -> Nt4SettingsFile {
 #[derive(Debug)]
 struct SettingsCache {
     last_check: Instant,
+    source_path: Option<PathBuf>,
     modified: Option<SystemTime>,
     value: Nt4SettingsFile,
 }
 
 static SETTINGS_CACHE: once_cell::sync::Lazy<Mutex<SettingsCache>> = once_cell::sync::Lazy::new(|| {
     let now = Instant::now();
-    Mutex::new(SettingsCache { last_check: now.checked_sub(Duration::from_secs(10)).unwrap_or(now), modified: None, value: Nt4SettingsFile::default() })
+    Mutex::new(SettingsCache { last_check: now.checked_sub(Duration::from_secs(10)).unwrap_or(now), source_path: None, modified: None, value: Nt4SettingsFile::default() })
 });
 
 pub fn cached_settings() -> Nt4SettingsFile {
@@ -87,10 +109,11 @@ pub fn cached_settings() -> Nt4SettingsFile {
     }
     guard.last_check = now;
 
-    let path = settings_path();
-    let meta = std::fs::metadata(&path);
-    let modified = meta.ok().and_then(|m| m.modified().ok());
-    if modified != guard.modified {
+    let (path, legacy_path) = settings_paths();
+    let source_path = if path.is_file() { Some(path) } else { legacy_path.filter(|candidate| candidate.is_file()) };
+    let modified = source_path.as_ref().and_then(|source| std::fs::metadata(source).ok()).and_then(|meta| meta.modified().ok());
+    if modified != guard.modified || source_path != guard.source_path {
+        guard.source_path = source_path;
         guard.modified = modified;
         guard.value = read_settings_file();
     }
@@ -102,8 +125,8 @@ fn default_subscriptions_enabled() -> bool {
 }
 
 fn default_nt4_server_host_from_team_file() -> Option<String> {
-    let path = std::env::var_os("HELIOS_TEAM_FILE").map(PathBuf::from).unwrap_or_else(|| "/etc/helios/team".into());
-    let content = std::fs::read_to_string(&path).ok()?;
+    let (path, legacy_path) = team_file_paths();
+    let content = read_to_string_with_fallback(&path, legacy_path.as_ref()).ok()?;
     let trimmed = content.trim();
     if trimmed.is_empty() {
         return None;

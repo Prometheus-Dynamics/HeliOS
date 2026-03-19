@@ -69,10 +69,14 @@ async fn handle_wipe_marker(marker: &PathBuf, current_slot: &str) {
         return;
     }
 
-    let old_label = if current_slot == "ACTIVE" { "RESERVE" } else { "ACTIVE" };
-    if let Some(old_dev) = by_label_path(old_label) {
-        let _ = Command::new("umount").arg(&old_dev).status().await;
-        let _ = Command::new("mkfs.ext4").args(["-F", "-L", old_label, &old_dev]).status().await;
+    if current_slot == "ACTIVE" || current_slot == "RESERVE" {
+        let old_label = if current_slot == "ACTIVE" { "RESERVE" } else { "ACTIVE" };
+        if let Some(old_dev) = by_label_path(old_label) {
+            let _ = Command::new("umount").arg(&old_dev).status().await;
+            let _ = Command::new("mkfs.ext4").args(["-F", "-L", old_label, &old_dev]).status().await;
+        }
+    } else {
+        info!(slot = %current_slot, "wipe-once marker ignored for squashfs OTA layout");
     }
 
     if let Err(err) = fs::remove_file(marker).await {

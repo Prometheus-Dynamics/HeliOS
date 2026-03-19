@@ -7,6 +7,41 @@ use imageproc::point::Point;
 use super::shared::*;
 
 pub(super) fn suzuki_abe_with_scratch_i32(image: &GrayImage, image_values: &mut Vec<i32>) -> Vec<Contour<i32>> {
+    let mut point_store = Vec::new();
+    let mut compact_contours = Vec::new();
+    suzuki_abe_with_scratch_i32_compact(image, image_values, &mut point_store, &mut compact_contours);
+    compact_contours.into_iter().map(|contour| Contour::new(contour.points(&point_store).to_vec(), contour.border_type, contour.parent)).collect()
+}
+
+#[inline(always)]
+fn push_compact_contour(contours: &mut Vec<CompactContour>, border_type: BorderType, parent: Option<usize>, start: usize, end: usize) {
+    if end > start {
+        contours.push(CompactContour { start, len: end - start, border_type, parent });
+    }
+}
+
+#[inline(always)]
+fn push_point_capped(point_store: &mut Vec<Point<i32>>, point: Point<i32>, contour_start: usize, point_limit: usize) -> bool {
+    if point_store.len() >= point_limit {
+        point_store.truncate(contour_start);
+        return false;
+    }
+    point_store.push(point);
+    true
+}
+
+pub(super) fn suzuki_abe_with_scratch_i32_compact(image: &GrayImage, image_values: &mut Vec<i32>, contour_points_store: &mut Vec<Point<i32>>, contours: &mut Vec<CompactContour>) {
+    let _ = suzuki_abe_with_scratch_i32_compact_capped(image, image_values, contour_points_store, contours, usize::MAX, usize::MAX);
+}
+
+pub(super) fn suzuki_abe_with_scratch_i32_compact_capped(
+    image: &GrayImage,
+    image_values: &mut Vec<i32>,
+    contour_points_store: &mut Vec<Point<i32>>,
+    contours: &mut Vec<CompactContour>,
+    max_points: usize,
+    max_contours: usize,
+) -> bool {
     let width = image.width() as usize;
     let width_i32 = width as i32;
     let height = image.height() as usize;
@@ -22,8 +57,11 @@ pub(super) fn suzuki_abe_with_scratch_i32(image: &GrayImage, image_values: &mut 
     let mut neighborhood = Neighborhood::default();
     let steps_fwd = build_neighbor_steps(&offsets_lin, &neighborhood.offsets, &NEIGHBOR_FORWARD);
     let steps_rev = build_neighbor_steps(&offsets_lin, &neighborhood.offsets, &NEIGHBOR_REVERSE);
-    let mut contours: Vec<Contour<i32>> = Vec::new();
+    contour_points_store.clear();
+    contours.clear();
     let mut curr_border_num = 1;
+    let point_limit = max_points.max(1);
+    let contour_limit = max_contours.max(1);
 
     for y in 0..height {
         let mut parent_border_num = 1;
@@ -58,6 +96,9 @@ pub(super) fn suzuki_abe_with_scratch_i32(image: &GrayImage, image_values: &mut 
                 } else {
                     None
                 } {
+                    if contours.len() >= contour_limit {
+                        return false;
+                    }
                     curr_border_num += 1;
 
                     let parent = if parent_border_num > 1 {
@@ -71,7 +112,7 @@ pub(super) fn suzuki_abe_with_scratch_i32(image: &GrayImage, image_values: &mut 
                         None
                     };
 
-                    let mut contour_points: ContourPoints = ContourPoints::with_capacity(32);
+                    let contour_start = contour_points_store.len();
                     let curr = Point::new(xi, yi);
                     neighborhood.rotate_to_value(adj - curr);
 
@@ -83,7 +124,9 @@ pub(super) fn suzuki_abe_with_scratch_i32(image: &GrayImage, image_values: &mut 
                         let mut pos_idx = (pos3.y as usize) * width + pos3.x as usize;
 
                         loop {
-                            contour_points.push(pos3);
+                            if !push_point_capped(contour_points_store, pos3, contour_start, point_limit) {
+                                return false;
+                            }
                             let start = start_dir;
                             let pos3_x = pos3.x;
                             let pos3_y = pos3.y;
@@ -116,13 +159,15 @@ pub(super) fn suzuki_abe_with_scratch_i32(image: &GrayImage, image_values: &mut 
                             start_dir = unsafe { *OPPOSITE.get_unchecked(next_idx) };
                         }
                     } else {
-                        contour_points.push(curr);
+                        if !push_point_capped(contour_points_store, curr, contour_start, point_limit) {
+                            return false;
+                        }
                         unsafe {
                             *image_values.get_unchecked_mut(idx) = -curr_border_num;
                         }
                     }
 
-                    contours.push(Contour::new(contour_points.into_vec(), border_type, parent));
+                    push_compact_contour(contours, border_type, parent, contour_start, contour_points_store.len());
                 }
 
                 let new_state = unsafe { *image_values.get_unchecked(idx) };
@@ -161,6 +206,9 @@ pub(super) fn suzuki_abe_with_scratch_i32(image: &GrayImage, image_values: &mut 
                 } else {
                     None
                 } {
+                    if contours.len() >= contour_limit {
+                        return false;
+                    }
                     curr_border_num += 1;
 
                     let parent = if parent_border_num > 1 {
@@ -174,7 +222,7 @@ pub(super) fn suzuki_abe_with_scratch_i32(image: &GrayImage, image_values: &mut 
                         None
                     };
 
-                    let mut contour_points: ContourPoints = ContourPoints::with_capacity(32);
+                    let contour_start = contour_points_store.len();
                     let curr = Point::new(xi, yi);
                     neighborhood.rotate_to_value(adj - curr);
 
@@ -187,7 +235,9 @@ pub(super) fn suzuki_abe_with_scratch_i32(image: &GrayImage, image_values: &mut 
                         let mut pos_idx = (pos3.y as usize) * width + pos3.x as usize;
 
                         loop {
-                            contour_points.push(pos3);
+                            if !push_point_capped(contour_points_store, pos3, contour_start, point_limit) {
+                                return false;
+                            }
                             let start = start_dir;
                             let pos3_x = pos3.x;
                             let pos3_y = pos3.y;
@@ -221,13 +271,15 @@ pub(super) fn suzuki_abe_with_scratch_i32(image: &GrayImage, image_values: &mut 
                             start_dir = unsafe { *OPPOSITE.get_unchecked(next_idx) };
                         }
                     } else {
-                        contour_points.push(curr);
+                        if !push_point_capped(contour_points_store, curr, contour_start, point_limit) {
+                            return false;
+                        }
                         unsafe {
                             *image_values.get_unchecked_mut(idx) = -curr_border_num;
                         }
                     }
 
-                    contours.push(Contour::new(contour_points.into_vec(), border_type, parent));
+                    push_compact_contour(contours, border_type, parent, contour_start, contour_points_store.len());
                 }
 
                 let new_state = unsafe { *image_values.get_unchecked(idx) };
@@ -255,6 +307,9 @@ pub(super) fn suzuki_abe_with_scratch_i32(image: &GrayImage, image_values: &mut 
                     } else {
                         None
                     } {
+                        if contours.len() >= contour_limit {
+                            return false;
+                        }
                         curr_border_num += 1;
 
                         let parent = if parent_border_num > 1 {
@@ -268,7 +323,7 @@ pub(super) fn suzuki_abe_with_scratch_i32(image: &GrayImage, image_values: &mut 
                             None
                         };
 
-                        let mut contour_points: ContourPoints = ContourPoints::with_capacity(32);
+                        let contour_start = contour_points_store.len();
                         let curr = Point::new(xi, yi);
                         neighborhood.rotate_to_value(adj - curr);
 
@@ -280,7 +335,9 @@ pub(super) fn suzuki_abe_with_scratch_i32(image: &GrayImage, image_values: &mut 
                             let mut pos_idx = (pos3.y as usize) * width + pos3.x as usize;
 
                             loop {
-                                contour_points.push(pos3);
+                                if !push_point_capped(contour_points_store, pos3, contour_start, point_limit) {
+                                    return false;
+                                }
                                 let start = start_dir;
                                 let pos3_x = pos3.x;
                                 let pos3_y = pos3.y;
@@ -314,13 +371,15 @@ pub(super) fn suzuki_abe_with_scratch_i32(image: &GrayImage, image_values: &mut 
                                 start_dir = unsafe { *OPPOSITE.get_unchecked(next_idx) };
                             }
                         } else {
-                            contour_points.push(curr);
+                            if !push_point_capped(contour_points_store, curr, contour_start, point_limit) {
+                                return false;
+                            }
                             unsafe {
                                 *image_values.get_unchecked_mut(idx) = -curr_border_num;
                             }
                         }
 
-                        contours.push(Contour::new(contour_points.into_vec(), border_type, parent));
+                        push_compact_contour(contours, border_type, parent, contour_start, contour_points_store.len());
                     }
                 }
             }
@@ -354,6 +413,9 @@ pub(super) fn suzuki_abe_with_scratch_i32(image: &GrayImage, image_values: &mut 
                 } else {
                     None
                 } {
+                    if contours.len() >= contour_limit {
+                        return false;
+                    }
                     curr_border_num += 1;
 
                     let parent = if parent_border_num > 1 {
@@ -367,7 +429,7 @@ pub(super) fn suzuki_abe_with_scratch_i32(image: &GrayImage, image_values: &mut 
                         None
                     };
 
-                    let mut contour_points: ContourPoints = ContourPoints::with_capacity(32);
+                    let contour_start = contour_points_store.len();
                     let curr = Point::new(xi, yi);
                     neighborhood.rotate_to_value(adj - curr);
 
@@ -384,7 +446,9 @@ pub(super) fn suzuki_abe_with_scratch_i32(image: &GrayImage, image_values: &mut 
                         let mut pos_idx = (pos3.y as usize) * width + pos3.x as usize;
 
                         loop {
-                            contour_points.push(pos3);
+                            if !push_point_capped(contour_points_store, pos3, contour_start, point_limit) {
+                                return false;
+                            }
                             let start = start_dir;
                             let pos3_x = pos3.x;
                             let pos3_y = pos3.y;
@@ -417,13 +481,15 @@ pub(super) fn suzuki_abe_with_scratch_i32(image: &GrayImage, image_values: &mut 
                             start_dir = unsafe { *OPPOSITE.get_unchecked(next_idx) };
                         }
                     } else {
-                        contour_points.push(curr);
+                        if !push_point_capped(contour_points_store, curr, contour_start, point_limit) {
+                            return false;
+                        }
                         unsafe {
                             *image_values.get_unchecked_mut(idx) = -curr_border_num;
                         }
                     }
 
-                    contours.push(Contour::new(contour_points.into_vec(), border_type, parent));
+                    push_compact_contour(contours, border_type, parent, contour_start, contour_points_store.len());
                 }
 
                 let new_state = unsafe { *image_values.get_unchecked(idx) };
@@ -435,5 +501,6 @@ pub(super) fn suzuki_abe_with_scratch_i32(image: &GrayImage, image_values: &mut 
         }
     }
 
-    contours
+    crate::diagnostics::report_scratch_high_water("contour.suzuki_compact_contours", compact_contours_bytes(contour_points_store.capacity(), contours.capacity()));
+    true
 }

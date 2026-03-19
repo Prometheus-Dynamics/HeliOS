@@ -3,11 +3,10 @@
   import CameraLayoutEditor from './CameraLayoutEditor.svelte';
   import CameraLayoutViewport from './CameraLayoutViewport.svelte';
   import CameraPoseForm from './CameraPoseForm.svelte';
-  import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rig';
+  import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rigDefaults';
   import { rigLayoutStore } from '$lib/stores/rigLayout';
   import type { RigCameraInfo, RobotDimensions } from '$lib/types/rig';
   import { DeviceService, type UpdateRobotDimensionsRequest } from '$lib/ts-bindings/http/client';
-  import { StreamsApi } from '$lib/api/streamsApi';
   import { buildErrorMessage } from '$lib/ui/errorPolicy';
 
   type RigLayoutViewState = {
@@ -331,10 +330,7 @@
     if (!selectedCamera) return;
     cameraPoseError = null;
     cameraPoseMessage = null;
-    if (!selectedCamera.streamId) {
-      cameraPoseError = 'This camera is missing a stream id; pose cannot be saved.';
-      return;
-    }
+    const cameraUid = selectedCamera.cameraUid ?? selectedCamera.uid;
 
     const parseTranslation = (label: string, raw: string): number => {
       const value = parseLengthToMeters(raw);
@@ -372,8 +368,8 @@
     }
     cameraPoseBusy = true;
     try {
-      await StreamsApi.updateStreamPose({
-        id: selectedCamera.streamId,
+      await DeviceService.updateCameraPose({
+        cameraUid,
         requestBody: {
           translation: { x: Number(x.toFixed(6)), y: Number(y.toFixed(6)), z: Number(z.toFixed(6)) },
           rotation: { roll: Number(roll.toFixed(4)), pitch: Number(pitch.toFixed(4)), yaw: Number(yaw.toFixed(4)) }
@@ -393,13 +389,10 @@
     if (!selectedCamera) return;
     cameraPoseError = null;
     cameraPoseMessage = null;
-    if (!selectedCamera.streamId) {
-      cameraPoseError = 'This camera is missing a stream id; pose cannot be cleared.';
-      return;
-    }
     cameraPoseBusy = true;
+    const cameraUid = selectedCamera.cameraUid ?? selectedCamera.uid;
     try {
-      await StreamsApi.clearStreamPose({ id: selectedCamera.streamId });
+      await DeviceService.clearCameraPose({ cameraUid });
       cameraPoseDirty = false;
       cameraPoseMessage = 'Cleared';
       await rigLayoutStore.refresh({ force: true }).catch(() => {});

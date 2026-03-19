@@ -1,5 +1,14 @@
 <script lang="ts">
-  import type { Connection, Edge, EdgeTypes, Node, NodeEventWithPointer, NodeTargetEventWithPointer, NodeTypes } from '@xyflow/svelte';
+  import type {
+    BackgroundVariant,
+    Connection,
+    Edge,
+    EdgeTypes,
+    Node,
+    NodeEventWithPointer,
+    NodeTargetEventWithPointer,
+    NodeTypes
+  } from '@xyflow/svelte';
   import type { OnConnectEnd, OnConnectStart, OnReconnectEnd, OnReconnectStart, Viewport } from '@xyflow/system';
   import type { PipelineConnectionRoute, PipelineConnectionStyle } from '$lib/types/pipeline';
   import type { EdgeSelection, PortEditorState } from './types';
@@ -22,7 +31,7 @@
     maxZoom: number;
     nodeTypes: NodeTypes;
     edgeTypes: EdgeTypes;
-    backgroundVariant: string;
+    backgroundVariant: BackgroundVariant;
     backgroundGap: number;
     backgroundSize: number;
     backgroundColor: string;
@@ -44,7 +53,7 @@
     onSelectionChange?: (event: { nodes: Node[]; edges: Edge[] }) => void;
     onPaneContextMenu?: ({ event }: { event: MouseEvent }) => void;
     onNodeContextMenu?: NodeEventWithPointer<MouseEvent, Node>;
-    onApi?: (event: CustomEvent<any>) => void;
+    onApi?: (event: CustomEvent<unknown>) => void;
     selectedEdge: EdgeSelection | null;
     selectedEdgeId: string | null;
     edgeStyleOptions: Array<{ id: PipelineConnectionRoute; label: string; icon: string }>;

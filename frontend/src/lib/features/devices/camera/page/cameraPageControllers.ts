@@ -1,13 +1,17 @@
 import { createCameraModeController } from './cameraModeController';
 import { createCameraControlController } from './cameraControlController';
 import { createCameraBackendController } from './cameraBackendController';
+import { createCameraStreamState } from './cameraStreamStore.svelte';
 import type { Mode } from '$lib/api/httpClient';
 
+type CameraControlControllerDeps = Parameters<typeof createCameraControlController>[1];
+type CameraBackendControllerDeps = Parameters<typeof createCameraBackendController>[1];
+
 export type CameraPageControllerDeps = {
-  streamState: any;
+  streamState: ReturnType<typeof createCameraStreamState>;
   streamId: string;
-  StreamsApi: any;
-  toaster: any;
+  StreamsApi: CameraBackendControllerDeps['streamsApi'];
+  toaster: CameraControlControllerDeps['toaster'];
   reportError: (params: { title: string; error?: unknown; message?: string; fallback?: string }) => void;
   modeKey: (value: unknown) => string | null;
   mediaFormatMatches: (mode: unknown, value: unknown) => boolean;

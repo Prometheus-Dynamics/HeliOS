@@ -1,7 +1,9 @@
 <script lang="ts">
-  import type { PipelineUiItem } from '$lib/features/pipelines/pipelineUiTypes';
+  import type { PipelineUiDivider, PipelineUiItem, PipelineUiText, PipelineUiTitle } from '$lib/features/pipelines/pipelineUiTypes';
   import FaIcon from '$lib/components/icons/FaIcon.svelte';
   import { faGear, faGripVertical } from '@fortawesome/free-solid-svg-icons';
+
+  type LayoutItem = PipelineUiTitle | PipelineUiText | PipelineUiDivider;
 
   const {
     item,
@@ -19,7 +21,7 @@
     onDragStart,
     onDragEnd
   } = $props<{
-    item: PipelineUiItem;
+    item: LayoutItem;
     grid: boolean;
     editMode: boolean;
     selectedItemId: string | null;
@@ -35,7 +37,10 @@
     onDragEnd: () => void;
   }>();
 
-  const wrapperClass = `${grid ? 'md:col-span-2' : ''} relative group ${selectedItemId === item.id ? 'ring-1 ring-primary-400/70' : ''} ${draggingItemId === item.id ? 'opacity-40' : ''}`;
+  const wrapperClass = $derived.by(
+    () =>
+      `${grid ? 'md:col-span-2' : ''} relative group ${selectedItemId === item.id ? 'ring-1 ring-primary-400/70' : ''} ${draggingItemId === item.id ? 'opacity-40' : ''}`
+  );
 </script>
 
 <div data-ui-item role="group" class={wrapperClass} ondragover={(event) => onDragOver(event, item)} ondragleave={(event) => onDragLeave(event, item)} ondrop={(event) => onDrop(event, item)}>

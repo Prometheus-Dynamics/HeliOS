@@ -1,4 +1,4 @@
-import type { PipelineDataType, PipelineGraphNode, PipelineGraphPlan, PipelineNodeValue } from '$lib/types/pipeline';
+import type { PipelineGraphNode, PipelineGraphPlan, PipelineNodeValue } from '$lib/types/pipeline';
 import { PIPELINE_INPUT_BACKEND_ID, PIPELINE_OUTPUT_BACKEND_ID } from '../boundary';
 import type { DaedalusEdge, DaedalusGraph, DaedalusNodeInstance, DaedalusValue } from '../daedalusTypes';
 import {
@@ -52,6 +52,10 @@ import {
 } from './graphNormalization';
 
 export { isDaedalusGraph } from './graphNormalization';
+
+const cloneJsonValue = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+const cloneSourceNode = (value: DaedalusNodeInstance): PipelineGraphNode['source'] =>
+  cloneJsonValue(value) as unknown as PipelineGraphNode['source'];
 
 const decodeEmbeddedGraph = (node: DaedalusNodeInstance): PipelineGraphPlan | null => {
   const raw = decodeMetadataString(node.metadata?.[EMBEDDED_GRAPH_KEY]);
@@ -148,13 +152,13 @@ export function fromDaedalusGraph(graph: DaedalusGraph): PipelineGraphPlan {
         y: location.y
       };
 
-      const inputSource = JSON.parse(JSON.stringify(node)) as unknown as any;
+      const inputSource = cloneSourceNode(node);
       if (inputSource && typeof inputSource === 'object') {
-        inputSource.inputs = [];
+        inputSource.inputs = {};
       }
-      const outputSource = JSON.parse(JSON.stringify(node)) as unknown as any;
+      const outputSource = cloneSourceNode(node);
       if (outputSource && typeof outputSource === 'object') {
-        outputSource.outputs = [];
+        outputSource.outputs = {};
       }
 
       nodes[id] = {
@@ -213,12 +217,12 @@ export function fromDaedalusGraph(graph: DaedalusGraph): PipelineGraphPlan {
       ),
       info: { id, location, values: constValues },
       ...(embedded ? { embedded } : {}),
-      source: JSON.parse(JSON.stringify(node)) as unknown as any
+      source: cloneSourceNode(node)
     };
   });
 
   const edgeStyles = decodeEdgeStyles(graph.metadata ?? null);
-  let connections = graph.edges
+  const connections = graph.edges
     .map((edge) => {
       const fromNode = edge?.from?.node;
       const toNode = edge?.to?.node;
@@ -292,7 +296,8 @@ export function toDaedalusGraph(plan: PipelineGraphPlan): DaedalusGraph {
       sync_groups: [],
       metadata: {}
     };
-    const { compute: _ignoredCompute, ...baseWithoutCompute } = base;
+    const baseWithoutCompute = { ...base };
+    delete (baseWithoutCompute as Partial<DaedalusNodeInstance> & { compute?: unknown }).compute;
 
     const labelCandidate = typeof node?.metadata?.name === 'string' ? node.metadata.name.trim() : '';
     const backendIdRaw = typeof node?.backendId === 'string' && node.backendId.trim() ? node.backendId.trim() : base.id;

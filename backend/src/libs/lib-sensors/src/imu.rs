@@ -2,7 +2,7 @@ use std::fmt;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::OnceLock;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::backends::accelerometer::Accelerometer;
 use crate::backends::gyro::Gyro;
@@ -418,7 +418,13 @@ enum AccelGyro {
 }
 
 enum MagDevice {
-    Bmm150 { dev: Arc<Mutex<Bmm150<I2cdev>>>, label: String },
+    Bmm150 { dev: Arc<Mutex<Bmm150<I2cdev>>>, label: String, min_interval: Duration, cached_sample: Option<CachedMagSample> },
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CachedMagSample {
+    sampled_at: Instant,
+    value: Option<[f32; 3]>,
 }
 
 impl ImuDevice {
@@ -471,10 +477,20 @@ impl ImuDevice {
             }
         };
 
-        let mag = match &self.mag {
-            Some(MagDevice::Bmm150 { dev, .. }) => {
-                let mut guard = dev.lock().await;
-                guard.read_mag().ok()
+        let mag = match &mut self.mag {
+            Some(MagDevice::Bmm150 { dev, min_interval, cached_sample, .. }) => {
+                let now = Instant::now();
+                let reuse_cached = cached_sample.map(|sample| now.duration_since(sample.sampled_at) < *min_interval).unwrap_or(false);
+                if reuse_cached {
+                    cached_sample.and_then(|sample| sample.value)
+                } else {
+                    let value = {
+                        let mut guard = dev.lock().await;
+                        guard.read_mag().ok()
+                    };
+                    *cached_sample = Some(CachedMagSample { sampled_at: now, value });
+                    value
+                }
             }
             None => None,
         };
@@ -671,6 +687,7 @@ impl ImuDevice {
     fn build_bmm(devices: &[SensorDeviceCfg]) -> Option<MagDevice> {
         let entry = devices.iter().find(|d| d.driver.eq_ignore_ascii_case("bmm150"))?;
         let cfg = Bmm150Config { address: entry.address, data_rate: BmmDataRate::Hz30, preset: BmmPreset::Regular, mode: BmmOperationMode::Normal };
+        let min_interval = Duration::from_secs_f32((1.0 / cfg.data_rate.hertz()).max(1.0 / 1000.0));
         let path = format!("/dev/i2c-{}", entry.bus);
         for attempt in 1..=I2C_INIT_RETRIES {
             let dev = match I2cdev::new(path.clone()) {
@@ -684,7 +701,7 @@ impl ImuDevice {
                 Ok(driver) => {
                     info!(bus = entry.bus, address = format_args!("{:#04x}", entry.address), "BMM150 magnetometer initialized");
                     let label = format!("BMM150 on i2c-{} (0x{:02X})", entry.bus, entry.address);
-                    return Some(MagDevice::Bmm150 { dev: Arc::new(Mutex::new(driver)), label });
+                    return Some(MagDevice::Bmm150 { dev: Arc::new(Mutex::new(driver)), label, min_interval, cached_sample: None });
                 }
                 Err(err) => {
                     warn!(bus = entry.bus, error = %err, attempt, "failed to initialize BMM150 magnetometer");

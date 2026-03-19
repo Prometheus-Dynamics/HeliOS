@@ -19,7 +19,8 @@ You can add peers via:
 - Provide endpoint host/port metadata (optional).
 - Configure optional outputs mapping:
   - Choose whether pose and ArUco/tag data should come from HTTP or NT4.
-  - For Custom peers, provide JSON path mappings for fields.
+  - For Custom peers, provide endpoint and field mapping details.
+- Test connections before saving.
 
 ## Quick setup defaults (what the UI fills in)
 

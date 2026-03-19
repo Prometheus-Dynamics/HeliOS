@@ -1,13 +1,11 @@
 <script lang="ts">
 import { createEventDispatcher } from 'svelte';
-import { toaster } from '$lib';
-import { applyPaletteToGraphPlan, emptyPipelineGraphPlan } from '$lib/features/pipelines/graph';
+import { emptyPipelineGraphPlan } from '$lib/features/pipelines/graph';
 import type { InspectorTabKey } from '$lib/features/pipelines/controller';
 import type { StreamInfo } from '$lib/ts-bindings/http/client';
   import type { GraphEdgeSelection, GraphPoint, PipelineDetailContext, PipelineOutputEntry, PipelinePortEntry } from './types';
 import type {
   ChannelPolicy,
-  PipelineDataType,
   PipelineGraphPlan,
   PipelineInputQueueConfig,
   PipelineNodeLayout,
@@ -16,7 +14,6 @@ import type {
   PipelineConnectionStyle,
   PipelineOutputSinkConfig,
   PipelineRegistryEntry,
-  PipelineStatus,
   PipelineTypeDescriptor,
   PipelineDiagnosticWarning,
   PipelineOverviewPipeline
@@ -30,6 +27,7 @@ import type {
 	import PipelineProfilerModal from '$lib/components/pipelines/PipelineProfilerModal.svelte';
 	import { revisionDisplay } from '$lib/components/pipelines/detail/pipelineDetailMetricsUtils';
 	import { resolveStreamLabel } from '$lib/utils/streamLabels';
+  import { SvelteSet } from 'svelte/reactivity';
   type PipelineBreadcrumb = {
     id: string;
     name: string;
@@ -38,6 +36,15 @@ import type {
   };
 
   type CaptureDeviceStatus = StreamInfo;
+  type GraphEditorHandle = {
+    focusOnGraphCenter?: () => void;
+    focusOnNode?: (nodeId: string, options?: { port?: string | null }) => void;
+  };
+  type LegacyPipelineRef = {
+    pipeline_id?: unknown;
+    pipelineId?: unknown;
+    id?: unknown;
+  };
 
   const props = $props<{
     context?: PipelineDetailContext;
@@ -68,7 +75,7 @@ import type {
     metricsUpdatedAt: null
   };
 
-  let graphEditor = $state<any>(null);
+  let graphEditor = $state<GraphEditorHandle | null>(null);
 
 const context = $derived.by<PipelineDetailContext>(() => props.context ?? defaultDetailContext);
 const typePalette = $derived.by(() => props.typePalette ?? {});
@@ -95,21 +102,28 @@ const activeInspectorTab = $derived.by<InspectorTabKey>(() => {
 const metricsInspectorActive = $derived.by(() => activeInspectorTab === 'metrics');
 const normalizedGraphSearchQuery = $derived.by(() => graphSearchQuery.trim());
 	const canShowEngineConfig = $derived.by(() => graphPlan?.format === 'daedalus');
+  const normalizeId = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+  const asRecord = (value: unknown): Record<string, unknown> | null =>
+    value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+  const legacyPipelineId = (value: unknown): string => {
+    const record = asRecord(value) as LegacyPipelineRef | null;
+    return normalizeId(record?.pipeline_id ?? record?.pipelineId ?? record?.id);
+  };
 
 	type ProfilerStreamOption = { id: string; label: string };
-	const streamUsesPipeline = (device: any, pipelineId: string): boolean => {
+	const streamUsesPipeline = (device: CaptureDeviceStatus, pipelineId: string): boolean => {
 	  if (!device || !pipelineId) return false;
-	  const manifest: any = device?.manifest ?? null;
+	  const manifest = device.manifest ?? null;
 	  if (!manifest) return false;
-	  const norm = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
-	  const target = norm(pipelineId);
+	  const manifestRecord = asRecord(manifest);
+	  const target = normalizeId(pipelineId);
 	  if (!target) return false;
-	  if (norm(manifest?.active_pipeline_id) === target) return true;
-	  if (norm(manifest?.pipeline_id) === target) return true;
+	  if (normalizeId(manifest.active_pipeline_id) === target) return true;
+	  if (normalizeId(manifestRecord?.pipeline_id) === target) return true;
 	  const pipelines = manifest?.pipelines;
 	  if (Array.isArray(pipelines)) {
 	    for (const entry of pipelines) {
-	      const id = norm(entry?.pipeline_id ?? entry?.pipelineId ?? entry?.id);
+	      const id = normalizeId(entry?.pipeline_id) || legacyPipelineId(entry);
 	      if (id === target) return true;
 	    }
 	  }
@@ -117,11 +131,11 @@ const normalizedGraphSearchQuery = $derived.by(() => graphSearchQuery.trim());
 	};
 
 	const profilerStreamOptions = $derived.by<ProfilerStreamOption[]>(() => {
-	  const pipelineId = (context.pipeline as any)?.id ?? null;
+	  const pipelineId = context.pipeline?.id ?? null;
 	  if (typeof pipelineId !== 'string' || !pipelineId.trim()) return [];
 	  const options: ProfilerStreamOption[] = [];
-	  const seen = new Set<string>();
-	  for (const device of captureDevicesList as any[]) {
+	  const seen = new SvelteSet<string>();
+	  for (const device of captureDevicesList) {
 	    const id = typeof device?.id === 'string' ? device.id.trim() : '';
 	    if (!id || seen.has(id)) continue;
 	    if (!streamUsesPipeline(device, pipelineId)) continue;
@@ -222,7 +236,6 @@ $effect(() => {
     removeHostIoPort: { nodeId: string; name: string };
   }>();
 
-  const DEFAULT_TIMER_INTERVAL_MS = 33;
   const autosaveChipState = $derived.by<AutosaveChipState>(() => {
     if (context.savingState === 'saving') {
       return { value: 'Saving…', tone: 'info', showRetry: false };
@@ -267,7 +280,6 @@ $effect(() => {
   let lastAutoValidationIssueCount = $state<number | null>(null);
 
   $effect(() => {
-    const warnings = pipelineWarnings;
     if (!context.pipeline) {
       warningsPanelOpen = false;
     }
@@ -493,8 +505,8 @@ $effect(() => {
 	    <PipelineProfilerModal
 	      open={profilerOpen}
 	      title="Profiler"
-	      pipelineId={(pipeline as any)?.id ?? null}
-	      pipelineLabel={(pipeline as any)?.name ?? (pipeline as any)?.profileName ?? null}
+	      pipelineId={pipeline.id}
+	      pipelineLabel={pipeline.name ?? null}
 	      bind:streamId={profilerStreamId}
 	      streamOptions={profilerStreamOptions}
 	      onClose={() => (profilerOpen = false)}

@@ -12,6 +12,8 @@ pub struct OsReleaseInfo {
     pub build_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pretty_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_root: Option<String>,
 }
 
 #[utoipa::path(
@@ -22,7 +24,14 @@ pub struct OsReleaseInfo {
 )]
 pub async fn os_release() -> ApiResult<impl axum::response::IntoResponse> {
     let contents = tokio::fs::read_to_string("/etc/os-release").await?;
-    let info = parse_os_release(&contents);
+    let mut info = parse_os_release(&contents);
+    if info.version_id.is_none() {
+        info.version_id = read_text_value("/etc/helios/version").await;
+    }
+    if info.build_id.is_none() {
+        info.build_id = read_text_value("/etc/helios/build-id").await.or_else(|| info.version_id.clone());
+    }
+    info.active_root = read_active_root().await;
     Ok((StatusCode::OK, Json(info)))
 }
 
@@ -51,5 +60,49 @@ fn parse_os_release(contents: &str) -> OsReleaseInfo {
         }
     }
 
-    OsReleaseInfo { version_id, build_id, pretty_name }
+    OsReleaseInfo { version_id, build_id, pretty_name, active_root: None }
+}
+
+async fn read_active_root() -> Option<String> {
+    if let Some(slot) = read_active_root_from_cmdline().await {
+        return Some(slot);
+    }
+
+    const ACTIVE_ROOT_PATHS: &[&str] = &["/var/lib/helios/ota/active", "/boot/helios/ota/active", "/mnt/boot/helios/ota/active"];
+
+    for path in ACTIVE_ROOT_PATHS {
+        let Ok(contents) = tokio::fs::read_to_string(path).await else {
+            continue;
+        };
+        let value = contents.trim();
+        if value.is_empty() {
+            continue;
+        }
+        return Some(value.to_string());
+    }
+
+    None
+}
+
+async fn read_active_root_from_cmdline() -> Option<String> {
+    let cmdline = tokio::fs::read_to_string("/proc/cmdline").await.ok()?;
+    let root = cmdline.split_whitespace().find_map(|token| token.strip_prefix("root=")).map(str::trim).filter(|value| !value.is_empty())?;
+
+    match root {
+        "/dev/mmcblk0p2" | "/dev/mmcblk1p2" | "/dev/sda2" => Some("ROOT_A".to_string()),
+        "/dev/mmcblk0p3" | "/dev/mmcblk1p3" | "/dev/sda3" => Some("ROOT_B".to_string()),
+        "/dev/helios-rootfs" => read_text_value("/var/lib/helios/ota/active").await.or_else(|| Some("ROOT_A".to_string())),
+        _ => None,
+    }
+}
+
+async fn read_text_value(path: &str) -> Option<String> {
+    let Ok(contents) = tokio::fs::read_to_string(path).await else {
+        return None;
+    };
+    let value = contents.trim();
+    if value.is_empty() {
+        return None;
+    }
+    Some(value.to_string())
 }

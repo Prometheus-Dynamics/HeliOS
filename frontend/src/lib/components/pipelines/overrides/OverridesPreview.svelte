@@ -75,6 +75,9 @@
       <div
         class="flex cursor-move items-start justify-between gap-2 border-b border-surface-800/70 p-3"
         onpointerdown={(event) => onStartFloatingDrag(event, 'gradient')}
+        role="button"
+        tabindex="-1"
+        aria-label="Drag gradient builder"
       >
         <div>
           <p class="text-micro-tight uppercase tracking-[0.2em] text-surface-500">Gradient Builder</p>
@@ -92,6 +95,9 @@
             bind:this={gradientTrackEl}
             style={`background:${buildGradientString(gradientAngle, gradientStops)};`}
             onpointerdown={onGradientTrackPointerDown}
+            role="button"
+            tabindex="-1"
+            aria-label="Edit gradient stops"
           >
             {#each gradientStops as stop (stop.id)}
               <button
@@ -174,7 +180,13 @@
 {#if editMode && colorPickerOpen}
   <div class="fixed z-[60] w-[22rem] max-w-[90vw]" style={colorPanelStyle} data-floating-panel="color">
     <div class="flex max-h-[calc(100vh-2rem)] max-h-[calc(100svh-2rem)] max-h-[calc(100dvh-2rem)] flex-col rounded border border-surface-800/80 bg-surface-950/95 shadow-2xl shadow-black/50">
-      <div class="flex cursor-move items-start justify-between gap-2 border-b border-surface-800/70 p-3" onpointerdown={(event) => onStartFloatingDrag(event, 'color')}>
+      <div
+        class="flex cursor-move items-start justify-between gap-2 border-b border-surface-800/70 p-3"
+        onpointerdown={(event) => onStartFloatingDrag(event, 'color')}
+        role="button"
+        tabindex="-1"
+        aria-label="Drag color picker"
+      >
         <div>
           <p class="text-micro-tight uppercase tracking-[0.2em] text-surface-500">Color Picker</p>
           <p class="text-xs text-surface-400">{colorPickerTarget === 'thumbBorder' ? 'Thumb Border' : 'Thumb Fill'}</p>

@@ -4,7 +4,6 @@
   import '@xyflow/svelte/dist/style.css';
   import {
     type EdgeTypes,
-    type Connection,
     type Edge,
     type Node,
     type NodeTypes
@@ -75,6 +74,7 @@
     normalizeSearchTokens,
     resolveClientPosition
   } from './pipeline-graph/editorHelpers';
+  import { emptyPipelineGraphPlan } from '$lib/features/pipelines/graph';
 
   const EDGE_INTERACTIONS_ENABLED = true;
   const VIEWPORT_MIN_ZOOM = 0.03;
@@ -83,7 +83,7 @@
   const MIN_FLOW_HEIGHT = 320;
   const FALLBACK_MAX_FLOW_HEIGHT = 1100;
   const VIEWPORT_PADDING = 160;
-
+  const VIEWPORT_EPSILON = 0.0001;
   type FlowApi = ReturnType<typeof useSvelteFlow>;
   let viewportHeight = $state(FALLBACK_MAX_FLOW_HEIGHT);
   if (typeof window !== 'undefined') {
@@ -97,6 +97,7 @@
   let {
     plan,
     interactive = true,
+    portEditorsMode = 'selected',
     height = 520,
     fluid = false,
     className = '',
@@ -113,8 +114,13 @@
     searchQuery = '',
     graphStore: graphStoreProp = null
   }: PipelineGraphEditorProps = $props();
-  const graphStore = graphStoreProp ?? createPipelineGraphStore();
-  const ownsGraphStore = graphStoreProp == null;
+  const getGraphStoreProp = () => graphStoreProp;
+  const resolveInitialPlan = (): PipelineGraphPlan =>
+    ensurePlanPortMetadata(clonePlan(plan ?? emptyPipelineGraphPlan()));
+  const resolveInteractive = (): boolean => interactive;
+  const resolveGpuOverlayMode = (): boolean => gpuOverlayMode;
+  const graphStore = getGraphStoreProp() ?? createPipelineGraphStore();
+  const ownsGraphStore = getGraphStoreProp() == null;
   const dispatch = createEventDispatcher<{
     change: { plan: PipelineGraphPlan };
     select: { nodeId: string | null; nodes: string[]; edge: EdgeSelection | null };
@@ -124,8 +130,7 @@
     layout: { nodes: PipelineNodeLayout };
     runtime: { nodeId: string; syncGroups: unknown[] };
   }>();
-  const initialPlan = ensurePlanPortMetadata(clonePlan(plan));
-  let internalPlan = $state(initialPlan);
+  let internalPlan = $state<PipelineGraphPlan>(resolveInitialPlan());
   let nodes = $state<Node[]>([]);
   let edges = $state<Edge[]>([]);
   let flowViewport = $state<Viewport>({ x: 0, y: 0, zoom: 1 });
@@ -134,17 +139,17 @@
   let activeConnection = $state<ActiveConnection | null>(null);
   let lastNodeClick: { id: string | null; timestamp: number } = { id: null, timestamp: 0 };
   let selectedEdge = $state<EdgeSelection | null>(null);
-  let isDragging = $state(false);
+  let isDragging = false;
   let pendingPlan: PipelineGraphPlan | null = null;
   let portEditor = $state<PortEditorState | null>(null);
   let portEditorDraft = $state('');
   let portEditorError = $state<string | null>(null);
   let lastLayoutHash: string | null = null;
-  const history = createHistoryManager(initialPlan, { interactive });
+  const history = createHistoryManager(resolveInitialPlan(), { interactive: resolveInteractive() });
   let flowApi: FlowApi | null = null;
   let pendingFocusRequest: FocusRequest | null = null;
   let focusHighlight = $state<FocusHighlight | null>(null);
-  let gpuOverlay = $state(gpuOverlayMode);
+  const gpuOverlay = $derived(resolveGpuOverlayMode());
   const HEATMAP_NODE_REFRESH_MS = 520;
   let heatmapForNodes = $state<PipelineGraphHeatmap | null>(null);
   const searchTokens = $derived.by(() => normalizeSearchTokens(searchQuery));
@@ -162,6 +167,12 @@
   let lastPointer: XYPosition | null = null;
   let lastFlowPointer: XYPosition | null = null;
   let toFlowPositionRef: (pos: XYPosition) => XYPosition = (pos) => pos;
+  let layoutSnapshotFrame: number | null = null;
+  let viewportPublishFrame: number | null = null;
+  let initialFitFrame: number | null = null;
+  let lastPublishedViewport: Viewport | null = null;
+  let initialFitPending = true;
+  const nodeDetailLevel = 'full' as const;
 
   const isPixelPortEditor = $derived(Boolean(portEditor) && isPixelTypeKey(portEditor?.dataTypeKey ?? null));
   const pixelEditorState = $derived(
@@ -373,6 +384,8 @@
     getSelectedEdgeId: () => selectedEdgeId,
     getActiveConnection: () => activeConnection,
     buildNodeOptions: () => ({
+      detailLevel: nodeDetailLevel,
+      portEditorsMode,
       focusHighlight,
       resolveRegistryEntryForNode: (node) => resolveRegistryEntryForNode(node),
       onNodePortDoubleClick: (nodeId, direction, port, event) =>
@@ -427,13 +440,15 @@
   const handleNodeDragStop: typeof baseHandleNodeDragStop = (event) => {
     baseHandleNodeDragStop(event);
     isDragging = false;
-    if (!pendingPlan) return;
+    if (!pendingPlan) {
+      scheduleLayoutSnapshot();
+      return;
+    }
     const nextPlan = pendingPlan;
     pendingPlan = null;
     internalPlan = ensurePlanPortMetadata(clonePlan(nextPlan));
     history.pushSnapshot(internalPlan);
-    updateNodes();
-    updateEdges();
+    scheduleLayoutSnapshot();
   };
 
   const handleMouseMove = (event: MouseEvent) => {
@@ -442,13 +457,80 @@
     lastFlowPointer = toFlowPositionRef(client);
   };
 
+  const flushLayoutSnapshot = () => {
+    layoutSnapshotFrame = null;
+    const { hash, layout } = buildLayoutSnapshot(nodes);
+    if (hash === lastLayoutHash) {
+      return;
+    }
+    lastLayoutHash = hash;
+    dispatch('layout', { nodes: layout });
+  };
+
+  const scheduleLayoutSnapshot = () => {
+    if (isDragging) return;
+    if (typeof window === 'undefined') {
+      flushLayoutSnapshot();
+      return;
+    }
+    if (layoutSnapshotFrame != null) {
+      window.cancelAnimationFrame(layoutSnapshotFrame);
+    }
+    layoutSnapshotFrame = window.requestAnimationFrame(() => {
+      flushLayoutSnapshot();
+    });
+  };
+
+  const publishViewport = () => {
+    viewportPublishFrame = null;
+    const next = flowViewport;
+    const previous = lastPublishedViewport;
+    if (
+      previous &&
+      Math.abs(previous.x - next.x) < VIEWPORT_EPSILON &&
+      Math.abs(previous.y - next.y) < VIEWPORT_EPSILON &&
+      Math.abs(previous.zoom - next.zoom) < VIEWPORT_EPSILON
+    ) {
+      return;
+    }
+    lastPublishedViewport = { x: next.x, y: next.y, zoom: next.zoom };
+    graphStore.setViewport(lastPublishedViewport);
+  };
+
+  const scheduleViewportPublish = () => {
+    if (typeof window === 'undefined') {
+      publishViewport();
+      return;
+    }
+    if (viewportPublishFrame != null) {
+      return;
+    }
+    viewportPublishFrame = window.requestAnimationFrame(() => {
+      publishViewport();
+    });
+  };
+
+  const scheduleInitialFit = () => {
+    if (!initialFitPending || typeof window === 'undefined' || !flowApi?.fitView || nodes.length === 0) {
+      return;
+    }
+    if (initialFitFrame != null) {
+      return;
+    }
+    initialFitFrame = window.requestAnimationFrame(() => {
+      initialFitFrame = window.requestAnimationFrame(() => {
+        initialFitFrame = null;
+        if (!initialFitPending || !flowApi?.fitView || nodes.length === 0) {
+          return;
+        }
+        initialFitPending = false;
+        void flowApi.fitView({ duration: 0, padding: 0.14 });
+      });
+    });
+  };
+
   $effect(updateNodes);
   $effect(updateEdges);
-  $effect(() => {
-    gpuOverlay = gpuOverlayMode;
-    updateNodes();
-  });
-
   const heatmapScheduler = createHeatmapScheduler({
     refreshMs: HEATMAP_NODE_REFRESH_MS,
     apply: (payload) => {
@@ -469,8 +551,7 @@
     }
     internalPlan = ensurePlanPortMetadata(clonePlan(plan));
     history.pushSnapshot(internalPlan);
-    updateNodes();
-    updateEdges();
+    initialFitPending = true;
     if (pendingFocusRequest) {
       applyFocusRequest(pendingFocusRequest);
     }
@@ -492,16 +573,13 @@
   });
 
   $effect(() => {
-    const { hash, layout } = buildLayoutSnapshot(nodes);
-    if (hash === lastLayoutHash) {
-      return;
-    }
-    lastLayoutHash = hash;
-    dispatch('layout', { nodes: layout });
+    void nodes;
+    scheduleLayoutSnapshot();
   });
 
   const handleFlowApi = (event: CustomEvent<FlowApi>) => {
     flowApi = event.detail;
+    scheduleInitialFit();
     if (pendingFocusRequest) {
       applyFocusRequest(pendingFocusRequest);
     }
@@ -535,6 +613,15 @@
   onDestroy(() => {
     clearFocusHighlightTimer();
     heatmapScheduler.dispose();
+    if (layoutSnapshotFrame != null && typeof window !== 'undefined') {
+      window.cancelAnimationFrame(layoutSnapshotFrame);
+    }
+    if (viewportPublishFrame != null && typeof window !== 'undefined') {
+      window.cancelAnimationFrame(viewportPublishFrame);
+    }
+    if (initialFitFrame != null && typeof window !== 'undefined') {
+      window.cancelAnimationFrame(initialFitFrame);
+    }
     if (ownsGraphStore) {
       graphStore.destroy();
     }
@@ -542,8 +629,14 @@
 
   $effect(() => {
     if (!flowViewport) return;
-    graphStore.setViewport({ x: flowViewport.x, y: flowViewport.y, zoom: flowViewport.zoom });
+    scheduleViewportPublish();
   });
+
+  $effect(() => {
+    void nodes.length;
+    scheduleInitialFit();
+  });
+
 </script>
 
 <PipelineGraphEditorView

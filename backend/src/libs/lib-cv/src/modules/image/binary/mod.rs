@@ -1,6 +1,7 @@
 use image::{DynamicImage, GrayImage, ImageBuffer, Rgb};
 use rayon::prelude::*;
 use std::cell::RefCell;
+use std::mem::size_of;
 use wide::{CmpGt, i16x16, u8x16};
 
 thread_local! {
@@ -13,7 +14,9 @@ thread_local! {
 mod neon;
 
 mod adaptive;
-pub use adaptive::{adaptive_mean_threshold_fast, adaptive_mean_threshold_fast_with_invert, with_adaptive_mean_threshold_fast, with_adaptive_mean_threshold_fast_timed};
+pub use adaptive::{
+    adaptive_mean_threshold_fast, adaptive_mean_threshold_fast_into, adaptive_mean_threshold_fast_with_invert, with_adaptive_mean_threshold_fast, with_adaptive_mean_threshold_fast_timed,
+};
 
 #[derive(Default)]
 struct AdaptiveBuffers {
@@ -100,7 +103,7 @@ pub fn binary_image_gray_simd(image: &GrayImage, threshold: u8) -> GrayImage {
         let mut i = 0;
         while i + SIMD_WIDTH <= src_chunk.len() {
             let v = i16x16::from(u8x16::new(src_chunk[i..i + SIMD_WIDTH].try_into().unwrap()));
-            let mask = v.cmp_gt(threshold_simd);
+            let mask = v.simd_gt(threshold_simd);
             let out = mask.blend(on, off).to_array().map(|v| v as u8);
             dst_chunk[i..i + SIMD_WIDTH].copy_from_slice(&out);
             i += SIMD_WIDTH;
@@ -225,6 +228,7 @@ fn ensure_mask_buffer(mask: &mut MaskBuffer, width: u32, height: u32) -> &mut [u
         mask.width = width;
         mask.height = height;
         mask.buf.resize(needed, 0);
+        crate::diagnostics::report_scratch_high_water("image.binary_mask", mask.buf.capacity() * size_of::<u8>());
     }
     &mut mask.buf[..]
 }

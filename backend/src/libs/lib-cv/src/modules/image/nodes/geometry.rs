@@ -191,6 +191,54 @@ fn cv_crop_roi(frame: DynamicImage, roi_x: i64, roi_y: i64, roi_w: i64, roi_h: i
     if let Some((x, y, w, h)) = roi_crop_bounds(fw, fh, roi_x, roi_y, roi_w, roi_h) { Ok((frame.crop_imm(x, y, w, h), i64::from(x), i64::from(y))) } else { Ok((frame, 0, 0)) }
 }
 
+#[node(
+    id = "crop_roi_gray",
+    summary = "Crop to ROI bounds as grayscale with passthrough disable semantics.",
+    description = "Crops the frame to roi_x/roi_y/roi_w/roi_h and converts directly to GrayImage. If roi_w or roi_h is <= 0, ROI is treated as disabled and the full grayscale frame is returned with zero offsets.",
+    inputs(
+        "frame",
+        port(name = "roi_x", default = 0i64, meta(ui_min = 0, ui_max = 4096, ui_step = 1)),
+        port(name = "roi_y", default = 0i64, meta(ui_min = 0, ui_max = 4096, ui_step = 1)),
+        port(name = "roi_w", default = 0i64, meta(ui_min = 0, ui_max = 4096, ui_step = 1)),
+        port(name = "roi_h", default = 0i64, meta(ui_min = 0, ui_max = 4096, ui_step = 1))
+    ),
+    outputs("frame", "offset_x", "offset_y")
+)]
+fn cv_crop_roi_gray(frame: &DynamicImage, roi_x: i64, roi_y: i64, roi_w: i64, roi_h: i64) -> Result<(crate::modules::image::luma::PooledGrayImage, i64, i64), NodeError> {
+    let (fw, fh) = frame.dimensions();
+    if fw == 0 || fh == 0 {
+        return Ok((crate::modules::image::luma::PooledGrayImage::new(0, 0), 0, 0));
+    }
+
+    if let Some((x, y, w, h)) = roi_crop_bounds(fw, fh, roi_x, roi_y, roi_w, roi_h) {
+        Ok((crop_luma8_frame(&frame, x, y, w, h), i64::from(x), i64::from(y)))
+    } else {
+        Ok((crop_luma8_frame(&frame, 0, 0, fw, fh), 0, 0))
+    }
+}
+
+#[node(
+    id = "roi_offsets",
+    summary = "Resolve ROI offsets without materializing an ROI image.",
+    description = "Computes the clamped ROI origin used by crop_roi/crop_roi_gray. If ROI is disabled or spans the full frame, returns zero offsets.",
+    inputs(
+        "frame",
+        port(name = "roi_x", default = 0i64, meta(ui_min = 0, ui_max = 4096, ui_step = 1)),
+        port(name = "roi_y", default = 0i64, meta(ui_min = 0, ui_max = 4096, ui_step = 1)),
+        port(name = "roi_w", default = 0i64, meta(ui_min = 0, ui_max = 4096, ui_step = 1)),
+        port(name = "roi_h", default = 0i64, meta(ui_min = 0, ui_max = 4096, ui_step = 1))
+    ),
+    outputs("offset_x", "offset_y")
+)]
+fn cv_roi_offsets(frame: &DynamicImage, roi_x: i64, roi_y: i64, roi_w: i64, roi_h: i64) -> Result<(i64, i64), NodeError> {
+    let (fw, fh) = frame.dimensions();
+    if fw == 0 || fh == 0 {
+        return Ok((0, 0));
+    }
+
+    if let Some((x, y, _, _)) = roi_crop_bounds(fw, fh, roi_x, roi_y, roi_w, roi_h) { Ok((i64::from(x), i64::from(y))) } else { Ok((0, 0)) }
+}
+
 fn roi_crop_bounds(fw: u32, fh: u32, roi_x: i64, roi_y: i64, roi_w: i64, roi_h: i64) -> Option<(u32, u32, u32, u32)> {
     if roi_w <= 0 || roi_h <= 0 {
         return None;

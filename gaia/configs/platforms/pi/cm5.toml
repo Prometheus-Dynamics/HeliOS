@@ -1,18 +1,32 @@
 # Target: Raspberry Pi CM5
 #
-# CM5-specific Buildroot target overrides.
+# Canonical CM5 profile: squashfs rootfs, overlay-backed writable state, and
+# the smaller single-kernel BOOT layout validated on both old and new CM5s.
 
 imports = [
   "./base.toml",
 ]
 
 [buildroot]
-expand_size_mb = 2300
+br_output_dir = "buildroot/output-cm5"
+
+[buildroot.symbols]
+BR2_TARGET_ROOTFS_EXT2 = false
+BR2_TARGET_ROOTFS_SQUASHFS = true
+BR2_TARGET_ROOTFS_SQUASHFS4_XZ = true
+BR2_TARGET_ROOTFS_SQUASHFS_BS_1024K = true
+BR2_TARGET_ROOTFS_SQUASHFS_EXTREME_COMP = true
+BR2_ROOTFS_POST_IMAGE_SCRIPT = "../../../assets/buildroot/boards/raspberrypicm5io-squashfs/post-image.sh"
+BR2_PACKAGE_RPI_FIRMWARE_CONFIG_FILE = "../../../assets/buildroot/boards/raspberrypicm5io-squashfs/config_cm5io.txt"
+BR2_PACKAGE_RPI_FIRMWARE_CMDLINE_FILE = "../../../assets/buildroot/boards/raspberrypicm5io-squashfs/cmdline.txt"
+BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES = "board/raspberrypi/linux-4k-page-size.fragment ../../../assets/buildroot/boards/raspberrypicm5io-squashfs/linux-squashfs-initramfs.fragment"
 
 [buildroot.rpi]
 board = "cm5"
 defconfig = "raspberrypicm5io_defconfig"
 overlay = "assets/overlays/cm5"
+config_file = "assets/buildroot/boards/raspberrypicm5io-squashfs/config_cm5io.txt"
+cmdline_file = "assets/buildroot/boards/raspberrypicm5io-squashfs/cmdline.txt"
 
 [program.profiles.aarch64-linux.env]
 RUSTFLAGS = "-C target-cpu=cortex-a76 --cfg feature=\"ffmpeg_8_0\""

@@ -26,6 +26,10 @@ done
 # Clear dhclient leases if present.
 rm -f /var/lib/dhcp/dhclient*.lease* 2>/dev/null || true
 
+# Remove persisted network overrides so networkd falls back to image defaults.
+rm -f /var/lib/helios/networkd/00-helios-persisted*.network 2>/dev/null || true
+rm -f /etc/systemd/network/00-helios-persisted*.network 2>/dev/null || true
+
 # Restart networkd to reapply the packaged .network files.
 systemctl restart systemd-networkd.service >/dev/null 2>&1 || true
 systemctl restart systemd-networkd-wait-online.service >/dev/null 2>&1 || true

@@ -1,4 +1,7 @@
 import { apiUrl } from '$lib/api/httpClient';
+import { createDomainResource } from '$lib/api/domainResources';
+import { apiFetch, apiFetchCachedJson } from '$lib/api/core/http';
+import { cacheResourceData, type ResourceCacheContext, type ResourceCacheResult } from '$lib/api/resourceCache';
 
 export type LocalizationPoseSpace =
   | 'tag_in_camera'
@@ -27,11 +30,18 @@ export type LocalizationConfig = {
   profiles: LocalizationProfile[];
 };
 
+export type LocalizationProfilesExportEnvelope = {
+  schema: string;
+  exportedAt: string;
+  config: LocalizationConfig;
+};
+
 export type LocalizationProfile = {
   id: string;
   name: string;
   tagSizeM?: number | null;
   allowedTagIds?: number[];
+  excludedTagIds?: number[];
   fieldMapId: string | null;
   fieldOrigin?: LocalizationFieldOriginConfig;
   // Snap the reported field-space height to the ground plane.
@@ -41,7 +51,7 @@ export type LocalizationProfile = {
   snapRollToGround?: boolean;
   // Snap field-space pitch to level (0 deg).
   snapPitchToGround?: boolean;
-  pipelineTemplateId?: string | null;
+  enabled?: boolean;
   color?: string | null;
   viewEnabled?: boolean;
   temporalStabilization?: LocalizationTemporalStabilizationConfig;
@@ -227,45 +237,71 @@ export type LocalizationPose = {
   };
 };
 
-export async function fetchLocalizationConfig(): Promise<LocalizationConfig> {
-  const response = await fetch(apiUrl('/localization/config'), {
+export async function fetchLocalizationConfig(): Promise<LocalizationConfig>;
+export async function fetchLocalizationConfig(
+  context: ResourceCacheContext<LocalizationConfig>
+): Promise<LocalizationConfig | ResourceCacheResult<LocalizationConfig>>;
+export async function fetchLocalizationConfig(
+  context?: ResourceCacheContext<LocalizationConfig>
+): Promise<LocalizationConfig | ResourceCacheResult<LocalizationConfig>> {
+  const payload = await apiFetchCachedJson<LocalizationConfig>(apiUrl('/localization/config'), context ?? {}, {
     method: 'GET',
     headers: { Accept: 'application/json' }
   });
-
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(text || `Request failed (${response.status})`);
+  if (typeof context === 'undefined') {
+    if (payload.status === 'not_modified') {
+      if (typeof payload.data !== 'undefined') {
+        return payload.data;
+      }
+      throw new Error('Localization config was not modified but no cached payload was available.');
+    }
+    return payload.data;
   }
-
-  return (await response.json()) as LocalizationConfig;
+  if (payload.status === 'not_modified') {
+    return payload;
+  }
+  return cacheResourceData(payload.data, {
+    etag: payload.etag ?? null,
+    revision: payload.revision ?? null
+  });
 }
 
+export const localizationConfigResource = createDomainResource({
+  key: 'localization:config:v1',
+  loader: fetchLocalizationConfig,
+  staleMs: 30_000,
+  maxAgeMs: 180_000,
+  kinds: ['localization.config', 'localization.profiles', 'localization.sources', 'streams.lifecycle', 'streams.pipeline', 'device.hardware']
+});
+
 export async function updateLocalizationConfig(config: LocalizationConfig): Promise<LocalizationConfig> {
-  const response = await fetch(apiUrl('/localization/config'), {
+  return apiFetch<LocalizationConfig>(apiUrl('/localization/config'), {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify(config)
+    headers: { Accept: 'application/json' },
+    body: config
   });
+}
 
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(text || `Request failed (${response.status})`);
-  }
+export async function fetchLocalizationProfilesExport(): Promise<LocalizationProfilesExportEnvelope> {
+  return apiFetch<LocalizationProfilesExportEnvelope>(apiUrl('/localization/profiles/export'), {
+    method: 'GET',
+    headers: { Accept: 'application/json' }
+  });
+}
 
-  return (await response.json()) as LocalizationConfig;
+export async function importLocalizationProfiles(
+  payload: LocalizationProfilesExportEnvelope | LocalizationConfig
+): Promise<LocalizationConfig> {
+  return apiFetch<LocalizationConfig>(apiUrl('/localization/profiles/import'), {
+    method: 'POST',
+    headers: { Accept: 'application/json' },
+    body: payload
+  });
 }
 
 export async function fetchLocalizationSolve(profileId?: string, signal?: AbortSignal): Promise<LocalizationSolveResponse> {
   const url = profileId
-    ? apiUrl(`/localization/solve?profile_id=${encodeURIComponent(profileId)}`)
-    : apiUrl('/localization/solve');
-  const response = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' }, signal });
-
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(text || `Request failed (${response.status})`);
-  }
-
-  return (await response.json()) as LocalizationSolveResponse;
+    ? apiUrl(`/localization/solve?profile_id=${encodeURIComponent(profileId)}&apply_field_origin=false`)
+    : apiUrl('/localization/solve?apply_field_origin=false');
+  return apiFetch<LocalizationSolveResponse>(url, { method: 'GET', headers: { Accept: 'application/json' }, signal });
 }

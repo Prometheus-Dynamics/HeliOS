@@ -98,7 +98,7 @@ const sidebars: SidebarsConfig = {
           items: [
             'guides/update-os-safely',
             'guides/firmware-bootloader-update',
-            'guides/snapshots-for-support',
+            'guides/diagnostics-bundles-for-support',
             'guides/restarts-what-breaks',
             'guides/troubleshooting',
           ],
@@ -117,6 +117,7 @@ const sidebars: SidebarsConfig = {
           items: [
             'guides/networktables-nt4',
             'guides/peers-discovery-and-registration',
+            'guides/helios-interdevice-protocol',
           ],
         },
       ],
@@ -232,7 +233,7 @@ const sidebars: SidebarsConfig = {
             'os/settings/overview',
             'os/settings/networking',
             'os/settings/rig-layout',
-            'os/settings/snapshots',
+            'os/settings/diagnostics',
             'os/settings/updater',
             'os/settings/plugins',
             'os/settings/usb-power',

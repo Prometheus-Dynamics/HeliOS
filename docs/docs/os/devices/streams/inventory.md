@@ -7,7 +7,9 @@ The **stream inventory** is the stream list on **OS > Devices**. Each card is on
 
 ## Register Stream
 
-Click **Register stream** to open the register modal. See **Register Stream** for a step-by-step walkthrough.
+Click **Register stream** to open the register modal.
+
+Most operators should start with **Quick camera setup**. Switch to **Advanced** only when you need explicit backend, mode, or codec control.
 
 ## Search And Filters
 

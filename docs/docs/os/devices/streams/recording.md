@@ -1,6 +1,6 @@
 ---
 title: Recording And Capture-Last
-description: Record/stop, capture 5s/30s/1m clips, sources, and the shadow recorder requirement.
+description: Continuous recording, capture-last clips, source selection, and IMU sidecars.
 ---
 
 The stream page header contains recording controls for a single stream.
@@ -11,6 +11,7 @@ The source dropdown controls what **continuous recording** records:
 
 - **Multiplex output**: the stream's multiplexed output.
 - **Raw output**: the raw stream output.
+- **Undistorted output**: the calibrated/undistorted host output when available.
 - **Pipeline output**: record a specific pipeline's host output port (when pipelines are attached and expose image outputs).
 
 The source dropdown groups available pipeline outputs by pipeline.
@@ -46,6 +47,7 @@ The gear button opens recording settings, including:
 - **Bitrate (bps)**: higher bitrate generally increases quality and file size (used when encoding/transcoding MP4).
 - **GOP**: keyframe interval. Smaller GOP can improve seeking and recovery at the cost of bitrate/quality efficiency.
 - **Quality (CRF 0-51)**: lower is higher quality and larger files (commonly ~18-28). Used when encoding/transcoding MP4.
+- **Include IMU**: when enabled, continuous recording also stores a gzipped IMU sidecar file for the recording.
 
 Notes:
 

@@ -24,6 +24,7 @@
     PipelineRegistryEntry,
     PipelineTypeDescriptor
   } from '$lib/types/pipeline';
+  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
   const {
     context,
@@ -147,7 +148,7 @@
     const inputs = selectedNode.inputs ?? {};
     const baseValues = selectedNode.info.values ?? {};
     const overrideValues = context.pipeline.graph.nodeValueOverrides?.[context.graphSelectionNodeId] ?? {};
-    const entries = new Map<string, NodeParameterEntry>();
+    const entries = new SvelteMap<string, NodeParameterEntry>();
     const registryEntry = registryEntries.find((candidate) => candidate.id === selectedNode.backendId);
 
     const addEntry = (portLabel: string, key: string, descriptor?: PipelineDataType) => {
@@ -243,7 +244,7 @@
 
   const nodeParameterRenderItems = $derived.by<NodeParameterRenderItem[]>(() => {
     const items: NodeParameterRenderItem[] = [];
-    const used = new Set<string>();
+    const used = new SvelteSet<string>();
     const allEntries = nodeParameterEntryMap;
 
     for (const entry of filteredNodeParameterEntries) {
@@ -294,7 +295,7 @@
     return 'linear-gradient(to right, #111, #ddd)';
   };
 
-  const colorRangeBases = new Set(['h', 's', 'v', 'r', 'g', 'b']);
+  const colorRangeBases = new SvelteSet(['h', 's', 'v', 'r', 'g', 'b']);
 
   const rgbToHsv = (rgb: { r: number; g: number; b: number }) => {
     const r = rgb.r / 255;

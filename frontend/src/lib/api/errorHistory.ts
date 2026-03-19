@@ -1,5 +1,4 @@
-import { getHttpClientBase } from '$lib/api/httpClient';
-import { fetchWithRetry } from '$lib/api/requestUtils';
+import { apiFetchResponse } from '$lib/api/core/http';
 
 export type ErrorHistoryEntry = {
   id: string;
@@ -23,26 +22,35 @@ export type ErrorHistoryResponse = {
 };
 
 export async function fetchErrorHistory(limit: number = 200, sinceMs?: number): Promise<ErrorHistoryEntry[]> {
-  const base = getHttpClientBase();
-  const url = new URL(`${base}/v1/errors`);
+  const url = new URL('http://localhost/v1/errors');
   if (limit > 0) {
     url.searchParams.set('limit', String(limit));
   }
   if (typeof sinceMs === 'number' && Number.isFinite(sinceMs)) {
     url.searchParams.set('since_ms', String(Math.max(0, Math.floor(sinceMs))));
   }
-  const response = await fetchWithRetry(url.toString(), { headers: { accept: 'application/json' } }, { timeoutMs: 8000, maxAttempts: 2 });
-  if (!response.ok) {
-    throw new Error(`Failed to fetch error history (${response.status})`);
+  const path = `${url.pathname}${url.search}`;
+  const response = await apiFetchResponse(path, undefined, { timeoutMs: 8000, maxAttempts: 2 }).catch((error) => {
+    throw error;
+  });
+  if (response.status === 404) {
+    return [];
   }
-  const payload = (await response.json()) as ErrorHistoryResponse;
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(text?.trim().length ? text : `Error history request failed (${response.status})`);
+  }
+  const payload = (await response.json().catch(() => ({ items: [] }))) as ErrorHistoryResponse;
   return Array.isArray(payload.items) ? payload.items : [];
 }
 
 export async function clearErrorHistory(): Promise<void> {
-  const base = getHttpClientBase();
-  const response = await fetchWithRetry(`${base}/v1/errors`, { method: 'DELETE' }, { timeoutMs: 8000, maxAttempts: 2 });
+  const response = await apiFetchResponse('/errors', { method: 'DELETE' }, { timeoutMs: 8000, maxAttempts: 2 });
+  if (response.status === 404) {
+    return;
+  }
   if (!response.ok) {
-    throw new Error(`Failed to clear error history (${response.status})`);
+    const text = await response.text().catch(() => '');
+    throw new Error(text?.trim().length ? text : `Error history clear failed (${response.status})`);
   }
 }

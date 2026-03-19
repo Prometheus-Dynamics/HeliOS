@@ -1,11 +1,9 @@
 import { serializeGraphPlan } from '$lib/features/pipelines/graph';
 import type {
-  PipelineDiagnostics,
   PipelineGraphPlan,
   PipelineNodeValue
 } from '$lib/types/pipeline';
 import { clonePlan, ensurePlanPortMetadata } from './utils';
-import type { PipelineGraphDiagnostics } from './types';
 import { BackgroundVariant } from '@xyflow/svelte';
 import {
   buildGraphDiagnostics,

@@ -2,6 +2,10 @@ use imageproc::point::Point;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 
+const RDP_RETAIN_POINT_CAP: usize = 4 * 1024;
+const RDP_RETAIN_MARKER_CAP: usize = 4 * 1024;
+const RDP_RETAIN_INDEX_CAP: usize = 4 * 1024;
+
 #[derive(Default)]
 struct RdpScratchF32 {
     stack: Vec<(usize, usize)>,
@@ -17,6 +21,28 @@ struct RdpScratchF32 {
 
 thread_local! {
     static RDP_SCRATCH_F32: RefCell<RdpScratchF32> = RefCell::new(RdpScratchF32::default());
+}
+
+#[inline(always)]
+fn trim_retained_vec<T>(vec: &mut Vec<T>, retain_cap: usize) {
+    vec.clear();
+    if vec.capacity() > retain_cap {
+        vec.shrink_to(retain_cap);
+    }
+}
+
+pub(crate) fn compact_rdp_scratch_after_frame() {
+    RDP_SCRATCH_F32.with(|scratch| {
+        let mut scratch = scratch.borrow_mut();
+        trim_retained_vec(&mut scratch.stack, RDP_RETAIN_MARKER_CAP);
+        trim_retained_vec(&mut scratch.marker_epoch, RDP_RETAIN_MARKER_CAP);
+        trim_retained_vec(&mut scratch.seg1, RDP_RETAIN_POINT_CAP);
+        trim_retained_vec(&mut scratch.seg2, RDP_RETAIN_POINT_CAP);
+        trim_retained_vec(&mut scratch.out2, RDP_RETAIN_POINT_CAP);
+        trim_retained_vec(&mut scratch.idxs, RDP_RETAIN_INDEX_CAP);
+        trim_retained_vec(&mut scratch.uniq, RDP_RETAIN_INDEX_CAP);
+        trim_retained_vec(&mut scratch.hull, RDP_RETAIN_INDEX_CAP);
+    });
 }
 
 /// Approximates a polygonal curve for lib-cv points using Ramer–Douglas–Peucker (f64).
@@ -120,6 +146,25 @@ pub fn approx_poly_dp_into(points: &[Point<f32>], closed: bool, epsilon: f32, ou
             let RdpScratchF32 { stack, marker_epoch, marker_gen, .. } = &mut *scratch;
             approx_poly_dp_open_with_buffers_into(points, epsilon, stack, marker_epoch, marker_gen, out);
         }
+    });
+}
+
+/// Faster closed-contour approximation used by hot candidate-extraction paths.
+///
+/// Instead of computing the exact farthest pair via a convex hull + rotating calipers pass,
+/// this chooses a split pair from a small set of axis/diagonal extrema. That keeps the
+/// complexity linear in the contour length and is sufficient for dense tag contours where
+/// we only need a stable 4-corner approximation.
+pub fn approx_poly_dp_closed_fast_into(points: &[Point<f32>], epsilon: f32, out: &mut Vec<Point<f32>>) {
+    if points.len() < 3 || epsilon <= 0.0 {
+        out.clear();
+        out.extend_from_slice(points);
+        return;
+    }
+
+    RDP_SCRATCH_F32.with(|scratch| {
+        let mut scratch = scratch.borrow_mut();
+        approx_poly_dp_closed_fast_with_scratch(points, epsilon, out, &mut scratch);
     });
 }
 
@@ -251,6 +296,31 @@ fn approx_poly_dp_closed_with_scratch(points: &[Point<f32>], epsilon: f32, out: 
     merge_closed_segments(out, out2);
 }
 
+fn approx_poly_dp_closed_fast_with_scratch(points: &[Point<f32>], epsilon: f32, out: &mut Vec<Point<f32>>, scratch: &mut RdpScratchF32) {
+    let n = points.len();
+    if n < 3 || epsilon <= 0.0 {
+        out.clear();
+        out.extend_from_slice(points);
+        return;
+    }
+
+    let (mut a, mut b) = approximate_farthest_pair_axis_extrema(points);
+    if a > b {
+        std::mem::swap(&mut a, &mut b);
+    }
+
+    let RdpScratchF32 { stack, marker_epoch, marker_gen, seg1, seg2, out2, .. } = scratch;
+    seg1.clear();
+    seg1.extend_from_slice(&points[a..=b]);
+    seg2.clear();
+    seg2.extend_from_slice(&points[b..]);
+    seg2.extend_from_slice(&points[..=a]);
+
+    approx_poly_dp_open_with_buffers_into(seg1.as_slice(), epsilon, stack, marker_epoch, marker_gen, out);
+    approx_poly_dp_open_with_buffers_into(seg2.as_slice(), epsilon, stack, marker_epoch, marker_gen, out2);
+    merge_closed_segments(out, out2);
+}
+
 fn merge_closed_segments<T: PartialEq + Copy>(left: &mut Vec<T>, right: &mut Vec<T>) {
     if left.is_empty() {
         std::mem::swap(left, right);
@@ -267,6 +337,103 @@ fn merge_closed_segments<T: PartialEq + Copy>(left: &mut Vec<T>, right: &mut Vec
         right.pop();
     }
     left.append(right);
+}
+
+fn approximate_farthest_pair_axis_extrema(points: &[Point<f32>]) -> (usize, usize) {
+    let n = points.len();
+    if n == 0 {
+        return (0, 0);
+    }
+    if n == 1 {
+        return (0, 0);
+    }
+    if n == 2 {
+        return (0, 1);
+    }
+
+    let mut min_x = 0usize;
+    let mut max_x = 0usize;
+    let mut min_y = 0usize;
+    let mut max_y = 0usize;
+    let mut min_sum = 0usize;
+    let mut max_sum = 0usize;
+    let mut min_diff = 0usize;
+    let mut max_diff = 0usize;
+
+    for i in 1..n {
+        let p = points[i];
+        let px = p.x;
+        let py = p.y;
+        let sum = px + py;
+        let diff = px - py;
+
+        let min_x_p = points[min_x];
+        if px < min_x_p.x || (px == min_x_p.x && py < min_x_p.y) {
+            min_x = i;
+        }
+
+        let max_x_p = points[max_x];
+        if px > max_x_p.x || (px == max_x_p.x && py > max_x_p.y) {
+            max_x = i;
+        }
+
+        let min_y_p = points[min_y];
+        if py < min_y_p.y || (py == min_y_p.y && px < min_y_p.x) {
+            min_y = i;
+        }
+
+        let max_y_p = points[max_y];
+        if py > max_y_p.y || (py == max_y_p.y && px > max_y_p.x) {
+            max_y = i;
+        }
+
+        let min_sum_p = points[min_sum];
+        let min_sum_v = min_sum_p.x + min_sum_p.y;
+        if sum < min_sum_v || (sum == min_sum_v && px < min_sum_p.x) {
+            min_sum = i;
+        }
+
+        let max_sum_p = points[max_sum];
+        let max_sum_v = max_sum_p.x + max_sum_p.y;
+        if sum > max_sum_v || (sum == max_sum_v && px > max_sum_p.x) {
+            max_sum = i;
+        }
+
+        let min_diff_p = points[min_diff];
+        let min_diff_v = min_diff_p.x - min_diff_p.y;
+        if diff < min_diff_v || (diff == min_diff_v && py < min_diff_p.y) {
+            min_diff = i;
+        }
+
+        let max_diff_p = points[max_diff];
+        let max_diff_v = max_diff_p.x - max_diff_p.y;
+        if diff > max_diff_v || (diff == max_diff_v && py > max_diff_p.y) {
+            max_diff = i;
+        }
+    }
+
+    let extrema = [min_x, max_x, min_y, max_y, min_sum, max_sum, min_diff, max_diff];
+    let mut unique = [usize::MAX; 8];
+    let mut unique_len = 0usize;
+    for idx in extrema {
+        if !unique[..unique_len].contains(&idx) {
+            unique[unique_len] = idx;
+            unique_len += 1;
+        }
+    }
+
+    if unique_len < 2 {
+        return (0, 1);
+    }
+
+    let mut best = normalize_pair(unique[0], unique[1]);
+    let mut best_dist = dist2_f32(points, best.0, best.1);
+    for i in 0..unique_len {
+        for j in (i + 1)..unique_len {
+            update_best_f32(points, unique[i], unique[j], &mut best, &mut best_dist);
+        }
+    }
+    best
 }
 
 fn farthest_pair_points(points: &[crate::Point]) -> (usize, usize) {
@@ -577,6 +744,50 @@ fn cross_f32(points: &[Point<f32>], o: usize, a: usize, b: usize) -> f32 {
     let ox = points[o].x;
     let oy = points[o].y;
     (points[a].x - ox) * (points[b].y - oy) - (points[a].y - oy) * (points[b].x - ox)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{approx_poly_dp_closed_fast_into, approx_poly_dp_into};
+    use imageproc::point::Point;
+
+    fn dense_rectangle(width: i32, height: i32) -> Vec<Point<f32>> {
+        let mut points = Vec::new();
+        for x in 0..width {
+            points.push(Point::new(x as f32, 0.0));
+        }
+        for y in 1..height {
+            points.push(Point::new((width - 1) as f32, y as f32));
+        }
+        for x in (0..(width - 1)).rev() {
+            points.push(Point::new(x as f32, (height - 1) as f32));
+        }
+        for y in (1..(height - 1)).rev() {
+            points.push(Point::new(0.0, y as f32));
+        }
+        points
+    }
+
+    #[test]
+    fn closed_fast_matches_closed_rdp_on_dense_rectangle() {
+        let contour = dense_rectangle(128, 72);
+        let mut exact = Vec::new();
+        let mut fast = Vec::new();
+
+        approx_poly_dp_into(&contour, true, 2.0, &mut exact);
+        approx_poly_dp_closed_fast_into(&contour, 2.0, &mut fast);
+
+        if exact.first() == exact.last() {
+            exact.pop();
+        }
+        if fast.first() == fast.last() {
+            fast.pop();
+        }
+
+        assert_eq!(exact.len(), 4);
+        assert_eq!(fast.len(), 4);
+        assert_eq!(exact, fast);
+    }
 }
 
 // pub fn approx_poly_dp(curve: &[Point<u32>], epsilon: f64, closed: bool) -> Vec<Point<u32>> {

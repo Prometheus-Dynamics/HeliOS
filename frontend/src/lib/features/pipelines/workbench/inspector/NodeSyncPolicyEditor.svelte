@@ -18,18 +18,14 @@
   } from './syncPolicyUtils';
   import {
     groupAccentColor,
-    generateGroupId,
     updateTickMode,
     setPrimaryTickGroup,
     toggleRequiredGroup,
     removeGroup,
-    duplicateGroup,
     updateGroup,
     renameGroup,
-    applyGroupWithPorts,
     movePortToGroup,
-    syncAllInputs as syncAllInputsDraft,
-    splitPortsIntoGroups as splitPortsIntoGroupsDraft
+    syncAllInputs as syncAllInputsDraft
   } from './syncPolicyDraftHelpers';
   import SyncAssignBoard from './SyncAssignBoard.svelte';
   import SyncPolicyControls from './SyncPolicyControls.svelte';
@@ -227,15 +223,6 @@
     modifySyncDraft((draft) => removeGroup(draft, index));
   }
 
-  function duplicateGroupLocal(index: number) {
-    modifySyncDraft((draft) => {
-      const template = draft.groups?.[index];
-      if (!template) return;
-      const nextId = generateGroupId(draft.groups.map((group) => group.id), template.id);
-      duplicateGroup(draft, index, nextId);
-    });
-  }
-
   function updateGroupLocal(index: number, updater: (group: PipelineSyncGroupConfig) => void) {
     modifySyncDraft((draft) => updateGroup(draft, index, updater));
   }
@@ -280,17 +267,6 @@
 
   const portsForGroup = (groupId: string | null) =>
     selectedNodePorts.filter((port) => (portAssignments[canonicalPortName(port)] ?? null) === groupId);
-
-  const applyGroupWithPortsLocal = (
-    ports: string[],
-    idHint?: string,
-    overrides?: Partial<PipelineSyncGroupConfig>
-  ) => {
-    if (!ports.length) return;
-    modifySyncDraft((draft) =>
-      applyGroupWithPorts(draft, ports, idHint, overrides, draft.groups.map((group) => group.id))
-    );
-  };
 
   function movePortToGroupLocal(port: string, targetGroupId: string | null) {
     modifySyncDraft((draft) => movePortToGroup(draft, port, targetGroupId));
@@ -337,21 +313,9 @@
     dragTarget = null;
   }
 
-  function groupRemainingPorts() {
-    if (!selectedNodePorts.length) return;
-    const remaining = listUnassignedPorts(syncDraft, selectedNodePorts);
-    if (remaining.length === 0) return;
-    applyGroupWithPortsLocal(remaining, 'group');
-  }
-
   function handleSyncAllInputs() {
     if (!selectedNodePorts.length) return;
     modifySyncDraft((draft) => syncAllInputsDraft(draft, selectedNodePorts));
-  }
-
-  function handleSplitPortsIntoGroups() {
-    if (!selectedNodePorts.length) return;
-    modifySyncDraft((draft) => splitPortsIntoGroupsDraft(draft, selectedNodePorts));
   }
 
   const tickSourceKind = $derived.by(() =>

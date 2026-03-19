@@ -108,7 +108,7 @@ fn cv_otsu(frame: DynamicImage, exec_ctx: &ExecutionContext) -> Result<GrayImage
     const RECOMPUTE_INTERVAL: u64 = 4;
     const MAX_SIG_DELTA: f64 = 0.03;
 
-    #[derive(Default, Serialize, Deserialize)]
+    #[derive(Clone, Default, Serialize, Deserialize)]
     struct OtsuState {
         frame_idx: u64,
         last_threshold: u8,
@@ -143,13 +143,13 @@ fn cv_otsu(frame: DynamicImage, exec_ctx: &ExecutionContext) -> Result<GrayImage
         acc / (64.0 * 255.0)
     }
 
-    let mut state: OtsuState = exec_ctx.state.get_checked::<OtsuState>(STATE_KEY).map_err(NodeError::Handler)?.unwrap_or_default();
+    let mut state: OtsuState = exec_ctx.state.take_native::<OtsuState>(STATE_KEY).or_else(|_| exec_ctx.state.get_checked::<OtsuState>(STATE_KEY)).map_err(NodeError::Handler)?.unwrap_or_default();
     state.frame_idx = state.frame_idx.saturating_add(1);
 
     let mask = crate::modules::image::luma::with_luma8_frame(&frame, |gray| {
         let sig = signature_8x8(gray);
         let can_reuse = state.last_signature_8x8.as_ref().map(|prev| signature_delta_norm(prev, &sig) <= MAX_SIG_DELTA).unwrap_or(false);
-        let periodic_refresh = (state.frame_idx % RECOMPUTE_INTERVAL) == 0;
+        let periodic_refresh = state.frame_idx.is_multiple_of(RECOMPUTE_INTERVAL);
         let threshold = if can_reuse && !periodic_refresh { state.last_threshold } else { crate::modules::image::binary::otsu_level_gray(gray) };
         state.last_threshold = threshold;
         match state.last_signature_8x8.as_mut() {
@@ -159,7 +159,7 @@ fn cv_otsu(frame: DynamicImage, exec_ctx: &ExecutionContext) -> Result<GrayImage
         crate::modules::image::binary::binary_image_gray_simd(gray, threshold)
     });
 
-    exec_ctx.state.set_typed(STATE_KEY, &state).map_err(NodeError::Handler)?;
+    exec_ctx.state.set_native(STATE_KEY, state).map_err(NodeError::Handler)?;
     Ok(mask)
 }
 
@@ -657,23 +657,9 @@ fn apply_clahe_cached(gray: &GrayImage, tile_size: u32, clip_limit: f32) -> Gray
     let stats = clahe_frame_stats(gray);
     CLAHE_PREPARED_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
-        if let Some(entry) = cache.as_mut()
-            && entry.key == key
-        {
-            let max_reuse = if tile_size <= 1 { CLAHE_MAX_REUSE_STREAK_TILE1 } else { CLAHE_MAX_REUSE_STREAK };
-            if entry.reuse_streak < max_reuse {
-                if tile_size > 1 && entry.reuse_streak < CLAHE_FORCE_REUSE_STREAK {
-                    entry.reuse_streak = entry.reuse_streak.saturating_add(1);
-                    return apply_clahe_with_tiles(gray, &entry.tiles);
-                }
-                if clahe_stats_similar(entry.stats, stats) {
-                    entry.reuse_streak = entry.reuse_streak.saturating_add(1);
-                    entry.stats = stats;
-                    return apply_clahe_with_tiles(gray, &entry.tiles);
-                }
-            }
-        }
-
+        // Reusing prepared tiles across different frames can preserve the wrong local histogram
+        // layout even when coarse frame stats look "similar". That is enough to change the
+        // downstream threshold mask and break tag detection. Always prepare from the current frame.
         let tiles = prepare_clahe(gray, tile_size, clip_limit);
         let out = apply_clahe_with_tiles(gray, &tiles);
         *cache = Some(ClahePreparedCache { key, stats, reuse_streak: 0, tiles });

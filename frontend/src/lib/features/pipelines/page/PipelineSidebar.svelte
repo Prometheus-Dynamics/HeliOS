@@ -6,7 +6,6 @@
   import { faTrashCan } from '@fortawesome/free-solid-svg-icons';
   import type { PipelineOverviewPipeline } from '$lib/types/pipeline';
 
-  type PluginListEntry = { name: string; detail: string; description: string };
   type PipelineListEntry = {
     id: string;
     name: string;
@@ -16,17 +15,13 @@
   };
 
   type PipelineSidebarProps = {
-    activeTab: 'pipeline' | 'tune';
     customNodeSearch?: string;
-    visiblePlugins?: PluginListEntry[];
     pipelinesRefreshing?: boolean;
     isInitialLoading?: boolean;
     pipelineListItems?: PipelineListEntry[];
     pipelineMap?: Record<string, PipelineOverviewPipeline>;
     selectedPipelineId?: string | null;
     pipelineSearch: Writable<string>;
-    onOpenPluginProject?: () => void;
-    onOpenPluginInIde?: (name: string) => void;
     onOpenCreateModal?: () => void;
     onSelectPipeline?: (id: string) => void;
     onOpenPipelineIcon?: (id: string) => void;
@@ -35,17 +30,13 @@
   };
 
   let {
-    activeTab,
     customNodeSearch = $bindable(''),
-    visiblePlugins = [],
     pipelinesRefreshing = false,
     isInitialLoading = false,
     pipelineListItems = [],
     pipelineMap = {},
     selectedPipelineId = null,
     pipelineSearch,
-    onOpenPluginProject = () => {},
-    onOpenPluginInIde = () => {},
     onOpenCreateModal = () => {},
     onSelectPipeline = () => {},
     onOpenPipelineIcon = () => {},
@@ -99,11 +90,22 @@
             {@const pipelineModel = pipelineMap[pipeline.id] ?? null}
             {@const pipelineAppearance = pipelineModel?.appearance ?? pipeline.appearance ?? null}
             {@const isSelected = pipeline.id === selectedPipelineId}
+            {@const hasDiagnosticsSnapshot = Boolean(pipelineModel?.diagnostics)}
             {@const warnings = pipelineModel?.diagnostics?.warnings ?? []}
+            {@const diagnosticsError = typeof pipelineModel?.diagnostics?.error === 'string' ? pipelineModel.diagnostics.error.trim() : ''}
             {@const storedIssueCount = Number.isFinite(pipeline.issueCount) ? Math.max(0, Math.floor(pipeline.issueCount ?? 0)) : 0}
-            {@const warningCount = warnings.length > 0 ? warnings.length : storedIssueCount}
+            {@const warningCount = hasDiagnosticsSnapshot ? warnings.length + (diagnosticsError.length > 0 ? 1 : 0) : storedIssueCount}
             {@const hasMissingLinks = warnings.length > 0 && warnings.some((warning) => /missing|resolve|cycle/i.test(warning.message ?? ''))}
-            {@const warningTitle = warnings.length > 0 ? warnings.map((warning) => warning.message ?? '').filter(Boolean).join('\n') : storedIssueCount > 0 ? `Pipeline has ${storedIssueCount} validation issue${storedIssueCount === 1 ? '' : 's'}.` : ''}
+            {@const warningTitle = hasDiagnosticsSnapshot
+              ? [
+                  diagnosticsError,
+                  ...warnings.map((warning) => warning.message ?? '').filter(Boolean)
+                ]
+                  .filter(Boolean)
+                  .join('\n')
+              : storedIssueCount > 0
+                ? `Pipeline has ${storedIssueCount} validation issue${storedIssueCount === 1 ? '' : 's'}.`
+                : ''}
             <div
               class={`w-full rounded border px-2.5 py-1.5 text-left transition ${
                 isSelected

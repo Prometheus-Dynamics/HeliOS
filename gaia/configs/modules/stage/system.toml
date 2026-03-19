@@ -5,7 +5,17 @@ mode = 420
 
 [[files]]
 dst = "/etc/os-release"
-content = "NAME=\"Helios\"\nID=helios\nPRETTY_NAME=\"Helios\"\n"
+content = "NAME=\"Helios\"\nID=helios\nVERSION_ID=\"v2026.1.0\"\nBUILD_ID=\"v2026.1.0\"\nPRETTY_NAME=\"Helios v2026.1.0\"\n"
+mode = 420
+
+[[files]]
+dst = "/etc/helios/version"
+content = "v2026.1.0\n"
+mode = 420
+
+[[files]]
+dst = "/etc/helios/build-id"
+content = "v2026.1.0\n"
 mode = 420
 
 [[files]]
@@ -29,13 +39,28 @@ content = "America/Vancouver\n"
 mode = 420
 
 [[files]]
+dst = "/etc/systemd/network/10-usbbr0.netdev"
+content = "[NetDev]\nName=usbbr0\nKind=bridge\n"
+mode = 420
+
+[[files]]
 dst = "/etc/systemd/network/10-usb0.network"
-content = "[Match]\nName=usb0\n\n[Network]\nDHCP=no\nAddress=172.31.250.1/24\nConfigureWithoutCarrier=yes\nLinkLocalAddressing=no\n"
+content = "[Match]\nName=usb0\n\n[Network]\nBridge=usbbr0\nLinkLocalAddressing=no\nConfigureWithoutCarrier=yes\n"
+mode = 420
+
+[[files]]
+dst = "/etc/systemd/network/11-usb-gadget-slaves.network"
+content = "[Match]\nName=usb1\n\n[Network]\nBridge=usbbr0\nLinkLocalAddressing=no\nConfigureWithoutCarrier=yes\n"
+mode = 420
+
+[[files]]
+dst = "/etc/systemd/network/12-usbbr0.network"
+content = "[Match]\nName=usbbr0\n\n[Network]\nDHCP=no\nAddress=172.31.250.1/24\nConfigureWithoutCarrier=yes\nLinkLocalAddressing=no\n"
 mode = 420
 
 [[files]]
 dst = "/etc/systemd/network/10-eth0.network"
-content = "[Match]\nName=eth0\n\n[Network]\nDHCP=yes\n"
+content = "[Match]\nName=end0 end1 eth0 eth1\n\n[Network]\nDHCP=yes\n"
 mode = 420
 
 [[files]]

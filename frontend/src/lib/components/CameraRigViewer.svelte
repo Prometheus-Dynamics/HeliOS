@@ -6,6 +6,7 @@
 
   import { applyPose, createCameraGroup, createRobotBaseGroup, DEFAULT_ROBOT_DIMENSIONS, setCameraHighlight } from '$lib/3d/rig';
   import type { RigCameraInfo, RobotDimensions } from '$lib/types/rig';
+  import { SvelteMap } from 'svelte/reactivity';
 
   type Props = {
     robot?: RobotDimensions;
@@ -18,6 +19,9 @@ const {
   cameras = [],
   selectedCamera = null
 }: Props = $props();
+  const readRobot = () => robot;
+  const readCameras = () => cameras;
+  const readSelectedCamera = () => selectedCamera;
 
   const dispatch = createEventDispatcher<{ select: string | null }>();
 
@@ -31,11 +35,11 @@ const {
   let animationFrame: number | null = null;
   let robotGroup: THREE.Group | null = null;
   let cameraGroup: THREE.Group | null = null;
-  const cameraMeshes = new Map<string, THREE.Group>();
+  const cameraMeshes = new SvelteMap<string, THREE.Group>();
 
-let robotDimensions = $state<RobotDimensions>(normalizeRobot(robot));
-let cameraEntries = $state<RigCameraInfo[]>(normalizeCameras(cameras));
-let selected = $state<string | null>(selectedCamera ?? null);
+  let robotDimensions = $state<RobotDimensions>(normalizeRobot(readRobot()));
+  let cameraEntries = $state<RigCameraInfo[]>(normalizeCameras(readCameras()));
+  let selected = $state<string | null>(readSelectedCamera() ?? null);
 
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
@@ -336,7 +340,7 @@ function dispose() {
   }
 
   $effect(() => {
-    const next = normalizeRobot(robot);
+    const next = normalizeRobot(readRobot());
     if (!robotEqual(robotDimensions, next)) {
       robotDimensions = next;
       rebuildRobot();
@@ -344,7 +348,7 @@ function dispose() {
   });
 
   $effect(() => {
-    const next = normalizeCameras(cameras);
+    const next = normalizeCameras(readCameras());
     if (!camerasEqual(cameraEntries, next)) {
       cameraEntries = next;
       rebuildCameras();
@@ -352,7 +356,7 @@ function dispose() {
   });
 
   $effect(() => {
-    const nextSelected = selectedCamera ?? null;
+    const nextSelected = readSelectedCamera() ?? null;
     if (selected !== nextSelected) {
       selected = nextSelected;
       updateSelectionHighlight();

@@ -1,4 +1,4 @@
-import { getHttpClientBase } from '$lib/api/httpClient';
+import { apiFetchResponse } from '$lib/api/core/http';
 import type { ConsoleSessionSummary } from '$lib/types/console';
 
 export class ConsoleSessionsNotSupportedError extends Error {
@@ -60,8 +60,7 @@ function unwrapJson<T>(response: Response): Promise<T> {
 }
 
 export async function fetchConsoleSessions(): Promise<ConsoleSessionSummary[]> {
-  const base = getHttpClientBase();
-  const response = await fetch(`${base}/v1/console/sessions`, {
+  const response = await apiFetchResponse('/console/sessions', {
     method: 'GET',
     headers: JSON_HEADERS
   });
@@ -73,11 +72,10 @@ export async function fetchConsoleSessions(): Promise<ConsoleSessionSummary[]> {
 }
 
 export async function createConsoleSession(request: CreateConsoleSessionRequest = {}): Promise<ConsoleSessionSummary> {
-  const base = getHttpClientBase();
-  const response = await fetch(`${base}/v1/console/sessions`, {
+  const response = await apiFetchResponse('/console/sessions', {
     method: 'POST',
     headers: JSON_HEADERS,
-    body: JSON.stringify(request)
+    body: request
   });
   const payload = await unwrapJson<ConsoleSessionSummary>(response).catch((error) => {
     throw new Error(`Unable to create console session: ${error instanceof Error ? error.message : String(error)}`);
@@ -90,8 +88,7 @@ export async function createConsoleSession(request: CreateConsoleSessionRequest 
 }
 
 export async function deleteConsoleSession(sessionId: string): Promise<void> {
-  const base = getHttpClientBase();
-  const response = await fetch(`${base}/v1/console/sessions/${sessionId}`, {
+  const response = await apiFetchResponse(`/console/sessions/${sessionId}`, {
     method: 'DELETE',
     headers: {
       Accept: 'application/json'

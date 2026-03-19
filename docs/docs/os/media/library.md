@@ -13,6 +13,7 @@ The Media library is the main Media page. It lists files stored on the device an
 - Switch between Grid and List layout.
 - Select one or more files and:
   - Create a replay stream (images/videos only).
+  - Download selected.
   - Delete selected.
 - Open an asset detail modal to preview and download it, and edit metadata.
 
@@ -39,4 +40,4 @@ When at least one asset is selected, the library header shows actions like:
 
 ## Paging
 
-Media loads in pages. Use **Load more** to fetch the next batch.
+Media loads incrementally. Use **Load more** to fetch additional results when available.

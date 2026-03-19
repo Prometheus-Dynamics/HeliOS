@@ -1,7 +1,7 @@
 use daedalus::data::model::Value as DaedalusValue;
 use daedalus::engine::{EngineConfig, GpuBackend, RuntimeMode};
 use daedalus::planner::Graph;
-use daedalus::runtime::{BackpressureStrategy, EdgePolicyKind};
+use daedalus::runtime::{BackpressureStrategy, EdgePolicyKind, MetricsLevel};
 use tracing::warn;
 
 const PREFIX: &str = "helios.daedalus.";
@@ -21,6 +21,7 @@ const KEY_RUNTIME_LOCKFREE_QUEUES: &str = "helios.daedalus.runtime.lockfree_queu
 const ENV_FORCE_CPU: &str = "HELIOS_DAEDALUS_FORCE_CPU";
 const ENV_GPU_BACKEND: &str = "HELIOS_DAEDALUS_GPU_BACKEND";
 const ENV_PLANNER_ENABLE_GPU: &str = "HELIOS_DAEDALUS_PLANNER_ENABLE_GPU";
+const ENV_METRICS_LEVEL: &str = "DAEDALUS_METRICS_LEVEL";
 
 fn parse_bool(raw: &str) -> Option<bool> {
     match raw.trim().to_ascii_lowercase().as_str() {
@@ -70,6 +71,16 @@ fn parse_backpressure(raw: &str) -> Option<BackpressureStrategy> {
         "none" => Some(BackpressureStrategy::None),
         "bounded" | "bounded_queues" => Some(BackpressureStrategy::BoundedQueues),
         "error" | "error_on_overflow" => Some(BackpressureStrategy::ErrorOnOverflow),
+        _ => None,
+    }
+}
+
+fn parse_metrics_level(raw: &str) -> Option<MetricsLevel> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "off" => Some(MetricsLevel::Off),
+        "basic" => Some(MetricsLevel::Basic),
+        "detailed" => Some(MetricsLevel::Detailed),
+        "profile" => Some(MetricsLevel::Profile),
         _ => None,
     }
 }
@@ -173,6 +184,14 @@ pub fn apply_daedalus_engine_config_overrides(cfg: &mut EngineConfig, graph: &Gr
 /// These are applied after graph metadata so operators can enforce a runtime policy
 /// during incident mitigation (for example, force CPU backend globally).
 pub fn apply_daedalus_engine_env_overrides(cfg: &mut EngineConfig) {
+    if let Ok(raw) = std::env::var(ENV_METRICS_LEVEL) {
+        if let Some(level) = parse_metrics_level(&raw) {
+            cfg.runtime.metrics_level = level;
+        } else {
+            warn!(env = ENV_METRICS_LEVEL, raw, "invalid daedalus metrics level override");
+        }
+    }
+
     if let Ok(raw) = std::env::var(ENV_FORCE_CPU) {
         match parse_bool(&raw) {
             Some(true) => {

@@ -3,6 +3,7 @@
 
   import { toaster } from '$lib';
   import { apiUrl } from '$lib/api/httpClient';
+  import { apiFetchResponse } from '$lib/api/core/http';
   import { resourceTelemetryStore, type ResourceSample } from '$lib/api/telemetry';
   import type { PeripheralEntry } from '$lib/types/devices';
   import SensorModalShell from './SensorModalShell.svelte';
@@ -86,6 +87,7 @@
   const mode = $derived(form.enabled ? (form.manual_percent != null ? 'fixed' : 'curve') : 'disabled');
   const statusMode = $derived(normalizeStatusMode(fanStatus?.mode));
   const displayMode = $derived(dirty ? mode : statusMode ?? mode);
+  const statusMessage = $derived.by(() => status ?? (refreshingStatus ? 'Refreshing status…' : null));
   const currentTemp = $derived(telemetry.cpu.temperature_c ?? null);
   const previewTarget = $derived(computeTarget(form, currentTemp));
   const ensureDeviceSettings = createSettingsLoader({
@@ -355,7 +357,7 @@
     if (!silent) refreshingStatus = true;
     try {
       const url = apiUrl('/peripherals/fan');
-      const response = await fetch(url, { headers: { Accept: 'application/json' } });
+      const response = await apiFetchResponse(url, { headers: { Accept: 'application/json' } });
       if (!response.ok) {
         const text = await response.text().catch(() => '');
         throw new Error(text || `Fan status request failed (${response.status})`);
@@ -501,7 +503,7 @@
       {busy}
       {dirty}
       {settingsError}
-      {status}
+      status={statusMessage}
       {error}
       onSelectPoint={(index) => (selectedPointIndex = index)}
       onAddPoint={() => addPoint()}

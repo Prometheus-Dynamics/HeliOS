@@ -1,5 +1,6 @@
 import { writable, type Readable } from 'svelte/store';
 import type { LogEntry, LogFilter } from './types';
+import { createLogFilterWorker, createLogTransformWorker } from '$lib/workers/factories';
 
 type LogWorkerState = {
   ready: boolean;
@@ -44,7 +45,7 @@ export function createLogWorkerClient(options: LogWorkerOptions = {}): LogWorker
   if (supportsWorker) {
     try {
       if (enableFilter) {
-        logFilterWorker = new Worker(new URL('$lib/workers/logFilterWorker.ts', import.meta.url), { type: 'module' });
+        logFilterWorker = createLogFilterWorker();
         logFilterWorker.onmessage = (event) => {
           const payload = event.data as LogEntry[];
           if (filterResolver) {
@@ -57,7 +58,7 @@ export function createLogWorkerClient(options: LogWorkerOptions = {}): LogWorker
         };
       }
       if (enableTransform) {
-        logTransformWorker = new Worker(new URL('$lib/workers/logTransformWorker.ts', import.meta.url), { type: 'module' });
+        logTransformWorker = createLogTransformWorker();
         logTransformWorker.onmessage = (event) => {
           const payload = event.data as { type?: string; requestId?: number; entries?: LogEntry[] };
           if (!payload || typeof payload.requestId !== 'number') return;

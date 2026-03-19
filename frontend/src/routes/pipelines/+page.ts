@@ -1,6 +1,13 @@
+import { fetchPipelinePagePayload, emptyPipelinePayload } from '$lib/api/pipelinesPayload';
 import type { PageLoad } from './$types';
-import { emptyPipelinePayload } from '$lib/api/pipelinesPayload';
 
-export const load: PageLoad = () => {
-  return emptyPipelinePayload();
+export const ssr = false;
+export const prerender = false;
+
+export const load: PageLoad = async () => {
+  try {
+    return await fetchPipelinePagePayload();
+  } catch {
+    return emptyPipelinePayload();
+  }
 };

@@ -22,7 +22,11 @@ import {
   transformFromFieldCenter,
   type PlanarFieldOrigin
 } from '$lib/features/localization/fieldOrigins';
-import { cameraKeyForSource, profileColorForId } from '$lib/features/localization/utils';
+import {
+  cameraKeyForSource,
+  mediaImuParentStreamIdForSource,
+  profileColorForId
+} from '$lib/features/localization/utils';
 import { pipelineGraphTotalMs } from '$lib/features/localization/page/localizationMetricsUtils';
 
 export type LocalizationBaseFrame = 'camera' | 'robot' | 'field';
@@ -60,29 +64,6 @@ export const groupLocalizationSources = (
 ): LocalizationSourceGroup[] => {
   const UUID_LIKE_RE =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  const MEDIA_IMU_STREAM_RE =
-    /^external:media-imu-([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i;
-  const MEDIA_IMU_ID_RE =
-    /^external:media-imu-([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}):/i;
-  const MEDIA_IMU_CAMERA_RE =
-    /^media-imu:([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i;
-
-  const mediaImuParentStreamId = (source: LocalizationPipelineSource): string | null => {
-    const streamId = (source.streamId ?? '').trim();
-    const id = (source.id ?? '').trim();
-    const cameraUid = (source.cameraUid ?? '').trim();
-
-    const byStream = streamId.match(MEDIA_IMU_STREAM_RE)?.[1];
-    if (byStream) return byStream;
-
-    const byId = id.match(MEDIA_IMU_ID_RE)?.[1];
-    if (byId) return byId;
-
-    const byCamera = cameraUid.match(MEDIA_IMU_CAMERA_RE)?.[1];
-    if (byCamera) return byCamera;
-
-    return null;
-  };
 
   const sourceKind = (source: LocalizationPipelineSource): LocalizationSourceGroup['kind'] => {
     const streamId = (source.streamId ?? '').trim();
@@ -121,7 +102,7 @@ export const groupLocalizationSources = (
   for (const source of compatibleSources) {
     const streamId = (source.streamId ?? '').trim();
     if (!UUID_LIKE_RE.test(streamId)) continue;
-    const key = source.cameraUid || source.streamId || source.id;
+    const key = cameraKeyForSource(source) ?? source.id;
     if (!key) continue;
     parentStreamGroups.set(streamId, {
       key,
@@ -144,7 +125,7 @@ export const groupLocalizationSources = (
 
   for (const source of compatibleSources) {
     const incomingKind = sourceKind(source);
-    const parentStreamId = mediaImuParentStreamId(source);
+    const parentStreamId = mediaImuParentStreamIdForSource(source);
     const parentGroup = parentStreamId ? parentStreamGroups.get(parentStreamId) : null;
 
     const kind: LocalizationSourceGroup['kind'] = parentGroup ? 'stream' : parentStreamId ? 'stream' : incomingKind;
@@ -258,10 +239,7 @@ export const getViewerCameraIdForMarker = (options: {
     return options.rigCameraForMarker(options.marker)?.uid ?? null;
   }
   const source = options.marker.source;
-  if (options.baseFrame === 'field') {
-    return (source?.cameraUid || source?.streamId || '').trim() || source?.id || null;
-  }
-  return (source?.cameraUid || source?.streamId || '').trim() || source?.id || null;
+  return cameraKeyForSource(source ?? null) || source?.id || null;
 };
 
 export const buildSourceStatusRows = (options: {
@@ -310,24 +288,84 @@ export const buildViewerCameras = (options: {
     return options.rigCameras;
   }
 
-  const seen = new Set<string>();
-  const out: RigCameraInfo[] = [];
-  for (const source of options.selectedSources) {
-    const key = cameraKeyForSource(source) ?? source.id;
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push({
-      uid: key,
-      streamId: source.streamId,
-      cameraUid: source.cameraUid,
-      streamAlias: source.streamLabel ?? null,
-      driverCameraId: source.cameraPath ?? key,
-      displayName: source.streamLabel || key,
+  const isImuLikeSource = (source: LocalizationPipelineSource): boolean => {
+    const streamId = String(source.streamId ?? '').trim().toLowerCase();
+    const outputKey = String(source.outputKey ?? '').trim().toLowerCase();
+    const cameraUid = String(source.cameraUid ?? '').trim().toLowerCase();
+    return (
+      streamId.startsWith('external:imu') ||
+      streamId.startsWith('external:media-imu-') ||
+      outputKey.includes('imu') ||
+      cameraUid === 'imu'
+    );
+  };
+
+  const sourceScoreForGroup = (source: LocalizationPipelineSource, groupKey: string): number => {
+    let score = 0;
+    const normalizedGroupKey = groupKey.trim();
+    const sourceCameraKey = cameraKeyForSource(source);
+    const parentStreamId = mediaImuParentStreamIdForSource(source);
+    const streamId = String(source.streamId ?? '').trim();
+    const cameraUid = String(source.cameraUid ?? '').trim();
+    if (sourceCameraKey && sourceCameraKey === normalizedGroupKey) score += 100;
+    if (parentStreamId && parentStreamId === normalizedGroupKey) score += 80;
+    if (cameraUid && cameraUid === normalizedGroupKey) score += 60;
+    if (streamId && streamId === normalizedGroupKey) score += 40;
+    if (!isImuLikeSource(source)) score += 50;
+    if (streamId && !streamId.startsWith('external:')) score += 15;
+    if (String(source.cameraPath ?? '').trim()) score += 8;
+    if (String(source.streamLabel ?? '').trim()) score += 4;
+    return score;
+  };
+
+  const canonicalStreamIdForGroup = (sources: LocalizationPipelineSource[]): string | null => {
+    for (const source of sources) {
+      const streamId = String(source.streamId ?? '').trim();
+      if (streamId && !streamId.startsWith('external:')) return streamId;
+    }
+    for (const source of sources) {
+      const parentStreamId = mediaImuParentStreamIdForSource(source);
+      if (parentStreamId) return parentStreamId;
+    }
+    for (const source of sources) {
+      const streamId = String(source.streamId ?? '').trim();
+      if (streamId) return streamId;
+    }
+    return null;
+  };
+
+  const groups = groupLocalizationSources(options.selectedSources);
+  return groups.map((group) => {
+    const sources = group.pipelines.flatMap((pipeline) => pipeline.sources);
+    const representative =
+      [...sources].sort((left, right) => sourceScoreForGroup(right, group.key) - sourceScoreForGroup(left, group.key))[0] ??
+      null;
+    const streamId = canonicalStreamIdForGroup(sources);
+    const nonImuCameraUid =
+      sources
+        .map((source) => String(source.cameraUid ?? '').trim())
+        .find((cameraUid) => cameraUid.length > 0 && cameraUid.toLowerCase() !== 'imu') ?? null;
+    const cameraUid = nonImuCameraUid ?? (representative ? String(representative.cameraUid ?? '').trim() || null : null);
+    const streamAlias =
+      String(group.label ?? '').trim() ||
+      (representative ? String(representative.streamLabel ?? '').trim() : '') ||
+      group.key;
+    const driverCameraId =
+      String(group.path ?? '').trim() ||
+      (representative ? String(representative.cameraPath ?? '').trim() : '') ||
+      group.key;
+
+    return {
+      uid: group.key,
+      streamId,
+      cameraUid,
+      streamAlias,
+      driverCameraId,
+      displayName: streamAlias || group.key,
       backend: 'Localization',
       pose: { translation: { x: 0, y: 0, z: 0 }, rotation: { roll: 0, pitch: 0, yaw: 0 } }
-    });
-  }
-  return out;
+    };
+  });
 };
 
 export const buildViewProfileOverlays = (options: {

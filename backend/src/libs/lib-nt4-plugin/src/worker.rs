@@ -1,9 +1,8 @@
 use crate::rmpv_json;
 use daedalus::runtime::NodeError;
-use nt_client::data::Properties;
-use nt_client::data::SubscriptionOptions;
-use nt_client::data::r#type::{DataType, JsonString};
-use nt_client::subscribe::ReceivedMessage;
+use nt_client::data::{DataType, JsonString};
+use nt_client::subscribe::{ReceivedMessage, SubscriptionOptions};
+use nt_client::topic::Properties;
 use nt_client::{Client, ClientHandle, NTAddr, NewClientOptions};
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
@@ -162,7 +161,7 @@ async fn publish_value(handle: &ClientHandle, publishers: &mut HashMap<String, P
         None => true,
     };
     if needs_new_publisher {
-        let publisher = handle.topic(topic.to_string()).generic_publish(data_type, Properties::default()).await.map_err(|e| e.to_string())?;
+        let publisher = handle.topic(topic.to_string()).generic_publish(data_type.clone(), Properties::default()).await.map_err(|e| e.to_string())?;
         publishers.insert(topic.to_string(), PublisherEntry { data_type, publisher });
     }
 

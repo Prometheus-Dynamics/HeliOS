@@ -85,38 +85,71 @@ struct ArucoTemporalStabilizeDetectionsConfig {
     corner_smooth_only_age1: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
+struct TemporalDetection {
+    id: u32,
+    rotation: u8,
+    corners: [Point; 4],
+    score: Option<f32>,
+    best_distance: Option<u32>,
+    second_distance: Option<u32>,
+    border_mismatches: Option<usize>,
+    contrast_range: Option<f32>,
+    border_width: Option<u8>,
+    data_width: Option<u8>,
+}
+
+impl TemporalDetection {
+    fn from_detection(det: &ArucoDetection2D) -> Self {
+        Self {
+            id: det.id,
+            rotation: det.rotation,
+            corners: det.corners,
+            score: det.score,
+            best_distance: det.best_distance,
+            second_distance: det.second_distance,
+            border_mismatches: det.border_mismatches,
+            contrast_range: det.contrast_range,
+            border_width: det.border_width,
+            data_width: det.data_width,
+        }
+    }
+
+    fn to_detection(&self) -> ArucoDetection2D {
+        ArucoDetection2D {
+            id: self.id,
+            rotation: self.rotation,
+            corners: self.corners,
+            score: self.score,
+            best_distance: self.best_distance,
+            second_distance: self.second_distance,
+            border_mismatches: self.border_mismatches,
+            contrast_range: self.contrast_range,
+            border_width: self.border_width,
+            data_width: self.data_width,
+            bits: None,
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 struct TemporalTrack {
-    det: ArucoDetection2D,
+    det: TemporalDetection,
     last_seen_frame: u64,
     center: (f64, f64),
     velocity: (f64, f64),
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-struct TemporalTrackState {
-    det: ArucoDetection2D,
-    last_seen_frame: u64,
-    center: [f64; 2],
-    velocity: [f64; 2],
-}
-
-impl From<&TemporalTrack> for TemporalTrackState {
-    fn from(value: &TemporalTrack) -> Self {
-        Self { det: value.det.clone(), last_seen_frame: value.last_seen_frame, center: [value.center.0, value.center.1], velocity: [value.velocity.0, value.velocity.1] }
+impl TemporalTrack {
+    fn from_detection(det: &ArucoDetection2D, last_seen_frame: u64, center: (f64, f64), velocity: (f64, f64)) -> Self {
+        Self { det: TemporalDetection::from_detection(det), last_seen_frame, center, velocity }
     }
 }
 
-impl From<TemporalTrackState> for TemporalTrack {
-    fn from(value: TemporalTrackState) -> Self {
-        Self { det: value.det, last_seen_frame: value.last_seen_frame, center: (value.center[0], value.center[1]), velocity: (value.velocity[0], value.velocity[1]) }
-    }
-}
-
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 struct TemporalState {
     frame_idx: u64,
-    tracks: HashMap<u32, TemporalTrackState>,
+    tracks: HashMap<u32, TemporalTrack>,
     frame_width: u32,
     frame_height: u32,
     last_signature_8x8: Option<Vec<u8>>,
@@ -134,6 +167,21 @@ fn frame_signature_8x8(frame: &DynamicImage) -> [u8; 64] {
             let px = frame.get_pixel(x, y).0;
             let lum = ((u16::from(px[0]) * 77 + u16::from(px[1]) * 150 + u16::from(px[2]) * 29) >> 8) as u8;
             sig[(gy * 8 + gx) as usize] = lum;
+        }
+    }
+    sig
+}
+
+fn gray_signature_8x8(frame: &GrayImage) -> [u8; 64] {
+    let (w, h) = frame.dimensions();
+    let mut sig = [0u8; 64];
+    let w = w.max(1);
+    let h = h.max(1);
+    for gy in 0..8u32 {
+        for gx in 0..8u32 {
+            let x = (((gx * 2 + 1) * w) / 16).min(w - 1);
+            let y = (((gy * 2 + 1) * h) / 16).min(h - 1);
+            sig[(gy * 8 + gx) as usize] = frame.get_pixel(x, y).0[0];
         }
     }
     sig
@@ -303,15 +351,15 @@ fn mean_corner_distance(a: &[Point; 4], b: &[Point; 4]) -> f64 {
     acc * 0.25
 }
 
-fn carry_quality_ok(det: &ArucoDetection2D, cfg: &ArucoTemporalStabilizeDetectionsConfig) -> bool {
+fn carry_quality_ok(border_mismatches: Option<usize>, best_distance: Option<u32>, cfg: &ArucoTemporalStabilizeDetectionsConfig) -> bool {
     let max_bm = usize::try_from(cfg.max_carry_border_mismatches.max(0)).unwrap_or(0);
     let max_best = u32::try_from(cfg.max_carry_best_distance.max(0)).unwrap_or(0);
-    if let Some(bm) = det.border_mismatches
+    if let Some(bm) = border_mismatches
         && bm > max_bm
     {
         return false;
     }
-    if let Some(best) = det.best_distance
+    if let Some(best) = best_distance
         && best > max_best
     {
         return false;
@@ -349,11 +397,13 @@ fn decode_relaxed_candidates(frame: &DynamicImage, quads: &[[CvPoint<f32>; 4]], 
             return Err(NodeError::InvalidInput(format!("unknown ArUco dictionary '{dict_name}'")));
         };
 
-        let mut decode_cfg = ArucoDecodeConfig::default();
-        decode_cfg.min_warped_patch_contrast_range = u8::try_from(cfg.rescue_min_warped_patch_contrast_range.max(0)).unwrap_or(6);
-        decode_cfg.min_cell_means_contrast_range = cfg.rescue_min_cell_means_contrast_range.max(0.0) as f32;
-        decode_cfg.min_quad_side_px = cfg.rescue_min_quad_side_px.max(0.0) as f32;
-        decode_cfg.min_bit_delta = cfg.rescue_min_bit_delta.max(0.0) as f32;
+        let mut decode_cfg = ArucoDecodeConfig {
+            min_warped_patch_contrast_range: u8::try_from(cfg.rescue_min_warped_patch_contrast_range.max(0)).unwrap_or(6),
+            min_cell_means_contrast_range: cfg.rescue_min_cell_means_contrast_range.max(0.0) as f32,
+            min_quad_side_px: cfg.rescue_min_quad_side_px.max(0.0) as f32,
+            min_bit_delta: cfg.rescue_min_bit_delta.max(0.0) as f32,
+            ..ArucoDecodeConfig::default()
+        };
 
         if cfg.rescue_max_hamming >= 0 {
             let max_hamming = u32::try_from(cfg.rescue_max_hamming).unwrap_or(0);
@@ -384,20 +434,24 @@ fn decode_relaxed_candidates(frame: &DynamicImage, quads: &[[CvPoint<f32>; 4]], 
         family = family.with_border_error_divisor(u8::try_from(cfg.rescue_border_error_divisor).unwrap_or(6));
     }
 
-    let mut decode_cfg = ArucoTagDecodeConfig::default();
-    decode_cfg.min_warped_patch_contrast_range = u8::try_from(cfg.rescue_min_warped_patch_contrast_range.max(0)).unwrap_or(6);
-    decode_cfg.warp_fallback_on_decode_fail = true;
-    decode_cfg.warp_fallback_on_low_contrast = true;
-    decode_cfg.warp_fallback_max_hamming_extra = u32::try_from(cfg.rescue_warp_fallback_max_hamming_extra.max(0)).unwrap_or(6);
-    decode_cfg.warp_fallback_border_slack = usize::try_from(cfg.rescue_warp_fallback_border_slack.max(0)).unwrap_or(12);
-    decode_cfg.warp_min_sample_scale = sample_scale.max(1);
-    decode_cfg.min_quad_side_px = cfg.rescue_min_quad_side_px.max(0.0) as f32;
-    decode_cfg.min_decode_score = -1.0;
-    decode_cfg.cell_decode.min_cell_means_contrast_range = cfg.rescue_min_cell_means_contrast_range.max(0.0) as f32;
-    decode_cfg.cell_decode.min_hamming_margin = 0;
-    decode_cfg.cell_decode.min_hamming_margin_min_dist = 0;
-    decode_cfg.cell_decode.min_hamming_margin_only_if_border_mismatch = false;
-    decode_cfg.cell_decode.min_bit_delta = cfg.rescue_min_bit_delta.max(0.0) as f32;
+    let decode_cfg = ArucoTagDecodeConfig {
+        min_warped_patch_contrast_range: u8::try_from(cfg.rescue_min_warped_patch_contrast_range.max(0)).unwrap_or(6),
+        warp_fallback_on_decode_fail: true,
+        warp_fallback_on_low_contrast: true,
+        warp_fallback_max_hamming_extra: u32::try_from(cfg.rescue_warp_fallback_max_hamming_extra.max(0)).unwrap_or(6),
+        warp_fallback_border_slack: usize::try_from(cfg.rescue_warp_fallback_border_slack.max(0)).unwrap_or(12),
+        warp_min_sample_scale: sample_scale.max(1),
+        min_quad_side_px: cfg.rescue_min_quad_side_px.max(0.0) as f32,
+        min_decode_score: -1.0,
+        cell_decode: crate::modules::aruco::tag::ArucoTagDecodeTuning {
+            min_cell_means_contrast_range: cfg.rescue_min_cell_means_contrast_range.max(0.0) as f32,
+            min_hamming_margin: 0,
+            min_hamming_margin_min_dist: 0,
+            min_hamming_margin_only_if_border_mismatch: false,
+            min_bit_delta: cfg.rescue_min_bit_delta.max(0.0) as f32,
+        },
+        ..ArucoTagDecodeConfig::default()
+    };
 
     Ok(decode_quads_with_config_no_bits(frame, quads, sample_scale, &family, &decode_cfg))
 }
@@ -415,8 +469,8 @@ fn decode_relaxed_candidates(frame: &DynamicImage, quads: &[[CvPoint<f32>; 4]], 
 )]
 fn cv_aruco_temporal_stabilize_detections(
     frame: &DynamicImage,
-    detections: Vec<ArucoDetection2D>,
-    quads: Vec<Quad>,
+    detections: std::sync::Arc<Vec<ArucoDetection2D>>,
+    quads: std::sync::Arc<Vec<Quad>>,
     cfg: ArucoTemporalStabilizeDetectionsConfig,
     exec_ctx: &ExecutionContext,
 ) -> Result<Vec<ArucoDetection2D>, NodeError> {
@@ -437,7 +491,7 @@ fn cv_aruco_temporal_stabilize_detections(
 
     // Keep at most one detection per id; prefer larger area.
     let mut current_by_id: HashMap<u32, ArucoDetection2D> = HashMap::with_capacity(detections.len());
-    for det in detections {
+    for det in detections.iter().cloned() {
         match current_by_id.get(&det.id) {
             Some(existing) => {
                 if quad_area(&det.corners) > quad_area(&existing.corners) {
@@ -458,7 +512,8 @@ fn cv_aruco_temporal_stabilize_detections(
         return Ok(out);
     }
 
-    let mut state: TemporalState = exec_ctx.state.get_checked::<TemporalState>(STATE_KEY).map_err(NodeError::Handler)?.unwrap_or_default();
+    let mut state: TemporalState =
+        exec_ctx.state.take_native::<TemporalState>(STATE_KEY).or_else(|_| exec_ctx.state.get_checked::<TemporalState>(STATE_KEY)).map_err(NodeError::Handler)?.unwrap_or_default();
     if state.frame_width != frame_w || state.frame_height != frame_h {
         state = TemporalState { frame_width: frame_w, frame_height: frame_h, ..Default::default() };
     }
@@ -474,8 +529,7 @@ fn cv_aruco_temporal_stabilize_detections(
     // Optional corner jitter damping against previous-frame corners (same id only).
     if corner_smooth_alpha > 0.0 {
         for det in current_by_id.values_mut() {
-            let Some(prev_state) = state.tracks.get(&det.id) else { continue };
-            let prev: TemporalTrack = prev_state.clone().into();
+            let Some(prev) = state.tracks.get(&det.id) else { continue };
             let age = frame_idx.saturating_sub(prev.last_seen_frame);
             if cfg.corner_smooth_only_age1 && age != 1 {
                 continue;
@@ -500,9 +554,9 @@ fn cv_aruco_temporal_stabilize_detections(
             let shift = best_corner_alignment_shift(&prev.det.corners, &det.corners);
             let aligned = rotated_corners(&det.corners, shift);
             let mut mean_corner_dist = 0.0f64;
-            for i in 0..4usize {
-                let dx = aligned[i].x - prev.det.corners[i].x;
-                let dy = aligned[i].y - prev.det.corners[i].y;
+            for (aligned_corner, prev_corner) in aligned.iter().zip(prev.det.corners.iter()) {
+                let dx = aligned_corner.x - prev_corner.x;
+                let dy = aligned_corner.y - prev_corner.y;
                 mean_corner_dist += (dx * dx + dy * dy).sqrt();
             }
             mean_corner_dist *= 0.25;
@@ -535,8 +589,7 @@ fn cv_aruco_temporal_stabilize_detections(
     let mut sum_dy = 0.0f64;
     let mut shared = 0usize;
     for (id, det) in &current_by_id {
-        if let Some(track_state) = state.tracks.get(id) {
-            let track: TemporalTrack = track_state.clone().into();
+        if let Some(track) = state.tracks.get(id) {
             let (cx, cy) = quad_center(&det.corners);
             let (px, py) = quad_center(&track.det.corners);
             sum_dx += cx - px;
@@ -553,7 +606,8 @@ fn cv_aruco_temporal_stabilize_detections(
         global_dy *= scale;
     }
 
-    let mut out: Vec<ArucoDetection2D> = current_by_id.values().cloned().collect();
+    let current_ids: HashSet<u32> = current_by_id.keys().copied().collect();
+    let mut out: Vec<ArucoDetection2D> = current_by_id.into_values().collect();
     // IDs emitted only by passthrough carry this frame. These must never refresh temporal state,
     // otherwise stale detections can self-sustain indefinitely.
     let mut carried_ids: HashSet<u32> = HashSet::new();
@@ -564,9 +618,8 @@ fn cv_aruco_temporal_stabilize_detections(
     let mut predicted_centers: HashMap<u32, (f64, f64, f64)> = HashMap::new();
 
     if hold_frames > 0 && carry_possible {
-        for (id, track_state) in &state.tracks {
-            let track: TemporalTrack = track_state.clone().into();
-            if current_by_id.contains_key(id) {
+        for (id, track) in &state.tracks {
+            if current_ids.contains(id) {
                 // Rule 1: if regular detection already has this id this frame, temporal pass must ignore it.
                 continue;
             }
@@ -574,7 +627,7 @@ fn cv_aruco_temporal_stabilize_detections(
             if age == 0 || age > hold_frames {
                 continue;
             }
-            if !carry_quality_ok(&track.det, &cfg) {
+            if !carry_quality_ok(track.det.border_mismatches, track.det.best_distance, &cfg) {
                 continue;
             }
             let (cx, cy) = track.center;
@@ -599,10 +652,9 @@ fn cv_aruco_temporal_stabilize_detections(
         let rescue_cap = usize::try_from(cfg.rescue_max_quads.clamp(4, 512)).unwrap_or(64);
 
         // (quad, normalized_distance, area)
-        let mut candidates: Vec<(Quad, f64, f64)> = Vec::new();
-        candidates.reserve(quads.len());
+        let mut candidates: Vec<(Quad, f64, f64)> = Vec::with_capacity(quads.len());
 
-        for quad in &quads {
+        for quad in quads.iter() {
             if min_quad_side > 0.0 && quad_min_side(quad) < min_quad_side {
                 continue;
             }
@@ -627,7 +679,7 @@ fn cv_aruco_temporal_stabilize_detections(
                 }
             }
             if best_norm_dist.is_finite() {
-                candidates.push((quad.clone(), best_norm_dist, quad_area(quad)));
+                candidates.push((*quad, best_norm_dist, quad_area(quad)));
             }
         }
 
@@ -658,13 +710,12 @@ fn cv_aruco_temporal_stabilize_detections(
                 if !missing_ids.contains(&det.id) {
                     continue;
                 }
-                if !carry_quality_ok(&det, &cfg) {
+                if !carry_quality_ok(det.border_mismatches, det.best_distance, &cfg) {
                     continue;
                 }
-                let Some(track_state) = state.tracks.get(&det.id) else {
+                let Some(track) = state.tracks.get(&det.id) else {
                     continue;
                 };
-                let track: TemporalTrack = track_state.clone().into();
                 if !quad_valid_in_frame(&track.det.corners, frame_w, frame_h) {
                     continue;
                 }
@@ -715,22 +766,21 @@ fn cv_aruco_temporal_stabilize_detections(
         }
     }
 
-    let carry_passthrough_possible = !cfg.carry_requires_current || !current_by_id.is_empty();
+    let carry_passthrough_possible = !cfg.carry_requires_current || !current_ids.is_empty();
     if carry_passthrough_frames > 0 && carry_passthrough_possible {
         let present: HashSet<u32> = out.iter().map(|d| d.id).collect();
         let carry_quad_max_area_ratio = if cfg.carry_quad_max_area_ratio.is_finite() { cfg.carry_quad_max_area_ratio.clamp(1.0, 10.0) } else { 2.5 };
         let carry_quad_max_corner_shift_ratio = if cfg.carry_quad_max_corner_shift_ratio.is_finite() { cfg.carry_quad_max_corner_shift_ratio.clamp(0.1, 4.0) } else { 1.2 };
         let carry_quad_search_radius_scale = if cfg.carry_quad_search_radius_scale.is_finite() { cfg.carry_quad_search_radius_scale.clamp(0.5, 4.0) } else { 1.0 };
-        for (id, track_state) in &state.tracks {
-            if present.contains(id) || current_by_id.contains_key(id) {
+        for (id, track) in &state.tracks {
+            if present.contains(id) || current_ids.contains(id) {
                 continue;
             }
-            let track: TemporalTrack = track_state.clone().into();
             let age = frame_idx.saturating_sub(track.last_seen_frame);
             if age == 0 || age > carry_passthrough_frames {
                 continue;
             }
-            if !carry_quality_ok(&track.det, &cfg) {
+            if !carry_quality_ok(track.det.border_mismatches, track.det.best_distance, &cfg) {
                 continue;
             }
 
@@ -758,7 +808,7 @@ fn cv_aruco_temporal_stabilize_detections(
                 let radius_sq = radius * radius;
 
                 let mut best_score = f64::INFINITY;
-                for quad in &quads {
+                for quad in quads.iter() {
                     if !quad_valid_in_frame(quad, frame_w, frame_h) {
                         continue;
                     }
@@ -795,7 +845,7 @@ fn cv_aruco_temporal_stabilize_detections(
                 support_corners = Some(supported);
             }
 
-            let mut det = track.det.clone();
+            let mut det = track.det.to_detection();
             det.corners = support_corners.unwrap_or(predicted);
             if !quad_valid_in_frame(&det.corners, frame_w, frame_h) {
                 continue;
@@ -811,8 +861,7 @@ fn cv_aruco_temporal_stabilize_detections(
             continue;
         }
         let center = quad_center(&det.corners);
-        let velocity = if let Some(prev_state) = state.tracks.get(&det.id) {
-            let prev: TemporalTrack = prev_state.clone().into();
+        let velocity = if let Some(prev) = state.tracks.get(&det.id) {
             let dt = frame_idx.saturating_sub(prev.last_seen_frame).max(1) as f64;
             let obs_vx = (center.0 - prev.center.0) / dt;
             let obs_vy = (center.1 - prev.center.1) / dt;
@@ -821,7 +870,7 @@ fn cv_aruco_temporal_stabilize_detections(
         } else {
             (0.0, 0.0)
         };
-        state.tracks.insert(det.id, TemporalTrackState::from(&TemporalTrack { det: det.clone(), last_seen_frame: frame_idx, center, velocity }));
+        state.tracks.insert(det.id, TemporalTrack::from_detection(det, frame_idx, center, velocity));
     }
 
     // Prune stale tracks and cap map size.
@@ -836,7 +885,7 @@ fn cv_aruco_temporal_stabilize_detections(
     }
 
     out.sort_by_key(|d| d.id);
-    exec_ctx.state.set_typed(STATE_KEY, &state).map_err(NodeError::Handler)?;
+    exec_ctx.state.set_native(STATE_KEY, state).map_err(NodeError::Handler)?;
     Ok(out)
 }
 
@@ -879,8 +928,8 @@ struct ArucoTemporalSmoothDetectionsConfig {
     outputs(port(name = "detections", source = "ArucoDetections2D", ty = crate::daedalus_types::aruco_detections_2d()))
 )]
 fn cv_aruco_temporal_smooth_detections(
-    frame: &DynamicImage,
-    detections: Vec<ArucoDetection2D>,
+    frame: &crate::modules::image::luma::PooledGrayImage,
+    detections: &Vec<ArucoDetection2D>,
     cfg: ArucoTemporalSmoothDetectionsConfig,
     exec_ctx: &ExecutionContext,
 ) -> Result<Vec<ArucoDetection2D>, NodeError> {
@@ -897,7 +946,7 @@ fn cv_aruco_temporal_smooth_detections(
 
     // Keep at most one detection per id; prefer larger area.
     let mut current_by_id: HashMap<u32, ArucoDetection2D> = HashMap::with_capacity(detections.len());
-    for det in detections {
+    for det in detections.iter().cloned() {
         match current_by_id.get(&det.id) {
             Some(existing) => {
                 if quad_area(&det.corners) > quad_area(&existing.corners) {
@@ -910,13 +959,14 @@ fn cv_aruco_temporal_smooth_detections(
         }
     }
 
-    let mut state: TemporalState = exec_ctx.state.get_checked::<TemporalState>(STATE_KEY).map_err(NodeError::Handler)?.unwrap_or_default();
+    let mut state: TemporalState =
+        exec_ctx.state.take_native::<TemporalState>(STATE_KEY).or_else(|_| exec_ctx.state.get_checked::<TemporalState>(STATE_KEY)).map_err(NodeError::Handler)?.unwrap_or_default();
     if state.frame_width != frame_w || state.frame_height != frame_h {
         state = TemporalState { frame_width: frame_w, frame_height: frame_h, ..Default::default() };
     }
     state.frame_idx = state.frame_idx.saturating_add(1);
     let frame_idx = state.frame_idx;
-    let curr_sig = frame_signature_8x8(frame);
+    let curr_sig = gray_signature_8x8(frame);
     let scene_cut = state.last_signature_8x8.as_ref().map(|prev| signature_diff_norm(prev, &curr_sig) > scene_cut_threshold).unwrap_or(false);
     if scene_cut {
         state.tracks.clear();
@@ -925,8 +975,7 @@ fn cv_aruco_temporal_smooth_detections(
 
     if corner_smooth_alpha > 0.0 {
         for det in current_by_id.values_mut() {
-            let Some(prev_state) = state.tracks.get(&det.id) else { continue };
-            let prev: TemporalTrack = prev_state.clone().into();
+            let Some(prev) = state.tracks.get(&det.id) else { continue };
             let age = frame_idx.saturating_sub(prev.last_seen_frame);
             if cfg.corner_smooth_only_age1 && age != 1 {
                 continue;
@@ -951,9 +1000,9 @@ fn cv_aruco_temporal_smooth_detections(
             let shift = best_corner_alignment_shift(&prev.det.corners, &det.corners);
             let aligned = rotated_corners(&det.corners, shift);
             let mut mean_corner_dist = 0.0f64;
-            for i in 0..4usize {
-                let dx = aligned[i].x - prev.det.corners[i].x;
-                let dy = aligned[i].y - prev.det.corners[i].y;
+            for (aligned_corner, prev_corner) in aligned.iter().zip(prev.det.corners.iter()) {
+                let dx = aligned_corner.x - prev_corner.x;
+                let dy = aligned_corner.y - prev_corner.y;
                 mean_corner_dist += (dx * dx + dy * dy).sqrt();
             }
             mean_corner_dist *= 0.25;
@@ -981,12 +1030,11 @@ fn cv_aruco_temporal_smooth_detections(
         }
     }
 
-    let mut out: Vec<ArucoDetection2D> = current_by_id.values().cloned().collect();
+    let mut out: Vec<ArucoDetection2D> = current_by_id.into_values().collect();
 
     for det in &out {
         let center = quad_center(&det.corners);
-        let velocity = if let Some(prev_state) = state.tracks.get(&det.id) {
-            let prev: TemporalTrack = prev_state.clone().into();
+        let velocity = if let Some(prev) = state.tracks.get(&det.id) {
             let dt = frame_idx.saturating_sub(prev.last_seen_frame).max(1) as f64;
             let obs_vx = (center.0 - prev.center.0) / dt;
             let obs_vy = (center.1 - prev.center.1) / dt;
@@ -995,7 +1043,7 @@ fn cv_aruco_temporal_smooth_detections(
         } else {
             (0.0, 0.0)
         };
-        state.tracks.insert(det.id, TemporalTrackState::from(&TemporalTrack { det: det.clone(), last_seen_frame: frame_idx, center, velocity }));
+        state.tracks.insert(det.id, TemporalTrack::from_detection(det, frame_idx, center, velocity));
     }
 
     state.tracks.retain(|_, track| frame_idx.saturating_sub(track.last_seen_frame) <= max_track_age_frames);
@@ -1009,6 +1057,6 @@ fn cv_aruco_temporal_smooth_detections(
     }
 
     out.sort_by_key(|d| d.id);
-    exec_ctx.state.set_typed(STATE_KEY, &state).map_err(NodeError::Handler)?;
+    exec_ctx.state.set_native(STATE_KEY, state).map_err(NodeError::Handler)?;
     Ok(out)
 }

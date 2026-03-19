@@ -11,7 +11,11 @@ This is useful when you want to:
 
 ## What you can do
 
-- Select images/videos and create a replay stream from them.
+- Select one or more images/videos and create a replay stream from them.
+- Use that replay stream like any other stream:
+  - attach pipelines
+  - tune outputs
+  - inspect metrics
 
 ## Create a replay stream from Media
 
@@ -20,7 +24,7 @@ This is useful when you want to:
    - Only Image and Video assets are playable.
 3. Click **Create media stream**.
 
-Helios will create a new stream (a "media replay" stream) and it will show up in **OS > Devices** like any other stream.
+Helios creates a new `File`-backend style stream and shows it in **OS > Devices** like any other stream.
 
 Notes:
 

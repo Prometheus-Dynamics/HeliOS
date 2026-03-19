@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { goto } from '$app/navigation';
   import type { StreamMetricsError } from '$lib/api/streamMetrics';
 
@@ -72,7 +73,7 @@
         <button
           class="mt-2 underline decoration-error-300/60 underline-offset-2 hover:text-error-50"
           type="button"
-          onclick={() => void goto('/pipelines')}
+          onclick={() => void goto(resolve('/pipelines'))}
         >
           Open pipelines
         </button>

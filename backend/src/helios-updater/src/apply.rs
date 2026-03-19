@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::ipc::{UpdateStage, UpdaterEvent};
+use serde::Deserialize;
 use tokio::fs;
 use tokio::process::Command;
 use tokio::sync::mpsc;
@@ -18,9 +19,9 @@ use crate::config::UpdaterConfig;
 use crate::error::{Error, Result};
 use crate::state::ServiceState;
 use crate::util::{
-    ProgressSender, ProgressUpdate, StreamFlashOutcome, blockdev_size_bytes, by_label_path, decompress_if_needed, detect_compression_kind, detect_ext4_partition_in_disk_image,
-    detect_fat_partition_in_disk_image, ensure_directory, flash_compressed_image_to_target, resolve_boot_block_device, resolve_boot_dir_rw, rewrite_cmdline_root,
-    select_target_slot, sync_filesystem,
+    ProgressSender, ProgressUpdate, SlotScheme, SlotSelection, StreamFlashOutcome, blockdev_size_bytes, by_label_path, decompress_if_needed, detect_compression_kind,
+    detect_ext4_partition_in_disk_image, detect_fat_partition_in_disk_image, detect_squashfs_partition_in_disk_image, ensure_directory, flash_compressed_image_to_target, resolve_boot_block_device,
+    resolve_boot_dir_rw, rewrite_cmdline_root, select_target_slot, sync_filesystem,
 };
 
 #[cfg(test)]
@@ -33,6 +34,43 @@ const APPLY_PROGRESS_START: u8 = 10;
 const APPLY_PROGRESS_END: u8 = 85;
 const PERSIST_NETWORKD_DIR: &str = "/var/lib/helios/networkd";
 const PERSIST_NETWORKD_PREFIX: &str = "00-helios-persisted-";
+const REQUIRED_BOOTABLE_ROOT_PATHS: &[&str] = &["/sbin/init", "/bin/sh", "/lib", "/lib64", "/usr/lib/systemd/systemd", "/etc/os-release"];
+
+#[derive(Debug, Clone, Copy)]
+struct PersistedFileSync {
+    source_candidates: &'static [&'static str],
+    target_path: &'static str,
+}
+
+const PERSISTED_FILE_SYNCS: &[PersistedFileSync] = &[
+    PersistedFileSync { source_candidates: &["/var/lib/helios/hostname", "/etc/hostname"], target_path: "/etc/hostname" },
+    PersistedFileSync { source_candidates: &["/var/lib/helios/team", "/etc/helios/team"], target_path: "/etc/helios/team" },
+    PersistedFileSync { source_candidates: &["/var/lib/helios/nt4.json", "/etc/helios/nt4.json"], target_path: "/etc/helios/nt4.json" },
+    PersistedFileSync { source_candidates: &["/var/lib/helios/peers.json", "/etc/helios/peers.json"], target_path: "/etc/helios/peers.json" },
+    PersistedFileSync { source_candidates: &["/var/lib/helios/usb-power.env", "/etc/helios/usb-power.env"], target_path: "/etc/helios/usb-power.env" },
+    PersistedFileSync { source_candidates: &["/var/lib/helios/leds.toml", "/etc/helios/leds.toml"], target_path: "/etc/helios/leds.toml" },
+    PersistedFileSync { source_candidates: &["/var/lib/helios/led-animations.json", "/etc/helios/led-animations.json"], target_path: "/etc/helios/led-animations.json" },
+    PersistedFileSync { source_candidates: &["/var/lib/helios/sensors.toml", "/etc/helios/sensors.toml"], target_path: "/etc/helios/sensors.toml" },
+    PersistedFileSync { source_candidates: &["/var/lib/helios/fan.toml", "/etc/helios/fan.toml"], target_path: "/etc/helios/fan.toml" },
+];
+
+#[derive(Debug, Clone, Deserialize)]
+struct ApplyManifestMetadata {
+    #[serde(default = "default_true")]
+    delete_image_after_apply: bool,
+    #[serde(default)]
+    source_media_path: Option<String>,
+}
+
+impl Default for ApplyManifestMetadata {
+    fn default() -> Self {
+        Self { delete_image_after_apply: true, source_media_path: None }
+    }
+}
+
+const fn default_true() -> bool {
+    true
+}
 
 #[cfg(test)]
 fn fake_apply_requested() -> bool {
@@ -86,6 +124,7 @@ async fn run_apply_job(config: Arc<UpdaterConfig>, state: Arc<RwLock<ServiceStat
 
 async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<ServiceState>>, events: &Sender<UpdaterEvent>, update_id: Uuid) -> Result<()> {
     let metadata = load_metadata(config, update_id).await?;
+    let manifest_metadata = parse_apply_manifest_metadata(&metadata);
     info!(%update_id, staged = %metadata_path(config, update_id).display(), "applying staged release");
 
     // Some platforms can't switch root via bootloader; allow forcing single-slot mode detection.
@@ -109,13 +148,11 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
         ensure_directory(config.work_dir()).await?;
         ensure_directory(&work_dir).await?;
 
-        let (target_label, target_device, single_slot_final) = select_target_slot(single_slot)?;
-        single_slot = single_slot_final;
+        let slot_selection = select_target_slot(single_slot)?;
+        single_slot = slot_selection.single_slot;
 
         if single_slot && !allow_single_slot_inplace {
-            return Err(Error::InvalidState(
-                "single-slot OTA is disabled: inactive RESERVE slot not found; in-place flashing the live root risks filesystem corruption".into(),
-            ));
+            return Err(Error::InvalidState("single-slot OTA is disabled: inactive RESERVE slot not found; in-place flashing the live root risks filesystem corruption".into()));
         }
         if single_slot {
             warn!(
@@ -124,12 +161,20 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
             );
         }
 
-        info!(%update_id, %target_label, target_device = %target_device, single_slot, "preparing staged image");
+        info!(
+            %update_id,
+            current_slot = %slot_selection.current_slot,
+            target_slot = %slot_selection.target_slot,
+            target_device = %slot_selection.target_device,
+            single_slot,
+            scheme = ?slot_selection.scheme,
+            "preparing staged image"
+        );
 
         let staged_artifact = metadata.artifacts.first().ok_or_else(|| Error::InvalidState("no staged artifact found".into()))?;
         let staged_path = PathBuf::from(&staged_artifact.local_path);
         let compression = detect_compression_kind(&staged_path).map_err(Error::Io)?;
-        let stream_flash_requested = env::var_os("UPDATER_STREAM_FLASH").is_some();
+        let stream_flash_requested = env::var_os("UPDATER_STREAM_FLASH").is_some() && slot_selection.scheme == SlotScheme::Ext4Labels;
         let mut temp_file = false;
         let mut expanded_path: Option<PathBuf> = None;
         let mut streamed = false;
@@ -139,10 +184,10 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
         let progress_sender = ProgressSender::new(progress_tx.clone());
 
         let flash_result = if stream_flash_requested && compression.is_some() {
-            info!(%update_id, %target_label, target_device = %target_device, "streaming staged image");
-            let _ = Command::new("umount").arg(&target_device).status().await;
-            let target_bytes = blockdev_size_bytes(&target_device).await?;
-            let outcome = flash_compressed_image_to_target(&staged_path, &target_device, target_bytes, Some(progress_sender.clone())).await;
+            info!(%update_id, target_slot = %slot_selection.target_slot, target_device = %slot_selection.target_device, "streaming staged image");
+            let _ = Command::new("umount").arg(&slot_selection.target_device).status().await;
+            let target_bytes = blockdev_size_bytes(&slot_selection.target_device).await?;
+            let outcome = flash_compressed_image_to_target(&staged_path, &slot_selection.target_device, target_bytes, Some(progress_sender.clone())).await;
             if let Ok(outcome) = outcome.as_ref() {
                 stream_outcome = Some(*outcome);
             }
@@ -156,14 +201,21 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
                     Ok(())
                 }
                 Err(Error::Io(err)) if err.kind() == ErrorKind::StorageFull && compression.is_some() => {
-                    warn!(%update_id, %target_label, target_device = %target_device, "work dir full; streaming staged image");
+                    if slot_selection.scheme != SlotScheme::Ext4Labels {
+                        return Err(Error::InvalidState(format!(
+                            "OTA work dir is full and streaming fallback is disabled for {:?} updates; need temporary space to decompress {}",
+                            slot_selection.scheme,
+                            staged_path.display()
+                        )));
+                    }
+                    warn!(%update_id, target_slot = %slot_selection.target_slot, target_device = %slot_selection.target_device, "work dir full; streaming staged image");
                     if let Err(err) = fs::remove_dir_all(&work_dir).await {
                         warn!(error = %err, path = %work_dir.display(), "failed to clean work dir after decompression failure");
                     }
                     ensure_directory(&work_dir).await?;
-                    let _ = Command::new("umount").arg(&target_device).status().await;
-                    let target_bytes = blockdev_size_bytes(&target_device).await?;
-                    let outcome = flash_compressed_image_to_target(&staged_path, &target_device, target_bytes, Some(progress_sender.clone())).await;
+                    let _ = Command::new("umount").arg(&slot_selection.target_device).status().await;
+                    let target_bytes = blockdev_size_bytes(&slot_selection.target_device).await?;
+                    let outcome = flash_compressed_image_to_target(&staged_path, &slot_selection.target_device, target_bytes, Some(progress_sender.clone())).await;
                     if let Ok(outcome) = outcome.as_ref() {
                         stream_outcome = Some(*outcome);
                     }
@@ -176,8 +228,8 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
                 && !streamed
             {
                 let expanded_path = expanded_path.as_ref().ok_or_else(|| Error::InvalidState("expanded OTA image missing".into()))?;
-                info!(%update_id, %target_label, target_device = %target_device, "writing staged image");
-                flash_image_to_target(expanded_path, &target_label, &target_device, Some(progress_sender.clone())).await?;
+                info!(%update_id, target_slot = %slot_selection.target_slot, target_device = %slot_selection.target_device, "writing staged image");
+                flash_image_to_target(expanded_path, &slot_selection, Some(progress_sender.clone())).await?;
             }
             expand_result
         };
@@ -188,16 +240,23 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
         flash_result?;
 
         if streamed {
-            relabel_target_filesystem(&target_label, &target_device).await?;
+            if slot_selection.scheme == SlotScheme::Ext4Labels {
+                relabel_target_filesystem(&slot_selection.target_slot, &slot_selection.target_device).await?;
+            }
             sync_filesystem(Path::new("/")).await?;
             if let Some(outcome) = stream_outcome
                 && !outcome.used_partition
             {
-                warn!(%update_id, %target_label, target_device = %target_device, "partition table not detected; streamed full image");
+                if slot_selection.scheme == SlotScheme::SquashfsAb {
+                    return Err(Error::InvalidState("streamed squashfs OTA image did not expose a root partition; refusing to overwrite the inactive slot with the whole disk image".into()));
+                }
+                warn!(%update_id, target_slot = %slot_selection.target_slot, target_device = %slot_selection.target_device, "partition table not detected; streamed full image");
             }
-            sync_boot_from_target(&target_device, &work_dir).await?;
-            if let Err(err) = sync_persisted_networkd(&target_device, &work_dir).await {
-                warn!(%err, %update_id, target_device = %target_device, "failed to sync persisted network config to target");
+            sync_boot_from_target(&slot_selection.target_device, &work_dir).await?;
+            if slot_selection.scheme == SlotScheme::Ext4Labels
+                && let Err(err) = sync_persisted_state(&slot_selection.target_device, &work_dir).await
+            {
+                warn!(%err, %update_id, target_device = %slot_selection.target_device, "failed to sync persisted device config to target");
             }
         } else {
             let expanded_path = expanded_path.ok_or_else(|| Error::InvalidState("expanded OTA image missing".into()))?;
@@ -205,15 +264,21 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
 
             let boot_synced = sync_boot_from_artifact(&expanded_path).await?;
             if !boot_synced {
-                sync_boot_from_target(&target_device, &work_dir).await?;
+                sync_boot_from_target(&slot_selection.target_device, &work_dir).await?;
             }
-            if let Err(err) = sync_persisted_networkd(&target_device, &work_dir).await {
-                warn!(%err, %update_id, target_device = %target_device, "failed to sync persisted network config to target");
+            if slot_selection.scheme == SlotScheme::Ext4Labels
+                && let Err(err) = sync_persisted_state(&slot_selection.target_device, &work_dir).await
+            {
+                warn!(%err, %update_id, target_device = %slot_selection.target_device, "failed to sync persisted device config to target");
             }
 
             if temp_file {
                 let _ = fs::remove_file(expanded_path).await;
             }
+        }
+
+        if slot_selection.scheme == SlotScheme::SquashfsAb {
+            validate_bootable_squashfs_root(&slot_selection.target_device, &work_dir).await?;
         }
 
         {
@@ -225,7 +290,7 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
         if single_slot {
             // Staying on the same slot: skip tryboot/cmdline juggling and rely on in-place update.
         } else {
-            update_boot_markers(config, &target_label, &target_device).await?;
+            update_boot_markers(config, &slot_selection).await?;
         }
     } else {
         info!(%update_id, "apply running in simulation mode (UPDATER_FAKE_APPLY)");
@@ -251,6 +316,10 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
     {
         let mut guard = state.write().await;
         guard.cache_usage_bytes = usage;
+    }
+
+    if !simulate {
+        cleanup_source_media_after_apply(config, update_id, &manifest_metadata).await;
     }
 
     if !simulate {
@@ -280,30 +349,106 @@ fn ensure_artifacts_present(update_id: Uuid, metadata: &StagedMetadata) -> Resul
     if metadata.artifacts.is_empty() { Err(crate::error::Error::InvalidState(format!("no artifacts staged for update {update_id}"))) } else { Ok(()) }
 }
 
-pub(crate) async fn flash_image_to_target(expanded_path: &Path, target_label: &str, target_device: &str, progress: Option<ProgressSender>) -> Result<()> {
+fn parse_apply_manifest_metadata(metadata: &StagedMetadata) -> ApplyManifestMetadata {
+    let raw = metadata.manifest.metadata_json.trim();
+    if raw.is_empty() || raw == "{}" {
+        return ApplyManifestMetadata::default();
+    }
+    serde_json::from_str::<ApplyManifestMetadata>(raw).unwrap_or_default()
+}
+
+async fn cleanup_source_media_after_apply(config: &UpdaterConfig, update_id: Uuid, metadata: &ApplyManifestMetadata) {
+    if !metadata.delete_image_after_apply {
+        return;
+    }
+    let Some(media_path) = metadata.source_media_path.as_deref().map(str::trim).filter(|value| !value.is_empty()).map(PathBuf::from) else {
+        return;
+    };
+    if !media_path.is_absolute() {
+        return;
+    }
+    let Some(filename) = media_path.file_name().and_then(|name| name.to_str()).and_then(sanitize_media_filename) else {
+        return;
+    };
+
+    match fs::remove_file(&media_path).await {
+        Ok(()) => info!(%update_id, path = %media_path.display(), "removed source OTA media file after apply"),
+        Err(err) if err.kind() == ErrorKind::NotFound => {}
+        Err(err) => warn!(%update_id, path = %media_path.display(), error = %err, "failed to remove source OTA media file"),
+    }
+
+    let media_meta_path = media_path
+        .parent()
+        .and_then(|media_dir| media_dir.parent().map(|api_data_dir| api_data_dir.join("media-meta").join(format!("{filename}.json"))))
+        .unwrap_or_else(|| config.data_dir().join("api-data").join("media-meta").join(format!("{filename}.json")));
+    match fs::remove_file(&media_meta_path).await {
+        Ok(()) => {}
+        Err(err) if err.kind() == ErrorKind::NotFound => {}
+        Err(err) => warn!(%update_id, path = %media_meta_path.display(), error = %err, "failed to remove source OTA media metadata"),
+    }
+}
+
+fn sanitize_media_filename(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Path::new(trimmed).file_name().map(|name| name.to_string_lossy().to_string())
+}
+
+pub(crate) async fn flash_image_to_target(expanded_path: &Path, slot_selection: &SlotSelection, progress: Option<ProgressSender>) -> Result<()> {
+    let target_device = slot_selection.target_device.as_str();
     let _ = Command::new("umount").arg(target_device).status().await;
 
     let mut offset = 0u64;
     let mut size: Option<u64> = None;
-    if let Some((off, ext4_size)) = detect_ext4_partition_in_disk_image(expanded_path).await? {
-        if let Some(target_bytes) = blockdev_size_bytes(target_device).await?
-            && ext4_size > target_bytes
-        {
-            let size_mib = ext4_size / (1024 * 1024);
-            let target_mib = target_bytes / (1024 * 1024);
-            return Err(Error::InvalidState(format!("target partition {} is {} bytes ({} MiB) but image rootfs is {} bytes ({} MiB)", target_device, target_bytes, target_mib, ext4_size, size_mib)));
+    let mut relabel = false;
+    match slot_selection.scheme {
+        SlotScheme::Ext4Labels => {
+            if let Some((off, ext4_size)) = detect_ext4_partition_in_disk_image(expanded_path).await? {
+                if let Some(target_bytes) = blockdev_size_bytes(target_device).await?
+                    && ext4_size > target_bytes
+                {
+                    let size_mib = ext4_size / (1024 * 1024);
+                    let target_mib = target_bytes / (1024 * 1024);
+                    return Err(Error::InvalidState(format!(
+                        "target partition {} is {} bytes ({} MiB) but image rootfs is {} bytes ({} MiB)",
+                        target_device, target_bytes, target_mib, ext4_size, size_mib
+                    )));
+                }
+                offset = off;
+                size = Some(ext4_size);
+            }
+            relabel = true;
         }
-        offset = off;
-        size = Some(ext4_size);
+        SlotScheme::SquashfsAb => {
+            let Some((off, squashfs_size)) = detect_squashfs_partition_in_disk_image(expanded_path).await? else {
+                return Err(Error::InvalidState(format!("no squashfs partition found inside OTA artifact {}; refusing to flash {}", expanded_path.display(), target_device)));
+            };
+            if let Some(target_bytes) = blockdev_size_bytes(target_device).await?
+                && squashfs_size > target_bytes
+            {
+                let size_mib = squashfs_size / (1024 * 1024);
+                let target_mib = target_bytes / (1024 * 1024);
+                return Err(Error::InvalidState(format!(
+                    "target squashfs slot {} is {} bytes ({} MiB) but image rootfs is {} bytes ({} MiB)",
+                    target_device, target_bytes, target_mib, squashfs_size, size_mib
+                )));
+            }
+            offset = off;
+            size = Some(squashfs_size);
+        }
     }
 
     let expanded_path = expanded_path.to_path_buf();
-    let target_device = target_device.to_string();
+    let target_device = slot_selection.target_device.clone();
     let target_device_copy = target_device.clone();
     let handle = tokio::task::spawn_blocking(move || copy_image_to_target_blocking(&expanded_path, &target_device_copy, offset, size, progress));
     handle.await.map_err(|err| Error::Io(std::io::Error::other(err.to_string())))??;
 
-    relabel_target_filesystem(target_label, &target_device).await?;
+    if relabel {
+        relabel_target_filesystem(&slot_selection.target_slot, &target_device).await?;
+    }
 
     Ok(())
 }
@@ -368,7 +513,7 @@ fn copy_image_to_target_blocking(expanded_path: &Path, target_device: &str, offs
     Ok(())
 }
 
-async fn update_boot_markers(config: &Arc<UpdaterConfig>, target_label: &str, target_device: &str) -> Result<()> {
+async fn update_boot_markers(config: &Arc<UpdaterConfig>, slot_selection: &SlotSelection) -> Result<()> {
     let Some((boot_dir, mounted)) = resolve_boot_dir_rw().await? else {
         return Err(crate::error::Error::InvalidState("cannot mount or find BOOT partition".into()));
     };
@@ -376,26 +521,32 @@ async fn update_boot_markers(config: &Arc<UpdaterConfig>, target_label: &str, ta
 
     // Prefer an explicit device path to avoid PARTUUID churn and LABEL= parsing
     // issues in early kernel root lookup.
-    let tryboot_root = target_device.to_string();
+    let tryboot_root = slot_selection.target_device.to_string();
     let tryboot_content = format!("tryboot_once=1\ntryboot_root={}\n", tryboot_root);
     fs::write(boot_path.join("tryboot.txt"), tryboot_content).await.map_err(Error::Io)?;
 
     let cmdline_path = boot_path.join("cmdline.txt");
     let existing = fs::read_to_string(&cmdline_path).await.unwrap_or_default();
-    let rewritten = rewrite_cmdline_root(&existing, target_label, target_device).await;
+    let rewritten = rewrite_cmdline_root(&existing, &slot_selection.target_slot, &slot_selection.target_device).await;
     fs::write(&cmdline_path, rewritten).await.map_err(Error::Io)?;
 
     let ota_dir = boot_path.join("helios").join("ota");
     ensure_directory(&ota_dir).await?;
-    let pending_value = target_label.to_string();
+    let state_dir = config.data_dir().join("ota");
+    ensure_directory(&state_dir).await?;
+    let pending_value = slot_selection.target_slot.to_string();
     fs::write(ota_dir.join("pending"), pending_value).await.map_err(Error::Io)?;
-    let _ = fs::write(ota_dir.join(format!("pending-{}", target_label)), b"").await;
-    let pending_marker = config.data_dir().join("ota").join("pending");
-    if let Some(parent) = pending_marker.parent() {
-        if let Err(err) = ensure_directory(parent).await {
-            warn!(error = %err, path = %parent.display(), "failed to ensure OTA pending marker dir");
-        } else if let Err(err) = fs::write(&pending_marker, target_label).await {
-            warn!(error = %err, path = %pending_marker.display(), "failed to write OTA pending marker");
+    let _ = fs::write(ota_dir.join("active"), format!("{}\n", slot_selection.current_slot)).await;
+    let _ = fs::write(ota_dir.join("reserve"), format!("{}\n", slot_selection.target_slot)).await;
+    let _ = fs::write(ota_dir.join(format!("pending-{}", slot_selection.target_slot)), b"").await;
+    let state_writes = [
+        (state_dir.join("active"), format!("{}\n", slot_selection.current_slot)),
+        (state_dir.join("reserve"), format!("{}\n", slot_selection.target_slot)),
+        (state_dir.join("pending"), format!("{}\n", slot_selection.target_slot)),
+    ];
+    for (path, value) in state_writes {
+        if let Err(err) = fs::write(&path, value).await {
+            warn!(error = %err, path = %path.display(), "failed to write OTA state marker");
         }
     }
 
@@ -592,20 +743,19 @@ async fn sync_boot_from_target(target_device: &str, work_dir: &Path) -> Result<(
     result
 }
 
-async fn sync_persisted_networkd(target_device: &str, work_dir: &Path) -> Result<()> {
-    let src_dir = Path::new(PERSIST_NETWORKD_DIR);
-    if !src_dir.is_dir() {
-        return Ok(());
-    }
-
+async fn sync_persisted_state(target_device: &str, work_dir: &Path) -> Result<()> {
     let mountpoint = work_dir.join("mnt-target-rw");
     ensure_directory(&mountpoint).await?;
     let status = Command::new("mount").args(["-o", "rw", target_device, mountpoint.to_str().unwrap()]).status().await.map_err(Error::Io)?;
     if !status.success() {
-        return Err(Error::InvalidState(format!("failed to mount flashed root {} for network sync", target_device)));
+        return Err(Error::InvalidState(format!("failed to mount flashed root {} for config sync", target_device)));
     }
 
-    let result = sync_persisted_networkd_into(&mountpoint, src_dir).await;
+    let result = async {
+        sync_persisted_networkd_into(&mountpoint, Path::new(PERSIST_NETWORKD_DIR)).await?;
+        sync_persisted_files_into(&mountpoint).await
+    }
+    .await;
     sync_filesystem(&mountpoint).await.ok();
     let _ = Command::new("umount").arg(&mountpoint).status().await;
     result
@@ -624,6 +774,10 @@ async fn sync_persisted_networkd_into(root: &Path, src_dir: &Path) -> Result<()>
         }
     }
 
+    if !src_dir.is_dir() {
+        return Ok(());
+    }
+
     let mut src_entries = tokio::fs::read_dir(src_dir).await.map_err(Error::Io)?;
     while let Some(entry) = src_entries.next_entry().await.map_err(Error::Io)? {
         let name = entry.file_name();
@@ -637,6 +791,73 @@ async fn sync_persisted_networkd_into(root: &Path, src_dir: &Path) -> Result<()>
     }
 
     Ok(())
+}
+
+async fn sync_persisted_files_into(root: &Path) -> Result<()> {
+    sync_persisted_files_with_mappings_into(root, PERSISTED_FILE_SYNCS).await
+}
+
+async fn sync_persisted_files_with_mappings_into(root: &Path, mappings: &[PersistedFileSync]) -> Result<()> {
+    for mapping in mappings {
+        let Some(src_path) = resolve_persisted_file_source(mapping).await? else {
+            continue;
+        };
+        let target_path = root.join(mapping.target_path.trim_start_matches('/'));
+        if let Some(parent) = target_path.parent() {
+            tokio::fs::create_dir_all(parent).await.map_err(Error::Io)?;
+        }
+        tokio::fs::copy(&src_path, &target_path).await.map_err(Error::Io)?;
+    }
+    Ok(())
+}
+
+async fn resolve_persisted_file_source(mapping: &PersistedFileSync) -> Result<Option<PathBuf>> {
+    for candidate in mapping.source_candidates {
+        match tokio::fs::metadata(candidate).await {
+            Ok(meta) if meta.is_file() => return Ok(Some(PathBuf::from(candidate))),
+            Ok(_) => continue,
+            Err(err) if err.kind() == ErrorKind::NotFound => continue,
+            Err(err) => return Err(Error::Io(err)),
+        }
+    }
+    Ok(None)
+}
+
+async fn validate_bootable_squashfs_root(target_device: &str, work_dir: &Path) -> Result<()> {
+    let mountpoint = work_dir.join("mnt-target-validate");
+    if fs::metadata(&mountpoint).await.is_ok() {
+        let _ = Command::new("umount").arg(&mountpoint).status().await;
+        let _ = fs::remove_dir_all(&mountpoint).await;
+    }
+    ensure_directory(&mountpoint).await?;
+
+    let mount_status = Command::new("mount").args(["-t", "squashfs", "-o", "ro", target_device, mountpoint.to_str().unwrap()]).status().await.map_err(Error::Io)?;
+
+    if !mount_status.success() {
+        let _ = fs::remove_dir_all(&mountpoint).await;
+        return Err(Error::InvalidState(format!("flashed squashfs slot {} is not mountable; refusing to switch boot slots", target_device)));
+    }
+
+    let missing = missing_bootable_root_paths(&mountpoint).await?;
+    let _ = Command::new("umount").arg(&mountpoint).status().await;
+    let _ = fs::remove_dir_all(&mountpoint).await;
+
+    if !missing.is_empty() {
+        return Err(Error::InvalidState(format!("flashed squashfs slot {} is not bootable; missing {}", target_device, missing.join(", "))));
+    }
+
+    Ok(())
+}
+
+async fn missing_bootable_root_paths(root: &Path) -> Result<Vec<&'static str>> {
+    let mut missing = Vec::new();
+    for required in REQUIRED_BOOTABLE_ROOT_PATHS {
+        let relative = required.trim_start_matches('/');
+        if fs::symlink_metadata(root.join(relative)).await.is_err() {
+            missing.push(*required);
+        }
+    }
+    Ok(missing)
 }
 
 async fn boot_dir_has_payload(root_boot: &Path) -> Result<bool> {
@@ -745,7 +966,11 @@ async fn copy_boot_tree(src: &Path, dst: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_env_flag, reboot_failure_message, reboot_output_is_expected_success};
+    use super::{
+        PersistedFileSync, missing_bootable_root_paths, parse_env_flag, reboot_failure_message, reboot_output_is_expected_success, sync_persisted_files_with_mappings_into,
+        sync_persisted_networkd_into,
+    };
+    use std::path::Path;
 
     #[test]
     fn reboot_success_status_is_accepted() {
@@ -779,5 +1004,82 @@ mod tests {
         for raw in ["", "0", "false", "no", "off", "2", "enabled"] {
             assert!(!parse_env_flag(raw), "expected falsey: {raw}");
         }
+    }
+
+    #[tokio::test]
+    async fn sync_persisted_files_prefers_data_candidate() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("root");
+        let primary = temp.path().join("primary/team");
+        let legacy = temp.path().join("legacy/team");
+        tokio::fs::create_dir_all(primary.parent().expect("primary parent")).await.expect("create primary parent");
+        tokio::fs::create_dir_all(legacy.parent().expect("legacy parent")).await.expect("create legacy parent");
+        tokio::fs::write(&primary, "2468\n").await.expect("write primary");
+        tokio::fs::write(&legacy, "1111\n").await.expect("write legacy");
+
+        let primary_str: &'static str = Box::leak(primary.display().to_string().into_boxed_str());
+        let legacy_str: &'static str = Box::leak(legacy.display().to_string().into_boxed_str());
+        let candidates: &'static [&'static str] = Box::leak(vec![primary_str, legacy_str].into_boxed_slice());
+        let mappings = [PersistedFileSync { source_candidates: candidates, target_path: "/etc/helios/team" }];
+
+        sync_persisted_files_with_mappings_into(&root, &mappings).await.expect("sync files");
+
+        let written = tokio::fs::read_to_string(root.join("etc/helios/team")).await.expect("read target");
+        assert_eq!(written, "2468\n");
+    }
+
+    #[tokio::test]
+    async fn sync_persisted_networkd_removes_stale_target_files_when_source_missing() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("root");
+        let target_dir = root.join("etc/systemd/network");
+        tokio::fs::create_dir_all(&target_dir).await.expect("create target dir");
+        tokio::fs::write(target_dir.join("00-helios-persisted-eth0.network"), "stale").await.expect("write stale file");
+        tokio::fs::write(target_dir.join("10-default.network"), "keep").await.expect("write packaged file");
+
+        sync_persisted_networkd_into(&root, Path::new("/definitely/missing")).await.expect("sync networkd");
+
+        assert!(!target_dir.join("00-helios-persisted-eth0.network").exists());
+        assert!(target_dir.join("10-default.network").exists());
+    }
+
+    #[tokio::test]
+    async fn bootable_root_validation_reports_missing_paths() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("root");
+        tokio::fs::create_dir_all(root.join("usr/lib/systemd")).await.expect("create systemd dir");
+        tokio::fs::create_dir_all(root.join("etc")).await.expect("create etc dir");
+        tokio::fs::write(root.join("usr/lib/systemd/systemd"), b"systemd").await.expect("write systemd");
+        tokio::fs::write(root.join("etc/os-release"), b"NAME=Helios\n").await.expect("write os-release");
+
+        let missing = missing_bootable_root_paths(&root).await.expect("missing paths");
+        assert!(missing.contains(&"/sbin/init"));
+        assert!(missing.contains(&"/bin/sh"));
+        assert!(missing.contains(&"/lib"));
+        assert!(missing.contains(&"/lib64"));
+        assert!(!missing.contains(&"/usr/lib/systemd/systemd"));
+        assert!(!missing.contains(&"/etc/os-release"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn bootable_root_validation_accepts_expected_layout() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("root");
+        tokio::fs::create_dir_all(root.join("usr/lib/systemd")).await.expect("create systemd dir");
+        tokio::fs::create_dir_all(root.join("sbin")).await.expect("create sbin dir");
+        tokio::fs::create_dir_all(root.join("bin")).await.expect("create bin dir");
+        tokio::fs::create_dir_all(root.join("lib")).await.expect("create lib dir");
+        tokio::fs::create_dir_all(root.join("etc")).await.expect("create etc dir");
+        tokio::fs::write(root.join("usr/lib/systemd/systemd"), b"systemd").await.expect("write systemd");
+        tokio::fs::write(root.join("bin/sh"), b"#!/bin/sh\n").await.expect("write shell");
+        tokio::fs::write(root.join("etc/os-release"), b"NAME=Helios\n").await.expect("write os-release");
+        symlink("../usr/lib/systemd/systemd", root.join("sbin/init")).expect("symlink init");
+        symlink("lib", root.join("lib64")).expect("symlink lib64");
+
+        let missing = missing_bootable_root_paths(&root).await.expect("missing paths");
+        assert!(missing.is_empty(), "unexpected missing paths: {missing:?}");
     }
 }

@@ -1,5 +1,5 @@
 use crate::http::AppState;
-use crate::logs::{self, LogSource};
+use crate::logs::LogSource;
 use axum::{
     extract::{
         Query, State,
@@ -13,9 +13,7 @@ use lib_asyncapi::{SchemaProvider, Server, Tag, TypeSchema, WsDoc};
 use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::process::Stdio;
 use tokio::io::AsyncRead;
-use tokio::process::Command;
 use tokio_util::codec::{FramedRead, LinesCodec};
 
 const DEFAULT_LINES: usize = 200;
@@ -29,8 +27,8 @@ pub struct LogsParams {
     pub follow: Option<bool>,
 }
 
-pub async fn logs_upgrade(ws: WebSocketUpgrade, State(_state): State<AppState>, Query(params): Query<LogsParams>) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| log_stream(socket, params))
+pub async fn logs_upgrade(ws: WebSocketUpgrade, State(state): State<AppState>, Query(params): Query<LogsParams>) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| log_stream(socket, state, params))
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -42,31 +40,27 @@ pub enum LogsServerEvent {
     Eof,
 }
 
-async fn log_stream(socket: WebSocket, params: LogsParams) {
+async fn log_stream(socket: WebSocket, state: AppState, params: LogsParams) {
     let (mut tx, mut rx) = socket.split();
 
     let follow = params.follow.unwrap_or(true);
     let lines = params.lines.unwrap_or(DEFAULT_LINES).clamp(MIN_LINES, MAX_LINES);
     let source_id = params.source.clone().unwrap_or_else(|| "journal".into());
 
-    let mut sources = logs::default_log_sources();
-    sources.extend(logs::discover_file_sources());
-    let sources = logs::hydrate_systemd_statuses(sources).await;
-
-    let Some(source) = sources.into_iter().find(|candidate| candidate.id == source_id) else {
-        let _ = tx.send(Message::Text(serde_json::to_string(&LogsServerEvent::Error { message: format!("unknown log source: {source_id}") }).unwrap_or_default())).await;
+    let Some(source) = state.services.system.resolve_log_source(&source_id).await else {
+        let _ = tx.send(Message::Text(serde_json::to_string(&LogsServerEvent::Error { message: format!("unknown log source: {source_id}") }).unwrap_or_default().into())).await;
         let _ = tx.send(Message::Close(None)).await;
         return;
     };
 
-    if tx.send(Message::Text(serde_json::to_string(&LogsServerEvent::Ready { source: Box::new(source.clone()) }).unwrap_or_default())).await.is_err() {
+    if tx.send(Message::Text(serde_json::to_string(&LogsServerEvent::Ready { source: Box::new(source.clone()) }).unwrap_or_default().into())).await.is_err() {
         return;
     }
 
-    let mut child = match spawn_source_process(&source, lines, follow) {
+    let mut child = match state.services.system.spawn_log_stream(&source, lines, follow) {
         Ok(child) => child,
         Err(err) => {
-            let _ = tx.send(Message::Text(serde_json::to_string(&LogsServerEvent::Error { message: err }).unwrap_or_default())).await;
+            let _ = tx.send(Message::Text(serde_json::to_string(&LogsServerEvent::Error { message: err }).unwrap_or_default().into())).await;
             let _ = tx.send(Message::Close(None)).await;
             return;
         }
@@ -104,9 +98,9 @@ async fn log_stream(socket: WebSocket, params: LogsParams) {
             }
             status = child.wait() => {
                 if status.is_err() {
-                    let _ = tx.send(Message::Text(serde_json::to_string(&LogsServerEvent::Error { message: "log process failed".into() }).unwrap_or_default())).await;
+                    let _ = tx.send(Message::Text(serde_json::to_string(&LogsServerEvent::Error { message: "log process failed".into() }).unwrap_or_default().into())).await;
                 }
-                let _ = tx.send(Message::Text(serde_json::to_string(&LogsServerEvent::Eof).unwrap_or_default())).await;
+                let _ = tx.send(Message::Text(serde_json::to_string(&LogsServerEvent::Eof).unwrap_or_default().into())).await;
                 break;
             }
         }
@@ -117,7 +111,7 @@ async fn log_stream(socket: WebSocket, params: LogsParams) {
 
 async fn send_line(tx: &mut futures::stream::SplitSink<WebSocket, Message>, line: String) -> Result<(), ()> {
     let evt = LogsServerEvent::Line { timestamp_ms: chrono::Utc::now().timestamp_millis() as u64, line };
-    tx.send(Message::Text(serde_json::to_string(&evt).unwrap_or_default())).await.map_err(|_| ())
+    tx.send(Message::Text(serde_json::to_string(&evt).unwrap_or_default().into())).await.map_err(|_| ())
 }
 
 async fn next_line<R: AsyncRead + Unpin>(stream_opt: &mut Option<FramedRead<R, LinesCodec>>) -> Option<String> {
@@ -129,69 +123,6 @@ async fn next_line<R: AsyncRead + Unpin>(stream_opt: &mut Option<FramedRead<R, L
             None
         }
     }
-}
-
-fn spawn_source_process(source: &LogSource, lines: usize, follow: bool) -> Result<tokio::process::Child, String> {
-    let follow_flag = if follow { "true" } else { "false" };
-    // Use an absolute path so the child can start even when PATH omits /bin (as with systemd defaults).
-    let mut cmd = Command::new("/bin/sh");
-    cmd.arg("-lc").env("LINES", lines.to_string()).env("FOLLOW", follow_flag).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
-
-    let script = match source.id.as_str() {
-        "journal" => journal_script(None, lines, follow),
-        "dmesg" => dmesg_script(lines, follow),
-        _ => {
-            if let Some(unit) = source.unit.as_deref() {
-                journal_script(Some(unit), lines, follow)
-            } else if let Some(path) = source.path.as_deref()
-                && source.id.starts_with("file:")
-            {
-                file_script(path, lines, follow)
-            } else {
-                return Err("unsupported log source".into());
-            }
-        }
-    };
-
-    cmd.arg(script).spawn().map_err(|err| format!("failed to start log source: {err}"))
-}
-
-fn journal_script(unit: Option<&str>, lines: usize, follow: bool) -> String {
-    let n = lines.to_string();
-    let follow_flag = if follow { "-f" } else { "" };
-    let unit_flag = unit.map(|u| format!("-u {u}")).unwrap_or_default();
-    format!("journalctl --no-pager -o short-iso {follow_flag} -n {n} {unit_flag}")
-}
-
-fn file_script(path: &str, lines: usize, follow: bool) -> String {
-    let n = lines.to_string();
-    if follow { format!("tail -n {n} -F {path}") } else { format!("tail -n {n} {path}") }
-}
-
-fn dmesg_script(lines: usize, follow: bool) -> String {
-    let n = lines.to_string();
-    if follow {
-        // BusyBox `dmesg` frequently lacks `-w`/`--follow`; prefer journalctl kernel follow
-        // when available, then fall back to `/dev/kmsg` streaming.
-        return format!(
-            r#"
-if command -v journalctl >/dev/null 2>&1; then
-  journalctl -k --no-pager -o short-iso -n {n} -f
-elif [ -r /dev/kmsg ]; then
-  dmesg 2>/dev/null | tail -n {n}
-  cat /dev/kmsg
-else
-  dmesg 2>/dev/null | tail -n {n}
-fi
-"#
-        );
-    }
-
-    format!(
-        r#"
-dmesg 2>/dev/null | tail -n {n}
-"#
-    )
 }
 
 fn schema<T: JsonSchema>() -> serde_json::Value {

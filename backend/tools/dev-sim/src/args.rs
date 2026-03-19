@@ -60,14 +60,6 @@ pub struct Args {
     #[arg(long, default_value_t = 19100)]
     pub api_metrics_port: u16,
 
-    /// Engine metrics exporter port.
-    #[arg(long, default_value_t = 19101)]
-    pub engine_metrics_port: u16,
-
-    /// Updater metrics exporter port.
-    #[arg(long, default_value_t = 19102)]
-    pub updater_metrics_port: u16,
-
     /// Capture backend to prefer when the API seeds default pipelines.
     #[arg(long = "session-backend", alias = "preview-backend", value_enum, default_value_t = SessionBackend::Mock)]
     pub session_backend: SessionBackend,

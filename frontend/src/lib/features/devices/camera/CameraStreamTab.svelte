@@ -6,6 +6,7 @@
   import { MEDIA_KIND_OPTIONS, mediaKindLabel } from '$lib/features/media/mediaKind';
   import { OpenAPI } from '$lib/ts-bindings/http/client';
   import { reportError } from '$lib/ui/errorPolicy';
+  import { apiFetchResponse } from '$lib/api/core/http';
   import { cancelDebounce, scheduleDebounce, type DebounceHandle } from '$lib/utils/debounce';
   import { toaster } from '$lib';
   import RangeBandSlider from '$lib/components/controls/RangeBandSlider.svelte';
@@ -13,6 +14,7 @@
   import StreamManifestDetails from './stream/StreamManifestDetails.svelte';
   import StreamControls from './stream/StreamControls.svelte';
   import StreamPreviewPanel from './stream/StreamPreviewPanel.svelte';
+  import { SvelteSet } from 'svelte/reactivity';
 
   let {
     cameraAlias = $bindable(),
@@ -107,6 +109,7 @@
     decoders?: BenchCodecStat[];
     encoders?: BenchCodecStat[];
   };
+  type StreamModeDescriptor = { id: string } & Record<string, unknown>;
   type StreamCrop = [number, number, number, number];
   type StreamCrosshair = [number, number];
   type StreamOrderingMode =
@@ -204,7 +207,7 @@
   }
 
   const selectedMediaNames = $derived((() => {
-    const names = new Set<string>();
+    const names = new SvelteSet<string>();
     const lines = String(fileBackendPathsText ?? '').split('\n');
     for (const line of lines) {
       const name = normalizeMediaName(line);
@@ -376,9 +379,7 @@
     const nextBackendKind = String((backendOptions[value] as { kind?: string } | null)?.kind ?? '')
       .trim()
       .toLowerCase();
-    if (nextBackendKind === 'file') {
-      shadowRecorderEnabled = false;
-    }
+    shadowRecorderEnabled = nextBackendKind !== 'file';
     selectedFormat = firstFormat();
     selectedResolution = firstResolution();
     selectedIntervalIdx = 0;
@@ -705,10 +706,10 @@
     try {
       const fps = Math.max(1, Math.trunc(Number(benchTargetFps) || 120));
       const sampleMs = Math.max(250, Math.trunc(Number(benchSampleMs) || 1500));
-      const descriptorModes = effectiveModes();
+      const descriptorModes = effectiveModes() as StreamModeDescriptor[];
       const selectedModes = descriptorModes
-        .filter((m: any) => resolutionKey(m) === selectedResolution)
-        .map((m: any) => ({ id: m.id }));
+        .filter((mode) => resolutionKey(mode) === selectedResolution)
+        .map((mode) => ({ id: mode.id }));
 
       const payload = {
         backend: backend.kind,
@@ -723,7 +724,7 @@
         controls: []
       };
 
-      const resp = await fetch(apiPath('/streams/bench/formats'), {
+      const resp = await apiFetchResponse(apiPath('/streams/bench/formats'), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload)

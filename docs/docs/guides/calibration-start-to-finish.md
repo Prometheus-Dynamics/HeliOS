@@ -68,6 +68,7 @@ Recommended capture habits:
 2. Vary the board pose. Tilt and rotate it, do not keep it flat.
 3. Move across the whole image. You want the board in every corner.
 4. Reject blurry snapshots. A smaller set of sharp images beats a huge blurry set.
+5. If guided mode is available, turn it on and use the coverage overlay to avoid over-sampling the center only.
 
 ## Step 5: Select Snapshots To Use
 
@@ -91,6 +92,7 @@ Important behavior:
 
 - Save stores calibration on the stream and updates the running state without a capture restart.
 - Apply may restart the stream in-place to update calibration constants used by some pipeline nodes.
+- If you already solved a similar camera, you can also copy calibration from another stream or import calibration JSON instead of starting from zero.
 
 ## Verify
 

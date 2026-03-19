@@ -1,6 +1,8 @@
 <script lang="ts" module>
   import { onDestroy, onMount, untrack } from 'svelte';
+  import type { DaedalusRegistryResponse } from '$lib/ts-bindings/http/client';
   import type { StreamInfo, StreamManifest, StreamMetrics } from '$lib/api/httpClient';
+  import { backendFeatures } from '$lib/api/backendFeatures';
   import type { PipelineUi } from '$lib/features/pipelines/pipelineUiTypes';
   import { createCameraPipelineState } from './cameraPipelineStore.svelte';
   import { createCameraPipelineMetricsController } from './cameraPipelineMetricsController';
@@ -27,7 +29,7 @@
     PIPELINE_UI_METADATA_KEY: string;
     DEFAULT_PIPELINE_UI: PipelineUi;
     RAW_PIPELINE_ID: string;
-    RAW_LOOPBACK_GRAPH: any;
+    RAW_LOOPBACK_GRAPH: unknown;
   };
 
   export function createCameraPagePipelineRuntime(deps: PipelineRuntimeDeps) {
@@ -42,9 +44,9 @@
       apiPath,
       PIPELINE_UI_METADATA_KEY,
       DEFAULT_PIPELINE_UI,
-    RAW_PIPELINE_ID,
-    RAW_LOOPBACK_GRAPH
-  } = deps;
+      RAW_PIPELINE_ID,
+      RAW_LOOPBACK_GRAPH
+    } = deps;
 
     const pipelineState = createCameraPipelineState();
 
@@ -67,9 +69,12 @@
       outputDurationForPipeline
     } = pipelineMetricsController;
 
-    let pipelineRegistrySnapshot = $state<any | null>(null);
+    const asRecord = (value: unknown): Record<string, unknown> | null =>
+      value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+
+    let pipelineRegistrySnapshot = $state<DaedalusRegistryResponse | null>(null);
     let pipelineOutputOptionsCache = $state<Record<string, string[]>>({});
-    let pipelineGraphCache = $state<Record<string, any>>({});
+    let pipelineGraphCache = $state<Record<string, unknown>>({});
     const derived = createCameraPageDerived({
       get selectedPipelineId() {
         return pipelineState.selectedPipelineId;
@@ -133,7 +138,7 @@
       }
     });
 
-    let applyPipelineOverridesToGraphRef = (pipelineId: string, graph: any) => graph;
+    let applyPipelineOverridesToGraphRef = (_pipelineId: string, graph: unknown) => graph;
 
     const pipelineLayoutController = createCameraPipelineLayoutRuntime({
       streamId,
@@ -212,7 +217,9 @@
       stream,
       pipelineState,
       derived,
-      ensurePipelineRegistry,
+      ensurePipelineRegistry: async () => {
+        await ensurePipelineRegistry();
+      },
       ensurePipelineGraphAndOutputs,
       awaitStreamUpdatesSocket,
       pipelineGraphCache: () => pipelineGraphCache,
@@ -251,7 +258,17 @@
 
     applyPipelineOverridesToGraphRef = applyPipelineOverridesToGraph;
 
+    let pipelineRegistryPrefetchHint = false;
+    let pipelineRegistryPrefetchIssued = false;
+    const unsubscribeBackendFeatures = backendFeatures.subscribe((value) => {
+      pipelineRegistryPrefetchHint = Boolean(value?.pipelineRegistryPrefetch);
+      if (!pipelineRegistryPrefetchHint || pipelineRegistryPrefetchIssued) return;
+      pipelineRegistryPrefetchIssued = true;
+      void ensurePipelineRegistry();
+    });
+
     onDestroy(() => {
+      unsubscribeBackendFeatures();
       stopPipelineTuningPointerTracking();
     });
 
@@ -259,6 +276,10 @@
       pipelineState.pipelineAssignDraft = normalizeAssignedPipelineIds(pipelineState.assignedPipelineIds);
       void refresh();
       void refreshPipelineGraphs();
+      if (pipelineRegistryPrefetchHint && !pipelineRegistryPrefetchIssued) {
+        pipelineRegistryPrefetchIssued = true;
+        void ensurePipelineRegistry();
+      }
     });
 
     $effect(() => {
@@ -316,10 +337,14 @@
         if (Object.prototype.hasOwnProperty.call(pipelineOutputOptionsCache, normalized)) return;
         ids.add(normalized);
       };
-      add((manifest as any)?.active_pipeline_id);
-      add((manifest as any)?.pipeline_id);
-      if (Array.isArray((manifest as any)?.pipelines)) {
-        (manifest as any).pipelines.forEach((entry: any) => add(entry?.pipeline_id ?? entry?.pipelineId ?? entry?.id));
+      const manifestRecord = asRecord(manifest);
+      add(manifest.active_pipeline_id);
+      add(manifestRecord?.pipeline_id);
+      if (Array.isArray(manifestRecord?.pipelines)) {
+        manifestRecord.pipelines.forEach((entry) => {
+          const pipeline = asRecord(entry);
+          add(pipeline?.pipeline_id ?? pipeline?.pipelineId ?? pipeline?.id);
+        });
       }
       if (!ids.size) return;
       untrack(() => {
@@ -354,27 +379,67 @@
       pipelineState.pipelineUiHydrated = true;
     });
 
-    const runtime = $derived.by(() => ({
-      pipelineState,
-      pipelineRegistrySnapshot,
-      pipelineOutputOptionsCache,
-      pipelineGraphCache,
-      pipelineUiHydratedFor,
-      telemetrySample: derived.telemetrySample,
-      activePipelineIds: derived.activePipelineIds,
-      pipelineGridRowIndices: derived.pipelineGridRowIndices,
-      pipelineGridColumnIndices: derived.pipelineGridColumnIndices,
-      pipelineGridIsSingle: derived.pipelineGridIsSingle,
-      pipelineGridIsMultiplex: derived.pipelineGridIsMultiplex,
-      pipelineAssignFilteredGraphs: derived.pipelineAssignFilteredGraphs,
-      pipelineTuningGraph: derived.pipelineTuningGraph,
-      pipelineTuningUi: derived.pipelineTuningUi,
-      pipelineTuningPlan: derived.pipelineTuningPlan,
-      canShowTuningEngineConfig: derived.canShowTuningEngineConfig,
-      pipelineTuningBaseNodeOverrides: derived.pipelineTuningBaseNodeOverrides,
-      pipelineTuningCameraNodeOverrides: derived.pipelineTuningCameraNodeOverrides,
-      pipelineTuningEffectiveNodeOverrides: derived.pipelineTuningEffectiveNodeOverrides,
-      pipelineTuningNodeDescriptors: derived.pipelineTuningNodeDescriptors,
+    return {
+      get pipelineState() {
+        return pipelineState;
+      },
+      get pipelineRegistrySnapshot() {
+        return pipelineRegistrySnapshot;
+      },
+      get pipelineOutputOptionsCache() {
+        return pipelineOutputOptionsCache;
+      },
+      get pipelineGraphCache() {
+        return pipelineGraphCache;
+      },
+      get pipelineUiHydratedFor() {
+        return pipelineUiHydratedFor;
+      },
+      get telemetrySample() {
+        return derived.telemetrySample;
+      },
+      get activePipelineIds() {
+        return derived.activePipelineIds;
+      },
+      get pipelineGridRowIndices() {
+        return derived.pipelineGridRowIndices;
+      },
+      get pipelineGridColumnIndices() {
+        return derived.pipelineGridColumnIndices;
+      },
+      get pipelineGridIsSingle() {
+        return derived.pipelineGridIsSingle;
+      },
+      get pipelineGridIsMultiplex() {
+        return derived.pipelineGridIsMultiplex;
+      },
+      get pipelineAssignFilteredGraphs() {
+        return derived.pipelineAssignFilteredGraphs;
+      },
+      get pipelineTuningGraph() {
+        return derived.pipelineTuningGraph;
+      },
+      get pipelineTuningUi() {
+        return derived.pipelineTuningUi;
+      },
+      get pipelineTuningPlan() {
+        return derived.pipelineTuningPlan;
+      },
+      get canShowTuningEngineConfig() {
+        return derived.canShowTuningEngineConfig;
+      },
+      get pipelineTuningBaseNodeOverrides() {
+        return derived.pipelineTuningBaseNodeOverrides;
+      },
+      get pipelineTuningCameraNodeOverrides() {
+        return derived.pipelineTuningCameraNodeOverrides;
+      },
+      get pipelineTuningEffectiveNodeOverrides() {
+        return derived.pipelineTuningEffectiveNodeOverrides;
+      },
+      get pipelineTuningNodeDescriptors() {
+        return derived.pipelineTuningNodeDescriptors;
+      },
       normalizePipelineIdForMetrics,
       activePipelineWireId,
       pipelineMetricsForId,
@@ -452,53 +517,135 @@
       nodeValueSignature,
       pipelineOverrideSignature,
       clamp,
-      // expose core state for other controllers
-      pipelineGraphs: pipelineState.pipelineGraphs,
-      pipelineGraphLoading: pipelineState.pipelineGraphLoading,
-      pipelineGraphError: pipelineState.pipelineGraphError,
-      selectedPipelineId: pipelineState.selectedPipelineId,
-      pipelineOutputOptions: pipelineState.pipelineOutputOptions,
-      selectedPipelineOutput: pipelineState.selectedPipelineOutput,
-      selectedPipelineGraph: pipelineState.selectedPipelineGraph,
-      assignedPipelineIds: pipelineState.assignedPipelineIds,
-      pipelineOutputByPipelineId: pipelineState.pipelineOutputByPipelineId,
-      pipelineAssignModalOpen: pipelineState.pipelineAssignModalOpen,
-      pipelineAssignDraft: pipelineState.pipelineAssignDraft,
-      pipelineAssignQuery: pipelineState.pipelineAssignQuery,
-      pipelineGridRows: pipelineState.pipelineGridRows,
-      pipelineGridColumns: pipelineState.pipelineGridColumns,
-      pipelineGridSlots: pipelineState.pipelineGridSlots,
-      pipelineGridSlotOutputKeys: pipelineState.pipelineGridSlotOutputKeys,
-      pipelineUiHydrated: pipelineState.pipelineUiHydrated,
-      pipelineDragPayload: pipelineState.pipelineDragPayload,
-      pipelineLayoutTouched: pipelineState.pipelineLayoutTouched,
-      pipelineRemoveModalOpen: pipelineState.pipelineRemoveModalOpen,
-      pipelineRemoveCandidateId: pipelineState.pipelineRemoveCandidateId,
-      pipelineTuningPanelOpen: pipelineState.pipelineTuningPanelOpen,
-      pipelineTuningPipelineId: pipelineState.pipelineTuningPipelineId,
-      pipelineTuningEngineConfigOpen: pipelineState.pipelineTuningEngineConfigOpen,
-      pipelineTuningDragState: pipelineState.pipelineTuningDragState,
-      pipelineTuningResizeState: pipelineState.pipelineTuningResizeState,
-      pipelineTuningPosition: pipelineState.pipelineTuningPosition,
-      pipelineTuningSize: pipelineState.pipelineTuningSize,
-      pipelineTuningLoading: pipelineState.pipelineTuningLoading,
-      pipelineTuningError: pipelineState.pipelineTuningError,
-      pipelineInputOverridesById: pipelineState.pipelineInputOverridesById,
-      pipelineNodeOverridesById: pipelineState.pipelineNodeOverridesById,
-      pipelineInputDraftsById: pipelineState.pipelineInputDraftsById,
-      pipelineNodeDraftsById: pipelineState.pipelineNodeDraftsById,
-      pipelineInputErrorsById: pipelineState.pipelineInputErrorsById,
-      pipelineNodeErrorsById: pipelineState.pipelineNodeErrorsById,
-      pipelineTuningApplyBusy: pipelineState.pipelineTuningApplyBusy,
-      pipelineTuningApplyQueuedById: pipelineState.pipelineTuningApplyQueuedById,
-      pipelineTuningLastAppliedSignatureById: pipelineState.pipelineTuningLastAppliedSignatureById,
-      pipelineTuningLastAppliedNodeOverridesById: pipelineState.pipelineTuningLastAppliedNodeOverridesById,
-      PIPELINE_LAYOUT_DEBOUNCE_MS: pipelineState.PIPELINE_LAYOUT_DEBOUNCE_MS,
-      pipelineLayoutApplyTimer: pipelineState.pipelineLayoutApplyTimer,
-      pipelineTuningApplyRafById: pipelineState.pipelineTuningApplyRafById
-    }));
-
-    // svelte-ignore state_referenced_locally
-    return runtime;
+      get pipelineGraphs() {
+        return pipelineState.pipelineGraphs;
+      },
+      get pipelineGraphLoading() {
+        return pipelineState.pipelineGraphLoading;
+      },
+      get pipelineGraphError() {
+        return pipelineState.pipelineGraphError;
+      },
+      get selectedPipelineId() {
+        return pipelineState.selectedPipelineId;
+      },
+      get pipelineOutputOptions() {
+        return pipelineState.pipelineOutputOptions;
+      },
+      get selectedPipelineOutput() {
+        return pipelineState.selectedPipelineOutput;
+      },
+      get selectedPipelineGraph() {
+        return pipelineState.selectedPipelineGraph;
+      },
+      get assignedPipelineIds() {
+        return pipelineState.assignedPipelineIds;
+      },
+      get pipelineOutputByPipelineId() {
+        return pipelineState.pipelineOutputByPipelineId;
+      },
+      get pipelineAssignModalOpen() {
+        return pipelineState.pipelineAssignModalOpen;
+      },
+      get pipelineAssignDraft() {
+        return pipelineState.pipelineAssignDraft;
+      },
+      get pipelineAssignQuery() {
+        return pipelineState.pipelineAssignQuery;
+      },
+      get pipelineGridRows() {
+        return pipelineState.pipelineGridRows;
+      },
+      get pipelineGridColumns() {
+        return pipelineState.pipelineGridColumns;
+      },
+      get pipelineGridSlots() {
+        return pipelineState.pipelineGridSlots;
+      },
+      get pipelineGridSlotOutputKeys() {
+        return pipelineState.pipelineGridSlotOutputKeys;
+      },
+      get pipelineUiHydrated() {
+        return pipelineState.pipelineUiHydrated;
+      },
+      get pipelineDragPayload() {
+        return pipelineState.pipelineDragPayload;
+      },
+      get pipelineLayoutTouched() {
+        return pipelineState.pipelineLayoutTouched;
+      },
+      get pipelineRemoveModalOpen() {
+        return pipelineState.pipelineRemoveModalOpen;
+      },
+      get pipelineRemoveCandidateId() {
+        return pipelineState.pipelineRemoveCandidateId;
+      },
+      get pipelineTuningPanelOpen() {
+        return pipelineState.pipelineTuningPanelOpen;
+      },
+      get pipelineTuningPipelineId() {
+        return pipelineState.pipelineTuningPipelineId;
+      },
+      get pipelineTuningEngineConfigOpen() {
+        return pipelineState.pipelineTuningEngineConfigOpen;
+      },
+      get pipelineTuningDragState() {
+        return pipelineState.pipelineTuningDragState;
+      },
+      get pipelineTuningResizeState() {
+        return pipelineState.pipelineTuningResizeState;
+      },
+      get pipelineTuningPosition() {
+        return pipelineState.pipelineTuningPosition;
+      },
+      get pipelineTuningSize() {
+        return pipelineState.pipelineTuningSize;
+      },
+      get pipelineTuningLoading() {
+        return pipelineState.pipelineTuningLoading;
+      },
+      get pipelineTuningError() {
+        return pipelineState.pipelineTuningError;
+      },
+      get pipelineInputOverridesById() {
+        return pipelineState.pipelineInputOverridesById;
+      },
+      get pipelineNodeOverridesById() {
+        return pipelineState.pipelineNodeOverridesById;
+      },
+      get pipelineInputDraftsById() {
+        return pipelineState.pipelineInputDraftsById;
+      },
+      get pipelineNodeDraftsById() {
+        return pipelineState.pipelineNodeDraftsById;
+      },
+      get pipelineInputErrorsById() {
+        return pipelineState.pipelineInputErrorsById;
+      },
+      get pipelineNodeErrorsById() {
+        return pipelineState.pipelineNodeErrorsById;
+      },
+      get pipelineTuningApplyBusy() {
+        return pipelineState.pipelineTuningApplyBusy;
+      },
+      get pipelineTuningApplyQueuedById() {
+        return pipelineState.pipelineTuningApplyQueuedById;
+      },
+      get pipelineTuningLastAppliedSignatureById() {
+        return pipelineState.pipelineTuningLastAppliedSignatureById;
+      },
+      get pipelineTuningLastAppliedNodeOverridesById() {
+        return pipelineState.pipelineTuningLastAppliedNodeOverridesById;
+      },
+      get PIPELINE_LAYOUT_DEBOUNCE_MS() {
+        return pipelineState.PIPELINE_LAYOUT_DEBOUNCE_MS;
+      },
+      get pipelineLayoutApplyTimer() {
+        return pipelineState.pipelineLayoutApplyTimer;
+      },
+      get pipelineTuningApplyRafById() {
+        return pipelineState.pipelineTuningApplyRafById;
+      }
+    };
   }
 </script>

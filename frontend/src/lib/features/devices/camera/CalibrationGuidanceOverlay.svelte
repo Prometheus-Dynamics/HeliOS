@@ -1,4 +1,6 @@
 <script lang="ts" module>
+  import { SvelteMap as ModuleSvelteMap } from 'svelte/reactivity';
+
   type CaptureStatsState = {
     total: number;
     close: number;
@@ -19,7 +21,7 @@
     lastGridKey: string;
   };
 
-  const guidedStateByStream = new Map<string, GuidedOverlayState>();
+  const guidedStateByStream = new ModuleSvelteMap<string, GuidedOverlayState>();
 
   function emptyCaptureStats(): CaptureStatsState {
     return { total: 0, close: 0, far: 0, skew: 0, corners: 0, cornerMask: 0, cornersUnique: 0, coverageAvg: 0, coverageSamples: 0 };
@@ -50,6 +52,7 @@
 
 <script lang="ts">
   import { onDestroy, untrack } from 'svelte';
+  import { SvelteMap } from 'svelte/reactivity';
   import { PipelinesApi } from '$lib/api/pipelinesApi';
   import { StreamsApi } from '$lib/api/streamsApi';
 
@@ -116,7 +119,7 @@
     coverageSamples: 0
   });
 
-  const MIN_TAGS = 3;
+  const MIN_TAGS = 2;
   const TARGET_TAGS = 6;
   const MIN_AREA_RATIO = 0.003;
   const MAX_AREA_RATIO = 0.08;
@@ -126,15 +129,17 @@
   const MIN_PLAUSIBLE_SIDE_RATIO = 0.18;
   const CLOSE_EXTENT_RATIO = 0.12;
   const FAR_EXTENT_RATIO = 0.05;
-  const MIN_FRAME_COVERAGE = 0.25;
+  const MIN_FRAME_COVERAGE = 0.12;
   const EDGE_PAD_RATIO = 0.08;
   const TARGET_CLOSE = 1;
-  const TARGET_FAR = 2;
-  const TARGET_SKEW = 3;
-  const TARGET_CORNERS = 4;
-  const CALIBRATION_MODE_PIPELINE_UUID = '00000000-0000-0000-0000-00000000c411';
-  const RAW_PIPELINE_UUID = '00000000-0000-0000-0000-0000000000aa';
-  const graphNameCache = new Map<string, string>();
+  const TARGET_FAR = 1;
+  const TARGET_SKEW = 1;
+  const TARGET_CORNERS = 2;
+  let calibrationModePipelineUuid = $state('');
+  let rawPipelineUuid = $state('');
+  let streamCapabilitiesLoaded = false;
+  let streamCapabilitiesPromise: Promise<void> | null = null;
+  const graphNameCache = new SvelteMap<string, string>();
 
   function persistGuidedState(streamUuid: string): void {
     const saved = getGuidedState(streamUuid);
@@ -817,10 +822,10 @@
     ctx2d.fillText(chipText, chipX + chipPad * 1.1, chipY + chipH / 2);
 
     const needs = [
-      { label: `Closer ${captureStats.close}/${TARGET_CLOSE}`, missing: captureStats.close < TARGET_CLOSE },
-      { label: `Farther ${captureStats.far}/${TARGET_FAR}`, missing: captureStats.far < TARGET_FAR },
-      { label: `Skewed ${captureStats.skew}/${TARGET_SKEW}`, missing: captureStats.skew < TARGET_SKEW },
-      { label: `Corners ${captureStats.cornersUnique}/${TARGET_CORNERS}`, missing: captureStats.cornersUnique < TARGET_CORNERS }
+      { label: `Closer ${captureStats.close}/${TARGET_CLOSE}`, pending: captureStats.close < TARGET_CLOSE },
+      { label: `Farther ${captureStats.far}/${TARGET_FAR}`, pending: captureStats.far < TARGET_FAR },
+      { label: `Skewed ${captureStats.skew}/${TARGET_SKEW}`, pending: captureStats.skew < TARGET_SKEW },
+      { label: `Corners ${captureStats.cornersUnique}/${TARGET_CORNERS}`, pending: captureStats.cornersUnique < TARGET_CORNERS }
     ];
 
     const subPadX = Math.max(6, Math.round(content.width / 230));
@@ -837,9 +842,9 @@
       const x = Math.max(content.x + chipPad, content.x + content.width - w - chipPad);
       const y = nextY;
 
-      const fill = item.missing ? 'rgba(239, 68, 68, 0.8)' : 'rgba(34, 197, 94, 0.7)';
-      const stroke = item.missing ? 'rgba(255, 150, 150, 0.8)' : 'rgba(160, 255, 200, 0.8)';
-      const text = item.missing ? 'rgba(255,255,255,0.98)' : 'rgba(10,10,10,0.95)';
+      const fill = item.pending ? 'rgba(245, 158, 11, 0.78)' : 'rgba(34, 197, 94, 0.7)';
+      const stroke = item.pending ? 'rgba(255, 226, 140, 0.82)' : 'rgba(160, 255, 200, 0.8)';
+      const text = item.pending ? 'rgba(24, 24, 24, 0.96)' : 'rgba(10,10,10,0.95)';
 
       ctx2d.fillStyle = fill;
       ctx2d.strokeStyle = stroke;
@@ -863,6 +868,26 @@
     if (typeof value !== 'string') return null;
     const normalized = value.trim().toLowerCase();
     return normalized.length ? normalized : null;
+  }
+
+  async function ensureStreamCapabilities(): Promise<void> {
+    if (streamCapabilitiesLoaded) return;
+    if (streamCapabilitiesPromise) return streamCapabilitiesPromise;
+    streamCapabilitiesPromise = (async () => {
+      try {
+        const capabilities = await StreamsApi.streamCapabilities();
+        const rawId = normalizePipelineId(capabilities?.rawPipelineId);
+        if (rawId) rawPipelineUuid = rawId;
+        const calibrationId = normalizePipelineId(capabilities?.calibrationModePipelineId);
+        if (calibrationId) calibrationModePipelineUuid = calibrationId;
+      } catch {
+        // Keep previously loaded IDs; avoid local hardcoded fallback IDs.
+      } finally {
+        streamCapabilitiesLoaded = true;
+        streamCapabilitiesPromise = null;
+      }
+    })();
+    return streamCapabilitiesPromise;
   }
 
   function readErrorStatus(error: unknown): number | null {
@@ -912,8 +937,8 @@
 
   async function resolveGraphName(pipelineId: string | null): Promise<string> {
     if (!pipelineId) return 'none';
-    if (pipelineId === RAW_PIPELINE_UUID) return 'raw';
-    if (pipelineId === CALIBRATION_MODE_PIPELINE_UUID) return 'daedalus_aruco';
+    if (pipelineId === rawPipelineUuid) return 'raw';
+    if (pipelineId === calibrationModePipelineUuid) return 'daedalus_aruco';
     const cached = graphNameCache.get(pipelineId);
     if (cached) return cached;
     try {
@@ -1036,6 +1061,7 @@
 
   function startPolling(): void {
     stopPolling();
+    void ensureStreamCapabilities();
     pollTimer = setInterval(() => void pollOnce(), 200);
     metricsTimer = setInterval(() => void pollMetricsOnce(), 1000);
     void pollOnce();

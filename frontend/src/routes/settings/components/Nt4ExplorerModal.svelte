@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { apiFetch } from '$lib/api/apiFetch';
+  import { apiFetch } from '$lib/api/core/http';
   import type { Nt4TopicInfo, Nt4TopicsResponse, Nt4ValueResponse } from '../types';
   import { buildErrorMessage } from '$lib/ui/errorPolicy';
   import Nt4Tree from './Nt4Tree.svelte';
   import type { NtTreeNode } from './nt4TreeTypes';
+  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
   type Props = {
     open: boolean;
@@ -32,7 +33,7 @@
   let lastScanAt = $state<number | null>(null);
   let scanInFlight = $state(false);
 
-  let openFolders = $state<Set<string>>(new Set());
+  let openFolders = new SvelteSet<string>();
 
   let selected = $state<string | null>(null);
   let value = $state<unknown>(null);
@@ -60,7 +61,7 @@
     topics = [];
     connected = 'unknown';
     lastScanAt = null;
-    openFolders = new Set();
+    openFolders.clear();
     selected = null;
     value = null;
     valueType = null;
@@ -113,13 +114,13 @@
         '/nt4/topics',
         {
           method: 'POST',
-          body: JSON.stringify({
+          body: {
             host,
             port,
             prefix: '/',
             scan_ms: 550,
             limit: 20000
-          })
+          }
         },
         { timeoutMs: 1600, recordConnection: false }
       );
@@ -165,7 +166,7 @@
         '/nt4/value',
         {
           method: 'POST',
-          body: JSON.stringify({ host, port, topic })
+          body: { host, port, topic }
         },
         { timeoutMs: 1600, recordConnection: false }
       );
@@ -189,15 +190,15 @@
       name: string;
       path: string;
       dataType?: string | null;
-      children?: Map<string, BuildNode>;
+      children?: SvelteMap<string, BuildNode>;
     };
 
-    const root = new Map<string, BuildNode>();
+    const root = new SvelteMap<string, BuildNode>();
 
-    const ensureFolder = (parent: Map<string, BuildNode>, name: string, path: string): BuildNode => {
+    const ensureFolder = (parent: SvelteMap<string, BuildNode>, name: string, path: string): BuildNode => {
       const existing = parent.get(name);
       if (existing && existing.kind === 'folder') return existing;
-      const node: BuildNode = { kind: 'folder', name, path, children: new Map() };
+      const node: BuildNode = { kind: 'folder', name, path, children: new SvelteMap() };
       parent.set(name, node);
       return node;
     };
@@ -226,12 +227,12 @@
         } else {
           folderPath = `${folderPath}/${seg}`;
           const folder = ensureFolder(cursor, seg, folderPath);
-          cursor = folder.children ?? (folder.children = new Map());
+          cursor = folder.children ?? (folder.children = new SvelteMap());
         }
       }
     }
 
-    const finalize = (map: Map<string, BuildNode>): NtTreeNode[] => {
+    const finalize = (map: ReadonlyMap<string, BuildNode>): NtTreeNode[] => {
       const items = Array.from(map.values());
       items.sort((a, b) => {
         if (a.kind !== b.kind) return a.kind === 'folder' ? -1 : 1;
@@ -244,7 +245,7 @@
           out.push({ kind: 'topic', name: entry.name, path: entry.path, topicCount: 1, dataType: entry.dataType ?? null });
           continue;
         }
-        const children = finalize(entry.children ?? new Map());
+        const children = finalize(entry.children ?? new SvelteMap());
         const topicCount = children.reduce((acc, child) => acc + (child.kind === 'topic' ? 1 : child.topicCount), 0);
         out.push({ kind: 'folder', name: entry.name, path: entry.path, topicCount, children });
       }
@@ -268,14 +269,13 @@
     if (openFolders.size) return;
     if (!tree.length) return;
     const roots = tree.filter((n) => n.kind === 'folder').map((n) => n.path);
-    openFolders = new Set(roots);
+    openFolders.clear();
+    roots.forEach((root) => openFolders.add(root));
   });
 
   function toggleFolder(path: string): void {
-    const next = new Set(openFolders);
-    if (next.has(path)) next.delete(path);
-    else next.add(path);
-    openFolders = next;
+    if (openFolders.has(path)) openFolders.delete(path);
+    else openFolders.add(path);
   }
 
   function selectTopic(topic: string): void {

@@ -5,14 +5,14 @@
   import FaIcon from '$lib/components/icons/FaIcon.svelte';
   import { faCamera } from '@fortawesome/free-solid-svg-icons';
   import type { PipelineDataType, PipelineNodeValue } from '$lib/types/pipeline';
-  import type { PipelineUi } from '$lib/features/pipelines/pipelineUiTypes';
+  import type { PipelineUi, PipelineUiNodeDescriptor } from '$lib/features/pipelines/pipelineUiTypes';
   import type { PipelineTuningConstantEntry } from '$lib/components/pipelines/types';
   import {
     buildTuneConstantGroups,
     buildTuneConstantSearchTokens,
     filterTuneConstantGroups
   } from '$lib/features/pipelines/page/pipelineTuneDerived';
-  import type { StreamPipelineLayout } from '$lib/ts-bindings/http/client';
+  import type { StreamPipelineLayout, StreamPipelineWire } from '$lib/ts-bindings/http/client';
 
   type Props = {
     open: boolean;
@@ -30,12 +30,12 @@
     onSizeChange: (next: { width: number; height: number }) => void;
     loading: boolean;
     error: string | null;
-    nodeDescriptors: Array<any>;
+    nodeDescriptors: PipelineUiNodeDescriptor[];
     ui: PipelineUi;
     streamLabel: string;
     streamId: string | null;
     streamLayout?: StreamPipelineLayout | null;
-    streamWires?: any[];
+    streamWires?: StreamPipelineWire[];
     setFrameSourceForPipelineInstance?: ((args: {
       to: { pipelineId: string; outputKey?: string | null };
       from: { pipelineId: string; outputKey?: string | null; port?: string | null } | null;
@@ -45,8 +45,8 @@
     readNodeDraft: (nodeId: string, portKey: string) => string | null;
     updateStreamNodeValue: (nodeId: string, portKey: string, dataType: PipelineDataType | null, raw: string) => void;
     applyBusy: boolean;
-    enginePlan: any;
-    onEnginePlanChange: (plan: any) => void;
+    enginePlan: unknown;
+    onEnginePlanChange: (plan: unknown) => void;
   };
 
   let {
@@ -80,11 +80,13 @@
     enginePlan,
     onEnginePlanChange
   }: Props = $props();
-  void canShowEngineConfig;
-  void engineConfigOpen;
-  void onSetEngineConfigOpen;
-  void enginePlan;
-  void onEnginePlanChange;
+  $effect(() => {
+    void canShowEngineConfig;
+    void engineConfigOpen;
+    void onSetEngineConfigOpen;
+    void enginePlan;
+    void onEnginePlanChange;
+  });
 
   const hasUiItems = $derived.by(() => {
     if (!ui) return false;
@@ -118,6 +120,17 @@
     filterTuneConstantGroups(constantGroups, constantSearchTokens)
   );
   const normalizeId = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+  const resolvePipelineLabel = (value: string | null): string => {
+    const normalized = normalizeId(value);
+    if (typeof pipelineLabel === 'function') {
+      const resolved = pipelineLabel(normalized || null);
+      if (typeof resolved === 'string' && resolved.trim().length) {
+        return resolved.trim();
+      }
+    }
+    if (normalized === rawPipelineId) return 'Raw stream';
+    return normalized.length ? normalized : 'Pipeline';
+  };
   const normalizeKey = (value: unknown): string | null => {
     const normalized = normalizeId(value);
     return normalized.length ? normalized : null;
@@ -127,16 +140,16 @@
     return normalized.length ? normalized : fallback;
   };
   const normalizedLayoutSlots = $derived.by(() => {
-    const slots = Array.isArray((streamLayout as any)?.slots) ? ((streamLayout as any).slots as any[]) : [];
+    const slots = Array.isArray(streamLayout?.slots) ? streamLayout.slots : [];
     return slots
       .map((slot) => {
-        const row = Math.trunc(Number(slot?.row));
-        const column = Math.trunc(Number(slot?.column));
+        const row = Math.trunc(Number(slot.row));
+        const column = Math.trunc(Number(slot.column));
         if (!Number.isInteger(row) || !Number.isInteger(column)) return null;
-        const rawId = normalizeId(slot?.pipeline_id);
+        const rawId = normalizeId(slot.pipeline_id);
         if (!rawId.length) return null;
         const pipelineId = rawId === rawPipelineUuid ? rawPipelineId : rawId;
-        const outputKey = normalizeKey(slot?.output_key);
+        const outputKey = normalizeKey(slot.output_key);
         return { row, column, pipelineId, outputKey, resolvedPort: outputKey ?? 'frame' };
       })
       .filter(Boolean) as Array<{ row: number; column: number; pipelineId: string; outputKey: string | null; resolvedPort: string }>;
@@ -154,7 +167,7 @@
     const targetWireId = pipelineId === rawPipelineId ? rawPipelineUuid : pipelineId;
     const wires = Array.isArray(streamWires) ? streamWires : [];
     const frameWire = wires.find((wire) => {
-      const to = (wire as any)?.to ?? null;
+      const to = wire.to ?? null;
       const wireToId = normalizeId(to?.pipeline_id);
       if (!wireToId.length) return false;
       if (wireToId !== targetWireId) return false;
@@ -163,7 +176,7 @@
       const wireToKey = normalizeKey(to?.output_key);
       return (wireToKey ?? null) === (inputTargetOutputKey ?? null);
     });
-    const from = (frameWire as any)?.from ?? null;
+    const from = frameWire?.from ?? null;
     const fromIdRaw = normalizeId(from?.pipeline_id);
     if (!fromIdRaw.length) return 'raw|raw';
     const fromId = fromIdRaw === rawPipelineUuid ? rawPipelineId : fromIdRaw;
@@ -311,12 +324,12 @@
             pipelineId={pipelineId}
             size="sm"
             className="shrink-0"
-            ariaLabel={pipelineLabel(pipelineId)}
+            ariaLabel={resolvePipelineLabel(pipelineId)}
           />
         {/if}
         <div class="min-w-0">
           <p class="text-2xs uppercase tracking-[0.3em] text-surface-500">Pipeline Tuning</p>
-          <p class="truncate text-sm text-surface-100">{pipelineLabel(pipelineId)}</p>
+          <p class="truncate text-sm text-surface-100">{resolvePipelineLabel(pipelineId)}</p>
         </div>
       </div>
       <div class="flex items-center gap-2">
@@ -371,7 +384,7 @@
                 {#each normalizedLayoutSlots as source (`${source.row}:${source.column}`)}
                   {#if source.pipelineId !== pipelineId && source.pipelineId !== rawPipelineId}
                     <option value={`pipe|${source.pipelineId}|${source.outputKey ?? ''}|${source.resolvedPort}`}>
-                      {pipelineLabel(source.pipelineId)} ({source.row + 1}:{source.column + 1}) - {source.resolvedPort}
+                      {resolvePipelineLabel(source.pipelineId)} ({source.row + 1}:{source.column + 1}) - {source.resolvedPort}
                     </option>
                   {/if}
                 {/each}
@@ -412,6 +425,7 @@
       class="absolute bottom-1 right-1 h-4 w-4 cursor-se-resize rounded bg-surface-800/60"
       onpointerdown={handleResizeStart}
       title="Resize"
+      role="presentation"
     ></div>
   </div>
 {/if}

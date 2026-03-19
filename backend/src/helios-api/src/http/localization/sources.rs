@@ -25,8 +25,7 @@ use super::solve;
 
 use helios_engine::ipc::{EngineErrorCode, EngineEvent};
 use helios_engine::localization::config::{LocalizationConfig, LocalizationPoseSpace, LocalizationProfile, LocalizationSourceConfig, select_profile};
-use helios_engine::localization::solve::solve_localization;
-use helios_engine::localization::sources::LocalizationSourceFetcher;
+use helios_engine::localization::fetch::LocalizationSourceFetcher;
 use helios_engine::localization::types::{LocalizationDetectionPose, LocalizationPipelineSource, LocalizationSolverOutputs, PipelineOutputSample};
 
 const IMU_EXTERNAL_ID: &str = "imu";
@@ -35,6 +34,83 @@ const PROFILE_OUTPUT_PREFIX: &str = "solver:";
 
 fn is_media_imu_output_key(output_key: &str) -> bool {
     output_key.eq_ignore_ascii_case(media_imu::MEDIA_IMU_OUTPUT_KEY) || output_key.eq_ignore_ascii_case(media_imu::MEDIA_IMU_OUTPUT_KEY_LEGACY)
+}
+
+fn output_key_looks_detection(output_key: &str) -> bool {
+    let key = output_key.trim().to_ascii_lowercase();
+    key.contains("aruco") || key.contains("detect") || key.contains("detection") || key.contains("tag_poses") || key.contains("tag_pose")
+}
+
+fn output_key_looks_pose(output_key: &str) -> bool {
+    let key = output_key.trim().to_ascii_lowercase();
+    key.starts_with("solver:")
+        || key.starts_with("tag_in_")
+        || key.starts_with("camera_in_")
+        || key.starts_with("robot_in_")
+        || key.contains("imu_pose")
+        || key.contains(" pose")
+        || key.contains("_pose")
+        || key.ends_with("pose")
+}
+
+fn output_key_looks_image(output_key: &str) -> bool {
+    let key = output_key.trim().to_ascii_lowercase();
+    key == "frame" || key == "raw" || key == "undistorted" || key.contains("image") || key.contains("frame")
+}
+
+fn data_type_text(data_type: Option<&JsonValue>) -> String {
+    data_type.and_then(|value| serde_json::to_string(value).ok()).unwrap_or_default().to_ascii_lowercase()
+}
+
+fn data_type_looks_localization(data_type: Option<&JsonValue>) -> bool {
+    let text = data_type_text(data_type);
+    if text.is_empty() {
+        return false;
+    }
+    text.contains("localization")
+        || text.contains("detection")
+        || text.contains("aruco")
+        || text.contains("tag_pose")
+        || text.contains("tag_poses")
+        || text.contains("tag_in_")
+        || text.contains("camera_in_")
+        || text.contains("robot_in_")
+        || text.contains("imu")
+        || text.contains("pose")
+}
+
+fn data_type_looks_image(data_type: Option<&JsonValue>) -> bool {
+    let text = data_type_text(data_type);
+    if text.is_empty() {
+        return false;
+    }
+    text.contains("image") || text.contains("frame") || text.contains("rgb") || text.contains("bgr") || text.contains("nv12") || text.contains("yuv") || text.contains("jpeg") || text.contains("png")
+}
+
+fn is_localization_compatible_output(output_key: &str, data_type: Option<&JsonValue>) -> bool {
+    let key = output_key.trim();
+    if key.is_empty() {
+        return false;
+    }
+    if key.eq_ignore_ascii_case("frame") {
+        return false;
+    }
+
+    let looks_detection = output_key_looks_detection(key);
+    let looks_pose = output_key_looks_pose(key);
+    let looks_image = output_key_looks_image(key);
+    let type_localization = data_type_looks_localization(data_type);
+    let type_image = data_type_looks_image(data_type);
+
+    if looks_detection || looks_pose {
+        // Prevent obvious frame/image outputs from leaking in via weak naming heuristics.
+        if looks_image && !type_localization {
+            return false;
+        }
+        return true;
+    }
+
+    type_localization && !type_image
 }
 
 #[derive(Clone)]
@@ -53,7 +129,7 @@ impl LocalizationSourceFetcher for ApiLocalizationSourceFetcher {
     fn fetch_source_value<'a>(&'a self, source: &'a LocalizationSourceConfig) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<JsonValue, String>> + Send + 'a>> {
         Box::pin(async move {
             if source.stream_id.starts_with("peer:") {
-                fetch_peer_output(&source.stream_id, &source.output_key).await
+                fetch_peer_output(&self.state, &source.stream_id, &source.output_key).await
             } else if let Some(source_id) = source.stream_id.strip_prefix("external:") {
                 external::fetch_external_value(&self.state, source_id, &source.output_key).await
             } else if let Some(profile_id) = source.stream_id.strip_prefix(PROFILE_STREAM_PREFIX) {
@@ -81,7 +157,7 @@ pub async fn list_sources(State(state): State<AppState>) -> ApiResult<Json<Vec<L
             continue;
         }
         if let Some(media_meta_dir) = media_meta_dir.as_deref()
-            && let Some(media_imu_source) = media_imu::source_for_stream(&stream, media_meta_dir).await
+            && let Some(media_imu_source) = media_imu::source_for_stream(&state, &stream, media_meta_dir).await
         {
             out.push(media_imu_source);
         }
@@ -93,8 +169,6 @@ pub async fn list_sources(State(state): State<AppState>) -> ApiResult<Json<Vec<L
             Ok(_) => Vec::new(),
             Err(_) => Vec::new(),
         };
-        let ports = outputs.into_iter().map(|desc| desc.name).filter(|port| !port.eq_ignore_ascii_case("frame"));
-
         let stream_label = stream.manifest.identity.alias.clone().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| stream_id.to_string());
 
         let camera_uid = stream.manifest.identity.hardware_id.clone().or(stream.manifest.identity.alias.clone()).unwrap_or_else(|| stream_id.to_string());
@@ -124,7 +198,12 @@ pub async fn list_sources(State(state): State<AppState>) -> ApiResult<Json<Vec<L
             ("none".to_string(), "Raw".to_string())
         };
 
-        for output_key in ports {
+        for desc in outputs {
+            let output_key = desc.name;
+            let data_type = desc.ty.map(|value| value.0);
+            if !is_localization_compatible_output(&output_key, data_type.as_ref()) {
+                continue;
+            }
             out.push(LocalizationPipelineSource {
                 id: format!("{stream_id}:{output_key}"),
                 stream_id: stream_id.to_string(),
@@ -134,7 +213,7 @@ pub async fn list_sources(State(state): State<AppState>) -> ApiResult<Json<Vec<L
                 pipeline_id: pipeline_id.clone(),
                 pipeline_label: pipeline_label.clone(),
                 output_key,
-                data_type: None,
+                data_type,
             });
         }
     }
@@ -148,7 +227,7 @@ pub async fn list_sources(State(state): State<AppState>) -> ApiResult<Json<Vec<L
         }));
     }
 
-    let peers = peers::snapshot_peers().await;
+    let peers = peers::snapshot_peers(&state).await;
     for peer in peers {
         out.extend(localization_peers::sources::list_peer_sources(&peer).await);
     }
@@ -229,9 +308,9 @@ pub async fn sample_output(State(state): State<AppState>, Path((id, output_key))
         (status = 502, description = "Peer error", body = EngineErrorBody)
     )
 )]
-pub async fn sample_peer_output(Path((id, output_key)): Path<(String, String)>) -> axum::response::Response {
+pub async fn sample_peer_output(State(state): State<AppState>, Path((id, output_key)): Path<(String, String)>) -> axum::response::Response {
     let (peer_id, camera) = localization_peers::sources::parse_peer_stream_id(&id);
-    let peers = peers::snapshot_peers().await;
+    let peers = peers::snapshot_peers(&state).await;
     let Some(peer) = peers.into_iter().find(|p| p.id == peer_id) else {
         return (StatusCode::NOT_FOUND, Json(engine_error_body(Some(EngineErrorCode::NotFound), "peer not found"))).into_response();
     };
@@ -281,9 +360,9 @@ pub(crate) async fn fetch_stream_output(state: &AppState, stream_id: &str, outpu
     }
 }
 
-pub(crate) async fn fetch_peer_output(stream_id: &str, output_key: &str) -> Result<JsonValue, String> {
+pub(crate) async fn fetch_peer_output(state: &AppState, stream_id: &str, output_key: &str) -> Result<JsonValue, String> {
     let (peer_id, camera) = localization_peers::sources::parse_peer_stream_id(stream_id.trim_start_matches("peer:"));
-    let peers = peers::snapshot_peers().await;
+    let peers = peers::snapshot_peers(state).await;
     let Some(peer) = peers.into_iter().find(|peer| peer.id == peer_id) else {
         return Err("peer not found".to_string());
     };
@@ -303,6 +382,9 @@ fn build_profile_output_sources(config: &LocalizationConfig) -> Vec<Localization
     let mut seen = BTreeSet::<(String, String)>::new();
 
     for profile in &config.profiles {
+        if !profile.enabled {
+            continue;
+        }
         let profile_id = profile.id.trim();
         if profile_id.is_empty() {
             continue;
@@ -488,15 +570,14 @@ pub(crate) async fn fetch_profile_output(fetcher: &ApiLocalizationSourceFetcher,
 
 async fn fetch_profile_output_inner(fetcher: &ApiLocalizationSourceFetcher, profile_id: &str, output_key: &str) -> Result<JsonValue, String> {
     let config = config::load_config().await.map_err(|err| err.to_string())?;
-    let profile = select_profile(&config, Some(profile_id)).map_err(|_| format!("profile '{profile_id}' not found"))?;
+    let profile = select_profile(&config, Some(profile_id)).map_err(|err| format!("profile '{profile_id}': {err}"))?;
     let mut sources = solve::dedupe_enabled_sources(profile.sources.iter().filter(|source| source.enabled).cloned().collect::<Vec<_>>());
     solve::enrich_source_input_keys(&fetcher.state, &mut sources).await;
 
     let mut rig_poses = solve::load_rig_poses(&fetcher.state, &sources).await;
     solve::inject_imu_leveling_rig_pose(&fetcher.state, profile, &mut rig_poses).await;
     let field_map = if let Some(map_id) = profile.field_map_id.as_deref() { maps::load_map_document(map_id).await.ok() } else { None };
-    let calibrations = solve::load_stream_calibrations(&fetcher.state).await;
-    let response = solve_localization(profile, &sources, &rig_poses, field_map.as_ref(), &calibrations, fetcher).await;
+    let response = solve::solve_via_engine(&fetcher.state, profile, sources, &rig_poses, field_map.as_ref(), fetcher, true).await?;
 
     let selector = parse_profile_output_selector(output_key)?;
     let Some(solver) = response.solvers.into_iter().find(|solver| solver.id == selector.solver_id) else {

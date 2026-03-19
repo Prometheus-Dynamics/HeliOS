@@ -158,7 +158,7 @@ export const filterFanInInputs = (
 
     const suffix = normalizedPort
       .slice(normalizedPrefix.length)
-      .replace(/^[_\-\s\.]+/u, '');
+      .replace(/^[-_\s.]+/u, '');
 
     if (!/^\d+$/u.test(suffix)) return null;
     return Number.parseInt(suffix, 10);

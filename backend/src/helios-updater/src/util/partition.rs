@@ -2,16 +2,26 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use tokio::fs;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::process::Command;
 
 use crate::error::{Error, Result};
 
 pub async fn detect_ext4_partition_in_disk_image(path: &Path) -> Result<Option<(u64, u64)>> {
-    parted_scan(path, |fs| matches!(fs, "ext2" | "ext3" | "ext4")).await
+    Ok(list_partitions_in_disk_image(path).await?.into_iter().find(|entry| matches!(entry.fs_type.as_str(), "ext2" | "ext3" | "ext4")).map(|entry| (entry.start, entry.size)))
 }
 
 pub async fn detect_fat_partition_in_disk_image(path: &Path) -> Result<Option<(u64, u64)>> {
-    parted_scan(path, |fs| fs.to_ascii_lowercase().starts_with("fat")).await
+    Ok(list_partitions_in_disk_image(path).await?.into_iter().find(|entry| entry.fs_type.to_ascii_lowercase().starts_with("fat")).map(|entry| (entry.start, entry.size)))
+}
+
+pub async fn detect_squashfs_partition_in_disk_image(path: &Path) -> Result<Option<(u64, u64)>> {
+    for entry in list_partitions_in_disk_image(path).await? {
+        if partition_looks_like_squashfs(path, entry.start).await? {
+            return Ok(Some((entry.start, entry.size)));
+        }
+    }
+    Ok(None)
 }
 
 pub async fn blockdev_size_bytes(dev: &str) -> Result<Option<u64>> {
@@ -28,13 +38,21 @@ pub async fn blockdev_size_bytes(dev: &str) -> Result<Option<u64>> {
     Ok(Some(size_sectors.saturating_mul(sector_bytes)))
 }
 
-async fn parted_scan(path: &Path, predicate: impl Fn(&str) -> bool) -> Result<Option<(u64, u64)>> {
+#[derive(Debug)]
+struct PartitionEntry {
+    start: u64,
+    size: u64,
+    fs_type: String,
+}
+
+async fn list_partitions_in_disk_image(path: &Path) -> Result<Vec<PartitionEntry>> {
     let output = Command::new("parted").args(["-m", "-s", path.to_string_lossy().as_ref(), "unit", "B", "print"]).output().await.map_err(Error::Io)?;
     if !output.status.success() {
-        return Ok(None);
+        return Ok(Vec::new());
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut partitions = Vec::new();
     for line in stdout.lines() {
         if !line.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
             continue;
@@ -43,17 +61,25 @@ async fn parted_scan(path: &Path, predicate: impl Fn(&str) -> bool) -> Result<Op
         if cols.len() < 6 {
             continue;
         }
-        let fs_col = cols[4];
-        if predicate(fs_col) {
-            let start = cols[1].trim_end_matches('B').parse::<u64>().unwrap_or(0);
-            let size = cols[3].trim_end_matches('B').parse::<u64>().unwrap_or(0);
-            if start > 0 && size > 0 {
-                return Ok(Some((start, size)));
-            }
+        let start = cols[1].trim_end_matches('B').parse::<u64>().unwrap_or(0);
+        let size = cols[3].trim_end_matches('B').parse::<u64>().unwrap_or(0);
+        if start > 0 && size > 0 {
+            partitions.push(PartitionEntry { start, size, fs_type: cols[4].trim().to_string() });
         }
     }
 
-    Ok(None)
+    Ok(partitions)
+}
+
+async fn partition_looks_like_squashfs(path: &Path, offset: u64) -> Result<bool> {
+    let mut file = fs::File::open(path).await.map_err(Error::Io)?;
+    file.seek(std::io::SeekFrom::Start(offset)).await.map_err(Error::Io)?;
+    let mut magic = [0_u8; 4];
+    match file.read_exact(&mut magic).await {
+        Ok(_) => Ok(&magic == b"hsqs"),
+        Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => Ok(false),
+        Err(err) => Err(Error::Io(err)),
+    }
 }
 
 async fn read_sysfs_u64(path: &Path) -> Result<Option<u64>> {

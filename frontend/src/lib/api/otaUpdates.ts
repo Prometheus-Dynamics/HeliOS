@@ -1,4 +1,4 @@
-import { buildWsUrlFromHttpBase, canUseWebSockets } from '$lib/api/wsClient';
+import { buildWsUrlFromHttpBase, canUseWebSockets, connectWebSocketWithFallback } from '$lib/api/core/ws';
 
 export type UpdaterSnapshotEvent = {
   type: 'snapshot';
@@ -69,72 +69,66 @@ export function connectUpdaterStream(handlers: UpdaterStreamHandlers = {}): (() 
   }
 
   const url = buildUpdaterSocketUrl();
-  let socket: WebSocket | null = null;
+  const connection = connectWebSocketWithFallback(
+    url,
+    {
+      onOpen: () => {
+        handlers.onOpen?.();
+      },
+      onMessage: (event) => {
+        if (typeof event.data !== 'string') return;
+        let parsed: UpdaterServerEvent | null = null;
+        try {
+          parsed = JSON.parse(event.data) as UpdaterServerEvent;
+        } catch {
+          return;
+        }
+        if (!parsed || typeof parsed !== 'object') return;
+        if (parsed.type === 'snapshot') {
+          handlers.onSnapshot?.(parsed);
+          return;
+        }
+        if (parsed.type === 'stage_progress') {
+          handlers.onStageProgress?.(parsed);
+          return;
+        }
+        if (parsed.type === 'stage_complete') {
+          handlers.onStageComplete?.(parsed);
+          return;
+        }
+        if (parsed.type === 'apply_scheduled') {
+          handlers.onApplyScheduled?.(parsed);
+          return;
+        }
+        if (parsed.type === 'apply_complete') {
+          handlers.onApplyComplete?.(parsed);
+          return;
+        }
+        if (parsed.type === 'rollback_triggered') {
+          handlers.onRollbackTriggered?.(parsed);
+          return;
+        }
+        if (parsed.type === 'error') {
+          handlers.onError?.(parsed.message || 'Updater stream error');
+        }
+      },
+      onError: (message) => {
+        handlers.onError?.(message || 'Updater stream connection failed');
+      },
+      onClose: () => {
+        handlers.onClose?.();
+      }
+    },
+    { errorMessage: 'Updater stream connection failed' }
+  );
 
-  try {
-    socket = new WebSocket(url);
-  } catch (err) {
-    handlers.onError?.((err as Error)?.message ?? 'Unable to open updater socket');
+  if (!connection) {
+    handlers.onError?.('Unable to open updater socket');
     return null;
   }
 
-  socket.addEventListener('open', () => {
-    handlers.onOpen?.();
-  });
-
-  socket.addEventListener('message', (event) => {
-    if (typeof event.data !== 'string') return;
-    let parsed: UpdaterServerEvent | null = null;
-    try {
-      parsed = JSON.parse(event.data) as UpdaterServerEvent;
-    } catch {
-      return;
-    }
-    if (!parsed || typeof parsed !== 'object') return;
-    if (parsed.type === 'snapshot') {
-      handlers.onSnapshot?.(parsed);
-      return;
-    }
-    if (parsed.type === 'stage_progress') {
-      handlers.onStageProgress?.(parsed);
-      return;
-    }
-    if (parsed.type === 'stage_complete') {
-      handlers.onStageComplete?.(parsed);
-      return;
-    }
-    if (parsed.type === 'apply_scheduled') {
-      handlers.onApplyScheduled?.(parsed);
-      return;
-    }
-    if (parsed.type === 'apply_complete') {
-      handlers.onApplyComplete?.(parsed);
-      return;
-    }
-    if (parsed.type === 'rollback_triggered') {
-      handlers.onRollbackTriggered?.(parsed);
-      return;
-    }
-    if (parsed.type === 'error') {
-      handlers.onError?.(parsed.message || 'Updater stream error');
-    }
-  });
-
-  socket.addEventListener('error', () => {
-    handlers.onError?.('Updater stream connection failed');
-  });
-
-  socket.addEventListener('close', () => {
-    handlers.onClose?.();
-  });
-
   return () => {
-    try {
-      socket?.close();
-    } catch {
-      // ignore
-    }
-    socket = null;
+    connection.close();
   };
 }
 

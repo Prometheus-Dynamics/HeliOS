@@ -3,8 +3,8 @@ pub(crate) mod bench;
 pub(crate) mod bench_util;
 pub(crate) mod calibration;
 pub(crate) mod controls;
-mod lifecycle;
-mod mjpeg;
+pub(crate) mod lifecycle;
+pub(crate) mod mjpeg;
 mod preview;
 mod profiling;
 pub(crate) mod recording;
@@ -14,6 +14,7 @@ pub(crate) mod sensor_bench;
 pub(crate) mod snapshot;
 pub(crate) mod types;
 pub(crate) mod util;
+pub(crate) mod validation;
 mod wait;
 
 use axum::{
@@ -33,11 +34,11 @@ use super::device::rig as rig_device;
 use super::device::rig::UpdateCameraPoseRequest;
 use super::error::ApiError;
 use crate::http::pipelines;
-use crate::http::streams_persist;
 use helios_engine::capture::{CaptureControl, CaptureControlValue};
 use helios_engine::ipc::{EngineErrorCode, EngineEvent, GraphOutputPortDescriptor, StreamManifest, StreamPipelineBinding};
 
 use self::types::{CodecInfo, StartStreamResponse, StreamFormatInfo, StreamInfo};
+use self::validation::{StreamCapabilitiesResponse, StreamValidateResponse, stream_capabilities, validate_stream_manifest};
 
 pub(crate) const RAW_PIPELINE_UUID: Uuid = Uuid::from_u128(0x000000000000000000000000000000aa);
 /// Reserved internal pipeline UUID used by the engine for transient calibration-mode graphs.
@@ -49,49 +50,51 @@ pub(crate) const CALIBRATION_MODE_PIPELINE_UUID: Uuid = Uuid::from_u128(0x000000
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_streams).post(start_stream))
+        .route("/validate", post(validate_stream))
+        .route("/capabilities", get(stream_capabilities_handler))
         .route("/replay/media", post(replay::start_media_replay_stream))
         .route("/backends", get(list_backends))
         .route("/bench/formats", post(bench_formats))
         .route("/bench/sensor", post(sensor_bench::start_sensor_benchmark).get(sensor_bench::list_sensor_benchmarks))
-        .route("/bench/sensor/:id", get(sensor_bench::get_sensor_benchmark))
-        .route("/bench/sensor/:id/cancel", post(sensor_bench::cancel_sensor_benchmark))
+        .route("/bench/sensor/{id}", get(sensor_bench::get_sensor_benchmark))
+        .route("/bench/sensor/{id}/cancel", post(sensor_bench::cancel_sensor_benchmark))
         .route("/codecs", get(list_codecs))
-        .route("/:id", get(get_stream).delete(delete_stream))
-        .route("/:id/controls", get(get_controls))
-        .route("/:id/controls/:control_id", post(set_control))
-        .route("/:id/metrics", get(get_metrics))
-        .route("/:id/format", get(stream_format))
-        .route("/:id/pipeline/output", post(set_pipeline_output))
-        .route("/:id/pipeline/layout", post(set_pipeline_layout))
-        .route("/:id/pipeline/wires", post(set_pipeline_wires))
-        .route("/:id/pipeline/outputs", get(list_pipeline_outputs))
-        .route("/:id/pipeline/outputs/:port/sample", get(get_pipeline_output_sample))
-        .route("/:id/pipeline/smoke", get(smoke_pipeline_graph))
-        .route("/:id/pipeline/graph", post(set_pipeline_graph))
-        .route("/:id/pipeline/graph/patch", post(set_pipeline_graph_patch))
-        .route("/:id/pipeline/inputs", post(set_pipeline_inputs))
-        .route("/:id/pipeline/profile", post(profiling::profile_pipeline))
-        .route("/:id/pipeline/perf", post(profiling::set_pipeline_perf))
-        .route("/:id/pipeline/metrics/reset", post(profiling::reset_pipeline_metrics))
-        .route("/:id/pipeline/flamegraph.svg", get(profiling::download_pipeline_flamegraph_svg))
-        .route("/:id/preview", get(preview_stream))
-        .route("/:id/frame", get(frame_jpeg))
-        .route("/:id/snapshot", post(snapshot::capture_snapshot))
-        .route("/:id/crop", post(snapshot::set_crop))
-        .route("/:id/crosshair", post(snapshot::set_crosshair))
-        .route("/:id/ordering", post(snapshot::set_ordering))
-        .route("/:id/pipeline/input-usage", get(snapshot::get_input_usage))
-        .route("/:id/calibration/board", get(calibration::board_png))
-        .route("/:id/calibration/board.pdf", get(calibration::board_pdf))
-        .route("/:id/recording/start", post(recording::start_recording))
-        .route("/:id/recording/stop", post(recording::stop_recording))
-        .route("/:id/recording/capture", post(recording::capture_shadow_recording))
-        .route("/:id/replay/start", post(replay_bundle::start_replay_bundle))
-        .route("/:id/replay/stop", post(replay_bundle::stop_replay_bundle))
-        .route("/:id/calibration/apply", post(calibration::apply_calibration))
-        .route("/:id/calibration/save", post(calibration::save_calibration))
-        .route("/:id/calibration/mode", post(calibration::set_calibration_mode))
-        .route("/:id/pose", put(update_stream_pose).delete(clear_stream_pose))
+        .route("/{id}", get(get_stream).delete(delete_stream))
+        .route("/{id}/controls", get(get_controls))
+        .route("/{id}/controls/{control_id}", post(set_control))
+        .route("/{id}/metrics", get(get_metrics))
+        .route("/{id}/format", get(stream_format))
+        .route("/{id}/pipeline/output", post(set_pipeline_output))
+        .route("/{id}/pipeline/layout", post(set_pipeline_layout))
+        .route("/{id}/pipeline/wires", post(set_pipeline_wires))
+        .route("/{id}/pipeline/outputs", get(list_pipeline_outputs))
+        .route("/{id}/pipeline/outputs/{port}/sample", get(get_pipeline_output_sample))
+        .route("/{id}/pipeline/smoke", get(smoke_pipeline_graph))
+        .route("/{id}/pipeline/graph", post(set_pipeline_graph))
+        .route("/{id}/pipeline/graph/patch", post(set_pipeline_graph_patch))
+        .route("/{id}/pipeline/inputs", post(set_pipeline_inputs))
+        .route("/{id}/pipeline/profile", post(profiling::profile_pipeline))
+        .route("/{id}/pipeline/perf", post(profiling::set_pipeline_perf))
+        .route("/{id}/pipeline/metrics/reset", post(profiling::reset_pipeline_metrics))
+        .route("/{id}/pipeline/flamegraph.svg", get(profiling::download_pipeline_flamegraph_svg))
+        .route("/{id}/preview", get(preview_stream))
+        .route("/{id}/frame", get(frame_jpeg))
+        .route("/{id}/snapshot", post(snapshot::capture_snapshot))
+        .route("/{id}/crop", post(snapshot::set_crop))
+        .route("/{id}/crosshair", post(snapshot::set_crosshair))
+        .route("/{id}/ordering", post(snapshot::set_ordering))
+        .route("/{id}/pipeline/input-usage", get(snapshot::get_input_usage))
+        .route("/{id}/calibration/board", get(calibration::board_png))
+        .route("/{id}/calibration/board.pdf", get(calibration::board_pdf))
+        .route("/{id}/recording/start", post(recording::start_recording))
+        .route("/{id}/recording/stop", post(recording::stop_recording))
+        .route("/{id}/recording/capture", post(recording::capture_shadow_recording))
+        .route("/{id}/replay/start", post(replay_bundle::start_replay_bundle))
+        .route("/{id}/replay/stop", post(replay_bundle::stop_replay_bundle))
+        .route("/{id}/calibration/apply", post(calibration::apply_calibration))
+        .route("/{id}/calibration/save", post(calibration::save_calibration))
+        .route("/{id}/calibration/mode", post(calibration::set_calibration_mode))
+        .route("/{id}/pose", put(update_stream_pose).delete(clear_stream_pose))
 }
 
 pub async fn restore_autostart_streams(state: AppState) {
@@ -110,8 +113,8 @@ pub(crate) async fn restart_stream_with_manifest(state: AppState, manifest: Stre
     tag = "EngineStreams",
     responses((status = 200, description = "List active streams", body = [StreamInfo]))
 )]
-async fn list_streams(State(state): State<AppState>) -> impl IntoResponse {
-    lifecycle::list_streams(state).await
+async fn list_streams(State(state): State<AppState>, headers: axum::http::HeaderMap) -> impl IntoResponse {
+    lifecycle::list_streams(state, headers).await
 }
 
 #[utoipa::path(
@@ -119,10 +122,40 @@ async fn list_streams(State(state): State<AppState>) -> impl IntoResponse {
     path = "/streams",
     tag = "EngineStreams",
     request_body = StreamManifest,
-    responses((status = 200, description = "Stream started", body = StartStreamResponse))
+    responses(
+        (status = 200, description = "Stream started", body = StartStreamResponse),
+        (status = 422, description = "Semantic validation failure", body = crate::http::validation::ValidationErrorBody)
+    )
 )]
 async fn start_stream(State(state): State<AppState>, Json(manifest): Json<StreamManifest>) -> impl IntoResponse {
     lifecycle::start_stream(state, manifest).await
+}
+
+#[utoipa::path(
+    post,
+    path = "/streams/validate",
+    tag = "EngineStreams",
+    request_body = StreamManifest,
+    responses(
+        (status = 200, description = "Validated + canonicalized stream manifest", body = StreamValidateResponse),
+        (status = 422, description = "Semantic validation failure", body = crate::http::validation::ValidationErrorBody)
+    )
+)]
+async fn validate_stream(Json(manifest): Json<StreamManifest>) -> impl IntoResponse {
+    match validate_stream_manifest(manifest).await {
+        Ok(result) => Json(StreamValidateResponse { manifest: result.manifest, warnings: result.warnings }).into_response(),
+        Err(err) => crate::http::validation::validation_error_response("stream manifest failed semantic validation", err.issues, err.warnings),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/streams/capabilities",
+    tag = "EngineStreams",
+    responses((status = 200, description = "Stream validation constraints and defaults", body = StreamCapabilitiesResponse))
+)]
+async fn stream_capabilities_handler() -> impl IntoResponse {
+    Json(stream_capabilities())
 }
 
 #[utoipa::path(
@@ -294,27 +327,34 @@ async fn set_pipeline_output(State(state): State<AppState>, Path(id): Path<Uuid>
 
     match state.engine.set_graph_output(id, requested_output).await {
         Ok(EngineEvent::Ack { .. }) => {
-            let updated = util::update_persisted_manifest_by_stream_id(id, apply_output).await;
-
-            if updated.is_none()
-                && let Ok(streams) = state.engine.list_streams().await
-                && let Some(stream) = streams.iter().find(|s| s.stream_id == id)
+            if let Err(err) = util::persist_live_stream_manifest_update(&state, id, |manifest| {
+                apply_output(manifest);
+            })
+            .await
             {
-                let mut manifest = stream.manifest.clone();
-                util::normalize_pipeline_manifest(&mut manifest);
-                streams_persist::persist_manifest(&util::camera_id_for_manifest(&manifest), Some(id), manifest).await;
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(util::engine_error_body(Some(EngineErrorCode::Internal), err))).into_response();
             }
             StatusCode::NO_CONTENT.into_response()
         }
         Ok(EngineEvent::Nack { code: EngineErrorCode::NotFound, .. }) => {
-            let updated = util::update_persisted_manifest_by_stream_id(id, apply_output).await;
+            let updated = match util::update_persisted_manifest_by_stream_id_checked(id, apply_output).await {
+                Ok(updated) => updated,
+                Err(err) => {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, Json(util::engine_error_body(Some(EngineErrorCode::Internal), format!("failed to persist stream manifest: {err}")))).into_response();
+                }
+            };
 
             if updated.is_some() { StatusCode::NO_CONTENT.into_response() } else { StatusCode::NOT_FOUND.into_response() }
         }
         Ok(EngineEvent::Nack { code, reason, .. }) => (StatusCode::BAD_REQUEST, Json(util::engine_error_body(Some(code), reason))).into_response(),
         Ok(_) => (StatusCode::BAD_GATEWAY, Json(util::engine_error_body(Some(EngineErrorCode::Internal), "unexpected engine response"))).into_response(),
         Err(err) if util::is_engine_unavailable(&err) => {
-            let updated = util::update_persisted_manifest_by_stream_id(id, apply_output).await;
+            let updated = match util::update_persisted_manifest_by_stream_id_checked(id, apply_output).await {
+                Ok(updated) => updated,
+                Err(err) => {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, Json(util::engine_error_body(Some(EngineErrorCode::Internal), format!("failed to persist stream manifest: {err}")))).into_response();
+                }
+            };
 
             if updated.is_some() { StatusCode::NO_CONTENT.into_response() } else { StatusCode::NOT_FOUND.into_response() }
         }
@@ -397,35 +437,41 @@ async fn set_pipeline_layout(State(state): State<AppState>, Path(id): Path<Uuid>
     };
     match state.engine.set_pipeline_layout(id, req.pipeline_layout.clone()).await {
         Ok(EngineEvent::Ack { .. }) => {
-            let updated = util::update_persisted_manifest_by_stream_id(id, |manifest| {
+            if let Err(err) = util::persist_live_stream_manifest_update(&state, id, |manifest| {
                 apply_layout(manifest);
             })
-            .await;
-
-            if updated.is_none()
-                && let Ok(streams) = state.engine.list_streams().await
-                && let Some(stream) = streams.iter().find(|s| s.stream_id == id)
+            .await
             {
-                let mut manifest = stream.manifest.clone();
-                util::normalize_pipeline_manifest(&mut manifest);
-                streams_persist::persist_manifest(&util::camera_id_for_manifest(&manifest), Some(id), manifest).await;
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(util::engine_error_body(Some(EngineErrorCode::Internal), err))).into_response();
             }
             StatusCode::NO_CONTENT.into_response()
         }
         Ok(EngineEvent::Nack { code: EngineErrorCode::NotFound, .. }) => {
-            let updated = util::update_persisted_manifest_by_stream_id(id, |manifest| {
+            let updated = match util::update_persisted_manifest_by_stream_id_checked(id, |manifest| {
                 apply_layout(manifest);
             })
-            .await;
+            .await
+            {
+                Ok(updated) => updated,
+                Err(err) => {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, Json(util::engine_error_body(Some(EngineErrorCode::Internal), format!("failed to persist stream manifest: {err}")))).into_response();
+                }
+            };
             if updated.is_some() { StatusCode::NO_CONTENT.into_response() } else { StatusCode::NOT_FOUND.into_response() }
         }
         Ok(EngineEvent::Nack { code, reason, .. }) => (StatusCode::BAD_REQUEST, Json(util::engine_error_body(Some(code), reason))).into_response(),
         Ok(_) => (StatusCode::BAD_GATEWAY, Json(util::engine_error_body(Some(EngineErrorCode::Internal), "unexpected engine response"))).into_response(),
         Err(err) if util::is_engine_unavailable(&err) => {
-            let updated = util::update_persisted_manifest_by_stream_id(id, |manifest| {
+            let updated = match util::update_persisted_manifest_by_stream_id_checked(id, |manifest| {
                 apply_layout(manifest);
             })
-            .await;
+            .await
+            {
+                Ok(updated) => updated,
+                Err(err) => {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, Json(util::engine_error_body(Some(EngineErrorCode::Internal), format!("failed to persist stream manifest: {err}")))).into_response();
+                }
+            };
             if updated.is_some() { StatusCode::NO_CONTENT.into_response() } else { StatusCode::NOT_FOUND.into_response() }
         }
         Err(err) => util::map_client_error(err),
@@ -454,25 +500,29 @@ async fn set_pipeline_wires(State(state): State<AppState>, Path(id): Path<Uuid>,
 
     match state.engine.set_pipeline_wires(id, wires.clone()).await {
         Ok(EngineEvent::Ack { .. }) => {
-            let updated = util::update_persisted_manifest_by_stream_id(id, |manifest| apply_wires(manifest)).await;
-            if updated.is_none()
-                && let Ok(streams) = state.engine.list_streams().await
-                && let Some(stream) = streams.iter().find(|s| s.stream_id == id)
-            {
-                let mut manifest = stream.manifest.clone();
-                util::normalize_pipeline_manifest(&mut manifest);
-                streams_persist::persist_manifest(&util::camera_id_for_manifest(&manifest), Some(id), manifest).await;
+            if let Err(err) = util::persist_live_stream_manifest_update(&state, id, |manifest| apply_wires(manifest)).await {
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(util::engine_error_body(Some(EngineErrorCode::Internal), err))).into_response();
             }
             StatusCode::NO_CONTENT.into_response()
         }
         Ok(EngineEvent::Nack { code: EngineErrorCode::NotFound, .. }) => {
-            let updated = util::update_persisted_manifest_by_stream_id(id, |manifest| apply_wires(manifest)).await;
+            let updated = match util::update_persisted_manifest_by_stream_id_checked(id, |manifest| apply_wires(manifest)).await {
+                Ok(updated) => updated,
+                Err(err) => {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, Json(util::engine_error_body(Some(EngineErrorCode::Internal), format!("failed to persist stream manifest: {err}")))).into_response();
+                }
+            };
             if updated.is_some() { StatusCode::NO_CONTENT.into_response() } else { StatusCode::NOT_FOUND.into_response() }
         }
         Ok(EngineEvent::Nack { code, reason, .. }) => (StatusCode::BAD_REQUEST, Json(util::engine_error_body(Some(code), reason))).into_response(),
         Ok(_) => (StatusCode::BAD_GATEWAY, Json(util::engine_error_body(Some(EngineErrorCode::Internal), "unexpected engine response"))).into_response(),
         Err(err) if util::is_engine_unavailable(&err) => {
-            let updated = util::update_persisted_manifest_by_stream_id(id, |manifest| apply_wires(manifest)).await;
+            let updated = match util::update_persisted_manifest_by_stream_id_checked(id, |manifest| apply_wires(manifest)).await {
+                Ok(updated) => updated,
+                Err(err) => {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, Json(util::engine_error_body(Some(EngineErrorCode::Internal), format!("failed to persist stream manifest: {err}")))).into_response();
+                }
+            };
             if updated.is_some() { StatusCode::NO_CONTENT.into_response() } else { StatusCode::NOT_FOUND.into_response() }
         }
         Err(err) => util::map_client_error(err),
@@ -623,11 +673,8 @@ async fn set_pipeline_graph(State(state): State<AppState>, Path(id): Path<Uuid>,
     }
     match state.engine.set_graph(id, req.graph.clone(), Some(pipeline_id), req.output.clone()).await {
         Ok(EngineEvent::Ack { .. }) => {
-            if let Ok(streams) = state.engine.list_streams().await
-                && let Some(stream) = streams.iter().find(|s| s.stream_id == id)
-            {
-                let mut manifest = stream.manifest.clone();
-                util::normalize_pipeline_manifest(&mut manifest);
+            if let Err(err) = util::persist_live_stream_manifest_update(&state, id, |manifest| {
+                util::normalize_pipeline_manifest(manifest);
 
                 // `/streams/:id/pipeline/graph` updates (or inserts) a single pipeline binding.
                 // Importantly: do not clear existing multiplex layout state, since users can
@@ -653,13 +700,16 @@ async fn set_pipeline_graph(State(state): State<AppState>, Path(id): Path<Uuid>,
                 if req.output.is_some() && manifest.active_pipeline_id == Some(pipeline_id) {
                     manifest.active_pipeline_output = req.output.clone();
                 }
-
-                streams_persist::persist_manifest(&util::camera_id_for_manifest(&manifest), Some(id), manifest).await;
+                util::promote_single_view_pipeline_selection(manifest, pipeline_id, req.output.clone());
+            })
+            .await
+            {
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(util::engine_error_body(Some(EngineErrorCode::Internal), err))).into_response();
             }
             StatusCode::NO_CONTENT.into_response()
         }
         Ok(EngineEvent::Nack { code: EngineErrorCode::NotFound, .. }) => {
-            let updated = util::update_persisted_manifest_by_stream_id(id, |manifest| {
+            let updated = match util::update_persisted_manifest_by_stream_id_checked(id, |manifest| {
                 util::normalize_pipeline_manifest(manifest);
 
                 let mut replaced = false;
@@ -684,8 +734,15 @@ async fn set_pipeline_graph(State(state): State<AppState>, Path(id): Path<Uuid>,
                 if req.output.is_some() && manifest.active_pipeline_id == Some(pipeline_id) {
                     manifest.active_pipeline_output = req.output.clone();
                 }
+                util::promote_single_view_pipeline_selection(manifest, pipeline_id, req.output.clone());
             })
-            .await;
+            .await
+            {
+                Ok(updated) => updated,
+                Err(err) => {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, Json(util::engine_error_body(Some(EngineErrorCode::Internal), format!("failed to persist stream manifest: {err}")))).into_response();
+                }
+            };
 
             if updated.is_some() { StatusCode::NO_CONTENT.into_response() } else { StatusCode::NOT_FOUND.into_response() }
         }
@@ -724,11 +781,8 @@ async fn set_pipeline_graph_patch(State(state): State<AppState>, Path(id): Path<
     let patch = req.patch.clone();
     match state.engine.set_graph_patch(id, patch.clone(), Some(pipeline_id)).await {
         Ok(EngineEvent::Ack { .. }) => {
-            if let Ok(streams) = state.engine.list_streams().await
-                && let Some(stream) = streams.iter().find(|s| s.stream_id == id)
-            {
-                let mut manifest = stream.manifest.clone();
-                util::normalize_pipeline_manifest(&mut manifest);
+            if let Err(err) = util::persist_live_stream_manifest_update(&state, id, |manifest| {
+                util::normalize_pipeline_manifest(manifest);
 
                 let mut updated = false;
                 for binding in &mut manifest.pipelines {
@@ -745,13 +799,16 @@ async fn set_pipeline_graph_patch(State(state): State<AppState>, Path(id): Path<
                 if manifest.active_pipeline_id.is_none() {
                     manifest.active_pipeline_id = Some(pipeline_id);
                 }
-
-                streams_persist::persist_manifest(&util::camera_id_for_manifest(&manifest), Some(id), manifest).await;
+                util::promote_single_view_pipeline_selection(manifest, pipeline_id, None);
+            })
+            .await
+            {
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(util::engine_error_body(Some(EngineErrorCode::Internal), err))).into_response();
             }
             StatusCode::NO_CONTENT.into_response()
         }
         Ok(EngineEvent::Nack { code: EngineErrorCode::NotFound, .. }) => {
-            let updated = util::update_persisted_manifest_by_stream_id(id, |manifest| {
+            let updated = match util::update_persisted_manifest_by_stream_id_checked(id, |manifest| {
                 util::normalize_pipeline_manifest(manifest);
 
                 let mut replaced = false;
@@ -770,8 +827,15 @@ async fn set_pipeline_graph_patch(State(state): State<AppState>, Path(id): Path<
                 if manifest.active_pipeline_id.is_none() {
                     manifest.active_pipeline_id = Some(pipeline_id);
                 }
+                util::promote_single_view_pipeline_selection(manifest, pipeline_id, None);
             })
-            .await;
+            .await
+            {
+                Ok(updated) => updated,
+                Err(err) => {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, Json(util::engine_error_body(Some(EngineErrorCode::Internal), format!("failed to persist stream manifest: {err}")))).into_response();
+                }
+            };
             if updated.is_some() { StatusCode::NO_CONTENT.into_response() } else { StatusCode::NOT_FOUND.into_response() }
         }
         Ok(EngineEvent::Nack { code, reason, .. }) => (StatusCode::BAD_GATEWAY, Json(util::engine_error_body(Some(code), format!("engine rejected patch: {reason}")))).into_response(),
@@ -792,17 +856,12 @@ async fn set_pipeline_inputs(State(state): State<AppState>, Path(id): Path<Uuid>
     let inputs = req.inputs.clone();
     match state.engine.set_pipeline_inputs(id, req.pipeline_id, inputs.clone()).await {
         Ok(EngineEvent::Ack { .. }) => {
-            let updated = util::update_persisted_manifest_by_stream_id(id, |manifest| {
+            if let Err(err) = util::persist_live_stream_manifest_update(&state, id, |manifest| {
                 util::apply_pipeline_host_inputs_update(manifest, &inputs);
             })
-            .await;
-            if updated.is_none()
-                && let Ok(streams) = state.engine.list_streams().await
-                && let Some(stream) = streams.into_iter().find(|summary| summary.stream_id == id)
+            .await
             {
-                let mut manifest = stream.manifest;
-                util::apply_pipeline_host_inputs_update(&mut manifest, &inputs);
-                streams_persist::persist_manifest(&util::camera_id_for_manifest(&manifest), Some(id), manifest).await;
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(util::engine_error_body(Some(EngineErrorCode::Internal), err))).into_response();
             }
             StatusCode::NO_CONTENT.into_response()
         }
@@ -832,8 +891,8 @@ async fn stream_format(Path(id): Path<Uuid>) -> impl IntoResponse {
         (status = 200, description = "Live stream preview (MJPEG multipart or length-prefixed encoded)", content_type = "application/octet-stream")
     )
 )]
-async fn preview_stream(Path(id): Path<Uuid>) -> impl IntoResponse {
-    preview::preview_stream(id).await
+async fn preview_stream(State(state): State<AppState>, Path(id): Path<Uuid>) -> impl IntoResponse {
+    preview::preview_stream(state, id).await
 }
 
 #[utoipa::path(
@@ -864,8 +923,8 @@ async fn get_stream(State(state): State<AppState>, Path(id): Path<Uuid>) -> impl
     tag = "EngineStreams",
     responses((status = 200, description = "Available capture backends/devices", body = [helios_engine::capture::DiscoveredDevice]))
 )]
-async fn list_backends() -> impl IntoResponse {
-    lifecycle::list_backends().await
+async fn list_backends(State(state): State<AppState>) -> impl IntoResponse {
+    lifecycle::list_backends(state).await
 }
 
 #[utoipa::path(

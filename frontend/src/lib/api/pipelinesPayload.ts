@@ -1,68 +1,86 @@
 import { PipelinesApi } from '$lib/api/pipelinesApi';
-import { buildPipelinePayloadFromOverview, emptyPipelinePayload } from '$lib/api/pipelinesNormalize';
-import type { PipelinePagePayload, PipelineTypeDescriptor } from '$lib/types/pipeline';
-import type { PipelineLifecycleStatus, PipelineOverviewEntry, PipelineOverviewResponse } from '$lib/types/pipeline-api';
+import { dedupePipelineOverview, summarizePipelineOverview } from '$lib/api/pipelinesPageUtils';
+import type { PipelineGraphPlan, PipelineOverviewPipeline, PipelinePagePayload, PipelineTypeDescriptor } from '$lib/types/pipeline';
+import type { PipelineLifecycleStatus } from '$lib/types/pipeline-api';
 
-export async function fetchPipelinePagePayload(_: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>): Promise<PipelinePagePayload> {
+function createEmptyShellGraph(): PipelineGraphPlan {
+  return {
+    format: 'daedalus',
+    nodes: {},
+    connections: []
+  };
+}
+
+export async function fetchPipelinePagePayload(): Promise<PipelinePagePayload> {
   try {
-    const [summaries, templates] = await Promise.all([
-      PipelinesApi.listGraphs(),
-      PipelinesApi.listTemplates().catch((error) => {
-        console.warn('Failed to load pipeline templates', error);
-        return [];
-      })
-    ]);
+    const summaries = await PipelinesApi.listGraphs();
     const issueCountById = new Map<string, number>();
     for (const entry of summaries ?? []) {
       const id = typeof entry?.id === 'string' ? entry.id : null;
       if (!id) continue;
-      const rawIssueCount = (entry as { issue_count?: number; issueCount?: number }).issue_count ?? (entry as { issue_count?: number; issueCount?: number }).issueCount ?? 0;
+      const rawIssueCount =
+        (entry as { issue_count?: number; issueCount?: number }).issue_count ??
+        (entry as { issue_count?: number; issueCount?: number }).issueCount ??
+        0;
       const parsed = Number(rawIssueCount);
       const count = Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
       issueCountById.set(id, count);
     }
 
-    const pipelines: PipelineOverviewEntry[] = (summaries ?? [])
-      .map((entry): PipelineOverviewEntry | null => {
-        const pipelineId = typeof entry?.id === 'string' ? entry.id : null;
-        if (!pipelineId) return null;
-        const rawName = typeof entry?.name === 'string' ? entry.name.trim() : '';
+    const pipelines = dedupePipelineOverview(
+      (summaries ?? [])
+        .map((entry): PipelineOverviewPipeline | null => {
+          const pipelineId = typeof entry?.id === 'string' ? entry.id : null;
+          if (!pipelineId) return null;
+          const rawName = typeof entry?.name === 'string' ? entry.name.trim() : '';
         const name = rawName.length > 0 ? rawName : pipelineId;
         const updatedAtMs = typeof entry?.updated_at_ms === 'number' ? entry.updated_at_ms : null;
+        const timestamp = updatedAtMs ?? 0;
         return {
-          pipelineId,
           name,
           alias: name,
           issueCount: issueCountById.get(pipelineId) ?? 0,
-          graph: { nodes: {}, connections: [] } satisfies PipelineOverviewEntry['graph'],
+          id: pipelineId,
+          graph: createEmptyShellGraph(),
           attachments: [],
           diagnostics: null,
           appearance: null,
           status: 'draft' satisfies PipelineLifecycleStatus,
           revision: updatedAtMs ? String(updatedAtMs) : null,
           planHash: null,
-          createdAt: updatedAtMs ?? null,
-          updatedAt: updatedAtMs ?? null
+          createdAt: timestamp,
+          updatedAt: timestamp
         };
-      })
-      .filter((entry): entry is PipelineOverviewEntry => Boolean(entry))
-      .sort((a, b) => a.name.localeCompare(b.name));
+        })
+        .filter((entry): entry is PipelineOverviewPipeline => Boolean(entry))
+        .sort((a, b) => a.name.localeCompare(b.name))
+    );
 
-    const overview: PipelineOverviewResponse = {
+    return {
       pipelines,
-      summary: { total: pipelines.length, live: 0, degraded: 0, drafts: pipelines.length },
-      templates: Array.isArray(templates) ? templates : [],
+      summary: summarizePipelineOverview(pipelines),
+      templates: [],
       registry: [],
-      dataTypes: [],
-      generatedAt: Date.now()
+      dataTypes: {},
+      generatedAt: Math.floor(Date.now() / 1000)
     };
-
-    return buildPipelinePayloadFromOverview(overview);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unexpected error loading pipeline overview';
     console.warn(message, error);
     return emptyPipelinePayload(message);
   }
+}
+
+export function emptyPipelinePayload(errorMessage?: string): PipelinePagePayload {
+  return {
+    pipelines: [],
+    summary: { total: 0, live: 0, degraded: 0, drafts: 0 },
+    templates: [],
+    registry: [],
+    dataTypes: {},
+    generatedAt: Math.floor(Date.now() / 1000),
+    errorMessage
+  };
 }
 
 export function validatePipelinePayload(payload: unknown): PipelinePagePayload | null {
@@ -75,9 +93,10 @@ export function validatePipelinePayload(payload: unknown): PipelinePagePayload |
   if (record.dataTypes && typeof record.dataTypes !== 'object') return null;
   const generatedAt = normalizeGeneratedAt(record.generatedAt);
   if (generatedAt == null) return null;
+  const pipelines = dedupePipelineOverview(Array.isArray(record.pipelines) ? (record.pipelines as PipelinePagePayload['pipelines']) : []);
   const normalized: PipelinePagePayload = {
-    pipelines: Array.isArray(record.pipelines) ? (record.pipelines as PipelinePagePayload['pipelines']) : [],
-    summary: record.summary as PipelinePagePayload['summary'],
+    pipelines,
+    summary: summarizePipelineOverview(pipelines),
     templates: Array.isArray(record.templates) ? (record.templates as PipelinePagePayload['templates']) : [],
     registry: Array.isArray(record.registry) ? (record.registry as PipelinePagePayload['registry']) : [],
     dataTypes:
@@ -87,9 +106,6 @@ export function validatePipelinePayload(payload: unknown): PipelinePagePayload |
   };
   return normalized;
 }
-
-export { emptyPipelinePayload } from '$lib/api/pipelinesNormalize';
-
 function normalizeGeneratedAt(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value;

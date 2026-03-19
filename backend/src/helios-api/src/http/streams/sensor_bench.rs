@@ -384,7 +384,7 @@ async fn run_benchmark_job(state: AppState, benchmark_id: Uuid, req: StartSensor
         return;
     };
 
-    let devices = discover_devices().await;
+    let devices = discover_devices(&state).await;
     let Some((device, backend)) = find_matching_backend(&devices, req.backend, &req.handle, &req.device_keys) else {
         update_job(benchmark_id, |job| job.status = SensorBenchmarkInternalStatus::Failed("device/backend not found".into())).await;
         return;

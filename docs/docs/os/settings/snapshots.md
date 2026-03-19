@@ -1,31 +1,16 @@
 ---
-title: Snapshots
+title: Snapshots (Moved)
+description: Diagnostics bundles now live under Settings > Diagnostics.
 ---
 
-Snapshots captures and manages device state archives used for debugging and support.
+The old **Snapshots** page has been replaced by **Diagnostics**.
 
-## Capture
+Use:
 
-1. (Optional) enter a **Label**.
-2. Click **Capture snapshot**.
-3. The new snapshot appears in the archive list when capture completes.
+- [Settings > Diagnostics](/os/settings/diagnostics)
 
-## Download / Delete
+That page now covers:
 
-- **Download** streams the archive to your browser.
-- **Delete** removes it from the device.
-
-## Retention Policy
-
-Retention controls how snapshots are stored and how many are kept on device.
-
-- **Retention count**: `1-512`
-- **Max size (MiB)**: `1-65536`
-- **Archive bundles as tar.gz**:
-  - enabled: snapshots are stored as `.tar.gz` archives
-  - disabled: snapshots are stored as plain directories on the device
-
-Notes:
-
-- Snapshots are stored on the device and count against disk usage.
-- If you are working with support, a snapshot is usually one of the first artifacts they will ask for.
+- diagnostics bundle capture/download/delete
+- retention policy
+- OS health checks

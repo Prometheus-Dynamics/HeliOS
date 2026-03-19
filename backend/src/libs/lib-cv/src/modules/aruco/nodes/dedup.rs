@@ -8,7 +8,7 @@ use super::*;
     ),
     outputs(port(name = "deduped", source = "ArucoDetections2D", ty = crate::daedalus_types::aruco_detections_2d()))
 )]
-fn cv_aruco_dedup_detections(detections: Option<Vec<ArucoDetection2D>>, center_dist_px: f64) -> Result<Vec<ArucoDetection2D>, NodeError> {
+fn cv_aruco_dedup_detections(detections: Option<std::sync::Arc<Vec<ArucoDetection2D>>>, center_dist_px: f64) -> Result<Vec<ArucoDetection2D>, NodeError> {
     fn quad_area(quad: &[Point; 4]) -> f64 {
         let mut area = 0.0f64;
         for i in 0..4 {
@@ -28,15 +28,15 @@ fn cv_aruco_dedup_detections(detections: Option<Vec<ArucoDetection2D>>, center_d
         (x * 0.25, y * 0.25)
     }
 
-    let detections = detections.unwrap_or_default();
+    let detections = detections.as_deref().map(Vec::as_slice).unwrap_or(&[]);
     let dist = center_dist_px.max(0.0);
     if detections.len() <= 1 || dist <= 0.0 {
-        return Ok(detections);
+        return Ok(detections.to_vec());
     }
     let dist2 = dist * dist;
 
     let mut by_id: std::collections::HashMap<u32, Vec<ArucoDetection2D>> = std::collections::HashMap::new();
-    for det in &detections {
+    for det in detections {
         by_id.entry(det.id).or_default().push(det.clone());
     }
 
@@ -66,44 +66,47 @@ fn cv_aruco_dedup_detections(detections: Option<Vec<ArucoDetection2D>>, center_d
     Ok(out)
 }
 
+#[derive(Clone, Debug, NodeConfig)]
+struct ArucoDedupSpatialConfig {
+    #[port(default = 8.0f64, meta(ui_min = 0.0, ui_max = 50.0, ui_step = 0.5))]
+    center_dist_px: f64,
+    // Require candidates to be similar size to merge (smaller/larger). A value <= 0 disables this check.
+    #[port(default = 0.0f64, meta(ui_min = 0.0, ui_max = 2.0, ui_step = 0.05))]
+    min_area_ratio: f64,
+    // Only merge near-identical detections. This prevents dropping detections when one path decodes but the other doesn't.
+    #[port(default = 2.5f64, meta(ui_min = 0.0, ui_max = 10.0, ui_step = 0.1))]
+    max_corner_dist_px: f64,
+    // Optional additional spatial check: require (center distance)^2 <= (max_center_dist_ratio^2) * min(area).
+    // A value <= 0 disables this check.
+    #[port(default = 0.0f64, meta(ui_min = 0.0, ui_max = 2.0, ui_step = 0.05))]
+    max_center_dist_ratio: f64,
+    // Optional additional spatial check: require quad intersection-over-union >= min_iou.
+    // A value <= 0 disables this check.
+    #[port(default = 0.0f64, meta(ui_min = 0.0, ui_max = 1.0, ui_step = 0.05))]
+    min_iou: f64,
+    // Optional post-pass: drop smaller detections fully nested inside larger detections,
+    // even when marker IDs differ (common ghost decode pattern).
+    #[port(default = false)]
+    suppress_nested: bool,
+    #[port(default = 0.9f64, meta(ui_min = 0.1, ui_max = 1.0, ui_step = 0.01))]
+    nested_area_ratio_max: f64,
+}
+
 #[node(
     id = "dedup_detections_spatial",
     inputs(
         port(name = "detections", source = "ArucoDetections2D", ty = crate::daedalus_types::aruco_detections_2d()),
-        port(name = "center_dist_px", default = 8.0f64, meta(ui_min = 0.0, ui_max = 50.0, ui_step = 0.5)),
-        // Require candidates to be similar size to merge (smaller/larger). A value <= 0 disables this check.
-        port(name = "min_area_ratio", default = 0.0f64, meta(ui_min = 0.0, ui_max = 2.0, ui_step = 0.05)),
-        // Only merge near-identical detections. This prevents dropping detections when one path decodes but the other doesn't.
-        port(name = "max_corner_dist_px", default = 2.5f64, meta(ui_min = 0.0, ui_max = 10.0, ui_step = 0.1)),
-        // Optional additional spatial check: require (center distance)^2 <= (max_center_dist_ratio^2) * min(area).
-        // A value <= 0 disables this check.
-        port(name = "max_center_dist_ratio", default = 0.0f64, meta(ui_min = 0.0, ui_max = 2.0, ui_step = 0.05)),
-        // Optional additional spatial check: require quad intersection-over-union >= min_iou.
-        // A value <= 0 disables this check.
-        port(name = "min_iou", default = 0.0f64, meta(ui_min = 0.0, ui_max = 1.0, ui_step = 0.05)),
-        // Optional post-pass: drop smaller detections fully nested inside larger detections,
-        // even when marker IDs differ (common ghost decode pattern).
-        port(name = "suppress_nested", default = false),
-        port(name = "nested_area_ratio_max", default = 0.9f64, meta(ui_min = 0.1, ui_max = 1.0, ui_step = 0.01))
+        config = ArucoDedupSpatialConfig
     ),
     outputs(port(name = "deduped", source = "ArucoDetections2D", ty = crate::daedalus_types::aruco_detections_2d()))
 )]
-fn cv_aruco_dedup_detections_spatial(
-    detections: Option<Vec<ArucoDetection2D>>,
-    center_dist_px: f64,
-    min_area_ratio: f64,
-    max_corner_dist_px: f64,
-    max_center_dist_ratio: f64,
-    min_iou: f64,
-    suppress_nested: bool,
-    nested_area_ratio_max: f64,
-) -> Result<Vec<ArucoDetection2D>, NodeError> {
-    let detections = detections.unwrap_or_default();
-    let merged = merge_detections_spatial_impl(detections, center_dist_px, min_area_ratio, max_corner_dist_px, max_center_dist_ratio, min_iou);
-    if !suppress_nested {
+fn cv_aruco_dedup_detections_spatial(detections: Option<std::sync::Arc<Vec<ArucoDetection2D>>>, cfg: ArucoDedupSpatialConfig) -> Result<Vec<ArucoDetection2D>, NodeError> {
+    let detections = detections.as_deref().map(Vec::as_slice).unwrap_or(&[]);
+    let merged = merge_detections_spatial_impl(detections.iter().cloned(), cfg.center_dist_px, cfg.min_area_ratio, cfg.max_corner_dist_px, cfg.max_center_dist_ratio, cfg.min_iou);
+    if !cfg.suppress_nested {
         return Ok(merged);
     }
-    Ok(suppress_nested_detections(merged, nested_area_ratio_max))
+    Ok(suppress_nested_detections(merged, cfg.nested_area_ratio_max))
 }
 
 fn suppress_nested_detections(detections: Vec<ArucoDetection2D>, nested_area_ratio_max: f64) -> Vec<ArucoDetection2D> {

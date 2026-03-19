@@ -1,3 +1,4 @@
+import type { ApiPortDescriptor } from '$lib/types/pipeline-api';
 import type { Edge } from '@xyflow/svelte';
 import { getPortType, makeHandleId, type PortOrders, typeKey } from './utils';
 import type {
@@ -113,11 +114,11 @@ const makeEdgeData = (
     toType = fromType;
   }
 
-  const fromDescriptor = (fromNode?.source as { outputs?: Record<string, unknown> } | null | undefined)?.outputs?.[
+  const fromDescriptor = (fromNode?.source as { outputs?: Record<string, ApiPortDescriptor | undefined> } | null | undefined)?.outputs?.[
     connection.from.port
   ];
   const fromColor =
-    resolvePortColor(fromType, fromDescriptor as any).color ??
+    resolvePortColor(fromType, fromDescriptor).color ??
     resolveEdgeFromColor(graph, connection.from.node, connection.from.port, fromRegistry);
   return {
     edgeId,
@@ -205,7 +206,7 @@ export const buildFlowEdges = (
       source: conn.from.node,
       target: conn.to.node,
       type: 'pipeline',
-      animated: true,
+      animated: isSelected || Boolean(connection),
       selected: isSelected,
       selectable: true,
       class: mergedClass,

@@ -52,6 +52,7 @@
   );
   const cpuTemp = $derived(fanStatus?.temperature_c ?? telemetry.cpu.temperature_c ?? null);
   const mode = $derived(form.enabled ? (form.manual_percent != null ? 'manual' : 'curve') : 'disabled');
+  const statusMessage = $derived.by(() => status ?? (busy ? 'Saving…' : refreshingStatus ? 'Refreshing…' : 'Autosave active'));
 
   $effect(() => {
     if (dirty || busy) return;
@@ -436,7 +437,7 @@
         <p class="text-xs text-error-400">{error}</p>
       {/if}
       <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-surface-500">
-        <span>{status ?? (busy ? 'Saving…' : 'Autosave active')}</span>
+        <span>{statusMessage}</span>
       </div>
     </article>
   </div>

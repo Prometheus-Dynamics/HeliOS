@@ -1,4 +1,10 @@
 use super::*;
+use std::mem::size_of;
+
+const DETECT_RETAIN_POINT_CAP: usize = 4 * 1024;
+const DETECT_RETAIN_APPROX_CAP: usize = 1024;
+const DECODE_RETAIN_WARPED_BUF_CAP: usize = 256 * 256;
+const DECODE_RETAIN_SAMPLE_POS_CAP: usize = 1024;
 
 #[derive(Clone)]
 pub(super) struct ArucoDetectionF32 {
@@ -57,6 +63,77 @@ impl Default for DecodeScratch {
 thread_local! {
     pub(super) static DETECT_SCRATCH: RefCell<DetectScratch> = RefCell::new(DetectScratch::default());
     pub(super) static DECODE_SCRATCH: RefCell<DecodeScratch> = RefCell::new(DecodeScratch::default());
+}
+
+#[inline(always)]
+fn trim_retained_vec<T>(vec: &mut Vec<T>, retain_cap: usize) {
+    vec.clear();
+    if vec.capacity() > retain_cap {
+        vec.shrink_to(retain_cap);
+    }
+}
+
+fn detect_scratch_bytes(scratch: &DetectScratch) -> usize {
+    scratch.distances.capacity() * size_of::<(f32, Point<f32>)>()
+        + scratch.trimmed.capacity() * size_of::<Point<f32>>()
+        + scratch.inliers.capacity() * size_of::<Point<f32>>()
+        + scratch.best_inliers.capacity() * size_of::<Point<f32>>()
+        + scratch.top_pts.capacity() * size_of::<Point<f32>>()
+        + scratch.bottom_pts.capacity() * size_of::<Point<f32>>()
+        + scratch.left_pts.capacity() * size_of::<Point<f32>>()
+        + scratch.right_pts.capacity() * size_of::<Point<f32>>()
+        + scratch.approx.capacity() * size_of::<Point<f32>>()
+        + scratch.downsampled.capacity() * size_of::<Point<f32>>()
+}
+
+fn decode_scratch_bytes(scratch: &DecodeScratch) -> usize {
+    scratch.warped_buf.capacity() * size_of::<u8>() + scratch.sample_positions.capacity() * size_of::<(f32, f32)>()
+}
+
+pub(super) fn report_detect_scratch() {
+    DETECT_SCRATCH.with(|scratch| {
+        let scratch = scratch.borrow();
+        crate::diagnostics::report_scratch_high_water("aruco.detect_scratch", detect_scratch_bytes(&scratch));
+    });
+}
+
+pub(crate) fn compact_detect_scratch_after_frame() {
+    DETECT_SCRATCH.with(|scratch| {
+        let mut scratch = scratch.borrow_mut();
+        trim_retained_vec(&mut scratch.distances, DETECT_RETAIN_POINT_CAP);
+        trim_retained_vec(&mut scratch.trimmed, DETECT_RETAIN_POINT_CAP);
+        trim_retained_vec(&mut scratch.inliers, DETECT_RETAIN_POINT_CAP);
+        trim_retained_vec(&mut scratch.best_inliers, DETECT_RETAIN_POINT_CAP);
+        trim_retained_vec(&mut scratch.top_pts, DETECT_RETAIN_POINT_CAP);
+        trim_retained_vec(&mut scratch.bottom_pts, DETECT_RETAIN_POINT_CAP);
+        trim_retained_vec(&mut scratch.left_pts, DETECT_RETAIN_POINT_CAP);
+        trim_retained_vec(&mut scratch.right_pts, DETECT_RETAIN_POINT_CAP);
+        trim_retained_vec(&mut scratch.approx, DETECT_RETAIN_APPROX_CAP);
+        trim_retained_vec(&mut scratch.downsampled, DETECT_RETAIN_POINT_CAP);
+    });
+}
+
+pub(crate) fn compact_decode_scratch_after_frame() {
+    DECODE_SCRATCH.with(|scratch| {
+        let mut scratch = scratch.borrow_mut();
+        if scratch.warped_buf.capacity() > DECODE_RETAIN_WARPED_BUF_CAP {
+            scratch.warped_buf.clear();
+            scratch.warped_buf.shrink_to(DECODE_RETAIN_WARPED_BUF_CAP);
+            scratch.warped_side = 0;
+        }
+        if scratch.sample_positions.capacity() > DECODE_RETAIN_SAMPLE_POS_CAP {
+            scratch.sample_positions.clear();
+            scratch.sample_positions.shrink_to(DECODE_RETAIN_SAMPLE_POS_CAP);
+            scratch.sample_positions_total_width = 0;
+            scratch.sample_positions_grid = 0;
+            scratch.sample_positions_margin_bits = 0;
+            scratch.sample_positions_per_cell = 0;
+        }
+    });
+}
+
+pub(super) fn report_decode_scratch(scratch: &DecodeScratch) {
+    crate::diagnostics::report_scratch_high_water("aruco.decode_scratch", decode_scratch_bytes(scratch));
 }
 
 pub(super) fn marker_f32_to_detection_2d(marker: ArucoDetectionF32, bits: Option<ArucoBitGrid>) -> Option<ArucoDetection2D> {

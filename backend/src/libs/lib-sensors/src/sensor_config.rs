@@ -8,7 +8,7 @@ use tracing::{debug, info, warn};
 use utoipa::ToSchema;
 
 /// Default locations searched for sensor configuration.
-pub const DEFAULT_SENSOR_CONFIG_PATHS: &[&str] = &["/etc/helios/sensors.toml", "/var/lib/helios/sensors.toml", "configs/presets/common.toml"];
+pub const DEFAULT_SENSOR_CONFIG_PATHS: &[&str] = &["/var/lib/helios/sensors.toml", "/etc/helios/sensors.toml", "configs/presets/common.toml"];
 
 #[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
 pub struct SensorDeviceCfg {

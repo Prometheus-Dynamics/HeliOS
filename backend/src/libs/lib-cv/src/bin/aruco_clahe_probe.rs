@@ -52,6 +52,8 @@ struct ProbeConfig {
     min_bit_delta: f32,
 }
 
+type DetectionQuality = (u32, Option<u32>, Option<usize>, Option<f32>);
+
 impl Default for ProbeConfig {
     fn default() -> Self {
         Self {
@@ -383,8 +385,8 @@ fn main() -> Result<(), String> {
         detections_enh_canon = node_like_filter(&detections_enh_canon, frame.width(), frame.height());
         let mut ids_orig: Vec<u32> = detections_orig.iter().map(|d| d.id).collect();
         let mut ids_enh: Vec<u32> = detections_enh.iter().map(|d| d.id).collect();
-        let quality_orig: Vec<(u32, Option<u32>, Option<usize>, Option<f32>)> = detections_orig.iter().map(|d| (d.id, d.best_distance, d.border_mismatches, d.score)).collect();
-        let quality_enh: Vec<(u32, Option<u32>, Option<usize>, Option<f32>)> = detections_enh.iter().map(|d| (d.id, d.best_distance, d.border_mismatches, d.score)).collect();
+        let quality_orig: Vec<DetectionQuality> = detections_orig.iter().map(|d| (d.id, d.best_distance, d.border_mismatches, d.score)).collect();
+        let quality_enh: Vec<DetectionQuality> = detections_enh.iter().map(|d| (d.id, d.best_distance, d.border_mismatches, d.score)).collect();
         let ids_node_like_orig: Vec<u32> = detections_orig_canon.iter().map(|d| d.id).collect();
         let ids_node_like_enh: Vec<u32> = detections_enh_canon.iter().map(|d| d.id).collect();
         ids_orig.sort_unstable();

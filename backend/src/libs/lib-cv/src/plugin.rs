@@ -3,12 +3,14 @@ use daedalus::registry::convert::ConverterBuilder;
 use daedalus::runtime::EdgePayload;
 use daedalus::runtime::plugins::RegistryPluginExt;
 use daedalus::{Plugin, PluginRegistry};
-use image::{DynamicImage, GrayAlphaImage, GrayImage, RgbImage, RgbaImage};
+use image::{DynamicImage, GenericImageView, GrayAlphaImage, GrayImage, RgbImage, RgbaImage};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::{Point, modules};
 
+#[cfg(feature = "gpu")]
+use daedalus::gpu::ErasedPayload;
 #[cfg(feature = "gpu")]
 use daedalus::gpu::GpuError;
 #[cfg(feature = "gpu")]
@@ -68,6 +70,7 @@ impl Plugin for CvPlugin {
     }
 
     fn install(&self, registry: &mut PluginRegistry) -> Result<(), &'static str> {
+        register_payload_size_inspectors();
         registry.register_enum::<ExecMode>(["auto", "cpu", "gpu"]);
         registry.register_enum::<crate::modules::aruco::ArucoCandidateQuadsMode>(["robust", "fast"]);
         registry.register_enum::<crate::modules::aruco::ArucoMaskMode>(["adaptive_mean", "otsu"]);
@@ -132,6 +135,7 @@ impl Plugin for CvPlugin {
         let img_dynamic_opt = TypeExpr::Optional(Box::new(img_dynamic.clone()));
 
         typing::register_type::<image::GrayImage>(img_gray.clone());
+        typing::register_type::<crate::modules::image::luma::PooledGrayImage>(img_gray.clone());
         typing::register_type::<image::GrayAlphaImage>(img_graya.clone());
         typing::register_type::<image::RgbImage>(img_rgb.clone());
         typing::register_type::<image::RgbaImage>(img_rgba.clone());
@@ -157,8 +161,19 @@ impl Plugin for CvPlugin {
         // Runtime CPU conversions between image flavors. These are intentionally registered in the
         // conversion registry (not exposed as nodes) so graphs can focus on the types they want.
         registry.register_conversion::<DynamicImage, GrayImage>(|img| Some(img.to_luma8()));
+        registry.register_conversion::<DynamicImage, crate::modules::image::luma::PooledGrayImage>(|img| {
+            let (w, h) = img.dimensions();
+            Some(crate::modules::image::luma::crop_luma8_frame(img, 0, 0, w, h))
+        });
+        registry.register_conversion::<DynamicImage, Arc<crate::modules::image::luma::PooledGrayImage>>(|img| {
+            let (w, h) = img.dimensions();
+            Some(Arc::new(crate::modules::image::luma::crop_luma8_frame(img, 0, 0, w, h)))
+        });
         registry.register_conversion::<DynamicImage, Option<DynamicImage>>(|img| Some(Some(img.clone())));
         registry.register_conversion::<GrayImage, DynamicImage>(|img| Some(DynamicImage::ImageLuma8(img.clone())));
+        registry.register_conversion::<crate::modules::image::luma::PooledGrayImage, GrayImage>(|img| Some(img.as_ref().clone()));
+        registry.register_conversion::<crate::modules::image::luma::PooledGrayImage, Arc<crate::modules::image::luma::PooledGrayImage>>(|img| Some(Arc::new(img.clone())));
+        registry.register_conversion::<crate::modules::image::luma::PooledGrayImage, DynamicImage>(|img| Some(DynamicImage::ImageLuma8(img.as_ref().clone())));
         registry.register_conversion::<GrayAlphaImage, DynamicImage>(|img| Some(DynamicImage::ImageLumaA8(img.clone())));
         registry.register_conversion::<RgbImage, DynamicImage>(|img| Some(DynamicImage::ImageRgb8(img.clone())));
         registry.register_conversion::<RgbaImage, DynamicImage>(|img| Some(DynamicImage::ImageRgba8(img.clone())));
@@ -174,14 +189,32 @@ impl Plugin for CvPlugin {
             .register_converter(ConverterBuilder::new("image_dynamic_to_gray8", TypeExpr::opaque("image:dynamic"), TypeExpr::opaque("image:gray8"), Ok).build_boxed())
             .map_err(|_| "failed to register image:dynamic -> image:gray8 converter")?;
 
-        registry.register_output_mover::<DynamicImage, _>(|img| EdgePayload::Any(Arc::new(img)));
-        registry.register_output_mover::<GrayImage, _>(|img| EdgePayload::Any(Arc::new(img)));
-        registry.register_output_mover::<GrayAlphaImage, _>(|img| {
-            let dyn_img = DynamicImage::ImageLumaA8(img);
-            EdgePayload::Any(Arc::new(dyn_img))
-        });
-        registry.register_output_mover::<RgbImage, _>(|img| EdgePayload::Any(Arc::new(img)));
-        registry.register_output_mover::<RgbaImage, _>(|img| EdgePayload::Any(Arc::new(img)));
+        #[cfg(feature = "gpu")]
+        {
+            registry.register_output_mover::<DynamicImage, _>(|img| EdgePayload::Payload(ErasedPayload::from_cpu::<DynamicImage>(img)));
+            registry.register_output_mover::<GrayImage, _>(|img| EdgePayload::Payload(ErasedPayload::from_cpu::<GrayImage>(img)));
+            registry.register_output_mover::<crate::modules::image::luma::PooledGrayImage, _>(|img| EdgePayload::Any(Arc::new(Arc::new(img))));
+            registry.register_output_mover::<GrayAlphaImage, _>(|img| EdgePayload::Payload(ErasedPayload::from_cpu::<DynamicImage>(DynamicImage::ImageLumaA8(img))));
+            registry.register_output_mover::<RgbImage, _>(|img| EdgePayload::Payload(ErasedPayload::from_cpu::<RgbImage>(img)));
+            registry.register_output_mover::<RgbaImage, _>(|img| EdgePayload::Payload(ErasedPayload::from_cpu::<RgbaImage>(img)));
+        }
+        #[cfg(not(feature = "gpu"))]
+        {
+            registry.register_output_mover::<DynamicImage, _>(|img| EdgePayload::Any(Arc::new(img)));
+            registry.register_output_mover::<GrayImage, _>(|img| EdgePayload::Any(Arc::new(img)));
+            registry.register_output_mover::<crate::modules::image::luma::PooledGrayImage, _>(|img| EdgePayload::Any(Arc::new(Arc::new(img))));
+            registry.register_output_mover::<GrayAlphaImage, _>(|img| {
+                let dyn_img = DynamicImage::ImageLumaA8(img);
+                EdgePayload::Any(Arc::new(dyn_img))
+            });
+            registry.register_output_mover::<RgbImage, _>(|img| EdgePayload::Any(Arc::new(img)));
+            registry.register_output_mover::<RgbaImage, _>(|img| EdgePayload::Any(Arc::new(img)));
+        }
+        // Typed CV containers are frequently fanned out to multiple nodes and host outputs.
+        // Wrap them in a shared Arc carrier so downstream readers can borrow without cloning
+        // the full vector payload on every frame.
+        registry.register_output_mover::<Vec<crate::modules::aruco::ArucoDetection2D>, _>(|detections| EdgePayload::Any(Arc::new(Arc::new(detections))));
+        registry.register_output_mover::<Vec<[Point; 4]>, _>(|quads| EdgePayload::Any(Arc::new(Arc::new(quads))));
 
         // Use bare values for unit plugins; use `new()` for macro-generated plugins with fields.
         let image = modules::image::nodes::CvImagePlugin;
@@ -220,4 +253,116 @@ impl Plugin for CvPlugin {
 
 pub fn plugin() -> CvPlugin {
     CvPlugin
+}
+
+fn register_payload_size_inspectors() {
+    static REGISTERED: OnceLock<()> = OnceLock::new();
+    REGISTERED.get_or_init(|| {
+        daedalus::runtime::register_payload_size_inspector(cv_payload_size_bytes);
+    });
+}
+
+fn cv_payload_size_bytes(any: &(dyn std::any::Any + Send + Sync)) -> Option<u64> {
+    if let Some(image) = any.downcast_ref::<crate::BinaryImage>() {
+        return Some(binary_image_size_bytes(image));
+    }
+    if let Some(image) = any.downcast_ref::<crate::modules::image::luma::PooledGrayImage>() {
+        return Some(gray_image_size_bytes(image.as_ref()));
+    }
+    if let Some(image) = any.downcast_ref::<Arc<crate::modules::image::luma::PooledGrayImage>>() {
+        return Some(gray_image_size_bytes(image.as_ref().as_ref()));
+    }
+    if let Some(quads) = any.downcast_ref::<Vec<[Point; 4]>>() {
+        return Some(vec_inline_bytes(quads) as u64);
+    }
+    if let Some(quads) = any.downcast_ref::<Arc<Vec<[Point; 4]>>>() {
+        return Some(vec_inline_bytes(quads.as_ref()) as u64);
+    }
+    if let Some(contours) = any.downcast_ref::<Vec<Vec<Point>>>() {
+        return Some(contours_size_bytes(contours));
+    }
+    if let Some(detections) = any.downcast_ref::<Vec<crate::modules::aruco::ArucoDetection2D>>() {
+        return Some(aruco_detection_vec_size_bytes(detections));
+    }
+    if let Some(detections) = any.downcast_ref::<Arc<Vec<crate::modules::aruco::ArucoDetection2D>>>() {
+        return Some(aruco_detection_vec_size_bytes(detections.as_ref()));
+    }
+    if let Some(output) = any.downcast_ref::<crate::modules::aruco::DetectionPoseOutput>() {
+        return Some(detection_pose_output_size_bytes(output));
+    }
+    if let Some(detections) = any.downcast_ref::<Vec<crate::modules::aruco::DetectionPose>>() {
+        return Some(detection_pose_vec_size_bytes(detections));
+    }
+    None
+}
+
+fn vec_inline_bytes<T>(values: &Vec<T>) -> usize {
+    std::mem::size_of::<Vec<T>>() + values.capacity() * std::mem::size_of::<T>()
+}
+
+fn binary_image_size_bytes(image: &crate::BinaryImage) -> u64 {
+    let raw = serde_json::to_vec(image).map(|bytes| bytes.len() as u64).unwrap_or(0);
+    raw.max(std::mem::size_of::<crate::BinaryImage>() as u64)
+}
+
+fn gray_image_size_bytes(image: &GrayImage) -> u64 {
+    std::mem::size_of::<GrayImage>() as u64 + image.as_raw().capacity() as u64
+}
+
+fn contours_size_bytes(contours: &Vec<Vec<Point>>) -> u64 {
+    let mut total = vec_inline_bytes(contours) as u64;
+    total = total.saturating_add(contours.iter().map(|contour| vec_inline_bytes(contour) as u64).sum::<u64>());
+    total
+}
+
+fn aruco_bit_grid_size_bytes(grid: &crate::modules::aruco::ArucoBitGrid) -> u64 {
+    let mut total = std::mem::size_of::<crate::modules::aruco::ArucoBitGrid>() as u64;
+    total = total.saturating_add(vec_inline_bytes(&grid.rows) as u64);
+    total.saturating_add(grid.rows.iter().map(|row| row.capacity() as u64).sum::<u64>())
+}
+
+fn aruco_detection_size_bytes(detection: &crate::modules::aruco::ArucoDetection2D) -> u64 {
+    let mut total = std::mem::size_of::<crate::modules::aruco::ArucoDetection2D>() as u64;
+    if let Some(bits) = detection.bits.as_ref() {
+        total = total.saturating_add(aruco_bit_grid_size_bytes(bits));
+    }
+    total
+}
+
+fn aruco_detection_vec_size_bytes(detections: &Vec<crate::modules::aruco::ArucoDetection2D>) -> u64 {
+    let mut total = vec_inline_bytes(detections) as u64;
+    total = total.saturating_add(detections.iter().map(aruco_detection_size_bytes).sum::<u64>());
+    total
+}
+
+fn detection_pose_size_bytes(detection: &crate::modules::aruco::DetectionPose) -> u64 {
+    let mut total = std::mem::size_of::<crate::modules::aruco::DetectionPose>() as u64;
+    total = total.saturating_add(detection.pose_method.capacity() as u64);
+    if let Some(bits) = detection.bits.as_ref() {
+        total = total.saturating_add(aruco_bit_grid_size_bytes(bits));
+    }
+    total
+}
+
+fn detection_pose_failure_sample_size_bytes(sample: &crate::modules::aruco::DetectionPoseFailureSample) -> u64 {
+    std::mem::size_of::<crate::modules::aruco::DetectionPoseFailureSample>() as u64 + sample.reason.capacity() as u64
+}
+
+fn detection_pose_stats_size_bytes(stats: &crate::modules::aruco::DetectionPoseStats) -> u64 {
+    let mut total = std::mem::size_of::<crate::modules::aruco::DetectionPoseStats>() as u64;
+    total = total.saturating_add(stats.pose_method.capacity() as u64);
+    if let Some(first_failure) = stats.first_failure.as_ref() {
+        total = total.saturating_add(detection_pose_failure_sample_size_bytes(first_failure));
+    }
+    total
+}
+
+fn detection_pose_vec_size_bytes(detections: &Vec<crate::modules::aruco::DetectionPose>) -> u64 {
+    let mut total = vec_inline_bytes(detections) as u64;
+    total = total.saturating_add(detections.iter().map(detection_pose_size_bytes).sum::<u64>());
+    total
+}
+
+fn detection_pose_output_size_bytes(output: &crate::modules::aruco::DetectionPoseOutput) -> u64 {
+    std::mem::size_of::<crate::modules::aruco::DetectionPoseOutput>() as u64 + detection_pose_vec_size_bytes(&output.detections) + detection_pose_stats_size_bytes(&output.stats)
 }

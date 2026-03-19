@@ -5,7 +5,7 @@ Svelte 5 web interface for configuring and monitoring Helios camera streams. Tal
 ## Stack & Requirements
 - SvelteKit + TypeScript
 - Tailwind CSS v4 + Skeleton UI
-- Bun runtime (required)
+- Bun runtime and package manager (required)
 - Node.js 18+
 
 ## Dev Quickstart
@@ -21,6 +21,8 @@ bun run lint
 bun run build
 bun run preview
 ```
+
+The frontend uses Bun as the package manager. Do not add other lockfiles or package-manager-specific config back into this workspace.
 
 Codegen runs automatically before `dev`, `build`, `check`, and `lint`. To run it manually:
 ```bash

@@ -1,5 +1,6 @@
 import type { LightingSettings } from '../../../../routes/settings/types';
-import { buildWsUrlFromHttpBase, canUseWebSockets } from '$lib/api/wsClient';
+import { apiFetch } from '$lib/api/core/http';
+import { buildWsUrlFromHttpBase, canUseWebSockets, connectWebSocketWithFallback, sendJson } from '$lib/api/core/ws';
 import type {
   LightingAnimationListResponse,
   LightingAnimationPayload,
@@ -10,90 +11,71 @@ import type {
   SavedLightingAnimation
 } from './lightingModalUtils';
 
-export async function fetchSavedAnimations(apiFetch: <T>(path: string, init?: RequestInit) => Promise<T>): Promise<SavedLightingAnimation[]> {
+export async function fetchSavedAnimations(): Promise<SavedLightingAnimation[]> {
   const payload = await apiFetch<LightingAnimationListResponse>('/device/lighting/animations');
   return Array.isArray(payload?.animations) ? payload.animations : [];
 }
 
-export async function fetchLightingTemplates(
-  apiFetch: <T>(path: string, init?: RequestInit) => Promise<T>
-): Promise<LightingAnimationTemplateSummary[]> {
+export async function fetchLightingTemplates(): Promise<LightingAnimationTemplateSummary[]> {
   const payload = await apiFetch<LightingAnimationTemplateSummary[]>('/device/lighting/templates');
   return Array.isArray(payload) ? payload : [];
 }
 
-export async function fetchLightingTemplate(
-  apiFetch: <T>(path: string, init?: RequestInit) => Promise<T>,
-  templateId: string
-): Promise<LightingAnimationTemplateDocument> {
+export async function fetchLightingTemplate(templateId: string): Promise<LightingAnimationTemplateDocument> {
   return apiFetch<LightingAnimationTemplateDocument>(`/device/lighting/templates/${encodeURIComponent(templateId)}`);
 }
 
-export async function fetchLightingRuntimeState(
-  apiFetch: <T>(path: string, init?: RequestInit) => Promise<T>
-): Promise<LightingRuntimeState> {
+export async function fetchLightingRuntimeState(): Promise<LightingRuntimeState> {
   return apiFetch<LightingRuntimeState>('/device/lighting/state');
 }
 
 export async function saveLightingConfig(
-  deviceSettingsStore: { patch: (payload: any) => Promise<void> },
-  payload: any
+  deviceSettingsStore: { patch: (payload: Record<string, unknown>) => Promise<void> },
+  payload: Record<string, unknown>
 ): Promise<void> {
   await deviceSettingsStore.patch(payload);
 }
 
-export async function resetLightingConfig(apiFetch: <T>(path: string, init?: RequestInit) => Promise<T>): Promise<LightingSettings> {
+export async function resetLightingConfig(): Promise<LightingSettings> {
   return apiFetch<LightingSettings>('/device/lighting/config/reset', { method: 'POST' });
 }
 
 export async function postLightingFrame(
-  apiFetch: <T>(path: string, init?: RequestInit) => Promise<T>,
   frame: LightingColorPayload[],
   brightness: number,
   requestedBy: string
 ): Promise<void> {
   const body: Record<string, unknown> = { frame, brightness, requested_by: requestedBy };
-  await apiFetch('/device/lighting', { method: 'POST', body: JSON.stringify(body) });
+  await apiFetch('/device/lighting', { method: 'POST', body });
 }
 
 export async function postLightingAnimation(
-  apiFetch: <T>(path: string, init?: RequestInit) => Promise<T>,
   animation: LightingAnimationPayload,
   brightness: number,
   requestedBy: string
 ): Promise<void> {
   const body: Record<string, unknown> = { animation, brightness, requested_by: requestedBy };
-  await apiFetch('/device/lighting', { method: 'POST', body: JSON.stringify(body) });
+  await apiFetch('/device/lighting', { method: 'POST', body });
 }
 
-export async function saveLightingAnimation(
-  apiFetch: <T>(path: string, init?: RequestInit) => Promise<T>,
-  body: Record<string, unknown>
-): Promise<void> {
-  await apiFetch('/device/lighting/animations', { method: 'POST', body: JSON.stringify(body) });
+export async function saveLightingAnimation(body: Record<string, unknown>): Promise<void> {
+  await apiFetch('/device/lighting/animations', { method: 'POST', body });
 }
 
-export async function deleteLightingAnimation(
-  apiFetch: <T>(path: string, init?: RequestInit) => Promise<T>,
-  name: string
-): Promise<void> {
+export async function deleteLightingAnimation(name: string): Promise<void> {
   await apiFetch(`/device/lighting/animations/${encodeURIComponent(name)}`, { method: 'DELETE' });
 }
 
-export async function playSavedLightingAnimation(
-  apiFetch: <T>(path: string, init?: RequestInit) => Promise<T>,
-  body: Record<string, unknown>
-): Promise<void> {
-  await apiFetch('/device/lighting', { method: 'POST', body: JSON.stringify(body) });
+export async function playSavedLightingAnimation(body: Record<string, unknown>): Promise<void> {
+  await apiFetch('/device/lighting', { method: 'POST', body });
 }
 
 export async function stopLightingOutput(
-  apiFetch: <T>(path: string, init?: RequestInit) => Promise<T>,
   frame: LightingColorPayload[],
   requestedBy: string
 ): Promise<void> {
   const body: Record<string, unknown> = { frame, brightness: 0, requested_by: requestedBy };
-  await apiFetch('/device/lighting', { method: 'POST', body: JSON.stringify(body) });
+  await apiFetch('/device/lighting', { method: 'POST', body });
 }
 
 export function openLightingStateSocket(handlers: {
@@ -108,43 +90,50 @@ export function openLightingStateSocket(handlers: {
   }
 
   const url = buildWsUrlFromHttpBase(['v1', 'ws', 'sensors']);
-  const socket = new WebSocket(url);
   let closed = false;
-
-  socket.onopen = () => {
-    handlers.onOpen?.();
-    socket.send(
-      JSON.stringify({
-        op: 'subscribe',
-        kinds: ['lighting'],
-        interval_ms: 200
-      })
-    );
-  };
-  socket.onmessage = (event) => {
-    try {
-      const parsed = JSON.parse(String(event.data ?? 'null')) as { lighting?: LightingRuntimeState };
-      if (parsed && typeof parsed === 'object' && parsed.lighting && typeof parsed.lighting === 'object') {
-        handlers.onState(parsed.lighting);
+  const connection = connectWebSocketWithFallback(
+    url,
+    {
+      onOpen: () => {
+        handlers.onOpen?.();
+        sendJson(connection, {
+          op: 'subscribe',
+          kinds: ['lighting'],
+          interval_ms: 200
+        });
+      },
+      onMessage: (event) => {
+        try {
+          const parsed = JSON.parse(String(event.data ?? 'null')) as { lighting?: LightingRuntimeState };
+          if (parsed && typeof parsed === 'object' && parsed.lighting && typeof parsed.lighting === 'object') {
+            handlers.onState(parsed.lighting);
+          }
+        } catch {
+          // Ignore malformed payloads from unrelated messages.
+        }
+      },
+      onError: (message) => {
+        if (!closed) {
+          handlers.onError?.(message || 'Lighting state socket error');
+        }
+      },
+      onClose: () => {
+        closed = true;
+        handlers.onClose?.();
       }
-    } catch {
-      // Ignore malformed payloads from unrelated messages.
-    }
-  };
-  socket.onerror = () => {
-    if (!closed) {
-      handlers.onError?.('Lighting state socket error');
-    }
-  };
-  socket.onclose = () => {
-    closed = true;
-    handlers.onClose?.();
-  };
+    },
+    { errorMessage: 'Lighting state socket error' }
+  );
+
+  if (!connection) {
+    handlers.onError?.('Unable to open lighting state socket');
+    return () => {};
+  }
 
   return () => {
     if (closed) return;
     closed = true;
-    socket.close();
+    connection.close();
   };
 }
 
@@ -163,7 +152,7 @@ export type LightingMediaPackItem = {
   tags: string[];
 };
 
-export async function listLightingMediaPacks(apiFetch: <T>(path: string, init?: RequestInit) => Promise<T>): Promise<LightingMediaPackItem[]> {
+export async function listLightingMediaPacks(): Promise<LightingMediaPackItem[]> {
   const payload = await apiFetch<MediaItem[]>('/media?kind=data');
   if (!Array.isArray(payload)) return [];
   return payload
@@ -184,7 +173,6 @@ export async function listLightingMediaPacks(apiFetch: <T>(path: string, init?: 
 }
 
 export async function uploadLightingMediaPack(
-  apiFetch: <T>(path: string, init?: RequestInit) => Promise<T>,
   fileName: string,
   jsonPayload: string
 ): Promise<void> {
@@ -196,9 +184,6 @@ export async function uploadLightingMediaPack(
   await apiFetch('/media', { method: 'POST', body: form });
 }
 
-export async function fetchLightingMediaPack(
-  apiFetch: <T>(path: string, init?: RequestInit) => Promise<T>,
-  name: string
-): Promise<unknown> {
+export async function fetchLightingMediaPack(name: string): Promise<unknown> {
   return apiFetch<unknown>(`/media/${encodeURIComponent(name)}`);
 }

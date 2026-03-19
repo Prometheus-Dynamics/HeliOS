@@ -12,6 +12,7 @@ It shows a preview (when available), metadata fields, and actions like download 
 - Download the file.
 - Edit asset metadata (name, description, tags).
 - Delete assets.
+- Replace attached metadata in-place after edits complete.
 
 ## Edit metadata
 
@@ -41,4 +42,8 @@ For model assets, you can attach a label file:
 
 ## Video clip trimming
 
-The UI may show a clip range panel for video assets, but trimming is not currently supported by the Media API.
+For video assets, the detail modal can apply clip edits and update the stored asset.
+
+## IMU Sidecars
+
+When a recording was captured with IMU enabled, the detail modal can also show IMU sidecar playback/inspection tools alongside the asset preview.

@@ -1,5 +1,8 @@
 import type {
+  BackendHandle,
+  CaptureDescriptor,
   CodecInfo,
+  ControlMeta,
   ProbedBackend,
   ProbedDevice,
   StreamInfo,
@@ -8,7 +11,7 @@ import type {
   Interval
 } from '$lib/api/httpClient';
 import type { StreamsApi } from '$lib/api/streamsApi';
-import { layoutSignature, normalizeGridOutputKeys, normalizeGridSlots } from './cameraPipelineState';
+import { layoutSignature } from './cameraPipelineState';
 import {
   PIPELINE_OUTPUT_CELL_KEY,
   RAW_PIPELINE_ID,
@@ -130,22 +133,42 @@ type BackendDeps = {
   modeKey: (value: unknown) => string | null;
   modeFormat: (mode: Mode | null | undefined) => string;
   modeResolution: (mode: Mode | null | undefined) => string;
-  mediaFormatMatches: (mode: Mode | null | undefined, value: any) => boolean;
+  mediaFormatMatches: (mode: Mode | null | undefined, value: unknown) => boolean;
   intervalsForSelection: () => Interval[];
   fpsLabel: (interval: Interval | undefined | null) => string;
   intervalToFps: (interval: Interval | null | undefined) => number | null;
-  frameRateToFps: (rate: any) => number | null;
-  normalizeFpsLimit: (value: any) => number | null;
-  normalizeRotationDegrees: (value: any) => number | null;
+  frameRateToFps: (rate: unknown) => number | null;
+  normalizeFpsLimit: (value: unknown) => number | null;
+  normalizeRotationDegrees: (value: unknown) => number | null;
   decodersForCaptureFormat: (fmt: string | null | undefined) => CodecInfo[];
   parseManifestLayout: (layout: unknown) => { rows: number; columns: number; slots: Record<string, string | null>; outputKeys: Record<string, string | null> } | null;
   outputSelectionForPipeline: (pipelineId: string) => string | null;
   setOutputSelectionForPipeline: (pipelineId: string, output: string | null) => void;
-  extractValue: (value: any) => number | boolean | null;
+  extractValue: (value: unknown) => number | boolean | null;
   DEFAULT_LIBCAMERA_TARGET_FPS: number;
 };
 
 export function createCameraBackendController(state: BackendState, deps: BackendDeps) {
+  const asRecord = (value: unknown): Record<string, unknown> | null =>
+    value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+  const asTrimmedString = (value: unknown): string =>
+    typeof value === 'string' ? value.trim() : '';
+  const asPositiveNumber = (value: unknown): number | null => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+  };
+  const asInterval = (value: unknown): Interval | null => {
+    const record = asRecord(value);
+    if (!record) return null;
+    return typeof record.numerator === 'number' && typeof record.denominator === 'number'
+      ? (record as unknown as Interval)
+      : null;
+  };
+  const identityRecordFor = (manifest?: StreamManifest | null): Record<string, unknown> | null =>
+    asRecord(manifest?.identity) ?? asRecord(asRecord(manifest)?.identity);
+  const captureRecordFor = (manifest?: StreamManifest | null): Record<string, unknown> | null =>
+    asRecord(manifest?.capture) ?? asRecord(asRecord(manifest)?.capture);
+
   function isFileBackend(kind: unknown): boolean {
     return String(kind ?? '').toLowerCase() === 'file';
   }
@@ -155,42 +178,84 @@ export function createCameraBackendController(state: BackendState, deps: Backend
   }
 
   function extractFileHandle(handle: unknown): { fps?: number; loop_forever?: boolean; paths?: string[] } | null {
-    if (!handle || typeof handle !== 'object') return null;
-    if (String((handle as any).type ?? '').toLowerCase() !== 'file') return null;
-    return handle as { fps?: number; loop_forever?: boolean; paths?: string[] };
+    const record = asRecord(handle);
+    if (!record) return null;
+    const direct = String(record.type ?? '').toLowerCase() === 'file' ? record : null;
+    const legacy = asRecord(record.File);
+    const resolved = direct ?? legacy;
+    if (!resolved) return null;
+    return {
+      fps: asPositiveNumber(resolved.fps) ?? undefined,
+      loop_forever: typeof resolved.loop_forever === 'boolean' ? resolved.loop_forever : undefined,
+      paths: Array.isArray(resolved.paths)
+        ? resolved.paths.filter((path): path is string => typeof path === 'string' && path.trim().length > 0)
+        : undefined
+    };
   }
 
-  function descriptorFromStreamOrManifest(manifest?: StreamManifest | null): { modes: Mode[]; controls: any[] } {
-    const streamDescriptor: any = state.stream?.descriptor ?? null;
-    const streamModes: Mode[] = Array.isArray(streamDescriptor?.modes) ? (streamDescriptor.modes.filter(Boolean) as Mode[]) : [];
+  function buildNetcamHandle(handle: unknown, fallbackUrl: string): BackendHandle {
+    const record = asRecord(handle);
+    const direct = record && String(record.type ?? '').toLowerCase() === 'netcam' ? record : null;
+    const legacy = record ? asRecord(record.Netcam) : null;
+    const resolved = direct ?? legacy;
+    return {
+      Netcam: {
+        url: asTrimmedString(resolved?.url) || fallbackUrl,
+        width: Math.max(0, Math.trunc(asPositiveNumber(resolved?.width) ?? 0)),
+        height: Math.max(0, Math.trunc(asPositiveNumber(resolved?.height) ?? 0)),
+        fps: Math.max(1, Math.trunc(asPositiveNumber(resolved?.fps) ?? 30))
+      }
+    };
+  }
+
+  function buildFileHandle(handle: unknown): BackendHandle {
+    const fileHandle = extractFileHandle(handle);
+    return {
+      File: {
+        fps: Math.max(1, Math.trunc(fileHandle?.fps ?? 30)),
+        loop_forever: fileHandle?.loop_forever ?? true,
+        paths: fileHandle?.paths ?? []
+      }
+    };
+  }
+
+  function descriptorFromStreamOrManifest(manifest?: StreamManifest | null): CaptureDescriptor {
+    const streamDescriptor = state.stream?.descriptor ?? null;
+    const streamModes: Mode[] = Array.isArray(streamDescriptor?.modes)
+      ? streamDescriptor.modes.filter(Boolean)
+      : [];
+    const streamControls: ControlMeta[] = Array.isArray(streamDescriptor?.controls)
+      ? streamDescriptor.controls
+      : [];
     if (streamModes.length) {
-      return { modes: streamModes, controls: Array.isArray(streamDescriptor?.controls) ? streamDescriptor.controls : [] };
+      return { modes: streamModes, controls: streamControls };
     }
 
-    const captureMode: any = (manifest as any)?.capture?.mode ?? null;
-    if (captureMode) {
+    const captureMode = captureRecordFor(manifest)?.mode ?? null;
+    const captureModeRecord = asRecord(captureMode);
+    if (captureModeRecord) {
       // Streams can be "stopped" after a restart and come back with an empty descriptor,
       // but the manifest still has a capture mode. Synthesize a minimal descriptor so
       // format/resolution selection (and Apply/Start) still work.
-      const synthesized: any = {
+      const synthesized = {
         id: captureMode,
-        format: captureMode?.format ?? null,
-        intervals: captureMode?.interval ? [captureMode.interval] : [],
+        format: captureModeRecord.format ?? null,
+        intervals: captureModeRecord.interval ? [captureModeRecord.interval as Interval] : [],
         interval_stepwise: null
-      };
-      return { modes: [synthesized as Mode], controls: Array.isArray(streamDescriptor?.controls) ? streamDescriptor.controls : [] };
+      } as unknown as Mode;
+      return { modes: [synthesized], controls: streamControls };
     }
 
-    return { modes: [], controls: Array.isArray(streamDescriptor?.controls) ? streamDescriptor.controls : [] };
+    return { modes: [], controls: streamControls };
   }
 
   function buildNetcamBackend(manifest?: StreamManifest | null): ProbedDevice | null {
     if (!isNetcamBackend(manifest?.capture?.backend)) return null;
     const descriptor = descriptorFromStreamOrManifest(manifest);
-    const identity = (manifest as any)?.identity ?? null;
+    const identity = identityRecordFor(manifest);
     const display =
-      (typeof identity?.alias === 'string' && identity.alias.trim().length ? identity.alias.trim() : null) ??
-      (typeof identity?.hardware_id === 'string' && identity.hardware_id.trim().length ? identity.hardware_id.trim() : null) ??
+      (asTrimmedString(identity?.alias) || null) ??
+      (asTrimmedString(identity?.hardware_id) || null) ??
       'Netcam';
     const keys =
       Array.isArray(manifest?.capture?.device_keys) && manifest?.capture?.device_keys?.length
@@ -200,7 +265,7 @@ export function createCameraBackendController(state: BackendState, deps: Backend
           : ['netcam'];
     const backend: ProbedBackend = {
       descriptor,
-      handle: (manifest?.capture?.handle ?? { type: 'netcam', url: keys[0] ?? '', width: 0, height: 0, fps: 30 }) as any,
+      handle: buildNetcamHandle(manifest?.capture?.handle, keys[0] ?? ''),
       kind: 'Netcam',
       properties: []
     };
@@ -210,15 +275,15 @@ export function createCameraBackendController(state: BackendState, deps: Backend
   function buildFileBackend(manifest?: StreamManifest | null): ProbedDevice | null {
     if (!isFileBackend(manifest?.capture?.backend)) return null;
     const descriptor = descriptorFromStreamOrManifest(manifest);
-    const identity = (manifest as any)?.identity ?? null;
+    const identity = identityRecordFor(manifest);
     const display =
-      (typeof identity?.alias === 'string' && identity.alias.trim().length ? identity.alias.trim() : null) ??
-      (typeof identity?.hardware_id === 'string' && identity.hardware_id.trim().length ? identity.hardware_id.trim() : null) ??
+      (asTrimmedString(identity?.alias) || null) ??
+      (asTrimmedString(identity?.hardware_id) || null) ??
       'Media library';
     const keys = Array.isArray(manifest?.identity?.keys) && manifest?.identity?.keys.length ? manifest.identity.keys : ['media-file'];
     const backend: ProbedBackend = {
       descriptor,
-      handle: (manifest?.capture?.handle ?? { type: 'file', fps: 30, loop_forever: true, paths: [] }) as any,
+      handle: buildFileHandle(manifest?.capture?.handle),
       kind: 'File',
       properties: []
     };
@@ -314,6 +379,10 @@ export function createCameraBackendController(state: BackendState, deps: Backend
 
   function applyManifestSelections(manifest?: StreamManifest | null): void {
     const capture = manifest?.capture;
+    const manifestRecord = asRecord(manifest);
+    const captureRecord = captureRecordFor(manifest);
+    const captureModeRecord = asRecord(captureRecord?.mode);
+    const identityRecord = identityRecordFor(manifest);
     if (manifest) {
       const decoderSettings = manifest.decoder_settings ?? null;
       const encoderSettingsWire = manifest.encoder_settings ?? null;
@@ -349,13 +418,13 @@ export function createCameraBackendController(state: BackendState, deps: Backend
     state.selectedBackendIndex = backendIdx >= 0 ? backendIdx : 0;
 
     const modes = deps.effectiveModes();
-    const wantedFormat = (capture as any)?.mode?.format ?? null;
+    const wantedFormat = captureModeRecord?.format ?? null;
     const mode = modes.find((m) => deps.mediaFormatMatches(m, wantedFormat)) ?? modes[0] ?? null;
-    state.selectedModeKey = deps.modeKey((capture as any)?.mode) ?? deps.modeKey(mode?.id) ?? null;
+    state.selectedModeKey = deps.modeKey(captureModeRecord ?? null) ?? deps.modeKey(mode?.id) ?? null;
     state.selectedFormat = deps.modeFormat(mode);
     state.selectedResolution = deps.modeResolution(mode);
     const intervals = deps.intervalsForSelection();
-    const wantedInterval = (capture as any)?.interval ?? (capture as any)?.mode?.interval ?? null;
+    const wantedInterval = asInterval(captureRecord?.interval ?? captureModeRecord?.interval ?? null);
     if (wantedInterval) {
       const idx = intervals.findIndex((int) => int?.numerator === wantedInterval?.numerator && int?.denominator === wantedInterval?.denominator);
       state.selectedIntervalIdx = idx >= 0 ? idx : 0;
@@ -365,16 +434,18 @@ export function createCameraBackendController(state: BackendState, deps: Backend
     state.selectedInterval = intervals[state.selectedIntervalIdx] ? deps.fpsLabel(intervals[state.selectedIntervalIdx]) : '';
     const isLibcamera = String(capture?.backend ?? '').toLowerCase() === 'libcamera';
     state.libcameraTargetFps =
-      (capture as any)?.target_fps ??
+      (typeof captureRecord?.target_fps === 'number' ? captureRecord.target_fps : null) ??
       deps.intervalToFps(wantedInterval) ??
       deps.intervalToFps(intervals[state.selectedIntervalIdx]) ??
       (isLibcamera ? deps.DEFAULT_LIBCAMERA_TARGET_FPS : null);
     const netcamHandleFps = (() => {
-      const handle = capture?.handle as any;
-      const fps = Number(handle?.fps);
-      if (String(handle?.type ?? '').toLowerCase() === 'netcam' && Number.isFinite(fps) && fps > 0) return Math.round(fps);
-      const legacyFps = Number(handle?.Netcam?.fps);
-      if (handle?.Netcam && Number.isFinite(legacyFps) && legacyFps > 0) return Math.round(legacyFps);
+      const handle = asRecord(capture?.handle);
+      const direct = handle && String(handle.type ?? '').toLowerCase() === 'netcam' ? handle : null;
+      const legacy = handle ? asRecord(handle.Netcam) : null;
+      const fps = asPositiveNumber(direct?.fps);
+      if (fps) return Math.round(fps);
+      const legacyFps = asPositiveNumber(legacy?.fps);
+      if (legacyFps) return Math.round(legacyFps);
       return null;
     })();
     state.netcamTargetFps = netcamHandleFps ?? deps.intervalToFps(wantedInterval) ?? deps.intervalToFps(intervals[state.selectedIntervalIdx]) ?? null;
@@ -383,7 +454,9 @@ export function createCameraBackendController(state: BackendState, deps: Backend
       const fileHandle = extractFileHandle(capture?.handle);
       const fpsRaw = Number(fileHandle?.fps ?? 0);
       const fallbackFps = Number.isFinite(fpsRaw) && fpsRaw > 0 ? fpsRaw : null;
-      const controlMeta = (currentBackend()?.descriptor?.controls ?? (state.stream as any)?.descriptor?.controls ?? []).find((ctrl) => ctrl.name === 'file.duration_ms');
+      const controlMeta = (currentBackend()?.descriptor?.controls ?? state.stream?.descriptor?.controls ?? []).find(
+        (ctrl) => ctrl.name === 'file.duration_ms'
+      );
       const controlValue = controlMeta?.id != null ? (capture?.controls ?? []).find((entry) => entry.id === controlMeta.id)?.value : null;
       const durationMs = deps.extractValue(controlValue);
       const durationFps = typeof durationMs === 'number' && durationMs > 0 ? Math.max(1, Math.round(1000 / durationMs)) : null;
@@ -394,10 +467,10 @@ export function createCameraBackendController(state: BackendState, deps: Backend
     }
 
     state.hostBuffer = manifest?.host_buffer ?? state.hostBuffer;
-    state.shadowRecorderEnabled = manifest?.shadow_recorder_enabled ?? false;
-    state.cameraAlias = String((manifest as any)?.identity?.alias ?? (manifest as any)?.identity?.display ?? '').trim();
-    const encoderEnabledFlag = (manifest as any)?.encoder_enabled;
-    const decoderEnabledFlag = (manifest as any)?.decoder_enabled;
+    state.shadowRecorderEnabled = isFileBackend(capture?.backend) ? false : (manifest?.shadow_recorder_enabled ?? true);
+    state.cameraAlias = asTrimmedString(identityRecord?.alias ?? identityRecord?.display);
+    const encoderEnabledFlag = manifestRecord?.encoder_enabled;
+    const decoderEnabledFlag = manifestRecord?.decoder_enabled;
     const isFileManifestBackend = isFileBackend(capture?.backend);
     const isNetcamManifestBackend = isNetcamBackend(capture?.backend);
     const isMediaManifestBackend = isFileManifestBackend || isNetcamManifestBackend;
@@ -428,11 +501,11 @@ export function createCameraBackendController(state: BackendState, deps: Backend
       state.decoderImpl = pickCodecId(compatible.length ? compatible : state.decoders, state.decoderImpl, ['mono8-replicate']);
     }
 
-    const pipelineEnabled = (manifest as any)?.pipeline_enabled;
+    const pipelineEnabled = manifestRecord?.pipeline_enabled;
     state.selectedPipelineId =
-      pipelineEnabled === false ? null : (manifest as any)?.active_pipeline_id ?? (manifest as any)?.pipeline_id ?? null;
+      pipelineEnabled === false ? null : asTrimmedString(manifestRecord?.active_pipeline_id ?? manifestRecord?.pipeline_id) || null;
     state.selectedPipelineOutput =
-      pipelineEnabled === false ? null : (manifest as any)?.active_pipeline_output ?? (manifest as any)?.pipeline_output ?? null;
+      pipelineEnabled === false ? null : asTrimmedString(manifestRecord?.active_pipeline_output ?? manifestRecord?.pipeline_output) || null;
 
     const normalizedSelected = state.selectedPipelineId ? String(state.selectedPipelineId).trim() : '';
     state.selectedPipelineId = normalizedSelected.length ? normalizedSelected : null;
@@ -447,8 +520,8 @@ export function createCameraBackendController(state: BackendState, deps: Backend
       state.selectedPipelineOutput = 'raw';
     }
 
-    const layout = (manifest as any)?.pipeline_layout ?? null;
-    const pipelines = (manifest as any)?.pipelines;
+    const layout = manifestRecord?.pipeline_layout ?? null;
+    const pipelines = manifestRecord?.pipelines;
     const parsedLayout = deps.parseManifestLayout(layout);
     if (pipelineEnabled !== false && parsedLayout && parsedLayout.rows === 1 && parsedLayout.columns === 1) {
       const outputCellId = parsedLayout.slots[PIPELINE_OUTPUT_CELL_KEY];
@@ -535,32 +608,36 @@ export function createCameraBackendController(state: BackendState, deps: Backend
       let normalizedOutputs: Record<string, string | null> | null = null;
       if (Array.isArray(pipelines)) {
         manifestPipelineIds = pipelines
-          .map((p: any) => {
+          .map((p) => {
+            const record = asRecord(p);
+            if (!record) return '';
             const raw =
-              typeof p?.pipeline_id === 'string'
-                ? p.pipeline_id
-                : typeof p?.pipelineId === 'string'
-                  ? p.pipelineId
-                  : typeof p?.id === 'string'
-                    ? p.id
+              typeof record.pipeline_id === 'string'
+                ? record.pipeline_id
+                : typeof record.pipelineId === 'string'
+                  ? record.pipelineId
+                  : typeof record.id === 'string'
+                    ? record.id
                     : '';
             const id = raw.trim();
             return id === RAW_PIPELINE_UUID ? RAW_PIPELINE_ID : id;
           })
           .filter(Boolean);
         const outputs: Record<string, string | null> = {};
-        pipelines.forEach((p: any) => {
+        pipelines.forEach((p) => {
+          const record = asRecord(p);
+          if (!record) return;
           let id =
-            typeof p?.pipeline_id === 'string'
-              ? p.pipeline_id.trim()
-              : typeof p?.pipelineId === 'string'
-                ? p.pipelineId.trim()
-                : typeof p?.id === 'string'
-                  ? p.id.trim()
+            typeof record.pipeline_id === 'string'
+              ? record.pipeline_id.trim()
+              : typeof record.pipelineId === 'string'
+                ? record.pipelineId.trim()
+                : typeof record.id === 'string'
+                  ? record.id.trim()
                   : '';
           if (id === RAW_PIPELINE_UUID) id = RAW_PIPELINE_ID;
           if (!id.length) return;
-          const out = typeof p?.pipeline_output === 'string' ? p.pipeline_output.trim() : '';
+          const out = typeof record.pipeline_output === 'string' ? record.pipeline_output.trim() : '';
           outputs[id] = out.length ? out : null;
         });
         normalizedOutputs = normalizePipelineOutputMap(outputs);

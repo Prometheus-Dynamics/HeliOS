@@ -1,7 +1,7 @@
 <script lang="ts">
+  import type { ComponentProps } from 'svelte';
   import type { Writable } from 'svelte/store';
-  import type { PipelineDataType, PipelineNodeValue, PipelineOverviewPipeline, PipelineTemplateSummary } from '$lib/types/pipeline';
-  import type { PipelinePortEntry, PipelineOutputEntry } from '$lib/components/pipelines/types';
+  import type { PipelineOverviewPipeline, PipelineTemplateSummary } from '$lib/types/pipeline';
   import type { StreamInfo } from '$lib/ts-bindings/http/client';
   import { StreamPreview } from '$lib';
   import { resolveStreamLabel } from '$lib/utils/streamLabels';
@@ -11,10 +11,12 @@
   import PipelineCreateModal from './PipelineCreateModal.svelte';
   import PipelineDeleteModal from './PipelineDeleteModal.svelte';
 
+  type StreamManifestIdentity = StreamInfo['manifest']['identity'] & { alias?: string | null };
+  type PipelineRegistryDrawerProps = ComponentProps<typeof PipelineRegistryDrawer>;
+
   type PipelineModalsProps = {
     registryDrawerOpen: boolean;
-    registryStores: unknown;
-    registryHelpers: unknown;
+    registryStores: PipelineRegistryDrawerProps['stores'];
     onCloseRegistry?: () => void;
     onRefreshRegistry?: () => void;
     onResetRegistry?: () => void;
@@ -74,20 +76,14 @@
     assignBusy?: boolean;
     captureDevices: StreamInfo[];
     selectedCaptureSessionId: string | null;
-    pipelineInputEntries: PipelinePortEntry[];
-    pipelineOutputEntries: PipelineOutputEntry[];
     onSelectCaptureSession?: (id: string) => void;
     onCloseAssign?: () => void;
     onAttachPipeline?: () => void;
-
-    describePortType: (value: PipelineDataType) => string;
-    formatPipelineValue: (value: PipelineNodeValue | null | undefined) => string;
   };
 
   let {
     registryDrawerOpen,
     registryStores,
-    registryHelpers,
     onCloseRegistry = () => {},
     onRefreshRegistry = () => {},
     onResetRegistry = () => {},
@@ -142,13 +138,9 @@
     assignBusy = false,
     captureDevices,
     selectedCaptureSessionId,
-    pipelineInputEntries,
-    pipelineOutputEntries,
     onSelectCaptureSession = () => {},
     onCloseAssign = () => {},
-    onAttachPipeline = () => {},
-    describePortType,
-    formatPipelineValue
+    onAttachPipeline = () => {}
   }: PipelineModalsProps = $props();
 
   const streamDisplayName = (stream: StreamInfo): string => {
@@ -158,13 +150,14 @@
 
   const streamStatusLabel = (stream: StreamInfo): string => {
     if (stream.status?.recording_active) return 'recording';
-    const status = (stream.status as any)?.state ?? stream.status ?? 'idle';
+    const status = stream.status?.state ?? 'idle';
     return String(status ?? 'idle');
   };
 
-  const selectedAssignStream = $derived.by(
-    () => captureDevices.find((stream) => stream.id === selectedCaptureSessionId) ?? null
-  );
+  const streamCaptureAlias = (stream: StreamInfo): string | null => {
+    const identity = stream.manifest.identity as StreamManifestIdentity;
+    return typeof identity.alias === 'string' && identity.alias.trim().length > 0 ? identity.alias : null;
+  };
 
   export type $$Props = PipelineModalsProps;
 </script>
@@ -172,7 +165,6 @@
 <PipelineRegistryDrawer
   open={registryDrawerOpen}
   stores={registryStores}
-  helpers={registryHelpers}
   onClose={onCloseRegistry}
   onRefresh={onRefreshRegistry}
   onReset={onResetRegistry}
@@ -288,7 +280,7 @@
                         status={statusLabel}
                         recording={Boolean(stream.status?.recording_active)}
                         captureSessionId={deviceId}
-                        captureSessionAlias={(stream.manifest as any)?.identity?.alias ?? null}
+                        captureSessionAlias={streamCaptureAlias(stream)}
                         enablePopout={false}
                         enforceAspect={false}
                         hideControls={true}

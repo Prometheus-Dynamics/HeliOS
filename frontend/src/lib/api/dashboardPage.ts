@@ -1,22 +1,23 @@
-import { DeviceService, PeripheralsService } from '$lib/ts-bindings/http/client';
+import { PeripheralsApi } from '$lib/api/peripheralsApi';
 import { PipelinesApi } from '$lib/api/pipelinesApi';
 import { StreamsApi } from '$lib/api/streamsApi';
-import { cancellableWithTimeout, DEFAULT_REQUEST_TIMEOUT_MS } from '$lib/api/requestUtils';
+import { DeviceApi } from '$lib/api/deviceApi';
+import { DEFAULT_REQUEST_TIMEOUT_MS } from '$lib/api/requestUtils';
 import type { DashboardFetchMeta, DashboardPayload, DashboardSourceStatus, PipelineWatchEntry, StreamGalleryItem, SummaryStat, TimelineItem } from '$lib/types/dashboard';
-import type { DaedalusRegistryNode, DeviceMetrics, ProbedDevice, StreamInfo } from '$lib/ts-bindings/http/client';
+import type { DeviceMetrics, PipelineSummary, ProbedDevice, StreamInfo } from '$lib/ts-bindings/http/client';
 import { resolveStreamAlias, resolveStreamLabel } from '$lib/utils/streamLabels';
 
 const REQUEST_TIMEOUT_MS = DEFAULT_REQUEST_TIMEOUT_MS;
 
 export async function fetchDashboardPageData(): Promise<DashboardPayload> {
-  const [streamsResult, camerasResult, nodesResult, metricsResult] = await Promise.allSettled([
+  const [streamsResult, camerasResult, pipelinesResult, metricsResult] = await Promise.allSettled([
     StreamsApi.listStreams({ timeoutMs: REQUEST_TIMEOUT_MS }),
-    cancellableWithTimeout(() => PeripheralsService.listCameras(), REQUEST_TIMEOUT_MS),
-    PipelinesApi.listRegistry({ timeoutMs: REQUEST_TIMEOUT_MS }),
-    cancellableWithTimeout(() => DeviceService.metrics(), REQUEST_TIMEOUT_MS)
+    PeripheralsApi.listCameras({ timeoutMs: REQUEST_TIMEOUT_MS }),
+    PipelinesApi.listGraphs({ timeoutMs: REQUEST_TIMEOUT_MS }),
+    DeviceApi.metrics({ timeoutMs: REQUEST_TIMEOUT_MS })
   ]);
 
-  const failures = [streamsResult, camerasResult, nodesResult, metricsResult].filter((result) => result.status === 'rejected').length;
+  const failures = [streamsResult, camerasResult, pipelinesResult, metricsResult].filter((result) => result.status === 'rejected').length;
   if (failures === 4) {
     throw new Error('All dashboard data requests failed');
   }
@@ -27,8 +28,8 @@ export async function fetchDashboardPageData(): Promise<DashboardPayload> {
   if (camerasResult.status === 'rejected') {
     console.warn('Camera inventory request failed', camerasResult.reason);
   }
-  if (nodesResult.status === 'rejected') {
-    console.warn('Pipeline registry request failed', nodesResult.reason);
+  if (pipelinesResult.status === 'rejected') {
+    console.warn('Pipeline graph list request failed', pipelinesResult.reason);
   }
   if (metricsResult.status === 'rejected') {
     console.warn('Device metrics request failed', metricsResult.reason);
@@ -40,13 +41,13 @@ export async function fetchDashboardPageData(): Promise<DashboardPayload> {
   const cameras = camerasResult.status === 'fulfilled' && Array.isArray(camerasResult.value.cameras)
     ? camerasResult.value.cameras
     : [];
-  const nodes = nodesResult.status === 'fulfilled' && Array.isArray(nodesResult.value.nodes)
-    ? nodesResult.value.nodes
+  const pipelines = pipelinesResult.status === 'fulfilled' && Array.isArray(pipelinesResult.value)
+    ? pipelinesResult.value
     : [];
   const metricsPayload = metricsResult.status === 'fulfilled' ? metricsResult.value : null;
 
-  const meta = buildDashboardMeta(streamsResult.status, camerasResult.status, nodesResult.status, metricsResult.status, failures);
-  const summaryStats = buildSummaryStats(streams, cameras, nodes, metricsPayload);
+  const meta = buildDashboardMeta(streamsResult.status, camerasResult.status, pipelinesResult.status, metricsResult.status, failures);
+  const summaryStats = buildSummaryStats(streams, cameras, pipelines, metricsPayload);
   const timelineItems = buildTimeline(metricsPayload);
   const pipelineWatch = buildPipelineWatch(streams);
   const streamGallery = buildStreamGallery(streams);
@@ -83,7 +84,7 @@ function buildDashboardMeta(
 function buildSummaryStats(
   streams: StreamInfo[],
   cameras: ProbedDevice[],
-  nodes: DaedalusRegistryNode[],
+  pipelines: PipelineSummary[],
   metrics: DeviceMetrics | null
 ): SummaryStat[] {
   const healthStatus = metrics ? 'OK' : 'Unknown';
@@ -94,8 +95,8 @@ function buildSummaryStats(
       value: String(streams.length)
     },
     {
-      label: 'Pipeline Nodes',
-      value: String(nodes.length)
+      label: 'Saved Pipelines',
+      value: String(pipelines.length)
     },
     {
       label: 'Connected Cameras',
@@ -110,7 +111,7 @@ function buildSummaryStats(
 
 function buildTimeline(metrics: DeviceMetrics | null): TimelineItem[] {
   const checkedLabel = formatTimestamp(new Date().toISOString());
-  const issues: any[] = [];
+  const issues: Array<{ code?: string; description?: string }> = [];
   const items: TimelineItem[] = [
     {
       title: 'Health check',

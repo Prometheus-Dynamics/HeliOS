@@ -45,7 +45,7 @@ Hostname is configured at:
 
 ### USB gadget networking (when enabled)
 
-Some images expose a USB gadget network interface (`usb0`). If you are using a direct laptop connection:
+Some images expose USB gadget networking (`usbbr0` on-device). If you are using a direct laptop connection:
 
 1. Plug your laptop into the device-mode USB-C port.
 2. Confirm your laptop gets a link-local / gadget address.

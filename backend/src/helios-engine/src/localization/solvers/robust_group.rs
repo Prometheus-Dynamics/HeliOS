@@ -4,7 +4,10 @@ use std::collections::{HashMap, HashSet};
 use lib_cv::modules::localization::{MarkerMap, MarkerObservation};
 use lib_cv::Rotation3;
 
-use super::{apply_imu_rotation_prior, default_supports_mode, push_detection_pose, source_looks_like_imu, LocalizationSolver, SolverContext, SolverOutcome};
+use super::{
+    apply_imu_rotation_prior, camera_field_pose_from_sample, default_supports_mode, push_detection_pose, robot_field_pose_from_camera_sample, source_looks_like_imu, LocalizationSolver, SolverContext,
+    SolverOutcome,
+};
 use crate::localization::config::{LocalizationPoseSpace, LocalizationSolverMode, LocalizationSolverRuntimeTuningConfig};
 use crate::localization::math::{compose_transforms, invert_transform, transform_to_pose, transform_to_rotation, transform_to_translation, PoseTransform};
 use crate::localization::merge::{merge_robot_estimates, merge_rotation_estimates};
@@ -369,20 +372,26 @@ impl LocalizationSolver for RobustGroupSolveSolver {
                     }
                     LocalizationPoseSpace::CameraInField => {
                         if needs_camera_in_field && !source_looks_like_imu(&sample.source) {
-                            let pose = if pose_sample.has_translation {
-                                Some(pose_sample.pose)
-                            } else if pose_sample.has_rotation {
-                                Some(PoseTransform { translation: Vector3::zeros(), rotation: pose_sample.pose.rotation })
-                            } else {
-                                None
-                            };
-                            if let Some(pose) = pose {
+                            if let Some(pose) = camera_field_pose_from_sample(pose_sample) {
                                 camera_outputs.push(LocalizationSourcePose {
                                     source_id: sample.source.id.clone(),
                                     camera_uid: sample.source.camera_uid.clone(),
                                     weight: sample.source.weight,
                                     pose: transform_to_pose(&pose),
                                 });
+                            }
+                        }
+                        if needs_robot_in_field && !source_looks_like_imu(&sample.source) {
+                            match robot_field_pose_from_camera_sample(sample, rig_poses) {
+                                Ok(Some(robot_pose)) => {
+                                    if robot_pose.has_translation {
+                                        translation_estimates.push((robot_pose.pose, sample.source.weight, sample.source.id.clone()));
+                                    } else if robot_pose.has_rotation {
+                                        non_imu_rotation_overrides.push((robot_pose.pose.rotation, sample.source.weight, sample.source.id.clone()));
+                                    }
+                                }
+                                Ok(None) => {}
+                                Err(err) => errors.push(err),
                             }
                         }
                     }
@@ -488,12 +497,14 @@ mod tests {
     }
 
     fn solver_config(mode: LocalizationSolverMode) -> LocalizationSolverConfig {
-        let mut runtime_tuning = LocalizationSolverRuntimeTuningConfig::default();
         // Make the base estimator deliberately permissive so outlier handling differences between
         // group and robust-group solvers are measurable in this regression test.
-        runtime_tuning.translation_consensus_inlier_scale = 3.0;
-        runtime_tuning.rotation_consensus_inlier_translation_scale = 2.6;
-        runtime_tuning.rotation_consensus_inlier_rotation_scale = 2.2;
+        let runtime_tuning = LocalizationSolverRuntimeTuningConfig {
+            translation_consensus_inlier_scale: 3.0,
+            rotation_consensus_inlier_translation_scale: 2.6,
+            rotation_consensus_inlier_rotation_scale: 2.2,
+            ..LocalizationSolverRuntimeTuningConfig::default()
+        };
 
         LocalizationSolverConfig {
             id: format!("solver_{mode:?}"),
@@ -583,7 +594,7 @@ mod tests {
 
             // Inject duplicate noisy observations for a subset of tags each frame. Group solve
             // uses all observations, while robust group solve keeps only the strongest one.
-            if ((frame_idx + marker.id as usize) % 3) == 0 {
+            if (frame_idx + marker.id as usize).is_multiple_of(3) {
                 let bad_pose = perturb_pose(&robot_from_tag, frame_idx + 11, marker.id + 100, true);
                 out.push(LocalizationDetection {
                     source_id: source.id.clone(),

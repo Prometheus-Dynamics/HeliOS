@@ -3,7 +3,7 @@ import { parseAnsiSegments, removeSegmentRange, segmentsToHtml, trimLeadingSegme
 import { detectLeadingLevelPrefix, extractLevelMarker, levelLineRemovalLength } from './levelDetection';
 
 export function decorateLogMessage(raw: string): DecoratedLogMessage {
-  let segments = parseAnsiSegments(raw);
+  const segments = parseAnsiSegments(raw);
   const sourceSegments = segments;
   const plainWithLevel = segments.map((segment) => segment.text).join('');
   const levelMarker = extractLevelMarker(segments);

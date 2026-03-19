@@ -1,5 +1,5 @@
 import { browser } from '$app/environment';
-import { derived, get, writable } from 'svelte/store';
+import { get, writable } from 'svelte/store';
 import { toaster } from '$lib';
 import { StreamsApi } from '$lib/api/streamsApi';
 import {
@@ -11,24 +11,20 @@ import {
   validatePipelineGraph
 } from './controller/io';
 import type {
-  PipelineAttachmentSummary,
   PipelineDataType,
   PipelineGraphPlan,
   PipelineDiagnosticWarning,
   PipelineNodeLayout,
   PipelineNodeValue,
-  PipelineNodeStyle,
   PipelineOverviewPipeline,
   PipelinePagePayload,
-  PipelineRegistryEntry,
   PipelineTemplateSummary,
   PipelineTypeDescriptor
 } from '$lib/types/pipeline';
 import type { StreamInfo } from '$lib/ts-bindings/http/client';
-import type { PipelineBinding } from '$lib/types/pipeline-api';
 import type { PipelineGraphEdgeSelection } from '$lib';
 import type { PipelineOutputEntry, PipelinePortEntry } from '../../components/pipelines/types';
-import { applyPaletteToGraphPlan, serializeGraphPlan, emptyPipelineGraphPlan } from './graph';
+import { applyPaletteToGraphPlan, serializeGraphPlan } from './graph';
 import { organizePipelineGraph } from './organize';
 import { buildRegistryVariants } from './registryUtils';
 import { fetchPipelinePagePayload } from '$lib/api/pipelinesPayload';
@@ -39,20 +35,16 @@ import {
   cloneGraphPlan,
   cloneDataType as cloneDataTypeModel,
   cloneNodeValue as cloneNodeValueModel,
-  cloneNodeSyncConfig,
-  fromApiGraphPlan
+  cloneNodeSyncConfig
 } from './model';
+import { fromApiGraphPlan } from './graphConverters';
+import { createPipelineValidationWorker } from '$lib/workers/factories';
 import { getDataTypeVariants, resolveDataTypeKey } from './valueFormatting';
 import {
-  normalizePipelinePortName,
-  PIPELINE_INPUT_BACKEND_ID,
-  PIPELINE_OUTPUT_BACKEND_ID,
-  refreshPipelineIoCaches,
-  removePipelineBoundaryNode
+  refreshPipelineIoCaches
 } from './boundary';
-import { describeError, coercePlanHash, truncatedPlanHashFromRevision, generateNodeId } from './controller/utils';
+import { describeError, truncatedPlanHashFromRevision, generateNodeId } from './controller/utils';
 import { buildPipelineInputEntries, buildPipelineOutputEntries } from './controller/planEntries';
-import { normalizeRegistry } from './controller/registryNormalization';
 import { normalizeDaedalusRegistry } from './controller/daedalusRegistry';
 import { reportError } from '$lib/ui/errorPolicy';
 import { createPipelineAutosaveManager } from './controller/autosave';
@@ -65,7 +57,6 @@ import { createPipelineDetailContext, createPipelineListState } from './controll
 import { createPipelinePayloadApplier } from './controller/pipelinePayload';
 import { hydrateGraphWithRegistry } from './styleHydration';
 import { createTypeHelpers } from './controller/typeHelpers';
-import { normalizeDiagnostics } from './diagnostics';
 import { createPlanSignature } from '$lib/components/flow/pipeline-graph/editorUtils';
 import { resolveNodeOrder } from './daedalusGraph';
 import { createPipelineMetricsState, removePipelineMetricsState } from './controller/metrics';
@@ -74,7 +65,6 @@ import { ensureHostIoNodeShape, findHostIoNodeId, resolveHostIoDirection } from 
 import { createPipelineRegistryState, resolveRegistryEntryForBackendId } from './controller/registry';
 import { createPipelineGraphContext } from './controller/graphContext';
 
-import type { CreatePipelineRequest, PipelineCreatedResponse } from '$lib/types/pipeline-api';
 import type { InspectorTabKey } from './controller/types';
 
 export type PipelineController = ReturnType<typeof createPipelineController>;
@@ -105,7 +95,6 @@ export function createPipelineController(initial: PipelinePagePayload, options: 
     availableCategories,
     availableProviders,
     hasActiveRegistryFilters,
-    registryEntriesFiltered,
     visibleRegistryEntries,
     registryGroups,
     setGraphContextSearch,
@@ -127,7 +116,7 @@ export function createPipelineController(initial: PipelinePagePayload, options: 
     cloneGraphPlan(plan, get(dataTypes));
   const clonePipeline = (pipeline: PipelineOverviewPipeline): PipelineOverviewPipeline =>
     clonePipelineModel(pipeline, get(dataTypes));
-  const { resolveTypeDescriptor, buildDataTypeFromKey } = createTypeHelpers({ dataTypes });
+  const { buildDataTypeFromKey } = createTypeHelpers({ dataTypes });
 
   const resolveRegistryEntry = (backendId: string | null | undefined) =>
     resolveRegistryEntryForBackendId(backendId, get(registry));
@@ -273,13 +262,13 @@ export function createPipelineController(initial: PipelinePagePayload, options: 
       };
 
       for (const [nodeId, metrics] of Object.entries(snapshot?.metrics ?? {})) {
-        const err = (metrics as any)?.lastError ?? null;
+        const err = metrics?.lastError ?? null;
         if (typeof err === 'string' && err.trim()) {
           pushWarning(nodeId, err);
         }
       }
       for (const [nodeId, metrics] of Object.entries(snapshot?.groups ?? {})) {
-        const err = (metrics as any)?.lastError ?? null;
+        const err = metrics?.lastError ?? null;
         if (typeof err === 'string' && err.trim()) {
           pushWarning(nodeId, err);
         }
@@ -609,7 +598,6 @@ export function createPipelineController(initial: PipelinePagePayload, options: 
   }
 
   const {
-    dataTypeForConnection,
     inferPortDataType,
     addNodeFromRegistry,
     groupSelection,
@@ -622,7 +610,6 @@ export function createPipelineController(initial: PipelinePagePayload, options: 
     addHostIoPort,
     removeHostIoPort,
     createBoundaryFromPort,
-    editBoundaryNode,
     editPipelinePort,
     removePipelinePort,
     setPipelineInputValue,
@@ -859,7 +846,7 @@ export function createPipelineController(initial: PipelinePagePayload, options: 
       return formatFallback();
     }
     if (!validationWorker) {
-      validationWorker = new Worker(new URL('$lib/workers/pipelineValidationWorker.ts', import.meta.url), { type: 'module' });
+      validationWorker = createPipelineValidationWorker();
       validationWorker.onmessage = (event) => {
         const payload = event.data as { requestId: number; warnings?: string[] };
         const resolver = validationResolvers.get(payload.requestId);
@@ -992,14 +979,14 @@ export function createPipelineController(initial: PipelinePagePayload, options: 
   }
 
   async function refreshPipelineOverview(options: { preserveDirty?: boolean } = {}) {
-    if (!browser || typeof fetch !== 'function') {
+    if (!browser) {
       return;
     }
     try {
       const preserveDirty = options.preserveDirty ?? true;
       const previousPipelinesById = new Map(get(pipelines).map((pipeline) => [pipeline.id, pipeline]));
       const previousDirtyState: Record<string, boolean> = preserveDirty ? get(dirtyState) : {};
-      const payload = await fetchPipelinePagePayload(fetch);
+      const payload = await fetchPipelinePagePayload();
       applyPipelinePayload(payload, { preserveDirty });
       const activePipelineId = get(selectedPipelineId);
       if (activePipelineId) {
@@ -1102,7 +1089,7 @@ export function createPipelineController(initial: PipelinePagePayload, options: 
     }
   }
 
-  async function detachAttachment(pipeline: PipelineOverviewPipeline, attachment: PipelineAttachmentSummary) {
+  async function detachAttachment() {
     toaster.error({
       title: 'Not supported',
       description: 'Detaching pipelines is disabled with the new pipeline API.'

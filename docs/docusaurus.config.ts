@@ -4,6 +4,22 @@ import type * as Preset from '@docusaurus/preset-classic';
 
 // This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
 
+const defaultRepository = 'Prometheus-Dynamics/HeliOS';
+const [defaultOrganizationName, defaultProjectName] = (
+  process.env.GITHUB_REPOSITORY || defaultRepository
+).split('/');
+
+const organizationName =
+  process.env.DOCUSAURUS_ORGANIZATION_NAME || defaultOrganizationName;
+const projectName = process.env.DOCUSAURUS_PROJECT_NAME || defaultProjectName;
+const siteUrl =
+  process.env.DOCUSAURUS_URL || `https://${organizationName}.github.io`;
+const siteBaseUrl =
+  process.env.DOCUSAURUS_BASE_URL || `/${projectName}/`;
+const editUrl =
+  process.env.DOCUSAURUS_EDIT_URL ||
+  `https://github.com/${organizationName}/${projectName}/tree/main/docs`;
+
 const config: Config = {
   title: 'Helios Docs',
   tagline: 'Instrument-grade pipelines and telemetry, documented.',
@@ -15,16 +31,15 @@ const config: Config = {
   },
 
   // Set the production url of your site here
-  url: 'https://docs.helios.local',
+  url: siteUrl,
   // Set the /<baseUrl>/ pathname under which your site is served
-  // For GitHub pages deployment, it is often '/<projectName>/'
-  baseUrl: process.env.DOCUSAURUS_BASE_URL || '/',
+  // For GitHub Pages project deployments, this is usually '/<projectName>/'.
+  baseUrl: siteBaseUrl,
   trailingSlash: true,
 
   // GitHub pages deployment config.
-  // If you aren't using GitHub pages, you don't need these.
-  organizationName: 'HeliOS', // Usually your GitHub org/user name.
-  projectName: 'helios-docs', // Usually your repo name.
+  organizationName,
+  projectName,
 
   onBrokenLinks: 'throw',
 
@@ -43,9 +58,7 @@ const config: Config = {
         docs: {
           sidebarPath: './sidebars.ts',
           routeBasePath: '/',
-          // Please change this to your repo.
-          // Remove this to remove the "edit this page" links.
-          editUrl: 'https://github.com/SozoAI/HeliOS/tree/main/docs',
+          editUrl,
         },
         // Release notes live as pages under src/pages/release-notes/.
         // Keep the blog disabled to avoid "blog-like" formatting for releases.

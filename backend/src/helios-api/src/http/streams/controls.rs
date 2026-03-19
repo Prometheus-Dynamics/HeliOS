@@ -6,104 +6,23 @@ use axum::{
 use helios_engine::capture::{CaptureControlInfo, CaptureControlValue, ControlAssignment};
 use helios_engine::ipc::StreamManifest;
 use helios_engine::ipc::{EngineErrorCode, EngineEvent};
-use once_cell::sync::Lazy;
-use std::collections::HashMap;
-use std::sync::RwLock;
-use std::time::{Duration, Instant};
-use tokio::time::{sleep, timeout};
+use std::process::Output;
+use std::time::Duration;
+use tokio::process::Command;
+use tokio::time::{Instant, sleep, timeout};
 use uuid::Uuid;
 
 use crate::http::AppState;
+use crate::http::streams::types::StartStreamResponse;
 
 use super::lifecycle;
 use super::util::camera_id_for_manifest;
-use super::util::{engine_error_body, map_client_error, update_persisted_manifest_by_stream_id};
+use super::util::{engine_error_body, map_client_error, update_persisted_manifest_by_stream_id_checked};
 use crate::http::streams_persist;
 
 const NOISE_REDUCTION_MODE: u32 = 10002;
-const CONTROL_CACHE_TTL: Duration = Duration::from_secs(30);
-const CONTROL_PERSIST_DEBOUNCE: Duration = Duration::from_millis(250);
 const CONTROL_APPLY_TIMEOUT: Duration = Duration::from_secs(3);
-
-#[derive(Clone)]
-struct ControlCacheEntry {
-    fetched_at: Instant,
-    controls: Vec<CaptureControlInfo>,
-}
-
-static CONTROL_CACHE: Lazy<RwLock<HashMap<Uuid, ControlCacheEntry>>> = Lazy::new(|| RwLock::new(HashMap::new()));
-
-#[derive(Clone)]
-struct ControlPersistEntry {
-    version: u64,
-    manifest: StreamManifest,
-    running: bool,
-}
-
-static CONTROL_PERSIST: Lazy<tokio::sync::Mutex<HashMap<Uuid, ControlPersistEntry>>> = Lazy::new(|| tokio::sync::Mutex::new(HashMap::new()));
-
-fn cache_controls(stream_id: Uuid, controls: &[CaptureControlInfo]) {
-    let Ok(mut guard) = CONTROL_CACHE.write() else {
-        return;
-    };
-    guard.insert(stream_id, ControlCacheEntry { fetched_at: Instant::now(), controls: controls.to_vec() });
-}
-
-fn cached_controls(stream_id: Uuid) -> Option<Vec<CaptureControlInfo>> {
-    let Ok(guard) = CONTROL_CACHE.read() else {
-        return None;
-    };
-    let entry = guard.get(&stream_id)?;
-    if entry.fetched_at.elapsed() > CONTROL_CACHE_TTL {
-        return None;
-    }
-    Some(entry.controls.clone())
-}
-
-async fn queue_control_persist(stream_id: Uuid, manifest: StreamManifest) {
-    let (spawn_worker, version) = {
-        let mut guard = CONTROL_PERSIST.lock().await;
-        let entry = guard.entry(stream_id).or_insert(ControlPersistEntry { version: 0, manifest: manifest.clone(), running: false });
-        entry.version = entry.version.saturating_add(1);
-        entry.manifest = manifest;
-        let spawn_worker = if !entry.running {
-            entry.running = true;
-            true
-        } else {
-            false
-        };
-        (spawn_worker, entry.version)
-    };
-
-    if !spawn_worker {
-        return;
-    }
-
-    tokio::spawn(async move {
-        let mut last_version = version;
-        loop {
-            sleep(CONTROL_PERSIST_DEBOUNCE).await;
-            let maybe_manifest = {
-                let mut guard = CONTROL_PERSIST.lock().await;
-                let Some(entry) = guard.get_mut(&stream_id) else {
-                    return;
-                };
-                if entry.version == last_version {
-                    entry.running = false;
-                    Some(entry.manifest.clone())
-                } else {
-                    last_version = entry.version;
-                    None
-                }
-            };
-
-            if let Some(manifest) = maybe_manifest {
-                streams_persist::persist_manifest(&camera_id_for_manifest(&manifest), Some(stream_id), manifest).await;
-                return;
-            }
-        }
-    });
-}
+const ENGINE_RESTART_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn numeric_bounds(value: &CaptureControlValue) -> Option<(f64, f64)> {
     match value {
@@ -156,6 +75,10 @@ fn replay_frame_range_adjustment(controls: &[CaptureControlInfo], manifest: &Str
 }
 
 fn validate_control_value(meta: &CaptureControlInfo, value: &CaptureControlValue) -> Result<(), String> {
+    if matches!(meta.access, styx::core::controls::Access::ReadOnly) {
+        return Err("control is read-only".into());
+    }
+
     // Allow explicit "none" as a best-effort reset/clear operation.
     if matches!(value, CaptureControlValue::None) {
         return Ok(());
@@ -205,6 +128,48 @@ fn validate_control_value(meta: &CaptureControlInfo, value: &CaptureControlValue
     Ok(())
 }
 
+async fn restart_engine_service() -> std::io::Result<Output> {
+    Command::new("systemctl").args(["restart", "--no-block", "helios-engine.service"]).output().await
+}
+
+async fn restart_engine_and_wait_for_stream(state: &AppState, stream_id: Uuid) -> Result<Option<helios_engine::capture::CaptureDescriptor>, Response> {
+    match restart_engine_service().await {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let message = if !stderr.is_empty() {
+                stderr
+            } else if !stdout.is_empty() {
+                stdout
+            } else {
+                format!("systemctl exited with {}", output.status)
+            };
+            return Err((StatusCode::BAD_GATEWAY, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("failed to restart engine service: {message}")))).into_response());
+        }
+        Err(err) => {
+            return Err((StatusCode::BAD_GATEWAY, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("failed to restart engine service: {err}")))).into_response());
+        }
+    }
+
+    let deadline = Instant::now() + ENGINE_RESTART_TIMEOUT;
+    while Instant::now() < deadline {
+        match state.engine.list_streams_with_timeout(Duration::from_secs(2)).await {
+            Ok(streams) => {
+                if let Some(found) = streams.into_iter().find(|stream| stream.stream_id == stream_id) {
+                    return Ok(Some(found.descriptor));
+                }
+            }
+            Err(_) => {
+                // Expected while the engine service is in the middle of restarting.
+            }
+        }
+        sleep(Duration::from_millis(500)).await;
+    }
+
+    Ok(None)
+}
+
 pub(crate) async fn get_controls(state: AppState, id: Uuid) -> Response {
     let mut result = state.engine.get_controls(id).await;
     if result.is_err() {
@@ -212,7 +177,7 @@ pub(crate) async fn get_controls(state: AppState, id: Uuid) -> Response {
     }
     match result {
         Ok(EngineEvent::Controls { controls, .. }) => {
-            cache_controls(id, &controls);
+            state.services.streams.cache_controls(id, &controls);
             Json::<Vec<CaptureControlInfo>>(controls).into_response()
         }
         Ok(EngineEvent::Nack { code, reason, .. }) => (StatusCode::BAD_REQUEST, Json(engine_error_body(Some(code), reason))).into_response(),
@@ -235,11 +200,11 @@ async fn apply_engine_control(state: &AppState, stream_id: Uuid, control_id: u32
 pub(crate) async fn set_control(state: AppState, id: Uuid, control_id: u32, value: CaptureControlValue) -> Response {
     // Validate against live control metadata to prevent invalid/out-of-range values from
     // crashing libcamera (or the stack) when clients send raw numbers.
-    let mut controls = cached_controls(id);
+    let mut controls = state.services.streams.cached_controls(id);
     if controls.is_none()
         && let Ok(EngineEvent::Controls { controls: fetched, .. }) = state.engine.get_controls(id).await
     {
-        cache_controls(id, &fetched);
+        state.services.streams.cache_controls(id, &fetched);
         controls = Some(fetched);
     }
     if let Some(ref controls) = controls
@@ -249,7 +214,7 @@ pub(crate) async fn set_control(state: AppState, id: Uuid, control_id: u32, valu
         return (StatusCode::BAD_REQUEST, Json(engine_error_body(Some(EngineErrorCode::InvalidInput), msg))).into_response();
     }
 
-    let stream_manifest = state.engine.list_streams().await.ok().and_then(|streams| streams.into_iter().find(|stream| stream.stream_id == id).map(|stream| stream.manifest));
+    let stream_manifest = state.services.streams.load_live_stream_manifest(&state, id).await;
     let is_file_backend = stream_manifest.as_ref().is_some_and(|manifest| manifest.capture.backend == styx::BackendKind::File);
     let adjusted_pair = match (&controls, &stream_manifest) {
         (Some(controls), Some(manifest)) => replay_frame_range_adjustment(controls, manifest, control_id, &value),
@@ -265,10 +230,72 @@ pub(crate) async fn set_control(state: AppState, id: Uuid, control_id: u32, valu
         && stream_manifest.as_ref().is_some_and(|manifest| manifest.capture.backend == styx::BackendKind::Libcamera)
         && let Some(mut manifest) = stream_manifest.clone()
     {
+        let previous_manifest = manifest.clone();
         apply_control_to_manifest(&mut manifest, control_id, value.clone());
-        streams_persist::persist_manifest(&camera_id_for_manifest(&manifest), Some(id), manifest.clone()).await;
-        let _ = state.engine.stop_stream(id).await;
-        return lifecycle::start_stream(state, manifest).await;
+        if let Err(err) = streams_persist::persist_manifest_checked(&camera_id_for_manifest(&manifest), Some(id), manifest.clone()).await {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("control update failed to persist before restart: {err}")))).into_response();
+        }
+        match restart_engine_and_wait_for_stream(&state, id).await {
+            Ok(Some(descriptor)) => {
+                return (StatusCode::OK, Json(StartStreamResponse { stream_id: id, descriptor })).into_response();
+            }
+            Ok(None) => {}
+            Err(response) => {
+                tracing::warn!(
+                    stream_id = %id,
+                    control_id,
+                    "controlled engine restart did not restore stream; rolling back manifest"
+                );
+
+                if let Err(err) = streams_persist::persist_manifest_checked(&camera_id_for_manifest(&previous_manifest), Some(id), previous_manifest.clone()).await {
+                    tracing::error!(
+                        stream_id = %id,
+                        control_id,
+                        error = %err,
+                        "failed to persist rollback manifest after libcamera control restart failure"
+                    );
+                    return response;
+                }
+
+                let rollback = restart_engine_and_wait_for_stream(&state, id).await;
+                if let Err(rollback_response) = rollback {
+                    tracing::error!(
+                        stream_id = %id,
+                        control_id,
+                        status = %rollback_response.status(),
+                        "rollback restart failed after controlled engine restart failure"
+                    );
+                }
+                return response;
+            }
+        }
+
+        tracing::warn!(
+            stream_id = %id,
+            control_id,
+            "controlled engine restart did not restore stream; rolling back to previous stream manifest"
+        );
+
+        if let Err(err) = streams_persist::persist_manifest_checked(&camera_id_for_manifest(&previous_manifest), Some(id), previous_manifest.clone()).await {
+            tracing::error!(
+                stream_id = %id,
+                control_id,
+                error = %err,
+                "failed to persist rollback manifest after libcamera control restart failure"
+            );
+            return (StatusCode::BAD_GATEWAY, Json(engine_error_body(Some(EngineErrorCode::Internal), "stream did not recover after controlled engine restart"))).into_response();
+        }
+
+        let rollback = restart_engine_and_wait_for_stream(&state, id).await;
+        if let Err(rollback_response) = rollback {
+            tracing::error!(
+                stream_id = %id,
+                control_id,
+                status = %rollback_response.status(),
+                "rollback restart failed after libcamera control restart failure"
+            );
+        }
+        return (StatusCode::BAD_GATEWAY, Json(engine_error_body(Some(EngineErrorCode::Internal), "stream did not recover after controlled engine restart"))).into_response();
     }
 
     // For replay start/stop range corrections, apply the sibling first so we never place the
@@ -303,7 +330,10 @@ pub(crate) async fn set_control(state: AppState, id: Uuid, control_id: u32, valu
                     for (restart_control_id, restart_control_value) in &controls_to_apply {
                         apply_control_to_manifest(&mut manifest, *restart_control_id, restart_control_value.clone());
                     }
-                    streams_persist::persist_manifest(&camera_id_for_manifest(&manifest), Some(id), manifest.clone()).await;
+                    if let Err(err) = streams_persist::persist_manifest_checked(&camera_id_for_manifest(&manifest), Some(id), manifest.clone()).await {
+                        return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("control update failed to persist before replay restart: {err}"))))
+                            .into_response();
+                    }
                     let _ = state.engine.stop_stream(id).await;
                     let restart = lifecycle::start_stream(state.clone(), manifest).await;
                     if restart.status().is_success() {
@@ -323,8 +353,10 @@ pub(crate) async fn set_control(state: AppState, id: Uuid, control_id: u32, valu
 
     // File-backend controls are sanitized/applied in-engine as one coherent set. Persist exactly
     // what the engine now holds to avoid writing stale or transiently-invalid frame ranges.
-    if is_file_backend && let Some(manifest) = state.engine.list_streams().await.ok().and_then(|streams| streams.into_iter().find(|stream| stream.stream_id == id).map(|stream| stream.manifest)) {
-        queue_control_persist(id, manifest).await;
+    if is_file_backend && let Some(manifest) = state.services.streams.load_live_stream_manifest(&state, id).await {
+        if let Err(err) = streams_persist::persist_manifest_checked(&camera_id_for_manifest(&manifest), Some(id), manifest).await {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("control applied live but failed to persist: {err}")))).into_response();
+        }
         return StatusCode::NO_CONTENT.into_response();
     }
 
@@ -333,15 +365,21 @@ pub(crate) async fn set_control(state: AppState, id: Uuid, control_id: u32, valu
             apply_control_to_manifest(&mut manifest, paired_control_id, paired_value);
         }
         apply_control_to_manifest(&mut manifest, control_id, value.clone());
-        queue_control_persist(id, manifest).await;
+        if let Err(err) = streams_persist::persist_manifest_checked(&camera_id_for_manifest(&manifest), Some(id), manifest).await {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("control applied live but failed to persist: {err}")))).into_response();
+        }
     } else {
-        let _ = update_persisted_manifest_by_stream_id(id, |manifest| {
+        if let Err(err) = update_persisted_manifest_by_stream_id_checked(id, |manifest| {
             if let Some((paired_control_id, paired_value)) = adjusted_pair.clone() {
                 apply_control_to_manifest(manifest, paired_control_id, paired_value);
             }
             apply_control_to_manifest(manifest, control_id, value.clone());
         })
-        .await;
+        .await
+        {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("control applied to persisted stream but failed to save: {err}"))))
+                .into_response();
+        }
     }
     StatusCode::NO_CONTENT.into_response()
 }

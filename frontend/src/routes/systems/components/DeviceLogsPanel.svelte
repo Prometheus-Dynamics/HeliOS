@@ -2,8 +2,9 @@
   import { onMount } from 'svelte';
   import DeviceLogsTerminal from './DeviceLogsTerminal.svelte';
   import { buildLogsDownloadUrl, fetchLogSources, type LogSource } from '$lib/api/deviceLogs';
+  import { createDomainResource } from '$lib/api/domainResources';
   import { createAsyncState } from '$lib/utils/asyncState';
-  import { createRefreshableResource } from '$lib/utils/refreshableResource';
+  import { SvelteMap } from 'svelte/reactivity';
 
   let sources = $state<LogSource[]>([]);
   const sourcesState = createAsyncState();
@@ -27,15 +28,16 @@
   const LOG_SOURCES_CACHE_KEY = 'logs:sources:v1';
   const LOG_SOURCES_CACHE_STALE_MS = 10_000;
   const LOG_SOURCES_CACHE_MAX_MS = 120_000;
-  const logSourcesResource = createRefreshableResource({
+  const logSourcesResource = createDomainResource({
     key: LOG_SOURCES_CACHE_KEY,
     loader: fetchLogSources,
     staleMs: LOG_SOURCES_CACHE_STALE_MS,
-    maxAgeMs: LOG_SOURCES_CACHE_MAX_MS
+    maxAgeMs: LOG_SOURCES_CACHE_MAX_MS,
+    kinds: ['device', 'settings']
   });
 
   const grouped = $derived.by(() => {
-    const map = new Map<string, LogSource[]>();
+    const map = new SvelteMap<string, LogSource[]>();
     for (const source of sources) {
       const key = source.group || 'Other';
       const list = map.get(key) ?? [];
@@ -59,6 +61,9 @@
       }
     }
     void refreshSources();
+    return logSourcesResource.subscribeInvalidations(() => {
+      void refreshSources();
+    }, { debounceMs: 250 });
   });
 
   async function refreshSources(): Promise<void> {
@@ -92,8 +97,6 @@
     findDirection = direction;
     findToken += 1;
   }
-
-  const selectedSource = $derived.by(() => sources.find((s) => s.id === selectedSourceId) ?? null);
 
   function formatUnitStatus(source: LogSource): string | null {
     if (!source.status) return null;

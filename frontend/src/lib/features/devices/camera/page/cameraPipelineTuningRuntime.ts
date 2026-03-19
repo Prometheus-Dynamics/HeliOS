@@ -1,19 +1,45 @@
 import { createPipelineTuningController } from './cameraPipelineTuningController';
-import type { PipelineDataType } from '$lib/types/pipeline';
+
+type TuningControllerState = Parameters<typeof createPipelineTuningController>[0];
+type TuningControllerDeps = Parameters<typeof createPipelineTuningController>[1];
+type TuningDerivedState = Pick<TuningControllerState, 'pipelineTuningPlan' | 'pipelineTuningGraph'>;
+type TuningPipelineState = Pick<
+  TuningControllerState,
+  | 'pipelineTuningPanelOpen'
+  | 'pipelineTuningPipelineId'
+  | 'pipelineTuningEngineConfigOpen'
+  | 'pipelineTuningError'
+  | 'pipelineTuningLoading'
+  | 'pipelineTuningDragState'
+  | 'pipelineTuningResizeState'
+  | 'pipelineTuningPosition'
+  | 'pipelineTuningSize'
+  | 'pipelineTuningUiOverride'
+  | 'pipelineTuningGraphOverride'
+  | 'pipelineTuningLiveGraph'
+  | 'pipelineInputOverridesById'
+  | 'pipelineNodeOverridesById'
+  | 'pipelineInputDraftsById'
+  | 'pipelineNodeDraftsById'
+  | 'pipelineInputErrorsById'
+  | 'pipelineNodeErrorsById'
+  | 'pipelineTuningApplyBusy'
+  | 'pipelineTuningApplyQueuedById'
+  | 'pipelineTuningLastAppliedSignatureById'
+  | 'pipelineTuningLastAppliedNodeOverridesById'
+  | 'pipelineTuningApplyRafById'
+>;
 
 type TuningRuntimeArgs = {
   streamId: string;
-  stream: () => any;
-  pipelineState: any;
-  derived: any;
-  ensurePipelineRegistry: () => Promise<void>;
-  ensurePipelineGraphAndOutputs: (
-    pipelineId: string,
-    forceRefresh?: boolean
-  ) => Promise<{ graphJson: any; filtered: string[]; types: Record<string, PipelineDataType | null | undefined> }>;
-  awaitStreamUpdatesSocket: (streamId: string, timeoutMs?: number) => Promise<unknown>;
-  pipelineGraphCache: () => any;
-  pipelineRegistrySnapshot: () => any;
+  stream: () => TuningControllerState['stream'];
+  pipelineState: TuningPipelineState;
+  derived: TuningDerivedState;
+  ensurePipelineRegistry: TuningControllerDeps['ensurePipelineRegistry'];
+  ensurePipelineGraphAndOutputs: TuningControllerDeps['ensurePipelineGraphAndOutputs'];
+  awaitStreamUpdatesSocket: TuningControllerDeps['awaitStreamUpdatesSocket'];
+  pipelineGraphCache: () => TuningControllerState['pipelineGraphCache'];
+  pipelineRegistrySnapshot: () => TuningControllerState['pipelineRegistrySnapshot'];
 };
 
 export function createCameraPipelineTuningRuntime(args: TuningRuntimeArgs) {

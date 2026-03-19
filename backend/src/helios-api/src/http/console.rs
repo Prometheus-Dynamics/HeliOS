@@ -15,7 +15,7 @@ use super::AppState;
 use super::error::{ApiError, ApiResult};
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/sessions", get(list_sessions).post(create_session)).route("/sessions/:session_id", delete(delete_session))
+    Router::new().route("/sessions", get(list_sessions).post(create_session)).route("/sessions/{session_id}", delete(delete_session))
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

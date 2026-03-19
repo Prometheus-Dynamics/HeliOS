@@ -1,43 +1,28 @@
 <script lang="ts">
 
   import { browser } from '$app/environment';
-  import { onDestroy, onMount, type Snippet } from 'svelte';
+  import { onDestroy, onMount, untrack, type Snippet } from 'svelte';
   import { derived, get, writable } from 'svelte/store';
   import { toaster, OpenAPI } from '$lib';
+  import { subscribeDomainInvalidations } from '$lib/api/invalidation';
+  import { scheduleAfterPaint, scheduleWhenIdle } from '$lib/utils/browserSchedule';
   import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
   import { PipelinesApi } from '$lib/api/pipelinesApi';
-  import { connectRealtimeUpdatesStream, type RealtimeUpdateEvent } from '$lib/api/realtimeUpdates';
+  import { realtimeUpdateMatchesKind, type RealtimeUpdateEvent } from '$lib/api/realtimeUpdates';
   import { StreamsApi } from '$lib/api/streamsApi';
   import { createPipelinePageStore } from '$lib/features/pipelines/pageStore';
   import type { PageData } from '../../../../routes/pipelines/$types';
   import type {
-    ChannelPolicy,
-    PipelineConnectionStyle,
     PipelineDataType,
     PipelineGraphPlan,
-    PipelineNodeValue,
-    PipelineInputQueueConfig,
-    PipelineOutputSinkConfig,
     PipelineOverviewPipeline,
-    PipelineNodeLayout,
-    PipelineNodeMetadata,
-    PipelinePortMetadata,
-    PipelineTemplateSummary
   } from '$lib/types/pipeline';
-  import type { PipelineGraphPoint, PipelineGraphEdgeSelection } from '$lib';
   import { serializeGraphPlan, applyPaletteToGraphPlan, emptyPipelineGraphPlan } from '$lib/features/pipelines/graph';
-  import { buildDaedalusGraphPatch, type DaedalusGraphPatch } from '$lib/features/pipelines/daedalusGraph';
+  import { buildDaedalusGraphPatch } from '$lib/features/pipelines/daedalusGraph';
   import { collectPipelineOutputs } from '$lib/features/pipelines/boundary';
   import { refreshPipelineIoCaches } from '$lib/features/pipelines/boundary';
-  import { fromApiGraphPlan } from '$lib/features/pipelines/model';
+  import { fromApiGraphPlan } from '$lib/features/pipelines/graphConverters';
   import { createRegistryResolver } from '$lib/components/flow/pipeline-graph/registry';
-  import PipelineListPanel from '$lib/features/pipelines/page/PipelineListPanel.svelte';
-  import PipelineInspectorPanel from '$lib/features/pipelines/page/PipelineInspectorPanel.svelte';
-  import PipelineModals from '$lib/features/pipelines/page/PipelineModals.svelte';
-  import PipelineGraphWorkspace from '$lib/features/pipelines/page/PipelineGraphWorkspace.svelte';
-  import PipelineGraphContextMenu from '$lib/features/pipelines/page/PipelineGraphContextMenu.svelte';
-  import PipelineTunePanel from '$lib/features/pipelines/page/PipelineTunePanel.svelte';
-  import PipelineIdePanel from '$lib/features/pipelines/page/PipelineIdePanel.svelte';
   import {
     DEFAULT_PIPELINE_COLOR,
     DEFAULT_PIPELINE_ICON_ID,
@@ -75,10 +60,20 @@
     safeClonePlan
   } from './pipelineTuneConstantUtils';
 
-  const { data, children: routeChildren } = $props<{ data: PageData; children?: Snippet<[ { ctx: any } ]> }>();
-  const initial: PipelinePagePayload = data;
+  const {
+    data,
+    initialPipelineId = null,
+    children: routeChildren
+  } = $props<{ data: PageData; initialPipelineId?: string | null; children?: Snippet<[ { ctx: Record<string, unknown> } ]> }>();
+  const initial = untrack(() => data as PipelinePagePayload);
+  const hasInitialPipelineData = Boolean(
+    initial.registry.length ||
+      initial.templates.length ||
+      Object.keys(initial.dataTypes ?? {}).length ||
+      initial.pipelines.some((pipeline) => graphPlanHasWorkspaceData(pipeline.graph))
+  );
 
-  const pageStore = createPipelinePageStore(initial);
+  const pageStore = untrack(() => createPipelinePageStore(initial));
   const { controller, pipelineUpdates, activeTab, registryDrawerOpen, dispose: disposePageStore } = pageStore;
   const pipelineUpdatesReady = pipelineUpdates.pipelineReady;
   const streamUpdatesReadyById = pipelineUpdates.streamReadyById;
@@ -98,16 +93,113 @@
   let PipelineDetailPanelComponent = $state<
     (typeof import('$lib/components/pipelines/PipelineDetailPanel.svelte'))['default'] | null
   >(null);
+  let PipelineListPanelComponent = $state<
+    (typeof import('$lib/features/pipelines/page/PipelineListPanel.svelte'))['default'] | null
+  >(null);
+  let PipelineInspectorPanelComponent = $state<
+    (typeof import('$lib/features/pipelines/page/PipelineInspectorPanel.svelte'))['default'] | null
+  >(null);
+  let PipelineModalsComponent = $state<
+    (typeof import('$lib/features/pipelines/page/PipelineModals.svelte'))['default'] | null
+  >(null);
+  let PipelineGraphWorkspaceComponent = $state<
+    (typeof import('$lib/features/pipelines/page/PipelineGraphWorkspace.svelte'))['default'] | null
+  >(null);
+  let PipelineGraphContextMenuComponent = $state<
+    (typeof import('$lib/features/pipelines/page/PipelineGraphContextMenu.svelte'))['default'] | null
+  >(null);
+  let PipelineTunePanelComponent = $state<
+    (typeof import('$lib/features/pipelines/page/PipelineTunePanel.svelte'))['default'] | null
+  >(null);
+
+  const componentLoads: Partial<Record<
+    | 'detail'
+    | 'list'
+    | 'inspector'
+    | 'modals'
+    | 'graph-workspace'
+    | 'graph-context'
+    | 'tune',
+    Promise<void>
+  >> = {};
+
+  function loadComponentOnce(
+    key: 'detail' | 'list' | 'inspector' | 'modals' | 'graph-workspace' | 'graph-context' | 'tune',
+    loader: () => Promise<void>
+  ): Promise<void> {
+    const inFlight = componentLoads[key];
+    if (inFlight) {
+      return inFlight;
+    }
+    const next = loader().finally(() => {
+      componentLoads[key] = undefined;
+    });
+    componentLoads[key] = next;
+    return next;
+  }
 
   async function loadPipelineDetailPanel(): Promise<void> {
     if (!browser || PipelineDetailPanelComponent) return;
-    const module = await import('$lib/components/pipelines/PipelineDetailPanel.svelte');
-    PipelineDetailPanelComponent = module.default;
+    await loadComponentOnce('detail', async () => {
+      const module = await import('$lib/components/pipelines/PipelineDetailPanel.svelte');
+      PipelineDetailPanelComponent = module.default;
+    });
+  }
+
+  async function loadPipelineShellComponents(): Promise<void> {
+    await Promise.all([
+      PipelineListPanelComponent
+        ? Promise.resolve()
+        : loadComponentOnce('list', async () => {
+            const module = await import('$lib/features/pipelines/page/PipelineListPanel.svelte');
+            PipelineListPanelComponent = module.default;
+          }),
+      PipelineInspectorPanelComponent
+        ? Promise.resolve()
+        : loadComponentOnce('inspector', async () => {
+            const module = await import('$lib/features/pipelines/page/PipelineInspectorPanel.svelte');
+            PipelineInspectorPanelComponent = module.default;
+          })
+    ]);
+  }
+
+  async function loadPipelineGraphComponents(): Promise<void> {
+    await Promise.all([
+      PipelineGraphWorkspaceComponent
+        ? Promise.resolve()
+        : loadComponentOnce('graph-workspace', async () => {
+            const module = await import('$lib/features/pipelines/page/PipelineGraphWorkspace.svelte');
+            PipelineGraphWorkspaceComponent = module.default;
+          }),
+      PipelineGraphContextMenuComponent
+        ? Promise.resolve()
+        : loadComponentOnce('graph-context', async () => {
+            const module = await import('$lib/features/pipelines/page/PipelineGraphContextMenu.svelte');
+            PipelineGraphContextMenuComponent = module.default;
+          }),
+      loadPipelineDetailPanel()
+    ]);
+  }
+
+  async function loadPipelineTunePanel(): Promise<void> {
+    if (PipelineTunePanelComponent) return;
+    await loadComponentOnce('tune', async () => {
+      const module = await import('$lib/features/pipelines/page/PipelineTunePanel.svelte');
+      PipelineTunePanelComponent = module.default;
+    });
+  }
+
+  async function loadPipelineModals(): Promise<void> {
+    if (PipelineModalsComponent) return;
+    await loadComponentOnce('modals', async () => {
+      const module = await import('$lib/features/pipelines/page/PipelineModals.svelte');
+      PipelineModalsComponent = module.default;
+    });
   }
   const { registry: registryHelpers } = controller.helpers;
 
   const RAW_STREAM_PIPELINE_ID = '__raw__';
-  const RAW_STREAM_PIPELINE_UUID = '00000000-0000-0000-0000-0000000000aa';
+  let rawStreamPipelineUuid = $state('');
 
   const {
     pipelineLabelById,
@@ -263,9 +355,10 @@
   const { validateCurrentPipeline } = controller.actions;
 
   let pipelineRefreshCount = $state(0);
-  let pipelinesBootstrapped = $state(false);
+  let pipelinesBootstrapped = $state(hasInitialPipelineData);
+  let pipelineUiReady = $state(false);
   const pipelinesRefreshing = $derived(pipelineRefreshCount > 0);
-  const isInitialLoading = $derived(!pipelinesBootstrapped && pipelinesRefreshing);
+  const isInitialLoading = $derived(!pipelineUiReady || (!pipelinesBootstrapped && pipelinesRefreshing));
 
   let importInput = $state<HTMLInputElement | null>(null);
   const {
@@ -322,14 +415,26 @@
   const deleteModalBusy = writable(false);
   const deleteModalError = writable<string | null>(null);
   const PIPELINE_FOCUS_REQUEST_KEY = 'helios.pipelines.focus_request';
-  const LIVE_UPDATES_RECONNECT_MS = 1_500;
   const LIVE_UPDATES_REFRESH_DEBOUNCE_MS = 300;
   type PipelineFocusRequest = { pipelineId: string; nodeId?: string | null; port?: string | null };
   let pendingPipelineFocus = $state<PipelineFocusRequest | null>(null);
-  let liveUpdatesCleanup: (() => void) | null = null;
-  let liveUpdatesReconnectHandle: number | null = null;
+  let stopLiveUpdates: (() => void) | null = null;
   let liveUpdatesRefreshHandle: number | null = null;
-  let liveUpdatesNonce = 0;
+  let cancelPipelineUiBoot: (() => void) | null = null;
+  let cancelPipelineBootstrapRefresh: (() => void) | null = null;
+  let cancelPipelineIdleWarmup: (() => void) | null = null;
+  let cancelPipelineGraphWarmup: (() => void) | null = null;
+  let cancelPipelineTuneWarmup: (() => void) | null = null;
+  let initialSelectionApplied = $state(false);
+
+  function graphPlanHasWorkspaceData(plan: PipelineGraphPlan | null | undefined): boolean {
+    if (!plan || typeof plan !== 'object') return false;
+    if (Object.keys(plan.nodes ?? {}).length > 0) return true;
+    if ((plan.connections?.length ?? 0) > 0) return true;
+    if (Object.keys(plan.pipelineInputs ?? {}).length > 0) return true;
+    if (Object.keys(plan.pipelineOutputs ?? {}).length > 0) return true;
+    return false;
+  }
 
   function shouldApplyLiveUpdate(event: RealtimeUpdateEvent): boolean {
     if (
@@ -340,14 +445,14 @@
     ) {
       return true;
     }
-    if (event.kind === 'api') {
+    if (realtimeUpdateMatchesKind(event, 'api')) {
       return false;
     }
     return (
-      event.kind === 'pipelines' ||
-      event.kind === 'streams' ||
-      event.kind === 'device' ||
-      event.kind === 'settings'
+      realtimeUpdateMatchesKind(event, 'pipelines') ||
+      realtimeUpdateMatchesKind(event, 'streams') ||
+      realtimeUpdateMatchesKind(event, 'device') ||
+      realtimeUpdateMatchesKind(event, 'settings')
     );
   }
 
@@ -360,56 +465,6 @@
       void loadPipelineOverview({ preserveDirty: true });
       void refreshCaptureDevices();
     }, LIVE_UPDATES_REFRESH_DEBOUNCE_MS);
-  }
-
-  function scheduleLiveUpdatesReconnect(): void {
-    if (!browser) return;
-    if (liveUpdatesReconnectHandle != null) return;
-    liveUpdatesReconnectHandle = window.setTimeout(() => {
-      liveUpdatesReconnectHandle = null;
-      connectLiveUpdates();
-    }, LIVE_UPDATES_RECONNECT_MS);
-  }
-
-  function disconnectLiveUpdates(): void {
-    liveUpdatesNonce += 1;
-    if (liveUpdatesReconnectHandle != null) {
-      clearTimeout(liveUpdatesReconnectHandle);
-      liveUpdatesReconnectHandle = null;
-    }
-    if (liveUpdatesRefreshHandle != null) {
-      clearTimeout(liveUpdatesRefreshHandle);
-      liveUpdatesRefreshHandle = null;
-    }
-    liveUpdatesCleanup?.();
-    liveUpdatesCleanup = null;
-  }
-
-  function connectLiveUpdates(): void {
-    if (!browser) return;
-    const nonce = (liveUpdatesNonce += 1);
-    if (liveUpdatesReconnectHandle != null) {
-      clearTimeout(liveUpdatesReconnectHandle);
-      liveUpdatesReconnectHandle = null;
-    }
-    liveUpdatesCleanup?.();
-    liveUpdatesCleanup = null;
-    liveUpdatesCleanup = connectRealtimeUpdatesStream({
-      onChange: (event) => {
-        if (nonce !== liveUpdatesNonce) return;
-        if (document.hidden) return;
-        if (!shouldApplyLiveUpdate(event)) return;
-        scheduleLiveUpdatesRefresh();
-      },
-      onClose: () => {
-        if (nonce !== liveUpdatesNonce) return;
-        scheduleLiveUpdatesReconnect();
-      },
-      onError: () => {
-        if (nonce !== liveUpdatesNonce) return;
-        scheduleLiveUpdatesReconnect();
-      }
-    });
   }
 
   function consumePipelineFocusRequest(): void {
@@ -447,6 +502,21 @@
     pendingPipelineFocus = null;
   });
 
+  $effect(() => {
+    if (initialSelectionApplied) return;
+    const pipelineId = typeof initialPipelineId === 'string' ? initialPipelineId.trim() : '';
+    if (!pipelineId) {
+      initialSelectionApplied = true;
+      return;
+    }
+    if ($selectedPipelineId === pipelineId) {
+      initialSelectionApplied = true;
+      return;
+    }
+    setSelectedPipeline(pipelineId);
+    initialSelectionApplied = true;
+  });
+
   async function loadPipelineOverview(options: { bootstrap?: boolean; preserveDirty?: boolean } = {}): Promise<void> {
     const { bootstrap = false, preserveDirty = true } = options;
     pipelineRefreshCount = pipelineRefreshCount + 1;
@@ -460,6 +530,18 @@
       }
     }
   }
+
+  const loadStreamCapabilities = async (): Promise<void> => {
+    try {
+      const capabilities = await StreamsApi.streamCapabilities();
+      const normalized = String(capabilities?.rawPipelineId ?? '').trim().toLowerCase();
+      if (normalized.length) {
+        rawStreamPipelineUuid = normalized;
+      }
+    } catch {
+      // Keep previously loaded IDs; avoid local hardcoded fallback IDs.
+    }
+  };
 
   let iconModalOpen = $state(false);
   let iconModalPipelineId = $state<string | null>(null);
@@ -622,7 +704,7 @@
     }
   }
 
-  const registryState = setupPipelineRegistryState({
+  setupPipelineRegistryState({
     activeTab,
     registryDrawerOpen,
     registry,
@@ -673,16 +755,69 @@
   });
 
   onMount(() => {
-    void loadPipelineOverview({ bootstrap: true, preserveDirty: false });
-    void loadPipelineDetailPanel();
-    connectLiveUpdates();
-    if (browser) {
-      const idle = (window as Window & { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback;
-      if (typeof idle === 'function') {
-        idle(() => scheduleRegistryRefresh());
-      } else {
-        setTimeout(() => scheduleRegistryRefresh(), 1200);
-      }
+    cancelPipelineUiBoot = scheduleAfterPaint(() => {
+      pipelineUiReady = true;
+    }, 1);
+    if (hasInitialPipelineData) {
+      cancelPipelineBootstrapRefresh = scheduleWhenIdle(() => {
+        if (document.hidden) return;
+        void loadStreamCapabilities();
+      }, { timeoutMs: 1800, fallbackMs: 700 });
+    } else {
+      cancelPipelineBootstrapRefresh = scheduleAfterPaint(() => {
+        void loadStreamCapabilities();
+        void loadPipelineOverview({ bootstrap: true, preserveDirty: false });
+      }, 2);
+    }
+    stopLiveUpdates = subscribeDomainInvalidations(
+      ['pipelines', 'streams', 'device', 'settings'],
+      (event) => {
+        if (document.hidden) return;
+        if (!shouldApplyLiveUpdate(event)) return;
+        scheduleLiveUpdatesRefresh();
+      },
+      { debounceMs: LIVE_UPDATES_REFRESH_DEBOUNCE_MS }
+    );
+    cancelPipelineIdleWarmup = scheduleWhenIdle(() => {
+      scheduleRegistryRefresh();
+      void loadPipelineModals();
+    }, { timeoutMs: 2000, fallbackMs: 1200 });
+  });
+
+  $effect(() => {
+    if (!pipelineUiReady) return;
+    void loadPipelineShellComponents();
+  });
+
+  $effect(() => {
+    cancelPipelineGraphWarmup?.();
+    cancelPipelineGraphWarmup = null;
+    cancelPipelineTuneWarmup?.();
+    cancelPipelineTuneWarmup = null;
+    if (!pipelineUiReady) return;
+    if ($activeTab === 'pipeline') {
+      if (!$selectedPipeline) return;
+      cancelPipelineGraphWarmup = scheduleAfterPaint(() => {
+        void loadPipelineGraphComponents();
+      }, 1);
+      return;
+    }
+    if (!$selectedPipeline) return;
+    cancelPipelineTuneWarmup = scheduleAfterPaint(() => {
+      void loadPipelineTunePanel();
+    }, 1);
+  });
+
+  $effect(() => {
+    if (
+      $registryDrawerOpen ||
+      iconModalOpen ||
+      ideState.pluginProjectModalOpen ||
+      $createModalOpen ||
+      $deleteModalOpen ||
+      $assignModalOpen
+    ) {
+      void loadPipelineModals();
     }
   });
 
@@ -695,7 +830,22 @@
   }
 
   onDestroy(() => {
-    disconnectLiveUpdates();
+    cancelPipelineUiBoot?.();
+    cancelPipelineUiBoot = null;
+    cancelPipelineBootstrapRefresh?.();
+    cancelPipelineBootstrapRefresh = null;
+    cancelPipelineIdleWarmup?.();
+    cancelPipelineIdleWarmup = null;
+    cancelPipelineGraphWarmup?.();
+    cancelPipelineGraphWarmup = null;
+    cancelPipelineTuneWarmup?.();
+    cancelPipelineTuneWarmup = null;
+    stopLiveUpdates?.();
+    stopLiveUpdates = null;
+    if (liveUpdatesRefreshHandle != null) {
+      clearTimeout(liveUpdatesRefreshHandle);
+      liveUpdatesRefreshHandle = null;
+    }
     disposePageStore();
   });
 
@@ -708,16 +858,15 @@
     PIPELINE_EXPORT_VERSION,
     PIPELINE_FOCUS_REQUEST_KEY,
     PipelineDetailPanelComponent,
-    PipelineGraphContextMenu,
-    PipelineGraphWorkspace,
-    PipelineIdePanel,
-    PipelineInspectorPanel,
-    PipelineListPanel,
-    PipelineModals,
-    PipelineTunePanel,
+    PipelineGraphContextMenu: PipelineGraphContextMenuComponent,
+    PipelineGraphWorkspace: PipelineGraphWorkspaceComponent,
+    PipelineInspectorPanel: PipelineInspectorPanelComponent,
+    PipelineListPanel: PipelineListPanelComponent,
+    PipelineModals: PipelineModalsComponent,
+    PipelineTunePanel: PipelineTunePanelComponent,
     PipelinesApi,
     RAW_STREAM_PIPELINE_ID,
-    RAW_STREAM_PIPELINE_UUID,
+    RAW_STREAM_PIPELINE_UUID: rawStreamPipelineUuid,
     SUPPORTED_PIPELINE_EXPORT_VERSIONS,
     StreamsApi,
     accessBadgeClass,
@@ -952,7 +1101,7 @@
   {buildNodeValueFromInput}
   {extractTuneConstantEntries}
   {RAW_STREAM_PIPELINE_ID}
-  {RAW_STREAM_PIPELINE_UUID}
+  RAW_STREAM_PIPELINE_UUID={rawStreamPipelineUuid}
   {PipelinesApi}
   {StreamsApi}
 >

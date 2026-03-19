@@ -93,7 +93,9 @@ impl StreamRunner {
         }
         // Keep preview generation independent from the main encoder path. This prevents UI preview
         // activity from implicitly requiring full stream encoder throughput.
-        let preview_worker = if !codecs_disabled { shmem.as_ref().map(|_| PreviewWorker::start()) } else { None };
+        let preview_encoder_stats = styx::codec::CodecStats::default();
+        let preview_encoder_last_activity_ms = Arc::new(AtomicU64::new(0));
+        let preview_worker = if !codecs_disabled { shmem.as_ref().map(|_| PreviewWorker::start(preview_encoder_stats.clone(), preview_encoder_last_activity_ms.clone())) } else { None };
         Self {
             stream_label,
             stream_id,
@@ -121,6 +123,7 @@ impl StreamRunner {
             encoder_worker: None,
             decoder_stats: styx::codec::CodecStats::default(),
             encoder_stats: styx::codec::CodecStats::default(),
+            preview_encoder_stats,
             capture_stats: styx::prelude::StageMetrics::default(),
             last_capture_ts: None,
             last_capture_wall: None,
@@ -132,8 +135,9 @@ impl StreamRunner {
             viewer_recently_active: false,
             preview_encode_interval,
             last_preview_encode_wall: None,
+            preview_encoder_last_activity_ms,
             preview_worker,
-            last_preview_frame: None,
+            runner_memory: super::RunnerMemoryTracker::default(),
         }
     }
 }

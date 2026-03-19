@@ -20,7 +20,16 @@ export type PipelineLayoutValidationState = {
   assignedPipelineIds: string[];
 };
 
-export function extractGraphOutputPorts(graph: any): string[] {
+type ManifestPipelineBinding = {
+  pipeline_id?: string | null;
+};
+
+type LegacyPipelineManifest = StreamManifest & {
+  pipeline_id?: string | null;
+  pipelines?: ManifestPipelineBinding[] | null;
+};
+
+export function extractGraphOutputPorts(graph: unknown): string[] {
   return extractGraphOutputPortsImpl(graph);
 }
 
@@ -47,11 +56,12 @@ export function isPipelineApplied(state: PipelineLayoutValidationState, pipeline
   if (pipelineId === RAW_PIPELINE_ID) return true;
   const normalized = String(pipelineId).trim();
   if (!normalized.length) return false;
-  const pipelines = (state.manifestState as any)?.pipelines ?? [];
+  const manifest = state.manifestState as LegacyPipelineManifest | null;
+  const pipelines = manifest?.pipelines ?? [];
   if (Array.isArray(pipelines)) {
     return pipelines.some((entry) => String(entry?.pipeline_id ?? '').trim() === normalized);
   }
-  const legacy = (state.manifestState as any)?.pipeline_id;
+  const legacy = manifest?.pipeline_id;
   return typeof legacy === 'string' && legacy.trim() === normalized;
 }
 

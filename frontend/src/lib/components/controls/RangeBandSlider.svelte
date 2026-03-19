@@ -21,8 +21,8 @@
     gradient = 'var(--color-surface-800)'
   }: Props = $props();
 
-  let internalMin = $state(valueMin);
-  let internalMax = $state(valueMax);
+  let internalMin = $state(0);
+  let internalMax = $state(0);
 
   const dispatch = createEventDispatcher<{ change: { min: number; max: number } }>();
 

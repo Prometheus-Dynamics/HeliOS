@@ -1,4 +1,5 @@
 use crate::http::error_history::{ErrorHistoryEntry, record_error_entry};
+use crate::ws::sensors::SharedSensorEvent;
 use axum::{
     Json,
     extract::{
@@ -8,12 +9,11 @@ use axum::{
     response::IntoResponse,
 };
 use helios_peripherals::dto::{I2cInventory, JsonData, SensorKind, SensorScope, SensorSnapshot, SensorSnapshotTyped};
-use helios_peripherals::ipc::{SensorCommand, SensorEvent};
-use lib_ipc::types::CommandId;
 use lib_sensors::dto::{ImuAxesPayload, ImuOptionsPayload, ImuOrientationPayload, ImuQuaternionPayload, ImuSourcesPayload, ImuStatusPayload, ImuUpdateRequest};
 use lib_sensors::imu::{ImuFusionMethod, ImuRange};
 use lib_sensors::model::SensorReading;
 use serde_json::{Map as JsonMap, Value as JsonValue, json};
+use std::sync::Arc;
 use tracing::{error, warn};
 use uuid::Uuid;
 
@@ -138,57 +138,55 @@ pub async fn update_imu(State(state): State<AppState>, Json(payload): Json<ImuUp
 }
 
 pub async fn handle_imu_ws(mut socket: WebSocket, state: AppState) -> Result<(), String> {
+    state.services.hardware.bind_sensor_events_state(&state);
+
     let error_context = WsErrorContext { request_id: Uuid::new_v4().to_string(), trace_id: Uuid::new_v4().to_string() };
-    if state.ensure_sensors().await.is_none() {
-        send_ws_error(&mut socket, &error_context, "peripherals IPC unavailable", "connect").await;
+    let (mut updates, latest): (tokio::sync::broadcast::Receiver<Arc<SharedSensorEvent>>, _) = state.services.hardware.subscribe_sensor_events().await;
+    if let Some(reason) = latest.error.as_ref() {
+        let reason: &str = reason.as_ref();
+        send_ws_error(&mut socket, &error_context, reason, "connect").await;
         return Ok(());
     }
 
-    let conn = crate::ipc::peripherals::connect_sensors_stream().await.map_err(|err| err.to_string())?;
-    let scope = SensorScope::Device;
-    let mut session = conn.session;
-
-    let subscribe = SensorCommand::Subscribe { command_id: CommandId::new(), scope: scope.clone() };
-    if let Err(err) = session.send_command(conn.client.journal(), &subscribe).await {
-        send_ws_error(&mut socket, &error_context, format!("failed to subscribe: {err}"), "subscribe").await;
-        return Err(err.to_string());
+    if let Some(snapshot) = latest.snapshot.as_ref()
+        && let Some(payload) = snapshot.imu.as_ref()
+        && let Ok(body) = serde_json::to_string(payload)
+        && socket.send(Message::Text(body.into())).await.is_err()
+    {
+        return Ok(());
     }
 
     loop {
         tokio::select! {
-            event = session.next_event() => {
-                match event {
-                    Ok(Some(SensorEvent::Snapshot { scope: event_scope, values, .. })) if event_scope == scope => {
-                        let status = imu_status_from_snapshot(&values);
-                        if let Ok(payload) = serde_json::to_string(&status)
-                            && socket.send(Message::Text(payload)).await.is_err()
-                        {
+            update = updates.recv() => {
+                match update {
+                    Ok(update) => match update.as_ref() {
+                        SharedSensorEvent::Snapshot(snapshot) => {
+                            let Some(payload) = snapshot.imu.as_ref() else { continue };
+                            if let Ok(body) = serde_json::to_string(payload)
+                                && socket.send(Message::Text(body.into())).await.is_err()
+                            {
+                                break;
+                            }
+                        }
+                        SharedSensorEvent::Error(reason) => {
+                            let reason: &str = reason.as_ref();
+                            send_ws_error(&mut socket, &error_context, reason, "stream").await;
                             break;
                         }
-                    }
-                    Ok(Some(SensorEvent::Nack { reason, .. })) => {
-                        send_ws_error(&mut socket, &error_context, reason.clone(), "stream").await;
+                        SharedSensorEvent::Firmware(_) | SharedSensorEvent::Lighting(_) => {}
+                    },
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        send_ws_error(&mut socket, &error_context, "sensor hub closed", "stream").await;
                         break;
                     }
-                    Ok(Some(SensorEvent::Unsubscribed { scope: event_scope })) if event_scope == scope => break,
-                    Ok(None) => break,
-                    Err(err) => {
-                        send_ws_error(&mut socket, &error_context, err.to_string(), "stream").await;
-                        break;
-                    }
-                    _ => {}
                 }
             }
             msg = socket.recv() => {
                 match msg {
-                    Some(Ok(Message::Close(_))) | None => {
-                        let _ = session.send_command(conn.client.journal(), &SensorCommand::Unsubscribe { command_id: CommandId::new(), scope: scope.clone() }).await;
-                        break;
-                    }
-                    Some(Ok(Message::Text(text))) if text.trim().eq_ignore_ascii_case("unsubscribe") => {
-                        let _ = session.send_command(conn.client.journal(), &SensorCommand::Unsubscribe { command_id: CommandId::new(), scope: scope.clone() }).await;
-                        break;
-                    }
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(Message::Text(text))) if text.trim().eq_ignore_ascii_case("unsubscribe") => break,
                     _ => {}
                 }
             }
@@ -235,7 +233,7 @@ async fn send_ws_error_with_context(socket: &mut WebSocket, context: &WsErrorCon
         reported_by: Some("helios-api".to_string()),
         transport: Some("ws".to_string()),
     });
-    let _ = socket.send(Message::Text(body.to_string())).await;
+    let _ = socket.send(Message::Text(body.to_string().into())).await;
 }
 
 async fn send_ws_error(socket: &mut WebSocket, context: &WsErrorContext, reason: impl Into<String>, operation: &str) {

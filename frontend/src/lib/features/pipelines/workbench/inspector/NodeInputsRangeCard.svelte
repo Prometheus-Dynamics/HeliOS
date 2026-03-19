@@ -3,14 +3,14 @@
   import ColorDropperButton from '$lib/components/controls/ColorDropperButton.svelte';
   import { describePortType } from '$lib/features/pipelines/inspector/inspectorTypeUtils';
   import { formatPipelineValue } from '$lib/features/pipelines/valueFormatting';
-  import type { PipelineDataType, PipelinePortMetadata } from '$lib/types/pipeline';
+  import type { PipelineDataType, PipelineNodeValue, PipelinePortMetadata, PipelineTypeDescriptor } from '$lib/types/pipeline';
 
   type NodeParameterEntry = {
     port: string;
     key: string;
     dataType: PipelineDataType | string | undefined;
-    baseValue: any;
-    overrideValue: any;
+    baseValue: PipelineNodeValue | undefined;
+    overrideValue: PipelineNodeValue | undefined;
     variants: string[];
     settable: boolean;
     metadata?: PipelinePortMetadata;
@@ -41,7 +41,7 @@
   } = $props<{
     label: string;
     dataType: PipelineDataType | string | undefined;
-    typePalette: Record<string, any>;
+    typePalette: Record<string, PipelineTypeDescriptor>;
     minEntry: NodeParameterEntry;
     maxEntry: NodeParameterEntry;
     sliderMin: number;

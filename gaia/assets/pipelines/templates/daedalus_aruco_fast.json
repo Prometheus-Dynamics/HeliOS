@@ -150,8 +150,8 @@
       },
       {
         "from": {
-          "node": 8,
-          "port": "frame"
+          "node": 1,
+          "port": "mask"
         },
         "to": {
           "node": 4,
@@ -821,14 +821,14 @@
             "clip_limit",
             {
               "type": "Float",
-              "value": 3.5
+              "value": 0.25
             }
           ],
           [
             "mix",
             {
               "type": "Float",
-              "value": 1
+              "value": 1.0
             }
           ],
           [
@@ -918,21 +918,21 @@
             "window",
             {
               "type": "Int",
-              "value": 61
+              "value": 15
             }
           ],
           [
             "offset",
             {
-              "type": "Float",
-              "value": 10
+              "type": "Int",
+              "value": 31
             }
           ],
           [
             "threshold_offset",
             {
-              "type": "Float",
-              "value": 0
+              "type": "Int",
+              "value": 17
             }
           ],
           [
@@ -946,7 +946,7 @@
             "invert",
             {
               "type": "Bool",
-              "value": true
+              "value": false
             }
           ],
           [
@@ -1448,7 +1448,7 @@
             "max_hamming",
             {
               "type": "Int",
-              "value": 0
+              "value": 5
             }
           ],
           [
@@ -1490,7 +1490,7 @@
             "min_warped_patch_contrast_range",
             {
               "type": "Int",
-              "value": 8
+              "value": 2
             }
           ],
           [
@@ -1504,7 +1504,7 @@
             "warp_fallback_max_hamming_extra",
             {
               "type": "Int",
-              "value": 0
+              "value": 10
             }
           ],
           [
@@ -1532,21 +1532,21 @@
             "min_quad_side_px",
             {
               "type": "Float",
-              "value": 0
+              "value": 0.0
             }
           ],
           [
             "min_quiet_zone_delta",
             {
               "type": "Float",
-              "value": 2.5
+              "value": 0.0
             }
           ],
           [
             "quiet_zone_texture_penalty",
             {
               "type": "Float",
-              "value": 12
+              "value": 12.0
             }
           ],
           [
@@ -1574,7 +1574,7 @@
             "min_decode_score",
             {
               "type": "Float",
-              "value": 2
+              "value": -1.0
             }
           ],
           [
@@ -1595,21 +1595,21 @@
             "min_cell_means_contrast_range",
             {
               "type": "Float",
-              "value": 10
+              "value": 4.0
             }
           ],
           [
             "min_hamming_margin",
             {
               "type": "Int",
-              "value": 4
+              "value": 0
             }
           ],
           [
             "min_hamming_margin_min_dist",
             {
               "type": "Int",
-              "value": 2
+              "value": 0
             }
           ],
           [
@@ -1623,7 +1623,7 @@
             "min_bit_delta",
             {
               "type": "Float",
-              "value": 3
+              "value": 0.0
             }
           ]
         ],

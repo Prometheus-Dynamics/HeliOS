@@ -17,7 +17,7 @@
     <span class="rounded-full bg-surface-800 px-3 py-1 text-xs text-surface-200">{devices.length} found</span>
   </div>
   <div class="divide-y divide-surface-800">
-    {#each devices as device, index}
+    {#each devices as device, index (device.identity?.keys?.[0] ?? device.identity?.display ?? `camera-${index}`)}
       <button
         type="button"
         class={`group flex w-full items-start gap-3 px-4 py-3 text-left transition ${

@@ -1,12 +1,84 @@
-import { buildWsUrlFromHttpBase, canUseWebSockets } from '$lib/api/wsClient';
+import { buildWsUrlFromHttpBase, canUseWebSockets, connectWebSocketWithFallback } from '$lib/api/core/ws';
 
 export type RealtimeUpdateOrigin = 'http' | 'ws';
+export type RealtimeUpdateDomain = 'api' | 'device' | 'localization' | 'media' | 'pipelines' | 'settings' | 'streams';
+export type RealtimeUpdateOperation = 'create' | 'update' | 'delete';
+export type RealtimeUpdateEntity =
+  | 'api'
+  | 'device'
+  | 'device_imu'
+  | 'device_hardware'
+  | 'device_settings'
+  | 'localization_config'
+  | 'localization_map'
+  | 'localization_profile'
+  | 'localization_source'
+  | 'media_asset'
+  | 'media_imu'
+  | 'media_label'
+  | 'media_metadata'
+  | 'pipeline_graph'
+  | 'plugin'
+  | 'stream'
+  | 'stream_control'
+  | 'stream_pipeline'
+  | 'updater';
+export type RealtimeUpdateKind =
+  | 'api'
+  | 'device'
+  | 'device.hardware'
+  | 'device.imu'
+  | 'device.settings'
+  | 'imu'
+  | 'localization'
+  | 'localization.config'
+  | 'localization.maps'
+  | 'localization.profiles'
+  | 'localization.sources'
+  | 'media'
+  | 'media.assets'
+  | 'media.imu'
+  | 'media.labels'
+  | 'media.metadata'
+  | 'pipelines'
+  | 'pipelines.graphs'
+  | 'settings'
+  | 'settings.device'
+  | 'settings.plugins'
+  | 'settings.updater'
+  | 'streams'
+  | 'streams.controls'
+  | 'streams.lifecycle'
+  | 'streams.pipeline';
+
+export function normalizeRealtimeUpdateKind(value: string | null | undefined): string | null {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized.length ? normalized : null;
+}
+
+export function realtimeUpdateMatchesKind(
+  eventOrKind: RealtimeUpdateEvent | string | null | undefined,
+  expectedKind: string
+): boolean {
+  const actual =
+    typeof eventOrKind === 'string'
+      ? normalizeRealtimeUpdateKind(eventOrKind)
+      : normalizeRealtimeUpdateKind(eventOrKind?.kind);
+  const expected = normalizeRealtimeUpdateKind(expectedKind);
+  if (!actual || !expected) return false;
+  return actual === expected || actual.startsWith(`${expected}.`);
+}
 
 export type RealtimeUpdateEvent = {
   seq: number;
   timestamp_ms: number;
   origin: RealtimeUpdateOrigin;
-  kind: string;
+  domain: RealtimeUpdateDomain;
+  kind: RealtimeUpdateKind;
+  operation: RealtimeUpdateOperation;
+  entity: RealtimeUpdateEntity;
+  revision: number;
+  resource_id?: string;
   path: string;
   method?: string;
   request_id?: string;
@@ -37,62 +109,56 @@ export function connectRealtimeUpdatesStream(
   }
 
   const url = buildRealtimeUpdatesSocketUrl(options.heartbeatMs ?? 15000);
-  let socket: WebSocket | null = null;
+  const connection = connectWebSocketWithFallback(
+    url,
+    {
+      onOpen: () => {
+        handlers.onOpen?.();
+      },
+      onMessage: (event) => {
+        if (typeof event.data !== 'string') return;
+        let parsed: RealtimeUpdatesServerEvent | null = null;
+        try {
+          parsed = JSON.parse(event.data) as RealtimeUpdatesServerEvent;
+        } catch {
+          return;
+        }
+        if (!parsed || typeof parsed !== 'object') return;
+        if (parsed.type === 'ready') {
+          handlers.onReady?.(typeof parsed.heartbeat_ms === 'number' ? parsed.heartbeat_ms : 15000);
+          return;
+        }
+        if (parsed.type === 'change') {
+          if (parsed.event && typeof parsed.event === 'object') {
+            handlers.onChange?.(parsed.event);
+          }
+          return;
+        }
+        if (parsed.type === 'heartbeat') {
+          handlers.onHeartbeat?.(typeof parsed.timestamp_ms === 'number' ? parsed.timestamp_ms : Date.now());
+          return;
+        }
+        if (parsed.type === 'error') {
+          handlers.onError?.(parsed.message || 'Realtime updates stream error');
+        }
+      },
+      onError: (message) => {
+        handlers.onError?.(message || 'Realtime updates stream connection failed');
+      },
+      onClose: () => {
+        handlers.onClose?.();
+      }
+    },
+    { errorMessage: 'Realtime updates stream connection failed' }
+  );
 
-  try {
-    socket = new WebSocket(url);
-  } catch (err) {
-    handlers.onError?.((err as Error)?.message ?? 'Unable to open realtime updates socket');
+  if (!connection) {
+    handlers.onError?.('Unable to open realtime updates socket');
     return () => {};
   }
 
-  socket.addEventListener('open', () => {
-    handlers.onOpen?.();
-  });
-
-  socket.addEventListener('message', (event) => {
-    if (typeof event.data !== 'string') return;
-    let parsed: RealtimeUpdatesServerEvent | null = null;
-    try {
-      parsed = JSON.parse(event.data) as RealtimeUpdatesServerEvent;
-    } catch {
-      return;
-    }
-    if (!parsed || typeof parsed !== 'object') return;
-    if (parsed.type === 'ready') {
-      handlers.onReady?.(typeof parsed.heartbeat_ms === 'number' ? parsed.heartbeat_ms : 15000);
-      return;
-    }
-    if (parsed.type === 'change') {
-      if (parsed.event && typeof parsed.event === 'object') {
-        handlers.onChange?.(parsed.event);
-      }
-      return;
-    }
-    if (parsed.type === 'heartbeat') {
-      handlers.onHeartbeat?.(typeof parsed.timestamp_ms === 'number' ? parsed.timestamp_ms : Date.now());
-      return;
-    }
-    if (parsed.type === 'error') {
-      handlers.onError?.(parsed.message || 'Realtime updates stream error');
-    }
-  });
-
-  socket.addEventListener('error', () => {
-    handlers.onError?.('Realtime updates stream connection failed');
-  });
-
-  socket.addEventListener('close', () => {
-    handlers.onClose?.();
-  });
-
   return () => {
-    try {
-      socket?.close();
-    } catch {
-      // ignore
-    }
-    socket = null;
+    connection.close();
   };
 }
 

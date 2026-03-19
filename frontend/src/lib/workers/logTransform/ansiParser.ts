@@ -1,6 +1,6 @@
 import type { LogSegment, SegmentState } from './types';
 
-const ANSI_ESCAPE_REGEX = /\u001b\[((?:\d{1,3};?)*)m/g;
+const ANSI_ESCAPE_REGEX = new RegExp(`${String.fromCharCode(27)}\\[((?:\\d{1,3};?)*)m`, 'g');
 
 export function parseAnsiSegments(raw: string): LogSegment[] {
   const segments: LogSegment[] = [];

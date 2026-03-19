@@ -2,12 +2,11 @@
   import { PipelineIcon } from '$lib';
   import FaIcon from '$lib/components/icons/FaIcon.svelte';
   import PipelineProfilerModal from '$lib/components/pipelines/PipelineProfilerModal.svelte';
-  import { RAW_PIPELINE_UUID as RAW_PIPELINE_UUID_CONST } from '$lib/features/devices/camera/page/cameraPipelineTuningController';
   import { faCamera, faCode, faPlus, faSliders, faStopwatch, faTrash, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons';
   import { floatingPipelineOutputsViewer } from '$lib/stores/floatingPipelineOutputsViewer';
   import { extractGraphOutputPortTypes } from '$lib/features/pipelines/outputFilters';
   import type { PipelineDataType, PipelineTemplateSummary } from '$lib/types/pipeline';
-  const DEFAULT_RAW_PIPELINE_UUID: string = RAW_PIPELINE_UUID_CONST;
+  import { SvelteSet } from 'svelte/reactivity';
 
   let {
     pipelineGraphError,
@@ -16,7 +15,7 @@
     assignedPipelineIds,
     handlePipelineDragStart,
     RAW_PIPELINE_ID,
-    RAW_PIPELINE_UUID = DEFAULT_RAW_PIPELINE_UUID,
+    RAW_PIPELINE_UUID = '',
     pipelineLabel,
     openPipelineTuningPanel,
     openPipelineRemoveModal,
@@ -64,15 +63,127 @@
     listPipelineTemplatesForAssign = undefined,
     createPipelineFromTemplateAndAssign = undefined
   } = $props();
-  void pipelineGridRowIndices;
-  void pipelineGridColumnIndices;
 
   let profilerOpen = $state(false);
   let profilerPipelineId = $state<string | null>(null);
   let profilerPipelineLabel = $state<string | null>(null);
 
+  type PipelineGraphEntry = Record<string, unknown> & {
+    id?: string | null;
+    name?: string | null;
+    issue_count?: number | null;
+    issueCount?: number | null;
+  };
+
+  type PipelineWireEndpoint = {
+    pipeline_id?: string | null;
+    output_key?: string | null;
+    port?: string | null;
+  };
+
+  type EnsurePipelineGraphResult = {
+    filtered?: string[] | null;
+    types?: Record<string, PipelineDataType | null | undefined> | null;
+    graphJson?: unknown;
+  };
+
+  type Subscribable<T> = {
+    subscribe: (run: (value: T) => void) => (() => void) | { unsubscribe?: () => void } | void;
+  };
+  type DragStartHandler = (event: DragEvent) => void;
+  type GridDropHandler = (event: DragEvent) => void;
+
+  const asRecord = (value: unknown): Record<string, unknown> | null =>
+    value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+
+  const asGraphEntry = (value: unknown): PipelineGraphEntry | null => {
+    const record = asRecord(value);
+    return record ? (record as PipelineGraphEntry) : null;
+  };
+
+  const isSubscribable = <T,>(value: unknown): value is Subscribable<T> =>
+    Boolean(value) && typeof value === 'object' && typeof (value as { subscribe?: unknown }).subscribe === 'function';
+  const isFunction = <T extends (...args: never[]) => unknown>(value: unknown): value is T => typeof value === 'function';
+
   const normalizeStreamId = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+  const normalizeId = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
+  const resolvePipelineLabel = (pipelineId: string | null): string => {
+    const normalizedPipelineId = normalizeId(pipelineId);
+    if (typeof pipelineLabel === 'function') {
+      const resolved = pipelineLabel(normalizedPipelineId);
+      if (typeof resolved === 'string' && resolved.trim().length) {
+        return resolved.trim();
+      }
+    }
+    if (normalizedPipelineId === RAW_PIPELINE_ID) return 'Raw stream';
+    const graphEntry = Array.isArray(pipelineGraphs)
+      ? (pipelineGraphs.map(asGraphEntry).find((entry) => normalizeId(entry?.id) === normalizedPipelineId) ?? null)
+      : null;
+    const graphName = typeof graphEntry?.name === 'string' ? graphEntry.name.trim() : '';
+    if (graphName.length) return graphName;
+    return normalizedPipelineId.length ? normalizedPipelineId : 'Pipeline';
+  };
+  const dragStartHandlerFor = (pipelineId: string, from?: { row: number; column: number }): DragStartHandler => {
+    if (!isFunction<(pipelineId: string, from?: { row: number; column: number }) => DragStartHandler>(handlePipelineDragStart)) {
+      return () => {};
+    }
+    const handler = handlePipelineDragStart(pipelineId, from);
+    return isFunction<DragStartHandler>(handler) ? handler : () => {};
+  };
+  const readPipelineForCell = (row: number, column: number): string | null => {
+    if (!isFunction<(row: number, column: number) => string | null>(pipelineForCell)) return null;
+    return pipelineForCell(row, column);
+  };
+  const readOutputSelectionForPipeline = (pipelineId: string): string | null => {
+    if (!isFunction<(pipelineId: string) => string | null>(outputSelectionForPipeline)) return null;
+    return outputSelectionForPipeline(pipelineId);
+  };
+  const readOutputKeyForCell = (row: number, column: number): string | null => {
+    if (!isFunction<(row: number, column: number) => string | null>(outputKeyForCell)) return null;
+    return outputKeyForCell(row, column);
+  };
+  const applyGridDimensions = (rows: number, columns: number): void => {
+    if (isFunction<(rows: number, columns: number) => void>(setPipelineGridDimensions)) {
+      setPipelineGridDimensions(rows, columns);
+    }
+  };
+  const applyAllowDrop = (event: DragEvent): void => {
+    if (isFunction<(event: DragEvent) => void>(allowDrop)) {
+      allowDrop(event);
+      return;
+    }
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'move';
+    }
+  };
+  const dropHandlerForCell = (row: number, column: number): GridDropHandler => {
+    if (!isFunction<(row: number, column: number) => GridDropHandler>(dropOnCell)) {
+      return (event) => event.preventDefault();
+    }
+    const handler = dropOnCell(row, column);
+    return isFunction<GridDropHandler>(handler) ? handler : (event) => event.preventDefault();
+  };
+  const clearGridCell = (row: number, column: number): void => {
+    if (isFunction<(row: number, column: number) => void>(clearCell)) {
+      clearCell(row, column);
+    }
+  };
+  const setOutputSelection = (pipelineId: string, next: string | null): void => {
+    if (isFunction<(pipelineId: string, next: string | null) => void>(setOutputSelectionForPipeline)) {
+      setOutputSelectionForPipeline(pipelineId, next);
+    }
+  };
+  const setLiveOutputSelection = async (next: string | null): Promise<void> => {
+    if (isFunction<(next: string | null) => Promise<unknown> | unknown>(setLivePipelineOutput)) {
+      await setLivePipelineOutput(next);
+    }
+  };
   const normalizedStreamId = $derived.by(() => normalizeStreamId(streamId));
+  $effect(() => {
+    void pipelineGridRowIndices;
+    void pipelineGridColumnIndices;
+  });
   const profilerStreamOptions = $derived.by(() => {
     if (!normalizedStreamId) return [];
     const label = typeof streamLabel === 'string' && streamLabel.trim().length ? streamLabel.trim() : normalizedStreamId;
@@ -86,7 +197,7 @@
     const normalizedPipelineId = typeof pipelineId === 'string' ? pipelineId.trim() : '';
     if (!normalizedPipelineId) return;
     profilerPipelineId = normalizedPipelineId === RAW_PIPELINE_ID ? RAW_PIPELINE_UUID : normalizedPipelineId;
-    profilerPipelineLabel = pipelineLabel(normalizedPipelineId);
+    profilerPipelineLabel = resolvePipelineLabel(normalizedPipelineId);
     profilerOpen = true;
   };
 
@@ -103,12 +214,12 @@
       typeof ensurePipelineGraphAndOutputs === 'function'
     ) {
       try {
-        const result = await ensurePipelineGraphAndOutputs(normalizedPipelineId, false);
-        const hydrated = (result as any)?.types ?? null;
+        const result = (await ensurePipelineGraphAndOutputs(normalizedPipelineId, false)) as EnsurePipelineGraphResult | null;
+        const hydrated = result?.types ?? null;
         if (hydrated && typeof hydrated === 'object') {
           portTypesByName = hydrated as Record<string, PipelineDataType | null | undefined>;
         } else {
-          const graphJson = (result as any)?.graphJson ?? null;
+          const graphJson = result?.graphJson ?? null;
           if (graphJson) {
             portTypesByName = extractGraphOutputPortTypes(graphJson);
           }
@@ -126,15 +237,14 @@
   };
 
   let outputOptionsFallback = $state<Record<string, string[]>>({});
-  let outputOptionsLoading = $state<Set<string>>(new Set());
+  let outputOptionsLoading = new SvelteSet<string>();
   const safeRows = $derived.by(() => Math.min(Math.max(Math.trunc(pipelineGridRows ?? 1), 1), 6));
   const safeColumns = $derived.by(() => Math.min(Math.max(Math.trunc(pipelineGridColumns ?? 1), 1), 6));
   const rowIndices = $derived.by(() => Array.from({ length: safeRows }, (_, i) => i));
   const columnIndices = $derived.by(() => Array.from({ length: safeColumns }, (_, i) => i));
-  const normalizeId = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
   const dedupePipelineIds = (ids: unknown[]): string[] => {
     const out: string[] = [];
-    const seen = new Set<string>();
+    const seen = new SvelteSet<string>();
     for (const value of ids ?? []) {
       const id = normalizeId(value);
       if (!id.length || seen.has(id)) continue;
@@ -143,17 +253,18 @@
     }
     return out;
   };
-  const dedupeGraphsById = (graphs: unknown[]): any[] => {
-    const out: any[] = [];
-    const seen = new Set<string>();
+  const dedupeGraphsById = (graphs: unknown[]): PipelineGraphEntry[] => {
+    const out: PipelineGraphEntry[] = [];
+    const seen = new SvelteSet<string>();
     for (const graph of graphs ?? []) {
-      const id = normalizeId((graph as any)?.id);
+      const graphRecord = asGraphEntry(graph);
+      const id = normalizeId(graphRecord?.id);
       if (!id.length || seen.has(id)) continue;
       seen.add(id);
-      if (graph && typeof graph === 'object' && (graph as any).id !== id) {
-        out.push({ ...(graph as Record<string, unknown>), id });
-      } else {
-        out.push(graph);
+      if (graphRecord && graphRecord.id !== id) {
+        out.push({ ...graphRecord, id });
+      } else if (graphRecord) {
+        out.push(graphRecord);
       }
     }
     return out;
@@ -191,10 +302,10 @@
     const entries: GridPipelineEntry[] = [];
     rowIndices.forEach((row) => {
       columnIndices.forEach((column) => {
-        const pipelineIdRaw = pipelineForCell(row, column);
+        const pipelineIdRaw = readPipelineForCell(row, column);
         const pipelineId = normalizeId(pipelineIdRaw);
         if (!pipelineId.length) return;
-        const outputKey = normalizeKey(outputKeyForCell?.(row, column));
+        const outputKey = normalizeKey(readOutputKeyForCell(row, column));
         entries.push({
           row,
           column,
@@ -212,7 +323,8 @@
     if (!target.length || target === RAW_PIPELINE_ID) return 'raw|raw';
     const targetWireId = target === RAW_PIPELINE_ID ? normalizeId(RAW_PIPELINE_UUID) : target;
     const frameWire = normalizedPipelineWires.find((wire) => {
-      const to = (wire as any)?.to ?? null;
+      const wireRecord = asRecord(wire);
+      const to = asRecord(wireRecord?.to) as PipelineWireEndpoint | null;
       const wireToId = normalizeId(to?.pipeline_id);
       if (!wireToId.length) return false;
       if (wireToId !== targetWireId) return false;
@@ -221,7 +333,8 @@
       const wireToKey = normalizeKey(to?.output_key);
       return (wireToKey ?? null) === (targetOutputKey ?? null);
     });
-    const from = (frameWire as any)?.from ?? null;
+    const frameWireRecord = asRecord(frameWire);
+    const from = asRecord(frameWireRecord?.from) as PipelineWireEndpoint | null;
     const fromIdRaw = normalizeId(from?.pipeline_id);
     if (!fromIdRaw.length) return 'raw|raw';
     const fromId = normalizePipelineIdForUi(fromIdRaw);
@@ -281,7 +394,7 @@
   const requestOutputOptions = async (pipelineId: string) => {
     if (!ensurePipelineGraphAndOutputs) return;
     if (outputOptionsLoading.has(pipelineId)) return;
-    outputOptionsLoading = new Set(outputOptionsLoading).add(pipelineId);
+    outputOptionsLoading = new SvelteSet(outputOptionsLoading).add(pipelineId);
     try {
       const result = await ensurePipelineGraphAndOutputs(pipelineId);
       const outputs = Array.isArray(result?.filtered) ? result.filtered : [];
@@ -291,7 +404,7 @@
     } catch {
       // ignore fetch errors
     } finally {
-      const next = new Set(outputOptionsLoading);
+      const next = new SvelteSet(outputOptionsLoading);
       next.delete(pipelineId);
       outputOptionsLoading = next;
     }
@@ -299,7 +412,7 @@
 
   $effect(() => {
     if (!ensurePipelineOutputsLoaded) return;
-    const missing = new Set<string>();
+    const missing = new SvelteSet<string>();
     (assignedPipelineIds ?? []).forEach((id) => {
       const normalized = String(id ?? '').trim();
       if (!normalized || normalized === RAW_PIPELINE_ID) return;
@@ -307,7 +420,7 @@
     });
     rowIndices.forEach((row) => {
       columnIndices.forEach((column) => {
-        const pipelineId = pipelineForCell(row, column);
+        const pipelineId = readPipelineForCell(row, column);
         const normalized = typeof pipelineId === 'string' ? pipelineId.trim() : '';
         if (!normalized || normalized === RAW_PIPELINE_ID) return;
         if (!hasLoadedOutputOptions(normalized)) missing.add(normalized);
@@ -319,7 +432,7 @@
     });
   });
 
-  function issueCountForGraph(graph: any): number {
+  function issueCountForGraph(graph: PipelineGraphEntry | null | undefined): number {
     const raw = graph?.issue_count ?? graph?.issueCount ?? 0;
     const count = Number(raw);
     return Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
@@ -331,10 +444,10 @@
     return entry ? issueCountForGraph(entry) : 0;
   }
 
-  const normalizeGraphList = (value: unknown): any[] | null =>
+  const normalizeGraphList = (value: unknown): PipelineGraphEntry[] | null =>
     (Array.isArray(value) ? dedupeGraphsById(value) : null);
 
-  function filterAndSortGraphs(graphs: any[], query: string): any[] {
+  function filterAndSortGraphs(graphs: PipelineGraphEntry[], query: string): PipelineGraphEntry[] {
     const q = query?.trim?.().toLowerCase?.() ?? '';
     const filtered = dedupeGraphsById(graphs).filter((graph) => {
       const id = String(graph?.id ?? '');
@@ -345,16 +458,24 @@
     return filtered.slice().sort((a, b) => String(a?.name ?? a?.id ?? '').localeCompare(String(b?.name ?? b?.id ?? '')));
   }
 
-  let pipelineGraphsSnapshot = $state<any[]>([]);
+  let pipelineGraphsSnapshot = $state<PipelineGraphEntry[]>([]);
 
   $effect(() => {
-    if (pipelineGraphs && typeof pipelineGraphs === 'object' && 'subscribe' in pipelineGraphs) {
-      const unsubscribe = (pipelineGraphs as any).subscribe((value: unknown) => {
+    if (isSubscribable<unknown>(pipelineGraphs)) {
+      const unsubscribe = pipelineGraphs.subscribe((value: unknown) => {
         const next = normalizeGraphList(value) ?? [];
         if (pipelineAssignModalOpen && next.length === 0 && pipelineGraphsSnapshot.length > 0) return;
         pipelineGraphsSnapshot = next;
       });
-      return () => unsubscribe?.();
+      return () => {
+        if (typeof unsubscribe === 'function') {
+          unsubscribe();
+          return;
+        }
+        if (unsubscribe && typeof unsubscribe === 'object') {
+          unsubscribe.unsubscribe?.();
+        }
+      };
     }
     const next = normalizeGraphList(pipelineGraphs) ?? [];
     if (pipelineAssignModalOpen && next.length === 0 && pipelineGraphsSnapshot.length > 0) return;
@@ -372,7 +493,7 @@
   const normalizeTemplateList = (value: unknown): PipelineTemplateSummary[] => {
     if (!Array.isArray(value)) return [];
     const out: PipelineTemplateSummary[] = [];
-    const seen = new Set<string>();
+    const seen = new SvelteSet<string>();
     for (const entry of value) {
       if (!entry || typeof entry !== 'object') continue;
       const record = entry as Record<string, unknown>;
@@ -442,7 +563,7 @@
       const created = await createPipelineFromTemplateAndAssign(templateId);
       const createdId = normalizeId((created as { id?: string } | null)?.id ?? '');
       if (createdId.length && !pipelineAssignDraft.includes(createdId)) {
-        pipelineAssignDraft = Array.from(new Set([...pipelineAssignDraft, createdId]));
+        pipelineAssignDraft = Array.from(new SvelteSet([...pipelineAssignDraft, createdId]));
       }
       const createdName = typeof (created as { name?: string } | null)?.name === 'string' ? created.name.trim() : '';
       pipelineTemplateStatus = createdName.length
@@ -533,7 +654,7 @@
           role="button"
           tabindex="0"
           draggable="true"
-          ondragstart={handlePipelineDragStart(RAW_PIPELINE_ID)}
+          ondragstart={dragStartHandlerFor(RAW_PIPELINE_ID)}
           title="Raw stream"
           aria-label="Raw stream"
         >
@@ -555,19 +676,19 @@
                   event.preventDefault();
                   return;
                 }
-                handlePipelineDragStart(pipelineId)(event as DragEvent);
+                dragStartHandlerFor(pipelineId)(event as DragEvent);
               }}
               title={pipelineId}
-              aria-label={pipelineLabel(pipelineId)}
+              aria-label={resolvePipelineLabel(pipelineId)}
             >
             <PipelineIcon
               pipelineId={pipelineId}
               size="sm"
               className="shrink-0"
-              ariaLabel={pipelineLabel(pipelineId)}
+              ariaLabel={resolvePipelineLabel(pipelineId)}
               title={pipelineId}
             />
-            <span class="max-w-[180px] truncate text-xs">{pipelineLabel(pipelineId)}</span>
+            <span class="max-w-[180px] truncate text-xs">{resolvePipelineLabel(pipelineId)}</span>
             {#if issueCount > 0}
               <span
                 class="inline-flex h-6 w-6 items-center justify-center rounded-full border border-amber-500/60 bg-amber-500/10 text-amber-200"
@@ -659,7 +780,7 @@
           </p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
-          <button class="btn btn-3xs preset-tonal uppercase tracking-[0.3em]" type="button" onclick={() => setPipelineGridDimensions(1, 1)}>
+          <button class="btn btn-3xs preset-tonal uppercase tracking-[0.3em]" type="button" onclick={() => applyGridDimensions(1, 1)}>
             1×1
           </button>
         </div>
@@ -674,7 +795,7 @@
             min="1"
             max="6"
             value={pipelineGridRows}
-            onchange={(e) => setPipelineGridDimensions(Number((e.currentTarget as HTMLInputElement).value), pipelineGridColumns)}
+            onchange={(e) => applyGridDimensions(Number((e.currentTarget as HTMLInputElement).value), pipelineGridColumns)}
           />
         </label>
         <label class="text-sm">
@@ -685,7 +806,7 @@
             min="1"
             max="6"
             value={pipelineGridColumns}
-            onchange={(e) => setPipelineGridDimensions(pipelineGridRows, Number((e.currentTarget as HTMLInputElement).value))}
+            onchange={(e) => applyGridDimensions(pipelineGridRows, Number((e.currentTarget as HTMLInputElement).value))}
           />
         </label>
       </div>
@@ -699,10 +820,10 @@
       >
         {#each rowIndices as row (row)}
           {#each columnIndices as column (column)}
-            {@const cellPipeline = pipelineForCell(row, column)}
+            {@const cellPipeline = readPipelineForCell(row, column)}
             {@const isOutputCell = row === 0 && column === 0}
             {@const isMultiplex = safeRows * safeColumns > 1}
-            {@const outputValue = cellPipeline ? (isMultiplex ? outputKeyForCell?.(row, column) : outputSelectionForPipeline(cellPipeline)) : null}
+            {@const outputValue = cellPipeline ? (isMultiplex ? readOutputKeyForCell(row, column) : readOutputSelectionForPipeline(cellPipeline)) : null}
             {@const outputOptions =
               cellPipeline
                 ? (cellPipeline === RAW_PIPELINE_ID ? ['raw', 'undistorted'] : pipelineOutputOptionsCache[cellPipeline] ?? outputOptionsFallback[cellPipeline] ?? [])
@@ -727,10 +848,10 @@
                   return;
                 }
                 if (!cellPipeline) return;
-                handlePipelineDragStart(cellPipeline, { row, column })(event as DragEvent);
+                dragStartHandlerFor(cellPipeline, { row, column })(event as DragEvent);
               }}
-              ondragover={allowDrop}
-              ondrop={dropOnCell(row, column)}
+              ondragover={applyAllowDrop}
+              ondrop={dropHandlerForCell(row, column)}
             >
               <div class="absolute right-2 top-2 flex items-center gap-2">
                 {#if cellPipeline}
@@ -739,7 +860,7 @@
                     type="button"
                     onclick={(e) => {
                       e.stopPropagation();
-                      clearCell(row, column);
+                      clearGridCell(row, column);
                     }}
                   >
                     Clear
@@ -817,7 +938,7 @@
                         pipelineId={cellPipeline}
                         size="lg"
                         className={pipelineGridIsSingle ? 'h-24 w-24' : 'h-16 w-16'}
-                        ariaLabel={pipelineLabel(cellPipeline)}
+                        ariaLabel={resolvePipelineLabel(cellPipeline)}
                         title={cellPipeline}
                       />
                     {/if}
@@ -839,7 +960,7 @@
                         {#each gridPipelineEntries as source (`${source.row}:${source.column}`)}
                           {#if source.pipelineId !== cellPipeline && source.pipelineId !== RAW_PIPELINE_ID}
                             <option value={`pipe|${source.pipelineId}|${source.outputKey ?? ''}|${source.resolvedPort}`}>
-                              {pipelineLabel(source.pipelineId)} ({source.row + 1}:{source.column + 1}) - {source.resolvedPort}
+                              {resolvePipelineLabel(source.pipelineId)} ({source.row + 1}:{source.column + 1}) - {source.resolvedPort}
                             </option>
                           {/if}
                         {/each}
@@ -860,10 +981,10 @@
                             setOutputKeyForCell?.(row, column, next);
                             schedulePipelineLayoutApply?.();
                           } else {
-                            setOutputSelectionForPipeline(cellPipeline, next);
+                            setOutputSelection(cellPipeline, next);
                             if (isOutputCell) {
                               selectedPipelineOutput = next;
-                              void setLivePipelineOutput(next);
+                              void setLiveOutputSelection(next);
                             }
                           }
                         }}
@@ -882,7 +1003,7 @@
                     {/if}
                   </div>
                   <div class="min-w-0">
-                    <p class="truncate text-xs text-surface-200">{pipelineLabel(cellPipeline)}</p>
+                    <p class="truncate text-xs text-surface-200">{resolvePipelineLabel(cellPipeline)}</p>
                     <p class="truncate text-micro-tight text-surface-500">{cellPipeline}</p>
                   </div>
                 {:else}
@@ -923,7 +1044,7 @@
           <p class="text-2xs uppercase tracking-[0.3em] text-surface-500">Remove pipeline</p>
           <p class="mt-1 text-sm text-surface-200">Remove this pipeline from the stream?</p>
           {#if pipelineId}
-            <p class="mt-1 text-xs text-surface-500">{pipelineLabel(pipelineId)}</p>
+            <p class="mt-1 text-xs text-surface-500">{resolvePipelineLabel(pipelineId)}</p>
           {/if}
           <p class="mt-2 text-xs text-surface-500">It will be detached and removed from any grid slots.</p>
         </div>
@@ -1055,7 +1176,7 @@
                   checked={checked}
                   onchange={(e) => {
                     const next = (e.currentTarget as HTMLInputElement).checked;
-                    const current = new Set(pipelineAssignDraft);
+                    const current = new SvelteSet(pipelineAssignDraft);
                     if (next) current.add(id);
                     else current.delete(id);
                     pipelineAssignDraft = Array.from(current);

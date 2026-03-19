@@ -28,7 +28,6 @@
     addBoundaryDraftPort: () => void;
     removeBoundaryDraftPort: (portId: string) => void;
     setBoundaryDraftPortName: (portId: string, name: string) => void;
-    setBoundaryDraftPortType: (portId: string, dataTypeKey: string) => void;
     setBoundaryDraftDirection: (direction: 'input' | 'output') => void;
     applyBoundaryDraft: () => void;
     setGroupDraftName: (name: string) => void;
@@ -59,7 +58,6 @@
     addBoundaryDraftPort,
     removeBoundaryDraftPort,
     setBoundaryDraftPortName,
-    setBoundaryDraftPortType,
     setBoundaryDraftDirection,
     applyBoundaryDraft,
     setGroupDraftName,

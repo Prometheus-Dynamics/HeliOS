@@ -1,6 +1,7 @@
 <script lang="ts">
   import {
     Background,
+    BackgroundVariant,
     Controls,
     SvelteFlow,
     type Edge,
@@ -17,6 +18,8 @@
   import GraphMinimap from './GraphMinimap.svelte';
   import type { EdgeTypes, NodeTypes, Connection, NodeEventWithPointer, NodeTargetEventWithPointer } from '@xyflow/svelte';
 
+  type FlowApi = ReturnType<typeof import('@xyflow/svelte')['useSvelteFlow']>;
+
   type Props = {
     nodes: Node[];
     edges: Edge[];
@@ -28,7 +31,7 @@
     maxZoom: number;
     nodeTypes: NodeTypes;
     edgeTypes: EdgeTypes;
-    backgroundVariant: any;
+    backgroundVariant: BackgroundVariant;
     backgroundGap: number;
     backgroundSize: number;
     backgroundColor: string;
@@ -52,7 +55,7 @@
     onSelectionChange?: (event: { nodes: Node[]; edges: Edge[] }) => void;
     onPaneContextMenu?: ({ event }: { event: MouseEvent }) => void;
     onNodeContextMenu?: NodeEventWithPointer<MouseEvent, Node>;
-    onApi?: (event: CustomEvent<any>) => void;
+    onApi?: (event: CustomEvent<FlowApi>) => void;
   };
 
   let {
@@ -100,7 +103,7 @@
   bind:viewport={viewport}
   class="h-full"
   colorMode="dark"
-  fitView
+  onlyRenderVisibleElements
   height={fluid ? undefined : resolvedHeight}
   minZoom={minZoom}
   maxZoom={maxZoom}

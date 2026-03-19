@@ -1,4 +1,5 @@
 use std::sync::atomic::Ordering;
+use std::sync::mpsc::TrySendError;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -150,6 +151,7 @@ impl StreamRunner {
     pub fn pump_host_once(&mut self) -> Result<bool> {
         let span = trace_span!("stream_pump", stream = %self.stream_label());
         let _guard = span.enter();
+        self.runner_memory.reset_current();
 
         self.poll_preview_worker();
 
@@ -225,7 +227,7 @@ impl StreamRunner {
                 // When the backend already provides encoded frames and there is no graph, skip
                 // expensive decode/graph work unless someone is subscribed to decoded frames.
                 if can_passthrough_encoded {
-                    let decoded_demand = self.raw_tx.receiver_count() > 0 || self.graph.host().receiver_count() > 0;
+                    let decoded_demand = self.raw_tx.receiver_count() > 0 || (self.graph.has_image_output() && self.graph.host().receiver_count() > 0);
                     if !decoded_demand {
                         return Ok(true);
                     }
@@ -240,6 +242,24 @@ impl StreamRunner {
                     }
                     self.last_decode_wall = Some(Instant::now());
                 }
+                let graph_host = self.graph.host();
+                let graph_has_image_output = self.graph.has_image_output();
+                let raw_demand = self.raw_tx.receiver_count() > 0;
+                let host_demand = graph_has_image_output && graph_host.receiver_count() > 0;
+                let preview_active = graph_has_image_output && self.preview_demand();
+                let encode_demand = self.encoder_id.is_some() && self.encoder_demand();
+                let graph_executor_active = self.graph.has_executor();
+                let needs_decoded_image = raw_demand || host_demand || preview_active || encode_demand || graph_executor_active;
+
+                // For uncompressed capture formats such as NV12, `frame_lease_to_dynamic_image`
+                // will happily materialize a full host image even when the caller explicitly
+                // disabled codecs. That defeats the point of "capture only" streams and shows up
+                // as a large active-memory floor. If nothing downstream needs an image, keep the
+                // frame as a lease and drop it here.
+                if !needs_decoded_image {
+                    return Ok(true);
+                }
+
                 let decode_start = Instant::now();
                 let mut transform_applied = false;
                 let transform = self.decoder_frame_transform();
@@ -326,35 +346,28 @@ impl StreamRunner {
                         }
                     }
                 };
+                let decoded_image_bytes = u64::from(image.width()).saturating_mul(u64::from(image.height())).saturating_mul(u64::from(image.color().bytes_per_pixel() as u32));
+                self.runner_memory.set_decoded_frame_bytes(decoded_image_bytes);
                 self.decoder_stats.inc_processed();
                 self.record_decode_ms(decode_start);
                 self.last_decode_wall = Some(Instant::now());
 
                 if self.raw_tx.receiver_count() > 0 {
+                    self.runner_memory.set_raw_clone_bytes(decoded_image_bytes);
                     let _ = self.raw_tx.send(Arc::new(image.clone()));
                 }
 
                 // Let the graph/executor transform the frame.
-                let preview_active = self.preview_demand();
-                let should_write_preview = self.encode_fourcc.is_none() || preview_active;
+                // Do not force image-output work just because no encoder is configured.
+                // In graph/no-viewer mode, value outputs can still be useful while the overlay/
+                // preview image path is pure memory churn.
+                let should_write_preview = preview_active;
+                let graph_image_output_demand = graph_has_image_output && (should_write_preview || self.encoder_demand() || host_demand);
                 let graph_start = Instant::now();
-                let processed = match self.process_assigned_graphs(image) {
-                    Some(img) => img,
-                    None => {
-                        // If the graph fails to produce an output (e.g. execution error),
-                        // keep the preview alive with the last good frame instead of cloning
-                        // the current decoded frame (full-res clones can inflate RSS).
-                        if should_write_preview && self.preview_worker.is_some() && self.shmem.is_some() {
-                            if let Some(fallback) = self.last_preview_frame.clone() {
-                                let host = self.graph.host();
-                                if host.receiver_count() > 0 {
-                                    host.send_frame(fallback.clone());
-                                }
-                                self.try_write_shmem_preview_from_image(fallback, ts);
-                            }
-                        }
-                        return Ok(true);
-                    }
+                let processed = match self.process_assigned_graphs(image, graph_image_output_demand) {
+                    Some(img) => Some(img),
+                    None if !graph_image_output_demand => None,
+                    None => return Ok(true),
                 };
                 let graph_ms = graph_start.elapsed().as_secs_f64() * 1000.0;
                 histogram!("helios.stream.graph_ms", "stream" => self.stream_label.clone()).record(graph_ms);
@@ -372,20 +385,20 @@ impl StreamRunner {
                     }
                 }
 
-                // Wrap in Arc so preview + encoder can share without cloning pixel buffers.
-                let processed = Arc::new(processed);
+                let processed = processed.map(Arc::new);
+                let processed_bytes =
+                    processed.as_ref().map(|image| u64::from(image.width()).saturating_mul(u64::from(image.height())).saturating_mul(u64::from(image.color().bytes_per_pixel() as u32))).unwrap_or(0);
+                self.runner_memory.set_processed_frame_bytes(processed_bytes);
 
                 // Only publish to host subscribers when at least one is connected; otherwise this is
                 // wasted work and can inflate memory usage via broadcast buffering for full-res frames.
-                let host = self.graph.host();
-                if host.receiver_count() > 0 {
-                    host.send_frame(processed.clone());
-                }
-                if should_write_preview && self.preview_worker.is_some() && self.shmem.is_some() {
-                    self.try_write_shmem_preview_from_image(processed.clone(), ts);
-                }
-                if preview_active {
-                    self.last_preview_frame = Some(processed.clone());
+                if let Some(processed) = processed.as_ref() {
+                    if graph_host.receiver_count() > 0 {
+                        graph_host.send_frame(processed.clone());
+                    }
+                    if should_write_preview && self.preview_worker.is_some() && self.shmem.is_some() {
+                        self.try_write_shmem_preview_from_image(processed.clone(), ts);
+                    }
                 }
 
                 // Encoder is an optional side-channel; if it’s backed up, drop frames *before*
@@ -412,6 +425,10 @@ impl StreamRunner {
                                     }
                                 }
                                 // If the encoder queue is full, just drop this frame for encoding.
+                                let Some(processed) = processed.as_ref() else {
+                                    self.encoder_stats.inc_backpressure();
+                                    return Ok(true);
+                                };
                                 if !worker.try_send_image(processed.clone(), ts) {
                                     self.encoder_stats.inc_backpressure();
                                 } else {
@@ -442,7 +459,7 @@ impl StreamRunner {
                 }
                 let stall_ms = std::env::var("HELIOS_CAPTURE_STALL_MS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(DEFAULT_CAPTURE_STALL_MS).clamp(50, 10_000);
                 let active_stall_ms = std::env::var("HELIOS_CAPTURE_ACTIVE_STALL_MS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(DEFAULT_CAPTURE_ACTIVE_STALL_MS).clamp(250, 10_000);
-                let interactive_demand = self.preview_demand() || self.encoder_demand() || self.graph.host().receiver_count() > 0;
+                let interactive_demand = (self.graph.has_image_output() && (self.preview_demand() || self.graph.host().receiver_count() > 0)) || self.encoder_demand();
                 let file_offset_start = self.file_replay_has_offset_start_frame();
                 // Seeking to late frames on software-decoded file replay can take multiple seconds
                 // before first output. Do not apply the aggressive interactive stall threshold in
@@ -527,8 +544,20 @@ impl StreamRunner {
             return;
         };
         let output_resolution = self.preview_output_resolution_hint();
-        if worker.req_tx.try_send(super::PreviewEncodeRequest { ts, image, output_resolution }).is_ok() {
-            self.last_preview_encode_wall = Some(now);
+        match worker.req_tx.try_send(super::PreviewEncodeRequest { ts, image, output_resolution }) {
+            Ok(()) => {
+                self.last_preview_encode_wall = Some(now);
+            }
+            Err(TrySendError::Full(_)) => {}
+            Err(TrySendError::Disconnected(req)) => {
+                tracing::warn!("preview worker channel disconnected; restarting preview worker");
+                self.preview_worker = Some(super::PreviewWorker::start(self.preview_encoder_stats.clone(), self.preview_encoder_last_activity_ms.clone()));
+                if let Some(worker) = self.preview_worker.as_ref() {
+                    if worker.req_tx.try_send(req).is_ok() {
+                        self.last_preview_encode_wall = Some(now);
+                    }
+                }
+            }
         }
     }
 
@@ -578,6 +607,7 @@ impl StreamRunner {
                 tracing::warn!(error = %err, "preview shmem write failed");
                 break;
             }
+            let _ = worker.recycle_tx.try_send(res.jpeg);
         }
     }
 }

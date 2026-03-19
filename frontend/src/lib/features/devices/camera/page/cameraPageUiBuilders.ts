@@ -1,5 +1,4 @@
-import type { StreamInfo, StreamManifest, StreamMetrics, ProbedBackend } from '$lib/api/httpClient';
-import type { PipelineGraphPlan } from '$lib/types/pipeline';
+import type { StreamInfo, StreamManifest, StreamMetrics } from '$lib/api/httpClient';
 
 export type CameraPageCoreInput = {
   loading: boolean;
@@ -9,13 +8,13 @@ export type CameraPageCoreInput = {
   stream: StreamInfo | null;
   manifestState: StreamManifest | null;
   streamMetrics: StreamMetrics | null;
-  controls: any[];
+  controls: unknown[];
   controlState: Record<number, number | boolean | null>;
   controlAppliedState: Record<number, number | boolean | null>;
   controlBusy: Record<number, boolean>;
   streamLookupDebug: string | null;
   streamApiBase: string | null;
-  descriptor: { modes: any[]; controls: any[] };
+  descriptor: { modes: unknown[]; controls: unknown[] };
   currentCalibrationParams: unknown;
   streamViewerHost: HTMLDivElement | null;
   streamViewerBounds: { width: number; height: number };
@@ -27,7 +26,7 @@ export type CameraPageCoreInput = {
 };
 
 export type CameraPageDerivedInput = {
-  activeMode: any;
+  activeMode: unknown;
   streamViewerAspect: number;
   streamViewerFit: { width: number; height: number };
   encoderSettingsAvailable: boolean;

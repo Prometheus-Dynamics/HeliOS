@@ -1,5 +1,8 @@
-import { DeviceService, PeripheralsService } from '$lib/ts-bindings/http/client';
+import { PeripheralsService } from '$lib/ts-bindings/http/client';
+import { fetchPeerStreams } from '$lib/api/peers';
 import { StreamsApi } from '$lib/api/streamsApi';
+import { PeripheralsApi } from '$lib/api/peripheralsApi';
+import { DeviceApi } from '$lib/api/deviceApi';
 import { emptyImuStatus } from '$lib/api/systemsPage';
 import { cancellableWithTimeout } from '$lib/api/requestUtils';
 import { formatFailureReason } from '$lib/api/pagePayload/request';
@@ -11,19 +14,26 @@ import type { DevicesPayload, DevicesPeripheralsSnapshot } from './types';
  * Compose the device dashboard payload from multiple backend endpoints.
  */
 export async function fetchDevicesPageData(): Promise<DevicesPayload> {
-  const [metricsResult, peripheralsResult, camerasResult, usbResult, fanResult, lightingResult, i2cResult, streamsResult] = await Promise.allSettled([
-    cancellableWithTimeout(() => DeviceService.metrics(), REQUEST_TIMEOUT_MS),
-    cancellableWithTimeout(() => PeripheralsService.listPeripherals(), REQUEST_TIMEOUT_MS),
-    cancellableWithTimeout(() => PeripheralsService.listCameras(), REQUEST_TIMEOUT_MS),
-    cancellableWithTimeout(() => PeripheralsService.listUsb(), REQUEST_TIMEOUT_MS),
-    cancellableWithTimeout(() => PeripheralsService.fanStatus(), REQUEST_TIMEOUT_MS),
-    cancellableWithTimeout(() => PeripheralsService.ledStatus(), REQUEST_TIMEOUT_MS),
-    cancellableWithTimeout(() => PeripheralsService.listI2C(), I2C_TIMEOUT_MS),
-    StreamsApi.listStreams({ timeoutMs: REQUEST_TIMEOUT_MS })
+  const [metricsResult, peripheralsResult, streamsResult, peerStreamsResult] = await Promise.allSettled([
+    DeviceApi.metrics({ timeoutMs: REQUEST_TIMEOUT_MS }),
+    PeripheralsApi.listPeripherals({ timeoutMs: REQUEST_TIMEOUT_MS }),
+    StreamsApi.listStreams({ timeoutMs: REQUEST_TIMEOUT_MS }),
+    fetchPeerStreams(REQUEST_TIMEOUT_MS)
   ]);
 
-  const failedCount = [metricsResult, peripheralsResult, camerasResult, usbResult, fanResult, lightingResult, i2cResult, streamsResult].filter((result) => result.status === 'rejected').length;
-  if (failedCount === 8) {
+  const [usbResult, fanResult, lightingResult, i2cResult] =
+    peripheralsResult.status === 'fulfilled'
+      ? [null, null, null, null]
+      : await Promise.allSettled([
+          cancellableWithTimeout(() => PeripheralsService.listUsb(), REQUEST_TIMEOUT_MS),
+          cancellableWithTimeout(() => PeripheralsService.fanStatus(), REQUEST_TIMEOUT_MS),
+          cancellableWithTimeout(() => PeripheralsService.ledStatus(), REQUEST_TIMEOUT_MS),
+          cancellableWithTimeout(() => PeripheralsService.listI2C(), I2C_TIMEOUT_MS)
+        ]);
+
+  const failedCount = [metricsResult, peripheralsResult, usbResult, fanResult, lightingResult, i2cResult, streamsResult, peerStreamsResult].filter(isRejected).length;
+  const attemptedRequests = peripheralsResult.status === 'fulfilled' ? 4 : 8;
+  if (failedCount === attemptedRequests) {
     throw new Error('All device data requests failed');
   }
 
@@ -33,50 +43,49 @@ export async function fetchDevicesPageData(): Promise<DevicesPayload> {
   if (peripheralsResult.status === 'rejected') {
     console.warn('Peripherals inventory request failed', peripheralsResult.reason);
   }
-  if (camerasResult.status === 'rejected') {
-    console.warn('Camera discovery request failed', camerasResult.reason);
-  }
-  if (usbResult.status === 'rejected') {
+  if (isRejected(usbResult)) {
     console.warn('USB inventory request failed', usbResult.reason);
   }
-  if (fanResult.status === 'rejected') {
+  if (isRejected(fanResult)) {
     console.warn('Fan status request failed', fanResult.reason);
   }
-  if (lightingResult.status === 'rejected') {
+  if (isRejected(lightingResult)) {
     console.warn('Lighting status request failed', lightingResult.reason);
   }
-  if (i2cResult.status === 'rejected') {
+  if (isRejected(i2cResult)) {
     console.warn('I2C inventory request failed', i2cResult.reason);
   }
   if (streamsResult.status === 'rejected') {
     console.warn('Stream list request failed', streamsResult.reason);
   }
+  if (peerStreamsResult.status === 'rejected') {
+    console.warn('Peer stream list request failed', peerStreamsResult.reason);
+  }
 
   const streamsRaw = streamsResult.status === 'fulfilled' ? streamsResult.value ?? [] : [];
   const streams = Array.isArray(streamsRaw) ? streamsRaw : [];
-  const peripheralFailure =
-    [camerasResult, usbResult, fanResult, lightingResult, i2cResult]
-      .filter((result) => result.status === 'rejected')
-      .map((result) => formatFailureReason((result as PromiseRejectedResult).reason))[0] ?? null;
+  const peerStreams = peerStreamsResult.status === 'fulfilled' ? peerStreamsResult.value?.streams ?? [] : [];
+  const peripheralPayload = peripheralsResult.status === 'fulfilled' ? peripheralsResult.value : null;
+  const peripheralFailure = firstFailureReason([peripheralsResult, usbResult, fanResult, lightingResult, i2cResult]);
   const errors = {
     peripherals: peripheralFailure
   };
 
-  const cameras = buildCameraCards(streams);
+  const cameras = buildCameraCards(streams, peerStreams);
 
   const health = extractHealth(metricsResult.status === 'fulfilled' ? metricsResult.value : null);
   const imu = emptyImuStatus();
-  const coralSensors = (peripheralsResult.status === 'fulfilled' ? peripheralsResult.value?.sensors ?? [] : []).filter((entry) => {
+  const coralSensors = (peripheralPayload?.sensors ?? []).filter((entry) => {
     const driver = (entry?.driver_namespace ?? '').trim().toLowerCase();
     return driver === 'coral';
   });
   const peripherals = extractPeripherals(
     {
       coralSensors,
-      usb: usbResult.status === 'fulfilled' ? usbResult.value ?? [] : [],
-      i2c: i2cResult.status === 'fulfilled' ? i2cResult.value ?? null : null,
-      fan: fanResult.status === 'fulfilled' ? fanResult.value ?? null : null,
-      lighting: lightingResult.status === 'fulfilled' ? lightingResult.value ?? null : null
+      usb: peripheralPayload?.usb ?? settledValue(usbResult, []),
+      i2c: peripheralPayload?.i2c ?? settledValue(i2cResult, null),
+      fan: peripheralPayload?.fan ?? settledValue(fanResult, null),
+      lighting: peripheralPayload?.lighting ?? settledValue(lightingResult, null)
     },
     imu
   );
@@ -93,56 +102,94 @@ export async function fetchDevicesPageData(): Promise<DevicesPayload> {
 }
 
 export async function fetchDevicesCamerasSnapshot(): Promise<DevicesPayload['cameras']> {
-  const streamsRaw = await StreamsApi.listStreams({ timeoutMs: REQUEST_TIMEOUT_MS });
+  const [streamsResult, peerStreamsResult] = await Promise.allSettled([
+    StreamsApi.listStreams({ timeoutMs: REQUEST_TIMEOUT_MS }),
+    fetchPeerStreams(REQUEST_TIMEOUT_MS)
+  ]);
+  const streamsRaw = streamsResult.status === 'fulfilled' ? streamsResult.value ?? [] : [];
   const streams = Array.isArray(streamsRaw) ? streamsRaw : [];
-  return buildCameraCards(streams);
+  const peerStreams = peerStreamsResult.status === 'fulfilled' ? peerStreamsResult.value?.streams ?? [] : [];
+  return buildCameraCards(streams, peerStreams);
 }
 
 export async function fetchDevicesPeripheralsSnapshot(): Promise<DevicesPeripheralsSnapshot> {
-  const [peripheralsResult, usbResult, fanResult, lightingResult, i2cResult] = await Promise.allSettled([
-    cancellableWithTimeout(() => PeripheralsService.listPeripherals(), REQUEST_TIMEOUT_MS),
+  const peripheralsResult = await Promise.allSettled([PeripheralsApi.listPeripherals({ timeoutMs: REQUEST_TIMEOUT_MS })]).then(([result]) => result);
+  if (peripheralsResult.status === 'fulfilled') {
+    const coralSensors = (peripheralsResult.value?.sensors ?? []).filter((entry) => {
+      const driver = (entry?.driver_namespace ?? '').trim().toLowerCase();
+      return driver === 'coral';
+    });
+    const peripherals = extractPeripherals(
+      {
+        coralSensors,
+        usb: peripheralsResult.value?.usb ?? [],
+        i2c: peripheralsResult.value?.i2c ?? null,
+        fan: peripheralsResult.value?.fan ?? null,
+        lighting: peripheralsResult.value?.lighting ?? null
+      },
+      emptyImuStatus()
+    );
+    return { peripherals, error: null };
+  }
+
+  console.warn('Peripherals inventory request failed', peripheralsResult.reason);
+  const [usbResult, fanResult, lightingResult, i2cResult] = await Promise.allSettled([
     cancellableWithTimeout(() => PeripheralsService.listUsb(), REQUEST_TIMEOUT_MS),
     cancellableWithTimeout(() => PeripheralsService.fanStatus(), REQUEST_TIMEOUT_MS),
     cancellableWithTimeout(() => PeripheralsService.ledStatus(), REQUEST_TIMEOUT_MS),
     cancellableWithTimeout(() => PeripheralsService.listI2C(), I2C_TIMEOUT_MS)
   ]);
 
-  const failures = [peripheralsResult, usbResult, fanResult, lightingResult, i2cResult].filter((result) => result.status === 'rejected');
-  if (failures.length === 5) {
+  const failures = [usbResult, fanResult, lightingResult, i2cResult].filter(isRejected);
+  if (failures.length === 4) {
     throw new Error('Peripherals data unavailable');
   }
 
-  if (peripheralsResult.status === 'rejected') {
-    console.warn('Peripherals inventory request failed', peripheralsResult.reason);
-  }
-  if (usbResult.status === 'rejected') {
+  if (isRejected(usbResult)) {
     console.warn('USB inventory request failed', usbResult.reason);
   }
-  if (fanResult.status === 'rejected') {
+  if (isRejected(fanResult)) {
     console.warn('Fan status request failed', fanResult.reason);
   }
-  if (lightingResult.status === 'rejected') {
+  if (isRejected(lightingResult)) {
     console.warn('Lighting status request failed', lightingResult.reason);
   }
-  if (i2cResult.status === 'rejected') {
+  if (isRejected(i2cResult)) {
     console.warn('I2C inventory request failed', i2cResult.reason);
   }
 
-  const peripheralFailure = failures.map((result) => formatFailureReason((result as PromiseRejectedResult).reason))[0] ?? null;
-  const coralSensors = (peripheralsResult.status === 'fulfilled' ? peripheralsResult.value?.sensors ?? [] : []).filter((entry) => {
-    const driver = (entry?.driver_namespace ?? '').trim().toLowerCase();
-    return driver === 'coral';
-  });
+  const peripheralFailure = firstFailureReason([peripheralsResult, usbResult, fanResult, lightingResult, i2cResult]);
+  const coralSensors: never[] = [];
   const peripherals = extractPeripherals(
     {
       coralSensors,
-      usb: usbResult.status === 'fulfilled' ? usbResult.value ?? [] : [],
-      i2c: i2cResult.status === 'fulfilled' ? i2cResult.value ?? null : null,
-      fan: fanResult.status === 'fulfilled' ? fanResult.value ?? null : null,
-      lighting: lightingResult.status === 'fulfilled' ? lightingResult.value ?? null : null
+      usb: settledValue(usbResult, []),
+      i2c: settledValue(i2cResult, null),
+      fan: settledValue(fanResult, null),
+      lighting: settledValue(lightingResult, null)
     },
     emptyImuStatus()
   );
 
   return { peripherals, error: peripheralFailure };
+}
+
+function isRejected(result: PromiseSettledResult<unknown> | null): result is PromiseRejectedResult {
+  return result?.status === 'rejected';
+}
+
+function settledValue<T>(result: PromiseSettledResult<T> | null, fallback: T): T {
+  if (!result || result.status !== 'fulfilled') {
+    return fallback;
+  }
+  return (result.value ?? fallback) as T;
+}
+
+function firstFailureReason(results: Array<PromiseSettledResult<unknown> | null>): string | null {
+  for (const result of results) {
+    if (result?.status === 'rejected') {
+      return formatFailureReason(result.reason);
+    }
+  }
+  return null;
 }

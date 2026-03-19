@@ -1,11 +1,12 @@
 <script lang="ts">
+	  import { resolve } from '$app/paths';
 	  import { goto } from '$app/navigation';
 	  import { onDestroy } from 'svelte';
 	  import type { Snippet } from 'svelte';
 	  import { openStreamMetricsSocket, type StreamMetricsError, type StreamMetricsEvent } from '$lib/api/streamMetrics';
 	  import { StreamsApi } from '$lib/api/streamsApi';
 	  import StreamMetricsBanners from '$lib/components/StreamMetricsBanners.svelte';
-	  import type { StreamMetrics } from '$lib/ts-bindings/http/client';
+	  import type { CaptureStageMetrics, CodecMetrics, StreamMetrics } from '$lib/ts-bindings/http/client';
 
   type MetricsSnapshot = {
     average_fps?: number;
@@ -55,15 +56,33 @@
   const METRICS_GRACE_MS = 9_000;
 
   type ComponentMetricEntry = { id: string; label: string; data: MetricsSnapshot };
-  type PipelineErrorEntry = { id: string; label: string; error: string; ageMs: number | null };
-  type PipelineFocusRequest = { pipelineId: string; nodeId?: string | null; port?: string | null };
-  const PIPELINE_FOCUS_REQUEST_KEY = 'helios.pipelines.focus_request';
-	  type PipelineNodeErrorSnapshot = {
-	    last_error?: string | null;
-	    last_error_at?: number | null;
-	    node_label?: string | null;
-	    node_type?: string | null;
-	  };
+	  type PipelineErrorEntry = { id: string; label: string; error: string; ageMs: number | null };
+	  type PipelineFocusRequest = { pipelineId: string; nodeId?: string | null; port?: string | null };
+	  const PIPELINE_FOCUS_REQUEST_KEY = 'helios.pipelines.focus_request';
+
+  const asRecord = (value: unknown): Record<string, unknown> | null =>
+    value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+
+  const captureSnapshot = (value: CaptureStageMetrics | null | undefined): MetricsSnapshot => ({
+    average_fps: value?.fps,
+    average_time_ms: value?.average_time_ms,
+    last_time_ms: value?.last_time_ms,
+    sample_count: value?.sample_count,
+    window_size: value?.sample_count
+  });
+
+  const codecSnapshot = (value: CodecMetrics | null | undefined): MetricsSnapshot => ({
+    average_fps: value?.fps,
+    average_time_ms: value?.average_time_ms,
+    last_time_ms: value?.last_time_ms,
+    work_average_time_ms: value?.work_average_time_ms,
+    work_last_time_ms: value?.work_last_time_ms,
+    sample_count: value?.sample_count,
+    window_size: value?.sample_count,
+    processed: value?.processed,
+    backpressure: value?.backpressure,
+    errors: value?.errors
+  });
 
   const componentMetrics = $derived<ComponentMetricEntry[]>((() => {
     if (!metrics) {
@@ -83,58 +102,24 @@
       {
         id: 'capture',
         label: 'Capture',
-        data: {
-          average_fps: (metrics.capture as any)?.fps,
-          average_time_ms: (metrics.capture as any)?.average_time_ms,
-          last_time_ms: (metrics.capture as any)?.last_time_ms,
-          sample_count: (metrics.capture as any)?.sample_count,
-          window_size: (metrics.capture as any)?.sample_count
-        }
+        data: captureSnapshot(metrics.capture)
       },
       {
         id: 'decoder',
         label: 'Decoder',
-        data: {
-          average_fps: metrics.decoder?.fps,
-          average_time_ms: metrics.decoder?.average_time_ms,
-          last_time_ms: metrics.decoder?.last_time_ms,
-          work_average_time_ms: (metrics.decoder as any)?.work_average_time_ms,
-          work_last_time_ms: (metrics.decoder as any)?.work_last_time_ms,
-          sample_count: metrics.decoder?.sample_count,
-          window_size: metrics.decoder?.sample_count,
-          processed: metrics.decoder?.processed,
-          backpressure: metrics.decoder?.backpressure,
-          errors: metrics.decoder?.errors
-        }
+        data: codecSnapshot(metrics.decoder)
       },
       {
         id: 'encoder',
         label: 'Encoder',
-        data: {
-          average_fps: metrics.encoder?.fps,
-          average_time_ms: metrics.encoder?.average_time_ms,
-          last_time_ms: metrics.encoder?.last_time_ms,
-          work_average_time_ms: (metrics.encoder as any)?.work_average_time_ms,
-          work_last_time_ms: (metrics.encoder as any)?.work_last_time_ms,
-          sample_count: metrics.encoder?.sample_count,
-          window_size: metrics.encoder?.sample_count,
-          processed: metrics.encoder?.processed,
-          backpressure: metrics.encoder?.backpressure,
-          errors: metrics.encoder?.errors
-        }
+        data: codecSnapshot(metrics.encoder)
       }
     ];
     if (!hideHostMetrics) {
       entries.push({
         id: 'host',
         label: 'Host',
-        data: {
-          average_fps: (metrics.host as any)?.fps,
-          average_time_ms: (metrics.host as any)?.average_time_ms,
-          last_time_ms: (metrics.host as any)?.last_time_ms,
-          sample_count: (metrics.host as any)?.sample_count,
-          window_size: (metrics.host as any)?.sample_count
-        }
+        data: captureSnapshot(metrics.host)
       });
     } else if (hasHostSlot) {
       entries.push({ id: 'host-slot', label: 'Host', data: {} });
@@ -143,9 +128,10 @@
   })());
 
   const pipelineErrors = $derived<PipelineErrorEntry[]>((() => {
-    const nodes = metrics?.pipeline?.nodes as Record<string, PipelineNodeErrorSnapshot> | undefined;
+    const nodes = metrics?.pipeline?.nodes;
     if (!nodes) return [];
-    const entries = Object.entries(nodes).flatMap(([id, node]) => {
+    const entries = Object.keys(nodes).flatMap((id) => {
+      const node = nodes[id];
       if (id === 'graph') return [];
       if (!node?.last_error) return [];
       const label = node.node_label || node.node_type || id;
@@ -155,7 +141,7 @@
   })());
 
   const pipelineWarnings = $derived<string | null>((() => {
-    const graphNode = (metrics?.pipeline?.nodes as Record<string, PipelineNodeErrorSnapshot> | undefined)?.graph;
+    const graphNode = metrics?.pipeline?.nodes?.graph;
     if (!graphNode?.last_error) return null;
     return graphNode.last_error;
   })());
@@ -288,6 +274,22 @@
     return `${value.toFixed(1)} fps`;
   }
 
+  function isIdleCodecComponent(component: ComponentMetricEntry): boolean {
+    if (component.id !== 'encoder' && component.id !== 'decoder') return false;
+    const sampleCount = Number(component.data.sample_count ?? 0);
+    const processed = Number(component.data.processed ?? 0);
+    const backpressure = Number(component.data.backpressure ?? 0);
+    const errors = Number(component.data.errors ?? 0);
+    return sampleCount <= 0 && processed <= 0 && backpressure <= 0 && errors <= 0;
+  }
+
+  function primaryMetricLabel(component: ComponentMetricEntry): string {
+    if (isIdleCodecComponent(component)) {
+      return component.id === 'encoder' ? 'Idle' : 'Standby';
+    }
+    return formatFps(component.data.average_fps ?? 0);
+  }
+
   function formatTimeMs(value: number | undefined = 0): string {
     if (!Number.isFinite(value) || value <= 0) return '—';
     return `${value.toFixed(2)} ms`;
@@ -390,15 +392,19 @@
     if (!captureSessionId) return;
     try {
       const stream = await StreamsApi.getStream({ id: captureSessionId }).catch(() => null);
-      const manifest: any = (stream as any)?.manifest ?? null;
-      const pipelineId: string | null =
-        manifest?.active_pipeline_id ?? manifest?.pipeline_id ?? manifest?.pipelines?.[0]?.pipeline_id ?? null;
+      const manifest = stream?.manifest ?? null;
+      const manifestRecord = asRecord(manifest);
+      const pipelineId =
+        (typeof manifest?.active_pipeline_id === 'string' && manifest.active_pipeline_id.trim()) ||
+        (typeof manifestRecord?.pipeline_id === 'string' && manifestRecord.pipeline_id.trim()) ||
+        (typeof manifest?.pipelines?.[0]?.pipeline_id === 'string' && manifest.pipelines[0].pipeline_id.trim()) ||
+        null;
       if (!pipelineId) return;
       const payload: PipelineFocusRequest = { pipelineId, nodeId: entry.id, port: null };
       if (typeof window !== 'undefined') {
         window.sessionStorage.setItem(PIPELINE_FOCUS_REQUEST_KEY, JSON.stringify(payload));
       }
-      await goto('/pipelines');
+      await goto(resolve('/pipelines'));
     } catch (err) {
       console.warn('Failed to navigate to pipeline graph', err);
     }
@@ -526,8 +532,10 @@
             <div class="cursor-help rounded border border-surface-800/60 bg-surface-900/70 px-2 py-1 text-[0.7rem] text-surface-300" title={buildSummaryTooltip(summaryLabel, component.data)}>
               <span class="font-semibold text-surface-100">{summaryLabel}</span>
               <span class="mx-1 text-surface-600">|</span>
-              <span>{formatSummaryFps(component.data.average_fps ?? 0)}</span>
-              <span class="ml-1 text-surface-500">({formatTimeMs(component.data.average_time_ms ?? 0)})</span>
+              <span>{isIdleCodecComponent(component) ? primaryMetricLabel(component) : formatSummaryFps(component.data.average_fps ?? 0)}</span>
+              {#if !isIdleCodecComponent(component)}
+                <span class="ml-1 text-surface-500">({formatTimeMs(component.data.average_time_ms ?? 0)})</span>
+              {/if}
             </div>
           {/each}
         </div>
@@ -550,7 +558,7 @@
                   <div class="mt-1.5 space-y-1 text-xs">
                     <div class="flex items-center justify-between text-surface-300">
                       <span>FPS</span>
-                      <span class="font-semibold text-surface-50">{formatFps(component.data.average_fps ?? 0)}</span>
+                      <span class="font-semibold text-surface-50">{primaryMetricLabel(component)}</span>
                     </div>
                     <div class="flex items-center justify-between text-surface-300">
                       <span>Avg / Last</span>
@@ -576,7 +584,7 @@
                   <dl class="mt-2 space-y-1 text-sm">
                     <div class="flex justify-between text-surface-300">
                       <dt>Average FPS</dt>
-                      <dd class="font-semibold text-surface-50">{formatFps(component.data.average_fps ?? 0)}</dd>
+                      <dd class="font-semibold text-surface-50">{primaryMetricLabel(component)}</dd>
                     </div>
                     <div class="flex justify-between text-surface-300">
                       <dt>Average time</dt>

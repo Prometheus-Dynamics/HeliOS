@@ -3,6 +3,8 @@ use std::fs;
 
 use crate::config::{Config, Mode, Partition};
 
+const MIB: u64 = 1024 * 1024;
+
 #[derive(Debug)]
 pub struct PartInfo {
     pub start: u64,
@@ -20,11 +22,13 @@ pub struct PartPlan {
     pub fs_type: Option<String>,
     pub marker: Option<String>,
     pub mkfs: bool,
+    pub wipe_signatures: bool,
     pub run_fsck: bool,
     pub run_resizefs: bool,
     pub mount_point: Option<String>,
     pub mount_label: Option<String>,
     pub secondary_marker: Option<String>,
+    pub reformat_if_missing_secondary_marker: bool,
 }
 
 pub fn detect_disk() -> Option<String> {
@@ -66,11 +70,23 @@ pub fn resolve_root(root_arg: &str) -> Option<String> {
         if let Some(dev) = resolve_by_path(root_arg) {
             return Some(dev);
         }
-        if root_arg != "/dev/root" {
+        if root_arg != "/dev/root" && dev_path_exists(root_arg) {
             return Some(root_arg.to_string());
         }
     }
     None
+}
+
+fn dev_path_exists(path: &str) -> bool {
+    if fs::metadata(path).is_ok() {
+        return true;
+    }
+
+    let Some(name) = path.strip_prefix("/dev/") else {
+        return false;
+    };
+
+    fs::metadata(format!("/sys/class/block/{}", name)).is_ok()
 }
 
 fn resolve_by_path(path: &str) -> Option<String> {
@@ -204,6 +220,14 @@ pub fn part_dev_path(disk: &str, part: u32) -> String {
     }
 }
 
+pub fn sectors_to_mib_floor(sectors: u64, sector_bytes: u64) -> u64 {
+    sectors.saturating_mul(sector_bytes) / MIB
+}
+
+pub fn sectors_to_mib_ceil(sectors: u64, sector_bytes: u64) -> u64 {
+    sectors.saturating_mul(sector_bytes).div_ceil(MIB)
+}
+
 fn align_up(val: u64, align: u64) -> u64 {
     if align == 0 {
         val
@@ -229,13 +253,13 @@ pub fn build_plan(cfg: &Config, ab_start: u64, ab_end: u64, data_start: u64, tot
     let mut plans = Vec::new();
 
     for p in &cfg.partitions {
-        let PartPlan { mode, label, fs_type, marker, mkfs, run_fsck, run_resizefs, .. } = init_plan_defaults(p);
+        let PartPlan { mode, label, fs_type, marker, mkfs, wipe_signatures, run_fsck, run_resizefs, .. } = init_plan_defaults(p);
 
         let is_data = is_data_partition(p);
 
         let mut start = match p.start_mib {
             Some(s) => s,
-            None if is_data && data_start > ab_start => data_start,
+            None if is_data && data_start > ab_start && !p.fill_to_end.unwrap_or(false) => data_start,
             None => cursor,
         };
         start = align_up(start, align);
@@ -309,11 +333,13 @@ pub fn build_plan(cfg: &Config, ab_start: u64, ab_end: u64, data_start: u64, tot
             fs_type,
             marker,
             mkfs,
+            wipe_signatures,
             run_fsck,
             run_resizefs,
             mount_point: p.mount_point.clone(),
             mount_label: p.mount_label.clone(),
             secondary_marker: p.secondary_marker.clone(),
+            reformat_if_missing_secondary_marker: p.reformat_if_missing_secondary_marker.unwrap_or(false),
         });
 
         cursor = end + gap;
@@ -333,11 +359,13 @@ fn init_plan_defaults(p: &Partition) -> PartPlan {
         fs_type: p.fs_type.clone(),
         marker: p.marker.clone(),
         mkfs: p.mkfs.unwrap_or(true),
+        wipe_signatures: p.wipe_signatures.unwrap_or(false),
         run_fsck: p.run_fsck.unwrap_or(true),
         run_resizefs: p.run_resizefs.unwrap_or(true),
         mount_point: p.mount_point.clone(),
         mount_label: p.mount_label.clone(),
         secondary_marker: p.secondary_marker.clone(),
+        reformat_if_missing_secondary_marker: p.reformat_if_missing_secondary_marker.unwrap_or(false),
     }
 }
 
@@ -347,7 +375,8 @@ fn is_data_partition(p: &Partition) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::disk_from_dev;
+    use super::{build_plan, disk_from_dev, resolve_root, sectors_to_mib_ceil};
+    use crate::config::{Config, Mode, Partition, Spans};
 
     #[test]
     fn disk_from_dev_handles_mmc_and_nvme() {
@@ -366,5 +395,38 @@ mod tests {
     fn disk_from_dev_passthrough_other() {
         assert_eq!(disk_from_dev("/dev/loop0"), "/dev/loop0");
         assert_eq!(disk_from_dev("/dev/mapper/vg0-root"), "/dev/mapper/vg0-root");
+    }
+
+    #[test]
+    fn resolve_root_rejects_nonexistent_placeholder_device() {
+        assert_eq!(resolve_root("/dev/helios-rootfs"), None);
+    }
+
+    #[test]
+    fn fill_to_end_data_starts_from_cursor_not_reserved_data_start() {
+        let cfg = Config {
+            spans: Spans { data_size_mib: Some(0), ..Default::default() },
+            partitions: vec![Partition {
+                name: "DATA".to_string(),
+                number: 3,
+                label: Some("DATA".to_string()),
+                mode: Mode::Mkpart,
+                fs_type: Some("ext4".to_string()),
+                fill_to_end: Some(true),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let plan = build_plan(&cfg, 128, 512, 512, 512).expect("plan");
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0].start_mib, 128);
+        assert_eq!(plan[0].end_mib, 511);
+    }
+
+    #[test]
+    fn sectors_to_mib_ceil_uses_next_safe_boundary_for_partition_end() {
+        assert_eq!(sectors_to_mib_ceil(221_633, 512), 109);
+        assert_eq!(sectors_to_mib_ceil(221_184, 512), 108);
     }
 }

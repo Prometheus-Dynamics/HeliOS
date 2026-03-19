@@ -1,45 +1,69 @@
 <script lang="ts">
-  const { ctx } = $props<{ ctx: any }>();
+  import type { PipelineOverviewPipeline } from '$lib/types/pipeline';
+  import type { Readable, Writable } from 'svelte/store';
 
-  let {
-    PipelineListPanel,
-    activeTab,
-    ideBindings,
-    visiblePlugins,
-    pipelinesRefreshing,
-    isInitialLoading,
-    pipelineListItems,
-    pipelineMap,
-    selectedPipelineId,
-    pipelineSearch,
-    openPluginProjectModal,
-    openPluginInIde,
-    openCreateModal,
-    setSelectedPipeline,
-    openPipelineIconModal,
-    handlePipelineCardKeydown
-  } = ctx;
+  type PipelineListEntry = {
+    id: string;
+    name: string;
+    revision?: string | null;
+    issueCount?: number | null;
+    appearance?: unknown;
+  };
+
+  type PipelinePageSidebarCtx = {
+    PipelineListPanel: (typeof import('./PipelineListPanel.svelte'))['default'] | null;
+    ideBindings: { customNodeSearch: string };
+    pipelinesRefreshing: boolean;
+    isInitialLoading: boolean;
+    pipelineListItems: Readable<PipelineListEntry[]>;
+    pipelineMap: Readable<Record<string, PipelineOverviewPipeline>>;
+    selectedPipelineId: Readable<string | null>;
+    pipelineSearch: Writable<string>;
+    openCreateModal: () => void;
+    setSelectedPipeline: (pipelineId: string) => void;
+    openPipelineIconModal: (pipelineId: string) => void;
+    handlePipelineCardKeydown: (event: KeyboardEvent, pipelineId: string) => void;
+    openDeleteModal?: (id: string) => void;
+  };
+
+  const { ctx } = $props<{ ctx: Record<string, unknown> }>();
+  const getPageCtx = (): PipelinePageSidebarCtx => ctx as PipelinePageSidebarCtx;
+  const PipelineListPanel = $derived.by(() => getPageCtx().PipelineListPanel);
+  const ideBindings = $derived.by(() => getPageCtx().ideBindings);
+  const pipelinesRefreshing = $derived.by(() => getPageCtx().pipelinesRefreshing);
+  const isInitialLoading = $derived.by(() => getPageCtx().isInitialLoading);
+  const pipelineListItems = $derived.by(() => getPageCtx().pipelineListItems);
+  const pipelineMap = $derived.by(() => getPageCtx().pipelineMap);
+  const selectedPipelineId = $derived.by(() => getPageCtx().selectedPipelineId);
+  const pipelineSearch = $derived.by(() => getPageCtx().pipelineSearch);
+  const openCreateModal = $derived.by(() => getPageCtx().openCreateModal);
+  const setSelectedPipeline = $derived.by(() => getPageCtx().setSelectedPipeline);
+  const openPipelineIconModal = $derived.by(() => getPageCtx().openPipelineIconModal);
+  const handlePipelineCardKeydown = $derived.by(() => getPageCtx().handlePipelineCardKeydown);
 
   const handleOpenDeleteModal = (id: string) => {
-    ctx.openDeleteModal?.(id);
+    getPageCtx().openDeleteModal?.(id);
   };
 </script>
 
-<PipelineListPanel
-  activeTab={$activeTab}
-  bind:customNodeSearch={ideBindings.customNodeSearch}
-  visiblePlugins={visiblePlugins}
-  pipelinesRefreshing={pipelinesRefreshing}
-  isInitialLoading={isInitialLoading}
-  pipelineListItems={$pipelineListItems}
-  pipelineMap={$pipelineMap}
-  selectedPipelineId={$selectedPipelineId}
-  pipelineSearch={pipelineSearch}
-  onOpenPluginProject={openPluginProjectModal}
-  onOpenPluginInIde={openPluginInIde}
-  onOpenCreateModal={openCreateModal}
-  onSelectPipeline={setSelectedPipeline}
-  onOpenPipelineIcon={openPipelineIconModal}
-  onOpenDeleteModal={handleOpenDeleteModal}
-  onPipelineCardKeydown={handlePipelineCardKeydown}
-/>
+{#if PipelineListPanel}
+  {@const ListPanel = PipelineListPanel}
+  <ListPanel
+    bind:customNodeSearch={ideBindings.customNodeSearch}
+    {pipelinesRefreshing}
+    {isInitialLoading}
+    pipelineListItems={$pipelineListItems}
+    pipelineMap={$pipelineMap}
+    selectedPipelineId={$selectedPipelineId}
+    {pipelineSearch}
+    onOpenCreateModal={openCreateModal}
+    onSelectPipeline={setSelectedPipeline}
+    onOpenPipelineIcon={openPipelineIconModal}
+    onOpenDeleteModal={handleOpenDeleteModal}
+    onPipelineCardKeydown={handlePipelineCardKeydown}
+  />
+{:else}
+  <aside class="flex min-h-0 min-w-0 flex-col rounded border border-surface-800/60 bg-surface-950/60 p-4 text-xs uppercase tracking-[0.24em] text-surface-400 xl:w-[22rem]">
+    Loading pipelines…
+  </aside>
+{/if}

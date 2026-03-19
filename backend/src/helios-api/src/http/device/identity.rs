@@ -1,8 +1,10 @@
 use axum::{Json, http::StatusCode, response::IntoResponse};
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 use utoipa::ToSchema;
 
 use super::super::error::{ApiError, ApiResult};
+use crate::http::persisted_files;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct HostnamePayload {
@@ -21,6 +23,10 @@ fn validate_hostname(value: &str) -> Result<(), Box<ApiError>> {
         return Err(Box::new(ApiError::bad_request("hostname must use letters, numbers, and hyphens")));
     }
     Ok(())
+}
+
+fn hostname_paths() -> (PathBuf, &'static Path) {
+    (persisted_files::data_root_file("hostname"), Path::new("/etc/hostname"))
 }
 
 #[utoipa::path(
@@ -43,6 +49,11 @@ pub async fn hostname() -> ApiResult<impl IntoResponse> {
 )]
 pub async fn set_hostname(Json(payload): Json<HostnamePayload>) -> ApiResult<impl IntoResponse> {
     validate_hostname(&payload.hostname)?;
-    lib_net::set_hostname(payload.hostname.trim()).map_err(ApiError::from)?;
+    let hostname = payload.hostname.trim();
+    lib_net::set_hostname(hostname).map_err(ApiError::from)?;
+
+    let (persist_path, legacy_path) = hostname_paths();
+    let body = format!("{hostname}\n");
+    persisted_files::write_mirrored(&persist_path, Some(legacy_path), body.as_bytes()).await.map_err(|err| ApiError::internal(format!("failed to persist hostname: {err}")))?;
     Ok(StatusCode::NO_CONTENT)
 }

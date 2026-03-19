@@ -9,7 +9,7 @@ export type PipelineTuningApplyState = {
   get stream(): StreamInfo | null;
   get streamId(): string;
   get pipelineTuningPlan(): PipelineGraphPlan | null;
-  get pipelineTuningGraph(): any;
+  get pipelineTuningGraph(): unknown;
   get pipelineInputOverridesById(): Record<string, Record<string, PipelineNodeValue>>;
   get pipelineNodeOverridesById(): Record<string, Record<string, Record<string, PipelineNodeValue>>>;
   get pipelineTuningLastAppliedNodeOverridesById(): Record<string, Record<string, Record<string, PipelineNodeValue>>>;
@@ -24,13 +24,16 @@ export type PipelineTuningApplyState = {
 };
 
 export type PipelineTuningApplyDeps = {
-  awaitStreamUpdatesSocket: (streamId: string, timeoutMs?: number) => Promise<{ send?: (payload: any) => boolean | void } | null>;
+  awaitStreamUpdatesSocket: (
+    streamId: string,
+    timeoutMs?: number
+  ) => Promise<{ send?: (payload: Record<string, unknown>) => boolean | void } | null>;
   applyPipelineOverridesToGraph: (
     pipelineId: string,
-    graph: any,
+    graph: unknown,
     inputOverridesById: Record<string, Record<string, PipelineNodeValue>>,
     nodeOverridesById: Record<string, Record<string, Record<string, PipelineNodeValue>>>
-  ) => any;
+  ) => unknown;
   isDaedalusPlan: (plan: PipelineGraphPlan | null | undefined) => boolean;
 };
 

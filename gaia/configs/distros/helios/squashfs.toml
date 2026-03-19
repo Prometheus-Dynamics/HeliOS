@@ -1,0 +1,57 @@
+# Distro/profile: Helios squashfs experiment, built on top of the standard
+# HeliOS composition with squashfs-specific first-boot DATA provisioning.
+
+[buildroot]
+imports = [
+  "../../modules/buildroot/base.toml",
+  "../../modules/buildroot/helios_packages.toml",
+]
+
+  [buildroot.package_versions]
+  imports = [
+    "../../modules/buildroot/package_versions.toml",
+  ]
+
+[program]
+imports = [
+  "../../modules/program/base.toml",
+  "../../modules/program/rust.toml",
+  "../../modules/program/java.toml",
+  "../../modules/program/custom.toml",
+]
+check_policy = "warn"
+
+  [program.lint]
+  imports = [
+    "../../modules/program/lint.toml",
+  ]
+  enabled = false
+
+  [program.install]
+  imports = [
+    "../../modules/program/install.toml",
+  ]
+
+[stage]
+imports = [
+  "../../modules/stage/base.toml",
+  "../../modules/stage/system.toml",
+]
+
+  [stage.env]
+  imports = [
+    "../../env/runtime/helios.toml",
+  ]
+
+  [stage.services]
+  imports = [
+    "../../modules/stage/services/base.toml",
+    "../../modules/stage/services/networkd.toml",
+    "../../modules/stage/services/ssh.toml",
+    "../../modules/stage/services/login_banner.toml",
+    "../../modules/stage/services/runtime_core.toml",
+    "../../modules/stage/services/gadget.toml",
+    "../../modules/stage/services/usb_power.toml",
+    "../../modules/stage/services/squashfs_experiment.toml",
+    "../../modules/stage/services/squashfs_provisioning.toml",
+  ]

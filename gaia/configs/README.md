@@ -56,5 +56,8 @@ archive_format = "img.xz"
 archive_name = "{build}-{version}-sdcard"
 ```
 
-The current production build file is:
+The current CM5 build file is:
 - `configs/builds/HeliOS-cm5.toml`
+
+It produces the squashfs/overlay image used for both release and live-deploy
+development workflows.

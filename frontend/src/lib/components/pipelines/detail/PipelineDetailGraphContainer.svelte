@@ -15,12 +15,12 @@
   import {
     formatHeatDuration,
     formatTimestamp,
-    metricsRowKey,
     normalizeHeatmapNodeId,
     shouldIncludeHeatmapNode
   } from '$lib/components/pipelines/detail/pipelineDetailMetricsUtils';
   import PipelineDetailGraphSection from '$lib/components/pipelines/detail/PipelineDetailGraphSection.svelte';
   import { resolveStreamLabel } from '$lib/utils/streamLabels';
+  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
   type PipelineBreadcrumb = {
     id: string;
@@ -135,25 +135,46 @@
     }
   };
 
+  const measureGraphViewport = () => {
+    const measured = graphViewportElement?.getBoundingClientRect().height ?? graphViewportElement?.clientHeight ?? 0;
+    if (measured > 0) {
+      applyGraphViewportHeight(measured);
+    }
+  };
+
   $effect(() => {
-    if (!graphViewportElement || typeof ResizeObserver === 'undefined') {
+    if (!graphViewportElement || typeof window === 'undefined') {
       return;
     }
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const measured =
-          entry.contentRect?.height ?? graphViewportElement?.clientHeight ?? graphViewportHeight;
-        if (measured > 0) {
-          applyGraphViewportHeight(measured);
-        }
+    let frameHandle: number | null = null;
+    const scheduleMeasure = () => {
+      if (frameHandle != null) {
+        window.cancelAnimationFrame(frameHandle);
       }
+      frameHandle = window.requestAnimationFrame(() => {
+        frameHandle = null;
+        measureGraphViewport();
+      });
+    };
+    scheduleMeasure();
+    window.addEventListener('resize', scheduleMeasure, { passive: true });
+    return () => {
+      if (frameHandle != null) {
+        window.cancelAnimationFrame(frameHandle);
+      }
+      window.removeEventListener('resize', scheduleMeasure);
+    };
+  });
+
+  $effect(() => {
+    void breadcrumbs.length;
+    void warningsPanelOpen;
+    void engineConfigOpen;
+    if (typeof window === 'undefined') return;
+    const handle = window.requestAnimationFrame(() => {
+      measureGraphViewport();
     });
-    observer.observe(graphViewportElement);
-    const initialRect = graphViewportElement.getBoundingClientRect();
-    if (initialRect.height > 0) {
-      applyGraphViewportHeight(initialRect.height);
-    }
-    return () => observer.disconnect();
+    return () => window.cancelAnimationFrame(handle);
   });
 
   let heatmapStreamId = $state<string | null>(null);
@@ -175,6 +196,9 @@
   };
 
   const pipelineBoundaryIndex = $derived.by<Record<string, boolean>>(() => {
+    if (!heatmapEnabled) {
+      return {};
+    }
     const nodes = context.pipeline?.graph?.nodes ?? {};
     const index: Record<string, boolean> = {};
     Object.entries(nodes).forEach(([nodeId, node]) => {
@@ -184,7 +208,10 @@
   });
 
   const registryByBackendId = $derived.by(() => {
-    const map = new Map<string, PipelineRegistryEntry>();
+    if (!gpuOverlayEnabled) {
+      return new SvelteMap<string, PipelineRegistryEntry>();
+    }
+    const map = new SvelteMap<string, PipelineRegistryEntry>();
     for (const entry of registryEntries ?? []) {
       const id = entry?.id?.trim();
       if (!id) continue;
@@ -199,7 +226,7 @@
     { id: 'boundary', label: 'Pipeline IO', description: 'Only pipeline IO nodes' }
   ];
 
-  const normalizedHeatmapFilterQuery = $derived.by(() => heatmapFilterQuery.trim().toLowerCase());
+  const normalizedHeatmapFilterQuery = $derived.by(() => (heatmapEnabled ? heatmapFilterQuery.trim().toLowerCase() : ''));
   const heatmapMinAverageMs = $derived.by<number | null>(() => {
     const normalized = heatmapMinAverageInput.trim();
     if (normalized.length === 0) return null;
@@ -216,6 +243,9 @@
   });
 
   const heatmapNodeIndex = $derived.by<Record<string, HeatmapNodeIndexEntry>>(() => {
+    if (!heatmapEnabled) {
+      return {};
+    }
     const index: Record<string, HeatmapNodeIndexEntry> = {};
     const graphNodes = context.pipeline?.graph?.nodes ?? {};
     const trim = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
@@ -228,7 +258,7 @@
       if (!normalizedId) return;
       const normalizedLabel = label.trim().length > 0 ? label.trim() : normalizedId;
       const existing = index[normalizedId];
-      const tokens = new Set(
+      const tokens = new SvelteSet(
         (existing?.keywords ?? '')
           .split(' ')
           .map((token) => token.trim())
@@ -287,6 +317,7 @@
   );
 
   const heatmapActiveFilterCount = $derived.by(() => {
+    if (!heatmapEnabled) return 0;
     let count = 0;
     if (normalizedHeatmapFilterQuery) count += 1;
     if (heatmapMinAverageMs != null && heatmapMinAverageMs > 0) count += 1;
@@ -295,6 +326,14 @@
   });
 
   const gpuOverlaySummary = $derived.by(() => {
+    if (!gpuOverlayEnabled) {
+      return {
+        segments: [],
+        totalGpuNodes: 0,
+        sharedSegments: 0,
+        ungroupedLabels: []
+      };
+    }
     const detected = detectGpuSegments(graphPlan, {
       resolveRegistryEntry: (node) => registryByBackendId.get(node.backendId) ?? null
     });
@@ -312,7 +351,7 @@
     const segments = validationSegments.length > 0 ? validationSegments : detected.segments;
     const gpuNodeIds =
       validationSegments.length > 0
-        ? new Set<string>(validationSegments.flatMap((segment) => segment.nodes))
+        ? new SvelteSet<string>(validationSegments.flatMap((segment) => segment.nodes))
         : detected.gpuNodeIds;
     const nodes = graphPlan?.nodes ?? {};
     const resolveLabel = (nodeId: string): string => {
@@ -330,7 +369,7 @@
       );
       return (label ?? nodeId).trim();
     };
-    const assigned = new Set<string>();
+    const assigned = new SvelteSet<string>();
     const decoratedSegments = segments.map((segment) => {
       segment.nodes.forEach((id) => assigned.add(id));
       return {
@@ -351,6 +390,9 @@
   });
 
   const gpuOverlaySegments = $derived.by<Array<{ id: number; nodes: string[] }> | null>(() => {
+    if (!gpuOverlayEnabled) {
+      return null;
+    }
     const validationSegmentsRaw = context.pipeline?.diagnostics?.gpu?.segments ?? [];
     const mapped = validationSegmentsRaw
       .map((segment) => {
@@ -461,8 +503,11 @@
   }
 
   const heatmapStreamOptions = $derived.by<HeatmapStreamOption[]>(() => {
+    if (!heatmapEnabled) {
+      return [];
+    }
     const options: HeatmapStreamOption[] = [];
-    const seen = new Set<string>();
+    const seen = new SvelteSet<string>();
     const metrics = context.metrics ?? [];
 
     if (metrics && metrics.length > 0) {
@@ -496,6 +541,7 @@
   });
 
   const selectedHeatmapStreamLabel = $derived.by(() => {
+    if (!heatmapEnabled) return 'All streams';
     const option = heatmapStreamOptions.find((entry) => entry.id === heatmapStreamId);
     if (option) return option.label;
     return 'All streams';
@@ -543,7 +589,7 @@
       return null;
     }
 
-    const includeCache = new Map<string, string | null>();
+    const includeCache = new SvelteMap<string, string | null>();
     const resolveIncludedNodeId = (nodeId: string): string | null => {
       if (includeCache.has(nodeId)) {
         return includeCache.get(nodeId) ?? null;

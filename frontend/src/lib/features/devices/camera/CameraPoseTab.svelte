@@ -1,13 +1,19 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import Panel from '$lib/components/Panel.svelte';
-  import CameraRigViewer from '$lib/components/CameraRigViewer.svelte';
   import { rigLayoutStore, type RigLayoutState } from '$lib/stores/rigLayout';
   import type { RigCameraInfo, RobotDimensions } from '$lib/types/rig';
-  import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rig';
+  import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rigDefaults';
   import { StreamsApi } from '$lib/api/streamsApi';
   import { reportError } from '$lib/ui/errorPolicy';
+  import { createLazySvelteComponentLoader } from '$lib/utils/lazySvelteComponent';
   import { toaster } from '$lib';
+
+  type CameraRigViewerComponent = (typeof import('$lib/components/CameraRigViewer.svelte'))['default'];
+
+  const cameraRigViewerLoader = createLazySvelteComponentLoader<CameraRigViewerComponent>(
+    () => import('$lib/components/CameraRigViewer.svelte')
+  );
 
   type CameraPoseFormState = {
     x: string;
@@ -117,12 +123,14 @@
   let cameraPoseBusy = $state(false);
   let cameraPoseMessage = $state<string | null>(null);
   let cameraPoseError = $state<string | null>(null);
+  let CameraRigViewerComponent = $state<CameraRigViewerComponent | null>(cameraRigViewerLoader.current());
 
   const unsubscribe = rigLayoutStore.subscribe((state) => {
     rigLayoutState = state;
   });
 
   onMount(() => {
+    void ensureCameraRigViewer();
     if (!rigLayoutState.initialized) {
       void rigLayoutStore.refresh();
     }
@@ -239,6 +247,10 @@
     if (!previewPose) return rigCameras;
     return rigCameras.map((camera) => (camera.uid === id ? { ...camera, pose: previewPose } : camera));
   })());
+
+  async function ensureCameraRigViewer(): Promise<void> {
+    CameraRigViewerComponent ??= await cameraRigViewerLoader.load();
+  }
 
   async function saveCameraPose(): Promise<void> {
     cameraPoseError = null;
@@ -361,7 +373,13 @@
     {/if}
 
     <div class="flex-1 min-h-0 overflow-hidden">
-      <CameraRigViewer robot={rigRobot} cameras={previewCameras} selectedCamera={selectedCameraId} />
+      {#if CameraRigViewerComponent}
+        <CameraRigViewerComponent robot={rigRobot} cameras={previewCameras} selectedCamera={selectedCameraId} />
+      {:else}
+        <div class="flex h-full min-h-[18rem] items-center justify-center rounded border border-surface-800/60 bg-surface-950/35 text-xs text-surface-500">
+          Loading camera rig viewer…
+        </div>
+      {/if}
     </div>
 
     <div class="shrink-0 rounded border border-surface-800 bg-surface-950/40 p-4">

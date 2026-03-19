@@ -5,7 +5,6 @@ use axum::{
     response::IntoResponse,
 };
 use chrono::Utc;
-use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path as StdPath;
@@ -23,17 +22,21 @@ use crate::http::error::{ApiError, ApiResult};
 use crate::http::media::{MediaItem, MediaMetadata, write_media_metadata};
 use crate::http::pipelines;
 use crate::http::storage;
-use crate::http::streams_persist;
 
 use super::preview::latest_frame_jpeg_bytes;
+use super::util::apply_pipeline_host_inputs_update;
 use super::util::is_engine_unavailable;
-use super::util::{apply_pipeline_host_inputs_update, update_persisted_manifest_by_stream_id};
 
-static SNAPSHOT_LOCKS: Lazy<Mutex<HashMap<Uuid, Arc<Mutex<()>>>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+#[derive(Default)]
+pub(crate) struct SnapshotLocksState {
+    locks: Mutex<HashMap<Uuid, Arc<Mutex<()>>>>,
+}
 
-pub(crate) async fn snapshot_guard(stream_id: Uuid) -> Arc<Mutex<()>> {
-    let mut guard = SNAPSHOT_LOCKS.lock().await;
-    guard.entry(stream_id).or_insert_with(|| Arc::new(Mutex::new(()))).clone()
+impl SnapshotLocksState {
+    pub(crate) async fn guard(&self, stream_id: Uuid) -> Arc<Mutex<()>> {
+        let mut guard = self.locks.lock().await;
+        guard.entry(stream_id).or_insert_with(|| Arc::new(Mutex::new(()))).clone()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
@@ -212,8 +215,8 @@ pub async fn get_input_usage(State(state): State<AppState>, Path(id): Path<Uuid>
 }
 
 pub(crate) async fn capture_snapshot_for_stream(state: &AppState, stream_id: Uuid, req: CaptureSnapshotRequest) -> ApiResult<MediaItem> {
-    let kind = normalize_snapshot_kind(req.kind.as_deref())?;
-    let snapshot_lock = snapshot_guard(stream_id).await;
+    let kind = normalize_snapshot_kind(req.kind.as_deref()).map_err(ApiError::bad_request)?;
+    let snapshot_lock = state.services.streams.snapshot_guard(stream_id).await;
     let _snapshot_guard = snapshot_lock.lock().await;
 
     // Calibration snapshots default to RAW if caller did not specify a source.
@@ -229,7 +232,7 @@ pub(crate) async fn apply_stream_crop(state: &AppState, stream_id: Uuid, crop: [
     let summary = find_stream_summary(state, stream_id).await?;
 
     let (width, height) = active_mode_resolution(&summary).ok_or_else(|| ApiError::bad_request("stream mode resolution is unavailable"))?;
-    let (roi_x, roi_y, roi_w, roi_h, disabled) = limelight_crop_to_roi(crop, width, height)?;
+    let (roi_x, roi_y, roi_w, roi_h, disabled) = limelight_crop_to_roi(crop, width, height).map_err(ApiError::bad_request)?;
 
     let target_pipeline_id = summary.manifest.active_pipeline_id.or_else(|| summary.manifest.pipelines.first().map(|binding| binding.pipeline_id));
     let roi_usage = inspect_roi_input_usage(&summary, target_pipeline_id).await;
@@ -254,15 +257,12 @@ pub(crate) async fn apply_stream_crop(state: &AppState, stream_id: Uuid, crop: [
         }
     }
 
-    if update_persisted_manifest_by_stream_id(stream_id, |manifest| {
+    if let Err(err) = super::util::persist_live_stream_manifest_update(state, stream_id, |manifest| {
         apply_pipeline_host_inputs_update(manifest, &persisted_inputs);
     })
     .await
-    .is_none()
     {
-        let mut manifest = summary.manifest.clone();
-        apply_pipeline_host_inputs_update(&mut manifest, &persisted_inputs);
-        streams_persist::persist_manifest(&super::util::camera_id_for_manifest(&manifest), Some(stream_id), manifest).await;
+        return Err(ApiError::internal(err));
     }
 
     Ok(SetStreamCropResponse { stream_id, crop, roi_x, roi_y, roi_w, roi_h, pipeline_id: target_pipeline_id, disabled, roi_inputs_used: roi_usage.used, warnings: roi_usage.warnings })
@@ -271,7 +271,7 @@ pub(crate) async fn apply_stream_crop(state: &AppState, stream_id: Uuid, crop: [
 pub(crate) async fn apply_stream_crosshair(state: &AppState, stream_id: Uuid, crosshair: [f64; 2], enabled: Option<bool>) -> ApiResult<SetStreamCrosshairResponse> {
     let summary = find_stream_summary(state, stream_id).await?;
     let (width, height) = active_mode_resolution(&summary).ok_or_else(|| ApiError::bad_request("stream mode resolution is unavailable"))?;
-    let (crosshair_x, crosshair_y, normalized_crosshair) = limelight_crosshair_to_px(crosshair, width, height)?;
+    let (crosshair_x, crosshair_y, normalized_crosshair) = limelight_crosshair_to_px(crosshair, width, height).map_err(ApiError::bad_request)?;
     let crosshair_enabled = enabled.unwrap_or(true);
 
     let target_pipeline_id = summary.manifest.active_pipeline_id.or_else(|| summary.manifest.pipelines.first().map(|binding| binding.pipeline_id));
@@ -300,15 +300,12 @@ pub(crate) async fn apply_stream_crosshair(state: &AppState, stream_id: Uuid, cr
         }
     }
 
-    if update_persisted_manifest_by_stream_id(stream_id, |manifest| {
+    if let Err(err) = super::util::persist_live_stream_manifest_update(state, stream_id, |manifest| {
         apply_pipeline_host_inputs_update(manifest, &persisted_inputs);
     })
     .await
-    .is_none()
     {
-        let mut manifest = summary.manifest.clone();
-        apply_pipeline_host_inputs_update(&mut manifest, &persisted_inputs);
-        streams_persist::persist_manifest(&super::util::camera_id_for_manifest(&manifest), Some(stream_id), manifest).await;
+        return Err(ApiError::internal(err));
     }
 
     Ok(SetStreamCrosshairResponse {
@@ -325,7 +322,7 @@ pub(crate) async fn apply_stream_crosshair(state: &AppState, stream_id: Uuid, cr
 
 pub(crate) async fn apply_stream_ordering(state: &AppState, stream_id: Uuid, mode: String) -> ApiResult<SetStreamOrderingResponse> {
     let summary = find_stream_summary(state, stream_id).await?;
-    let normalized_mode = normalize_detections_order_mode(&mode)?;
+    let normalized_mode = normalize_detections_order_mode(&mode).map_err(ApiError::bad_request)?;
 
     let target_pipeline_id = summary.manifest.active_pipeline_id.or_else(|| summary.manifest.pipelines.first().map(|binding| binding.pipeline_id));
     let ordering_usage = inspect_host_input_usage(&summary, target_pipeline_id, &ORDERING_KEYS, "Order", "ordering controls", "Ordering controls").await;
@@ -347,15 +344,12 @@ pub(crate) async fn apply_stream_ordering(state: &AppState, stream_id: Uuid, mod
         }
     }
 
-    if update_persisted_manifest_by_stream_id(stream_id, |manifest| {
+    if let Err(err) = super::util::persist_live_stream_manifest_update(state, stream_id, |manifest| {
         apply_pipeline_host_inputs_update(manifest, &persisted_inputs);
     })
     .await
-    .is_none()
     {
-        let mut manifest = summary.manifest.clone();
-        apply_pipeline_host_inputs_update(&mut manifest, &persisted_inputs);
-        streams_persist::persist_manifest(&super::util::camera_id_for_manifest(&manifest), Some(stream_id), manifest).await;
+        return Err(ApiError::internal(err));
     }
 
     Ok(SetStreamOrderingResponse { stream_id, mode: normalized_mode, pipeline_id: target_pipeline_id, ordering_inputs_used: ordering_usage.used, warnings: ordering_usage.warnings })
@@ -482,13 +476,13 @@ async fn save_snapshot_media(stream_id: Uuid, name: Option<&str>, kind: &str, jp
     })
 }
 
-fn normalize_snapshot_kind(kind: Option<&str>) -> ApiResult<&'static str> {
+fn normalize_snapshot_kind(kind: Option<&str>) -> Result<&'static str, String> {
     let value = kind.map(str::trim).filter(|value| !value.is_empty());
     match value {
         None => Ok("snapshot"),
         Some(raw) if raw.eq_ignore_ascii_case("snapshot") => Ok("snapshot"),
         Some(raw) if raw.eq_ignore_ascii_case("calibration") => Ok("calibration"),
-        Some(raw) => Err(ApiError::bad_request(format!("unsupported snapshot kind: {raw}"))),
+        Some(raw) => Err(format!("unsupported snapshot kind: {raw}")),
     }
 }
 
@@ -506,9 +500,9 @@ fn active_mode_resolution(summary: &StreamSummary) -> Option<(u32, u32)> {
     summary.descriptor.modes.iter().find(|mode| mode.id == mode_id).or_else(|| summary.descriptor.modes.first()).map(|mode| (mode.format.resolution.width.get(), mode.format.resolution.height.get()))
 }
 
-fn limelight_crop_to_roi(crop: [f64; 4], width: u32, height: u32) -> ApiResult<(i64, i64, i64, i64, bool)> {
+fn limelight_crop_to_roi(crop: [f64; 4], width: u32, height: u32) -> Result<(i64, i64, i64, i64, bool), String> {
     if !crop.iter().all(|value| value.is_finite()) {
-        return Err(ApiError::bad_request("crop values must be finite numbers"));
+        return Err("crop values must be finite numbers".to_string());
     }
 
     let [x0, x1, y0, y1] = crop;
@@ -546,9 +540,9 @@ fn limelight_crop_to_roi(crop: [f64; 4], width: u32, height: u32) -> ApiResult<(
     Ok((x, y, w, h, false))
 }
 
-fn limelight_crosshair_to_px(crosshair: [f64; 2], width: u32, height: u32) -> ApiResult<(i64, i64, [f64; 2])> {
+fn limelight_crosshair_to_px(crosshair: [f64; 2], width: u32, height: u32) -> Result<(i64, i64, [f64; 2]), String> {
     if !crosshair.iter().all(|value| value.is_finite()) {
-        return Err(ApiError::bad_request("crosshair values must be finite numbers"));
+        return Err("crosshair values must be finite numbers".to_string());
     }
 
     let [x_norm, y_norm] = crosshair;
@@ -566,8 +560,8 @@ fn limelight_crosshair_to_px(crosshair: [f64; 2], width: u32, height: u32) -> Ap
     Ok((x, y, [x_norm, y_norm]))
 }
 
-fn normalize_detections_order_mode(raw: &str) -> ApiResult<String> {
-    let normalized = raw.trim().to_ascii_lowercase().replace('-', "_").replace(' ', "_");
+fn normalize_detections_order_mode(raw: &str) -> Result<String, String> {
+    let normalized = raw.trim().to_ascii_lowercase().replace(['-', ' '], "_");
     let canonical = match normalized.as_str() {
         "none" => "none",
         "largest_to_smallest" => "largest_to_smallest",
@@ -583,9 +577,9 @@ fn normalize_detections_order_mode(raw: &str) -> ApiResult<String> {
         "center_most" => "center_most",
         "crosshair" => "crosshair",
         _ => {
-            return Err(ApiError::bad_request(format!(
+            return Err(format!(
                 "unsupported ordering mode: {raw} (expected one of: none, largest_to_smallest, smallest_to_largest, top_most, bottom_most, left_most, right_most, top_left, top_right, bottom_left, bottom_right, center_most, crosshair)"
-            )));
+            ));
         }
     };
     Ok(canonical.to_string())
@@ -698,10 +692,10 @@ async fn host_bridge_declares_input(summary: &StreamSummary, pipeline_id: Option
 
 async fn resolve_pipeline_graph_json(summary: &StreamSummary, pipeline_id: Option<Uuid>) -> Option<serde_json::Value> {
     let pipeline_id = pipeline_id?;
-    if let Some(binding) = summary.manifest.pipelines.iter().find(|binding| binding.pipeline_id == pipeline_id) {
-        if let Some(graph) = binding.pipeline_graph.as_ref() {
-            return Some(graph.as_value().clone());
-        }
+    if let Some(binding) = summary.manifest.pipelines.iter().find(|binding| binding.pipeline_id == pipeline_id)
+        && let Some(graph) = binding.pipeline_graph.as_ref()
+    {
+        return Some(graph.as_value().clone());
     }
 
     let doc = pipelines::load_graph_document(pipeline_id).await.ok()?;

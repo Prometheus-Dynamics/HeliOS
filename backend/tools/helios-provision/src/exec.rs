@@ -6,14 +6,14 @@ use std::{fs, path::Path, thread, time::Duration};
 
 use crate::{
     config::Mode,
-    geometry::{part_dev_path, read_part_info, PartPlan},
+    geometry::{disk_bn, part_dev_path, read_part_info, sectors_to_mib_ceil, sectors_to_mib_floor, PartInfo, PartPlan},
     logger::Logger,
 };
 
 pub fn resize_partition(plan: &PartPlan, disk: &str, sector_bytes: u64, logger: &mut Logger) -> Result<()> {
     let dev = part_dev_path(disk, plan.number);
     let current = read_part_info(disk, plan.number)?;
-    let current_end_mib = (current.start + current.size) * sector_bytes / 1024 / 1024;
+    let current_end_mib = sectors_to_mib_ceil(current.start + current.size, sector_bytes);
 
     // If the current partition already extends to (or beyond) the target, skip the resizepart
     // step to avoid parted prompting about "shrinking" under -s, but still grow the filesystem.
@@ -51,7 +51,7 @@ pub fn resize_partition(plan: &PartPlan, disk: &str, sector_bytes: u64, logger: 
         run_cmd(Command::new("e2label").arg(&dev).arg(label), logger)?;
     }
     let updated = read_part_info(disk, plan.number)?;
-    let updated_end_mib = (updated.start + updated.size) * sector_bytes / 1024 / 1024;
+    let updated_end_mib = sectors_to_mib_ceil(updated.start + updated.size, sector_bytes);
     logger.log(format!("partition {} now ends at ~{}MiB (target {}MiB)", plan.number, updated_end_mib, plan.end_mib));
     Ok(())
 }
@@ -122,10 +122,17 @@ pub fn create_partition(plan: &PartPlan, disk: &str, logger: &mut Logger) -> Res
     logger.log(format!("mkpart {} {}-{}MiB type={} part#{}", plan.name, start, end, fs_type, plan.number));
 
     let existing = read_part_info(disk, plan.number).ok();
-    let already_exists = existing.is_some();
-    if already_exists {
+    let geometry_mismatch = existing.as_ref().map(|info| partition_geometry_mismatch(disk, info, plan)).unwrap_or(false);
+    if geometry_mismatch {
+        logger.log(format!("partition {} exists with mismatched geometry; recreating to match {}-{}MiB", plan.number, start, end));
+        run_cmd(Command::new("parted").arg("-s").arg(disk).arg("rm").arg(plan.number.to_string()), logger)?;
+        reread_partition_table(disk, logger)?;
+    } else if existing.is_some() {
         logger.log(format!("partition {} already exists; skipping mkpart", plan.number));
-    } else {
+    }
+
+    let already_exists = existing.is_some() && !geometry_mismatch;
+    if !already_exists {
         run_cmd(Command::new("parted").arg("-s").arg(disk).arg("unit").arg("MiB").arg("mkpart").arg("primary").arg(fs_type).arg(format!("{}MiB", start)).arg(format!("{}MiB", end)), logger)?;
 
         reread_partition_table(disk, logger)?;
@@ -133,7 +140,12 @@ pub fn create_partition(plan: &PartPlan, disk: &str, logger: &mut Logger) -> Res
 
     let dev = part_dev_path(disk, plan.number);
     wait_for_device(&dev, logger)?;
-    if plan.mkfs && fs_type != "none" && !already_exists {
+    if plan.wipe_signatures {
+        clear_partition_signatures(&dev, logger)?;
+    }
+    let needs_reformat = if already_exists && plan.reformat_if_missing_secondary_marker { !existing_secondary_marker_present(plan, &dev, logger)? } else { false };
+
+    if plan.mkfs && fs_type != "none" && (!already_exists || needs_reformat) {
         let mut cmd = Command::new("mkfs");
         if fs_type == "ext4" {
             cmd = Command::new("mkfs.ext4");
@@ -144,7 +156,7 @@ pub fn create_partition(plan: &PartPlan, disk: &str, logger: &mut Logger) -> Res
         cmd.arg("-L").arg(plan.label.as_deref().unwrap_or(plan.name.as_str())).arg(&dev);
         run_cmd(&mut cmd, logger)?;
     } else {
-        logger.log(format!("mkfs skipped for {} (exists={}, mkfs={})", dev, already_exists, plan.mkfs));
+        logger.log(format!("mkfs skipped for {} (exists={}, mkfs={}, needs_reformat={})", dev, already_exists, plan.mkfs, needs_reformat));
     }
     if let Some(label) = plan.label.as_deref() {
         run_cmd(Command::new("e2label").arg(&dev).arg(label), logger)?;
@@ -161,7 +173,7 @@ pub fn execute_plan(plans: &[PartPlan], disk: &str, sector_bytes: u64, logger: &
                 let desired_gap = plan.start_mib.saturating_sub(prev_end);
                 if plan.number > 1 {
                     if let Ok(prev_info) = read_part_info(disk, plan.number - 1) {
-                        let prev_actual_end = (prev_info.start + prev_info.size) * sector_bytes / 1024 / 1024;
+                        let prev_actual_end = sectors_to_mib_ceil(prev_info.start + prev_info.size, sector_bytes);
                         if prev_actual_end > plan.start_mib {
                             let adjusted_start = prev_actual_end.saturating_add(desired_gap);
                             if adjusted_start >= plan.end_mib {
@@ -294,6 +306,25 @@ fn wait_for_device(dev: &str, logger: &mut Logger) -> Result<()> {
         thread::sleep(Duration::from_millis(100));
     }
     Err(anyhow!("device {} did not appear after partition change", dev))
+}
+
+fn partition_geometry_mismatch(disk: &str, existing: &PartInfo, plan: &PartPlan) -> bool {
+    let sector_bytes = read_sector_bytes(disk).unwrap_or(512);
+    let start_mib = sectors_to_mib_floor(existing.start, sector_bytes);
+    let end_mib = sectors_to_mib_ceil(existing.start.saturating_add(existing.size), sector_bytes);
+    start_mib.abs_diff(plan.start_mib) > 1 || end_mib.abs_diff(plan.end_mib) > 1
+}
+
+fn read_sector_bytes(disk: &str) -> Option<u64> {
+    let sys_path = format!("/sys/class/block/{}/queue/logical_block_size", disk_bn(disk));
+    fs::read_to_string(sys_path).ok()?.trim().parse::<u64>().ok()
+}
+
+fn clear_partition_signatures(dev: &str, logger: &mut Logger) -> Result<()> {
+    logger.log(format!("clearing filesystem signatures from {}", dev));
+    let _ = run_cmd(Command::new("wipefs").arg("-a").arg(dev), logger);
+    run_cmd(Command::new("dd").arg("if=/dev/zero").arg(format!("of={dev}")).arg("bs=1M").arg("count=4").arg("conv=fsync"), logger)?;
+    Ok(())
 }
 
 fn touch_marker(path: &str, logger: &mut Logger) -> Result<()> {
@@ -439,6 +470,50 @@ fn maybe_prepare_mount(plan: &PartPlan, disk: &str, logger: &mut Logger) -> Resu
 
     let _ = run_cmd(Command::new("umount").arg(mount_point), logger);
     Ok(())
+}
+
+fn existing_secondary_marker_present(plan: &PartPlan, dev: &str, logger: &mut Logger) -> Result<bool> {
+    let Some(sec) = plan.secondary_marker.as_deref() else {
+        return Ok(false);
+    };
+    let Some(mount_point) = plan.mount_point.as_deref() else {
+        return Ok(false);
+    };
+    let label = plan.mount_label.as_deref().or(plan.label.as_deref());
+
+    fs::create_dir_all(mount_point)?;
+
+    let mut mounted = false;
+    if let Some(label) = label {
+        let label_path = Path::new("/dev/disk/by-label").join(label);
+        if label_path.exists() {
+            let label_dev = label_path.to_string_lossy().to_string();
+            let mut mount_cmd = Command::new("mount");
+            mount_cmd.args(["-o", "rw", &label_dev, mount_point]);
+            if run_cmd(&mut mount_cmd, logger).is_ok() {
+                mounted = true;
+            }
+        }
+    }
+
+    if !mounted {
+        let mut dev_cmd = Command::new("mount");
+        dev_cmd.args(["-o", "rw", dev, mount_point]);
+        if run_cmd(&mut dev_cmd, logger).is_ok() {
+            mounted = true;
+        }
+    }
+
+    if !mounted {
+        logger.log(format!("existing {} could not be mounted to inspect secondary marker; treating as unprepared", dev));
+        return Ok(false);
+    }
+
+    let has_marker = Path::new(sec).exists();
+    logger.log(format!("secondary marker {} {} on {}", sec, if has_marker { "found" } else { "missing" }, dev));
+
+    let _ = run_cmd(Command::new("umount").arg(mount_point), logger);
+    Ok(has_marker)
 }
 
 fn is_data_plan(plan: &PartPlan) -> bool {

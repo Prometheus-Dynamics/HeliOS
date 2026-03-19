@@ -1,6 +1,8 @@
 import { PIPELINE_OUTPUT_BACKEND_ID } from './boundaryUtils';
 
 const normalizeId = (value: unknown): string => String(value ?? '').trim().toLowerCase();
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
 
 const isHostOutputId = (value: unknown): boolean => {
   const id = normalizeId(value);
@@ -31,43 +33,46 @@ const collectPorts = (value: unknown, ports: Set<string>) => {
     });
     return;
   }
-  if (typeof value === 'object') {
-    Object.keys(value as Record<string, unknown>).forEach((key) => {
-      const trimmed = key.trim();
-      if (trimmed) ports.add(trimmed);
-    });
-  }
+  Object.keys(asRecord(value) ?? {}).forEach((key) => {
+    const trimmed = key.trim();
+    if (trimmed) ports.add(trimmed);
+  });
 };
 
-export const extractGraphOutputPorts = (graph: any): string[] => {
-  if (!graph || typeof graph !== 'object') return [];
-  const nested = (graph as any)?.graph ?? (graph as any)?.pipeline_graph ?? (graph as any)?.pipelineGraph;
-  if (nested && nested !== graph && typeof nested === 'object') {
-    return extractGraphOutputPorts(nested);
+export const extractGraphOutputPorts = (graph: unknown): string[] => {
+  const graphRecord = asRecord(graph);
+  if (!graphRecord) return [];
+  const nested = graphRecord.graph ?? graphRecord.pipeline_graph ?? graphRecord.pipelineGraph;
+  const nestedRecord = asRecord(nested);
+  if (nestedRecord && nested !== graph) {
+    return extractGraphOutputPorts(nestedRecord);
   }
   const ports = new Set<string>();
 
-  const nodesArray = Array.isArray(graph?.nodes) ? graph.nodes : null;
-  const edgesArray = Array.isArray(graph?.edges) ? graph.edges : null;
+  const nodesArray = Array.isArray(graphRecord.nodes) ? graphRecord.nodes : null;
+  const edgesArray = Array.isArray(graphRecord.edges) ? graphRecord.edges : null;
   if (nodesArray) {
     const hostIndices: number[] = [];
     const hostIds = new Set<string>();
-    nodesArray.forEach((node: any, idx: number) => {
+    nodesArray.forEach((nodeValue, idx) => {
+      const node = asRecord(nodeValue);
       if (isHostOutputId(node?.id) || isHostOutputBackendId(node?.backendId ?? node?.backend_id ?? node?.backend)) {
         hostIndices.push(idx);
-        const id = normalizeId(node?.id ?? node?.info?.id);
+        const id = normalizeId(node?.id ?? asRecord(node?.info)?.id);
         if (id) hostIds.add(id);
       }
     });
 
     if (hostIndices.length && edgesArray && edgesArray.length) {
-      edgesArray.forEach((edge: any) => {
-        const toRaw = edge?.to?.node ?? edge?.to?.nodeId ?? edge?.to?.id ?? edge?.to;
+      edgesArray.forEach((edgeValue) => {
+        const edge = asRecord(edgeValue);
+        const edgeTarget = asRecord(edge?.to);
+        const toRaw = edgeTarget?.node ?? edgeTarget?.nodeId ?? edgeTarget?.id ?? edge?.to;
         const toId =
           typeof toRaw === 'string'
             ? normalizeId(toRaw)
-            : typeof toRaw === 'object'
-              ? normalizeId((toRaw as any)?.id ?? (toRaw as any)?.nodeId)
+            : asRecord(toRaw)
+              ? normalizeId(asRecord(toRaw)?.id ?? asRecord(toRaw)?.nodeId)
               : '';
         const toIndex =
           typeof toRaw === 'number'
@@ -82,7 +87,7 @@ export const extractGraphOutputPorts = (graph: any): string[] => {
         } else {
           return;
         }
-        const port = typeof edge?.to?.port === 'string' ? edge.to.port.trim() : '';
+        const port = typeof edgeTarget?.port === 'string' ? edgeTarget.port.trim() : '';
         if (port) ports.add(port);
       });
       if (ports.size) {
@@ -92,9 +97,9 @@ export const extractGraphOutputPorts = (graph: any): string[] => {
 
     if (hostIndices.length) {
       hostIndices.forEach((idx) => {
-        const node = nodesArray[idx] ?? null;
+        const node = asRecord(nodesArray[idx] ?? null);
         collectPorts(node?.inputs, ports);
-        collectPorts(node?.metadata?.inputPorts, ports);
+        collectPorts(asRecord(node?.metadata)?.inputPorts, ports);
       });
       if (ports.size) {
         return Array.from(ports).sort((a, b) => a.localeCompare(b));
@@ -102,26 +107,26 @@ export const extractGraphOutputPorts = (graph: any): string[] => {
     }
   }
 
-  const nodesRecord =
-    graph?.nodes && typeof graph.nodes === 'object' && !Array.isArray(graph.nodes) ? (graph.nodes as Record<string, any>) : null;
-  if (nodesRecord) {
-    Object.entries(nodesRecord).forEach(([key, node]) => {
+  const nodesRecord = asRecord(graphRecord.nodes);
+  if (nodesRecord && !Array.isArray(graphRecord.nodes)) {
+    Object.entries(nodesRecord).forEach(([key, nodeValue]) => {
+      const node = asRecord(nodeValue);
       if (!node) return;
       const matches =
         isHostOutputBackendId(node?.backendId ?? node?.backend_id) ||
-        isHostOutputId(node?.id ?? node?.info?.id) ||
+        isHostOutputId(node?.id ?? asRecord(node?.info)?.id) ||
         isHostOutputId(key);
       if (!matches) return;
       collectPorts(node?.inputs, ports);
-      collectPorts(node?.metadata?.inputPorts, ports);
+      collectPorts(asRecord(node?.metadata)?.inputPorts, ports);
     });
   }
 
-  const signatureOutputs = (graph as any)?.signature?.outputs;
+  const signatureOutputs = asRecord(graphRecord.signature)?.outputs;
   collectPorts(signatureOutputs, ports);
 
   if (!ports.size) {
-    const pipelineOutputs = (graph as any)?.pipelineOutputs ?? (graph as any)?.pipeline_outputs;
+    const pipelineOutputs = graphRecord.pipelineOutputs ?? graphRecord.pipeline_outputs;
     collectPorts(pipelineOutputs, ports);
   }
 

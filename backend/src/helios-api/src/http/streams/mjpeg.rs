@@ -5,32 +5,64 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use bytes::Bytes;
-use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio::time::Duration;
 use tracing::warn;
 use uuid::Uuid;
 
+use crate::http::AppState;
 use helios_engine::ipc::EngineErrorCode;
 use helios_engine::stream::{read_latest_frame_with_header, touch_stream_preview, touch_stream_viewer};
 
 use super::util::engine_error_body;
 
-static MJPEG_FEEDS: Lazy<tokio::sync::Mutex<HashMap<Uuid, broadcast::Sender<Bytes>>>> = Lazy::new(|| tokio::sync::Mutex::new(HashMap::new()));
-static MJPEG_PART_HEADER: Lazy<Bytes> = Lazy::new(|| Bytes::from_static(b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"));
-static MJPEG_PART_FOOTER: Lazy<Bytes> = Lazy::new(|| Bytes::from_static(b"\r\n"));
-static MJPEG_INTERVAL: Lazy<Duration> = Lazy::new(|| {
+#[derive(Default)]
+pub(crate) struct MjpegFeedsState {
+    feeds: tokio::sync::Mutex<HashMap<Uuid, broadcast::Sender<Bytes>>>,
+}
+
+impl MjpegFeedsState {
+    pub(crate) async fn subscribe(self: Arc<Self>, stream_id: Uuid) -> broadcast::Receiver<Bytes> {
+        let mut feeds = self.feeds.lock().await;
+        if let Some(sender) = feeds.get(&stream_id) {
+            return sender.subscribe();
+        }
+
+        let (sender, rx) = broadcast::channel(8);
+        feeds.insert(stream_id, sender.clone());
+        drop(feeds);
+
+        tokio::spawn(run_mjpeg_feed(self.clone(), stream_id, sender));
+        rx
+    }
+
+    async fn remove(&self, stream_id: Uuid) {
+        let mut feeds = self.feeds.lock().await;
+        feeds.remove(&stream_id);
+    }
+}
+
+fn mjpeg_part_header() -> Bytes {
+    Bytes::from_static(b"--frame\r\nContent-Type: image/jpeg\r\n\r\n")
+}
+
+fn mjpeg_part_footer() -> Bytes {
+    Bytes::from_static(b"\r\n")
+}
+
+fn mjpeg_interval() -> Duration {
     std::env::var("HELIOS_MJPEG_INTERVAL_MS")
         .ok()
         .and_then(|raw| raw.parse::<u64>().ok())
         .map(Duration::from_millis)
         .map(|d| d.clamp(Duration::from_millis(20), Duration::from_millis(500)))
         .unwrap_or_else(|| Duration::from_millis(33))
-});
+}
 
-static MJPEG_OUTAGE: Lazy<Duration> = Lazy::new(|| {
+fn mjpeg_outage() -> Duration {
     // Align with the encoded preview outage setting so both preview formats tolerate stream restarts.
     std::env::var("HELIOS_PREVIEW_OUTAGE_MS")
         .ok()
@@ -38,10 +70,10 @@ static MJPEG_OUTAGE: Lazy<Duration> = Lazy::new(|| {
         .map(Duration::from_millis)
         .map(|d| d.clamp(Duration::from_secs(1), Duration::from_secs(15)))
         .unwrap_or_else(|| Duration::from_secs(15))
-});
+}
 
-pub(crate) async fn mjpeg_stream(id: Uuid) -> Response {
-    let mut rx = subscribe_mjpeg_feed(id).await;
+pub(crate) async fn mjpeg_stream(state: AppState, id: Uuid) -> Response {
+    let mut rx = state.services.streams.subscribe_mjpeg_feed(id).await;
     let first_frame = match tokio::time::timeout(Duration::from_secs(2), recv_next_frame(&mut rx)).await {
         Ok(Ok(bytes)) => bytes,
         Ok(Err(err)) => return err.into_response(),
@@ -50,32 +82,25 @@ pub(crate) async fn mjpeg_stream(id: Uuid) -> Response {
         }
     };
 
-    let header = MJPEG_PART_HEADER.clone();
-    let footer = MJPEG_PART_FOOTER.clone();
-
     // Stream in three chunks per frame (header + jpeg + footer) to avoid copying the JPEG bytes
     // into a freshly allocated multipart buffer every frame.
-    let body_stream = futures::stream::unfold((rx, Some(first_frame), 0u8), move |(mut rx, mut pending, phase)| {
-        let header = header.clone();
-        let footer = footer.clone();
-        async move {
-            match phase {
-                0 => {
-                    if pending.is_none() {
-                        pending = match recv_next_frame(&mut rx).await {
-                            Ok(bytes) => Some(bytes),
-                            Err(_) => return None,
-                        };
-                    }
-                    Some((Ok::<Bytes, Infallible>(header), (rx, pending, 1)))
+    let body_stream = futures::stream::unfold((rx, Some(first_frame), 0u8), move |(mut rx, mut pending, phase)| async move {
+        match phase {
+            0 => {
+                if pending.is_none() {
+                    pending = match recv_next_frame(&mut rx).await {
+                        Ok(bytes) => Some(bytes),
+                        Err(_) => return None,
+                    };
                 }
-                1 => {
-                    let bytes = pending?;
-                    Some((Ok::<Bytes, Infallible>(bytes), (rx, None, 2)))
-                }
-                2 => Some((Ok::<Bytes, Infallible>(footer), (rx, None, 0))),
-                _ => None,
+                Some((Ok::<Bytes, Infallible>(mjpeg_part_header()), (rx, pending, 1)))
             }
+            1 => {
+                let bytes = pending?;
+                Some((Ok::<Bytes, Infallible>(bytes), (rx, None, 2)))
+            }
+            2 => Some((Ok::<Bytes, Infallible>(mjpeg_part_footer()), (rx, None, 0))),
+            _ => None,
         }
     });
 
@@ -102,34 +127,19 @@ async fn recv_next_frame(rx: &mut broadcast::Receiver<Bytes>) -> Result<Bytes, R
     }
 }
 
-async fn subscribe_mjpeg_feed(stream_id: Uuid) -> broadcast::Receiver<Bytes> {
-    let mut feeds = MJPEG_FEEDS.lock().await;
-    if let Some(sender) = feeds.get(&stream_id) {
-        return sender.subscribe();
-    }
-
-    let (sender, rx) = broadcast::channel(8);
-    feeds.insert(stream_id, sender.clone());
-    drop(feeds);
-
-    tokio::spawn(run_mjpeg_feed(stream_id, sender));
-    rx
-}
-
-async fn run_mjpeg_feed(stream_id: Uuid, sender: broadcast::Sender<Bytes>) {
-    let interval = *MJPEG_INTERVAL;
+async fn run_mjpeg_feed(feeds: Arc<MjpegFeedsState>, stream_id: Uuid, sender: broadcast::Sender<Bytes>) {
+    let interval = mjpeg_interval();
     let sender_for_loop = sender.clone();
     let loop_result = tokio::task::spawn_blocking(move || run_mjpeg_loop(stream_id, sender_for_loop, interval)).await;
     if let Err(err) = loop_result {
         warn!(stream_id = %stream_id, error = %err, "mjpeg feed task panicked");
     }
 
-    let mut feeds = MJPEG_FEEDS.lock().await;
-    feeds.remove(&stream_id);
+    feeds.remove(stream_id).await;
 }
 
 fn run_mjpeg_loop(stream_id: Uuid, sender: broadcast::Sender<Bytes>, interval: Duration) {
-    let outage = *MJPEG_OUTAGE;
+    let outage = mjpeg_outage();
     let mut first_unavailable_at: Option<std::time::Instant> = None;
     let mut last_touch = std::time::Instant::now().checked_sub(Duration::from_secs(10)).unwrap_or_else(std::time::Instant::now);
     while sender.receiver_count() > 0 {
@@ -143,9 +153,7 @@ fn run_mjpeg_loop(stream_id: Uuid, sender: broadcast::Sender<Bytes>, interval: D
             last_touch = std::time::Instant::now();
         }
         let (header, bytes) = match read_latest_frame_with_header(stream_id) {
-            Ok((header, bytes)) => {
-                (header, bytes)
-            }
+            Ok((header, bytes)) => (header, bytes),
             Err(_) => {
                 let now = std::time::Instant::now();
                 first_unavailable_at.get_or_insert(now);

@@ -1,7 +1,8 @@
 <script lang="ts">
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { toaster } from '$lib';
-  import { OpenAPI, PeersService, PeripheralsService } from '$lib/ts-bindings/http/client';
+  import { apiFetch } from '$lib/api/core/http';
+  import { ApiError, OpenAPI, PeersService, PeripheralsService } from '$lib/ts-bindings/http/client';
   import { connectDevicesUpdatesStream } from '$lib/api/devicesUpdates';
   import { PipelinesApi } from '$lib/api/pipelinesApi';
   import { StreamsApi } from '$lib/api/streamsApi';
@@ -19,6 +20,7 @@
     ProbedDevice,
     PeerInfo,
     StreamInfo,
+    StreamCapabilitiesResponse,
     StreamManifest
   } from '$lib/ts-bindings/http/client';
   import { registerCameraModal } from '$lib/stores/modals';
@@ -54,12 +56,13 @@
   } from '$lib/components/register-camera/registerCameraSelectors';
   import type {
     SensorBenchListItem,
-    SensorBenchModeResult,
-    SensorBenchResult,
-    SensorBenchSummary
+    SensorBenchResult
   } from '$lib/components/register-camera/sensorBenchTypes';
+  import { SvelteSet, SvelteURL } from 'svelte/reactivity';
 
   const dispatch = createEventDispatcher<{ create: { streamId?: string; descriptor?: unknown } }>();
+  const asRecord = (value: unknown): Record<string, unknown> | null =>
+    value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
 
   let { registeredIds = [], registeredHardwareIds = [] } = $props();
 
@@ -137,7 +140,7 @@
     return { width: Math.trunc(width), height: Math.trunc(height) };
   });
   const isRegistered = (device: ProbedDevice | null): boolean => isDeviceRegistered(device, registeredHardwareIds);
-  const RAW_STREAM_PIPELINE_UUID = '00000000-0000-0000-0000-0000000000aa';
+  let streamCapabilities = $state<StreamCapabilitiesResponse | null>(null);
   const encoderSelectionId = (codec: CodecInfo | null | undefined): string | null => {
     if (!codec) return null;
     const name = String(codec.name ?? '').trim();
@@ -168,7 +171,7 @@
     return index >= 0 ? index : 0;
   };
   const dedupeModesByResolution = (modes: Mode[]): Mode[] => {
-    const seen = new Set<string>();
+    const seen = new SvelteSet<string>();
     const out: Mode[] = [];
     for (const mode of modes) {
       const key = resolutionKey(mode);
@@ -184,14 +187,7 @@
   });
   const simpleCanSubmit = $derived.by(() => {
     if (!currentDevice() || !currentBackend()) return false;
-    if (!simpleResolutionModes.length) return false;
-    if (simplePipelineSource === 'existing') {
-      return Boolean(simplePipelineId && availablePipelines.some((entry) => entry.id === simplePipelineId));
-    }
-    if (simplePipelineSource === 'template') {
-      return Boolean(simpleTemplateId && availableTemplates.some((entry) => entry.templateId === simpleTemplateId));
-    }
-    return true;
+    return simpleResolutionModes.length > 0;
   });
   const pipelineDisplayName = (entry: PipelineSummary | null | undefined): string => {
     const name = String(entry?.name ?? '').trim();
@@ -249,20 +245,25 @@
     devicesUpdates.disconnectUpdates();
   });
 
+  $effect(() => {
+    void registeredIds.length;
+  });
+
+  type SensorBenchmarksResponse = { benchmarks?: SensorBenchListItem[] };
+  type SensorBenchStatusResponse = { status?: string; result?: SensorBenchResult | null };
+
   async function refreshSensorBenchmarks(): Promise<void> {
     sensorBenchError = null;
     sensorBenchLoading = true;
     try {
-      const resp = await fetch(apiPath('/streams/bench/sensor'));
-      if (!resp.ok) throw new Error(`Failed (${resp.status})`);
-      const json = (await resp.json()) as any;
+      const json = await apiFetch<SensorBenchmarksResponse>(apiPath('/streams/bench/sensor'));
       sensorBenchmarks = Array.isArray(json?.benchmarks) ? (json.benchmarks as SensorBenchListItem[]) : [];
       const filtered = filterSensorBenchmarks(
         sensorBenchmarks,
         String(currentBackend()?.kind ?? '').toLowerCase(),
         (currentDevice()?.identity?.keys ?? [])[0] ?? null
       );
-      const ids = new Set(filtered.map((b) => b?.summary?.benchmark_id).filter(Boolean) as string[]);
+      const ids = new SvelteSet(filtered.map((b) => b?.summary?.benchmark_id).filter(Boolean) as string[]);
       if (!sensorBenchSelectedId || !ids.has(sensorBenchSelectedId)) {
         sensorBenchSelectedId = filtered[0]?.summary?.benchmark_id ?? null;
       }
@@ -280,9 +281,7 @@
     sensorBenchSelectedResult = null;
     sensorBenchError = null;
     try {
-      const resp = await fetch(apiPath(`/streams/bench/sensor/${encodeURIComponent(id)}`));
-      if (!resp.ok) throw new Error(`Failed (${resp.status})`);
-      const status = (await resp.json()) as any;
+      const status = await apiFetch<SensorBenchStatusResponse>(apiPath(`/streams/bench/sensor/${encodeURIComponent(id)}`));
       if (status?.status === 'completed' && status?.result) {
         sensorBenchSelectedResult = status.result as SensorBenchResult;
       }
@@ -340,18 +339,19 @@
     const prevFormat = preserveSelection ? selectedFormat : null;
     const prevResolution = preserveSelection ? selectedResolutionKey : null;
     try {
-      const [cameraResp, codecResp, streamsResp, peersResp, pipelineResp, templateResp] = await Promise.all([
+      const [cameraResp, codecResp, streamsResp, peersResp, pipelineResp, templateResp, streamCapabilitiesResp] = await Promise.all([
         PeripheralsService.listCameras(),
         StreamsApi.listCodecs().catch(() => null) as Promise<CodecInfo[] | null>,
         StreamsApi.listStreams().catch(() => []) as Promise<StreamInfo[]>,
         PeersService.listPeers().catch(() => null) as Promise<{ peers?: PeerInfo[] } | null>,
         PipelinesApi.listGraphs().catch(() => []) as Promise<PipelineSummary[]>,
-        PipelinesApi.listTemplates().catch(() => []) as Promise<PipelineTemplateSummary[]>
+        PipelinesApi.listTemplates().catch(() => []) as Promise<PipelineTemplateSummary[]>,
+        StreamsApi.streamCapabilities().catch(() => null) as Promise<StreamCapabilitiesResponse | null>
       ]);
 
       const allCodecs = Array.isArray(codecResp) ? codecResp.filter((c) => c?.fourcc) : [];
       const dedupeCodecs = (items: CodecInfo[], keyFor: (codec: CodecInfo) => string): CodecInfo[] => {
-        const seen = new Set<string>();
+        const seen = new SvelteSet<string>();
         const result: CodecInfo[] = [];
         for (const codec of items) {
           const key = keyFor(codec);
@@ -416,6 +416,7 @@
           }
         }
       }
+      streamCapabilities = streamCapabilitiesResp;
 
       const list = Array.isArray(cameraResp?.cameras) ? cameraResp.cameras.filter(Boolean) : [];
       const usedKeys = streamAssignedKeys(Array.isArray(streamsResp) ? streamsResp : []);
@@ -478,17 +479,21 @@
     for (const peer of peers) {
       if (!peer || typeof peer !== 'object') continue;
       const labelBase = String(peer.alias ?? peer.id ?? 'Peer').trim() || 'Peer';
-      const integration: any = (peer as any).integration ?? {};
+      const integration = asRecord(peer.integration);
+      const integrationKind = String(peer.integration?.kind ?? '').trim().toLowerCase();
+      if (integrationKind === 'helios') {
+        continue;
+      }
       const urls = [
-        ...(Array.isArray(integration.streamUrls) ? integration.streamUrls : []),
-        ...(Array.isArray(integration.stream_urls) ? integration.stream_urls : []),
-        integration.streamUrl,
-        integration.stream_url
+        ...(Array.isArray(integration?.streamUrls) ? integration.streamUrls : []),
+        ...(Array.isArray(peer.integration?.stream_urls) ? peer.integration.stream_urls : []),
+        integration?.streamUrl,
+        peer.integration?.stream_url
       ]
-        .map((value: any) => (typeof value === 'string' ? value.trim() : ''))
+        .map((value) => (typeof value === 'string' ? value.trim() : ''))
         .filter((value: string) => value.length > 0);
 
-      const deduped = Array.from(new Set(urls));
+      const deduped = Array.from(new SvelteSet(urls));
       for (const url of deduped) {
         const parsed = safeParseUrl(url);
         const portLabel = parsed?.port ? parsed.port : '';
@@ -513,7 +518,7 @@
               // The API expects the same serde-tagged handle shape that `/v1/streams` returns
               // (e.g. `{ type: "libcamera", ... }`), so don't use the older `{ Netcam: {...} }`
               // OpenAPI union.
-              handle: { type: 'netcam', url, width: 0, height: 0, fps: 30 } as any,
+              handle: { type: 'netcam', url, width: 0, height: 0, fps: 30 } as unknown as ProbedBackend['handle'],
               properties: [],
               descriptor: {
                 controls: [],
@@ -540,7 +545,7 @@
     const trimmed = raw.trim();
     if (!trimmed) return null;
     try {
-      const url = new URL(trimmed);
+      const url = new SvelteURL(trimmed);
       const port = url.port || (url.protocol === 'http:' ? '80' : url.protocol === 'https:' ? '443' : url.protocol === 'rtsp:' ? '554' : '');
       const endpoint = (() => {
         const path = url.pathname?.trim() ?? '';
@@ -591,13 +596,13 @@
 	    }
 	  }
 
-	  function fpsOf(interval: Interval | null | undefined): number | null {
-	    if (!interval) return null;
-	    const num = Number((interval as any).numerator);
-	    const den = Number((interval as any).denominator);
-	    if (!Number.isFinite(num) || !Number.isFinite(den) || num <= 0 || den <= 0) return null;
-	    return den / num;
-	  }
+  function fpsOf(interval: Interval | null | undefined): number | null {
+    if (!interval) return null;
+    const num = Number(interval.numerator);
+    const den = Number(interval.denominator);
+    if (!Number.isFinite(num) || !Number.isFinite(den) || num <= 0 || den <= 0) return null;
+    return den / num;
+  }
 
 	  function bestIntervalIndex(target: Interval | null | undefined, candidates: Interval[]): number | null {
 	    const want = fpsOf(target);
@@ -759,15 +764,10 @@
     }
     if (simplePipelineSource === 'existing') {
       const id = String(simplePipelineId ?? '').trim();
-      if (!id) {
-        throw new Error('Select a pipeline to attach.');
-      }
-      return id;
+      return id || null;
     }
     const templateId = String(simpleTemplateId ?? '').trim();
-    if (!templateId) {
-      throw new Error('Select a template to attach.');
-    }
+    if (!templateId) return null;
     const templateDoc = await PipelinesApi.fetchTemplate({ id: templateId });
     const templateGraph = templateDoc?.graph;
     if (!templateGraph || typeof templateGraph !== 'object') {
@@ -778,9 +778,37 @@
       String(alias).trim() ||
       String(device.identity?.display ?? '').trim() ||
       'Camera';
-    const uploadName = `${templateName} - ${aliasSeed}`;
-    const created = await PipelinesApi.uploadGraph({ requestBody: { graph: templateGraph, name: uploadName } });
-    const createdId = String(created?.id ?? '').trim();
+    const baseUploadName = `${templateName} - ${aliasSeed}`;
+
+    const isIdentityConflict = (error: unknown): boolean => {
+      if (!(error instanceof ApiError)) return false;
+      if (error.status !== 409) return false;
+      const message =
+        typeof error.body === 'string'
+          ? error.body
+          : typeof asRecord(error.body)?.error === 'string'
+            ? String(asRecord(error.body)?.error)
+            : '';
+      const normalized = message.toLowerCase();
+      return normalized.includes('identity token already in use') || normalized.includes('collide within the requested pipeline');
+    };
+
+    let createdId: string | null = null;
+    const MAX_ATTEMPTS = 8;
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+      const uploadName = attempt === 0 ? baseUploadName : `${baseUploadName} (${attempt + 1})`;
+      try {
+        const created = await PipelinesApi.uploadGraph({ requestBody: { graph: templateGraph, name: uploadName } });
+        createdId = String(created?.id ?? '').trim() || null;
+        if (createdId) break;
+      } catch (error) {
+        if (isIdentityConflict(error) && attempt < MAX_ATTEMPTS - 1) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
     if (!createdId) {
       throw new Error('Failed to create pipeline from template.');
     }
@@ -852,23 +880,7 @@
     };
 
     const normalizedEncoderImpl = encoderImpl && encoderImpl.trim().length ? encoderImpl : null;
-    const compatibleDecoders = decodersForFormat();
-    const requestedDecoder = decoderImpl && decoderImpl.trim().length ? decoderImpl.trim() : null;
-    const decoderMatch =
-      requestedDecoder == null
-        ? null
-        : compatibleDecoders.find((codec) => String(codec.implementation ?? '').trim() === requestedDecoder)
-          ?? compatibleDecoders.find((codec) => String(codec.name ?? '').trim() === requestedDecoder)
-          ?? null;
-    const normalizedDecoderImpl = decoderMatch
-      ? (String(decoderMatch.implementation ?? '').trim() || String(decoderMatch.name ?? '').trim() || null)
-      : null;
-    if (requestedDecoder && !normalizedDecoderImpl) {
-      toaster.warning({
-        title: 'Decoder reset',
-        description: 'Selected decoder is not available for this capture format.'
-      });
-    }
+    const normalizedDecoderImpl = decoderImpl && decoderImpl.trim().length ? decoderImpl.trim() : null;
     const modeWidth = Number(mode.format?.resolution?.width ?? 0);
     const modeHeight = Number(mode.format?.resolution?.height ?? 0);
     const defaultEncoderOutputResolution =
@@ -877,42 +889,53 @@
         : null;
     const backendKind = String(backend.kind ?? '').trim().toLowerCase();
     const isMediaBackend = backendKind === 'file' || backendKind === 'netcam';
+    const rawPipelineId = String(streamCapabilities?.rawPipelineId ?? '').trim();
+    const rawPipelineOutput = String(streamCapabilities?.defaults?.rawOutput ?? '').trim();
+    if (isMediaBackend && (!rawPipelineId || !rawPipelineOutput)) {
+      submitting = false;
+      toaster.error({
+        title: 'Stream capabilities unavailable',
+        description: 'Unable to determine raw pipeline defaults from backend capabilities.'
+      });
+      return;
+    }
     const shouldAttachSelectedPipeline = Boolean(attachedPipelineId);
     const useRawMediaPipelineInSimpleMode = isSimpleRegistration && !shouldAttachSelectedPipeline && isMediaBackend;
 
-    const manifest: StreamManifest = {
+      const manifest: StreamManifest = {
         // Backend expects `DeviceIdentity { id, alias, hardware_id }` for stream manifests.
-        // The TS bindings can lag (some shapes still show `{ display, keys }`), so cast to `any`
+        // The TS bindings can lag (some shapes still show `{ display, keys }`), so cast through
+        // `unknown` to keep the runtime JSON correct without widening the rest of the payload.
         // to keep the runtime JSON correct.
         identity: {
           id: null,
           alias: alias.trim().length ? alias.trim() : null,
           hardware_id: selectStableHardwareId(device.identity?.keys) ?? device.identity?.display?.trim?.() ?? null
-        } as any,
+        } as unknown as StreamManifest['identity'],
         capture,
         pipeline_enabled: isSimpleRegistration
           ? shouldAttachSelectedPipeline || useRawMediaPipelineInSimpleMode
           : isMediaBackend,
         active_pipeline_id: isSimpleRegistration
-          ? attachedPipelineId ?? (useRawMediaPipelineInSimpleMode ? RAW_STREAM_PIPELINE_UUID : null)
+          ? attachedPipelineId ?? (useRawMediaPipelineInSimpleMode ? rawPipelineId : null)
           : isMediaBackend
-            ? RAW_STREAM_PIPELINE_UUID
+            ? rawPipelineId
             : null,
         active_pipeline_output: isSimpleRegistration
           ? useRawMediaPipelineInSimpleMode
-            ? 'raw'
+            ? rawPipelineOutput
             : null
           : isMediaBackend
-            ? 'raw'
+            ? rawPipelineOutput
             : null,
         pipelines: isSimpleRegistration
           ? attachedPipelineId
             ? [{ pipeline_id: attachedPipelineId, pipeline_graph: null, pipeline_output: null }]
             : useRawMediaPipelineInSimpleMode
-              ? [{ pipeline_id: RAW_STREAM_PIPELINE_UUID, pipeline_graph: null, pipeline_output: 'raw' }]
+              ? [{ pipeline_id: rawPipelineId, pipeline_graph: null, pipeline_output: rawPipelineOutput }]
               : []
           : isMediaBackend
-            ? [{ pipeline_id: RAW_STREAM_PIPELINE_UUID, pipeline_graph: null, pipeline_output: 'raw' }]
+            ? [{ pipeline_id: rawPipelineId, pipeline_graph: null, pipeline_output: rawPipelineOutput }]
             : [],
         pipeline_layout: isSimpleRegistration
           ? attachedPipelineId
@@ -925,14 +948,14 @@
               ? {
                   rows: 1,
                   columns: 1,
-                  slots: [{ row: 0, column: 0, pipeline_id: RAW_STREAM_PIPELINE_UUID, output_key: 'raw' }]
+                  slots: [{ row: 0, column: 0, pipeline_id: rawPipelineId, output_key: rawPipelineOutput }]
                 }
               : null
           : isMediaBackend
             ? {
                 rows: 1,
                 columns: 1,
-                slots: [{ row: 0, column: 0, pipeline_id: RAW_STREAM_PIPELINE_UUID, output_key: 'raw' }]
+                slots: [{ row: 0, column: 0, pipeline_id: rawPipelineId, output_key: rawPipelineOutput }]
               }
             : null,
         encoder_id: normalizedEncoderImpl,
@@ -959,18 +982,18 @@
               decode_fps_limit: encoderSettings.decodeFps
             }
           : null,
-        host_buffer: Number.isFinite(hostBuffer) && hostBuffer > 0 ? Math.round(hostBuffer) : undefined,
+        host_buffer: Number.isFinite(hostBuffer) ? hostBuffer : undefined,
         start_on_boot: false
       };
 
     try {
       const response = await StreamsApi.startStream({ requestBody: manifest });
-      const streamId = (response as any)?.stream_id ?? (response as any)?.streamId;
+      const streamId = response.stream_id;
       toaster.success({ title: 'Stream created', description: streamId ? `Stream ${streamId} started` : 'Capture stream started' });
       invalidateSWRPrefix('devices:');
       invalidateSWRPrefix('media:');
       invalidateSWR('media:stream-labels:v1');
-      dispatch('create', { streamId, descriptor: (response as any)?.descriptor });
+      dispatch('create', { streamId, descriptor: response.descriptor });
       registerCameraModal.set(false);
     } catch (err) {
       reportError({
@@ -989,9 +1012,7 @@
 
 {#if loading}
   <ModalShell open title="Loading cameras…" closeOnBackdrop={false} closeOnEsc={false} className="z-50" panelClassName="max-w-sm">
-    {#snippet children()}
-      <div class="py-6 text-center text-sm text-surface-300">Fetching available cameras…</div>
-    {/snippet}
+    <div class="py-6 text-center text-sm text-surface-300">Fetching available cameras…</div>
   </ModalShell>
 {:else if error}
   <ModalShell open title="Unable to load cameras" subtitle={error} className="z-50" onClose={close}>
@@ -1068,7 +1089,6 @@
       {/if}
       <button class="btn btn-ghost" type="button" onclick={close}>Close</button>
     {/snippet}
-    {#snippet children()}
       {#if devices.length === 0}
         <div class="rounded-lg border border-surface-800 bg-surface-950/70 px-4 py-6 text-sm text-surface-300">
           No cameras detected. Ensure the engine is running and the device is connected, then retry.
@@ -1262,7 +1282,6 @@
           </div>
         {/if}
       {/if}
-    {/snippet}
   </ModalShell>
 {/if}
 

@@ -1,5 +1,4 @@
 export { normalizeNodeStyle } from './normalizeHelpers';
-export { fromApiPortDescriptor, fromApiGraphPlan } from './graphConverters';
 export {
   cloneDataType,
   clonePortMappings,

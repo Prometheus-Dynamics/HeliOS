@@ -81,7 +81,7 @@
     onToggleEngineConfig
   }: Props = $props();
 
-  const pipeline = context.pipeline;
+  const pipeline = $derived(context.pipeline);
 </script>
 
 {#if pipeline}

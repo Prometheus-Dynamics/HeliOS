@@ -4,6 +4,7 @@
   import SensorModalShell from './SensorModalShell.svelte';
   import PeripheralStats from './PeripheralStats.svelte';
   import FirmwareUpdaterPanel from './FirmwareUpdaterPanel.svelte';
+  import { SvelteSet } from 'svelte/reactivity';
 
   type FirmwareStatus = PeripheralEntry['firmware'];
 
@@ -72,7 +73,7 @@
       }
     }
     const deduped: WarningCard[] = [];
-    const seen = new Set<string>();
+    const seen = new SvelteSet<string>();
     for (const card of cards) {
       const key = `${card.title}::${card.message}`;
       if (seen.has(key)) continue;

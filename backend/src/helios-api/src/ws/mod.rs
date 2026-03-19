@@ -1,12 +1,12 @@
 mod console;
-mod device;
+pub(crate) mod device;
 mod devices;
 mod imu;
 pub(crate) mod logs;
 mod ota;
 mod pipelines;
 pub(crate) mod processes;
-mod sensors;
+pub(crate) mod sensors;
 mod streams;
 mod updates;
 
@@ -41,6 +41,8 @@ pub fn asyncapi_json(host: Option<String>) -> serde_json::Value {
     streams::register_docs(host.clone(), &mut registry, &mut servers, &mut tags, &mut docs);
     devices::register_docs(host.clone(), &mut registry, &mut servers, &mut tags, &mut docs);
     device::register_docs(host.clone(), &mut registry, &mut servers, &mut tags, &mut docs);
+    sensors::register_docs(host.clone(), &mut registry, &mut servers, &mut tags, &mut docs);
+    imu::register_docs(host.clone(), &mut registry, &mut servers, &mut tags, &mut docs);
     console::register_docs(host.clone(), &mut registry, &mut servers, &mut tags, &mut docs);
     logs::register_docs(host.clone(), &mut registry, &mut servers, &mut tags, &mut docs);
     processes::register_docs(host.clone(), &mut registry, &mut servers, &mut tags, &mut docs);

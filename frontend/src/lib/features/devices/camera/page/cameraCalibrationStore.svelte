@@ -1,6 +1,8 @@
 <script lang="ts" module>
+  import type { CalibrationImage, CalibrationParams, IpaStatus } from '$lib/features/devices/camera/cameraCalibrationTypes';
+
   export type CalibrationSolveResult = {
-    calibration: { fx: number; fy: number; cx: number; cy: number; k1: number; k2: number; p1: number; p2: number; k3: number; undistortIters: number; lensModel?: 'pinhole' | 'fisheye' };
+    calibration: CalibrationParams;
     reprojectionErrorPx?: number;
     viewsUsed?: number;
     pointsUsed?: number;
@@ -31,7 +33,7 @@
         dictionary: '4x4_1000'
       },
       calibrationLensModel: 'pinhole' as 'pinhole' | 'fisheye',
-      calibrationImages: [] as Array<{ name: string; size_bytes: number; content_type: string; stream_id?: string; kind?: string; captured_at_ms?: number }>,
+      calibrationImages: [] as CalibrationImage[],
       calibrationOwnPhotosOnly: true,
       calibrationSelected: {} as Record<string, boolean>,
       calibrationLoading: false,
@@ -53,25 +55,13 @@
       calibrationImportSources: [] as Array<{
         id: string;
         label: string;
-        calibration: {
-          fx: number;
-          fy: number;
-          cx: number;
-          cy: number;
-          k1: number;
-          k2: number;
-          p1: number;
-          p2: number;
-          k3: number;
-          undistortIters: number;
-          lensModel?: 'pinhole' | 'fisheye';
-        };
+        calibration: CalibrationParams;
       }>,
       calibrationPreviewOpen: false,
-      calibrationPreviewItem: null as any | null,
+      calibrationPreviewItem: null as CalibrationImage | null,
 
       ipaLoading: false,
-      ipaStatus: null as { files: Array<{ target: string; path: string; exists: boolean; ccmCt?: number | null; ccm?: number[] | null }> } | null,
+      ipaStatus: null as IpaStatus | null,
       ipaTarget: 'both' as 'both' | 'pisp' | 'vc4',
       ipaCt: 4000,
       ipaCcm: [

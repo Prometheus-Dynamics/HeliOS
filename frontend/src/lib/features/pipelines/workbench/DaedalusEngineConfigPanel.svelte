@@ -1,12 +1,12 @@
 <script lang="ts">
   import type { PipelineGraphPlan } from '$lib/types/pipeline';
 
-  const props = $props<{
+  type Props = {
     plan: PipelineGraphPlan;
     onChange: (plan: PipelineGraphPlan) => void;
     open?: boolean;
     showHeader?: boolean;
-  }>();
+  };
 
   const META = {
     gpuBackend: 'helios.daedalus.gpu_backend',
@@ -19,16 +19,17 @@
     runtimeLockfreeQueues: 'helios.daedalus.runtime.lockfree_queues'
   } as const;
 
-  let open = $state(Boolean(props.open));
-  const showHeader = $derived(props.showHeader ?? true);
+  let { plan, onChange, open: openProp = undefined, showHeader: showHeaderProp = true }: Props = $props();
+  let open = $state(false);
+  const showHeader = $derived(showHeaderProp ?? true);
 
   $effect(() => {
-    if (typeof props.open === 'boolean') {
-      open = props.open;
+    if (typeof openProp === 'boolean') {
+      open = openProp;
     }
   });
 
-  const metadata = $derived((props.plan.daedalus?.metadata ?? {}) as Record<string, string>);
+  const metadata = $derived((plan.daedalus?.metadata ?? {}) as Record<string, string>);
 
   const read = (key: string, fallback = ''): string => {
     const value = metadata[key];
@@ -41,7 +42,7 @@
   };
 
   const updateMeta = (patch: Record<string, string | null | undefined>) => {
-    const nextMeta: Record<string, string> = { ...(props.plan.daedalus?.metadata ?? {}) };
+    const nextMeta: Record<string, string> = { ...(plan.daedalus?.metadata ?? {}) };
     for (const [key, value] of Object.entries(patch)) {
       if (value == null || value.trim().length === 0) {
         delete nextMeta[key];
@@ -49,8 +50,8 @@
         nextMeta[key] = value;
       }
     }
-    props.onChange({
-      ...props.plan,
+    onChange({
+      ...plan,
       format: 'daedalus',
       daedalus: { metadata: nextMeta }
     });
@@ -112,7 +113,7 @@
       type="button"
       class="flex w-full items-center justify-between gap-3 text-left"
       onclick={() => {
-        if (typeof props.open === 'boolean') return;
+        if (typeof openProp === 'boolean') return;
         open = !open;
       }}
     >

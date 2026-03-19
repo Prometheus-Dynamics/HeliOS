@@ -1,4 +1,4 @@
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -53,6 +53,7 @@ pub struct StreamRunner {
     pub(super) encoder_worker: Option<EncoderWorker>,
     pub(super) decoder_stats: styx::codec::CodecStats,
     pub(super) encoder_stats: styx::codec::CodecStats,
+    pub(super) preview_encoder_stats: styx::codec::CodecStats,
     pub(super) capture_stats: styx::prelude::StageMetrics,
     pub(super) last_capture_ts: Option<u64>,
     pub(super) last_capture_wall: Option<Instant>,
@@ -64,13 +65,78 @@ pub struct StreamRunner {
     pub(super) viewer_recently_active: bool,
     pub(super) preview_encode_interval: Duration,
     pub(super) last_preview_encode_wall: Option<Instant>,
+    pub(super) preview_encoder_last_activity_ms: Arc<AtomicU64>,
     pub(super) preview_worker: Option<PreviewWorker>,
-    pub(super) last_preview_frame: Option<Arc<image::DynamicImage>>,
+    pub(super) runner_memory: RunnerMemoryTracker,
+}
+
+#[derive(Debug, Default)]
+pub(super) struct RunnerMemoryTracker {
+    pub(super) current_decoded_frame_bytes: u64,
+    pub(super) peak_decoded_frame_bytes: u64,
+    pub(super) current_raw_clone_bytes: u64,
+    pub(super) peak_raw_clone_bytes: u64,
+    pub(super) current_processed_frame_bytes: u64,
+    pub(super) peak_processed_frame_bytes: u64,
+    pub(super) current_frame_working_set_bytes: u64,
+    pub(super) peak_frame_working_set_bytes: u64,
+}
+
+impl RunnerMemoryTracker {
+    fn update_peak(slot: &mut u64, value: u64) {
+        if value > *slot {
+            *slot = value;
+        }
+    }
+
+    pub(super) fn reset_current(&mut self) {
+        self.current_decoded_frame_bytes = 0;
+        self.current_raw_clone_bytes = 0;
+        self.current_processed_frame_bytes = 0;
+        self.current_frame_working_set_bytes = 0;
+    }
+
+    pub(super) fn set_decoded_frame_bytes(&mut self, bytes: u64) {
+        self.current_decoded_frame_bytes = bytes;
+        Self::update_peak(&mut self.peak_decoded_frame_bytes, bytes);
+        self.refresh_total();
+    }
+
+    pub(super) fn set_raw_clone_bytes(&mut self, bytes: u64) {
+        self.current_raw_clone_bytes = bytes;
+        Self::update_peak(&mut self.peak_raw_clone_bytes, bytes);
+        self.refresh_total();
+    }
+
+    pub(super) fn set_processed_frame_bytes(&mut self, bytes: u64) {
+        self.current_processed_frame_bytes = bytes;
+        Self::update_peak(&mut self.peak_processed_frame_bytes, bytes);
+        self.refresh_total();
+    }
+
+    fn refresh_total(&mut self) {
+        self.current_frame_working_set_bytes = self.current_decoded_frame_bytes.saturating_add(self.current_raw_clone_bytes).saturating_add(self.current_processed_frame_bytes);
+        Self::update_peak(&mut self.peak_frame_working_set_bytes, self.current_frame_working_set_bytes);
+    }
+
+    pub(super) fn snapshot(&self) -> crate::stream::StreamRunnerMemoryMetrics {
+        crate::stream::StreamRunnerMemoryMetrics {
+            current_decoded_frame_bytes: self.current_decoded_frame_bytes,
+            peak_decoded_frame_bytes: self.peak_decoded_frame_bytes,
+            current_raw_clone_bytes: self.current_raw_clone_bytes,
+            peak_raw_clone_bytes: self.peak_raw_clone_bytes,
+            current_processed_frame_bytes: self.current_processed_frame_bytes,
+            peak_processed_frame_bytes: self.peak_processed_frame_bytes,
+            current_frame_working_set_bytes: self.current_frame_working_set_bytes,
+            peak_frame_working_set_bytes: self.peak_frame_working_set_bytes,
+        }
+    }
 }
 
 pub(super) struct PreviewWorker {
     pub(super) req_tx: std::sync::mpsc::SyncSender<PreviewEncodeRequest>,
     pub(super) res_rx: std::sync::mpsc::Receiver<PreviewEncodeResult>,
+    pub(super) recycle_tx: std::sync::mpsc::SyncSender<Vec<u8>>,
     join: std::thread::JoinHandle<()>,
 }
 
@@ -87,18 +153,23 @@ pub(super) struct PreviewEncodeResult {
 }
 
 impl PreviewWorker {
-    pub(super) fn start() -> Self {
+    pub(super) fn start(stats: styx::codec::CodecStats, activity_ms: Arc<AtomicU64>) -> Self {
         let (req_tx, req_rx) = std::sync::mpsc::sync_channel::<PreviewEncodeRequest>(1);
         let (res_tx, res_rx) = std::sync::mpsc::sync_channel::<PreviewEncodeResult>(1);
+        let (recycle_tx, recycle_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(1);
         let quality = preview_jpeg_quality();
         let join = std::thread::spawn(move || {
             use image::codecs::jpeg::JpegEncoder;
             use image::ColorType;
+            use std::sync::mpsc::TrySendError;
 
             let mut rgb = Vec::<u8>::new();
             let mut jpeg = Vec::<u8>::new();
 
             while let Ok(req) = req_rx.recv() {
+                if let Ok(recycled) = recycle_rx.try_recv() {
+                    jpeg = recycled;
+                }
                 let resized = req.output_resolution.and_then(|(target_width, target_height)| {
                     let target_width = target_width.max(1);
                     let target_height = target_height.max(1);
@@ -117,25 +188,43 @@ impl PreviewWorker {
                     rgb.resize(wanted, 0);
                 }
                 if !write_rgb24(source, &mut rgb) {
+                    stats.inc_errors();
                     continue;
                 }
 
                 jpeg.clear();
                 // `Vec<u8>` implements `Write`; keep capacity to avoid allocator churn.
+                let encode_start = Instant::now();
                 let mut enc = JpegEncoder::new_with_quality(&mut jpeg, quality);
                 if enc.encode(&rgb, width, height, ColorType::Rgb8.into()).is_err() {
+                    stats.inc_errors();
                     continue;
                 }
+                stats.inc_processed();
+                stats.record_duration(encode_start.elapsed());
+                activity_ms.store(StreamRunner::unix_now_ms(), Ordering::Relaxed);
                 let dims = (width, height);
-                // Drop stale results if the consumer is behind.
-                let _ = res_tx.try_send(PreviewEncodeResult { ts: req.ts, dims, jpeg: jpeg.clone() });
+                let ready = std::mem::take(&mut jpeg);
+                match res_tx.try_send(PreviewEncodeResult { ts: req.ts, dims, jpeg: ready }) {
+                    Ok(()) => {}
+                    // Drop stale results if the consumer is behind, but keep the owned buffer so
+                    // the worker can reuse its capacity on the next encode.
+                    Err(TrySendError::Full(result)) => {
+                        stats.inc_backpressure();
+                        jpeg = result.jpeg;
+                    }
+                    Err(TrySendError::Disconnected(_result)) => {
+                        break;
+                    }
+                }
             }
         });
-        Self { req_tx, res_rx, join }
+        Self { req_tx, res_rx, recycle_tx, join }
     }
 
     pub(super) fn stop(self) {
         drop(self.req_tx);
+        drop(self.recycle_tx);
         let _ = self.join.join();
     }
 }
@@ -146,26 +235,15 @@ impl StreamRunner {
     }
 
     pub fn snapshot_jpeg(&self, quality: u8) -> Result<Vec<u8>> {
-        let Some(image) = self.last_preview_frame.as_deref() else {
-            return Err(Error::NotFound("preview frame unavailable"));
-        };
-
-        let width = image.width().max(1);
-        let height = image.height().max(1);
-        let wanted = width as usize * height as usize * 3;
-        let mut rgb = vec![0u8; wanted];
-        if !write_rgb24(image, &mut rgb) {
-            return Err(Error::InvalidState("snapshot rgb24 conversion failed"));
+        let _ = quality;
+        if let Some(stream_id) = self.stream_id {
+            if let Ok((header, bytes)) = crate::stream::read_latest_frame_with_header(stream_id) {
+                if matches!(&header.fourcc.to_u32().to_le_bytes(), b"MJPG" | b"JPEG") {
+                    return Ok(bytes);
+                }
+            }
         }
-
-        use image::codecs::jpeg::JpegEncoder;
-        use image::ColorType;
-
-        let mut jpeg = Vec::<u8>::new();
-        let quality = quality.clamp(1, 100);
-        let mut enc = JpegEncoder::new_with_quality(&mut jpeg, quality);
-        enc.encode(&rgb, width, height, ColorType::Rgb8.into()).map_err(|_| Error::InvalidState("snapshot jpeg encode failed"))?;
-        Ok(jpeg)
+        Err(Error::NotFound("preview frame unavailable"))
     }
 }
 

@@ -41,7 +41,7 @@
         value={policy}
         onchange={(event) => onPolicyChange?.((event.currentTarget as HTMLSelectElement).value)}
       >
-        {#each channelPolicyOptions as option}
+        {#each channelPolicyOptions as option (option.value)}
           <option value={option.value}>{option.label}</option>
         {/each}
       </select>

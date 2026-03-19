@@ -1,6 +1,7 @@
 import type { MediaAsset, MediaAssetType } from '$lib/features/media/api';
 import type { MediaAssetsStore } from '$lib/features/media/assetsStore';
 import { apiUrl } from '$lib';
+import { apiFetch } from '$lib/api/core/http';
 import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
 
 export type MediaClientSort =
@@ -205,21 +206,15 @@ export async function createMediaReplayStream(context: {
     selectedAssets.find((asset) => asset.kind === 'video' && Number.isFinite(asset.fps) && asset.fps > 0)?.fps ?? null;
   const replayFps = Math.max(1, Math.min(240, Math.round(videoFpsHint ?? 10)));
   try {
-    const response = await fetch(apiUrl('/streams/replay/media'), {
+    const payload = await apiFetch<{ stream_id?: string; streamId?: string; error?: string; message?: string }>(apiUrl('/streams/replay/media'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+      body: {
         files,
         fps: replayFps,
         loopForever: true,
         alias
-      })
+      }
     });
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) {
-      const message = payload?.error ?? payload?.message ?? 'Unable to start media replay stream.';
-      throw new Error(message);
-    }
     const streamId = payload?.stream_id ?? payload?.streamId;
     context.toaster.success({
       title: 'Media stream started',

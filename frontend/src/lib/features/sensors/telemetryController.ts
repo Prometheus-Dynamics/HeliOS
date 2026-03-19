@@ -1,5 +1,6 @@
 import { writable, type Readable } from 'svelte/store';
 import { apiUrl } from '$lib/api/httpClient';
+import { apiFetch } from '$lib/api/core/http';
 import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
 import { emptyImuStatus, mapImuStatus, refreshImuStatus, updateImuConfig } from '$lib/api/systemsPage';
 import { createBackoffTimer } from '$lib/utils/backoff';
@@ -124,7 +125,7 @@ export function createSensorTelemetryController(options: { pollMs?: number } = {
   }
 
   function handleImuStream(payload: unknown) {
-    const status = mapImuStatus(payload as any);
+    const status = mapImuStatus(payload as Parameters<typeof mapImuStatus>[0]);
     state.update((current) => ({
       ...current,
       imuStatus: status,
@@ -174,12 +175,7 @@ export function createSensorTelemetryController(options: { pollMs?: number } = {
     state.update((current) => ({ ...current, powerLoading: true, powerError: null }));
     try {
       const url = apiUrl('/device/power');
-      const response = await fetch(url, { headers: { Accept: 'application/json' } });
-      if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        throw new Error(text || `Power request failed (${response.status})`);
-      }
-      const json = await response.json();
+      const json = await apiFetch<unknown>(url, { headers: { Accept: 'application/json' } });
       state.update((current) => ({
         ...current,
         powerStatus: normalizePowerStatus(json),
@@ -307,11 +303,15 @@ function emptyPowerStatus(): PowerStatus {
   return { watts: null, volts: null, amps: null, updatedAt: null, sources: [], errors: [] };
 }
 
-function normalizePowerStatus(value: any): PowerStatus {
-  if (!value || typeof value !== 'object') {
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+
+function normalizePowerStatus(value: unknown): PowerStatus {
+  const record = asRecord(value);
+  if (!record) {
     return emptyPowerStatus();
   }
-  const toNumber = (v: any) => {
+  const toNumber = (v: unknown) => {
     if (typeof v === 'number' && Number.isFinite(v)) return v;
     if (typeof v === 'string' && v.trim().length) {
       const parsed = Number(v.trim());
@@ -319,18 +319,22 @@ function normalizePowerStatus(value: any): PowerStatus {
     }
     return null;
   };
-  const toString = (v: any) => (typeof v === 'string' && v.trim().length ? v.trim() : null);
-  const sources: PowerStatus['sources'] = Array.isArray(value.sources)
-    ? value.sources
-        .map((src: any) => ({
-          label: toString(src?.label) ?? 'Source',
-          bus: typeof src?.bus === 'number' ? src.bus : null,
-          address: toString(src?.address),
-          watts: toNumber(src?.watts),
-          volts: toNumber(src?.volts),
-          amps: toNumber(src?.amps),
-          shuntVolts: toNumber(src?.shunt_volts ?? src?.shuntVolts)
-        }))
+  const toString = (v: unknown) => (typeof v === 'string' && v.trim().length ? v.trim() : null);
+  const sources: PowerStatus['sources'] = Array.isArray(record.sources)
+    ? record.sources
+        .map((entry) => {
+          const source = asRecord(entry);
+          const bus = toNumber(source?.bus);
+          return {
+            label: toString(source?.label) ?? 'Source',
+            bus: bus != null ? Math.trunc(bus) : null,
+            address: toString(source?.address),
+            watts: toNumber(source?.watts),
+            volts: toNumber(source?.volts),
+            amps: toNumber(source?.amps),
+            shuntVolts: toNumber(source?.shunt_volts ?? source?.shuntVolts)
+          };
+        })
         .filter((entry) => entry.label)
     : [];
 
@@ -342,9 +346,9 @@ function normalizePowerStatus(value: any): PowerStatus {
   const sourceAmpsSum = sourceAmps.length ? sourceAmps.reduce((sum, next) => sum + next, 0) : null;
   const sourceWattsSum = sourceWatts.length ? sourceWatts.reduce((sum, next) => sum + next, 0) : null;
 
-  const volts = toNumber(value.volts) ?? firstSourceVolts;
-  const amps = toNumber(value.amps) ?? sourceAmpsSum;
-  const rawWatts = toNumber(value.watts);
+  const volts = toNumber(record.volts) ?? firstSourceVolts;
+  const amps = toNumber(record.amps) ?? sourceAmpsSum;
+  const rawWatts = toNumber(record.watts);
   const derivedWatts = volts != null && amps != null ? volts * amps : null;
   const watts =
     rawWatts == null
@@ -355,10 +359,10 @@ function normalizePowerStatus(value: any): PowerStatus {
     watts,
     volts,
     amps,
-    updatedAt: toString(value.updated_at ?? value.updatedAt),
+    updatedAt: toString(record.updated_at ?? record.updatedAt),
     sources,
-    errors: Array.isArray(value.errors)
-      ? (value.errors.map((entry: any) => toString(entry)).filter(Boolean) as string[])
+    errors: Array.isArray(record.errors)
+      ? record.errors.map((entry) => toString(entry)).filter((entry): entry is string => entry != null)
       : []
   };
 }

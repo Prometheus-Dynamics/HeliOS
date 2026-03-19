@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { onDestroy, onMount } from 'svelte';
+  import { onMount } from 'svelte';
+  import { subscribeDomainInvalidations } from '$lib/api/invalidation';
   import { apiFetch } from '../api';
   import { buildErrorMessage } from '$lib/ui/errorPolicy';
   import type { BootloaderStatus, BootloaderUpdateResponse } from '../types';
-  import type { RealtimeUpdateEvent } from '$lib/api/realtimeUpdates';
+  import { realtimeUpdateMatchesKind, type RealtimeUpdateEvent } from '$lib/api/realtimeUpdates';
 
   let status = $state<BootloaderStatus | null>(null);
   let loading = $state(false);
@@ -12,7 +13,6 @@
   let updateError = $state<string | null>(null);
   let updateStatus = $state<string | null>(null);
   let confirmChecked = $state(false);
-  let liveRefreshHandle: number | null = null;
 
   const supported = $derived(status?.supported ?? false);
   const needsUpdate = $derived(status?.needs_update ?? false);
@@ -35,34 +35,28 @@
     () => status?.status_message ?? (needsUpdate ? 'Bootloader update required for RP1 peripherals.' : null)
   );
 
+  function shouldApplyLiveUpdate(event: RealtimeUpdateEvent): boolean {
+    if (
+      event.path.startsWith('/v1/device/bootloader') ||
+      event.path.startsWith('/v1/device/restart') ||
+      event.path.startsWith('/v1/device/os')
+    ) {
+      return true;
+    }
+    if (realtimeUpdateMatchesKind(event, 'api')) return false;
+    return realtimeUpdateMatchesKind(event, 'device') || realtimeUpdateMatchesKind(event, 'settings');
+  }
+
   onMount(() => {
     void refreshStatus();
-    const onRealtimeUpdate = (rawEvent: Event) => {
-      const event = rawEvent as CustomEvent<RealtimeUpdateEvent>;
-      const detail = event.detail;
-      if (!detail) return;
-      const touchesBootloader =
-        detail.path.startsWith('/v1/device/bootloader') ||
-        detail.path.startsWith('/v1/device/restart') ||
-        detail.path.startsWith('/v1/device/os');
-      if (!touchesBootloader && detail.kind !== 'device' && detail.kind !== 'settings') return;
-      if (liveRefreshHandle != null) return;
-      liveRefreshHandle = window.setTimeout(() => {
-        liveRefreshHandle = null;
+    return subscribeDomainInvalidations(
+      ['device', 'settings'],
+      (event) => {
+        if (!shouldApplyLiveUpdate(event)) return;
         void refreshStatus();
-      }, 350);
-    };
-    window.addEventListener('helios:settings-realtime-update', onRealtimeUpdate as EventListener);
-    return () => {
-      window.removeEventListener('helios:settings-realtime-update', onRealtimeUpdate as EventListener);
-    };
-  });
-
-  onDestroy(() => {
-    if (liveRefreshHandle != null) {
-      clearTimeout(liveRefreshHandle);
-      liveRefreshHandle = null;
-    }
+      },
+      { debounceMs: 350 }
+    );
   });
 
   async function refreshStatus(): Promise<void> {
@@ -85,7 +79,7 @@
     try {
       const response = await apiFetch<BootloaderUpdateResponse>('/device/bootloader', {
         method: 'POST',
-        body: JSON.stringify({ confirm: true, reboot: true })
+        body: { confirm: true, reboot: true }
       });
       updateStatus = response?.message ?? 'Update staged. Rebooting to apply firmware.';
       await refreshStatus();

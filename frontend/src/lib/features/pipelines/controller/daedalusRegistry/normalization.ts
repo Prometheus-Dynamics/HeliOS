@@ -12,12 +12,22 @@ import {
   toPortMap
 } from './parsing';
 
+const normalizedRegistryCache = new WeakMap<
+  DaedalusRegistryNode[],
+  { types: DaedalusRegistryType[] | null | undefined; entries: PipelineRegistryEntry[] }
+>();
+
 export function normalizeDaedalusRegistry(
   nodes: DaedalusRegistryNode[],
   types?: DaedalusRegistryType[] | null
 ): PipelineRegistryEntry[] {
+  const cached = normalizedRegistryCache.get(nodes);
+  if (cached && cached.types === types) {
+    return cached.entries;
+  }
+
   const typeRegistry = buildTypeRegistryLookup(types);
-  return (nodes ?? [])
+  const entries = (nodes ?? [])
     .map((node) => {
       const metadataRecord = (node?.metadata ?? {}) as Record<string, unknown>;
       const id = typeof node?.id === 'string' && node.id.trim() ? node.id.trim() : null;
@@ -86,4 +96,7 @@ export function normalizeDaedalusRegistry(
       return entry;
     })
     .filter((entry): entry is PipelineRegistryEntry => Boolean(entry));
+
+  normalizedRegistryCache.set(nodes, { types, entries });
+  return entries;
 }

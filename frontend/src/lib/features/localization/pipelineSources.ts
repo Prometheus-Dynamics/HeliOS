@@ -1,8 +1,10 @@
 import type { PipelineDataType } from '$lib/types/pipeline';
 import { apiUrl } from '$lib/api/httpClient';
+import { apiFetch, apiFetchResponse } from '$lib/api/core/http';
 import { extractGraphOutputPorts } from '$lib/features/pipelines/graphOutputPorts';
 import { extractGraphOutputPortTypes } from '$lib/features/pipelines/outputFilters';
 import { resolveStreamLabel } from '$lib/utils/streamLabels';
+import type { StreamInfo } from '$lib/api/httpClient';
 
 export type LocalizationPipelineSource = {
   id: string;
@@ -20,6 +22,113 @@ export type LocalizationPipelineSource = {
 export type PipelineOutputSample = {
   dataType: PipelineDataType | null;
   value: unknown;
+};
+
+type UnknownRecord = Record<string, unknown>;
+
+const asRecord = (value: unknown): UnknownRecord | null =>
+  value && typeof value === 'object' ? (value as UnknownRecord) : null;
+
+const toLower = (value: string | null | undefined): string => clean(value).toLowerCase();
+
+const outputKeyLooksImage = (outputKey: string): boolean => {
+  const key = outputKey.trim().toLowerCase();
+  return key === 'frame' || key === 'raw' || key === 'undistorted' || key.includes('image') || key.includes('frame');
+};
+
+export const isLocalizationDetectionSource = (source: LocalizationPipelineSource): boolean => {
+  const key = toLower(source.outputKey);
+  if (!key) return false;
+  const detectionLike =
+    key.includes('aruco') ||
+    key.includes('detect') ||
+    key.includes('detection') ||
+    key.includes('tag_pose') ||
+    key.includes('tag_poses') ||
+    key.startsWith('tag_in_') ||
+    key.startsWith('camera_in_tag') ||
+    key.startsWith('robot_in_tag');
+  if (!detectionLike) return false;
+  return !outputKeyLooksImage(key);
+};
+
+export const isLocalizationImuSource = (source: LocalizationPipelineSource): boolean => {
+  const streamId = toLower(source.streamId);
+  const outputKey = toLower(source.outputKey);
+  const cameraUid = toLower(source.cameraUid);
+  return (
+    streamId.startsWith('external:imu') ||
+    outputKey.includes('imu_pose') ||
+    outputKey.startsWith('imu_') ||
+    cameraUid === 'imu'
+  );
+};
+
+export const isLocalizationPoseSource = (source: LocalizationPipelineSource): boolean => {
+  const key = toLower(source.outputKey);
+  if (!key) return false;
+  const poseLike =
+    key.startsWith('solver:') ||
+    key.startsWith('tag_in_') ||
+    key.startsWith('camera_in_') ||
+    key.startsWith('robot_in_') ||
+    key.includes('pose');
+  if (!poseLike) return false;
+  if (isLocalizationDetectionSource(source)) return true;
+  if (isLocalizationImuSource(source)) return true;
+  return !outputKeyLooksImage(key);
+};
+
+const stringifyDataType = (value: PipelineDataType | null | undefined): string => {
+  if (value == null) return '';
+  if (typeof value === 'string') return value.toLowerCase();
+  try {
+    return JSON.stringify(value).toLowerCase();
+  } catch {
+    return '';
+  }
+};
+
+const dataTypeLooksLocalization = (value: PipelineDataType | null | undefined): boolean => {
+  const text = stringifyDataType(value);
+  if (!text) return false;
+  return (
+    text.includes('localization') ||
+    text.includes('detection') ||
+    text.includes('aruco') ||
+    text.includes('tag_pose') ||
+    text.includes('tag_poses') ||
+    text.includes('tag_in_') ||
+    text.includes('camera_in_') ||
+    text.includes('robot_in_') ||
+    text.includes('imu') ||
+    text.includes('pose')
+  );
+};
+
+const dataTypeLooksImage = (value: PipelineDataType | null | undefined): boolean => {
+  const text = stringifyDataType(value);
+  if (!text) return false;
+  return (
+    text.includes('image') ||
+    text.includes('frame') ||
+    text.includes('rgb') ||
+    text.includes('bgr') ||
+    text.includes('nv12') ||
+    text.includes('yuv') ||
+    text.includes('jpeg') ||
+    text.includes('png')
+  );
+};
+
+export const isLocalizationCompatibleSource = (source: LocalizationPipelineSource): boolean => {
+  const outputKey = clean(source.outputKey);
+  if (!outputKey) return false;
+  if (outputKey.toLowerCase() === 'frame') return false;
+  if (isLocalizationDetectionSource(source) || isLocalizationImuSource(source) || isLocalizationPoseSource(source)) {
+    return true;
+  }
+  return dataTypeLooksLocalization(source.dataType) && !dataTypeLooksImage(source.dataType);
 };
 
 const UUID_LIKE_RE =
@@ -181,21 +290,16 @@ const dedupeLocalizationSources = (
 };
 
 const fetchJson = async <T>(url: string): Promise<T> => {
-  const response = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' } });
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(text || `Request failed (${response.status})`);
-  }
-  return (await response.json()) as T;
+  return apiFetch<T>(url, { method: 'GET', headers: { Accept: 'application/json' } });
 };
 
-const normalizeStreamLabel = (stream: any): string => {
+const normalizeStreamLabel = (stream: StreamInfo): string => {
   return resolveStreamLabel(stream, 'Stream');
 };
 
-const normalizeCameraUid = (stream: any): string => {
-  const manifest = stream?.manifest ?? {};
-  const identity = manifest?.identity ?? {};
+const normalizeCameraUid = (stream: StreamInfo): string => {
+  const manifest = asRecord(stream.manifest);
+  const identity = asRecord(manifest?.identity);
   const keys = Array.isArray(identity?.keys)
     ? identity.keys.map((value: unknown) => String(value ?? '').trim()).filter((value: string) => value.length > 0)
     : [];
@@ -206,13 +310,13 @@ const normalizeCameraUid = (stream: any): string => {
   return String(uid).trim() || String(stream?.id ?? '');
 };
 
-const normalizeCameraPath = (stream: any, cameraUid: string): string => {
+const normalizeCameraPath = (stream: StreamInfo, cameraUid: string): string => {
   if (cameraUid) return `device:${cameraUid}`;
   return `stream:${String(stream?.id ?? '').trim()}`;
 };
 
-const collectPipelineIdsForStream = (stream: any): string[] => {
-  const manifest = stream?.manifest ?? {};
+const collectPipelineIdsForStream = (stream: StreamInfo): string[] => {
+  const manifest = asRecord(stream.manifest);
   const ids = new Set<string>();
   const add = (value: unknown) => {
     const raw = typeof value === 'string' ? value.trim() : '';
@@ -221,12 +325,14 @@ const collectPipelineIdsForStream = (stream: any): string[] => {
   add(manifest?.pipeline_id);
   add(manifest?.active_pipeline_id);
   if (Array.isArray(manifest?.pipelines)) {
-    manifest.pipelines.forEach((entry: any) => {
-      add(entry?.pipeline_id ?? entry?.pipelineId ?? entry?.id);
+    manifest.pipelines.forEach((entry) => {
+      const binding = asRecord(entry);
+      add(binding?.pipeline_id ?? binding?.pipelineId ?? binding?.id);
     });
   }
-  if (manifest?.pipeline_layout && Array.isArray(manifest.pipeline_layout.slots)) {
-    manifest.pipeline_layout.slots.forEach((slot: any) => add(slot?.pipeline_id));
+  const pipelineLayout = asRecord(manifest?.pipeline_layout);
+  if (Array.isArray(pipelineLayout?.slots)) {
+    pipelineLayout.slots.forEach((slot) => add(asRecord(slot)?.pipeline_id));
   }
   return Array.from(ids);
 };
@@ -235,12 +341,12 @@ export async function fetchLocalizationPipelineSources(): Promise<LocalizationPi
   const baseSources = await fetchJson<LocalizationPipelineSource[]>(apiUrl('/localization/sources'));
   let streamSources: LocalizationPipelineSource[] = [];
   try {
-    const streams = await fetchJson<any[]>(apiUrl('/streams'));
+    const streams = await fetchJson<StreamInfo[]>(apiUrl('/streams'));
     const pipelineSummaries = await fetchJson<Array<{ id: string; name?: string | null }>>(apiUrl('/pipelines/graphs')).catch(() => []);
     const pipelineNameById = Object.fromEntries(
       (pipelineSummaries ?? []).map((entry) => [String(entry.id), String(entry.name ?? entry.id)])
     );
-    const pipelineGraphCache = new Map<string, any>();
+    const pipelineGraphCache = new Map<string, unknown>();
     for (const stream of streams) {
       const streamId = String(stream?.id ?? '').trim();
       if (!streamId) continue;
@@ -257,12 +363,13 @@ export async function fetchLocalizationPipelineSources(): Promise<LocalizationPi
         if (!pipelineId) continue;
         let graph = pipelineGraphCache.get(pipelineId);
         if (!graph) {
-          const binding = (stream?.manifest?.pipelines ?? []).find((entry: any) => String(entry?.pipeline_id ?? '').trim() === pipelineId);
-          graph = binding?.pipeline_graph ?? stream?.manifest?.pipeline_graph ?? null;
+          const bindings = Array.isArray(stream?.manifest?.pipelines) ? stream.manifest.pipelines : [];
+          const binding = bindings.find((entry) => String(asRecord(entry)?.pipeline_id ?? '').trim() === pipelineId);
+          graph = asRecord(binding)?.pipeline_graph ?? asRecord(stream?.manifest)?.pipeline_graph ?? null;
         }
         if (!graph) {
           try {
-            const doc = await fetchJson<{ graph: any }>(apiUrl(`/pipelines/graphs/${encodeURIComponent(pipelineId)}`));
+            const doc = await fetchJson<{ graph: unknown }>(apiUrl(`/pipelines/graphs/${encodeURIComponent(pipelineId)}`));
             graph = doc?.graph ?? null;
           } catch {
             graph = null;
@@ -312,7 +419,7 @@ export async function fetchPipelineOutputSample(
           `/localization/external/${encodeURIComponent(streamId.slice('external:'.length))}/outputs/${encodeURIComponent(outputKey)}`
         )
       : apiUrl(`/localization/streams/${encodeURIComponent(streamId)}/outputs/${encodeURIComponent(outputKey)}`);
-  const response = await fetch(url, {
+  const response = await apiFetchResponse(url, {
     method: 'GET',
     headers: {
       Accept: 'application/json'

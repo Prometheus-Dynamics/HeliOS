@@ -69,8 +69,8 @@ fn cv_aruco_detections_filter_area(detections: &Vec<ArucoDetection2D>, min_area:
         let mut sx = 0.0;
         let mut sy = 0.0;
         for p in &det.corners {
-            sx += p.x as f64;
-            sy += p.y as f64;
+            sx += p.x;
+            sy += p.y;
         }
         (sx / 4.0, sy / 4.0)
     }
@@ -80,10 +80,10 @@ fn cv_aruco_detections_filter_area(detections: &Vec<ArucoDetection2D>, min_area:
         for i in 0..4 {
             let a = corners[i];
             let b = corners[(i + 1) & 3];
-            let ax = a.x as f64;
-            let ay = a.y as f64;
-            let bx = b.x as f64;
-            let by = b.y as f64;
+            let ax = a.x;
+            let ay = a.y;
+            let bx = b.x;
+            let by = b.y;
             let cross = (bx - ax) * (py - ay) - (by - ay) * (px - ax);
             if cross.abs() <= 1e-9 {
                 continue;
@@ -151,7 +151,7 @@ fn cv_aruco_detections_filter_area(detections: &Vec<ArucoDetection2D>, min_area:
         }
     }
 
-    out = out.into_iter().zip(keep.into_iter()).filter_map(|(det, keep)| if keep { Some(det) } else { None }).collect();
+    out = out.into_iter().zip(keep).filter_map(|(det, keep)| if keep { Some(det) } else { None }).collect();
     Ok(out)
 }
 
@@ -396,15 +396,11 @@ fn cv_aruco_detections_filter(detections: &Vec<ArucoDetection2D>, mode: ArucoDet
     ),
     outputs(port(name = "detections", source = "ArucoDetections2D", ty = crate::daedalus_types::aruco_detections_2d()))
 )]
-fn cv_aruco_detections_order(detections: &Vec<ArucoDetection2D>, mode: String, crosshair_x: i64, crosshair_y: i64) -> Result<Vec<ArucoDetection2D>, NodeError> {
-    #[derive(Clone)]
-    struct Candidate {
-        det: ArucoDetection2D,
-        cx: f64,
-        cy: f64,
-        area: f64,
+fn cv_aruco_detections_order(detections: std::sync::Arc<Vec<ArucoDetection2D>>, mode: String, crosshair_x: i64, crosshair_y: i64) -> Result<Vec<ArucoDetection2D>, NodeError> {
+    if detections.is_empty() {
+        return Ok(Vec::new());
     }
-
+    let mut detections = std::sync::Arc::unwrap_or_clone(detections);
     fn cmp_f64(a: f64, b: f64) -> std::cmp::Ordering {
         if !a.is_finite() && !b.is_finite() {
             return std::cmp::Ordering::Equal;
@@ -439,71 +435,98 @@ fn cv_aruco_detections_order(detections: &Vec<ArucoDetection2D>, mode: String, c
     let mode = parse_order_mode(&mode);
 
     if detections.len() <= 1 || mode == ArucoDetectionsOrderMode::None {
-        return Ok(detections.clone());
-    }
-
-    let mut candidates: Vec<Candidate> = Vec::with_capacity(detections.len());
-    let mut invalid: Vec<ArucoDetection2D> = Vec::new();
-    for det in detections.iter().cloned() {
-        let (cx, cy) = detection_center(&det);
-        let area = detection_area(&det);
-        if !(cx.is_finite() && cy.is_finite() && area.is_finite()) {
-            invalid.push(det);
-            continue;
-        }
-        candidates.push(Candidate { det, cx, cy, area });
-    }
-
-    if candidates.len() <= 1 {
-        let mut out = candidates.into_iter().map(|c| c.det).collect::<Vec<_>>();
-        out.extend(invalid);
-        return Ok(out);
+        return Ok(detections);
     }
 
     let (center_x, center_y) = if mode == ArucoDetectionsOrderMode::CenterMost {
         let mut sx = 0.0;
         let mut sy = 0.0;
-        for c in &candidates {
-            sx += c.cx;
-            sy += c.cy;
+        let mut count = 0usize;
+        for det in &detections {
+            let (cx, cy) = detection_center(det);
+            let area = detection_area(det);
+            if cx.is_finite() && cy.is_finite() && area.is_finite() {
+                sx += cx;
+                sy += cy;
+                count += 1;
+            }
         }
-        let n = candidates.len() as f64;
+        if count == 0 {
+            return Ok(detections);
+        }
+        let n = count as f64;
         (sx / n, sy / n)
     } else {
         (crosshair_x as f64, crosshair_y as f64)
     };
 
-    candidates.sort_by(|a, b| {
+    detections.sort_by(|a, b| {
         use std::cmp::Ordering;
-        let ord = match mode {
-            ArucoDetectionsOrderMode::LargestToSmallest => cmp_f64(b.area, a.area),
-            ArucoDetectionsOrderMode::SmallestToLargest => cmp_f64(a.area, b.area),
-            ArucoDetectionsOrderMode::TopMost => cmp_f64(a.cy, b.cy).then_with(|| cmp_f64(a.cx, b.cx)),
-            ArucoDetectionsOrderMode::BottomMost => cmp_f64(b.cy, a.cy).then_with(|| cmp_f64(a.cx, b.cx)),
-            ArucoDetectionsOrderMode::LeftMost => cmp_f64(a.cx, b.cx).then_with(|| cmp_f64(a.cy, b.cy)),
-            ArucoDetectionsOrderMode::RightMost => cmp_f64(b.cx, a.cx).then_with(|| cmp_f64(a.cy, b.cy)),
-            ArucoDetectionsOrderMode::TopLeft => cmp_f64(a.cy, b.cy).then_with(|| cmp_f64(a.cx, b.cx)),
-            ArucoDetectionsOrderMode::TopRight => cmp_f64(a.cy, b.cy).then_with(|| cmp_f64(b.cx, a.cx)),
-            ArucoDetectionsOrderMode::BottomLeft => cmp_f64(b.cy, a.cy).then_with(|| cmp_f64(a.cx, b.cx)),
-            ArucoDetectionsOrderMode::BottomRight => cmp_f64(b.cy, a.cy).then_with(|| cmp_f64(b.cx, a.cx)),
-            ArucoDetectionsOrderMode::CenterMost | ArucoDetectionsOrderMode::Crosshair => {
-                let adx = a.cx - center_x;
-                let ady = a.cy - center_y;
-                let bdx = b.cx - center_x;
-                let bdy = b.cy - center_y;
-                let ad2 = adx * adx + ady * ady;
-                let bd2 = bdx * bdx + bdy * bdy;
-                cmp_f64(ad2, bd2).then_with(|| cmp_f64(b.area, a.area))
+        let a_center = detection_center(a);
+        let b_center = detection_center(b);
+        let a_area = detection_area(a);
+        let b_area = detection_area(b);
+        let a_valid = a_center.0.is_finite() && a_center.1.is_finite() && a_area.is_finite();
+        let b_valid = b_center.0.is_finite() && b_center.1.is_finite() && b_area.is_finite();
+
+        match (a_valid, b_valid) {
+            (true, true) => {
+                let ord = match mode {
+                    ArucoDetectionsOrderMode::LargestToSmallest => cmp_f64(b_area, a_area),
+                    ArucoDetectionsOrderMode::SmallestToLargest => cmp_f64(a_area, b_area),
+                    ArucoDetectionsOrderMode::TopMost => cmp_f64(a_center.1, b_center.1).then_with(|| cmp_f64(a_center.0, b_center.0)),
+                    ArucoDetectionsOrderMode::BottomMost => cmp_f64(b_center.1, a_center.1).then_with(|| cmp_f64(a_center.0, b_center.0)),
+                    ArucoDetectionsOrderMode::LeftMost => cmp_f64(a_center.0, b_center.0).then_with(|| cmp_f64(a_center.1, b_center.1)),
+                    ArucoDetectionsOrderMode::RightMost => cmp_f64(b_center.0, a_center.0).then_with(|| cmp_f64(a_center.1, b_center.1)),
+                    ArucoDetectionsOrderMode::TopLeft => cmp_f64(a_center.1, b_center.1).then_with(|| cmp_f64(a_center.0, b_center.0)),
+                    ArucoDetectionsOrderMode::TopRight => cmp_f64(a_center.1, b_center.1).then_with(|| cmp_f64(b_center.0, a_center.0)),
+                    ArucoDetectionsOrderMode::BottomLeft => cmp_f64(b_center.1, a_center.1).then_with(|| cmp_f64(a_center.0, b_center.0)),
+                    ArucoDetectionsOrderMode::BottomRight => cmp_f64(b_center.1, a_center.1).then_with(|| cmp_f64(b_center.0, a_center.0)),
+                    ArucoDetectionsOrderMode::CenterMost | ArucoDetectionsOrderMode::Crosshair => {
+                        let adx = a_center.0 - center_x;
+                        let ady = a_center.1 - center_y;
+                        let bdx = b_center.0 - center_x;
+                        let bdy = b_center.1 - center_y;
+                        let ad2 = adx * adx + ady * ady;
+                        let bd2 = bdx * bdx + bdy * bdy;
+                        cmp_f64(ad2, bd2).then_with(|| cmp_f64(b_area, a_area))
+                    }
+                    ArucoDetectionsOrderMode::None => Ordering::Equal,
+                };
+                if ord == Ordering::Equal { a.id.cmp(&b.id) } else { ord }
             }
-            ArucoDetectionsOrderMode::None => Ordering::Equal,
-        };
-        if ord == Ordering::Equal { a.det.id.cmp(&b.det.id) } else { ord }
+            (true, false) => Ordering::Less,
+            (false, true) => Ordering::Greater,
+            (false, false) => Ordering::Equal,
+        }
     });
 
-    let mut out = candidates.into_iter().map(|c| c.det).collect::<Vec<_>>();
-    out.extend(invalid);
-    Ok(out)
+    Ok(detections)
 }
+
+#[derive(Clone, Debug, NodeConfig)]
+struct ArucoCrosshairTargetConfig {
+    #[port(default = 0i64, meta(ui_min = 0, ui_max = 8192, ui_step = 1))]
+    crosshair_x: i64,
+    #[port(default = 0i64, meta(ui_min = 0, ui_max = 8192, ui_step = 1))]
+    crosshair_y: i64,
+    #[port(default = 0i64, meta(ui_min = 0, ui_max = 8192, ui_step = 1))]
+    frame_width: i64,
+    #[port(default = 0i64, meta(ui_min = 0, ui_max = 8192, ui_step = 1))]
+    frame_height: i64,
+    #[port(default = false)]
+    require_crosshair_inside: bool,
+    #[port(default = true)]
+    fallback_to_nearest: bool,
+    #[port(default = 0.0f64, meta(ui_min = 0.0, ui_max = 4096.0, ui_step = 1.0))]
+    max_distance_px: f64,
+    #[port(default = 0.0f64, meta(ui_min = 0.0, ui_max = 180.0, ui_step = 0.1))]
+    hfov_deg: f64,
+    #[port(default = 0.0f64, meta(ui_min = 0.0, ui_max = 180.0, ui_step = 0.1))]
+    vfov_deg: f64,
+}
+
+type ArucoCrosshairTargetOutput = (Vec<ArucoDetection2D>, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64);
 
 #[node(
     id = "detections_crosshair_target",
@@ -511,15 +534,7 @@ fn cv_aruco_detections_order(detections: &Vec<ArucoDetection2D>, mode: String, c
     description = "Returns the nearest detection to (crosshair_x, crosshair_y), with optional in-box gating and Limelight-style target metrics.",
     inputs(
         port(name = "detections", source = "ArucoDetections2D", ty = crate::daedalus_types::aruco_detections_2d()),
-        port(name = "crosshair_x", default = 0i64, meta(ui_min = 0, ui_max = 8192, ui_step = 1)),
-        port(name = "crosshair_y", default = 0i64, meta(ui_min = 0, ui_max = 8192, ui_step = 1)),
-        port(name = "frame_width", default = 0i64, meta(ui_min = 0, ui_max = 8192, ui_step = 1)),
-        port(name = "frame_height", default = 0i64, meta(ui_min = 0, ui_max = 8192, ui_step = 1)),
-        port(name = "require_crosshair_inside", default = false),
-        port(name = "fallback_to_nearest", default = true),
-        port(name = "max_distance_px", default = 0.0f64, meta(ui_min = 0.0, ui_max = 4096.0, ui_step = 1.0)),
-        port(name = "hfov_deg", default = 0.0f64, meta(ui_min = 0.0, ui_max = 180.0, ui_step = 0.1)),
-        port(name = "vfov_deg", default = 0.0f64, meta(ui_min = 0.0, ui_max = 180.0, ui_step = 0.1))
+        config = ArucoCrosshairTargetConfig
     ),
     outputs(
         port(name = "detections", source = "ArucoDetections2D", ty = crate::daedalus_types::aruco_detections_2d()),
@@ -537,18 +552,7 @@ fn cv_aruco_detections_order(detections: &Vec<ArucoDetection2D>, mode: String, c
         "tlong"
     )
 )]
-fn cv_aruco_detections_crosshair_target(
-    detections: &Vec<ArucoDetection2D>,
-    crosshair_x: i64,
-    crosshair_y: i64,
-    frame_width: i64,
-    frame_height: i64,
-    require_crosshair_inside: bool,
-    fallback_to_nearest: bool,
-    max_distance_px: f64,
-    hfov_deg: f64,
-    vfov_deg: f64,
-) -> Result<(Vec<ArucoDetection2D>, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64), NodeError> {
+fn cv_aruco_detections_crosshair_target(detections: &Vec<ArucoDetection2D>, cfg: ArucoCrosshairTargetConfig) -> Result<ArucoCrosshairTargetOutput, NodeError> {
     #[derive(Clone, Copy)]
     struct Candidate<'a> {
         det: &'a ArucoDetection2D,
@@ -563,8 +567,8 @@ fn cv_aruco_detections_crosshair_target(
         contains_crosshair: bool,
     }
 
-    let chx = crosshair_x as f64;
-    let chy = crosshair_y as f64;
+    let chx = cfg.crosshair_x as f64;
+    let chy = cfg.crosshair_y as f64;
     let mut candidates: Vec<Candidate<'_>> = Vec::with_capacity(detections.len());
     for det in detections {
         let (cx, cy) = detection_center(det);
@@ -589,16 +593,16 @@ fn cv_aruco_detections_crosshair_target(
         return Ok((Vec::new(), 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0));
     }
 
-    let mut active: Vec<Candidate<'_>> = if require_crosshair_inside { candidates.iter().copied().filter(|candidate| candidate.contains_crosshair).collect() } else { candidates.clone() };
+    let mut active: Vec<Candidate<'_>> = if cfg.require_crosshair_inside { candidates.iter().copied().filter(|candidate| candidate.contains_crosshair).collect() } else { candidates.clone() };
     if active.is_empty() {
-        if require_crosshair_inside && fallback_to_nearest {
+        if cfg.require_crosshair_inside && cfg.fallback_to_nearest {
             active = candidates;
         } else {
             return Ok((Vec::new(), 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0));
         }
     }
 
-    let max_distance_px = if max_distance_px.is_finite() { max_distance_px.max(0.0) } else { 0.0 };
+    let max_distance_px = if cfg.max_distance_px.is_finite() { cfg.max_distance_px.max(0.0) } else { 0.0 };
     if max_distance_px > 0.0 {
         let max_d2 = max_distance_px * max_distance_px;
         active.retain(|candidate| candidate.dist2 <= max_d2);
@@ -617,14 +621,14 @@ fn cv_aruco_detections_crosshair_target(
         }
     }
 
-    let fw = frame_width.max(0) as f64;
-    let fh = frame_height.max(0) as f64;
+    let fw = cfg.frame_width.max(0) as f64;
+    let fh = cfg.frame_height.max(0) as f64;
     let tx_base = best.cx - chx;
     let ty_base = chy - best.cy;
     let tx_norm = if fw > 1.0 { tx_base / (fw * 0.5) } else { tx_base };
     let ty_norm = if fh > 1.0 { ty_base / (fh * 0.5) } else { ty_base };
-    let tx = if fw > 1.0 && hfov_deg > 0.0 { tx_norm * (hfov_deg * 0.5) } else { tx_norm };
-    let ty = if fh > 1.0 && vfov_deg > 0.0 { ty_norm * (vfov_deg * 0.5) } else { ty_norm };
+    let tx = if fw > 1.0 && cfg.hfov_deg > 0.0 { tx_norm * (cfg.hfov_deg * 0.5) } else { tx_norm };
+    let ty = if fh > 1.0 && cfg.vfov_deg > 0.0 { ty_norm * (cfg.vfov_deg * 0.5) } else { ty_norm };
     let ta = if fw > 1.0 && fh > 1.0 { (best.area / (fw * fh)) * 100.0 } else { best.area };
     let thor = (best.max_x - best.min_x).abs().max(1.0);
     let tvert = (best.max_y - best.min_y).abs().max(1.0);

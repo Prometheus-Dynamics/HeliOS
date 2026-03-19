@@ -88,7 +88,7 @@ pub struct BenchFormatsResponse {
 
 pub async fn bench_formats(State(state): State<AppState>, Json(req): Json<BenchFormatsRequest>) -> axum::response::Response {
     let (keys, backend) = if req.device_keys.is_empty() || req.modes.is_empty() {
-        let devices = discover_devices().await;
+        let devices = discover_devices(&state).await;
         let Some((device, backend)) = find_matching_backend(&devices, req.backend, &req.handle, &req.device_keys) else {
             return (StatusCode::NOT_FOUND, Json(BenchFormatsResponse { formats: vec![], warnings: vec!["device/backend not found".into()] })).into_response();
         };

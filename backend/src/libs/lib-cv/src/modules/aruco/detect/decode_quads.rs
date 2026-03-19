@@ -1,6 +1,6 @@
 use super::*;
 
-const DECODE_PAR_MIN_QUADS: usize = 96;
+const DECODE_PAR_MIN_QUADS: usize = 512;
 
 /// Decode a collection of quads using the supplied ArUco tag family.
 pub fn decode_quads(frame: &DynamicImage, quads: &[[Point<f32>; 4]], sample_scale: u32, family: &ArucoTagFamily) -> Vec<ArucoDetection2D> {
@@ -15,6 +15,18 @@ pub fn decode_quads_with_config_no_bits(frame: &DynamicImage, quads: &[[Point<f3
     decode_quads_with_config_bits(frame, quads, sample_scale, family, config, false)
 }
 
+pub fn decode_quads_gray(gray: &GrayImage, quads: &[[Point<f32>; 4]], sample_scale: u32, family: &ArucoTagFamily) -> Vec<ArucoDetection2D> {
+    decode_quads_with_config_gray(gray, quads, sample_scale, family, &ArucoTagDecodeConfig::default())
+}
+
+pub fn decode_quads_with_config_gray(gray: &GrayImage, quads: &[[Point<f32>; 4]], sample_scale: u32, family: &ArucoTagFamily, config: &ArucoTagDecodeConfig) -> Vec<ArucoDetection2D> {
+    decode_quads_with_config_bits_gray(gray, quads, sample_scale, family, config, true)
+}
+
+pub fn decode_quads_with_config_no_bits_gray(gray: &GrayImage, quads: &[[Point<f32>; 4]], sample_scale: u32, family: &ArucoTagFamily, config: &ArucoTagDecodeConfig) -> Vec<ArucoDetection2D> {
+    decode_quads_with_config_bits_gray(gray, quads, sample_scale, family, config, false)
+}
+
 fn decode_quads_with_config_bits(
     frame: &DynamicImage,
     quads: &[[Point<f32>; 4]],
@@ -26,34 +38,58 @@ fn decode_quads_with_config_bits(
     if quads.is_empty() {
         return Vec::new();
     }
-    with_luma8_frame(frame, |gray| {
-        let start = std::time::Instant::now();
-        // On CM-class devices, rayon setup/merge overhead is often larger than decode work for
-        // small/medium candidate counts. Keep serial decode unless we have a large quad set.
-        let decoded: Vec<ArucoDetectionF32> = if quads.len() < DECODE_PAR_MIN_QUADS {
-            quads.iter().filter_map(|quad| decode_quad(gray, quad, sample_scale, family, config)).collect()
-        } else {
-            quads.par_iter().filter_map(|quad| decode_quad(gray, quad, sample_scale, family, config)).collect()
-        };
-        if tracing::enabled!(Level::TRACE) {
-            let elapsed = start.elapsed();
-            trace!(
-                target: "cv::aruco::decode",
-                quads = quads.len(),
-                decoded = decoded.len(),
-                ms = (elapsed.as_secs_f64() * 1000.0),
-                us_per_quad = (elapsed.as_secs_f64() * 1_000_000.0) / (quads.len().max(1) as f64),
-                "decode_quads"
-            );
+    with_luma8_frame(frame, |gray| decode_quads_with_config_bits_gray(gray, quads, sample_scale, family, config, include_bits))
+}
+
+fn decode_quads_with_config_bits_gray(
+    gray: &GrayImage,
+    quads: &[[Point<f32>; 4]],
+    sample_scale: u32,
+    family: &ArucoTagFamily,
+    config: &ArucoTagDecodeConfig,
+    include_bits: bool,
+) -> Vec<ArucoDetection2D> {
+    if quads.is_empty() {
+        return Vec::new();
+    }
+
+    let start = std::time::Instant::now();
+    // On CM-class devices, rayon setup/merge overhead is often larger than decode work for
+    // small/medium candidate counts. Keep serial decode unless we have a large quad set.
+    let detections: Vec<ArucoDetection2D> = if quads.len() < DECODE_PAR_MIN_QUADS {
+        let mut out = Vec::with_capacity(quads.len().min(256));
+        for quad in quads {
+            let Some(marker) = decode_quad(gray, quad, sample_scale, family, config) else {
+                continue;
+            };
+            let bits = if include_bits { family.bit_grid(marker.id as usize) } else { None };
+            if let Some(detection) = marker_f32_to_detection_2d(marker, bits) {
+                out.push(detection);
+            }
         }
-        decoded
-            .into_iter()
-            .filter_map(|m| {
-                let bits = if include_bits { family.bit_grid(m.id as usize) } else { None };
-                marker_f32_to_detection_2d(m, bits)
+        out
+    } else {
+        quads
+            .par_iter()
+            .filter_map(|quad| {
+                let marker = decode_quad(gray, quad, sample_scale, family, config)?;
+                let bits = if include_bits { family.bit_grid(marker.id as usize) } else { None };
+                marker_f32_to_detection_2d(marker, bits)
             })
             .collect()
-    })
+    };
+    if tracing::enabled!(Level::TRACE) {
+        let elapsed = start.elapsed();
+        trace!(
+            target: "cv::aruco::decode",
+            quads = quads.len(),
+            decoded = detections.len(),
+            ms = (elapsed.as_secs_f64() * 1000.0),
+            us_per_quad = (elapsed.as_secs_f64() * 1_000_000.0) / (quads.len().max(1) as f64),
+            "decode_quads"
+        );
+    }
+    detections
 }
 
 #[derive(Debug, Default, Clone, Copy)]

@@ -1,4 +1,4 @@
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use rand::{RngExt, SeedableRng, rng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
 
 use crate::filters::{Filter, FilterConfigError};
@@ -9,7 +9,6 @@ struct Particle {
     weight: f32,
 }
 
-#[derive(Clone)]
 pub struct ParticleFilter<const N: usize> {
     particles: [Particle; N],
     rng: StdRng,
@@ -18,7 +17,8 @@ pub struct ParticleFilter<const N: usize> {
 impl<const N: usize> ParticleFilter<N> {
     pub fn new(initial: [f32; 3]) -> Self {
         // Seed a reproducible StdRng from the OS RNG once
-        let rng = StdRng::from_os_rng();
+        let mut os_rng = rng();
+        let rng = StdRng::from_rng(&mut os_rng);
         Self { particles: core::array::from_fn(|_| Particle { pose: initial, weight: 1.0 / N as f32 }), rng }
     }
 

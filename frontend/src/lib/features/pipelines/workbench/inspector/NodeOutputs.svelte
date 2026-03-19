@@ -243,7 +243,7 @@
           onchange={(event) => (relinkTarget = (event.currentTarget as HTMLSelectElement).value || null)}
         >
           <option value="">Select pipeline…</option>
-          {#each relinkOptions as option}
+          {#each relinkOptions as option (option.id)}
             <option value={option.id}>{option.label}</option>
           {/each}
         </select>

@@ -1,10 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { toaster } from '$lib';
+  import { toaster } from '$lib/toaster';
   import PeersDiscoverModal from '$lib/features/peers/page/PeersDiscoverModal.svelte';
   import PeersSidebar from '$lib/features/peers/page/PeersSidebar.svelte';
   import PeersListPanel from '$lib/features/peers/page/PeersListPanel.svelte';
-  import { discoverPhotonvisionStreams, probePeer, registerPeer } from '$lib/api/peers';
+  import { discoverPhotonvisionStreams, probePeer, registerPeer, syncPeerPipelines, testPeerEndpointJson } from '$lib/api/peers';
   import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
   import type {
     DiscoveredStream,
@@ -14,7 +14,7 @@
   } from '$lib/types/peer';
   import { faCamera, faWrench } from '@fortawesome/free-solid-svg-icons';
 
-  import type { CustomMappingForm, CustomMappingPreview, PeerFilterDefinition, PeerFilterOption } from '$lib/features/peers/types';
+  import type { CustomMappingPreview, PeerFilterDefinition, PeerFilterOption } from '$lib/features/peers/types';
   import { createPeersStore } from '$lib/features/peers/store';
   import {
     blankMappingForm,
@@ -48,11 +48,11 @@
   import type { PageData } from './$types';
 
   const { data } = $props<{ data: PageData }>();
-  const peersStore = createPeersStore(data.payload);
-  const peersPayload = peersStore.payload;
+  const readPayload = () => data.payload;
+  const peersStore = createPeersStore(readPayload());
   const pending = peersStore.pending;
   const hasLoadedOnce = peersStore.hasLoadedOnce;
-  let loadError = $state<string | null>(data.payload.errorMessage ?? null);
+  let loadError = $state<string | null>(readPayload().errorMessage ?? null);
   let customPending = $state({ customSave: false, customTest: false, probe: false });
   let customForm = $state({
     peerId: null as string | null,
@@ -91,6 +91,7 @@
     preview: null,
     url: null,
   });
+  let peerSyncPending = $state<Record<string, boolean>>({});
 
   const peers = peersStore.peers;
   const quickSetupEnabled = $derived(isQuickSetupKind(customForm.integrationKind));
@@ -206,6 +207,39 @@
       }
     } catch (error) {
       reportError({ title: 'Remove failed', error });
+    }
+  }
+
+  function isSyncingPeer(peerId: string): boolean {
+    return Boolean(peerSyncPending[peerId]);
+  }
+
+  function setSyncingPeer(peerId: string, value: boolean): void {
+    peerSyncPending = { ...peerSyncPending, [peerId]: value };
+  }
+
+  async function handleSyncPeerPipelines(peer: PeerSummary): Promise<void> {
+    if (!peer?.id || isSyncingPeer(peer.id)) return;
+    setSyncingPeer(peer.id, true);
+    try {
+      const response = await syncPeerPipelines(peer.id, { force: true }, 10_000);
+      const syncedCount = response.synced.length;
+      const errorCount = response.errors.length;
+      if (errorCount > 0) {
+        toaster.warning({
+          title: 'Peer sync completed with warnings',
+          description: `${displayName(peer)} · ${syncedCount} synced · ${errorCount} warning(s)`
+        });
+      } else {
+        toaster.success({
+          title: 'Peer pipelines synced',
+          description: `${displayName(peer)} · ${syncedCount} pipeline(s)`
+        });
+      }
+    } catch (error) {
+      reportError({ title: 'Pipeline sync failed', error });
+    } finally {
+      setSyncingPeer(peer.id, false);
     }
   }
 
@@ -437,12 +471,7 @@
     customTest = { ...customTest, running: true, error: null, preview: null, response: null };
     try {
       const target = buildCustomUrl(base, endpoint);
-      const response = await fetch(target, { headers: { accept: 'application/json' } });
-      if (!response.ok) {
-        const detail = await response.text().catch(() => '');
-        throw new Error(detail || `Request failed (${response.status})`);
-      }
-      const payload = await response.json();
+      const payload = await testPeerEndpointJson(target);
       const preview = previewCustomMapping(payload, mappingFromForm(customForm.mapping));
       customTest = { running: false, error: null, response: payload, preview, url: target };
     } catch (error) {
@@ -455,10 +484,6 @@
 
   function upsertPeer(peer: PeerSummary): void {
     peersStore.upsertPeer(peer);
-  }
-
-  function removePeerById(peerId: string): void {
-    peersStore.removePeerLocal(peerId);
   }
 
   function openManagementUi(peer: PeerSummary): void {
@@ -534,11 +559,13 @@
         {searchQuery}
         {peerProbeCache}
         {customPending}
+        onSyncPipelines={(peer) => handleSyncPeerPipelines(peer)}
         onOpenMapping={(peer) => openDiscoverModal('manual', peer)}
         onProbePeer={(peer) => probeExistingPeer(peer)}
         onOpenManagement={(peer) => openManagementUi(peer)}
         onRemove={(peerId) => handleRemove(peerId)}
         isRemoving={(peerId) => isRemoving(peerId)}
+        isSyncingPipelines={(peerId) => isSyncingPeer(peerId)}
       />
     </div>
   </div>

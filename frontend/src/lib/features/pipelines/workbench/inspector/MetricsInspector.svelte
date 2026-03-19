@@ -52,7 +52,7 @@
     return `${(value / (1024 * 1024)).toFixed(1)} MB`;
   };
 
-  const pipeline = context.pipeline;
+  const pipeline = $derived(context.pipeline);
   const METRICS_ROW_HEIGHT = 28;
   const METRICS_OVERSCAN = 8;
   let metricsScroll = $state<Record<string, number>>({});
@@ -185,7 +185,7 @@
                       >
                         <div class="relative" style={`height: ${totalHeight}px;`}>
                           <div class="absolute left-0 right-0" style={`transform: translateY(${offset}px);`}>
-                            {#each slice as [nodeId, metrics]}
+                            {#each slice as [nodeId, metrics] (nodeId)}
                               {@const perf = metrics?.metrics}
                               {@const warning = metrics?.lastError ?? null}
                               {@const warningAt = metrics?.lastErrorAt ?? null}

@@ -12,7 +12,15 @@
     helpers: RegistryHelpers;
   } = $props();
 
-  const { search, tag, category, hasActiveFilters, loading, sort, view, availableTags, availableCategories } = stores;
+  const search = $derived.by(() => stores.search);
+  const tag = $derived.by(() => stores.tag);
+  const category = $derived.by(() => stores.category);
+  const hasActiveFilters = $derived.by(() => stores.hasActiveFilters);
+  const loading = $derived.by(() => stores.loading);
+  const sort = $derived.by(() => stores.sort);
+  const view = $derived.by(() => stores.view);
+  const availableTags = $derived.by(() => stores.availableTags);
+  const availableCategories = $derived.by(() => stores.availableCategories);
 
   const searchTerm = $derived(() => $search.trim());
 
@@ -68,7 +76,7 @@
       <span class="text-micro-tight uppercase tracking-[0.3em] text-surface-500">Tag</span>
       <select class="input text-sm" onchange={handleTagChange} value={$tag ?? ''}>
         <option value="">Any tag</option>
-        {#each $availableTags as option}
+        {#each $availableTags as option (option)}
           <option value={option} selected={option === $tag}>{option}</option>
         {/each}
       </select>
@@ -77,7 +85,7 @@
       <span class="text-micro-tight uppercase tracking-[0.3em] text-surface-500">Category</span>
       <select class="input text-sm" onchange={handleCategoryChange} value={$category ?? ''}>
         <option value="">Any category</option>
-        {#each $availableCategories as option}
+        {#each $availableCategories as option (option)}
           <option value={option} selected={option === $category}>{option}</option>
         {/each}
       </select>

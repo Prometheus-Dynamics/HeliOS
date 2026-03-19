@@ -10,6 +10,7 @@
     direction: 'input' | 'output';
     port: PortRenderInfo;
     handlers: PortInteractionHandlers;
+    interactive?: boolean;
     resolvePortStateClass: (direction: 'input' | 'output', type: PipelineDataType) => string;
     pixelColorInputAction: (node: HTMLInputElement, handleId: string) => { destroy: () => void };
   }>();
@@ -17,6 +18,7 @@
   const direction = $derived(props.direction);
   const port = $derived(props.port);
   const handlers = $derived(props.handlers);
+  const interactive = $derived(props.interactive ?? true);
   const resolvePortStateClass = $derived(props.resolvePortStateClass);
   const pixelColorInputAction = $derived(props.pixelColorInputAction);
   const isInput = $derived(direction === 'input');
@@ -94,7 +96,7 @@
 
   <div class={`flex flex-col py-1 ${isInput ? '' : 'items-end'}`}>
     <PortLabel {direction} {port} />
-    <PortValueEditor {direction} {port} {handlers} {pixelColorInputAction} />
+    <PortValueEditor {direction} {port} {handlers} {interactive} {pixelColorInputAction} />
     <PortStatus {direction} {port} />
   </div>
 

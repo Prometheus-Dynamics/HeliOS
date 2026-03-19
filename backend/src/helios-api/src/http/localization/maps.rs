@@ -1,23 +1,31 @@
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, Multipart, Path},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, post},
 };
 use serde::Deserialize;
 use serde_json::Value;
+use std::collections::{BTreeSet, HashSet};
 use tokio::fs;
 use uuid::Uuid;
 
 use super::super::AppState;
 use super::super::error::{ApiError, ApiResult};
 use super::super::media::{MediaMetadata, write_media_metadata};
+use super::super::upload_integrity;
+use super::super::validation::validation_error_response;
 use super::super::{json_store, storage};
+use super::validation::validate_limelight_fmap_payload;
 use helios_engine::localization::maps::{FieldMapDocument, FieldMapMarker, FieldMapOverlay, FieldMapSource, FieldMapSummary, FieldQuaternion, aruco_bits_for_family, hydrate_map_document};
+use tracing::{info, warn};
+
+const DEFAULT_MEDIA_SEED_DIR: &str = "/usr/share/helios/media";
+const MEDIA_SEED_DIR_ENV: &str = "HELIOS_API_MEDIA_SEED_DIR";
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/", get(list_maps)).route("/:id", get(fetch_map)).route("/upload", post(upload_limelight_fmap)).route_layer(DefaultBodyLimit::disable())
+    Router::new().route("/", get(list_maps)).route("/{id}", get(fetch_map)).route("/upload", post(upload_limelight_fmap)).route_layer(DefaultBodyLimit::disable())
 }
 
 pub(crate) async fn load_map_document(id: &str) -> ApiResult<FieldMapDocument> {
@@ -25,6 +33,340 @@ pub(crate) async fn load_map_document(id: &str) -> ApiResult<FieldMapDocument> {
     hydrate_map_document(&mut doc);
     maybe_backfill_overlay_from_media(id, &mut doc).await;
     Ok(doc)
+}
+
+pub(crate) async fn seed_bundled_field_maps() {
+    let seed_dir = std::env::var(MEDIA_SEED_DIR_ENV).ok().map(|value| value.trim().to_string()).filter(|value| !value.is_empty()).unwrap_or_else(|| DEFAULT_MEDIA_SEED_DIR.to_string());
+
+    let mut seed_entries = match fs::read_dir(&seed_dir).await {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return,
+        Err(err) => {
+            warn!(path = %seed_dir, error = %err, "failed to read field-map seed directory");
+            return;
+        }
+    };
+
+    let media_dir = match storage::ensure_subdir_async("media").await {
+        Ok(dir) => dir,
+        Err(err) => {
+            warn!(error = %err, "failed to prepare media directory while seeding field maps");
+            return;
+        }
+    };
+    let map_dir = match storage::ensure_subdir_async("localization/maps").await {
+        Ok(dir) => dir,
+        Err(err) => {
+            warn!(error = %err, "failed to prepare localization map directory while seeding field maps");
+            return;
+        }
+    };
+
+    let mut existing_sources = load_existing_map_source_filenames(&map_dir).await;
+    let mut seeded_maps = 0usize;
+    let mut copied_media = 0usize;
+    let mut skipped_invalid = 0usize;
+
+    loop {
+        let entry = match seed_entries.next_entry().await {
+            Ok(Some(entry)) => entry,
+            Ok(None) => break,
+            Err(err) => {
+                warn!(path = %seed_dir, error = %err, "failed while scanning field-map seed directory");
+                break;
+            }
+        };
+        let path = entry.path();
+        let is_fmap = path.extension().and_then(|ext| ext.to_str()).map(|ext| ext.eq_ignore_ascii_case("fmap")).unwrap_or(false);
+        if !is_fmap {
+            continue;
+        }
+
+        let raw_filename = entry.file_name().to_string_lossy().to_string();
+        let Some(filename) = storage::sanitize_name(&raw_filename) else {
+            warn!(raw_filename, "skipping seeded field map with invalid file name");
+            continue;
+        };
+
+        let bytes = match fs::read(&path).await {
+            Ok(bytes) if !bytes.is_empty() => bytes,
+            Ok(_) => {
+                warn!(filename, "skipping empty seeded field map");
+                skipped_invalid = skipped_invalid.saturating_add(1);
+                continue;
+            }
+            Err(err) => {
+                warn!(filename, path = %path.display(), error = %err, "failed to read seeded field map");
+                skipped_invalid = skipped_invalid.saturating_add(1);
+                continue;
+            }
+        };
+
+        let raw: Value = match serde_json::from_slice(&bytes) {
+            Ok(value) => value,
+            Err(err) => {
+                warn!(filename, error = %err, "invalid seeded .fmap json");
+                skipped_invalid = skipped_invalid.saturating_add(1);
+                continue;
+            }
+        };
+        let semantic_validation = validate_limelight_fmap_payload(&raw);
+        let map_warnings = match semantic_validation {
+            Ok(warnings) => warnings,
+            Err(err) => {
+                warn!(
+                    filename,
+                    issue_count = err.issues.len(),
+                    warning_count = err.warnings.len(),
+                    issues = ?err.issues,
+                    warnings = ?err.warnings,
+                    "seeded field map failed semantic validation"
+                );
+                skipped_invalid = skipped_invalid.saturating_add(1);
+                continue;
+            }
+        };
+        if !map_warnings.is_empty() {
+            info!(
+                filename,
+                warning_count = map_warnings.len(),
+                warnings = ?map_warnings,
+                "seeded field map required semantic sanitization"
+            );
+        }
+
+        let fmap: LimelightFmap = match serde_json::from_value(raw.clone()) {
+            Ok(value) => value,
+            Err(err) => {
+                warn!(filename, error = %err, "seeded .fmap shape is invalid");
+                skipped_invalid = skipped_invalid.saturating_add(1);
+                continue;
+            }
+        };
+
+        let media_path = media_dir.join(&filename);
+        let should_copy = match fs::metadata(&media_path).await {
+            Ok(meta) => meta.len() == 0,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => true,
+            Err(err) => {
+                warn!(filename, path = %media_path.display(), error = %err, "failed to inspect seeded media destination");
+                true
+            }
+        };
+        if should_copy {
+            if let Err(err) = fs::write(&media_path, &bytes).await {
+                warn!(filename, path = %media_path.display(), error = %err, "failed to store seeded field map in media library");
+                continue;
+            }
+            copied_media = copied_media.saturating_add(1);
+        }
+
+        let map_name = derive_map_name(&filename);
+        if let Err(err) = ensure_field_map_media_metadata(&filename, &map_name, &filename).await {
+            warn!(filename, error = %err, "failed to register seeded field map media metadata");
+        }
+
+        if existing_sources.contains(filename.as_str()) {
+            continue;
+        }
+
+        let map_id = seeded_map_id_for_filename(&filename);
+        let overlay = extract_overlay(&raw);
+        let doc = match convert_limelight_fmap(&map_id, &map_name, &filename, fmap, overlay) {
+            Ok(doc) => doc,
+            Err(err) => {
+                warn!(filename, error = %err, "failed to convert seeded field map");
+                skipped_invalid = skipped_invalid.saturating_add(1);
+                continue;
+            }
+        };
+
+        let map_path = map_dir.join(format!("{map_id}.json"));
+        if let Err(err) = json_store::write_json(map_path, &doc).await {
+            warn!(filename, error = %err, "failed to persist seeded field map document");
+            continue;
+        }
+        existing_sources.insert(filename);
+        seeded_maps = seeded_maps.saturating_add(1);
+    }
+
+    if seeded_maps > 0 || copied_media > 0 || skipped_invalid > 0 {
+        info!(seed_dir = %seed_dir, seeded_maps, copied_media, skipped_invalid, "field-map startup seed pass completed");
+    }
+
+    match bootstrap_maps_from_media_library(&mut existing_sources).await {
+        Ok(registered) if registered > 0 => info!(registered, "registered .fmap assets from media library"),
+        Ok(_) => {}
+        Err(err) => warn!(error = %err, "failed to register media-library .fmap assets"),
+    }
+}
+
+async fn load_existing_map_source_filenames(map_dir: &std::path::Path) -> HashSet<String> {
+    let mut sources = HashSet::new();
+    let mut reader = match fs::read_dir(map_dir).await {
+        Ok(reader) => reader,
+        Err(err) => {
+            warn!(path = %map_dir.display(), error = %err, "failed to scan map directory for seeded source matching");
+            return sources;
+        }
+    };
+
+    loop {
+        let entry = match reader.next_entry().await {
+            Ok(Some(entry)) => entry,
+            Ok(None) => break,
+            Err(err) => {
+                warn!(path = %map_dir.display(), error = %err, "failed while reading map directory entry");
+                break;
+            }
+        };
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let bytes = match fs::read(&path).await {
+            Ok(bytes) => bytes,
+            Err(_) => continue,
+        };
+        let doc: FieldMapDocument = match serde_json::from_slice(&bytes) {
+            Ok(doc) => doc,
+            Err(_) => continue,
+        };
+        if let FieldMapSource::LimelightFmap { original_file_name: Some(file), .. } = doc.source
+            && let Some(name) = storage::sanitize_name(&file)
+        {
+            sources.insert(name);
+        }
+    }
+
+    sources
+}
+
+fn seeded_map_id_for_filename(filename: &str) -> String {
+    Uuid::new_v5(&Uuid::NAMESPACE_URL, format!("helios:seeded-field-map:{filename}").as_bytes()).to_string()
+}
+
+async fn bootstrap_maps_from_media_library(existing_sources: &mut HashSet<String>) -> ApiResult<usize> {
+    let media_dir = storage::ensure_subdir_async("media").await.map_err(|err| ApiError::internal(format!("failed to open media storage: {err}")))?;
+    let mut entries = fs::read_dir(&media_dir).await.map_err(|err| ApiError::internal(format!("failed to list media storage: {err}")))?;
+    let mut registered = 0usize;
+
+    while let Some(entry) = entries.next_entry().await.map_err(|err| ApiError::internal(format!("failed to scan media storage: {err}")))? {
+        let is_file = entry.file_type().await.map(|ty| ty.is_file()).unwrap_or(false);
+        if !is_file {
+            continue;
+        }
+        let raw_name = entry.file_name().to_string_lossy().to_string();
+        if !raw_name.to_ascii_lowercase().ends_with(".fmap") {
+            continue;
+        }
+        let Some(media_name) = storage::sanitize_name(&raw_name) else {
+            continue;
+        };
+        let bytes = match fs::read(entry.path()).await {
+            Ok(bytes) if !bytes.is_empty() => bytes,
+            _ => continue,
+        };
+        let already_registered = existing_sources.contains(media_name.as_str());
+        if ensure_map_registered_from_media_file(&media_name, &bytes).await.is_ok() {
+            if !already_registered {
+                registered = registered.saturating_add(1);
+            }
+            existing_sources.insert(media_name);
+        }
+    }
+
+    Ok(registered)
+}
+
+async fn ensure_map_registered_from_media_file(media_name: &str, bytes: &[u8]) -> ApiResult<String> {
+    let raw: Value = serde_json::from_slice(bytes).map_err(|err| ApiError::bad_request(format!("invalid .fmap json: {err}")))?;
+    let semantic_validation = validate_limelight_fmap_payload(&raw).map_err(|err| {
+        let detail = err.issues.first().map(|issue| issue.message.clone()).unwrap_or_else(|| "semantic map validation failed".to_string());
+        ApiError::bad_request(format!("invalid .fmap payload: {detail}"))
+    })?;
+    if !semantic_validation.is_empty() {
+        info!(
+            media_name,
+            warning_count = semantic_validation.len(),
+            warnings = ?semantic_validation,
+            "media-library field map required semantic sanitization"
+        );
+    }
+    let fmap: LimelightFmap = serde_json::from_value(raw.clone()).map_err(|err| ApiError::bad_request(format!("invalid .fmap json: {err}")))?;
+
+    let map_name = derive_map_name(media_name);
+    let map_id = if let Some(existing_id) = find_map_id_for_source_file(media_name).await? {
+        existing_id
+    } else {
+        let map_id = seeded_map_id_for_filename(media_name);
+        let overlay = extract_overlay(&raw);
+        let doc = convert_limelight_fmap(&map_id, &map_name, media_name, fmap, overlay)?;
+        let dir = storage::ensure_subdir_async("localization/maps").await.map_err(|err| ApiError::internal(format!("failed to open map storage: {err}")))?;
+        let path = dir.join(format!("{map_id}.json"));
+        json_store::write_json(path, &doc).await.map_err(|err| ApiError::internal(format!("failed to store map: {err}")))?;
+        map_id
+    };
+    ensure_field_map_media_metadata(media_name, &map_name, media_name).await?;
+    Ok(map_id)
+}
+
+async fn ensure_field_map_media_metadata(media_name: &str, map_name: &str, source_filename: &str) -> ApiResult<()> {
+    let meta_dir = storage::ensure_subdir_async("media-meta").await.map_err(|err| ApiError::internal(format!("failed to open media metadata storage: {err}")))?;
+    let meta_path = meta_dir.join(format!("{media_name}.json"));
+    let mut metadata: MediaMetadata = match fs::read(&meta_path).await {
+        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
+        Err(_) => MediaMetadata::default(),
+    };
+
+    metadata.kind = Some("field-map".to_string());
+    if metadata.description.as_deref().map(str::trim).is_none_or(|value| value.is_empty()) {
+        metadata.description = Some(format!("Field map: {map_name} (source: {source_filename})"));
+    }
+
+    let mut tags = BTreeSet::new();
+    for tag in metadata.tags {
+        let trimmed = tag.trim();
+        if !trimmed.is_empty() {
+            tags.insert(trimmed.to_string());
+        }
+    }
+    tags.insert("field-map".to_string());
+    tags.insert("localization".to_string());
+    metadata.tags = tags.into_iter().collect();
+
+    write_media_metadata(media_name, metadata).await
+}
+
+async fn find_map_id_for_source_file(filename: &str) -> ApiResult<Option<String>> {
+    let dir = storage::ensure_subdir_async("localization/maps").await.map_err(|err| ApiError::internal(format!("failed to open map storage: {err}")))?;
+    let mut entries = fs::read_dir(&dir).await.map_err(|err| ApiError::internal(format!("failed to list map storage: {err}")))?;
+    let sanitized = storage::sanitize_name(filename).unwrap_or_else(|| filename.to_string());
+
+    while let Some(entry) = entries.next_entry().await.map_err(|err| ApiError::internal(format!("failed to scan map storage: {err}")))? {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let bytes = match fs::read(&path).await {
+            Ok(bytes) => bytes,
+            Err(_) => continue,
+        };
+        let doc: FieldMapDocument = match serde_json::from_slice(&bytes) {
+            Ok(doc) => doc,
+            Err(_) => continue,
+        };
+        if let FieldMapSource::LimelightFmap { original_file_name: Some(original), .. } = doc.source
+            && original == sanitized
+        {
+            return Ok(Some(stem.to_string()));
+        }
+    }
+
+    Ok(None)
 }
 
 #[utoipa::path(
@@ -90,46 +432,102 @@ async fn fetch_map(Path(id): Path<String>) -> ApiResult<Json<FieldMapDocument>> 
     responses(
         (status = 201, description = "Map uploaded", body = FieldMapSummary),
         (status = 400, description = "Invalid upload", body = super::super::error::ErrorBody),
+        (status = 422, description = "Semantic validation failure", body = super::super::validation::ValidationErrorBody),
         (status = 413, description = "Upload too large", body = super::super::error::ErrorBody)
     )
 )]
-async fn upload_limelight_fmap(mut multipart: Multipart) -> ApiResult<impl IntoResponse> {
+async fn upload_limelight_fmap(headers: HeaderMap, mut multipart: Multipart) -> axum::response::Response {
     let max_bytes = max_upload_bytes();
+    let expected_upload_bytes = match upload_integrity::expected_upload_bytes(&headers) {
+        Ok(value) => value,
+        Err(err) => return ApiError::bad_request(err).into_response(),
+    };
     let mut uploaded: Option<(String, Vec<u8>)> = None;
 
-    while let Some(field) = multipart.next_field().await.map_err(|err| ApiError::bad_request(format!("failed to read upload payload: {err}")))? {
+    loop {
+        let next = match multipart.next_field().await {
+            Ok(value) => value,
+            Err(err) => return ApiError::bad_request(format!("failed to read upload payload: {err}")).into_response(),
+        };
+        let Some(field) = next else {
+            break;
+        };
         if uploaded.is_some() {
-            return Err(ApiError::bad_request("only one file may be uploaded per request"));
+            return ApiError::bad_request("only one file may be uploaded per request").into_response();
         }
         let filename = field.file_name().map(|name| name.to_string()).unwrap_or_else(|| "field.fmap".to_string());
-        let data = field.bytes().await.map_err(|err| ApiError::bad_request(format!("failed to read upload bytes: {err}")))?;
+        let data = match field.bytes().await {
+            Ok(bytes) => bytes,
+            Err(err) => return ApiError::bad_request(format!("failed to read upload bytes: {err}")).into_response(),
+        };
         if data.is_empty() {
-            return Err(ApiError::bad_request("empty upload"));
+            return ApiError::bad_request("empty upload").into_response();
         }
         if data.len() as u64 > max_bytes {
-            return Err(ApiError::payload_too_large(format!("upload exceeds limit of {} bytes", max_bytes)));
+            return ApiError::payload_too_large(format!("upload exceeds limit of {} bytes", max_bytes)).into_response();
+        }
+        if let Err(err) = upload_integrity::validate_expected_upload_bytes(data.len() as u64, expected_upload_bytes) {
+            return ApiError::bad_request(err).into_response();
         }
         uploaded = Some((filename, data.to_vec()));
     }
 
     let Some((filename, bytes)) = uploaded else {
-        return Err(ApiError::bad_request("multipart payload missing file part"));
+        return ApiError::bad_request("multipart payload missing file part").into_response();
     };
 
-    let raw: Value = serde_json::from_slice(&bytes).map_err(|err| ApiError::bad_request(format!("invalid .fmap json: {err}")))?;
-    let fmap: LimelightFmap = serde_json::from_value(raw.clone()).map_err(|err| ApiError::bad_request(format!("invalid .fmap json: {err}")))?;
+    let raw: Value = match serde_json::from_slice(&bytes) {
+        Ok(value) => value,
+        Err(err) => return ApiError::bad_request(format!("invalid .fmap json: {err}")).into_response(),
+    };
+    let semantic_validation = validate_limelight_fmap_payload(&raw);
+    let map_warnings = match semantic_validation {
+        Ok(warnings) => warnings,
+        Err(err) => {
+            warn!(
+                issue_count = err.issues.len(),
+                warning_count = err.warnings.len(),
+                issues = ?err.issues,
+                warnings = ?err.warnings,
+                "localization map upload rejected by semantic validator"
+            );
+            return validation_error_response("uploaded fmap failed semantic validation", err.issues, err.warnings);
+        }
+    };
+    if !map_warnings.is_empty() {
+        info!(
+            warning_count = map_warnings.len(),
+            warnings = ?map_warnings,
+            "localization map upload required semantic sanitization"
+        );
+    }
+
+    let fmap: LimelightFmap = match serde_json::from_value(raw.clone()) {
+        Ok(value) => value,
+        Err(err) => return ApiError::bad_request(format!("invalid .fmap json: {err}")).into_response(),
+    };
     let id = Uuid::new_v4().to_string();
     let name = derive_map_name(&filename);
     let overlay = extract_overlay(&raw);
-    let doc = convert_limelight_fmap(&id, &name, &filename, fmap, overlay)?;
+    let doc = match convert_limelight_fmap(&id, &name, &filename, fmap, overlay) {
+        Ok(doc) => doc,
+        Err(err) => return err.into_response(),
+    };
 
-    let dir = storage::ensure_subdir_async("localization/maps").await.map_err(|err| ApiError::internal(format!("failed to open map storage: {err}")))?;
+    let dir = match storage::ensure_subdir_async("localization/maps").await {
+        Ok(dir) => dir,
+        Err(err) => return ApiError::internal(format!("failed to open map storage: {err}")).into_response(),
+    };
     let path = dir.join(format!("{id}.json"));
-    json_store::write_json(path, &doc).await.map_err(|err| ApiError::internal(format!("failed to store map: {err}")))?;
-    store_map_media_copy(&id, &name, &filename, &bytes).await?;
+    if let Err(err) = json_store::write_json(path, &doc).await {
+        return ApiError::internal(format!("failed to store map: {err}")).into_response();
+    }
+    if let Err(err) = store_map_media_copy(&id, &name, &filename, &bytes).await {
+        return err.into_response();
+    }
 
     let summary = FieldMapSummary { id: id.clone(), name, width_m: doc.width_m, depth_m: doc.depth_m, marker_count: doc.markers.len(), source_kind: "limelight-fmap".to_string() };
-    Ok((StatusCode::CREATED, Json(summary)))
+    (StatusCode::CREATED, Json(summary)).into_response()
 }
 
 async fn store_map_media_copy(id: &str, name: &str, filename: &str, bytes: &[u8]) -> ApiResult<String> {
@@ -139,9 +537,7 @@ async fn store_map_media_copy(id: &str, name: &str, filename: &str, bytes: &[u8]
     let path = media_dir.join(&media_name);
     fs::write(&path, bytes).await.map_err(|err| ApiError::internal(format!("failed to store map in media library: {err}")))?;
 
-    let description = format!("Field map: {name} (source: {filename})");
-    let meta = MediaMetadata { kind: Some("field-map".to_string()), description: Some(description), tags: vec!["field-map".to_string(), "localization".to_string()], ..Default::default() };
-    write_media_metadata(&media_name, meta).await?;
+    ensure_field_map_media_metadata(&media_name, name, filename).await?;
     Ok(media_name)
 }
 

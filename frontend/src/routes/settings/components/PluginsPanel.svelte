@@ -1,8 +1,11 @@
 <script lang="ts">
-  import { onDestroy, onMount } from 'svelte';
+  import { onMount } from 'svelte';
+  import { subscribeDomainInvalidations } from '$lib/api/invalidation';
+  import { normalizeUploadError, uploadSizeHeaders, verifyUploadedBytes } from '$lib/api/uploadIntegrity';
   import { apiFetch } from '../api';
   import { buildErrorMessage } from '$lib/ui/errorPolicy';
-  import type { RealtimeUpdateEvent } from '$lib/api/realtimeUpdates';
+  import { realtimeUpdateMatchesKind, type RealtimeUpdateEvent } from '$lib/api/realtimeUpdates';
+  import { SvelteMap } from 'svelte/reactivity';
 
   type PluginFile = { name: string; size_bytes: number };
   type PluginCompatibility = {
@@ -38,40 +41,23 @@
   let uploadFile = $state<File | null>(null);
   let uploadBusy = $state(false);
   let uploadError = $state<string | null>(null);
-  let liveRefreshHandle: number | null = null;
 
   function shouldApplyLiveUpdate(event: RealtimeUpdateEvent): boolean {
     if (event.path.startsWith('/v1/plugins')) return true;
-    if (event.kind === 'api') return false;
-    return event.kind === 'settings' || event.kind === 'device';
-  }
-
-  function scheduleLiveRefresh(): void {
-    if (liveRefreshHandle != null) return;
-    liveRefreshHandle = window.setTimeout(() => {
-      liveRefreshHandle = null;
-      void loadPlugins();
-    }, 300);
+    if (realtimeUpdateMatchesKind(event, 'api')) return false;
+    return realtimeUpdateMatchesKind(event, 'settings') || realtimeUpdateMatchesKind(event, 'device');
   }
 
   onMount(() => {
     void loadPlugins();
-    const onRealtimeUpdate = (rawEvent: Event) => {
-      const event = rawEvent as CustomEvent<RealtimeUpdateEvent>;
-      if (!event.detail || !shouldApplyLiveUpdate(event.detail)) return;
-      scheduleLiveRefresh();
-    };
-    window.addEventListener('helios:settings-realtime-update', onRealtimeUpdate as EventListener);
-    return () => {
-      window.removeEventListener('helios:settings-realtime-update', onRealtimeUpdate as EventListener);
-    };
-  });
-
-  onDestroy(() => {
-    if (liveRefreshHandle != null) {
-      clearTimeout(liveRefreshHandle);
-      liveRefreshHandle = null;
-    }
+    return subscribeDomainInvalidations(
+      ['settings', 'device'],
+      (event) => {
+        if (!shouldApplyLiveUpdate(event)) return;
+        void loadPlugins();
+      },
+      { debounceMs: 300 }
+    );
   });
 
   function openUploadModal(): void {
@@ -96,10 +82,10 @@
       const installed = Array.isArray(payload.installed) ? payload.installed : [];
       const disabled = Array.isArray(payload.disabled) ? payload.disabled : [];
       const compatibilityList = Array.isArray(payload.compatibility) ? payload.compatibility : [];
-      const compatibilityMap = new Map(compatibilityList.map((entry) => [entry.filename, entry]));
+      const compatibilityMap = new SvelteMap(compatibilityList.map((entry) => [entry.filename, entry]));
       engineAvailable = payload.engine_available ?? true;
 
-      const merged = new Map<string, PluginEntry>();
+      const merged = new SvelteMap<string, PluginEntry>();
       for (const plugin of installed) {
         if (plugin?.name) {
           merged.set(plugin.name, { ...plugin, enabled: true, compatibility: compatibilityMap.get(plugin.name) });
@@ -137,15 +123,20 @@
     try {
       const form = new FormData();
       form.append('file', uploadFile, uploadFile.name);
-      const upload = await apiFetch<PluginUploadResponse>('/plugins/upload', { method: 'POST', body: form });
+      const upload = await apiFetch<PluginUploadResponse>('/plugins/upload', {
+        method: 'POST',
+        body: form,
+        headers: uploadSizeHeaders(uploadFile)
+      });
+      verifyUploadedBytes(uploadFile.size, upload.size_bytes, 'Plugin upload');
       await apiFetch('/plugins/install', {
         method: 'POST',
-        body: JSON.stringify({ upload_name: upload.name })
+        body: { upload_name: upload.name }
       });
       await loadPlugins();
       closeUploadModal();
     } catch (err) {
-      uploadError = buildErrorMessage({ error: err, fallback: 'Unable to upload plugin.' });
+      uploadError = buildErrorMessage({ error: normalizeUploadError(err, 'Plugin upload'), fallback: 'Unable to upload plugin.' });
     } finally {
       uploadBusy = false;
     }

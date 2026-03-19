@@ -16,14 +16,26 @@ API_FEATURES="${API_FEATURES:-}"
 
 DOCKERFILE="${DOCKERFILE:-gaia/docker/aarch64/Dockerfile.aarch64-rpi4}"
 DOCKER_CONTEXT="${DOCKER_CONTEXT:-$ROOT_DIR/gaia}"
-IMAGE_TAG="${IMAGE_TAG:-helios-cross}"
+IMAGE_TAG="${IMAGE_TAG:-helios-cross-rust194}"
 REBUILD_IMAGE="0"
+
+CROSS_BUILD_ROOT_DEFAULT="/var/tmp/helios-cross/${IMAGE_TAG}"
+TARGET_BUILD_DIR="${TARGET_BUILD_DIR:-$CROSS_BUILD_ROOT_DEFAULT/target}"
+CROSS_CARGO_HOME="${CROSS_CARGO_HOME:-$CROSS_BUILD_ROOT_DEFAULT/cargo}"
+CROSS_SCCACHE_DIR="${CROSS_SCCACHE_DIR:-$CROSS_BUILD_ROOT_DEFAULT/sccache}"
 
 # Optional local checkouts used when you want to patch these dependencies during development.
 # In a clean/public clone, leave unset.
-DAEDALUS_HOST_PATH="${DAEDALUS_HOST_PATH:-}"
-STYX_HOST_PATH="${STYX_HOST_PATH:-}"
-LIBCAMERA_RS_HOST_PATH="${LIBCAMERA_RS_HOST_PATH:-}"
+default_checkout_path() {
+  local path="$1"
+  if [[ -d "$path" ]]; then
+    printf '%s' "$path"
+  fi
+}
+
+DAEDALUS_HOST_PATH="${DAEDALUS_HOST_PATH:-$(default_checkout_path /home/sozo/Documents/GitHub/Daedalus)}"
+STYX_HOST_PATH="${STYX_HOST_PATH:-$(default_checkout_path /home/sozo/Documents/GitHub/Styx)}"
+LIBCAMERA_RS_HOST_PATH="${LIBCAMERA_RS_HOST_PATH:-$(default_checkout_path /home/sozo/Documents/GitHub/libcamera-rs)}"
 
 BINS_DIR_DEFAULT="$ROOT_DIR/output/cm5/binaries"
 PLUGINS_DIR_DEFAULT="$ROOT_DIR/output/cm5/plugins/daedalus"
@@ -40,6 +52,7 @@ FRONTEND_DIR_LOCAL="${FRONTEND_DIR_LOCAL:-$ROOT_DIR/frontend/build}"
 FRONTEND_DIR_REMOTE="${FRONTEND_DIR_REMOTE:-/opt/helios/frontend}"
 
 ONLY="all" # all|binaries|plugins
+STRICT_BINARIES_ONLY="0"
 BUILD="1"
 UPLOAD="1"
 RESTART_SERVICES="1"
@@ -64,6 +77,8 @@ Options:
   --engine-features <f> Cargo features for helios-engine (default: $ENGINE_FEATURES)
   --api-features <f>   Cargo features for helios-api (default: $API_FEATURES)
   --only <what>         all|binaries|plugins (default: all)
+  --strict-binaries-only
+                        Do not auto-sync Daedalus plugins when deploying binaries
   --no-build            Skip build; only upload/restart
   --no-upload           Only build; skip upload/restart
   --no-restart          Upload but do not restart services
@@ -96,6 +111,9 @@ Env vars (optional):
   STYX_HOST_PATH         Host path to a Styx checkout (optional dev override)
   LIBCAMERA_RS_HOST_PATH Host path to a libcamera-rs checkout (optional dev override)
   DOCKER_CONTEXT         Docker build context for the cross image
+  TARGET_BUILD_DIR       Host path for cross-built Cargo target artifacts
+  CROSS_CARGO_HOME       Host path for cross-build Cargo cache
+  CROSS_SCCACHE_DIR      Host path for cross-build sccache data
 EOF
 }
 
@@ -167,6 +185,7 @@ while [[ $# -gt 0 ]]; do
     --engine-features) ENGINE_FEATURES="${2:-}"; shift 2 ;;
     --api-features) API_FEATURES="${2:-}"; shift 2 ;;
     --only) ONLY="${2:-}"; shift 2 ;;
+    --strict-binaries-only) STRICT_BINARIES_ONLY="1"; shift ;;
     --no-build) BUILD="0"; shift ;;
     --no-upload) UPLOAD="0"; shift ;;
     --no-restart) RESTART_SERVICES="0"; shift ;;
@@ -216,6 +235,10 @@ case "$ONLY" in
   binaries) do_binaries="1" ;;
   plugins) do_plugins="1" ;;
 esac
+
+if [[ "$do_binaries" == "1" && "$ONLY" == "binaries" && "$STRICT_BINARIES_ONLY" != "1" ]]; then
+  do_plugins="1"
+fi
 
 docker_image_built="0"
 
@@ -269,13 +292,15 @@ docker_run_cargo_build() {
   local profile_flag="$3"
   local repo_root="$4"
   local features="${5:-}"
+  local build_kind="${6:-package}"
+  local bin_name="${7:-$package}"
 
   local -a docker_args=(
     --rm
     -v "$repo_root/backend:/work/backend"
-    -v "$repo_root/target:/work/target"
-    -v "$repo_root/.cache/cargo:/work/.cargo"
-    -v "$repo_root/.cache/sccache:/root/.cache/sccache"
+    -v "$TARGET_BUILD_DIR:/work/target"
+    -v "$CROSS_CARGO_HOME:/work/.cargo"
+    -v "$CROSS_SCCACHE_DIR:/root/.cache/sccache"
     -e "CARGO_HOME=/work/.cargo"
     -e "CARGO_TARGET_DIR=/work/target"
     -e "SCCACHE_DIR=/root/.cache/sccache"
@@ -314,10 +339,27 @@ docker_run_cargo_build() {
     features_arg="--features '$features'"
   fi
 
+  local target_arg="-p '$package'"
+  if [[ "$build_kind" == "bin" ]]; then
+    target_arg="-p '$package' --bin '$bin_name'"
+  fi
+
   run docker run "${docker_args[@]}" "$IMAGE_TAG" bash -lc \
     "export GIT_CONFIG_GLOBAL=/tmp/gitconfig; \
      : > \"\$GIT_CONFIG_GLOBAL\"; \
-     cargo build --target '$target_triple' $profile_flag ${features_arg:+$features_arg }-p '$package'"
+     cargo build --target '$target_triple' $profile_flag ${features_arg:+$features_arg }$target_arg"
+}
+
+binary_output_path() {
+  local package="$1"
+  local profile_flag="$2"
+  local target_triple="$3"
+  local bin_name="${4:-$package}"
+
+  local profile_dir
+  profile_dir=$(profile_dir_from_flag "$profile_flag")
+
+  echo "$TARGET_BUILD_DIR/$target_triple/$profile_dir/$bin_name"
 }
 
 copy_binary_out() {
@@ -325,11 +367,10 @@ copy_binary_out() {
   local profile_flag="$2"
   local target_triple="$3"
   local out_dir="$4"
+  local bin_name="${5:-$package}"
 
-  local profile_dir
-  profile_dir=$(profile_dir_from_flag "$profile_flag")
-
-  local bin_path="$ROOT_DIR/target/$target_triple/$profile_dir/$package"
+  local bin_path
+  bin_path=$(binary_output_path "$package" "$profile_flag" "$target_triple" "$bin_name")
   if [[ ! -f "$bin_path" ]]; then
     die "expected output not found: $bin_path"
   fi
@@ -370,7 +411,7 @@ copy_plugins_out() {
   local profile_dir
   profile_dir=$(profile_dir_from_flag "$profile_flag")
 
-  local so_glob="$ROOT_DIR/target/$target_triple/$profile_dir/libhelios_daedalus_*_plugin.so"
+  local so_glob="$TARGET_BUILD_DIR/$target_triple/$profile_dir/libhelios_daedalus_*_plugin.so"
   shopt -s nullglob
   local so_files=( $so_glob )
   shopt -u nullglob
@@ -415,11 +456,10 @@ needs_binary_build() {
   local package="$1"
   local profile_flag="$2"
   local target_triple="$3"
+  local bin_name="${4:-$package}"
 
-  local profile_dir
-  profile_dir=$(profile_dir_from_flag "$profile_flag")
-
-  local bin_path="$ROOT_DIR/target/$target_triple/$profile_dir/$package"
+  local bin_path
+  bin_path=$(binary_output_path "$package" "$profile_flag" "$target_triple" "$bin_name")
   if [[ ! -f "$bin_path" ]]; then
     return 0
   fi
@@ -475,7 +515,7 @@ plugin_output_path() {
   profile_dir=$(profile_dir_from_flag "$profile_flag")
 
   local crate_name="${package//-/_}"
-  echo "$ROOT_DIR/target/$target_triple/$profile_dir/lib${crate_name}.so"
+  echo "$TARGET_BUILD_DIR/$target_triple/$profile_dir/lib${crate_name}.so"
 }
 
 needs_plugin_build() {
@@ -537,7 +577,7 @@ needs_plugin_build() {
 }
 
 if [[ "$BUILD" == "1" ]]; then
-  run mkdir -p "$ROOT_DIR/.cache/cargo" "$ROOT_DIR/.cache/sccache"
+  run mkdir -p "$TARGET_BUILD_DIR" "$CROSS_CARGO_HOME" "$CROSS_SCCACHE_DIR"
   ensure_docker_image
 
   if [[ "$do_plugins" == "1" ]]; then
@@ -561,22 +601,29 @@ if [[ "$BUILD" == "1" ]]; then
   fi
 
   if [[ "$do_binaries" == "1" ]]; then
-    packages=("helios-engine" "helios-api" "helios-peripherals" "helios-updater")
-    pkg=""
-    for pkg in "${packages[@]}"; do
-      if needs_binary_build "$pkg" "$PROFILE_FLAG" "$TARGET_TRIPLE"; then
-        echo "Building $pkg ($TARGET_TRIPLE) $(profile_label)..."
+    bin_specs=(
+      "helios-engine:helios-engine"
+      "helios-api:helios-api"
+      "helios-api:helios-api-tools"
+      "helios-peripherals:helios-peripherals"
+      "helios-updater:helios-updater"
+    )
+    spec=""
+    for spec in "${bin_specs[@]}"; do
+      IFS=: read -r pkg bin_name <<<"$spec"
+      if needs_binary_build "$pkg" "$PROFILE_FLAG" "$TARGET_TRIPLE" "$bin_name"; then
+        echo "Building $bin_name ($TARGET_TRIPLE) $(profile_label)..."
         pkg_features=""
         if [[ "$pkg" == "helios-engine" ]]; then
           pkg_features="$ENGINE_FEATURES"
         elif [[ "$pkg" == "helios-api" ]]; then
           pkg_features="$API_FEATURES"
         fi
-        docker_run_cargo_build "$pkg" "$TARGET_TRIPLE" "$PROFILE_FLAG" "$ROOT_DIR" "$pkg_features"
+        docker_run_cargo_build "$pkg" "$TARGET_TRIPLE" "$PROFILE_FLAG" "$ROOT_DIR" "$pkg_features" "bin" "$bin_name"
       else
-        echo "Skipping $pkg (up to date)"
+        echo "Skipping $bin_name (up to date)"
       fi
-      copy_binary_out "$pkg" "$PROFILE_FLAG" "$TARGET_TRIPLE" "$BINS_DIR"
+      copy_binary_out "$pkg" "$PROFILE_FLAG" "$TARGET_TRIPLE" "$BINS_DIR" "$bin_name"
     done
   fi
 fi
@@ -652,15 +699,15 @@ if [[ "$UPLOAD" == "1" ]]; then
       for f in "${files[@]}"; do
         printf ' %q' "$f"
       done
-      printf ' | ssh %q %q\n' "$SSH_TARGET" "tar --warning=no-timestamp --no-same-owner -xf - -C \"$remote_dir\""
+      printf ' | ssh %q %q\n' "$SSH_TARGET" "tar -x -o -f - -C \"$remote_dir\""
       return 0
     fi
     if [[ -n "${SSH_PASS// }" ]]; then
       tar -C "$base_dir" -cf - "${files[@]}" | \
-        sshpass -p "$SSH_PASS" ssh "${ssh_opts[@]}" "$SSH_TARGET" "sh -lc 'tar --warning=no-timestamp --no-same-owner -xf - -C \"$remote_dir\"'"
+        sshpass -p "$SSH_PASS" ssh "${ssh_opts[@]}" "$SSH_TARGET" "sh -lc 'tar -x -o -f - -C \"$remote_dir\"'"
     else
       tar -C "$base_dir" -cf - "${files[@]}" | \
-        ssh "${ssh_opts[@]}" "$SSH_TARGET" "sh -lc 'tar --warning=no-timestamp --no-same-owner -xf - -C \"$remote_dir\"'"
+        ssh "${ssh_opts[@]}" "$SSH_TARGET" "sh -lc 'tar -x -o -f - -C \"$remote_dir\"'"
     fi
   }
 
@@ -682,12 +729,13 @@ if [[ "$UPLOAD" == "1" ]]; then
     fi
 
     # Extract into a temp dir first so a partial transfer can't brick /usr/bin.
-    local ts tmpdir backup_dir
+    local ts tmpdir backup_dir staging_root
     ts="$(date +%s)"
-    tmpdir="/tmp/helios-deploy-bins.$ts"
+    staging_root="/var/lib/helios/deploy-staging"
+    tmpdir="$staging_root/bins.$ts"
     backup_dir="/var/lib/helios/deploy-backups/bins-$ts"
 
-    ssh_exec "sh -lc 'set -e; rm -rf \"$tmpdir\"; install -d -m0755 \"$tmpdir\"'"
+    ssh_exec "sh -lc 'set -e; install -d -m0755 \"$staging_root\"; rm -rf \"$tmpdir\"; install -d -m0755 \"$tmpdir\"'"
     ssh_upload_tar "$BINS_DIR" "$tmpdir" "${bins[@]}"
 
     # Validate all uploads before touching the live paths.
@@ -703,18 +751,29 @@ if [[ "$UPLOAD" == "1" ]]; then
         if [ -f \"$remote_dir/$b\" ]; then cp -f \"$remote_dir/$b\" \"$backup_dir/$b\" || true; fi; \
         install -m0755 \"$tmpdir/$b\" \"$remote_dir/$b\"'"
     done
+    for b in "${bins[@]}"; do
+      local local_hash remote_hash
+      local_hash="$(local_sha256 "$BINS_DIR/$b")"
+      remote_hash="$(remote_sha256 "$remote_dir/$b")"
+      if [[ -z "${remote_hash// }" || "$local_hash" != "$remote_hash" ]]; then
+        die "remote binary hash mismatch after install: $b"
+      fi
+    done
     ssh_exec "sh -lc 'rm -rf \"$tmpdir\"'"
   }
 
   ensure_remote_plugin_env() {
-    # Keep engine/api pointed at the deploy plugin dir even when doing a plugin-only deploy.
+    # Keep engine/api pointed at both the writable deploy plugin dir and the system plugin dir.
+    # Do not set HELIOS_DAEDALUS_PLUGIN_DIR here: that single-dir override masks system plugins.
+    local plugin_dirs="${PLUGIN_DIR_REMOTE}:/usr/lib/helios/plugins/daedalus"
     ssh_exec "sh -lc 'install -d -m0755 \"$PLUGIN_DIR_REMOTE\"; \
       for f in /etc/default/helios-engine /etc/default/helios-api; do \
         touch \"\$f\"; \
-        if grep -q \"^HELIOS_DAEDALUS_PLUGIN_DIR=\" \"\$f\"; then \
-          sed -i \"s|^HELIOS_DAEDALUS_PLUGIN_DIR=.*|HELIOS_DAEDALUS_PLUGIN_DIR=$PLUGIN_DIR_REMOTE|\" \"\$f\"; \
+        sed -i \"/^HELIOS_DAEDALUS_PLUGIN_DIR=/d\" \"\$f\"; \
+        if grep -q \"^HELIOS_DAEDALUS_PLUGIN_DIRS=\" \"\$f\"; then \
+          sed -i \"s|^HELIOS_DAEDALUS_PLUGIN_DIRS=.*|HELIOS_DAEDALUS_PLUGIN_DIRS=$plugin_dirs|\" \"\$f\"; \
         else \
-          echo \"HELIOS_DAEDALUS_PLUGIN_DIR=$PLUGIN_DIR_REMOTE\" >> \"\$f\"; \
+          echo \"HELIOS_DAEDALUS_PLUGIN_DIRS=$plugin_dirs\" >> \"\$f\"; \
         fi; \
       done'"
   }
@@ -752,7 +811,7 @@ if [[ "$UPLOAD" == "1" ]]; then
   }
 
   if [[ "$do_binaries" == "1" ]]; then
-    bins=("helios-engine" "helios-api" "helios-peripherals" "helios-updater")
+    bins=("helios-engine" "helios-api" "helios-api-tools" "helios-peripherals" "helios-updater")
     b=""
     for b in "${bins[@]}"; do
       [[ -f "$BINS_DIR/$b" ]] || die "missing binary: $BINS_DIR/$b"
@@ -909,6 +968,9 @@ if [[ "$UPLOAD" == "1" ]]; then
         # On some setups this may briefly impact the USB gadget/network link; don't fail the deploy if so.
         if ! ssh_exec "systemctl restart helios-peripherals.service"; then
           echo "Warning: failed to restart helios-peripherals.service; binary was uploaded but service may still be running old code."
+        fi
+        if ! ssh_exec "systemctl restart helios-updater.service"; then
+          echo "Warning: failed to restart helios-updater.service; binary was uploaded but service may still be running old code."
         fi
       else
         echo "Skipping restart (RESTART_SERVICES=0)"

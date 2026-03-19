@@ -1,11 +1,14 @@
 <script lang="ts">
   import { OpenAPI, type MediaItem, type UpdateAckResponse, type UpdateStateResponse, type UploadUpdateResponse } from '$lib/ts-bindings/http/client';
-  import { apiFetch, REQUESTED_BY } from '../api';
+  import { normalizeUploadError, uploadSizeHeaders, verifyUploadedBytes } from '$lib/api/uploadIntegrity';
+  import { apiFetch, REQUESTED_BY, uploadOtaImage } from '../api';
+  import { createDomainResource } from '$lib/api/domainResources';
+  import { subscribeDomainInvalidations } from '$lib/api/invalidation';
+  import { startRefreshScheduler } from '$lib/api/refreshScheduler';
   import { buildErrorMessage } from '$lib/ui/errorPolicy';
   import { connectUpdaterStream } from '$lib/api/otaUpdates';
-  import type { RealtimeUpdateEvent } from '$lib/api/realtimeUpdates';
+  import { realtimeUpdateMatchesKind, type RealtimeUpdateEvent } from '$lib/api/realtimeUpdates';
   import { onDestroy, onMount } from 'svelte';
-  import { createRefreshableResource } from '$lib/utils/refreshableResource';
   import UpdaterApplyPanel from './UpdaterApplyPanel.svelte';
   import UpdaterConfirmDialog from './UpdaterConfirmDialog.svelte';
   import UpdaterSourceSelector from './UpdaterSourceSelector.svelte';
@@ -44,6 +47,7 @@
   let applyStatus = $state<string | null>(null);
   let applyConfirmOpen = $state(false);
   let applyConfirmChecked = $state(false);
+  let deleteImageAfterApply = $state(true);
 
   // State + info
   let stateLoading = $state(false);
@@ -54,8 +58,10 @@
   let streamClose: (() => void) | null = null;
   let streamReconnectHandle: ReturnType<typeof setTimeout> | null = null;
   let streamNonce = 0;
-  let statePollHandle: ReturnType<typeof setInterval> | null = null;
+  let stopStatePollingLoop: (() => void) | null = null;
   let liveRefreshHandle: ReturnType<typeof setTimeout> | null = null;
+  let liveRefreshMediaPending = false;
+  let liveRefreshStatePending = false;
 
   // Source selection
   let imageUrlOverride = $state('');
@@ -68,11 +74,12 @@
   const MEDIA_CACHE_KEY = 'media:updater:v1';
   const MEDIA_CACHE_STALE_MS = 10_000;
   const MEDIA_CACHE_MAX_MS = 120_000;
-  const mediaResource = createRefreshableResource({
+  const mediaResource = createDomainResource({
     key: MEDIA_CACHE_KEY,
     loader: () => apiFetch<MediaItem[]>('/media'),
     staleMs: MEDIA_CACHE_STALE_MS,
-    maxAgeMs: MEDIA_CACHE_MAX_MS
+    maxAgeMs: MEDIA_CACHE_MAX_MS,
+    kinds: ['media']
   });
 
   const apiBaseLabel = $derived(OpenAPI.BASE || '—');
@@ -219,15 +226,17 @@
   }
 
   function startStatePolling(): void {
-    if (statePollHandle) return;
-    void fetchState();
-    statePollHandle = setInterval(() => void fetchState(), 5000);
+    if (stopStatePollingLoop) return;
+    stopStatePollingLoop = startRefreshScheduler(fetchState, {
+      intervalMs: 5_000,
+      immediate: true,
+      enabled: () => !streamConnected
+    });
   }
 
   function stopStatePolling(): void {
-    if (!statePollHandle) return;
-    clearInterval(statePollHandle);
-    statePollHandle = null;
+    stopStatePollingLoop?.();
+    stopStatePollingLoop = null;
   }
 
   function disconnectStream(): void {
@@ -322,18 +331,36 @@
 
   function shouldApplyLiveUpdate(event: RealtimeUpdateEvent): boolean {
     if (event.path.startsWith('/v1/ota') || event.path.startsWith('/v1/media')) return true;
-    if (event.kind === 'api') return false;
-    return event.kind === 'media' || event.kind === 'device' || event.kind === 'settings';
+    if (realtimeUpdateMatchesKind(event, 'api')) return false;
+    return (
+      realtimeUpdateMatchesKind(event, 'media') ||
+      realtimeUpdateMatchesKind(event, 'device') ||
+      realtimeUpdateMatchesKind(event, 'settings')
+    );
   }
 
   function scheduleLiveRefresh(event: RealtimeUpdateEvent): void {
+    if (event.path.startsWith('/v1/media') || realtimeUpdateMatchesKind(event, 'media')) {
+      liveRefreshMediaPending = true;
+    }
+    if (
+      event.path.startsWith('/v1/ota') ||
+      realtimeUpdateMatchesKind(event, 'device') ||
+      realtimeUpdateMatchesKind(event, 'settings')
+    ) {
+      liveRefreshStatePending = true;
+    }
     if (liveRefreshHandle != null) return;
     liveRefreshHandle = setTimeout(() => {
       liveRefreshHandle = null;
-      if (event.path.startsWith('/v1/media') || event.kind === 'media') {
+      const shouldRefreshMedia = liveRefreshMediaPending;
+      const shouldRefreshState = liveRefreshStatePending;
+      liveRefreshMediaPending = false;
+      liveRefreshStatePending = false;
+      if (shouldRefreshMedia) {
         void fetchMedia({ force: true });
       }
-      if (event.path.startsWith('/v1/ota') || event.kind === 'device' || event.kind === 'settings') {
+      if (shouldRefreshState) {
         void fetchState();
       }
     }, 350);
@@ -358,14 +385,13 @@
     uploadInfo = null;
 
     try {
-      const form = new FormData();
-      form.append('file', uploadTarget);
-      const response = await fetch(`${OpenAPI.BASE}/ota/upload`, { method: 'POST', body: form });
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || `Upload failed (${response.status})`);
+      let payload: UploadUpdateResponse;
+      try {
+        payload = await uploadOtaImage(uploadTarget, uploadSizeHeaders(uploadTarget));
+      } catch (error) {
+        throw normalizeUploadError(error, 'Update upload');
       }
-      const payload = (await response.json()) as UploadUpdateResponse;
+      verifyUploadedBytes(uploadTarget.size, payload.size_bytes, 'Update upload');
       uploadInfo = payload;
       uploadStatus = `Uploaded ${payload.filename}`;
       sourceKind = 'upload';
@@ -377,7 +403,7 @@
         await fetchState();
       }
     } catch (err) {
-      uploadError = buildErrorMessage({ error: err, fallback: 'Upload failed.' });
+      uploadError = buildErrorMessage({ error: normalizeUploadError(err, 'Update upload'), fallback: 'Upload failed.' });
     } finally {
       uploadBusy = false;
     }
@@ -392,7 +418,10 @@
     applyError = null;
     applyStatus = null;
     try {
-      const payload: { requested_by: string; image_url?: string; size_bytes?: number; checksum?: string } = { requested_by: REQUESTED_BY };
+      const payload: { requested_by: string; image_url?: string; size_bytes?: number; checksum?: string; delete_image_after_apply: boolean } = {
+        requested_by: REQUESTED_BY,
+        delete_image_after_apply: deleteImageAfterApply
+      };
       payload.image_url = imageUrl;
       if (sourceKind === 'upload' && uploadInfo) {
         payload.size_bytes = uploadInfo.size_bytes;
@@ -400,7 +429,7 @@
       }
       const response = await apiFetch<UpdateAckResponse>(
         '/ota/apply',
-        { method: 'POST', body: JSON.stringify(payload) },
+        { method: 'POST', body: payload },
         { timeoutMs: 150_000 }
       );
       applyStatus = response.message || 'Apply scheduled';
@@ -442,7 +471,7 @@
     try {
       const response = await apiFetch<UpdateAckResponse>('/ota/cancel', {
         method: 'POST',
-        body: JSON.stringify({ update_id: currentState.update_id, requested_by: REQUESTED_BY })
+        body: { update_id: currentState.update_id, requested_by: REQUESTED_BY }
       });
       applyStatus = response.message || 'Update canceled';
       if (!streamConnected) {
@@ -515,15 +544,10 @@
 
   onMount(() => {
     connectStream();
-    const onRealtimeUpdate = (rawEvent: Event) => {
-      const event = rawEvent as CustomEvent<RealtimeUpdateEvent>;
-      if (!event.detail || !shouldApplyLiveUpdate(event.detail)) return;
-      scheduleLiveRefresh(event.detail);
-    };
-    window.addEventListener('helios:settings-realtime-update', onRealtimeUpdate as EventListener);
-    return () => {
-      window.removeEventListener('helios:settings-realtime-update', onRealtimeUpdate as EventListener);
-    };
+    return subscribeDomainInvalidations(['media', 'device', 'settings'], (event) => {
+      if (!shouldApplyLiveUpdate(event)) return;
+      scheduleLiveRefresh(event);
+    });
   });
 
   onDestroy(() => {
@@ -531,6 +555,8 @@
       clearTimeout(liveRefreshHandle);
       liveRefreshHandle = null;
     }
+    liveRefreshMediaPending = false;
+    liveRefreshStatePending = false;
     disconnectStream();
     stopStatePolling();
   });
@@ -585,8 +611,10 @@
     applyBusy={applyBusy}
     isStageInProgress={isStageInProgress}
     imageUrl={imageUrl}
+    deleteImageAfterApply={deleteImageAfterApply}
     onOpenConfirm={openApplyConfirm}
     onCancelUpdate={() => cancelUpdate()}
+    onDeleteImageAfterApplyChange={(enabled) => (deleteImageAfterApply = enabled)}
   />
 
   <UpdaterStatePanel

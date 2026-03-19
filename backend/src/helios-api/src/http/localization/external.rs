@@ -16,9 +16,9 @@ const IMU_EXTERNAL_ID: &str = "imu";
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/external/sources", get(list_external_sources))
-        .route("/external/sources/:id", put(upsert_external_source).delete(delete_external_source))
-        .route("/external/sources/:id/sample", post(update_external_sample))
-        .route("/external/:id/outputs/:output_key", get(sample_external_output))
+        .route("/external/sources/{id}", put(upsert_external_source).delete(delete_external_source))
+        .route("/external/sources/{id}/sample", post(update_external_sample))
+        .route("/external/{id}/outputs/{output_key}", get(sample_external_output))
 }
 
 #[utoipa::path(
@@ -145,9 +145,7 @@ async fn fetch_device_imu_sample(state: &AppState) -> ApiResult<PipelineOutputSa
     // IMU position is usually clamped/zeroed (`dr_lock_position=true`) and should not be treated
     // as an absolute robot-field translation source for localization.
     // Only publish translation when dead-reckoned position is explicitly unlocked *and* non-zero.
-    let translation = status.position_world.filter(|position| {
-        status.dr_lock_position == Some(false) && (position.x.abs() > 1e-6 || position.y.abs() > 1e-6 || position.z.abs() > 1e-6)
-    });
+    let translation = status.position_world.filter(|position| status.dr_lock_position == Some(false) && (position.x.abs() > 1e-6 || position.y.abs() > 1e-6 || position.z.abs() > 1e-6));
     let velocity = status.velocity_world.map(|value| {
         serde_json::json!({
             "x": value.x,

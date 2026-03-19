@@ -50,6 +50,10 @@
     }
   });
 
+  function openAsset(url: string): void {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
   export type $$Props = CalibrationPreviewModalProps;
 </script>
 
@@ -88,13 +92,17 @@
           >
             {calibrationDeleting ? 'Deleting…' : 'Delete'}
           </button>
-          <a class="btn btn-xs preset-outline" href={apiPath(`/media/${encodeURIComponent(item.name)}`)} target="_blank" rel="noreferrer">
+          <button
+            class="btn btn-xs preset-outline"
+            type="button"
+            onclick={() => openAsset(apiPath(`/media/${encodeURIComponent(item.name)}`))}
+          >
             Download
-          </a>
+          </button>
         </div>
       </div>
 
-      <div class="mt-4 grid gap-6 lg:grid-cols-[1.2fr_1fr]">
+      <div class="mt-4 grid gap-6 xl:grid-cols-[1.2fr_1fr]">
         <div class="min-w-0 rounded border border-surface-800/60 bg-surface-900/40 p-3">
           <p class="text-xs uppercase tracking-[0.3em] text-surface-500">Preview</p>
           <div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-surface-400">

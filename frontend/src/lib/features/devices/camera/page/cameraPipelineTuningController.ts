@@ -7,7 +7,7 @@ import type {
   PipelineRegistryEntry
 } from '$lib/types/pipeline';
 import type { PipelineUi } from '$lib/features/pipelines/pipelineUiTypes';
-import { fromApiGraphPlan } from '$lib/features/pipelines/model';
+import { fromApiGraphPlan } from '$lib/features/pipelines/graphConverters';
 import { decodeDaedalusValue } from '$lib/features/pipelines/daedalusGraph/valueCodec';
 import { getDataTypeVariants } from '$lib/features/pipelines/valueFormatting';
 import { serializeGraphPlan } from '$lib/features/pipelines/graph';
@@ -58,13 +58,19 @@ type PipelineTuningSize = {
 };
 
 type StreamUpdatesSocket = {
-  send?: (payload: any) => boolean | void;
+  send?: (payload: Record<string, unknown>) => boolean | void;
 } | null;
 
 export const PIPELINE_UI_STORAGE_PREFIX = 'helios.camera.pipelineUi.v1.';
 export const PIPELINE_OUTPUT_CELL_KEY = '0:0';
 export const RAW_PIPELINE_ID = '__raw__';
-export const RAW_PIPELINE_UUID = '00000000-0000-0000-0000-0000000000aa';
+const DEFAULT_RAW_PIPELINE_UUID = '00000000-0000-0000-0000-0000000000aa';
+export let RAW_PIPELINE_UUID = DEFAULT_RAW_PIPELINE_UUID;
+export function setRawPipelineUuid(value: string | null | undefined): string {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  RAW_PIPELINE_UUID = normalized.length ? normalized : DEFAULT_RAW_PIPELINE_UUID;
+  return RAW_PIPELINE_UUID;
+}
 export const RAW_LOOPBACK_GRAPH = {
   nodes: [
     {
@@ -102,6 +108,12 @@ export const RAW_LOOPBACK_GRAPH = {
   ],
   metadata: {}
 };
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+
+const asTrimmedString = (value: unknown): string =>
+  typeof value === 'string' ? value.trim() : '';
 
 export function normalizeAssignedPipelineIds(ids: string[]): string[] {
   return Array.from(
@@ -256,9 +268,10 @@ export function numberFromRegistryValue(value: unknown): number | null {
   return null;
 }
 
-export function resolveRegistrySnapshotNodeId(snapshot: any, backendId: string | null | undefined): string | null {
-  if (!snapshot || !backendId) return null;
-  const nodes = Array.isArray(snapshot?.nodes) ? snapshot.nodes : [];
+export function resolveRegistrySnapshotNodeId(snapshot: unknown, backendId: string | null | undefined): string | null {
+  const snapshotRecord = asRecord(snapshot);
+  if (!snapshotRecord || !backendId) return null;
+  const nodes = Array.isArray(snapshotRecord.nodes) ? snapshotRecord.nodes : [];
   if (!nodes.length) return null;
   const normalize = (value: string) => {
     const lower = value.toLowerCase();
@@ -296,21 +309,22 @@ type RegistryLookup = {
 
 const registryLookupCache = new WeakMap<object, RegistryLookup>();
 
-const getRegistryLookup = (snapshot: any): RegistryLookup | null => {
-  if (!snapshot || typeof snapshot !== 'object') return null;
-  if (registryLookupCache.has(snapshot)) {
-    return registryLookupCache.get(snapshot) ?? null;
+const getRegistryLookup = (snapshot: unknown): RegistryLookup | null => {
+  const snapshotRecord = asRecord(snapshot);
+  if (!snapshotRecord) return null;
+  if (registryLookupCache.has(snapshotRecord)) {
+    return registryLookupCache.get(snapshotRecord) ?? null;
   }
-  const nodes = Array.isArray(snapshot.nodes) ? snapshot.nodes : null;
+  const nodes = Array.isArray(snapshotRecord.nodes) ? snapshotRecord.nodes : null;
   if (!nodes) return null;
-  const entries = normalizeDaedalusRegistry(nodes, snapshot.types ?? undefined);
+  const entries = normalizeDaedalusRegistry(nodes, Array.isArray(snapshotRecord.types) ? snapshotRecord.types : undefined);
   const byId = new Map(entries.map((entry) => [entry.id, entry]));
   const lookup = { entries, byId };
-  registryLookupCache.set(snapshot, lookup);
+  registryLookupCache.set(snapshotRecord, lookup);
   return lookup;
 };
 
-const findRegistryEntryFor = (snapshot: any, nodeId: string): PipelineRegistryEntry | null => {
+const findRegistryEntryFor = (snapshot: unknown, nodeId: string): PipelineRegistryEntry | null => {
   const lookup = getRegistryLookup(snapshot);
   if (!lookup) return null;
   const resolvedNodeId = resolveRegistrySnapshotNodeId(snapshot, nodeId);
@@ -335,24 +349,24 @@ const resolveRegistryPort = <T>(
   return fallbackKey ? record[fallbackKey] ?? null : null;
 };
 
-export function registryPortMetadataFor(snapshot: any, nodeId: string, portKey: string): PipelinePortMetadata | null {
+export function registryPortMetadataFor(snapshot: unknown, nodeId: string, portKey: string): PipelinePortMetadata | null {
   const entry = findRegistryEntryFor(snapshot, nodeId);
   if (entry?.metadata?.inputPorts) {
     const resolved = resolveRegistryPort(entry.metadata.inputPorts, portKey);
     return normalizePortMetadata(resolved ?? null);
   }
-  const registryNodes = Array.isArray(snapshot?.nodes) ? snapshot.nodes : [];
+  const snapshotRecord = asRecord(snapshot);
+  const registryNodes = Array.isArray(snapshotRecord?.nodes) ? snapshotRecord.nodes : [];
   const resolvedNodeId = resolveRegistrySnapshotNodeId(snapshot, nodeId);
   const registryNode = resolvedNodeId
-    ? registryNodes.find((node: any) => String(node?.id ?? '') === resolvedNodeId) ?? null
+    ? registryNodes.find((node) => String(asRecord(node)?.id ?? '') === resolvedNodeId) ?? null
     : null;
-  const metadata = registryNode?.metadata ?? null;
-  if (!metadata || typeof metadata !== 'object') return null;
+  const metadata = asRecord(asRecord(registryNode)?.metadata);
+  if (!metadata) return null;
   const normalizedPort = normalizeNodePortKey(portKey);
-  const directPorts = (metadata as { inputPorts?: Record<string, PipelinePortMetadata>; input_ports?: Record<string, PipelinePortMetadata> })
-    .inputPorts ??
-    (metadata as { inputPorts?: Record<string, PipelinePortMetadata>; input_ports?: Record<string, PipelinePortMetadata> })
-      .input_ports;
+  const directPorts =
+    (asRecord(metadata.inputPorts) as Record<string, PipelinePortMetadata> | null) ??
+    (asRecord(metadata.input_ports) as Record<string, PipelinePortMetadata> | null);
   if (directPorts) {
     const normalizedMap = normalizePortMetadataMap(directPorts);
     if (normalizedMap && normalizedMap[normalizedPort]) {
@@ -460,7 +474,7 @@ const enumVariantsFromTypeExpr = (value: unknown): string[] => {
     .filter((name): name is string => Boolean(name && name.length > 0));
 };
 
-export function pipelineDataTypeFromTypeExpr(ty: any): PipelineDataType {
+export function pipelineDataTypeFromTypeExpr(ty: unknown): PipelineDataType {
   if (typeof ty === 'string') {
     const trimmed = ty.trim();
     return trimmed.length ? pipelineDataTypeFromTypeExpr({ Scalar: trimmed }) : 'Generic';
@@ -496,33 +510,36 @@ export function pipelineDataTypeFromTypeExpr(ty: any): PipelineDataType {
   return 'Generic';
 }
 
-export function registryPortTypeFor(snapshot: any, nodeId: string, portKey: string): PipelineDataType | null {
+export function registryPortTypeFor(snapshot: unknown, nodeId: string, portKey: string): PipelineDataType | null {
   const registryEntry = findRegistryEntryFor(snapshot, nodeId);
   if (registryEntry?.inputs) {
     const resolved = resolveRegistryPort(registryEntry.inputs as Record<string, PipelineDataType>, portKey);
     if (resolved) return resolved;
   }
-  const registryNodes = Array.isArray(snapshot?.nodes) ? snapshot.nodes : [];
+  const snapshotRecord = asRecord(snapshot);
+  const registryNodes = Array.isArray(snapshotRecord?.nodes) ? snapshotRecord.nodes : [];
   const resolvedNodeId = resolveRegistrySnapshotNodeId(snapshot, nodeId);
   const registryNode = resolvedNodeId
-    ? registryNodes.find((node: any) => String(node?.id ?? '') === resolvedNodeId) ?? null
+    ? registryNodes.find((node) => String(asRecord(node)?.id ?? '') === resolvedNodeId) ?? null
     : null;
-  const ports = Array.isArray(registryNode?.input_ports)
-    ? registryNode.input_ports
-    : Array.isArray(registryNode?.inputPorts)
-      ? registryNode.inputPorts
+  const registryNodeRecord = asRecord(registryNode);
+  const ports = Array.isArray(registryNodeRecord?.input_ports)
+    ? registryNodeRecord.input_ports
+    : Array.isArray(registryNodeRecord?.inputPorts)
+      ? registryNodeRecord.inputPorts
       : [];
   const normalizedPort = normalizeNodePortKey(portKey);
   const portEntry =
-    ports.find((p: any) => normalizeNodePortKey(String(p?.name ?? '')) === normalizedPort) ?? null;
-  if (!portEntry?.ty) return null;
-  return pipelineDataTypeFromTypeExpr(portEntry.ty);
+    ports.find((p) => normalizeNodePortKey(String(asRecord(p)?.name ?? '')) === normalizedPort) ?? null;
+  const portRecord = asRecord(portEntry);
+  if (!portRecord?.ty) return null;
+  return pipelineDataTypeFromTypeExpr(portRecord.ty);
 }
 
 export function extractNodeValueDescriptors(
   graph: unknown,
   overrides: Record<string, Record<string, PipelineNodeValue>>,
-  registrySnapshot: any
+  registrySnapshot: unknown
 ): PipelineNodeValueDescriptor[] {
   if (!graph || typeof graph !== 'object') return [];
   const plan = graph as {
@@ -685,10 +702,10 @@ export function applyDaedalusNodeOverrides(
 
 export function applyPipelineOverridesToGraph(
   pipelineId: string,
-  graph: any,
+  graph: unknown,
   inputOverridesById: Record<string, Record<string, PipelineNodeValue>>,
   nodeOverridesById: Record<string, Record<string, Record<string, PipelineNodeValue>>>
-): any {
+): unknown {
   if (!graph || typeof graph !== 'object') return graph;
   const inputOverrides = inputOverridesById[pipelineId] ?? {};
   const nodeOverrides = nodeOverridesById[pipelineId] ?? {};
@@ -727,7 +744,7 @@ type PipelineTuningState = {
   get stream(): StreamInfo | null;
   get streamId(): string;
   get pipelineTuningPlan(): PipelineGraphPlan | null;
-  get pipelineTuningGraph(): any;
+  get pipelineTuningGraph(): unknown;
   get pipelineTuningPanelOpen(): boolean;
   set pipelineTuningPanelOpen(value: boolean);
   get pipelineTuningPipelineId(): string | null;
@@ -748,10 +765,10 @@ type PipelineTuningState = {
   set pipelineTuningSize(value: PipelineTuningSize);
   get pipelineTuningUiOverride(): PipelineUi | null;
   set pipelineTuningUiOverride(value: PipelineUi | null);
-  get pipelineTuningGraphOverride(): any;
-  set pipelineTuningGraphOverride(value: any);
-  get pipelineTuningLiveGraph(): any;
-  set pipelineTuningLiveGraph(value: any);
+  get pipelineTuningGraphOverride(): unknown;
+  set pipelineTuningGraphOverride(value: unknown);
+  get pipelineTuningLiveGraph(): unknown;
+  set pipelineTuningLiveGraph(value: unknown);
   get pipelineInputOverridesById(): Record<string, Record<string, PipelineNodeValue>>;
   set pipelineInputOverridesById(value: Record<string, Record<string, PipelineNodeValue>>);
   get pipelineNodeOverridesById(): Record<string, Record<string, Record<string, PipelineNodeValue>>>;
@@ -773,8 +790,8 @@ type PipelineTuningState = {
   get pipelineTuningLastAppliedNodeOverridesById(): Record<string, Record<string, Record<string, PipelineNodeValue>>>;
   set pipelineTuningLastAppliedNodeOverridesById(value: Record<string, Record<string, Record<string, PipelineNodeValue>>>);
   get pipelineTuningApplyRafById(): Map<string, number>;
-  get pipelineGraphCache(): Record<string, any>;
-  get pipelineRegistrySnapshot(): any;
+  get pipelineGraphCache(): Record<string, unknown>;
+  get pipelineRegistrySnapshot(): unknown;
 };
 
 type PipelineTuningDeps = {
@@ -782,7 +799,7 @@ type PipelineTuningDeps = {
   ensurePipelineGraphAndOutputs: (
     pipelineId: string,
     forceRefresh?: boolean
-  ) => Promise<{ graphJson: any; filtered: string[]; types: Record<string, PipelineDataType | null | undefined> }>;
+  ) => Promise<{ graphJson: unknown; filtered: string[]; types: Record<string, PipelineDataType | null | undefined> }>;
   awaitStreamUpdatesSocket: (streamId: string, timeoutMs?: number) => Promise<StreamUpdatesSocket>;
 };
 
@@ -825,7 +842,7 @@ export function createPipelineTuningController(state: PipelineTuningState, deps:
     startPipelineTuningResize
   } = pointerHandlers;
 
-  const extractPipelineUi = (graph: any): PipelineUi | null => {
+  const extractPipelineUi = (graph: unknown): PipelineUi | null => {
     const parseMaybeNestedJson = (value: string): unknown => {
       const parsed = parseMetadataValue(value);
       if (typeof parsed !== 'string') return parsed;
@@ -837,18 +854,20 @@ export function createPipelineTuningController(state: PipelineTuningState, deps:
       return parsed;
     };
 
-    if (!graph || typeof graph !== 'object') return null;
+    const graphRecord = asRecord(graph);
+    if (!graphRecord) return null;
     const metadata =
-      graph?.metadata ??
-      graph?.daedalus?.metadata ??
-      graph?.graph?.metadata ??
-      graph?.pipeline_graph?.metadata ??
+      graphRecord.metadata ??
+      asRecord(graphRecord.daedalus)?.metadata ??
+      asRecord(graphRecord.graph)?.metadata ??
+      asRecord(graphRecord.pipeline_graph)?.metadata ??
       null;
-    if (!metadata || typeof metadata !== 'object') return null;
+    const metadataRecord = asRecord(metadata);
+    if (!metadataRecord) return null;
     const raw =
-      (metadata as any)[PIPELINE_UI_METADATA_KEY] ??
-      (metadata as any)['helios.pipeline_ui'] ??
-      (metadata as any)['pipeline.ui'] ??
+      metadataRecord[PIPELINE_UI_METADATA_KEY] ??
+      metadataRecord['helios.pipeline_ui'] ??
+      metadataRecord['pipeline.ui'] ??
       null;
     if (!raw) return null;
     if (typeof raw === 'string') {
@@ -864,31 +883,33 @@ export function createPipelineTuningController(state: PipelineTuningState, deps:
     return raw as PipelineUi;
   };
 
-  const extractStreamGraphForPipeline = (pipelineId: string): any | null => {
+  const extractStreamGraphForPipeline = (pipelineId: string): unknown | null => {
     const stream = state.stream;
     const manifest = stream?.manifest ?? null;
     if (!manifest) return null;
     const normalized = String(pipelineId ?? '').trim();
     if (!normalized.length) return null;
-    const readGraph = (value: any) => value?.pipeline_graph ?? value?.pipelineGraph ?? value?.graph ?? null;
-    const activeId = typeof (manifest as any)?.active_pipeline_id === 'string'
-      ? (manifest as any).active_pipeline_id.trim()
-      : '';
-    const legacyId = typeof (manifest as any)?.pipeline_id === 'string'
-      ? (manifest as any).pipeline_id.trim()
-      : '';
+    const manifestRecord = asRecord(manifest);
+    const readGraph = (value: unknown) => {
+      const record = asRecord(value);
+      return record?.pipeline_graph ?? record?.pipelineGraph ?? record?.graph ?? null;
+    };
+    const activeId = asTrimmedString(manifestRecord?.active_pipeline_id);
+    const legacyId = asTrimmedString(manifestRecord?.pipeline_id);
     if ((activeId && activeId === normalized) || (legacyId && legacyId === normalized)) {
       return readGraph(manifest);
     }
-    if (Array.isArray((manifest as any)?.pipelines)) {
-      for (const entry of (manifest as any).pipelines) {
+    if (Array.isArray(manifestRecord?.pipelines)) {
+      for (const entry of manifestRecord.pipelines) {
+        const entryRecord = asRecord(entry);
+        if (!entryRecord) continue;
         const raw =
-          typeof entry?.pipeline_id === 'string'
-            ? entry.pipeline_id
-            : typeof entry?.pipelineId === 'string'
-              ? entry.pipelineId
-              : typeof entry?.id === 'string'
-                ? entry.id
+          typeof entryRecord.pipeline_id === 'string'
+            ? entryRecord.pipeline_id
+            : typeof entryRecord.pipelineId === 'string'
+              ? entryRecord.pipelineId
+              : typeof entryRecord.id === 'string'
+                ? entryRecord.id
                 : '';
         const entryId = raw.trim();
         if (entryId && entryId === normalized) {
@@ -956,7 +977,7 @@ export function createPipelineTuningController(state: PipelineTuningState, deps:
     stopPipelineTuningPointerTracking();
   }
 
-  function applyPipelineOverridesToGraphForState(pipelineId: string, graph: any): any {
+  function applyPipelineOverridesToGraphForState(pipelineId: string, graph: unknown): unknown {
     return applyPipelineOverridesToGraph(
       pipelineId,
       graph,

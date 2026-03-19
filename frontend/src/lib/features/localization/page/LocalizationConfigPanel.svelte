@@ -10,6 +10,7 @@
   } from '$lib/features/localization/localizationConfig';
   import type { LocalizationPipelineSource } from '$lib/features/localization/pipelineSources';
   import type { FieldMapSummary } from '$lib/features/localization/fieldMaps';
+  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
   type RuntimeTuningFieldKey = Extract<keyof LocalizationSolverRuntimeTuningConfig, string>;
 
@@ -50,6 +51,7 @@
     solverNameInput?: string;
     onCommitSolverName?: () => void;
     activeSolverMode?: LocalizationSolverMode | null;
+    supportedSolverModes?: LocalizationSolverMode[];
     onSetSolverMode?: (mode: LocalizationSolverMode) => void;
     activeSolverSourceIds?: string[];
     onSetActiveSolverUseAllSources?: (useAll: boolean) => void;
@@ -63,6 +65,9 @@
     tagSizeInput?: string;
     tagSizeError?: string | null;
     onCommitTagSize?: () => void;
+    excludedTagIdsInput?: string;
+    excludedTagIdsError?: string | null;
+    onCommitExcludedTagIds?: () => void;
     fieldOriginMode?: LocalizationFieldOriginMode;
     fieldOriginCustom?: LocalizationCustomFieldOrigin | null;
     onSetFieldOriginMode?: (mode: LocalizationFieldOriginMode) => void;
@@ -105,10 +110,6 @@
     onSetSourceWeight?: (sourceId: string, value: string) => void;
     sourceUsedByProfilesById?: Record<string, string[]>;
     sourceStatusRows?: SourceStatusRow[];
-    feedMessage?: string | null;
-    pipelineStatusError?: string | null;
-    pipelineOutputsError?: string | null;
-    localizationConfigError?: string | null;
   };
 
   let {
@@ -126,6 +127,7 @@
     solverNameInput = $bindable(''),
     onCommitSolverName,
     activeSolverMode = null,
+    supportedSolverModes = [],
     onSetSolverMode,
     activeSolverSourceIds = [],
     onSetActiveSolverUseAllSources,
@@ -139,6 +141,9 @@
     tagSizeInput = $bindable(''),
     tagSizeError = null,
     onCommitTagSize,
+    excludedTagIdsInput = $bindable(''),
+    excludedTagIdsError = null,
+    onCommitExcludedTagIds,
     fieldOriginMode = 'blue',
     fieldOriginCustom = { x: 0, z: 0, yawDeg: 0 },
     onSetFieldOriginMode,
@@ -220,18 +225,14 @@
     groupedSources = [],
     openSourceGroups = [],
     onToggleSourceGroup,
-    calibratedCameraIds = new Set<string>(),
+    calibratedCameraIds = new SvelteSet<string>(),
     isSourceCalibrated = () => true,
     selectedSourceIds = [],
     onToggleSource,
     sourceWeightsById = {},
     onSetSourceWeight,
     sourceUsedByProfilesById = {},
-    sourceStatusRows = [],
-    feedMessage = null,
-    pipelineStatusError = null,
-    pipelineOutputsError = null,
-    localizationConfigError = null
+    sourceStatusRows = []
   }: LocalizationConfigPanelProps = $props();
 
   const hasActiveProfile = $derived(Boolean(activeProfileId));
@@ -239,6 +240,35 @@
   const canRemoveSolver = $derived(solverCount > 1);
   const solverUsesAllSources = $derived(activeSolverSourceIds.length === 0);
   const solverHasTemporalOverride = $derived(activeSolverTemporalOverride !== null);
+  const solverModeDisplayLabel = (mode: LocalizationSolverMode): string => {
+    switch (mode) {
+      case 'group_solve':
+        return 'Group solve';
+      case 'robust_group_solve':
+        return 'Robust group solve (outlier-pruned)';
+      case 'per_camera_merge':
+        return 'Per-camera merge';
+      case 'triangulate':
+        return 'Triangulate (merge cameras)';
+      default:
+        return mode;
+    }
+  };
+  const supportedSolverModeSet = $derived.by(() => new SvelteSet(supportedSolverModes));
+  const visibleSolverModes = $derived.by<LocalizationSolverMode[]>(() => {
+    const seen = new SvelteSet<string>();
+    const ordered: LocalizationSolverMode[] = [];
+    for (const mode of supportedSolverModes) {
+      const normalized = String(mode ?? '').trim();
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      ordered.push(mode);
+    }
+    if (activeSolverMode && !seen.has(activeSolverMode)) {
+      ordered.push(activeSolverMode);
+    }
+    return ordered;
+  });
   type SetupTab = 'sources' | 'solver' | 'field' | 'advanced';
   type SetupTabSpec = {
     id: SetupTab;
@@ -256,10 +286,10 @@
   let sourceSearch = $state('');
   let sourceFilter = $state<'all' | 'selected'>('all');
 
-  const selectedSourceSet = $derived.by(() => new Set(selectedSourceIds));
+  const selectedSourceSet = $derived.by(() => new SvelteSet(selectedSourceIds));
   const sourceStatusById = $derived.by(() => {
     const entries: Array<[string, SourceStatusRow]> = sourceStatusRows.map((entry) => [entry.source.id, entry]);
-    return new Map(entries);
+    return new SvelteMap(entries);
   });
   const normalizedSourceSearch = $derived.by(() => sourceSearch.trim().toLowerCase());
   const showSelectedOnly = $derived.by(() => sourceFilter === 'selected');
@@ -359,24 +389,14 @@
       .filter((group): group is SourceGroup => Boolean(group))
   );
   const solverSourceSet = $derived.by<Set<string>>(() =>
-    solverUsesAllSources ? new Set(selectedSourceIds) : new Set(activeSolverSourceIds)
+    solverUsesAllSources ? new SvelteSet(selectedSourceIds) : new SvelteSet(activeSolverSourceIds)
   );
   const solverModeLabel = $derived.by(() => {
-    switch (activeSolverMode) {
-      case 'group_solve':
-        return 'Group solve';
-      case 'robust_group_solve':
-        return 'Robust group solve';
-      case 'per_camera_merge':
-        return 'Per-camera merge';
-      case 'triangulate':
-        return 'Triangulate';
-      default:
-        return 'Unset';
-    }
+    if (!activeSolverMode) return 'Unset';
+    return solverModeDisplayLabel(activeSolverMode);
   });
   const solverSourceCount = $derived.by(() => {
-    const compatibleIds = new Set(
+    const compatibleIds = new SvelteSet(
       groupedSources.flatMap((group) => group.pipelines.flatMap((pipeline) => pipeline.sources.map((source) => source.id)))
     );
     let count = 0;
@@ -485,8 +505,6 @@
   type RuntimeTuningFieldSpec = {
     key: RuntimeTuningFieldKey;
     label: string;
-    min: number;
-    max: number;
     step: string;
   };
 
@@ -503,11 +521,11 @@
       label: 'Observation thresholds',
       description: 'Solve acceptance thresholds and single-vs-multi-tag confidence gates.',
       fields: [
-        { key: 'minObservationWeight', label: 'Min observation weight', min: 0, max: 5, step: '0.01' },
-        { key: 'minSingleTagSolveWeight', label: 'Min single-tag solve weight', min: 0, max: 5, step: '0.01' },
-        { key: 'minMultiTagTotalWeight', label: 'Min multi-tag total weight', min: 0, max: 20, step: '0.01' },
-        { key: 'minMultiTagEffectiveCount', label: 'Min multi-tag effective count', min: 0, max: 20, step: '0.01' },
-        { key: 'weakSingleTagMargin', label: 'Weak single-tag margin', min: 0, max: 5, step: '0.01' }
+        { key: 'minObservationWeight', label: 'Min observation weight', step: '0.01' },
+        { key: 'minSingleTagSolveWeight', label: 'Min single-tag solve weight', step: '0.01' },
+        { key: 'minMultiTagTotalWeight', label: 'Min multi-tag total weight', step: '0.01' },
+        { key: 'minMultiTagEffectiveCount', label: 'Min multi-tag effective count', step: '0.01' },
+        { key: 'weakSingleTagMargin', label: 'Weak single-tag margin', step: '0.01' }
       ]
     },
     {
@@ -515,13 +533,13 @@
       label: 'Per-camera merge penalties',
       description: 'Height-delta thresholds and per-tier penalties for merge weighting.',
       fields: [
-        { key: 'coplanarHeightDeltaM', label: 'Co-planar map height delta (m)', min: 0, max: 5, step: '0.01' },
-        { key: 'severeObservedHeightDeltaM', label: 'Severe observed height delta (m)', min: 0, max: 10, step: '0.01' },
-        { key: 'moderateObservedHeightDeltaM', label: 'Moderate observed height delta (m)', min: 0, max: 10, step: '0.01' },
-        { key: 'mildObservedHeightDeltaM', label: 'Mild observed height delta (m)', min: 0, max: 10, step: '0.01' },
-        { key: 'severePenalty', label: 'Severe penalty', min: 0, max: 1, step: '0.01' },
-        { key: 'moderatePenalty', label: 'Moderate penalty', min: 0, max: 1, step: '0.01' },
-        { key: 'mildPenalty', label: 'Mild penalty', min: 0, max: 1, step: '0.01' }
+        { key: 'coplanarHeightDeltaM', label: 'Co-planar map height delta (m)', step: '0.01' },
+        { key: 'severeObservedHeightDeltaM', label: 'Severe observed height delta (m)', step: '0.01' },
+        { key: 'moderateObservedHeightDeltaM', label: 'Moderate observed height delta (m)', step: '0.01' },
+        { key: 'mildObservedHeightDeltaM', label: 'Mild observed height delta (m)', step: '0.01' },
+        { key: 'severePenalty', label: 'Severe penalty', step: '0.01' },
+        { key: 'moderatePenalty', label: 'Moderate penalty', step: '0.01' },
+        { key: 'mildPenalty', label: 'Mild penalty', step: '0.01' }
       ]
     },
     {
@@ -529,8 +547,8 @@
       label: 'Temporal dt scaling',
       description: 'Clamp the frame-time scaling applied to temporal gains.',
       fields: [
-        { key: 'dtScaleMin', label: 'Dt scale min', min: 0.01, max: 20, step: '0.01' },
-        { key: 'dtScaleMax', label: 'Dt scale max', min: 0.01, max: 20, step: '0.01' }
+        { key: 'dtScaleMin', label: 'Dt scale min', step: '0.01' },
+        { key: 'dtScaleMax', label: 'Dt scale max', step: '0.01' }
       ]
     },
     {
@@ -538,13 +556,13 @@
       label: 'Tag switch handling',
       description: 'Caps, reject windows, and gain dampening when switching single-tag identities.',
       fields: [
-        { key: 'switchedSingleTagMaxTranslationJumpM', label: 'Switch max translation jump (m)', min: 0.001, max: 50, step: '0.001' },
-        { key: 'switchedSingleTagMaxRotationJumpDeg', label: 'Switch max rotation jump (deg)', min: 0.01, max: 180, step: '0.01' },
-        { key: 'switchedSingleTagRejectWindowScale', label: 'Switch reject window scale', min: 0.1, max: 10, step: '0.01' },
-        { key: 'switchedSingleTagRejectWindowMinMs', label: 'Switch reject window min (ms)', min: 0, max: 20000, step: '1' },
-        { key: 'switchedSingleTagGainDamp', label: 'Switch gain damp', min: 0, max: 1, step: '0.01' },
-        { key: 'switchedSingleTagMinTranslationGain', label: 'Switch min translation gain', min: 0, max: 1, step: '0.01' },
-        { key: 'switchedSingleTagMinRotationGain', label: 'Switch min rotation gain', min: 0, max: 1, step: '0.01' }
+        { key: 'switchedSingleTagMaxTranslationJumpM', label: 'Switch max translation jump (m)', step: '0.001' },
+        { key: 'switchedSingleTagMaxRotationJumpDeg', label: 'Switch max rotation jump (deg)', step: '0.01' },
+        { key: 'switchedSingleTagRejectWindowScale', label: 'Switch reject window scale', step: '0.01' },
+        { key: 'switchedSingleTagRejectWindowMinMs', label: 'Switch reject window min (ms)', step: '1' },
+        { key: 'switchedSingleTagGainDamp', label: 'Switch gain damp', step: '0.01' },
+        { key: 'switchedSingleTagMinTranslationGain', label: 'Switch min translation gain', step: '0.01' },
+        { key: 'switchedSingleTagMinRotationGain', label: 'Switch min rotation gain', step: '0.01' }
       ]
     },
     {
@@ -552,13 +570,13 @@
       label: 'Multi-to-single drop handling',
       description: 'Caps, reject windows, and gain dampening when dropping to single-tag tracking.',
       fields: [
-        { key: 'droppedMultiToSingleMaxTranslationJumpM', label: 'Drop max translation jump (m)', min: 0.001, max: 50, step: '0.001' },
-        { key: 'droppedMultiToSingleMaxRotationJumpDeg', label: 'Drop max rotation jump (deg)', min: 0.01, max: 180, step: '0.01' },
-        { key: 'droppedMultiToSingleRejectWindowScale', label: 'Drop reject window scale', min: 0.1, max: 10, step: '0.01' },
-        { key: 'droppedMultiToSingleRejectWindowMinMs', label: 'Drop reject window min (ms)', min: 0, max: 20000, step: '1' },
-        { key: 'droppedMultiToSingleGainDamp', label: 'Drop gain damp', min: 0, max: 1, step: '0.01' },
-        { key: 'droppedMultiToSingleMinTranslationGain', label: 'Drop min translation gain', min: 0, max: 1, step: '0.01' },
-        { key: 'droppedMultiToSingleMinRotationGain', label: 'Drop min rotation gain', min: 0, max: 1, step: '0.01' }
+        { key: 'droppedMultiToSingleMaxTranslationJumpM', label: 'Drop max translation jump (m)', step: '0.001' },
+        { key: 'droppedMultiToSingleMaxRotationJumpDeg', label: 'Drop max rotation jump (deg)', step: '0.01' },
+        { key: 'droppedMultiToSingleRejectWindowScale', label: 'Drop reject window scale', step: '0.01' },
+        { key: 'droppedMultiToSingleRejectWindowMinMs', label: 'Drop reject window min (ms)', step: '1' },
+        { key: 'droppedMultiToSingleGainDamp', label: 'Drop gain damp', step: '0.01' },
+        { key: 'droppedMultiToSingleMinTranslationGain', label: 'Drop min translation gain', step: '0.01' },
+        { key: 'droppedMultiToSingleMinRotationGain', label: 'Drop min rotation gain', step: '0.01' }
       ]
     }
   ];
@@ -924,10 +942,12 @@
                         onchange={(event) => onSetSolverMode?.((event.currentTarget as HTMLSelectElement).value as LocalizationSolverMode)}
                         disabled={localizationConfigLoading}
                       >
-                        <option value="group_solve">Group solve</option>
-                        <option value="robust_group_solve">Robust group solve (outlier-pruned)</option>
-                        <option value="per_camera_merge">Per-camera merge</option>
-                        <option value="triangulate">Triangulate (merge cameras)</option>
+                        {#each visibleSolverModes as mode (mode)}
+                          <option value={mode}>
+                            {solverModeDisplayLabel(mode)}
+                            {#if !supportedSolverModeSet.has(mode)} (unsupported by backend){/if}
+                          </option>
+                        {/each}
                       </select>
                     {/if}
                     <div class="rounded border border-surface-800/70 bg-surface-950/50 px-3 py-3">
@@ -958,8 +978,6 @@
                             <span class="uppercase tracking-[0.3em] text-surface-500">Single-tag translation alpha</span>
                             <input
                               type="number"
-                              min="0"
-                              max="1"
                               step="0.01"
                               value={activeSolverTemporalOverride?.singleTagTranslationAlpha ?? 0}
                               disabled={localizationConfigLoading}
@@ -971,8 +989,6 @@
                             <span class="uppercase tracking-[0.3em] text-surface-500">Single-tag rotation alpha</span>
                             <input
                               type="number"
-                              min="0"
-                              max="1"
                               step="0.01"
                               value={activeSolverTemporalOverride?.singleTagRotationAlpha ?? 0}
                               disabled={localizationConfigLoading}
@@ -984,8 +1000,6 @@
                             <span class="uppercase tracking-[0.3em] text-surface-500">Multi-tag translation alpha</span>
                             <input
                               type="number"
-                              min="0"
-                              max="1"
                               step="0.01"
                               value={activeSolverTemporalOverride?.multiTagTranslationAlpha ?? 0}
                               disabled={localizationConfigLoading}
@@ -997,8 +1011,6 @@
                             <span class="uppercase tracking-[0.3em] text-surface-500">Multi-tag rotation alpha</span>
                             <input
                               type="number"
-                              min="0"
-                              max="1"
                               step="0.01"
                               value={activeSolverTemporalOverride?.multiTagRotationAlpha ?? 0}
                               disabled={localizationConfigLoading}
@@ -1010,8 +1022,6 @@
                             <span class="uppercase tracking-[0.3em] text-surface-500">Max jump translation (m)</span>
                             <input
                               type="number"
-                              min="0.01"
-                              max="50"
                               step="0.01"
                               value={activeSolverTemporalOverride?.maxTranslationJumpM ?? 0}
                               disabled={localizationConfigLoading}
@@ -1023,8 +1033,6 @@
                             <span class="uppercase tracking-[0.3em] text-surface-500">Max jump rotation (deg)</span>
                             <input
                               type="number"
-                              min="0.1"
-                              max="180"
                               step="0.1"
                               value={activeSolverTemporalOverride?.maxRotationJumpDeg ?? 0}
                               disabled={localizationConfigLoading}
@@ -1036,8 +1044,6 @@
                             <span class="uppercase tracking-[0.3em] text-surface-500">Reanchor reject window (ms)</span>
                             <input
                               type="number"
-                              min="50"
-                              max="5000"
                               step="10"
                               value={activeSolverTemporalOverride?.reanchorRejectWindowMs ?? 0}
                               disabled={localizationConfigLoading}
@@ -1191,8 +1197,6 @@
                                       </span>
                                       <input
                                         type="number"
-                                        min="0"
-                                        max="10"
                                         step="0.01"
                                         value={sourceWeight}
                                         class="w-full rounded border border-surface-800 bg-surface-950/80 px-2 py-1 text-micro text-surface-100 focus:border-primary-400 focus:outline-none"
@@ -1270,6 +1274,21 @@
                     <p class="text-micro text-rose-200">{tagSizeError}</p>
                   {/if}
                   <p class="text-micro text-surface-500">Required for pose solving; field map sizes are ignored.</p>
+                </div>
+
+                <div class="grid gap-2">
+                  <p class="text-micro-tight uppercase tracking-[0.35em] text-surface-500">Excluded tag IDs</p>
+                  <input
+                    class="w-full rounded border border-surface-800 bg-surface-950/70 px-3 py-2 text-xs text-surface-100 placeholder:text-surface-600 focus:border-primary-400 focus:outline-none"
+                    placeholder="e.g. 1, 2 5"
+                    bind:value={excludedTagIdsInput}
+                    onchange={onCommitExcludedTagIds}
+                    disabled={!hasActiveProfile || localizationConfigLoading}
+                  />
+                  {#if excludedTagIdsError}
+                    <p class="text-micro text-rose-200">{excludedTagIdsError}</p>
+                  {/if}
+                  <p class="text-micro text-surface-500">Comma/space-separated IDs to ignore during localization solve.</p>
                 </div>
 
                 <div class="grid gap-2">
@@ -1403,10 +1422,9 @@
                       : 'border-surface-700/70 bg-surface-900/70 text-surface-200 hover:border-surface-500 hover:text-white'
                   }`}
                 >
-                  {mapUploadBusy ? 'Uploading…' : 'Upload .fmap'}
+                  {mapUploadBusy ? 'Uploading…' : 'Upload map'}
                   <input
                     type="file"
-                    accept=".fmap"
                     class="sr-only"
                     onchange={(event) => {
                       const input = event.currentTarget as HTMLInputElement;
@@ -1464,8 +1482,6 @@
                       <span class="uppercase tracking-[0.3em] text-surface-500">Single-tag translation alpha</span>
                       <input
                         type="number"
-                        min="0"
-                        max="1"
                         step="0.01"
                         value={profileTemporalStabilization.singleTagTranslationAlpha}
                         disabled={!hasActiveProfile || localizationConfigLoading}
@@ -1477,8 +1493,6 @@
                       <span class="uppercase tracking-[0.3em] text-surface-500">Single-tag rotation alpha</span>
                       <input
                         type="number"
-                        min="0"
-                        max="1"
                         step="0.01"
                         value={profileTemporalStabilization.singleTagRotationAlpha}
                         disabled={!hasActiveProfile || localizationConfigLoading}
@@ -1490,8 +1504,6 @@
                       <span class="uppercase tracking-[0.3em] text-surface-500">Multi-tag translation alpha</span>
                       <input
                         type="number"
-                        min="0"
-                        max="1"
                         step="0.01"
                         value={profileTemporalStabilization.multiTagTranslationAlpha}
                         disabled={!hasActiveProfile || localizationConfigLoading}
@@ -1503,8 +1515,6 @@
                       <span class="uppercase tracking-[0.3em] text-surface-500">Multi-tag rotation alpha</span>
                       <input
                         type="number"
-                        min="0"
-                        max="1"
                         step="0.01"
                         value={profileTemporalStabilization.multiTagRotationAlpha}
                         disabled={!hasActiveProfile || localizationConfigLoading}
@@ -1516,8 +1526,6 @@
                       <span class="uppercase tracking-[0.3em] text-surface-500">Max jump translation (m)</span>
                       <input
                         type="number"
-                        min="0.01"
-                        max="50"
                         step="0.01"
                         value={profileTemporalStabilization.maxTranslationJumpM}
                         disabled={!hasActiveProfile || localizationConfigLoading}
@@ -1529,8 +1537,6 @@
                       <span class="uppercase tracking-[0.3em] text-surface-500">Max jump rotation (deg)</span>
                       <input
                         type="number"
-                        min="0.1"
-                        max="180"
                         step="0.1"
                         value={profileTemporalStabilization.maxRotationJumpDeg}
                         disabled={!hasActiveProfile || localizationConfigLoading}
@@ -1542,8 +1548,6 @@
                       <span class="uppercase tracking-[0.3em] text-surface-500">Reanchor reject window (ms)</span>
                       <input
                         type="number"
-                        min="50"
-                        max="5000"
                         step="10"
                         value={profileTemporalStabilization.reanchorRejectWindowMs}
                         disabled={!hasActiveProfile || localizationConfigLoading}
@@ -1573,8 +1577,6 @@
                         <span class="uppercase tracking-[0.3em] text-surface-500">{field.label}</span>
                         <input
                           type="number"
-                          min={field.min}
-                          max={field.max}
                           step={field.step}
                           value={activeSolverRuntimeTuning[field.key]}
                           disabled={localizationConfigLoading}

@@ -30,6 +30,7 @@ Notes (this is on purpose):
 
 - Applying an update will stop all streams and reboot the device.
 - The Web UI will disconnect during the reboot, then reload when the device comes back.
+- The current updater flow applies directly from the selected image source; you do not need to manage a separate user-facing staging step.
 
 ## Canceling
 

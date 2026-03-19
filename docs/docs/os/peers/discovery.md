@@ -15,7 +15,8 @@ The UI runs both by default.
 
 - Start a discovery run (mDNS + broadcast).
 - See when the last run started, what scopes were used, and the expected completion time.
-- Review which peers were found and add them to your registry.
+- Automatically register responding peers into your peer list.
+- Review recent discovery activity from the add-peer modal.
 
 ## When discovery works (and when it does not)
 

@@ -4,6 +4,8 @@
   import { connectionState } from '$lib/api/connection';
   import { buildHttpCandidateUrls } from '$lib/api/httpCandidates';
   import { apiUrl } from '$lib/api/httpClient';
+  import { fetchPeerStreamFormat } from '$lib/api/peers';
+  import { resolveStreamPreviewFormat, type StreamPreviewFormat } from '$lib/api/streamPreviewFormat';
   import { StreamsApi } from '$lib/api/streamsApi';
   import EncodedStreamPlayer from '$lib/components/EncodedStreamPlayer.svelte';
   import MjpegStreamPlayer from '$lib/components/MjpegStreamPlayer.svelte';
@@ -11,6 +13,7 @@
     floatingStreamViewer,
     type FloatingStreamStatus
   } from '$lib/stores/floatingStreamViewer';
+  import { SvelteURLSearchParams } from 'svelte/reactivity';
 
   type StreamPreviewProps = {
     className?: string;
@@ -103,9 +106,30 @@
   const toggleButtonBase =
     'pointer-events-auto flex h-16 w-16 items-center justify-center rounded-full bg-black/70 text-white shadow-lg transition hover:bg-black/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:bg-surface-700 disabled:text-surface-400 disabled:shadow-none md:h-20 md:w-20';
   const toggleIconClass = 'h-10 w-10 md:h-12 md:w-12';
+  type PeerStreamRef = { peerId: string; streamId: string };
+
+  function parsePeerStreamRef(raw: string | null | undefined): PeerStreamRef | null {
+    const value = String(raw ?? '').trim();
+    if (!value.startsWith('peer:')) return null;
+    const rest = value.slice('peer:'.length);
+    const splitIndex = rest.indexOf(':');
+    if (splitIndex <= 0 || splitIndex >= rest.length - 1) return null;
+    const peerId = rest.slice(0, splitIndex).trim();
+    const streamId = rest.slice(splitIndex + 1).trim();
+    if (!peerId || !streamId) return null;
+    return { peerId, streamId };
+  }
+
+  function peerProxyPath(peer: PeerStreamRef, endpoint: 'preview' | 'frame' | 'format'): string {
+    return `/peers/${encodeURIComponent(peer.peerId)}/streams/${encodeURIComponent(peer.streamId)}/${endpoint}`;
+  }
 
 
-  function mapEncodedInfoFormat(raw: unknown): ResolvedPreviewFormat | null {
+  function previewFormatCacheKey(peer: PeerStreamRef | null, sessionId: string): string {
+    return peer ? `peer:${peer.peerId}:${peer.streamId}` : `stream:${sessionId}`;
+  }
+
+  function mapEncodedInfoFormat(raw: unknown): StreamPreviewFormat | null {
     if (!raw || typeof raw !== 'object' || !('format' in raw)) return null;
     const format = (raw as { format?: unknown }).format;
     if (format === 'mjpeg' || format === 'h264' || format === 'h265') return format;
@@ -119,10 +143,16 @@
       return;
     }
     if (!captureSessionId) return;
+    const sessionId = captureSessionId;
+    const peer = parsePeerStreamRef(sessionId);
     try {
-      const json = await StreamsApi.streamFormat({ id: captureSessionId });
-      const mapped = mapEncodedInfoFormat(json);
-      if (mapped) {
+      const mapped = await resolveStreamPreviewFormat(previewFormatCacheKey(peer, sessionId), async () => {
+        const json = peer
+          ? await fetchPeerStreamFormat(peer.peerId, peer.streamId)
+          : await StreamsApi.streamFormat({ id: sessionId });
+        return mapEncodedInfoFormat(json);
+      });
+      if (mapped && captureSessionId === sessionId) {
         resolvedFormat = mapped;
       }
     } catch {
@@ -445,12 +475,16 @@
     if (resolvedFormat === 'unknown') {
       return null;
     }
-    const params = new URLSearchParams();
+    const params = new SvelteURLSearchParams();
     if (pipelineId?.trim()) params.set('pipeline', pipelineId.trim());
     if (pipelineOutput?.trim()) params.set('output', pipelineOutput.trim());
     if (previewNonce > 0) params.set('cb', String(previewNonce));
     const suffix = params.toString();
     const query = suffix.length ? `?${suffix}` : '';
+    const peer = parsePeerStreamRef(captureSessionId);
+    if (peer) {
+      return apiUrl(`${peerProxyPath(peer, 'preview')}${query}`);
+    }
     if (resolvedFormat === 'mjpeg') {
       const ref = captureSessionId ?? captureSessionAlias;
       if (!ref) return null;
@@ -463,9 +497,13 @@
   function buildFrameUrl(): string | null {
     const ref = captureSessionId;
     if (!ref) return null;
-    const params = new URLSearchParams({ t: String(frameNonce) });
+    const peer = parsePeerStreamRef(ref);
+    const params = new SvelteURLSearchParams({ t: String(frameNonce) });
     if (pipelineId?.trim()) params.set('pipeline', pipelineId.trim());
     if (pipelineOutput?.trim()) params.set('output', pipelineOutput.trim());
+    if (peer) {
+      return apiUrl(`${peerProxyPath(peer, 'frame')}?${params.toString()}`);
+    }
     return apiUrl(`/streams/${encodeURIComponent(ref)}/frame?${params.toString()}`);
   }
 

@@ -44,7 +44,7 @@ async fn updates_loop(socket: WebSocket, state: AppState, heartbeat: Duration) {
     heartbeat_ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
     let ready = UpdatesEvent::Ready { heartbeat_ms: heartbeat.as_millis() as u64 };
-    if tx.send(Message::Text(serde_json::to_string(&ready).unwrap_or_default())).await.is_err() {
+    if tx.send(Message::Text(serde_json::to_string(&ready).unwrap_or_default().into())).await.is_err() {
         return;
     }
 
@@ -54,13 +54,13 @@ async fn updates_loop(socket: WebSocket, state: AppState, heartbeat: Duration) {
                 match update {
                     Ok(event) => {
                         let body = serde_json::to_string(&UpdatesEvent::Change { event }).unwrap_or_default();
-                        if tx.send(Message::Text(body)).await.is_err() {
+                        if tx.send(Message::Text(body.into())).await.is_err() {
                             break;
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(skipped)) => {
                         let body = serde_json::to_string(&UpdatesEvent::Error { message: format!("updates stream lagged by {skipped} events") }).unwrap_or_default();
-                        if tx.send(Message::Text(body)).await.is_err() {
+                        if tx.send(Message::Text(body.into())).await.is_err() {
                             break;
                         }
                     }
@@ -69,7 +69,7 @@ async fn updates_loop(socket: WebSocket, state: AppState, heartbeat: Duration) {
             }
             _ = heartbeat_ticker.tick() => {
                 let heartbeat_event = UpdatesEvent::Heartbeat { timestamp_ms: chrono::Utc::now().timestamp_millis().max(0) as u64 };
-                if tx.send(Message::Text(serde_json::to_string(&heartbeat_event).unwrap_or_default())).await.is_err() {
+                if tx.send(Message::Text(serde_json::to_string(&heartbeat_event).unwrap_or_default().into())).await.is_err() {
                     break;
                 }
             }
@@ -107,12 +107,17 @@ fn realtime_updates_schema() -> serde_json::Value {
                     "type": { "type": "string", "enum": ["change"] },
                     "event": {
                         "type": "object",
-                        "required": ["seq", "timestamp_ms", "origin", "kind", "path"],
+                        "required": ["seq", "timestamp_ms", "origin", "domain", "kind", "operation", "entity", "revision", "path"],
                         "properties": {
                             "seq": { "type": "integer", "minimum": 1 },
                             "timestamp_ms": { "type": "integer", "minimum": 0 },
                             "origin": { "type": "string", "enum": ["http", "ws"] },
+                            "domain": { "type": "string", "enum": ["api", "device", "localization", "media", "pipelines", "settings", "streams"] },
                             "kind": { "type": "string" },
+                            "operation": { "type": "string", "enum": ["create", "update", "delete"] },
+                            "entity": { "type": "string" },
+                            "revision": { "type": "integer", "minimum": 1 },
+                            "resource_id": { "type": "string" },
                             "path": { "type": "string" },
                             "method": { "type": "string" },
                             "request_id": { "type": "string" }

@@ -2,9 +2,10 @@
   import type { PipelineDataType, PipelineGraphPlan, PipelineNodeValue, PipelinePortMetadata } from '$lib/types/pipeline';
   import type { PipelineUi } from '$lib/features/pipelines/pipelineUiTypes';
   import type { ResourceSample } from '$lib/api/telemetry';
+  import type { DaedalusRegistryResponse } from '$lib/ts-bindings/http/client';
   import { resourceTelemetryStore } from '$lib/api/telemetry';
   import { get } from 'svelte/store';
-  import { fromApiGraphPlan } from '$lib/features/pipelines/model';
+  import { fromApiGraphPlan } from '$lib/features/pipelines/graphConverters';
   import { createRegistryResolver } from '$lib/components/flow/pipeline-graph/registry';
   import { getDataTypeVariants, resolveDataTypeKey } from '$lib/features/pipelines/valueFormatting';
   import { normalizeDaedalusRegistry } from '$lib/features/pipelines/controller/daedalusRegistry';
@@ -19,6 +20,11 @@
     type PipelineNodeValueDescriptor
   } from './cameraPipelineTuningController';
 
+  type PipelineGraphListEntry = Record<string, unknown> & {
+    id?: string;
+    name?: string | null;
+  };
+
   type DerivedState = {
     get selectedPipelineId(): string | null;
     get assignedPipelineIds(): string[];
@@ -27,19 +33,19 @@
     get pipelineGridRows(): number;
     get pipelineGridColumns(): number;
     get pipelineAssignQuery(): string;
-    get pipelineGraphs(): any[];
+    get pipelineGraphs(): PipelineGraphListEntry[];
     get pipelineTuningPipelineId(): string | null;
-    get pipelineGraphCache(): Record<string, any>;
-    get pipelineTuningLiveGraph(): any;
+    get pipelineGraphCache(): Record<string, unknown>;
+    get pipelineTuningLiveGraph(): unknown;
     get pipelineTuningUiOverride(): PipelineUi | null;
-    get pipelineTuningGraphOverride(): any;
+    get pipelineTuningGraphOverride(): unknown;
     get pipelineNodeOverridesById(): Record<string, Record<string, Record<string, PipelineNodeValue>>>;
-    get pipelineRegistrySnapshot(): any;
+    get pipelineRegistrySnapshot(): DaedalusRegistryResponse | null;
     get PIPELINE_UI_METADATA_KEY(): string;
     get DEFAULT_PIPELINE_UI(): PipelineUi;
     get RAW_PIPELINE_ID(): string;
     get RAW_PIPELINE_UUID(): string;
-    get RAW_LOOPBACK_GRAPH(): any;
+    get RAW_LOOPBACK_GRAPH(): unknown;
   };
 
   export function createCameraPageDerived(state: DerivedState) {
@@ -90,7 +96,10 @@
       return base;
     };
 
-    const resolveRegistrySnapshotNodeId = (snapshot: any, backendId: string | null | undefined): string | null => {
+    const resolveRegistrySnapshotNodeId = (
+      snapshot: DaedalusRegistryResponse | null | undefined,
+      backendId: string | null | undefined
+    ): string | null => {
       if (!snapshot || !backendId) return null;
       const nodes = Array.isArray(snapshot?.nodes) ? snapshot.nodes : [];
       if (!nodes.length) return null;
@@ -123,7 +132,7 @@
       return best?.id ?? null;
     };
 
-    const coercePlanFromGraph = (graph: any): PipelineGraphPlan | null => {
+    const coercePlanFromGraph = (graph: unknown): PipelineGraphPlan | null => {
       if (!graph || typeof graph !== 'object') return null;
       const nodes = (graph as { nodes?: unknown }).nodes;
       const connections = (graph as { connections?: unknown }).connections;
@@ -149,7 +158,7 @@
 
     const buildDescriptorMap = (
       plan: PipelineGraphPlan | null,
-      resolveRegistryEntryForNode: ((node: PipelineGraphPlan['nodes'][string] | undefined) => any) | null
+      resolveRegistryEntryForNode: ReturnType<typeof createRegistryResolver> | null
     ): Map<string, PipelineNodeValueDescriptor> => {
       const map = new Map<string, PipelineNodeValueDescriptor>();
       if (!plan) return map;

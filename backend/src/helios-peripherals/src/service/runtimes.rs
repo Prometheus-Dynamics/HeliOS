@@ -1,13 +1,12 @@
 use std::sync::Arc;
-use std::time::Duration;
 
-use lib_math::linalg::Quaternion;
 use lib_sensors::fan_config;
 
 use crate::dto::{LightingCommand, LightingRuntimeState};
 use crate::error::Result;
-use crate::imu::{ImuFusionMethod, ImuRange, ImuSettings, ImuState};
+use crate::imu::{ImuSettings, ImuState};
 use crate::ipc::SensorEvent;
+use crate::orchestrator::ImuSettingsUpdate;
 
 use super::SensorsService;
 
@@ -65,34 +64,7 @@ impl SensorsService {
         self.runtimes.reset_imu_pose().await
     }
 
-    pub async fn update_imu_settings(
-        &self,
-        fusion: Option<ImuFusionMethod>,
-        range: Option<ImuRange>,
-        interval: Option<Duration>,
-        yaw_offset_deg: Option<f32>,
-        mount_correction: Option<Quaternion>,
-        dr_velocity_damp_tau_seconds: Option<f32>,
-        dr_still_velocity_zero_tau_seconds: Option<f32>,
-        dr_max_accel_world_mps2: Option<f32>,
-        dr_max_speed_mps: Option<f32>,
-        dr_max_position_m: Option<f32>,
-        dr_lock_position: Option<bool>,
-    ) -> Result<ImuSettings> {
-        self.runtimes
-            .update_imu_settings(
-                fusion,
-                range,
-                interval,
-                yaw_offset_deg,
-                mount_correction,
-                dr_velocity_damp_tau_seconds,
-                dr_still_velocity_zero_tau_seconds,
-                dr_max_accel_world_mps2,
-                dr_max_speed_mps,
-                dr_max_position_m,
-                dr_lock_position,
-            )
-            .await
+    pub async fn update_imu_settings(&self, update: ImuSettingsUpdate) -> Result<ImuSettings> {
+        self.runtimes.update_imu_settings(update).await
     }
 }

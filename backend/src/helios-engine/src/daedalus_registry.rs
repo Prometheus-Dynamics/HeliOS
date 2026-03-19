@@ -215,6 +215,12 @@ fn refresh_dynamic_plugin_cache(cache: &mut DynamicPluginCache) {
             let Some(name) = path.file_name().and_then(|v| v.to_str()).map(ToString::to_string) else {
                 continue;
             };
+            // Preserve first-seen directory priority across refreshes as well. A plugin copied into
+            // the writable deploy dir should continue to win over same-named system copies instead
+            // of being double-loaded and re-registered later in the process.
+            if seen_names.contains(&name) {
+                continue;
+            }
             seen_names.insert(name.clone());
             if disabled.contains_key(&name) {
                 continue;

@@ -2,7 +2,7 @@
   import { REQUESTED_BY } from '../api';
   import { DeviceService } from '$lib/ts-bindings/http/client';
   import { buildErrorMessage } from '$lib/ui/errorPolicy';
-  import type { DeviceOperationAckResponse, RestartTargetId, RestartTile } from '../types';
+  import type { RestartTargetId, RestartTile } from '../types';
 
   let restartTargets = $state<RestartTile[]>([
     { id: 'api', label: 'RESTART API', detail: 'REST + telemetry plane', status: 'Idle', busy: false },

@@ -5,9 +5,6 @@ use axum::{
 };
 use helios_engine::capture::CaptureDescriptor;
 use helios_engine::ipc::{EngineErrorCode, EngineEvent, StreamManifest, StreamSummary};
-use std::collections::HashMap;
-use std::sync::OnceLock;
-use std::time::Instant;
 use std::time::{SystemTime, UNIX_EPOCH};
 use styx::capture::prelude::Mode as CaptureMode;
 use styx::codec::CodecKind;
@@ -17,22 +14,23 @@ use uuid::Uuid;
 
 use crate::http::AppState;
 use crate::http::identity_tokens;
-use crate::http::pipelines;
+use crate::http::revision::{apply_revision_headers, matches_if_none_match, not_modified_response};
 use crate::http::streams_persist;
+use crate::http::validation::validation_error_response;
 
 use super::sensor_bench;
 use super::types::{CodecInfo, CodecTunables, StartStreamResponse, StreamInfo};
 use super::util::{
     apply_effective_pipeline_layout, camera_id_for_manifest, default_ffmpeg_settings_descriptor, engine_error_body, list_streams_timeout, map_client_error, normalize_pipeline_manifest,
 };
+use super::validation::validate_stream_manifest;
 use super::wait::{wait_for_stream_gone, wait_for_stream_started};
-use super::{CALIBRATION_MODE_PIPELINE_UUID, RAW_PIPELINE_UUID};
 
 fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
-fn descriptor_from_persisted_manifest(manifest: &StreamManifest) -> CaptureDescriptor {
+pub(crate) fn descriptor_from_persisted_manifest(manifest: &StreamManifest) -> CaptureDescriptor {
     // Persisted records may exist even when the stream isn't currently running.
     // Synthesize a minimal descriptor so the UI can still render format/resolution and
     // allow the user to re-apply/start the stream without first selecting a backend.
@@ -45,7 +43,7 @@ fn descriptor_from_persisted_manifest(manifest: &StreamManifest) -> CaptureDescr
     CaptureDescriptor { modes: vec![mode], controls: Vec::new() }
 }
 
-fn ensure_descriptor_has_mode(descriptor: &mut CaptureDescriptor, manifest: &StreamManifest) {
+pub(crate) fn ensure_descriptor_has_mode(descriptor: &mut CaptureDescriptor, manifest: &StreamManifest) {
     if !descriptor.modes.is_empty() {
         return;
     }
@@ -53,32 +51,6 @@ fn ensure_descriptor_has_mode(descriptor: &mut CaptureDescriptor, manifest: &Str
     let format = mode_id.format;
     let intervals = mode_id.interval.into_iter().collect();
     descriptor.modes.push(CaptureMode { id: mode_id, format, intervals, interval_stepwise: None });
-}
-
-#[derive(Clone)]
-struct StreamListCacheEntry {
-    fetched_at: Instant,
-    payload: Vec<StreamInfo>,
-}
-
-fn stream_list_cache() -> &'static tokio::sync::RwLock<Option<StreamListCacheEntry>> {
-    static CACHE: OnceLock<tokio::sync::RwLock<Option<StreamListCacheEntry>>> = OnceLock::new();
-    CACHE.get_or_init(|| tokio::sync::RwLock::new(None))
-}
-
-fn stream_start_lock() -> &'static tokio::sync::Mutex<()> {
-    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
-}
-
-fn stream_list_cache_ttl() -> Duration {
-    const DEFAULT_MS: u64 = 750;
-    const MIN_MS: u64 = 0;
-    const MAX_MS: u64 = 5_000;
-
-    let ms = std::env::var("HELIOS_API_STREAMS_CACHE_MS").ok().and_then(|value| value.trim().parse::<u64>().ok()).unwrap_or(DEFAULT_MS);
-
-    Duration::from_millis(ms.clamp(MIN_MS, MAX_MS))
 }
 
 fn stream_list_response(payload: Vec<StreamInfo>, stale: bool) -> Response {
@@ -190,6 +162,67 @@ fn stream_identity_token_set(stream_id: Uuid, manifest: &StreamManifest) -> std:
     out
 }
 
+const DEFAULT_LIBCAMERA_TARGET_FPS: u32 = 30;
+const OV9782_DEFAULT_LIBCAMERA_TARGET_FPS: u32 = 60;
+const MAX_INHERITED_LIBCAMERA_TARGET_FPS: u32 = 60;
+const LIBCAMERA_AE_EXPOSURE_MODE: u32 = 5;
+const LIBCAMERA_SHARPNESS: u32 = 24;
+const LIBCAMERA_NOISE_REDUCTION_MODE: u32 = 10002;
+const OV9782_AE_EXPOSURE_SHORT: i32 = 1;
+const OV9782_NOISE_REDUCTION_FAST: i32 = 1;
+const OV9782_DEFAULT_SHARPNESS: f32 = 1.25;
+
+fn token_mentions_ov9782(raw: &str) -> bool {
+    raw.to_ascii_lowercase().contains("ov9782")
+}
+
+fn manifest_targets_ov9782(manifest: &StreamManifest) -> bool {
+    if manifest.capture.backend != styx::BackendKind::Libcamera {
+        return false;
+    }
+    if manifest.capture.device_keys.iter().any(|key| token_mentions_ov9782(key)) {
+        return true;
+    }
+    if let styx::BackendHandle::Libcamera { id } = &manifest.capture.handle
+        && token_mentions_ov9782(id)
+    {
+        return true;
+    }
+    if let Some(alias) = manifest.identity.alias.as_deref()
+        && token_mentions_ov9782(alias)
+    {
+        return true;
+    }
+    if let Some(hw) = manifest.identity.hardware_id.as_deref()
+        && token_mentions_ov9782(hw)
+    {
+        return true;
+    }
+    false
+}
+
+fn insert_manifest_control_if_missing(manifest: &mut StreamManifest, id: u32, value: helios_engine::capture::CaptureControlValue) {
+    if manifest.capture.controls.iter().any(|control| control.id == id) {
+        return;
+    }
+    manifest.capture.controls.push(helios_engine::capture::ControlAssignment { id, value });
+}
+
+fn apply_new_ov9782_defaults(manifest: &mut StreamManifest) {
+    if !manifest_targets_ov9782(manifest) {
+        return;
+    }
+
+    if manifest.capture.target_fps.is_none() {
+        manifest.capture.target_fps = Some(OV9782_DEFAULT_LIBCAMERA_TARGET_FPS);
+    }
+
+    insert_manifest_control_if_missing(manifest, LIBCAMERA_AE_EXPOSURE_MODE, helios_engine::capture::CaptureControlValue::Int(OV9782_AE_EXPOSURE_SHORT));
+    insert_manifest_control_if_missing(manifest, LIBCAMERA_NOISE_REDUCTION_MODE, helios_engine::capture::CaptureControlValue::Int(OV9782_NOISE_REDUCTION_FAST));
+    insert_manifest_control_if_missing(manifest, LIBCAMERA_SHARPNESS, helios_engine::capture::CaptureControlValue::Float(OV9782_DEFAULT_SHARPNESS.max(0.0)));
+    manifest.capture.enable_tdn_output = true;
+}
+
 async fn resolve_stream_owner_camera_id(state: &AppState, requested_id: Uuid) -> Option<String> {
     if let Ok(active) = state.engine.list_streams().await
         && let Some(stream) = active.into_iter().find(|stream| stream.stream_id == requested_id)
@@ -261,10 +294,6 @@ async fn ensure_unique_stream_identity(state: &AppState, manifest: &StreamManife
 }
 
 async fn merge_stream_manifest_state(state: &AppState, manifest: &mut StreamManifest, camera_id_override: Option<&str>) {
-    const DEFAULT_LIBCAMERA_TARGET_FPS: u32 = 30;
-    const MAX_INHERITED_LIBCAMERA_TARGET_FPS: u32 = 60;
-    const NOISE_REDUCTION_MODE: u32 = 10002;
-
     let camera_id = camera_id_override.map(|value| value.to_string()).unwrap_or_else(|| camera_id_for_manifest(manifest));
     let requested_id = manifest.identity.id;
 
@@ -307,6 +336,7 @@ async fn merge_stream_manifest_state(state: &AppState, manifest: &mut StreamMani
     }
 
     let Some(base) = base_manifest else {
+        apply_new_ov9782_defaults(manifest);
         if manifest.pose.is_none() {
             manifest.pose = Some(default_identity_rig_pose());
         }
@@ -447,10 +477,13 @@ async fn merge_stream_manifest_state(state: &AppState, manifest: &mut StreamMani
         manifest.start_on_boot = true;
     }
 
+    let preserve_existing_libcamera_controls = manifest.capture.backend == styx::BackendKind::Libcamera && manifest.capture.controls.is_empty();
+
     // Merge capture controls so applying stream settings doesn't clear previously-set values.
     let mut merged: std::collections::BTreeMap<u32, helios_engine::capture::CaptureControlValue> = std::collections::BTreeMap::new();
 
-    if let Some(id) = base_stream_id
+    if manifest.capture.backend != styx::BackendKind::Libcamera
+        && let Some(id) = base_stream_id
         && let Ok(EngineEvent::Controls { controls, .. }) = state.engine.get_controls(id).await
     {
         for ctl in controls {
@@ -462,7 +495,7 @@ async fn merge_stream_manifest_state(state: &AppState, manifest: &mut StreamMani
         }
     }
 
-    if merged.is_empty() {
+    if merged.is_empty() && (manifest.capture.backend != styx::BackendKind::Libcamera || preserve_existing_libcamera_controls) {
         for ctl in &base.capture.controls {
             merged.insert(ctl.id, ctl.value.clone());
         }
@@ -483,7 +516,7 @@ async fn merge_stream_manifest_state(state: &AppState, manifest: &mut StreamMani
     manifest.capture.controls = merged.into_iter().map(|(id, value)| helios_engine::capture::ControlAssignment { id, value }).collect();
 
     if manifest.capture.backend == styx::BackendKind::Libcamera {
-        let tdn_value = manifest.capture.controls.iter().find(|ctl| ctl.id == NOISE_REDUCTION_MODE).map(|ctl| match &ctl.value {
+        let tdn_value = manifest.capture.controls.iter().find(|ctl| ctl.id == LIBCAMERA_NOISE_REDUCTION_MODE).map(|ctl| match &ctl.value {
             helios_engine::capture::CaptureControlValue::Int(v) => *v != 0,
             helios_engine::capture::CaptureControlValue::Uint(v) => *v != 0,
             helios_engine::capture::CaptureControlValue::Float(v) => *v != 0.0,
@@ -541,131 +574,20 @@ pub(crate) async fn get_stream(state: AppState, id: Uuid) -> Response {
     }
 }
 
-pub(crate) async fn list_streams(state: AppState) -> Response {
-    // Avoid blocking the HTTP handler if the engine IPC stalls.
-    let ttl = stream_list_cache_ttl();
-    if ttl != Duration::from_millis(0)
-        && let Some(entry) = stream_list_cache().read().await.clone()
-        && entry.fetched_at.elapsed() < ttl
-    {
-        return stream_list_response(entry.payload, false);
+pub(crate) async fn list_streams(state: AppState, headers: axum::http::HeaderMap) -> Response {
+    let (payload, stale, revision) = state.services.streams.get_cached_streams_snapshot_with_revision(&state).await;
+    if matches_if_none_match(&headers, revision) {
+        return not_modified_response(revision);
     }
 
-    let mut stale = false;
-    let mut out: Vec<StreamInfo> = match state.engine.list_streams_with_timeout(list_streams_timeout()).await {
-        Ok(streams) => streams
-            .into_iter()
-            .filter(|s| !s.manifest.internal)
-            .map(|StreamSummary { stream_id, mut descriptor, mut manifest, status }| {
-                normalize_pipeline_manifest(&mut manifest);
-                apply_effective_pipeline_layout(&mut manifest);
-                ensure_descriptor_has_mode(&mut descriptor, &manifest);
-                StreamInfo { id: stream_id, descriptor, manifest, status: Some(status) }
-            })
-            .collect(),
-        Err(err) => {
-            tracing::warn!(error = %err, "engine list_streams timed out");
-            stale = true;
-            if let Some(entry) = stream_list_cache().read().await.clone() {
-                return stream_list_response(entry.payload, true);
-            }
-            Vec::new()
-        }
-    };
-
-    let mut seen_ids: std::collections::BTreeSet<Uuid> = out.iter().map(|s| s.id).collect();
-    let mut persisted_ids: std::collections::BTreeSet<Uuid> = std::collections::BTreeSet::new();
-    let persisted = streams_persist::list_persisted_records().await;
-    let mut pose_by_stream: HashMap<Uuid, _> = HashMap::new();
-    for record in &persisted {
-        let Some(manifest) = record.manifest.as_ref() else {
-            continue;
-        };
-        if manifest.internal {
-            continue;
-        }
-        let stream_id = manifest.identity.id.or(record.last_stream_id).unwrap_or_else(|| streams_persist::derived_stream_id(&record.camera_id));
-        if let Some(pose) = manifest.pose.clone() {
-            pose_by_stream.insert(stream_id, pose);
-        }
-    }
-    for stream in &mut out {
-        if stream.manifest.pose.is_none()
-            && let Some(pose) = pose_by_stream.get(&stream.id).cloned()
-        {
-            stream.manifest.pose = Some(pose);
-        }
-    }
-    for record in persisted {
-        let Some(mut manifest) = record.manifest else {
-            continue;
-        };
-        if manifest.internal {
-            continue;
-        }
-        let stream_id = manifest.identity.id.or(record.last_stream_id).unwrap_or_else(|| streams_persist::derived_stream_id(&record.camera_id));
-        if !persisted_ids.insert(stream_id) {
-            tracing::warn!(camera_id = %record.camera_id, stream_id = %stream_id, "duplicate persisted stream id; keeping first record");
-            continue;
-        }
-        if seen_ids.contains(&stream_id) {
-            tracing::debug!(camera_id = %record.camera_id, stream_id = %stream_id, "persisted stream already running; skipping");
-            continue;
-        }
-        manifest.identity.id = Some(stream_id);
-        normalize_pipeline_manifest(&mut manifest);
-        apply_effective_pipeline_layout(&mut manifest);
-        let descriptor = descriptor_from_persisted_manifest(&manifest);
-        out.push(StreamInfo { id: stream_id, descriptor, manifest, status: None });
-        seen_ids.insert(stream_id);
-    }
-
-    *stream_list_cache().write().await = Some(StreamListCacheEntry { fetched_at: Instant::now(), payload: out.clone() });
-    stream_list_response(out, stale)
-}
-
-pub(in crate::http::streams) struct PipelineLoadError {
-    pub(in crate::http::streams) status: StatusCode,
-    pub(in crate::http::streams) message: String,
-}
-
-pub(in crate::http::streams) async fn fill_manifest_pipeline(manifest: &mut StreamManifest) -> Result<(), PipelineLoadError> {
-    if manifest.pipeline_enabled == Some(false) {
-        manifest.pipelines.clear();
-        manifest.active_pipeline_id = None;
-        manifest.active_pipeline_output = None;
-        manifest.pipeline_layout = None;
-        return Ok(());
-    }
-
-    for binding in &mut manifest.pipelines {
-        if binding.pipeline_graph.is_some() && binding.pipeline_id != CALIBRATION_MODE_PIPELINE_UUID {
-            return Err(PipelineLoadError {
-                status: StatusCode::BAD_REQUEST,
-                message: format!("inline pipeline graphs are not allowed for stream manifests (pipeline {}); persist the graph under /pipelines/graphs first", binding.pipeline_id),
-            });
-        }
-        binding.pipeline_graph = None;
-        let pipeline_id = binding.pipeline_id;
-        if pipeline_id == RAW_PIPELINE_UUID || pipeline_id == CALIBRATION_MODE_PIPELINE_UUID {
-            continue;
-        }
-        match pipelines::load_graph_document(pipeline_id).await {
-            Ok(_) => {}
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                return Err(PipelineLoadError { status: StatusCode::BAD_REQUEST, message: format!("pipeline {pipeline_id} is not persisted under /pipelines/graphs") });
-            }
-            Err(err) => {
-                return Err(PipelineLoadError { status: StatusCode::BAD_GATEWAY, message: format!("failed to load pipeline {pipeline_id}: {err}") });
-            }
-        }
-    }
-    Ok(())
+    let mut response = stream_list_response(payload, stale);
+    apply_revision_headers(response.headers_mut(), revision);
+    response
 }
 
 pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> Response {
     // Serialize stream starts so identity uniqueness checks (active + persisted) remain reliable.
-    let _guard = stream_start_lock().lock().await;
+    let _guard = state.services.streams.stream_start_guard().await;
 
     let mut manifest = manifest;
     let start_ms = now_ms();
@@ -694,8 +616,29 @@ pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> R
         manifest.shadow_recorder_enabled = false;
     }
 
-    if let Err(err) = fill_manifest_pipeline(&mut manifest).await {
-        return (err.status, Json(engine_error_body(Some(EngineErrorCode::Internal), err.message))).into_response();
+    match validate_stream_manifest(manifest).await {
+        Ok(validated) => {
+            if !validated.warnings.is_empty() {
+                tracing::info!(
+                    stream_id = %requested_id,
+                    warning_count = validated.warnings.len(),
+                    warnings = ?validated.warnings,
+                    "stream manifest sanitized during semantic validation"
+                );
+            }
+            manifest = validated.manifest;
+        }
+        Err(err) => {
+            tracing::warn!(
+                stream_id = %requested_id,
+                issue_count = err.issues.len(),
+                warning_count = err.warnings.len(),
+                issues = ?err.issues,
+                warnings = ?err.warnings,
+                "stream start rejected by semantic validator"
+            );
+            return validation_error_response("stream manifest failed semantic validation", err.issues, err.warnings);
+        }
     }
     if let Some(response) = ensure_unique_stream_identity(&state, &manifest, requested_id, &camera_id).await {
         return response;
@@ -744,7 +687,10 @@ pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> R
         match state.engine.start_stream(manifest.clone()).await {
             Ok(EngineEvent::Started { stream_id, descriptor, .. }) => {
                 let persist_id = owner_camera_id.clone().unwrap_or_else(|| camera_id_for_manifest(&manifest));
-                streams_persist::persist_manifest(&persist_id, Some(stream_id), manifest.clone()).await;
+                if let Err(err) = streams_persist::persist_manifest_checked(&persist_id, Some(stream_id), manifest.clone()).await {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("stream started live but failed to persist: {err}")))).into_response();
+                }
+                state.services.streams.invalidate_stream_list_cache().await;
                 return (StatusCode::OK, Json(StartStreamResponse { stream_id, descriptor })).into_response();
             }
             Ok(EngineEvent::Nack { code, reason, .. }) => {
@@ -767,7 +713,11 @@ pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> R
             Ok(_) | Err(_) => match wait_for_stream_started(&state, requested_id, Duration::from_secs(20)).await {
                 Ok(Some(descriptor)) => {
                     let persist_id = owner_camera_id.clone().unwrap_or_else(|| camera_id_for_manifest(&manifest));
-                    streams_persist::persist_manifest(&persist_id, Some(requested_id), manifest.clone()).await;
+                    if let Err(err) = streams_persist::persist_manifest_checked(&persist_id, Some(requested_id), manifest.clone()).await {
+                        return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("stream started live but failed to persist: {err}"))))
+                            .into_response();
+                    }
+                    state.services.streams.invalidate_stream_list_cache().await;
                     return (StatusCode::OK, Json(StartStreamResponse { stream_id: requested_id, descriptor })).into_response();
                 }
                 Ok(None) => {
@@ -785,7 +735,10 @@ pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> R
 pub(crate) async fn delete_stream(state: AppState, id: Uuid) -> Response {
     // Unregister should be fast and resilient: remove persisted state immediately, and stop the
     // running stream on a best-effort basis (without blocking the HTTP request on engine IPC).
-    let _ = streams_persist::remove_record_by_stream_id(id).await;
+    if let Err(err) = streams_persist::remove_record_by_stream_id(id).await {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("failed to remove persisted stream record: {err}")))).into_response();
+    }
+    state.services.streams.invalidate_stream_list_cache().await;
 
     // If the stream isn't running, we're done.
     if let Ok(streams) = state.engine.list_streams_with_timeout(list_streams_timeout()).await
@@ -796,23 +749,30 @@ pub(crate) async fn delete_stream(state: AppState, id: Uuid) -> Response {
 
     // Request stop, but don't wait long enough for the UI to time out.
     match state.engine.stop_stream_with_timeout(id, Duration::from_secs(2)).await {
-        Ok(EngineEvent::Stopped { .. }) => StatusCode::NO_CONTENT.into_response(),
+        Ok(EngineEvent::Stopped { .. }) => {
+            state.services.streams.invalidate_stream_list_cache().await;
+            StatusCode::NO_CONTENT.into_response()
+        }
         Ok(EngineEvent::Nack { .. }) => StatusCode::NO_CONTENT.into_response(),
-        Ok(_) => StatusCode::NO_CONTENT.into_response(),
+        Ok(_) => {
+            state.services.streams.invalidate_stream_list_cache().await;
+            StatusCode::NO_CONTENT.into_response()
+        }
         Err(_) => {
             // Fire-and-forget: keep trying in the background so the stream actually stops.
             let state = state.clone();
             tokio::spawn(async move {
                 let _ = state.engine.stop_stream_with_timeout(id, Duration::from_secs(20)).await;
+                state.services.streams.invalidate_stream_list_cache().await;
             });
             StatusCode::NO_CONTENT.into_response()
         }
     }
 }
 
-pub(crate) async fn list_backends() -> Response {
-    match tokio::task::spawn_blocking(helios_engine::capture::discover_devices).await {
-        Ok(devices) => Json(devices).into_response(),
+pub(crate) async fn list_backends(state: AppState) -> Response {
+    match state.engine.discover_devices().await {
+        Ok(discovery) => Json(discovery.devices).into_response(),
         Err(err) => (StatusCode::BAD_GATEWAY, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("device discovery failed: {err}")))).into_response(),
     }
 }

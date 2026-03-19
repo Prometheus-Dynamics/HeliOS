@@ -1,12 +1,9 @@
 import type {
   PipelineDataType,
   PipelineGraphNode,
-  PipelineNodeStyle,
-  PipelineNodeValue,
-  PipelineRegistryEntry,
-  PipelineSyncGroupConfig
+  PipelineRegistryEntry
 } from '$lib/types/pipeline';
-import type { ApiGraphNode, ApiPortDescriptor } from '$lib/types/pipeline-api';
+import type { ApiGraphNode } from '$lib/types/pipeline-api';
 import type {
   ActiveConnection,
   EnumSelectionHandler,
@@ -39,6 +36,8 @@ export interface PipelineNodeData extends Record<string, unknown> {
   inputOrder: string[];
   outputOrder: string[];
   activeConnection: ActiveConnection | null;
+  detailLevel?: 'minimal' | 'full';
+  portEditorsMode?: 'selected' | 'always' | 'never';
   searchActive?: boolean;
   searchMatch?: boolean;
   searchTokens?: string[];
@@ -104,6 +103,13 @@ export type PortRenderInfo = {
   hasIssue: boolean;
   isHighlighted: boolean;
   syncState: PortSyncState;
+};
+
+export type CompactPortHandle = {
+  name: string;
+  handleId: string;
+  hasIssue: boolean;
+  isHighlighted: boolean;
 };
 
 export type BasePortRenderInfo = Omit<

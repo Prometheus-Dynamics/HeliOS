@@ -1,6 +1,6 @@
 import { readable } from 'svelte/store';
 import { browser } from '$app/environment';
-import { apiFetch } from '$lib/api/apiFetch';
+import { apiFetch } from '$lib/api/core/http';
 import type { Nt4Settings, Nt4TopicsResponse, TeamNumberPayload } from '$lib/ts-bindings/http/client';
 
 export type RobotConnectionState = {
@@ -53,7 +53,7 @@ async function fetchRobotConnection(): Promise<RobotConnectionState> {
       '/nt4/topics',
       {
         method: 'POST',
-        body: JSON.stringify({ host, port, prefix: '/', scan_ms: 250, limit: 32 })
+        body: { host, port, prefix: '/', scan_ms: 250, limit: 32 }
       },
       { timeoutMs: 1200, recordConnection: false }
     );

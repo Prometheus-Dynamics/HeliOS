@@ -43,6 +43,10 @@
     overlayUrlForImage
   }: CalibrationResultsProps = $props();
 
+  function openOverlay(url: string): void {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
   export type $$Props = CalibrationResultsProps;
 </script>
 
@@ -171,9 +175,9 @@
                 <td class="px-2 py-1">{view.used ? 'yes' : 'no'}</td>
                 <td class="px-2 py-1">
                   {#if overlayUrl}
-                    <a class="underline underline-offset-2" href={overlayUrl} target="_blank" rel="noreferrer">
+                    <button class="underline underline-offset-2" type="button" onclick={() => openOverlay(overlayUrl)}>
                       open
-                    </a>
+                    </button>
                   {:else}
                     —
                   {/if}

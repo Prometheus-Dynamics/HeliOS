@@ -217,11 +217,6 @@
     dispatch('close');
   }
 
-  function handleCalibrate() {
-    if (!peripheral) return;
-    dispatch('calibrate', { peripheral });
-  }
-
   async function handleApplyFirmware(): Promise<void> {
     const ok = await firmware.applyFirmware(peripheral);
     if (ok) dispatch('refresh');
