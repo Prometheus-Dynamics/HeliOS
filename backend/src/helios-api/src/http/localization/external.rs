@@ -239,6 +239,11 @@ async fn fetch_device_imu_sample(state: &AppState) -> ApiResult<PipelineOutputSa
     if let Some(is_moving_fast) = status.is_moving_fast {
         payload.insert("is_moving_fast".to_string(), serde_json::json!(is_moving_fast));
     }
+    if let Some(updated_at) = status.updated_at.as_deref()
+        && let Ok(timestamp) = chrono::DateTime::parse_from_rfc3339(updated_at)
+    {
+        payload.insert("sampleTimestampMs".to_string(), serde_json::json!(timestamp.timestamp_millis().max(0) as u64));
+    }
 
     Ok(PipelineOutputSample { data_type: None, value: serde_json::Value::Object(payload) })
 }

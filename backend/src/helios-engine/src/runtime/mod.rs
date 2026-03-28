@@ -244,7 +244,7 @@ impl EngineRuntime {
                 Ok(outputs) => EngineEvent::GraphOutputs { command_id, stream_id, outputs },
                 Err(err) => EngineEvent::Nack { command_id, code: error_code_for(&err), reason: err.to_string() },
             },
-            EngineCommand::GetGraphOutputSample { command_id, stream_id, port } => match self.services.get_graph_output_sample(stream_id, port.clone()).await {
+            EngineCommand::GetGraphOutputSample { command_id, stream_id, port, fresh } => match self.services.get_graph_output_sample(stream_id, port.clone(), fresh).await {
                 Ok(value) => EngineEvent::GraphOutputSample { command_id, stream_id, port, value: crate::ipc::JsonWire(value) },
                 Err(err) => EngineEvent::Nack { command_id, code: error_code_for(&err), reason: err.to_string() },
             },

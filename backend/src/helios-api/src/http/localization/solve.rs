@@ -2,9 +2,13 @@ use axum::{
     Json,
     extract::{Query, State},
 };
+use futures::future::join_all;
 use nalgebra::{UnitQuaternion, Vector3};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::sync::OnceLock;
+use std::time::Instant;
+use tokio::sync::RwLock;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -41,6 +45,25 @@ fn default_apply_field_origin() -> bool {
 
 const RAW_STREAM_PIPELINE_UUID: Uuid = Uuid::from_u128(0x00000000_0000_0000_0000_0000000000aa);
 
+#[derive(Clone)]
+struct CachedLocalizationSolveResponse {
+    signature: Vec<u8>,
+    response: LocalizationSolveResponse,
+}
+
+fn localization_solve_cache() -> &'static RwLock<HashMap<String, CachedLocalizationSolveResponse>> {
+    static CACHE: OnceLock<RwLock<HashMap<String, CachedLocalizationSolveResponse>>> = OnceLock::new();
+    CACHE.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+fn localization_solve_cache_key(profile_id: &str, apply_field_origin: bool) -> String {
+    format!("{}|{}", profile_id.trim(), if apply_field_origin { "field" } else { "raw" })
+}
+
+fn localization_solve_signature(request: &LocalizationSolveRequest) -> Result<Vec<u8>, String> {
+    serde_json::to_vec(request).map_err(|err| format!("failed to encode localization solve signature: {err}"))
+}
+
 #[utoipa::path(
     get,
     path = "/localization/solve",
@@ -55,13 +78,14 @@ pub async fn solve(State(state): State<AppState>, Query(query): Query<Localizati
     let config = config::load_config().await?;
     let profile = select_profile(&config, query.profile_id.as_deref()).map_err(ApiError::not_found)?;
     let mut sources = dedupe_enabled_sources(profile.sources.iter().filter(|source| source.enabled).cloned().collect::<Vec<_>>());
-    enrich_source_input_keys(&state, &mut sources).await;
+    let stream_summaries = state.engine.list_streams().await.unwrap_or_default();
+    enrich_source_input_keys_from_streams(&stream_summaries, &mut sources);
 
-    let mut rig_poses = load_rig_poses(&state, &sources).await;
+    let mut rig_poses = load_rig_poses_from_streams(&sources, &stream_summaries).await;
     inject_imu_leveling_rig_pose(&state, profile, &mut rig_poses).await;
     let field_map = if let Some(map_id) = profile.field_map_id.as_deref() { maps::load_map_document(map_id).await.ok() } else { None };
     let fetcher = ApiLocalizationSourceFetcher::new(state.clone());
-    let response = solve_via_engine(&state, profile, sources, &rig_poses, field_map.as_ref(), &fetcher, query.apply_field_origin).await.map_err(ApiError::bad_gateway)?;
+    let response = solve_via_engine(&state, profile, sources, &rig_poses, field_map.as_ref(), &stream_summaries, &fetcher, query.apply_field_origin).await.map_err(ApiError::bad_gateway)?;
 
     Ok(Json(response))
 }
@@ -72,12 +96,32 @@ pub(crate) async fn solve_via_engine(
     sources: Vec<LocalizationSourceConfig>,
     rig_poses: &HashMap<String, PoseTransform>,
     field_map: Option<&helios_engine::localization::maps::FieldMapDocument>,
+    stream_summaries: &[StreamSummary],
     fetcher: &ApiLocalizationSourceFetcher,
     apply_field_origin: bool,
 ) -> Result<LocalizationSolveResponse, String> {
-    let request = build_localization_solve_request(state, profile, sources, rig_poses, field_map, fetcher, apply_field_origin).await?;
+    let request_started = Instant::now();
+    let (request, source_fetch_ms) = build_localization_solve_request(state, profile, sources, rig_poses, field_map, stream_summaries, fetcher, apply_field_origin).await?;
+    let cache_key = localization_solve_cache_key(&request.profile.id, request.apply_field_origin);
+    let signature = localization_solve_signature(&request)?;
+    if let Some(entry) = localization_solve_cache().read().await.get(&cache_key).cloned()
+        && entry.signature == signature
+    {
+        let mut response = entry.response;
+        response.timings.cache_hit = true;
+        response.timings.source_fetch_ms = source_fetch_ms;
+        response.timings.total_ms = request_started.elapsed().as_secs_f64() * 1000.0;
+        return Ok(response);
+    }
     match state.engine.solve_localization_event(request).await {
-        Ok(EngineEvent::LocalizationSolved { response, .. }) => serde_json::from_value(response.into()).map_err(|err| format!("invalid localization solve response: {err}")),
+        Ok(EngineEvent::LocalizationSolved { response, .. }) => {
+            let mut response: LocalizationSolveResponse = serde_json::from_value(response.into()).map_err(|err| format!("invalid localization solve response: {err}"))?;
+            response.timings.cache_hit = false;
+            response.timings.source_fetch_ms = source_fetch_ms;
+            response.timings.total_ms = request_started.elapsed().as_secs_f64() * 1000.0;
+            localization_solve_cache().write().await.insert(cache_key, CachedLocalizationSolveResponse { signature, response: response.clone() });
+            Ok(response)
+        }
         Ok(EngineEvent::Nack { reason, .. }) => Err(reason),
         Ok(other) => Err(format!("unexpected engine response: {other:?}")),
         Err(err) => Err(err.to_string()),
@@ -90,15 +134,20 @@ async fn build_localization_solve_request(
     sources: Vec<LocalizationSourceConfig>,
     rig_poses: &HashMap<String, PoseTransform>,
     field_map: Option<&helios_engine::localization::maps::FieldMapDocument>,
+    stream_summaries: &[StreamSummary],
     fetcher: &ApiLocalizationSourceFetcher,
     apply_field_origin: bool,
-) -> Result<LocalizationSolveRequest, String> {
+) -> Result<(LocalizationSolveRequest, f64), String> {
+    let source_fetch_started = Instant::now();
     let source_values = fetch_localization_source_values(fetcher, &sources).await;
-    let calibrations = load_stream_calibrations(state).await.into_iter().collect::<BTreeMap<_, _>>();
+    let source_fetch_ms = source_fetch_started.elapsed().as_secs_f64() * 1000.0;
+    let calibrations = load_stream_calibrations_from_streams(stream_summaries).into_iter().collect::<BTreeMap<_, _>>();
     let rig_poses = rig_poses.iter().map(|(camera_uid, pose)| (camera_uid.clone(), transform_to_pose(pose))).collect::<BTreeMap<_, _>>();
     let field_map = strip_overlay_from_field_map(field_map);
 
-    Ok(LocalizationSolveRequest { profile: profile.clone(), sources, rig_poses, field_map, calibrations, source_values, apply_field_origin })
+    let request = LocalizationSolveRequest { profile: profile.clone(), sources, rig_poses, field_map, calibrations, source_values, apply_field_origin };
+    let _ = state;
+    Ok((request, source_fetch_ms))
 }
 
 fn strip_overlay_from_field_map(field_map: Option<&FieldMapDocument>) -> Option<FieldMapDocument> {
@@ -108,14 +157,13 @@ fn strip_overlay_from_field_map(field_map: Option<&FieldMapDocument>) -> Option<
 }
 
 pub(crate) async fn fetch_localization_source_values(fetcher: &ApiLocalizationSourceFetcher, sources: &[LocalizationSourceConfig]) -> Vec<LocalizationSolveSourceValue> {
-    let mut values = Vec::with_capacity(sources.len());
-    for source in sources {
+    join_all(sources.iter().map(|source| async move {
         match LocalizationSourceFetcher::fetch_source_value(fetcher, source).await {
-            Ok(value) => values.push(LocalizationSolveSourceValue { source_id: source.id.clone(), value: Some(value.into()), error: None }),
-            Err(error) => values.push(LocalizationSolveSourceValue { source_id: source.id.clone(), value: None, error: Some(error) }),
+            Ok(value) => LocalizationSolveSourceValue { source_id: source.id.clone(), value: Some(value.into()), error: None },
+            Err(error) => LocalizationSolveSourceValue { source_id: source.id.clone(), value: None, error: Some(error) },
         }
-    }
-    values
+    }))
+    .await
 }
 
 pub(crate) fn dedupe_enabled_sources(sources: Vec<LocalizationSourceConfig>) -> Vec<LocalizationSourceConfig> {
@@ -197,16 +245,12 @@ fn infer_source_input_key(stream: &StreamSummary, source: &LocalizationSourceCon
     default_port.or_else(|| canonical_input_space_hint(Some(source.output_key.as_str())).map(str::to_string))
 }
 
-pub(crate) async fn enrich_source_input_keys(state: &AppState, sources: &mut [LocalizationSourceConfig]) {
+pub(crate) fn enrich_source_input_keys_from_streams(streams: &[StreamSummary], sources: &mut [LocalizationSourceConfig]) {
     let needs_inference = sources.iter().any(|source| normalize_key(source.input_key.as_deref()).is_none());
     if !needs_inference {
         return;
     }
-    let streams = match state.engine.list_streams().await {
-        Ok(streams) => streams,
-        Err(_) => return,
-    };
-    let streams_by_id: HashMap<Uuid, StreamSummary> = streams.into_iter().map(|stream| (stream.stream_id, stream)).collect();
+    let streams_by_id: HashMap<Uuid, StreamSummary> = streams.iter().cloned().map(|stream| (stream.stream_id, stream)).collect();
 
     for source in sources {
         if normalize_key(source.input_key.as_deref()).is_some() {
@@ -222,13 +266,12 @@ pub(crate) async fn enrich_source_input_keys(state: &AppState, sources: &mut [Lo
     }
 }
 
-pub(crate) async fn load_rig_poses(state: &AppState, sources: &[LocalizationSourceConfig]) -> HashMap<String, PoseTransform> {
+pub(crate) async fn load_rig_poses_from_streams(sources: &[LocalizationSourceConfig], stream_summaries: &[StreamSummary]) -> HashMap<String, PoseTransform> {
     let mut out: HashMap<String, PoseTransform> = streams_persist::list_pose_map().await.into_iter().map(|(uid, pose)| (uid, rig_pose_to_viewer_transform(&map_rig_pose(&pose)))).collect();
 
     // Backfill source camera_uids from their stream pose when `camera_uid` doesn't match the
     // persisted camera-id key (common for short aliases like `ov9782`).
-    let running_by_stream: HashMap<Uuid, StreamRigPose> =
-        state.engine.list_streams().await.unwrap_or_default().into_iter().filter_map(|stream| stream.manifest.pose.map(|pose| (stream.stream_id, pose))).collect();
+    let running_by_stream: HashMap<Uuid, StreamRigPose> = stream_summaries.iter().filter_map(|stream| stream.manifest.pose.clone().map(|pose| (stream.stream_id, pose))).collect();
 
     for source in sources {
         let camera_uid = source.camera_uid.trim();
@@ -399,14 +442,13 @@ pub(crate) async fn inject_imu_leveling_rig_pose(state: &AppState, profile: &hel
     }
 }
 
-pub(crate) async fn load_stream_calibrations(state: &AppState) -> HashMap<String, StreamCalibration> {
+pub(crate) fn load_stream_calibrations_from_streams(streams: &[StreamSummary]) -> HashMap<String, StreamCalibration> {
     let mut out = HashMap::new();
-    let streams = state.engine.list_streams().await.unwrap_or_default();
     for stream in streams {
-        let Some(calib) = stream.manifest.calibration else {
+        let Some(calib) = stream.manifest.calibration.as_ref() else {
             continue;
         };
-        out.insert(stream.stream_id.to_string(), calib);
+        out.insert(stream.stream_id.to_string(), calib.clone());
     }
     out
 }

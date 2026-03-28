@@ -1,11 +1,12 @@
 use image::{DynamicImage, GrayImage};
 use imageproc::point::Point as CvPoint;
 use memchr::{memchr, memrchr};
+use rayon::prelude::*;
 use std::mem::size_of;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-use super::detect::{ArucoTagDetectorConfig, candidate_quad_from_contour, candidate_quad_from_contour_fast};
+use super::detect::{ArucoTagDetectorConfig, candidate_quad_from_contour, candidate_quad_from_contour_fast, candidate_quad_from_contour_fast_in};
 use crate::contour::suzuki_abe::{CompactContour, suzuki_abe_i32_compact_capped_into};
 use crate::modules::image::luma::with_luma8_frame;
 
@@ -24,6 +25,7 @@ const ADAPTIVE_TRACE_POINT_BUDGET_MIN: usize = 32 * 1024;
 const ADAPTIVE_TRACE_POINT_BUDGET_MAX: usize = 128 * 1024;
 const ADAPTIVE_TRACE_CONTOUR_BUDGET_MIN: usize = 128;
 const ADAPTIVE_TRACE_CONTOUR_BUDGET_MAX: usize = 2048;
+const ADAPTIVE_FAST_FILTER_PAR_MIN_CONTOURS: usize = 48;
 
 static ADAPTIVE_TRACE_BUDGET_HITS: AtomicUsize = AtomicUsize::new(0);
 
@@ -336,6 +338,11 @@ fn contour_to_f32(points: &[CvPoint<i32>], out: &mut Vec<CvPoint<f32>>, off_x: i
 }
 
 #[inline(always)]
+fn should_parallelize_fast_candidate_filter(contour_count: usize) -> bool {
+    contour_count >= ADAPTIVE_FAST_FILTER_PAR_MIN_CONTOURS && rayon::current_num_threads() > 1
+}
+
+#[inline(always)]
 fn compress_chain_turn_points(points: &mut Vec<CvPoint<i32>>, scratch: &mut Vec<CvPoint<i32>>) {
     let n = points.len();
     if n < 32 {
@@ -589,14 +596,37 @@ fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig
                     fast_idx.capacity() * size_of::<usize>() + fast_success.capacity() * size_of::<bool>() + fast_tested.capacity() * size_of::<bool>(),
                 );
 
-                let mut quads: Vec<[CvPoint<f32>; 4]> = Vec::with_capacity(fast_idx.len());
-                for &idx in fast_idx.iter() {
+                let fast_results: Vec<(usize, Option<[CvPoint<f32>; 4]>)> = if should_parallelize_fast_candidate_filter(fast_idx.len()) {
+                    fast_idx
+                        .par_iter()
+                        .map_init(
+                            || (Vec::<CvPoint<f32>>::new(), Vec::<CvPoint<f32>>::new(), Vec::<CvPoint<f32>>::new()),
+                            |(pts_f32_local, downsampled, approx), &idx| {
+                                let contour = prepared[idx];
+                                contour_to_f32(prepared_contour_points(&contour, point_store), pts_f32_local, contour_off_x, contour_off_y);
+                                let quad = candidate_quad_from_contour_fast_in(pts_f32_local, contour.perimeter, min_perimeter_for_area, &detector_config, downsampled, approx)
+                                    .filter(|quad| quad_passes_post_filters(quad, config, width, height));
+                                (idx, quad)
+                            },
+                        )
+                        .collect()
+                } else {
+                    fast_idx
+                        .iter()
+                        .map(|&idx| {
+                            let contour = prepared[idx];
+                            contour_to_f32(prepared_contour_points(&contour, point_store), pts_f32, contour_off_x, contour_off_y);
+                            let quad = candidate_quad_from_contour_fast(pts_f32, contour.perimeter, min_perimeter_for_area, &detector_config)
+                                .filter(|quad| quad_passes_post_filters(quad, config, width, height));
+                            (idx, quad)
+                        })
+                        .collect()
+                };
+
+                let mut quads: Vec<[CvPoint<f32>; 4]> = Vec::with_capacity(fast_results.len());
+                for (idx, quad) in fast_results {
                     fast_tested[idx] = true;
-                    let contour = prepared[idx];
-                    contour_to_f32(prepared_contour_points(&contour, point_store), pts_f32, contour_off_x, contour_off_y);
-                    if let Some(quad) =
-                        candidate_quad_from_contour_fast(pts_f32, contour.perimeter, min_perimeter_for_area, &detector_config).filter(|quad| quad_passes_post_filters(quad, config, width, height))
-                    {
+                    if let Some(quad) = quad {
                         fast_success[idx] = true;
                         quads.push(quad);
                     }

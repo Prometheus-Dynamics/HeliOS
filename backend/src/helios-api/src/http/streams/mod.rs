@@ -878,8 +878,8 @@ async fn set_pipeline_inputs(State(state): State<AppState>, Path(id): Path<Uuid>
     params(("id" = Uuid, Path, description = "Stream ID")),
     responses((status = 200, description = "Latest encoded payload format info", body = StreamFormatInfo))
 )]
-async fn stream_format(Path(id): Path<Uuid>) -> impl IntoResponse {
-    preview::stream_format(id).await
+async fn stream_format(Path(id): Path<Uuid>, Query(query): Query<preview::PreviewSelectionQuery>) -> impl IntoResponse {
+    preview::stream_format(id, query).await
 }
 
 #[utoipa::path(
@@ -891,8 +891,8 @@ async fn stream_format(Path(id): Path<Uuid>) -> impl IntoResponse {
         (status = 200, description = "Live stream preview (MJPEG multipart or length-prefixed encoded)", content_type = "application/octet-stream")
     )
 )]
-async fn preview_stream(State(state): State<AppState>, Path(id): Path<Uuid>) -> impl IntoResponse {
-    preview::preview_stream(state, id).await
+async fn preview_stream(State(state): State<AppState>, Path(id): Path<Uuid>, Query(query): Query<preview::PreviewSelectionQuery>) -> impl IntoResponse {
+    preview::preview_stream(state, id, query).await
 }
 
 #[utoipa::path(
@@ -902,8 +902,8 @@ async fn preview_stream(State(state): State<AppState>, Path(id): Path<Uuid>) -> 
     params(("id" = Uuid, Path, description = "Stream ID")),
     responses((status = 200, description = "Latest JPEG frame", content_type = "image/jpeg"))
 )]
-async fn frame_jpeg(State(state): State<AppState>, Path(id): Path<Uuid>) -> impl IntoResponse {
-    preview::frame_jpeg(state, id).await
+async fn frame_jpeg(State(state): State<AppState>, Path(id): Path<Uuid>, Query(query): Query<preview::PreviewSelectionQuery>) -> impl IntoResponse {
+    preview::frame_jpeg(state, id, query).await
 }
 
 #[utoipa::path(

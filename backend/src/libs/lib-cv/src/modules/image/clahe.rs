@@ -13,7 +13,7 @@ thread_local! {
 const VERT_LUT_RETAIN_CAP: usize = 128 * 256;
 
 const CLAHE_LUT_PAR_MIN_TILES: usize = 24;
-const CLAHE_APPLY_PAR_MIN_PIXELS_DEFAULT: usize = 1920 * 1080;
+const CLAHE_APPLY_PAR_MIN_PIXELS_DEFAULT: usize = 1024 * 768;
 
 fn clahe_apply_parallel_min_pixels() -> usize {
     static MIN_PIXELS: OnceLock<usize> = OnceLock::new();

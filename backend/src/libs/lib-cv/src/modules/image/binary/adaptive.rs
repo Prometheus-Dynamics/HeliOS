@@ -15,7 +15,7 @@ fn ensure_odd_window(value: u32) -> u32 {
 }
 
 const ADAPTIVE_SHIFT: i32 = 16;
-const ADAPTIVE_PARALLEL_MIN_PIXELS_DEFAULT: usize = 1920 * 1080;
+const ADAPTIVE_PARALLEL_MIN_PIXELS_DEFAULT: usize = 1024 * 768;
 
 fn adaptive_parallel_min_pixels() -> usize {
     static MIN_PIXELS: OnceLock<usize> = OnceLock::new();
@@ -23,7 +23,7 @@ fn adaptive_parallel_min_pixels() -> usize {
 }
 
 fn adaptive_parallel_threads_default() -> usize {
-    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).min(2).max(1)
+    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).min(4).max(1)
 }
 
 fn serial_runtime_requested() -> bool {

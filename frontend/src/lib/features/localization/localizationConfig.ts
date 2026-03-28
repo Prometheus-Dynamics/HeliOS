@@ -174,6 +174,16 @@ export type LocalizationSolveResponse = {
   profileId: string;
   solvers: LocalizationSolverResult[];
   sources: LocalizationSourceSampleStatus[];
+  timings: LocalizationSolveTimings;
+};
+
+export type LocalizationSolveTimings = {
+  sourceFetchMs: number;
+  sourceParseMs: number;
+  solverMs: number;
+  engineMs: number;
+  totalMs: number;
+  cacheHit: boolean;
 };
 
 export type LocalizationSourceSampleStatus = {

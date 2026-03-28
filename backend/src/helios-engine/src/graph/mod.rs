@@ -676,6 +676,8 @@ fn default_host_bridge_input_value(port_lc: &str) -> Option<DaedalusValue> {
         "roi_x" | "roi_y" | "roi_w" | "roi_h" => Some(DaedalusValue::Int(0)),
         // Crosshair defaults to origin unless explicitly set by controls.
         "crosshair_x" | "crosshair_y" => Some(DaedalusValue::Int(0)),
+        // Overlay crosshair toggle defaults off unless explicitly enabled by controls.
+        "draw_crosshair" => Some(DaedalusValue::Bool(false)),
         // Ordering defaults to no-op.
         "order_mode" => Some(DaedalusValue::String("none".into())),
         _ => None,
@@ -1388,9 +1390,15 @@ impl GraphHandle {
             .collect()
     }
 
-    pub fn sample_json_output(&self, port: &str) -> Option<Value> {
-        self.request_output_sample(port);
+    pub fn read_json_output(&self, port: &str, fresh: bool) -> Option<Value> {
+        if fresh {
+            self.request_output_sample(port);
+        }
         self.executor.as_ref().and_then(|exec| exec.sample_json_output(port))
+    }
+
+    pub fn sample_json_output(&self, port: &str) -> Option<Value> {
+        self.read_json_output(port, true)
     }
 
     pub fn sample_value_output(&self, port: &str) -> Option<DaedalusValue> {
@@ -2178,6 +2186,8 @@ impl RollingGraphMetrics {
         };
 
         let flamegraph = self.last_flamegraph.as_ref().map(|capture| PipelineFlamegraphMetrics { path: capture.path.clone(), size_bytes: capture.size_bytes, captured_at_ms: capture.captured_at_ms });
+        let warnings =
+            self.warnings.iter().rev().filter(|(instant, _)| now.saturating_duration_since(*instant) <= Duration::from_secs(4)).map(|(_, warning)| warning.clone()).take(4).collect::<Vec<_>>();
 
         PipelineGraphMetrics {
             nodes: out,
@@ -2187,6 +2197,7 @@ impl RollingGraphMetrics {
             image_working_set: None,
             perf,
             flamegraph,
+            warnings,
         }
     }
 }
@@ -2257,6 +2268,20 @@ impl DaedalusGraphExecutor {
             }
             node.outputs.iter().any(|p| p.eq_ignore_ascii_case("calibration"))
         });
+
+        let mut declared_host_bridge_ports: BTreeSet<String> = BTreeSet::new();
+        for node in graph.nodes.iter().filter(|node| {
+            let id = node.id.0.as_str();
+            id == "io.host_bridge" || id.ends_with(":io.host_bridge")
+        }) {
+            for port in &node.outputs {
+                let trimmed = port.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                declared_host_bridge_ports.insert(trimmed.to_string());
+            }
+        }
 
         // Host output ports are a graph contract: the authoritative port list comes from the graph
         // JSON node's declared `inputs` array (not from runtime inference).
@@ -2476,6 +2501,21 @@ impl DaedalusGraphExecutor {
             "daedalus graph: host ports configured"
         );
 
+        let mut seeded_input_values: BTreeMap<String, DaedalusValue> = BTreeMap::new();
+        for port in &declared_host_bridge_ports {
+            if port.eq_ignore_ascii_case(&input_port) {
+                continue;
+            }
+            if calibration_port.as_deref().is_some_and(|cal| port.eq_ignore_ascii_case(cal)) {
+                continue;
+            }
+            let key = port.to_ascii_lowercase();
+            let Some(default_value) = default_host_bridge_input_value(&key) else {
+                continue;
+            };
+            seeded_input_values.insert(key, default_value);
+        }
+
         let pprof_enabled = pprof_enabled_from_env();
         let pprof_duration_ms = if pprof_enabled { pprof_duration_ms_from_env() } else { None };
         let pprof_until_ms = pprof_duration_ms.and_then(|d| now_ms().checked_add(d)).unwrap_or(0);
@@ -2520,7 +2560,7 @@ impl DaedalusGraphExecutor {
             pprof_until_ms: AtomicU64::new(pprof_until_ms),
             pprof_guard: Mutex::new(None),
             calibration_payload: std::sync::RwLock::new(calibration_to_daedalus_value(None)),
-            input_values: std::sync::RwLock::new(BTreeMap::new()),
+            input_values: std::sync::RwLock::new(seeded_input_values),
             last_background_trim_ms: AtomicU64::new(0),
             last_error_detail: std::sync::RwLock::new(String::new()),
             failure_count: AtomicU64::new(0),

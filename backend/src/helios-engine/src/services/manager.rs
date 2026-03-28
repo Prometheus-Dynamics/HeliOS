@@ -1716,13 +1716,17 @@ impl StreamManager {
         Ok(host.host_output_port_descriptors())
     }
 
-    pub async fn get_graph_output_sample(&self, stream_id: Uuid, port: String) -> Result<serde_json::Value> {
+    pub async fn get_graph_output_sample(&self, stream_id: Uuid, port: String, fresh: bool) -> Result<serde_json::Value> {
         let ctx = self.get_stream(stream_id).await?;
+        if !fresh {
+            let host = ctx.host.read().await;
+            return host.read_json_output(&port, false).ok_or(Error::NotFound("graph output sample unavailable"));
+        }
         let deadline = tokio::time::Instant::now() + Duration::from_millis(250);
         loop {
             {
                 let host = ctx.host.read().await;
-                if let Some(value) = host.sample_json_output(&port) {
+                if let Some(value) = host.read_json_output(&port, true) {
                     return Ok(value);
                 }
             }

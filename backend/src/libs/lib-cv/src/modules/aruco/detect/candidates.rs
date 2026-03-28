@@ -138,7 +138,14 @@ pub fn candidate_quad_from_contour(contour: &[Point<f32>], config: &ArucoTagDete
     filter_candidate(contour, config)
 }
 
-pub fn candidate_quad_from_contour_fast(contour: &[Point<f32>], perimeter: f32, min_perimeter: Option<f32>, config: &ArucoTagDetectorConfig) -> Option<[Point<f32>; 4]> {
+pub fn candidate_quad_from_contour_fast_in(
+    contour: &[Point<f32>],
+    perimeter: f32,
+    min_perimeter: Option<f32>,
+    config: &ArucoTagDetectorConfig,
+    downsampled: &mut Vec<Point<f32>>,
+    approx: &mut Vec<Point<f32>>,
+) -> Option<[Point<f32>; 4]> {
     if contour.len() < 4 {
         return None;
     }
@@ -155,26 +162,31 @@ pub fn candidate_quad_from_contour_fast(contour: &[Point<f32>], perimeter: f32, 
     }
 
     let adaptive_epsilon = contour_epsilon(perimeter, config);
-    let result = with_detect_scratch(|scratch| {
-        let (contour, approx) = {
-            let DetectScratch { downsampled, approx, .. } = &mut *scratch;
-            (downsample_closed_contour_for_fast_dp(contour, downsampled), approx)
-        };
-        crate::modules::contour::douglas_peucker::approx_poly_dp_closed_fast_into(contour, adaptive_epsilon, approx);
-        if approx.first() == approx.last() {
-            approx.pop();
-        }
-        if approx.len() != 4 {
-            return None;
-        }
+    let contour = downsample_closed_contour_for_fast_dp(contour, downsampled);
+    crate::modules::contour::douglas_peucker::approx_poly_dp_closed_fast_into(contour, adaptive_epsilon, approx);
+    if approx.first() == approx.last() {
+        approx.pop();
+    }
+    if approx.len() != 4 {
+        return None;
+    }
 
-        let mut quad = [approx[0], approx[1], approx[2], approx[3]];
-        sort_corners_clockwise(&mut quad);
-        rotate_corners_to_top_left(&mut quad);
-        if !quad_satisfies_config(&quad, config) {
-            return None;
-        }
-        Some(quad)
+    let mut quad = [approx[0], approx[1], approx[2], approx[3]];
+    sort_corners_clockwise(&mut quad);
+    rotate_corners_to_top_left(&mut quad);
+    if !quad_satisfies_config(&quad, config) {
+        return None;
+    }
+    Some(quad)
+}
+
+pub fn candidate_quad_from_contour_fast(contour: &[Point<f32>], perimeter: f32, min_perimeter: Option<f32>, config: &ArucoTagDetectorConfig) -> Option<[Point<f32>; 4]> {
+    let result = with_detect_scratch(|scratch| {
+        let (downsampled, approx) = {
+            let DetectScratch { downsampled, approx, .. } = &mut *scratch;
+            (downsampled, approx)
+        };
+        candidate_quad_from_contour_fast_in(contour, perimeter, min_perimeter, config, downsampled, approx)
     });
     report_detect_scratch();
     result

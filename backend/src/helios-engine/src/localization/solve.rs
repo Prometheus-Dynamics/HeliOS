@@ -16,7 +16,7 @@ use super::maps::{FieldMapDocument, FieldMapSource};
 use super::math::{compose_transforms, invert_transform, PoseTransform};
 use super::solvers::{SolverContext, SolverRegistry};
 use super::sources::{fetch_source_samples_with_registry, SourceParserRegistry, SourceSample};
-use super::types::{LocalizationSolveResponse, LocalizationSolverOutputs, LocalizationSolverResult, LocalizationSourceSampleStatus};
+use super::types::{LocalizationSolveResponse, LocalizationSolveTimings, LocalizationSolverOutputs, LocalizationSolverResult, LocalizationSourceSampleStatus};
 
 #[derive(Debug, Clone)]
 struct TemporalPoseState {
@@ -59,10 +59,13 @@ pub struct LocalizationSolveContext<'a, F> {
 }
 
 pub async fn solve_localization_with_registry<F: LocalizationSourceFetcher>(ctx: LocalizationSolveContext<'_, F>) -> LocalizationSolveResponse {
+    let total_started = Instant::now();
     let marker_map = ctx.field_map.map(marker_map_from_field_map);
     let default_tag_size_m = ctx.profile.tag_size_m.or_else(|| infer_tag_size_from_field_map(ctx.field_map));
 
+    let source_parse_started = Instant::now();
     let mut source_samples = fetch_source_samples_with_registry(ctx.fetcher, ctx.sources, default_tag_size_m, ctx.calibrations, ctx.parser_registry).await;
+    let source_parse_ms = source_parse_started.elapsed().as_secs_f64() * 1000.0;
     apply_profile_tag_filter(ctx.profile, &mut source_samples);
     let source_statuses = source_samples
         .iter()
@@ -78,10 +81,17 @@ pub async fn solve_localization_with_registry<F: LocalizationSourceFetcher>(ctx:
         })
         .collect();
 
+    let solver_started = Instant::now();
     let mut solver_results = ctx.profile.solvers.iter().map(|solver| solve_for_solver(ctx.solver_registry, solver, &source_samples, ctx.rig_poses, marker_map.as_ref())).collect::<Vec<_>>();
     apply_profile_postprocessing(ctx.profile, &mut solver_results, ctx.rig_poses, ctx.field_map, ctx.apply_field_origin);
+    let solver_ms = solver_started.elapsed().as_secs_f64() * 1000.0;
 
-    LocalizationSolveResponse { profile_id: ctx.profile.id.clone(), solvers: solver_results, sources: source_statuses }
+    LocalizationSolveResponse {
+        profile_id: ctx.profile.id.clone(),
+        solvers: solver_results,
+        sources: source_statuses,
+        timings: LocalizationSolveTimings { source_fetch_ms: 0.0, source_parse_ms, solver_ms, engine_ms: total_started.elapsed().as_secs_f64() * 1000.0, total_ms: 0.0, cache_hit: false },
+    }
 }
 
 fn infer_tag_size_from_field_map(field_map: Option<&FieldMapDocument>) -> Option<f64> {

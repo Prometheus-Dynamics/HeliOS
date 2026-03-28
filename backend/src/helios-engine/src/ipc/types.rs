@@ -553,6 +553,7 @@ pub enum EngineCommand {
         #[bincode(with_serde)]
         stream_id: Uuid,
         port: String,
+        fresh: bool,
     },
     /// Update multiplex layout (rows/columns/slot assignment) without restarting capture.
     SetPipelineLayout {

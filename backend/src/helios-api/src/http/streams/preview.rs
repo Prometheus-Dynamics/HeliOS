@@ -6,6 +6,7 @@ use axum::{
 };
 use bytes::Bytes;
 use once_cell::sync::Lazy;
+use serde::Deserialize;
 use std::convert::Infallible;
 use std::time::Instant;
 use tokio::sync::mpsc;
@@ -23,6 +24,14 @@ use super::mjpeg;
 use super::types::StreamFormatInfo;
 use super::util::engine_error_body;
 use super::util::fourcc_to_format;
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub(crate) struct PreviewSelectionQuery {
+    #[serde(default)]
+    pub pipeline: Option<Uuid>,
+    #[serde(default)]
+    pub output: Option<String>,
+}
 
 static PREVIEW_POLL: Lazy<std::time::Duration> = Lazy::new(|| {
     std::env::var("HELIOS_PREVIEW_POLL_MS")
@@ -60,6 +69,42 @@ fn is_mjpeg_fourcc(fourcc: styx::prelude::FourCc) -> bool {
     matches!(&fourcc.to_u32().to_le_bytes(), b"MJPG" | b"JPEG")
 }
 
+fn normalize_preview_output(output: Option<String>) -> Option<String> {
+    let normalized = output.and_then(|raw| {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+    });
+    match normalized.as_deref() {
+        Some(value) if value.eq_ignore_ascii_case("frame") || value.eq_ignore_ascii_case("raw") || value.eq_ignore_ascii_case("undistorted") => None,
+        _ => normalized,
+    }
+}
+
+fn override_recording_source(query: &PreviewSelectionQuery) -> Option<RecordingSource> {
+    let output_key = normalize_preview_output(query.output.clone());
+    if query.pipeline.is_none() && output_key.is_none() {
+        return None;
+    }
+    Some(RecordingSource::Pipeline { pipeline_id: query.pipeline, output_key })
+}
+
+fn snapshot_mjpeg_part_header() -> Bytes {
+    Bytes::from_static(b"--frame\r\nContent-Type: image/jpeg\r\n\r\n")
+}
+
+fn snapshot_mjpeg_part_footer() -> Bytes {
+    Bytes::from_static(b"\r\n")
+}
+
+fn snapshot_mjpeg_interval() -> Duration {
+    std::env::var("HELIOS_MJPEG_INTERVAL_MS")
+        .ok()
+        .and_then(|raw| raw.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .map(|d| d.clamp(Duration::from_millis(20), Duration::from_millis(500)))
+        .unwrap_or_else(|| Duration::from_millis(33))
+}
+
 async fn prefer_jpeg_preview_header(id: Uuid, header: ShmemFrameHeader) -> ShmemFrameHeader {
     if header.len == 0 || header.fourcc.to_u32() == 0 || is_mjpeg_fourcc(header.fourcc) {
         return header;
@@ -93,7 +138,7 @@ async fn prefer_jpeg_preview_header(id: Uuid, header: ShmemFrameHeader) -> Shmem
     }
 }
 
-pub(crate) async fn stream_format(id: Uuid) -> Response {
+pub(crate) async fn stream_format(id: Uuid, query: PreviewSelectionQuery) -> Response {
     let header = match tokio::task::spawn_blocking(move || read_latest_header(id)).await {
         Ok(Ok(header)) => header,
         Ok(Err(_)) | Err(_) => return StatusCode::NOT_FOUND.into_response(),
@@ -101,10 +146,52 @@ pub(crate) async fn stream_format(id: Uuid) -> Response {
     if header.len == 0 || header.fourcc.to_u32() == 0 {
         return StatusCode::NOT_FOUND.into_response();
     }
+    if override_recording_source(&query).is_some() {
+        return Json(StreamFormatInfo { fourcc: "MJPG".to_string(), format: "mjpeg".to_string(), width: header.width, height: header.height }).into_response();
+    }
     Json(StreamFormatInfo { fourcc: header.fourcc.to_string(), format: fourcc_to_format(header.fourcc).to_string(), width: header.width, height: header.height }).into_response()
 }
 
-pub(crate) async fn preview_stream(state: AppState, id: Uuid) -> Response {
+async fn preview_snapshot_stream(state: AppState, id: Uuid, source: RecordingSource) -> Response {
+    let first_frame = match capture_snapshot_jpeg_without_preview_fallback(&state, id, Some(source.clone())).await {
+        Ok(bytes) => bytes,
+        Err(err) => return err.into_response(),
+    };
+    let interval = snapshot_mjpeg_interval();
+    let body_stream = futures::stream::unfold((state, id, source, Some(first_frame), 0u8), move |(state, id, source, mut pending, phase)| async move {
+        match phase {
+            0 => {
+                if pending.is_none() {
+                    tokio::time::sleep(interval).await;
+                    pending = match capture_snapshot_jpeg_without_preview_fallback(&state, id, Some(source.clone())).await {
+                        Ok(bytes) => Some(bytes),
+                        Err(_) => return None,
+                    };
+                }
+                Some((Ok::<Bytes, Infallible>(snapshot_mjpeg_part_header()), (state, id, source, pending, 1)))
+            }
+            1 => {
+                let jpeg = pending?;
+                Some((Ok::<Bytes, Infallible>(Bytes::from(jpeg)), (state, id, source, None, 2)))
+            }
+            2 => Some((Ok::<Bytes, Infallible>(snapshot_mjpeg_part_footer()), (state, id, source, None, 0))),
+            _ => None,
+        }
+    });
+    let body = Body::from_stream(body_stream);
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "multipart/x-mixed-replace; boundary=frame")
+        .header(header::CACHE_CONTROL, "no-store, no-cache")
+        .header(header::PRAGMA, "no-cache")
+        .body(body)
+        .unwrap()
+}
+
+pub(crate) async fn preview_stream(state: AppState, id: Uuid, query: PreviewSelectionQuery) -> Response {
+    if let Some(source) = override_recording_source(&query) {
+        return preview_snapshot_stream(state, id, source).await;
+    }
     let header = match tokio::time::timeout(
         Duration::from_secs(2),
         tokio::task::spawn_blocking(move || {
@@ -196,8 +283,9 @@ pub(crate) async fn preview_stream(state: AppState, id: Uuid) -> Response {
         .unwrap()
 }
 
-pub(crate) async fn frame_jpeg(state: AppState, id: Uuid) -> Response {
-    match capture_snapshot_jpeg_without_preview_fallback(&state, id, Some(RecordingSource::Raw)).await {
+pub(crate) async fn frame_jpeg(state: AppState, id: Uuid, query: PreviewSelectionQuery) -> Response {
+    let source = override_recording_source(&query).unwrap_or(RecordingSource::Raw);
+    match capture_snapshot_jpeg_without_preview_fallback(&state, id, Some(source)).await {
         Ok(jpeg) => (StatusCode::OK, [(header::CONTENT_TYPE, "image/jpeg"), (header::CACHE_CONTROL, "no-store, no-cache")], Body::from(jpeg)).into_response(),
         Err(err) => err.into_response(),
     }

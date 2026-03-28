@@ -372,14 +372,22 @@ impl EngineConnection {
         self.request(|command_id| EngineCommand::ListGraphOutputs { command_id, stream_id: id }, ExpectedEvent::GraphOutputs { stream_id: id }, "list_graph_outputs", ENGINE_RESPONSE_TIMEOUT).await
     }
 
-    pub async fn get_graph_output_sample_event(&self, id: uuid::Uuid, port: String) -> Result<EngineEvent, lib_ipc::client::ClientTransportError> {
+    pub async fn get_graph_output_sample_event_with_mode(&self, id: uuid::Uuid, port: String, fresh: bool) -> Result<EngineEvent, lib_ipc::client::ClientTransportError> {
         self.request(
-            |command_id| EngineCommand::GetGraphOutputSample { command_id, stream_id: id, port: port.clone() },
+            |command_id| EngineCommand::GetGraphOutputSample { command_id, stream_id: id, port: port.clone(), fresh },
             ExpectedEvent::GraphOutputSample { stream_id: id },
             "get_graph_output_sample",
             ENGINE_RESPONSE_TIMEOUT,
         )
         .await
+    }
+
+    pub async fn get_graph_output_sample_event(&self, id: uuid::Uuid, port: String) -> Result<EngineEvent, lib_ipc::client::ClientTransportError> {
+        self.get_graph_output_sample_event_with_mode(id, port, true).await
+    }
+
+    pub async fn get_cached_graph_output_sample_event(&self, id: uuid::Uuid, port: String) -> Result<EngineEvent, lib_ipc::client::ClientTransportError> {
+        self.get_graph_output_sample_event_with_mode(id, port, false).await
     }
 
     pub async fn set_codecs(&self, id: uuid::Uuid, decoder_id: Option<String>, encoder_id: Option<String>) -> Result<EngineEvent, lib_ipc::client::ClientTransportError> {

@@ -140,10 +140,11 @@
     return entries.sort((a, b) => (a.ageMs ?? Number.POSITIVE_INFINITY) - (b.ageMs ?? Number.POSITIVE_INFINITY));
   })());
 
-  const pipelineWarnings = $derived<string | null>((() => {
-    const graphNode = metrics?.pipeline?.nodes?.graph;
-    if (!graphNode?.last_error) return null;
-    return graphNode.last_error;
+  const pipelineWarnings = $derived<string[]>((() => {
+    const pipeline = asRecord(metrics?.pipeline);
+    const warnings = pipeline?.warnings;
+    if (!Array.isArray(warnings)) return [];
+    return warnings.filter((warning): warning is string => typeof warning === 'string' && warning.trim().length > 0);
   })());
 
   function activeReference(): string | null {
@@ -503,10 +504,10 @@
         {/if}
       </div>
     {/if}
-    {#if pipelineWarnings}
+    {#if pipelineWarnings.length > 0}
       <div class="rounded border border-warning-500/40 bg-warning-500/10 px-3 py-2 text-xs text-warning-200">
         <p class="font-semibold text-warning-100">Pipeline warning</p>
-        <p class="mt-1">{formatErrorMessage(pipelineWarnings)}</p>
+        <p class="mt-1">{formatErrorMessage(pipelineWarnings[0])}</p>
       </div>
     {/if}
     {#if errorHistory.length > 1}

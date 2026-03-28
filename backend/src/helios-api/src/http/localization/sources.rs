@@ -6,8 +6,9 @@ use axum::{
 };
 use serde_json::Value as JsonValue;
 use serde_json::json;
-use std::collections::BTreeSet;
-use std::sync::Arc;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -31,6 +32,28 @@ use helios_engine::localization::types::{LocalizationDetectionPose, Localization
 const IMU_EXTERNAL_ID: &str = "imu";
 const PROFILE_STREAM_PREFIX: &str = "profile:";
 const PROFILE_OUTPUT_PREFIX: &str = "solver:";
+const LOCALIZATION_STREAM_SAMPLE_REFRESH_MS: u64 = 1_000;
+
+fn localization_stream_sample_refreshes() -> &'static Mutex<BTreeMap<String, u64>> {
+    static STATE: OnceLock<Mutex<BTreeMap<String, u64>>> = OnceLock::new();
+    STATE.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|dur| dur.as_millis() as u64).unwrap_or(0)
+}
+
+async fn localization_stream_sample_needs_refresh(stream_id: Uuid, output_key: &str) -> bool {
+    let key = format!("{stream_id}:{}", output_key.trim().to_ascii_lowercase());
+    let now = now_ms();
+    let mut guard = localization_stream_sample_refreshes().lock().await;
+    guard.retain(|_, refreshed_at_ms| now.saturating_sub(*refreshed_at_ms) <= LOCALIZATION_STREAM_SAMPLE_REFRESH_MS.saturating_mul(8));
+    let needs_refresh = guard.get(&key).copied().map(|refreshed_at_ms| now.saturating_sub(refreshed_at_ms) >= LOCALIZATION_STREAM_SAMPLE_REFRESH_MS).unwrap_or(true);
+    if needs_refresh {
+        guard.insert(key, now);
+    }
+    needs_refresh
+}
 
 fn is_media_imu_output_key(output_key: &str) -> bool {
     output_key.eq_ignore_ascii_case(media_imu::MEDIA_IMU_OUTPUT_KEY) || output_key.eq_ignore_ascii_case(media_imu::MEDIA_IMU_OUTPUT_KEY_LEGACY)
@@ -279,7 +302,7 @@ pub async fn list_sources(State(state): State<AppState>) -> ApiResult<Json<Vec<L
     )
 )]
 pub async fn sample_output(State(state): State<AppState>, Path((id, output_key)): Path<(Uuid, String)>) -> axum::response::Response {
-    match state.engine.get_graph_output_sample_event(id, output_key.clone()).await {
+    match state.engine.get_cached_graph_output_sample_event(id, output_key.clone()).await {
         Ok(EngineEvent::GraphOutputSample { value, .. }) => Json(PipelineOutputSample { data_type: None, value: value.into() }).into_response(),
         Ok(EngineEvent::Nack { code, .. }) if code == EngineErrorCode::NotFound && is_media_imu_output_key(&output_key) => {
             match media_imu::fetch_media_imu_sample_for_stream(&state, id, &output_key).await {
@@ -349,14 +372,27 @@ pub async fn sample_profile_output(State(state): State<AppState>, Path((id, outp
 
 pub(crate) async fn fetch_stream_output(state: &AppState, stream_id: &str, output_key: &str) -> Result<JsonValue, String> {
     let stream_uuid = Uuid::parse_str(stream_id).map_err(|_| "invalid stream id".to_string())?;
-    match state.engine.get_graph_output_sample_event(stream_uuid, output_key.to_string()).await {
-        Ok(EngineEvent::GraphOutputSample { value, .. }) => Ok(value.into()),
-        Ok(EngineEvent::Nack { code, .. }) if code == EngineErrorCode::NotFound && is_media_imu_output_key(output_key) => {
+    let fresh = localization_stream_sample_needs_refresh(stream_uuid, output_key).await;
+    let event = match state.engine.get_graph_output_sample_event_with_mode(stream_uuid, output_key.to_string(), fresh).await {
+        Ok(event) => event,
+        Err(err) => return Err(err.to_string()),
+    };
+    match event {
+        EngineEvent::GraphOutputSample { value, .. } => Ok(value.into()),
+        EngineEvent::Nack { code, .. } if code == EngineErrorCode::NotFound && is_media_imu_output_key(output_key) => {
             media_imu::fetch_media_imu_sample_for_stream(state, stream_uuid, output_key).await.map(|sample| sample.value).map_err(|err| err.to_string())
         }
-        Ok(EngineEvent::Nack { reason, .. }) => Err(reason),
-        Ok(_) => Err("unexpected engine response".to_string()),
-        Err(err) => Err(err.to_string()),
+        EngineEvent::Nack { code, .. } if code == EngineErrorCode::NotFound && !fresh => match state.engine.get_graph_output_sample_event(stream_uuid, output_key.to_string()).await {
+            Ok(EngineEvent::GraphOutputSample { value, .. }) => Ok(value.into()),
+            Ok(EngineEvent::Nack { code, .. }) if code == EngineErrorCode::NotFound && is_media_imu_output_key(output_key) => {
+                media_imu::fetch_media_imu_sample_for_stream(state, stream_uuid, output_key).await.map(|sample| sample.value).map_err(|err| err.to_string())
+            }
+            Ok(EngineEvent::Nack { reason, .. }) => Err(reason),
+            Ok(_) => Err("unexpected engine response".to_string()),
+            Err(err) => Err(err.to_string()),
+        },
+        EngineEvent::Nack { reason, .. } => Err(reason),
+        _ => Err("unexpected engine response".to_string()),
     }
 }
 
@@ -572,12 +608,13 @@ async fn fetch_profile_output_inner(fetcher: &ApiLocalizationSourceFetcher, prof
     let config = config::load_config().await.map_err(|err| err.to_string())?;
     let profile = select_profile(&config, Some(profile_id)).map_err(|err| format!("profile '{profile_id}': {err}"))?;
     let mut sources = solve::dedupe_enabled_sources(profile.sources.iter().filter(|source| source.enabled).cloned().collect::<Vec<_>>());
-    solve::enrich_source_input_keys(&fetcher.state, &mut sources).await;
+    let stream_summaries = fetcher.state.engine.list_streams().await.unwrap_or_default();
+    solve::enrich_source_input_keys_from_streams(&stream_summaries, &mut sources);
 
-    let mut rig_poses = solve::load_rig_poses(&fetcher.state, &sources).await;
+    let mut rig_poses = solve::load_rig_poses_from_streams(&sources, &stream_summaries).await;
     solve::inject_imu_leveling_rig_pose(&fetcher.state, profile, &mut rig_poses).await;
     let field_map = if let Some(map_id) = profile.field_map_id.as_deref() { maps::load_map_document(map_id).await.ok() } else { None };
-    let response = solve::solve_via_engine(&fetcher.state, profile, sources, &rig_poses, field_map.as_ref(), fetcher, true).await?;
+    let response = solve::solve_via_engine(&fetcher.state, profile, sources, &rig_poses, field_map.as_ref(), &stream_summaries, fetcher, true).await?;
 
     let selector = parse_profile_output_selector(output_key)?;
     let Some(solver) = response.solvers.into_iter().find(|solver| solver.id == selector.solver_id) else {

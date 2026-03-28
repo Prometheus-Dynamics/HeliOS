@@ -309,6 +309,8 @@ pub struct PipelineGraphMetrics {
     pub perf: Option<PipelinePerfMetrics>,
     #[serde(default)]
     pub flamegraph: Option<PipelineFlamegraphMetrics>,
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]

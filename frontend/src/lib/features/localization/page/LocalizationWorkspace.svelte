@@ -72,6 +72,18 @@
     metricsError: string | null;
     error: string | null;
   };
+  type ProfileTimingRow = {
+    profileId: string;
+    label: string;
+    active: boolean;
+    visible: boolean;
+    solverMs: number | null;
+    engineMs: number | null;
+    totalMs: number | null;
+    sourceFetchMs: number | null;
+    sourceParseMs: number | null;
+    cacheHit: boolean;
+  };
   type ImuRotationOverlayData = {
     sourceId: string;
     sourceLabel: string;
@@ -114,6 +126,7 @@
     selectedSourceCount?: number;
     liveMarkerCount?: number;
     lastPollMs?: number | null;
+    activeSolveMs?: number | null;
     pollHz?: number;
     pollHzMin?: number;
     pollHzMax?: number;
@@ -213,6 +226,7 @@
     onSetSourceWeight?: (sourceId: string, value: string) => void;
     sourceUsedByProfilesById?: Record<string, string[]>;
     sourceStatusRows?: SourceStatusRow[];
+    profileTimingRows?: ProfileTimingRow[];
     showCameraPoseOverlay?: boolean;
     showCustomFieldsOverlay?: boolean;
     showImuRotationOverlay?: boolean;
@@ -280,6 +294,7 @@
     selectedSourceCount = 0,
     liveMarkerCount = 0,
     lastPollMs = null,
+    activeSolveMs = null,
     pollHz = $bindable(30),
     pollHzMin = 1,
     pollHzMax = 240,
@@ -417,6 +432,7 @@
     onSetSourceWeight,
     sourceUsedByProfilesById = {},
     sourceStatusRows = [],
+    profileTimingRows = [],
     showCameraPoseOverlay = $bindable(false),
     showCustomFieldsOverlay = $bindable(false),
     showImuRotationOverlay = $bindable(false),
@@ -766,11 +782,12 @@
       onMetricsToggle={toggleMetrics}
     >
       {#snippet footerStatus()}
-        <div class="grid grid-cols-[12ch_8ch_8ch_10ch_7ch_minmax(0,1fr)] items-center gap-x-2 text-micro-tight tracking-[0.3em] text-surface-400">
+        <div class="grid grid-cols-[12ch_8ch_8ch_10ch_10ch_7ch_minmax(0,1fr)] items-center gap-x-2 text-micro-tight tracking-[0.3em] text-surface-400">
           <span class="whitespace-nowrap font-semibold uppercase text-surface-50">{feedStatus}</span>
           <span class="whitespace-nowrap text-right font-mono tabular-nums">{selectedSourceCount} src</span>
           <span class="whitespace-nowrap text-right font-mono tabular-nums">{liveMarkerCount} tags</span>
           <span class="whitespace-nowrap text-right font-mono tabular-nums">{lastPollMs != null ? `${lastPollMs.toFixed(1)}ms` : '—'}</span>
+          <span class="whitespace-nowrap text-right font-mono tabular-nums">{activeSolveMs != null ? `${activeSolveMs.toFixed(1)}ms` : '—'}</span>
           <span class="whitespace-nowrap text-right font-mono tabular-nums">{pollHz}Hz</span>
           <span class={`min-w-0 truncate ${feedMessage ? 'text-error-300' : 'text-surface-500'}`}>{feedMessage ?? ''}</span>
         </div>
@@ -1142,7 +1159,9 @@
     {feedStatus}
     {pollHz}
     {lastPollMs}
+    {activeSolveMs}
     sourceStatusRows={sourceStatusRows}
+    profileTimingRows={profileTimingRows}
     onClose={() => (showMetricsOverlay = false)}
   />
 

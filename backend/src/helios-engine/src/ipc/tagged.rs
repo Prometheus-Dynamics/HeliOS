@@ -162,7 +162,7 @@ const _: () = {
             struct SetGraphOutput { command_id: lib_ipc::types::CommandId => with_serde, stream_id: uuid::Uuid => with_serde, output: Option<String> => with_serde },
             struct SetPipelineInputs { command_id: lib_ipc::types::CommandId => with_serde, stream_id: uuid::Uuid => with_serde, pipeline_id: Option<uuid::Uuid> => with_serde, inputs: std::collections::BTreeMap<String, Option<crate::ipc::JsonWire>> => with_serde },
             struct ListGraphOutputs { command_id: lib_ipc::types::CommandId => with_serde, stream_id: uuid::Uuid => with_serde },
-            struct GetGraphOutputSample { command_id: lib_ipc::types::CommandId => with_serde, stream_id: uuid::Uuid => with_serde, port: String },
+            struct GetGraphOutputSample { command_id: lib_ipc::types::CommandId => with_serde, stream_id: uuid::Uuid => with_serde, port: String, fresh: bool },
             struct SetPipelineLayout { command_id: lib_ipc::types::CommandId => with_serde, stream_id: uuid::Uuid => with_serde, layout: Option<crate::ipc::StreamPipelineLayout> => with_serde },
             struct SolveCalibration { command_id: lib_ipc::types::CommandId => with_serde, request: crate::ipc::CalibrationSolveRequest => with_serde },
             struct SolveLocalization { command_id: lib_ipc::types::CommandId => with_serde, request: crate::ipc::JsonWire => with_serde },

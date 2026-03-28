@@ -1,10 +1,10 @@
 use super::{build_demand_sinks, derive_host_aliases, infer_host_output_incoming_types, normalize_graph_json_for_runtime};
 
+use daedalus::DataCell;
 use daedalus::data::model::{EnumVariant, TypeExpr, Value};
-use daedalus::gpu::ErasedPayload;
 use daedalus::planner::ComputeAffinity;
 use daedalus::registry::store::NodeDescriptorBuilder;
-use daedalus::runtime::executor::EdgePayload;
+use daedalus::runtime::executor::RuntimeValue;
 use daedalus::runtime::plugins::PluginRegistry;
 use daedalus::runtime::{EdgePolicyKind, RuntimeNode, RuntimePlan, RuntimeSegment};
 use image::DynamicImage;
@@ -236,6 +236,17 @@ fn host_output_port_types_include_host_bridge_dynamic_outputs() {
 }
 
 #[test]
+fn default_host_bridge_inputs_cover_overlay_crosshair_toggle() {
+    assert_eq!(super::default_host_bridge_input_value("crosshair_x"), Some(Value::Int(0)));
+    assert_eq!(super::default_host_bridge_input_value("crosshair_y"), Some(Value::Int(0)));
+    assert_eq!(super::default_host_bridge_input_value("draw_crosshair"), Some(Value::Bool(false)));
+    assert_eq!(
+        super::default_host_bridge_input_value("order_mode"),
+        Some(Value::String(std::borrow::Cow::Borrowed("none")))
+    );
+}
+
+#[test]
 fn host_bridge_injects_any_payload_into_graph() {
     let host_bridge = RuntimeNode {
         id: "io.host_bridge".into(),
@@ -278,7 +289,7 @@ fn host_bridge_injects_any_payload_into_graph() {
     let host_mgr = daedalus::runtime::host_bridge::HostBridgeManager::new();
     host_mgr.populate_from_plan(&plan);
     let host = host_mgr.handle("Input:frame").expect("host handle");
-    let payload = EdgePayload::Payload(ErasedPayload::from_cpu::<DynamicImage>(DynamicImage::new_rgb8(1, 1)));
+    let payload = RuntimeValue::Data(DataCell::from_cpu::<DynamicImage>(DynamicImage::new_rgb8(1, 1)));
     host.push("frame", payload, None);
 
     let saw_frame = std::sync::Arc::new(std::sync::Mutex::new(false));

@@ -126,6 +126,18 @@
   type FeedStatus = 'idle' | 'connecting' | 'live' | 'error';
 
   type LocalizationCoordinateSpace = LocalizationPoseSpace;
+  type LocalizationProfileTimingRow = {
+    profileId: string;
+    label: string;
+    active: boolean;
+    visible: boolean;
+    solverMs: number | null;
+    engineMs: number | null;
+    totalMs: number | null;
+    sourceFetchMs: number | null;
+    sourceParseMs: number | null;
+    cacheHit: boolean;
+  };
 
   type RigLayoutViewState = {
     layout: { robot: RobotDimensions; cameras: RigCameraInfo[] };
@@ -3073,14 +3085,16 @@
 
   $effect(() => {
     if (!browser) return;
-    const streamIds = Array.from(
-      new Set(
-        selectedSources
-          .filter((source) => !isImuSource(source))
-          .map((source) => source.streamId)
-          .filter(Boolean)
-      )
-    );
+    const streamIds = showMetricsOverlay
+      ? Array.from(
+          new Set(
+            selectedSources
+              .filter((source) => !isImuSource(source))
+              .map((source) => source.streamId)
+              .filter(Boolean)
+          )
+        )
+      : [];
 
     for (const [streamId, cleanup] of Array.from(streamMetricsCleanup.entries())) {
       if (streamIds.includes(streamId)) continue;
@@ -3178,6 +3192,35 @@
       detectionsBySourceId,
       toNumber
     })
+  );
+
+  const activeSolveMs = $derived.by<number | null>(() => {
+    const solverMs = solveResponse?.timings?.solverMs;
+    return typeof solverMs === 'number' && Number.isFinite(solverMs) ? solverMs : null;
+  });
+
+  const profileTimingRows = $derived.by<LocalizationProfileTimingRow[]>(() =>
+    $profiles
+      .map((profile) => {
+        const resp = solveResponsesByProfile[profile.id] ?? (profile.id === solveResponse?.profileId ? solveResponse : null);
+        if (!resp) return null;
+        const timings = resp.timings;
+        const finiteOrNull = (value: number | null | undefined): number | null => (typeof value === 'number' && Number.isFinite(value) ? value : null);
+        return {
+          profileId: profile.id,
+          label: profile.name,
+          active: profile.id === ($activeProfile?.id ?? null),
+          visible: profile.viewEnabled === true,
+          solverMs: finiteOrNull(timings?.solverMs),
+          engineMs: finiteOrNull(timings?.engineMs),
+          totalMs: finiteOrNull(timings?.totalMs),
+          sourceFetchMs: finiteOrNull(timings?.sourceFetchMs),
+          sourceParseMs: finiteOrNull(timings?.sourceParseMs),
+          cacheHit: timings?.cacheHit === true
+        };
+      })
+      .filter((row): row is LocalizationProfileTimingRow => row !== null)
+      .sort((left, right) => Number(right.active) - Number(left.active) || Number(right.visible) - Number(left.visible) || left.label.localeCompare(right.label))
   );
 
   const hasAnyViewsEnabled = $derived.by(() => viewProfiles.length > 0);
@@ -4786,6 +4829,7 @@
 	      selectedSourceCount={selectedSourceIds.length}
 	      liveMarkerCount={liveMarkers.length}
 	      lastPollMs={lastPollMs}
+      activeSolveMs={activeSolveMs}
       bind:pollHz={pollHz}
 	      pollHzMin={pollHzMin}
 	      pollHzMax={pollHzMax}
@@ -4872,6 +4916,7 @@
 	      onSetSourceWeight={setSourceWeight}
       sourceUsedByProfilesById={sourceUsedByProfilesById}
 	      sourceStatusRows={sourceStatusRows}
+      profileTimingRows={profileTimingRows}
       bind:showCameraPoseOverlay={showCameraPoseOverlay}
       bind:showCustomFieldsOverlay={showCustomFieldsOverlay}
       bind:showImuRotationOverlay={showImuRotationOverlay}

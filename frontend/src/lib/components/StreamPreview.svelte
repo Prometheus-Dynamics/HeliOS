@@ -125,8 +125,22 @@
   }
 
 
+  function normalizedPipelineOutputTag(raw: string | null | undefined): string {
+    return String(raw ?? '').trim().toLowerCase();
+  }
+
+  function usesOutputOverridePreview(): boolean {
+    const output = normalizedPipelineOutputTag(pipelineOutput);
+    if (pipelineId?.trim()) return true;
+    if (!output) return false;
+    return output !== 'frame' && output !== 'raw' && output !== 'undistorted';
+  }
+
   function previewFormatCacheKey(peer: PeerStreamRef | null, sessionId: string): string {
-    return peer ? `peer:${peer.peerId}:${peer.streamId}` : `stream:${sessionId}`;
+    const pipelineTag = String(pipelineId ?? '').trim();
+    const outputTag = normalizedPipelineOutputTag(pipelineOutput);
+    const base = peer ? `peer:${peer.peerId}:${peer.streamId}` : `stream:${sessionId}`;
+    return `${base}:${pipelineTag}:${outputTag}`;
   }
 
   function mapEncodedInfoFormat(raw: unknown): StreamPreviewFormat | null {
@@ -140,6 +154,10 @@
   async function refreshResolvedFormat(): Promise<void> {
     if (previewFormat === 'mjpeg' || previewFormat === 'h264' || previewFormat === 'h265') {
       resolvedFormat = previewFormat;
+      return;
+    }
+    if (usesOutputOverridePreview()) {
+      resolvedFormat = 'mjpeg';
       return;
     }
     if (!captureSessionId) return;
@@ -161,7 +179,7 @@
   }
 
   $effect(() => {
-    const _ = `${captureSessionId ?? ''}:${previewFormat}`;
+    const _ = `${captureSessionId ?? ''}:${previewFormat}:${pipelineId ?? ''}:${pipelineOutput ?? ''}`;
     void _;
     void refreshResolvedFormat();
   });

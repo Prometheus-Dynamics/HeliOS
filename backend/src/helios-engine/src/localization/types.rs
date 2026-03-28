@@ -46,6 +46,25 @@ pub struct LocalizationSolveResponse {
     pub profile_id: String,
     pub solvers: Vec<LocalizationSolverResult>,
     pub sources: Vec<LocalizationSourceSampleStatus>,
+    #[serde(default)]
+    pub timings: LocalizationSolveTimings,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalizationSolveTimings {
+    #[serde(default)]
+    pub source_fetch_ms: f64,
+    #[serde(default)]
+    pub source_parse_ms: f64,
+    #[serde(default)]
+    pub solver_ms: f64,
+    #[serde(default)]
+    pub engine_ms: f64,
+    #[serde(default)]
+    pub total_ms: f64,
+    #[serde(default)]
+    pub cache_hit: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

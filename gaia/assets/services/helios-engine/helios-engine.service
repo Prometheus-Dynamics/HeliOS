@@ -27,11 +27,11 @@ Environment=MALLOC_ARENA_MAX=1
 Environment=MALLOC_TRIM_THRESHOLD_=65536
 Environment=MALLOC_MMAP_THRESHOLD_=65536
 Environment=MALLOC_TOP_PAD_=65536
-# The ArUco graph's CPU-heavy nodes use Rayon plus worker-local scratch. On CM-class devices,
-# allowing the global pool to fan out causes a steady heap ratchet without improving throughput.
-Environment=RAYON_NUM_THREADS=1
-Environment=HELIOS_ENGINE_WORKER_THREADS=1
-Environment=HELIOS_ENGINE_MAX_BLOCKING_THREADS=1
+# Keep enough parallelism for the fast ArUco graph to use the available CM5 cores without
+# overprovisioning threads or blocking pools beyond the CPU count.
+Environment=RAYON_NUM_THREADS=4
+Environment=HELIOS_ENGINE_WORKER_THREADS=4
+Environment=HELIOS_ENGINE_MAX_BLOCKING_THREADS=4
 Environment=HELIOS_ENGINE_CACHE_NODE_REGISTRY=0
 Environment=HELIOS_NODE_REGISTRY_SNAPSHOT_PATH=/var/lib/helios/state/node-registry.snapshot.json
 Environment=STYX_LIBCAMERA_STOP_WHEN_IDLE=1
@@ -41,7 +41,7 @@ Environment=HELIOS_STYX_CAPTURE_QUEUE_DEPTH=2
 Environment=HELIOS_CAPTURE_STALL_MS=6000
 Environment=HELIOS_CAPTURE_ACTIVE_STALL_MS=5000
 Environment=HELIOS_DAEDALUS_PLUGIN_DIRS=/var/lib/helios/plugins/daedalus:/usr/lib/helios/plugins/daedalus
-Environment=HELIOS_DAEDALUS_DEMAND_DRIVEN=0
+Environment=HELIOS_DAEDALUS_DEMAND_DRIVEN=1
 Environment=DAEDALUS_METRICS_LEVEL=detailed
 Environment=HELIOS_API_DATA_DIR=/var/lib/helios/api-data
 EnvironmentFile=-/etc/default/helios-engine
