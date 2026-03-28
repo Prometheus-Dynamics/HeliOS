@@ -6,27 +6,27 @@ use super::*;
 )]
 #[cfg_attr(not(feature = "gpu"), node(id = "rgb_multi_range_mask", compute(ComputeAffinity::GpuPreferred), inputs("frame", "ranges", port(name = "mode", default = "auto")), outputs("mask")))]
 fn cv_rgb_multi_range_mask(
-    frame: Payload<DynamicImage>,
+    frame: Compute<DynamicImage>,
     ranges: Vec<(i32, i32, i32, i32, i32, i32)>,
     mode: ExecMode,
     #[cfg(feature = "gpu")] ctx: ShaderContext,
     _exec_ctx: &ExecutionContext,
-) -> Result<Payload<DynamicImage>, NodeError> {
+) -> Result<Compute<DynamicImage>, NodeError> {
     #[cfg(feature = "gpu")]
     {
         if ranges.is_empty() {
             return Err(NodeError::InvalidInput("rgb_multi_range_mask: at least one range required".into()));
         }
-        let cpu_fallback = || -> Result<Payload<DynamicImage>, NodeError> {
+        let cpu_fallback = || -> Result<Compute<DynamicImage>, NodeError> {
             let (bytes, w, h) = frame.to_rgba_bytes(ctx.gpu.as_ref()).map_err(|e| NodeError::Handler(format!("rgb_multi_range_mask: {e}")))?;
             let rgba = RgbaImage::from_raw(w, h, bytes).ok_or_else(|| NodeError::Handler("rgb_multi_range_mask: invalid image dimensions".into()))?;
             let img = DynamicImage::ImageRgba8(rgba);
-            Ok(Payload::Cpu(DynamicImage::ImageLuma8(rgb_multi_range_mask(&img, &ranges))))
+            Ok(Compute::Cpu(DynamicImage::ImageLuma8(rgb_multi_range_mask(&img, &ranges))))
         };
 
         let (width, height) = frame.dimensions();
         if width == 0 || height == 0 {
-            return Ok(Payload::Cpu(DynamicImage::new_rgba8(width, height)));
+            return Ok(Compute::Cpu(DynamicImage::new_rgba8(width, height)));
         }
 
         let want_gpu = matches!(mode, ExecMode::Gpu | ExecMode::Auto) && ctx.gpu.is_some();
@@ -55,7 +55,7 @@ fn cv_rgb_multi_range_mask(
     {
         let _ = mode;
         let frame = expect_cpu(frame, "rgb_multi_range_mask", Some(_exec_ctx))?;
-        Ok(Payload::Cpu(DynamicImage::ImageLuma8(rgb_multi_range_mask(&frame, &ranges))))
+        Ok(Compute::Cpu(DynamicImage::ImageLuma8(rgb_multi_range_mask(&frame, &ranges))))
     }
 }
 
@@ -65,27 +65,27 @@ fn cv_rgb_multi_range_mask(
 )]
 #[cfg_attr(not(feature = "gpu"), node(id = "hsv_multi_range_mask", compute(ComputeAffinity::GpuPreferred), inputs("frame", "ranges", port(name = "mode", default = "auto")), outputs("mask")))]
 fn cv_hsv_multi_range_mask(
-    frame: Payload<DynamicImage>,
+    frame: Compute<DynamicImage>,
     ranges: Vec<(f32, f32, f32, f32, f32, f32)>,
     mode: ExecMode,
     #[cfg(feature = "gpu")] ctx: ShaderContext,
     _exec_ctx: &ExecutionContext,
-) -> Result<Payload<DynamicImage>, NodeError> {
+) -> Result<Compute<DynamicImage>, NodeError> {
     #[cfg(feature = "gpu")]
     {
         if ranges.is_empty() {
             return Err(NodeError::InvalidInput("hsv_multi_range_mask: at least one range required".into()));
         }
-        let cpu_fallback = || -> Result<Payload<DynamicImage>, NodeError> {
+        let cpu_fallback = || -> Result<Compute<DynamicImage>, NodeError> {
             let (bytes, w, h) = frame.to_rgba_bytes(ctx.gpu.as_ref()).map_err(|e| NodeError::Handler(format!("hsv_multi_range_mask: {e}")))?;
             let rgba = RgbaImage::from_raw(w, h, bytes).ok_or_else(|| NodeError::Handler("hsv_multi_range_mask: invalid image dimensions".into()))?;
             let img = DynamicImage::ImageRgba8(rgba);
-            Ok(Payload::Cpu(DynamicImage::ImageLuma8(hsv_multi_range_mask(&img, &ranges))))
+            Ok(Compute::Cpu(DynamicImage::ImageLuma8(hsv_multi_range_mask(&img, &ranges))))
         };
 
         let (width, height) = frame.dimensions();
         if width == 0 || height == 0 {
-            return Ok(Payload::Cpu(DynamicImage::new_rgba8(width, height)));
+            return Ok(Compute::Cpu(DynamicImage::new_rgba8(width, height)));
         }
 
         let want_gpu = matches!(mode, ExecMode::Gpu | ExecMode::Auto) && ctx.gpu.is_some();
@@ -114,7 +114,7 @@ fn cv_hsv_multi_range_mask(
     {
         let _ = mode;
         let frame = expect_cpu(frame, "hsv_multi_range_mask", Some(_exec_ctx))?;
-        Ok(Payload::Cpu(DynamicImage::ImageLuma8(hsv_multi_range_mask(&frame, &ranges))))
+        Ok(Compute::Cpu(DynamicImage::ImageLuma8(hsv_multi_range_mask(&frame, &ranges))))
     }
 }
 
@@ -124,15 +124,15 @@ fn cv_hsv_multi_range_mask(
 )]
 #[cfg_attr(not(feature = "gpu"), node(id = "apply_mask", compute(ComputeAffinity::GpuPreferred), inputs("frame", "mask", port(name = "mode", default = "auto")), outputs("frame")))]
 fn cv_apply_mask(
-    frame: Payload<DynamicImage>,
-    mask: Payload<DynamicImage>,
+    frame: Compute<DynamicImage>,
+    mask: Compute<DynamicImage>,
     mode: ExecMode,
     #[cfg(feature = "gpu")] ctx: ShaderContext,
     _exec_ctx: &ExecutionContext,
-) -> Result<Payload<DynamicImage>, NodeError> {
+) -> Result<Compute<DynamicImage>, NodeError> {
     #[cfg(feature = "gpu")]
     {
-        let cpu_fallback = || -> Result<Payload<DynamicImage>, NodeError> {
+        let cpu_fallback = || -> Result<Compute<DynamicImage>, NodeError> {
             let (frame_bytes, fw, fh) = frame.to_rgba_bytes(ctx.gpu.as_ref()).map_err(|e| NodeError::Handler(format!("apply_mask: {e}")))?;
             let (mask_bytes, mw, mh) = mask.to_rgba_bytes(ctx.gpu.as_ref()).map_err(|e| NodeError::Handler(format!("apply_mask: {e}")))?;
             if fw != mw || fh != mh {
@@ -141,13 +141,13 @@ fn cv_apply_mask(
             let frame_rgba = RgbaImage::from_raw(fw, fh, frame_bytes).ok_or_else(|| NodeError::Handler("apply_mask: invalid frame dimensions".into()))?;
             let mask_rgba = RgbaImage::from_raw(mw, mh, mask_bytes).ok_or_else(|| NodeError::Handler("apply_mask: invalid mask dimensions".into()))?;
             let mask_gray = DynamicImage::ImageRgba8(mask_rgba).to_luma8();
-            Ok(Payload::Cpu(apply_mask(&DynamicImage::ImageRgba8(frame_rgba), &mask_gray)))
+            Ok(Compute::Cpu(apply_mask(&DynamicImage::ImageRgba8(frame_rgba), &mask_gray)))
         };
 
         let (width, height) = frame.dimensions();
         let (mw, mh) = mask.dimensions();
         if width == 0 || height == 0 {
-            return Ok(Payload::Cpu(DynamicImage::new_rgba8(width, height)));
+            return Ok(Compute::Cpu(DynamicImage::new_rgba8(width, height)));
         }
         if (width, height) != (mw, mh) {
             return Err(NodeError::InvalidInput("mask/frame size mismatch".into()));
@@ -178,7 +178,7 @@ fn cv_apply_mask(
         let frame_cpu = expect_cpu(frame, "apply_mask", Some(_exec_ctx))?;
         let mask_cpu = expect_cpu(mask, "apply_mask", Some(_exec_ctx))?;
         let mask_gray = mask_cpu.to_luma8();
-        Ok(Payload::Cpu(apply_mask(&frame_cpu, &mask_gray)))
+        Ok(Compute::Cpu(apply_mask(&frame_cpu, &mask_gray)))
     }
 }
 

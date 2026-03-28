@@ -12,7 +12,7 @@ use super::*;
     outputs(port(name = "detections", source = "ArucoDetections2D", ty = crate::daedalus_types::aruco_detections_2d()))
 )]
 fn cv_aruco_decode_quads(
-    frame: Payload<DynamicImage>,
+    frame: Compute<DynamicImage>,
     quads: &Vec<Quad>,
     dictionary: ArucoDictionaryKind,
     sample_scale: i64,
@@ -71,7 +71,7 @@ fn cv_aruco_decode_quads(
         outputs(port(name = "detections", source = "ArucoDetections2D", ty = crate::daedalus_types::aruco_detections_2d()))
     )]
 fn cv_aruco_decode_quads_warp(
-    frame: Payload<DynamicImage>,
+    frame: Compute<DynamicImage>,
     quads: &Vec<Quad>,
     dictionary: ArucoDictionaryKind,
     sample_scale: i64,
@@ -240,7 +240,7 @@ fn decode_tuning_from_calibrated_aruco(cfg: &ArucoTagDecodeQuadsCalibratedConfig
     outputs(port(name = "detections", source = "ArucoDetections2D", ty = crate::daedalus_types::aruco_detections_2d()))
 )]
 fn cv_aruco_decode_quads_calibrated(
-    frame: Payload<DynamicImage>,
+    frame: Compute<DynamicImage>,
     quads: &Vec<Quad>,
     cfg: ArucoTagDecodeQuadsCalibratedConfig,
     exec_ctx: &ExecutionContext,

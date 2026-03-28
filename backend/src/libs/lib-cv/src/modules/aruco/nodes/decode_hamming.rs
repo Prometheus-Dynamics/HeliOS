@@ -248,7 +248,7 @@ fn cv_aruco_decode_quads_hamming_finalize_detections(
 )]
 #[allow(clippy::too_many_arguments)]
 fn cv_aruco_decode_quads_hamming(
-    frame: DynamicImage,
+    frame: &GrayImage,
     quads: std::sync::Arc<Vec<Quad>>,
     dictionary: ArucoDictionaryKind,
     sample_scale: i64,
@@ -282,40 +282,38 @@ fn cv_aruco_decode_quads_hamming(
 ) -> Result<Vec<ArucoDetection2D>, NodeError> {
     let _scratch_guard = ArucoDecodeFrameScratchGuard::new();
     let _ = exec_ctx;
-    crate::modules::image::luma::with_luma8_frame(&frame, |gray| {
-        decode_quads_hamming_gray_inner(
-            gray,
-            quads.as_slice(),
-            dictionary,
-            sample_scale,
-            max_hamming,
-            border_error_divisor,
-            refine_corners_warp,
-            refine_corners_warp_scale,
-            min_id,
-            max_id,
-            min_warped_patch_contrast_range,
-            warp_fallback_on_decode_fail,
-            warp_fallback_max_hamming_extra,
-            warp_fallback_border_slack,
-            warp_fallback_on_low_contrast,
-            warp_min_sample_scale,
-            min_quad_side_px,
-            min_quiet_zone_delta,
-            quiet_zone_texture_penalty,
-            verify_warp_min_best_distance,
-            verify_warp_only_if_border_mismatch,
-            verify_warp_reject_on_fail,
-            min_decode_score,
-            cell_sample_grid,
-            cell_sample_margin,
-            min_cell_means_contrast_range,
-            min_hamming_margin,
-            min_hamming_margin_min_dist,
-            min_hamming_margin_only_if_border_mismatch,
-            min_bit_delta,
-        )
-    })
+    decode_quads_hamming_gray_inner(
+        frame,
+        quads.as_slice(),
+        dictionary,
+        sample_scale,
+        max_hamming,
+        border_error_divisor,
+        refine_corners_warp,
+        refine_corners_warp_scale,
+        min_id,
+        max_id,
+        min_warped_patch_contrast_range,
+        warp_fallback_on_decode_fail,
+        warp_fallback_max_hamming_extra,
+        warp_fallback_border_slack,
+        warp_fallback_on_low_contrast,
+        warp_min_sample_scale,
+        min_quad_side_px,
+        min_quiet_zone_delta,
+        quiet_zone_texture_penalty,
+        verify_warp_min_best_distance,
+        verify_warp_only_if_border_mismatch,
+        verify_warp_reject_on_fail,
+        min_decode_score,
+        cell_sample_grid,
+        cell_sample_margin,
+        min_cell_means_contrast_range,
+        min_hamming_margin,
+        min_hamming_margin_min_dist,
+        min_hamming_margin_only_if_border_mismatch,
+        min_bit_delta,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]

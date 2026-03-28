@@ -10,6 +10,8 @@ thread_local! {
     static VERT_LUT_SCRATCH: RefCell<Vec<u16>> = const { RefCell::new(Vec::new()) };
 }
 
+const VERT_LUT_RETAIN_CAP: usize = 128 * 256;
+
 const CLAHE_LUT_PAR_MIN_TILES: usize = 24;
 const CLAHE_APPLY_PAR_MIN_PIXELS_DEFAULT: usize = 1920 * 1080;
 
@@ -89,6 +91,42 @@ struct ClaheCoordCache {
 
 thread_local! {
     static CLAHE_COORD_CACHE: RefCell<Option<ClaheCoordCache>> = const { RefCell::new(None) };
+}
+
+pub(crate) fn compact_clahe_scratch_after_frame() {
+    compact_clahe_scratch_current_thread();
+    rayon::broadcast(|_| {
+        compact_clahe_scratch_current_thread();
+    });
+}
+
+pub(crate) fn release_clahe_scratch_on_idle() {
+    release_clahe_scratch_current_thread();
+    rayon::broadcast(|_| {
+        release_clahe_scratch_current_thread();
+    });
+}
+
+fn compact_clahe_scratch_current_thread() {
+    VERT_LUT_SCRATCH.with(|scratch| {
+        let mut scratch = scratch.borrow_mut();
+        scratch.clear();
+        if scratch.capacity() > VERT_LUT_RETAIN_CAP {
+            scratch.shrink_to(VERT_LUT_RETAIN_CAP);
+        }
+    });
+    CLAHE_COORD_CACHE.with(|cache| {
+        cache.borrow_mut().take();
+    });
+}
+
+fn release_clahe_scratch_current_thread() {
+    VERT_LUT_SCRATCH.with(|scratch| {
+        *scratch.borrow_mut() = Vec::new();
+    });
+    CLAHE_COORD_CACHE.with(|cache| {
+        cache.borrow_mut().take();
+    });
 }
 
 /// Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) with bilinear blending between tiles.

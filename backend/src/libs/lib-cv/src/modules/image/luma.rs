@@ -1,148 +1,41 @@
 use image::{DynamicImage, GrayImage};
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::ops::Deref;
 use std::sync::{Mutex, OnceLock};
 
-#[cfg(feature = "gpu")]
-use daedalus::gpu::{GpuContextHandle, GpuError, GpuImageHandle, GpuSendable, upload_r8_texture, upload_rgba8_texture};
+const LUMA_SCRATCH_RETAIN_CAP: usize = 2 * 1024 * 1024;
 
-thread_local! {
-    static LUMA_SCRATCH: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+fn luma_scratch_pool() -> &'static Mutex<Option<Vec<u8>>> {
+    static POOL: OnceLock<Mutex<Option<Vec<u8>>>> = OnceLock::new();
+    POOL.get_or_init(|| Mutex::new(None))
 }
 
-const POOLED_GRAY_IMAGE_MAX_PER_SIZE: usize = 1;
-
-fn pooled_gray_image_store() -> &'static Mutex<HashMap<usize, Vec<Vec<u8>>>> {
-    static STORE: OnceLock<Mutex<HashMap<usize, Vec<Vec<u8>>>>> = OnceLock::new();
-    STORE.get_or_init(|| Mutex::new(HashMap::new()))
+fn with_luma_scratch<R>(needed: usize, label: &'static str, f: impl FnOnce(&mut Vec<u8>) -> R) -> R {
+    let mut buf = luma_scratch_pool().lock().ok().and_then(|mut slot| slot.take()).unwrap_or_default();
+    if buf.len() != needed {
+        buf.resize(needed, 0);
+        crate::diagnostics::report_scratch_high_water(label, buf.capacity());
+    }
+    let out = f(&mut buf);
+    buf.clear();
+    if buf.capacity() <= LUMA_SCRATCH_RETAIN_CAP
+        && let Ok(mut slot) = luma_scratch_pool().lock()
+        && slot.is_none()
+    {
+        *slot = Some(buf);
+    }
+    out
 }
 
-fn take_pooled_gray_bytes(len: usize) -> Vec<u8> {
-    let Some(bytes) = pooled_gray_image_store().lock().ok().and_then(|mut guard| guard.get_mut(&len).and_then(Vec::pop)) else {
-        return vec![0u8; len];
-    };
-    let mut bytes = bytes;
-    if bytes.len() != len {
-        bytes.resize(len, 0);
-    } else {
-        bytes.fill(0);
-    }
-    bytes
-}
-
-fn recycle_pooled_gray_bytes(mut bytes: Vec<u8>) {
-    let len = bytes.len();
-    if len == 0 {
-        return;
-    }
-    if bytes.capacity() > len.saturating_mul(2) {
-        bytes.shrink_to(len);
-    }
-    if let Ok(mut guard) = pooled_gray_image_store().lock() {
-        let slot = guard.entry(len).or_default();
-        if slot.len() < POOLED_GRAY_IMAGE_MAX_PER_SIZE {
-            slot.push(bytes);
+pub(crate) fn compact_luma_scratch_after_frame() {
+    if let Ok(mut slot) = luma_scratch_pool().lock() {
+        if slot.as_ref().is_some_and(|scratch| scratch.capacity() > LUMA_SCRATCH_RETAIN_CAP) {
+            *slot = None;
         }
     }
 }
 
-pub struct PooledGrayImage {
-    image: Option<GrayImage>,
-}
-
-impl PooledGrayImage {
-    pub fn new(width: u32, height: u32) -> Self {
-        let len = (width as usize).saturating_mul(height as usize);
-        let bytes = take_pooled_gray_bytes(len);
-        let image = GrayImage::from_raw(width, height, bytes).unwrap_or_else(|| GrayImage::new(width, height));
-        Self { image: Some(image) }
-    }
-
-    pub fn as_gray(&self) -> &GrayImage {
-        self.image.as_ref().expect("pooled gray image missing inner image")
-    }
-
-    pub fn as_mut_gray(&mut self) -> &mut GrayImage {
-        self.image.as_mut().expect("pooled gray image missing inner image")
-    }
-
-    pub fn into_inner(mut self) -> GrayImage {
-        self.image.take().expect("pooled gray image missing inner image")
-    }
-}
-
-impl Clone for PooledGrayImage {
-    fn clone(&self) -> Self {
-        let gray = self.as_gray();
-        let mut out = Self::new(gray.width(), gray.height());
-        out.as_mut_gray().as_mut().copy_from_slice(gray.as_raw());
-        out
-    }
-}
-
-impl Deref for PooledGrayImage {
-    type Target = GrayImage;
-
-    fn deref(&self) -> &Self::Target {
-        self.as_gray()
-    }
-}
-
-impl AsRef<GrayImage> for PooledGrayImage {
-    fn as_ref(&self) -> &GrayImage {
-        self.as_gray()
-    }
-}
-
-impl Drop for PooledGrayImage {
-    fn drop(&mut self) {
-        let Some(image) = self.image.take() else {
-            return;
-        };
-        recycle_pooled_gray_bytes(image.into_raw());
-    }
-}
-
-#[cfg(feature = "gpu")]
-impl GpuSendable for PooledGrayImage {
-    type GpuRepr = GpuImageHandle;
-
-    fn upload(self, ctx: &GpuContextHandle) -> Result<Self::GpuRepr, GpuError> {
-        let gray = self.as_gray();
-        let (width, height) = gray.dimensions();
-        if ctx.capabilities().supported_formats.iter().any(|f| matches!(f, daedalus::gpu::GpuFormat::R8Unorm)) {
-            return upload_r8_texture(ctx, width, height, gray.as_raw());
-        }
-
-        let mut rgba = Vec::with_capacity((width as usize).saturating_mul(height as usize).saturating_mul(4));
-        for &v in gray.as_raw() {
-            rgba.extend_from_slice(&[v, v, v, 255]);
-        }
-        upload_rgba8_texture(ctx, width, height, &rgba)
-    }
-
-    fn download(gpu: &Self::GpuRepr, ctx: &GpuContextHandle) -> Result<Self, GpuError> {
-        let bytes = ctx.read_texture(gpu)?;
-        let mut out = PooledGrayImage::new(gpu.width, gpu.height);
-        let dst = out.as_mut_gray().as_mut();
-        match gpu.format {
-            daedalus::gpu::GpuFormat::R8Unorm => {
-                if dst.len() != bytes.len() {
-                    return Err(GpuError::AllocationFailed);
-                }
-                dst.copy_from_slice(&bytes);
-            }
-            _ => {
-                if dst.len().saturating_mul(4) != bytes.len() {
-                    return Err(GpuError::AllocationFailed);
-                }
-                for (dst_px, rgba) in dst.iter_mut().zip(bytes.chunks_exact(4)) {
-                    *dst_px = rgba[0];
-                }
-            }
-        }
-        Ok(out)
+pub(crate) fn release_luma_scratch_on_idle() {
+    if let Ok(mut slot) = luma_scratch_pool().lock() {
+        *slot = None;
     }
 }
 
@@ -257,30 +150,18 @@ fn rgba_to_luma_into(dst: &mut [u8], src: &[u8]) {
 
 fn with_gray_scratch<R>(width: u32, height: u32, label: &'static str, fill: impl FnOnce(&mut [u8]), f: impl FnOnce(&GrayImage) -> R) -> R {
     let needed = (width as usize).saturating_mul(height as usize);
-    LUMA_SCRATCH.with(|scratch| match scratch.try_borrow_mut() {
-        Ok(mut buf) => {
-            if buf.len() != needed {
-                buf.resize(needed, 0);
-                crate::diagnostics::report_scratch_high_water(label, buf.capacity());
-            }
-            fill(&mut buf);
-            let img = GrayImage::from_raw(width, height, std::mem::take(&mut *buf)).unwrap_or_else(|| GrayImage::new(width, height));
-            let out = f(&img);
-            *buf = img.into_raw();
-            out
-        }
-        Err(_) => {
-            let mut local = vec![0u8; needed];
-            fill(&mut local);
-            let img = GrayImage::from_raw(width, height, local).unwrap_or_else(|| GrayImage::new(width, height));
-            f(&img)
-        }
+    with_luma_scratch(needed, label, |buf| {
+        fill(buf.as_mut_slice());
+        let img = GrayImage::from_raw(width, height, std::mem::take(buf)).unwrap_or_else(|| GrayImage::new(width, height));
+        let out = f(&img);
+        *buf = img.into_raw();
+        out
     })
 }
 
-pub(crate) fn crop_luma8_frame(frame: &DynamicImage, x: u32, y: u32, width: u32, height: u32) -> PooledGrayImage {
+pub(crate) fn crop_luma8_frame(frame: &DynamicImage, x: u32, y: u32, width: u32, height: u32) -> GrayImage {
     if width == 0 || height == 0 {
-        return PooledGrayImage::new(0, 0);
+        return GrayImage::new(0, 0);
     }
 
     match frame {
@@ -291,8 +172,8 @@ pub(crate) fn crop_luma8_frame(frame: &DynamicImage, x: u32, y: u32, width: u32,
             let y = y as usize;
             let width_usize = width as usize;
             let height_usize = height as usize;
-            let mut out = PooledGrayImage::new(width, height);
-            let out_raw = out.as_mut_gray().as_mut();
+            let mut out = GrayImage::new(width, height);
+            let out_raw = out.as_mut();
             for row in 0..height_usize {
                 let src_start = (y + row) * stride + x;
                 let src_end = src_start + width_usize;
@@ -308,8 +189,8 @@ pub(crate) fn crop_luma8_frame(frame: &DynamicImage, x: u32, y: u32, width: u32,
             let y = y as usize;
             let width_usize = width as usize;
             let height_usize = height as usize;
-            let mut out = PooledGrayImage::new(width, height);
-            let out_raw = out.as_mut_gray().as_mut();
+            let mut out = GrayImage::new(width, height);
+            let out_raw = out.as_mut();
             for row in 0..height_usize {
                 let src_row = ((y + row) * stride + x) * 2;
                 let dst_row = row * width_usize;
@@ -326,8 +207,8 @@ pub(crate) fn crop_luma8_frame(frame: &DynamicImage, x: u32, y: u32, width: u32,
             let y = y as usize;
             let width_usize = width as usize;
             let height_usize = height as usize;
-            let mut out = PooledGrayImage::new(width, height);
-            let out_raw = out.as_mut_gray().as_mut();
+            let mut out = GrayImage::new(width, height);
+            let out_raw = out.as_mut();
             for row in 0..height_usize {
                 let src_row = ((y + row) * stride + x) * 3;
                 let dst_row = row * width_usize;
@@ -342,8 +223,8 @@ pub(crate) fn crop_luma8_frame(frame: &DynamicImage, x: u32, y: u32, width: u32,
             let y = y as usize;
             let width_usize = width as usize;
             let height_usize = height as usize;
-            let mut out = PooledGrayImage::new(width, height);
-            let out_raw = out.as_mut_gray().as_mut();
+            let mut out = GrayImage::new(width, height);
+            let out_raw = out.as_mut();
             for row in 0..height_usize {
                 let src_row = ((y + row) * stride + x) * 4;
                 let dst_row = row * width_usize;
@@ -353,11 +234,15 @@ pub(crate) fn crop_luma8_frame(frame: &DynamicImage, x: u32, y: u32, width: u32,
         }
         other => {
             let gray = other.crop_imm(x, y, width, height).to_luma8();
-            let mut out = PooledGrayImage::new(width, height);
-            out.as_mut_gray().as_mut().copy_from_slice(gray.as_raw());
+            let mut out = GrayImage::new(width, height);
+            out.as_mut().copy_from_slice(gray.as_raw());
             out
         }
     }
+}
+
+pub(crate) fn crop_luma8_image(frame: &DynamicImage, x: u32, y: u32, width: u32, height: u32) -> GrayImage {
+    crop_luma8_frame(frame, x, y, width, height)
 }
 
 pub(crate) fn with_cropped_luma8_frame<R>(frame: &DynamicImage, x: u32, y: u32, width: u32, height: u32, f: impl FnOnce(&GrayImage) -> R) -> R {
@@ -462,92 +347,45 @@ pub(crate) fn with_cropped_luma8_frame<R>(frame: &DynamicImage, x: u32, y: u32, 
     }
 }
 
-pub(crate) fn with_luma8_frame<R>(frame: &DynamicImage, f: impl FnOnce(&GrayImage) -> R) -> R {
+pub fn with_luma8_frame<R>(frame: &DynamicImage, f: impl FnOnce(&GrayImage) -> R) -> R {
     match frame {
         DynamicImage::ImageLuma8(gray) => f(gray),
         DynamicImage::ImageLumaA8(gray) => {
             let (width, height) = gray.dimensions();
             let src = gray.as_raw();
-            LUMA_SCRATCH.with(|scratch| {
-                let needed = (width as usize).saturating_mul(height as usize);
-                match scratch.try_borrow_mut() {
-                    Ok(mut buf) => {
-                        if buf.len() != needed {
-                            buf.resize(needed, 0);
-                            crate::diagnostics::report_scratch_high_water("image.luma_scratch", buf.capacity());
-                        }
-                        for (dst, src) in buf.iter_mut().zip(src.chunks_exact(2)) {
-                            *dst = src[0];
-                        }
-                        let img = GrayImage::from_raw(width, height, std::mem::take(&mut *buf)).unwrap_or_else(|| GrayImage::new(width, height));
-                        let out = f(&img);
-                        *buf = img.into_raw();
-                        out
-                    }
-                    Err(_) => {
-                        // Re-entrant conversion on this thread; avoid panicking on RefCell borrow.
-                        let mut local = vec![0u8; needed];
-                        for (dst, src) in local.iter_mut().zip(src.chunks_exact(2)) {
-                            *dst = src[0];
-                        }
-                        let img = GrayImage::from_raw(width, height, local).unwrap_or_else(|| GrayImage::new(width, height));
-                        f(&img)
-                    }
+            let needed = (width as usize).saturating_mul(height as usize);
+            with_luma_scratch(needed, "image.luma_scratch", |buf| {
+                for (dst, src) in buf.iter_mut().zip(src.chunks_exact(2)) {
+                    *dst = src[0];
                 }
+                let img = GrayImage::from_raw(width, height, std::mem::take(buf)).unwrap_or_else(|| GrayImage::new(width, height));
+                let out = f(&img);
+                *buf = img.into_raw();
+                out
             })
         }
         DynamicImage::ImageRgb8(rgb) => {
             let (width, height) = rgb.dimensions();
             let src = rgb.as_raw();
-            LUMA_SCRATCH.with(|scratch| {
-                let needed = (width as usize).saturating_mul(height as usize);
-                match scratch.try_borrow_mut() {
-                    Ok(mut buf) => {
-                        if buf.len() != needed {
-                            buf.resize(needed, 0);
-                            crate::diagnostics::report_scratch_high_water("image.luma_scratch", buf.capacity());
-                        }
-                        rgb_to_luma_into(buf.as_mut_slice(), src);
-                        let img = GrayImage::from_raw(width, height, std::mem::take(&mut *buf)).unwrap_or_else(|| GrayImage::new(width, height));
-                        let out = f(&img);
-                        *buf = img.into_raw();
-                        out
-                    }
-                    Err(_) => {
-                        // Re-entrant conversion on this thread; avoid panicking on RefCell borrow.
-                        let mut local = vec![0u8; needed];
-                        rgb_to_luma_into(local.as_mut_slice(), src);
-                        let img = GrayImage::from_raw(width, height, local).unwrap_or_else(|| GrayImage::new(width, height));
-                        f(&img)
-                    }
-                }
+            let needed = (width as usize).saturating_mul(height as usize);
+            with_luma_scratch(needed, "image.luma_scratch", |buf| {
+                rgb_to_luma_into(buf.as_mut_slice(), src);
+                let img = GrayImage::from_raw(width, height, std::mem::take(buf)).unwrap_or_else(|| GrayImage::new(width, height));
+                let out = f(&img);
+                *buf = img.into_raw();
+                out
             })
         }
         DynamicImage::ImageRgba8(rgba) => {
             let (width, height) = rgba.dimensions();
             let src = rgba.as_raw();
-            LUMA_SCRATCH.with(|scratch| {
-                let needed = (width as usize).saturating_mul(height as usize);
-                match scratch.try_borrow_mut() {
-                    Ok(mut buf) => {
-                        if buf.len() != needed {
-                            buf.resize(needed, 0);
-                            crate::diagnostics::report_scratch_high_water("image.luma_scratch", buf.capacity());
-                        }
-                        rgba_to_luma_into(buf.as_mut_slice(), src);
-                        let img = GrayImage::from_raw(width, height, std::mem::take(&mut *buf)).unwrap_or_else(|| GrayImage::new(width, height));
-                        let out = f(&img);
-                        *buf = img.into_raw();
-                        out
-                    }
-                    Err(_) => {
-                        // Re-entrant conversion on this thread; avoid panicking on RefCell borrow.
-                        let mut local = vec![0u8; needed];
-                        rgba_to_luma_into(local.as_mut_slice(), src);
-                        let img = GrayImage::from_raw(width, height, local).unwrap_or_else(|| GrayImage::new(width, height));
-                        f(&img)
-                    }
-                }
+            let needed = (width as usize).saturating_mul(height as usize);
+            with_luma_scratch(needed, "image.luma_scratch", |buf| {
+                rgba_to_luma_into(buf.as_mut_slice(), src);
+                let img = GrayImage::from_raw(width, height, std::mem::take(buf)).unwrap_or_else(|| GrayImage::new(width, height));
+                let out = f(&img);
+                *buf = img.into_raw();
+                out
             })
         }
         other => {

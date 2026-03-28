@@ -1,20 +1,22 @@
 use daedalus::data::model::StructFieldValue;
 use daedalus::data::model::TypeExpr as DaedalusTypeExpr;
 use daedalus::data::model::Value as DaedalusValue;
+use daedalus::data::model::ValueType as DaedalusValueType;
 use daedalus::engine::{Engine, EngineConfig, RuntimeMode};
-use daedalus::gpu::{select_backend, ErasedPayload, GpuBackendKind, GpuContextHandle, GpuOptions};
+use daedalus::gpu::{select_backend, Compute, DataCell, GpuBackendKind, GpuContextHandle, GpuOptions};
 use daedalus::planner::{ComputeAffinity, Graph, GraphPatch, PatchReport};
-use daedalus::runtime::executor::EdgePayload as DaedalusEdgePayload;
 use daedalus::runtime::executor::ExecutionTelemetry as DaedalusExecutionTelemetry;
 use daedalus::runtime::executor::OwnedExecutor as DaedalusOwnedExecutor;
 use daedalus::runtime::handler_registry::HandlerRegistry as DaedalusHandlers;
 use daedalus::runtime::host_bridge::HOST_BRIDGE_META_KEY;
-use daedalus::runtime::{BackpressureStrategy, EdgePolicyKind, HostBridgeManager as DaedalusBridgeManager, MetricsLevel as DaedalusMetricsLevel, RuntimePlan, RuntimeSink};
-use daedalus::Payload;
-use image::{DynamicImage, GrayImage, Rgba, RgbaImage};
+use daedalus::runtime::{
+    BackpressureStrategy, EdgePolicyKind, HostBridgeManager as DaedalusBridgeManager, MetricsLevel as DaedalusMetricsLevel, RuntimePlan, RuntimeSink, RuntimeValue as DaedalusEdgePayload,
+};
+use image::{DynamicImage, GrayImage, RgbImage, Rgba, RgbaImage};
 use lib_cv::modules::aruco::ArucoDetection2D;
 use metrics::histogram;
 use serde_json::Value;
+use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::env;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -58,6 +60,335 @@ fn is_image_payload(ty: &DaedalusTypeExpr) -> bool {
     }
 }
 
+fn is_grayscale_image_payload(ty: &DaedalusTypeExpr) -> bool {
+    match ty {
+        DaedalusTypeExpr::Opaque(name) => {
+            let lower = name.to_ascii_lowercase();
+            lower == "image:gray8" || lower == "image:graya8"
+        }
+        DaedalusTypeExpr::Optional(inner) => is_grayscale_image_payload(inner.as_ref()),
+        _ => false,
+    }
+}
+
+fn node_requires_color_input(node_id: &str) -> bool {
+    let lower = node_id.to_ascii_lowercase();
+    lower.contains(":color:")
+}
+
+fn graph_prefers_grayscale_input(graph_has_color_sensitive_nodes: bool, preview_ports: &[String], host_output_port_types: &BTreeMap<String, DaedalusTypeExpr>) -> bool {
+    if graph_has_color_sensitive_nodes {
+        return false;
+    }
+
+    if preview_ports.iter().any(|port| {
+        let key = port.to_ascii_lowercase();
+        host_output_port_types.get(&key).is_none_or(|ty| !is_grayscale_image_payload(ty))
+    }) {
+        return false;
+    }
+
+    host_output_port_types.values().filter(|ty| is_image_payload(ty)).all(is_grayscale_image_payload)
+}
+
+fn is_aruco_detections_payload(ty: &DaedalusTypeExpr) -> bool {
+    match ty {
+        DaedalusTypeExpr::List(inner) => match inner.as_ref() {
+            DaedalusTypeExpr::Opaque(name) => name.eq_ignore_ascii_case("cv:aruco_detection_2d"),
+            other => is_aruco_detections_payload(other),
+        },
+        DaedalusTypeExpr::Optional(inner) => is_aruco_detections_payload(inner.as_ref()),
+        _ => false,
+    }
+}
+
+fn unwrap_nested_runtime_any<'a>(mut any: &'a (dyn Any + Send + Sync)) -> &'a (dyn Any + Send + Sync) {
+    loop {
+        if let Some(inner) = any.downcast_ref::<Arc<dyn Any + Send + Sync>>() {
+            any = inner.as_ref();
+            continue;
+        }
+        if let Some(inner) = any.downcast_ref::<Box<dyn Any + Send + Sync>>() {
+            any = inner.as_ref();
+            continue;
+        }
+        if let Some(inner) = any.downcast_ref::<Arc<Box<dyn Any + Send + Sync>>>() {
+            any = inner.as_ref().as_ref();
+            continue;
+        }
+        if let Some(inner) = any.downcast_ref::<Box<Arc<dyn Any + Send + Sync>>>() {
+            any = inner.as_ref().as_ref();
+            continue;
+        }
+        return any;
+    }
+}
+
+fn decode_runtime_value_as_aruco_detections(payload: &DaedalusEdgePayload) -> Option<Arc<Vec<ArucoDetection2D>>> {
+    let DaedalusEdgePayload::Any(any) = payload else {
+        return None;
+    };
+    let any = unwrap_nested_runtime_any(any.as_ref());
+    any.downcast_ref::<Arc<Vec<ArucoDetection2D>>>().cloned().or_else(|| any.downcast_ref::<Vec<ArucoDetection2D>>().map(|detections| Arc::new(detections.clone())))
+}
+
+fn int_value_json(value: i64) -> (DaedalusValue, Option<Value>) {
+    let value = DaedalusValue::Int(value);
+    let json = daedalus_value_to_json(&value);
+    (value, json)
+}
+
+fn float_value_json(value: f64) -> Option<(DaedalusValue, Option<Value>)> {
+    if !value.is_finite() {
+        return None;
+    }
+    let value = DaedalusValue::Float(value);
+    let json = daedalus_value_to_json(&value);
+    Some((value, json))
+}
+
+fn string_value_json(raw: String) -> (DaedalusValue, Option<Value>) {
+    let parsed = serde_json::from_str::<Value>(&raw).unwrap_or(Value::String(raw));
+    (json_to_daedalus_value(&parsed), Some(parsed))
+}
+
+fn bytes_value_json(bytes: Vec<u8>) -> (DaedalusValue, Option<Value>) {
+    let value = DaedalusValue::Bytes(bytes.into());
+    let json = daedalus_value_to_json(&value);
+    (value, json)
+}
+
+fn decode_runtime_value_fallback(payload: &DaedalusEdgePayload, port_type: Option<&DaedalusTypeExpr>) -> Option<(DaedalusValue, Option<Value>)> {
+    match payload {
+        DaedalusEdgePayload::Value(value) => {
+            let json = daedalus_value_to_json(value);
+            Some((value.clone(), json))
+        }
+        DaedalusEdgePayload::Bytes(bytes) => Some(bytes_value_json(bytes.as_ref().to_vec())),
+        DaedalusEdgePayload::Any(any) => {
+            let any = unwrap_nested_runtime_any(any.as_ref());
+            if let Some(json) = any.downcast_ref::<Value>() {
+                return Some((json_to_daedalus_value(json), Some(json.clone())));
+            }
+            if let Some(raw) = any.downcast_ref::<String>() {
+                return Some(string_value_json(raw.clone()));
+            }
+            if let Some(raw) = any.downcast_ref::<Arc<String>>() {
+                return Some(string_value_json((**raw).clone()));
+            }
+            if let Some(bytes) = any.downcast_ref::<Vec<u8>>() {
+                return Some(bytes_value_json(bytes.clone()));
+            }
+            if let Some(bytes) = any.downcast_ref::<Arc<[u8]>>() {
+                return Some(bytes_value_json(bytes.as_ref().to_vec()));
+            }
+
+            match port_type {
+                Some(DaedalusTypeExpr::Scalar(DaedalusValueType::Bool)) => any.downcast_ref::<bool>().copied().map(|value| {
+                    let value = DaedalusValue::Bool(value);
+                    let json = daedalus_value_to_json(&value);
+                    (value, json)
+                }),
+                Some(DaedalusTypeExpr::Scalar(DaedalusValueType::F32)) | Some(DaedalusTypeExpr::Scalar(DaedalusValueType::Float)) => {
+                    any.downcast_ref::<f64>().copied().and_then(float_value_json).or_else(|| any.downcast_ref::<f32>().copied().and_then(|value| float_value_json(f64::from(value))))
+                }
+                Some(DaedalusTypeExpr::Scalar(DaedalusValueType::I32)) | Some(DaedalusTypeExpr::Scalar(DaedalusValueType::U32)) | Some(DaedalusTypeExpr::Scalar(DaedalusValueType::Int)) => any
+                    .downcast_ref::<i64>()
+                    .copied()
+                    .map(int_value_json)
+                    .or_else(|| any.downcast_ref::<i32>().copied().map(|value| int_value_json(i64::from(value))))
+                    .or_else(|| any.downcast_ref::<u32>().copied().map(|value| int_value_json(i64::from(value))))
+                    .or_else(|| any.downcast_ref::<u64>().copied().and_then(|value| i64::try_from(value).ok()).map(int_value_json))
+                    .or_else(|| any.downcast_ref::<usize>().copied().and_then(|value| i64::try_from(value).ok()).map(int_value_json))
+                    .or_else(|| any.downcast_ref::<u16>().copied().map(|value| int_value_json(i64::from(value))))
+                    .or_else(|| any.downcast_ref::<u8>().copied().map(|value| int_value_json(i64::from(value))))
+                    .or_else(|| any.downcast_ref::<i16>().copied().map(|value| int_value_json(i64::from(value))))
+                    .or_else(|| any.downcast_ref::<i8>().copied().map(|value| int_value_json(i64::from(value))))
+                    .or_else(|| any.downcast_ref::<isize>().copied().and_then(|value| i64::try_from(value).ok()).map(int_value_json)),
+                Some(DaedalusTypeExpr::Scalar(DaedalusValueType::String)) => {
+                    any.downcast_ref::<String>().cloned().map(string_value_json).or_else(|| any.downcast_ref::<Arc<String>>().map(|raw| string_value_json((**raw).clone())))
+                }
+                Some(DaedalusTypeExpr::Scalar(DaedalusValueType::Bytes)) => {
+                    any.downcast_ref::<Vec<u8>>().cloned().map(bytes_value_json).or_else(|| any.downcast_ref::<Arc<[u8]>>().map(|bytes| bytes_value_json(bytes.as_ref().to_vec())))
+                }
+                _ => {
+                    if let Some(value) = any.downcast_ref::<bool>().copied() {
+                        let value = DaedalusValue::Bool(value);
+                        let json = daedalus_value_to_json(&value);
+                        return Some((value, json));
+                    }
+                    if let Some(value) = any.downcast_ref::<i64>().copied() {
+                        return Some(int_value_json(value));
+                    }
+                    if let Some(value) = any.downcast_ref::<f64>().copied() {
+                        return float_value_json(value);
+                    }
+                    if let Some(value) = any.downcast_ref::<String>() {
+                        return Some(string_value_json(value.clone()));
+                    }
+                    None
+                }
+            }
+        }
+        DaedalusEdgePayload::Unit => None,
+        _ => None,
+    }
+}
+
+fn decode_compute_dynamic_image(payload: Compute<DynamicImage>, gpu: Option<&GpuContextHandle>) -> Result<DynamicImage, String> {
+    match payload {
+        Compute::Cpu(img) => Ok(img),
+        Compute::Gpu(handle) => {
+            let Some(gpu) = gpu else {
+                return Err("gpu image output requires a GPU context".into());
+            };
+            <DynamicImage as daedalus::gpu::DeviceBridge>::download(&handle, gpu).map_err(|err| format!("failed to download gpu image: {err:?}"))
+        }
+    }
+}
+
+fn decode_compute_gray_image(payload: Compute<GrayImage>, gpu: Option<&GpuContextHandle>) -> Result<DynamicImage, String> {
+    match payload {
+        Compute::Cpu(gray) => Ok(DynamicImage::ImageLuma8(gray)),
+        Compute::Gpu(handle) => {
+            let Some(gpu) = gpu else {
+                return Err("gpu gray output requires a GPU context".into());
+            };
+            <GrayImage as daedalus::gpu::DeviceBridge>::download(&handle, gpu).map(DynamicImage::ImageLuma8).map_err(|err| format!("failed to download gpu gray image: {err:?}"))
+        }
+    }
+}
+
+fn decode_compute_gray_preview_output(payload: Compute<GrayImage>, gpu: Option<&GpuContextHandle>) -> Result<GraphPreviewOutput, String> {
+    match payload {
+        Compute::Cpu(gray) => Ok(GraphPreviewOutput::Gray(Arc::new(gray))),
+        Compute::Gpu(handle) => {
+            let Some(gpu) = gpu else {
+                return Err("gpu gray output requires a GPU context".into());
+            };
+            <GrayImage as daedalus::gpu::DeviceBridge>::download(&handle, gpu).map(|gray| GraphPreviewOutput::Gray(Arc::new(gray))).map_err(|err| format!("failed to download gpu gray image: {err:?}"))
+        }
+    }
+}
+
+fn decode_host_output_data_cell(payload: &DataCell, gpu: Option<&GpuContextHandle>) -> Result<Option<DynamicImage>, String> {
+    if let Some(img) = payload.arc_cpu_any::<DynamicImage>() {
+        return Ok(Some(Arc::unwrap_or_clone(img)));
+    }
+    if let Some(img) = payload.try_downcast_cpu_any::<DynamicImage>() {
+        return Ok(Some(img));
+    }
+    if let Some(img) = payload.clone_cpu::<DynamicImage>() {
+        return Ok(Some(img));
+    }
+    if let Some(gray) = payload.arc_cpu_any::<GrayImage>() {
+        return Ok(Some(DynamicImage::ImageLuma8(Arc::unwrap_or_clone(gray))));
+    }
+    if let Some(gray) = payload.try_downcast_cpu_any::<GrayImage>() {
+        return Ok(Some(DynamicImage::ImageLuma8(gray)));
+    }
+    if let Some(gray) = payload.clone_cpu::<GrayImage>() {
+        return Ok(Some(DynamicImage::ImageLuma8(gray)));
+    }
+    if let Some(rgb) = payload.try_downcast_cpu_any::<RgbImage>() {
+        return Ok(Some(DynamicImage::ImageRgb8(rgb)));
+    }
+    if let Some(rgba) = payload.try_downcast_cpu_any::<RgbaImage>() {
+        return Ok(Some(DynamicImage::ImageRgba8(rgba)));
+    }
+    if let Some(compute) = payload.try_downcast_cpu_any::<Compute<DynamicImage>>() {
+        return decode_compute_dynamic_image(compute, gpu).map(Some);
+    }
+    if let Some(compute) = payload.try_downcast_cpu_any::<Compute<GrayImage>>() {
+        return decode_compute_gray_image(compute, gpu).map(Some);
+    }
+    if let Some(handle) = payload.clone_gpu::<DynamicImage>() {
+        return decode_compute_dynamic_image(Compute::Gpu(handle), gpu).map(Some);
+    }
+    if let Some(handle) = payload.clone_gpu::<GrayImage>() {
+        return decode_compute_gray_image(Compute::Gpu(handle), gpu).map(Some);
+    }
+    if payload.is_gpu() {
+        let Some(gpu) = gpu else {
+            return Err("gpu data payload requires a GPU context".into());
+        };
+        let downloaded = payload.download(gpu).map_err(|err| format!("failed to materialize gpu payload on cpu: {err:?}"))?;
+        return decode_host_output_data_cell(&downloaded, None);
+    }
+    Ok(None)
+}
+
+fn decode_host_output_data_cell_preview(payload: &DataCell, gpu: Option<&GpuContextHandle>) -> Result<Option<GraphPreviewOutput>, String> {
+    if let Some(img) = payload.arc_cpu_any::<DynamicImage>() {
+        return Ok(Some(GraphPreviewOutput::Image(Arc::unwrap_or_clone(img))));
+    }
+    if let Some(img) = payload.try_downcast_cpu_any::<DynamicImage>() {
+        return Ok(Some(GraphPreviewOutput::Image(img)));
+    }
+    if let Some(img) = payload.clone_cpu::<DynamicImage>() {
+        return Ok(Some(GraphPreviewOutput::Image(img)));
+    }
+    if let Some(gray) = payload.arc_cpu_any::<GrayImage>() {
+        return Ok(Some(GraphPreviewOutput::Gray(gray)));
+    }
+    if let Some(gray) = payload.try_downcast_cpu_any::<GrayImage>() {
+        return Ok(Some(GraphPreviewOutput::Gray(Arc::new(gray))));
+    }
+    if let Some(gray) = payload.clone_cpu::<GrayImage>() {
+        return Ok(Some(GraphPreviewOutput::Gray(Arc::new(gray))));
+    }
+    if let Some(rgb) = payload.try_downcast_cpu_any::<RgbImage>() {
+        return Ok(Some(GraphPreviewOutput::Image(DynamicImage::ImageRgb8(rgb))));
+    }
+    if let Some(rgba) = payload.try_downcast_cpu_any::<RgbaImage>() {
+        return Ok(Some(GraphPreviewOutput::Image(DynamicImage::ImageRgba8(rgba))));
+    }
+    if let Some(compute) = payload.try_downcast_cpu_any::<Compute<DynamicImage>>() {
+        return decode_compute_dynamic_image(compute, gpu).map(GraphPreviewOutput::Image).map(Some);
+    }
+    if let Some(compute) = payload.try_downcast_cpu_any::<Compute<GrayImage>>() {
+        return decode_compute_gray_preview_output(compute, gpu).map(Some);
+    }
+    if let Some(handle) = payload.clone_gpu::<DynamicImage>() {
+        return decode_compute_dynamic_image(Compute::Gpu(handle), gpu).map(GraphPreviewOutput::Image).map(Some);
+    }
+    if let Some(handle) = payload.clone_gpu::<GrayImage>() {
+        return decode_compute_gray_preview_output(Compute::Gpu(handle), gpu).map(Some);
+    }
+    if payload.is_gpu() {
+        let Some(gpu) = gpu else {
+            return Err("gpu data payload requires a GPU context".into());
+        };
+        let downloaded = payload.download(gpu).map_err(|err| format!("failed to materialize gpu payload on cpu: {err:?}"))?;
+        return decode_host_output_data_cell_preview(&downloaded, None);
+    }
+    Ok(None)
+}
+
+fn decode_host_output_raw_payload(payload: &DaedalusEdgePayload, gpu: Option<&GpuContextHandle>) -> Result<Option<DynamicImage>, String> {
+    match payload {
+        DaedalusEdgePayload::Data(cell) => decode_host_output_data_cell(cell, gpu),
+        _ => Ok(None),
+    }
+}
+
+fn decode_host_output_raw_preview_payload(payload: &DaedalusEdgePayload, gpu: Option<&GpuContextHandle>) -> Result<Option<GraphPreviewOutput>, String> {
+    match payload {
+        DaedalusEdgePayload::Data(cell) => decode_host_output_data_cell_preview(cell, gpu),
+        _ => Ok(None),
+    }
+}
+
+fn describe_host_output_payload(payload: &DaedalusEdgePayload) -> String {
+    match payload {
+        DaedalusEdgePayload::Any(any) => format!("Any({})", std::any::type_name_of_val(any.as_ref())),
+        DaedalusEdgePayload::Data(cell) => format!("Data({cell:?})"),
+        DaedalusEdgePayload::Value(value) => format!("Value({value:?})"),
+        DaedalusEdgePayload::Bytes(_) => "Bytes".into(),
+        DaedalusEdgePayload::Unit => "Unit".into(),
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum GraphError {
     #[error("failed to parse graph json: {0}")]
@@ -86,6 +417,27 @@ impl Default for GraphProcessOptions {
     }
 }
 
+pub enum GraphPreviewOutput {
+    Image(DynamicImage),
+    Gray(Arc<GrayImage>),
+}
+
+impl GraphPreviewOutput {
+    pub fn size_bytes(&self) -> u64 {
+        match self {
+            Self::Image(image) => dynamic_image_size_bytes(image),
+            Self::Gray(image) => gray_image_size_bytes(image.as_ref()),
+        }
+    }
+
+    pub fn into_dynamic_image(self) -> DynamicImage {
+        match self {
+            Self::Image(image) => image,
+            Self::Gray(image) => DynamicImage::ImageLuma8(Arc::unwrap_or_clone(image)),
+        }
+    }
+}
+
 pub trait GraphExecutor: Send + Sync {
     /// Process an incoming frame and optionally emit a transformed frame.
     fn process(&self, image: DynamicImage) -> Option<DynamicImage>;
@@ -94,6 +446,12 @@ pub trait GraphExecutor: Send + Sync {
     fn process_with_options(&self, image: DynamicImage, options: GraphProcessOptions) -> Option<DynamicImage> {
         let _ = options;
         self.process(image)
+    }
+
+    /// Process a frame for preview-only consumers without forcing grayscale outputs through
+    /// `DynamicImage` and the general allocator.
+    fn process_preview_with_options(&self, image: DynamicImage, options: GraphProcessOptions) -> Option<GraphPreviewOutput> {
+        self.process_with_options(image, options).map(GraphPreviewOutput::Image)
     }
 
     /// Update per-stream calibration used by graph nodes that accept it.
@@ -114,6 +472,12 @@ pub trait GraphExecutor: Send + Sync {
 
     /// Hint that a host output port will be sampled soon and its last value should be retained.
     fn request_output_sample(&self, _port: &str) {}
+
+    /// Whether a host output sample was recently requested and the graph should stay live long
+    /// enough to materialize it from incoming frames.
+    fn has_output_sample_demand(&self) -> bool {
+        false
+    }
 
     /// Solved types for host-bridge output ports (keyed by lowercase port name).
     fn host_output_port_types(&self) -> Option<BTreeMap<String, DaedalusTypeExpr>> {
@@ -142,6 +506,12 @@ pub trait GraphExecutor: Send + Sync {
         true
     }
 
+    /// Whether the graph only needs grayscale source frames, allowing the runner to avoid
+    /// materializing full RGB input for camera formats such as NV12.
+    fn prefers_grayscale_input(&self) -> bool {
+        false
+    }
+
     fn pipeline_metrics(&self) -> Option<PipelineGraphMetrics> {
         None
     }
@@ -164,6 +534,9 @@ pub trait GraphExecutor: Send + Sync {
 
     /// Reset rolling pipeline metrics (node timings, perf samples, last flamegraph).
     fn reset_pipeline_metrics(&self, _pipeline_id: Option<uuid::Uuid>) {}
+
+    /// Drop idle-only retained graph state that is not needed once all image/sample demand is off.
+    fn release_idle_retention(&self) {}
 
     /// Capture a CPU flamegraph for the running pipeline over a wall-clock duration.
     ///
@@ -906,6 +1279,16 @@ impl GraphHandle {
         }
     }
 
+    pub fn process_preview_with_options(&self, image: DynamicImage, options: GraphProcessOptions) -> Option<GraphPreviewOutput> {
+        if let Some(exec) = &self.executor {
+            exec.process_preview_with_options(image, options)
+        } else if options.require_image_output {
+            Some(GraphPreviewOutput::Image(image))
+        } else {
+            None
+        }
+    }
+
     pub fn set_calibration(&self, calibration: Option<crate::ipc::StreamCalibration>) {
         if let Some(exec) = &self.executor {
             let should_clear = calibration.is_some();
@@ -956,6 +1339,14 @@ impl GraphHandle {
 
     pub fn has_image_output(&self) -> bool {
         self.executor.as_ref().map(|exec| exec.has_image_output()).unwrap_or(true)
+    }
+
+    pub fn prefers_grayscale_input(&self) -> bool {
+        self.executor.as_ref().map(|exec| exec.prefers_grayscale_input()).unwrap_or(false)
+    }
+
+    pub fn has_output_sample_demand(&self) -> bool {
+        self.executor.as_ref().map(|exec| exec.has_output_sample_demand()).unwrap_or(false)
     }
 
     pub fn pipeline_metrics(&self) -> Option<PipelineGraphMetrics> {
@@ -1034,6 +1425,12 @@ impl GraphHandle {
         }
     }
 
+    pub fn release_idle_retention(&self) {
+        if let Some(exec) = &self.executor {
+            exec.release_idle_retention();
+        }
+    }
+
     pub fn capture_flamegraph(&self, pipeline_id: Option<uuid::Uuid>, duration_ms: u64) -> Result<(), String> {
         let exec = self.executor.as_ref().ok_or_else(|| "graph has no executor".to_string())?;
         exec.capture_flamegraph(pipeline_id, duration_ms)
@@ -1063,6 +1460,7 @@ struct DaedalusGraphExecutor {
     host_output_port_owners: BTreeMap<String, usize>,
     preview_ports: Vec<String>,
     preview_ports_lc: BTreeSet<String>,
+    prefers_grayscale_input: bool,
     run_mode: RuntimeMode,
     run_metrics_level: DaedalusMetricsLevel,
     active_nodes_with_image: Option<Arc<Vec<bool>>>,
@@ -1203,6 +1601,22 @@ struct NodePayloadSample {
     peak_payload_working_set_bytes: u64,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct EdgeMetricSample {
+    total_wait: Duration,
+    samples: usize,
+    max_depth: u64,
+    current_depth: u64,
+    peak_queue_bytes: u64,
+    current_queue_bytes: u64,
+    capacity: Option<u64>,
+    drops: u64,
+    transport_bytes: u64,
+    transport_count: u64,
+    gpu_uploads: u64,
+    gpu_downloads: u64,
+}
+
 #[derive(Debug, Default)]
 struct RollingGraphMetrics {
     window: usize,
@@ -1211,7 +1625,7 @@ struct RollingGraphMetrics {
     samples: BTreeMap<usize, VecDeque<(Instant, f64)>>,
     node_perf_samples: BTreeMap<usize, VecDeque<(Instant, NodePerfSample)>>,
     node_payload_samples: BTreeMap<usize, VecDeque<(Instant, NodePayloadSample)>>,
-    edge_samples: BTreeMap<usize, VecDeque<(Instant, daedalus::runtime::executor::EdgeMetrics)>>,
+    edge_samples: BTreeMap<usize, VecDeque<(Instant, EdgeMetricSample)>>,
     group_samples: BTreeMap<String, VecDeque<(Instant, f64)>>,
     group_perf_samples: BTreeMap<String, VecDeque<(Instant, NodePerfSample)>>,
     group_payload_samples: BTreeMap<String, VecDeque<(Instant, NodePayloadSample)>>,
@@ -1283,7 +1697,7 @@ impl RollingGraphMetrics {
                     perf_deque.pop_front();
                 }
             }
-            if let Some(payload) = node_metrics.payload.as_ref() {
+            if let Some(payload) = node_metrics.transport.as_ref() {
                 let sample = NodePayloadSample {
                     average_input_payload_bytes: payload.in_bytes as f64 / calls,
                     average_output_payload_bytes: payload.out_bytes as f64 / calls,
@@ -1313,7 +1727,7 @@ impl RollingGraphMetrics {
                     perf_deque.pop_front();
                 }
             }
-            if let Some(payload) = group_metrics.payload.as_ref() {
+            if let Some(payload) = group_metrics.transport.as_ref() {
                 let calls = group_metrics.calls.max(1) as f64;
                 let sample = NodePayloadSample {
                     average_input_payload_bytes: payload.in_bytes as f64 / calls,
@@ -1331,7 +1745,23 @@ impl RollingGraphMetrics {
         }
         for (edge_idx, edge_metrics) in &telemetry.edge_metrics {
             let deque = self.edge_samples.entry(*edge_idx).or_default();
-            deque.push_back((now, edge_metrics.clone()));
+            deque.push_back((
+                now,
+                EdgeMetricSample {
+                    total_wait: edge_metrics.total_wait,
+                    samples: edge_metrics.samples,
+                    max_depth: edge_metrics.max_depth,
+                    current_depth: edge_metrics.current_depth,
+                    peak_queue_bytes: edge_metrics.peak_queue_bytes,
+                    current_queue_bytes: edge_metrics.current_queue_bytes,
+                    capacity: edge_metrics.capacity,
+                    drops: edge_metrics.drops,
+                    transport_bytes: edge_metrics.transport_bytes,
+                    transport_count: edge_metrics.transport_count,
+                    gpu_uploads: edge_metrics.gpu_uploads,
+                    gpu_downloads: edge_metrics.gpu_downloads,
+                },
+            ));
             while deque.len() > self.window {
                 deque.pop_front();
             }
@@ -1686,8 +2116,8 @@ impl RollingGraphMetrics {
 
             let wait_sample_count: u64 = deque.iter().map(|(_, metrics)| metrics.samples as u64).sum();
             let total_wait_ms: f64 = deque.iter().map(|(_, metrics)| metrics.total_wait.as_secs_f64() * 1000.0).sum();
-            let payload_count: u64 = deque.iter().map(|(_, metrics)| metrics.payload_count).sum();
-            let payload_bytes: u64 = deque.iter().map(|(_, metrics)| metrics.payload_bytes).sum();
+            let payload_count: u64 = deque.iter().map(|(_, metrics)| metrics.transport_count).sum();
+            let payload_bytes: u64 = deque.iter().map(|(_, metrics)| metrics.transport_bytes).sum();
             let max_depth = deque.iter().map(|(_, metrics)| metrics.max_depth).max().unwrap_or(0);
             let dropped = deque.iter().map(|(_, metrics)| metrics.drops).sum();
             let gpu_uploads = deque.iter().map(|(_, metrics)| metrics.gpu_uploads).sum();
@@ -1847,6 +2277,7 @@ impl DaedalusGraphExecutor {
                 }
             }
         }
+        let graph_has_color_sensitive_nodes = graph.nodes.iter().any(|node| node_requires_color_input(node.id.0.as_str()));
         let planner_output = engine.plan(&registry.registry, graph).map_err(|e| GraphError::Build(e.to_string()))?;
         let runtime_plan = engine.build_runtime_plan(&planner_output.plan).map_err(|e| GraphError::Build(e.to_string()))?;
         host_mgr.populate_from_plan(&runtime_plan);
@@ -1923,6 +2354,7 @@ impl DaedalusGraphExecutor {
         let host_output_ports = declared_host_output_ports;
         let host_output_ports_lc: BTreeSet<String> = host_output_ports.iter().map(|p| p.to_ascii_lowercase()).collect();
         let host_output_port_owners = infer_host_output_port_owners(&runtime_plan, &output_hosts);
+        let prefers_grayscale_input = graph_prefers_grayscale_input(graph_has_color_sensitive_nodes, &preview_ports, &host_output_port_types);
         let plan = Arc::new(runtime_plan);
         let node_info: Vec<NodeInfo> = plan
             .nodes
@@ -2068,6 +2500,7 @@ impl DaedalusGraphExecutor {
             host_output_port_owners,
             preview_ports,
             preview_ports_lc,
+            prefers_grayscale_input,
             run_mode: engine.config().runtime.mode.clone(),
             run_metrics_level,
             active_nodes_with_image,
@@ -2158,6 +2591,10 @@ impl GraphExecutor for DaedalusGraphExecutor {
     }
 
     fn process_with_options(&self, image: DynamicImage, options: GraphProcessOptions) -> Option<DynamicImage> {
+        self.process_preview_with_options(image, options).map(GraphPreviewOutput::into_dynamic_image)
+    }
+
+    fn process_preview_with_options(&self, image: DynamicImage, options: GraphProcessOptions) -> Option<GraphPreviewOutput> {
         let call_idx = self.process_calls.fetch_add(1, Ordering::Relaxed);
         if call_idx < 3 {
             tracing::debug!(call_idx, "daedalus graph: processing frame");
@@ -2169,7 +2606,7 @@ impl GraphExecutor for DaedalusGraphExecutor {
             }
             let detail = self.last_error_detail.read().ok().map(|guard| guard.trim().to_string()).filter(|text| !text.is_empty());
             self.image_working_set.record(dynamic_image_size_bytes(&image), 0, 0);
-            return Some(error_frame_like(&image, "GRAPH DISABLED", detail.as_deref()));
+            return Some(GraphPreviewOutput::Image(error_frame_like(&image, "GRAPH DISABLED", detail.as_deref())));
         }
         if !self.dedicated_executor && self.rebuild_requested.swap(false, Ordering::Relaxed) {
             match self.rebuild_shared_executor() {
@@ -2196,12 +2633,11 @@ impl GraphExecutor for DaedalusGraphExecutor {
 
             let input_host = self.host_mgr.handle(&self.input_host_alias)?;
             let pushed = if gpu_plan_active {
-                DaedalusEdgePayload::Payload(ErasedPayload::from_cpu::<DynamicImage>(image))
+                DaedalusEdgePayload::Data(DataCell::from_cpu::<DynamicImage>(image))
             } else {
-                // CPU-only graphs still enter through the host bridge. Keep the frame in
-                // `ErasedPayload` so the runtime uses the same typed decode path as the GPU-capable
-                // case instead of relying on `Any` downcasts at the graph boundary.
-                DaedalusEdgePayload::Payload(ErasedPayload::from_cpu::<DynamicImage>(image))
+                // CPU-only graphs still enter through the host bridge via `DataCell` so typed
+                // image decoding stays on the same path as GPU-capable graphs.
+                DaedalusEdgePayload::Data(DataCell::from_cpu::<DynamicImage>(image))
             };
             let correlation_id = input_host.push(&self.input_port, pushed, None);
             if call_idx < 3 {
@@ -2378,7 +2814,7 @@ impl GraphExecutor for DaedalusGraphExecutor {
                     *guard = detail.clone();
                 }
                 self.image_working_set.record(input_image_bytes, 0, 0);
-                return Some(error_frame(input_dims, "GRAPH ERROR", Some(&detail)));
+                return Some(GraphPreviewOutput::Image(error_frame(input_dims, "GRAPH ERROR", Some(&detail))));
             }
         };
         let perf_sample = perf_guard.and_then(|guard| guard.finish().ok());
@@ -2432,7 +2868,7 @@ impl GraphExecutor for DaedalusGraphExecutor {
             }
         }
 
-        let mut preview_image: Option<DynamicImage> = None;
+        let mut preview_output: Option<GraphPreviewOutput> = None;
         let mut preview_key: Option<String> = None;
         let mut image_updates: Vec<(String, DynamicImage)> = Vec::new();
         let mut json_updates: Vec<(String, Value)> = Vec::new();
@@ -2459,7 +2895,9 @@ impl GraphExecutor for DaedalusGraphExecutor {
                 let wants_preview = image_output_requested && self.preview_ports_lc.contains(&port_lc);
                 let wants_retained_sample = requested_sample_ports.contains(&port_lc);
                 let wants_image_sample = wants_preview || wants_retained_sample;
+                let direct_preview = wants_preview && !wants_retained_sample;
                 let port_type = port.resolved_type();
+                let prefers_grayscale_preview = direct_preview && port_type.is_some_and(is_grayscale_image_payload);
                 let is_image_type = port_type.map(is_image_payload).unwrap_or(false);
                 let typed_image = is_image_type;
                 if host_output_debug_enabled() && (call_idx < 3 || call_idx.is_multiple_of(120)) {
@@ -2480,84 +2918,252 @@ impl GraphExecutor for DaedalusGraphExecutor {
                 // Keep image samples only for the active preview/output path. Additional image
                 // outputs can be surprisingly expensive because they force CPU materialization and
                 // then stay resident in `image_samples`.
+                //
+                // Unresolved ports are common while type inference is catching up, but they should
+                // not cause us to eagerly materialize large image payloads unless the caller
+                // explicitly asked for that image.
                 let unresolved_type = port_type.is_none();
-                if typed_image || unresolved_type {
+                if typed_image || (unresolved_type && wants_image_sample) {
                     let mut image_popped = false;
-                    match port.try_pop::<DynamicImage>() {
-                        Ok(Some((_corr, img))) => {
-                            popped_outputs += 1;
-                            if preview_key.is_none() && wants_preview {
-                                preview_key = Some(port_lc.clone());
-                            }
-                            image_updates.push((port_lc.clone(), img));
-                            image_popped = true;
-                            if call_idx < 3 && wants_preview {
-                                tracing::debug!(call_idx, port = %port_name, "daedalus graph: pulled preview output");
-                            }
-                        }
-                        Ok(None) => {}
-                        Err(_err) => {
-                            // Many CV nodes in lib-cv use `Payload<DynamicImage>` so they can
-                            // run under GPU/CPU affinity without forcing node authors to
-                            // manually handle transfers. The host output bridge should be
-                            // able to decode those payloads too.
-                            match port.try_pop::<Payload<DynamicImage>>() {
-                                Ok(Some((_corr, payload))) => match payload {
-                                    Payload::Cpu(img) => {
-                                        popped_outputs += 1;
-                                        if preview_key.is_none() && wants_preview {
-                                            preview_key = Some(port_lc.clone());
-                                        }
-                                        image_updates.push((port_lc.clone(), img));
-                                        image_popped = true;
+                    if prefers_grayscale_preview {
+                        match port.try_pop::<Compute<GrayImage>>() {
+                            Ok(Some((_corr, payload))) => match payload {
+                                Compute::Cpu(gray) => {
+                                    popped_outputs += 1;
+                                    if preview_key.is_none() && wants_preview {
+                                        preview_key = Some(port_lc.clone());
                                     }
-                                    Payload::Gpu(handle) => {
-                                        if let Some(gpu) = self.gpu.as_ref() {
-                                            match <DynamicImage as daedalus::gpu::GpuSendable>::download(&handle, gpu) {
-                                                Ok(img) => {
-                                                    popped_outputs += 1;
-                                                    if preview_key.is_none() && wants_preview {
-                                                        preview_key = Some(port_lc.clone());
-                                                    }
-                                                    image_updates.push((port_lc.clone(), img));
-                                                    image_popped = true;
+                                    preview_output = Some(GraphPreviewOutput::Gray(Arc::new(gray)));
+                                    image_popped = true;
+                                    if call_idx < 3 && wants_preview {
+                                        tracing::debug!(call_idx, port = %port_name, "daedalus graph: pulled grayscale preview output");
+                                    }
+                                }
+                                Compute::Gpu(handle) => {
+                                    if let Some(gpu) = self.gpu.as_ref() {
+                                        match <GrayImage as daedalus::gpu::DeviceBridge>::download(&handle, gpu) {
+                                            Ok(gray) => {
+                                                popped_outputs += 1;
+                                                if preview_key.is_none() && wants_preview {
+                                                    preview_key = Some(port_lc.clone());
                                                 }
-                                                Err(err) => {
-                                                    if wants_preview || host_output_debug_enabled() {
-                                                        tracing::warn!(target: "helios_engine::graph", port = %port_name, error = ?err, "host output GPU image download failed");
-                                                    }
+                                                preview_output = Some(GraphPreviewOutput::Gray(Arc::new(gray)));
+                                                image_popped = true;
+                                            }
+                                            Err(err) => {
+                                                if wants_preview || host_output_debug_enabled() {
+                                                    tracing::warn!(target: "helios_engine::graph", port = %port_name, error = ?err, "host output GPU gray decode failed");
                                                 }
                                             }
                                         }
                                     }
-                                },
-                                Ok(None) => {}
-                                Err(err) => {
-                                    if wants_preview || host_output_debug_enabled() {
-                                        tracing::warn!(target: "helios_engine::graph", port = %port_name, error = ?err, "host output image decode failed");
-                                    }
+                                }
+                            },
+                            Ok(None) => {}
+                            Err(_err) => {}
+                        }
+
+                        if !image_popped {
+                            if let Some((_corr, gray)) = port.try_pop_any_arc::<GrayImage>() {
+                                popped_outputs += 1;
+                                if preview_key.is_none() && wants_preview {
+                                    preview_key = Some(port_lc.clone());
+                                }
+                                preview_output = Some(GraphPreviewOutput::Gray(gray));
+                                image_popped = true;
+                            }
+                        }
+
+                        if !image_popped {
+                            if let Some((_corr, gray)) = port.try_pop_any::<GrayImage>() {
+                                popped_outputs += 1;
+                                if preview_key.is_none() && wants_preview {
+                                    preview_key = Some(port_lc.clone());
+                                }
+                                preview_output = Some(GraphPreviewOutput::Gray(Arc::new(gray)));
+                                image_popped = true;
+                            }
+                        }
+                    }
+
+                    if !image_popped {
+                        match port.try_pop::<DynamicImage>() {
+                            Ok(Some((_corr, img))) => {
+                                popped_outputs += 1;
+                                if preview_key.is_none() && wants_preview {
+                                    preview_key = Some(port_lc.clone());
+                                }
+                                if direct_preview && preview_output.is_none() {
+                                    preview_output = Some(GraphPreviewOutput::Image(img));
+                                } else {
+                                    image_updates.push((port_lc.clone(), img));
+                                }
+                                image_popped = true;
+                                if call_idx < 3 && wants_preview {
+                                    tracing::debug!(call_idx, port = %port_name, "daedalus graph: pulled preview output");
                                 }
                             }
-
-                            if !image_popped {
-                                match port.try_pop::<Payload<GrayImage>>() {
-                                    Ok(Some((_corr, payload))) => {
-                                        if let Payload::Cpu(gray) = payload {
+                            Ok(None) => {}
+                            Err(_err) => {
+                                // Many CV nodes in lib-cv use `Compute<DynamicImage>` so they can
+                                // run under GPU/CPU affinity without forcing node authors to
+                                // manually handle transfers. The host output bridge should be
+                                // able to decode those payloads too.
+                                match port.try_pop::<Compute<DynamicImage>>() {
+                                    Ok(Some((_corr, payload))) => match payload {
+                                        Compute::Cpu(img) => {
                                             popped_outputs += 1;
                                             if preview_key.is_none() && wants_preview {
                                                 preview_key = Some(port_lc.clone());
                                             }
-                                            image_updates.push((port_lc.clone(), DynamicImage::ImageLuma8(gray)));
+                                            if direct_preview && preview_output.is_none() {
+                                                preview_output = Some(GraphPreviewOutput::Image(img));
+                                            } else {
+                                                image_updates.push((port_lc.clone(), img));
+                                            }
                                             image_popped = true;
-                                            if call_idx < 3 && wants_preview {
-                                                tracing::debug!(call_idx, port = %port_name, "daedalus graph: pulled preview output");
+                                        }
+                                        Compute::Gpu(handle) => {
+                                            if let Some(gpu) = self.gpu.as_ref() {
+                                                match <DynamicImage as daedalus::gpu::DeviceBridge>::download(&handle, gpu) {
+                                                    Ok(img) => {
+                                                        popped_outputs += 1;
+                                                        if preview_key.is_none() && wants_preview {
+                                                            preview_key = Some(port_lc.clone());
+                                                        }
+                                                        if direct_preview && preview_output.is_none() {
+                                                            preview_output = Some(GraphPreviewOutput::Image(img));
+                                                        } else {
+                                                            image_updates.push((port_lc.clone(), img));
+                                                        }
+                                                        image_popped = true;
+                                                    }
+                                                    Err(err) => {
+                                                        if wants_preview || host_output_debug_enabled() {
+                                                            tracing::warn!(target: "helios_engine::graph", port = %port_name, error = ?err, "host output GPU image download failed");
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
-                                    }
+                                    },
                                     Ok(None) => {}
-                                    Err(err) => {
-                                        if wants_preview || host_output_debug_enabled() {
-                                            tracing::warn!(target: "helios_engine::graph", port = %port_name, error = ?err, "host output image decode failed");
+                                    Err(_err) => {}
+                                }
+
+                                if !image_popped {
+                                    match port.try_pop::<Compute<GrayImage>>() {
+                                        Ok(Some((_corr, payload))) => match payload {
+                                            Compute::Cpu(gray) => {
+                                                popped_outputs += 1;
+                                                if preview_key.is_none() && wants_preview {
+                                                    preview_key = Some(port_lc.clone());
+                                                }
+                                                if direct_preview && preview_output.is_none() {
+                                                    preview_output = Some(GraphPreviewOutput::Gray(Arc::new(gray)));
+                                                } else {
+                                                    image_updates.push((port_lc.clone(), DynamicImage::ImageLuma8(gray)));
+                                                }
+                                                image_popped = true;
+                                                if call_idx < 3 && wants_preview {
+                                                    tracing::debug!(call_idx, port = %port_name, "daedalus graph: pulled preview output");
+                                                }
+                                            }
+                                            Compute::Gpu(handle) => {
+                                                if let Some(gpu) = self.gpu.as_ref() {
+                                                    match <GrayImage as daedalus::gpu::DeviceBridge>::download(&handle, gpu) {
+                                                        Ok(gray) => {
+                                                            popped_outputs += 1;
+                                                            if preview_key.is_none() && wants_preview {
+                                                                preview_key = Some(port_lc.clone());
+                                                            }
+                                                            if direct_preview && preview_output.is_none() {
+                                                                preview_output = Some(GraphPreviewOutput::Gray(Arc::new(gray)));
+                                                            } else {
+                                                                image_updates.push((port_lc.clone(), DynamicImage::ImageLuma8(gray)));
+                                                            }
+                                                            image_popped = true;
+                                                        }
+                                                        Err(err) => {
+                                                            if wants_preview || host_output_debug_enabled() {
+                                                                tracing::warn!(target: "helios_engine::graph", port = %port_name, error = ?err, "host output GPU gray decode failed");
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        Ok(None) => {}
+                                        Err(_err) => {}
+                                    }
+                                }
+
+                                if !image_popped {
+                                    if let Some((_corr, gray)) = port.try_pop_any::<GrayImage>() {
+                                        popped_outputs += 1;
+                                        if preview_key.is_none() && wants_preview {
+                                            preview_key = Some(port_lc.clone());
+                                        }
+                                        if direct_preview && preview_output.is_none() {
+                                            preview_output = Some(GraphPreviewOutput::Gray(Arc::new(gray)));
+                                        } else {
+                                            image_updates.push((port_lc.clone(), DynamicImage::ImageLuma8(gray)));
+                                        }
+                                        image_popped = true;
+                                    }
+                                }
+
+                                if !image_popped {
+                                    if let Some((_corr, gray)) = port.try_pop_any_arc::<GrayImage>() {
+                                        popped_outputs += 1;
+                                        if preview_key.is_none() && wants_preview {
+                                            preview_key = Some(port_lc.clone());
+                                        }
+                                        if direct_preview && preview_output.is_none() {
+                                            preview_output = Some(GraphPreviewOutput::Gray(gray));
+                                        } else {
+                                            image_updates.push((port_lc.clone(), DynamicImage::ImageLuma8(Arc::unwrap_or_clone(gray))));
+                                        }
+                                        image_popped = true;
+                                    }
+                                }
+
+                                if !image_popped {
+                                    if let Some(raw) = port.try_pop_raw() {
+                                        let raw_desc = describe_host_output_payload(&raw.inner);
+                                        let decoded = if direct_preview && preview_output.is_none() {
+                                            decode_host_output_raw_preview_payload(&raw.inner, self.gpu.as_ref())
+                                        } else {
+                                            decode_host_output_raw_payload(&raw.inner, self.gpu.as_ref()).map(|maybe| maybe.map(GraphPreviewOutput::Image))
+                                        };
+                                        match decoded {
+                                            Ok(Some(img)) => {
+                                                popped_outputs += 1;
+                                                if preview_key.is_none() && wants_preview {
+                                                    preview_key = Some(port_lc.clone());
+                                                }
+                                                if direct_preview && preview_output.is_none() {
+                                                    preview_output = Some(img);
+                                                } else {
+                                                    image_updates.push((port_lc.clone(), img.into_dynamic_image()));
+                                                }
+                                                image_popped = true;
+                                                if call_idx < 3 && wants_preview {
+                                                    tracing::debug!(call_idx, port = %port_name, payload = %raw_desc, "daedalus graph: decoded preview output from raw payload");
+                                                }
+                                            }
+                                            Ok(None) => {
+                                                if wants_preview || host_output_debug_enabled() {
+                                                    tracing::warn!(target: "helios_engine::graph", port = %port_name, payload = %raw_desc, "host output raw image payload unsupported");
+                                                }
+                                                port.restore_raw(raw);
+                                            }
+                                            Err(err) => {
+                                                if wants_preview || host_output_debug_enabled() {
+                                                    tracing::warn!(target: "helios_engine::graph", port = %port_name, payload = %raw_desc, error = %err, "host output raw image decode failed");
+                                                }
+                                                port.restore_raw(raw);
+                                            }
                                         }
                                     }
                                 }
@@ -2579,24 +3185,24 @@ impl GraphExecutor for DaedalusGraphExecutor {
                 // readable without racing the next frame boundary. Keep a rolling last sample for
                 // non-image host outputs and reserve request-gated retention for image outputs.
 
-                if let Some((_corr, detections)) = port.try_pop_any::<Arc<Vec<ArucoDetection2D>>>() {
-                    popped_outputs += 1;
-                    let port_name = port_lc.clone();
-                    if call_idx < 3 {
-                        tracing::debug!(call_idx, port = %port_name, len = detections.len(), "daedalus graph: captured shared detection output");
+                if port_type.is_some_and(is_aruco_detections_payload) {
+                    if let Some(raw) = port.try_pop_raw() {
+                        if let Some(detections) = decode_runtime_value_as_aruco_detections(&raw.inner) {
+                            popped_outputs += 1;
+                            let port_name = port_lc.clone();
+                            if call_idx < 3 {
+                                tracing::debug!(
+                                    call_idx,
+                                    port = %port_name,
+                                    len = detections.len(),
+                                    "daedalus graph: captured typed detection output"
+                                );
+                            }
+                            typed_updates.push((port_name, TypedHostOutputSample::ArucoDetections(detections)));
+                            continue;
+                        }
+                        port.restore_raw(raw);
                     }
-                    typed_updates.push((port_name, TypedHostOutputSample::ArucoDetections(detections)));
-                    continue;
-                }
-
-                if let Some((_corr, detections)) = port.try_pop_any::<Vec<ArucoDetection2D>>() {
-                    popped_outputs += 1;
-                    let port_name = port_lc.clone();
-                    if call_idx < 3 {
-                        tracing::debug!(call_idx, port = %port_name, len = detections.len(), "daedalus graph: captured typed detection output");
-                    }
-                    typed_updates.push((port_name, TypedHostOutputSample::ArucoDetections(Arc::new(detections))));
-                    continue;
                 }
 
                 match port.try_pop::<daedalus::data::model::Value>() {
@@ -2610,39 +3216,62 @@ impl GraphExecutor for DaedalusGraphExecutor {
                             json_updates.push((port_name.clone(), json));
                         }
                         value_updates.push((port_name, value));
+                        continue;
                     }
-                    result => {
-                        // Some nodes emit JSON as `serde_json::Value` or plain `String`; accept both.
-                        if let Some((_corr, json)) = port.try_pop_any::<Value>() {
-                            popped_outputs += 1;
-                            let port_name = port_lc.clone();
-                            if call_idx < 3 {
-                                tracing::debug!(call_idx, port = %port_name, "daedalus graph: captured typed json output");
+                    Ok(None) => {
+                        if let Some(raw) = port.try_pop_raw() {
+                            if let Some((value, json)) = decode_runtime_value_fallback(&raw.inner, port_type) {
+                                popped_outputs += 1;
+                                let port_name = port_lc.clone();
+                                if let Some(json) = json {
+                                    if call_idx < 3 {
+                                        tracing::debug!(
+                                            call_idx,
+                                            port = %port_name,
+                                            "daedalus graph: captured fallback json output"
+                                        );
+                                    }
+                                    json_updates.push((port_name.clone(), json));
+                                }
+                                value_updates.push((port_name, value));
+                                continue;
                             }
-                            value_updates.push((port_name.clone(), json_to_daedalus_value(&json)));
-                            json_updates.push((port_name, json));
-                            continue;
+                            port.restore_raw(raw);
                         }
-
-                        if let Some((_corr, raw)) = port.try_pop_any::<String>() {
-                            popped_outputs += 1;
-                            let port_name = port_lc.clone();
-                            let parsed = serde_json::from_str::<Value>(&raw).unwrap_or(Value::String(raw));
-                            if call_idx < 3 {
-                                tracing::debug!(call_idx, port = %port_name, "daedalus graph: captured string json output");
+                    }
+                    Err(err) => {
+                        if let Some(raw) = port.try_pop_raw() {
+                            if let Some((value, json)) = decode_runtime_value_fallback(&raw.inner, port_type) {
+                                popped_outputs += 1;
+                                let port_name = port_lc.clone();
+                                if let Some(json) = json {
+                                    if call_idx < 3 {
+                                        tracing::debug!(
+                                            call_idx,
+                                            port = %port_name,
+                                            "daedalus graph: captured fallback json output"
+                                        );
+                                    }
+                                    json_updates.push((port_name.clone(), json));
+                                }
+                                value_updates.push((port_name, value));
+                                continue;
                             }
-                            value_updates.push((port_name.clone(), json_to_daedalus_value(&parsed)));
-                            json_updates.push((port_name, parsed));
-                            continue;
+                            port.restore_raw(raw);
                         }
 
                         if host_output_debug_enabled() {
-                            if let Err(err) = result {
-                                // Many ports are neither image nor value-like; ignore unless debugging.
-                                tracing::warn!(target: "helios_engine::graph", port = %port_name, error = ?err, "host output value decode failed");
-                            }
+                            // Many ports are neither image nor value-like; ignore unless debugging.
+                            tracing::warn!(target: "helios_engine::graph", port = %port_name, error = ?err, "host output value decode failed");
                         }
                     }
+                }
+
+                if unresolved_type && !wants_image_sample {
+                    // If the port type is still unresolved and we did not recognize a structured
+                    // value, drain anything left so image outputs do not accumulate or get
+                    // repeatedly materialized on later ticks.
+                    popped_outputs += output_host.clear(port_name);
                 }
             }
         }
@@ -2675,14 +3304,16 @@ impl GraphExecutor for DaedalusGraphExecutor {
         if !image_updates.is_empty() {
             // Select the preview image locally first so we can still render a frame even if the
             // sample cache lock is poisoned/unavailable.
-            if let Some(key) = preview_key.as_deref() {
-                if let Some(idx) = image_updates.iter().position(|(port, _)| port == key) {
-                    let (_port, img) = image_updates.swap_remove(idx);
-                    preview_image = Some(img);
+            if preview_output.is_none() {
+                if let Some(key) = preview_key.as_deref() {
+                    if let Some(idx) = image_updates.iter().position(|(port, _)| port == key) {
+                        let (_port, img) = image_updates.swap_remove(idx);
+                        preview_output = Some(GraphPreviewOutput::Image(img));
+                    }
                 }
             }
             let host_output_image_bytes: u64 = image_updates.iter().map(|(_, image)| dynamic_image_size_bytes(image)).sum();
-            let preview_image_bytes = preview_image.as_ref().map(dynamic_image_size_bytes).unwrap_or(0);
+            let preview_image_bytes = preview_output.as_ref().map(GraphPreviewOutput::size_bytes).unwrap_or(0);
             self.image_working_set.record(input_image_bytes, host_output_image_bytes, preview_image_bytes);
             if let Ok(mut guard) = self.image_samples.lock() {
                 for (port, value) in image_updates {
@@ -2690,12 +3321,12 @@ impl GraphExecutor for DaedalusGraphExecutor {
                 }
             }
         } else {
-            let preview_image_bytes = preview_image.as_ref().map(dynamic_image_size_bytes).unwrap_or(0);
+            let preview_image_bytes = preview_output.as_ref().map(GraphPreviewOutput::size_bytes).unwrap_or(0);
             self.image_working_set.record(input_image_bytes, 0, preview_image_bytes);
         }
         self.prune_unrequested_output_samples(&requested_sample_ports);
 
-        if let Some(img) = preview_image {
+        if let Some(img) = preview_output {
             self.maybe_trim_background_graph_allocators(options);
             return Some(img);
         }
@@ -2732,8 +3363,16 @@ impl GraphExecutor for DaedalusGraphExecutor {
         self.request_output_sample_retention(port);
     }
 
+    fn has_output_sample_demand(&self) -> bool {
+        !self.active_requested_sample_ports().is_empty()
+    }
+
     fn has_image_output(&self) -> bool {
         !self.preview_ports.is_empty()
+    }
+
+    fn prefers_grayscale_input(&self) -> bool {
+        self.prefers_grayscale_input
     }
 
     fn host_output_port_types(&self) -> Option<BTreeMap<String, DaedalusTypeExpr>> {
@@ -2792,6 +3431,29 @@ impl GraphExecutor for DaedalusGraphExecutor {
         }
     }
 
+    fn release_idle_retention(&self) {
+        if let Ok(mut guard) = self.image_samples.lock() {
+            guard.clear();
+        }
+        if let Ok(exec) = self.executor.lock() {
+            let _ = exec.on_idle();
+        }
+        for alias in &self.output_hosts {
+            let Some(output_host) = self.host_mgr.handle(alias) else {
+                continue;
+            };
+            for port in output_host.incoming_ports() {
+                let port_name = port.name();
+                let port_lc = port_name.to_ascii_lowercase();
+                let is_preview_port = self.preview_ports_lc.contains(&port_lc);
+                let is_image_port = self.host_output_port_types.get(&port_lc).is_some_and(is_image_payload);
+                if is_preview_port || is_image_port {
+                    let _ = output_host.clear(port_name);
+                }
+            }
+        }
+    }
+
     fn capture_flamegraph(&self, _pipeline_id: Option<uuid::Uuid>, duration_ms: u64) -> Result<(), String> {
         if duration_ms == 0 {
             return Err("duration_ms must be > 0".into());
@@ -2830,7 +3492,8 @@ impl DaedalusGraphExecutor {
             return;
         }
         self.last_background_trim_ms.store(now, Ordering::Relaxed);
-        let _ = trim_process_allocators();
+        styx::codec::decoder::clear_packed_frame_pools_all_threads();
+        lib_cv::compact_runtime_scratch_after_frame();
     }
 
     fn normalize_host_output_port_key(&self, port: &str) -> Option<String> {
@@ -3036,6 +3699,10 @@ fn annotate_retained_output_metrics(snapshot: &mut PipelineGraphMetrics, owners:
 
 fn dynamic_image_size_bytes(image: &DynamicImage) -> u64 {
     u64::from(image.width()).saturating_mul(u64::from(image.height())).saturating_mul(u64::from(image.color().bytes_per_pixel() as u32))
+}
+
+fn gray_image_size_bytes(image: &GrayImage) -> u64 {
+    u64::from(image.width()).saturating_mul(u64::from(image.height()))
 }
 
 fn json_value_size_bytes(value: &Value) -> u64 {
@@ -3619,21 +4286,6 @@ fn active_graph_trim_interval_ms() -> u64 {
     let value = env::var("HELIOS_GRAPH_ACTIVE_TRIM_INTERVAL_MS").ok().and_then(|raw| raw.trim().parse::<u64>().ok()).unwrap_or(1_000);
     VALUE.store(value, Ordering::Relaxed);
     value
-}
-
-#[allow(unsafe_code)]
-fn trim_process_allocators() -> Option<i32> {
-    #[cfg(all(target_os = "linux", target_env = "gnu"))]
-    {
-        unsafe extern "C" {
-            fn malloc_trim(pad: usize) -> i32;
-        }
-        Some(unsafe { malloc_trim(0) })
-    }
-    #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
-    {
-        None
-    }
 }
 
 fn pprof_frames_from_env() -> u64 {

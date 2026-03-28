@@ -8,6 +8,7 @@ const CANDIDATE_RETAIN_POINT_CAP: usize = 4 * 1024;
 const CANDIDATE_RETAIN_QUAD_CAP: usize = 512;
 const CANDIDATE_RETAIN_GROUP_CAP: usize = 128;
 const DECODE_RETAIN_QUAD_CAP: usize = 512;
+const INTEGRAL_RETAIN_CAP: usize = 1_100_000;
 
 pub(super) fn aruco_include_bits_enabled() -> bool {
     static INCLUDE_BITS: LazyLock<bool> = LazyLock::new(|| {
@@ -129,6 +130,10 @@ fn compact_candidate_quad_scratch_after_frame(scratch: &mut CandidateQuadScratch
 }
 
 pub(super) fn compact_shared_scratch_after_frame() {
+    INTEGRAL_SCRATCH.with(|scratch| {
+        let mut scratch = scratch.borrow_mut();
+        trim_retained_vec(&mut scratch, INTEGRAL_RETAIN_CAP);
+    });
     ARUCO_NODE_SCRATCH.with(|scratch| {
         let mut scratch = scratch.borrow_mut();
         trim_retained_vec(&mut scratch.distances, NODE_RETAIN_POINT_CAP);
@@ -184,12 +189,12 @@ pub(super) fn report_overlay_id_cache_bytes(bytes: usize) {
     crate::diagnostics::report_scratch_high_water("aruco.overlay_id_cache", bytes);
 }
 
-pub(super) fn expect_cpu_frame(frame: Payload<DynamicImage>, label: &str, exec_ctx: Option<&ExecutionContext>) -> Result<DynamicImage, NodeError> {
+pub(super) fn expect_cpu_frame(frame: Compute<DynamicImage>, label: &str, exec_ctx: Option<&ExecutionContext>) -> Result<DynamicImage, NodeError> {
     #[cfg(feature = "gpu")]
     {
         match frame {
-            Payload::Cpu(img) => Ok(img),
-            Payload::Gpu(handle) => {
+            Compute::Cpu(img) => Ok(img),
+            Compute::Gpu(handle) => {
                 let ctx = exec_ctx.and_then(|ctx| ctx.gpu.as_ref()).ok_or_else(|| NodeError::Handler(format!("{label}: gpu payload missing context")))?;
                 let bytes = ctx.read_texture(&handle).map_err(|e| NodeError::Handler(format!("{label}: {e}")))?;
                 let rgba = RgbaImage::from_raw(handle.width, handle.height, bytes).ok_or_else(|| NodeError::Handler(format!("{label}: invalid image dimensions")))?;
@@ -201,8 +206,8 @@ pub(super) fn expect_cpu_frame(frame: Payload<DynamicImage>, label: &str, exec_c
     {
         let _ = exec_ctx;
         match frame {
-            Payload::Cpu(img) => Ok(img),
-            Payload::Gpu(_) => Err(NodeError::Handler(format!("{label}: gpu payload unsupported (insert cpu convert)"))),
+            Compute::Cpu(img) => Ok(img),
+            Compute::Gpu(_) => Err(NodeError::Handler(format!("{label}: gpu payload unsupported (insert cpu convert)"))),
         }
     }
 }

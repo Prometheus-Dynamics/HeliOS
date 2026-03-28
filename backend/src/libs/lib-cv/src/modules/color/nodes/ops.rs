@@ -14,14 +14,14 @@ use super::*;
     not(feature = "gpu"),
     node(id = "brightness", compute(ComputeAffinity::GpuPreferred), inputs("frame", port(name = "value", meta(ui_min = -255, ui_max = 255, ui_step = 1)), port(name = "mode", default = "auto")), outputs("frame"))
 )]
-fn cv_brightness(frame: Payload<DynamicImage>, value: i32, mode: ExecMode, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+fn cv_brightness(frame: Compute<DynamicImage>, value: i32, mode: ExecMode, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     if value == 0 {
         return Ok(frame);
     }
     #[cfg(feature = "gpu")]
     {
-        let cpu_fallback = || -> Result<Payload<DynamicImage>, NodeError> {
-            Ok(Payload::Cpu(
+        let cpu_fallback = || -> Result<Compute<DynamicImage>, NodeError> {
+            Ok(Compute::Cpu(
                 frame
                     .to_rgba_bytes(ctx.gpu.as_ref())
                     .map_err(|e| NodeError::Handler(format!("brightness: {e}")))
@@ -33,7 +33,7 @@ fn cv_brightness(frame: Payload<DynamicImage>, value: i32, mode: ExecMode, #[cfg
 
         let (width, height) = frame.dimensions();
         if width == 0 || height == 0 {
-            return Ok(Payload::Cpu(DynamicImage::new_rgba8(width, height)));
+            return Ok(Compute::Cpu(DynamicImage::new_rgba8(width, height)));
         }
 
         let want_gpu = matches!(mode, ExecMode::Gpu | ExecMode::Auto) && ctx.gpu.is_some();
@@ -59,7 +59,7 @@ fn cv_brightness(frame: Payload<DynamicImage>, value: i32, mode: ExecMode, #[cfg
     {
         let _ = mode;
         let frame = expect_cpu(frame, "brightness", Some(_exec_ctx))?;
-        Ok(Payload::Cpu(frame.brighten(value)))
+        Ok(Compute::Cpu(frame.brighten(value)))
     }
 }
 
@@ -77,14 +77,14 @@ fn cv_brightness(frame: Payload<DynamicImage>, value: i32, mode: ExecMode, #[cfg
     not(feature = "gpu"),
     node(id = "contrast", compute(ComputeAffinity::GpuPreferred), inputs("frame", port(name = "value", meta(ui_min = -100.0, ui_max = 100.0, ui_step = 1.0)), port(name = "mode", default = "auto")), outputs("frame"))
 )]
-fn cv_contrast(frame: Payload<DynamicImage>, value: f32, mode: ExecMode, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+fn cv_contrast(frame: Compute<DynamicImage>, value: f32, mode: ExecMode, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     if value == 0.0 {
         return Ok(frame);
     }
     #[cfg(feature = "gpu")]
     {
-        let cpu_fallback = || -> Result<Payload<DynamicImage>, NodeError> {
-            Ok(Payload::Cpu(
+        let cpu_fallback = || -> Result<Compute<DynamicImage>, NodeError> {
+            Ok(Compute::Cpu(
                 frame
                     .to_rgba_bytes(ctx.gpu.as_ref())
                     .map_err(|e| NodeError::Handler(format!("contrast: {e}")))
@@ -96,7 +96,7 @@ fn cv_contrast(frame: Payload<DynamicImage>, value: f32, mode: ExecMode, #[cfg(f
 
         let (width, height) = frame.dimensions();
         if width == 0 || height == 0 {
-            return Ok(Payload::Cpu(DynamicImage::new_rgba8(width, height)));
+            return Ok(Compute::Cpu(DynamicImage::new_rgba8(width, height)));
         }
 
         let want_gpu = matches!(mode, ExecMode::Gpu | ExecMode::Auto) && ctx.gpu.is_some();
@@ -122,7 +122,7 @@ fn cv_contrast(frame: Payload<DynamicImage>, value: f32, mode: ExecMode, #[cfg(f
     {
         let _ = mode;
         let frame = expect_cpu(frame, "contrast", Some(_exec_ctx))?;
-        Ok(Payload::Cpu(frame.adjust_contrast(value)))
+        Ok(Compute::Cpu(frame.adjust_contrast(value)))
     }
 }
 
@@ -140,14 +140,14 @@ fn cv_contrast(frame: Payload<DynamicImage>, value: f32, mode: ExecMode, #[cfg(f
     not(feature = "gpu"),
     node(id = "hue", compute(ComputeAffinity::GpuPreferred), inputs("frame", port(name = "degrees", meta(ui_min = -180, ui_max = 180, ui_step = 1)), port(name = "mode", default = "auto")), outputs("frame"))
 )]
-fn cv_hue(frame: Payload<DynamicImage>, degrees: i32, mode: ExecMode, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+fn cv_hue(frame: Compute<DynamicImage>, degrees: i32, mode: ExecMode, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     if degrees == 0 {
         return Ok(frame);
     }
     #[cfg(feature = "gpu")]
     {
-        let cpu_fallback = || -> Result<Payload<DynamicImage>, NodeError> {
-            Ok(Payload::Cpu(
+        let cpu_fallback = || -> Result<Compute<DynamicImage>, NodeError> {
+            Ok(Compute::Cpu(
                 frame
                     .to_rgba_bytes(ctx.gpu.as_ref())
                     .map_err(|e| NodeError::Handler(format!("hue: {e}")))
@@ -159,7 +159,7 @@ fn cv_hue(frame: Payload<DynamicImage>, degrees: i32, mode: ExecMode, #[cfg(feat
 
         let (width, height) = frame.dimensions();
         if width == 0 || height == 0 {
-            return Ok(Payload::Cpu(DynamicImage::new_rgba8(width, height)));
+            return Ok(Compute::Cpu(DynamicImage::new_rgba8(width, height)));
         }
 
         let want_gpu = matches!(mode, ExecMode::Gpu | ExecMode::Auto) && ctx.gpu.is_some();
@@ -185,7 +185,7 @@ fn cv_hue(frame: Payload<DynamicImage>, degrees: i32, mode: ExecMode, #[cfg(feat
     {
         let _ = mode;
         let frame = expect_cpu(frame, "hue", Some(_exec_ctx))?;
-        Ok(Payload::Cpu(frame.huerotate(degrees)))
+        Ok(Compute::Cpu(frame.huerotate(degrees)))
     }
 }
 
@@ -208,13 +208,13 @@ fn cv_hue(frame: Payload<DynamicImage>, degrees: i32, mode: ExecMode, #[cfg(feat
         outputs("frame")
     )
 )]
-fn cv_saturation(frame: Payload<DynamicImage>, factor: f32, mode: ExecMode, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+fn cv_saturation(frame: Compute<DynamicImage>, factor: f32, mode: ExecMode, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     if (factor - 1.0).abs() <= f32::EPSILON {
         return Ok(frame);
     }
     #[cfg(feature = "gpu")]
     {
-        let cpu_fallback = || -> Result<Payload<DynamicImage>, NodeError> {
+        let cpu_fallback = || -> Result<Compute<DynamicImage>, NodeError> {
             let mut img: RgbaImage = frame
                 .to_rgba_bytes(ctx.gpu.as_ref())
                 .map_err(|e| NodeError::Handler(format!("saturation: {e}")))
@@ -269,12 +269,12 @@ fn cv_saturation(frame: Payload<DynamicImage>, factor: f32, mode: ExecMode, #[cf
                 }
             });
 
-            Ok(Payload::Cpu(DynamicImage::ImageRgba8(img)))
+            Ok(Compute::Cpu(DynamicImage::ImageRgba8(img)))
         };
 
         let (width, height) = frame.dimensions();
         if width == 0 || height == 0 {
-            return Ok(Payload::Cpu(DynamicImage::new_rgba8(width, height)));
+            return Ok(Compute::Cpu(DynamicImage::new_rgba8(width, height)));
         }
 
         let want_gpu = matches!(mode, ExecMode::Gpu | ExecMode::Auto) && ctx.gpu.is_some();
@@ -351,7 +351,7 @@ fn cv_saturation(frame: Payload<DynamicImage>, factor: f32, mode: ExecMode, #[cf
             }
         });
 
-        Ok(Payload::Cpu(DynamicImage::ImageRgba8(img)))
+        Ok(Compute::Cpu(DynamicImage::ImageRgba8(img)))
     }
 }
 
@@ -378,7 +378,7 @@ fn cv_saturation(frame: Payload<DynamicImage>, factor: f32, mode: ExecMode, #[cf
         outputs(port(name = "mask", description = "Grayscale output image."))
     )
 )]
-fn cv_grayscale(frame: Payload<DynamicImage>, mode: ExecMode, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+fn cv_grayscale(frame: Compute<DynamicImage>, mode: ExecMode, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     #[cfg(feature = "gpu")]
     {
         fn to_luma8_fast(img: &DynamicImage) -> GrayImage {
@@ -390,27 +390,27 @@ fn cv_grayscale(frame: Payload<DynamicImage>, mode: ExecMode, #[cfg(feature = "g
             }
         }
 
-        let cpu_fallback = || -> Result<Payload<DynamicImage>, NodeError> {
+        let cpu_fallback = || -> Result<Compute<DynamicImage>, NodeError> {
             match &frame {
-                Payload::Cpu(img) => {
+                Compute::Cpu(img) => {
                     let out = match img {
                         DynamicImage::ImageLuma8(_) => img.clone(),
                         other => DynamicImage::ImageLuma8(to_luma8_fast(other)),
                     };
-                    Ok(Payload::Cpu(out))
+                    Ok(Compute::Cpu(out))
                 }
-                Payload::Gpu(handle) => {
+                Compute::Gpu(handle) => {
                     let gpu = ctx.gpu.as_ref().ok_or_else(|| NodeError::Handler("grayscale: gpu payload but no gpu context".into()))?;
                     let bytes = gpu.read_texture(handle).map_err(|e| NodeError::Handler(format!("grayscale: read_texture: {e}")))?;
                     let rgba = RgbaImage::from_raw(handle.width, handle.height, bytes).ok_or_else(|| NodeError::Handler("grayscale: invalid image dimensions".into()))?;
-                    Ok(Payload::Cpu(DynamicImage::ImageLuma8(rgba8_to_luma8_exact(&rgba))))
+                    Ok(Compute::Cpu(DynamicImage::ImageLuma8(rgba8_to_luma8_exact(&rgba))))
                 }
             }
         };
 
         let (width, height) = frame.dimensions();
         if width == 0 || height == 0 {
-            return Ok(Payload::Cpu(DynamicImage::new_rgba8(width, height)));
+            return Ok(Compute::Cpu(DynamicImage::new_rgba8(width, height)));
         }
 
         let want_gpu = matches!(mode, ExecMode::Gpu | ExecMode::Auto) && ctx.gpu.is_some();
@@ -444,7 +444,7 @@ fn cv_grayscale(frame: Payload<DynamicImage>, mode: ExecMode, #[cfg(feature = "g
                 _ => other.to_luma8(),
             }),
         };
-        Ok(Payload::Cpu(out))
+        Ok(Compute::Cpu(out))
     }
 }
 

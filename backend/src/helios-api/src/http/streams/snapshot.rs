@@ -14,7 +14,6 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use helios_engine::ipc::{EngineEvent, RecordingSource, StreamSummary};
-use helios_engine::stream::touch_stream_preview;
 use lib_ipc::client::ClientTransportError;
 
 use crate::http::AppState;
@@ -375,12 +374,17 @@ async fn inspect_stream_input_usage(state: &AppState, stream_id: Uuid) -> ApiRes
     })
 }
 
-async fn capture_snapshot_jpeg(state: &AppState, stream_id: Uuid, source: Option<RecordingSource>) -> ApiResult<Vec<u8>> {
-    // Ensure the stream is considered "preview active" so the engine keeps a recent decoded frame.
-    let _ = touch_stream_preview(stream_id);
+pub(crate) async fn capture_snapshot_jpeg(state: &AppState, stream_id: Uuid, source: Option<RecordingSource>) -> ApiResult<Vec<u8>> {
+    capture_snapshot_jpeg_inner(state, stream_id, source, true).await
+}
 
+pub(crate) async fn capture_snapshot_jpeg_without_preview_fallback(state: &AppState, stream_id: Uuid, source: Option<RecordingSource>) -> ApiResult<Vec<u8>> {
+    capture_snapshot_jpeg_inner(state, stream_id, source, false).await
+}
+
+async fn capture_snapshot_jpeg_inner(state: &AppState, stream_id: Uuid, source: Option<RecordingSource>, allow_preview_fallback: bool) -> ApiResult<Vec<u8>> {
     let quality = snapshot_jpeg_quality();
-    let can_fallback_to_preview = source_can_use_preview_fallback(source.as_ref());
+    let can_fallback_to_preview = allow_preview_fallback && source_can_use_preview_fallback(source.as_ref());
     let requested_source = source.as_ref().map(snapshot_source_label).unwrap_or("default");
     for attempt in 0..5u8 {
         match state.engine.snapshot_jpeg(stream_id, quality, source.clone()).await {

@@ -316,7 +316,7 @@ fn pipeline_edge_metrics_fall_back_to_planned_bounded_capacity() {
         }],
     );
 
-    rolling.edge_samples.insert(0, VecDeque::from([(Instant::now(), daedalus::runtime::executor::EdgeMetrics { samples: 1, max_depth: 2, current_depth: 1, ..Default::default() })]));
+    rolling.edge_samples.insert(0, VecDeque::from([(Instant::now(), super::EdgeMetricSample { samples: 1, max_depth: 2, current_depth: 1, ..Default::default() })]));
 
     let metrics = rolling.snapshot();
     let edge = metrics.edges.expect("edge metrics").get("edge_0").cloned().expect("edge_0");

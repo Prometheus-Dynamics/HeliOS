@@ -11,7 +11,6 @@ use crate::graph::GraphHandle;
 use crate::ipc::{DecoderSettings, EncoderSettings};
 
 use super::super::ShmemWriter;
-use super::PreviewWorker;
 use super::StreamRunner;
 
 const ENV_ENCODED_CHANNEL_SIZE: &str = "HELIOS_ENCODED_CHANNEL_SIZE";
@@ -69,6 +68,10 @@ impl StreamRunner {
                 }
             }
         }
+        if decoder_id.is_none() && capture_config.backend == BackendKind::Libcamera && capture_config.mode.format.code == FourCc::new(*b"NV12") && graph.prefers_grayscale_input() {
+            tracing::info!("auto-selecting nv12-luma decoder for grayscale graph");
+            decoder_id = Some("nv12-luma".to_string());
+        }
 
         let (encoded_tx, _encoded_rx) = broadcast::channel(encoded_channel_size());
         let (raw_tx, _raw_rx) = broadcast::channel(encoded_channel_size());
@@ -95,7 +98,9 @@ impl StreamRunner {
         // activity from implicitly requiring full stream encoder throughput.
         let preview_encoder_stats = styx::codec::CodecStats::default();
         let preview_encoder_last_activity_ms = Arc::new(AtomicU64::new(0));
-        let preview_worker = if !codecs_disabled { shmem.as_ref().map(|_| PreviewWorker::start(preview_encoder_stats.clone(), preview_encoder_last_activity_ms.clone())) } else { None };
+        // Keep preview generation fully demand-driven. Starting the preview worker here leaves
+        // an idle thread plus retained buffers resident even when nothing is consuming preview.
+        let preview_worker = None;
         Self {
             stream_label,
             stream_id,
@@ -116,6 +121,8 @@ impl StreamRunner {
             last_decode_wall: None,
             last_encode_wall: None,
             encoder_last_activity_ms: Arc::new(AtomicU64::new(0)),
+            managed_encoded_consumer_count: Arc::new(AtomicU64::new(0)),
+            managed_encoded_consumer_last_seen_ms: Arc::new(AtomicU64::new(0)),
             codecs: None,
             encoded_tx,
             raw_tx,
@@ -134,9 +141,12 @@ impl StreamRunner {
             last_viewer_check_wall: None,
             viewer_recently_active: false,
             preview_encode_interval,
+            last_preview_work_wall: None,
             last_preview_encode_wall: None,
             preview_encoder_last_activity_ms,
             preview_worker,
+            last_idle_compaction_wall: None,
+            last_frame_demand: std::sync::Mutex::new(super::LastFrameDemandSnapshot::default()),
             runner_memory: super::RunnerMemoryTracker::default(),
         }
     }
@@ -232,4 +242,95 @@ fn decoder_looks_compatible_with_capture(decoder: &str, fourcc: FourCc) -> bool 
         return decoder.eq_ignore_ascii_case(selector) || decoder.to_ascii_lowercase().contains(selector);
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroU32;
+    use std::sync::Arc;
+
+    use image::DynamicImage;
+    use styx::core::format::{ColorSpace, Interval, MediaFormat, Resolution};
+
+    use super::*;
+    use crate::capture::BackendHandle;
+    use crate::graph::{GraphExecutor, GraphHandle, HostBridgeHandle};
+
+    struct MockGraphExecutor {
+        prefers_grayscale_input: bool,
+    }
+
+    impl GraphExecutor for MockGraphExecutor {
+        fn process(&self, image: DynamicImage) -> Option<DynamicImage> {
+            Some(image)
+        }
+
+        fn prefers_grayscale_input(&self) -> bool {
+            self.prefers_grayscale_input
+        }
+    }
+
+    fn sample_config() -> CaptureConfig {
+        CaptureConfig {
+            device_keys: vec![],
+            backend: BackendKind::Libcamera,
+            handle: BackendHandle::Libcamera { id: "camera".to_string() },
+            mode: ModeId { format: MediaFormat::new(FourCc::new(*b"NV12"), Resolution::new(1280, 800).unwrap(), ColorSpace::Srgb), interval: None },
+            target_fps: Some(60),
+            interval: None,
+            controls: vec![],
+            enable_tdn_output: false,
+        }
+    }
+
+    fn sample_graph(prefers_grayscale_input: bool) -> GraphHandle {
+        let (host, rx) = HostBridgeHandle::new(1);
+        let _ = rx;
+        GraphHandle::with_executor(host, Arc::new(MockGraphExecutor { prefers_grayscale_input }))
+    }
+
+    #[test]
+    fn libcamera_target_fps_maps_to_interval() {
+        let config = sample_config();
+        assert_eq!(config.effective_interval_for_backend(BackendKind::Libcamera), Some(Interval { numerator: NonZeroU32::new(1).unwrap(), denominator: NonZeroU32::new(60).unwrap() }));
+    }
+
+    #[test]
+    fn non_libcamera_target_fps_still_maps_to_interval() {
+        let mut config = sample_config();
+        config.backend = BackendKind::V4l2;
+        assert_eq!(config.effective_interval_for_backend(BackendKind::V4l2), Some(Interval { numerator: NonZeroU32::new(1).unwrap(), denominator: NonZeroU32::new(60).unwrap() }));
+    }
+
+    #[test]
+    fn auto_selects_nv12_luma_for_grayscale_graphs() {
+        let runner = crate::stream::runner::StreamRunner::new(StreamRunnerConfig {
+            capture_config: sample_config(),
+            graph: sample_graph(true),
+            encoder_id: None,
+            decoder_id: None,
+            encoder_settings: None,
+            decoder_settings: None,
+            shmem: None,
+            stream_id: None,
+        });
+
+        assert_eq!(runner.decoder_id.as_deref(), Some("nv12-luma"));
+    }
+
+    #[test]
+    fn keeps_decoder_unset_for_non_grayscale_graphs() {
+        let runner = crate::stream::runner::StreamRunner::new(StreamRunnerConfig {
+            capture_config: sample_config(),
+            graph: sample_graph(false),
+            encoder_id: None,
+            decoder_id: None,
+            encoder_settings: None,
+            decoder_settings: None,
+            shmem: None,
+            stream_id: None,
+        });
+
+        assert_eq!(runner.decoder_id, None);
+    }
 }

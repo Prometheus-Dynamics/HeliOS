@@ -1,6 +1,6 @@
 use imageproc::point::Point;
-use std::cell::RefCell;
 use std::cmp::Ordering;
+use std::sync::{Mutex, OnceLock};
 
 const RDP_RETAIN_POINT_CAP: usize = 4 * 1024;
 const RDP_RETAIN_MARKER_CAP: usize = 4 * 1024;
@@ -19,8 +19,15 @@ struct RdpScratchF32 {
     hull: Vec<usize>,
 }
 
-thread_local! {
-    static RDP_SCRATCH_F32: RefCell<RdpScratchF32> = RefCell::new(RdpScratchF32::default());
+fn rdp_scratch_f32() -> &'static Mutex<RdpScratchF32> {
+    static RDP_SCRATCH_F32: OnceLock<Mutex<RdpScratchF32>> = OnceLock::new();
+    RDP_SCRATCH_F32.get_or_init(|| Mutex::new(RdpScratchF32::default()))
+}
+
+#[inline(always)]
+fn with_rdp_scratch_f32<R>(f: impl FnOnce(&mut RdpScratchF32) -> R) -> R {
+    let mut scratch = rdp_scratch_f32().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    f(&mut scratch)
 }
 
 #[inline(always)]
@@ -32,8 +39,7 @@ fn trim_retained_vec<T>(vec: &mut Vec<T>, retain_cap: usize) {
 }
 
 pub(crate) fn compact_rdp_scratch_after_frame() {
-    RDP_SCRATCH_F32.with(|scratch| {
-        let mut scratch = scratch.borrow_mut();
+    with_rdp_scratch_f32(|scratch| {
         trim_retained_vec(&mut scratch.stack, RDP_RETAIN_MARKER_CAP);
         trim_retained_vec(&mut scratch.marker_epoch, RDP_RETAIN_MARKER_CAP);
         trim_retained_vec(&mut scratch.seg1, RDP_RETAIN_POINT_CAP);
@@ -138,10 +144,9 @@ pub fn approx_poly_dp_into(points: &[Point<f32>], closed: bool, epsilon: f32, ou
         return;
     }
 
-    RDP_SCRATCH_F32.with(|scratch| {
-        let mut scratch = scratch.borrow_mut();
+    with_rdp_scratch_f32(|scratch| {
         if closed {
-            approx_poly_dp_closed_with_scratch(points, epsilon, out, &mut scratch);
+            approx_poly_dp_closed_with_scratch(points, epsilon, out, scratch);
         } else {
             let RdpScratchF32 { stack, marker_epoch, marker_gen, .. } = &mut *scratch;
             approx_poly_dp_open_with_buffers_into(points, epsilon, stack, marker_epoch, marker_gen, out);
@@ -162,9 +167,8 @@ pub fn approx_poly_dp_closed_fast_into(points: &[Point<f32>], epsilon: f32, out:
         return;
     }
 
-    RDP_SCRATCH_F32.with(|scratch| {
-        let mut scratch = scratch.borrow_mut();
-        approx_poly_dp_closed_fast_with_scratch(points, epsilon, out, &mut scratch);
+    with_rdp_scratch_f32(|scratch| {
+        approx_poly_dp_closed_fast_with_scratch(points, epsilon, out, scratch);
     });
 }
 

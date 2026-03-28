@@ -1,9 +1,9 @@
 use image::{DynamicImage, GrayImage};
 use imageproc::point::Point as CvPoint;
 use memchr::{memchr, memrchr};
-use std::cell::RefCell;
 use std::mem::size_of;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use super::detect::{ArucoTagDetectorConfig, candidate_quad_from_contour, candidate_quad_from_contour_fast};
 use crate::contour::suzuki_abe::{CompactContour, suzuki_abe_i32_compact_capped_into};
@@ -19,17 +19,19 @@ const ADAPTIVE_RETAIN_CONTOUR_POINTS_CAP: usize = 4 * 1024;
 const ADAPTIVE_RETAIN_POINT_STORE_CAP: usize = 32 * 1024;
 const ADAPTIVE_RETAIN_CONTOUR_COUNT_CAP: usize = ADAPTIVE_PREPROCESS_CONTOUR_CAP_MAX;
 const ADAPTIVE_RETAIN_ROI_BYTES_CAP: usize = 1024 * 1024;
-const ADAPTIVE_TRACE_POINTS_PER_CONTOUR: usize = 2 * 1024;
-const ADAPTIVE_TRACE_POINT_BUDGET_MIN: usize = 128 * 1024;
-const ADAPTIVE_TRACE_POINT_BUDGET_MAX: usize = 512 * 1024;
+const ADAPTIVE_TRACE_POINTS_PER_CONTOUR: usize = 512;
+const ADAPTIVE_TRACE_POINT_BUDGET_MIN: usize = 32 * 1024;
+const ADAPTIVE_TRACE_POINT_BUDGET_MAX: usize = 128 * 1024;
 const ADAPTIVE_TRACE_CONTOUR_BUDGET_MIN: usize = 128;
 const ADAPTIVE_TRACE_CONTOUR_BUDGET_MAX: usize = 2048;
 
 static ADAPTIVE_TRACE_BUDGET_HITS: AtomicUsize = AtomicUsize::new(0);
 
 #[inline(always)]
-fn adaptive_trace_point_budget(preprocess_cap: usize) -> usize {
-    preprocess_cap.saturating_mul(ADAPTIVE_TRACE_POINTS_PER_CONTOUR).clamp(ADAPTIVE_TRACE_POINT_BUDGET_MIN, ADAPTIVE_TRACE_POINT_BUDGET_MAX)
+fn adaptive_trace_point_budget(preprocess_cap: usize, trace_pixels: usize) -> usize {
+    let per_contour_budget = preprocess_cap.saturating_mul(ADAPTIVE_TRACE_POINTS_PER_CONTOUR);
+    let area_budget = (trace_pixels / 8).max(ADAPTIVE_TRACE_POINT_BUDGET_MIN);
+    per_contour_budget.min(area_budget).clamp(ADAPTIVE_TRACE_POINT_BUDGET_MIN, ADAPTIVE_TRACE_POINT_BUDGET_MAX)
 }
 
 #[inline(always)]
@@ -194,8 +196,15 @@ fn merge_quads(out: &mut Vec<[CvPoint<f32>; 4]>, mut candidates: Vec<[CvPoint<f3
     }
 }
 
-thread_local! {
-    static ADAPTIVE_EXTRACT_SCRATCH: RefCell<AdaptiveExtractScratch> = RefCell::new(AdaptiveExtractScratch::default());
+fn adaptive_extract_scratch() -> &'static Mutex<AdaptiveExtractScratch> {
+    static ADAPTIVE_EXTRACT_SCRATCH: OnceLock<Mutex<AdaptiveExtractScratch>> = OnceLock::new();
+    ADAPTIVE_EXTRACT_SCRATCH.get_or_init(|| Mutex::new(AdaptiveExtractScratch::default()))
+}
+
+#[inline(always)]
+fn with_adaptive_extract_scratch<R>(f: impl FnOnce(&mut AdaptiveExtractScratch) -> R) -> R {
+    let mut scratch = adaptive_extract_scratch().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    f(&mut scratch)
 }
 
 #[derive(Clone, Copy)]
@@ -236,6 +245,26 @@ impl AdaptiveExtractScratch {
         trim_retained_vec(&mut self.fallback_idx, ADAPTIVE_RETAIN_CONTOUR_COUNT_CAP);
         trim_retained_vec(&mut self.pts_f32, ADAPTIVE_RETAIN_CONTOUR_POINTS_CAP);
     }
+
+    fn release_on_idle(&mut self) {
+        release_retained_vec(&mut self.work_i32);
+        release_retained_vec(&mut self.compress_scratch);
+        release_retained_vec(&mut self.roi_bytes);
+        release_retained_vec(&mut self.raw_point_store);
+        release_retained_vec(&mut self.raw_contours);
+        release_retained_vec(&mut self.point_store);
+        release_retained_vec(&mut self.prepared);
+        release_retained_vec(&mut self.fast_idx);
+        release_retained_vec(&mut self.fast_success);
+        release_retained_vec(&mut self.fast_tested);
+        release_retained_vec(&mut self.fallback_idx);
+        release_retained_vec(&mut self.pts_f32);
+    }
+}
+
+#[doc(hidden)]
+pub(crate) fn release_runtime_scratch_on_idle() {
+    with_adaptive_extract_scratch(|scratch| scratch.release_on_idle());
 }
 
 #[inline(always)]
@@ -257,10 +286,16 @@ fn prepared_contour_points<'a>(contour: &PreparedContour, point_store: &'a [CvPo
 
 #[inline(always)]
 fn trim_retained_vec<T>(vec: &mut Vec<T>, retain_cap: usize) {
-    vec.clear();
     if vec.capacity() > retain_cap {
-        vec.shrink_to(retain_cap);
+        *vec = if retain_cap == 0 { Vec::new() } else { Vec::with_capacity(retain_cap) };
+    } else {
+        vec.clear();
     }
+}
+
+#[inline(always)]
+fn release_retained_vec<T>(vec: &mut Vec<T>) {
+    *vec = Vec::new();
 }
 
 #[inline(always)]
@@ -400,7 +435,8 @@ fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig
     } else {
         fast_cap_cfg
     };
-    let trace_point_budget = adaptive_trace_point_budget(preprocess_cap);
+    let trace_pixels = roi_bounds.map(|(_, _, roi_w, roi_h)| roi_w.saturating_mul(roi_h)).unwrap_or_else(|| binary_width.saturating_mul(binary.height() as usize));
+    let trace_point_budget = adaptive_trace_point_budget(preprocess_cap, trace_pixels);
     let trace_contour_budget = adaptive_trace_contour_budget(preprocess_cap);
 
     let detector_config = ArucoTagDetectorConfig {
@@ -419,8 +455,7 @@ fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig
 
     let min_perimeter_for_area = if detector_config.min_area > f32::EPSILON { Some((4.0 * std::f32::consts::PI * detector_config.min_area).sqrt()) } else { None };
 
-    ADAPTIVE_EXTRACT_SCRATCH.with(|scratch| {
-        let mut scratch = scratch.borrow_mut();
+    with_adaptive_extract_scratch(|scratch| {
         let AdaptiveExtractScratch { work_i32, compress_scratch, roi_bytes, raw_point_store, raw_contours, point_store, prepared, fast_idx, fast_success, fast_tested, fallback_idx, pts_f32 } =
             &mut *scratch;
 
@@ -610,6 +645,22 @@ pub fn adaptive_quads(frame: &DynamicImage, config: &AdaptiveDetectorConfig) -> 
         let binary = if config.open_k > 0 { crate::ops::morphology::open(&binary, imageproc::distance_transform::Norm::L1, config.open_k) } else { binary };
         extract_quads_from_binary(&binary, config, diag)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ADAPTIVE_TRACE_POINT_BUDGET_MIN, adaptive_trace_point_budget};
+
+    #[test]
+    fn trace_point_budget_caps_full_frame_work() {
+        assert_eq!(adaptive_trace_point_budget(240, 1280 * 800), 122_880);
+    }
+
+    #[test]
+    fn trace_point_budget_scales_down_for_small_rois() {
+        assert_eq!(adaptive_trace_point_budget(240, 320 * 320), ADAPTIVE_TRACE_POINT_BUDGET_MIN);
+        assert_eq!(adaptive_trace_point_budget(24, 64 * 64), ADAPTIVE_TRACE_POINT_BUDGET_MIN);
+    }
 }
 
 pub fn adaptive_quads_multi(frame: &DynamicImage, config: &AdaptiveDetectorConfig, window_min: u32, window_max: u32, window_step: u32) -> Vec<[CvPoint<f32>; 4]> {

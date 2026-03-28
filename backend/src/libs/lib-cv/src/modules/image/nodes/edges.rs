@@ -19,20 +19,20 @@ use super::*;
         outputs("edges")
     )
 )]
-fn cv_canny_prep(frame: Payload<DynamicImage>, smoothing: f32, mode: ExecMode, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+fn cv_canny_prep(frame: Compute<DynamicImage>, smoothing: f32, mode: ExecMode, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     #[cfg(feature = "gpu")]
     {
         let _ = smoothing;
-        let cpu_fallback = || -> Result<Payload<DynamicImage>, NodeError> {
+        let cpu_fallback = || -> Result<Compute<DynamicImage>, NodeError> {
             let (bytes, w, h) = frame.to_rgba_bytes(ctx.gpu.as_ref()).map_err(|e| NodeError::Handler(format!("canny_prep: {e}")))?;
             let rgba = RgbaImage::from_raw(w, h, bytes).ok_or_else(|| NodeError::Handler("canny_prep: invalid image dimensions".into()))?;
             let gray = DynamicImage::ImageRgba8(rgba).to_luma8();
-            Ok(Payload::Cpu(DynamicImage::ImageLuma8(canny_prep(&gray))))
+            Ok(Compute::Cpu(DynamicImage::ImageLuma8(canny_prep(&gray))))
         };
 
         let (width, height) = frame.dimensions();
         if width == 0 || height == 0 {
-            return Ok(Payload::Cpu(DynamicImage::new_rgba8(width, height)));
+            return Ok(Compute::Cpu(DynamicImage::new_rgba8(width, height)));
         }
 
         let want_gpu = matches!(mode, ExecMode::Gpu | ExecMode::Auto) && ctx.gpu.is_some();
@@ -55,13 +55,13 @@ fn cv_canny_prep(frame: Payload<DynamicImage>, smoothing: f32, mode: ExecMode, #
         let _ = (mode, smoothing);
         let frame = expect_cpu(frame, "canny_prep", Some(_exec_ctx))?;
         let gray = frame.to_luma8();
-        Ok(Payload::Cpu(DynamicImage::ImageLuma8(canny_prep(&gray))))
+        Ok(Compute::Cpu(DynamicImage::ImageLuma8(canny_prep(&gray))))
     }
 }
 
 #[cfg_attr(feature = "gpu", node(id = "emboss", compute(ComputeAffinity::GpuPreferred), inputs("frame", port(name = "mode", default = "auto")), outputs("mask"), shaders(ConvolutionShaderBindings)))]
 #[cfg_attr(not(feature = "gpu"), node(id = "emboss", compute(ComputeAffinity::GpuPreferred), inputs("frame", port(name = "mode", default = "auto")), outputs("mask")))]
-fn cv_emboss(frame: Payload<DynamicImage>, mode: ExecMode, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+fn cv_emboss(frame: Compute<DynamicImage>, mode: ExecMode, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     #[cfg(feature = "gpu")]
     const EMBOSS_KERNEL: [f32; 9] = [-2.0, -1.0, 0.0, -1.0, 1.0, 1.0, 0.0, 1.0, 2.0];
 
@@ -75,13 +75,13 @@ fn cv_emboss(frame: Payload<DynamicImage>, mode: ExecMode, #[cfg(feature = "gpu"
         let _ = mode;
         let frame = expect_cpu(frame, "emboss", Some(_exec_ctx))?;
         let gray = frame.to_luma8();
-        Ok(Payload::Cpu(DynamicImage::ImageLuma8(emboss(&gray))))
+        Ok(Compute::Cpu(DynamicImage::ImageLuma8(emboss(&gray))))
     }
 }
 
 #[cfg_attr(feature = "gpu", node(id = "sharpen", compute(ComputeAffinity::GpuPreferred), inputs("frame", port(name = "mode", default = "auto")), outputs("mask"), shaders(ConvolutionShaderBindings)))]
 #[cfg_attr(not(feature = "gpu"), node(id = "sharpen", compute(ComputeAffinity::GpuPreferred), inputs("frame", port(name = "mode", default = "auto")), outputs("mask")))]
-fn cv_sharpen(frame: Payload<DynamicImage>, mode: ExecMode, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+fn cv_sharpen(frame: Compute<DynamicImage>, mode: ExecMode, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     #[cfg(feature = "gpu")]
     const SHARPEN_KERNEL: [f32; 9] = [0.0, -1.0, 0.0, -1.0, 5.0, -1.0, 0.0, -1.0, 0.0];
 
@@ -95,7 +95,7 @@ fn cv_sharpen(frame: Payload<DynamicImage>, mode: ExecMode, #[cfg(feature = "gpu
         let _ = mode;
         let frame = expect_cpu(frame, "sharpen", Some(_exec_ctx))?;
         let gray = frame.to_luma8();
-        Ok(Payload::Cpu(DynamicImage::ImageLuma8(sharpen(&gray))))
+        Ok(Compute::Cpu(DynamicImage::ImageLuma8(sharpen(&gray))))
     }
 }
 
@@ -129,13 +129,13 @@ fn cv_sharpen(frame: Payload<DynamicImage>, mode: ExecMode, #[cfg(feature = "gpu
     )
 )]
 fn cv_laplacian(
-    frame: Payload<DynamicImage>,
+    frame: Compute<DynamicImage>,
     gain: f32,
     bias: f32,
     mode: ExecMode,
     #[cfg(feature = "gpu")] ctx: ShaderContext,
     _exec_ctx: &ExecutionContext,
-) -> Result<Payload<DynamicImage>, NodeError> {
+) -> Result<Compute<DynamicImage>, NodeError> {
     let base_kernel: [f32; 9] = [-1.0, -1.0, -1.0, -1.0, 8.0, -1.0, -1.0, -1.0, -1.0];
     let mut kernel = base_kernel;
     for v in kernel.iter_mut() {
@@ -152,7 +152,7 @@ fn cv_laplacian(
         let _ = mode;
         let frame = expect_cpu(frame, "laplacian", Some(_exec_ctx))?;
         let gray = frame.to_luma8();
-        Ok(Payload::Cpu(DynamicImage::ImageLuma8(convolve_gray(&gray, kernel, 1.0, bias))))
+        Ok(Compute::Cpu(DynamicImage::ImageLuma8(convolve_gray(&gray, kernel, 1.0, bias))))
     }
 }
 
@@ -162,12 +162,12 @@ fn cv_laplacian(
 )]
 #[cfg_attr(not(feature = "gpu"), node(id = "weighted_blur3", compute(ComputeAffinity::GpuPreferred), inputs("frame", "weights", port(name = "mode", default = "auto")), outputs("mask")))]
 fn cv_weighted_blur3(
-    frame: Payload<DynamicImage>,
+    frame: Compute<DynamicImage>,
     weights: Vec<f32>,
     mode: ExecMode,
     #[cfg(feature = "gpu")] ctx: ShaderContext,
     _exec_ctx: &ExecutionContext,
-) -> Result<Payload<DynamicImage>, NodeError> {
+) -> Result<Compute<DynamicImage>, NodeError> {
     let kernel = to_kernel(&weights).ok_or_else(|| NodeError::InvalidInput("weights must contain 9 values".into()))?;
     let sum: f32 = kernel.iter().copied().sum();
     let factor = if sum.abs() > f32::EPSILON { 1.0 / sum } else { 1.0 };
@@ -182,6 +182,6 @@ fn cv_weighted_blur3(
         let _ = mode;
         let frame = expect_cpu(frame, "weighted_blur3", Some(_exec_ctx))?;
         let gray = frame.to_luma8();
-        Ok(Payload::Cpu(DynamicImage::ImageLuma8(convolve_gray(&gray, kernel, factor, 0.0))))
+        Ok(Compute::Cpu(DynamicImage::ImageLuma8(convolve_gray(&gray, kernel, factor, 0.0))))
     }
 }

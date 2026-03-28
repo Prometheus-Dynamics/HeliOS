@@ -32,7 +32,7 @@ pub fn build_daedalus_runtime_registry(host_mgr: &DaedalusBridgeManager, graph: 
     let mut registry = PluginRegistry::new();
     let plugins = {
         let mut plugin_ids = vec!["host_bridge".into()];
-        let installed_ids = install_dynamic_plugins_cached(&mut registry)?;
+        let installed_ids = install_dynamic_plugins_cached(&mut registry, graph)?;
         plugin_ids.extend(installed_ids);
         // Dynamic plugins are discovered/loaded via `DYNAMIC_PLUGIN_CACHE` so we don't redo
         // directory scans and `dlopen` work for every stream/graph build.
@@ -55,6 +55,50 @@ pub fn build_daedalus_runtime_registry(host_mgr: &DaedalusBridgeManager, graph: 
     registry.apply_type_compatibilities();
     let handlers = registry.take_handlers();
     Ok(DaedalusRuntimeRegistry { registry, plugins, handlers })
+}
+
+fn graph_plugin_namespaces(graph: Option<&Graph>) -> Option<BTreeSet<String>> {
+    let graph = graph?;
+    let mut namespaces = BTreeSet::new();
+    for node in &graph.nodes {
+        let id = node.id.0.as_str();
+        let Some((namespace, _rest)) = id.split_once(':') else {
+            continue;
+        };
+        match namespace {
+            "cv" | "ai" | "nt4" | "led" => {
+                namespaces.insert(namespace.to_string());
+            }
+            _ => {}
+        }
+    }
+    Some(namespaces)
+}
+
+fn plugin_namespace_from_filename(name: &str) -> Option<&'static str> {
+    if name.contains("_cv_") {
+        return Some("cv");
+    }
+    if name.contains("_ai_") {
+        return Some("ai");
+    }
+    if name.contains("_nt4_") {
+        return Some("nt4");
+    }
+    if name.contains("_led_") {
+        return Some("led");
+    }
+    None
+}
+
+fn plugin_requested_for_graph(name: &str, requested_namespaces: Option<&BTreeSet<String>>) -> bool {
+    let Some(requested_namespaces) = requested_namespaces else {
+        return true;
+    };
+    let Some(namespace) = plugin_namespace_from_filename(name) else {
+        return true;
+    };
+    requested_namespaces.contains(namespace)
 }
 
 fn parse_plugin_dirs() -> Vec<PathBuf> {
@@ -122,7 +166,7 @@ struct DynamicPluginCache {
 
 static DYNAMIC_PLUGIN_CACHE: OnceLock<Mutex<Result<DynamicPluginCache, String>>> = OnceLock::new();
 
-fn init_dynamic_plugin_cache() -> Result<DynamicPluginCache, String> {
+fn init_dynamic_plugin_cache(requested_namespaces: Option<&BTreeSet<String>>) -> Result<DynamicPluginCache, String> {
     let dirs = parse_plugin_dirs();
     let mut disabled = BTreeMap::new();
     for dir in &dirs {
@@ -141,6 +185,9 @@ fn init_dynamic_plugin_cache() -> Result<DynamicPluginCache, String> {
                 continue;
             };
             if disabled.contains_key(&name) {
+                continue;
+            }
+            if !plugin_requested_for_graph(&name, requested_namespaces) {
                 continue;
             }
             // Preserve first-seen directory priority so writable install dirs (e.g. /var/lib)
@@ -186,7 +233,7 @@ fn current_disabled_plugins() -> BTreeMap<String, PathBuf> {
     out
 }
 
-fn refresh_dynamic_plugin_cache(cache: &mut DynamicPluginCache) {
+fn refresh_dynamic_plugin_cache(cache: &mut DynamicPluginCache, requested_namespaces: Option<&BTreeSet<String>>) {
     let mut loaded_paths = BTreeSet::new();
     for (_, path, _) in &cache.libs {
         loaded_paths.insert(path.clone());
@@ -215,6 +262,9 @@ fn refresh_dynamic_plugin_cache(cache: &mut DynamicPluginCache) {
             let Some(name) = path.file_name().and_then(|v| v.to_str()).map(ToString::to_string) else {
                 continue;
             };
+            if !plugin_requested_for_graph(&name, requested_namespaces) {
+                continue;
+            }
             // Preserve first-seen directory priority across refreshes as well. A plugin copied into
             // the writable deploy dir should continue to win over same-named system copies instead
             // of being double-loaded and re-registered later in the process.
@@ -247,13 +297,14 @@ fn refresh_dynamic_plugin_cache(cache: &mut DynamicPluginCache) {
     cache.diagnostics.retain(|name, _| seen_names.contains(name));
 }
 
-fn install_dynamic_plugins_cached(registry: &mut PluginRegistry) -> Result<Vec<String>, &'static str> {
-    let cache = DYNAMIC_PLUGIN_CACHE.get_or_init(|| Mutex::new(init_dynamic_plugin_cache()));
+fn install_dynamic_plugins_cached(registry: &mut PluginRegistry, graph: Option<&Graph>) -> Result<Vec<String>, &'static str> {
+    let requested_namespaces = graph_plugin_namespaces(graph);
+    let cache = DYNAMIC_PLUGIN_CACHE.get_or_init(|| Mutex::new(init_dynamic_plugin_cache(requested_namespaces.as_ref())));
     let mut guard = cache.lock().map_err(|_| "dynamic plugin cache lock poisoned")?;
     let cache = guard.as_mut().map_err(|_| "dynamic plugin load failed")?;
-    refresh_dynamic_plugin_cache(cache);
+    refresh_dynamic_plugin_cache(cache, requested_namespaces.as_ref());
     let disabled = current_disabled_plugins();
-    tracing::info!(plugins = cache.libs.len(), disabled = disabled.len(), "daedalus plugin scan complete");
+    tracing::info!(plugins = cache.libs.len(), disabled = disabled.len(), requested_namespaces = ?requested_namespaces, "daedalus plugin scan complete");
 
     let mut names = Vec::new();
     for (lib, path, name) in &cache.libs {
@@ -281,7 +332,7 @@ fn install_dynamic_plugins_cached(registry: &mut PluginRegistry) -> Result<Vec<S
 }
 
 pub fn plugin_diagnostics() -> Vec<PluginCompatibility> {
-    let cache = DYNAMIC_PLUGIN_CACHE.get_or_init(|| Mutex::new(init_dynamic_plugin_cache()));
+    let cache = DYNAMIC_PLUGIN_CACHE.get_or_init(|| Mutex::new(init_dynamic_plugin_cache(None)));
     let mut guard = match cache.lock() {
         Ok(guard) => guard,
         Err(_) => return Vec::new(),
@@ -290,7 +341,7 @@ pub fn plugin_diagnostics() -> Vec<PluginCompatibility> {
         Ok(cache) => cache,
         Err(_) => return Vec::new(),
     };
-    refresh_dynamic_plugin_cache(cache);
+    refresh_dynamic_plugin_cache(cache, None);
     cache.diagnostics.values().cloned().collect()
 }
 

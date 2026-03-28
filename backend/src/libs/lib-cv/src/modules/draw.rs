@@ -35,14 +35,14 @@ pub mod nodes {
         utils::overlay_dynamic,
     };
 
-    use daedalus::gpu::Payload;
+    use daedalus::gpu::Compute;
 
-    fn expect_cpu_frame(frame: Payload<DynamicImage>, label: &str, exec_ctx: Option<&ExecutionContext>) -> Result<DynamicImage, NodeError> {
+    fn expect_cpu_frame(frame: Compute<DynamicImage>, label: &str, exec_ctx: Option<&ExecutionContext>) -> Result<DynamicImage, NodeError> {
         #[cfg(feature = "gpu")]
         {
             match frame {
-                Payload::Cpu(img) => Ok(img),
-                Payload::Gpu(handle) => {
+                Compute::Cpu(img) => Ok(img),
+                Compute::Gpu(handle) => {
                     let ctx = exec_ctx.and_then(|ctx| ctx.gpu.as_ref()).ok_or_else(|| NodeError::Handler(format!("{label}: gpu payload missing context")))?;
                     let bytes = ctx.read_texture(&handle).map_err(|e| NodeError::Handler(format!("{label}: {e}")))?;
                     let rgba = RgbaImage::from_raw(handle.width, handle.height, bytes).ok_or_else(|| NodeError::Handler(format!("{label}: invalid image dimensions")))?;
@@ -54,8 +54,8 @@ pub mod nodes {
         {
             let _ = exec_ctx;
             match frame {
-                Payload::Cpu(img) => Ok(img),
-                Payload::Gpu(_) => Err(NodeError::Handler(format!("{label}: GPU payload unsupported (insert cpu convert)"))),
+                Compute::Cpu(img) => Ok(img),
+                Compute::Gpu(_) => Err(NodeError::Handler(format!("{label}: GPU payload unsupported (insert cpu convert)"))),
             }
         }
     }
@@ -185,14 +185,14 @@ pub mod nodes {
         ),
         outputs(port(name = "frame", ty = TypeExpr::opaque("image:dynamic")))
     )]
-    fn draw_crosshair_at(frame: Payload<DynamicImage>, x: i64, y: i64, size: u32, thickness: u32, enabled: bool, exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+    fn draw_crosshair_at(frame: Compute<DynamicImage>, x: i64, y: i64, size: u32, thickness: u32, enabled: bool, exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
         if !enabled {
             return Ok(frame);
         }
         let mut out = expect_cpu_frame(frame, "drawcrosshairat", Some(exec_ctx))?;
         let (width, height) = out.dimensions();
         if width == 0 || height == 0 {
-            return Ok(Payload::Cpu(out));
+            return Ok(Compute::Cpu(out));
         }
 
         let thickness = thickness.max(1);
@@ -208,7 +208,7 @@ pub mod nodes {
         let color = Rgba([0, 255, 0, 255]);
         overlay_line_x_y(&mut out, (left, cy), (right, cy), thickness, color);
         overlay_line_x_y(&mut out, (cx, top), (cx, bottom), thickness, color);
-        Ok(Payload::Cpu(out))
+        Ok(Compute::Cpu(out))
     }
 
     #[derive(Clone, Debug, NodeConfig)]
@@ -339,7 +339,7 @@ pub mod nodes {
         ),
         outputs("frame")
     )]
-    fn draw_contours(frame: Payload<DynamicImage>, contours: &Vec<Vec<Point>>, thickness: i64, color: DaedalusValue, exec_ctx: &ExecutionContext) -> Result<DynamicImage, NodeError> {
+    fn draw_contours(frame: Compute<DynamicImage>, contours: &Vec<Vec<Point>>, thickness: i64, color: DaedalusValue, exec_ctx: &ExecutionContext) -> Result<DynamicImage, NodeError> {
         let mut out = expect_cpu_frame(frame, "drawcontours", Some(exec_ctx))?;
         if contours.iter().all(|contour| contour.is_empty()) {
             return Ok(out);

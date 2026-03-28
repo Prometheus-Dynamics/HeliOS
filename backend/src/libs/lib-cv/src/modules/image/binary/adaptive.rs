@@ -26,19 +26,55 @@ fn adaptive_parallel_threads_default() -> usize {
     std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).min(2).max(1)
 }
 
+fn serial_runtime_requested() -> bool {
+    std::env::var("HELIOS_DAEDALUS_RUNTIME_MODE").ok().is_some_and(|value| value.trim().eq_ignore_ascii_case("serial"))
+}
+
 fn adaptive_available_parallelism() -> usize {
     static THREADS: OnceLock<usize> = OnceLock::new();
     *THREADS.get_or_init(|| {
-        std::env::var("HELIOS_ADAPTIVE_PARALLEL_THREADS").ok().and_then(|value| value.parse::<usize>().ok()).filter(|value| *value > 0).unwrap_or_else(adaptive_parallel_threads_default)
+        if serial_runtime_requested() {
+            return 1;
+        }
+
+        let global_rayon_threads = std::env::var("RAYON_NUM_THREADS").ok().and_then(|value| value.parse::<usize>().ok()).filter(|value| *value > 0);
+        std::env::var("HELIOS_ADAPTIVE_PARALLEL_THREADS")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or_else(adaptive_parallel_threads_default)
+            .min(global_rayon_threads.unwrap_or(usize::MAX))
     })
 }
 
-fn adaptive_thread_pool() -> &'static rayon::ThreadPool {
+fn adaptive_thread_pool() -> Option<&'static rayon::ThreadPool> {
+    if adaptive_available_parallelism() <= 1 {
+        return None;
+    }
+
     static POOL: OnceLock<rayon::ThreadPool> = OnceLock::new();
-    POOL.get_or_init(|| {
+    Some(POOL.get_or_init(|| {
         let threads = adaptive_available_parallelism().max(1);
         rayon::ThreadPoolBuilder::new().num_threads(threads).build().expect("adaptive threshold thread pool")
-    })
+    }))
+}
+
+pub(super) fn compact_parallel_worker_scratch_after_frame() {
+    let Some(pool) = adaptive_thread_pool() else {
+        return;
+    };
+    pool.broadcast(|_| {
+        super::compact_adaptive_threshold_scratch_current_thread();
+    });
+}
+
+pub(super) fn release_parallel_worker_scratch_on_idle() {
+    let Some(pool) = adaptive_thread_pool() else {
+        return;
+    };
+    pool.broadcast(|_| {
+        super::release_adaptive_threshold_scratch_current_thread();
+    });
 }
 
 fn log_adaptive_parallel_choice(use_parallel: bool, width: u32, height: u32) {
@@ -55,20 +91,22 @@ fn should_use_adaptive_parallel(pixel_count: usize) -> bool {
 }
 
 pub fn adaptive_mean_threshold_fast(image: &GrayImage, window: u32, offset: f32) -> GrayImage {
-    ADAPTIVE_BUFFERS.with(|buffers| {
-        let mut buffers = buffers.borrow_mut();
-        adaptive_mean_threshold_fast_inner(image, window, offset, false, &mut buffers)
-    })
+    let out = with_adaptive_buffers(|buffers| adaptive_mean_threshold_fast_inner(image, window, offset, false, buffers));
+    compact_adaptive_threshold_scratch_after_frame();
+    out
 }
 
 /// Adaptive mean threshold with optional polarity flip.
 ///
 /// When `invert == true`, the output mask polarity is flipped without an extra post-pass over the image.
 pub fn adaptive_mean_threshold_fast_with_invert(image: &GrayImage, window: u32, offset: f32, invert: bool) -> GrayImage {
-    ADAPTIVE_BUFFERS.with(|buffers| {
-        let mut buffers = buffers.borrow_mut();
-        adaptive_mean_threshold_fast_inner(image, window, offset, invert, &mut buffers)
-    })
+    let out = with_adaptive_buffers(|buffers| adaptive_mean_threshold_fast_inner(image, window, offset, invert, buffers));
+    compact_adaptive_threshold_scratch_after_frame();
+    out
+}
+
+pub fn adaptive_mean_threshold_fast_with_invert_in(exec_ctx: &daedalus::runtime::state::ExecutionContext, image: &GrayImage, window: u32, offset: f32, invert: bool) -> Result<GrayImage, String> {
+    super::with_managed_adaptive_buffers(exec_ctx, |buffers| adaptive_mean_threshold_fast_inner(image, window, offset, invert, buffers))
 }
 
 pub fn adaptive_mean_threshold_fast_into(image: &GrayImage, window: u32, offset: f32, invert: bool, output: &mut GrayImage) {
@@ -80,30 +118,28 @@ pub fn adaptive_mean_threshold_fast_into(image: &GrayImage, window: u32, offset:
         output.as_mut().fill(0);
         return;
     }
-    ADAPTIVE_BUFFERS.with(|buffers| {
-        let mut buffers = buffers.borrow_mut();
-        adaptive_mean_threshold_fast_inner_into(image, window, offset, invert, &mut buffers, output.as_mut());
-    });
+    with_adaptive_buffers(|buffers| adaptive_mean_threshold_fast_inner_into(image, window, offset, invert, buffers, output.as_mut()));
+    compact_adaptive_threshold_scratch_after_frame();
 }
 
 pub fn with_adaptive_mean_threshold_fast<R>(image: &GrayImage, window: u32, offset: f32, invert: bool, f: impl FnOnce(&GrayImage) -> R) -> R {
     let (width, height) = image.dimensions();
     let needed = (width as usize).saturating_mul(height as usize);
-    ADAPTIVE_BUFFERS.with(|buffers| {
-        let mut buffers = buffers.borrow_mut();
-        MASK_BUFFER.with(|mask| {
-            let mut mask = mask.borrow_mut();
-            let dst = ensure_mask_buffer(&mut mask, width, height);
+    let out = with_adaptive_buffers(|buffers| {
+        with_mask_buffer(|mask| {
+            let dst = ensure_mask_buffer(mask, width, height);
             if dst.len() != needed {
                 return f(&GrayImage::new(width, height));
             }
-            adaptive_mean_threshold_fast_inner_into(image, window, offset, invert, &mut buffers, dst);
+            adaptive_mean_threshold_fast_inner_into(image, window, offset, invert, buffers, dst);
             let img = GrayImage::from_raw(width, height, std::mem::take(&mut mask.buf)).expect("mask buffer size must match image dimensions");
             let out = f(&img);
             mask.buf = img.into_raw();
             out
         })
-    })
+    });
+    compact_adaptive_threshold_scratch_after_frame();
+    out
 }
 
 pub fn with_adaptive_mean_threshold_fast_timed<R>(image: &GrayImage, window: u32, offset: f32, invert: bool, f: impl FnOnce(&GrayImage) -> R) -> (R, Duration) {
@@ -287,7 +323,7 @@ fn adaptive_mean_threshold_fast_inner_into(image: &GrayImage, window: u32, offse
     let use_parallel = should_use_adaptive_parallel(expected_len);
     log_adaptive_parallel_choice(use_parallel, width, height);
     if use_parallel {
-        adaptive_mean_threshold_fast_parallel_into(image, window, radius, offset, invert, buffers, dst);
+        adaptive_mean_threshold_fast_parallel_into(image, window, radius, offset, invert, dst);
         return;
     }
     let radius_isize = radius as isize;
@@ -298,9 +334,9 @@ fn adaptive_mean_threshold_fast_inner_into(image: &GrayImage, window: u32, offse
 
     let ring_rows = window as usize;
     let ring_len = width_usize.saturating_mul(ring_rows);
-    if buffers.hsum.len() != ring_len {
-        buffers.hsum.resize(ring_len, 0u16);
-        crate::diagnostics::report_scratch_high_water("image.adaptive_hsum", buffers.hsum.capacity() * size_of::<u16>());
+    if buffers.hsum_ring.len() != ring_len {
+        buffers.hsum_ring.resize(ring_len, 0u16);
+        crate::diagnostics::report_scratch_high_water("image.adaptive_hsum", buffers.hsum_ring.capacity() * size_of::<u16>());
     }
     if buffers.col_sum.len() != width_usize {
         buffers.col_sum.resize(width_usize, 0);
@@ -313,7 +349,7 @@ fn adaptive_mean_threshold_fast_inner_into(image: &GrayImage, window: u32, offse
     let inv_area = inv_area as i32;
     let area_half_scaled = area_half.saturating_mul(inv_area);
     let offset_scaled = (offset * ((1i64 << ADAPTIVE_SHIFT) as f32)).round() as i32;
-    let hsum_ring = &mut buffers.hsum;
+    let hsum_ring = &mut buffers.hsum_ring;
     let col_sum = &mut buffers.col_sum;
 
     let clamp_y = |y: isize| -> usize {
@@ -509,7 +545,7 @@ fn adaptive_mean_threshold_fast_inner_into(image: &GrayImage, window: u32, offse
     }
 }
 
-fn adaptive_mean_threshold_fast_parallel_into(image: &GrayImage, window: u32, radius: usize, offset: f32, invert: bool, buffers: &mut AdaptiveBuffers, dst: &mut [u8]) {
+fn adaptive_mean_threshold_fast_parallel_into(image: &GrayImage, window: u32, radius: usize, offset: f32, invert: bool, dst: &mut [u8]) {
     let (width, height) = image.dimensions();
     let width_usize = width as usize;
     let height_usize = height as usize;
@@ -518,10 +554,8 @@ fn adaptive_mean_threshold_fast_parallel_into(image: &GrayImage, window: u32, ra
     }
     let src = image.as_raw();
     let hsum_len = width_usize.saturating_mul(height_usize);
-    if buffers.hsum.len() != hsum_len {
-        buffers.hsum.resize(hsum_len, 0u16);
-        crate::diagnostics::report_scratch_high_water("image.adaptive_hsum", buffers.hsum.capacity() * size_of::<u16>());
-    }
+    let mut hsum = vec![0u16; hsum_len];
+    crate::diagnostics::report_scratch_high_water("image.adaptive_parallel_hsum", hsum.capacity() * size_of::<u16>());
     let area = (window as i32) * (window as i32);
     let area_half = area / 2;
     let inv_area = (((1i64) << ADAPTIVE_SHIFT) + (area as i64 / 2)) / (area as i64);
@@ -531,17 +565,16 @@ fn adaptive_mean_threshold_fast_parallel_into(image: &GrayImage, window: u32, ra
     let radius_isize = radius as isize;
     let use_neon = false;
 
-    let pool = adaptive_thread_pool();
+    let pool = adaptive_thread_pool().expect("adaptive parallel path requires a worker pool");
     pool.install(|| {
         {
-            let hsum = &mut buffers.hsum;
             hsum.par_chunks_mut(width_usize).enumerate().for_each(|(y, row)| {
                 let src_row = &src[y * width_usize..(y + 1) * width_usize];
                 compute_horizontal_hsum_row_u16(src_row, radius, row, use_neon);
             });
         }
 
-        let hsum = &buffers.hsum;
+        let hsum = hsum.as_slice();
         let threads = pool.current_num_threads().max(1);
         let mut rows_per_chunk = height_usize.div_ceil(threads);
         rows_per_chunk = rows_per_chunk.max(window as usize).max(32);

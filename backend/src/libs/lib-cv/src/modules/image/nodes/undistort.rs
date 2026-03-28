@@ -462,7 +462,7 @@ fn undistort_dynamic_image(img: DynamicImage, calib: UndistortCalib, border_clam
     outputs("frame")
 )]
 fn cv_undistort(
-    frame: Payload<DynamicImage>,
+    frame: Compute<DynamicImage>,
     fx: f64,
     fy: f64,
     cx: f64,
@@ -478,7 +478,7 @@ fn cv_undistort(
     zoom: f64,
     fill_margin: f64,
     _exec_ctx: &ExecutionContext,
-) -> Result<Payload<DynamicImage>, NodeError> {
+) -> Result<Compute<DynamicImage>, NodeError> {
     let border_clamp = border_mode.is_clamp();
     let in_fx = fx as f32;
     let in_fy = fy as f32;
@@ -519,10 +519,10 @@ fn cv_undistort(
     let out_fx = in_fx * zoom_eff;
     let out_fy = in_fy * zoom_eff;
     if !(out_fx.is_finite() && out_fy.is_finite() && out_fx > 0.0 && out_fy > 0.0) {
-        return Ok(Payload::Cpu(img));
+        return Ok(Compute::Cpu(img));
     }
     let calib = UndistortCalib { out_fx, out_fy, ..calib };
-    Ok(Payload::Cpu(undistort_dynamic_image(img, calib, border_clamp)))
+    Ok(Compute::Cpu(undistort_dynamic_image(img, calib, border_clamp)))
 }
 
 #[node(
@@ -541,7 +541,7 @@ fn cv_undistort(
     outputs("frame")
 )]
 fn cv_undistort_optional(
-    frame: Payload<DynamicImage>,
+    frame: Compute<DynamicImage>,
     calibration: Option<daedalus::data::model::Value>,
     border_mode: BorderMode,
     // Treat `zoom_mode` as optional at runtime to remain compatible with older graphs/hosts
@@ -550,7 +550,7 @@ fn cv_undistort_optional(
     zoom: f64,
     fill_margin: f64,
     _exec_ctx: &ExecutionContext,
-) -> Result<Payload<DynamicImage>, NodeError> {
+) -> Result<Compute<DynamicImage>, NodeError> {
     let border_clamp = border_mode.is_clamp();
     let zoom_mode = zoom_mode.unwrap_or(UndistortZoomMode::Manual);
     let Some(calibration) = calibration else {
@@ -689,8 +689,8 @@ fn cv_undistort_optional(
     let out_fx = calibration.fx * zoom_eff;
     let out_fy = calibration.fy * zoom_eff;
     if !(out_fx.is_finite() && out_fy.is_finite() && out_fx > 0.0 && out_fy > 0.0) {
-        return Ok(Payload::Cpu(img));
+        return Ok(Compute::Cpu(img));
     }
     let calib = UndistortCalib { out_fx, out_fy, ..calib };
-    Ok(Payload::Cpu(undistort_dynamic_image(img, calib, border_clamp)))
+    Ok(Compute::Cpu(undistort_dynamic_image(img, calib, border_clamp)))
 }

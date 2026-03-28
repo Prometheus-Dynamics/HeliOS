@@ -10,7 +10,6 @@ use imageproc::{
 use once_cell::sync::Lazy;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::cell::RefCell;
 use tracing::{Level, trace};
 use utoipa::ToSchema;
 

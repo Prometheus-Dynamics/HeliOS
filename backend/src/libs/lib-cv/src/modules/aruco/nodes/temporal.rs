@@ -928,7 +928,7 @@ struct ArucoTemporalSmoothDetectionsConfig {
     outputs(port(name = "detections", source = "ArucoDetections2D", ty = crate::daedalus_types::aruco_detections_2d()))
 )]
 fn cv_aruco_temporal_smooth_detections(
-    frame: &crate::modules::image::luma::PooledGrayImage,
+    frame: &GrayImage,
     detections: &Vec<ArucoDetection2D>,
     cfg: ArucoTemporalSmoothDetectionsConfig,
     exec_ctx: &ExecutionContext,

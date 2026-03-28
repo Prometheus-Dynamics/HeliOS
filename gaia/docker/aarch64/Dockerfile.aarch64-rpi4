@@ -1,6 +1,8 @@
 # Use Debian testing as the base image
 # syntax=docker/dockerfile:1.6
+ARG FFMPEG_VERSION=8.0.1
 FROM debian:bookworm AS debian-arm64-base
+ARG FFMPEG_VERSION
 
 # 1. Add ARM64 architecture first
 RUN dpkg --add-architecture arm64
@@ -76,17 +78,20 @@ RUN apt-get update -y && \
     cmake
 
 # Native (host) FFmpeg development headers are required because Cargo runs some build scripts
-# with TARGET==HOST. Target (aarch64) FFmpeg is provided below under /usr/aarch64-linux-gnu.
-RUN apt-get update -y && \
-    apt-get install -y \
-    ffmpeg \
-    libavcodec-dev \
-    libavdevice-dev \
-    libavfilter-dev \
-    libavformat-dev \
-    libavutil-dev \
-    libswresample-dev \
-    libswscale-dev
+# with TARGET==HOST. Build the same FFmpeg release for the host as we do for the target so
+# `ffmpeg-next` sees a consistent API surface instead of Debian bookworm's older FFmpeg 5.x.
+RUN apt-get update -y && apt-get install -y nasm yasm
+RUN curl -Ls https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz \
+        | tar xJ && \
+    cd ffmpeg-${FFMPEG_VERSION} && \
+    ./configure \
+        --prefix=/usr/local \
+        --enable-shared \
+        --disable-static && \
+    make -j$(nproc) && make install && \
+    ldconfig && \
+    cd .. && rm -rf ffmpeg-${FFMPEG_VERSION}
+ENV PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:/usr/lib/pkgconfig"
 
 # Ensure pkg-config does not accidentally pick up host (amd64) libraries when cross-compiling.
 # ffmpeg-sys-next uses pkg-config to locate FFmpeg; we want the aarch64 sysroot only.
@@ -125,7 +130,7 @@ FROM debian-arm64-base AS rpi4-linux
 # Define build arguments for dependency versions
 ARG LIBCAMERA_BRANCH=v0.6.0
 ARG TURBOJPEG_VERSION=3.1.2
-ARG FFMPEG_VERSION=8.0.1
+ARG FFMPEG_VERSION
 
 RUN apt-get update -y && apt-get upgrade -y
 

@@ -2,10 +2,10 @@
 use super::*;
 
 #[cfg(feature = "gpu")]
-pub(super) fn run_box_blur(frame: &Payload<DynamicImage>, radius: u32, ctx: &ShaderContext) -> Result<Payload<DynamicImage>, NodeError> {
+pub(super) fn run_box_blur(frame: &Compute<DynamicImage>, radius: u32, ctx: &ShaderContext) -> Result<Compute<DynamicImage>, NodeError> {
     let (width, height) = frame.dimensions();
     if width == 0 || height == 0 {
-        return Ok(Payload::Cpu(DynamicImage::new_rgba8(width, height)));
+        return Ok(Compute::Cpu(DynamicImage::new_rgba8(width, height)));
     }
     let radius = radius.max(1);
     let inv_kernel = 1.0 / ((radius * 2 + 1) as f32);
@@ -18,10 +18,10 @@ pub(super) fn run_box_blur(frame: &Payload<DynamicImage>, radius: u32, ctx: &Sha
 }
 
 #[cfg(feature = "gpu")]
-pub(super) fn run_sobel_gpu(frame: &Payload<DynamicImage>, ctx: &ShaderContext) -> Result<Payload<DynamicImage>, NodeError> {
+pub(super) fn run_sobel_gpu(frame: &Compute<DynamicImage>, ctx: &ShaderContext) -> Result<Compute<DynamicImage>, NodeError> {
     let (width, height) = frame.dimensions();
     if width == 0 || height == 0 {
-        return Ok(Payload::Cpu(DynamicImage::new_rgba8(width, height)));
+        return Ok(Compute::Cpu(DynamicImage::new_rgba8(width, height)));
     }
     let params = SobelParams { width, height, _pad: [0; 2] };
     let bindings = SobelShaderBindings { input: frame, output: TextureOut::from_input_ctx(frame, ctx), params: Uniform::new(params) };
@@ -29,10 +29,10 @@ pub(super) fn run_sobel_gpu(frame: &Payload<DynamicImage>, ctx: &ShaderContext) 
 }
 
 #[cfg(feature = "gpu")]
-pub(super) fn gpu_convolution(frame: &Payload<DynamicImage>, kernel: [f32; 9], factor: f32, bias: f32, ctx: &ShaderContext) -> Result<Payload<DynamicImage>, NodeError> {
+pub(super) fn gpu_convolution(frame: &Compute<DynamicImage>, kernel: [f32; 9], factor: f32, bias: f32, ctx: &ShaderContext) -> Result<Compute<DynamicImage>, NodeError> {
     let (width, height) = frame.dimensions();
     if width == 0 || height == 0 {
-        return Ok(Payload::Cpu(DynamicImage::new_rgba8(width, height)));
+        return Ok(Compute::Cpu(DynamicImage::new_rgba8(width, height)));
     }
     let kernel_rows = [[kernel[0], kernel[1], kernel[2], 0.0], [kernel[3], kernel[4], kernel[5], 0.0], [kernel[6], kernel[7], kernel[8], 0.0]];
     let params = ConvolutionParams { factor, bias, _pad: [0.0; 2], kernel: kernel_rows };
@@ -42,10 +42,10 @@ pub(super) fn gpu_convolution(frame: &Payload<DynamicImage>, kernel: [f32; 9], f
 }
 
 #[cfg(feature = "gpu")]
-pub(super) fn run_morph(mask: &Payload<DynamicImage>, norm: MorphNorm, k: u32, op: u32, ctx: &ShaderContext) -> Result<Payload<DynamicImage>, NodeError> {
+pub(super) fn run_morph(mask: &Compute<DynamicImage>, norm: MorphNorm, k: u32, op: u32, ctx: &ShaderContext) -> Result<Compute<DynamicImage>, NodeError> {
     let (width, height) = mask.dimensions();
     if width == 0 || height == 0 {
-        return Ok(Payload::Cpu(DynamicImage::new_rgba8(width, height)));
+        return Ok(Compute::Cpu(DynamicImage::new_rgba8(width, height)));
     }
     let params = MorphParams {
         radius: k.max(1),
@@ -62,7 +62,7 @@ pub(super) fn run_morph(mask: &Payload<DynamicImage>, norm: MorphNorm, k: u32, o
 }
 
 #[cfg(feature = "gpu")]
-pub(super) fn run_morph_diff(a: &Payload<DynamicImage>, b: &Payload<DynamicImage>, ctx: &ShaderContext) -> Result<Payload<DynamicImage>, NodeError> {
+pub(super) fn run_morph_diff(a: &Compute<DynamicImage>, b: &Compute<DynamicImage>, ctx: &ShaderContext) -> Result<Compute<DynamicImage>, NodeError> {
     let (width, height) = a.dimensions();
     if (width, height) != b.dimensions() {
         return Err(NodeError::InvalidInput("morph diff: size mismatch".into()));
@@ -72,15 +72,15 @@ pub(super) fn run_morph_diff(a: &Payload<DynamicImage>, b: &Payload<DynamicImage
 }
 
 #[cfg(feature = "gpu")]
-pub(super) fn cpu_convolution_from_payload(frame: &Payload<DynamicImage>, kernel: [f32; 9], factor: f32, bias: f32, label: &str, ctx: &ShaderContext) -> Result<Payload<DynamicImage>, NodeError> {
+pub(super) fn cpu_convolution_from_payload(frame: &Compute<DynamicImage>, kernel: [f32; 9], factor: f32, bias: f32, label: &str, ctx: &ShaderContext) -> Result<Compute<DynamicImage>, NodeError> {
     let (bytes, w, h) = frame.to_rgba_bytes(ctx.gpu.as_ref()).map_err(|e| NodeError::Handler(format!("{label}: {e}")))?;
     let rgba = RgbaImage::from_raw(w, h, bytes).ok_or_else(|| NodeError::Handler(format!("{label}: invalid image dimensions")))?;
     let gray = DynamicImage::ImageRgba8(rgba).to_luma8();
-    Ok(Payload::Cpu(DynamicImage::ImageLuma8(convolve_gray(&gray, kernel, factor, bias))))
+    Ok(Compute::Cpu(DynamicImage::ImageLuma8(convolve_gray(&gray, kernel, factor, bias))))
 }
 
 #[cfg(feature = "gpu")]
-pub(super) fn dispatch_convolution(frame: &Payload<DynamicImage>, kernel: [f32; 9], factor: f32, bias: f32, mode: ExecMode, ctx: &ShaderContext) -> Result<Payload<DynamicImage>, NodeError> {
+pub(super) fn dispatch_convolution(frame: &Compute<DynamicImage>, kernel: [f32; 9], factor: f32, bias: f32, mode: ExecMode, ctx: &ShaderContext) -> Result<Compute<DynamicImage>, NodeError> {
     let cpu_fallback = || cpu_convolution_from_payload(frame, kernel, factor, bias, "convolution", ctx);
     let want_gpu = matches!(mode, ExecMode::Gpu | ExecMode::Auto) && ctx.gpu.is_some();
     if want_gpu {

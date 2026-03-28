@@ -1,20 +1,18 @@
 use daedalus::data::{model::TypeExpr, typing};
+#[cfg(feature = "gpu")]
+use daedalus::gpu::{Compute, DataCell, GpuError};
 use daedalus::registry::convert::ConverterBuilder;
-use daedalus::runtime::EdgePayload;
+use daedalus::runtime::RuntimeValue;
 use daedalus::runtime::plugins::RegistryPluginExt;
 use daedalus::{Plugin, PluginRegistry};
-use image::{DynamicImage, GenericImageView, GrayAlphaImage, GrayImage, RgbImage, RgbaImage};
+use image::{DynamicImage, GrayAlphaImage, GrayImage, RgbImage, RgbaImage};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, OnceLock};
 
 use crate::{Point, modules};
 
 #[cfg(feature = "gpu")]
-use daedalus::gpu::ErasedPayload;
-#[cfg(feature = "gpu")]
-use daedalus::gpu::GpuError;
-#[cfg(feature = "gpu")]
-pub type ImagePayload = daedalus::gpu::Payload<DynamicImage>;
+pub type ImagePayload = Compute<DynamicImage>;
 #[cfg(not(feature = "gpu"))]
 pub type ImagePayload = DynamicImage;
 
@@ -27,12 +25,12 @@ pub trait ImagePayloadExt {
 impl ImagePayloadExt for ImagePayload {
     fn to_rgba_bytes(&self, gpu: Option<&daedalus::gpu::GpuContextHandle>) -> Result<(Vec<u8>, u32, u32), GpuError> {
         match self {
-            daedalus::gpu::Payload::Cpu(img) => {
+            Compute::Cpu(img) => {
                 let rgba = img.to_rgba8();
                 let (w, h) = rgba.dimensions();
                 Ok((rgba.into_raw(), w, h))
             }
-            daedalus::gpu::Payload::Gpu(handle) => {
+            Compute::Gpu(handle) => {
                 let ctx = gpu.ok_or(GpuError::Unsupported)?;
                 let bytes = ctx.read_texture(handle)?;
                 Ok((bytes, handle.width, handle.height))
@@ -135,7 +133,6 @@ impl Plugin for CvPlugin {
         let img_dynamic_opt = TypeExpr::Optional(Box::new(img_dynamic.clone()));
 
         typing::register_type::<image::GrayImage>(img_gray.clone());
-        typing::register_type::<crate::modules::image::luma::PooledGrayImage>(img_gray.clone());
         typing::register_type::<image::GrayAlphaImage>(img_graya.clone());
         typing::register_type::<image::RgbImage>(img_rgb.clone());
         typing::register_type::<image::RgbaImage>(img_rgba.clone());
@@ -155,25 +152,14 @@ impl Plugin for CvPlugin {
         // Optional image ports should accept their non-optional counterparts directly.
         registry.register_type_compatibility(img_dynamic.clone(), img_dynamic_opt);
         registry.register_type_compatibility(img_gray.clone(), img_gray_opt);
-        typing::register_type::<daedalus::gpu::Payload<image::DynamicImage>>(TypeExpr::opaque("image:dynamic"));
-        typing::register_type::<daedalus::gpu::Payload<image::GrayImage>>(TypeExpr::opaque("image:gray8"));
+        typing::register_type::<daedalus::gpu::Compute<image::DynamicImage>>(TypeExpr::opaque("image:dynamic"));
+        typing::register_type::<daedalus::gpu::Compute<image::GrayImage>>(TypeExpr::opaque("image:gray8"));
 
         // Runtime CPU conversions between image flavors. These are intentionally registered in the
         // conversion registry (not exposed as nodes) so graphs can focus on the types they want.
         registry.register_conversion::<DynamicImage, GrayImage>(|img| Some(img.to_luma8()));
-        registry.register_conversion::<DynamicImage, crate::modules::image::luma::PooledGrayImage>(|img| {
-            let (w, h) = img.dimensions();
-            Some(crate::modules::image::luma::crop_luma8_frame(img, 0, 0, w, h))
-        });
-        registry.register_conversion::<DynamicImage, Arc<crate::modules::image::luma::PooledGrayImage>>(|img| {
-            let (w, h) = img.dimensions();
-            Some(Arc::new(crate::modules::image::luma::crop_luma8_frame(img, 0, 0, w, h)))
-        });
         registry.register_conversion::<DynamicImage, Option<DynamicImage>>(|img| Some(Some(img.clone())));
         registry.register_conversion::<GrayImage, DynamicImage>(|img| Some(DynamicImage::ImageLuma8(img.clone())));
-        registry.register_conversion::<crate::modules::image::luma::PooledGrayImage, GrayImage>(|img| Some(img.as_ref().clone()));
-        registry.register_conversion::<crate::modules::image::luma::PooledGrayImage, Arc<crate::modules::image::luma::PooledGrayImage>>(|img| Some(Arc::new(img.clone())));
-        registry.register_conversion::<crate::modules::image::luma::PooledGrayImage, DynamicImage>(|img| Some(DynamicImage::ImageLuma8(img.as_ref().clone())));
         registry.register_conversion::<GrayAlphaImage, DynamicImage>(|img| Some(DynamicImage::ImageLumaA8(img.clone())));
         registry.register_conversion::<RgbImage, DynamicImage>(|img| Some(DynamicImage::ImageRgb8(img.clone())));
         registry.register_conversion::<RgbaImage, DynamicImage>(|img| Some(DynamicImage::ImageRgba8(img.clone())));
@@ -191,30 +177,28 @@ impl Plugin for CvPlugin {
 
         #[cfg(feature = "gpu")]
         {
-            registry.register_output_mover::<DynamicImage, _>(|img| EdgePayload::Payload(ErasedPayload::from_cpu::<DynamicImage>(img)));
-            registry.register_output_mover::<GrayImage, _>(|img| EdgePayload::Payload(ErasedPayload::from_cpu::<GrayImage>(img)));
-            registry.register_output_mover::<crate::modules::image::luma::PooledGrayImage, _>(|img| EdgePayload::Any(Arc::new(Arc::new(img))));
-            registry.register_output_mover::<GrayAlphaImage, _>(|img| EdgePayload::Payload(ErasedPayload::from_cpu::<DynamicImage>(DynamicImage::ImageLumaA8(img))));
-            registry.register_output_mover::<RgbImage, _>(|img| EdgePayload::Payload(ErasedPayload::from_cpu::<RgbImage>(img)));
-            registry.register_output_mover::<RgbaImage, _>(|img| EdgePayload::Payload(ErasedPayload::from_cpu::<RgbaImage>(img)));
+            registry.register_output_mover::<DynamicImage, _>(|img| RuntimeValue::Data(DataCell::from_cpu::<DynamicImage>(img)));
+            registry.register_output_mover::<GrayImage, _>(|img| RuntimeValue::Data(DataCell::from_cpu::<GrayImage>(img)));
+            registry.register_output_mover::<GrayAlphaImage, _>(|img| RuntimeValue::Data(DataCell::from_cpu::<DynamicImage>(DynamicImage::ImageLumaA8(img))));
+            registry.register_output_mover::<RgbImage, _>(|img| RuntimeValue::Data(DataCell::from_cpu::<RgbImage>(img)));
+            registry.register_output_mover::<RgbaImage, _>(|img| RuntimeValue::Data(DataCell::from_cpu::<RgbaImage>(img)));
         }
         #[cfg(not(feature = "gpu"))]
         {
-            registry.register_output_mover::<DynamicImage, _>(|img| EdgePayload::Any(Arc::new(img)));
-            registry.register_output_mover::<GrayImage, _>(|img| EdgePayload::Any(Arc::new(img)));
-            registry.register_output_mover::<crate::modules::image::luma::PooledGrayImage, _>(|img| EdgePayload::Any(Arc::new(Arc::new(img))));
+            registry.register_output_mover::<DynamicImage, _>(|img| RuntimeValue::Any(Arc::new(img)));
+            registry.register_output_mover::<GrayImage, _>(|img| RuntimeValue::Any(Arc::new(img)));
             registry.register_output_mover::<GrayAlphaImage, _>(|img| {
                 let dyn_img = DynamicImage::ImageLumaA8(img);
-                EdgePayload::Any(Arc::new(dyn_img))
+                RuntimeValue::Any(Arc::new(dyn_img))
             });
-            registry.register_output_mover::<RgbImage, _>(|img| EdgePayload::Any(Arc::new(img)));
-            registry.register_output_mover::<RgbaImage, _>(|img| EdgePayload::Any(Arc::new(img)));
+            registry.register_output_mover::<RgbImage, _>(|img| RuntimeValue::Any(Arc::new(img)));
+            registry.register_output_mover::<RgbaImage, _>(|img| RuntimeValue::Any(Arc::new(img)));
         }
         // Typed CV containers are frequently fanned out to multiple nodes and host outputs.
         // Wrap them in a shared Arc carrier so downstream readers can borrow without cloning
         // the full vector payload on every frame.
-        registry.register_output_mover::<Vec<crate::modules::aruco::ArucoDetection2D>, _>(|detections| EdgePayload::Any(Arc::new(Arc::new(detections))));
-        registry.register_output_mover::<Vec<[Point; 4]>, _>(|quads| EdgePayload::Any(Arc::new(Arc::new(quads))));
+        registry.register_output_mover::<Vec<crate::modules::aruco::ArucoDetection2D>, _>(|detections| RuntimeValue::Any(Arc::new(Arc::new(detections))));
+        registry.register_output_mover::<Vec<[Point; 4]>, _>(|quads| RuntimeValue::Any(Arc::new(Arc::new(quads))));
 
         // Use bare values for unit plugins; use `new()` for macro-generated plugins with fields.
         let image = modules::image::nodes::CvImagePlugin;
@@ -258,19 +242,13 @@ pub fn plugin() -> CvPlugin {
 fn register_payload_size_inspectors() {
     static REGISTERED: OnceLock<()> = OnceLock::new();
     REGISTERED.get_or_init(|| {
-        daedalus::runtime::register_payload_size_inspector(cv_payload_size_bytes);
+        daedalus::runtime::register_runtime_data_size_inspector(cv_payload_size_bytes);
     });
 }
 
 fn cv_payload_size_bytes(any: &(dyn std::any::Any + Send + Sync)) -> Option<u64> {
     if let Some(image) = any.downcast_ref::<crate::BinaryImage>() {
         return Some(binary_image_size_bytes(image));
-    }
-    if let Some(image) = any.downcast_ref::<crate::modules::image::luma::PooledGrayImage>() {
-        return Some(gray_image_size_bytes(image.as_ref()));
-    }
-    if let Some(image) = any.downcast_ref::<Arc<crate::modules::image::luma::PooledGrayImage>>() {
-        return Some(gray_image_size_bytes(image.as_ref().as_ref()));
     }
     if let Some(quads) = any.downcast_ref::<Vec<[Point; 4]>>() {
         return Some(vec_inline_bytes(quads) as u64);
@@ -303,10 +281,6 @@ fn vec_inline_bytes<T>(values: &Vec<T>) -> usize {
 fn binary_image_size_bytes(image: &crate::BinaryImage) -> u64 {
     let raw = serde_json::to_vec(image).map(|bytes| bytes.len() as u64).unwrap_or(0);
     raw.max(std::mem::size_of::<crate::BinaryImage>() as u64)
-}
-
-fn gray_image_size_bytes(image: &GrayImage) -> u64 {
-    std::mem::size_of::<GrayImage>() as u64 + image.as_raw().capacity() as u64
 }
 
 fn contours_size_bytes(contours: &Vec<Vec<Point>>) -> u64 {

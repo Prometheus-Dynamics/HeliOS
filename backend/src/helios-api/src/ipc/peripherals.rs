@@ -111,9 +111,11 @@ struct IdleSession {
     last_used: Instant,
 }
 
-// Keep idle sessions short so command clients do not sit on a hot sensor stream long enough
-// to overflow the server-side broadcast ring.
-const DEFAULT_SESSION_IDLE_MS: u64 = 500;
+// Command-style peripherals IPC calls (snapshot, fan status, inventory) do not need a live
+// broadcast subscription between requests. Reusing idle sessions keeps the server-side broadcast
+// receiver attached after the command completes, which turns periodic API polling into an
+// effectively always-subscribed sensor stream.
+const DEFAULT_SESSION_IDLE_MS: u64 = 0;
 const MAX_SESSION_IDLE_MS: u64 = 2_000;
 const MAX_IDLE_SESSIONS: usize = 4;
 

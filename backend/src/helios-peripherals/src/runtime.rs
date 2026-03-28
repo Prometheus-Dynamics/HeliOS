@@ -187,6 +187,13 @@ impl SensorsRuntime {
         let shutdown_reason: &'static str = loop {
             tokio::select! {
                 reason = &mut shutdown_future => break reason?,
+                Some(result) = tasks.join_next(), if !tasks.is_empty() => {
+                    match result {
+                        Ok(Ok(())) => {}
+                        Ok(Err(err)) => warn!(%err, "sensors client session ended with error"),
+                        Err(join_err) => warn!(%join_err, "sensors client task panicked"),
+                    }
+                }
                 accept = listener.accept() => {
                     match accept {
                         Ok((stream, _addr)) => {

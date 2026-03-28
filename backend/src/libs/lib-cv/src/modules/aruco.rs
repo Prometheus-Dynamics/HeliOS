@@ -213,6 +213,22 @@ pub mod nodes;
 pub use tag::ArucoTagFamilyKind;
 pub use tag::dictionary::{ArucoDictionary, ArucoDictionaryKind, aruco_dictionary_from_name};
 
+#[doc(hidden)]
+pub(crate) fn compact_runtime_scratch_after_frame() {
+    detect::compact_detect_scratch_after_frame();
+    detect::compact_decode_scratch_after_frame();
+    pose::compact_pose_scratch_after_frame();
+    tag::compact_runtime_scratch_after_frame();
+    #[cfg(feature = "engine")]
+    nodes::compact_runtime_scratch_after_frame();
+}
+
+#[doc(hidden)]
+pub(crate) fn release_runtime_scratch_on_idle() {
+    compact_runtime_scratch_after_frame();
+    adaptive::release_runtime_scratch_on_idle();
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ArucoMaskMode {

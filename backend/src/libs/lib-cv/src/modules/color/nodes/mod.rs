@@ -15,7 +15,7 @@ use crate::plugin::ExecMode;
 
 #[cfg(feature = "gpu")]
 use bytemuck::{Pod, Zeroable};
-use daedalus::gpu::Payload;
+use daedalus::gpu::Compute;
 #[cfg(feature = "gpu")]
 use daedalus::gpu::shader::{ShaderContext, TextureOut, Uniform, UniformBytes};
 #[cfg(feature = "gpu")]
@@ -23,10 +23,10 @@ use daedalus::macros::GpuBindings;
 use daedalus::runtime::state::ExecutionContext;
 
 #[cfg(not(feature = "gpu"))]
-fn expect_cpu(frame: Payload<DynamicImage>, label: &str, _exec_ctx: Option<&ExecutionContext>) -> Result<DynamicImage, NodeError> {
+fn expect_cpu(frame: Compute<DynamicImage>, label: &str, _exec_ctx: Option<&ExecutionContext>) -> Result<DynamicImage, NodeError> {
     match frame {
-        Payload::Cpu(img) => Ok(img),
-        Payload::Gpu(_) => Err(NodeError::Handler(format!("{label}: gpu payload unsupported (insert cpu convert)"))),
+        Compute::Cpu(img) => Ok(img),
+        Compute::Gpu(_) => Err(NodeError::Handler(format!("{label}: gpu payload unsupported (insert cpu convert)"))),
     }
 }
 
@@ -43,7 +43,7 @@ struct ColorParam {
 #[gpu(spec(src = "src/gpu/shaders/color_ops.wgsl", entry = "brightness_main"))]
 struct BrightnessShaderBindings<'a> {
     #[gpu(binding = 0, texture2d(format = "rgba8unorm"))]
-    input: &'a Payload<DynamicImage>,
+    input: &'a Compute<DynamicImage>,
     #[gpu(binding = 1, texture2d(format = "rgba8unorm", write))]
     output: TextureOut,
     #[gpu(binding = 2, uniform)]
@@ -55,7 +55,7 @@ struct BrightnessShaderBindings<'a> {
 #[gpu(spec(src = "src/gpu/shaders/color_ops.wgsl", entry = "contrast_main"))]
 struct ContrastShaderBindings<'a> {
     #[gpu(binding = 0, texture2d(format = "rgba8unorm"))]
-    input: &'a Payload<DynamicImage>,
+    input: &'a Compute<DynamicImage>,
     #[gpu(binding = 1, texture2d(format = "rgba8unorm", write))]
     output: TextureOut,
     #[gpu(binding = 2, uniform)]
@@ -67,7 +67,7 @@ struct ContrastShaderBindings<'a> {
 #[gpu(spec(src = "src/gpu/shaders/color_ops.wgsl", entry = "saturation_main"))]
 struct SaturationShaderBindings<'a> {
     #[gpu(binding = 0, texture2d(format = "rgba8unorm"))]
-    input: &'a Payload<DynamicImage>,
+    input: &'a Compute<DynamicImage>,
     #[gpu(binding = 1, texture2d(format = "rgba8unorm", write))]
     output: TextureOut,
     #[gpu(binding = 2, uniform)]
@@ -79,7 +79,7 @@ struct SaturationShaderBindings<'a> {
 #[gpu(spec(src = "src/gpu/shaders/color_ops.wgsl", entry = "grayscale_main"))]
 struct GrayscaleShaderBindings<'a> {
     #[gpu(binding = 0, texture2d(format = "rgba8unorm"))]
-    input: &'a Payload<DynamicImage>,
+    input: &'a Compute<DynamicImage>,
     #[gpu(binding = 1, texture2d(format = "rgba8unorm", write))]
     output: TextureOut,
     #[gpu(binding = 2, uniform)]
@@ -91,7 +91,7 @@ struct GrayscaleShaderBindings<'a> {
 #[gpu(spec(src = "src/gpu/shaders/color_ops.wgsl", entry = "hue_main"))]
 struct HueShaderBindings<'a> {
     #[gpu(binding = 0, texture2d(format = "rgba8unorm"))]
-    input: &'a Payload<DynamicImage>,
+    input: &'a Compute<DynamicImage>,
     #[gpu(binding = 1, texture2d(format = "rgba8unorm", write))]
     output: TextureOut,
     #[gpu(binding = 2, uniform)]
@@ -124,7 +124,7 @@ struct RgbRange {
 #[gpu(spec(src = "src/gpu/shaders/rgb_range.wgsl", entry = "rgb_mask_main"))]
 struct RgbRangeShaderBindings<'a> {
     #[gpu(binding = 0, texture2d(format = "rgba8unorm"))]
-    input: &'a Payload<DynamicImage>,
+    input: &'a Compute<DynamicImage>,
     #[gpu(binding = 1, texture2d(format = "rgba8unorm", write))]
     output: TextureOut,
     #[gpu(binding = 2, storage(read))]
@@ -151,7 +151,7 @@ struct HsvRange {
 #[gpu(spec(src = "src/gpu/shaders/hsv_range.wgsl", entry = "hsv_mask_main"))]
 struct HsvRangeShaderBindings<'a> {
     #[gpu(binding = 0, texture2d(format = "rgba8unorm"))]
-    input: &'a Payload<DynamicImage>,
+    input: &'a Compute<DynamicImage>,
     #[gpu(binding = 1, texture2d(format = "rgba8unorm", write))]
     output: TextureOut,
     #[gpu(binding = 2, storage(read))]
@@ -165,9 +165,9 @@ struct HsvRangeShaderBindings<'a> {
 #[gpu(spec(src = "src/gpu/shaders/apply_mask.wgsl", entry = "apply_mask_main"))]
 struct ApplyMaskShaderBindings<'a> {
     #[gpu(binding = 0, texture2d(format = "rgba8unorm"))]
-    frame: &'a Payload<DynamicImage>,
+    frame: &'a Compute<DynamicImage>,
     #[gpu(binding = 1, texture2d(format = "rgba8unorm"))]
-    mask: &'a Payload<DynamicImage>,
+    mask: &'a Compute<DynamicImage>,
     #[gpu(binding = 2, texture2d(format = "rgba8unorm", write))]
     output: TextureOut,
 }

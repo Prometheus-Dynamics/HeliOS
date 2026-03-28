@@ -331,11 +331,11 @@ struct ArucoOverlayDetectionsConfig {
     outputs(port(name = "frame", ty = TypeExpr::opaque("image:dynamic")))
 )]
 fn cv_aruco_overlay(
-    frame: Payload<DynamicImage>,
+    frame: Compute<DynamicImage>,
     detections: Option<std::sync::Arc<Vec<ArucoDetection2D>>>,
     cfg: ArucoOverlayDetectionsConfig,
     exec_ctx: &ExecutionContext,
-) -> Result<Payload<DynamicImage>, NodeError> {
+) -> Result<Compute<DynamicImage>, NodeError> {
     let thickness = u32::try_from(cfg.thickness).unwrap_or(3).clamp(1, 32);
     let detections = detections.as_deref().map(Vec::as_slice).unwrap_or(&[]);
     if (!cfg.draw_boxes && !cfg.draw_corners && !cfg.draw_ids && !cfg.draw_hud && !cfg.draw_crosshair) || (detections.is_empty() && !cfg.draw_hud) {
@@ -402,7 +402,7 @@ fn cv_aruco_overlay(
         overlay_tags_count(&mut out, detections.len());
     }
 
-    Ok(Payload::Cpu(out))
+    Ok(Compute::Cpu(out))
 }
 
 #[node(
@@ -415,7 +415,7 @@ fn cv_aruco_overlay(
     ),
     outputs(port(name = "frame", ty = TypeExpr::opaque("image:dynamic")))
 )]
-fn cv_aruco_overlay_quads(frame: Payload<DynamicImage>, quads: &Vec<Quad>, thickness: i64, max_quads: i64, exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+fn cv_aruco_overlay_quads(frame: Compute<DynamicImage>, quads: &Vec<Quad>, thickness: i64, max_quads: i64, exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     let thickness = u32::try_from(thickness).unwrap_or(2).clamp(1, 32);
     let max_quads = usize::try_from(max_quads).unwrap_or(128).clamp(1, 4096);
     let mut out = expect_cpu_frame(frame, "overlay_quads", Some(exec_ctx))?;
@@ -430,7 +430,7 @@ fn cv_aruco_overlay_quads(frame: Payload<DynamicImage>, quads: &Vec<Quad>, thick
         draw::contour::overlay_contour_points(&mut out, &bbox, thickness, Rgba([255, 0, 255, 255]));
     }
 
-    Ok(Payload::Cpu(out))
+    Ok(Compute::Cpu(out))
 }
 
 #[node(
@@ -441,12 +441,12 @@ fn cv_aruco_overlay_quads(frame: Payload<DynamicImage>, quads: &Vec<Quad>, thick
     ),
     outputs(port(name = "frame", ty = TypeExpr::opaque("image:dynamic")))
 )]
-fn cv_aruco_overlay_quads_count(frame: Payload<DynamicImage>, quads: &Vec<Quad>, exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+fn cv_aruco_overlay_quads_count(frame: Compute<DynamicImage>, quads: &Vec<Quad>, exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     let mut out = expect_cpu_frame(frame, "overlay_quads_count", Some(exec_ctx))?;
 
     overlay_count_label(&mut out, "QUADS", quads.len());
 
-    Ok(Payload::Cpu(out))
+    Ok(Compute::Cpu(out))
 }
 
 #[node(
@@ -457,16 +457,16 @@ fn cv_aruco_overlay_quads_count(frame: Payload<DynamicImage>, quads: &Vec<Quad>,
     ),
     outputs(port(name = "frame", ty = TypeExpr::opaque("image:dynamic")))
 )]
-fn cv_overlay_tags_count(frame: Payload<DynamicImage>, detections: &Vec<ArucoDetection2D>, exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+fn cv_overlay_tags_count(frame: Compute<DynamicImage>, detections: &Vec<ArucoDetection2D>, exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     let _ = exec_ctx;
     match frame {
-        Payload::Cpu(mut out) => {
+        Compute::Cpu(mut out) => {
             if !detections.is_empty() {
                 overlay_tags_count(&mut out, detections.len());
             }
-            Ok(Payload::Cpu(out))
+            Ok(Compute::Cpu(out))
         }
-        Payload::Gpu(handle) => Ok(Payload::Gpu(handle)),
+        Compute::Gpu(handle) => Ok(Compute::Gpu(handle)),
     }
 }
 
@@ -475,7 +475,7 @@ fn cv_overlay_tags_count(frame: Payload<DynamicImage>, detections: &Vec<ArucoDet
         inputs("frame", config = ArucoTagOverlayConfig),
         outputs(port(name = "frame", ty = TypeExpr::opaque("image:dynamic")))
 		    )]
-fn cv_detect_aruco_overlay(frame: Payload<DynamicImage>, cfg: ArucoTagOverlayConfig, exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+fn cv_detect_aruco_overlay(frame: Compute<DynamicImage>, cfg: ArucoTagOverlayConfig, exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     static CALLS: AtomicU64 = AtomicU64::new(0);
     let call_idx = CALLS.fetch_add(1, Ordering::Relaxed);
     if call_idx < 3 {
@@ -542,7 +542,7 @@ fn cv_detect_aruco_overlay(frame: Payload<DynamicImage>, cfg: ArucoTagOverlayCon
             if cfg.draw_hud {
                 overlay_tags_count(&mut out, markers.len());
             }
-            return Ok(Payload::Cpu(out));
+            return Ok(Compute::Cpu(out));
         }
     }
 
@@ -582,7 +582,7 @@ fn cv_detect_aruco_overlay(frame: Payload<DynamicImage>, cfg: ArucoTagOverlayCon
         return Err(NodeError::InvalidInput("unknown tag dictionary".into()));
     }
     if detect_cfg.min_area > (pw as f32 * ph as f32) {
-        return Ok(Payload::Cpu(out));
+        return Ok(Compute::Cpu(out));
     }
 
     #[derive(Default, Debug, Clone, Copy)]
@@ -769,7 +769,7 @@ fn cv_detect_aruco_overlay(frame: Payload<DynamicImage>, cfg: ArucoTagOverlayCon
         );
     }
 
-    Ok(Payload::Cpu(out))
+    Ok(Compute::Cpu(out))
 }
 
 fn build_detector_config(epsilon: f64, min_area: f32, max_area: f32, min_angle_deg: f64, max_angle_deg: f64, max_side_cv: f32, downscale: u32) -> ArucoTagDetectorConfig {
@@ -891,7 +891,7 @@ fn decode_detections_from_contour_points(
 
 #[allow(clippy::too_many_arguments)]
 fn detect_detections_from_shared_contours_impl(
-    frame: Payload<DynamicImage>,
+    frame: Compute<DynamicImage>,
     contours: &Vec<Vec<Point>>,
     dictionary: ArucoDictionaryKind,
     max_hamming: i64,
@@ -1015,7 +1015,7 @@ fn detect_detections_from_shared_contours_impl(
         inputs("frame", config = ArucoTagOverlayConfig),
         outputs(port(name = "detections", source = "ArucoDetections2D", ty = crate::daedalus_types::aruco_detections_2d()))
                     )]
-fn cv_detect_aruco_detections(frame: Payload<DynamicImage>, cfg: ArucoTagOverlayConfig, exec_ctx: &ExecutionContext) -> Result<Vec<ArucoDetection2D>, NodeError> {
+fn cv_detect_aruco_detections(frame: Compute<DynamicImage>, cfg: ArucoTagOverlayConfig, exec_ctx: &ExecutionContext) -> Result<Vec<ArucoDetection2D>, NodeError> {
     let downscale = u32::try_from(cfg.downscale).unwrap_or(1).max(1);
     let sample_scale = u32::try_from(cfg.sample_scale).unwrap_or(1).max(1);
     let threshold_window = u32::try_from(cfg.threshold_window).unwrap_or(31).max(3);
@@ -1141,7 +1141,7 @@ fn cv_detect_aruco_detections(frame: Payload<DynamicImage>, cfg: ArucoTagOverlay
 )]
 #[allow(clippy::too_many_arguments)]
 fn cv_detect_aruco_detections_from_contours(
-    frame: Payload<DynamicImage>,
+    frame: Compute<DynamicImage>,
     contours: &Vec<Vec<Point>>,
     dictionary: ArucoDictionaryKind,
     max_hamming: i64,

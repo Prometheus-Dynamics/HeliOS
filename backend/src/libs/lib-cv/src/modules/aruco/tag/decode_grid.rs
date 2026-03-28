@@ -18,6 +18,28 @@ thread_local! {
     static ARUCO_TAG_SCRATCH: RefCell<ArucoTagScratch> = RefCell::new(ArucoTagScratch::default());
 }
 
+const TAG_SCRATCH_FLAT_RETAIN_CAP: usize = 256;
+const TAG_SCRATCH_BORDER_RETAIN_CAP: usize = 128;
+const TAG_SCRATCH_INNER_RETAIN_CAP: usize = 128;
+const TAG_SCRATCH_CANDIDATE_RETAIN_CAP: usize = 128;
+
+fn trim_retained_vec<T>(vec: &mut Vec<T>, retain_cap: usize) {
+    vec.clear();
+    if vec.capacity() > retain_cap {
+        vec.shrink_to(retain_cap);
+    }
+}
+
+pub(super) fn compact_tag_scratch_after_frame() {
+    ARUCO_TAG_SCRATCH.with(|scratch| {
+        let mut scratch = scratch.borrow_mut();
+        trim_retained_vec(&mut scratch.flat, TAG_SCRATCH_FLAT_RETAIN_CAP);
+        trim_retained_vec(&mut scratch.border_vals, TAG_SCRATCH_BORDER_RETAIN_CAP);
+        trim_retained_vec(&mut scratch.inner_vals, TAG_SCRATCH_INNER_RETAIN_CAP);
+        trim_retained_vec(&mut scratch.candidates, TAG_SCRATCH_CANDIDATE_RETAIN_CAP);
+    });
+}
+
 pub(super) fn hamming_distance(a: u64, b: u64) -> u32 {
     (a ^ b).count_ones()
 }

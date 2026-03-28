@@ -839,7 +839,7 @@
             }
           ]
         ],
-        "id": "cv:image:clahe",
+        "id": "cv:aruco:clahe_gray",
         "inputs": [
           "mask",
           "tile_size",
@@ -957,7 +957,7 @@
             }
           ]
         ],
-        "id": "cv:image:adaptive_threshold",
+        "id": "cv:aruco:adaptive_threshold_gray",
         "inputs": [
           "frame",
           "window",
@@ -2368,7 +2368,7 @@
           },
           "host_bridge_inputs": {
             "type": "String",
-            "value": "overlay:image:dynamic,detections:list<cv:aruco_detection_2d>,clahe:image:dynamic,adaptive:image:dynamic,target_detections:list<cv:aruco_detection_2d>,tv:float,tid:float,tx:float,ty:float,ta:float,distance_px:float,target_cx:float,target_cy:float,thor:float,tvert:float,tshort:float,tlong:float"
+            "value": "overlay:image:dynamic,detections:list<cv:aruco_detection_2d>,clahe:image:gray8,adaptive:image:gray8,target_detections:list<cv:aruco_detection_2d>,tv:float,tid:float,tx:float,ty:float,ta:float,distance_px:float,target_cx:float,target_cy:float,thor:float,tvert:float,tshort:float,tlong:float"
           }
         },
         "outputs": []
@@ -2377,7 +2377,7 @@
         "bundle": null,
         "compute": "CpuOnly",
         "const_inputs": [],
-        "id": "cv:image:crop_roi",
+        "id": "cv:image:crop_roi_gray",
         "inputs": [
           "frame",
           "roi_x",

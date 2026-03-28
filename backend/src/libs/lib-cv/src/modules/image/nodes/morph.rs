@@ -14,7 +14,7 @@ use super::*;
     not(feature = "gpu"),
     node(id = "erode", compute(ComputeAffinity::GpuPreferred), inputs("mask", port(name = "norm", default = "l1"), port(name = "k", meta(ui_min = 1, ui_max = 31, ui_step = 2))), outputs("mask"))
 )]
-fn cv_erode(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+fn cv_erode(mask: Compute<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     #[cfg(feature = "gpu")]
     {
         return run_morph(&mask, norm, k, 0, &ctx);
@@ -24,7 +24,7 @@ fn cv_erode(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature 
         let k = k.max(1).min(u8::MAX as u32) as u8;
         let mask = expect_cpu(mask, "erode", Some(_exec_ctx))?;
         let gray = mask.to_luma8();
-        Ok(Payload::Cpu(DynamicImage::ImageLuma8(morph_ops::erode(&gray, norm.to_imageproc(), k))))
+        Ok(Compute::Cpu(DynamicImage::ImageLuma8(morph_ops::erode(&gray, norm.to_imageproc(), k))))
     }
 }
 
@@ -42,7 +42,7 @@ fn cv_erode(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature 
     not(feature = "gpu"),
     node(id = "dilate", compute(ComputeAffinity::GpuPreferred), inputs("mask", port(name = "norm", default = "l1"), port(name = "k", meta(ui_min = 1, ui_max = 31, ui_step = 2))), outputs("mask"))
 )]
-fn cv_dilate(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+fn cv_dilate(mask: Compute<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     #[cfg(feature = "gpu")]
     {
         return run_morph(&mask, norm, k, 1, &ctx);
@@ -52,7 +52,7 @@ fn cv_dilate(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature
         let k = k.max(1).min(u8::MAX as u32) as u8;
         let mask = expect_cpu(mask, "dilate", Some(_exec_ctx))?;
         let gray = mask.to_luma8();
-        Ok(Payload::Cpu(DynamicImage::ImageLuma8(morph_ops::dilate(&gray, norm.to_imageproc(), k))))
+        Ok(Compute::Cpu(DynamicImage::ImageLuma8(morph_ops::dilate(&gray, norm.to_imageproc(), k))))
     }
 }
 
@@ -70,7 +70,7 @@ fn cv_dilate(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature
     not(feature = "gpu"),
     node(id = "open", compute(ComputeAffinity::GpuPreferred), inputs("mask", port(name = "norm", default = "l1"), port(name = "k", meta(ui_min = 1, ui_max = 31, ui_step = 2))), outputs("mask"))
 )]
-fn cv_open(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+fn cv_open(mask: Compute<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     if k == 0 || payload_is_empty(&mask) {
         return Ok(mask);
     }
@@ -84,7 +84,7 @@ fn cv_open(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature =
         let k = k.max(1).min(u8::MAX as u32) as u8;
         let mask = expect_cpu(mask, "open", Some(_exec_ctx))?;
         let gray = mask.to_luma8();
-        Ok(Payload::Cpu(DynamicImage::ImageLuma8(morph_ops::open(&gray, norm.to_imageproc(), k))))
+        Ok(Compute::Cpu(DynamicImage::ImageLuma8(morph_ops::open(&gray, norm.to_imageproc(), k))))
     }
 }
 
@@ -102,7 +102,7 @@ fn cv_open(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature =
     not(feature = "gpu"),
     node(id = "close", compute(ComputeAffinity::GpuPreferred), inputs("mask", port(name = "norm", default = "l1"), port(name = "k", meta(ui_min = 1, ui_max = 31, ui_step = 2))), outputs("mask"))
 )]
-fn cv_close(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+fn cv_close(mask: Compute<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     if k == 0 || payload_is_empty(&mask) {
         return Ok(mask);
     }
@@ -116,7 +116,7 @@ fn cv_close(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature 
         let k = k.max(1).min(u8::MAX as u32) as u8;
         let mask = expect_cpu(mask, "close", Some(_exec_ctx))?;
         let gray = mask.to_luma8();
-        Ok(Payload::Cpu(DynamicImage::ImageLuma8(morph_ops::close(&gray, norm.to_imageproc(), k))))
+        Ok(Compute::Cpu(DynamicImage::ImageLuma8(morph_ops::close(&gray, norm.to_imageproc(), k))))
     }
 }
 
@@ -134,7 +134,7 @@ fn cv_close(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature 
     not(feature = "gpu"),
     node(id = "tophat", compute(ComputeAffinity::GpuPreferred), inputs("mask", port(name = "norm", default = "l1"), port(name = "k", meta(ui_min = 1, ui_max = 31, ui_step = 2))), outputs("mask"))
 )]
-fn cv_tophat(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+fn cv_tophat(mask: Compute<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     if k == 0 || payload_is_empty(&mask) {
         return Ok(mask);
     }
@@ -152,7 +152,7 @@ fn cv_tophat(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature
         let mask = expect_cpu(mask, "tophat", Some(_exec_ctx))?;
         let gray = mask.to_luma8();
         let out = if matches!(norm, MorphNorm::L1) { morph_ops::tophat_simd(&gray, norm.to_imageproc(), k) } else { morph_ops::tophat(&gray, norm.to_imageproc(), k) };
-        Ok(Payload::Cpu(DynamicImage::ImageLuma8(out)))
+        Ok(Compute::Cpu(DynamicImage::ImageLuma8(out)))
     }
 }
 
@@ -170,7 +170,7 @@ fn cv_tophat(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature
     not(feature = "gpu"),
     node(id = "blackhat", compute(ComputeAffinity::GpuPreferred), inputs("mask", port(name = "norm", default = "l1"), port(name = "k", meta(ui_min = 1, ui_max = 31, ui_step = 2))), outputs("mask"))
 )]
-fn cv_blackhat(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+fn cv_blackhat(mask: Compute<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     if k == 0 || payload_is_empty(&mask) {
         return Ok(mask);
     }
@@ -188,7 +188,7 @@ fn cv_blackhat(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(featu
         let mask = expect_cpu(mask, "blackhat", Some(_exec_ctx))?;
         let gray = mask.to_luma8();
         let out = if matches!(norm, MorphNorm::L1) { morph_ops::blackhat_simd(&gray, norm.to_imageproc(), k) } else { morph_ops::blackhat(&gray, norm.to_imageproc(), k) };
-        Ok(Payload::Cpu(DynamicImage::ImageLuma8(out)))
+        Ok(Compute::Cpu(DynamicImage::ImageLuma8(out)))
     }
 }
 
@@ -206,7 +206,7 @@ fn cv_blackhat(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(featu
     not(feature = "gpu"),
     node(id = "gradient", compute(ComputeAffinity::GpuPreferred), inputs("mask", port(name = "norm", default = "l1"), port(name = "k", meta(ui_min = 1, ui_max = 31, ui_step = 2))), outputs("mask"))
 )]
-fn cv_gradient(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+fn cv_gradient(mask: Compute<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     if k == 0 || payload_is_empty(&mask) {
         return Ok(mask);
     }
@@ -222,7 +222,7 @@ fn cv_gradient(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(featu
         let mask = expect_cpu(mask, "gradient", Some(_exec_ctx))?;
         let gray = mask.to_luma8();
         let out = if matches!(norm, MorphNorm::L1) { morph_ops::gradient_simd(&gray, norm.to_imageproc(), k) } else { morph_ops::gradient(&gray, norm.to_imageproc(), k) };
-        Ok(Payload::Cpu(DynamicImage::ImageLuma8(out)))
+        Ok(Compute::Cpu(DynamicImage::ImageLuma8(out)))
     }
 }
 
@@ -245,7 +245,7 @@ fn cv_gradient(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(featu
         outputs("mask")
     )
 )]
-fn cv_ingradient(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+fn cv_ingradient(mask: Compute<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     if k == 0 || payload_is_empty(&mask) {
         return Ok(mask);
     }
@@ -259,7 +259,7 @@ fn cv_ingradient(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(fea
         let k = k.max(1).min(u8::MAX as u32) as u8;
         let mask = expect_cpu(mask, "ingradient", Some(_exec_ctx))?;
         let gray = mask.to_luma8();
-        Ok(Payload::Cpu(DynamicImage::ImageLuma8(morph_ops::internal_gradient(&gray, norm.to_imageproc(), k))))
+        Ok(Compute::Cpu(DynamicImage::ImageLuma8(morph_ops::internal_gradient(&gray, norm.to_imageproc(), k))))
     }
 }
 
@@ -282,7 +282,7 @@ fn cv_ingradient(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(fea
         outputs("mask")
     )
 )]
-fn cv_exgradient(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+fn cv_exgradient(mask: Compute<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     if k == 0 || payload_is_empty(&mask) {
         return Ok(mask);
     }
@@ -296,7 +296,7 @@ fn cv_exgradient(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(fea
         let k = k.max(1).min(u8::MAX as u32) as u8;
         let mask = expect_cpu(mask, "exgradient", Some(_exec_ctx))?;
         let gray = mask.to_luma8();
-        Ok(Payload::Cpu(DynamicImage::ImageLuma8(morph_ops::external_gradient(&gray, norm.to_imageproc(), k))))
+        Ok(Compute::Cpu(DynamicImage::ImageLuma8(morph_ops::external_gradient(&gray, norm.to_imageproc(), k))))
     }
 }
 
@@ -314,7 +314,7 @@ fn cv_exgradient(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(fea
     not(feature = "gpu"),
     node(id = "outline", compute(ComputeAffinity::GpuPreferred), inputs("mask", port(name = "norm", default = "l1"), port(name = "k", meta(ui_min = 1, ui_max = 31, ui_step = 2))), outputs("mask"))
 )]
-fn cv_outline(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+fn cv_outline(mask: Compute<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     if k == 0 || payload_is_empty(&mask) {
         return Ok(mask);
     }
@@ -328,7 +328,7 @@ fn cv_outline(mask: Payload<DynamicImage>, norm: MorphNorm, k: u32, #[cfg(featur
         let k = k.max(1).min(u8::MAX as u32) as u8;
         let mask = expect_cpu(mask, "outline", Some(_exec_ctx))?;
         let gray = mask.to_luma8();
-        Ok(Payload::Cpu(DynamicImage::ImageLuma8(morph_ops::outline(&gray, norm.to_imageproc(), k))))
+        Ok(Compute::Cpu(DynamicImage::ImageLuma8(morph_ops::outline(&gray, norm.to_imageproc(), k))))
     }
 }
 
@@ -357,9 +357,9 @@ fn cv_component_features(mask: GrayImage, min_area: u32) -> Result<Vec<Component
     Ok(extract_component_features(&mask, min_area))
 }
 
-fn payload_is_empty(mask: &Payload<DynamicImage>) -> bool {
+fn payload_is_empty(mask: &Compute<DynamicImage>) -> bool {
     match mask {
-        Payload::Cpu(DynamicImage::ImageLuma8(gray)) => gray.as_raw().iter().all(|&v| v == 0),
+        Compute::Cpu(DynamicImage::ImageLuma8(gray)) => gray.as_raw().iter().all(|&v| v == 0),
         _ => false,
     }
 }

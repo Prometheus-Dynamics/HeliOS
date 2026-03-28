@@ -125,8 +125,7 @@ pub(super) fn decode_quad_sampled(
         if total_width == 0 || required == 0 || required > 100 || !cell_size.is_finite() || cell_size <= 0.0 {
             return Err(SampledDecodeError::InvalidInput);
         }
-        let (marker, should_verify) = DECODE_SCRATCH.with(|scratch| {
-            let mut scratch = scratch.try_borrow_mut().map_err(|_| SampledDecodeError::InvalidInput)?;
+        let (marker, should_verify) = with_decode_scratch(|scratch| {
             let in_bounds = projection_unit_in_bounds(inv, gray.width() as i32, gray.height() as i32);
             if config.cell_sample_grid >= 2 {
                 let margin_bits = config.cell_sample_margin.to_bits();

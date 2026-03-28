@@ -94,8 +94,6 @@ impl PipelinesReadModelState {
             let mut cache = registry_cache.write().await;
             if cache.as_ref().is_some_and(|entry| entry.revision == revision) {
                 *cache = None;
-                drop(cache);
-                trim_process_allocator();
             }
         });
     }
@@ -395,11 +393,6 @@ pub(crate) async fn validate_graph_report(state: &AppState, graph: JsonValue, ac
         }
         Err(err) => Err(GraphValidationRequestError::Transport(err)),
     }
-}
-
-fn trim_process_allocator() {
-    // Cache eviction already frees the serialized registry payload and metadata; keep the API path
-    // free of glibc-specific unsafe trimming hooks until we have an audited cross-platform helper.
 }
 
 fn build_cached_registry_payload(snapshot: NodeRegistrySnapshot) -> Result<Arc<CachedRegistryPayload>, serde_json::Error> {

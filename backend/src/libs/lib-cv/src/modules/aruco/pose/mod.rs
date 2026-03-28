@@ -90,6 +90,24 @@ thread_local! {
     static POSE_SCRATCH: RefCell<PoseScratch> = RefCell::new(PoseScratch::default());
 }
 
+const POSE_SAMPLE_RETAIN_CAP: usize = 256;
+
+fn trim_retained_vec<T>(vec: &mut Vec<T>, retain_cap: usize) {
+    vec.clear();
+    if vec.capacity() > retain_cap {
+        vec.shrink_to(retain_cap);
+    }
+}
+
+pub(crate) fn compact_pose_scratch_after_frame() {
+    POSE_SCRATCH.with(|scratch| {
+        let mut scratch = scratch.borrow_mut();
+        trim_retained_vec(&mut scratch.fx_samples, POSE_SAMPLE_RETAIN_CAP);
+        trim_retained_vec(&mut scratch.fy_samples, POSE_SAMPLE_RETAIN_CAP);
+        trim_retained_vec(&mut scratch.f_samples, POSE_SAMPLE_RETAIN_CAP);
+    });
+}
+
 impl TagPoseCalibration {
     pub fn is_usable(&self) -> bool {
         self.fx.is_finite() && self.fy.is_finite() && self.fx.abs() > f64::EPSILON && self.fy.abs() > f64::EPSILON && self.cx.is_finite() && self.cy.is_finite()

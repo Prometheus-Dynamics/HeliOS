@@ -1715,7 +1715,7 @@
           },
           "host_bridge_inputs": {
             "type": "String",
-            "value": "adaptive:image:dynamic,clahe:image:dynamic,detections:list<cv:aruco_detection_2d>,overlay:image:dynamic,target_detections:list<cv:aruco_detection_2d>,tv:float,tid:float,tx:float,ty:float,ta:float,distance_px:float,target_cx:float,target_cy:float,thor:float,tvert:float,tshort:float,tlong:float"
+            "value": "adaptive:image:gray8,clahe:image:gray8,detections:list<cv:aruco_detection_2d>,overlay:image:dynamic,target_detections:list<cv:aruco_detection_2d>,tv:float,tid:float,tx:float,ty:float,ta:float,distance_px:float,target_cx:float,target_cy:float,thor:float,tvert:float,tshort:float,tlong:float"
           }
         },
         "outputs": []

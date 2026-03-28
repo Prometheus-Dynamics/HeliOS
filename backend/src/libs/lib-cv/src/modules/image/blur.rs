@@ -1,9 +1,9 @@
 use std::num::NonZero;
+use std::sync::{Mutex, OnceLock};
 
 use image::{DynamicImage, GrayImage};
 use libblur::{AnisotropicRadius, BlurImageMut, EdgeMode, EdgeMode2D, FastBlurChannels, ThreadingPolicy, fast_gaussian_next, fast_gaussian_next_blur_image};
 use rayon::current_num_threads;
-use std::cell::RefCell;
 
 pub fn blur_image(image: DynamicImage, sigma: f32) -> DynamicImage {
     if sigma <= 0.0 {
@@ -40,8 +40,41 @@ pub fn blur_gray_image_in_place(gray: &mut GrayImage, sigma: f32) {
     fast_gaussian_next(&mut image, AnisotropicRadius::new(sigma as u32), ThreadingPolicy::Fixed(threads), EdgeMode2D::new(EdgeMode::Clamp)).unwrap();
 }
 
-thread_local! {
-    static BOX_BLUR_SCRATCH: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+const BOX_BLUR_SCRATCH_RETAIN_CAP: usize = 2 * 1024 * 1024;
+
+fn box_blur_scratch_pool() -> &'static Mutex<Option<Vec<u8>>> {
+    static POOL: OnceLock<Mutex<Option<Vec<u8>>>> = OnceLock::new();
+    POOL.get_or_init(|| Mutex::new(None))
+}
+
+fn with_box_blur_scratch<R>(needed: usize, f: impl FnOnce(&mut Vec<u8>) -> R) -> R {
+    let mut scratch = box_blur_scratch_pool().lock().ok().and_then(|mut slot| slot.take()).unwrap_or_default();
+    if scratch.len() != needed {
+        scratch.resize(needed, 0);
+    }
+    let out = f(&mut scratch);
+    scratch.clear();
+    if scratch.capacity() <= BOX_BLUR_SCRATCH_RETAIN_CAP
+        && let Ok(mut slot) = box_blur_scratch_pool().lock()
+        && slot.is_none()
+    {
+        *slot = Some(scratch);
+    }
+    out
+}
+
+pub(crate) fn compact_blur_scratch_after_frame() {
+    if let Ok(mut slot) = box_blur_scratch_pool().lock() {
+        if slot.as_ref().is_some_and(|scratch| scratch.capacity() > BOX_BLUR_SCRATCH_RETAIN_CAP) {
+            *slot = None;
+        }
+    }
+}
+
+pub(crate) fn release_blur_scratch_on_idle() {
+    if let Ok(mut slot) = box_blur_scratch_pool().lock() {
+        *slot = None;
+    }
 }
 
 fn box_blur_gray_in_place(gray: &mut GrayImage, radius: u32) {
@@ -59,14 +92,10 @@ fn box_blur_gray_in_place(gray: &mut GrayImage, radius: u32) {
     let last_x = width_usize.saturating_sub(1);
     let last_y = height_usize.saturating_sub(1);
 
-    let src = gray.as_raw();
-    BOX_BLUR_SCRATCH.with(|scratch| {
-        let mut scratch = scratch.borrow_mut();
-        let needed = width_usize.saturating_mul(height_usize);
-        if scratch.len() != needed {
-            scratch.resize(needed, 0);
-        }
-        let tmp = &mut scratch[..];
+    let needed = width_usize.saturating_mul(height_usize);
+    with_box_blur_scratch(needed, |scratch| {
+        let tmp = scratch.as_mut_slice();
+        let src = gray.as_raw();
 
         for y in 0..height_usize {
             let row = &src[y * width_usize..(y + 1) * width_usize];
@@ -83,10 +112,6 @@ fn box_blur_gray_in_place(gray: &mut GrayImage, radius: u32) {
                 sum -= row[sub_x] as u32;
             }
         }
-    });
-    BOX_BLUR_SCRATCH.with(|scratch| {
-        let scratch = scratch.borrow();
-        let tmp = &scratch[..];
         let out = gray.as_flat_samples_mut().samples;
         for x in 0..width_usize {
             let mut sum = tmp[x] as u32 * (radius_usize as u32 + 1);
@@ -127,7 +152,7 @@ pub mod nodes {
 
     #[cfg(feature = "gpu")]
     use bytemuck::{Pod, Zeroable};
-    use daedalus::gpu::Payload;
+    use daedalus::gpu::Compute;
     #[cfg(feature = "gpu")]
     use daedalus::gpu::shader::{ShaderContext, TextureOut, Uniform};
     #[cfg(feature = "gpu")]
@@ -154,7 +179,7 @@ pub mod nodes {
     #[gpu(spec(src = "src/gpu/shaders/blur.wgsl", entry = "blur_horizontal_main"))]
     struct BlurHorizontalShaderBindings<'a> {
         #[gpu(binding = 0, texture2d(format = "rgba8unorm"))]
-        input: &'a Payload<DynamicImage>,
+        input: &'a Compute<DynamicImage>,
         #[gpu(binding = 1, texture2d(format = "rgba8unorm", write))]
         output: TextureOut,
         #[gpu(binding = 2, storage(read))]
@@ -168,7 +193,7 @@ pub mod nodes {
     #[gpu(spec(src = "src/gpu/shaders/blur.wgsl", entry = "blur_vertical_main"))]
     struct BlurVerticalShaderBindings<'a> {
         #[gpu(binding = 0, texture2d(format = "rgba8unorm"))]
-        input: &'a Payload<DynamicImage>,
+        input: &'a Compute<DynamicImage>,
         #[gpu(binding = 1, texture2d(format = "rgba8unorm", write))]
         output: TextureOut,
         #[gpu(binding = 2, storage(read))]
@@ -196,30 +221,30 @@ pub mod nodes {
             outputs("frame")
         )
     )]
-    pub fn cv_blur(frame: Payload<DynamicImage>, sigma: f32, mode: ExecMode, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+    pub fn cv_blur(frame: Compute<DynamicImage>, sigma: f32, mode: ExecMode, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
         if sigma <= 0.0 {
             return Ok(frame);
         }
         #[cfg(feature = "gpu")]
         {
-            let cpu_fallback = || -> Result<Payload<DynamicImage>, NodeError> {
+            let cpu_fallback = || -> Result<Compute<DynamicImage>, NodeError> {
                 if let Some(cpu) = frame.as_cpu() {
                     if let DynamicImage::ImageLuma8(gray) = cpu {
                         let mut gray = gray.clone();
                         blur_gray_image_in_place(&mut gray, sigma);
-                        return Ok(Payload::Cpu(DynamicImage::ImageLuma8(gray)));
+                        return Ok(Compute::Cpu(DynamicImage::ImageLuma8(gray)));
                     }
-                    return Ok(Payload::Cpu(blur_image(cpu.clone(), sigma)));
+                    return Ok(Compute::Cpu(blur_image(cpu.clone(), sigma)));
                 }
 
                 let (bytes, w, h) = frame.to_rgba_bytes(ctx.gpu.as_ref()).map_err(|e| NodeError::Handler(format!("blur: {e}")))?;
                 let rgba = RgbaImage::from_raw(w, h, bytes).ok_or_else(|| NodeError::Handler("blur: invalid image dimensions".into()))?;
-                Ok(Payload::Cpu(blur_image(DynamicImage::ImageRgba8(rgba), sigma)))
+                Ok(Compute::Cpu(blur_image(DynamicImage::ImageRgba8(rgba), sigma)))
             };
 
             let (width, height) = frame.dimensions();
             if width == 0 || height == 0 {
-                return Ok(Payload::Cpu(DynamicImage::new_rgba8(width, height)));
+                return Ok(Compute::Cpu(DynamicImage::new_rgba8(width, height)));
             }
 
             let want_gpu = matches!(mode, ExecMode::Gpu | ExecMode::Auto) && ctx.gpu.is_some();
@@ -256,8 +281,8 @@ pub mod nodes {
         {
             let _ = mode;
             match frame {
-                Payload::Cpu(image) => Ok(Payload::Cpu(blur_image(image, sigma))),
-                Payload::Gpu(_) => Err(NodeError::Handler("blur: GPU payload unsupported in CPU-only build".into())),
+                Compute::Cpu(image) => Ok(Compute::Cpu(blur_image(image, sigma))),
+                Compute::Gpu(_) => Err(NodeError::Handler("blur: GPU payload unsupported in CPU-only build".into())),
             }
         }
     }

@@ -9,10 +9,28 @@ thread_local! {
     static BINARY_SCRATCH: RefCell<BinaryMorphScratch> = RefCell::new(BinaryMorphScratch::default());
 }
 
+const BINARY_MORPH_BUFFER_RETAIN_CAP: usize = 2 * 1024 * 1024;
+
 #[derive(Default)]
 struct BinaryMorphScratch {
     a: Vec<u8>,
     b: Vec<u8>,
+}
+
+#[inline(always)]
+fn trim_retained_vec<T>(vec: &mut Vec<T>, retain_cap: usize) {
+    vec.clear();
+    if vec.capacity() > retain_cap {
+        vec.shrink_to(retain_cap);
+    }
+}
+
+pub(crate) fn compact_binary_morph_scratch_after_frame() {
+    BINARY_SCRATCH.with(|scratch| {
+        let mut scratch = scratch.borrow_mut();
+        trim_retained_vec(&mut scratch.a, BINARY_MORPH_BUFFER_RETAIN_CAP);
+        trim_retained_vec(&mut scratch.b, BINARY_MORPH_BUFFER_RETAIN_CAP);
+    });
 }
 
 pub fn erode(image: &GrayImage, norm: Norm, k: u8) -> GrayImage {

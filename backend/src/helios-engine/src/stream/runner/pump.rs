@@ -1,11 +1,11 @@
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::TrySendError;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use metrics::histogram;
 use styx::capture::prelude::RecvOutcome;
-use styx::codec::decoder::{frame_lease_to_dynamic_image, frame_to_dynamic_image};
+use styx::codec::decoder::frame_to_dynamic_image;
 use styx::codec::CodecKind;
 use tracing::trace_span;
 
@@ -18,8 +18,65 @@ const CAPTURE_IDLE_SLEEP: Duration = Duration::from_millis(1);
 const DEFAULT_CAPTURE_STALL_MS: u64 = 1_500;
 const DEFAULT_CAPTURE_ACTIVE_STALL_MS: u64 = 1_000;
 const DEFAULT_CAPTURE_FIRST_FRAME_STALL_MS: u64 = 8_000;
+const DEFAULT_IDLE_COMPACTION_INTERVAL_MS: u64 = 1_000;
 
 impl StreamRunner {
+    fn update_last_frame_demand(
+        &self,
+        raw_receiver_count: u64,
+        host_receiver_count: u64,
+        preview_demand_active: bool,
+        encode_demand_active: bool,
+        graph_sample_demand_active: bool,
+        needs_decoded_image: bool,
+        graph_has_image_output: bool,
+        graph_has_executor: bool,
+    ) {
+        let mut snapshot = match self.last_frame_demand.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        *snapshot = super::LastFrameDemandSnapshot {
+            raw_receiver_count,
+            host_receiver_count,
+            preview_demand_active,
+            encode_demand_active,
+            graph_sample_demand_active,
+            needs_decoded_image,
+            graph_has_image_output,
+            graph_has_executor,
+        };
+    }
+
+    fn idle_compaction_interval() -> Duration {
+        static VALUE_MS: AtomicU64 = AtomicU64::new(u64::MAX);
+        let cached = VALUE_MS.load(Ordering::Relaxed);
+        let millis = if cached != u64::MAX {
+            cached
+        } else {
+            let value = std::env::var("HELIOS_STREAM_IDLE_COMPACTION_INTERVAL_MS").ok().and_then(|raw| raw.trim().parse::<u64>().ok()).unwrap_or(DEFAULT_IDLE_COMPACTION_INTERVAL_MS).clamp(50, 60_000);
+            VALUE_MS.store(value, Ordering::Relaxed);
+            value
+        };
+        Duration::from_millis(millis)
+    }
+
+    fn maybe_compact_idle_runtime(&mut self) {
+        let now = Instant::now();
+        if let Some(last) = self.last_idle_compaction_wall {
+            if now.saturating_duration_since(last) < Self::idle_compaction_interval() {
+                return;
+            }
+        }
+        self.last_idle_compaction_wall = Some(now);
+
+        self.stop_encoder_worker();
+        self.runner_memory.reset_current();
+        self.graph.release_idle_retention();
+        styx::codec::decoder::clear_packed_frame_pools_all_threads();
+        lib_cv::release_runtime_scratch_on_idle();
+    }
+
     fn control_value_to_u64(value: &styx::core::controls::ControlValue) -> Option<u64> {
         match value {
             styx::core::controls::ControlValue::Uint(v) => Some(*v as u64),
@@ -227,8 +284,27 @@ impl StreamRunner {
                 // When the backend already provides encoded frames and there is no graph, skip
                 // expensive decode/graph work unless someone is subscribed to decoded frames.
                 if can_passthrough_encoded {
-                    let decoded_demand = self.raw_tx.receiver_count() > 0 || (self.graph.has_image_output() && self.graph.host().receiver_count() > 0);
+                    let graph_has_image_output = self.graph.has_image_output();
+                    let graph_has_executor = self.graph.has_executor();
+                    let graph_host = self.graph.host();
+                    let raw_receiver_count = self.raw_tx.receiver_count() as u64;
+                    let host_receiver_count = graph_host.receiver_count() as u64;
+                    let preview_demand_active = self.preview_demand();
+                    let encode_demand_active = self.encoder_id.is_some() && self.encoder_demand();
+                    let graph_sample_demand_active = self.graph.has_output_sample_demand();
+                    let decoded_demand = raw_receiver_count > 0 || (graph_has_image_output && host_receiver_count > 0);
+                    self.update_last_frame_demand(
+                        raw_receiver_count,
+                        host_receiver_count,
+                        preview_demand_active,
+                        encode_demand_active,
+                        graph_sample_demand_active,
+                        decoded_demand,
+                        graph_has_image_output,
+                        graph_has_executor,
+                    );
                     if !decoded_demand {
+                        self.maybe_compact_idle_runtime();
                         return Ok(true);
                     }
                 }
@@ -244,12 +320,32 @@ impl StreamRunner {
                 }
                 let graph_host = self.graph.host();
                 let graph_has_image_output = self.graph.has_image_output();
-                let raw_demand = self.raw_tx.receiver_count() > 0;
-                let host_demand = graph_has_image_output && graph_host.receiver_count() > 0;
-                let preview_active = graph_has_image_output && self.preview_demand();
+                let graph_has_executor = self.graph.has_executor();
+                let raw_receiver_count = self.raw_tx.receiver_count() as u64;
+                let host_receiver_count = graph_host.receiver_count() as u64;
+                let raw_demand = raw_receiver_count > 0;
+                let host_demand = graph_has_image_output && host_receiver_count > 0;
+                let preview_demand_active = self.preview_demand();
+                let preview_active = graph_has_image_output && preview_demand_active;
                 let encode_demand = self.encoder_id.is_some() && self.encoder_demand();
-                let graph_executor_active = self.graph.has_executor();
-                let needs_decoded_image = raw_demand || host_demand || preview_active || encode_demand || graph_executor_active;
+                // A configured graph is not demand by itself. Keep the decode/graph path hot only
+                // when someone is consuming frames now or a host-output sample was explicitly
+                // requested and is waiting to be materialized from a fresh frame.
+                let graph_sample_demand = self.graph.has_output_sample_demand();
+                let needs_decoded_image = raw_demand || host_demand || preview_active || encode_demand || graph_sample_demand;
+                self.update_last_frame_demand(
+                    raw_receiver_count,
+                    host_receiver_count,
+                    preview_demand_active,
+                    encode_demand,
+                    graph_sample_demand,
+                    needs_decoded_image,
+                    graph_has_image_output,
+                    graph_has_executor,
+                );
+                let preview_only_demand = preview_active && !raw_demand && !host_demand && !encode_demand && !graph_sample_demand;
+                let preview_only_no_graph =
+                    preview_active && !raw_demand && !host_demand && !encode_demand && !graph_sample_demand && !graph_has_executor && self.preview_worker.is_some() && self.shmem.is_some();
 
                 // For uncompressed capture formats such as NV12, `frame_lease_to_dynamic_image`
                 // will happily materialize a full host image even when the caller explicitly
@@ -257,7 +353,15 @@ impl StreamRunner {
                 // as a large active-memory floor. If nothing downstream needs an image, keep the
                 // frame as a lease and drop it here.
                 if !needs_decoded_image {
+                    self.maybe_compact_idle_runtime();
                     return Ok(true);
+                }
+                if preview_only_demand {
+                    let now = Instant::now();
+                    if self.last_preview_work_wall.is_some_and(|last| now.saturating_duration_since(last) < self.preview_encode_interval) {
+                        return Ok(true);
+                    }
+                    self.last_preview_work_wall = Some(now);
                 }
 
                 let decode_start = Instant::now();
@@ -271,78 +375,77 @@ impl StreamRunner {
                     }
                 }
 
-                let image = match frame_lease_to_dynamic_image(frame) {
-                    Ok(mut img) => {
+                let force_codec_decode = self.decoder_id.as_ref().is_some_and(|id| !id.trim().is_empty());
+                let image = if !force_codec_decode {
+                    if let Some(mut img) = frame_to_dynamic_image(&frame) {
+                        // Prefer the borrow/copy conversion path here. The move-based
+                        // `frame_lease_to_dynamic_image(frame)` fast path can drain Styx buffer pools
+                        // by taking owned `BufferLease` storage out of `FrameLease`, which then turns
+                        // steady-state capture into repeated heap allocations and a slow memory ratchet.
                         if let Some(transform) = transform {
                             if !transform_applied {
                                 img = Self::apply_image_transform(img, transform);
                             }
                         }
                         img
-                    }
-                    Err(frame) => {
+                    } else {
                         // Strict semantics: if the user hasn't selected a decoder, do not do any
                         // codec-backed decode for encoded capture inputs.
-                        if self.decoder_id.is_none() {
-                            tracing::debug!(fourcc = ?capture_fourcc, "decode disabled; skipping frame");
-                            return Ok(true);
-                        }
-                        // Try decoding via codec registry if direct conversion failed (e.g. encoded input).
-                        let codecs = self.ensure_codecs_for_decode()?;
-                        let fourcc = frame.meta().format.code;
-                        match codecs.process_auto_kind(fourcc, CodecKind::Decoder, frame) {
-                            Ok(decoded) => {
-                                let mut decoded = decoded;
-                                if let Some(transform) = transform {
-                                    if let Ok(transformed) = transform_packed_frame(&decoded, transform) {
-                                        decoded = transformed;
-                                        transform_applied = true;
-                                    }
-                                }
-                                match frame_lease_to_dynamic_image(decoded) {
-                                    Ok(mut img) => {
-                                        if let Some(transform) = transform {
-                                            if !transform_applied {
-                                                img = Self::apply_image_transform(img, transform);
-                                            }
-                                        }
-                                        img
-                                    }
-                                    Err(decoded) => {
-                                        let decoded_fourcc = decoded.meta().format.code;
-                                        let decoded_planes = decoded.planes();
-                                        let decoded_plane_lens: Vec<_> = decoded_planes.iter().map(|p| p.data().len()).collect();
-                                        let decoded_plane_strides: Vec<_> = decoded_planes.iter().map(|p| p.stride()).collect();
-                                        drop(decoded_planes);
-
-                                        match frame_to_dynamic_image(&decoded) {
-                                            Some(mut img) => {
-                                                if let Some(transform) = transform {
-                                                    if !transform_applied {
-                                                        img = Self::apply_image_transform(img, transform);
-                                                    }
-                                                }
-                                                img
-                                            }
-                                            None => {
-                                                self.decoder_stats.inc_errors();
-                                                tracing::warn!(
-                                                    fourcc = ?decoded_fourcc,
-                                                    plane_lens = ?decoded_plane_lens,
-                                                    plane_strides = ?decoded_plane_strides,
-                                                    "decoded frame conversion failed"
-                                                );
-                                                return Ok(true);
-                                            }
-                                        }
-                                    }
+                        tracing::debug!(fourcc = ?capture_fourcc, "decode disabled; skipping frame");
+                        return Ok(true);
+                    }
+                } else {
+                    let codecs = self.ensure_codecs_for_decode()?;
+                    let fourcc = frame.meta().format.code;
+                    match codecs.process_auto_kind(fourcc, CodecKind::Decoder, frame) {
+                        Ok(decoded) => {
+                            let mut decoded = decoded;
+                            if let Some(transform) = transform {
+                                if let Ok(transformed) = transform_packed_frame(&decoded, transform) {
+                                    decoded = transformed;
+                                    transform_applied = true;
                                 }
                             }
-                            Err(err) => {
-                                self.decoder_stats.inc_errors();
-                                tracing::warn!(error = ?err, "frame decode failed for fourcc {:?}", fourcc);
+                            if preview_only_no_graph && (transform.is_none() || transform_applied) {
+                                let decoded_bytes = decoded.payload_bytes() as u64;
+                                self.runner_memory.set_decoded_frame_bytes(decoded_bytes);
+                                self.decoder_stats.inc_processed();
+                                self.record_decode_ms(decode_start);
+                                self.last_decode_wall = Some(Instant::now());
+                                self.try_write_shmem_preview_from_frame(decoded);
                                 return Ok(true);
                             }
+                            let decoded_fourcc = decoded.meta().format.code;
+                            let decoded_planes = decoded.planes();
+                            let decoded_plane_lens: Vec<_> = decoded_planes.iter().map(|p| p.data().len()).collect();
+                            let decoded_plane_strides: Vec<_> = decoded_planes.iter().map(|p| p.stride()).collect();
+                            drop(decoded_planes);
+
+                            match frame_to_dynamic_image(&decoded) {
+                                Some(mut img) => {
+                                    if let Some(transform) = transform {
+                                        if !transform_applied {
+                                            img = Self::apply_image_transform(img, transform);
+                                        }
+                                    }
+                                    img
+                                }
+                                None => {
+                                    self.decoder_stats.inc_errors();
+                                    tracing::warn!(
+                                        fourcc = ?decoded_fourcc,
+                                        plane_lens = ?decoded_plane_lens,
+                                        plane_strides = ?decoded_plane_strides,
+                                        "decoded frame conversion failed"
+                                    );
+                                    return Ok(true);
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            self.decoder_stats.inc_errors();
+                            tracing::warn!(error = ?err, "frame decode failed for fourcc {:?}", fourcc);
+                            return Ok(true);
                         }
                     }
                 };
@@ -362,19 +465,29 @@ impl StreamRunner {
                 // In graph/no-viewer mode, value outputs can still be useful while the overlay/
                 // preview image path is pure memory churn.
                 let should_write_preview = preview_active;
-                let graph_image_output_demand = graph_has_image_output && (should_write_preview || self.encoder_demand() || host_demand);
+                let graph_image_output_demand = graph_has_image_output && (should_write_preview || encode_demand || host_demand);
+                let preview_only_graph_output = should_write_preview && self.shmem.is_some() && !host_demand && !encode_demand && !graph_sample_demand;
                 let graph_start = Instant::now();
-                let processed = match self.process_assigned_graphs(image, graph_image_output_demand) {
-                    Some(img) => Some(img),
-                    None if !graph_image_output_demand => None,
-                    None => return Ok(true),
+                let (processed, preview_output) = if preview_only_graph_output {
+                    match self.process_assigned_graph_preview(image, graph_image_output_demand) {
+                        Some(output) => (None, Some(output)),
+                        None if !graph_image_output_demand => (None, None),
+                        None => return Ok(true),
+                    }
+                } else {
+                    let processed = match self.process_assigned_graphs(image, graph_image_output_demand) {
+                        Some(img) => Some(img),
+                        None if !graph_image_output_demand => None,
+                        None => return Ok(true),
+                    };
+                    (processed.map(Arc::new), None)
                 };
                 let graph_ms = graph_start.elapsed().as_secs_f64() * 1000.0;
                 histogram!("helios.stream.graph_ms", "stream" => self.stream_label.clone()).record(graph_ms);
 
                 // If an encoder is configured, ensure the codec registry (and encoder output fourcc)
                 // is initialized even when we didn't need the registry for decode.
-                if self.encoder_id.is_some() && (self.encode_fourcc.is_none() || self.encoder_demand()) {
+                if self.encoder_id.is_some() && (self.encode_fourcc.is_none() || encode_demand) {
                     match self.ensure_codecs_for_decode() {
                         Ok(codecs) => {
                             if let Err(err) = self.ensure_encoder_selected(&codecs, capture_fourcc) {
@@ -385,9 +498,11 @@ impl StreamRunner {
                     }
                 }
 
-                let processed = processed.map(Arc::new);
-                let processed_bytes =
-                    processed.as_ref().map(|image| u64::from(image.width()).saturating_mul(u64::from(image.height())).saturating_mul(u64::from(image.color().bytes_per_pixel() as u32))).unwrap_or(0);
+                let processed_bytes = processed
+                    .as_ref()
+                    .map(|image| u64::from(image.width()).saturating_mul(u64::from(image.height())).saturating_mul(u64::from(image.color().bytes_per_pixel() as u32)))
+                    .or_else(|| preview_output.as_ref().map(crate::graph::GraphPreviewOutput::size_bytes))
+                    .unwrap_or(0);
                 self.runner_memory.set_processed_frame_bytes(processed_bytes);
 
                 // Only publish to host subscribers when at least one is connected; otherwise this is
@@ -396,8 +511,12 @@ impl StreamRunner {
                     if graph_host.receiver_count() > 0 {
                         graph_host.send_frame(processed.clone());
                     }
-                    if should_write_preview && self.preview_worker.is_some() && self.shmem.is_some() {
+                    if should_write_preview && self.shmem.is_some() {
                         self.try_write_shmem_preview_from_image(processed.clone(), ts);
+                    }
+                } else if should_write_preview && self.shmem.is_some() {
+                    if let Some(output) = preview_output {
+                        self.try_write_shmem_preview_from_graph_output(output, ts);
                     }
                 }
 
@@ -406,7 +525,7 @@ impl StreamRunner {
                 if self.encode_fourcc.is_some() {
                     // Start the encoder only when something is actively subscribed to encoded output.
                     // Preview shmem generation is handled independently by the preview worker.
-                    let wants_encode = self.encoder_demand();
+                    let wants_encode = encode_demand;
                     if wants_encode {
                         if can_passthrough_encoded {
                             self.stop_encoder_worker();
@@ -459,7 +578,30 @@ impl StreamRunner {
                 }
                 let stall_ms = std::env::var("HELIOS_CAPTURE_STALL_MS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(DEFAULT_CAPTURE_STALL_MS).clamp(50, 10_000);
                 let active_stall_ms = std::env::var("HELIOS_CAPTURE_ACTIVE_STALL_MS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(DEFAULT_CAPTURE_ACTIVE_STALL_MS).clamp(250, 10_000);
-                let interactive_demand = (self.graph.has_image_output() && (self.preview_demand() || self.graph.host().receiver_count() > 0)) || self.encoder_demand();
+                let graph_has_image_output = self.graph.has_image_output();
+                let graph_has_executor = self.graph.has_executor();
+                let graph_host = self.graph.host();
+                let raw_receiver_count = self.raw_tx.receiver_count() as u64;
+                let host_receiver_count = graph_host.receiver_count() as u64;
+                let preview_demand_active = self.preview_demand();
+                let encode_demand_active = self.encoder_id.is_some() && self.encoder_demand();
+                let graph_sample_demand_active = self.graph.has_output_sample_demand();
+                let needs_decoded_image =
+                    raw_receiver_count > 0 || (graph_has_image_output && (preview_demand_active || host_receiver_count > 0)) || encode_demand_active || graph_sample_demand_active;
+                self.update_last_frame_demand(
+                    raw_receiver_count,
+                    host_receiver_count,
+                    preview_demand_active,
+                    encode_demand_active,
+                    graph_sample_demand_active,
+                    needs_decoded_image,
+                    graph_has_image_output,
+                    graph_has_executor,
+                );
+                let interactive_demand = (graph_has_image_output && (preview_demand_active || host_receiver_count > 0)) || encode_demand_active || graph_sample_demand_active;
+                if !interactive_demand {
+                    self.maybe_compact_idle_runtime();
+                }
                 let file_offset_start = self.file_replay_has_offset_start_frame();
                 // Seeking to late frames on software-decoded file replay can take multiple seconds
                 // before first output. Do not apply the aggressive interactive stall threshold in
@@ -533,18 +675,25 @@ impl StreamRunner {
         })
     }
 
-    fn try_write_shmem_preview_from_image(&mut self, image: Arc<image::DynamicImage>, ts: u64) {
+    fn try_write_shmem_preview_from_source(&mut self, source: super::PreviewEncodeSource, ts: u64) {
         let now = Instant::now();
         if let Some(last) = self.last_preview_encode_wall {
             if now.saturating_duration_since(last) < self.preview_encode_interval {
                 return;
             }
         }
+        if self.preview_worker.is_none() {
+            if self.shmem.is_none() || !self.preview_generation_enabled() {
+                return;
+            }
+            self.preview_worker = Some(super::PreviewWorker::start(self.preview_encoder_stats.clone(), self.preview_encoder_last_activity_ms.clone()));
+            tracing::info!("preview worker started on demand");
+        }
         let Some(worker) = self.preview_worker.as_ref() else {
             return;
         };
         let output_resolution = self.preview_output_resolution_hint();
-        match worker.req_tx.try_send(super::PreviewEncodeRequest { ts, image, output_resolution }) {
+        match worker.req_tx.try_send(super::PreviewEncodeRequest { ts, source, output_resolution }) {
             Ok(()) => {
                 self.last_preview_encode_wall = Some(now);
             }
@@ -559,6 +708,23 @@ impl StreamRunner {
                 }
             }
         }
+    }
+
+    fn try_write_shmem_preview_from_image(&mut self, image: Arc<image::DynamicImage>, ts: u64) {
+        self.try_write_shmem_preview_from_source(super::PreviewEncodeSource::Image(image), ts);
+    }
+
+    fn try_write_shmem_preview_from_graph_output(&mut self, output: crate::graph::GraphPreviewOutput, ts: u64) {
+        let source = match output {
+            crate::graph::GraphPreviewOutput::Image(image) => super::PreviewEncodeSource::Image(Arc::new(image)),
+            crate::graph::GraphPreviewOutput::Gray(image) => super::PreviewEncodeSource::Gray(image),
+        };
+        self.try_write_shmem_preview_from_source(source, ts);
+    }
+
+    fn try_write_shmem_preview_from_frame(&mut self, frame: styx::prelude::FrameLease) {
+        let ts = frame.meta().timestamp;
+        self.try_write_shmem_preview_from_source(super::PreviewEncodeSource::Frame(frame), ts);
     }
 
     fn try_write_shmem_preview_from_capture(&mut self, frame: &styx::prelude::FrameLease) {

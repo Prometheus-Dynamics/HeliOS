@@ -1,6 +1,17 @@
 pub mod douglas_peucker;
 pub mod scaling;
 pub mod suzuki_abe;
+
+pub(crate) fn compact_runtime_scratch_after_frame() {
+    douglas_peucker::compact_rdp_scratch_after_frame();
+    suzuki_abe::compact_suzuki_scratch_after_frame();
+}
+
+pub(crate) fn release_runtime_scratch_on_idle() {
+    compact_runtime_scratch_after_frame();
+    suzuki_abe::release_suzuki_scratch_on_idle();
+}
+
 #[cfg(feature = "engine")]
 pub mod nodes {
     #![allow(clippy::ptr_arg)]
@@ -16,7 +27,7 @@ pub mod nodes {
     #[cfg(feature = "gpu")]
     use daedalus::ComputeAffinity;
     use daedalus::declare_plugin;
-    use daedalus::gpu::Payload;
+    use daedalus::gpu::Compute;
     #[cfg(feature = "gpu")]
     use daedalus::gpu::shader::{BufferOut, ShaderContext, Uniform};
     #[cfg(feature = "gpu")]
@@ -60,10 +71,10 @@ pub mod nodes {
             ))
         )
     )]
-    fn cv_find_contours(mask: Payload<DynamicImage>, #[cfg(feature = "gpu")] ctx: ShaderContext, exec_ctx: &ExecutionContext) -> Result<Vec<Vec<Point>>, NodeError> {
+    fn cv_find_contours(mask: Compute<DynamicImage>, #[cfg(feature = "gpu")] ctx: ShaderContext, exec_ctx: &ExecutionContext) -> Result<Vec<Vec<Point>>, NodeError> {
         #[cfg(feature = "gpu")]
         {
-            let input_is_gpu = matches!(&mask, Payload::Gpu(_));
+            let input_is_gpu = matches!(&mask, Compute::Gpu(_));
             let want_gpu = ctx.gpu.is_some() && input_is_gpu;
             if want_gpu {
                 if let Some((gray, roi_x, roi_y)) = read_mask_roi_compact(&mask, &ctx, 16)? {
@@ -83,8 +94,8 @@ pub mod nodes {
         }
 
         let gray = match mask {
-            Payload::Cpu(img) => img.to_luma8(),
-            Payload::Gpu(handle) => {
+            Compute::Cpu(img) => img.to_luma8(),
+            Compute::Gpu(handle) => {
                 let gpu = exec_ctx.gpu.as_ref().ok_or_else(|| NodeError::Handler("contours: gpu payload missing context".into()))?;
                 let bytes = gpu.read_texture(&handle).map_err(|e| NodeError::Handler(format!("contours: {e}")))?;
                 let rgba = RgbaImage::from_raw(handle.width, handle.height, bytes).ok_or_else(|| NodeError::Handler("contours: invalid image dimensions".into()))?;
@@ -294,7 +305,7 @@ pub mod nodes {
     #[gpu(spec(src = "src/gpu/shaders/mask_tile_reduce.wgsl", entry = "tile_reduce_main"))]
     struct MaskTileReduceBindings<'a> {
         #[gpu(binding = 0, texture2d(format = "rgba8unorm"))]
-        input: &'a Payload<DynamicImage>,
+        input: &'a Compute<DynamicImage>,
         #[gpu(binding = 1, storage(read_write), zeroed, readback)]
         tiles: BufferOut,
         #[gpu(binding = 2, uniform)]
@@ -306,7 +317,7 @@ pub mod nodes {
     #[gpu(spec(src = "src/gpu/shaders/mask_pack.wgsl", entry = "pack_mask_main"))]
     struct MaskPackBindings<'a> {
         #[gpu(binding = 0, texture2d(format = "rgba8unorm"))]
-        input: &'a Payload<DynamicImage>,
+        input: &'a Compute<DynamicImage>,
         #[gpu(binding = 1, storage(read_write), zeroed, readback)]
         packed: BufferOut,
         #[gpu(binding = 2, uniform)]
@@ -314,7 +325,7 @@ pub mod nodes {
     }
 
     #[cfg(feature = "gpu")]
-    fn read_mask_roi_compact(mask: &Payload<DynamicImage>, ctx: &ShaderContext, tile: u32) -> Result<Option<(GrayImage, u32, u32)>, NodeError> {
+    fn read_mask_roi_compact(mask: &Compute<DynamicImage>, ctx: &ShaderContext, tile: u32) -> Result<Option<(GrayImage, u32, u32)>, NodeError> {
         let (width, height) = mask.dimensions();
         if width == 0 || height == 0 {
             return Ok(None);
@@ -374,7 +385,7 @@ pub mod nodes {
     }
 
     #[cfg(feature = "gpu")]
-    fn read_mask_pack(mask: &Payload<DynamicImage>, ctx: &ShaderContext, roi_x: u32, roi_y: u32, roi_w: u32, roi_h: u32) -> Result<GrayImage, NodeError> {
+    fn read_mask_pack(mask: &Compute<DynamicImage>, ctx: &ShaderContext, roi_x: u32, roi_y: u32, roi_w: u32, roi_h: u32) -> Result<GrayImage, NodeError> {
         let (width, height) = mask.dimensions();
         let packs_w = roi_w.div_ceil(4);
         let packed_len = (packs_w as u64).saturating_mul(roi_h as u64).saturating_mul(4);
@@ -447,13 +458,13 @@ pub mod nodes {
             ))
         )
     )]
-    fn cv_find_contours_compact(mask: Payload<DynamicImage>, tile: i64, mode: ExecMode, #[cfg(feature = "gpu")] ctx: ShaderContext, exec_ctx: &ExecutionContext) -> Result<Vec<Vec<Point>>, NodeError> {
+    fn cv_find_contours_compact(mask: Compute<DynamicImage>, tile: i64, mode: ExecMode, #[cfg(feature = "gpu")] ctx: ShaderContext, exec_ctx: &ExecutionContext) -> Result<Vec<Vec<Point>>, NodeError> {
         #[cfg(feature = "gpu")]
         {
             if matches!(mode, ExecMode::Gpu) && ctx.gpu.is_none() {
                 return Err(NodeError::Handler("contours_compact: GPU requested but unavailable".into()));
             }
-            let input_is_gpu = matches!(&mask, Payload::Gpu(_));
+            let input_is_gpu = matches!(&mask, Compute::Gpu(_));
             let want_gpu = match mode {
                 ExecMode::Gpu => ctx.gpu.is_some(),
                 ExecMode::Auto => ctx.gpu.is_some() && input_is_gpu,
@@ -483,8 +494,8 @@ pub mod nodes {
         }
 
         let gray = match mask {
-            Payload::Cpu(img) => img.to_luma8(),
-            Payload::Gpu(handle) => {
+            Compute::Cpu(img) => img.to_luma8(),
+            Compute::Gpu(handle) => {
                 let gpu = exec_ctx.gpu.as_ref().ok_or_else(|| NodeError::Handler("contours_compact: gpu payload missing context".into()))?;
                 let bytes = gpu.read_texture(&handle).map_err(|e| NodeError::Handler(format!("contours_compact: {e}")))?;
                 let rgba = RgbaImage::from_raw(handle.width, handle.height, bytes).ok_or_else(|| NodeError::Handler("contours_compact: invalid image dimensions".into()))?;

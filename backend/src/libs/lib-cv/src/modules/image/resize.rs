@@ -1,7 +1,7 @@
 #![allow(unsafe_code)]
 
 use std::any::Any;
-use std::cell::RefCell;
+use std::sync::{Mutex, OnceLock};
 
 use bytemuck::cast_vec;
 use fast_image_resize::{IntoImageView, PixelType, ResizeOptions, Resizer, images::Image};
@@ -12,19 +12,45 @@ use ffmpeg::{
 };
 use image::{ColorType, DynamicImage, GenericImageView, GrayImage, ImageBuffer};
 
-thread_local! {
-    static THREAD_RESIZER: RefCell<Resizer> = RefCell::new({
-        #[allow(unused_mut)]
-        let mut resizer = Resizer::new();
-        #[cfg(target_arch = "aarch64")]
-        #[allow(unsafe_code)]
-        unsafe {
-            if !crate::simd::neon_enabled() {
-                resizer.set_cpu_extensions(fast_image_resize::CpuExtensions::None);
-            }
+fn new_thread_resizer() -> Resizer {
+    #[allow(unused_mut)]
+    let mut resizer = Resizer::new();
+    #[cfg(target_arch = "aarch64")]
+    #[allow(unsafe_code)]
+    unsafe {
+        if !crate::simd::neon_enabled() {
+            resizer.set_cpu_extensions(fast_image_resize::CpuExtensions::None);
         }
-        resizer
-    });
+    }
+    resizer
+}
+
+fn resizer_pool() -> &'static Mutex<Option<Resizer>> {
+    static POOL: OnceLock<Mutex<Option<Resizer>>> = OnceLock::new();
+    POOL.get_or_init(|| Mutex::new(None))
+}
+
+fn with_resizer<R>(f: impl FnOnce(&mut Resizer) -> R) -> R {
+    let mut resizer = resizer_pool().lock().ok().and_then(|mut slot| slot.take()).unwrap_or_else(new_thread_resizer);
+    let out = f(&mut resizer);
+    if let Ok(mut slot) = resizer_pool().lock()
+        && slot.is_none()
+    {
+        *slot = Some(resizer);
+    }
+    out
+}
+
+pub(crate) fn compact_resize_scratch_after_frame() {
+    if let Ok(mut slot) = resizer_pool().lock() {
+        *slot = Some(new_thread_resizer());
+    }
+}
+
+pub(crate) fn release_resize_scratch_on_idle() {
+    if let Ok(mut slot) = resizer_pool().lock() {
+        *slot = None;
+    }
 }
 
 pub fn resize_to_minium_canonical_image(image: &DynamicImage, tc: f32, dot_tau_ti: f32) -> DynamicImage {
@@ -39,10 +65,7 @@ pub fn resize_to_minium_canonical_image(image: &DynamicImage, tc: f32, dot_tau_t
 }
 
 pub fn resize_fast(image: &(impl IntoImageView + Any), width: u32, height: u32) -> DynamicImage {
-    THREAD_RESIZER.with(|r| {
-        let mut resizer = r.borrow_mut();
-        resize_fast_with_resizer(&mut resizer, image, width, height)
-    })
+    with_resizer(|resizer| resize_fast_with_resizer(resizer, image, width, height))
 }
 
 pub fn resize_fast_with_resizer(resizer: &mut Resizer, image: &(impl IntoImageView + Any), width: u32, height: u32) -> DynamicImage {

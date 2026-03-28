@@ -94,8 +94,7 @@ fn filter_candidate(contour: &[Point<f32>], config: &ArucoTagDetectorConfig) -> 
         }
     }
     let adaptive_epsilon = contour_epsilon(perimeter, config);
-    let result = DETECT_SCRATCH.with(|scratch| {
-        let mut scratch = scratch.borrow_mut();
+    let result = with_detect_scratch(|scratch| {
         let (contour, approx) = {
             let DetectScratch { downsampled, approx, .. } = &mut *scratch;
             (downsample_closed_contour_for_fast_dp(contour, downsampled), approx)
@@ -156,8 +155,7 @@ pub fn candidate_quad_from_contour_fast(contour: &[Point<f32>], perimeter: f32, 
     }
 
     let adaptive_epsilon = contour_epsilon(perimeter, config);
-    let result = DETECT_SCRATCH.with(|scratch| {
-        let mut scratch = scratch.borrow_mut();
+    let result = with_detect_scratch(|scratch| {
         let (contour, approx) = {
             let DetectScratch { downsampled, approx, .. } = &mut *scratch;
             (downsample_closed_contour_for_fast_dp(contour, downsampled), approx)

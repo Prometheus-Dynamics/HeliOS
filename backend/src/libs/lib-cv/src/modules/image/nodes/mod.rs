@@ -20,11 +20,11 @@ use crate::modules::image::morphology as morph_ops;
 use crate::modules::image::{
     binary::otsu_level,
     blur::nodes::cv_blur,
-    clahe::{ClaheTiles, apply_clahe_with_tiles, prepare_clahe},
+    clahe::{apply_clahe_with_tiles, prepare_clahe},
     components::{ComponentFeature, component_features as extract_component_features, remove_small_components_in_place},
     convolution::{canny_prep, convolve_gray, sobel_edges},
     guided::guided_filter_gray,
-    luma::{crop_luma8_frame, with_luma8_frame},
+    luma::with_luma8_frame,
     morphology::skeleton,
     resize::{downscale_luma8_in_place, resize_fast},
     rotate::{Rotation, rotate_fast},
@@ -35,7 +35,7 @@ use crate::plugin::ExecMode;
 use crate::modules::image::binary::binary_image_simd;
 #[cfg(feature = "gpu")]
 use bytemuck::{Pod, Zeroable};
-use daedalus::gpu::Payload;
+use daedalus::gpu::Compute;
 #[cfg(feature = "gpu")]
 use daedalus::gpu::shader::{ShaderContext, TextureOut, Uniform};
 #[cfg(feature = "gpu")]
@@ -83,12 +83,12 @@ impl MorphNorm {
     }
 }
 
-fn expect_cpu(frame: Payload<DynamicImage>, label: &str, _exec_ctx: Option<&ExecutionContext>) -> Result<DynamicImage, NodeError> {
+fn expect_cpu(frame: Compute<DynamicImage>, label: &str, _exec_ctx: Option<&ExecutionContext>) -> Result<DynamicImage, NodeError> {
     #[cfg(feature = "gpu")]
     {
         match frame {
-            Payload::Cpu(img) => Ok(img),
-            Payload::Gpu(handle) => {
+            Compute::Cpu(img) => Ok(img),
+            Compute::Gpu(handle) => {
                 let ctx = _exec_ctx.and_then(|ctx| ctx.gpu.as_ref()).ok_or_else(|| NodeError::Handler(format!("{label}: gpu payload missing context")))?;
                 let bytes = ctx.read_texture(&handle).map_err(|e| NodeError::Handler(format!("{label}: {e}")))?;
                 let rgba = RgbaImage::from_raw(handle.width, handle.height, bytes).ok_or_else(|| NodeError::Handler(format!("{label}: invalid image dimensions")))?;
@@ -99,8 +99,8 @@ fn expect_cpu(frame: Payload<DynamicImage>, label: &str, _exec_ctx: Option<&Exec
     #[cfg(not(feature = "gpu"))]
     {
         match frame {
-            Payload::Cpu(img) => Ok(img),
-            Payload::Gpu(_) => Err(NodeError::Handler(format!("{label}: GPU payload unsupported (insert cpu convert)"))),
+            Compute::Cpu(img) => Ok(img),
+            Compute::Gpu(_) => Err(NodeError::Handler(format!("{label}: GPU payload unsupported (insert cpu convert)"))),
         }
     }
 }
@@ -118,7 +118,7 @@ struct BinaryParams {
 #[gpu(spec(src = "src/gpu/shaders/binary.wgsl", entry = "binary_main"))]
 struct BinaryShaderBindings<'a> {
     #[gpu(binding = 0, texture2d(format = "rgba8unorm"))]
-    input: &'a Payload<DynamicImage>,
+    input: &'a Compute<DynamicImage>,
     #[gpu(binding = 1, texture2d(format = "rgba8unorm", write))]
     output: TextureOut,
     #[gpu(binding = 2, uniform)]
@@ -140,7 +140,7 @@ struct BoxBlurParams {
 #[gpu(spec(src = "src/gpu/shaders/adaptive_box.wgsl", entry = "box_horizontal_main"))]
 struct BoxBlurHorizontalBindings<'a> {
     #[gpu(binding = 0, texture2d(format = "rgba8unorm"))]
-    input: &'a Payload<DynamicImage>,
+    input: &'a Compute<DynamicImage>,
     #[gpu(binding = 1, texture2d(format = "rgba8unorm", write))]
     output: TextureOut,
     #[gpu(binding = 2, uniform)]
@@ -152,7 +152,7 @@ struct BoxBlurHorizontalBindings<'a> {
 #[gpu(spec(src = "src/gpu/shaders/adaptive_box.wgsl", entry = "box_vertical_main"))]
 struct BoxBlurVerticalBindings<'a> {
     #[gpu(binding = 0, texture2d(format = "rgba8unorm"))]
-    input: &'a Payload<DynamicImage>,
+    input: &'a Compute<DynamicImage>,
     #[gpu(binding = 1, texture2d(format = "rgba8unorm", write))]
     output: TextureOut,
     #[gpu(binding = 2, uniform)]
@@ -173,9 +173,9 @@ struct MaskThresholdParams {
 #[gpu(spec(src = "src/gpu/shaders/aruco_mask_threshold.wgsl", entry = "mask_threshold_r8_main"))]
 struct MaskThresholdShaderBindings<'a> {
     #[gpu(binding = 0, texture2d(format = "rgba8unorm"))]
-    input: &'a Payload<DynamicImage>,
+    input: &'a Compute<DynamicImage>,
     #[gpu(binding = 1, texture2d(format = "rgba8unorm"))]
-    mean: &'a Payload<DynamicImage>,
+    mean: &'a Compute<DynamicImage>,
     #[gpu(binding = 2, texture2d(format = "rgba8unorm", write))]
     output: TextureOut,
     #[gpu(binding = 3, uniform)]
@@ -199,7 +199,7 @@ struct DownscaleParams {
 #[gpu(spec(src = "src/gpu/shaders/downscale.wgsl", entry = "downscale_main"))]
 struct DownscaleShaderBindings<'a> {
     #[gpu(binding = 0, texture2d(format = "rgba8unorm"))]
-    input: &'a Payload<DynamicImage>,
+    input: &'a Compute<DynamicImage>,
     #[gpu(binding = 1, texture2d(format = "rgba8unorm", write))]
     output: TextureOut,
     #[gpu(binding = 2, uniform)]
@@ -220,7 +220,7 @@ struct SobelParams {
 #[gpu(spec(src = "src/gpu/shaders/sobel.wgsl", entry = "sobel_main"))]
 struct SobelShaderBindings<'a> {
     #[gpu(binding = 0, texture2d(format = "rgba8unorm"))]
-    input: &'a Payload<DynamicImage>,
+    input: &'a Compute<DynamicImage>,
     #[gpu(binding = 1, texture2d(format = "rgba8unorm", write))]
     output: TextureOut,
     #[gpu(binding = 2, uniform)]
@@ -242,7 +242,7 @@ struct ConvolutionParams {
 #[gpu(spec(src = "src/gpu/shaders/convolution.wgsl", entry = "convolution_main"))]
 struct ConvolutionShaderBindings<'a> {
     #[gpu(binding = 0, texture2d(format = "rgba8unorm"))]
-    input: &'a Payload<DynamicImage>,
+    input: &'a Compute<DynamicImage>,
     #[gpu(binding = 1, texture2d(format = "rgba8unorm", write))]
     output: TextureOut,
     #[gpu(binding = 2, uniform)]
@@ -263,7 +263,7 @@ struct GuidedParams {
 #[gpu(spec(src = "src/gpu/shaders/guided_filter_coeff.wgsl", entry = "guided_coeff_main"))]
 struct GuidedCoeffShaderBindings<'a> {
     #[gpu(binding = 0, texture2d(format = "rgba8unorm"))]
-    input: &'a Payload<DynamicImage>,
+    input: &'a Compute<DynamicImage>,
     #[gpu(binding = 1, texture2d(format = "rgba16float", write))]
     output: TextureOut,
     #[gpu(binding = 2, uniform)]
@@ -275,9 +275,9 @@ struct GuidedCoeffShaderBindings<'a> {
 #[gpu(spec(src = "src/gpu/shaders/guided_filter_resolve.wgsl", entry = "guided_resolve_main"))]
 struct GuidedResolveShaderBindings<'a> {
     #[gpu(binding = 0, texture2d(format = "rgba8unorm"))]
-    input: &'a Payload<DynamicImage>,
+    input: &'a Compute<DynamicImage>,
     #[gpu(binding = 1, texture2d(format = "rgba16float"))]
-    coeff: &'a Payload<DynamicImage>,
+    coeff: &'a Compute<DynamicImage>,
     #[gpu(binding = 2, uniform)]
     params: Uniform<GuidedParams>,
     #[gpu(binding = 3, texture2d(format = "rgba8unorm", write))]
@@ -299,7 +299,7 @@ struct MorphParams {
 #[gpu(spec(src = "src/gpu/shaders/morph.wgsl", entry = "morph_main"))]
 struct MorphShaderBindings<'a> {
     #[gpu(binding = 0, texture2d(format = "rgba8unorm"))]
-    input: &'a Payload<DynamicImage>,
+    input: &'a Compute<DynamicImage>,
     #[gpu(binding = 1, texture2d(format = "rgba8unorm", write))]
     output: TextureOut,
     #[gpu(binding = 2, uniform)]
@@ -311,9 +311,9 @@ struct MorphShaderBindings<'a> {
 #[gpu(spec(src = "src/gpu/shaders/morph_diff.wgsl", entry = "diff_main"))]
 struct MorphDiffShaderBindings<'a> {
     #[gpu(binding = 0, texture2d(format = "rgba8unorm"))]
-    a: &'a Payload<DynamicImage>,
+    a: &'a Compute<DynamicImage>,
     #[gpu(binding = 1, texture2d(format = "rgba8unorm"))]
-    b: &'a Payload<DynamicImage>,
+    b: &'a Compute<DynamicImage>,
     #[gpu(binding = 3, texture2d(format = "rgba8unorm", write))]
     output: TextureOut,
 }
@@ -323,7 +323,7 @@ struct MorphDiffShaderBindings<'a> {
 #[gpu(spec(src = "src/gpu/shaders/clahe.wgsl", entry = "clahe_main"))]
 struct ClaheShaderBindings<'a> {
     #[gpu(binding = 0, texture2d(format = "rgba8unorm"))]
-    input: &'a Payload<DynamicImage>,
+    input: &'a Compute<DynamicImage>,
     #[gpu(binding = 1, texture2d(format = "rgba8unorm", write))]
     output: TextureOut,
     #[gpu(binding = 2, uniform)]

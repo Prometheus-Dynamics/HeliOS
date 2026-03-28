@@ -188,9 +188,7 @@ pub(super) fn decode_quad_warp_result(
     }
 
     fn warp_and_decode(gray: &GrayImage, corners: &[Point<f32>; 4], warp_scale: u32, family: &ArucoTagFamily, config: &ArucoTagDecodeConfig) -> Result<WarpDecodeCandidate, WarpDecodeError> {
-        DECODE_SCRATCH.with(|scratch| {
-            let mut scratch = scratch.try_borrow_mut().map_err(|_| WarpDecodeError::InvalidInput)?;
-
+        with_decode_scratch(|scratch| {
             let from = [(corners[0].x, corners[0].y), (corners[1].x, corners[1].y), (corners[2].x, corners[2].y), (corners[3].x, corners[3].y)];
             let side = family.total_width() as u32 * warp_scale;
             if side == 0 {

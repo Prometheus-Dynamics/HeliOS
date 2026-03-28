@@ -902,8 +902,8 @@ async fn preview_stream(State(state): State<AppState>, Path(id): Path<Uuid>) -> 
     params(("id" = Uuid, Path, description = "Stream ID")),
     responses((status = 200, description = "Latest JPEG frame", content_type = "image/jpeg"))
 )]
-async fn frame_jpeg(Path(id): Path<Uuid>) -> impl IntoResponse {
-    preview::frame_jpeg(id).await
+async fn frame_jpeg(State(state): State<AppState>, Path(id): Path<Uuid>) -> impl IntoResponse {
+    preview::frame_jpeg(state, id).await
 }
 
 #[utoipa::path(

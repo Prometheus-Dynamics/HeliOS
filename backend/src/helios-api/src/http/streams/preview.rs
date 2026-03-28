@@ -15,7 +15,8 @@ use tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
 
 use crate::http::AppState;
-use helios_engine::ipc::EngineErrorCode;
+use crate::http::streams::snapshot::capture_snapshot_jpeg_without_preview_fallback;
+use helios_engine::ipc::{EngineErrorCode, RecordingSource};
 use helios_engine::stream::{ShmemFrameHeader, read_latest_frame_with_header, read_latest_header, touch_stream_preview};
 
 use super::mjpeg;
@@ -93,16 +94,10 @@ async fn prefer_jpeg_preview_header(id: Uuid, header: ShmemFrameHeader) -> Shmem
 }
 
 pub(crate) async fn stream_format(id: Uuid) -> Response {
-    let header = match tokio::task::spawn_blocking(move || {
-        let _ = touch_stream_preview(id);
-        read_latest_header(id)
-    })
-    .await
-    {
+    let header = match tokio::task::spawn_blocking(move || read_latest_header(id)).await {
         Ok(Ok(header)) => header,
         Ok(Err(_)) | Err(_) => return StatusCode::NOT_FOUND.into_response(),
     };
-    let header = prefer_jpeg_preview_header(id, header).await;
     if header.len == 0 || header.fourcc.to_u32() == 0 {
         return StatusCode::NOT_FOUND.into_response();
     }
@@ -113,8 +108,19 @@ pub(crate) async fn preview_stream(state: AppState, id: Uuid) -> Response {
     let header = match tokio::time::timeout(
         Duration::from_secs(2),
         tokio::task::spawn_blocking(move || {
-            let _ = touch_stream_preview(id);
-            read_latest_header(id)
+            let deadline = Instant::now() + Duration::from_secs(2);
+            loop {
+                let _ = touch_stream_preview(id);
+                match read_latest_header(id) {
+                    Ok(header) if header.len > 0 && header.fourcc.to_u32() != 0 => return Ok(header),
+                    Ok(_) | Err(_) => {
+                        if Instant::now() >= deadline {
+                            return read_latest_header(id);
+                        }
+                        std::thread::sleep(Duration::from_millis(25));
+                    }
+                }
+            }
         }),
     )
     .await
@@ -190,15 +196,10 @@ pub(crate) async fn preview_stream(state: AppState, id: Uuid) -> Response {
         .unwrap()
 }
 
-pub(crate) async fn frame_jpeg(id: Uuid) -> Response {
-    match latest_frame_jpeg_bytes(id).await {
+pub(crate) async fn frame_jpeg(state: AppState, id: Uuid) -> Response {
+    match capture_snapshot_jpeg_without_preview_fallback(&state, id, Some(RecordingSource::Raw)).await {
         Ok(jpeg) => (StatusCode::OK, [(header::CONTENT_TYPE, "image/jpeg"), (header::CACHE_CONTROL, "no-store, no-cache")], Body::from(jpeg)).into_response(),
-        Err(err) => {
-            if is_preview_unavailable_error(&err) {
-                return (StatusCode::NOT_FOUND, Json(engine_error_body(Some(EngineErrorCode::NotFound), "preview unavailable"))).into_response();
-            }
-            (StatusCode::BAD_GATEWAY, Json(engine_error_body(Some(EngineErrorCode::Internal), err))).into_response()
-        }
+        Err(err) => err.into_response(),
     }
 }
 
@@ -233,9 +234,4 @@ fn preview_jpeg_from_encoded(header: ShmemFrameHeader, bytes: Vec<u8>) -> Result
         _ => {}
     }
     Err("preview unavailable".into())
-}
-
-fn is_preview_unavailable_error(err: &str) -> bool {
-    let err = err.to_ascii_lowercase();
-    err.contains("frame map not initialized") || err.contains("frame map not found") || err.contains("preview unavailable") || err.contains("no such file or directory")
 }

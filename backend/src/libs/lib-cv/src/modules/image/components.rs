@@ -10,6 +10,21 @@ thread_local! {
     static COMPONENT_FEATURE_SCRATCH: RefCell<ComponentFeatureScratch> = RefCell::new(ComponentFeatureScratch::default());
 }
 
+const COMPONENT_OFFSET_RETAIN_CAP: usize = 256;
+const COMPONENT_PARENT_RETAIN_CAP: usize = 16 * 1024;
+const COMPONENT_STRIPE_KEEP_RETAIN_CAP: usize = 16 * 1024;
+const COMPONENT_ROW_TO_STRIPE_RETAIN_CAP: usize = 2 * 1024;
+const COMPONENT_FEATURE_VISITED_RETAIN_CAP: usize = 2 * 1024 * 1024;
+const COMPONENT_FEATURE_STACK_RETAIN_CAP: usize = 16 * 1024;
+
+#[inline(always)]
+fn trim_retained_vec<T>(vec: &mut Vec<T>, retain_cap: usize) {
+    vec.clear();
+    if vec.capacity() > retain_cap {
+        vec.shrink_to(retain_cap);
+    }
+}
+
 #[derive(Default)]
 struct ComponentScratch {
     component_offsets: Vec<u32>,
@@ -23,6 +38,34 @@ struct ComponentScratch {
 struct ComponentFeatureScratch {
     visited: Vec<u8>,
     stack: Vec<usize>,
+}
+
+pub(crate) fn compact_component_scratch_after_frame() {
+    COMPONENT_SCRATCH.with(|scratch| {
+        let mut scratch = scratch.borrow_mut();
+        trim_retained_vec(&mut scratch.component_offsets, COMPONENT_OFFSET_RETAIN_CAP);
+        trim_retained_vec(&mut scratch.global_parents, COMPONENT_PARENT_RETAIN_CAP);
+        trim_retained_vec(&mut scratch.areas, COMPONENT_PARENT_RETAIN_CAP);
+        for keep in &mut scratch.stripe_keep {
+            trim_retained_vec(keep, COMPONENT_STRIPE_KEEP_RETAIN_CAP);
+        }
+        trim_retained_vec(&mut scratch.stripe_keep, COMPONENT_OFFSET_RETAIN_CAP);
+        trim_retained_vec(&mut scratch.row_to_stripe, COMPONENT_ROW_TO_STRIPE_RETAIN_CAP);
+    });
+    COMPONENT_FEATURE_SCRATCH.with(|scratch| {
+        let mut scratch = scratch.borrow_mut();
+        trim_retained_vec(&mut scratch.visited, COMPONENT_FEATURE_VISITED_RETAIN_CAP);
+        trim_retained_vec(&mut scratch.stack, COMPONENT_FEATURE_STACK_RETAIN_CAP);
+    });
+}
+
+pub(crate) fn release_component_scratch_on_idle() {
+    COMPONENT_SCRATCH.with(|scratch| {
+        *scratch.borrow_mut() = ComponentScratch::default();
+    });
+    COMPONENT_FEATURE_SCRATCH.with(|scratch| {
+        *scratch.borrow_mut() = ComponentFeatureScratch::default();
+    });
 }
 
 pub fn remove_small_components(mask: &GrayImage, min_area: u32) -> GrayImage {

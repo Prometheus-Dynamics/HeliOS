@@ -271,8 +271,7 @@ pub(super) fn decode_quad_aruco_warp_result(
             return None;
         }
         let iters = iters.clamp(8, 128);
-        DETECT_SCRATCH.with(|scratch| {
-            let mut scratch = scratch.borrow_mut();
+        with_detect_scratch(|scratch| {
             let mut inliers = std::mem::take(&mut scratch.inliers);
             let mut best_inliers = std::mem::take(&mut scratch.best_inliers);
             inliers.clear();
@@ -423,8 +422,7 @@ pub(super) fn decode_quad_aruco_warp_result(
             Some(peak_f)
         };
 
-        let (mut top_pts, mut bottom_pts, mut left_pts, mut right_pts) = DETECT_SCRATCH.with(|scratch| {
-            let mut scratch = scratch.borrow_mut();
+        let (mut top_pts, mut bottom_pts, mut left_pts, mut right_pts) = with_detect_scratch(|scratch| {
             (std::mem::take(&mut scratch.top_pts), std::mem::take(&mut scratch.bottom_pts), std::mem::take(&mut scratch.left_pts), std::mem::take(&mut scratch.right_pts))
         });
 
@@ -478,8 +476,7 @@ pub(super) fn decode_quad_aruco_warp_result(
             }
         }
 
-        DETECT_SCRATCH.with(|scratch| {
-            let mut scratch = scratch.borrow_mut();
+        with_detect_scratch(|scratch| {
             scratch.top_pts = top_pts;
             scratch.bottom_pts = bottom_pts;
             scratch.left_pts = left_pts;

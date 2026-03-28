@@ -4,12 +4,15 @@ use imageproc::contours::BorderType;
 use imageproc::point::Point;
 use memchr::memchr;
 use smallvec::SmallVec;
-use std::cell::RefCell;
 use std::mem::size_of;
+use std::sync::{Mutex, OnceLock};
 
-thread_local! {
-    static ROW_OFFSETS_SCRATCH: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+fn row_offsets_scratch() -> &'static Mutex<Vec<usize>> {
+    static ROW_OFFSETS_SCRATCH: OnceLock<Mutex<Vec<usize>>> = OnceLock::new();
+    ROW_OFFSETS_SCRATCH.get_or_init(|| Mutex::new(Vec::new()))
 }
+
+const ROW_OFFSETS_RETAIN_CAP: usize = 2048;
 
 pub(super) type ContourPoints = SmallVec<[Point<i32>; 32]>;
 
@@ -43,17 +46,29 @@ pub(super) fn ensure_scratch_len(buffer: &mut Vec<i32>, len: usize) {
 }
 
 pub(super) fn with_row_offsets<R>(width: usize, height: usize, f: impl FnOnce(&[usize]) -> R) -> R {
-    ROW_OFFSETS_SCRATCH.with(|scratch| {
-        let mut rows = scratch.borrow_mut();
-        if rows.len() != height {
-            rows.resize(height, 0);
-            crate::diagnostics::report_scratch_high_water("contour.row_offsets", rows.capacity() * size_of::<usize>());
-        }
-        for (y, slot) in rows.iter_mut().enumerate().take(height) {
-            *slot = y * width;
-        }
-        f(&rows)
-    })
+    let mut rows = row_offsets_scratch().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if rows.len() != height {
+        rows.resize(height, 0);
+        crate::diagnostics::report_scratch_high_water("contour.row_offsets", rows.capacity() * size_of::<usize>());
+    }
+    for (y, slot) in rows.iter_mut().enumerate().take(height) {
+        *slot = y * width;
+    }
+    f(&rows)
+}
+
+pub(super) fn compact_shared_scratch_after_frame() {
+    let mut rows = row_offsets_scratch().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if rows.capacity() > ROW_OFFSETS_RETAIN_CAP {
+        *rows = Vec::with_capacity(ROW_OFFSETS_RETAIN_CAP);
+    } else {
+        rows.clear();
+    }
+}
+
+pub(super) fn release_shared_scratch_on_idle() {
+    let mut rows = row_offsets_scratch().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    *rows = Vec::new();
 }
 
 #[inline(always)]

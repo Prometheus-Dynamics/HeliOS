@@ -1,5 +1,6 @@
 use super::*;
 use std::mem::size_of;
+use std::sync::{Mutex, OnceLock};
 
 const DETECT_RETAIN_POINT_CAP: usize = 4 * 1024;
 const DETECT_RETAIN_APPROX_CAP: usize = 1024;
@@ -60,9 +61,24 @@ impl Default for DecodeScratch {
     }
 }
 
-thread_local! {
-    pub(super) static DETECT_SCRATCH: RefCell<DetectScratch> = RefCell::new(DetectScratch::default());
-    pub(super) static DECODE_SCRATCH: RefCell<DecodeScratch> = RefCell::new(DecodeScratch::default());
+fn detect_scratch() -> &'static Mutex<DetectScratch> {
+    static DETECT_SCRATCH: OnceLock<Mutex<DetectScratch>> = OnceLock::new();
+    DETECT_SCRATCH.get_or_init(|| Mutex::new(DetectScratch::default()))
+}
+
+fn decode_scratch() -> &'static Mutex<DecodeScratch> {
+    static DECODE_SCRATCH: OnceLock<Mutex<DecodeScratch>> = OnceLock::new();
+    DECODE_SCRATCH.get_or_init(|| Mutex::new(DecodeScratch::default()))
+}
+
+pub(super) fn with_detect_scratch<R>(f: impl FnOnce(&mut DetectScratch) -> R) -> R {
+    let mut scratch = detect_scratch().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    f(&mut scratch)
+}
+
+pub(super) fn with_decode_scratch<R>(f: impl FnOnce(&mut DecodeScratch) -> R) -> R {
+    let mut scratch = decode_scratch().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    f(&mut scratch)
 }
 
 #[inline(always)]
@@ -91,15 +107,13 @@ fn decode_scratch_bytes(scratch: &DecodeScratch) -> usize {
 }
 
 pub(super) fn report_detect_scratch() {
-    DETECT_SCRATCH.with(|scratch| {
-        let scratch = scratch.borrow();
+    with_detect_scratch(|scratch| {
         crate::diagnostics::report_scratch_high_water("aruco.detect_scratch", detect_scratch_bytes(&scratch));
     });
 }
 
 pub(crate) fn compact_detect_scratch_after_frame() {
-    DETECT_SCRATCH.with(|scratch| {
-        let mut scratch = scratch.borrow_mut();
+    with_detect_scratch(|scratch| {
         trim_retained_vec(&mut scratch.distances, DETECT_RETAIN_POINT_CAP);
         trim_retained_vec(&mut scratch.trimmed, DETECT_RETAIN_POINT_CAP);
         trim_retained_vec(&mut scratch.inliers, DETECT_RETAIN_POINT_CAP);
@@ -114,8 +128,7 @@ pub(crate) fn compact_detect_scratch_after_frame() {
 }
 
 pub(crate) fn compact_decode_scratch_after_frame() {
-    DECODE_SCRATCH.with(|scratch| {
-        let mut scratch = scratch.borrow_mut();
+    with_decode_scratch(|scratch| {
         if scratch.warped_buf.capacity() > DECODE_RETAIN_WARPED_BUF_CAP {
             scratch.warped_buf.clear();
             scratch.warped_buf.shrink_to(DECODE_RETAIN_WARPED_BUF_CAP);

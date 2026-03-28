@@ -3,7 +3,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver as StdReceiver, SyncSender, TrySendError};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread::JoinHandle;
@@ -41,7 +41,6 @@ const SNAPSHOT_SOURCE_TIMEOUT: Duration = Duration::from_secs(3);
 const RECORDING_STOP_GRACE_DEFAULT_MS: u64 = 0;
 const RECORDING_STOP_GRACE_MIN_MS: u64 = 0;
 const RECORDING_STOP_GRACE_MAX_MS: u64 = 2_000;
-const POST_TEARDOWN_TRIM_DELAY: Duration = Duration::from_secs(2);
 const SHADOW_STOP_TIMEOUT: Duration = Duration::from_secs(10);
 const SHADOW_WINDOW_DEFAULT_MS: u64 = 120_000;
 const SHADOW_WINDOW_MIN_MS: u64 = 5_000;
@@ -55,6 +54,34 @@ const ENV_RECORDING_FRAME_QUEUE_SIZE: &str = "HELIOS_RECORDING_FRAME_QUEUE_SIZE"
 const DEFAULT_RECORDING_FRAME_QUEUE_SIZE: usize = 48;
 
 static SHADOW_DATA_ROOT: OnceLock<PathBuf> = OnceLock::new();
+
+struct ManagedEncodedConsumer {
+    count: Arc<AtomicU64>,
+    last_seen_ms: Arc<AtomicU64>,
+}
+
+impl ManagedEncodedConsumer {
+    fn new(count: Arc<AtomicU64>, last_seen_ms: Arc<AtomicU64>) -> Self {
+        count.fetch_add(1, Ordering::Relaxed);
+        let consumer = Self { count, last_seen_ms };
+        consumer.touch();
+        consumer
+    }
+
+    fn touch(&self) {
+        self.last_seen_ms.store(current_time_ms(), Ordering::Relaxed);
+    }
+
+    fn touch_handle(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.last_seen_ms)
+    }
+}
+
+impl Drop for ManagedEncodedConsumer {
+    fn drop(&mut self) {
+        let _ = self.count.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| Some(value.saturating_sub(1)));
+    }
+}
 
 #[derive(Clone, Debug, Default)]
 struct RecordingStats {
@@ -495,6 +522,7 @@ impl StreamManager {
                         None
                     }
                 };
+                let descriptor = crate::capture::descriptor_for_config(&manifest.capture).ok_or(Error::InvalidState("missing capture descriptor"))?;
 
                 let runner = StreamRunner::new(StreamRunnerConfig {
                     capture_config: manifest.capture.clone(),
@@ -506,28 +534,19 @@ impl StreamManager {
                     shmem,
                     stream_id: Some(stream_id),
                 });
-                // Start the runner on a plain std thread (no Tokio context) so Styx capture
-                // workers are always thread-backed and can be joined deterministically on stop.
-                let runner = std::thread::spawn(move || {
-                    let mut runner = runner;
-                    runner.start()?;
-                    Ok::<StreamRunner, Error>(runner)
-                })
-                .join()
-                .map_err(|_| Error::InvalidState("stream runner start panicked"))??;
-
-                let descriptor = runner.descriptor().cloned().ok_or(Error::InvalidState("missing capture descriptor"))?;
                 let encoded_tx = runner.encoded_sender();
+                let managed_encoded_consumer_count = runner.managed_encoded_consumer_count_handle();
+                let managed_encoded_consumer_last_seen_ms = runner.managed_encoded_consumer_last_seen_handle();
                 let raw_tx = runner.raw_sender();
                 let (command_tx, command_rx) = sync_channel::<StreamCommand>(stream_command_queue_size());
                 let (exit_tx, exit_rx) = watch::channel(StreamExit::Running);
                 let join: JoinHandle<()> = std::thread::spawn(move || run_stream_worker(runner, command_rx, exit_tx));
-                Ok::<_, Error>((descriptor, graph, encoded_tx, raw_tx, command_tx, exit_rx, join))
+                Ok::<_, Error>((descriptor, graph, encoded_tx, managed_encoded_consumer_count, managed_encoded_consumer_last_seen_ms, raw_tx, command_tx, exit_rx, join))
             }
         })
         .await
         .map_err(|_| Error::InvalidState("stream worker start cancelled"));
-        let (descriptor, host, encoded_tx, raw_tx, command_tx, exit_rx, join) = match start_res {
+        let (descriptor, host, encoded_tx, managed_encoded_consumer_count, managed_encoded_consumer_last_seen_ms, raw_tx, command_tx, exit_rx, join) = match start_res {
             Ok(Ok(parts)) => parts,
             Ok(Err(err)) => {
                 self.finish_starting(stream_id).await;
@@ -559,6 +578,8 @@ impl StreamManager {
                 host: tokio::sync::RwLock::new(host),
                 calibration_mode_restore: tokio::sync::RwLock::new(None),
                 encoded_tx: encoded_tx_for_ctx,
+                managed_encoded_consumer_count,
+                managed_encoded_consumer_last_seen_ms,
                 raw_tx: raw_tx_for_ctx,
                 command_tx,
                 exit_rx,
@@ -651,53 +672,6 @@ impl StreamManager {
         if let Some(join) = ctx.worker_join.lock().await.take() {
             let _ = tokio::task::spawn_blocking(move || join.join()).await;
         }
-        self.trim_after_last_stream_teardown(stream_id, "immediate").await;
-        self.schedule_delayed_trim_after_last_stream(stream_id);
-    }
-
-    fn schedule_delayed_trim_after_last_stream(&self, stream_id: Uuid) {
-        let manager = self.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(POST_TEARDOWN_TRIM_DELAY).await;
-            manager.trim_after_last_stream_teardown(stream_id, "delayed").await;
-        });
-    }
-
-    async fn trim_after_last_stream_teardown(&self, stream_id: Uuid, phase: &'static str) {
-        let active_streams = {
-            let streams = self.streams.read().await;
-            streams.len()
-        };
-        if active_streams != 0 {
-            tracing::debug!(stream_id = %stream_id, phase, active_streams, "skipping allocator trim; other streams are still active");
-            return;
-        }
-
-        let before = read_process_memory_rollup();
-        let trim_result = trim_process_allocators();
-        let after = read_process_memory_rollup();
-
-        tracing::info!(
-            stream_id = %stream_id,
-            phase,
-            active_streams,
-            trim_supported = trim_result.is_some(),
-            trim_result = trim_result.unwrap_or_default(),
-            before_pss_kib = ?before.pss_bytes.map(bytes_to_kib),
-            after_pss_kib = ?after.pss_bytes.map(bytes_to_kib),
-            delta_pss_kib = ?delta_kib(before.pss_bytes, after.pss_bytes),
-            before_private_dirty_kib = ?before.private_dirty_bytes.map(bytes_to_kib),
-            after_private_dirty_kib = ?after.private_dirty_bytes.map(bytes_to_kib),
-            delta_private_dirty_kib = ?delta_kib(before.private_dirty_bytes, after.private_dirty_bytes),
-            before_anon_kib = ?before.anonymous_bytes.map(bytes_to_kib),
-            after_anon_kib = ?after.anonymous_bytes.map(bytes_to_kib),
-            delta_anon_kib = ?delta_kib(before.anonymous_bytes, after.anonymous_bytes),
-            before_rss_kib = ?before.rss_bytes.map(bytes_to_kib),
-            after_rss_kib = ?after.rss_bytes.map(bytes_to_kib),
-            delta_rss_kib = ?delta_kib(before.rss_bytes, after.rss_bytes),
-            threads = ?after.threads,
-            "last stream stopped; trimmed allocator state"
-        );
     }
 
     pub async fn set_control(&self, stream_id: Uuid, control_id: ControlId, value: CaptureControlValue) -> Result<()> {
@@ -836,11 +810,28 @@ impl StreamManager {
             && (matches!(container, RecordingContainer::Mp4) || passthrough_codec == Some(codec));
         if use_encoded_passthrough {
             let manager = self.clone();
+            let encoded_consumer = ManagedEncodedConsumer::new(Arc::clone(&ctx.managed_encoded_consumer_count), Arc::clone(&ctx.managed_encoded_consumer_last_seen_ms));
+            let encoded_consumer_touch = encoded_consumer.touch_handle();
             let rx = ctx.encoded_tx.subscribe();
             let source_codec = passthrough_codec.unwrap_or(codec);
             let frame_ts_path = frame_ts_path.clone();
             tokio::spawn(async move {
-                let result = record_encoded_session(rx, stop_rx, &record_path, &raw_path, container, source_codec, codec, duration_ms, requested_fps, settings, Some(frame_ts_path)).await;
+                let _encoded_consumer = encoded_consumer;
+                let result = record_encoded_session(
+                    rx,
+                    stop_rx,
+                    &record_path,
+                    &raw_path,
+                    container,
+                    source_codec,
+                    codec,
+                    duration_ms,
+                    requested_fps,
+                    settings,
+                    Some(frame_ts_path),
+                    Some(encoded_consumer_touch),
+                )
+                .await;
                 let _ = done_tx.send(RecordingState::Completed(result.clone()));
                 manager.finish_recording(stream_id, result).await;
             });
@@ -1041,8 +1032,11 @@ impl StreamManager {
         let format_tracker = Arc::new(AtomicU8::new(raw_format.to_u8()));
         let tracker_for_worker = Arc::clone(&format_tracker);
         let (stop_tx, stop_rx) = oneshot::channel();
+        let encoded_consumer = ManagedEncodedConsumer::new(Arc::clone(&ctx.managed_encoded_consumer_count), Arc::clone(&ctx.managed_encoded_consumer_last_seen_ms));
+        let encoded_consumer_touch = encoded_consumer.touch_handle();
         let mut encoded_rx = ctx.encoded_tx.subscribe();
         let join = tokio::spawn(async move {
+            let _encoded_consumer = encoded_consumer;
             let worker = match ShadowRecorderWorker::start(ShadowRecorderConfig { shadow_dir: shadow_dir.clone(), codec: preferred_codec, segment_ms, window_ms, format_tracker: tracker_for_worker }) {
                 Ok(worker) => worker,
                 Err(err) => {
@@ -1050,7 +1044,7 @@ impl StreamManager {
                     return;
                 }
             };
-            if let Err(err) = run_shadow_recorder_stream(&mut encoded_rx, worker, stop_rx).await {
+            if let Err(err) = run_shadow_recorder_stream(&mut encoded_rx, worker, stop_rx, Some(encoded_consumer_touch)).await {
                 tracing::warn!(stream_id = %stream_id, error = %err, "shadow recorder stopped with error");
             }
         });
@@ -2485,12 +2479,20 @@ async fn capture_shadow_segments(shadow_dir: &Path, output_path: &Path, codec: R
     Ok(total_bytes)
 }
 
-async fn run_shadow_recorder_stream(rx: &mut Receiver<EncodedFrame>, worker: ShadowRecorderWorker, mut stop_rx: oneshot::Receiver<()>) -> std::result::Result<(), String> {
+async fn run_shadow_recorder_stream(
+    rx: &mut Receiver<EncodedFrame>,
+    worker: ShadowRecorderWorker,
+    mut stop_rx: oneshot::Receiver<()>,
+    consumer_touch: Option<Arc<AtomicU64>>,
+) -> std::result::Result<(), String> {
     loop {
         tokio::select! {
             _ = &mut stop_rx => break,
             recv = rx.recv() => match recv {
                 Ok(chunk) => {
+                    if let Some(touch) = consumer_touch.as_ref() {
+                        touch.store(current_time_ms(), Ordering::Relaxed);
+                    }
                     let _ = worker.try_send_chunk(chunk.data, chunk.ts_ms);
                 }
                 Err(RecvError::Lagged(_)) => continue,
@@ -3215,6 +3217,7 @@ async fn record_encoded_stream(
     codec: RecordingCodec,
     duration_ms: Option<u64>,
     timestamps_path: Option<PathBuf>,
+    consumer_touch: Option<Arc<AtomicU64>>,
 ) -> std::result::Result<RecordingStats, String> {
     let (tx, write_rx) = std::sync::mpsc::channel::<(Arc<[u8]>, u64)>();
     let output_path = output_path.to_path_buf();
@@ -3235,6 +3238,9 @@ async fn record_encoded_stream(
                     _ = sleep_until(duration_until) => break,
                     recv = rx.recv() => match recv {
                         Ok(chunk) => {
+                            if let Some(touch) = consumer_touch.as_ref() {
+                                touch.store(current_time_ms(), Ordering::Relaxed);
+                            }
                             let wall_ts_ms = current_time_ms().max(last_wall_ts_ms);
                             last_wall_ts_ms = wall_ts_ms;
                             if tx.send((chunk.data, wall_ts_ms)).is_err() {
@@ -3250,6 +3256,9 @@ async fn record_encoded_stream(
                     _ = sleep_until(stop_until) => break,
                     recv = rx.recv() => match recv {
                         Ok(chunk) => {
+                            if let Some(touch) = consumer_touch.as_ref() {
+                                touch.store(current_time_ms(), Ordering::Relaxed);
+                            }
                             let wall_ts_ms = current_time_ms().max(last_wall_ts_ms);
                             last_wall_ts_ms = wall_ts_ms;
                             if tx.send((chunk.data, wall_ts_ms)).is_err() {
@@ -3273,6 +3282,9 @@ async fn record_encoded_stream(
                 _ = sleep_until(duration_until) => break,
                 recv = rx.recv() => match recv {
                     Ok(chunk) => {
+                        if let Some(touch) = consumer_touch.as_ref() {
+                            touch.store(current_time_ms(), Ordering::Relaxed);
+                        }
                         let wall_ts_ms = current_time_ms().max(last_wall_ts_ms);
                         last_wall_ts_ms = wall_ts_ms;
                         if tx.send((chunk.data, wall_ts_ms)).is_err() {
@@ -3324,11 +3336,12 @@ async fn record_encoded_session(
     fps: Option<f32>,
     settings: Option<crate::ipc::RecordingSettings>,
     timestamps_path: Option<PathBuf>,
+    consumer_touch: Option<Arc<AtomicU64>>,
 ) -> std::result::Result<RecordingStats, String> {
     let record_path = if matches!(container, RecordingContainer::Mp4) { raw_path } else { output_path };
     let wall_start_ms = current_time_ms();
     let rewrite_timestamps_path = timestamps_path.clone();
-    let stats = record_encoded_stream(rx, stop_rx, record_path, source_codec, duration_ms, timestamps_path).await?;
+    let stats = record_encoded_stream(rx, stop_rx, record_path, source_codec, duration_ms, timestamps_path, consumer_touch).await?;
     let wall_end_ms = current_time_ms();
     if let Some(path) = rewrite_timestamps_path.as_deref() {
         maybe_rewrite_encoded_frame_timestamps(path, &stats, wall_start_ms, wall_end_ms).await?;
@@ -3900,81 +3913,6 @@ fn write_rgb24(image: &image::DynamicImage, out: &mut [u8]) -> bool {
 
 fn normalize_alias(alias: Option<&str>) -> Option<String> {
     alias.map(str::trim).filter(|value| !value.is_empty()).map(|value| value.to_ascii_lowercase())
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-struct ProcessMemoryRollup {
-    pss_bytes: Option<u64>,
-    private_dirty_bytes: Option<u64>,
-    anonymous_bytes: Option<u64>,
-    rss_bytes: Option<u64>,
-    threads: Option<u64>,
-}
-
-fn bytes_to_kib(bytes: u64) -> u64 {
-    bytes / 1024
-}
-
-fn delta_kib(before: Option<u64>, after: Option<u64>) -> Option<i64> {
-    Some(bytes_to_kib(after?) as i64 - bytes_to_kib(before?) as i64)
-}
-
-fn parse_proc_key_bytes(text: &str, key: &str) -> Option<u64> {
-    text.lines().find_map(|line| {
-        let trimmed = line.trim_start();
-        if !trimmed.starts_with(key) {
-            return None;
-        }
-        let value = trimmed[key.len()..].trim();
-        let number = value.split_whitespace().next().and_then(|raw| raw.parse::<u64>().ok())?;
-        if value.contains("kB") {
-            Some(number.saturating_mul(1024))
-        } else {
-            Some(number)
-        }
-    })
-}
-
-fn parse_proc_key_u64(text: &str, key: &str) -> Option<u64> {
-    text.lines().find_map(|line| {
-        let trimmed = line.trim_start();
-        if !trimmed.starts_with(key) {
-            return None;
-        }
-        trimmed[key.len()..].trim().parse::<u64>().ok()
-    })
-}
-
-fn read_process_memory_rollup() -> ProcessMemoryRollup {
-    let smaps = std::fs::read_to_string("/proc/self/smaps_rollup").ok();
-    let status = std::fs::read_to_string("/proc/self/status").ok();
-    ProcessMemoryRollup {
-        pss_bytes: smaps.as_deref().and_then(|text| parse_proc_key_bytes(text, "Pss:")),
-        private_dirty_bytes: smaps.as_deref().and_then(|text| parse_proc_key_bytes(text, "Private_Dirty:")),
-        anonymous_bytes: smaps.as_deref().and_then(|text| parse_proc_key_bytes(text, "Anonymous:")),
-        rss_bytes: status.as_deref().and_then(|text| parse_proc_key_bytes(text, "VmRSS:")),
-        threads: status.as_deref().and_then(|text| parse_proc_key_u64(text, "Threads:")),
-    }
-}
-
-#[allow(unsafe_code)]
-fn trim_process_allocators() -> Option<i32> {
-    #[cfg(all(target_os = "linux", target_env = "gnu"))]
-    {
-        unsafe extern "C" {
-            fn malloc_trim(pad: usize) -> i32;
-        }
-
-        // Reclaim free pages from glibc arenas after the last stream tears down. Repeated
-        // start/stop churn can otherwise leave large anonymous arenas resident long after the
-        // frame/graph objects are dropped.
-        Some(unsafe { malloc_trim(0) })
-    }
-
-    #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
-    {
-        None
-    }
 }
 
 fn single_view_slot_pipeline_id(manifest: &StreamManifest) -> Option<Uuid> {

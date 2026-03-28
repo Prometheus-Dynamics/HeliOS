@@ -20,20 +20,20 @@ use serde::{Deserialize, Serialize};
         outputs("mask")
     )
 )]
-fn cv_binary(frame: Payload<DynamicImage>, threshold: u8, mode: ExecMode, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+fn cv_binary(frame: Compute<DynamicImage>, threshold: u8, mode: ExecMode, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     #[cfg(feature = "gpu")]
     {
-        let cpu_fallback = || -> Result<Payload<DynamicImage>, NodeError> {
+        let cpu_fallback = || -> Result<Compute<DynamicImage>, NodeError> {
             let (bytes, w, h) = frame.to_rgba_bytes(ctx.gpu.as_ref()).map_err(|e| NodeError::Handler(format!("binary: {e}")))?;
             let rgba = RgbaImage::from_raw(w, h, bytes).ok_or_else(|| NodeError::Handler("binary: invalid image dimensions".into()))?;
             let img = DynamicImage::ImageRgba8(rgba);
             let mask = binary_image_simd(&img, threshold);
-            Ok(Payload::Cpu(DynamicImage::ImageLuma8(mask)))
+            Ok(Compute::Cpu(DynamicImage::ImageLuma8(mask)))
         };
 
         let (width, height) = frame.dimensions();
         if width == 0 || height == 0 {
-            return Ok(Payload::Cpu(DynamicImage::new_rgba8(width, height)));
+            return Ok(Compute::Cpu(DynamicImage::new_rgba8(width, height)));
         }
 
         let want_gpu = matches!(mode, ExecMode::Gpu | ExecMode::Auto) && ctx.gpu.is_some();
@@ -69,7 +69,7 @@ fn cv_binary(frame: Payload<DynamicImage>, threshold: u8, mode: ExecMode, #[cfg(
             }
         };
         let mask = crate::modules::image::binary::binary_image_gray_simd(gray, threshold);
-        Ok(Payload::Cpu(DynamicImage::ImageLuma8(mask)))
+        Ok(Compute::Cpu(DynamicImage::ImageLuma8(mask)))
     }
 }
 
@@ -80,7 +80,7 @@ fn cv_binary(frame: Payload<DynamicImage>, threshold: u8, mode: ExecMode, #[cfg(
     inputs("frame", port(name = "threshold", default = 90, meta(ui_min = 0, ui_max = 255, ui_step = 1))),
     outputs("mask")
 )]
-fn cv_binary_mask(frame: Payload<DynamicImage>, threshold: i64, _exec_ctx: &ExecutionContext) -> Result<GrayImage, NodeError> {
+fn cv_binary_mask(frame: Compute<DynamicImage>, threshold: i64, _exec_ctx: &ExecutionContext) -> Result<GrayImage, NodeError> {
     let img: DynamicImage = expect_cpu(frame, "binary_mask", Some(_exec_ctx))?;
 
     let threshold = (threshold.clamp(0, 255)) as u8;
@@ -184,7 +184,7 @@ fn adaptive_border_guarded<'a>(gray: &'a GrayImage, border_guard_px: u32) -> std
 
 #[cfg(feature = "gpu")]
 fn adaptive_threshold_impl(
-    frame: Payload<DynamicImage>,
+    frame: Compute<DynamicImage>,
     window: u32,
     offset: f32,
     threshold_offset: f32,
@@ -193,34 +193,34 @@ fn adaptive_threshold_impl(
     mode: ExecMode,
     ctx: ShaderContext,
     _exec_ctx: &ExecutionContext,
-) -> Result<Payload<DynamicImage>, NodeError> {
+) -> Result<Compute<DynamicImage>, NodeError> {
     let window = ensure_odd_window(window);
     let radius = window.saturating_sub(1) / 2;
     let combined_offset = offset + threshold_offset;
-    let cpu_fallback = || -> Result<Payload<DynamicImage>, NodeError> {
+    let cpu_fallback = || -> Result<Compute<DynamicImage>, NodeError> {
         match &frame {
-            Payload::Cpu(DynamicImage::ImageLuma8(gray)) => {
+            Compute::Cpu(DynamicImage::ImageLuma8(gray)) => {
                 let guarded = adaptive_border_guarded(gray, border_guard_px);
-                Ok(Payload::Cpu(DynamicImage::ImageLuma8(crate::modules::image::binary::adaptive_mean_threshold_fast_with_invert(guarded.as_ref(), window, combined_offset, invert))))
+                Ok(Compute::Cpu(DynamicImage::ImageLuma8(crate::modules::image::binary::adaptive_mean_threshold_fast_with_invert(guarded.as_ref(), window, combined_offset, invert))))
             }
-            Payload::Cpu(img) => {
+            Compute::Cpu(img) => {
                 let gray = img.to_luma8();
                 let guarded = adaptive_border_guarded(&gray, border_guard_px);
-                Ok(Payload::Cpu(DynamicImage::ImageLuma8(crate::modules::image::binary::adaptive_mean_threshold_fast_with_invert(guarded.as_ref(), window, combined_offset, invert))))
+                Ok(Compute::Cpu(DynamicImage::ImageLuma8(crate::modules::image::binary::adaptive_mean_threshold_fast_with_invert(guarded.as_ref(), window, combined_offset, invert))))
             }
-            Payload::Gpu(_) => {
+            Compute::Gpu(_) => {
                 let (bytes, w, h) = frame.to_rgba_bytes(ctx.gpu.as_ref()).map_err(|e| NodeError::Handler(format!("adaptive_threshold: {e}")))?;
                 let rgba = RgbaImage::from_raw(w, h, bytes).ok_or_else(|| NodeError::Handler("adaptive_threshold: invalid image dimensions".into()))?;
                 let gray = DynamicImage::ImageRgba8(rgba).to_luma8();
                 let guarded = adaptive_border_guarded(&gray, border_guard_px);
-                Ok(Payload::Cpu(DynamicImage::ImageLuma8(crate::modules::image::binary::adaptive_mean_threshold_fast_with_invert(guarded.as_ref(), window, combined_offset, invert))))
+                Ok(Compute::Cpu(DynamicImage::ImageLuma8(crate::modules::image::binary::adaptive_mean_threshold_fast_with_invert(guarded.as_ref(), window, combined_offset, invert))))
             }
         }
     };
 
     let (width, height) = frame.dimensions();
     if width == 0 || height == 0 {
-        return Ok(Payload::Cpu(DynamicImage::new_rgba8(width, height)));
+        return Ok(Compute::Cpu(DynamicImage::new_rgba8(width, height)));
     }
 
     let want_gpu = matches!(mode, ExecMode::Gpu | ExecMode::Auto) && ctx.gpu.is_some();
@@ -246,7 +246,7 @@ fn adaptive_threshold_impl(
 
 #[cfg(not(feature = "gpu"))]
 fn adaptive_threshold_impl(
-    frame: Payload<DynamicImage>,
+    frame: Compute<DynamicImage>,
     window: u32,
     offset: f32,
     threshold_offset: f32,
@@ -254,7 +254,7 @@ fn adaptive_threshold_impl(
     invert: bool,
     mode: ExecMode,
     _exec_ctx: &ExecutionContext,
-) -> Result<Payload<DynamicImage>, NodeError> {
+) -> Result<Compute<DynamicImage>, NodeError> {
     let window = ensure_odd_window(window);
     let _ = mode;
     let frame = expect_cpu(frame, "adaptive_threshold", Some(_exec_ctx))?;
@@ -263,7 +263,7 @@ fn adaptive_threshold_impl(
         let guarded = adaptive_border_guarded(gray, border_guard_px);
         crate::modules::image::binary::adaptive_mean_threshold_fast_with_invert(guarded.as_ref(), window, combined_offset, invert)
     });
-    Ok(Payload::Cpu(DynamicImage::ImageLuma8(mask)))
+    Ok(Compute::Cpu(DynamicImage::ImageLuma8(mask)))
 }
 
 #[cfg_attr(
@@ -302,7 +302,7 @@ fn adaptive_threshold_impl(
     )
 )]
 fn cv_adaptive_threshold(
-    frame: Payload<DynamicImage>,
+    frame: Compute<DynamicImage>,
     window: u32,
     offset: f32,
     threshold_offset: f32,
@@ -311,7 +311,7 @@ fn cv_adaptive_threshold(
     mode: ExecMode,
     #[cfg(feature = "gpu")] ctx: ShaderContext,
     _exec_ctx: &ExecutionContext,
-) -> Result<Payload<DynamicImage>, NodeError> {
+) -> Result<Compute<DynamicImage>, NodeError> {
     #[cfg(feature = "gpu")]
     {
         adaptive_threshold_impl(frame, window, offset, threshold_offset, border_guard_px, invert, mode, ctx, _exec_ctx)
@@ -360,7 +360,7 @@ fn cv_adaptive_threshold(
     )
 )]
 fn cv_adaptive_threshold_fast(
-    frame: Payload<DynamicImage>,
+    frame: Compute<DynamicImage>,
     window: u32,
     offset: f32,
     threshold_offset: f32,
@@ -369,7 +369,7 @@ fn cv_adaptive_threshold_fast(
     mode: ExecMode,
     #[cfg(feature = "gpu")] ctx: ShaderContext,
     _exec_ctx: &ExecutionContext,
-) -> Result<Payload<DynamicImage>, NodeError> {
+) -> Result<Compute<DynamicImage>, NodeError> {
     #[cfg(feature = "gpu")]
     {
         adaptive_threshold_impl(frame, window, offset, threshold_offset, border_guard_px, invert, mode, ctx, _exec_ctx)
@@ -382,20 +382,20 @@ fn cv_adaptive_threshold_fast(
 
 #[cfg_attr(feature = "gpu", node(id = "sobel_edge", compute(ComputeAffinity::GpuPreferred), inputs("frame", port(name = "mode", default = "auto")), outputs("mask"), shaders(SobelShaderBindings)))]
 #[cfg_attr(not(feature = "gpu"), node(id = "sobel_edge", compute(ComputeAffinity::GpuPreferred), inputs("frame", port(name = "mode", default = "auto")), outputs("mask")))]
-fn cv_sobel(frame: Payload<DynamicImage>, mode: ExecMode, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+fn cv_sobel(frame: Compute<DynamicImage>, mode: ExecMode, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     #[cfg(feature = "gpu")]
     {
-        let cpu_fallback = || -> Result<Payload<DynamicImage>, NodeError> {
+        let cpu_fallback = || -> Result<Compute<DynamicImage>, NodeError> {
             let (bytes, w, h) = frame.to_rgba_bytes(ctx.gpu.as_ref()).map_err(|e| NodeError::Handler(format!("sobel: {e}")))?;
             let rgba = RgbaImage::from_raw(w, h, bytes).ok_or_else(|| NodeError::Handler("sobel: invalid image dimensions".into()))?;
             let tmp = DynamicImage::ImageRgba8(rgba);
             let mask = with_luma8_frame(&tmp, sobel_edges);
-            Ok(Payload::Cpu(DynamicImage::ImageLuma8(mask)))
+            Ok(Compute::Cpu(DynamicImage::ImageLuma8(mask)))
         };
 
         let (width, height) = frame.dimensions();
         if width == 0 || height == 0 {
-            return Ok(Payload::Cpu(DynamicImage::new_rgba8(width, height)));
+            return Ok(Compute::Cpu(DynamicImage::new_rgba8(width, height)));
         }
 
         let want_gpu = matches!(mode, ExecMode::Gpu | ExecMode::Auto) && ctx.gpu.is_some();
@@ -423,7 +423,7 @@ fn cv_sobel(frame: Payload<DynamicImage>, mode: ExecMode, #[cfg(feature = "gpu")
         let _ = mode;
         let frame = expect_cpu(frame, "sobel", Some(_exec_ctx))?;
         let mask = with_luma8_frame(&frame, sobel_edges);
-        Ok(Payload::Cpu(DynamicImage::ImageLuma8(mask)))
+        Ok(Compute::Cpu(DynamicImage::ImageLuma8(mask)))
     }
 }
 
@@ -459,14 +459,14 @@ fn cv_sobel(frame: Payload<DynamicImage>, mode: ExecMode, #[cfg(feature = "gpu")
     )
 )]
 fn cv_convolution3x3(
-    frame: Payload<DynamicImage>,
+    frame: Compute<DynamicImage>,
     kernel: Vec<f32>,
     factor: f32,
     bias: f32,
     mode: ExecMode,
     #[cfg(feature = "gpu")] ctx: ShaderContext,
     _exec_ctx: &ExecutionContext,
-) -> Result<Payload<DynamicImage>, NodeError> {
+) -> Result<Compute<DynamicImage>, NodeError> {
     let kernel_arr: [f32; 9] = to_kernel(&kernel).ok_or_else(|| NodeError::InvalidInput("kernel must have 9 values".into()))?;
 
     #[cfg(feature = "gpu")]
@@ -479,7 +479,7 @@ fn cv_convolution3x3(
         let _ = mode;
         let frame = expect_cpu(frame, "convolution3x3", Some(_exec_ctx))?;
         let gray = frame.to_luma8();
-        Ok(Payload::Cpu(DynamicImage::ImageLuma8(convolve_gray(&gray, kernel_arr, factor, bias))))
+        Ok(Compute::Cpu(DynamicImage::ImageLuma8(convolve_gray(&gray, kernel_arr, factor, bias))))
     }
 }
 
@@ -513,26 +513,26 @@ fn cv_convolution3x3(
     )
 )]
 fn cv_guided_filter(
-    mask: Payload<DynamicImage>,
+    mask: Compute<DynamicImage>,
     radius: u32,
     epsilon: f32,
     mode: ExecMode,
     #[cfg(feature = "gpu")] ctx: ShaderContext,
     _exec_ctx: &ExecutionContext,
-) -> Result<Payload<DynamicImage>, NodeError> {
+) -> Result<Compute<DynamicImage>, NodeError> {
     #[cfg(feature = "gpu")]
     {
         let r = radius.max(1);
-        let cpu_fallback = || -> Result<Payload<DynamicImage>, NodeError> {
+        let cpu_fallback = || -> Result<Compute<DynamicImage>, NodeError> {
             let (bytes, w, h) = mask.to_rgba_bytes(ctx.gpu.as_ref()).map_err(|e| NodeError::Handler(format!("guided_filter_gray: {e}")))?;
             let rgba = RgbaImage::from_raw(w, h, bytes).ok_or_else(|| NodeError::Handler("guided_filter_gray: invalid image dimensions".into()))?;
             let gray = DynamicImage::ImageRgba8(rgba).to_luma8();
-            Ok(Payload::Cpu(DynamicImage::ImageLuma8(guided_filter_gray(&gray, r, epsilon))))
+            Ok(Compute::Cpu(DynamicImage::ImageLuma8(guided_filter_gray(&gray, r, epsilon))))
         };
 
         let (width, height) = mask.dimensions();
         if width == 0 || height == 0 {
-            return Ok(Payload::Cpu(DynamicImage::new_rgba8(width, height)));
+            return Ok(Compute::Cpu(DynamicImage::new_rgba8(width, height)));
         }
 
         let want_gpu = matches!(mode, ExecMode::Gpu | ExecMode::Auto) && ctx.gpu.is_some();
@@ -548,7 +548,7 @@ fn cv_guided_filter(
             };
 
             if let Some(coeff_handle) = coeff_out.texture_handle(1) {
-                let coeff_payload = Payload::Gpu(coeff_handle);
+                let coeff_payload = Compute::Gpu(coeff_handle);
                 let resolve_bindings = GuidedResolveShaderBindings { input: &mask, coeff: &coeff_payload, output: TextureOut::from_input_ctx(&mask, &ctx), params: Uniform::new(params) };
 
                 return ctx
@@ -573,7 +573,7 @@ fn cv_guided_filter(
         let r = radius.max(1);
         let mask = expect_cpu(mask, "guided_filter_gray", Some(_exec_ctx))?;
         let gray = mask.to_luma8();
-        Ok(Payload::Cpu(DynamicImage::ImageLuma8(guided_filter_gray(&gray, r, epsilon))))
+        Ok(Compute::Cpu(DynamicImage::ImageLuma8(guided_filter_gray(&gray, r, epsilon))))
     }
 }
 
@@ -586,85 +586,14 @@ fn cv_otsu_level(frame: DynamicImage) -> Result<u32, NodeError> {
 // They were conversion-only / API-only variants; Daedalus already handles conversions, so we
 // keep a single `adaptive_threshold` node with the superset of parameters.
 
-#[derive(Clone, Copy, Debug, Default)]
-struct ClaheFrameStats {
-    mean: u16,
-    spread: u16,
-}
-
-struct ClahePreparedCache {
-    key: (u32, u32, u32, u32),
-    stats: ClaheFrameStats,
-    reuse_streak: u8,
-    tiles: ClaheTiles,
-}
-
-thread_local! {
-    static CLAHE_PREPARED_CACHE: std::cell::RefCell<Option<ClahePreparedCache>> = const { std::cell::RefCell::new(None) };
-}
-
-const CLAHE_MAX_REUSE_STREAK: u8 = 120;
-const CLAHE_MAX_REUSE_STREAK_TILE1: u8 = 240;
-const CLAHE_MEAN_DELTA_MAX: u16 = 30;
-const CLAHE_SPREAD_DELTA_MAX: u16 = 64;
-const CLAHE_FORCE_REUSE_STREAK: u8 = 32;
-
-#[inline]
-fn clahe_frame_stats(gray: &GrayImage) -> ClaheFrameStats {
-    let w = gray.width() as usize;
-    let h = gray.height() as usize;
-    if w == 0 || h == 0 {
-        return ClaheFrameStats::default();
-    }
-
-    let sx = (w / 24).max(1);
-    let sy = (h / 18).max(1);
-    let raw = gray.as_raw();
-    let mut sum = 0u64;
-    let mut count = 0u64;
-    let mut min_v = u8::MAX;
-    let mut max_v = u8::MIN;
-
-    let mut y = 0usize;
-    while y < h {
-        let row = &raw[y * w..(y + 1) * w];
-        let mut x = 0usize;
-        while x < w {
-            let v = row[x];
-            min_v = min_v.min(v);
-            max_v = max_v.max(v);
-            sum = sum.saturating_add(v as u64);
-            count = count.saturating_add(1);
-            x = x.saturating_add(sx);
-        }
-        y = y.saturating_add(sy);
-    }
-
-    let mean = if count > 0 { (sum / count) as u16 } else { 0 };
-    let spread = max_v.saturating_sub(min_v) as u16;
-    ClaheFrameStats { mean, spread }
-}
-
-#[inline]
-fn clahe_stats_similar(a: ClaheFrameStats, b: ClaheFrameStats) -> bool {
-    let mean_delta = a.mean.abs_diff(b.mean);
-    let spread_delta = a.spread.abs_diff(b.spread);
-    mean_delta <= CLAHE_MEAN_DELTA_MAX && spread_delta <= CLAHE_SPREAD_DELTA_MAX
-}
-
 fn apply_clahe_cached(gray: &GrayImage, tile_size: u32, clip_limit: f32) -> GrayImage {
-    let key = (gray.width(), gray.height(), tile_size, clip_limit.to_bits());
-    let stats = clahe_frame_stats(gray);
-    CLAHE_PREPARED_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        // Reusing prepared tiles across different frames can preserve the wrong local histogram
-        // layout even when coarse frame stats look "similar". That is enough to change the
-        // downstream threshold mask and break tag detection. Always prepare from the current frame.
-        let tiles = prepare_clahe(gray, tile_size, clip_limit);
-        let out = apply_clahe_with_tiles(gray, &tiles);
-        *cache = Some(ClahePreparedCache { key, stats, reuse_streak: 0, tiles });
-        out
-    })
+    // Reusing prepared tiles across different frames can preserve the wrong local histogram
+    // layout even when coarse frame stats look "similar". That is enough to change the
+    // downstream threshold mask and break tag detection. Always prepare from the current frame.
+    let tiles = prepare_clahe(gray, tile_size, clip_limit);
+    let out = apply_clahe_with_tiles(gray, &tiles);
+    crate::modules::image::clahe::compact_clahe_scratch_after_frame();
+    out
 }
 
 #[inline]
@@ -719,14 +648,14 @@ fn blend_clahe_with_base(base: &GrayImage, enhanced: GrayImage, mix: f32) -> Gra
     )
 )]
 fn cv_clahe(
-    mask: Payload<DynamicImage>,
+    mask: Compute<DynamicImage>,
     tile_size: i64,
     clip_limit: f64,
     mix: f64,
     mode: Option<ExecMode>,
     #[cfg(feature = "gpu")] ctx: ShaderContext,
     _exec_ctx: &ExecutionContext,
-) -> Result<Payload<DynamicImage>, NodeError> {
+) -> Result<Compute<DynamicImage>, NodeError> {
     let tile_size = tile_size.clamp(1, u32::MAX as i64) as u32;
     let clip_limit = (clip_limit.max(0.0) as f32).max(0.0);
     let mix = (mix as f32).clamp(0.0, 1.0);
@@ -802,9 +731,9 @@ fn cv_clahe(
 
     #[cfg(feature = "gpu")]
     {
-        let cpu_fallback = || -> Result<Payload<DynamicImage>, NodeError> {
+        let cpu_fallback = || -> Result<Compute<DynamicImage>, NodeError> {
             match &mask {
-                Payload::Cpu(img) => {
+                Compute::Cpu(img) => {
                     let out = match img {
                         DynamicImage::ImageLuma8(gray) => blend_clahe_with_base(gray, apply_clahe_cached(gray, tile_size, clip_limit), mix),
                         other => {
@@ -812,21 +741,21 @@ fn cv_clahe(
                             blend_clahe_with_base(&gray, apply_clahe_cached(&gray, tile_size, clip_limit), mix)
                         }
                     };
-                    Ok(Payload::Cpu(DynamicImage::ImageLuma8(out)))
+                    Ok(Compute::Cpu(DynamicImage::ImageLuma8(out)))
                 }
-                Payload::Gpu(_) => {
+                Compute::Gpu(_) => {
                     let (bytes, w, h) = mask.to_rgba_bytes(ctx.gpu.as_ref()).map_err(|e| NodeError::Handler(format!("clahe: {e}")))?;
                     let rgba = RgbaImage::from_raw(w, h, bytes).ok_or_else(|| NodeError::Handler("clahe: invalid image dimensions".into()))?;
                     let gray = DynamicImage::ImageRgba8(rgba).to_luma8();
                     let out = blend_clahe_with_base(&gray, apply_clahe_cached(&gray, tile_size, clip_limit), mix);
-                    Ok(Payload::Cpu(DynamicImage::ImageLuma8(out)))
+                    Ok(Compute::Cpu(DynamicImage::ImageLuma8(out)))
                 }
             }
         };
 
         let (width, height) = mask.dimensions();
         if width == 0 || height == 0 {
-            return Ok(Payload::Cpu(DynamicImage::new_rgba8(width, height)));
+            return Ok(Compute::Cpu(DynamicImage::new_rgba8(width, height)));
         }
 
         let want_gpu = matches!(mode, ExecMode::Gpu | ExecMode::Auto) && ctx.gpu.is_some() && mix >= 0.999;
@@ -867,7 +796,7 @@ fn cv_clahe(
                 blend_clahe_with_base(&gray, apply_clahe_cached(&gray, tile_size, clip_limit), mix)
             }
         };
-        Ok(Payload::Cpu(DynamicImage::ImageLuma8(out)))
+        Ok(Compute::Cpu(DynamicImage::ImageLuma8(out)))
     }
 }
 
@@ -997,21 +926,21 @@ fn gamma_lut(gamma: f32) -> [u8; 256] {
 }
 
 #[node(id = "equalize", inputs("mask"), outputs("mask"))]
-fn cv_equalize(mask: Payload<DynamicImage>, _exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+fn cv_equalize(mask: Compute<DynamicImage>, _exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     let img = expect_cpu(mask, "equalize", Some(_exec_ctx))?;
     let mut gray = match img {
         DynamicImage::ImageLuma8(gray) => gray,
         other => other.to_luma8(),
     };
     if gray.as_raw().iter().all(|&v| v == 0) {
-        return Ok(Payload::Cpu(DynamicImage::ImageLuma8(gray)));
+        return Ok(Compute::Cpu(DynamicImage::ImageLuma8(gray)));
     }
     equalize_hist_gray_in_place(&mut gray);
-    Ok(Payload::Cpu(DynamicImage::ImageLuma8(gray)))
+    Ok(Compute::Cpu(DynamicImage::ImageLuma8(gray)))
 }
 
 #[node(id = "gamma", inputs("mask", port(name = "gamma", default = 1.0f64, meta(ui_min = 0.1, ui_max = 5.0, ui_step = 0.1))), outputs("mask"))]
-fn cv_gamma(mask: Payload<DynamicImage>, gamma: f64, _exec_ctx: &ExecutionContext) -> Result<Payload<DynamicImage>, NodeError> {
+fn cv_gamma(mask: Compute<DynamicImage>, gamma: f64, _exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     if (gamma - 1.0).abs() <= f64::EPSILON {
         return Ok(mask);
     }
@@ -1019,5 +948,5 @@ fn cv_gamma(mask: Payload<DynamicImage>, gamma: f64, _exec_ctx: &ExecutionContex
     let lut = gamma_lut(gamma);
     let img = expect_cpu(mask, "gamma", Some(_exec_ctx))?;
     let gray = gamma_apply_to_image(img, &lut);
-    Ok(Payload::Cpu(DynamicImage::ImageLuma8(gray)))
+    Ok(Compute::Cpu(DynamicImage::ImageLuma8(gray)))
 }

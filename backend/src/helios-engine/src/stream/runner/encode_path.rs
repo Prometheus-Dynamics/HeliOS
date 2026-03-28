@@ -15,8 +15,8 @@ use crate::capture::{CaptureControlInfo, CaptureControlValue, CaptureDescriptor,
 use crate::error::{Error, Result};
 use crate::graph::GraphHandle;
 use crate::stream::{
-    CodecMetrics, EncodedFrame, StreamBufferPoolMetrics, StreamExternalBackingMetrics, StreamMemoryMetrics, StreamMetrics, StreamPackedPoolMetrics, StreamProcessMemoryMetrics,
-    StreamQueueMemoryMetrics, StreamStagingCopyMetrics,
+    CodecMetrics, EncodedFrame, StreamBufferPoolMetrics, StreamEncoderDemandMetrics, StreamExternalBackingMetrics, StreamFrameDemandMetrics, StreamMemoryMetrics, StreamMetrics,
+    StreamPackedPoolMetrics, StreamProcessMemoryMetrics, StreamQueueMemoryMetrics, StreamStagingCopyMetrics,
 };
 
 use super::super::encode::{stage_to_capture_metrics, to_codec_metrics};
@@ -24,6 +24,10 @@ use super::super::encoder_worker::EncoderWorkerStart;
 use super::StreamRunner;
 
 impl StreamRunner {
+    fn encoded_consumer_stale_ms() -> u64 {
+        std::env::var("HELIOS_ENCODED_CONSUMER_STALE_MS").ok().and_then(|raw| raw.parse::<u64>().ok()).unwrap_or(5_000).clamp(500, 60_000)
+    }
+
     fn parse_proc_key_bytes(text: &str, key: &str) -> Option<u64> {
         text.lines().find_map(|line| {
             let trimmed = line.trim_start();
@@ -225,6 +229,10 @@ impl StreamRunner {
         self.graph.process_with_options(image, crate::graph::GraphProcessOptions { require_image_output })
     }
 
+    pub(super) fn process_assigned_graph_preview(&self, image: image::DynamicImage, require_image_output: bool) -> Option<crate::graph::GraphPreviewOutput> {
+        self.graph.process_preview_with_options(image, crate::graph::GraphProcessOptions { require_image_output })
+    }
+
     pub fn start(&mut self) -> Result<()> {
         if self.session.is_some() {
             return Err(Error::InvalidState("stream already running"));
@@ -244,13 +252,8 @@ impl StreamRunner {
         self.session = Some(session);
         self.capture_started_wall = Some(Instant::now());
         tracing::info!("capture session attached to stream runner");
-        // `stop()` tears down the preview worker, and capture recovery restarts reuse this same
-        // runner instance. Recreate the worker on start so preview shmem resumes after restarts.
-        if self.preview_worker.is_none() && self.shmem.is_some() && self.preview_generation_enabled() {
-            self.preview_worker = Some(super::PreviewWorker::start(self.preview_encoder_stats.clone(), self.preview_encoder_last_activity_ms.clone()));
-            self.last_preview_encode_wall = None;
-            tracing::info!("preview worker restarted");
-        }
+        // Preview worker startup is handled lazily in the pump when preview demand appears.
+        self.last_preview_encode_wall = None;
 
         if (self.encoder_id.is_some() || self.decoder_id.is_some()) && self.codecs.is_none() {
             tracing::info!(encoder = self.encoder_id.as_deref().unwrap_or("none"), decoder = self.decoder_id.as_deref().unwrap_or("none"), "initializing codec registry");
@@ -344,10 +347,7 @@ impl StreamRunner {
         if let Some(worker) = self.preview_worker.take() {
             worker.stop();
         }
-        if self.shmem.is_some() && self.preview_generation_enabled() {
-            self.preview_worker = Some(super::PreviewWorker::start(self.preview_encoder_stats.clone(), self.preview_encoder_last_activity_ms.clone()));
-            self.last_preview_encode_wall = None;
-        }
+        self.last_preview_encode_wall = None;
 
         if decoder_changed || encoder_changed {
             // Pixel conversion helpers inside Styx cache per-thread buffers (including in the Rayon
@@ -454,6 +454,28 @@ impl StreamRunner {
         let pipeline = self.graph.pipeline_metrics();
         let pipeline_instances = self.graph.pipeline_metrics_by_pipeline();
         let memory = self.styx_memory_metrics();
+        let frame_demand_snapshot = match self.last_frame_demand.lock() {
+            Ok(guard) => *guard,
+            Err(poisoned) => *poisoned.into_inner(),
+        };
+        let frame_demand = Some(StreamFrameDemandMetrics {
+            raw_receiver_count: frame_demand_snapshot.raw_receiver_count,
+            host_receiver_count: frame_demand_snapshot.host_receiver_count,
+            preview_demand_active: frame_demand_snapshot.preview_demand_active,
+            encode_demand_active: frame_demand_snapshot.encode_demand_active,
+            graph_sample_demand_active: frame_demand_snapshot.graph_sample_demand_active,
+            needs_decoded_image: frame_demand_snapshot.needs_decoded_image,
+            graph_has_image_output: frame_demand_snapshot.graph_has_image_output,
+            graph_has_executor: frame_demand_snapshot.graph_has_executor,
+        });
+        let encoder_demand_active = self.encoder_demand();
+        let encoder_demand = Some(StreamEncoderDemandMetrics {
+            broadcast_receiver_count: self.encoded_tx.receiver_count() as u64,
+            managed_consumer_count: self.managed_encoded_consumer_count.load(Ordering::Relaxed),
+            managed_consumer_last_seen_ms: self.managed_encoded_consumer_last_seen_ms.load(Ordering::Relaxed),
+            encoder_demand_active,
+            encoder_worker_running: self.encoder_worker.is_some(),
+        });
         let main_encoder_active = Self::codec_stats_has_activity(&self.encoder_stats);
         let preview_encoder_active = Self::codec_stats_has_activity(&self.preview_encoder_stats);
         let prefer_preview_encoder = preview_encoder_active && !main_encoder_active;
@@ -498,7 +520,7 @@ impl StreamRunner {
                 }
             }
         }
-        StreamMetrics { capture, host, encoder, decoder, memory, pipeline, pipeline_instances }
+        StreamMetrics { capture, host, encoder, encoder_demand, frame_demand, decoder, memory, pipeline, pipeline_instances }
     }
 
     pub fn descriptor(&self) -> Option<&CaptureDescriptor> {
@@ -521,6 +543,14 @@ impl StreamRunner {
         self.encoded_tx.clone()
     }
 
+    pub fn managed_encoded_consumer_count_handle(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.managed_encoded_consumer_count)
+    }
+
+    pub fn managed_encoded_consumer_last_seen_handle(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.managed_encoded_consumer_last_seen_ms)
+    }
+
     pub fn subscribe_raw(&self) -> broadcast::Receiver<Arc<image::DynamicImage>> {
         self.raw_tx.subscribe()
     }
@@ -529,10 +559,21 @@ impl StreamRunner {
         self.raw_tx.clone()
     }
 
-    pub(super) fn encoder_demand(&mut self) -> bool {
+    pub(super) fn encoder_demand(&self) -> bool {
         // Encoder work is an optional side-channel for encoded consumers.
-        // Preview should stay on the lightweight preview worker path.
-        self.encoded_tx.receiver_count() > 0
+        // Preview should stay on the lightweight preview worker path, and unknown/stale
+        // broadcast receivers must not be able to keep ffmpeg hot forever.
+        let managed_count = self.managed_encoded_consumer_count.load(Ordering::Relaxed);
+        if managed_count == 0 {
+            return false;
+        }
+
+        let last_seen_ms = self.managed_encoded_consumer_last_seen_ms.load(Ordering::Relaxed);
+        if last_seen_ms == 0 {
+            return true;
+        }
+
+        Self::unix_now_ms().saturating_sub(last_seen_ms) <= Self::encoded_consumer_stale_ms()
     }
 
     pub(super) fn preview_demand(&mut self) -> bool {
@@ -555,6 +596,22 @@ impl StreamRunner {
         self.viewer_recently_active = crate::stream::preview_active_recently(stream_id, self.viewer_idle_timeout);
         self.last_viewer_check_wall = Some(now);
         self.viewer_recently_active
+    }
+
+    pub(crate) fn live_demand_active(&mut self) -> bool {
+        let graph_has_image_output = self.graph.has_image_output();
+        let graph_host = self.graph.host();
+        let raw_receiver_count = self.raw_tx.receiver_count() as u64;
+        let host_receiver_count = graph_host.receiver_count() as u64;
+        let preview_demand_active = self.preview_demand();
+        let encode_demand_active = self.encoder_id.is_some() && self.encoder_demand();
+        let graph_sample_demand_active = self.graph.has_output_sample_demand();
+
+        raw_receiver_count > 0 || (graph_has_image_output && (preview_demand_active || host_receiver_count > 0)) || encode_demand_active || graph_sample_demand_active
+    }
+
+    pub(crate) fn idle_stop_timeout(&self) -> Duration {
+        self.viewer_idle_timeout
     }
 
     pub(super) fn stop_encoder_worker(&mut self) {
@@ -713,7 +770,7 @@ impl StreamRunner {
         self.stream_label.as_ref()
     }
 
-    fn preview_generation_enabled(&self) -> bool {
+    pub(super) fn preview_generation_enabled(&self) -> bool {
         !(self.encoder_id.is_none() && self.decoder_id.is_none() && self.capture_config.backend != styx::BackendKind::File)
     }
 

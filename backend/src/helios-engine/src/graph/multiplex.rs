@@ -591,6 +591,10 @@ impl GraphExecutor for MultiplexGraphExecutor {
         }
     }
 
+    fn has_output_sample_demand(&self) -> bool {
+        self.active_pipeline().is_some_and(|pipeline| pipeline.graph.has_output_sample_demand())
+    }
+
     fn host_output_port_types(&self) -> Option<BTreeMap<String, daedalus::data::model::TypeExpr>> {
         self.active_pipeline().and_then(|pipeline| pipeline.graph.host_output_port_types())
     }

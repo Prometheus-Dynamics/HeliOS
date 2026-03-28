@@ -1,3 +1,4 @@
+use daedalus::runtime::state::{ExecutionContext, ManagedResource};
 use image::{DynamicImage, GrayImage, ImageBuffer, Rgb};
 use rayon::prelude::*;
 use std::cell::RefCell;
@@ -5,22 +6,23 @@ use std::mem::size_of;
 use wide::{CmpGt, i16x16, u8x16};
 
 thread_local! {
-    static ADAPTIVE_BUFFERS: RefCell<AdaptiveBuffers> = RefCell::new(AdaptiveBuffers::default());
     static ADAPTIVE_COL_SUM_SCRATCH: RefCell<Vec<i32>> = const { RefCell::new(Vec::new()) };
-    static MASK_BUFFER: RefCell<MaskBuffer> = RefCell::new(MaskBuffer::default());
 }
+
+const ADAPTIVE_COL_SUM_RETAIN_CAP: usize = 4096;
 
 #[cfg(target_arch = "aarch64")]
 mod neon;
 
 mod adaptive;
 pub use adaptive::{
-    adaptive_mean_threshold_fast, adaptive_mean_threshold_fast_into, adaptive_mean_threshold_fast_with_invert, with_adaptive_mean_threshold_fast, with_adaptive_mean_threshold_fast_timed,
+    adaptive_mean_threshold_fast, adaptive_mean_threshold_fast_into, adaptive_mean_threshold_fast_with_invert, adaptive_mean_threshold_fast_with_invert_in, with_adaptive_mean_threshold_fast,
+    with_adaptive_mean_threshold_fast_timed,
 };
 
 #[derive(Default)]
-struct AdaptiveBuffers {
-    hsum: Vec<u16>,
+pub(super) struct AdaptiveBuffers {
+    hsum_ring: Vec<u16>,
     col_sum: Vec<i32>,
 }
 
@@ -29,6 +31,104 @@ struct MaskBuffer {
     width: u32,
     height: u32,
     buf: Vec<u8>,
+}
+
+#[derive(Default)]
+struct ManagedAdaptiveBuffers {
+    buffers: AdaptiveBuffers,
+}
+
+#[inline(always)]
+fn adaptive_buffers_bytes(buffers: &AdaptiveBuffers) -> usize {
+    buffers.hsum_ring.capacity() * size_of::<u16>() + buffers.col_sum.capacity() * size_of::<i32>()
+}
+
+#[inline(always)]
+fn adaptive_buffers_live_bytes(buffers: &AdaptiveBuffers) -> usize {
+    buffers.hsum_ring.len() * size_of::<u16>() + buffers.col_sum.len() * size_of::<i32>()
+}
+
+#[inline(always)]
+fn clear_adaptive_buffers_live(buffers: &mut AdaptiveBuffers) {
+    buffers.hsum_ring.clear();
+    buffers.col_sum.clear();
+}
+
+impl ManagedResource for ManagedAdaptiveBuffers {
+    fn live_bytes(&self) -> u64 {
+        adaptive_buffers_live_bytes(&self.buffers) as u64
+    }
+
+    fn retained_bytes(&self) -> u64 {
+        adaptive_buffers_bytes(&self.buffers) as u64
+    }
+
+    fn touched_bytes(&self) -> u64 {
+        self.live_bytes()
+    }
+
+    fn after_frame(&mut self) {
+        clear_adaptive_buffers_live(&mut self.buffers);
+    }
+
+    fn on_memory_pressure(&mut self) {
+        clear_adaptive_buffers_live(&mut self.buffers);
+        self.buffers.hsum_ring.shrink_to_fit();
+        self.buffers.col_sum.shrink_to_fit();
+    }
+
+    fn on_idle(&mut self) {
+        self.on_memory_pressure();
+    }
+
+    fn on_stop(&mut self) {
+        self.on_memory_pressure();
+    }
+}
+
+pub(super) fn with_managed_adaptive_buffers<R>(exec_ctx: &ExecutionContext, f: impl FnOnce(&mut AdaptiveBuffers) -> R) -> Result<R, String> {
+    exec_ctx.with_frame_scratch("image.binary.adaptive", ManagedAdaptiveBuffers::default, |scratch| f(&mut scratch.buffers))
+}
+
+fn with_adaptive_buffers<R>(f: impl FnOnce(&mut AdaptiveBuffers) -> R) -> R {
+    let mut buffers = AdaptiveBuffers::default();
+    f(&mut buffers)
+}
+
+fn with_mask_buffer<R>(f: impl FnOnce(&mut MaskBuffer) -> R) -> R {
+    let mut mask = MaskBuffer::default();
+    f(&mut mask)
+}
+
+#[inline(always)]
+fn trim_retained_vec<T>(vec: &mut Vec<T>, retain_cap: usize) {
+    vec.clear();
+    if vec.capacity() > retain_cap {
+        vec.shrink_to(retain_cap);
+    }
+}
+
+pub(crate) fn compact_adaptive_threshold_scratch_after_frame() {
+    compact_adaptive_threshold_scratch_current_thread();
+    adaptive::compact_parallel_worker_scratch_after_frame();
+}
+
+pub(crate) fn release_adaptive_threshold_scratch_on_idle() {
+    release_adaptive_threshold_scratch_current_thread();
+    adaptive::release_parallel_worker_scratch_on_idle();
+}
+
+pub(super) fn compact_adaptive_threshold_scratch_current_thread() {
+    ADAPTIVE_COL_SUM_SCRATCH.with(|scratch| {
+        let mut scratch = scratch.borrow_mut();
+        trim_retained_vec(&mut scratch, ADAPTIVE_COL_SUM_RETAIN_CAP);
+    });
+}
+
+pub(super) fn release_adaptive_threshold_scratch_current_thread() {
+    ADAPTIVE_COL_SUM_SCRATCH.with(|scratch| {
+        *scratch.borrow_mut() = Vec::new();
+    });
 }
 
 pub fn binary_image(image: &DynamicImage, threshold: u8) -> GrayImage {
@@ -256,9 +356,8 @@ fn threshold_into(dst: &mut [u8], src: &[u8], threshold: u8, invert: bool) {
 pub fn with_binary_threshold_mask<R>(gray: &GrayImage, threshold: u8, invert: bool, f: impl FnOnce(&GrayImage) -> R) -> R {
     let (width, height) = gray.dimensions();
     let src = gray.as_raw();
-    MASK_BUFFER.with(|mask| {
-        let mut mask = mask.borrow_mut();
-        let dst = ensure_mask_buffer(&mut mask, width, height);
+    with_mask_buffer(|mask| {
+        let dst = ensure_mask_buffer(mask, width, height);
         threshold_into(dst, src, threshold, invert);
 
         let img = GrayImage::from_raw(width, height, std::mem::take(&mut mask.buf)).expect("mask buffer size must match image dimensions");

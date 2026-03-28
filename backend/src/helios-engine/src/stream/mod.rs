@@ -43,6 +43,10 @@ pub struct StreamMetrics {
     #[serde(default)]
     pub encoder: Option<CodecMetrics>,
     #[serde(default)]
+    pub encoder_demand: Option<StreamEncoderDemandMetrics>,
+    #[serde(default)]
+    pub frame_demand: Option<StreamFrameDemandMetrics>,
+    #[serde(default)]
     pub decoder: Option<CodecMetrics>,
     #[serde(default)]
     pub memory: Option<StreamMemoryMetrics>,
@@ -50,6 +54,40 @@ pub struct StreamMetrics {
     pub pipeline: Option<PipelineGraphMetrics>,
     #[serde(default)]
     pub pipeline_instances: Option<BTreeMap<String, PipelineGraphMetrics>>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+pub struct StreamEncoderDemandMetrics {
+    #[serde(default)]
+    pub broadcast_receiver_count: u64,
+    #[serde(default)]
+    pub managed_consumer_count: u64,
+    #[serde(default)]
+    pub managed_consumer_last_seen_ms: u64,
+    #[serde(default)]
+    pub encoder_demand_active: bool,
+    #[serde(default)]
+    pub encoder_worker_running: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+pub struct StreamFrameDemandMetrics {
+    #[serde(default)]
+    pub raw_receiver_count: u64,
+    #[serde(default)]
+    pub host_receiver_count: u64,
+    #[serde(default)]
+    pub preview_demand_active: bool,
+    #[serde(default)]
+    pub encode_demand_active: bool,
+    #[serde(default)]
+    pub graph_sample_demand_active: bool,
+    #[serde(default)]
+    pub needs_decoded_image: bool,
+    #[serde(default)]
+    pub graph_has_image_output: bool,
+    #[serde(default)]
+    pub graph_has_executor: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]

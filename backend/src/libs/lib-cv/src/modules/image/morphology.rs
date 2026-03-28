@@ -383,6 +383,8 @@ thread_local! {
     static SKELETON_SCRATCH: RefCell<SkeletonScratch> = RefCell::new(SkeletonScratch::default());
 }
 
+const MORPH_BUFFER_RETAIN_CAP: usize = 2 * 1024 * 1024;
+
 #[derive(Default)]
 struct MorphScratch {
     current: Vec<u8>,
@@ -394,6 +396,28 @@ struct SkeletonScratch {
     current: Vec<u8>,
     temp: Vec<u8>,
     opened: Vec<u8>,
+}
+
+#[inline(always)]
+fn trim_retained_vec<T>(vec: &mut Vec<T>, retain_cap: usize) {
+    vec.clear();
+    if vec.capacity() > retain_cap {
+        vec.shrink_to(retain_cap);
+    }
+}
+
+pub(crate) fn compact_morphology_scratch_after_frame() {
+    MORPH_SCRATCH.with(|scratch| {
+        let mut scratch = scratch.borrow_mut();
+        trim_retained_vec(&mut scratch.current, MORPH_BUFFER_RETAIN_CAP);
+        trim_retained_vec(&mut scratch.temp, MORPH_BUFFER_RETAIN_CAP);
+    });
+    SKELETON_SCRATCH.with(|scratch| {
+        let mut scratch = scratch.borrow_mut();
+        trim_retained_vec(&mut scratch.current, MORPH_BUFFER_RETAIN_CAP);
+        trim_retained_vec(&mut scratch.temp, MORPH_BUFFER_RETAIN_CAP);
+        trim_retained_vec(&mut scratch.opened, MORPH_BUFFER_RETAIN_CAP);
+    });
 }
 
 fn cross_erode_once(src: &[u8], dst: &mut [u8], width: usize, height: usize) {

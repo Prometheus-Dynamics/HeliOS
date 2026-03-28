@@ -36,12 +36,12 @@ fn cv_to_gray(frame: DynamicImage) -> Result<GrayImage, NodeError> {
     )
 )]
 fn cv_downscale(
-    frame: Payload<DynamicImage>,
+    frame: Compute<DynamicImage>,
     factor: i64,
     mode: ExecMode,
     #[cfg(feature = "gpu")] ctx: ShaderContext,
     _exec_ctx: &ExecutionContext,
-) -> Result<(Payload<DynamicImage>, i64), NodeError> {
+) -> Result<(Compute<DynamicImage>, i64), NodeError> {
     let factor = u32::try_from(factor).unwrap_or(1).max(1);
     let factor_out = i64::from(factor);
     if factor == 1 {
@@ -54,7 +54,7 @@ fn cv_downscale(
         let out_width = (width / factor).max(1);
         let out_height = (height / factor).max(1);
         if width == 0 || height == 0 {
-            return Ok((Payload::Cpu(DynamicImage::new_rgba8(width, height)), factor_out));
+            return Ok((Compute::Cpu(DynamicImage::new_rgba8(width, height)), factor_out));
         }
 
         if matches!(mode, ExecMode::Gpu) && ctx.gpu.is_none() {
@@ -85,7 +85,7 @@ fn cv_downscale(
         DynamicImage::ImageLuma8(gray) => DynamicImage::ImageLuma8(downscale_luma8_in_place(gray, dst_width, dst_height)),
         other => resize_fast(&other, dst_width, dst_height),
     };
-    Ok((Payload::Cpu(resized), factor_out))
+    Ok((Compute::Cpu(resized), factor_out))
 }
 
 #[node(id = "invert", inputs("mask"), outputs("mask"))]
@@ -204,16 +204,16 @@ fn cv_crop_roi(frame: DynamicImage, roi_x: i64, roi_y: i64, roi_w: i64, roi_h: i
     ),
     outputs("frame", "offset_x", "offset_y")
 )]
-fn cv_crop_roi_gray(frame: &DynamicImage, roi_x: i64, roi_y: i64, roi_w: i64, roi_h: i64) -> Result<(crate::modules::image::luma::PooledGrayImage, i64, i64), NodeError> {
+fn cv_crop_roi_gray(frame: &DynamicImage, roi_x: i64, roi_y: i64, roi_w: i64, roi_h: i64) -> Result<(GrayImage, i64, i64), NodeError> {
     let (fw, fh) = frame.dimensions();
     if fw == 0 || fh == 0 {
-        return Ok((crate::modules::image::luma::PooledGrayImage::new(0, 0), 0, 0));
+        return Ok((image::GrayImage::new(0, 0), 0, 0));
     }
 
     if let Some((x, y, w, h)) = roi_crop_bounds(fw, fh, roi_x, roi_y, roi_w, roi_h) {
-        Ok((crop_luma8_frame(&frame, x, y, w, h), i64::from(x), i64::from(y)))
+        Ok((crate::modules::image::luma::crop_luma8_image(frame, x, y, w, h), i64::from(x), i64::from(y)))
     } else {
-        Ok((crop_luma8_frame(&frame, 0, 0, fw, fh), 0, 0))
+        Ok((crate::modules::image::luma::crop_luma8_image(frame, 0, 0, fw, fh), 0, 0))
     }
 }
 

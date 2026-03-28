@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use std::sync::atomic::AtomicU64;
 use tokio::sync::broadcast::Sender;
 use tokio::sync::watch;
 use tokio::sync::Mutex as AsyncMutex;
@@ -44,6 +45,8 @@ pub(crate) struct StreamContext {
     pub(crate) host: tokio::sync::RwLock<GraphHandle>,
     pub(crate) calibration_mode_restore: tokio::sync::RwLock<Option<CalibrationModeRestore>>,
     pub(crate) encoded_tx: Sender<EncodedFrame>,
+    pub(crate) managed_encoded_consumer_count: Arc<AtomicU64>,
+    pub(crate) managed_encoded_consumer_last_seen_ms: Arc<AtomicU64>,
     pub(crate) raw_tx: Sender<Arc<image::DynamicImage>>,
     pub(crate) command_tx: SyncSender<StreamCommand>,
     pub(crate) exit_rx: watch::Receiver<StreamExit>,
@@ -156,6 +159,7 @@ pub(crate) fn run_stream_worker(mut runner: StreamRunner, command_rx: mpsc::Rece
     let mut result = Ok(());
     let mut should_run = true;
     let mut command_wait = COMMAND_IDLE_MIN;
+    let mut no_demand_since: Option<Instant> = None;
     let mut restart_attempts = 0u32;
     let mut last_restart = Instant::now().checked_sub(Duration::from_secs(60)).unwrap_or_else(Instant::now);
     let usb_recovery_enabled = usb_power_recovery_enabled();
@@ -195,7 +199,32 @@ pub(crate) fn run_stream_worker(mut runner: StreamRunner, command_rx: mpsc::Rece
             break;
         }
 
+        let demand_active = runner.live_demand_active();
+        if demand_active {
+            no_demand_since = None;
+        } else if no_demand_since.is_none() {
+            no_demand_since = Some(Instant::now());
+        }
+
         if !runner.is_running() {
+            if !demand_active {
+                match command_rx.recv_timeout(command_wait) {
+                    Ok(cmd) => {
+                        should_run = handle_stream_command(&mut runner, cmd);
+                        command_wait = COMMAND_IDLE_MIN;
+                        continue;
+                    }
+                    Err(RecvTimeoutError::Timeout) => {
+                        command_wait = COMMAND_IDLE_MIN;
+                        continue;
+                    }
+                    Err(RecvTimeoutError::Disconnected) => {
+                        result = Err(Error::InvalidState("stream worker command channel closed"));
+                        break;
+                    }
+                }
+            }
+
             let since_last = last_restart.elapsed();
             if since_last < Duration::from_millis(250) {
                 std::thread::sleep(Duration::from_millis(250) - since_last);
@@ -230,6 +259,13 @@ pub(crate) fn run_stream_worker(mut runner: StreamRunner, command_rx: mpsc::Rece
                     continue;
                 }
             }
+        }
+
+        if !demand_active && no_demand_since.is_some_and(|since| since.elapsed() >= runner.idle_stop_timeout()) {
+            tracing::info!(stream_id = ?stream_id, "stream idle with no active demand; stopping capture session");
+            runner.stop();
+            command_wait = COMMAND_IDLE_MIN;
+            continue;
         }
 
         match runner.pump_host_once() {

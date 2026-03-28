@@ -17,7 +17,7 @@ use std::cell::RefCell;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
-use daedalus::gpu::Payload;
+use daedalus::gpu::Compute;
 
 use crate::draw;
 use crate::modules::aruco::DetectionPoseOutput;
@@ -55,7 +55,8 @@ mod temporal;
 
 use adaptive::{
     cv_aruco_adaptive_merge_quads, cv_aruco_adaptive_quads_from_frame, cv_aruco_adaptive_quads_from_mask, cv_aruco_adaptive_quads_from_roi_frame, cv_aruco_adaptive_quads_gate,
-    cv_aruco_adaptive_quads_pass, cv_aruco_adaptive_quads_select_best, cv_aruco_adaptive_threshold_mask, cv_aruco_adaptive_window_select, cv_aruco_quads_concat,
+    cv_aruco_adaptive_quads_pass, cv_aruco_adaptive_quads_select_best, cv_aruco_adaptive_threshold_gray, cv_aruco_adaptive_threshold_mask, cv_aruco_adaptive_window_select, cv_aruco_clahe_gray,
+    cv_aruco_quads_concat,
 };
 use candidate_quads::{
     cv_aruco_candidate_quads, cv_aruco_candidate_quads_extract, cv_aruco_candidate_quads_filter_area, cv_aruco_candidate_quads_filter_corner_spacing, cv_aruco_candidate_quads_filter_geometry,
@@ -81,6 +82,11 @@ use overlay::{
 use poses::cv_aruco_tag_poses;
 use scale::{cv_aruco_offset_detections, cv_aruco_scale_detections, cv_aruco_scale_quads};
 use temporal::{cv_aruco_temporal_smooth_detections, cv_aruco_temporal_stabilize_detections};
+
+pub(crate) fn compact_runtime_scratch_after_frame() {
+    shared::compact_shared_scratch_after_frame();
+    adaptive::compact_adaptive_frame_node_scratch_after_frame();
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct CvArucoPlugin;
@@ -132,6 +138,8 @@ impl CvArucoPlugin {
         registry.merge::<cv_aruco_adaptive_merge_quads>()?;
         registry.merge::<cv_aruco_quads_concat>()?;
         registry.merge::<cv_aruco_adaptive_window_select>()?;
+        registry.merge::<cv_aruco_clahe_gray>()?;
+        registry.merge::<cv_aruco_adaptive_threshold_gray>()?;
         registry.merge::<cv_aruco_adaptive_threshold_mask>()?;
         registry.merge::<cv_aruco_adaptive_quads_from_frame>()?;
         registry.merge::<cv_aruco_adaptive_quads_from_roi_frame>()?;

@@ -7,6 +7,10 @@ mod decode_grid;
 mod decoding;
 mod family;
 
+pub(crate) fn compact_runtime_scratch_after_frame() {
+    decode_grid::compact_tag_scratch_after_frame();
+}
+
 // Used by family data modules to share the decode implementation.
 pub(super) fn decode(code: &[Vec<u8>], family: &dyn ArucoTagDecoding) -> Option<ArucoTagDecode> {
     decode_grid::decode(code, family)

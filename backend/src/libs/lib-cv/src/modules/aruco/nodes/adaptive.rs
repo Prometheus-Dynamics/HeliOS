@@ -262,6 +262,104 @@ fn cv_aruco_adaptive_quads_pass(
 }
 
 #[node(
+    id = "clahe_gray",
+    summary = "Apply CLAHE directly to a grayscale frame.",
+    inputs(
+        port(name = "mask", source = "Frame", ty = daedalus::data::model::TypeExpr::opaque("image:gray8")),
+        port(name = "tile_size", default = 2i64, meta(ui_min = 1, ui_max = 64, ui_step = 1)),
+        port(name = "clip_limit", default = 3.5f64, meta(ui_min = 0.0, ui_max = 10.0, ui_step = 0.1)),
+        port(name = "mix", default = 1.0f64, meta(ui_min = 0.0, ui_max = 1.0, ui_step = 0.01)),
+        port(name = "mode", default = "cpu")
+    ),
+    outputs(port(name = "mask", source = "Frame", ty = daedalus::data::model::TypeExpr::opaque("image:gray8")))
+)]
+fn cv_aruco_clahe_gray(mask: &GrayImage, tile_size: i64, clip_limit: f64, mix: f64, _mode: Option<crate::plugin::ExecMode>, exec_ctx: &ExecutionContext) -> Result<GrayImage, NodeError> {
+    let gray = mask;
+    let tile_size = tile_size.clamp(1, u32::MAX as i64) as u32;
+    let clip_limit = (clip_limit.max(0.0) as f32).max(0.0);
+    let mix = (mix as f32).clamp(0.0, 1.0);
+    let (width, height) = gray.dimensions();
+    if width == 0 || height == 0 {
+        return Ok(GrayImage::new(width, height));
+    }
+    if mix <= 0.001 {
+        return Ok(gray.clone());
+    }
+
+    let mut out = GrayImage::new(width, height);
+    if mix >= 0.999 {
+        apply_cached_clahe_into(gray, tile_size, clip_limit, &mut out);
+        return Ok(out);
+    }
+
+    with_adaptive_frame_node_scratch(exec_ctx, |scratch| {
+        apply_cached_clahe_into(gray, tile_size, clip_limit, &mut scratch.clahe);
+        crate::modules::image::clahe::blend_clahe_with_base_into(gray, &scratch.clahe, mix, &mut out);
+    })
+    .map_err(NodeError::Handler)?;
+    Ok(out)
+}
+
+fn adaptive_border_guarded_gray<'a>(gray: &'a GrayImage, border_guard_px: u32) -> std::borrow::Cow<'a, GrayImage> {
+    let width = gray.width() as usize;
+    let guard = (border_guard_px as usize).min(width / 2);
+    if guard == 0 || width <= 2 {
+        return std::borrow::Cow::Borrowed(gray);
+    }
+
+    let mut guarded = gray.clone();
+    for row in guarded.as_mut().chunks_mut(width) {
+        let left_src = row[guard];
+        row[..guard].fill(left_src);
+
+        let right_src_idx = width - guard - 1;
+        let right_src = row[right_src_idx];
+        row[(width - guard)..].fill(right_src);
+    }
+    std::borrow::Cow::Owned(guarded)
+}
+
+#[node(
+    id = "adaptive_threshold_gray",
+    summary = "Adaptive threshold directly on a grayscale frame.",
+    inputs(
+        port(name = "frame", source = "Frame", ty = daedalus::data::model::TypeExpr::opaque("image:gray8")),
+        port(name = "window", default = 9i64, meta(ui_min = 3, ui_max = 101, ui_step = 2)),
+        port(name = "offset", default = 0.0f64, meta(ui_min = -50.0, ui_max = 50.0, ui_step = 1.0)),
+        port(name = "threshold_offset", default = 0.0f64, meta(ui_min = -50.0, ui_max = 50.0, ui_step = 1.0)),
+        port(name = "border_guard_px", default = 0i64, meta(ui_min = 0, ui_max = 32, ui_step = 1)),
+        port(name = "invert", default = false),
+        port(name = "mode", default = "cpu")
+    ),
+    outputs(port(name = "mask", source = "Frame", ty = daedalus::data::model::TypeExpr::opaque("image:gray8")))
+)]
+fn cv_aruco_adaptive_threshold_gray(
+    frame: &GrayImage,
+    window: i64,
+    offset: f64,
+    threshold_offset: f64,
+    border_guard_px: i64,
+    invert: bool,
+    _mode: Option<crate::plugin::ExecMode>,
+    exec_ctx: &ExecutionContext,
+) -> Result<GrayImage, NodeError> {
+    let window = u32::try_from(window).unwrap_or(0);
+    let window = if window < 3 {
+        window
+    } else if window.is_multiple_of(2) {
+        window.saturating_add(1)
+    } else {
+        window
+    };
+    if window < 3 || frame.width() == 0 || frame.height() == 0 {
+        return Ok(GrayImage::new(frame.width(), frame.height()));
+    }
+    let combined_offset = offset.clamp(-50.0, 50.0) as f32 + threshold_offset.clamp(-50.0, 50.0) as f32;
+    let guarded = adaptive_border_guarded_gray(frame, u32::try_from(border_guard_px.max(0)).unwrap_or(0));
+    crate::modules::image::binary::adaptive_mean_threshold_fast_with_invert_in(exec_ctx, guarded.as_ref(), window, combined_offset, invert).map_err(NodeError::Handler)
+}
+
+#[node(
     id = "adaptive_window_select",
     inputs(
         port(name = "enabled", default = true),
@@ -337,6 +435,7 @@ fn cv_aruco_adaptive_threshold_mask(
     threshold_offset: f64,
     invert: bool,
     invert_flip: bool,
+    exec_ctx: &ExecutionContext,
 ) -> Result<GrayImage, NodeError> {
     if !enabled {
         return Ok(GrayImage::new(0, 0));
@@ -347,97 +446,90 @@ fn cv_aruco_adaptive_threshold_mask(
     }
     let offset = adaptive_offset.clamp(0.0, 64.0) as f32 + threshold_offset.clamp(-32.0, 32.0) as f32;
     let invert = invert ^ invert_flip;
-    Ok(crate::modules::image::binary::adaptive_mean_threshold_fast_with_invert(gray, window, offset, invert))
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-struct AdaptiveClaheFrameStats {
-    mean: u16,
-    spread: u16,
-}
-
-struct AdaptiveClahePreparedCache {
-    key: (u32, u32, u32, u32),
-    stats: AdaptiveClaheFrameStats,
-    reuse_streak: u8,
-    tiles: crate::modules::image::clahe::ClaheTiles,
+    crate::modules::image::binary::adaptive_mean_threshold_fast_with_invert_in(exec_ctx, gray, window, offset, invert).map_err(NodeError::Handler)
 }
 
 struct AdaptiveFrameNodeScratch {
     clahe: GrayImage,
     blended: GrayImage,
-    mask: GrayImage,
-    clahe_cache: Option<AdaptiveClahePreparedCache>,
 }
 
 impl Default for AdaptiveFrameNodeScratch {
     fn default() -> Self {
-        Self { clahe: GrayImage::new(0, 0), blended: GrayImage::new(0, 0), mask: GrayImage::new(0, 0), clahe_cache: None }
+        Self { clahe: GrayImage::new(0, 0), blended: GrayImage::new(0, 0) }
     }
 }
 
-thread_local! {
-    static ADAPTIVE_FRAME_NODE_SCRATCH: RefCell<AdaptiveFrameNodeScratch> = RefCell::new(AdaptiveFrameNodeScratch::default());
+#[inline]
+fn adaptive_frame_node_scratch_bytes(scratch: &AdaptiveFrameNodeScratch) -> usize {
+    scratch.clahe.as_raw().capacity() + scratch.blended.as_raw().capacity()
 }
 
-const ADAPTIVE_NODE_CLAHE_MAX_REUSE_STREAK: u8 = 120;
-const ADAPTIVE_NODE_CLAHE_MAX_REUSE_STREAK_TILE1: u8 = 240;
-const ADAPTIVE_NODE_CLAHE_MEAN_DELTA_MAX: u16 = 30;
-const ADAPTIVE_NODE_CLAHE_SPREAD_DELTA_MAX: u16 = 64;
-const ADAPTIVE_NODE_CLAHE_FORCE_REUSE_STREAK: u8 = 32;
+#[inline]
+fn adaptive_frame_node_scratch_live_bytes(scratch: &AdaptiveFrameNodeScratch) -> usize {
+    scratch.clahe.as_raw().len() + scratch.blended.as_raw().len()
+}
 
 #[inline]
-fn adaptive_clahe_frame_stats(gray: &GrayImage) -> AdaptiveClaheFrameStats {
-    let w = gray.width() as usize;
-    let h = gray.height() as usize;
-    if w == 0 || h == 0 {
-        return AdaptiveClaheFrameStats::default();
+fn clear_gray_image_live(image: &mut GrayImage) {
+    let mut buf = std::mem::take(image).into_raw();
+    buf.clear();
+    *image = GrayImage::from_raw(0, 0, buf).expect("zero-sized gray image");
+}
+
+#[inline]
+fn release_gray_image(image: &mut GrayImage) {
+    let mut buf = std::mem::take(image).into_raw();
+    buf.clear();
+    buf.shrink_to_fit();
+    *image = GrayImage::from_raw(0, 0, buf).expect("zero-sized gray image");
+}
+
+impl daedalus::runtime::state::ManagedResource for AdaptiveFrameNodeScratch {
+    fn live_bytes(&self) -> u64 {
+        adaptive_frame_node_scratch_live_bytes(self) as u64
     }
 
-    let sx = (w / 24).max(1);
-    let sy = (h / 18).max(1);
-    let raw = gray.as_raw();
-    let mut sum = 0u64;
-    let mut count = 0u64;
-    let mut min_v = u8::MAX;
-    let mut max_v = u8::MIN;
-
-    let mut y = 0usize;
-    while y < h {
-        let row = &raw[y * w..(y + 1) * w];
-        let mut x = 0usize;
-        while x < w {
-            let v = row[x];
-            min_v = min_v.min(v);
-            max_v = max_v.max(v);
-            sum = sum.saturating_add(v as u64);
-            count = count.saturating_add(1);
-            x = x.saturating_add(sx);
-        }
-        y = y.saturating_add(sy);
+    fn retained_bytes(&self) -> u64 {
+        adaptive_frame_node_scratch_bytes(self) as u64
     }
 
-    let mean = if count > 0 { (sum / count) as u16 } else { 0 };
-    let spread = max_v.saturating_sub(min_v) as u16;
-    AdaptiveClaheFrameStats { mean, spread }
+    fn touched_bytes(&self) -> u64 {
+        self.live_bytes()
+    }
+
+    fn after_frame(&mut self) {
+        clear_gray_image_live(&mut self.clahe);
+        clear_gray_image_live(&mut self.blended);
+    }
+
+    fn on_memory_pressure(&mut self) {
+        release_gray_image(&mut self.clahe);
+        release_gray_image(&mut self.blended);
+    }
+
+    fn on_idle(&mut self) {
+        self.on_memory_pressure();
+    }
+
+    fn on_stop(&mut self) {
+        self.on_memory_pressure();
+    }
 }
 
-#[inline]
-fn adaptive_clahe_stats_similar(a: AdaptiveClaheFrameStats, b: AdaptiveClaheFrameStats) -> bool {
-    let mean_delta = a.mean.abs_diff(b.mean);
-    let spread_delta = a.spread.abs_diff(b.spread);
-    mean_delta <= ADAPTIVE_NODE_CLAHE_MEAN_DELTA_MAX && spread_delta <= ADAPTIVE_NODE_CLAHE_SPREAD_DELTA_MAX
+fn with_adaptive_frame_node_scratch<R>(exec_ctx: &ExecutionContext, f: impl FnOnce(&mut AdaptiveFrameNodeScratch) -> R) -> Result<R, String> {
+    exec_ctx.with_frame_scratch("aruco.adaptive.frame", AdaptiveFrameNodeScratch::default, f)
 }
 
+pub(crate) fn compact_adaptive_frame_node_scratch_after_frame() {}
+
 #[inline]
-fn apply_cached_clahe_into(gray: &GrayImage, tile_size: u32, clip_limit: f32, cache: &mut Option<AdaptiveClahePreparedCache>, output: &mut GrayImage) {
-    let key = (gray.width(), gray.height(), tile_size, clip_limit.to_bits());
-    let stats = adaptive_clahe_frame_stats(gray);
+fn apply_cached_clahe_into(gray: &GrayImage, tile_size: u32, clip_limit: f32, output: &mut GrayImage) {
     // Keep fused adaptive preprocessing aligned with standalone CLAHE behavior: build tiles from
     // the current frame instead of reusing a prior frame's local histogram layout.
     let tiles = crate::modules::image::clahe::prepare_clahe(gray, tile_size, clip_limit);
     crate::modules::image::clahe::apply_clahe_with_tiles_into(gray, &tiles, output);
-    *cache = Some(AdaptiveClahePreparedCache { key, stats, reuse_streak: 0, tiles });
+    crate::modules::image::clahe::compact_clahe_scratch_after_frame();
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -556,7 +648,7 @@ fn collect_adaptive_quads(
 )]
 #[allow(clippy::too_many_arguments)]
 fn cv_aruco_adaptive_quads_from_frame(
-    frame: std::sync::Arc<crate::modules::image::luma::PooledGrayImage>,
+    frame: &GrayImage,
     enabled: bool,
     tile_size: i64,
     clip_limit: f64,
@@ -580,9 +672,10 @@ fn cv_aruco_adaptive_quads_from_frame(
     max_quads: i64,
     expand_inner_scale: f64,
     expand_inner_max_side_px: f64,
+    exec_ctx: &ExecutionContext,
 ) -> Result<Vec<Quad>, NodeError> {
     collect_adaptive_quads_from_gray_frame(
-        frame.as_ref(),
+        frame,
         enabled,
         tile_size,
         clip_limit,
@@ -606,6 +699,7 @@ fn cv_aruco_adaptive_quads_from_frame(
         max_quads,
         expand_inner_scale,
         expand_inner_max_side_px,
+        exec_ctx,
     )
 }
 
@@ -661,6 +755,7 @@ fn collect_adaptive_quads_from_gray_frame(
     max_quads: i64,
     expand_inner_scale: f64,
     expand_inner_max_side_px: f64,
+    exec_ctx: &ExecutionContext,
 ) -> Result<Vec<Quad>, NodeError> {
     if !enabled {
         return Ok(Vec::new());
@@ -676,14 +771,13 @@ fn collect_adaptive_quads_from_gray_frame(
     let mix = (mix as f32).clamp(0.0, 1.0);
     let offset = adaptive_offset.clamp(0.0, 64.0) as f32 + threshold_offset.clamp(-32.0, 32.0) as f32;
 
-    ADAPTIVE_FRAME_NODE_SCRATCH.with(|scratch| {
-        let mut scratch = scratch.borrow_mut();
-        let AdaptiveFrameNodeScratch { clahe, blended, mask, clahe_cache } = &mut *scratch;
+    with_adaptive_frame_node_scratch(exec_ctx, |scratch| {
+        let AdaptiveFrameNodeScratch { clahe, blended } = &mut *scratch;
 
         let threshold_input: &GrayImage = if mix <= 0.001 {
             frame
         } else {
-            apply_cached_clahe_into(frame, tile_size, clip_limit, clahe_cache, clahe);
+            apply_cached_clahe_into(frame, tile_size, clip_limit, clahe);
             if mix >= 0.999 {
                 clahe
             } else {
@@ -692,26 +786,28 @@ fn collect_adaptive_quads_from_gray_frame(
             }
         };
 
-        crate::modules::image::binary::adaptive_mean_threshold_fast_into(threshold_input, window, offset, invert, mask);
-        collect_adaptive_quads(
-            mask,
-            min_perimeter_rate,
-            max_perimeter_rate,
-            epsilon,
-            min_area,
-            max_area,
-            min_angle_deg,
-            max_angle_deg,
-            max_side_cv,
-            min_corner_distance_rate,
-            min_distance_to_border,
-            min_side_px,
-            fallback_max_contours,
-            max_quads,
-            expand_inner_scale,
-            expand_inner_max_side_px,
-        )
+        crate::modules::image::binary::with_adaptive_mean_threshold_fast(threshold_input, window, offset, invert, |mask| {
+            collect_adaptive_quads(
+                mask,
+                min_perimeter_rate,
+                max_perimeter_rate,
+                epsilon,
+                min_area,
+                max_area,
+                min_angle_deg,
+                max_angle_deg,
+                max_side_cv,
+                min_corner_distance_rate,
+                min_distance_to_border,
+                min_side_px,
+                fallback_max_contours,
+                max_quads,
+                expand_inner_scale,
+                expand_inner_max_side_px,
+            )
+        })
     })
+    .map_err(NodeError::Handler)?
 }
 
 #[node(
@@ -779,6 +875,7 @@ fn cv_aruco_adaptive_quads_from_roi_frame(
     max_quads: i64,
     expand_inner_scale: f64,
     expand_inner_max_side_px: f64,
+    exec_ctx: &ExecutionContext,
 ) -> Result<Vec<Quad>, NodeError> {
     let (fw, fh) = frame.dimensions();
     let (x, y, w, h) = roi_bounds_or_full(fw, fh, roi_x, roi_y, roi_w, roi_h);
@@ -808,6 +905,7 @@ fn cv_aruco_adaptive_quads_from_roi_frame(
             max_quads,
             expand_inner_scale,
             expand_inner_max_side_px,
+            exec_ctx,
         )
     })
 }
