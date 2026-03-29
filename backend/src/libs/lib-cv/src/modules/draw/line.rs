@@ -92,3 +92,93 @@ pub fn overlay_line_x_y(image: &mut DynamicImage, start: (u32, u32), end: (u32, 
 
     overlay_dynamic(image, &overlay_img, min_x as i64, min_y as i64);
 }
+
+fn fill_rect_luma8(image: &mut image::GrayImage, x0: u32, y0: u32, x1: u32, y1: u32, value: u8) {
+    let stride = image.width() as usize;
+    let buf = image.as_flat_samples_mut().samples;
+    let x0 = x0 as usize;
+    let x1 = x1 as usize;
+    for y in y0..=y1 {
+        let row = y as usize * stride;
+        buf[row + x0..row + x1 + 1].fill(value);
+    }
+}
+
+fn fill_rect_rgb8(image: &mut image::RgbImage, x0: u32, y0: u32, x1: u32, y1: u32, value: [u8; 3]) {
+    let stride = image.width() as usize * 3;
+    let buf = image.as_flat_samples_mut().samples;
+    let x0 = x0 as usize;
+    let x1 = x1 as usize;
+    for y in y0..=y1 {
+        let row = y as usize * stride;
+        let span = &mut buf[row + x0 * 3..row + (x1 + 1) * 3];
+        for px in span.chunks_exact_mut(3) {
+            px.copy_from_slice(&value);
+        }
+    }
+}
+
+fn fill_rect_rgba8(image: &mut image::RgbaImage, x0: u32, y0: u32, x1: u32, y1: u32, value: [u8; 4]) {
+    let stride = image.width() as usize * 4;
+    let buf = image.as_flat_samples_mut().samples;
+    let x0 = x0 as usize;
+    let x1 = x1 as usize;
+    for y in y0..=y1 {
+        let row = y as usize * stride;
+        let span = &mut buf[row + x0 * 4..row + (x1 + 1) * 4];
+        for px in span.chunks_exact_mut(4) {
+            px.copy_from_slice(&value);
+        }
+    }
+}
+
+pub fn overlay_crosshair_x_y(image: &mut DynamicImage, center: (u32, u32), arm: u32, thickness: u32, colour: Rgba<u8>) {
+    let (width, height) = image.dimensions();
+    if width == 0 || height == 0 {
+        return;
+    }
+
+    let thickness = thickness.max(1);
+    let cx = center.0.min(width - 1);
+    let cy = center.1.min(height - 1);
+    let left = cx.saturating_sub(arm);
+    let right = cx.saturating_add(arm).min(width - 1);
+    let top = cy.saturating_sub(arm);
+    let bottom = cy.saturating_add(arm).min(height - 1);
+    let band_lo = thickness.saturating_sub(1) / 2;
+    let band_hi = thickness / 2;
+    let hx0 = left;
+    let hx1 = right;
+    let hy0 = cy.saturating_sub(band_lo);
+    let hy1 = cy.saturating_add(band_hi).min(height - 1);
+    let vx0 = cx.saturating_sub(band_lo);
+    let vx1 = cx.saturating_add(band_hi).min(width - 1);
+    let vy0 = top;
+    let vy1 = bottom;
+
+    if colour.0[3] == 255 {
+        match image {
+            DynamicImage::ImageLuma8(buf) => {
+                let lum = (0.299 * colour.0[0] as f32 + 0.587 * colour.0[1] as f32 + 0.114 * colour.0[2] as f32).round().clamp(0.0, 255.0) as u8;
+                fill_rect_luma8(buf, hx0, hy0, hx1, hy1, lum);
+                fill_rect_luma8(buf, vx0, vy0, vx1, vy1, lum);
+                return;
+            }
+            DynamicImage::ImageRgb8(buf) => {
+                let rgb = [colour.0[0], colour.0[1], colour.0[2]];
+                fill_rect_rgb8(buf, hx0, hy0, hx1, hy1, rgb);
+                fill_rect_rgb8(buf, vx0, vy0, vx1, vy1, rgb);
+                return;
+            }
+            DynamicImage::ImageRgba8(buf) => {
+                fill_rect_rgba8(buf, hx0, hy0, hx1, hy1, colour.0);
+                fill_rect_rgba8(buf, vx0, vy0, vx1, vy1, colour.0);
+                return;
+            }
+            _ => {}
+        }
+    }
+
+    overlay_line_x_y(image, (left, cy), (right, cy), thickness, colour);
+    overlay_line_x_y(image, (cx, top), (cx, bottom), thickness, colour);
+}

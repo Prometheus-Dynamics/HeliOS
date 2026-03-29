@@ -19,6 +19,7 @@
     encoderFpsLimit: number | null;
     encoderSettingsAvailable: boolean;
     hostBuffer: number;
+    previewJpegQuality: number | null;
     applying: boolean;
     onDecoderSelect: (value: string) => void;
     onDecoderFpsInput: (raw: string) => void;
@@ -29,6 +30,7 @@
     onEncoderFpsInput: (raw: string) => void;
     onOpenEncoderSettings: () => void;
     onHostBufferInput: (raw: string) => void;
+    onPreviewJpegQualityInput: (raw: string) => void;
     onApplyPreset: () => void;
   };
 
@@ -47,6 +49,7 @@
     encoderFpsLimit,
     encoderSettingsAvailable,
     hostBuffer,
+    previewJpegQuality,
     applying,
     onDecoderSelect,
     onDecoderFpsInput,
@@ -57,6 +60,7 @@
     onEncoderFpsInput,
     onOpenEncoderSettings,
     onHostBufferInput,
+    onPreviewJpegQualityInput,
     onApplyPreset
   }: StreamControlsProps = $props();
 
@@ -185,16 +189,30 @@
       </button>
     </div>
 
-    <label class="control-field text-sm w-full max-w-[14rem]">
-      <span class="control-label text-2xs uppercase tracking-[0.3em] text-surface-500">Host buffer</span>
-      <input
-        class="control-input w-full rounded-md border border-surface-700 bg-surface-900/70 px-3"
-        type="number"
-        min="1"
-        value={hostBuffer}
-        oninput={(e) => onHostBufferInput((e.currentTarget as HTMLInputElement).value)}
-      />
-    </label>
+    <div class="control-grid grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <label class="control-field text-sm">
+        <span class="control-label text-2xs uppercase tracking-[0.3em] text-surface-500">Host buffer</span>
+        <input
+          class="control-input w-full rounded-md border border-surface-700 bg-surface-900/70 px-3"
+          type="number"
+          min="1"
+          value={hostBuffer}
+          oninput={(e) => onHostBufferInput((e.currentTarget as HTMLInputElement).value)}
+        />
+      </label>
+      <label class="control-field text-sm">
+        <span class="control-label text-2xs uppercase tracking-[0.3em] text-surface-500">Preview JPEG</span>
+        <input
+          class="control-input w-full rounded-md border border-surface-700 bg-surface-900/70 px-3"
+          type="number"
+          min="1"
+          max="100"
+          step="1"
+          value={previewJpegQuality ?? 65}
+          oninput={(e) => onPreviewJpegQualityInput((e.currentTarget as HTMLInputElement).value)}
+        />
+      </label>
+    </div>
 
   {#if shadowRecorderSupported}
     <label class="text-sm">

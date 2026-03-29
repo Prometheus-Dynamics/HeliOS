@@ -35,6 +35,7 @@
     decoderSelectionTouched = $bindable(),
     encoderSelectionTouched = $bindable(),
     hostBuffer = $bindable(),
+    previewJpegQuality = $bindable(),
     decoderFpsLimit = $bindable(),
     decoderRotationDegrees = $bindable(),
     decoderMirrorHorizontal = $bindable(),
@@ -481,6 +482,11 @@
     hostBuffer = Number.isFinite(v) && v > 0 ? v : 8;
   }
 
+  function handlePreviewJpegQualityInput(raw: string): void {
+    const parsed = raw.trim().length ? Number(raw) : null;
+    previewJpegQuality = parsed && Number.isFinite(parsed) ? Math.min(100, Math.max(1, Math.trunc(parsed))) : 65;
+  }
+
   function readStreamCrop(): StreamCrop {
     if (!Array.isArray(streamCrop) || streamCrop.length !== 4) return [-1, 1, -1, 1];
     return [
@@ -804,6 +810,7 @@
       encoderFpsLimit={encoderFpsLimit}
       encoderSettingsAvailable={encoderSettingsAvailable}
       hostBuffer={hostBuffer}
+      previewJpegQuality={previewJpegQuality}
       applying={applying}
       onDecoderSelect={handleDecoderSelect}
       onDecoderFpsInput={handleDecoderFpsInput}
@@ -814,6 +821,7 @@
       onEncoderFpsInput={handleEncoderFpsInput}
       onOpenEncoderSettings={handleOpenEncoderSettings}
       onHostBufferInput={handleHostBufferInput}
+      onPreviewJpegQualityInput={handlePreviewJpegQualityInput}
       onApplyPreset={() => applyStreamPreset()}
     />
     <details class="rounded border border-surface-800 bg-surface-950/40 p-4" open>

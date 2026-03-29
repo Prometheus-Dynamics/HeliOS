@@ -257,6 +257,7 @@ pub(crate) async fn start_media_replay_stream(State(state): State<AppState>, Jso
         decoder_id: None,
         encoder_settings: None,
         decoder_settings: None,
+        preview_jpeg_quality: None,
         shadow_recorder_enabled: false,
         start_on_boot: false,
     };

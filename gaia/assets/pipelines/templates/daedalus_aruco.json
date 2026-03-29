@@ -487,6 +487,7 @@
     "metadata": {
       "helios.daedalus.gpu_backend": "cpu",
       "helios.daedalus.planner.enable_gpu": "false",
+      "helios.auto_target_roi": false,
       "helios.pipeline.alias": "ArUco Smart C40 clahe + mask_open",
       "helios.pipeline.ui": {
         "description": "Single adaptive + one contour pass + one detect path. No redundant fallback/temporal branches."

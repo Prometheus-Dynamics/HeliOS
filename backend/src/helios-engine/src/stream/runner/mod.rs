@@ -24,10 +24,6 @@ mod pump;
 
 pub use config::StreamRunnerConfig;
 
-fn preview_jpeg_quality() -> u8 {
-    std::env::var("HELIOS_PREVIEW_JPEG_QUALITY").ok().and_then(|raw| raw.parse::<u8>().ok()).unwrap_or(95).clamp(1, 100)
-}
-
 fn preview_worker_trim_interval() -> Duration {
     let millis = std::env::var("HELIOS_PREVIEW_WORKER_TRIM_INTERVAL_MS").ok().and_then(|raw| raw.parse::<u64>().ok()).unwrap_or(1_000).clamp(50, 60_000);
     Duration::from_millis(millis)
@@ -141,6 +137,7 @@ pub struct StreamRunner {
     pub(super) decoder_id: Option<String>,
     pub(super) encoder_settings: Option<EncoderSettings>,
     pub(super) decoder_settings: Option<DecoderSettings>,
+    pub(super) preview_jpeg_quality: u8,
     pub(super) decode_fps_limit: Option<f64>,
     pub(super) encode_fps_limit: Option<f64>,
     pub(super) encode_configured: bool,
@@ -409,10 +406,9 @@ pub(super) struct PreviewEncodeRequest {
 }
 
 impl PreviewWorker {
-    pub(super) fn start(stats: styx::codec::CodecStats, activity_ms: Arc<AtomicU64>, transport_stats: Arc<Mutex<PreviewTransportStats>>, mut shmem: ShmemWriter) -> Self {
+    pub(super) fn start(stats: styx::codec::CodecStats, activity_ms: Arc<AtomicU64>, transport_stats: Arc<Mutex<PreviewTransportStats>>, quality: u8, mut shmem: ShmemWriter) -> Self {
         let mailbox = Arc::new(PreviewMailbox::new());
         let mailbox_thread = Arc::clone(&mailbox);
-        let quality = preview_jpeg_quality();
         let trim_interval = preview_worker_trim_interval();
         let join = std::thread::spawn(move || {
             let mut turbo = TurboPreviewEncoder::new(quality);

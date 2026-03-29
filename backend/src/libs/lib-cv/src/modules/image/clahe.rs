@@ -12,7 +12,7 @@ thread_local! {
 
 const VERT_LUT_RETAIN_CAP: usize = 128 * 256;
 
-const CLAHE_LUT_PAR_MIN_TILES: usize = 24;
+const CLAHE_LUT_PAR_MIN_TILES: usize = 4;
 const CLAHE_APPLY_PAR_MIN_PIXELS_DEFAULT: usize = 1024 * 768;
 
 fn clahe_apply_parallel_min_pixels() -> usize {
@@ -51,7 +51,7 @@ pub fn prepare_clahe(gray: &GrayImage, tile_size: u32, clip_limit: f32) -> Clahe
 
     let mut luts = vec![[0u8; 256]; (tiles_x * tiles_y) as usize];
     if luts.len() >= CLAHE_LUT_PAR_MIN_TILES && clahe_should_parallelize(width, height) {
-        luts.par_iter_mut().enumerate().with_min_len(8).for_each(|(idx, lut)| {
+        luts.par_iter_mut().enumerate().with_min_len(1).for_each(|(idx, lut)| {
             let ty = idx as u32 / tiles_x;
             let tx = idx as u32 % tiles_x;
             let x0 = tx * tile_w;
@@ -237,7 +237,13 @@ pub fn apply_clahe_with_tiles_into(gray: &GrayImage, tiles: &ClaheTiles, output:
 
                 let src_row = &input[y * width_usize..(y + 1) * width_usize];
                 let dst_row = &mut rows[row_offset * width_usize..(row_offset + 1) * width_usize];
-                apply_clahe_row_segmented_vert(dst_row, src_row, col_weight_fp.as_ref(), vert_luts, tiles.tile_w as usize);
+                if interp_y.idx0 == interp_y.idx1 {
+                    let row_base = (interp_y.idx0 * tiles.tiles_x) as usize;
+                    let row_luts = &tiles.luts[row_base..row_base + tiles.tiles_x as usize];
+                    apply_clahe_row_segmented_no_vert(dst_row, src_row, col_weight_fp.as_ref(), row_luts, tiles.tile_w as usize);
+                } else {
+                    apply_clahe_row_segmented_vert(dst_row, src_row, col_weight_fp.as_ref(), vert_luts, tiles.tile_w as usize);
+                }
             }
         });
     };
@@ -409,6 +415,48 @@ unsafe fn compute_vertical_lut_neon(out: &mut [u16], top: &[u8; 256], bottom: &[
 }
 
 #[inline(always)]
+fn apply_clahe_row_segmented_no_vert(dst_row: &mut [u8], src_row: &[u8], col_weight_fp: &[u16], row_luts: &[[u8; 256]], tile_w: usize) {
+    debug_assert_eq!(dst_row.len(), src_row.len());
+    debug_assert_eq!(dst_row.len(), col_weight_fp.len());
+    debug_assert!(tile_w > 0);
+
+    let width = dst_row.len();
+    let tiles_x = row_luts.len();
+    if tiles_x == 0 {
+        dst_row.copy_from_slice(src_row);
+        return;
+    }
+
+    for tx in 0..tiles_x {
+        let idx0 = tx;
+        let idx1 = (tx + 1).min(tiles_x.saturating_sub(1));
+        let x0 = tx * tile_w;
+        if x0 >= width {
+            break;
+        }
+        let x1 = ((tx + 1) * tile_w).min(width);
+
+        let lut0 = &row_luts[idx0];
+        if idx0 == idx1 {
+            for x in x0..x1 {
+                dst_row[x] = lut0[src_row[x] as usize];
+            }
+            continue;
+        }
+
+        let lut1 = &row_luts[idx1];
+        for x in x0..x1 {
+            let wx = col_weight_fp[x] as i32;
+            let value = src_row[x] as usize;
+            let left = lut0[value] as i32;
+            let right = lut1[value] as i32;
+            let out_fp8 = (left << 8) + (right - left) * wx;
+            dst_row[x] = ((out_fp8 + 128) >> 8) as u8;
+        }
+    }
+}
+
+#[inline(always)]
 fn apply_clahe_row_segmented_vert(dst_row: &mut [u8], src_row: &[u8], col_weight_fp: &[u16], vert_luts: &[u16], tile_w: usize) {
     debug_assert_eq!(dst_row.len(), src_row.len());
     debug_assert_eq!(dst_row.len(), col_weight_fp.len());
@@ -433,8 +481,15 @@ fn apply_clahe_row_segmented_vert(dst_row: &mut [u8], src_row: &[u8], col_weight
         let base0 = idx0 * 256;
         let base1 = idx1 * 256;
         let lut0 = &vert_luts[base0..base0 + 256];
-        let lut1 = &vert_luts[base1..base1 + 256];
+        if idx0 == idx1 {
+            for x in x0..x1 {
+                let value = src_row[x] as usize;
+                dst_row[x] = ((lut0[value] as i32 + 128) >> 8) as u8;
+            }
+            continue;
+        }
 
+        let lut1 = &vert_luts[base1..base1 + 256];
         for x in x0..x1 {
             let wx = col_weight_fp[x] as i32;
             let value = src_row[x] as usize;
@@ -464,19 +519,21 @@ fn compute_tile_lut(src: &GrayImage, x0: u32, y0: u32, x1: u32, y1: u32, clip_li
     for y in y0..y1 {
         let y = y as usize;
         let row = &src_buf[y * width + x0..y * width + x1];
-        let mut chunks = row.chunks_exact(8);
-        for chunk in chunks.by_ref() {
-            hist0[chunk[0] as usize] += 1;
-            hist1[chunk[1] as usize] += 1;
-            hist2[chunk[2] as usize] += 1;
-            hist3[chunk[3] as usize] += 1;
-            hist4[chunk[4] as usize] += 1;
-            hist5[chunk[5] as usize] += 1;
-            hist6[chunk[6] as usize] += 1;
-            hist7[chunk[7] as usize] += 1;
+        let mut idx = 0usize;
+        while idx + 8 <= row.len() {
+            hist0[unsafe { *row.get_unchecked(idx) } as usize] += 1;
+            hist1[unsafe { *row.get_unchecked(idx + 1) } as usize] += 1;
+            hist2[unsafe { *row.get_unchecked(idx + 2) } as usize] += 1;
+            hist3[unsafe { *row.get_unchecked(idx + 3) } as usize] += 1;
+            hist4[unsafe { *row.get_unchecked(idx + 4) } as usize] += 1;
+            hist5[unsafe { *row.get_unchecked(idx + 5) } as usize] += 1;
+            hist6[unsafe { *row.get_unchecked(idx + 6) } as usize] += 1;
+            hist7[unsafe { *row.get_unchecked(idx + 7) } as usize] += 1;
+            idx += 8;
         }
-        for &value in chunks.remainder() {
-            hist0[value as usize] += 1;
+        while idx < row.len() {
+            hist0[unsafe { *row.get_unchecked(idx) } as usize] += 1;
+            idx += 1;
         }
     }
 
@@ -517,5 +574,76 @@ fn compute_tile_lut(src: &GrayImage, x0: u32, y0: u32, x1: u32, y1: u32, clip_li
         cumulative = cumulative.saturating_add(hist[idx]);
         let val = cumulative.saturating_sub(cdf_min);
         *out = ((val * 255) / denom) as u8;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn apply_clahe_reference(gray: &GrayImage, tiles: &ClaheTiles) -> GrayImage {
+        let width = gray.width();
+        let height = gray.height();
+        let mut out = GrayImage::new(width, height);
+        let row_interp = build_interp(height, tiles.tile_h, tiles.tiles_y, height);
+        let col_weight_fp = build_weight_fp(width, tiles.tile_w, tiles.tiles_x, width);
+        let input = gray.as_raw();
+        let out_buf = out.as_mut();
+        let width_usize = width as usize;
+        let tiles_x = tiles.tiles_x as usize;
+
+        for y in 0..height as usize {
+            let interp_y = row_interp[y];
+            let row0_base = (interp_y.idx0 * tiles.tiles_x) as usize;
+            let row1_base = (interp_y.idx1 * tiles.tiles_x) as usize;
+            let wy = interp_y.weight_fp as i32;
+            let src_row = &input[y * width_usize..(y + 1) * width_usize];
+            let dst_row = &mut out_buf[y * width_usize..(y + 1) * width_usize];
+
+            for x in 0..width_usize {
+                let idx0 = (x as u32 / tiles.tile_w).min(tiles.tiles_x - 1) as usize;
+                let idx1 = (idx0 + 1).min(tiles_x.saturating_sub(1));
+                let wx = col_weight_fp[x] as i32;
+                let value = src_row[x] as usize;
+                let top_left = tiles.luts[row0_base + idx0][value] as i32;
+                let top_right = tiles.luts[row0_base + idx1][value] as i32;
+                let bottom_left = tiles.luts[row1_base + idx0][value] as i32;
+                let bottom_right = tiles.luts[row1_base + idx1][value] as i32;
+                let left = top_left * 256 + (bottom_left - top_left) * wy;
+                let right = top_right * 256 + (bottom_right - top_right) * wy;
+                let out_fp16 = (left << 8) + (right - left) * wx;
+                dst_row[x] = ((out_fp16 + 0x8000) >> 16) as u8;
+            }
+        }
+
+        out
+    }
+
+    fn patterned_gray(width: u32, height: u32) -> GrayImage {
+        let mut buf = vec![0u8; (width as usize).saturating_mul(height as usize)];
+        for y in 0..height as usize {
+            for x in 0..width as usize {
+                buf[y * width as usize + x] = ((x * 19 + y * 31 + ((x ^ y) * 7)) & 0xff) as u8;
+            }
+        }
+        GrayImage::from_raw(width, height, buf).expect("test image dimensions")
+    }
+
+    #[test]
+    fn apply_clahe_with_tiles_matches_reference_two_tiles() {
+        let gray = patterned_gray(37, 23);
+        let tiles = prepare_clahe(&gray, 2, 3.5);
+        let expected = apply_clahe_reference(&gray, &tiles);
+        let actual = apply_clahe_with_tiles(&gray, &tiles);
+        assert_eq!(actual.as_raw(), expected.as_raw());
+    }
+
+    #[test]
+    fn apply_clahe_with_tiles_matches_reference_three_tiles() {
+        let gray = patterned_gray(41, 29);
+        let tiles = prepare_clahe(&gray, 3, 2.75);
+        let expected = apply_clahe_reference(&gray, &tiles);
+        let actual = apply_clahe_with_tiles(&gray, &tiles);
+        assert_eq!(actual.as_raw(), expected.as_raw());
     }
 }

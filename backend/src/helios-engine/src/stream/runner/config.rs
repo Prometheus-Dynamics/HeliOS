@@ -31,13 +31,14 @@ pub struct StreamRunnerConfig {
     pub decoder_id: Option<String>,
     pub encoder_settings: Option<EncoderSettings>,
     pub decoder_settings: Option<DecoderSettings>,
+    pub preview_jpeg_quality: u8,
     pub shmem: Option<ShmemWriter>,
     pub stream_id: Option<uuid::Uuid>,
 }
 
 impl StreamRunner {
     pub fn new(config: StreamRunnerConfig) -> Self {
-        let StreamRunnerConfig { mut capture_config, graph, encoder_id, mut decoder_id, encoder_settings, decoder_settings, mut shmem, stream_id } = config;
+        let StreamRunnerConfig { mut capture_config, graph, encoder_id, mut decoder_id, encoder_settings, decoder_settings, preview_jpeg_quality, mut shmem, stream_id } = config;
         if capture_config.backend == BackendKind::Libcamera && capture_config.target_fps.is_none() && capture_config.interval.is_none() {
             let fps = env::var(ENV_DEFAULT_LIBCAMERA_FPS).ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or(DEFAULT_LIBCAMERA_FPS);
             capture_config.target_fps = Some(fps.max(1));
@@ -112,6 +113,7 @@ impl StreamRunner {
             decoder_id,
             encoder_settings,
             decoder_settings,
+            preview_jpeg_quality: preview_jpeg_quality.clamp(1, 100),
             decode_fps_limit,
             encode_fps_limit,
             encode_configured: false,
@@ -304,6 +306,7 @@ mod tests {
             decoder_id: None,
             encoder_settings: None,
             decoder_settings: None,
+            preview_jpeg_quality: 65,
             shmem: None,
             stream_id: None,
         });
@@ -320,6 +323,7 @@ mod tests {
             decoder_id: None,
             encoder_settings: None,
             decoder_settings: None,
+            preview_jpeg_quality: 65,
             shmem: None,
             stream_id: None,
         });

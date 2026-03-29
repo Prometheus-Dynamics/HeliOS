@@ -291,14 +291,7 @@ fn overlay_detection_crosshair(image: &mut DynamicImage, cx: i64, cy: i64, size_
     let cx = cx.clamp(0, i64::from(width.saturating_sub(1))) as u32;
     let cy = cy.clamp(0, i64::from(height.saturating_sub(1))) as u32;
     let arm = (size_px.max(2) / 2) as u32;
-
-    let left = cx.saturating_sub(arm);
-    let right = cx.saturating_add(arm).min(width - 1);
-    let top = cy.saturating_sub(arm);
-    let bottom = cy.saturating_add(arm).min(height - 1);
-
-    draw::line::overlay_line_x_y(image, (left, cy), (right, cy), thickness.max(1), color);
-    draw::line::overlay_line_x_y(image, (cx, top), (cx, bottom), thickness.max(1), color);
+    draw::line::overlay_crosshair_x_y(image, (cx, cy), arm, thickness.max(1), color);
 }
 
 #[derive(Clone, Debug, NodeConfig)]

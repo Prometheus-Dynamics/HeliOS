@@ -73,7 +73,10 @@ pub use aruco_calibrated::{
     decode_quads_aruco_with_config_no_bits, decode_quads_aruco_with_config_no_bits_gray,
 };
 pub use calibrated::{decode_quads_calibrated, decode_quads_calibrated_with_config};
-pub use candidates::{candidate_quad_from_contour, candidate_quad_from_contour_fast, candidate_quad_from_contour_fast_in, filter_candidates, filter_candidates_fast, quad_satisfies_config};
+pub use candidates::{
+    candidate_quad_from_contour, candidate_quad_from_contour_fast, candidate_quad_from_contour_fast_i32_in, candidate_quad_from_contour_fast_in, filter_candidates, filter_candidates_fast,
+    quad_satisfies_config,
+};
 pub use config::{ArucoDecodeConfig, ArucoTagDecodeConfig, ArucoTagDetectorConfig, CameraCalibration};
 pub use debug::{DecodeQuadFailure, DecodeQuadOutcome, decode_quad_debug};
 pub use decode_quads::{

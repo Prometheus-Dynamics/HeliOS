@@ -482,6 +482,7 @@
     "metadata": {
       "helios.daedalus.gpu_backend": "cpu",
       "helios.daedalus.planner.enable_gpu": "false",
+      "helios.auto_target_roi": true,
       "helios.pipeline.alias": "aruco-fast",
       "helios.pipeline.ui": {
         "description": "Fast single-branch CPU ArUco: CLAHE -> adaptive threshold -> adaptive quads -> decode -> dedup -> overlay.",
@@ -1151,7 +1152,7 @@
             "fallback_max_contours",
             {
               "type": "Int",
-              "value": 128
+              "value": 48
             }
           ],
           [
@@ -1179,7 +1180,7 @@
             "max_quads",
             {
               "type": "Int",
-              "value": 0
+              "value": 4
             }
           ]
         ],

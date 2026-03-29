@@ -531,6 +531,7 @@ impl StreamManager {
                     decoder_id: manifest.decoder_id.clone(),
                     encoder_settings: manifest.encoder_settings.clone(),
                     decoder_settings: manifest.decoder_settings.clone(),
+                    preview_jpeg_quality: manifest.preview_jpeg_quality(),
                     shmem,
                     stream_id: Some(stream_id),
                 });
@@ -4421,6 +4422,7 @@ mod tests {
             decoder_id: None,
             encoder_settings: None,
             decoder_settings: None,
+            preview_jpeg_quality: None,
             shadow_recorder_enabled: false,
             start_on_boot: false,
         }

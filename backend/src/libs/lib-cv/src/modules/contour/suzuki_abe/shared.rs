@@ -20,6 +20,7 @@ pub(super) type ContourPoints = SmallVec<[Point<i32>; 32]>;
 pub struct CompactContour {
     pub start: usize,
     pub len: usize,
+    pub chain_len: u32,
     pub border_type: BorderType,
     pub parent: Option<usize>,
     pub min_x: i32,

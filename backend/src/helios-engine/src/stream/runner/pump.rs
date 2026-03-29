@@ -679,7 +679,13 @@ impl StreamRunner {
             let Some(shmem) = self.shmem.take() else {
                 return;
             };
-            self.preview_worker = Some(super::PreviewWorker::start(self.preview_encoder_stats.clone(), self.preview_encoder_last_activity_ms.clone(), self.preview_transport_stats.clone(), shmem));
+            self.preview_worker = Some(super::PreviewWorker::start(
+                self.preview_encoder_stats.clone(),
+                self.preview_encoder_last_activity_ms.clone(),
+                self.preview_transport_stats.clone(),
+                self.preview_jpeg_quality,
+                shmem,
+            ));
             tracing::info!("preview worker started on demand");
         }
         let Some(worker) = self.preview_worker.as_ref() else {
@@ -693,7 +699,13 @@ impl StreamRunner {
             let Some(shmem) = shmem else {
                 return;
             };
-            self.preview_worker = Some(super::PreviewWorker::start(self.preview_encoder_stats.clone(), self.preview_encoder_last_activity_ms.clone(), self.preview_transport_stats.clone(), shmem));
+            self.preview_worker = Some(super::PreviewWorker::start(
+                self.preview_encoder_stats.clone(),
+                self.preview_encoder_last_activity_ms.clone(),
+                self.preview_transport_stats.clone(),
+                self.preview_jpeg_quality,
+                shmem,
+            ));
         }
     }
 

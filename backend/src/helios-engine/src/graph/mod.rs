@@ -147,6 +147,199 @@ fn decode_runtime_value_as_aruco_detections(payload: &DaedalusEdgePayload) -> Op
     any.downcast_ref::<Arc<Vec<ArucoDetection2D>>>().cloned().or_else(|| any.downcast_ref::<Vec<ArucoDetection2D>>().map(|detections| Arc::new(detections.clone())))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RoiRect {
+    x: i64,
+    y: i64,
+    w: i64,
+    h: i64,
+}
+
+#[derive(Debug, Default)]
+struct AutoTargetRoiState {
+    rect: Option<RoiRect>,
+    last_center: Option<(f64, f64)>,
+    velocity: (f64, f64),
+    misses: u32,
+    ever_detected: bool,
+}
+
+fn host_output_detection_source_port(host_output_ports: &[String]) -> Option<String> {
+    host_output_ports.iter().find(|port| port.eq_ignore_ascii_case("target_detections")).cloned().or_else(|| host_output_ports.iter().find(|port| port.eq_ignore_ascii_case("detections")).cloned())
+}
+
+fn daedalus_value_as_i64(value: &DaedalusValue) -> Option<i64> {
+    match value {
+        DaedalusValue::Int(value) => Some(*value),
+        DaedalusValue::Float(value) if value.is_finite() => Some(*value as i64),
+        _ => None,
+    }
+}
+
+fn daedalus_value_as_bool(value: &DaedalusValue) -> Option<bool> {
+    match value {
+        DaedalusValue::Bool(value) => Some(*value),
+        DaedalusValue::Int(value) => Some(*value != 0),
+        DaedalusValue::Float(value) if value.is_finite() => Some(*value != 0.0),
+        _ => None,
+    }
+}
+
+fn is_roi_port(port: &str) -> bool {
+    matches!(port.trim().to_ascii_lowercase().as_str(), "roi_x" | "roi_y" | "roi_w" | "roi_h")
+}
+
+fn manual_roi_override_active(inputs: &BTreeMap<String, DaedalusValue>) -> bool {
+    let w = inputs.get("roi_w").and_then(daedalus_value_as_i64).unwrap_or(0);
+    let h = inputs.get("roi_h").and_then(daedalus_value_as_i64).unwrap_or(0);
+    w > 0 && h > 0
+}
+
+fn detection_bbox(det: &ArucoDetection2D) -> Option<(f64, f64, f64, f64)> {
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for corner in &det.corners {
+        if !(corner.x.is_finite() && corner.y.is_finite()) {
+            return None;
+        }
+        min_x = min_x.min(corner.x);
+        min_y = min_y.min(corner.y);
+        max_x = max_x.max(corner.x);
+        max_y = max_y.max(corner.y);
+    }
+    if !(min_x.is_finite() && min_y.is_finite() && max_x.is_finite() && max_y.is_finite()) {
+        return None;
+    }
+    Some((min_x, min_y, max_x, max_y))
+}
+
+fn clamp_roi_rect(frame_dims: (u32, u32), cx: f64, cy: f64, w: f64, h: f64) -> Option<RoiRect> {
+    let (frame_w, frame_h) = frame_dims;
+    if frame_w == 0 || frame_h == 0 || !(cx.is_finite() && cy.is_finite() && w.is_finite() && h.is_finite()) {
+        return None;
+    }
+
+    let fw = frame_w as f64;
+    let fh = frame_h as f64;
+    let roi_w = w.max(1.0).min(fw).round();
+    let roi_h = h.max(1.0).min(fh).round();
+    if roi_w <= 0.0 || roi_h <= 0.0 {
+        return None;
+    }
+
+    let max_x = (fw - roi_w).max(0.0);
+    let max_y = (fh - roi_h).max(0.0);
+    let x = (cx - roi_w * 0.5).clamp(0.0, max_x).round();
+    let y = (cy - roi_h * 0.5).clamp(0.0, max_y).round();
+    Some(RoiRect { x: x as i64, y: y as i64, w: roi_w as i64, h: roi_h as i64 })
+}
+
+fn reset_auto_target_roi_tracking(state: &mut AutoTargetRoiState) {
+    state.rect = None;
+    state.last_center = None;
+    state.velocity = (0.0, 0.0);
+    state.misses = 0;
+}
+
+fn bootstrap_auto_target_roi_rect(frame_dims: (u32, u32), inputs: &BTreeMap<String, DaedalusValue>) -> Option<RoiRect> {
+    const DEFAULT_FRAME_RATIO: f64 = 0.60;
+    const DEFAULT_MAX_RATIO: f64 = 0.72;
+    const CROSSHAIR_FRAME_RATIO: f64 = 0.42;
+    const CROSSHAIR_MAX_RATIO: f64 = 0.55;
+    const MIN_SIZE_PX: f64 = 224.0;
+
+    let (frame_w, frame_h) = frame_dims;
+    if frame_w == 0 || frame_h == 0 {
+        return None;
+    }
+
+    let crosshair_x = inputs.get("crosshair_x").and_then(daedalus_value_as_i64);
+    let crosshair_y = inputs.get("crosshair_y").and_then(daedalus_value_as_i64);
+    let draw_crosshair = inputs.get("draw_crosshair").and_then(daedalus_value_as_bool).unwrap_or(false);
+    let order_uses_crosshair = matches!(inputs.get("order_mode"), Some(DaedalusValue::String(mode)) if mode.eq_ignore_ascii_case("crosshair"));
+    let explicit_crosshair = draw_crosshair || order_uses_crosshair || crosshair_x.zip(crosshair_y).is_some_and(|(x, y)| x > 0 || y > 0);
+
+    let (center_x, center_y, frame_ratio, max_ratio) = if explicit_crosshair {
+        let max_x = i64::from(frame_w.saturating_sub(1));
+        let max_y = i64::from(frame_h.saturating_sub(1));
+        let x = crosshair_x.unwrap_or(max_x / 2).clamp(0, max_x) as f64;
+        let y = crosshair_y.unwrap_or(max_y / 2).clamp(0, max_y) as f64;
+        (x, y, CROSSHAIR_FRAME_RATIO, CROSSHAIR_MAX_RATIO)
+    } else {
+        (frame_w as f64 * 0.5, frame_h as f64 * 0.5, DEFAULT_FRAME_RATIO, DEFAULT_MAX_RATIO)
+    };
+
+    let max_w = (frame_w as f64 * max_ratio).max(1.0).min(frame_w as f64);
+    let max_h = (frame_h as f64 * max_ratio).max(1.0).min(frame_h as f64);
+    let roi_w = (frame_w as f64 * frame_ratio).max(MIN_SIZE_PX.min(max_w)).min(max_w);
+    let roi_h = (frame_h as f64 * frame_ratio).max(MIN_SIZE_PX.min(max_h)).min(max_h);
+    clamp_roi_rect(frame_dims, center_x, center_y, roi_w, roi_h)
+}
+
+fn update_auto_target_roi_state(state: &mut AutoTargetRoiState, frame_dims: (u32, u32), detections: &[ArucoDetection2D]) -> Option<RoiRect> {
+    const HOLD_FRAMES: u32 = 3;
+    const EXPAND_RATIO: f64 = 2.25;
+    const MIN_FRAME_RATIO: f64 = 0.18;
+    const MIN_SIZE_PX: f64 = 96.0;
+    const MAX_SIZE_RATIO: f64 = 0.65;
+    const MISS_GROWTH: f64 = 1.35;
+    const BASE_PAD_PX: f64 = 24.0;
+
+    let (frame_w, frame_h) = frame_dims;
+    if frame_w == 0 || frame_h == 0 {
+        *state = AutoTargetRoiState::default();
+        return None;
+    }
+
+    let frame_min = frame_w.min(frame_h) as f64;
+    let min_roi_size = (frame_min * MIN_FRAME_RATIO).max(MIN_SIZE_PX);
+    let max_roi_w = (frame_w as f64 * MAX_SIZE_RATIO).max(min_roi_size).min(frame_w as f64);
+    let max_roi_h = (frame_h as f64 * MAX_SIZE_RATIO).max(min_roi_size).min(frame_h as f64);
+
+    if let Some(det) = detections.first() {
+        let Some((min_x, min_y, max_x, max_y)) = detection_bbox(det) else {
+            return state.rect;
+        };
+        let bbox_w = (max_x - min_x).max(1.0);
+        let bbox_h = (max_y - min_y).max(1.0);
+        let center = ((min_x + max_x) * 0.5, (min_y + max_y) * 0.5);
+        let velocity = state.last_center.map(|prev| (center.0 - prev.0, center.1 - prev.1)).unwrap_or((0.0, 0.0));
+        let velocity_pad = (velocity.0.abs().max(velocity.1.abs()) * 2.0).min(frame_min * 0.1);
+        let roi_w = (bbox_w * EXPAND_RATIO + BASE_PAD_PX + velocity_pad).clamp(min_roi_size, max_roi_w);
+        let roi_h = (bbox_h * EXPAND_RATIO + BASE_PAD_PX + velocity_pad).clamp(min_roi_size, max_roi_h);
+        let rect = clamp_roi_rect(frame_dims, center.0, center.1, roi_w, roi_h)?;
+        state.rect = Some(rect);
+        state.last_center = Some(center);
+        state.velocity = velocity;
+        state.misses = 0;
+        state.ever_detected = true;
+        return Some(rect);
+    }
+
+    let Some(prev_rect) = state.rect else {
+        reset_auto_target_roi_tracking(state);
+        return None;
+    };
+
+    if state.misses >= HOLD_FRAMES {
+        reset_auto_target_roi_tracking(state);
+        return None;
+    }
+
+    state.misses = state.misses.saturating_add(1);
+    let growth = MISS_GROWTH.powi(state.misses as i32);
+    let base_center = state.last_center.unwrap_or((prev_rect.x as f64 + prev_rect.w as f64 * 0.5, prev_rect.y as f64 + prev_rect.h as f64 * 0.5));
+    let predicted_center = (base_center.0 + state.velocity.0, base_center.1 + state.velocity.1);
+    let roi_w = (prev_rect.w as f64 * growth).clamp(min_roi_size, max_roi_w);
+    let roi_h = (prev_rect.h as f64 * growth).clamp(min_roi_size, max_roi_h);
+    let rect = clamp_roi_rect(frame_dims, predicted_center.0, predicted_center.1, roi_w, roi_h)?;
+    state.rect = Some(rect);
+    state.last_center = Some(predicted_center);
+    Some(rect)
+}
+
 fn int_value_json(value: i64) -> (DaedalusValue, Option<Value>) {
     let value = DaedalusValue::Int(value);
     let json = daedalus_value_to_json(&value);
@@ -711,6 +904,22 @@ fn default_host_bridge_input_value(port_lc: &str) -> Option<DaedalusValue> {
         "order_mode" => Some(DaedalusValue::String("none".into())),
         _ => None,
     }
+}
+
+fn metadata_bool_flag(map: &BTreeMap<String, DaedalusValue>, key: &str) -> Option<bool> {
+    map.get(key).and_then(daedalus_value_as_bool).or_else(|| {
+        map.get(key).and_then(|value| match value {
+            DaedalusValue::String(raw) => {
+                let raw = raw.trim().to_ascii_lowercase();
+                match raw.as_str() {
+                    "1" | "true" | "yes" | "on" => Some(true),
+                    "0" | "false" | "no" | "off" => Some(false),
+                    _ => None,
+                }
+            }
+            _ => None,
+        })
+    })
 }
 
 fn normalize_graph_metadata(graph: &mut Value) {
@@ -1602,6 +1811,7 @@ struct DaedalusGraphExecutor {
     input_host_alias: String,
     input_port: String,
     calibration_port: Option<String>,
+    declared_input_ports_lc: BTreeSet<String>,
     output_hosts: Vec<String>,
     host_output_ports: Vec<String>,
     host_output_ports_lc: BTreeSet<String>,
@@ -1610,6 +1820,8 @@ struct DaedalusGraphExecutor {
     host_output_port_owners: BTreeMap<String, usize>,
     preview_ports: Vec<String>,
     preview_ports_lc: BTreeSet<String>,
+    preview_aux_ports: Vec<String>,
+    preview_aux_ports_lc: BTreeSet<String>,
     prefers_grayscale_input: bool,
     run_mode: RuntimeMode,
     run_metrics_level: DaedalusMetricsLevel,
@@ -1634,6 +1846,8 @@ struct DaedalusGraphExecutor {
     calibration_payload: std::sync::RwLock<DaedalusValue>,
     default_input_values: BTreeMap<String, DaedalusValue>,
     input_values: std::sync::RwLock<BTreeMap<String, DaedalusValue>>,
+    auto_target_roi_source_port: Option<String>,
+    auto_target_roi: Mutex<AutoTargetRoiState>,
     last_background_trim_ms: AtomicU64,
     last_error_detail: std::sync::RwLock<String>,
     failure_count: AtomicU64,
@@ -2503,6 +2717,7 @@ impl DaedalusGraphExecutor {
             }
         }
         let graph_has_color_sensitive_nodes = graph.nodes.iter().any(|node| node_requires_color_input(node.id.0.as_str()));
+        let graph_auto_target_roi_enabled = metadata_bool_flag(&graph.metadata, "helios.auto_target_roi").unwrap_or_else(auto_target_roi_enabled);
         let planner_output = engine.plan(&registry.registry, graph).map_err(|e| GraphError::Build(e.to_string()))?;
         let runtime_plan = engine.build_runtime_plan(&planner_output.plan).map_err(|e| GraphError::Build(e.to_string()))?;
         host_mgr.populate_from_plan(&runtime_plan);
@@ -2661,12 +2876,19 @@ impl DaedalusGraphExecutor {
         let host_outputs_in_graph = host_outputs_in_graph_enabled(Some(plan.as_ref()), gpu_plan_active);
         let demand_driven = demand_driven_enabled(Some(plan.as_ref()), gpu_plan_active);
         let run_metrics_level = engine.config().runtime.metrics_level;
+        let roi_ports_present = declared_host_bridge_ports.contains("roi_x")
+            && declared_host_bridge_ports.contains("roi_y")
+            && declared_host_bridge_ports.contains("roi_w")
+            && declared_host_bridge_ports.contains("roi_h");
+        let auto_target_roi_source_port = if graph_auto_target_roi_enabled && roi_ports_present { host_output_detection_source_port(&host_output_ports) } else { None };
+        let preview_aux_ports = auto_target_roi_source_port.iter().cloned().collect::<Vec<_>>();
         let active_nodes_with_image =
-            build_demand_mask(plan.as_ref(), &output_hosts, &preview_ports, &host_output_ports, &host_output_port_types, &host_output_port_owners, demand_driven, true, true).map(Arc::new);
+            build_demand_mask(plan.as_ref(), &output_hosts, &preview_ports, &host_output_ports, &host_output_port_types, &host_output_port_owners, demand_driven, true, true, &[]).map(Arc::new);
         let active_nodes_preview_only =
-            build_demand_mask(plan.as_ref(), &output_hosts, &preview_ports, &host_output_ports, &host_output_port_types, &host_output_port_owners, demand_driven, true, false).map(Arc::new);
+            build_demand_mask(plan.as_ref(), &output_hosts, &preview_ports, &host_output_ports, &host_output_port_types, &host_output_port_owners, demand_driven, true, false, &preview_aux_ports)
+                .map(Arc::new);
         let active_nodes_without_image =
-            build_demand_mask(plan.as_ref(), &output_hosts, &preview_ports, &host_output_ports, &host_output_port_types, &host_output_port_owners, demand_driven, false, true).map(Arc::new);
+            build_demand_mask(plan.as_ref(), &output_hosts, &preview_ports, &host_output_ports, &host_output_port_types, &host_output_port_owners, demand_driven, false, true, &[]).map(Arc::new);
         let mut executor = DaedalusOwnedExecutor::new(plan.clone(), handlers.clone_arc())
             .with_host_bridges(host_mgr.clone())
             .with_const_coercers(const_coercers.clone())
@@ -2735,6 +2957,7 @@ impl DaedalusGraphExecutor {
             input_host_alias,
             input_port,
             calibration_port,
+            declared_input_ports_lc: declared_host_bridge_ports.iter().map(|port| port.to_ascii_lowercase()).collect(),
             output_hosts,
             host_output_ports,
             host_output_ports_lc,
@@ -2742,6 +2965,8 @@ impl DaedalusGraphExecutor {
             host_output_port_owners,
             preview_ports,
             preview_ports_lc,
+            preview_aux_ports: preview_aux_ports.clone(),
+            preview_aux_ports_lc: preview_aux_ports.iter().map(|port| port.to_ascii_lowercase()).collect(),
             prefers_grayscale_input,
             run_mode: engine.config().runtime.mode.clone(),
             run_metrics_level,
@@ -2765,6 +2990,8 @@ impl DaedalusGraphExecutor {
             calibration_payload: std::sync::RwLock::new(calibration_to_daedalus_value(None)),
             default_input_values: seeded_input_values.clone(),
             input_values: std::sync::RwLock::new(seeded_input_values),
+            auto_target_roi_source_port,
+            auto_target_roi: Mutex::new(AutoTargetRoiState::default()),
             last_background_trim_ms: AtomicU64::new(0),
             last_error_detail: std::sync::RwLock::new(String::new()),
             failure_count: AtomicU64::new(0),
@@ -2907,6 +3134,16 @@ impl GraphExecutor for DaedalusGraphExecutor {
                 let _ = input_host.push(port, pushed, Some(correlation_id));
             }
             if let Ok(guard) = self.input_values.read() {
+                let auto_roi_values = if manual_roi_override_active(&guard) {
+                    None
+                } else {
+                    self.auto_target_roi
+                        .lock()
+                        .ok()
+                        .and_then(|state| state.rect.or_else(|| (!state.ever_detected).then(|| bootstrap_auto_target_roi_rect(input_dims, &guard)).flatten()))
+                        .map(|rect| [("roi_x", rect.x), ("roi_y", rect.y), ("roi_w", rect.w), ("roi_h", rect.h)])
+                };
+                let auto_max_quads = if auto_roi_values.is_some() && self.declared_input_ports_lc.contains("max_quads") && !guard.contains_key("max_quads") { Some(4i64) } else { None };
                 for (port, value) in guard.iter() {
                     if port.eq_ignore_ascii_case(&self.input_port) {
                         continue;
@@ -2916,8 +3153,19 @@ impl GraphExecutor for DaedalusGraphExecutor {
                             continue;
                         }
                     }
+                    if auto_roi_values.is_some() && is_roi_port(port) {
+                        continue;
+                    }
                     let pushed = DaedalusEdgePayload::Value(value.clone());
                     let _ = input_host.push(port, pushed, Some(correlation_id));
+                }
+                if let Some(auto_roi_values) = auto_roi_values {
+                    for (port, value) in auto_roi_values {
+                        let _ = input_host.push(port, DaedalusEdgePayload::Value(DaedalusValue::Int(value)), Some(correlation_id));
+                    }
+                }
+                if let Some(max_quads) = auto_max_quads {
+                    let _ = input_host.push("max_quads", DaedalusEdgePayload::Value(DaedalusValue::Int(max_quads)), Some(correlation_id));
                 }
             }
             Some(())
@@ -3114,7 +3362,11 @@ impl GraphExecutor for DaedalusGraphExecutor {
             if call_idx < 3 {
                 tracing::debug!(call_idx, host = %alias, ports = ?output_host.incoming_port_names(), "daedalus graph: output host ports");
             }
-            let port_names: Vec<String> = if preview_only_port_reads { self.preview_ports.clone() } else { output_host.incoming_port_names() };
+            let port_names: Vec<String> = if preview_only_port_reads {
+                self.preview_ports.iter().chain(self.preview_aux_ports.iter()).cloned().collect::<BTreeSet<_>>().into_iter().collect()
+            } else {
+                output_host.incoming_port_names()
+            };
             for port_name_owned in port_names {
                 let mut ports = output_host.iter_ports(std::slice::from_ref(&port_name_owned));
                 let Some(port) = ports.next() else { continue };
@@ -3493,6 +3745,13 @@ impl GraphExecutor for DaedalusGraphExecutor {
             }
         }
         if !typed_updates.is_empty() {
+            if let Some(source_port) = self.auto_target_roi_source_port.as_deref() {
+                if let Some((_port, TypedHostOutputSample::ArucoDetections(detections))) = typed_updates.iter().find(|(port, _)| port == source_port) {
+                    if let Ok(mut guard) = self.auto_target_roi.lock() {
+                        let _ = update_auto_target_roi_state(&mut guard, input_dims, detections.as_ref().as_slice());
+                    }
+                }
+            }
             if let Ok(mut guard) = self.typed_samples.lock() {
                 for (port, value) in typed_updates {
                     guard.insert(port, value);
@@ -3689,7 +3948,8 @@ impl GraphExecutor for DaedalusGraphExecutor {
 
 impl DaedalusGraphExecutor {
     fn apply_host_output_port_filter(&self, options: GraphProcessOptions, requested_sample_ports: &BTreeSet<String>) {
-        let filter = if options.preview_only && requested_sample_ports.is_empty() { Some(self.preview_ports_lc.iter().cloned().collect::<BTreeSet<_>>()) } else { None };
+        let filter =
+            if options.preview_only && requested_sample_ports.is_empty() { Some(self.preview_ports_lc.iter().chain(self.preview_aux_ports_lc.iter()).cloned().collect::<BTreeSet<_>>()) } else { None };
 
         for alias in &self.output_hosts {
             self.host_mgr.set_outbound_port_filter(alias.clone(), filter.clone());
@@ -4333,6 +4593,7 @@ fn build_demand_mask(
     demand_driven: bool,
     include_preview_ports: bool,
     include_value_ports: bool,
+    extra_sink_ports: &[String],
 ) -> Option<Vec<bool>> {
     if !demand_driven {
         return None;
@@ -4369,6 +4630,11 @@ fn build_demand_mask(
             }
         }
     }
+    for port in extra_sink_ports {
+        if !port.trim().is_empty() {
+            sink_ports.insert(port.clone());
+        }
+    }
 
     let mut sinks = Vec::new();
     for port in sink_ports {
@@ -4393,6 +4659,7 @@ fn build_demand_sinks(
     host_output_port_types: &BTreeMap<String, DaedalusTypeExpr>,
     host_output_port_owners: &BTreeMap<String, usize>,
     demand_driven: bool,
+    extra_sink_ports: &[String],
 ) -> Vec<RuntimeSink> {
     if !demand_driven {
         return Vec::new();
@@ -4420,6 +4687,11 @@ fn build_demand_sinks(
         }
         let is_image = host_output_port_types.get(&key).map(is_image_payload).unwrap_or(false);
         if !is_image {
+            sink_ports.insert(port.clone());
+        }
+    }
+    for port in extra_sink_ports {
+        if !port.trim().is_empty() {
             sink_ports.insert(port.clone());
         }
     }
@@ -4461,6 +4733,13 @@ fn executor_busy_timeout_from_env() -> Option<Duration> {
 
 fn env_flag(name: &str) -> bool {
     env::var(name).ok().map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")).unwrap_or(false)
+}
+
+fn auto_target_roi_enabled() -> bool {
+    match env::var("HELIOS_DAEDALUS_AUTO_TARGET_ROI") {
+        Ok(raw) => matches!(raw.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"),
+        Err(_) => true,
+    }
 }
 
 fn plan_uses_gpu(plan: &RuntimePlan) -> bool {

@@ -486,6 +486,12 @@
     set hostBuffer(value) {
       streamState.hostBuffer = value;
     },
+    get previewJpegQuality() {
+      return streamState.previewJpegQuality;
+    },
+    set previewJpegQuality(value) {
+      streamState.previewJpegQuality = value;
+    },
     get decoderFpsLimit() {
       return streamState.decoderFpsLimit;
     },
@@ -1209,6 +1215,9 @@
       },
       get hostBuffer() {
         return streamState.hostBuffer;
+      },
+      get previewJpegQuality() {
+        return streamState.previewJpegQuality;
       },
       get selectedIntervalIdx() {
         return streamState.selectedIntervalIdx;

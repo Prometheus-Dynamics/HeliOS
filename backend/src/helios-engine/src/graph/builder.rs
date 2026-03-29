@@ -563,6 +563,7 @@ mod tests {
             decoder_id: None,
             encoder_settings: None,
             decoder_settings: None,
+            preview_jpeg_quality: None,
             shadow_recorder_enabled: true,
             start_on_boot: false,
         }

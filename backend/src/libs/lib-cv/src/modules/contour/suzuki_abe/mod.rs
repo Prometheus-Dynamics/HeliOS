@@ -78,7 +78,9 @@ pub fn suzuki_abe_i32_compact_capped_into(image: &GrayImage, point_store: &mut V
 
 #[cfg(test)]
 mod tests {
-    use super::{IMAGE_VALUES_RETAIN_CAP, compact_suzuki_scratch_after_frame, image_values_scratch, release_suzuki_scratch_on_idle};
+    use super::{IMAGE_VALUES_RETAIN_CAP, compact_suzuki_scratch_after_frame, image_values_scratch, release_suzuki_scratch_on_idle, suzuki_abe_i32, suzuki_abe_i32_compact_into};
+    use image::{GrayImage, Luma};
+    use imageproc::contours::BorderType;
 
     #[test]
     fn frame_compaction_caps_image_values_capacity() {
@@ -98,5 +100,26 @@ mod tests {
         release_suzuki_scratch_on_idle();
         let scratch = image_values_scratch().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         assert_eq!(scratch.capacity(), 0);
+    }
+
+    #[test]
+    fn compact_trace_preserves_chain_len_metadata() {
+        let mut image = GrayImage::new(8, 8);
+        for y in 2..6 {
+            for x in 2..6 {
+                image.put_pixel(x, y, Luma([255]));
+            }
+        }
+
+        let full = suzuki_abe_i32(&image);
+        let full_outer = full.iter().find(|contour| contour.border_type == BorderType::Outer).expect("outer contour");
+
+        let mut point_store = Vec::new();
+        let mut compact = Vec::new();
+        suzuki_abe_i32_compact_into(&image, &mut point_store, &mut compact);
+        let compact_outer = compact.iter().find(|contour| contour.border_type == BorderType::Outer).expect("compact outer contour");
+
+        assert_eq!(compact_outer.chain_len as usize, full_outer.points.len());
+        assert_eq!(compact_outer.len, compact_outer.chain_len as usize);
     }
 }

@@ -266,6 +266,12 @@ export const createCameraPageControllers = (deps: CameraPageControllerDeps) => {
       set hostBuffer(value) {
         deps.streamState.hostBuffer = value;
       },
+      get previewJpegQuality() {
+        return deps.streamState.previewJpegQuality;
+      },
+      set previewJpegQuality(value) {
+        deps.streamState.previewJpegQuality = value;
+      },
       get cameraAlias() {
         return deps.streamState.cameraAlias;
       },

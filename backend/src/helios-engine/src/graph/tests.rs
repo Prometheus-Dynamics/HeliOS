@@ -1,4 +1,4 @@
-use super::{build_demand_sinks, derive_host_aliases, infer_host_output_incoming_types, normalize_graph_json_for_runtime};
+use super::{build_demand_sinks, derive_host_aliases, infer_host_output_incoming_types, normalize_graph_json_for_runtime, update_auto_target_roi_state};
 
 use daedalus::data::model::{EnumVariant, TypeExpr, Value};
 use daedalus::planner::ComputeAffinity;
@@ -10,6 +10,7 @@ use daedalus::DataCell;
 use image::DynamicImage;
 use image::GenericImageView;
 use image::{GrayImage, Luma, RgbaImage};
+use lib_cv::modules::aruco::ArucoDetection2D;
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::PathBuf;
@@ -377,6 +378,89 @@ fn default_host_bridge_inputs_cover_overlay_crosshair_toggle() {
 }
 
 #[test]
+fn auto_target_roi_tracks_and_holds_selected_detection() {
+    let mut state = super::AutoTargetRoiState::default();
+    let detection = ArucoDetection2D {
+        id: 3,
+        rotation: 0,
+        corners: [lib_cv::Point { x: 600.0, y: 360.0 }, lib_cv::Point { x: 680.0, y: 360.0 }, lib_cv::Point { x: 680.0, y: 440.0 }, lib_cv::Point { x: 600.0, y: 440.0 }],
+        score: None,
+        best_distance: None,
+        second_distance: None,
+        border_mismatches: None,
+        contrast_range: None,
+        border_width: None,
+        data_width: None,
+        bits: None,
+    };
+
+    let rect = update_auto_target_roi_state(&mut state, (1280, 800), &[detection.clone()]).expect("roi rect");
+    assert!(rect.w > 80 && rect.w < 1280);
+    assert!(rect.h > 80 && rect.h < 800);
+    assert!(rect.x <= 600 && rect.y <= 360);
+    assert!(state.ever_detected);
+
+    let held = update_auto_target_roi_state(&mut state, (1280, 800), &[]).expect("held roi");
+    assert!(held.w >= rect.w);
+    assert!(held.h >= rect.h);
+    assert_eq!(state.misses, 1);
+
+    for _ in 0..4 {
+        let _ = update_auto_target_roi_state(&mut state, (1280, 800), &[]);
+    }
+    assert!(state.rect.is_none());
+    assert!(state.ever_detected);
+}
+
+#[test]
+fn bootstrap_auto_target_roi_defaults_to_center_before_first_lock() {
+    let inputs = BTreeMap::new();
+    let rect = super::bootstrap_auto_target_roi_rect((1280, 800), &inputs).expect("bootstrap rect");
+    assert!((rect.x + rect.w / 2 - 640).abs() <= 2);
+    assert!((rect.y + rect.h / 2 - 400).abs() <= 2);
+    assert!(rect.w < 1280);
+    assert!(rect.h < 800);
+}
+
+#[test]
+fn bootstrap_auto_target_roi_prefers_explicit_crosshair() {
+    let mut inputs = BTreeMap::new();
+    inputs.insert("crosshair_x".to_string(), Value::Int(960));
+    inputs.insert("crosshair_y".to_string(), Value::Int(220));
+    inputs.insert("draw_crosshair".to_string(), Value::Bool(true));
+    let rect = super::bootstrap_auto_target_roi_rect((1280, 800), &inputs).expect("bootstrap rect");
+    assert!((rect.x + rect.w / 2 - 960).abs() <= 2);
+    assert!((rect.y + rect.h / 2 - 220).abs() <= 2);
+}
+
+#[test]
+fn bootstrap_auto_target_roi_crosshair_is_tighter_than_default() {
+    let default_rect = super::bootstrap_auto_target_roi_rect((1280, 800), &BTreeMap::new()).expect("default rect");
+
+    let mut inputs = BTreeMap::new();
+    inputs.insert("crosshair_x".to_string(), Value::Int(640));
+    inputs.insert("crosshair_y".to_string(), Value::Int(400));
+    inputs.insert("draw_crosshair".to_string(), Value::Bool(true));
+
+    let crosshair_rect = super::bootstrap_auto_target_roi_rect((1280, 800), &inputs).expect("crosshair rect");
+    assert!(crosshair_rect.w < default_rect.w);
+    assert!(crosshair_rect.h < default_rect.h);
+}
+
+#[test]
+fn metadata_bool_flag_accepts_bool_and_string_values() {
+    let mut map = BTreeMap::new();
+    map.insert("helios.auto_target_roi".to_string(), Value::Bool(false));
+    assert_eq!(super::metadata_bool_flag(&map, "helios.auto_target_roi"), Some(false));
+
+    map.insert("helios.auto_target_roi".to_string(), Value::String("true".into()));
+    assert_eq!(super::metadata_bool_flag(&map, "helios.auto_target_roi"), Some(true));
+
+    map.insert("helios.auto_target_roi".to_string(), Value::String("off".into()));
+    assert_eq!(super::metadata_bool_flag(&map, "helios.auto_target_roi"), Some(false));
+}
+
+#[test]
 fn host_bridge_injects_any_payload_into_graph() {
     let host_bridge = RuntimeNode {
         id: "io.host_bridge".into(),
@@ -562,8 +646,16 @@ fn demand_driven_sinks_skip_non_preview_image_outputs() {
     port_types.insert("detections".to_string(), TypeExpr::list(TypeExpr::scalar(daedalus::data::model::ValueType::Int)));
 
     let host_output_port_owners = BTreeMap::new();
-    let sinks =
-        build_demand_sinks(&plan, &["Output".to_string()], &["raw".to_string()], &["raw".to_string(), "overlay".to_string(), "detections".to_string()], &port_types, &host_output_port_owners, true);
+    let sinks = build_demand_sinks(
+        &plan,
+        &["Output".to_string()],
+        &["raw".to_string()],
+        &["raw".to_string(), "overlay".to_string(), "detections".to_string()],
+        &port_types,
+        &host_output_port_owners,
+        true,
+        &[],
+    );
 
     let ports = sinks.into_iter().filter_map(|sink| sink.port).collect::<BTreeSet<_>>();
     assert!(ports.contains("raw"));
@@ -646,7 +738,7 @@ fn preview_only_demand_targets_host_output_sink_and_only_overlay_branch() {
     assert_eq!(owners.get("clahe"), Some(&3));
     assert_eq!(owners.get("adaptive"), Some(&3));
 
-    let sinks = build_demand_sinks(&plan, &["Output".to_string()], &["overlay".to_string()], &["overlay".to_string(), "clahe".to_string(), "adaptive".to_string()], &port_types, &owners, true);
+    let sinks = build_demand_sinks(&plan, &["Output".to_string()], &["overlay".to_string()], &["overlay".to_string(), "clahe".to_string(), "adaptive".to_string()], &port_types, &owners, true, &[]);
     assert_eq!(sinks.len(), 1);
     assert_eq!(sinks[0].port.as_deref(), Some("overlay"));
     assert_eq!(sinks[0].node.index, Some(3));
@@ -661,6 +753,7 @@ fn preview_only_demand_targets_host_output_sink_and_only_overlay_branch() {
         true,
         true,
         false,
+        &[],
     )
     .expect("preview-only demand mask");
     assert_eq!(mask, vec![false, false, true, true]);

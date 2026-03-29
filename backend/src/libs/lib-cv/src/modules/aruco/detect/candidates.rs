@@ -37,6 +37,29 @@ fn downsample_closed_contour_for_fast_dp<'a>(contour: &'a [Point<f32>], scratch:
     scratch.as_slice()
 }
 
+#[inline(always)]
+fn downsample_closed_contour_for_fast_dp_i32<'a>(contour: &'a [Point<i32>], scratch: &'a mut Vec<Point<i32>>) -> &'a [Point<i32>] {
+    let len = contour.len();
+    if len < FAST_DP_DOWNSAMPLE_MIN_LEN {
+        return contour;
+    }
+    let step = len.div_ceil(FAST_DP_DOWNSAMPLE_TARGET).max(2);
+    scratch.clear();
+    scratch.reserve(len / step + 2);
+    for i in (0..len).step_by(step) {
+        scratch.push(contour[i]);
+    }
+    if let (Some(&last_src), Some(&last_ds)) = (contour.last(), scratch.last())
+        && (last_ds.x != last_src.x || last_ds.y != last_src.y)
+    {
+        scratch.push(last_src);
+    }
+    if scratch.len() < 8 {
+        return contour;
+    }
+    scratch.as_slice()
+}
+
 fn contour_perimeter_len(contour: &[Point<f32>]) -> f32 {
     contour.len() as f32
 }
@@ -172,6 +195,53 @@ pub fn candidate_quad_from_contour_fast_in(
     }
 
     let mut quad = [approx[0], approx[1], approx[2], approx[3]];
+    sort_corners_clockwise(&mut quad);
+    rotate_corners_to_top_left(&mut quad);
+    if !quad_satisfies_config(&quad, config) {
+        return None;
+    }
+    Some(quad)
+}
+
+pub fn candidate_quad_from_contour_fast_i32_in(
+    contour: &[Point<i32>],
+    perimeter: f32,
+    min_perimeter: Option<f32>,
+    config: &ArucoTagDetectorConfig,
+    downsampled: &mut Vec<Point<i32>>,
+    approx: &mut Vec<Point<i32>>,
+) -> Option<[Point<f32>; 4]> {
+    if contour.len() < 4 {
+        return None;
+    }
+    if perimeter <= f32::EPSILON {
+        return None;
+    }
+    if let Some(min_perimeter) = min_perimeter
+        && config.min_area > f32::EPSILON
+    {
+        let max_step = std::f32::consts::SQRT_2;
+        if perimeter * max_step < min_perimeter {
+            return None;
+        }
+    }
+
+    let adaptive_epsilon = contour_epsilon(perimeter, config);
+    let contour = downsample_closed_contour_for_fast_dp_i32(contour, downsampled);
+    crate::modules::contour::douglas_peucker::approx_poly_dp_closed_fast_i32_into(contour, adaptive_epsilon, approx);
+    if approx.first() == approx.last() {
+        approx.pop();
+    }
+    if approx.len() != 4 {
+        return None;
+    }
+
+    let mut quad = [
+        Point::new(approx[0].x as f32, approx[0].y as f32),
+        Point::new(approx[1].x as f32, approx[1].y as f32),
+        Point::new(approx[2].x as f32, approx[2].y as f32),
+        Point::new(approx[3].x as f32, approx[3].y as f32),
+    ];
     sort_corners_clockwise(&mut quad);
     rotate_corners_to_top_left(&mut quad);
     if !quad_satisfies_config(&quad, config) {

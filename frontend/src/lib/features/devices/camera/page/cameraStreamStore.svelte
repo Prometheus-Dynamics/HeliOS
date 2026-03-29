@@ -45,6 +45,7 @@
       encoderSelectionTouched: false,
       decoderSelectionTouched: false,
       hostBuffer: 8,
+      previewJpegQuality: 65,
       cameraAlias: '',
       decoderFpsLimit: null as number | null,
       decoderRotationDegrees: 0 as number | null,

@@ -56,6 +56,7 @@ type PresetState = {
   get fileBackendLoop(): boolean;
   get fileBackendPathsText(): string;
   get hostBuffer(): number | null;
+  get previewJpegQuality(): number | null;
   get selectedIntervalIdx(): number;
   get selectedModeKey(): string | null;
   get selectedFormat(): string;
@@ -360,6 +361,7 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
           : null,
         shadow_recorder_enabled: shadowRecorderEnabled,
         host_buffer: state.hostBuffer ?? null,
+        preview_jpeg_quality: state.previewJpegQuality ?? 65,
         pipeline_enabled: enablePipeline,
         pipeline_id: activePipelineIdWire,
         pipeline_output: activePipelineOutputWire ?? null,

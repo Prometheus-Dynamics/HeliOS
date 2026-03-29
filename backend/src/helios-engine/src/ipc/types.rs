@@ -1155,6 +1155,8 @@ pub struct StreamManifest {
     pub encoder_settings: Option<EncoderSettings>,
     #[serde(default)]
     pub decoder_settings: Option<DecoderSettings>,
+    #[serde(default)]
+    pub preview_jpeg_quality: Option<u8>,
     /// Enable the rolling shadow recorder buffer used for capture-last clips.
     #[serde(default = "default_shadow_recorder_enabled")]
     pub shadow_recorder_enabled: bool,
@@ -1172,6 +1174,10 @@ impl StreamManifest {
         } else {
             requested
         }
+    }
+
+    pub fn preview_jpeg_quality(&self) -> u8 {
+        self.preview_jpeg_quality.or_else(default_preview_jpeg_quality_override).unwrap_or(DEFAULT_PREVIEW_JPEG_QUALITY).clamp(1, 100)
     }
 }
 
@@ -1215,6 +1221,12 @@ pub(crate) fn default_host_buffer() -> usize {
     // still override via `HELIOS_HOST_BUFFER` or per-stream `host_buffer`.
     let requested = env::var("HELIOS_HOST_BUFFER").ok().and_then(|v| v.parse().ok()).filter(|v| *v > 0).unwrap_or(2);
     requested.min(max_host_buffer())
+}
+
+const DEFAULT_PREVIEW_JPEG_QUALITY: u8 = 65;
+
+fn default_preview_jpeg_quality_override() -> Option<u8> {
+    env::var("HELIOS_PREVIEW_JPEG_QUALITY").ok().and_then(|v| v.parse::<u8>().ok())
 }
 
 pub(crate) fn default_shadow_recorder_enabled() -> bool {

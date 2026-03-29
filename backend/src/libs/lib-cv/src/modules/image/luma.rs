@@ -166,6 +166,9 @@ pub(crate) fn crop_luma8_frame(frame: &DynamicImage, x: u32, y: u32, width: u32,
 
     match frame {
         DynamicImage::ImageLuma8(gray) => {
+            if x == 0 && y == 0 && width == gray.width() && height == gray.height() {
+                return gray.clone();
+            }
             let raw = gray.as_raw();
             let stride = gray.width() as usize;
             let x = x as usize;

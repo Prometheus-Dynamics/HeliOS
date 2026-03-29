@@ -81,6 +81,8 @@ type BackendState = {
   set shadowRecorderEnabled(value: boolean);
   get hostBuffer(): number | null;
   set hostBuffer(value: number | null);
+  get previewJpegQuality(): number | null;
+  set previewJpegQuality(value: number | null);
   get cameraAlias(): string;
   set cameraAlias(value: string);
   get selectedModeKey(): string | null;
@@ -156,6 +158,10 @@ export function createCameraBackendController(state: BackendState, deps: Backend
   const asPositiveNumber = (value: unknown): number | null => {
     const numeric = Number(value);
     return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+  };
+  const asJpegQuality = (value: unknown): number | null => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? Math.min(100, Math.max(1, Math.trunc(numeric))) : null;
   };
   const asInterval = (value: unknown): Interval | null => {
     const record = asRecord(value);
@@ -467,6 +473,7 @@ export function createCameraBackendController(state: BackendState, deps: Backend
     }
 
     state.hostBuffer = manifest?.host_buffer ?? state.hostBuffer;
+    state.previewJpegQuality = asJpegQuality(manifest?.preview_jpeg_quality ?? manifestRecord?.preview_jpeg_quality) ?? 65;
     state.shadowRecorderEnabled = isFileBackend(capture?.backend) ? false : (manifest?.shadow_recorder_enabled ?? true);
     state.cameraAlias = asTrimmedString(identityRecord?.alias ?? identityRecord?.display);
     const encoderEnabledFlag = manifestRecord?.encoder_enabled;

@@ -45,6 +45,7 @@
     | 'decoderSelectionTouched'
     | 'encoderSelectionTouched'
     | 'hostBuffer'
+    | 'previewJpegQuality'
     | 'decoderFpsLimit'
     | 'decoderRotationDegrees'
     | 'decoderMirrorHorizontal'
@@ -365,6 +366,7 @@
           bind:decoderSelectionTouched={ctx.streamBindings.decoderSelectionTouched}
           bind:encoderSelectionTouched={ctx.streamBindings.encoderSelectionTouched}
           bind:hostBuffer={ctx.streamBindings.hostBuffer}
+          bind:previewJpegQuality={ctx.streamBindings.previewJpegQuality}
           bind:decoderFpsLimit={ctx.streamBindings.decoderFpsLimit}
           bind:decoderRotationDegrees={ctx.streamBindings.decoderRotationDegrees}
           bind:decoderMirrorHorizontal={ctx.streamBindings.decoderMirrorHorizontal}

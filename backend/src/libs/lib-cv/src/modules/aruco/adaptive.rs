@@ -7,14 +7,16 @@ use std::mem::size_of;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-use super::detect::{ArucoTagDetectorConfig, candidate_quad_from_contour, candidate_quad_from_contour_fast_in};
+use super::detect::{ArucoTagDetectorConfig, candidate_quad_from_contour, candidate_quad_from_contour_fast_i32_in};
 use crate::contour::suzuki_abe::{CompactContour, suzuki_abe_i32_compact_capped_into};
 use crate::modules::image::luma::with_luma8_frame;
 
 const ADAPTIVE_FAST_CANDIDATE_CONTOUR_CAP: usize = 96;
 const ADAPTIVE_FAST_CANDIDATE_CONTOUR_CAP_MIN: usize = 24;
-const ADAPTIVE_FAST_DP_DOWNSAMPLE_MIN_LEN: usize = 1024;
-const ADAPTIVE_FAST_DP_DOWNSAMPLE_TARGET: usize = 384;
+const ADAPTIVE_TARGETED_FAST_CAP_MULTIPLIER: usize = 8;
+const ADAPTIVE_TARGETED_PREPROCESS_CAP_MULTIPLIER: usize = 16;
+const ADAPTIVE_TARGETED_FALLBACK_CAP_MULTIPLIER: usize = 12;
+const ADAPTIVE_TARGETED_PREPROCESS_CAP_MIN: usize = 48;
 // Trigger the slower contour fallback only when the fast quad path is clearly under-producing.
 // On the fast live stream, a single viable quad is typically enough to skip the expensive fallback.
 const ADAPTIVE_FALLBACK_TRIGGER_QUADS_MAX_DEFAULT: usize = 1;
@@ -44,6 +46,26 @@ fn adaptive_trace_point_budget(preprocess_cap: usize, trace_pixels: usize) -> us
 #[inline(always)]
 fn adaptive_trace_contour_budget(preprocess_cap: usize) -> usize {
     preprocess_cap.saturating_mul(4).clamp(ADAPTIVE_TRACE_CONTOUR_BUDGET_MIN, ADAPTIVE_TRACE_CONTOUR_BUDGET_MAX)
+}
+
+#[inline(always)]
+fn adaptive_targeted_cap(max_quads: usize, multiplier: usize, min_cap: usize, hard_cap: usize) -> usize {
+    if max_quads == 0 { hard_cap } else { max_quads.saturating_mul(multiplier).clamp(min_cap.min(hard_cap), hard_cap) }
+}
+
+#[inline(always)]
+fn adaptive_targeted_fast_cap(max_quads: usize, fast_cap: usize) -> usize {
+    adaptive_targeted_cap(max_quads, ADAPTIVE_TARGETED_FAST_CAP_MULTIPLIER, ADAPTIVE_FAST_CANDIDATE_CONTOUR_CAP_MIN, fast_cap)
+}
+
+#[inline(always)]
+fn adaptive_targeted_preprocess_cap(max_quads: usize, preprocess_cap: usize, fast_cap: usize) -> usize {
+    adaptive_targeted_cap(max_quads, ADAPTIVE_TARGETED_PREPROCESS_CAP_MULTIPLIER, ADAPTIVE_TARGETED_PREPROCESS_CAP_MIN.max(fast_cap), preprocess_cap)
+}
+
+#[inline(always)]
+fn adaptive_targeted_fallback_cap(max_quads: usize, fallback_cap: usize, fast_cap: usize) -> usize {
+    adaptive_targeted_cap(max_quads, ADAPTIVE_TARGETED_FALLBACK_CAP_MULTIPLIER, fast_cap, fallback_cap)
 }
 
 fn log_adaptive_trace_budget_hit(width: u32, height: u32, point_budget: usize, contour_budget: usize, preprocess_cap: usize) {
@@ -234,6 +256,8 @@ struct AdaptiveExtractScratch {
     fast_success: Vec<bool>,
     fast_tested: Vec<bool>,
     fallback_idx: Vec<usize>,
+    fast_downsampled_i32: Vec<CvPoint<i32>>,
+    fast_approx_i32: Vec<CvPoint<i32>>,
     pts_f32: Vec<CvPoint<f32>>,
 }
 
@@ -250,6 +274,8 @@ impl AdaptiveExtractScratch {
         release_retained_vec(&mut self.fast_success);
         release_retained_vec(&mut self.fast_tested);
         release_retained_vec(&mut self.fallback_idx);
+        release_retained_vec(&mut self.fast_downsampled_i32);
+        release_retained_vec(&mut self.fast_approx_i32);
         release_retained_vec(&mut self.pts_f32);
     }
 
@@ -266,6 +292,8 @@ impl AdaptiveExtractScratch {
         trim_retained_vec(&mut self.fast_success, fast_cap.max(64));
         trim_retained_vec(&mut self.fast_tested, fast_cap.max(64));
         trim_retained_vec(&mut self.fallback_idx, contour_cap.max(64));
+        trim_retained_vec(&mut self.fast_downsampled_i32, work_cap);
+        trim_retained_vec(&mut self.fast_approx_i32, 64);
         trim_retained_vec(&mut self.pts_f32, work_cap);
     }
 }
@@ -339,52 +367,6 @@ fn contour_to_f32(points: &[CvPoint<i32>], out: &mut Vec<CvPoint<f32>>, off_x: i
         for p in points.iter() {
             out.push(CvPoint::new((p.x + off_x) as f32, (p.y + off_y) as f32));
         }
-    }
-}
-
-#[inline(always)]
-fn contour_to_f32_for_fast_candidate(points: &[CvPoint<i32>], out: &mut Vec<CvPoint<f32>>, off_x: i32, off_y: i32) {
-    out.clear();
-    let len = points.len();
-    if len == 0 {
-        return;
-    }
-
-    let step = if len < ADAPTIVE_FAST_DP_DOWNSAMPLE_MIN_LEN { 1 } else { len.div_ceil(ADAPTIVE_FAST_DP_DOWNSAMPLE_TARGET).max(2) };
-    let target_len = if step == 1 { len } else { len.div_ceil(step) + 1 };
-    out.reserve(target_len.saturating_sub(out.capacity()));
-
-    if step == 1 {
-        if off_x == 0 && off_y == 0 {
-            for p in points.iter() {
-                out.push(CvPoint::new(p.x as f32, p.y as f32));
-            }
-        } else {
-            for p in points.iter() {
-                out.push(CvPoint::new((p.x + off_x) as f32, (p.y + off_y) as f32));
-            }
-        }
-        return;
-    }
-
-    if off_x == 0 && off_y == 0 {
-        for i in (0..len).step_by(step) {
-            let p = points[i];
-            out.push(CvPoint::new(p.x as f32, p.y as f32));
-        }
-    } else {
-        for i in (0..len).step_by(step) {
-            let p = points[i];
-            out.push(CvPoint::new((p.x + off_x) as f32, (p.y + off_y) as f32));
-        }
-    }
-
-    let last_src = &points[len - 1];
-    let last_x = if off_x == 0 { last_src.x as f32 } else { (last_src.x + off_x) as f32 };
-    let last_y = if off_y == 0 { last_src.y as f32 } else { (last_src.y + off_y) as f32 };
-    let needs_last = out.last().map(|last| last.x != last_x || last.y != last_y).unwrap_or(true);
-    if needs_last {
-        out.push(CvPoint::new(last_x, last_y));
     }
 }
 
@@ -488,11 +470,17 @@ fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig
     // Cap expensive contour-preprocess work under noisy masks. We keep the largest chain-code
     // contours first (proxy for perimeter/area) because true tags are unlikely to be tiny.
     let fast_cap_cfg = config.fallback_max_contours.clamp(ADAPTIVE_FAST_CANDIDATE_CONTOUR_CAP_MIN, ADAPTIVE_FAST_CANDIDATE_CONTOUR_CAP);
-    let preprocess_cap = if config.fallback_max_contours > ADAPTIVE_FAST_CANDIDATE_CONTOUR_CAP {
+    let preprocess_cap_cfg = if config.fallback_max_contours > ADAPTIVE_FAST_CANDIDATE_CONTOUR_CAP {
         config.fallback_max_contours.saturating_mul(2).clamp(ADAPTIVE_FAST_CANDIDATE_CONTOUR_CAP, ADAPTIVE_PREPROCESS_CONTOUR_CAP_MAX)
     } else {
         fast_cap_cfg
     };
+    // `max_quads` is not just an output cap anymore: when the caller only needs a few final
+    // candidates, shrink the expensive contour-prep / fast-pass budget while keeping a generous
+    // margin so the target quad is still likely to survive noisy scenes.
+    let fast_cap_limit = adaptive_targeted_fast_cap(config.max_quads, fast_cap_cfg);
+    let preprocess_cap = adaptive_targeted_preprocess_cap(config.max_quads, preprocess_cap_cfg, fast_cap_limit);
+    let fallback_cap_limit = adaptive_targeted_fallback_cap(config.max_quads, config.fallback_max_contours, fast_cap_limit);
     let trace_pixels = roi_bounds.map(|(_, _, roi_w, roi_h)| roi_w.saturating_mul(roi_h)).unwrap_or_else(|| binary_width.saturating_mul(binary.height() as usize));
     let trace_point_budget = adaptive_trace_point_budget(preprocess_cap, trace_pixels);
     let trace_contour_budget = adaptive_trace_contour_budget(preprocess_cap);
@@ -514,8 +502,22 @@ fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig
     let min_perimeter_for_area = if detector_config.min_area > f32::EPSILON { Some((4.0 * std::f32::consts::PI * detector_config.min_area).sqrt()) } else { None };
 
     with_adaptive_extract_scratch(|scratch| {
-        let AdaptiveExtractScratch { work_i32, compress_scratch, roi_bytes, raw_point_store, raw_contours, point_store, prepared, fast_idx, fast_success, fast_tested, fallback_idx, pts_f32 } =
-            &mut *scratch;
+        let AdaptiveExtractScratch {
+            work_i32,
+            compress_scratch,
+            roi_bytes,
+            raw_point_store,
+            raw_contours,
+            point_store,
+            prepared,
+            fast_idx,
+            fast_success,
+            fast_tested,
+            fallback_idx,
+            fast_downsampled_i32,
+            fast_approx_i32,
+            pts_f32,
+        } = &mut *scratch;
 
         work_i32.clear();
         compress_scratch.clear();
@@ -528,6 +530,8 @@ fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig
         fast_success.clear();
         fast_tested.clear();
         fallback_idx.clear();
+        fast_downsampled_i32.clear();
+        fast_approx_i32.clear();
         pts_f32.clear();
 
         let (contour_off_x, contour_off_y, trace_complete) = if let Some((min_x, min_y, roi_w, roi_h)) = roi_bounds {
@@ -603,14 +607,21 @@ fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig
         let result = if prepared.is_empty() {
             Vec::new()
         } else {
-            let fast_cap = fast_cap_cfg.min(prepared.len());
+            let fast_cap = fast_cap_limit.min(prepared.len());
             if config.fallback_max_contours <= fast_cap {
                 let mut out = Vec::with_capacity(fast_cap);
-                let mut downsampled = Vec::<CvPoint<f32>>::new();
-                let mut approx = Vec::<CvPoint<f32>>::new();
                 for contour in prepared.iter().take(fast_cap) {
-                    contour_to_f32_for_fast_candidate(prepared_contour_points(contour, point_store), pts_f32, contour_off_x, contour_off_y);
-                    if let Some(quad) = candidate_quad_from_contour_fast_in(pts_f32, contour.perimeter, min_perimeter_for_area, &detector_config, &mut downsampled, &mut approx)
+                    let points = prepared_contour_points(contour, point_store);
+                    if let Some(quad) = candidate_quad_from_contour_fast_i32_in(points, contour.perimeter, min_perimeter_for_area, &detector_config, fast_downsampled_i32, fast_approx_i32)
+                        .map(|mut quad| {
+                            if contour_off_x != 0 || contour_off_y != 0 {
+                                for p in &mut quad {
+                                    p.x += contour_off_x as f32;
+                                    p.y += contour_off_y as f32;
+                                }
+                            }
+                            quad
+                        })
                         .filter(|quad| quad_passes_post_filters(quad, config, width, height))
                     {
                         out.push(quad);
@@ -638,25 +649,53 @@ fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig
                     fast_idx
                         .par_iter()
                         .map_init(
-                            || (Vec::<CvPoint<f32>>::new(), Vec::<CvPoint<f32>>::new(), Vec::<CvPoint<f32>>::new()),
-                            |(pts_f32_local, downsampled, approx), &idx| {
+                            || (Vec::<CvPoint<i32>>::new(), Vec::<CvPoint<i32>>::new()),
+                            |(downsampled, approx), &idx| {
                                 let contour = prepared[idx];
-                                contour_to_f32_for_fast_candidate(prepared_contour_points(&contour, point_store), pts_f32_local, contour_off_x, contour_off_y);
-                                let quad = candidate_quad_from_contour_fast_in(pts_f32_local, contour.perimeter, min_perimeter_for_area, &detector_config, downsampled, approx)
-                                    .filter(|quad| quad_passes_post_filters(quad, config, width, height));
+                                let quad = candidate_quad_from_contour_fast_i32_in(
+                                    prepared_contour_points(&contour, point_store),
+                                    contour.perimeter,
+                                    min_perimeter_for_area,
+                                    &detector_config,
+                                    downsampled,
+                                    approx,
+                                )
+                                .map(|mut quad| {
+                                    if contour_off_x != 0 || contour_off_y != 0 {
+                                        for p in &mut quad {
+                                            p.x += contour_off_x as f32;
+                                            p.y += contour_off_y as f32;
+                                        }
+                                    }
+                                    quad
+                                })
+                                .filter(|quad| quad_passes_post_filters(quad, config, width, height));
                                 (idx, quad)
                             },
                         )
                         .collect()
                 } else {
                     let mut results = Vec::with_capacity(fast_idx.len());
-                    let mut downsampled = Vec::<CvPoint<f32>>::new();
-                    let mut approx = Vec::<CvPoint<f32>>::new();
                     for &idx in fast_idx.iter() {
                         let contour = prepared[idx];
-                        contour_to_f32_for_fast_candidate(prepared_contour_points(&contour, point_store), pts_f32, contour_off_x, contour_off_y);
-                        let quad = candidate_quad_from_contour_fast_in(pts_f32, contour.perimeter, min_perimeter_for_area, &detector_config, &mut downsampled, &mut approx)
-                            .filter(|quad| quad_passes_post_filters(quad, config, width, height));
+                        let quad = candidate_quad_from_contour_fast_i32_in(
+                            prepared_contour_points(&contour, point_store),
+                            contour.perimeter,
+                            min_perimeter_for_area,
+                            &detector_config,
+                            fast_downsampled_i32,
+                            fast_approx_i32,
+                        )
+                        .map(|mut quad| {
+                            if contour_off_x != 0 || contour_off_y != 0 {
+                                for p in &mut quad {
+                                    p.x += contour_off_x as f32;
+                                    p.y += contour_off_y as f32;
+                                }
+                            }
+                            quad
+                        })
+                        .filter(|quad| quad_passes_post_filters(quad, config, width, height));
                         results.push((idx, quad));
                     }
                     results
@@ -674,7 +713,7 @@ fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig
 
                 let fallback_trigger_quads_max = adaptive_fallback_trigger_quads_max();
                 if quads.len() < fallback_trigger_quads_max {
-                    let fallback_cap = config.fallback_max_contours;
+                    let fallback_cap = fallback_cap_limit;
                     let k = fallback_cap.min(prepared.len());
                     if k > 0 && k > fast_cap {
                         fallback_idx.extend(0..prepared.len());
@@ -700,12 +739,7 @@ fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig
             }
         };
 
-        scratch.compact_after_frame(
-            binary_width.saturating_mul(binary.height() as usize),
-            trace_point_budget,
-            trace_contour_budget.max(preprocess_cap),
-            fast_cap_cfg.max(config.fallback_max_contours),
-        );
+        scratch.compact_after_frame(binary_width.saturating_mul(binary.height() as usize), trace_point_budget, trace_contour_budget.max(preprocess_cap), fast_cap_limit.max(fallback_cap_limit));
 
         result
     })
@@ -723,7 +757,13 @@ pub fn adaptive_quads(frame: &DynamicImage, config: &AdaptiveDetectorConfig) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::{ADAPTIVE_TRACE_POINT_BUDGET_MIN, adaptive_trace_point_budget};
+    use super::{
+        ADAPTIVE_TRACE_POINT_BUDGET_MIN, AdaptiveDetectorConfig, adaptive_quads_from_mask, adaptive_targeted_fallback_cap, adaptive_targeted_fast_cap, adaptive_targeted_preprocess_cap,
+        adaptive_trace_point_budget,
+    };
+    use crate::modules::aruco::tag::ArucoTagDecoding;
+    use crate::modules::aruco::tag::dictionary::family::Family36H11;
+    use image::{GrayImage, Luma};
 
     #[test]
     fn trace_point_budget_caps_full_frame_work() {
@@ -734,6 +774,82 @@ mod tests {
     fn trace_point_budget_scales_down_for_small_rois() {
         assert_eq!(adaptive_trace_point_budget(240, 320 * 320), ADAPTIVE_TRACE_POINT_BUDGET_MIN);
         assert_eq!(adaptive_trace_point_budget(24, 64 * 64), ADAPTIVE_TRACE_POINT_BUDGET_MIN);
+    }
+
+    #[test]
+    fn max_quads_budget_shrinks_fast_and_preprocess_caps() {
+        assert_eq!(adaptive_targeted_fast_cap(0, 96), 96);
+        assert_eq!(adaptive_targeted_preprocess_cap(0, 256, 96), 256);
+        assert_eq!(adaptive_targeted_fallback_cap(0, 128, 96), 128);
+
+        assert_eq!(adaptive_targeted_fast_cap(4, 96), 32);
+        assert_eq!(adaptive_targeted_preprocess_cap(4, 256, 32), 64);
+        assert_eq!(adaptive_targeted_fallback_cap(4, 128, 32), 48);
+
+        assert_eq!(adaptive_targeted_fast_cap(2, 96), 24);
+        assert_eq!(adaptive_targeted_preprocess_cap(2, 256, 24), 48);
+        assert_eq!(adaptive_targeted_fallback_cap(2, 128, 24), 24);
+    }
+
+    #[test]
+    fn adaptive_quads_from_mask_detects_inverted_36h11_marker() {
+        let fam = Family36H11;
+        let marker = fam.draw_marker(3, 160).expect("marker");
+        let pad = 24u32;
+        let mut mask = GrayImage::new(marker.width() + pad * 2, marker.height() + pad * 2);
+        for y in 0..marker.height() {
+            for x in 0..marker.width() {
+                let value = if marker.get_pixel(x, y)[0] == 0 { 255 } else { 0 };
+                mask.put_pixel(x + pad, y + pad, Luma([value]));
+            }
+        }
+
+        let cfg = AdaptiveDetectorConfig {
+            min_area: 400.0,
+            max_area: None,
+            min_angle: 5.0,
+            max_angle: 175.0,
+            max_side_cv: 4.0,
+            min_corner_distance_rate: 0.05,
+            min_distance_to_border: 3,
+            min_side_px: 0.0,
+            fallback_max_contours: 120,
+            max_quads: 0,
+            ..AdaptiveDetectorConfig::default()
+        };
+        let quads = adaptive_quads_from_mask(&mask, &cfg);
+        assert!(!quads.is_empty(), "expected at least one quad for a clean inverted marker");
+    }
+
+    #[test]
+    fn adaptive_quads_from_mask_detects_inverted_36h11_marker_with_max_quads_budget() {
+        let fam = Family36H11;
+        let marker = fam.draw_marker(3, 160).expect("marker");
+        let pad = 24u32;
+        let mut mask = GrayImage::new(marker.width() + pad * 2, marker.height() + pad * 2);
+        for y in 0..marker.height() {
+            for x in 0..marker.width() {
+                let value = if marker.get_pixel(x, y)[0] == 0 { 255 } else { 0 };
+                mask.put_pixel(x + pad, y + pad, Luma([value]));
+            }
+        }
+
+        let cfg = AdaptiveDetectorConfig {
+            min_area: 400.0,
+            max_area: None,
+            min_angle: 5.0,
+            max_angle: 175.0,
+            max_side_cv: 4.0,
+            min_corner_distance_rate: 0.05,
+            min_distance_to_border: 3,
+            min_side_px: 0.0,
+            fallback_max_contours: 128,
+            max_quads: 4,
+            ..AdaptiveDetectorConfig::default()
+        };
+        let quads = adaptive_quads_from_mask(&mask, &cfg);
+        assert!(!quads.is_empty(), "expected at least one quad for a clean inverted marker under max_quads budget");
+        assert!(quads.len() <= 4, "max_quads budget should cap the number of emitted quads");
     }
 }
 
