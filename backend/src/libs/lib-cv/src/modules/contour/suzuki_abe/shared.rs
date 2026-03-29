@@ -22,12 +22,21 @@ pub struct CompactContour {
     pub len: usize,
     pub border_type: BorderType,
     pub parent: Option<usize>,
+    pub min_x: i32,
+    pub min_y: i32,
+    pub max_x: i32,
+    pub max_y: i32,
 }
 
 impl CompactContour {
     #[inline(always)]
     pub fn points<'a>(&self, point_store: &'a [Point<i32>]) -> &'a [Point<i32>] {
         &point_store[self.start..self.start + self.len]
+    }
+
+    #[inline(always)]
+    pub fn bbox_dims(&self) -> (u32, u32) {
+        ((self.max_x - self.min_x).unsigned_abs().saturating_add(1), (self.max_y - self.min_y).unsigned_abs().saturating_add(1))
     }
 }
 

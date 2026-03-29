@@ -280,7 +280,6 @@ fn cv_aruco_decode_quads_hamming(
     min_bit_delta: f64,
     exec_ctx: &ExecutionContext,
 ) -> Result<Vec<ArucoDetection2D>, NodeError> {
-    let _scratch_guard = ArucoDecodeFrameScratchGuard::new();
     let _ = exec_ctx;
     decode_quads_hamming_gray_inner(
         frame,

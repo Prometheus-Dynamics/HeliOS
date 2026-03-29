@@ -1,6 +1,6 @@
 use daedalus::data::{model::TypeExpr, typing};
 #[cfg(feature = "gpu")]
-use daedalus::gpu::{Compute, DataCell, GpuError};
+use daedalus::gpu::{Compute, GpuError};
 use daedalus::registry::convert::ConverterBuilder;
 use daedalus::runtime::RuntimeValue;
 use daedalus::runtime::plugins::RegistryPluginExt;
@@ -175,25 +175,14 @@ impl Plugin for CvPlugin {
             .register_converter(ConverterBuilder::new("image_dynamic_to_gray8", TypeExpr::opaque("image:dynamic"), TypeExpr::opaque("image:gray8"), Ok).build_boxed())
             .map_err(|_| "failed to register image:dynamic -> image:gray8 converter")?;
 
-        #[cfg(feature = "gpu")]
-        {
-            registry.register_output_mover::<DynamicImage, _>(|img| RuntimeValue::Data(DataCell::from_cpu::<DynamicImage>(img)));
-            registry.register_output_mover::<GrayImage, _>(|img| RuntimeValue::Data(DataCell::from_cpu::<GrayImage>(img)));
-            registry.register_output_mover::<GrayAlphaImage, _>(|img| RuntimeValue::Data(DataCell::from_cpu::<DynamicImage>(DynamicImage::ImageLumaA8(img))));
-            registry.register_output_mover::<RgbImage, _>(|img| RuntimeValue::Data(DataCell::from_cpu::<RgbImage>(img)));
-            registry.register_output_mover::<RgbaImage, _>(|img| RuntimeValue::Data(DataCell::from_cpu::<RgbaImage>(img)));
-        }
-        #[cfg(not(feature = "gpu"))]
-        {
-            registry.register_output_mover::<DynamicImage, _>(|img| RuntimeValue::Any(Arc::new(img)));
-            registry.register_output_mover::<GrayImage, _>(|img| RuntimeValue::Any(Arc::new(img)));
-            registry.register_output_mover::<GrayAlphaImage, _>(|img| {
-                let dyn_img = DynamicImage::ImageLumaA8(img);
-                RuntimeValue::Any(Arc::new(dyn_img))
-            });
-            registry.register_output_mover::<RgbImage, _>(|img| RuntimeValue::Any(Arc::new(img)));
-            registry.register_output_mover::<RgbaImage, _>(|img| RuntimeValue::Any(Arc::new(img)));
-        }
+        registry.register_output_mover::<DynamicImage, _>(|img| RuntimeValue::Any(Arc::new(img)));
+        registry.register_output_mover::<GrayImage, _>(|img| RuntimeValue::Any(Arc::new(img)));
+        registry.register_output_mover::<GrayAlphaImage, _>(|img| {
+            let dyn_img = DynamicImage::ImageLumaA8(img);
+            RuntimeValue::Any(Arc::new(dyn_img))
+        });
+        registry.register_output_mover::<RgbImage, _>(|img| RuntimeValue::Any(Arc::new(img)));
+        registry.register_output_mover::<RgbaImage, _>(|img| RuntimeValue::Any(Arc::new(img)));
         // Typed CV containers are frequently fanned out to multiple nodes and host outputs.
         // Wrap them in a shared Arc carrier so downstream readers can borrow without cloning
         // the full vector payload on every frame.

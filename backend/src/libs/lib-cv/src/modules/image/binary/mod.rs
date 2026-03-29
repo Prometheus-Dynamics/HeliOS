@@ -7,9 +7,15 @@ use wide::{CmpGt, i16x16, u8x16};
 
 thread_local! {
     static ADAPTIVE_COL_SUM_SCRATCH: RefCell<Vec<i32>> = const { RefCell::new(Vec::new()) };
+    static ADAPTIVE_PARALLEL_HSUM_SCRATCH: RefCell<Vec<u16>> = const { RefCell::new(Vec::new()) };
+    static ADAPTIVE_BUFFER_SCRATCH: RefCell<AdaptiveBuffers> = const { RefCell::new(AdaptiveBuffers { hsum_ring: Vec::new(), col_sum: Vec::new() }) };
+    static ADAPTIVE_MASK_SCRATCH: RefCell<MaskBuffer> = const { RefCell::new(MaskBuffer { width: 0, height: 0, buf: Vec::new() }) };
 }
 
 const ADAPTIVE_COL_SUM_RETAIN_CAP: usize = 4096;
+const ADAPTIVE_HSUM_RING_RETAIN_CAP: usize = 1280 * 181;
+const ADAPTIVE_PARALLEL_HSUM_RETAIN_CAP: usize = 1280 * 800;
+const ADAPTIVE_MASK_RETAIN_CAP: usize = 1280 * 800;
 
 #[cfg(target_arch = "aarch64")]
 mod neon;
@@ -91,13 +97,24 @@ pub(super) fn with_managed_adaptive_buffers<R>(exec_ctx: &ExecutionContext, f: i
 }
 
 fn with_adaptive_buffers<R>(f: impl FnOnce(&mut AdaptiveBuffers) -> R) -> R {
-    let mut buffers = AdaptiveBuffers::default();
-    f(&mut buffers)
+    ADAPTIVE_BUFFER_SCRATCH.with(|scratch| {
+        let mut buffers = scratch.borrow_mut();
+        f(&mut buffers)
+    })
 }
 
 fn with_mask_buffer<R>(f: impl FnOnce(&mut MaskBuffer) -> R) -> R {
-    let mut mask = MaskBuffer::default();
-    f(&mut mask)
+    ADAPTIVE_MASK_SCRATCH.with(|scratch| {
+        let mut mask = scratch.borrow_mut();
+        f(&mut mask)
+    })
+}
+
+pub(super) fn with_parallel_hsum_scratch<R>(f: impl FnOnce(&mut Vec<u16>) -> R) -> R {
+    ADAPTIVE_PARALLEL_HSUM_SCRATCH.with(|scratch| {
+        let mut hsum = scratch.borrow_mut();
+        f(&mut hsum)
+    })
 }
 
 #[inline(always)]
@@ -123,11 +140,35 @@ pub(super) fn compact_adaptive_threshold_scratch_current_thread() {
         let mut scratch = scratch.borrow_mut();
         trim_retained_vec(&mut scratch, ADAPTIVE_COL_SUM_RETAIN_CAP);
     });
+    ADAPTIVE_PARALLEL_HSUM_SCRATCH.with(|scratch| {
+        let mut scratch = scratch.borrow_mut();
+        trim_retained_vec(&mut scratch, ADAPTIVE_PARALLEL_HSUM_RETAIN_CAP);
+    });
+    ADAPTIVE_BUFFER_SCRATCH.with(|scratch| {
+        let mut buffers = scratch.borrow_mut();
+        trim_retained_vec(&mut buffers.hsum_ring, ADAPTIVE_HSUM_RING_RETAIN_CAP);
+        trim_retained_vec(&mut buffers.col_sum, ADAPTIVE_COL_SUM_RETAIN_CAP);
+    });
+    ADAPTIVE_MASK_SCRATCH.with(|scratch| {
+        let mut mask = scratch.borrow_mut();
+        mask.width = 0;
+        mask.height = 0;
+        trim_retained_vec(&mut mask.buf, ADAPTIVE_MASK_RETAIN_CAP);
+    });
 }
 
 pub(super) fn release_adaptive_threshold_scratch_current_thread() {
     ADAPTIVE_COL_SUM_SCRATCH.with(|scratch| {
         *scratch.borrow_mut() = Vec::new();
+    });
+    ADAPTIVE_PARALLEL_HSUM_SCRATCH.with(|scratch| {
+        *scratch.borrow_mut() = Vec::new();
+    });
+    ADAPTIVE_BUFFER_SCRATCH.with(|scratch| {
+        *scratch.borrow_mut() = AdaptiveBuffers::default();
+    });
+    ADAPTIVE_MASK_SCRATCH.with(|scratch| {
+        *scratch.borrow_mut() = MaskBuffer::default();
     });
 }
 

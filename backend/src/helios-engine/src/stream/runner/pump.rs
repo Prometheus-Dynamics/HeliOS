@@ -1,5 +1,4 @@
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::TrySendError;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -71,10 +70,15 @@ impl StreamRunner {
         self.last_idle_compaction_wall = Some(now);
 
         self.stop_encoder_worker();
+        self.stop_preview_worker();
         self.runner_memory.reset_current();
         self.graph.release_idle_retention();
         styx::codec::decoder::clear_packed_frame_pools_all_threads();
         lib_cv::release_runtime_scratch_on_idle();
+    }
+
+    fn preview_sink_available(&self) -> bool {
+        self.shmem.is_some() || self.preview_worker.is_some()
     }
 
     fn control_value_to_u64(value: &styx::core::controls::ControlValue) -> Option<u64> {
@@ -343,9 +347,7 @@ impl StreamRunner {
                     graph_has_image_output,
                     graph_has_executor,
                 );
-                let preview_only_demand = preview_active && !raw_demand && !host_demand && !encode_demand && !graph_sample_demand;
-                let preview_only_no_graph =
-                    preview_active && !raw_demand && !host_demand && !encode_demand && !graph_sample_demand && !graph_has_executor && self.preview_worker.is_some() && self.shmem.is_some();
+                let preview_only_no_graph = preview_active && !raw_demand && !host_demand && !encode_demand && !graph_sample_demand && !graph_has_executor && self.preview_worker.is_some();
 
                 // For uncompressed capture formats such as NV12, `frame_lease_to_dynamic_image`
                 // will happily materialize a full host image even when the caller explicitly
@@ -356,14 +358,6 @@ impl StreamRunner {
                     self.maybe_compact_idle_runtime();
                     return Ok(true);
                 }
-                if preview_only_demand {
-                    let now = Instant::now();
-                    if self.last_preview_work_wall.is_some_and(|last| now.saturating_duration_since(last) < self.preview_encode_interval) {
-                        return Ok(true);
-                    }
-                    self.last_preview_work_wall = Some(now);
-                }
-
                 let decode_start = Instant::now();
                 let mut transform_applied = false;
                 let transform = self.decoder_frame_transform();
@@ -466,10 +460,10 @@ impl StreamRunner {
                 // preview image path is pure memory churn.
                 let should_write_preview = preview_active;
                 let graph_image_output_demand = graph_has_image_output && (should_write_preview || encode_demand || host_demand);
-                let preview_only_graph_output = should_write_preview && self.shmem.is_some() && !host_demand && !encode_demand && !graph_sample_demand;
+                let preview_only_graph_output = should_write_preview && self.preview_sink_available() && !host_demand && !encode_demand && !graph_sample_demand;
                 let graph_start = Instant::now();
                 let (processed, preview_output) = if preview_only_graph_output {
-                    match self.process_assigned_graph_preview(image, graph_image_output_demand) {
+                    match self.process_assigned_graph_preview(image, graph_image_output_demand, true) {
                         Some(output) => (None, Some(output)),
                         None if !graph_image_output_demand => (None, None),
                         None => return Ok(true),
@@ -483,6 +477,8 @@ impl StreamRunner {
                     (processed.map(Arc::new), None)
                 };
                 let graph_ms = graph_start.elapsed().as_secs_f64() * 1000.0;
+                self.graph_stage_stats.record(Duration::from_secs_f64(graph_ms / 1000.0));
+                self.last_graph_wall = Some(Instant::now());
                 histogram!("helios.stream.graph_ms", "stream" => self.stream_label.clone()).record(graph_ms);
 
                 // If an encoder is configured, ensure the codec registry (and encoder output fourcc)
@@ -511,10 +507,10 @@ impl StreamRunner {
                     if graph_host.receiver_count() > 0 {
                         graph_host.send_frame(processed.clone());
                     }
-                    if should_write_preview && self.shmem.is_some() {
+                    if should_write_preview && self.preview_sink_available() {
                         self.try_write_shmem_preview_from_image(processed.clone(), ts);
                     }
-                } else if should_write_preview && self.shmem.is_some() {
+                } else if should_write_preview && self.preview_sink_available() {
                     if let Some(output) = preview_output {
                         self.try_write_shmem_preview_from_graph_output(output, ts);
                     }
@@ -676,37 +672,28 @@ impl StreamRunner {
     }
 
     fn try_write_shmem_preview_from_source(&mut self, source: super::PreviewEncodeSource, ts: u64) {
-        let now = Instant::now();
-        if let Some(last) = self.last_preview_encode_wall {
-            if now.saturating_duration_since(last) < self.preview_encode_interval {
-                return;
-            }
-        }
         if self.preview_worker.is_none() {
             if self.shmem.is_none() || !self.preview_generation_enabled() {
                 return;
             }
-            self.preview_worker = Some(super::PreviewWorker::start(self.preview_encoder_stats.clone(), self.preview_encoder_last_activity_ms.clone()));
+            let Some(shmem) = self.shmem.take() else {
+                return;
+            };
+            self.preview_worker = Some(super::PreviewWorker::start(self.preview_encoder_stats.clone(), self.preview_encoder_last_activity_ms.clone(), self.preview_transport_stats.clone(), shmem));
             tracing::info!("preview worker started on demand");
         }
         let Some(worker) = self.preview_worker.as_ref() else {
             return;
         };
         let output_resolution = self.preview_output_resolution_hint();
-        match worker.req_tx.try_send(super::PreviewEncodeRequest { ts, source, output_resolution }) {
-            Ok(()) => {
-                self.last_preview_encode_wall = Some(now);
-            }
-            Err(TrySendError::Full(_)) => {}
-            Err(TrySendError::Disconnected(req)) => {
-                tracing::warn!("preview worker channel disconnected; restarting preview worker");
-                self.preview_worker = Some(super::PreviewWorker::start(self.preview_encoder_stats.clone(), self.preview_encoder_last_activity_ms.clone()));
-                if let Some(worker) = self.preview_worker.as_ref() {
-                    if worker.req_tx.try_send(req).is_ok() {
-                        self.last_preview_encode_wall = Some(now);
-                    }
-                }
-            }
+        let req = super::PreviewEncodeRequest { ts, source, output_resolution, queued_at: Instant::now() };
+        if !worker.submit(req, &self.preview_transport_stats) {
+            tracing::warn!("preview worker mailbox closed; restarting preview worker");
+            let shmem = self.preview_worker.take().and_then(|worker| worker.stop()).or_else(|| self.shmem.take());
+            let Some(shmem) = shmem else {
+                return;
+            };
+            self.preview_worker = Some(super::PreviewWorker::start(self.preview_encoder_stats.clone(), self.preview_encoder_last_activity_ms.clone(), self.preview_transport_stats.clone(), shmem));
         }
     }
 
@@ -757,23 +744,6 @@ impl StreamRunner {
     }
 
     fn poll_preview_worker(&mut self) {
-        let Some(worker) = self.preview_worker.as_ref() else {
-            return;
-        };
-        let Some(shmem) = self.shmem.as_mut() else {
-            // If the encoder worker claimed shmem, drop any pending results.
-            while worker.res_rx.try_recv().is_ok() {}
-            return;
-        };
-
-        // Drain to keep only the latest frame (channel is size-1, but be robust).
-        while let Ok(res) = worker.res_rx.try_recv() {
-            let fourcc = FourCc::new(*b"JPEG");
-            if let Err(err) = shmem.write(Some(res.ts), Some(fourcc), res.dims, &res.jpeg) {
-                tracing::warn!(error = %err, "preview shmem write failed");
-                break;
-            }
-            let _ = worker.recycle_tx.try_send(res.jpeg);
-        }
+        let _ = self.preview_worker.as_ref();
     }
 }

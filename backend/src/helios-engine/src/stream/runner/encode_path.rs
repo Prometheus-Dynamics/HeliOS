@@ -19,7 +19,7 @@ use crate::stream::{
     StreamPackedPoolMetrics, StreamProcessMemoryMetrics, StreamQueueMemoryMetrics, StreamStagingCopyMetrics,
 };
 
-use super::super::encode::{stage_to_capture_metrics, to_codec_metrics};
+use super::super::encode::{cadence_stage_to_capture_metrics, stage_to_capture_metrics, to_codec_metrics};
 use super::super::encoder_worker::EncoderWorkerStart;
 use super::StreamRunner;
 
@@ -226,11 +226,11 @@ impl StreamRunner {
     }
 
     pub(super) fn process_assigned_graphs(&self, image: image::DynamicImage, require_image_output: bool) -> Option<image::DynamicImage> {
-        self.graph.process_with_options(image, crate::graph::GraphProcessOptions { require_image_output })
+        self.graph.process_with_options(image, crate::graph::GraphProcessOptions { require_image_output, preview_only: false })
     }
 
-    pub(super) fn process_assigned_graph_preview(&self, image: image::DynamicImage, require_image_output: bool) -> Option<crate::graph::GraphPreviewOutput> {
-        self.graph.process_preview_with_options(image, crate::graph::GraphProcessOptions { require_image_output })
+    pub(super) fn process_assigned_graph_preview(&self, image: image::DynamicImage, require_image_output: bool, preview_only: bool) -> Option<crate::graph::GraphPreviewOutput> {
+        self.graph.process_preview_with_options(image, crate::graph::GraphProcessOptions { require_image_output, preview_only })
     }
 
     pub fn start(&mut self) -> Result<()> {
@@ -377,6 +377,7 @@ impl StreamRunner {
 
     pub fn stop(&mut self) {
         self.stop_encoder_worker();
+        self.stop_preview_worker();
         self.encoder_last_activity_ms.store(0, Ordering::Relaxed);
         self.preview_encoder_last_activity_ms.store(0, Ordering::Relaxed);
         self.runner_memory.reset_current();
@@ -384,9 +385,6 @@ impl StreamRunner {
         self.capture_empty_since = None;
         self.last_capture_ts = None;
         self.last_capture_wall = None;
-        if let Some(worker) = self.preview_worker.take() {
-            worker.stop();
-        }
         if let Some(mut session) = self.session.take() {
             session.stop();
         }
@@ -438,8 +436,9 @@ impl StreamRunner {
 
     pub fn metrics(&self) -> StreamMetrics {
         let now = Instant::now();
-        let mut capture = stage_to_capture_metrics(&self.capture_stats);
+        let mut capture = cadence_stage_to_capture_metrics(&self.capture_stats);
         let mut host = stage_to_capture_metrics(&self.graph.host().metrics());
+        let mut graph_stage = stage_to_capture_metrics(&self.graph_stage_stats);
 
         if let Some(last_capture) = self.last_capture_wall {
             let age = now.saturating_duration_since(last_capture);
@@ -448,6 +447,12 @@ impl StreamRunner {
             }
             if age >= Self::stale_threshold_for_fps(host.fps) {
                 Self::mark_capture_metrics_stale(&mut host, age);
+            }
+        }
+        if let Some(last_graph) = self.last_graph_wall {
+            let age = now.saturating_duration_since(last_graph);
+            if age >= Self::stale_threshold_for_fps(graph_stage.fps) {
+                Self::mark_capture_metrics_stale(&mut graph_stage, age);
             }
         }
 
@@ -479,6 +484,13 @@ impl StreamRunner {
         let main_encoder_active = Self::codec_stats_has_activity(&self.encoder_stats);
         let preview_encoder_active = Self::codec_stats_has_activity(&self.preview_encoder_stats);
         let prefer_preview_encoder = preview_encoder_active && !main_encoder_active;
+        let preview_transport = {
+            let stats = match self.preview_transport_stats.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            stats.has_samples().then(|| stats.snapshot())
+        };
         let mut encoder = if prefer_preview_encoder {
             Some(to_codec_metrics(&self.preview_encoder_stats))
         } else if self.encode_fourcc.is_some() {
@@ -520,7 +532,7 @@ impl StreamRunner {
                 }
             }
         }
-        StreamMetrics { capture, host, encoder, encoder_demand, frame_demand, decoder, memory, pipeline, pipeline_instances }
+        StreamMetrics { capture, host, graph_stage, encoder, preview_transport, encoder_demand, frame_demand, decoder, memory, pipeline, pipeline_instances }
     }
 
     pub fn descriptor(&self) -> Option<&CaptureDescriptor> {
@@ -616,6 +628,14 @@ impl StreamRunner {
 
     pub(super) fn stop_encoder_worker(&mut self) {
         if let Some(worker) = self.encoder_worker.take() {
+            if let Some(shmem) = worker.stop() {
+                self.shmem = Some(shmem);
+            }
+        }
+    }
+
+    pub(super) fn stop_preview_worker(&mut self) {
+        if let Some(worker) = self.preview_worker.take() {
             if let Some(shmem) = worker.stop() {
                 self.shmem = Some(shmem);
             }

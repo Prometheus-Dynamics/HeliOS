@@ -40,6 +40,7 @@ Environment=HELIOS_STYX_CAPTURE_QUEUE_DEPTH=2
 # heavy graph load; repeated restart loops correlate with large RSS growth.
 Environment=HELIOS_CAPTURE_STALL_MS=6000
 Environment=HELIOS_CAPTURE_ACTIVE_STALL_MS=5000
+Environment=HELIOS_STREAM_PREVIEW_ENCODE_INTERVAL_MS=4
 Environment=HELIOS_DAEDALUS_PLUGIN_DIRS=/var/lib/helios/plugins/daedalus:/usr/lib/helios/plugins/daedalus
 Environment=HELIOS_DAEDALUS_DEMAND_DRIVEN=1
 Environment=DAEDALUS_METRICS_LEVEL=detailed

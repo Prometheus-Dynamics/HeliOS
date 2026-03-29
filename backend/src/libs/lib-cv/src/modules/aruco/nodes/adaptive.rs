@@ -529,7 +529,6 @@ fn apply_cached_clahe_into(gray: &GrayImage, tile_size: u32, clip_limit: f32, ou
     // the current frame instead of reusing a prior frame's local histogram layout.
     let tiles = crate::modules::image::clahe::prepare_clahe(gray, tile_size, clip_limit);
     crate::modules::image::clahe::apply_clahe_with_tiles_into(gray, &tiles, output);
-    crate::modules::image::clahe::compact_clahe_scratch_after_frame();
 }
 
 #[allow(clippy::too_many_arguments)]

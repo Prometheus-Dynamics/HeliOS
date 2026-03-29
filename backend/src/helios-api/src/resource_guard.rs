@@ -633,8 +633,8 @@ fn compute_runtime_score(metrics: &StreamMetrics) -> f64 {
     let pipeline_primary = metrics.pipeline.as_ref().map(pipeline_score).unwrap_or(0.0);
     let pipeline_instances = if let Some(maps) = metrics.pipeline_instances.as_ref() { maps.values().map(pipeline_score).sum::<f64>() } else { 0.0 };
 
-    // `host`/`capture` average times are throughput-derived, so keep a low weight.
-    let host_load = metrics.host.last_time_ms.max(metrics.host.average_time_ms) * metrics.host.fps.max(0.0) * 0.05;
+    let host_work_ms = if metrics.host.work_average_time_ms > 0.0 { metrics.host.work_average_time_ms } else { metrics.host.last_time_ms.max(metrics.host.average_time_ms) };
+    let host_load = host_work_ms.max(0.0) * metrics.host.fps.max(0.0) * 0.05;
 
     decoder + encoder + pipeline_primary + pipeline_instances + host_load
 }

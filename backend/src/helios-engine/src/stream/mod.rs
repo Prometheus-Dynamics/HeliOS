@@ -40,8 +40,11 @@ pub struct EncodedFrame {
 pub struct StreamMetrics {
     pub capture: CaptureStageMetrics,
     pub host: CaptureStageMetrics,
+    pub graph_stage: CaptureStageMetrics,
     #[serde(default)]
     pub encoder: Option<CodecMetrics>,
+    #[serde(default)]
+    pub preview_transport: Option<StreamPreviewTransportMetrics>,
     #[serde(default)]
     pub encoder_demand: Option<StreamEncoderDemandMetrics>,
     #[serde(default)]
@@ -306,11 +309,33 @@ pub struct PipelineGraphMetrics {
     #[serde(default)]
     pub image_working_set: Option<PipelineImageWorkingSetMetrics>,
     #[serde(default)]
+    pub executor: Option<PipelineTimingMetrics>,
+    #[serde(default)]
+    pub wrapper: Option<PipelineTimingMetrics>,
+    #[serde(default)]
+    pub executor_lock: Option<PipelineTimingMetrics>,
+    #[serde(default)]
+    pub output_materialization: Option<PipelineTimingMetrics>,
+    #[serde(default)]
     pub perf: Option<PipelinePerfMetrics>,
     #[serde(default)]
     pub flamegraph: Option<PipelineFlamegraphMetrics>,
     #[serde(default)]
     pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+pub struct PipelineTimingMetrics {
+    #[serde(default)]
+    pub average_time_ms: f64,
+    #[serde(default)]
+    pub last_time_ms: f64,
+    #[serde(default)]
+    pub sample_count: u64,
+    #[serde(default)]
+    pub window_size: u64,
+    #[serde(default)]
+    pub last_sample_age_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
@@ -454,4 +479,22 @@ pub struct CodecMetrics {
     /// Last processing time spent inside this stage (work time), independent of downstream waits.
     #[serde(default)]
     pub work_last_time_ms: f64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+pub struct StreamPreviewTransportMetrics {
+    #[serde(default)]
+    pub queue_average_time_ms: f64,
+    #[serde(default)]
+    pub queue_last_time_ms: f64,
+    #[serde(default)]
+    pub publish_average_time_ms: f64,
+    #[serde(default)]
+    pub publish_last_time_ms: f64,
+    #[serde(default)]
+    pub end_to_end_average_time_ms: f64,
+    #[serde(default)]
+    pub end_to_end_last_time_ms: f64,
+    #[serde(default)]
+    pub replaced_pending_frames: u64,
 }

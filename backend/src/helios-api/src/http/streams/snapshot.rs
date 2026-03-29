@@ -494,7 +494,7 @@ fn snapshot_jpeg_quality() -> u8 {
     std::env::var("HELIOS_SNAPSHOT_JPEG_QUALITY").ok().and_then(|raw| raw.parse::<u8>().ok()).unwrap_or(95).clamp(1, 100)
 }
 
-async fn find_stream_summary(state: &AppState, stream_id: Uuid) -> ApiResult<StreamSummary> {
+pub(crate) async fn find_stream_summary(state: &AppState, stream_id: Uuid) -> ApiResult<StreamSummary> {
     let streams = state.engine.list_streams().await.map_err(|err| ApiError::new(StatusCode::BAD_GATEWAY, "bad_gateway", format!("failed to list streams: {err}")))?;
     streams.into_iter().find(|stream| stream.stream_id == stream_id).ok_or_else(|| ApiError::not_found("stream not found"))
 }

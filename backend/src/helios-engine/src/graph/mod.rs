@@ -76,19 +76,34 @@ fn node_requires_color_input(node_id: &str) -> bool {
     lower.contains(":color:")
 }
 
+fn grayscale_compatible_dynamic_preview_port(port: &str) -> bool {
+    matches!(port.trim().to_ascii_lowercase().as_str(), "overlay")
+}
+
+fn preview_port_accepts_grayscale_input(port: &str, host_output_port_types: &BTreeMap<String, DaedalusTypeExpr>) -> bool {
+    let key = port.to_ascii_lowercase();
+    match host_output_port_types.get(&key) {
+        Some(ty) if is_grayscale_image_payload(ty) => true,
+        Some(ty) if is_image_payload(ty) && grayscale_compatible_dynamic_preview_port(&key) => true,
+        None => grayscale_compatible_dynamic_preview_port(&key),
+        _ => false,
+    }
+}
+
+fn host_output_image_port_accepts_grayscale_input(port: &str, ty: &DaedalusTypeExpr) -> bool {
+    is_grayscale_image_payload(ty) || (is_image_payload(ty) && grayscale_compatible_dynamic_preview_port(port))
+}
+
 fn graph_prefers_grayscale_input(graph_has_color_sensitive_nodes: bool, preview_ports: &[String], host_output_port_types: &BTreeMap<String, DaedalusTypeExpr>) -> bool {
     if graph_has_color_sensitive_nodes {
         return false;
     }
 
-    if preview_ports.iter().any(|port| {
-        let key = port.to_ascii_lowercase();
-        host_output_port_types.get(&key).is_none_or(|ty| !is_grayscale_image_payload(ty))
-    }) {
+    if preview_ports.iter().any(|port| !preview_port_accepts_grayscale_input(port, host_output_port_types)) {
         return false;
     }
 
-    host_output_port_types.values().filter(|ty| is_image_payload(ty)).all(is_grayscale_image_payload)
+    host_output_port_types.iter().filter(|(_, ty)| is_image_payload(ty)).all(|(port, ty)| host_output_image_port_accepts_grayscale_input(port, ty))
 }
 
 fn is_aruco_detections_payload(ty: &DaedalusTypeExpr) -> bool {
@@ -409,17 +424,30 @@ pub struct GraphDisabledState {
 #[derive(Debug, Clone, Copy)]
 pub struct GraphProcessOptions {
     pub require_image_output: bool,
+    pub preview_only: bool,
 }
 
 impl Default for GraphProcessOptions {
     fn default() -> Self {
-        Self { require_image_output: true }
+        Self { require_image_output: true, preview_only: false }
     }
 }
 
 pub enum GraphPreviewOutput {
     Image(DynamicImage),
     Gray(Arc<GrayImage>),
+}
+
+fn normalize_preview_output_for_port(output: GraphPreviewOutput, port: &str, host_output_port_types: &BTreeMap<String, DaedalusTypeExpr>) -> GraphPreviewOutput {
+    if !preview_port_accepts_grayscale_input(port, host_output_port_types) {
+        return output;
+    }
+    match output {
+        GraphPreviewOutput::Image(DynamicImage::ImageLuma8(gray)) => GraphPreviewOutput::Gray(Arc::new(gray)),
+        GraphPreviewOutput::Image(DynamicImage::ImageLumaA8(gray)) => GraphPreviewOutput::Gray(Arc::new(DynamicImage::ImageLumaA8(gray).to_luma8())),
+        GraphPreviewOutput::Image(image) => GraphPreviewOutput::Gray(Arc::new(image.to_luma8())),
+        other => other,
+    }
 }
 
 impl GraphPreviewOutput {
@@ -595,11 +623,12 @@ impl HostBridgeHandle {
 pub struct GraphHandle {
     pub host: HostBridgeHandle,
     executor: Option<Arc<dyn GraphExecutor>>,
+    preview_executor: Option<Arc<dyn GraphExecutor>>,
 }
 
 impl std::fmt::Debug for GraphHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GraphHandle").field("executor_present", &self.executor.is_some()).finish()
+        f.debug_struct("GraphHandle").field("executor_present", &self.executor.is_some()).field("preview_executor_present", &self.preview_executor.is_some()).finish()
     }
 }
 
@@ -947,6 +976,61 @@ fn normalize_graph_json_for_runtime(json: &Value) -> Value {
     normalized
 }
 
+fn prune_unselected_host_output_edges(graph_obj: &mut serde_json::Map<String, Value>, keep_port_lc: &str) {
+    let Some(nodes) = graph_obj.get("nodes").and_then(|value| value.as_array()) else {
+        return;
+    };
+    let host_output_nodes = nodes
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, node)| {
+            let node_obj = node.as_object()?;
+            let id = node_obj.get("id").and_then(|value| value.as_str()).unwrap_or("");
+            ((id == "io.host_output") || id.ends_with(":io.host_output")).then_some(idx)
+        })
+        .collect::<BTreeSet<_>>();
+    if host_output_nodes.is_empty() {
+        return;
+    }
+
+    let Some(edges) = graph_obj.get_mut("edges").and_then(|value| value.as_array_mut()) else {
+        return;
+    };
+    edges.retain(|edge| {
+        let Some(to) = edge.get("to").and_then(|value| value.as_object()) else {
+            return true;
+        };
+        let Some(node_idx) = to.get("node").and_then(|value| value.as_u64()).map(|value| value as usize) else {
+            return true;
+        };
+        if !host_output_nodes.contains(&node_idx) {
+            return true;
+        }
+        let Some(port) = to.get("port").and_then(|value| value.as_str()) else {
+            return false;
+        };
+        port.trim().eq_ignore_ascii_case(keep_port_lc)
+    });
+}
+
+fn normalize_preview_graph_json_for_runtime(json: &Value, selected_output: &str) -> Value {
+    let mut normalized = normalize_graph_json_for_runtime(json);
+    let keep_port_lc = selected_output.trim().to_ascii_lowercase();
+    if keep_port_lc.is_empty() {
+        return normalized;
+    }
+    let Some(obj) = normalized.as_object_mut() else {
+        return normalized;
+    };
+    prune_unselected_host_output_edges(obj, &keep_port_lc);
+    let edges = obj.get("edges").and_then(|value| value.as_array()).cloned().unwrap_or_default();
+    if let Some(nodes) = obj.get_mut("nodes").and_then(|value| value.as_array_mut()) {
+        prune_disconnected_host_output_ports(nodes, &edges);
+    }
+    prune_isolated_runtime_nodes(obj);
+    normalized
+}
+
 fn normalize_graph_enum_const_inputs(graph: &mut Graph, registry: &daedalus::runtime::plugins::PluginRegistry) {
     fn unwrap_legacy_typed_value(value: &DaedalusValue) -> Option<DaedalusValue> {
         let mut ty: Option<String> = None;
@@ -1233,17 +1317,17 @@ fn infer_host_output_incoming_types(plan: &RuntimePlan, registry: &daedalus::reg
 
 impl GraphHandle {
     pub fn new(host: HostBridgeHandle) -> Self {
-        Self { host, executor: None }
+        Self { host, executor: None, preview_executor: None }
     }
 
     pub fn with_executor(host: HostBridgeHandle, executor: Arc<dyn GraphExecutor>) -> Self {
-        Self { host, executor: Some(executor) }
+        Self { host, executor: Some(executor), preview_executor: None }
     }
 
     pub fn with_default_host(buffer: usize) -> Self {
         let (host, rx) = HostBridgeHandle::new(buffer);
         let _ = rx;
-        Self { host, executor: None }
+        Self { host, executor: None, preview_executor: None }
     }
 
     /// Build a graph handle from a Daedalus graph JSON payload. This validates the graph
@@ -1264,7 +1348,15 @@ impl GraphHandle {
         let (host, rx) = HostBridgeHandle::new(buffer);
         let _ = rx;
         let executor = DaedalusGraphExecutor::new(graph, pool_size, output_port.map(str::to_string))?;
-        Ok(Self { host, executor: Some(Arc::new(executor)) })
+        let preview_executor = if let Some(selected_output) = output_port {
+            let preview_json = normalize_preview_graph_json_for_runtime(json, selected_output);
+            let preview_graph: Graph = serde_json::from_value(preview_json).map_err(|e| GraphError::Parse(e.to_string()))?;
+            let preview = DaedalusGraphExecutor::new(preview_graph, pool_size, Some(selected_output.to_string()))?;
+            Some(Arc::new(preview) as Arc<dyn GraphExecutor>)
+        } else {
+            None
+        };
+        Ok(Self { host, executor: Some(Arc::new(executor)), preview_executor })
     }
 
     pub fn process(&self, image: DynamicImage) -> Option<DynamicImage> {
@@ -1272,6 +1364,11 @@ impl GraphHandle {
     }
 
     pub fn process_with_options(&self, image: DynamicImage, options: GraphProcessOptions) -> Option<DynamicImage> {
+        if options.preview_only && !self.has_output_sample_demand() {
+            if let Some(preview_exec) = &self.preview_executor {
+                return preview_exec.process_preview_with_options(image, options).map(GraphPreviewOutput::into_dynamic_image);
+            }
+        }
         if let Some(exec) = &self.executor {
             exec.process_with_options(image, options)
         } else if options.require_image_output {
@@ -1282,6 +1379,11 @@ impl GraphHandle {
     }
 
     pub fn process_preview_with_options(&self, image: DynamicImage, options: GraphProcessOptions) -> Option<GraphPreviewOutput> {
+        if options.preview_only && !self.has_output_sample_demand() {
+            if let Some(preview_exec) = &self.preview_executor {
+                return preview_exec.process_preview_with_options(image, options);
+            }
+        }
         if let Some(exec) = &self.executor {
             exec.process_preview_with_options(image, options)
         } else if options.require_image_output {
@@ -1292,8 +1394,14 @@ impl GraphHandle {
     }
 
     pub fn set_calibration(&self, calibration: Option<crate::ipc::StreamCalibration>) {
+        let should_clear = calibration.is_some();
         if let Some(exec) = &self.executor {
-            let should_clear = calibration.is_some();
+            exec.set_calibration(calibration.clone());
+            if should_clear {
+                exec.clear_disabled();
+            }
+        }
+        if let Some(exec) = &self.preview_executor {
             exec.set_calibration(calibration);
             if should_clear {
                 exec.clear_disabled();
@@ -1318,11 +1426,18 @@ impl GraphHandle {
 
     pub fn apply_graph_patch(&self, pipeline_id: Option<uuid::Uuid>, patch: &GraphPatch) -> Option<PatchReport> {
         let exec = self.executor.as_ref()?;
-        exec.apply_graph_patch(pipeline_id, patch)
+        let report = exec.apply_graph_patch(pipeline_id, patch);
+        if let Some(preview_exec) = &self.preview_executor {
+            let _ = preview_exec.apply_graph_patch(pipeline_id, patch);
+        }
+        report
     }
 
     pub fn set_pipeline_input_values(&self, pipeline_id: Option<uuid::Uuid>, inputs: &BTreeMap<String, Option<DaedalusValue>>) {
         if let Some(exec) = &self.executor {
+            exec.set_pipeline_inputs(pipeline_id, inputs);
+        }
+        if let Some(exec) = &self.preview_executor {
             exec.set_pipeline_inputs(pipeline_id, inputs);
         }
     }
@@ -1352,10 +1467,20 @@ impl GraphHandle {
     }
 
     pub fn pipeline_metrics(&self) -> Option<PipelineGraphMetrics> {
+        if !self.has_output_sample_demand() {
+            if let Some(preview_exec) = &self.preview_executor {
+                return preview_exec.pipeline_metrics().or_else(|| self.executor.as_ref().and_then(|exec| exec.pipeline_metrics()));
+            }
+        }
         self.executor.as_ref().and_then(|exec| exec.pipeline_metrics())
     }
 
     pub fn pipeline_metrics_by_pipeline(&self) -> Option<BTreeMap<String, PipelineGraphMetrics>> {
+        if !self.has_output_sample_demand() {
+            if let Some(preview_exec) = &self.preview_executor {
+                return preview_exec.pipeline_metrics_by_pipeline().or_else(|| self.executor.as_ref().and_then(|exec| exec.pipeline_metrics_by_pipeline()));
+            }
+        }
         self.executor.as_ref().and_then(|exec| exec.pipeline_metrics_by_pipeline())
     }
 
@@ -1412,11 +1537,19 @@ impl GraphHandle {
     }
 
     pub fn disabled_state(&self) -> GraphDisabledState {
+        if !self.has_output_sample_demand() {
+            if let Some(preview_exec) = &self.preview_executor {
+                return preview_exec.disabled_state();
+            }
+        }
         self.executor.as_ref().map(|exec| exec.disabled_state()).unwrap_or_default()
     }
 
     pub fn clear_disabled(&self) {
         if let Some(exec) = &self.executor {
+            exec.clear_disabled();
+        }
+        if let Some(exec) = &self.preview_executor {
             exec.clear_disabled();
         }
     }
@@ -1425,16 +1558,25 @@ impl GraphHandle {
         if let Some(exec) = &self.executor {
             exec.set_perf_enabled(pipeline_id, enabled);
         }
+        if let Some(exec) = &self.preview_executor {
+            exec.set_perf_enabled(pipeline_id, enabled);
+        }
     }
 
     pub fn reset_pipeline_metrics(&self, pipeline_id: Option<uuid::Uuid>) {
         if let Some(exec) = &self.executor {
             exec.reset_pipeline_metrics(pipeline_id);
         }
+        if let Some(exec) = &self.preview_executor {
+            exec.reset_pipeline_metrics(pipeline_id);
+        }
     }
 
     pub fn release_idle_retention(&self) {
         if let Some(exec) = &self.executor {
+            exec.release_idle_retention();
+        }
+        if let Some(exec) = &self.preview_executor {
             exec.release_idle_retention();
         }
     }
@@ -1472,6 +1614,7 @@ struct DaedalusGraphExecutor {
     run_mode: RuntimeMode,
     run_metrics_level: DaedalusMetricsLevel,
     active_nodes_with_image: Option<Arc<Vec<bool>>>,
+    active_nodes_preview_only: Option<Arc<Vec<bool>>>,
     active_nodes_without_image: Option<Arc<Vec<bool>>>,
     executor: Arc<std::sync::Mutex<DaedalusOwnedExecutor<DaedalusHandlers>>>,
     metrics: Mutex<RollingGraphMetrics>,
@@ -1489,6 +1632,7 @@ struct DaedalusGraphExecutor {
     pprof_until_ms: AtomicU64,
     pprof_guard: Mutex<Option<flamegraph::FlamegraphGuard>>,
     calibration_payload: std::sync::RwLock<DaedalusValue>,
+    default_input_values: BTreeMap<String, DaedalusValue>,
     input_values: std::sync::RwLock<BTreeMap<String, DaedalusValue>>,
     last_background_trim_ms: AtomicU64,
     last_error_detail: std::sync::RwLock<String>,
@@ -1572,7 +1716,7 @@ impl GraphImageWorkingSetTracker {
 
 const NODE_METRICS_WINDOW: usize = 100;
 const GRAPH_ERROR_DISABLE_THRESHOLD: u64 = 5;
-const HOST_OUTPUT_SAMPLE_TTL_MS: u64 = 2_000;
+const DEFAULT_HOST_OUTPUT_SAMPLE_TTL_MS: u64 = 500;
 
 #[derive(Debug, Clone)]
 struct NodeInfo {
@@ -1638,6 +1782,9 @@ struct RollingGraphMetrics {
     group_perf_samples: BTreeMap<String, VecDeque<(Instant, NodePerfSample)>>,
     group_payload_samples: BTreeMap<String, VecDeque<(Instant, NodePayloadSample)>>,
     graph_samples: VecDeque<(Instant, f64)>,
+    wrapper_samples: VecDeque<(Instant, f64)>,
+    lock_samples: VecDeque<(Instant, f64)>,
+    output_materialization_samples: VecDeque<(Instant, f64)>,
     perf_samples: VecDeque<(Instant, perf::PerfSample)>,
     last_flamegraph: Option<flamegraph::FlamegraphCapture>,
     warnings: VecDeque<(Instant, String)>,
@@ -1658,6 +1805,9 @@ impl RollingGraphMetrics {
             group_perf_samples: BTreeMap::new(),
             group_payload_samples: BTreeMap::new(),
             graph_samples: VecDeque::new(),
+            wrapper_samples: VecDeque::new(),
+            lock_samples: VecDeque::new(),
+            output_materialization_samples: VecDeque::new(),
             perf_samples: VecDeque::new(),
             last_flamegraph: None,
             warnings: VecDeque::new(),
@@ -1785,6 +1935,33 @@ impl RollingGraphMetrics {
         }
     }
 
+    fn record_wrapper_duration(&mut self, duration: Duration) {
+        let now = Instant::now();
+        let ms = duration.as_secs_f64() * 1000.0;
+        self.wrapper_samples.push_back((now, ms));
+        while self.wrapper_samples.len() > self.window {
+            self.wrapper_samples.pop_front();
+        }
+    }
+
+    fn record_lock_duration(&mut self, duration: Duration) {
+        let now = Instant::now();
+        let ms = duration.as_secs_f64() * 1000.0;
+        self.lock_samples.push_back((now, ms));
+        while self.lock_samples.len() > self.window {
+            self.lock_samples.pop_front();
+        }
+    }
+
+    fn record_output_materialization_duration(&mut self, duration: Duration) {
+        let now = Instant::now();
+        let ms = duration.as_secs_f64() * 1000.0;
+        self.output_materialization_samples.push_back((now, ms));
+        while self.output_materialization_samples.len() > self.window {
+            self.output_materialization_samples.pop_front();
+        }
+    }
+
     fn record_perf_sample(&mut self, sample: perf::PerfSample) {
         let now = Instant::now();
         self.perf_samples.push_back((now, sample));
@@ -1823,6 +2000,9 @@ impl RollingGraphMetrics {
         self.group_perf_samples.clear();
         self.group_payload_samples.clear();
         self.graph_samples.clear();
+        self.wrapper_samples.clear();
+        self.lock_samples.clear();
+        self.output_materialization_samples.clear();
         self.perf_samples.clear();
         self.last_flamegraph = None;
         self.warnings.clear();
@@ -1839,6 +2019,22 @@ impl RollingGraphMetrics {
             let peak_output_payload_bytes = payload_deque.iter().map(|(_, sample)| sample.peak_output_payload_bytes).max().unwrap_or(0);
             let peak_payload_working_set_bytes = payload_deque.iter().map(|(_, sample)| sample.peak_payload_working_set_bytes).max().unwrap_or(0);
             (average_input_payload_bytes, average_output_payload_bytes, peak_input_payload_bytes, peak_output_payload_bytes, peak_payload_working_set_bytes)
+        };
+        let summarize_timing = |deque: &VecDeque<(Instant, f64)>| -> Option<crate::stream::PipelineTimingMetrics> {
+            if deque.is_empty() {
+                return None;
+            }
+            let sample_count = deque.len() as u64;
+            let sum_ms: f64 = deque.iter().map(|(_, ms)| *ms).sum();
+            let average_time_ms = sum_ms / sample_count.max(1) as f64;
+            let (last_t, last_time_ms) = deque.back().copied().unwrap_or((now, 0.0));
+            Some(crate::stream::PipelineTimingMetrics {
+                average_time_ms,
+                last_time_ms,
+                sample_count,
+                window_size: self.window as u64,
+                last_sample_age_ms: Some(now.saturating_duration_since(last_t).as_millis() as u64),
+            })
         };
         let mut out = BTreeMap::new();
         let mut type_counts: BTreeMap<&str, usize> = BTreeMap::new();
@@ -2195,6 +2391,10 @@ impl RollingGraphMetrics {
             edges: if edge_entries.is_empty() { None } else { Some(edge_entries) },
             sample_cache: None,
             image_working_set: None,
+            executor: summarize_timing(&self.graph_samples),
+            wrapper: summarize_timing(&self.wrapper_samples),
+            executor_lock: summarize_timing(&self.lock_samples),
+            output_materialization: summarize_timing(&self.output_materialization_samples),
             perf,
             flamegraph,
             warnings,
@@ -2462,9 +2662,11 @@ impl DaedalusGraphExecutor {
         let demand_driven = demand_driven_enabled(Some(plan.as_ref()), gpu_plan_active);
         let run_metrics_level = engine.config().runtime.metrics_level;
         let active_nodes_with_image =
-            build_demand_mask(plan.as_ref(), &output_hosts, &preview_ports, &host_output_ports, &host_output_port_types, &host_output_port_owners, demand_driven, true).map(Arc::new);
+            build_demand_mask(plan.as_ref(), &output_hosts, &preview_ports, &host_output_ports, &host_output_port_types, &host_output_port_owners, demand_driven, true, true).map(Arc::new);
+        let active_nodes_preview_only =
+            build_demand_mask(plan.as_ref(), &output_hosts, &preview_ports, &host_output_ports, &host_output_port_types, &host_output_port_owners, demand_driven, true, false).map(Arc::new);
         let active_nodes_without_image =
-            build_demand_mask(plan.as_ref(), &output_hosts, &preview_ports, &host_output_ports, &host_output_port_types, &host_output_port_owners, demand_driven, false).map(Arc::new);
+            build_demand_mask(plan.as_ref(), &output_hosts, &preview_ports, &host_output_ports, &host_output_port_types, &host_output_port_owners, demand_driven, false, true).map(Arc::new);
         let mut executor = DaedalusOwnedExecutor::new(plan.clone(), handlers.clone_arc())
             .with_host_bridges(host_mgr.clone())
             .with_const_coercers(const_coercers.clone())
@@ -2544,6 +2746,7 @@ impl DaedalusGraphExecutor {
             run_mode: engine.config().runtime.mode.clone(),
             run_metrics_level,
             active_nodes_with_image,
+            active_nodes_preview_only,
             active_nodes_without_image,
             executor: Arc::new(std::sync::Mutex::new(executor)),
             metrics: Mutex::new(RollingGraphMetrics::new(NODE_METRICS_WINDOW, node_info, edge_info)),
@@ -2560,6 +2763,7 @@ impl DaedalusGraphExecutor {
             pprof_until_ms: AtomicU64::new(pprof_until_ms),
             pprof_guard: Mutex::new(None),
             calibration_payload: std::sync::RwLock::new(calibration_to_daedalus_value(None)),
+            default_input_values: seeded_input_values.clone(),
             input_values: std::sync::RwLock::new(seeded_input_values),
             last_background_trim_ms: AtomicU64::new(0),
             last_error_detail: std::sync::RwLock::new(String::new()),
@@ -2614,6 +2818,8 @@ impl GraphExecutor for DaedalusGraphExecutor {
                 }
                 if let Some(value) = value {
                     guard.insert(key, value.clone());
+                } else if let Some(default_value) = self.default_input_values.get(&key) {
+                    guard.insert(key, default_value.clone());
                 } else {
                     guard.remove(&key);
                 }
@@ -2635,7 +2841,10 @@ impl GraphExecutor for DaedalusGraphExecutor {
     }
 
     fn process_preview_with_options(&self, image: DynamicImage, options: GraphProcessOptions) -> Option<GraphPreviewOutput> {
+        let total_start = Instant::now();
         let call_idx = self.process_calls.fetch_add(1, Ordering::Relaxed);
+        let requested_sample_ports = self.active_requested_sample_ports();
+        self.apply_host_output_port_filter(options, &requested_sample_ports);
         if call_idx < 3 {
             tracing::debug!(call_idx, "daedalus graph: processing frame");
         }
@@ -2662,12 +2871,19 @@ impl GraphExecutor for DaedalusGraphExecutor {
         let input_dims = (image.width(), image.height());
 
         let push_host_inputs = |image: DynamicImage| -> Option<()> {
+            let preview_only_port_reads = options.preview_only && requested_sample_ports.is_empty();
             for alias in &self.output_hosts {
                 let Some(output_host) = self.host_mgr.handle(alias) else {
                     continue;
                 };
-                for port in output_host.incoming_port_names() {
-                    let _ = output_host.clear(&port);
+                if preview_only_port_reads {
+                    for port in &self.preview_ports {
+                        let _ = output_host.clear(port);
+                    }
+                } else {
+                    for port in output_host.incoming_port_names() {
+                        let _ = output_host.clear(&port);
+                    }
                 }
             }
 
@@ -2684,14 +2900,11 @@ impl GraphExecutor for DaedalusGraphExecutor {
                 tracing::debug!(call_idx, correlation_id, port = %self.input_port, "daedalus graph: pushed input");
             }
             let calibration_port = self.calibration_port.clone().or_else(|| input_host.outgoing_ports().find(|p| p.eq_ignore_ascii_case("calibration")).map(|p| p.to_string()));
-            let mut provided_inputs: BTreeSet<String> = BTreeSet::new();
-            provided_inputs.insert(self.input_port.to_ascii_lowercase());
 
             if let Some(port) = calibration_port.as_deref() {
                 let payload = self.calibration_payload.read().ok().map(|guard| guard.clone()).unwrap_or_else(|| calibration_to_daedalus_value(None));
                 let pushed = DaedalusEdgePayload::Value(payload);
                 let _ = input_host.push(port, pushed, Some(correlation_id));
-                provided_inputs.insert(port.to_ascii_lowercase());
             }
             if let Ok(guard) = self.input_values.read() {
                 for (port, value) in guard.iter() {
@@ -2705,21 +2918,6 @@ impl GraphExecutor for DaedalusGraphExecutor {
                     }
                     let pushed = DaedalusEdgePayload::Value(value.clone());
                     let _ = input_host.push(port, pushed, Some(correlation_id));
-                    provided_inputs.insert(port.to_ascii_lowercase());
-                }
-            }
-            for port in input_host.outgoing_ports() {
-                let key = port.to_ascii_lowercase();
-                if provided_inputs.contains(&key) {
-                    continue;
-                }
-                let Some(default_value) = default_host_bridge_input_value(&key) else {
-                    continue;
-                };
-                let pushed = DaedalusEdgePayload::Value(default_value);
-                let _ = input_host.push(port, pushed, Some(correlation_id));
-                if call_idx < 3 {
-                    tracing::debug!(call_idx, port = %port, "daedalus graph: pushed default host input");
                 }
             }
             Some(())
@@ -2755,6 +2953,7 @@ impl GraphExecutor for DaedalusGraphExecutor {
             }
         }
 
+        let mut lock_duration = Duration::default();
         let run_result: Result<(DaedalusExecutionTelemetry, Duration), String> = if self.dedicated_executor {
             push_host_inputs(image)?;
             let host_outputs_in_graph = host_outputs_in_graph_enabled(Some(self.plan.as_ref()), gpu_plan_active);
@@ -2812,7 +3011,8 @@ impl GraphExecutor for DaedalusGraphExecutor {
                 }
             };
 
-            let lock_ms = lock_start.elapsed().as_secs_f64() * 1000.0;
+            lock_duration = lock_start.elapsed();
+            let lock_ms = lock_duration.as_secs_f64() * 1000.0;
             histogram!("helios.stream.executor_lock_ms").record(lock_ms);
 
             let exec = exec.as_deref_mut()?;
@@ -2897,17 +3097,8 @@ impl GraphExecutor for DaedalusGraphExecutor {
         if call_idx < 3 {
             tracing::debug!(call_idx, warnings = telemetry.warnings.len(), nodes = telemetry.node_metrics.len(), "daedalus graph: ran");
         }
-        if let Ok(mut metrics) = self.metrics.lock() {
-            metrics.record_graph_duration(run_duration);
-            metrics.record_telemetry(&telemetry);
-            if let Some(sample) = perf_sample {
-                metrics.record_perf_sample(sample);
-            }
-            if let Some(capture) = flamegraph_capture {
-                metrics.record_flamegraph(capture);
-            }
-        }
 
+        let output_materialization_start = Instant::now();
         let mut preview_output: Option<GraphPreviewOutput> = None;
         let mut preview_key: Option<String> = None;
         let mut image_updates: Vec<(String, DynamicImage)> = Vec::new();
@@ -2916,14 +3107,17 @@ impl GraphExecutor for DaedalusGraphExecutor {
         let mut typed_updates: Vec<(String, TypedHostOutputSample)> = Vec::new();
         let mut popped_outputs = 0usize;
         let image_output_requested = options.require_image_output;
-        let requested_sample_ports = self.active_requested_sample_ports();
+        let preview_only_port_reads = options.preview_only && requested_sample_ports.is_empty();
 
         for alias in &self.output_hosts {
             let Some(output_host) = self.host_mgr.handle(alias) else { continue };
             if call_idx < 3 {
                 tracing::debug!(call_idx, host = %alias, ports = ?output_host.incoming_port_names(), "daedalus graph: output host ports");
             }
-            for port in output_host.incoming_ports() {
+            let port_names: Vec<String> = if preview_only_port_reads { self.preview_ports.clone() } else { output_host.incoming_port_names() };
+            for port_name_owned in port_names {
+                let mut ports = output_host.iter_ports(std::slice::from_ref(&port_name_owned));
+                let Some(port) = ports.next() else { continue };
                 let port_name = port.name();
                 let port_lc = port_name.to_ascii_lowercase();
                 if !self.host_output_ports_lc.contains(&port_lc) {
@@ -2934,10 +3128,13 @@ impl GraphExecutor for DaedalusGraphExecutor {
                 }
                 let wants_preview = image_output_requested && self.preview_ports_lc.contains(&port_lc);
                 let wants_retained_sample = requested_sample_ports.contains(&port_lc);
+                if preview_only_port_reads && !wants_preview {
+                    continue;
+                }
                 let wants_image_sample = wants_preview || wants_retained_sample;
                 let direct_preview = wants_preview && !wants_retained_sample;
                 let port_type = port.resolved_type();
-                let prefers_grayscale_preview = direct_preview && port_type.is_some_and(is_grayscale_image_payload);
+                let prefers_grayscale_preview = direct_preview && preview_port_accepts_grayscale_input(&port_lc, &self.host_output_port_types);
                 let is_image_type = port_type.map(is_image_payload).unwrap_or(false);
                 let typed_image = is_image_type;
                 if host_output_debug_enabled() && (call_idx < 3 || call_idx.is_multiple_of(120)) {
@@ -2965,6 +3162,7 @@ impl GraphExecutor for DaedalusGraphExecutor {
                 let unresolved_type = port_type.is_none();
                 if typed_image || (unresolved_type && wants_image_sample) {
                     let mut image_popped = false;
+
                     if prefers_grayscale_preview {
                         match port.try_pop::<Compute<GrayImage>>() {
                             Ok(Some((_corr, payload))) => match payload {
@@ -3034,7 +3232,7 @@ impl GraphExecutor for DaedalusGraphExecutor {
                                     preview_key = Some(port_lc.clone());
                                 }
                                 if direct_preview && preview_output.is_none() {
-                                    preview_output = Some(GraphPreviewOutput::Image(img));
+                                    preview_output = Some(normalize_preview_output_for_port(GraphPreviewOutput::Image(img), &port_lc, &self.host_output_port_types));
                                 } else {
                                     image_updates.push((port_lc.clone(), img));
                                 }
@@ -3057,7 +3255,7 @@ impl GraphExecutor for DaedalusGraphExecutor {
                                                 preview_key = Some(port_lc.clone());
                                             }
                                             if direct_preview && preview_output.is_none() {
-                                                preview_output = Some(GraphPreviewOutput::Image(img));
+                                                preview_output = Some(normalize_preview_output_for_port(GraphPreviewOutput::Image(img), &port_lc, &self.host_output_port_types));
                                             } else {
                                                 image_updates.push((port_lc.clone(), img));
                                             }
@@ -3072,7 +3270,7 @@ impl GraphExecutor for DaedalusGraphExecutor {
                                                             preview_key = Some(port_lc.clone());
                                                         }
                                                         if direct_preview && preview_output.is_none() {
-                                                            preview_output = Some(GraphPreviewOutput::Image(img));
+                                                            preview_output = Some(normalize_preview_output_for_port(GraphPreviewOutput::Image(img), &port_lc, &self.host_output_port_types));
                                                         } else {
                                                             image_updates.push((port_lc.clone(), img));
                                                         }
@@ -3165,46 +3363,6 @@ impl GraphExecutor for DaedalusGraphExecutor {
                                             image_updates.push((port_lc.clone(), DynamicImage::ImageLuma8(Arc::unwrap_or_clone(gray))));
                                         }
                                         image_popped = true;
-                                    }
-                                }
-
-                                if !image_popped {
-                                    if let Some(raw) = port.try_pop_raw() {
-                                        let raw_desc = describe_host_output_payload(&raw.inner);
-                                        let decoded = if direct_preview && preview_output.is_none() {
-                                            decode_host_output_raw_preview_payload(&raw.inner, self.gpu.as_ref())
-                                        } else {
-                                            decode_host_output_raw_payload(&raw.inner, self.gpu.as_ref()).map(|maybe| maybe.map(GraphPreviewOutput::Image))
-                                        };
-                                        match decoded {
-                                            Ok(Some(img)) => {
-                                                popped_outputs += 1;
-                                                if preview_key.is_none() && wants_preview {
-                                                    preview_key = Some(port_lc.clone());
-                                                }
-                                                if direct_preview && preview_output.is_none() {
-                                                    preview_output = Some(img);
-                                                } else {
-                                                    image_updates.push((port_lc.clone(), img.into_dynamic_image()));
-                                                }
-                                                image_popped = true;
-                                                if call_idx < 3 && wants_preview {
-                                                    tracing::debug!(call_idx, port = %port_name, payload = %raw_desc, "daedalus graph: decoded preview output from raw payload");
-                                                }
-                                            }
-                                            Ok(None) => {
-                                                if wants_preview || host_output_debug_enabled() {
-                                                    tracing::warn!(target: "helios_engine::graph", port = %port_name, payload = %raw_desc, "host output raw image payload unsupported");
-                                                }
-                                                port.restore_raw(raw);
-                                            }
-                                            Err(err) => {
-                                                if wants_preview || host_output_debug_enabled() {
-                                                    tracing::warn!(target: "helios_engine::graph", port = %port_name, payload = %raw_desc, error = %err, "host output raw image decode failed");
-                                                }
-                                                port.restore_raw(raw);
-                                            }
-                                        }
                                     }
                                 }
                             }
@@ -3348,7 +3506,7 @@ impl GraphExecutor for DaedalusGraphExecutor {
                 if let Some(key) = preview_key.as_deref() {
                     if let Some(idx) = image_updates.iter().position(|(port, _)| port == key) {
                         let (_port, img) = image_updates.swap_remove(idx);
-                        preview_output = Some(GraphPreviewOutput::Image(img));
+                        preview_output = Some(normalize_preview_output_for_port(GraphPreviewOutput::Image(img), key, &self.host_output_port_types));
                     }
                 }
             }
@@ -3365,6 +3523,22 @@ impl GraphExecutor for DaedalusGraphExecutor {
             self.image_working_set.record(input_image_bytes, 0, preview_image_bytes);
         }
         self.prune_unrequested_output_samples(&requested_sample_ports);
+
+        let output_materialization_duration = output_materialization_start.elapsed();
+        let wrapper_duration = total_start.elapsed().saturating_sub(run_duration);
+        if let Ok(mut metrics) = self.metrics.lock() {
+            metrics.record_graph_duration(run_duration);
+            metrics.record_wrapper_duration(wrapper_duration);
+            metrics.record_lock_duration(lock_duration);
+            metrics.record_output_materialization_duration(output_materialization_duration);
+            metrics.record_telemetry(&telemetry);
+            if let Some(sample) = perf_sample {
+                metrics.record_perf_sample(sample);
+            }
+            if let Some(capture) = flamegraph_capture {
+                metrics.record_flamegraph(capture);
+            }
+        }
 
         if let Some(img) = preview_output {
             self.maybe_trim_background_graph_allocators(options);
@@ -3514,7 +3688,18 @@ impl GraphExecutor for DaedalusGraphExecutor {
 }
 
 impl DaedalusGraphExecutor {
+    fn apply_host_output_port_filter(&self, options: GraphProcessOptions, requested_sample_ports: &BTreeSet<String>) {
+        let filter = if options.preview_only && requested_sample_ports.is_empty() { Some(self.preview_ports_lc.iter().cloned().collect::<BTreeSet<_>>()) } else { None };
+
+        for alias in &self.output_hosts {
+            self.host_mgr.set_outbound_port_filter(alias.clone(), filter.clone());
+        }
+    }
+
     fn active_nodes_for_process_options(&self, options: GraphProcessOptions) -> Option<Arc<Vec<bool>>> {
+        if options.preview_only {
+            return self.active_nodes_preview_only.clone().or_else(|| self.active_nodes_with_image.clone());
+        }
         if options.require_image_output {
             return self.active_nodes_with_image.clone();
         }
@@ -3565,9 +3750,10 @@ impl DaedalusGraphExecutor {
     fn active_requested_sample_ports(&self) -> BTreeSet<String> {
         let mut active = BTreeSet::new();
         let now = now_ms();
+        let ttl_ms = host_output_sample_ttl_ms();
         if let Ok(mut guard) = self.requested_sample_ports.lock() {
             guard.retain(|port, requested_at_ms| {
-                let keep = now.saturating_sub(*requested_at_ms) <= HOST_OUTPUT_SAMPLE_TTL_MS;
+                let keep = now.saturating_sub(*requested_at_ms) <= ttl_ms;
                 if keep {
                     active.insert(port.clone());
                 }
@@ -4117,7 +4303,8 @@ fn host_output_sink_node_index(plan: &RuntimePlan, output_hosts: &[String]) -> O
 
 fn infer_host_output_port_owners(plan: &RuntimePlan, output_hosts: &[String]) -> BTreeMap<String, usize> {
     let mut owners = BTreeMap::new();
-    for (_from, _from_port, to, to_port, _) in &plan.edges {
+    for (from, _from_port, to, to_port, _) in &plan.edges {
+        let _ = from;
         let Some(to_node) = plan.nodes.get(to.0) else {
             continue;
         };
@@ -4128,6 +4315,9 @@ fn infer_host_output_port_owners(plan: &RuntimePlan, output_hosts: &[String]) ->
             continue;
         }
         let key = to_port.to_ascii_lowercase();
+        // Demand-driven masking must target the host-output sink and preserve the selected input
+        // port. Daedalus will then walk only that port's upstream closure. Pointing this at the
+        // producer node skips `io.host_output` entirely, which makes preview publication disappear.
         owners.entry(key).or_insert(to.0);
     }
     owners
@@ -4142,6 +4332,7 @@ fn build_demand_mask(
     host_output_port_owners: &BTreeMap<String, usize>,
     demand_driven: bool,
     include_preview_ports: bool,
+    include_value_ports: bool,
 ) -> Option<Vec<bool>> {
     if !demand_driven {
         return None;
@@ -4161,19 +4352,21 @@ fn build_demand_mask(
             }
         }
     }
-    // Demand-driven execution still needs non-preview host outputs (for example `detections`)
-    // so sampling and calibration solve can read value ports from the same graph tick.
-    for port in host_output_ports {
-        if port.trim().is_empty() {
-            continue;
-        }
-        let key = port.to_ascii_lowercase();
-        if sink_ports.contains(port) {
-            continue;
-        }
-        let is_image = host_output_port_types.get(&key).map(is_image_payload).unwrap_or(false);
-        if !is_image {
-            sink_ports.insert(port.clone());
+    if include_value_ports {
+        // Demand-driven execution still needs non-preview host outputs (for example `detections`)
+        // so sampling and calibration solve can read value ports from the same graph tick.
+        for port in host_output_ports {
+            if port.trim().is_empty() {
+                continue;
+            }
+            let key = port.to_ascii_lowercase();
+            if sink_ports.contains(port) {
+                continue;
+            }
+            let is_image = host_output_port_types.get(&key).map(is_image_payload).unwrap_or(false);
+            if !is_image {
+                sink_ports.insert(port.clone());
+            }
         }
     }
 
@@ -4323,7 +4516,20 @@ fn active_graph_trim_interval_ms() -> u64 {
     if cached != u64::MAX {
         return cached;
     }
-    let value = env::var("HELIOS_GRAPH_ACTIVE_TRIM_INTERVAL_MS").ok().and_then(|raw| raw.trim().parse::<u64>().ok()).unwrap_or(1_000);
+    // Active preview/graph workloads should stay on the fast path and clean up on idle instead of
+    // paying periodic cross-thread compaction every second.
+    let value = env::var("HELIOS_GRAPH_ACTIVE_TRIM_INTERVAL_MS").ok().and_then(|raw| raw.trim().parse::<u64>().ok()).unwrap_or(0);
+    VALUE.store(value, Ordering::Relaxed);
+    value
+}
+
+fn host_output_sample_ttl_ms() -> u64 {
+    static VALUE: AtomicU64 = AtomicU64::new(u64::MAX);
+    let cached = VALUE.load(Ordering::Relaxed);
+    if cached != u64::MAX {
+        return cached;
+    }
+    let value = env::var("HELIOS_HOST_OUTPUT_SAMPLE_TTL_MS").ok().and_then(|raw| raw.trim().parse::<u64>().ok()).unwrap_or(DEFAULT_HOST_OUTPUT_SAMPLE_TTL_MS).clamp(50, 5_000);
     VALUE.store(value, Ordering::Relaxed);
     value
 }

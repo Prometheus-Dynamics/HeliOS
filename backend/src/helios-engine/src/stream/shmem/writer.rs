@@ -1,5 +1,4 @@
 use std::fs::{File, OpenOptions};
-use std::io::{Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
 use styx::prelude::FourCc;
@@ -8,10 +7,14 @@ use uuid::Uuid;
 use crate::error::{Error, Result};
 
 use super::paths::{fallback_shmem_path, preferred_shmem_path};
-use super::{build_header, shmem_capacity, HEADER_SIZE, MAGIC};
+use super::{build_header, shmem_capacity, HEADER_SIZE};
 
 #[cfg(target_family = "unix")]
-use std::{fs, os::unix::fs::PermissionsExt, path::Path};
+use std::{
+    fs,
+    os::unix::fs::{FileExt, PermissionsExt},
+    path::Path,
+};
 
 #[cfg(target_family = "unix")]
 fn ensure_shared_dir_permissions(dir: &Path) {
@@ -52,20 +55,11 @@ impl ShmemWriter {
             #[cfg(target_family = "unix")]
             ensure_shared_dir_permissions(parent);
         }
-        let mut file = OpenOptions::new().create(true).read(true).write(true).truncate(true).open(&path).map_err(|_| Error::InvalidState("shmem file open failed"))?;
+        let file = OpenOptions::new().create(true).read(true).write(true).truncate(true).open(&path).map_err(|_| Error::InvalidState("shmem file open failed"))?;
         let total_len = (HEADER_SIZE + capacity) as u64;
         file.set_len(total_len).map_err(|_| Error::InvalidState("shmem set len failed"))?;
-        // Seed the header so readers see a consistent magic even before the first frame is written.
-        file.seek(SeekFrom::Start(0)).map_err(|_| Error::InvalidState("shmem seek failed"))?;
-        file.write_all(&MAGIC).map_err(|_| Error::InvalidState("shmem write failed"))?;
-        file.write_all(&0u64.to_le_bytes()).map_err(|_| Error::InvalidState("shmem write failed"))?; // seq
-        file.write_all(&0u64.to_le_bytes()).map_err(|_| Error::InvalidState("shmem write failed"))?; // ts
-        file.write_all(&0u32.to_le_bytes()).map_err(|_| Error::InvalidState("shmem write failed"))?; // len
-        file.write_all(&0u32.to_le_bytes()).map_err(|_| Error::InvalidState("shmem write failed"))?; // w
-        file.write_all(&0u32.to_le_bytes()).map_err(|_| Error::InvalidState("shmem write failed"))?; // h
-        file.write_all(&0u32.to_le_bytes()).map_err(|_| Error::InvalidState("shmem write failed"))?; // fourcc
-        file.write_all(&0u32.to_le_bytes()).map_err(|_| Error::InvalidState("shmem write failed"))?; // reserved
-        file.flush().map_err(|_| Error::InvalidState("shmem flush failed"))?;
+        let header = build_header(0, 0, 0, (0, 0), 0);
+        write_all_at(&file, &header, 0)?;
         Ok(Self { path, file, capacity, seq: 0 })
     }
 
@@ -81,22 +75,19 @@ impl ShmemWriter {
         let fourcc_u32 = fourcc.map(|cc| cc.to_u32()).unwrap_or_default();
         let ts = ts.unwrap_or_default();
         // Sequence uses LSB as a seqlock: odd while writing, even when complete.
-        let seq_base = self.seq.wrapping_add(1);
-        self.seq = seq_base;
-        let seq_writing = seq_base | 1;
-        let seq_complete = (seq_base.wrapping_add(1)) & !1;
+        // Advance the stable even sequence every frame so readers can detect each new publish.
+        let seq_complete = self.seq.wrapping_add(2) & !1;
+        let seq_writing = seq_complete | 1;
+        self.seq = seq_complete;
 
         let header_writing = build_header(seq_writing, ts, len, dims, fourcc_u32);
         let header_complete = build_header(seq_complete, ts, len, dims, fourcc_u32);
 
-        self.file.seek(SeekFrom::Start(0)).map_err(|_| Error::InvalidState("shmem seek failed"))?;
         // Mark in-progress header first so readers retry until the payload + final header land.
-        self.file.write_all(&header_writing).map_err(|_| Error::InvalidState("shmem write failed"))?;
-        self.file.write_all(data).map_err(|_| Error::InvalidState("shmem write failed"))?;
+        write_all_at(&self.file, &header_writing, 0)?;
+        write_all_at(&self.file, data, HEADER_SIZE as u64)?;
         // Re-write a stable header so readers can verify the payload is consistent.
-        self.file.seek(SeekFrom::Start(0)).map_err(|_| Error::InvalidState("shmem seek failed"))?;
-        self.file.write_all(&header_complete).map_err(|_| Error::InvalidState("shmem write failed"))?;
-        self.file.flush().map_err(|_| Error::InvalidState("shmem flush failed"))?;
+        write_all_at(&self.file, &header_complete, 0)?;
         Ok(())
     }
 }
@@ -114,3 +105,61 @@ fn log_preferred_unavailable(preferred: &PathBuf, err: &Error) {
 
 #[cfg(not(feature = "runtime"))]
 fn log_preferred_unavailable(_preferred: &PathBuf, _err: &Error) {}
+
+#[cfg(target_family = "unix")]
+fn write_all_at(file: &File, mut buf: &[u8], mut offset: u64) -> Result<()> {
+    while !buf.is_empty() {
+        let written = file.write_at(buf, offset).map_err(|_| Error::InvalidState("shmem write failed"))?;
+        if written == 0 {
+            return Err(Error::InvalidState("shmem write failed"));
+        }
+        buf = &buf[written..];
+        offset = offset.saturating_add(written as u64);
+    }
+    Ok(())
+}
+
+#[cfg(not(target_family = "unix"))]
+fn write_all_at(file: &File, buf: &[u8], offset: u64) -> Result<()> {
+    use std::io::{Seek, SeekFrom, Write};
+
+    let mut file = file.try_clone().map_err(|_| Error::InvalidState("shmem clone failed"))?;
+    file.seek(SeekFrom::Start(offset)).map_err(|_| Error::InvalidState("shmem seek failed"))?;
+    file.write_all(buf).map_err(|_| Error::InvalidState("shmem write failed"))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Seek, SeekFrom};
+
+    fn read_header(file: &mut File) -> super::super::ShmemFrameHeader {
+        let mut raw = [0u8; super::super::HEADER_SIZE];
+        file.seek(SeekFrom::Start(0)).expect("seek");
+        file.read_exact(&mut raw).expect("read");
+        super::super::parse_header(&raw).expect("parse")
+    }
+
+    #[test]
+    fn stable_seq_changes_on_every_write() {
+        let path = std::env::temp_dir().join(format!("helios-writer-{}.frame", Uuid::new_v4()));
+        let mut writer = ShmemWriter::create_at_path(path.clone(), 1024).expect("writer");
+        let fourcc = FourCc::new(*b"JPEG");
+
+        writer.write(Some(1), Some(fourcc), (1, 1), &[1]).expect("write one");
+        let mut file = File::open(&path).expect("open one");
+        let header_one = read_header(&mut file);
+
+        writer.write(Some(2), Some(fourcc), (1, 1), &[2]).expect("write two");
+        let mut file = File::open(&path).expect("open two");
+        let header_two = read_header(&mut file);
+
+        assert_eq!(header_one.seq, 2);
+        assert_eq!(header_two.seq, 4);
+        assert_ne!(header_one.seq, header_two.seq);
+
+        drop(writer);
+        let _ = std::fs::remove_file(path);
+    }
+}

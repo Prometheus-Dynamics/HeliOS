@@ -342,6 +342,7 @@ fn cv_aruco_overlay(
         return Ok(frame);
     }
     let mut out = expect_cpu_frame(frame, "overlay_detections", Some(exec_ctx))?;
+    let preserve_luma_output = matches!(out, DynamicImage::ImageLuma8(_) | DynamicImage::ImageLumaA8(_));
     let crosshair_scale = cfg.crosshair_scale.clamp(0.05, 1.5);
     let crosshair_thickness = if cfg.crosshair_thickness <= 0 { thickness } else { u32::try_from(cfg.crosshair_thickness).unwrap_or(thickness).clamp(1, 32) };
 
@@ -400,6 +401,10 @@ fn cv_aruco_overlay(
 
     if cfg.draw_hud {
         overlay_tags_count(&mut out, detections.len());
+    }
+
+    if preserve_luma_output && !matches!(out, DynamicImage::ImageLuma8(_)) {
+        out = DynamicImage::ImageLuma8(out.to_luma8());
     }
 
     Ok(Compute::Cpu(out))
@@ -1172,4 +1177,50 @@ fn cv_detect_aruco_detections_from_contours(
         exec_ctx,
         "aruco_detect_detections_from_contours",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_detection() -> ArucoDetection2D {
+        ArucoDetection2D {
+            id: 3,
+            rotation: 0,
+            corners: [Point { x: 24.0, y: 24.0 }, Point { x: 72.0, y: 24.0 }, Point { x: 72.0, y: 72.0 }, Point { x: 24.0, y: 72.0 }],
+            score: None,
+            best_distance: None,
+            second_distance: None,
+            border_mismatches: None,
+            contrast_range: None,
+            border_width: None,
+            data_width: None,
+            bits: None,
+        }
+    }
+
+    #[test]
+    fn overlay_hot_path_preserves_luma8_frame() {
+        let mut out = DynamicImage::ImageLuma8(GrayImage::from_pixel(96, 96, Luma([32])));
+        let det = sample_detection();
+        let bbox = [
+            CvPoint::new(det.corners[0].x as f32, det.corners[0].y as f32),
+            CvPoint::new(det.corners[1].x as f32, det.corners[1].y as f32),
+            CvPoint::new(det.corners[2].x as f32, det.corners[2].y as f32),
+            CvPoint::new(det.corners[3].x as f32, det.corners[3].y as f32),
+        ];
+
+        draw::contour::overlay_contour_points(&mut out, &bbox, 1, Rgba([0, 255, 255, 255]));
+        for corner in det.corners {
+            draw::shape::overlay_circle(&mut out, (corner.x.max(0.0) as u32, corner.y.max(0.0) as u32), 3, true, Rgba([255, 64, 0, 255]));
+        }
+        overlay_tags_count(&mut out, 1);
+
+        match out {
+            DynamicImage::ImageLuma8(image) => {
+                assert_eq!(image.dimensions(), (96, 96));
+            }
+            other => panic!("expected luma8 overlay output, got {other:?}"),
+        }
+    }
 }

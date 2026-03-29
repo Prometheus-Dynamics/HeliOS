@@ -91,8 +91,16 @@ pub(super) fn to_codec_metrics(stats: &styx::codec::CodecStats) -> CodecMetrics 
 
 #[cfg(feature = "runtime")]
 pub(super) fn stage_to_capture_metrics(stage: &StageMetrics) -> CaptureStageMetrics {
-    let last_ms = stage.last_millis().unwrap_or(0.0);
     let fps = stage.fps().unwrap_or(0.0);
-    let avg_ms = if fps > 0.0 { 1000.0 / fps } else { 0.0 };
-    CaptureStageMetrics { average_time_ms: avg_ms, fps, sample_count: stage.samples(), last_time_ms: last_ms }
+    let cadence_ms = if fps > 0.0 { 1000.0 / fps } else { 0.0 };
+    let work_last_ms = stage.last_millis().unwrap_or(0.0);
+    let work_avg_ms = stage.avg_millis().unwrap_or(0.0);
+    CaptureStageMetrics { average_time_ms: cadence_ms, fps, sample_count: stage.samples(), last_time_ms: cadence_ms, work_average_time_ms: work_avg_ms, work_last_time_ms: work_last_ms }
+}
+
+#[cfg(feature = "runtime")]
+pub(super) fn cadence_stage_to_capture_metrics(stage: &StageMetrics) -> CaptureStageMetrics {
+    let fps = stage.fps().unwrap_or(0.0);
+    let cadence_ms = if fps > 0.0 { 1000.0 / fps } else { 0.0 };
+    CaptureStageMetrics { average_time_ms: cadence_ms, fps, sample_count: stage.samples(), last_time_ms: cadence_ms, work_average_time_ms: 0.0, work_last_time_ms: 0.0 }
 }

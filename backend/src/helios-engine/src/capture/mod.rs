@@ -67,7 +67,7 @@ impl CaptureConfig {
         Some(Interval { numerator: NonZeroU32::new(1).unwrap(), denominator: fps })
     }
 
-    fn effective_interval_for_backend(&self, backend: BackendKind) -> Option<Interval> {
+    pub(crate) fn effective_interval_for_backend(&self, backend: BackendKind) -> Option<Interval> {
         match backend {
             BackendKind::Libcamera => self.interval.or_else(|| self.target_fps.and_then(Self::interval_from_target_fps)),
             _ => self.target_fps.and_then(Self::interval_from_target_fps).or(self.interval),
@@ -302,24 +302,31 @@ pub fn default_virtual_device() -> ProbedDevice {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, ToSchema)]
 pub struct CaptureStageMetrics {
+    /// Throughput-derived cadence for this stage (`1000 / fps`).
     #[serde(default)]
     pub average_time_ms: f64,
     #[serde(default)]
     pub fps: f64,
     #[serde(default)]
     pub sample_count: u64,
+    /// Last observed cadence for this stage. Kept aligned with `average_time_ms`.
     #[serde(default)]
     pub last_time_ms: f64,
+    /// Actual stage work time over the rolling window.
+    #[serde(default)]
+    pub work_average_time_ms: f64,
+    /// Actual work time for the last completed sample.
+    #[serde(default)]
+    pub work_last_time_ms: f64,
 }
 
 impl From<StageMetrics> for CaptureStageMetrics {
     fn from(metrics: StageMetrics) -> Self {
-        let last_ms = metrics.last_millis().unwrap_or(0.0);
         let fps = metrics.fps().unwrap_or(0.0);
-        let avg_ms = if fps > 0.0 { 1000.0 / fps } else { 0.0 };
-        // `StageMetrics` averages are computed over a rolling window; report a rolling sample count
-        // so the UI doesn't look like it is aggregating over an infinite lifetime.
-        CaptureStageMetrics { average_time_ms: avg_ms, fps, sample_count: metrics.samples(), last_time_ms: last_ms }
+        let cadence_ms = if fps > 0.0 { 1000.0 / fps } else { 0.0 };
+        // `StageMetrics` is also used for cadence-only sources such as capture frame intervals.
+        // Keep the generic conversion honest: it reports cadence and leaves work timing unset.
+        CaptureStageMetrics { average_time_ms: cadence_ms, fps, sample_count: metrics.samples(), last_time_ms: cadence_ms, work_average_time_ms: 0.0, work_last_time_ms: 0.0 }
     }
 }
 

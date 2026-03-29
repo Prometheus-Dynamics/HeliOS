@@ -66,7 +66,6 @@ pub async fn sample_output<F: LocalizationSourceFetcher>(
     let run_start = Instant::now();
     if let Some(graph) = runtime.graph.as_ref() {
         graph.set_pipeline_inputs(None, &inputs);
-        graph.request_output_sample(output_key);
         let _ = graph.process(dummy_image());
     }
     runtime.last_run_ms = Some(run_start.elapsed().as_secs_f64() * 1000.0);
@@ -74,7 +73,7 @@ pub async fn sample_output<F: LocalizationSourceFetcher>(
     let Some(graph) = runtime.graph.as_ref() else {
         return Err("localization pipeline not initialized".to_string());
     };
-    match graph.sample_json_output(output_key) {
+    match graph.read_json_output(output_key, false) {
         Some(value) => Ok(PipelineOutputSample { data_type: None, value }),
         None => Err("output sample not available".to_string()),
     }

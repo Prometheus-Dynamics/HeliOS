@@ -50,6 +50,7 @@ runtime = [
     "lib-cv",
     "nalgebra",
     "ffmpeg",
+    "turbojpeg",
 ]
 tokio-console = ["runtime", "dep:console-subscriber"]
 pprof = ["runtime", "dep:pprof"]
@@ -85,6 +86,7 @@ daedalus = { workspace = true, features = ["engine", "plugins", "gpu-wgpu", "ffi
 lib-cv = { path = "../libs/lib-cv", optional = true }
 nalgebra = { workspace = true, optional = true }
 ffmpeg = { workspace = true, optional = true }
+turbojpeg = { version = "1.4.0", optional = true }
 
 [dev-dependencies]
 tempfile = "3.26.0"

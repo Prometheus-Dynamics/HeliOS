@@ -1,17 +1,150 @@
 use super::{build_demand_sinks, derive_host_aliases, infer_host_output_incoming_types, normalize_graph_json_for_runtime};
 
-use daedalus::DataCell;
 use daedalus::data::model::{EnumVariant, TypeExpr, Value};
 use daedalus::planner::ComputeAffinity;
 use daedalus::registry::store::NodeDescriptorBuilder;
 use daedalus::runtime::executor::RuntimeValue;
 use daedalus::runtime::plugins::PluginRegistry;
 use daedalus::runtime::{EdgePolicyKind, RuntimeNode, RuntimePlan, RuntimeSegment};
+use daedalus::DataCell;
 use image::DynamicImage;
 use image::GenericImageView;
+use image::{GrayImage, Luma, RgbaImage};
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::path::PathBuf;
 use std::time::Instant;
+
+#[test]
+fn grayscale_input_pref_allows_overlay_dynamic_preview() {
+    let host_output_port_types =
+        BTreeMap::from([("overlay".to_string(), TypeExpr::opaque("image:dynamic")), ("clahe".to_string(), TypeExpr::opaque("image:gray8")), ("adaptive".to_string(), TypeExpr::opaque("image:gray8"))]);
+
+    assert!(super::graph_prefers_grayscale_input(false, &["overlay".to_string()], &host_output_port_types,));
+}
+
+#[test]
+fn grayscale_input_pref_rejects_generic_dynamic_frame_preview() {
+    let host_output_port_types = BTreeMap::from([("frame".to_string(), TypeExpr::opaque("image:dynamic"))]);
+
+    assert!(!super::graph_prefers_grayscale_input(false, &["frame".to_string()], &host_output_port_types,));
+}
+
+#[test]
+#[ignore = "requires the dynamic Daedalus CV plugin registry"]
+fn fast_overlay_preview_keeps_grayscale_output_for_blank_luma_input() {
+    let template_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../gaia/assets/pipelines/templates/daedalus_aruco_fast.json");
+    let template_text = std::fs::read_to_string(&template_path).unwrap_or_else(|err| panic!("failed to read {}: {err}", template_path.display()));
+    let template_json: serde_json::Value = serde_json::from_str(&template_text).expect("fast template json");
+    let graph_json = template_json.get("graph").cloned().expect("fast template graph payload");
+
+    let graph = super::GraphHandle::from_json_with_output(1, &graph_json, Some("overlay")).expect("fast graph");
+
+    let frame = DynamicImage::ImageLuma8(GrayImage::from_pixel(1280, 800, Luma([32])));
+    let output = graph.process_preview_with_options(frame, super::GraphProcessOptions { require_image_output: true, preview_only: true }).expect("overlay preview output");
+
+    match output {
+        super::GraphPreviewOutput::Gray(gray) => {
+            assert_eq!(gray.dimensions(), (1280, 800));
+        }
+        super::GraphPreviewOutput::Image(DynamicImage::ImageLuma8(gray)) => {
+            assert_eq!(gray.dimensions(), (1280, 800));
+        }
+        super::GraphPreviewOutput::Image(DynamicImage::ImageLumaA8(_)) => panic!("expected grayscale overlay preview output, got luma-alpha image"),
+        super::GraphPreviewOutput::Image(DynamicImage::ImageRgb8(_)) => panic!("expected grayscale overlay preview output, got rgb8 image"),
+        super::GraphPreviewOutput::Image(DynamicImage::ImageRgba8(_)) => panic!("expected grayscale overlay preview output, got rgba8 image"),
+        super::GraphPreviewOutput::Image(DynamicImage::ImageRgb16(_)) => panic!("expected grayscale overlay preview output, got rgb16 image"),
+        super::GraphPreviewOutput::Image(DynamicImage::ImageRgba16(_)) => panic!("expected grayscale overlay preview output, got rgba16 image"),
+        super::GraphPreviewOutput::Image(DynamicImage::ImageRgb32F(_)) => panic!("expected grayscale overlay preview output, got rgb32f image"),
+        super::GraphPreviewOutput::Image(DynamicImage::ImageRgba32F(_)) => panic!("expected grayscale overlay preview output, got rgba32f image"),
+        super::GraphPreviewOutput::Image(DynamicImage::ImageLuma16(_)) => panic!("expected grayscale overlay preview output, got luma16 image"),
+        super::GraphPreviewOutput::Image(DynamicImage::ImageLumaA16(_)) => panic!("expected grayscale overlay preview output, got luma-alpha16 image"),
+        super::GraphPreviewOutput::Image(_) => panic!("expected grayscale overlay preview output, got another dynamic image variant"),
+    }
+}
+
+#[test]
+fn normalize_preview_output_keeps_overlay_luma_on_gray_fast_path() {
+    let port_types = BTreeMap::from([("overlay".to_string(), TypeExpr::opaque("image:dynamic"))]);
+    let output = super::normalize_preview_output_for_port(super::GraphPreviewOutput::Image(DynamicImage::ImageLuma8(GrayImage::from_pixel(8, 8, Luma([12])))), "overlay", &port_types);
+
+    match output {
+        super::GraphPreviewOutput::Gray(gray) => assert_eq!(gray.dimensions(), (8, 8)),
+        _ => panic!("expected overlay preview to stay on gray fast path"),
+    }
+}
+
+#[test]
+fn normalize_preview_output_converts_overlay_rgba_to_gray_fast_path() {
+    let port_types = BTreeMap::from([("overlay".to_string(), TypeExpr::opaque("image:dynamic"))]);
+    let output =
+        super::normalize_preview_output_for_port(super::GraphPreviewOutput::Image(DynamicImage::ImageRgba8(RgbaImage::from_pixel(8, 8, image::Rgba([0, 255, 0, 255])))), "overlay", &port_types);
+
+    match output {
+        super::GraphPreviewOutput::Gray(gray) => assert_eq!(gray.dimensions(), (8, 8)),
+        _ => panic!("expected overlay preview to force grayscale fast path"),
+    }
+}
+
+#[test]
+fn normalize_preview_output_leaves_generic_dynamic_preview_unchanged() {
+    let port_types = BTreeMap::from([("frame".to_string(), TypeExpr::opaque("image:dynamic"))]);
+    let output = super::normalize_preview_output_for_port(super::GraphPreviewOutput::Image(DynamicImage::ImageLuma8(GrayImage::from_pixel(8, 8, Luma([12])))), "frame", &port_types);
+
+    match output {
+        super::GraphPreviewOutput::Image(DynamicImage::ImageLuma8(gray)) => assert_eq!(gray.dimensions(), (8, 8)),
+        _ => panic!("expected generic dynamic preview to remain unchanged"),
+    }
+}
+
+#[test]
+fn selected_host_output_preview_with_sibling_image_port_emits_frame() {
+    let image_ty = serde_json::to_string(&TypeExpr::opaque("image:dynamic")).expect("image type json");
+    let graph_json = serde_json::json!({
+        "nodes": [
+            {
+                "id": "io.host_bridge",
+                "label": "Input",
+                "inputs": [],
+                "outputs": ["frame"],
+                "metadata": {
+                    "host_bridge": { "type": "Bool", "value": true },
+                    "dynamic_output_types": {
+                        "type": "Map",
+                        "value": [
+                            [
+                                { "type": "String", "value": "frame" },
+                                { "type": "String", "value": image_ty }
+                            ]
+                        ]
+                    }
+                }
+            },
+            {
+                "id": "io.host_output",
+                "label": "Output",
+                "inputs": ["overlay", "clahe"],
+                "outputs": [],
+                "metadata": { "host_bridge": { "type": "Bool", "value": true } }
+            }
+        ],
+        "edges": [
+            { "from": { "node": 0, "port": "frame" }, "to": { "node": 1, "port": "overlay" } },
+            { "from": { "node": 0, "port": "frame" }, "to": { "node": 1, "port": "clahe" } }
+        ]
+    });
+
+    let graph = super::GraphHandle::from_json_with_output(1, &graph_json, Some("overlay")).expect("graph build");
+    let input = DynamicImage::ImageLuma8(GrayImage::from_pixel(32, 24, Luma([77])));
+
+    let output = graph.process_preview_with_options(input, super::GraphProcessOptions { require_image_output: true, preview_only: true });
+
+    match output {
+        Some(super::GraphPreviewOutput::Gray(gray)) => assert_eq!(gray.dimensions(), (32, 24)),
+        Some(super::GraphPreviewOutput::Image(image)) => assert_eq!(image.dimensions(), (32, 24)),
+        None => panic!("expected selected preview output to emit a frame"),
+    }
+}
 
 #[test]
 fn normalize_graph_enum_consts_unwraps_struct_wrapped_values() {
@@ -240,10 +373,7 @@ fn default_host_bridge_inputs_cover_overlay_crosshair_toggle() {
     assert_eq!(super::default_host_bridge_input_value("crosshair_x"), Some(Value::Int(0)));
     assert_eq!(super::default_host_bridge_input_value("crosshair_y"), Some(Value::Int(0)));
     assert_eq!(super::default_host_bridge_input_value("draw_crosshair"), Some(Value::Bool(false)));
-    assert_eq!(
-        super::default_host_bridge_input_value("order_mode"),
-        Some(Value::String(std::borrow::Cow::Borrowed("none")))
-    );
+    assert_eq!(super::default_host_bridge_input_value("order_mode"), Some(Value::String(std::borrow::Cow::Borrowed("none"))));
 }
 
 #[test]
@@ -439,6 +569,101 @@ fn demand_driven_sinks_skip_non_preview_image_outputs() {
     assert!(ports.contains("raw"));
     assert!(ports.contains("detections"));
     assert!(!ports.contains("overlay"));
+}
+
+#[test]
+fn preview_only_demand_targets_host_output_sink_and_only_overlay_branch() {
+    let clahe = RuntimeNode {
+        id: "cv:aruco:clahe_gray".into(),
+        stable_id: 0,
+        bundle: None,
+        label: Some("CLAHE".into()),
+        compute: ComputeAffinity::CpuOnly,
+        const_inputs: vec![],
+        sync_groups: vec![],
+        metadata: std::collections::BTreeMap::new(),
+    };
+    let adaptive = RuntimeNode {
+        id: "cv:aruco:adaptive_threshold_gray".into(),
+        stable_id: 0,
+        bundle: None,
+        label: Some("Adaptive".into()),
+        compute: ComputeAffinity::CpuOnly,
+        const_inputs: vec![],
+        sync_groups: vec![],
+        metadata: std::collections::BTreeMap::new(),
+    };
+    let crosshair = RuntimeNode {
+        id: "cv:draw:drawcrosshairat".into(),
+        stable_id: 0,
+        bundle: None,
+        label: Some("Crosshair".into()),
+        compute: ComputeAffinity::CpuOnly,
+        const_inputs: vec![],
+        sync_groups: vec![],
+        metadata: std::collections::BTreeMap::new(),
+    };
+    let host_output = RuntimeNode {
+        id: "io.host_output".into(),
+        stable_id: 0,
+        bundle: None,
+        label: Some("Output".into()),
+        compute: ComputeAffinity::CpuOnly,
+        const_inputs: vec![],
+        sync_groups: vec![],
+        metadata: std::collections::BTreeMap::from([("host_bridge".into(), Value::Bool(true))]),
+    };
+
+    let plan = RuntimePlan {
+        default_policy: EdgePolicyKind::Fifo,
+        backpressure: daedalus::runtime::BackpressureStrategy::None,
+        lockfree_queues: false,
+        graph_metadata: std::collections::BTreeMap::new(),
+        nodes: vec![clahe, adaptive, crosshair, host_output],
+        edges: vec![
+            (daedalus::planner::NodeRef(0), "mask".into(), daedalus::planner::NodeRef(3), "clahe".into(), EdgePolicyKind::Fifo),
+            (daedalus::planner::NodeRef(1), "mask".into(), daedalus::planner::NodeRef(3), "adaptive".into(), EdgePolicyKind::Fifo),
+            (daedalus::planner::NodeRef(2), "frame".into(), daedalus::planner::NodeRef(3), "overlay".into(), EdgePolicyKind::Fifo),
+        ],
+        gpu_segments: vec![],
+        gpu_edges: vec![],
+        gpu_entries: vec![],
+        gpu_exits: vec![],
+        segments: vec![RuntimeSegment {
+            nodes: vec![daedalus::planner::NodeRef(0), daedalus::planner::NodeRef(1), daedalus::planner::NodeRef(2), daedalus::planner::NodeRef(3)],
+            compute: ComputeAffinity::CpuOnly,
+        }],
+        schedule_order: vec![],
+    };
+
+    let mut port_types = BTreeMap::new();
+    port_types.insert("overlay".to_string(), TypeExpr::opaque("image:dynamic"));
+    port_types.insert("clahe".to_string(), TypeExpr::opaque("image:gray8"));
+    port_types.insert("adaptive".to_string(), TypeExpr::opaque("image:gray8"));
+
+    let owners = super::infer_host_output_port_owners(&plan, &["Output".to_string()]);
+    assert_eq!(owners.get("overlay"), Some(&3));
+    assert_eq!(owners.get("clahe"), Some(&3));
+    assert_eq!(owners.get("adaptive"), Some(&3));
+
+    let sinks = build_demand_sinks(&plan, &["Output".to_string()], &["overlay".to_string()], &["overlay".to_string(), "clahe".to_string(), "adaptive".to_string()], &port_types, &owners, true);
+    assert_eq!(sinks.len(), 1);
+    assert_eq!(sinks[0].port.as_deref(), Some("overlay"));
+    assert_eq!(sinks[0].node.index, Some(3));
+
+    let mask = super::build_demand_mask(
+        &plan,
+        &["Output".to_string()],
+        &["overlay".to_string()],
+        &["overlay".to_string(), "clahe".to_string(), "adaptive".to_string()],
+        &port_types,
+        &owners,
+        true,
+        true,
+        false,
+    )
+    .expect("preview-only demand mask");
+    assert_eq!(mask, vec![false, false, true, true]);
 }
 
 #[test]

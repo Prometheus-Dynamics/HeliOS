@@ -382,15 +382,6 @@ pub(crate) async fn fetch_stream_output(state: &AppState, stream_id: &str, outpu
         EngineEvent::Nack { code, .. } if code == EngineErrorCode::NotFound && is_media_imu_output_key(output_key) => {
             media_imu::fetch_media_imu_sample_for_stream(state, stream_uuid, output_key).await.map(|sample| sample.value).map_err(|err| err.to_string())
         }
-        EngineEvent::Nack { code, .. } if code == EngineErrorCode::NotFound && !fresh => match state.engine.get_graph_output_sample_event(stream_uuid, output_key.to_string()).await {
-            Ok(EngineEvent::GraphOutputSample { value, .. }) => Ok(value.into()),
-            Ok(EngineEvent::Nack { code, .. }) if code == EngineErrorCode::NotFound && is_media_imu_output_key(output_key) => {
-                media_imu::fetch_media_imu_sample_for_stream(state, stream_uuid, output_key).await.map(|sample| sample.value).map_err(|err| err.to_string())
-            }
-            Ok(EngineEvent::Nack { reason, .. }) => Err(reason),
-            Ok(_) => Err("unexpected engine response".to_string()),
-            Err(err) => Err(err.to_string()),
-        },
         EngineEvent::Nack { reason, .. } => Err(reason),
         _ => Err("unexpected engine response".to_string()),
     }

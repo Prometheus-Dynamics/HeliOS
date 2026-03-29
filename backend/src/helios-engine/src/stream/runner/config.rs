@@ -24,9 +24,6 @@ const ENV_VIEWER_IDLE_TIMEOUT_MS: &str = "HELIOS_STREAM_VIEWER_IDLE_TIMEOUT_MS";
 const DEFAULT_VIEWER_IDLE_TIMEOUT_MS: u64 = 2_500;
 const ENV_VIEWER_CHECK_INTERVAL_MS: &str = "HELIOS_STREAM_VIEWER_CHECK_INTERVAL_MS";
 const DEFAULT_VIEWER_CHECK_INTERVAL_MS: u64 = 250;
-const ENV_PREVIEW_ENCODE_INTERVAL_MS: &str = "HELIOS_STREAM_PREVIEW_ENCODE_INTERVAL_MS";
-const DEFAULT_PREVIEW_ENCODE_INTERVAL_MS: u64 = 33;
-
 pub struct StreamRunnerConfig {
     pub capture_config: CaptureConfig,
     pub graph: GraphHandle,
@@ -83,7 +80,6 @@ impl StreamRunner {
         let stream_label: metrics::SharedString = stream_id.map(|id| id.to_string()).unwrap_or_else(|| "unknown".to_string()).into();
         let viewer_idle_timeout = viewer_idle_timeout();
         let viewer_check_interval = viewer_check_interval();
-        let preview_encode_interval = preview_encode_interval();
         // When both encoder + decoder IDs are unset, treat the stream as "codecs disabled" and do
         // not generate any preview shmem output (even passthrough MJPEG). However, file-backed
         // streams (media replay) do not rely on external codecs for preview: we can still generate
@@ -98,6 +94,7 @@ impl StreamRunner {
         // activity from implicitly requiring full stream encoder throughput.
         let preview_encoder_stats = styx::codec::CodecStats::default();
         let preview_encoder_last_activity_ms = Arc::new(AtomicU64::new(0));
+        let preview_transport_stats = Arc::new(std::sync::Mutex::new(super::PreviewTransportStats::default()));
         // Keep preview generation fully demand-driven. Starting the preview worker here leaves
         // an idle thread plus retained buffers resident even when nothing is consuming preview.
         let preview_worker = None;
@@ -132,19 +129,20 @@ impl StreamRunner {
             encoder_stats: styx::codec::CodecStats::default(),
             preview_encoder_stats,
             capture_stats: styx::prelude::StageMetrics::default(),
+            graph_stage_stats: styx::prelude::StageMetrics::default(),
             last_capture_ts: None,
             last_capture_wall: None,
+            last_graph_wall: None,
             capture_empty_since: None,
             capture_started_wall: None,
             viewer_idle_timeout,
             viewer_check_interval,
             last_viewer_check_wall: None,
             viewer_recently_active: false,
-            preview_encode_interval,
-            last_preview_work_wall: None,
             last_preview_encode_wall: None,
             preview_encoder_last_activity_ms,
             preview_worker,
+            preview_transport_stats,
             last_idle_compaction_wall: None,
             last_frame_demand: std::sync::Mutex::new(super::LastFrameDemandSnapshot::default()),
             runner_memory: super::RunnerMemoryTracker::default(),
@@ -164,11 +162,6 @@ fn viewer_idle_timeout() -> Duration {
 fn viewer_check_interval() -> Duration {
     let millis = env::var(ENV_VIEWER_CHECK_INTERVAL_MS).ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(DEFAULT_VIEWER_CHECK_INTERVAL_MS);
     Duration::from_millis(millis.clamp(50, 5_000))
-}
-
-fn preview_encode_interval() -> Duration {
-    let millis = env::var(ENV_PREVIEW_ENCODE_INTERVAL_MS).ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(DEFAULT_PREVIEW_ENCODE_INTERVAL_MS);
-    Duration::from_millis(millis.clamp(10, 1_000))
 }
 
 fn find_nv12_mode_for_config(config: &CaptureConfig) -> Option<ModeId> {

@@ -1722,11 +1722,18 @@ impl StreamManager {
             let host = ctx.host.read().await;
             return host.read_json_output(&port, false).ok_or(Error::NotFound("graph output sample unavailable"));
         }
+        {
+            let host = ctx.host.read().await;
+            host.request_output_sample(&port);
+            if let Some(value) = host.read_json_output(&port, false) {
+                return Ok(value);
+            }
+        }
         let deadline = tokio::time::Instant::now() + Duration::from_millis(250);
         loop {
             {
                 let host = ctx.host.read().await;
-                if let Some(value) = host.read_json_output(&port, true) {
+                if let Some(value) = host.read_json_output(&port, false) {
                     return Ok(value);
                 }
             }

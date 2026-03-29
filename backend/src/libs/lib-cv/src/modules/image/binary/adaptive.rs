@@ -330,6 +330,9 @@ fn adaptive_mean_threshold_fast_inner_into(image: &GrayImage, window: u32, offse
     let width_usize = width as usize;
     let height_usize = height as usize;
     let src = image.as_raw();
+    #[cfg(target_arch = "aarch64")]
+    let use_neon = crate::simd::neon_enabled();
+    #[cfg(not(target_arch = "aarch64"))]
     let use_neon = false;
 
     let ring_rows = window as usize;
@@ -553,9 +556,6 @@ fn adaptive_mean_threshold_fast_parallel_into(image: &GrayImage, window: u32, ra
         return;
     }
     let src = image.as_raw();
-    let hsum_len = width_usize.saturating_mul(height_usize);
-    let mut hsum = vec![0u16; hsum_len];
-    crate::diagnostics::report_scratch_high_water("image.adaptive_parallel_hsum", hsum.capacity() * size_of::<u16>());
     let area = (window as i32) * (window as i32);
     let area_half = area / 2;
     let inv_area = (((1i64) << ADAPTIVE_SHIFT) + (area as i64 / 2)) / (area as i64);
@@ -563,64 +563,95 @@ fn adaptive_mean_threshold_fast_parallel_into(image: &GrayImage, window: u32, ra
     let area_half_scaled = area_half.saturating_mul(inv_area);
     let offset_scaled = (offset * ((1i64 << ADAPTIVE_SHIFT) as f32)).round() as i32;
     let radius_isize = radius as isize;
+    #[cfg(target_arch = "aarch64")]
+    let use_neon = crate::simd::neon_enabled();
+    #[cfg(not(target_arch = "aarch64"))]
     let use_neon = false;
 
     let pool = adaptive_thread_pool().expect("adaptive parallel path requires a worker pool");
-    pool.install(|| {
-        {
-            hsum.par_chunks_mut(width_usize).enumerate().for_each(|(y, row)| {
-                let src_row = &src[y * width_usize..(y + 1) * width_usize];
-                compute_horizontal_hsum_row_u16(src_row, radius, row, use_neon);
-            });
+    super::with_parallel_hsum_scratch(|hsum| {
+        let hsum_len = width_usize.saturating_mul(height_usize);
+        if hsum.len() != hsum_len {
+            hsum.resize(hsum_len, 0u16);
+            crate::diagnostics::report_scratch_high_water("image.adaptive_parallel_hsum", hsum.capacity() * size_of::<u16>());
         }
 
-        let hsum = hsum.as_slice();
-        let threads = pool.current_num_threads().max(1);
-        let mut rows_per_chunk = height_usize.div_ceil(threads);
-        rows_per_chunk = rows_per_chunk.max(window as usize).max(32);
+        pool.install(|| {
+            {
+                hsum.par_chunks_mut(width_usize).enumerate().for_each(|(y, row)| {
+                    let src_row = &src[y * width_usize..(y + 1) * width_usize];
+                    compute_horizontal_hsum_row_u16(src_row, radius, row, use_neon);
+                });
+            }
 
-        let clamp_y = |y: isize| -> usize {
-            if y < 0 {
-                0
-            } else if y as usize >= height_usize {
-                height_usize - 1
-            } else {
-                y as usize
-            }
-        };
+            let hsum = hsum.as_slice();
+            let threads = pool.current_num_threads().max(1);
+            let mut rows_per_chunk = height_usize.div_ceil(threads);
+            rows_per_chunk = rows_per_chunk.max(window as usize).max(32);
 
-        dst.par_chunks_mut(width_usize * rows_per_chunk).enumerate().for_each(|(chunk_idx, dst_chunk)| {
-            let y0 = chunk_idx * rows_per_chunk;
-            let chunk_rows = dst_chunk.len() / width_usize;
-            if chunk_rows == 0 {
-                return;
-            }
-            let chunk_end = (y0 + chunk_rows).min(height_usize);
-            let mut inner_start = radius;
-            if inner_start > height_usize {
-                inner_start = height_usize;
-            }
-            let mut inner_end = height_usize.saturating_sub(radius + 1);
-            if inner_end < inner_start {
-                inner_end = inner_start;
-            }
-            let interior_start = inner_start.max(y0);
-            let interior_end = inner_end.min(chunk_end);
-            ADAPTIVE_COL_SUM_SCRATCH.with(|scratch| {
-                let mut col_sum = scratch.borrow_mut();
-                if col_sum.len() != width_usize {
-                    col_sum.resize(width_usize, 0);
-                    crate::diagnostics::report_scratch_high_water("image.adaptive_parallel_col_sum", col_sum.capacity() * size_of::<i32>());
+            let clamp_y = |y: isize| -> usize {
+                if y < 0 {
+                    0
+                } else if y as usize >= height_usize {
+                    height_usize - 1
                 } else {
-                    col_sum.fill(0);
+                    y as usize
                 }
-                let col_sum = col_sum.as_mut_slice();
-                if y0 >= radius && y0 + radius < height_usize {
-                    if use_neon {
+            };
+
+            dst.par_chunks_mut(width_usize * rows_per_chunk).enumerate().for_each(|(chunk_idx, dst_chunk)| {
+                let y0 = chunk_idx * rows_per_chunk;
+                let chunk_rows = dst_chunk.len() / width_usize;
+                if chunk_rows == 0 {
+                    return;
+                }
+                let chunk_end = (y0 + chunk_rows).min(height_usize);
+                let mut inner_start = radius;
+                if inner_start > height_usize {
+                    inner_start = height_usize;
+                }
+                let mut inner_end = height_usize.saturating_sub(radius + 1);
+                if inner_end < inner_start {
+                    inner_end = inner_start;
+                }
+                let interior_start = inner_start.max(y0);
+                let interior_end = inner_end.min(chunk_end);
+                ADAPTIVE_COL_SUM_SCRATCH.with(|scratch| {
+                    let mut col_sum = scratch.borrow_mut();
+                    if col_sum.len() != width_usize {
+                        col_sum.resize(width_usize, 0);
+                        crate::diagnostics::report_scratch_high_water("image.adaptive_parallel_col_sum", col_sum.capacity() * size_of::<i32>());
+                    } else {
+                        col_sum.fill(0);
+                    }
+                    let col_sum = col_sum.as_mut_slice();
+                    if y0 >= radius && y0 + radius < height_usize {
+                        if use_neon {
+                            #[cfg(target_arch = "aarch64")]
+                            {
+                                for dy in -radius_isize..=radius_isize {
+                                    let yy = (y0 as isize + dy) as usize;
+                                    let row = &hsum[yy * width_usize..(yy + 1) * width_usize];
+                                    // SAFETY: guarded by runtime feature detection.
+                                    unsafe {
+                                        neon::add_u16_row_to_i32_col_sum_neon(col_sum, row);
+                                    }
+                                }
+                            }
+                            #[cfg(not(target_arch = "aarch64"))]
+                            unreachable!("neon-enabled path on non-aarch64");
+                        } else {
+                            for dy in -radius_isize..=radius_isize {
+                                let yy = (y0 as isize + dy) as usize;
+                                let row = &hsum[yy * width_usize..(yy + 1) * width_usize];
+                                add_u16_row_to_col_sum_scalar(col_sum, row);
+                            }
+                        }
+                    } else if use_neon {
                         #[cfg(target_arch = "aarch64")]
                         {
                             for dy in -radius_isize..=radius_isize {
-                                let yy = (y0 as isize + dy) as usize;
+                                let yy = clamp_y(y0 as isize + dy);
                                 let row = &hsum[yy * width_usize..(yy + 1) * width_usize];
                                 // SAFETY: guarded by runtime feature detection.
                                 unsafe {
@@ -632,36 +663,63 @@ fn adaptive_mean_threshold_fast_parallel_into(image: &GrayImage, window: u32, ra
                         unreachable!("neon-enabled path on non-aarch64");
                     } else {
                         for dy in -radius_isize..=radius_isize {
-                            let yy = (y0 as isize + dy) as usize;
+                            let yy = clamp_y(y0 as isize + dy);
                             let row = &hsum[yy * width_usize..(yy + 1) * width_usize];
                             add_u16_row_to_col_sum_scalar(col_sum, row);
                         }
                     }
-                } else if use_neon {
-                    #[cfg(target_arch = "aarch64")]
-                    {
-                        for dy in -radius_isize..=radius_isize {
-                            let yy = clamp_y(y0 as isize + dy);
-                            let row = &hsum[yy * width_usize..(yy + 1) * width_usize];
-                            // SAFETY: guarded by runtime feature detection.
-                            unsafe {
-                                neon::add_u16_row_to_i32_col_sum_neon(col_sum, row);
+
+                    if use_neon {
+                        #[cfg(target_arch = "aarch64")]
+                        {
+                            for y in y0..interior_start {
+                                let local_y = y.saturating_sub(y0);
+                                let src_row = &src[y * width_usize..(y + 1) * width_usize];
+                                let dst_row = &mut dst_chunk[local_y * width_usize..(local_y + 1) * width_usize];
+                                let sub_y = clamp_y(y as isize - radius_isize);
+                                let add_y = clamp_y(y as isize + radius_isize + 1);
+                                let sub_row = &hsum[sub_y * width_usize..(sub_y + 1) * width_usize];
+                                let add_row = &hsum[add_y * width_usize..(add_y + 1) * width_usize];
+
+                                // SAFETY: guarded by runtime feature detection.
+                                unsafe {
+                                    neon::adaptive_threshold_row_neon(dst_row, src_row, col_sum, sub_row, add_row, invert, area_half_scaled, inv_area, offset_scaled);
+                                }
+                            }
+
+                            for y in interior_start..interior_end {
+                                let local_y = y.saturating_sub(y0);
+                                let src_row = &src[y * width_usize..(y + 1) * width_usize];
+                                let dst_row = &mut dst_chunk[local_y * width_usize..(local_y + 1) * width_usize];
+                                let sub_y = y - radius;
+                                let add_y = y + radius + 1;
+                                let sub_row = &hsum[sub_y * width_usize..(sub_y + 1) * width_usize];
+                                let add_row = &hsum[add_y * width_usize..(add_y + 1) * width_usize];
+
+                                // SAFETY: guarded by runtime feature detection.
+                                unsafe {
+                                    neon::adaptive_threshold_row_neon(dst_row, src_row, col_sum, sub_row, add_row, invert, area_half_scaled, inv_area, offset_scaled);
+                                }
+                            }
+
+                            for y in interior_end..chunk_end {
+                                let local_y = y.saturating_sub(y0);
+                                let src_row = &src[y * width_usize..(y + 1) * width_usize];
+                                let dst_row = &mut dst_chunk[local_y * width_usize..(local_y + 1) * width_usize];
+                                let sub_y = clamp_y(y as isize - radius_isize);
+                                let add_y = clamp_y(y as isize + radius_isize + 1);
+                                let sub_row = &hsum[sub_y * width_usize..(sub_y + 1) * width_usize];
+                                let add_row = &hsum[add_y * width_usize..(add_y + 1) * width_usize];
+
+                                // SAFETY: guarded by runtime feature detection.
+                                unsafe {
+                                    neon::adaptive_threshold_row_neon(dst_row, src_row, col_sum, sub_row, add_row, invert, area_half_scaled, inv_area, offset_scaled);
+                                }
                             }
                         }
-                    }
-                    #[cfg(not(target_arch = "aarch64"))]
-                    unreachable!("neon-enabled path on non-aarch64");
-                } else {
-                    for dy in -radius_isize..=radius_isize {
-                        let yy = clamp_y(y0 as isize + dy);
-                        let row = &hsum[yy * width_usize..(yy + 1) * width_usize];
-                        add_u16_row_to_col_sum_scalar(col_sum, row);
-                    }
-                }
-
-                if use_neon {
-                    #[cfg(target_arch = "aarch64")]
-                    {
+                        #[cfg(not(target_arch = "aarch64"))]
+                        unreachable!("neon-enabled path on non-aarch64");
+                    } else {
                         for y in y0..interior_start {
                             let local_y = y.saturating_sub(y0);
                             let src_row = &src[y * width_usize..(y + 1) * width_usize];
@@ -671,10 +729,7 @@ fn adaptive_mean_threshold_fast_parallel_into(image: &GrayImage, window: u32, ra
                             let sub_row = &hsum[sub_y * width_usize..(sub_y + 1) * width_usize];
                             let add_row = &hsum[add_y * width_usize..(add_y + 1) * width_usize];
 
-                            // SAFETY: guarded by runtime feature detection.
-                            unsafe {
-                                neon::adaptive_threshold_row_neon(dst_row, src_row, col_sum, sub_row, add_row, invert, area_half_scaled, inv_area, offset_scaled);
-                            }
+                            adaptive_threshold_row_scalar(dst_row, src_row, col_sum, sub_row, add_row, invert, area_half_scaled, inv_area, offset_scaled);
                         }
 
                         for y in interior_start..interior_end {
@@ -686,10 +741,7 @@ fn adaptive_mean_threshold_fast_parallel_into(image: &GrayImage, window: u32, ra
                             let sub_row = &hsum[sub_y * width_usize..(sub_y + 1) * width_usize];
                             let add_row = &hsum[add_y * width_usize..(add_y + 1) * width_usize];
 
-                            // SAFETY: guarded by runtime feature detection.
-                            unsafe {
-                                neon::adaptive_threshold_row_neon(dst_row, src_row, col_sum, sub_row, add_row, invert, area_half_scaled, inv_area, offset_scaled);
-                            }
+                            adaptive_threshold_row_scalar(dst_row, src_row, col_sum, sub_row, add_row, invert, area_half_scaled, inv_area, offset_scaled);
                         }
 
                         for y in interior_end..chunk_end {
@@ -701,51 +753,10 @@ fn adaptive_mean_threshold_fast_parallel_into(image: &GrayImage, window: u32, ra
                             let sub_row = &hsum[sub_y * width_usize..(sub_y + 1) * width_usize];
                             let add_row = &hsum[add_y * width_usize..(add_y + 1) * width_usize];
 
-                            // SAFETY: guarded by runtime feature detection.
-                            unsafe {
-                                neon::adaptive_threshold_row_neon(dst_row, src_row, col_sum, sub_row, add_row, invert, area_half_scaled, inv_area, offset_scaled);
-                            }
+                            adaptive_threshold_row_scalar(dst_row, src_row, col_sum, sub_row, add_row, invert, area_half_scaled, inv_area, offset_scaled);
                         }
                     }
-                    #[cfg(not(target_arch = "aarch64"))]
-                    unreachable!("neon-enabled path on non-aarch64");
-                } else {
-                    for y in y0..interior_start {
-                        let local_y = y.saturating_sub(y0);
-                        let src_row = &src[y * width_usize..(y + 1) * width_usize];
-                        let dst_row = &mut dst_chunk[local_y * width_usize..(local_y + 1) * width_usize];
-                        let sub_y = clamp_y(y as isize - radius_isize);
-                        let add_y = clamp_y(y as isize + radius_isize + 1);
-                        let sub_row = &hsum[sub_y * width_usize..(sub_y + 1) * width_usize];
-                        let add_row = &hsum[add_y * width_usize..(add_y + 1) * width_usize];
-
-                        adaptive_threshold_row_scalar(dst_row, src_row, col_sum, sub_row, add_row, invert, area_half_scaled, inv_area, offset_scaled);
-                    }
-
-                    for y in interior_start..interior_end {
-                        let local_y = y.saturating_sub(y0);
-                        let src_row = &src[y * width_usize..(y + 1) * width_usize];
-                        let dst_row = &mut dst_chunk[local_y * width_usize..(local_y + 1) * width_usize];
-                        let sub_y = y - radius;
-                        let add_y = y + radius + 1;
-                        let sub_row = &hsum[sub_y * width_usize..(sub_y + 1) * width_usize];
-                        let add_row = &hsum[add_y * width_usize..(add_y + 1) * width_usize];
-
-                        adaptive_threshold_row_scalar(dst_row, src_row, col_sum, sub_row, add_row, invert, area_half_scaled, inv_area, offset_scaled);
-                    }
-
-                    for y in interior_end..chunk_end {
-                        let local_y = y.saturating_sub(y0);
-                        let src_row = &src[y * width_usize..(y + 1) * width_usize];
-                        let dst_row = &mut dst_chunk[local_y * width_usize..(local_y + 1) * width_usize];
-                        let sub_y = clamp_y(y as isize - radius_isize);
-                        let add_y = clamp_y(y as isize + radius_isize + 1);
-                        let sub_row = &hsum[sub_y * width_usize..(sub_y + 1) * width_usize];
-                        let add_row = &hsum[add_y * width_usize..(add_y + 1) * width_usize];
-
-                        adaptive_threshold_row_scalar(dst_row, src_row, col_sum, sub_row, add_row, invert, area_half_scaled, inv_area, offset_scaled);
-                    }
-                }
+                });
             });
         });
     });

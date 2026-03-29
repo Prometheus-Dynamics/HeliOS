@@ -1,11 +1,12 @@
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use image::codecs::jpeg::JpegEncoder;
 use image::ColorType;
 use styx::prelude::FrameLease;
 use tokio::sync::broadcast;
+use turbojpeg::{Compressor as TurboJpegCompressor, Image as TurboJpegImage, OutputBuf as TurboJpegOutputBuf, PixelFormat as TurboJpegPixelFormat, Subsamp as TurboJpegSubsamp};
 use uuid::Uuid;
 
 use crate::error::{Error, Result};
@@ -63,6 +64,55 @@ fn release_preview_worker_buffers(gray: &mut Vec<u8>, rgb: &mut Vec<u8>, jpeg: &
     *jpeg = Vec::new();
 }
 
+struct TurboPreviewEncoder {
+    compressor: TurboJpegCompressor,
+    output: TurboJpegOutputBuf<'static>,
+}
+
+impl TurboPreviewEncoder {
+    fn new(quality: u8) -> Option<Self> {
+        let mut compressor = TurboJpegCompressor::new().ok()?;
+        compressor.set_quality(i32::from(quality)).ok()?;
+        compressor.set_optimize(false).ok()?;
+        Some(Self { compressor, output: TurboJpegOutputBuf::new_owned() })
+    }
+
+    fn encode_gray(&mut self, image: &image::GrayImage) -> Option<(u32, u32)> {
+        self.compressor.set_subsamp(TurboJpegSubsamp::Gray).ok()?;
+        let width = image.width().max(1);
+        let height = image.height().max(1);
+        let view = TurboJpegImage { pixels: image.as_raw().as_slice(), width: width as usize, pitch: width as usize, height: height as usize, format: TurboJpegPixelFormat::GRAY };
+        self.compressor.compress(view, &mut self.output).ok()?;
+        Some((width, height))
+    }
+
+    fn encode_dynamic(&mut self, image: &image::DynamicImage) -> Option<(u32, u32)> {
+        let (pixels, pitch, format, subsamp) = match image {
+            // 4:2:0 subsampling is materially cheaper than 4:4:4 for live preview while keeping
+            // visual quality acceptable for the operator UI.
+            image::DynamicImage::ImageRgb8(buf) => (buf.as_raw().as_slice(), buf.width() as usize * 3, TurboJpegPixelFormat::RGB, TurboJpegSubsamp::Sub2x2),
+            image::DynamicImage::ImageRgba8(buf) => (buf.as_raw().as_slice(), buf.width() as usize * 4, TurboJpegPixelFormat::RGBA, TurboJpegSubsamp::Sub2x2),
+            image::DynamicImage::ImageLuma8(buf) => return self.encode_gray(buf),
+            _ => return None,
+        };
+        self.compressor.set_subsamp(subsamp).ok()?;
+        let width = image.width().max(1);
+        let height = image.height().max(1);
+        let view = TurboJpegImage { pixels, width: width as usize, pitch, height: height as usize, format };
+        self.compressor.compress(view, &mut self.output).ok()?;
+        Some((width, height))
+    }
+
+    fn encoded_bytes(&self) -> &[u8] {
+        &self.output
+    }
+}
+
+enum PreviewEncodedFrame<'a> {
+    Borrowed { dims: (u32, u32), bytes: &'a [u8] },
+    Owned { dims: (u32, u32) },
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub(super) struct LastFrameDemandSnapshot {
     pub raw_receiver_count: u64,
@@ -108,19 +158,20 @@ pub struct StreamRunner {
     pub(super) encoder_stats: styx::codec::CodecStats,
     pub(super) preview_encoder_stats: styx::codec::CodecStats,
     pub(super) capture_stats: styx::prelude::StageMetrics,
+    pub(super) graph_stage_stats: styx::prelude::StageMetrics,
     pub(super) last_capture_ts: Option<u64>,
     pub(super) last_capture_wall: Option<Instant>,
+    pub(super) last_graph_wall: Option<Instant>,
     pub(super) capture_empty_since: Option<Instant>,
     pub(super) capture_started_wall: Option<Instant>,
     pub(super) viewer_idle_timeout: std::time::Duration,
     pub(super) viewer_check_interval: std::time::Duration,
     pub(super) last_viewer_check_wall: Option<Instant>,
     pub(super) viewer_recently_active: bool,
-    pub(super) preview_encode_interval: Duration,
-    pub(super) last_preview_work_wall: Option<Instant>,
     pub(super) last_preview_encode_wall: Option<Instant>,
     pub(super) preview_encoder_last_activity_ms: Arc<AtomicU64>,
     pub(super) preview_worker: Option<PreviewWorker>,
+    pub(super) preview_transport_stats: Arc<Mutex<PreviewTransportStats>>,
     pub(super) last_idle_compaction_wall: Option<Instant>,
     pub(super) last_frame_demand: Mutex<LastFrameDemandSnapshot>,
     pub(super) runner_memory: RunnerMemoryTracker,
@@ -189,11 +240,159 @@ impl RunnerMemoryTracker {
     }
 }
 
+#[derive(Debug, Default)]
+pub(super) struct PreviewTransportTiming {
+    samples: u64,
+    total_ns: u128,
+    last_ns: u64,
+}
+
+impl PreviewTransportTiming {
+    fn record(&mut self, duration: Duration) {
+        let ns = duration.as_nanos().min(u64::MAX as u128) as u64;
+        self.samples = self.samples.saturating_add(1);
+        self.total_ns = self.total_ns.saturating_add(ns as u128);
+        self.last_ns = ns;
+    }
+
+    fn average_ms(&self) -> f64 {
+        if self.samples == 0 {
+            0.0
+        } else {
+            (self.total_ns as f64 / self.samples as f64) / 1_000_000.0
+        }
+    }
+
+    fn last_ms(&self) -> f64 {
+        self.last_ns as f64 / 1_000_000.0
+    }
+}
+
+#[derive(Debug, Default)]
+pub(super) struct PreviewTransportStats {
+    queue_wait: PreviewTransportTiming,
+    publish: PreviewTransportTiming,
+    end_to_end: PreviewTransportTiming,
+    replaced_pending_frames: u64,
+}
+
+impl PreviewTransportStats {
+    pub(super) fn record_queue_wait(&mut self, duration: Duration) {
+        self.queue_wait.record(duration);
+    }
+
+    pub(super) fn record_publish(&mut self, duration: Duration) {
+        self.publish.record(duration);
+    }
+
+    pub(super) fn record_end_to_end(&mut self, duration: Duration) {
+        self.end_to_end.record(duration);
+    }
+
+    pub(super) fn record_replaced_pending_frame(&mut self) {
+        self.replaced_pending_frames = self.replaced_pending_frames.saturating_add(1);
+    }
+
+    pub(super) fn snapshot(&self) -> crate::stream::StreamPreviewTransportMetrics {
+        crate::stream::StreamPreviewTransportMetrics {
+            queue_average_time_ms: self.queue_wait.average_ms(),
+            queue_last_time_ms: self.queue_wait.last_ms(),
+            publish_average_time_ms: self.publish.average_ms(),
+            publish_last_time_ms: self.publish.last_ms(),
+            end_to_end_average_time_ms: self.end_to_end.average_ms(),
+            end_to_end_last_time_ms: self.end_to_end.last_ms(),
+            replaced_pending_frames: self.replaced_pending_frames,
+        }
+    }
+
+    pub(super) fn has_samples(&self) -> bool {
+        self.queue_wait.samples > 0 || self.publish.samples > 0 || self.end_to_end.samples > 0 || self.replaced_pending_frames > 0
+    }
+}
+
+#[derive(Default)]
+struct PreviewMailboxState {
+    pending: Option<PreviewEncodeRequest>,
+    closed: bool,
+}
+
+struct PreviewMailbox {
+    state: Mutex<PreviewMailboxState>,
+    cv: Condvar,
+}
+
+enum PreviewMailboxRecv {
+    Request(PreviewEncodeRequest),
+    Timeout,
+    Closed,
+}
+
+impl PreviewMailbox {
+    fn new() -> Self {
+        Self { state: Mutex::new(PreviewMailboxState::default()), cv: Condvar::new() }
+    }
+
+    fn submit(&self, req: PreviewEncodeRequest, transport_stats: &Arc<Mutex<PreviewTransportStats>>) -> bool {
+        let mut state = match self.state.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if state.closed {
+            return false;
+        }
+        if state.pending.replace(req).is_some() {
+            let mut stats = match transport_stats.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            stats.record_replaced_pending_frame();
+        }
+        drop(state);
+        self.cv.notify_one();
+        true
+    }
+
+    fn recv_timeout(&self, timeout: Duration) -> PreviewMailboxRecv {
+        let mut state = match self.state.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        loop {
+            if let Some(req) = state.pending.take() {
+                return PreviewMailboxRecv::Request(req);
+            }
+            if state.closed {
+                return PreviewMailboxRecv::Closed;
+            }
+            let wait = self.cv.wait_timeout(state, timeout);
+            let (guard, result) = match wait {
+                Ok(pair) => pair,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            state = guard;
+            if result.timed_out() {
+                if state.closed {
+                    return PreviewMailboxRecv::Closed;
+                }
+                return PreviewMailboxRecv::Timeout;
+            }
+        }
+    }
+
+    fn close(&self) {
+        let mut state = match self.state.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        state.closed = true;
+        drop(state);
+        self.cv.notify_one();
+    }
+}
+
 pub(super) struct PreviewWorker {
-    pub(super) req_tx: std::sync::mpsc::SyncSender<PreviewEncodeRequest>,
-    pub(super) res_rx: std::sync::mpsc::Receiver<PreviewEncodeResult>,
-    pub(super) recycle_tx: std::sync::mpsc::SyncSender<Vec<u8>>,
-    join: std::thread::JoinHandle<()>,
+    mailbox: Arc<PreviewMailbox>,
+    join: std::thread::JoinHandle<Option<ShmemWriter>>,
 }
 
 pub(super) enum PreviewEncodeSource {
@@ -206,46 +405,42 @@ pub(super) struct PreviewEncodeRequest {
     pub(super) ts: u64,
     pub(super) source: PreviewEncodeSource,
     pub(super) output_resolution: Option<(u32, u32)>,
-}
-
-pub(super) struct PreviewEncodeResult {
-    pub(super) ts: u64,
-    pub(super) dims: (u32, u32),
-    pub(super) jpeg: Vec<u8>,
+    pub(super) queued_at: Instant,
 }
 
 impl PreviewWorker {
-    pub(super) fn start(stats: styx::codec::CodecStats, activity_ms: Arc<AtomicU64>) -> Self {
-        let (req_tx, req_rx) = std::sync::mpsc::sync_channel::<PreviewEncodeRequest>(1);
-        let (res_tx, res_rx) = std::sync::mpsc::sync_channel::<PreviewEncodeResult>(1);
-        let (recycle_tx, recycle_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(1);
+    pub(super) fn start(stats: styx::codec::CodecStats, activity_ms: Arc<AtomicU64>, transport_stats: Arc<Mutex<PreviewTransportStats>>, mut shmem: ShmemWriter) -> Self {
+        let mailbox = Arc::new(PreviewMailbox::new());
+        let mailbox_thread = Arc::clone(&mailbox);
         let quality = preview_jpeg_quality();
         let trim_interval = preview_worker_trim_interval();
         let join = std::thread::spawn(move || {
-            use std::sync::mpsc::{RecvTimeoutError, TrySendError};
-
+            let mut turbo = TurboPreviewEncoder::new(quality);
             let mut gray = Vec::<u8>::new();
             let mut rgb = Vec::<u8>::new();
             let mut jpeg = Vec::<u8>::new();
             let mut last_trim = Instant::now();
 
             loop {
-                let req = match req_rx.recv_timeout(trim_interval) {
-                    Ok(req) => req,
-                    Err(RecvTimeoutError::Timeout) => {
-                        while recycle_rx.try_recv().is_ok() {}
+                let req = match mailbox_thread.recv_timeout(trim_interval) {
+                    PreviewMailboxRecv::Request(req) => req,
+                    PreviewMailboxRecv::Timeout => {
                         release_preview_worker_buffers(&mut gray, &mut rgb, &mut jpeg);
                         last_trim = Instant::now();
                         continue;
                     }
-                    Err(RecvTimeoutError::Disconnected) => break,
+                    PreviewMailboxRecv::Closed => return Some(shmem),
                 };
-                if let Ok(recycled) = recycle_rx.try_recv() {
-                    jpeg = recycled;
-                }
                 let encode_start = Instant::now();
-                let dims = match encode_preview_request(&req, quality, &mut gray, &mut rgb, &mut jpeg) {
-                    Some(dims) => dims,
+                {
+                    let mut stats_guard = match transport_stats.lock() {
+                        Ok(guard) => guard,
+                        Err(poisoned) => poisoned.into_inner(),
+                    };
+                    stats_guard.record_queue_wait(encode_start.saturating_duration_since(req.queued_at));
+                }
+                let encoded = match encode_preview_request(&req, quality, turbo.as_mut(), &mut gray, &mut rgb, &mut jpeg) {
+                    Some(encoded) => encoded,
                     None => {
                         stats.inc_errors();
                         continue;
@@ -254,20 +449,26 @@ impl PreviewWorker {
 
                 stats.inc_processed();
                 stats.record_duration(encode_start.elapsed());
-                activity_ms.store(StreamRunner::unix_now_ms(), Ordering::Relaxed);
-                let ready = std::mem::take(&mut jpeg);
-                match res_tx.try_send(PreviewEncodeResult { ts: req.ts, dims, jpeg: ready }) {
-                    Ok(()) => {}
-                    // Drop stale results if the consumer is behind, but keep the owned buffer so
-                    // the worker can reuse its capacity on the next encode.
-                    Err(TrySendError::Full(result)) => {
-                        stats.inc_backpressure();
-                        jpeg = result.jpeg;
-                    }
-                    Err(TrySendError::Disconnected(_result)) => {
-                        break;
-                    }
+                let publish_start = Instant::now();
+                let (dims, bytes) = match encoded {
+                    PreviewEncodedFrame::Borrowed { dims, bytes } => (dims, bytes),
+                    PreviewEncodedFrame::Owned { dims } => (dims, jpeg.as_slice()),
+                };
+                if let Err(err) = shmem.write(Some(req.ts), Some(styx::prelude::FourCc::new(*b"JPEG")), dims, bytes) {
+                    stats.inc_errors();
+                    tracing::warn!(path = ?shmem.path(), error = %err, "preview shmem write failed");
                 }
+                let publish_elapsed = publish_start.elapsed();
+                activity_ms.store(StreamRunner::unix_now_ms(), Ordering::Relaxed);
+                {
+                    let mut stats_guard = match transport_stats.lock() {
+                        Ok(guard) => guard,
+                        Err(poisoned) => poisoned.into_inner(),
+                    };
+                    stats_guard.record_publish(publish_elapsed);
+                    stats_guard.record_end_to_end(req.queued_at.elapsed());
+                }
+                jpeg.clear();
 
                 if last_trim.elapsed() >= trim_interval {
                     compact_preview_worker_buffers(&mut gray, &mut rgb, &mut jpeg);
@@ -275,13 +476,16 @@ impl PreviewWorker {
                 }
             }
         });
-        Self { req_tx, res_rx, recycle_tx, join }
+        Self { mailbox, join }
     }
 
-    pub(super) fn stop(self) {
-        drop(self.req_tx);
-        drop(self.recycle_tx);
-        let _ = self.join.join();
+    pub(super) fn submit(&self, req: PreviewEncodeRequest, transport_stats: &Arc<Mutex<PreviewTransportStats>>) -> bool {
+        self.mailbox.submit(req, transport_stats)
+    }
+
+    pub(super) fn stop(self) -> Option<ShmemWriter> {
+        self.mailbox.close();
+        self.join.join().ok().flatten()
     }
 }
 
@@ -375,7 +579,14 @@ fn write_rgb24(image: &image::DynamicImage, out: &mut [u8]) -> bool {
     }
 }
 
-fn encode_preview_request(req: &PreviewEncodeRequest, quality: u8, gray: &mut Vec<u8>, rgb: &mut Vec<u8>, jpeg: &mut Vec<u8>) -> Option<(u32, u32)> {
+fn encode_preview_request<'a>(
+    req: &PreviewEncodeRequest,
+    quality: u8,
+    turbo: Option<&'a mut TurboPreviewEncoder>,
+    gray: &mut Vec<u8>,
+    rgb: &mut Vec<u8>,
+    jpeg: &mut Vec<u8>,
+) -> Option<PreviewEncodedFrame<'a>> {
     match &req.source {
         PreviewEncodeSource::Frame(frame) => {
             let dims = (frame.meta().format.resolution.width.get(), frame.meta().format.resolution.height.get());
@@ -386,19 +597,25 @@ fn encode_preview_request(req: &PreviewEncodeRequest, quality: u8, gray: &mut Ve
             });
             if !needs_resize {
                 if let Some(dims) = encode_preview_frame_direct(frame, quality, gray, rgb, jpeg) {
-                    return Some(dims);
+                    return Some(PreviewEncodedFrame::Owned { dims });
                 }
             }
 
             let image = styx::codec::decoder::frame_to_dynamic_image(frame)?;
-            encode_preview_dynamic_image(&image, req.output_resolution, quality, rgb, jpeg)
+            encode_preview_dynamic_image(&image, req.output_resolution, quality, turbo, rgb, jpeg)
         }
-        PreviewEncodeSource::Gray(image) => encode_preview_gray_image(image.as_ref(), req.output_resolution, quality, jpeg),
-        PreviewEncodeSource::Image(image) => encode_preview_dynamic_image(image.as_ref(), req.output_resolution, quality, rgb, jpeg),
+        PreviewEncodeSource::Gray(image) => encode_preview_gray_image(image.as_ref(), req.output_resolution, quality, turbo, jpeg),
+        PreviewEncodeSource::Image(image) => encode_preview_dynamic_image(image.as_ref(), req.output_resolution, quality, turbo, rgb, jpeg),
     }
 }
 
-fn encode_preview_gray_image(image: &image::GrayImage, output_resolution: Option<(u32, u32)>, quality: u8, jpeg: &mut Vec<u8>) -> Option<(u32, u32)> {
+fn encode_preview_gray_image<'a>(
+    image: &image::GrayImage,
+    output_resolution: Option<(u32, u32)>,
+    quality: u8,
+    turbo: Option<&'a mut TurboPreviewEncoder>,
+    jpeg: &mut Vec<u8>,
+) -> Option<PreviewEncodedFrame<'a>> {
     let resized = output_resolution.and_then(|(target_width, target_height)| {
         let target_width = target_width.max(1);
         let target_height = target_height.max(1);
@@ -412,17 +629,30 @@ fn encode_preview_gray_image(image: &image::GrayImage, output_resolution: Option
     let width = source.width().max(1);
     let height = source.height().max(1);
 
+    if let Some(turbo) = turbo {
+        if let Some(dims) = turbo.encode_gray(source) {
+            return Some(PreviewEncodedFrame::Borrowed { dims, bytes: turbo.encoded_bytes() });
+        }
+    }
+
     jpeg.clear();
-    let mut enc = JpegEncoder::new_with_quality(jpeg, quality);
+    let mut enc = JpegEncoder::new_with_quality(&mut *jpeg, quality);
     if enc.encode(source.as_raw(), width, height, ColorType::L8.into()).is_err() {
         return None;
     }
-    Some((width, height))
+    Some(PreviewEncodedFrame::Owned { dims: (width, height) })
 }
 
-fn encode_preview_dynamic_image(image: &image::DynamicImage, output_resolution: Option<(u32, u32)>, quality: u8, rgb: &mut Vec<u8>, jpeg: &mut Vec<u8>) -> Option<(u32, u32)> {
+fn encode_preview_dynamic_image<'a>(
+    image: &image::DynamicImage,
+    output_resolution: Option<(u32, u32)>,
+    quality: u8,
+    turbo: Option<&'a mut TurboPreviewEncoder>,
+    rgb: &mut Vec<u8>,
+    jpeg: &mut Vec<u8>,
+) -> Option<PreviewEncodedFrame<'a>> {
     if matches!(image, image::DynamicImage::ImageLuma8(_) | image::DynamicImage::ImageLumaA8(_)) {
-        return lib_cv::modules::image::luma::with_luma8_frame(image, |gray| encode_preview_gray_image(gray, output_resolution, quality, jpeg));
+        return lib_cv::modules::image::luma::with_luma8_frame(image, |gray| encode_preview_gray_image(gray, output_resolution, quality, turbo, jpeg));
     }
 
     let resized = output_resolution.and_then(|(target_width, target_height)| {
@@ -437,6 +667,24 @@ fn encode_preview_dynamic_image(image: &image::DynamicImage, output_resolution: 
     let source: &image::DynamicImage = resized.as_ref().unwrap_or(image);
     let width = source.width().max(1);
     let height = source.height().max(1);
+
+    if let Some(turbo) = turbo {
+        if let Some(dims) = turbo.encode_dynamic(source) {
+            return Some(PreviewEncodedFrame::Borrowed { dims, bytes: turbo.encoded_bytes() });
+        }
+    }
+
+    // Fast path: if the preview source is already tightly-packed RGB8, hand it directly to the
+    // JPEG encoder instead of copying through the scratch RGB buffer first.
+    if let image::DynamicImage::ImageRgb8(buf) = source {
+        jpeg.clear();
+        let mut enc = JpegEncoder::new_with_quality(&mut *jpeg, quality);
+        if enc.encode(buf.as_raw(), width, height, ColorType::Rgb8.into()).is_ok() {
+            return Some(PreviewEncodedFrame::Owned { dims: (width, height) });
+        }
+        return None;
+    }
+
     let wanted = width as usize * height as usize * 3;
     if rgb.len() != wanted {
         rgb.resize(wanted, 0);
@@ -446,11 +694,11 @@ fn encode_preview_dynamic_image(image: &image::DynamicImage, output_resolution: 
     }
 
     jpeg.clear();
-    let mut enc = JpegEncoder::new_with_quality(jpeg, quality);
+    let mut enc = JpegEncoder::new_with_quality(&mut *jpeg, quality);
     if enc.encode(&rgb[..wanted], width, height, ColorType::Rgb8.into()).is_err() {
         return None;
     }
-    Some((width, height))
+    Some(PreviewEncodedFrame::Owned { dims: (width, height) })
 }
 
 fn encode_preview_frame_direct(frame: &FrameLease, quality: u8, gray: &mut Vec<u8>, rgb: &mut Vec<u8>, jpeg: &mut Vec<u8>) -> Option<(u32, u32)> {
@@ -484,7 +732,7 @@ fn encode_preview_frame_direct(frame: &FrameLease, quality: u8, gray: &mut Vec<u
                 }
                 &gray[..wanted]
             };
-            let mut enc = JpegEncoder::new_with_quality(jpeg, quality);
+            let mut enc = JpegEncoder::new_with_quality(&mut *jpeg, quality);
             if enc.encode(packed, width, height, ColorType::L8.into()).is_err() {
                 return None;
             }
@@ -510,7 +758,7 @@ fn encode_preview_frame_direct(frame: &FrameLease, quality: u8, gray: &mut Vec<u
                 }
                 &rgb[..wanted]
             };
-            let mut enc = JpegEncoder::new_with_quality(jpeg, quality);
+            let mut enc = JpegEncoder::new_with_quality(&mut *jpeg, quality);
             if enc.encode(packed, width, height, ColorType::Rgb8.into()).is_err() {
                 return None;
             }
@@ -538,7 +786,7 @@ fn encode_preview_frame_direct(frame: &FrameLease, quality: u8, gray: &mut Vec<u
                     di += 3;
                 }
             }
-            let mut enc = JpegEncoder::new_with_quality(jpeg, quality);
+            let mut enc = JpegEncoder::new_with_quality(&mut *jpeg, quality);
             if enc.encode(&rgb[..wanted], width, height, ColorType::Rgb8.into()).is_err() {
                 return None;
             }

@@ -14,9 +14,9 @@ pub(super) fn suzuki_abe_with_scratch_i32(image: &GrayImage, image_values: &mut 
 }
 
 #[inline(always)]
-fn push_compact_contour(contours: &mut Vec<CompactContour>, border_type: BorderType, parent: Option<usize>, start: usize, end: usize) {
+fn push_compact_contour(contours: &mut Vec<CompactContour>, border_type: BorderType, parent: Option<usize>, start: usize, end: usize, min_x: i32, min_y: i32, max_x: i32, max_y: i32) {
     if end > start {
-        contours.push(CompactContour { start, len: end - start, border_type, parent });
+        contours.push(CompactContour { start, len: end - start, border_type, parent, min_x, min_y, max_x, max_y });
     }
 }
 
@@ -28,6 +28,14 @@ fn push_point_capped(point_store: &mut Vec<Point<i32>>, point: Point<i32>, conto
     }
     point_store.push(point);
     true
+}
+
+#[inline(always)]
+fn update_bounds(min_x: &mut i32, min_y: &mut i32, max_x: &mut i32, max_y: &mut i32, point: Point<i32>) {
+    *min_x = (*min_x).min(point.x);
+    *min_y = (*min_y).min(point.y);
+    *max_x = (*max_x).max(point.x);
+    *max_y = (*max_y).max(point.y);
 }
 
 pub(super) fn suzuki_abe_with_scratch_i32_compact(image: &GrayImage, image_values: &mut Vec<i32>, contour_points_store: &mut Vec<Point<i32>>, contours: &mut Vec<CompactContour>) {
@@ -46,8 +54,6 @@ pub(super) fn suzuki_abe_with_scratch_i32_compact_capped(
     let width_i32 = width as i32;
     let height = image.height() as usize;
     let height_i32 = height as i32;
-    let max_x = width_i32 - 1;
-    let max_y = height_i32 - 1;
     let width_isize = width as isize;
     let offsets_lin = [-1, -width_isize - 1, -width_isize, -width_isize + 1, 1, width_isize + 1, width_isize, width_isize - 1];
 
@@ -114,6 +120,7 @@ pub(super) fn suzuki_abe_with_scratch_i32_compact_capped(
 
                     let contour_start = contour_points_store.len();
                     let curr = Point::new(xi, yi);
+                    let (mut min_x, mut min_y, mut max_x, mut max_y) = (curr.x, curr.y, curr.x, curr.y);
                     neighborhood.rotate_to_value(adj - curr);
 
                     let start = neighborhood.start;
@@ -124,6 +131,7 @@ pub(super) fn suzuki_abe_with_scratch_i32_compact_capped(
                         let mut pos_idx = (pos3.y as usize) * width + pos3.x as usize;
 
                         loop {
+                            update_bounds(&mut min_x, &mut min_y, &mut max_x, &mut max_y, pos3);
                             if !push_point_capped(contour_points_store, pos3, contour_start, point_limit) {
                                 return false;
                             }
@@ -159,6 +167,7 @@ pub(super) fn suzuki_abe_with_scratch_i32_compact_capped(
                             start_dir = unsafe { *OPPOSITE.get_unchecked(next_idx) };
                         }
                     } else {
+                        update_bounds(&mut min_x, &mut min_y, &mut max_x, &mut max_y, curr);
                         if !push_point_capped(contour_points_store, curr, contour_start, point_limit) {
                             return false;
                         }
@@ -167,7 +176,7 @@ pub(super) fn suzuki_abe_with_scratch_i32_compact_capped(
                         }
                     }
 
-                    push_compact_contour(contours, border_type, parent, contour_start, contour_points_store.len());
+                    push_compact_contour(contours, border_type, parent, contour_start, contour_points_store.len(), min_x, min_y, max_x, max_y);
                 }
 
                 let new_state = unsafe { *image_values.get_unchecked(idx) };
@@ -224,6 +233,7 @@ pub(super) fn suzuki_abe_with_scratch_i32_compact_capped(
 
                     let contour_start = contour_points_store.len();
                     let curr = Point::new(xi, yi);
+                    let (mut min_x, mut min_y, mut max_x, mut max_y) = (curr.x, curr.y, curr.x, curr.y);
                     neighborhood.rotate_to_value(adj - curr);
 
                     let start = neighborhood.start;
@@ -235,6 +245,7 @@ pub(super) fn suzuki_abe_with_scratch_i32_compact_capped(
                         let mut pos_idx = (pos3.y as usize) * width + pos3.x as usize;
 
                         loop {
+                            update_bounds(&mut min_x, &mut min_y, &mut max_x, &mut max_y, pos3);
                             if !push_point_capped(contour_points_store, pos3, contour_start, point_limit) {
                                 return false;
                             }
@@ -271,6 +282,7 @@ pub(super) fn suzuki_abe_with_scratch_i32_compact_capped(
                             start_dir = unsafe { *OPPOSITE.get_unchecked(next_idx) };
                         }
                     } else {
+                        update_bounds(&mut min_x, &mut min_y, &mut max_x, &mut max_y, curr);
                         if !push_point_capped(contour_points_store, curr, contour_start, point_limit) {
                             return false;
                         }
@@ -279,7 +291,7 @@ pub(super) fn suzuki_abe_with_scratch_i32_compact_capped(
                         }
                     }
 
-                    push_compact_contour(contours, border_type, parent, contour_start, contour_points_store.len());
+                    push_compact_contour(contours, border_type, parent, contour_start, contour_points_store.len(), min_x, min_y, max_x, max_y);
                 }
 
                 let new_state = unsafe { *image_values.get_unchecked(idx) };
@@ -325,6 +337,7 @@ pub(super) fn suzuki_abe_with_scratch_i32_compact_capped(
 
                         let contour_start = contour_points_store.len();
                         let curr = Point::new(xi, yi);
+                        let (mut min_x, mut min_y, mut max_x, mut max_y) = (curr.x, curr.y, curr.x, curr.y);
                         neighborhood.rotate_to_value(adj - curr);
 
                         let start = neighborhood.start;
@@ -335,6 +348,7 @@ pub(super) fn suzuki_abe_with_scratch_i32_compact_capped(
                             let mut pos_idx = (pos3.y as usize) * width + pos3.x as usize;
 
                             loop {
+                                update_bounds(&mut min_x, &mut min_y, &mut max_x, &mut max_y, pos3);
                                 if !push_point_capped(contour_points_store, pos3, contour_start, point_limit) {
                                     return false;
                                 }
@@ -371,6 +385,7 @@ pub(super) fn suzuki_abe_with_scratch_i32_compact_capped(
                                 start_dir = unsafe { *OPPOSITE.get_unchecked(next_idx) };
                             }
                         } else {
+                            update_bounds(&mut min_x, &mut min_y, &mut max_x, &mut max_y, curr);
                             if !push_point_capped(contour_points_store, curr, contour_start, point_limit) {
                                 return false;
                             }
@@ -379,7 +394,7 @@ pub(super) fn suzuki_abe_with_scratch_i32_compact_capped(
                             }
                         }
 
-                        push_compact_contour(contours, border_type, parent, contour_start, contour_points_store.len());
+                        push_compact_contour(contours, border_type, parent, contour_start, contour_points_store.len(), min_x, min_y, max_x, max_y);
                     }
                 }
             }
@@ -431,6 +446,7 @@ pub(super) fn suzuki_abe_with_scratch_i32_compact_capped(
 
                     let contour_start = contour_points_store.len();
                     let curr = Point::new(xi, yi);
+                    let (mut min_x, mut min_y, mut max_x, mut max_y) = (curr.x, curr.y, curr.x, curr.y);
                     neighborhood.rotate_to_value(adj - curr);
 
                     let start = neighborhood.start;
@@ -446,6 +462,7 @@ pub(super) fn suzuki_abe_with_scratch_i32_compact_capped(
                         let mut pos_idx = (pos3.y as usize) * width + pos3.x as usize;
 
                         loop {
+                            update_bounds(&mut min_x, &mut min_y, &mut max_x, &mut max_y, pos3);
                             if !push_point_capped(contour_points_store, pos3, contour_start, point_limit) {
                                 return false;
                             }
@@ -481,6 +498,7 @@ pub(super) fn suzuki_abe_with_scratch_i32_compact_capped(
                             start_dir = unsafe { *OPPOSITE.get_unchecked(next_idx) };
                         }
                     } else {
+                        update_bounds(&mut min_x, &mut min_y, &mut max_x, &mut max_y, curr);
                         if !push_point_capped(contour_points_store, curr, contour_start, point_limit) {
                             return false;
                         }
@@ -489,7 +507,7 @@ pub(super) fn suzuki_abe_with_scratch_i32_compact_capped(
                         }
                     }
 
-                    push_compact_contour(contours, border_type, parent, contour_start, contour_points_store.len());
+                    push_compact_contour(contours, border_type, parent, contour_start, contour_points_store.len(), min_x, min_y, max_x, max_y);
                 }
 
                 let new_state = unsafe { *image_values.get_unchecked(idx) };

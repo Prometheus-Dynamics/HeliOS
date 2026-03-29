@@ -190,6 +190,7 @@ pub mod nodes {
             return Ok(frame);
         }
         let mut out = expect_cpu_frame(frame, "drawcrosshairat", Some(exec_ctx))?;
+        let preserve_luma_output = matches!(out, DynamicImage::ImageLuma8(_) | DynamicImage::ImageLumaA8(_));
         let (width, height) = out.dimensions();
         if width == 0 || height == 0 {
             return Ok(Compute::Cpu(out));
@@ -208,6 +209,9 @@ pub mod nodes {
         let color = Rgba([0, 255, 0, 255]);
         overlay_line_x_y(&mut out, (left, cy), (right, cy), thickness, color);
         overlay_line_x_y(&mut out, (cx, top), (cx, bottom), thickness, color);
+        if preserve_luma_output && !matches!(out, DynamicImage::ImageLuma8(_)) {
+            out = DynamicImage::ImageLuma8(out.to_luma8());
+        }
         Ok(Compute::Cpu(out))
     }
 
@@ -399,4 +403,24 @@ pub mod nodes {
         "draw",
         [draw_text, draw_point, draw_line, draw_crosshair, draw_crosshair_at, bbox_anchor_point, draw_rect, draw_circle, draw_ellipse, draw_points, draw_contours, draw_text_scaled, overlay_frames]
     );
+}
+
+#[cfg(all(test, feature = "engine"))]
+mod tests {
+    use super::line::overlay_line_x_y;
+    use image::{DynamicImage, GrayImage, Luma, Rgba};
+
+    #[test]
+    fn crosshair_overlay_preserves_luma8_frame() {
+        let mut out = DynamicImage::ImageLuma8(GrayImage::from_pixel(96, 96, Luma([32])));
+        overlay_line_x_y(&mut out, (36, 48), (60, 48), 2, Rgba([0, 255, 0, 255]));
+        overlay_line_x_y(&mut out, (48, 36), (48, 60), 2, Rgba([0, 255, 0, 255]));
+
+        match out {
+            DynamicImage::ImageLuma8(image) => {
+                assert_eq!(image.dimensions(), (96, 96));
+            }
+            other => panic!("expected luma8 crosshair output, got {other:?}"),
+        }
+    }
 }

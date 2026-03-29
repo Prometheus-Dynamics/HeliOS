@@ -17,6 +17,7 @@ use uuid::Uuid;
 
 use crate::http::AppState;
 use crate::http::streams::snapshot::capture_snapshot_jpeg_without_preview_fallback;
+use crate::http::streams::snapshot::find_stream_summary;
 use helios_engine::ipc::{EngineErrorCode, RecordingSource};
 use helios_engine::stream::{ShmemFrameHeader, read_latest_frame_with_header, read_latest_header, touch_stream_preview};
 
@@ -86,6 +87,24 @@ fn override_recording_source(query: &PreviewSelectionQuery) -> Option<RecordingS
         return None;
     }
     Some(RecordingSource::Pipeline { pipeline_id: query.pipeline, output_key })
+}
+
+async fn query_targets_active_preview(state: &AppState, id: Uuid, query: &PreviewSelectionQuery) -> bool {
+    let requested_output = normalize_preview_output(query.output.clone());
+    if query.pipeline.is_none() && requested_output.is_none() {
+        return true;
+    }
+
+    let Ok(summary) = find_stream_summary(state, id).await else {
+        return false;
+    };
+    let active_pipeline_id = summary.manifest.active_pipeline_id.or_else(|| summary.manifest.pipelines.first().map(|binding| binding.pipeline_id));
+    let active_output = normalize_preview_output(summary.manifest.active_pipeline_output.clone());
+
+    let requested_pipeline_id = query.pipeline.or(active_pipeline_id);
+    let requested_output = requested_output.or_else(|| active_output.clone());
+
+    requested_pipeline_id == active_pipeline_id && requested_output == active_output
 }
 
 fn snapshot_mjpeg_part_header() -> Bytes {
@@ -189,7 +208,9 @@ async fn preview_snapshot_stream(state: AppState, id: Uuid, source: RecordingSou
 }
 
 pub(crate) async fn preview_stream(state: AppState, id: Uuid, query: PreviewSelectionQuery) -> Response {
-    if let Some(source) = override_recording_source(&query) {
+    if !query_targets_active_preview(&state, id, &query).await
+        && let Some(source) = override_recording_source(&query)
+    {
         return preview_snapshot_stream(state, id, source).await;
     }
     let header = match tokio::time::timeout(
@@ -284,6 +305,13 @@ pub(crate) async fn preview_stream(state: AppState, id: Uuid, query: PreviewSele
 }
 
 pub(crate) async fn frame_jpeg(state: AppState, id: Uuid, query: PreviewSelectionQuery) -> Response {
+    if query_targets_active_preview(&state, id, &query).await {
+        match latest_frame_jpeg_bytes(id).await {
+            Ok(jpeg) => return (StatusCode::OK, [(header::CONTENT_TYPE, "image/jpeg"), (header::CACHE_CONTROL, "no-store, no-cache")], Body::from(jpeg)).into_response(),
+            Err(_) => {}
+        }
+    }
+
     let source = override_recording_source(&query).unwrap_or(RecordingSource::Raw);
     match capture_snapshot_jpeg_without_preview_fallback(&state, id, Some(source)).await {
         Ok(jpeg) => (StatusCode::OK, [(header::CONTENT_TYPE, "image/jpeg"), (header::CACHE_CONTROL, "no-store, no-cache")], Body::from(jpeg)).into_response(),
