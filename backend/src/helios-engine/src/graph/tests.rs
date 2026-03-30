@@ -14,7 +14,6 @@ use lib_cv::modules::aruco::ArucoDetection2D;
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::PathBuf;
-use std::time::Instant;
 
 #[test]
 fn grayscale_input_pref_allows_overlay_dynamic_preview() {
@@ -541,7 +540,7 @@ fn pipeline_edge_metrics_fall_back_to_planned_bounded_capacity() {
         }],
     );
 
-    rolling.edge_samples.insert(0, VecDeque::from([(Instant::now(), super::EdgeMetricSample { samples: 1, max_depth: 2, current_depth: 1, ..Default::default() })]));
+    rolling.edge_samples.insert(0, VecDeque::from([super::EdgeMetricSample { samples: 1, max_depth: 2, current_depth: 1, ..Default::default() }]));
 
     let metrics = rolling.snapshot();
     let edge = metrics.edges.expect("edge metrics").get("edge_0").cloned().expect("edge_0");
@@ -882,4 +881,50 @@ fn normalize_graph_runtime_prunes_isolated_nodes() {
         })
         .collect::<Vec<_>>();
     assert_eq!(edge_indices, vec![(0, 1), (1, 2)]);
+}
+
+#[test]
+fn decode_runtime_value_fallback_preserves_lazy_json_readability() {
+    let payload = super::DaedalusEdgePayload::Any(std::sync::Arc::new("{\"tag\":3,\"ok\":true}".to_string()));
+    let value = super::decode_runtime_value_fallback(&payload, None).expect("decoded value");
+    assert_eq!(super::daedalus_value_to_json(&value), Some(json!({ "tag": 3, "ok": true })));
+}
+
+#[test]
+fn structured_output_retention_is_request_gated_for_preview_graphs() {
+    let requested = BTreeSet::from(["detections".to_string()]);
+    assert!(super::should_retain_structured_output_port("detections", &requested, None, true));
+    assert!(super::should_retain_structured_output_port("target_detections", &BTreeSet::new(), Some("target_detections"), true));
+    assert!(!super::should_retain_structured_output_port("tid", &BTreeSet::new(), Some("target_detections"), true));
+}
+
+#[test]
+fn structured_output_retention_stays_enabled_for_structured_only_graphs() {
+    assert!(super::should_retain_structured_output_port("solver_pose", &BTreeSet::new(), None, false));
+    assert!(super::should_retain_structured_output_port("detections", &BTreeSet::new(), None, false));
+}
+
+#[test]
+fn node_metrics_window_scales_with_metrics_level() {
+    assert_eq!(super::node_metrics_window(daedalus::runtime::MetricsLevel::Off), 16);
+    assert_eq!(super::node_metrics_window(daedalus::runtime::MetricsLevel::Basic), 32);
+    assert_eq!(super::node_metrics_window(daedalus::runtime::MetricsLevel::Detailed), 64);
+    assert_eq!(super::node_metrics_window(daedalus::runtime::MetricsLevel::Profile), 100);
+}
+
+#[test]
+fn rolling_graph_metrics_release_idle_retention_clears_samples_but_keeps_warnings() {
+    let mut metrics = super::RollingGraphMetrics::new(8, Vec::new(), Vec::new());
+    metrics.record_graph_duration(std::time::Duration::from_millis(5));
+    metrics.record_wrapper_duration(std::time::Duration::from_millis(2));
+    metrics.record_warning("keep me".to_string());
+
+    metrics.release_idle_retention();
+
+    assert!(metrics.graph_samples.is_empty());
+    assert!(metrics.wrapper_samples.is_empty());
+    assert!(metrics.samples.is_empty());
+    assert!(metrics.edge_samples.is_empty());
+    assert_eq!(metrics.warnings.len(), 1);
+    assert_eq!(metrics.warnings.back().map(|(_, msg)| msg.as_str()), Some("keep me"));
 }

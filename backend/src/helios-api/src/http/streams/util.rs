@@ -78,7 +78,14 @@ pub(crate) fn fourcc_to_format(fourcc: FourCc) -> &'static str {
 }
 
 pub(crate) fn default_ffmpeg_settings_descriptor() -> EncoderSettingsDescriptor {
-    EncoderSettingsDescriptor { bitrate: Some(4_000_000), gop: None, framerate: None, thread_count: None, output_resolution: None, decode_fps_limit: None }
+    EncoderSettingsDescriptor {
+        bitrate: Some(4_000_000),
+        gop: None,
+        framerate: Some(helios_engine::ipc::FrameRate { numerator: 60, denominator: 1 }),
+        thread_count: None,
+        output_resolution: Some(helios_engine::ipc::ResolutionHint { width: 854, height: 480 }),
+        decode_fps_limit: None,
+    }
 }
 
 pub(crate) fn apply_effective_pipeline_layout(manifest: &mut StreamManifest) {
@@ -485,6 +492,7 @@ where
     if let Some(manifest) =
         update_persisted_manifest_by_stream_id_checked(stream_id, |manifest| updater(manifest)).await.map_err(|err| format!("updated live state but failed to persist stream manifest: {err}"))?
     {
+        state.services.streams.upsert_cached_stream_manifest(stream_id, manifest.clone()).await;
         return Ok(manifest);
     }
 
@@ -498,5 +506,6 @@ where
     streams_persist::persist_manifest_checked(&camera_id_for_manifest(&manifest), Some(stream_id), manifest.clone())
         .await
         .map_err(|err| format!("updated live state but failed to persist stream manifest: {err}"))?;
+    state.services.streams.upsert_cached_stream_manifest(stream_id, manifest.clone()).await;
     Ok(manifest)
 }

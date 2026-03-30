@@ -102,12 +102,19 @@ struct MetricsCacheEntry {
     body: DeviceMetrics,
 }
 
+#[derive(Clone)]
+struct ProcessMetricsCacheEntry {
+    fetched_at: Instant,
+    metrics: Vec<ProcessMemoryMetrics>,
+}
+
 struct SystemCollector {
     sys: System,
     disks: Disks,
     components: Components,
     networks: Networks,
     net_snapshot: Option<NetSnapshot>,
+    process_metrics_cache: Option<ProcessMetricsCacheEntry>,
 }
 
 impl SystemCollector {
@@ -118,7 +125,7 @@ impl SystemCollector {
         let components = Components::new_with_refreshed_list();
 
         networks.refresh(false);
-        let mut collector = Self { sys, disks, components, networks, net_snapshot: None };
+        let mut collector = Self { sys, disks, components, networks, net_snapshot: None, process_metrics_cache: None };
         collector.update_net_snapshot();
 
         // Prime CPU stats so the first incremental sample is meaningful.
@@ -139,7 +146,7 @@ impl SystemCollector {
         let cpu_freq_mhz = self.sys.cpus().first().map(|cpu| cpu.frequency()).unwrap_or(0);
         let cpus = self.sys.cpus().iter().enumerate().map(|(idx, cpu)| CpuCoreMetrics { id: idx, name: cpu.name().to_string(), pct: cpu.cpu_usage(), freq_mhz: cpu.frequency() }).collect();
         let disks = collect_disk_metrics(&self.disks);
-        let processes = collect_process_memory_metrics(&self.sys);
+        let processes = self.collect_cached_process_memory_metrics();
         let temps = self.components.iter().filter_map(|component| component.temperature().map(|temperature_c| TempReading { label: component.label().to_string(), temperature_c })).collect();
         let storage_health = storage::probe_storage_health();
         let issues = storage_health.issues.into_iter().map(|issue| DeviceHealthIssue { code: issue.code.to_string(), description: issue.description }).collect::<Vec<_>>();
@@ -160,6 +167,24 @@ impl SystemCollector {
             temps,
             api: None,
         }
+    }
+
+    fn collect_cached_process_memory_metrics(&mut self) -> Vec<ProcessMemoryMetrics> {
+        let ttl = process_metrics_cache_ttl();
+        if ttl > Duration::from_millis(0)
+            && let Some(entry) = self.process_metrics_cache.as_ref()
+            && entry.fetched_at.elapsed() < ttl
+        {
+            return entry.metrics.clone();
+        }
+
+        let metrics = collect_process_memory_metrics(&self.sys);
+        if ttl > Duration::from_millis(0) {
+            self.process_metrics_cache = Some(ProcessMetricsCacheEntry { fetched_at: Instant::now(), metrics: metrics.clone() });
+        } else {
+            self.process_metrics_cache = None;
+        }
+        metrics
     }
 
     fn collect_telemetry(&mut self) -> TelemetrySample {
@@ -276,7 +301,8 @@ pub struct SystemReadModelState {
     metrics_cache: RwLock<Option<MetricsCacheEntry>>,
     metrics_refresh_lock: tokio::sync::Mutex<()>,
     metrics_stats: CacheMetricCounters,
-    system_collector: Arc<StdMutex<SystemCollector>>,
+    telemetry_collector: Arc<StdMutex<SystemCollector>>,
+    metrics_collector: Arc<StdMutex<SystemCollector>>,
     log_sources_cache: RwLock<Option<LogSourcesCacheEntry>>,
     log_sources_refresh_lock: tokio::sync::Mutex<()>,
     log_sources_stats: CacheMetricCounters,
@@ -293,7 +319,8 @@ impl Default for SystemReadModelState {
             metrics_cache: RwLock::new(None),
             metrics_refresh_lock: tokio::sync::Mutex::new(()),
             metrics_stats: CacheMetricCounters::default(),
-            system_collector: Arc::new(StdMutex::new(SystemCollector::new())),
+            telemetry_collector: Arc::new(StdMutex::new(SystemCollector::new())),
+            metrics_collector: Arc::new(StdMutex::new(SystemCollector::new())),
             log_sources_cache: RwLock::new(None),
             log_sources_refresh_lock: tokio::sync::Mutex::new(()),
             log_sources_stats: CacheMetricCounters::default(),
@@ -473,6 +500,21 @@ impl StreamMetricsHub {
         (topics, subscribers)
     }
 
+    async fn unsubscribe(&self, stream_id: uuid::Uuid) {
+        let Some(topic) = self.find_topic(stream_id) else {
+            return;
+        };
+        if topic.tx.receiver_count() > 0 {
+            return;
+        }
+        if let Ok(mut guard) = topic.latest.lock() {
+            guard.take();
+        }
+        if let Ok(mut topics) = self.topics.lock() {
+            topics.remove(&stream_id);
+        }
+    }
+
     async fn prime_topic(&self, stream_id: uuid::Uuid, topic: &Arc<StreamMetricsTopic>) -> Result<(), String> {
         if topic.latest.lock().ok().and_then(|guard| guard.clone()).is_some() {
             return Ok(());
@@ -496,6 +538,10 @@ impl StreamMetricsHub {
         }
         let _ = topic.tx.send(snapshot);
         Ok(())
+    }
+
+    fn find_topic(&self, stream_id: uuid::Uuid) -> Option<Arc<StreamMetricsTopic>> {
+        self.topics.lock().ok()?.get(&stream_id).cloned()
     }
 }
 
@@ -550,7 +596,24 @@ impl StreamOutputsHub {
         let Some(topic) = self.find_topic(stream_id) else {
             return;
         };
-        topic.clients.lock().await.remove(&client_id);
+        let idle = {
+            let mut clients = topic.clients.lock().await;
+            clients.remove(&client_id);
+            clients.is_empty()
+        };
+        if !idle || topic.tx.receiver_count() > 0 {
+            return;
+        }
+
+        if let Ok(mut guard) = topic.latest_ports.lock() {
+            *guard = None;
+        }
+
+        if let Ok(mut topics) = self.topics.lock()
+            && topics.get(&stream_id).is_some_and(|current| Arc::ptr_eq(current, &topic))
+        {
+            topics.remove(&stream_id);
+        }
     }
 
     async fn current_ports(&self, stream_id: uuid::Uuid) -> Result<Arc<SharedStreamOutputsPortsSnapshot>, String> {
@@ -650,6 +713,16 @@ fn metrics_cache_ttl() -> Duration {
     *TTL.get_or_init(|| read_duration_env("HELIOS_DEVICE_METRICS_CACHE_MS", 750, 0, 10_000))
 }
 
+fn devices_updates_stream_poll_interval() -> Duration {
+    static TTL: OnceLock<Duration> = OnceLock::new();
+    *TTL.get_or_init(|| read_duration_env("HELIOS_DEVICE_UPDATES_STREAM_POLL_MS", 2_000, 250, 60_000))
+}
+
+fn process_metrics_cache_ttl() -> Duration {
+    static TTL: OnceLock<Duration> = OnceLock::new();
+    *TTL.get_or_init(|| read_duration_env("HELIOS_DEVICE_PROCESS_BREAKDOWN_CACHE_MS", 5_000, 0, 60_000))
+}
+
 fn metrics_refresh_timeout() -> Duration {
     static TTL: OnceLock<Duration> = OnceLock::new();
     *TTL.get_or_init(|| read_duration_env("HELIOS_DEVICE_METRICS_TIMEOUT_MS", 2_000, 250, 15_000))
@@ -715,7 +788,7 @@ impl SystemReadModelState {
         }
 
         let stale = self.metrics_cache.read().await.clone();
-        let collector = self.system_collector.clone();
+        let collector = self.metrics_collector.clone();
         let body = match tokio::time::timeout(metrics_refresh_timeout(), tokio::task::spawn_blocking(move || collect_device_metrics(&collector))).await {
             Ok(Ok(body)) => body,
             Ok(Err(err)) => {
@@ -746,7 +819,7 @@ impl SystemReadModelState {
     }
 
     pub async fn subscribe_telemetry_payloads(&self) -> (broadcast::Receiver<Arc<str>>, Option<Arc<str>>) {
-        self.telemetry_hub.subscribe(self.system_collector.clone()).await
+        self.telemetry_hub.subscribe(self.telemetry_collector.clone()).await
     }
 
     pub fn bind_devices_updates_state(&self, state: &crate::http::AppState) {
@@ -763,6 +836,10 @@ impl SystemReadModelState {
 
     pub async fn subscribe_stream_metrics(&self, stream_id: uuid::Uuid) -> Result<(broadcast::Receiver<Arc<SharedStreamMetricsSnapshot>>, Option<Arc<SharedStreamMetricsSnapshot>>), String> {
         self.stream_metrics_hub.subscribe(stream_id).await
+    }
+
+    pub async fn unsubscribe_stream_metrics(&self, stream_id: uuid::Uuid) {
+        self.stream_metrics_hub.unsubscribe(stream_id).await;
     }
 
     pub fn bind_stream_outputs_state(&self, state: &crate::http::AppState) {
@@ -975,6 +1052,8 @@ async fn run_devices_updates_sampler(tx: broadcast::Sender<Arc<SharedDevicesUpda
 
     let mut last_usb = usb_fingerprint();
     let mut last_streams = stream_fingerprint(&state).await.unwrap_or_default();
+    let streams_poll_interval = devices_updates_stream_poll_interval();
+    let mut last_streams_poll = Instant::now();
     let mut pending: BTreeSet<DevicesUpdateReason> = BTreeSet::new();
     let min_gap = Duration::from_millis(MIN_UPDATE_GAP_MS);
     let mut last_sent = Instant::now().checked_sub(min_gap).unwrap_or_else(Instant::now);
@@ -995,11 +1074,14 @@ async fn run_devices_updates_sampler(tx: broadcast::Sender<Arc<SharedDevicesUpda
                     pending.insert(DevicesUpdateReason::Usb);
                 }
 
-                if let Some(next_streams) = stream_fingerprint(&state).await
-                    && next_streams != last_streams {
-                        last_streams = next_streams;
-                        pending.insert(DevicesUpdateReason::Streams);
+                if last_streams_poll.elapsed() >= streams_poll_interval {
+                    last_streams_poll = Instant::now();
+                    if let Some(next_streams) = stream_fingerprint(&state).await
+                        && next_streams != last_streams {
+                            last_streams = next_streams;
+                            pending.insert(DevicesUpdateReason::Streams);
                     }
+                }
 
                 if !pending.is_empty() && last_sent.elapsed() >= min_gap {
                     broadcast_devices_update(&tx, &pending);
@@ -1402,46 +1484,59 @@ struct ProcessMemoryAttribution {
 
 fn collect_process_memory_metrics(sys: &System) -> Vec<ProcessMemoryMetrics> {
     let limit = process_breakdown_limit();
+    let budget = process_breakdown_budget();
+    let started = Instant::now();
     let mut processes: Vec<&sysinfo::Process> = sys.processes().values().collect();
     processes.sort_by(|left, right| right.memory().cmp(&left.memory()).then_with(|| left.pid().as_u32().cmp(&right.pid().as_u32())));
 
-    processes
-        .into_iter()
-        .filter_map(|process| {
-            let pid = process.pid().as_u32();
-            let name = process.name().to_string_lossy().to_string();
-            let attribution = read_process_memory_attribution(pid);
-            if attribution.tgid.is_some_and(|tgid| tgid != pid) {
-                return None;
-            }
-            Some(ProcessMemoryMetrics {
-                pid,
-                name,
-                executable: attribution.executable,
-                executable_file_bytes: attribution.executable_file_bytes,
-                threads: attribution.threads,
-                rss_bytes: attribution.rss_bytes.unwrap_or_else(|| process.memory()),
-                pss_bytes: attribution.pss_bytes,
-                private_dirty_bytes: attribution.private_dirty_bytes,
-                swap_bytes: attribution.swap_bytes,
-                executable_pss_bytes: attribution.executable_pss_bytes,
-                shared_lib_pss_bytes: attribution.shared_lib_pss_bytes,
-                heap_pss_bytes: attribution.heap_pss_bytes,
-                stack_pss_bytes: attribution.stack_pss_bytes,
-                anonymous_pss_bytes: attribution.anonymous_pss_bytes,
-                device_pss_bytes: attribution.device_pss_bytes,
-                deleted_pss_bytes: attribution.deleted_pss_bytes,
-                other_pss_bytes: attribution.other_pss_bytes,
-                top_pss_mappings: attribution.top_pss_mappings,
-            })
-        })
-        .take(limit)
-        .collect()
+    let mut output = Vec::with_capacity(limit.min(processes.len()));
+    for process in processes {
+        if output.len() >= limit {
+            break;
+        }
+        if budget > Duration::from_millis(0) && started.elapsed() >= budget {
+            break;
+        }
+
+        let pid = process.pid().as_u32();
+        let name = process.name().to_string_lossy().to_string();
+        let attribution = read_process_memory_attribution(pid);
+        if attribution.tgid.is_some_and(|tgid| tgid != pid) {
+            continue;
+        }
+        output.push(ProcessMemoryMetrics {
+            pid,
+            name,
+            executable: attribution.executable,
+            executable_file_bytes: attribution.executable_file_bytes,
+            threads: attribution.threads,
+            rss_bytes: attribution.rss_bytes.unwrap_or_else(|| process.memory()),
+            pss_bytes: attribution.pss_bytes,
+            private_dirty_bytes: attribution.private_dirty_bytes,
+            swap_bytes: attribution.swap_bytes,
+            executable_pss_bytes: attribution.executable_pss_bytes,
+            shared_lib_pss_bytes: attribution.shared_lib_pss_bytes,
+            heap_pss_bytes: attribution.heap_pss_bytes,
+            stack_pss_bytes: attribution.stack_pss_bytes,
+            anonymous_pss_bytes: attribution.anonymous_pss_bytes,
+            device_pss_bytes: attribution.device_pss_bytes,
+            deleted_pss_bytes: attribution.deleted_pss_bytes,
+            other_pss_bytes: attribution.other_pss_bytes,
+            top_pss_mappings: attribution.top_pss_mappings,
+        });
+    }
+
+    output
 }
 
 fn process_breakdown_limit() -> usize {
     static LIMIT: OnceLock<usize> = OnceLock::new();
     *LIMIT.get_or_init(|| std::env::var("HELIOS_DEVICE_PROCESS_BREAKDOWN_LIMIT").ok().and_then(|value| value.trim().parse::<usize>().ok()).unwrap_or(16).clamp(1, 128))
+}
+
+fn process_breakdown_budget() -> Duration {
+    static BUDGET: OnceLock<Duration> = OnceLock::new();
+    *BUDGET.get_or_init(|| read_duration_env("HELIOS_DEVICE_PROCESS_BREAKDOWN_BUDGET_MS", 400, 0, 5_000))
 }
 
 fn process_mapping_limit() -> usize {
@@ -2315,5 +2410,48 @@ Pss:                   2 kB\n";
         assert_eq!(attribution.top_pss_mappings.first().map(|mapping| mapping.bucket.as_str()), Some("executable"));
         assert_eq!(attribution.top_pss_mappings.first().map(|mapping| mapping.label.as_str()), Some("/usr/bin/helios-updater"));
         assert_eq!(attribution.top_pss_mappings.first().map(|mapping| mapping.pss_bytes), Some(128 * 1024));
+    }
+
+    #[tokio::test]
+    async fn stream_outputs_unsubscribe_prunes_idle_topic() {
+        let hub = StreamOutputsHub::new();
+        let stream_id = uuid::Uuid::new_v4();
+        let topic = hub.topic(stream_id);
+        let client_id = uuid::Uuid::new_v4();
+
+        topic.clients.lock().await.insert(client_id, StreamOutputsClientConfig { ports: Vec::new(), sample_interval: Duration::from_millis(10), ports_interval: Duration::from_millis(20) });
+
+        let receiver = topic.tx.subscribe();
+        assert!(hub.find_topic(stream_id).is_some());
+
+        drop(receiver);
+        hub.unsubscribe(stream_id, client_id).await;
+
+        let (topic_count, subscriber_count) = hub.stats().await;
+        assert_eq!(topic_count, 0);
+        assert_eq!(subscriber_count, 0);
+        assert!(hub.find_topic(stream_id).is_none());
+    }
+
+    #[tokio::test]
+    async fn stream_metrics_unsubscribe_prunes_idle_topic() {
+        let hub = StreamMetricsHub::new();
+        let stream_id = uuid::Uuid::new_v4();
+        let topic = hub.topic(stream_id);
+        let latest = Arc::new(SharedStreamMetricsSnapshot { stream_id, metrics: StreamMetrics::default(), timestamp_ms: 1 });
+        if let Ok(mut guard) = topic.latest.lock() {
+            *guard = Some(latest);
+        }
+
+        let receiver = topic.tx.subscribe();
+        assert!(hub.find_topic(stream_id).is_some());
+
+        drop(receiver);
+        hub.unsubscribe(stream_id).await;
+
+        let (topic_count, subscriber_count) = hub.stats();
+        assert_eq!(topic_count, 0);
+        assert_eq!(subscriber_count, 0);
+        assert!(hub.find_topic(stream_id).is_none());
     }
 }

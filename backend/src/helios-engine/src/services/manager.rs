@@ -481,7 +481,7 @@ impl StreamManager {
                 settings.gop = Some(want_fps as i32);
             }
         }
-        apply_default_encoder_output_resolution(&mut manifest);
+        apply_default_encoder_settings(&mut manifest);
 
         {
             let streams = self.streams.read().await;
@@ -2009,7 +2009,34 @@ fn infer_recording_fps(manifest: &StreamManifest) -> Option<f32> {
     manifest.capture.mode.interval.map(|interval| interval.fps())
 }
 
-fn apply_default_encoder_output_resolution(manifest: &mut StreamManifest) {
+const DEFAULT_STREAM_ENCODER_FPS: u32 = 60;
+const DEFAULT_STREAM_ENCODER_OUTPUT_HEIGHT: u32 = 480;
+const DEFAULT_STREAM_PREVIEW_JPEG_QUALITY: u8 = 30;
+
+fn default_encoder_output_resolution(capture_resolution: Resolution) -> crate::ipc::ResolutionHint {
+    let source_width = capture_resolution.width.get().max(1);
+    let source_height = capture_resolution.height.get().max(1);
+    let target_height = source_height.min(DEFAULT_STREAM_ENCODER_OUTPUT_HEIGHT).max(1);
+
+    if source_height <= target_height {
+        return crate::ipc::ResolutionHint { width: source_width, height: source_height };
+    }
+
+    let scale = target_height as f64 / source_height as f64;
+    let mut width = ((source_width as f64) * scale).round() as u32;
+    let mut height = target_height;
+
+    if width > 1 && width % 2 != 0 {
+        width += 1;
+    }
+    if height > 1 && height % 2 != 0 {
+        height -= 1;
+    }
+
+    crate::ipc::ResolutionHint { width: width.max(1).min(source_width), height: height.max(1).min(source_height) }
+}
+
+fn apply_default_encoder_settings(manifest: &mut StreamManifest) {
     if manifest.encoder_enabled == Some(false) {
         return;
     }
@@ -2019,15 +2046,21 @@ fn apply_default_encoder_output_resolution(manifest: &mut StreamManifest) {
     }
 
     let settings = manifest.encoder_settings.get_or_insert_with(Default::default);
+    if settings.framerate.is_none() {
+        settings.framerate = Some(crate::ipc::FrameRate { numerator: DEFAULT_STREAM_ENCODER_FPS, denominator: 1 });
+    }
     let has_explicit_resolution = settings.output_resolution.as_ref().is_some_and(|resolution| resolution.width > 0 && resolution.height > 0);
     if has_explicit_resolution {
+        if manifest.preview_jpeg_quality.is_none() {
+            manifest.preview_jpeg_quality = Some(DEFAULT_STREAM_PREVIEW_JPEG_QUALITY);
+        }
         return;
     }
 
-    let capture_resolution = manifest.capture.mode.format.resolution;
-    let width = (capture_resolution.width.get() / 2).max(1);
-    let height = (capture_resolution.height.get() / 2).max(1);
-    settings.output_resolution = Some(crate::ipc::ResolutionHint { width, height });
+    settings.output_resolution = Some(default_encoder_output_resolution(manifest.capture.mode.format.resolution));
+    if manifest.preview_jpeg_quality.is_none() {
+        manifest.preview_jpeg_quality = Some(DEFAULT_STREAM_PREVIEW_JPEG_QUALITY);
+    }
 }
 
 fn infer_recording_codec(encoder_id: Option<&str>) -> Option<RecordingCodec> {
@@ -4498,22 +4531,52 @@ mod tests {
     }
 
     #[test]
-    fn default_encoder_resolution_uses_half_of_capture_mode() {
+    fn default_encoder_settings_use_480p_for_1080p_capture() {
         let mut manifest = sample_manifest_for_encoder_defaults(1920, 1080);
-        apply_default_encoder_output_resolution(&mut manifest);
+        apply_default_encoder_settings(&mut manifest);
         let output = manifest.encoder_settings.and_then(|settings| settings.output_resolution).expect("output resolution");
-        assert_eq!(output.width, 960);
-        assert_eq!(output.height, 540);
+        assert_eq!(output.width, 854);
+        assert_eq!(output.height, 480);
     }
 
     #[test]
-    fn default_encoder_resolution_does_not_override_explicit_value() {
-        let mut manifest = sample_manifest_for_encoder_defaults(1920, 1080);
-        manifest.encoder_settings = Some(crate::ipc::EncoderSettings { output_resolution: Some(crate::ipc::ResolutionHint { width: 1280, height: 720 }), ..Default::default() });
-        apply_default_encoder_output_resolution(&mut manifest);
+    fn default_encoder_settings_preserve_aspect_for_16_by_10_capture() {
+        let mut manifest = sample_manifest_for_encoder_defaults(1280, 800);
+        apply_default_encoder_settings(&mut manifest);
         let output = manifest.encoder_settings.and_then(|settings| settings.output_resolution).expect("output resolution");
+        assert_eq!(output.width, 768);
+        assert_eq!(output.height, 480);
+    }
+
+    #[test]
+    fn default_encoder_settings_set_framerate_and_preview_quality() {
+        let mut manifest = sample_manifest_for_encoder_defaults(1920, 1080);
+        apply_default_encoder_settings(&mut manifest);
+        let settings = manifest.encoder_settings.expect("encoder settings");
+        let framerate = settings.framerate.expect("framerate");
+        assert_eq!(framerate.numerator, 60);
+        assert_eq!(framerate.denominator, 1);
+        assert_eq!(manifest.preview_jpeg_quality, Some(30));
+    }
+
+    #[test]
+    fn default_encoder_settings_do_not_override_explicit_values() {
+        let mut manifest = sample_manifest_for_encoder_defaults(1920, 1080);
+        manifest.encoder_settings = Some(crate::ipc::EncoderSettings {
+            framerate: Some(crate::ipc::FrameRate { numerator: 24, denominator: 1 }),
+            output_resolution: Some(crate::ipc::ResolutionHint { width: 1280, height: 720 }),
+            ..Default::default()
+        });
+        manifest.preview_jpeg_quality = Some(80);
+        apply_default_encoder_settings(&mut manifest);
+        let settings = manifest.encoder_settings.expect("encoder settings");
+        let output = settings.output_resolution.expect("output resolution");
         assert_eq!(output.width, 1280);
         assert_eq!(output.height, 720);
+        let framerate = settings.framerate.expect("framerate");
+        assert_eq!(framerate.numerator, 24);
+        assert_eq!(framerate.denominator, 1);
+        assert_eq!(manifest.preview_jpeg_quality, Some(80));
     }
 
     #[test]

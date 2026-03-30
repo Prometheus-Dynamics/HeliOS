@@ -309,9 +309,23 @@ export async function importLocalizationProfiles(
   });
 }
 
-export async function fetchLocalizationSolve(profileId?: string, signal?: AbortSignal): Promise<LocalizationSolveResponse> {
-  const url = profileId
-    ? apiUrl(`/localization/solve?profile_id=${encodeURIComponent(profileId)}&apply_field_origin=false`)
-    : apiUrl('/localization/solve?apply_field_origin=false');
+export type FetchLocalizationSolveOptions = {
+  fieldPosesOnly?: boolean;
+};
+
+export async function fetchLocalizationSolve(
+  profileId?: string,
+  signal?: AbortSignal,
+  options: FetchLocalizationSolveOptions = {}
+): Promise<LocalizationSolveResponse> {
+  const params = new URLSearchParams();
+  if (profileId) {
+    params.set('profile_id', profileId);
+  }
+  params.set('apply_field_origin', 'false');
+  if (options.fieldPosesOnly) {
+    params.set('field_poses_only', 'true');
+  }
+  const url = apiUrl(`/localization/solve?${params.toString()}`);
   return apiFetch<LocalizationSolveResponse>(url, { method: 'GET', headers: { Accept: 'application/json' }, signal });
 }

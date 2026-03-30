@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import type { Snippet } from 'svelte';
   import { connectionState } from '$lib/api/connection';
   import { buildHttpCandidateUrls } from '$lib/api/httpCandidates';
@@ -78,6 +78,9 @@
   let previewCandidateIndex = $state(0);
   let frameCandidates = $state<string[]>([]);
   let frameCandidateIndex = $state(0);
+  let previewHost = $state<HTMLElement | null>(null);
+  let documentVisible = $state(true);
+  let viewportVisible = $state(true);
   const RECONNECT_BASE_DELAY_MS = 700;
   const RECONNECT_MAX_DELAY_MS = 4000;
   const STALL_BANNER_DELAY_MS = 3500;
@@ -102,6 +105,7 @@
   const supportsLivePreview = $derived(
     resolvedFormat === 'mjpeg' || (supportsWebCodecs && (resolvedFormat === 'h264' || resolvedFormat === 'h265'))
   );
+  const livePreviewVisible = $derived(documentVisible && viewportVisible);
   const imageFitClass = $derived(fitMode === 'contain' ? 'object-contain object-center' : 'object-cover object-center');
   const toggleButtonBase =
     'pointer-events-auto flex h-16 w-16 items-center justify-center rounded-full bg-black/70 text-white shadow-lg transition hover:bg-black/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:bg-surface-700 disabled:text-surface-400 disabled:shadow-none md:h-20 md:w-20';
@@ -342,7 +346,7 @@
   }
 
   function scheduleReconnect(immediate = false): void {
-    if (!isPlaying || !supportsLivePreview || !canPreview) return;
+    if (!isPlaying || !supportsLivePreview || !canPreview || !livePreviewVisible) return;
     clearReconnectTimer();
     const delay = immediate ? 0 : nextReconnectDelay();
     reconnectTimer = setTimeout(() => {
@@ -441,13 +445,30 @@
   });
 
   $effect(() => {
+    if (!isPlaying || !supportsLivePreview || !canPreview) return;
+    if (!livePreviewVisible) {
+      previewUrl = null;
+      previewCandidates = [];
+      previewCandidateIndex = 0;
+      clearReconnectTimer();
+      clearStallBannerTimer();
+      return;
+    }
+    if (!previewUrl && rebuildPreviewCandidates(true)) {
+      clearReconnectTimer();
+      lastKey = previewKey();
+      resetReconnectAttempts();
+    }
+  });
+
+  $effect(() => {
     if (isPlaying) return;
     refreshFrame();
   });
 
   $effect(() => {
     const currentStatus = status === 'recording' ? 'live' : (status as FloatingStreamStatus);
-    if (!isPlaying || !supportsLivePreview || !canPreview) {
+    if (!isPlaying || !supportsLivePreview || !canPreview || !livePreviewVisible) {
       lastStatus = currentStatus;
       return;
     }
@@ -468,7 +489,7 @@
   $effect(() => {
     const backendStatus = $connectionState.status;
     const cameOnline = backendStatus === 'online' && lastConnectionStatus !== null && lastConnectionStatus !== 'online';
-    if (cameOnline && isPlaying && supportsLivePreview && canPreview) {
+    if (cameOnline && isPlaying && supportsLivePreview && canPreview && livePreviewVisible) {
       clearReconnectTimer();
       clearStallBannerTimer();
       resetReconnectAttempts();
@@ -478,6 +499,40 @@
       }
     }
     lastConnectionStatus = backendStatus;
+  });
+
+  onMount(() => {
+    const onVisibilityChange = () => {
+      documentVisible = typeof document === 'undefined' ? true : !document.hidden;
+    };
+    onVisibilityChange();
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisibilityChange);
+    }
+
+    let observer: IntersectionObserver | null = null;
+    if (typeof IntersectionObserver !== 'undefined' && previewHost) {
+      observer = new IntersectionObserver(
+        (entries) => {
+          const entry = entries[0];
+          viewportVisible = Boolean(entry?.isIntersecting || (entry?.intersectionRatio ?? 0) > 0);
+        },
+        {
+          rootMargin: '200px 0px 200px 0px',
+          threshold: 0.01
+        }
+      );
+      observer.observe(previewHost);
+    } else {
+      viewportVisible = true;
+    }
+
+    return () => {
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisibilityChange);
+      }
+      observer?.disconnect();
+    };
   });
 
   onDestroy(() => {
@@ -578,6 +633,7 @@
 
 <figure class={`${className} text-xs ${showCaption ? 'space-y-1' : ''} ${fillParent ? 'h-full w-full' : ''}`}>
   <div
+    bind:this={previewHost}
     class={`relative h-full w-full bg-surface-950 ${isRecording ? 'border-2 border-error-500' : showFrame ? 'border border-surface-700/70' : ''}`}
     class:aspect-video={enforceAspect && !aspectRatio}
     style={enforceAspect && aspectRatio ? `aspect-ratio: ${aspectRatio};` : undefined}

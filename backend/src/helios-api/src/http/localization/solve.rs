@@ -37,6 +37,8 @@ pub(crate) struct LocalizationSolveQuery {
     profile_id: Option<String>,
     #[serde(default = "default_apply_field_origin", rename = "apply_field_origin", alias = "applyFieldOrigin")]
     apply_field_origin: bool,
+    #[serde(default, rename = "field_poses_only", alias = "fieldPosesOnly")]
+    field_poses_only: bool,
 }
 
 fn default_apply_field_origin() -> bool {
@@ -70,7 +72,8 @@ fn localization_solve_signature(request: &LocalizationSolveRequest) -> Result<Ve
     tag = "Localization",
     params(
         ("profile_id" = Option<String>, Query, description = "Profile id override"),
-        ("apply_field_origin" = Option<bool>, Query, description = "Apply profile fieldOrigin transform to field-space outputs (default true)")
+        ("apply_field_origin" = Option<bool>, Query, description = "Apply profile fieldOrigin transform to field-space outputs (default true)"),
+        ("field_poses_only" = Option<bool>, Query, description = "Return only field-space solve poses, omitting raw detection-space outputs")
     ),
     responses((status = 200, description = "Localization solve outputs", body = LocalizationSolveResponse))
 )]
@@ -85,9 +88,21 @@ pub async fn solve(State(state): State<AppState>, Query(query): Query<Localizati
     inject_imu_leveling_rig_pose(&state, profile, &mut rig_poses).await;
     let field_map = if let Some(map_id) = profile.field_map_id.as_deref() { maps::load_map_document(map_id).await.ok() } else { None };
     let fetcher = ApiLocalizationSourceFetcher::new(state.clone());
-    let response = solve_via_engine(&state, profile, sources, &rig_poses, field_map.as_ref(), &stream_summaries, &fetcher, query.apply_field_origin).await.map_err(ApiError::bad_gateway)?;
+    let mut response = solve_via_engine(&state, profile, sources, &rig_poses, field_map.as_ref(), &stream_summaries, &fetcher, query.apply_field_origin).await.map_err(ApiError::bad_gateway)?;
+    if query.field_poses_only {
+        trim_localization_solve_response_to_field_poses(&mut response);
+    }
 
     Ok(Json(response))
+}
+
+fn trim_localization_solve_response_to_field_poses(response: &mut LocalizationSolveResponse) {
+    for solver in &mut response.solvers {
+        solver.outputs.tag_in_camera = None;
+        solver.outputs.camera_in_tag = None;
+        solver.outputs.tag_in_robot = None;
+        solver.outputs.robot_in_tag = None;
+    }
 }
 
 pub(crate) async fn solve_via_engine(
@@ -462,8 +477,20 @@ fn map_rig_pose(pose: &StreamRigPose) -> RigPose {
 
 #[cfg(test)]
 mod tests {
-    use super::strip_overlay_from_field_map;
+    use super::{strip_overlay_from_field_map, trim_localization_solve_response_to_field_poses};
+    use helios_engine::localization::config::LocalizationSolverMode;
     use helios_engine::localization::maps::{FieldMapDocument, FieldMapOverlay, FieldMapSource};
+    use helios_engine::localization::types::{
+        LocalizationDetectionPose, LocalizationPose, LocalizationQuaternion, LocalizationRotation, LocalizationSolveResponse, LocalizationSolveTimings, LocalizationSolverOutputs,
+        LocalizationSolverPose, LocalizationSolverResult, LocalizationSourcePose, LocalizationVector,
+    };
+
+    fn sample_pose() -> LocalizationPose {
+        LocalizationPose {
+            translation: LocalizationVector { x: 1.0, y: 2.0, z: 3.0 },
+            rotation: LocalizationRotation { roll: 4.0, pitch: 5.0, yaw: 6.0, quaternion: LocalizationQuaternion { x: 0.0, y: 0.0, z: 0.0, w: 1.0 } },
+        }
+    }
 
     #[test]
     fn strip_overlay_from_field_map_removes_embedded_image_data() {
@@ -493,6 +520,51 @@ mod tests {
         assert_eq!(stripped.markers.len(), field_map.markers.len());
         assert_eq!(stripped.id, field_map.id);
         assert_eq!(stripped.name, field_map.name);
+    }
+
+    #[test]
+    fn field_poses_only_trim_drops_detection_outputs_but_keeps_field_outputs() {
+        let detection = LocalizationDetectionPose {
+            source_id: "src".to_string(),
+            camera_uid: "cam".to_string(),
+            tag_id: 3,
+            pose: sample_pose(),
+            weight: 1.0,
+            quality: 1.0,
+            tag_size: Some(0.165),
+            code_rotation: Some(0),
+            tag_bits: Some(lib_cv::modules::aruco::ArucoBitGrid { width: 6, border: 1, rows: vec!["010101".to_string(); 6] }),
+        };
+        let mut response = LocalizationSolveResponse {
+            profile_id: "profile".to_string(),
+            solvers: vec![LocalizationSolverResult {
+                id: "solver".to_string(),
+                name: "Solver".to_string(),
+                mode: LocalizationSolverMode::GroupSolve,
+                output_spaces: Vec::new(),
+                outputs: LocalizationSolverOutputs {
+                    tag_in_camera: Some(vec![detection.clone()]),
+                    camera_in_tag: Some(vec![detection.clone()]),
+                    tag_in_robot: Some(vec![detection.clone()]),
+                    robot_in_tag: Some(vec![detection]),
+                    camera_in_field: Some(vec![LocalizationSourcePose { source_id: "src".to_string(), camera_uid: "cam".to_string(), weight: 1.0, pose: sample_pose() }]),
+                    robot_in_field: Some(LocalizationSolverPose { pose: sample_pose(), source_ids: vec!["src".to_string()] }),
+                },
+                errors: Vec::new(),
+            }],
+            sources: Vec::new(),
+            timings: LocalizationSolveTimings::default(),
+        };
+
+        trim_localization_solve_response_to_field_poses(&mut response);
+
+        let outputs = &response.solvers[0].outputs;
+        assert!(outputs.tag_in_camera.is_none());
+        assert!(outputs.camera_in_tag.is_none());
+        assert!(outputs.tag_in_robot.is_none());
+        assert!(outputs.robot_in_tag.is_none());
+        assert_eq!(outputs.camera_in_field.as_ref().map(Vec::len), Some(1));
+        assert!(outputs.robot_in_field.is_some());
     }
 }
 

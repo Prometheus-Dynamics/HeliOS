@@ -17,9 +17,9 @@ use uuid::Uuid;
 
 use crate::http::AppState;
 use crate::http::streams::snapshot::capture_snapshot_jpeg_without_preview_fallback;
-use crate::http::streams::snapshot::find_stream_summary;
+use helios_engine::ipc::StreamManifest;
 use helios_engine::ipc::{EngineErrorCode, RecordingSource};
-use helios_engine::stream::{ShmemFrameHeader, read_latest_frame_with_header, read_latest_header, touch_stream_preview};
+use helios_engine::stream::{ShmemFrameHeader, read_latest_frame_with_header, read_latest_frame_with_header_if_newer_than, read_latest_header, touch_stream_preview};
 
 use super::mjpeg;
 use super::types::StreamFormatInfo;
@@ -95,11 +95,16 @@ async fn query_targets_active_preview(state: &AppState, id: Uuid, query: &Previe
         return true;
     }
 
-    let Ok(summary) = find_stream_summary(state, id).await else {
+    let Some(manifest) = state.services.streams.load_live_stream_manifest(state, id).await else {
         return false;
     };
-    let active_pipeline_id = summary.manifest.active_pipeline_id.or_else(|| summary.manifest.pipelines.first().map(|binding| binding.pipeline_id));
-    let active_output = normalize_preview_output(summary.manifest.active_pipeline_output.clone());
+    preview_targets_active_pipeline(&manifest, query)
+}
+
+fn preview_targets_active_pipeline(manifest: &StreamManifest, query: &PreviewSelectionQuery) -> bool {
+    let active_pipeline_id = manifest.active_pipeline_id.or_else(|| manifest.pipelines.first().map(|binding| binding.pipeline_id));
+    let active_output = normalize_preview_output(manifest.active_pipeline_output.clone());
+    let requested_output = normalize_preview_output(query.output.clone());
 
     let requested_pipeline_id = query.pipeline.or(active_pipeline_id);
     let requested_output = requested_output.or_else(|| active_output.clone());
@@ -124,6 +129,14 @@ fn snapshot_mjpeg_interval() -> Duration {
         .unwrap_or_else(|| Duration::from_millis(33))
 }
 
+fn touch_preview_if_due(id: Uuid, last_touch: &mut Instant, interval: Duration) {
+    if last_touch.elapsed() < interval {
+        return;
+    }
+    let _ = touch_stream_preview(id);
+    *last_touch = Instant::now();
+}
+
 async fn prefer_jpeg_preview_header(id: Uuid, header: ShmemFrameHeader) -> ShmemFrameHeader {
     if header.len == 0 || header.fourcc.to_u32() == 0 || is_mjpeg_fourcc(header.fourcc) {
         return header;
@@ -135,8 +148,9 @@ async fn prefer_jpeg_preview_header(id: Uuid, header: ShmemFrameHeader) -> Shmem
     match tokio::task::spawn_blocking(move || {
         let deadline = Instant::now() + warmup;
         let mut best = header;
+        let mut last_touch = Instant::now().checked_sub(Duration::from_secs(10)).unwrap_or_else(Instant::now);
         while Instant::now() < deadline {
-            let _ = touch_stream_preview(id);
+            touch_preview_if_due(id, &mut last_touch, Duration::from_millis(500));
             if let Ok(candidate) = read_latest_header(id)
                 && candidate.len > 0
                 && candidate.fourcc.to_u32() != 0
@@ -217,8 +231,9 @@ pub(crate) async fn preview_stream(state: AppState, id: Uuid, query: PreviewSele
         Duration::from_secs(2),
         tokio::task::spawn_blocking(move || {
             let deadline = Instant::now() + Duration::from_secs(2);
+            let mut last_touch = Instant::now().checked_sub(Duration::from_secs(10)).unwrap_or_else(Instant::now);
             loop {
-                let _ = touch_stream_preview(id);
+                touch_preview_if_due(id, &mut last_touch, Duration::from_millis(500));
                 match read_latest_header(id) {
                     Ok(header) if header.len > 0 && header.fourcc.to_u32() != 0 => return Ok(header),
                     Ok(_) | Err(_) => {
@@ -260,8 +275,8 @@ pub(crate) async fn preview_stream(state: AppState, id: Uuid, query: PreviewSele
                 let _ = touch_stream_preview(id);
                 last_touch = Instant::now();
             }
-            let (hdr, payload) = match read_latest_frame_with_header(id) {
-                Ok((hdr, payload)) => (hdr, payload),
+            let next = match read_latest_frame_with_header_if_newer_than(id, last_seq) {
+                Ok(next) => next,
                 Err(_) => {
                     let now = Instant::now();
                     first_read_error_at.get_or_insert(now);
@@ -275,6 +290,10 @@ pub(crate) async fn preview_stream(state: AppState, id: Uuid, query: PreviewSele
                 }
             };
             first_read_error_at = None;
+            let Some((hdr, payload)) = next else {
+                std::thread::sleep(poll);
+                continue;
+            };
             if hdr.len == 0 || hdr.fourcc.to_u32() == 0 || hdr.seq == last_seq {
                 std::thread::sleep(poll);
                 continue;
@@ -323,8 +342,9 @@ pub(crate) async fn latest_frame_jpeg_bytes(id: Uuid) -> Result<Vec<u8>, String>
     match tokio::task::spawn_blocking(move || {
         // Allow enough time for a newly-started stream to produce its first preview frame.
         let deadline = Instant::now() + Duration::from_secs(2);
+        let mut last_touch = Instant::now().checked_sub(Duration::from_secs(10)).unwrap_or_else(Instant::now);
         loop {
-            let _ = touch_stream_preview(id);
+            touch_preview_if_due(id, &mut last_touch, Duration::from_millis(500));
             match read_latest_frame_with_header(id) {
                 Ok(value) => return Ok(value),
                 Err(err) => {
@@ -350,4 +370,78 @@ fn preview_jpeg_from_encoded(header: ShmemFrameHeader, bytes: Vec<u8>) -> Result
         _ => {}
     }
     Err("preview unavailable".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PreviewSelectionQuery, preview_targets_active_pipeline};
+    use helios_engine::capture::{BackendHandle, BackendKind, CaptureConfig, ModeId};
+    use helios_engine::identity::DeviceIdentity;
+    use helios_engine::ipc::{StreamManifest, StreamPipelineBinding};
+    use styx::prelude::{ColorSpace, FourCc, MediaFormat, Resolution};
+    use uuid::Uuid;
+
+    fn manifest_with_active(pipeline_id: Uuid, output: Option<&str>) -> StreamManifest {
+        let format = MediaFormat::new(FourCc::new(*b"RGB3"), Resolution::new(1, 1).expect("valid resolution"), ColorSpace::Srgb);
+        StreamManifest {
+            identity: DeviceIdentity { id: None, alias: None, hardware_id: None },
+            capture: CaptureConfig {
+                device_keys: vec![],
+                backend: BackendKind::Virtual,
+                handle: BackendHandle::Virtual,
+                mode: ModeId { format, interval: None },
+                target_fps: None,
+                interval: None,
+                controls: vec![],
+                enable_tdn_output: false,
+            },
+            host_buffer: 2,
+            internal: false,
+            pipeline_enabled: None,
+            pipelines: vec![StreamPipelineBinding { pipeline_id, pipeline_graph: None, pipeline_output: output.map(str::to_string), pipeline_patch: None }],
+            active_pipeline_id: Some(pipeline_id),
+            active_pipeline_output: output.map(str::to_string),
+            pipeline_layout: None,
+            pipeline_wires: Vec::new(),
+            pipeline_host_inputs: std::collections::BTreeMap::new(),
+            calibration: None,
+            pose: None,
+            encoder_enabled: None,
+            encoder_id: None,
+            decoder_enabled: None,
+            decoder_id: None,
+            encoder_settings: None,
+            decoder_settings: None,
+            preview_jpeg_quality: None,
+            shadow_recorder_enabled: true,
+            start_on_boot: false,
+        }
+    }
+
+    #[test]
+    fn preview_targets_active_pipeline_matches_explicit_active_selection() {
+        let pipeline_id = Uuid::new_v4();
+        let manifest = manifest_with_active(pipeline_id, Some("overlay"));
+        let query = PreviewSelectionQuery { pipeline: Some(pipeline_id), output: Some("overlay".to_string()) };
+
+        assert!(preview_targets_active_pipeline(&manifest, &query));
+    }
+
+    #[test]
+    fn preview_targets_active_pipeline_rejects_non_active_output() {
+        let pipeline_id = Uuid::new_v4();
+        let manifest = manifest_with_active(pipeline_id, Some("overlay"));
+        let query = PreviewSelectionQuery { pipeline: Some(pipeline_id), output: Some("mask".to_string()) };
+
+        assert!(!preview_targets_active_pipeline(&manifest, &query));
+    }
+
+    #[test]
+    fn preview_targets_active_pipeline_treats_raw_frame_aliases_as_default_output() {
+        let pipeline_id = Uuid::new_v4();
+        let manifest = manifest_with_active(pipeline_id, None);
+        let query = PreviewSelectionQuery { pipeline: None, output: Some("frame".to_string()) };
+
+        assert!(preview_targets_active_pipeline(&manifest, &query));
+    }
 }

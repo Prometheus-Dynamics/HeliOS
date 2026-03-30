@@ -1,17 +1,17 @@
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use metrics::histogram;
 use styx::capture::prelude::RecvOutcome;
-use styx::codec::decoder::frame_to_dynamic_image;
 use styx::codec::CodecKind;
+use styx::codec::decoder::frame_to_dynamic_image;
 use tracing::trace_span;
 
 use crate::error::{Error, Result};
 
 use super::StreamRunner;
-use styx::prelude::{transform_packed_frame, FourCc, FrameTransform, Rotation90};
+use styx::prelude::{FourCc, FrameTransform, Rotation90, transform_packed_frame};
 
 const CAPTURE_IDLE_SLEEP: Duration = Duration::from_millis(1);
 const DEFAULT_CAPTURE_STALL_MS: u64 = 1_500;
@@ -110,13 +110,10 @@ impl StreamRunner {
     }
 
     fn preview_output_resolution_hint(&self) -> Option<(u32, u32)> {
-        self.encoder_settings.as_ref().and_then(|settings| settings.output_resolution.as_ref()).and_then(|resolution| {
-            if resolution.width > 0 && resolution.height > 0 {
-                Some((resolution.width, resolution.height))
-            } else {
-                None
-            }
-        })
+        self.encoder_settings
+            .as_ref()
+            .and_then(|settings| settings.output_resolution.as_ref())
+            .and_then(|resolution| if resolution.width > 0 && resolution.height > 0 { Some((resolution.width, resolution.height)) } else { None })
     }
 
     fn decoder_frame_transform(&self) -> Option<FrameTransform> {
@@ -146,11 +143,7 @@ impl StreamRunner {
             Rotation90::Deg180 => image.rotate180(),
             Rotation90::Deg270 => image.rotate270(),
         };
-        if transform.mirror {
-            rotated.fliph()
-        } else {
-            rotated
-        }
+        if transform.mirror { rotated.fliph() } else { rotated }
     }
 
     fn encoded_family(fourcc: FourCc) -> Option<&'static str> {
@@ -347,6 +340,10 @@ impl StreamRunner {
                     graph_has_image_output,
                     graph_has_executor,
                 );
+                let preview_only_demand = preview_active && !raw_demand && !host_demand && !encode_demand && !graph_sample_demand;
+                if preview_only_demand && !super::preview_submit_due(self.last_preview_submit_wall, self.preview_submit_interval, Instant::now()) {
+                    return Ok(true);
+                }
                 let preview_only_no_graph = preview_active && !raw_demand && !host_demand && !encode_demand && !graph_sample_demand && !graph_has_executor && self.preview_worker.is_some();
 
                 // For uncompressed capture formats such as NV12, `frame_lease_to_dynamic_image`
@@ -614,11 +611,7 @@ impl StreamRunner {
                         self.capture_config.interval.map(|interval| {
                             let num = interval.numerator.get() as f64;
                             let den = interval.denominator.get() as f64;
-                            if den > 0.0 {
-                                1000.0 * num / den
-                            } else {
-                                0.0
-                            }
+                            if den > 0.0 { 1000.0 * num / den } else { 0.0 }
                         })
                     })
                     .unwrap_or(0.0);
@@ -672,6 +665,10 @@ impl StreamRunner {
     }
 
     fn try_write_shmem_preview_from_source(&mut self, source: super::PreviewEncodeSource, ts: u64) {
+        let now = Instant::now();
+        if !super::preview_submit_due(self.last_preview_submit_wall, self.preview_submit_interval, now) {
+            return;
+        }
         if self.preview_worker.is_none() {
             if self.shmem.is_none() || !self.preview_generation_enabled() {
                 return;
@@ -692,7 +689,7 @@ impl StreamRunner {
             return;
         };
         let output_resolution = self.preview_output_resolution_hint();
-        let req = super::PreviewEncodeRequest { ts, source, output_resolution, queued_at: Instant::now() };
+        let req = super::PreviewEncodeRequest { ts, source, output_resolution, queued_at: now };
         if !worker.submit(req, &self.preview_transport_stats) {
             tracing::warn!("preview worker mailbox closed; restarting preview worker");
             let shmem = self.preview_worker.take().and_then(|worker| worker.stop()).or_else(|| self.shmem.take());
@@ -706,7 +703,9 @@ impl StreamRunner {
                 self.preview_jpeg_quality,
                 shmem,
             ));
+            return;
         }
+        self.last_preview_submit_wall = Some(now);
     }
 
     fn try_write_shmem_preview_from_image(&mut self, image: Arc<image::DynamicImage>, ts: u64) {
@@ -734,6 +733,10 @@ impl StreamRunner {
         if !self.preview_demand() {
             return;
         }
+        let now = Instant::now();
+        if !super::preview_submit_due(self.last_preview_submit_wall, self.preview_submit_interval, now) {
+            return;
+        }
         let Some(shmem) = self.shmem.as_mut() else {
             return;
         };
@@ -752,7 +755,9 @@ impl StreamRunner {
         let ts = meta.timestamp;
         if let Err(err) = shmem.write(Some(ts), Some(fourcc), dims, data) {
             tracing::warn!(error = %err, fourcc = ?fourcc, "preview shmem write failed");
+            return;
         }
+        self.last_preview_submit_wall = Some(now);
     }
 
     fn poll_preview_worker(&mut self) {

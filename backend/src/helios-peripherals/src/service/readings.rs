@@ -17,8 +17,7 @@ use super::serialize_reading;
 impl SensorsService {
     pub async fn apply_imu_sample(&self, sample: ImuSample) {
         let scope = SensorScope::Device;
-        self.ensure_scope_registered(&scope).await;
-        if self.event_bus.receiver_count() == 0 {
+        if !self.has_scope_subscribers(&scope).await {
             return;
         }
         {
@@ -32,8 +31,7 @@ impl SensorsService {
 
     pub async fn apply_imu_error(&self, message: String) {
         let scope = SensorScope::Device;
-        self.ensure_scope_registered(&scope).await;
-        if self.event_bus.receiver_count() == 0 {
+        if !self.has_scope_subscribers(&scope).await {
             return;
         }
         {

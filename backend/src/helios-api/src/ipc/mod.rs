@@ -3,6 +3,7 @@ pub mod peripherals;
 pub mod updater;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -21,8 +22,8 @@ use self::updater::UpdaterConnection;
 pub const PERIPHERALS_SOCKET: &str = "/run/helios/peripherals.sock";
 pub const UPDATER_SOCKET: &str = "/run/helios/updater.sock";
 
-/// Journals are stored under /tmp for now; rotate later if needed.
-pub const JOURNAL_DIR: &str = "/tmp/helios-ipc";
+pub const DEFAULT_JOURNAL_DIR: &str = "/var/lib/helios/journal/ipc";
+pub const IPC_JOURNAL_DIR_ENV: &str = "HELIOS_IPC_JOURNAL_DIR";
 
 /// Live handles into each service connection.
 pub struct IpcHandles {
@@ -389,7 +390,15 @@ impl IpcHandles {
 
 /// Ensure journal directory exists.
 pub fn ensure_journal_dir() -> std::io::Result<()> {
-    fs::create_dir_all(JOURNAL_DIR)
+    fs::create_dir_all(journal_dir())
+}
+
+pub fn journal_dir() -> PathBuf {
+    std::env::var_os(IPC_JOURNAL_DIR_ENV).filter(|value| !value.is_empty()).map(PathBuf::from).unwrap_or_else(|| PathBuf::from(DEFAULT_JOURNAL_DIR))
+}
+
+pub fn journal_path(file_name: &str) -> PathBuf {
+    journal_dir().join(file_name)
 }
 
 pub fn command_id_from_context(label: &str) -> lib_ipc::types::CommandId {

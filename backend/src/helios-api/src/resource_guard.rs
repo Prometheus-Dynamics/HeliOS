@@ -293,6 +293,12 @@ async fn run_resource_guard_loop(handles: Arc<IpcHandles>, cfg: GuardConfig, mut
             continue;
         };
 
+        update_runtime_state(cfg, mem_available_kb, &degraded);
+
+        if degraded.is_empty() && mem_available_kb > cfg.mem_low_kb {
+            continue;
+        }
+
         let running = match handles.engine.list_streams().await {
             Ok(streams) => streams,
             Err(err) => {

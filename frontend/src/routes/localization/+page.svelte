@@ -422,11 +422,6 @@
       await loadSources();
       await loadStreamsSnapshot();
       await loadFieldMapList();
-      const profileId = imported.activeProfileId ?? imported.profiles[0]?.id ?? null;
-      await loadPipelineStatus(profileId);
-      if (profileId) {
-        await loadPipelineOutputs(profileId);
-      }
       toaster.success({
         title: 'Profiles imported',
         description: `Loaded ${imported.profiles.length} localization profile(s).`
@@ -1042,12 +1037,20 @@
     toNumber
   });
 
+  const shouldPollFieldPosesOnly = (): boolean =>
+    (coordinateSpace === 'camera_in_field' || coordinateSpace === 'robot_in_field') &&
+    !showOutputsOverlay &&
+    !showTagLines;
+
   const { runFeedPoll } = createLocalizationFeedRuntime({
     getActiveProfile: () => runtimeActiveProfile ?? null,
     getHasAnyFeedSources: () => hasAnyFeedSources,
     getActiveHasSources: () => activeHasSources,
     getViewProfilesWithSources: () => viewProfilesWithSources,
-    fetchLocalizationSolve,
+    fetchLocalizationSolve: (profileId, signal) =>
+      fetchLocalizationSolve(profileId, signal, {
+        fieldPosesOnly: shouldPollFieldPosesOnly()
+      }),
     setSolveResponsesByProfile: (next) => {
       solveResponsesByProfile = next;
     },
@@ -1115,8 +1118,6 @@
 
   const {
     loadLocalizationConfig,
-    loadPipelineStatus,
-    loadPipelineOutputs,
     loadSources,
     loadLocalizationViewers
   } = createLocalizationPageState({
@@ -1995,7 +1996,7 @@
 
   const loadStreamsSnapshot = async (): Promise<void> => {
     try {
-      streamInfos = await StreamsApi.listStreams({ cacheMs: 0, forceRefresh: true });
+      streamInfos = await StreamsApi.listStreams({ cacheMs: 5_000 });
     } catch {
       streamInfos = [];
     }
@@ -2046,22 +2047,17 @@
   }
 
   function refreshLocalizationLiveState(options: { refreshSources?: boolean } = {}): void {
-    const profileId = $localizationConfig?.activeProfileId ?? null;
     void rigLayoutStore.refresh({ force: true });
-    void loadLocalizationConfig();
     if (options.refreshSources) {
       const now = Date.now();
       if (now - lastLiveSourcesRefreshAtMs >= LIVE_SOURCES_REFRESH_MIN_INTERVAL_MS) {
         lastLiveSourcesRefreshAtMs = now;
         void loadSources();
       }
+      void loadLocalizationConfig();
+      void loadStreamsSnapshot();
+      void loadFieldMapList();
     }
-    void loadStreamsSnapshot();
-    void loadPipelineStatus(profileId);
-    if (profileId) {
-      void loadPipelineOutputs(profileId);
-    }
-    void loadFieldMapList();
   }
 
   function scheduleLiveUpdatesRefresh(event?: RealtimeUpdateEvent): void {
@@ -4438,13 +4434,6 @@
     });
   });
 
-  $effect(() => {
-    const profile = runtimeActiveProfile;
-    if (!profile) return;
-    void loadPipelineStatus(profile.id);
-    void loadPipelineOutputs(profile.id);
-  });
-
   async function bootstrapLocalizationPage(): Promise<void> {
     localizationBootLoading = true;
     localizationBootError = null;
@@ -4454,13 +4443,6 @@
       const seeded = await maybeSeedDefaultLocalizationProfile();
       if (seeded) {
         await Promise.all([loadLocalizationConfig(), loadSources(), loadStreamsSnapshot(), loadFieldMapList()]);
-      }
-      const profileId = $localizationConfig?.activeProfileId ?? $localizationConfig?.profiles?.[0]?.id ?? null;
-      await loadPipelineStatus(profileId);
-      const profile =
-        $localizationConfig?.profiles?.find((entry) => entry.id === profileId) ?? $localizationConfig?.profiles?.[0] ?? null;
-      if (profile) {
-        await loadPipelineOutputs(profile.id);
       }
     } catch (error) {
       const description = error instanceof Error ? error.message : 'Failed to initialize localization page';

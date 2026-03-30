@@ -11,6 +11,7 @@ use super::SensorsService;
 pub(super) struct SensorsState {
     pub(super) inventory: SensorInventory,
     pub(super) scopes: BTreeSet<SensorScope>,
+    pub(super) scope_subscribers: BTreeMap<SensorScope, usize>,
     pub(super) readings: BTreeMap<SensorScope, BTreeMap<SensorKind, SensorReading>>,
     pub(super) serialized_readings: BTreeMap<SensorScope, SensorSnapshot>,
     pub(super) i2c_inventory: Option<I2cInventory>,

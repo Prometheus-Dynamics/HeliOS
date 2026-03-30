@@ -32,15 +32,33 @@ pub struct ClaheTiles {
     pub tile_h: u32,
 }
 
+impl Default for ClaheTiles {
+    fn default() -> Self {
+        Self { luts: Vec::new(), tiles_x: 0, tiles_y: 0, tile_w: 0, tile_h: 0 }
+    }
+}
+
 /// Precompute per-tile LUTs for CLAHE.
 ///
 /// `tile_size` is the requested tile grid size (number of tiles per axis),
 /// matching OpenCV's `tileGridSize` semantics (e.g. `4` => ~4x4 tiles).
 pub fn prepare_clahe(gray: &GrayImage, tile_size: u32, clip_limit: f32) -> ClaheTiles {
+    let mut tiles = ClaheTiles::default();
+    prepare_clahe_into(gray, tile_size, clip_limit, &mut tiles);
+    tiles
+}
+
+/// Precompute per-tile LUTs for CLAHE into reusable storage.
+pub fn prepare_clahe_into(gray: &GrayImage, tile_size: u32, clip_limit: f32, tiles: &mut ClaheTiles) {
     let width = gray.width();
     let height = gray.height();
     if width == 0 || height == 0 {
-        return ClaheTiles { luts: vec![[0u8; 256]], tiles_x: 1, tiles_y: 1, tile_w: 1, tile_h: 1 };
+        tiles.luts.resize(1, [0u8; 256]);
+        tiles.tiles_x = 1;
+        tiles.tiles_y = 1;
+        tiles.tile_w = 1;
+        tiles.tile_h = 1;
+        return;
     }
 
     let grid = tile_size.max(1);
@@ -49,9 +67,14 @@ pub fn prepare_clahe(gray: &GrayImage, tile_size: u32, clip_limit: f32) -> Clahe
     let tiles_x = width.div_ceil(tile_w).max(1);
     let tiles_y = height.div_ceil(tile_h).max(1);
 
-    let mut luts = vec![[0u8; 256]; (tiles_x * tiles_y) as usize];
-    if luts.len() >= CLAHE_LUT_PAR_MIN_TILES && clahe_should_parallelize(width, height) {
-        luts.par_iter_mut().enumerate().with_min_len(1).for_each(|(idx, lut)| {
+    tiles.luts.resize((tiles_x * tiles_y) as usize, [0u8; 256]);
+    tiles.tiles_x = tiles_x;
+    tiles.tiles_y = tiles_y;
+    tiles.tile_w = tile_w;
+    tiles.tile_h = tile_h;
+
+    if tiles.luts.len() >= CLAHE_LUT_PAR_MIN_TILES && clahe_should_parallelize(width, height) {
+        tiles.luts.par_iter_mut().enumerate().with_min_len(1).for_each(|(idx, lut)| {
             let ty = idx as u32 / tiles_x;
             let tx = idx as u32 % tiles_x;
             let x0 = tx * tile_w;
@@ -61,7 +84,7 @@ pub fn prepare_clahe(gray: &GrayImage, tile_size: u32, clip_limit: f32) -> Clahe
             compute_tile_lut(gray, x0, y0, x1, y1, clip_limit, lut);
         });
     } else {
-        for (idx, lut) in luts.iter_mut().enumerate() {
+        for (idx, lut) in tiles.luts.iter_mut().enumerate() {
             let ty = idx as u32 / tiles_x;
             let tx = idx as u32 % tiles_x;
             let x0 = tx * tile_w;
@@ -71,8 +94,6 @@ pub fn prepare_clahe(gray: &GrayImage, tile_size: u32, clip_limit: f32) -> Clahe
             compute_tile_lut(gray, x0, y0, x1, y1, clip_limit, lut);
         }
     }
-
-    ClaheTiles { luts, tiles_x, tiles_y, tile_w, tile_h }
 }
 
 #[derive(Clone, Copy)]
@@ -129,6 +150,21 @@ fn release_clahe_scratch_current_thread() {
     });
 }
 
+#[inline]
+pub(crate) fn alloc_gray_image_for_overwrite(width: u32, height: u32) -> GrayImage {
+    if width == 0 || height == 0 {
+        return GrayImage::new(width, height);
+    }
+
+    let len = (width as usize).saturating_mul(height as usize);
+    let mut buf = Vec::with_capacity(len);
+    // The hot paths that use this helper fully overwrite every pixel before the image is read.
+    unsafe {
+        buf.set_len(len);
+    }
+    GrayImage::from_raw(width, height, buf).expect("gray image dimensions must match allocated buffer")
+}
+
 /// Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) with bilinear blending between tiles.
 pub fn apply_clahe(gray: &GrayImage, tile_size: u32, clip_limit: f32) -> GrayImage {
     let tiles = prepare_clahe(gray, tile_size, clip_limit);
@@ -139,7 +175,7 @@ pub fn apply_clahe(gray: &GrayImage, tile_size: u32, clip_limit: f32) -> GrayIma
 pub fn apply_clahe_with_tiles(gray: &GrayImage, tiles: &ClaheTiles) -> GrayImage {
     let width = gray.width();
     let height = gray.height();
-    let mut output = GrayImage::new(width, height);
+    let mut output = alloc_gray_image_for_overwrite(width, height);
     apply_clahe_with_tiles_into(gray, tiles, &mut output);
     output
 }
@@ -645,5 +681,18 @@ mod tests {
         let expected = apply_clahe_reference(&gray, &tiles);
         let actual = apply_clahe_with_tiles(&gray, &tiles);
         assert_eq!(actual.as_raw(), expected.as_raw());
+    }
+
+    #[test]
+    fn prepare_clahe_into_matches_allocating_variant() {
+        let gray = patterned_gray(37, 23);
+        let expected = prepare_clahe(&gray, 2, 3.5);
+        let mut reusable = ClaheTiles::default();
+        prepare_clahe_into(&gray, 2, 3.5, &mut reusable);
+        assert_eq!(reusable.tiles_x, expected.tiles_x);
+        assert_eq!(reusable.tiles_y, expected.tiles_y);
+        assert_eq!(reusable.tile_w, expected.tile_w);
+        assert_eq!(reusable.tile_h, expected.tile_h);
+        assert_eq!(reusable.luts, expected.luts);
     }
 }

@@ -10,7 +10,7 @@ pub use paths::shmem_path;
 pub use paths::viewer_heartbeat_path;
 #[cfg(feature = "runtime")]
 pub use reader::read_latest_frame_async;
-pub use reader::{read_latest_frame, read_latest_frame_with_header, read_latest_header};
+pub use reader::{read_latest_frame, read_latest_frame_with_header, read_latest_frame_with_header_if_newer_than, read_latest_header};
 pub use viewer::{preview_active_recently, touch_stream_preview, touch_stream_viewer, viewer_active_recently};
 pub use writer::ShmemWriter;
 

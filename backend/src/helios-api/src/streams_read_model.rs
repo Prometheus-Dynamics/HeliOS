@@ -168,7 +168,25 @@ impl StreamsReadModelState {
         Some(entry.controls.clone())
     }
 
+    pub async fn cached_stream_info(&self, stream_id: Uuid) -> Option<StreamInfo> {
+        self.stream_list_cache.read().await.as_ref()?.payload.iter().find(|stream| stream.id == stream_id).cloned()
+    }
+
+    pub async fn upsert_cached_stream_manifest(&self, stream_id: Uuid, manifest: StreamManifest) {
+        let mut guard = self.stream_list_cache.write().await;
+        let Some(entry) = guard.as_mut() else {
+            return;
+        };
+        let Some(stream) = entry.payload.iter_mut().find(|stream| stream.id == stream_id) else {
+            return;
+        };
+        stream.manifest = manifest;
+    }
+
     pub async fn load_live_stream_manifest(&self, state: &AppState, stream_id: Uuid) -> Option<StreamManifest> {
+        if let Some(stream) = self.cached_stream_info(stream_id).await {
+            return Some(stream.manifest);
+        }
         state.engine.list_streams().await.ok().and_then(|streams| streams.into_iter().find(|stream| stream.stream_id == stream_id).map(|stream| stream.manifest))
     }
 }

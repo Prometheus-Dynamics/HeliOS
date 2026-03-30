@@ -15,7 +15,8 @@ pub use shmem::read_latest_frame_async;
 pub use shmem::{cleanup_all_stream_files, cleanup_stream_files};
 #[cfg(any(feature = "runtime", feature = "dto"))]
 pub use shmem::{
-    preview_active_recently, preview_heartbeat_path, read_latest_frame, read_latest_frame_with_header, read_latest_header, shmem_path, touch_stream_preview, touch_stream_viewer,
+    preview_active_recently, preview_heartbeat_path, read_latest_frame, read_latest_frame_with_header, read_latest_frame_with_header_if_newer_than, read_latest_header, shmem_path,
+    touch_stream_preview, touch_stream_viewer,
     viewer_active_recently, viewer_heartbeat_path, ShmemFrameHeader, ShmemWriter,
 };
 

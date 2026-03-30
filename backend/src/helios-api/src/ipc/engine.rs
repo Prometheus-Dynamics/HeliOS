@@ -21,7 +21,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::time::{Duration, Instant, sleep, timeout};
 use tracing::{error, info, warn};
 
-use super::{JOURNAL_DIR, command_id_from_context};
+use super::{command_id_from_context, journal_path};
 
 const ENGINE_SOCKET: &str = "/run/helios/engine.sock";
 const DEV_ENGINE_SOCKET: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/target/dev/run/engine.sock");
@@ -907,7 +907,7 @@ async fn fetch_stream_count_for_tuning(_client: &EngineClient, mut session: Engi
 }
 
 pub async fn connect_engine() -> Result<EngineConnection, Box<dyn std::error::Error + Send + Sync>> {
-    let journal_path = PathBuf::from(JOURNAL_DIR).join("engine.journal");
+    let journal_path = journal_path("engine.journal");
     let candidates = resolve_engine_sockets();
 
     let mut last_err: Option<Box<dyn std::error::Error + Send + Sync>> = None;
@@ -934,7 +934,7 @@ pub async fn connect_engine_best_effort() -> EngineConnection {
         Err(err) => warn!(%err, "engine IPC connect failed; starting in degraded mode"),
     }
 
-    let journal_path = PathBuf::from(JOURNAL_DIR).join("engine.journal");
+    let journal_path = journal_path("engine.journal");
     let candidates = resolve_engine_sockets();
     for socket in &candidates {
         match try_connect_lazy(socket, journal_path.clone()) {

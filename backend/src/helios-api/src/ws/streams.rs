@@ -15,7 +15,7 @@ use futures::{SinkExt, StreamExt};
 use helios_engine::capture::CaptureControlValue;
 use helios_engine::ipc::EngineEvent;
 use helios_engine::stream::StreamMetrics;
-use helios_engine::stream::{read_latest_frame_with_header, touch_stream_viewer};
+use helios_engine::stream::{read_latest_frame_with_header_if_newer_than, touch_stream_viewer};
 use lib_asyncapi::registry::SchemaRegistry;
 use lib_asyncapi::{SchemaProvider, Server, Tag, TypeSchema, WsDoc};
 use serde::{Deserialize, Serialize};
@@ -161,6 +161,9 @@ async fn handle_stream_metrics(socket: WebSocket, state: AppState, stream_id: Uu
             }
         }
     }
+
+    drop(metrics_rx);
+    state.services.system.unsubscribe_stream_metrics(stream_id).await;
 }
 
 #[derive(Debug, Deserialize)]
@@ -314,6 +317,7 @@ async fn handle_stream_outputs(socket: WebSocket, state: AppState, stream_id: Uu
     if let Err(err) = send_stream_outputs_list(&mut ws_sender, &initial_ports, None).await {
         let _ = send_stream_outputs_error(&mut ws_sender, None, err).await;
         let _ = ws_sender.close().await;
+        drop(outputs_rx);
         state.services.system.unsubscribe_stream_outputs(stream_id, client_id).await;
         return;
     }
@@ -424,6 +428,7 @@ async fn handle_stream_outputs(socket: WebSocket, state: AppState, stream_id: Uu
         }
     }
 
+    drop(outputs_rx);
     state.services.system.unsubscribe_stream_outputs(stream_id, client_id).await;
     let _ = ws_sender.close().await;
 }
@@ -623,13 +628,17 @@ async fn handle_stream_frames(socket: WebSocket, state: AppState, stream_id: Uui
                 let _ = touch_stream_viewer(stream_id);
                 last_touch = Instant::now();
             }
-            let (hdr, payload) = match read_latest_frame_with_header(stream_id) {
-                Ok((hdr, payload)) => (hdr, payload),
+            let next = match read_latest_frame_with_header_if_newer_than(stream_id, last_seq) {
+                Ok(next) => next,
                 Err(_) => {
                     // The shmem backing can be transiently unavailable during capture/pipeline restarts.
                     std::thread::sleep(poll);
                     continue;
                 }
+            };
+            let Some((hdr, payload)) = next else {
+                std::thread::sleep(poll);
+                continue;
             };
             if hdr.len == 0 || hdr.fourcc.to_u32() == 0 || hdr.seq == last_seq {
                 std::thread::sleep(poll);

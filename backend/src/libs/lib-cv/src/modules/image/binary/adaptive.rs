@@ -154,10 +154,10 @@ pub fn with_adaptive_mean_threshold_fast_timed<R>(image: &GrayImage, window: u32
 
 fn adaptive_mean_threshold_fast_inner(image: &GrayImage, window: u32, offset: f32, invert: bool, buffers: &mut AdaptiveBuffers) -> GrayImage {
     let (width, height) = image.dimensions();
-    let mut output = GrayImage::new(width, height);
     if width == 0 || height == 0 {
-        return output;
+        return GrayImage::new(width, height);
     }
+    let mut output = crate::modules::image::clahe::alloc_gray_image_for_overwrite(width, height);
     adaptive_mean_threshold_fast_inner_into(image, window, offset, invert, buffers, output.as_mut());
     output
 }

@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use crate::http::AppState;
 use helios_engine::ipc::EngineErrorCode;
-use helios_engine::stream::{read_latest_frame_with_header, read_latest_header, touch_stream_preview, touch_stream_viewer};
+use helios_engine::stream::{read_latest_frame_with_header_if_newer_than, read_latest_header, touch_stream_preview};
 
 use super::util::engine_error_body;
 
@@ -53,6 +53,11 @@ fn mjpeg_part_footer() -> Bytes {
     Bytes::from_static(b"\r\n")
 }
 
+fn mjpeg_poll_for_preview_fps(max_fps: Option<f64>) -> Duration {
+    let fps = max_fps.filter(|value| value.is_finite() && *value > 0.0).unwrap_or(15.0).clamp(1.0, 120.0);
+    Duration::from_secs_f64((1.0 / fps) / 4.0).clamp(Duration::from_millis(5), Duration::from_millis(100))
+}
+
 fn mjpeg_poll() -> Duration {
     std::env::var("HELIOS_MJPEG_POLL_MS")
         .ok()
@@ -61,7 +66,10 @@ fn mjpeg_poll() -> Duration {
         .or_else(|| std::env::var("HELIOS_MJPEG_INTERVAL_MS").ok().and_then(|raw| raw.parse::<u64>().ok()))
         .map(Duration::from_millis)
         .map(|d| d.clamp(Duration::from_millis(1), Duration::from_millis(100)))
-        .unwrap_or_else(|| Duration::from_millis(5))
+        .unwrap_or_else(|| {
+            let preview_fps = std::env::var("HELIOS_PREVIEW_MAX_FPS").ok().and_then(|raw| raw.parse::<f64>().ok());
+            mjpeg_poll_for_preview_fps(preview_fps)
+        })
 }
 
 fn mjpeg_outage() -> Duration {
@@ -149,8 +157,6 @@ fn run_mjpeg_loop(stream_id: Uuid, sender: broadcast::Sender<Bytes>, poll: Durat
         if last_touch.elapsed() >= Duration::from_millis(500) {
             // Keep the preview heartbeat alive so the engine continues producing preview frames.
             let _ = touch_stream_preview(stream_id);
-            // Also mark a viewer heartbeat so other demand heuristics can stay consistent.
-            let _ = touch_stream_viewer(stream_id);
             last_touch = std::time::Instant::now();
         }
 
@@ -184,8 +190,8 @@ fn run_mjpeg_loop(stream_id: Uuid, sender: broadcast::Sender<Bytes>, poll: Durat
             continue;
         }
 
-        let (frame_header, bytes) = match read_latest_frame_with_header(stream_id) {
-            Ok(value) => value,
+        let next = match read_latest_frame_with_header_if_newer_than(stream_id, last_seq) {
+            Ok(next) => next,
             Err(_) => {
                 let now = std::time::Instant::now();
                 first_unavailable_at.get_or_insert(now);
@@ -195,6 +201,10 @@ fn run_mjpeg_loop(stream_id: Uuid, sender: broadcast::Sender<Bytes>, poll: Durat
                 std::thread::sleep(poll);
                 continue;
             }
+        };
+        let Some((frame_header, bytes)) = next else {
+            std::thread::sleep(poll);
+            continue;
         };
 
         if !matches!(&frame_header.fourcc.to_u32().to_le_bytes(), b"MJPG" | b"JPEG") {
@@ -211,5 +221,22 @@ fn run_mjpeg_loop(stream_id: Uuid, sender: broadcast::Sender<Bytes>, poll: Durat
 
         // Send the raw JPEG bytes; the HTTP body wraps them with multipart boundaries per-client.
         let _ = sender.send(Bytes::from(bytes));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mjpeg_poll_for_preview_fps_tracks_preview_rate() {
+        assert_eq!(mjpeg_poll_for_preview_fps(Some(30.0)), Duration::from_secs_f64((1.0 / 30.0) / 4.0));
+        assert_eq!(mjpeg_poll_for_preview_fps(Some(15.0)), Duration::from_secs_f64((1.0 / 15.0) / 4.0));
+    }
+
+    #[test]
+    fn mjpeg_poll_for_preview_fps_clamps_extremes() {
+        assert_eq!(mjpeg_poll_for_preview_fps(Some(240.0)), Duration::from_millis(5));
+        assert_eq!(mjpeg_poll_for_preview_fps(Some(0.0)), Duration::from_secs_f64((1.0 / 15.0) / 4.0));
     }
 }

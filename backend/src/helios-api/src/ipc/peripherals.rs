@@ -16,7 +16,7 @@ use tokio::sync::Mutex;
 use tokio::time::timeout;
 use tracing::debug;
 
-use crate::ipc::{JOURNAL_DIR, PERIPHERALS_SOCKET, command_id_from_context};
+use crate::ipc::{PERIPHERALS_SOCKET, command_id_from_context, journal_path};
 
 const DEV_PERIPHERALS_SOCKET: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/target/dev/run/peripherals.sock");
 const SENSOR_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -75,7 +75,7 @@ impl TransportConfig for SensorsClientConfig {
 }
 
 pub async fn connect_sensors() -> Result<SensorsConnection, Box<dyn std::error::Error + Send + Sync>> {
-    let journal_path = PathBuf::from(JOURNAL_DIR).join("peripherals.journal");
+    let journal_path = journal_path("peripherals.journal");
     let mut last_err: Option<Box<dyn std::error::Error + Send + Sync>> = None;
     for socket in resolve_peripherals_socket_candidates() {
         match try_connect_sensors(socket, journal_path.clone()).await {
@@ -88,7 +88,7 @@ pub async fn connect_sensors() -> Result<SensorsConnection, Box<dyn std::error::
 }
 
 pub async fn connect_sensors_stream() -> Result<SensorsStream, Box<dyn std::error::Error + Send + Sync>> {
-    let journal_path = PathBuf::from(JOURNAL_DIR).join("peripherals.journal");
+    let journal_path = journal_path("peripherals.journal");
     let mut last_err: Option<Box<dyn std::error::Error + Send + Sync>> = None;
     for socket in resolve_peripherals_socket_candidates() {
         match try_connect_sensors_stream(socket, journal_path.clone()).await {

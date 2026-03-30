@@ -43,8 +43,9 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::net::TcpListener;
+use tokio::time::{Duration, sleep};
 use tower_http::cors::{Any, CorsLayer};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use utoipa::OpenApi;
 use uuid::Uuid;
 
@@ -80,6 +81,70 @@ fn default_api_worker_threads() -> usize {
 
 fn default_api_max_blocking_threads(worker_threads: usize) -> usize {
     (worker_threads.saturating_mul(2)).clamp(4, 8)
+}
+
+fn startup_cache_warm_delay() -> Duration {
+    std::env::var("HELIOS_STARTUP_CACHE_WARM_DELAY_MS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .map(|duration| duration.clamp(Duration::from_millis(0), Duration::from_secs(30)))
+        .unwrap_or_else(|| Duration::from_millis(1500))
+}
+
+fn startup_cache_warm_retry_delay() -> Duration {
+    std::env::var("HELIOS_STARTUP_CACHE_WARM_RETRY_MS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .map(|duration| duration.clamp(Duration::from_millis(100), Duration::from_secs(30)))
+        .unwrap_or_else(|| Duration::from_millis(1000))
+}
+
+fn startup_cache_warm_attempts() -> usize {
+    std::env::var("HELIOS_STARTUP_CACHE_WARM_ATTEMPTS").ok().and_then(|value| value.trim().parse::<usize>().ok()).unwrap_or(4).clamp(1, 10)
+}
+
+fn spawn_startup_read_model_warm(state: http::AppState) {
+    let initial_delay = startup_cache_warm_delay();
+    let retry_delay = startup_cache_warm_retry_delay();
+    let attempts = startup_cache_warm_attempts();
+    tokio::spawn(async move {
+        if !initial_delay.is_zero() {
+            sleep(initial_delay).await;
+        }
+
+        for attempt in 0..attempts {
+            let (streams, stale, _) = state.services.streams.get_cached_streams_snapshot_with_revision(&state).await;
+            let streams_ready = !stale;
+            let metrics_ready = state.services.system.load_device_metrics_snapshot().await.is_ok();
+            let _ = state.services.system.load_log_sources_snapshot().await;
+
+            if streams_ready && metrics_ready {
+                return;
+            }
+
+            if attempt + 1 < attempts {
+                if stale || !metrics_ready {
+                    warn!(attempt = attempt + 1, attempts, stale_streams = stale, stream_count = streams.len(), metrics_ready, "startup cache warm incomplete; retrying");
+                }
+                sleep(retry_delay).await;
+            }
+        }
+    });
+}
+
+fn spawn_stream_restore(state: http::AppState, handles: Arc<ipc::IpcHandles>, reason: &'static str) {
+    tokio::spawn(async move {
+        info!(reason, "starting background stream restore");
+        {
+            let _guard = state.services.streams.stream_start_guard().await;
+            streams::restore_autostart_streams(state.clone()).await;
+            streams_persist::restore_persisted_streams(handles).await;
+        }
+        info!(reason, "background stream restore completed");
+        spawn_startup_read_model_warm(state);
+    });
 }
 
 #[cfg(feature = "pprof")]
@@ -241,16 +306,14 @@ async fn async_main() {
     }
     http::peers::init_peers_from_disk(&state).await;
     http::startup::apply_startup_preset(state.clone()).await;
-    streams::restore_autostart_streams(state.clone()).await;
-    streams_persist::restore_persisted_streams(handles.clone()).await;
+    spawn_stream_restore(state.clone(), handles.clone(), "startup");
     {
         let handles = handles.clone();
         let state = state.clone();
         let mut engine_reconnects = handles.engine.subscribe_connect_events();
         tokio::spawn(async move {
             while engine_reconnects.recv().await.is_ok() {
-                streams::restore_autostart_streams(state.clone()).await;
-                streams_persist::restore_persisted_streams(handles.clone()).await;
+                spawn_stream_restore(state.clone(), handles.clone(), "engine-reconnect");
             }
         });
     }

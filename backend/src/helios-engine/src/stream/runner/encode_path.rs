@@ -1,7 +1,7 @@
 use std::fs;
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use metrics::histogram;
@@ -36,11 +36,7 @@ impl StreamRunner {
             }
             let value = trimmed[key.len()..].trim();
             let number = value.split_whitespace().next().and_then(|raw| raw.parse::<u64>().ok())?;
-            if value.contains("kB") {
-                Some(number.saturating_mul(1024))
-            } else {
-                Some(number)
-            }
+            if value.contains("kB") { Some(number.saturating_mul(1024)) } else { Some(number) }
         })
     }
 
@@ -254,6 +250,7 @@ impl StreamRunner {
         tracing::info!("capture session attached to stream runner");
         // Preview worker startup is handled lazily in the pump when preview demand appears.
         self.last_preview_encode_wall = None;
+        self.last_preview_submit_wall = None;
 
         if (self.encoder_id.is_some() || self.decoder_id.is_some()) && self.codecs.is_none() {
             tracing::info!(encoder = self.encoder_id.as_deref().unwrap_or("none"), decoder = self.decoder_id.as_deref().unwrap_or("none"), "initializing codec registry");
@@ -348,6 +345,7 @@ impl StreamRunner {
             worker.stop();
         }
         self.last_preview_encode_wall = None;
+        self.last_preview_submit_wall = None;
 
         if decoder_changed || encoder_changed {
             // Pixel conversion helpers inside Styx cache per-thread buffers (including in the Rayon
@@ -380,6 +378,7 @@ impl StreamRunner {
         self.stop_preview_worker();
         self.encoder_last_activity_ms.store(0, Ordering::Relaxed);
         self.preview_encoder_last_activity_ms.store(0, Ordering::Relaxed);
+        self.last_preview_submit_wall = None;
         self.runner_memory.reset_current();
         self.capture_started_wall = None;
         self.capture_empty_since = None;
@@ -397,6 +396,7 @@ impl StreamRunner {
     pub(crate) fn stop_capture_for_restart(&mut self) {
         self.encoder_last_activity_ms.store(0, Ordering::Relaxed);
         self.preview_encoder_last_activity_ms.store(0, Ordering::Relaxed);
+        self.last_preview_submit_wall = None;
         self.runner_memory.reset_current();
         self.capture_started_wall = None;
         self.capture_empty_since = None;
@@ -640,6 +640,7 @@ impl StreamRunner {
                 self.shmem = Some(shmem);
             }
         }
+        self.last_preview_submit_wall = None;
     }
 
     pub(super) fn ensure_encoder_worker_started(&mut self) -> Result<()> {

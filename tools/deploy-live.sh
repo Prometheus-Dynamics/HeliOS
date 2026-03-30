@@ -729,13 +729,25 @@ if [[ "$UPLOAD" == "1" ]]; then
     fi
 
     # Extract into a temp dir first so a partial transfer can't brick /usr/bin.
-    local ts tmpdir backup_dir staging_root
+    local ts tmpdir backup_dir staging_root backup_keep
     ts="$(date +%s)"
     staging_root="/var/lib/helios/deploy-staging"
     tmpdir="$staging_root/bins.$ts"
     backup_dir="/var/lib/helios/deploy-backups/bins-$ts"
+    backup_keep="${HELIOS_DEPLOY_BACKUP_KEEP:-5}"
 
-    ssh_exec "sh -lc 'set -e; install -d -m0755 \"$staging_root\"; rm -rf \"$tmpdir\"; install -d -m0755 \"$tmpdir\"'"
+    ssh_exec "sh -lc 'set -e; \
+      install -d -m0755 \"$staging_root\" \"${backup_dir%/*}\"; \
+      find \"$staging_root\" -mindepth 1 -maxdepth 1 -type d -name \"bins.*\" -exec rm -rf {} +; \
+      keep=\"$backup_keep\"; \
+      case \"\$keep\" in \"\"|*[!0-9]*) keep=5 ;; esac; \
+      i=0; \
+      for d in \$(ls -1dt \"${backup_dir%/*}\"/bins-* 2>/dev/null || true); do \
+        i=\$((i + 1)); \
+        if [ \"\$i\" -gt \"\$keep\" ]; then rm -rf \"\$d\"; fi; \
+      done; \
+      rm -rf \"$tmpdir\"; \
+      install -d -m0755 \"$tmpdir\"'"
     ssh_upload_tar "$BINS_DIR" "$tmpdir" "${bins[@]}"
 
     # Validate all uploads before touching the live paths.

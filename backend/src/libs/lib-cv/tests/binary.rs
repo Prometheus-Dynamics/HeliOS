@@ -1,5 +1,8 @@
 use image::GrayImage;
-use lib_cv::modules::image::binary::{binary_image, binary_image_gray, binary_image_gray_simd, binary_image_simd, otsu_binarization_gray, otsu_binarization_gray_simd, otsu_level, otsu_level_gray};
+use lib_cv::modules::image::binary::{
+    adaptive_mean_threshold_fast_into, adaptive_mean_threshold_fast_with_invert, binary_image, binary_image_gray, binary_image_gray_simd, binary_image_simd, otsu_binarization_gray,
+    otsu_binarization_gray_simd, otsu_level, otsu_level_gray,
+};
 
 #[test]
 fn binary_simd_matches_scalar() {
@@ -55,4 +58,20 @@ fn otsu_level_dynamic_matches_gray() {
     let level_gray = otsu_level_gray(&img);
     let level_dyn = otsu_level(&dyn_img);
     assert_eq!(level_gray, level_dyn);
+}
+
+#[test]
+fn adaptive_threshold_into_matches_allocating_variant() {
+    let width = 64;
+    let height = 48;
+    let mut img = GrayImage::new(width, height);
+    for (i, p) in img.as_mut().iter_mut().enumerate() {
+        *p = ((i * 37 + (i / width as usize) * 11) % 256) as u8;
+    }
+
+    let allocating = adaptive_mean_threshold_fast_with_invert(&img, 15, 7.0, true);
+    let mut into = GrayImage::new(width, height);
+    adaptive_mean_threshold_fast_into(&img, 15, 7.0, true, &mut into);
+
+    assert_eq!(allocating.as_raw(), into.as_raw());
 }

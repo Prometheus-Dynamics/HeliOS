@@ -230,6 +230,10 @@ impl StreamsReadModelService {
         self.state.load_live_stream_manifest(state, stream_id).await
     }
 
+    pub async fn upsert_cached_stream_manifest(&self, stream_id: Uuid, manifest: StreamManifest) {
+        self.state.upsert_cached_stream_manifest(stream_id, manifest).await;
+    }
+
     pub async fn subscribe_mjpeg_feed(&self, stream_id: Uuid) -> broadcast::Receiver<Bytes> {
         self.mjpeg_feeds.clone().subscribe(stream_id).await
     }
@@ -313,6 +317,10 @@ impl SystemReadModelService {
 
     pub async fn subscribe_stream_metrics(&self, stream_id: Uuid) -> Result<(broadcast::Receiver<Arc<SharedStreamMetricsSnapshot>>, Option<Arc<SharedStreamMetricsSnapshot>>), String> {
         self.state.subscribe_stream_metrics(stream_id).await
+    }
+
+    pub async fn unsubscribe_stream_metrics(&self, stream_id: Uuid) {
+        self.state.unsubscribe_stream_metrics(stream_id).await;
     }
 
     pub fn bind_stream_outputs_state(&self, state: &crate::http::AppState) {

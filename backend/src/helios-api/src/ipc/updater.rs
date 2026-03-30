@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 use tokio::time::{Duration, timeout};
 use tracing::{error, info};
 
-use crate::ipc::{JOURNAL_DIR, UPDATER_SOCKET};
+use crate::ipc::{UPDATER_SOCKET, journal_path};
 
 const DEV_UPDATER_SOCKET: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/target/dev/run/updater.sock");
 
@@ -18,7 +18,7 @@ pub struct UpdaterConnection {
 }
 
 pub async fn connect_updater() -> Result<UpdaterConnection, Box<dyn std::error::Error + Send + Sync>> {
-    let journal_path = PathBuf::from(JOURNAL_DIR).join("updater.journal");
+    let journal_path = journal_path("updater.journal");
     let mut last_err: Option<Box<dyn std::error::Error + Send + Sync>> = None;
     for socket in resolve_updater_socket_candidates() {
         match try_connect_updater(socket, journal_path.clone()).await {
@@ -43,8 +43,7 @@ async fn try_connect_updater(socket: PathBuf, journal_path: PathBuf) -> Result<U
     // Send a no-op QueryState to verify round-trip.
     let command_id = lib_ipc::types::CommandId::new();
     let command = UpdaterCommand::QueryState { command_id };
-    let journal_entry = client.journal().append(&command)?;
-    session.send_command(client.journal(), &command).await?;
+    let journal_entry = session.send_command(client.journal(), &command).await?;
     match session.next_event().await {
         Ok(Some(UpdaterEvent::Control(ControlEvent::Ack(ack)))) if ack.command_id == command_id => {
             info!("updater acked QueryState (journal offset {})", journal_entry.offset)

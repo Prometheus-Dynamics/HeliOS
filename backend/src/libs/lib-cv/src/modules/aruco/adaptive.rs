@@ -252,10 +252,7 @@ struct AdaptiveExtractScratch {
     raw_contours: Vec<CompactContour>,
     point_store: Vec<CvPoint<i32>>,
     prepared: Vec<PreparedContour>,
-    fast_idx: Vec<usize>,
-    fast_success: Vec<bool>,
-    fast_tested: Vec<bool>,
-    fallback_idx: Vec<usize>,
+    candidate_idx: Vec<usize>,
     fast_downsampled_i32: Vec<CvPoint<i32>>,
     fast_approx_i32: Vec<CvPoint<i32>>,
     pts_f32: Vec<CvPoint<f32>>,
@@ -270,16 +267,13 @@ impl AdaptiveExtractScratch {
         release_retained_vec(&mut self.raw_contours);
         release_retained_vec(&mut self.point_store);
         release_retained_vec(&mut self.prepared);
-        release_retained_vec(&mut self.fast_idx);
-        release_retained_vec(&mut self.fast_success);
-        release_retained_vec(&mut self.fast_tested);
-        release_retained_vec(&mut self.fallback_idx);
+        release_retained_vec(&mut self.candidate_idx);
         release_retained_vec(&mut self.fast_downsampled_i32);
         release_retained_vec(&mut self.fast_approx_i32);
         release_retained_vec(&mut self.pts_f32);
     }
 
-    fn compact_after_frame(&mut self, image_pixels: usize, point_cap: usize, contour_cap: usize, fast_cap: usize) {
+    fn compact_after_frame(&mut self, image_pixels: usize, point_cap: usize, contour_cap: usize, _fast_cap: usize) {
         let work_cap = point_cap.min(16 * 1024).max(256);
         trim_retained_vec(&mut self.work_i32, work_cap);
         trim_retained_vec(&mut self.compress_scratch, work_cap);
@@ -288,10 +282,7 @@ impl AdaptiveExtractScratch {
         trim_retained_vec(&mut self.raw_contours, contour_cap.max(64));
         trim_retained_vec(&mut self.point_store, point_cap.max(1024));
         trim_retained_vec(&mut self.prepared, contour_cap.max(64));
-        trim_retained_vec(&mut self.fast_idx, fast_cap.max(64));
-        trim_retained_vec(&mut self.fast_success, fast_cap.max(64));
-        trim_retained_vec(&mut self.fast_tested, fast_cap.max(64));
-        trim_retained_vec(&mut self.fallback_idx, contour_cap.max(64));
+        trim_retained_vec(&mut self.candidate_idx, contour_cap.max(64));
         trim_retained_vec(&mut self.fast_downsampled_i32, work_cap);
         trim_retained_vec(&mut self.fast_approx_i32, 64);
         trim_retained_vec(&mut self.pts_f32, work_cap);
@@ -350,6 +341,20 @@ fn cap_quads_by_area(quads: &mut Vec<[CvPoint<f32>; 4]>, max_quads: usize) {
     }
     quads.select_nth_unstable_by(max_quads - 1, |a, b| quad_area_f32(b).total_cmp(&quad_area_f32(a)));
     quads.truncate(max_quads);
+}
+
+#[inline(always)]
+fn rank_candidate_contours(indices: &mut Vec<usize>, prepared: &[PreparedContour], keep: usize) {
+    indices.clear();
+    if keep == 0 || prepared.is_empty() {
+        return;
+    }
+    indices.extend(0..prepared.len());
+    if indices.len() > keep {
+        indices.select_nth_unstable_by(keep - 1, |&a, &b| prepared[b].len.cmp(&prepared[a].len));
+        indices.truncate(keep);
+    }
+    indices.sort_unstable_by(|&a, &b| prepared[b].len.cmp(&prepared[a].len));
 }
 
 #[inline(always)]
@@ -510,10 +515,7 @@ fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig
             raw_contours,
             point_store,
             prepared,
-            fast_idx,
-            fast_success,
-            fast_tested,
-            fallback_idx,
+            candidate_idx,
             fast_downsampled_i32,
             fast_approx_i32,
             pts_f32,
@@ -526,10 +528,7 @@ fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig
         raw_contours.clear();
         point_store.clear();
         prepared.clear();
-        fast_idx.clear();
-        fast_success.clear();
-        fast_tested.clear();
-        fallback_idx.clear();
+        candidate_idx.clear();
         fast_downsampled_i32.clear();
         fast_approx_i32.clear();
         pts_f32.clear();
@@ -631,22 +630,13 @@ fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig
                 report_adaptive_allocation_high_water("aruco.adaptive_quads", out.capacity() * size_of::<[CvPoint<f32>; 4]>());
                 out
             } else {
-                fast_idx.extend(0..prepared.len());
-                if fast_idx.len() > fast_cap {
-                    fast_idx.select_nth_unstable_by(fast_cap - 1, |&a, &b| prepared[b].len.cmp(&prepared[a].len));
-                    fast_idx.truncate(fast_cap);
-                }
-                fast_success.resize(prepared.len(), false);
-                fast_success.fill(false);
-                fast_tested.resize(prepared.len(), false);
-                fast_tested.fill(false);
-                report_adaptive_allocation_high_water(
-                    "aruco.adaptive_fast_state",
-                    fast_idx.capacity() * size_of::<usize>() + fast_success.capacity() * size_of::<bool>() + fast_tested.capacity() * size_of::<bool>(),
-                );
+                let fallback_cap = fallback_cap_limit.min(prepared.len());
+                rank_candidate_contours(candidate_idx, prepared, fallback_cap);
+                let fast_candidates = fast_cap.min(candidate_idx.len());
+                report_adaptive_allocation_high_water("aruco.adaptive_candidate_index", candidate_idx.capacity() * size_of::<usize>());
 
-                let fast_results: Vec<(usize, Option<[CvPoint<f32>; 4]>)> = if should_parallelize_fast_candidate_filter(fast_idx.len()) {
-                    fast_idx
+                let fast_results: Vec<Option<[CvPoint<f32>; 4]>> = if should_parallelize_fast_candidate_filter(fast_candidates) {
+                    candidate_idx[..fast_candidates]
                         .par_iter()
                         .map_init(
                             || (Vec::<CvPoint<i32>>::new(), Vec::<CvPoint<i32>>::new()),
@@ -670,13 +660,13 @@ fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig
                                     quad
                                 })
                                 .filter(|quad| quad_passes_post_filters(quad, config, width, height));
-                                (idx, quad)
+                                quad
                             },
                         )
                         .collect()
                 } else {
-                    let mut results = Vec::with_capacity(fast_idx.len());
-                    for &idx in fast_idx.iter() {
+                    let mut results = Vec::with_capacity(fast_candidates);
+                    for &idx in candidate_idx.iter().take(fast_candidates) {
                         let contour = prepared[idx];
                         let quad = candidate_quad_from_contour_fast_i32_in(
                             prepared_contour_points(&contour, point_store),
@@ -696,16 +686,14 @@ fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig
                             quad
                         })
                         .filter(|quad| quad_passes_post_filters(quad, config, width, height));
-                        results.push((idx, quad));
+                        results.push(quad);
                     }
                     results
                 };
 
                 let mut quads: Vec<[CvPoint<f32>; 4]> = Vec::with_capacity(fast_results.len());
-                for (idx, quad) in fast_results {
-                    fast_tested[idx] = true;
+                for quad in fast_results {
                     if let Some(quad) = quad {
-                        fast_success[idx] = true;
                         quads.push(quad);
                     }
                 }
@@ -713,17 +701,8 @@ fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig
 
                 let fallback_trigger_quads_max = adaptive_fallback_trigger_quads_max();
                 if quads.len() < fallback_trigger_quads_max {
-                    let fallback_cap = fallback_cap_limit;
-                    let k = fallback_cap.min(prepared.len());
-                    if k > 0 && k > fast_cap {
-                        fallback_idx.extend(0..prepared.len());
-                        fallback_idx.select_nth_unstable_by(k - 1, |&a, &b| prepared[b].len.cmp(&prepared[a].len));
-                        report_adaptive_allocation_high_water("aruco.adaptive_fallback_index", fallback_idx.capacity() * size_of::<usize>());
-
-                        for &idx in fallback_idx.iter().take(k) {
-                            if fast_success[idx] || fast_tested[idx] {
-                                continue;
-                            }
+                    if fallback_cap > fast_candidates {
+                        for &idx in candidate_idx.iter().skip(fast_candidates).take(fallback_cap - fast_candidates) {
                             let contour = prepared[idx];
                             contour_to_f32(prepared_contour_points(&contour, point_store), pts_f32, contour_off_x, contour_off_y);
                             if let Some(quad) = candidate_quad_from_contour(pts_f32, &detector_config).filter(|quad| quad_passes_post_filters(quad, config, width, height)) {

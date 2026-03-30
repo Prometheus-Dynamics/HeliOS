@@ -169,7 +169,7 @@ const LIBCAMERA_AE_EXPOSURE_MODE: u32 = 5;
 const LIBCAMERA_SHARPNESS: u32 = 24;
 const LIBCAMERA_NOISE_REDUCTION_MODE: u32 = 10002;
 const OV9782_AE_EXPOSURE_SHORT: i32 = 1;
-const OV9782_NOISE_REDUCTION_FAST: i32 = 1;
+const OV9782_NOISE_REDUCTION_OFF: i32 = 0;
 const OV9782_DEFAULT_SHARPNESS: f32 = 1.25;
 
 fn token_mentions_ov9782(raw: &str) -> bool {
@@ -208,6 +208,16 @@ fn insert_manifest_control_if_missing(manifest: &mut StreamManifest, id: u32, va
     manifest.capture.controls.push(helios_engine::capture::ControlAssignment { id, value });
 }
 
+fn capture_control_enables_tdn(value: &helios_engine::capture::CaptureControlValue) -> bool {
+    match value {
+        helios_engine::capture::CaptureControlValue::Int(v) => *v != 0,
+        helios_engine::capture::CaptureControlValue::Uint(v) => *v != 0,
+        helios_engine::capture::CaptureControlValue::Float(v) => *v != 0.0,
+        helios_engine::capture::CaptureControlValue::Bool(v) => *v,
+        helios_engine::capture::CaptureControlValue::None => false,
+    }
+}
+
 fn apply_new_ov9782_defaults(manifest: &mut StreamManifest) {
     if !manifest_targets_ov9782(manifest) {
         return;
@@ -218,9 +228,14 @@ fn apply_new_ov9782_defaults(manifest: &mut StreamManifest) {
     }
 
     insert_manifest_control_if_missing(manifest, LIBCAMERA_AE_EXPOSURE_MODE, helios_engine::capture::CaptureControlValue::Int(OV9782_AE_EXPOSURE_SHORT));
-    insert_manifest_control_if_missing(manifest, LIBCAMERA_NOISE_REDUCTION_MODE, helios_engine::capture::CaptureControlValue::Int(OV9782_NOISE_REDUCTION_FAST));
+    insert_manifest_control_if_missing(manifest, LIBCAMERA_NOISE_REDUCTION_MODE, helios_engine::capture::CaptureControlValue::Int(OV9782_NOISE_REDUCTION_OFF));
     insert_manifest_control_if_missing(manifest, LIBCAMERA_SHARPNESS, helios_engine::capture::CaptureControlValue::Float(OV9782_DEFAULT_SHARPNESS.max(0.0)));
-    manifest.capture.enable_tdn_output = true;
+    manifest.capture.enable_tdn_output = manifest
+        .capture
+        .controls
+        .iter()
+        .find(|ctl| ctl.id == LIBCAMERA_NOISE_REDUCTION_MODE)
+        .is_some_and(|ctl| capture_control_enables_tdn(&ctl.value));
 }
 
 async fn resolve_stream_owner_camera_id(state: &AppState, requested_id: Uuid) -> Option<String> {
@@ -516,13 +531,7 @@ async fn merge_stream_manifest_state(state: &AppState, manifest: &mut StreamMani
     manifest.capture.controls = merged.into_iter().map(|(id, value)| helios_engine::capture::ControlAssignment { id, value }).collect();
 
     if manifest.capture.backend == styx::BackendKind::Libcamera {
-        let tdn_value = manifest.capture.controls.iter().find(|ctl| ctl.id == LIBCAMERA_NOISE_REDUCTION_MODE).map(|ctl| match &ctl.value {
-            helios_engine::capture::CaptureControlValue::Int(v) => *v != 0,
-            helios_engine::capture::CaptureControlValue::Uint(v) => *v != 0,
-            helios_engine::capture::CaptureControlValue::Float(v) => *v != 0.0,
-            helios_engine::capture::CaptureControlValue::Bool(v) => *v,
-            helios_engine::capture::CaptureControlValue::None => false,
-        });
+        let tdn_value = manifest.capture.controls.iter().find(|ctl| ctl.id == LIBCAMERA_NOISE_REDUCTION_MODE).map(|ctl| capture_control_enables_tdn(&ctl.value));
         if let Some(enabled) = tdn_value {
             manifest.capture.enable_tdn_output = enabled;
         }
@@ -804,5 +813,69 @@ pub(crate) async fn list_codecs() -> Response {
             Json(codecs).into_response()
         }
         Err(err) => (StatusCode::BAD_GATEWAY, Json(engine_error_body(Some(EngineErrorCode::Internal), err.to_string()))).into_response(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use helios_engine::capture::{BackendHandle, BackendKind, CaptureConfig, ModeId};
+    use helios_engine::identity::DeviceIdentity;
+    use std::collections::BTreeMap;
+    use styx::prelude::{ColorSpace, FourCc, MediaFormat, Resolution};
+
+    fn sample_ov9782_manifest() -> StreamManifest {
+        let format = MediaFormat::new(FourCc::new(*b"NV12"), Resolution::new(1280, 800).unwrap(), ColorSpace::Srgb);
+        StreamManifest {
+            identity: DeviceIdentity {
+                id: None,
+                alias: Some("ov9782 cam".to_string()),
+                hardware_id: None,
+            },
+            capture: CaptureConfig {
+                device_keys: vec!["ov9782".to_string()],
+                backend: BackendKind::Libcamera,
+                handle: BackendHandle::Libcamera { id: "ov9782-main".to_string() },
+                mode: ModeId { format, interval: None },
+                target_fps: None,
+                interval: None,
+                controls: Vec::new(),
+                enable_tdn_output: true,
+            },
+            host_buffer: 2,
+            internal: false,
+            pipeline_enabled: None,
+            pipelines: Vec::new(),
+            active_pipeline_id: None,
+            active_pipeline_output: None,
+            pipeline_layout: None,
+            pipeline_wires: Vec::new(),
+            pipeline_host_inputs: BTreeMap::new(),
+            calibration: None,
+            pose: None,
+            encoder_enabled: None,
+            encoder_id: None,
+            decoder_enabled: None,
+            decoder_id: None,
+            encoder_settings: None,
+            decoder_settings: None,
+            preview_jpeg_quality: None,
+            shadow_recorder_enabled: false,
+            start_on_boot: false,
+        }
+    }
+
+    #[test]
+    fn ov9782_defaults_disable_tdn_output_when_noise_reduction_is_missing() {
+        let mut manifest = sample_ov9782_manifest();
+
+        apply_new_ov9782_defaults(&mut manifest);
+
+        assert_eq!(manifest.capture.target_fps, Some(OV9782_DEFAULT_LIBCAMERA_TARGET_FPS));
+        assert!(!manifest.capture.enable_tdn_output);
+        assert_eq!(
+            manifest.capture.controls.iter().find(|ctl| ctl.id == LIBCAMERA_NOISE_REDUCTION_MODE).map(|ctl| ctl.value.clone()),
+            Some(helios_engine::capture::CaptureControlValue::Int(OV9782_NOISE_REDUCTION_OFF))
+        );
     }
 }

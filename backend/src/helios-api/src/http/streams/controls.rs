@@ -400,6 +400,12 @@ pub(crate) async fn get_metrics(state: AppState, id: Uuid) -> Response {
     if result.is_err() {
         result = state.engine.get_metrics(id).await;
     }
+    if let Ok(EngineEvent::Metrics { metrics, .. }) = &result
+        && super::profiling::pipeline_metrics_need_host_output_priming(metrics)
+        && super::profiling::prime_pipeline_metrics_once(&state, id).await
+    {
+        result = state.engine.get_metrics(id).await;
+    }
     match result {
         Ok(EngineEvent::Metrics { metrics, .. }) => Json(metrics).into_response(),
         Ok(EngineEvent::Nack { code, reason, .. }) => (StatusCode::BAD_REQUEST, Json(engine_error_body(Some(code), reason))).into_response(),

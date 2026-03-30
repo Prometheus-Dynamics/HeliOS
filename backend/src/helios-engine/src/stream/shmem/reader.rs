@@ -32,6 +32,11 @@ fn open_frame_file(stream_id: Uuid) -> Result<File> {
     File::open(&path).map_err(|_| Error::NotFound("frame map not found"))
 }
 
+enum PayloadRead {
+    Ready((ShmemFrameHeader, Vec<u8>)),
+    Retry,
+}
+
 fn stable_header_loop(file: &mut File, start: Instant, timeout: Duration, retry_delay: Duration) -> Result<ShmemFrameHeader> {
     loop {
         let header = read_raw_header(file)?;
@@ -68,51 +73,70 @@ pub fn read_latest_header(stream_id: Uuid) -> Result<ShmemFrameHeader> {
     }
 }
 
-pub fn read_latest_frame_with_header(stream_id: Uuid) -> Result<(ShmemFrameHeader, Vec<u8>)> {
+fn read_payload_for_header(
+    file: &mut File,
+    header: ShmemFrameHeader,
+    start: Instant,
+    timeout: Duration,
+    retry_delay: Duration,
+) -> Result<PayloadRead> {
+    let len = header.len as usize;
+    let file_len = file.metadata().map_err(|_| Error::InvalidState("frame map metadata failed"))?.len();
+    if HEADER_SIZE as u64 + len as u64 > file_len {
+        if wait_or_timeout(start, timeout, retry_delay).is_ok() {
+            return Ok(PayloadRead::Retry);
+        }
+        return Err(Error::InvalidState("frame map length invalid"));
+    }
+
+    let mut buf = vec![0u8; len];
+    file.read_exact(&mut buf).map_err(|_| Error::InvalidState("frame map payload read failed"))?;
+
+    let header2 = read_raw_header(file)?;
+    let hdr2 = parse_header(&header2)?;
+    let stable = header.seq == hdr2.seq && (hdr2.seq & 1) == 0 && header.len == hdr2.len;
+    if stable {
+        return Ok(PayloadRead::Ready((hdr2, buf)));
+    }
+
+    if wait_or_timeout(start, timeout, retry_delay).is_ok() {
+        return Ok(PayloadRead::Retry);
+    }
+    Err(Error::InvalidState("frame map unstable"))
+}
+
+fn read_latest_frame_with_header_inner(stream_id: Uuid, last_seq: Option<u64>) -> Result<Option<(ShmemFrameHeader, Vec<u8>)>> {
     let mut file = open_frame_file(stream_id)?;
     let start = Instant::now();
     let timeout = shmem_read_timeout();
     let retry_delay = shmem_read_retry();
 
     loop {
-        let header = read_raw_header(&mut file)?;
-        if header.iter().all(|&b| b == 0) {
-            if wait_or_timeout(start, timeout, retry_delay).is_ok() {
-                continue;
-            }
-            return Err(Error::NotFound("frame map not initialized"));
+        let header = match stable_header_loop(&mut file, start, timeout, retry_delay) {
+            Ok(header) => header,
+            Err(Error::Timeout) => return Err(Error::NotFound("frame map not initialized")),
+            Err(err) => return Err(err),
+        };
+        if last_seq == Some(header.seq) {
+            return Ok(None);
         }
-        let hdr1 = parse_header(&header)?;
-        if (hdr1.seq & 1) == 1 || hdr1.len == 0 {
-            if wait_or_timeout(start, timeout, retry_delay).is_ok() {
-                continue;
-            }
-            return Err(Error::NotFound("frame map not initialized"));
+        match read_payload_for_header(&mut file, header, start, timeout, retry_delay) {
+            Ok(PayloadRead::Ready(frame)) => return Ok(Some(frame)),
+            Ok(PayloadRead::Retry) => continue,
+            Err(err) => return Err(err),
         }
+    }
+}
 
-        let len = hdr1.len as usize;
-        let file_len = file.metadata().map_err(|_| Error::InvalidState("frame map metadata failed"))?.len();
-        if HEADER_SIZE as u64 + len as u64 > file_len {
-            if wait_or_timeout(start, timeout, retry_delay).is_ok() {
-                continue;
-            }
-            return Err(Error::InvalidState("frame map length invalid"));
-        }
+pub fn read_latest_frame_with_header_if_newer_than(stream_id: Uuid, last_seq: u64) -> Result<Option<(ShmemFrameHeader, Vec<u8>)>> {
+    read_latest_frame_with_header_inner(stream_id, Some(last_seq))
+}
 
-        let mut buf = vec![0u8; len];
-        file.read_exact(&mut buf).map_err(|_| Error::InvalidState("frame map payload read failed"))?;
-
-        let header2 = read_raw_header(&mut file)?;
-        let hdr2 = parse_header(&header2)?;
-        let stable = hdr1.seq == hdr2.seq && (hdr2.seq & 1) == 0 && hdr1.len == hdr2.len;
-        if stable {
-            return Ok((hdr2, buf));
-        }
-
-        if wait_or_timeout(start, timeout, retry_delay).is_ok() {
-            continue;
-        }
-        return Err(Error::InvalidState("frame map unstable"));
+pub fn read_latest_frame_with_header(stream_id: Uuid) -> Result<(ShmemFrameHeader, Vec<u8>)> {
+    match read_latest_frame_with_header_inner(stream_id, None) {
+        Ok(Some(frame)) => Ok(frame),
+        Ok(None) => Err(Error::NotFound("frame map not initialized")),
+        Err(err) => Err(err),
     }
 }
 
@@ -214,6 +238,29 @@ mod tests {
         writer.write(Some(1), Some(fourcc), (1, 1), &payload).expect("write frame");
 
         let bytes = reader.join().expect("reader join").expect("reader ok");
+        assert_eq!(bytes, payload);
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn read_latest_frame_with_header_if_newer_than_skips_same_seq() {
+        let stream_id = Uuid::new_v4();
+        let mut writer = crate::stream::ShmemWriter::create(stream_id).expect("create shmem");
+        let path = writer.path().clone();
+
+        let payload = b"test-frame-payload".to_vec();
+        let fourcc = styx::prelude::FourCc::from_str("MJPG").unwrap();
+        writer.write(Some(1), Some(fourcc), (1, 1), &payload).expect("write frame");
+        let first_seq = read_latest_header(stream_id).expect("first header").seq;
+
+        let same = read_latest_frame_with_header_if_newer_than(stream_id, first_seq).expect("same seq read");
+        assert!(same.is_none());
+
+        writer.write(Some(2), Some(fourcc), (1, 1), &payload).expect("write second frame");
+        let newer = read_latest_frame_with_header_if_newer_than(stream_id, first_seq).expect("new seq read");
+        let (header, bytes) = newer.expect("newer frame");
+        assert!(header.seq > first_seq);
         assert_eq!(bytes, payload);
 
         let _ = std::fs::remove_file(path);

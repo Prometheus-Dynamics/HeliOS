@@ -15,7 +15,8 @@ use tracing::warn;
 
 const PERIPHERALS_SOCKET: &str = "/run/helios/peripherals.sock";
 const DEV_PERIPHERALS_SOCKET: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/target/dev/run/peripherals.sock");
-const JOURNAL_DIR: &str = "/tmp/helios-ipc";
+const DEFAULT_JOURNAL_DIR: &str = "/var/lib/helios/journal/ipc";
+const IPC_JOURNAL_DIR_ENV: &str = "HELIOS_IPC_JOURNAL_DIR";
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(2);
 const TICK_INTERVAL: Duration = Duration::from_millis(50);
 const CONNECTION_IDLE_TIMEOUT: Duration = Duration::from_millis(500);
@@ -237,7 +238,7 @@ struct Connection {
 }
 
 async fn connect_peripherals() -> Result<Connection, String> {
-    let journal_path = PathBuf::from(JOURNAL_DIR).join("peripherals.journal");
+    let journal_path = journal_path("peripherals.journal");
     let mut last_err = None;
     for socket in resolve_peripherals_socket_candidates() {
         match try_connect(socket, journal_path.clone()).await {
@@ -268,6 +269,10 @@ fn resolve_peripherals_socket_candidates() -> Vec<PathBuf> {
     push_unique(&mut candidates, PathBuf::from(DEV_PERIPHERALS_SOCKET));
     push_unique(&mut candidates, PathBuf::from(PERIPHERALS_SOCKET));
     candidates
+}
+
+fn journal_path(file_name: &str) -> PathBuf {
+    std::env::var_os(IPC_JOURNAL_DIR_ENV).filter(|value| !value.is_empty()).map(PathBuf::from).unwrap_or_else(|| PathBuf::from(DEFAULT_JOURNAL_DIR)).join(file_name)
 }
 
 fn push_unique(paths: &mut Vec<PathBuf>, candidate: PathBuf) {

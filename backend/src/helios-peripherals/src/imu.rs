@@ -11,12 +11,22 @@ use tokio::time::{Duration, MissedTickBehavior, interval, sleep};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
+use crate::dto::SensorScope;
 use crate::error::Result;
 use crate::service::SensorsService;
 pub use lib_sensors::imu::{ImuFusionMethod, ImuRange, ImuSample, ImuSettings};
 
 const IMU_DETECT_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 const IMU_MAX_CONSECUTIVE_SAMPLE_ERRORS: usize = 10;
+
+fn idle_imu_update_interval() -> Duration {
+    let ms = std::env::var("HELIOS_IMU_IDLE_INTERVAL_MS").ok().and_then(|raw| raw.parse::<u64>().ok()).unwrap_or(100).clamp(20, 5_000);
+    Duration::from_millis(ms)
+}
+
+fn effective_imu_update_interval(active_interval: Duration, idle_interval: Duration, has_live_subscribers: bool) -> Duration {
+    if has_live_subscribers { active_interval } else { active_interval.max(idle_interval) }
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct ImuState {
@@ -102,6 +112,7 @@ async fn run_imu_supervisor(
     reset_pose_requested: Arc<AtomicBool>,
     shutdown: CancellationToken,
 ) {
+    let idle_interval = idle_imu_update_interval();
     loop {
         if shutdown.is_cancelled() {
             break;
@@ -155,10 +166,16 @@ async fn run_imu_supervisor(
                     last_tick = now;
 
                     let settings_snapshot = settings.read().await.clone();
-                    if previous_interval != Some(settings_snapshot.update_interval) {
-                        ticker = tokio::time::interval(settings_snapshot.update_interval);
+                    let has_live_subscribers = if let Some(service) = service.upgrade() {
+                        service.has_scope_subscribers(&SensorScope::Device).await
+                    } else {
+                        false
+                    };
+                    let effective_interval = effective_imu_update_interval(settings_snapshot.update_interval, idle_interval, has_live_subscribers);
+                    if previous_interval != Some(effective_interval) {
+                        ticker = tokio::time::interval(effective_interval);
                         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
-                        previous_interval = Some(settings_snapshot.update_interval);
+                        previous_interval = Some(effective_interval);
                     }
                     if previous_fusion != Some(settings_snapshot.fusion) {
                         previous_fusion = Some(settings_snapshot.fusion);
@@ -199,5 +216,23 @@ async fn run_imu_supervisor(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::effective_imu_update_interval;
+
+    #[test]
+    fn effective_imu_update_interval_keeps_active_rate_for_live_subscribers() {
+        assert_eq!(effective_imu_update_interval(Duration::from_millis(20), Duration::from_millis(100), true), Duration::from_millis(20));
+    }
+
+    #[test]
+    fn effective_imu_update_interval_uses_idle_floor_without_live_subscribers() {
+        assert_eq!(effective_imu_update_interval(Duration::from_millis(20), Duration::from_millis(100), false), Duration::from_millis(100));
+        assert_eq!(effective_imu_update_interval(Duration::from_millis(250), Duration::from_millis(100), false), Duration::from_millis(250));
     }
 }

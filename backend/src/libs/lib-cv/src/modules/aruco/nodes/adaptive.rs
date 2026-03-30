@@ -286,14 +286,17 @@ fn cv_aruco_clahe_gray(mask: &GrayImage, tile_size: i64, clip_limit: f64, mix: f
         return Ok(gray.clone());
     }
 
-    let mut out = GrayImage::new(width, height);
+    let mut out = crate::modules::image::clahe::alloc_gray_image_for_overwrite(width, height);
     if mix >= 0.999 {
-        apply_cached_clahe_into(gray, tile_size, clip_limit, &mut out);
+        with_adaptive_frame_node_scratch(exec_ctx, |scratch| {
+            apply_cached_clahe_into(gray, tile_size, clip_limit, &mut scratch.clahe_tiles, &mut out);
+        })
+        .map_err(NodeError::Handler)?;
         return Ok(out);
     }
 
     with_adaptive_frame_node_scratch(exec_ctx, |scratch| {
-        apply_cached_clahe_into(gray, tile_size, clip_limit, &mut scratch.clahe);
+        apply_cached_clahe_into(gray, tile_size, clip_limit, &mut scratch.clahe_tiles, &mut scratch.clahe);
         crate::modules::image::clahe::blend_clahe_with_base_into(gray, &scratch.clahe, mix, &mut out);
     })
     .map_err(NodeError::Handler)?;
@@ -452,22 +455,23 @@ fn cv_aruco_adaptive_threshold_mask(
 struct AdaptiveFrameNodeScratch {
     clahe: GrayImage,
     blended: GrayImage,
+    clahe_tiles: crate::modules::image::clahe::ClaheTiles,
 }
 
 impl Default for AdaptiveFrameNodeScratch {
     fn default() -> Self {
-        Self { clahe: GrayImage::new(0, 0), blended: GrayImage::new(0, 0) }
+        Self { clahe: GrayImage::new(0, 0), blended: GrayImage::new(0, 0), clahe_tiles: crate::modules::image::clahe::ClaheTiles::default() }
     }
 }
 
 #[inline]
 fn adaptive_frame_node_scratch_bytes(scratch: &AdaptiveFrameNodeScratch) -> usize {
-    scratch.clahe.as_raw().capacity() + scratch.blended.as_raw().capacity()
+    scratch.clahe.as_raw().capacity() + scratch.blended.as_raw().capacity() + scratch.clahe_tiles.luts.capacity() * std::mem::size_of::<[u8; 256]>()
 }
 
 #[inline]
 fn adaptive_frame_node_scratch_live_bytes(scratch: &AdaptiveFrameNodeScratch) -> usize {
-    scratch.clahe.as_raw().len() + scratch.blended.as_raw().len()
+    scratch.clahe.as_raw().len() + scratch.blended.as_raw().len() + scratch.clahe_tiles.luts.len() * std::mem::size_of::<[u8; 256]>()
 }
 
 #[inline]
@@ -483,6 +487,11 @@ fn release_gray_image(image: &mut GrayImage) {
     buf.clear();
     buf.shrink_to_fit();
     *image = GrayImage::from_raw(0, 0, buf).expect("zero-sized gray image");
+}
+
+#[inline]
+fn release_clahe_tiles(tiles: &mut crate::modules::image::clahe::ClaheTiles) {
+    *tiles = crate::modules::image::clahe::ClaheTiles::default();
 }
 
 impl daedalus::runtime::state::ManagedResource for AdaptiveFrameNodeScratch {
@@ -506,6 +515,7 @@ impl daedalus::runtime::state::ManagedResource for AdaptiveFrameNodeScratch {
     fn on_memory_pressure(&mut self) {
         release_gray_image(&mut self.clahe);
         release_gray_image(&mut self.blended);
+        release_clahe_tiles(&mut self.clahe_tiles);
     }
 
     fn on_idle(&mut self) {
@@ -524,11 +534,18 @@ fn with_adaptive_frame_node_scratch<R>(exec_ctx: &ExecutionContext, f: impl FnOn
 pub(crate) fn compact_adaptive_frame_node_scratch_after_frame() {}
 
 #[inline]
-fn apply_cached_clahe_into(gray: &GrayImage, tile_size: u32, clip_limit: f32, output: &mut GrayImage) {
+fn apply_cached_clahe_into(
+    gray: &GrayImage,
+    tile_size: u32,
+    clip_limit: f32,
+    tiles: &mut crate::modules::image::clahe::ClaheTiles,
+    output: &mut GrayImage,
+) {
     // Keep fused adaptive preprocessing aligned with standalone CLAHE behavior: build tiles from
     // the current frame instead of reusing a prior frame's local histogram layout.
-    let tiles = crate::modules::image::clahe::prepare_clahe(gray, tile_size, clip_limit);
-    crate::modules::image::clahe::apply_clahe_with_tiles_into(gray, &tiles, output);
+    // Reuse the LUT backing storage itself so this path does not allocate every frame.
+    crate::modules::image::clahe::prepare_clahe_into(gray, tile_size, clip_limit, tiles);
+    crate::modules::image::clahe::apply_clahe_with_tiles_into(gray, tiles, output);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -771,12 +788,12 @@ fn collect_adaptive_quads_from_gray_frame(
     let offset = adaptive_offset.clamp(0.0, 64.0) as f32 + threshold_offset.clamp(-32.0, 32.0) as f32;
 
     with_adaptive_frame_node_scratch(exec_ctx, |scratch| {
-        let AdaptiveFrameNodeScratch { clahe, blended } = &mut *scratch;
+        let AdaptiveFrameNodeScratch { clahe, blended, clahe_tiles } = &mut *scratch;
 
         let threshold_input: &GrayImage = if mix <= 0.001 {
             frame
         } else {
-            apply_cached_clahe_into(frame, tile_size, clip_limit, clahe);
+            apply_cached_clahe_into(frame, tile_size, clip_limit, clahe_tiles, clahe);
             if mix >= 0.999 {
                 clahe
             } else {

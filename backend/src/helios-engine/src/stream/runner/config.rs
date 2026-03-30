@@ -1,12 +1,12 @@
 use std::env;
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
 use styx::prelude::FourCc;
 use tokio::sync::broadcast;
 
-use crate::capture::{discover_devices, find_backend_for_config, BackendKind, CaptureConfig, ModeId};
+use crate::capture::{BackendKind, CaptureConfig, ModeId, discover_devices, find_backend_for_config};
 use crate::graph::GraphHandle;
 use crate::ipc::{DecoderSettings, EncoderSettings};
 
@@ -99,6 +99,13 @@ impl StreamRunner {
         // Keep preview generation fully demand-driven. Starting the preview worker here leaves
         // an idle thread plus retained buffers resident even when nothing is consuming preview.
         let preview_worker = None;
+        let preview_submit_interval = encoder_settings
+            .as_ref()
+            .and_then(|settings| settings.framerate.as_ref())
+            .map(|fr| fr.numerator as f64 / fr.denominator.max(1) as f64)
+            .filter(|fps| *fps > 0.0)
+            .and_then(|fps| super::preview_submit_interval_for_fps(Some(fps)))
+            .or_else(super::preview_default_submit_interval);
         Self {
             stream_label,
             stream_id,
@@ -142,6 +149,8 @@ impl StreamRunner {
             last_viewer_check_wall: None,
             viewer_recently_active: false,
             last_preview_encode_wall: None,
+            last_preview_submit_wall: None,
+            preview_submit_interval,
             preview_encoder_last_activity_ms,
             preview_worker,
             preview_transport_stats,

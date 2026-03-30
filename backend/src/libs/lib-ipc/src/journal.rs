@@ -15,6 +15,9 @@ use bincode::{
 use crate::{envelope::bincode_config, types::JournalMetadata};
 
 const HEADER_LEN: usize = 4;
+const DEFAULT_MAX_JOURNAL_BYTES: u64 = 8 * 1024 * 1024;
+const MIN_MAX_JOURNAL_BYTES: u64 = 64 * 1024;
+const MAX_MAX_JOURNAL_BYTES: u64 = 256 * 1024 * 1024;
 
 fn map_encode_error(err: EncodeError) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, err)
@@ -55,11 +58,12 @@ pub struct Journal<T> {
 pub struct JournalOptions {
     pub sync_on_append: bool,
     pub buffer_capacity: usize,
+    pub max_bytes: Option<u64>,
 }
 
 impl Default for JournalOptions {
     fn default() -> Self {
-        Self { sync_on_append: false, buffer_capacity: 64 * 1024 }
+        Self { sync_on_append: false, buffer_capacity: 64 * 1024, max_bytes: journal_max_bytes_from_env().or(Some(DEFAULT_MAX_JOURNAL_BYTES)) }
     }
 }
 
@@ -83,13 +87,20 @@ impl<T> Journal<T> {
         T: Encode + Clone,
     {
         let mut file = self.file.lock().expect("journal poisoned");
-        let offset = file.seek(SeekFrom::End(0))?;
         let data = encode_to_vec(payload, bincode_config()).map_err(map_encode_error)?;
         if data.len() > u32::MAX as usize {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "journal payload exceeds 4 GiB limit"));
         }
 
         let len = data.len() as u32;
+        let entry_len = HEADER_LEN as u64 + len as u64;
+        let mut offset = file.seek(SeekFrom::End(0))?;
+        if self.options.max_bytes.is_some_and(|max_bytes| offset > 0 && offset.saturating_add(entry_len) > max_bytes) {
+            reset_writer(&mut file, self.options.sync_on_append)?;
+            *self.last_trimmed_at.lock().expect("journal poisoned") = Some(Utc::now());
+            offset = 0;
+        }
+
         file.write_all(&len.to_le_bytes())?;
         file.write_all(&data)?;
         file.flush()?;
@@ -109,7 +120,8 @@ impl<T> Journal<T> {
     {
         let mut file = self.file.lock().expect("journal poisoned");
         let mut entries = Vec::new();
-        let mut offset = file.seek(SeekFrom::End(0))?;
+        let mut encoded = Vec::new();
+        let mut batch_len = 0u64;
 
         for payload in payloads {
             let payload = payload.as_ref();
@@ -117,12 +129,24 @@ impl<T> Journal<T> {
             if data.len() > u32::MAX as usize {
                 return Err(io::Error::new(io::ErrorKind::InvalidData, "journal payload exceeds 4 GiB limit"));
             }
+            batch_len = batch_len.saturating_add(HEADER_LEN as u64 + data.len() as u64);
+            encoded.push((payload.clone(), data));
+        }
+
+        let mut offset = file.seek(SeekFrom::End(0))?;
+        if self.options.max_bytes.is_some_and(|max_bytes| offset > 0 && offset.saturating_add(batch_len) > max_bytes) {
+            reset_writer(&mut file, self.options.sync_on_append)?;
+            *self.last_trimmed_at.lock().expect("journal poisoned") = Some(Utc::now());
+            offset = 0;
+        }
+
+        for (payload, data) in encoded {
             let len = data.len() as u32;
             file.write_all(&len.to_le_bytes())?;
             file.write_all(&data)?;
 
             let next_offset = offset + HEADER_LEN as u64 + len as u64;
-            entries.push(JournalEntry { offset, next_offset, payload: payload.clone() });
+            entries.push(JournalEntry { offset, next_offset, payload });
             offset = next_offset;
         }
 
@@ -251,6 +275,20 @@ impl<T> Journal<T> {
     }
 }
 
+fn journal_max_bytes_from_env() -> Option<u64> {
+    std::env::var("HELIOS_IPC_JOURNAL_MAX_BYTES").ok().and_then(|raw| raw.trim().parse::<u64>().ok()).map(|value| value.clamp(MIN_MAX_JOURNAL_BYTES, MAX_MAX_JOURNAL_BYTES))
+}
+
+fn reset_writer(file: &mut BufWriter<File>, sync_on_append: bool) -> io::Result<()> {
+    file.flush()?;
+    file.get_ref().set_len(0)?;
+    file.seek(SeekFrom::Start(0))?;
+    if sync_on_append {
+        file.get_ref().sync_data()?;
+    }
+    Ok(())
+}
+
 pub type JournalWriter<T> = Journal<T>;
 pub type JournalReader<T> = Journal<T>;
 
@@ -367,6 +405,28 @@ mod tests {
 
         let entries = journal.replay().expect("replay");
         assert_eq!(entries.len(), 1_000);
+    }
+
+    #[test]
+    fn append_rolls_journal_when_max_bytes_is_exceeded() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("engine.capped");
+        let journal: Journal<TestCommand> = Journal::open_with_options(&path, JournalOptions { sync_on_append: false, buffer_capacity: 1024, max_bytes: Some(512) }).expect("open");
+
+        let mut last_command = None;
+        for _ in 0..32 {
+            let (_, command) = sample_apply_command();
+            journal.append(&command).expect("append");
+            last_command = Some(command);
+        }
+
+        let file_len = std::fs::metadata(&path).expect("metadata").len();
+        assert!(file_len <= 512);
+
+        let entries = journal.replay().expect("replay");
+        assert!(!entries.is_empty());
+        assert!(entries.len() < 32);
+        assert_eq!(entries.last().expect("last entry").payload, last_command.expect("last command"));
     }
 
     #[test]

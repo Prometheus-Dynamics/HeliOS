@@ -16,6 +16,7 @@ use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
+use crate::dto::SensorScope;
 use crate::error::{Error, Result};
 use crate::service::SensorsService;
 
@@ -23,6 +24,15 @@ fn power_poll_interval() -> Duration {
     let default_ms: u64 = 100;
     let ms = std::env::var("HELIOS_POWER_POLL_INTERVAL_MS").ok().and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(default_ms).clamp(20, 10_000);
     Duration::from_millis(ms)
+}
+
+fn idle_power_poll_interval() -> Duration {
+    let ms = std::env::var("HELIOS_POWER_IDLE_INTERVAL_MS").ok().and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(1_000).clamp(100, 30_000);
+    Duration::from_millis(ms)
+}
+
+fn effective_power_poll_interval(active_interval: Duration, idle_interval: Duration, has_live_subscribers: bool) -> Duration {
+    if has_live_subscribers { active_interval } else { active_interval.max(idle_interval) }
 }
 
 struct PowerSource {
@@ -137,19 +147,34 @@ impl PowerRuntime {
 
 async fn run_power_loop(service: std::sync::Weak<SensorsService>, sources: Vec<PowerSource>, shutdown: CancellationToken) {
     let poll_interval = power_poll_interval();
+    let idle_interval = idle_power_poll_interval();
     let poll_interval_ms = poll_interval.as_millis().min(u128::from(u64::MAX)) as u64;
-    info!(sources = sources.len(), poll_interval_ms, "power runtime started");
+    let idle_interval_ms = idle_interval.as_millis().min(u128::from(u64::MAX)) as u64;
+    info!(sources = sources.len(), poll_interval_ms, idle_interval_ms, "power runtime started");
     if poll_interval_ms < 100 {
         warn!(poll_interval_ms, "power polling interval is very aggressive and may increase idle CPU usage");
     }
 
     let mut ticker = interval(poll_interval);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let mut previous_interval = None;
 
     loop {
         tokio::select! {
             _ = shutdown.cancelled() => break,
             _ = ticker.tick() => {
+                let has_live_subscribers = if let Some(service) = service.upgrade() {
+                    service.has_scope_subscribers(&SensorScope::Device).await
+                } else {
+                    false
+                };
+                let effective_interval = effective_power_poll_interval(poll_interval, idle_interval, has_live_subscribers);
+                if previous_interval != Some(effective_interval) {
+                    ticker = interval(effective_interval);
+                    ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+                    previous_interval = Some(effective_interval);
+                }
+
                 let results = join_all(sources.iter().map(|source| {
                     let label = source.label.clone();
                     async move { (label, source.sample().await) }
@@ -174,5 +199,23 @@ async fn run_power_loop(service: std::sync::Weak<SensorsService>, sources: Vec<P
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::effective_power_poll_interval;
+
+    #[test]
+    fn effective_power_poll_interval_keeps_active_rate_for_live_subscribers() {
+        assert_eq!(effective_power_poll_interval(Duration::from_millis(100), Duration::from_millis(1_000), true), Duration::from_millis(100));
+    }
+
+    #[test]
+    fn effective_power_poll_interval_uses_idle_floor_without_live_subscribers() {
+        assert_eq!(effective_power_poll_interval(Duration::from_millis(100), Duration::from_millis(1_000), false), Duration::from_millis(1_000));
+        assert_eq!(effective_power_poll_interval(Duration::from_millis(2_000), Duration::from_millis(1_000), false), Duration::from_millis(2_000));
     }
 }
