@@ -118,3 +118,26 @@ fn encoder_settings_accepts_legacy_fps_framerate_json() {
     assert_eq!(rate.numerator, 2997);
     assert_eq!(rate.denominator, 100);
 }
+
+#[test]
+fn stream_manifest_defaults_shadow_recorder_off_when_omitted() {
+    let payload = serde_json::json!({
+        "identity": {},
+        "capture": {
+            "device_keys": [],
+            "backend": "Virtual",
+            "handle": { "type": "virtual" },
+            "mode": {
+                "format": {
+                    "code": "RGB3",
+                    "resolution": { "width": 1, "height": 1 },
+                    "color": "Srgb"
+                },
+                "interval": null
+            },
+            "controls": []
+        }
+    });
+    let parsed: StreamManifest = serde_json::from_value(payload).expect("decode manifest");
+    assert!(!parsed.shadow_recorder_enabled);
+}

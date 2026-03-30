@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex as StdMutex, OnceLock, Weak};
 use std::time::Duration as StdDuration;
 use sysinfo::{Components, Disks, Networks, ProcessesToUpdate, System};
 use tokio::process::{Child, Command};
-use tokio::sync::{Mutex, RwLock, broadcast};
+use tokio::sync::{Mutex, RwLock, broadcast, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, Instant};
 use tracing::{debug, warn};
@@ -694,7 +694,23 @@ impl ProcessesHub {
         if needs_spawn {
             let tx = self.tx.clone();
             let latest = self.latest.clone();
-            *guard = Some(tokio::task::spawn_blocking(move || run_processes_sampler(tx, latest)));
+            *guard = Some(tokio::spawn(async move {
+                let (done_tx, done_rx) = oneshot::channel();
+                let fallback_tx = tx.clone();
+                let fallback_latest = latest.clone();
+                match spawn_api_sampler_thread("helios-api-procs", move || {
+                    run_processes_sampler(tx, latest);
+                    let _ = done_tx.send(());
+                }) {
+                    Ok(_join) => {
+                        let _ = done_rx.await;
+                    }
+                    Err(err) => {
+                        warn!(error = %err, "failed to spawn dedicated processes sampler thread; falling back to Tokio blocking pool");
+                        let _ = tokio::task::spawn_blocking(move || run_processes_sampler(fallback_tx, fallback_latest)).await;
+                    }
+                }
+            }));
         }
     }
 
@@ -706,6 +722,19 @@ impl ProcessesHub {
 fn read_duration_env(var: &str, default_ms: u64, min_ms: u64, max_ms: u64) -> Duration {
     let ms = std::env::var(var).ok().and_then(|value| value.trim().parse::<u64>().ok()).unwrap_or(default_ms);
     Duration::from_millis(ms.clamp(min_ms, max_ms))
+}
+
+fn read_size_env(var: &str, default: usize, min: usize, max: usize) -> usize {
+    std::env::var(var).ok().and_then(|value| value.trim().parse::<usize>().ok()).unwrap_or(default).clamp(min, max)
+}
+
+fn api_sampler_thread_stack_bytes() -> usize {
+    static VALUE: OnceLock<usize> = OnceLock::new();
+    *VALUE.get_or_init(|| read_size_env("HELIOS_API_SAMPLER_THREAD_STACK_BYTES", 512 * 1024, 128 * 1024, 4 * 1024 * 1024))
+}
+
+fn spawn_api_sampler_thread(name: &'static str, f: impl FnOnce() + Send + 'static) -> std::io::Result<std::thread::JoinHandle<()>> {
+    std::thread::Builder::new().name(name.to_string()).stack_size(api_sampler_thread_stack_bytes()).spawn(f)
 }
 
 fn metrics_cache_ttl() -> Duration {
@@ -1241,79 +1270,103 @@ async fn run_telemetry_sampler(tx: broadcast::Sender<Arc<str>>, latest: Arc<StdM
         })
     };
 
-    let sys_task = tokio::task::spawn_blocking(move || {
-        let soft_budget = (sample_interval / 5).max(Duration::from_millis(50));
-        let hard_budget = sample_interval + Duration::from_millis(50);
-
-        let mut last_warn: Option<Instant> = None;
-        let mut suppressed_warns: u64 = 0;
-
-        let mut saw_receiver = tx.receiver_count() > 0;
-        let mut next_tick = Instant::now();
-
-        loop {
-            let receiver_count = tx.receiver_count();
-            saw_receiver |= receiver_count > 0;
-            if saw_receiver && receiver_count == 0 {
-                break;
-            }
-
-            let now = Instant::now();
-            if now < next_tick {
-                std::thread::sleep(next_tick - now);
-            }
-            next_tick = Instant::now() + sample_interval;
-
-            let sampling_started = Instant::now();
-            let mut sample = collector.lock().expect("system collector poisoned").collect_telemetry();
-            let sampling_elapsed = sampling_started.elapsed();
-
-            if let Some(state) = state.as_ref().and_then(|weak| weak.upgrade()) {
-                sample.engine = Some(EngineTelemetry { connected: state.engine.is_connected(), last_disconnect_ms: state.engine.last_disconnect_ms() });
-            }
-
-            if let Ok(guard) = last_power.lock() {
-                sample.power = guard.clone();
-            }
-
-            if sampling_elapsed >= soft_budget {
-                let now = Instant::now();
-                let should_warn = last_warn.map(|time| now.duration_since(time) >= Duration::from_secs(10)).unwrap_or(true);
-                if should_warn {
-                    if sampling_elapsed >= hard_budget {
-                        warn!(
-                            elapsed_ms = sampling_elapsed.as_millis(),
-                            soft_budget_ms = soft_budget.as_millis(),
-                            interval_ms = sample_interval.as_millis(),
-                            suppressed = suppressed_warns,
-                            "telemetry sampling exceeded budget"
-                        );
-                    } else {
-                        debug!(
-                            elapsed_ms = sampling_elapsed.as_millis(),
-                            soft_budget_ms = soft_budget.as_millis(),
-                            interval_ms = sample_interval.as_millis(),
-                            suppressed = suppressed_warns,
-                            "telemetry sampling exceeded soft budget"
-                        );
-                    }
-                    last_warn = Some(now);
-                    suppressed_warns = 0;
-                } else {
-                    suppressed_warns = suppressed_warns.saturating_add(1);
-                }
-            }
-
-            let payload = Arc::<str>::from(serde_json::to_string(&sample).unwrap_or_default());
-            if let Ok(mut guard) = latest.lock() {
-                *guard = Some(payload.clone());
-            }
-            let _ = tx.send(payload);
+    let (sys_done_tx, sys_done_rx) = oneshot::channel();
+    let fallback_tx = tx.clone();
+    let fallback_latest = latest.clone();
+    let fallback_state = state.clone();
+    let fallback_last_power = last_power.clone();
+    let fallback_collector = collector.clone();
+    match spawn_api_sampler_thread("helios-api-telemetry", move || {
+        run_telemetry_sys_sampler(tx, latest, state, last_power, collector, sample_interval);
+        let _ = sys_done_tx.send(());
+    }) {
+        Ok(_join) => {
+            let _ = sys_done_rx.await;
         }
-    });
-
-    let _ = sys_task.await;
+        Err(err) => {
+            warn!(error = %err, "failed to spawn dedicated telemetry sampler thread; falling back to Tokio blocking pool");
+            let _ = tokio::task::spawn_blocking(move || run_telemetry_sys_sampler(fallback_tx, fallback_latest, fallback_state, fallback_last_power, fallback_collector, sample_interval)).await;
+        }
+    }
     power_task.abort();
+}
+
+fn run_telemetry_sys_sampler(
+    tx: broadcast::Sender<Arc<str>>,
+    latest: Arc<StdMutex<Option<Arc<str>>>>,
+    state: Option<Weak<IpcHandles>>,
+    last_power: Arc<StdMutex<Option<PowerTelemetry>>>,
+    collector: Arc<StdMutex<SystemCollector>>,
+    sample_interval: Duration,
+) {
+    let soft_budget = (sample_interval / 5).max(Duration::from_millis(50));
+    let hard_budget = sample_interval + Duration::from_millis(50);
+
+    let mut last_warn: Option<Instant> = None;
+    let mut suppressed_warns: u64 = 0;
+
+    let mut saw_receiver = tx.receiver_count() > 0;
+    let mut next_tick = Instant::now();
+
+    loop {
+        let receiver_count = tx.receiver_count();
+        saw_receiver |= receiver_count > 0;
+        if saw_receiver && receiver_count == 0 {
+            break;
+        }
+
+        let now = Instant::now();
+        if now < next_tick {
+            std::thread::sleep(next_tick - now);
+        }
+        next_tick = Instant::now() + sample_interval;
+
+        let sampling_started = Instant::now();
+        let mut sample = collector.lock().expect("system collector poisoned").collect_telemetry();
+        let sampling_elapsed = sampling_started.elapsed();
+
+        if let Some(state) = state.as_ref().and_then(|weak| weak.upgrade()) {
+            sample.engine = Some(EngineTelemetry { connected: state.engine.is_connected(), last_disconnect_ms: state.engine.last_disconnect_ms() });
+        }
+
+        if let Ok(guard) = last_power.lock() {
+            sample.power = guard.clone();
+        }
+
+        if sampling_elapsed >= soft_budget {
+            let now = Instant::now();
+            let should_warn = last_warn.map(|time| now.duration_since(time) >= Duration::from_secs(10)).unwrap_or(true);
+            if should_warn {
+                if sampling_elapsed >= hard_budget {
+                    warn!(
+                        elapsed_ms = sampling_elapsed.as_millis(),
+                        soft_budget_ms = soft_budget.as_millis(),
+                        interval_ms = sample_interval.as_millis(),
+                        suppressed = suppressed_warns,
+                        "telemetry sampling exceeded budget"
+                    );
+                } else {
+                    debug!(
+                        elapsed_ms = sampling_elapsed.as_millis(),
+                        soft_budget_ms = soft_budget.as_millis(),
+                        interval_ms = sample_interval.as_millis(),
+                        suppressed = suppressed_warns,
+                        "telemetry sampling exceeded soft budget"
+                    );
+                }
+                last_warn = Some(now);
+                suppressed_warns = 0;
+            } else {
+                suppressed_warns = suppressed_warns.saturating_add(1);
+            }
+        }
+
+        let payload = Arc::<str>::from(serde_json::to_string(&sample).unwrap_or_default());
+        if let Ok(mut guard) = latest.lock() {
+            *guard = Some(payload.clone());
+        }
+        let _ = tx.send(payload);
+    }
 }
 
 fn run_processes_sampler(tx: broadcast::Sender<Arc<SharedProcessesSnapshot>>, latest: Arc<StdMutex<Option<Arc<SharedProcessesSnapshot>>>>) {

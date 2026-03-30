@@ -1,7 +1,7 @@
 use std::fs;
 use std::process::Command;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use metrics::histogram;
@@ -36,7 +36,11 @@ impl StreamRunner {
             }
             let value = trimmed[key.len()..].trim();
             let number = value.split_whitespace().next().and_then(|raw| raw.parse::<u64>().ok())?;
-            if value.contains("kB") { Some(number.saturating_mul(1024)) } else { Some(number) }
+            if value.contains("kB") {
+                Some(number.saturating_mul(1024))
+            } else {
+                Some(number)
+            }
         })
     }
 
@@ -225,10 +229,6 @@ impl StreamRunner {
         self.graph.process_with_options(image, crate::graph::GraphProcessOptions { require_image_output, preview_only: false })
     }
 
-    pub(super) fn process_assigned_graph_preview(&self, image: image::DynamicImage, require_image_output: bool, preview_only: bool) -> Option<crate::graph::GraphPreviewOutput> {
-        self.graph.process_preview_with_options(image, crate::graph::GraphProcessOptions { require_image_output, preview_only })
-    }
-
     pub fn start(&mut self) -> Result<()> {
         if self.session.is_some() {
             return Err(Error::InvalidState("stream already running"));
@@ -239,7 +239,6 @@ impl StreamRunner {
         self.last_capture_wall = None;
         self.capture_started_wall = None;
         self.encoder_last_activity_ms.store(0, Ordering::Relaxed);
-        self.preview_encoder_last_activity_ms.store(0, Ordering::Relaxed);
         let capture_fourcc = self.capture_input_fourcc().ok_or(Error::InvalidState("capture format unknown"))?;
         self.capture_fourcc = Some(capture_fourcc);
 
@@ -248,8 +247,6 @@ impl StreamRunner {
         self.session = Some(session);
         self.capture_started_wall = Some(Instant::now());
         tracing::info!("capture session attached to stream runner");
-        // Preview worker startup is handled lazily in the pump when preview demand appears.
-        self.last_preview_encode_wall = None;
         self.last_preview_submit_wall = None;
 
         if (self.encoder_id.is_some() || self.decoder_id.is_some()) && self.codecs.is_none() {
@@ -295,8 +292,7 @@ impl StreamRunner {
         }
 
         // Do not start the encoder worker eagerly. Encoding is a side-channel that should only
-        // run when something is subscribed to the encoded stream (see `encoder_demand()`).
-        // Preview/JPEG shmem is handled independently.
+        // run when something is actively consuming the configured encoded output.
         tracing::info!("stream runner started");
         Ok(())
     }
@@ -333,18 +329,12 @@ impl StreamRunner {
         // Reset per-stage stats so subsequent metrics samples reflect the new configuration.
         self.decoder_stats = styx::codec::CodecStats::default();
         self.encoder_stats = styx::codec::CodecStats::default();
-        self.preview_encoder_stats = styx::codec::CodecStats::default();
         self.last_decode_wall = None;
         self.last_encode_wall = None;
         self.encoder_last_activity_ms.store(0, Ordering::Relaxed);
-        self.preview_encoder_last_activity_ms = Arc::new(AtomicU64::new(0));
 
         // Encoder worker depends on the selected codec; stop it and let the pump restart it when demanded.
         self.stop_encoder_worker();
-        if let Some(worker) = self.preview_worker.take() {
-            worker.stop();
-        }
-        self.last_preview_encode_wall = None;
         self.last_preview_submit_wall = None;
 
         if decoder_changed || encoder_changed {
@@ -375,9 +365,7 @@ impl StreamRunner {
 
     pub fn stop(&mut self) {
         self.stop_encoder_worker();
-        self.stop_preview_worker();
         self.encoder_last_activity_ms.store(0, Ordering::Relaxed);
-        self.preview_encoder_last_activity_ms.store(0, Ordering::Relaxed);
         self.last_preview_submit_wall = None;
         self.runner_memory.reset_current();
         self.capture_started_wall = None;
@@ -395,7 +383,6 @@ impl StreamRunner {
 
     pub(crate) fn stop_capture_for_restart(&mut self) {
         self.encoder_last_activity_ms.store(0, Ordering::Relaxed);
-        self.preview_encoder_last_activity_ms.store(0, Ordering::Relaxed);
         self.last_preview_submit_wall = None;
         self.runner_memory.reset_current();
         self.capture_started_wall = None;
@@ -473,7 +460,7 @@ impl StreamRunner {
             graph_has_image_output: frame_demand_snapshot.graph_has_image_output,
             graph_has_executor: frame_demand_snapshot.graph_has_executor,
         });
-        let encoder_demand_active = self.encoder_demand();
+        let encoder_demand_active = self.encoder_id.is_some() && (self.encoder_demand() || frame_demand_snapshot.preview_demand_active);
         let encoder_demand = Some(StreamEncoderDemandMetrics {
             broadcast_receiver_count: self.encoded_tx.receiver_count() as u64,
             managed_consumer_count: self.managed_encoded_consumer_count.load(Ordering::Relaxed),
@@ -481,9 +468,6 @@ impl StreamRunner {
             encoder_demand_active,
             encoder_worker_running: self.encoder_worker.is_some(),
         });
-        let main_encoder_active = Self::codec_stats_has_activity(&self.encoder_stats);
-        let preview_encoder_active = Self::codec_stats_has_activity(&self.preview_encoder_stats);
-        let prefer_preview_encoder = preview_encoder_active && !main_encoder_active;
         let preview_transport = {
             let stats = match self.preview_transport_stats.lock() {
                 Ok(guard) => guard,
@@ -491,28 +475,13 @@ impl StreamRunner {
             };
             stats.has_samples().then(|| stats.snapshot())
         };
-        let mut encoder = if prefer_preview_encoder {
-            Some(to_codec_metrics(&self.preview_encoder_stats))
-        } else if self.encode_fourcc.is_some() {
-            Some(to_codec_metrics(&self.encoder_stats))
-        } else if preview_encoder_active {
-            Some(to_codec_metrics(&self.preview_encoder_stats))
-        } else {
-            None
-        };
+        let mut encoder = if self.encode_fourcc.is_some() { Some(to_codec_metrics(&self.encoder_stats)) } else { None };
         if let Some(metrics) = encoder.as_mut() {
-            let activity_ms = if prefer_preview_encoder { self.preview_encoder_last_activity_ms.load(Ordering::Relaxed) } else { self.encoder_last_activity_ms.load(Ordering::Relaxed) };
+            let activity_ms = self.encoder_last_activity_ms.load(Ordering::Relaxed);
             if activity_ms > 0 {
                 let age = Duration::from_millis(Self::unix_now_ms().saturating_sub(activity_ms));
                 if age >= Self::stale_threshold_for_fps(metrics.fps) {
                     Self::mark_codec_metrics_stale(metrics, age);
-                }
-            } else if prefer_preview_encoder {
-                if let Some(last_encode) = self.last_preview_encode_wall {
-                    let age = now.saturating_duration_since(last_encode);
-                    if age >= Self::stale_threshold_for_fps(metrics.fps) {
-                        Self::mark_codec_metrics_stale(metrics, age);
-                    }
                 }
             } else if let Some(last_encode) = self.last_encode_wall {
                 let age = now.saturating_duration_since(last_encode);
@@ -572,9 +541,8 @@ impl StreamRunner {
     }
 
     pub(super) fn encoder_demand(&self) -> bool {
-        // Encoder work is an optional side-channel for encoded consumers.
-        // Preview should stay on the lightweight preview worker path, and unknown/stale
-        // broadcast receivers must not be able to keep ffmpeg hot forever.
+        // Encoder work is demand-driven. Keep unknown/stale broadcast receivers from keeping the
+        // configured encoder hot forever; preview demand is folded in separately by callers.
         let managed_count = self.managed_encoded_consumer_count.load(Ordering::Relaxed);
         if managed_count == 0 {
             return false;
@@ -592,8 +560,9 @@ impl StreamRunner {
         let Some(stream_id) = self.stream_id else {
             return false;
         };
-        // If both encoder + decoder are disabled, treat preview as disabled too.
-        if self.encoder_id.is_none() && self.decoder_id.is_none() {
+        // Preview is the configured encoded output path. If the stream has no encoder selected,
+        // do not keep any hidden preview transport alive.
+        if self.encoder_id.is_none() {
             return false;
         }
 
@@ -616,10 +585,10 @@ impl StreamRunner {
         let raw_receiver_count = self.raw_tx.receiver_count() as u64;
         let host_receiver_count = graph_host.receiver_count() as u64;
         let preview_demand_active = self.preview_demand();
-        let encode_demand_active = self.encoder_id.is_some() && self.encoder_demand();
+        let encode_demand_active = self.encoder_id.is_some() && (self.encoder_demand() || preview_demand_active);
         let graph_sample_demand_active = self.graph.has_output_sample_demand();
 
-        raw_receiver_count > 0 || (graph_has_image_output && (preview_demand_active || host_receiver_count > 0)) || encode_demand_active || graph_sample_demand_active
+        raw_receiver_count > 0 || (graph_has_image_output && host_receiver_count > 0) || encode_demand_active || graph_sample_demand_active
     }
 
     pub(crate) fn idle_stop_timeout(&self) -> Duration {
@@ -632,15 +601,6 @@ impl StreamRunner {
                 self.shmem = Some(shmem);
             }
         }
-    }
-
-    pub(super) fn stop_preview_worker(&mut self) {
-        if let Some(worker) = self.preview_worker.take() {
-            if let Some(shmem) = worker.stop() {
-                self.shmem = Some(shmem);
-            }
-        }
-        self.last_preview_submit_wall = None;
     }
 
     pub(super) fn ensure_encoder_worker_started(&mut self) -> Result<()> {
@@ -662,10 +622,7 @@ impl StreamRunner {
                 self.encode_configured = true;
             }
         }
-        // Keep preview shmem owned by the preview worker when available so `/preview` and
-        // `/stream.mjpeg` do not depend on ffmpeg encoder throughput.
-        let use_preview_shmem = self.preview_worker.is_some();
-        let encoder_shmem = if use_preview_shmem { None } else { self.shmem.take() };
+        let encoder_shmem = self.shmem.take();
         let encoder_selector = self.encoder_id.clone().unwrap_or_default();
         let encoder = self
             .build_ffmpeg_encoder_for_worker(encode_input)
@@ -789,14 +746,6 @@ impl StreamRunner {
 
     pub(super) fn stream_label(&self) -> &str {
         self.stream_label.as_ref()
-    }
-
-    pub(super) fn preview_generation_enabled(&self) -> bool {
-        !(self.encoder_id.is_none() && self.decoder_id.is_none() && self.capture_config.backend != styx::BackendKind::File)
-    }
-
-    fn codec_stats_has_activity(stats: &styx::codec::CodecStats) -> bool {
-        stats.samples() > 0 || stats.processed() > 0 || stats.backpressure() > 0 || stats.errors() > 0
     }
 
     pub(super) fn is_encoded_preview_fourcc(fourcc: FourCc) -> bool {

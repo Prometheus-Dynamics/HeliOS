@@ -10,6 +10,7 @@ use uuid::Uuid;
 use crate::engine_guard;
 use crate::http::AppState;
 
+use super::lifecycle::persist_effective_stream_manifest;
 use super::util::camera_id_for_manifest;
 use super::validation::validate_stream_manifest;
 use super::wait::wait_for_stream_started;
@@ -98,7 +99,7 @@ pub(super) async fn restore_autostart_streams(state: AppState) {
                 let start_result = state.engine.start_stream(manifest.clone()).await;
                 let started = match start_result {
                     Ok(EngineEvent::Started { stream_id, .. }) => {
-                        crate::http::streams_persist::persist_manifest(&camera_id, Some(stream_id), manifest.clone()).await;
+                        let _ = persist_effective_stream_manifest(&state, &camera_id, stream_id, &manifest).await;
                         true
                     }
                     Ok(EngineEvent::Nack { reason, .. }) => {
@@ -129,7 +130,7 @@ pub(super) async fn restore_autostart_streams(state: AppState) {
                     }
                     Ok(_) | Err(_) => match wait_for_stream_started(&state, requested_id, Duration::from_secs(20)).await {
                         Ok(Some(_descriptor)) => {
-                            crate::http::streams_persist::persist_manifest(&camera_id, Some(requested_id), manifest.clone()).await;
+                            let _ = persist_effective_stream_manifest(&state, &camera_id, requested_id, &manifest).await;
                             true
                         }
                         Ok(None) => {

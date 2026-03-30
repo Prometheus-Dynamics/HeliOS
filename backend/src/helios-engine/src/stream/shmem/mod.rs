@@ -1,9 +1,11 @@
+#[cfg(feature = "runtime")]
 mod cleanup;
 mod paths;
 mod reader;
 mod viewer;
 mod writer;
 
+#[cfg(feature = "runtime")]
 pub use cleanup::{cleanup_all_stream_files, cleanup_stream_files};
 pub use paths::preview_heartbeat_path;
 pub use paths::shmem_path;

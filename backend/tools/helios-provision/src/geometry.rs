@@ -342,7 +342,7 @@ pub fn build_plan(cfg: &Config, ab_start: u64, ab_end: u64, data_start: u64, tot
             reformat_if_missing_secondary_marker: p.reformat_if_missing_secondary_marker.unwrap_or(false),
         });
 
-        cursor = end + gap;
+        cursor = end + p.gap_after_mib.unwrap_or(gap);
     }
 
     Ok(plans)
@@ -422,6 +422,36 @@ mod tests {
         assert_eq!(plan.len(), 1);
         assert_eq!(plan[0].start_mib, 128);
         assert_eq!(plan[0].end_mib, 511);
+    }
+
+    #[test]
+    fn partition_gap_override_only_expands_selected_gap() {
+        let cfg = Config {
+            defaults: crate::config::Defaults { gap_mib: Some(4), ..Default::default() },
+            partitions: vec![
+                Partition { name: "ROOT_A".to_string(), number: 2, mode: Mode::Noop, size_mib: Some(96), ..Default::default() },
+                Partition { name: "ROOT_B".to_string(), number: 3, mode: Mode::Mkpart, size_mib: Some(96), gap_after_mib: Some(256), ..Default::default() },
+                Partition {
+                    name: "DATA".to_string(),
+                    number: 4,
+                    label: Some("DATA".to_string()),
+                    mode: Mode::Mkpart,
+                    fs_type: Some("ext4".to_string()),
+                    fill_to_end: Some(true),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+
+        let plan = build_plan(&cfg, 32, 1024, 1024, 1024).expect("plan");
+        assert_eq!(plan.len(), 3);
+        assert_eq!(plan[0].start_mib, 32);
+        assert_eq!(plan[0].end_mib, 128);
+        assert_eq!(plan[1].start_mib, 132);
+        assert_eq!(plan[1].end_mib, 228);
+        assert_eq!(plan[2].start_mib, 484);
+        assert_eq!(plan[2].end_mib, 1023);
     }
 
     #[test]

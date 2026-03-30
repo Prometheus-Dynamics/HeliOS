@@ -1,0 +1,12 @@
+[Unit]
+Description=Trim systemd journal to HeliOS memory limits
+After=systemd-journald.service local-fs.target
+RequiresMountsFor=/var/log/journal
+ConditionPathExists=/usr/bin/journalctl
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/helios-journal-vacuum.sh
+
+[Install]
+WantedBy=multi-user.target

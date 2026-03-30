@@ -59,7 +59,7 @@
         outWidth: null as number | null,
         outHeight: null as number | null,
       },
-      shadowRecorderEnabled: true,
+      shadowRecorderEnabled: false,
       streamCrop: [-1, 1, -1, 1] as [number, number, number, number],
       streamCropGuidesEnabled: true,
       streamCropApplying: false,

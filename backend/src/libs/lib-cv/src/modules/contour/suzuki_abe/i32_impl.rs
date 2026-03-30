@@ -133,6 +133,17 @@ pub(super) fn suzuki_abe_with_scratch_i32_compact_capped(
     suzuki_abe_with_scratch_i32_compact_mode(image, image_values, contour_points_store, contours, false, max_points, max_contours)
 }
 
+pub(super) fn suzuki_abe_with_scratch_i32_turn_compact_capped(
+    image: &GrayImage,
+    image_values: &mut Vec<i32>,
+    contour_points_store: &mut Vec<Point<i32>>,
+    contours: &mut Vec<CompactContour>,
+    max_points: usize,
+    max_contours: usize,
+) -> bool {
+    suzuki_abe_with_scratch_i32_compact_mode(image, image_values, contour_points_store, contours, true, max_points, max_contours)
+}
+
 fn suzuki_abe_with_scratch_i32_compact_mode(
     image: &GrayImage,
     image_values: &mut Vec<i32>,

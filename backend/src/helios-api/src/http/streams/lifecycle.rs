@@ -22,12 +22,24 @@ use super::sensor_bench;
 use super::types::{CodecInfo, CodecTunables, StartStreamResponse, StreamInfo};
 use super::util::{
     apply_effective_pipeline_layout, camera_id_for_manifest, default_ffmpeg_settings_descriptor, engine_error_body, list_streams_timeout, map_client_error, normalize_pipeline_manifest,
+    normalize_stream_encoder_manifest,
 };
 use super::validation::validate_stream_manifest;
 use super::wait::{wait_for_stream_gone, wait_for_stream_started};
 
 fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+pub(super) async fn persist_effective_stream_manifest(state: &AppState, camera_id: &str, stream_id: Uuid, requested_manifest: &StreamManifest) -> std::io::Result<()> {
+    let effective_manifest = state
+        .engine
+        .list_streams()
+        .await
+        .ok()
+        .and_then(|streams| streams.into_iter().find(|stream| stream.stream_id == stream_id).map(|stream| stream.manifest))
+        .unwrap_or_else(|| requested_manifest.clone());
+    streams_persist::persist_manifest_checked(camera_id, Some(stream_id), effective_manifest).await
 }
 
 pub(crate) fn descriptor_from_persisted_manifest(manifest: &StreamManifest) -> CaptureDescriptor {
@@ -118,6 +130,12 @@ fn recover_from_missing_selected_output(manifest: &mut StreamManifest, code: Eng
     changed
 }
 
+fn is_transient_missing_capture_descriptor(manifest: &StreamManifest, code: EngineErrorCode, reason: &str) -> bool {
+    matches!(code, EngineErrorCode::InvalidState)
+        && manifest.capture.backend == styx::BackendKind::Libcamera
+        && reason.to_ascii_lowercase().contains("missing capture descriptor")
+}
+
 fn is_legacy_media_file_token(raw: &str) -> bool {
     identity_tokens::normalize_token(raw).as_deref() == Some("media-file")
 }
@@ -172,6 +190,41 @@ const OV9782_AE_EXPOSURE_SHORT: i32 = 1;
 const OV9782_NOISE_REDUCTION_OFF: i32 = 0;
 const OV9782_DEFAULT_SHARPNESS: f32 = 1.25;
 
+fn capture_control_value_is_enabled(value: &helios_engine::capture::CaptureControlValue) -> bool {
+    match value {
+        helios_engine::capture::CaptureControlValue::Int(v) => *v != 0,
+        helios_engine::capture::CaptureControlValue::Uint(v) => *v != 0,
+        helios_engine::capture::CaptureControlValue::Float(v) => *v != 0.0,
+        helios_engine::capture::CaptureControlValue::Bool(v) => *v,
+        helios_engine::capture::CaptureControlValue::None => false,
+    }
+}
+
+fn manifest_controls_require_tdn_output(manifest: &StreamManifest, descriptor: &CaptureDescriptor) -> bool {
+    manifest
+        .capture
+        .controls
+        .iter()
+        .any(|control| capture_control_value_is_enabled(&control.value) && descriptor.controls.iter().find(|meta| meta.id.0 == control.id).is_some_and(|meta| meta.metadata.requires_tdn_output))
+}
+
+fn sanitize_capture_tdn_output_with_descriptor(manifest: &mut StreamManifest, descriptor: Option<&CaptureDescriptor>) {
+    if manifest.capture.backend != styx::BackendKind::Libcamera || !manifest.capture.enable_tdn_output {
+        return;
+    }
+    let Some(descriptor) = descriptor else {
+        return;
+    };
+    if !manifest_controls_require_tdn_output(manifest, descriptor) {
+        manifest.capture.enable_tdn_output = false;
+    }
+}
+
+fn sanitize_capture_tdn_output(manifest: &mut StreamManifest) {
+    let descriptor = helios_engine::capture::descriptor_for_config(&manifest.capture);
+    sanitize_capture_tdn_output_with_descriptor(manifest, descriptor.as_ref());
+}
+
 fn token_mentions_ov9782(raw: &str) -> bool {
     raw.to_ascii_lowercase().contains("ov9782")
 }
@@ -208,16 +261,6 @@ fn insert_manifest_control_if_missing(manifest: &mut StreamManifest, id: u32, va
     manifest.capture.controls.push(helios_engine::capture::ControlAssignment { id, value });
 }
 
-fn capture_control_enables_tdn(value: &helios_engine::capture::CaptureControlValue) -> bool {
-    match value {
-        helios_engine::capture::CaptureControlValue::Int(v) => *v != 0,
-        helios_engine::capture::CaptureControlValue::Uint(v) => *v != 0,
-        helios_engine::capture::CaptureControlValue::Float(v) => *v != 0.0,
-        helios_engine::capture::CaptureControlValue::Bool(v) => *v,
-        helios_engine::capture::CaptureControlValue::None => false,
-    }
-}
-
 fn apply_new_ov9782_defaults(manifest: &mut StreamManifest) {
     if !manifest_targets_ov9782(manifest) {
         return;
@@ -230,12 +273,7 @@ fn apply_new_ov9782_defaults(manifest: &mut StreamManifest) {
     insert_manifest_control_if_missing(manifest, LIBCAMERA_AE_EXPOSURE_MODE, helios_engine::capture::CaptureControlValue::Int(OV9782_AE_EXPOSURE_SHORT));
     insert_manifest_control_if_missing(manifest, LIBCAMERA_NOISE_REDUCTION_MODE, helios_engine::capture::CaptureControlValue::Int(OV9782_NOISE_REDUCTION_OFF));
     insert_manifest_control_if_missing(manifest, LIBCAMERA_SHARPNESS, helios_engine::capture::CaptureControlValue::Float(OV9782_DEFAULT_SHARPNESS.max(0.0)));
-    manifest.capture.enable_tdn_output = manifest
-        .capture
-        .controls
-        .iter()
-        .find(|ctl| ctl.id == LIBCAMERA_NOISE_REDUCTION_MODE)
-        .is_some_and(|ctl| capture_control_enables_tdn(&ctl.value));
+    manifest.capture.enable_tdn_output = false;
 }
 
 async fn resolve_stream_owner_camera_id(state: &AppState, requested_id: Uuid) -> Option<String> {
@@ -471,6 +509,7 @@ async fn merge_stream_manifest_state(state: &AppState, manifest: &mut StreamMani
             manifest.decoder_settings = base.decoder_settings.clone();
         }
     }
+    normalize_stream_encoder_manifest(manifest);
 
     // Preserve capture interval unless explicitly provided.
     // Libcamera FPS should not be pinned by a persisted `interval`. Prefer the explicit FPS field
@@ -529,13 +568,6 @@ async fn merge_stream_manifest_state(state: &AppState, manifest: &mut StreamMani
         merged.remove(&30);
     }
     manifest.capture.controls = merged.into_iter().map(|(id, value)| helios_engine::capture::ControlAssignment { id, value }).collect();
-
-    if manifest.capture.backend == styx::BackendKind::Libcamera {
-        let tdn_value = manifest.capture.controls.iter().find(|ctl| ctl.id == LIBCAMERA_NOISE_REDUCTION_MODE).map(|ctl| capture_control_enables_tdn(&ctl.value));
-        if let Some(enabled) = tdn_value {
-            manifest.capture.enable_tdn_output = enabled;
-        }
-    }
 
     if manifest.pose.is_none() {
         manifest.pose = Some(default_identity_rig_pose());
@@ -649,6 +681,8 @@ pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> R
             return validation_error_response("stream manifest failed semantic validation", err.issues, err.warnings);
         }
     }
+    sanitize_capture_tdn_output(&mut manifest);
+    normalize_stream_encoder_manifest(&mut manifest);
     if let Some(response) = ensure_unique_stream_identity(&state, &manifest, requested_id, &camera_id).await {
         return response;
     }
@@ -696,7 +730,7 @@ pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> R
         match state.engine.start_stream(manifest.clone()).await {
             Ok(EngineEvent::Started { stream_id, descriptor, .. }) => {
                 let persist_id = owner_camera_id.clone().unwrap_or_else(|| camera_id_for_manifest(&manifest));
-                if let Err(err) = streams_persist::persist_manifest_checked(&persist_id, Some(stream_id), manifest.clone()).await {
+                if let Err(err) = persist_effective_stream_manifest(&state, &persist_id, stream_id, &manifest).await {
                     return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("stream started live but failed to persist: {err}")))).into_response();
                 }
                 state.services.streams.invalidate_stream_list_cache().await;
@@ -713,7 +747,8 @@ pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> R
                 }
                 let is_transient_busy =
                     matches!(code, helios_engine::ipc::EngineErrorCode::InvalidState) && (reason.contains("Device or resource busy") || reason.contains("resource busy") || reason.contains("EBUSY"));
-                if is_transient_busy && attempts < 10 {
+                let is_transient_descriptor = is_transient_missing_capture_descriptor(&manifest, code, &reason);
+                if (is_transient_busy || is_transient_descriptor) && attempts < 10 {
                     tokio::time::sleep(Duration::from_millis(50 * attempts as u64)).await;
                     continue;
                 }
@@ -722,7 +757,7 @@ pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> R
             Ok(_) | Err(_) => match wait_for_stream_started(&state, requested_id, Duration::from_secs(20)).await {
                 Ok(Some(descriptor)) => {
                     let persist_id = owner_camera_id.clone().unwrap_or_else(|| camera_id_for_manifest(&manifest));
-                    if let Err(err) = streams_persist::persist_manifest_checked(&persist_id, Some(requested_id), manifest.clone()).await {
+                    if let Err(err) = persist_effective_stream_manifest(&state, &persist_id, requested_id, &manifest).await {
                         return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("stream started live but failed to persist: {err}"))))
                             .into_response();
                     }
@@ -822,16 +857,13 @@ mod tests {
     use helios_engine::capture::{BackendHandle, BackendKind, CaptureConfig, ModeId};
     use helios_engine::identity::DeviceIdentity;
     use std::collections::BTreeMap;
+    use styx::core::controls::{Access, ControlId, ControlKind, ControlMetadata, ControlValue};
     use styx::prelude::{ColorSpace, FourCc, MediaFormat, Resolution};
 
     fn sample_ov9782_manifest() -> StreamManifest {
         let format = MediaFormat::new(FourCc::new(*b"NV12"), Resolution::new(1280, 800).unwrap(), ColorSpace::Srgb);
         StreamManifest {
-            identity: DeviceIdentity {
-                id: None,
-                alias: Some("ov9782 cam".to_string()),
-                hardware_id: None,
-            },
+            identity: DeviceIdentity { id: None, alias: Some("ov9782 cam".to_string()), hardware_id: None },
             capture: CaptureConfig {
                 device_keys: vec!["ov9782".to_string()],
                 backend: BackendKind::Libcamera,
@@ -865,6 +897,30 @@ mod tests {
         }
     }
 
+    fn sample_descriptor_with_noise_reduction(requires_tdn_output: bool) -> CaptureDescriptor {
+        CaptureDescriptor {
+            modes: Vec::new(),
+            controls: vec![helios_engine::capture::CaptureControl {
+                id: ControlId(LIBCAMERA_NOISE_REDUCTION_MODE),
+                name: "NoiseReductionMode".to_string(),
+                kind: ControlKind::IntMenu,
+                access: Access::ReadWrite,
+                min: ControlValue::Int(0),
+                max: ControlValue::Int(4),
+                default: ControlValue::Int(0),
+                step: None,
+                menu: Some(vec![
+                    "NoiseReductionModeOff".to_string(),
+                    "NoiseReductionModeFast".to_string(),
+                    "NoiseReductionModeHighQuality".to_string(),
+                    "NoiseReductionModeMinimal".to_string(),
+                    "NoiseReductionModeZSL".to_string(),
+                ]),
+                metadata: ControlMetadata { requires_tdn_output },
+            }],
+        }
+    }
+
     #[test]
     fn ov9782_defaults_disable_tdn_output_when_noise_reduction_is_missing() {
         let mut manifest = sample_ov9782_manifest();
@@ -877,5 +933,39 @@ mod tests {
             manifest.capture.controls.iter().find(|ctl| ctl.id == LIBCAMERA_NOISE_REDUCTION_MODE).map(|ctl| ctl.value.clone()),
             Some(helios_engine::capture::CaptureControlValue::Int(OV9782_NOISE_REDUCTION_OFF))
         );
+    }
+
+    #[test]
+    fn ov9782_defaults_keep_tdn_output_disabled_even_with_nonzero_noise_reduction() {
+        let mut manifest = sample_ov9782_manifest();
+        manifest.capture.controls.push(helios_engine::capture::ControlAssignment { id: LIBCAMERA_NOISE_REDUCTION_MODE, value: helios_engine::capture::CaptureControlValue::Int(1) });
+
+        apply_new_ov9782_defaults(&mut manifest);
+
+        assert!(!manifest.capture.enable_tdn_output);
+    }
+
+    #[test]
+    fn sanitize_capture_tdn_output_clears_redundant_force_flag() {
+        let mut manifest = sample_ov9782_manifest();
+        manifest.capture.controls.push(helios_engine::capture::ControlAssignment { id: LIBCAMERA_NOISE_REDUCTION_MODE, value: helios_engine::capture::CaptureControlValue::Int(1) });
+        manifest.capture.enable_tdn_output = true;
+
+        let descriptor = sample_descriptor_with_noise_reduction(false);
+        sanitize_capture_tdn_output_with_descriptor(&mut manifest, Some(&descriptor));
+
+        assert!(!manifest.capture.enable_tdn_output);
+    }
+
+    #[test]
+    fn sanitize_capture_tdn_output_preserves_required_tdn_flag() {
+        let mut manifest = sample_ov9782_manifest();
+        manifest.capture.controls.push(helios_engine::capture::ControlAssignment { id: LIBCAMERA_NOISE_REDUCTION_MODE, value: helios_engine::capture::CaptureControlValue::Int(1) });
+        manifest.capture.enable_tdn_output = true;
+
+        let descriptor = sample_descriptor_with_noise_reduction(true);
+        sanitize_capture_tdn_output_with_descriptor(&mut manifest, Some(&descriptor));
+
+        assert!(manifest.capture.enable_tdn_output);
     }
 }

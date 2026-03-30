@@ -57,15 +57,6 @@ static PREVIEW_OUTAGE: Lazy<std::time::Duration> = Lazy::new(|| {
         .unwrap_or_else(|| std::time::Duration::from_secs(15))
 });
 
-static PREVIEW_FORMAT_WARMUP: Lazy<std::time::Duration> = Lazy::new(|| {
-    std::env::var("HELIOS_PREVIEW_FORMAT_WARMUP_MS")
-        .ok()
-        .and_then(|raw| raw.parse::<u64>().ok())
-        .map(std::time::Duration::from_millis)
-        .map(|d| d.clamp(std::time::Duration::from_millis(0), std::time::Duration::from_secs(2)))
-        .unwrap_or_else(|| std::time::Duration::from_millis(350))
-});
-
 fn is_mjpeg_fourcc(fourcc: styx::prelude::FourCc) -> bool {
     matches!(&fourcc.to_u32().to_le_bytes(), b"MJPG" | b"JPEG")
 }
@@ -135,40 +126,6 @@ fn touch_preview_if_due(id: Uuid, last_touch: &mut Instant, interval: Duration) 
     }
     let _ = touch_stream_preview(id);
     *last_touch = Instant::now();
-}
-
-async fn prefer_jpeg_preview_header(id: Uuid, header: ShmemFrameHeader) -> ShmemFrameHeader {
-    if header.len == 0 || header.fourcc.to_u32() == 0 || is_mjpeg_fourcc(header.fourcc) {
-        return header;
-    }
-    let warmup = *PREVIEW_FORMAT_WARMUP;
-    if warmup.is_zero() {
-        return header;
-    }
-    match tokio::task::spawn_blocking(move || {
-        let deadline = Instant::now() + warmup;
-        let mut best = header;
-        let mut last_touch = Instant::now().checked_sub(Duration::from_secs(10)).unwrap_or_else(Instant::now);
-        while Instant::now() < deadline {
-            touch_preview_if_due(id, &mut last_touch, Duration::from_millis(500));
-            if let Ok(candidate) = read_latest_header(id)
-                && candidate.len > 0
-                && candidate.fourcc.to_u32() != 0
-            {
-                if is_mjpeg_fourcc(candidate.fourcc) {
-                    return candidate;
-                }
-                best = candidate;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        best
-    })
-    .await
-    {
-        Ok(updated) => updated,
-        Err(_) => header,
-    }
 }
 
 pub(crate) async fn stream_format(id: Uuid, query: PreviewSelectionQuery) -> Response {
@@ -251,7 +208,6 @@ pub(crate) async fn preview_stream(state: AppState, id: Uuid, query: PreviewSele
         Ok(Ok(Ok(header))) => header,
         _ => return (StatusCode::NOT_FOUND, Json(engine_error_body(Some(EngineErrorCode::NotFound), "preview unavailable"))).into_response(),
     };
-    let header = prefer_jpeg_preview_header(id, header).await;
     if header.len == 0 || header.fourcc.to_u32() == 0 {
         return (StatusCode::NOT_FOUND, Json(engine_error_body(Some(EngineErrorCode::NotFound), "preview unavailable"))).into_response();
     }

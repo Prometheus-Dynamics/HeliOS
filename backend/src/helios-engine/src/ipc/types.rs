@@ -1230,10 +1230,7 @@ fn default_preview_jpeg_quality_override() -> Option<u8> {
 }
 
 pub(crate) fn default_shadow_recorder_enabled() -> bool {
-    // Feature-gated for now; enable explicitly.
-    let raw = env::var("HELIOS_ENABLE_SHADOW_RECORDER").ok().unwrap_or_default();
-    let v = raw.trim().to_ascii_lowercase();
-    matches!(v.as_str(), "1" | "true" | "yes" | "y" | "on" | "enabled")
+    false
 }
 
 fn max_host_buffer() -> usize {

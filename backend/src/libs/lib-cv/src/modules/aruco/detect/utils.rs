@@ -61,8 +61,21 @@ pub(crate) fn is_convex_quad(points: &[Point<f32>; 4]) -> bool {
 }
 
 #[inline(always)]
+fn cos_within_signed_bound(dot: f32, denom_sq: f32, bound: f32, is_lower: bool) -> bool {
+    let bound_sq_times_denom = (bound * bound) * denom_sq;
+    if is_lower {
+        if bound <= 0.0 { dot >= 0.0 || (dot * dot) <= bound_sq_times_denom } else { dot > 0.0 && (dot * dot) >= bound_sq_times_denom }
+    } else if bound >= 0.0 {
+        dot <= 0.0 || (dot * dot) <= bound_sq_times_denom
+    } else {
+        dot < 0.0 && (dot * dot) >= bound_sq_times_denom
+    }
+}
+
+#[inline(always)]
 pub(super) fn angles_within_cos_range(points: &[Point<f32>; 4], cos_min: f32, cos_max: f32) -> bool {
     debug_assert!(cos_min <= cos_max);
+    const COS_DENOM_EPSILON_SQ: f32 = f32::EPSILON * f32::EPSILON;
     for i in 0..4 {
         let prev = points[(i + 3) & 3];
         let curr = points[i];
@@ -76,13 +89,12 @@ pub(super) fn angles_within_cos_range(points: &[Point<f32>; 4], cos_min: f32, co
         let dot = abx * cbx + aby * cby;
         let ab2 = abx * abx + aby * aby;
         let cb2 = cbx * cbx + cby * cby;
-        let denom = (ab2 * cb2).sqrt();
-        if denom <= f32::EPSILON {
+        let denom_sq = ab2 * cb2;
+        if denom_sq <= COS_DENOM_EPSILON_SQ {
             return false;
         }
 
-        let cos_theta = (dot / denom).clamp(-1.0, 1.0);
-        if cos_theta < cos_min || cos_theta > cos_max {
+        if !cos_within_signed_bound(dot, denom_sq, cos_min, true) || !cos_within_signed_bound(dot, denom_sq, cos_max, false) {
             return false;
         }
     }
@@ -169,6 +181,66 @@ pub(super) fn refined_quad_is_reasonable(original: &[Point<f32>; 4], refined: &[
     }
 
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reference_angles_within_cos_range(points: &[Point<f32>; 4], cos_min: f32, cos_max: f32) -> bool {
+        for i in 0..4 {
+            let prev = points[(i + 3) & 3];
+            let curr = points[i];
+            let next = points[(i + 1) & 3];
+
+            let abx = prev.x - curr.x;
+            let aby = prev.y - curr.y;
+            let cbx = next.x - curr.x;
+            let cby = next.y - curr.y;
+
+            let dot = abx * cbx + aby * cby;
+            let ab2 = abx * abx + aby * aby;
+            let cb2 = cbx * cbx + cby * cby;
+            let denom = (ab2 * cb2).sqrt();
+            if denom <= f32::EPSILON {
+                return false;
+            }
+
+            let cos_theta = (dot / denom).clamp(-1.0, 1.0);
+            if cos_theta < cos_min || cos_theta > cos_max {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn next_rand(state: &mut u64) -> f32 {
+        *state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let value = ((*state >> 32) as u32) as f32 / (u32::MAX as f32);
+        (value * 200.0) - 100.0
+    }
+
+    #[test]
+    fn angles_within_cos_range_matches_reference() {
+        let bounds = [(-0.7, 0.7), (-0.6, 0.2), (0.1, 0.8), (-0.95, -0.1)];
+        let mut state = 1u64;
+
+        for (cos_min, cos_max) in bounds {
+            for _ in 0..4096 {
+                let points = [
+                    Point::new(next_rand(&mut state), next_rand(&mut state)),
+                    Point::new(next_rand(&mut state), next_rand(&mut state)),
+                    Point::new(next_rand(&mut state), next_rand(&mut state)),
+                    Point::new(next_rand(&mut state), next_rand(&mut state)),
+                ];
+                assert_eq!(
+                    angles_within_cos_range(&points, cos_min, cos_max),
+                    reference_angles_within_cos_range(&points, cos_min, cos_max),
+                    "mismatch for bounds ({cos_min}, {cos_max}) and points {points:?}"
+                );
+            }
+        }
+    }
 }
 
 pub(super) fn normalize_warped_patch(patch: &mut GrayImage, min_range: u8) -> bool {

@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use super::detect::{ArucoTagDetectorConfig, candidate_quad_from_contour, candidate_quad_from_contour_fast_i32_in};
-use crate::contour::suzuki_abe::{CompactContour, suzuki_abe_i32_compact_capped_into};
+use crate::contour::suzuki_abe::{CompactContour, suzuki_abe_i32_turn_compact_capped_into};
 use crate::modules::image::luma::with_luma8_frame;
 
 const ADAPTIVE_FAST_CANDIDATE_CONTOUR_CAP: usize = 96;
@@ -245,8 +245,6 @@ struct PreparedContour {
 
 #[derive(Default)]
 struct AdaptiveExtractScratch {
-    work_i32: Vec<CvPoint<i32>>,
-    compress_scratch: Vec<CvPoint<i32>>,
     roi_bytes: Vec<u8>,
     raw_point_store: Vec<CvPoint<i32>>,
     raw_contours: Vec<CompactContour>,
@@ -260,8 +258,6 @@ struct AdaptiveExtractScratch {
 
 impl AdaptiveExtractScratch {
     fn release_on_idle(&mut self) {
-        release_retained_vec(&mut self.work_i32);
-        release_retained_vec(&mut self.compress_scratch);
         release_retained_vec(&mut self.roi_bytes);
         release_retained_vec(&mut self.raw_point_store);
         release_retained_vec(&mut self.raw_contours);
@@ -275,8 +271,6 @@ impl AdaptiveExtractScratch {
 
     fn compact_after_frame(&mut self, image_pixels: usize, point_cap: usize, contour_cap: usize, _fast_cap: usize) {
         let work_cap = point_cap.min(16 * 1024).max(256);
-        trim_retained_vec(&mut self.work_i32, work_cap);
-        trim_retained_vec(&mut self.compress_scratch, work_cap);
         trim_retained_vec(&mut self.roi_bytes, image_pixels.max(1024));
         trim_retained_vec(&mut self.raw_point_store, point_cap.max(1024));
         trim_retained_vec(&mut self.raw_contours, contour_cap.max(64));
@@ -344,7 +338,7 @@ fn cap_quads_by_area(quads: &mut Vec<[CvPoint<f32>; 4]>, max_quads: usize) {
 }
 
 #[inline(always)]
-fn rank_candidate_contours(indices: &mut Vec<usize>, prepared: &[PreparedContour], keep: usize) {
+fn select_candidate_contours(indices: &mut Vec<usize>, prepared: &[PreparedContour], keep: usize) {
     indices.clear();
     if keep == 0 || prepared.is_empty() {
         return;
@@ -354,7 +348,6 @@ fn rank_candidate_contours(indices: &mut Vec<usize>, prepared: &[PreparedContour
         indices.select_nth_unstable_by(keep - 1, |&a, &b| prepared[b].len.cmp(&prepared[a].len));
         indices.truncate(keep);
     }
-    indices.sort_unstable_by(|&a, &b| prepared[b].len.cmp(&prepared[a].len));
 }
 
 #[inline(always)]
@@ -378,33 +371,6 @@ fn contour_to_f32(points: &[CvPoint<i32>], out: &mut Vec<CvPoint<f32>>, off_x: i
 #[inline(always)]
 fn should_parallelize_fast_candidate_filter(contour_count: usize) -> bool {
     contour_count >= ADAPTIVE_FAST_FILTER_PAR_MIN_CONTOURS && rayon::current_num_threads() > 1
-}
-
-#[inline(always)]
-fn compress_chain_turn_points(points: &mut Vec<CvPoint<i32>>, scratch: &mut Vec<CvPoint<i32>>) {
-    let n = points.len();
-    if n < 32 {
-        return;
-    }
-
-    scratch.clear();
-    scratch.reserve(n.saturating_sub(scratch.capacity()));
-    for i in 0..n {
-        let prev = points[(i + n - 1) % n];
-        let curr = points[i];
-        let next = points[(i + 1) % n];
-        let d1x = (curr.x - prev.x).signum();
-        let d1y = (curr.y - prev.y).signum();
-        let d2x = (next.x - curr.x).signum();
-        let d2y = (next.y - curr.y).signum();
-        if d1x != d2x || d1y != d2y {
-            scratch.push(curr);
-        }
-    }
-
-    if scratch.len() >= 8 && scratch.len() + 4 < n {
-        std::mem::swap(points, scratch);
-    }
 }
 
 fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig, diag: f32) -> Vec<[CvPoint<f32>; 4]> {
@@ -507,22 +473,8 @@ fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig
     let min_perimeter_for_area = if detector_config.min_area > f32::EPSILON { Some((4.0 * std::f32::consts::PI * detector_config.min_area).sqrt()) } else { None };
 
     with_adaptive_extract_scratch(|scratch| {
-        let AdaptiveExtractScratch {
-            work_i32,
-            compress_scratch,
-            roi_bytes,
-            raw_point_store,
-            raw_contours,
-            point_store,
-            prepared,
-            candidate_idx,
-            fast_downsampled_i32,
-            fast_approx_i32,
-            pts_f32,
-        } = &mut *scratch;
+        let AdaptiveExtractScratch { roi_bytes, raw_point_store, raw_contours, point_store, prepared, candidate_idx, fast_downsampled_i32, fast_approx_i32, pts_f32 } = &mut *scratch;
 
-        work_i32.clear();
-        compress_scratch.clear();
         roi_bytes.clear();
         raw_point_store.clear();
         raw_contours.clear();
@@ -546,11 +498,11 @@ fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig
                 dst_row.copy_from_slice(src_row);
             }
             let roi = GrayImage::from_raw(roi_w as u32, roi_h as u32, std::mem::take(roi_bytes)).unwrap_or_else(|| GrayImage::new(roi_w as u32, roi_h as u32));
-            let trace_complete = suzuki_abe_i32_compact_capped_into(&roi, raw_point_store, raw_contours, trace_point_budget, trace_contour_budget);
+            let trace_complete = suzuki_abe_i32_turn_compact_capped_into(&roi, raw_point_store, raw_contours, trace_point_budget, trace_contour_budget);
             *roi_bytes = roi.into_raw();
             (min_x as i32, min_y as i32, trace_complete)
         } else {
-            (0, 0, suzuki_abe_i32_compact_capped_into(binary, raw_point_store, raw_contours, trace_point_budget, trace_contour_budget))
+            (0, 0, suzuki_abe_i32_turn_compact_capped_into(binary, raw_point_store, raw_contours, trace_point_budget, trace_contour_budget))
         };
         if !trace_complete {
             log_adaptive_trace_budget_hit(binary.width(), binary.height(), trace_point_budget, trace_contour_budget, preprocess_cap);
@@ -568,7 +520,7 @@ fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig
             if points.len() < 4 {
                 continue;
             }
-            let contour_len = points.len() as f32;
+            let contour_len = contour.chain_len as f32;
             if contour_len > max_perimeter || contour_len * max_step < min_perimeter {
                 continue;
             }
@@ -589,16 +541,9 @@ fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig
                 }
             }
 
-            work_i32.clear();
-            work_i32.extend_from_slice(points);
-            compress_chain_turn_points(work_i32, compress_scratch);
-            if work_i32.len() < 4 {
-                continue;
-            }
-
             let start = point_store.len();
-            point_store.extend_from_slice(work_i32);
-            prepared.push(PreparedContour { start, len: work_i32.len(), perimeter: contour_len });
+            point_store.extend_from_slice(points);
+            prepared.push(PreparedContour { start, len: points.len(), perimeter: contour_len });
         }
 
         report_adaptive_allocation_high_water("aruco.adaptive_prepared_contours", prepared_contours_bytes(point_store.capacity(), prepared.capacity()));
@@ -631,11 +576,11 @@ fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig
                 out
             } else {
                 let fallback_cap = fallback_cap_limit.min(prepared.len());
-                rank_candidate_contours(candidate_idx, prepared, fallback_cap);
+                select_candidate_contours(candidate_idx, prepared, fallback_cap);
                 let fast_candidates = fast_cap.min(candidate_idx.len());
                 report_adaptive_allocation_high_water("aruco.adaptive_candidate_index", candidate_idx.capacity() * size_of::<usize>());
 
-                let fast_results: Vec<Option<[CvPoint<f32>; 4]>> = if should_parallelize_fast_candidate_filter(fast_candidates) {
+                let mut quads: Vec<[CvPoint<f32>; 4]> = if should_parallelize_fast_candidate_filter(fast_candidates) {
                     candidate_idx[..fast_candidates]
                         .par_iter()
                         .map_init(
@@ -663,12 +608,13 @@ fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig
                                 quad
                             },
                         )
+                        .filter_map(|quad| quad)
                         .collect()
                 } else {
                     let mut results = Vec::with_capacity(fast_candidates);
                     for &idx in candidate_idx.iter().take(fast_candidates) {
                         let contour = prepared[idx];
-                        let quad = candidate_quad_from_contour_fast_i32_in(
+                        if let Some(quad) = candidate_quad_from_contour_fast_i32_in(
                             prepared_contour_points(&contour, point_store),
                             contour.perimeter,
                             min_perimeter_for_area,
@@ -685,18 +631,14 @@ fn extract_quads_from_binary(binary: &GrayImage, config: &AdaptiveDetectorConfig
                             }
                             quad
                         })
-                        .filter(|quad| quad_passes_post_filters(quad, config, width, height));
-                        results.push(quad);
+                        .filter(|quad| quad_passes_post_filters(quad, config, width, height))
+                        {
+                            results.push(quad);
+                        }
                     }
                     results
                 };
 
-                let mut quads: Vec<[CvPoint<f32>; 4]> = Vec::with_capacity(fast_results.len());
-                for quad in fast_results {
-                    if let Some(quad) = quad {
-                        quads.push(quad);
-                    }
-                }
                 report_adaptive_allocation_high_water("aruco.adaptive_quads", quads.capacity() * size_of::<[CvPoint<f32>; 4]>());
 
                 let fallback_trigger_quads_max = adaptive_fallback_trigger_quads_max();
@@ -737,8 +679,8 @@ pub fn adaptive_quads(frame: &DynamicImage, config: &AdaptiveDetectorConfig) -> 
 #[cfg(test)]
 mod tests {
     use super::{
-        ADAPTIVE_TRACE_POINT_BUDGET_MIN, AdaptiveDetectorConfig, adaptive_quads_from_mask, adaptive_targeted_fallback_cap, adaptive_targeted_fast_cap, adaptive_targeted_preprocess_cap,
-        adaptive_trace_point_budget,
+        ADAPTIVE_TRACE_POINT_BUDGET_MIN, AdaptiveDetectorConfig, PreparedContour, adaptive_quads_from_mask, adaptive_targeted_fallback_cap, adaptive_targeted_fast_cap,
+        adaptive_targeted_preprocess_cap, adaptive_trace_point_budget, select_candidate_contours,
     };
     use crate::modules::aruco::tag::ArucoTagDecoding;
     use crate::modules::aruco::tag::dictionary::family::Family36H11;
@@ -768,6 +710,23 @@ mod tests {
         assert_eq!(adaptive_targeted_fast_cap(2, 96), 24);
         assert_eq!(adaptive_targeted_preprocess_cap(2, 256, 24), 48);
         assert_eq!(adaptive_targeted_fallback_cap(2, 128, 24), 24);
+    }
+
+    #[test]
+    fn candidate_selection_keeps_top_lengths() {
+        let prepared = vec![
+            PreparedContour { start: 0, len: 5, perimeter: 0.0 },
+            PreparedContour { start: 0, len: 12, perimeter: 0.0 },
+            PreparedContour { start: 0, len: 7, perimeter: 0.0 },
+            PreparedContour { start: 0, len: 9, perimeter: 0.0 },
+        ];
+
+        let mut indices = Vec::new();
+        select_candidate_contours(&mut indices, &prepared, 2);
+
+        let mut lengths: Vec<usize> = indices.iter().map(|&idx| prepared[idx].len).collect();
+        lengths.sort_unstable();
+        assert_eq!(lengths, vec![9, 12]);
     }
 
     #[test]

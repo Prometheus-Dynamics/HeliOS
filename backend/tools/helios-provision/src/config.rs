@@ -49,6 +49,7 @@ pub struct Partition {
     pub run_resizefs: Option<bool>,
     pub mount_point: Option<String>,
     pub mount_label: Option<String>,
+    pub gap_after_mib: Option<u64>,
     pub secondary_marker: Option<String>,
     pub reformat_if_missing_secondary_marker: Option<bool>,
 }

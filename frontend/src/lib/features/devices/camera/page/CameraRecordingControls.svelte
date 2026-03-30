@@ -215,7 +215,7 @@
     const manifest = manifestFor(ctx.stream);
     const backend = String(manifest?.capture?.backend ?? '').trim().toLowerCase();
     if (backend === 'file') return false;
-    return Boolean(manifest?.shadow_recorder_enabled ?? true);
+    return Boolean(manifest?.shadow_recorder_enabled ?? false);
   });
   const preferredMultiplexCodec = $derived.by(() => {
     const encoderId = String(manifestFor(ctx.stream)?.encoder_id ?? '').toLowerCase();

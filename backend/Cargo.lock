@@ -2938,7 +2938,6 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
- "turbojpeg",
  "utoipa",
  "uuid",
 ]
@@ -6954,6 +6953,7 @@ dependencies = [
  "styx-capture",
  "styx-core-rs",
  "thiserror 2.0.18",
+ "turbojpeg",
  "utoipa",
  "yuvutils-rs",
 ]

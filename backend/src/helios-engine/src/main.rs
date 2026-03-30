@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 use std::{fs, io::Write, path::PathBuf};
 
 use helios_engine::ipc::server::EngineIpcServer;
@@ -16,7 +17,16 @@ fn main() {
 
     let worker_threads = read_thread_env("HELIOS_ENGINE_WORKER_THREADS", default_engine_worker_threads(), 1, 4);
     let max_blocking_threads = read_thread_env("HELIOS_ENGINE_MAX_BLOCKING_THREADS", default_engine_max_blocking_threads(worker_threads), 1, 16);
-    let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(worker_threads).max_blocking_threads(max_blocking_threads).enable_all().build().expect("tokio runtime");
+    let thread_stack_size = read_thread_env("HELIOS_ENGINE_THREAD_STACK_BYTES", default_engine_thread_stack_bytes(), 256 * 1024, 8 * 1024 * 1024);
+    let blocking_keep_alive = read_duration_env("HELIOS_ENGINE_BLOCKING_KEEP_ALIVE_MS", 3_000, 250, 60_000);
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(worker_threads)
+        .max_blocking_threads(max_blocking_threads)
+        .thread_stack_size(thread_stack_size)
+        .thread_keep_alive(blocking_keep_alive)
+        .enable_all()
+        .build()
+        .expect("tokio runtime");
     runtime.block_on(async_main());
 }
 
@@ -30,6 +40,14 @@ fn default_engine_worker_threads() -> usize {
 
 fn default_engine_max_blocking_threads(worker_threads: usize) -> usize {
     (worker_threads.saturating_mul(2)).clamp(2, 8)
+}
+
+fn default_engine_thread_stack_bytes() -> usize {
+    2 * 1024 * 1024
+}
+
+fn read_duration_env(var: &str, default_ms: u64, min_ms: u64, max_ms: u64) -> Duration {
+    Duration::from_millis(std::env::var(var).ok().and_then(|value| value.trim().parse::<u64>().ok()).unwrap_or(default_ms).clamp(min_ms, max_ms))
 }
 
 async fn async_main() {

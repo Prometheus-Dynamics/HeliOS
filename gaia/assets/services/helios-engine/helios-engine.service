@@ -27,6 +27,7 @@ Environment=MALLOC_ARENA_MAX=1
 Environment=MALLOC_TRIM_THRESHOLD_=65536
 Environment=MALLOC_MMAP_THRESHOLD_=65536
 Environment=MALLOC_TOP_PAD_=65536
+Environment=RUST_MIN_STACK=2097152
 # Keep enough parallelism for the fast ArUco graph to use the available CM5 cores without
 # overprovisioning threads or blocking pools beyond the CPU count.
 Environment=RAYON_NUM_THREADS=4
@@ -35,7 +36,7 @@ Environment=HELIOS_ENGINE_MAX_BLOCKING_THREADS=4
 Environment=HELIOS_ENGINE_CACHE_NODE_REGISTRY=0
 Environment=HELIOS_NODE_REGISTRY_SNAPSHOT_PATH=/var/lib/helios/state/node-registry.snapshot.json
 Environment=STYX_LIBCAMERA_STOP_WHEN_IDLE=1
-Environment=HELIOS_STYX_CAPTURE_QUEUE_DEPTH=2
+Environment=HELIOS_STYX_CAPTURE_QUEUE_DEPTH=1
 # Keep stall recovery enabled, but avoid overly aggressive 1s restart churn under
 # heavy graph load; repeated restart loops correlate with large RSS growth.
 Environment=HELIOS_CAPTURE_STALL_MS=6000

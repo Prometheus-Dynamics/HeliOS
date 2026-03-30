@@ -38,35 +38,10 @@ mod warp;
 // internals into this module scope. Submodules continue to `use super::*;` and call helpers
 // unqualified without having to thread paths everywhere.
 #[allow(unused_imports)]
-use aruco_calibrated::*;
-#[allow(unused_imports)]
-use aruco_decode::*;
-#[allow(unused_imports)]
-use aruco_warp::*;
-#[allow(unused_imports)]
-use calibrated::*;
-#[allow(unused_imports)]
-use candidates::*;
-#[allow(unused_imports)]
-use debug::*;
-#[allow(unused_imports)]
-use decode_quads::*;
-#[allow(unused_imports)]
-use distortion::*;
-#[allow(unused_imports)]
-use quad_decode::*;
-#[allow(unused_imports)]
-use refine::*;
-#[allow(unused_imports)]
-use sampled::*;
-#[allow(unused_imports)]
-use sampling::*;
-#[allow(unused_imports)]
-use types::*;
-#[allow(unused_imports)]
-use utils::*;
-#[allow(unused_imports)]
-use warp::*;
+use self::{
+    aruco_calibrated::*, aruco_decode::*, aruco_warp::*, calibrated::*, candidates::*, debug::*, decode_quads::*, distortion::*, quad_decode::*, refine::*, sampled::*, sampling::*, types::*,
+    utils::*, warp::*,
+};
 
 pub use aruco_calibrated::{
     decode_quads_aruco_calibrated_with_config, decode_quads_aruco_calibrated_with_config_no_bits, decode_quads_aruco_with_config, decode_quads_aruco_with_config_gray,

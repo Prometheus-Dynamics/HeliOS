@@ -1,6 +1,6 @@
 <script lang="ts">
   import { browser } from '$app/environment';
-  import { onDestroy } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import FaIcon from '$lib/components/icons/FaIcon.svelte';
   import { faClipboard } from '@fortawesome/free-solid-svg-icons';
   import { openStreamOutputsSocket, type StreamOutputsSocket } from '$lib/api/streamOutputs';
@@ -33,11 +33,15 @@
   let expandedPorts = $state<string[]>([]);
   let socket = $state<StreamOutputsSocket | null>(null);
   let socketStreamId = $state<string | null>(null);
+  let panelHost = $state<HTMLDivElement | null>(null);
+  let documentVisible = $state(true);
+  let viewportVisible = $state(true);
 
   let copiedPort = $state<string | null>(null);
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
   const expandedSet = $derived.by(() => new Set(expandedPorts));
+  const panelVisible = $derived(documentVisible && viewportVisible);
 
   const filteredPorts = $derived.by(() => {
     const query = portSearch.trim().toLowerCase();
@@ -216,7 +220,37 @@
     const normalized = typeof streamId === 'string' ? streamId.trim() : '';
     if (!normalized) return;
     if (!socket || socketStreamId !== normalized) return;
-    socket.subscribe(expandedPorts, { intervalMs: SUBSCRIBE_INTERVAL_MS });
+    socket.subscribe(panelVisible ? expandedPorts : [], { intervalMs: SUBSCRIBE_INTERVAL_MS });
+  });
+
+  onMount(() => {
+    if (!browser) return;
+
+    const syncDocumentVisibility = () => {
+      documentVisible = document.visibilityState !== 'hidden';
+    };
+
+    syncDocumentVisibility();
+    document.addEventListener('visibilitychange', syncDocumentVisibility);
+
+    let observer: IntersectionObserver | null = null;
+    if (typeof IntersectionObserver !== 'undefined' && panelHost) {
+      observer = new IntersectionObserver(
+        (entries) => {
+          const entry = entries[0];
+          viewportVisible = Boolean(entry?.isIntersecting || (entry?.intersectionRatio ?? 0) > 0);
+        },
+        { threshold: [0, 0.05] }
+      );
+      observer.observe(panelHost);
+    } else {
+      viewportVisible = true;
+    }
+
+    return () => {
+      document.removeEventListener('visibilitychange', syncDocumentVisibility);
+      observer?.disconnect();
+    };
   });
 
   onDestroy(() => {
@@ -230,7 +264,7 @@
   export type $$Props = PipelineOutputsPanelProps;
 </script>
 
-<div class="min-h-0 h-full flex flex-col gap-3">
+<div bind:this={panelHost} class="min-h-0 h-full flex flex-col gap-3">
   <div class="flex flex-wrap items-center justify-between gap-2">
     <div class="flex min-w-0 flex-1 items-center gap-2">
       <input

@@ -195,11 +195,11 @@ pub fn candidate_quad_from_contour_fast_in(
     }
 
     let mut quad = [approx[0], approx[1], approx[2], approx[3]];
-    sort_corners_clockwise(&mut quad);
-    rotate_corners_to_top_left(&mut quad);
     if !quad_satisfies_config(&quad, config) {
         return None;
     }
+    sort_corners_clockwise(&mut quad);
+    rotate_corners_to_top_left(&mut quad);
     Some(quad)
 }
 
@@ -242,11 +242,11 @@ pub fn candidate_quad_from_contour_fast_i32_in(
         Point::new(approx[2].x as f32, approx[2].y as f32),
         Point::new(approx[3].x as f32, approx[3].y as f32),
     ];
-    sort_corners_clockwise(&mut quad);
-    rotate_corners_to_top_left(&mut quad);
     if !quad_satisfies_config(&quad, config) {
         return None;
     }
+    sort_corners_clockwise(&mut quad);
+    rotate_corners_to_top_left(&mut quad);
     Some(quad)
 }
 
@@ -357,4 +357,54 @@ pub(super) fn quad_area(points: &[Point<f32>; 4]) -> f32 {
         area += points[i].x * points[j].y - points[j].x * points[i].y;
     }
     area.abs() * 0.5
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rect_contour_i32(x: i32, y: i32, w: i32, h: i32) -> Vec<Point<i32>> {
+        let mut out = Vec::new();
+        for xx in x..x + w {
+            out.push(Point::new(xx, y));
+        }
+        for yy in y + 1..y + h {
+            out.push(Point::new(x + w - 1, yy));
+        }
+        for xx in (x..x + w - 1).rev() {
+            out.push(Point::new(xx, y + h - 1));
+        }
+        for yy in ((y + 1)..y + h - 1).rev() {
+            out.push(Point::new(x, yy));
+        }
+        out
+    }
+
+    #[test]
+    fn candidate_quad_from_contour_fast_i32_keeps_tl_ordering_after_validation() {
+        let contour = rect_contour_i32(10, 20, 40, 24);
+        let perimeter = contour.len() as f32;
+        let config = ArucoTagDetectorConfig {
+            min_area: 100.0,
+            max_area: None,
+            min_angle_deg: 45.0,
+            max_angle_deg: 135.0,
+            max_side_cv: 1.5,
+            max_side_ratio: 0.0,
+            max_diag_ratio: 0.0,
+            epsilon: 2.5,
+            angle_cos_min: -1.0,
+            angle_cos_max: 1.0,
+        }
+        .with_angle_cos_bounds();
+        let mut downsampled = Vec::new();
+        let mut approx = Vec::new();
+
+        let quad = candidate_quad_from_contour_fast_i32_in(&contour, perimeter, None, &config, &mut downsampled, &mut approx).expect("expected rectangle quad");
+
+        assert_eq!(quad[0], Point::new(10.0, 20.0));
+        assert_eq!(quad[1], Point::new(49.0, 20.0));
+        assert_eq!(quad[2], Point::new(49.0, 43.0));
+        assert_eq!(quad[3], Point::new(10.0, 43.0));
+    }
 }

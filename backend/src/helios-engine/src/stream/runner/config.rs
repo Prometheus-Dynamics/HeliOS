@@ -1,12 +1,12 @@
 use std::env;
-use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
 use std::time::Duration;
 
 use styx::prelude::FourCc;
 use tokio::sync::broadcast;
 
-use crate::capture::{BackendKind, CaptureConfig, ModeId, discover_devices, find_backend_for_config};
+use crate::capture::{discover_devices, find_backend_for_config, BackendKind, CaptureConfig, ModeId};
 use crate::graph::GraphHandle;
 use crate::ipc::{DecoderSettings, EncoderSettings};
 
@@ -38,7 +38,8 @@ pub struct StreamRunnerConfig {
 
 impl StreamRunner {
     pub fn new(config: StreamRunnerConfig) -> Self {
-        let StreamRunnerConfig { mut capture_config, graph, encoder_id, mut decoder_id, encoder_settings, decoder_settings, preview_jpeg_quality, mut shmem, stream_id } = config;
+        let StreamRunnerConfig { mut capture_config, graph, encoder_id, mut decoder_id, encoder_settings, decoder_settings, preview_jpeg_quality: _preview_jpeg_quality, mut shmem, stream_id } =
+            config;
         if capture_config.backend == BackendKind::Libcamera && capture_config.target_fps.is_none() && capture_config.interval.is_none() {
             let fps = env::var(ENV_DEFAULT_LIBCAMERA_FPS).ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or(DEFAULT_LIBCAMERA_FPS);
             capture_config.target_fps = Some(fps.max(1));
@@ -82,23 +83,14 @@ impl StreamRunner {
         let viewer_idle_timeout = viewer_idle_timeout();
         let viewer_check_interval = viewer_check_interval();
         // When both encoder + decoder IDs are unset, treat the stream as "codecs disabled" and do
-        // not generate any preview shmem output (even passthrough MJPEG). However, file-backed
-        // streams (media replay) do not rely on external codecs for preview: we can still generate
-        // JPEG previews via the lightweight `PreviewWorker`.
+        // not generate any preview shmem output.
         let codecs_disabled = encoder_id.is_none() && decoder_id.is_none() && capture_config.backend != BackendKind::File;
         if codecs_disabled {
             if let Some(writer) = shmem.as_mut() {
                 let _ = writer.write(None, None, (0, 0), &[]);
             }
         }
-        // Keep preview generation independent from the main encoder path. This prevents UI preview
-        // activity from implicitly requiring full stream encoder throughput.
-        let preview_encoder_stats = styx::codec::CodecStats::default();
-        let preview_encoder_last_activity_ms = Arc::new(AtomicU64::new(0));
         let preview_transport_stats = Arc::new(std::sync::Mutex::new(super::PreviewTransportStats::default()));
-        // Keep preview generation fully demand-driven. Starting the preview worker here leaves
-        // an idle thread plus retained buffers resident even when nothing is consuming preview.
-        let preview_worker = None;
         let preview_submit_interval = encoder_settings
             .as_ref()
             .and_then(|settings| settings.framerate.as_ref())
@@ -120,7 +112,6 @@ impl StreamRunner {
             decoder_id,
             encoder_settings,
             decoder_settings,
-            preview_jpeg_quality: preview_jpeg_quality.clamp(1, 100),
             decode_fps_limit,
             encode_fps_limit,
             encode_configured: false,
@@ -136,7 +127,6 @@ impl StreamRunner {
             encoder_worker: None,
             decoder_stats: styx::codec::CodecStats::default(),
             encoder_stats: styx::codec::CodecStats::default(),
-            preview_encoder_stats,
             capture_stats: styx::prelude::StageMetrics::default(),
             graph_stage_stats: styx::prelude::StageMetrics::default(),
             last_capture_ts: None,
@@ -148,11 +138,8 @@ impl StreamRunner {
             viewer_check_interval,
             last_viewer_check_wall: None,
             viewer_recently_active: false,
-            last_preview_encode_wall: None,
             last_preview_submit_wall: None,
             preview_submit_interval,
-            preview_encoder_last_activity_ms,
-            preview_worker,
             preview_transport_stats,
             last_idle_compaction_wall: None,
             last_frame_demand: std::sync::Mutex::new(super::LastFrameDemandSnapshot::default()),

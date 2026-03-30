@@ -224,7 +224,7 @@ pub(crate) fn find_backend_for_config<'a>(config: &CaptureConfig, devices: &'a [
         .or_else(|| device.backends.iter().find(|backend| backend.kind == config.backend))
 }
 
-pub(crate) fn descriptor_for_config(config: &CaptureConfig) -> Option<CaptureDescriptor> {
+pub fn descriptor_for_config(config: &CaptureConfig) -> Option<CaptureDescriptor> {
     let devices = devices_for_config(config);
     let backend = find_backend_for_config(config, &devices)?;
     Some(minimize_capture_descriptor(&backend.descriptor, &config.mode))

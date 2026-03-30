@@ -20,7 +20,7 @@ pub(crate) struct HelperStatus {
 
 #[cfg(test)]
 pub(crate) async fn run_tool(request: ApiToolsRequest) -> Result<ApiToolsResponse, ApiError> {
-    crate::api_tools_impl::execute(request).map_err(ApiError::internal)
+    super::api_tools_impl::execute(request).map_err(ApiError::internal)
 }
 
 #[cfg(not(test))]

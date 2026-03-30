@@ -534,13 +534,7 @@ fn with_adaptive_frame_node_scratch<R>(exec_ctx: &ExecutionContext, f: impl FnOn
 pub(crate) fn compact_adaptive_frame_node_scratch_after_frame() {}
 
 #[inline]
-fn apply_cached_clahe_into(
-    gray: &GrayImage,
-    tile_size: u32,
-    clip_limit: f32,
-    tiles: &mut crate::modules::image::clahe::ClaheTiles,
-    output: &mut GrayImage,
-) {
+fn apply_cached_clahe_into(gray: &GrayImage, tile_size: u32, clip_limit: f32, tiles: &mut crate::modules::image::clahe::ClaheTiles, output: &mut GrayImage) {
     // Keep fused adaptive preprocessing aligned with standalone CLAHE behavior: build tiles from
     // the current frame instead of reusing a prior frame's local histogram layout.
     // Reuse the LUT backing storage itself so this path does not allocate every frame.

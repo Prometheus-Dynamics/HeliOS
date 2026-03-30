@@ -76,9 +76,18 @@ pub fn suzuki_abe_i32_compact_capped_into(image: &GrayImage, point_store: &mut V
     out
 }
 
+pub fn suzuki_abe_i32_turn_compact_capped_into(image: &GrayImage, point_store: &mut Vec<Point<i32>>, contours: &mut Vec<CompactContour>, max_points: usize, max_contours: usize) -> bool {
+    let out = with_image_values_scratch(|scratch| i32_impl::suzuki_abe_with_scratch_i32_turn_compact_capped(image, scratch, point_store, contours, max_points, max_contours));
+    compact_suzuki_scratch_after_frame();
+    out
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{IMAGE_VALUES_RETAIN_CAP, compact_suzuki_scratch_after_frame, image_values_scratch, release_suzuki_scratch_on_idle, suzuki_abe_i32, suzuki_abe_i32_compact_into};
+    use super::{
+        IMAGE_VALUES_RETAIN_CAP, compact_suzuki_scratch_after_frame, image_values_scratch, release_suzuki_scratch_on_idle, suzuki_abe_i32, suzuki_abe_i32_compact_into,
+        suzuki_abe_i32_turn_compact_capped_into,
+    };
     use image::{GrayImage, Luma};
     use imageproc::contours::BorderType;
 
@@ -121,5 +130,30 @@ mod tests {
 
         assert_eq!(compact_outer.chain_len as usize, full_outer.points.len());
         assert_eq!(compact_outer.len, compact_outer.chain_len as usize);
+    }
+
+    #[test]
+    fn turn_compact_trace_preserves_chain_len_and_reduces_points() {
+        let mut image = GrayImage::new(8, 8);
+        for y in 2..6 {
+            for x in 2..6 {
+                image.put_pixel(x, y, Luma([255]));
+            }
+        }
+
+        let mut compact_points = Vec::new();
+        let mut compact = Vec::new();
+        suzuki_abe_i32_compact_into(&image, &mut compact_points, &mut compact);
+        let compact_outer = compact.iter().find(|contour| contour.border_type == BorderType::Outer).expect("compact outer contour");
+
+        let mut turn_points = Vec::new();
+        let mut turn_compact = Vec::new();
+        let traced = suzuki_abe_i32_turn_compact_capped_into(&image, &mut turn_points, &mut turn_compact, usize::MAX, usize::MAX);
+        assert!(traced, "turn-compressed contour trace should complete");
+
+        let turn_outer = turn_compact.iter().find(|contour| contour.border_type == BorderType::Outer).expect("turn-compressed outer contour");
+        assert_eq!(turn_outer.chain_len, compact_outer.chain_len);
+        assert!(turn_outer.len <= compact_outer.len);
+        assert!(turn_outer.len >= 4);
     }
 }

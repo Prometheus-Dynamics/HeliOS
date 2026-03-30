@@ -276,10 +276,8 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
 
       const encoderId = (() => {
         if (!state.encoderEnabled) return null;
-        // When shadow recording is enabled and the user hasn't intentionally selected an encoder,
-        // let backend defaults choose the safer CPU profile (h264) instead of inheriting stale codec state.
-        if (shadowRecorderEnabled && !state.encoderSelectionTouched) return null;
-        return state.encoderImpl;
+        const selected = String(state.encoderImpl ?? '').trim();
+        return selected.length ? selected : null;
       })();
       const decoderId = (() => {
         if (!state.decoderEnabled) return null;

@@ -1,12 +1,8 @@
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::atomic::AtomicU64;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use image::ColorType;
-use image::codecs::jpeg::JpegEncoder;
-use styx::prelude::FrameLease;
 use tokio::sync::broadcast;
-use turbojpeg::{Compressor as TurboJpegCompressor, Image as TurboJpegImage, OutputBuf as TurboJpegOutputBuf, PixelFormat as TurboJpegPixelFormat, Subsamp as TurboJpegSubsamp};
 use uuid::Uuid;
 
 use crate::error::{Error, Result};
@@ -15,24 +11,14 @@ use crate::capture::{CaptureConfig, CaptureSession};
 use crate::graph::GraphHandle;
 use crate::ipc::{DecoderSettings, EncoderSettings};
 
-use super::ShmemWriter;
 use super::encoder_worker::EncoderWorker;
+use super::ShmemWriter;
 
 mod config;
 mod encode_path;
 mod pump;
 
 pub use config::StreamRunnerConfig;
-
-fn preview_worker_trim_interval() -> Duration {
-    let millis = std::env::var("HELIOS_PREVIEW_WORKER_TRIM_INTERVAL_MS").ok().and_then(|raw| raw.parse::<u64>().ok()).unwrap_or(1_000).clamp(50, 60_000);
-    Duration::from_millis(millis)
-}
-
-fn preview_default_max_dimension() -> Option<u32> {
-    let value = std::env::var("HELIOS_PREVIEW_MAX_DIMENSION").ok().and_then(|raw| raw.parse::<u32>().ok())?;
-    if value == 0 { None } else { Some(value.clamp(240, 4096)) }
-}
 
 fn preview_submit_interval_for_fps(max_fps: Option<f64>) -> Option<Duration> {
     let fps = max_fps?;
@@ -49,143 +35,6 @@ fn preview_default_submit_interval() -> Option<Duration> {
 
 pub(super) fn preview_submit_due(last_submit_wall: Option<Instant>, interval: Option<Duration>, now: Instant) -> bool {
     !interval.is_some_and(|interval| last_submit_wall.is_some_and(|last| now.saturating_duration_since(last) < interval))
-}
-
-fn preview_worker_rgb_retain_cap() -> usize {
-    let default = preview_default_max_dimension()
-        .map(|max_dim| max_dim as usize * max_dim as usize * 3)
-        .unwrap_or(1280 * 720 * 3);
-    std::env::var("HELIOS_PREVIEW_WORKER_RGB_RETAIN_BYTES").ok().and_then(|raw| raw.parse::<usize>().ok()).unwrap_or(default).max(320 * 240 * 3)
-}
-
-fn preview_worker_gray_retain_cap() -> usize {
-    let default = preview_default_max_dimension()
-        .map(|max_dim| max_dim as usize * max_dim as usize)
-        .unwrap_or(1280 * 720);
-    std::env::var("HELIOS_PREVIEW_WORKER_GRAY_RETAIN_BYTES").ok().and_then(|raw| raw.parse::<usize>().ok()).unwrap_or(default).max(320 * 240)
-}
-
-fn preview_worker_jpeg_retain_cap() -> usize {
-    let default = preview_default_max_dimension()
-        .map(|max_dim| ((max_dim as usize * max_dim as usize * 3) / 2).clamp(256 * 1024, 2 * 1024 * 1024))
-        .unwrap_or(2 * 1024 * 1024);
-    std::env::var("HELIOS_PREVIEW_WORKER_JPEG_RETAIN_BYTES").ok().and_then(|raw| raw.parse::<usize>().ok()).unwrap_or(default).max(256 * 1024)
-}
-
-fn preview_worker_trim_vec(vec: &mut Vec<u8>, retain_cap: usize) {
-    vec.clear();
-    if vec.capacity() > retain_cap {
-        vec.shrink_to(retain_cap);
-    }
-}
-
-fn compact_preview_worker_buffers(gray: &mut Vec<u8>, rgb: &mut Vec<u8>, jpeg: &mut Vec<u8>) {
-    preview_worker_trim_vec(gray, preview_worker_gray_retain_cap());
-    preview_worker_trim_vec(rgb, preview_worker_rgb_retain_cap());
-    preview_worker_trim_vec(jpeg, preview_worker_jpeg_retain_cap());
-}
-
-fn release_preview_worker_buffers(gray: &mut Vec<u8>, rgb: &mut Vec<u8>, jpeg: &mut Vec<u8>) {
-    *gray = Vec::new();
-    *rgb = Vec::new();
-    *jpeg = Vec::new();
-}
-
-fn effective_preview_resolution(source_width: u32, source_height: u32, explicit: Option<(u32, u32)>) -> Option<(u32, u32)> {
-    if let Some((width, height)) = explicit {
-        if width > 0 && height > 0 {
-            return Some((width.max(1), height.max(1)));
-        }
-    }
-
-    let Some(max_dim) = preview_default_max_dimension() else {
-        return None;
-    };
-    let width = source_width.max(1);
-    let height = source_height.max(1);
-    let long_edge = width.max(height);
-    if long_edge <= max_dim {
-        return None;
-    }
-
-    let scale = max_dim as f64 / long_edge as f64;
-    let target_width = ((width as f64 * scale).round() as u32).max(1);
-    let target_height = ((height as f64 * scale).round() as u32).max(1);
-    Some((target_width, target_height))
-}
-
-struct TurboPreviewEncoder {
-    compressor: TurboJpegCompressor,
-    output: TurboJpegOutputBuf<'static>,
-}
-
-impl TurboPreviewEncoder {
-    fn new(quality: u8) -> Option<Self> {
-        let mut compressor = TurboJpegCompressor::new().ok()?;
-        compressor.set_quality(i32::from(quality)).ok()?;
-        compressor.set_optimize(false).ok()?;
-        Some(Self { compressor, output: TurboJpegOutputBuf::new_owned() })
-    }
-
-    fn encode_gray(&mut self, image: &image::GrayImage) -> Option<(u32, u32)> {
-        self.encode_packed(image.as_raw().as_slice(), image.width().max(1), image.height().max(1), image.width().max(1) as usize, TurboJpegPixelFormat::GRAY, TurboJpegSubsamp::Gray)
-    }
-
-    fn encode_gray_bytes(&mut self, pixels: &[u8], width: u32, height: u32) -> Option<(u32, u32)> {
-        self.encode_packed(pixels, width.max(1), height.max(1), width.max(1) as usize, TurboJpegPixelFormat::GRAY, TurboJpegSubsamp::Gray)
-    }
-
-    fn encode_rgb_bytes(&mut self, pixels: &[u8], width: u32, height: u32) -> Option<(u32, u32)> {
-        self.encode_packed(pixels, width.max(1), height.max(1), width.max(1) as usize * 3, TurboJpegPixelFormat::RGB, TurboJpegSubsamp::Sub2x2)
-    }
-
-    fn encode_rgba_bytes(&mut self, pixels: &[u8], width: u32, height: u32) -> Option<(u32, u32)> {
-        self.encode_packed(pixels, width.max(1), height.max(1), width.max(1) as usize * 4, TurboJpegPixelFormat::RGBA, TurboJpegSubsamp::Sub2x2)
-    }
-
-    fn encode_dynamic(&mut self, image: &image::DynamicImage) -> Option<(u32, u32)> {
-        let (pixels, pitch, format, subsamp) = match image {
-            // 4:2:0 subsampling is materially cheaper than 4:4:4 for live preview while keeping
-            // visual quality acceptable for the operator UI.
-            image::DynamicImage::ImageRgb8(buf) => (buf.as_raw().as_slice(), buf.width() as usize * 3, TurboJpegPixelFormat::RGB, TurboJpegSubsamp::Sub2x2),
-            image::DynamicImage::ImageRgba8(buf) => (buf.as_raw().as_slice(), buf.width() as usize * 4, TurboJpegPixelFormat::RGBA, TurboJpegSubsamp::Sub2x2),
-            image::DynamicImage::ImageLuma8(buf) => return self.encode_gray(buf),
-            _ => return None,
-        };
-        self.compressor.set_subsamp(subsamp).ok()?;
-        let width = image.width().max(1);
-        let height = image.height().max(1);
-        let view = TurboJpegImage { pixels, width: width as usize, pitch, height: height as usize, format };
-        self.compressor.compress(view, &mut self.output).ok()?;
-        Some((width, height))
-    }
-
-    fn encode_packed(&mut self, pixels: &[u8], width: u32, height: u32, pitch: usize, format: TurboJpegPixelFormat, subsamp: TurboJpegSubsamp) -> Option<(u32, u32)> {
-        self.compressor.set_subsamp(subsamp).ok()?;
-        let view = TurboJpegImage { pixels, width: width as usize, pitch, height: height as usize, format };
-        self.compressor.compress(view, &mut self.output).ok()?;
-        Some((width, height))
-    }
-
-    fn encoded_bytes(&self) -> &[u8] {
-        &self.output
-    }
-
-    fn reset_output(&mut self) {
-        self.output = TurboJpegOutputBuf::new_owned();
-    }
-
-    fn compact_output(&mut self, retain_cap: usize) {
-        if self.output.len() > retain_cap {
-            self.reset_output();
-        }
-    }
-}
-
-#[derive(Debug)]
-enum PreviewEncodedFrame<'a> {
-    Borrowed { dims: (u32, u32), bytes: &'a [u8] },
-    Owned { dims: (u32, u32) },
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -216,7 +65,6 @@ pub struct StreamRunner {
     pub(super) decoder_id: Option<String>,
     pub(super) encoder_settings: Option<EncoderSettings>,
     pub(super) decoder_settings: Option<DecoderSettings>,
-    pub(super) preview_jpeg_quality: u8,
     pub(super) decode_fps_limit: Option<f64>,
     pub(super) encode_fps_limit: Option<f64>,
     pub(super) encode_configured: bool,
@@ -232,7 +80,6 @@ pub struct StreamRunner {
     pub(super) encoder_worker: Option<EncoderWorker>,
     pub(super) decoder_stats: styx::codec::CodecStats,
     pub(super) encoder_stats: styx::codec::CodecStats,
-    pub(super) preview_encoder_stats: styx::codec::CodecStats,
     pub(super) capture_stats: styx::prelude::StageMetrics,
     pub(super) graph_stage_stats: styx::prelude::StageMetrics,
     pub(super) last_capture_ts: Option<u64>,
@@ -244,11 +91,8 @@ pub struct StreamRunner {
     pub(super) viewer_check_interval: std::time::Duration,
     pub(super) last_viewer_check_wall: Option<Instant>,
     pub(super) viewer_recently_active: bool,
-    pub(super) last_preview_encode_wall: Option<Instant>,
     pub(super) last_preview_submit_wall: Option<Instant>,
     pub(super) preview_submit_interval: Option<Duration>,
-    pub(super) preview_encoder_last_activity_ms: Arc<AtomicU64>,
-    pub(super) preview_worker: Option<PreviewWorker>,
     pub(super) preview_transport_stats: Arc<Mutex<PreviewTransportStats>>,
     pub(super) last_idle_compaction_wall: Option<Instant>,
     pub(super) last_frame_demand: Mutex<LastFrameDemandSnapshot>,
@@ -326,15 +170,12 @@ pub(super) struct PreviewTransportTiming {
 }
 
 impl PreviewTransportTiming {
-    fn record(&mut self, duration: Duration) {
-        let ns = duration.as_nanos().min(u64::MAX as u128) as u64;
-        self.samples = self.samples.saturating_add(1);
-        self.total_ns = self.total_ns.saturating_add(ns as u128);
-        self.last_ns = ns;
-    }
-
     fn average_ms(&self) -> f64 {
-        if self.samples == 0 { 0.0 } else { (self.total_ns as f64 / self.samples as f64) / 1_000_000.0 }
+        if self.samples == 0 {
+            0.0
+        } else {
+            (self.total_ns as f64 / self.samples as f64) / 1_000_000.0
+        }
     }
 
     fn last_ms(&self) -> f64 {
@@ -351,22 +192,6 @@ pub(super) struct PreviewTransportStats {
 }
 
 impl PreviewTransportStats {
-    pub(super) fn record_queue_wait(&mut self, duration: Duration) {
-        self.queue_wait.record(duration);
-    }
-
-    pub(super) fn record_publish(&mut self, duration: Duration) {
-        self.publish.record(duration);
-    }
-
-    pub(super) fn record_end_to_end(&mut self, duration: Duration) {
-        self.end_to_end.record(duration);
-    }
-
-    pub(super) fn record_replaced_pending_frame(&mut self) {
-        self.replaced_pending_frames = self.replaced_pending_frames.saturating_add(1);
-    }
-
     pub(super) fn snapshot(&self) -> crate::stream::StreamPreviewTransportMetrics {
         crate::stream::StreamPreviewTransportMetrics {
             queue_average_time_ms: self.queue_wait.average_ms(),
@@ -381,190 +206,6 @@ impl PreviewTransportStats {
 
     pub(super) fn has_samples(&self) -> bool {
         self.queue_wait.samples > 0 || self.publish.samples > 0 || self.end_to_end.samples > 0 || self.replaced_pending_frames > 0
-    }
-}
-
-#[derive(Default)]
-struct PreviewMailboxState {
-    pending: Option<PreviewEncodeRequest>,
-    closed: bool,
-}
-
-struct PreviewMailbox {
-    state: Mutex<PreviewMailboxState>,
-    cv: Condvar,
-}
-
-enum PreviewMailboxRecv {
-    Request(PreviewEncodeRequest),
-    Timeout,
-    Closed,
-}
-
-impl PreviewMailbox {
-    fn new() -> Self {
-        Self { state: Mutex::new(PreviewMailboxState::default()), cv: Condvar::new() }
-    }
-
-    fn submit(&self, req: PreviewEncodeRequest, transport_stats: &Arc<Mutex<PreviewTransportStats>>) -> bool {
-        let mut state = match self.state.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
-        if state.closed {
-            return false;
-        }
-        if state.pending.replace(req).is_some() {
-            let mut stats = match transport_stats.lock() {
-                Ok(guard) => guard,
-                Err(poisoned) => poisoned.into_inner(),
-            };
-            stats.record_replaced_pending_frame();
-        }
-        drop(state);
-        self.cv.notify_one();
-        true
-    }
-
-    fn recv_timeout(&self, timeout: Duration) -> PreviewMailboxRecv {
-        let mut state = match self.state.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
-        loop {
-            if let Some(req) = state.pending.take() {
-                return PreviewMailboxRecv::Request(req);
-            }
-            if state.closed {
-                return PreviewMailboxRecv::Closed;
-            }
-            let wait = self.cv.wait_timeout(state, timeout);
-            let (guard, result) = match wait {
-                Ok(pair) => pair,
-                Err(poisoned) => poisoned.into_inner(),
-            };
-            state = guard;
-            if result.timed_out() {
-                if state.closed {
-                    return PreviewMailboxRecv::Closed;
-                }
-                return PreviewMailboxRecv::Timeout;
-            }
-        }
-    }
-
-    fn close(&self) {
-        let mut state = match self.state.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
-        state.closed = true;
-        drop(state);
-        self.cv.notify_one();
-    }
-}
-
-pub(super) struct PreviewWorker {
-    mailbox: Arc<PreviewMailbox>,
-    join: std::thread::JoinHandle<Option<ShmemWriter>>,
-}
-
-pub(super) enum PreviewEncodeSource {
-    Image(Arc<image::DynamicImage>),
-    Gray(Arc<image::GrayImage>),
-    Frame(FrameLease),
-}
-
-pub(super) struct PreviewEncodeRequest {
-    pub(super) ts: u64,
-    pub(super) source: PreviewEncodeSource,
-    pub(super) output_resolution: Option<(u32, u32)>,
-    pub(super) queued_at: Instant,
-}
-
-impl PreviewWorker {
-    pub(super) fn start(stats: styx::codec::CodecStats, activity_ms: Arc<AtomicU64>, transport_stats: Arc<Mutex<PreviewTransportStats>>, quality: u8, mut shmem: ShmemWriter) -> Self {
-        let mailbox = Arc::new(PreviewMailbox::new());
-        let mailbox_thread = Arc::clone(&mailbox);
-        let trim_interval = preview_worker_trim_interval();
-        let join = std::thread::spawn(move || {
-            let mut turbo = TurboPreviewEncoder::new(quality);
-            let mut gray = Vec::<u8>::new();
-            let mut rgb = Vec::<u8>::new();
-            let mut jpeg = Vec::<u8>::new();
-            let mut last_trim = Instant::now();
-
-            loop {
-                let req = match mailbox_thread.recv_timeout(trim_interval) {
-                    PreviewMailboxRecv::Request(req) => req,
-                    PreviewMailboxRecv::Timeout => {
-                        release_preview_worker_buffers(&mut gray, &mut rgb, &mut jpeg);
-                        if let Some(turbo) = turbo.as_mut() {
-                            turbo.reset_output();
-                        }
-                        last_trim = Instant::now();
-                        continue;
-                    }
-                    PreviewMailboxRecv::Closed => return Some(shmem),
-                };
-                let encode_start = Instant::now();
-                {
-                    let mut stats_guard = match transport_stats.lock() {
-                        Ok(guard) => guard,
-                        Err(poisoned) => poisoned.into_inner(),
-                    };
-                    stats_guard.record_queue_wait(encode_start.saturating_duration_since(req.queued_at));
-                }
-                let encoded = match encode_preview_request(&req, quality, turbo.as_mut(), &mut gray, &mut rgb, &mut jpeg) {
-                    Some(encoded) => encoded,
-                    None => {
-                        stats.inc_errors();
-                        continue;
-                    }
-                };
-
-                stats.inc_processed();
-                stats.record_duration(encode_start.elapsed());
-                let publish_start = Instant::now();
-                let (dims, bytes) = match encoded {
-                    PreviewEncodedFrame::Borrowed { dims, bytes } => (dims, bytes),
-                    PreviewEncodedFrame::Owned { dims } => (dims, jpeg.as_slice()),
-                };
-                if let Err(err) = shmem.write(Some(req.ts), Some(styx::prelude::FourCc::new(*b"JPEG")), dims, bytes) {
-                    stats.inc_errors();
-                    tracing::warn!(path = ?shmem.path(), error = %err, "preview shmem write failed");
-                }
-                let publish_elapsed = publish_start.elapsed();
-                activity_ms.store(StreamRunner::unix_now_ms(), Ordering::Relaxed);
-                {
-                    let mut stats_guard = match transport_stats.lock() {
-                        Ok(guard) => guard,
-                        Err(poisoned) => poisoned.into_inner(),
-                    };
-                    stats_guard.record_publish(publish_elapsed);
-                    stats_guard.record_end_to_end(req.queued_at.elapsed());
-                }
-                jpeg.clear();
-
-                if last_trim.elapsed() >= trim_interval {
-                    compact_preview_worker_buffers(&mut gray, &mut rgb, &mut jpeg);
-                    if let Some(turbo) = turbo.as_mut() {
-                        turbo.compact_output(preview_worker_jpeg_retain_cap());
-                    }
-                    last_trim = Instant::now();
-                }
-            }
-        });
-        Self { mailbox, join }
-    }
-
-    pub(super) fn submit(&self, req: PreviewEncodeRequest, transport_stats: &Arc<Mutex<PreviewTransportStats>>) -> bool {
-        self.mailbox.submit(req, transport_stats)
-    }
-
-    pub(super) fn stop(self) -> Option<ShmemWriter> {
-        self.mailbox.close();
-        self.join.join().ok().flatten()
     }
 }
 
@@ -586,384 +227,9 @@ impl StreamRunner {
     }
 }
 
-fn write_rgb24(image: &image::DynamicImage, out: &mut [u8]) -> bool {
-    let width = image.width() as usize;
-    let height = image.height() as usize;
-    let want = width.saturating_mul(height).saturating_mul(3);
-    if out.len() < want {
-        return false;
-    }
-
-    match image {
-        image::DynamicImage::ImageRgb8(buf) => {
-            let raw = buf.as_raw();
-            if raw.len() != want {
-                return false;
-            }
-            out[..want].copy_from_slice(raw);
-            true
-        }
-        image::DynamicImage::ImageRgba8(buf) => {
-            let raw = buf.as_raw();
-            if raw.len() != width.saturating_mul(height).saturating_mul(4) {
-                return false;
-            }
-            let mut di = 0usize;
-            for src in raw.chunks_exact(4) {
-                out[di] = src[0];
-                out[di + 1] = src[1];
-                out[di + 2] = src[2];
-                di += 3;
-            }
-            true
-        }
-        image::DynamicImage::ImageLuma8(buf) => {
-            let raw = buf.as_raw();
-            if raw.len() != width.saturating_mul(height) {
-                return false;
-            }
-            let mut di = 0usize;
-            for &g in raw {
-                out[di] = g;
-                out[di + 1] = g;
-                out[di + 2] = g;
-                di += 3;
-            }
-            true
-        }
-        image::DynamicImage::ImageLumaA8(buf) => {
-            let raw = buf.as_raw();
-            if raw.len() != width.saturating_mul(height).saturating_mul(2) {
-                return false;
-            }
-            let mut di = 0usize;
-            for src in raw.chunks_exact(2) {
-                let g = src[0];
-                out[di] = g;
-                out[di + 1] = g;
-                out[di + 2] = g;
-                di += 3;
-            }
-            true
-        }
-        _ => {
-            let rgb = image.to_rgb8();
-            let raw = rgb.as_raw();
-            if raw.len() != want {
-                return false;
-            }
-            out[..want].copy_from_slice(raw);
-            true
-        }
-    }
-}
-
-fn encode_preview_request<'a>(
-    req: &PreviewEncodeRequest,
-    quality: u8,
-    mut turbo: Option<&'a mut TurboPreviewEncoder>,
-    gray: &mut Vec<u8>,
-    rgb: &mut Vec<u8>,
-    jpeg: &mut Vec<u8>,
-) -> Option<PreviewEncodedFrame<'a>> {
-    match &req.source {
-        PreviewEncodeSource::Frame(frame) => {
-            let dims = (frame.meta().format.resolution.width.get(), frame.meta().format.resolution.height.get());
-            let needs_resize = req.output_resolution.is_some_and(|(target_width, target_height)| {
-                let target_width = target_width.max(1);
-                let target_height = target_height.max(1);
-                target_width != dims.0 || target_height != dims.1
-            });
-            if !needs_resize {
-                if let Some(dims) = encode_preview_frame_direct(frame, quality, turbo.as_deref_mut(), gray, rgb, jpeg) {
-                    return Some(PreviewEncodedFrame::Owned { dims });
-                }
-            }
-
-            let image = styx::codec::decoder::frame_to_dynamic_image(frame)?;
-            encode_preview_dynamic_image(&image, req.output_resolution, quality, turbo, rgb, jpeg)
-        }
-        PreviewEncodeSource::Gray(image) => encode_preview_gray_image(image.as_ref(), req.output_resolution, quality, turbo, jpeg),
-        PreviewEncodeSource::Image(image) => encode_preview_dynamic_image(image.as_ref(), req.output_resolution, quality, turbo, rgb, jpeg),
-    }
-}
-
-fn encode_preview_gray_image<'a>(
-    image: &image::GrayImage,
-    output_resolution: Option<(u32, u32)>,
-    quality: u8,
-    turbo: Option<&'a mut TurboPreviewEncoder>,
-    jpeg: &mut Vec<u8>,
-) -> Option<PreviewEncodedFrame<'a>> {
-    let output_resolution = effective_preview_resolution(image.width(), image.height(), output_resolution);
-    let resized = output_resolution.and_then(|(target_width, target_height)| {
-        let target_width = target_width.max(1);
-        let target_height = target_height.max(1);
-        if target_width == image.width() && target_height == image.height() {
-            None
-        } else {
-            lib_cv::modules::image::resize::resize_fast(image, target_width, target_height).into_luma8().into()
-        }
-    });
-    let source = resized.as_ref().unwrap_or(image);
-    let width = source.width().max(1);
-    let height = source.height().max(1);
-
-    if let Some(turbo) = turbo {
-        if let Some(dims) = turbo.encode_gray(source) {
-            return Some(PreviewEncodedFrame::Borrowed { dims, bytes: turbo.encoded_bytes() });
-        }
-    }
-
-    jpeg.clear();
-    let mut enc = JpegEncoder::new_with_quality(&mut *jpeg, quality);
-    if enc.encode(source.as_raw(), width, height, ColorType::L8.into()).is_err() {
-        return None;
-    }
-    Some(PreviewEncodedFrame::Owned { dims: (width, height) })
-}
-
-fn encode_preview_dynamic_image<'a>(
-    image: &image::DynamicImage,
-    output_resolution: Option<(u32, u32)>,
-    quality: u8,
-    turbo: Option<&'a mut TurboPreviewEncoder>,
-    rgb: &mut Vec<u8>,
-    jpeg: &mut Vec<u8>,
-) -> Option<PreviewEncodedFrame<'a>> {
-    if matches!(image, image::DynamicImage::ImageLuma8(_) | image::DynamicImage::ImageLumaA8(_)) {
-        return lib_cv::modules::image::luma::with_luma8_frame(image, |gray| encode_preview_gray_image(gray, output_resolution, quality, turbo, jpeg));
-    }
-
-    let output_resolution = effective_preview_resolution(image.width(), image.height(), output_resolution);
-    let resized = output_resolution.and_then(|(target_width, target_height)| {
-        let target_width = target_width.max(1);
-        let target_height = target_height.max(1);
-        if target_width == image.width() && target_height == image.height() {
-            None
-        } else {
-            Some(lib_cv::modules::image::resize::resize_fast(image, target_width, target_height))
-        }
-    });
-    let source: &image::DynamicImage = resized.as_ref().unwrap_or(image);
-    let width = source.width().max(1);
-    let height = source.height().max(1);
-
-    if let Some(turbo) = turbo {
-        if let Some(dims) = turbo.encode_dynamic(source) {
-            return Some(PreviewEncodedFrame::Borrowed { dims, bytes: turbo.encoded_bytes() });
-        }
-    }
-
-    if let image::DynamicImage::ImageRgb8(buf) = source {
-        jpeg.clear();
-        let mut enc = JpegEncoder::new_with_quality(&mut *jpeg, quality);
-        if enc.encode(buf.as_raw(), width, height, ColorType::Rgb8.into()).is_ok() {
-            return Some(PreviewEncodedFrame::Owned { dims: (width, height) });
-        }
-        return None;
-    }
-
-    let wanted = width as usize * height as usize * 3;
-    if rgb.len() != wanted {
-        rgb.resize(wanted, 0);
-    }
-    if !write_rgb24(source, rgb) {
-        return None;
-    }
-
-    jpeg.clear();
-    let mut enc = JpegEncoder::new_with_quality(&mut *jpeg, quality);
-    if enc.encode(&rgb[..wanted], width, height, ColorType::Rgb8.into()).is_err() {
-        return None;
-    }
-    Some(PreviewEncodedFrame::Owned { dims: (width, height) })
-}
-
-fn encode_preview_frame_direct(frame: &FrameLease, quality: u8, mut turbo: Option<&mut TurboPreviewEncoder>, gray: &mut Vec<u8>, rgb: &mut Vec<u8>, jpeg: &mut Vec<u8>) -> Option<(u32, u32)> {
-    let meta = frame.meta();
-    let width = meta.format.resolution.width.get().max(1);
-    let height = meta.format.resolution.height.get().max(1);
-    if effective_preview_resolution(width, height, None).is_some() {
-        return None;
-    }
-    let planes = frame.planes();
-    let plane = planes.first()?;
-    let code = meta.format.code;
-
-    jpeg.clear();
-    match &code.to_u32().to_le_bytes() {
-        b"R8  " | b"GREY" => {
-            let row_bytes = width as usize;
-            let stride = plane.stride().max(row_bytes);
-            let plane_len = stride.checked_mul(height as usize)?;
-            if plane.data().len() < plane_len {
-                return None;
-            }
-            let packed = if stride == row_bytes {
-                &plane.data()[..row_bytes * height as usize]
-            } else {
-                let wanted = row_bytes * height as usize;
-                if gray.len() != wanted {
-                    gray.resize(wanted, 0);
-                }
-                for row in 0..height as usize {
-                    let src_off = row * stride;
-                    let dst_off = row * row_bytes;
-                    gray[dst_off..dst_off + row_bytes].copy_from_slice(&plane.data()[src_off..src_off + row_bytes]);
-                }
-                &gray[..wanted]
-            };
-            if let Some(turbo) = turbo.as_deref_mut() {
-                if let Some(dims) = turbo.encode_gray_bytes(packed, width, height) {
-                    jpeg.clear();
-                    jpeg.extend_from_slice(turbo.encoded_bytes());
-                    return Some(dims);
-                }
-            }
-            let mut enc = JpegEncoder::new_with_quality(&mut *jpeg, quality);
-            if enc.encode(packed, width, height, ColorType::L8.into()).is_err() {
-                return None;
-            }
-            return Some((width, height));
-        }
-        b"RG24" => {
-            let row_bytes = width as usize * 3;
-            let stride = plane.stride().max(row_bytes);
-            let plane_len = stride.checked_mul(height as usize)?;
-            if plane.data().len() < plane_len {
-                return None;
-            }
-            let packed = if stride == row_bytes {
-                &plane.data()[..row_bytes * height as usize]
-            } else {
-                let wanted = row_bytes * height as usize;
-                if rgb.len() != wanted {
-                    rgb.resize(wanted, 0);
-                }
-                for row in 0..height as usize {
-                    let src_off = row * stride;
-                    let dst_off = row * row_bytes;
-                    rgb[dst_off..dst_off + row_bytes].copy_from_slice(&plane.data()[src_off..src_off + row_bytes]);
-                }
-                &rgb[..wanted]
-            };
-            if let Some(turbo) = turbo.as_deref_mut() {
-                if let Some(dims) = turbo.encode_rgb_bytes(packed, width, height) {
-                    jpeg.clear();
-                    jpeg.extend_from_slice(turbo.encoded_bytes());
-                    return Some(dims);
-                }
-            }
-            let mut enc = JpegEncoder::new_with_quality(&mut *jpeg, quality);
-            if enc.encode(packed, width, height, ColorType::Rgb8.into()).is_err() {
-                return None;
-            }
-            return Some((width, height));
-        }
-        b"RGBA" => {
-            let row_pixels = width as usize;
-            let row_bytes = row_pixels * 4;
-            let stride = plane.stride().max(row_bytes);
-            let plane_len = stride.checked_mul(height as usize)?;
-            if plane.data().len() < plane_len {
-                return None;
-            }
-            if stride == row_bytes {
-                let packed = &plane.data()[..row_bytes * height as usize];
-                if let Some(turbo) = turbo.as_deref_mut() {
-                    if let Some(dims) = turbo.encode_rgba_bytes(packed, width, height) {
-                        jpeg.clear();
-                        jpeg.extend_from_slice(turbo.encoded_bytes());
-                        return Some(dims);
-                    }
-                }
-            }
-            let wanted = row_pixels * height as usize * 3;
-            if rgb.len() != wanted {
-                rgb.resize(wanted, 0);
-            }
-            for row in 0..height as usize {
-                let src_row = &plane.data()[row * stride..row * stride + row_bytes];
-                let dst_row = &mut rgb[row * row_pixels * 3..(row + 1) * row_pixels * 3];
-                let mut di = 0usize;
-                for px in src_row.chunks_exact(4) {
-                    dst_row[di] = px[0];
-                    dst_row[di + 1] = px[1];
-                    dst_row[di + 2] = px[2];
-                    di += 3;
-                }
-            }
-            if let Some(turbo) = turbo.as_deref_mut() {
-                if let Some(dims) = turbo.encode_rgb_bytes(&rgb[..wanted], width, height) {
-                    jpeg.clear();
-                    jpeg.extend_from_slice(turbo.encoded_bytes());
-                    return Some(dims);
-                }
-            }
-            let mut enc = JpegEncoder::new_with_quality(&mut *jpeg, quality);
-            if enc.encode(&rgb[..wanted], width, height, ColorType::Rgb8.into()).is_err() {
-                return None;
-            }
-            return Some((width, height));
-        }
-        _ => return None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use styx::prelude::{BufferPool, ColorSpace, FourCc, FrameMeta, MediaFormat, Resolution};
-
-    #[test]
-    fn preview_frame_direct_encodes_luma_without_dynamic_image() {
-        let mut buf = BufferPool::with_limits(1, 4, 1).lease();
-        buf.resize(4);
-        buf.as_mut_slice().copy_from_slice(&[0, 64, 128, 255]);
-        let frame = FrameLease::single_plane(FrameMeta::new(MediaFormat::new(FourCc::new(*b"GREY"), Resolution::new(2, 2).unwrap(), ColorSpace::Unknown), 42), buf, 4, 2);
-
-        let mut gray = Vec::new();
-        let mut rgb = Vec::new();
-        let mut jpeg = Vec::new();
-        let dims = encode_preview_frame_direct(&frame, 90, None, &mut gray, &mut rgb, &mut jpeg);
-        assert_eq!(dims, Some((2, 2)));
-        assert!(!jpeg.is_empty());
-    }
-
-    #[test]
-    fn preview_frame_direct_uses_turbo_when_available() {
-        let Some(mut turbo) = TurboPreviewEncoder::new(90) else {
-            return;
-        };
-
-        let mut buf = BufferPool::with_limits(1, 4, 1).lease();
-        buf.resize(4);
-        buf.as_mut_slice().copy_from_slice(&[0, 64, 128, 255]);
-        let frame = FrameLease::single_plane(FrameMeta::new(MediaFormat::new(FourCc::new(*b"GREY"), Resolution::new(2, 2).unwrap(), ColorSpace::Unknown), 42), buf, 4, 2);
-
-        let mut gray = Vec::new();
-        let mut rgb = Vec::new();
-        let mut jpeg = Vec::new();
-        let dims = encode_preview_frame_direct(&frame, 90, Some(&mut turbo), &mut gray, &mut rgb, &mut jpeg);
-        assert_eq!(dims, Some((2, 2)));
-        assert!(!jpeg.is_empty());
-    }
-
-    #[test]
-    fn effective_preview_resolution_leaves_large_frames_unchanged_without_explicit_target() {
-        assert_eq!(effective_preview_resolution(1280, 800, None), None);
-    }
-
-    #[test]
-    fn effective_preview_resolution_prefers_explicit_target() {
-        assert_eq!(effective_preview_resolution(1280, 800, Some((1280, 800))), Some((1280, 800)));
-    }
-
-    #[test]
-    fn effective_preview_resolution_leaves_small_frames_unchanged() {
-        assert_eq!(effective_preview_resolution(640, 400, None), None);
-    }
 
     #[test]
     fn preview_submit_interval_for_fps_disables_non_positive_limits() {

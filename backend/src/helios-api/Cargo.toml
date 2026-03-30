@@ -56,7 +56,7 @@ blake3 = "1.8"
 nix = { version = "0.31", default-features = false, features = ["process", "term", "fs"] }
 rustix = { version = "1.1.4", features = ["process", "termios"] }
 toml = "1.0.6"
-styx = { workspace = true, features = ["serde", "schema"] }
+styx = { workspace = true, features = ["serde", "schema", "codec-turbojpeg"] }
 mime_guess = "2.0.5"
 image = { workspace = true }
 imageproc = { workspace = true }

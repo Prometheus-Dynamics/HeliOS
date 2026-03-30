@@ -15,7 +15,6 @@ hardware_id = "/base/axi/pcie@1000120000/rp1/i2c@88000/ov9782@60"
 [streams.manifest.capture]
 backend = "Libcamera"
 target_fps = 60
-enable_tdn_output = true
 device_keys = ["/base/axi/pcie@1000120000/rp1/i2c@88000/ov9782@60", "ov9782"]
 
 [streams.manifest.capture.handle]
@@ -47,7 +46,8 @@ active_pipeline_id = "4fca14eb-e218-48e4-adf9-b957d645c604"
 active_pipeline_output = "overlay"
 pipeline_wires = []
 pipeline_host_inputs = {}
-encoder_id = "ffmpeg"
+encoder_enabled = true
+encoder_id = "turbojpeg"
 decoder_id = "nv12-cpu"
 shadow_recorder_enabled = false
 start_on_boot = false

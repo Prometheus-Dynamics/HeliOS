@@ -73,13 +73,7 @@ pub fn read_latest_header(stream_id: Uuid) -> Result<ShmemFrameHeader> {
     }
 }
 
-fn read_payload_for_header(
-    file: &mut File,
-    header: ShmemFrameHeader,
-    start: Instant,
-    timeout: Duration,
-    retry_delay: Duration,
-) -> Result<PayloadRead> {
+fn read_payload_for_header(file: &mut File, header: ShmemFrameHeader, start: Instant, timeout: Duration, retry_delay: Duration) -> Result<PayloadRead> {
     let len = header.len as usize;
     let file_len = file.metadata().map_err(|_| Error::InvalidState("frame map metadata failed"))?.len();
     if HEADER_SIZE as u64 + len as u64 > file_len {

@@ -19,9 +19,9 @@ use crate::config::UpdaterConfig;
 use crate::error::{Error, Result};
 use crate::state::ServiceState;
 use crate::util::{
-    ProgressSender, ProgressUpdate, SlotScheme, SlotSelection, StreamFlashOutcome, blockdev_size_bytes, by_label_path, decompress_if_needed, detect_compression_kind,
-    detect_ext4_partition_in_disk_image, detect_fat_partition_in_disk_image, detect_squashfs_partition_in_disk_image, ensure_directory, flash_compressed_image_to_target, resolve_boot_block_device,
-    resolve_boot_dir_rw, rewrite_cmdline_root, select_target_slot, sync_filesystem,
+    BlockPartitionInfo, ProgressSender, ProgressUpdate, SlotScheme, SlotSelection, StreamFlashOutcome, available_bytes_for_path, blockdev_size_bytes, by_label_path, decompress_if_needed,
+    detect_compression_kind, detect_ext4_partition_in_disk_image, detect_fat_partition_in_disk_image, detect_squashfs_partition_in_disk_image, ensure_directory, flash_compressed_image_to_target,
+    inspect_adjacent_partition, inspect_block_partition, resize_partition_end, resolve_boot_block_device, resolve_boot_dir_rw, rewrite_cmdline_root, select_target_slot, sync_filesystem,
 };
 
 #[cfg(test)]
@@ -35,6 +35,14 @@ const APPLY_PROGRESS_END: u8 = 85;
 const PERSIST_NETWORKD_DIR: &str = "/var/lib/helios/networkd";
 const PERSIST_NETWORKD_PREFIX: &str = "00-helios-persisted-";
 const REQUIRED_BOOTABLE_ROOT_PATHS: &[&str] = &["/sbin/init", "/bin/sh", "/lib", "/lib64", "/usr/lib/systemd/systemd", "/etc/os-release"];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SquashfsSlotResizePlan {
+    Fits,
+    GrowIntoGap { required_growth_bytes: u64, gap_after_bytes: u64, new_end_bytes_exclusive: u64 },
+    NeedsDataResize { required_growth_bytes: u64, gap_after_bytes: u64, additional_from_data_bytes: u64, data_dir_available_bytes: u64 },
+    ClearDataDir { required_growth_bytes: u64, gap_after_bytes: u64, additional_from_data_bytes: u64, data_dir_available_bytes: u64, clear_bytes: u64 },
+}
 
 #[derive(Debug, Clone, Copy)]
 struct PersistedFileSync {
@@ -229,7 +237,7 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
             {
                 let expanded_path = expanded_path.as_ref().ok_or_else(|| Error::InvalidState("expanded OTA image missing".into()))?;
                 info!(%update_id, target_slot = %slot_selection.target_slot, target_device = %slot_selection.target_device, "writing staged image");
-                flash_image_to_target(expanded_path, &slot_selection, Some(progress_sender.clone())).await?;
+                flash_image_to_target(expanded_path, &slot_selection, config.data_dir(), Some(progress_sender.clone())).await?;
             }
             expand_result
         };
@@ -396,7 +404,7 @@ fn sanitize_media_filename(raw: &str) -> Option<String> {
     Path::new(trimmed).file_name().map(|name| name.to_string_lossy().to_string())
 }
 
-pub(crate) async fn flash_image_to_target(expanded_path: &Path, slot_selection: &SlotSelection, progress: Option<ProgressSender>) -> Result<()> {
+pub(crate) async fn flash_image_to_target(expanded_path: &Path, slot_selection: &SlotSelection, data_dir: &Path, progress: Option<ProgressSender>) -> Result<()> {
     let target_device = slot_selection.target_device.as_str();
     let _ = Command::new("umount").arg(target_device).status().await;
 
@@ -425,16 +433,7 @@ pub(crate) async fn flash_image_to_target(expanded_path: &Path, slot_selection: 
             let Some((off, squashfs_size)) = detect_squashfs_partition_in_disk_image(expanded_path).await? else {
                 return Err(Error::InvalidState(format!("no squashfs partition found inside OTA artifact {}; refusing to flash {}", expanded_path.display(), target_device)));
             };
-            if let Some(target_bytes) = blockdev_size_bytes(target_device).await?
-                && squashfs_size > target_bytes
-            {
-                let size_mib = squashfs_size / (1024 * 1024);
-                let target_mib = target_bytes / (1024 * 1024);
-                return Err(Error::InvalidState(format!(
-                    "target squashfs slot {} is {} bytes ({} MiB) but image rootfs is {} bytes ({} MiB)",
-                    target_device, target_bytes, target_mib, squashfs_size, size_mib
-                )));
-            }
+            ensure_squashfs_target_capacity(target_device, squashfs_size, data_dir).await?;
             offset = off;
             size = Some(squashfs_size);
         }
@@ -451,6 +450,85 @@ pub(crate) async fn flash_image_to_target(expanded_path: &Path, slot_selection: 
     }
 
     Ok(())
+}
+
+async fn ensure_squashfs_target_capacity(target_device: &str, image_size_bytes: u64, data_dir: &Path) -> Result<()> {
+    let Some(target_info) = inspect_block_partition(target_device).await? else {
+        return Err(Error::InvalidState(format!("unable to inspect squashfs target slot {target_device}")));
+    };
+    let next_partition = inspect_adjacent_partition(target_device, 1).await?;
+    let data_dir_available_bytes = available_bytes_for_path(data_dir).await?.unwrap_or(0);
+
+    match plan_squashfs_slot_resize(&target_info, next_partition.as_ref(), image_size_bytes, data_dir_available_bytes) {
+        SquashfsSlotResizePlan::Fits => Ok(()),
+        SquashfsSlotResizePlan::GrowIntoGap { required_growth_bytes, gap_after_bytes, new_end_bytes_exclusive } => {
+            info!(
+                target_device = %target_info.device,
+                disk = %target_info.disk,
+                part = target_info.number,
+                required_growth_bytes,
+                gap_after_bytes,
+                new_end_bytes_exclusive,
+                "growing inactive squashfs slot before OTA flash"
+            );
+            resize_partition_end(&target_info.disk, target_info.number, new_end_bytes_exclusive).await
+        }
+        SquashfsSlotResizePlan::NeedsDataResize { required_growth_bytes, gap_after_bytes, additional_from_data_bytes, data_dir_available_bytes } => Err(Error::InvalidState(format!(
+            "target squashfs slot {} is {} bytes but image rootfs needs {} bytes; OTA needs {} more bytes total, can reclaim {} bytes of post-slot slack, but still needs {} more bytes from DATA. {} currently has {} bytes free. Clear space there and retry once live DATA repartitioning is supported.",
+            target_info.device,
+            target_info.size_bytes(),
+            image_size_bytes,
+            required_growth_bytes,
+            gap_after_bytes,
+            additional_from_data_bytes,
+            data_dir.display(),
+            data_dir_available_bytes
+        ))),
+        SquashfsSlotResizePlan::ClearDataDir { required_growth_bytes, gap_after_bytes, additional_from_data_bytes, data_dir_available_bytes, clear_bytes } => Err(Error::InvalidState(format!(
+            "target squashfs slot {} is {} bytes but image rootfs needs {} bytes; OTA needs {} more bytes total, can reclaim {} bytes of post-slot slack, but DATA only has {} bytes free and {} more bytes would have to come from DATA. Clear at least {} bytes from {} and retry.",
+            target_info.device,
+            target_info.size_bytes(),
+            image_size_bytes,
+            required_growth_bytes,
+            gap_after_bytes,
+            data_dir_available_bytes,
+            additional_from_data_bytes,
+            clear_bytes,
+            data_dir.display()
+        ))),
+    }
+}
+
+fn plan_squashfs_slot_resize(target_info: &BlockPartitionInfo, next_partition: Option<&BlockPartitionInfo>, image_size_bytes: u64, data_dir_available_bytes: u64) -> SquashfsSlotResizePlan {
+    let required_capacity_bytes = align_up_bytes(image_size_bytes, target_info.sector_bytes);
+    let target_bytes = target_info.size_bytes();
+    if required_capacity_bytes <= target_bytes {
+        return SquashfsSlotResizePlan::Fits;
+    }
+
+    let required_growth_bytes = required_capacity_bytes.saturating_sub(target_bytes);
+    let gap_after_bytes = next_partition.map(|next| next.start_bytes().saturating_sub(target_info.end_bytes_exclusive())).unwrap_or(0);
+
+    if required_growth_bytes <= gap_after_bytes {
+        return SquashfsSlotResizePlan::GrowIntoGap { required_growth_bytes, gap_after_bytes, new_end_bytes_exclusive: target_info.end_bytes_exclusive().saturating_add(required_growth_bytes) };
+    }
+
+    let additional_from_data_bytes = required_growth_bytes.saturating_sub(gap_after_bytes);
+    if data_dir_available_bytes >= additional_from_data_bytes {
+        SquashfsSlotResizePlan::NeedsDataResize { required_growth_bytes, gap_after_bytes, additional_from_data_bytes, data_dir_available_bytes }
+    } else {
+        SquashfsSlotResizePlan::ClearDataDir {
+            required_growth_bytes,
+            gap_after_bytes,
+            additional_from_data_bytes,
+            data_dir_available_bytes,
+            clear_bytes: additional_from_data_bytes.saturating_sub(data_dir_available_bytes),
+        }
+    }
+}
+
+const fn align_up_bytes(value: u64, align: u64) -> u64 {
+    if align == 0 { value } else { value.div_ceil(align).saturating_mul(align) }
 }
 
 async fn relabel_target_filesystem(target_label: &str, target_device: &str) -> Result<()> {
@@ -967,9 +1045,10 @@ async fn copy_boot_tree(src: &Path, dst: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        PersistedFileSync, missing_bootable_root_paths, parse_env_flag, reboot_failure_message, reboot_output_is_expected_success, sync_persisted_files_with_mappings_into,
-        sync_persisted_networkd_into,
+        PersistedFileSync, SquashfsSlotResizePlan, missing_bootable_root_paths, parse_env_flag, plan_squashfs_slot_resize, reboot_failure_message, reboot_output_is_expected_success,
+        sync_persisted_files_with_mappings_into, sync_persisted_networkd_into,
     };
+    use crate::util::BlockPartitionInfo;
     use std::path::Path;
 
     #[test]
@@ -1081,5 +1160,46 @@ mod tests {
 
         let missing = missing_bootable_root_paths(&root).await.expect("missing paths");
         assert!(missing.is_empty(), "unexpected missing paths: {missing:?}");
+    }
+
+    #[test]
+    fn squashfs_resize_plan_grows_into_post_slot_gap() {
+        let target = BlockPartitionInfo { device: "/dev/mmcblk0p3".to_string(), disk: "/dev/mmcblk0".to_string(), number: 3, sector_bytes: 512, start_sectors: 0, size_sectors: 188_416 };
+        let next = BlockPartitionInfo {
+            device: "/dev/mmcblk0p4".to_string(),
+            disk: "/dev/mmcblk0".to_string(),
+            number: 4,
+            sector_bytes: 512,
+            start_sectors: target.size_sectors + 8_192,
+            size_sectors: 1_000_000,
+        };
+
+        let plan = plan_squashfs_slot_resize(&target, Some(&next), target.size_bytes() + 671_744, 0);
+        assert_eq!(plan, SquashfsSlotResizePlan::GrowIntoGap { required_growth_bytes: 671_744, gap_after_bytes: 4_194_304, new_end_bytes_exclusive: target.end_bytes_exclusive() + 671_744 });
+    }
+
+    #[test]
+    fn squashfs_resize_plan_requests_clear_space_when_data_free_is_short() {
+        let target = BlockPartitionInfo { device: "/dev/mmcblk0p3".to_string(), disk: "/dev/mmcblk0".to_string(), number: 3, sector_bytes: 512, start_sectors: 0, size_sectors: 188_416 };
+        let next = BlockPartitionInfo {
+            device: "/dev/mmcblk0p4".to_string(),
+            disk: "/dev/mmcblk0".to_string(),
+            number: 4,
+            sector_bytes: 512,
+            start_sectors: target.size_sectors + 4_096,
+            size_sectors: 1_000_000,
+        };
+
+        let plan = plan_squashfs_slot_resize(&target, Some(&next), target.size_bytes() + 6_291_456, 1_048_576);
+        assert_eq!(
+            plan,
+            SquashfsSlotResizePlan::ClearDataDir {
+                required_growth_bytes: 6_291_456,
+                gap_after_bytes: 2_097_152,
+                additional_from_data_bytes: 4_194_304,
+                data_dir_available_bytes: 1_048_576,
+                clear_bytes: 3_145_728,
+            }
+        );
     }
 }

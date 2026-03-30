@@ -55,6 +55,20 @@ const DEFAULT_RECORDING_FRAME_QUEUE_SIZE: usize = 48;
 
 static SHADOW_DATA_ROOT: OnceLock<PathBuf> = OnceLock::new();
 
+fn thread_stack_size_bytes(var: &str, default: usize) -> usize {
+    const MIN: usize = 256 * 1024;
+    const MAX: usize = 8 * 1024 * 1024;
+    std::env::var(var).ok().and_then(|raw| raw.trim().parse::<usize>().ok()).unwrap_or(default).clamp(MIN, MAX)
+}
+
+fn stream_worker_stack_size_bytes() -> usize {
+    thread_stack_size_bytes("HELIOS_ENGINE_STREAM_THREAD_STACK_BYTES", 2 * 1024 * 1024)
+}
+
+fn recording_worker_stack_size_bytes() -> usize {
+    thread_stack_size_bytes("HELIOS_ENGINE_RECORDING_THREAD_STACK_BYTES", 1 * 1024 * 1024)
+}
+
 struct ManagedEncodedConsumer {
     count: Arc<AtomicU64>,
     last_seen_ms: Arc<AtomicU64>,
@@ -448,37 +462,28 @@ impl StreamManager {
         let stream_id = manifest.identity.id.unwrap_or_else(Uuid::new_v4);
         manifest.identity.id = Some(stream_id);
 
-        // Shadow recorder persists the stream's *encoded* side-channel (it does not run its own
-        // encoder). Enforce an H.264/H.265 stream encoder whenever shadow is enabled so:
-        // 1) the shadow recorder can start, and
-        // 2) regular recordings can piggyback the shadow segments instead of spawning a 2nd encoder.
+        // Shadow recorder persists the stream's encoded side-channel, but it must not rewrite the
+        // user-selected stream encoder. If the selected encoder is incompatible, shadow recorder
+        // will fail later with a clear warning instead of silently coercing the stream profile.
         if manifest.shadow_recorder_enabled && shadow_recorder_feature_enabled() && manifest.encoder_enabled != Some(false) {
-            let needs_codec = match manifest.encoder_id.as_deref() {
-                Some(id) => {
-                    let trimmed = id.trim();
-                    trimmed.is_empty() || infer_recording_codec(Some(trimmed)).is_none()
+            let recording_codec = manifest
+                .encoder_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .and_then(|id| infer_recording_codec(Some(id)));
+            if recording_codec.is_some() {
+                // Shadow-based capture/recording needs frequent keyframes so short windows (5s, 30s)
+                // remain decodable and ffmpeg can remux without producing empty MP4s.
+                let want_fps = infer_recording_fps(&manifest).unwrap_or(30.0).round().clamp(1.0, 240.0) as u32;
+                let settings = manifest.encoder_settings.get_or_insert_with(Default::default);
+                if settings.framerate.is_none() {
+                    settings.framerate = Some(crate::ipc::FrameRate { numerator: want_fps, denominator: 1 });
                 }
-                None => true,
-            };
-            if needs_codec {
-                manifest.encoder_enabled = Some(true);
-                // Default to H.264. On CM5 today this is typically software encode, but it is
-                // materially cheaper than software H.265 (x265). Callers can explicitly set
-                // "h265" (or a specific impl name like "h265_v4l2m2m") when hardware is available
-                // or the higher compression is worth the CPU.
-                manifest.encoder_id = Some("h264".to_string());
-            }
-
-            // Shadow-based capture/recording needs frequent keyframes so short windows (5s, 30s)
-            // remain decodable and ffmpeg can remux without producing empty MP4s.
-            let want_fps = infer_recording_fps(&manifest).unwrap_or(30.0).round().clamp(1.0, 240.0) as u32;
-            let settings = manifest.encoder_settings.get_or_insert_with(Default::default);
-            if settings.framerate.is_none() {
-                settings.framerate = Some(crate::ipc::FrameRate { numerator: want_fps, denominator: 1 });
-            }
-            if settings.gop.is_none() {
-                // 1-second GOP by default (in frames).
-                settings.gop = Some(want_fps as i32);
+                if settings.gop.is_none() {
+                    // 1-second GOP by default (in frames).
+                    settings.gop = Some(want_fps as i32);
+                }
             }
         }
         apply_default_encoder_settings(&mut manifest);
@@ -541,7 +546,11 @@ impl StreamManager {
                 let raw_tx = runner.raw_sender();
                 let (command_tx, command_rx) = sync_channel::<StreamCommand>(stream_command_queue_size());
                 let (exit_tx, exit_rx) = watch::channel(StreamExit::Running);
-                let join: JoinHandle<()> = std::thread::spawn(move || run_stream_worker(runner, command_rx, exit_tx));
+                let join: JoinHandle<()> = std::thread::Builder::new()
+                    .name(format!("helios-stream-{stream_id}"))
+                    .stack_size(stream_worker_stack_size_bytes())
+                    .spawn(move || run_stream_worker(runner, command_rx, exit_tx))
+                    .map_err(|err| Error::InvalidStateOwned(format!("stream worker spawn failed: {err}")))?;
                 Ok::<_, Error>((descriptor, graph, encoded_tx, managed_encoded_consumer_count, managed_encoded_consumer_last_seen_ms, raw_tx, command_tx, exit_rx, join))
             }
         })
@@ -567,6 +576,7 @@ impl StreamManager {
         let mut streams = self.streams.write().await;
         if streams.contains_key(&stream_id) {
             drop(streams);
+            abort_unregistered_stream_worker(stream_id, command_tx, join).await;
             self.finish_starting(stream_id).await;
             return Err(Error::Conflict("stream already exists"));
         }
@@ -1891,6 +1901,15 @@ fn enqueue_stream_command(tx: &SyncSender<StreamCommand>, command: StreamCommand
     }
 }
 
+async fn abort_unregistered_stream_worker(stream_id: Uuid, command_tx: SyncSender<StreamCommand>, join: JoinHandle<()>) {
+    let (respond_to, rx) = oneshot::channel();
+    if enqueue_stream_command(&command_tx, StreamCommand::Stop { respond_to }).is_ok() {
+        let _ = tokio::time::timeout(Duration::from_secs(2), rx).await;
+    }
+    let _ = tokio::task::spawn_blocking(move || join.join()).await;
+    cleanup_stream_files(stream_id);
+}
+
 impl Clone for StreamManager {
     fn clone(&self) -> Self {
         Self { streams: Arc::clone(&self.streams), starting: Arc::clone(&self.starting), recordings: Arc::clone(&self.recordings), shadow_recorders: Arc::clone(&self.shadow_recorders) }
@@ -2013,6 +2032,83 @@ const DEFAULT_STREAM_ENCODER_FPS: u32 = 60;
 const DEFAULT_STREAM_ENCODER_OUTPUT_HEIGHT: u32 = 480;
 const DEFAULT_STREAM_PREVIEW_JPEG_QUALITY: u8 = 30;
 
+fn manifest_prefers_default_stream_encoder(manifest: &StreamManifest) -> bool {
+    !manifest.internal && !matches!(manifest.capture.backend, BackendKind::File | BackendKind::Netcam)
+}
+
+fn encoder_selector_needs_normalization(selector: Option<&str>) -> bool {
+    let Some(selector) = selector.map(str::trim).filter(|value| !value.is_empty()) else {
+        return true;
+    };
+    selector.eq_ignore_ascii_case("ffmpeg") || matches!(selector.to_ascii_lowercase().as_str(), "mjpeg" | "mjpg" | "jpeg")
+}
+
+fn default_stream_encoder_selector() -> Option<String> {
+    let preferred_input = FourCc::new(*b"RG24");
+    let entries = CodecRegistry::list_enabled_encoders().ok()?;
+    let mut preferred_mjpeg: Option<String> = None;
+    let mut fallback_mjpeg: Option<String> = None;
+    let mut fallback_any: Option<String> = None;
+
+    for (input, codecs) in entries {
+        if input != preferred_input {
+            continue;
+        }
+        for desc in codecs {
+            if desc.kind != CodecKind::Encoder {
+                continue;
+            }
+            let impl_name = desc.impl_name.trim();
+            if impl_name.is_empty() {
+                continue;
+            }
+            if fallback_any.is_none() {
+                fallback_any = Some(impl_name.to_string());
+            }
+            if desc.name.eq_ignore_ascii_case("mjpeg") {
+                if desc.impl_name.eq_ignore_ascii_case("turbojpeg") {
+                    preferred_mjpeg = Some(impl_name.to_string());
+                    break;
+                }
+                if fallback_mjpeg.is_none() {
+                    fallback_mjpeg = Some(impl_name.to_string());
+                }
+            }
+        }
+        if preferred_mjpeg.is_some() {
+            break;
+        }
+    }
+
+    preferred_mjpeg.or(fallback_mjpeg).or(fallback_any)
+}
+
+fn normalize_stream_encoder_selection(manifest: &mut StreamManifest) {
+    if !manifest_prefers_default_stream_encoder(manifest) {
+        return;
+    }
+
+    let selector = manifest.encoder_id.as_deref();
+    let selector_needs_normalization = encoder_selector_needs_normalization(selector);
+
+    if manifest.encoder_enabled == Some(false) && !selector_needs_normalization {
+        return;
+    }
+
+    if selector_needs_normalization {
+        let Some(default_selector) = default_stream_encoder_selector() else {
+            return;
+        };
+        manifest.encoder_enabled = Some(true);
+        manifest.encoder_id = Some(default_selector);
+        return;
+    }
+
+    if manifest.encoder_enabled.is_none() {
+        manifest.encoder_enabled = Some(true);
+    }
+}
+
 fn default_encoder_output_resolution(capture_resolution: Resolution) -> crate::ipc::ResolutionHint {
     let source_width = capture_resolution.width.get().max(1);
     let source_height = capture_resolution.height.get().max(1);
@@ -2037,6 +2133,8 @@ fn default_encoder_output_resolution(capture_resolution: Resolution) -> crate::i
 }
 
 fn apply_default_encoder_settings(manifest: &mut StreamManifest) {
+    normalize_stream_encoder_selection(manifest);
+
     if manifest.encoder_enabled == Some(false) {
         return;
     }
@@ -2552,7 +2650,11 @@ impl RecordingEncoderWorker {
     fn start(config: RecordingEncoderConfig) -> std::result::Result<Self, String> {
         let mailbox = Arc::new(LatestFrameMailbox::new(recording_frame_queue_size()));
         let rx = Arc::clone(&mailbox);
-        let join = std::thread::spawn(move || run_recording_encoder(rx, config));
+        let join = std::thread::Builder::new()
+            .name("helios-recording".into())
+            .stack_size(recording_worker_stack_size_bytes())
+            .spawn(move || run_recording_encoder(rx, config))
+            .map_err(|err| format!("recording worker spawn failed: {err}"))?;
         Ok(Self { mailbox, join: Some(join) })
     }
 
@@ -2572,7 +2674,11 @@ impl ShadowRecorderWorker {
         // Small bounded queue. Shadow recorder must not stall the stream loop, but also should not
         // drop nearly all chunks under momentary IO/cpu hiccups.
         let (tx, rx) = sync_channel::<ShadowRecorderJob>(32);
-        let join = std::thread::spawn(move || run_shadow_recorder_worker(rx, config));
+        let join = std::thread::Builder::new()
+            .name("helios-shadow-record".into())
+            .stack_size(recording_worker_stack_size_bytes())
+            .spawn(move || run_shadow_recorder_worker(rx, config))
+            .map_err(|err| format!("shadow recorder spawn failed: {err}"))?;
         Ok(Self { tx, join: Some(join) })
     }
 
@@ -4420,6 +4526,8 @@ fn upsert_control_assignment(controls: &mut Vec<ControlAssignment>, id: u32, val
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
     use styx::core::controls::{Access, ControlId as StyxControlId, ControlKind, ControlMeta, ControlMetadata, ControlValue};
 
     fn sample_manifest_for_encoder_defaults(width: u32, height: u32) -> StreamManifest {
@@ -4652,5 +4760,25 @@ mod tests {
         let stop = controls.iter().find(|ctl| ctl.id == 11).and_then(|ctl| control_value_to_u32(&ctl.value));
         assert_eq!(start, Some(500));
         assert_eq!(stop, Some(500));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn abort_unregistered_stream_worker_stops_and_joins_thread() {
+        let (command_tx, command_rx) = sync_channel::<StreamCommand>(1);
+        let stopped = Arc::new(AtomicBool::new(false));
+        let stopped_flag = Arc::clone(&stopped);
+        let join = std::thread::spawn(move || {
+            match command_rx.recv().expect("stop command") {
+                StreamCommand::Stop { respond_to } => {
+                    let _ = respond_to.send(());
+                }
+                _ => panic!("expected stop command"),
+            }
+            stopped_flag.store(true, Ordering::SeqCst);
+        });
+
+        abort_unregistered_stream_worker(Uuid::nil(), command_tx, join).await;
+
+        assert!(stopped.load(Ordering::SeqCst));
     }
 }

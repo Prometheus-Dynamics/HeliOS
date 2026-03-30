@@ -27,6 +27,7 @@ fs_type = "ext4"
 size_mib = __ROOT_SLOT_SIZE_MIB__
 mkfs = false
 wipe_signatures = true
+gap_after_mib = 256
 marker = "/var/lib/helios/.provision.reserve_v1"
 
 [[partitions]]

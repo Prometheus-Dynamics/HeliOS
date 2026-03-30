@@ -386,12 +386,70 @@ pub(crate) async fn set_control(state: AppState, id: Uuid, control_id: u32, valu
 
 fn apply_control_to_manifest(manifest: &mut StreamManifest, control_id: u32, value: CaptureControlValue) {
     manifest.capture.controls.retain(|ctl| ctl.id != control_id);
-    let enable_tdn_output = control_id == NOISE_REDUCTION_MODE && !matches!(value, CaptureControlValue::Int(0) | CaptureControlValue::None);
     if !matches!(value, CaptureControlValue::None) {
         manifest.capture.controls.push(ControlAssignment { id: control_id, value });
     }
     if control_id == NOISE_REDUCTION_MODE {
-        manifest.capture.enable_tdn_output = enable_tdn_output;
+        // Keep TDN output in auto mode when NoiseReduction changes. Styx/libcamera already decides
+        // from per-control metadata whether a dedicated TDN stream is required; forcing it here
+        // keeps an unnecessary dmabuf request pool resident on OV9782.
+        manifest.capture.enable_tdn_output = false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use helios_engine::capture::{BackendHandle, BackendKind, CaptureConfig, ModeId};
+    use helios_engine::identity::DeviceIdentity;
+    use std::collections::BTreeMap;
+    use styx::prelude::{ColorSpace, FourCc, MediaFormat, Resolution};
+
+    fn sample_manifest() -> StreamManifest {
+        let format = MediaFormat::new(FourCc::new(*b"NV12"), Resolution::new(1280, 800).unwrap(), ColorSpace::Srgb);
+        StreamManifest {
+            identity: DeviceIdentity { id: None, alias: Some("ov9782".to_string()), hardware_id: Some("ov9782".to_string()) },
+            capture: CaptureConfig {
+                device_keys: vec!["ov9782".to_string()],
+                backend: BackendKind::Libcamera,
+                handle: BackendHandle::Libcamera { id: "ov9782".to_string() },
+                mode: ModeId { format, interval: None },
+                target_fps: Some(60),
+                interval: None,
+                controls: vec![ControlAssignment { id: NOISE_REDUCTION_MODE, value: CaptureControlValue::Int(1) }],
+                enable_tdn_output: true,
+            },
+            host_buffer: 8,
+            internal: false,
+            pipeline_enabled: None,
+            pipelines: Vec::new(),
+            active_pipeline_id: None,
+            active_pipeline_output: None,
+            pipeline_layout: None,
+            pipeline_wires: Vec::new(),
+            pipeline_host_inputs: BTreeMap::new(),
+            calibration: None,
+            pose: None,
+            encoder_enabled: None,
+            encoder_id: None,
+            decoder_enabled: None,
+            decoder_id: None,
+            encoder_settings: None,
+            decoder_settings: None,
+            preview_jpeg_quality: None,
+            shadow_recorder_enabled: false,
+            start_on_boot: false,
+        }
+    }
+
+    #[test]
+    fn noise_reduction_manifest_update_does_not_force_tdn_output() {
+        let mut manifest = sample_manifest();
+
+        apply_control_to_manifest(&mut manifest, NOISE_REDUCTION_MODE, CaptureControlValue::Int(1));
+
+        assert!(!manifest.capture.enable_tdn_output);
+        assert_eq!(manifest.capture.controls.iter().find(|ctl| ctl.id == NOISE_REDUCTION_MODE).map(|ctl| ctl.value.clone()), Some(CaptureControlValue::Int(1)));
     }
 }
 

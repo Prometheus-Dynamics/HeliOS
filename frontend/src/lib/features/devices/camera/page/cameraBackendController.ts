@@ -335,7 +335,47 @@ export function createCameraBackendController(state: BackendState, deps: Backend
   function codecSelectionId(codec: CodecInfo): string | null {
     const name = String(codec.name ?? '').trim();
     const implementation = String(codec.implementation ?? '').trim();
-    return implementation || name || null;
+    if (implementation && implementation.toLowerCase() !== 'ffmpeg') {
+      return implementation;
+    }
+    return name || implementation || null;
+  }
+
+  function codecMatchesKey(codec: CodecInfo, key: string): boolean {
+    const normalized = key.trim().toLowerCase();
+    if (!normalized) return false;
+    return (
+      String(codec.implementation ?? '').trim().toLowerCase() === normalized ||
+      String(codec.name ?? '').trim().toLowerCase() === normalized
+    );
+  }
+
+  function preferredCodecMatch(list: CodecInfo[], key: string): CodecInfo | null {
+    const normalized = key.trim().toLowerCase();
+    if (!normalized) return null;
+
+    const directImpl = list.find((codec) => String(codec.implementation ?? '').trim().toLowerCase() === normalized);
+    if (directImpl) return directImpl;
+
+    if (normalized === 'ffmpeg') {
+      const turbojpeg = list.find(
+        (codec) =>
+          String(codec.name ?? '').trim().toLowerCase() === 'mjpeg' &&
+          String(codec.implementation ?? '').trim().toLowerCase() === 'turbojpeg'
+      );
+      if (turbojpeg) return turbojpeg;
+    }
+
+    if (normalized === 'mjpeg') {
+      const turbojpeg = list.find(
+        (codec) =>
+          String(codec.name ?? '').trim().toLowerCase() === 'mjpeg' &&
+          String(codec.implementation ?? '').trim().toLowerCase() === 'turbojpeg'
+      );
+      if (turbojpeg) return turbojpeg;
+    }
+
+    return list.find((codec) => String(codec.name ?? '').trim().toLowerCase() === normalized) ?? null;
   }
 
   function pickCodecId(
@@ -346,13 +386,13 @@ export function createCameraBackendController(state: BackendState, deps: Backend
     if (!list.length) return null;
     const wanted = typeof desired === 'string' ? desired.trim() : '';
     if (wanted) {
-      const match = list.find((c) => c.implementation === wanted) ?? list.find((c) => c.name === wanted);
+      const match = preferredCodecMatch(list, wanted);
       if (match) return codecSelectionId(match);
     }
     for (const pref of preferred) {
       const key = String(pref ?? '').trim();
       if (!key) continue;
-      const match = list.find((c) => c.implementation === key) ?? list.find((c) => c.name === key);
+      const match = preferredCodecMatch(list, key);
       if (match) return codecSelectionId(match);
     }
     return list[0] ? codecSelectionId(list[0]) : null;
@@ -474,17 +514,25 @@ export function createCameraBackendController(state: BackendState, deps: Backend
 
     state.hostBuffer = manifest?.host_buffer ?? state.hostBuffer;
     state.previewJpegQuality = asJpegQuality(manifest?.preview_jpeg_quality ?? manifestRecord?.preview_jpeg_quality) ?? 65;
-    state.shadowRecorderEnabled = isFileBackend(capture?.backend) ? false : (manifest?.shadow_recorder_enabled ?? true);
+    state.shadowRecorderEnabled = isFileBackend(capture?.backend) ? false : (manifest?.shadow_recorder_enabled ?? false);
     state.cameraAlias = asTrimmedString(identityRecord?.alias ?? identityRecord?.display);
     const encoderEnabledFlag = manifestRecord?.encoder_enabled;
     const decoderEnabledFlag = manifestRecord?.decoder_enabled;
     const isFileManifestBackend = isFileBackend(capture?.backend);
     const isNetcamManifestBackend = isNetcamBackend(capture?.backend);
     const isMediaManifestBackend = isFileManifestBackend || isNetcamManifestBackend;
+    const manifestEncoderId = typeof manifest?.encoder_id === 'string' ? manifest.encoder_id.trim() : '';
+    const encoderSelectionIsConcrete = Boolean(
+      manifestEncoderId.length > 0 &&
+      manifestEncoderId.toLowerCase() !== 'ffmpeg'
+    );
     const hasMediaCodecs = isMediaManifestBackend && (state.encoders.length > 0 || state.decoders.length > 0);
     state.encoderEnabled = typeof encoderEnabledFlag === 'boolean'
       ? (isMediaManifestBackend && !encoderEnabledFlag && hasMediaCodecs ? true : encoderEnabledFlag)
-      : manifest?.encoder_id != null || (isMediaManifestBackend && state.encoders.length > 0);
+      : encoderSelectionIsConcrete || (state.encoders.length > 0 && !isMediaManifestBackend ? true : (isMediaManifestBackend && state.encoders.length > 0));
+    if (!state.encoderEnabled && !isMediaManifestBackend && !encoderSelectionIsConcrete && state.encoders.length > 0) {
+      state.encoderEnabled = true;
+    }
     state.decoderEnabled = typeof decoderEnabledFlag === 'boolean'
       ? (isMediaManifestBackend && !decoderEnabledFlag && hasMediaCodecs ? true : decoderEnabledFlag)
       : manifest?.decoder_id != null || (isMediaManifestBackend && state.decoders.length > 0);

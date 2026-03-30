@@ -1,4 +1,5 @@
 use crate::http::{json_store, storage};
+use crate::http::streams::util::normalize_stream_encoder_manifest;
 use crate::ipc::IpcHandles;
 use chrono::Utc;
 use helios_engine::ipc::{RigPose, StreamManifest};
@@ -112,6 +113,7 @@ async fn hydrate_manifest(mut manifest: StreamManifest) -> StreamManifest {
     if manifest.capture.backend == styx::BackendKind::File {
         normalize_file_capture_manifest(&mut manifest);
     }
+    normalize_stream_encoder_manifest(&mut manifest);
 
     manifest
 }

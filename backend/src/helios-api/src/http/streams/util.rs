@@ -7,6 +7,7 @@ use helios_engine::ipc::{JsonWire, StreamManifest, StreamPipelineGridSlot, Strea
 use lib_ipc::client::ClientTransportError;
 use std::io;
 use std::time::Duration;
+use styx::codec::{CodecKind, CodecRegistry};
 use styx::prelude::FourCc;
 use uuid::Uuid;
 
@@ -85,6 +86,83 @@ pub(crate) fn default_ffmpeg_settings_descriptor() -> EncoderSettingsDescriptor 
         thread_count: None,
         output_resolution: Some(helios_engine::ipc::ResolutionHint { width: 854, height: 480 }),
         decode_fps_limit: None,
+    }
+}
+
+fn manifest_prefers_default_stream_encoder(manifest: &StreamManifest) -> bool {
+    !manifest.internal && !matches!(manifest.capture.backend, styx::BackendKind::File | styx::BackendKind::Netcam)
+}
+
+fn encoder_selector_needs_normalization(selector: Option<&str>) -> bool {
+    let Some(selector) = selector.map(str::trim).filter(|value| !value.is_empty()) else {
+        return true;
+    };
+    selector.eq_ignore_ascii_case("ffmpeg") || matches!(selector.to_ascii_lowercase().as_str(), "mjpeg" | "mjpg" | "jpeg")
+}
+
+fn default_stream_encoder_selector() -> Option<String> {
+    let preferred_input = FourCc::new(*b"RG24");
+    let entries = CodecRegistry::list_enabled_encoders().ok()?;
+    let mut preferred_mjpeg: Option<String> = None;
+    let mut fallback_mjpeg: Option<String> = None;
+    let mut fallback_any: Option<String> = None;
+
+    for (input, codecs) in entries {
+        if input != preferred_input {
+            continue;
+        }
+        for desc in codecs {
+            if desc.kind != CodecKind::Encoder {
+                continue;
+            }
+            let impl_name = desc.impl_name.trim();
+            if impl_name.is_empty() {
+                continue;
+            }
+            if fallback_any.is_none() {
+                fallback_any = Some(impl_name.to_string());
+            }
+            if desc.name.eq_ignore_ascii_case("mjpeg") {
+                if desc.impl_name.eq_ignore_ascii_case("turbojpeg") {
+                    preferred_mjpeg = Some(impl_name.to_string());
+                    break;
+                }
+                if fallback_mjpeg.is_none() {
+                    fallback_mjpeg = Some(impl_name.to_string());
+                }
+            }
+        }
+        if preferred_mjpeg.is_some() {
+            break;
+        }
+    }
+
+    preferred_mjpeg.or(fallback_mjpeg).or(fallback_any)
+}
+
+pub(crate) fn normalize_stream_encoder_manifest(manifest: &mut StreamManifest) {
+    if !manifest_prefers_default_stream_encoder(manifest) {
+        return;
+    }
+
+    let selector = manifest.encoder_id.as_deref();
+    let selector_needs_normalization = encoder_selector_needs_normalization(selector);
+
+    if manifest.encoder_enabled == Some(false) && !selector_needs_normalization {
+        return;
+    }
+
+    if selector_needs_normalization {
+        let Some(default_selector) = default_stream_encoder_selector() else {
+            return;
+        };
+        manifest.encoder_enabled = Some(true);
+        manifest.encoder_id = Some(default_selector);
+        return;
+    }
+
+    if manifest.encoder_enabled.is_none() {
+        manifest.encoder_enabled = Some(true);
     }
 }
 

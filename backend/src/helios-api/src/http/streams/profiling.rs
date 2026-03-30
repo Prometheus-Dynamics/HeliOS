@@ -42,7 +42,8 @@ pub struct PipelineProfileRequest {
     /// Enable perf counters (cache misses, branch stats) during the capture window.
     #[serde(default)]
     pub enable_perf_counters: Option<bool>,
-    /// Capture a CPU flamegraph SVG during the capture window.
+    /// Capture a CPU flamegraph SVG during the capture window. This is opt-in because it is
+    /// materially heavier than the normal timing profile path.
     #[serde(default)]
     pub capture_flamegraph: Option<bool>,
     /// Reset rolling metrics before the capture window (recommended).
@@ -112,12 +113,17 @@ fn summarize_pipeline(pipeline: &PipelineGraphMetrics) -> PipelineProfileSummary
     PipelineProfileSummary { graph_average_time_ms, top_nodes: nodes }
 }
 
+fn capture_flamegraph_enabled(req: &PipelineProfileRequest) -> bool {
+    req.capture_flamegraph.unwrap_or(false)
+}
+
+fn perf_counters_enabled(req: &PipelineProfileRequest) -> bool {
+    req.enable_perf_counters.unwrap_or(false)
+}
+
 pub(crate) fn pipeline_metrics_need_host_output_priming(metrics: &StreamMetrics) -> bool {
     metrics.pipeline.as_ref().is_some_and(|pipeline| {
-        pipeline.nodes.is_empty()
-            && pipeline.groups.as_ref().is_none_or(BTreeMap::is_empty)
-            && pipeline.edges.as_ref().is_none_or(BTreeMap::is_empty)
-            && pipeline.flamegraph.is_none()
+        pipeline.nodes.is_empty() && pipeline.groups.as_ref().is_none_or(BTreeMap::is_empty) && pipeline.edges.as_ref().is_none_or(BTreeMap::is_empty) && pipeline.flamegraph.is_none()
     })
 }
 
@@ -199,8 +205,8 @@ pub async fn profile_pipeline(State(state): State<AppState>, Path(id): Path<Uuid
     let warmup_ms = req.warmup_ms.unwrap_or(500).min(30_000);
     let duration_ms = req.duration_ms.unwrap_or(5_000).clamp(250, 120_000);
     let pipeline_id = req.pipeline_id;
-    let enable_perf = req.enable_perf_counters.unwrap_or(true);
-    let capture_flamegraph = req.capture_flamegraph.unwrap_or(true);
+    let enable_perf = perf_counters_enabled(&req);
+    let capture_flamegraph = capture_flamegraph_enabled(&req);
     let reset_metrics = req.reset_metrics.unwrap_or(true);
     let metrics_keepalive = tokio::spawn(hold_pipeline_metrics_demand(state.clone(), id, warmup_ms.saturating_add(duration_ms)));
 
@@ -224,6 +230,9 @@ pub async fn profile_pipeline(State(state): State<AppState>, Path(id): Path<Uuid
 
     tokio::time::sleep(std::time::Duration::from_millis(duration_ms)).await;
     let _ = metrics_keepalive.await;
+    if enable_perf {
+        let _ = state.engine.set_graph_perf(id, pipeline_id, false).await;
+    }
 
     let mut metrics = match state.engine.get_metrics(id).await {
         Ok(helios_engine::ipc::EngineEvent::Metrics { metrics, .. }) => metrics,
@@ -294,7 +303,7 @@ pub async fn download_pipeline_flamegraph_svg(State(state): State<AppState>, Pat
 
 #[cfg(test)]
 mod tests {
-    use super::pipeline_metrics_need_host_output_priming;
+    use super::{PipelineProfileRequest, capture_flamegraph_enabled, perf_counters_enabled, pipeline_metrics_need_host_output_priming};
     use helios_engine::stream::{PipelineGraphMetrics, PipelineNodeMetrics, PipelineNodeRuntimeMetrics, StreamMetrics};
     use std::collections::BTreeMap;
 
@@ -330,5 +339,17 @@ mod tests {
         )]));
         let metrics = StreamMetrics { pipeline: Some(pipeline), ..StreamMetrics::default() };
         assert!(!pipeline_metrics_need_host_output_priming(&metrics));
+    }
+
+    #[test]
+    fn profile_request_defaults_flamegraph_off() {
+        let req = PipelineProfileRequest { warmup_ms: None, duration_ms: None, pipeline_id: None, enable_perf_counters: None, capture_flamegraph: None, reset_metrics: None };
+        assert!(!capture_flamegraph_enabled(&req));
+    }
+
+    #[test]
+    fn profile_request_defaults_perf_counters_off() {
+        let req = PipelineProfileRequest { warmup_ms: None, duration_ms: None, pipeline_id: None, enable_perf_counters: None, capture_flamegraph: None, reset_metrics: None };
+        assert!(!perf_counters_enabled(&req));
     }
 }
