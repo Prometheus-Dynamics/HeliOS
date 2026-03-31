@@ -109,6 +109,30 @@
       "review_note": "Storage data-root selection and path sanitization now live here; keep it limited to filesystem root and helper concerns."
     },
     {
+      "path": "backend/src/helios-api/src/http/device/network.rs",
+      "max_lines": 80,
+      "owner": "HeliOS",
+      "review_note": "Device network HTTP root should stay as thin route and schema orchestration after the module split."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/network/config.rs",
+      "max_lines": 260,
+      "owner": "HeliOS",
+      "review_note": "networkd rendering and durable filesystem persistence now live here; keep team autodetect and HTTP handlers out of this module."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/network/state.rs",
+      "max_lines": 280,
+      "owner": "HeliOS",
+      "review_note": "Team persistence, inference, and autodetect task behavior now live here; keep networkd write helpers and route glue out of it."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/network/types.rs",
+      "max_lines": 60,
+      "owner": "HeliOS",
+      "review_note": "Device network API schema and small team-id wrapper types now live here; keep them separate from handlers and persistence helpers."
+    },
+    {
       "path": "backend/src/helios-api/src/http/plugins.rs",
       "max_lines": 80,
       "owner": "HeliOS",
