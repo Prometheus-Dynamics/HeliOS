@@ -30,9 +30,7 @@ fn sample_manifest() -> StreamManifest {
         calibration: None,
         pose: None,
         encoder: RequestedEncoderConfig::default(),
-        decoder_enabled: None,
-        decoder_id: None,
-        decoder_settings: None,
+        decoder: RequestedDecoderConfig::default(),
         preview_jpeg_quality: None,
         shadow_recorder_enabled: true,
         start_on_boot: false,
@@ -171,6 +169,34 @@ fn stream_manifest_accepts_typed_encoder_json() {
 }
 
 #[test]
+fn stream_manifest_accepts_typed_decoder_json() {
+    let mut payload = sample_manifest_json();
+    payload.as_object_mut().expect("manifest object").insert(
+        "decoder".to_string(),
+        serde_json::json!({
+            "state": "enabled",
+            "id": "nv12-luma",
+            "settings": {
+                "fps_limit": 24.0,
+                "rotation_degrees": 90,
+                "mirror_horizontal": true
+            }
+        }),
+    );
+    let parsed: StreamManifest = serde_json::from_value(payload).expect("decode manifest");
+    match parsed.decoder {
+        RequestedDecoderConfig::Enabled { id, settings } => {
+            assert_eq!(id.as_deref(), Some("nv12-luma"));
+            let settings = settings.expect("decoder settings");
+            assert_eq!(settings.fps_limit, Some(24.0));
+            assert_eq!(settings.rotation_degrees, Some(90));
+            assert_eq!(settings.mirror_horizontal, Some(true));
+        }
+        RequestedDecoderConfig::Disabled => panic!("typed decoder config should remain enabled"),
+    }
+}
+
+#[test]
 fn stream_manifest_rejects_mixed_new_and_legacy_encoder_json() {
     let mut payload = sample_manifest_json();
     let object = payload.as_object_mut().expect("manifest object");
@@ -179,6 +205,17 @@ fn stream_manifest_rejects_mixed_new_and_legacy_encoder_json() {
 
     let err = serde_json::from_value::<StreamManifest>(payload).expect_err("mixed encoder config should fail");
     assert!(err.to_string().contains("may not mix `encoder`"));
+}
+
+#[test]
+fn stream_manifest_rejects_mixed_new_and_legacy_decoder_json() {
+    let mut payload = sample_manifest_json();
+    let object = payload.as_object_mut().expect("manifest object");
+    object.insert("decoder".to_string(), serde_json::json!({ "state": "enabled", "id": "nv12-luma" }));
+    object.insert("decoder_id".to_string(), serde_json::json!("h264"));
+
+    let err = serde_json::from_value::<StreamManifest>(payload).expect_err("mixed decoder config should fail");
+    assert!(err.to_string().contains("may not mix `decoder`"));
 }
 
 #[test]
@@ -195,4 +232,20 @@ fn stream_manifest_rejects_legacy_disabled_encoder_with_settings() {
 
     let err = serde_json::from_value::<StreamManifest>(payload).expect_err("legacy disabled encoder should not accept settings");
     assert!(err.to_string().contains("legacy encoder_enabled=false"));
+}
+
+#[test]
+fn stream_manifest_rejects_legacy_disabled_decoder_with_settings() {
+    let mut payload = sample_manifest_json();
+    let object = payload.as_object_mut().expect("manifest object");
+    object.insert("decoder_enabled".to_string(), serde_json::json!(false));
+    object.insert(
+        "decoder_settings".to_string(),
+        serde_json::json!({
+            "rotation_degrees": 90
+        }),
+    );
+
+    let err = serde_json::from_value::<StreamManifest>(payload).expect_err("legacy disabled decoder should not accept settings");
+    assert!(err.to_string().contains("legacy decoder_enabled=false"));
 }

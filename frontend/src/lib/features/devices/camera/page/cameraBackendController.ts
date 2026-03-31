@@ -178,6 +178,22 @@ export function createCameraBackendController(state: BackendState, deps: Backend
   };
   const requestedEncoderSettingsFor = (manifest?: StreamManifest | null): Record<string, unknown> | null =>
     asRecord(requestedEncoderRecordFor(manifest)?.settings) ?? asRecord(asRecord(manifest)?.encoder_settings);
+  const requestedDecoderRecordFor = (manifest?: StreamManifest | null): Record<string, unknown> | null =>
+    asRecord(asRecord(manifest)?.decoder);
+  const requestedDecoderIdFor = (manifest?: StreamManifest | null): string | null => {
+    const requestedId = asTrimmedString(requestedDecoderRecordFor(manifest)?.id);
+    if (requestedId) return requestedId;
+    const legacyId = asTrimmedString(asRecord(manifest)?.decoder_id);
+    return legacyId || null;
+  };
+  const requestedDecoderStateFor = (manifest?: StreamManifest | null): 'enabled' | 'disabled' | null => {
+    const requestedState = asTrimmedString(requestedDecoderRecordFor(manifest)?.state).toLowerCase();
+    if (requestedState === 'enabled' || requestedState === 'disabled') return requestedState;
+    const legacyEnabled = asRecord(manifest)?.decoder_enabled;
+    return typeof legacyEnabled === 'boolean' ? (legacyEnabled ? 'enabled' : 'disabled') : null;
+  };
+  const requestedDecoderSettingsFor = (manifest?: StreamManifest | null): Record<string, unknown> | null =>
+    asRecord(requestedDecoderRecordFor(manifest)?.settings) ?? asRecord(asRecord(manifest)?.decoder_settings);
   const asFiniteNumber = (value: unknown): number | null => {
     const numeric = Number(value);
     return Number.isFinite(numeric) ? numeric : null;
@@ -236,7 +252,7 @@ export function createCameraBackendController(state: BackendState, deps: Backend
       );
       state.decoderImpl = pickCodecId(
         state.decoders,
-        resolvedDecoderId || manifest?.decoder_id,
+        resolvedDecoderId || requestedDecoderIdFor(manifest),
         decoderPreferencesForFormat(
           manifest?.capture?.mode?.format?.code ?? null,
           state.decoderDefaultIdsByCaptureFormat
@@ -259,11 +275,12 @@ export function createCameraBackendController(state: BackendState, deps: Backend
     const resolvedDecoderId = resolvedCodecId(resolvedDecoder);
     const requestedEncoderState = requestedEncoderStateFor(manifest);
     const encoderSettingsWire = requestedEncoderSettingsFor(manifest);
+    const requestedDecoderState = requestedDecoderStateFor(manifest);
+    const decoderSettingsWire = requestedDecoderSettingsFor(manifest);
     if (manifest) {
-      const decoderSettings = manifest.decoder_settings ?? null;
-      state.decoderFpsLimit = deps.normalizeFpsLimit(decoderSettings?.fps_limit ?? encoderSettingsWire?.decode_fps_limit ?? null);
-      state.decoderRotationDegrees = deps.normalizeRotationDegrees(decoderSettings?.rotation_degrees ?? 0);
-      state.decoderMirrorHorizontal = Boolean(decoderSettings?.mirror_horizontal ?? false);
+      state.decoderFpsLimit = deps.normalizeFpsLimit(decoderSettingsWire?.fps_limit ?? encoderSettingsWire?.decode_fps_limit ?? null);
+      state.decoderRotationDegrees = deps.normalizeRotationDegrees(decoderSettingsWire?.rotation_degrees ?? 0);
+      state.decoderMirrorHorizontal = Boolean(decoderSettingsWire?.mirror_horizontal ?? false);
     }
     if (!state.devices.length) {
       state.selectedDeviceIndex = -1;
@@ -346,14 +363,13 @@ export function createCameraBackendController(state: BackendState, deps: Backend
     state.shadowRecorderEnabled = isFileBackend(capture?.backend) ? false : (manifest?.shadow_recorder_enabled ?? false);
     state.cameraAlias = asTrimmedString(identityRecord?.alias ?? identityRecord?.display);
     const encoderEnabledFlag = manifestRecord?.encoder_enabled;
-    const decoderEnabledFlag = manifestRecord?.decoder_enabled;
     const nextEncoderId = pickCodecId(
       state.encoders,
       resolvedEncoderId || requestedEncoderIdFor(manifest) || state.encoderImpl
     );
     const nextDecoderId = pickCodecId(
       state.decoders,
-      resolvedDecoderId || manifest?.decoder_id || state.decoderImpl,
+      resolvedDecoderId || requestedDecoderIdFor(manifest) || state.decoderImpl,
       decoderPreferencesForFormat(state.selectedFormat, state.decoderDefaultIdsByCaptureFormat)
     );
     state.encoderEnabled = typeof resolvedEncoder?.enabled === 'boolean'
@@ -367,8 +383,10 @@ export function createCameraBackendController(state: BackendState, deps: Backend
             : Boolean(nextEncoderId);
     state.decoderEnabled = typeof resolvedDecoder?.enabled === 'boolean'
       ? resolvedDecoder.enabled
-      : typeof decoderEnabledFlag === 'boolean'
-        ? Boolean(decoderEnabledFlag)
+      : requestedDecoderState === 'enabled'
+        ? true
+        : requestedDecoderState === 'disabled'
+          ? false
         : Boolean(nextDecoderId);
     if (encoderSettingsWire) {
       const outputResolution = asRecord(encoderSettingsWire.output_resolution);

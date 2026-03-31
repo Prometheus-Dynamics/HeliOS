@@ -4385,7 +4385,7 @@ fn upsert_control_assignment(controls: &mut Vec<ControlAssignment>, id: u32, val
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ipc::{RequestedEncoderConfig, StreamManifest};
+    use crate::ipc::{RequestedDecoderConfig, RequestedEncoderConfig, StreamManifest};
     use serde_json::json;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
@@ -4419,9 +4419,7 @@ mod tests {
             calibration: None,
             pose: None,
             encoder: RequestedEncoderConfig::enabled(Some("h264".to_string()), None),
-            decoder_enabled: None,
-            decoder_id: None,
-            decoder_settings: None,
+            decoder: RequestedDecoderConfig::default(),
             preview_jpeg_quality: None,
             shadow_recorder_enabled: false,
             start_on_boot: false,

@@ -4,7 +4,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use helios_engine::capture::CaptureDescriptor;
-use helios_engine::ipc::{EngineErrorCode, JsonWire, ResolvedStreamConfig, StreamManifest, StreamPipelineGridSlot, StreamPipelineLayout, StreamStatus, normalize_requested_stream_encoder};
+use helios_engine::ipc::{EngineErrorCode, JsonWire, ResolvedStreamConfig, StreamManifest, StreamPipelineGridSlot, StreamPipelineLayout, StreamStatus, normalize_requested_stream_decoder, normalize_requested_stream_encoder};
 use lib_ipc::client::ClientTransportError;
 use std::io;
 use std::time::Duration;
@@ -95,6 +95,7 @@ pub(crate) fn build_stream_info(id: Uuid, descriptor: CaptureDescriptor, resolve
 
 pub(crate) fn normalize_stream_encoder_manifest(manifest: &mut StreamManifest) {
     normalize_requested_stream_encoder(manifest);
+    normalize_requested_stream_decoder(manifest);
 }
 
 #[cfg(test)]
@@ -102,7 +103,7 @@ mod tests {
     use super::*;
     use helios_engine::capture::CaptureConfig;
     use helios_engine::identity::DeviceIdentity;
-    use helios_engine::ipc::{default_stream_encoder_selector, RequestedEncoderConfig};
+    use helios_engine::ipc::{RequestedDecoderConfig, RequestedEncoderConfig, default_stream_encoder_selector};
     use std::collections::BTreeMap;
     use styx::prelude::{ColorSpace, MediaFormat, Resolution};
     use styx::{BackendHandle, BackendKind};
@@ -132,9 +133,7 @@ mod tests {
             calibration: None,
             pose: None,
             encoder: RequestedEncoderConfig::default(),
-            decoder_enabled: None,
-            decoder_id: None,
-            decoder_settings: None,
+            decoder: RequestedDecoderConfig::default(),
             preview_jpeg_quality: None,
             shadow_recorder_enabled: false,
             start_on_boot: false,
@@ -157,8 +156,7 @@ mod tests {
     fn resolve_stream_state_honors_explicit_disable() {
         let mut manifest = sample_manifest();
         manifest.encoder = RequestedEncoderConfig::disabled();
-        manifest.decoder_enabled = Some(false);
-        manifest.decoder_id = Some("image-crate".to_string());
+        manifest.decoder = RequestedDecoderConfig::disabled();
 
         let resolved = manifest.resolve();
         assert!(!resolved.encoder.enabled);

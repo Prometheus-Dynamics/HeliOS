@@ -528,7 +528,7 @@ pub(crate) fn build_graph_handle_for_pipeline_output(host_buffer: usize, manifes
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ipc::{RequestedEncoderConfig, StreamManifest};
+    use crate::ipc::{RequestedDecoderConfig, RequestedEncoderConfig, StreamManifest};
     use styx::prelude::{ColorSpace, FourCc, MediaFormat, Resolution};
 
     fn sample_manifest() -> ResolvedStreamConfig {
@@ -559,9 +559,7 @@ mod tests {
             calibration: None,
             pose: None,
             encoder: RequestedEncoderConfig::default(),
-            decoder_enabled: None,
-            decoder_id: None,
-            decoder_settings: None,
+            decoder: RequestedDecoderConfig::default(),
             preview_jpeg_quality: None,
             shadow_recorder_enabled: true,
             start_on_boot: false,

@@ -474,11 +474,6 @@ async fn merge_stream_manifest_state(state: &AppState, manifest: &mut StreamMani
 
     normalize_pipeline_manifest(manifest);
 
-    if manifest.decoder_enabled == Some(false) {
-        manifest.decoder_id = None;
-        manifest.decoder_settings = None;
-    }
-
     // Preserve codec selections only when restarting the *same* capture format.
     // Carrying a decoder across formats can make the next start fail (decoder input mismatch).
     let requested_fourcc = manifest.capture.mode.format.code;
@@ -487,13 +482,9 @@ async fn merge_stream_manifest_state(state: &AppState, manifest: &mut StreamMani
     let same_mode = manifest.capture.mode.format == base.capture.mode.format;
     if same_format {
         manifest.encoder.ensure_id(base.encoder.id().map(ToString::to_string));
-        if manifest.decoder_enabled != Some(false) && manifest.decoder_id.is_none() {
-            manifest.decoder_id = base.decoder_id.clone();
-        }
+        manifest.decoder.ensure_id(base.decoder.id().map(ToString::to_string));
         manifest.encoder.ensure_settings(base.encoder.settings().cloned());
-        if manifest.decoder_enabled != Some(false) && manifest.decoder_settings.is_none() {
-            manifest.decoder_settings = base.decoder_settings.clone();
-        }
+        manifest.decoder.ensure_settings(base.decoder.settings().cloned());
     }
     normalize_stream_encoder_manifest(manifest);
 
@@ -877,9 +868,7 @@ mod tests {
             calibration: None,
             pose: None,
             encoder: helios_engine::ipc::RequestedEncoderConfig::default(),
-            decoder_enabled: None,
-            decoder_id: None,
-            decoder_settings: None,
+            decoder: helios_engine::ipc::RequestedDecoderConfig::default(),
             preview_jpeg_quality: None,
             shadow_recorder_enabled: false,
             start_on_boot: false,

@@ -1320,6 +1320,173 @@ impl<'de> Deserialize<'de> for RequestedEncoderConfig {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum RequestedDecoderConfig {
+    Disabled,
+    Enabled {
+        id: Option<String>,
+        settings: Option<DecoderSettings>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum RequestedDecoderConfigSchema {
+    Disabled,
+    Enabled {
+        #[serde(default)]
+        id: Option<String>,
+        #[serde(default)]
+        settings: Option<DecoderSettings>,
+    },
+}
+
+impl Default for RequestedDecoderConfig {
+    fn default() -> Self {
+        Self::Enabled { id: None, settings: None }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+enum RequestedDecoderConfigBinaryWire {
+    Disabled,
+    Enabled {
+        #[serde(default)]
+        id: Option<String>,
+        #[serde(default)]
+        settings: Option<DecoderSettings>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+enum RequestedDecoderConfigHumanWire {
+    Disabled,
+    Enabled {
+        #[serde(default)]
+        id: Option<String>,
+        #[serde(default)]
+        settings: Option<DecoderSettings>,
+    },
+}
+
+impl RequestedDecoderConfig {
+    pub fn disabled() -> Self {
+        Self::Disabled
+    }
+
+    pub fn enabled(id: Option<String>, settings: Option<DecoderSettings>) -> Self {
+        Self::Enabled { id, settings }
+    }
+
+    pub fn is_disabled(&self) -> bool {
+        matches!(self, Self::Disabled)
+    }
+
+    pub fn id(&self) -> Option<&str> {
+        match self {
+            Self::Disabled => None,
+            Self::Enabled { id, .. } => id.as_deref(),
+        }
+    }
+
+    pub fn settings(&self) -> Option<&DecoderSettings> {
+        match self {
+            Self::Disabled => None,
+            Self::Enabled { settings, .. } => settings.as_ref(),
+        }
+    }
+
+    pub fn ensure_id(&mut self, id: Option<String>) {
+        match self {
+            Self::Disabled => {}
+            Self::Enabled { id: existing, .. } => {
+                if existing.is_none() {
+                    *existing = normalized_codec_selector(id.as_deref());
+                }
+            }
+        }
+    }
+
+    pub fn ensure_settings(&mut self, settings: Option<DecoderSettings>) {
+        match self {
+            Self::Disabled => {}
+            Self::Enabled { settings: existing, .. } => {
+                if existing.is_none() {
+                    *existing = settings;
+                }
+            }
+        }
+    }
+
+    fn from_legacy(enabled: Option<bool>, id: Option<String>, settings: Option<DecoderSettings>) -> Result<Self, String> {
+        let normalized_id = normalized_codec_selector(id.as_deref());
+        if enabled == Some(false) {
+            if normalized_id.is_some() || settings.is_some() {
+                return Err("legacy decoder_enabled=false may not be combined with decoder_id or decoder_settings".to_string());
+            }
+            return Ok(Self::Disabled);
+        }
+        Ok(Self::enabled(normalized_id, settings))
+    }
+}
+
+impl From<RequestedDecoderConfig> for RequestedDecoderConfigBinaryWire {
+    fn from(value: RequestedDecoderConfig) -> Self {
+        match value {
+            RequestedDecoderConfig::Disabled => Self::Disabled,
+            RequestedDecoderConfig::Enabled { id, settings } => Self::Enabled { id, settings },
+        }
+    }
+}
+
+impl From<RequestedDecoderConfigBinaryWire> for RequestedDecoderConfig {
+    fn from(value: RequestedDecoderConfigBinaryWire) -> Self {
+        match value {
+            RequestedDecoderConfigBinaryWire::Disabled => Self::Disabled,
+            RequestedDecoderConfigBinaryWire::Enabled { id, settings } => Self::Enabled { id, settings },
+        }
+    }
+}
+
+impl From<RequestedDecoderConfig> for RequestedDecoderConfigHumanWire {
+    fn from(value: RequestedDecoderConfig) -> Self {
+        match value {
+            RequestedDecoderConfig::Disabled => Self::Disabled,
+            RequestedDecoderConfig::Enabled { id, settings } => Self::Enabled { id, settings },
+        }
+    }
+}
+
+impl From<RequestedDecoderConfigHumanWire> for RequestedDecoderConfig {
+    fn from(value: RequestedDecoderConfigHumanWire) -> Self {
+        match value {
+            RequestedDecoderConfigHumanWire::Disabled => Self::Disabled,
+            RequestedDecoderConfigHumanWire::Enabled { id, settings } => Self::Enabled { id, settings },
+        }
+    }
+}
+
+impl Serialize for RequestedDecoderConfig {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        if serializer.is_human_readable() {
+            RequestedDecoderConfigHumanWire::from(self.clone()).serialize(serializer)
+        } else {
+            RequestedDecoderConfigBinaryWire::from(self.clone()).serialize(serializer)
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for RequestedDecoderConfig {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        if deserializer.is_human_readable() {
+            Ok(RequestedDecoderConfigHumanWire::deserialize(deserializer)?.into())
+        } else {
+            Ok(RequestedDecoderConfigBinaryWire::deserialize(deserializer)?.into())
+        }
+    }
+}
+
 #[derive(Debug, Clone, ToSchema)]
 pub struct StreamManifest {
     pub identity: DeviceIdentity,
@@ -1353,14 +1520,8 @@ pub struct StreamManifest {
     pub pose: Option<RigPose>,
     #[schema(value_type = RequestedEncoderConfigSchema)]
     pub encoder: RequestedEncoderConfig,
-    /// Explicit toggle for decoder enable/disable.
-    ///
-    /// This exists because JSON `null` / absent fields are indistinguishable for `Option<T>`.
-    /// Clients must be able to explicitly disable the decoder without having the API silently
-    /// inherit a previously persisted decoder selection when restarting the same capture format.
-    pub decoder_enabled: Option<bool>,
-    pub decoder_id: Option<String>,
-    pub decoder_settings: Option<DecoderSettings>,
+    #[schema(value_type = RequestedDecoderConfigSchema)]
+    pub decoder: RequestedDecoderConfig,
     pub preview_jpeg_quality: Option<u8>,
     /// Enable the rolling shadow recorder buffer used for capture-last clips.
     pub shadow_recorder_enabled: bool,
@@ -1396,11 +1557,7 @@ struct StreamManifestBinaryWire {
     #[serde(default)]
     pub encoder: RequestedEncoderConfig,
     #[serde(default)]
-    pub decoder_enabled: Option<bool>,
-    #[serde(default)]
-    pub decoder_id: Option<String>,
-    #[serde(default)]
-    pub decoder_settings: Option<DecoderSettings>,
+    pub decoder: RequestedDecoderConfig,
     #[serde(default)]
     pub preview_jpeg_quality: Option<u8>,
     #[serde(default = "default_shadow_recorder_enabled")]
@@ -1444,6 +1601,8 @@ struct StreamManifestHumanWire {
     #[serde(default)]
     pub encoder_settings: Option<EncoderSettings>,
     #[serde(default)]
+    pub decoder: Option<RequestedDecoderConfig>,
+    #[serde(default)]
     pub decoder_enabled: Option<bool>,
     #[serde(default)]
     pub decoder_id: Option<String>,
@@ -1474,9 +1633,7 @@ impl From<StreamManifestBinaryWire> for StreamManifest {
             calibration: value.calibration,
             pose: value.pose,
             encoder: value.encoder,
-            decoder_enabled: value.decoder_enabled,
-            decoder_id: value.decoder_id,
-            decoder_settings: value.decoder_settings,
+            decoder: value.decoder,
             preview_jpeg_quality: value.preview_jpeg_quality,
             shadow_recorder_enabled: value.shadow_recorder_enabled,
             start_on_boot: value.start_on_boot,
@@ -1501,9 +1658,7 @@ impl From<StreamManifest> for StreamManifestBinaryWire {
             calibration: value.calibration,
             pose: value.pose,
             encoder: value.encoder,
-            decoder_enabled: value.decoder_enabled,
-            decoder_id: value.decoder_id,
-            decoder_settings: value.decoder_settings,
+            decoder: value.decoder,
             preview_jpeg_quality: value.preview_jpeg_quality,
             shadow_recorder_enabled: value.shadow_recorder_enabled,
             start_on_boot: value.start_on_boot,
@@ -1522,6 +1677,13 @@ impl TryFrom<StreamManifestHumanWire> for StreamManifest {
             }
             (None, enabled, id, settings) => RequestedEncoderConfig::from_legacy(enabled, id, settings)?,
         };
+        let decoder = match (value.decoder, value.decoder_enabled, value.decoder_id, value.decoder_settings) {
+            (Some(decoder), None, None, None) => decoder,
+            (Some(_), _, _, _) => {
+                return Err("stream manifest may not mix `decoder` with legacy `decoder_enabled`, `decoder_id`, or `decoder_settings` fields".to_string())
+            }
+            (None, enabled, id, settings) => RequestedDecoderConfig::from_legacy(enabled, id, settings)?,
+        };
 
         Ok(Self {
             identity: value.identity,
@@ -1538,9 +1700,7 @@ impl TryFrom<StreamManifestHumanWire> for StreamManifest {
             calibration: value.calibration,
             pose: value.pose,
             encoder,
-            decoder_enabled: value.decoder_enabled,
-            decoder_id: value.decoder_id,
-            decoder_settings: value.decoder_settings,
+            decoder,
             preview_jpeg_quality: value.preview_jpeg_quality,
             shadow_recorder_enabled: value.shadow_recorder_enabled,
             start_on_boot: value.start_on_boot,
@@ -1568,9 +1728,10 @@ impl From<StreamManifest> for StreamManifestHumanWire {
             encoder_enabled: None,
             encoder_id: None,
             encoder_settings: None,
-            decoder_enabled: value.decoder_enabled,
-            decoder_id: value.decoder_id,
-            decoder_settings: value.decoder_settings,
+            decoder: Some(value.decoder),
+            decoder_enabled: None,
+            decoder_id: None,
+            decoder_settings: None,
             preview_jpeg_quality: value.preview_jpeg_quality,
             shadow_recorder_enabled: value.shadow_recorder_enabled,
             start_on_boot: value.start_on_boot,
@@ -1629,15 +1790,12 @@ impl StreamManifest {
         }
 
         let encoder_explicitly_disabled = requested.encoder.is_disabled();
-        let decoder_explicitly_disabled = requested.decoder_enabled == Some(false);
-
-        if decoder_explicitly_disabled {
-            requested.decoder_id = None;
-            requested.decoder_settings = None;
-        }
-
         if !encoder_explicitly_disabled {
             normalize_stream_encoder_selection(&mut requested);
+        }
+        let decoder_explicitly_disabled = requested.decoder.is_disabled();
+        if !decoder_explicitly_disabled {
+            normalize_stream_decoder_selection(&mut requested);
         }
 
         let mut encoder = ResolvedEncoderConfig {
@@ -1658,13 +1816,10 @@ impl StreamManifest {
 
         let mut decoder = ResolvedDecoderConfig {
             enabled: false,
-            codec_id: normalized_codec_selector(requested.decoder_id.as_deref()),
-            settings: requested.decoder_settings.clone(),
+            codec_id: normalized_codec_selector(requested.decoder.id()),
+            settings: requested.decoder.settings().cloned(),
             settings_present: false,
         };
-        if !decoder_explicitly_disabled && decoder.codec_id.is_none() {
-            decoder.codec_id = default_decoder_selector_for_capture_format(requested.capture.mode.format.code);
-        }
         decoder.enabled = !decoder_explicitly_disabled && decoder.codec_id.is_some();
         if !decoder.enabled {
             decoder.codec_id = None;
@@ -1726,9 +1881,11 @@ impl ResolvedStreamConfig {
             } else {
                 RequestedEncoderConfig::disabled()
             },
-            decoder_enabled: Some(self.decoder.enabled),
-            decoder_id: self.decoder.codec_id.clone(),
-            decoder_settings: self.decoder.settings.clone(),
+            decoder: if self.decoder.enabled {
+                RequestedDecoderConfig::enabled(self.decoder.codec_id.clone(), self.decoder.settings.clone())
+            } else {
+                RequestedDecoderConfig::disabled()
+            },
             preview_jpeg_quality: Some(self.preview_jpeg_quality),
             shadow_recorder_enabled: self.shadow_recorder_enabled,
             start_on_boot: self.start_on_boot,
@@ -1866,6 +2023,10 @@ pub fn normalize_requested_stream_encoder(manifest: &mut StreamManifest) {
     normalize_stream_encoder_selection(manifest);
 }
 
+pub fn normalize_requested_stream_decoder(manifest: &mut StreamManifest) {
+    normalize_stream_decoder_selection(manifest);
+}
+
 fn normalize_stream_encoder_selection(manifest: &mut StreamManifest) {
     if !manifest_prefers_default_stream_encoder(manifest) {
         return;
@@ -1882,6 +2043,17 @@ fn normalize_stream_encoder_selection(manifest: &mut StreamManifest) {
         };
         manifest.encoder.ensure_id(Some(default_selector));
     }
+}
+
+fn normalize_stream_decoder_selection(manifest: &mut StreamManifest) {
+    if manifest.decoder.is_disabled() {
+        return;
+    }
+
+    let Some(default_selector) = default_decoder_selector_for_capture_format(manifest.capture.mode.format.code) else {
+        return;
+    };
+    manifest.decoder.ensure_id(Some(default_selector));
 }
 
 fn normalized_codec_selector(value: Option<&str>) -> Option<String> {

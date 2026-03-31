@@ -351,15 +351,19 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
           : {
               state: 'disabled'
             },
-        decoder_enabled: decoderEnabled,
-        decoder_id: decoderEnabled ? decoderId : null,
-        decoder_settings: decoderEnabled
+        decoder: decoderEnabled
           ? {
-              fps_limit: state.decoderFpsLimit ?? null,
-              rotation_degrees: state.decoderRotationDegrees ?? 0,
-              mirror_horizontal: state.decoderMirrorHorizontal ?? false
+              state: 'enabled',
+              id: decoderId,
+              settings: {
+                fps_limit: state.decoderFpsLimit ?? null,
+                rotation_degrees: state.decoderRotationDegrees ?? 0,
+                mirror_horizontal: state.decoderMirrorHorizontal ?? false
+              }
             }
-          : null,
+          : {
+              state: 'disabled'
+            },
         shadow_recorder_enabled: shadowRecorderEnabled,
         host_buffer: state.hostBuffer ?? null,
         preview_jpeg_quality: state.previewJpegQuality ?? 65,

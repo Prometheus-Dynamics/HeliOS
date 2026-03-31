@@ -983,13 +983,18 @@
           : {
               state: 'disabled'
             },
-        decoder_id: normalizedDecoderImpl,
-        decoder_settings: normalizedDecoderImpl
+        decoder: normalizedDecoderImpl
           ? {
-              rotation_degrees: decoderRotationDegrees,
-              mirror_horizontal: decoderMirrorHorizontal
+              state: 'enabled',
+              id: normalizedDecoderImpl,
+              settings: {
+                rotation_degrees: decoderRotationDegrees,
+                mirror_horizontal: decoderMirrorHorizontal
+              }
             }
-          : null,
+          : {
+              state: 'disabled'
+            },
         host_buffer: Number.isFinite(hostBuffer) ? hostBuffer : 8,
         shadow_recorder_enabled: false,
         start_on_boot: false

@@ -133,6 +133,15 @@ mod tests {
             [streams.manifest.encoder.settings]
             framerate = { numerator = 20, denominator = 1 }
             output_resolution = { width = 854, height = 480 }
+
+            [streams.manifest.decoder]
+            state = "enabled"
+            id = "nv12-luma"
+
+            [streams.manifest.decoder.settings]
+            fps_limit = 24
+            rotation_degrees = 90
+            mirror_horizontal = true
         "#;
 
         let doc = decode_startup_preset(Path::new("/etc/helios/startup.toml"), raw.as_bytes()).expect("decode startup preset");
@@ -141,5 +150,7 @@ mod tests {
         assert_eq!(doc.streams[0].camera_id, "ov9782");
         assert_eq!(doc.streams[0].manifest.capture.target_fps, Some(120));
         assert_eq!(doc.streams[0].manifest.encoder.settings().and_then(|enc| enc.output_resolution.as_ref()).map(|res| (res.width, res.height)), Some((854, 480)));
+        assert_eq!(doc.streams[0].manifest.decoder.id(), Some("nv12-luma"));
+        assert_eq!(doc.streams[0].manifest.decoder.settings().and_then(|decoder| decoder.rotation_degrees), Some(90));
     }
 }
