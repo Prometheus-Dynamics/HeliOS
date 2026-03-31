@@ -1,9 +1,5 @@
+import type { PeerEndpoint } from '$lib/ts-bindings/http/client';
 import type { PeerEndpointSummary, PeerStatus } from '$lib/types/peer';
-
-type ApiPeerEndpoint = {
-  host?: unknown;
-  port?: unknown;
-};
 
 export function normalizeStatus(value: unknown): PeerStatus {
   if (value === 'joining' || value === 'online' || value === 'offline' || value === 'unreachable') {
@@ -22,7 +18,7 @@ export function normalizeEndpoint(entry: unknown): PeerEndpointSummary | null {
   if (!entry || typeof entry !== 'object') {
     return null;
   }
-  const record = entry as ApiPeerEndpoint;
+  const record = entry as Partial<PeerEndpoint>;
   const host = typeof record.host === 'string' ? record.host.trim() : '';
   if (!host) {
     return null;
