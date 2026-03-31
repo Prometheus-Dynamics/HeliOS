@@ -1367,6 +1367,78 @@
       "max_lines": 40,
       "owner": "HeliOS",
       "review_note": "Limelight naming helper tests now live here; keep them isolated from production modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/led_status/mod.rs",
+      "max_lines": 40,
+      "owner": "HeliOS",
+      "review_note": "LED status root should only wire together the split config, state, lighting, runtime, and test modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/led_status/config.rs",
+      "max_lines": 130,
+      "owner": "HeliOS",
+      "review_note": "LED update and engine-crash environment parsing now live here; keep runtime loops and lighting command emission out of this config module."
+    },
+    {
+      "path": "backend/src/helios-api/src/led_status/state.rs",
+      "max_lines": 100,
+      "owner": "HeliOS",
+      "review_note": "LED mode state, updater-event mapping, and rollback/reboot mode interpretation now live here; keep command emission and polling loops separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/led_status/lighting.rs",
+      "max_lines": 180,
+      "owner": "HeliOS",
+      "review_note": "LED animation selection, configured-event lookup, and peripheral lighting command emission now live here; keep environment parsing and updater session polling separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/led_status/runtime.rs",
+      "max_lines": 150,
+      "owner": "HeliOS",
+      "review_note": "LED updater/crash task orchestration and updater session polling now live here; keep mode mapping and lighting command construction in their dedicated modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/led_status/tests.rs",
+      "max_lines": 60,
+      "owner": "HeliOS",
+      "review_note": "LED rollback-mode regression tests now live here; keep them isolated from production code."
+    },
+    {
+      "path": "backend/src/helios-api/src/ipc/peripherals/mod.rs",
+      "max_lines": 60,
+      "owner": "HeliOS",
+      "review_note": "Peripherals IPC root should only define shared client/session aliases and wire together the split config, connect, command, session, and test modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/ipc/peripherals/config.rs",
+      "max_lines": 120,
+      "owner": "HeliOS",
+      "review_note": "Peripherals IPC socket candidate resolution, transport config, and idle-session policy now live here; keep handshake and command execution separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/ipc/peripherals/connect.rs",
+      "max_lines": 90,
+      "owner": "HeliOS",
+      "review_note": "Peripherals IPC handshake, stream bootstrap, and socket fallback probing now live here; keep command implementations and idle-session reuse separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/ipc/peripherals/session.rs",
+      "max_lines": 130,
+      "owner": "HeliOS",
+      "review_note": "Peripherals IPC request/response waiting, pooled-session checkout, and idle-session recycling now live here; keep individual command methods separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/ipc/peripherals/commands.rs",
+      "max_lines": 190,
+      "owner": "HeliOS",
+      "review_note": "Peripherals IPC command methods and response decoding now live here; keep transport config and pooled-session orchestration separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/ipc/peripherals/tests.rs",
+      "max_lines": 50,
+      "owner": "HeliOS",
+      "review_note": "Peripherals IPC config and socket-candidate regression tests now live here; keep them isolated from production modules."
     }
   ],
   "forbidden_paths": [
@@ -1504,6 +1576,16 @@
       "path": "backend/src/helios-api/src/http/localization/media_imu.rs",
       "owner": "HeliOS",
       "reason": "Media-IMU sidecar binding, source publication, and replay sample selection now live under backend/src/helios-api/src/http/localization/media_imu/*. Do not recreate the deleted localization/media_imu.rs monolith."
+    },
+    {
+      "path": "backend/src/helios-api/src/led_status.rs",
+      "owner": "HeliOS",
+      "reason": "LED update-mode state, environment config, lighting command emission, and updater/crash task orchestration now live under backend/src/helios-api/src/led_status/*. Do not recreate the deleted led_status.rs monolith."
+    },
+    {
+      "path": "backend/src/helios-api/src/ipc/peripherals.rs",
+      "owner": "HeliOS",
+      "reason": "Peripherals IPC socket resolution, handshake/bootstrap, pooled-session management, and command implementations now live under backend/src/helios-api/src/ipc/peripherals/*. Do not recreate the deleted ipc/peripherals.rs monolith."
     }
   ]
 }
