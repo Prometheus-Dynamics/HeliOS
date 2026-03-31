@@ -110,9 +110,33 @@
     },
     {
       "path": "backend/src/helios-api/src/http/media.rs",
-      "max_lines": 980,
+      "max_lines": 80,
       "owner": "HeliOS",
-      "review_note": "Media HTTP root should stay focused on route orchestration after splitting preview generation, archive streaming, metadata/model helpers, and schema definitions into dedicated modules."
+      "review_note": "Media HTTP root should stay focused on route orchestration after splitting catalog, asset, attachment, transform, preview, archive, metadata/model helpers, and schema definitions into dedicated modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/media/catalog.rs",
+      "max_lines": 360,
+      "owner": "HeliOS",
+      "review_note": "Media list, upload, and archive download routes now live here; keep raw file fetch/delete, attachments, and transforms out of this catalog module."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/media/assets.rs",
+      "max_lines": 240,
+      "owner": "HeliOS",
+      "review_note": "Media file fetch, delete, rename, and metadata update routes now live here; keep upload/archive and attachment routes separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/media/attachments.rs",
+      "max_lines": 340,
+      "owner": "HeliOS",
+      "review_note": "Media IMU and label attachment routes now live here; keep preview generation and raw asset mutation separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/media/transforms.rs",
+      "max_lines": 260,
+      "owner": "HeliOS",
+      "review_note": "Media preview, thumbnail, and image-edit routes now live here; keep upload/list/archive and metadata mutation out of this transform module."
     },
     {
       "path": "backend/src/helios-api/src/http/media/archive.rs",

@@ -44,7 +44,7 @@ pub struct MediaItem {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
-pub(super) struct ListMediaParams {
+pub(crate) struct ListMediaParams {
     #[serde(default)]
     pub stream_id: Option<Uuid>,
     #[serde(default)]
@@ -103,7 +103,7 @@ pub(crate) struct MediaMetadata {
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
-pub(super) struct UpdateMetadataRequest {
+pub(crate) struct UpdateMetadataRequest {
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
@@ -117,7 +117,7 @@ pub(super) struct UpdateMetadataRequest {
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
-pub(super) struct CropRect {
+pub(crate) struct CropRect {
     pub x: u32,
     pub y: u32,
     pub width: u32,
@@ -131,7 +131,7 @@ impl From<CropRect> for ToolCropRect {
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
-pub(super) struct ImageEditsRequest {
+pub(crate) struct ImageEditsRequest {
     #[serde(default)]
     pub rotate_degrees: Option<i32>,
     #[serde(default)]
