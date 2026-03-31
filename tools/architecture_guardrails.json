@@ -91,6 +91,24 @@
       "review_note": "Peripherals API schemas now live here; keep schema definitions separate from endpoint logic and helper code."
     },
     {
+      "path": "backend/src/helios-api/src/http/storage.rs",
+      "max_lines": 40,
+      "owner": "HeliOS",
+      "review_note": "Storage HTTP root should stay as thin re-export orchestration after the storage split."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/storage/health.rs",
+      "max_lines": 520,
+      "owner": "HeliOS",
+      "review_note": "Storage mount probing, OTA layout checks, and self-check health evaluation now live here; keep path helpers and unrelated HTTP code out of it."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/storage/paths.rs",
+      "max_lines": 160,
+      "owner": "HeliOS",
+      "review_note": "Storage data-root selection and path sanitization now live here; keep it limited to filesystem root and helper concerns."
+    },
+    {
       "path": "frontend/src/lib/components/StreamPreview.svelte",
       "max_lines": 850,
       "owner": "HeliOS",
