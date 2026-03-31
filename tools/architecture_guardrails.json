@@ -127,10 +127,34 @@
       "review_note": "AI model detection, metadata hydration, manifest registration, and label-artifact handling now live here; keep media route handlers and preview helpers out of the model-management path."
     },
     {
-      "path": "backend/src/helios-api/src/http/media/preview.rs",
-      "max_lines": 580,
+      "path": "backend/src/helios-api/src/http/media/preview/mod.rs",
+      "max_lines": 40,
       "owner": "HeliOS",
-      "review_note": "Video probing, preview transcoding, thumbnail generation, and byte-range streaming now live here; keep preview/streaming internals separate from the upload and metadata routes."
+      "review_note": "Media preview root should stay as thin re-export orchestration after the preview split."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/media/preview/metadata.rs",
+      "max_lines": 260,
+      "owner": "HeliOS",
+      "review_note": "Image/video metadata hydration, ffprobe parsing, codec normalization, and preview FPS derivation now live here; keep ffmpeg execution and range streaming out of this module."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/media/preview/ffmpeg.rs",
+      "max_lines": 220,
+      "owner": "HeliOS",
+      "review_note": "Preview and thumbnail cache paths plus ffmpeg execution now live here; keep metadata probing and HTTP range handling separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/media/preview/ranges.rs",
+      "max_lines": 140,
+      "owner": "HeliOS",
+      "review_note": "Byte-range parsing and media file streaming now live here; keep ffmpeg execution and metadata probing out of the streaming path."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/media/preview/tests.rs",
+      "max_lines": 80,
+      "owner": "HeliOS",
+      "review_note": "Media preview codec, ffprobe-ratio, and range parser tests now live here; keep regression coverage isolated from production modules."
     },
     {
       "path": "backend/src/helios-api/src/http/media/support.rs",
@@ -737,6 +761,11 @@
       "path": "backend/src/helios-api/src/http/nt4.rs",
       "owner": "HeliOS",
       "reason": "NT4 HTTP routing, transport helpers, schema types, and value/topic logic now live under backend/src/helios-api/src/http/nt4/*. Do not recreate the deleted nt4.rs monolith."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/media/preview.rs",
+      "owner": "HeliOS",
+      "reason": "Media preview probing, ffmpeg generation, and range streaming now live under backend/src/helios-api/src/http/media/preview/*. Do not recreate the deleted media/preview.rs monolith."
     }
   ]
 }
