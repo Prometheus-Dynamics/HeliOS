@@ -217,6 +217,42 @@
       "review_note": "IDE API schema types now live here; keep them separate from handlers and filesystem helpers."
     },
     {
+      "path": "backend/src/helios-api/src/http/device/rig.rs",
+      "max_lines": 40,
+      "owner": "HeliOS",
+      "review_note": "Device rig HTTP root should stay as thin route/type re-export orchestration after the module split."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/rig/layout.rs",
+      "max_lines": 180,
+      "owner": "HeliOS",
+      "review_note": "Rig camera-layout assembly now lives here; keep peer forwarding and persistence mutation handlers out of the layout path."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/rig/routes.rs",
+      "max_lines": 220,
+      "owner": "HeliOS",
+      "review_note": "Rig pose and robot-dimension handlers now live here; keep layout construction and identifier helpers out of the route layer."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/rig/state.rs",
+      "max_lines": 220,
+      "owner": "HeliOS",
+      "review_note": "Rig robot-state persistence, camera-id normalization, and shared mapping helpers now live here; keep peer HTTP forwarding out of this module."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/rig/peer_forward.rs",
+      "max_lines": 160,
+      "owner": "HeliOS",
+      "review_note": "Rig peer pose forwarding and live-stream pose persistence now live here; keep layout aggregation and robot-state storage separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/rig/types.rs",
+      "max_lines": 100,
+      "owner": "HeliOS",
+      "review_note": "Rig API schema types now live here; keep them separate from handlers and persistence helpers."
+    },
+    {
       "path": "backend/src/helios-api/src/http/plugins.rs",
       "max_lines": 80,
       "owner": "HeliOS",

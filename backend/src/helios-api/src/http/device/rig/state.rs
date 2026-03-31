@@ -1,0 +1,144 @@
+use chrono::Utc;
+
+use crate::http::{json_store, peers, storage};
+
+use super::{CameraLayoutCameraResponse, PoseRotation, PoseVector, RigPose, RobotDimensions, UpdateRobotDimensionsRequest};
+
+const DEFAULT_ROBOT: RobotDimensions = RobotDimensions { width_m: 0.6, length_m: 0.6, bumper_height_m: 0.127, bumper_thickness_m: 0.0508, ground_clearance_m: 0.0 };
+
+impl Default for RobotDimensions {
+    fn default() -> Self {
+        DEFAULT_ROBOT
+    }
+}
+
+pub(super) fn now_rfc3339() -> String {
+    Utc::now().to_rfc3339()
+}
+
+pub(super) async fn robot_state_path() -> std::io::Result<std::path::PathBuf> {
+    let dir = storage::ensure_subdir_async("rig").await?;
+    Ok(dir.join("robot.json"))
+}
+
+pub(super) async fn load_robot_dimensions() -> RobotDimensions {
+    let path = match robot_state_path().await {
+        Ok(path) => path,
+        Err(_) => return RobotDimensions::default(),
+    };
+    json_store::read_json_or_default(&path).await
+}
+
+pub(super) async fn update_robot_dimensions_state<F, Fut>(updater: F) -> std::io::Result<RobotDimensions>
+where
+    F: FnOnce(RobotDimensions) -> Fut,
+    Fut: std::future::Future<Output = RobotDimensions>,
+{
+    let path = robot_state_path().await?;
+    json_store::update_json(path, updater).await
+}
+
+pub(super) fn apply_robot_dimensions_patch(mut robot: RobotDimensions, patch_req: UpdateRobotDimensionsRequest) -> RobotDimensions {
+    let apply = |field: &mut f64, value: Option<f64>, allow_zero: bool| -> bool {
+        let Some(v) = value else {
+            return false;
+        };
+        if !v.is_finite() {
+            return false;
+        }
+        if allow_zero {
+            if v < 0.0 {
+                return false;
+            }
+        } else if v <= 0.0 {
+            return false;
+        }
+        *field = v;
+        true
+    };
+
+    let _ = apply(&mut robot.width_m, patch_req.width_m, false);
+    let _ = apply(&mut robot.length_m, patch_req.length_m, false);
+    let _ = apply(&mut robot.bumper_height_m, patch_req.bumper_height_m, false);
+    let _ = apply(&mut robot.bumper_thickness_m, patch_req.bumper_thickness_m, false);
+    let _ = apply(&mut robot.ground_clearance_m, patch_req.ground_clearance_m, true);
+    robot
+}
+
+pub(super) fn backend_label(device: &helios_engine::capture::DiscoveredDevice) -> String {
+    device.backends.first().map(|backend| format!("{:?}", backend.kind).to_lowercase()).unwrap_or_else(|| "unknown".to_string())
+}
+
+pub(crate) fn camera_uid_from_keys(keys: &[String], fallback: Option<&str>) -> Option<String> {
+    if keys.is_empty() {
+        return fallback.map(|value| value.to_string());
+    }
+
+    if let Some(key) = keys.iter().find(|key| key.contains('/')) {
+        return Some(key.clone());
+    }
+
+    if let Some(key) = keys.iter().find(|key| key.contains(':')) {
+        return Some(key.clone());
+    }
+
+    let mut normalized = keys.to_vec();
+    normalized.sort();
+    normalized.into_iter().next().or_else(|| fallback.map(|value| value.to_string()))
+}
+
+pub(super) fn canonical_camera_id(device: &helios_engine::capture::DiscoveredDevice) -> String {
+    camera_uid_from_keys(&device.identity.keys, Some(&device.identity.display)).unwrap_or_else(|| device.identity.display.clone())
+}
+
+pub(super) fn camera_hardware_id(device: &helios_engine::capture::DiscoveredDevice) -> Option<String> {
+    if device.identity.keys.is_empty() {
+        None
+    } else {
+        let mut keys = device.identity.keys.clone();
+        keys.sort();
+        Some(keys.join("|"))
+    }
+}
+
+pub(super) fn stream_matches_device(stream: &helios_engine::ipc::StreamSummary, device: &helios_engine::capture::DiscoveredDevice) -> bool {
+    let keys = &stream.manifest.capture.device_keys;
+    if keys.is_empty() {
+        return false;
+    }
+    device.identity.keys.iter().any(|key| keys.iter().any(|k| k == key))
+}
+
+pub(super) fn map_remote_peer_pose(pose: &peers::PeerRemoteRigPose) -> RigPose {
+    RigPose {
+        translation: PoseVector { x: pose.translation.x, y: pose.translation.y, z: pose.translation.z },
+        rotation: PoseRotation { roll: pose.rotation.roll, pitch: pose.rotation.pitch, yaw: pose.rotation.yaw },
+        updated_at: pose.updated_at.clone(),
+    }
+}
+
+pub(super) fn remote_camera_display_name(peer_stream: &peers::PeerRemoteStreamSummary) -> String {
+    peer_stream
+        .display_name
+        .as_ref()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+        .or_else(|| peer_stream.stream_alias.clone())
+        .unwrap_or_else(|| peer_stream.remote_stream_id.clone())
+}
+
+pub(super) fn peer_camera_layout_entry(peer_stream: &peers::PeerRemoteStreamSummary) -> CameraLayoutCameraResponse {
+    let peer_camera_uid = peer_stream.camera_uid.as_deref().map(str::trim).filter(|value| !value.is_empty()).map(|value| value.to_string()).unwrap_or_else(|| peer_stream.stream_ref.clone());
+
+    CameraLayoutCameraResponse {
+        stream_id: Some(peer_stream.stream_ref.clone()),
+        stream_alias: peer_stream.stream_alias.clone(),
+        camera_uid: Some(peer_camera_uid.clone()),
+        driver_camera_id: peer_camera_uid,
+        display_name: remote_camera_display_name(peer_stream),
+        backend: format!("peer/{:?}", peer_stream.peer_kind).to_ascii_lowercase(),
+        hardware_id: Some(peer_stream.remote_stream_id.clone()),
+        pose: peer_stream.pose.as_ref().map(map_remote_peer_pose),
+    }
+}
