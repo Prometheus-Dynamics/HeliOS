@@ -1039,6 +1039,24 @@
       "review_note": "Console PTY allocation, shell bootstrap, PATH resolution, and blocking reader/writer tasks now live here; keep session registry state and API payload shaping out of the spawn/runtime helper."
     },
     {
+      "path": "backend/src/helios-api/src/pipelines_read_model/mod.rs",
+      "max_lines": 120,
+      "owner": "HeliOS",
+      "review_note": "Pipelines read-model root should stay focused on shared cache state, exported request error types, and light metric accessors after splitting graph-validation and registry-cache internals into dedicated modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/pipelines_read_model/graph_validation.rs",
+      "max_lines": 320,
+      "owner": "HeliOS",
+      "review_note": "Graph validation helper fallback, graph-list cache refresh, planner diagnostic mapping, and validation state mutation now live here; keep node-registry snapshot/file helper logic out of this module."
+    },
+    {
+      "path": "backend/src/helios-api/src/pipelines_read_model/registry.rs",
+      "max_lines": 360,
+      "owner": "HeliOS",
+      "review_note": "Node-registry cache refresh, disk snapshot invalidation, helper execution, and response shaping now live here; keep graph-list scanning and validation-helper fallback out of this registry module."
+    },
+    {
       "path": "backend/src/helios-engine/src/localization/solve/mod.rs",
       "max_lines": 250,
       "owner": "HeliOS",
@@ -1116,6 +1134,11 @@
       "path": "backend/src/helios-api/src/console_sessions.rs",
       "owner": "HeliOS",
       "reason": "Console session manager state now lives under backend/src/helios-api/src/console_sessions/*. Do not recreate the deleted console_sessions.rs monolith."
+    },
+    {
+      "path": "backend/src/helios-api/src/pipelines_read_model.rs",
+      "owner": "HeliOS",
+      "reason": "Pipelines read-model graph validation and registry caching now live under backend/src/helios-api/src/pipelines_read_model/*. Do not recreate the deleted pipelines_read_model.rs monolith."
     },
     {
       "path": "backend/src/helios-api/src/http/localization/maps.rs",
