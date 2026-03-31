@@ -60,9 +60,13 @@ pub struct UploadUpdateError {
 pub struct StageUpdateRequest {
     pub image_url: String,
     #[serde(default)]
+    pub artifact_kind: Option<ApplyArtifactKind>,
+    #[serde(default)]
     pub size_bytes: Option<u64>,
     #[serde(default)]
     pub checksum: Option<String>,
+    #[serde(default = "default_true")]
+    pub delete_image_after_apply: bool,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -77,6 +81,8 @@ pub struct UpdateAckResponse {
 pub struct ApplyUpdateRequest {
     #[serde(default)]
     pub requested_by: Option<String>,
+    #[serde(default)]
+    pub update_id: Option<String>,
     #[serde(default)]
     pub artifact_kind: Option<ApplyArtifactKind>,
     #[serde(default)]
@@ -93,6 +99,14 @@ pub struct ApplyUpdateRequest {
 pub struct PreflightUpdateRequest {
     #[serde(default)]
     pub update_id: Option<String>,
+    #[serde(default)]
+    pub artifact_kind: Option<ApplyArtifactKind>,
+    #[serde(default)]
+    pub image_url: Option<String>,
+    #[serde(default)]
+    pub size_bytes: Option<u64>,
+    #[serde(default)]
+    pub checksum: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
@@ -109,14 +123,6 @@ impl ApplyArtifactKind {
             Self::DiskImage => "disk-image",
             Self::FrontendBundle => "frontend-bundle",
             Self::ServiceBundle => "service-bundle",
-        }
-    }
-
-    fn requires_stream_shutdown(self) -> bool {
-        match self {
-            Self::DiskImage => true,
-            Self::FrontendBundle => false,
-            Self::ServiceBundle => false,
         }
     }
 }
@@ -169,6 +175,8 @@ pub struct OtaDirectoryStorageReport {
 pub struct PreflightUpdateResponse {
     pub update_id: String,
     pub ready: bool,
+    #[serde(default)]
+    pub transient: bool,
     pub report: PreflightReport,
 }
 
@@ -177,6 +185,30 @@ pub struct ApplyConflictResponse {
     pub update_id: String,
     pub error: String,
     pub preflight: PreflightReport,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PreflightRequestMode<'a> {
+    Active,
+    Existing(Uuid),
+    Transient {
+        image_url: &'a str,
+        artifact_kind: ApplyArtifactKind,
+        size_bytes: Option<u64>,
+        checksum: Option<&'a str>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ApplyRequestMode<'a> {
+    Existing(Uuid),
+    Transient {
+        image_url: &'a str,
+        artifact_kind: ApplyArtifactKind,
+        size_bytes: Option<u64>,
+        checksum: Option<&'a str>,
+        delete_image_after_apply: bool,
+    },
 }
 
 #[utoipa::path(
@@ -318,8 +350,20 @@ pub async fn upload_update(headers: HeaderMap, mut multipart: Multipart) -> impl
     )
 )]
 pub async fn stage_update(State(_state): State<AppState>, Json(payload): Json<StageUpdateRequest>) -> impl IntoResponse {
-    let _ = (&payload.image_url, payload.size_bytes, payload.checksum.as_deref());
-    (StatusCode::GONE, Json(UploadUpdateError { error: "staging removed: use /ota/apply with image_url".into() })).into_response()
+    let artifact_kind = payload.artifact_kind.unwrap_or(ApplyArtifactKind::DiskImage);
+    match stage_and_wait_for_update(
+        &_state,
+        &payload.image_url,
+        artifact_kind,
+        payload.size_bytes,
+        payload.checksum.as_deref(),
+        payload.delete_image_after_apply,
+    )
+    .await
+    {
+        Ok(update_id) => (StatusCode::OK, Json(UpdateAckResponse { update_id: Some(update_id.to_string()), message: "update staged".into() })).into_response(),
+        Err(err) => err.into_response(),
+    }
 }
 
 #[utoipa::path(
@@ -335,18 +379,16 @@ pub async fn stage_update(State(_state): State<AppState>, Json(payload): Json<St
 )]
 pub async fn apply_update(State(state): State<AppState>, Json(payload): Json<ApplyUpdateRequest>) -> impl IntoResponse {
     let _ = payload.requested_by.as_deref();
-    let artifact_kind = payload.artifact_kind.unwrap_or(ApplyArtifactKind::DiskImage);
-    let Some(image_url) = payload.image_url.as_deref() else {
-        return (StatusCode::BAD_REQUEST, Json(UploadUpdateError { error: "image_url is required (staging removed)".into() })).into_response();
+    let update_id = match resolve_apply_request_mode(&payload) {
+        Ok(ApplyRequestMode::Existing(update_id)) => update_id,
+        Ok(ApplyRequestMode::Transient { image_url, artifact_kind, size_bytes, checksum, delete_image_after_apply }) => {
+            match stage_and_wait_for_update(&state, image_url, artifact_kind, size_bytes, checksum, delete_image_after_apply).await {
+                Ok(update_id) => update_id,
+                Err(err) => return err.into_response(),
+            }
+        }
+        Err(err) => return (StatusCode::BAD_REQUEST, Json(err)).into_response(),
     };
-    let update_id = match stage_update_for_manual_apply(&state, image_url, payload.size_bytes, payload.checksum.as_deref(), payload.delete_image_after_apply, artifact_kind).await {
-        Ok(update_id) => update_id,
-        Err(err) => return err.into_response(),
-    };
-    if let Err(err) = wait_for_staged_update(&state, update_id).await {
-        let _ = cancel_update_by_id(&state, update_id).await;
-        return err.into_response();
-    }
     let report = match fetch_updater_preflight(&state, update_id).await {
         Ok(report) => report,
         Err(err) => {
@@ -358,7 +400,7 @@ pub async fn apply_update(State(state): State<AppState>, Json(payload): Json<App
         let _ = cancel_update_by_id(&state, update_id).await;
         return (StatusCode::CONFLICT, Json(ApplyConflictResponse { update_id: update_id.to_string(), error: report.summary.clone(), preflight: report })).into_response();
     }
-    let stopped_streams = if artifact_kind.requires_stream_shutdown() { stop_streams_for_update(&state).await.unwrap_or(0) } else { 0 };
+    let stopped_streams = if preflight_requires_stream_shutdown(&report) { stop_streams_for_update(&state).await.unwrap_or(0) } else { 0 };
     if let Err(err) = send_apply_release(&state, update_id).await {
         return err.into_response();
     }
@@ -367,25 +409,28 @@ pub async fn apply_update(State(state): State<AppState>, Json(payload): Json<App
 }
 
 pub async fn preflight_update(State(state): State<AppState>, Json(payload): Json<PreflightUpdateRequest>) -> impl IntoResponse {
-    let update_id = if let Some(raw) = payload.update_id.as_deref() {
-        match Uuid::parse_str(raw.trim()) {
-            Ok(id) => id,
-            Err(_) => return (StatusCode::BAD_REQUEST, Json(UploadUpdateError { error: "invalid update_id".into() })).into_response(),
+    match resolve_preflight_request_mode(&payload) {
+        Ok(PreflightRequestMode::Active) => {
+            let update_id = match active_update_id(&state).await {
+                Ok(id) => id,
+                Err(err) => return err.into_response(),
+            };
+            match fetch_updater_preflight(&state, update_id).await {
+                Ok(report) => (StatusCode::OK, Json(PreflightUpdateResponse { update_id: update_id.to_string(), ready: report.ready, transient: false, report })).into_response(),
+                Err(err) => err.into_response(),
+            }
         }
-    } else {
-        let updater_state = match fetch_updater_state(&state).await {
-            Ok((state, _)) => state,
-            Err(err) => return err.into_response(),
-        };
-        match updater_state {
-            Some(active) => active.update_id,
-            None => return (StatusCode::BAD_REQUEST, Json(UploadUpdateError { error: "no staged update is active".into() })).into_response(),
+        Ok(PreflightRequestMode::Existing(update_id)) => match fetch_updater_preflight(&state, update_id).await {
+            Ok(report) => (StatusCode::OK, Json(PreflightUpdateResponse { update_id: update_id.to_string(), ready: report.ready, transient: false, report })).into_response(),
+            Err(err) => err.into_response(),
+        },
+        Ok(PreflightRequestMode::Transient { image_url, artifact_kind, size_bytes, checksum }) => {
+            match run_transient_preflight(&state, image_url, artifact_kind, size_bytes, checksum).await {
+                Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+                Err(err) => err.into_response(),
+            }
         }
-    };
-
-    match fetch_updater_preflight(&state, update_id).await {
-        Ok(report) => (StatusCode::OK, Json(PreflightUpdateResponse { update_id: update_id.to_string(), ready: report.ready, report })).into_response(),
-        Err(err) => err.into_response(),
+        Err(err) => (StatusCode::BAD_REQUEST, Json(err)).into_response(),
     }
 }
 
@@ -443,6 +488,127 @@ async fn stop_streams_for_update(state: &AppState) -> Option<usize> {
         warn!(stopped, "stopped streams before OTA apply");
     }
     Some(stopped)
+}
+
+fn resolve_apply_request_mode(payload: &ApplyUpdateRequest) -> Result<ApplyRequestMode<'_>, UploadUpdateError> {
+    let update_id = payload.update_id.as_deref().map(str::trim).filter(|value| !value.is_empty());
+    let image_url = payload.image_url.as_deref().map(str::trim).filter(|value| !value.is_empty());
+
+    if update_id.is_some() && image_url.is_some() {
+        return Err(UploadUpdateError { error: "provide either update_id or image_url for /ota/apply, not both".into() });
+    }
+    if update_id.is_none() && image_url.is_none() {
+        return Err(UploadUpdateError { error: "image_url or update_id is required".into() });
+    }
+    if image_url.is_none() && (payload.artifact_kind.is_some() || payload.size_bytes.is_some() || payload.checksum.as_deref().is_some_and(|value| !value.trim().is_empty())) {
+        return Err(UploadUpdateError { error: "artifact_kind, size_bytes, and checksum are only valid when image_url is provided".into() });
+    }
+
+    if let Some(raw) = update_id {
+        return match Uuid::parse_str(raw) {
+            Ok(id) => Ok(ApplyRequestMode::Existing(id)),
+            Err(_) => Err(UploadUpdateError { error: "invalid update_id".into() }),
+        };
+    }
+
+    Ok(ApplyRequestMode::Transient {
+        image_url: image_url.expect("image_url presence checked above"),
+        artifact_kind: payload.artifact_kind.unwrap_or(ApplyArtifactKind::DiskImage),
+        size_bytes: payload.size_bytes,
+        checksum: payload.checksum.as_deref().map(str::trim).filter(|value| !value.is_empty()),
+        delete_image_after_apply: payload.delete_image_after_apply,
+    })
+}
+
+fn preflight_requires_stream_shutdown(report: &PreflightReport) -> bool {
+    matches!(report.artifact_kind.as_deref(), Some(kind) if kind == ApplyArtifactKind::DiskImage.manifest_kind())
+}
+
+fn resolve_preflight_request_mode(payload: &PreflightUpdateRequest) -> Result<PreflightRequestMode<'_>, UploadUpdateError> {
+    let update_id = payload.update_id.as_deref().map(str::trim).filter(|value| !value.is_empty());
+    let image_url = payload.image_url.as_deref().map(str::trim).filter(|value| !value.is_empty());
+
+    if update_id.is_some() && image_url.is_some() {
+        return Err(UploadUpdateError { error: "provide either update_id or image_url for /ota/preflight, not both".into() });
+    }
+    if image_url.is_none() && (payload.artifact_kind.is_some() || payload.size_bytes.is_some() || payload.checksum.as_deref().is_some_and(|value| !value.trim().is_empty())) {
+        return Err(UploadUpdateError { error: "artifact_kind, size_bytes, and checksum are only valid when image_url is provided".into() });
+    }
+
+    if let Some(raw) = update_id {
+        return match Uuid::parse_str(raw) {
+            Ok(id) => Ok(PreflightRequestMode::Existing(id)),
+            Err(_) => Err(UploadUpdateError { error: "invalid update_id".into() }),
+        };
+    }
+
+    if let Some(image_url) = image_url {
+        return Ok(PreflightRequestMode::Transient {
+            image_url,
+            artifact_kind: payload.artifact_kind.unwrap_or(ApplyArtifactKind::DiskImage),
+            size_bytes: payload.size_bytes,
+            checksum: payload.checksum.as_deref().map(str::trim).filter(|value| !value.is_empty()),
+        });
+    }
+
+    Ok(PreflightRequestMode::Active)
+}
+
+async fn active_update_id(state: &AppState) -> Result<Uuid, UploadUpdateError> {
+    let updater_state = fetch_updater_state(state).await?.0;
+    match updater_state {
+        Some(active) => Ok(active.update_id),
+        None => Err(UploadUpdateError { error: "no staged update is active".into() }),
+    }
+}
+
+async fn run_transient_preflight(
+    state: &AppState,
+    image_url: &str,
+    artifact_kind: ApplyArtifactKind,
+    size_bytes: Option<u64>,
+    checksum: Option<&str>,
+) -> Result<PreflightUpdateResponse, UploadUpdateError> {
+    let update_id = stage_update_for_manual_apply(state, image_url, size_bytes, checksum, false, artifact_kind).await?;
+    let preflight_result = transient_preflight_inner(state, update_id).await;
+    let cleanup_result = ensure_transient_preflight_cleared(state, update_id).await;
+
+    match (preflight_result, cleanup_result) {
+        (Ok(report), Ok(())) => Ok(PreflightUpdateResponse { update_id: update_id.to_string(), ready: report.ready, transient: true, report }),
+        (Err(err), Ok(())) => Err(err),
+        (Ok(_), Err(cleanup_err)) => Err(cleanup_err),
+        (Err(err), Err(cleanup_err)) => Err(UploadUpdateError { error: format!("{}; cleanup failed: {}", err.error, cleanup_err.error) }),
+    }
+}
+
+async fn transient_preflight_inner(state: &AppState, update_id: Uuid) -> Result<PreflightReport, UploadUpdateError> {
+    wait_for_staged_update(state, update_id).await?;
+    fetch_updater_preflight(state, update_id).await
+}
+
+async fn ensure_transient_preflight_cleared(state: &AppState, update_id: Uuid) -> Result<(), UploadUpdateError> {
+    let active = fetch_updater_state(state).await?.0;
+    if !matches!(active, Some(current) if current.update_id == update_id) {
+        return Ok(());
+    }
+    cancel_update_by_id(state, update_id).await?;
+    wait_for_update_cleared(state, update_id).await
+}
+
+async fn stage_and_wait_for_update(
+    state: &AppState,
+    image_url: &str,
+    artifact_kind: ApplyArtifactKind,
+    size_bytes: Option<u64>,
+    checksum: Option<&str>,
+    delete_image_after_apply: bool,
+) -> Result<Uuid, UploadUpdateError> {
+    let update_id = stage_update_for_manual_apply(state, image_url, size_bytes, checksum, delete_image_after_apply, artifact_kind).await?;
+    if let Err(err) = wait_for_staged_update(state, update_id).await {
+        let _ = cancel_update_by_id(state, update_id).await;
+        return Err(err);
+    }
+    Ok(update_id)
 }
 
 async fn stage_update_for_manual_apply(
@@ -505,6 +671,20 @@ async fn wait_for_staged_update(state: &AppState, update_id: Uuid) -> Result<Upd
             return Err(UploadUpdateError { error: format!("timed out waiting for staged update {}", update_id) });
         }
         sleep(Duration::from_millis(250)).await;
+    }
+}
+
+async fn wait_for_update_cleared(state: &AppState, update_id: Uuid) -> Result<(), UploadUpdateError> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let (active, _) = fetch_updater_state(state).await?;
+        if !matches!(active, Some(current) if current.update_id == update_id) {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(UploadUpdateError { error: format!("timed out waiting for transient preflight cleanup of update {}", update_id) });
+        }
+        sleep(Duration::from_millis(200)).await;
     }
 }
 
@@ -655,5 +835,205 @@ const fn default_true() -> bool {
 impl IntoResponse for UploadUpdateError {
     fn into_response(self) -> axum::response::Response {
         (StatusCode::SERVICE_UNAVAILABLE, Json(self)).into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ApplyArtifactKind, ApplyRequestMode, ApplyUpdateRequest, PreflightRequestMode, PreflightUpdateRequest, resolve_apply_request_mode, resolve_preflight_request_mode,
+    };
+    use uuid::Uuid;
+
+    #[test]
+    fn resolve_preflight_request_mode_defaults_to_active() {
+        let payload = PreflightUpdateRequest { update_id: None, artifact_kind: None, image_url: None, size_bytes: None, checksum: None };
+        assert_eq!(resolve_preflight_request_mode(&payload).unwrap(), PreflightRequestMode::Active);
+    }
+
+    #[test]
+    fn resolve_preflight_request_mode_parses_existing_update_id() {
+        let update_id = Uuid::new_v4();
+        let payload = PreflightUpdateRequest { update_id: Some(update_id.to_string()), artifact_kind: None, image_url: None, size_bytes: None, checksum: None };
+        assert_eq!(resolve_preflight_request_mode(&payload).unwrap(), PreflightRequestMode::Existing(update_id));
+    }
+
+    #[test]
+    fn resolve_preflight_request_mode_rejects_invalid_update_id() {
+        let payload = PreflightUpdateRequest { update_id: Some("not-a-uuid".into()), artifact_kind: None, image_url: None, size_bytes: None, checksum: None };
+        let err = resolve_preflight_request_mode(&payload).unwrap_err();
+        assert_eq!(err.error, "invalid update_id");
+    }
+
+    #[test]
+    fn resolve_preflight_request_mode_rejects_conflicting_targets() {
+        let payload = PreflightUpdateRequest {
+            update_id: Some(Uuid::new_v4().to_string()),
+            artifact_kind: Some(ApplyArtifactKind::ServiceBundle),
+            image_url: Some("file:///tmp/update.tar".into()),
+            size_bytes: Some(42),
+            checksum: Some("abc".into()),
+        };
+        let err = resolve_preflight_request_mode(&payload).unwrap_err();
+        assert_eq!(err.error, "provide either update_id or image_url for /ota/preflight, not both");
+    }
+
+    #[test]
+    fn resolve_preflight_request_mode_rejects_artifact_fields_without_image_url() {
+        let payload = PreflightUpdateRequest {
+            update_id: None,
+            artifact_kind: Some(ApplyArtifactKind::FrontendBundle),
+            image_url: None,
+            size_bytes: Some(1024),
+            checksum: Some("abc".into()),
+        };
+        let err = resolve_preflight_request_mode(&payload).unwrap_err();
+        assert_eq!(err.error, "artifact_kind, size_bytes, and checksum are only valid when image_url is provided");
+    }
+
+    #[test]
+    fn resolve_preflight_request_mode_defaults_transient_artifact_kind_to_disk_image() {
+        let payload = PreflightUpdateRequest {
+            update_id: None,
+            artifact_kind: None,
+            image_url: Some("file:///tmp/update.img.xz".into()),
+            size_bytes: Some(4096),
+            checksum: Some("  deadbeef  ".into()),
+        };
+        assert_eq!(
+            resolve_preflight_request_mode(&payload).unwrap(),
+            PreflightRequestMode::Transient {
+                image_url: "file:///tmp/update.img.xz",
+                artifact_kind: ApplyArtifactKind::DiskImage,
+                size_bytes: Some(4096),
+                checksum: Some("deadbeef"),
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_preflight_request_mode_keeps_explicit_transient_artifact_kind() {
+        let payload = PreflightUpdateRequest {
+            update_id: None,
+            artifact_kind: Some(ApplyArtifactKind::ServiceBundle),
+            image_url: Some("file:///tmp/service_bundle.tar".into()),
+            size_bytes: None,
+            checksum: Some("   ".into()),
+        };
+        assert_eq!(
+            resolve_preflight_request_mode(&payload).unwrap(),
+            PreflightRequestMode::Transient {
+                image_url: "file:///tmp/service_bundle.tar",
+                artifact_kind: ApplyArtifactKind::ServiceBundle,
+                size_bytes: None,
+                checksum: None,
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_apply_request_mode_rejects_missing_target() {
+        let payload = ApplyUpdateRequest {
+            requested_by: None,
+            update_id: None,
+            artifact_kind: None,
+            image_url: None,
+            size_bytes: None,
+            checksum: None,
+            delete_image_after_apply: true,
+        };
+        let err = resolve_apply_request_mode(&payload).unwrap_err();
+        assert_eq!(err.error, "image_url or update_id is required");
+    }
+
+    #[test]
+    fn resolve_apply_request_mode_rejects_conflicting_targets() {
+        let payload = ApplyUpdateRequest {
+            requested_by: None,
+            update_id: Some(Uuid::new_v4().to_string()),
+            artifact_kind: Some(ApplyArtifactKind::ServiceBundle),
+            image_url: Some("file:///tmp/update.tar".into()),
+            size_bytes: Some(12),
+            checksum: Some("abc".into()),
+            delete_image_after_apply: false,
+        };
+        let err = resolve_apply_request_mode(&payload).unwrap_err();
+        assert_eq!(err.error, "provide either update_id or image_url for /ota/apply, not both");
+    }
+
+    #[test]
+    fn resolve_apply_request_mode_rejects_artifact_fields_without_image_url() {
+        let payload = ApplyUpdateRequest {
+            requested_by: None,
+            update_id: Some(Uuid::new_v4().to_string()),
+            artifact_kind: Some(ApplyArtifactKind::FrontendBundle),
+            image_url: None,
+            size_bytes: Some(64),
+            checksum: Some("abc".into()),
+            delete_image_after_apply: true,
+        };
+        let err = resolve_apply_request_mode(&payload).unwrap_err();
+        assert_eq!(err.error, "artifact_kind, size_bytes, and checksum are only valid when image_url is provided");
+    }
+
+    #[test]
+    fn resolve_apply_request_mode_parses_existing_update_id() {
+        let update_id = Uuid::new_v4();
+        let payload = ApplyUpdateRequest {
+            requested_by: Some("tester".into()),
+            update_id: Some(update_id.to_string()),
+            artifact_kind: None,
+            image_url: None,
+            size_bytes: None,
+            checksum: None,
+            delete_image_after_apply: true,
+        };
+        assert_eq!(resolve_apply_request_mode(&payload).unwrap(), ApplyRequestMode::Existing(update_id));
+    }
+
+    #[test]
+    fn resolve_apply_request_mode_defaults_transient_artifact_kind() {
+        let payload = ApplyUpdateRequest {
+            requested_by: None,
+            update_id: None,
+            artifact_kind: None,
+            image_url: Some("file:///tmp/update.img.xz".into()),
+            size_bytes: Some(4096),
+            checksum: Some("  deadbeef ".into()),
+            delete_image_after_apply: false,
+        };
+        assert_eq!(
+            resolve_apply_request_mode(&payload).unwrap(),
+            ApplyRequestMode::Transient {
+                image_url: "file:///tmp/update.img.xz",
+                artifact_kind: ApplyArtifactKind::DiskImage,
+                size_bytes: Some(4096),
+                checksum: Some("deadbeef"),
+                delete_image_after_apply: false,
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_apply_request_mode_keeps_explicit_transient_fields() {
+        let payload = ApplyUpdateRequest {
+            requested_by: Some("tester".into()),
+            update_id: None,
+            artifact_kind: Some(ApplyArtifactKind::ServiceBundle),
+            image_url: Some("file:///tmp/service_bundle.tar".into()),
+            size_bytes: Some(128),
+            checksum: Some(" ".into()),
+            delete_image_after_apply: true,
+        };
+        assert_eq!(
+            resolve_apply_request_mode(&payload).unwrap(),
+            ApplyRequestMode::Transient {
+                image_url: "file:///tmp/service_bundle.tar",
+                artifact_kind: ApplyArtifactKind::ServiceBundle,
+                size_bytes: Some(128),
+                checksum: None,
+                delete_image_after_apply: true,
+            }
+        );
     }
 }
