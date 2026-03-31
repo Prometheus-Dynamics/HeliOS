@@ -24,6 +24,8 @@ static DATA_ROOT: Lazy<PathBuf> = Lazy::new(|| {
 });
 
 fn default_data_root() -> PathBuf {
+    // TEMP_SHIM: storage-temp-data-root-fallback
+    // Keep the temp-dir escape hatch only until every boot path guarantees a mounted persistent data root before API start.
     let candidates = [PathBuf::from("/data/helios/api"), PathBuf::from("/var/lib/helios/api"), std::env::temp_dir().join("helios-api")];
 
     for candidate in candidates {

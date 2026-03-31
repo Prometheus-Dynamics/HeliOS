@@ -5,6 +5,8 @@ use tokio::fs;
 use uuid::Uuid;
 
 pub(crate) const DATA_ROOT: &str = "/var/lib/helios";
+// TEMP_SHIM: persisted-files-etc-mirror
+// Keep mirrored /etc/helios reads and writes until all runtime consumers are migrated onto /var/lib/helios.
 pub(crate) const LEGACY_HELIOS_ETC_DIR: &str = "/etc/helios";
 
 pub(crate) fn data_root_file(name: &str) -> PathBuf {

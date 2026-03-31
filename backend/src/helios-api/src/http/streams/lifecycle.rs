@@ -135,6 +135,8 @@ fn is_transient_missing_capture_descriptor(manifest: &StreamManifest, code: Engi
 }
 
 fn is_legacy_media_file_token(raw: &str) -> bool {
+    // TEMP_SHIM: streams-lifecycle-media-file-token-compat
+    // Keep coercing the old media-file token until persisted file-stream manifests have been migrated in place.
     identity_tokens::normalize_token(raw).as_deref() == Some("media-file")
 }
 

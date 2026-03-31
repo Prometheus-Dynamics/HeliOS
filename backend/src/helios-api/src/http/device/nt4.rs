@@ -47,6 +47,8 @@ fn default_subscriptions_enabled() -> bool {
 }
 
 fn settings_paths() -> (PathBuf, Option<PathBuf>) {
+    // TEMP_SHIM: device-nt4-settings-etc-fallback
+    // Keep the /etc fallback until every deployed image writes NT4 settings into the data-root path.
     match std::env::var_os("HELIOS_NT4_SETTINGS_FILE") {
         Some(path) => (PathBuf::from(path), None),
         None => (persisted_files::data_root_file("nt4.json"), Some(persisted_files::legacy_helios_etc_file("nt4.json"))),

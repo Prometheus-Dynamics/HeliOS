@@ -298,6 +298,7 @@ async fn resolve_replay_calibration(state: &AppState, source_stream_id: Option<U
         }
     }
 
+    // TEMP_SHIM: streams-replay-calibration-guess-fallback
     // Fallback for legacy/offboard media with missing stream-id metadata:
     // if there is exactly one calibrated camera profile available, use it.
     //
@@ -325,6 +326,8 @@ async fn resolve_replay_calibration(state: &AppState, source_stream_id: Option<U
 }
 
 async fn ensure_replay_compatible_path(meta_dir: &Path, source: &Path, source_name: &str, fps_hint: Option<f32>) -> Result<PathBuf, String> {
+    // TEMP_SHIM: streams-replay-annexb-remux-compat-cache
+    // Older/offboard raw annex-b captures still need an MP4 wrapper before the replay stack can consume them reliably.
     let Some(format_hint) = raw_annexb_format_hint(source_name) else {
         return Ok(source.to_path_buf());
     };

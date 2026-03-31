@@ -721,6 +721,8 @@ fn client_name_from_hostname(hostname: &str) -> String {
 }
 
 async fn default_nt4_server_host_from_team_file() -> Option<String> {
+    // TEMP_SHIM: nt4-limelight-team-file-etc-fallback
+    // Keep the /etc team fallback until every deployed image writes the canonical team file into /var/lib/helios.
     let primary = std::env::var_os("HELIOS_TEAM_FILE").map(std::path::PathBuf::from).unwrap_or_else(|| "/var/lib/helios/team".into());
     let fallback = (primary.as_path() == std::path::Path::new("/var/lib/helios/team")).then_some(std::path::Path::new("/etc/helios/team"));
     let content = match tokio::fs::read_to_string(&primary).await {

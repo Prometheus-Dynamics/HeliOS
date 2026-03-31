@@ -55,6 +55,8 @@ pub fn sanitize_segment(raw: &str, fallback: &str) -> String {
 }
 
 fn settings_paths() -> (PathBuf, Option<PathBuf>) {
+    // TEMP_SHIM: nt4-plugin-settings-etc-fallback
+    // Keep the /etc fallback until every deployed image migrates nt4.json into /var/lib/helios.
     match std::env::var_os("HELIOS_NT4_SETTINGS_FILE") {
         Some(path) => (PathBuf::from(path), None),
         None => (PathBuf::from("/var/lib/helios/nt4.json"), Some(PathBuf::from("/etc/helios/nt4.json"))),
@@ -62,6 +64,8 @@ fn settings_paths() -> (PathBuf, Option<PathBuf>) {
 }
 
 fn team_file_paths() -> (PathBuf, Option<PathBuf>) {
+    // TEMP_SHIM: nt4-plugin-team-file-etc-fallback
+    // Keep the /etc team fallback until every deployed image migrates the team file into /var/lib/helios.
     match std::env::var_os("HELIOS_TEAM_FILE") {
         Some(path) => (PathBuf::from(path), None),
         None => (PathBuf::from("/var/lib/helios/team"), Some(PathBuf::from("/etc/helios/team"))),
