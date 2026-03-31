@@ -427,6 +427,48 @@
       "review_note": "Plugin API schema types now live here; keep them separate from handler logic."
     },
     {
+      "path": "backend/src/helios-api/src/http/pipelines.rs",
+      "max_lines": 540,
+      "owner": "HeliOS",
+      "review_note": "Pipelines HTTP root should stay focused on route orchestration after splitting graph metadata handling, storage helpers, validation/cache hooks, identity checks, and stream refresh side effects into dedicated modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/pipelines/graph_support.rs",
+      "max_lines": 220,
+      "owner": "HeliOS",
+      "review_note": "Graph metadata normalization, alias injection, planner diagnostic mapping, and registry-port metadata propagation now live here; keep storage, route handlers, and stream refresh logic out of this module."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/pipelines/identity.rs",
+      "max_lines": 220,
+      "owner": "HeliOS",
+      "review_note": "Pipeline identity token generation and uniqueness enforcement now live here; keep graph metadata mutation and HTTP route glue out of this module."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/pipelines/refresh.rs",
+      "max_lines": 230,
+      "owner": "HeliOS",
+      "review_note": "Pipeline-to-stream detachment and consumer refresh behavior now live here; keep storage and route parsing separate from the stream-manifest mutation path."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/pipelines/registry.rs",
+      "max_lines": 60,
+      "owner": "HeliOS",
+      "review_note": "Pipeline registry cache warming and validation-state cache wrappers now live here; keep this module limited to thin read-model/service delegation."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/pipelines/storage_support.rs",
+      "max_lines": 120,
+      "owner": "HeliOS",
+      "review_note": "Pipeline and template directory helpers plus storage-backed graph/template loading now live here; keep route orchestration and stream refresh side effects out of the storage layer."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/pipelines/types.rs",
+      "max_lines": 240,
+      "owner": "HeliOS",
+      "review_note": "Pipeline API schemas, planner-diagnostic payloads, registry response models, and refresh failure records now live here; keep handler and storage logic out of the type layer."
+    },
+    {
       "path": "frontend/src/lib/components/StreamPreview.svelte",
       "max_lines": 850,
       "owner": "HeliOS",
