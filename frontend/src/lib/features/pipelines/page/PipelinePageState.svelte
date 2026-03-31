@@ -4,11 +4,8 @@
   import { onDestroy, onMount, untrack, type Snippet } from 'svelte';
   import { derived, get, writable } from 'svelte/store';
   import { toaster, OpenAPI } from '$lib';
-  import { subscribeDomainInvalidations } from '$lib/api/invalidation';
-  import { scheduleAfterPaint, scheduleWhenIdle } from '$lib/utils/browserSchedule';
   import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
   import { PipelinesApi } from '$lib/api/pipelinesApi';
-  import { realtimeUpdateMatchesKind, type RealtimeUpdateEvent } from '$lib/api/realtimeUpdates';
   import { StreamsApi } from '$lib/api/streamsApi';
   import { createPipelinePageStore } from '$lib/features/pipelines/pageStore';
   import type { PageData } from '../../../../routes/pipelines/$types';
@@ -25,10 +22,7 @@
   import { createRegistryResolver } from '$lib/components/flow/pipeline-graph/registry';
   import {
     DEFAULT_PIPELINE_COLOR,
-    DEFAULT_PIPELINE_ICON_ID,
-    defaultColorForPipeline,
-    defaultIconIdForPipeline,
-    resolvePipelineIconOption
+    DEFAULT_PIPELINE_ICON_ID
   } from '$lib/features/pipelines/iconCatalog';
   import type { PipelinePagePayload } from '$lib/types/pipeline';
   import {
@@ -59,6 +53,14 @@
     portMetadataForConstant as portMetadataForConstantBase,
     safeClonePlan
   } from './pipelineTuneConstantUtils';
+  import {
+    PIPELINE_FOCUS_REQUEST_KEY,
+    createPipelinePageComponentLoaders,
+    createPipelinePageIconModalSupport,
+    createPipelinePageRuntime,
+    graphPlanHasWorkspaceData,
+    handlePipelineCardKeydown as handlePipelineCardKeydownSupport
+  } from './pipelinePageSupport';
 
   const {
     data,
@@ -112,90 +114,43 @@
     (typeof import('$lib/features/pipelines/page/PipelineTunePanel.svelte'))['default'] | null
   >(null);
 
-  const componentLoads: Partial<Record<
-    | 'detail'
-    | 'list'
-    | 'inspector'
-    | 'modals'
-    | 'graph-workspace'
-    | 'graph-context'
-    | 'tune',
-    Promise<void>
-  >> = {};
-
-  function loadComponentOnce(
-    key: 'detail' | 'list' | 'inspector' | 'modals' | 'graph-workspace' | 'graph-context' | 'tune',
-    loader: () => Promise<void>
-  ): Promise<void> {
-    const inFlight = componentLoads[key];
-    if (inFlight) {
-      return inFlight;
+  const {
+    loadPipelineDetailPanel,
+    loadPipelineShellComponents,
+    loadPipelineGraphComponents,
+    loadPipelineTunePanel,
+    loadPipelineModals
+  } = createPipelinePageComponentLoaders({
+    browser,
+    getPipelineDetailPanel: () => PipelineDetailPanelComponent,
+    setPipelineDetailPanel: (component) => {
+      PipelineDetailPanelComponent = component;
+    },
+    getPipelineListPanel: () => PipelineListPanelComponent,
+    setPipelineListPanel: (component) => {
+      PipelineListPanelComponent = component;
+    },
+    getPipelineInspectorPanel: () => PipelineInspectorPanelComponent,
+    setPipelineInspectorPanel: (component) => {
+      PipelineInspectorPanelComponent = component;
+    },
+    getPipelineModals: () => PipelineModalsComponent,
+    setPipelineModals: (component) => {
+      PipelineModalsComponent = component;
+    },
+    getPipelineGraphWorkspace: () => PipelineGraphWorkspaceComponent,
+    setPipelineGraphWorkspace: (component) => {
+      PipelineGraphWorkspaceComponent = component;
+    },
+    getPipelineGraphContextMenu: () => PipelineGraphContextMenuComponent,
+    setPipelineGraphContextMenu: (component) => {
+      PipelineGraphContextMenuComponent = component;
+    },
+    getPipelineTunePanel: () => PipelineTunePanelComponent,
+    setPipelineTunePanel: (component) => {
+      PipelineTunePanelComponent = component;
     }
-    const next = loader().finally(() => {
-      componentLoads[key] = undefined;
-    });
-    componentLoads[key] = next;
-    return next;
-  }
-
-  async function loadPipelineDetailPanel(): Promise<void> {
-    if (!browser || PipelineDetailPanelComponent) return;
-    await loadComponentOnce('detail', async () => {
-      const module = await import('$lib/components/pipelines/PipelineDetailPanel.svelte');
-      PipelineDetailPanelComponent = module.default;
-    });
-  }
-
-  async function loadPipelineShellComponents(): Promise<void> {
-    await Promise.all([
-      PipelineListPanelComponent
-        ? Promise.resolve()
-        : loadComponentOnce('list', async () => {
-            const module = await import('$lib/features/pipelines/page/PipelineListPanel.svelte');
-            PipelineListPanelComponent = module.default;
-          }),
-      PipelineInspectorPanelComponent
-        ? Promise.resolve()
-        : loadComponentOnce('inspector', async () => {
-            const module = await import('$lib/features/pipelines/page/PipelineInspectorPanel.svelte');
-            PipelineInspectorPanelComponent = module.default;
-          })
-    ]);
-  }
-
-  async function loadPipelineGraphComponents(): Promise<void> {
-    await Promise.all([
-      PipelineGraphWorkspaceComponent
-        ? Promise.resolve()
-        : loadComponentOnce('graph-workspace', async () => {
-            const module = await import('$lib/features/pipelines/page/PipelineGraphWorkspace.svelte');
-            PipelineGraphWorkspaceComponent = module.default;
-          }),
-      PipelineGraphContextMenuComponent
-        ? Promise.resolve()
-        : loadComponentOnce('graph-context', async () => {
-            const module = await import('$lib/features/pipelines/page/PipelineGraphContextMenu.svelte');
-            PipelineGraphContextMenuComponent = module.default;
-          }),
-      loadPipelineDetailPanel()
-    ]);
-  }
-
-  async function loadPipelineTunePanel(): Promise<void> {
-    if (PipelineTunePanelComponent) return;
-    await loadComponentOnce('tune', async () => {
-      const module = await import('$lib/features/pipelines/page/PipelineTunePanel.svelte');
-      PipelineTunePanelComponent = module.default;
-    });
-  }
-
-  async function loadPipelineModals(): Promise<void> {
-    if (PipelineModalsComponent) return;
-    await loadComponentOnce('modals', async () => {
-      const module = await import('$lib/features/pipelines/page/PipelineModals.svelte');
-      PipelineModalsComponent = module.default;
-    });
-  }
+  });
   const { registry: registryHelpers } = controller.helpers;
 
   const RAW_STREAM_PIPELINE_ID = '__raw__';
@@ -414,108 +369,11 @@
   const deleteModalPipeline = writable<PipelineOverviewPipeline | null>(null);
   const deleteModalBusy = writable(false);
   const deleteModalError = writable<string | null>(null);
-  const PIPELINE_FOCUS_REQUEST_KEY = 'helios.pipelines.focus_request';
-  const LIVE_UPDATES_REFRESH_DEBOUNCE_MS = 300;
-  type PipelineFocusRequest = { pipelineId: string; nodeId?: string | null; port?: string | null };
-  let pendingPipelineFocus = $state<PipelineFocusRequest | null>(null);
-  let stopLiveUpdates: (() => void) | null = null;
-  let liveUpdatesRefreshHandle: number | null = null;
-  let cancelPipelineUiBoot: (() => void) | null = null;
-  let cancelPipelineBootstrapRefresh: (() => void) | null = null;
-  let cancelPipelineIdleWarmup: (() => void) | null = null;
-  let cancelPipelineGraphWarmup: (() => void) | null = null;
-  let cancelPipelineTuneWarmup: (() => void) | null = null;
-  let initialSelectionApplied = $state(false);
-
-  function graphPlanHasWorkspaceData(plan: PipelineGraphPlan | null | undefined): boolean {
-    if (!plan || typeof plan !== 'object') return false;
-    if (Object.keys(plan.nodes ?? {}).length > 0) return true;
-    if ((plan.connections?.length ?? 0) > 0) return true;
-    if (Object.keys(plan.pipelineInputs ?? {}).length > 0) return true;
-    if (Object.keys(plan.pipelineOutputs ?? {}).length > 0) return true;
-    return false;
-  }
-
-  function shouldApplyLiveUpdate(event: RealtimeUpdateEvent): boolean {
-    if (
-      event.path.startsWith('/v1/pipelines') ||
-      event.path.startsWith('/v1/streams') ||
-      event.path.startsWith('/v1/ws/pipelines') ||
-      event.path.startsWith('/v1/ws/streams')
-    ) {
-      return true;
-    }
-    if (realtimeUpdateMatchesKind(event, 'api')) {
-      return false;
-    }
-    return (
-      realtimeUpdateMatchesKind(event, 'pipelines') ||
-      realtimeUpdateMatchesKind(event, 'streams') ||
-      realtimeUpdateMatchesKind(event, 'device') ||
-      realtimeUpdateMatchesKind(event, 'settings')
-    );
-  }
-
-  function scheduleLiveUpdatesRefresh(): void {
-    if (!browser) return;
-    if (liveUpdatesRefreshHandle != null) return;
-    liveUpdatesRefreshHandle = window.setTimeout(() => {
-      liveUpdatesRefreshHandle = null;
-      if (document.hidden) return;
-      void loadPipelineOverview({ preserveDirty: true });
-      void refreshCaptureDevices();
-    }, LIVE_UPDATES_REFRESH_DEBOUNCE_MS);
-  }
-
-  function consumePipelineFocusRequest(): void {
-    if (!browser) return;
-    const raw = window.sessionStorage.getItem(PIPELINE_FOCUS_REQUEST_KEY);
-    if (!raw) return;
-    window.sessionStorage.removeItem(PIPELINE_FOCUS_REQUEST_KEY);
-    try {
-      const parsed = JSON.parse(raw) as PipelineFocusRequest;
-      if (!parsed?.pipelineId) return;
-      pendingPipelineFocus = parsed;
-      setActiveTab('pipeline');
-      setSelectedPipeline(parsed.pipelineId);
-    } catch {
-      // ignore
-    }
-  }
-
-  onMount(() => {
-    if (!browser) return;
-    consumePipelineFocusRequest();
-  });
-
-  $effect(() => {
-    const req = pendingPipelineFocus;
-    if (!req || !$selectedPipeline || $selectedPipeline.id !== req.pipelineId) return;
-    const nodeId = req.nodeId ?? null;
-    if (!nodeId) {
-      pendingPipelineFocus = null;
-      return;
-    }
-    const detailPanel = detailPanelRef;
-    if (typeof detailPanel?.focusOnNode !== 'function') return;
-    detailPanel.focusOnNode(nodeId, { port: req.port ?? null });
-    pendingPipelineFocus = null;
-  });
-
-  $effect(() => {
-    if (initialSelectionApplied) return;
-    const pipelineId = typeof initialPipelineId === 'string' ? initialPipelineId.trim() : '';
-    if (!pipelineId) {
-      initialSelectionApplied = true;
-      return;
-    }
-    if ($selectedPipelineId === pipelineId) {
-      initialSelectionApplied = true;
-      return;
-    }
-    setSelectedPipeline(pipelineId);
-    initialSelectionApplied = true;
-  });
+  let pendingPipelineFocus = $state<{
+    pipelineId: string;
+    nodeId?: string | null;
+    port?: string | null;
+  } | null>(null);
 
   async function loadPipelineOverview(options: { bootstrap?: boolean; preserveDirty?: boolean } = {}): Promise<void> {
     const { bootstrap = false, preserveDirty = true } = options;
@@ -531,7 +389,7 @@
     }
   }
 
-  const loadStreamCapabilities = async (): Promise<void> => {
+  async function loadStreamCapabilities(): Promise<void> {
     try {
       const capabilities = await StreamsApi.streamCapabilities();
       const normalized = String(capabilities?.rawPipelineId ?? '').trim().toLowerCase();
@@ -541,7 +399,7 @@
     } catch {
       // Keep previously loaded IDs; avoid local hardcoded fallback IDs.
     }
-  };
+  }
 
   let iconModalOpen = $state(false);
   let iconModalPipelineId = $state<string | null>(null);
@@ -574,47 +432,41 @@
     organizeCurrentGraph();
   }
 
-  function openPipelineIconModal(pipelineId: string) {
-    const pipeline = $pipelines.find((entry) => entry.id === pipelineId);
-    const appearance = pipeline?.appearance ?? null;
-    iconModalPipelineId = pipelineId;
-    const selectedIconId = appearance?.icon ?? defaultIconIdForPipeline(pipelineId);
-    const resolvedIcon = resolvePipelineIconOption(selectedIconId);
-    iconModalIconId = resolvedIcon.id;
-    iconModalColor = appearance?.color ?? defaultColorForPipeline(pipelineId);
-    iconModalError = null;
-    iconModalSaving = false;
-    iconModalOpen = true;
-  }
-
-  function closePipelineIconModal() {
-    iconModalOpen = false;
-    iconModalPipelineId = null;
-    iconModalError = null;
-    iconModalSaving = false;
-  }
-
-  async function savePipelineIconSelection() {
-    if (!iconModalPipelineId) return;
-    iconModalSaving = true;
-    iconModalError = null;
-    try {
-      const pipelineLabel = pipelineLabelById(iconModalPipelineId);
-      await setPipelineAppearance(iconModalPipelineId, {
-        icon: iconModalIconId,
-        color: iconModalColor
-      });
-      closePipelineIconModal();
-      toaster.success({
-        title: 'Appearance updated',
-        description: pipelineLabel
-      });
-    } catch (error) {
-      iconModalError = buildErrorMessage({ error, fallback: 'Failed to update appearance' });
-    } finally {
-      iconModalSaving = false;
-    }
-  }
+  const { openPipelineIconModal, closePipelineIconModal, savePipelineIconSelection } =
+    createPipelinePageIconModalSupport({
+      getPipelines: () => $pipelines,
+      pipelineLabelById,
+      setPipelineAppearance,
+      buildErrorMessage,
+      onSaveSuccess: (pipelineLabel) => {
+        toaster.success({
+          title: 'Appearance updated',
+          description: pipelineLabel
+        });
+      },
+      getIconModalOpen: () => iconModalOpen,
+      setIconModalOpen: (open) => {
+        iconModalOpen = open;
+      },
+      getIconModalPipelineId: () => iconModalPipelineId,
+      setIconModalPipelineId: (pipelineId) => {
+        iconModalPipelineId = pipelineId;
+      },
+      getIconModalIconId: () => iconModalIconId,
+      setIconModalIconId: (iconId) => {
+        iconModalIconId = iconId;
+      },
+      getIconModalColor: () => iconModalColor,
+      setIconModalColor: (color) => {
+        iconModalColor = color;
+      },
+      setIconModalSaving: (saving) => {
+        iconModalSaving = saving;
+      },
+      setIconModalError: (message) => {
+        iconModalError = message;
+      }
+    });
 
   const {
     deletePipelineById,
@@ -704,6 +556,41 @@
     }
   }
 
+  const pipelinePageRuntime = createPipelinePageRuntime({
+    browser,
+    hasInitialPipelineData,
+    getInitialPipelineId: () => initialPipelineId,
+    getSelectedPipelineId: () => $selectedPipelineId ?? null,
+    getSelectedPipeline: () => $selectedPipeline ?? null,
+    setSelectedPipeline,
+    setActiveTab,
+    getPendingPipelineFocus: () => pendingPipelineFocus,
+    setPendingPipelineFocus: (request) => {
+      pendingPipelineFocus = request;
+    },
+    getDetailPanelRef: () => detailPanelRef,
+    loadPipelineOverview,
+    loadStreamCapabilities,
+    refreshCaptureDevices,
+    scheduleRegistryRefresh,
+    loadPipelineModals,
+    loadPipelineShellComponents,
+    loadPipelineGraphComponents,
+    loadPipelineTunePanel,
+    getPipelineUiReady: () => pipelineUiReady,
+    setPipelineUiReady: (ready) => {
+      pipelineUiReady = ready;
+    },
+    getActiveTab: () => $activeTab,
+    getRegistryDrawerOpen: () => $registryDrawerOpen,
+    getIconModalOpen: () => iconModalOpen,
+    getPluginProjectModalOpen: () => ideState.pluginProjectModalOpen,
+    getCreateModalOpen: () => $createModalOpen,
+    getDeleteModalOpen: () => $deleteModalOpen,
+    getAssignModalOpen: () => $assignModalOpen,
+    disposePageStore
+  });
+
   setupPipelineRegistryState({
     activeTab,
     registryDrawerOpen,
@@ -755,98 +642,34 @@
   });
 
   onMount(() => {
-    cancelPipelineUiBoot = scheduleAfterPaint(() => {
-      pipelineUiReady = true;
-    }, 1);
-    if (hasInitialPipelineData) {
-      cancelPipelineBootstrapRefresh = scheduleWhenIdle(() => {
-        if (document.hidden) return;
-        void loadStreamCapabilities();
-      }, { timeoutMs: 1800, fallbackMs: 700 });
-    } else {
-      cancelPipelineBootstrapRefresh = scheduleAfterPaint(() => {
-        void loadStreamCapabilities();
-        void loadPipelineOverview({ bootstrap: true, preserveDirty: false });
-      }, 2);
-    }
-    stopLiveUpdates = subscribeDomainInvalidations(
-      ['pipelines', 'streams', 'device', 'settings'],
-      (event) => {
-        if (document.hidden) return;
-        if (!shouldApplyLiveUpdate(event)) return;
-        scheduleLiveUpdatesRefresh();
-      },
-      { debounceMs: LIVE_UPDATES_REFRESH_DEBOUNCE_MS }
-    );
-    cancelPipelineIdleWarmup = scheduleWhenIdle(() => {
-      scheduleRegistryRefresh();
-      void loadPipelineModals();
-    }, { timeoutMs: 2000, fallbackMs: 1200 });
+    pipelinePageRuntime.mount();
   });
 
   $effect(() => {
-    if (!pipelineUiReady) return;
-    void loadPipelineShellComponents();
+    pipelinePageRuntime.syncPendingPipelineFocus();
   });
 
   $effect(() => {
-    cancelPipelineGraphWarmup?.();
-    cancelPipelineGraphWarmup = null;
-    cancelPipelineTuneWarmup?.();
-    cancelPipelineTuneWarmup = null;
-    if (!pipelineUiReady) return;
-    if ($activeTab === 'pipeline') {
-      if (!$selectedPipeline) return;
-      cancelPipelineGraphWarmup = scheduleAfterPaint(() => {
-        void loadPipelineGraphComponents();
-      }, 1);
-      return;
-    }
-    if (!$selectedPipeline) return;
-    cancelPipelineTuneWarmup = scheduleAfterPaint(() => {
-      void loadPipelineTunePanel();
-    }, 1);
+    pipelinePageRuntime.syncInitialPipelineSelection();
   });
 
   $effect(() => {
-    if (
-      $registryDrawerOpen ||
-      iconModalOpen ||
-      ideState.pluginProjectModalOpen ||
-      $createModalOpen ||
-      $deleteModalOpen ||
-      $assignModalOpen
-    ) {
-      void loadPipelineModals();
-    }
+    pipelinePageRuntime.warmShellComponents();
   });
 
-  function handlePipelineCardKeydown(event: KeyboardEvent, pipelineId: string) {
-    if (event.key !== 'Enter' && event.key !== ' ') {
-      return;
-    }
-    event.preventDefault();
-    setSelectedPipeline(pipelineId);
-  }
+  $effect(() => {
+    pipelinePageRuntime.warmActiveTabComponents();
+  });
+
+  $effect(() => {
+    pipelinePageRuntime.warmModalComponents();
+  });
+
+  const handlePipelineCardKeydown = (event: KeyboardEvent, pipelineId: string) =>
+    handlePipelineCardKeydownSupport(event, pipelineId, setSelectedPipeline);
 
   onDestroy(() => {
-    cancelPipelineUiBoot?.();
-    cancelPipelineUiBoot = null;
-    cancelPipelineBootstrapRefresh?.();
-    cancelPipelineBootstrapRefresh = null;
-    cancelPipelineIdleWarmup?.();
-    cancelPipelineIdleWarmup = null;
-    cancelPipelineGraphWarmup?.();
-    cancelPipelineGraphWarmup = null;
-    cancelPipelineTuneWarmup?.();
-    cancelPipelineTuneWarmup = null;
-    stopLiveUpdates?.();
-    stopLiveUpdates = null;
-    if (liveUpdatesRefreshHandle != null) {
-      clearTimeout(liveUpdatesRefreshHandle);
-      liveUpdatesRefreshHandle = null;
-    }
-    disposePageStore();
+    pipelinePageRuntime.destroy();
   });
 
   const baseCtx = $derived.by(() => ({
@@ -881,7 +704,7 @@
     closePluginProjectModal,
     collectPipelineOutputs,
     confirmDeletePipeline,
-    consumePipelineFocusRequest,
+    consumePipelineFocusRequest: pipelinePageRuntime.consumePipelineFocusRequest,
     createPipelinePageStore,
     createPluginProject,
     createRegistryResolver,

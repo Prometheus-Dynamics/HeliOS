@@ -805,6 +805,18 @@
       "review_note": "Media-page bootstrap, refresh/backoff policy, worker orchestration, drag/drop upload handling, toast/progress wiring, and replay/archive actions now live here; keep rendering and viewport math out of this route controller."
     },
     {
+      "path": "frontend/src/lib/features/pipelines/page/PipelinePageState.svelte",
+      "max_lines": 980,
+      "owner": "HeliOS",
+      "review_note": "The pipeline page state component should stay focused on store wiring, graph/tune composition, and shared child context after extracting lazy component loading, focus handoff, live refresh policy, warmup scheduling, and icon-modal behavior into a dedicated helper."
+    },
+    {
+      "path": "frontend/src/lib/features/pipelines/page/pipelinePageSupport.ts",
+      "max_lines": 520,
+      "owner": "HeliOS",
+      "review_note": "Pipeline page lazy component loading, live-refresh/focus policy, warmup scheduling, and icon-modal actions now live here; keep route rendering state and graph/tune composition out of this runtime helper."
+    },
+    {
       "path": "frontend/src/routes/localization/+page.svelte",
       "max_lines": 3600,
       "owner": "HeliOS",
