@@ -1,4 +1,8 @@
-use helios_engine::ipc::{ResolvedStreamConfig, StreamManifest, default_decoder_ids_by_capture_format, default_stream_encoder_selector};
+use helios_engine::ipc::{
+    DEFAULT_STREAM_PIPELINE_ENABLED_WHEN_BINDINGS_PRESENT, ResolvedStreamConfig, StreamManifest, default_decoder_enabled, default_decoder_ids_by_capture_format, default_encoder_enabled,
+    default_host_buffer, default_requested_preview_jpeg_quality_disabled, default_requested_preview_jpeg_quality_enabled, default_shadow_recorder_enabled, default_start_on_boot,
+    default_stream_encoder_selector,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -36,6 +40,13 @@ pub struct StreamValidationDefaults {
     pub raw_output: String,
     pub undistorted_output: String,
     pub pipeline_enabled_when_bindings_present: bool,
+    pub default_encoder_enabled: bool,
+    pub default_decoder_enabled: bool,
+    pub default_host_buffer: usize,
+    pub default_preview_jpeg_quality: u8,
+    pub default_preview_jpeg_quality_when_encoder_disabled: u8,
+    pub default_shadow_recorder_enabled: bool,
+    pub default_start_on_boot: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_encoder_id: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -77,7 +88,14 @@ pub fn stream_capabilities() -> StreamCapabilitiesResponse {
         defaults: StreamValidationDefaults {
             raw_output: "raw".to_string(),
             undistorted_output: "undistorted".to_string(),
-            pipeline_enabled_when_bindings_present: true,
+            pipeline_enabled_when_bindings_present: DEFAULT_STREAM_PIPELINE_ENABLED_WHEN_BINDINGS_PRESENT,
+            default_encoder_enabled: default_encoder_enabled(),
+            default_decoder_enabled: default_decoder_enabled(),
+            default_host_buffer: default_host_buffer(),
+            default_preview_jpeg_quality: default_requested_preview_jpeg_quality_enabled(),
+            default_preview_jpeg_quality_when_encoder_disabled: default_requested_preview_jpeg_quality_disabled(),
+            default_shadow_recorder_enabled: default_shadow_recorder_enabled(),
+            default_start_on_boot: default_start_on_boot(),
             default_encoder_id: default_stream_encoder_selector(),
             default_decoder_ids_by_capture_format: default_decoder_ids_by_capture_format(),
         },
@@ -131,11 +149,7 @@ fn validate_explicit_stream_config(manifest: &StreamManifest, issues: &mut Vec<V
         || manifest.pipeline_layout.is_some()
         || !manifest.pipeline_wires.is_empty();
     if !manifest.pipeline_enabled && has_disabled_pipeline_state {
-        issues.push(issue(
-            "/pipeline_enabled",
-            "pipeline_disabled_with_pipeline_state",
-            "pipeline_enabled=false requires pipelines, active pipeline selection, layout, and wires to be empty",
-        ));
+        issues.push(issue("/pipeline_enabled", "pipeline_disabled_with_pipeline_state", "pipeline_enabled=false requires pipelines, active pipeline selection, layout, and wires to be empty"));
     }
 }
 
@@ -461,6 +475,19 @@ mod tests {
         assert_eq!(capabilities.defaults.default_decoder_ids_by_capture_format.get("RG24").map(String::as_str), Some("passthrough"));
     }
 
+    #[test]
+    fn stream_capabilities_publish_effective_stream_defaults() {
+        let capabilities = stream_capabilities();
+        assert_eq!(capabilities.defaults.pipeline_enabled_when_bindings_present, DEFAULT_STREAM_PIPELINE_ENABLED_WHEN_BINDINGS_PRESENT);
+        assert_eq!(capabilities.defaults.default_encoder_enabled, default_encoder_enabled());
+        assert_eq!(capabilities.defaults.default_decoder_enabled, default_decoder_enabled());
+        assert_eq!(capabilities.defaults.default_host_buffer, default_host_buffer());
+        assert_eq!(capabilities.defaults.default_preview_jpeg_quality, default_requested_preview_jpeg_quality_enabled());
+        assert_eq!(capabilities.defaults.default_preview_jpeg_quality_when_encoder_disabled, default_requested_preview_jpeg_quality_disabled());
+        assert_eq!(capabilities.defaults.default_shadow_recorder_enabled, default_shadow_recorder_enabled());
+        assert_eq!(capabilities.defaults.default_start_on_boot, default_start_on_boot());
+    }
+
     fn manifest_from_json(value: serde_json::Value) -> StreamManifest {
         serde_json::from_value(value).expect("valid stream manifest json")
     }
@@ -562,12 +589,7 @@ mod tests {
         let mut manifest = base_manifest(&file);
         let pipeline_id = Uuid::new_v4();
         manifest.pipeline_enabled = false;
-        manifest.pipelines.push(helios_engine::ipc::StreamPipelineBinding {
-            pipeline_id,
-            pipeline_graph: None,
-            pipeline_output: Some("overlay".to_string()),
-            pipeline_patch: None,
-        });
+        manifest.pipelines.push(helios_engine::ipc::StreamPipelineBinding { pipeline_id, pipeline_graph: None, pipeline_output: Some("overlay".to_string()), pipeline_patch: None });
         manifest.active_pipeline_id = Some(pipeline_id);
 
         let result = validate_stream_manifest(manifest).await;

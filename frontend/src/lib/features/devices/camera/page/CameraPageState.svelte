@@ -450,6 +450,12 @@
     set decoderImpl(value) {
       streamState.decoderImpl = value;
     },
+    get streamDefaults() {
+      return streamState.streamDefaults;
+    },
+    set streamDefaults(value) {
+      streamState.streamDefaults = value;
+    },
     get decoderDefaultIdsByCaptureFormat() {
       return streamState.decoderDefaultIdsByCaptureFormat;
     },
@@ -1125,6 +1131,9 @@
       },
       get stream() {
         return streamState.stream;
+      },
+      get streamDefaults() {
+        return streamState.streamDefaults;
       },
       get applying() {
         return streamState.applying;

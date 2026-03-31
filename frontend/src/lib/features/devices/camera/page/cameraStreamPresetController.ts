@@ -1,6 +1,7 @@
 import type { CodecInfo, Interval, Mode, ProbedBackend, ProbedDevice, StreamInfo, StreamManifest } from '$lib/api/httpClient';
 import { OpenAPI, getHttpClientBase } from '$lib/api/httpClient';
 import { extractError } from '$lib/api/errors';
+import { defaultPreviewJpegQualityForEncoder, type StreamCreationDefaults } from '$lib/api/streamDefaults';
 import type { PipelinesApi } from '$lib/api/pipelinesApi';
 import type { StreamsApi } from '$lib/api/streamsApi';
 import { normalizeGridSlots } from './cameraPipelineState';
@@ -14,6 +15,7 @@ import {
 type PresetState = {
   get streamId(): string;
   get stream(): StreamInfo | null;
+  get streamDefaults(): StreamCreationDefaults | null;
   get applying(): boolean;
   set applying(value: boolean);
   get pendingStreamPresetApply(): boolean;
@@ -321,6 +323,10 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
 
       const existingPipelineWires =
         Array.isArray(state.stream?.manifest?.pipeline_wires) ? state.stream.manifest.pipeline_wires : [];
+      const streamDefaults = state.streamDefaults;
+      if (!streamDefaults) {
+        throw new Error('Stream defaults are unavailable');
+      }
 
       const payload = {
         identity,
@@ -365,8 +371,11 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
               state: 'disabled'
             },
         shadow_recorder_enabled: shadowRecorderEnabled,
-        host_buffer: state.hostBuffer ?? 8,
-        preview_jpeg_quality: state.previewJpegQuality ?? 65,
+        host_buffer: state.hostBuffer ?? streamDefaults.defaultHostBuffer,
+        preview_jpeg_quality:
+          state.previewJpegQuality ??
+          defaultPreviewJpegQualityForEncoder(streamDefaults, state.encoderEnabled) ??
+          streamDefaults.defaultPreviewJpegQuality,
         pipeline_enabled: enablePipeline,
         pipeline_id: activePipelineIdWire,
         pipeline_output: activePipelineOutputWire ?? null,

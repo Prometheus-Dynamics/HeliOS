@@ -2,6 +2,7 @@
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { toaster } from '$lib';
   import { apiFetch } from '$lib/api/core/http';
+  import { resolveStreamCreationDefaults } from '$lib/api/streamDefaults';
   import { ApiError, OpenAPI, PeersService, PeripheralsService } from '$lib/ts-bindings/http/client';
   import { connectDevicesUpdatesStream } from '$lib/api/devicesUpdates';
   import { PipelinesApi } from '$lib/api/pipelinesApi';
@@ -84,7 +85,7 @@
   let decoderImpl = $state<string | null>(null);
   let decoderRotationDegrees = $state(0);
   let decoderMirrorHorizontal = $state(false);
-  let hostBuffer = $state<number>(8);
+  let hostBuffer = $state<number>(0);
   let encoderSettings = $state({
     bitrate: null as number | null,
     gop: null as number | null,
@@ -417,6 +418,10 @@
         }
       }
       streamCapabilities = streamCapabilitiesResp;
+      const streamDefaults = resolveStreamCreationDefaults(streamCapabilitiesResp);
+      if (!preserveSelection && streamDefaults) {
+        hostBuffer = streamDefaults.defaultHostBuffer;
+      }
 
       const list = Array.isArray(cameraResp?.cameras) ? cameraResp.cameras.filter(Boolean) : [];
       const usedKeys = streamAssignedKeys(Array.isArray(streamsResp) ? streamsResp : []);
@@ -889,8 +894,17 @@
         : null;
     const backendKind = String(backend.kind ?? '').trim().toLowerCase();
     const isMediaBackend = backendKind === 'file' || backendKind === 'netcam';
+    const streamDefaults = resolveStreamCreationDefaults(streamCapabilities);
+    if (!streamDefaults) {
+      toaster.error({
+        title: 'Stream defaults unavailable',
+        description: 'Unable to determine the backend stream defaults required to build the manifest.'
+      });
+      return;
+    }
+
     const rawPipelineId = String(streamCapabilities?.rawPipelineId ?? '').trim();
-    const rawPipelineOutput = String(streamCapabilities?.defaults?.rawOutput ?? '').trim();
+    const rawPipelineOutput = streamDefaults.rawOutput;
     if (isMediaBackend && (!rawPipelineId || !rawPipelineOutput)) {
       submitting = false;
       toaster.error({
@@ -995,10 +1009,10 @@
           : {
               state: 'disabled'
             },
-        host_buffer: Number.isFinite(hostBuffer) ? hostBuffer : 8,
-        preview_jpeg_quality: 65,
-        shadow_recorder_enabled: false,
-        start_on_boot: false
+        host_buffer: Number.isFinite(hostBuffer) && hostBuffer > 0 ? hostBuffer : streamDefaults.defaultHostBuffer,
+        preview_jpeg_quality: streamDefaults.defaultPreviewJpegQuality,
+        shadow_recorder_enabled: streamDefaults.defaultShadowRecorderEnabled,
+        start_on_boot: streamDefaults.defaultStartOnBoot
       };
 
     try {

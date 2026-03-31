@@ -16,9 +16,9 @@ use lib_ipc::frame::MessageKind;
 use lib_ipc::protocol::ControlEvent;
 use lib_ipc::server::ServerEvent;
 use lib_ipc::types::CommandId;
-use styx::BackendKind;
 use styx::codec::{CodecKind, CodecRegistry};
 use styx::prelude::{FourCc, Resolution};
+use styx::BackendKind;
 
 pub type ControlId = u32;
 
@@ -1156,10 +1156,7 @@ pub struct ResolvedStreamConfig {
 #[derive(Debug, Clone)]
 pub enum RequestedEncoderConfig {
     Disabled,
-    Enabled {
-        id: Option<String>,
-        settings: Option<EncoderSettings>,
-    },
+    Enabled { id: Option<String>, settings: Option<EncoderSettings> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -1323,10 +1320,7 @@ impl<'de> Deserialize<'de> for RequestedEncoderConfig {
 #[derive(Debug, Clone)]
 pub enum RequestedDecoderConfig {
     Disabled,
-    Enabled {
-        id: Option<String>,
-        settings: Option<DecoderSettings>,
-    },
+    Enabled { id: Option<String>, settings: Option<DecoderSettings> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -1488,7 +1482,11 @@ impl<'de> Deserialize<'de> for RequestedDecoderConfig {
 }
 
 fn canonical_requested_host_buffer(value: usize) -> usize {
-    if value == 0 { default_host_buffer() } else { value }
+    if value == 0 {
+        default_host_buffer()
+    } else {
+        value
+    }
 }
 
 fn canonical_requested_pipeline_enabled(
@@ -1500,19 +1498,15 @@ fn canonical_requested_pipeline_enabled(
     pipeline_wires: &[StreamPipelineWire],
 ) -> bool {
     value.unwrap_or_else(|| {
-        !pipelines.is_empty()
-            || active_pipeline_id.is_some()
-            || active_pipeline_output.is_some_and(|value| !value.trim().is_empty())
-            || pipeline_layout.is_some()
-            || !pipeline_wires.is_empty()
+        !pipelines.is_empty() || active_pipeline_id.is_some() || active_pipeline_output.is_some_and(|value| !value.trim().is_empty()) || pipeline_layout.is_some() || !pipeline_wires.is_empty()
     })
 }
 
 fn default_requested_preview_jpeg_quality(encoder: &RequestedEncoderConfig) -> u8 {
     if encoder.is_disabled() {
-        default_preview_jpeg_quality_override().unwrap_or(DEFAULT_PREVIEW_JPEG_QUALITY).clamp(1, 100)
+        default_requested_preview_jpeg_quality_disabled()
     } else {
-        DEFAULT_STREAM_PREVIEW_JPEG_QUALITY
+        default_requested_preview_jpeg_quality_enabled()
     }
 }
 
@@ -1712,16 +1706,12 @@ impl TryFrom<StreamManifestHumanWire> for StreamManifest {
     fn try_from(value: StreamManifestHumanWire) -> Result<Self, Self::Error> {
         let encoder = match (value.encoder, value.encoder_enabled, value.encoder_id, value.encoder_settings) {
             (Some(encoder), None, None, None) => encoder,
-            (Some(_), _, _, _) => {
-                return Err("stream manifest may not mix `encoder` with legacy `encoder_enabled`, `encoder_id`, or `encoder_settings` fields".to_string())
-            }
+            (Some(_), _, _, _) => return Err("stream manifest may not mix `encoder` with legacy `encoder_enabled`, `encoder_id`, or `encoder_settings` fields".to_string()),
             (None, enabled, id, settings) => RequestedEncoderConfig::from_legacy(enabled, id, settings)?,
         };
         let decoder = match (value.decoder, value.decoder_enabled, value.decoder_id, value.decoder_settings) {
             (Some(decoder), None, None, None) => decoder,
-            (Some(_), _, _, _) => {
-                return Err("stream manifest may not mix `decoder` with legacy `decoder_enabled`, `decoder_id`, or `decoder_settings` fields".to_string())
-            }
+            (Some(_), _, _, _) => return Err("stream manifest may not mix `decoder` with legacy `decoder_enabled`, `decoder_id`, or `decoder_settings` fields".to_string()),
             (None, enabled, id, settings) => RequestedDecoderConfig::from_legacy(enabled, id, settings)?,
         };
         let pipeline_enabled = canonical_requested_pipeline_enabled(
@@ -1848,12 +1838,8 @@ impl StreamManifest {
             normalize_stream_decoder_selection(&mut requested);
         }
 
-        let mut encoder = ResolvedEncoderConfig {
-            enabled: false,
-            codec_id: normalized_codec_selector(requested.encoder.id()),
-            settings: requested.encoder.settings().cloned(),
-            settings_present: false,
-        };
+        let mut encoder =
+            ResolvedEncoderConfig { enabled: false, codec_id: normalized_codec_selector(requested.encoder.id()), settings: requested.encoder.settings().cloned(), settings_present: false };
         encoder.enabled = !encoder_explicitly_disabled && encoder.codec_id.is_some();
 
         if encoder.enabled {
@@ -1864,12 +1850,8 @@ impl StreamManifest {
         }
         encoder.settings_present = encoder.enabled && encoder.settings.is_some();
 
-        let mut decoder = ResolvedDecoderConfig {
-            enabled: false,
-            codec_id: normalized_codec_selector(requested.decoder.id()),
-            settings: requested.decoder.settings().cloned(),
-            settings_present: false,
-        };
+        let mut decoder =
+            ResolvedDecoderConfig { enabled: false, codec_id: normalized_codec_selector(requested.decoder.id()), settings: requested.decoder.settings().cloned(), settings_present: false };
         decoder.enabled = !decoder_explicitly_disabled && decoder.codec_id.is_some();
         if !decoder.enabled {
             decoder.codec_id = None;
@@ -1922,16 +1904,8 @@ impl ResolvedStreamConfig {
             pipeline_host_inputs: self.pipeline_host_inputs.clone(),
             calibration: self.calibration.clone(),
             pose: self.pose.clone(),
-            encoder: if self.encoder.enabled {
-                RequestedEncoderConfig::enabled(self.encoder.codec_id.clone(), self.encoder.settings.clone())
-            } else {
-                RequestedEncoderConfig::disabled()
-            },
-            decoder: if self.decoder.enabled {
-                RequestedDecoderConfig::enabled(self.decoder.codec_id.clone(), self.decoder.settings.clone())
-            } else {
-                RequestedDecoderConfig::disabled()
-            },
+            encoder: if self.encoder.enabled { RequestedEncoderConfig::enabled(self.encoder.codec_id.clone(), self.encoder.settings.clone()) } else { RequestedEncoderConfig::disabled() },
+            decoder: if self.decoder.enabled { RequestedDecoderConfig::enabled(self.decoder.codec_id.clone(), self.decoder.settings.clone()) } else { RequestedDecoderConfig::disabled() },
             preview_jpeg_quality: self.preview_jpeg_quality,
             shadow_recorder_enabled: self.shadow_recorder_enabled,
             start_on_boot: self.start_on_boot,
@@ -2001,13 +1975,34 @@ const DEFAULT_PREVIEW_JPEG_QUALITY: u8 = 65;
 const DEFAULT_STREAM_ENCODER_FPS: u32 = 60;
 const DEFAULT_STREAM_ENCODER_OUTPUT_HEIGHT: u32 = 480;
 const DEFAULT_STREAM_PREVIEW_JPEG_QUALITY: u8 = 30;
+pub const DEFAULT_STREAM_PIPELINE_ENABLED_WHEN_BINDINGS_PRESENT: bool = true;
 
 fn default_preview_jpeg_quality_override() -> Option<u8> {
     env::var("HELIOS_PREVIEW_JPEG_QUALITY").ok().and_then(|v| v.parse::<u8>().ok())
 }
 
-pub(crate) fn default_shadow_recorder_enabled() -> bool {
+pub fn default_requested_preview_jpeg_quality_enabled() -> u8 {
+    default_preview_jpeg_quality_override().unwrap_or(DEFAULT_PREVIEW_JPEG_QUALITY).clamp(1, 100)
+}
+
+pub fn default_requested_preview_jpeg_quality_disabled() -> u8 {
+    DEFAULT_STREAM_PREVIEW_JPEG_QUALITY
+}
+
+pub fn default_shadow_recorder_enabled() -> bool {
     false
+}
+
+pub fn default_start_on_boot() -> bool {
+    false
+}
+
+pub fn default_encoder_enabled() -> bool {
+    true
+}
+
+pub fn default_decoder_enabled() -> bool {
+    true
 }
 
 fn max_host_buffer() -> usize {

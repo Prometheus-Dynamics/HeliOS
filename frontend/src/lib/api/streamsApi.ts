@@ -2,6 +2,8 @@ import { EngineStreamsService } from '$lib/ts-bindings/http/client';
 import { apiUrl } from '$lib/api/httpClient';
 import { apiFetch, apiFetchCachedJson, runApiRequest, type ApiRequestOptions } from '$lib/api/core/http';
 import { DEFAULT_REQUEST_TIMEOUT_MS, fetchWithRetry } from '$lib/api/requestUtils';
+import { makeNetcamManifest } from '$lib/api/streamManifestBuilders';
+import type { RegisterNetcamStreamInput } from '$lib/api/streamManifestBuilders';
 import type {
   CancelablePromise,
   RootStatusPayload,
@@ -219,68 +221,7 @@ async function codecInventorySingleflight(options?: ApiRequestOptions): Promise<
   return codecInventoryInflight;
 }
 
-export type RegisterNetcamStreamInput = {
-  url: string;
-  name?: string | null;
-  fps?: number | null;
-  width?: number | null;
-  height?: number | null;
-  startOnBoot?: boolean | null;
-};
-
-function makeNetcamManifest(input: RegisterNetcamStreamInput, capabilities: StreamCapabilitiesResponse): StreamManifest {
-  const url = input.url.trim();
-  const fps = typeof input.fps === 'number' && Number.isFinite(input.fps) ? Math.max(1, Math.min(120, Math.trunc(input.fps))) : 30;
-  const width = typeof input.width === 'number' && Number.isFinite(input.width) ? Math.max(0, Math.trunc(input.width)) : 0;
-  const height = typeof input.height === 'number' && Number.isFinite(input.height) ? Math.max(0, Math.trunc(input.height)) : 0;
-  const alias = input.name?.trim().length ? input.name.trim() : `Netcam ${url}`;
-  const rawPipelineId = String(capabilities.rawPipelineId ?? '').trim();
-  const rawOutput = String(capabilities.defaults?.rawOutput ?? '').trim();
-  if (!rawPipelineId || !rawOutput) {
-    throw new Error('Stream capabilities missing raw pipeline defaults');
-  }
-
-  // The backend's `StreamManifest.identity` is `DeviceIdentity { id, alias, hardware_id }`.
-  // TS bindings may lag here, so cast through `unknown` to keep the runtime JSON shape correct.
-  return {
-    identity: { id: null, alias, hardware_id: null } as unknown as StreamManifest['identity'],
-    capture: {
-      device_keys: [url],
-      backend: 'Netcam',
-      handle: {
-        // styx serializes BackendHandle as an internally-tagged JSON enum (`{ type: "netcam", ... }`).
-        // The OpenAPI union can lag behind that serde representation, so keep the runtime shape correct.
-        type: 'netcam',
-        url,
-        width,
-        height,
-        fps
-      },
-      mode: {
-        format: {
-          code: 'MJPG',
-          color: 'Srgb',
-          resolution: { width: Math.max(1, width || 1), height: Math.max(1, height || 1) },
-        },
-        interval: { numerator: 1, denominator: fps },
-      },
-      interval: { numerator: 1, denominator: fps },
-      controls: [],
-    },
-    host_buffer: 8,
-    preview_jpeg_quality: 65,
-    pipeline_enabled: true,
-    active_pipeline_id: rawPipelineId,
-    active_pipeline_output: rawOutput,
-    pipelines: [{ pipeline_id: rawPipelineId, pipeline_graph: null, pipeline_output: rawOutput }],
-    pipeline_layout: {
-      rows: 1,
-      columns: 1,
-      slots: [{ row: 0, column: 0, pipeline_id: rawPipelineId, output_key: rawOutput }]
-    },
-    start_on_boot: Boolean(input.startOnBoot),
-  } as unknown as StreamManifest;
-}
+export type { RegisterNetcamStreamInput };
 
 export const StreamsApi = {
   runtimeStatus: (options?: ApiRequestOptions) => runtimeStatusSingleflight(options),

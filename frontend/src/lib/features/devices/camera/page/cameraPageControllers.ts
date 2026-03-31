@@ -188,6 +188,12 @@ export const createCameraPageControllers = (deps: CameraPageControllerDeps) => {
       set decoders(value) {
         deps.streamState.decoders = value;
       },
+      get streamDefaults() {
+        return deps.streamState.streamDefaults;
+      },
+      set streamDefaults(value) {
+        deps.streamState.streamDefaults = value;
+      },
       get decoderDefaultIdsByCaptureFormat() {
         return deps.streamState.decoderDefaultIdsByCaptureFormat;
       },

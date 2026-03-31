@@ -1,4 +1,5 @@
 <script lang="ts" module>
+  import type { StreamCreationDefaults } from '$lib/api/streamDefaults';
   import type { CodecInfo, ControlMeta, ProbedDevice, StreamInfo, StreamManifest, StreamMetrics } from '$lib/ts-bindings/http/client';
   import type { StreamControlSocket } from '$lib/api/streamControls';
   import type { connectStreamUpdates } from '$lib/api/streamUpdates';
@@ -33,6 +34,7 @@
       codecs: [] as CodecInfo[],
       encoders: [] as CodecInfo[],
       decoders: [] as CodecInfo[],
+      streamDefaults: null as StreamCreationDefaults | null,
       decoderDefaultIdsByCaptureFormat: {} as Record<string, string>,
       selectedDeviceIndex: 0,
       selectedBackendIndex: 0,
@@ -41,12 +43,12 @@
       netcamTargetFps: null as number | null,
       encoderImpl: null as string | null,
       decoderImpl: null as string | null,
-      encoderEnabled: true,
-      decoderEnabled: true,
+      encoderEnabled: false,
+      decoderEnabled: false,
       encoderSelectionTouched: false,
       decoderSelectionTouched: false,
-      hostBuffer: 8,
-      previewJpegQuality: 65,
+      hostBuffer: null as number | null,
+      previewJpegQuality: null as number | null,
       cameraAlias: '',
       decoderFpsLimit: null as number | null,
       decoderRotationDegrees: 0 as number | null,

@@ -9,6 +9,11 @@ import type {
 } from '$lib/api/httpClient';
 import type { StreamsApi } from '$lib/api/streamsApi';
 import {
+  defaultPreviewJpegQualityForEncoder,
+  resolveStreamCreationDefaults,
+  type StreamCreationDefaults
+} from '$lib/api/streamDefaults';
+import {
   decoderPreferencesForFormat,
   dedupeCodecs,
   normalizeDecoderDefaultIdsByCaptureFormat,
@@ -55,6 +60,8 @@ type BackendState = {
   set encoders(value: CodecInfo[]);
   get decoders(): CodecInfo[];
   set decoders(value: CodecInfo[]);
+  get streamDefaults(): StreamCreationDefaults | null;
+  set streamDefaults(value: StreamCreationDefaults | null);
   get decoderDefaultIdsByCaptureFormat(): Record<string, string>;
   set decoderDefaultIdsByCaptureFormat(value: Record<string, string>);
   get encoderImpl(): string | null;
@@ -229,11 +236,10 @@ export function createCameraBackendController(state: BackendState, deps: Backend
       const runtimeStatus = await deps.streamsApi.runtimeStatus();
       const resolvedEncoderId = resolvedCodecId(resolvedEncoderStateFor());
       const resolvedDecoderId = resolvedCodecId(resolvedDecoderStateFor());
-      const defaultEncoderId = asTrimmedString(runtimeStatus?.streams?.capabilities?.defaults?.defaultEncoderId);
+      state.streamDefaults = resolveStreamCreationDefaults(runtimeStatus?.streams?.capabilities);
+      const defaultEncoderId = state.streamDefaults?.defaultEncoderId ?? null;
       state.codecs = Array.isArray(list) ? list : [];
-      state.decoderDefaultIdsByCaptureFormat = normalizeDecoderDefaultIdsByCaptureFormat(
-        runtimeStatus?.streams?.capabilities?.defaults?.defaultDecoderIdsByCaptureFormat
-      );
+      state.decoderDefaultIdsByCaptureFormat = normalizeDecoderDefaultIdsByCaptureFormat(state.streamDefaults?.defaultDecoderIdsByCaptureFormat);
       const allEncoders = dedupeCodecs(
         state.codecs.filter((c) => String(c.kind).toLowerCase() === 'encoder'),
         (c) => `${c.name}::${c.implementation}::${c.input}::${c.output}`
@@ -271,6 +277,7 @@ export function createCameraBackendController(state: BackendState, deps: Backend
     const identityRecord = identityRecordFor(manifest);
     const resolvedEncoder = resolvedEncoderStateFor();
     const resolvedDecoder = resolvedDecoderStateFor();
+    const streamDefaults = state.streamDefaults;
     const resolvedEncoderId = resolvedCodecId(resolvedEncoder);
     const resolvedDecoderId = resolvedCodecId(resolvedDecoder);
     const requestedEncoderState = requestedEncoderStateFor(manifest);
@@ -358,9 +365,13 @@ export function createCameraBackendController(state: BackendState, deps: Backend
       state.fileBackendPathsText = paths.join('\n');
     }
 
-    state.hostBuffer = asFiniteNumber(manifest?.host_buffer ?? manifestRecord?.host_buffer) ?? state.hostBuffer;
-    state.previewJpegQuality = asJpegQuality(manifest?.preview_jpeg_quality ?? manifestRecord?.preview_jpeg_quality) ?? 65;
-    state.shadowRecorderEnabled = isFileBackend(capture?.backend) ? false : (manifest?.shadow_recorder_enabled ?? false);
+    state.hostBuffer =
+      asFiniteNumber(manifest?.host_buffer ?? manifestRecord?.host_buffer) ??
+      streamDefaults?.defaultHostBuffer ??
+      state.hostBuffer;
+    state.shadowRecorderEnabled = isFileBackend(capture?.backend)
+      ? false
+      : (manifest?.shadow_recorder_enabled ?? streamDefaults?.defaultShadowRecorderEnabled ?? false);
     state.cameraAlias = asTrimmedString(identityRecord?.alias ?? identityRecord?.display);
     const encoderEnabledFlag = manifestRecord?.encoder_enabled;
     const nextEncoderId = pickCodecId(
@@ -380,14 +391,18 @@ export function createCameraBackendController(state: BackendState, deps: Backend
           ? false
           : typeof encoderEnabledFlag === 'boolean'
             ? Boolean(encoderEnabledFlag)
-            : Boolean(nextEncoderId);
+            : streamDefaults?.defaultEncoderEnabled ?? Boolean(nextEncoderId);
     state.decoderEnabled = typeof resolvedDecoder?.enabled === 'boolean'
       ? resolvedDecoder.enabled
       : requestedDecoderState === 'enabled'
         ? true
         : requestedDecoderState === 'disabled'
           ? false
-        : Boolean(nextDecoderId);
+        : streamDefaults?.defaultDecoderEnabled ?? Boolean(nextDecoderId);
+    state.previewJpegQuality =
+      asJpegQuality(manifest?.preview_jpeg_quality ?? manifestRecord?.preview_jpeg_quality) ??
+      defaultPreviewJpegQualityForEncoder(streamDefaults, state.encoderEnabled) ??
+      state.previewJpegQuality;
     if (encoderSettingsWire) {
       const outputResolution = asRecord(encoderSettingsWire.output_resolution);
       state.encoderSettings = {

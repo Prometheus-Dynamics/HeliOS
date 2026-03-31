@@ -122,7 +122,7 @@ fn stream_manifest_defaults_shadow_recorder_off_when_omitted() {
     assert!(!parsed.shadow_recorder_enabled);
     assert_eq!(parsed.host_buffer, super::default_host_buffer());
     assert!(!parsed.pipeline_enabled);
-    assert_eq!(parsed.preview_jpeg_quality, 30);
+    assert_eq!(parsed.preview_jpeg_quality, 65);
 }
 
 fn sample_manifest_json() -> serde_json::Value {
@@ -257,14 +257,8 @@ fn stream_manifest_rejects_legacy_disabled_decoder_with_settings() {
 fn stream_manifest_derives_pipeline_enabled_from_pipeline_state_when_omitted() {
     let mut payload = sample_manifest_json();
     let object = payload.as_object_mut().expect("manifest object");
-    object.insert(
-        "pipelines".to_string(),
-        serde_json::json!([{ "pipeline_id": uuid::Uuid::new_v4(), "pipeline_graph": null, "pipeline_output": "overlay" }]),
-    );
-    object.insert(
-        "active_pipeline_id".to_string(),
-        serde_json::json!(uuid::Uuid::new_v4()),
-    );
+    object.insert("pipelines".to_string(), serde_json::json!([{ "pipeline_id": uuid::Uuid::new_v4(), "pipeline_graph": null, "pipeline_output": "overlay" }]));
+    object.insert("active_pipeline_id".to_string(), serde_json::json!(uuid::Uuid::new_v4()));
 
     let parsed: StreamManifest = serde_json::from_value(payload).expect("decode manifest");
     assert!(parsed.pipeline_enabled);
@@ -276,5 +270,5 @@ fn stream_manifest_defaults_preview_quality_when_encoder_disabled() {
     payload.as_object_mut().expect("manifest object").insert("encoder".to_string(), serde_json::json!({ "state": "disabled" }));
 
     let parsed: StreamManifest = serde_json::from_value(payload).expect("decode manifest");
-    assert_eq!(parsed.preview_jpeg_quality, 65);
+    assert_eq!(parsed.preview_jpeg_quality, 30);
 }
