@@ -895,6 +895,42 @@
       "review_note": "Sensor websocket request parsing and payload-shaping tests now live here; keep regression coverage isolated from production modules."
     },
     {
+      "path": "backend/src/helios-api/src/ipc/engine/mod.rs",
+      "max_lines": 340,
+      "owner": "HeliOS",
+      "review_note": "Engine IPC root should stay focused on shared types, request matching, and lifecycle plumbing after splitting dispatcher, transport, timeout policy, and RPC surface into dedicated modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/ipc/engine/dispatcher.rs",
+      "max_lines": 460,
+      "owner": "HeliOS",
+      "review_note": "Engine IPC dispatcher state, journal retirement, reconnect handling, and timeout expiry now live here; keep request/response RPC wrappers and transport bootstrap logic out of this runtime loop."
+    },
+    {
+      "path": "backend/src/helios-api/src/ipc/engine/rpc.rs",
+      "max_lines": 820,
+      "owner": "HeliOS",
+      "review_note": "Engine IPC RPC wrappers now live here; keep transport/session bootstrap, dispatcher internals, and timeout policy definitions out of this request surface."
+    },
+    {
+      "path": "backend/src/helios-api/src/ipc/engine/timeouts.rs",
+      "max_lines": 180,
+      "owner": "HeliOS",
+      "review_note": "Engine IPC timeout constants, queue sizing, and scaling policy now live here; keep request dispatch and transport bootstrap separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/ipc/engine/transport.rs",
+      "max_lines": 240,
+      "owner": "HeliOS",
+      "review_note": "Engine IPC socket discovery, handshake bootstrap, degraded-mode startup, and initial stream-count tuning now live here; keep dispatcher bookkeeping and RPC wrappers out of this transport module."
+    },
+    {
+      "path": "backend/src/helios-api/src/ipc/engine/tests.rs",
+      "max_lines": 120,
+      "owner": "HeliOS",
+      "review_note": "Engine IPC timeout/journal-mode regression tests now live here; keep production transport and dispatcher logic out of this test module."
+    },
+    {
       "path": "backend/src/helios-engine/src/localization/solve/mod.rs",
       "max_lines": 250,
       "owner": "HeliOS",
@@ -952,6 +988,11 @@
       "path": "backend/src/helios-api/src/ws/sensors.rs",
       "owner": "HeliOS",
       "reason": "Sensor websocket hub state, session parsing, and payload/error transport now live under backend/src/helios-api/src/ws/sensors/*. Do not recreate the deleted ws/sensors.rs monolith."
+    },
+    {
+      "path": "backend/src/helios-api/src/ipc/engine.rs",
+      "owner": "HeliOS",
+      "reason": "Engine IPC request dispatch, reconnect bootstrap, timeout policy, and RPC wrappers now live under backend/src/helios-api/src/ipc/engine/*. Do not recreate the deleted ipc/engine.rs monolith."
     },
     {
       "path": "backend/src/helios-api/src/http/localization/maps.rs",
