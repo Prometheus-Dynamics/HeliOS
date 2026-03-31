@@ -76,6 +76,19 @@
     normalizePortKey,
     streamOverrideSignature
   } from './pipelineTuneState';
+  import {
+    asRecord,
+    asStreamInfo,
+    buildTuneMetricsStreamRefs,
+    buildTuneMetricsWantedKey,
+    buildTuneMetricsWantedRefs,
+    buildTuneStreamsForPipeline,
+    createTuneBindings,
+    extractGraphAlias,
+    findTuneSelectedStream,
+    resolveTuneMetadataStream,
+    resolveTunePreviewStream
+  } from './pipelineTunePageSupport';
   import { isDaedalusPlan, safeClonePlan } from './pipelineTuneConstantUtils';
   import { fromApiGraphPlan } from '$lib/features/pipelines/graphConverters';
   import { buildDaedalusGraphPatch } from '$lib/features/pipelines/daedalusGraph';
@@ -181,27 +194,6 @@
     StreamsApi
   }: TuneDeps = $props();
   untrack(() => detailContext);
-
-  const asRecord = (value: unknown): Record<string, unknown> | null =>
-    value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
-  const asTrimmedString = (value: unknown): string =>
-    typeof value === 'string' ? value.trim() : '';
-  const extractGraphAlias = (graph: unknown): string | null => {
-    const graphRecord = asRecord(graph);
-    if (!graphRecord) return null;
-    const metadata = asRecord(graphRecord.metadata);
-    if (!metadata) return null;
-    const raw = metadata['helios.pipeline.alias'] ?? null;
-    if (typeof raw === 'string') return raw.trim();
-    const rawRecord = asRecord(raw);
-    return typeof rawRecord?.value === 'string' ? rawRecord.value.trim() : null;
-  };
-  const asStreamInfo = (value: unknown): StreamInfo | null => {
-    const record = asRecord(value);
-    const id = asTrimmedString(record?.id);
-    const manifest = asRecord(record?.manifest);
-    return id && manifest ? (value as StreamInfo) : null;
-  };
 
   const PIPELINE_UI_METADATA_KEY = 'helios.pipeline.ui';
 
@@ -405,239 +397,140 @@
   type TuneConstantGroup = PipelineTuningConstantGroup;
   const tuneConstantGroups: TuneConstantGroup[] = $derived.by(() => buildTuneConstantGroups(tuneConstants));
   let tuneConstantSearch = $state('');
-  const tuneBindings = $state({
-    get tuneUiEditMode() {
-      return tuneUiEditMode;
-    },
-    set tuneUiEditMode(value: boolean) {
-      tuneUiEditMode = value;
-    },
-    get tuneScopeTab() {
-      return tuneScopeTab;
-    },
-    set tuneScopeTab(value: string) {
-      tuneScopeTab = value;
-    },
-    get tunePipelineUiSearch() {
-      return tunePipelineUiSearch;
-    },
-    set tunePipelineUiSearch(value: string) {
-      tunePipelineUiSearch = value;
-    },
-    get tunePipelineUiDraft() {
-      return tunePipelineUiDraft;
-    },
-    set tunePipelineUiDraft(value: PipelineUi) {
-      tunePipelineUiDraft = value;
-    },
-    get tuneUiActiveTabId() {
-      return tuneUiActiveTabId;
-    },
-    set tuneUiActiveTabId(value: string) {
-      tuneUiActiveTabId = value;
-    },
-    get tuneUiSelectedItemId() {
-      return tuneUiSelectedItemId;
-    },
-    set tuneUiSelectedItemId(value: string | null) {
-      tuneUiSelectedItemId = value;
-    },
-    get tuneUiSelectedItemAnchor() {
-      return tuneUiSelectedItemAnchor;
-    },
-    set tuneUiSelectedItemAnchor(value: { x: number; y: number } | null) {
-      tuneUiSelectedItemAnchor = value;
-    },
-    get tuneConstantSearch() {
-      return tuneConstantSearch;
-    },
-    set tuneConstantSearch(value: string) {
-      tuneConstantSearch = value;
-    },
-    get tunePerformanceTab() {
-      return tunePerformanceTab;
-    },
-    set tunePerformanceTab(value: 'metrics' | 'controls' | 'layout' | 'outputs') {
-      tunePerformanceTab = value;
-    },
-    get tuneControlsQuery() {
-      return tuneControlsQuery;
-    },
-    set tuneControlsQuery(value: string) {
-      tuneControlsQuery = value;
-    },
-    get tuneShowReadOnlyControls() {
-      return tuneShowReadOnlyControls;
-    },
-    set tuneShowReadOnlyControls(value: boolean) {
-      tuneShowReadOnlyControls = value;
-    },
-    get tuneControlState() {
-      return tuneControlState;
-    },
-    set tuneControlState(value: Record<number, number | boolean | null>) {
-      tuneControlState = value;
-    },
-    get tuneControlAppliedState() {
-      return tuneControlAppliedState;
-    },
-    set tuneControlAppliedState(value: Record<number, number | boolean | null>) {
-      tuneControlAppliedState = value;
-    },
-    get tuneControlBusy() {
-      return tuneControlBusy;
-    },
-    set tuneControlBusy(value: Record<number, boolean>) {
-      tuneControlBusy = value;
-    },
-    get tuneMultiplexRows() {
-      return tuneMultiplexRows;
-    },
-    set tuneMultiplexRows(value: number) {
-      tuneMultiplexRows = value;
-    },
-    get tuneMultiplexColumns() {
-      return tuneMultiplexColumns;
-    },
-    set tuneMultiplexColumns(value: number) {
-      tuneMultiplexColumns = value;
-    },
-    get tuneSelectedPipelineOutput() {
-      return tuneSelectedPipelineOutput;
-    },
-    set tuneSelectedPipelineOutput(value: string | null) {
-      tuneSelectedPipelineOutput = value;
-    },
-    get tunePipelineRemoveModalOpen() {
-      return tunePipelineRemoveModalOpen;
-    },
-    set tunePipelineRemoveModalOpen(value: boolean) {
-      tunePipelineRemoveModalOpen = value;
-    },
-    get tunePipelineRemoveCandidateId() {
-      return tunePipelineRemoveCandidateId;
-    },
-    set tunePipelineRemoveCandidateId(value: string | null) {
-      tunePipelineRemoveCandidateId = value;
-    },
-    get tunePipelineAssignModalOpen() {
-      return tunePipelineAssignModalOpen;
-    },
-    set tunePipelineAssignModalOpen(value: boolean) {
-      tunePipelineAssignModalOpen = value;
-    },
-    get tunePipelineAssignQuery() {
-      return tunePipelineAssignQuery;
-    },
-    set tunePipelineAssignQuery(value: string) {
-      tunePipelineAssignQuery = value;
-    },
-    get tunePipelineAssignDraft() {
-      return tunePipelineAssignDraft;
-    },
-    set tunePipelineAssignDraft(value: string[]) {
-      tunePipelineAssignDraft = value;
-    }
-  });
+  const tuneBindings = $state(
+    createTuneBindings({
+      getTuneUiEditMode: () => tuneUiEditMode,
+      setTuneUiEditMode: (value) => {
+        tuneUiEditMode = value;
+      },
+      getTuneScopeTab: () => tuneScopeTab,
+      setTuneScopeTab: (value) => {
+        tuneScopeTab = value;
+      },
+      getTunePipelineUiSearch: () => tunePipelineUiSearch,
+      setTunePipelineUiSearch: (value) => {
+        tunePipelineUiSearch = value;
+      },
+      getTunePipelineUiDraft: () => tunePipelineUiDraft,
+      setTunePipelineUiDraft: (value) => {
+        tunePipelineUiDraft = value;
+      },
+      getTuneUiActiveTabId: () => tuneUiActiveTabId,
+      setTuneUiActiveTabId: (value) => {
+        tuneUiActiveTabId = value;
+      },
+      getTuneUiSelectedItemId: () => tuneUiSelectedItemId,
+      setTuneUiSelectedItemId: (value) => {
+        tuneUiSelectedItemId = value;
+      },
+      getTuneUiSelectedItemAnchor: () => tuneUiSelectedItemAnchor,
+      setTuneUiSelectedItemAnchor: (value) => {
+        tuneUiSelectedItemAnchor = value;
+      },
+      getTuneConstantSearch: () => tuneConstantSearch,
+      setTuneConstantSearch: (value) => {
+        tuneConstantSearch = value;
+      },
+      getTunePerformanceTab: () => tunePerformanceTab,
+      setTunePerformanceTab: (value) => {
+        tunePerformanceTab = value;
+      },
+      getTuneControlsQuery: () => tuneControlsQuery,
+      setTuneControlsQuery: (value) => {
+        tuneControlsQuery = value;
+      },
+      getTuneShowReadOnlyControls: () => tuneShowReadOnlyControls,
+      setTuneShowReadOnlyControls: (value) => {
+        tuneShowReadOnlyControls = value;
+      },
+      getTuneControlState: () => tuneControlState,
+      setTuneControlState: (value) => {
+        tuneControlState = value;
+      },
+      getTuneControlAppliedState: () => tuneControlAppliedState,
+      setTuneControlAppliedState: (value) => {
+        tuneControlAppliedState = value;
+      },
+      getTuneControlBusy: () => tuneControlBusy,
+      setTuneControlBusy: (value) => {
+        tuneControlBusy = value;
+      },
+      getTuneMultiplexRows: () => tuneMultiplexRows,
+      setTuneMultiplexRows: (value) => {
+        tuneMultiplexRows = value;
+      },
+      getTuneMultiplexColumns: () => tuneMultiplexColumns,
+      setTuneMultiplexColumns: (value) => {
+        tuneMultiplexColumns = value;
+      },
+      getTuneSelectedPipelineOutput: () => tuneSelectedPipelineOutput,
+      setTuneSelectedPipelineOutput: (value) => {
+        tuneSelectedPipelineOutput = value;
+      },
+      getTunePipelineRemoveModalOpen: () => tunePipelineRemoveModalOpen,
+      setTunePipelineRemoveModalOpen: (value) => {
+        tunePipelineRemoveModalOpen = value;
+      },
+      getTunePipelineRemoveCandidateId: () => tunePipelineRemoveCandidateId,
+      setTunePipelineRemoveCandidateId: (value) => {
+        tunePipelineRemoveCandidateId = value;
+      },
+      getTunePipelineAssignModalOpen: () => tunePipelineAssignModalOpen,
+      setTunePipelineAssignModalOpen: (value) => {
+        tunePipelineAssignModalOpen = value;
+      },
+      getTunePipelineAssignQuery: () => tunePipelineAssignQuery,
+      setTunePipelineAssignQuery: (value) => {
+        tunePipelineAssignQuery = value;
+      },
+      getTunePipelineAssignDraft: () => tunePipelineAssignDraft,
+      setTunePipelineAssignDraft: (value) => {
+        tunePipelineAssignDraft = value;
+      }
+    })
+  );
   const tuneConstantSearchTokens: string[] = $derived.by(() => buildTuneConstantSearchTokens(tuneConstantSearch));
   const tuneFilteredConstantGroups: TuneConstantGroup[] = $derived.by(() =>
     filterTuneConstantGroups(tuneConstantGroups, tuneConstantSearchTokens)
   );
-  const tuneStreamsForPipeline: StreamInfo[] = $derived.by(() => {
-    const pipeline = $selectedPipeline;
-    const pipelineId = pipeline?.id ?? '';
-    if (!pipelineId || !pipeline) return [];
-
-    const aliases = new SvelteSet<string>();
-    const name = typeof pipeline.name === 'string' ? pipeline.name.trim().toLowerCase() : '';
-    const alias = typeof pipeline.alias === 'string' ? pipeline.alias.trim().toLowerCase() : '';
-    if (name) aliases.add(name);
-    if (alias) aliases.add(alias);
-
-    const aliasMatches = (graph: unknown): boolean => {
-      if (!aliases.size) return false;
-      const value = extractGraphAlias(graph);
-      if (!value) return false;
-      return aliases.has(value.toLowerCase());
-    };
-
-    // Attachments are often absent from the pipeline overview payload; rely on stream manifests.
-    return tuneStreams.filter((stream) => {
-      if (streamUsesPipeline(stream, pipelineId)) return true;
-      const manifest = asRecord(stream?.manifest);
-      if (aliasMatches(manifest?.pipeline_graph)) return true;
-      if (Array.isArray(manifest?.pipelines)) {
-        return manifest.pipelines.some((binding) => aliasMatches(asRecord(binding)?.pipeline_graph));
-      }
-      return false;
-    });
-  });
-
-  const tuneMetricsStreamRefs: TuneMetricsStreamRef[] = $derived.by(() => {
-    const pipeline = $selectedPipeline;
-    const pipelineId = pipeline?.id ?? '';
-    if (!pipelineId) return [];
-
-    const refs: TuneMetricsStreamRef[] = [];
-    const seen = new SvelteSet<string>();
-
-    // Prefer explicit attachments when available, otherwise fall back to detected streams.
-    const attachments = Array.isArray(pipeline?.attachments) ? pipeline.attachments : [];
-    for (const attachment of attachments) {
-      const attachmentRecord = asRecord(attachment);
-      const idRaw =
-        typeof attachment?.captureSessionId === 'string'
-          ? attachment.captureSessionId
-          : typeof attachmentRecord?.capture_session_id === 'string'
-            ? attachmentRecord.capture_session_id
-            : '';
-      const id = String(idRaw ?? '').trim();
-      if (!id || seen.has(id)) continue;
-      const active = tuneStreams.find((stream) => stream.id === id) ?? null;
-      const pathRaw =
-        typeof attachment?.cameraPath === 'string'
-          ? attachment.cameraPath
-          : typeof attachmentRecord?.camera_path === 'string'
-            ? attachmentRecord.camera_path
-            : '';
-      const activeLabel = active ? streamLabel(active).trim() : '';
-      const label = activeLabel || String(pathRaw ?? '').trim() || id;
-      refs.push({ id, label });
-      seen.add(id);
-    }
-
-    // Also include any active streams whose manifests reference the pipeline.
-    for (const stream of tuneStreamsForPipeline) {
-      if (seen.has(stream.id)) continue;
-      refs.push({ id: stream.id, label: streamLabel(stream) });
-      seen.add(stream.id);
-    }
-
-    return refs;
-  });
-
-  const tuneMetricsWantedRefs: TuneMetricsStreamRef[] = $derived.by(() => {
-    if (tuneScopeTab === 'global') return tuneMetricsStreamRefs;
-    if (!tuneScopeTab) return [];
-    const match = tuneMetricsStreamRefs.find((ref) => ref.id === tuneScopeTab) ?? null;
-    return [match ?? { id: tuneScopeTab, label: tuneScopeTab }];
-  });
-
-  const tuneMetricsWantedKey: string = $derived.by(() => {
-    const pipelineId = $selectedPipeline?.id ?? '';
-    if (tuneScopeTab === 'global') {
-      const ids = tuneMetricsStreamRefs.map((ref) => ref.id).filter(Boolean).sort((a, b) => a.localeCompare(b));
-      return `global:${pipelineId}:${ids.join('|')}`;
-    }
-    return tuneScopeTab ? `stream:${pipelineId}:${tuneScopeTab}` : `none:${pipelineId}`;
-  });
-  const tuneActiveStreamId = $derived(tuneScopeTab === 'global' ? null : tuneScopeTab);
-  const tuneSelectedStream = $derived(
-    tuneActiveStreamId ? tuneStreamsForPipeline.find((stream) => stream.id === tuneActiveStreamId) ?? null : null
+  const tuneStreamsForPipeline: StreamInfo[] = $derived.by(() =>
+    buildTuneStreamsForPipeline({
+      pipeline: $selectedPipeline ?? null,
+      tuneStreams,
+      streamUsesPipeline
+    })
   );
-  const tunePreviewStream: StreamInfo | null = $derived.by(() => (tuneScopeTab === 'global' ? null : tuneSelectedStream));
-  const tuneMetadataStream: StreamInfo | null = $derived.by(
-    () => tunePreviewStream ?? tuneStreamsForPipeline[0] ?? null
+
+  const tuneMetricsStreamRefs: TuneMetricsStreamRef[] = $derived.by(() =>
+    buildTuneMetricsStreamRefs({
+      pipeline: $selectedPipeline ?? null,
+      tuneStreams,
+      tuneStreamsForPipeline,
+      streamLabel
+    })
+  );
+
+  const tuneMetricsWantedRefs: TuneMetricsStreamRef[] = $derived.by(() =>
+    buildTuneMetricsWantedRefs({
+      tuneScopeTab,
+      tuneMetricsStreamRefs
+    })
+  );
+
+  const tuneMetricsWantedKey: string = $derived.by(() =>
+    buildTuneMetricsWantedKey({
+      pipelineId: $selectedPipeline?.id ?? '',
+      tuneScopeTab,
+      tuneMetricsStreamRefs
+    })
+  );
+  const tuneActiveStreamId = $derived(tuneScopeTab === 'global' ? null : tuneScopeTab);
+  const tuneSelectedStream = $derived(findTuneSelectedStream(tuneActiveStreamId, tuneStreamsForPipeline));
+  const tunePreviewStream: StreamInfo | null = $derived.by(() =>
+    resolveTunePreviewStream(tuneScopeTab, tuneSelectedStream)
+  );
+  const tuneMetadataStream: StreamInfo | null = $derived.by(() =>
+    resolveTuneMetadataStream(tunePreviewStream, tuneStreamsForPipeline)
   );
 
   $effect(() => {

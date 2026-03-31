@@ -817,6 +817,18 @@
       "review_note": "Pipeline page lazy component loading, live-refresh/focus policy, warmup scheduling, and icon-modal actions now live here; keep route rendering state and graph/tune composition out of this runtime helper."
     },
     {
+      "path": "frontend/src/lib/features/pipelines/page/PipelineTuneState.svelte",
+      "max_lines": 2080,
+      "owner": "HeliOS",
+      "review_note": "Pipeline tune state still owns runtime composition, effects, and tuning orchestration, but stream-association/metrics targeting and page-binding helpers have been extracted; keep adding helpers instead of rebuilding more page-local support logic."
+    },
+    {
+      "path": "frontend/src/lib/features/pipelines/page/pipelineTunePageSupport.ts",
+      "max_lines": 420,
+      "owner": "HeliOS",
+      "review_note": "Pipeline tune page support now owns stream association helpers, metrics target derivation, preview/metadata stream resolution, and the shared binding facade; keep heavy runtime effects and mutation flows out of this helper."
+    },
+    {
       "path": "frontend/src/routes/localization/+page.svelte",
       "max_lines": 3600,
       "owner": "HeliOS",
