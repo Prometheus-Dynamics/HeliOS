@@ -659,6 +659,42 @@
       "max_lines": 250,
       "owner": "HeliOS",
       "review_note": "The localization solver orchestration was split out of the old monolith; keep the new module thin."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/nt4/mod.rs",
+      "max_lines": 40,
+      "owner": "HeliOS",
+      "review_note": "NT4 HTTP root should stay as thin route orchestration after the module split."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/nt4/types.rs",
+      "max_lines": 80,
+      "owner": "HeliOS",
+      "review_note": "NT4 schema types now live here; keep API request and response shapes separate from transport and route logic."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/nt4/transport.rs",
+      "max_lines": 140,
+      "owner": "HeliOS",
+      "review_note": "NT4 host resolution and connection retry logic now live here; keep topic scanning and value decoding out of this transport helper module."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/nt4/topics.rs",
+      "max_lines": 120,
+      "owner": "HeliOS",
+      "review_note": "NT4 topic discovery now lives here; keep host resolution, schema types, and value decoding separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/nt4/value.rs",
+      "max_lines": 150,
+      "owner": "HeliOS",
+      "review_note": "NT4 value reads and MessagePack-to-JSON decoding now live here; keep topic discovery and transport helpers out of this module."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/nt4/tests.rs",
+      "max_lines": 80,
+      "owner": "HeliOS",
+      "review_note": "NT4 transport and decode tests now live here; keep regression coverage isolated from production modules."
     }
   ],
   "forbidden_paths": [
@@ -696,6 +732,11 @@
       "path": "backend/src/helios-api/src/http/localization/solve.rs",
       "owner": "HeliOS",
       "reason": "Localization solve HTTP orchestration now lives under backend/src/helios-api/src/http/localization/solve/*. Do not recreate the deleted localization/solve.rs monolith."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/nt4.rs",
+      "owner": "HeliOS",
+      "reason": "NT4 HTTP routing, transport helpers, schema types, and value/topic logic now live under backend/src/helios-api/src/http/nt4/*. Do not recreate the deleted nt4.rs monolith."
     }
   ]
 }
