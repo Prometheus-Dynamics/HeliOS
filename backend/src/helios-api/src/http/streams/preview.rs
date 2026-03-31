@@ -340,6 +340,7 @@ mod tests {
     fn manifest_with_active(pipeline_id: Uuid, output: Option<&str>) -> StreamManifest {
         let format = MediaFormat::new(FourCc::new(*b"RGB3"), Resolution::new(1, 1).expect("valid resolution"), ColorSpace::Srgb);
         StreamManifest {
+            schema_version: helios_engine::ipc::CURRENT_STREAM_CONFIG_SCHEMA_VERSION,
             identity: DeviceIdentity { id: None, alias: None, hardware_id: None },
             capture: CaptureConfig {
                 device_keys: vec![],

@@ -16,6 +16,7 @@ fn sample_manifest() -> StreamManifest {
         enable_tdn_output: false,
     };
     StreamManifest {
+        schema_version: CURRENT_STREAM_CONFIG_SCHEMA_VERSION,
         identity,
         capture,
         host_buffer: super::default_host_buffer(),
@@ -119,6 +120,7 @@ fn encoder_settings_accepts_legacy_fps_framerate_json() {
 fn stream_manifest_defaults_shadow_recorder_off_when_omitted() {
     let payload = sample_manifest_json();
     let parsed: StreamManifest = serde_json::from_value(payload).expect("decode manifest");
+    assert_eq!(parsed.schema_version, CURRENT_STREAM_CONFIG_SCHEMA_VERSION);
     assert!(!parsed.shadow_recorder_enabled);
     assert_eq!(parsed.host_buffer, super::default_host_buffer());
     assert!(!parsed.pipeline_enabled);
@@ -143,6 +145,28 @@ fn sample_manifest_json() -> serde_json::Value {
             "controls": []
         }
     })
+}
+
+#[test]
+fn stream_manifest_serializes_current_schema_version() {
+    let manifest = sample_manifest();
+    let payload = serde_json::to_value(&manifest).expect("encode manifest");
+    assert_eq!(payload.get("schema_version").and_then(serde_json::Value::as_u64), Some(CURRENT_STREAM_CONFIG_SCHEMA_VERSION as u64));
+}
+
+#[test]
+fn stream_manifest_accepts_legacy_versionless_json() {
+    let parsed: StreamManifest = serde_json::from_value(sample_manifest_json()).expect("decode legacy manifest");
+    assert_eq!(parsed.schema_version, CURRENT_STREAM_CONFIG_SCHEMA_VERSION);
+}
+
+#[test]
+fn stream_manifest_rejects_unknown_future_schema_version() {
+    let mut payload = sample_manifest_json();
+    payload.as_object_mut().expect("manifest object").insert("schema_version".to_string(), serde_json::json!(CURRENT_STREAM_CONFIG_SCHEMA_VERSION + 1));
+
+    let err = serde_json::from_value::<StreamManifest>(payload).expect_err("future schema version should fail");
+    assert!(err.to_string().contains("unsupported stream manifest schema_version"));
 }
 
 #[test]

@@ -110,6 +110,7 @@ mod tests {
 
     fn sample_manifest() -> StreamManifest {
         StreamManifest {
+            schema_version: helios_engine::ipc::CURRENT_STREAM_CONFIG_SCHEMA_VERSION,
             identity: DeviceIdentity { id: None, alias: Some("camera".to_string()), hardware_id: None },
             capture: CaptureConfig {
                 device_keys: vec!["cam".to_string()],

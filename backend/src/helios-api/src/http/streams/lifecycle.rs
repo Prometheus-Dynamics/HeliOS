@@ -845,6 +845,7 @@ mod tests {
     fn sample_ov9782_manifest() -> StreamManifest {
         let format = MediaFormat::new(FourCc::new(*b"NV12"), Resolution::new(1280, 800).unwrap(), ColorSpace::Srgb);
         StreamManifest {
+            schema_version: helios_engine::ipc::CURRENT_STREAM_CONFIG_SCHEMA_VERSION,
             identity: DeviceIdentity { id: None, alias: Some("ov9782 cam".to_string()), hardware_id: None },
             capture: CaptureConfig {
                 device_keys: vec!["ov9782".to_string()],

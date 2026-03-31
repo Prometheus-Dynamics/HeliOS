@@ -1,3 +1,4 @@
+import { withCurrentStreamManifestSchema } from '$lib/api/streamSchema';
 import type { CodecInfo, Interval, Mode, ProbedBackend, ProbedDevice, StreamInfo, StreamManifest } from '$lib/api/httpClient';
 import { OpenAPI, getHttpClientBase } from '$lib/api/httpClient';
 import { extractError } from '$lib/api/errors';
@@ -328,7 +329,7 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
         throw new Error('Stream defaults are unavailable');
       }
 
-      const payload = {
+      const payload = withCurrentStreamManifestSchema({
         identity,
         capture: {
           backend: backend.kind,
@@ -385,7 +386,7 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
         // explicitly disables pipelines.
         pipeline_wires: enablePipeline ? existingPipelineWires : [],
         pipelines: pipelineAssignments
-      } as unknown as StreamManifest;
+      }) as unknown as StreamManifest;
 
       await deps.streamsApi.startStream({ requestBody: payload });
       deps.onExternalLayoutApplied?.();

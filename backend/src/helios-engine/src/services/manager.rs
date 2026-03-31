@@ -4385,7 +4385,7 @@ fn upsert_control_assignment(controls: &mut Vec<ControlAssignment>, id: u32, val
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ipc::{RequestedDecoderConfig, RequestedEncoderConfig, StreamManifest};
+    use crate::ipc::{CURRENT_STREAM_CONFIG_SCHEMA_VERSION, RequestedDecoderConfig, RequestedEncoderConfig, StreamManifest};
     use serde_json::json;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
@@ -4405,6 +4405,7 @@ mod tests {
             enable_tdn_output: false,
         };
         StreamManifest {
+            schema_version: CURRENT_STREAM_CONFIG_SCHEMA_VERSION,
             identity,
             capture,
             host_buffer: crate::ipc::default_host_buffer(),

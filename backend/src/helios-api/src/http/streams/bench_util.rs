@@ -1,7 +1,7 @@
 use helios_engine::{
     capture::{BackendHandle, BackendKind, CaptureConfig, ControlAssignment, DiscoveredDevice},
     identity::DeviceIdentity,
-    ipc::{EngineEvent, RequestedDecoderConfig, RequestedEncoderConfig, StreamManifest},
+    ipc::{CURRENT_STREAM_CONFIG_SCHEMA_VERSION, EngineEvent, RequestedDecoderConfig, RequestedEncoderConfig, StreamManifest},
     stream::touch_stream_preview,
 };
 use std::{collections::HashMap, sync::OnceLock, time::Duration};
@@ -110,6 +110,7 @@ pub async fn start_stream_for_mode(args: StartStreamArgs<'_>) -> Result<Uuid, St
     };
 
     let mut manifest = StreamManifest {
+        schema_version: CURRENT_STREAM_CONFIG_SCHEMA_VERSION,
         identity: identity.clone(),
         capture,
         host_buffer: helios_engine::ipc::default_host_buffer(),

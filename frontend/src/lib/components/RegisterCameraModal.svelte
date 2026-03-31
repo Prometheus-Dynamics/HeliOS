@@ -3,6 +3,7 @@
   import { toaster } from '$lib';
   import { apiFetch } from '$lib/api/core/http';
   import { resolveStreamCreationDefaults } from '$lib/api/streamDefaults';
+  import { withCurrentStreamManifestSchema } from '$lib/api/streamSchema';
   import { ApiError, OpenAPI, PeersService, PeripheralsService } from '$lib/ts-bindings/http/client';
   import { connectDevicesUpdatesStream } from '$lib/api/devicesUpdates';
   import { PipelinesApi } from '$lib/api/pipelinesApi';
@@ -916,7 +917,7 @@
     const shouldAttachSelectedPipeline = Boolean(attachedPipelineId);
     const useRawMediaPipelineInSimpleMode = isSimpleRegistration && !shouldAttachSelectedPipeline && isMediaBackend;
 
-      const manifest: StreamManifest = {
+      const manifest: StreamManifest = withCurrentStreamManifestSchema({
         // Backend expects `DeviceIdentity { id, alias, hardware_id }` for stream manifests.
         // The TS bindings can lag (some shapes still show `{ display, keys }`), so cast through
         // `unknown` to keep the runtime JSON correct without widening the rest of the payload.
@@ -1013,7 +1014,7 @@
         preview_jpeg_quality: streamDefaults.defaultPreviewJpegQuality,
         shadow_recorder_enabled: streamDefaults.defaultShadowRecorderEnabled,
         start_on_boot: streamDefaults.defaultStartOnBoot
-      };
+      });
 
     try {
       const response = await StreamsApi.startStream({ requestBody: manifest });

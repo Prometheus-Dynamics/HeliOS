@@ -1,4 +1,5 @@
 import { resolveStreamCreationDefaults } from '$lib/api/streamDefaults';
+import { withCurrentStreamManifestSchema } from '$lib/api/streamSchema';
 import type { StreamCapabilitiesResponse, StreamManifest } from '$lib/ts-bindings/http/client';
 
 export type RegisterNetcamStreamInput = {
@@ -23,7 +24,7 @@ export function makeNetcamManifest(input: RegisterNetcamStreamInput, capabilitie
     throw new Error('Stream capabilities missing requested stream defaults');
   }
 
-  return {
+  return withCurrentStreamManifestSchema({
     identity: { id: null, alias, hardware_id: null } as unknown as StreamManifest['identity'],
     capture: {
       device_keys: [url],
@@ -59,5 +60,5 @@ export function makeNetcamManifest(input: RegisterNetcamStreamInput, capabilitie
     },
     shadow_recorder_enabled: streamDefaults.defaultShadowRecorderEnabled,
     start_on_boot: input.startOnBoot == null ? streamDefaults.defaultStartOnBoot : Boolean(input.startOnBoot)
-  } as unknown as StreamManifest;
+  }) as unknown as StreamManifest;
 }

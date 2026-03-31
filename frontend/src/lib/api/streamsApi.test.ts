@@ -57,6 +57,7 @@ describe('stream defaults contract', () => {
       sampleCapabilities()
     );
 
+    expect(manifest.schema_version).toBe(1);
     expect(manifest.host_buffer).toBe(17);
     expect(manifest.preview_jpeg_quality).toBe(42);
     expect(manifest.shadow_recorder_enabled).toBe(true);

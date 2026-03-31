@@ -528,7 +528,7 @@ pub(crate) fn build_graph_handle_for_pipeline_output(host_buffer: usize, manifes
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ipc::{RequestedDecoderConfig, RequestedEncoderConfig, StreamManifest};
+    use crate::ipc::{CURRENT_STREAM_CONFIG_SCHEMA_VERSION, RequestedDecoderConfig, RequestedEncoderConfig, StreamManifest};
     use styx::prelude::{ColorSpace, FourCc, MediaFormat, Resolution};
 
     fn sample_manifest() -> ResolvedStreamConfig {
@@ -545,6 +545,7 @@ mod tests {
             enable_tdn_output: false,
         };
         StreamManifest {
+            schema_version: CURRENT_STREAM_CONFIG_SCHEMA_VERSION,
             identity,
             capture,
             host_buffer: 1,

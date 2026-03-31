@@ -1514,8 +1514,12 @@ fn canonical_requested_preview_jpeg_quality(value: Option<u8>, encoder: &Request
     value.map(|value| value.clamp(1, 100)).unwrap_or_else(|| default_requested_preview_jpeg_quality(encoder))
 }
 
+pub const CURRENT_STREAM_CONFIG_SCHEMA_VERSION: u32 = 1;
+const LEGACY_STREAM_CONFIG_SCHEMA_VERSION: u32 = 0;
+
 #[derive(Debug, Clone, ToSchema)]
 pub struct StreamManifest {
+    pub schema_version: u32,
     pub identity: DeviceIdentity,
     pub capture: CaptureConfig,
     pub host_buffer: usize,
@@ -1592,6 +1596,8 @@ struct StreamManifestBinaryWire {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StreamManifestHumanWire {
+    #[serde(default)]
+    pub schema_version: Option<u32>,
     pub identity: DeviceIdentity,
     pub capture: CaptureConfig,
     #[serde(default)]
@@ -1653,6 +1659,7 @@ impl From<StreamManifestBinaryWire> for StreamManifest {
         let host_buffer = canonical_requested_host_buffer(value.host_buffer);
         let preview_jpeg_quality = canonical_requested_preview_jpeg_quality(value.preview_jpeg_quality, &value.encoder);
         Self {
+            schema_version: CURRENT_STREAM_CONFIG_SCHEMA_VERSION,
             identity: value.identity,
             capture: value.capture,
             host_buffer,
@@ -1673,6 +1680,40 @@ impl From<StreamManifestBinaryWire> for StreamManifest {
             start_on_boot: value.start_on_boot,
         }
     }
+}
+
+type StreamManifestHumanMigration = fn(StreamManifestHumanWire) -> Result<StreamManifestHumanWire, String>;
+
+fn migrate_stream_manifest_v0_to_v1(mut wire: StreamManifestHumanWire) -> Result<StreamManifestHumanWire, String> {
+    wire.schema_version = Some(CURRENT_STREAM_CONFIG_SCHEMA_VERSION);
+    Ok(wire)
+}
+
+const STREAM_MANIFEST_HUMAN_MIGRATIONS: &[(u32, StreamManifestHumanMigration)] = &[(LEGACY_STREAM_CONFIG_SCHEMA_VERSION, migrate_stream_manifest_v0_to_v1)];
+
+fn migrate_stream_manifest_human_wire(mut wire: StreamManifestHumanWire) -> Result<StreamManifestHumanWire, String> {
+    let mut version = wire.schema_version.unwrap_or(LEGACY_STREAM_CONFIG_SCHEMA_VERSION);
+    if version > CURRENT_STREAM_CONFIG_SCHEMA_VERSION {
+        return Err(format!(
+            "unsupported stream manifest schema_version {}; current version is {}",
+            version, CURRENT_STREAM_CONFIG_SCHEMA_VERSION
+        ));
+    }
+
+    while version < CURRENT_STREAM_CONFIG_SCHEMA_VERSION {
+        let Some((_, migration)) = STREAM_MANIFEST_HUMAN_MIGRATIONS.iter().find(|(from, _)| *from == version) else {
+            return Err(format!(
+                "no stream manifest migration registered from schema_version {} to {}",
+                version,
+                version + 1
+            ));
+        };
+        wire = migration(wire)?;
+        version = wire.schema_version.unwrap_or(version + 1);
+    }
+
+    wire.schema_version = Some(CURRENT_STREAM_CONFIG_SCHEMA_VERSION);
+    Ok(wire)
 }
 
 impl From<StreamManifest> for StreamManifestBinaryWire {
@@ -1704,6 +1745,7 @@ impl TryFrom<StreamManifestHumanWire> for StreamManifest {
     type Error = String;
 
     fn try_from(value: StreamManifestHumanWire) -> Result<Self, Self::Error> {
+        let value = migrate_stream_manifest_human_wire(value)?;
         let encoder = match (value.encoder, value.encoder_enabled, value.encoder_id, value.encoder_settings) {
             (Some(encoder), None, None, None) => encoder,
             (Some(_), _, _, _) => return Err("stream manifest may not mix `encoder` with legacy `encoder_enabled`, `encoder_id`, or `encoder_settings` fields".to_string()),
@@ -1726,6 +1768,7 @@ impl TryFrom<StreamManifestHumanWire> for StreamManifest {
         let preview_jpeg_quality = canonical_requested_preview_jpeg_quality(value.preview_jpeg_quality, &encoder);
 
         Ok(Self {
+            schema_version: CURRENT_STREAM_CONFIG_SCHEMA_VERSION,
             identity: value.identity,
             capture: value.capture,
             host_buffer,
@@ -1751,6 +1794,7 @@ impl TryFrom<StreamManifestHumanWire> for StreamManifest {
 impl From<StreamManifest> for StreamManifestHumanWire {
     fn from(value: StreamManifest) -> Self {
         Self {
+            schema_version: Some(value.schema_version),
             identity: value.identity,
             capture: value.capture,
             host_buffer: Some(value.host_buffer),
@@ -1891,6 +1935,7 @@ impl ResolvedStreamConfig {
 
     pub fn to_requested_manifest(&self) -> StreamManifest {
         StreamManifest {
+            schema_version: CURRENT_STREAM_CONFIG_SCHEMA_VERSION,
             identity: self.identity.clone(),
             capture: self.capture.clone(),
             host_buffer: self.host_buffer,
