@@ -2,7 +2,13 @@
   import { onMount } from 'svelte';
   import { apiFetch, apiFetchResponse } from '$lib/api/core/http';
   import { readStorage, removeStorage, writeStorage } from '$lib/utils/storage';
-  import type { Mode, ProbedBackend, ProbedDevice } from '$lib/ts-bindings/http/client';
+  import type {
+    Mode,
+    ProbedBackend,
+    ProbedDevice,
+    SensorBenchmarkListResponse,
+    SensorBenchmarkStarted
+  } from '$lib/ts-bindings/http/client';
   import { toaster } from '$lib';
   import BenchmarkSetup from './benchmark/BenchmarkSetup.svelte';
   import BenchmarkProgress from './benchmark/BenchmarkProgress.svelte';
@@ -26,14 +32,6 @@
   } from './benchmark/benchmarkUtils';
   import { etaMs, maxEtaMs, updateEtaEstimator, type EtaEstimator } from './benchmark/benchmarkState';
   import { SvelteSet } from 'svelte/reactivity';
-
-  type BenchmarksResponse = {
-    benchmarks?: BenchmarkListItem[];
-  };
-
-  type BenchmarkStartResponse = {
-    benchmark_id?: string;
-  };
 
   let { apiPath, device, backend } = $props<{
     apiPath: (path: string) => string;
@@ -154,7 +152,7 @@
     listError = null;
     try {
       const json = (await apiFetch<unknown>(apiPath('/streams/bench/sensor'))) as unknown;
-      const payload = asRecord<BenchmarksResponse>(json);
+      const payload = asRecord<SensorBenchmarkListResponse>(json);
       benchmarks = Array.isArray(payload?.benchmarks) ? payload.benchmarks.filter(isBenchmarkListItem) : [];
       if (benchmarks.length) {
         const ids = new SvelteSet(benchmarks.map((entry) => entry.summary.benchmark_id));
@@ -253,7 +251,7 @@
       }
 
       const json = (await resp.json()) as unknown;
-      const startResponse = asRecord<BenchmarkStartResponse>(json);
+      const startResponse = asRecord<SensorBenchmarkStarted>(json);
       const id = typeof startResponse?.benchmark_id === 'string' ? startResponse.benchmark_id : '';
       if (!id) throw new Error('Missing benchmark id');
 
