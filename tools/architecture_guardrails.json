@@ -56,9 +56,33 @@
     },
     {
       "path": "backend/src/helios-updater/src/apply.rs",
-      "max_lines": 1900,
+      "max_lines": 560,
       "owner": "HeliOS",
-      "review_note": "Updater apply logic remains large while OTA flows are being consolidated; protect the current size ceiling."
+      "review_note": "Updater apply root should stay focused on job orchestration after splitting preflight planning, progress publication, filesystem sync, and regression tests into dedicated apply/* modules."
+    },
+    {
+      "path": "backend/src/helios-updater/src/apply/preflight.rs",
+      "max_lines": 360,
+      "owner": "HeliOS",
+      "review_note": "Disk-image preflight planning, staged-artifact validation, and squashfs resize verdict shaping now live here; keep runtime apply execution and filesystem mutation out of the preflight path."
+    },
+    {
+      "path": "backend/src/helios-updater/src/apply/progress.rs",
+      "max_lines": 120,
+      "owner": "HeliOS",
+      "review_note": "Apply-stage progress throttling and updater state snapshot publication now live here; keep OTA preflight and filesystem sync logic out of this eventing helper."
+    },
+    {
+      "path": "backend/src/helios-updater/src/apply/sync.rs",
+      "max_lines": 700,
+      "owner": "HeliOS",
+      "review_note": "Boot sync, persisted-state sync, squashfs capacity planning, and staged artifact cleanup now live here; keep apply job orchestration and preflight report shaping out of this filesystem mutation module."
+    },
+    {
+      "path": "backend/src/helios-updater/src/apply/tests.rs",
+      "max_lines": 360,
+      "owner": "HeliOS",
+      "review_note": "Updater apply regression tests now live in a dedicated file; keep production apply logic and helper implementations out of the test module."
     },
     {
       "path": "backend/src/helios-api/src/http/peripherals.rs",
