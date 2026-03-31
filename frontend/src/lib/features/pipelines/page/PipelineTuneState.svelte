@@ -95,7 +95,7 @@
   };
 
   type StreamsApi = {
-    listStreams: () => Promise<unknown>;
+    resolvedStreams: () => Promise<unknown>;
     getControls: (params: { id: string }) => Promise<unknown>;
     getMetrics: (params: { id: string }) => Promise<unknown>;
     setControl: (params: { id: string; controlId: number; requestBody: unknown }) => Promise<void>;
@@ -1589,7 +1589,7 @@
       void (async () => {
         try {
           const listResult = await cancellableWithTimeout(
-            () => StreamsApi.listStreams(),
+            () => StreamsApi.resolvedStreams(),
             TUNE_METRICS_SNAPSHOT_TIMEOUT_MS
           );
           if (!isMounted) return;

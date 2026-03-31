@@ -12,7 +12,7 @@ import {
 } from './pipelineTuneState';
 
 type StreamsApi = {
-  listStreams: () => Promise<unknown>;
+  resolvedStreams: () => Promise<unknown>;
   setPipelineGraphPatch: (params: { id: string; requestBody: { patch: unknown; pipeline_id?: string | null } }) => Promise<unknown>;
   setPipelineGraph: (params: { id: string; requestBody: { graph: unknown; pipeline_id?: string | null } }) => Promise<unknown>;
   setPipelineInputs: (params: { id: string; requestBody: { pipeline_id?: string | null; inputs: Record<string, unknown | null> } }) => Promise<unknown>;
@@ -40,7 +40,7 @@ export const createTuneStreamOverrides = (options: {
   setTuneStreamInputOverridesById: (next: Record<string, Record<string, PipelineNodeValue>>) => void;
 }) => {
   const fetchTuneStreams = async (): Promise<StreamInfo[]> => {
-    const listResult = await options.StreamsApi.listStreams();
+    const listResult = await options.StreamsApi.resolvedStreams();
     if (Array.isArray(listResult)) return listResult as StreamInfo[];
     const items = asListedStreamsResult(listResult)?.items ?? null;
     return Array.isArray(items) ? items : [];

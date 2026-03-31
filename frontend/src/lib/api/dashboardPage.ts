@@ -11,7 +11,7 @@ const REQUEST_TIMEOUT_MS = DEFAULT_REQUEST_TIMEOUT_MS;
 
 export async function fetchDashboardPageData(): Promise<DashboardPayload> {
   const [streamsResult, camerasResult, pipelinesResult, metricsResult] = await Promise.allSettled([
-    StreamsApi.listStreams({ timeoutMs: REQUEST_TIMEOUT_MS }),
+    StreamsApi.resolvedStreams({ timeoutMs: REQUEST_TIMEOUT_MS }),
     PeripheralsApi.listCameras({ timeoutMs: REQUEST_TIMEOUT_MS }),
     PipelinesApi.listGraphs({ timeoutMs: REQUEST_TIMEOUT_MS }),
     DeviceApi.metrics({ timeoutMs: REQUEST_TIMEOUT_MS })

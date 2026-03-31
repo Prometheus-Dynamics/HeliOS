@@ -132,7 +132,7 @@ export function createPipelineMetricsManager(deps: PipelineMetricsManagerDeps) {
     const current = ensurePipelineMetricsEntry(pipelineId);
     try {
       const listResult = await cancellableWithTimeout(
-        () => StreamsApi.listStreams(),
+        () => StreamsApi.resolvedStreams(),
         PIPELINE_METRICS_REQUEST_TIMEOUT_MS,
       );
       const listRecord = asRecord(listResult);

@@ -17,7 +17,7 @@ export async function fetchDevicesPageData(): Promise<DevicesPayload> {
   const [metricsResult, peripheralsResult, streamsResult, peerStreamsResult] = await Promise.allSettled([
     DeviceApi.metrics({ timeoutMs: REQUEST_TIMEOUT_MS }),
     PeripheralsApi.listPeripherals({ timeoutMs: REQUEST_TIMEOUT_MS }),
-    StreamsApi.listStreams({ timeoutMs: REQUEST_TIMEOUT_MS }),
+    StreamsApi.resolvedStreams({ timeoutMs: REQUEST_TIMEOUT_MS }),
     fetchPeerStreams(REQUEST_TIMEOUT_MS)
   ]);
 
@@ -103,7 +103,7 @@ export async function fetchDevicesPageData(): Promise<DevicesPayload> {
 
 export async function fetchDevicesCamerasSnapshot(): Promise<DevicesPayload['cameras']> {
   const [streamsResult, peerStreamsResult] = await Promise.allSettled([
-    StreamsApi.listStreams({ timeoutMs: REQUEST_TIMEOUT_MS }),
+    StreamsApi.resolvedStreams({ timeoutMs: REQUEST_TIMEOUT_MS }),
     fetchPeerStreams(REQUEST_TIMEOUT_MS)
   ]);
   const streamsRaw = streamsResult.status === 'fulfilled' ? streamsResult.value ?? [] : [];

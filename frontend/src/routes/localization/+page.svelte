@@ -1996,7 +1996,7 @@
 
   const loadStreamsSnapshot = async (): Promise<void> => {
     try {
-      streamInfos = await StreamsApi.listStreams({ cacheMs: 5_000 });
+      streamInfos = await StreamsApi.resolvedStreams({ cacheMs: 5_000 });
     } catch {
       streamInfos = [];
     }

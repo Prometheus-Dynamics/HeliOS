@@ -23,7 +23,7 @@ export async function uploadPipelineGraph(graph: unknown, name?: string | null) 
 }
 
 export async function listCaptureBackends() {
-  return StreamsApi.listStreams();
+  return StreamsApi.resolvedStreams();
 }
 
 export async function listPipelineRegistry() {

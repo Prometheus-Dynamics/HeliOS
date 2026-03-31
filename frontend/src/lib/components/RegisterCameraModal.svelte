@@ -342,7 +342,7 @@
       const [cameraResp, codecResp, streamsResp, peersResp, pipelineResp, templateResp, streamCapabilitiesResp] = await Promise.all([
         PeripheralsService.listCameras(),
         StreamsApi.listCodecs().catch(() => null) as Promise<CodecInfo[] | null>,
-        StreamsApi.listStreams().catch(() => []) as Promise<StreamInfo[]>,
+        StreamsApi.resolvedStreams().catch(() => []) as Promise<StreamInfo[]>,
         PeersService.listPeers().catch(() => null) as Promise<{ peers?: PeerInfo[] } | null>,
         PipelinesApi.listGraphs().catch(() => []) as Promise<PipelineSummary[]>,
         PipelinesApi.listTemplates().catch(() => []) as Promise<PipelineTemplateSummary[]>,

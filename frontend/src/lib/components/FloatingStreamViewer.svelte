@@ -72,7 +72,7 @@
     loadingStreams = true;
     loadError = null;
     try {
-      const streams = await StreamsApi.listStreams();
+      const streams = await StreamsApi.resolvedStreams();
       const nextStreams = (streams ?? []).map((stream) => {
         const display = resolveStreamDisplay(stream);
         const alias = resolveStreamAlias(stream);
