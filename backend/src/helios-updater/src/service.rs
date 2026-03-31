@@ -56,6 +56,7 @@ impl UpdaterService {
                 self.publish_snapshot().await;
                 Ok(())
             }
+            UpdaterCommand::PreflightRelease { command_id: _, update_id } => self.preflight_release(update_id).await,
         }
     }
 
@@ -134,6 +135,12 @@ impl UpdaterService {
         let handle = apply::spawn_apply_job(Arc::clone(&self.config), Arc::clone(&self.state), self.event_bus.clone(), update_id);
         self.track_task(handle).await;
         self.publish_event(UpdaterEvent::ApplyScheduled { update_id, eta: window.start });
+        Ok(())
+    }
+
+    async fn preflight_release(&self, update_id: Uuid) -> Result<()> {
+        let report = apply::preflight_staged_release(&self.config, update_id).await?;
+        self.publish_event(UpdaterEvent::PreflightReport { report });
         Ok(())
     }
 

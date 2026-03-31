@@ -74,6 +74,11 @@ pub enum UpdaterCommand {
     QueryState {
         command_id: CommandId,
     },
+    PreflightRelease {
+        command_id: CommandId,
+        #[bincode(with_serde)]
+        update_id: Uuid,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Encode, Decode)]
@@ -118,6 +123,38 @@ pub struct UpdateState {
     pub artifacts: Vec<UrlArtifact>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Encode, Decode)]
+#[serde(rename_all = "snake_case")]
+pub enum PreflightVerdict {
+    Ready,
+    GrowIntoGap,
+    TargetTooSmall,
+    NeedsDataResize,
+    ClearDataDir,
+    WorkDirFull,
+    InvalidArtifact,
+    SingleSlotDisabled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Encode, Decode)]
+pub struct PreflightReport {
+    #[bincode(with_serde)]
+    pub update_id: Uuid,
+    pub ready: bool,
+    pub verdict: PreflightVerdict,
+    pub summary: String,
+    pub artifact_kind: Option<String>,
+    pub target_device: Option<String>,
+    pub image_size_bytes: Option<u64>,
+    pub target_size_bytes: Option<u64>,
+    pub gap_after_bytes: Option<u64>,
+    pub additional_from_data_bytes: Option<u64>,
+    pub data_dir_available_bytes: Option<u64>,
+    pub work_dir_available_bytes: Option<u64>,
+    pub clear_bytes: Option<u64>,
+    pub single_slot: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
 pub enum UpdaterEvent {
     Control(ControlEvent),
@@ -151,6 +188,9 @@ pub enum UpdaterEvent {
         active_update: Option<UpdateState>,
         cache_usage_bytes: u64,
     },
+    PreflightReport {
+        report: PreflightReport,
+    },
     Heartbeat {
         uptime_ms: u64,
         sequence: u64,
@@ -181,6 +221,7 @@ enum UpdaterCommandKind {
     ApplyRelease = 2,
     Rollback = 3,
     QueryState = 4,
+    PreflightRelease = 5,
 }
 
 impl UpdaterCommandKind {
@@ -195,6 +236,7 @@ impl UpdaterCommandKind {
             2 => Some(Self::ApplyRelease),
             3 => Some(Self::Rollback),
             4 => Some(Self::QueryState),
+            5 => Some(Self::PreflightRelease),
             _ => None,
         }
     }
@@ -210,8 +252,9 @@ enum UpdaterEventKind {
     ApplyComplete = 4,
     RollbackTriggered = 5,
     StateSnapshot = 6,
-    Heartbeat = 7,
-    LogRecord = 8,
+    PreflightReport = 7,
+    Heartbeat = 8,
+    LogRecord = 9,
 }
 
 impl UpdaterEventKind {
@@ -228,8 +271,9 @@ impl UpdaterEventKind {
             4 => Some(Self::ApplyComplete),
             5 => Some(Self::RollbackTriggered),
             6 => Some(Self::StateSnapshot),
-            7 => Some(Self::Heartbeat),
-            8 => Some(Self::LogRecord),
+            7 => Some(Self::PreflightReport),
+            8 => Some(Self::Heartbeat),
+            9 => Some(Self::LogRecord),
             _ => None,
         }
     }
@@ -244,6 +288,7 @@ const _: () = {
             struct ApplyRelease { command_id: CommandId, update_id: Uuid => with_serde, window: MaintenanceWindow },
             struct Rollback { command_id: CommandId, update_id: Uuid => with_serde },
             struct QueryState { command_id: CommandId },
+            struct PreflightRelease { command_id: CommandId, update_id: Uuid => with_serde },
         }
     }
 
@@ -255,6 +300,7 @@ const _: () = {
             struct ApplyComplete { update_id: Uuid => with_serde, reboot_required: bool },
             struct RollbackTriggered { update_id: Uuid => with_serde, reason: String },
             struct StateSnapshot { active_update: Option<UpdateState>, cache_usage_bytes: u64 },
+            struct PreflightReport { report: PreflightReport },
             struct Heartbeat { uptime_ms: u64, sequence: u64, stage_queue_depth: u32 },
             struct LogRecord { level: LogLevel, span: Vec<String>, message: String },
             tuple Control (ControlEvent),
@@ -273,6 +319,7 @@ impl ServerEvent for UpdaterEvent {
             | Self::ApplyComplete { .. }
             | Self::RollbackTriggered { .. }
             | Self::StateSnapshot { .. }
+            | Self::PreflightReport { .. }
             | Self::LogRecord { .. }
             | Self::Unknown { .. } => MessageKind::Event,
         }
@@ -317,6 +364,24 @@ mod tests {
             UpdaterEvent::ApplyComplete { update_id: Uuid::new_v4(), reboot_required: true },
             UpdaterEvent::RollbackTriggered { update_id: Uuid::new_v4(), reason: "failure".into() },
             UpdaterEvent::StateSnapshot { active_update: Some(sample_update_state()), cache_usage_bytes: 4096 },
+            UpdaterEvent::PreflightReport {
+                report: PreflightReport {
+                    update_id: Uuid::new_v4(),
+                    ready: false,
+                    verdict: PreflightVerdict::ClearDataDir,
+                    summary: "clear space and retry".into(),
+                    artifact_kind: Some("disk-image".into()),
+                    target_device: Some("/dev/mmcblk0p3".into()),
+                    image_size_bytes: Some(97_140_736),
+                    target_size_bytes: Some(96_468_992),
+                    gap_after_bytes: Some(4_194_304),
+                    additional_from_data_bytes: Some(3_145_728),
+                    data_dir_available_bytes: Some(1_048_576),
+                    work_dir_available_bytes: Some(8_388_608),
+                    clear_bytes: Some(2_097_152),
+                    single_slot: false,
+                },
+            },
             UpdaterEvent::Heartbeat { uptime_ms: 1234, sequence: 2, stage_queue_depth: 1 },
             UpdaterEvent::LogRecord { level: LogLevel::Warn, span: vec!["updater".into()], message: "warn".into() },
         ]

@@ -125,7 +125,8 @@ fn command_id(command: &UpdaterCommand) -> CommandId {
         | UpdaterCommand::Cancel { command_id, .. }
         | UpdaterCommand::ApplyRelease { command_id, .. }
         | UpdaterCommand::Rollback { command_id, .. }
-        | UpdaterCommand::QueryState { command_id } => *command_id,
+        | UpdaterCommand::QueryState { command_id }
+        | UpdaterCommand::PreflightRelease { command_id, .. } => *command_id,
     }
 }
 
@@ -136,5 +137,6 @@ fn command_name(command: &UpdaterCommand) -> &'static str {
         UpdaterCommand::ApplyRelease { .. } => "apply_release",
         UpdaterCommand::Rollback { .. } => "rollback",
         UpdaterCommand::QueryState { .. } => "query_state",
+        UpdaterCommand::PreflightRelease { .. } => "preflight_release",
     }
 }

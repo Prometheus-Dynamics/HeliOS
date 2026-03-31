@@ -7,13 +7,15 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use helios_updater::ipc::{UpdateState, UpdaterCommand};
+use chrono::Utc;
+use helios_updater::ipc::{MaintenanceWindow, PreflightReport, UpdateStage, UpdateState, UpdaterCommand};
 use helios_updater::{ManifestArtifact, ReleaseManifest};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
+use tokio::time::{Duration, Instant, sleep};
 use tracing::warn;
 use url::Url;
 use utoipa::ToSchema;
@@ -29,6 +31,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/upload", post(upload_update))
         .route("/stage", post(stage_update))
+        .route("/preflight", post(preflight_update))
         .route("/apply", post(apply_update))
         .route("/cancel", post(cancel_update))
         .route("/state", get(updater_state))
@@ -86,6 +89,12 @@ pub struct ApplyUpdateRequest {
     pub delete_image_after_apply: bool,
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct PreflightUpdateRequest {
+    #[serde(default)]
+    pub update_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ApplyArtifactKind {
@@ -126,6 +135,20 @@ pub struct UpdateStateResponse {
     #[serde(default)]
     pub state: Option<Value>,
     pub cache_usage_bytes: u64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PreflightUpdateResponse {
+    pub update_id: String,
+    pub ready: bool,
+    pub report: PreflightReport,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ApplyConflictResponse {
+    pub update_id: String,
+    pub error: String,
+    pub preflight: PreflightReport,
 }
 
 #[utoipa::path(
@@ -249,13 +272,54 @@ pub async fn apply_update(State(state): State<AppState>, Json(payload): Json<App
     let Some(image_url) = payload.image_url.as_deref() else {
         return (StatusCode::BAD_REQUEST, Json(UploadUpdateError { error: "image_url is required (staging removed)".into() })).into_response();
     };
-    let update_id = match stage_update_for_auto_apply(&state, image_url, payload.size_bytes, payload.checksum.as_deref(), payload.delete_image_after_apply, artifact_kind).await {
+    let update_id = match stage_update_for_manual_apply(&state, image_url, payload.size_bytes, payload.checksum.as_deref(), payload.delete_image_after_apply, artifact_kind).await {
         Ok(update_id) => update_id,
         Err(err) => return err.into_response(),
     };
+    if let Err(err) = wait_for_staged_update(&state, update_id).await {
+        let _ = cancel_update_by_id(&state, update_id).await;
+        return err.into_response();
+    }
+    let report = match fetch_updater_preflight(&state, update_id).await {
+        Ok(report) => report,
+        Err(err) => {
+            let _ = cancel_update_by_id(&state, update_id).await;
+            return err.into_response();
+        }
+    };
+    if !report.ready {
+        let _ = cancel_update_by_id(&state, update_id).await;
+        return (StatusCode::CONFLICT, Json(ApplyConflictResponse { update_id: update_id.to_string(), error: report.summary.clone(), preflight: report })).into_response();
+    }
     let stopped_streams = if artifact_kind.requires_stream_shutdown() { stop_streams_for_update(&state).await.unwrap_or(0) } else { 0 };
+    if let Err(err) = send_apply_release(&state, update_id).await {
+        return err.into_response();
+    }
     let message = if stopped_streams > 0 { format!("apply scheduled (stopped {} stream{})", stopped_streams, if stopped_streams == 1 { "" } else { "s" }) } else { "apply scheduled".to_string() };
     (StatusCode::OK, Json(UpdateAckResponse { update_id: Some(update_id.to_string()), message })).into_response()
+}
+
+pub async fn preflight_update(State(state): State<AppState>, Json(payload): Json<PreflightUpdateRequest>) -> impl IntoResponse {
+    let update_id = if let Some(raw) = payload.update_id.as_deref() {
+        match Uuid::parse_str(raw.trim()) {
+            Ok(id) => id,
+            Err(_) => return (StatusCode::BAD_REQUEST, Json(UploadUpdateError { error: "invalid update_id".into() })).into_response(),
+        }
+    } else {
+        let updater_state = match fetch_updater_state(&state).await {
+            Ok((state, _)) => state,
+            Err(err) => return err.into_response(),
+        };
+        match updater_state {
+            Some(active) => active.update_id,
+            None => return (StatusCode::BAD_REQUEST, Json(UploadUpdateError { error: "no staged update is active".into() })).into_response(),
+        }
+    };
+
+    match fetch_updater_preflight(&state, update_id).await {
+        Ok(report) => (StatusCode::OK, Json(PreflightUpdateResponse { update_id: update_id.to_string(), ready: report.ready, report })).into_response(),
+        Err(err) => err.into_response(),
+    }
 }
 
 #[utoipa::path(
@@ -314,7 +378,7 @@ async fn stop_streams_for_update(state: &AppState) -> Option<usize> {
     Some(stopped)
 }
 
-async fn stage_update_for_auto_apply(
+async fn stage_update_for_manual_apply(
     state: &AppState,
     image_url: &str,
     size_bytes: Option<u64>,
@@ -340,7 +404,7 @@ async fn stage_update_for_auto_apply(
     let update_id = Uuid::new_v4();
     let source_artifact_path = ota_storage::source_upload_path_for_image_url(&image_url).await;
     let metadata_json = serde_json::json!({
-        "auto_apply": true,
+        "auto_apply": false,
         "delete_image_after_apply": delete_image_after_apply,
         "source_artifact_path": source_artifact_path,
     })
@@ -349,6 +413,47 @@ async fn stage_update_for_auto_apply(
     let command = UpdaterCommand::StageRelease { command_id: command_id_from_context("ota_stage_apply"), update_id, manifest };
     state.services.updater.send_updater_command(state, command, true).await.map_err(|error| UploadUpdateError { error })?;
     Ok(update_id)
+}
+
+async fn wait_for_staged_update(state: &AppState, update_id: Uuid) -> Result<UpdateState, UploadUpdateError> {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let (active, _) = fetch_updater_state(state).await?;
+        if let Some(active) = active {
+            if active.update_id != update_id {
+                return Err(UploadUpdateError { error: format!("different update {} became active while waiting for {}", active.update_id, update_id) });
+            }
+            match active.stage {
+                UpdateStage::AwaitingWindow => return Ok(active),
+                UpdateStage::RolledBack => {
+                    return Err(UploadUpdateError { error: active.last_error.unwrap_or_else(|| format!("staging update {} failed", update_id)) });
+                }
+                UpdateStage::Applying | UpdateStage::Rebooting | UpdateStage::Complete => {
+                    return Err(UploadUpdateError { error: format!("update {} unexpectedly entered {:?} before apply was authorized", update_id, active.stage) });
+                }
+                _ => {}
+            }
+        }
+        if Instant::now() >= deadline {
+            return Err(UploadUpdateError { error: format!("timed out waiting for staged update {}", update_id) });
+        }
+        sleep(Duration::from_millis(250)).await;
+    }
+}
+
+async fn fetch_updater_preflight(state: &AppState, update_id: Uuid) -> Result<PreflightReport, UploadUpdateError> {
+    state.services.updater.fetch_updater_preflight(state, update_id).await.map_err(|error| UploadUpdateError { error })
+}
+
+async fn send_apply_release(state: &AppState, update_id: Uuid) -> Result<(), UploadUpdateError> {
+    let command =
+        UpdaterCommand::ApplyRelease { command_id: command_id_from_context("ota_apply_release"), update_id, window: MaintenanceWindow { start: Utc::now(), duration: Duration::from_secs(1) } };
+    state.services.updater.send_updater_command(state, command, true).await.map_err(|error| UploadUpdateError { error })
+}
+
+async fn cancel_update_by_id(state: &AppState, update_id: Uuid) -> Result<(), UploadUpdateError> {
+    let command = UpdaterCommand::Cancel { command_id: command_id_from_context("ota_cancel_auto"), update_id };
+    state.services.updater.send_updater_command(state, command, true).await.map_err(|error| UploadUpdateError { error })
 }
 
 #[utoipa::path(
