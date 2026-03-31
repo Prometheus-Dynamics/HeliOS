@@ -5,6 +5,7 @@ use axum::{
 };
 use helios_engine::ipc::{JsonWire, StreamManifest, StreamPipelineGridSlot, StreamPipelineLayout};
 use lib_ipc::client::ClientTransportError;
+use std::collections::BTreeMap;
 use std::io;
 use std::time::Duration;
 use styx::codec::{CodecKind, CodecRegistry};
@@ -138,6 +139,52 @@ pub(crate) fn default_stream_encoder_selector() -> Option<String> {
     }
 
     preferred_mjpeg.or(fallback_mjpeg).or(fallback_any)
+}
+
+fn default_decoder_selector_for_codec(descs: &[styx::codec::CodecDescriptor]) -> Option<String> {
+    if descs.is_empty() {
+        return None;
+    }
+
+    if let Some(codec) = descs.iter().find(|desc| desc.name.eq_ignore_ascii_case("mjpeg") && desc.impl_name.eq_ignore_ascii_case("turbojpeg")) {
+        return Some(codec.impl_name.to_string());
+    }
+
+    match descs[0].input.to_u32().to_le_bytes() {
+        [b'H', b'2', b'6', b'4'] => return Some("h264".to_string()),
+        [b'H', b'2', b'6', b'5'] | [b'H', b'E', b'V', b'C'] => return Some("h265".to_string()),
+        [b'M', b'J', b'P', b'G'] | [b'J', b'P', b'E', b'G'] => {}
+        _ => {}
+    }
+
+    if let Some(codec) = descs.iter().find(|desc| desc.impl_name.eq_ignore_ascii_case("passthrough")) {
+        return Some(codec.impl_name.to_string());
+    }
+
+    descs.first().map(|desc| desc.impl_name.to_string())
+}
+
+pub(crate) fn default_decoder_ids_by_capture_format() -> BTreeMap<String, String> {
+    let mut defaults = BTreeMap::new();
+    let Ok(entries) = CodecRegistry::list_enabled_codecs() else {
+        return defaults;
+    };
+
+    for (input, codecs) in entries {
+        let decoder_descs: Vec<_> = codecs.into_iter().filter(|desc| desc.kind == CodecKind::Decoder).collect();
+        if decoder_descs.is_empty() {
+            continue;
+        }
+        let key = String::from_utf8_lossy(&input.to_u32().to_le_bytes()).trim().to_ascii_uppercase();
+        if key.is_empty() {
+            continue;
+        }
+        if let Some(selector) = default_decoder_selector_for_codec(&decoder_descs) {
+            defaults.insert(key, selector);
+        }
+    }
+
+    defaults
 }
 
 pub(crate) fn normalize_stream_encoder_manifest(manifest: &mut StreamManifest) {

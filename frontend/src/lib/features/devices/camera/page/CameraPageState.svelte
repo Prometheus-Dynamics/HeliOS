@@ -450,6 +450,12 @@
     set decoderImpl(value) {
       streamState.decoderImpl = value;
     },
+    get decoderDefaultIdsByCaptureFormat() {
+      return streamState.decoderDefaultIdsByCaptureFormat;
+    },
+    set decoderDefaultIdsByCaptureFormat(value) {
+      streamState.decoderDefaultIdsByCaptureFormat = value;
+    },
     get encoderImpl() {
       return streamState.encoderImpl;
     },
@@ -1058,10 +1064,18 @@
     }
 
     if (!streamState.decoderSelectionTouched) {
-      const compatible = decodersForCaptureFormat(streamState.selectedFormat);
+      const normalizedFormat = String(streamState.selectedFormat ?? '')
+        .trim()
+        .split(/\s+/)[0]
+        ?.toUpperCase() ?? '';
+      const preferredDecoderIds = [
+        normalizedFormat ? streamState.decoderDefaultIdsByCaptureFormat[normalizedFormat] : null,
+        streamState.decoderDefaultIdsByCaptureFormat.ANY ?? null
+      ].filter((value, index, list): value is string => typeof value === 'string' && value.trim().length > 0 && list.indexOf(value) === index);
       const preferred = pickCodecId(
-        compatible.length ? compatible : streamState.decoders,
-        streamState.decoderImpl
+        streamState.decoders,
+        streamState.decoderImpl,
+        preferredDecoderIds
       );
       if (preferred) {
         if (streamState.decoderImpl !== preferred) {

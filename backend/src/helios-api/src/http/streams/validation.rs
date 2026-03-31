@@ -1,6 +1,6 @@
 use helios_engine::ipc::StreamManifest;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use styx::{BackendHandle, BackendKind};
 use utoipa::ToSchema;
@@ -37,6 +37,8 @@ pub struct StreamValidationDefaults {
     pub pipeline_enabled_when_bindings_present: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_encoder_id: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub default_decoder_ids_by_capture_format: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -75,6 +77,7 @@ pub fn stream_capabilities() -> StreamCapabilitiesResponse {
             undistorted_output: "undistorted".to_string(),
             pipeline_enabled_when_bindings_present: true,
             default_encoder_id: util::default_stream_encoder_selector(),
+            default_decoder_ids_by_capture_format: util::default_decoder_ids_by_capture_format(),
         },
         constraints: StreamValidationConstraints {
             requires_backend_handle_match: true,
@@ -421,6 +424,14 @@ mod tests {
     fn stream_capabilities_publish_default_encoder_id() {
         let capabilities = stream_capabilities();
         assert!(capabilities.defaults.default_encoder_id.as_deref().is_some_and(|value| !value.trim().is_empty()));
+    }
+
+    #[test]
+    fn stream_capabilities_publish_decoder_defaults_by_capture_format() {
+        let capabilities = stream_capabilities();
+        assert_eq!(capabilities.defaults.default_decoder_ids_by_capture_format.get("MJPG").map(String::as_str), Some("turbojpeg"));
+        assert_eq!(capabilities.defaults.default_decoder_ids_by_capture_format.get("H264").map(String::as_str), Some("h264"));
+        assert_eq!(capabilities.defaults.default_decoder_ids_by_capture_format.get("RG24").map(String::as_str), Some("passthrough"));
     }
 
     fn manifest_from_json(value: serde_json::Value) -> StreamManifest {

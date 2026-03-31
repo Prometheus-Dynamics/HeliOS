@@ -24,6 +24,7 @@ type CodecList = Awaited<ReturnType<typeof EngineStreamsService.listCodecs>>;
 type RuntimeStreamCapabilities = StreamCapabilities & {
   defaults: StreamCapabilities['defaults'] & {
     defaultEncoderId?: string | null;
+    defaultDecoderIdsByCaptureFormat?: Record<string, string> | null;
   };
 };
 type RuntimeStatusPayload = {

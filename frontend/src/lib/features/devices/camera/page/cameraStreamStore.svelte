@@ -33,6 +33,7 @@
       codecs: [] as CodecInfo[],
       encoders: [] as CodecInfo[],
       decoders: [] as CodecInfo[],
+      decoderDefaultIdsByCaptureFormat: {} as Record<string, string>,
       selectedDeviceIndex: 0,
       selectedBackendIndex: 0,
       selectedIntervalIdx: 0,
