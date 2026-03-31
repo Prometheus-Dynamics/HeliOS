@@ -8,15 +8,21 @@
     },
     {
       "path": "backend/src/helios-api/src/system_read_model.rs",
-      "max_lines": 2200,
+      "max_lines": 1800,
       "owner": "HeliOS",
-      "review_note": "Read-model decomposition is still in progress; after extracting the stream hubs, keep the parent file from regrowing into the old mixed collector/delivery monolith."
+      "review_note": "Read-model decomposition is still in progress; after extracting the stream hubs and realtime delivery block, keep the parent file from regrowing into the old mixed collector/delivery monolith."
     },
     {
       "path": "backend/src/helios-api/src/system_read_model/streams.rs",
       "max_lines": 800,
       "owner": "HeliOS",
       "review_note": "Stream metrics/output hub delivery logic now lives in its own module; keep it focused while the wider read-model split continues."
+    },
+    {
+      "path": "backend/src/helios-api/src/system_read_model/realtime.rs",
+      "max_lines": 800,
+      "owner": "HeliOS",
+      "review_note": "Realtime process/device-update/telemetry delivery now lives in its own module; keep the extracted hub logic contained while the rest of the read-model split continues."
     },
     {
       "path": "backend/src/helios-updater/src/apply.rs",
