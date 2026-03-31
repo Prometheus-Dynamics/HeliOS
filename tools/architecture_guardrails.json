@@ -565,6 +565,30 @@
       "review_note": "Localization config string trimming and backend-sanitization diff warnings now live here; keep profile/reference validation and fmap semantic checks out of the sanitization layer."
     },
     {
+      "path": "backend/src/helios-api/src/http/startup/mod.rs",
+      "max_lines": 170,
+      "owner": "HeliOS",
+      "review_note": "Startup preset root should stay focused on high-level apply orchestration after splitting preset-file helpers, pipeline seeding, and stream seeding into dedicated modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/startup/files.rs",
+      "max_lines": 160,
+      "owner": "HeliOS",
+      "review_note": "Startup preset file resolution, marker writing, preset decoding, and pipeline-count helpers now live here; keep seeding behavior out of the filesystem helper layer."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/startup/pipelines_seed.rs",
+      "max_lines": 140,
+      "owner": "HeliOS",
+      "review_note": "Startup pipeline graph/template resolution and persisted pipeline seeding now live here; keep stream seeding and marker/file helper logic separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/startup/streams_seed.rs",
+      "max_lines": 90,
+      "owner": "HeliOS",
+      "review_note": "Startup stream preset validation and persistence now live here; keep pipeline graph seeding and preset file decoding out of the stream seed path."
+    },
+    {
       "path": "frontend/src/lib/components/StreamPreview.svelte",
       "max_lines": 850,
       "owner": "HeliOS",
@@ -632,6 +656,11 @@
       "path": "backend/src/helios-api/src/http/localization/validation.rs",
       "owner": "HeliOS",
       "reason": "Localization validation now lives under backend/src/helios-api/src/http/localization/validation/*. Do not recreate the deleted localization/validation.rs monolith."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/startup.rs",
+      "owner": "HeliOS",
+      "reason": "Startup preset application now lives under backend/src/helios-api/src/http/startup/*. Do not recreate the deleted startup.rs monolith."
     }
   ]
 }
