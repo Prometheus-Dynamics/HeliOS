@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+OTA_RELEASE_PUBLISHER="$ROOT_DIR/tools/ota_release_publisher.py"
 
 SSH_TARGET_DEFAULT="root@172.31.250.1"
 
@@ -328,10 +329,12 @@ ensure_deps() {
     if [[ "$do_binaries" == "1" && "$BINARIES_DEPLOY_MODE" == "ota" ]]; then
       command -v curl >/dev/null 2>&1 || die "curl is required for binary OTA deploys"
       command -v python3 >/dev/null 2>&1 || die "python3 is required for binary OTA deploys"
+      [[ -f "$OTA_RELEASE_PUBLISHER" ]] || die "missing OTA release publisher: $OTA_RELEASE_PUBLISHER"
     fi
     if [[ "$UPLOAD_FRONTEND" == "1" && "$do_frontend" == "1" && "$FRONTEND_DEPLOY_MODE" == "ota" ]]; then
       command -v curl >/dev/null 2>&1 || die "curl is required for frontend OTA deploys"
       command -v python3 >/dev/null 2>&1 || die "python3 is required for frontend OTA deploys"
+      [[ -f "$OTA_RELEASE_PUBLISHER" ]] || die "missing OTA release publisher: $OTA_RELEASE_PUBLISHER"
     fi
   fi
 }
@@ -891,127 +894,30 @@ PY
     return 1
   }
 
-  build_release_bundle_archive() {
-    local source_dir="$1"
-    local output_path="$2"
-    shift 2
+  ota_publish_release() {
+    local artifact_kind="$1"
+    local source_dir="$2"
+    local post_url="$3"
+    shift 3
     local -a bundle_entries=( "$@" )
-    if [[ "${#bundle_entries[@]}" -eq 0 ]]; then
-      die "refusing to build an empty OTA bundle"
-    fi
-    run tar -C "$source_dir" -cf "$output_path" "${bundle_entries[@]}"
-  }
-
-  wait_for_http_ok() {
-    local url="$1"
-    local label="${2:-service}"
-    local last_error=""
-    local attempt
-    for attempt in $(seq 1 20); do
-      if curl -fsS "$url" >/dev/null; then
-        return 0
-      fi
-      last_error="attempt $attempt failed"
-      sleep 1
+    local -a cmd=(
+      python3
+      "$OTA_RELEASE_PUBLISHER"
+      publish
+      --artifact-kind "$artifact_kind"
+      --base-url "$OTA_BASE_URL"
+      --requested-by "$OTA_REQUESTED_BY"
+      --source-dir "$source_dir"
+      --post-url "$post_url"
+    )
+    local entry
+    for entry in "${bundle_entries[@]}"; do
+      cmd+=( --entry "$entry" )
     done
-    die "$label did not become reachable at $url after OTA apply ($last_error)"
-  }
-
-  ota_wait_for_apply_completion() {
-    local update_id="$1"
-    local label="$2"
-    local deadline_seconds="${3:-120}"
-    local state_response last_stage="" stage="" state_update_id="" last_error="" seen_update="0"
-    local deadline=$((SECONDS + deadline_seconds))
-
-    echo "Waiting for $label OTA apply $update_id..."
-    while (( SECONDS < deadline )); do
-      if state_response="$(curl_json_request_retryable GET "$OTA_BASE_URL/ota/state")"; then
-        stage="$(json_read_field "state.stage" "$state_response")"
-        state_update_id="$(json_read_field "state.update_id" "$state_response")"
-        last_error="$(json_read_field "state.last_error" "$state_response")"
-
-        if [[ "$state_update_id" == "$update_id" && "$stage" != "$last_stage" ]]; then
-          echo "$label OTA stage: ${stage:-unknown}"
-          last_stage="$stage"
-        fi
-
-        if [[ "$state_update_id" == "$update_id" ]]; then
-          seen_update="1"
-          case "$stage" in
-            complete) return 0 ;;
-            rolled_back) die "$label OTA rolled back: ${last_error:-unknown error}" ;;
-          esac
-        elif [[ "$seen_update" == "1" && -z "${state_update_id// }" ]]; then
-          # Service-bundle activation can restart the updater itself, which clears
-          # the in-memory active-update state before the host finishes polling.
-          # Once we've seen our update id reach the updater, a transition back to
-          # idle with the API healthy is a successful terminal state.
-          echo "$label OTA stage: complete"
-          return 0
-        fi
-      fi
-
-      sleep 1
-    done
-
-    die "timed out waiting for $label OTA apply $update_id"
-  }
-
-  ota_apply_bundle() {
-    local bundle_path="$1"
-    local artifact_kind="$2"
-    local label="$3"
-    local post_url="$4"
-    local upload_response image_url size_bytes checksum apply_payload apply_response update_id
-
-    upload_response="$(curl_multipart_request "$OTA_BASE_URL/ota/upload" "$bundle_path")"
-    image_url="$(json_read_field "image_url" "$upload_response")"
-    size_bytes="$(json_read_field "size_bytes" "$upload_response")"
-    checksum="$(json_read_field "sha256" "$upload_response")"
-
-    [[ -n "${image_url// }" ]] || die "OTA upload response did not include image_url"
-
-    apply_payload="$(python3 - "$image_url" "$size_bytes" "$checksum" "$OTA_REQUESTED_BY" "$artifact_kind" <<'PY'
-import json
-import sys
-
-image_url, size_bytes, checksum, requested_by, artifact_kind = sys.argv[1:]
-payload = {
-    "requested_by": requested_by,
-    "artifact_kind": artifact_kind,
-    "image_url": image_url,
-    "delete_image_after_apply": True,
-}
-if size_bytes:
-    payload["size_bytes"] = int(size_bytes)
-if checksum:
-    payload["checksum"] = checksum
-print(json.dumps(payload))
-PY
-)"
-    apply_response="$(curl_json_request POST "$OTA_BASE_URL/ota/apply" "$apply_payload")"
-    update_id="$(json_read_field "update_id" "$apply_response")"
-    [[ -n "${update_id// }" ]] || die "OTA apply response did not include update_id"
-
-    ota_wait_for_apply_completion "$update_id" "$label"
-    curl_json_request GET "$OTA_BASE_URL/ota/state" >/dev/null
-    wait_for_http_ok "$post_url" "$label"
-  }
-
-  ota_apply_frontend_bundle() {
-    local bundle_path="$1"
-    local root_url
-    root_url="${OTA_BASE_URL%/v1}/"
-    if [[ "$root_url" == "$OTA_BASE_URL/" ]]; then
-      root_url="${OTA_BASE_URL%/}/"
+    if [[ "$DRY_RUN" == "1" ]]; then
+      cmd+=( --dry-run )
     fi
-    ota_apply_bundle "$bundle_path" "frontend_bundle" "Frontend" "$root_url"
-  }
-
-  ota_apply_service_bundle() {
-    local bundle_path="$1"
-    ota_apply_bundle "$bundle_path" "service_bundle" "Service bundle" "$OTA_BASE_URL"
+    run "${cmd[@]}"
   }
 
   # Validate that a remote path looks like a real executable (non-empty, ELF magic).
@@ -1180,26 +1086,21 @@ PY
     fi
   fi
 
-  if [[ "$UPLOAD_FRONTEND" == "1" && "$do_frontend" == "1" ]]; then
-    if [[ ! -d "$FRONTEND_DIR_LOCAL" ]]; then
-      die "local frontend dir not found: $FRONTEND_DIR_LOCAL"
-    fi
-    if [[ "$FRONTEND_DEPLOY_MODE" == "ota" ]]; then
-      echo "Publishing frontend bundle via OTA -> $OTA_BASE_URL"
-      if [[ "$DRY_RUN" == "1" ]]; then
-        printf '+ tar -C %q -cf <tmp> .\n' "$FRONTEND_DIR_LOCAL"
-        printf '+ curl -F file=@<tmp> %q\n' "$OTA_BASE_URL/ota/upload"
-        printf '+ curl -X POST -H %q --data %q %q\n' 'Content-Type: application/json' '{"artifact_kind":"frontend_bundle",...}' "$OTA_BASE_URL/ota/apply"
-      else
-        frontend_bundle_archive="$(mktemp --suffix=.tar)"
-        trap 'rm -f "$frontend_bundle_archive"; ssh_control_cleanup' EXIT
-        build_release_bundle_archive "$FRONTEND_DIR_LOCAL" "$frontend_bundle_archive" "."
-        ota_apply_frontend_bundle "$frontend_bundle_archive"
-        rm -f "$frontend_bundle_archive"
+    if [[ "$UPLOAD_FRONTEND" == "1" && "$do_frontend" == "1" ]]; then
+      if [[ ! -d "$FRONTEND_DIR_LOCAL" ]]; then
+        die "local frontend dir not found: $FRONTEND_DIR_LOCAL"
       fi
-    else
-      echo "Uploading frontend -> $SSH_TARGET:$FRONTEND_DIR_REMOTE"
-      ssh_exec "install -d -m0755 '$FRONTEND_DIR_REMOTE'"
+      if [[ "$FRONTEND_DEPLOY_MODE" == "ota" ]]; then
+        echo "Publishing frontend bundle via OTA -> $OTA_BASE_URL"
+        frontend_root_url=""
+        frontend_root_url="${OTA_BASE_URL%/v1}/"
+        if [[ "$frontend_root_url" == "$OTA_BASE_URL/" ]]; then
+          frontend_root_url="${OTA_BASE_URL%/}/"
+        fi
+        ota_publish_release "frontend_bundle" "$FRONTEND_DIR_LOCAL" "$frontend_root_url" "."
+      else
+        echo "Uploading frontend -> $SSH_TARGET:$FRONTEND_DIR_REMOTE"
+        ssh_exec "install -d -m0755 '$FRONTEND_DIR_REMOTE'"
       # Clear old build artifacts so removed files don't linger.
       ssh_exec "sh -lc 'rm -rf \"$FRONTEND_DIR_REMOTE\"/*'"
       ssh_upload_tar "$FRONTEND_DIR_LOCAL" "$FRONTEND_DIR_REMOTE" "."
@@ -1270,21 +1171,7 @@ PY
     if [[ "${#bins_to_upload[@]}" -gt 0 ]]; then
       if [[ "$BINARIES_DEPLOY_MODE" == "ota" ]]; then
         echo "Publishing ${#bins_to_upload[@]} binary artifact(s) via OTA -> $OTA_BASE_URL"
-        if [[ "$DRY_RUN" == "1" ]]; then
-          printf '+ tar -C %q -cf <tmp>' "$BINS_DIR"
-          for b in "${bins_to_upload[@]}"; do
-            printf ' %q' "$b"
-          done
-          printf '\n'
-          printf '+ curl -F file=@<tmp> %q\n' "$OTA_BASE_URL/ota/upload"
-          printf '+ curl -X POST -H %q --data %q %q\n' 'Content-Type: application/json' '{"artifact_kind":"service_bundle",...}' "$OTA_BASE_URL/ota/apply"
-        else
-          service_bundle_archive="$(mktemp --suffix=.tar)"
-          trap 'rm -f "$service_bundle_archive"; ssh_control_cleanup' EXIT
-          build_release_bundle_archive "$BINS_DIR" "$service_bundle_archive" "${bins_to_upload[@]}"
-          ota_apply_service_bundle "$service_bundle_archive"
-          rm -f "$service_bundle_archive"
-        fi
+        ota_publish_release "service_bundle" "$BINS_DIR" "$OTA_BASE_URL" "${bins_to_upload[@]}"
       else
         echo "Uploading ${#bins_to_upload[@]} bin(s) -> $SSH_TARGET:$BIN_DIR_REMOTE"
         if [[ "$delay_binary_stop_for_frontend_ota" == "1" ]]; then
