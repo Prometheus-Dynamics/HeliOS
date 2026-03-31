@@ -1057,6 +1057,30 @@
       "review_note": "Node-registry cache refresh, disk snapshot invalidation, helper execution, and response shaping now live here; keep graph-list scanning and validation-helper fallback out of this registry module."
     },
     {
+      "path": "backend/src/helios-api/src/media_read_model/mod.rs",
+      "max_lines": 140,
+      "owner": "HeliOS",
+      "review_note": "Media read-model root should stay focused on shared cache state, public media replay types, and light lock/cache metrics after splitting load/probe helpers and replay-selection logic into dedicated modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/media_read_model/cache.rs",
+      "max_lines": 180,
+      "owner": "HeliOS",
+      "review_note": "Media IMU sidecar loading, frame timeline parsing, ffprobe playback-duration probing, and cache hydration now live here; keep replay cursor math and timeline selection out of this cache module."
+    },
+    {
+      "path": "backend/src/helios-api/src/media_read_model/selection.rs",
+      "max_lines": 260,
+      "owner": "HeliOS",
+      "review_note": "Media replay cursor state, frame-timestamp scale inference, and IMU event selection now live here; keep gzip/json sidecar loading and ffprobe probes out of this replay-selection module."
+    },
+    {
+      "path": "backend/src/helios-api/src/media_read_model/tests.rs",
+      "max_lines": 80,
+      "owner": "HeliOS",
+      "review_note": "Media replay timing helper tests now live here; keep production cache/state code out of the test module."
+    },
+    {
       "path": "backend/src/helios-engine/src/localization/solve/mod.rs",
       "max_lines": 250,
       "owner": "HeliOS",
@@ -1139,6 +1163,11 @@
       "path": "backend/src/helios-api/src/pipelines_read_model.rs",
       "owner": "HeliOS",
       "reason": "Pipelines read-model graph validation and registry caching now live under backend/src/helios-api/src/pipelines_read_model/*. Do not recreate the deleted pipelines_read_model.rs monolith."
+    },
+    {
+      "path": "backend/src/helios-api/src/media_read_model.rs",
+      "owner": "HeliOS",
+      "reason": "Media read-model cache hydration, ffprobe duration probing, and replay-timeline selection now live under backend/src/helios-api/src/media_read_model/*. Do not recreate the deleted media_read_model.rs monolith."
     },
     {
       "path": "backend/src/helios-api/src/http/localization/maps.rs",
