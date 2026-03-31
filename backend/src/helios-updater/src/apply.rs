@@ -15,6 +15,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::artifact::{StagedMetadata, cache_usage_bytes, load_metadata, staged_to_url_artifacts};
+use crate::bundle::{BundleApplyOutcome, apply_frontend_bundle, is_frontend_bundle};
 use crate::config::UpdaterConfig;
 use crate::error::{Error, Result};
 use crate::state::ServiceState;
@@ -133,10 +134,15 @@ async fn run_apply_job(config: Arc<UpdaterConfig>, state: Arc<RwLock<ServiceStat
 async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<ServiceState>>, events: &Sender<UpdaterEvent>, update_id: Uuid) -> Result<()> {
     let metadata = load_metadata(config, update_id).await?;
     let manifest_metadata = parse_apply_manifest_metadata(&metadata);
+    let artifact_kind = metadata
+        .manifest
+        .artifacts
+        .first()
+        .and_then(|artifact| artifact.kind.as_deref());
     info!(%update_id, staged = %metadata_path(config, update_id).display(), "applying staged release");
 
     // Some platforms can't switch root via bootloader; allow forcing single-slot mode detection.
-    let mut single_slot = env::var_os("UPDATER_SINGLE_SLOT").is_some();
+    let single_slot_requested = env::var_os("UPDATER_SINGLE_SLOT").is_some();
     let allow_single_slot_inplace = env_flag_enabled("UPDATER_ALLOW_SINGLE_SLOT_INPLACE");
 
     {
@@ -151,10 +157,96 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
 
     let simulate = fake_apply_requested();
     let work_dir = config.work_dir().join(update_id.to_string());
+    let apply_outcome = if is_frontend_bundle(artifact_kind) {
+        if simulate {
+            info!(%update_id, "frontend bundle apply running in simulation mode (UPDATER_FAKE_APPLY)");
+            BundleApplyOutcome::frontend_bundle()
+        } else {
+            let staged_artifact = metadata
+                .artifacts
+                .first()
+                .ok_or_else(|| Error::InvalidState("no staged artifact found".into()))?;
+            let staged_path = PathBuf::from(&staged_artifact.local_path);
+            {
+                let mut guard = state.write().await;
+                guard.update_progress(UpdateStage::Applying, Some(65), None);
+            }
+            publish_snapshot(state, events).await;
+            apply_frontend_bundle(config, update_id, &staged_path).await?
+        }
+    } else {
+        apply_disk_image_release(
+            config,
+            state,
+            events,
+            update_id,
+            &metadata,
+            simulate,
+            &work_dir,
+            single_slot_requested,
+            allow_single_slot_inplace,
+        )
+        .await?
+    };
+
+    if fs::metadata(&work_dir).await.is_ok() {
+        fs::remove_dir_all(&work_dir).await?;
+    }
+
+    {
+        let mut guard = state.write().await;
+        guard.update_progress(UpdateStage::Complete, Some(100), None);
+    }
+    let _ = events.send(UpdaterEvent::ApplyComplete { update_id, reboot_required: apply_outcome.reboot_required });
+    publish_snapshot(state, events).await;
+
+    let usage = cache_usage_bytes(config.cache_dir()).await?;
+    {
+        let mut guard = state.write().await;
+        guard.cache_usage_bytes = usage;
+    }
 
     if !simulate {
+        cleanup_source_media_after_apply(config, update_id, &manifest_metadata).await;
+    }
+
+    if !simulate && apply_outcome.reboot_required {
+        let tryboot = apply_outcome.tryboot;
+        match reboot_with_args(if tryboot { &["tryboot"] } else { &[] }).await {
+            Ok(output) if reboot_output_is_expected_success(&output) => {
+                if output.status.success() {
+                    info!(%update_id, tryboot, "reboot requested after update apply");
+                } else {
+                    info!(%update_id, tryboot, status = %output.status, "reboot handoff interrupted by shutdown signal (expected during reboot)");
+                }
+            }
+            Ok(output) => {
+                let message = reboot_failure_message(&output);
+                warn!(%update_id, tryboot, %message, "reboot request failed");
+            }
+            Err(err) => {
+                warn!(%update_id, tryboot, %err, "reboot request failed");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn apply_disk_image_release(
+    config: &Arc<UpdaterConfig>,
+    state: &Arc<RwLock<ServiceState>>,
+    events: &Sender<UpdaterEvent>,
+    update_id: Uuid,
+    metadata: &StagedMetadata,
+    simulate: bool,
+    work_dir: &Path,
+    mut single_slot: bool,
+    allow_single_slot_inplace: bool,
+) -> Result<BundleApplyOutcome> {
+    if !simulate {
         ensure_directory(config.work_dir()).await?;
-        ensure_directory(&work_dir).await?;
+        ensure_directory(work_dir).await?;
 
         let slot_selection = select_target_slot(single_slot)?;
         single_slot = slot_selection.single_slot;
@@ -202,7 +294,7 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
             streamed = true;
             outcome.map(|_| ())
         } else {
-            let expand_result = match decompress_if_needed(&staged_path, &work_dir).await {
+            let expand_result = match decompress_if_needed(&staged_path, work_dir).await {
                 Ok((path, is_temp)) => {
                     expanded_path = Some(path);
                     temp_file = is_temp;
@@ -217,10 +309,10 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
                         )));
                     }
                     warn!(%update_id, target_slot = %slot_selection.target_slot, target_device = %slot_selection.target_device, "work dir full; streaming staged image");
-                    if let Err(err) = fs::remove_dir_all(&work_dir).await {
+                    if let Err(err) = fs::remove_dir_all(work_dir).await {
                         warn!(error = %err, path = %work_dir.display(), "failed to clean work dir after decompression failure");
                     }
-                    ensure_directory(&work_dir).await?;
+                    ensure_directory(work_dir).await?;
                     let _ = Command::new("umount").arg(&slot_selection.target_device).status().await;
                     let target_bytes = blockdev_size_bytes(&slot_selection.target_device).await?;
                     let outcome = flash_compressed_image_to_target(&staged_path, &slot_selection.target_device, target_bytes, Some(progress_sender.clone())).await;
@@ -260,9 +352,9 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
                 }
                 warn!(%update_id, target_slot = %slot_selection.target_slot, target_device = %slot_selection.target_device, "partition table not detected; streamed full image");
             }
-            sync_boot_from_target(&slot_selection.target_device, &work_dir).await?;
+            sync_boot_from_target(&slot_selection.target_device, work_dir).await?;
             if slot_selection.scheme == SlotScheme::Ext4Labels
-                && let Err(err) = sync_persisted_state(&slot_selection.target_device, &work_dir).await
+                && let Err(err) = sync_persisted_state(&slot_selection.target_device, work_dir).await
             {
                 warn!(%err, %update_id, target_device = %slot_selection.target_device, "failed to sync persisted device config to target");
             }
@@ -272,10 +364,10 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
 
             let boot_synced = sync_boot_from_artifact(&expanded_path).await?;
             if !boot_synced {
-                sync_boot_from_target(&slot_selection.target_device, &work_dir).await?;
+                sync_boot_from_target(&slot_selection.target_device, work_dir).await?;
             }
             if slot_selection.scheme == SlotScheme::Ext4Labels
-                && let Err(err) = sync_persisted_state(&slot_selection.target_device, &work_dir).await
+                && let Err(err) = sync_persisted_state(&slot_selection.target_device, work_dir).await
             {
                 warn!(%err, %update_id, target_device = %slot_selection.target_device, "failed to sync persisted device config to target");
             }
@@ -286,7 +378,7 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
         }
 
         if slot_selection.scheme == SlotScheme::SquashfsAb {
-            validate_bootable_squashfs_root(&slot_selection.target_device, &work_dir).await?;
+            validate_bootable_squashfs_root(&slot_selection.target_device, work_dir).await?;
         }
 
         {
@@ -295,9 +387,7 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
         }
         publish_snapshot(state, events).await;
 
-        if single_slot {
-            // Staying on the same slot: skip tryboot/cmdline juggling and rely on in-place update.
-        } else {
+        if !single_slot {
             update_boot_markers(config, &slot_selection).await?;
         }
     } else {
@@ -309,48 +399,7 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
         publish_snapshot(state, events).await;
     }
 
-    if fs::metadata(&work_dir).await.is_ok() {
-        fs::remove_dir_all(&work_dir).await?;
-    }
-
-    {
-        let mut guard = state.write().await;
-        guard.update_progress(UpdateStage::Complete, Some(100), None);
-    }
-    let _ = events.send(UpdaterEvent::ApplyComplete { update_id, reboot_required: true });
-    publish_snapshot(state, events).await;
-
-    let usage = cache_usage_bytes(config.cache_dir()).await?;
-    {
-        let mut guard = state.write().await;
-        guard.cache_usage_bytes = usage;
-    }
-
-    if !simulate {
-        cleanup_source_media_after_apply(config, update_id, &manifest_metadata).await;
-    }
-
-    if !simulate {
-        let tryboot = !single_slot;
-        match reboot_with_args(if tryboot { &["tryboot"] } else { &[] }).await {
-            Ok(output) if reboot_output_is_expected_success(&output) => {
-                if output.status.success() {
-                    info!(%update_id, tryboot, "reboot requested after update apply");
-                } else {
-                    info!(%update_id, tryboot, status = %output.status, "reboot handoff interrupted by shutdown signal (expected during reboot)");
-                }
-            }
-            Ok(output) => {
-                let message = reboot_failure_message(&output);
-                warn!(%update_id, tryboot, %message, "reboot request failed");
-            }
-            Err(err) => {
-                warn!(%update_id, tryboot, %err, "reboot request failed");
-            }
-        }
-    }
-
-    Ok(())
+    Ok(BundleApplyOutcome::disk_image(!single_slot))
 }
 
 fn ensure_artifacts_present(update_id: Uuid, metadata: &StagedMetadata) -> Result<()> {

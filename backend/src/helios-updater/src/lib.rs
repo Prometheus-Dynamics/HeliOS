@@ -7,6 +7,8 @@ mod apply;
 #[cfg(feature = "updater-ipc")]
 mod artifact;
 #[cfg(feature = "updater-ipc")]
+mod bundle;
+#[cfg(feature = "updater-ipc")]
 mod cleanup;
 #[cfg(feature = "updater-ipc")]
 pub mod client;

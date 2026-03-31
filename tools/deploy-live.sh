@@ -50,8 +50,11 @@ TEMPLATES_DIR_LOCAL="${TEMPLATES_DIR_LOCAL:-$ROOT_DIR/gaia/assets/templates}"
 TEMPLATES_DIR_REMOTE="${TEMPLATES_DIR_REMOTE:-/usr/share/helios/pipeline-templates}"
 FRONTEND_DIR_LOCAL="${FRONTEND_DIR_LOCAL:-$ROOT_DIR/frontend/build}"
 FRONTEND_DIR_REMOTE="${FRONTEND_DIR_REMOTE:-/opt/helios/frontend}"
+FRONTEND_DEPLOY_MODE="${FRONTEND_DEPLOY_MODE:-ota}"
+OTA_BASE_URL="${OTA_BASE_URL:-}"
+OTA_REQUESTED_BY="${OTA_REQUESTED_BY:-deploy-live}"
 
-ONLY="all" # all|binaries|plugins
+ONLY="all" # all|binaries|plugins|frontend
 STRICT_BINARIES_ONLY="0"
 BUILD="1"
 UPLOAD="1"
@@ -76,7 +79,7 @@ Options:
                         Build profile (default: dev-release)
   --engine-features <f> Cargo features for helios-engine (default: $ENGINE_FEATURES)
   --api-features <f>   Cargo features for helios-api (default: $API_FEATURES)
-  --only <what>         all|binaries|plugins (default: all)
+  --only <what>         all|binaries|plugins|frontend (default: all)
   --strict-binaries-only
                         Do not auto-sync Daedalus plugins when deploying binaries
   --no-build            Skip build; only upload/restart
@@ -92,6 +95,9 @@ Options:
   --no-frontend         Skip uploading frontend assets
   --frontend-dir <dir>  Local frontend build dir (default: $FRONTEND_DIR_LOCAL)
   --frontend-remote <dir> Remote frontend dir (default: $FRONTEND_DIR_REMOTE)
+  --frontend-via-ota    Publish frontend via /v1/ota (default)
+  --frontend-via-ssh    Keep legacy SSH frontend upload path
+  --ota-base-url <url>  OTA API base URL (default: derived from --ssh as http://host/v1)
   --no-strip            Do not strip debug sections from built artifacts before upload
   --fast-upload         Upload everything without hashing (default)
   --slow-upload         Hash local/remote to avoid uploading unchanged artifacts
@@ -107,6 +113,8 @@ Env vars (optional):
   RUSTFLAGS             Passed through to build scripts
   BIN_DIR_REMOTE         Remote bin dir
   PLUGIN_DIR_REMOTE      Remote plugin dir
+  FRONTEND_DEPLOY_MODE   Frontend deploy mode: ota|ssh
+  OTA_BASE_URL           OTA API base URL override
   DAEDALUS_HOST_PATH     Host path to a Daedalus checkout (optional dev override)
   STYX_HOST_PATH         Host path to a Styx checkout (optional dev override)
   LIBCAMERA_RS_HOST_PATH Host path to a libcamera-rs checkout (optional dev override)
@@ -175,6 +183,22 @@ profile_dir_from_flag() {
   fi
 }
 
+ssh_target_host() {
+  local target="$1"
+  target="${target##*@}"
+  printf '%s\n' "$target"
+}
+
+default_ota_base_url() {
+  local host
+  host="$(ssh_target_host "$SSH_TARGET")"
+  printf 'http://%s/v1\n' "$host"
+}
+
+if [[ -z "${OTA_BASE_URL// }" ]]; then
+  OTA_BASE_URL="$(default_ota_base_url)"
+fi
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --ssh) SSH_TARGET="${2:-}"; shift 2 ;;
@@ -199,6 +223,9 @@ while [[ $# -gt 0 ]]; do
     --no-frontend) UPLOAD_FRONTEND="0"; shift ;;
     --frontend-dir) FRONTEND_DIR_LOCAL="${2:-}"; shift 2 ;;
     --frontend-remote) FRONTEND_DIR_REMOTE="${2:-}"; shift 2 ;;
+    --frontend-via-ota) FRONTEND_DEPLOY_MODE="ota"; shift ;;
+    --frontend-via-ssh) FRONTEND_DEPLOY_MODE="ssh"; shift ;;
+    --ota-base-url) OTA_BASE_URL="${2:-}"; shift 2 ;;
     --no-strip) STRIP_DEBUG="0"; shift ;;
     --fast-upload) FAST_UPLOAD="1"; shift ;;
     --slow-upload) FAST_UPLOAD="0"; shift ;;
@@ -224,16 +251,23 @@ if [[ ( "$PROFILE_FLAG" == "--release" || "$PROFILE_FLAG" == "--profile dev-rele
 fi
 
 case "$ONLY" in
-  all|binaries|plugins) ;;
-  *) die "--only must be one of: all, binaries, plugins" ;;
+  all|binaries|plugins|frontend) ;;
+  *) die "--only must be one of: all, binaries, plugins, frontend" ;;
+esac
+
+case "$FRONTEND_DEPLOY_MODE" in
+  ota|ssh) ;;
+  *) die "FRONTEND_DEPLOY_MODE must be one of: ota, ssh" ;;
 esac
 
 do_binaries="0"
 do_plugins="0"
+do_frontend="0"
 case "$ONLY" in
-  all) do_binaries="1"; do_plugins="1" ;;
+  all) do_binaries="1"; do_plugins="1"; do_frontend="1" ;;
   binaries) do_binaries="1" ;;
   plugins) do_plugins="1" ;;
+  frontend) do_frontend="1" ;;
 esac
 
 if [[ "$do_binaries" == "1" && "$ONLY" == "binaries" && "$STRICT_BINARIES_ONLY" != "1" ]]; then
@@ -245,6 +279,9 @@ docker_image_built="0"
 ensure_deps() {
   if [[ "$BUILD" == "1" ]]; then
     command -v docker >/dev/null 2>&1 || die "docker is required for build"
+    if [[ "$UPLOAD_FRONTEND" == "1" && "$do_frontend" == "1" ]]; then
+      command -v bun >/dev/null 2>&1 || die "bun is required to build the frontend"
+    fi
     if [[ -n "${DAEDALUS_HOST_PATH// }" ]]; then
       [[ -d "$DAEDALUS_HOST_PATH" ]] || die "missing DAEDALUS_HOST_PATH dir: $DAEDALUS_HOST_PATH"
     fi
@@ -259,6 +296,10 @@ ensure_deps() {
     command -v ssh >/dev/null 2>&1 || die "ssh is required for upload"
     if [[ -n "${SSH_PASS// }" ]]; then
       command -v sshpass >/dev/null 2>&1 || die "sshpass is required when using --pass"
+    fi
+    if [[ "$UPLOAD_FRONTEND" == "1" && "$do_frontend" == "1" && "$FRONTEND_DEPLOY_MODE" == "ota" ]]; then
+      command -v curl >/dev/null 2>&1 || die "curl is required for frontend OTA deploys"
+      command -v python3 >/dev/null 2>&1 || die "python3 is required for frontend OTA deploys"
     fi
   fi
 }
@@ -577,8 +618,10 @@ needs_plugin_build() {
 }
 
 if [[ "$BUILD" == "1" ]]; then
-  run mkdir -p "$TARGET_BUILD_DIR" "$CROSS_CARGO_HOME" "$CROSS_SCCACHE_DIR"
-  ensure_docker_image
+  if [[ "$do_binaries" == "1" || "$do_plugins" == "1" ]]; then
+    run mkdir -p "$TARGET_BUILD_DIR" "$CROSS_CARGO_HOME" "$CROSS_SCCACHE_DIR"
+    ensure_docker_image
+  fi
 
   if [[ "$do_plugins" == "1" ]]; then
     echo "Building Daedalus plugins ($TARGET_TRIPLE) $(profile_label)..."
@@ -626,9 +669,19 @@ if [[ "$BUILD" == "1" ]]; then
       copy_binary_out "$pkg" "$PROFILE_FLAG" "$TARGET_TRIPLE" "$BINS_DIR" "$bin_name"
     done
   fi
+
+  if [[ "$UPLOAD_FRONTEND" == "1" && "$do_frontend" == "1" ]]; then
+    echo "Building frontend bundle..."
+    run_with_env SKIP_DOCS_SYNC=1 -- bash -lc "cd '$ROOT_DIR/frontend' && bun run build"
+  fi
 fi
 
 if [[ "$UPLOAD" == "1" ]]; then
+  delay_binary_stop_for_frontend_ota="0"
+  if [[ "$UPLOAD_FRONTEND" == "1" && "$FRONTEND_DEPLOY_MODE" == "ota" ]]; then
+    delay_binary_stop_for_frontend_ota="1"
+  fi
+
   if [[ "$do_plugins" == "1" ]]; then
     [[ -d "$PLUGINS_DIR" ]] || die "local plugin dir not found: $PLUGINS_DIR"
   fi
@@ -708,6 +761,195 @@ if [[ "$UPLOAD" == "1" ]]; then
     else
       tar -C "$base_dir" -cf - "${files[@]}" | \
         ssh "${ssh_opts[@]}" "$SSH_TARGET" "sh -lc 'tar -x -o -f - -C \"$remote_dir\"'"
+    fi
+  }
+
+  json_read_field() {
+    local field="$1"
+    local payload="${2:-}"
+    python3 - "$field" "$payload" <<'PY'
+import json
+import sys
+
+field = sys.argv[1]
+raw = sys.argv[2]
+try:
+    data = json.loads(raw)
+except Exception:
+    sys.exit(1)
+
+value = data
+for part in field.split('.'):
+    if isinstance(value, dict) and part in value:
+        value = value[part]
+    else:
+        value = None
+        break
+
+if value is None:
+    sys.exit(0)
+if isinstance(value, bool):
+    print("true" if value else "false")
+elif isinstance(value, (int, float)):
+    print(value)
+elif isinstance(value, str):
+    print(value)
+else:
+    print(json.dumps(value))
+PY
+  }
+
+  curl_json_request() {
+    local method="$1"
+    local url="$2"
+    local body="${3:-}"
+    local response_file status_code
+    response_file="$(mktemp)"
+    if [[ -n "${body// }" ]]; then
+      status_code="$(curl -sS -o "$response_file" -w '%{http_code}' -X "$method" -H 'Content-Type: application/json' --data "$body" "$url")"
+    else
+      status_code="$(curl -sS -o "$response_file" -w '%{http_code}' -X "$method" "$url")"
+    fi
+    if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
+      local response_body
+      response_body="$(cat "$response_file")"
+      rm -f "$response_file"
+      die "request failed ($method $url -> HTTP $status_code): $response_body"
+    fi
+    cat "$response_file"
+    rm -f "$response_file"
+  }
+
+  curl_multipart_request() {
+    local url="$1"
+    local file_path="$2"
+    local response_file status_code
+    response_file="$(mktemp)"
+    status_code="$(curl -sS -o "$response_file" -w '%{http_code}' -F "file=@${file_path}" "$url")"
+    if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
+      local response_body
+      response_body="$(cat "$response_file")"
+      rm -f "$response_file"
+      die "upload failed ($url -> HTTP $status_code): $response_body"
+    fi
+    cat "$response_file"
+    rm -f "$response_file"
+  }
+
+  curl_json_request_retryable() {
+    local method="$1"
+    local url="$2"
+    local body="${3:-}"
+    local response_file status_code
+    response_file="$(mktemp)"
+    if [[ -n "${body// }" ]]; then
+      status_code="$(curl -sS -o "$response_file" -w '%{http_code}' -X "$method" -H 'Content-Type: application/json' --data "$body" "$url" || true)"
+    else
+      status_code="$(curl -sS -o "$response_file" -w '%{http_code}' -X "$method" "$url" || true)"
+    fi
+    if [[ "$status_code" -ge 200 && "$status_code" -lt 300 ]]; then
+      cat "$response_file"
+      rm -f "$response_file"
+      return 0
+    fi
+    rm -f "$response_file"
+    return 1
+  }
+
+  build_frontend_bundle_archive() {
+    local source_dir="$1"
+    local output_path="$2"
+    run tar -C "$source_dir" -cf "$output_path" .
+  }
+
+  wait_for_http_ok() {
+    local url="$1"
+    local last_error=""
+    local attempt
+    for attempt in $(seq 1 20); do
+      if curl -fsS "$url" >/dev/null; then
+        return 0
+      fi
+      last_error="attempt $attempt failed"
+      sleep 1
+    done
+    die "frontend did not become reachable at $url after OTA apply ($last_error)"
+  }
+
+  ota_apply_frontend_bundle() {
+    local bundle_path="$1"
+    local upload_response image_url size_bytes checksum apply_payload apply_response update_id state_response root_url
+
+    upload_response="$(curl_multipart_request "$OTA_BASE_URL/ota/upload" "$bundle_path")"
+    image_url="$(json_read_field "image_url" "$upload_response")"
+    size_bytes="$(json_read_field "size_bytes" "$upload_response")"
+    checksum="$(json_read_field "sha256" "$upload_response")"
+
+    [[ -n "${image_url// }" ]] || die "OTA upload response did not include image_url"
+
+    apply_payload="$(python3 - "$image_url" "$size_bytes" "$checksum" "$OTA_REQUESTED_BY" <<'PY'
+import json
+import sys
+
+image_url, size_bytes, checksum, requested_by = sys.argv[1:]
+payload = {
+    "requested_by": requested_by,
+    "artifact_kind": "frontend_bundle",
+    "image_url": image_url,
+    "delete_image_after_apply": True,
+}
+if size_bytes:
+    payload["size_bytes"] = int(size_bytes)
+if checksum:
+    payload["checksum"] = checksum
+print(json.dumps(payload))
+PY
+)"
+    apply_response="$(curl_json_request POST "$OTA_BASE_URL/ota/apply" "$apply_payload")"
+    update_id="$(json_read_field "update_id" "$apply_response")"
+    [[ -n "${update_id// }" ]] || die "OTA apply response did not include update_id"
+
+    echo "Waiting for frontend OTA apply $update_id..."
+    local last_stage=""
+    local stage=""
+    local state_update_id=""
+    local last_error=""
+    local deadline=$((SECONDS + 120))
+    while (( SECONDS < deadline )); do
+      if state_response="$(curl_json_request_retryable GET "$OTA_BASE_URL/ota/state")"; then
+        stage="$(json_read_field "state.stage" "$state_response")"
+        state_update_id="$(json_read_field "state.update_id" "$state_response")"
+        last_error="$(json_read_field "state.last_error" "$state_response")"
+
+        if [[ "$state_update_id" == "$update_id" && "$stage" != "$last_stage" ]]; then
+          echo "Frontend OTA stage: ${stage:-unknown}"
+          last_stage="$stage"
+        fi
+
+        if [[ "$state_update_id" == "$update_id" ]]; then
+          case "$stage" in
+            complete) break ;;
+            rolled_back) die "frontend OTA rolled back: ${last_error:-unknown error}" ;;
+          esac
+        fi
+      fi
+
+      sleep 1
+    done
+
+    if (( SECONDS >= deadline )); then
+      die "timed out waiting for frontend OTA apply $update_id"
+    fi
+
+    root_url="${OTA_BASE_URL%/v1}/"
+    if [[ "$root_url" == "$OTA_BASE_URL/" ]]; then
+      root_url="${OTA_BASE_URL%/}/"
+    fi
+    curl_json_request GET "$OTA_BASE_URL/ota/state" >/dev/null
+    wait_for_http_ok "$root_url"
+
+    if [[ "$DRY_RUN" != "1" ]]; then
+      ssh_exec "systemctl is-active --quiet helios-frontend.service"
     fi
   }
 
@@ -841,10 +1083,14 @@ if [[ "$UPLOAD" == "1" ]]; then
     fi
 
     if [[ "${#bins_to_upload[@]}" -gt 0 ]]; then
-      echo "Stopping services on $SSH_TARGET..."
-      # Do not stop peripherals/updater here; on some devices peripherals owns the USB gadget/network.
-      # Stopping it can drop the SSH link mid-deploy.
-      ssh_exec "systemctl stop helios-api.service helios-engine.service || true"
+      if [[ "$delay_binary_stop_for_frontend_ota" == "1" ]]; then
+        echo "Delaying engine/api stop until after frontend OTA apply..."
+      else
+        echo "Stopping services on $SSH_TARGET..."
+        # Do not stop peripherals/updater here; on some devices peripherals owns the USB gadget/network.
+        # Stopping it can drop the SSH link mid-deploy.
+        ssh_exec "systemctl stop helios-api.service helios-engine.service || true"
+      fi
     else
       echo "Binaries unchanged; skipping binary upload."
     fi
@@ -873,16 +1119,31 @@ if [[ "$UPLOAD" == "1" ]]; then
     fi
   fi
 
-  if [[ "$UPLOAD_FRONTEND" == "1" ]]; then
+  if [[ "$UPLOAD_FRONTEND" == "1" && "$do_frontend" == "1" ]]; then
     if [[ ! -d "$FRONTEND_DIR_LOCAL" ]]; then
       die "local frontend dir not found: $FRONTEND_DIR_LOCAL"
     fi
-    echo "Uploading frontend -> $SSH_TARGET:$FRONTEND_DIR_REMOTE"
-    ssh_exec "install -d -m0755 '$FRONTEND_DIR_REMOTE'"
-    # Clear old build artifacts so removed files don't linger.
-    ssh_exec "sh -lc 'rm -rf \"$FRONTEND_DIR_REMOTE\"/*'"
-    ssh_upload_tar "$FRONTEND_DIR_LOCAL" "$FRONTEND_DIR_REMOTE" "."
-    ssh_exec "sh -lc 'chmod -R a+rX \"$FRONTEND_DIR_REMOTE\"'"
+    if [[ "$FRONTEND_DEPLOY_MODE" == "ota" ]]; then
+      echo "Publishing frontend bundle via OTA -> $OTA_BASE_URL"
+      if [[ "$DRY_RUN" == "1" ]]; then
+        printf '+ tar -C %q -cf <tmp> .\n' "$FRONTEND_DIR_LOCAL"
+        printf '+ curl -F file=@<tmp> %q\n' "$OTA_BASE_URL/ota/upload"
+        printf '+ curl -X POST -H %q --data %q %q\n' 'Content-Type: application/json' '{"artifact_kind":"frontend_bundle",...}' "$OTA_BASE_URL/ota/apply"
+      else
+        frontend_bundle_archive="$(mktemp --suffix=.tar)"
+        trap 'rm -f "$frontend_bundle_archive"; ssh_control_cleanup' EXIT
+        build_frontend_bundle_archive "$FRONTEND_DIR_LOCAL" "$frontend_bundle_archive"
+        ota_apply_frontend_bundle "$frontend_bundle_archive"
+        rm -f "$frontend_bundle_archive"
+      fi
+    else
+      echo "Uploading frontend -> $SSH_TARGET:$FRONTEND_DIR_REMOTE"
+      ssh_exec "install -d -m0755 '$FRONTEND_DIR_REMOTE'"
+      # Clear old build artifacts so removed files don't linger.
+      ssh_exec "sh -lc 'rm -rf \"$FRONTEND_DIR_REMOTE\"/*'"
+      ssh_upload_tar "$FRONTEND_DIR_LOCAL" "$FRONTEND_DIR_REMOTE" "."
+      ssh_exec "sh -lc 'chmod -R a+rX \"$FRONTEND_DIR_REMOTE\"'"
+    fi
   fi
 
   if [[ "$do_plugins" == "1" ]]; then
@@ -947,6 +1208,10 @@ if [[ "$UPLOAD" == "1" ]]; then
   if [[ "$do_binaries" == "1" ]]; then
     if [[ "${#bins_to_upload[@]}" -gt 0 ]]; then
       echo "Uploading ${#bins_to_upload[@]} bin(s) -> $SSH_TARGET:$BIN_DIR_REMOTE"
+      if [[ "$delay_binary_stop_for_frontend_ota" == "1" ]]; then
+        echo "Stopping services on $SSH_TARGET..."
+        ssh_exec "systemctl stop helios-api.service helios-engine.service || true"
+      fi
       ssh_exec "install -d -m0755 '$BIN_DIR_REMOTE'"
       upload_and_install_bins "$BIN_DIR_REMOTE" "${bins_to_upload[@]}"
 
