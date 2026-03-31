@@ -1049,7 +1049,7 @@
     }
 
     if (!streamState.encoderSelectionTouched && streamState.encoders.length) {
-      const preferred = pickCodecId(streamState.encoders, streamState.encoderImpl, ['mjpeg']);
+      const preferred = pickCodecId(streamState.encoders, streamState.encoderImpl);
       if (preferred) {
         if (streamState.encoderImpl !== preferred) {
           streamState.encoderImpl = preferred;
@@ -1061,8 +1061,7 @@
       const compatible = decodersForCaptureFormat(streamState.selectedFormat);
       const preferred = pickCodecId(
         compatible.length ? compatible : streamState.decoders,
-        streamState.decoderImpl,
-        ['mono8-replicate']
+        streamState.decoderImpl
       );
       if (preferred) {
         if (streamState.decoderImpl !== preferred) {

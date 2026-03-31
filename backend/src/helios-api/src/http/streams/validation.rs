@@ -35,6 +35,8 @@ pub struct StreamValidationDefaults {
     pub raw_output: String,
     pub undistorted_output: String,
     pub pipeline_enabled_when_bindings_present: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_encoder_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -68,7 +70,12 @@ pub fn stream_capabilities() -> StreamCapabilitiesResponse {
     StreamCapabilitiesResponse {
         raw_pipeline_id: RAW_PIPELINE_UUID,
         calibration_mode_pipeline_id: CALIBRATION_MODE_PIPELINE_UUID,
-        defaults: StreamValidationDefaults { raw_output: "raw".to_string(), undistorted_output: "undistorted".to_string(), pipeline_enabled_when_bindings_present: true },
+        defaults: StreamValidationDefaults {
+            raw_output: "raw".to_string(),
+            undistorted_output: "undistorted".to_string(),
+            pipeline_enabled_when_bindings_present: true,
+            default_encoder_id: util::default_stream_encoder_selector(),
+        },
         constraints: StreamValidationConstraints {
             requires_backend_handle_match: true,
             file_backend_requires_non_empty_paths: true,
@@ -409,6 +416,12 @@ fn handle_label(handle: &BackendHandle) -> &'static str {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn stream_capabilities_publish_default_encoder_id() {
+        let capabilities = stream_capabilities();
+        assert!(capabilities.defaults.default_encoder_id.as_deref().is_some_and(|value| !value.trim().is_empty()));
+    }
 
     fn manifest_from_json(value: serde_json::Value) -> StreamManifest {
         serde_json::from_value(value).expect("valid stream manifest json")

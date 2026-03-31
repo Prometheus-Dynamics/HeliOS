@@ -21,6 +21,11 @@ const DEFAULT_STREAM_CAPABILITIES_CACHE_MS = 10_000;
 type StreamsList = Awaited<ReturnType<typeof EngineStreamsService.listStreams>>;
 type StreamCapabilities = Awaited<ReturnType<typeof EngineStreamsService.streamCapabilitiesHandler>>;
 type CodecList = Awaited<ReturnType<typeof EngineStreamsService.listCodecs>>;
+type RuntimeStreamCapabilities = StreamCapabilities & {
+  defaults: StreamCapabilities['defaults'] & {
+    defaultEncoderId?: string | null;
+  };
+};
 type RuntimeStatusPayload = {
   health: {
     ok: boolean;
@@ -29,7 +34,7 @@ type RuntimeStatusPayload = {
     version: string;
   };
   streams: {
-    capabilities: StreamCapabilities;
+    capabilities: RuntimeStreamCapabilities;
     codecs: CodecList;
     resolvedStreams: StreamsList;
     stale: boolean;

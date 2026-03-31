@@ -100,7 +100,7 @@ fn encoder_selector_needs_normalization(selector: Option<&str>) -> bool {
     selector.eq_ignore_ascii_case("ffmpeg") || matches!(selector.to_ascii_lowercase().as_str(), "mjpeg" | "mjpg" | "jpeg")
 }
 
-fn default_stream_encoder_selector() -> Option<String> {
+pub(crate) fn default_stream_encoder_selector() -> Option<String> {
     let preferred_input = FourCc::new(*b"RG24");
     let entries = CodecRegistry::list_enabled_encoders().ok()?;
     let mut preferred_mjpeg: Option<String> = None;

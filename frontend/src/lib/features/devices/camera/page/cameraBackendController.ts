@@ -335,19 +335,7 @@ export function createCameraBackendController(state: BackendState, deps: Backend
   function codecSelectionId(codec: CodecInfo): string | null {
     const name = String(codec.name ?? '').trim();
     const implementation = String(codec.implementation ?? '').trim();
-    if (implementation && implementation.toLowerCase() !== 'ffmpeg') {
-      return implementation;
-    }
-    return name || implementation || null;
-  }
-
-  function codecMatchesKey(codec: CodecInfo, key: string): boolean {
-    const normalized = key.trim().toLowerCase();
-    if (!normalized) return false;
-    return (
-      String(codec.implementation ?? '').trim().toLowerCase() === normalized ||
-      String(codec.name ?? '').trim().toLowerCase() === normalized
-    );
+    return implementation || name || null;
   }
 
   function preferredCodecMatch(list: CodecInfo[], key: string): CodecInfo | null {
@@ -356,24 +344,6 @@ export function createCameraBackendController(state: BackendState, deps: Backend
 
     const directImpl = list.find((codec) => String(codec.implementation ?? '').trim().toLowerCase() === normalized);
     if (directImpl) return directImpl;
-
-    if (normalized === 'ffmpeg') {
-      const turbojpeg = list.find(
-        (codec) =>
-          String(codec.name ?? '').trim().toLowerCase() === 'mjpeg' &&
-          String(codec.implementation ?? '').trim().toLowerCase() === 'turbojpeg'
-      );
-      if (turbojpeg) return turbojpeg;
-    }
-
-    if (normalized === 'mjpeg') {
-      const turbojpeg = list.find(
-        (codec) =>
-          String(codec.name ?? '').trim().toLowerCase() === 'mjpeg' &&
-          String(codec.implementation ?? '').trim().toLowerCase() === 'turbojpeg'
-      );
-      if (turbojpeg) return turbojpeg;
-    }
 
     return list.find((codec) => String(codec.name ?? '').trim().toLowerCase() === normalized) ?? null;
   }
@@ -401,23 +371,22 @@ export function createCameraBackendController(state: BackendState, deps: Backend
   async function loadCodecs(manifest?: StreamManifest | null): Promise<void> {
     try {
       const list = await deps.streamsApi.listCodecs();
+      const runtimeStatus = await deps.streamsApi.runtimeStatus();
+      const defaultEncoderId = asTrimmedString(runtimeStatus?.streams?.capabilities?.defaults?.defaultEncoderId);
       state.codecs = Array.isArray(list) ? list : [];
       const allEncoders = dedupeCodecs(
         state.codecs.filter((c) => String(c.kind).toLowerCase() === 'encoder'),
         (c) => `${c.name}::${c.implementation}::${c.input}::${c.output}`
       );
-      const preferredEncoders = allEncoders.filter((c) => c.input === 'RG24');
-      state.encoders = preferredEncoders.length
-        ? dedupeCodecs(preferredEncoders, (c) => `${c.name}::${c.implementation}`)
-        : dedupeCodecs(allEncoders, (c) => `${c.name}::${c.implementation}`);
+      state.encoders = dedupeCodecs(allEncoders, (c) => `${c.name}::${c.implementation}`);
 
       state.decoders = dedupeCodecs(
         state.codecs.filter((c) => String(c.kind).toLowerCase() === 'decoder'),
         (c) => `${c.name}::${c.implementation}::${c.input}::${c.output}`
       );
 
-      state.encoderImpl = pickCodecId(state.encoders, manifest?.encoder_id, ['mjpeg']);
-      state.decoderImpl = pickCodecId(state.decoders, manifest?.decoder_id, ['mono8-replicate']);
+      state.encoderImpl = pickCodecId(state.encoders, manifest?.encoder_id, defaultEncoderId ? [defaultEncoderId] : []);
+      state.decoderImpl = pickCodecId(state.decoders, manifest?.decoder_id);
     } catch (err) {
       console.warn('Failed to load codec catalog', err);
     }
@@ -549,11 +518,11 @@ export function createCameraBackendController(state: BackendState, deps: Backend
       state.encoderFpsLimit = null;
     }
     if (!manifest?.encoder_id && state.encoders.length && !state.encoderSelectionTouched) {
-      state.encoderImpl = pickCodecId(state.encoders, state.encoderImpl, ['mjpeg']);
+      state.encoderImpl = pickCodecId(state.encoders, state.encoderImpl);
     }
     if (!manifest?.decoder_id && state.decoders.length && !state.decoderSelectionTouched) {
       const compatible = deps.decodersForCaptureFormat(state.selectedFormat);
-      state.decoderImpl = pickCodecId(compatible.length ? compatible : state.decoders, state.decoderImpl, ['mono8-replicate']);
+      state.decoderImpl = pickCodecId(compatible.length ? compatible : state.decoders, state.decoderImpl);
     }
 
     const pipelineEnabled = manifestRecord?.pipeline_enabled;
