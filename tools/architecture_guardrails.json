@@ -793,6 +793,18 @@
       "review_note": "Systems page bootstrap refresh, I2C rescans, IMU stream/poll fallback, IMU config mutation, and form/state synchronization now live here; keep visual panel wiring out of this runtime controller and continue splitting if another subsystem regrows."
     },
     {
+      "path": "frontend/src/routes/media/+page.svelte",
+      "max_lines": 340,
+      "owner": "HeliOS",
+      "review_note": "The media route now owns layout/virtualization and view wiring while bootstrapping, refresh cadence, worker-backed filtering/display, selection hotkeys, and upload/replay actions live in a dedicated helper; keep runtime policy out of the route component."
+    },
+    {
+      "path": "frontend/src/routes/media/mediaPageSupport.ts",
+      "max_lines": 860,
+      "owner": "HeliOS",
+      "review_note": "Media-page bootstrap, refresh/backoff policy, worker orchestration, drag/drop upload handling, toast/progress wiring, and replay/archive actions now live here; keep rendering and viewport math out of this route controller."
+    },
+    {
       "path": "frontend/src/routes/localization/+page.svelte",
       "max_lines": 3600,
       "owner": "HeliOS",
