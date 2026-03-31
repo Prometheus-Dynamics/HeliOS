@@ -8,9 +8,9 @@
     },
     {
       "path": "backend/src/helios-api/src/system_read_model.rs",
-      "max_lines": 1350,
+      "max_lines": 600,
       "owner": "HeliOS",
-      "review_note": "Read-model decomposition is still in progress; after extracting the stream hubs and realtime delivery block, keep the parent file from regrowing into the old mixed collector/delivery monolith."
+      "review_note": "Read-model decomposition is still in progress; after extracting the stream hubs, realtime delivery block, process attribution, log-source subsystem, and hardware/storage helpers, keep the parent file from regrowing into the old mixed collector/delivery monolith."
     },
     {
       "path": "backend/src/helios-api/src/system_read_model/streams.rs",
@@ -29,6 +29,24 @@
       "max_lines": 400,
       "owner": "HeliOS",
       "review_note": "Process memory attribution and /proc smaps parsing now live here; keep the process breakdown parser isolated instead of rebuilding it inside the parent read model."
+    },
+    {
+      "path": "backend/src/helios-api/src/system_read_model/log_sources.rs",
+      "max_lines": 400,
+      "owner": "HeliOS",
+      "review_note": "Log source discovery, caching, and shell command wiring now live here; keep log-source concerns out of the parent read model."
+    },
+    {
+      "path": "backend/src/helios-api/src/system_read_model/hardware.rs",
+      "max_lines": 350,
+      "owner": "HeliOS",
+      "review_note": "GPU and CPU hardware telemetry helpers now live here; keep sysfs/debugfs probing isolated from the parent read model."
+    },
+    {
+      "path": "backend/src/helios-api/src/system_read_model/storage_metrics.rs",
+      "max_lines": 350,
+      "owner": "HeliOS",
+      "review_note": "Disk partition grouping and overlay mount selection now live here; keep storage topology logic isolated from the parent read model."
     },
     {
       "path": "backend/src/helios-updater/src/apply.rs",

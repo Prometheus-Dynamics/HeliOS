@@ -8,7 +8,7 @@ use tokio::time::{Duration, Instant};
 
 use crate::http::device::metrics::{ProcessMappingMetrics, ProcessMemoryMetrics};
 
-use super::{parse_proc_key_bytes, read_duration_env};
+use super::read_duration_env;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum ProcessMappingBucket {
@@ -245,9 +245,29 @@ fn mapping_label(bucket: ProcessMappingBucket, pathname: Option<&str>, executabl
     }
 }
 
+fn parse_proc_key_bytes(text: &str, key: &str) -> Option<u64> {
+    text.lines().find_map(|line| {
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with(key) {
+            return None;
+        }
+        let value = trimmed[key.len()..].trim();
+        let number = value.split_whitespace().next().and_then(|raw| raw.parse::<u64>().ok())?;
+        if value.contains("kB") { Some(number.saturating_mul(1024)) } else { Some(number) }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_proc_key_bytes_handles_kib_and_plain_values() {
+        let text = "Threads:\t4\nVmRSS:\t  18432 kB\nVmSwap:\t0 kB\n";
+        assert_eq!(parse_proc_key_bytes(text, "Threads:"), Some(4));
+        assert_eq!(parse_proc_key_bytes(text, "VmRSS:"), Some(18_874_368));
+        assert_eq!(parse_proc_key_bytes(text, "VmSwap:"), Some(0));
+    }
 
     #[test]
     fn classify_process_mapping_separates_runtime_buckets() {
