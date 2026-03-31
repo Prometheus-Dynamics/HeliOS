@@ -1,24 +1,9 @@
 <script lang="ts">
-  type CalibrationImage = {
-    name: string;
-    size_bytes: number;
-    content_type: string;
-    stream_id?: string;
-    kind?: string;
-    captured_at_ms?: number;
-  };
+  import type { CalibrationBoard, CalibrationImage } from '../cameraCalibrationTypes';
 
   type CalibrationSetupProps = {
     calibrationTool: 'lens' | 'color';
-    calibrationBoard: {
-      squaresX: number;
-      squaresY: number;
-      squareMm: number;
-      markerMm: number;
-      marginMm: number;
-      dpi: number;
-      dictionary?: string;
-    };
+    calibrationBoard: CalibrationBoard;
     calibrationLensModel: 'pinhole' | 'fisheye';
     setCalibrationLensModel: (value: 'pinhole' | 'fisheye') => void;
     boardPreviewUrl: string;

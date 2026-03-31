@@ -1,12 +1,5 @@
 <script lang="ts">
-  type CalibrationImage = {
-    name: string;
-    size_bytes: number;
-    content_type: string;
-    stream_id?: string;
-    kind?: string;
-    captured_at_ms?: number;
-  };
+  import type { CalibrationImage } from '../cameraCalibrationTypes';
 
   type CalibrationPreviewModalProps = {
     open: boolean;

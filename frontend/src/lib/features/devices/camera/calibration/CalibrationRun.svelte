@@ -1,17 +1,8 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import CalibrationResults from './CalibrationResults.svelte';
-  import type { CalibrationParams, CalibrationResult, IpaStatus } from '../cameraCalibrationTypes';
+  import type { CalibrationImage, CalibrationParams, CalibrationResult, IpaStatus } from '../cameraCalibrationTypes';
   import { estimateCalibrationFovDegs } from '../cameraCalibrationUtils';
-
-  type CalibrationImage = {
-    name: string;
-    size_bytes: number;
-    content_type: string;
-    stream_id?: string;
-    kind?: string;
-    captured_at_ms?: number;
-  };
 
   type CalibrationImportSource = {
     id: string;
