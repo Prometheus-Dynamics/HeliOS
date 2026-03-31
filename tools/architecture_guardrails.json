@@ -535,6 +535,36 @@
       "review_note": "Localization stream, peer, and profile output sampling endpoints now live here; keep compatibility heuristics and catalog construction out of the response path."
     },
     {
+      "path": "backend/src/helios-api/src/http/localization/validation/mod.rs",
+      "max_lines": 80,
+      "owner": "HeliOS",
+      "review_note": "Localization validation root should stay as a thin schema/re-export layer after splitting capabilities, config validation, fmap validation, and sanitization helpers into dedicated modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/localization/validation/capabilities.rs",
+      "max_lines": 100,
+      "owner": "HeliOS",
+      "review_note": "Localization defaults/capabilities and map-upload constraints now live here; keep profile validation and fmap semantic checks separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/localization/validation/config_validation.rs",
+      "max_lines": 280,
+      "owner": "HeliOS",
+      "review_note": "Localization config normalization follow-up, profile/source/solver reference checks, and active-profile resolution now live here; keep fmap payload validation and generic sanitization helpers out of this module."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/localization/validation/fmap.rs",
+      "max_lines": 140,
+      "owner": "HeliOS",
+      "review_note": "Limelight fmap semantic validation now lives here; keep config/profile validation logic and capability defaults separate from payload-shape validation."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/localization/validation/sanitize.rs",
+      "max_lines": 140,
+      "owner": "HeliOS",
+      "review_note": "Localization config string trimming and backend-sanitization diff warnings now live here; keep profile/reference validation and fmap semantic checks out of the sanitization layer."
+    },
+    {
       "path": "frontend/src/lib/components/StreamPreview.svelte",
       "max_lines": 850,
       "owner": "HeliOS",
@@ -597,6 +627,11 @@
       "path": "backend/src/helios-api/src/http/localization/sources.rs",
       "owner": "HeliOS",
       "reason": "Localization source listing, compatibility heuristics, sample endpoints, and profile-output helpers now live under backend/src/helios-api/src/http/localization/sources/*. Do not recreate the deleted localization/sources.rs monolith."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/localization/validation.rs",
+      "owner": "HeliOS",
+      "reason": "Localization validation now lives under backend/src/helios-api/src/http/localization/validation/*. Do not recreate the deleted localization/validation.rs monolith."
     }
   ]
 }
