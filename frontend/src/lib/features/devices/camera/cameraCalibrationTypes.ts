@@ -1,4 +1,8 @@
-import type { IpaStatus as GeneratedIpaStatus } from '$lib/ts-bindings/http/client';
+import type {
+  IpaStatus as GeneratedIpaStatus,
+  SolveCalibrationResponse as GeneratedCalibrationResult,
+  StreamCalibrationParams as GeneratedCalibrationParams
+} from '$lib/ts-bindings/http/client';
 
 export type CalibrationBoard = {
   squaresX: number;
@@ -19,46 +23,7 @@ export type CalibrationImage = {
   captured_at_ms?: number;
 };
 
-export type CalibrationResult = {
-  calibration: {
-    fx: number;
-    fy: number;
-    cx: number;
-    cy: number;
-    k1: number;
-    k2: number;
-    p1: number;
-    p2: number;
-    k3: number;
-    undistortIters: number;
-    lensModel?: 'pinhole' | 'fisheye';
-  };
-  reprojectionErrorPx: number;
-  viewsUsed: number;
-  pointsUsed: number;
-  warnings?: string[];
-  debugViews?: Array<{
-    image: string;
-    overlay?: string | null;
-    tagsDetected: number;
-    pointsDetected: number;
-    used: boolean;
-    coverageRatio: number;
-  }>;
-};
-
-export type CalibrationParams = {
-  fx: number;
-  fy: number;
-  cx: number;
-  cy: number;
-  k1: number;
-  k2: number;
-  p1: number;
-  p2: number;
-  k3: number;
-  undistortIters: number;
-  lensModel?: 'pinhole' | 'fisheye';
-};
+export type CalibrationResult = GeneratedCalibrationResult;
+export type CalibrationParams = GeneratedCalibrationParams;
 
 export type IpaStatus = GeneratedIpaStatus;
