@@ -1,39 +1,15 @@
 import { apiFetch } from '$lib/api/core/http';
 import { createDomainResource } from '$lib/api/domainResources';
 import { DeviceApi } from '$lib/api/deviceApi';
-import type { BootloaderStatus } from '$lib/ts-bindings/http/client';
+import type {
+  BootloaderStatus,
+  ResourceGuardAction,
+  ResourceGuardActionKind,
+  ResourceGuardDegradedStream,
+  ResourceGuardStatus
+} from '$lib/ts-bindings/http/client';
 
-export type ResourceGuardActionKind = 'disable_decoder' | 'disable_all_codecs' | 'stop_stream' | 'restore_codecs';
-
-export type ResourceGuardAction = {
-  at_ms: number;
-  kind: ResourceGuardActionKind;
-  stream_id: string;
-  alias?: string | null;
-  score: number;
-  reason: string;
-  mem_available_kb?: number | null;
-};
-
-export type ResourceGuardDegradedStream = {
-  stream_id: string;
-  alias?: string | null;
-  stage: 'decoder_disabled' | 'codecs_disabled';
-  changed_at_ms: number;
-};
-
-export type ResourceGuardStatus = {
-  enabled: boolean;
-  poll_ms: number;
-  cooldown_ms: number;
-  mem_low_kb: number;
-  mem_recover_kb: number;
-  last_mem_available_kb?: number | null;
-  pressure_active: boolean;
-  degraded_streams: ResourceGuardDegradedStream[];
-  last_action?: ResourceGuardAction | null;
-  recent_actions: ResourceGuardAction[];
-};
+export type { ResourceGuardAction, ResourceGuardActionKind, ResourceGuardDegradedStream, ResourceGuardStatus };
 
 export type DeviceHealthIssue = {
   code: string;
