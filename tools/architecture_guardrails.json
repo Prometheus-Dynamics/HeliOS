@@ -1217,6 +1217,78 @@
       "max_lines": 90,
       "owner": "HeliOS",
       "review_note": "Systemd unit-status hydration now lives here; keep source catalog definitions separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/pipeline_command_service/mod.rs",
+      "max_lines": 30,
+      "owner": "HeliOS",
+      "review_note": "Pipeline command root should only re-export the split document I/O and graph mutation helpers."
+    },
+    {
+      "path": "backend/src/helios-api/src/pipeline_command_service/document.rs",
+      "max_lines": 80,
+      "owner": "HeliOS",
+      "review_note": "Pipeline document persistence and Daedalus value encoding now live here; keep graph mutation workflows separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/pipeline_command_service/updates.rs",
+      "max_lines": 200,
+      "owner": "HeliOS",
+      "review_note": "Pipeline node-const, input-value, and full-graph mutation flows now live here; keep document I/O and value encoding helpers separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/streams/recording/mod.rs",
+      "max_lines": 110,
+      "owner": "HeliOS",
+      "review_note": "Recording root should only hold request schemas, shared session state, and re-export the split recording handlers."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/streams/recording/routes/mod.rs",
+      "max_lines": 30,
+      "owner": "HeliOS",
+      "review_note": "Recording route root should only re-export the split start, stop, and capture handlers."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/streams/recording/routes/start.rs",
+      "max_lines": 250,
+      "owner": "HeliOS",
+      "review_note": "Recording start orchestration now lives here; keep option parsing, metadata helpers, and IMU sidecar runtime in their dedicated modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/streams/recording/routes/stop.rs",
+      "max_lines": 110,
+      "owner": "HeliOS",
+      "review_note": "Recording stop orchestration and failure cleanup now live here; keep sidecar runtime and metadata helpers in their dedicated modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/streams/recording/routes/capture.rs",
+      "max_lines": 220,
+      "owner": "HeliOS",
+      "review_note": "Shadow recording capture orchestration now lives here; keep codec/container parsing and media helpers in their dedicated modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/streams/recording/options.rs",
+      "max_lines": 180,
+      "owner": "HeliOS",
+      "review_note": "Recording option parsing, codec/container normalization, and inferred defaults now live here; keep route orchestration and sidecar runtime separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/streams/recording/media.rs",
+      "max_lines": 220,
+      "owner": "HeliOS",
+      "review_note": "Recording media-name resolution, metadata updates, cleanup, and FPS derivation now live here; keep route orchestration and IMU sidecar runtime separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/streams/recording/sidecar.rs",
+      "max_lines": 410,
+      "owner": "HeliOS",
+      "review_note": "IMU sidecar capture, frame-tail polling, and gzipped writer finalization now live here; keep request parsing and media metadata helpers separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/streams/recording/tests.rs",
+      "max_lines": 40,
+      "owner": "HeliOS",
+      "review_note": "Recording filename-suffix regression tests now live here; keep them isolated from production modules."
     }
   ],
   "forbidden_paths": [
@@ -1284,6 +1356,21 @@
       "path": "backend/src/helios-api/src/logs.rs",
       "owner": "HeliOS",
       "reason": "Log-source schemas, default catalog discovery, and systemd status hydration now live under backend/src/helios-api/src/logs/*. Do not recreate the deleted logs.rs monolith."
+    },
+    {
+      "path": "backend/src/helios-api/src/pipeline_command_service.rs",
+      "owner": "HeliOS",
+      "reason": "Pipeline graph mutation flows and document persistence helpers now live under backend/src/helios-api/src/pipeline_command_service/*. Do not recreate the deleted pipeline_command_service.rs monolith."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/streams/recording.rs",
+      "owner": "HeliOS",
+      "reason": "Recording routes, IMU sidecar runtime, metadata helpers, and option parsing now live under backend/src/helios-api/src/http/streams/recording/*. Do not recreate the deleted recording.rs monolith."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/streams/recording/routes.rs",
+      "owner": "HeliOS",
+      "reason": "Recording route orchestration now lives under backend/src/helios-api/src/http/streams/recording/routes/*. Do not recreate the deleted recording/routes.rs monolith."
     },
     {
       "path": "backend/src/helios-api/src/http/localization/maps.rs",

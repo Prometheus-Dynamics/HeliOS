@@ -1,15 +1,15 @@
-use crate::http::AppState;
-use crate::http::pipelines::PipelineDocument;
-use crate::http::pipelines::{inject_pipeline_alias_metadata, merge_edge_metadata, normalize_graph_metadata, normalize_graph_node_ids, refresh_graph_validation, refresh_pipeline_input_consumers};
-use crate::http::storage;
+use std::collections::BTreeMap;
+
 use chrono::Utc;
-use daedalus::data::model::Value as DaedalusValue;
 use daedalus::planner::Graph as DaedalusGraph;
 use serde_json::Value as JsonValue;
-use std::collections::BTreeMap;
-use std::path::PathBuf;
-use tokio::fs;
 use uuid::Uuid;
+
+use crate::http::AppState;
+use crate::http::pipelines::PipelineRefreshFailure;
+use crate::http::pipelines::{inject_pipeline_alias_metadata, merge_edge_metadata, normalize_graph_metadata, normalize_graph_node_ids, refresh_graph_validation, refresh_pipeline_input_consumers};
+
+use super::document::{encode_daedalus_value, load_pipeline_doc, save_pipeline_doc};
 
 pub(crate) async fn update_pipeline_node_const(state: &AppState, pipeline_id: Uuid, node_id: &str, port: &str, value: Option<JsonValue>) -> Result<i64, String> {
     let mut doc = load_pipeline_doc(pipeline_id).await?;
@@ -47,8 +47,7 @@ pub(crate) async fn update_pipeline_node_const(state: &AppState, pipeline_id: Uu
     refresh_graph_validation(state, pipeline_id, &doc.graph).await;
     let failures = crate::http::pipelines::refresh_pipeline_consumers(state, pipeline_id, &doc.graph).await;
     if !failures.is_empty() {
-        let detail = failures.iter().map(|failure| format!("{}: {}", failure.stream_id, failure.error)).collect::<Vec<_>>().join(", ");
-        return Err(format!("graph saved but failed to refresh streams: {detail}"));
+        return Err(format_refresh_failures("graph saved but failed to refresh streams", &failures));
     }
     Ok(doc.updated_at_ms)
 }
@@ -74,8 +73,7 @@ pub(crate) async fn update_pipeline_input_value(state: &AppState, pipeline_id: U
     inputs.insert(port.to_string(), runtime_value);
     let failures = refresh_pipeline_input_consumers(state, pipeline_id, inputs).await;
     if !failures.is_empty() {
-        let detail = failures.iter().map(|failure| format!("{}: {}", failure.stream_id, failure.error)).collect::<Vec<_>>().join(", ");
-        return Err(format!("inputs saved but failed to refresh streams: {detail}"));
+        return Err(format_refresh_failures("inputs saved but failed to refresh streams", &failures));
     }
     Ok(doc.updated_at_ms)
 }
@@ -102,51 +100,12 @@ pub(crate) async fn update_pipeline_graph(state: &AppState, pipeline_id: Uuid, g
     save_pipeline_doc(pipeline_id, &doc).await?;
     let failures = crate::http::pipelines::refresh_pipeline_consumers(state, pipeline_id, &doc.graph).await;
     if !failures.is_empty() {
-        let detail = failures.iter().map(|failure| format!("{}: {}", failure.stream_id, failure.error)).collect::<Vec<_>>().join(", ");
-        return Err(format!("graph saved but failed to refresh streams: {detail}"));
+        return Err(format_refresh_failures("graph saved but failed to refresh streams", &failures));
     }
     Ok(doc.updated_at_ms)
 }
 
-pub(crate) async fn load_pipeline_doc(pipeline_id: Uuid) -> Result<PipelineDocument, String> {
-    let path = pipeline_path(pipeline_id).await.map_err(|err| format!("failed to resolve pipeline path: {err}"))?;
-    let data = fs::read(&path).await.map_err(|err| format!("failed to read pipeline: {err}"))?;
-    serde_json::from_slice::<PipelineDocument>(&data).map_err(|err| format!("failed to decode pipeline: {err}"))
-}
-
-pub(crate) async fn save_pipeline_doc(pipeline_id: Uuid, doc: &PipelineDocument) -> Result<(), String> {
-    let path = pipeline_path(pipeline_id).await.map_err(|err| format!("failed to resolve pipeline path: {err}"))?;
-    let data = serde_json::to_vec_pretty(doc).map_err(|err| format!("failed to encode pipeline: {err}"))?;
-    fs::write(&path, data).await.map_err(|err| format!("failed to write pipeline: {err}"))
-}
-
-pub(crate) async fn pipeline_path(pipeline_id: Uuid) -> std::io::Result<PathBuf> {
-    let dir = storage::ensure_subdir_async("pipelines").await?;
-    Ok(dir.join(format!("{pipeline_id}.json")))
-}
-
-fn encode_daedalus_value(value: &JsonValue) -> DaedalusValue {
-    match value {
-        JsonValue::Null => DaedalusValue::Unit,
-        JsonValue::Bool(b) => DaedalusValue::Bool(*b),
-        JsonValue::Number(num) => {
-            if let Some(i) = num.as_i64() {
-                DaedalusValue::Int(i)
-            } else if let Some(f) = num.as_f64() {
-                DaedalusValue::Float(f)
-            } else {
-                DaedalusValue::Unit
-            }
-        }
-        JsonValue::String(s) => DaedalusValue::String(s.to_string().into()),
-        JsonValue::Array(items) => DaedalusValue::List(items.iter().map(encode_daedalus_value).collect()),
-        JsonValue::Object(map) => {
-            let fields = map
-                .iter()
-                .filter(|(key, _)| !key.trim().is_empty())
-                .map(|(name, value)| daedalus::data::model::StructFieldValue { name: name.to_string(), value: encode_daedalus_value(value) })
-                .collect();
-            DaedalusValue::Struct(fields)
-        }
-    }
+fn format_refresh_failures(prefix: &str, failures: &[PipelineRefreshFailure]) -> String {
+    let detail = failures.iter().map(|failure| format!("{}: {}", failure.stream_id, failure.error)).collect::<Vec<_>>().join(", ");
+    format!("{prefix}: {detail}")
 }

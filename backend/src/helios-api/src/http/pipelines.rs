@@ -12,11 +12,11 @@ pub(crate) use refresh::{refresh_pipeline_consumers, refresh_pipeline_input_cons
 pub(crate) use registry::refresh_graph_validation;
 pub use registry::warm_registry_cache;
 pub(crate) use storage_support::{load_graph_document, load_template_graph, map_io_error, pipeline_dir, pipeline_template_dir};
-pub(crate) use types::RegistryPortMetadataLookup;
 pub use types::{
     DaedalusRegistryFanInPort, DaedalusRegistryNode, DaedalusRegistryPort, DaedalusRegistryResponse, DaedalusRegistryType, DaedalusSyncGroup, GpuEdgeBufferInfo, GpuSegment, PipelineDocument,
     PipelineError, PipelineSummary, PipelineTemplateDocument, PipelineTemplateSummary, PlannerDiagnostic, PlannerDiagnosticSpan, UploadGraphRequest, ValidateGraphRequest, ValidateGraphResponse,
 };
+pub(crate) use types::{PipelineRefreshFailure, RegistryPortMetadataLookup};
 
 use axum::{
     Json, Router,
