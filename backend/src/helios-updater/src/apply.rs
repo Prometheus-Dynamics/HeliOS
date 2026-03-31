@@ -15,7 +15,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::artifact::{StagedMetadata, cache_usage_bytes, load_metadata, staged_to_url_artifacts};
-use crate::bundle::{BundleApplyOutcome, apply_frontend_bundle, is_frontend_bundle};
+use crate::bundle::{BundleApplyOutcome, apply_frontend_bundle, apply_service_bundle, is_frontend_bundle, is_service_bundle, trigger_updater_restart_later};
 use crate::config::UpdaterConfig;
 use crate::error::{Error, Result};
 use crate::state::ServiceState;
@@ -134,11 +134,7 @@ async fn run_apply_job(config: Arc<UpdaterConfig>, state: Arc<RwLock<ServiceStat
 async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<ServiceState>>, events: &Sender<UpdaterEvent>, update_id: Uuid) -> Result<()> {
     let metadata = load_metadata(config, update_id).await?;
     let manifest_metadata = parse_apply_manifest_metadata(&metadata);
-    let artifact_kind = metadata
-        .manifest
-        .artifacts
-        .first()
-        .and_then(|artifact| artifact.kind.as_deref());
+    let artifact_kind = metadata.manifest.artifacts.first().and_then(|artifact| artifact.kind.as_deref());
     info!(%update_id, staged = %metadata_path(config, update_id).display(), "applying staged release");
 
     // Some platforms can't switch root via bootloader; allow forcing single-slot mode detection.
@@ -162,10 +158,7 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
             info!(%update_id, "frontend bundle apply running in simulation mode (UPDATER_FAKE_APPLY)");
             BundleApplyOutcome::frontend_bundle()
         } else {
-            let staged_artifact = metadata
-                .artifacts
-                .first()
-                .ok_or_else(|| Error::InvalidState("no staged artifact found".into()))?;
+            let staged_artifact = metadata.artifacts.first().ok_or_else(|| Error::InvalidState("no staged artifact found".into()))?;
             let staged_path = PathBuf::from(&staged_artifact.local_path);
             {
                 let mut guard = state.write().await;
@@ -174,19 +167,22 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
             publish_snapshot(state, events).await;
             apply_frontend_bundle(config, update_id, &staged_path).await?
         }
+    } else if is_service_bundle(artifact_kind) {
+        if simulate {
+            info!(%update_id, "service bundle apply running in simulation mode (UPDATER_FAKE_APPLY)");
+            BundleApplyOutcome::service_bundle(false)
+        } else {
+            let staged_artifact = metadata.artifacts.first().ok_or_else(|| Error::InvalidState("no staged artifact found".into()))?;
+            let staged_path = PathBuf::from(&staged_artifact.local_path);
+            {
+                let mut guard = state.write().await;
+                guard.update_progress(UpdateStage::Applying, Some(65), None);
+            }
+            publish_snapshot(state, events).await;
+            apply_service_bundle(config, update_id, &staged_path).await?
+        }
     } else {
-        apply_disk_image_release(
-            config,
-            state,
-            events,
-            update_id,
-            &metadata,
-            simulate,
-            &work_dir,
-            single_slot_requested,
-            allow_single_slot_inplace,
-        )
-        .await?
+        apply_disk_image_release(config, state, events, update_id, &metadata, simulate, &work_dir, single_slot_requested, allow_single_slot_inplace).await?
     };
 
     if fs::metadata(&work_dir).await.is_ok() {
@@ -208,6 +204,13 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
 
     if !simulate {
         cleanup_source_media_after_apply(config, update_id, &manifest_metadata).await;
+    }
+
+    if !simulate
+        && apply_outcome.restart_updater_after_apply
+        && let Err(err) = trigger_updater_restart_later(config)
+    {
+        warn!(%update_id, %err, "failed to schedule updater restart after service bundle apply");
     }
 
     if !simulate && apply_outcome.reboot_required {

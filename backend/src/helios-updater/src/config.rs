@@ -40,10 +40,14 @@ pub struct UpdaterConfig {
     pub(crate) data_dir: PathBuf,
     pub(crate) cache_dir: PathBuf,
     pub(crate) work_dir: PathBuf,
+    pub(crate) service_releases_dir: PathBuf,
+    pub(crate) service_bin_dir: PathBuf,
     pub(crate) frontend_releases_dir: PathBuf,
     pub(crate) frontend_active_path: PathBuf,
     pub(crate) frontend_service_unit: String,
     pub(crate) frontend_healthcheck_url: Option<String>,
+    pub(crate) updater_service_unit: String,
+    pub(crate) api_healthcheck_url: Option<String>,
     pub(crate) signature_policy: SignaturePolicy,
     pub(crate) user_agent: String,
 }
@@ -67,10 +71,14 @@ impl UpdaterConfig {
             data_dir,
             cache_dir,
             work_dir,
+            service_releases_dir: default_service_releases_dir(),
+            service_bin_dir: default_service_bin_dir(),
             frontend_releases_dir: default_frontend_releases_dir(),
             frontend_active_path: default_frontend_active_path(),
             frontend_service_unit: default_frontend_service_unit(),
             frontend_healthcheck_url: default_frontend_healthcheck_url(),
+            updater_service_unit: default_updater_service_unit(),
+            api_healthcheck_url: default_api_healthcheck_url(),
             signature_policy: SignaturePolicy::default(),
             user_agent: format!("helios-updater/{}", env!("CARGO_PKG_VERSION")),
         }
@@ -115,16 +123,18 @@ impl UpdaterConfig {
         self
     }
 
+    pub fn with_service_paths(mut self, releases_dir: impl Into<PathBuf>, bin_dir: impl Into<PathBuf>) -> Self {
+        self.service_releases_dir = releases_dir.into();
+        self.service_bin_dir = bin_dir.into();
+        self
+    }
+
     pub fn with_signature_policy(mut self, policy: SignaturePolicy) -> Self {
         self.signature_policy = policy;
         self
     }
 
-    pub fn with_frontend_paths(
-        mut self,
-        releases_dir: impl Into<PathBuf>,
-        active_path: impl Into<PathBuf>,
-    ) -> Self {
+    pub fn with_frontend_paths(mut self, releases_dir: impl Into<PathBuf>, active_path: impl Into<PathBuf>) -> Self {
         self.frontend_releases_dir = releases_dir.into();
         self.frontend_active_path = active_path.into();
         self
@@ -135,11 +145,18 @@ impl UpdaterConfig {
         self
     }
 
-    pub fn with_frontend_healthcheck_url(
-        mut self,
-        url: Option<impl Into<String>>,
-    ) -> Self {
+    pub fn with_frontend_healthcheck_url(mut self, url: Option<impl Into<String>>) -> Self {
         self.frontend_healthcheck_url = url.map(Into::into);
+        self
+    }
+
+    pub fn with_updater_service_unit(mut self, unit: impl Into<String>) -> Self {
+        self.updater_service_unit = unit.into();
+        self
+    }
+
+    pub fn with_api_healthcheck_url(mut self, url: Option<impl Into<String>>) -> Self {
+        self.api_healthcheck_url = url.map(Into::into);
         self
     }
 
@@ -184,6 +201,14 @@ impl UpdaterConfig {
         &self.work_dir
     }
 
+    pub fn service_releases_dir(&self) -> &Path {
+        &self.service_releases_dir
+    }
+
+    pub fn service_bin_dir(&self) -> &Path {
+        &self.service_bin_dir
+    }
+
     pub fn frontend_releases_dir(&self) -> &Path {
         &self.frontend_releases_dir
     }
@@ -198,6 +223,14 @@ impl UpdaterConfig {
 
     pub fn frontend_healthcheck_url(&self) -> Option<&str> {
         self.frontend_healthcheck_url.as_deref()
+    }
+
+    pub fn updater_service_unit(&self) -> &str {
+        &self.updater_service_unit
+    }
+
+    pub fn api_healthcheck_url(&self) -> Option<&str> {
+        self.api_healthcheck_url.as_deref()
     }
 
     pub fn signature_policy(&self) -> &SignaturePolicy {
@@ -220,32 +253,45 @@ fn default_data_dir() -> PathBuf {
 }
 
 fn default_frontend_releases_dir() -> PathBuf {
-    env::var("UPDATER_FRONTEND_RELEASES_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("/opt/helios/releases/frontend"))
+    env::var("UPDATER_FRONTEND_RELEASES_DIR").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/opt/helios/releases/frontend"))
+}
+
+fn default_service_releases_dir() -> PathBuf {
+    env::var("UPDATER_SERVICE_RELEASES_DIR").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/opt/helios/releases/services"))
+}
+
+fn default_service_bin_dir() -> PathBuf {
+    env::var("UPDATER_SERVICE_BIN_DIR").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/usr/bin"))
 }
 
 fn default_frontend_active_path() -> PathBuf {
-    env::var("UPDATER_FRONTEND_ACTIVE_PATH")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("/opt/helios/frontend"))
+    env::var("UPDATER_FRONTEND_ACTIVE_PATH").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/opt/helios/frontend"))
 }
 
 fn default_frontend_service_unit() -> String {
-    env::var("UPDATER_FRONTEND_SERVICE_UNIT")
-        .unwrap_or_else(|_| "helios-frontend.service".into())
+    env::var("UPDATER_FRONTEND_SERVICE_UNIT").unwrap_or_else(|_| "helios-frontend.service".into())
+}
+
+fn default_updater_service_unit() -> String {
+    env::var("UPDATER_UPDATER_SERVICE_UNIT").unwrap_or_else(|_| "helios-updater.service".into())
 }
 
 fn default_frontend_healthcheck_url() -> Option<String> {
     match env::var("UPDATER_FRONTEND_HEALTHCHECK_URL") {
         Ok(value) => {
             let trimmed = value.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_string())
-            }
+            if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
         }
         Err(_) => Some("http://127.0.0.1/".into()),
+    }
+}
+
+fn default_api_healthcheck_url() -> Option<String> {
+    match env::var("UPDATER_API_HEALTHCHECK_URL") {
+        Ok(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+        }
+        Err(_) => Some("http://127.0.0.1/v1".into()),
     }
 }

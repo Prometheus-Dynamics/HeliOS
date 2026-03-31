@@ -50,6 +50,7 @@ TEMPLATES_DIR_LOCAL="${TEMPLATES_DIR_LOCAL:-$ROOT_DIR/gaia/assets/templates}"
 TEMPLATES_DIR_REMOTE="${TEMPLATES_DIR_REMOTE:-/usr/share/helios/pipeline-templates}"
 FRONTEND_DIR_LOCAL="${FRONTEND_DIR_LOCAL:-$ROOT_DIR/frontend/build}"
 FRONTEND_DIR_REMOTE="${FRONTEND_DIR_REMOTE:-/opt/helios/frontend}"
+BINARIES_DEPLOY_MODE="${BINARIES_DEPLOY_MODE:-ota}"
 FRONTEND_DEPLOY_MODE="${FRONTEND_DEPLOY_MODE:-ota}"
 OTA_BASE_URL="${OTA_BASE_URL:-}"
 OTA_REQUESTED_BY="${OTA_REQUESTED_BY:-deploy-live}"
@@ -64,6 +65,7 @@ FAST_UPLOAD="${FAST_UPLOAD:-1}"
 UPLOAD_TEMPLATES="1"
 UPLOAD_FRONTEND="1"
 STRIP_DEBUG="1"
+REQUIRES_SSH="0"
 
 usage() {
   cat <<EOF
@@ -95,6 +97,8 @@ Options:
   --no-frontend         Skip uploading frontend assets
   --frontend-dir <dir>  Local frontend build dir (default: $FRONTEND_DIR_LOCAL)
   --frontend-remote <dir> Remote frontend dir (default: $FRONTEND_DIR_REMOTE)
+  --binaries-via-ota    Publish binaries via /v1/ota (default)
+  --binaries-via-ssh    Keep legacy SSH binary upload path
   --frontend-via-ota    Publish frontend via /v1/ota (default)
   --frontend-via-ssh    Keep legacy SSH frontend upload path
   --ota-base-url <url>  OTA API base URL (default: derived from --ssh as http://host/v1)
@@ -113,6 +117,7 @@ Env vars (optional):
   RUSTFLAGS             Passed through to build scripts
   BIN_DIR_REMOTE         Remote bin dir
   PLUGIN_DIR_REMOTE      Remote plugin dir
+  BINARIES_DEPLOY_MODE   Binary deploy mode: ota|ssh
   FRONTEND_DEPLOY_MODE   Frontend deploy mode: ota|ssh
   OTA_BASE_URL           OTA API base URL override
   DAEDALUS_HOST_PATH     Host path to a Daedalus checkout (optional dev override)
@@ -223,6 +228,8 @@ while [[ $# -gt 0 ]]; do
     --no-frontend) UPLOAD_FRONTEND="0"; shift ;;
     --frontend-dir) FRONTEND_DIR_LOCAL="${2:-}"; shift 2 ;;
     --frontend-remote) FRONTEND_DIR_REMOTE="${2:-}"; shift 2 ;;
+    --binaries-via-ota) BINARIES_DEPLOY_MODE="ota"; shift ;;
+    --binaries-via-ssh) BINARIES_DEPLOY_MODE="ssh"; shift ;;
     --frontend-via-ota) FRONTEND_DEPLOY_MODE="ota"; shift ;;
     --frontend-via-ssh) FRONTEND_DEPLOY_MODE="ssh"; shift ;;
     --ota-base-url) OTA_BASE_URL="${2:-}"; shift 2 ;;
@@ -253,6 +260,11 @@ fi
 case "$ONLY" in
   all|binaries|plugins|frontend) ;;
   *) die "--only must be one of: all, binaries, plugins, frontend" ;;
+esac
+
+case "$BINARIES_DEPLOY_MODE" in
+  ota|ssh) ;;
+  *) die "BINARIES_DEPLOY_MODE must be one of: ota, ssh" ;;
 esac
 
 case "$FRONTEND_DEPLOY_MODE" in
@@ -293,9 +305,29 @@ ensure_deps() {
     fi
   fi
   if [[ "$UPLOAD" == "1" ]]; then
-    command -v ssh >/dev/null 2>&1 || die "ssh is required for upload"
-    if [[ -n "${SSH_PASS// }" ]]; then
-      command -v sshpass >/dev/null 2>&1 || die "sshpass is required when using --pass"
+    needs_ssh="0"
+    if [[ "$UPLOAD_TEMPLATES" == "1" ]]; then
+      needs_ssh="1"
+    fi
+    if [[ "$do_plugins" == "1" ]]; then
+      needs_ssh="1"
+    fi
+    if [[ "$do_binaries" == "1" && "$BINARIES_DEPLOY_MODE" == "ssh" ]]; then
+      needs_ssh="1"
+    fi
+    if [[ "$UPLOAD_FRONTEND" == "1" && "$do_frontend" == "1" && "$FRONTEND_DEPLOY_MODE" == "ssh" ]]; then
+      needs_ssh="1"
+    fi
+    if [[ "$needs_ssh" == "1" ]]; then
+      REQUIRES_SSH="1"
+      command -v ssh >/dev/null 2>&1 || die "ssh is required for the selected upload paths"
+      if [[ -n "${SSH_PASS// }" ]]; then
+        command -v sshpass >/dev/null 2>&1 || die "sshpass is required when using --pass"
+      fi
+    fi
+    if [[ "$do_binaries" == "1" && "$BINARIES_DEPLOY_MODE" == "ota" ]]; then
+      command -v curl >/dev/null 2>&1 || die "curl is required for binary OTA deploys"
+      command -v python3 >/dev/null 2>&1 || die "python3 is required for binary OTA deploys"
     fi
     if [[ "$UPLOAD_FRONTEND" == "1" && "$do_frontend" == "1" && "$FRONTEND_DEPLOY_MODE" == "ota" ]]; then
       command -v curl >/dev/null 2>&1 || die "curl is required for frontend OTA deploys"
@@ -678,7 +710,7 @@ fi
 
 if [[ "$UPLOAD" == "1" ]]; then
   delay_binary_stop_for_frontend_ota="0"
-  if [[ "$UPLOAD_FRONTEND" == "1" && "$FRONTEND_DEPLOY_MODE" == "ota" ]]; then
+  if [[ "$do_binaries" == "1" && "$BINARIES_DEPLOY_MODE" == "ssh" && "$UPLOAD_FRONTEND" == "1" && "$FRONTEND_DEPLOY_MODE" == "ota" ]]; then
     delay_binary_stop_for_frontend_ota="1"
   fi
 
@@ -714,6 +746,9 @@ if [[ "$UPLOAD" == "1" ]]; then
 
   ssh_control_cleanup() {
     if [[ "$DRY_RUN" == "1" ]]; then
+      return 0
+    fi
+    if [[ "$REQUIRES_SSH" != "1" ]]; then
       return 0
     fi
     if [[ -n "${SSH_PASS// }" ]]; then
@@ -856,14 +891,20 @@ PY
     return 1
   }
 
-  build_frontend_bundle_archive() {
+  build_release_bundle_archive() {
     local source_dir="$1"
     local output_path="$2"
-    run tar -C "$source_dir" -cf "$output_path" .
+    shift 2
+    local -a bundle_entries=( "$@" )
+    if [[ "${#bundle_entries[@]}" -eq 0 ]]; then
+      die "refusing to build an empty OTA bundle"
+    fi
+    run tar -C "$source_dir" -cf "$output_path" "${bundle_entries[@]}"
   }
 
   wait_for_http_ok() {
     local url="$1"
+    local label="${2:-service}"
     local last_error=""
     local attempt
     for attempt in $(seq 1 20); do
@@ -873,12 +914,56 @@ PY
       last_error="attempt $attempt failed"
       sleep 1
     done
-    die "frontend did not become reachable at $url after OTA apply ($last_error)"
+    die "$label did not become reachable at $url after OTA apply ($last_error)"
   }
 
-  ota_apply_frontend_bundle() {
+  ota_wait_for_apply_completion() {
+    local update_id="$1"
+    local label="$2"
+    local deadline_seconds="${3:-120}"
+    local state_response last_stage="" stage="" state_update_id="" last_error="" seen_update="0"
+    local deadline=$((SECONDS + deadline_seconds))
+
+    echo "Waiting for $label OTA apply $update_id..."
+    while (( SECONDS < deadline )); do
+      if state_response="$(curl_json_request_retryable GET "$OTA_BASE_URL/ota/state")"; then
+        stage="$(json_read_field "state.stage" "$state_response")"
+        state_update_id="$(json_read_field "state.update_id" "$state_response")"
+        last_error="$(json_read_field "state.last_error" "$state_response")"
+
+        if [[ "$state_update_id" == "$update_id" && "$stage" != "$last_stage" ]]; then
+          echo "$label OTA stage: ${stage:-unknown}"
+          last_stage="$stage"
+        fi
+
+        if [[ "$state_update_id" == "$update_id" ]]; then
+          seen_update="1"
+          case "$stage" in
+            complete) return 0 ;;
+            rolled_back) die "$label OTA rolled back: ${last_error:-unknown error}" ;;
+          esac
+        elif [[ "$seen_update" == "1" && -z "${state_update_id// }" ]]; then
+          # Service-bundle activation can restart the updater itself, which clears
+          # the in-memory active-update state before the host finishes polling.
+          # Once we've seen our update id reach the updater, a transition back to
+          # idle with the API healthy is a successful terminal state.
+          echo "$label OTA stage: complete"
+          return 0
+        fi
+      fi
+
+      sleep 1
+    done
+
+    die "timed out waiting for $label OTA apply $update_id"
+  }
+
+  ota_apply_bundle() {
     local bundle_path="$1"
-    local upload_response image_url size_bytes checksum apply_payload apply_response update_id state_response root_url
+    local artifact_kind="$2"
+    local label="$3"
+    local post_url="$4"
+    local upload_response image_url size_bytes checksum apply_payload apply_response update_id
 
     upload_response="$(curl_multipart_request "$OTA_BASE_URL/ota/upload" "$bundle_path")"
     image_url="$(json_read_field "image_url" "$upload_response")"
@@ -887,14 +972,14 @@ PY
 
     [[ -n "${image_url// }" ]] || die "OTA upload response did not include image_url"
 
-    apply_payload="$(python3 - "$image_url" "$size_bytes" "$checksum" "$OTA_REQUESTED_BY" <<'PY'
+    apply_payload="$(python3 - "$image_url" "$size_bytes" "$checksum" "$OTA_REQUESTED_BY" "$artifact_kind" <<'PY'
 import json
 import sys
 
-image_url, size_bytes, checksum, requested_by = sys.argv[1:]
+image_url, size_bytes, checksum, requested_by, artifact_kind = sys.argv[1:]
 payload = {
     "requested_by": requested_by,
-    "artifact_kind": "frontend_bundle",
+    "artifact_kind": artifact_kind,
     "image_url": image_url,
     "delete_image_after_apply": True,
 }
@@ -909,48 +994,24 @@ PY
     update_id="$(json_read_field "update_id" "$apply_response")"
     [[ -n "${update_id// }" ]] || die "OTA apply response did not include update_id"
 
-    echo "Waiting for frontend OTA apply $update_id..."
-    local last_stage=""
-    local stage=""
-    local state_update_id=""
-    local last_error=""
-    local deadline=$((SECONDS + 120))
-    while (( SECONDS < deadline )); do
-      if state_response="$(curl_json_request_retryable GET "$OTA_BASE_URL/ota/state")"; then
-        stage="$(json_read_field "state.stage" "$state_response")"
-        state_update_id="$(json_read_field "state.update_id" "$state_response")"
-        last_error="$(json_read_field "state.last_error" "$state_response")"
+    ota_wait_for_apply_completion "$update_id" "$label"
+    curl_json_request GET "$OTA_BASE_URL/ota/state" >/dev/null
+    wait_for_http_ok "$post_url" "$label"
+  }
 
-        if [[ "$state_update_id" == "$update_id" && "$stage" != "$last_stage" ]]; then
-          echo "Frontend OTA stage: ${stage:-unknown}"
-          last_stage="$stage"
-        fi
-
-        if [[ "$state_update_id" == "$update_id" ]]; then
-          case "$stage" in
-            complete) break ;;
-            rolled_back) die "frontend OTA rolled back: ${last_error:-unknown error}" ;;
-          esac
-        fi
-      fi
-
-      sleep 1
-    done
-
-    if (( SECONDS >= deadline )); then
-      die "timed out waiting for frontend OTA apply $update_id"
-    fi
-
+  ota_apply_frontend_bundle() {
+    local bundle_path="$1"
+    local root_url
     root_url="${OTA_BASE_URL%/v1}/"
     if [[ "$root_url" == "$OTA_BASE_URL/" ]]; then
       root_url="${OTA_BASE_URL%/}/"
     fi
-    curl_json_request GET "$OTA_BASE_URL/ota/state" >/dev/null
-    wait_for_http_ok "$root_url"
+    ota_apply_bundle "$bundle_path" "frontend_bundle" "Frontend" "$root_url"
+  }
 
-    if [[ "$DRY_RUN" != "1" ]]; then
-      ssh_exec "systemctl is-active --quiet helios-frontend.service"
-    fi
+  ota_apply_service_bundle() {
+    local bundle_path="$1"
+    ota_apply_bundle "$bundle_path" "service_bundle" "Service bundle" "$OTA_BASE_URL"
   }
 
   # Validate that a remote path looks like a real executable (non-empty, ELF magic).
@@ -1072,7 +1133,7 @@ PY
     done
 
     bins_to_upload=()
-    if [[ "$FAST_UPLOAD" == "1" ]]; then
+    if [[ "$BINARIES_DEPLOY_MODE" == "ota" || "$FAST_UPLOAD" == "1" ]]; then
       bins_to_upload=( "${bins[@]}" )
     else
       for b in "${bins[@]}"; do
@@ -1083,9 +1144,9 @@ PY
     fi
 
     if [[ "${#bins_to_upload[@]}" -gt 0 ]]; then
-      if [[ "$delay_binary_stop_for_frontend_ota" == "1" ]]; then
+      if [[ "$BINARIES_DEPLOY_MODE" == "ssh" && "$delay_binary_stop_for_frontend_ota" == "1" ]]; then
         echo "Delaying engine/api stop until after frontend OTA apply..."
-      else
+      elif [[ "$BINARIES_DEPLOY_MODE" == "ssh" ]]; then
         echo "Stopping services on $SSH_TARGET..."
         # Do not stop peripherals/updater here; on some devices peripherals owns the USB gadget/network.
         # Stopping it can drop the SSH link mid-deploy.
@@ -1132,7 +1193,7 @@ PY
       else
         frontend_bundle_archive="$(mktemp --suffix=.tar)"
         trap 'rm -f "$frontend_bundle_archive"; ssh_control_cleanup' EXIT
-        build_frontend_bundle_archive "$FRONTEND_DIR_LOCAL" "$frontend_bundle_archive"
+        build_release_bundle_archive "$FRONTEND_DIR_LOCAL" "$frontend_bundle_archive" "."
         ota_apply_frontend_bundle "$frontend_bundle_archive"
         rm -f "$frontend_bundle_archive"
       fi
@@ -1207,50 +1268,66 @@ PY
 
   if [[ "$do_binaries" == "1" ]]; then
     if [[ "${#bins_to_upload[@]}" -gt 0 ]]; then
-      echo "Uploading ${#bins_to_upload[@]} bin(s) -> $SSH_TARGET:$BIN_DIR_REMOTE"
-      if [[ "$delay_binary_stop_for_frontend_ota" == "1" ]]; then
-        echo "Stopping services on $SSH_TARGET..."
-        ssh_exec "systemctl stop helios-api.service helios-engine.service || true"
-      fi
-      ssh_exec "install -d -m0755 '$BIN_DIR_REMOTE'"
-      upload_and_install_bins "$BIN_DIR_REMOTE" "${bins_to_upload[@]}"
-
-      echo "Ensuring plugin env in /etc/default..."
-      ensure_remote_plugin_env
-      if [[ "$PROFILE_FLAG" == "--release" ]]; then
-        echo "Disabling debug logging for release..."
-        ssh_exec "sh -lc 'f=\"/etc/default/helios-engine\"; \
-          touch \"\$f\"; \
-          sed -i \"/^DAEDALUS_HOST_BRIDGE_TRACE=/d\" \"\$f\"; \
-          # Clear any leftover tracing/profiling knobs that can drastically impact performance. \
-          sed -i \"/^DAEDALUS_TRACE_/d\" \"\$f\"; \
-          sed -i \"/^HELIOS_PERF_COUNTERS=/d\" \"\$f\"; \
-          sed -i \"/^HELIOS_PPROF=/d\" \"\$f\"; \
-          sed -i \"/^HELIOS_PPROF_/d\" \"\$f\"; \
-          sed -i \"/^HELIOS_HOST_OUTPUT_DEBUG=/d\" \"\$f\"; \
-          sed -i \"/^HELIOS_DAEDALUS_HOST_OUTPUTS_IN_GRAPH=/d\" \"\$f\"; \
-          sed -i \"/^HELIOS_DAEDALUS_DEMAND_DRIVEN=/d\" \"\$f\"; \
-          if grep -q \"^RUST_LOG=\" \"\$f\"; then \
-            sed -i \"s/^RUST_LOG=.*/RUST_LOG=info/\" \"\$f\"; \
-          else \
-            echo \"RUST_LOG=info\" >> \"\$f\"; \
-          fi'"
-      fi
-
-      if [[ "$RESTART_SERVICES" != "0" ]]; then
-        echo "Restarting services..."
-        # Restart engine+api first.
-        ssh_exec "systemctl daemon-reload || true; systemctl restart helios-engine.service helios-api.service"
-        # Restart peripherals in a best-effort way as well so updated IMU/power code is actually active.
-        # On some setups this may briefly impact the USB gadget/network link; don't fail the deploy if so.
-        if ! ssh_exec "systemctl restart helios-peripherals.service"; then
-          echo "Warning: failed to restart helios-peripherals.service; binary was uploaded but service may still be running old code."
-        fi
-        if ! ssh_exec "systemctl restart helios-updater.service"; then
-          echo "Warning: failed to restart helios-updater.service; binary was uploaded but service may still be running old code."
+      if [[ "$BINARIES_DEPLOY_MODE" == "ota" ]]; then
+        echo "Publishing ${#bins_to_upload[@]} binary artifact(s) via OTA -> $OTA_BASE_URL"
+        if [[ "$DRY_RUN" == "1" ]]; then
+          printf '+ tar -C %q -cf <tmp>' "$BINS_DIR"
+          for b in "${bins_to_upload[@]}"; do
+            printf ' %q' "$b"
+          done
+          printf '\n'
+          printf '+ curl -F file=@<tmp> %q\n' "$OTA_BASE_URL/ota/upload"
+          printf '+ curl -X POST -H %q --data %q %q\n' 'Content-Type: application/json' '{"artifact_kind":"service_bundle",...}' "$OTA_BASE_URL/ota/apply"
+        else
+          service_bundle_archive="$(mktemp --suffix=.tar)"
+          trap 'rm -f "$service_bundle_archive"; ssh_control_cleanup' EXIT
+          build_release_bundle_archive "$BINS_DIR" "$service_bundle_archive" "${bins_to_upload[@]}"
+          ota_apply_service_bundle "$service_bundle_archive"
+          rm -f "$service_bundle_archive"
         fi
       else
-        echo "Skipping restart (RESTART_SERVICES=0)"
+        echo "Uploading ${#bins_to_upload[@]} bin(s) -> $SSH_TARGET:$BIN_DIR_REMOTE"
+        if [[ "$delay_binary_stop_for_frontend_ota" == "1" ]]; then
+          echo "Stopping services on $SSH_TARGET..."
+          ssh_exec "systemctl stop helios-api.service helios-engine.service || true"
+        fi
+        ssh_exec "install -d -m0755 '$BIN_DIR_REMOTE'"
+        upload_and_install_bins "$BIN_DIR_REMOTE" "${bins_to_upload[@]}"
+
+        echo "Ensuring plugin env in /etc/default..."
+        ensure_remote_plugin_env
+        if [[ "$PROFILE_FLAG" == "--release" ]]; then
+          echo "Disabling debug logging for release..."
+          ssh_exec "sh -lc 'f=\"/etc/default/helios-engine\"; \
+            touch \"\$f\"; \
+            sed -i \"/^DAEDALUS_HOST_BRIDGE_TRACE=/d\" \"\$f\"; \
+            # Clear any leftover tracing/profiling knobs that can drastically impact performance. \
+            sed -i \"/^DAEDALUS_TRACE_/d\" \"\$f\"; \
+            sed -i \"/^HELIOS_PERF_COUNTERS=/d\" \"\$f\"; \
+            sed -i \"/^HELIOS_PPROF=/d\" \"\$f\"; \
+            sed -i \"/^HELIOS_PPROF_/d\" \"\$f\"; \
+            sed -i \"/^HELIOS_HOST_OUTPUT_DEBUG=/d\" \"\$f\"; \
+            sed -i \"/^HELIOS_DAEDALUS_HOST_OUTPUTS_IN_GRAPH=/d\" \"\$f\"; \
+            sed -i \"/^HELIOS_DAEDALUS_DEMAND_DRIVEN=/d\" \"\$f\"; \
+            if grep -q \"^RUST_LOG=\" \"\$f\"; then \
+              sed -i \"s/^RUST_LOG=.*/RUST_LOG=info/\" \"\$f\"; \
+            else \
+              echo \"RUST_LOG=info\" >> \"\$f\"; \
+            fi'"
+        fi
+
+        if [[ "$RESTART_SERVICES" != "0" ]]; then
+          echo "Restarting services..."
+          ssh_exec "systemctl daemon-reload || true; systemctl restart helios-engine.service helios-api.service"
+          if ! ssh_exec "systemctl restart helios-peripherals.service"; then
+            echo "Warning: failed to restart helios-peripherals.service; binary was uploaded but service may still be running old code."
+          fi
+          if ! ssh_exec "systemctl restart helios-updater.service"; then
+            echo "Warning: failed to restart helios-updater.service; binary was uploaded but service may still be running old code."
+          fi
+        else
+          echo "Skipping restart (RESTART_SERVICES=0)"
+        fi
       fi
     fi
   fi

@@ -94,6 +94,7 @@ pub struct ApplyUpdateRequest {
 pub enum ApplyArtifactKind {
     DiskImage,
     FrontendBundle,
+    ServiceBundle,
 }
 
 impl ApplyArtifactKind {
@@ -101,6 +102,7 @@ impl ApplyArtifactKind {
         match self {
             Self::DiskImage => "disk-image",
             Self::FrontendBundle => "frontend-bundle",
+            Self::ServiceBundle => "service-bundle",
         }
     }
 
@@ -108,6 +110,7 @@ impl ApplyArtifactKind {
         match self {
             Self::DiskImage => true,
             Self::FrontendBundle => false,
+            Self::ServiceBundle => false,
         }
     }
 }
@@ -255,24 +258,11 @@ pub async fn apply_update(State(state): State<AppState>, Json(payload): Json<App
     let Some(image_url) = payload.image_url.as_deref() else {
         return (StatusCode::BAD_REQUEST, Json(UploadUpdateError { error: "image_url is required (staging removed)".into() })).into_response();
     };
-    let update_id = match stage_update_for_auto_apply(
-        &state,
-        image_url,
-        payload.size_bytes,
-        payload.checksum.as_deref(),
-        payload.delete_image_after_apply,
-        artifact_kind,
-    )
-    .await
-    {
+    let update_id = match stage_update_for_auto_apply(&state, image_url, payload.size_bytes, payload.checksum.as_deref(), payload.delete_image_after_apply, artifact_kind).await {
         Ok(update_id) => update_id,
         Err(err) => return err.into_response(),
     };
-    let stopped_streams = if artifact_kind.requires_stream_shutdown() {
-        stop_streams_for_update(&state).await.unwrap_or(0)
-    } else {
-        0
-    };
+    let stopped_streams = if artifact_kind.requires_stream_shutdown() { stop_streams_for_update(&state).await.unwrap_or(0) } else { 0 };
     let message = if stopped_streams > 0 { format!("apply scheduled (stopped {} stream{})", stopped_streams, if stopped_streams == 1 { "" } else { "s" }) } else { "apply scheduled".to_string() };
     (StatusCode::OK, Json(UpdateAckResponse { update_id: Some(update_id.to_string()), message })).into_response()
 }
@@ -343,14 +333,8 @@ async fn stage_update_for_auto_apply(
 ) -> Result<Uuid, UploadUpdateError> {
     let image_url = Url::parse(image_url.trim()).map_err(|_| UploadUpdateError { error: "invalid image_url".into() })?;
 
-    let mut artifact = ManifestArtifact {
-        url: image_url.clone(),
-        filename: None,
-        size_bytes,
-        sha256: checksum.map(|s| s.to_string()),
-        signature: None,
-        kind: Some(artifact_kind.manifest_kind().into()),
-    };
+    let mut artifact =
+        ManifestArtifact { url: image_url.clone(), filename: None, size_bytes, sha256: checksum.map(|s| s.to_string()), signature: None, kind: Some(artifact_kind.manifest_kind().into()) };
     if image_url.scheme() == "file" {
         let Ok(path) = image_url.to_file_path() else {
             return Err(UploadUpdateError { error: "invalid image path".into() });
