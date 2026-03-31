@@ -3,6 +3,8 @@ import { createDomainResource } from '$lib/api/domainResources';
 import { DeviceApi } from '$lib/api/deviceApi';
 import type {
   BootloaderStatus,
+  DeviceHealthIssue,
+  DeviceMetrics,
   ResourceGuardAction,
   ResourceGuardActionKind,
   ResourceGuardDegradedStream,
@@ -10,16 +12,6 @@ import type {
 } from '$lib/ts-bindings/http/client';
 
 export type { ResourceGuardAction, ResourceGuardActionKind, ResourceGuardDegradedStream, ResourceGuardStatus };
-
-export type DeviceHealthIssue = {
-  code: string;
-  description: string;
-};
-
-type DeviceMetricsWithHealth = {
-  status?: string | null;
-  issues?: Array<{ code?: string | null; description?: string | null }> | null;
-};
 
 export type OsHealthStatus = {
   status: string;
@@ -39,7 +31,7 @@ export async function fetchResourceGuardStatus(): Promise<ResourceGuardStatus> {
 }
 
 export async function fetchOsHealthStatus(): Promise<OsHealthStatus> {
-  const metrics = (await DeviceApi.metrics({ cacheMs: 0 })) as DeviceMetricsWithHealth;
+  const metrics = (await DeviceApi.metrics({ cacheMs: 0 })) as DeviceMetrics;
   const issues = Array.isArray(metrics?.issues)
     ? metrics.issues
         .map((issue) => ({
