@@ -6,13 +6,14 @@ use helios_engine::ipc::{
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
+use styx::codec::{CodecKind, CodecRegistry};
 use styx::{BackendHandle, BackendKind};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::http::identity_tokens;
 use crate::http::pipelines;
-use crate::http::validation::{ValidationIssue, ValidationWarning, issue, warning};
+use crate::http::validation::{ValidationIssue, ValidationWarning, issue, issue_with_remediation, warning};
 
 use super::util;
 use super::{CALIBRATION_MODE_PIPELINE_UUID, RAW_PIPELINE_UUID};
@@ -129,10 +130,6 @@ pub fn normalize_stream_manifest(mut manifest: StreamManifest) -> NormalizedStre
     util::normalize_stream_encoder_manifest(&mut manifest);
     normalize_capture_tdn_output(&mut manifest);
 
-    if !crate::features::shadow_recorder_enabled() {
-        manifest.shadow_recorder_enabled = false;
-    }
-
     NormalizedStreamManifest { manifest, warnings }
 }
 
@@ -147,6 +144,7 @@ pub async fn validate_stream_manifest(manifest: StreamManifest) -> Result<Stream
     validate_pipeline_layout(&manifest, &mut issues);
     validate_pipeline_wires(&manifest, &mut issues);
     validate_pipeline_bindings(&manifest, &mut issues).await;
+    validate_stream_feature_compatibility(&manifest, &mut issues);
 
     if issues.is_empty() {
         let mut manifest = manifest;
@@ -194,6 +192,171 @@ fn validate_backend_and_handle(manifest: &StreamManifest, issues: &mut Vec<Valid
             format!("capture backend `{}` does not match handle variant `{}`", backend_label(manifest.capture.backend), handle_label(&manifest.capture.handle)),
         ));
     }
+}
+
+fn validate_stream_feature_compatibility(manifest: &StreamManifest, issues: &mut Vec<ValidationIssue>) {
+    validate_requested_codec_compatibility(manifest, issues);
+    validate_shadow_recorder_compatibility(manifest, issues);
+}
+
+fn validate_requested_codec_compatibility(manifest: &StreamManifest, issues: &mut Vec<ValidationIssue>) {
+    if !manifest.encoder.is_disabled() {
+        validate_codec_selector_available(
+            styx::prelude::FourCc::new(*b"RG24"),
+            CodecKind::Encoder,
+            manifest.encoder.id(),
+            "/encoder/id",
+            "encoder_unavailable",
+            issues,
+        );
+    }
+
+    if !manifest.decoder.is_disabled() {
+        let capture_fourcc = manifest.capture.mode.format.code;
+        validate_codec_selector_available(
+            capture_fourcc,
+            CodecKind::Decoder,
+            manifest.decoder.id(),
+            "/decoder/id",
+            "decoder_unavailable",
+            issues,
+        );
+    }
+}
+
+fn validate_codec_selector_available(
+    input: styx::prelude::FourCc,
+    kind: CodecKind,
+    selector: Option<&str>,
+    pointer: &str,
+    code: &'static str,
+    issues: &mut Vec<ValidationIssue>,
+) {
+    let Some(selector) = selector.map(str::trim).filter(|value| !value.is_empty()) else {
+        return;
+    };
+
+    if codec_selector_available(input, kind, selector) {
+        return;
+    }
+
+    let kind_label = match kind {
+        CodecKind::Encoder => "encoder",
+        CodecKind::Decoder => "decoder",
+    };
+    let format_label = String::from_utf8_lossy(&input.to_u32().to_le_bytes()).trim().to_string();
+    let remediation = match kind {
+        CodecKind::Encoder => "Choose an available encoder selector for this stream, or disable encoding.",
+        CodecKind::Decoder => "Choose a decoder selector that supports the selected capture format, or disable decoding.",
+    };
+    issues.push(issue_with_remediation(
+        pointer,
+        code,
+        format!("{kind_label} `{selector}` is not available for capture format {format_label}"),
+        remediation,
+    ));
+}
+
+fn codec_selector_available(input: styx::prelude::FourCc, kind: CodecKind, selector: &str) -> bool {
+    let Ok(registry) = CodecRegistry::with_enabled_codecs() else {
+        return false;
+    };
+    let handle = registry.handle();
+    handle.lookup_named_kind(input, kind, selector).or_else(|_| handle.lookup_auto_kind_by_name(input, kind, selector)).is_ok()
+}
+
+fn validate_shadow_recorder_compatibility(manifest: &StreamManifest, issues: &mut Vec<ValidationIssue>) {
+    if !manifest.shadow_recorder_enabled {
+        return;
+    }
+
+    if !crate::features::shadow_recorder_enabled() {
+        issues.push(issue_with_remediation(
+            "/shadow_recorder_enabled",
+            "shadow_recorder_feature_disabled",
+            "shadow recorder is disabled by the HELIOS_ENABLE_SHADOW_RECORDER feature gate",
+            "Disable shadow recording for this stream, or enable HELIOS_ENABLE_SHADOW_RECORDER before retrying.",
+        ));
+        return;
+    }
+
+    if manifest.encoder.is_disabled() {
+        issues.push(issue_with_remediation(
+            "/shadow_recorder_enabled",
+            "shadow_recorder_requires_encoder",
+            "shadow recorder requires the stream encoder to be enabled",
+            "Enable an H264 or H265 encoder before turning on shadow recording.",
+        ));
+        return;
+    }
+
+    let Some(encoder_id) = manifest.encoder.id().map(str::trim).filter(|value| !value.is_empty()) else {
+        issues.push(issue_with_remediation(
+            "/encoder/id",
+            "shadow_recorder_requires_h26x_encoder",
+            "shadow recorder requires an h264/h265 encoder selection",
+            "Select an H264 or H265 encoder for this stream before enabling shadow recording.",
+        ));
+        return;
+    };
+
+    if infer_shadow_recording_codec(encoder_id).is_none() {
+        issues.push(issue_with_remediation(
+            "/encoder/id",
+            "shadow_recorder_requires_h26x_encoder",
+            "shadow recorder requires an h264/h265 encoder selection",
+            "Select an H264 or H265 encoder for this stream before enabling shadow recording.",
+        ));
+    }
+}
+
+fn infer_shadow_recording_codec(encoder_id: &str) -> Option<helios_engine::ipc::RecordingCodec> {
+    let encoder_id = encoder_id.trim();
+    if encoder_id.is_empty() {
+        return None;
+    }
+
+    let h264 = encoder_matches_recording_codec(helios_engine::ipc::RecordingCodec::H264, encoder_id);
+    let h265 = encoder_matches_recording_codec(helios_engine::ipc::RecordingCodec::H265, encoder_id);
+    match (h264, h265) {
+        (true, false) => Some(helios_engine::ipc::RecordingCodec::H264),
+        (false, true) => Some(helios_engine::ipc::RecordingCodec::H265),
+        _ => None,
+    }
+}
+
+fn encoder_matches_recording_codec(codec: helios_engine::ipc::RecordingCodec, encoder_id: &str) -> bool {
+    let targets: &[&str] = match codec {
+        helios_engine::ipc::RecordingCodec::H264 => &["h264", "avc"],
+        helios_engine::ipc::RecordingCodec::H265 => &["h265", "hevc"],
+    };
+    let encoder_id = encoder_id.trim();
+    if encoder_id.is_empty() {
+        return false;
+    }
+    if targets.iter().any(|target| encoder_id.eq_ignore_ascii_case(target)) {
+        return true;
+    }
+    let lowered = encoder_id.to_ascii_lowercase();
+    if targets.iter().any(|target| lowered.contains(target)) {
+        return true;
+    }
+
+    let Some(entries) = CodecRegistry::list_enabled_encoders().ok() else {
+        return false;
+    };
+    let mut matched_names = BTreeSet::new();
+    for (_, codecs) in entries {
+        for desc in codecs {
+            if desc.kind != CodecKind::Encoder {
+                continue;
+            }
+            if desc.impl_name.eq_ignore_ascii_case(encoder_id) {
+                matched_names.insert(desc.name.to_ascii_lowercase());
+            }
+        }
+    }
+    matched_names.len() == 1 && targets.iter().any(|target| matched_names.contains(*target))
 }
 
 fn validate_file_backend_paths_present(manifest: &StreamManifest, issues: &mut Vec<ValidationIssue>) {
@@ -703,6 +866,15 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn allows_missing_codec_selectors_when_not_explicitly_requested() {
+        let file = create_temp_media_file("mp4").await;
+        let manifest = base_manifest(&file);
+
+        validate_stream_manifest(manifest).await.expect("validation should succeed");
+        let _ = tokio::fs::remove_file(&file).await;
+    }
+
+    #[tokio::test]
     async fn rejects_unsupported_file_replay_media_type() {
         let file = create_temp_media_file("txt").await;
         let manifest = base_manifest(&file);
@@ -726,6 +898,53 @@ mod tests {
         let err = result.expect_err("expected disabled pipeline state failure");
         assert!(err.issues.iter().any(|issue| issue.code == "pipeline_disabled_with_pipeline_state"));
         let _ = tokio::fs::remove_file(&file).await;
+    }
+
+    #[tokio::test]
+    async fn rejects_unknown_encoder_selector() {
+        let mut manifest = sample_libcamera_manifest();
+        manifest.encoder = helios_engine::ipc::RequestedEncoderConfig::enabled(Some("definitely-missing-encoder".to_string()), None);
+
+        let err = validate_stream_manifest(manifest).await.expect_err("expected unknown encoder failure");
+        let issue = err.issues.iter().find(|issue| issue.code == "encoder_unavailable").expect("expected encoder availability issue");
+        assert_eq!(issue.path, "/encoder/id");
+        assert_eq!(issue.remediation.as_deref(), Some("Choose an available encoder selector for this stream, or disable encoding."));
+    }
+
+    #[tokio::test]
+    async fn rejects_unknown_decoder_selector() {
+        let mut manifest = sample_libcamera_manifest();
+        manifest.decoder = helios_engine::ipc::RequestedDecoderConfig::enabled(Some("definitely-missing-decoder".to_string()), None);
+
+        let err = validate_stream_manifest(manifest).await.expect_err("expected unknown decoder failure");
+        let issue = err.issues.iter().find(|issue| issue.code == "decoder_unavailable").expect("expected decoder availability issue");
+        assert_eq!(issue.path, "/decoder/id");
+        assert_eq!(issue.remediation.as_deref(), Some("Choose a decoder selector that supports the selected capture format, or disable decoding."));
+    }
+
+    #[tokio::test]
+    async fn rejects_shadow_recorder_without_encoder() {
+        let mut manifest = sample_libcamera_manifest();
+        manifest.encoder = helios_engine::ipc::RequestedEncoderConfig::disabled();
+        manifest.shadow_recorder_enabled = true;
+
+        let err = validate_stream_manifest(manifest).await.expect_err("expected shadow recorder encoder requirement failure");
+        let issue =
+            err.issues.iter().find(|issue| issue.code == "shadow_recorder_requires_encoder").expect("expected shadow recorder encoder issue");
+        assert_eq!(issue.path, "/shadow_recorder_enabled");
+        assert_eq!(issue.remediation.as_deref(), Some("Enable an H264 or H265 encoder before turning on shadow recording."));
+    }
+
+    #[tokio::test]
+    async fn rejects_shadow_recorder_with_non_h26x_encoder() {
+        let mut manifest = sample_libcamera_manifest();
+        manifest.encoder = helios_engine::ipc::RequestedEncoderConfig::enabled(Some("turbojpeg".to_string()), None);
+        manifest.shadow_recorder_enabled = true;
+
+        let err = validate_stream_manifest(manifest).await.expect_err("expected shadow recorder codec compatibility failure");
+        let issue = err.issues.iter().find(|issue| issue.code == "shadow_recorder_requires_h26x_encoder").expect("expected shadow recorder codec issue");
+        assert_eq!(issue.path, "/encoder/id");
+        assert_eq!(issue.remediation.as_deref(), Some("Select an H264 or H265 encoder for this stream before enabling shadow recording."));
     }
 
     fn sample_libcamera_manifest() -> StreamManifest {

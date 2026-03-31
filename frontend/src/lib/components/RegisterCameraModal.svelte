@@ -9,6 +9,7 @@
   import { PipelinesApi } from '$lib/api/pipelinesApi';
   import { StreamsApi } from '$lib/api/streamsApi';
   import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
+  import { extractValidationReport } from '$lib/api/errors';
   import { invalidateSWR, invalidateSWRPrefix } from '$lib/utils/swrCache';
   import type {
     CaptureConfig,
@@ -23,10 +24,12 @@
     PeerInfo,
     StreamInfo,
     StreamCapabilitiesResponse,
-    StreamManifest
+    StreamManifest,
+    ValidationIssue
   } from '$lib/ts-bindings/http/client';
   import { registerCameraModal } from '$lib/stores/modals';
   import ModalShell from '$lib/components/ui/ModalShell.svelte';
+  import ValidationIssueList from '$lib/components/ui/ValidationIssueList.svelte';
   import RegisterCameraDeviceList from '$lib/components/register-camera/RegisterCameraDeviceList.svelte';
   import RegisterCameraBackendMode from '$lib/components/register-camera/RegisterCameraBackendMode.svelte';
   import RegisterCameraStreamSettings from '$lib/components/register-camera/RegisterCameraStreamSettings.svelte';
@@ -71,6 +74,8 @@
   let loading = $state(true);
   let submitting = $state(false);
   let error = $state<string | null>(null);
+  let submitError = $state<string | null>(null);
+  let submitValidationIssues = $state<ValidationIssue[]>([]);
   let devices = $state<ProbedDevice[]>([]);
   let codecs = $state<CodecInfo[]>([]);
   let encoders = $state<CodecInfo[]>([]);
@@ -326,6 +331,8 @@
     if (!silent) {
       loading = true;
       error = null;
+      submitError = null;
+      submitValidationIssues = [];
     }
     const preserveSelection =
       typeof options === 'object' && options !== null && 'preserveSelection' in options
@@ -833,6 +840,8 @@
   }
 
   async function submit(): Promise<void> {
+    submitError = null;
+    submitValidationIssues = [];
     const device = currentDevice();
     const backend = currentBackend();
     const isSimpleRegistration = registerExperience === 'simple';
@@ -1026,12 +1035,14 @@
       dispatch('create', { streamId, descriptor: response.descriptor });
       registerCameraModal.set(false);
     } catch (err) {
+      const validationReport = extractValidationReport(err);
+      submitValidationIssues = validationReport?.issues ?? [];
       reportError({
         title: 'Stream start failed',
         error: err,
         fallback: 'Unable to start the stream right now.',
         inline: (message) => {
-          error = message;
+          submitError = message;
         }
       });
     } finally {
@@ -1072,6 +1083,17 @@
             ? 'Choose camera, stream type, resolution, and optional pipeline/template.'
             : 'Detected devices from /peripherals with a fallback to /streams/backends.'}
         </p>
+        {#if submitError}
+          <div class="mt-4 space-y-3 rounded-lg border border-error-500/30 bg-error-500/10 px-4 py-3">
+            <div>
+              <p class="text-[0.7rem] font-semibold uppercase tracking-[0.24em] text-error-100">Last start attempt failed</p>
+              <p class="mt-2 text-sm text-surface-100">{submitError}</p>
+            </div>
+            {#if submitValidationIssues.length}
+              <ValidationIssueList issues={submitValidationIssues} title="Stream incompatibilities" compact />
+            {/if}
+          </div>
+        {/if}
         <div class="mt-3 inline-flex rounded-md border border-surface-700 bg-surface-950/70 p-1">
           <button
             type="button"

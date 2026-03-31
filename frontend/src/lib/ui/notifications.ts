@@ -1,4 +1,5 @@
 import { writable } from 'svelte/store';
+import type { ValidationIssue } from '$lib/ts-bindings/http/client';
 import { readJson, writeJson } from '$lib/utils/storage';
 
 export type NotificationKind = 'error' | 'warning' | 'info';
@@ -18,6 +19,7 @@ export type NotificationItem = {
   retryable?: boolean | null;
   remediation?: string | null;
   reportedBy?: string | null;
+  validationIssues?: ValidationIssue[] | null;
 };
 
 const MAX_NOTIFICATIONS = 50;

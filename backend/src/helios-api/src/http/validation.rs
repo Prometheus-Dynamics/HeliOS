@@ -12,6 +12,8 @@ pub struct ValidationIssue {
     pub path: String,
     pub code: String,
     pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remediation: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
@@ -34,7 +36,21 @@ pub struct ValidationErrorBody {
 }
 
 pub fn issue(path: impl Into<String>, code: impl Into<String>, message: impl Into<String>) -> ValidationIssue {
-    ValidationIssue { path: path.into(), code: code.into(), message: message.into() }
+    ValidationIssue { path: path.into(), code: code.into(), message: message.into(), remediation: None }
+}
+
+pub fn issue_with_remediation(
+    path: impl Into<String>,
+    code: impl Into<String>,
+    message: impl Into<String>,
+    remediation: impl Into<String>,
+) -> ValidationIssue {
+    ValidationIssue {
+        path: path.into(),
+        code: code.into(),
+        message: message.into(),
+        remediation: Some(remediation.into()),
+    }
 }
 
 pub fn warning(path: impl Into<String>, code: impl Into<String>, message: impl Into<String>) -> ValidationWarning {

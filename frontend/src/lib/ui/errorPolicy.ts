@@ -1,7 +1,7 @@
 import { get } from 'svelte/store';
 import { toaster } from '$lib';
 import { pushNotification } from '$lib/ui/notifications';
-import { extractError, extractErrorMetadata } from '$lib/api/errors';
+import { extractError, extractErrorMetadata, extractValidationReport } from '$lib/api/errors';
 import { connectionState, type ConnectionStatus } from '$lib/api/connection';
 
 type ErrorPolicyOptions = {
@@ -67,6 +67,7 @@ function isNetworkFailure(error: unknown, message: string): boolean {
 export function reportError(options: ErrorPolicyOptions): string {
   const message = buildErrorMessage(options);
   const metadata = extractErrorMetadata(options.error);
+  const validation = extractValidationReport(options.error);
   if (options.inline) {
     options.inline(message);
   }
@@ -96,7 +97,8 @@ export function reportError(options: ErrorPolicyOptions): string {
     retryable: options.retryable ?? metadata?.retryable ?? null,
     remediation: options.remediation ?? metadata?.remediation ?? null,
     occurredAt: metadata?.timestampMs ?? null,
-    reportedBy: metadata?.reportedBy ?? null
+    reportedBy: metadata?.reportedBy ?? null,
+    validationIssues: validation?.issues ?? metadata?.validationIssues ?? null
   });
   return message;
 }

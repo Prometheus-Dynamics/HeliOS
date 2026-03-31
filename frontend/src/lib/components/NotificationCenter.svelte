@@ -3,6 +3,7 @@
   import { clearErrorHistory, fetchErrorHistory } from '$lib/api/errorHistory';
   import { reportError } from '$lib/ui/errorPolicy';
   import FaIcon from '$lib/components/icons/FaIcon.svelte';
+  import ValidationIssueList from '$lib/components/ui/ValidationIssueList.svelte';
   import { faBell } from '@fortawesome/free-solid-svg-icons';
   import type { ErrorHistoryEntry } from '$lib/api/errorHistory';
   import { onMount } from 'svelte';
@@ -93,7 +94,8 @@
           note.operation ?? '',
           note.code ?? '',
           note.requestId ?? '',
-          note.traceId ?? ''
+          note.traceId ?? '',
+          ...(note.validationIssues?.flatMap((issue) => [issue.code, issue.path, issue.message, issue.remediation ?? '']) ?? [])
         ]
           .join(' ')
           .toLowerCase();
@@ -257,6 +259,11 @@
                     {/if}
                     {#if note.remediation}
                       <div class="mt-2 text-xs text-surface-300">Next: {note.remediation}</div>
+                    {/if}
+                    {#if note.validationIssues?.length}
+                      <div class="mt-3">
+                        <ValidationIssueList issues={note.validationIssues} title="Reported issues" compact />
+                      </div>
                     {/if}
                   </div>
                   <button

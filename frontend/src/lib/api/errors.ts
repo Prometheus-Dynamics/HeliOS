@@ -5,7 +5,7 @@ import type {
   ValidationIssue,
   ValidationWarning
 } from '$lib/ts-bindings/http/client';
-import { ApiError } from '$lib/ts-bindings/http/client';
+import { ApiError } from '$lib/ts-bindings/http/client/core/ApiError';
 
 type ErrorPayload = Partial<ErrorBody> &
   Partial<ValidationErrorBody> &
@@ -18,6 +18,11 @@ type ErrorPayload = Partial<ErrorBody> &
     traceId?: string | null;
     reportedBy?: string | null;
   };
+
+export type ValidationReport = {
+  issues: ValidationIssue[];
+  warnings: ValidationWarning[];
+};
 
 const CODE_MESSAGES: Record<string, string> = {
   bad_request: 'Invalid request.',
@@ -57,6 +62,36 @@ function summarizeValidationEntries(entries: Array<ValidationIssue | ValidationW
   const primary = messages.slice(0, 3).join('; ');
   const remaining = messages.length - 3;
   return remaining > 0 ? `${primary}; +${remaining} more` : primary;
+}
+
+function normalizeValidationIssues(entries: Array<ValidationIssue> | null | undefined): ValidationIssue[] {
+  if (!Array.isArray(entries)) return [];
+  return entries.filter(
+    (entry): entry is ValidationIssue =>
+      Boolean(entry) &&
+      typeof entry.code === 'string' &&
+      typeof entry.message === 'string' &&
+      typeof entry.path === 'string'
+  );
+}
+
+function normalizeValidationWarnings(entries: Array<ValidationWarning> | null | undefined): ValidationWarning[] {
+  if (!Array.isArray(entries)) return [];
+  return entries.filter(
+    (entry): entry is ValidationWarning =>
+      Boolean(entry) &&
+      typeof entry.code === 'string' &&
+      typeof entry.message === 'string' &&
+      typeof entry.path === 'string'
+  );
+}
+
+function validationReportFromPayload(payload: ErrorPayload | null | undefined): ValidationReport | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const issues = normalizeValidationIssues(payload.issues ?? null);
+  const warnings = normalizeValidationWarnings(payload.warnings ?? null);
+  if (!issues.length && !warnings.length) return null;
+  return { issues, warnings };
 }
 
 function formatPayloadMessage(payload: ErrorPayload): string | null {
@@ -131,12 +166,16 @@ export type ErrorMetadata = {
   retryable?: boolean | null;
   remediation?: string | null;
   reportedBy?: string | null;
+  validationIssues?: ValidationIssue[] | null;
+  validationWarnings?: ValidationWarning[] | null;
 };
 
 export function extractErrorMetadata(err: unknown): ErrorMetadata | null {
   if (!(err instanceof ApiError)) return null;
   const payload = err.body as ErrorPayload | null | undefined;
   if (!payload || typeof payload !== 'object') return null;
+  const validation = validationReportFromPayload(payload);
+  const remediationFromIssue = validation?.issues.find((issue) => typeof issue.remediation === 'string' && issue.remediation.trim().length)?.remediation ?? null;
   return {
     code: payload.code ?? null,
     timestampMs:
@@ -150,9 +189,17 @@ export function extractErrorMetadata(err: unknown): ErrorMetadata | null {
     requestId: payload.requestId ?? payload.request_id ?? null,
     traceId: payload.traceId ?? payload.trace_id ?? null,
     retryable: payload.retryable ?? null,
-    remediation: payload.remediation ?? null,
-    reportedBy: payload.reportedBy ?? payload.reported_by ?? null
+    remediation: payload.remediation ?? remediationFromIssue,
+    reportedBy: payload.reportedBy ?? payload.reported_by ?? null,
+    validationIssues: validation?.issues ?? null,
+    validationWarnings: validation?.warnings ?? null
   };
+}
+
+export function extractValidationReport(err: unknown): ValidationReport | null {
+  if (!(err instanceof ApiError)) return null;
+  const payload = err.body as ErrorPayload | null | undefined;
+  return validationReportFromPayload(payload);
 }
 
 export function extractMessage(raw: string | null | undefined): string | null {
