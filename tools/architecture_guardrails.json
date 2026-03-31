@@ -1157,6 +1157,66 @@
       "max_lines": 160,
       "owner": "HeliOS",
       "review_note": "Stream control batching, apply-loop scheduling, and response fanout now live here; keep graph mutation persistence out of this module."
+    },
+    {
+      "path": "backend/src/helios-api/src/app_state/mod.rs",
+      "max_lines": 40,
+      "owner": "HeliOS",
+      "review_note": "App-state root should only stitch together the split service facade modules and re-exports."
+    },
+    {
+      "path": "backend/src/helios-api/src/app_state/core.rs",
+      "max_lines": 50,
+      "owner": "HeliOS",
+      "review_note": "ApiAppState and ApiServices construction now live here; keep service-specific forwarding logic in the dedicated facade modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/app_state/hardware_media.rs",
+      "max_lines": 170,
+      "owner": "HeliOS",
+      "review_note": "Hardware and media read-model service facades now live here; keep pipeline, network, and updater concerns separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/app_state/pipelines_streams.rs",
+      "max_lines": 220,
+      "owner": "HeliOS",
+      "review_note": "Pipeline-registry and stream-read-model service facades now live here; keep system telemetry and updater wiring separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/app_state/network_peers.rs",
+      "max_lines": 90,
+      "owner": "HeliOS",
+      "review_note": "Network-team autodetect and peer snapshot service facades now live here; keep read-model and updater state out of this module."
+    },
+    {
+      "path": "backend/src/helios-api/src/app_state/system_updater.rs",
+      "max_lines": 230,
+      "owner": "HeliOS",
+      "review_note": "System read-model and updater service facades now live here; keep stream/media wrappers out of this module."
+    },
+    {
+      "path": "backend/src/helios-api/src/logs/mod.rs",
+      "max_lines": 40,
+      "owner": "HeliOS",
+      "review_note": "Logs root should only re-export the split schema, catalog, and systemd hydration modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/logs/types.rs",
+      "max_lines": 50,
+      "owner": "HeliOS",
+      "review_note": "Log-source schemas now live here; keep source discovery and systemd probing out of this module."
+    },
+    {
+      "path": "backend/src/helios-api/src/logs/catalog.rs",
+      "max_lines": 100,
+      "owner": "HeliOS",
+      "review_note": "Default log source inventory and file-source discovery now live here; keep systemd status hydration separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/logs/systemd.rs",
+      "max_lines": 90,
+      "owner": "HeliOS",
+      "review_note": "Systemd unit-status hydration now lives here; keep source catalog definitions separate."
     }
   ],
   "forbidden_paths": [
@@ -1214,6 +1274,16 @@
       "path": "backend/src/helios-api/src/stream_command_service.rs",
       "owner": "HeliOS",
       "reason": "Stream command graph mutation helpers and the control batching worker now live under backend/src/helios-api/src/stream_command_service/*. Do not recreate the deleted stream_command_service.rs monolith."
+    },
+    {
+      "path": "backend/src/helios-api/src/app_state.rs",
+      "owner": "HeliOS",
+      "reason": "ApiAppState construction plus the hardware/media/pipeline/stream/network/peer/system/updater service facades now live under backend/src/helios-api/src/app_state/*. Do not recreate the deleted app_state.rs monolith."
+    },
+    {
+      "path": "backend/src/helios-api/src/logs.rs",
+      "owner": "HeliOS",
+      "reason": "Log-source schemas, default catalog discovery, and systemd status hydration now live under backend/src/helios-api/src/logs/*. Do not recreate the deleted logs.rs monolith."
     },
     {
       "path": "backend/src/helios-api/src/http/localization/maps.rs",
