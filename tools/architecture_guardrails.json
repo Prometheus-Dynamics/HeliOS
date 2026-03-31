@@ -865,6 +865,36 @@
       "review_note": "Frame shmem forwarding is a dedicated path now; keep it contained instead of merging it back into the router."
     },
     {
+      "path": "backend/src/helios-api/src/ws/sensors/mod.rs",
+      "max_lines": 120,
+      "owner": "HeliOS",
+      "review_note": "The sensors websocket root should stay as thin upgrade/doc orchestration after the split."
+    },
+    {
+      "path": "backend/src/helios-api/src/ws/sensors/hub.rs",
+      "max_lines": 320,
+      "owner": "HeliOS",
+      "review_note": "Sensor event sampler state, latest-value cache, and peripherals subscription lifecycle now live here; keep websocket session parsing and error transport out of the hub module."
+    },
+    {
+      "path": "backend/src/helios-api/src/ws/sensors/session.rs",
+      "max_lines": 380,
+      "owner": "HeliOS",
+      "review_note": "Sensor websocket client message parsing, requested-kind state, cached replay, and wire-level error handling now live here; keep sampler/runtime state out of the session module."
+    },
+    {
+      "path": "backend/src/helios-api/src/ws/sensors/wire.rs",
+      "max_lines": 160,
+      "owner": "HeliOS",
+      "review_note": "Sensor websocket wire framing and error-history transport now live here; keep subscription state and peripherals sampling out of this transport helper."
+    },
+    {
+      "path": "backend/src/helios-api/src/ws/sensors/tests.rs",
+      "max_lines": 120,
+      "owner": "HeliOS",
+      "review_note": "Sensor websocket request parsing and payload-shaping tests now live here; keep regression coverage isolated from production modules."
+    },
+    {
       "path": "backend/src/helios-engine/src/localization/solve/mod.rs",
       "max_lines": 250,
       "owner": "HeliOS",
@@ -917,6 +947,11 @@
       "path": "backend/src/helios-api/src/ws/streams.rs",
       "owner": "HeliOS",
       "reason": "Websocket stream handling now lives under backend/src/helios-api/src/ws/streams/*. Do not recreate the deleted ws/streams.rs monolith."
+    },
+    {
+      "path": "backend/src/helios-api/src/ws/sensors.rs",
+      "owner": "HeliOS",
+      "reason": "Sensor websocket hub state, session parsing, and payload/error transport now live under backend/src/helios-api/src/ws/sensors/*. Do not recreate the deleted ws/sensors.rs monolith."
     },
     {
       "path": "backend/src/helios-api/src/http/localization/maps.rs",
