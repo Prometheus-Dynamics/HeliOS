@@ -985,6 +985,48 @@
       "review_note": "Resource-guard meminfo parsing regressions now live here; keep production runtime and scoring logic out of the test module."
     },
     {
+      "path": "backend/src/helios-api/src/api_tools_impl/mod.rs",
+      "max_lines": 180,
+      "owner": "HeliOS",
+      "review_note": "API tools root should stay focused on request dispatch and shared exports after splitting board/chart generation, PDF helpers, CCM solving, image edits, and model inspection into dedicated modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/api_tools_impl/boards.rs",
+      "max_lines": 260,
+      "owner": "HeliOS",
+      "review_note": "Calibration-board PNG/PDF generation and board-square sizing defaults now live here; keep generic PDF drawing helpers and IPA chart logic separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/api_tools_impl/charts.rs",
+      "max_lines": 220,
+      "owner": "HeliOS",
+      "review_note": "IPA chart sizing, paper-fit selection, color-checker swatches, and PNG/PDF route helpers now live here; keep calibration-board and CCM solve logic out of this module."
+    },
+    {
+      "path": "backend/src/helios-api/src/api_tools_impl/ccm.rs",
+      "max_lines": 220,
+      "owner": "HeliOS",
+      "review_note": "Color-checker corner ordering, homography solving, patch sampling, and CCM solve logic now live here; keep PDF/image editing and model inspection concerns separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/api_tools_impl/pdf.rs",
+      "max_lines": 340,
+      "owner": "HeliOS",
+      "review_note": "Shared PDF constants, page-unit conversion, and grayscale/RGB PDF rendering helpers now live here; keep tool request dispatch and color-checker math out of this module."
+    },
+    {
+      "path": "backend/src/helios-api/src/api_tools_impl/image_ops.rs",
+      "max_lines": 80,
+      "owner": "HeliOS",
+      "review_note": "Image crop/rotation and output encoding now live here; keep PDF generation and model inspection out of this image-edit helper."
+    },
+    {
+      "path": "backend/src/helios-api/src/api_tools_impl/model.rs",
+      "max_lines": 80,
+      "owner": "HeliOS",
+      "review_note": "AI model inspection format conversion and tensor metadata mapping now live here; keep board/chart/image operations separate from model introspection."
+    },
+    {
       "path": "backend/src/helios-engine/src/localization/solve/mod.rs",
       "max_lines": 250,
       "owner": "HeliOS",
@@ -1052,6 +1094,11 @@
       "path": "backend/src/helios-api/src/resource_guard.rs",
       "owner": "HeliOS",
       "reason": "Resource-guard schemas, runtime polling, scoring heuristics, and system probes now live under backend/src/helios-api/src/resource_guard/*. Do not recreate the deleted resource_guard.rs monolith."
+    },
+    {
+      "path": "backend/src/helios-api/src/api_tools_impl.rs",
+      "owner": "HeliOS",
+      "reason": "API tools request dispatch, board/chart generation, PDF rendering, CCM solving, image edits, and model inspection now live under backend/src/helios-api/src/api_tools_impl/*. Do not recreate the deleted api_tools_impl.rs monolith."
     },
     {
       "path": "backend/src/helios-api/src/http/localization/maps.rs",
