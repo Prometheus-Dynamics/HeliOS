@@ -727,6 +727,18 @@
       "review_note": "Viewer behavior is still being broken apart; fail if StreamPreview regrows beyond the agreed guardrail."
     },
     {
+      "path": "frontend/src/routes/+layout.svelte",
+      "max_lines": 450,
+      "owner": "HeliOS",
+      "review_note": "The root layout now composes navigation and page-level chrome while app-shell runtime bootstrapping, runtime error policy, persisted shell preferences, and health/resource banners live in a dedicated helper; keep cross-route shell state out of the layout component."
+    },
+    {
+      "path": "frontend/src/routes/appShellSupport.ts",
+      "max_lines": 320,
+      "owner": "HeliOS",
+      "review_note": "App-shell runtime bootstrapping, banner derivation, resource refresh wiring, and runtime error normalization live here; keep global shell policy out of the root layout."
+    },
+    {
       "path": "frontend/src/routes/localization/+page.svelte",
       "max_lines": 3600,
       "owner": "HeliOS",

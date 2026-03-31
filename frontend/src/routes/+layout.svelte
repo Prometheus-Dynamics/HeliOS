@@ -2,7 +2,7 @@
   import '../app.css';
   import '$lib/api/httpClient';
   import { resolve } from '$app/paths';
-  import { page, updated } from '$app/stores';
+  import { page } from '$app/stores';
   import { Toaster } from '@skeletonlabs/skeleton-svelte';
   import type { IconDefinition } from '@fortawesome/free-solid-svg-icons';
   import {
@@ -22,30 +22,27 @@
   import type { Snippet } from 'svelte';
   import { toaster } from '$lib/toaster';
   import {
-    bootloaderStatusResource,
-    osHealthStatusResource,
-    resourceGuardStatusResource,
     type OsHealthStatus,
     type ResourceGuardStatus
   } from '$lib/api/deviceStatusResources';
-  import { startDomainInvalidationBridge } from '$lib/api/invalidation';
-  import { startRefreshScheduler } from '$lib/api/refreshScheduler';
   import FaIcon from '$lib/components/icons/FaIcon.svelte';
   import FloatingStreamViewer from '$lib/components/FloatingStreamViewer.svelte';
   import FloatingPipelineOutputsViewer from '$lib/components/FloatingPipelineOutputsViewer.svelte';
   import ConnectionStatusBanner from '$lib/components/ConnectionStatusBanner.svelte';
   import NotificationCenter from '$lib/components/NotificationCenter.svelte';
-  import { readStorage, writeStorage } from '$lib/utils/storage';
   import type { BootloaderStatus } from '$lib/ts-bindings/http/client';
-  import { SvelteMap } from 'svelte/reactivity';
+  import {
+    bootstrapAppShell,
+    buildOsHealthBanner,
+    buildOsHealthFingerprint,
+    buildResourceGuardBanner,
+    persistDismissedOsHealthFingerprint,
+    persistSidebarCollapsed
+  } from './appShellSupport';
 
   let { children }: { children: Snippet } = $props();
-  const SIDEBAR_COLLAPSED_STORAGE_KEY = 'helios.app.sidebar.collapsed';
-  const OS_HEALTH_BANNER_DISMISSED_STORAGE_KEY = 'helios.app.os-health.dismissed';
-  const RUNTIME_ERROR_TOAST_THROTTLE_MS = 5_000;
   let isSidebarCollapsed = $state(false);
   let dismissedOsHealthFingerprint = $state('');
-  const recentRuntimeErrors = new SvelteMap<string, number>();
 
   type NavHref = '/dashboard' | '/pipelines' | '/devices' | '/peers' | '/media' | '/localization' | '/systems' | '/docs' | '/settings';
 
@@ -79,17 +76,6 @@
   let bootloaderStatus = $state<BootloaderStatus | null>(null);
   const showSettingsBootloaderWarning = $derived(Boolean(bootloaderStatus?.supported && bootloaderStatus?.needs_update));
   let osHealthStatus = $state<OsHealthStatus | null>(null);
-
-  type ResourceGuardBannerState = {
-    title: string;
-    details: string;
-  };
-
-  type OsHealthBannerState = {
-    title: string;
-    details: string;
-  };
-
   let resourceGuardStatus = $state<ResourceGuardStatus | null>(null);
   const osHealthBanner = $derived(buildOsHealthBanner(osHealthStatus));
   const osHealthFingerprint = $derived(buildOsHealthFingerprint(osHealthStatus));
@@ -102,225 +88,40 @@
     return current === href || current.startsWith(`${href}/`);
   };
 
-  const normalizeRuntimeMessage = (value: string): string => {
-    const trimmed = value.trim();
-    if (!trimmed.length) return 'Unexpected UI error';
-    return trimmed.length > 320 ? `${trimmed.slice(0, 320)}...` : trimmed;
-  };
-
-  const isIgnorableRuntimeMessage = (value: string): boolean => {
-    const normalized = value.trim().toLowerCase();
-    return (
-      normalized.includes('resizeobserver loop completed with undelivered notifications') ||
-      normalized.includes('resizeobserver loop limit exceeded') ||
-      normalized === 'the operation was aborted.' ||
-      normalized === 'operation was aborted' ||
-      normalized === 'signal is aborted without reason'
-    );
-  };
-
-  const isIgnorableRuntimeError = (error: unknown, fallback?: string): boolean => {
-    const message = runtimeErrorMessage(error, fallback);
-    if (isIgnorableRuntimeMessage(message)) {
-      return true;
-    }
-    if (error && typeof error === 'object' && 'name' in error) {
-      const name = String((error as { name?: unknown }).name ?? '').trim().toLowerCase();
-      if (name === 'aborterror') {
-        return true;
-      }
-    }
-    return false;
-  };
-
-  const runtimeErrorMessage = (error: unknown, fallback?: string): string => {
-    if (error instanceof Error && typeof error.message === 'string' && error.message.trim().length) {
-      return normalizeRuntimeMessage(error.message);
-    }
-    if (typeof error === 'string' && error.trim().length) {
-      return normalizeRuntimeMessage(error);
-    }
-    if (error && typeof error === 'object' && 'message' in error) {
-      const message = (error as { message?: unknown }).message;
-      if (typeof message === 'string' && message.trim().length) {
-        return normalizeRuntimeMessage(message);
-      }
-    }
-    return normalizeRuntimeMessage(fallback ?? 'Unexpected UI error');
-  };
-
-  const shouldToastRuntimeError = (key: string): boolean => {
-    const now = Date.now();
-    const previous = recentRuntimeErrors.get(key) ?? 0;
-    recentRuntimeErrors.set(key, now);
-    for (const [messageKey, timestamp] of recentRuntimeErrors.entries()) {
-      if (now - timestamp > RUNTIME_ERROR_TOAST_THROTTLE_MS * 4) {
-        recentRuntimeErrors.delete(messageKey);
-      }
-    }
-    return now - previous >= RUNTIME_ERROR_TOAST_THROTTLE_MS;
-  };
-
-  const notifyRuntimeError = (message: string): void => {
-    if (!shouldToastRuntimeError(message)) return;
-    toaster.error({
-      title: 'Unexpected UI error',
-      description: message
-    });
-  };
-
   onMount(() => {
-    startDomainInvalidationBridge();
-    isSidebarCollapsed = readStorage(SIDEBAR_COLLAPSED_STORAGE_KEY) === '1';
-    dismissedOsHealthFingerprint = readStorage(OS_HEALTH_BANNER_DISMISSED_STORAGE_KEY);
-    const cachedBootloader = bootloaderStatusResource.read();
-    if (cachedBootloader?.data) {
-      bootloaderStatus = cachedBootloader.data;
-    }
-    const cachedOsHealth = osHealthStatusResource.read();
-    if (cachedOsHealth?.data) {
-      osHealthStatus = cachedOsHealth.data;
-    }
-    const cachedResourceGuard = resourceGuardStatusResource.read();
-    if (cachedResourceGuard?.data) {
-      resourceGuardStatus = cachedResourceGuard.data;
-    }
-    const stopBootloaderRefresh = startRefreshScheduler(refreshBootloaderStatus, {
-      intervalMs: 120_000,
-      immediate: true
+    return bootstrapAppShell({
+      setIsSidebarCollapsed: (value) => {
+        isSidebarCollapsed = value;
+      },
+      setDismissedOsHealthFingerprint: (value) => {
+        dismissedOsHealthFingerprint = value;
+      },
+      setBootloaderStatus: (value) => {
+        bootloaderStatus = value;
+      },
+      setOsHealthStatus: (value) => {
+        osHealthStatus = value;
+      },
+      setResourceGuardStatus: (value) => {
+        resourceGuardStatus = value;
+      },
+      notifyRuntimeError: (message) => {
+        toaster.error({
+          title: 'Unexpected UI error',
+          description: message
+        });
+      }
     });
-    const stopOsHealthRefresh = startRefreshScheduler(refreshOsHealthStatus, {
-      intervalMs: 10_000,
-      immediate: true
-    });
-    const stopResourceGuardRefresh = startRefreshScheduler(refreshResourceGuardStatus, {
-      intervalMs: 4_000,
-      immediate: true
-    });
-    const stopVersionWatch = updated.subscribe((isUpdated) => {
-      if (!isUpdated) return;
-      globalThis.location?.reload();
-    });
-
-    const handleWindowError = (event: Event): void => {
-      if (!(event instanceof ErrorEvent)) return;
-      if (isIgnorableRuntimeError(event.error, event.message)) return;
-      const message = runtimeErrorMessage(event.error, event.message);
-      notifyRuntimeError(message);
-    };
-    const handleUnhandledRejection = (event: PromiseRejectionEvent): void => {
-      if (isIgnorableRuntimeError(event.reason, 'Unhandled promise rejection')) return;
-      const message = runtimeErrorMessage(event.reason, 'Unhandled promise rejection');
-      notifyRuntimeError(message);
-    };
-    window.addEventListener('error', handleWindowError);
-    window.addEventListener('unhandledrejection', handleUnhandledRejection);
-
-    return () => {
-      stopBootloaderRefresh();
-      stopOsHealthRefresh();
-      stopResourceGuardRefresh();
-      stopVersionWatch();
-      window.removeEventListener('error', handleWindowError);
-      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
-    };
   });
-
-  async function refreshBootloaderStatus(): Promise<void> {
-    try {
-      bootloaderStatus = await bootloaderStatusResource.refresh();
-    } catch {
-      // If the backend is offline (or this device doesn't expose the endpoint), just omit the warning icon.
-      bootloaderStatus = null;
-    }
-  }
-
-  async function refreshResourceGuardStatus(): Promise<void> {
-    try {
-      resourceGuardStatus = await resourceGuardStatusResource.refresh();
-    } catch {
-      resourceGuardStatus = null;
-    }
-  }
-
-  async function refreshOsHealthStatus(): Promise<void> {
-    try {
-      osHealthStatus = await osHealthStatusResource.refresh();
-    } catch {
-      osHealthStatus = null;
-    }
-  }
-
-  function buildOsHealthBanner(status: OsHealthStatus | null): OsHealthBannerState | null {
-    const issues = Array.isArray(status?.issues) ? status.issues : [];
-    if (!issues.length) return null;
-
-    const primary = issues[0];
-    const extraCount = Math.max(0, issues.length - 1);
-    const title = primary?.code?.trim().length ? `Core OS issue: ${primary.code}` : 'Core OS issue detected';
-    const details = primary?.description?.trim().length
-      ? extraCount > 0
-        ? `${primary.description} ${extraCount} additional issue${extraCount === 1 ? '' : 's'} reported.`
-        : primary.description
-      : extraCount > 0
-        ? `${extraCount + 1} core OS issues reported.`
-        : 'Device storage or boot state is degraded.';
-
-    return { title, details };
-  }
-
-  function buildOsHealthFingerprint(status: OsHealthStatus | null): string {
-    const issues = Array.isArray(status?.issues) ? status.issues : [];
-    return issues
-      .map((issue) => `${issue.code?.trim() ?? ''}:${issue.description?.trim() ?? ''}`)
-      .filter((entry) => entry.length > 1)
-      .sort()
-      .join('|');
-  }
-
-  function buildResourceGuardBanner(status: ResourceGuardStatus | null): ResourceGuardBannerState | null {
-    if (!status?.enabled) return null;
-    const degraded = Array.isArray(status.degraded_streams) ? status.degraded_streams : [];
-    const action = status.last_action ?? null;
-    const recentlyIntervened = Boolean(action && Date.now() - action.at_ms <= 180_000);
-    if (!degraded.length && !recentlyIntervened) return null;
-
-    const title =
-      degraded.length > 0
-        ? `Resource guard active: ${degraded.length} stream${degraded.length === 1 ? '' : 's'} degraded`
-        : 'Resource guard intervened to protect device stability';
-
-    if (!action) {
-      return { title, details: 'Resource pressure mitigation is active.' };
-    }
-
-    const actionLabel =
-      action.kind === 'disable_decoder'
-        ? 'Disabled decoder'
-        : action.kind === 'disable_all_codecs'
-          ? 'Disabled codecs'
-          : action.kind === 'stop_stream'
-            ? 'Stopped stream'
-            : 'Restored codecs';
-    const streamLabel = action.alias?.trim()?.length ? action.alias.trim() : action.stream_id;
-    const memoryLabel =
-      typeof action.mem_available_kb === 'number'
-        ? `MemAvailable ${action.mem_available_kb.toLocaleString()} kB.`
-        : typeof status.last_mem_available_kb === 'number'
-          ? `MemAvailable ${status.last_mem_available_kb.toLocaleString()} kB.`
-          : '';
-    const details = `${actionLabel} on ${streamLabel}. ${action.reason}${memoryLabel ? ` ${memoryLabel}` : ''}`;
-    return { title, details };
-  }
 
   function toggleSidebar(): void {
     isSidebarCollapsed = !isSidebarCollapsed;
-    writeStorage(SIDEBAR_COLLAPSED_STORAGE_KEY, isSidebarCollapsed ? '1' : '0');
+    persistSidebarCollapsed(isSidebarCollapsed);
   }
 
   function dismissOsHealthBanner(): void {
     dismissedOsHealthFingerprint = osHealthFingerprint;
-    writeStorage(OS_HEALTH_BANNER_DISMISSED_STORAGE_KEY, osHealthFingerprint);
+    persistDismissedOsHealthFingerprint(osHealthFingerprint);
   }
 </script>
 
