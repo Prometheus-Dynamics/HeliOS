@@ -61,6 +61,36 @@
       "review_note": "Updater apply logic remains large while OTA flows are being consolidated; protect the current size ceiling."
     },
     {
+      "path": "backend/src/helios-api/src/http/peripherals.rs",
+      "max_lines": 80,
+      "owner": "HeliOS",
+      "review_note": "The peripherals HTTP root should stay as thin routing and re-export orchestration after the module split."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/peripherals/inventory.rs",
+      "max_lines": 330,
+      "owner": "HeliOS",
+      "review_note": "Peripheral inventory, USB, fan, and lighting HTTP handlers now live here; keep route orchestration focused and do not merge sensor mapping back in."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/peripherals/sensors.rs",
+      "max_lines": 420,
+      "owner": "HeliOS",
+      "review_note": "Sensor inventory mapping and sensor configuration endpoints now live here; keep descriptor mapping and firmware/alias handling isolated from the other HTTP paths."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/peripherals/support.rs",
+      "max_lines": 260,
+      "owner": "HeliOS",
+      "review_note": "Peripherals USB/sysfs scanning, timeout policy, and refresh helpers now live here; keep those support utilities out of the route modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/peripherals/types.rs",
+      "max_lines": 220,
+      "owner": "HeliOS",
+      "review_note": "Peripherals API schemas now live here; keep schema definitions separate from endpoint logic and helper code."
+    },
+    {
       "path": "frontend/src/lib/components/StreamPreview.svelte",
       "max_lines": 850,
       "owner": "HeliOS",
