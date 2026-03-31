@@ -6,6 +6,7 @@ import type {
   I2cBusInfo,
   I2cInventory,
   LightingStatus,
+  PeripheralInventory,
   SensorPeripheral,
   StreamInfo,
   UsbPeripheral
@@ -31,18 +32,14 @@ type DeviceHealth = DeviceMetrics & {
   issues?: Array<{ code?: string | null; description?: string | null }>;
 };
 
-type PeripheralsPayload = {
+type PeripheralsPayload = Partial<PeripheralInventory> & {
   coralSensors?: PeripheralStatusResponse[] | null;
-  usb?: UsbPeripheral[] | null;
   peripherals?: {
     usb?: UsbPeripheral[] | null;
     i2c?: I2cInventory | null;
     fan?: FanStatus | null;
     lighting?: LightingStatus | null;
   } | null;
-  i2c?: I2cInventory | null;
-  fan?: FanStatus | null;
-  lighting?: LightingStatus | null;
 };
 
 export function extractHealth(payload: DeviceMetrics | null): DeviceMetrics | null {
