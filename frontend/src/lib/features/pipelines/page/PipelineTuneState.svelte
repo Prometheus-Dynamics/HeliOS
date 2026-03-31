@@ -5,6 +5,7 @@
   import { toaster } from '$lib';
   import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
   import { connectStreamControls, type StreamControlSocket } from '$lib/api/streamControls';
+  import type { StreamsApi as SharedStreamsApi } from '$lib/api/streamsApi';
   import { backendFeatures } from '$lib/api/backendFeatures';
   import type { ControlMeta, StreamInfo, StreamPipelineLayout } from '$lib/ts-bindings/http/client';
   import type {
@@ -94,18 +95,19 @@
     updateGraph: (params: { id: string; requestBody: { name?: string; graph: unknown } }) => Promise<unknown>;
   };
 
-  type StreamsApi = {
-    resolvedStreams: () => Promise<unknown>;
-    getControls: (params: { id: string }) => Promise<unknown>;
-    getMetrics: (params: { id: string }) => Promise<unknown>;
-    setControl: (params: { id: string; controlId: number; requestBody: unknown }) => Promise<void>;
-    setPipelineGraph: (params: { id: string; requestBody: { graph: unknown; pipeline_id?: string | null; output?: string | null } }) => Promise<unknown>;
-    setPipelineGraphPatch: (params: { id: string; requestBody: { patch: unknown; pipeline_id?: string | null } }) => Promise<unknown>;
-    setPipelineInputs: (params: { id: string; requestBody: { pipeline_id?: string | null; inputs: Record<string, unknown | null> } }) => Promise<unknown>;
-    setPipelineOutput: (params: { id: string; requestBody: { output: string | null } }) => Promise<unknown>;
-    setPipelineLayout: (params: { id: string; requestBody: { pipeline_layout: StreamPipelineLayout | null } }) => Promise<unknown>;
-    smokePipelineGraph: (params: { id: string; timeoutMs: number }) => Promise<{ ok: boolean; errors?: string[] }>;
-  };
+  type StreamsApi = Pick<
+    typeof SharedStreamsApi,
+    | 'resolvedStreams'
+    | 'getControls'
+    | 'getMetrics'
+    | 'setControl'
+    | 'setPipelineGraph'
+    | 'setPipelineGraphPatch'
+    | 'setPipelineInputs'
+    | 'setPipelineOutput'
+    | 'setPipelineLayout'
+    | 'smokePipelineGraph'
+  >;
 
   type TuneDeps = {
     children?: Snippet<[ { tune: Record<string, unknown> } ]>;

@@ -1,3 +1,4 @@
+import type { StreamsApi as SharedStreamsApi } from '$lib/api/streamsApi';
 import type { StreamInfo } from '$lib/ts-bindings/http/client';
 import type { PipelineGraphPlan } from '$lib/types/pipeline';
 import { normalizeMultiplexSlots, multiplexKey } from './pipelineMultiplexUtils';
@@ -33,12 +34,7 @@ export type TuneMultiplexApplyDeps = {
   resolvePipelineLabel: (pipelineId: string | null) => string;
   pipelines: { get: () => Array<{ id: string; graph?: PipelineGraphPlan | null }> };
   serializeGraphPlan: (plan: PipelineGraphPlan) => unknown;
-  StreamsApi: {
-    setPipelineLayout: (params: { id: string; requestBody: { pipeline_layout: TuneMultiplexLayout | null } }) => Promise<unknown>;
-    smokePipelineGraph: (params: { id: string; timeoutMs: number }) => Promise<{ ok: boolean; errors?: string[] }>;
-    setPipelineGraph: (params: { id: string; requestBody: { graph: unknown; pipeline_id: string; output: string | null } }) => Promise<unknown>;
-    setPipelineOutput: (params: { id: string; requestBody: { output: string | null } }) => Promise<unknown>;
-  };
+  StreamsApi: Pick<typeof SharedStreamsApi, 'setPipelineLayout' | 'smokePipelineGraph' | 'setPipelineGraph' | 'setPipelineOutput'>;
   toaster: { success: (payload: { title: string }) => void; error: (payload: { title: string; description?: string }) => void };
   reportError: (params: { title: string; error: unknown; fallback: string }) => void;
   buildErrorMessage: (params: { error: unknown; fallback: string }) => string;

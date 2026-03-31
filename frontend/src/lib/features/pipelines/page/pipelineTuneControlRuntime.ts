@@ -1,3 +1,4 @@
+import type { StreamsApi as SharedStreamsApi } from '$lib/api/streamsApi';
 import type { StreamInfo } from '$lib/ts-bindings/http/client';
 import type { ControlMeta, ControlValue } from '$lib/ts-bindings/http/client';
 import type { StreamControlSocket } from '$lib/api/streamControls';
@@ -21,7 +22,7 @@ export type TuneControlRuntimeDeps = {
   getTuneShowReadOnlyControls: () => boolean;
   controlApplyDebounceMs: number;
   connectStreamControls: (streamId: string, options: { onError?: (message: string) => void }) => StreamControlSocket;
-  StreamsApi: { setControl: (params: { id: string; controlId: number; requestBody: ControlValue }) => Promise<void> };
+  StreamsApi: Pick<typeof SharedStreamsApi, 'setControl'>;
   toaster: { error: (payload: { title: string; description?: string }) => void };
   buildErrorMessage: (params: { error: unknown; fallback: string }) => string;
   reportError: (params: { title: string; error: unknown; fallback: string }) => void;

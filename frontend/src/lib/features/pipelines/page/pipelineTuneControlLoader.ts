@@ -1,7 +1,8 @@
+import type { StreamsApi as SharedStreamsApi } from '$lib/api/streamsApi';
 import type { ControlMeta, StreamInfo } from '$lib/ts-bindings/http/client';
 
 export type TuneControlLoaderDeps = {
-  StreamsApi: { getControls: (params: { id: string }) => Promise<unknown> };
+  StreamsApi: Pick<typeof SharedStreamsApi, 'getControls'>;
   buildErrorMessage: (params: { error: unknown; fallback: string }) => string;
   seedControlState: (controls: ControlMeta[]) => Record<number, number | boolean | null>;
   setTuneStreamControls: (controls: ControlMeta[]) => void;

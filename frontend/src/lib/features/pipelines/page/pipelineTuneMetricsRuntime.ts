@@ -1,3 +1,4 @@
+import type { StreamsApi as SharedStreamsApi } from '$lib/api/streamsApi';
 import type { PipelineNodeRuntimeMetrics, PipelineStreamNodeMetrics } from '$lib/types/pipeline';
 import { cancellableWithTimeout } from '$lib/api/requestUtils';
 
@@ -23,7 +24,7 @@ export type StreamMetricsSummary = {
 };
 
 export type TuneMetricsRuntimeDeps = {
-  StreamsApi: { getMetrics: (params: { id: string }) => Promise<unknown> };
+  StreamsApi: Pick<typeof SharedStreamsApi, 'getMetrics'>;
   buildErrorMessage: (params: { error: unknown; fallback: string }) => string;
   getSelectedPipelineId?: () => string | null;
   getTuneMetricsSnapshots: () => PipelineStreamNodeMetrics[];

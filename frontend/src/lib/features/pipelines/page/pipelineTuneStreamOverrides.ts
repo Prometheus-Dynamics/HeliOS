@@ -1,3 +1,4 @@
+import type { StreamsApi as SharedStreamsApi } from '$lib/api/streamsApi';
 import type { StreamInfo } from '$lib/ts-bindings/http/client';
 import type { PipelineGraphPlan, PipelineNodeValue, PipelineOverviewPipeline } from '$lib/types/pipeline';
 import { fromApiGraphPlan } from '$lib/features/pipelines/graphConverters';
@@ -11,12 +12,7 @@ import {
   normalizePortKey
 } from './pipelineTuneState';
 
-type StreamsApi = {
-  resolvedStreams: () => Promise<unknown>;
-  setPipelineGraphPatch: (params: { id: string; requestBody: { patch: unknown; pipeline_id?: string | null } }) => Promise<unknown>;
-  setPipelineGraph: (params: { id: string; requestBody: { graph: unknown; pipeline_id?: string | null } }) => Promise<unknown>;
-  setPipelineInputs: (params: { id: string; requestBody: { pipeline_id?: string | null; inputs: Record<string, unknown | null> } }) => Promise<unknown>;
-};
+type StreamsApi = Pick<typeof SharedStreamsApi, 'resolvedStreams' | 'setPipelineGraphPatch' | 'setPipelineGraph' | 'setPipelineInputs'>;
 
 type ListedStreamsResult = {
   items?: StreamInfo[] | null;
