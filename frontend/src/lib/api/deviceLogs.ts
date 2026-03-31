@@ -2,36 +2,16 @@ import { apiFetchCachedJson } from '$lib/api/core/http';
 import { getHttpClientBase } from '$lib/api/httpClient';
 import { buildWsUrlFromHttpBase, canUseWebSockets } from '$lib/api/core/ws';
 import { cacheResourceData, type ResourceCacheContext, type ResourceCacheResult } from '$lib/api/resourceCache';
+import type { LogSource, LogSourceKind, SystemdUnitStatus } from '$lib/ts-bindings/http/client';
 
-export type LogSourceKind = 'journal_system' | 'journal_unit' | 'dmesg' | 'file';
-
-export type SystemdUnitStatus = {
-  active_state?: string | null;
-  sub_state?: string | null;
-  unit_file_state?: string | null;
-  description?: string | null;
-  fragment_path?: string | null;
-  main_pid?: number | null;
-  exec_main_status?: number | null;
-};
-
-export type LogSource = {
-  id: string;
-  label: string;
-  group: string;
-  kind: LogSourceKind;
-  unit?: string | null;
-  path?: string | null;
-  important: boolean;
-  status?: SystemdUnitStatus | null;
-};
+export type { LogSource, LogSourceKind, SystemdUnitStatus };
 
 export async function fetchLogSources(context: ResourceCacheContext<LogSource[]> = {}): Promise<LogSource[] | ResourceCacheResult<LogSource[]>> {
-  const payload = await apiFetchCachedJson<unknown>('/device/logs/sources', context);
+  const payload = await apiFetchCachedJson<LogSource[]>('/device/logs/sources', context);
   if (payload.status === 'not_modified') {
     return payload as ResourceCacheResult<LogSource[]>;
   }
-  const sources = Array.isArray(payload.data) ? (payload.data as LogSource[]) : [];
+  const sources = Array.isArray(payload.data) ? payload.data : [];
   return cacheResourceData(sources, {
     etag: payload.etag ?? null,
     revision: payload.revision ?? null
