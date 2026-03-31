@@ -469,6 +469,42 @@
       "review_note": "Pipeline API schemas, planner-diagnostic payloads, registry response models, and refresh failure records now live here; keep handler and storage logic out of the type layer."
     },
     {
+      "path": "backend/src/helios-api/src/http/localization/maps/mod.rs",
+      "max_lines": 220,
+      "owner": "HeliOS",
+      "review_note": "Localization maps HTTP root should stay focused on route orchestration after splitting seed/bootstrap flows, storage/media helpers, fmap conversion, and overlay parsing into dedicated modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/localization/maps/seed.rs",
+      "max_lines": 280,
+      "owner": "HeliOS",
+      "review_note": "Bundled/media-library field-map seeding and registration now live here; keep route handlers and overlay/parser internals out of the startup/import path."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/localization/maps/storage.rs",
+      "max_lines": 200,
+      "owner": "HeliOS",
+      "review_note": "Map document loading, source-file indexing, overlay backfill, and summary listing now live here; keep upload parsing and seed orchestration out of the storage layer."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/localization/maps/support.rs",
+      "max_lines": 140,
+      "owner": "HeliOS",
+      "review_note": "Map media metadata registration, upload limits, seeded-id generation, and naming helpers now live here; keep route logic and fmap conversion out of this module."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/localization/maps/convert.rs",
+      "max_lines": 160,
+      "owner": "HeliOS",
+      "review_note": "Limelight fmap-to-field-map conversion and family normalization now live here; keep upload/storage orchestration out of the geometry conversion layer."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/localization/maps/overlay.rs",
+      "max_lines": 150,
+      "owner": "HeliOS",
+      "review_note": "Field-map overlay discovery, data-url normalization, and JSON image extraction now live here; keep fmap conversion and route behavior separate."
+    },
+    {
       "path": "frontend/src/lib/components/StreamPreview.svelte",
       "max_lines": 850,
       "owner": "HeliOS",
@@ -521,6 +557,11 @@
       "path": "backend/src/helios-api/src/ws/streams.rs",
       "owner": "HeliOS",
       "reason": "Websocket stream handling now lives under backend/src/helios-api/src/ws/streams/*. Do not recreate the deleted ws/streams.rs monolith."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/localization/maps.rs",
+      "owner": "HeliOS",
+      "reason": "Localization map HTTP handling now lives under backend/src/helios-api/src/http/localization/maps/*. Do not recreate the deleted localization/maps.rs monolith."
     }
   ]
 }
