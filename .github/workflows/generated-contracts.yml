@@ -1,0 +1,43 @@
+name: Generated Contracts
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  generated-contracts:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Cache cargo target
+        uses: actions/cache@v4
+        with:
+          path: .cache/api-codegen/cargo-target
+          key: ${{ runner.os }}-cargo-target-${{ hashFiles('backend/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-target-
+
+      - name: Check generated contracts
+        working-directory: frontend
+        run: bun run check:contracts
