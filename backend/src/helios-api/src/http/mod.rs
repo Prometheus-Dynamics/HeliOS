@@ -11,6 +11,7 @@ pub mod localization;
 pub mod media;
 pub mod nt4;
 pub mod ota;
+pub(crate) mod ota_storage;
 pub mod peers;
 pub mod peripherals;
 pub(crate) mod persisted_files;

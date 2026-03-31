@@ -63,17 +63,17 @@ const PERSISTED_FILE_SYNCS: &[PersistedFileSync] = &[
     PersistedFileSync { source_candidates: &["/var/lib/helios/fan.toml", "/etc/helios/fan.toml"], target_path: "/etc/helios/fan.toml" },
 ];
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 struct ApplyManifestMetadata {
     #[serde(default = "default_true")]
     delete_image_after_apply: bool,
-    #[serde(default)]
-    source_media_path: Option<String>,
+    #[serde(default, alias = "source_media_path")]
+    source_artifact_path: Option<String>,
 }
 
 impl Default for ApplyManifestMetadata {
     fn default() -> Self {
-        Self { delete_image_after_apply: true, source_media_path: None }
+        Self { delete_image_after_apply: true, source_artifact_path: None }
     }
 }
 
@@ -421,15 +421,12 @@ async fn cleanup_source_media_after_apply(config: &UpdaterConfig, update_id: Uui
     if !metadata.delete_image_after_apply {
         return;
     }
-    let Some(media_path) = metadata.source_media_path.as_deref().map(str::trim).filter(|value| !value.is_empty()).map(PathBuf::from) else {
+    let Some(media_path) = metadata.source_artifact_path.as_deref().map(str::trim).filter(|value| !value.is_empty()).map(PathBuf::from) else {
         return;
     };
     if !media_path.is_absolute() {
         return;
     }
-    let Some(filename) = media_path.file_name().and_then(|name| name.to_str()).and_then(sanitize_media_filename) else {
-        return;
-    };
 
     match fs::remove_file(&media_path).await {
         Ok(()) => info!(%update_id, path = %media_path.display(), "removed source OTA media file after apply"),
@@ -437,14 +434,20 @@ async fn cleanup_source_media_after_apply(config: &UpdaterConfig, update_id: Uui
         Err(err) => warn!(%update_id, path = %media_path.display(), error = %err, "failed to remove source OTA media file"),
     }
 
-    let media_meta_path = media_path
-        .parent()
-        .and_then(|media_dir| media_dir.parent().map(|api_data_dir| api_data_dir.join("media-meta").join(format!("{filename}.json"))))
-        .unwrap_or_else(|| config.data_dir().join("api-data").join("media-meta").join(format!("{filename}.json")));
-    match fs::remove_file(&media_meta_path).await {
-        Ok(()) => {}
-        Err(err) if err.kind() == ErrorKind::NotFound => {}
-        Err(err) => warn!(%update_id, path = %media_meta_path.display(), error = %err, "failed to remove source OTA media metadata"),
+    let Some(filename) = media_path.file_name().and_then(|name| name.to_str()).and_then(sanitize_media_filename) else {
+        return;
+    };
+    let is_media_path = media_path.parent().and_then(|dir| dir.file_name()).and_then(|name| name.to_str()).map(|name| name == "media").unwrap_or(false);
+    if is_media_path {
+        let media_meta_path = media_path
+            .parent()
+            .and_then(|media_dir| media_dir.parent().map(|api_data_dir| api_data_dir.join("media-meta").join(format!("{filename}.json"))))
+            .unwrap_or_else(|| config.data_dir().join("api-data").join("media-meta").join(format!("{filename}.json")));
+        match fs::remove_file(&media_meta_path).await {
+            Ok(()) => {}
+            Err(err) if err.kind() == ErrorKind::NotFound => {}
+            Err(err) => warn!(%update_id, path = %media_meta_path.display(), error = %err, "failed to remove source OTA media metadata"),
+        }
     }
 }
 
@@ -1097,10 +1100,10 @@ async fn copy_boot_tree(src: &Path, dst: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        PersistedFileSync, SquashfsSlotResizePlan, missing_bootable_root_paths, parse_env_flag, plan_squashfs_slot_resize, reboot_failure_message, reboot_output_is_expected_success,
-        sync_persisted_files_with_mappings_into, sync_persisted_networkd_into,
+        ApplyManifestMetadata, PersistedFileSync, SquashfsSlotResizePlan, missing_bootable_root_paths, parse_apply_manifest_metadata, parse_env_flag, plan_squashfs_slot_resize,
+        reboot_failure_message, reboot_output_is_expected_success, sync_persisted_files_with_mappings_into, sync_persisted_networkd_into,
     };
-    use crate::util::BlockPartitionInfo;
+    use crate::{artifact::ReleaseManifest, util::BlockPartitionInfo};
     use std::path::Path;
 
     #[test]
@@ -1135,6 +1138,37 @@ mod tests {
         for raw in ["", "0", "false", "no", "off", "2", "enabled"] {
             assert!(!parse_env_flag(raw), "expected falsey: {raw}");
         }
+    }
+
+    #[test]
+    fn parse_apply_manifest_metadata_accepts_new_source_artifact_path() {
+        let manifest = ReleaseManifest {
+            update_id: None,
+            version: None,
+            artifacts: Vec::new(),
+            metadata_json: r#"{"delete_image_after_apply":true,"source_artifact_path":"/var/lib/helios/updater/api-uploads/bundle.tar"}"#.into(),
+        };
+        let metadata = crate::artifact::StagedMetadata { manifest, artifacts: Vec::new(), staged_at: chrono::Utc::now() };
+
+        let parsed = parse_apply_manifest_metadata(&metadata);
+
+        assert!(parsed.delete_image_after_apply);
+        assert_eq!(parsed.source_artifact_path.as_deref(), Some("/var/lib/helios/updater/api-uploads/bundle.tar"));
+    }
+
+    #[test]
+    fn parse_apply_manifest_metadata_accepts_legacy_source_media_path_alias() {
+        let manifest = ReleaseManifest {
+            update_id: None,
+            version: None,
+            artifacts: Vec::new(),
+            metadata_json: r#"{"delete_image_after_apply":true,"source_media_path":"/var/lib/helios/api-data/media/update.tar"}"#.into(),
+        };
+        let metadata = crate::artifact::StagedMetadata { manifest, artifacts: Vec::new(), staged_at: chrono::Utc::now() };
+
+        let parsed = parse_apply_manifest_metadata(&metadata);
+
+        assert_eq!(parsed, ApplyManifestMetadata { delete_image_after_apply: true, source_artifact_path: Some("/var/lib/helios/api-data/media/update.tar".into()) });
     }
 
     #[tokio::test]

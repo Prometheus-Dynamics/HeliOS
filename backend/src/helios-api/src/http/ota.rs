@@ -1,7 +1,4 @@
-use std::{
-    env,
-    path::{Path, PathBuf},
-};
+use std::{env, path::PathBuf};
 
 use axum::{
     Json, Router,
@@ -23,8 +20,8 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use super::AppState;
-use super::media::{MediaMetadata, write_media_metadata};
-use super::storage::{self, sanitize_name};
+use super::ota_storage;
+use super::storage::sanitize_name;
 use super::upload_integrity;
 use crate::ipc::command_id_from_context;
 
@@ -143,7 +140,7 @@ pub struct UpdateStateResponse {
     )
 )]
 pub async fn upload_update(headers: HeaderMap, mut multipart: Multipart) -> impl IntoResponse {
-    let media_dir = match storage::ensure_subdir("media") {
+    let upload_dir = match ota_storage::ensure_upload_dir() {
         Ok(dir) => dir,
         Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(UploadUpdateError { error: err.to_string() })).into_response(),
     };
@@ -182,15 +179,14 @@ pub async fn upload_update(headers: HeaderMap, mut multipart: Multipart) -> impl
         }
     };
 
-    let original_name = upload.filename.clone();
-    let filename = match unique_media_name(&media_dir, &upload.filename).await {
+    let filename = match ota_storage::unique_upload_name(&upload_dir, &upload.filename).await {
         Ok(name) => name,
         Err(err) => {
             let _ = fs::remove_file(&upload.temp_path).await;
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(UploadUpdateError { error: err.to_string() })).into_response();
         }
     };
-    let image_path = media_dir.join(&filename);
+    let image_path = upload_dir.join(&filename);
     if let Some(parent) = image_path.parent() {
         let _ = fs::create_dir_all(parent).await;
     }
@@ -216,11 +212,6 @@ pub async fn upload_update(headers: HeaderMap, mut multipart: Multipart) -> impl
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(UploadUpdateError { error: "failed to build image url".into() })).into_response();
         }
     };
-
-    let metadata = MediaMetadata { kind: Some("ota".into()), description: Some(format!("OTA update upload ({})", original_name)), tags: vec!["ota".into()], ..Default::default() };
-    if let Err(err) = write_media_metadata(&filename, metadata).await {
-        warn!(error = %err, filename = %filename, "failed to write OTA media metadata");
-    }
 
     let response = UploadUpdateResponse { filename, size_bytes: upload.size_bytes, sha256: upload.sha256, image_url, version: None, build_id: None };
 
@@ -347,50 +338,17 @@ async fn stage_update_for_auto_apply(
     }
 
     let update_id = Uuid::new_v4();
-    let source_media_path = source_media_path_for_image_url(&image_url).await;
+    let source_artifact_path = ota_storage::source_upload_path_for_image_url(&image_url).await;
     let metadata_json = serde_json::json!({
         "auto_apply": true,
         "delete_image_after_apply": delete_image_after_apply,
-        "source_media_path": source_media_path,
+        "source_artifact_path": source_artifact_path,
     })
     .to_string();
     let manifest = ReleaseManifest { update_id: Some(update_id), version: None, artifacts: vec![artifact], metadata_json };
     let command = UpdaterCommand::StageRelease { command_id: command_id_from_context("ota_stage_apply"), update_id, manifest };
     state.services.updater.send_updater_command(state, command, true).await.map_err(|error| UploadUpdateError { error })?;
     Ok(update_id)
-}
-
-async fn source_media_path_for_image_url(image_url: &Url) -> Option<String> {
-    let media_dir = storage::ensure_subdir_async("media").await.ok()?;
-
-    if image_url.scheme() == "file" {
-        let source_path = image_url.to_file_path().ok()?;
-        let file_name = source_path.file_name()?.to_str()?;
-        let sanitized = sanitize_name(file_name)?;
-        let candidate = media_dir.join(&sanitized);
-        if source_path == candidate {
-            return Some(candidate.to_string_lossy().to_string());
-        }
-        return None;
-    }
-
-    if image_url.scheme() != "http" && image_url.scheme() != "https" {
-        return None;
-    }
-
-    let segments: Vec<&str> = image_url.path_segments().map(|it| it.collect()).unwrap_or_default();
-    for (index, segment) in segments.iter().enumerate() {
-        if !segment.eq_ignore_ascii_case("media") {
-            continue;
-        }
-        if segments.len() != index + 2 {
-            continue;
-        }
-        let file_name = sanitize_name(segments[index + 1])?;
-        return Some(media_dir.join(file_name).to_string_lossy().to_string());
-    }
-
-    None
 }
 
 #[utoipa::path(
@@ -467,37 +425,6 @@ async fn process_upload_field(mut field: axum::extract::multipart::Field<'_>, ex
     }
     let sha256 = hex::encode(hasher.finalize());
     Ok(UploadedTemp { filename, temp_path, size_bytes: stored_bytes, sha256 })
-}
-
-async fn unique_media_name(dir: &Path, filename: &str) -> Result<String, std::io::Error> {
-    let candidate = filename.to_string();
-    if !fs::try_exists(dir.join(&candidate)).await.unwrap_or(false) {
-        return Ok(candidate);
-    }
-
-    let suffix = Uuid::new_v4().simple().to_string();
-    let mut attempts = 0;
-    loop {
-        attempts += 1;
-        let next = append_suffix(filename, &suffix[..8], attempts);
-        if !fs::try_exists(dir.join(&next)).await.unwrap_or(false) {
-            return Ok(next);
-        }
-        if attempts > 5 {
-            return Ok(format!("{}-{}", suffix, filename));
-        }
-    }
-}
-
-fn append_suffix(filename: &str, suffix: &str, attempt: usize) -> String {
-    let suffix = if attempt <= 1 { suffix.to_string() } else { format!("{suffix}-{attempt}") };
-    if let Some(stripped) = filename.strip_suffix(".tar.gz") {
-        return format!("{stripped}-{suffix}.tar.gz");
-    }
-    if let Some((stem, ext)) = filename.rsplit_once('.') {
-        return format!("{stem}-{suffix}.{ext}");
-    }
-    format!("{filename}-{suffix}")
 }
 
 async fn fetch_updater_state(state: &AppState) -> Result<(Option<UpdateState>, u64), UploadUpdateError> {
