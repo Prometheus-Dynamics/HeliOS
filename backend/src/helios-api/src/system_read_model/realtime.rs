@@ -17,7 +17,8 @@ use crate::http::streams::util::list_streams_timeout;
 use crate::ipc::IpcHandles;
 use crate::ws::device::{EngineTelemetry, PowerTelemetry};
 
-use super::{SystemCollector, devices_updates_stream_poll_interval, sample_power_from_peripherals, spawn_api_sampler_thread};
+use super::hardware::sample_power_from_peripherals;
+use super::{SystemCollector, devices_updates_stream_poll_interval, spawn_api_sampler_thread};
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct ProcessSample {

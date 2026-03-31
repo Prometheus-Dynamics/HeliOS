@@ -1,7 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex as StdMutex, OnceLock};
+use std::sync::{Mutex as StdMutex, OnceLock, Weak};
 
+use crate::ipc::IpcHandles;
+use crate::ws::device::PowerTelemetry;
 use crate::ws::device::{CpuThrottleStatus, GpuMemorySample, GpuTelemetry};
 
 pub(super) fn sample_gpu() -> Option<GpuTelemetry> {
@@ -54,6 +56,20 @@ pub(super) fn read_cpu_throttle_status() -> Option<CpuThrottleStatus> {
         throttled_since_boot: (value & (1 << 18)) != 0,
         soft_temp_limit_since_boot: (value & (1 << 19)) != 0,
     })
+}
+
+pub(super) async fn sample_power_from_peripherals(state: Option<&Weak<IpcHandles>>) -> Option<PowerTelemetry> {
+    use crate::http::device::power::power_status_from_snapshot;
+    use helios_peripherals::dto::SensorScope;
+
+    let handles = state?.upgrade()?;
+    let sensors = handles.ensure_sensors().await?;
+    let response = tokio::time::timeout(tokio::time::Duration::from_millis(250), sensors.sensor_snapshot(SensorScope::Device)).await.ok()?;
+    let response = response.ok()?;
+    let snapshot = response.ok()?;
+    let status = power_status_from_snapshot(&snapshot);
+
+    Some(PowerTelemetry { watts: status.watts.map(|value| value as f32), volts: status.volts.map(|value| value as f32), amps: status.amps.map(|value| value as f32) })
 }
 
 fn read_gpu_busy_percent() -> Option<f32> {
