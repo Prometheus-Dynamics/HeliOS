@@ -84,6 +84,24 @@ class ShimGuardrailsTests(unittest.TestCase):
             self.assertEqual(len(violations), 1)
             self.assertEqual(violations[0].code, "UNREGISTERED_SHIM")
 
+    def test_string_literals_do_not_count_as_markers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            shim_file = root / "tools/example.py"
+            shim_file.parent.mkdir(parents=True)
+            shim_file.write_text('MARKER_TOKEN = "TEMP_SHIM: stray-shim"\n', encoding="utf-8")
+
+            config = guardrails.ShimGuardrailConfig(required_shims=())
+
+            violations = guardrails.evaluate_guardrails(
+                root,
+                config,
+                today=date(2026, 3, 31),
+                scan_roots=("tools",),
+            )
+
+            self.assertEqual(violations, [])
+
     def test_evaluate_reports_duplicate_markers(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

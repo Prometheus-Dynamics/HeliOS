@@ -1289,6 +1289,84 @@
       "max_lines": 40,
       "owner": "HeliOS",
       "review_note": "Recording filename-suffix regression tests now live here; keep them isolated from production modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/nt4/support.rs",
+      "max_lines": 80,
+      "owner": "HeliOS",
+      "review_note": "Shared NT4 hostname and team-IP helpers now live here; keep bridge- and limelight-specific runtime flows in their own modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/nt4/bridge/mod.rs",
+      "max_lines": 180,
+      "owner": "HeliOS",
+      "review_note": "The NT4 bridge root should only own the publish loop and delegation to the split network, payload, topic, and publisher helpers."
+    },
+    {
+      "path": "backend/src/helios-api/src/nt4/bridge/network.rs",
+      "max_lines": 80,
+      "owner": "HeliOS",
+      "review_note": "NT4 bridge target-host fallback and local IPv4 discovery now live here; keep topic and publish logic separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/nt4/bridge/payloads.rs",
+      "max_lines": 130,
+      "owner": "HeliOS",
+      "review_note": "NT4 bridge stream and camera publisher payload shaping now lives here; keep socket/publisher management separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/nt4/bridge/publish.rs",
+      "max_lines": 220,
+      "owner": "HeliOS",
+      "review_note": "NT4 bridge publisher caching and topic writes now live here; keep target resolution and payload shaping separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/nt4/bridge/topics.rs",
+      "max_lines": 80,
+      "owner": "HeliOS",
+      "review_note": "NT4 bridge topic naming and preview URL helpers now live here; keep publish and network logic separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/nt4/bridge/tests.rs",
+      "max_lines": 40,
+      "owner": "HeliOS",
+      "review_note": "NT4 bridge topic helper tests now live here; keep them isolated from production modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/nt4/limelight/mod.rs",
+      "max_lines": 100,
+      "owner": "HeliOS",
+      "review_note": "Limelight root should only expose public status schemas and delegate runtime work to the split submodules."
+    },
+    {
+      "path": "backend/src/helios-api/src/nt4/limelight/naming.rs",
+      "max_lines": 140,
+      "owner": "HeliOS",
+      "review_note": "Limelight adapter table-name derivation and seed building now live here; keep publish and snapshot logic separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/nt4/limelight/publish.rs",
+      "max_lines": 380,
+      "owner": "HeliOS",
+      "review_note": "Limelight NT4 publish transport, cache invalidation, and topic writes now live here; keep runtime state and snapshot building separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/nt4/limelight/runtime.rs",
+      "max_lines": 320,
+      "owner": "HeliOS",
+      "review_note": "Limelight reconcile state, registry snapshots, and adapter runtime assembly now live here; keep payload shaping and publishing in dedicated modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/nt4/limelight/snapshot.rs",
+      "max_lines": 340,
+      "owner": "HeliOS",
+      "review_note": "Limelight snapshot synthesis, IMU shaping, and detection parsing now live here; keep runtime state and publish transport separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/nt4/limelight/tests.rs",
+      "max_lines": 40,
+      "owner": "HeliOS",
+      "review_note": "Limelight naming helper tests now live here; keep them isolated from production modules."
     }
   ],
   "forbidden_paths": [
@@ -1371,6 +1449,16 @@
       "path": "backend/src/helios-api/src/http/streams/recording/routes.rs",
       "owner": "HeliOS",
       "reason": "Recording route orchestration now lives under backend/src/helios-api/src/http/streams/recording/routes/*. Do not recreate the deleted recording/routes.rs monolith."
+    },
+    {
+      "path": "backend/src/helios-api/src/nt4/bridge.rs",
+      "owner": "HeliOS",
+      "reason": "The NT4 bridge publish loop, topic helpers, payload shaping, and target/network helpers now live under backend/src/helios-api/src/nt4/bridge/*. Do not recreate the deleted nt4/bridge.rs monolith."
+    },
+    {
+      "path": "backend/src/helios-api/src/nt4/limelight.rs",
+      "owner": "HeliOS",
+      "reason": "Limelight registry state, snapshot synthesis, naming, and publish transport now live under backend/src/helios-api/src/nt4/limelight/*. Do not recreate the deleted nt4/limelight.rs monolith."
     },
     {
       "path": "backend/src/helios-api/src/http/localization/maps.rs",

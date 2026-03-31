@@ -3,12 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub(super) fn team_number_to_rio_ip(team: u32) -> Option<Ipv4Addr> {
-    if team == 0 || team > 25_599 {
-        return None;
-    }
-    let a = (team / 100) as u8;
-    let b = (team % 100) as u8;
-    Some(Ipv4Addr::new(10, a, b, 2))
+    crate::nt4::support::team_number_to_rio_ip(team)
 }
 
 pub(super) fn team_number_from_rio_ip(ip: Ipv4Addr) -> Option<u32> {

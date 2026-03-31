@@ -5,6 +5,7 @@ pub mod limelight_types;
 pub mod photonvision;
 pub mod photonvision_packet;
 pub mod pool;
+pub mod support;
 
 use once_cell::sync::Lazy;
 

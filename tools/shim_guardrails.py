@@ -149,9 +149,9 @@ def discover_shims(repo_root: Path, scan_roots: tuple[str, ...]) -> list[Discove
         except OSError:
             continue
         for line_no, line in enumerate(lines, start=1):
-            if MARKER_TOKEN not in line:
+            marker_value = extract_marker_id(line)
+            if marker_value is None:
                 continue
-            marker_value = line.split(MARKER_TOKEN, 1)[1].strip()
             if not marker_value:
                 shims.append(
                     DiscoveredShim(
@@ -190,7 +190,9 @@ def discover_shims_with_git_grep(repo_root: Path, scan_roots: tuple[str, ...]) -
     shims: list[DiscoveredShim] = []
     for raw_line in result.stdout.splitlines():
         path_text, line_text, content = raw_line.split(":", 2)
-        marker_value = content.split(MARKER_TOKEN, 1)[1].strip() if MARKER_TOKEN in content else ""
+        marker_value = extract_marker_id(content)
+        if marker_value is None:
+            continue
         shims.append(
             DiscoveredShim(
                 id=marker_value,
@@ -199,6 +201,15 @@ def discover_shims_with_git_grep(repo_root: Path, scan_roots: tuple[str, ...]) -
             )
         )
     return shims
+
+
+def extract_marker_id(line: str) -> str | None:
+    stripped = line.lstrip()
+    for prefix in ("// ", "//", "# ", "#"):
+        marker_prefix = f"{prefix}{MARKER_TOKEN}"
+        if stripped.startswith(marker_prefix):
+            return stripped[len(marker_prefix) :].strip()
+    return None
 
 
 def evaluate_guardrails(
