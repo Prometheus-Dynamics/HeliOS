@@ -144,7 +144,7 @@ const _: () = {
     lib_ipc::tagged_enum! {
         impl crate::ipc::EngineCommand => crate::ipc::EngineCommandKind {
             struct List { command_id: lib_ipc::types::CommandId },
-            struct Start { command_id: lib_ipc::types::CommandId => with_serde, manifest: Box<crate::ipc::StreamManifest> => with_serde },
+            struct Start { command_id: lib_ipc::types::CommandId => with_serde, manifest: Box<crate::ipc::ResolvedStreamConfig> => with_serde },
             struct SetCodecs { command_id: lib_ipc::types::CommandId => with_serde, stream_id: uuid::Uuid => with_serde, decoder_id: Option<String> => with_serde, encoder_id: Option<String> => with_serde },
             struct SetCalibration { command_id: lib_ipc::types::CommandId => with_serde, stream_id: uuid::Uuid => with_serde, calibration: Option<crate::ipc::StreamCalibration> => with_serde },
             struct SetCalibrationMode { command_id: lib_ipc::types::CommandId => with_serde, stream_id: uuid::Uuid => with_serde, enabled: bool, dictionary: Option<String> => with_serde, mode: Option<String> => with_serde },

@@ -4,12 +4,10 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use helios_engine::capture::CaptureDescriptor;
-use helios_engine::ipc::{JsonWire, StreamManifest, StreamPipelineGridSlot, StreamPipelineLayout, StreamStatus};
+use helios_engine::ipc::{EngineErrorCode, JsonWire, ResolvedStreamConfig, StreamManifest, StreamPipelineGridSlot, StreamPipelineLayout, StreamStatus, normalize_requested_stream_encoder};
 use lib_ipc::client::ClientTransportError;
-use std::collections::BTreeMap;
 use std::io;
 use std::time::Duration;
-use styx::codec::{CodecKind, CodecRegistry};
 use styx::prelude::FourCc;
 use uuid::Uuid;
 
@@ -18,8 +16,7 @@ use crate::http::streams_persist;
 
 use super::CALIBRATION_MODE_PIPELINE_UUID;
 use super::RAW_PIPELINE_UUID;
-use super::types::{EncoderSettingsDescriptor, EngineErrorBody, ResolvedCodecState, ResolvedStreamState, StreamInfo};
-use helios_engine::ipc::EngineErrorCode;
+use super::types::{EncoderSettingsDescriptor, EngineErrorBody, StreamInfo};
 
 pub(crate) fn map_client_error(err: ClientTransportError) -> Response {
     let status = StatusCode::BAD_GATEWAY;
@@ -91,175 +88,13 @@ pub(crate) fn default_ffmpeg_settings_descriptor() -> EncoderSettingsDescriptor 
     }
 }
 
-fn manifest_prefers_default_stream_encoder(manifest: &StreamManifest) -> bool {
-    !manifest.internal && !matches!(manifest.capture.backend, styx::BackendKind::File | styx::BackendKind::Netcam)
-}
-
-fn encoder_selector_needs_normalization(selector: Option<&str>) -> bool {
-    let Some(selector) = selector.map(str::trim).filter(|value| !value.is_empty()) else {
-        return true;
-    };
-    selector.eq_ignore_ascii_case("ffmpeg") || matches!(selector.to_ascii_lowercase().as_str(), "mjpeg" | "mjpg" | "jpeg")
-}
-
-pub(crate) fn default_stream_encoder_selector() -> Option<String> {
-    let preferred_input = FourCc::new(*b"RG24");
-    let entries = CodecRegistry::list_enabled_encoders().ok()?;
-    let mut preferred_mjpeg: Option<String> = None;
-    let mut fallback_mjpeg: Option<String> = None;
-    let mut fallback_any: Option<String> = None;
-
-    for (input, codecs) in entries {
-        if input != preferred_input {
-            continue;
-        }
-        for desc in codecs {
-            if desc.kind != CodecKind::Encoder {
-                continue;
-            }
-            let impl_name = desc.impl_name.trim();
-            if impl_name.is_empty() {
-                continue;
-            }
-            if fallback_any.is_none() {
-                fallback_any = Some(impl_name.to_string());
-            }
-            if desc.name.eq_ignore_ascii_case("mjpeg") {
-                if desc.impl_name.eq_ignore_ascii_case("turbojpeg") {
-                    preferred_mjpeg = Some(impl_name.to_string());
-                    break;
-                }
-                if fallback_mjpeg.is_none() {
-                    fallback_mjpeg = Some(impl_name.to_string());
-                }
-            }
-        }
-        if preferred_mjpeg.is_some() {
-            break;
-        }
-    }
-
-    preferred_mjpeg.or(fallback_mjpeg).or(fallback_any)
-}
-
-fn default_decoder_selector_for_codec(descs: &[styx::codec::CodecDescriptor]) -> Option<String> {
-    if descs.is_empty() {
-        return None;
-    }
-
-    if let Some(codec) = descs.iter().find(|desc| desc.name.eq_ignore_ascii_case("mjpeg") && desc.impl_name.eq_ignore_ascii_case("turbojpeg")) {
-        return Some(codec.impl_name.to_string());
-    }
-
-    match descs[0].input.to_u32().to_le_bytes() {
-        [b'H', b'2', b'6', b'4'] => return Some("h264".to_string()),
-        [b'H', b'2', b'6', b'5'] | [b'H', b'E', b'V', b'C'] => return Some("h265".to_string()),
-        [b'M', b'J', b'P', b'G'] | [b'J', b'P', b'E', b'G'] => {}
-        _ => {}
-    }
-
-    if let Some(codec) = descs.iter().find(|desc| desc.impl_name.eq_ignore_ascii_case("passthrough")) {
-        return Some(codec.impl_name.to_string());
-    }
-
-    descs.first().map(|desc| desc.impl_name.to_string())
-}
-
-pub(crate) fn default_decoder_ids_by_capture_format() -> BTreeMap<String, String> {
-    let mut defaults = BTreeMap::new();
-    let Ok(entries) = CodecRegistry::list_enabled_codecs() else {
-        return defaults;
-    };
-
-    for (input, codecs) in entries {
-        let decoder_descs: Vec<_> = codecs.into_iter().filter(|desc| desc.kind == CodecKind::Decoder).collect();
-        if decoder_descs.is_empty() {
-            continue;
-        }
-        let key = String::from_utf8_lossy(&input.to_u32().to_le_bytes()).trim().to_ascii_uppercase();
-        if key.is_empty() {
-            continue;
-        }
-        if let Some(selector) = default_decoder_selector_for_codec(&decoder_descs) {
-            defaults.insert(key, selector);
-        }
-    }
-
-    defaults
-}
-
-fn normalized_codec_selector(value: Option<&str>) -> Option<String> {
-    value.map(str::trim).filter(|value| !value.is_empty()).map(ToString::to_string)
-}
-
-pub(crate) fn default_decoder_selector_for_capture_format(fourcc: FourCc) -> Option<String> {
-    let defaults = default_decoder_ids_by_capture_format();
-    let key = String::from_utf8_lossy(&fourcc.to_u32().to_le_bytes()).trim().to_ascii_uppercase();
-    defaults.get(&key).cloned().or_else(|| defaults.get("ANY").cloned())
-}
-
-pub(crate) fn resolve_stream_state(manifest: &StreamManifest) -> ResolvedStreamState {
-    let mut normalized = manifest.clone();
-    let encoder_explicitly_disabled = normalized.encoder_enabled == Some(false);
-    let decoder_explicitly_disabled = normalized.decoder_enabled == Some(false);
-
-    if encoder_explicitly_disabled {
-        normalized.encoder_id = None;
-        normalized.encoder_settings = None;
-    }
-    if decoder_explicitly_disabled {
-        normalized.decoder_id = None;
-        normalized.decoder_settings = None;
-    }
-
-    if !encoder_explicitly_disabled {
-        normalize_stream_encoder_manifest(&mut normalized);
-    }
-
-    let encoder_codec_id = normalized_codec_selector(normalized.encoder_id.as_deref());
-    let encoder_enabled = !encoder_explicitly_disabled && encoder_codec_id.is_some();
-
-    let mut decoder_codec_id = normalized_codec_selector(normalized.decoder_id.as_deref());
-    if !decoder_explicitly_disabled && decoder_codec_id.is_none() {
-        decoder_codec_id = default_decoder_selector_for_capture_format(normalized.capture.mode.format.code);
-    }
-    let decoder_enabled = !decoder_explicitly_disabled && decoder_codec_id.is_some();
-
-    ResolvedStreamState {
-        encoder: ResolvedCodecState { enabled: encoder_enabled, codec_id: encoder_codec_id, settings_present: encoder_enabled && normalized.encoder_settings.is_some() },
-        decoder: ResolvedCodecState { enabled: decoder_enabled, codec_id: decoder_codec_id, settings_present: decoder_enabled && normalized.decoder_settings.is_some() },
-    }
-}
-
-pub(crate) fn build_stream_info(id: Uuid, descriptor: CaptureDescriptor, manifest: StreamManifest, status: Option<StreamStatus>) -> StreamInfo {
-    let resolved = resolve_stream_state(&manifest);
+pub(crate) fn build_stream_info(id: Uuid, descriptor: CaptureDescriptor, resolved: ResolvedStreamConfig, status: Option<StreamStatus>) -> StreamInfo {
+    let manifest = resolved.to_requested_manifest();
     StreamInfo { id, descriptor, manifest, resolved, status }
 }
 
 pub(crate) fn normalize_stream_encoder_manifest(manifest: &mut StreamManifest) {
-    if !manifest_prefers_default_stream_encoder(manifest) {
-        return;
-    }
-
-    let selector = manifest.encoder_id.as_deref();
-    let selector_needs_normalization = encoder_selector_needs_normalization(selector);
-
-    if manifest.encoder_enabled == Some(false) && !selector_needs_normalization {
-        return;
-    }
-
-    if selector_needs_normalization {
-        let Some(default_selector) = default_stream_encoder_selector() else {
-            return;
-        };
-        manifest.encoder_enabled = Some(true);
-        manifest.encoder_id = Some(default_selector);
-        return;
-    }
-
-    if manifest.encoder_enabled.is_none() {
-        manifest.encoder_enabled = Some(true);
-    }
+    normalize_requested_stream_encoder(manifest);
 }
 
 #[cfg(test)]
@@ -267,10 +102,10 @@ mod tests {
     use super::*;
     use helios_engine::capture::CaptureConfig;
     use helios_engine::identity::DeviceIdentity;
-    use helios_engine::ipc::{EncoderSettings, FrameRate, ResolutionHint};
+    use helios_engine::ipc::{default_stream_encoder_selector, EncoderSettings, FrameRate, ResolutionHint};
     use std::collections::BTreeMap;
-    use styx::{BackendHandle, BackendKind};
     use styx::prelude::{ColorSpace, MediaFormat, Resolution};
+    use styx::{BackendHandle, BackendKind};
 
     fn sample_manifest() -> StreamManifest {
         StreamManifest {
@@ -279,10 +114,7 @@ mod tests {
                 device_keys: vec!["cam".to_string()],
                 backend: BackendKind::Libcamera,
                 handle: BackendHandle::Libcamera { id: "cam0".to_string() },
-                mode: helios_engine::capture::ModeId {
-                    format: MediaFormat::new(FourCc::new(*b"NV12"), Resolution::new(1280, 800).unwrap(), ColorSpace::Srgb),
-                    interval: None,
-                },
+                mode: helios_engine::capture::ModeId { format: MediaFormat::new(FourCc::new(*b"NV12"), Resolution::new(1280, 800).unwrap(), ColorSpace::Srgb), interval: None },
                 target_fps: None,
                 interval: None,
                 controls: Vec::new(),
@@ -313,11 +145,14 @@ mod tests {
 
     #[test]
     fn resolve_stream_state_applies_default_encoder_and_decoder() {
-        let resolved = resolve_stream_state(&sample_manifest());
+        let resolved = sample_manifest().resolve();
         assert!(resolved.encoder.enabled);
         assert_eq!(resolved.encoder.codec_id.as_deref(), default_stream_encoder_selector().as_deref());
         assert!(resolved.decoder.enabled);
-        assert_eq!(resolved.decoder.codec_id.as_deref(), default_decoder_selector_for_capture_format(FourCc::new(*b"NV12")).as_deref());
+        assert_eq!(
+            resolved.decoder.codec_id.as_deref(),
+            helios_engine::ipc::default_decoder_selector_for_capture_format(FourCc::new(*b"NV12")).as_deref()
+        );
     }
 
     #[test]
@@ -336,7 +171,7 @@ mod tests {
         manifest.decoder_enabled = Some(false);
         manifest.decoder_id = Some("image-crate".to_string());
 
-        let resolved = resolve_stream_state(&manifest);
+        let resolved = manifest.resolve();
         assert!(!resolved.encoder.enabled);
         assert!(resolved.encoder.codec_id.is_none());
         assert!(!resolved.encoder.settings_present);
@@ -758,7 +593,7 @@ where
         return Err("updated live state but stream was not found for persistence".to_string());
     };
 
-    let mut manifest = stream.manifest;
+    let mut manifest = stream.manifest.to_requested_manifest();
     updater(&mut manifest);
     streams_persist::persist_manifest_checked(&camera_id_for_manifest(&manifest), Some(stream_id), manifest.clone())
         .await

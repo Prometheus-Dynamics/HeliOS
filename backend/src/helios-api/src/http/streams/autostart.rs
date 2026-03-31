@@ -96,7 +96,7 @@ pub(super) async fn restore_autostart_streams(state: AppState) {
                 }
 
                 let requested_id = *manifest.identity.id.get_or_insert_with(Uuid::new_v4);
-                let start_result = state.engine.start_stream(manifest.clone()).await;
+                let start_result = state.engine.start_stream(manifest.resolve()).await;
                 let started = match start_result {
                     Ok(EngineEvent::Started { stream_id, .. }) => {
                         let _ = persist_effective_stream_manifest(&state, &camera_id, stream_id, &manifest).await;
@@ -112,7 +112,7 @@ pub(super) async fn restore_autostart_streams(state: AppState) {
                                         || (manifest.identity.id.is_some() && stream.manifest.identity.id == manifest.identity.id)
                                         || desired_alias.is_some_and(|alias| stream.manifest.identity.alias.as_deref().map(str::trim) == Some(alias))
                                 }) {
-                                    crate::http::streams_persist::persist_manifest(&camera_id, Some(existing.stream_id), existing.manifest.clone()).await;
+                                    crate::http::streams_persist::persist_resolved_config(&camera_id, Some(existing.stream_id), existing.manifest.clone()).await;
                                     info!(camera_id, stream_id = %existing.stream_id, "autostart stream already running; reconciled record");
                                     true
                                 } else {

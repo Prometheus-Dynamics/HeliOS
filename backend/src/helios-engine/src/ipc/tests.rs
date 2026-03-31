@@ -70,7 +70,7 @@ fn start_command_round_trips_over_bincode() {
     let decoded_manifest: StreamManifest = bincode::serde::decode_from_slice(&encoded_manifest, config).expect("decode manifest").0;
     assert_eq!(decoded_manifest.capture.backend, base_manifest.capture.backend);
 
-    let command = EngineCommand::Start { command_id: CommandId::new(), manifest: Box::new(base_manifest.clone()) };
+    let command = EngineCommand::Start { command_id: CommandId::new(), manifest: Box::new(base_manifest.clone().resolve()) };
     let encoded = bincode::encode_to_vec(command, config).expect("encode command");
     let (decoded, _): (EngineCommand, usize) = bincode::decode_from_slice(&encoded, config).expect("decode command");
     if let EngineCommand::Start { manifest: round_trip, .. } = decoded {
@@ -83,7 +83,7 @@ fn start_command_round_trips_over_bincode() {
 #[test]
 fn stream_list_event_round_trips() {
     let (_, descriptor) = crate::capture::default_virtual_device().backends.into_iter().next().map(|b| b.descriptor).map(|d| ((), d)).unwrap();
-    let summary = StreamSummary { stream_id: uuid::Uuid::new_v4(), descriptor, manifest: sample_manifest(), status: StreamStatus::default() };
+    let summary = StreamSummary { stream_id: uuid::Uuid::new_v4(), descriptor, manifest: sample_manifest().resolve(), status: StreamStatus::default() };
     let event = EngineEvent::StreamList { command_id: CommandId::new(), streams: vec![summary.clone()] };
     let config = bincode::config::standard();
     let encoded = bincode::encode_to_vec(event, config).expect("encode event");

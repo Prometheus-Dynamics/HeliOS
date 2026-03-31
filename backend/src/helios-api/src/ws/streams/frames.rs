@@ -153,7 +153,7 @@ async fn snapshot_stream_output(state: &AppState, stream_id: Uuid) -> Result<Opt
     let summary = streams.into_iter().find(|stream| stream.stream_id == stream_id).ok_or_else(|| "stream not found".to_string())?;
     let manifest = summary.manifest;
 
-    if manifest.pipeline_enabled == Some(false) {
+    if !manifest.pipeline_enabled {
         return Ok(None);
     }
 

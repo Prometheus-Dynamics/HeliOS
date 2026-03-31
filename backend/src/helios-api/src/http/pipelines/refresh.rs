@@ -97,7 +97,7 @@ pub(super) async fn detach_pipeline_from_streams(state: &AppState, pipeline_id: 
         if stream.manifest.internal {
             continue;
         }
-        let mut manifest = stream.manifest.clone();
+        let mut manifest = stream.manifest.to_requested_manifest();
         if !detach_pipeline_from_manifest(&mut manifest, pipeline_id) {
             continue;
         }
@@ -143,12 +143,12 @@ pub(crate) async fn refresh_pipeline_consumers(state: &AppState, pipeline_id: Uu
     };
 
     for stream in streams {
-        let manifest = &stream.manifest;
+        let manifest = stream.manifest.to_requested_manifest();
         let uses_pipeline = manifest.pipelines.iter().any(|binding| binding.pipeline_id == pipeline_id);
         if !uses_pipeline {
             continue;
         }
-        let output = preferred_pipeline_output(manifest, pipeline_id);
+        let output = preferred_pipeline_output(&manifest, pipeline_id);
         if let Err(err) = state.engine.set_graph(stream.stream_id, graph.clone(), Some(pipeline_id), output).await {
             warn!(stream_id = %stream.stream_id, pipeline_id = %pipeline_id, error = %err, "failed to refresh pipeline graph on stream");
             failures.push(PipelineRefreshFailure { stream_id: stream.stream_id, error: err.to_string() });

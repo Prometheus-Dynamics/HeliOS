@@ -7,13 +7,13 @@ use super::{
 };
 use helios_engine::ipc::{
     CalibrationSolveRequest, EngineCommand, EngineEvent, JsonWire, LocalizationPipelineGraphRequest, LocalizationPipelineSampleRequest, LocalizationPipelineStatusRequest, LocalizationSolveRequest,
-    NodeRegistrySnapshot, StreamCalibration, StreamManifest,
+    NodeRegistrySnapshot, ResolvedStreamConfig, StreamCalibration,
 };
 use std::{collections::BTreeMap, io, time::Duration};
 use tracing::warn;
 
 impl EngineConnection {
-    pub async fn start_stream(&self, manifest: StreamManifest) -> Result<EngineEvent, lib_ipc::client::ClientTransportError> {
+    pub async fn start_stream(&self, manifest: ResolvedStreamConfig) -> Result<EngineEvent, lib_ipc::client::ClientTransportError> {
         self.request(|command_id| EngineCommand::Start { command_id, manifest: Box::new(manifest) }, ExpectedEvent::Start, "start_stream", ENGINE_START_STREAM_TIMEOUT).await
     }
 

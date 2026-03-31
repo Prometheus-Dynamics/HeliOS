@@ -4,7 +4,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use helios_engine::capture::CaptureDescriptor;
-use helios_engine::ipc::{EngineErrorCode, EngineEvent, StreamManifest, StreamSummary};
+use helios_engine::ipc::{EngineErrorCode, EngineEvent, ResolvedStreamConfig, StreamManifest, StreamSummary};
 use std::time::{SystemTime, UNIX_EPOCH};
 use styx::capture::prelude::Mode as CaptureMode;
 use styx::codec::CodecKind;
@@ -38,8 +38,8 @@ pub(super) async fn persist_effective_stream_manifest(state: &AppState, camera_i
         .await
         .ok()
         .and_then(|streams| streams.into_iter().find(|stream| stream.stream_id == stream_id).map(|stream| stream.manifest))
-        .unwrap_or_else(|| requested_manifest.clone());
-    streams_persist::persist_manifest_checked(camera_id, Some(stream_id), effective_manifest).await
+        .unwrap_or_else(|| requested_manifest.resolve());
+    streams_persist::persist_resolved_config_checked(camera_id, Some(stream_id), effective_manifest).await
 }
 
 pub(crate) fn descriptor_from_persisted_manifest(manifest: &StreamManifest) -> CaptureDescriptor {
@@ -83,7 +83,7 @@ fn maybe_engine_crash_response(state: &AppState, start_ms: u64, _manifest: &Stre
     Some((StatusCode::BAD_GATEWAY, Json(engine_error_body(Some(EngineErrorCode::Internal), reason))).into_response())
 }
 
-fn manifests_conflict(a: &StreamManifest, b: &StreamManifest) -> bool {
+fn manifests_conflict(a: &ResolvedStreamConfig, b: &StreamManifest) -> bool {
     if a.capture.device_keys.is_empty() || b.capture.device_keys.is_empty() {
         return false;
     }
@@ -280,7 +280,7 @@ async fn resolve_stream_owner_camera_id(state: &AppState, requested_id: Uuid) ->
     if let Ok(active) = state.engine.list_streams().await
         && let Some(stream) = active.into_iter().find(|stream| stream.stream_id == requested_id)
     {
-        return Some(camera_id_for_manifest(&stream.manifest));
+        return Some(camera_id_for_manifest(&stream.manifest.to_requested_manifest()));
     }
     let persisted = streams_persist::list_persisted_records().await;
     for record in persisted {
@@ -303,7 +303,7 @@ async fn ensure_unique_stream_identity(state: &AppState, manifest: &StreamManife
             if stream.manifest.internal {
                 continue;
             }
-            let existing_camera_id = camera_id_for_manifest(&stream.manifest);
+            let existing_camera_id = camera_id_for_manifest(&stream.manifest.to_requested_manifest());
             if stream.stream_id == requested_id {
                 if existing_camera_id != camera_id {
                     return Some((StatusCode::CONFLICT, Json(engine_error_body(Some(EngineErrorCode::Conflict), "stream uuid already assigned to another camera"))).into_response());
@@ -311,7 +311,7 @@ async fn ensure_unique_stream_identity(state: &AppState, manifest: &StreamManife
                 continue;
             }
 
-            let existing_tokens = stream_identity_token_set(stream.stream_id, &stream.manifest);
+            let existing_tokens = stream_identity_token_set(stream.stream_id, &stream.manifest.to_requested_manifest());
 
             if let Some(tok) = requested_tokens.intersection(&existing_tokens).next().cloned() {
                 let msg = format!("stream identity token already in use: token=\"{tok}\" conflicts with running stream id=\"{}\" (camera=\"{}\")", stream.stream_id, existing_camera_id);
@@ -358,14 +358,14 @@ async fn merge_stream_manifest_state(state: &AppState, manifest: &mut StreamMani
             && let Some(existing) = running.iter().find(|s| s.stream_id == id && !s.manifest.internal)
         {
             base_stream_id = Some(existing.stream_id);
-            base_manifest = Some(existing.manifest.clone());
+            base_manifest = Some(existing.manifest.to_requested_manifest());
         }
 
         if base_manifest.is_none()
             && let Some(existing) = running.iter().find(|s| !s.manifest.internal && manifests_conflict(&s.manifest, manifest))
         {
             base_stream_id = Some(existing.stream_id);
-            base_manifest = Some(existing.manifest.clone());
+            base_manifest = Some(existing.manifest.to_requested_manifest());
         }
     }
 
@@ -583,8 +583,9 @@ pub(crate) async fn get_stream(state: AppState, id: Uuid) -> Response {
                 {
                     manifest.pose = Some(pose);
                 }
-                apply_effective_pipeline_layout(&mut manifest);
-                ensure_descriptor_has_mode(&mut descriptor, &manifest);
+                let mut requested = manifest.to_requested_manifest();
+                apply_effective_pipeline_layout(&mut requested);
+                ensure_descriptor_has_mode(&mut descriptor, &requested);
                 Json(build_stream_info(stream_id, descriptor, manifest, Some(status))).into_response()
             }
             None => {
@@ -605,7 +606,7 @@ pub(crate) async fn get_stream(state: AppState, id: Uuid) -> Response {
                     manifest.identity.id = Some(id);
                     apply_effective_pipeline_layout(&mut manifest);
                     let descriptor = descriptor_from_persisted_manifest(&manifest);
-                    return Json(build_stream_info(id, descriptor, manifest, None)).into_response();
+                    return Json(build_stream_info(id, descriptor, manifest.resolve(), None)).into_response();
                 }
 
                 StatusCode::NOT_FOUND.into_response()
@@ -682,7 +683,6 @@ pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> R
         }
     }
     sanitize_capture_tdn_output(&mut manifest);
-    normalize_stream_encoder_manifest(&mut manifest);
     if let Some(response) = ensure_unique_stream_identity(&state, &manifest, requested_id, &camera_id).await {
         return response;
     }
@@ -727,7 +727,7 @@ pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> R
     let mut output_recovery_attempted = false;
     loop {
         attempts += 1;
-        match state.engine.start_stream(manifest.clone()).await {
+        match state.engine.start_stream(manifest.resolve()).await {
             Ok(EngineEvent::Started { stream_id, descriptor, .. }) => {
                 let persist_id = owner_camera_id.clone().unwrap_or_else(|| camera_id_for_manifest(&manifest));
                 if let Err(err) = persist_effective_stream_manifest(&state, &persist_id, stream_id, &manifest).await {

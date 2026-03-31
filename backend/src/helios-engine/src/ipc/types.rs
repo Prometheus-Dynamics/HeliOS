@@ -16,6 +16,9 @@ use lib_ipc::frame::MessageKind;
 use lib_ipc::protocol::ControlEvent;
 use lib_ipc::server::ServerEvent;
 use lib_ipc::types::CommandId;
+use styx::BackendKind;
+use styx::codec::{CodecKind, CodecRegistry};
+use styx::prelude::{FourCc, Resolution};
 
 pub type ControlId = u32;
 
@@ -365,7 +368,7 @@ pub enum EngineCommand {
         #[bincode(with_serde)]
         command_id: CommandId,
         #[bincode(with_serde)]
-        manifest: Box<StreamManifest>,
+        manifest: Box<ResolvedStreamConfig>,
     },
     /// Update encoder/decoder selection for a running stream without restarting capture.
     SetCodecs {
@@ -1091,6 +1094,65 @@ pub struct RigPose {
     pub updated_at: Option<String>,
 }
 
+pub type RequestedStreamConfig = StreamManifest;
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedEncoderConfig {
+    pub enabled: bool,
+    #[serde(default)]
+    pub codec_id: Option<String>,
+    #[serde(default)]
+    pub settings: Option<EncoderSettings>,
+    #[serde(default)]
+    pub settings_present: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedDecoderConfig {
+    pub enabled: bool,
+    #[serde(default)]
+    pub codec_id: Option<String>,
+    #[serde(default)]
+    pub settings: Option<DecoderSettings>,
+    #[serde(default)]
+    pub settings_present: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedStreamConfig {
+    pub identity: DeviceIdentity,
+    pub capture: CaptureConfig,
+    pub host_buffer: usize,
+    pub internal: bool,
+    pub pipeline_enabled: bool,
+    #[serde(default)]
+    pub pipelines: Vec<StreamPipelineBinding>,
+    #[serde(default)]
+    pub active_pipeline_id: Option<Uuid>,
+    #[serde(default)]
+    pub active_pipeline_output: Option<String>,
+    #[serde(default)]
+    pub pipeline_layout: Option<StreamPipelineLayout>,
+    #[serde(default)]
+    pub pipeline_wires: Vec<StreamPipelineWire>,
+    #[serde(default)]
+    pub pipeline_host_inputs: BTreeMap<String, JsonWire>,
+    #[serde(default)]
+    pub calibration: Option<StreamCalibration>,
+    #[serde(default)]
+    pub pose: Option<RigPose>,
+    #[serde(default)]
+    pub encoder: ResolvedEncoderConfig,
+    #[serde(default)]
+    pub decoder: ResolvedDecoderConfig,
+    pub preview_jpeg_quality: u8,
+    pub shadow_recorder_enabled: bool,
+    pub start_on_boot: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct StreamManifest {
     pub identity: DeviceIdentity,
@@ -1179,13 +1241,151 @@ impl StreamManifest {
     pub fn preview_jpeg_quality(&self) -> u8 {
         self.preview_jpeg_quality.or_else(default_preview_jpeg_quality_override).unwrap_or(DEFAULT_PREVIEW_JPEG_QUALITY).clamp(1, 100)
     }
+
+    pub fn resolve(&self) -> ResolvedStreamConfig {
+        let mut requested = self.clone();
+        let host_buffer = requested.host_buffer();
+
+        let pipeline_enabled = requested.pipeline_enabled != Some(false);
+        if !pipeline_enabled {
+            requested.pipelines.clear();
+            requested.active_pipeline_id = None;
+            requested.active_pipeline_output = None;
+            requested.pipeline_layout = None;
+            requested.pipeline_wires.clear();
+        }
+
+        let encoder_explicitly_disabled = requested.encoder_enabled == Some(false);
+        let decoder_explicitly_disabled = requested.decoder_enabled == Some(false);
+
+        if encoder_explicitly_disabled {
+            requested.encoder_id = None;
+            requested.encoder_settings = None;
+        }
+        if decoder_explicitly_disabled {
+            requested.decoder_id = None;
+            requested.decoder_settings = None;
+        }
+
+        if !encoder_explicitly_disabled {
+            normalize_stream_encoder_selection(&mut requested);
+        }
+
+        let mut encoder = ResolvedEncoderConfig {
+            enabled: false,
+            codec_id: normalized_codec_selector(requested.encoder_id.as_deref()),
+            settings: requested.encoder_settings.clone(),
+            settings_present: false,
+        };
+        encoder.enabled = !encoder_explicitly_disabled && encoder.codec_id.is_some();
+
+        if encoder.enabled {
+            apply_default_encoder_settings(&requested.capture, &mut encoder);
+        } else {
+            encoder.codec_id = None;
+            encoder.settings = None;
+        }
+        encoder.settings_present = encoder.enabled && encoder.settings.is_some();
+
+        let mut decoder = ResolvedDecoderConfig {
+            enabled: false,
+            codec_id: normalized_codec_selector(requested.decoder_id.as_deref()),
+            settings: requested.decoder_settings.clone(),
+            settings_present: false,
+        };
+        if !decoder_explicitly_disabled && decoder.codec_id.is_none() {
+            decoder.codec_id = default_decoder_selector_for_capture_format(requested.capture.mode.format.code);
+        }
+        decoder.enabled = !decoder_explicitly_disabled && decoder.codec_id.is_some();
+        if !decoder.enabled {
+            decoder.codec_id = None;
+            decoder.settings = None;
+        }
+        decoder.settings_present = decoder.enabled && decoder.settings.is_some();
+
+        let preview_jpeg_quality = requested
+            .preview_jpeg_quality
+            .map(|value| value.clamp(1, 100))
+            .or_else(|| encoder.enabled.then_some(DEFAULT_STREAM_PREVIEW_JPEG_QUALITY))
+            .unwrap_or_else(|| requested.preview_jpeg_quality());
+
+        ResolvedStreamConfig {
+            identity: requested.identity,
+            capture: requested.capture,
+            host_buffer,
+            internal: requested.internal,
+            pipeline_enabled,
+            pipelines: requested.pipelines,
+            active_pipeline_id: requested.active_pipeline_id,
+            active_pipeline_output: requested.active_pipeline_output,
+            pipeline_layout: requested.pipeline_layout,
+            pipeline_wires: requested.pipeline_wires,
+            pipeline_host_inputs: requested.pipeline_host_inputs,
+            calibration: requested.calibration,
+            pose: requested.pose,
+            encoder,
+            decoder,
+            preview_jpeg_quality,
+            shadow_recorder_enabled: requested.shadow_recorder_enabled,
+            start_on_boot: requested.start_on_boot,
+        }
+    }
+}
+
+impl ResolvedStreamConfig {
+    pub fn host_buffer(&self) -> usize {
+        self.host_buffer
+    }
+
+    pub fn to_requested_manifest(&self) -> StreamManifest {
+        StreamManifest {
+            identity: self.identity.clone(),
+            capture: self.capture.clone(),
+            host_buffer: self.host_buffer,
+            internal: self.internal,
+            pipeline_enabled: Some(self.pipeline_enabled),
+            pipelines: self.pipelines.clone(),
+            active_pipeline_id: self.active_pipeline_id,
+            active_pipeline_output: self.active_pipeline_output.clone(),
+            pipeline_layout: self.pipeline_layout.clone(),
+            pipeline_wires: self.pipeline_wires.clone(),
+            pipeline_host_inputs: self.pipeline_host_inputs.clone(),
+            calibration: self.calibration.clone(),
+            pose: self.pose.clone(),
+            encoder_enabled: Some(self.encoder.enabled),
+            encoder_id: self.encoder.codec_id.clone(),
+            decoder_enabled: Some(self.decoder.enabled),
+            decoder_id: self.decoder.codec_id.clone(),
+            encoder_settings: self.encoder.settings.clone(),
+            decoder_settings: self.decoder.settings.clone(),
+            preview_jpeg_quality: Some(self.preview_jpeg_quality),
+            shadow_recorder_enabled: self.shadow_recorder_enabled,
+            start_on_boot: self.start_on_boot,
+        }
+    }
+
+    pub fn encoder_id(&self) -> Option<&str> {
+        self.encoder.enabled.then_some(self.encoder.codec_id.as_deref()).flatten()
+    }
+
+    pub fn decoder_id(&self) -> Option<&str> {
+        self.decoder.enabled.then_some(self.decoder.codec_id.as_deref()).flatten()
+    }
+
+    pub fn encoder_settings(&self) -> Option<&EncoderSettings> {
+        self.encoder.enabled.then_some(self.encoder.settings.as_ref()).flatten()
+    }
+
+    pub fn decoder_settings(&self) -> Option<&DecoderSettings> {
+        self.decoder.enabled.then_some(self.decoder.settings.as_ref()).flatten()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamSummary {
     pub stream_id: Uuid,
     pub descriptor: CaptureDescriptor,
-    pub manifest: StreamManifest,
+    pub manifest: ResolvedStreamConfig,
     #[serde(default)]
     pub status: StreamStatus,
 }
@@ -1224,6 +1424,9 @@ pub(crate) fn default_host_buffer() -> usize {
 }
 
 const DEFAULT_PREVIEW_JPEG_QUALITY: u8 = 65;
+const DEFAULT_STREAM_ENCODER_FPS: u32 = 60;
+const DEFAULT_STREAM_ENCODER_OUTPUT_HEIGHT: u32 = 480;
+const DEFAULT_STREAM_PREVIEW_JPEG_QUALITY: u8 = 30;
 
 fn default_preview_jpeg_quality_override() -> Option<u8> {
     env::var("HELIOS_PREVIEW_JPEG_QUALITY").ok().and_then(|v| v.parse::<u8>().ok())
@@ -1235,4 +1438,175 @@ pub(crate) fn default_shadow_recorder_enabled() -> bool {
 
 fn max_host_buffer() -> usize {
     env::var("HELIOS_HOST_BUFFER_MAX").ok().and_then(|v| v.parse().ok()).filter(|v| *v > 0).unwrap_or(64)
+}
+
+fn manifest_prefers_default_stream_encoder(manifest: &StreamManifest) -> bool {
+    !manifest.internal && !matches!(manifest.capture.backend, BackendKind::File | BackendKind::Netcam)
+}
+
+fn encoder_selector_needs_normalization(selector: Option<&str>) -> bool {
+    let Some(selector) = selector.map(str::trim).filter(|value| !value.is_empty()) else {
+        return true;
+    };
+    selector.eq_ignore_ascii_case("ffmpeg") || matches!(selector.to_ascii_lowercase().as_str(), "mjpeg" | "mjpg" | "jpeg")
+}
+
+pub fn default_stream_encoder_selector() -> Option<String> {
+    let preferred_input = FourCc::new(*b"RG24");
+    let entries = CodecRegistry::list_enabled_encoders().ok()?;
+    let mut preferred_mjpeg: Option<String> = None;
+    let mut fallback_mjpeg: Option<String> = None;
+    let mut fallback_any: Option<String> = None;
+
+    for (input, codecs) in entries {
+        if input != preferred_input {
+            continue;
+        }
+        for desc in codecs {
+            if desc.kind != CodecKind::Encoder {
+                continue;
+            }
+            let impl_name = desc.impl_name.trim();
+            if impl_name.is_empty() {
+                continue;
+            }
+            if fallback_any.is_none() {
+                fallback_any = Some(impl_name.to_string());
+            }
+            if desc.name.eq_ignore_ascii_case("mjpeg") {
+                if desc.impl_name.eq_ignore_ascii_case("turbojpeg") {
+                    preferred_mjpeg = Some(impl_name.to_string());
+                    break;
+                }
+                if fallback_mjpeg.is_none() {
+                    fallback_mjpeg = Some(impl_name.to_string());
+                }
+            }
+        }
+        if preferred_mjpeg.is_some() {
+            break;
+        }
+    }
+
+    preferred_mjpeg.or(fallback_mjpeg).or(fallback_any)
+}
+
+pub fn normalize_requested_stream_encoder(manifest: &mut StreamManifest) {
+    normalize_stream_encoder_selection(manifest);
+}
+
+fn normalize_stream_encoder_selection(manifest: &mut StreamManifest) {
+    if !manifest_prefers_default_stream_encoder(manifest) {
+        return;
+    }
+
+    let selector = manifest.encoder_id.as_deref();
+    let selector_needs_normalization = encoder_selector_needs_normalization(selector);
+
+    if manifest.encoder_enabled == Some(false) && !selector_needs_normalization {
+        return;
+    }
+
+    if selector_needs_normalization {
+        let Some(default_selector) = default_stream_encoder_selector() else {
+            return;
+        };
+        manifest.encoder_enabled = Some(true);
+        manifest.encoder_id = Some(default_selector);
+        return;
+    }
+
+    if manifest.encoder_enabled.is_none() {
+        manifest.encoder_enabled = Some(true);
+    }
+}
+
+fn normalized_codec_selector(value: Option<&str>) -> Option<String> {
+    value.map(str::trim).filter(|value| !value.is_empty()).map(ToString::to_string)
+}
+
+fn default_decoder_selector_for_codec(descs: &[styx::codec::CodecDescriptor]) -> Option<String> {
+    if descs.is_empty() {
+        return None;
+    }
+
+    if let Some(codec) = descs.iter().find(|desc| desc.name.eq_ignore_ascii_case("mjpeg") && desc.impl_name.eq_ignore_ascii_case("turbojpeg")) {
+        return Some(codec.impl_name.to_string());
+    }
+
+    match descs[0].input.to_u32().to_le_bytes() {
+        [b'H', b'2', b'6', b'4'] => return Some("h264".to_string()),
+        [b'H', b'2', b'6', b'5'] | [b'H', b'E', b'V', b'C'] => return Some("h265".to_string()),
+        [b'M', b'J', b'P', b'G'] | [b'J', b'P', b'E', b'G'] => {}
+        _ => {}
+    }
+
+    if let Some(codec) = descs.iter().find(|desc| desc.impl_name.eq_ignore_ascii_case("passthrough")) {
+        return Some(codec.impl_name.to_string());
+    }
+
+    descs.first().map(|desc| desc.impl_name.to_string())
+}
+
+pub fn default_decoder_ids_by_capture_format() -> BTreeMap<String, String> {
+    let mut defaults = BTreeMap::new();
+    let Ok(entries) = CodecRegistry::list_enabled_codecs() else {
+        return defaults;
+    };
+
+    for (input, codecs) in entries {
+        let decoder_descs: Vec<_> = codecs.into_iter().filter(|desc| desc.kind == CodecKind::Decoder).collect();
+        if decoder_descs.is_empty() {
+            continue;
+        }
+        let key = String::from_utf8_lossy(&input.to_u32().to_le_bytes()).trim().to_ascii_uppercase();
+        if key.is_empty() {
+            continue;
+        }
+        if let Some(selector) = default_decoder_selector_for_codec(&decoder_descs) {
+            defaults.insert(key, selector);
+        }
+    }
+
+    defaults
+}
+
+pub fn default_decoder_selector_for_capture_format(fourcc: FourCc) -> Option<String> {
+    let defaults = default_decoder_ids_by_capture_format();
+    let key = String::from_utf8_lossy(&fourcc.to_u32().to_le_bytes()).trim().to_ascii_uppercase();
+    defaults.get(&key).cloned().or_else(|| defaults.get("ANY").cloned())
+}
+
+fn default_encoder_output_resolution(capture_resolution: Resolution) -> ResolutionHint {
+    let source_width = capture_resolution.width.get().max(1);
+    let source_height = capture_resolution.height.get().max(1);
+    let target_height = source_height.min(DEFAULT_STREAM_ENCODER_OUTPUT_HEIGHT).max(1);
+
+    if source_height <= target_height {
+        return ResolutionHint { width: source_width, height: source_height };
+    }
+
+    let scale = target_height as f64 / source_height as f64;
+    let mut width = ((source_width as f64) * scale).round() as u32;
+    let mut height = target_height;
+
+    if width > 1 && width % 2 != 0 {
+        width += 1;
+    }
+    if height > 1 && height % 2 != 0 {
+        height -= 1;
+    }
+
+    ResolutionHint { width: width.max(1).min(source_width), height: height.max(1).min(source_height) }
+}
+
+fn apply_default_encoder_settings(capture: &CaptureConfig, encoder: &mut ResolvedEncoderConfig) {
+    let settings = encoder.settings.get_or_insert_with(Default::default);
+    if settings.framerate.is_none() {
+        settings.framerate = Some(FrameRate { numerator: DEFAULT_STREAM_ENCODER_FPS, denominator: 1 });
+    }
+    let has_explicit_resolution = settings.output_resolution.as_ref().is_some_and(|resolution| resolution.width > 0 && resolution.height > 0);
+    if !has_explicit_resolution {
+        settings.output_resolution = Some(default_encoder_output_resolution(capture.mode.format.resolution));
+    }
 }

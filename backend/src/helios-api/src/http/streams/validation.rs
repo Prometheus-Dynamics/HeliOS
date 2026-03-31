@@ -1,4 +1,4 @@
-use helios_engine::ipc::StreamManifest;
+use helios_engine::ipc::{ResolvedStreamConfig, StreamManifest, default_decoder_ids_by_capture_format, default_stream_encoder_selector};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -16,6 +16,7 @@ use super::{CALIBRATION_MODE_PIPELINE_UUID, RAW_PIPELINE_UUID};
 #[serde(rename_all = "camelCase")]
 pub struct StreamValidateResponse {
     pub manifest: StreamManifest,
+    pub resolved: ResolvedStreamConfig,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<ValidationWarning>,
 }
@@ -56,6 +57,7 @@ pub struct StreamValidationConstraints {
 #[derive(Debug, Clone)]
 pub struct StreamValidationResult {
     pub manifest: StreamManifest,
+    pub resolved: ResolvedStreamConfig,
     pub warnings: Vec<ValidationWarning>,
 }
 
@@ -76,8 +78,8 @@ pub fn stream_capabilities() -> StreamCapabilitiesResponse {
             raw_output: "raw".to_string(),
             undistorted_output: "undistorted".to_string(),
             pipeline_enabled_when_bindings_present: true,
-            default_encoder_id: util::default_stream_encoder_selector(),
-            default_decoder_ids_by_capture_format: util::default_decoder_ids_by_capture_format(),
+            default_encoder_id: default_stream_encoder_selector(),
+            default_decoder_ids_by_capture_format: default_decoder_ids_by_capture_format(),
         },
         constraints: StreamValidationConstraints {
             requires_backend_handle_match: true,
@@ -106,7 +108,8 @@ pub async fn validate_stream_manifest(mut manifest: StreamManifest) -> Result<St
 
     if issues.is_empty() {
         util::normalize_pipeline_manifest(&mut manifest);
-        Ok(StreamValidationResult { manifest, warnings })
+        let resolved = manifest.resolve();
+        Ok(StreamValidationResult { manifest, resolved, warnings })
     } else {
         Err(StreamValidationError { issues, warnings })
     }

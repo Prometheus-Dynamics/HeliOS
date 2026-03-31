@@ -136,7 +136,7 @@ pub async fn apply_calibration(State(state): State<AppState>, Path(id): Path<Uui
         Some(summary) => summary,
         None => return ApiError::not_found("stream not found").into_response(),
     };
-    let mut manifest = summary.manifest;
+    let mut manifest = summary.manifest.to_requested_manifest();
 
     manifest.calibration = Some(helios_engine::ipc::StreamCalibration {
         fx: payload.fx,
@@ -164,7 +164,7 @@ pub async fn apply_calibration(State(state): State<AppState>, Path(id): Path<Uui
     }
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
-    match state.engine.start_stream(manifest.clone()).await {
+    match state.engine.start_stream(manifest.resolve()).await {
         Ok(EngineEvent::Started { .. }) => {}
         Ok(EngineEvent::Nack { code, reason, .. }) => {
             return (StatusCode::BAD_REQUEST, Json(engine_error_body(Some(code), reason))).into_response();
@@ -199,7 +199,7 @@ pub async fn save_calibration(State(state): State<AppState>, Path(id): Path<Uuid
         Some(summary) => summary,
         None => return ApiError::not_found("stream not found").into_response(),
     };
-    let mut manifest = summary.manifest;
+    let mut manifest = summary.manifest.to_requested_manifest();
 
     let calibration = helios_engine::ipc::StreamCalibration {
         fx: payload.fx,

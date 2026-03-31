@@ -24,7 +24,7 @@ use uuid::Uuid;
 
 use crate::capture::{BackendKind, CaptureControlInfo, CaptureControlValue, CaptureDescriptor, ControlAssignment};
 use crate::error::{Error, Result};
-use crate::ipc::{ControlId, JsonWire, RecordingCodec, RecordingContainer, RecordingSource, StreamManifest};
+use crate::ipc::{ControlId, JsonWire, RecordingCodec, RecordingContainer, RecordingSource, ResolvedStreamConfig};
 use crate::stream::{cleanup_all_stream_files, cleanup_stream_files, EncodedFrame, ShmemWriter, StreamMetrics, StreamRunner, StreamRunnerConfig};
 use daedalus::planner::GraphPatch;
 
@@ -457,7 +457,7 @@ impl StreamManager {
         }
     }
 
-    pub async fn start_stream(&self, manifest: StreamManifest) -> Result<(Uuid, CaptureDescriptor)> {
+    pub async fn start_stream(&self, manifest: ResolvedStreamConfig) -> Result<(Uuid, CaptureDescriptor)> {
         let mut manifest = manifest;
         let stream_id = manifest.identity.id.unwrap_or_else(Uuid::new_v4);
         manifest.identity.id = Some(stream_id);
@@ -465,18 +465,13 @@ impl StreamManager {
         // Shadow recorder persists the stream's encoded side-channel, but it must not rewrite the
         // user-selected stream encoder. If the selected encoder is incompatible, shadow recorder
         // will fail later with a clear warning instead of silently coercing the stream profile.
-        if manifest.shadow_recorder_enabled && shadow_recorder_feature_enabled() && manifest.encoder_enabled != Some(false) {
-            let recording_codec = manifest
-                .encoder_id
-                .as_deref()
-                .map(str::trim)
-                .filter(|id| !id.is_empty())
-                .and_then(|id| infer_recording_codec(Some(id)));
+        if manifest.shadow_recorder_enabled && shadow_recorder_feature_enabled() && manifest.encoder.enabled {
+            let recording_codec = manifest.encoder_id().and_then(|id| infer_recording_codec(Some(id)));
             if recording_codec.is_some() {
                 // Shadow-based capture/recording needs frequent keyframes so short windows (5s, 30s)
                 // remain decodable and ffmpeg can remux without producing empty MP4s.
                 let want_fps = infer_recording_fps(&manifest).unwrap_or(30.0).round().clamp(1.0, 240.0) as u32;
-                let settings = manifest.encoder_settings.get_or_insert_with(Default::default);
+                let settings = manifest.encoder.settings.get_or_insert_with(Default::default);
                 if settings.framerate.is_none() {
                     settings.framerate = Some(crate::ipc::FrameRate { numerator: want_fps, denominator: 1 });
                 }
@@ -486,8 +481,6 @@ impl StreamManager {
                 }
             }
         }
-        apply_default_encoder_settings(&mut manifest);
-
         {
             let streams = self.streams.read().await;
             if streams.contains_key(&stream_id) {
@@ -532,11 +525,11 @@ impl StreamManager {
                 let runner = StreamRunner::new(StreamRunnerConfig {
                     capture_config: manifest.capture.clone(),
                     graph: graph.clone(),
-                    encoder_id: manifest.encoder_id.clone(),
-                    decoder_id: manifest.decoder_id.clone(),
-                    encoder_settings: manifest.encoder_settings.clone(),
-                    decoder_settings: manifest.decoder_settings.clone(),
-                    preview_jpeg_quality: manifest.preview_jpeg_quality(),
+                    encoder_id: manifest.encoder.codec_id.clone(),
+                    decoder_id: manifest.decoder.codec_id.clone(),
+                    encoder_settings: manifest.encoder.settings.clone(),
+                    decoder_settings: manifest.decoder.settings.clone(),
+                    preview_jpeg_quality: manifest.preview_jpeg_quality,
                     shmem,
                     stream_id: Some(stream_id),
                 });
@@ -794,7 +787,7 @@ impl StreamManager {
         };
         let frame_ts_path = recording_frame_ts_path(&record_path);
         let requested_fps = settings.as_ref().and_then(|s| s.fps).filter(|v| *v > 0.0).or_else(|| infer_recording_fps(&manifest_snapshot));
-        let encoder_hint = manifest_snapshot.encoder_id.clone().filter(|value| !value.trim().is_empty());
+        let encoder_hint = manifest_snapshot.encoder.codec_id.clone().filter(|value| !value.trim().is_empty());
 
         let started_at_ms = current_time_ms();
         let (stop_tx, stop_rx) = oneshot::channel();
@@ -813,10 +806,10 @@ impl StreamManager {
         //
         // Encoded passthrough is opt-in for deployments that prioritize lower CPU over boundary
         // fidelity (start can land mid-GOP).
-        let passthrough_codec = infer_recording_codec(manifest_snapshot.encoder_id.as_deref());
+        let passthrough_codec = infer_recording_codec(manifest_snapshot.encoder_id());
         let use_encoded_passthrough = recording_encoded_passthrough_enabled()
             && matches!(&resolved_source, ResolvedRecordingSource::Multiplex)
-            && manifest_snapshot.encoder_enabled != Some(false)
+            && manifest_snapshot.encoder.enabled
             && passthrough_codec.is_some()
             && (matches!(container, RecordingContainer::Mp4) || passthrough_codec == Some(codec));
         if use_encoded_passthrough {
@@ -855,9 +848,9 @@ impl StreamManager {
             && shadow_recorder_feature_enabled()
             && manifest_snapshot.shadow_recorder_enabled
             && matches!(source, RecordingSource::Multiplex)
-            && infer_recording_codec(manifest_snapshot.encoder_id.as_deref()).is_some();
+            && infer_recording_codec(manifest_snapshot.encoder_id()).is_some();
         if shadow_candidate {
-            let stream_codec = infer_recording_codec(manifest_snapshot.encoder_id.as_deref()).unwrap();
+            let stream_codec = infer_recording_codec(manifest_snapshot.encoder_id()).unwrap();
             if codec != stream_codec {
                 {
                     let mut recordings = self.recordings.lock().await;
@@ -972,7 +965,7 @@ impl StreamManager {
             })
         }
         .unwrap_or_else(|| {
-            let fallback = infer_recording_codec(manifest_snapshot.encoder_id.as_deref()).unwrap_or(RecordingCodec::H264);
+            let fallback = infer_recording_codec(manifest_snapshot.encoder_id()).unwrap_or(RecordingCodec::H264);
             (fallback, None)
         });
         let raw_format = raw_format.unwrap_or_else(|| RawRecordingFormat::from_codec(requested_codec));
@@ -1026,12 +1019,12 @@ impl StreamManager {
         Ok(())
     }
 
-    async fn start_shadow_recorder(&self, stream_id: Uuid, manifest: &StreamManifest) -> Result<()> {
+    async fn start_shadow_recorder(&self, stream_id: Uuid, manifest: &ResolvedStreamConfig) -> Result<()> {
         let ctx = self.get_stream(stream_id).await?;
-        if manifest.encoder_enabled == Some(false) {
+        if !manifest.encoder.enabled {
             return Err(Error::InvalidState("shadow recorder requires encoder enabled"));
         }
-        let encoder_id = manifest.encoder_id.as_deref().unwrap_or_default().trim();
+        let encoder_id = manifest.encoder_id().unwrap_or_default().trim();
         if encoder_id.is_empty() {
             return Err(Error::InvalidState("shadow recorder requires an encoder_id (h264/h265)"));
         }
@@ -1205,7 +1198,7 @@ impl StreamManager {
             crate::graph::context::inject_node_context(&mut graph_json_for_build, &stream_alias, "calibration");
 
             let mut manifest_for_build = manifest_snapshot.clone();
-            manifest_for_build.pipeline_enabled = Some(true);
+            manifest_for_build.pipeline_enabled = true;
             manifest_for_build.pipelines = vec![crate::ipc::StreamPipelineBinding {
                 pipeline_id: CALIBRATION_MODE_PIPELINE_UUID,
                 pipeline_graph: Some(crate::ipc::JsonWire(graph_json_for_build.clone())),
@@ -1242,7 +1235,7 @@ impl StreamManager {
             tracing::info!(stream_id = %stream_id, outputs = ?outputs, "calibration mode graph applied");
 
             let mut manifest = ctx.manifest.write().await;
-            manifest.pipeline_enabled = Some(true);
+            manifest.pipeline_enabled = true;
             manifest.pipelines = vec![crate::ipc::StreamPipelineBinding {
                 pipeline_id: CALIBRATION_MODE_PIPELINE_UUID,
                 pipeline_graph: Some(crate::ipc::JsonWire(graph_json)),
@@ -1318,8 +1311,8 @@ impl StreamManager {
         // `pipeline_enabled=false` forces passthrough and ignores output selection).
         let implicit_raw_view = view_pipeline_id.is_none() && manifest_snapshot.pipelines.is_empty();
         let wants_raw_graph = (view_pipeline_id == Some(RAW_STREAM_PIPELINE_UUID) || implicit_raw_view) && wants_non_default_raw_output;
-        if manifest_snapshot.pipeline_enabled == Some(false) && wants_raw_graph {
-            manifest_snapshot.pipeline_enabled = Some(true);
+        if !manifest_snapshot.pipeline_enabled && wants_raw_graph {
+            manifest_snapshot.pipeline_enabled = true;
         }
         if output_targets_active_pipeline {
             manifest_snapshot.active_pipeline_output = canonical_output.clone();
@@ -1337,7 +1330,7 @@ impl StreamManager {
             }
         }
 
-        let build_graph = |selected_output: Option<String>, host_buffer: usize, manifest: crate::ipc::StreamManifest| async move {
+        let build_graph = |selected_output: Option<String>, host_buffer: usize, manifest: crate::ipc::ResolvedStreamConfig| async move {
             tokio::task::spawn_blocking(move || {
                 crate::graph::build_graph_handle_for_manifest(host_buffer, &manifest, selected_output.as_deref()).map_err(|err| Error::InvalidStateOwned(format!("pipeline graph invalid: {err}")))
             })
@@ -1383,8 +1376,8 @@ impl StreamManager {
 
         {
             let mut manifest = ctx.manifest.write().await;
-            if manifest.pipeline_enabled == Some(false) && wants_raw_graph {
-                manifest.pipeline_enabled = Some(true);
+            if !manifest.pipeline_enabled && wants_raw_graph {
+                manifest.pipeline_enabled = true;
             }
             if output_targets_active_pipeline {
                 manifest.active_pipeline_output = selected_output.clone();
@@ -1424,7 +1417,7 @@ impl StreamManager {
         let graph_wire = crate::ipc::JsonWire(graph_json);
 
         let mut manifest_snapshot = ctx.manifest.read().await.clone();
-        manifest_snapshot.pipeline_enabled = Some(true);
+        manifest_snapshot.pipeline_enabled = true;
 
         let target_pipeline_id = match pipeline_id {
             Some(id) => id,
@@ -1489,7 +1482,7 @@ impl StreamManager {
         let patch: GraphPatch = serde_json::from_value(patch_json.clone()).map_err(|err| Error::InvalidStateOwned(format!("invalid graph patch: {err}")))?;
 
         let mut manifest_snapshot = ctx.manifest.read().await.clone();
-        manifest_snapshot.pipeline_enabled = Some(true);
+        manifest_snapshot.pipeline_enabled = true;
 
         let target_pipeline_id = match pipeline_id {
             Some(id) => id,
@@ -1549,7 +1542,7 @@ impl StreamManager {
         let mut manifest_snapshot = ctx.manifest.read().await.clone();
         manifest_snapshot.pipeline_layout = layout.clone();
         if layout.is_some() {
-            manifest_snapshot.pipeline_enabled = Some(true);
+            manifest_snapshot.pipeline_enabled = true;
         }
         if let Some(layout) = manifest_snapshot.pipeline_layout.as_mut() {
             let previous_active_pipeline_id = manifest_snapshot.active_pipeline_id;
@@ -1611,7 +1604,7 @@ impl StreamManager {
         let mut selected_output = manifest_snapshot.active_pipeline_output.clone();
         let manifest_for_build = manifest_snapshot.clone();
 
-        let build_graph = |output: Option<String>, host_buffer: usize, manifest: crate::ipc::StreamManifest| async move {
+        let build_graph = |output: Option<String>, host_buffer: usize, manifest: crate::ipc::ResolvedStreamConfig| async move {
             tokio::task::spawn_blocking(move || {
                 crate::graph::build_graph_handle_for_manifest(host_buffer, &manifest, output.as_deref()).map_err(|err| Error::InvalidStateOwned(format!("pipeline graph invalid: {err}")))
             })
@@ -1656,7 +1649,7 @@ impl StreamManager {
         let mut manifest_snapshot = ctx.manifest.read().await.clone();
         manifest_snapshot.pipeline_wires = wires;
         if !manifest_snapshot.pipeline_wires.is_empty() {
-            manifest_snapshot.pipeline_enabled = Some(true);
+            manifest_snapshot.pipeline_enabled = true;
         }
 
         const RAW_STREAM_PIPELINE_UUID: Uuid = Uuid::from_u128(0x00000000_0000_0000_0000_0000000000aa);
@@ -1682,7 +1675,7 @@ impl StreamManager {
         let mut selected_output = manifest_snapshot.active_pipeline_output.clone();
         let mut manifest_for_build = manifest_snapshot.clone();
 
-        let build_graph = |output: Option<String>, host_buffer: usize, manifest: crate::ipc::StreamManifest| async move {
+        let build_graph = |output: Option<String>, host_buffer: usize, manifest: crate::ipc::ResolvedStreamConfig| async move {
             tokio::task::spawn_blocking(move || {
                 crate::graph::build_graph_handle_for_manifest(host_buffer, &manifest, output.as_deref()).map_err(|err| Error::InvalidStateOwned(format!("pipeline graph invalid: {err}")))
             })
@@ -1858,7 +1851,7 @@ impl StreamManager {
     }
 }
 
-fn reconcile_manifest_pipeline_references(manifest: &mut StreamManifest) {
+fn reconcile_manifest_pipeline_references(manifest: &mut ResolvedStreamConfig) {
     let mut known_pipeline_ids: HashSet<Uuid> = manifest.pipelines.iter().map(|binding| binding.pipeline_id).collect();
     // RAW may be referenced in layout/wires without a persisted binding.
     known_pipeline_ids.insert(RAW_STREAM_PIPELINE_UUID);
@@ -1930,7 +1923,7 @@ fn recording_state_to_result(state: RecordingState) -> Result<()> {
     }
 }
 
-fn resolve_recording_source(manifest: &StreamManifest, source: RecordingSource) -> ResolvedRecordingSource {
+fn resolve_recording_source(manifest: &ResolvedStreamConfig, source: RecordingSource) -> ResolvedRecordingSource {
     match source {
         RecordingSource::Multiplex => ResolvedRecordingSource::Multiplex,
         RecordingSource::Raw => ResolvedRecordingSource::Raw,
@@ -1950,14 +1943,14 @@ fn resolve_recording_source(manifest: &StreamManifest, source: RecordingSource) 
     }
 }
 
-fn manifest_contains_pipeline(manifest: &StreamManifest, pipeline_id: Uuid) -> bool {
+fn manifest_contains_pipeline(manifest: &ResolvedStreamConfig, pipeline_id: Uuid) -> bool {
     if manifest.active_pipeline_id == Some(pipeline_id) {
         return true;
     }
     manifest.pipelines.iter().any(|binding| binding.pipeline_id == pipeline_id)
 }
 
-fn build_recording_pipeline_graph(manifest: &StreamManifest, pipeline_id: Uuid, output_key: Option<&str>) -> Result<crate::graph::GraphHandle> {
+fn build_recording_pipeline_graph(manifest: &ResolvedStreamConfig, pipeline_id: Uuid, output_key: Option<&str>) -> Result<crate::graph::GraphHandle> {
     crate::graph::build_graph_handle_for_pipeline_output(manifest.host_buffer(), manifest, pipeline_id, output_key)
         .map_err(|err| Error::InvalidStateOwned(format!("recording pipeline build failed: {err}")))
 }
@@ -2011,8 +2004,8 @@ fn current_time_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|value| value.as_millis() as u64).unwrap_or(0)
 }
 
-fn infer_recording_fps(manifest: &StreamManifest) -> Option<f32> {
-    if let Some(settings) = manifest.encoder_settings.as_ref() {
+fn infer_recording_fps(manifest: &ResolvedStreamConfig) -> Option<f32> {
+    if let Some(settings) = manifest.encoder_settings() {
         if let Some(rate) = settings.framerate.as_ref() {
             if rate.denominator > 0 {
                 return Some(rate.numerator as f32 / rate.denominator as f32);
@@ -2026,139 +2019,6 @@ fn infer_recording_fps(manifest: &StreamManifest) -> Option<f32> {
         return Some(interval.fps());
     }
     manifest.capture.mode.interval.map(|interval| interval.fps())
-}
-
-const DEFAULT_STREAM_ENCODER_FPS: u32 = 60;
-const DEFAULT_STREAM_ENCODER_OUTPUT_HEIGHT: u32 = 480;
-const DEFAULT_STREAM_PREVIEW_JPEG_QUALITY: u8 = 30;
-
-fn manifest_prefers_default_stream_encoder(manifest: &StreamManifest) -> bool {
-    !manifest.internal && !matches!(manifest.capture.backend, BackendKind::File | BackendKind::Netcam)
-}
-
-fn encoder_selector_needs_normalization(selector: Option<&str>) -> bool {
-    let Some(selector) = selector.map(str::trim).filter(|value| !value.is_empty()) else {
-        return true;
-    };
-    selector.eq_ignore_ascii_case("ffmpeg") || matches!(selector.to_ascii_lowercase().as_str(), "mjpeg" | "mjpg" | "jpeg")
-}
-
-fn default_stream_encoder_selector() -> Option<String> {
-    let preferred_input = FourCc::new(*b"RG24");
-    let entries = CodecRegistry::list_enabled_encoders().ok()?;
-    let mut preferred_mjpeg: Option<String> = None;
-    let mut fallback_mjpeg: Option<String> = None;
-    let mut fallback_any: Option<String> = None;
-
-    for (input, codecs) in entries {
-        if input != preferred_input {
-            continue;
-        }
-        for desc in codecs {
-            if desc.kind != CodecKind::Encoder {
-                continue;
-            }
-            let impl_name = desc.impl_name.trim();
-            if impl_name.is_empty() {
-                continue;
-            }
-            if fallback_any.is_none() {
-                fallback_any = Some(impl_name.to_string());
-            }
-            if desc.name.eq_ignore_ascii_case("mjpeg") {
-                if desc.impl_name.eq_ignore_ascii_case("turbojpeg") {
-                    preferred_mjpeg = Some(impl_name.to_string());
-                    break;
-                }
-                if fallback_mjpeg.is_none() {
-                    fallback_mjpeg = Some(impl_name.to_string());
-                }
-            }
-        }
-        if preferred_mjpeg.is_some() {
-            break;
-        }
-    }
-
-    preferred_mjpeg.or(fallback_mjpeg).or(fallback_any)
-}
-
-fn normalize_stream_encoder_selection(manifest: &mut StreamManifest) {
-    if !manifest_prefers_default_stream_encoder(manifest) {
-        return;
-    }
-
-    let selector = manifest.encoder_id.as_deref();
-    let selector_needs_normalization = encoder_selector_needs_normalization(selector);
-
-    if manifest.encoder_enabled == Some(false) && !selector_needs_normalization {
-        return;
-    }
-
-    if selector_needs_normalization {
-        let Some(default_selector) = default_stream_encoder_selector() else {
-            return;
-        };
-        manifest.encoder_enabled = Some(true);
-        manifest.encoder_id = Some(default_selector);
-        return;
-    }
-
-    if manifest.encoder_enabled.is_none() {
-        manifest.encoder_enabled = Some(true);
-    }
-}
-
-fn default_encoder_output_resolution(capture_resolution: Resolution) -> crate::ipc::ResolutionHint {
-    let source_width = capture_resolution.width.get().max(1);
-    let source_height = capture_resolution.height.get().max(1);
-    let target_height = source_height.min(DEFAULT_STREAM_ENCODER_OUTPUT_HEIGHT).max(1);
-
-    if source_height <= target_height {
-        return crate::ipc::ResolutionHint { width: source_width, height: source_height };
-    }
-
-    let scale = target_height as f64 / source_height as f64;
-    let mut width = ((source_width as f64) * scale).round() as u32;
-    let mut height = target_height;
-
-    if width > 1 && width % 2 != 0 {
-        width += 1;
-    }
-    if height > 1 && height % 2 != 0 {
-        height -= 1;
-    }
-
-    crate::ipc::ResolutionHint { width: width.max(1).min(source_width), height: height.max(1).min(source_height) }
-}
-
-fn apply_default_encoder_settings(manifest: &mut StreamManifest) {
-    normalize_stream_encoder_selection(manifest);
-
-    if manifest.encoder_enabled == Some(false) {
-        return;
-    }
-    let encoder_selected = manifest.encoder_id.as_deref().map(str::trim).is_some_and(|id| !id.is_empty());
-    if !encoder_selected {
-        return;
-    }
-
-    let settings = manifest.encoder_settings.get_or_insert_with(Default::default);
-    if settings.framerate.is_none() {
-        settings.framerate = Some(crate::ipc::FrameRate { numerator: DEFAULT_STREAM_ENCODER_FPS, denominator: 1 });
-    }
-    let has_explicit_resolution = settings.output_resolution.as_ref().is_some_and(|resolution| resolution.width > 0 && resolution.height > 0);
-    if has_explicit_resolution {
-        if manifest.preview_jpeg_quality.is_none() {
-            manifest.preview_jpeg_quality = Some(DEFAULT_STREAM_PREVIEW_JPEG_QUALITY);
-        }
-        return;
-    }
-
-    settings.output_resolution = Some(default_encoder_output_resolution(manifest.capture.mode.format.resolution));
-    if manifest.preview_jpeg_quality.is_none() {
-        manifest.preview_jpeg_quality = Some(DEFAULT_STREAM_PREVIEW_JPEG_QUALITY);
-    }
 }
 
 fn infer_recording_codec(encoder_id: Option<&str>) -> Option<RecordingCodec> {
@@ -4066,7 +3926,7 @@ fn normalize_alias(alias: Option<&str>) -> Option<String> {
     alias.map(str::trim).filter(|value| !value.is_empty()).map(|value| value.to_ascii_lowercase())
 }
 
-fn single_view_slot_pipeline_id(manifest: &StreamManifest) -> Option<Uuid> {
+fn single_view_slot_pipeline_id(manifest: &ResolvedStreamConfig) -> Option<Uuid> {
     let layout = manifest.pipeline_layout.as_ref()?;
     if layout.rows != 1 || layout.columns != 1 {
         return None;
@@ -4525,12 +4385,13 @@ fn upsert_control_assignment(controls: &mut Vec<ControlAssignment>, id: u32, val
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ipc::StreamManifest;
     use serde_json::json;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use styx::core::controls::{Access, ControlId as StyxControlId, ControlKind, ControlMeta, ControlMetadata, ControlValue};
 
-    fn sample_manifest_for_encoder_defaults(width: u32, height: u32) -> StreamManifest {
+    fn sample_manifest_for_encoder_defaults(width: u32, height: u32) -> ResolvedStreamConfig {
         let identity = crate::identity::DeviceIdentity { id: None, alias: None, hardware_id: None };
         let format = MediaFormat::new(FourCc::new(*b"RGB3"), Resolution::new(width, height).expect("resolution"), ColorSpace::Srgb);
         let capture = crate::capture::CaptureConfig {
@@ -4567,6 +4428,7 @@ mod tests {
             shadow_recorder_enabled: false,
             start_on_boot: false,
         }
+        .resolve()
     }
 
     fn file_video_descriptor(start_id: u32, stop_id: u32, default_stop: u32) -> CaptureDescriptor {
@@ -4640,51 +4502,50 @@ mod tests {
 
     #[test]
     fn default_encoder_settings_use_480p_for_1080p_capture() {
-        let mut manifest = sample_manifest_for_encoder_defaults(1920, 1080);
-        apply_default_encoder_settings(&mut manifest);
-        let output = manifest.encoder_settings.and_then(|settings| settings.output_resolution).expect("output resolution");
+        let manifest = sample_manifest_for_encoder_defaults(1920, 1080);
+        let output = manifest.encoder.settings.and_then(|settings| settings.output_resolution).expect("output resolution");
         assert_eq!(output.width, 854);
         assert_eq!(output.height, 480);
     }
 
     #[test]
     fn default_encoder_settings_preserve_aspect_for_16_by_10_capture() {
-        let mut manifest = sample_manifest_for_encoder_defaults(1280, 800);
-        apply_default_encoder_settings(&mut manifest);
-        let output = manifest.encoder_settings.and_then(|settings| settings.output_resolution).expect("output resolution");
+        let manifest = sample_manifest_for_encoder_defaults(1280, 800);
+        let output = manifest.encoder.settings.and_then(|settings| settings.output_resolution).expect("output resolution");
         assert_eq!(output.width, 768);
         assert_eq!(output.height, 480);
     }
 
     #[test]
     fn default_encoder_settings_set_framerate_and_preview_quality() {
-        let mut manifest = sample_manifest_for_encoder_defaults(1920, 1080);
-        apply_default_encoder_settings(&mut manifest);
-        let settings = manifest.encoder_settings.expect("encoder settings");
+        let manifest = sample_manifest_for_encoder_defaults(1920, 1080);
+        let settings = manifest.encoder.settings.expect("encoder settings");
         let framerate = settings.framerate.expect("framerate");
         assert_eq!(framerate.numerator, 60);
         assert_eq!(framerate.denominator, 1);
-        assert_eq!(manifest.preview_jpeg_quality, Some(30));
+        assert_eq!(manifest.preview_jpeg_quality, 30);
     }
 
     #[test]
     fn default_encoder_settings_do_not_override_explicit_values() {
-        let mut manifest = sample_manifest_for_encoder_defaults(1920, 1080);
-        manifest.encoder_settings = Some(crate::ipc::EncoderSettings {
-            framerate: Some(crate::ipc::FrameRate { numerator: 24, denominator: 1 }),
-            output_resolution: Some(crate::ipc::ResolutionHint { width: 1280, height: 720 }),
-            ..Default::default()
-        });
-        manifest.preview_jpeg_quality = Some(80);
-        apply_default_encoder_settings(&mut manifest);
-        let settings = manifest.encoder_settings.expect("encoder settings");
+        let manifest = StreamManifest {
+            encoder_settings: Some(crate::ipc::EncoderSettings {
+                framerate: Some(crate::ipc::FrameRate { numerator: 24, denominator: 1 }),
+                output_resolution: Some(crate::ipc::ResolutionHint { width: 1280, height: 720 }),
+                ..Default::default()
+            }),
+            preview_jpeg_quality: Some(80),
+            ..sample_manifest_for_encoder_defaults(1920, 1080).to_requested_manifest()
+        }
+        .resolve();
+        let settings = manifest.encoder.settings.expect("encoder settings");
         let output = settings.output_resolution.expect("output resolution");
         assert_eq!(output.width, 1280);
         assert_eq!(output.height, 720);
         let framerate = settings.framerate.expect("framerate");
         assert_eq!(framerate.numerator, 24);
         assert_eq!(framerate.denominator, 1);
-        assert_eq!(manifest.preview_jpeg_quality, Some(80));
+        assert_eq!(manifest.preview_jpeg_quality, 80);
     }
 
     #[test]

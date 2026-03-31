@@ -137,7 +137,7 @@ pub async fn start_stream_for_mode(args: StartStreamArgs<'_>) -> Result<Uuid, St
     let requested_id = Uuid::new_v4();
     manifest.identity.id = Some(requested_id);
 
-    let stream_id = match state.engine.start_stream(manifest.clone()).await {
+    let stream_id = match state.engine.start_stream(manifest.resolve()).await {
         Ok(EngineEvent::Started { stream_id, .. }) => stream_id,
         Ok(EngineEvent::Nack { reason, .. }) => return Err(reason),
         Ok(_) | Err(_) => match wait_for_stream_started(state, requested_id, Duration::from_secs(15)).await {
@@ -194,7 +194,7 @@ pub async fn stop_conflicting_streams(state: &AppState, keys: &[String]) -> Vec<
         for s in running {
             if s.manifest.capture.device_keys.iter().any(|k| keys.iter().any(|want| want == k)) {
                 debug!(stream_id = %s.stream_id, "stopping conflicting stream for benchmark");
-                restored.push(s.manifest.clone());
+                restored.push(s.manifest.to_requested_manifest());
                 let _ = state.engine.stop_stream(s.stream_id).await;
                 let _ = wait_for_stream_gone(state, s.stream_id, Duration::from_secs(10)).await;
                 sleep(Duration::from_millis(250)).await;
@@ -207,7 +207,7 @@ pub async fn stop_conflicting_streams(state: &AppState, keys: &[String]) -> Vec<
 pub async fn restore_streams_best_effort(state: &AppState, restored: Vec<StreamManifest>, warnings: &mut Vec<String>) {
     for mut manifest in restored {
         manifest.identity.id = None;
-        match state.engine.start_stream(manifest.clone()).await {
+        match state.engine.start_stream(manifest.resolve()).await {
             Ok(EngineEvent::Started { .. }) => {}
             Ok(EngineEvent::Nack { reason, .. }) => warnings.push(format!("failed to restore stream: {reason}")),
             Ok(_) | Err(_) => {}

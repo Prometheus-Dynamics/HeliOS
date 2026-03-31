@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::ipc::{StreamManifest, StreamPipelineBinding, StreamPipelineGridSlot};
+use crate::ipc::{ResolvedStreamConfig, StreamPipelineBinding, StreamPipelineGridSlot};
 use crate::pipelines;
 use daedalus::planner::Graph;
 use daedalus::planner::GraphPatch;
@@ -19,7 +19,7 @@ fn clamp_dimension(value: u8) -> u32 {
     u32::from(value).clamp(1, MULTIPLEX_DIMENSION_MAX)
 }
 
-fn layout_from_manifest(manifest: &StreamManifest) -> Option<(u32, u32, Vec<StreamPipelineGridSlot>)> {
+fn layout_from_manifest(manifest: &ResolvedStreamConfig) -> Option<(u32, u32, Vec<StreamPipelineGridSlot>)> {
     let layout = manifest.pipeline_layout.as_ref()?;
     let rows = clamp_dimension(layout.rows);
     let columns = clamp_dimension(layout.columns);
@@ -48,11 +48,11 @@ fn auto_layout_for_pipelines(pipelines: &[StreamPipelineBinding]) -> (u32, u32, 
     (size, size, slots)
 }
 
-fn active_pipeline_id(manifest: &StreamManifest, _rows: u32, _cols: u32, _slots: &[StreamPipelineGridSlot]) -> Option<Uuid> {
+fn active_pipeline_id(manifest: &ResolvedStreamConfig, _rows: u32, _cols: u32, _slots: &[StreamPipelineGridSlot]) -> Option<Uuid> {
     manifest.active_pipeline_id
 }
 
-fn output_override_for_active<'a>(manifest: &'a StreamManifest, override_active_output: Option<&'a str>) -> Option<&'a str> {
+fn output_override_for_active<'a>(manifest: &'a ResolvedStreamConfig, override_active_output: Option<&'a str>) -> Option<&'a str> {
     override_active_output.or(manifest.active_pipeline_output.as_deref())
 }
 
@@ -60,7 +60,7 @@ fn nonempty_trimmed(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|v| !v.is_empty())
 }
 
-fn raw_binding_output(manifest: &StreamManifest) -> Option<&str> {
+fn raw_binding_output(manifest: &ResolvedStreamConfig) -> Option<&str> {
     manifest.pipelines.iter().find(|p| p.pipeline_id == RAW_STREAM_PIPELINE_UUID).and_then(|p| nonempty_trimmed(p.pipeline_output.as_deref()))
 }
 
@@ -72,7 +72,7 @@ fn raw_slot_output(slots: &[StreamPipelineGridSlot]) -> Option<&str> {
         .or_else(|| slots.iter().find(|slot| slot.pipeline_id == Some(RAW_STREAM_PIPELINE_UUID)).and_then(|slot| nonempty_trimmed(slot.output_key.as_deref())))
 }
 
-fn resolve_raw_output_for_active<'a>(manifest: &'a StreamManifest, slots: &'a [StreamPipelineGridSlot], override_active_output: Option<&'a str>) -> Option<&'a str> {
+fn resolve_raw_output_for_active<'a>(manifest: &'a ResolvedStreamConfig, slots: &'a [StreamPipelineGridSlot], override_active_output: Option<&'a str>) -> Option<&'a str> {
     // In 1x1 layout mode, slot (0,0) is the rendered view source. Prefer the slot output key
     // over global active output overrides so stale active-pipeline state cannot force RAW view
     // back to `raw` when the slot explicitly requests `undistorted`.
@@ -187,7 +187,7 @@ fn builtin_raw_stream_graph_json() -> Value {
     builtin_raw_stream_graph_json_variant(true)
 }
 
-fn build_builtin_raw_stream_graph_handle(host_buffer: usize, manifest: &StreamManifest, output_port: Option<&str>) -> Result<GraphHandle, GraphError> {
+fn build_builtin_raw_stream_graph_handle(host_buffer: usize, manifest: &ResolvedStreamConfig, output_port: Option<&str>) -> Result<GraphHandle, GraphError> {
     // RAW stream outputs are explicitly `raw` (fast path) or `undistorted` (requires undistort node).
     // Keep `frame` as compatibility alias and coerce stale/invalid values back to `raw`.
     let canonical = normalize_raw_output_key(output_port).unwrap_or_else(|| "raw".to_string());
@@ -214,7 +214,7 @@ fn build_builtin_raw_stream_graph_handle(host_buffer: usize, manifest: &StreamMa
     Ok(graph)
 }
 
-fn stream_alias_from_manifest(manifest: &StreamManifest) -> String {
+fn stream_alias_from_manifest(manifest: &ResolvedStreamConfig) -> String {
     let fallback = "stream";
     if let Some(alias) = manifest.identity.alias.as_deref() {
         return context::sanitize_segment(alias, fallback);
@@ -245,7 +245,7 @@ fn normalize_output_key(key: Option<&str>) -> Option<String> {
     })
 }
 
-fn manifest_host_inputs_for_runtime(manifest: &StreamManifest) -> BTreeMap<String, Option<Value>> {
+fn manifest_host_inputs_for_runtime(manifest: &ResolvedStreamConfig) -> BTreeMap<String, Option<Value>> {
     let mut out: BTreeMap<String, Option<Value>> = BTreeMap::new();
     for (raw_key, raw_value) in &manifest.pipeline_host_inputs {
         let key = raw_key.trim().to_ascii_lowercase();
@@ -257,7 +257,7 @@ fn manifest_host_inputs_for_runtime(manifest: &StreamManifest) -> BTreeMap<Strin
     out
 }
 
-fn apply_manifest_host_inputs(graph: &GraphHandle, manifest: &StreamManifest, pipeline_id: Option<Uuid>) {
+fn apply_manifest_host_inputs(graph: &GraphHandle, manifest: &ResolvedStreamConfig, pipeline_id: Option<Uuid>) {
     let inputs = manifest_host_inputs_for_runtime(manifest);
     if inputs.is_empty() {
         return;
@@ -296,8 +296,8 @@ fn slot_output_key(slot: &StreamPipelineGridSlot) -> Option<String> {
     normalize_output_key(slot.output_key.as_deref())
 }
 
-pub(crate) fn build_graph_handle_for_manifest(host_buffer: usize, manifest: &StreamManifest, override_active_output: Option<&str>) -> Result<GraphHandle, GraphError> {
-    if manifest.pipeline_enabled == Some(false) {
+pub(crate) fn build_graph_handle_for_manifest(host_buffer: usize, manifest: &ResolvedStreamConfig, override_active_output: Option<&str>) -> Result<GraphHandle, GraphError> {
+    if !manifest.pipeline_enabled {
         return Ok(GraphHandle::with_default_host(host_buffer));
     }
 
@@ -502,7 +502,7 @@ pub(crate) fn build_graph_handle_for_manifest(host_buffer: usize, manifest: &Str
     Ok(graph)
 }
 
-pub(crate) fn build_graph_handle_for_pipeline_output(host_buffer: usize, manifest: &StreamManifest, pipeline_id: Uuid, output_key: Option<&str>) -> Result<GraphHandle, GraphError> {
+pub(crate) fn build_graph_handle_for_pipeline_output(host_buffer: usize, manifest: &ResolvedStreamConfig, pipeline_id: Uuid, output_key: Option<&str>) -> Result<GraphHandle, GraphError> {
     if pipeline_id == RAW_STREAM_PIPELINE_UUID {
         let binding_output = manifest.pipelines.iter().find(|p| p.pipeline_id == RAW_STREAM_PIPELINE_UUID).and_then(|p| p.pipeline_output.as_deref());
         let output = output_key.or(binding_output);
@@ -528,9 +528,10 @@ pub(crate) fn build_graph_handle_for_pipeline_output(host_buffer: usize, manifes
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ipc::StreamManifest;
     use styx::prelude::{ColorSpace, FourCc, MediaFormat, Resolution};
 
-    fn sample_manifest() -> StreamManifest {
+    fn sample_manifest() -> ResolvedStreamConfig {
         let identity = crate::identity::DeviceIdentity { id: None, alias: None, hardware_id: None };
         let fmt = MediaFormat::new(FourCc::new(*b"RGB3"), Resolution::new(1, 1).expect("resolution"), ColorSpace::Srgb);
         let capture = crate::capture::CaptureConfig {
@@ -567,6 +568,7 @@ mod tests {
             shadow_recorder_enabled: true,
             start_on_boot: false,
         }
+        .resolve()
     }
 
     #[test]

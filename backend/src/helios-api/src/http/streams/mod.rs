@@ -143,7 +143,7 @@ async fn start_stream(State(state): State<AppState>, Json(manifest): Json<Stream
 )]
 async fn validate_stream(Json(manifest): Json<StreamManifest>) -> impl IntoResponse {
     match validate_stream_manifest(manifest).await {
-        Ok(result) => Json(StreamValidateResponse { manifest: result.manifest, warnings: result.warnings }).into_response(),
+        Ok(result) => Json(StreamValidateResponse { manifest: result.manifest, resolved: result.resolved, warnings: result.warnings }).into_response(),
         Err(err) => crate::http::validation::validation_error_response("stream manifest failed semantic validation", err.issues, err.warnings),
     }
 }

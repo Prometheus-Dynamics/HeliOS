@@ -46,10 +46,11 @@ fn controls_cache_ttl() -> Duration {
     Duration::from_secs(30)
 }
 
-fn stream_info_from_summary(StreamSummary { stream_id, mut descriptor, mut manifest, status }: StreamSummary) -> StreamInfo {
-    normalize_pipeline_manifest(&mut manifest);
-    apply_effective_pipeline_layout(&mut manifest);
-    ensure_descriptor_has_mode(&mut descriptor, &manifest);
+fn stream_info_from_summary(StreamSummary { stream_id, mut descriptor, manifest, status }: StreamSummary) -> StreamInfo {
+    let mut requested = manifest.to_requested_manifest();
+    normalize_pipeline_manifest(&mut requested);
+    apply_effective_pipeline_layout(&mut requested);
+    ensure_descriptor_has_mode(&mut descriptor, &requested);
     build_stream_info(stream_id, descriptor, manifest, Some(status))
 }
 
@@ -76,17 +77,18 @@ fn merge_persisted_streams(mut active: Vec<StreamInfo>, persisted: Vec<streams_p
             && let Some(pose) = pose_by_stream.get(&stream.id).cloned()
         {
             stream.manifest.pose = Some(pose);
+            stream.resolved.pose = stream.manifest.pose.clone();
         }
     }
 
     for record in persisted {
-        let Some(mut manifest) = record.manifest else {
+        let Some(mut resolved) = record.resolved_config else {
             continue;
         };
-        if manifest.internal {
+        if resolved.internal {
             continue;
         }
-        let stream_id = manifest.identity.id.or(record.last_stream_id).unwrap_or_else(|| streams_persist::derived_stream_id(&record.camera_id));
+        let stream_id = resolved.identity.id.or(record.last_stream_id).unwrap_or_else(|| streams_persist::derived_stream_id(&record.camera_id));
         if !persisted_ids.insert(stream_id) {
             tracing::warn!(camera_id = %record.camera_id, stream_id = %stream_id, "duplicate persisted stream id; keeping first record");
             continue;
@@ -95,11 +97,12 @@ fn merge_persisted_streams(mut active: Vec<StreamInfo>, persisted: Vec<streams_p
             tracing::debug!(camera_id = %record.camera_id, stream_id = %stream_id, "persisted stream already running; skipping");
             continue;
         }
-        manifest.identity.id = Some(stream_id);
+        resolved.identity.id = Some(stream_id);
+        let mut manifest = resolved.to_requested_manifest();
         normalize_pipeline_manifest(&mut manifest);
         apply_effective_pipeline_layout(&mut manifest);
         let descriptor = descriptor_from_persisted_manifest(&manifest);
-        active.push(build_stream_info(stream_id, descriptor, manifest, None));
+        active.push(build_stream_info(stream_id, descriptor, resolved, None));
         seen_ids.insert(stream_id);
     }
 
@@ -180,13 +183,20 @@ impl StreamsReadModelState {
         let Some(stream) = entry.payload.iter_mut().find(|stream| stream.id == stream_id) else {
             return;
         };
+        let resolved = manifest.resolve();
         stream.manifest = manifest;
+        stream.resolved = resolved;
     }
 
     pub async fn load_live_stream_manifest(&self, state: &AppState, stream_id: Uuid) -> Option<StreamManifest> {
         if let Some(stream) = self.cached_stream_info(stream_id).await {
             return Some(stream.manifest);
         }
-        state.engine.list_streams().await.ok().and_then(|streams| streams.into_iter().find(|stream| stream.stream_id == stream_id).map(|stream| stream.manifest))
+        state
+            .engine
+            .list_streams()
+            .await
+            .ok()
+            .and_then(|streams| streams.into_iter().find(|stream| stream.stream_id == stream_id).map(|stream| stream.manifest.to_requested_manifest()))
     }
 }

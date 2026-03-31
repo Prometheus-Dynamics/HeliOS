@@ -13,9 +13,9 @@ use super::{DegradedStream, ReliefAction, ResourceGuardStage};
 pub(super) fn relief_action_for_stream(stream: &StreamSummary, degraded: &HashMap<Uuid, DegradedStream>, allow_stop_fallback: bool) -> Option<ReliefAction> {
     match degraded.get(&stream.stream_id).map(|state| state.stage) {
         None => {
-            if stream.manifest.decoder_id.is_some() {
+            if stream.manifest.decoder_id().is_some() {
                 Some(ReliefAction::DisableDecoder)
-            } else if stream.manifest.encoder_id.is_some() {
+            } else if stream.manifest.encoder_id().is_some() {
                 Some(ReliefAction::DisableAllCodecs)
             } else if allow_stop_fallback {
                 Some(ReliefAction::StopStream)
@@ -24,7 +24,7 @@ pub(super) fn relief_action_for_stream(stream: &StreamSummary, degraded: &HashMa
             }
         }
         Some(ResourceGuardStage::DecoderDisabled) => {
-            if stream.manifest.encoder_id.is_some() {
+            if stream.manifest.encoder_id().is_some() {
                 Some(ReliefAction::DisableAllCodecs)
             } else if allow_stop_fallback {
                 Some(ReliefAction::StopStream)
@@ -41,13 +41,13 @@ pub(super) fn rough_stream_score(stream: &StreamSummary) -> f64 {
     if stream.manifest.capture.backend == styx::BackendKind::File {
         score += 140.0;
     }
-    if stream.manifest.decoder_id.is_some() {
+    if stream.manifest.decoder_id().is_some() {
         score += 220.0;
     }
-    if stream.manifest.encoder_id.is_some() {
+    if stream.manifest.encoder_id().is_some() {
         score += 140.0;
     }
-    if stream.manifest.pipeline_enabled != Some(false) {
+    if stream.manifest.pipeline_enabled {
         score += 180.0;
     }
     score += stream.manifest.pipelines.len() as f64 * 45.0;

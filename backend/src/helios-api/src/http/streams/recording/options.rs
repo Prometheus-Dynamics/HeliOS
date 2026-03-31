@@ -77,7 +77,7 @@ pub(super) fn parse_codec_override(value: Option<&str>) -> Result<Option<Recordi
 pub(super) async fn infer_stream_codec(state: &crate::http::AppState, id: Uuid) -> Result<RecordingCodec, ApiError> {
     let streams = state.engine.list_streams().await.map_err(|err| ApiError::bad_gateway(format!("engine list failed: {err}")))?;
     let summary = streams.into_iter().find(|stream| stream.stream_id == id).ok_or_else(|| ApiError::not_found("stream not found"))?;
-    let encoder_id = summary.manifest.encoder_id.as_deref().unwrap_or("");
+    let encoder_id = summary.manifest.encoder_id().unwrap_or("");
     let normalized = encoder_id.to_ascii_lowercase();
     if normalized.contains("h265") || normalized.contains("hevc") {
         return Ok(RecordingCodec::H265);

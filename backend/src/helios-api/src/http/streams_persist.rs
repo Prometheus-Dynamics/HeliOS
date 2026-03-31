@@ -1,8 +1,8 @@
-use crate::http::{json_store, storage};
 use crate::http::streams::util::normalize_stream_encoder_manifest;
+use crate::http::{json_store, storage};
 use crate::ipc::IpcHandles;
 use chrono::Utc;
-use helios_engine::ipc::{RigPose, StreamManifest};
+use helios_engine::ipc::{ResolvedStreamConfig, RigPose, StreamManifest};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::{
@@ -55,6 +55,8 @@ pub struct PersistedStreamRecord {
     pub updated_at: Option<String>,
     #[serde(default)]
     pub manifest: Option<StreamManifest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_config: Option<ResolvedStreamConfig>,
 }
 
 fn now_rfc3339() -> String {
@@ -118,6 +120,22 @@ async fn hydrate_manifest(mut manifest: StreamManifest) -> StreamManifest {
     manifest
 }
 
+async fn hydrate_record(mut record: PersistedStreamRecord) -> PersistedStreamRecord {
+    if let Some(resolved) = record.resolved_config.clone() {
+        record.manifest = Some(resolved.to_requested_manifest());
+        return record;
+    }
+
+    if let Some(manifest) = record.manifest.take() {
+        let manifest = hydrate_manifest(manifest).await;
+        let resolved = manifest.resolve();
+        record.manifest = Some(resolved.to_requested_manifest());
+        record.resolved_config = Some(resolved);
+    }
+
+    record
+}
+
 fn normalize_file_capture_manifest(manifest: &mut StreamManifest) {
     let styx::BackendHandle::File { paths, fps, loop_forever } = &manifest.capture.handle else {
         return;
@@ -161,6 +179,35 @@ where
     .await
 }
 
+async fn persist_resolved_config_impl(camera_id: &str, stream_id: Option<Uuid>, mut resolved: ResolvedStreamConfig) -> std::io::Result<()> {
+    if let Some(id) = stream_id {
+        resolved.identity.id = Some(id);
+    }
+    if resolved.capture.backend == styx::BackendKind::File && !resolved.start_on_boot {
+        resolved.start_on_boot = true;
+    }
+    update_record(camera_id, move |mut record| async move {
+        if let Some(id) = stream_id {
+            record.last_stream_id = Some(id);
+        }
+        if resolved.pose.is_none()
+            && let Some(existing_pose) = record
+                .resolved_config
+                .as_ref()
+                .and_then(|config| config.pose.clone())
+                .or_else(|| record.manifest.as_ref().and_then(|manifest| manifest.pose.clone()))
+        {
+            resolved.pose = Some(existing_pose);
+        }
+        record.manifest = None;
+        record.resolved_config = Some(resolved);
+        record.updated_at = Some(now_rfc3339());
+        record
+    })
+    .await
+    .map(|_| ())
+}
+
 async fn persist_manifest_impl(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) -> std::io::Result<()> {
     let mut hydrated = hydrate_manifest(manifest).await;
     if let Some(id) = stream_id {
@@ -170,37 +217,31 @@ async fn persist_manifest_impl(camera_id: &str, stream_id: Option<Uuid>, manifes
         hydrated.start_on_boot = true;
     }
 
-    // Ensure we don't re-persist libcamera intervals/control 30 if the stream was started from an
-    // older manifest; the canonical persisted representation is `capture.target_fps`.
     if hydrated.capture.backend == styx::BackendKind::Libcamera && hydrated.capture.target_fps.is_some() {
         hydrated.capture.interval = None;
         hydrated.capture.controls.retain(|c| c.id != 30);
     }
 
-    update_record(camera_id, move |mut record| async move {
-        if let Some(id) = stream_id {
-            record.last_stream_id = Some(id);
-        }
-        if hydrated.pose.is_none()
-            && let Some(existing_pose) = record.manifest.as_ref().and_then(|manifest| manifest.pose.clone())
-        {
-            hydrated.pose = Some(existing_pose);
-        }
-        record.manifest = Some(hydrated);
-        record.updated_at = Some(now_rfc3339());
-        record
-    })
-    .await
-    .map(|_| ())
+    persist_resolved_config_impl(camera_id, stream_id, hydrated.resolve()).await
 }
 
 pub async fn persist_manifest_checked(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) -> std::io::Result<()> {
     persist_manifest_impl(camera_id, stream_id, manifest).await
 }
 
+pub async fn persist_resolved_config_checked(camera_id: &str, stream_id: Option<Uuid>, resolved: ResolvedStreamConfig) -> std::io::Result<()> {
+    persist_resolved_config_impl(camera_id, stream_id, resolved).await
+}
+
 pub async fn persist_manifest(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) {
     if let Err(err) = persist_manifest_impl(camera_id, stream_id, manifest).await {
         warn!(camera_id, error = %err, "failed to persist stream manifest");
+    }
+}
+
+pub async fn persist_resolved_config(camera_id: &str, stream_id: Option<Uuid>, resolved: ResolvedStreamConfig) {
+    if let Err(err) = persist_resolved_config_impl(camera_id, stream_id, resolved).await {
+        warn!(camera_id, error = %err, "failed to persist resolved stream config");
     }
 }
 
@@ -220,21 +261,7 @@ pub async fn persist_manifest_quick_checked(camera_id: &str, stream_id: Option<U
         hydrated.capture.controls.retain(|c| c.id != 30);
     }
 
-    update_record(camera_id, move |mut record| async move {
-        if let Some(id) = stream_id {
-            record.last_stream_id = Some(id);
-        }
-        if hydrated.pose.is_none()
-            && let Some(existing_pose) = record.manifest.as_ref().and_then(|manifest| manifest.pose.clone())
-        {
-            hydrated.pose = Some(existing_pose);
-        }
-        record.manifest = Some(hydrated);
-        record.updated_at = Some(now_rfc3339());
-        record
-    })
-    .await
-    .map(|_| ())
+    persist_resolved_config_impl(camera_id, stream_id, hydrated.resolve()).await
 }
 
 pub async fn persist_manifest_quick(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) {
@@ -244,11 +271,15 @@ pub async fn persist_manifest_quick(camera_id: &str, stream_id: Option<Uuid>, ma
 }
 
 pub async fn load_manifest(camera_id: &str) -> Option<StreamManifest> {
+    load_resolved_config(camera_id).await.map(|config| config.to_requested_manifest())
+}
+
+pub async fn load_resolved_config(camera_id: &str) -> Option<ResolvedStreamConfig> {
     let path = record_path(camera_id).await.ok()?;
     let bytes = fs::read(&path).await.ok()?;
     let record = serde_json::from_slice::<PersistedStreamRecord>(&bytes).ok()?;
-    let manifest = record.manifest?;
-    Some(hydrate_manifest(manifest).await)
+    let record = hydrate_record(record).await;
+    record.resolved_config
 }
 
 async fn list_records() -> Vec<PersistedStreamRecord> {
@@ -275,7 +306,7 @@ async fn list_records() -> Vec<PersistedStreamRecord> {
         let Ok(record) = serde_json::from_slice::<PersistedStreamRecord>(&bytes) else {
             continue;
         };
-        out.push(record);
+        out.push(hydrate_record(record).await);
     }
 
     out
@@ -318,15 +349,7 @@ async fn migrate_file_camera_ids_once() {
 pub async fn list_persisted_records() -> Vec<PersistedStreamRecord> {
     static MIGRATED: OnceCell<()> = OnceCell::const_new();
     MIGRATED.get_or_init(|| async { migrate_file_camera_ids_once().await }).await;
-
-    let mut records = list_records().await;
-    for record in &mut records {
-        if let Some(manifest) = record.manifest.take() {
-            let manifest = hydrate_manifest(manifest).await;
-            record.manifest = Some(manifest);
-        }
-    }
-    records
+    list_records().await
 }
 
 pub async fn update_manifest_pose_by_camera_id(camera_id: &str, pose: Option<RigPose>) -> std::io::Result<bool> {
@@ -336,7 +359,7 @@ pub async fn update_manifest_pose_by_camera_id(camera_id: &str, pose: Option<Rig
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(false),
         Err(err) => return Err(err),
     };
-    let mut record = serde_json::from_slice::<PersistedStreamRecord>(&bytes).unwrap_or_default();
+    let mut record = hydrate_record(serde_json::from_slice::<PersistedStreamRecord>(&bytes).unwrap_or_default()).await;
     if record.camera_id.is_empty() {
         record.camera_id = camera_id.to_string();
     }
@@ -345,6 +368,7 @@ pub async fn update_manifest_pose_by_camera_id(camera_id: &str, pose: Option<Rig
     };
     manifest.pose = pose;
     record.manifest = Some(manifest);
+    record.resolved_config = record.manifest.as_ref().map(StreamManifest::resolve);
     record.updated_at = Some(now_rfc3339());
 
     let data = serde_json::to_vec(&record).map_err(io::Error::other)?;
@@ -408,7 +432,7 @@ pub async fn remove_record_by_stream_id(stream_id: Uuid) -> io::Result<bool> {
     Ok(false)
 }
 
-pub(crate) fn manifests_conflict(a: &StreamManifest, b: &StreamManifest) -> bool {
+pub(crate) fn manifests_conflict(a: &ResolvedStreamConfig, b: &StreamManifest) -> bool {
     if a.capture.device_keys.is_empty() || b.capture.device_keys.is_empty() {
         return false;
     }
@@ -442,7 +466,7 @@ pub async fn restore_persisted_streams(state: AppState) {
             continue;
         }
 
-        match state.engine.start_stream(manifest.clone()).await {
+        match state.engine.start_stream(manifest.resolve()).await {
             Ok(helios_engine::ipc::EngineEvent::Started { stream_id, .. }) => {
                 persist_manifest(&record.camera_id, Some(stream_id), manifest.clone()).await;
             }
@@ -458,7 +482,7 @@ pub async fn restore_persisted_streams(state: AppState) {
                                 || (manifest.identity.id.is_some() && stream.manifest.identity.id == manifest.identity.id)
                                 || desired_alias.is_some_and(|alias| stream.manifest.identity.alias.as_deref().map(str::trim) == Some(alias))
                         }) {
-                            persist_manifest(&record.camera_id, Some(existing.stream_id), existing.manifest.clone()).await;
+                            persist_resolved_config(&record.camera_id, Some(existing.stream_id), existing.manifest.clone()).await;
                             info!(camera_id = %record.camera_id, stream_id = %existing.stream_id, "persisted stream already running; reconciled record");
                             continue;
                         }

@@ -40,7 +40,7 @@ fn usb_power_recovery_cooldown() -> Duration {
 
 pub(crate) struct StreamContext {
     pub(crate) stream_started_at_ms: u64,
-    pub(crate) manifest: tokio::sync::RwLock<crate::ipc::StreamManifest>,
+    pub(crate) manifest: tokio::sync::RwLock<crate::ipc::ResolvedStreamConfig>,
     pub(crate) descriptor: CaptureDescriptor,
     pub(crate) host: tokio::sync::RwLock<GraphHandle>,
     pub(crate) calibration_mode_restore: tokio::sync::RwLock<Option<CalibrationModeRestore>>,
@@ -56,7 +56,7 @@ pub(crate) struct StreamContext {
 
 #[derive(Debug, Clone)]
 pub(crate) struct CalibrationModeRestore {
-    pub(crate) pipeline_enabled: Option<bool>,
+    pub(crate) pipeline_enabled: bool,
     pub(crate) pipelines: Vec<crate::ipc::StreamPipelineBinding>,
     pub(crate) active_pipeline_id: Option<uuid::Uuid>,
     pub(crate) active_pipeline_output: Option<String>,
@@ -65,7 +65,7 @@ pub(crate) struct CalibrationModeRestore {
 }
 
 impl CalibrationModeRestore {
-    pub(crate) fn from_manifest(manifest: &crate::ipc::StreamManifest) -> Self {
+    pub(crate) fn from_manifest(manifest: &crate::ipc::ResolvedStreamConfig) -> Self {
         Self {
             pipeline_enabled: manifest.pipeline_enabled,
             pipelines: manifest.pipelines.clone(),
@@ -76,7 +76,7 @@ impl CalibrationModeRestore {
         }
     }
 
-    pub(crate) fn apply_to_manifest(&self, manifest: &mut crate::ipc::StreamManifest) {
+    pub(crate) fn apply_to_manifest(&self, manifest: &mut crate::ipc::ResolvedStreamConfig) {
         manifest.pipeline_enabled = self.pipeline_enabled;
         manifest.pipelines = self.pipelines.clone();
         manifest.active_pipeline_id = self.active_pipeline_id;

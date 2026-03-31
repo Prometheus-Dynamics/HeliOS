@@ -226,11 +226,11 @@ async fn relieve_pressure(handles: &Arc<IpcHandles>, running: &[StreamSummary], 
 
     match choice.action {
         ReliefAction::DisableDecoder => {
-            let encoder_id = stream.manifest.encoder_id.clone();
+            let encoder_id = stream.manifest.encoder.codec_id.clone();
             match handles.engine.set_codecs(stream.stream_id, None, encoder_id).await {
                 Ok(EngineEvent::Ack { .. }) => {
-                    let mut original_decoder_id = stream.manifest.decoder_id.clone();
-                    let mut original_encoder_id = stream.manifest.encoder_id.clone();
+                    let mut original_decoder_id = stream.manifest.decoder.codec_id.clone();
+                    let mut original_encoder_id = stream.manifest.encoder.codec_id.clone();
                     if let Some(existing) = degraded.get(&stream.stream_id) {
                         original_decoder_id = existing.original_decoder_id.clone();
                         original_encoder_id = existing.original_encoder_id.clone();
@@ -265,8 +265,8 @@ async fn relieve_pressure(handles: &Arc<IpcHandles>, running: &[StreamSummary], 
         }
         ReliefAction::DisableAllCodecs => match handles.engine.set_codecs(stream.stream_id, None, None).await {
             Ok(EngineEvent::Ack { .. }) => {
-                let mut original_decoder_id = stream.manifest.decoder_id.clone();
-                let mut original_encoder_id = stream.manifest.encoder_id.clone();
+                let mut original_decoder_id = stream.manifest.decoder.codec_id.clone();
+                let mut original_encoder_id = stream.manifest.encoder.codec_id.clone();
                 if let Some(existing) = degraded.get(&stream.stream_id) {
                     original_decoder_id = existing.original_decoder_id.clone();
                     original_encoder_id = existing.original_encoder_id.clone();

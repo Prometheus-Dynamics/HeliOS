@@ -59,7 +59,7 @@ pub(super) async fn update_running_stream_pose(state: &AppState, camera_uid: &st
         }
         let mut manifest = stream.manifest.clone();
         manifest.pose = pose.clone();
-        streams_persist::persist_manifest_checked(&camera_id_for_manifest(&manifest), Some(stream.stream_id), manifest)
+        streams_persist::persist_resolved_config_checked(&camera_id_for_manifest(&manifest.to_requested_manifest()), Some(stream.stream_id), manifest)
             .await
             .map_err(|err| format!("updated live stream pose but failed to persist: {err}"))?;
         return Ok(true);
