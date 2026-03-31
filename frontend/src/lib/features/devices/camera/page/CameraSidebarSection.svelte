@@ -178,7 +178,7 @@
     | 'syncModeSelection'
     | 'fpsLabel'
     | 'intervalToFps'
-    | 'decodersForCaptureFormat'
+    | 'decoders'
     | 'applyStreamPreset'
     | 'applyStreamCrop'
     | 'applyStreamCrosshair'
@@ -403,7 +403,7 @@
           syncModeSelection={ctx.syncModeSelection}
           fpsLabel={ctx.fpsLabel}
           intervalToFps={ctx.intervalToFps}
-          decodersForCaptureFormat={ctx.decodersForCaptureFormat}
+          decoders={ctx.decoders}
           applyStreamPreset={ctx.applyStreamPreset}
           applyStreamCrop={ctx.applyStreamCrop}
           applyStreamCrosshair={ctx.applyStreamCrosshair}

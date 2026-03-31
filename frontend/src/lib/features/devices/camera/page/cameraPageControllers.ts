@@ -424,7 +424,6 @@ export const createCameraPageControllers = (deps: CameraPageControllerDeps) => {
       frameRateToFps: deps.frameRateToFps,
       normalizeFpsLimit: deps.normalizeFpsLimit,
       normalizeRotationDegrees: deps.normalizeRotationDegrees,
-      decodersForCaptureFormat: modeController.decodersForCaptureFormat,
       parseManifestLayout: deps.parseManifestLayout,
       outputSelectionForPipeline: deps.outputSelectionForPipeline,
       setOutputSelectionForPipeline: deps.setOutputSelectionForPipeline,

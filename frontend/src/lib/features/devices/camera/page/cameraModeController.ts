@@ -146,14 +146,6 @@ export function createCameraModeController(state: ModeControllerState, deps: Mod
     return first ? fpsLabel(first) : '';
   }
 
-  function decodersForCaptureFormat(fmt: string | null | undefined): CodecInfo[] {
-    const key = normalizeFormat(fmt ?? '');
-    return state.decoders.filter((d) => {
-      const input = normalizeFormat(d.input ?? d.fourcc ?? '');
-      return !key || input === key || input === 'ANY';
-    });
-  }
-
   function currentMode(): Mode | null {
     const modes = effectiveModes();
     const formatKey = normalizeFormat(state.selectedFormat);
@@ -187,7 +179,6 @@ export function createCameraModeController(state: ModeControllerState, deps: Mod
     firstFormat,
     firstResolution,
     firstInterval,
-    decodersForCaptureFormat,
     currentMode,
     syncModeSelection
   };

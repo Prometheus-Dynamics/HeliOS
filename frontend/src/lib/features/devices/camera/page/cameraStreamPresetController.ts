@@ -78,7 +78,6 @@ type PresetDeps = {
   currentDevice: () => ProbedDevice | null;
   currentMode: () => Mode | null;
   intervalsForSelection: () => Interval[];
-  decodersForCaptureFormat: (fmt: string | null | undefined) => CodecInfo[];
   pickCodecId: (list: CodecInfo[], desired: string | null | undefined, preferred?: string[]) => string | null;
   outputSelectionForPipeline: (pipelineId: string) => string | null;
   applyPipelineOverridesToGraph: (pipelineId: string, graph: unknown) => unknown;

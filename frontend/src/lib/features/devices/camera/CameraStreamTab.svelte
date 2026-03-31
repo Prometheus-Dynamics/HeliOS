@@ -59,6 +59,7 @@
     streamOrderingError = $bindable(null as string | null),
     streamOrderingWarning = $bindable(null as string | null),
     applying,
+    decoders,
     encoders,
     encoderSettingsAvailable,
     currentDevice,
@@ -72,7 +73,6 @@
     syncModeSelection,
     fpsLabel,
     intervalToFps,
-    decodersForCaptureFormat,
     applyStreamPreset,
     applyStreamCrop,
     applyStreamCrosshair,
@@ -161,7 +161,7 @@
   const formatOptions = $derived.by(() => uniqueFormats());
   const resolutionOptions = $derived.by(() => resolutionsForFormat(selectedFormat));
   const intervalOptions = $derived.by(() => intervalsForSelection());
-  const decoderOptions = $derived.by(() => decodersForCaptureFormat(selectedFormat));
+  const decoderOptions = $derived.by(() => decoders ?? []);
   const selectedEncoder = $derived.by(() => {
     const selected = String(encoderImpl ?? '').trim();
     if (!selected) return null;
@@ -386,8 +386,6 @@
     selectedIntervalIdx = 0;
     selectedInterval = intervalsForSelection()[0] ? fpsLabel(intervalsForSelection()[0]) : '';
     syncModeSelection();
-    const compat = decodersForCaptureFormat(selectedFormat);
-    decoderImpl = compat[0]?.implementation ?? null;
   }
 
   function handleFormatChange(value: string): void {
@@ -397,8 +395,6 @@
     selectedIntervalIdx = 0;
     selectedInterval = intervalsForSelection()[0] ? fpsLabel(intervalsForSelection()[0]) : '';
     syncModeSelection();
-    const compat = decodersForCaptureFormat(selectedFormat);
-    decoderImpl = compat[0]?.implementation ?? null;
   }
 
   function handleResolutionChange(value: string): void {

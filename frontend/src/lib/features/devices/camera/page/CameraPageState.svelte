@@ -747,7 +747,6 @@
     firstFormat,
     firstResolution,
     firstInterval,
-    decodersForCaptureFormat,
     currentMode,
     syncModeSelection
   } = modeController;
@@ -1261,7 +1260,6 @@
       currentDevice,
       currentMode,
       intervalsForSelection,
-      decodersForCaptureFormat,
       pickCodecId,
       outputSelectionForPipeline,
       applyPipelineOverridesToGraph,
@@ -1664,7 +1662,6 @@
       currentBackend,
       currentDevice,
       currentMode,
-      decodersForCaptureFormat,
       dedupeCodecs,
       descriptor,
       displayValue,

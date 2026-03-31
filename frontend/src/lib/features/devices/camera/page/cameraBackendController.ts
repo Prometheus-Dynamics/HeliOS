@@ -144,7 +144,6 @@ type BackendDeps = {
   frameRateToFps: (rate: unknown) => number | null;
   normalizeFpsLimit: (value: unknown) => number | null;
   normalizeRotationDegrees: (value: unknown) => number | null;
-  decodersForCaptureFormat: (fmt: string | null | undefined) => CodecInfo[];
   parseManifestLayout: (layout: unknown) => { rows: number; columns: number; slots: Record<string, string | null>; outputKeys: Record<string, string | null> } | null;
   outputSelectionForPipeline: (pipelineId: string) => string | null;
   setOutputSelectionForPipeline: (pipelineId: string, output: string | null) => void;
