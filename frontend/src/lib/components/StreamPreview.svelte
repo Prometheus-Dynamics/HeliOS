@@ -2,18 +2,13 @@
   import { onDestroy, onMount } from 'svelte';
   import type { Snippet } from 'svelte';
   import { connectionState } from '$lib/api/connection';
-  import { buildHttpCandidateUrls } from '$lib/api/httpCandidates';
-  import { apiUrl } from '$lib/api/httpClient';
-  import { fetchPeerStreamFormat } from '$lib/api/peers';
-  import { resolveStreamPreviewFormat, type StreamPreviewFormat } from '$lib/api/streamPreviewFormat';
-  import { StreamsApi } from '$lib/api/streamsApi';
   import EncodedStreamPlayer from '$lib/components/EncodedStreamPlayer.svelte';
   import MjpegStreamPlayer from '$lib/components/MjpegStreamPlayer.svelte';
+  import { floatingStreamViewer, type FloatingStreamStatus } from '$lib/stores/floatingStreamViewer';
   import {
-    floatingStreamViewer,
-    type FloatingStreamStatus
-  } from '$lib/stores/floatingStreamViewer';
-  import { SvelteURLSearchParams } from 'svelte/reactivity';
+    createStreamPreviewController,
+    createStreamPreviewRuntimeState
+  } from './streamPreviewController';
 
   type StreamPreviewProps = {
     className?: string;
@@ -61,37 +56,10 @@
     children
   }: StreamPreviewProps = $props();
 
-  let isPlaying = $state(false);
-  let previewUrl = $state<string | null>(null);
-  let frameUrl = $state<string | null>(null);
-  let previewError = $state<string | null>(null);
   let isHovering = $state(false);
   let pauseButtonFocused = $state(false);
-  let lastKey: string | null = null;
-  let frameKey: string | null = null;
-  let lastAutoPlayKey: string | null = null;
-  let lastCaptureSessionId = $state<string | null>(null);
-  let lastSwitchAt = $state<number | null>(null);
-  let previewNonce = $state(0);
-  let frameNonce = $state(0);
-  let previewCandidates = $state<string[]>([]);
-  let previewCandidateIndex = $state(0);
-  let frameCandidates = $state<string[]>([]);
-  let frameCandidateIndex = $state(0);
   let previewHost = $state<HTMLElement | null>(null);
-  let documentVisible = $state(true);
-  let viewportVisible = $state(true);
-  const RECONNECT_BASE_DELAY_MS = 700;
-  const RECONNECT_MAX_DELAY_MS = 4000;
-  const STALL_BANNER_DELAY_MS = 3500;
-  const FRAME_RETRY_DELAY_MS = 1200;
-
-  let reconnectAttempt = 0;
-  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  let stallBannerTimer: ReturnType<typeof setTimeout> | null = null;
-  let frameRetryTimer: ReturnType<typeof setTimeout> | null = null;
-  let lastStatus: FloatingStreamStatus | null = null;
-  let lastConnectionStatus: 'unknown' | 'online' | 'offline' | 'degraded' | null = null;
+  const runtime = $state(createStreamPreviewRuntimeState());
 
   const canPreview = $derived(Boolean(captureSessionId));
   const isRecording = $derived(Boolean(recording));
@@ -99,190 +67,46 @@
   const statusChipClass = $derived(
     isRecording ? 'border border-error-500/70 bg-error-500/60 text-white' : 'bg-black/70 text-surface-100'
   );
-  type ResolvedPreviewFormat = 'mjpeg' | 'h264' | 'h265' | 'unknown';
-  let resolvedFormat = $state<ResolvedPreviewFormat>('mjpeg');
+  const resolvedFormat = $derived(runtime.resolvedFormat);
   const supportsWebCodecs = $derived(typeof VideoDecoder !== 'undefined');
   const supportsLivePreview = $derived(
     resolvedFormat === 'mjpeg' || (supportsWebCodecs && (resolvedFormat === 'h264' || resolvedFormat === 'h265'))
   );
-  const livePreviewVisible = $derived(documentVisible && viewportVisible);
+  const livePreviewVisible = $derived(runtime.documentVisible && runtime.viewportVisible);
   const imageFitClass = $derived(fitMode === 'contain' ? 'object-contain object-center' : 'object-cover object-center');
   const toggleButtonBase =
     'pointer-events-auto flex h-16 w-16 items-center justify-center rounded-full bg-black/70 text-white shadow-lg transition hover:bg-black/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:bg-surface-700 disabled:text-surface-400 disabled:shadow-none md:h-20 md:w-20';
   const toggleIconClass = 'h-10 w-10 md:h-12 md:w-12';
-  type PeerStreamRef = { peerId: string; streamId: string };
-
-  function parsePeerStreamRef(raw: string | null | undefined): PeerStreamRef | null {
-    const value = String(raw ?? '').trim();
-    if (!value.startsWith('peer:')) return null;
-    const rest = value.slice('peer:'.length);
-    const splitIndex = rest.indexOf(':');
-    if (splitIndex <= 0 || splitIndex >= rest.length - 1) return null;
-    const peerId = rest.slice(0, splitIndex).trim();
-    const streamId = rest.slice(splitIndex + 1).trim();
-    if (!peerId || !streamId) return null;
-    return { peerId, streamId };
-  }
-
-  function peerProxyPath(peer: PeerStreamRef, endpoint: 'preview' | 'frame' | 'format'): string {
-    return `/peers/${encodeURIComponent(peer.peerId)}/streams/${encodeURIComponent(peer.streamId)}/${endpoint}`;
-  }
-
-
-  function normalizedPipelineOutputTag(raw: string | null | undefined): string {
-    return String(raw ?? '').trim().toLowerCase();
-  }
-
-  function usesOutputOverridePreview(): boolean {
-    const output = normalizedPipelineOutputTag(pipelineOutput);
-    if (pipelineId?.trim()) return true;
-    if (!output) return false;
-    return output !== 'frame' && output !== 'raw' && output !== 'undistorted';
-  }
-
-  function previewFormatCacheKey(peer: PeerStreamRef | null, sessionId: string): string {
-    const pipelineTag = String(pipelineId ?? '').trim();
-    const outputTag = normalizedPipelineOutputTag(pipelineOutput);
-    const base = peer ? `peer:${peer.peerId}:${peer.streamId}` : `stream:${sessionId}`;
-    return `${base}:${pipelineTag}:${outputTag}`;
-  }
-
-  function mapEncodedInfoFormat(raw: unknown): StreamPreviewFormat | null {
-    if (!raw || typeof raw !== 'object' || !('format' in raw)) return null;
-    const format = (raw as { format?: unknown }).format;
-    if (format === 'mjpeg' || format === 'h264' || format === 'h265') return format;
-    if (format === 'unknown') return 'unknown';
-    return null;
-  }
-
-  async function refreshResolvedFormat(): Promise<void> {
-    if (previewFormat === 'mjpeg' || previewFormat === 'h264' || previewFormat === 'h265') {
-      resolvedFormat = previewFormat;
-      return;
-    }
-    if (usesOutputOverridePreview()) {
-      resolvedFormat = 'mjpeg';
-      return;
-    }
-    if (!captureSessionId) return;
-    const sessionId = captureSessionId;
-    const peer = parsePeerStreamRef(sessionId);
-    try {
-      const mapped = await resolveStreamPreviewFormat(previewFormatCacheKey(peer, sessionId), async () => {
-        const json = peer
-          ? await fetchPeerStreamFormat(peer.peerId, peer.streamId)
-          : await StreamsApi.streamFormat({ id: sessionId });
-        return mapEncodedInfoFormat(json);
-      });
-      if (mapped && captureSessionId === sessionId) {
-        resolvedFormat = mapped;
-      }
-    } catch {
-      // ignore and keep the current/default
-    }
-  }
+  const isPlaying = $derived(runtime.isPlaying);
+  const previewUrl = $derived(runtime.previewUrl);
+  const frameUrl = $derived(runtime.frameUrl);
+  const previewError = $derived(runtime.previewError);
+  const controller = createStreamPreviewController({
+    state: runtime,
+    readConfig: () => ({
+      captureSessionId,
+      captureSessionAlias,
+      cameraUid,
+      pipelineId,
+      pipelineOutput,
+      previewFormat,
+      autoPlay,
+      canPreview,
+      supportsLivePreview,
+      livePreviewVisible,
+      status: status === 'recording' ? 'live' : (status as FloatingStreamStatus)
+    })
+  });
 
   $effect(() => {
     const _ = `${captureSessionId ?? ''}:${previewFormat}:${pipelineId ?? ''}:${pipelineOutput ?? ''}`;
     void _;
-    void refreshResolvedFormat();
+    void controller.resolveConfiguredFormat();
   });
 
   $effect(() => {
-    const current = captureSessionId ?? null;
-    if (current === lastCaptureSessionId) return;
-    lastCaptureSessionId = current;
-    lastSwitchAt = Date.now();
-    previewError = null;
-    lastAutoPlayKey = null;
-    lastKey = null;
-    previewUrl = null;
-    previewCandidates = [];
-    previewCandidateIndex = 0;
-    frameCandidates = [];
-    frameCandidateIndex = 0;
-    isPlaying = false;
-    clearReconnectTimer();
-    clearStallBannerTimer();
-    if (previewFormat === 'auto') {
-      resolvedFormat = 'mjpeg';
-    }
+    controller.syncSessionTarget();
   });
-
-
-  function togglePreview(): void {
-    if (!canPreview || !supportsLivePreview) return;
-    if (isPlaying) {
-      stopPreview();
-      return;
-    }
-    startPreview();
-  }
-
-  function buildPreviewUrlCandidates(): string[] {
-    const url = createPreviewUrl();
-    if (!url) return [];
-    return buildHttpCandidateUrls(url);
-  }
-
-  function buildFrameUrlCandidates(): string[] {
-    const url = buildFrameUrl();
-    if (!url) return [];
-    return buildHttpCandidateUrls(url);
-  }
-
-  function switchToNextPreviewCandidate(): boolean {
-    const nextIndex = previewCandidateIndex + 1;
-    if (nextIndex >= previewCandidates.length) {
-      return false;
-    }
-    const nextUrl = previewCandidates[nextIndex];
-    if (!nextUrl) {
-      return false;
-    }
-    previewCandidateIndex = nextIndex;
-    previewUrl = nextUrl;
-    return true;
-  }
-
-  function rebuildPreviewCandidates(advanceNonce = false): boolean {
-    if (advanceNonce) {
-      advancePreviewNonce();
-    }
-    const candidates = buildPreviewUrlCandidates();
-    previewCandidates = candidates;
-    previewCandidateIndex = 0;
-    previewUrl = candidates[0] ?? null;
-    return Boolean(previewUrl);
-  }
-
-  function startPreview(): void {
-    if (!canPreview) return;
-    if (!rebuildPreviewCandidates(true)) return;
-    clearReconnectTimer();
-    clearStallBannerTimer();
-    isPlaying = true;
-    previewError = null;
-    lastKey = previewKey();
-    frameUrl = null;
-    frameKey = null;
-    resetReconnectAttempts();
-  }
-
-  function stopPreview(): void {
-    previewUrl = null;
-    previewCandidates = [];
-    previewCandidateIndex = 0;
-    isPlaying = false;
-    previewError = null;
-    lastKey = null;
-    pauseButtonFocused = false;
-    clearReconnectTimer();
-    clearStallBannerTimer();
-    clearFrameRetryTimer();
-    resetReconnectAttempts();
-    refreshFrame(true);
-  }
 
   function handlePopoutClick(event: MouseEvent): void {
     event.preventDefault();
@@ -305,330 +129,41 @@
   function handlePreviewClick(event: MouseEvent): void {
     event.preventDefault();
     event.stopPropagation();
-    togglePreview();
-  }
-
-  function clearReconnectTimer(): void {
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
-    }
-  }
-
-  function clearStallBannerTimer(): void {
-    if (stallBannerTimer) {
-      clearTimeout(stallBannerTimer);
-      stallBannerTimer = null;
-    }
-  }
-
-  function clearFrameRetryTimer(): void {
-    if (frameRetryTimer) {
-      clearTimeout(frameRetryTimer);
-      frameRetryTimer = null;
-    }
-  }
-
-  function resetReconnectAttempts(): void {
-    reconnectAttempt = 0;
-  }
-
-  function incrementReconnectAttempt(): void {
-    reconnectAttempt = Math.min(reconnectAttempt + 1, 6);
-  }
-
-  function nextReconnectDelay(): number {
-    if (reconnectAttempt <= 0) {
-      return RECONNECT_BASE_DELAY_MS;
-    }
-    const delay = RECONNECT_BASE_DELAY_MS * 2 ** (reconnectAttempt - 1);
-    return Math.min(delay, RECONNECT_MAX_DELAY_MS);
-  }
-
-  function scheduleReconnect(immediate = false): void {
-    if (!isPlaying || !supportsLivePreview || !canPreview || !livePreviewVisible) return;
-    clearReconnectTimer();
-    const delay = immediate ? 0 : nextReconnectDelay();
-    reconnectTimer = setTimeout(() => {
-      reconnectTimer = null;
-      if (!isPlaying || !supportsLivePreview || !canPreview) return;
-      if (!switchToNextPreviewCandidate() && !rebuildPreviewCandidates(true)) {
-        incrementReconnectAttempt();
-        scheduleReconnect();
-        return;
-      }
-    }, delay);
-  }
-
-  function scheduleFrameRetry(immediate = false): void {
-    if (isPlaying || !canPreview) return;
-    clearFrameRetryTimer();
-    frameRetryTimer = setTimeout(() => {
-      frameRetryTimer = null;
-      if (isPlaying || !canPreview) return;
-      refreshFrame(true);
-    }, immediate ? 0 : FRAME_RETRY_DELAY_MS);
-  }
-
-  function handleStreamError(message?: string): void {
-    if (!isPlaying) return;
-    if (switchToNextPreviewCandidate()) {
-      clearStallBannerTimer();
-      previewError = null;
-      return;
-    }
-    previewUrl = null;
-    const resolvedMessage = message ?? 'Stream preview error';
-    const normalizedMessage = resolvedMessage.toLowerCase();
-    const recentSwitch = lastSwitchAt != null && Date.now() - lastSwitchAt < 2000;
-    const transientAbort = normalizedMessage.includes('abort');
-    const transient404 = recentSwitch && normalizedMessage.includes('404');
-    if (transientAbort || transient404) {
-      refreshFrame(true);
-      scheduleReconnect(true);
-      return;
-    }
-    incrementReconnectAttempt();
-    const isStall = resolvedMessage.toLowerCase().includes('stalled');
-    if (isStall) {
-      clearStallBannerTimer();
-      stallBannerTimer = setTimeout(() => {
-        stallBannerTimer = null;
-        if (!isPlaying || previewError) return;
-        previewError = resolvedMessage;
-      }, STALL_BANNER_DELAY_MS);
-    } else {
-      clearStallBannerTimer();
-      previewError = resolvedMessage;
-    }
-    refreshFrame(true);
-    scheduleReconnect();
-  }
-
-  function handleStreamLoad(): void {
-    if (!isPlaying) return;
-    clearReconnectTimer();
-    clearStallBannerTimer();
-    resetReconnectAttempts();
-    previewError = null;
-
-    // When the stream stabilizes, ensure we are showing the live MJPEG feed
-    // and defer snapshot refreshes until the stream goes idle again.
-    frameUrl = null;
-  }
-
-  function handleStreamFrame(): void {
-    handleStreamLoad();
+    controller.togglePreview();
   }
 
   $effect(() => {
-    if (!isPlaying) return;
-    const key = previewKey();
-    if (key !== lastKey) {
-      if (rebuildPreviewCandidates(true)) {
-        clearReconnectTimer();
-        lastKey = key;
-        resetReconnectAttempts();
-      } else {
-        stopPreview();
-      }
-    }
+    controller.syncPreviewKey();
   });
 
   $effect(() => {
-    if (!autoPlay) return;
-    const key = previewKey();
-    if (!key || key === lastAutoPlayKey) return;
-    if (!canPreview || !supportsLivePreview) return;
-    lastAutoPlayKey = key;
-    startPreview();
+    controller.syncAutoPlay();
   });
 
   $effect(() => {
-    if (!isPlaying || !supportsLivePreview || !canPreview) return;
-    if (!livePreviewVisible) {
-      previewUrl = null;
-      previewCandidates = [];
-      previewCandidateIndex = 0;
-      clearReconnectTimer();
-      clearStallBannerTimer();
-      return;
-    }
-    if (!previewUrl && rebuildPreviewCandidates(true)) {
-      clearReconnectTimer();
-      lastKey = previewKey();
-      resetReconnectAttempts();
-    }
+    controller.syncVisibilityDemand();
   });
 
   $effect(() => {
-    if (isPlaying) return;
-    refreshFrame();
+    if (runtime.isPlaying) return;
+    controller.refreshFrame();
   });
 
   $effect(() => {
-    const currentStatus = status === 'recording' ? 'live' : (status as FloatingStreamStatus);
-    if (!isPlaying || !supportsLivePreview || !canPreview || !livePreviewVisible) {
-      lastStatus = currentStatus;
-      return;
-    }
-    if (
-      (currentStatus === 'live' || currentStatus === 'degraded') &&
-      lastStatus !== currentStatus
-    ) {
-      resetReconnectAttempts();
-    }
-    if (currentStatus === 'live' || currentStatus === 'degraded') {
-      if (!previewUrl) {
-        scheduleReconnect(true);
-      }
-    }
-    lastStatus = currentStatus;
+    controller.syncStatusDemand();
   });
 
   $effect(() => {
-    const backendStatus = $connectionState.status;
-    const cameOnline = backendStatus === 'online' && lastConnectionStatus !== null && lastConnectionStatus !== 'online';
-    if (cameOnline && isPlaying && supportsLivePreview && canPreview && livePreviewVisible) {
-      clearReconnectTimer();
-      clearStallBannerTimer();
-      resetReconnectAttempts();
-      previewError = null;
-      if (rebuildPreviewCandidates(true)) {
-        lastKey = previewKey();
-      }
-    }
-    lastConnectionStatus = backendStatus;
+    controller.syncConnectionStatus($connectionState.status);
   });
 
   onMount(() => {
-    const onVisibilityChange = () => {
-      documentVisible = typeof document === 'undefined' ? true : !document.hidden;
-    };
-    onVisibilityChange();
-    if (typeof document !== 'undefined') {
-      document.addEventListener('visibilitychange', onVisibilityChange);
-    }
-
-    let observer: IntersectionObserver | null = null;
-    if (typeof IntersectionObserver !== 'undefined' && previewHost) {
-      observer = new IntersectionObserver(
-        (entries) => {
-          const entry = entries[0];
-          viewportVisible = Boolean(entry?.isIntersecting || (entry?.intersectionRatio ?? 0) > 0);
-        },
-        {
-          rootMargin: '200px 0px 200px 0px',
-          threshold: 0.01
-        }
-      );
-      observer.observe(previewHost);
-    } else {
-      viewportVisible = true;
-    }
-
-    return () => {
-      if (typeof document !== 'undefined') {
-        document.removeEventListener('visibilitychange', onVisibilityChange);
-      }
-      observer?.disconnect();
-    };
+    return controller.mount(previewHost);
   });
 
   onDestroy(() => {
-    stopPreview();
-    clearFrameRetryTimer();
+    controller.destroy();
   });
-
-  function createPreviewUrl(): string | null {
-    return buildPreviewUrl();
-  }
-
-  function buildPreviewUrl(): string | null {
-    if (resolvedFormat === 'unknown') {
-      return null;
-    }
-    const params = new SvelteURLSearchParams();
-    if (pipelineId?.trim()) params.set('pipeline', pipelineId.trim());
-    if (pipelineOutput?.trim()) params.set('output', pipelineOutput.trim());
-    if (previewNonce > 0) params.set('cb', String(previewNonce));
-    const suffix = params.toString();
-    const query = suffix.length ? `?${suffix}` : '';
-    const peer = parsePeerStreamRef(captureSessionId);
-    if (peer) {
-      return apiUrl(`${peerProxyPath(peer, 'preview')}${query}`);
-    }
-    if (resolvedFormat === 'mjpeg') {
-      const ref = captureSessionId ?? captureSessionAlias;
-      if (!ref) return null;
-      return apiUrl(`/streams/${encodeURIComponent(ref)}/preview${query}`);
-    }
-    if (!captureSessionId) return null;
-    return apiUrl(`/streams/${encodeURIComponent(captureSessionId)}/preview${query}`);
-  }
-
-  function buildFrameUrl(): string | null {
-    const ref = captureSessionId;
-    if (!ref) return null;
-    const peer = parsePeerStreamRef(ref);
-    const params = new SvelteURLSearchParams({ t: String(frameNonce) });
-    if (pipelineId?.trim()) params.set('pipeline', pipelineId.trim());
-    if (pipelineOutput?.trim()) params.set('output', pipelineOutput.trim());
-    if (peer) {
-      return apiUrl(`${peerProxyPath(peer, 'frame')}?${params.toString()}`);
-    }
-    return apiUrl(`/streams/${encodeURIComponent(ref)}/frame?${params.toString()}`);
-  }
-
-  function refreshFrame(force = false): void {
-    const key = previewKey();
-    if (!key) {
-      frameUrl = null;
-      frameKey = null;
-      frameCandidates = [];
-      frameCandidateIndex = 0;
-      return;
-    }
-    if (!force && key === frameKey) {
-      return;
-    }
-    advanceFrameNonce();
-    const candidates = buildFrameUrlCandidates();
-    frameCandidates = candidates;
-    frameCandidateIndex = 0;
-    const url = candidates[0] ?? null;
-    if (url) {
-      frameUrl = url;
-      frameKey = key;
-      clearFrameRetryTimer();
-    } else {
-      frameUrl = null;
-      frameKey = null;
-      scheduleFrameRetry();
-    }
-  }
-
-  function previewKey(): string | null {
-    const ref = captureSessionId;
-    if (!ref) return null;
-    const base = cameraUid?.trim() ? `${ref}:${cameraUid.trim()}` : ref;
-    const pipelineTag = pipelineId?.trim() ? pipelineId.trim() : '';
-    const outputTag = pipelineOutput?.trim() ? pipelineOutput.trim() : '';
-    return `${base}:${resolvedFormat}:${pipelineTag}:${outputTag}`;
-  }
-
-  function nextNonce(current: number): number {
-    const now = Date.now();
-    return now <= current ? current + 1 : now;
-  }
-
-  function advancePreviewNonce(): void {
-    previewNonce = nextNonce(previewNonce);
-  }
-
-  function advanceFrameNonce(): void {
-    frameNonce = nextNonce(frameNonce);
-  }
 </script>
 
 <figure class={`${className} text-xs ${showCaption ? 'space-y-1' : ''} ${fillParent ? 'h-full w-full' : ''}`}>
@@ -647,16 +182,16 @@
         <MjpegStreamPlayer
           url={previewUrl}
           fitClass={imageFitClass}
-          on:error={(event) => handleStreamError(event.detail?.message)}
-          on:frame={handleStreamFrame}
+          on:error={(event) => controller.handleStreamError(event.detail?.message)}
+          on:frame={() => controller.handleStreamFrame()}
         />
       {:else if resolvedFormat === 'h264' || resolvedFormat === 'h265'}
         <EncodedStreamPlayer
           url={previewUrl}
           format={resolvedFormat}
           fitClass={imageFitClass}
-          on:error={(event) => handleStreamError(event.detail?.message)}
-          on:frame={handleStreamFrame}
+          on:error={(event) => controller.handleStreamError(event.detail?.message)}
+          on:frame={() => controller.handleStreamFrame()}
         />
       {:else}
         <div class="flex h-full w-full items-center justify-center bg-surface-950 text-micro uppercase tracking-[0.3em] text-surface-400">
@@ -669,20 +204,8 @@
         src={frameUrl}
         crossorigin="anonymous"
         alt={`Preview for ${name}`}
-        onload={() => {
-          clearFrameRetryTimer();
-        }}
-        onerror={() => {
-          const nextIndex = frameCandidateIndex + 1;
-          if (nextIndex < frameCandidates.length) {
-            frameCandidateIndex = nextIndex;
-            frameUrl = frameCandidates[nextIndex] ?? null;
-            return;
-          }
-          // Avoid leaving a broken-image icon rendered when the backend reports preview unavailable.
-          frameUrl = null;
-          scheduleFrameRetry();
-        }}
+        onload={() => controller.handleFrameLoad()}
+        onerror={() => controller.handleFrameError()}
       />
     {:else}
       <div class="flex h-full w-full items-center justify-center bg-surface-950 text-micro uppercase tracking-[0.3em] text-surface-400">

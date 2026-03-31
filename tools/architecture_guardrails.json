@@ -722,9 +722,15 @@
     },
     {
       "path": "frontend/src/lib/components/StreamPreview.svelte",
-      "max_lines": 850,
+      "max_lines": 360,
       "owner": "HeliOS",
-      "review_note": "Viewer behavior is still being broken apart; fail if StreamPreview regrows beyond the agreed guardrail."
+      "review_note": "StreamPreview now renders the shared preview surface while the controller owns transport selection, reconnect/fallback policy, and visibility-driven demand; keep rendering concerns in the component and runtime behavior in the controller."
+    },
+    {
+      "path": "frontend/src/lib/components/streamPreviewController.ts",
+      "max_lines": 680,
+      "owner": "HeliOS",
+      "review_note": "Shared preview runtime behavior for dashboard, devices, camera detail, floating viewer, and pipeline preview surfaces now lives here; keep autoplay, pause/resume, visibility demand, transport selection, and fallback logic out of per-route components."
     },
     {
       "path": "frontend/src/routes/+layout.svelte",
