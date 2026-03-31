@@ -109,6 +109,36 @@
       "review_note": "Storage data-root selection and path sanitization now live here; keep it limited to filesystem root and helper concerns."
     },
     {
+      "path": "backend/src/helios-api/src/http/plugins.rs",
+      "max_lines": 80,
+      "owner": "HeliOS",
+      "review_note": "Plugins HTTP root should stay as thin routing and re-export orchestration after the module split."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/plugins/catalog.rs",
+      "max_lines": 220,
+      "owner": "HeliOS",
+      "review_note": "Plugin inventory listing and compatibility aggregation now live here; keep file upload and storage operations out of this layer."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/plugins/file_ops.rs",
+      "max_lines": 360,
+      "owner": "HeliOS",
+      "review_note": "Plugin upload/install/download/toggle handlers now live here; keep environment and compatibility helpers out of the route module."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/plugins/support.rs",
+      "max_lines": 380,
+      "owner": "HeliOS",
+      "review_note": "Plugin filesystem, compatibility probing, upload processing, and directory policy now live here; keep tests and route handlers separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/plugins/types.rs",
+      "max_lines": 120,
+      "owner": "HeliOS",
+      "review_note": "Plugin API schema types now live here; keep them separate from handler logic."
+    },
+    {
       "path": "frontend/src/lib/components/StreamPreview.svelte",
       "max_lines": 850,
       "owner": "HeliOS",
