@@ -728,9 +728,9 @@
     },
     {
       "path": "frontend/src/routes/localization/+page.svelte",
-      "max_lines": 4100,
+      "max_lines": 3900,
       "owner": "HeliOS",
-      "review_note": "The localization route now delegates tuning policy and camera POV math/identity plumbing to dedicated helpers; keep orchestration in the route and continue extracting viewer/runtime subsections instead of rebuilding a page-local geometry monolith."
+      "review_note": "The localization route now delegates tuning policy, camera POV math/identity plumbing, and viewer camera matching/state construction to dedicated helpers; keep orchestration in the route and continue extracting viewer/runtime subsections instead of rebuilding a page-local geometry monolith."
     },
     {
       "path": "frontend/src/routes/localization/localizationTuningActions.ts",
@@ -743,6 +743,12 @@
       "max_lines": 700,
       "owner": "HeliOS",
       "review_note": "Camera POV intrinsics extraction, IMU sample parsing, FOV culling, and source/camera identity normalization now live here; keep camera geometry and identity plumbing out of the route component."
+    },
+    {
+      "path": "frontend/src/routes/localization/localizationViewerCameraState.ts",
+      "max_lines": 420,
+      "owner": "HeliOS",
+      "review_note": "Viewer camera matching, synthetic camera fallbacks, POV option derivation, and cached POV state synchronization now live here; keep camera view-state construction out of the route component."
     },
     {
       "path": "backend/src/helios-api/src/ws/streams/mod.rs",

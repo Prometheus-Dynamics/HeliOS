@@ -123,7 +123,6 @@
   import {
     cameraFramePositionForDetection,
     cameraKeyVariants,
-    cameraPovOptionId,
     collectKeyVariants,
     detectionInsidePovFov,
     extractPovIntrinsicsSet,
@@ -141,6 +140,16 @@
     type CameraPovIntrinsics,
     type CameraPovState
   } from './localizationCameraPovUtils';
+  import {
+    buildCameraPovByOptionId,
+    buildCameraPovOptions,
+    buildCameraPovOptionsBase,
+    buildViewerRenderableCameras,
+    mergeCameraPovStateCache,
+    resolveSelectedCameraPov,
+    resolveSelectedLiveCameraPov,
+    type CameraPovOption
+  } from './localizationViewerCameraState';
 
   type FeedStatus = 'idle' | 'connecting' | 'live' | 'error';
 
@@ -163,17 +172,6 @@
     loading: boolean;
     error: string | null;
     initialized: boolean;
-  };
-
-  type CameraPovOption = {
-    id: string;
-    profileId: string;
-    sourceId: string;
-    groupLabel: string;
-    subgroupLabel: string;
-    label: string;
-    available: boolean;
-    ghost: boolean;
   };
 
   type ViewerDetectionPose = LocalizationDetectionPose & { profileId: string; color: string | null };
@@ -1333,44 +1331,6 @@
         .map((source) => source.id)
     );
     return sources.filter((source) => enabledIds.has(source.id));
-  }
-
-  function syntheticCameraFromSource(
-    source: LocalizationPipelineSource,
-    fallbackKey?: string | null
-  ): RigCameraInfo | null {
-    const key = (cameraKeyForSource(source) ?? source.id ?? fallbackKey ?? '').trim();
-    if (!key) return null;
-    const streamId = String(source.streamId ?? '').trim() || null;
-    const cameraUid = String(source.cameraUid ?? '').trim() || null;
-    const streamAlias = (source.streamLabel ?? '').trim() || null;
-    const displayName = streamAlias || cameraUid || streamId || source.id || key;
-    const driverCameraId = String(source.cameraPath ?? '').trim() || key;
-    return {
-      uid: key,
-      streamId,
-      cameraUid,
-      streamAlias,
-      driverCameraId,
-      displayName,
-      backend: 'Localization',
-      pose: { translation: { x: 0, y: 0, z: 0 }, rotation: { roll: 0, pitch: 0, yaw: 0 } }
-    };
-  }
-
-  function syntheticCameraFromKey(key: string): RigCameraInfo | null {
-    const uid = key.trim();
-    if (!uid) return null;
-    return {
-      uid,
-      streamId: uid,
-      cameraUid: uid,
-      streamAlias: null,
-      driverCameraId: uid,
-      displayName: uid,
-      backend: 'Localization',
-      pose: { translation: { x: 0, y: 0, z: 0 }, rotation: { roll: 0, pitch: 0, yaw: 0 } }
-    };
   }
 
   $effect(() => {
@@ -2625,40 +2585,15 @@
     return Object.keys(out).length > 0 ? out : baseTransforms;
   });
 
-  const viewerRenderableCameras = $derived.by<RigCameraInfo[]>(() => {
-    if (baseFrame !== 'field') return viewerCameras;
-    const transforms = viewerCameraTransforms ?? {};
-    const keys = Object.keys(transforms);
-    if (keys.length === 0) return [];
-    const known = new Set(keys);
-    const matched = viewerCameras.filter((camera) => rigCameraKeys(camera).some((key) => known.has(key)));
-    const covered = new Set<string>();
-    for (const camera of matched) {
-      for (const key of rigCameraKeys(camera)) {
-        covered.add(key);
-      }
-    }
-
-    const sourcePool = [...viewOverlaySources, ...selectedSources];
-    const synthetic: RigCameraInfo[] = [];
-    for (const key of keys) {
-      if (covered.has(key)) continue;
-      const matchedSource =
-        sourcePool.find((source) =>
-          sourceKeys(source).some((candidate) => candidate === key)
-        ) ?? null;
-      const camera = matchedSource
-        ? syntheticCameraFromSource(matchedSource, key)
-        : syntheticCameraFromKey(key);
-      if (!camera) continue;
-      synthetic.push(camera);
-      for (const variant of rigCameraKeys(camera)) {
-        covered.add(variant);
-      }
-    }
-
-    return matched.concat(synthetic);
-  });
+  const viewerRenderableCameras = $derived.by<RigCameraInfo[]>(() =>
+    buildViewerRenderableCameras({
+      baseFrame,
+      viewerCameras,
+      viewerCameraTransforms,
+      viewOverlaySources,
+      selectedSources
+    })
+  );
 
   $effect(() => {
     if (baseFrame !== 'field') {
@@ -2728,150 +2663,41 @@
         })
   );
 
-  const cameraPovOptionsBase = $derived.by<Array<Omit<CameraPovOption, 'available' | 'ghost'>>>(() => {
-    const out: Array<Omit<CameraPovOption, 'available' | 'ghost'>> = [];
-    for (const profile of viewProfiles) {
-      const profileLabel = (profile.name ?? '').trim() || profile.id;
-      const enabled = enabledSourcesForProfile(profile);
-      for (const source of enabled) {
-        const cameraAlias = (source.streamLabel || source.cameraUid || source.streamId || source.id).trim();
-        const pipelineAlias = (source.pipelineLabel || source.pipelineId || 'pipeline').trim();
-        const portLabel = (source.outputKey || 'port').trim();
-        out.push({
-          id: cameraPovOptionId(profile.id, source.id),
-          profileId: profile.id,
-          sourceId: source.id,
-          groupLabel: profileLabel,
-          subgroupLabel: cameraAlias,
-          label: `${pipelineAlias} · ${portLabel}`
-        });
-      }
-    }
-    return out;
-  });
+  const cameraPovOptionsBase = $derived.by(() =>
+    buildCameraPovOptionsBase(viewProfiles, enabledSourcesForProfile)
+  );
 
-  const cameraPovByOptionId = $derived.by<Record<string, CameraPovState>>(() => {
-    const out: Record<string, CameraPovState> = {};
-    const profileById = new Map($profiles.map((profile) => [profile.id, profile]));
-    const sourceById = new Map(sources.map((source) => [source.id, source]));
-
-    const toPoseTransform = (pose: { translation: { x: number; y: number; z: number }; rotation: { quaternion: PoseQuaternion } } | null | undefined): PoseTransform | null => {
-      if (!pose) return null;
-      return {
-        position: [pose.translation.x, pose.translation.y, pose.translation.z],
-        quaternion: pose.rotation.quaternion
-      };
-    };
-
-    for (const option of cameraPovOptionsBase) {
-      const profile = profileById.get(option.profileId) ?? null;
-      const source = sourceById.get(option.sourceId) ?? null;
-      if (!profile || !source) continue;
-
-      const outputs = outputsForProfile(profile);
-      if (!outputs) continue;
-
-      const sourceKeySet = new Set(sourceKeys(source));
-      const rigCamera = (() => {
-        let best: { camera: RigCameraInfo; score: number } | null = null;
-        for (const camera of rigLayoutState.layout.cameras) {
-          const score = rigCameraKeys(camera).reduce(
-            (count, key) => count + (sourceKeySet.has(key) ? 1 : 0),
-            0
-          );
-          if (score <= 0) continue;
-          if (!best || score > best.score) {
-            best = { camera, score };
-          }
-        }
-        return best?.camera ?? rigCameraForSource(source);
-      })();
-      for (const key of rigCameraKeys(rigCamera)) {
-        sourceKeySet.add(key);
-      }
-
-      const cameraInField = (() => {
-        const list = outputs.cameraInField ?? [];
-        if (!list.length) return null;
-        const picked = list.find((entry) =>
-          collectKeyVariants([entry.cameraUid, entry.sourceId]).some((key) => sourceKeySet.has(key))
-        );
-        return picked ? toPoseTransform(picked.pose) : null;
-      })();
-
-      const fieldFromRobot = toPoseTransform(outputs.robotInField?.pose ?? null);
-
-      const rigRobotFromCamera = (() => {
-        const pose = rigCamera?.pose ?? null;
-        return rigPoseToViewerTransform(pose);
-      })();
-
-      const fieldFromCamera =
-        (fieldFromRobot && rigRobotFromCamera ? composeTransforms(fieldFromRobot, rigRobotFromCamera) : null) ??
-        cameraInField;
-
-      let transform: PoseTransform | null = null;
-      if (coordinateSpace === 'tag_in_camera') {
-        transform = identityTransform();
-      } else if (coordinateSpace === 'tag_in_robot') {
-        // In robot-space viewing, keep POV locked to rig-local camera pose.
-        // Do not re-derive from field solves, which can drift or jump when tags are sparse.
-        transform = rigRobotFromCamera;
-      } else {
-        transform = fieldFromCamera;
-      }
-      if (!transform) continue;
-
-      const cameraKey =
-        (source.cameraUid || source.streamId || source.id || rigCamera?.uid || '').trim() || null;
-      const allKeys = new Set<string>([...Array.from(sourceKeySet.values()), ...rigCameraKeys(rigCamera)]);
-      const intrinsicsEntry = Array.from(allKeys.values())
-        .map((key) => cameraIntrinsicsByKey[key] ?? null)
-        .find(
-          (entry): entry is { undistorted: CameraPovIntrinsics | null; raw: CameraPovIntrinsics | null } =>
-            Boolean(entry)
-        ) ?? null;
-      const intrinsicsUndistorted = intrinsicsEntry?.undistorted ?? null;
-      const intrinsicsRaw = intrinsicsEntry?.raw ?? intrinsicsUndistorted ?? null;
-
-      out[option.id] = {
-        optionId: option.id,
-        profileId: profile.id,
-        sourceId: source.id,
-        cameraKey,
-        transform,
-        intrinsicsUndistorted,
-        intrinsicsRaw
-      };
-    }
-
-    return out;
-  });
-
-  const cameraPovOptions = $derived.by<CameraPovOption[]>(() =>
-    cameraPovOptionsBase.map((option) => {
-      const hasLivePose = Boolean(cameraPovByOptionId[option.id]);
-      const hasGhostPose = !hasLivePose && Boolean(lastCameraPovByOptionId[option.id]);
-      return {
-        ...option,
-        available: hasLivePose || hasGhostPose,
-        ghost: hasGhostPose
-      };
+  const cameraPovByOptionId = $derived.by<Record<string, CameraPovState>>(() =>
+    buildCameraPovByOptionId({
+      cameraPovOptionsBase,
+      profiles: $profiles,
+      sources,
+      outputsForProfile,
+      rigCameras: rigLayoutState.layout.cameras,
+      coordinateSpace,
+      cameraIntrinsicsByKey
     })
   );
 
-  const selectedCameraPov = $derived.by<CameraPovState | null>(() => {
-    const selected = cameraPovSelectionId.trim();
-    if (!selected) return null;
-    if (selected === ROBOT_FOLLOW_POV_OPTION_ID) return null;
-    return cameraPovByOptionId[selected] ?? lastCameraPovByOptionId[selected] ?? null;
-  });
-  const selectedLiveCameraPov = $derived.by<CameraPovState | null>(() => {
-    const selected = cameraPovSelectionId.trim();
-    if (!selected) return null;
-    if (selected === ROBOT_FOLLOW_POV_OPTION_ID) return null;
-    return cameraPovByOptionId[selected] ?? null;
-  });
+  const cameraPovOptions = $derived.by<CameraPovOption[]>(() =>
+    buildCameraPovOptions(cameraPovOptionsBase, cameraPovByOptionId, lastCameraPovByOptionId)
+  );
+
+  const selectedCameraPov = $derived.by<CameraPovState | null>(() =>
+    resolveSelectedCameraPov(
+      cameraPovSelectionId,
+      ROBOT_FOLLOW_POV_OPTION_ID,
+      cameraPovByOptionId,
+      lastCameraPovByOptionId
+    )
+  );
+  const selectedLiveCameraPov = $derived.by<CameraPovState | null>(() =>
+    resolveSelectedLiveCameraPov(
+      cameraPovSelectionId,
+      ROBOT_FOLLOW_POV_OPTION_ID,
+      cameraPovByOptionId
+    )
+  );
 
   const viewerCameraPovEnabled = $derived.by(() => Boolean(selectedCameraPov));
   const viewerCameraPovTransform = $derived.by<PoseTransform | null>(() => selectedCameraPov?.transform ?? null);
@@ -2979,38 +2805,12 @@
 
   $effect(() => {
     const current = cameraPovByOptionId;
-    const next: Record<string, CameraPovState> = { ...lastCameraPovByOptionId };
-    let changed = false;
-
-    for (const [optionId, state] of Object.entries(current)) {
-      const prev = next[optionId] ?? null;
-      const sameTransform =
-        prev &&
-        prev.transform.position[0] === state.transform.position[0] &&
-        prev.transform.position[1] === state.transform.position[1] &&
-        prev.transform.position[2] === state.transform.position[2] &&
-        prev.transform.quaternion.x === state.transform.quaternion.x &&
-        prev.transform.quaternion.y === state.transform.quaternion.y &&
-        prev.transform.quaternion.z === state.transform.quaternion.z &&
-        prev.transform.quaternion.w === state.transform.quaternion.w;
-      const sameIntrinsics =
-        intrinsicsEqual(prev?.intrinsicsUndistorted ?? null, state.intrinsicsUndistorted) &&
-        intrinsicsEqual(prev?.intrinsicsRaw ?? null, state.intrinsicsRaw);
-      if (sameTransform && sameIntrinsics && prev?.cameraKey === state.cameraKey) {
-        continue;
-      }
-      next[optionId] = state;
-      changed = true;
-    }
-
-    const validOptions = new Set(cameraPovOptionsBase.map((option) => option.id));
-    for (const key of Object.keys(next)) {
-      if (validOptions.has(key)) continue;
-      delete next[key];
-      changed = true;
-    }
-
-    if (changed) {
+    const next = mergeCameraPovStateCache(
+      current,
+      lastCameraPovByOptionId,
+      cameraPovOptionsBase.map((option) => option.id)
+    );
+    if (next !== lastCameraPovByOptionId) {
       lastCameraPovByOptionId = next;
     }
   });
