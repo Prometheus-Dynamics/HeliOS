@@ -1,3 +1,5 @@
+import type { IpaStatus as GeneratedIpaStatus } from '$lib/ts-bindings/http/client';
+
 export type CalibrationBoard = {
   squaresX: number;
   squaresY: number;
@@ -59,6 +61,4 @@ export type CalibrationParams = {
   lensModel?: 'pinhole' | 'fisheye';
 };
 
-export type IpaStatus = {
-  files: Array<{ target: string; path: string; exists: boolean; ccmCt?: number | null; ccm?: number[] | null }>;
-};
+export type IpaStatus = GeneratedIpaStatus;

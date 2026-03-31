@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import CalibrationResults from './CalibrationResults.svelte';
+  import type { IpaStatus } from '../cameraCalibrationTypes';
   import { estimateCalibrationFovDegs } from '../cameraCalibrationUtils';
 
   type CalibrationImage = {
@@ -52,10 +53,6 @@
       used: boolean;
       coverageRatio: number;
     }>;
-  };
-
-  type IpaStatus = {
-    files: Array<{ target: string; path: string; exists: boolean; ccmCt?: number | null; ccm?: number[] | null }>;
   };
 
   type CalibrationImportSource = {
