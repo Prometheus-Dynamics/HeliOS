@@ -77,7 +77,7 @@ export async function resolveStreamInfo({ effectiveId, streamsApi, deviceService
   let error: string | null = null;
 
   if (!info?.id) {
-    const list = await streamsApi.listStreams({ forceRefresh: true }).catch(() => null);
+    const list = await streamsApi.resolvedStreams({ forceRefresh: true }).catch(() => null);
     const wrappedCandidates = asStreamInfoArray(asRecord(list)?.items);
     candidates = wrappedCandidates.length ? wrappedCandidates : asStreamInfoArray(list);
     const match = candidates.find((item) => matchesEffectiveId(item, effectiveId));

@@ -248,7 +248,7 @@ export function createCameraCalibrationController(state: CalibrationState, deps:
     state.calibrationImportSourcesLoading = true;
     state.calibrationImportError = null;
     try {
-      const streams = await StreamsApi.listStreams({ forceRefresh: true, cacheMs: 0 });
+      const streams = await StreamsApi.resolvedStreams({ forceRefresh: true, cacheMs: 0 });
       const currentId = (state.stream?.id ?? state.streamId).trim();
       const nextSources: CalibrationImportSource[] = [];
       for (const stream of streams ?? []) {

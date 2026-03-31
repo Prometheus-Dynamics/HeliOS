@@ -302,6 +302,8 @@ function makeNetcamManifest(input: RegisterNetcamStreamInput, capabilities: Stre
 
 export const StreamsApi = {
   runtimeStatus: (options?: ApiRequestOptions) => runtimeStatusSingleflight(options),
+  resolvedStreams: (options?: ApiRequestOptions) =>
+    runtimeStatusSingleflight(options).then((payload) => payload.streams.resolvedStreams),
   listStreams: (options?: ApiRequestOptions) => listStreamsSingleflight(options),
   streamCapabilities: (options?: ApiRequestOptions) => streamCapabilitiesSingleflight(options),
   getStream: (args: Parameters<typeof EngineStreamsService.getStream>[0], options?: ApiRequestOptions) =>
