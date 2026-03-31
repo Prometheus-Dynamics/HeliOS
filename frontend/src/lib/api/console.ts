@@ -1,4 +1,9 @@
 import { apiFetchResponse } from '$lib/api/core/http';
+import type {
+  ConsoleSessionListPayload,
+  ConsoleSessionSummaryPayload,
+  CreateConsoleSessionRequest
+} from '$lib/ts-bindings/http/client';
 import type { ConsoleSessionSummary } from '$lib/types/console';
 
 export class ConsoleSessionsNotSupportedError extends Error {
@@ -8,44 +13,26 @@ export class ConsoleSessionsNotSupportedError extends Error {
   }
 }
 
-type ConsoleSessionListResponse = {
-  sessions?: Array<Partial<ConsoleSessionSummary>>;
-};
-
-type CreateConsoleSessionRequest = {
-  cols?: number;
-  rows?: number;
-};
-
 const JSON_HEADERS = {
   Accept: 'application/json',
   'Content-Type': 'application/json'
 };
 
-function mapSession(raw: Partial<ConsoleSessionSummary> | null | undefined): ConsoleSessionSummary | null {
-  const rawId = (raw as Record<string, unknown>)?.sessionId ?? (raw as Record<string, unknown>)?.session_id;
-  const sessionId = typeof rawId === 'string' ? rawId : '';
-  if (!raw || typeof raw !== 'object' || sessionId.length === 0) {
+function mapSession(raw: ConsoleSessionSummaryPayload | null | undefined): ConsoleSessionSummary | null {
+  const sessionId = typeof raw?.session_id === 'string' ? raw.session_id : '';
+  if (!raw || sessionId.length === 0) {
     return null;
   }
-  const createdAt = (raw as Record<string, unknown>).createdAt ?? (raw as Record<string, unknown>).created_at ?? new Date().toISOString();
-  const lastActivity =
-    (raw as Record<string, unknown>).lastActivity ?? (raw as Record<string, unknown>).last_activity ?? createdAt ?? new Date().toISOString();
-  const exitCode = (raw as Record<string, unknown>).exitCode ?? (raw as Record<string, unknown>).exit_code ?? null;
-  const clientCount = (raw as Record<string, unknown>).clientCount ?? (raw as Record<string, unknown>).client_count ?? 0;
-  const cols = (raw as Record<string, unknown>).cols;
-  const rows = (raw as Record<string, unknown>).rows;
-  const shell = (raw as Record<string, unknown>).shell;
   return {
     sessionId,
-    shell: typeof shell === 'string' ? shell : 'shell',
-    createdAt: typeof createdAt === 'string' ? createdAt : new Date().toISOString(),
-    lastActivity: typeof lastActivity === 'string' ? lastActivity : new Date().toISOString(),
-    exitCode: typeof exitCode === 'number' ? exitCode : null,
-    clientCount: typeof clientCount === 'number' ? clientCount : 0,
-    cols: typeof cols === 'number' ? cols : Number(cols) || 0,
-    rows: typeof rows === 'number' ? rows : Number(rows) || 0,
-    closed: Boolean((raw as Record<string, unknown>).closed ?? false)
+    shell: typeof raw.shell === 'string' ? raw.shell : 'shell',
+    createdAt: typeof raw.created_at === 'string' ? raw.created_at : new Date().toISOString(),
+    lastActivity: typeof raw.last_activity === 'string' ? raw.last_activity : raw.created_at ?? new Date().toISOString(),
+    exitCode: typeof raw.exit_code === 'number' ? raw.exit_code : null,
+    clientCount: typeof raw.client_count === 'number' ? raw.client_count : 0,
+    cols: typeof raw.cols === 'number' ? raw.cols : 0,
+    rows: typeof raw.rows === 'number' ? raw.rows : 0,
+    closed: Boolean(raw.closed ?? false)
   };
 }
 
@@ -64,7 +51,7 @@ export async function fetchConsoleSessions(): Promise<ConsoleSessionSummary[]> {
     method: 'GET',
     headers: JSON_HEADERS
   });
-  const payload = await unwrapJson<ConsoleSessionListResponse>(response).catch((error) => {
+  const payload = await unwrapJson<ConsoleSessionListPayload>(response).catch((error) => {
     throw new Error(`Unable to load console sessions: ${error instanceof Error ? error.message : String(error)}`);
   });
   const sessions = payload.sessions ?? [];
@@ -77,7 +64,7 @@ export async function createConsoleSession(request: CreateConsoleSessionRequest 
     headers: JSON_HEADERS,
     body: request
   });
-  const payload = await unwrapJson<ConsoleSessionSummary>(response).catch((error) => {
+  const payload = await unwrapJson<ConsoleSessionSummaryPayload>(response).catch((error) => {
     throw new Error(`Unable to create console session: ${error instanceof Error ? error.message : String(error)}`);
   });
   const mapped = mapSession(payload);

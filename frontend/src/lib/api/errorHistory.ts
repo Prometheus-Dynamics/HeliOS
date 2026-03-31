@@ -1,25 +1,7 @@
 import { apiFetchResponse } from '$lib/api/core/http';
+import type { ErrorHistoryEntry, ErrorHistoryResponse } from '$lib/ts-bindings/http/client';
 
-export type ErrorHistoryEntry = {
-  id: string;
-  status?: number | null;
-  code: string;
-  error: string;
-  details?: string | null;
-  timestamp_ms: number;
-  source?: string | null;
-  operation?: string | null;
-  request_id?: string | null;
-  trace_id?: string | null;
-  retryable?: boolean | null;
-  remediation?: string | null;
-  reported_by?: string | null;
-  transport?: string | null;
-};
-
-export type ErrorHistoryResponse = {
-  items: ErrorHistoryEntry[];
-};
+export type { ErrorHistoryEntry, ErrorHistoryResponse };
 
 export async function fetchErrorHistory(limit: number = 200, sinceMs?: number): Promise<ErrorHistoryEntry[]> {
   const url = new URL('http://localhost/v1/errors');
