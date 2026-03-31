@@ -1,7 +1,10 @@
 use std::collections::BTreeSet;
+use std::fs;
+use std::path::Path;
 use std::sync::{Arc, Mutex as StdMutex, Weak};
 use std::time::Duration as StdDuration;
 
+use helios_engine::ipc::StreamState;
 use schemars::JsonSchema;
 use serde::Serialize;
 use sysinfo::{ProcessesToUpdate, System};
@@ -10,13 +13,11 @@ use tokio::task::JoinHandle;
 use tokio::time::{Duration, Instant};
 use tracing::{debug, warn};
 
+use crate::http::streams::util::list_streams_timeout;
 use crate::ipc::IpcHandles;
 use crate::ws::device::{EngineTelemetry, PowerTelemetry};
 
-use super::{
-    SystemCollector, broadcast_devices_update, devices_updates_stream_poll_interval, reason_for_update_kind, sample_power_from_peripherals, spawn_api_sampler_thread, stream_fingerprint,
-    usb_fingerprint,
-};
+use super::{SystemCollector, devices_updates_stream_poll_interval, sample_power_from_peripherals, spawn_api_sampler_thread};
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct ProcessSample {
@@ -464,6 +465,68 @@ fn build_shared_process_snapshot(sys: &System) -> SharedProcessesSnapshot {
         total_memory_bytes: sys.total_memory(),
         used_memory_bytes: sys.used_memory(),
         processes: Arc::<[ProcessSample]>::from(processes),
+    }
+}
+
+fn reason_for_update_kind(kind: &str) -> DevicesUpdateReason {
+    match kind {
+        "streams" => DevicesUpdateReason::Streams,
+        "pipelines" => DevicesUpdateReason::Pipelines,
+        "localization" => DevicesUpdateReason::Localization,
+        "media" => DevicesUpdateReason::Media,
+        "imu" => DevicesUpdateReason::Imu,
+        "device" => DevicesUpdateReason::Device,
+        "settings" => DevicesUpdateReason::Settings,
+        _ => DevicesUpdateReason::Api,
+    }
+}
+
+fn broadcast_devices_update(tx: &broadcast::Sender<Arc<SharedDevicesUpdate>>, reasons: &BTreeSet<DevicesUpdateReason>) {
+    let update = Arc::new(SharedDevicesUpdate { timestamp_ms: chrono::Utc::now().timestamp_millis().max(0) as u64, reasons: reasons.iter().copied().collect() });
+    let _ = tx.send(update);
+}
+
+fn usb_fingerprint() -> String {
+    let root = Path::new("/sys/bus/usb/devices");
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(_) => return String::new(),
+    };
+
+    let mut keys: Vec<String> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let vendor = fs::read_to_string(path.join("idVendor")).ok();
+        let product = fs::read_to_string(path.join("idProduct")).ok();
+        let (Some(vendor), Some(product)) = (vendor, product) else { continue };
+        let name = entry.file_name().to_string_lossy().to_string();
+        keys.push(format!("{name}:{}:{}", vendor.trim(), product.trim()));
+    }
+    keys.sort();
+    keys.join("|")
+}
+
+async fn stream_fingerprint(state: &Arc<IpcHandles>) -> Option<String> {
+    let streams = match state.engine.list_streams_with_timeout(list_streams_timeout()).await {
+        Ok(streams) => streams,
+        Err(err) => {
+            debug!(%err, "devices updates stream list failed");
+            return None;
+        }
+    };
+
+    let mut keys: Vec<String> = streams.into_iter().map(|summary| format!("{}:{}", summary.stream_id, stream_state_label(summary.status.state))).collect();
+    keys.sort();
+    Some(keys.join("|"))
+}
+
+fn stream_state_label(state: StreamState) -> &'static str {
+    match state {
+        StreamState::Running => "running",
+        StreamState::Disabled => "disabled",
     }
 }
 
