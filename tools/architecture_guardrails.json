@@ -187,6 +187,36 @@
       "review_note": "Bootloader API schemas and config constants now live here; keep them separate from route and staging logic."
     },
     {
+      "path": "backend/src/helios-api/src/http/device/ide.rs",
+      "max_lines": 30,
+      "owner": "HeliOS",
+      "review_note": "Device IDE HTTP root should stay as thin route/type re-export orchestration after the module split."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/ide/routes.rs",
+      "max_lines": 220,
+      "owner": "HeliOS",
+      "review_note": "IDE route handlers now live here; keep env parsing and template patch helpers out of the HTTP layer."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/ide/support.rs",
+      "max_lines": 160,
+      "owner": "HeliOS",
+      "review_note": "IDE env parsing, host/scheme resolution, and project-name sanitation now live here; keep template mutation logic out of this module."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/ide/templates.rs",
+      "max_lines": 180,
+      "owner": "HeliOS",
+      "review_note": "IDE template copying and build/Cargo patch helpers now live here; keep request/header/env handling separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/ide/types.rs",
+      "max_lines": 80,
+      "owner": "HeliOS",
+      "review_note": "IDE API schema types now live here; keep them separate from handlers and filesystem helpers."
+    },
+    {
       "path": "backend/src/helios-api/src/http/plugins.rs",
       "max_lines": 80,
       "owner": "HeliOS",
