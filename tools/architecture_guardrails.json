@@ -955,6 +955,36 @@
       "review_note": "Engine IPC timeout/journal-mode regression tests now live here; keep production transport and dispatcher logic out of this test module."
     },
     {
+      "path": "backend/src/helios-api/src/resource_guard/mod.rs",
+      "max_lines": 260,
+      "owner": "HeliOS",
+      "review_note": "Resource-guard public schemas, config parsing, and shared runtime state now live here; keep the root focused on contract/state definitions instead of rebuilding the async relief loop."
+    },
+    {
+      "path": "backend/src/helios-api/src/resource_guard/runtime.rs",
+      "max_lines": 420,
+      "owner": "HeliOS",
+      "review_note": "Resource-guard polling, restore, and pressure-relief orchestration now live here; keep ranking heuristics and meminfo/env helpers out of the async runtime loop."
+    },
+    {
+      "path": "backend/src/helios-api/src/resource_guard/scoring.rs",
+      "max_lines": 180,
+      "owner": "HeliOS",
+      "review_note": "Resource-guard stream ranking, runtime metrics scoring, and staged relief selection now live here; keep state mutation and env/meminfo probing out of the scoring path."
+    },
+    {
+      "path": "backend/src/helios-api/src/resource_guard/system.rs",
+      "max_lines": 80,
+      "owner": "HeliOS",
+      "review_note": "Resource-guard meminfo parsing, clock helpers, and env parsing now live here; keep polling/runtime mutations and stream scoring logic separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/resource_guard/tests.rs",
+      "max_lines": 80,
+      "owner": "HeliOS",
+      "review_note": "Resource-guard meminfo parsing regressions now live here; keep production runtime and scoring logic out of the test module."
+    },
+    {
       "path": "backend/src/helios-engine/src/localization/solve/mod.rs",
       "max_lines": 250,
       "owner": "HeliOS",
@@ -1017,6 +1047,11 @@
       "path": "backend/src/helios-api/src/ipc/engine.rs",
       "owner": "HeliOS",
       "reason": "Engine IPC request dispatch, reconnect bootstrap, timeout policy, and RPC wrappers now live under backend/src/helios-api/src/ipc/engine/*. Do not recreate the deleted ipc/engine.rs monolith."
+    },
+    {
+      "path": "backend/src/helios-api/src/resource_guard.rs",
+      "owner": "HeliOS",
+      "reason": "Resource-guard schemas, runtime polling, scoring heuristics, and system probes now live under backend/src/helios-api/src/resource_guard/*. Do not recreate the deleted resource_guard.rs monolith."
     },
     {
       "path": "backend/src/helios-api/src/http/localization/maps.rs",
