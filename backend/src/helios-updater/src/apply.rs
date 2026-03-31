@@ -217,6 +217,9 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
     if !simulate {
         cleanup_source_media_after_apply(config, update_id, &manifest_metadata).await;
     }
+    if !simulate && !apply_outcome.reboot_required {
+        clear_completed_update_state(config, state, events, update_id).await?;
+    }
 
     if !simulate
         && apply_outcome.restart_updater_after_apply
@@ -738,6 +741,37 @@ async fn cleanup_source_media_after_apply(config: &UpdaterConfig, update_id: Uui
             Err(err) => warn!(%update_id, path = %media_meta_path.display(), error = %err, "failed to remove source OTA media metadata"),
         }
     }
+}
+
+pub(crate) async fn purge_update_dirs(config: &UpdaterConfig, update_id: Uuid) -> Result<()> {
+    let cache_dir = config.cache_dir().join(update_id.to_string());
+    if fs::metadata(&cache_dir).await.is_ok() {
+        fs::remove_dir_all(&cache_dir).await?;
+    }
+
+    let work_dir = config.work_dir().join(update_id.to_string());
+    if fs::metadata(&work_dir).await.is_ok() {
+        fs::remove_dir_all(&work_dir).await?;
+    }
+
+    Ok(())
+}
+
+async fn clear_completed_update_state(config: &UpdaterConfig, state: &Arc<RwLock<ServiceState>>, events: &Sender<UpdaterEvent>, update_id: Uuid) -> Result<()> {
+    purge_update_dirs(config, update_id).await?;
+    let cache_usage = cache_usage_bytes(config.cache_dir()).await?;
+
+    {
+        let mut guard = state.write().await;
+        if matches!(guard.active_update.as_ref().map(|a| a.update_id), Some(id) if id == update_id) {
+            guard.update_progress(UpdateStage::Idle, Some(0), None);
+            guard.clear_active_update();
+        }
+        guard.cache_usage_bytes = cache_usage;
+    }
+
+    publish_snapshot(state, events).await;
+    Ok(())
 }
 
 fn sanitize_media_filename(raw: &str) -> Option<String> {
@@ -1389,16 +1423,19 @@ async fn copy_boot_tree(src: &Path, dst: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ApplyManifestMetadata, PersistedFileSync, SquashfsPreflightContext, SquashfsSlotResizePlan, missing_bootable_root_paths, parse_apply_manifest_metadata, parse_env_flag,
-        plan_squashfs_slot_resize, preflight_report_for_squashfs_plan, reboot_failure_message, reboot_output_is_expected_success, sync_persisted_files_with_mappings_into,
-        sync_persisted_networkd_into,
+        ApplyManifestMetadata, PersistedFileSync, SquashfsPreflightContext, SquashfsSlotResizePlan, clear_completed_update_state, missing_bootable_root_paths, parse_apply_manifest_metadata,
+        parse_env_flag, plan_squashfs_slot_resize, preflight_report_for_squashfs_plan, purge_update_dirs, reboot_failure_message, reboot_output_is_expected_success,
+        sync_persisted_files_with_mappings_into, sync_persisted_networkd_into,
     };
     use crate::{
         artifact::ReleaseManifest,
-        ipc::PreflightVerdict,
+        config::UpdaterConfig,
+        ipc::{PreflightVerdict, UpdateStage, UpdaterEvent},
+        state::ServiceState,
         util::{BlockPartitionInfo, SlotScheme, SlotSelection},
     };
-    use std::path::Path;
+    use std::{path::Path, sync::Arc};
+    use tokio::sync::{RwLock, broadcast};
     use uuid::Uuid;
 
     #[test]
@@ -1464,6 +1501,71 @@ mod tests {
         let parsed = parse_apply_manifest_metadata(&metadata);
 
         assert_eq!(parsed, ApplyManifestMetadata { delete_image_after_apply: true, source_artifact_path: Some("/var/lib/helios/api-data/media/update.tar".into()) });
+    }
+
+    #[tokio::test]
+    async fn purge_update_dirs_removes_cache_and_work_content() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let update_id = Uuid::new_v4();
+        let cache_root = temp.path().join("cache");
+        let work_root = temp.path().join("work");
+        let cache_dir = cache_root.join(update_id.to_string());
+        let work_dir = work_root.join(update_id.to_string());
+        tokio::fs::create_dir_all(&cache_dir).await.expect("create cache dir");
+        tokio::fs::create_dir_all(&work_dir).await.expect("create work dir");
+        tokio::fs::write(cache_dir.join("bundle.tar"), b"cache").await.expect("write cache file");
+        tokio::fs::write(work_dir.join("expanded.img"), b"work").await.expect("write work file");
+
+        let config = UpdaterConfig::new(temp.path().join("updater.sock"), temp.path().join("updater.log")).with_cache_dir(&cache_root).with_work_dir(&work_root);
+
+        purge_update_dirs(&config, update_id).await.expect("purge update dirs");
+
+        assert!(tokio::fs::metadata(&cache_dir).await.is_err(), "cache dir should be removed");
+        assert!(tokio::fs::metadata(&work_dir).await.is_err(), "work dir should be removed");
+    }
+
+    #[tokio::test]
+    async fn clear_completed_update_state_purges_dirs_and_resets_snapshot() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let update_id = Uuid::new_v4();
+        let cache_root = temp.path().join("cache");
+        let work_root = temp.path().join("work");
+        let cache_dir = cache_root.join(update_id.to_string());
+        let work_dir = work_root.join(update_id.to_string());
+        tokio::fs::create_dir_all(&cache_dir).await.expect("create cache dir");
+        tokio::fs::create_dir_all(&work_dir).await.expect("create work dir");
+        tokio::fs::write(cache_dir.join("bundle.tar"), b"cache").await.expect("write cache file");
+        tokio::fs::write(work_dir.join("expanded.img"), b"work").await.expect("write work file");
+
+        let config = UpdaterConfig::new(temp.path().join("updater.sock"), temp.path().join("updater.log")).with_cache_dir(&cache_root).with_work_dir(&work_root);
+
+        let state = Arc::new(RwLock::new(ServiceState::default()));
+        {
+            let mut guard = state.write().await;
+            guard.ensure_active_update(update_id);
+            guard.update_progress(UpdateStage::Complete, Some(100), None);
+            guard.cache_usage_bytes = 999;
+        }
+
+        let (events, mut rx) = broadcast::channel(8);
+
+        clear_completed_update_state(&config, &state, &events, update_id).await.expect("clear completed update state");
+
+        let guard = state.read().await;
+        assert!(guard.active_update.is_none(), "completed update should be cleared");
+        assert_eq!(guard.cache_usage_bytes, 0, "cache usage should be refreshed after purge");
+        drop(guard);
+
+        assert!(tokio::fs::metadata(&cache_dir).await.is_err(), "cache dir should be removed");
+        assert!(tokio::fs::metadata(&work_dir).await.is_err(), "work dir should be removed");
+
+        match rx.recv().await.expect("snapshot event") {
+            UpdaterEvent::StateSnapshot { active_update, cache_usage_bytes } => {
+                assert!(active_update.is_none(), "snapshot should report idle updater");
+                assert_eq!(cache_usage_bytes, 0);
+            }
+            other => panic!("expected state snapshot, got {other:?}"),
+        }
     }
 
     #[tokio::test]

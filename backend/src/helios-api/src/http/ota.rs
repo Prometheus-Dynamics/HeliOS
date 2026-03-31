@@ -171,6 +171,23 @@ pub async fn upload_update(headers: HeaderMap, mut multipart: Multipart) -> impl
         Ok(value) => value,
         Err(err) => return (StatusCode::BAD_REQUEST, Json(UploadUpdateError { error: err })).into_response(),
     };
+    let upload_stats = match ota_storage::upload_storage_stats_for_dir(&upload_dir).await {
+        Ok(stats) => stats,
+        Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(UploadUpdateError { error: format!("failed to inspect OTA upload storage: {err}") })).into_response(),
+    };
+    if let Some(expected_bytes) = expected_upload_bytes
+        && expected_bytes > upload_stats.remaining_bytes
+    {
+        return insufficient_storage_response(format!(
+            "OTA upload store {} only has {} writable bytes remaining (usage {}, quota {}, fs available {}); upload needs {} bytes",
+            upload_stats.root.display(),
+            upload_stats.remaining_bytes,
+            upload_stats.usage_bytes,
+            upload_stats.quota_bytes,
+            upload_stats.available_bytes,
+            expected_bytes
+        ));
+    }
 
     let mut uploaded: Option<UploadedTemp> = None;
 
@@ -186,10 +203,11 @@ pub async fn upload_update(headers: HeaderMap, mut multipart: Multipart) -> impl
             if uploaded.is_some() {
                 return (StatusCode::BAD_REQUEST, Json(UploadUpdateError { error: "only one file may be uploaded per request".into() })).into_response();
             }
-            match process_upload_field(field, expected_upload_bytes).await {
+            match process_upload_field(field, expected_upload_bytes, upload_stats.remaining_bytes).await {
                 Ok(info) => uploaded = Some(info),
                 Err(err) => {
-                    return (StatusCode::BAD_REQUEST, Json(UploadUpdateError { error: err })).into_response();
+                    let status = if err.contains("remaining") || err.contains("storage quota") { StatusCode::INSUFFICIENT_STORAGE } else { StatusCode::BAD_REQUEST };
+                    return (status, Json(UploadUpdateError { error: err })).into_response();
                 }
             }
         }
@@ -210,6 +228,25 @@ pub async fn upload_update(headers: HeaderMap, mut multipart: Multipart) -> impl
         }
     };
     let image_path = upload_dir.join(&filename);
+    let post_upload_stats = match ota_storage::upload_storage_stats_for_dir(&upload_dir).await {
+        Ok(stats) => stats,
+        Err(err) => {
+            let _ = fs::remove_file(&upload.temp_path).await;
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(UploadUpdateError { error: format!("failed to inspect OTA upload storage: {err}") })).into_response();
+        }
+    };
+    if upload.size_bytes > post_upload_stats.remaining_bytes {
+        let _ = fs::remove_file(&upload.temp_path).await;
+        return insufficient_storage_response(format!(
+            "OTA upload store {} only has {} writable bytes remaining (usage {}, quota {}, fs available {}); upload needs {} bytes",
+            post_upload_stats.root.display(),
+            post_upload_stats.remaining_bytes,
+            post_upload_stats.usage_bytes,
+            post_upload_stats.quota_bytes,
+            post_upload_stats.available_bytes,
+            upload.size_bytes
+        ));
+    }
     if let Some(parent) = image_path.parent() {
         let _ = fs::create_dir_all(parent).await;
     }
@@ -220,12 +257,14 @@ pub async fn upload_update(headers: HeaderMap, mut multipart: Multipart) -> impl
         if err.kind() == std::io::ErrorKind::CrossesDevices {
             if let Err(copy_err) = fs::copy(&upload.temp_path, &image_path).await {
                 let _ = fs::remove_file(&upload.temp_path).await;
-                return (StatusCode::INTERNAL_SERVER_ERROR, Json(UploadUpdateError { error: format!("failed to store upload: {copy_err}") })).into_response();
+                let status = if copy_err.kind() == std::io::ErrorKind::StorageFull { StatusCode::INSUFFICIENT_STORAGE } else { StatusCode::INTERNAL_SERVER_ERROR };
+                return (status, Json(UploadUpdateError { error: format!("failed to store upload: {copy_err}") })).into_response();
             }
             let _ = fs::remove_file(&upload.temp_path).await;
         } else {
             let _ = fs::remove_file(&upload.temp_path).await;
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(UploadUpdateError { error: format!("failed to store upload: {err}") })).into_response();
+            let status = if err.kind() == std::io::ErrorKind::StorageFull { StatusCode::INSUFFICIENT_STORAGE } else { StatusCode::INTERNAL_SERVER_ERROR };
+            return (status, Json(UploadUpdateError { error: format!("failed to store upload: {err}") })).into_response();
         }
     }
 
@@ -483,7 +522,7 @@ struct UploadedTemp {
     sha256: String,
 }
 
-async fn process_upload_field(mut field: axum::extract::multipart::Field<'_>, expected_upload_bytes: Option<u64>) -> Result<UploadedTemp, String> {
+async fn process_upload_field(mut field: axum::extract::multipart::Field<'_>, expected_upload_bytes: Option<u64>, remaining_upload_bytes: u64) -> Result<UploadedTemp, String> {
     let filename = match field.file_name().and_then(sanitize_name) {
         Some(name) => name,
         None => return Err("upload missing filename".into()),
@@ -492,7 +531,7 @@ async fn process_upload_field(mut field: axum::extract::multipart::Field<'_>, ex
     let mut file = fs::File::create(&temp_path).await.map_err(|err| format!("failed to create upload: {err}"))?;
     let mut hasher = Sha256::new();
     let mut written: u64 = 0;
-    let limit = max_ota_bytes();
+    let limit = storage_budget_bytes(max_ota_bytes(), expected_upload_bytes, remaining_upload_bytes);
 
     while let Some(chunk) = match field.chunk().await {
         Ok(chunk) => chunk,
@@ -504,7 +543,7 @@ async fn process_upload_field(mut field: axum::extract::multipart::Field<'_>, ex
         written += chunk.len() as u64;
         if written > limit {
             let _ = fs::remove_file(&temp_path).await;
-            return Err(format!("upload exceeds limit of {} bytes", limit));
+            return Err(format!("upload exceeds OTA storage quota: remaining writable bytes {}", limit));
         }
         if let Err(err) = file.write_all(&chunk).await {
             let _ = fs::remove_file(&temp_path).await;
@@ -534,6 +573,15 @@ async fn process_upload_field(mut field: axum::extract::multipart::Field<'_>, ex
 
 async fn fetch_updater_state(state: &AppState) -> Result<(Option<UpdateState>, u64), UploadUpdateError> {
     state.services.updater.fetch_updater_state(state).await.map_err(|error| UploadUpdateError { error })
+}
+
+fn storage_budget_bytes(max_upload_bytes: u64, expected_upload_bytes: Option<u64>, remaining_upload_bytes: u64) -> u64 {
+    let quota_cap = remaining_upload_bytes.min(max_upload_bytes);
+    expected_upload_bytes.map(|bytes| bytes.min(quota_cap)).unwrap_or(quota_cap)
+}
+
+fn insufficient_storage_response(error: String) -> axum::response::Response {
+    (StatusCode::INSUFFICIENT_STORAGE, Json(UploadUpdateError { error })).into_response()
 }
 
 fn max_ota_bytes() -> u64 {

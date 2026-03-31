@@ -106,7 +106,7 @@ impl UpdaterService {
 
     async fn cancel_update(&self, update_id: Uuid) -> Result<()> {
         info!(%update_id, "cancelling staged update");
-        self.purge_update_dirs(update_id).await?;
+        apply::purge_update_dirs(&self.config, update_id).await?;
         let cache_usage = artifact::cache_usage_bytes(self.config.cache_dir()).await?;
 
         {
@@ -147,7 +147,7 @@ impl UpdaterService {
     pub(crate) async fn rollback(&self, update_id: Uuid) -> Result<()> {
         self.ensure_update_is_ready(update_id).await?;
         info!(%update_id, "rollback requested");
-        self.purge_update_dirs(update_id).await?;
+        apply::purge_update_dirs(&self.config, update_id).await?;
 
         let cache_usage = artifact::cache_usage_bytes(self.config.cache_dir()).await?;
         {
@@ -217,20 +217,6 @@ impl UpdaterService {
     #[cfg(test)]
     pub(crate) fn state_handle(&self) -> Arc<RwLock<ServiceState>> {
         Arc::clone(&self.state)
-    }
-
-    async fn purge_update_dirs(&self, update_id: Uuid) -> Result<()> {
-        let cache_dir = self.config.cache_dir().join(update_id.to_string());
-        if tokio::fs::metadata(&cache_dir).await.is_ok() {
-            tokio::fs::remove_dir_all(&cache_dir).await?;
-        }
-
-        let work_dir = self.config.work_dir().join(update_id.to_string());
-        if tokio::fs::metadata(&work_dir).await.is_ok() {
-            tokio::fs::remove_dir_all(&work_dir).await?;
-        }
-
-        Ok(())
     }
 
     async fn http_client(&self) -> Result<&reqwest::Client> {
