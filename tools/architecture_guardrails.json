@@ -728,9 +728,9 @@
     },
     {
       "path": "frontend/src/routes/localization/+page.svelte",
-      "max_lines": 3900,
+      "max_lines": 3600,
       "owner": "HeliOS",
-      "review_note": "The localization route now delegates tuning policy, camera POV math/identity plumbing, and viewer camera matching/state construction to dedicated helpers; keep orchestration in the route and continue extracting viewer/runtime subsections instead of rebuilding a page-local geometry monolith."
+      "review_note": "The localization route now delegates tuning policy, camera POV math/identity plumbing, viewer camera matching/state construction, and viewer overlay/cache derivation to dedicated helpers; keep orchestration in the route and continue extracting viewer/runtime subsections instead of rebuilding a page-local geometry monolith."
     },
     {
       "path": "frontend/src/routes/localization/localizationTuningActions.ts",
@@ -749,6 +749,12 @@
       "max_lines": 420,
       "owner": "HeliOS",
       "review_note": "Viewer camera matching, synthetic camera fallbacks, POV option derivation, and cached POV state synchronization now live here; keep camera view-state construction out of the route component."
+    },
+    {
+      "path": "frontend/src/routes/localization/localizationViewerOverlayState.ts",
+      "max_lines": 700,
+      "owner": "HeliOS",
+      "review_note": "Viewer overlay derivation, pose-cache updates, target-space overlay rows, and field/local tag marker construction now live here; keep viewer marker/cache geometry and overlay shaping out of the route component."
     },
     {
       "path": "backend/src/helios-api/src/ws/streams/mod.rs",
