@@ -535,28 +535,25 @@ export function createCameraBackendController(state: BackendState, deps: Backend
     state.cameraAlias = asTrimmedString(identityRecord?.alias ?? identityRecord?.display);
     const encoderEnabledFlag = manifestRecord?.encoder_enabled;
     const decoderEnabledFlag = manifestRecord?.decoder_enabled;
-    const isFileManifestBackend = isFileBackend(capture?.backend);
-    const isNetcamManifestBackend = isNetcamBackend(capture?.backend);
-    const isMediaManifestBackend = isFileManifestBackend || isNetcamManifestBackend;
-    const manifestEncoderId = typeof manifest?.encoder_id === 'string' ? manifest.encoder_id.trim() : '';
-    const encoderSelectionIsConcrete = Boolean(
-      manifestEncoderId.length > 0 &&
-      manifestEncoderId.toLowerCase() !== 'ffmpeg'
+    const nextEncoderId = pickCodecId(
+      state.encoders,
+      resolvedEncoderId || manifest?.encoder_id || state.encoderImpl
     );
-    const hasMediaCodecs = isMediaManifestBackend && (state.encoders.length > 0 || state.decoders.length > 0);
+    const nextDecoderId = pickCodecId(
+      state.decoders,
+      resolvedDecoderId || manifest?.decoder_id || state.decoderImpl,
+      decoderPreferencesForFormat(state.selectedFormat)
+    );
     state.encoderEnabled = typeof resolvedEncoder?.enabled === 'boolean'
       ? resolvedEncoder.enabled
       : typeof encoderEnabledFlag === 'boolean'
-        ? (isMediaManifestBackend && !encoderEnabledFlag && hasMediaCodecs ? true : encoderEnabledFlag)
-        : encoderSelectionIsConcrete || (state.encoders.length > 0 && !isMediaManifestBackend ? true : (isMediaManifestBackend && state.encoders.length > 0));
-    if (!state.encoderEnabled && !isMediaManifestBackend && !encoderSelectionIsConcrete && !resolvedEncoderId && state.encoders.length > 0) {
-      state.encoderEnabled = true;
-    }
+        ? Boolean(encoderEnabledFlag)
+        : Boolean(nextEncoderId);
     state.decoderEnabled = typeof resolvedDecoder?.enabled === 'boolean'
       ? resolvedDecoder.enabled
       : typeof decoderEnabledFlag === 'boolean'
-        ? (isMediaManifestBackend && !decoderEnabledFlag && hasMediaCodecs ? true : decoderEnabledFlag)
-        : manifest?.decoder_id != null || (isMediaManifestBackend && state.decoders.length > 0);
+        ? Boolean(decoderEnabledFlag)
+        : Boolean(nextDecoderId);
     if (manifest?.encoder_settings) {
       state.encoderSettings = {
         bitrate: manifest.encoder_settings.bitrate ?? null,
@@ -570,14 +567,10 @@ export function createCameraBackendController(state: BackendState, deps: Backend
       state.encoderFpsLimit = null;
     }
     if (state.encoders.length && !state.encoderSelectionTouched) {
-      state.encoderImpl = pickCodecId(state.encoders, resolvedEncoderId || manifest?.encoder_id || state.encoderImpl);
+      state.encoderImpl = nextEncoderId;
     }
     if (state.decoders.length && !state.decoderSelectionTouched) {
-      state.decoderImpl = pickCodecId(
-        state.decoders,
-        resolvedDecoderId || manifest?.decoder_id || state.decoderImpl,
-        decoderPreferencesForFormat(state.selectedFormat)
-      );
+      state.decoderImpl = nextDecoderId;
     }
 
     const pipelineEnabled = manifestRecord?.pipeline_enabled;
