@@ -2,39 +2,29 @@ import { apiUrl } from '$lib/api/httpClient';
 import { createDomainResource } from '$lib/api/domainResources';
 import { apiFetch, apiFetchCachedJson } from '$lib/api/core/http';
 import { cacheResourceData, type ResourceCacheContext, type ResourceCacheResult } from '$lib/api/resourceCache';
+import type {
+  LocalizationCustomFieldOrigin as GeneratedLocalizationCustomFieldOrigin,
+  LocalizationFieldOriginConfig as GeneratedLocalizationFieldOriginConfig,
+  LocalizationFieldOriginMode as GeneratedLocalizationFieldOriginMode,
+  LocalizationPoseSpace as GeneratedLocalizationPoseSpace,
+  LocalizationProfilesExportEnvelope as GeneratedLocalizationProfilesExportEnvelope,
+  LocalizationSolverMode as GeneratedLocalizationSolverMode,
+  LocalizationSolverRuntimeTuningConfig as GeneratedLocalizationSolverRuntimeTuningConfig,
+  LocalizationTemporalStabilizationConfig as GeneratedLocalizationTemporalStabilizationConfig
+} from '$lib/ts-bindings/http/client';
 
-export type LocalizationPoseSpace =
-  | 'tag_in_camera'
-  | 'camera_in_tag'
-  | 'tag_in_robot'
-  | 'robot_in_tag'
-  | 'camera_in_field'
-  | 'robot_in_field';
-
-export type LocalizationSolverMode = 'group_solve' | 'robust_group_solve' | 'per_camera_merge' | 'triangulate';
-export type LocalizationFieldOriginMode = 'center' | 'blue' | 'red' | 'custom';
-
-export type LocalizationCustomFieldOrigin = {
-  x: number;
-  z: number;
-  yawDeg: number;
-};
-
-export type LocalizationFieldOriginConfig = {
-  mode: LocalizationFieldOriginMode;
-  custom?: LocalizationCustomFieldOrigin | null;
-};
+export type LocalizationPoseSpace = GeneratedLocalizationPoseSpace;
+export type LocalizationSolverMode = GeneratedLocalizationSolverMode;
+export type LocalizationFieldOriginMode = GeneratedLocalizationFieldOriginMode;
+export type LocalizationCustomFieldOrigin = GeneratedLocalizationCustomFieldOrigin;
+export type LocalizationFieldOriginConfig = GeneratedLocalizationFieldOriginConfig;
 
 export type LocalizationConfig = {
   activeProfileId: string | null;
   profiles: LocalizationProfile[];
 };
 
-export type LocalizationProfilesExportEnvelope = {
-  schema: string;
-  exportedAt: string;
-  config: LocalizationConfig;
-};
+export type LocalizationProfilesExportEnvelope = GeneratedLocalizationProfilesExportEnvelope;
 
 export type LocalizationProfile = {
   id: string;
@@ -81,47 +71,8 @@ export type LocalizationSolverConfig = {
   temporalStabilization?: LocalizationTemporalStabilizationConfig | null;
 };
 
-export type LocalizationSolverRuntimeTuningConfig = {
-  minObservationWeight: number;
-  minSingleTagSolveWeight: number;
-  minMultiTagTotalWeight: number;
-  minMultiTagEffectiveCount: number;
-  weakSingleTagMargin: number;
-  coplanarHeightDeltaM: number;
-  severeObservedHeightDeltaM: number;
-  moderateObservedHeightDeltaM: number;
-  mildObservedHeightDeltaM: number;
-  severePenalty: number;
-  moderatePenalty: number;
-  mildPenalty: number;
-  dtScaleMin: number;
-  dtScaleMax: number;
-  switchedSingleTagMaxTranslationJumpM: number;
-  switchedSingleTagMaxRotationJumpDeg: number;
-  droppedMultiToSingleMaxTranslationJumpM: number;
-  droppedMultiToSingleMaxRotationJumpDeg: number;
-  switchedSingleTagRejectWindowScale: number;
-  switchedSingleTagRejectWindowMinMs: number;
-  droppedMultiToSingleRejectWindowScale: number;
-  droppedMultiToSingleRejectWindowMinMs: number;
-  switchedSingleTagGainDamp: number;
-  switchedSingleTagMinTranslationGain: number;
-  switchedSingleTagMinRotationGain: number;
-  droppedMultiToSingleGainDamp: number;
-  droppedMultiToSingleMinTranslationGain: number;
-  droppedMultiToSingleMinRotationGain: number;
-};
-
-export type LocalizationTemporalStabilizationConfig = {
-  enabled: boolean;
-  singleTagTranslationAlpha: number;
-  singleTagRotationAlpha: number;
-  multiTagTranslationAlpha: number;
-  multiTagRotationAlpha: number;
-  maxTranslationJumpM: number;
-  maxRotationJumpDeg: number;
-  reanchorRejectWindowMs: number;
-};
+export type LocalizationSolverRuntimeTuningConfig = GeneratedLocalizationSolverRuntimeTuningConfig;
+export type LocalizationTemporalStabilizationConfig = GeneratedLocalizationTemporalStabilizationConfig;
 
 export const DEFAULT_TEMPORAL_STABILIZATION: LocalizationTemporalStabilizationConfig = {
   enabled: true,
