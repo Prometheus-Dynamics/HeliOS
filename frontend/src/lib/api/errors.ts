@@ -1,33 +1,23 @@
+import type {
+  EngineErrorBody,
+  ErrorBody,
+  ValidationErrorBody,
+  ValidationIssue,
+  ValidationWarning
+} from '$lib/ts-bindings/http/client';
 import { ApiError } from '$lib/ts-bindings/http/client';
 
-type ErrorPayload = {
-  code?: string | null;
-  error?: string | null;
-  message?: string | null;
-  details?: string | null;
-  issues?: Array<{
-    path?: string | null;
-    code?: string | null;
+type ErrorPayload = Partial<ErrorBody> &
+  Partial<ValidationErrorBody> &
+  Partial<EngineErrorBody> & {
     message?: string | null;
-  }> | null;
-  warnings?: Array<{
-    path?: string | null;
-    code?: string | null;
-    message?: string | null;
-  }> | null;
-  timestamp_ms?: number | null;
-  timestampMs?: number | null;
-  source?: string | null;
-  operation?: string | null;
-  request_id?: string | null;
-  requestId?: string | null;
-  trace_id?: string | null;
-  traceId?: string | null;
-  retryable?: boolean | null;
-  remediation?: string | null;
-  reported_by?: string | null;
-  reportedBy?: string | null;
-};
+    issues?: Array<ValidationIssue> | null;
+    warnings?: Array<ValidationWarning> | null;
+    timestamp_ms?: number | null;
+    requestId?: string | null;
+    traceId?: string | null;
+    reportedBy?: string | null;
+  };
 
 const CODE_MESSAGES: Record<string, string> = {
   bad_request: 'Invalid request.',
@@ -53,20 +43,14 @@ export function mapErrorCode(code: string | null | undefined): string | null {
   return CODE_MESSAGES[normalized] ?? null;
 }
 
-type ValidationEntry = {
-  path?: string | null;
-  code?: string | null;
-  message?: string | null;
-};
-
-function formatValidationEntry(entry: ValidationEntry): string | null {
+function formatValidationEntry(entry: ValidationIssue | ValidationWarning): string | null {
   const message = typeof entry.message === 'string' ? entry.message.trim() : '';
   if (!message.length) return null;
   const path = typeof entry.path === 'string' ? entry.path.trim() : '';
   return path.length ? `${path}: ${message}` : message;
 }
 
-function summarizeValidationEntries(entries: ValidationEntry[] | null | undefined): string | null {
+function summarizeValidationEntries(entries: Array<ValidationIssue | ValidationWarning> | null | undefined): string | null {
   if (!Array.isArray(entries) || entries.length === 0) return null;
   const messages = entries.map((entry) => formatValidationEntry(entry)).filter((entry): entry is string => Boolean(entry));
   if (!messages.length) return null;
