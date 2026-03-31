@@ -1,0 +1,47 @@
+{
+  "line_limits": [
+    {
+      "path": "backend/src/helios-engine/src/services/manager.rs",
+      "max_lines": 5200,
+      "owner": "HeliOS",
+      "review_note": "Legacy stream manager is still oversized; fail if it regrows beyond the current envelope while the split work continues."
+    },
+    {
+      "path": "backend/src/helios-api/src/system_read_model.rs",
+      "max_lines": 2700,
+      "owner": "HeliOS",
+      "review_note": "Read-model decomposition is still in progress; cap it slightly above the current size instead of allowing silent growth."
+    },
+    {
+      "path": "backend/src/helios-updater/src/apply.rs",
+      "max_lines": 1900,
+      "owner": "HeliOS",
+      "review_note": "Updater apply logic remains large while OTA flows are being consolidated; protect the current size ceiling."
+    },
+    {
+      "path": "backend/src/helios-api/src/ws/streams.rs",
+      "max_lines": 1100,
+      "owner": "HeliOS",
+      "review_note": "Websocket stream orchestration is still oversized; prevent regression while the split is planned."
+    },
+    {
+      "path": "frontend/src/lib/components/StreamPreview.svelte",
+      "max_lines": 850,
+      "owner": "HeliOS",
+      "review_note": "Viewer behavior is still being broken apart; fail if StreamPreview regrows beyond the agreed guardrail."
+    },
+    {
+      "path": "backend/src/helios-engine/src/localization/solve/mod.rs",
+      "max_lines": 250,
+      "owner": "HeliOS",
+      "review_note": "The localization solver orchestration was split out of the old monolith; keep the new module thin."
+    }
+  ],
+  "forbidden_paths": [
+    {
+      "path": "backend/src/helios-engine/src/localization/solve.rs",
+      "owner": "HeliOS",
+      "reason": "The localization solver now lives under backend/src/helios-engine/src/localization/solve/*. Do not recreate the old monolithic solve.rs path."
+    }
+  ]
+}
