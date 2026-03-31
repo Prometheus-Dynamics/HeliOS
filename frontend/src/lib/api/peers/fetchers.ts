@@ -1,6 +1,14 @@
 import { DEFAULT_REQUEST_TIMEOUT_MS } from '$lib/api/requestUtils';
 import { requestJson } from '$lib/api/pagePayload/request';
 import type {
+  PeerDiscoveryResponse as ApiDiscoveryResponse,
+  PeerInventoryResponse as ApiPeerListResponse,
+  PeerProbeResponse as ApiPeerProbeResponse,
+  PeerRegistrationResponse as ApiRegisterResponse,
+  PeerRemovalResponse as ApiRemovalResponse,
+  PhotonvisionDiscoverStreamsResponse as ApiPhotonvisionDiscoverStreamsResponse
+} from '$lib/ts-bindings/http/client';
+import type {
   PeerIntegrationKind,
   PeerProbeInput,
   PeerProbeResponse,
@@ -22,14 +30,6 @@ import {
   normalizePeers,
   normalizePhotonvisionStreamsResponse,
   serializeIntegrationMetadata
-} from './mappers';
-import type {
-  ApiDiscoveryResponse,
-  ApiPeerListResponse,
-  ApiPeerProbeResponse,
-  ApiPhotonvisionDiscoverStreamsResponse,
-  ApiRegisterResponse,
-  ApiRemovalResponse
 } from './mappers';
 
 const API_PREFIX = '/v1/peers';

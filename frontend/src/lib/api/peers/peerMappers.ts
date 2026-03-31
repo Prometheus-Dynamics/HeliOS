@@ -1,4 +1,25 @@
 import { normalizeResourceSample } from '$lib/api/telemetry';
+import type {
+  DiscoveredStream as ApiDiscoveredStream,
+  Nt4PeerProbe as ApiNt4PeerProbe,
+  PeerCustomIntegrationConfig as ApiPeerCustomIntegration,
+  PeerDiscoveryResponse as ApiDiscoveryResponse,
+  PeerInfo as ApiPeer,
+  PeerIntegrationArucoMapping as ApiPeerArucoMapping,
+  PeerIntegrationAxisMapping as ApiPeerAxisMapping,
+  PeerIntegrationMapping as ApiPeerCustomMapping,
+  PeerIntegrationMetadata as ApiPeerIntegration,
+  PeerIntegrationPose as ApiPeerCameraPose,
+  PeerIntegrationPoseMapping as ApiPeerPoseMapping,
+  PeerIntegrationPoseRotation as ApiPeerRotation,
+  PeerIntegrationPoseVector as ApiPeerVector,
+  PeerInventoryResponse as ApiPeerListResponse,
+  PeerProbeResponse as ApiPeerProbeResponse,
+  PeerRegistrationResponse as ApiRegisterResponse,
+  PeerRemovalResponse as ApiRemovalResponse,
+  PhotonvisionDiscoverStreamsResponse as ApiPhotonvisionDiscoverStreamsResponse,
+  ProbeResult as ApiProbeResult
+} from '$lib/ts-bindings/http/client';
 import { normalizeCapabilities, normalizeEndpoints, normalizeStatus } from './peerStatusMappers';
 import type {
   DiscoveredStream,
@@ -16,102 +37,6 @@ import type {
   PeerIntegrationPoseMapping,
   PeerSummary
 } from '$lib/types/peer';
-
-type ApiPeerVector = {
-  x?: unknown;
-  y?: unknown;
-  z?: unknown;
-};
-
-type ApiPeerRotation = {
-  roll?: unknown;
-  pitch?: unknown;
-  yaw?: unknown;
-};
-
-type ApiPeerCameraPose = {
-  translation?: unknown;
-  rotation?: unknown;
-};
-
-type ApiPeerAxisMapping = {
-  x?: unknown;
-  y?: unknown;
-  z?: unknown;
-};
-
-type ApiPeerPoseMapping = {
-  translation?: unknown;
-  rotation?: unknown;
-  timestamp?: unknown;
-  latency_ms?: unknown;
-};
-
-type ApiPeerArucoMapping = {
-  list_path?: unknown;
-  id?: unknown;
-  family?: unknown;
-  center_x?: unknown;
-  center_y?: unknown;
-  rotation?: unknown;
-  translation?: unknown;
-};
-
-type ApiPeerCustomMapping = {
-  pose?: unknown;
-  aruco?: unknown;
-};
-
-type ApiPeerCustomIntegration = {
-  api_endpoint?: unknown;
-  network_table?: unknown;
-  telemetry_endpoint?: unknown;
-  mapping?: unknown;
-};
-
-type ApiPeerIntegration = {
-  kind?: unknown;
-  management_url?: unknown;
-  stream_url?: unknown;
-  stream_urls?: unknown;
-  localization_outputs?: unknown;
-  camera_pose?: unknown;
-  custom?: unknown;
-};
-
-type ApiPeer = {
-  id?: unknown;
-  alias?: unknown;
-  status?: unknown;
-  api_base_url?: unknown;
-  endpoints?: unknown;
-  version?: unknown;
-  capabilities?: unknown;
-  integration?: unknown;
-  last_seen_at?: unknown;
-  latency_ms?: unknown;
-  telemetry?: unknown;
-};
-
-export type ApiPeerListResponse = {
-  peers?: unknown;
-  discovery?: unknown;
-};
-
-export type ApiRegisterResponse = {
-  peer?: ApiPeer;
-};
-
-export type ApiDiscoveryResponse = {
-  run_id?: unknown;
-  started_at?: unknown;
-  scopes?: unknown;
-  expected_completion?: unknown;
-};
-
-export type ApiRemovalResponse = {
-  removed?: unknown;
-};
 
 export const INTEGRATION_DEFAULT: PeerIntegrationMetadata = {
   kind: 'helios',
@@ -394,53 +319,12 @@ function normalizeIntegration(entry: unknown): PeerIntegrationMetadata {
   };
 }
 
-type ApiDiscoveredStream = {
-  url?: unknown;
-  port?: unknown;
-  status?: unknown;
-  content_type?: unknown;
-};
-
-export type ApiPhotonvisionDiscoverStreamsResponse = {
-  host?: unknown;
-  streams?: unknown;
-};
-
-type ApiProbeResult = {
-  url?: unknown;
-  ok?: unknown;
-  status?: unknown;
-  content_type?: unknown;
-  latency_ms?: unknown;
-  error?: unknown;
-};
-
-export type ApiPeerProbeResponse = {
-  kind?: unknown;
-  api?: unknown;
-  management?: unknown;
-  stream?: unknown;
-  streams?: unknown;
-  photonvision?: unknown;
-  nt4?: unknown;
-};
-
-type ApiNt4PeerProbe = {
-  host?: unknown;
-  port?: unknown;
-  ok?: unknown;
-  roots?: unknown;
-  error?: unknown;
-};
-
-function normalizeDiscoveredStream(entry: unknown): DiscoveredStream | null {
-  if (!entry || typeof entry !== 'object') return null;
-  const record = entry as ApiDiscoveredStream;
-  const url = typeof record.url === 'string' ? record.url.trim() : '';
-  const port = typeof record.port === 'number' && Number.isFinite(record.port) ? Math.trunc(record.port) : null;
-  const status = typeof record.status === 'number' && Number.isFinite(record.status) ? Math.trunc(record.status) : null;
+function normalizeDiscoveredStream(record: ApiDiscoveredStream | null | undefined): DiscoveredStream | null {
+  const url = typeof record?.url === 'string' ? record.url.trim() : '';
+  const port = typeof record?.port === 'number' && Number.isFinite(record.port) ? Math.trunc(record.port) : null;
+  const status = typeof record?.status === 'number' && Number.isFinite(record.status) ? Math.trunc(record.status) : null;
   if (!url || port === null || status === null) return null;
-  const contentType = typeof record.content_type === 'string' && record.content_type.trim().length ? record.content_type.trim() : null;
+  const contentType = typeof record?.content_type === 'string' && record.content_type.trim().length ? record.content_type.trim() : null;
   return { url, port, status, contentType };
 }
 
