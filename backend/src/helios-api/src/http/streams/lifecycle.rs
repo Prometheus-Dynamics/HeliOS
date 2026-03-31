@@ -131,9 +131,7 @@ fn recover_from_missing_selected_output(manifest: &mut StreamManifest, code: Eng
 }
 
 fn is_transient_missing_capture_descriptor(manifest: &StreamManifest, code: EngineErrorCode, reason: &str) -> bool {
-    matches!(code, EngineErrorCode::InvalidState)
-        && manifest.capture.backend == styx::BackendKind::Libcamera
-        && reason.to_ascii_lowercase().contains("missing capture descriptor")
+    matches!(code, EngineErrorCode::InvalidState) && manifest.capture.backend == styx::BackendKind::Libcamera && reason.to_ascii_lowercase().contains("missing capture descriptor")
 }
 
 fn is_legacy_media_file_token(raw: &str) -> bool {
@@ -821,10 +819,10 @@ pub(crate) async fn list_backends(state: AppState) -> Response {
     }
 }
 
-pub(crate) async fn list_codecs() -> Response {
-    match CodecRegistry::list_enabled_codecs() {
-        Ok(entries) => {
-            let codecs: Vec<CodecInfo> = entries
+pub(crate) fn codec_inventory() -> Result<Vec<CodecInfo>, String> {
+    CodecRegistry::list_enabled_codecs()
+        .map(|entries| {
+            entries
                 .into_iter()
                 .flat_map(|(fourcc, descs)| {
                     descs.into_iter().map(move |desc| {
@@ -844,9 +842,14 @@ pub(crate) async fn list_codecs() -> Response {
                         }
                     })
                 })
-                .collect();
-            Json(codecs).into_response()
-        }
+                .collect()
+        })
+        .map_err(|err| err.to_string())
+}
+
+pub(crate) async fn list_codecs() -> Response {
+    match codec_inventory() {
+        Ok(codecs) => Json(codecs).into_response(),
         Err(err) => (StatusCode::BAD_GATEWAY, Json(engine_error_body(Some(EngineErrorCode::Internal), err.to_string()))).into_response(),
     }
 }

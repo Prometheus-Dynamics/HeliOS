@@ -5,7 +5,7 @@ use styx::codec::CodecKind;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-#[derive(Serialize, Deserialize, ToSchema, Clone)]
+#[derive(Debug, Serialize, Deserialize, ToSchema, Clone)]
 pub struct StreamInfo {
     pub id: Uuid,
     pub descriptor: CaptureDescriptor,

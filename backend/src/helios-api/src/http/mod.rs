@@ -33,6 +33,7 @@ use utoipa::OpenApi;
 #[derive(OpenApi)]
 #[openapi(
     paths(
+        health::root_status,
         health::health,
         streams::list_streams,
         streams::start_stream,
@@ -197,6 +198,8 @@ use utoipa::OpenApi;
             streams::validation::StreamCapabilitiesResponse,
             streams::validation::StreamValidationDefaults,
             streams::validation::StreamValidationConstraints,
+            health::RuntimeStreamsPayload,
+            health::RootStatusPayload,
             streams::sensor_bench::StartSensorBenchmarkRequest,
             streams::sensor_bench::SensorBenchmarkStarted,
             streams::sensor_bench::SensorBenchmarkProgress,
@@ -393,6 +396,7 @@ pub type AppState = Arc<crate::app_state::ApiAppState>;
 
 pub fn router(state: AppState) -> Router {
     Router::new()
+        .route("/", get(health::root_status))
         .route("/health", get(health::health))
         .route("/calibration/solve", post(calibration_solve::solve_calibration))
         .nest("/streams", streams::router())

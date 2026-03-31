@@ -1,6 +1,6 @@
 import { EngineStreamsService } from '$lib/ts-bindings/http/client';
 import { apiUrl } from '$lib/api/httpClient';
-import { apiFetchCachedJson, runApiRequest, type ApiRequestOptions } from '$lib/api/core/http';
+import { apiFetch, apiFetchCachedJson, runApiRequest, type ApiRequestOptions } from '$lib/api/core/http';
 import { DEFAULT_REQUEST_TIMEOUT_MS, fetchWithRetry } from '$lib/api/requestUtils';
 import type {
   CancelablePromise,
@@ -20,10 +20,30 @@ const DEFAULT_STREAMS_CACHE_MS = 750;
 const DEFAULT_STREAM_CAPABILITIES_CACHE_MS = 10_000;
 type StreamsList = Awaited<ReturnType<typeof EngineStreamsService.listStreams>>;
 type StreamCapabilities = Awaited<ReturnType<typeof EngineStreamsService.streamCapabilitiesHandler>>;
+type CodecList = Awaited<ReturnType<typeof EngineStreamsService.listCodecs>>;
+type RuntimeStatusPayload = {
+  health: {
+    ok: boolean;
+    server_time_ms: number;
+    uptime_ms: number;
+    version: string;
+  };
+  streams: {
+    capabilities: StreamCapabilities;
+    codecs: CodecList;
+    resolvedStreams: StreamsList;
+    stale: boolean;
+    revision: number;
+  };
+};
 let streamsCache: CacheEntry<StreamsList> | null = null;
 let streamsInflight: Promise<StreamsList> | null = null;
 let streamCapabilitiesCache: CacheEntry<StreamCapabilities> | null = null;
 let streamCapabilitiesInflight: Promise<StreamCapabilities> | null = null;
+let codecInventoryCache: CacheEntry<CodecList> | null = null;
+let codecInventoryInflight: Promise<CodecList> | null = null;
+let runtimeStatusCache: CacheEntry<RuntimeStatusPayload> | null = null;
+let runtimeStatusInflight: Promise<RuntimeStatusPayload> | null = null;
 
 function withAbort<T>(task: (controller: AbortController) => Promise<T>): CancelablePromise<T> {
   const controller = new AbortController();
@@ -70,6 +90,50 @@ function resolveStreamCapabilitiesCacheMs(options?: ApiRequestOptions): number {
     return DEFAULT_STREAM_CAPABILITIES_CACHE_MS;
   }
   return Math.max(0, Math.floor(raw));
+}
+
+function primeRuntimeStatusCaches(payload: RuntimeStatusPayload, fetchedAt: number): void {
+  streamCapabilitiesCache = { fetchedAt, value: payload.streams.capabilities };
+  codecInventoryCache = { fetchedAt, value: payload.streams.codecs };
+  streamsCache = {
+    fetchedAt,
+    value: payload.streams.resolvedStreams,
+    etag: streamsCache?.etag ?? null,
+    revision: payload.streams.revision
+  };
+}
+
+async function runtimeStatusSingleflight(options?: ApiRequestOptions): Promise<RuntimeStatusPayload> {
+  const cacheMs = resolveStreamCapabilitiesCacheMs(options);
+  const now = Date.now();
+  if (!options?.forceRefresh && cacheMs > 0 && runtimeStatusCache && now - runtimeStatusCache.fetchedAt < cacheMs) {
+    return runtimeStatusCache.value;
+  }
+
+  if (runtimeStatusInflight) {
+    return runtimeStatusInflight;
+  }
+
+  runtimeStatusInflight = apiFetch<RuntimeStatusPayload>(
+    apiUrl('/').replace(/\/+$/, ''),
+    { headers: { Accept: 'application/json' } },
+    { label: 'runtimeStatus', ...options }
+  )
+    .then((value) => {
+      const fetchedAt = Date.now();
+      if (cacheMs > 0) {
+        runtimeStatusCache = { fetchedAt, value };
+        primeRuntimeStatusCaches(value, fetchedAt);
+      } else {
+        runtimeStatusCache = null;
+      }
+      return value;
+    })
+    .finally(() => {
+      runtimeStatusInflight = null;
+    });
+
+  return runtimeStatusInflight;
 }
 
 async function listStreamsSingleflight(options?: ApiRequestOptions) {
@@ -128,14 +192,10 @@ async function streamCapabilitiesSingleflight(options?: ApiRequestOptions): Prom
     return streamCapabilitiesInflight;
   }
 
-  streamCapabilitiesInflight = runApiRequest(() => EngineStreamsService.streamCapabilitiesHandler(), {
-    label: 'streamCapabilities',
-    ...options
-  })
-    .then((value) => {
-      if (cacheMs > 0) {
-        streamCapabilitiesCache = { fetchedAt: Date.now(), value };
-      } else {
+  streamCapabilitiesInflight = runtimeStatusSingleflight(options)
+    .then((payload) => {
+      const value = payload.streams.capabilities;
+      if (cacheMs <= 0) {
         streamCapabilitiesCache = null;
       }
       return value;
@@ -145,6 +205,32 @@ async function streamCapabilitiesSingleflight(options?: ApiRequestOptions): Prom
     });
 
   return streamCapabilitiesInflight;
+}
+
+async function codecInventorySingleflight(options?: ApiRequestOptions): Promise<CodecList> {
+  const cacheMs = resolveStreamCapabilitiesCacheMs(options);
+  const now = Date.now();
+  if (!options?.forceRefresh && cacheMs > 0 && codecInventoryCache && now - codecInventoryCache.fetchedAt < cacheMs) {
+    return codecInventoryCache.value;
+  }
+
+  if (codecInventoryInflight) {
+    return codecInventoryInflight;
+  }
+
+  codecInventoryInflight = runtimeStatusSingleflight(options)
+    .then((payload) => {
+      const value = payload.streams.codecs;
+      if (cacheMs <= 0) {
+        codecInventoryCache = null;
+      }
+      return value;
+    })
+    .finally(() => {
+      codecInventoryInflight = null;
+    });
+
+  return codecInventoryInflight;
 }
 
 export type RegisterNetcamStreamInput = {
@@ -209,6 +295,7 @@ function makeNetcamManifest(input: RegisterNetcamStreamInput, capabilities: Stre
 }
 
 export const StreamsApi = {
+  runtimeStatus: (options?: ApiRequestOptions) => runtimeStatusSingleflight(options),
   listStreams: (options?: ApiRequestOptions) => listStreamsSingleflight(options),
   streamCapabilities: (options?: ApiRequestOptions) => streamCapabilitiesSingleflight(options),
   getStream: (args: Parameters<typeof EngineStreamsService.getStream>[0], options?: ApiRequestOptions) =>
@@ -331,8 +418,7 @@ export const StreamsApi = {
     runApiRequest(() => EngineStreamsService.deleteStream(args), { label: 'deleteStream', ...options }),
   listBackends: (options?: ApiRequestOptions) =>
     runApiRequest(() => EngineStreamsService.listBackends(), { label: 'listBackends', ...options }),
-  listCodecs: (options?: ApiRequestOptions) =>
-    runApiRequest(() => EngineStreamsService.listCodecs(), { label: 'listCodecs', ...options }),
+  listCodecs: (options?: ApiRequestOptions) => codecInventorySingleflight(options),
   startStream: (args: Parameters<typeof EngineStreamsService.startStream>[0], options?: ApiRequestOptions) =>
     runApiRequest(() => EngineStreamsService.startStream(args), { label: 'startStream', timeoutMs: 45_000, ...options }),
   registerNetcamStream: async (input: RegisterNetcamStreamInput, options?: ApiRequestOptions) => {
