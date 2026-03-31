@@ -123,7 +123,7 @@ mod tests {
             },
             host_buffer: 2,
             internal: false,
-            pipeline_enabled: None,
+            pipeline_enabled: false,
             pipelines: Vec::new(),
             active_pipeline_id: None,
             active_pipeline_output: None,
@@ -134,7 +134,7 @@ mod tests {
             pose: None,
             encoder: RequestedEncoderConfig::default(),
             decoder: RequestedDecoderConfig::default(),
-            preview_jpeg_quality: None,
+            preview_jpeg_quality: 30,
             shadow_recorder_enabled: false,
             start_on_boot: false,
         }
@@ -171,7 +171,7 @@ pub(crate) fn apply_effective_pipeline_layout(manifest: &mut StreamManifest) {
     if manifest.pipeline_layout.is_some() {
         return;
     }
-    if manifest.pipeline_enabled == Some(false) {
+    if !manifest.pipeline_enabled {
         return;
     }
     if manifest.pipelines.len() <= 1 {
@@ -237,7 +237,7 @@ pub(crate) fn normalize_pipeline_manifest(manifest: &mut StreamManifest) {
     strip_reserved_pipeline_ids(manifest);
     canonicalize_raw_output_aliases(manifest);
 
-    if manifest.pipeline_enabled == Some(false) {
+    if !manifest.pipeline_enabled {
         manifest.pipelines.clear();
         manifest.active_pipeline_id = None;
         manifest.active_pipeline_output = None;
@@ -293,18 +293,6 @@ pub(crate) fn normalize_pipeline_manifest(manifest: &mut StreamManifest) {
 
     // Re-canonicalize after any active/slot-derived output updates.
     canonicalize_raw_output_aliases(manifest);
-
-    // Normalize `pipeline_enabled` so "no pipeline config" defaults to raw frames.
-    if manifest.pipelines.is_empty() {
-        if manifest.pipeline_enabled.is_none() {
-            manifest.pipeline_enabled = Some(false);
-        }
-    } else {
-        // Make the enabled state explicit when multiplex bindings exist.
-        if manifest.pipeline_enabled.is_none() {
-            manifest.pipeline_enabled = Some(true);
-        }
-    }
 
     for binding in &mut manifest.pipelines {
         binding.pipeline_graph = None;
@@ -521,7 +509,7 @@ pub(crate) fn strip_reserved_pipeline_ids(manifest: &mut StreamManifest) {
             || manifest.active_pipeline_id.is_some()
             || !manifest.pipeline_wires.is_empty();
         if !has_any_config {
-            manifest.pipeline_enabled = Some(false);
+            manifest.pipeline_enabled = false;
         }
     }
 }

@@ -1487,6 +1487,39 @@ impl<'de> Deserialize<'de> for RequestedDecoderConfig {
     }
 }
 
+fn canonical_requested_host_buffer(value: usize) -> usize {
+    if value == 0 { default_host_buffer() } else { value }
+}
+
+fn canonical_requested_pipeline_enabled(
+    value: Option<bool>,
+    pipelines: &[StreamPipelineBinding],
+    active_pipeline_id: Option<Uuid>,
+    active_pipeline_output: Option<&str>,
+    pipeline_layout: Option<&StreamPipelineLayout>,
+    pipeline_wires: &[StreamPipelineWire],
+) -> bool {
+    value.unwrap_or_else(|| {
+        !pipelines.is_empty()
+            || active_pipeline_id.is_some()
+            || active_pipeline_output.is_some_and(|value| !value.trim().is_empty())
+            || pipeline_layout.is_some()
+            || !pipeline_wires.is_empty()
+    })
+}
+
+fn default_requested_preview_jpeg_quality(encoder: &RequestedEncoderConfig) -> u8 {
+    if encoder.is_disabled() {
+        default_preview_jpeg_quality_override().unwrap_or(DEFAULT_PREVIEW_JPEG_QUALITY).clamp(1, 100)
+    } else {
+        DEFAULT_STREAM_PREVIEW_JPEG_QUALITY
+    }
+}
+
+fn canonical_requested_preview_jpeg_quality(value: Option<u8>, encoder: &RequestedEncoderConfig) -> u8 {
+    value.map(|value| value.clamp(1, 100)).unwrap_or_else(|| default_requested_preview_jpeg_quality(encoder))
+}
+
 #[derive(Debug, Clone, ToSchema)]
 pub struct StreamManifest {
     pub identity: DeviceIdentity,
@@ -1496,10 +1529,7 @@ pub struct StreamManifest {
     /// appear in user-facing stream lists / registration UX.
     pub internal: bool,
     /// When set to `false`, force the stream to run without any pipeline graph (raw frames).
-    ///
-    /// This exists because JSON `null` / absent fields are indistinguishable for `Option<T>` and we
-    /// need an explicit way for clients to clear a previously persisted pipeline.
-    pub pipeline_enabled: Option<bool>,
+    pub pipeline_enabled: bool,
     /// Optional additional pipeline graphs to run in multiplex/debug view.
     pub pipelines: Vec<StreamPipelineBinding>,
     /// Active pipeline ID when `pipelines` is set.
@@ -1522,7 +1552,7 @@ pub struct StreamManifest {
     pub encoder: RequestedEncoderConfig,
     #[schema(value_type = RequestedDecoderConfigSchema)]
     pub decoder: RequestedDecoderConfig,
-    pub preview_jpeg_quality: Option<u8>,
+    pub preview_jpeg_quality: u8,
     /// Enable the rolling shadow recorder buffer used for capture-last clips.
     pub shadow_recorder_enabled: bool,
     pub start_on_boot: bool,
@@ -1570,8 +1600,8 @@ struct StreamManifestBinaryWire {
 struct StreamManifestHumanWire {
     pub identity: DeviceIdentity,
     pub capture: CaptureConfig,
-    #[serde(default = "default_host_buffer")]
-    pub host_buffer: usize,
+    #[serde(default)]
+    pub host_buffer: Option<usize>,
     #[serde(default)]
     pub internal: bool,
     #[serde(default)]
@@ -1618,12 +1648,22 @@ struct StreamManifestHumanWire {
 
 impl From<StreamManifestBinaryWire> for StreamManifest {
     fn from(value: StreamManifestBinaryWire) -> Self {
+        let pipeline_enabled = canonical_requested_pipeline_enabled(
+            value.pipeline_enabled,
+            &value.pipelines,
+            value.active_pipeline_id,
+            value.active_pipeline_output.as_deref(),
+            value.pipeline_layout.as_ref(),
+            &value.pipeline_wires,
+        );
+        let host_buffer = canonical_requested_host_buffer(value.host_buffer);
+        let preview_jpeg_quality = canonical_requested_preview_jpeg_quality(value.preview_jpeg_quality, &value.encoder);
         Self {
             identity: value.identity,
             capture: value.capture,
-            host_buffer: value.host_buffer,
+            host_buffer,
             internal: value.internal,
-            pipeline_enabled: value.pipeline_enabled,
+            pipeline_enabled,
             pipelines: value.pipelines,
             active_pipeline_id: value.active_pipeline_id,
             active_pipeline_output: value.active_pipeline_output,
@@ -1634,7 +1674,7 @@ impl From<StreamManifestBinaryWire> for StreamManifest {
             pose: value.pose,
             encoder: value.encoder,
             decoder: value.decoder,
-            preview_jpeg_quality: value.preview_jpeg_quality,
+            preview_jpeg_quality,
             shadow_recorder_enabled: value.shadow_recorder_enabled,
             start_on_boot: value.start_on_boot,
         }
@@ -1648,7 +1688,7 @@ impl From<StreamManifest> for StreamManifestBinaryWire {
             capture: value.capture,
             host_buffer: value.host_buffer,
             internal: value.internal,
-            pipeline_enabled: value.pipeline_enabled,
+            pipeline_enabled: Some(value.pipeline_enabled),
             pipelines: value.pipelines,
             active_pipeline_id: value.active_pipeline_id,
             active_pipeline_output: value.active_pipeline_output,
@@ -1659,7 +1699,7 @@ impl From<StreamManifest> for StreamManifestBinaryWire {
             pose: value.pose,
             encoder: value.encoder,
             decoder: value.decoder,
-            preview_jpeg_quality: value.preview_jpeg_quality,
+            preview_jpeg_quality: Some(value.preview_jpeg_quality),
             shadow_recorder_enabled: value.shadow_recorder_enabled,
             start_on_boot: value.start_on_boot,
         }
@@ -1684,13 +1724,23 @@ impl TryFrom<StreamManifestHumanWire> for StreamManifest {
             }
             (None, enabled, id, settings) => RequestedDecoderConfig::from_legacy(enabled, id, settings)?,
         };
+        let pipeline_enabled = canonical_requested_pipeline_enabled(
+            value.pipeline_enabled,
+            &value.pipelines,
+            value.active_pipeline_id,
+            value.active_pipeline_output.as_deref(),
+            value.pipeline_layout.as_ref(),
+            &value.pipeline_wires,
+        );
+        let host_buffer = canonical_requested_host_buffer(value.host_buffer.unwrap_or_else(default_host_buffer));
+        let preview_jpeg_quality = canonical_requested_preview_jpeg_quality(value.preview_jpeg_quality, &encoder);
 
         Ok(Self {
             identity: value.identity,
             capture: value.capture,
-            host_buffer: value.host_buffer,
+            host_buffer,
             internal: value.internal,
-            pipeline_enabled: value.pipeline_enabled,
+            pipeline_enabled,
             pipelines: value.pipelines,
             active_pipeline_id: value.active_pipeline_id,
             active_pipeline_output: value.active_pipeline_output,
@@ -1701,7 +1751,7 @@ impl TryFrom<StreamManifestHumanWire> for StreamManifest {
             pose: value.pose,
             encoder,
             decoder,
-            preview_jpeg_quality: value.preview_jpeg_quality,
+            preview_jpeg_quality,
             shadow_recorder_enabled: value.shadow_recorder_enabled,
             start_on_boot: value.start_on_boot,
         })
@@ -1713,9 +1763,9 @@ impl From<StreamManifest> for StreamManifestHumanWire {
         Self {
             identity: value.identity,
             capture: value.capture,
-            host_buffer: value.host_buffer,
+            host_buffer: Some(value.host_buffer),
             internal: value.internal,
-            pipeline_enabled: value.pipeline_enabled,
+            pipeline_enabled: Some(value.pipeline_enabled),
             pipelines: value.pipelines,
             active_pipeline_id: value.active_pipeline_id,
             active_pipeline_output: value.active_pipeline_output,
@@ -1732,7 +1782,7 @@ impl From<StreamManifest> for StreamManifestHumanWire {
             decoder_enabled: None,
             decoder_id: None,
             decoder_settings: None,
-            preview_jpeg_quality: value.preview_jpeg_quality,
+            preview_jpeg_quality: Some(value.preview_jpeg_quality),
             shadow_recorder_enabled: value.shadow_recorder_enabled,
             start_on_boot: value.start_on_boot,
         }
@@ -1762,7 +1812,7 @@ impl<'de> Deserialize<'de> for StreamManifest {
 
 impl StreamManifest {
     pub fn host_buffer(&self) -> usize {
-        let requested = if self.host_buffer == 0 { default_host_buffer() } else { self.host_buffer };
+        let requested = self.host_buffer.max(1);
         let max = max_host_buffer();
         if requested > max {
             tracing::warn!(requested, max, "host buffer too large; clamping to avoid excessive memory use");
@@ -1773,14 +1823,14 @@ impl StreamManifest {
     }
 
     pub fn preview_jpeg_quality(&self) -> u8 {
-        self.preview_jpeg_quality.or_else(default_preview_jpeg_quality_override).unwrap_or(DEFAULT_PREVIEW_JPEG_QUALITY).clamp(1, 100)
+        self.preview_jpeg_quality.clamp(1, 100)
     }
 
     pub fn resolve(&self) -> ResolvedStreamConfig {
         let mut requested = self.clone();
         let host_buffer = requested.host_buffer();
 
-        let pipeline_enabled = requested.pipeline_enabled != Some(false);
+        let pipeline_enabled = requested.pipeline_enabled;
         if !pipeline_enabled {
             requested.pipelines.clear();
             requested.active_pipeline_id = None;
@@ -1827,11 +1877,7 @@ impl StreamManifest {
         }
         decoder.settings_present = decoder.enabled && decoder.settings.is_some();
 
-        let preview_jpeg_quality = requested
-            .preview_jpeg_quality
-            .map(|value| value.clamp(1, 100))
-            .or_else(|| encoder.enabled.then_some(DEFAULT_STREAM_PREVIEW_JPEG_QUALITY))
-            .unwrap_or_else(|| requested.preview_jpeg_quality());
+        let preview_jpeg_quality = requested.preview_jpeg_quality();
 
         ResolvedStreamConfig {
             identity: requested.identity,
@@ -1867,7 +1913,7 @@ impl ResolvedStreamConfig {
             capture: self.capture.clone(),
             host_buffer: self.host_buffer,
             internal: self.internal,
-            pipeline_enabled: Some(self.pipeline_enabled),
+            pipeline_enabled: self.pipeline_enabled,
             pipelines: self.pipelines.clone(),
             active_pipeline_id: self.active_pipeline_id,
             active_pipeline_output: self.active_pipeline_output.clone(),
@@ -1886,7 +1932,7 @@ impl ResolvedStreamConfig {
             } else {
                 RequestedDecoderConfig::disabled()
             },
-            preview_jpeg_quality: Some(self.preview_jpeg_quality),
+            preview_jpeg_quality: self.preview_jpeg_quality,
             shadow_recorder_enabled: self.shadow_recorder_enabled,
             start_on_boot: self.start_on_boot,
         }
@@ -1943,7 +1989,7 @@ pub struct StreamStatus {
     pub recording_since_ms: Option<u64>,
 }
 
-pub(crate) fn default_host_buffer() -> usize {
+pub fn default_host_buffer() -> usize {
     // The host bridge buffers full frames for late subscribers. At full resolution this can
     // balloon RSS quickly (e.g. RGBA at 2K+). Default small to keep memory predictable; users can
     // still override via `HELIOS_HOST_BUFFER` or per-stream `host_buffer`.

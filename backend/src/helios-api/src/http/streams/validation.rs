@@ -98,6 +98,7 @@ pub async fn validate_stream_manifest(mut manifest: StreamManifest) -> Result<St
     let mut warnings = Vec::<ValidationWarning>::new();
 
     validate_backend_and_handle(&manifest, &mut issues);
+    validate_explicit_stream_config(&manifest, &mut issues);
     sanitize_file_backend_paths(&mut manifest, &mut issues, &mut warnings);
     validate_file_backend_media_paths(&manifest, &mut issues).await;
     sanitize_reserved_pipeline_ids(&mut manifest, &mut warnings);
@@ -112,6 +113,29 @@ pub async fn validate_stream_manifest(mut manifest: StreamManifest) -> Result<St
         Ok(StreamValidationResult { manifest, resolved, warnings })
     } else {
         Err(StreamValidationError { issues, warnings })
+    }
+}
+
+fn validate_explicit_stream_config(manifest: &StreamManifest, issues: &mut Vec<ValidationIssue>) {
+    if manifest.host_buffer == 0 {
+        issues.push(issue("/host_buffer", "host_buffer_must_be_positive", "host_buffer must be greater than zero"));
+    }
+
+    if manifest.preview_jpeg_quality == 0 {
+        issues.push(issue("/preview_jpeg_quality", "preview_quality_must_be_positive", "preview_jpeg_quality must be between 1 and 100"));
+    }
+
+    let has_disabled_pipeline_state = !manifest.pipelines.is_empty()
+        || manifest.active_pipeline_id.is_some()
+        || manifest.active_pipeline_output.as_deref().is_some_and(|value| !value.trim().is_empty())
+        || manifest.pipeline_layout.is_some()
+        || !manifest.pipeline_wires.is_empty();
+    if !manifest.pipeline_enabled && has_disabled_pipeline_state {
+        issues.push(issue(
+            "/pipeline_enabled",
+            "pipeline_disabled_with_pipeline_state",
+            "pipeline_enabled=false requires pipelines, active pipeline selection, layout, and wires to be empty",
+        ));
     }
 }
 
@@ -511,6 +535,7 @@ mod tests {
     async fn warns_for_raw_output_alias_normalization() {
         let file = create_temp_media_file("mp4").await;
         let mut manifest = base_manifest(&file);
+        manifest.pipeline_enabled = true;
         manifest.active_pipeline_id = Some(RAW_PIPELINE_UUID);
         manifest.active_pipeline_output = Some("FRAME".to_string());
 
@@ -528,6 +553,26 @@ mod tests {
         let result = validate_stream_manifest(manifest).await;
         let err = result.expect_err("expected unsupported media type failure");
         assert!(err.issues.iter().any(|issue| issue.code == "unsupported_media_type"));
+        let _ = tokio::fs::remove_file(&file).await;
+    }
+
+    #[tokio::test]
+    async fn rejects_disabled_pipeline_with_pipeline_state() {
+        let file = create_temp_media_file("mp4").await;
+        let mut manifest = base_manifest(&file);
+        let pipeline_id = Uuid::new_v4();
+        manifest.pipeline_enabled = false;
+        manifest.pipelines.push(helios_engine::ipc::StreamPipelineBinding {
+            pipeline_id,
+            pipeline_graph: None,
+            pipeline_output: Some("overlay".to_string()),
+            pipeline_patch: None,
+        });
+        manifest.active_pipeline_id = Some(pipeline_id);
+
+        let result = validate_stream_manifest(manifest).await;
+        let err = result.expect_err("expected disabled pipeline state failure");
+        assert!(err.issues.iter().any(|issue| issue.code == "pipeline_disabled_with_pipeline_state"));
         let _ = tokio::fs::remove_file(&file).await;
     }
 }

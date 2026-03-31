@@ -103,7 +103,7 @@ fn update_graph_binding(manifest: &mut helios_engine::ipc::StreamManifest, pipel
     if !updated {
         manifest.pipelines.push(StreamPipelineBinding { pipeline_id, pipeline_graph: None, pipeline_output: output.clone(), pipeline_patch: None });
     }
-    manifest.pipeline_enabled = Some(true);
+    manifest.pipeline_enabled = true;
     if manifest.active_pipeline_id.is_none() {
         manifest.active_pipeline_id = Some(pipeline_id);
     }
@@ -129,7 +129,7 @@ fn update_graph_patch_binding(manifest: &mut helios_engine::ipc::StreamManifest,
         manifest.pipelines.push(StreamPipelineBinding { pipeline_id, pipeline_graph: None, pipeline_output: None, pipeline_patch: Some(patch) });
     }
 
-    manifest.pipeline_enabled = Some(true);
+    manifest.pipeline_enabled = true;
     if manifest.active_pipeline_id.is_none() {
         manifest.active_pipeline_id = Some(pipeline_id);
     }

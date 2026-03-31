@@ -353,7 +353,7 @@ mod tests {
             },
             host_buffer: 2,
             internal: false,
-            pipeline_enabled: None,
+            pipeline_enabled: true,
             pipelines: vec![StreamPipelineBinding { pipeline_id, pipeline_graph: None, pipeline_output: output.map(str::to_string), pipeline_patch: None }],
             active_pipeline_id: Some(pipeline_id),
             active_pipeline_output: output.map(str::to_string),
@@ -364,7 +364,7 @@ mod tests {
             pose: None,
             encoder: helios_engine::ipc::RequestedEncoderConfig::default(),
             decoder: helios_engine::ipc::RequestedDecoderConfig::default(),
-            preview_jpeg_quality: None,
+            preview_jpeg_quality: 30,
             shadow_recorder_enabled: true,
             start_on_boot: false,
         }

@@ -407,7 +407,7 @@ async fn merge_stream_manifest_state(state: &AppState, manifest: &mut StreamMani
     }
 
     // Explicit pipeline disable: allow clients to clear persisted pipeline config.
-    if manifest.pipeline_enabled == Some(false) {
+    if !manifest.pipeline_enabled {
         manifest.pipelines.clear();
         manifest.active_pipeline_id = None;
         manifest.active_pipeline_output = None;
@@ -438,7 +438,7 @@ async fn merge_stream_manifest_state(state: &AppState, manifest: &mut StreamMani
     // In single-view mode, preserve the previously-visible slot output when the incoming payload
     // leaves `output_key` empty. This prevents stale UI state from unintentionally resetting
     // RAW output selection (`undistorted` -> `raw`) during full stream re-apply.
-    if manifest.pipeline_enabled != Some(false)
+    if manifest.pipeline_enabled
         && let Some(layout) = manifest.pipeline_layout.as_mut()
         && let Some(base_layout) = base.pipeline_layout.as_ref()
         && layout.rows == 1
@@ -858,7 +858,7 @@ mod tests {
             },
             host_buffer: 2,
             internal: false,
-            pipeline_enabled: None,
+            pipeline_enabled: false,
             pipelines: Vec::new(),
             active_pipeline_id: None,
             active_pipeline_output: None,
@@ -869,7 +869,7 @@ mod tests {
             pose: None,
             encoder: helios_engine::ipc::RequestedEncoderConfig::default(),
             decoder: helios_engine::ipc::RequestedDecoderConfig::default(),
-            preview_jpeg_quality: None,
+            preview_jpeg_quality: 30,
             shadow_recorder_enabled: false,
             start_on_boot: false,
         }

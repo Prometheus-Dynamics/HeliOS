@@ -421,7 +421,7 @@ mod tests {
             },
             host_buffer: 8,
             internal: false,
-            pipeline_enabled: None,
+            pipeline_enabled: false,
             pipelines: Vec::new(),
             active_pipeline_id: None,
             active_pipeline_output: None,
@@ -432,7 +432,7 @@ mod tests {
             pose: None,
             encoder: helios_engine::ipc::RequestedEncoderConfig::default(),
             decoder: helios_engine::ipc::RequestedDecoderConfig::default(),
-            preview_jpeg_quality: None,
+            preview_jpeg_quality: 30,
             shadow_recorder_enabled: false,
             start_on_boot: false,
         }

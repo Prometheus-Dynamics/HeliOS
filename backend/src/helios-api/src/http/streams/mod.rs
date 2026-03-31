@@ -298,10 +298,10 @@ async fn set_pipeline_output(State(state): State<AppState>, Path(id): Path<Uuid>
         let implicit_raw_view = view_pipeline_id.is_none() && manifest.pipelines.is_empty();
         if (view_pipeline_id == Some(RAW_PIPELINE_UUID) || implicit_raw_view)
             && normalized_output.as_deref().is_some_and(|v| v.trim().eq_ignore_ascii_case("undistorted"))
-            && manifest.pipeline_enabled == Some(false)
+            && !manifest.pipeline_enabled
         {
             // Allow RAW stream view selection to re-enable pipelines.
-            manifest.pipeline_enabled = Some(true);
+            manifest.pipeline_enabled = true;
         }
 
         if output_targets_active_pipeline {
@@ -375,7 +375,7 @@ async fn set_pipeline_layout(State(state): State<AppState>, Path(id): Path<Uuid>
     let apply_layout = |manifest: &mut helios_engine::ipc::StreamManifest| {
         manifest.pipeline_layout = req.pipeline_layout.clone();
         if manifest.pipeline_layout.is_some() {
-            manifest.pipeline_enabled = Some(true);
+            manifest.pipeline_enabled = true;
         }
         if let Some(layout) = manifest.pipeline_layout.as_mut() {
             let previous_active_pipeline_id = manifest.active_pipeline_id;
@@ -494,7 +494,7 @@ async fn set_pipeline_wires(State(state): State<AppState>, Path(id): Path<Uuid>,
     let apply_wires = |manifest: &mut helios_engine::ipc::StreamManifest| {
         manifest.pipeline_wires = wires.clone();
         if !manifest.pipeline_wires.is_empty() {
-            manifest.pipeline_enabled = Some(true);
+            manifest.pipeline_enabled = true;
         }
     };
 
@@ -693,7 +693,7 @@ async fn set_pipeline_graph(State(state): State<AppState>, Path(id): Path<Uuid>,
                 if !updated {
                     manifest.pipelines.push(StreamPipelineBinding { pipeline_id, pipeline_graph: None, pipeline_output: req.output.clone(), pipeline_patch: None });
                 }
-                manifest.pipeline_enabled = Some(true);
+                manifest.pipeline_enabled = true;
                 if manifest.active_pipeline_id.is_none() {
                     manifest.active_pipeline_id = Some(pipeline_id);
                 }
@@ -727,7 +727,7 @@ async fn set_pipeline_graph(State(state): State<AppState>, Path(id): Path<Uuid>,
                     manifest.pipelines.push(StreamPipelineBinding { pipeline_id, pipeline_graph: None, pipeline_output: req.output.clone(), pipeline_patch: None });
                 }
 
-                manifest.pipeline_enabled = Some(true);
+                manifest.pipeline_enabled = true;
                 if manifest.active_pipeline_id.is_none() {
                     manifest.active_pipeline_id = Some(pipeline_id);
                 }
@@ -795,7 +795,7 @@ async fn set_pipeline_graph_patch(State(state): State<AppState>, Path(id): Path<
                 if !updated {
                     manifest.pipelines.push(StreamPipelineBinding { pipeline_id, pipeline_graph: None, pipeline_output: None, pipeline_patch: Some(helios_engine::ipc::JsonWire(patch.clone())) });
                 }
-                manifest.pipeline_enabled = Some(true);
+                manifest.pipeline_enabled = true;
                 if manifest.active_pipeline_id.is_none() {
                     manifest.active_pipeline_id = Some(pipeline_id);
                 }
@@ -823,7 +823,7 @@ async fn set_pipeline_graph_patch(State(state): State<AppState>, Path(id): Path<
                     manifest.pipelines.push(StreamPipelineBinding { pipeline_id, pipeline_graph: None, pipeline_output: None, pipeline_patch: Some(helios_engine::ipc::JsonWire(patch.clone())) });
                 }
 
-                manifest.pipeline_enabled = Some(true);
+                manifest.pipeline_enabled = true;
                 if manifest.active_pipeline_id.is_none() {
                     manifest.active_pipeline_id = Some(pipeline_id);
                 }

@@ -112,9 +112,9 @@ pub async fn start_stream_for_mode(args: StartStreamArgs<'_>) -> Result<Uuid, St
     let mut manifest = StreamManifest {
         identity: identity.clone(),
         capture,
-        host_buffer: 0,
+        host_buffer: helios_engine::ipc::default_host_buffer(),
         internal: true,
-        pipeline_enabled: None,
+        pipeline_enabled: false,
         pipelines: Vec::new(),
         active_pipeline_id: None,
         active_pipeline_output: None,
@@ -125,7 +125,7 @@ pub async fn start_stream_for_mode(args: StartStreamArgs<'_>) -> Result<Uuid, St
         pose: None,
         encoder: RequestedEncoderConfig::default(),
         decoder: RequestedDecoderConfig::default(),
-        preview_jpeg_quality: None,
+        preview_jpeg_quality: 30,
         shadow_recorder_enabled: false,
         start_on_boot: false,
     };

@@ -4407,9 +4407,9 @@ mod tests {
         StreamManifest {
             identity,
             capture,
-            host_buffer: 0,
+            host_buffer: crate::ipc::default_host_buffer(),
             internal: false,
-            pipeline_enabled: None,
+            pipeline_enabled: false,
             pipelines: Vec::new(),
             active_pipeline_id: None,
             active_pipeline_output: None,
@@ -4420,7 +4420,7 @@ mod tests {
             pose: None,
             encoder: RequestedEncoderConfig::enabled(Some("h264".to_string()), None),
             decoder: RequestedDecoderConfig::default(),
-            preview_jpeg_quality: None,
+            preview_jpeg_quality: 30,
             shadow_recorder_enabled: false,
             start_on_boot: false,
         }
@@ -4533,7 +4533,7 @@ mod tests {
                     ..Default::default()
                 }),
             ),
-            preview_jpeg_quality: Some(80),
+            preview_jpeg_quality: 80,
             ..sample_manifest_for_encoder_defaults(1920, 1080).to_requested_manifest()
         }
         .resolve();

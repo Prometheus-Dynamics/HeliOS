@@ -267,6 +267,8 @@ function makeNetcamManifest(input: RegisterNetcamStreamInput, capabilities: Stre
       interval: { numerator: 1, denominator: fps },
       controls: [],
     },
+    host_buffer: 8,
+    preview_jpeg_quality: 65,
     pipeline_enabled: true,
     active_pipeline_id: rawPipelineId,
     active_pipeline_output: rawOutput,

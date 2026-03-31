@@ -996,6 +996,7 @@
               state: 'disabled'
             },
         host_buffer: Number.isFinite(hostBuffer) ? hostBuffer : 8,
+        preview_jpeg_quality: 65,
         shadow_recorder_enabled: false,
         start_on_boot: false
       };

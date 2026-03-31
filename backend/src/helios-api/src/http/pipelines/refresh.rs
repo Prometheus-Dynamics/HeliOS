@@ -69,13 +69,13 @@ fn detach_pipeline_from_manifest(manifest: &mut StreamManifest, pipeline_id: Uui
     }
 
     if manifest.pipelines.is_empty() {
-        manifest.pipeline_enabled = Some(false);
+        manifest.pipeline_enabled = false;
         manifest.pipeline_layout = None;
         manifest.active_pipeline_id = None;
         manifest.active_pipeline_output = None;
         changed = true;
-    } else if manifest.pipeline_enabled == Some(false) {
-        manifest.pipeline_enabled = Some(true);
+    } else if !manifest.pipeline_enabled {
+        manifest.pipeline_enabled = true;
         changed = true;
     }
 

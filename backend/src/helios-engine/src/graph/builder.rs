@@ -549,7 +549,7 @@ mod tests {
             capture,
             host_buffer: 1,
             internal: false,
-            pipeline_enabled: Some(true),
+            pipeline_enabled: true,
             pipelines: vec![StreamPipelineBinding { pipeline_id: RAW_STREAM_PIPELINE_UUID, pipeline_graph: None, pipeline_output: Some("raw".to_string()), pipeline_patch: None }],
             active_pipeline_id: Some(RAW_STREAM_PIPELINE_UUID),
             active_pipeline_output: Some("raw".to_string()),
@@ -560,7 +560,7 @@ mod tests {
             pose: None,
             encoder: RequestedEncoderConfig::default(),
             decoder: RequestedDecoderConfig::default(),
-            preview_jpeg_quality: None,
+            preview_jpeg_quality: 30,
             shadow_recorder_enabled: true,
             start_on_boot: false,
         }

@@ -358,7 +358,7 @@ export function createCameraBackendController(state: BackendState, deps: Backend
       state.fileBackendPathsText = paths.join('\n');
     }
 
-    state.hostBuffer = manifest?.host_buffer ?? state.hostBuffer;
+    state.hostBuffer = asFiniteNumber(manifest?.host_buffer ?? manifestRecord?.host_buffer) ?? state.hostBuffer;
     state.previewJpegQuality = asJpegQuality(manifest?.preview_jpeg_quality ?? manifestRecord?.preview_jpeg_quality) ?? 65;
     state.shadowRecorderEnabled = isFileBackend(capture?.backend) ? false : (manifest?.shadow_recorder_enabled ?? false);
     state.cameraAlias = asTrimmedString(identityRecord?.alias ?? identityRecord?.display);
@@ -408,11 +408,11 @@ export function createCameraBackendController(state: BackendState, deps: Backend
       state.decoderImpl = nextDecoderId;
     }
 
-    const pipelineEnabled = manifestRecord?.pipeline_enabled;
+    const pipelineEnabled = manifest?.pipeline_enabled ?? manifestRecord?.pipeline_enabled ?? false;
     state.selectedPipelineId =
-      pipelineEnabled === false ? null : asTrimmedString(manifestRecord?.active_pipeline_id ?? manifestRecord?.pipeline_id) || null;
+      !pipelineEnabled ? null : asTrimmedString(manifestRecord?.active_pipeline_id ?? manifestRecord?.pipeline_id) || null;
     state.selectedPipelineOutput =
-      pipelineEnabled === false ? null : asTrimmedString(manifestRecord?.active_pipeline_output ?? manifestRecord?.pipeline_output) || null;
+      !pipelineEnabled ? null : asTrimmedString(manifestRecord?.active_pipeline_output ?? manifestRecord?.pipeline_output) || null;
 
     const normalizedSelected = state.selectedPipelineId ? String(state.selectedPipelineId).trim() : '';
     state.selectedPipelineId = normalizedSelected.length ? normalizedSelected : null;
@@ -430,7 +430,7 @@ export function createCameraBackendController(state: BackendState, deps: Backend
     const layout = manifestRecord?.pipeline_layout ?? null;
     const pipelines = manifestRecord?.pipelines;
     const parsedLayout = deps.parseManifestLayout(layout);
-    if (pipelineEnabled !== false && parsedLayout && parsedLayout.rows === 1 && parsedLayout.columns === 1) {
+    if (pipelineEnabled && parsedLayout && parsedLayout.rows === 1 && parsedLayout.columns === 1) {
       const outputCellId = parsedLayout.slots[PIPELINE_OUTPUT_CELL_KEY];
       const fallbackEntry = Object.entries(parsedLayout.slots).find(([, id]) => typeof id === 'string' && id.trim().length);
       const selectedSlotKey =

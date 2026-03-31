@@ -233,11 +233,11 @@ pub(crate) async fn start_media_replay_stream(State(state): State<AppState>, Jso
             controls: Vec::new(),
             enable_tdn_output: false,
         },
-        host_buffer: 0,
+        host_buffer: helios_engine::ipc::default_host_buffer(),
         internal: false,
         // Media replay streams should be immediately viewable in the UI even when codecs are disabled.
         // The reserved RAW pipeline provides a cheap preview path (and can be wired into other pipelines).
-        pipeline_enabled: Some(true),
+        pipeline_enabled: true,
         pipelines: Vec::new(),
         active_pipeline_id: Some(RAW_STREAM_PIPELINE_UUID),
         // Use the engine-native key for the raw passthrough port.
@@ -253,7 +253,7 @@ pub(crate) async fn start_media_replay_stream(State(state): State<AppState>, Jso
         pose: None,
         encoder: RequestedEncoderConfig::default(),
         decoder: RequestedDecoderConfig::default(),
-        preview_jpeg_quality: None,
+        preview_jpeg_quality: 30,
         shadow_recorder_enabled: false,
         start_on_boot: false,
     };

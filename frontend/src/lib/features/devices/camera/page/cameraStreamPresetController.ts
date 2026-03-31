@@ -365,7 +365,7 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
               state: 'disabled'
             },
         shadow_recorder_enabled: shadowRecorderEnabled,
-        host_buffer: state.hostBuffer ?? null,
+        host_buffer: state.hostBuffer ?? 8,
         preview_jpeg_quality: state.previewJpegQuality ?? 65,
         pipeline_enabled: enablePipeline,
         pipeline_id: activePipelineIdWire,
