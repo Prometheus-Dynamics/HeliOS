@@ -163,6 +163,30 @@
       "review_note": "IPA API schema and request parameter types now live here; keep them separate from handler and patching logic."
     },
     {
+      "path": "backend/src/helios-api/src/http/device/bootloader.rs",
+      "max_lines": 30,
+      "owner": "HeliOS",
+      "review_note": "Device bootloader HTTP root should stay as thin route and type re-export orchestration after the module split."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/bootloader/routes.rs",
+      "max_lines": 120,
+      "owner": "HeliOS",
+      "review_note": "Bootloader route handlers now live here; keep config parsing and partition staging helpers out of the HTTP layer."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/bootloader/support.rs",
+      "max_lines": 260,
+      "owner": "HeliOS",
+      "review_note": "Bootloader config parsing, status evaluation, partition resolution, and staging logic now live here; keep route glue and schema types separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/bootloader/types.rs",
+      "max_lines": 80,
+      "owner": "HeliOS",
+      "review_note": "Bootloader API schemas and config constants now live here; keep them separate from route and staging logic."
+    },
+    {
       "path": "backend/src/helios-api/src/http/plugins.rs",
       "max_lines": 80,
       "owner": "HeliOS",
