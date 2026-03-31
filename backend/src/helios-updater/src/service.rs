@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::ipc::{MaintenanceWindow, UpdateStage, UpdaterCommand, UpdaterEvent};
+use crate::ipc::{MaintenanceWindow, StorageDirectoryReport, UpdateStage, UpdaterCommand, UpdaterEvent, UpdaterStorageReport};
 use chrono::Utc;
 use serde::Deserialize;
 use tokio::sync::{Mutex, RwLock, broadcast};
@@ -14,6 +14,7 @@ use crate::cleanup;
 use crate::config::{SignaturePolicy, UpdaterConfig};
 use crate::error::{Error, Result};
 use crate::state::ServiceState;
+use crate::util::available_bytes_for_path;
 
 const EVENT_BUS_CAPACITY: usize = 128;
 
@@ -56,6 +57,7 @@ impl UpdaterService {
                 self.publish_snapshot().await;
                 Ok(())
             }
+            UpdaterCommand::QueryStorage { .. } => self.query_storage().await,
             UpdaterCommand::PreflightRelease { command_id: _, update_id } => self.preflight_release(update_id).await,
         }
     }
@@ -166,6 +168,21 @@ impl UpdaterService {
         UpdaterEvent::StateSnapshot { active_update: active, cache_usage_bytes: cache_usage }
     }
 
+    async fn query_storage(&self) -> Result<()> {
+        let report = self.storage_report().await?;
+        self.publish_event(UpdaterEvent::StorageReport { report });
+        Ok(())
+    }
+
+    pub(crate) async fn storage_report(&self) -> Result<UpdaterStorageReport> {
+        Ok(UpdaterStorageReport {
+            cache: storage_directory_report(self.config.cache_dir()).await?,
+            work: storage_directory_report(self.config.work_dir()).await?,
+            service_releases: storage_directory_report(self.config.service_releases_dir()).await?,
+            frontend_releases: storage_directory_report(self.config.frontend_releases_dir()).await?,
+        })
+    }
+
     pub(crate) async fn publish_snapshot(&self) {
         let event = self.snapshot_event().await;
         self.publish_event(event);
@@ -227,6 +244,10 @@ impl UpdaterService {
 fn build_http_client(config: &UpdaterConfig) -> Result<reqwest::Client> {
     let roots = webpki_root_certs::TLS_SERVER_ROOT_CERTS.iter().map(|cert| reqwest::Certificate::from_der(cert.as_ref())).collect::<core::result::Result<Vec<_>, _>>()?;
     reqwest::Client::builder().user_agent(config.user_agent().to_string()).tls_certs_only(roots).build().map_err(Into::into)
+}
+
+async fn storage_directory_report(path: &std::path::Path) -> Result<StorageDirectoryReport> {
+    Ok(StorageDirectoryReport { path: path.display().to_string(), usage_bytes: artifact::cache_usage_bytes(path).await?, available_bytes: available_bytes_for_path(path).await? })
 }
 
 async fn stage_release_job(
@@ -322,4 +343,97 @@ fn spawn_state_sync(state: Arc<RwLock<ServiceState>>, mut rx: broadcast::Receive
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{UpdaterService, storage_directory_report};
+    use crate::config::UpdaterConfig;
+    use crate::ipc::UpdaterEvent;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn storage_directory_report_counts_usage() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path().join("cache");
+        tokio::fs::create_dir_all(&root).await.expect("create root");
+        tokio::fs::write(root.join("artifact.bin"), vec![0u8; 11]).await.expect("write artifact");
+
+        let report = storage_directory_report(&root).await.expect("storage report");
+
+        assert_eq!(report.path, root.display().to_string());
+        assert_eq!(report.usage_bytes, 11);
+        assert!(report.available_bytes.is_some());
+    }
+
+    #[tokio::test]
+    async fn updater_service_storage_report_includes_all_roots() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let cache_dir = temp.path().join("cache");
+        let work_dir = temp.path().join("work");
+        let service_releases = temp.path().join("service-releases");
+        let service_bin = temp.path().join("bin");
+        let frontend_releases = temp.path().join("frontend-releases");
+        tokio::fs::create_dir_all(&cache_dir).await.expect("create cache dir");
+        tokio::fs::create_dir_all(&work_dir).await.expect("create work dir");
+        tokio::fs::create_dir_all(&service_releases).await.expect("create service releases dir");
+        tokio::fs::create_dir_all(&service_bin).await.expect("create service bin dir");
+        tokio::fs::create_dir_all(&frontend_releases).await.expect("create frontend releases dir");
+        tokio::fs::write(cache_dir.join("artifact.bin"), vec![0u8; 13]).await.expect("write cache file");
+        tokio::fs::write(work_dir.join("expanded.img"), vec![0u8; 17]).await.expect("write work file");
+        tokio::fs::create_dir_all(service_releases.join("r1")).await.expect("create release dir");
+        tokio::fs::write(service_releases.join("r1/helios-api"), vec![0u8; 19]).await.expect("write service release");
+        tokio::fs::create_dir_all(frontend_releases.join("f1")).await.expect("create frontend dir");
+        tokio::fs::write(frontend_releases.join("f1/index.html"), vec![0u8; 23]).await.expect("write frontend release");
+
+        let config = UpdaterConfig::new(temp.path().join("updater.sock"), temp.path().join("updater.log"))
+            .with_cache_dir(&cache_dir)
+            .with_work_dir(&work_dir)
+            .with_service_paths(&service_releases, &service_bin)
+            .with_frontend_paths(&frontend_releases, frontend_releases.join("current"));
+        let service = UpdaterService::new(Arc::new(config)).expect("service");
+
+        let report = service.storage_report().await.expect("storage report");
+
+        assert_eq!(report.cache.usage_bytes, 13);
+        assert_eq!(report.work.usage_bytes, 17);
+        assert_eq!(report.service_releases.usage_bytes, 19);
+        assert_eq!(report.frontend_releases.usage_bytes, 23);
+    }
+
+    #[tokio::test]
+    async fn query_storage_publishes_storage_report_event() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let cache_dir = temp.path().join("cache");
+        let work_dir = temp.path().join("work");
+        let service_releases = temp.path().join("service-releases");
+        let service_bin = temp.path().join("bin");
+        let frontend_releases = temp.path().join("frontend-releases");
+        tokio::fs::create_dir_all(&cache_dir).await.expect("create cache dir");
+        tokio::fs::create_dir_all(&work_dir).await.expect("create work dir");
+        tokio::fs::create_dir_all(&service_releases).await.expect("create service releases dir");
+        tokio::fs::create_dir_all(&service_bin).await.expect("create service bin dir");
+        tokio::fs::create_dir_all(&frontend_releases).await.expect("create frontend releases dir");
+        tokio::fs::write(cache_dir.join("artifact.bin"), vec![0u8; 29]).await.expect("write cache file");
+
+        let config = UpdaterConfig::new(temp.path().join("updater.sock"), temp.path().join("updater.log"))
+            .with_cache_dir(&cache_dir)
+            .with_work_dir(&work_dir)
+            .with_service_paths(&service_releases, &service_bin)
+            .with_frontend_paths(&frontend_releases, frontend_releases.join("current"));
+        let service = UpdaterService::new(Arc::new(config)).expect("service");
+        let mut rx = service.subscribe();
+
+        service.handle_command(crate::ipc::UpdaterCommand::QueryStorage { command_id: crate::client::CommandId::new() }).await.expect("query storage");
+
+        loop {
+            match rx.recv().await.expect("event") {
+                UpdaterEvent::StorageReport { report } => {
+                    assert_eq!(report.cache.usage_bytes, 29);
+                    break;
+                }
+                _ => continue,
+            }
+        }
+    }
 }

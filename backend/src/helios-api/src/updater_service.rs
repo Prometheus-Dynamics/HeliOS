@@ -3,7 +3,7 @@ use crate::ipc;
 use crate::ipc::command_id_from_context;
 use crate::ipc::updater::UpdaterConnection;
 use helios_updater::client::{CommandId, UpdaterSession};
-use helios_updater::ipc::{PreflightReport, UpdateState, UpdaterCommand};
+use helios_updater::ipc::{PreflightReport, UpdateState, UpdaterCommand, UpdaterStorageReport};
 use lib_ipc::protocol::ControlEvent;
 use std::future::Future;
 use std::sync::Arc;
@@ -118,6 +118,39 @@ pub async fn fetch_updater_state(state: &AppState) -> Result<(Option<UpdateState
     .await
 }
 
+pub async fn fetch_updater_storage(state: &AppState) -> Result<UpdaterStorageReport, String> {
+    with_updater(state, |conn| async move {
+        let journal = conn.client.journal();
+        let command = UpdaterCommand::QueryStorage { command_id: command_id_from_context("ota_storage") };
+        let cmd_id = command_id(&command);
+        let mut session = conn.checkout_session().await.map_err(|err| err.to_string())?;
+        journal.append(&command).map_err(|err| err.to_string())?;
+        session.send_command(journal, &command).await.map_err(|err| err.to_string())?;
+
+        let deadline = Duration::from_secs(5);
+        let result = loop {
+            let event = match timeout(deadline, session.next_event()).await {
+                Ok(Ok(Some(event))) => event,
+                Ok(Ok(None)) => break Err("updater closed connection".to_string()),
+                Ok(Err(err)) => break Err(err.to_string()),
+                Err(_) => break Err("timed out waiting for updater storage report".to_string()),
+            };
+
+            match event {
+                helios_updater::ipc::UpdaterEvent::StorageReport { report } => break Ok(report),
+                helios_updater::ipc::UpdaterEvent::Control(ControlEvent::Nack(nack)) if nack.command_id == cmd_id => break Err(nack.reason),
+                _ => continue,
+            }
+        };
+
+        if result.is_ok() {
+            conn.recycle_session(session).await;
+        }
+        result
+    })
+    .await
+}
+
 pub async fn fetch_updater_preflight(state: &AppState, update_id: uuid::Uuid) -> Result<PreflightReport, String> {
     with_updater(state, |conn| async move {
         let journal = conn.client.journal();
@@ -158,6 +191,7 @@ fn command_id(command: &UpdaterCommand) -> CommandId {
         | UpdaterCommand::ApplyRelease { command_id, .. }
         | UpdaterCommand::Rollback { command_id, .. }
         | UpdaterCommand::QueryState { command_id }
+        | UpdaterCommand::QueryStorage { command_id }
         | UpdaterCommand::PreflightRelease { command_id, .. } => *command_id,
     }
 }

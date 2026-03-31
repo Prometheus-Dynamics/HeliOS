@@ -74,6 +74,9 @@ pub enum UpdaterCommand {
     QueryState {
         command_id: CommandId,
     },
+    QueryStorage {
+        command_id: CommandId,
+    },
     PreflightRelease {
         command_id: CommandId,
         #[bincode(with_serde)]
@@ -94,6 +97,21 @@ pub struct UrlArtifact {
     pub url: Url,
     pub size_bytes: Option<u64>,
     pub checksum: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Encode, Decode)]
+pub struct StorageDirectoryReport {
+    pub path: String,
+    pub usage_bytes: u64,
+    pub available_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Encode, Decode)]
+pub struct UpdaterStorageReport {
+    pub cache: StorageDirectoryReport,
+    pub work: StorageDirectoryReport,
+    pub service_releases: StorageDirectoryReport,
+    pub frontend_releases: StorageDirectoryReport,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Encode, Decode)]
@@ -188,6 +206,9 @@ pub enum UpdaterEvent {
         active_update: Option<UpdateState>,
         cache_usage_bytes: u64,
     },
+    StorageReport {
+        report: UpdaterStorageReport,
+    },
     PreflightReport {
         report: PreflightReport,
     },
@@ -221,7 +242,8 @@ enum UpdaterCommandKind {
     ApplyRelease = 2,
     Rollback = 3,
     QueryState = 4,
-    PreflightRelease = 5,
+    QueryStorage = 5,
+    PreflightRelease = 6,
 }
 
 impl UpdaterCommandKind {
@@ -236,7 +258,8 @@ impl UpdaterCommandKind {
             2 => Some(Self::ApplyRelease),
             3 => Some(Self::Rollback),
             4 => Some(Self::QueryState),
-            5 => Some(Self::PreflightRelease),
+            5 => Some(Self::QueryStorage),
+            6 => Some(Self::PreflightRelease),
             _ => None,
         }
     }
@@ -252,9 +275,10 @@ enum UpdaterEventKind {
     ApplyComplete = 4,
     RollbackTriggered = 5,
     StateSnapshot = 6,
-    PreflightReport = 7,
-    Heartbeat = 8,
-    LogRecord = 9,
+    StorageReport = 7,
+    PreflightReport = 8,
+    Heartbeat = 9,
+    LogRecord = 10,
 }
 
 impl UpdaterEventKind {
@@ -271,9 +295,10 @@ impl UpdaterEventKind {
             4 => Some(Self::ApplyComplete),
             5 => Some(Self::RollbackTriggered),
             6 => Some(Self::StateSnapshot),
-            7 => Some(Self::PreflightReport),
-            8 => Some(Self::Heartbeat),
-            9 => Some(Self::LogRecord),
+            7 => Some(Self::StorageReport),
+            8 => Some(Self::PreflightReport),
+            9 => Some(Self::Heartbeat),
+            10 => Some(Self::LogRecord),
             _ => None,
         }
     }
@@ -288,6 +313,7 @@ const _: () = {
             struct ApplyRelease { command_id: CommandId, update_id: Uuid => with_serde, window: MaintenanceWindow },
             struct Rollback { command_id: CommandId, update_id: Uuid => with_serde },
             struct QueryState { command_id: CommandId },
+            struct QueryStorage { command_id: CommandId },
             struct PreflightRelease { command_id: CommandId, update_id: Uuid => with_serde },
         }
     }
@@ -300,6 +326,7 @@ const _: () = {
             struct ApplyComplete { update_id: Uuid => with_serde, reboot_required: bool },
             struct RollbackTriggered { update_id: Uuid => with_serde, reason: String },
             struct StateSnapshot { active_update: Option<UpdateState>, cache_usage_bytes: u64 },
+            struct StorageReport { report: UpdaterStorageReport },
             struct PreflightReport { report: PreflightReport },
             struct Heartbeat { uptime_ms: u64, sequence: u64, stage_queue_depth: u32 },
             struct LogRecord { level: LogLevel, span: Vec<String>, message: String },
@@ -319,6 +346,7 @@ impl ServerEvent for UpdaterEvent {
             | Self::ApplyComplete { .. }
             | Self::RollbackTriggered { .. }
             | Self::StateSnapshot { .. }
+            | Self::StorageReport { .. }
             | Self::PreflightReport { .. }
             | Self::LogRecord { .. }
             | Self::Unknown { .. } => MessageKind::Event,
@@ -354,7 +382,29 @@ mod tests {
         }
     }
 
+    fn sample_commands() -> Vec<UpdaterCommand> {
+        vec![
+            UpdaterCommand::StageRelease {
+                command_id: CommandId::new(),
+                update_id: Uuid::new_v4(),
+                manifest: ReleaseManifest { update_id: Some(Uuid::new_v4()), version: Some("v2026.1.0".into()), artifacts: Vec::new(), metadata_json: "{}".into() },
+            },
+            UpdaterCommand::Cancel { command_id: CommandId::new(), update_id: Uuid::new_v4() },
+            UpdaterCommand::ApplyRelease { command_id: CommandId::new(), update_id: Uuid::new_v4(), window: MaintenanceWindow { start: Utc::now(), duration: Duration::from_secs(30) } },
+            UpdaterCommand::Rollback { command_id: CommandId::new(), update_id: Uuid::new_v4() },
+            UpdaterCommand::QueryState { command_id: CommandId::new() },
+            UpdaterCommand::QueryStorage { command_id: CommandId::new() },
+            UpdaterCommand::PreflightRelease { command_id: CommandId::new(), update_id: Uuid::new_v4() },
+        ]
+    }
+
     fn sample_events() -> Vec<UpdaterEvent> {
+        let storage = UpdaterStorageReport {
+            cache: StorageDirectoryReport { path: "/var/lib/helios/ota/cache".into(), usage_bytes: 4096, available_bytes: Some(1_048_576) },
+            work: StorageDirectoryReport { path: "/var/lib/helios/ota/work".into(), usage_bytes: 2048, available_bytes: Some(1_048_576) },
+            service_releases: StorageDirectoryReport { path: "/opt/helios/releases/services".into(), usage_bytes: 8192, available_bytes: Some(1_048_576) },
+            frontend_releases: StorageDirectoryReport { path: "/opt/helios/releases/frontend".into(), usage_bytes: 1024, available_bytes: Some(1_048_576) },
+        };
         vec![
             UpdaterEvent::Control(ControlEvent::Ack(AckEvent { command_id: CommandId::new(), processed_at: Utc::now() })),
             UpdaterEvent::Control(ControlEvent::Nack(NackEvent { command_id: CommandId::new(), reason: "error".into(), retryable: false })),
@@ -364,6 +414,7 @@ mod tests {
             UpdaterEvent::ApplyComplete { update_id: Uuid::new_v4(), reboot_required: true },
             UpdaterEvent::RollbackTriggered { update_id: Uuid::new_v4(), reason: "failure".into() },
             UpdaterEvent::StateSnapshot { active_update: Some(sample_update_state()), cache_usage_bytes: 4096 },
+            UpdaterEvent::StorageReport { report: storage },
             UpdaterEvent::PreflightReport {
                 report: PreflightReport {
                     update_id: Uuid::new_v4(),
@@ -412,6 +463,15 @@ mod tests {
         for event in sample_events() {
             if let Err(err) = check_round_trip(&event) {
                 panic!("updater event round-trip failed ({event:?}): {err}");
+            }
+        }
+    }
+
+    #[test]
+    fn updater_command_roundtrip() {
+        for command in sample_commands() {
+            if let Err(err) = check_round_trip(&command) {
+                panic!("updater command round-trip failed ({command:?}): {err}");
             }
         }
     }

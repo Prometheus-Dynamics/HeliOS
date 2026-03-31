@@ -6,7 +6,7 @@ use bytes::Bytes;
 use helios_engine::capture::CaptureControlInfo;
 use helios_engine::ipc::{EngineErrorCode, StreamManifest};
 use helios_updater::client::UpdaterSession;
-use helios_updater::ipc::{PreflightReport, UpdateState, UpdaterCommand};
+use helios_updater::ipc::{PreflightReport, UpdateState, UpdaterCommand, UpdaterStorageReport};
 use serde_json::Value as JsonValue;
 use tokio::process::Child;
 use tokio::sync::Mutex;
@@ -407,6 +407,10 @@ impl UpdaterService {
 
     pub async fn fetch_updater_state(&self, state: &crate::http::AppState) -> Result<(Option<UpdateState>, u64), String> {
         crate::updater_service::fetch_updater_state(state).await
+    }
+
+    pub async fn fetch_updater_storage(&self, state: &crate::http::AppState) -> Result<UpdaterStorageReport, String> {
+        crate::updater_service::fetch_updater_storage(state).await
     }
 
     pub async fn fetch_updater_preflight(&self, state: &crate::http::AppState, update_id: Uuid) -> Result<PreflightReport, String> {
