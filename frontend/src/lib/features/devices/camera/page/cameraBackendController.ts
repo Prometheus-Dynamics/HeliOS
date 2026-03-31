@@ -162,6 +162,26 @@ export function createCameraBackendController(state: BackendState, deps: Backend
     state.stream?.resolved?.encoder ?? null;
   const resolvedDecoderStateFor = (): StreamInfo['resolved']['decoder'] | null =>
     state.stream?.resolved?.decoder ?? null;
+  const requestedEncoderRecordFor = (manifest?: StreamManifest | null): Record<string, unknown> | null =>
+    asRecord(asRecord(manifest)?.encoder);
+  const requestedEncoderIdFor = (manifest?: StreamManifest | null): string | null => {
+    const requestedId = asTrimmedString(requestedEncoderRecordFor(manifest)?.id);
+    if (requestedId) return requestedId;
+    const legacyId = asTrimmedString(asRecord(manifest)?.encoder_id);
+    return legacyId || null;
+  };
+  const requestedEncoderStateFor = (manifest?: StreamManifest | null): 'enabled' | 'disabled' | null => {
+    const requestedState = asTrimmedString(requestedEncoderRecordFor(manifest)?.state).toLowerCase();
+    if (requestedState === 'enabled' || requestedState === 'disabled') return requestedState;
+    const legacyEnabled = asRecord(manifest)?.encoder_enabled;
+    return typeof legacyEnabled === 'boolean' ? (legacyEnabled ? 'enabled' : 'disabled') : null;
+  };
+  const requestedEncoderSettingsFor = (manifest?: StreamManifest | null): Record<string, unknown> | null =>
+    asRecord(requestedEncoderRecordFor(manifest)?.settings) ?? asRecord(asRecord(manifest)?.encoder_settings);
+  const asFiniteNumber = (value: unknown): number | null => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  };
 
   async function loadBackends(manifest?: StreamManifest | null): Promise<void> {
     const netcamDevice = buildNetcamBackend(state.stream, manifest);
@@ -211,7 +231,7 @@ export function createCameraBackendController(state: BackendState, deps: Backend
 
       state.encoderImpl = pickCodecId(
         state.encoders,
-        resolvedEncoderId || manifest?.encoder_id,
+        resolvedEncoderId || requestedEncoderIdFor(manifest),
         defaultEncoderId ? [defaultEncoderId] : []
       );
       state.decoderImpl = pickCodecId(
@@ -237,9 +257,10 @@ export function createCameraBackendController(state: BackendState, deps: Backend
     const resolvedDecoder = resolvedDecoderStateFor();
     const resolvedEncoderId = resolvedCodecId(resolvedEncoder);
     const resolvedDecoderId = resolvedCodecId(resolvedDecoder);
+    const requestedEncoderState = requestedEncoderStateFor(manifest);
+    const encoderSettingsWire = requestedEncoderSettingsFor(manifest);
     if (manifest) {
       const decoderSettings = manifest.decoder_settings ?? null;
-      const encoderSettingsWire = manifest.encoder_settings ?? null;
       state.decoderFpsLimit = deps.normalizeFpsLimit(decoderSettings?.fps_limit ?? encoderSettingsWire?.decode_fps_limit ?? null);
       state.decoderRotationDegrees = deps.normalizeRotationDegrees(decoderSettings?.rotation_degrees ?? 0);
       state.decoderMirrorHorizontal = Boolean(decoderSettings?.mirror_horizontal ?? false);
@@ -328,7 +349,7 @@ export function createCameraBackendController(state: BackendState, deps: Backend
     const decoderEnabledFlag = manifestRecord?.decoder_enabled;
     const nextEncoderId = pickCodecId(
       state.encoders,
-      resolvedEncoderId || manifest?.encoder_id || state.encoderImpl
+      resolvedEncoderId || requestedEncoderIdFor(manifest) || state.encoderImpl
     );
     const nextDecoderId = pickCodecId(
       state.decoders,
@@ -337,23 +358,28 @@ export function createCameraBackendController(state: BackendState, deps: Backend
     );
     state.encoderEnabled = typeof resolvedEncoder?.enabled === 'boolean'
       ? resolvedEncoder.enabled
-      : typeof encoderEnabledFlag === 'boolean'
-        ? Boolean(encoderEnabledFlag)
-        : Boolean(nextEncoderId);
+      : requestedEncoderState === 'enabled'
+        ? true
+        : requestedEncoderState === 'disabled'
+          ? false
+          : typeof encoderEnabledFlag === 'boolean'
+            ? Boolean(encoderEnabledFlag)
+            : Boolean(nextEncoderId);
     state.decoderEnabled = typeof resolvedDecoder?.enabled === 'boolean'
       ? resolvedDecoder.enabled
       : typeof decoderEnabledFlag === 'boolean'
         ? Boolean(decoderEnabledFlag)
         : Boolean(nextDecoderId);
-    if (manifest?.encoder_settings) {
+    if (encoderSettingsWire) {
+      const outputResolution = asRecord(encoderSettingsWire.output_resolution);
       state.encoderSettings = {
-        bitrate: manifest.encoder_settings.bitrate ?? null,
-        gop: manifest.encoder_settings.gop ?? null,
-        threadCount: manifest.encoder_settings.thread_count ?? null,
-        outWidth: manifest.encoder_settings.output_resolution?.width ?? null,
-        outHeight: manifest.encoder_settings.output_resolution?.height ?? null
+        bitrate: asFiniteNumber(encoderSettingsWire.bitrate),
+        gop: asFiniteNumber(encoderSettingsWire.gop),
+        threadCount: asFiniteNumber(encoderSettingsWire.thread_count),
+        outWidth: asFiniteNumber(outputResolution?.width),
+        outHeight: asFiniteNumber(outputResolution?.height)
       };
-      state.encoderFpsLimit = deps.frameRateToFps(manifest.encoder_settings.framerate) ?? null;
+      state.encoderFpsLimit = deps.frameRateToFps(encoderSettingsWire.framerate) ?? null;
     } else {
       state.encoderFpsLimit = null;
     }

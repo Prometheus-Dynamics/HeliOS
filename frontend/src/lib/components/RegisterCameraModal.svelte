@@ -913,6 +913,7 @@
           hardware_id: selectStableHardwareId(device.identity?.keys) ?? device.identity?.display?.trim?.() ?? null
         } as unknown as StreamManifest['identity'],
         capture,
+        internal: false,
         pipeline_enabled: isSimpleRegistration
           ? shouldAttachSelectedPipeline || useRawMediaPipelineInSimpleMode
           : isMediaBackend,
@@ -958,7 +959,30 @@
                 slots: [{ row: 0, column: 0, pipeline_id: rawPipelineId, output_key: rawPipelineOutput }]
               }
             : null,
-        encoder_id: normalizedEncoderImpl,
+        pipeline_wires: [],
+        pipeline_host_inputs: {},
+        encoder: normalizedEncoderImpl
+          ? {
+              state: 'enabled',
+              id: normalizedEncoderImpl,
+              settings: {
+                bitrate: encoderSettings.bitrate,
+                gop: encoderSettings.gop,
+                framerate:
+                  encoderSettings.framerateNum && encoderSettings.framerateDen
+                    ? { numerator: encoderSettings.framerateNum, denominator: encoderSettings.framerateDen }
+                    : null,
+                thread_count: encoderSettings.threadCount,
+                output_resolution:
+                  encoderSettings.outWidth && encoderSettings.outHeight
+                    ? { width: encoderSettings.outWidth, height: encoderSettings.outHeight }
+                    : defaultEncoderOutputResolution,
+                decode_fps_limit: encoderSettings.decodeFps
+              }
+            }
+          : {
+              state: 'disabled'
+            },
         decoder_id: normalizedDecoderImpl,
         decoder_settings: normalizedDecoderImpl
           ? {
@@ -966,23 +990,8 @@
               mirror_horizontal: decoderMirrorHorizontal
             }
           : null,
-        encoder_settings: normalizedEncoderImpl
-          ? {
-              bitrate: encoderSettings.bitrate,
-              gop: encoderSettings.gop,
-              framerate:
-                encoderSettings.framerateNum && encoderSettings.framerateDen
-                  ? { numerator: encoderSettings.framerateNum, denominator: encoderSettings.framerateDen }
-                  : null,
-              thread_count: encoderSettings.threadCount,
-              output_resolution:
-                encoderSettings.outWidth && encoderSettings.outHeight
-                  ? { width: encoderSettings.outWidth, height: encoderSettings.outHeight }
-                  : defaultEncoderOutputResolution,
-              decode_fps_limit: encoderSettings.decodeFps
-            }
-          : null,
-        host_buffer: Number.isFinite(hostBuffer) ? hostBuffer : undefined,
+        host_buffer: Number.isFinite(hostBuffer) ? hostBuffer : 8,
+        shadow_recorder_enabled: false,
         start_on_boot: false
       };
 

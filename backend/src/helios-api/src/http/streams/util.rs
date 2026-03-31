@@ -102,7 +102,7 @@ mod tests {
     use super::*;
     use helios_engine::capture::CaptureConfig;
     use helios_engine::identity::DeviceIdentity;
-    use helios_engine::ipc::{default_stream_encoder_selector, EncoderSettings, FrameRate, ResolutionHint};
+    use helios_engine::ipc::{default_stream_encoder_selector, RequestedEncoderConfig};
     use std::collections::BTreeMap;
     use styx::prelude::{ColorSpace, MediaFormat, Resolution};
     use styx::{BackendHandle, BackendKind};
@@ -131,11 +131,9 @@ mod tests {
             pipeline_host_inputs: BTreeMap::new(),
             calibration: None,
             pose: None,
-            encoder_enabled: None,
-            encoder_id: None,
+            encoder: RequestedEncoderConfig::default(),
             decoder_enabled: None,
             decoder_id: None,
-            encoder_settings: None,
             decoder_settings: None,
             preview_jpeg_quality: None,
             shadow_recorder_enabled: false,
@@ -158,16 +156,7 @@ mod tests {
     #[test]
     fn resolve_stream_state_honors_explicit_disable() {
         let mut manifest = sample_manifest();
-        manifest.encoder_enabled = Some(false);
-        manifest.encoder_id = Some("turbojpeg".to_string());
-        manifest.encoder_settings = Some(EncoderSettings {
-            bitrate: Some(1),
-            gop: None,
-            framerate: Some(FrameRate { numerator: 60, denominator: 1 }),
-            thread_count: None,
-            output_resolution: Some(ResolutionHint { width: 640, height: 480 }),
-            decode_fps_limit: None,
-        });
+        manifest.encoder = RequestedEncoderConfig::disabled();
         manifest.decoder_enabled = Some(false);
         manifest.decoder_id = Some("image-crate".to_string());
 

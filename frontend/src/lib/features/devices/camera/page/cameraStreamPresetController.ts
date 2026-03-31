@@ -333,22 +333,26 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
           controls: [],
           device_keys: device.identity?.keys ?? []
         },
-        encoder_enabled: state.encoderEnabled,
-        encoder_id: encoderId,
+        encoder: state.encoderEnabled
+          ? {
+              state: 'enabled',
+              id: encoderId,
+              settings: {
+                bitrate: state.encoderSettings?.bitrate ?? null,
+                gop: state.encoderSettings?.gop ?? null,
+                thread_count: state.encoderSettings?.threadCount ?? null,
+                framerate: fpsToFrameRate(state.encoderFpsLimit),
+                output_resolution:
+                  state.encoderSettings?.outWidth && state.encoderSettings?.outHeight
+                    ? { width: state.encoderSettings.outWidth, height: state.encoderSettings.outHeight }
+                    : defaultEncoderOutputResolution
+              }
+            }
+          : {
+              state: 'disabled'
+            },
         decoder_enabled: decoderEnabled,
         decoder_id: decoderEnabled ? decoderId : null,
-        encoder_settings: state.encoderEnabled
-          ? {
-              bitrate: state.encoderSettings?.bitrate ?? null,
-              gop: state.encoderSettings?.gop ?? null,
-              thread_count: state.encoderSettings?.threadCount ?? null,
-              framerate: fpsToFrameRate(state.encoderFpsLimit),
-              output_resolution:
-                state.encoderSettings?.outWidth && state.encoderSettings?.outHeight
-                  ? { width: state.encoderSettings.outWidth, height: state.encoderSettings.outHeight }
-                  : defaultEncoderOutputResolution
-            }
-          : null,
         decoder_settings: decoderEnabled
           ? {
               fps_limit: state.decoderFpsLimit ?? null,

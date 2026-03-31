@@ -19,7 +19,7 @@ use crate::http::{AppState, storage, streams_persist};
 use helios_engine::capture::{BackendHandle, BackendKind, CaptureConfig, ModeId};
 use helios_engine::identity::DeviceIdentity;
 use helios_engine::ipc::EngineErrorCode;
-use helios_engine::ipc::{StreamManifest, StreamPipelineGridSlot, StreamPipelineLayout};
+use helios_engine::ipc::{RequestedEncoderConfig, StreamManifest, StreamPipelineGridSlot, StreamPipelineLayout};
 use styx::capture_api::make_file_device;
 use styx::core::format::{ColorSpace, MediaFormat, Resolution};
 use styx::prelude::FourCc;
@@ -251,11 +251,9 @@ pub(crate) async fn start_media_replay_stream(State(state): State<AppState>, Jso
         pipeline_host_inputs: std::collections::BTreeMap::new(),
         calibration: replay_calibration,
         pose: None,
-        encoder_enabled: None,
-        encoder_id: None,
+        encoder: RequestedEncoderConfig::default(),
         decoder_enabled: None,
         decoder_id: None,
-        encoder_settings: None,
         decoder_settings: None,
         preview_jpeg_quality: None,
         shadow_recorder_enabled: false,

@@ -29,11 +29,9 @@ fn sample_manifest() -> StreamManifest {
         pipeline_host_inputs: std::collections::BTreeMap::new(),
         calibration: None,
         pose: None,
-        encoder_enabled: None,
-        encoder_id: None,
+        encoder: RequestedEncoderConfig::default(),
         decoder_enabled: None,
         decoder_id: None,
-        encoder_settings: None,
         decoder_settings: None,
         preview_jpeg_quality: None,
         shadow_recorder_enabled: true,
@@ -121,7 +119,13 @@ fn encoder_settings_accepts_legacy_fps_framerate_json() {
 
 #[test]
 fn stream_manifest_defaults_shadow_recorder_off_when_omitted() {
-    let payload = serde_json::json!({
+    let payload = sample_manifest_json();
+    let parsed: StreamManifest = serde_json::from_value(payload).expect("decode manifest");
+    assert!(!parsed.shadow_recorder_enabled);
+}
+
+fn sample_manifest_json() -> serde_json::Value {
+    serde_json::json!({
         "identity": {},
         "capture": {
             "device_keys": [],
@@ -137,7 +141,58 @@ fn stream_manifest_defaults_shadow_recorder_off_when_omitted() {
             },
             "controls": []
         }
-    });
+    })
+}
+
+#[test]
+fn stream_manifest_accepts_typed_encoder_json() {
+    let mut payload = sample_manifest_json();
+    payload.as_object_mut().expect("manifest object").insert(
+        "encoder".to_string(),
+        serde_json::json!({
+            "state": "enabled",
+            "id": "h264",
+            "settings": {
+                "bitrate": 4_000_000,
+                "thread_count": 2
+            }
+        }),
+    );
     let parsed: StreamManifest = serde_json::from_value(payload).expect("decode manifest");
-    assert!(!parsed.shadow_recorder_enabled);
+    match parsed.encoder {
+        RequestedEncoderConfig::Enabled { id, settings } => {
+            assert_eq!(id.as_deref(), Some("h264"));
+            let settings = settings.expect("encoder settings");
+            assert_eq!(settings.bitrate, Some(4_000_000));
+            assert_eq!(settings.thread_count, Some(2));
+        }
+        RequestedEncoderConfig::Disabled => panic!("typed encoder config should remain enabled"),
+    }
+}
+
+#[test]
+fn stream_manifest_rejects_mixed_new_and_legacy_encoder_json() {
+    let mut payload = sample_manifest_json();
+    let object = payload.as_object_mut().expect("manifest object");
+    object.insert("encoder".to_string(), serde_json::json!({ "state": "enabled", "id": "h264" }));
+    object.insert("encoder_id".to_string(), serde_json::json!("turbojpeg"));
+
+    let err = serde_json::from_value::<StreamManifest>(payload).expect_err("mixed encoder config should fail");
+    assert!(err.to_string().contains("may not mix `encoder`"));
+}
+
+#[test]
+fn stream_manifest_rejects_legacy_disabled_encoder_with_settings() {
+    let mut payload = sample_manifest_json();
+    let object = payload.as_object_mut().expect("manifest object");
+    object.insert("encoder_enabled".to_string(), serde_json::json!(false));
+    object.insert(
+        "encoder_settings".to_string(),
+        serde_json::json!({
+            "bitrate": 2_000_000
+        }),
+    );
+
+    let err = serde_json::from_value::<StreamManifest>(payload).expect_err("legacy disabled encoder should not accept settings");
+    assert!(err.to_string().contains("legacy encoder_enabled=false"));
 }

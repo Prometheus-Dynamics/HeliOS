@@ -125,10 +125,12 @@ mod tests {
             pipeline_enabled = true
             active_pipeline_id = "4fca14eb-e218-48e4-adf9-b957d645c604"
             active_pipeline_output = "overlay"
-            encoder_enabled = true
             start_on_boot = true
 
-            [streams.manifest.encoder_settings]
+            [streams.manifest.encoder]
+            state = "enabled"
+
+            [streams.manifest.encoder.settings]
             framerate = { numerator = 20, denominator = 1 }
             output_resolution = { width = 854, height = 480 }
         "#;
@@ -138,6 +140,6 @@ mod tests {
         assert_eq!(doc.streams.len(), 1);
         assert_eq!(doc.streams[0].camera_id, "ov9782");
         assert_eq!(doc.streams[0].manifest.capture.target_fps, Some(120));
-        assert_eq!(doc.streams[0].manifest.encoder_settings.as_ref().and_then(|enc| enc.output_resolution.as_ref()).map(|res| (res.width, res.height)), Some((854, 480)));
+        assert_eq!(doc.streams[0].manifest.encoder.settings().and_then(|enc| enc.output_resolution.as_ref()).map(|res| (res.width, res.height)), Some((854, 480)));
     }
 }

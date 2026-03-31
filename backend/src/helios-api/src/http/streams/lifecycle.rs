@@ -474,16 +474,6 @@ async fn merge_stream_manifest_state(state: &AppState, manifest: &mut StreamMani
 
     normalize_pipeline_manifest(manifest);
 
-    // Honor explicit codec enable/disable toggles.
-    //
-    // We need dedicated boolean toggles because JSON `null` / absent fields are indistinguishable
-    // for `Option<T>`. Without these flags, a client cannot reliably disable codecs while
-    // restarting the same capture format: `null` gets treated as "not provided" and we inherit
-    // persisted codec selections.
-    if manifest.encoder_enabled == Some(false) {
-        manifest.encoder_id = None;
-        manifest.encoder_settings = None;
-    }
     if manifest.decoder_enabled == Some(false) {
         manifest.decoder_id = None;
         manifest.decoder_settings = None;
@@ -496,15 +486,11 @@ async fn merge_stream_manifest_state(state: &AppState, manifest: &mut StreamMani
     let same_format = requested_fourcc == base_fourcc;
     let same_mode = manifest.capture.mode.format == base.capture.mode.format;
     if same_format {
-        if manifest.encoder_enabled != Some(false) && manifest.encoder_id.is_none() {
-            manifest.encoder_id = base.encoder_id.clone();
-        }
+        manifest.encoder.ensure_id(base.encoder.id().map(ToString::to_string));
         if manifest.decoder_enabled != Some(false) && manifest.decoder_id.is_none() {
             manifest.decoder_id = base.decoder_id.clone();
         }
-        if manifest.encoder_enabled != Some(false) && manifest.encoder_settings.is_none() {
-            manifest.encoder_settings = base.encoder_settings.clone();
-        }
+        manifest.encoder.ensure_settings(base.encoder.settings().cloned());
         if manifest.decoder_enabled != Some(false) && manifest.decoder_settings.is_none() {
             manifest.decoder_settings = base.decoder_settings.clone();
         }
@@ -890,11 +876,9 @@ mod tests {
             pipeline_host_inputs: BTreeMap::new(),
             calibration: None,
             pose: None,
-            encoder_enabled: None,
-            encoder_id: None,
+            encoder: helios_engine::ipc::RequestedEncoderConfig::default(),
             decoder_enabled: None,
             decoder_id: None,
-            encoder_settings: None,
             decoder_settings: None,
             preview_jpeg_quality: None,
             shadow_recorder_enabled: false,

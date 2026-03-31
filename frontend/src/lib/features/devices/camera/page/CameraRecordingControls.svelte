@@ -217,8 +217,20 @@
     if (backend === 'file') return false;
     return Boolean(manifest?.shadow_recorder_enabled ?? false);
   });
+  const manifestEncoderId = (manifest: ReturnType<typeof manifestFor>): string => {
+    const manifestRecord =
+      manifest && typeof manifest === 'object' ? (manifest as Record<string, unknown>) : null;
+    const encoderRecord =
+      manifestRecord?.encoder && typeof manifestRecord.encoder === 'object'
+        ? (manifestRecord.encoder as Record<string, unknown>)
+        : null;
+    if (typeof encoderRecord?.id === 'string' && encoderRecord.id.trim().length > 0) {
+      return encoderRecord.id.trim().toLowerCase();
+    }
+    return String(manifestRecord?.encoder_id ?? '').trim().toLowerCase();
+  };
   const preferredMultiplexCodec = $derived.by(() => {
-    const encoderId = String(manifestFor(ctx.stream)?.encoder_id ?? '').toLowerCase();
+    const encoderId = manifestEncoderId(manifestFor(ctx.stream));
     if (encoderId.includes('265') || encoderId.includes('hevc')) return 'h265';
     if (encoderId.includes('264') || encoderId.includes('avc')) return 'h264';
     return null;

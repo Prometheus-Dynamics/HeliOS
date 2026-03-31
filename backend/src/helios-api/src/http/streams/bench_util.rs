@@ -1,7 +1,7 @@
 use helios_engine::{
     capture::{BackendHandle, BackendKind, CaptureConfig, ControlAssignment, DiscoveredDevice},
     identity::DeviceIdentity,
-    ipc::{EngineEvent, StreamManifest},
+    ipc::{EngineEvent, RequestedEncoderConfig, StreamManifest},
     stream::touch_stream_preview,
 };
 use std::{collections::HashMap, sync::OnceLock, time::Duration};
@@ -123,11 +123,9 @@ pub async fn start_stream_for_mode(args: StartStreamArgs<'_>) -> Result<Uuid, St
         pipeline_host_inputs: std::collections::BTreeMap::new(),
         calibration: None,
         pose: None,
-        encoder_enabled: None,
-        encoder_id: None,
+        encoder: RequestedEncoderConfig::default(),
         decoder_enabled: None,
         decoder_id: None,
-        encoder_settings: None,
         decoder_settings: None,
         preview_jpeg_quality: None,
         shadow_recorder_enabled: false,

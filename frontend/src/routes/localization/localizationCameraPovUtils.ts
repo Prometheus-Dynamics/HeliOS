@@ -133,8 +133,8 @@ const resolvePovResolution = (
   const captureMode = asRecord(capture?.mode);
   const captureModeFormat = asRecord(captureMode?.format);
   const captureFormat = asRecord(capture?.format);
-  const encoderSettings = asRecord(manifest?.encoder_settings);
   const encoder = asRecord(manifest?.encoder);
+  const encoderSettings = asRecord(encoder?.settings) ?? asRecord(asRecord(manifest)?.encoder_settings);
   const candidates = [
     captureModeFormat?.resolution,
     captureMode?.resolution,

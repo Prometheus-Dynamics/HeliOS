@@ -4385,7 +4385,7 @@ fn upsert_control_assignment(controls: &mut Vec<ControlAssignment>, id: u32, val
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ipc::StreamManifest;
+    use crate::ipc::{RequestedEncoderConfig, StreamManifest};
     use serde_json::json;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
@@ -4418,11 +4418,9 @@ mod tests {
             pipeline_host_inputs: std::collections::BTreeMap::new(),
             calibration: None,
             pose: None,
-            encoder_enabled: None,
-            encoder_id: Some("h264".to_string()),
+            encoder: RequestedEncoderConfig::enabled(Some("h264".to_string()), None),
             decoder_enabled: None,
             decoder_id: None,
-            encoder_settings: None,
             decoder_settings: None,
             preview_jpeg_quality: None,
             shadow_recorder_enabled: false,
@@ -4529,11 +4527,14 @@ mod tests {
     #[test]
     fn default_encoder_settings_do_not_override_explicit_values() {
         let manifest = StreamManifest {
-            encoder_settings: Some(crate::ipc::EncoderSettings {
-                framerate: Some(crate::ipc::FrameRate { numerator: 24, denominator: 1 }),
-                output_resolution: Some(crate::ipc::ResolutionHint { width: 1280, height: 720 }),
-                ..Default::default()
-            }),
+            encoder: RequestedEncoderConfig::enabled(
+                None,
+                Some(crate::ipc::EncoderSettings {
+                    framerate: Some(crate::ipc::FrameRate { numerator: 24, denominator: 1 }),
+                    output_resolution: Some(crate::ipc::ResolutionHint { width: 1280, height: 720 }),
+                    ..Default::default()
+                }),
+            ),
             preview_jpeg_quality: Some(80),
             ..sample_manifest_for_encoder_defaults(1920, 1080).to_requested_manifest()
         }
