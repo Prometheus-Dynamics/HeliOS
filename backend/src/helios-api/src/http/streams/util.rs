@@ -3,7 +3,8 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use helios_engine::ipc::{JsonWire, StreamManifest, StreamPipelineGridSlot, StreamPipelineLayout};
+use helios_engine::capture::CaptureDescriptor;
+use helios_engine::ipc::{JsonWire, StreamManifest, StreamPipelineGridSlot, StreamPipelineLayout, StreamStatus};
 use lib_ipc::client::ClientTransportError;
 use std::collections::BTreeMap;
 use std::io;
@@ -17,7 +18,7 @@ use crate::http::streams_persist;
 
 use super::CALIBRATION_MODE_PIPELINE_UUID;
 use super::RAW_PIPELINE_UUID;
-use super::types::{EncoderSettingsDescriptor, EngineErrorBody};
+use super::types::{EncoderSettingsDescriptor, EngineErrorBody, ResolvedCodecState, ResolvedStreamState, StreamInfo};
 use helios_engine::ipc::EngineErrorCode;
 
 pub(crate) fn map_client_error(err: ClientTransportError) -> Response {
@@ -187,6 +188,54 @@ pub(crate) fn default_decoder_ids_by_capture_format() -> BTreeMap<String, String
     defaults
 }
 
+fn normalized_codec_selector(value: Option<&str>) -> Option<String> {
+    value.map(str::trim).filter(|value| !value.is_empty()).map(ToString::to_string)
+}
+
+pub(crate) fn default_decoder_selector_for_capture_format(fourcc: FourCc) -> Option<String> {
+    let defaults = default_decoder_ids_by_capture_format();
+    let key = String::from_utf8_lossy(&fourcc.to_u32().to_le_bytes()).trim().to_ascii_uppercase();
+    defaults.get(&key).cloned().or_else(|| defaults.get("ANY").cloned())
+}
+
+pub(crate) fn resolve_stream_state(manifest: &StreamManifest) -> ResolvedStreamState {
+    let mut normalized = manifest.clone();
+    let encoder_explicitly_disabled = normalized.encoder_enabled == Some(false);
+    let decoder_explicitly_disabled = normalized.decoder_enabled == Some(false);
+
+    if encoder_explicitly_disabled {
+        normalized.encoder_id = None;
+        normalized.encoder_settings = None;
+    }
+    if decoder_explicitly_disabled {
+        normalized.decoder_id = None;
+        normalized.decoder_settings = None;
+    }
+
+    if !encoder_explicitly_disabled {
+        normalize_stream_encoder_manifest(&mut normalized);
+    }
+
+    let encoder_codec_id = normalized_codec_selector(normalized.encoder_id.as_deref());
+    let encoder_enabled = !encoder_explicitly_disabled && encoder_codec_id.is_some();
+
+    let mut decoder_codec_id = normalized_codec_selector(normalized.decoder_id.as_deref());
+    if !decoder_explicitly_disabled && decoder_codec_id.is_none() {
+        decoder_codec_id = default_decoder_selector_for_capture_format(normalized.capture.mode.format.code);
+    }
+    let decoder_enabled = !decoder_explicitly_disabled && decoder_codec_id.is_some();
+
+    ResolvedStreamState {
+        encoder: ResolvedCodecState { enabled: encoder_enabled, codec_id: encoder_codec_id, settings_present: encoder_enabled && normalized.encoder_settings.is_some() },
+        decoder: ResolvedCodecState { enabled: decoder_enabled, codec_id: decoder_codec_id, settings_present: decoder_enabled && normalized.decoder_settings.is_some() },
+    }
+}
+
+pub(crate) fn build_stream_info(id: Uuid, descriptor: CaptureDescriptor, manifest: StreamManifest, status: Option<StreamStatus>) -> StreamInfo {
+    let resolved = resolve_stream_state(&manifest);
+    StreamInfo { id, descriptor, manifest, resolved, status }
+}
+
 pub(crate) fn normalize_stream_encoder_manifest(manifest: &mut StreamManifest) {
     if !manifest_prefers_default_stream_encoder(manifest) {
         return;
@@ -210,6 +259,89 @@ pub(crate) fn normalize_stream_encoder_manifest(manifest: &mut StreamManifest) {
 
     if manifest.encoder_enabled.is_none() {
         manifest.encoder_enabled = Some(true);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use helios_engine::capture::CaptureConfig;
+    use helios_engine::identity::DeviceIdentity;
+    use helios_engine::ipc::{EncoderSettings, FrameRate, ResolutionHint};
+    use std::collections::BTreeMap;
+    use styx::{BackendHandle, BackendKind};
+    use styx::prelude::{ColorSpace, MediaFormat, Resolution};
+
+    fn sample_manifest() -> StreamManifest {
+        StreamManifest {
+            identity: DeviceIdentity { id: None, alias: Some("camera".to_string()), hardware_id: None },
+            capture: CaptureConfig {
+                device_keys: vec!["cam".to_string()],
+                backend: BackendKind::Libcamera,
+                handle: BackendHandle::Libcamera { id: "cam0".to_string() },
+                mode: helios_engine::capture::ModeId {
+                    format: MediaFormat::new(FourCc::new(*b"NV12"), Resolution::new(1280, 800).unwrap(), ColorSpace::Srgb),
+                    interval: None,
+                },
+                target_fps: None,
+                interval: None,
+                controls: Vec::new(),
+                enable_tdn_output: false,
+            },
+            host_buffer: 2,
+            internal: false,
+            pipeline_enabled: None,
+            pipelines: Vec::new(),
+            active_pipeline_id: None,
+            active_pipeline_output: None,
+            pipeline_layout: None,
+            pipeline_wires: Vec::new(),
+            pipeline_host_inputs: BTreeMap::new(),
+            calibration: None,
+            pose: None,
+            encoder_enabled: None,
+            encoder_id: None,
+            decoder_enabled: None,
+            decoder_id: None,
+            encoder_settings: None,
+            decoder_settings: None,
+            preview_jpeg_quality: None,
+            shadow_recorder_enabled: false,
+            start_on_boot: false,
+        }
+    }
+
+    #[test]
+    fn resolve_stream_state_applies_default_encoder_and_decoder() {
+        let resolved = resolve_stream_state(&sample_manifest());
+        assert!(resolved.encoder.enabled);
+        assert_eq!(resolved.encoder.codec_id.as_deref(), default_stream_encoder_selector().as_deref());
+        assert!(resolved.decoder.enabled);
+        assert_eq!(resolved.decoder.codec_id.as_deref(), default_decoder_selector_for_capture_format(FourCc::new(*b"NV12")).as_deref());
+    }
+
+    #[test]
+    fn resolve_stream_state_honors_explicit_disable() {
+        let mut manifest = sample_manifest();
+        manifest.encoder_enabled = Some(false);
+        manifest.encoder_id = Some("turbojpeg".to_string());
+        manifest.encoder_settings = Some(EncoderSettings {
+            bitrate: Some(1),
+            gop: None,
+            framerate: Some(FrameRate { numerator: 60, denominator: 1 }),
+            thread_count: None,
+            output_resolution: Some(ResolutionHint { width: 640, height: 480 }),
+            decode_fps_limit: None,
+        });
+        manifest.decoder_enabled = Some(false);
+        manifest.decoder_id = Some("image-crate".to_string());
+
+        let resolved = resolve_stream_state(&manifest);
+        assert!(!resolved.encoder.enabled);
+        assert!(resolved.encoder.codec_id.is_none());
+        assert!(!resolved.encoder.settings_present);
+        assert!(!resolved.decoder.enabled);
+        assert!(resolved.decoder.codec_id.is_none());
     }
 }
 

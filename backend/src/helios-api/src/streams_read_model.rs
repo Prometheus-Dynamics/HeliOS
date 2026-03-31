@@ -2,7 +2,7 @@ use crate::api_observability::{ApiCacheMetric, CacheMetricCounters};
 use crate::http::AppState;
 use crate::http::streams::lifecycle::{descriptor_from_persisted_manifest, ensure_descriptor_has_mode};
 use crate::http::streams::types::StreamInfo;
-use crate::http::streams::util::{apply_effective_pipeline_layout, list_streams_timeout, normalize_pipeline_manifest};
+use crate::http::streams::util::{apply_effective_pipeline_layout, build_stream_info, list_streams_timeout, normalize_pipeline_manifest};
 use crate::http::streams_persist;
 use helios_engine::capture::CaptureControlInfo;
 use helios_engine::ipc::{StreamManifest, StreamSummary};
@@ -50,7 +50,7 @@ fn stream_info_from_summary(StreamSummary { stream_id, mut descriptor, mut manif
     normalize_pipeline_manifest(&mut manifest);
     apply_effective_pipeline_layout(&mut manifest);
     ensure_descriptor_has_mode(&mut descriptor, &manifest);
-    StreamInfo { id: stream_id, descriptor, manifest, status: Some(status) }
+    build_stream_info(stream_id, descriptor, manifest, Some(status))
 }
 
 fn merge_persisted_streams(mut active: Vec<StreamInfo>, persisted: Vec<streams_persist::PersistedStreamRecord>) -> Vec<StreamInfo> {
@@ -99,7 +99,7 @@ fn merge_persisted_streams(mut active: Vec<StreamInfo>, persisted: Vec<streams_p
         normalize_pipeline_manifest(&mut manifest);
         apply_effective_pipeline_layout(&mut manifest);
         let descriptor = descriptor_from_persisted_manifest(&manifest);
-        active.push(StreamInfo { id: stream_id, descriptor, manifest, status: None });
+        active.push(build_stream_info(stream_id, descriptor, manifest, None));
         seen_ids.insert(stream_id);
     }
 

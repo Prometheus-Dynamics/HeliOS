@@ -21,8 +21,8 @@ use crate::http::validation::validation_error_response;
 use super::sensor_bench;
 use super::types::{CodecInfo, CodecTunables, StartStreamResponse, StreamInfo};
 use super::util::{
-    apply_effective_pipeline_layout, camera_id_for_manifest, default_ffmpeg_settings_descriptor, engine_error_body, list_streams_timeout, map_client_error, normalize_pipeline_manifest,
-    normalize_stream_encoder_manifest,
+    apply_effective_pipeline_layout, build_stream_info, camera_id_for_manifest, default_ffmpeg_settings_descriptor, engine_error_body, list_streams_timeout, map_client_error,
+    normalize_pipeline_manifest, normalize_stream_encoder_manifest,
 };
 use super::validation::validate_stream_manifest;
 use super::wait::{wait_for_stream_gone, wait_for_stream_started};
@@ -583,7 +583,7 @@ pub(crate) async fn get_stream(state: AppState, id: Uuid) -> Response {
                 }
                 apply_effective_pipeline_layout(&mut manifest);
                 ensure_descriptor_has_mode(&mut descriptor, &manifest);
-                Json(StreamInfo { id: stream_id, descriptor, manifest, status: Some(status) }).into_response()
+                Json(build_stream_info(stream_id, descriptor, manifest, Some(status))).into_response()
             }
             None => {
                 // If the stream isn't currently running, fall back to the persisted record so the
@@ -603,7 +603,7 @@ pub(crate) async fn get_stream(state: AppState, id: Uuid) -> Response {
                     manifest.identity.id = Some(id);
                     apply_effective_pipeline_layout(&mut manifest);
                     let descriptor = descriptor_from_persisted_manifest(&manifest);
-                    return Json(StreamInfo { id, descriptor, manifest, status: None }).into_response();
+                    return Json(build_stream_info(id, descriptor, manifest, None)).into_response();
                 }
 
                 StatusCode::NOT_FOUND.into_response()

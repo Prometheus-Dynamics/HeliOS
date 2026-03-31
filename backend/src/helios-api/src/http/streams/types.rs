@@ -11,7 +11,26 @@ pub struct StreamInfo {
     pub descriptor: CaptureDescriptor,
     pub manifest: StreamManifest,
     #[serde(default)]
+    pub resolved: ResolvedStreamState,
+    #[serde(default)]
     pub status: Option<StreamStatus>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedStreamState {
+    pub encoder: ResolvedCodecState,
+    pub decoder: ResolvedCodecState,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedCodecState {
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codec_id: Option<String>,
+    #[serde(default)]
+    pub settings_present: bool,
 }
 
 #[derive(Serialize, Deserialize, ToSchema)]

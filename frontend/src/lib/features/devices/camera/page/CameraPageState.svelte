@@ -1053,8 +1053,14 @@
       return;
     }
 
+    const resolvedEncoderId = String(streamState.stream?.resolved?.encoder?.codecId ?? '').trim();
+    const resolvedDecoderId = String(streamState.stream?.resolved?.decoder?.codecId ?? '').trim();
+
     if (!streamState.encoderSelectionTouched && streamState.encoders.length) {
-      const preferred = pickCodecId(streamState.encoders, streamState.encoderImpl);
+      const preferred = pickCodecId(
+        streamState.encoders,
+        resolvedEncoderId || streamState.encoderImpl
+      );
       if (preferred) {
         if (streamState.encoderImpl !== preferred) {
           streamState.encoderImpl = preferred;
@@ -1073,7 +1079,7 @@
       ].filter((value, index, list): value is string => typeof value === 'string' && value.trim().length > 0 && list.indexOf(value) === index);
       const preferred = pickCodecId(
         streamState.decoders,
-        streamState.decoderImpl,
+        resolvedDecoderId || streamState.decoderImpl,
         preferredDecoderIds
       );
       if (preferred) {

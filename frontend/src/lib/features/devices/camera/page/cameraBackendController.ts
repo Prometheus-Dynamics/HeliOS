@@ -180,6 +180,12 @@ export function createCameraBackendController(state: BackendState, deps: Backend
     asRecord(manifest?.identity) ?? asRecord(asRecord(manifest)?.identity);
   const captureRecordFor = (manifest?: StreamManifest | null): Record<string, unknown> | null =>
     asRecord(manifest?.capture) ?? asRecord(asRecord(manifest)?.capture);
+  const resolvedEncoderStateFor = (): StreamInfo['resolved']['encoder'] | null =>
+    state.stream?.resolved?.encoder ?? null;
+  const resolvedDecoderStateFor = (): StreamInfo['resolved']['decoder'] | null =>
+    state.stream?.resolved?.decoder ?? null;
+  const resolvedCodecId = (value: { codecId?: string | null } | null | undefined): string =>
+    asTrimmedString(value?.codecId);
 
   function isFileBackend(kind: unknown): boolean {
     return String(kind ?? '').toLowerCase() === 'file';
@@ -389,6 +395,8 @@ export function createCameraBackendController(state: BackendState, deps: Backend
     try {
       const list = await deps.streamsApi.listCodecs();
       const runtimeStatus = await deps.streamsApi.runtimeStatus();
+      const resolvedEncoderId = resolvedCodecId(resolvedEncoderStateFor());
+      const resolvedDecoderId = resolvedCodecId(resolvedDecoderStateFor());
       const defaultEncoderId = asTrimmedString(runtimeStatus?.streams?.capabilities?.defaults?.defaultEncoderId);
       const decoderDefaults = runtimeStatus?.streams?.capabilities?.defaults?.defaultDecoderIdsByCaptureFormat;
       state.codecs = Array.isArray(list) ? list : [];
@@ -413,8 +421,16 @@ export function createCameraBackendController(state: BackendState, deps: Backend
         (c) => `${c.name}::${c.implementation}::${c.input}::${c.output}`
       );
 
-      state.encoderImpl = pickCodecId(state.encoders, manifest?.encoder_id, defaultEncoderId ? [defaultEncoderId] : []);
-      state.decoderImpl = pickCodecId(state.decoders, manifest?.decoder_id, decoderPreferencesForFormat(manifest?.capture?.mode?.format?.code ?? null));
+      state.encoderImpl = pickCodecId(
+        state.encoders,
+        resolvedEncoderId || manifest?.encoder_id,
+        defaultEncoderId ? [defaultEncoderId] : []
+      );
+      state.decoderImpl = pickCodecId(
+        state.decoders,
+        resolvedDecoderId || manifest?.decoder_id,
+        decoderPreferencesForFormat(manifest?.capture?.mode?.format?.code ?? null)
+      );
     } catch (err) {
       console.warn('Failed to load codec catalog', err);
     }
@@ -426,6 +442,10 @@ export function createCameraBackendController(state: BackendState, deps: Backend
     const captureRecord = captureRecordFor(manifest);
     const captureModeRecord = asRecord(captureRecord?.mode);
     const identityRecord = identityRecordFor(manifest);
+    const resolvedEncoder = resolvedEncoderStateFor();
+    const resolvedDecoder = resolvedDecoderStateFor();
+    const resolvedEncoderId = resolvedCodecId(resolvedEncoder);
+    const resolvedDecoderId = resolvedCodecId(resolvedDecoder);
     if (manifest) {
       const decoderSettings = manifest.decoder_settings ?? null;
       const encoderSettingsWire = manifest.encoder_settings ?? null;
@@ -524,15 +544,19 @@ export function createCameraBackendController(state: BackendState, deps: Backend
       manifestEncoderId.toLowerCase() !== 'ffmpeg'
     );
     const hasMediaCodecs = isMediaManifestBackend && (state.encoders.length > 0 || state.decoders.length > 0);
-    state.encoderEnabled = typeof encoderEnabledFlag === 'boolean'
-      ? (isMediaManifestBackend && !encoderEnabledFlag && hasMediaCodecs ? true : encoderEnabledFlag)
-      : encoderSelectionIsConcrete || (state.encoders.length > 0 && !isMediaManifestBackend ? true : (isMediaManifestBackend && state.encoders.length > 0));
-    if (!state.encoderEnabled && !isMediaManifestBackend && !encoderSelectionIsConcrete && state.encoders.length > 0) {
+    state.encoderEnabled = typeof resolvedEncoder?.enabled === 'boolean'
+      ? resolvedEncoder.enabled
+      : typeof encoderEnabledFlag === 'boolean'
+        ? (isMediaManifestBackend && !encoderEnabledFlag && hasMediaCodecs ? true : encoderEnabledFlag)
+        : encoderSelectionIsConcrete || (state.encoders.length > 0 && !isMediaManifestBackend ? true : (isMediaManifestBackend && state.encoders.length > 0));
+    if (!state.encoderEnabled && !isMediaManifestBackend && !encoderSelectionIsConcrete && !resolvedEncoderId && state.encoders.length > 0) {
       state.encoderEnabled = true;
     }
-    state.decoderEnabled = typeof decoderEnabledFlag === 'boolean'
-      ? (isMediaManifestBackend && !decoderEnabledFlag && hasMediaCodecs ? true : decoderEnabledFlag)
-      : manifest?.decoder_id != null || (isMediaManifestBackend && state.decoders.length > 0);
+    state.decoderEnabled = typeof resolvedDecoder?.enabled === 'boolean'
+      ? resolvedDecoder.enabled
+      : typeof decoderEnabledFlag === 'boolean'
+        ? (isMediaManifestBackend && !decoderEnabledFlag && hasMediaCodecs ? true : decoderEnabledFlag)
+        : manifest?.decoder_id != null || (isMediaManifestBackend && state.decoders.length > 0);
     if (manifest?.encoder_settings) {
       state.encoderSettings = {
         bitrate: manifest.encoder_settings.bitrate ?? null,
@@ -545,11 +569,15 @@ export function createCameraBackendController(state: BackendState, deps: Backend
     } else {
       state.encoderFpsLimit = null;
     }
-    if (!manifest?.encoder_id && state.encoders.length && !state.encoderSelectionTouched) {
-      state.encoderImpl = pickCodecId(state.encoders, state.encoderImpl);
+    if (state.encoders.length && !state.encoderSelectionTouched) {
+      state.encoderImpl = pickCodecId(state.encoders, resolvedEncoderId || manifest?.encoder_id || state.encoderImpl);
     }
-    if (!manifest?.decoder_id && state.decoders.length && !state.decoderSelectionTouched) {
-      state.decoderImpl = pickCodecId(state.decoders, state.decoderImpl, decoderPreferencesForFormat(state.selectedFormat));
+    if (state.decoders.length && !state.decoderSelectionTouched) {
+      state.decoderImpl = pickCodecId(
+        state.decoders,
+        resolvedDecoderId || manifest?.decoder_id || state.decoderImpl,
+        decoderPreferencesForFormat(state.selectedFormat)
+      );
     }
 
     const pipelineEnabled = manifestRecord?.pipeline_enabled;
