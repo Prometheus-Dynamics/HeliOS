@@ -1,25 +1,5 @@
 <script lang="ts" module>
-  import type { CalibrationImage, CalibrationParams, IpaStatus } from '$lib/features/devices/camera/cameraCalibrationTypes';
-
-  export type CalibrationSolveResult = {
-    calibration: CalibrationParams;
-    reprojectionErrorPx?: number;
-    viewsUsed?: number;
-    pointsUsed?: number;
-    warnings?: string[];
-    debugViews?: Array<{
-      image: string;
-      overlay?: string | null;
-      tagsDetected: number;
-      pointsDetected: number;
-      used: boolean;
-      coverageRatio: number;
-      rawTagsDetected?: number;
-      rawIds?: number[];
-      rawDuplicateIds?: number[];
-      rawOutOfRangeIds?: number[];
-    }>;
-  };
+  import type { CalibrationImage, CalibrationParams, CalibrationResult, IpaStatus } from '$lib/features/devices/camera/cameraCalibrationTypes';
 
   export function createCameraCalibrationState() {
     const state = $state({
@@ -47,7 +27,7 @@
       calibrationGuidedCaptureToken: 0,
       calibrationGuidedAccumulateLive: false,
       calibrationIncludeOverlays: false,
-      calibrationResult: null as CalibrationSolveResult | null,
+      calibrationResult: null as CalibrationResult | null,
       calibrationImportSourcesLoading: false,
       calibrationImporting: false,
       calibrationImportError: null as string | null,

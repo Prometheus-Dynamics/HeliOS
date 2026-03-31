@@ -1,8 +1,7 @@
 import type { StreamInfo, StreamManifest } from '$lib/api/httpClient';
-import type { CalibrationParams } from '$lib/features/devices/camera/cameraCalibrationTypes';
-import type { CalibrationSolveResult } from './cameraCalibrationStore.svelte';
+import type { CalibrationParams, CalibrationResult } from '$lib/features/devices/camera/cameraCalibrationTypes';
 
-type SolveDebugView = NonNullable<CalibrationSolveResult['debugViews']>[number];
+type SolveDebugView = NonNullable<CalibrationResult['debugViews']>[number];
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
@@ -44,7 +43,7 @@ export function resolvePoseCameraRef(streamInfo: StreamInfo | null, fallback: st
   return identityFallback || fallback;
 }
 
-export function normalizeCalibrationSolveResult(value: unknown): CalibrationSolveResult | null {
+export function normalizeCalibrationSolveResult(value: unknown): CalibrationResult | null {
   const record = asRecord(value);
   if (!record) return null;
   const calibration = asRecord(record.calibration) ?? asRecord(record.camera) ?? record;

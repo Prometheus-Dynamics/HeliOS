@@ -1,33 +1,6 @@
 <script lang="ts">
+  import type { CalibrationResult } from '../cameraCalibrationTypes';
   import { estimateCalibrationFovDegs } from '../cameraCalibrationUtils';
-
-  type CalibrationResult = {
-    calibration: {
-      fx: number;
-      fy: number;
-      cx: number;
-      cy: number;
-      k1: number;
-      k2: number;
-      p1: number;
-      p2: number;
-      k3: number;
-      undistortIters: number;
-      lensModel?: 'pinhole' | 'fisheye';
-    };
-    reprojectionErrorPx: number;
-    viewsUsed: number;
-    pointsUsed: number;
-    warnings?: string[];
-    debugViews?: Array<{
-      image: string;
-      overlay?: string | null;
-      tagsDetected: number;
-      pointsDetected: number;
-      used: boolean;
-      coverageRatio: number;
-    }>;
-  };
 
   type CalibrationResultsProps = {
     calibrationResult: CalibrationResult | null;

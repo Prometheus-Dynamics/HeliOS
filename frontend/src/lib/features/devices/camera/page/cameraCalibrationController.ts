@@ -1,11 +1,10 @@
 import type { StreamInfo } from '$lib/api/httpClient';
 import { apiFetchResponse } from '$lib/api/core/http';
-import type { CalibrationBoard, CalibrationImage, CalibrationParams, IpaStatus } from '$lib/features/devices/camera/cameraCalibrationTypes';
+import type { CalibrationBoard, CalibrationImage, CalibrationParams, CalibrationResult, IpaStatus } from '$lib/features/devices/camera/cameraCalibrationTypes';
 import { StreamsApi } from '$lib/api/streamsApi';
 import { emitMediaMutation } from '$lib/features/media/mutations';
 import { compareMediaRecent } from '$lib/features/media/sort';
 import { resolveStreamLabel } from '$lib/utils/streamLabels';
-import type { CalibrationSolveResult } from './cameraCalibrationStore.svelte';
 
 type CalibrationImportSource = {
   id: string;
@@ -49,8 +48,8 @@ type CalibrationState = {
   set calibrationGuidedAccumulateLive(value: boolean);
   get calibrationIncludeOverlays(): boolean;
   set calibrationIncludeOverlays(value: boolean);
-  get calibrationResult(): CalibrationSolveResult | null;
-  set calibrationResult(value: CalibrationSolveResult | null);
+  get calibrationResult(): CalibrationResult | null;
+  set calibrationResult(value: CalibrationResult | null);
   get calibrationImportSourcesLoading(): boolean;
   set calibrationImportSourcesLoading(value: boolean);
   get calibrationImporting(): boolean;
@@ -106,7 +105,7 @@ type CalibrationDeps = {
     inline?: (message: string) => void;
   }) => string | void;
   refresh: () => Promise<void>;
-  normalizeCalibrationSolveResult: (value: unknown) => CalibrationSolveResult | null;
+  normalizeCalibrationSolveResult: (value: unknown) => CalibrationResult | null;
   normalizeCalibrationParams: (value: unknown) => CalibrationParams | null;
 };
 
