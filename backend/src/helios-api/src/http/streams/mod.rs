@@ -289,7 +289,6 @@ async fn set_pipeline_output(State(state): State<AppState>, Path(id): Path<Uuid>
     let requested_output = req.output.clone();
     let requested_output_for_manifest = requested_output.clone();
     let apply_output = |manifest: &mut helios_engine::ipc::StreamManifest| {
-        util::normalize_pipeline_manifest(manifest);
         let active_pipeline_id = manifest.active_pipeline_id.or_else(|| manifest.pipelines.first().map(|binding| binding.pipeline_id));
         let view_pipeline_id = single_view_slot_pipeline_id(manifest).or(active_pipeline_id);
         let output_targets_active_pipeline = view_pipeline_id == active_pipeline_id;
@@ -674,8 +673,6 @@ async fn set_pipeline_graph(State(state): State<AppState>, Path(id): Path<Uuid>,
     match state.engine.set_graph(id, req.graph.clone(), Some(pipeline_id), req.output.clone()).await {
         Ok(EngineEvent::Ack { .. }) => {
             if let Err(err) = util::persist_live_stream_manifest_update(&state, id, |manifest| {
-                util::normalize_pipeline_manifest(manifest);
-
                 // `/streams/:id/pipeline/graph` updates (or inserts) a single pipeline binding.
                 // Importantly: do not clear existing multiplex layout state, since users can
                 // assign/tune pipelines while a multiplex grid is configured.
@@ -710,8 +707,6 @@ async fn set_pipeline_graph(State(state): State<AppState>, Path(id): Path<Uuid>,
         }
         Ok(EngineEvent::Nack { code: EngineErrorCode::NotFound, .. }) => {
             let updated = match util::update_persisted_manifest_by_stream_id_checked(id, |manifest| {
-                util::normalize_pipeline_manifest(manifest);
-
                 let mut replaced = false;
                 for binding in &mut manifest.pipelines {
                     if binding.pipeline_id == pipeline_id {
@@ -782,8 +777,6 @@ async fn set_pipeline_graph_patch(State(state): State<AppState>, Path(id): Path<
     match state.engine.set_graph_patch(id, patch.clone(), Some(pipeline_id)).await {
         Ok(EngineEvent::Ack { .. }) => {
             if let Err(err) = util::persist_live_stream_manifest_update(&state, id, |manifest| {
-                util::normalize_pipeline_manifest(manifest);
-
                 let mut updated = false;
                 for binding in &mut manifest.pipelines {
                     if binding.pipeline_id == pipeline_id {
@@ -809,8 +802,6 @@ async fn set_pipeline_graph_patch(State(state): State<AppState>, Path(id): Path<
         }
         Ok(EngineEvent::Nack { code: EngineErrorCode::NotFound, .. }) => {
             let updated = match util::update_persisted_manifest_by_stream_id_checked(id, |manifest| {
-                util::normalize_pipeline_manifest(manifest);
-
                 let mut replaced = false;
                 for binding in &mut manifest.pipelines {
                     if binding.pipeline_id == pipeline_id {

@@ -546,7 +546,7 @@ where
         }
 
         updater(&mut manifest);
-        streams_persist::persist_manifest_checked(&record.camera_id, Some(stream_id), manifest.clone()).await?;
+        let manifest = streams_persist::persist_manifest_prepared_checked(&record.camera_id, Some(stream_id), manifest).await?;
         return Ok(Some(manifest));
     }
 
@@ -571,7 +571,7 @@ where
 
     let mut manifest = stream.manifest.to_requested_manifest();
     updater(&mut manifest);
-    streams_persist::persist_manifest_checked(&camera_id_for_manifest(&manifest), Some(stream_id), manifest.clone())
+    let manifest = streams_persist::persist_manifest_prepared_checked(&camera_id_for_manifest(&manifest), Some(stream_id), manifest)
         .await
         .map_err(|err| format!("updated live state but failed to persist stream manifest: {err}"))?;
     state.services.streams.upsert_cached_stream_manifest(stream_id, manifest.clone()).await;

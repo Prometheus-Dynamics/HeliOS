@@ -4,12 +4,13 @@ use helios_engine::ipc::{
     default_stream_encoder_selector,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use styx::{BackendHandle, BackendKind};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use crate::http::identity_tokens;
 use crate::http::pipelines;
 use crate::http::validation::{ValidationIssue, ValidationWarning, issue, warning};
 
@@ -73,6 +74,12 @@ pub struct StreamValidationResult {
 }
 
 #[derive(Debug, Clone)]
+pub struct NormalizedStreamManifest {
+    pub manifest: StreamManifest,
+    pub warnings: Vec<ValidationWarning>,
+}
+
+#[derive(Debug, Clone)]
 pub struct StreamValidationError {
     pub issues: Vec<ValidationIssue>,
     pub warnings: Vec<ValidationWarning>,
@@ -111,21 +118,38 @@ pub fn stream_capabilities() -> StreamCapabilitiesResponse {
     }
 }
 
-pub async fn validate_stream_manifest(mut manifest: StreamManifest) -> Result<StreamValidationResult, StreamValidationError> {
-    let mut issues = Vec::<ValidationIssue>::new();
+pub fn normalize_stream_manifest(mut manifest: StreamManifest) -> NormalizedStreamManifest {
     let mut warnings = Vec::<ValidationWarning>::new();
+
+    normalize_file_stream_identity(&mut manifest);
+    normalize_file_backend_paths(&mut manifest, &mut warnings);
+    normalize_file_capture_manifest(&mut manifest);
+    normalize_reserved_pipeline_ids(&mut manifest, &mut warnings);
+    canonicalize_pipeline_output_aliases(&mut manifest, &mut warnings);
+    util::normalize_stream_encoder_manifest(&mut manifest);
+    normalize_capture_tdn_output(&mut manifest);
+
+    if !crate::features::shadow_recorder_enabled() {
+        manifest.shadow_recorder_enabled = false;
+    }
+
+    NormalizedStreamManifest { manifest, warnings }
+}
+
+pub async fn validate_stream_manifest(manifest: StreamManifest) -> Result<StreamValidationResult, StreamValidationError> {
+    let NormalizedStreamManifest { manifest, warnings } = normalize_stream_manifest(manifest);
+    let mut issues = Vec::<ValidationIssue>::new();
 
     validate_backend_and_handle(&manifest, &mut issues);
     validate_explicit_stream_config(&manifest, &mut issues);
-    sanitize_file_backend_paths(&mut manifest, &mut issues, &mut warnings);
+    validate_file_backend_paths_present(&manifest, &mut issues);
     validate_file_backend_media_paths(&manifest, &mut issues).await;
-    sanitize_reserved_pipeline_ids(&mut manifest, &mut warnings);
     validate_pipeline_layout(&manifest, &mut issues);
     validate_pipeline_wires(&manifest, &mut issues);
     validate_pipeline_bindings(&manifest, &mut issues).await;
-    canonicalize_pipeline_output_aliases(&mut manifest, &mut warnings);
 
     if issues.is_empty() {
+        let mut manifest = manifest;
         util::normalize_pipeline_manifest(&mut manifest);
         let resolved = manifest.resolve();
         Ok(StreamValidationResult { manifest, resolved, warnings })
@@ -172,7 +196,21 @@ fn validate_backend_and_handle(manifest: &StreamManifest, issues: &mut Vec<Valid
     }
 }
 
-fn sanitize_file_backend_paths(manifest: &mut StreamManifest, issues: &mut Vec<ValidationIssue>, warnings: &mut Vec<ValidationWarning>) {
+fn validate_file_backend_paths_present(manifest: &StreamManifest, issues: &mut Vec<ValidationIssue>) {
+    if manifest.capture.backend != BackendKind::File {
+        return;
+    }
+
+    let BackendHandle::File { paths, .. } = &manifest.capture.handle else {
+        return;
+    };
+
+    if paths.is_empty() {
+        issues.push(issue("/capture/handle/paths", "missing_paths", "file backend requires at least one non-empty path"));
+    }
+}
+
+fn normalize_file_backend_paths(manifest: &mut StreamManifest, warnings: &mut Vec<ValidationWarning>) {
     if manifest.capture.backend != BackendKind::File {
         return;
     }
@@ -201,9 +239,6 @@ fn sanitize_file_backend_paths(manifest: &mut StreamManifest, issues: &mut Vec<V
     }
 
     *paths = deduped;
-    if paths.is_empty() {
-        issues.push(issue("/capture/handle/paths", "missing_paths", "file backend requires at least one non-empty path"));
-    }
 }
 
 fn file_replay_content_type(path: &Path) -> String {
@@ -249,7 +284,7 @@ async fn validate_file_backend_media_paths(manifest: &StreamManifest, issues: &m
     }
 }
 
-fn sanitize_reserved_pipeline_ids(manifest: &mut StreamManifest, warnings: &mut Vec<ValidationWarning>) {
+fn normalize_reserved_pipeline_ids(manifest: &mut StreamManifest, warnings: &mut Vec<ValidationWarning>) {
     let before_pipelines = manifest.pipelines.len();
     manifest.pipelines.retain(|binding| binding.pipeline_id != CALIBRATION_MODE_PIPELINE_UUID);
     if manifest.pipelines.len() != before_pipelines {
@@ -399,6 +434,96 @@ fn canonicalize_pipeline_output_aliases(manifest: &mut StreamManifest, warnings:
     }
 }
 
+fn is_legacy_media_file_token(raw: &str) -> bool {
+    // TEMP_SHIM: streams-lifecycle-media-file-token-compat
+    // Keep coercing the old media-file token until persisted file-stream manifests have been migrated in place.
+    identity_tokens::normalize_token(raw).as_deref() == Some("media-file")
+}
+
+fn normalize_file_stream_identity(manifest: &mut StreamManifest) {
+    if manifest.capture.backend != styx::BackendKind::File {
+        return;
+    }
+
+    manifest.capture.device_keys.retain(|key| !is_legacy_media_file_token(key));
+
+    let alias_missing = manifest.identity.alias.as_deref().map(str::trim).is_none_or(|value| value.is_empty());
+    if alias_missing {
+        let fallback = manifest.identity.id.map(|id| format!("media-replay-{id}")).unwrap_or_else(|| format!("media-replay-{}", Uuid::new_v4()));
+        manifest.identity.alias = Some(fallback);
+    }
+
+    if manifest.identity.hardware_id.as_deref().is_some_and(is_legacy_media_file_token) {
+        manifest.identity.hardware_id = manifest.identity.alias.clone().or_else(|| manifest.identity.id.map(|id| id.to_string()));
+    }
+}
+
+fn capture_control_value_is_enabled(value: &helios_engine::capture::CaptureControlValue) -> bool {
+    match value {
+        helios_engine::capture::CaptureControlValue::Int(v) => *v != 0,
+        helios_engine::capture::CaptureControlValue::Uint(v) => *v != 0,
+        helios_engine::capture::CaptureControlValue::Float(v) => *v != 0.0,
+        helios_engine::capture::CaptureControlValue::Bool(v) => *v,
+        helios_engine::capture::CaptureControlValue::None => false,
+    }
+}
+
+fn manifest_controls_require_tdn_output(manifest: &StreamManifest, descriptor: &helios_engine::capture::CaptureDescriptor) -> bool {
+    manifest
+        .capture
+        .controls
+        .iter()
+        .any(|control| {
+            capture_control_value_is_enabled(&control.value)
+                && descriptor.controls.iter().find(|meta| meta.id.0 == control.id).is_some_and(|meta| meta.metadata.requires_tdn_output)
+        })
+}
+
+fn normalize_capture_tdn_output_with_descriptor(manifest: &mut StreamManifest, descriptor: Option<&helios_engine::capture::CaptureDescriptor>) {
+    if manifest.capture.backend != styx::BackendKind::Libcamera || !manifest.capture.enable_tdn_output {
+        return;
+    }
+    let Some(descriptor) = descriptor else {
+        return;
+    };
+    if !manifest_controls_require_tdn_output(manifest, descriptor) {
+        manifest.capture.enable_tdn_output = false;
+    }
+}
+
+fn normalize_capture_tdn_output(manifest: &mut StreamManifest) {
+    let descriptor = helios_engine::capture::descriptor_for_config(&manifest.capture);
+    normalize_capture_tdn_output_with_descriptor(manifest, descriptor.as_ref());
+}
+
+fn normalize_file_capture_manifest(manifest: &mut StreamManifest) {
+    let styx::BackendHandle::File { paths, fps, loop_forever } = &manifest.capture.handle else {
+        return;
+    };
+
+    let device = styx::capture_api::make_file_device("file-replay", paths.clone(), *fps, *loop_forever);
+    let Some(backend) = device.backends.iter().find(|backend| backend.kind == styx::BackendKind::File) else {
+        return;
+    };
+
+    let valid_control_ids: HashSet<u32> = backend.descriptor.controls.iter().map(|control| control.id.0).collect();
+    if valid_control_ids.is_empty() {
+        manifest.capture.controls.clear();
+    } else {
+        manifest.capture.controls.retain(|control| valid_control_ids.contains(&control.id));
+    }
+
+    let mode_is_valid = backend.descriptor.modes.iter().any(|mode| mode.id == manifest.capture.mode);
+    if mode_is_valid {
+        return;
+    }
+
+    let replacement_mode = backend.descriptor.modes.iter().find(|mode| mode.id.format == manifest.capture.mode.format).or_else(|| backend.descriptor.modes.first()).map(|mode| mode.id.clone());
+    if let Some(mode) = replacement_mode {
+        manifest.capture.mode = mode;
+    }
+}
+
 fn canonicalize_raw_output_field(value: &mut Option<String>, path: impl Into<String>, label: &'static str, warnings: &mut Vec<ValidationWarning>) {
     let path = path.into();
     let original = value.clone();
@@ -459,7 +584,12 @@ fn handle_label(handle: &BackendHandle) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use helios_engine::capture::{BackendHandle, BackendKind, CaptureConfig, CaptureControl, CaptureControlValue, ControlAssignment, ModeId};
+    use helios_engine::identity::DeviceIdentity;
     use serde_json::json;
+    use std::collections::BTreeMap;
+    use styx::core::controls::{Access, ControlId, ControlKind, ControlMetadata, ControlValue};
+    use styx::prelude::{ColorSpace, FourCc, MediaFormat, Resolution};
 
     #[test]
     fn stream_capabilities_publish_default_encoder_id() {
@@ -596,5 +726,102 @@ mod tests {
         let err = result.expect_err("expected disabled pipeline state failure");
         assert!(err.issues.iter().any(|issue| issue.code == "pipeline_disabled_with_pipeline_state"));
         let _ = tokio::fs::remove_file(&file).await;
+    }
+
+    fn sample_libcamera_manifest() -> StreamManifest {
+        let format = MediaFormat::new(FourCc::new(*b"NV12"), Resolution::new(1280, 800).unwrap(), ColorSpace::Srgb);
+        StreamManifest {
+            schema_version: helios_engine::ipc::CURRENT_STREAM_CONFIG_SCHEMA_VERSION,
+            identity: DeviceIdentity { id: Some(Uuid::new_v4()), alias: Some("camera".to_string()), hardware_id: Some("camera".to_string()) },
+            capture: CaptureConfig {
+                device_keys: vec!["camera".to_string()],
+                backend: BackendKind::Libcamera,
+                handle: BackendHandle::Libcamera { id: "camera".to_string() },
+                mode: ModeId { format, interval: None },
+                target_fps: None,
+                interval: None,
+                controls: Vec::new(),
+                enable_tdn_output: true,
+            },
+            host_buffer: 2,
+            internal: false,
+            pipeline_enabled: false,
+            pipelines: Vec::new(),
+            active_pipeline_id: None,
+            active_pipeline_output: None,
+            pipeline_layout: None,
+            pipeline_wires: Vec::new(),
+            pipeline_host_inputs: BTreeMap::new(),
+            calibration: None,
+            pose: None,
+            encoder: helios_engine::ipc::RequestedEncoderConfig::default(),
+            decoder: helios_engine::ipc::RequestedDecoderConfig::default(),
+            preview_jpeg_quality: 30,
+            shadow_recorder_enabled: false,
+            start_on_boot: false,
+        }
+    }
+
+    fn sample_descriptor_with_noise_reduction(requires_tdn_output: bool) -> helios_engine::capture::CaptureDescriptor {
+        helios_engine::capture::CaptureDescriptor {
+            modes: Vec::new(),
+            controls: vec![CaptureControl {
+                id: ControlId(10002),
+                name: "NoiseReductionMode".to_string(),
+                kind: ControlKind::IntMenu,
+                access: Access::ReadWrite,
+                min: ControlValue::Int(0),
+                max: ControlValue::Int(4),
+                default: ControlValue::Int(0),
+                step: None,
+                menu: Some(vec![
+                    "NoiseReductionModeOff".to_string(),
+                    "NoiseReductionModeFast".to_string(),
+                    "NoiseReductionModeHighQuality".to_string(),
+                    "NoiseReductionModeMinimal".to_string(),
+                    "NoiseReductionModeZSL".to_string(),
+                ]),
+                metadata: ControlMetadata { requires_tdn_output },
+            }],
+        }
+    }
+
+    #[test]
+    fn normalize_stream_manifest_clears_legacy_media_file_identity() {
+        let mut manifest = sample_libcamera_manifest();
+        manifest.capture.backend = BackendKind::File;
+        manifest.capture.handle = BackendHandle::File { paths: Vec::new(), fps: 30, loop_forever: false };
+        manifest.capture.device_keys = vec!["media-file".to_string(), "video-0".to_string()];
+        manifest.identity.alias = None;
+        manifest.identity.hardware_id = Some("media-file".to_string());
+
+        let normalized = normalize_stream_manifest(manifest);
+        assert_eq!(normalized.manifest.capture.device_keys, vec!["video-0".to_string()]);
+        assert!(normalized.manifest.identity.alias.as_deref().is_some_and(|value| value.starts_with("media-replay-")));
+        assert_eq!(normalized.manifest.identity.hardware_id, normalized.manifest.identity.alias);
+    }
+
+    #[test]
+    fn normalize_stream_manifest_clears_redundant_tdn_flag() {
+        let mut manifest = sample_libcamera_manifest();
+        manifest.capture.controls.push(ControlAssignment { id: 10002, value: CaptureControlValue::Int(1) });
+        manifest.capture.enable_tdn_output = true;
+
+        let descriptor = sample_descriptor_with_noise_reduction(false);
+        normalize_capture_tdn_output_with_descriptor(&mut manifest, Some(&descriptor));
+
+        assert!(!manifest.capture.enable_tdn_output);
+    }
+
+    #[test]
+    fn normalize_stream_manifest_preserves_required_tdn_flag() {
+        let mut manifest = sample_libcamera_manifest();
+        manifest.capture.controls.push(ControlAssignment { id: 10002, value: CaptureControlValue::Int(1) });
+        manifest.capture.enable_tdn_output = true;
+
+        let descriptor = sample_descriptor_with_noise_reduction(true);
+        normalize_capture_tdn_output_with_descriptor(&mut manifest, Some(&descriptor));
+
+        assert!(manifest.capture.enable_tdn_output);
     }
 }

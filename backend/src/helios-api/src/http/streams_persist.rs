@@ -1,4 +1,4 @@
-use crate::http::streams::util::normalize_stream_encoder_manifest;
+use crate::http::streams::validation::{StreamValidationResult, normalize_stream_manifest, validate_stream_manifest};
 use crate::http::{json_store, storage};
 use crate::ipc::IpcHandles;
 use chrono::Utc;
@@ -6,7 +6,7 @@ use helios_engine::ipc::{ResolvedStreamConfig, RigPose, StreamManifest};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     io,
 };
 use tokio::fs;
@@ -169,12 +169,7 @@ async fn hydrate_manifest(mut manifest: StreamManifest) -> StreamManifest {
     if manifest.capture.backend == styx::BackendKind::File && manifest.capture.mode.format.code == styx::prelude::FourCc::new(*b"RGBA") {
         manifest.capture.mode.format.code = styx::prelude::FourCc::new(*b"RG24");
     }
-    if manifest.capture.backend == styx::BackendKind::File {
-        normalize_file_capture_manifest(&mut manifest);
-    }
-    normalize_stream_encoder_manifest(&mut manifest);
-
-    manifest
+    normalize_stream_manifest(manifest).manifest
 }
 
 async fn hydrate_record(mut record: PersistedStreamRecord) -> PersistedStreamRecord {
@@ -186,40 +181,27 @@ async fn hydrate_record(mut record: PersistedStreamRecord) -> PersistedStreamRec
 
     if let Some(manifest) = record.manifest.take() {
         let manifest = hydrate_manifest(manifest).await;
-        let resolved = manifest.resolve();
-        record.manifest = Some(resolved.to_requested_manifest());
-        record.resolved_config = Some(resolved);
+        match validate_stream_manifest(manifest.clone()).await {
+            Ok(prepared) => {
+                record.manifest = Some(prepared.manifest);
+                record.resolved_config = Some(prepared.resolved);
+            }
+            Err(err) => {
+                warn!(
+                    camera_id = record.camera_id,
+                    issue_count = err.issues.len(),
+                    warning_count = err.warnings.len(),
+                    issues = ?err.issues,
+                    warnings = ?err.warnings,
+                    "persisted stream record remains manifest-only because semantic validation failed"
+                );
+                record.manifest = Some(manifest);
+                record.resolved_config = None;
+            }
+        }
     }
 
     record
-}
-
-fn normalize_file_capture_manifest(manifest: &mut StreamManifest) {
-    let styx::BackendHandle::File { paths, fps, loop_forever } = &manifest.capture.handle else {
-        return;
-    };
-
-    let device = styx::capture_api::make_file_device("file-replay", paths.clone(), *fps, *loop_forever);
-    let Some(backend) = device.backends.iter().find(|backend| backend.kind == styx::BackendKind::File) else {
-        return;
-    };
-
-    let valid_control_ids: HashSet<u32> = backend.descriptor.controls.iter().map(|control| control.id.0).collect();
-    if valid_control_ids.is_empty() {
-        manifest.capture.controls.clear();
-    } else {
-        manifest.capture.controls.retain(|control| valid_control_ids.contains(&control.id));
-    }
-
-    let mode_is_valid = backend.descriptor.modes.iter().any(|mode| mode.id == manifest.capture.mode);
-    if mode_is_valid {
-        return;
-    }
-
-    let replacement_mode = backend.descriptor.modes.iter().find(|mode| mode.id.format == manifest.capture.mode.format).or_else(|| backend.descriptor.modes.first()).map(|mode| mode.id.clone());
-    if let Some(mode) = replacement_mode {
-        manifest.capture.mode = mode;
-    }
 }
 
 async fn update_record<F, Fut>(camera_id: &str, updater: F) -> std::io::Result<PersistedStreamRecord>
@@ -271,7 +253,7 @@ async fn persist_resolved_config_impl(camera_id: &str, stream_id: Option<Uuid>, 
     .map(|_| ())
 }
 
-async fn persist_manifest_impl(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) -> std::io::Result<()> {
+async fn prepare_manifest_for_persistence(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) -> std::io::Result<StreamValidationResult> {
     let mut hydrated = hydrate_manifest(manifest).await;
     if let Some(id) = stream_id {
         hydrated.identity.id = Some(id);
@@ -285,11 +267,28 @@ async fn persist_manifest_impl(camera_id: &str, stream_id: Option<Uuid>, manifes
         hydrated.capture.controls.retain(|c| c.id != 30);
     }
 
-    persist_resolved_config_impl(camera_id, stream_id, hydrated.resolve()).await
+    validate_stream_manifest(hydrated).await.map_err(|err| {
+        let detail = err
+            .issues
+            .first()
+            .map(|issue| format!("{} ({})", issue.message, issue.code))
+            .unwrap_or_else(|| "unknown semantic validation failure".to_string());
+        io::Error::new(io::ErrorKind::InvalidInput, format!("persisted stream manifest for `{camera_id}` failed semantic validation: {detail}"))
+    })
+}
+
+async fn persist_manifest_impl(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) -> std::io::Result<StreamManifest> {
+    let prepared = prepare_manifest_for_persistence(camera_id, stream_id, manifest).await?;
+    persist_resolved_config_impl(camera_id, stream_id, prepared.resolved).await?;
+    Ok(prepared.manifest)
+}
+
+pub(crate) async fn persist_manifest_prepared_checked(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) -> std::io::Result<StreamManifest> {
+    persist_manifest_impl(camera_id, stream_id, manifest).await
 }
 
 pub async fn persist_manifest_checked(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) -> std::io::Result<()> {
-    persist_manifest_impl(camera_id, stream_id, manifest).await
+    persist_manifest_impl(camera_id, stream_id, manifest).await.map(|_| ())
 }
 
 pub async fn persist_resolved_config_checked(camera_id: &str, stream_id: Option<Uuid>, resolved: ResolvedStreamConfig) -> std::io::Result<()> {
@@ -309,22 +308,7 @@ pub async fn persist_resolved_config(camera_id: &str, stream_id: Option<Uuid>, r
 }
 
 pub async fn persist_manifest_quick_checked(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) -> std::io::Result<()> {
-    let mut hydrated = hydrate_manifest(manifest).await;
-    if let Some(id) = stream_id {
-        hydrated.identity.id = Some(id);
-    }
-    if hydrated.capture.backend == styx::BackendKind::File && !hydrated.start_on_boot {
-        hydrated.start_on_boot = true;
-    }
-
-    // Ensure we don't re-persist libcamera intervals/control 30 if the stream was started from an
-    // older manifest; the canonical persisted representation is `capture.target_fps`.
-    if hydrated.capture.backend == styx::BackendKind::Libcamera && hydrated.capture.target_fps.is_some() {
-        hydrated.capture.interval = None;
-        hydrated.capture.controls.retain(|c| c.id != 30);
-    }
-
-    persist_resolved_config_impl(camera_id, stream_id, hydrated.resolve()).await
+    persist_manifest_impl(camera_id, stream_id, manifest).await.map(|_| ())
 }
 
 pub async fn persist_manifest_quick(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) {
@@ -436,8 +420,24 @@ pub async fn update_manifest_pose_by_camera_id(camera_id: &str, pose: Option<Rig
         return Ok(false);
     };
     manifest.pose = pose;
-    record.manifest = Some(manifest);
-    record.resolved_config = record.manifest.as_ref().map(StreamManifest::resolve);
+    match validate_stream_manifest(manifest.clone()).await {
+        Ok(prepared) => {
+            record.manifest = Some(prepared.manifest);
+            record.resolved_config = Some(prepared.resolved);
+        }
+        Err(err) => {
+            warn!(
+                camera_id,
+                issue_count = err.issues.len(),
+                warning_count = err.warnings.len(),
+                issues = ?err.issues,
+                warnings = ?err.warnings,
+                "persisted stream pose update left manifest unresolved because semantic validation failed"
+            );
+            record.manifest = Some(manifest);
+            record.resolved_config = None;
+        }
+    }
     record.updated_at = Some(now_rfc3339());
 
     let data = serde_json::to_vec(&record).map_err(io::Error::other)?;
@@ -535,7 +535,23 @@ pub async fn restore_persisted_streams(state: AppState) {
             continue;
         }
 
-        match state.engine.start_stream(manifest.resolve()).await {
+        let prepared = match validate_stream_manifest(manifest).await {
+            Ok(prepared) => prepared,
+            Err(err) => {
+                warn!(
+                    camera_id = record.camera_id,
+                    issue_count = err.issues.len(),
+                    warning_count = err.warnings.len(),
+                    issues = ?err.issues,
+                    warnings = ?err.warnings,
+                    "skipping persisted stream restore that failed stream preparation"
+                );
+                continue;
+            }
+        };
+        let manifest = prepared.manifest;
+
+        match state.engine.start_stream(prepared.resolved).await {
             Ok(helios_engine::ipc::EngineEvent::Started { stream_id, .. }) => {
                 persist_manifest(&record.camera_id, Some(stream_id), manifest.clone()).await;
             }

@@ -53,7 +53,7 @@ pub(super) async fn restore_autostart_streams(state: AppState) {
             let state = state.clone();
             let reserved_keys = reserved_keys.clone();
             async move {
-                match validate_stream_manifest(manifest).await {
+                let prepared = match validate_stream_manifest(manifest).await {
                     Ok(validated) => {
                         if !validated.warnings.is_empty() {
                             warn!(
@@ -63,7 +63,7 @@ pub(super) async fn restore_autostart_streams(state: AppState) {
                                 "autostart manifest required semantic sanitization"
                             );
                         }
-                        manifest = validated.manifest;
+                        validated
                     }
                     Err(err) => {
                         warn!(
@@ -76,7 +76,8 @@ pub(super) async fn restore_autostart_streams(state: AppState) {
                         );
                         return;
                     }
-                }
+                };
+                manifest = prepared.manifest;
 
                 let mut device_keys = manifest.capture.device_keys.clone();
                 if manifest.capture.backend == BackendKind::File || device_keys.iter().any(|k| k == "media-file") {
@@ -96,7 +97,7 @@ pub(super) async fn restore_autostart_streams(state: AppState) {
                 }
 
                 let requested_id = *manifest.identity.id.get_or_insert_with(Uuid::new_v4);
-                let start_result = state.engine.start_stream(manifest.resolve()).await;
+                let start_result = state.engine.start_stream(prepared.resolved).await;
                 let started = match start_result {
                     Ok(EngineEvent::Started { stream_id, .. }) => {
                         let _ = persist_effective_stream_manifest(&state, &camera_id, stream_id, &manifest).await;
