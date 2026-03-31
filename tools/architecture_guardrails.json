@@ -1027,6 +1027,18 @@
       "review_note": "AI model inspection format conversion and tensor metadata mapping now live here; keep board/chart/image operations separate from model introspection."
     },
     {
+      "path": "backend/src/helios-api/src/console_sessions/mod.rs",
+      "max_lines": 260,
+      "owner": "HeliOS",
+      "review_note": "Console session public payloads, manager state, and session summary/resize lifecycle now live here; keep PTY spawn and blocking IO orchestration out of the root module."
+    },
+    {
+      "path": "backend/src/helios-api/src/console_sessions/spawn.rs",
+      "max_lines": 220,
+      "owner": "HeliOS",
+      "review_note": "Console PTY allocation, shell bootstrap, PATH resolution, and blocking reader/writer tasks now live here; keep session registry state and API payload shaping out of the spawn/runtime helper."
+    },
+    {
       "path": "backend/src/helios-engine/src/localization/solve/mod.rs",
       "max_lines": 250,
       "owner": "HeliOS",
@@ -1099,6 +1111,11 @@
       "path": "backend/src/helios-api/src/api_tools_impl.rs",
       "owner": "HeliOS",
       "reason": "API tools request dispatch, board/chart generation, PDF rendering, CCM solving, image edits, and model inspection now live under backend/src/helios-api/src/api_tools_impl/*. Do not recreate the deleted api_tools_impl.rs monolith."
+    },
+    {
+      "path": "backend/src/helios-api/src/console_sessions.rs",
+      "owner": "HeliOS",
+      "reason": "Console session manager state now lives under backend/src/helios-api/src/console_sessions/*. Do not recreate the deleted console_sessions.rs monolith."
     },
     {
       "path": "backend/src/helios-api/src/http/localization/maps.rs",
