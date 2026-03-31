@@ -43,16 +43,12 @@ PLUGINS_DIR_DEFAULT="$ROOT_DIR/output/cm5/plugins/daedalus"
 BINS_DIR="$BINS_DIR_DEFAULT"
 PLUGINS_DIR="$PLUGINS_DIR_DEFAULT"
 
-BIN_DIR_REMOTE="${BIN_DIR_REMOTE:-/usr/bin}"
 # Daedalus plugins are large (especially debug builds). Default to /var/lib/helios (separate partition on CM5)
 # to avoid filling the root filesystem.
 PLUGIN_DIR_REMOTE="${PLUGIN_DIR_REMOTE:-/var/lib/helios/plugins/daedalus}"
 TEMPLATES_DIR_LOCAL="${TEMPLATES_DIR_LOCAL:-$ROOT_DIR/gaia/assets/templates}"
 TEMPLATES_DIR_REMOTE="${TEMPLATES_DIR_REMOTE:-/usr/share/helios/pipeline-templates}"
 FRONTEND_DIR_LOCAL="${FRONTEND_DIR_LOCAL:-$ROOT_DIR/frontend/build}"
-FRONTEND_DIR_REMOTE="${FRONTEND_DIR_REMOTE:-/opt/helios/frontend}"
-BINARIES_DEPLOY_MODE="${BINARIES_DEPLOY_MODE:-ota}"
-FRONTEND_DEPLOY_MODE="${FRONTEND_DEPLOY_MODE:-ota}"
 OTA_BASE_URL="${OTA_BASE_URL:-}"
 OTA_REQUESTED_BY="${OTA_REQUESTED_BY:-deploy-live}"
 
@@ -90,18 +86,12 @@ Options:
   --no-restart          Upload but do not restart services
   --bins-dir <dir>      Local binaries dir (default: $BINS_DIR_DEFAULT)
   --plugins-dir <dir>   Local plugins dir (default: $PLUGINS_DIR_DEFAULT)
-  --bin-dir <dir>       Remote bin dir (default: $BIN_DIR_REMOTE)
   --plugin-dir <dir>    Remote plugin dir (default: $PLUGIN_DIR_REMOTE)
   --no-templates        Skip uploading pipeline templates
   --templates-dir <dir> Local templates dir (default: $TEMPLATES_DIR_LOCAL)
   --templates-remote <dir> Remote templates dir (default: $TEMPLATES_DIR_REMOTE)
   --no-frontend         Skip uploading frontend assets
   --frontend-dir <dir>  Local frontend build dir (default: $FRONTEND_DIR_LOCAL)
-  --frontend-remote <dir> Remote frontend dir (default: $FRONTEND_DIR_REMOTE)
-  --binaries-via-ota    Publish binaries via /v1/ota (default)
-  --binaries-via-ssh    Keep legacy SSH binary upload path
-  --frontend-via-ota    Publish frontend via /v1/ota (default)
-  --frontend-via-ssh    Keep legacy SSH frontend upload path
   --ota-base-url <url>  OTA API base URL (default: derived from --ssh as http://host/v1)
   --no-strip            Do not strip debug sections from built artifacts before upload
   --fast-upload         Upload everything without hashing (default)
@@ -116,10 +106,7 @@ Options:
 
 Env vars (optional):
   RUSTFLAGS             Passed through to build scripts
-  BIN_DIR_REMOTE         Remote bin dir
   PLUGIN_DIR_REMOTE      Remote plugin dir
-  BINARIES_DEPLOY_MODE   Binary deploy mode: ota|ssh
-  FRONTEND_DEPLOY_MODE   Frontend deploy mode: ota|ssh
   OTA_BASE_URL           OTA API base URL override
   DAEDALUS_HOST_PATH     Host path to a Daedalus checkout (optional dev override)
   STYX_HOST_PATH         Host path to a Styx checkout (optional dev override)
@@ -221,18 +208,21 @@ while [[ $# -gt 0 ]]; do
     --no-restart) RESTART_SERVICES="0"; shift ;;
     --bins-dir) BINS_DIR="${2:-}"; shift 2 ;;
     --plugins-dir) PLUGINS_DIR="${2:-}"; shift 2 ;;
-    --bin-dir) BIN_DIR_REMOTE="${2:-}"; shift 2 ;;
     --plugin-dir) PLUGIN_DIR_REMOTE="${2:-}"; shift 2 ;;
     --no-templates) UPLOAD_TEMPLATES="0"; shift ;;
     --templates-dir) TEMPLATES_DIR_LOCAL="${2:-}"; shift 2 ;;
     --templates-remote) TEMPLATES_DIR_REMOTE="${2:-}"; shift 2 ;;
     --no-frontend) UPLOAD_FRONTEND="0"; shift ;;
     --frontend-dir) FRONTEND_DIR_LOCAL="${2:-}"; shift 2 ;;
-    --frontend-remote) FRONTEND_DIR_REMOTE="${2:-}"; shift 2 ;;
-    --binaries-via-ota) BINARIES_DEPLOY_MODE="ota"; shift ;;
-    --binaries-via-ssh) BINARIES_DEPLOY_MODE="ssh"; shift ;;
-    --frontend-via-ota) FRONTEND_DEPLOY_MODE="ota"; shift ;;
-    --frontend-via-ssh) FRONTEND_DEPLOY_MODE="ssh"; shift ;;
+    --bin-dir|--frontend-remote)
+      shift 2 || die "$1 requires a value"
+      ;;
+    --binaries-via-ota|--frontend-via-ota)
+      shift
+      ;;
+    --binaries-via-ssh|--frontend-via-ssh)
+      die "$1 has been removed; binaries and frontend now publish only through OTA"
+      ;;
     --ota-base-url) OTA_BASE_URL="${2:-}"; shift 2 ;;
     --no-strip) STRIP_DEBUG="0"; shift ;;
     --fast-upload) FAST_UPLOAD="1"; shift ;;
@@ -261,16 +251,6 @@ fi
 case "$ONLY" in
   all|binaries|plugins|frontend) ;;
   *) die "--only must be one of: all, binaries, plugins, frontend" ;;
-esac
-
-case "$BINARIES_DEPLOY_MODE" in
-  ota|ssh) ;;
-  *) die "BINARIES_DEPLOY_MODE must be one of: ota, ssh" ;;
-esac
-
-case "$FRONTEND_DEPLOY_MODE" in
-  ota|ssh) ;;
-  *) die "FRONTEND_DEPLOY_MODE must be one of: ota, ssh" ;;
 esac
 
 do_binaries="0"
@@ -313,12 +293,6 @@ ensure_deps() {
     if [[ "$do_plugins" == "1" ]]; then
       needs_ssh="1"
     fi
-    if [[ "$do_binaries" == "1" && "$BINARIES_DEPLOY_MODE" == "ssh" ]]; then
-      needs_ssh="1"
-    fi
-    if [[ "$UPLOAD_FRONTEND" == "1" && "$do_frontend" == "1" && "$FRONTEND_DEPLOY_MODE" == "ssh" ]]; then
-      needs_ssh="1"
-    fi
     if [[ "$needs_ssh" == "1" ]]; then
       REQUIRES_SSH="1"
       command -v ssh >/dev/null 2>&1 || die "ssh is required for the selected upload paths"
@@ -326,12 +300,12 @@ ensure_deps() {
         command -v sshpass >/dev/null 2>&1 || die "sshpass is required when using --pass"
       fi
     fi
-    if [[ "$do_binaries" == "1" && "$BINARIES_DEPLOY_MODE" == "ota" ]]; then
+    if [[ "$do_binaries" == "1" ]]; then
       command -v curl >/dev/null 2>&1 || die "curl is required for binary OTA deploys"
       command -v python3 >/dev/null 2>&1 || die "python3 is required for binary OTA deploys"
       [[ -f "$OTA_RELEASE_PUBLISHER" ]] || die "missing OTA release publisher: $OTA_RELEASE_PUBLISHER"
     fi
-    if [[ "$UPLOAD_FRONTEND" == "1" && "$do_frontend" == "1" && "$FRONTEND_DEPLOY_MODE" == "ota" ]]; then
+    if [[ "$UPLOAD_FRONTEND" == "1" && "$do_frontend" == "1" ]]; then
       command -v curl >/dev/null 2>&1 || die "curl is required for frontend OTA deploys"
       command -v python3 >/dev/null 2>&1 || die "python3 is required for frontend OTA deploys"
       [[ -f "$OTA_RELEASE_PUBLISHER" ]] || die "missing OTA release publisher: $OTA_RELEASE_PUBLISHER"
@@ -712,11 +686,6 @@ if [[ "$BUILD" == "1" ]]; then
 fi
 
 if [[ "$UPLOAD" == "1" ]]; then
-  delay_binary_stop_for_frontend_ota="0"
-  if [[ "$do_binaries" == "1" && "$BINARIES_DEPLOY_MODE" == "ssh" && "$UPLOAD_FRONTEND" == "1" && "$FRONTEND_DEPLOY_MODE" == "ota" ]]; then
-    delay_binary_stop_for_frontend_ota="1"
-  fi
-
   if [[ "$do_plugins" == "1" ]]; then
     [[ -d "$PLUGINS_DIR" ]] || die "local plugin dir not found: $PLUGINS_DIR"
   fi
@@ -802,98 +771,6 @@ if [[ "$UPLOAD" == "1" ]]; then
     fi
   }
 
-  json_read_field() {
-    local field="$1"
-    local payload="${2:-}"
-    python3 - "$field" "$payload" <<'PY'
-import json
-import sys
-
-field = sys.argv[1]
-raw = sys.argv[2]
-try:
-    data = json.loads(raw)
-except Exception:
-    sys.exit(1)
-
-value = data
-for part in field.split('.'):
-    if isinstance(value, dict) and part in value:
-        value = value[part]
-    else:
-        value = None
-        break
-
-if value is None:
-    sys.exit(0)
-if isinstance(value, bool):
-    print("true" if value else "false")
-elif isinstance(value, (int, float)):
-    print(value)
-elif isinstance(value, str):
-    print(value)
-else:
-    print(json.dumps(value))
-PY
-  }
-
-  curl_json_request() {
-    local method="$1"
-    local url="$2"
-    local body="${3:-}"
-    local response_file status_code
-    response_file="$(mktemp)"
-    if [[ -n "${body// }" ]]; then
-      status_code="$(curl -sS -o "$response_file" -w '%{http_code}' -X "$method" -H 'Content-Type: application/json' --data "$body" "$url")"
-    else
-      status_code="$(curl -sS -o "$response_file" -w '%{http_code}' -X "$method" "$url")"
-    fi
-    if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
-      local response_body
-      response_body="$(cat "$response_file")"
-      rm -f "$response_file"
-      die "request failed ($method $url -> HTTP $status_code): $response_body"
-    fi
-    cat "$response_file"
-    rm -f "$response_file"
-  }
-
-  curl_multipart_request() {
-    local url="$1"
-    local file_path="$2"
-    local response_file status_code
-    response_file="$(mktemp)"
-    status_code="$(curl -sS -o "$response_file" -w '%{http_code}' -F "file=@${file_path}" "$url")"
-    if [[ "$status_code" -lt 200 || "$status_code" -ge 300 ]]; then
-      local response_body
-      response_body="$(cat "$response_file")"
-      rm -f "$response_file"
-      die "upload failed ($url -> HTTP $status_code): $response_body"
-    fi
-    cat "$response_file"
-    rm -f "$response_file"
-  }
-
-  curl_json_request_retryable() {
-    local method="$1"
-    local url="$2"
-    local body="${3:-}"
-    local response_file status_code
-    response_file="$(mktemp)"
-    if [[ -n "${body// }" ]]; then
-      status_code="$(curl -sS -o "$response_file" -w '%{http_code}' -X "$method" -H 'Content-Type: application/json' --data "$body" "$url" || true)"
-    else
-      status_code="$(curl -sS -o "$response_file" -w '%{http_code}' -X "$method" "$url" || true)"
-    fi
-    if [[ "$status_code" -ge 200 && "$status_code" -lt 300 ]]; then
-      cat "$response_file"
-      rm -f "$response_file"
-      return 0
-    fi
-    rm -f "$response_file"
-    return 1
-  }
-
   ota_publish_release() {
     local artifact_kind="$1"
     local source_dir="$2"
@@ -920,69 +797,6 @@ PY
     run "${cmd[@]}"
   }
 
-  # Validate that a remote path looks like a real executable (non-empty, ELF magic).
-  # Busybox/coreutils availability varies on target; avoid relying on `stat`.
-  remote_validate_elf() {
-    local remote_path="$1"
-    ssh_exec "sh -lc 'set -e; \
-      [ -s \"$remote_path\" ]; \
-      head -c 4 \"$remote_path\" | hexdump -C | head -n 1 | grep -q \"7f 45 4c 46\"'"
-  }
-
-  upload_and_install_bins() {
-    local remote_dir="$1"
-    shift
-    local -a bins=( "$@" )
-    if [[ "${#bins[@]}" -eq 0 ]]; then
-      return 0
-    fi
-
-    # Extract into a temp dir first so a partial transfer can't brick /usr/bin.
-    local ts tmpdir backup_dir staging_root backup_keep
-    ts="$(date +%s)"
-    staging_root="/var/lib/helios/deploy-staging"
-    tmpdir="$staging_root/bins.$ts"
-    backup_dir="/var/lib/helios/deploy-backups/bins-$ts"
-    backup_keep="${HELIOS_DEPLOY_BACKUP_KEEP:-5}"
-
-    ssh_exec "sh -lc 'set -e; \
-      install -d -m0755 \"$staging_root\" \"${backup_dir%/*}\"; \
-      find \"$staging_root\" -mindepth 1 -maxdepth 1 -type d -name \"bins.*\" -exec rm -rf {} +; \
-      keep=\"$backup_keep\"; \
-      case \"\$keep\" in \"\"|*[!0-9]*) keep=5 ;; esac; \
-      i=0; \
-      for d in \$(ls -1dt \"${backup_dir%/*}\"/bins-* 2>/dev/null || true); do \
-        i=\$((i + 1)); \
-        if [ \"\$i\" -gt \"\$keep\" ]; then rm -rf \"\$d\"; fi; \
-      done; \
-      rm -rf \"$tmpdir\"; \
-      install -d -m0755 \"$tmpdir\"'"
-    ssh_upload_tar "$BINS_DIR" "$tmpdir" "${bins[@]}"
-
-    # Validate all uploads before touching the live paths.
-    local b
-    for b in "${bins[@]}"; do
-      remote_validate_elf "$tmpdir/$b"
-    done
-
-    # Keep a copy of previous binaries for quick rollback if needed.
-    ssh_exec "sh -lc 'set -e; install -d -m0755 \"${backup_dir%/*}\" \"$backup_dir\"'"
-    for b in "${bins[@]}"; do
-      ssh_exec "sh -lc 'set -e; \
-        if [ -f \"$remote_dir/$b\" ]; then cp -f \"$remote_dir/$b\" \"$backup_dir/$b\" || true; fi; \
-        install -m0755 \"$tmpdir/$b\" \"$remote_dir/$b\"'"
-    done
-    for b in "${bins[@]}"; do
-      local local_hash remote_hash
-      local_hash="$(local_sha256 "$BINS_DIR/$b")"
-      remote_hash="$(remote_sha256 "$remote_dir/$b")"
-      if [[ -z "${remote_hash// }" || "$local_hash" != "$remote_hash" ]]; then
-        die "remote binary hash mismatch after install: $b"
-      fi
-    done
-    ssh_exec "sh -lc 'rm -rf \"$tmpdir\"'"
-  }
-
   ensure_remote_plugin_env() {
     # Keep engine/api pointed at both the writable deploy plugin dir and the system plugin dir.
     # Do not set HELIOS_DAEDALUS_PLUGIN_DIR here: that single-dir override masks system plugins.
@@ -999,15 +813,6 @@ PY
       done'"
   }
 
-  local_sha256() {
-    sha256sum "$1" | awk '{print $1}'
-  }
-
-  remote_sha256() {
-    local remote_path="$1"
-    ssh_exec "sh -lc 'sha256sum \"$remote_path\" 2>/dev/null | awk \"{print \\$1}\"'"
-  }
-
   should_upload() {
     if [[ "$FAST_UPLOAD" == "1" ]]; then
       return 0
@@ -1021,8 +826,8 @@ PY
       return 0
     fi
 
-    local_hash="$(local_sha256 "$local_path")"
-    remote_hash="$(remote_sha256 "$remote_path")"
+    local_hash="$(sha256sum "$local_path" | awk '{print $1}')"
+    remote_hash="$(ssh_exec "sh -lc 'sha256sum \"$remote_path\" 2>/dev/null | awk \"{print \\$1}\"'")"
 
     if [[ -z "${remote_hash// }" ]]; then
       return 0
@@ -1039,25 +844,16 @@ PY
     done
 
     bins_to_upload=()
-    if [[ "$BINARIES_DEPLOY_MODE" == "ota" || "$FAST_UPLOAD" == "1" ]]; then
+    if [[ "$FAST_UPLOAD" == "1" ]]; then
       bins_to_upload=( "${bins[@]}" )
     else
       for b in "${bins[@]}"; do
-        if should_upload "$BINS_DIR/$b" "$BIN_DIR_REMOTE/$b"; then
-          bins_to_upload+=("$b")
-        fi
+        bins_to_upload+=("$b")
       done
     fi
 
     if [[ "${#bins_to_upload[@]}" -gt 0 ]]; then
-      if [[ "$BINARIES_DEPLOY_MODE" == "ssh" && "$delay_binary_stop_for_frontend_ota" == "1" ]]; then
-        echo "Delaying engine/api stop until after frontend OTA apply..."
-      elif [[ "$BINARIES_DEPLOY_MODE" == "ssh" ]]; then
-        echo "Stopping services on $SSH_TARGET..."
-        # Do not stop peripherals/updater here; on some devices peripherals owns the USB gadget/network.
-        # Stopping it can drop the SSH link mid-deploy.
-        ssh_exec "systemctl stop helios-api.service helios-engine.service || true"
-      fi
+      echo "Preparing ${#bins_to_upload[@]} binary artifact(s) for OTA publish..."
     else
       echo "Binaries unchanged; skipping binary upload."
     fi
@@ -1086,26 +882,17 @@ PY
     fi
   fi
 
-    if [[ "$UPLOAD_FRONTEND" == "1" && "$do_frontend" == "1" ]]; then
-      if [[ ! -d "$FRONTEND_DIR_LOCAL" ]]; then
-        die "local frontend dir not found: $FRONTEND_DIR_LOCAL"
-      fi
-      if [[ "$FRONTEND_DEPLOY_MODE" == "ota" ]]; then
-        echo "Publishing frontend bundle via OTA -> $OTA_BASE_URL"
-        frontend_root_url=""
-        frontend_root_url="${OTA_BASE_URL%/v1}/"
-        if [[ "$frontend_root_url" == "$OTA_BASE_URL/" ]]; then
-          frontend_root_url="${OTA_BASE_URL%/}/"
-        fi
-        ota_publish_release "frontend_bundle" "$FRONTEND_DIR_LOCAL" "$frontend_root_url" "."
-      else
-        echo "Uploading frontend -> $SSH_TARGET:$FRONTEND_DIR_REMOTE"
-        ssh_exec "install -d -m0755 '$FRONTEND_DIR_REMOTE'"
-      # Clear old build artifacts so removed files don't linger.
-      ssh_exec "sh -lc 'rm -rf \"$FRONTEND_DIR_REMOTE\"/*'"
-      ssh_upload_tar "$FRONTEND_DIR_LOCAL" "$FRONTEND_DIR_REMOTE" "."
-      ssh_exec "sh -lc 'chmod -R a+rX \"$FRONTEND_DIR_REMOTE\"'"
+  if [[ "$UPLOAD_FRONTEND" == "1" && "$do_frontend" == "1" ]]; then
+    if [[ ! -d "$FRONTEND_DIR_LOCAL" ]]; then
+      die "local frontend dir not found: $FRONTEND_DIR_LOCAL"
     fi
+    echo "Publishing frontend bundle via OTA -> $OTA_BASE_URL"
+    frontend_root_url=""
+    frontend_root_url="${OTA_BASE_URL%/v1}/"
+    if [[ "$frontend_root_url" == "$OTA_BASE_URL/" ]]; then
+      frontend_root_url="${OTA_BASE_URL%/}/"
+    fi
+    ota_publish_release "frontend_bundle" "$FRONTEND_DIR_LOCAL" "$frontend_root_url" "."
   fi
 
   if [[ "$do_plugins" == "1" ]]; then
@@ -1169,53 +956,8 @@ PY
 
   if [[ "$do_binaries" == "1" ]]; then
     if [[ "${#bins_to_upload[@]}" -gt 0 ]]; then
-      if [[ "$BINARIES_DEPLOY_MODE" == "ota" ]]; then
-        echo "Publishing ${#bins_to_upload[@]} binary artifact(s) via OTA -> $OTA_BASE_URL"
-        ota_publish_release "service_bundle" "$BINS_DIR" "$OTA_BASE_URL" "${bins_to_upload[@]}"
-      else
-        echo "Uploading ${#bins_to_upload[@]} bin(s) -> $SSH_TARGET:$BIN_DIR_REMOTE"
-        if [[ "$delay_binary_stop_for_frontend_ota" == "1" ]]; then
-          echo "Stopping services on $SSH_TARGET..."
-          ssh_exec "systemctl stop helios-api.service helios-engine.service || true"
-        fi
-        ssh_exec "install -d -m0755 '$BIN_DIR_REMOTE'"
-        upload_and_install_bins "$BIN_DIR_REMOTE" "${bins_to_upload[@]}"
-
-        echo "Ensuring plugin env in /etc/default..."
-        ensure_remote_plugin_env
-        if [[ "$PROFILE_FLAG" == "--release" ]]; then
-          echo "Disabling debug logging for release..."
-          ssh_exec "sh -lc 'f=\"/etc/default/helios-engine\"; \
-            touch \"\$f\"; \
-            sed -i \"/^DAEDALUS_HOST_BRIDGE_TRACE=/d\" \"\$f\"; \
-            # Clear any leftover tracing/profiling knobs that can drastically impact performance. \
-            sed -i \"/^DAEDALUS_TRACE_/d\" \"\$f\"; \
-            sed -i \"/^HELIOS_PERF_COUNTERS=/d\" \"\$f\"; \
-            sed -i \"/^HELIOS_PPROF=/d\" \"\$f\"; \
-            sed -i \"/^HELIOS_PPROF_/d\" \"\$f\"; \
-            sed -i \"/^HELIOS_HOST_OUTPUT_DEBUG=/d\" \"\$f\"; \
-            sed -i \"/^HELIOS_DAEDALUS_HOST_OUTPUTS_IN_GRAPH=/d\" \"\$f\"; \
-            sed -i \"/^HELIOS_DAEDALUS_DEMAND_DRIVEN=/d\" \"\$f\"; \
-            if grep -q \"^RUST_LOG=\" \"\$f\"; then \
-              sed -i \"s/^RUST_LOG=.*/RUST_LOG=info/\" \"\$f\"; \
-            else \
-              echo \"RUST_LOG=info\" >> \"\$f\"; \
-            fi'"
-        fi
-
-        if [[ "$RESTART_SERVICES" != "0" ]]; then
-          echo "Restarting services..."
-          ssh_exec "systemctl daemon-reload || true; systemctl restart helios-engine.service helios-api.service"
-          if ! ssh_exec "systemctl restart helios-peripherals.service"; then
-            echo "Warning: failed to restart helios-peripherals.service; binary was uploaded but service may still be running old code."
-          fi
-          if ! ssh_exec "systemctl restart helios-updater.service"; then
-            echo "Warning: failed to restart helios-updater.service; binary was uploaded but service may still be running old code."
-          fi
-        else
-          echo "Skipping restart (RESTART_SERVICES=0)"
-        fi
-      fi
+      echo "Publishing ${#bins_to_upload[@]} binary artifact(s) via OTA -> $OTA_BASE_URL"
+      ota_publish_release "service_bundle" "$BINS_DIR" "$OTA_BASE_URL" "${bins_to_upload[@]}"
     fi
   fi
 fi
