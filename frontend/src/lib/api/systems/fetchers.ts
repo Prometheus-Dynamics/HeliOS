@@ -3,9 +3,15 @@ import { formatFailureReason, requestOptionalJson } from '$lib/api/pagePayload/r
 import { fetchWithRetry } from '$lib/api/requestUtils';
 import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rigDefaults';
 import type { I2cInventory, ImuStatus, SystemsPageData } from '$lib/types/systems';
+import type {
+  HostnamePayload,
+  I2cInventory as I2cInventoryPayload,
+  ImuStatusPayload,
+  NetworkInterfaceSettings,
+  TeamNumberPayload
+} from '$lib/ts-bindings/http/client';
 import { FAILURE_MESSAGE_ALL, REQUEST_TIMEOUT_MS, SENSOR_REQUEST_TIMEOUT_MS, SYSTEMS_RETRY_OPTIONS } from './constants';
 import { emptyImuStatus, mapI2cInventory, mapImuStatus } from './mappers';
-import type { I2cInventoryResponse, ImuStatusResponse } from './mappers';
 
 type DeviceSettingsSnapshot = {
   hostname: string;
@@ -17,18 +23,6 @@ type DeviceSettingsSnapshot = {
     static_ipv4?: { address?: string | null; prefix?: number | null; gateway?: string | null } | null;
     dhcp_ipv4?: { address?: string | null; prefix?: number | null; gateway?: string | null } | null;
   }> | null;
-};
-
-type HostnamePayload = { hostname?: unknown };
-type TeamPayload = { team_number?: unknown };
-type NetworkIpv4Payload = { prefix?: unknown };
-type NetworkInterfacePayload = {
-  name?: unknown;
-  mode?: unknown;
-  mac?: unknown;
-  address?: unknown;
-  ipv4?: unknown;
-  gateway?: unknown;
 };
 
 function asRecord<T extends Record<string, unknown>>(value: unknown): T | null {
@@ -97,13 +91,13 @@ async function fetchDeviceSettings(timeoutMs: number): Promise<DeviceSettingsSna
       : typeof hostnameRaw === 'string'
         ? hostnameRaw
         : 'helios';
-  const teamRecord = asRecord<TeamPayload>(teamRaw);
+  const teamRecord = asRecord<TeamNumberPayload>(teamRaw);
   const team_number = typeof teamRecord?.team_number === 'number' ? teamRecord.team_number : null;
 
   const interfaces = Array.isArray(networkRaw)
     ? networkRaw
-        .map((entry) => asRecord<NetworkInterfacePayload>(entry))
-        .filter((entry): entry is NetworkInterfacePayload => Boolean(entry))
+        .map((entry) => asRecord<NetworkInterfaceSettings>(entry))
+        .filter((entry): entry is NetworkInterfaceSettings => Boolean(entry))
         .map((entry) => {
           const name = typeof entry.name === 'string' ? entry.name : null;
           const mac = typeof entry.mac === 'string' ? entry.mac : null;
@@ -111,11 +105,8 @@ async function fetchDeviceSettings(timeoutMs: number): Promise<DeviceSettingsSna
           const mode: 'dhcp' | 'static' = modeRaw.includes('static') ? 'static' : 'dhcp';
           const address = typeof entry.address === 'string' ? entry.address : null;
           const ipv4Entries = Array.isArray(entry.ipv4) ? entry.ipv4 : [];
-          const firstIpv4 = asRecord<NetworkIpv4Payload>(ipv4Entries[0]);
-          const prefix =
-            typeof firstIpv4?.prefix === 'number'
-              ? firstIpv4.prefix
-              : 24;
+          const firstIpv4 = asRecord<{ prefix?: unknown }>(ipv4Entries[0]);
+          const prefix = typeof firstIpv4?.prefix === 'number' ? firstIpv4.prefix : 24;
           const gateway = typeof entry.gateway === 'string' ? entry.gateway : null;
 
           return {
@@ -131,8 +122,8 @@ async function fetchDeviceSettings(timeoutMs: number): Promise<DeviceSettingsSna
   return { hostname, team_number, interfaces };
 }
 
-async function fetchI2cInventory(timeoutMs: number): Promise<I2cInventoryResponse> {
-  const payload = await requestOptionalJson<I2cInventoryResponse>('/peripherals/i2c', { method: 'GET' }, { timeoutMs, retry: SYSTEMS_RETRY_OPTIONS });
+async function fetchI2cInventory(timeoutMs: number): Promise<I2cInventoryPayload> {
+  const payload = await requestOptionalJson<I2cInventoryPayload>('/peripherals/i2c', { method: 'GET' }, { timeoutMs, retry: SYSTEMS_RETRY_OPTIONS });
   return payload ?? { buses: [], devices: [] };
 }
 
@@ -140,7 +131,7 @@ export async function fetchI2cInventorySnapshot(timeoutMs: number = SENSOR_REQUE
   return mapI2cInventory(await fetchI2cInventory(timeoutMs));
 }
 
-async function postI2cRescan(timeoutMs: number): Promise<I2cInventoryResponse | null> {
+async function postI2cRescan(timeoutMs: number): Promise<I2cInventoryPayload | null> {
   const url = apiUrl('/peripherals/i2c/scan');
   const response = await fetchWithRetry(
     url,
@@ -163,7 +154,7 @@ async function postI2cRescan(timeoutMs: number): Promise<I2cInventoryResponse | 
   if (!contentType.toLowerCase().includes('application/json')) {
     return null;
   }
-  return (await response.json()) as I2cInventoryResponse;
+  return (await response.json()) as I2cInventoryPayload;
 }
 
 export async function refreshI2cInventory(): Promise<I2cInventory> {
@@ -187,8 +178,8 @@ export async function refreshI2cInventory(): Promise<I2cInventory> {
   return mapI2cInventory(await fetchI2cInventory(SENSOR_REQUEST_TIMEOUT_MS));
 }
 
-async function fetchImuStatus(timeoutMs: number): Promise<ImuStatusResponse> {
-  const payload = await requestOptionalJson<ImuStatusResponse>('/device/imu', { method: 'GET' }, { timeoutMs, retry: SYSTEMS_RETRY_OPTIONS });
+async function fetchImuStatus(timeoutMs: number): Promise<ImuStatusPayload> {
+  const payload = await requestOptionalJson<ImuStatusPayload>('/device/imu', { method: 'GET' }, { timeoutMs, retry: SYSTEMS_RETRY_OPTIONS });
   return payload ?? {};
 }
 
@@ -274,6 +265,6 @@ export async function updateImuConfig(request: {
     const text = await response.text().catch(() => '');
     throw new Error(text || `IMU update failed (${response.status})`);
   }
-  const json = (await response.json()) as ImuStatusResponse;
+  const json = (await response.json()) as ImuStatusPayload;
   return mapImuStatus(json);
 }

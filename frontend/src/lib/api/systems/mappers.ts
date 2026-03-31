@@ -1,71 +1,10 @@
 import type { ImuAxes, ImuOptions, ImuStatus, I2cInventory } from '$lib/types/systems';
+import type { I2cInventory as I2cInventoryPayload, ImuStatusPayload } from '$lib/ts-bindings/http/client';
 
-export type I2cInventoryResponse = {
-  buses?: Array<{
-    bus?: number | null;
-    adapter?: string | null;
-    label?: string | null;
-    path?: string | null;
-    error_count?: number | null;
-    last_error?: string | null;
-  }> | null;
-  devices?: Array<{
-    bus?: number | null;
-    address?: string | null;
-    address_hex?: string | null;
-    driver?: string | null;
-    modalias?: string | null;
-    kind?: string | null;
-    name?: string | null;
-    path?: string | null;
-  }> | null;
-};
+export type I2cInventoryResponse = I2cInventoryPayload;
+export type ImuStatusResponse = ImuStatusPayload;
 
-export type ImuStatusResponse = {
-  fusion?: string | null;
-  range?: string | null;
-  update_interval_ms?: number | null;
-  dr_velocity_damp_tau_seconds?: number | null;
-  dr_still_velocity_zero_tau_seconds?: number | null;
-  dr_max_accel_world_mps2?: number | null;
-  dr_max_speed_mps?: number | null;
-  dr_max_position_m?: number | null;
-  dr_lock_position?: boolean | null;
-  updated_at?: string | null;
-  dt_seconds?: number | null;
-  last_error?: string | null;
-  has_sample?: boolean | null;
-  orientation?: {
-    roll?: number | null;
-    pitch?: number | null;
-    yaw?: number | null;
-    quaternion?: { w?: number | null; x?: number | null; y?: number | null; z?: number | null } | null;
-  } | null;
-  linear_accel?: { x?: number | null; y?: number | null; z?: number | null } | null;
-  corrected_world_accel_mps2?: { x?: number | null; y?: number | null; z?: number | null } | null;
-  velocity_world?: { x?: number | null; y?: number | null; z?: number | null } | null;
-  velocity_delta_world?: { x?: number | null; y?: number | null; z?: number | null } | null;
-  linear_speed_mps?: number | null;
-  linear_speed_normalized?: number | null;
-  position_world?: { x?: number | null; y?: number | null; z?: number | null } | null;
-  angular_velocity_dps?: { x?: number | null; y?: number | null; z?: number | null } | null;
-  angular_speed_dps?: number | null;
-  angular_speed_normalized?: number | null;
-  is_moving?: boolean | null;
-  is_moving_fast?: boolean | null;
-  motion_g?: number | null;
-  motion_fast_g?: number | null;
-  motion_fast_threshold_g?: number | null;
-  motion_noise_floor_g?: number | null;
-  dr_confidence?: number | null;
-  accel?: { x?: number | null; y?: number | null; z?: number | null } | null;
-  gyro?: { x?: number | null; y?: number | null; z?: number | null } | null;
-  mag?: { x?: number | null; y?: number | null; z?: number | null } | null;
-  sources?: { accel_gyro?: string | null; magnetometer?: string | null } | null;
-  options?: { fusion?: string[] | null; range?: string[] | null; intervals_ms?: number[] | null } | null;
-};
-
-export function mapI2cInventory(payload: I2cInventoryResponse | null): I2cInventory {
+export function mapI2cInventory(payload: I2cInventoryPayload | null): I2cInventory {
   if (!payload) return { buses: [], devices: [] };
   const buses = (payload.buses ?? [])
     .map((bus) => ({
@@ -81,7 +20,7 @@ export function mapI2cInventory(payload: I2cInventoryResponse | null): I2cInvent
   const devices = (payload.devices ?? [])
     .map((device) => ({
       bus: device.bus ?? 0,
-      address: device.address ?? device.address_hex ?? '',
+      address: device.address_hex ?? '',
       driver: device.driver ?? null,
       kind: device.kind ?? null,
       modalias: device.modalias ?? null,
@@ -157,7 +96,7 @@ export function emptyImuOptions(): ImuOptions {
   return { fusion: [], range: [], intervalsMs: [] };
 }
 
-export function mapImuStatus(payload: ImuStatusResponse | null): ImuStatus {
+export function mapImuStatus(payload: ImuStatusPayload | null): ImuStatus {
   if (!payload) return emptyImuStatus();
   const quaternion =
     payload.orientation?.quaternion &&
