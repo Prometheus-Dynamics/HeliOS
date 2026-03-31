@@ -1,19 +1,6 @@
 import type { StreamInfo, StreamManifest } from '$lib/api/httpClient';
+import type { CalibrationParams } from '$lib/features/devices/camera/cameraCalibrationTypes';
 import type { CalibrationSolveResult } from './cameraCalibrationStore.svelte';
-
-type CalibrationParams = {
-  fx: number;
-  fy: number;
-  cx: number;
-  cy: number;
-  k1: number;
-  k2: number;
-  p1: number;
-  p2: number;
-  k3: number;
-  undistortIters: number;
-  lensModel?: 'pinhole' | 'fisheye';
-};
 
 type SolveDebugView = NonNullable<CalibrationSolveResult['debugViews']>[number];
 

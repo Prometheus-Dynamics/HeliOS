@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import CalibrationResults from './CalibrationResults.svelte';
-  import type { IpaStatus } from '../cameraCalibrationTypes';
+  import type { CalibrationParams, CalibrationResult, IpaStatus } from '../cameraCalibrationTypes';
   import { estimateCalibrationFovDegs } from '../cameraCalibrationUtils';
 
   type CalibrationImage = {
@@ -11,48 +11,6 @@
     stream_id?: string;
     kind?: string;
     captured_at_ms?: number;
-  };
-
-  type CalibrationParams = {
-    fx: number;
-    fy: number;
-    cx: number;
-    cy: number;
-    k1: number;
-    k2: number;
-    p1: number;
-    p2: number;
-    k3: number;
-    undistortIters: number;
-    lensModel?: 'pinhole' | 'fisheye';
-  };
-
-  type CalibrationResult = {
-    calibration: {
-      fx: number;
-      fy: number;
-      cx: number;
-      cy: number;
-      k1: number;
-      k2: number;
-      p1: number;
-      p2: number;
-      k3: number;
-      undistortIters: number;
-      lensModel?: 'pinhole' | 'fisheye';
-    };
-    reprojectionErrorPx: number;
-    viewsUsed: number;
-    pointsUsed: number;
-    warnings?: string[];
-    debugViews?: Array<{
-      image: string;
-      overlay?: string | null;
-      tagsDetected: number;
-      pointsDetected: number;
-      used: boolean;
-      coverageRatio: number;
-    }>;
   };
 
   type CalibrationImportSource = {

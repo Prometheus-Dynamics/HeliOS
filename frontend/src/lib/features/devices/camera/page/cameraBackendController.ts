@@ -20,19 +20,6 @@ import {
   normalizePipelineOutputMap
 } from './cameraPipelineTuningController';
 
-export type CalibrationParams = {
-  fx: number;
-  fy: number;
-  cx: number;
-  cy: number;
-  k1: number;
-  k2: number;
-  p1: number;
-  p2: number;
-  k3: number;
-  undistortIters: number;
-};
-
 type BackendState = {
   get stream(): StreamInfo | null;
   get streamId(): string;
