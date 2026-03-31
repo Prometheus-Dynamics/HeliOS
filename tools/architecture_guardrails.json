@@ -133,6 +133,36 @@
       "review_note": "Device network API schema and small team-id wrapper types now live here; keep them separate from handlers and persistence helpers."
     },
     {
+      "path": "backend/src/helios-api/src/http/device/ipa.rs",
+      "max_lines": 40,
+      "owner": "HeliOS",
+      "review_note": "Device IPA HTTP root should stay as thin re-export orchestration after the module split."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/ipa/files.rs",
+      "max_lines": 220,
+      "owner": "HeliOS",
+      "review_note": "IPA file inventory, download responses, and CCM extraction now live here; keep chart rendering and CCM patching out of this module."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/ipa/ccm.rs",
+      "max_lines": 220,
+      "owner": "HeliOS",
+      "review_note": "IPA CCM patch/apply/solve logic now lives here; keep file inventory and chart response handling out of it."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/ipa/charts.rs",
+      "max_lines": 120,
+      "owner": "HeliOS",
+      "review_note": "IPA chart PNG/PDF response handling now lives here; keep CCM patching and file metadata helpers separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/ipa/types.rs",
+      "max_lines": 160,
+      "owner": "HeliOS",
+      "review_note": "IPA API schema and request parameter types now live here; keep them separate from handler and patching logic."
+    },
+    {
       "path": "backend/src/helios-api/src/http/plugins.rs",
       "max_lines": 80,
       "owner": "HeliOS",
