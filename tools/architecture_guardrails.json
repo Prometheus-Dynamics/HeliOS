@@ -769,6 +769,30 @@
       "review_note": "App-shell runtime bootstrapping, banner derivation, resource refresh wiring, and runtime error normalization live here; keep global shell policy out of the root layout."
     },
     {
+      "path": "frontend/src/routes/devices/+page.svelte",
+      "max_lines": 500,
+      "owner": "HeliOS",
+      "review_note": "The devices route now composes filters, device/peripheral presentation, and modal state while cache/bootstrap refresh wiring, websocket reconnect policy, and stream action/runtime mutation logic live in a dedicated helper; keep route orchestration in the page and do not rebuild a second controller in-component."
+    },
+    {
+      "path": "frontend/src/routes/devices/devicesPageSupport.ts",
+      "max_lines": 620,
+      "owner": "HeliOS",
+      "review_note": "Devices page cache hydration, periodic refresh, websocket reconnect/backoff policy, and stream unregister/download/restore actions now live here; keep rendering concerns and modal layout out of this route controller."
+    },
+    {
+      "path": "frontend/src/routes/systems/+page.svelte",
+      "max_lines": 460,
+      "owner": "HeliOS",
+      "review_note": "The systems route now composes activity tabs and panel props while I2C/IMU bootstrap, refresh policy, and IMU stream/config controllers live in a dedicated helper; keep the page focused on orchestration instead of rebuilding device runtime policy inline."
+    },
+    {
+      "path": "frontend/src/routes/systems/systemsPageSupport.ts",
+      "max_lines": 980,
+      "owner": "HeliOS",
+      "review_note": "Systems page bootstrap refresh, I2C rescans, IMU stream/poll fallback, IMU config mutation, and form/state synchronization now live here; keep visual panel wiring out of this runtime controller and continue splitting if another subsystem regrows."
+    },
+    {
       "path": "frontend/src/routes/localization/+page.svelte",
       "max_lines": 3600,
       "owner": "HeliOS",

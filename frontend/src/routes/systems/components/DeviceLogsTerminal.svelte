@@ -300,22 +300,26 @@
   }
 
   $effect(() => {
-    if (!active) {
-      disconnect();
-      return;
-    }
-    if (!sourceId) {
-      disconnect();
-      return;
-    }
-    if (socket && lastConnectedSourceId === sourceId) {
-      return;
-    }
-    if (sourceId !== lastConnectedSourceId) {
-      clear();
-    }
-    lastConnectedSourceId = sourceId;
-    connect();
+    const nextActive = active;
+    const nextSourceId = sourceId;
+    untrack(() => {
+      if (!nextActive) {
+        disconnect();
+        return;
+      }
+      if (!nextSourceId) {
+        disconnect();
+        return;
+      }
+      if (socket && lastConnectedSourceId === nextSourceId) {
+        return;
+      }
+      if (nextSourceId !== lastConnectedSourceId) {
+        clear();
+      }
+      lastConnectedSourceId = nextSourceId;
+      connect();
+    });
   });
 
   $effect(() => {

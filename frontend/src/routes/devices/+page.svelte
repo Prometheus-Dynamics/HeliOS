@@ -10,51 +10,22 @@
   import DevicesPageSidebar from '$lib/features/devices/page/DevicesPageSidebar.svelte';
   import DevicesPageContent from '$lib/features/devices/page/DevicesPageContent.svelte';
   import DevicesUnregisterDialog from '$lib/features/devices/page/DevicesUnregisterDialog.svelte';
-  import { createDomainResource, subscribeDomainResourceInvalidations } from '$lib/api/domainResources';
-  import { scheduleWhenIdle } from '$lib/utils/browserSchedule';
-  import { resourceGuardStatusResource, type ResourceGuardStatus } from '$lib/api/deviceStatusResources';
-  import { connectDevicesUpdatesStream } from '$lib/api/devicesUpdates';
-  import { startRefreshScheduler } from '$lib/api/refreshScheduler';
-  import { StreamsApi } from '$lib/api/streamsApi';
-  import { apiFetch } from '$lib/api/core/http';
+  import type { ResourceGuardStatus } from '$lib/api/deviceStatusResources';
   import { connectionState } from '$lib/api/connection';
   import { resourceTelemetryStore, type ResourceSample } from '$lib/api/telemetry';
-  import { invalidateSWR, invalidateSWRPrefix } from '$lib/utils/swrCache';
-  import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
-  import { createBackoffTimer } from '$lib/utils/backoff';
   import type { IconDefinition } from '@fortawesome/free-solid-svg-icons';
   import { faClock, faLayerGroup, faPlug, faSatelliteDish, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons';
-  import { fetchDevicesCamerasSnapshot, fetchDevicesPeripheralsSnapshot } from '$lib/api/devicesPage';
   import { registerCameraModal } from '$lib/stores/modals';
   import { createDevicesUiStore } from '$lib/features/devices/store';
   import { buildThrottleBanner, normalizePeripheralToken } from '$lib/features/devices/utils';
-  import { localizationConfigResource, type LocalizationConfig } from '$lib/features/localization/localizationConfig';
+  import type { LocalizationConfig } from '$lib/features/localization/localizationConfig';
   import { PROFILE_COLORS, profileColorForId } from '$lib/features/localization/utils';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
-
-  const AUTO_REFRESH_MS = 10_000;
-  const DEVICES_CAMERAS_CACHE_KEY = 'devices:cameras:v1';
-  const DEVICES_PERIPHERALS_CACHE_KEY = 'devices:peripherals:v1';
-  const DEVICES_CACHE_STALE_MS = 10_000;
-  const DEVICES_CACHE_MAX_MS = 120_000;
-  const WS_REFRESH_DEBOUNCE_MS = 250;
-  const DEVICES_UPDATES_RECONNECT_MS = 750;
-  const DEVICES_UPDATES_RECONNECT_MAX_MS = 15_000;
-  const LOCALIZATION_CONFIG_REFRESH_MS = 30_000;
-  const devicesCamerasResource = createDomainResource({
-    key: DEVICES_CAMERAS_CACHE_KEY,
-    loader: fetchDevicesCamerasSnapshot,
-    staleMs: DEVICES_CACHE_STALE_MS,
-    maxAgeMs: DEVICES_CACHE_MAX_MS,
-    kinds: ['device', 'settings', 'streams']
-  });
-  const devicesPeripheralsResource = createDomainResource({
-    key: DEVICES_PERIPHERALS_CACHE_KEY,
-    loader: fetchDevicesPeripheralsSnapshot,
-    staleMs: DEVICES_CACHE_STALE_MS,
-    maxAgeMs: DEVICES_CACHE_MAX_MS,
-    kinds: ['device', 'settings']
-  });
+  import {
+    createDevicesPageSupport,
+    type PeripheralRow,
+    type StreamActionBusyState
+  } from './devicesPageSupport';
 
   const { data } = $props<{ data: PageData }>();
   const readInitialDevices = () => data.initial;
@@ -74,20 +45,6 @@
     )
   );
 
-  let stopRefreshScheduler: (() => void) | null = null;
-  let stopResourceGuardScheduler: (() => void) | null = null;
-  let stopLocalizationScheduler: (() => void) | null = null;
-  let wsRefreshTimer: number | null = null;
-  let updatesCleanup: (() => void) | null = null;
-  let stopDomainInvalidation: (() => void) | null = null;
-  let updatesNonce = 0;
-  let updatesReconnectPending = false;
-  let cancelBootstrapRefresh: (() => void) | null = null;
-  const updatesReconnectBackoff = createBackoffTimer({
-    baseMs: DEVICES_UPDATES_RECONNECT_MS,
-    maxMs: DEVICES_UPDATES_RECONNECT_MAX_MS
-  });
-
   const cameras = $derived(devices.cameras ?? []);
   const peripherals = $derived(devices.peripherals ?? []);
   const deviceErrors = $derived(devices.errors ?? {});
@@ -99,7 +56,6 @@
   const camerasInitialLoading = $derived(camerasLoading && cameras.length === 0);
 
   type CameraStatus = DevicesPageData['cameras'][number]['status'];
-  type PeripheralRow = DevicesPageData['peripherals'][number];
   type CameraFilterOption = 'all' | CameraStatus;
   type LocalizationProfileBadge = { id: string; name: string; color: string };
 
@@ -253,12 +209,6 @@
     )
   ]);
 
-	  type StreamActionBusyState = {
-	    unregister?: boolean;
-	    download?: boolean;
-      restore?: boolean;
-  };
-
   let streamActionBusy = $state<Record<string, StreamActionBusyState>>({});
   let resourceGuardStatus = $state<ResourceGuardStatus | null>(null);
   const resourceGuardDegradedStreamIds = $derived.by(() => {
@@ -270,401 +220,70 @@
     return ids;
   });
   let pendingUnregister = $state<CameraRow | null>(null);
+  let stopDevicesPageSupport: (() => void) | null = null;
+
+  const devicesPageSupport = createDevicesPageSupport({
+    readDevices: () => devices,
+    setDevices: (value) => {
+      devices = value;
+    },
+    readHasLoadedOnce: () => hasLoadedOnce,
+    setHasLoadedOnce: (value) => {
+      hasLoadedOnce = value;
+    },
+    readIsRefreshing: () => isRefreshing,
+    setIsRefreshing: (value) => {
+      isRefreshing = value;
+    },
+    setCamerasLoading: (value) => {
+      camerasLoading = value;
+    },
+    setPeripheralsLoading: (value) => {
+      peripheralsLoading = value;
+    },
+    setLocalizationConfig: (value) => {
+      localizationConfig = value;
+    },
+    setResourceGuardStatus: (value) => {
+      resourceGuardStatus = value;
+    },
+    setLoadError: (value) => {
+      loadError = value;
+    },
+    setFetchedAt: (value) => {
+      fetchedAt = value;
+    },
+    readConnectionStatus: () => connectionStatus,
+    readIsBackendUnavailable: () => isBackendUnavailable,
+    syncActivePeripheral,
+    readStreamActionBusy: () => streamActionBusy,
+    setStreamActionBusy: (value) => {
+      streamActionBusy = value;
+    },
+    readPendingUnregister: () => pendingUnregister,
+    setPendingUnregister: (value) => {
+      pendingUnregister = value;
+    }
+  });
 
   onMount(() => {
-    if (browser) {
-      const cachedCameras = devicesCamerasResource.read();
-      if (cachedCameras?.data) {
-        devices = { ...devices, cameras: cachedCameras.data };
-        fetchedAt = cachedCameras.fetchedAt;
-        hasLoadedOnce = true;
-      }
-      const cachedPeripherals = devicesPeripheralsResource.read();
-      if (cachedPeripherals?.data) {
-        devices = {
-          ...devices,
-          peripherals: cachedPeripherals.data.peripherals,
-          errors: { ...(devices.errors ?? {}), peripherals: cachedPeripherals.data.error }
-        };
-        fetchedAt = Math.max(fetchedAt, cachedPeripherals.fetchedAt);
-        hasLoadedOnce = true;
-      }
-      const cachedLocalization = localizationConfigResource.read();
-      if (cachedLocalization?.data) {
-        localizationConfig = cachedLocalization.data;
-      }
-      const cachedResourceGuard = resourceGuardStatusResource.read();
-      if (cachedResourceGuard?.data) {
-        resourceGuardStatus = cachedResourceGuard.data;
-      }
-    }
-    if (hasLoadedOnce) {
-      cancelBootstrapRefresh = scheduleWhenIdle(() => {
-        if (document.hidden) return;
-        void refreshDevices();
-        void refreshLocalizationConfig();
-        void refreshResourceGuardStatus();
-      }, { timeoutMs: 1800, fallbackMs: 650 });
-    } else {
-      void refreshDevices({ bootstrap: true });
-      void refreshLocalizationConfig();
-      void refreshResourceGuardStatus();
-    }
-    connectDevicesUpdates();
-    stopDomainInvalidation = subscribeDomainResourceInvalidations(['device', 'localization', 'media', 'settings', 'streams'], [devicesCamerasResource, devicesPeripheralsResource], () => {
-      void refreshDevices({ force: true });
-      void refreshLocalizationConfig();
-      void refreshResourceGuardStatus();
-    }, { debounceMs: WS_REFRESH_DEBOUNCE_MS });
-    stopRefreshScheduler = startRefreshScheduler(() => refreshDevices(), {
-      intervalMs: AUTO_REFRESH_MS,
-      immediate: false,
-      enabled: () => !isBackendUnavailable
-    });
-    stopResourceGuardScheduler = startRefreshScheduler(refreshResourceGuardStatus, {
-      intervalMs: 4_000,
-      immediate: false,
-      enabled: () => !isBackendUnavailable
-    });
-    stopLocalizationScheduler = startRefreshScheduler(refreshLocalizationConfig, {
-      intervalMs: LOCALIZATION_CONFIG_REFRESH_MS,
-      immediate: false,
-      enabled: () => !isBackendUnavailable
-    });
+    stopDevicesPageSupport = devicesPageSupport.start();
   });
 
   onDestroy(() => {
-    cancelBootstrapRefresh?.();
-    cancelBootstrapRefresh = null;
-    stopRefreshScheduler?.();
-    stopRefreshScheduler = null;
-    stopResourceGuardScheduler?.();
-    stopResourceGuardScheduler = null;
-    stopLocalizationScheduler?.();
-    stopLocalizationScheduler = null;
-    if (wsRefreshTimer) {
-      clearTimeout(wsRefreshTimer);
-      wsRefreshTimer = null;
-    }
-    stopDomainInvalidation?.();
-    disconnectDevicesUpdates();
+    stopDevicesPageSupport?.();
+    stopDevicesPageSupport = null;
     devicesUiStore.destroy();
   });
-
-  function scheduleWsRefresh(): void {
-    if (wsRefreshTimer != null) return;
-    wsRefreshTimer = window.setTimeout(() => {
-      wsRefreshTimer = null;
-      if (document.hidden) return;
-      void refreshDevices({ force: true });
-    }, WS_REFRESH_DEBOUNCE_MS);
-  }
-
-  function scheduleDevicesUpdatesReconnect(): void {
-    if (updatesReconnectPending) return;
-    updatesReconnectPending = true;
-    const delay = updatesReconnectBackoff.bump();
-    updatesReconnectBackoff.schedule(() => {
-      updatesReconnectPending = false;
-      connectDevicesUpdates();
-    }, delay);
-  }
-
-  function disconnectDevicesUpdates(): void {
-    updatesNonce += 1;
-    updatesReconnectPending = false;
-    updatesReconnectBackoff.cancel();
-    updatesCleanup?.();
-    updatesCleanup = null;
-  }
-
-  function connectDevicesUpdates(): void {
-    const nonce = (updatesNonce += 1);
-    updatesReconnectPending = false;
-    updatesReconnectBackoff.cancel();
-    updatesCleanup?.();
-    updatesCleanup = null;
-    updatesCleanup = connectDevicesUpdatesStream({
-      onOpen: () => {
-        if (nonce !== updatesNonce) return;
-        updatesReconnectBackoff.reset();
-      },
-      onUpdate: () => {
-        if (nonce !== updatesNonce) return;
-        updatesReconnectBackoff.reset();
-        if (document.hidden) return;
-        scheduleWsRefresh();
-      },
-      onClose: () => {
-        if (nonce !== updatesNonce) return;
-        scheduleDevicesUpdatesReconnect();
-      },
-      onError: (message) => {
-        if (nonce !== updatesNonce) return;
-        if (connectionStatus === 'online') {
-          reportError({ context: 'Devices updates socket', error: message, toast: false });
-        }
-        scheduleDevicesUpdatesReconnect();
-      }
-    });
-  }
 
   $effect(() => {
     devicesUiStore.update(cameras, peripherals);
   });
 
-  async function refreshLocalizationConfig(): Promise<void> {
-    try {
-      localizationConfig = await localizationConfigResource.refresh();
-    } catch (error) {
-      if (connectionStatus === 'online' && !isAbortError(error)) {
-        reportError({ context: 'Devices localization refresh', error, toast: false });
-      }
-    }
-  }
-
-  async function refreshDevices(options: { bootstrap?: boolean; force?: boolean } = {}): Promise<void> {
-    if (isRefreshing) return;
-
-    const { bootstrap = false, force = false } = options;
-    if (isBackendUnavailable) {
-      if (bootstrap && !hasLoadedOnce) {
-        loadError = 'Backend unavailable. Update the API base URL in Settings.';
-        hasLoadedOnce = true;
-      }
-      return;
-    }
-    if (bootstrap) {
-      loadError = null;
-    }
-    isRefreshing = true;
-    let pending = 2;
-    let failures = 0;
-    let sawSuccess = false;
-
-    const finalize = () => {
-      pending -= 1;
-      if (pending > 0) return;
-      isRefreshing = false;
-      if (bootstrap || !hasLoadedOnce) {
-        hasLoadedOnce = true;
-      }
-      if (!sawSuccess && failures >= 2) {
-        loadError = 'Unable to load devices right now.';
-      }
-    };
-
-    camerasLoading = true;
-    devicesCamerasResource.refresh({ force })
-      .then((camerasPayload) => {
-        sawSuccess = true;
-        loadError = null;
-        camerasLoading = false;
-        devices = { ...devices, cameras: camerasPayload };
-        fetchedAt = Date.now();
-      })
-      .catch((error) => {
-        failures += 1;
-        camerasLoading = false;
-        if (!isAbortError(error)) {
-          if (connectionStatus === 'online') {
-            reportError({ context: 'Devices cameras refresh', error, toast: false });
-          }
-        }
-        devicesCamerasResource.invalidate();
-      })
-      .finally(finalize);
-
-    peripheralsLoading = true;
-    devicesPeripheralsResource.refresh({ force })
-      .then((snapshot) => {
-        sawSuccess = true;
-        loadError = null;
-        peripheralsLoading = false;
-        devices = {
-          ...devices,
-          peripherals: snapshot.peripherals,
-          errors: { ...(devices.errors ?? {}), peripherals: snapshot.error }
-        };
-        syncActivePeripheral(snapshot.peripherals);
-        fetchedAt = Date.now();
-      })
-      .catch((error) => {
-        failures += 1;
-        peripheralsLoading = false;
-        if (!isAbortError(error)) {
-          if (connectionStatus === 'online') {
-            reportError({ context: 'Devices peripherals refresh', error, toast: false });
-          }
-          const message = buildErrorMessage({ error, fallback: 'Unable to load peripherals right now.' });
-          devices = { ...devices, errors: { ...(devices.errors ?? {}), peripherals: message } };
-        }
-        devicesPeripheralsResource.invalidate();
-      })
-      .finally(finalize);
-  }
-
-  async function refreshResourceGuardStatus(): Promise<void> {
-    try {
-      resourceGuardStatus = await resourceGuardStatusResource.refresh();
-    } catch {
-      resourceGuardStatus = null;
-    }
-  }
-
-  function actionIsBusy(cameraId: string, action: keyof StreamActionBusyState): boolean {
-    const entry = streamActionBusy[cameraId];
-    if (!entry) return false;
-    return Boolean(entry[action]);
-  }
-
-  function setActionBusy(cameraId: string, action: keyof StreamActionBusyState, value: boolean): void {
-    streamActionBusy = {
-      ...streamActionBusy,
-      [cameraId]: {
-        ...(streamActionBusy[cameraId] ?? {}),
-        [action]: value
-      }
-    };
-  }
-
-  function requestUnregister(camera: CameraRow): void {
-    if (pendingUnregister || actionIsBusy(camera.id, 'unregister')) return;
-    pendingUnregister = camera;
-  }
-
-  function closeUnregisterDialog(): void {
-    pendingUnregister = null;
-  }
-
-  async function confirmUnregister(): Promise<void> {
-    const target = pendingUnregister;
-    if (!target) return;
-    await unregisterCameraStream(target);
-    pendingUnregister = null;
-  }
-
-  function sessionRefFromCamera(camera: CameraRow): string | null {
-    const id = camera.captureSessionId?.toString().trim() ?? '';
-    if (id.startsWith('peer:')) return null;
-    const alias = camera.captureSessionAlias?.trim();
-    if (alias) return alias;
-    return id.length ? id : null;
-  }
-
-  async function unregisterCameraStream(camera: CameraRow): Promise<void> {
-    const streamId = camera.captureSessionId?.toString().trim() ?? '';
-    if (!streamId) {
-      toaster.error({
-        title: 'Stream not active',
-        description: 'This camera does not have an active capture session.'
-      });
-      return;
-    }
-    if (actionIsBusy(camera.id, 'unregister')) return;
-    setActionBusy(camera.id, 'unregister', true);
-    try {
-      await StreamsApi.deleteStream({ id: streamId });
-      toaster.success({
-        title: 'Stream deleted',
-        description: `${camera.name} capture session removed`
-      });
-      invalidateSWRPrefix('devices:');
-      invalidateSWRPrefix('media:');
-      invalidateSWR('media:stream-labels:v1');
-      await refreshDevices();
-    } catch (error) {
-      reportError({
-        title: 'Delete failed',
-        error,
-        fallback: 'Unable to delete the stream right now.'
-      });
-    } finally {
-      setActionBusy(camera.id, 'unregister', false);
-    }
-  }
-
-  async function downloadCameraManifest(camera: CameraRow): Promise<void> {
-    const streamId = camera.captureSessionId?.toString().trim() ?? '';
-    if (!streamId) {
-      toaster.error({
-        title: 'Manifest unavailable',
-        description: 'No capture session is active for this camera.'
-      });
-      return;
-    }
-    if (actionIsBusy(camera.id, 'download')) return;
-    setActionBusy(camera.id, 'download', true);
-    try {
-      const response = await StreamsApi.getStream({ id: streamId });
-      const manifest = response?.manifest;
-      if (!manifest || typeof manifest !== 'object') {
-        throw new Error('Manifest not available');
-      }
-      const pretty = JSON.stringify(manifest, null, 2);
-      const blob = new Blob([pretty], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const suggestedName =
-        typeof manifest === 'object' && manifest && 'path' in manifest && typeof manifest.path === 'string'
-          ? manifest.path.split('/').pop() ?? 'stream-manifest'
-          : 'stream-manifest';
-      const filename = `${suggestedName.replace(/\.json$/i, '') || 'stream-manifest'}-${camera.id}.json`;
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = filename;
-      document.body.appendChild(anchor);
-      anchor.click();
-      document.body.removeChild(anchor);
-      URL.revokeObjectURL(url);
-      toaster.success({
-        title: 'Manifest downloaded',
-        description: `${camera.name} manifest saved`
-      });
-    } catch (error) {
-      reportError({
-        title: 'Download failed',
-        error,
-        fallback: 'Unable to download the manifest right now.'
-      });
-    } finally {
-      setActionBusy(camera.id, 'download', false);
-    }
-  }
-
   function isResourceGuardDegraded(camera: CameraRow): boolean {
     const streamId = camera.captureSessionId?.toString().trim();
     if (!streamId) return false;
     return resourceGuardDegradedStreamIds.has(streamId);
-  }
-
-  async function restoreCameraStreamResources(camera: CameraRow): Promise<void> {
-    const streamId = camera.captureSessionId?.toString().trim() ?? '';
-    if (!streamId) {
-      toaster.error({
-        title: 'Restore unavailable',
-        description: 'This camera does not have an active stream ID.'
-      });
-      return;
-    }
-    if (actionIsBusy(camera.id, 'restore')) return;
-    setActionBusy(camera.id, 'restore', true);
-    try {
-      await apiFetch(`/device/resource-guard/restore/${encodeURIComponent(streamId)}`, { method: 'POST' });
-      toaster.success({
-        title: 'Stream resources re-enabled',
-        description: `${camera.name} codecs restored`
-      });
-      await refreshResourceGuardStatus();
-      await refreshDevices({ force: true });
-    } catch (error) {
-      reportError({
-        title: 'Restore failed',
-        error,
-        fallback: 'Unable to re-enable stream resources right now.'
-      });
-    } finally {
-      setActionBusy(camera.id, 'restore', false);
-    }
   }
 
   function rememberActivePeripheral(peripheral: PeripheralRow | null) {
@@ -741,13 +360,6 @@
     cameraFilter = 'all';
   }
 
-  function isAbortError(error: unknown): boolean {
-    if (!error) return false;
-    if (error instanceof DOMException && error.name === 'AbortError') return true;
-    if (error instanceof Error && error.name === 'AbortError') return true;
-    return (error as { name?: string }).name === 'AbortError';
-  }
-
   function clone<T>(value: T): T {
     return JSON.parse(JSON.stringify(value));
   }
@@ -784,11 +396,11 @@
       onSelectPeripheral={(peripheral) => openPeripheral(peripheral as PeripheralRow | null)}
       onRegisterStream={() => registerCameraModal.set(true)}
       onClearFilters={clearInventoryFilters}
-      onDownloadManifest={(camera) => void downloadCameraManifest(camera as CameraRow)}
-      onRequestUnregister={(camera) => requestUnregister(camera as CameraRow)}
-      onRestoreStreamResources={(camera) => void restoreCameraStreamResources(camera as CameraRow)}
-      actionIsBusy={(id, action) => actionIsBusy(id, action)}
-      sessionRefFromCamera={(camera) => sessionRefFromCamera(camera as CameraRow)}
+      onDownloadManifest={(camera) => void devicesPageSupport.downloadCameraManifest(camera as CameraRow)}
+      onRequestUnregister={(camera) => devicesPageSupport.requestUnregister(camera as CameraRow)}
+      onRestoreStreamResources={(camera) => void devicesPageSupport.restoreCameraStreamResources(camera as CameraRow)}
+      actionIsBusy={(id, action) => devicesPageSupport.actionIsBusy(id, action)}
+      sessionRefFromCamera={(camera) => devicesPageSupport.sessionRefFromCamera(camera as CameraRow)}
       isResourceGuardDegraded={(camera) => isResourceGuardDegraded(camera as CameraRow)}
     />
   </div>
@@ -797,21 +409,21 @@
 	    peripheral={activePeripheral}
 	    on:close={handlePeripheralClose}
 	    on:calibrate={handlePeripheralCalibrate}
-	    on:refresh={() => void refreshDevices()}
+	    on:refresh={() => void devicesPageSupport.refreshDevices()}
 	  />
 
     {#if $registerCameraModal}
       <RegisterCameraModal
         registeredIds={registeredIds}
         registeredHardwareIds={registeredHardwareIds}
-        on:create={() => void refreshDevices()}
+        on:create={() => void devicesPageSupport.refreshDevices()}
       />
     {/if}
 
     <DevicesUnregisterDialog
       pending={pendingUnregister}
-      busy={pendingUnregister ? actionIsBusy(pendingUnregister.id, 'unregister') : false}
-      onClose={closeUnregisterDialog}
-      onConfirm={() => void confirmUnregister()}
+      busy={pendingUnregister ? devicesPageSupport.actionIsBusy(pendingUnregister.id, 'unregister') : false}
+      onClose={devicesPageSupport.closeUnregisterDialog}
+      onConfirm={() => void devicesPageSupport.confirmUnregister()}
     />
 </section>
