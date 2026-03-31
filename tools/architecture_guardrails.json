@@ -589,6 +589,36 @@
       "review_note": "Startup stream preset validation and persistence now live here; keep pipeline graph seeding and preset file decoding out of the stream seed path."
     },
     {
+      "path": "backend/src/helios-api/src/http/localization/solve/mod.rs",
+      "max_lines": 110,
+      "owner": "HeliOS",
+      "review_note": "Localization solve root should stay as thin route/query orchestration after splitting request/cache assembly, source-input inference, rig-pose loading, and IMU leveling into dedicated modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/localization/solve/request.rs",
+      "max_lines": 170,
+      "owner": "HeliOS",
+      "review_note": "Localization solve request assembly, source-value fetch fanout, response trimming, and solve cache wiring now live here; keep stream-input inference and rig-pose loading out of the request layer."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/localization/solve/inputs.rs",
+      "max_lines": 170,
+      "owner": "HeliOS",
+      "review_note": "Localization source dedupe, input-key inference, and IMU-source heuristics now live here; keep solve cache wiring and rig-pose mutation separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/localization/solve/rig.rs",
+      "max_lines": 200,
+      "owner": "HeliOS",
+      "review_note": "Rig-pose loading, persisted-pose backfill, and IMU leveling composition now live here; keep source-value fetch, request encoding, and OpenAPI route behavior out of the rig layer."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/localization/solve/tests.rs",
+      "max_lines": 120,
+      "owner": "HeliOS",
+      "review_note": "Localization solve behavioral tests now live here; keep test-only coverage out of the route and helper modules."
+    },
+    {
       "path": "frontend/src/lib/components/StreamPreview.svelte",
       "max_lines": 850,
       "owner": "HeliOS",
@@ -661,6 +691,11 @@
       "path": "backend/src/helios-api/src/http/startup.rs",
       "owner": "HeliOS",
       "reason": "Startup preset application now lives under backend/src/helios-api/src/http/startup/*. Do not recreate the deleted startup.rs monolith."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/localization/solve.rs",
+      "owner": "HeliOS",
+      "reason": "Localization solve HTTP orchestration now lives under backend/src/helios-api/src/http/localization/solve/*. Do not recreate the deleted localization/solve.rs monolith."
     }
   ]
 }
