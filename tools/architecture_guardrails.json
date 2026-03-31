@@ -19,16 +19,40 @@
       "review_note": "Updater apply logic remains large while OTA flows are being consolidated; protect the current size ceiling."
     },
     {
-      "path": "backend/src/helios-api/src/ws/streams.rs",
-      "max_lines": 1100,
-      "owner": "HeliOS",
-      "review_note": "Websocket stream orchestration is still oversized; prevent regression while the split is planned."
-    },
-    {
       "path": "frontend/src/lib/components/StreamPreview.svelte",
       "max_lines": 850,
       "owner": "HeliOS",
       "review_note": "Viewer behavior is still being broken apart; fail if StreamPreview regrows beyond the agreed guardrail."
+    },
+    {
+      "path": "backend/src/helios-api/src/ws/streams/mod.rs",
+      "max_lines": 220,
+      "owner": "HeliOS",
+      "review_note": "The websocket stream router should stay as thin orchestration after the split."
+    },
+    {
+      "path": "backend/src/helios-api/src/ws/streams/metrics.rs",
+      "max_lines": 420,
+      "owner": "HeliOS",
+      "review_note": "Stream metrics websocket handling is isolated here; cap it so it does not regrow into a new monolith."
+    },
+    {
+      "path": "backend/src/helios-api/src/ws/streams/commands.rs",
+      "max_lines": 380,
+      "owner": "HeliOS",
+      "review_note": "Graph/control command handling should remain focused and not accumulate unrelated websocket paths."
+    },
+    {
+      "path": "backend/src/helios-api/src/ws/streams/outputs.rs",
+      "max_lines": 340,
+      "owner": "HeliOS",
+      "review_note": "Stream output subscriptions were split out to keep sampling and subscription state isolated."
+    },
+    {
+      "path": "backend/src/helios-api/src/ws/streams/frames.rs",
+      "max_lines": 320,
+      "owner": "HeliOS",
+      "review_note": "Frame shmem forwarding is a dedicated path now; keep it contained instead of merging it back into the router."
     },
     {
       "path": "backend/src/helios-engine/src/localization/solve/mod.rs",
@@ -42,6 +66,11 @@
       "path": "backend/src/helios-engine/src/localization/solve.rs",
       "owner": "HeliOS",
       "reason": "The localization solver now lives under backend/src/helios-engine/src/localization/solve/*. Do not recreate the old monolithic solve.rs path."
+    },
+    {
+      "path": "backend/src/helios-api/src/ws/streams.rs",
+      "owner": "HeliOS",
+      "reason": "Websocket stream handling now lives under backend/src/helios-api/src/ws/streams/*. Do not recreate the deleted ws/streams.rs monolith."
     }
   ]
 }
