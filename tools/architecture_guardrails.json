@@ -109,6 +109,42 @@
       "review_note": "Storage data-root selection and path sanitization now live here; keep it limited to filesystem root and helper concerns."
     },
     {
+      "path": "backend/src/helios-api/src/http/media.rs",
+      "max_lines": 980,
+      "owner": "HeliOS",
+      "review_note": "Media HTTP root should stay focused on route orchestration after splitting preview generation, archive streaming, metadata/model helpers, and schema definitions into dedicated modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/media/archive.rs",
+      "max_lines": 80,
+      "owner": "HeliOS",
+      "review_note": "Media archive assembly now lives here; keep archive building isolated from the HTTP routes and media metadata/model logic."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/media/models.rs",
+      "max_lines": 360,
+      "owner": "HeliOS",
+      "review_note": "AI model detection, metadata hydration, manifest registration, and label-artifact handling now live here; keep media route handlers and preview helpers out of the model-management path."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/media/preview.rs",
+      "max_lines": 580,
+      "owner": "HeliOS",
+      "review_note": "Video probing, preview transcoding, thumbnail generation, and byte-range streaming now live here; keep preview/streaming internals separate from the upload and metadata routes."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/media/support.rs",
+      "max_lines": 220,
+      "owner": "HeliOS",
+      "review_note": "Media storage paths, metadata persistence, label/IMU helpers, and MIME/upload-limit helpers now live here; keep those support concerns out of the HTTP root."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/media/types.rs",
+      "max_lines": 220,
+      "owner": "HeliOS",
+      "review_note": "Media API schema types and query parsing now live here; keep them separate from route logic, preview generation, and AI model helpers."
+    },
+    {
       "path": "backend/src/helios-api/src/http/device/network.rs",
       "max_lines": 80,
       "owner": "HeliOS",
