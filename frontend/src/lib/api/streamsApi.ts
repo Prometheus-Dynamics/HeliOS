@@ -4,6 +4,7 @@ import { apiFetch, apiFetchCachedJson, runApiRequest, type ApiRequestOptions } f
 import { DEFAULT_REQUEST_TIMEOUT_MS, fetchWithRetry } from '$lib/api/requestUtils';
 import type {
   CancelablePromise,
+  RootStatusPayload,
   StreamCapabilitiesResponse,
   StreamManifest,
   StreamPipelineWire
@@ -21,35 +22,14 @@ const DEFAULT_STREAM_CAPABILITIES_CACHE_MS = 10_000;
 type StreamsList = Awaited<ReturnType<typeof EngineStreamsService.listStreams>>;
 type StreamCapabilities = Awaited<ReturnType<typeof EngineStreamsService.streamCapabilitiesHandler>>;
 type CodecList = Awaited<ReturnType<typeof EngineStreamsService.listCodecs>>;
-type RuntimeStreamCapabilities = StreamCapabilities & {
-  defaults: StreamCapabilities['defaults'] & {
-    defaultEncoderId?: string | null;
-    defaultDecoderIdsByCaptureFormat?: Record<string, string> | null;
-  };
-};
-type RuntimeStatusPayload = {
-  health: {
-    ok: boolean;
-    server_time_ms: number;
-    uptime_ms: number;
-    version: string;
-  };
-  streams: {
-    capabilities: RuntimeStreamCapabilities;
-    codecs: CodecList;
-    resolvedStreams: StreamsList;
-    stale: boolean;
-    revision: number;
-  };
-};
 let streamsCache: CacheEntry<StreamsList> | null = null;
 let streamsInflight: Promise<StreamsList> | null = null;
 let streamCapabilitiesCache: CacheEntry<StreamCapabilities> | null = null;
 let streamCapabilitiesInflight: Promise<StreamCapabilities> | null = null;
 let codecInventoryCache: CacheEntry<CodecList> | null = null;
 let codecInventoryInflight: Promise<CodecList> | null = null;
-let runtimeStatusCache: CacheEntry<RuntimeStatusPayload> | null = null;
-let runtimeStatusInflight: Promise<RuntimeStatusPayload> | null = null;
+let runtimeStatusCache: CacheEntry<RootStatusPayload> | null = null;
+let runtimeStatusInflight: Promise<RootStatusPayload> | null = null;
 
 function withAbort<T>(task: (controller: AbortController) => Promise<T>): CancelablePromise<T> {
   const controller = new AbortController();
@@ -98,7 +78,7 @@ function resolveStreamCapabilitiesCacheMs(options?: ApiRequestOptions): number {
   return Math.max(0, Math.floor(raw));
 }
 
-function primeRuntimeStatusCaches(payload: RuntimeStatusPayload, fetchedAt: number): void {
+function primeRuntimeStatusCaches(payload: RootStatusPayload, fetchedAt: number): void {
   streamCapabilitiesCache = { fetchedAt, value: payload.streams.capabilities };
   codecInventoryCache = { fetchedAt, value: payload.streams.codecs };
   streamsCache = {
@@ -109,7 +89,7 @@ function primeRuntimeStatusCaches(payload: RuntimeStatusPayload, fetchedAt: numb
   };
 }
 
-async function runtimeStatusSingleflight(options?: ApiRequestOptions): Promise<RuntimeStatusPayload> {
+async function runtimeStatusSingleflight(options?: ApiRequestOptions): Promise<RootStatusPayload> {
   const cacheMs = resolveStreamCapabilitiesCacheMs(options);
   const now = Date.now();
   if (!options?.forceRefresh && cacheMs > 0 && runtimeStatusCache && now - runtimeStatusCache.fetchedAt < cacheMs) {
@@ -120,7 +100,7 @@ async function runtimeStatusSingleflight(options?: ApiRequestOptions): Promise<R
     return runtimeStatusInflight;
   }
 
-  runtimeStatusInflight = apiFetch<RuntimeStatusPayload>(
+  runtimeStatusInflight = apiFetch<RootStatusPayload>(
     apiUrl('/').replace(/\/+$/, ''),
     { headers: { Accept: 'application/json' } },
     { label: 'runtimeStatus', ...options }
