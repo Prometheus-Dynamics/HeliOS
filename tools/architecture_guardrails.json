@@ -253,6 +253,72 @@
       "review_note": "Rig API schema types now live here; keep them separate from handlers and persistence helpers."
     },
     {
+      "path": "backend/src/helios-api/src/http/device/imu.rs",
+      "max_lines": 30,
+      "owner": "HeliOS",
+      "review_note": "Device IMU HTTP root should stay as thin route/status/ws re-export orchestration after the module split."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/imu/routes.rs",
+      "max_lines": 180,
+      "owner": "HeliOS",
+      "review_note": "IMU HTTP handlers now live here; keep JSON/typed snapshot decoding and websocket delivery out of the route layer."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/imu/status.rs",
+      "max_lines": 380,
+      "owner": "HeliOS",
+      "review_note": "IMU snapshot decoding, typed-status projection, and JSON fallback parsing now live here; keep request validation and websocket error handling separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/imu/update.rs",
+      "max_lines": 180,
+      "owner": "HeliOS",
+      "review_note": "IMU update request normalization and validation now live here; keep status projection and HTTP route orchestration out of this module."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/imu/ws.rs",
+      "max_lines": 150,
+      "owner": "HeliOS",
+      "review_note": "IMU websocket subscription and error reporting now live here; keep route handlers and snapshot projection logic separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/lighting.rs",
+      "max_lines": 30,
+      "owner": "HeliOS",
+      "review_note": "Device lighting HTTP root should stay as thin route/type re-export orchestration after the module split."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/lighting/types.rs",
+      "max_lines": 320,
+      "owner": "HeliOS",
+      "review_note": "Lighting API schema types and conversion shims now live here; keep runtime IPC and template/catalog logic out of the type layer."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/lighting/config.rs",
+      "max_lines": 120,
+      "owner": "HeliOS",
+      "review_note": "Lighting config loading, validation, and mirrored persistence now live here; keep runtime IPC and template catalog handling separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/lighting/runtime.rs",
+      "max_lines": 100,
+      "owner": "HeliOS",
+      "review_note": "Lighting runtime command and state handlers now live here; keep template/catalog filesystem work out of this module."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/lighting/animations.rs",
+      "max_lines": 160,
+      "owner": "HeliOS",
+      "review_note": "Lighting animation catalog CRUD now lives here; keep type conversion shims and template filesystem logic separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/lighting/templates.rs",
+      "max_lines": 220,
+      "owner": "HeliOS",
+      "review_note": "Lighting template discovery, normalization, and legacy template decoding now live here; keep runtime IPC and animation catalog mutation out of this module."
+    },
+    {
       "path": "backend/src/helios-api/src/http/plugins.rs",
       "max_lines": 80,
       "owner": "HeliOS",
