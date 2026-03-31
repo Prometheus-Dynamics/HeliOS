@@ -319,6 +319,48 @@
       "review_note": "Lighting template discovery, normalization, and legacy template decoding now live here; keep runtime IPC and animation catalog mutation out of this module."
     },
     {
+      "path": "backend/src/helios-api/src/http/device/snapshots.rs",
+      "max_lines": 30,
+      "owner": "HeliOS",
+      "review_note": "Device snapshots HTTP root should stay as thin route re-export orchestration after the module split."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/snapshots/routes.rs",
+      "max_lines": 160,
+      "owner": "HeliOS",
+      "review_note": "Snapshot capture/list/delete/download handlers now live here; keep filesystem indexing and path helpers out of the route layer."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/snapshots/storage.rs",
+      "max_lines": 120,
+      "owner": "HeliOS",
+      "review_note": "Snapshot indexing, latest-id normalization, and tar/directory helpers now live here; keep route glue and schema declarations separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/snapshots/types.rs",
+      "max_lines": 80,
+      "owner": "HeliOS",
+      "review_note": "Snapshot API schemas and metadata decoding types now live here; keep filesystem logic and route handlers separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/usb_power.rs",
+      "max_lines": 80,
+      "owner": "HeliOS",
+      "review_note": "USB power HTTP root should stay as thin route orchestration after the module split."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/usb_power/support.rs",
+      "max_lines": 150,
+      "owner": "HeliOS",
+      "review_note": "USB power env parsing, render/persist helpers, and script execution now live here; keep API schema and route glue out of this module."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/device/usb_power/types.rs",
+      "max_lines": 80,
+      "owner": "HeliOS",
+      "review_note": "USB power API schema defaults now live here; keep persistence and shell execution separate."
+    },
+    {
       "path": "backend/src/helios-api/src/http/plugins.rs",
       "max_lines": 80,
       "owner": "HeliOS",
