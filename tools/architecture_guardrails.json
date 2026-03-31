@@ -727,6 +727,18 @@
       "review_note": "Viewer behavior is still being broken apart; fail if StreamPreview regrows beyond the agreed guardrail."
     },
     {
+      "path": "frontend/src/routes/localization/+page.svelte",
+      "max_lines": 4700,
+      "owner": "HeliOS",
+      "review_note": "The localization route remains large while the page is being carved into dedicated state, action, and viewer helpers; keep orchestration in the route and continue extracting config-mutation policy into focused modules."
+    },
+    {
+      "path": "frontend/src/routes/localization/localizationTuningActions.ts",
+      "max_lines": 480,
+      "owner": "HeliOS",
+      "review_note": "Field-origin, temporal stabilization, and solver-runtime tuning mutation logic now lives here; keep normalization and config-write policy out of the giant route component."
+    },
+    {
       "path": "backend/src/helios-api/src/ws/streams/mod.rs",
       "max_lines": 220,
       "owner": "HeliOS",
