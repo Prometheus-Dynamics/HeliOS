@@ -1,92 +1,23 @@
-use crate::api_observability::{ApiCacheMetric, CacheMetricCounters};
 use crate::http::AppState;
 use crate::http::peripherals::{PeripheralErrors, PeripheralInventory, UsbPeripheral, derive_lighting_status, list_usb_sysfs, map_fan_status, map_sensor_inventory};
 use crate::ipc::peripherals::SensorsConnection;
-use std::sync::{Arc, OnceLock};
-use std::time::{Duration, Instant};
-use tokio::sync::{Mutex, RwLock};
+use std::sync::Arc;
+use std::time::Instant;
 use tracing::warn;
 
+use super::{HardwareReadModelState, INVENTORY_REFRESH_MIN, peripheral_inventory_cache_ttl, sensor_ipc_timeout, sensor_refresh_timeout};
+
 #[derive(Clone)]
-struct PeripheralInventoryCacheEntry {
-    fetched_at: Instant,
-    revision: u64,
-    payload: PeripheralInventory,
-}
-
-struct CachedDiscovery {
-    result: helios_engine::capture::DiscoveryResult,
-    at: Instant,
-    revision: u64,
-}
-
-const INVENTORY_REFRESH_MIN: Duration = Duration::from_secs(10);
-
-pub struct HardwareReadModelState {
-    camera_cache: Mutex<Option<CachedDiscovery>>,
-    inventory_refresh_at: Mutex<Instant>,
-    peripheral_inventory_cache: RwLock<Option<PeripheralInventoryCacheEntry>>,
-    peripheral_inventory_refresh_lock: Mutex<()>,
-    camera_refresh_lock: Mutex<()>,
-    peripheral_inventory_stats: CacheMetricCounters,
-    camera_discovery_stats: CacheMetricCounters,
-}
-
-impl Default for HardwareReadModelState {
-    fn default() -> Self {
-        Self {
-            camera_cache: Mutex::new(None),
-            inventory_refresh_at: Mutex::new(Instant::now() - INVENTORY_REFRESH_MIN),
-            peripheral_inventory_cache: RwLock::new(None),
-            peripheral_inventory_refresh_lock: Mutex::new(()),
-            camera_refresh_lock: Mutex::new(()),
-            peripheral_inventory_stats: CacheMetricCounters::default(),
-            camera_discovery_stats: CacheMetricCounters::default(),
-        }
-    }
-}
-
-fn read_timeout_env(var: &str, default_ms: u64, min_ms: u64, max_ms: u64) -> Duration {
-    let ms = std::env::var(var).ok().and_then(|value| value.trim().parse::<u64>().ok()).unwrap_or(default_ms);
-    Duration::from_millis(ms.clamp(min_ms, max_ms))
-}
-
-fn peripheral_inventory_cache_ttl() -> Duration {
-    static VALUE: OnceLock<Duration> = OnceLock::new();
-    *VALUE.get_or_init(|| read_timeout_env("HELIOS_PERIPHERALS_CACHE_MS", 1_000, 0, 10_000))
-}
-
-fn sensor_ipc_timeout() -> Duration {
-    static VALUE: OnceLock<Duration> = OnceLock::new();
-    *VALUE.get_or_init(|| read_timeout_env("HELIOS_PERIPHERALS_TIMEOUT_MS", 1_500, 250, 15_000))
-}
-
-fn camera_discovery_timeout() -> Duration {
-    static VALUE: OnceLock<Duration> = OnceLock::new();
-    *VALUE.get_or_init(|| read_timeout_env("HELIOS_CAMERA_DISCOVERY_TIMEOUT_MS", 1_500, 250, 20_000))
-}
-
-fn sensor_refresh_timeout() -> Duration {
-    static VALUE: OnceLock<Duration> = OnceLock::new();
-    *VALUE.get_or_init(|| read_timeout_env("HELIOS_PERIPHERALS_REFRESH_TIMEOUT_MS", 2_500, 500, 20_000))
+pub(super) struct PeripheralInventoryCacheEntry {
+    pub(super) fetched_at: Instant,
+    pub(super) revision: u64,
+    pub(super) payload: PeripheralInventory,
 }
 
 impl HardwareReadModelState {
-    pub fn peripheral_inventory_cache_metrics(&self) -> ApiCacheMetric {
-        self.peripheral_inventory_stats.snapshot()
-    }
-
-    pub fn camera_discovery_cache_metrics(&self) -> ApiCacheMetric {
-        self.camera_discovery_stats.snapshot()
-    }
-
-    pub async fn invalidate_peripheral_inventory_cache(&self) {
-        *self.peripheral_inventory_cache.write().await = None;
-    }
-
     pub async fn load_peripheral_inventory_snapshot(&self, state: &AppState) -> Result<(PeripheralInventory, u64), String> {
         let ttl = peripheral_inventory_cache_ttl();
-        if ttl != Duration::from_millis(0)
+        if ttl != std::time::Duration::from_millis(0)
             && let Some(entry) = self.peripheral_inventory_cache.read().await.clone()
             && entry.fetched_at.elapsed() < ttl
         {
@@ -96,7 +27,7 @@ impl HardwareReadModelState {
 
         self.peripheral_inventory_stats.record_miss();
         let _refresh_guard = self.peripheral_inventory_refresh_lock.lock().await;
-        if ttl != Duration::from_millis(0)
+        if ttl != std::time::Duration::from_millis(0)
             && let Some(entry) = self.peripheral_inventory_cache.read().await.clone()
             && entry.fetched_at.elapsed() < ttl
         {
@@ -187,64 +118,6 @@ impl HardwareReadModelState {
 
         errors.cameras = cameras.errors;
         Ok(PeripheralInventory { cameras: cameras.devices, sensors, errors, i2c, usb, lighting, fan })
-    }
-
-    pub async fn cached_discover_cameras_snapshot(&self, state: &AppState) -> Result<(helios_engine::capture::DiscoveryResult, u64), String> {
-        const TTL: Duration = Duration::from_secs(5);
-
-        {
-            let guard = self.camera_cache.lock().await;
-            if let Some(cached) = guard.as_ref()
-                && cached.at.elapsed() < TTL
-            {
-                self.camera_discovery_stats.record_hit();
-                return Ok((cached.result.clone(), cached.revision));
-            }
-        }
-
-        self.camera_discovery_stats.record_miss();
-        let _refresh_guard = self.camera_refresh_lock.lock().await;
-        {
-            let guard = self.camera_cache.lock().await;
-            if let Some(cached) = guard.as_ref()
-                && cached.at.elapsed() < TTL
-            {
-                self.camera_discovery_stats.record_hit();
-                return Ok((cached.result.clone(), cached.revision));
-            }
-        }
-
-        let discovery = match tokio::time::timeout(camera_discovery_timeout(), state.engine.discover_devices()).await {
-            Ok(Ok(result)) => Ok(result),
-            Ok(Err(err)) => Err(err.to_string()),
-            Err(_) => Err("camera discovery timed out".to_string()),
-        };
-
-        match discovery {
-            Ok(result) => {
-                let revision = self.camera_discovery_stats.record_refresh();
-                let mut guard = self.camera_cache.lock().await;
-                *guard = Some(CachedDiscovery { result: result.clone(), at: Instant::now(), revision });
-                Ok((result, revision))
-            }
-            Err(err) => {
-                let mut fallback = {
-                    let guard = self.camera_cache.lock().await;
-                    guard.as_ref().map(|entry| entry.result.clone()).unwrap_or_else(|| helios_engine::capture::DiscoveryResult { devices: Vec::new(), errors: Vec::new() })
-                };
-                if fallback.errors.iter().all(|entry| entry != &err) {
-                    fallback.errors.push(err);
-                    if fallback.errors.len() > 5 {
-                        let drain = fallback.errors.len() - 5;
-                        fallback.errors.drain(0..drain);
-                    }
-                }
-                let revision = self.camera_discovery_stats.record_refresh();
-                let mut guard = self.camera_cache.lock().await;
-                *guard = Some(CachedDiscovery { result: fallback.clone(), at: Instant::now(), revision });
-                Ok((fallback, revision))
-            }
-        }
     }
 
     pub async fn allow_inventory_refresh(&self) -> bool {

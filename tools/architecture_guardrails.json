@@ -1121,6 +1121,42 @@
       "max_lines": 80,
       "owner": "HeliOS",
       "review_note": "NT4 transport and decode tests now live here; keep regression coverage isolated from production modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/hardware_read_model/mod.rs",
+      "max_lines": 90,
+      "owner": "HeliOS",
+      "review_note": "Hardware read-model root should hold shared cache state and timeout policy only; keep discovery and inventory assembly in their dedicated modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/hardware_read_model/discovery.rs",
+      "max_lines": 120,
+      "owner": "HeliOS",
+      "review_note": "Camera discovery cache refresh and fallback behavior now live here; keep peripheral inventory policy out of this module."
+    },
+    {
+      "path": "backend/src/helios-api/src/hardware_read_model/inventory.rs",
+      "max_lines": 240,
+      "owner": "HeliOS",
+      "review_note": "Peripheral inventory assembly, refresh throttling, and sensor fallback rules now live here; keep camera discovery cache policy separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/stream_command_service/mod.rs",
+      "max_lines": 40,
+      "owner": "HeliOS",
+      "review_note": "Stream command service root should only re-export the split graph-update and control-worker modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/stream_command_service/graph_updates.rs",
+      "max_lines": 260,
+      "owner": "HeliOS",
+      "review_note": "Live stream graph, graph-patch, and pipeline-input mutations now live here; keep control batching and websocket worker logic out of this module."
+    },
+    {
+      "path": "backend/src/helios-api/src/stream_command_service/controls.rs",
+      "max_lines": 160,
+      "owner": "HeliOS",
+      "review_note": "Stream control batching, apply-loop scheduling, and response fanout now live here; keep graph mutation persistence out of this module."
     }
   ],
   "forbidden_paths": [
@@ -1168,6 +1204,16 @@
       "path": "backend/src/helios-api/src/media_read_model.rs",
       "owner": "HeliOS",
       "reason": "Media read-model cache hydration, ffprobe duration probing, and replay-timeline selection now live under backend/src/helios-api/src/media_read_model/*. Do not recreate the deleted media_read_model.rs monolith."
+    },
+    {
+      "path": "backend/src/helios-api/src/hardware_read_model.rs",
+      "owner": "HeliOS",
+      "reason": "Hardware read-model cache state, discovery fallback, and peripheral inventory refresh policy now live under backend/src/helios-api/src/hardware_read_model/*. Do not recreate the deleted hardware_read_model.rs monolith."
+    },
+    {
+      "path": "backend/src/helios-api/src/stream_command_service.rs",
+      "owner": "HeliOS",
+      "reason": "Stream command graph mutation helpers and the control batching worker now live under backend/src/helios-api/src/stream_command_service/*. Do not recreate the deleted stream_command_service.rs monolith."
     },
     {
       "path": "backend/src/helios-api/src/http/localization/maps.rs",
