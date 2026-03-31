@@ -667,6 +667,60 @@
       "review_note": "Localization solve behavioral tests now live here; keep test-only coverage out of the route and helper modules."
     },
     {
+      "path": "backend/src/helios-api/src/http/localization/external/mod.rs",
+      "max_lines": 40,
+      "owner": "HeliOS",
+      "review_note": "Localization external-source HTTP root should stay as thin route orchestration after splitting registry and sampling helpers into dedicated modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/localization/external/registry.rs",
+      "max_lines": 120,
+      "owner": "HeliOS",
+      "review_note": "External source CRUD and sample-update endpoints now live here; keep IMU fallback sampling and media-IMU dispatch out of the registry module."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/localization/external/sampling.rs",
+      "max_lines": 220,
+      "owner": "HeliOS",
+      "review_note": "External source sample fetching, IMU fallback shaping, and media-IMU dispatch now live here; keep CRUD routes and catalog listing out of the sampling module."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/localization/external/tests.rs",
+      "max_lines": 100,
+      "owner": "HeliOS",
+      "review_note": "External source IMU fallback regression tests now live here; keep them isolated from the production modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/localization/media_imu/mod.rs",
+      "max_lines": 40,
+      "owner": "HeliOS",
+      "review_note": "Media-IMU localization root should stay as thin re-export orchestration after splitting binding, source, and sampling concerns."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/localization/media_imu/binding.rs",
+      "max_lines": 180,
+      "owner": "HeliOS",
+      "review_note": "Media replay sidecar binding, file-name candidate expansion, and metadata resolution now live here; keep source catalog and sample materialization separate."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/localization/media_imu/source.rs",
+      "max_lines": 80,
+      "owner": "HeliOS",
+      "review_note": "Media-IMU source publication now lives here; keep file-resolution and sample selection concerns in their dedicated modules."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/localization/media_imu/sampling.rs",
+      "max_lines": 220,
+      "owner": "HeliOS",
+      "review_note": "Media-IMU sample lookup, replay-clock selection, and pose payload shaping now live here; keep binding discovery and source catalog behavior out of it."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/localization/media_imu/tests.rs",
+      "max_lines": 100,
+      "owner": "HeliOS",
+      "review_note": "Media-IMU replay naming and pose-sample regression tests now live here; keep them isolated from the production modules."
+    },
+    {
       "path": "frontend/src/lib/components/StreamPreview.svelte",
       "max_lines": 850,
       "owner": "HeliOS",
@@ -790,6 +844,16 @@
       "path": "backend/src/helios-api/src/http/media/preview.rs",
       "owner": "HeliOS",
       "reason": "Media preview probing, ffmpeg generation, and range streaming now live under backend/src/helios-api/src/http/media/preview/*. Do not recreate the deleted media/preview.rs monolith."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/localization/external.rs",
+      "owner": "HeliOS",
+      "reason": "Localization external-source routes, IMU fallback sampling, and media-IMU dispatch now live under backend/src/helios-api/src/http/localization/external/*. Do not recreate the deleted localization/external.rs monolith."
+    },
+    {
+      "path": "backend/src/helios-api/src/http/localization/media_imu.rs",
+      "owner": "HeliOS",
+      "reason": "Media-IMU sidecar binding, source publication, and replay sample selection now live under backend/src/helios-api/src/http/localization/media_imu/*. Do not recreate the deleted localization/media_imu.rs monolith."
     }
   ]
 }
