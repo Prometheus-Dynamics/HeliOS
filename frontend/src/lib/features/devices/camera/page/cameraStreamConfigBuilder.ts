@@ -16,6 +16,7 @@ import { decoderPreferencesForFormat, pickCodecId } from './cameraBackendCodecs'
 import { asPositiveNumber, extractFileHandle, identityRecordFor, isFileBackend } from './cameraBackendSupport';
 import { normalizeGridSlots } from './cameraPipelineState';
 import { fpsToFrameRate } from './cameraStreamState';
+import type { StreamSelectionMode } from './cameraStreamEditorReducer';
 import {
   PIPELINE_OUTPUT_CELL_KEY,
   RAW_PIPELINE_ID,
@@ -77,8 +78,8 @@ export type CameraStreamCodecSelectionInput = {
   defaultEncoderId?: string | null;
   selectedFormat: string | null;
   decoderDefaultIdsByCaptureFormat: Record<string, string>;
-  encoderSelectionTouched: boolean;
-  decoderSelectionTouched: boolean;
+  encoderSelectionMode: StreamSelectionMode;
+  decoderSelectionMode: StreamSelectionMode;
 };
 
 export type CameraStreamCodecSelections = {
@@ -135,14 +136,14 @@ export function deriveStreamCodecSelections(
       : [];
 
   return {
-    encoderImpl: input.encoderSelectionTouched
+    encoderImpl: input.encoderSelectionMode === 'manual'
       ? input.encoderImpl
       : pickCodecId(
           input.encoders,
           input.resolvedEncoderId || input.requestedEncoderId || input.encoderImpl,
           preferredEncoderIds
         ),
-    decoderImpl: input.decoderSelectionTouched
+    decoderImpl: input.decoderSelectionMode === 'manual'
       ? input.decoderImpl
       : pickCodecId(
           input.decoders,

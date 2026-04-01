@@ -22,14 +22,20 @@
   import StreamControls from './stream/StreamControls.svelte';
   import StreamPreviewPanel from './stream/StreamPreviewPanel.svelte';
   import { SvelteSet } from 'svelte/reactivity';
+  import { modeKey } from './page/cameraPageHelpers';
+  import {
+    reduceCameraStreamEditorState,
+    type CameraStreamEditorState,
+    type StreamSelectionMode
+  } from './page/cameraStreamEditorReducer';
 
   let {
     cameraAlias = $bindable(),
     selectedBackendIndex = $bindable(),
+    selectedModeKey = $bindable(null as string | null),
     selectedFormat = $bindable(),
     selectedResolution = $bindable(),
     selectedIntervalIdx = $bindable(),
-    selectedInterval = $bindable(),
     libcameraTargetFps = $bindable(),
     netcamTargetFps = $bindable(),
     fileBackendFps = $bindable(),
@@ -39,8 +45,8 @@
     encoderImpl = $bindable(),
     decoderEnabled = $bindable(),
     encoderEnabled = $bindable(),
-    decoderSelectionTouched = $bindable(),
-    encoderSelectionTouched = $bindable(),
+    decoderSelectionMode = $bindable('auto' as StreamSelectionMode),
+    encoderSelectionMode = $bindable('auto' as StreamSelectionMode),
     hostBuffer = $bindable(),
     previewJpegQuality = $bindable(),
     decoderFpsLimit = $bindable(),
@@ -384,39 +390,76 @@
     cameraAlias = value;
   }
 
+  function currentEditorState(): CameraStreamEditorState {
+    return {
+      selectedBackendIndex,
+      selectedModeKey,
+      selectedFormat,
+      selectedResolution,
+      selectedIntervalIdx,
+      shadowRecorderEnabled,
+      encoderImpl,
+      decoderImpl,
+      encoderEnabled,
+      decoderEnabled,
+      encoderSelectionMode,
+      decoderSelectionMode
+    };
+  }
+
+  function applyEditorState(next: CameraStreamEditorState): void {
+    selectedBackendIndex = next.selectedBackendIndex;
+    selectedModeKey = next.selectedModeKey;
+    selectedFormat = next.selectedFormat;
+    selectedResolution = next.selectedResolution;
+    selectedIntervalIdx = next.selectedIntervalIdx;
+    shadowRecorderEnabled = next.shadowRecorderEnabled;
+    encoderImpl = next.encoderImpl;
+    decoderImpl = next.decoderImpl;
+    encoderEnabled = next.encoderEnabled;
+    decoderEnabled = next.decoderEnabled;
+    encoderSelectionMode = next.encoderSelectionMode;
+    decoderSelectionMode = next.decoderSelectionMode;
+  }
+
+  function applyEditorAction(
+    action: Parameters<typeof reduceCameraStreamEditorState>[1]
+  ): void {
+    applyEditorState(
+      reduceCameraStreamEditorState(currentEditorState(), action, { modeKey })
+    );
+  }
+
   function handleBackendChange(value: number): void {
-    selectedBackendIndex = value;
-    const nextBackendKind = String((backendOptions[value] as { kind?: string } | null)?.kind ?? '')
-      .trim()
-      .toLowerCase();
-    shadowRecorderEnabled = nextBackendKind !== 'file';
-    selectedFormat = firstFormat();
-    selectedResolution = firstResolution();
-    selectedIntervalIdx = 0;
-    selectedInterval = intervalsForSelection()[0] ? fpsLabel(intervalsForSelection()[0]) : '';
-    syncModeSelection();
+    applyEditorAction({
+      type: 'backend_selected',
+      backendIndex: value,
+      backendKind: (backendOptions[value] as { kind?: string } | null)?.kind ?? null,
+      modes: effectiveModes()
+    });
   }
 
   function handleFormatChange(value: string): void {
-    selectedFormat = value;
-    const resolutions = resolutionsForFormat(selectedFormat);
-    if (!resolutions.includes(selectedResolution)) selectedResolution = resolutions[0] ?? '';
-    selectedIntervalIdx = 0;
-    selectedInterval = intervalsForSelection()[0] ? fpsLabel(intervalsForSelection()[0]) : '';
-    syncModeSelection();
+    applyEditorAction({
+      type: 'format_selected',
+      format: value,
+      modes: effectiveModes()
+    });
   }
 
   function handleResolutionChange(value: string): void {
-    selectedResolution = value;
-    selectedIntervalIdx = 0;
-    selectedInterval = intervalsForSelection()[0] ? fpsLabel(intervalsForSelection()[0]) : '';
-    syncModeSelection();
+    applyEditorAction({
+      type: 'resolution_selected',
+      resolution: value,
+      modes: effectiveModes()
+    });
   }
 
   function handleIntervalChange(index: number): void {
-    selectedIntervalIdx = index;
-    const ints = intervalsForSelection();
-    selectedInterval = ints[selectedIntervalIdx] ? fpsLabel(ints[selectedIntervalIdx]) : '';
+    applyEditorAction({
+      type: 'interval_selected',
+      intervalIndex: index
+    });
   }
 
   function handleLibcameraFpsInput(raw: string): void {
@@ -439,25 +482,17 @@
   }
 
   function handleDecoderSelect(value: string): void {
-    decoderSelectionTouched = true;
-    if (!value) {
-      decoderEnabled = false;
-      decoderImpl = null;
-      return;
-    }
-    decoderEnabled = true;
-    decoderImpl = value;
+    applyEditorAction({
+      type: 'decoder_selected',
+      value: value || null
+    });
   }
 
   function handleEncoderSelect(value: string): void {
-    encoderSelectionTouched = true;
-    if (!value) {
-      encoderEnabled = false;
-      encoderImpl = null;
-      return;
-    }
-    encoderEnabled = true;
-    encoderImpl = value;
+    applyEditorAction({
+      type: 'encoder_selected',
+      value: value || null
+    });
   }
 
   function handleDecoderFpsInput(raw: string): void {

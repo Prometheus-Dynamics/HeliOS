@@ -25,7 +25,6 @@
   import { createCameraStreamLifecycleController } from './cameraStreamLifecycleController';
   import { createCameraStreamPresetController } from './cameraStreamPresetController';
   import { createCameraStreamPresetHelpers } from './cameraStreamPresetHelpers';
-  import { deriveStreamCodecSelections } from './cameraStreamConfigBuilder';
   import { buildCameraPageConstants, buildCameraPageCore, buildCameraPageDerived } from './cameraPageUiBuilders';
   import { buildCameraTabs } from './cameraPageTabs';
   import { setupStreamViewerResize } from './cameraPageViewHelpers';
@@ -392,6 +391,12 @@
     set selectedBackendIndex(value) {
       streamState.selectedBackendIndex = value;
     },
+    get selectedModeKey() {
+      return streamState.selectedModeKey;
+    },
+    set selectedModeKey(value) {
+      streamState.selectedModeKey = value;
+    },
     get selectedFormat() {
       return streamState.selectedFormat;
     },
@@ -409,12 +414,6 @@
     },
     set selectedIntervalIdx(value) {
       streamState.selectedIntervalIdx = value;
-    },
-    get selectedInterval() {
-      return streamState.selectedInterval;
-    },
-    set selectedInterval(value) {
-      streamState.selectedInterval = value;
     },
     get libcameraTargetFps() {
       return streamState.libcameraTargetFps;
@@ -482,17 +481,17 @@
     set encoderEnabled(value) {
       streamState.encoderEnabled = value;
     },
-    get decoderSelectionTouched() {
-      return streamState.decoderSelectionTouched;
+    get decoderSelectionMode() {
+      return streamState.decoderSelectionMode;
     },
-    set decoderSelectionTouched(value) {
-      streamState.decoderSelectionTouched = value;
+    set decoderSelectionMode(value) {
+      streamState.decoderSelectionMode = value;
     },
-    get encoderSelectionTouched() {
-      return streamState.encoderSelectionTouched;
+    get encoderSelectionMode() {
+      return streamState.encoderSelectionMode;
     },
-    set encoderSelectionTouched(value) {
-      streamState.encoderSelectionTouched = value;
+    set encoderSelectionMode(value) {
+      streamState.encoderSelectionMode = value;
     },
     get hostBuffer() {
       return streamState.hostBuffer;
@@ -1036,68 +1035,6 @@
       return { width: Math.floor(width), height: Math.floor(height) };
     })()
   );
-
-
-
-  $effect(() => {
-    void pipelineState.pipelineGridRows;
-    void pipelineState.pipelineGridColumns;
-    void pipelineState.pipelineGridSlots;
-    void pipelineState.assignedPipelineIds;
-    void pipelineState.selectedPipelineId;
-    void pipelineState.pipelineOutputByPipelineId;
-    void streamState.encoders;
-    void streamState.decoders;
-    void streamState.selectedFormat;
-
-    const rows = Math.min(Math.max(Math.trunc(pipelineState.pipelineGridRows), 1), 6);
-    const columns = Math.min(Math.max(Math.trunc(pipelineState.pipelineGridColumns), 1), 6);
-    const multiplex = rows * columns > 1;
-    const hasPipelines =
-      Boolean(pipelineState.selectedPipelineId) ||
-      (pipelineState.assignedPipelineIds?.length ?? 0) > 0 ||
-      Object.values(pipelineState.pipelineGridSlots ?? {}).some(Boolean);
-    if (!multiplex && !hasPipelines) {
-      return;
-    }
-
-    const selections = deriveStreamCodecSelections({
-      encoders: streamState.encoders,
-      decoders: streamState.decoders,
-      encoderImpl: streamState.encoderImpl,
-      decoderImpl: streamState.decoderImpl,
-      resolvedEncoderId: String(streamState.stream?.resolved?.encoder?.codecId ?? '').trim(),
-      resolvedDecoderId: String(streamState.stream?.resolved?.decoder?.codecId ?? '').trim(),
-      selectedFormat: streamState.selectedFormat,
-      decoderDefaultIdsByCaptureFormat: streamState.decoderDefaultIdsByCaptureFormat,
-      encoderSelectionTouched: streamState.encoderSelectionTouched,
-      decoderSelectionTouched: streamState.decoderSelectionTouched
-    });
-
-    if (!streamState.encoderSelectionTouched && selections.encoderImpl && streamState.encoderImpl !== selections.encoderImpl) {
-      streamState.encoderImpl = selections.encoderImpl;
-    }
-
-    if (!streamState.decoderSelectionTouched && selections.decoderImpl && streamState.decoderImpl !== selections.decoderImpl) {
-      streamState.decoderImpl = selections.decoderImpl;
-    }
-  });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

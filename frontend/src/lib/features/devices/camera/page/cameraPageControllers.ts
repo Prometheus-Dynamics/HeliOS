@@ -224,17 +224,17 @@ export const createCameraPageControllers = (deps: CameraPageControllerDeps) => {
       set decoderEnabled(value) {
         deps.streamState.decoderEnabled = value;
       },
-      get encoderSelectionTouched() {
-        return deps.streamState.encoderSelectionTouched;
+      get encoderSelectionMode() {
+        return deps.streamState.encoderSelectionMode;
       },
-      set encoderSelectionTouched(value) {
-        deps.streamState.encoderSelectionTouched = value;
+      set encoderSelectionMode(value) {
+        deps.streamState.encoderSelectionMode = value;
       },
-      get decoderSelectionTouched() {
-        return deps.streamState.decoderSelectionTouched;
+      get decoderSelectionMode() {
+        return deps.streamState.decoderSelectionMode;
       },
-      set decoderSelectionTouched(value) {
-        deps.streamState.decoderSelectionTouched = value;
+      set decoderSelectionMode(value) {
+        deps.streamState.decoderSelectionMode = value;
       },
       get encoderSettings() {
         return deps.streamState.encoderSettings;
@@ -307,12 +307,6 @@ export const createCameraPageControllers = (deps: CameraPageControllerDeps) => {
       },
       set selectedResolution(value) {
         deps.streamState.selectedResolution = value;
-      },
-      get selectedInterval() {
-        return deps.streamState.selectedInterval;
-      },
-      set selectedInterval(value) {
-        deps.streamState.selectedInterval = value;
       },
       get selectedIntervalIdx() {
         return deps.streamState.selectedIntervalIdx;

@@ -244,7 +244,7 @@ describe('camera stream config builder', () => {
     expect(manifest.pipeline_wires).toEqual([]);
   });
 
-  test('derives codec selections from resolved ids, defaults, and touch flags', () => {
+  test('derives codec selections from resolved ids, defaults, and selection modes', () => {
     const selections = deriveStreamCodecSelections({
       encoders: [
         { kind: 'encoder', name: 'mjpeg', implementation: 'turbojpeg', output: 'MJPG' } as never,
@@ -263,8 +263,8 @@ describe('camera stream config builder', () => {
       defaultEncoderId: 'turbojpeg',
       selectedFormat: 'RGB3',
       decoderDefaultIdsByCaptureFormat: DEFAULTS.defaultDecoderIdsByCaptureFormat,
-      encoderSelectionTouched: true,
-      decoderSelectionTouched: false
+      encoderSelectionMode: 'manual',
+      decoderSelectionMode: 'auto'
     });
 
     expect(selections.encoderImpl).toBe('manual-encoder');

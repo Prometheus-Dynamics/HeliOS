@@ -1,4 +1,19 @@
 import type { CodecInfo, Interval, Mode, StreamInfo } from '$lib/api/httpClient';
+import {
+  cameraIntervalsForSelection,
+  cameraFpsLabel,
+  cameraModeColorLabel,
+  cameraModeFormat,
+  cameraModeLabel,
+  cameraModeResolution,
+  cameraModeResolutionKey,
+  cameraResolutionsForFormat,
+  currentCameraMode,
+  effectiveCameraModes,
+  firstCameraFormat,
+  syncCameraModeSelectionState,
+  uniqueCameraFormats
+} from './cameraModeSelectors';
 
 export type ModeControllerState = {
   get stream(): StreamInfo | null;
@@ -17,123 +32,52 @@ type ModeControllerDeps = {
 };
 
 export function createCameraModeController(state: ModeControllerState, deps: ModeControllerDeps) {
-  function normalizeFormat(value: unknown): string {
-    const raw = typeof value === 'string' ? value : value == null ? '' : String(value);
-    const trimmed = raw.trim();
-    if (!trimmed) return '';
-    return trimmed.split(/\s+/)[0]?.toUpperCase() ?? '';
-  }
-
-  function normalizeModes(value: unknown): Mode[] {
-    if (!Array.isArray(value)) return [];
-    return value.filter(Boolean) as Mode[];
-  }
-
-  function modeSignature(mode: Mode | null | undefined): string {
-    if (!mode) return '';
-    const fmt = normalizeFormat(mode?.format?.code ?? '');
-    const res = mode?.format?.resolution ?? null;
-    const resKey = res?.width && res?.height ? `${res.width}x${res.height}` : '';
-    const color = typeof mode?.format?.color === 'string' ? mode.format.color : '';
-    const idKey = deps.modeKey(mode?.id) ?? '';
-    return [fmt, resKey, color, idKey].filter(Boolean).join('|');
-  }
-
   function effectiveModes(): Mode[] {
     const backendModes =
       typeof state.backendModes === 'function'
         ? (state.backendModes as unknown as () => Mode[] | null)()
         : (state.backendModes ?? null);
-    const backendList = normalizeModes(backendModes);
-    const streamList = normalizeModes(state.stream?.descriptor?.modes ?? []);
-    if (!backendList.length) return streamList;
-    if (!streamList.length) return backendList;
-    const merged: Mode[] = [];
-    const seen = new Set<string>();
-    for (const mode of [...backendList, ...streamList]) {
-      const key = modeSignature(mode);
-      if (key && seen.has(key)) continue;
-      if (key) seen.add(key);
-      merged.push(mode);
-    }
-    return merged;
+    return effectiveCameraModes(backendModes, state.stream?.descriptor?.modes ?? [], deps);
   }
 
   function modeFormat(mode: Mode | null | undefined): string {
-    const fmt = mode?.format ?? null;
-    return normalizeFormat(fmt?.code ?? '');
+    return cameraModeFormat(mode);
   }
 
   function modeResolution(mode: Mode | null | undefined): string {
-    const res = mode?.format?.resolution;
-    if (!res?.width || !res?.height) return 'Unknown';
-    return `${res.width}x${res.height}`;
+    return cameraModeResolution(mode);
   }
 
   function colorLabel(mode: Mode | null | undefined): string {
-    const val = mode?.format?.color ?? '';
-    return typeof val === 'string' && val.length ? val : 'Auto';
+    return cameraModeColorLabel(mode);
   }
 
   function modeLabel(mode: Mode | null | undefined): string {
-    if (!mode) return 'Unknown';
-    const fmt = modeFormat(mode);
-    const res = modeResolution(mode);
-    const color = colorLabel(mode);
-    return [fmt, res, color].filter(Boolean).join(' • ');
+    return cameraModeLabel(mode);
   }
 
   function resolutionKey(mode: Mode | null | undefined): string {
-    const res = mode?.format?.resolution;
-    if (!res?.width || !res?.height) return '';
-    return `${res.width}x${res.height}`;
+    return cameraModeResolutionKey(mode);
   }
 
   function uniqueFormats(): string[] {
-    const modes = effectiveModes();
-    const seen = new Set<string>();
-    const list: string[] = [];
-    for (const mode of modes) {
-      const fmt = modeFormat(mode);
-      if (!fmt || seen.has(fmt)) continue;
-      seen.add(fmt);
-      list.push(fmt);
-    }
-    return list;
+    return uniqueCameraFormats(effectiveModes());
   }
 
   function resolutionsForFormat(fmt: string): string[] {
-    const modes = effectiveModes();
-    const key = normalizeFormat(fmt);
-    const seen = new Set<string>();
-    const list: string[] = [];
-    for (const mode of modes) {
-      if (modeFormat(mode) !== key) continue;
-      const resKey = resolutionKey(mode);
-      if (!resKey || seen.has(resKey)) continue;
-      seen.add(resKey);
-      list.push(resKey);
-    }
-    return list;
+    return cameraResolutionsForFormat(effectiveModes(), fmt);
   }
 
   function intervalsForSelection(): Interval[] {
-    const modes = effectiveModes();
-    const formatKey = normalizeFormat(state.selectedFormat);
-    const match = modes.find((m) => modeFormat(m) === formatKey && resolutionKey(m) === state.selectedResolution);
-    return match?.intervals ?? [];
+    return cameraIntervalsForSelection(effectiveModes(), state.selectedFormat, state.selectedResolution);
   }
 
   function fpsLabel(interval: Interval | undefined | null): string {
-    if (!interval) return '—';
-    const { numerator, denominator } = interval;
-    if (!numerator || !denominator) return '—';
-    const fps = denominator / numerator;
-    return Number.isFinite(fps) ? `${fps.toFixed(2).replace(/\.00$/, '')} fps` : '—';
+    return cameraFpsLabel(interval);
   }
 
   function firstFormat(): string {
-    return uniqueFormats()[0] ?? '';
+    return firstCameraFormat(effectiveModes());
   }
 
   function firstResolution(): string {
@@ -147,22 +91,30 @@ export function createCameraModeController(state: ModeControllerState, deps: Mod
   }
 
   function currentMode(): Mode | null {
-    const modes = effectiveModes();
-    const formatKey = normalizeFormat(state.selectedFormat);
-    const byFormatRes = modes.find((m) => modeFormat(m) === formatKey && resolutionKey(m) === state.selectedResolution);
-    return byFormatRes ?? modes.find((m) => deps.modeKey(m.id) === state.selectedModeKey) ?? modes[0] ?? null;
+    return currentCameraMode(
+      effectiveModes(),
+      {
+        selectedModeKey: state.selectedModeKey,
+        selectedFormat: state.selectedFormat,
+        selectedResolution: state.selectedResolution
+      },
+      deps
+    );
   }
 
   function syncModeSelection(): void {
-    const mode = currentMode();
-    state.selectedModeKey = deps.modeKey(mode?.id) ?? null;
-    const normalizedFormat = normalizeFormat(state.selectedFormat);
-    if (!normalizedFormat) {
-      state.selectedFormat = modeFormat(mode);
-    } else if (state.selectedFormat !== normalizedFormat) {
-      state.selectedFormat = normalizedFormat;
-    }
-    if (!state.selectedResolution) state.selectedResolution = modeResolution(mode);
+    const next = syncCameraModeSelectionState(
+      {
+        selectedModeKey: state.selectedModeKey,
+        selectedFormat: state.selectedFormat,
+        selectedResolution: state.selectedResolution
+      },
+      effectiveModes(),
+      deps
+    );
+    state.selectedModeKey = next.selectedModeKey;
+    state.selectedFormat = next.selectedFormat;
+    state.selectedResolution = next.selectedResolution;
   }
 
   return {

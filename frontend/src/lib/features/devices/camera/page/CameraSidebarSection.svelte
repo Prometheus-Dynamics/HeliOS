@@ -29,10 +29,10 @@
     StreamTabProps,
     | 'cameraAlias'
     | 'selectedBackendIndex'
+    | 'selectedModeKey'
     | 'selectedFormat'
     | 'selectedResolution'
     | 'selectedIntervalIdx'
-    | 'selectedInterval'
     | 'libcameraTargetFps'
     | 'netcamTargetFps'
     | 'fileBackendFps'
@@ -42,8 +42,8 @@
     | 'encoderImpl'
     | 'decoderEnabled'
     | 'encoderEnabled'
-    | 'decoderSelectionTouched'
-    | 'encoderSelectionTouched'
+    | 'decoderSelectionMode'
+    | 'encoderSelectionMode'
     | 'hostBuffer'
     | 'previewJpegQuality'
     | 'decoderFpsLimit'
@@ -350,10 +350,10 @@
         <CameraStreamTab
           bind:cameraAlias={ctx.streamBindings.cameraAlias}
           bind:selectedBackendIndex={ctx.streamBindings.selectedBackendIndex}
+          bind:selectedModeKey={ctx.streamBindings.selectedModeKey}
           bind:selectedFormat={ctx.streamBindings.selectedFormat}
           bind:selectedResolution={ctx.streamBindings.selectedResolution}
           bind:selectedIntervalIdx={ctx.streamBindings.selectedIntervalIdx}
-          bind:selectedInterval={ctx.streamBindings.selectedInterval}
           bind:libcameraTargetFps={ctx.streamBindings.libcameraTargetFps}
           bind:netcamTargetFps={ctx.streamBindings.netcamTargetFps}
           bind:fileBackendFps={ctx.streamBindings.fileBackendFps}
@@ -363,8 +363,8 @@
           bind:encoderImpl={ctx.streamBindings.encoderImpl}
           bind:decoderEnabled={ctx.streamBindings.decoderEnabled}
           bind:encoderEnabled={ctx.streamBindings.encoderEnabled}
-          bind:decoderSelectionTouched={ctx.streamBindings.decoderSelectionTouched}
-          bind:encoderSelectionTouched={ctx.streamBindings.encoderSelectionTouched}
+          bind:decoderSelectionMode={ctx.streamBindings.decoderSelectionMode}
+          bind:encoderSelectionMode={ctx.streamBindings.encoderSelectionMode}
           bind:hostBuffer={ctx.streamBindings.hostBuffer}
           bind:previewJpegQuality={ctx.streamBindings.previewJpegQuality}
           bind:decoderFpsLimit={ctx.streamBindings.decoderFpsLimit}
