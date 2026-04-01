@@ -17,11 +17,11 @@ import {
 } from '$lib/api/streamDefaults';
 import { recordingModeEnabled } from '$lib/api/streamRecordingMode';
 import {
-  decoderPreferencesForFormat,
   dedupeCodecs,
   normalizeDecoderDefaultIdsByCaptureFormat,
   pickCodecId
 } from './cameraBackendCodecs';
+import { deriveStreamCodecSelections } from './cameraStreamConfigBuilder';
 import {
   asInterval,
   asJpegQuality,
@@ -247,20 +247,23 @@ export function createCameraBackendController(state: BackendState, deps: Backend
         state.codecs.filter((c) => String(c.kind).toLowerCase() === 'decoder'),
         (c) => `${c.name}::${c.implementation}::${c.input}::${c.output}`
       );
-
-      state.encoderImpl = pickCodecId(
-        state.encoders,
-        resolvedEncoderId || requestedEncoderIdFor(manifest),
-        defaultEncoderId ? [defaultEncoderId] : []
-      );
-      state.decoderImpl = pickCodecId(
-        state.decoders,
-        resolvedDecoderId || requestedDecoderIdFor(manifest),
-        decoderPreferencesForFormat(
-          manifest?.capture?.mode?.format?.code ?? null,
-          state.decoderDefaultIdsByCaptureFormat
-        )
-      );
+      const selections = deriveStreamCodecSelections({
+        encoders: state.encoders,
+        decoders: state.decoders,
+        encoderImpl: state.encoderImpl,
+        decoderImpl: state.decoderImpl,
+        resolvedEncoderId,
+        resolvedDecoderId,
+        requestedEncoderId: requestedEncoderIdFor(manifest),
+        requestedDecoderId: requestedDecoderIdFor(manifest),
+        defaultEncoderId,
+        selectedFormat: manifest?.capture?.mode?.format?.code ?? null,
+        decoderDefaultIdsByCaptureFormat: state.decoderDefaultIdsByCaptureFormat,
+        encoderSelectionTouched: state.encoderSelectionTouched,
+        decoderSelectionTouched: state.decoderSelectionTouched
+      });
+      state.encoderImpl = selections.encoderImpl;
+      state.decoderImpl = selections.decoderImpl;
     } catch (err) {
       console.warn('Failed to load codec catalog', err);
     }
@@ -371,15 +374,23 @@ export function createCameraBackendController(state: BackendState, deps: Backend
       : recordingModeEnabled(manifest?.recording_mode ?? streamDefaults?.defaultRecordingMode);
     state.cameraAlias = asTrimmedString(identityRecord?.alias ?? identityRecord?.display);
     const encoderEnabledFlag = manifestRecord?.encoder_enabled;
-    const nextEncoderId = pickCodecId(
-      state.encoders,
-      resolvedEncoderId || requestedEncoderIdFor(manifest) || state.encoderImpl
-    );
-    const nextDecoderId = pickCodecId(
-      state.decoders,
-      resolvedDecoderId || requestedDecoderIdFor(manifest) || state.decoderImpl,
-      decoderPreferencesForFormat(state.selectedFormat, state.decoderDefaultIdsByCaptureFormat)
-    );
+    const selections = deriveStreamCodecSelections({
+      encoders: state.encoders,
+      decoders: state.decoders,
+      encoderImpl: state.encoderImpl,
+      decoderImpl: state.decoderImpl,
+      resolvedEncoderId,
+      resolvedDecoderId,
+      requestedEncoderId: requestedEncoderIdFor(manifest),
+      requestedDecoderId: requestedDecoderIdFor(manifest),
+      defaultEncoderId: streamDefaults?.defaultEncoderId ?? null,
+      selectedFormat: state.selectedFormat,
+      decoderDefaultIdsByCaptureFormat: state.decoderDefaultIdsByCaptureFormat,
+      encoderSelectionTouched: state.encoderSelectionTouched,
+      decoderSelectionTouched: state.decoderSelectionTouched
+    });
+    const nextEncoderId = selections.encoderImpl;
+    const nextDecoderId = selections.decoderImpl;
     state.encoderEnabled = typeof resolvedEncoder?.enabled === 'boolean'
       ? resolvedEncoder.enabled
       : requestedEncoderState === 'enabled'

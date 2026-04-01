@@ -16,10 +16,17 @@ import { createPipelineTuningApply } from './tuningApply';
 import { createPipelineTuningDrafts } from './tuningDrafts';
 import { clamp, createPipelineTuningPointerHandlers } from './tuningPointers';
 import { nodeValueSignature, pipelineOverrideSignature } from './tuningSignatures';
+import {
+  PIPELINE_OUTPUT_CELL_KEY,
+  RAW_PIPELINE_ID,
+  RAW_PIPELINE_UUID,
+  setRawPipelineUuid
+} from './cameraPipelineConstants';
 import { PIPELINE_UI_METADATA_KEY } from './cameraPageStateTypes';
 import { parseMetadataValue } from './cameraStateUtils';
 
 export { clamp, nodeValueSignature, pipelineOverrideSignature };
+export { PIPELINE_OUTPUT_CELL_KEY, RAW_PIPELINE_ID, RAW_PIPELINE_UUID, setRawPipelineUuid };
 
 export type PipelineNodeValueDescriptor = {
   nodeId: string;
@@ -62,15 +69,6 @@ type StreamUpdatesSocket = {
 } | null;
 
 export const PIPELINE_UI_STORAGE_PREFIX = 'helios.camera.pipelineUi.v1.';
-export const PIPELINE_OUTPUT_CELL_KEY = '0:0';
-export const RAW_PIPELINE_ID = '__raw__';
-const DEFAULT_RAW_PIPELINE_UUID = '00000000-0000-0000-0000-0000000000aa';
-export let RAW_PIPELINE_UUID = DEFAULT_RAW_PIPELINE_UUID;
-export function setRawPipelineUuid(value: string | null | undefined): string {
-  const normalized = String(value ?? '').trim().toLowerCase();
-  RAW_PIPELINE_UUID = normalized.length ? normalized : DEFAULT_RAW_PIPELINE_UUID;
-  return RAW_PIPELINE_UUID;
-}
 export const RAW_LOOPBACK_GRAPH = {
   nodes: [
     {

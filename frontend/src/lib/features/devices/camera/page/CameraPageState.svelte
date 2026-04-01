@@ -25,6 +25,7 @@
   import { createCameraStreamLifecycleController } from './cameraStreamLifecycleController';
   import { createCameraStreamPresetController } from './cameraStreamPresetController';
   import { createCameraStreamPresetHelpers } from './cameraStreamPresetHelpers';
+  import { deriveStreamCodecSelections } from './cameraStreamConfigBuilder';
   import { buildCameraPageConstants, buildCameraPageCore, buildCameraPageDerived } from './cameraPageUiBuilders';
   import { buildCameraTabs } from './cameraPageTabs';
   import { setupStreamViewerResize } from './cameraPageViewHelpers';
@@ -1060,40 +1061,25 @@
       return;
     }
 
-    const resolvedEncoderId = String(streamState.stream?.resolved?.encoder?.codecId ?? '').trim();
-    const resolvedDecoderId = String(streamState.stream?.resolved?.decoder?.codecId ?? '').trim();
+    const selections = deriveStreamCodecSelections({
+      encoders: streamState.encoders,
+      decoders: streamState.decoders,
+      encoderImpl: streamState.encoderImpl,
+      decoderImpl: streamState.decoderImpl,
+      resolvedEncoderId: String(streamState.stream?.resolved?.encoder?.codecId ?? '').trim(),
+      resolvedDecoderId: String(streamState.stream?.resolved?.decoder?.codecId ?? '').trim(),
+      selectedFormat: streamState.selectedFormat,
+      decoderDefaultIdsByCaptureFormat: streamState.decoderDefaultIdsByCaptureFormat,
+      encoderSelectionTouched: streamState.encoderSelectionTouched,
+      decoderSelectionTouched: streamState.decoderSelectionTouched
+    });
 
-    if (!streamState.encoderSelectionTouched && streamState.encoders.length) {
-      const preferred = pickCodecId(
-        streamState.encoders,
-        resolvedEncoderId || streamState.encoderImpl
-      );
-      if (preferred) {
-        if (streamState.encoderImpl !== preferred) {
-          streamState.encoderImpl = preferred;
-        }
-      }
+    if (!streamState.encoderSelectionTouched && selections.encoderImpl && streamState.encoderImpl !== selections.encoderImpl) {
+      streamState.encoderImpl = selections.encoderImpl;
     }
 
-    if (!streamState.decoderSelectionTouched) {
-      const normalizedFormat = String(streamState.selectedFormat ?? '')
-        .trim()
-        .split(/\s+/)[0]
-        ?.toUpperCase() ?? '';
-      const preferredDecoderIds = [
-        normalizedFormat ? streamState.decoderDefaultIdsByCaptureFormat[normalizedFormat] : null,
-        streamState.decoderDefaultIdsByCaptureFormat.ANY ?? null
-      ].filter((value, index, list): value is string => typeof value === 'string' && value.trim().length > 0 && list.indexOf(value) === index);
-      const preferred = pickCodecId(
-        streamState.decoders,
-        resolvedDecoderId || streamState.decoderImpl,
-        preferredDecoderIds
-      );
-      if (preferred) {
-        if (streamState.decoderImpl !== preferred) {
-          streamState.decoderImpl = preferred;
-        }
-      }
+    if (!streamState.decoderSelectionTouched && selections.decoderImpl && streamState.decoderImpl !== selections.decoderImpl) {
+      streamState.decoderImpl = selections.decoderImpl;
     }
   });
 
@@ -1163,29 +1149,17 @@
       get pipelineGridSlots() {
         return pipelineState.pipelineGridSlots;
       },
-      set pipelineGridSlots(value) {
-        pipelineState.pipelineGridSlots = value;
-      },
       get pipelineGridSlotOutputKeys() {
         return pipelineState.pipelineGridSlotOutputKeys;
+      },
+      get pipelineOutputByPipelineId() {
+        return pipelineState.pipelineOutputByPipelineId;
       },
       get assignedPipelineIds() {
         return pipelineState.assignedPipelineIds;
       },
-      set assignedPipelineIds(value) {
-        pipelineState.assignedPipelineIds = value;
-      },
       get selectedPipelineId() {
         return pipelineState.selectedPipelineId;
-      },
-      set selectedPipelineId(value) {
-        pipelineState.selectedPipelineId = value;
-      },
-      get selectedPipelineOutput() {
-        return pipelineState.selectedPipelineOutput;
-      },
-      set selectedPipelineOutput(value) {
-        pipelineState.selectedPipelineOutput = value;
       },
       get cameraAlias() {
         return streamState.cameraAlias;
@@ -1196,9 +1170,6 @@
       get decoderImpl() {
         return streamState.decoderImpl;
       },
-      get decoders() {
-        return streamState.decoders;
-      },
       get encoderEnabled() {
         return streamState.encoderEnabled;
       },
@@ -1207,9 +1178,6 @@
       },
       get encoderSettings() {
         return streamState.encoderSettings;
-      },
-      get encoderSelectionTouched() {
-        return streamState.encoderSelectionTouched;
       },
       get encoderFpsLimit() {
         return streamState.encoderFpsLimit;
@@ -1267,7 +1235,6 @@
       }
     },
     {
-      pipelinesApi: PipelinesApi,
       streamsApi: StreamsApi,
       apiBase,
       toaster,
@@ -1276,10 +1243,6 @@
       currentDevice,
       currentMode,
       intervalsForSelection,
-      pickCodecId,
-      outputSelectionForPipeline,
-      applyPipelineOverridesToGraph,
-      dropPipelineEverywhere,
       reportError,
       onExternalLayoutApplied: () => dismissGuidedCalibrationOverlay()
     }
