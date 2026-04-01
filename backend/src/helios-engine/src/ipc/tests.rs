@@ -33,7 +33,7 @@ fn sample_manifest() -> StreamManifest {
         encoder: RequestedEncoderConfig::default(),
         decoder: RequestedDecoderConfig::default(),
         preview_jpeg_quality: 30,
-        shadow_recorder_enabled: true,
+        recording_mode: StreamRecordingMode::shadow_buffer(default_shadow_recording_codec()),
         start_on_boot: false,
     }
 }
@@ -117,11 +117,11 @@ fn encoder_settings_accepts_legacy_fps_framerate_json() {
 }
 
 #[test]
-fn stream_manifest_defaults_shadow_recorder_off_when_omitted() {
+fn stream_manifest_defaults_recording_mode_to_disabled_when_omitted() {
     let payload = sample_manifest_json();
     let parsed: StreamManifest = serde_json::from_value(payload).expect("decode manifest");
     assert_eq!(parsed.schema_version, CURRENT_STREAM_CONFIG_SCHEMA_VERSION);
-    assert!(!parsed.shadow_recorder_enabled);
+    assert_eq!(parsed.recording_mode, StreamRecordingMode::Disabled);
     assert_eq!(parsed.host_buffer, super::default_host_buffer());
     assert!(!parsed.pipeline_enabled);
     assert_eq!(parsed.preview_jpeg_quality, 65);

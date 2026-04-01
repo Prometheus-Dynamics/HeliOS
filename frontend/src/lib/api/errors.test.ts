@@ -26,9 +26,9 @@ describe('validation error extraction', () => {
       issues: [
         {
           path: '/encoder/id',
-          code: 'shadow_recorder_requires_h26x_encoder',
-          message: 'shadow recorder requires an h264/h265 encoder selection',
-          remediation: 'Select an H264 or H265 encoder for this stream before enabling shadow recording.'
+          code: 'recording_mode_requires_matching_encoder',
+          message: 'shadow-buffer recording mode requires an h264/h265 encoder selection',
+          remediation: 'Select an H264 or H265 encoder before enabling shadow-buffer recording mode.'
         }
       ],
       warnings: [
@@ -45,9 +45,9 @@ describe('validation error extraction', () => {
       issues: [
         {
           path: '/encoder/id',
-          code: 'shadow_recorder_requires_h26x_encoder',
-          message: 'shadow recorder requires an h264/h265 encoder selection',
-          remediation: 'Select an H264 or H265 encoder for this stream before enabling shadow recording.'
+          code: 'recording_mode_requires_matching_encoder',
+          message: 'shadow-buffer recording mode requires an h264/h265 encoder selection',
+          remediation: 'Select an H264 or H265 encoder before enabling shadow-buffer recording mode.'
         }
       ],
       warnings: [
@@ -66,10 +66,10 @@ describe('validation error extraction', () => {
       error: 'Stream validation failed.',
       issues: [
         {
-          path: '/shadow_recorder_enabled',
-          code: 'shadow_recorder_requires_encoder',
-          message: 'shadow recorder requires the stream encoder to be enabled',
-          remediation: 'Enable an H264 or H265 encoder before turning on shadow recording.'
+          path: '/recording_mode/state',
+          code: 'recording_mode_requires_encoder',
+          message: 'shadow-buffer recording mode requires the stream encoder to be enabled',
+          remediation: 'Enable an H264 or H265 encoder before enabling shadow-buffer recording mode.'
         }
       ],
       warnings: [],
@@ -79,13 +79,13 @@ describe('validation error extraction', () => {
     expect(extractErrorMetadata(error)).toMatchObject({
       code: 'validation_error',
       timestampMs: 9876,
-      remediation: 'Enable an H264 or H265 encoder before turning on shadow recording.',
+      remediation: 'Enable an H264 or H265 encoder before enabling shadow-buffer recording mode.',
       validationIssues: [
         {
-          path: '/shadow_recorder_enabled',
-          code: 'shadow_recorder_requires_encoder',
-          message: 'shadow recorder requires the stream encoder to be enabled',
-          remediation: 'Enable an H264 or H265 encoder before turning on shadow recording.'
+          path: '/recording_mode/state',
+          code: 'recording_mode_requires_encoder',
+          message: 'shadow-buffer recording mode requires the stream encoder to be enabled',
+          remediation: 'Enable an H264 or H265 encoder before enabling shadow-buffer recording mode.'
         }
       ]
     });

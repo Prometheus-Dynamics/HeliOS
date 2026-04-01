@@ -462,23 +462,31 @@ impl StreamManager {
         let stream_id = manifest.identity.id.unwrap_or_else(Uuid::new_v4);
         manifest.identity.id = Some(stream_id);
 
-        // Shadow recorder persists the stream's encoded side-channel, but it must not rewrite the
-        // user-selected stream encoder. If the selected encoder is incompatible, shadow recorder
-        // will fail later with a clear warning instead of silently coercing the stream profile.
-        if manifest.shadow_recorder_enabled && shadow_recorder_feature_enabled() && manifest.encoder.enabled {
-            let recording_codec = manifest.encoder_id().and_then(|id| infer_recording_codec(Some(id)));
-            if recording_codec.is_some() {
-                // Shadow-based capture/recording needs frequent keyframes so short windows (5s, 30s)
-                // remain decodable and ffmpeg can remux without producing empty MP4s.
-                let want_fps = infer_recording_fps(&manifest).unwrap_or(30.0).round().clamp(1.0, 240.0) as u32;
-                let settings = manifest.encoder.settings.get_or_insert_with(Default::default);
-                if settings.framerate.is_none() {
-                    settings.framerate = Some(crate::ipc::FrameRate { numerator: want_fps, denominator: 1 });
-                }
-                if settings.gop.is_none() {
-                    // 1-second GOP by default (in frames).
-                    settings.gop = Some(want_fps as i32);
-                }
+        if let Some(recording_codec) = manifest.recording_mode.shadow_buffer_codec() {
+            if !shadow_recorder_feature_enabled() {
+                return Err(Error::InvalidState("shadow-buffer recording mode requires HELIOS_ENABLE_SHADOW_RECORDER"));
+            }
+            if !manifest.encoder.enabled {
+                return Err(Error::InvalidState("shadow-buffer recording mode requires encoder enabled"));
+            }
+            let encoder_id = manifest.encoder_id().unwrap_or_default().trim();
+            if encoder_id.is_empty() {
+                return Err(Error::InvalidState("shadow-buffer recording mode requires an encoder_id"));
+            }
+            if !encoder_matches(recording_codec, encoder_id) {
+                return Err(Error::InvalidState("shadow-buffer recording mode codec does not match the selected encoder"));
+            }
+
+            // Shadow-based capture/recording needs frequent keyframes so short windows (5s, 30s)
+            // remain decodable and ffmpeg can remux without producing empty MP4s.
+            let want_fps = infer_recording_fps(&manifest).unwrap_or(30.0).round().clamp(1.0, 240.0) as u32;
+            let settings = manifest.encoder.settings.get_or_insert_with(Default::default);
+            if settings.framerate.is_none() {
+                settings.framerate = Some(crate::ipc::FrameRate { numerator: want_fps, denominator: 1 });
+            }
+            if settings.gop.is_none() {
+                // 1-second GOP by default (in frames).
+                settings.gop = Some(want_fps as i32);
             }
         }
         {
@@ -562,7 +570,7 @@ impl StreamManager {
         };
         let cleanup_rx = exit_rx.clone();
         let monitor_rx = cleanup_rx.clone();
-        let shadow_enabled = manifest_clone.shadow_recorder_enabled && shadow_recorder_feature_enabled();
+        let shadow_enabled = manifest_clone.recording_mode.is_shadow_buffer();
         let stream_started_at_ms = current_time_ms();
         let encoded_tx_for_ctx = encoded_tx.clone();
         let raw_tx_for_ctx = raw_tx.clone();
@@ -596,8 +604,6 @@ impl StreamManager {
             if let Err(err) = self.start_shadow_recorder(stream_id, &manifest_clone).await {
                 tracing::warn!(stream_id = %stream_id, error = %err, "shadow recorder start failed");
             }
-        } else if manifest_clone.shadow_recorder_enabled && !shadow_recorder_feature_enabled() {
-            tracing::info!(stream_id = %stream_id, "shadow recorder feature gate is off; ignoring manifest request");
         }
         tracing::info!(stream_id = %stream_id, "stream registered");
         self.finish_starting(stream_id).await;
@@ -846,11 +852,11 @@ impl StreamManager {
         // clip timing tied to live frame flow.
         let shadow_candidate = recording_shadow_start_stop_enabled()
             && shadow_recorder_feature_enabled()
-            && manifest_snapshot.shadow_recorder_enabled
+            && manifest_snapshot.recording_mode.is_shadow_buffer()
             && matches!(source, RecordingSource::Multiplex)
-            && infer_recording_codec(manifest_snapshot.encoder_id()).is_some();
+            && manifest_snapshot.recording_mode.shadow_buffer_codec().is_some();
         if shadow_candidate {
-            let stream_codec = infer_recording_codec(manifest_snapshot.encoder_id()).unwrap();
+            let stream_codec = manifest_snapshot.recording_mode.shadow_buffer_codec().unwrap();
             if codec != stream_codec {
                 {
                     let mut recordings = self.recordings.lock().await;
@@ -954,9 +960,9 @@ impl StreamManager {
         }
         let ctx = self.get_stream(stream_id).await?;
         let manifest_snapshot = ctx.manifest.read().await.clone();
-        if !manifest_snapshot.shadow_recorder_enabled {
+        let Some(configured_codec) = manifest_snapshot.recording_mode.shadow_buffer_codec() else {
             return Err(Error::InvalidState("shadow recorder disabled"));
-        }
+        };
         let (requested_codec, raw_format) = {
             let recorders = self.shadow_recorders.lock().await;
             recorders.get(&stream_id).map(|handle| {
@@ -964,10 +970,7 @@ impl StreamManager {
                 (handle.requested_codec, Some(raw))
             })
         }
-        .unwrap_or_else(|| {
-            let fallback = infer_recording_codec(manifest_snapshot.encoder_id()).unwrap_or(RecordingCodec::H264);
-            (fallback, None)
-        });
+        .unwrap_or((configured_codec, None));
         let raw_format = raw_format.unwrap_or_else(|| RawRecordingFormat::from_codec(requested_codec));
         let window_ms = normalize_shadow_window_ms(window_ms);
         if window_ms == 0 {
@@ -1024,11 +1027,7 @@ impl StreamManager {
         if !manifest.encoder.enabled {
             return Err(Error::InvalidState("shadow recorder requires encoder enabled"));
         }
-        let encoder_id = manifest.encoder_id().unwrap_or_default().trim();
-        if encoder_id.is_empty() {
-            return Err(Error::InvalidState("shadow recorder requires an encoder_id (h264/h265)"));
-        }
-        let preferred_codec = infer_recording_codec(Some(encoder_id)).ok_or(Error::InvalidState("shadow recorder requires h264/h265 encoder"))?;
+        let preferred_codec = manifest.recording_mode.shadow_buffer_codec().ok_or(Error::InvalidState("shadow recorder requires shadow-buffer recording mode"))?;
         let raw_format = RawRecordingFormat::from_codec(preferred_codec);
         let shadow_dir = shadow_dir_for_stream(stream_id);
         let window_ms = shadow_window_ms();
@@ -4422,7 +4421,7 @@ mod tests {
             encoder: RequestedEncoderConfig::enabled(Some("h264".to_string()), None),
             decoder: RequestedDecoderConfig::default(),
             preview_jpeg_quality: 30,
-            shadow_recorder_enabled: false,
+            recording_mode: crate::ipc::default_recording_mode(),
             start_on_boot: false,
         }
         .resolve()

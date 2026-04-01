@@ -1,4 +1,5 @@
 import type { StreamCapabilitiesResponse } from '$lib/ts-bindings/http/client';
+import { defaultRecordingMode, normalizeRecordingMode, type StreamRecordingModeWire } from './streamRecordingMode';
 
 export type StreamCreationDefaults = {
   rawOutput: string;
@@ -9,7 +10,7 @@ export type StreamCreationDefaults = {
   defaultHostBuffer: number;
   defaultPreviewJpegQuality: number;
   defaultPreviewJpegQualityWhenEncoderDisabled: number;
-  defaultShadowRecorderEnabled: boolean;
+  defaultRecordingMode: StreamRecordingModeWire;
   defaultStartOnBoot: boolean;
   defaultEncoderId: string | null;
   defaultDecoderIdsByCaptureFormat: Record<string, string>;
@@ -51,7 +52,6 @@ export function resolveStreamCreationDefaults(
     typeof defaults?.pipelineEnabledWhenBindingsPresent !== 'boolean' ||
     typeof defaults?.defaultEncoderEnabled !== 'boolean' ||
     typeof defaults?.defaultDecoderEnabled !== 'boolean' ||
-    typeof defaults?.defaultShadowRecorderEnabled !== 'boolean' ||
     typeof defaults?.defaultStartOnBoot !== 'boolean'
   ) {
     return null;
@@ -75,7 +75,7 @@ export function resolveStreamCreationDefaults(
     defaultHostBuffer,
     defaultPreviewJpegQuality,
     defaultPreviewJpegQualityWhenEncoderDisabled,
-    defaultShadowRecorderEnabled: defaults.defaultShadowRecorderEnabled,
+    defaultRecordingMode: normalizeRecordingMode(defaults.defaultRecordingMode ?? defaultRecordingMode()),
     defaultStartOnBoot: defaults.defaultStartOnBoot,
     defaultEncoderId: asTrimmedString(defaults.defaultEncoderId),
     defaultDecoderIdsByCaptureFormat

@@ -13,6 +13,7 @@ import {
   resolveStreamCreationDefaults,
   type StreamCreationDefaults
 } from '$lib/api/streamDefaults';
+import { recordingModeEnabled } from '$lib/api/streamRecordingMode';
 import {
   decoderPreferencesForFormat,
   dedupeCodecs,
@@ -371,7 +372,7 @@ export function createCameraBackendController(state: BackendState, deps: Backend
       state.hostBuffer;
     state.shadowRecorderEnabled = isFileBackend(capture?.backend)
       ? false
-      : (manifest?.shadow_recorder_enabled ?? streamDefaults?.defaultShadowRecorderEnabled ?? false);
+      : recordingModeEnabled(manifest?.recording_mode ?? streamDefaults?.defaultRecordingMode);
     state.cameraAlias = asTrimmedString(identityRecord?.alias ?? identityRecord?.display);
     const encoderEnabledFlag = manifestRecord?.encoder_enabled;
     const nextEncoderId = pickCodecId(

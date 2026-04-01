@@ -136,7 +136,7 @@ mod tests {
             encoder: RequestedEncoderConfig::default(),
             decoder: RequestedDecoderConfig::default(),
             preview_jpeg_quality: 30,
-            shadow_recorder_enabled: false,
+            recording_mode: helios_engine::ipc::default_recording_mode(),
             start_on_boot: false,
         }
     }

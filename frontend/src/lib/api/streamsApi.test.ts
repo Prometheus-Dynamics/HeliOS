@@ -18,7 +18,10 @@ function sampleCapabilities(): StreamCapabilitiesResponse {
       defaultHostBuffer: 17,
       defaultPreviewJpegQuality: 42,
       defaultPreviewJpegQualityWhenEncoderDisabled: 11,
-      defaultShadowRecorderEnabled: true,
+      defaultRecordingMode: {
+        state: 'shadow_buffer',
+        codec: 'h264'
+      },
       defaultStartOnBoot: false,
       defaultEncoderId: 'turbojpeg',
       defaultDecoderIdsByCaptureFormat: {
@@ -60,7 +63,7 @@ describe('stream defaults contract', () => {
     expect(manifest.schema_version).toBe(1);
     expect(manifest.host_buffer).toBe(17);
     expect(manifest.preview_jpeg_quality).toBe(42);
-    expect(manifest.shadow_recorder_enabled).toBe(true);
+    expect(manifest.recording_mode).toEqual({ state: 'shadow_buffer', codec: 'h264' });
     expect(manifest.start_on_boot).toBe(false);
     expect(manifest.pipeline_enabled).toBe(true);
     expect(manifest.active_pipeline_output).toBe('raw');

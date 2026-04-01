@@ -127,7 +127,7 @@ pub async fn start_stream_for_mode(args: StartStreamArgs<'_>) -> Result<Uuid, St
         encoder: RequestedEncoderConfig::default(),
         decoder: RequestedDecoderConfig::default(),
         preview_jpeg_quality: 30,
-        shadow_recorder_enabled: false,
+        recording_mode: helios_engine::ipc::default_recording_mode(),
         start_on_boot: false,
     };
 

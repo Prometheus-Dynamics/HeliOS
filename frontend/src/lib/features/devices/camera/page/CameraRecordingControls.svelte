@@ -3,6 +3,7 @@
   import { toaster } from '$lib';
   import { apiFetchResponse } from '$lib/api/core/http';
   import type { StreamInfo, StreamManifest, StreamPipelineBinding } from '$lib/api/httpClient';
+  import { recordingModeEnabled } from '$lib/api/streamRecordingMode';
   import FaIcon from '$lib/components/icons/FaIcon.svelte';
   import { emitMediaMutation } from '$lib/features/media/mutations';
   import { reportError } from '$lib/ui/errorPolicy';
@@ -215,7 +216,7 @@
     const manifest = manifestFor(ctx.stream);
     const backend = String(manifest?.capture?.backend ?? '').trim().toLowerCase();
     if (backend === 'file') return false;
-    return Boolean(manifest?.shadow_recorder_enabled ?? false);
+    return recordingModeEnabled(manifest?.recording_mode);
   });
   const manifestEncoderId = (manifest: ReturnType<typeof manifestFor>): string => {
     const manifestRecord =

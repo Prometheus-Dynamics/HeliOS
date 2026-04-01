@@ -562,7 +562,7 @@ mod tests {
             encoder: RequestedEncoderConfig::default(),
             decoder: RequestedDecoderConfig::default(),
             preview_jpeg_quality: 30,
-            shadow_recorder_enabled: true,
+            recording_mode: crate::ipc::StreamRecordingMode::shadow_buffer(crate::ipc::default_shadow_recording_codec()),
             start_on_boot: false,
         }
         .resolve()

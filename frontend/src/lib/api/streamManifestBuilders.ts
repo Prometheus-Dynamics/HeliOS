@@ -1,4 +1,5 @@
 import { resolveStreamCreationDefaults } from '$lib/api/streamDefaults';
+import { normalizeRecordingMode } from '$lib/api/streamRecordingMode';
 import { withCurrentStreamManifestSchema } from '$lib/api/streamSchema';
 import type { StreamCapabilitiesResponse, StreamManifest } from '$lib/ts-bindings/http/client';
 
@@ -58,7 +59,7 @@ export function makeNetcamManifest(input: RegisterNetcamStreamInput, capabilitie
       columns: 1,
       slots: [{ row: 0, column: 0, pipeline_id: rawPipelineId, output_key: rawOutput }]
     },
-    shadow_recorder_enabled: streamDefaults.defaultShadowRecorderEnabled,
+    recording_mode: normalizeRecordingMode(streamDefaults.defaultRecordingMode),
     start_on_boot: input.startOnBoot == null ? streamDefaults.defaultStartOnBoot : Boolean(input.startOnBoot)
   }) as unknown as StreamManifest;
 }

@@ -1,8 +1,10 @@
 use helios_engine::ipc::{
-    DEFAULT_STREAM_PIPELINE_ENABLED_WHEN_BINDINGS_PRESENT, ResolvedStreamConfig, StreamManifest, default_decoder_enabled, default_decoder_ids_by_capture_format, default_encoder_enabled,
-    default_host_buffer, default_requested_preview_jpeg_quality_disabled, default_requested_preview_jpeg_quality_enabled, default_shadow_recorder_enabled, default_start_on_boot,
-    default_stream_encoder_selector,
+    DEFAULT_STREAM_PIPELINE_ENABLED_WHEN_BINDINGS_PRESENT, ResolvedStreamConfig, StreamManifest, StreamRecordingMode, default_decoder_enabled, default_decoder_ids_by_capture_format,
+    default_encoder_enabled, default_host_buffer, default_recording_mode, default_requested_preview_jpeg_quality_disabled, default_requested_preview_jpeg_quality_enabled,
+    default_start_on_boot, default_stream_encoder_selector,
 };
+#[cfg(test)]
+use helios_engine::ipc::default_shadow_recording_codec;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
@@ -47,7 +49,7 @@ pub struct StreamValidationDefaults {
     pub default_host_buffer: usize,
     pub default_preview_jpeg_quality: u8,
     pub default_preview_jpeg_quality_when_encoder_disabled: u8,
-    pub default_shadow_recorder_enabled: bool,
+    pub default_recording_mode: StreamRecordingMode,
     pub default_start_on_boot: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_encoder_id: Option<String>,
@@ -102,7 +104,7 @@ pub fn stream_capabilities() -> StreamCapabilitiesResponse {
             default_host_buffer: default_host_buffer(),
             default_preview_jpeg_quality: default_requested_preview_jpeg_quality_enabled(),
             default_preview_jpeg_quality_when_encoder_disabled: default_requested_preview_jpeg_quality_disabled(),
-            default_shadow_recorder_enabled: default_shadow_recorder_enabled(),
+            default_recording_mode: default_recording_mode(),
             default_start_on_boot: default_start_on_boot(),
             default_encoder_id: default_stream_encoder_selector(),
             default_decoder_ids_by_capture_format: default_decoder_ids_by_capture_format(),
@@ -196,7 +198,7 @@ fn validate_backend_and_handle(manifest: &StreamManifest, issues: &mut Vec<Valid
 
 fn validate_stream_feature_compatibility(manifest: &StreamManifest, issues: &mut Vec<ValidationIssue>) {
     validate_requested_codec_compatibility(manifest, issues);
-    validate_shadow_recorder_compatibility(manifest, issues);
+    validate_recording_mode_compatibility(manifest, issues);
 }
 
 fn validate_requested_codec_compatibility(manifest: &StreamManifest, issues: &mut Vec<ValidationIssue>) {
@@ -265,27 +267,27 @@ fn codec_selector_available(input: styx::prelude::FourCc, kind: CodecKind, selec
     handle.lookup_named_kind(input, kind, selector).or_else(|_| handle.lookup_auto_kind_by_name(input, kind, selector)).is_ok()
 }
 
-fn validate_shadow_recorder_compatibility(manifest: &StreamManifest, issues: &mut Vec<ValidationIssue>) {
-    if !manifest.shadow_recorder_enabled {
+fn validate_recording_mode_compatibility(manifest: &StreamManifest, issues: &mut Vec<ValidationIssue>) {
+    let Some(requested_codec) = manifest.recording_mode.shadow_buffer_codec() else {
         return;
-    }
+    };
 
     if !crate::features::shadow_recorder_enabled() {
         issues.push(issue_with_remediation(
-            "/shadow_recorder_enabled",
-            "shadow_recorder_feature_disabled",
-            "shadow recorder is disabled by the HELIOS_ENABLE_SHADOW_RECORDER feature gate",
-            "Disable shadow recording for this stream, or enable HELIOS_ENABLE_SHADOW_RECORDER before retrying.",
+            "/recording_mode/state",
+            "recording_mode_feature_disabled",
+            "shadow-buffer recording mode is disabled by the HELIOS_ENABLE_SHADOW_RECORDER feature gate",
+            "Switch recording mode to disabled, or enable HELIOS_ENABLE_SHADOW_RECORDER before retrying.",
         ));
         return;
     }
 
     if manifest.encoder.is_disabled() {
         issues.push(issue_with_remediation(
-            "/shadow_recorder_enabled",
-            "shadow_recorder_requires_encoder",
-            "shadow recorder requires the stream encoder to be enabled",
-            "Enable an H264 or H265 encoder before turning on shadow recording.",
+            "/recording_mode/state",
+            "recording_mode_requires_encoder",
+            "shadow-buffer recording mode requires the stream encoder to be enabled",
+            "Enable the stream encoder before turning on shadow-buffer recording.",
         ));
         return;
     }
@@ -293,35 +295,20 @@ fn validate_shadow_recorder_compatibility(manifest: &StreamManifest, issues: &mu
     let Some(encoder_id) = manifest.encoder.id().map(str::trim).filter(|value| !value.is_empty()) else {
         issues.push(issue_with_remediation(
             "/encoder/id",
-            "shadow_recorder_requires_h26x_encoder",
-            "shadow recorder requires an h264/h265 encoder selection",
-            "Select an H264 or H265 encoder for this stream before enabling shadow recording.",
+            "recording_mode_requires_matching_encoder",
+            format!("recording mode requests {:?} but the stream encoder selector is missing", requested_codec).to_lowercase(),
+            "Select an H264 or H265 encoder that matches the chosen recording mode codec.",
         ));
         return;
     };
 
-    if infer_shadow_recording_codec(encoder_id).is_none() {
+    if !encoder_matches_recording_codec(requested_codec, encoder_id) {
         issues.push(issue_with_remediation(
-            "/encoder/id",
-            "shadow_recorder_requires_h26x_encoder",
-            "shadow recorder requires an h264/h265 encoder selection",
-            "Select an H264 or H265 encoder for this stream before enabling shadow recording.",
+            "/recording_mode/codec",
+            "recording_mode_codec_mismatch",
+            format!("recording mode codec {:?} does not match encoder `{encoder_id}`", requested_codec).to_lowercase(),
+            "Choose an encoder selector that matches the requested recording mode codec, or switch the recording mode codec to match the encoder.",
         ));
-    }
-}
-
-fn infer_shadow_recording_codec(encoder_id: &str) -> Option<helios_engine::ipc::RecordingCodec> {
-    let encoder_id = encoder_id.trim();
-    if encoder_id.is_empty() {
-        return None;
-    }
-
-    let h264 = encoder_matches_recording_codec(helios_engine::ipc::RecordingCodec::H264, encoder_id);
-    let h265 = encoder_matches_recording_codec(helios_engine::ipc::RecordingCodec::H265, encoder_id);
-    match (h264, h265) {
-        (true, false) => Some(helios_engine::ipc::RecordingCodec::H264),
-        (false, true) => Some(helios_engine::ipc::RecordingCodec::H265),
-        _ => None,
     }
 }
 
@@ -777,7 +764,7 @@ mod tests {
         assert_eq!(capabilities.defaults.default_host_buffer, default_host_buffer());
         assert_eq!(capabilities.defaults.default_preview_jpeg_quality, default_requested_preview_jpeg_quality_enabled());
         assert_eq!(capabilities.defaults.default_preview_jpeg_quality_when_encoder_disabled, default_requested_preview_jpeg_quality_disabled());
-        assert_eq!(capabilities.defaults.default_shadow_recorder_enabled, default_shadow_recorder_enabled());
+        assert_eq!(capabilities.defaults.default_recording_mode, default_recording_mode());
         assert_eq!(capabilities.defaults.default_start_on_boot, default_start_on_boot());
     }
 
@@ -923,28 +910,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_shadow_recorder_without_encoder() {
+    async fn rejects_recording_mode_without_encoder() {
         let mut manifest = sample_libcamera_manifest();
         manifest.encoder = helios_engine::ipc::RequestedEncoderConfig::disabled();
-        manifest.shadow_recorder_enabled = true;
+        manifest.recording_mode = StreamRecordingMode::shadow_buffer(default_shadow_recording_codec());
 
-        let err = validate_stream_manifest(manifest).await.expect_err("expected shadow recorder encoder requirement failure");
+        let err = validate_stream_manifest(manifest).await.expect_err("expected recording mode encoder requirement failure");
         let issue =
-            err.issues.iter().find(|issue| issue.code == "shadow_recorder_requires_encoder").expect("expected shadow recorder encoder issue");
-        assert_eq!(issue.path, "/shadow_recorder_enabled");
-        assert_eq!(issue.remediation.as_deref(), Some("Enable an H264 or H265 encoder before turning on shadow recording."));
+            err.issues.iter().find(|issue| issue.code == "recording_mode_requires_encoder").expect("expected recording mode encoder issue");
+        assert_eq!(issue.path, "/recording_mode/state");
+        assert_eq!(issue.remediation.as_deref(), Some("Enable the stream encoder before turning on shadow-buffer recording."));
     }
 
     #[tokio::test]
-    async fn rejects_shadow_recorder_with_non_h26x_encoder() {
+    async fn rejects_recording_mode_with_mismatched_encoder() {
         let mut manifest = sample_libcamera_manifest();
         manifest.encoder = helios_engine::ipc::RequestedEncoderConfig::enabled(Some("turbojpeg".to_string()), None);
-        manifest.shadow_recorder_enabled = true;
+        manifest.recording_mode = StreamRecordingMode::shadow_buffer(default_shadow_recording_codec());
 
-        let err = validate_stream_manifest(manifest).await.expect_err("expected shadow recorder codec compatibility failure");
-        let issue = err.issues.iter().find(|issue| issue.code == "shadow_recorder_requires_h26x_encoder").expect("expected shadow recorder codec issue");
-        assert_eq!(issue.path, "/encoder/id");
-        assert_eq!(issue.remediation.as_deref(), Some("Select an H264 or H265 encoder for this stream before enabling shadow recording."));
+        let err = validate_stream_manifest(manifest).await.expect_err("expected recording mode codec compatibility failure");
+        let issue = err.issues.iter().find(|issue| issue.code == "recording_mode_codec_mismatch").expect("expected recording mode codec issue");
+        assert_eq!(issue.path, "/recording_mode/codec");
+        assert_eq!(
+            issue.remediation.as_deref(),
+            Some("Choose an encoder selector that matches the requested recording mode codec, or switch the recording mode codec to match the encoder.")
+        );
     }
 
     fn sample_libcamera_manifest() -> StreamManifest {
@@ -976,7 +966,7 @@ mod tests {
             encoder: helios_engine::ipc::RequestedEncoderConfig::default(),
             decoder: helios_engine::ipc::RequestedDecoderConfig::default(),
             preview_jpeg_quality: 30,
-            shadow_recorder_enabled: false,
+            recording_mode: default_recording_mode(),
             start_on_boot: false,
         }
     }

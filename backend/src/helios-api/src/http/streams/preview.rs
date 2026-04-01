@@ -366,7 +366,7 @@ mod tests {
             encoder: helios_engine::ipc::RequestedEncoderConfig::default(),
             decoder: helios_engine::ipc::RequestedDecoderConfig::default(),
             preview_jpeg_quality: 30,
-            shadow_recorder_enabled: true,
+            recording_mode: helios_engine::ipc::StreamRecordingMode::shadow_buffer(helios_engine::ipc::default_shadow_recording_codec()),
             start_on_boot: false,
         }
     }

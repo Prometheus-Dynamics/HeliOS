@@ -1120,6 +1120,50 @@ pub struct ResolvedDecoderConfig {
     pub settings_present: bool,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Encode, Decode, ToSchema, PartialEq, Eq, Default)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum StreamRecordingMode {
+    #[default]
+    Disabled,
+    ShadowBuffer {
+        codec: RecordingCodec,
+    },
+}
+
+impl StreamRecordingMode {
+    pub fn disabled() -> Self {
+        Self::Disabled
+    }
+
+    pub fn shadow_buffer(codec: RecordingCodec) -> Self {
+        Self::ShadowBuffer { codec }
+    }
+
+    pub fn is_disabled(&self) -> bool {
+        matches!(self, Self::Disabled)
+    }
+
+    pub fn is_shadow_buffer(&self) -> bool {
+        matches!(self, Self::ShadowBuffer { .. })
+    }
+
+    pub fn shadow_buffer_codec(&self) -> Option<RecordingCodec> {
+        match self {
+            Self::Disabled => None,
+            Self::ShadowBuffer { codec } => Some(*codec),
+        }
+    }
+
+    fn from_legacy_shadow_recorder(enabled: bool, encoder: &RequestedEncoderConfig) -> Self {
+        if !enabled {
+            return Self::Disabled;
+        }
+
+        let inferred_codec = encoder.id().map(str::trim).filter(|value| !value.is_empty()).and_then(legacy_shadow_recording_codec_for_encoder);
+        Self::ShadowBuffer { codec: inferred_codec.unwrap_or_else(default_shadow_recording_codec) }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvedStreamConfig {
@@ -1149,7 +1193,8 @@ pub struct ResolvedStreamConfig {
     #[serde(default)]
     pub decoder: ResolvedDecoderConfig,
     pub preview_jpeg_quality: u8,
-    pub shadow_recorder_enabled: bool,
+    #[serde(default)]
+    pub recording_mode: StreamRecordingMode,
     pub start_on_boot: bool,
 }
 
@@ -1551,8 +1596,8 @@ pub struct StreamManifest {
     #[schema(value_type = RequestedDecoderConfigSchema)]
     pub decoder: RequestedDecoderConfig,
     pub preview_jpeg_quality: u8,
-    /// Enable the rolling shadow recorder buffer used for capture-last clips.
-    pub shadow_recorder_enabled: bool,
+    /// Recording mode contract for capture-last buffers and future recording policies.
+    pub recording_mode: StreamRecordingMode,
     pub start_on_boot: bool,
 }
 
@@ -1588,8 +1633,8 @@ struct StreamManifestBinaryWire {
     pub decoder: RequestedDecoderConfig,
     #[serde(default)]
     pub preview_jpeg_quality: Option<u8>,
-    #[serde(default = "default_shadow_recorder_enabled")]
-    pub shadow_recorder_enabled: bool,
+    #[serde(default = "default_recording_mode")]
+    pub recording_mode: StreamRecordingMode,
     #[serde(default)]
     pub start_on_boot: bool,
 }
@@ -1640,8 +1685,10 @@ struct StreamManifestHumanWire {
     pub decoder_settings: Option<DecoderSettings>,
     #[serde(default)]
     pub preview_jpeg_quality: Option<u8>,
-    #[serde(default = "default_shadow_recorder_enabled")]
-    pub shadow_recorder_enabled: bool,
+    #[serde(default)]
+    pub recording_mode: Option<StreamRecordingMode>,
+    #[serde(default)]
+    pub shadow_recorder_enabled: Option<bool>,
     #[serde(default)]
     pub start_on_boot: bool,
 }
@@ -1676,7 +1723,7 @@ impl From<StreamManifestBinaryWire> for StreamManifest {
             encoder: value.encoder,
             decoder: value.decoder,
             preview_jpeg_quality,
-            shadow_recorder_enabled: value.shadow_recorder_enabled,
+            recording_mode: value.recording_mode,
             start_on_boot: value.start_on_boot,
         }
     }
@@ -1735,7 +1782,7 @@ impl From<StreamManifest> for StreamManifestBinaryWire {
             encoder: value.encoder,
             decoder: value.decoder,
             preview_jpeg_quality: Some(value.preview_jpeg_quality),
-            shadow_recorder_enabled: value.shadow_recorder_enabled,
+            recording_mode: value.recording_mode,
             start_on_boot: value.start_on_boot,
         }
     }
@@ -1755,6 +1802,12 @@ impl TryFrom<StreamManifestHumanWire> for StreamManifest {
             (Some(decoder), None, None, None) => decoder,
             (Some(_), _, _, _) => return Err("stream manifest may not mix `decoder` with legacy `decoder_enabled`, `decoder_id`, or `decoder_settings` fields".to_string()),
             (None, enabled, id, settings) => RequestedDecoderConfig::from_legacy(enabled, id, settings)?,
+        };
+        let recording_mode = match (value.recording_mode, value.shadow_recorder_enabled) {
+            (Some(recording_mode), None) => recording_mode,
+            (Some(_), Some(_)) => return Err("stream manifest may not mix `recording_mode` with legacy `shadow_recorder_enabled`".to_string()),
+            (None, Some(enabled)) => StreamRecordingMode::from_legacy_shadow_recorder(enabled, &encoder),
+            (None, None) => default_recording_mode(),
         };
         let pipeline_enabled = canonical_requested_pipeline_enabled(
             value.pipeline_enabled,
@@ -1785,7 +1838,7 @@ impl TryFrom<StreamManifestHumanWire> for StreamManifest {
             encoder,
             decoder,
             preview_jpeg_quality,
-            shadow_recorder_enabled: value.shadow_recorder_enabled,
+            recording_mode,
             start_on_boot: value.start_on_boot,
         })
     }
@@ -1817,7 +1870,8 @@ impl From<StreamManifest> for StreamManifestHumanWire {
             decoder_id: None,
             decoder_settings: None,
             preview_jpeg_quality: Some(value.preview_jpeg_quality),
-            shadow_recorder_enabled: value.shadow_recorder_enabled,
+            recording_mode: Some(value.recording_mode),
+            shadow_recorder_enabled: None,
             start_on_boot: value.start_on_boot,
         }
     }
@@ -1922,7 +1976,7 @@ impl StreamManifest {
             encoder,
             decoder,
             preview_jpeg_quality,
-            shadow_recorder_enabled: requested.shadow_recorder_enabled,
+            recording_mode: requested.recording_mode,
             start_on_boot: requested.start_on_boot,
         }
     }
@@ -1952,7 +2006,7 @@ impl ResolvedStreamConfig {
             encoder: if self.encoder.enabled { RequestedEncoderConfig::enabled(self.encoder.codec_id.clone(), self.encoder.settings.clone()) } else { RequestedEncoderConfig::disabled() },
             decoder: if self.decoder.enabled { RequestedDecoderConfig::enabled(self.decoder.codec_id.clone(), self.decoder.settings.clone()) } else { RequestedDecoderConfig::disabled() },
             preview_jpeg_quality: self.preview_jpeg_quality,
-            shadow_recorder_enabled: self.shadow_recorder_enabled,
+            recording_mode: self.recording_mode,
             start_on_boot: self.start_on_boot,
         }
     }
@@ -2034,8 +2088,16 @@ pub fn default_requested_preview_jpeg_quality_disabled() -> u8 {
     DEFAULT_STREAM_PREVIEW_JPEG_QUALITY
 }
 
+pub fn default_shadow_recording_codec() -> RecordingCodec {
+    RecordingCodec::H264
+}
+
+pub fn default_recording_mode() -> StreamRecordingMode {
+    StreamRecordingMode::Disabled
+}
+
 pub fn default_shadow_recorder_enabled() -> bool {
-    false
+    default_recording_mode().is_shadow_buffer()
 }
 
 pub fn default_start_on_boot() -> bool {
@@ -2052,6 +2114,22 @@ pub fn default_decoder_enabled() -> bool {
 
 fn max_host_buffer() -> usize {
     env::var("HELIOS_HOST_BUFFER_MAX").ok().and_then(|v| v.parse().ok()).filter(|v| *v > 0).unwrap_or(64)
+}
+
+fn legacy_shadow_recording_codec_for_encoder(encoder_id: &str) -> Option<RecordingCodec> {
+    let encoder_id = encoder_id.trim();
+    if encoder_id.is_empty() {
+        return None;
+    }
+
+    let lowered = encoder_id.to_ascii_lowercase();
+    let h264 = encoder_id.eq_ignore_ascii_case("h264") || encoder_id.eq_ignore_ascii_case("avc") || lowered.contains("h264") || lowered.contains("avc");
+    let h265 = encoder_id.eq_ignore_ascii_case("h265") || encoder_id.eq_ignore_ascii_case("hevc") || lowered.contains("h265") || lowered.contains("hevc");
+    match (h264, h265) {
+        (true, false) => Some(RecordingCodec::H264),
+        (false, true) => Some(RecordingCodec::H265),
+        _ => None,
+    }
 }
 
 fn manifest_prefers_default_stream_encoder(manifest: &StreamManifest) -> bool {

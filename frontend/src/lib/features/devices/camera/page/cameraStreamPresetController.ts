@@ -3,6 +3,7 @@ import type { CodecInfo, Interval, Mode, ProbedBackend, ProbedDevice, StreamInfo
 import { OpenAPI, getHttpClientBase } from '$lib/api/httpClient';
 import { extractError } from '$lib/api/errors';
 import { defaultPreviewJpegQualityForEncoder, type StreamCreationDefaults } from '$lib/api/streamDefaults';
+import { recordingModeFromToggle } from '$lib/api/streamRecordingMode';
 import type { PipelinesApi } from '$lib/api/pipelinesApi';
 import type { StreamsApi } from '$lib/api/streamsApi';
 import { normalizeGridSlots } from './cameraPipelineState';
@@ -371,7 +372,7 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
           : {
               state: 'disabled'
             },
-        shadow_recorder_enabled: shadowRecorderEnabled,
+        recording_mode: recordingModeFromToggle(shadowRecorderEnabled, encoderId),
         host_buffer: state.hostBuffer ?? streamDefaults.defaultHostBuffer,
         preview_jpeg_quality:
           state.previewJpegQuality ??

@@ -257,7 +257,7 @@ pub(crate) async fn start_media_replay_stream(State(state): State<AppState>, Jso
         encoder: RequestedEncoderConfig::default(),
         decoder: RequestedDecoderConfig::default(),
         preview_jpeg_quality: 30,
-        shadow_recorder_enabled: false,
+        recording_mode: helios_engine::ipc::default_recording_mode(),
         start_on_boot: false,
     };
 

@@ -3,6 +3,7 @@
   import { toaster } from '$lib';
   import { apiFetch } from '$lib/api/core/http';
   import { resolveStreamCreationDefaults } from '$lib/api/streamDefaults';
+  import { normalizeRecordingMode } from '$lib/api/streamRecordingMode';
   import { withCurrentStreamManifestSchema } from '$lib/api/streamSchema';
   import { ApiError, OpenAPI, PeersService, PeripheralsService } from '$lib/ts-bindings/http/client';
   import { connectDevicesUpdatesStream } from '$lib/api/devicesUpdates';
@@ -1021,7 +1022,7 @@
             },
         host_buffer: Number.isFinite(hostBuffer) && hostBuffer > 0 ? hostBuffer : streamDefaults.defaultHostBuffer,
         preview_jpeg_quality: streamDefaults.defaultPreviewJpegQuality,
-        shadow_recorder_enabled: streamDefaults.defaultShadowRecorderEnabled,
+        recording_mode: normalizeRecordingMode(streamDefaults.defaultRecordingMode),
         start_on_boot: streamDefaults.defaultStartOnBoot
       });
 
