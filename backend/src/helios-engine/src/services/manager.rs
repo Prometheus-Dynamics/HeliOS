@@ -55,6 +55,13 @@ const DEFAULT_RECORDING_FRAME_QUEUE_SIZE: usize = 48;
 
 static SHADOW_DATA_ROOT: OnceLock<PathBuf> = OnceLock::new();
 
+#[path = "manager/policy.rs"]
+mod policy;
+#[path = "manager/recording.rs"]
+mod recording;
+#[path = "manager/runtime.rs"]
+mod runtime;
+
 fn thread_stack_size_bytes(var: &str, default: usize) -> usize {
     const MIN: usize = 256 * 1024;
     const MAX: usize = 8 * 1024 * 1024;
@@ -444,269 +451,15 @@ pub struct StreamManager {
 
 impl StreamManager {
     pub fn new() -> Self {
-        // Best-effort cleanup of orphaned shared-memory preview buffers from prior crashes/restarts.
-        // These live on tmpfs and can permanently inflate RSS if left behind.
-        cleanup_all_stream_files();
-        // Clean up recording staging dirs that can be left behind if the engine crashes mid-recording.
-        cleanup_recording_stage_root_sync();
-        Self {
-            streams: Arc::new(RwLock::new(HashMap::new())),
-            starting: Arc::new(AsyncMutex::new(HashSet::new())),
-            recordings: Arc::new(AsyncMutex::new(HashMap::new())),
-            shadow_recorders: Arc::new(AsyncMutex::new(HashMap::new())),
-        }
+        runtime::new_manager()
     }
 
     pub async fn start_stream(&self, manifest: ResolvedStreamConfig) -> Result<(Uuid, CaptureDescriptor)> {
-        let mut manifest = manifest;
-        let stream_id = manifest.identity.id.unwrap_or_else(Uuid::new_v4);
-        manifest.identity.id = Some(stream_id);
-
-        if let Some(recording_codec) = manifest.recording_mode.shadow_buffer_codec() {
-            if !shadow_recorder_feature_enabled() {
-                return Err(Error::InvalidState("shadow-buffer recording mode requires HELIOS_ENABLE_SHADOW_RECORDER"));
-            }
-            if !manifest.encoder.enabled {
-                return Err(Error::InvalidState("shadow-buffer recording mode requires encoder enabled"));
-            }
-            let encoder_id = manifest.encoder_id().unwrap_or_default().trim();
-            if encoder_id.is_empty() {
-                return Err(Error::InvalidState("shadow-buffer recording mode requires an encoder_id"));
-            }
-            if !encoder_matches(recording_codec, encoder_id) {
-                return Err(Error::InvalidState("shadow-buffer recording mode codec does not match the selected encoder"));
-            }
-
-            // Shadow-based capture/recording needs frequent keyframes so short windows (5s, 30s)
-            // remain decodable and ffmpeg can remux without producing empty MP4s.
-            let want_fps = infer_recording_fps(&manifest).unwrap_or(30.0).round().clamp(1.0, 240.0) as u32;
-            let settings = manifest
-                .encoder
-                .settings
-                .get_or_insert_with(|| {
-                    crate::ipc::empty_encoder_settings_for_selector(manifest.encoder.codec_id.as_deref()).unwrap_or(match recording_codec {
-                        RecordingCodec::H264 => crate::ipc::EncoderSettings::H264 {
-                            bitrate: None,
-                            gop: None,
-                            framerate: None,
-                            thread_count: None,
-                            output_resolution: None,
-                        },
-                        RecordingCodec::H265 => crate::ipc::EncoderSettings::H265 {
-                            bitrate: None,
-                            gop: None,
-                            framerate: None,
-                            thread_count: None,
-                            output_resolution: None,
-                        },
-                    })
-                });
-            if let crate::ipc::EncoderSettings::FfmpegMjpeg { gop, framerate, .. }
-            | crate::ipc::EncoderSettings::H264 { gop, framerate, .. }
-            | crate::ipc::EncoderSettings::H265 { gop, framerate, .. } = settings
-            {
-                if framerate.is_none() {
-                    *framerate = Some(crate::ipc::FrameRate { numerator: want_fps, denominator: 1 });
-                }
-                if gop.is_none() {
-                    // 1-second GOP by default (in frames).
-                    *gop = Some(want_fps as i32);
-                }
-            }
-        }
-        {
-            let streams = self.streams.read().await;
-            if streams.contains_key(&stream_id) {
-                return Err(Error::Conflict("stream already exists"));
-            }
-        }
-        if let Some(requested_alias) = normalize_alias(manifest.identity.alias.as_deref()) {
-            let entries: Vec<Arc<StreamContext>> = {
-                let streams = self.streams.read().await;
-                streams.values().cloned().collect()
-            };
-            for ctx in entries {
-                let existing_alias = normalize_alias(ctx.manifest.read().await.identity.alias.as_deref());
-                if existing_alias.as_deref() == Some(&requested_alias) {
-                    return Err(Error::Conflict("stream alias already exists"));
-                }
-            }
-        }
-        {
-            let mut starting = self.starting.lock().await;
-            if !starting.insert(stream_id) {
-                return Err(Error::Conflict("stream already starting"));
-            }
-        }
-
-        let streams_handle = self.streams.clone();
-        let manifest_clone = manifest.clone();
-        let start_res = tokio::task::spawn_blocking({
-            let manifest = manifest.clone();
-            move || {
-                let host_buffer = manifest.host_buffer();
-                let graph = crate::graph::build_graph_handle_for_manifest(host_buffer, &manifest, None).map_err(|err| Error::InvalidStateOwned(format!("pipeline graph invalid: {err}")))?;
-                let shmem = match ShmemWriter::create(stream_id) {
-                    Ok(writer) => Some(writer),
-                    Err(err) => {
-                        tracing::warn!(stream_id = %stream_id, error = %err, "shmem writer init failed; preview endpoints may be unavailable");
-                        None
-                    }
-                };
-                let descriptor = descriptor_for_config_retrying(&manifest.capture).ok_or_else(|| Error::RetryableInvalidStateOwned("missing capture descriptor".to_string()))?;
-
-                let runner = StreamRunner::new(StreamRunnerConfig {
-                    capture_config: manifest.capture.clone(),
-                    graph: graph.clone(),
-                    encoder_id: manifest.encoder.codec_id.clone(),
-                    decoder_id: manifest.decoder.codec_id.clone(),
-                    encoder_settings: manifest.encoder.settings.clone(),
-                    decoder_settings: manifest.decoder.settings.clone(),
-                    preview_jpeg_quality: manifest.preview_jpeg_quality,
-                    shmem,
-                    stream_id: Some(stream_id),
-                });
-                let encoded_tx = runner.encoded_sender();
-                let managed_encoded_consumer_count = runner.managed_encoded_consumer_count_handle();
-                let managed_encoded_consumer_last_seen_ms = runner.managed_encoded_consumer_last_seen_handle();
-                let raw_tx = runner.raw_sender();
-                let (command_tx, command_rx) = sync_channel::<StreamCommand>(stream_command_queue_size());
-                let (exit_tx, exit_rx) = watch::channel(StreamExit::Running);
-                let join: JoinHandle<()> = std::thread::Builder::new()
-                    .name(format!("helios-stream-{stream_id}"))
-                    .stack_size(stream_worker_stack_size_bytes())
-                    .spawn(move || run_stream_worker(runner, command_rx, exit_tx))
-                    .map_err(|err| Error::InvalidStateOwned(format!("stream worker spawn failed: {err}")))?;
-                Ok::<_, Error>((descriptor, graph, encoded_tx, managed_encoded_consumer_count, managed_encoded_consumer_last_seen_ms, raw_tx, command_tx, exit_rx, join))
-            }
-        })
-        .await
-        .map_err(|_| Error::InvalidState("stream worker start cancelled"));
-        let (descriptor, host, encoded_tx, managed_encoded_consumer_count, managed_encoded_consumer_last_seen_ms, raw_tx, command_tx, exit_rx, join) = match start_res {
-            Ok(Ok(parts)) => parts,
-            Ok(Err(err)) => {
-                self.finish_starting(stream_id).await;
-                return Err(err);
-            }
-            Err(err) => {
-                self.finish_starting(stream_id).await;
-                return Err(err);
-            }
-        };
-        let cleanup_rx = exit_rx.clone();
-        let monitor_rx = cleanup_rx.clone();
-        let shadow_enabled = manifest_clone.recording_mode.is_shadow_buffer();
-        let stream_started_at_ms = current_time_ms();
-        let encoded_tx_for_ctx = encoded_tx.clone();
-        let raw_tx_for_ctx = raw_tx.clone();
-        let mut streams = self.streams.write().await;
-        if streams.contains_key(&stream_id) {
-            drop(streams);
-            abort_unregistered_stream_worker(stream_id, command_tx, join).await;
-            self.finish_starting(stream_id).await;
-            return Err(Error::Conflict("stream already exists"));
-        }
-        streams.insert(
-            stream_id,
-            Arc::new(StreamContext {
-                stream_started_at_ms,
-                manifest: tokio::sync::RwLock::new(manifest_clone.clone()),
-                descriptor: descriptor.clone(),
-                host: tokio::sync::RwLock::new(host),
-                calibration_mode_restore: tokio::sync::RwLock::new(None),
-                encoded_tx: encoded_tx_for_ctx,
-                managed_encoded_consumer_count,
-                managed_encoded_consumer_last_seen_ms,
-                raw_tx: raw_tx_for_ctx,
-                command_tx,
-                exit_rx,
-                cleanup_rx: AsyncMutex::new(Some(cleanup_rx)),
-                worker_join: AsyncMutex::new(Some(join)),
-            }),
-        );
-        drop(streams);
-        if shadow_enabled {
-            if let Err(err) = self.start_shadow_recorder(stream_id, &manifest_clone).await {
-                tracing::warn!(stream_id = %stream_id, error = %err, "shadow recorder start failed");
-            }
-        }
-        tracing::info!(stream_id = %stream_id, "stream registered");
-        self.finish_starting(stream_id).await;
-        tokio::spawn({
-            let streams_handle = streams_handle.clone();
-            let manager = self.clone();
-            let mut exit_rx = monitor_rx;
-            async move {
-                let _ = exit_rx.changed().await;
-                let _ = manager.stop_shadow_recorder(stream_id).await;
-                let ctx = {
-                    let mut streams = streams_handle.write().await;
-                    streams.remove(&stream_id)
-                };
-                if let Some(ctx) = ctx {
-                    let exit_state = ctx.exit_rx.borrow().clone();
-                    manager.finalize_stream_teardown(stream_id, ctx).await;
-                    if let StreamExit::Stopped(Err(err)) = exit_state {
-                        tracing::warn!(stream_id = %stream_id, error = %err, "stream worker exited with error");
-                    }
-                }
-            }
-        });
-        Ok((stream_id, descriptor))
+        runtime::start_stream(self, manifest).await
     }
 
     pub async fn stop_stream(&self, stream_id: Uuid) -> Result<()> {
-        tracing::info!(stream_id = %stream_id, "stream stop requested");
-        // Keep the stream registered until the worker has actually stopped.
-        // This avoids `/streams == []` while capture/ISP is still active.
-        let ctx = {
-            let streams = self.streams.read().await;
-            streams.get(&stream_id).cloned()
-        };
-        let Some(ctx) = ctx else {
-            return Ok(());
-        };
-        let _ = self.stop_recording(stream_id).await;
-        let _ = self.stop_shadow_recorder(stream_id).await;
-        let (tx, rx) = oneshot::channel();
-        enqueue_stream_command(&ctx.command_tx, StreamCommand::Stop { respond_to: tx })?;
-        let _ = rx.await;
-
-        let mut exit_rx = ctx.cleanup_rx.lock().await.take().unwrap_or_else(|| ctx.exit_rx.clone());
-        let stopped = tokio::time::timeout(Duration::from_secs(25), async {
-            loop {
-                if matches!(exit_rx.borrow().clone(), StreamExit::Stopped(_)) {
-                    break;
-                }
-                if exit_rx.changed().await.is_err() {
-                    break;
-                }
-            }
-        })
-        .await
-        .is_ok();
-        if !stopped {
-            tracing::warn!(stream_id = %stream_id, "stream stop did not complete within 25s");
-            return Err(Error::Timeout);
-        }
-        // Remove the stream from the manager map (if it hasn't already been removed by the exit monitor),
-        // and perform best-effort cleanup.
-        let ctx = {
-            let mut streams = self.streams.write().await;
-            streams.remove(&stream_id)
-        };
-        if let Some(ctx) = ctx {
-            self.finalize_stream_teardown(stream_id, ctx).await;
-        }
-        tracing::info!(stream_id = %stream_id, "stream stop completed");
-        Ok(())
-    }
-
-    async fn finalize_stream_teardown(&self, stream_id: Uuid, ctx: Arc<StreamContext>) {
-        cleanup_stream_files(stream_id);
-        if let Some(join) = ctx.worker_join.lock().await.take() {
-            let _ = tokio::task::spawn_blocking(move || join.join()).await;
-        }
+        runtime::stop_stream(self, stream_id).await
     }
 
     pub async fn set_control(&self, stream_id: Uuid, control_id: ControlId, value: CaptureControlValue) -> Result<()> {
@@ -755,21 +508,6 @@ impl StreamManager {
         self.send_command(stream_id, |respond_to| StreamCommand::GetMetrics { respond_to }).await
     }
 
-    async fn sample_stream_encoder_fps(&self, stream_id: Uuid) -> Option<f32> {
-        // Encoder stats require the encoder worker to have produced samples.
-        // Retry briefly so we can remux clips with "actual" fps (avoids time compression when
-        // the encoder can't keep up with the capture target_fps).
-        for _ in 0..5 {
-            if let Ok(metrics) = self.get_metrics(stream_id).await {
-                if let Some(fps) = metrics.encoder.as_ref().map(|m| m.fps as f32).filter(|v| v.is_finite() && *v > 0.0) {
-                    return Some(fps);
-                }
-            }
-            tokio::time::sleep(Duration::from_millis(200)).await;
-        }
-        None
-    }
-
     pub async fn snapshot_jpeg(&self, stream_id: Uuid, quality: u8, source: Option<RecordingSource>) -> Result<Vec<u8>> {
         let Some(source) = source else {
             return self.send_command(stream_id, move |respond_to| StreamCommand::SnapshotJpeg { quality, respond_to }).await;
@@ -799,308 +537,23 @@ impl StreamManager {
     }
 
     pub async fn start_recording(&self, stream_id: Uuid, params: StartRecordingParams) -> Result<()> {
-        let StartRecordingParams { source, output_path, container, codec, duration_ms, settings } = params;
-        let ctx = self.get_stream(stream_id).await?;
-        {
-            let recordings = self.recordings.lock().await;
-            if recordings.contains_key(&stream_id) {
-                return Err(Error::Conflict("recording already active"));
-            }
-        }
-
-        let manifest_snapshot = ctx.manifest.read().await.clone();
-        let resolved_source = resolve_recording_source(&manifest_snapshot, source.clone());
-
-        let record_path = PathBuf::from(output_path);
-        let raw_path = match container {
-            RecordingContainer::Mp4 => build_raw_path(&record_path, codec),
-            RecordingContainer::Raw => record_path.clone(),
-        };
-        let frame_ts_path = recording_frame_ts_path(&record_path);
-        let requested_fps = settings.as_ref().and_then(|s| s.fps).filter(|v| *v > 0.0).or_else(|| infer_recording_fps(&manifest_snapshot));
-        let encoder_hint = manifest_snapshot.encoder.codec_id.clone().filter(|value| !value.trim().is_empty());
-
-        let started_at_ms = current_time_ms();
-        let (stop_tx, stop_rx) = oneshot::channel();
-        let (done_tx, done_rx) = watch::channel(RecordingState::Running);
-        let session = Arc::new(AsyncMutex::new(RecordingSession { stop_tx: Some(stop_tx), done_rx, started_at_ms }));
-        {
-            let mut recordings = self.recordings.lock().await;
-            if recordings.contains_key(&stream_id) {
-                return Err(Error::Conflict("recording already active"));
-            }
-            recordings.insert(stream_id, session.clone());
-        }
-
-        // Record live start/stop sessions from the frame path by default so clip boundaries follow
-        // the same preview cadence the operator sees in UI.
-        //
-        // Encoded passthrough is opt-in for deployments that prioritize lower CPU over boundary
-        // fidelity (start can land mid-GOP).
-        let passthrough_codec = infer_recording_codec(manifest_snapshot.encoder_id());
-        let use_encoded_passthrough = recording_encoded_passthrough_enabled()
-            && matches!(&resolved_source, ResolvedRecordingSource::Multiplex)
-            && manifest_snapshot.encoder.enabled
-            && passthrough_codec.is_some()
-            && (matches!(container, RecordingContainer::Mp4) || passthrough_codec == Some(codec));
-        if use_encoded_passthrough {
-            let manager = self.clone();
-            let encoded_consumer = ManagedEncodedConsumer::new(Arc::clone(&ctx.managed_encoded_consumer_count), Arc::clone(&ctx.managed_encoded_consumer_last_seen_ms));
-            let encoded_consumer_touch = encoded_consumer.touch_handle();
-            let rx = ctx.encoded_tx.subscribe();
-            let source_codec = passthrough_codec.unwrap_or(codec);
-            let frame_ts_path = frame_ts_path.clone();
-            tokio::spawn(async move {
-                let _encoded_consumer = encoded_consumer;
-                let result = record_encoded_session(
-                    rx,
-                    stop_rx,
-                    &record_path,
-                    &raw_path,
-                    container,
-                    source_codec,
-                    codec,
-                    duration_ms,
-                    requested_fps,
-                    settings,
-                    Some(frame_ts_path),
-                    Some(encoded_consumer_touch),
-                )
-                .await;
-                let _ = done_tx.send(RecordingState::Completed(result.clone()));
-                manager.finish_recording(stream_id, result).await;
-            });
-            return Ok(());
-        }
-
-        // Shadow-backed capture for regular start/stop recordings is opt-in. Default behavior keeps
-        // clip timing tied to live frame flow.
-        let shadow_candidate = recording_shadow_start_stop_enabled()
-            && shadow_recorder_feature_enabled()
-            && manifest_snapshot.recording_mode.is_shadow_buffer()
-            && matches!(source, RecordingSource::Multiplex)
-            && manifest_snapshot.recording_mode.shadow_buffer_codec().is_some();
-        if shadow_candidate {
-            let stream_codec = manifest_snapshot.recording_mode.shadow_buffer_codec().unwrap();
-            if codec != stream_codec {
-                {
-                    let mut recordings = self.recordings.lock().await;
-                    recordings.remove(&stream_id);
-                }
-                return Err(Error::InvalidStateOwned(format!("requested codec {codec:?} does not match stream encoder ({stream_codec:?}); configure encoder_id accordingly")));
-            }
-
-            // Ensure shadow recorder is running (it may not have been started if the feature gate
-            // was enabled after the stream booted).
-            let already_running = {
-                let recorders = self.shadow_recorders.lock().await;
-                recorders.contains_key(&stream_id)
-            };
-            if !already_running {
-                if let Err(err) = self.start_shadow_recorder(stream_id, &manifest_snapshot).await {
-                    {
-                        let mut recordings = self.recordings.lock().await;
-                        recordings.remove(&stream_id);
-                    }
-                    return Err(Error::InvalidStateOwned(format!("shadow recorder start failed: {err}")));
-                }
-            }
-
-            let measured_fps = self.sample_stream_encoder_fps(stream_id).await;
-            let fps = settings.as_ref().and_then(|s| s.fps).filter(|v| *v > 0.0).or(measured_fps).or(requested_fps);
-
-            let manager = self.clone();
-            let shadow_dir = shadow_dir_for_stream(stream_id);
-            tokio::spawn(async move {
-                let result = record_shadow_segments_session(stream_id, &shadow_dir, codec, &record_path, &raw_path, container, started_at_ms, duration_ms, fps, settings, stop_rx).await;
-                let _ = done_tx.send(RecordingState::Completed(result.clone()));
-                manager.finish_recording(stream_id, result).await;
-            });
-            return Ok(());
-        }
-
-        let frame_source = match resolved_source {
-            ResolvedRecordingSource::Multiplex => {
-                let graph = ctx.host.read().await.clone();
-                RecordingFrameSource::Multiplex { rx: graph.subscribe() }
-            }
-            ResolvedRecordingSource::Raw => RecordingFrameSource::Raw { rx: ctx.raw_tx.subscribe() },
-            ResolvedRecordingSource::Pipeline { pipeline_id, output_key } => match build_recording_pipeline_graph(&manifest_snapshot, pipeline_id, output_key.as_deref()) {
-                Ok(graph) => RecordingFrameSource::Pipeline { rx: ctx.raw_tx.subscribe(), graph },
-                Err(err) => {
-                    tracing::warn!(
-                        stream_id = %stream_id,
-                        pipeline_id = %pipeline_id,
-                        error = %err,
-                        "recording pipeline invalid; falling back to multiplex"
-                    );
-                    let graph = ctx.host.read().await.clone();
-                    RecordingFrameSource::Multiplex { rx: graph.subscribe() }
-                }
-            },
-        };
-        let manager = self.clone();
-        tokio::spawn(async move {
-            let params =
-                RecordingFrameParams { output_path: &record_path, raw_path: &raw_path, container, codec, duration_ms, fps: requested_fps, settings, encoder_hint, frame_ts_path: Some(frame_ts_path) };
-            let result = record_frame_stream(frame_source, stop_rx, params).await;
-            let _ = done_tx.send(RecordingState::Completed(result.clone()));
-            manager.finish_recording(stream_id, result).await;
-        });
-
-        Ok(())
+        recording::start_recording(self, stream_id, params).await
     }
 
     pub async fn stop_recording(&self, stream_id: Uuid) -> Result<()> {
-        let session = {
-            let recordings = self.recordings.lock().await;
-            recordings.get(&stream_id).cloned()
-        };
-        let Some(session) = session else {
-            return Ok(());
-        };
-
-        let (stop_tx, mut done_rx) = {
-            let mut session = session.lock().await;
-            (session.stop_tx.take(), session.done_rx.clone())
-        };
-        if let Some(stop_tx) = stop_tx {
-            let _ = stop_tx.send(());
-        }
-
-        if matches!(*done_rx.borrow(), RecordingState::Completed(_)) {
-            return recording_state_to_result(done_rx.borrow().clone());
-        }
-
-        match tokio::time::timeout(RECORDING_STOP_TIMEOUT, done_rx.changed()).await {
-            Ok(Ok(())) => recording_state_to_result(done_rx.borrow().clone()),
-            Ok(Err(_)) => Err(Error::InvalidState("recording status channel closed")),
-            Err(_) => Err(Error::Timeout),
-        }
+        recording::stop_recording(self, stream_id).await
     }
 
     pub async fn capture_shadow_recording(&self, stream_id: Uuid, output_path: String, container: RecordingContainer, window_ms: u64) -> Result<()> {
-        if !shadow_recorder_feature_enabled() {
-            return Err(Error::InvalidState("shadow recorder feature is disabled"));
-        }
-        let ctx = self.get_stream(stream_id).await?;
-        let manifest_snapshot = ctx.manifest.read().await.clone();
-        let Some(configured_codec) = manifest_snapshot.recording_mode.shadow_buffer_codec() else {
-            return Err(Error::InvalidState("shadow recorder disabled"));
-        };
-        let (requested_codec, raw_format) = {
-            let recorders = self.shadow_recorders.lock().await;
-            recorders.get(&stream_id).map(|handle| {
-                let raw = RawRecordingFormat::from_u8(handle.raw_format.load(Ordering::Acquire));
-                (handle.requested_codec, Some(raw))
-            })
-        }
-        .unwrap_or((configured_codec, None));
-        let raw_format = raw_format.unwrap_or_else(|| RawRecordingFormat::from_codec(requested_codec));
-        let window_ms = normalize_shadow_window_ms(window_ms);
-        if window_ms == 0 {
-            return Err(Error::InvalidState("shadow capture window must be > 0"));
-        }
-        // Pre-roll improves mux validity when the requested window begins mid-GOP (ffmpeg will
-        // otherwise drop non-decodable leading frames until an IDR).
-        let preroll_ms = shadow_segment_ms().max(1_000);
-        let capture_ms = window_ms.saturating_add(preroll_ms).min(shadow_window_ms());
-
-        let shadow_dir = shadow_dir_for_stream(stream_id);
-        if fs::metadata(&shadow_dir).await.is_err() {
-            return Err(Error::NotFound("shadow recorder data not found"));
-        }
-
-        let output_path = PathBuf::from(output_path);
-        if let Some(parent) = output_path.parent() {
-            fs::create_dir_all(parent).await.map_err(|err| Error::InvalidStateOwned(format!("shadow output dir create failed: {err}")))?;
-        }
-
-        let raw_path = match container {
-            RecordingContainer::Mp4 => build_raw_path(&output_path, requested_codec),
-            RecordingContainer::Raw => output_path.clone(),
-        };
-
-        capture_shadow_segments(&shadow_dir, &raw_path, requested_codec, capture_ms).await.map_err(Error::InvalidStateOwned)?;
-
-        if matches!(container, RecordingContainer::Mp4) {
-            let forced_fps = probe_raw_frames(&raw_path, raw_format).await.ok().map(|frames| {
-                let secs = (capture_ms as f32 / 1000.0).max(0.001);
-                (frames as f32 / secs).clamp(1.0, 240.0)
-            });
-            let fps = forced_fps.or(self.sample_stream_encoder_fps(stream_id).await).or_else(|| infer_recording_fps(&manifest_snapshot));
-
-            let pretrim = pretrim_output_path(&output_path);
-            let finalize_res = finalize_recording_mp4(raw_path.clone(), pretrim.clone(), raw_format, requested_codec, fps, None).await;
-            if let Err(err) = finalize_res {
-                let _ = fs::remove_file(&pretrim).await;
-                return Err(Error::InvalidStateOwned(err));
-            }
-            let trim_res = trim_mp4_to_last_window(&pretrim, &output_path, window_ms, requested_codec).await;
-            let _ = fs::remove_file(&pretrim).await;
-            if let Err(err) = trim_res {
-                let _ = fs::remove_file(&output_path).await;
-                return Err(Error::InvalidStateOwned(err));
-            }
-        }
-
-        Ok(())
+        recording::capture_shadow_recording(self, stream_id, output_path, container, window_ms).await
     }
 
     async fn start_shadow_recorder(&self, stream_id: Uuid, manifest: &ResolvedStreamConfig) -> Result<()> {
-        let ctx = self.get_stream(stream_id).await?;
-        if !manifest.encoder.enabled {
-            return Err(Error::InvalidState("shadow recorder requires encoder enabled"));
-        }
-        let preferred_codec = manifest.recording_mode.shadow_buffer_codec().ok_or(Error::InvalidState("shadow recorder requires shadow-buffer recording mode"))?;
-        let raw_format = RawRecordingFormat::from_codec(preferred_codec);
-        let shadow_dir = shadow_dir_for_stream(stream_id);
-        let window_ms = shadow_window_ms();
-        let segment_ms = shadow_segment_ms();
-        let format_tracker = Arc::new(AtomicU8::new(raw_format.to_u8()));
-        let tracker_for_worker = Arc::clone(&format_tracker);
-        let (stop_tx, stop_rx) = oneshot::channel();
-        let encoded_consumer = ManagedEncodedConsumer::new(Arc::clone(&ctx.managed_encoded_consumer_count), Arc::clone(&ctx.managed_encoded_consumer_last_seen_ms));
-        let encoded_consumer_touch = encoded_consumer.touch_handle();
-        let mut encoded_rx = ctx.encoded_tx.subscribe();
-        let join = tokio::spawn(async move {
-            let _encoded_consumer = encoded_consumer;
-            let worker = match ShadowRecorderWorker::start(ShadowRecorderConfig { shadow_dir: shadow_dir.clone(), codec: preferred_codec, segment_ms, window_ms, format_tracker: tracker_for_worker }) {
-                Ok(worker) => worker,
-                Err(err) => {
-                    tracing::warn!(stream_id = %stream_id, error = %err, "shadow recorder worker start failed");
-                    return;
-                }
-            };
-            if let Err(err) = run_shadow_recorder_stream(&mut encoded_rx, worker, stop_rx, Some(encoded_consumer_touch)).await {
-                tracing::warn!(stream_id = %stream_id, error = %err, "shadow recorder stopped with error");
-            }
-        });
-
-        let mut recorders = self.shadow_recorders.lock().await;
-        if recorders.contains_key(&stream_id) {
-            join.abort();
-            return Err(Error::Conflict("shadow recorder already active"));
-        }
-        recorders.insert(stream_id, ShadowRecorderHandle { stop_tx: Some(stop_tx), join, requested_codec: preferred_codec, raw_format: format_tracker });
-        Ok(())
+        recording::start_shadow_recorder(self, stream_id, manifest).await
     }
 
     async fn stop_shadow_recorder(&self, stream_id: Uuid) -> Result<()> {
-        let handle = {
-            let mut recorders = self.shadow_recorders.lock().await;
-            recorders.remove(&stream_id)
-        };
-        let Some(mut handle) = handle else {
-            return Ok(());
-        };
-        if let Some(stop_tx) = handle.stop_tx.take() {
-            let _ = stop_tx.send(());
-        }
-        match tokio::time::timeout(SHADOW_STOP_TIMEOUT, handle.join).await {
-            Ok(_) => Ok(()),
-            Err(_) => Err(Error::Timeout),
-        }
+        recording::stop_shadow_recorder(self, stream_id).await
     }
 
     pub async fn set_codecs(&self, stream_id: Uuid, decoder_id: Option<String>, encoder_id: Option<String>) -> Result<()> {
@@ -2028,198 +1481,36 @@ fn current_time_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|value| value.as_millis() as u64).unwrap_or(0)
 }
 
-fn infer_recording_fps(manifest: &ResolvedStreamConfig) -> Option<f32> {
-    if let Some(settings) = manifest.encoder_settings() {
-        if let Some(rate) = settings.framerate() {
-            if rate.denominator > 0 {
-                return Some(rate.numerator as f32 / rate.denominator as f32);
-            }
-        }
-    }
-    if let Some(fps) = manifest.capture.target_fps {
-        return Some(fps as f32);
-    }
-    if let Some(interval) = manifest.capture.interval {
-        return Some(interval.fps());
-    }
-    manifest.capture.mode.interval.map(|interval| interval.fps())
-}
-
-fn infer_recording_codec(encoder_id: Option<&str>) -> Option<RecordingCodec> {
-    let encoder_id = encoder_id?.trim();
-    if encoder_id.is_empty() {
-        return None;
-    }
-    let h264 = encoder_matches(RecordingCodec::H264, encoder_id);
-    let h265 = encoder_matches(RecordingCodec::H265, encoder_id);
-    match (h264, h265) {
-        (true, false) => Some(RecordingCodec::H264),
-        (false, true) => Some(RecordingCodec::H265),
-        // Ambiguous selector (e.g. impl names like "ffmpeg" that can produce multiple codecs).
-        _ => None,
-    }
-}
-
-fn encoder_matches(codec: RecordingCodec, encoder_id: &str) -> bool {
-    let targets: &[&str] = match codec {
-        RecordingCodec::H264 => &["h264", "avc"],
-        RecordingCodec::H265 => &["h265", "hevc"],
-    };
-    let encoder_id = encoder_id.trim();
-    if encoder_id.is_empty() {
-        return false;
-    }
-    if targets.iter().any(|t| encoder_id.eq_ignore_ascii_case(t)) {
-        return true;
-    }
-    let lowered = encoder_id.to_ascii_lowercase();
-    if targets.iter().any(|t| lowered.contains(t)) {
-        return true;
-    }
-    let entries = CodecRegistry::list_enabled_encoders().ok();
-    if let Some(entries) = entries {
-        let mut matched_names = std::collections::BTreeSet::new();
-        for (_, list) in entries {
-            for desc in list {
-                if desc.kind != CodecKind::Encoder {
-                    continue;
-                }
-                if desc.impl_name.eq_ignore_ascii_case(encoder_id) {
-                    matched_names.insert(desc.name.to_ascii_lowercase());
-                }
-            }
-        }
-        if matched_names.len() == 1 && targets.iter().any(|t| matched_names.contains(*t)) {
-            return true;
-        }
-    }
-    false
-}
-
 fn shadow_window_ms() -> u64 {
-    let requested = std::env::var("HELIOS_SHADOW_WINDOW_MS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(SHADOW_WINDOW_DEFAULT_MS);
-    requested.clamp(SHADOW_WINDOW_MIN_MS, SHADOW_WINDOW_MAX_MS)
+    policy::shadow_window_ms()
 }
 
 fn shadow_segment_ms() -> u64 {
-    let requested = std::env::var("HELIOS_SHADOW_SEGMENT_MS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(SHADOW_SEGMENT_DEFAULT_MS);
-    let clamped = requested.clamp(SHADOW_SEGMENT_MIN_MS, SHADOW_SEGMENT_MAX_MS);
-    clamped.min(shadow_window_ms())
+    policy::shadow_segment_ms()
 }
 
 fn shadow_flush_interval_ms() -> u64 {
-    std::env::var("HELIOS_SHADOW_FLUSH_MS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(1_000).clamp(100, 5_000)
+    policy::shadow_flush_interval_ms()
 }
 
 fn shadow_writer_buffer_bytes() -> usize {
-    std::env::var("HELIOS_SHADOW_WRITER_BYTES").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(1 << 20).clamp(64 << 10, 8 << 20)
+    policy::shadow_writer_buffer_bytes()
 }
 
 fn shadow_config_scan_interval_ms() -> u64 {
-    std::env::var("HELIOS_SHADOW_CONFIG_SCAN_MS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(1_000).clamp(100, 10_000)
+    policy::shadow_config_scan_interval_ms()
 }
 
 fn recording_stop_grace_ms() -> u64 {
-    std::env::var("HELIOS_RECORDING_STOP_GRACE_MS")
-        .ok()
-        .and_then(|v| v.trim().parse::<u64>().ok())
-        .unwrap_or(RECORDING_STOP_GRACE_DEFAULT_MS)
-        .clamp(RECORDING_STOP_GRACE_MIN_MS, RECORDING_STOP_GRACE_MAX_MS)
+    policy::recording_stop_grace_ms()
 }
 
 fn recording_frame_queue_size() -> usize {
-    std::env::var(ENV_RECORDING_FRAME_QUEUE_SIZE).ok().and_then(|v| v.trim().parse::<usize>().ok()).unwrap_or(DEFAULT_RECORDING_FRAME_QUEUE_SIZE).clamp(1, 256)
+    policy::recording_frame_queue_size()
 }
 
 fn keep_raw_on_record_fail() -> bool {
-    static VALUE: OnceLock<bool> = OnceLock::new();
-    *VALUE.get_or_init(|| {
-        let raw = std::env::var("HELIOS_KEEP_RAW_ON_RECORD_FAIL").ok().unwrap_or_default();
-        let v = raw.trim().to_ascii_lowercase();
-        matches!(v.as_str(), "1" | "true" | "yes" | "y" | "on" | "enabled")
-    })
-}
-
-fn normalize_shadow_window_ms(requested: u64) -> u64 {
-    let base = shadow_window_ms();
-    if requested == 0 {
-        return base;
-    }
-    requested.clamp(SHADOW_WINDOW_MIN_MS, base)
-}
-
-fn shadow_data_root() -> PathBuf {
-    SHADOW_DATA_ROOT
-        .get_or_init(|| {
-            if let Ok(dir) = std::env::var("HELIOS_SHADOW_RECORD_DIR") {
-                return PathBuf::from(dir);
-            }
-            if let Ok(dir) = std::env::var("HELIOS_API_DATA_DIR") {
-                return PathBuf::from(dir);
-            }
-            let candidates = [PathBuf::from("/data/helios/api"), PathBuf::from("/var/lib/helios/api"), std::env::temp_dir().join("helios-api")];
-            for candidate in candidates {
-                if candidate.is_dir() || std::fs::create_dir_all(&candidate).is_ok() {
-                    return candidate;
-                }
-            }
-            std::env::temp_dir().join("helios-api")
-        })
-        .clone()
-}
-
-fn env_flag_enabled(var: &str, default_value: bool) -> bool {
-    let raw = match std::env::var(var) {
-        Ok(value) => value,
-        Err(_) => return default_value,
-    };
-    let value = raw.trim().to_ascii_lowercase();
-    if value.is_empty() {
-        return default_value;
-    }
-    matches!(value.as_str(), "1" | "true" | "yes" | "y" | "on" | "enabled")
-}
-
-fn shadow_recorder_feature_enabled() -> bool {
-    static VALUE: OnceLock<bool> = OnceLock::new();
-    *VALUE.get_or_init(|| env_flag_enabled("HELIOS_ENABLE_SHADOW_RECORDER", true))
-}
-
-fn recording_encoded_passthrough_enabled() -> bool {
-    static VALUE: OnceLock<bool> = OnceLock::new();
-    *VALUE.get_or_init(|| env_flag_enabled("HELIOS_RECORDING_USE_ENCODED_PASSTHROUGH", false))
-}
-
-fn recording_shadow_start_stop_enabled() -> bool {
-    static VALUE: OnceLock<bool> = OnceLock::new();
-    *VALUE.get_or_init(|| env_flag_enabled("HELIOS_RECORDING_USE_SHADOW_START_STOP", false))
-}
-
-fn shadow_dir_for_stream(stream_id: Uuid) -> PathBuf {
-    shadow_data_root().join("media").join(".shadow").join(stream_id.to_string())
-}
-
-fn recording_stage_root() -> PathBuf {
-    shadow_data_root().join("media").join(".recordings")
-}
-
-fn cleanup_recording_stage_root_sync() {
-    let root = recording_stage_root();
-    if std::fs::metadata(&root).is_err() {
-        return;
-    }
-    let entries = match std::fs::read_dir(&root) {
-        Ok(v) => v,
-        Err(_) => return,
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            let _ = std::fs::remove_dir_all(&path);
-        } else {
-            let _ = std::fs::remove_file(&path);
-        }
-    }
+    policy::keep_raw_on_record_fail()
 }
 
 fn parse_shadow_segment_timestamp(name: &str, ext: &str) -> Option<u64> {
