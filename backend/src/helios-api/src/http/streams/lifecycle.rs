@@ -778,7 +778,8 @@ mod tests {
     use helios_engine::capture::{BackendHandle, BackendKind, CaptureConfig, ModeId};
     use helios_engine::identity::DeviceIdentity;
     use helios_engine::ipc::{
-        StreamCaptureRuntimeState, StreamCaptureState, StreamCodecChainRuntimeState, StreamDemandRuntimeState, StreamPipelineRuntimeState, StreamRecordingRuntimeState, StreamRuntimeState,
+        StreamCaptureRuntimeState, StreamCaptureState, StreamCodecChainRuntimeState, StreamDemandPipelineRuntimeState, StreamDemandRuntimeState, StreamGraphDemandRuntimeState,
+        StreamPipelineRuntimeState, StreamRecordingDemandRuntimeState, StreamRecordingRuntimeState, StreamRuntimeState, StreamViewerDemandRuntimeState,
     };
     use helios_engine::stream::StreamFrameDemandMetrics;
     use std::collections::BTreeMap;
@@ -897,6 +898,19 @@ mod tests {
                     encoder_demand_active: true,
                     encoder_worker_running: true,
                 },
+                viewers: StreamViewerDemandRuntimeState { raw_receiver_count: 1, host_receiver_count: 2, preview_viewer_active: true },
+                graph: StreamGraphDemandRuntimeState { output_sample_pending: false, has_image_output: true, has_executor: false, image_output_active: true, execution_active: false },
+                recording: StreamRecordingDemandRuntimeState { recording_session_active: true, shadow_recorder_active: false },
+                pipeline: StreamDemandPipelineRuntimeState {
+                    decoded_image_active: true,
+                    encoded_output_active: true,
+                    preview_transport_active: true,
+                    graph_image_output_active: true,
+                    graph_execution_active: false,
+                    encoded_passthrough_possible: false,
+                    encoded_passthrough_active: false,
+                    live_active: true,
+                },
                 live_active: true,
             },
             recording: StreamRecordingRuntimeState { state: helios_engine::ipc::StreamRecordingState::Active, started_at_ms: Some(77) },
@@ -930,6 +944,8 @@ mod tests {
         assert_eq!(inspect.capture.as_ref().and_then(|capture| capture.capture_fourcc.as_deref()), Some("YUYV"));
         assert_eq!(inspect.codec_chain.as_ref().and_then(|codec| codec.encoder_impl.as_deref()), Some("turbojpeg"));
         assert!(inspect.consumer_demand.as_ref().is_some_and(|demand| demand.live_active));
+        assert!(inspect.consumer_demand.as_ref().is_some_and(|demand| demand.recording.recording_session_active));
+        assert!(inspect.consumer_demand.as_ref().is_some_and(|demand| demand.pipeline.encoded_output_active));
         assert_eq!(inspect.recording.as_ref().and_then(|recording| recording.started_at_ms), Some(77));
         assert_eq!(inspect.pipeline.as_ref().and_then(|pipeline| pipeline.active_output_key.as_deref()), Some("raw"));
     }

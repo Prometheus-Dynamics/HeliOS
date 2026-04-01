@@ -22,7 +22,7 @@ use tokio::sync::RwLock;
 use tokio::time::{sleep_until, timeout, Instant};
 use uuid::Uuid;
 
-use crate::capture::{BackendKind, CaptureControlInfo, CaptureControlValue, CaptureDescriptor, ControlAssignment, descriptor_for_config_retrying};
+use crate::capture::{descriptor_for_config_retrying, BackendKind, CaptureControlInfo, CaptureControlValue, CaptureDescriptor, ControlAssignment};
 use crate::error::{Error, Result};
 use crate::ipc::{ControlId, JsonWire, RecordingCodec, RecordingContainer, RecordingSource, ResolvedStreamConfig};
 use crate::stream::{cleanup_all_stream_files, cleanup_stream_files, EncodedFrame, ShmemWriter, StreamMetrics, StreamRunner, StreamRunnerConfig};
@@ -1265,6 +1265,10 @@ impl StreamManager {
             }
             started
         };
+        let shadow_recorders_active = {
+            let recorders = self.shadow_recorders.lock().await;
+            recorders.keys().copied().collect::<HashSet<_>>()
+        };
         let mut out = Vec::with_capacity(entries.len());
         for (id, ctx) in entries {
             let mut manifest = ctx.manifest.read().await.clone();
@@ -1291,6 +1295,8 @@ impl StreamManager {
             runtime.pipeline.disabled = graph_state.disabled;
             runtime.pipeline.disabled_since_ms = graph_state.disabled_since_ms;
             runtime.pipeline.disabled_reason = graph_state.disabled_reason;
+            runtime.demand.recording.recording_session_active = recording_started.contains_key(&id);
+            runtime.demand.recording.shadow_recorder_active = shadow_recorders_active.contains(&id);
             if let Some(started_at) = recording_started.get(&id).copied() {
                 runtime.recording.state = crate::ipc::StreamRecordingState::Active;
                 runtime.recording.started_at_ms = Some(started_at);
@@ -3728,7 +3734,7 @@ fn upsert_control_assignment(controls: &mut Vec<ControlAssignment>, id: u32, val
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ipc::{CURRENT_STREAM_CONFIG_SCHEMA_VERSION, RequestedDecoderConfig, RequestedEncoderConfig, StreamManifest};
+    use crate::ipc::{RequestedDecoderConfig, RequestedEncoderConfig, StreamManifest, CURRENT_STREAM_CONFIG_SCHEMA_VERSION};
     use serde_json::json;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
@@ -3844,12 +3850,7 @@ mod tests {
     #[test]
     fn default_encoder_settings_use_480p_for_1080p_capture() {
         let manifest = sample_manifest_for_encoder_defaults(1920, 1080);
-        let output = manifest
-            .encoder
-            .settings
-            .as_ref()
-            .and_then(|settings| settings.output_resolution())
-            .expect("output resolution");
+        let output = manifest.encoder.settings.as_ref().and_then(|settings| settings.output_resolution()).expect("output resolution");
         assert_eq!(output.width, 854);
         assert_eq!(output.height, 480);
     }
@@ -3857,12 +3858,7 @@ mod tests {
     #[test]
     fn default_encoder_settings_preserve_aspect_for_16_by_10_capture() {
         let manifest = sample_manifest_for_encoder_defaults(1280, 800);
-        let output = manifest
-            .encoder
-            .settings
-            .as_ref()
-            .and_then(|settings| settings.output_resolution())
-            .expect("output resolution");
+        let output = manifest.encoder.settings.as_ref().and_then(|settings| settings.output_resolution()).expect("output resolution");
         assert_eq!(output.width, 768);
         assert_eq!(output.height, 480);
     }

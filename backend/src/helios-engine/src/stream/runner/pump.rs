@@ -31,33 +31,6 @@ impl StreamRunner {
     #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
     fn trim_process_heap() {}
 
-    fn update_last_frame_demand(
-        &self,
-        raw_receiver_count: u64,
-        host_receiver_count: u64,
-        preview_demand_active: bool,
-        encode_demand_active: bool,
-        graph_sample_demand_active: bool,
-        needs_decoded_image: bool,
-        graph_has_image_output: bool,
-        graph_has_executor: bool,
-    ) {
-        let mut snapshot = match self.last_frame_demand.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
-        *snapshot = super::LastFrameDemandSnapshot {
-            raw_receiver_count,
-            host_receiver_count,
-            preview_demand_active,
-            encode_demand_active,
-            graph_sample_demand_active,
-            needs_decoded_image,
-            graph_has_image_output,
-            graph_has_executor,
-        };
-    }
-
     fn idle_compaction_interval() -> Duration {
         static VALUE_MS: AtomicU64 = AtomicU64::new(u64::MAX);
         let cached = VALUE_MS.load(Ordering::Relaxed);
@@ -255,6 +228,13 @@ impl StreamRunner {
 
                 let capture_fourcc = frame.meta().format.code;
                 let can_passthrough_encoded = self.can_passthrough_encoded_capture(capture_fourcc);
+                let graph_has_image_output = self.graph.has_image_output();
+                let graph_has_executor = self.graph.has_executor();
+                let graph_host = self.graph.host();
+                let raw_receiver_count = self.raw_tx.receiver_count() as u64;
+                let host_receiver_count = graph_host.receiver_count() as u64;
+                let demand = self.compose_demand_state(raw_receiver_count, host_receiver_count, graph_has_image_output, graph_has_executor, can_passthrough_encoded);
+                self.update_last_demand_state(&demand);
 
                 // Shadow recorder (and other encoded subscribers) want a bytestream. When the capture
                 // backend already produces an encoded stream, forward it directly into the encoded
@@ -262,7 +242,7 @@ impl StreamRunner {
                 //
                 // Keep this limited to "no graph" mode: once a graph is active, callers expect the
                 // encoded stream to reflect processed output, which requires the encoder worker.
-                if can_passthrough_encoded && self.encoder_demand() {
+                if demand.pipeline.encoded_passthrough_active {
                     if let Some(plane) = frame.planes().first() {
                         let data = Arc::<[u8]>::from(plane.data());
                         let _ = self.encoded_tx.send(crate::stream::EncodedFrame { data, ts_ms: Self::unix_now_ms() });
@@ -276,30 +256,9 @@ impl StreamRunner {
                 }
                 // When the backend already provides encoded frames and there is no graph, skip
                 // expensive decode/graph work unless someone is subscribed to decoded frames.
-                if can_passthrough_encoded {
-                    let graph_has_image_output = self.graph.has_image_output();
-                    let graph_has_executor = self.graph.has_executor();
-                    let graph_host = self.graph.host();
-                    let raw_receiver_count = self.raw_tx.receiver_count() as u64;
-                    let host_receiver_count = graph_host.receiver_count() as u64;
-                    let preview_demand_active = self.preview_demand();
-                    let encode_demand_active = self.encoder_id.is_some() && (self.encoder_demand() || preview_demand_active);
-                    let graph_sample_demand_active = self.graph.has_output_sample_demand();
-                    let decoded_demand = raw_receiver_count > 0 || (graph_has_image_output && host_receiver_count > 0);
-                    self.update_last_frame_demand(
-                        raw_receiver_count,
-                        host_receiver_count,
-                        preview_demand_active,
-                        encode_demand_active,
-                        graph_sample_demand_active,
-                        decoded_demand,
-                        graph_has_image_output,
-                        graph_has_executor,
-                    );
-                    if !decoded_demand {
-                        self.maybe_compact_idle_runtime();
-                        return Ok(true);
-                    }
+                if can_passthrough_encoded && !demand.pipeline.decoded_image_active {
+                    self.maybe_compact_idle_runtime();
+                    return Ok(true);
                 }
 
                 if let Some(limit) = self.decode_fps_limit {
@@ -311,37 +270,12 @@ impl StreamRunner {
                     }
                     self.last_decode_wall = Some(Instant::now());
                 }
-                let graph_host = self.graph.host();
-                let graph_has_image_output = self.graph.has_image_output();
-                let graph_has_executor = self.graph.has_executor();
-                let raw_receiver_count = self.raw_tx.receiver_count() as u64;
-                let host_receiver_count = graph_host.receiver_count() as u64;
-                let raw_demand = raw_receiver_count > 0;
-                let host_demand = graph_has_image_output && host_receiver_count > 0;
-                let preview_demand_active = self.preview_demand();
-                let encode_demand = self.encoder_id.is_some() && (self.encoder_demand() || preview_demand_active);
-                // A configured graph is not demand by itself. Keep the decode/graph path hot only
-                // when someone is consuming frames now or a host-output sample was explicitly
-                // requested and is waiting to be materialized from a fresh frame.
-                let graph_sample_demand = self.graph.has_output_sample_demand();
-                let needs_decoded_image = raw_demand || host_demand || encode_demand || graph_sample_demand;
-                self.update_last_frame_demand(
-                    raw_receiver_count,
-                    host_receiver_count,
-                    preview_demand_active,
-                    encode_demand,
-                    graph_sample_demand,
-                    needs_decoded_image,
-                    graph_has_image_output,
-                    graph_has_executor,
-                );
-
                 // For uncompressed capture formats such as NV12, `frame_lease_to_dynamic_image`
                 // will happily materialize a full host image even when the caller explicitly
                 // disabled codecs. That defeats the point of "capture only" streams and shows up
                 // as a large active-memory floor. If nothing downstream needs an image, keep the
                 // frame as a lease and drop it here.
-                if !needs_decoded_image {
+                if !demand.pipeline.decoded_image_active {
                     self.maybe_compact_idle_runtime();
                     return Ok(true);
                 }
@@ -436,7 +370,7 @@ impl StreamRunner {
                 // Do not force image-output work just because no encoder is configured.
                 // In graph/no-viewer mode, value outputs can still be useful while the overlay/
                 // preview image path is pure memory churn.
-                let graph_image_output_demand = graph_has_image_output && (encode_demand || host_demand);
+                let graph_image_output_demand = demand.pipeline.graph_image_output_active;
                 let graph_start = Instant::now();
                 let processed = match self.process_assigned_graphs(image, graph_image_output_demand) {
                     Some(img) => Some(Arc::new(img)),
@@ -450,7 +384,7 @@ impl StreamRunner {
 
                 // If an encoder is configured, ensure the codec registry (and encoder output fourcc)
                 // is initialized even when we didn't need the registry for decode.
-                if self.encoder_id.is_some() && (self.encode_fourcc.is_none() || encode_demand) {
+                if self.encoder_id.is_some() && (self.encode_fourcc.is_none() || demand.pipeline.encoded_output_active) {
                     match self.ensure_codecs_for_decode() {
                         Ok(codecs) => {
                             if let Err(err) = self.ensure_encoder_selected(&codecs, capture_fourcc) {
@@ -478,7 +412,7 @@ impl StreamRunner {
                 if self.encode_fourcc.is_some() {
                     // Start the encoder only when something is actively subscribed to encoded output.
                     // Preview shmem generation is handled independently by the preview worker.
-                    let wants_encode = encode_demand;
+                    let wants_encode = demand.pipeline.encoded_output_active;
                     if wants_encode {
                         if can_passthrough_encoded {
                             self.stop_encoder_worker();
@@ -536,22 +470,9 @@ impl StreamRunner {
                 let graph_host = self.graph.host();
                 let raw_receiver_count = self.raw_tx.receiver_count() as u64;
                 let host_receiver_count = graph_host.receiver_count() as u64;
-                let preview_demand_active = self.preview_demand();
-                let encode_demand_active = self.encoder_id.is_some() && self.encoder_demand();
-                let graph_sample_demand_active = self.graph.has_output_sample_demand();
-                let needs_decoded_image =
-                    raw_receiver_count > 0 || (graph_has_image_output && (preview_demand_active || host_receiver_count > 0)) || encode_demand_active || graph_sample_demand_active;
-                self.update_last_frame_demand(
-                    raw_receiver_count,
-                    host_receiver_count,
-                    preview_demand_active,
-                    encode_demand_active,
-                    graph_sample_demand_active,
-                    needs_decoded_image,
-                    graph_has_image_output,
-                    graph_has_executor,
-                );
-                let interactive_demand = (graph_has_image_output && (preview_demand_active || host_receiver_count > 0)) || encode_demand_active || graph_sample_demand_active;
+                let demand = self.compose_demand_state(raw_receiver_count, host_receiver_count, graph_has_image_output, graph_has_executor, false);
+                self.update_last_demand_state(&demand);
+                let interactive_demand = demand.pipeline.graph_image_output_active || demand.pipeline.encoded_output_active || demand.graph.output_sample_pending;
                 if !interactive_demand {
                     self.maybe_compact_idle_runtime();
                 }

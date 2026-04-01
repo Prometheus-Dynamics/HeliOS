@@ -20,18 +20,6 @@ mod pump;
 
 pub use config::StreamRunnerConfig;
 
-#[derive(Debug, Clone, Copy, Default)]
-pub(super) struct LastFrameDemandSnapshot {
-    pub raw_receiver_count: u64,
-    pub host_receiver_count: u64,
-    pub preview_demand_active: bool,
-    pub encode_demand_active: bool,
-    pub graph_sample_demand_active: bool,
-    pub needs_decoded_image: bool,
-    pub graph_has_image_output: bool,
-    pub graph_has_executor: bool,
-}
-
 pub struct StreamRunner {
     stream_label: metrics::SharedString,
     pub(super) stream_id: Option<Uuid>,
@@ -76,7 +64,7 @@ pub struct StreamRunner {
     pub(super) viewer_recently_active: bool,
     pub(super) preview_transport_stats: Arc<Mutex<PreviewTransportStats>>,
     pub(super) last_idle_compaction_wall: Option<Instant>,
-    pub(super) last_frame_demand: Mutex<LastFrameDemandSnapshot>,
+    pub(super) last_demand_state: Mutex<crate::ipc::StreamDemandRuntimeState>,
     pub(super) runner_memory: RunnerMemoryTracker,
 }
 

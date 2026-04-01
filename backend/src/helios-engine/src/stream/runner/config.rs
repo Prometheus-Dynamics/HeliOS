@@ -133,7 +133,7 @@ impl StreamRunner {
             viewer_recently_active: false,
             preview_transport_stats,
             last_idle_compaction_wall: None,
-            last_frame_demand: std::sync::Mutex::new(super::LastFrameDemandSnapshot::default()),
+            last_demand_state: std::sync::Mutex::new(crate::ipc::StreamDemandRuntimeState::default()),
             runner_memory: super::RunnerMemoryTracker::default(),
         }
     }
