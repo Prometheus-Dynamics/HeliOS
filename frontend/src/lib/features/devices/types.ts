@@ -1,3 +1,4 @@
+import type { StreamPreviewFormat } from '$lib/api/streamPreviewFormat';
 import type { CameraCard, CameraStatus, PeripheralEntry } from '$lib/types/devices';
 
 export type ThrottleBanner = { label: string; detail: string; tone: 'warning' | 'error' };
@@ -15,6 +16,7 @@ export type CameraCardItem = {
   driverNamespace: string;
   captureSessionId: string | null;
   captureSessionAlias: string | null;
+  previewFormat?: StreamPreviewFormat | null;
   cameraUid: string;
   href: '/devices' | '/peers' | `/devices/${string}`;
   statusClass: string;

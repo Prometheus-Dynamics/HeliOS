@@ -1,6 +1,7 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import { getVirtualWindow, virtualViewport } from '$lib/ui/virtualViewport';
+  import type { StreamPreviewFormat } from '$lib/api/streamPreviewFormat';
   import type { Snippet } from 'svelte';
   import { Panel, StreamPreview } from '$lib';
 
@@ -18,6 +19,7 @@
     captureSessionId?: string | null;
     captureSessionAlias?: string | null;
     cameraUid?: string | null;
+    previewFormat?: StreamPreviewFormat | null;
     href?: '/devices' | '/peers' | `/devices/${string}` | null;
     statusClass?: string;
   };
@@ -133,6 +135,7 @@
                           captureSessionId={camera.captureSessionId}
                           captureSessionAlias={camera.captureSessionAlias}
                           cameraUid={camera.cameraUid}
+                          previewFormatHint={camera.previewFormat ?? 'unknown'}
                           enablePopout={false}
                           enforceAspect={false}
                           hideControls={true}
@@ -206,6 +209,7 @@
                     captureSessionId={camera.captureSessionId}
                     captureSessionAlias={camera.captureSessionAlias}
                     cameraUid={camera.cameraUid}
+                    previewFormatHint={camera.previewFormat ?? 'unknown'}
                     enablePopout={false}
                     enforceAspect={false}
                     hideControls={true}

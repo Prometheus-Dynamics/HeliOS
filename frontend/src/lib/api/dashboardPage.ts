@@ -1,6 +1,7 @@
 import { PeripheralsApi } from '$lib/api/peripheralsApi';
 import { PipelinesApi } from '$lib/api/pipelinesApi';
 import { StreamsApi } from '$lib/api/streamsApi';
+import { streamPreviewFormatFromStreamInfo } from '$lib/api/streamPreviewFormat';
 import { streamHealthStatus, streamRecordingActive, streamRecordingSinceMs } from '$lib/api/streamRuntime';
 import { DeviceApi } from '$lib/api/deviceApi';
 import { DEFAULT_REQUEST_TIMEOUT_MS } from '$lib/api/requestUtils';
@@ -167,6 +168,7 @@ function buildStreamGallery(slots: StreamInfo[]): StreamGalleryItem[] {
       captureSessionId: slot.id ?? null,
       captureSessionAlias: resolveStreamAlias(slot),
       cameraUid: null,
+      previewFormat: streamPreviewFormatFromStreamInfo(slot),
       recordingActive,
       recordingSinceMs
     };

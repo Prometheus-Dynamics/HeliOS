@@ -91,13 +91,6 @@ impl StreamRunner {
             }
         }
         let preview_transport_stats = Arc::new(std::sync::Mutex::new(super::PreviewTransportStats::default()));
-        let preview_submit_interval = encoder_settings
-            .as_ref()
-            .and_then(|settings| settings.framerate())
-            .map(|fr| fr.numerator as f64 / fr.denominator.max(1) as f64)
-            .filter(|fps| *fps > 0.0)
-            .and_then(|fps| super::preview_submit_interval_for_fps(Some(fps)))
-            .or_else(super::preview_default_submit_interval);
         Self {
             stream_label,
             stream_id,
@@ -138,8 +131,6 @@ impl StreamRunner {
             viewer_check_interval,
             last_viewer_check_wall: None,
             viewer_recently_active: false,
-            last_preview_submit_wall: None,
-            preview_submit_interval,
             preview_transport_stats,
             last_idle_compaction_wall: None,
             last_frame_demand: std::sync::Mutex::new(super::LastFrameDemandSnapshot::default()),

@@ -19,7 +19,7 @@ use crate::http::streams_persist;
 
 use super::CALIBRATION_MODE_PIPELINE_UUID;
 use super::RAW_PIPELINE_UUID;
-use super::types::{EngineErrorBody, StreamInfo};
+use super::types::{EngineErrorBody, StreamInfo, StreamPreviewFormat};
 
 pub(crate) fn map_client_error(err: ClientTransportError) -> Response {
     let status = StatusCode::BAD_GATEWAY;
@@ -88,7 +88,8 @@ pub(crate) fn fourcc_to_format(fourcc: FourCc) -> &'static str {
 
 pub(crate) fn build_stream_info(id: Uuid, descriptor: CaptureDescriptor, resolved: ResolvedStreamConfig, status: Option<StreamStatus>, runtime: Option<StreamRuntimeState>) -> StreamInfo {
     let manifest = resolved.to_requested_manifest();
-    StreamInfo { id, descriptor, manifest, resolved, status, runtime }
+    let preview_format = StreamPreviewFormat::from_encoder_selector(resolved.encoder.codec_id.as_deref().filter(|_| resolved.encoder.enabled));
+    StreamInfo { id, descriptor, manifest, resolved, preview_format, status, runtime }
 }
 
 pub(crate) async fn resolve_stream_runtime_capabilities(state: &AppState) -> Result<StreamRuntimeCapabilities, EngineErrorBody> {
@@ -172,6 +173,17 @@ mod tests {
         assert!(!resolved.encoder.settings_present);
         assert!(!resolved.decoder.enabled);
         assert!(resolved.decoder.codec_id.is_none());
+    }
+
+    #[test]
+    fn build_stream_info_reports_preview_format_from_resolved_encoder() {
+        let mut manifest = sample_manifest();
+        manifest.encoder = RequestedEncoderConfig::enabled(Some("h264_v4l2m2m".to_string()), None);
+        let resolved = manifest.resolve();
+        let (_, descriptor) = helios_engine::capture::default_virtual_device().backends.into_iter().next().map(|backend| ((), backend.descriptor)).expect("virtual descriptor");
+
+        let info = build_stream_info(Uuid::nil(), descriptor, resolved, None, None);
+        assert!(matches!(info.preview_format, StreamPreviewFormat::H264));
     }
 
     #[test]

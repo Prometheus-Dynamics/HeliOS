@@ -232,12 +232,6 @@ impl StreamRunner {
                         tracing::info!(startup_ms, "stream capture delivered first frame");
                     }
                 }
-                // If the capture backend is already producing an encoded bitstream (MJPEG/H264/H265),
-                // publish it into shmem directly so HTTP preview endpoints can stream with minimal CPU.
-                // Skip this fast-path when a graph is active so preview shows processed output.
-                if !self.graph.has_executor() {
-                    self.try_write_shmem_preview_from_capture(&frame);
-                }
                 // Capture metrics should reflect frame cadence, not queue wait time.
                 // Prefer source timestamps when available; fall back to wall clock deltas.
                 let now = Instant::now();
@@ -632,46 +626,5 @@ impl StreamRunner {
             let pump_ms = pump_start.elapsed().as_secs_f64() * 1000.0;
             histogram!("helios.stream.pump_ms", "stream" => self.stream_label.clone()).record(pump_ms);
         })
-    }
-
-    fn try_write_shmem_preview_from_capture(&mut self, frame: &styx::prelude::FrameLease) {
-        // If both encoder + decoder are disabled, do not expose any preview output.
-        if self.encoder_id.is_none() && self.decoder_id.is_none() {
-            return;
-        }
-        // Preview is no longer allowed to invent its own encode path. If a stream encoder is
-        // configured, preview must follow that encoder's output instead of directly publishing
-        // capture bytes here.
-        if self.encoder_id.is_some() {
-            return;
-        }
-        if !self.preview_demand() {
-            return;
-        }
-        let now = Instant::now();
-        if !super::preview_submit_due(self.last_preview_submit_wall, self.preview_submit_interval, now) {
-            return;
-        }
-        let Some(shmem) = self.shmem.as_mut() else {
-            return;
-        };
-        let meta = frame.meta();
-        let fourcc = meta.format.code;
-        if !Self::is_encoded_preview_fourcc(fourcc) {
-            return;
-        }
-        let res = meta.format.resolution;
-        let dims = (res.width.get(), res.height.get());
-        let planes = frame.planes();
-        let Some(plane) = planes.first() else {
-            return;
-        };
-        let data = plane.data();
-        let ts = meta.timestamp;
-        if let Err(err) = shmem.write(Some(ts), Some(fourcc), dims, data) {
-            tracing::warn!(error = %err, fourcc = ?fourcc, "preview shmem write failed");
-            return;
-        }
-        self.last_preview_submit_wall = Some(now);
     }
 }

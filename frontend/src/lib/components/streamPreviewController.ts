@@ -1,8 +1,6 @@
 import { buildHttpCandidateUrls } from '$lib/api/httpCandidates';
 import { apiUrl } from '$lib/api/httpClient';
-import { fetchPeerStreamFormat } from '$lib/api/peers';
-import { resolveStreamPreviewFormat, type StreamPreviewFormat } from '$lib/api/streamPreviewFormat';
-import { StreamsApi } from '$lib/api/streamsApi';
+import type { StreamPreviewFormat } from '$lib/api/streamPreviewFormat';
 import type { FloatingStreamStatus } from '$lib/stores/floatingStreamViewer';
 import { SvelteURLSearchParams } from 'svelte/reactivity';
 
@@ -19,6 +17,7 @@ type StreamPreviewConfigSnapshot = {
   pipelineId: string | null;
   pipelineOutput: string | null;
   previewFormat: StreamPreviewExplicitFormat;
+  previewFormatHint: StreamPreviewFormat | null;
   autoPlay: boolean;
   canPreview: boolean;
   supportsLivePreview: boolean;
@@ -98,21 +97,6 @@ function usesOutputOverridePreview(config: StreamPreviewConfigSnapshot): boolean
   if (config.pipelineId?.trim()) return true;
   if (!output) return false;
   return output !== 'frame' && output !== 'raw' && output !== 'undistorted';
-}
-
-function previewFormatCacheKey(config: StreamPreviewConfigSnapshot, peer: PeerStreamRef | null, sessionId: string): string {
-  const pipelineTag = String(config.pipelineId ?? '').trim();
-  const outputTag = normalizedPipelineOutputTag(config.pipelineOutput);
-  const base = peer ? `peer:${peer.peerId}:${peer.streamId}` : `stream:${sessionId}`;
-  return `${base}:${pipelineTag}:${outputTag}`;
-}
-
-function mapEncodedInfoFormat(raw: unknown): StreamPreviewFormat | null {
-  if (!raw || typeof raw !== 'object' || !('format' in raw)) return null;
-  const format = (raw as { format?: unknown }).format;
-  if (format === 'mjpeg' || format === 'h264' || format === 'h265') return format;
-  if (format === 'unknown') return 'unknown';
-  return null;
 }
 
 export const createStreamPreviewController = (options: {
@@ -352,22 +336,7 @@ export const createStreamPreviewController = (options: {
       state.resolvedFormat = 'mjpeg';
       return;
     }
-    if (!config.captureSessionId) return;
-    const sessionId = config.captureSessionId;
-    const peer = parsePeerStreamRef(sessionId);
-    try {
-      const mapped = await resolveStreamPreviewFormat(previewFormatCacheKey(config, peer, sessionId), async () => {
-        const json = peer
-          ? await fetchPeerStreamFormat(peer.peerId, peer.streamId)
-          : await StreamsApi.streamFormat({ id: sessionId });
-        return mapEncodedInfoFormat(json);
-      });
-      if (mapped && readConfig().captureSessionId === sessionId) {
-        state.resolvedFormat = mapped;
-      }
-    } catch {
-      // Keep the current/default format.
-    }
+    state.resolvedFormat = config.previewFormatHint ?? 'unknown';
   };
 
   const syncSessionTarget = (): void => {
@@ -391,7 +360,7 @@ export const createStreamPreviewController = (options: {
     clearStallBannerTimer();
     clearFrameRetryTimer();
     if (config.previewFormat === 'auto') {
-      state.resolvedFormat = 'mjpeg';
+      state.resolvedFormat = config.previewFormatHint ?? 'unknown';
     }
   };
 

@@ -147,6 +147,7 @@
             recording={recordingActive}
             captureSessionId={ctx.stream?.id ?? ctx.streamId}
             captureSessionAlias={streamAlias}
+            previewFormatHint={ctx.stream?.preview_format ?? 'unknown'}
             hideControls={false}
             enforceAspect={false}
             fitMode="contain"

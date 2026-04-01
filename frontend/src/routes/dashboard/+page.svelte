@@ -333,7 +333,8 @@
       recordingSinceMs: stream.recordingSinceMs ?? null,
       captureSessionId: stream.captureSessionId,
       captureSessionAlias: stream.captureSessionAlias,
-      cameraUid: stream.cameraUid
+      cameraUid: stream.cameraUid,
+      previewFormat: stream.previewFormat
     }))
   )());
 

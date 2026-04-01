@@ -255,7 +255,6 @@ impl StreamRunner {
         self.session = Some(session);
         self.capture_started_wall = Some(Instant::now());
         tracing::info!("capture session attached to stream runner");
-        self.last_preview_submit_wall = None;
 
         if (self.encoder_id.is_some() || self.decoder_id.is_some()) && self.codecs.is_none() {
             tracing::info!(encoder = self.encoder_id.as_deref().unwrap_or("none"), decoder = self.decoder_id.as_deref().unwrap_or("none"), "initializing codec registry");
@@ -343,7 +342,6 @@ impl StreamRunner {
 
         // Encoder worker depends on the selected codec; stop it and let the pump restart it when demanded.
         self.stop_encoder_worker();
-        self.last_preview_submit_wall = None;
 
         if decoder_changed || encoder_changed {
             // Pixel conversion helpers inside Styx cache per-thread buffers (including in the Rayon
@@ -374,7 +372,6 @@ impl StreamRunner {
     pub fn stop(&mut self) {
         self.stop_encoder_worker();
         self.encoder_last_activity_ms.store(0, Ordering::Relaxed);
-        self.last_preview_submit_wall = None;
         self.runner_memory.reset_current();
         self.capture_started_wall = None;
         self.capture_empty_since = None;
@@ -391,7 +388,6 @@ impl StreamRunner {
 
     pub(crate) fn stop_capture_for_restart(&mut self) {
         self.encoder_last_activity_ms.store(0, Ordering::Relaxed);
-        self.last_preview_submit_wall = None;
         self.runner_memory.reset_current();
         self.capture_started_wall = None;
         self.capture_empty_since = None;
@@ -453,10 +449,7 @@ impl StreamRunner {
             encoder_demand_active: encode_demand_active,
             encoder_worker_running: self.encoder_worker.is_some(),
         };
-        let live_active = frame.raw_receiver_count > 0
-            || (frame.graph_has_image_output && frame.host_receiver_count > 0)
-            || frame.encode_demand_active
-            || frame.graph_sample_demand_active;
+        let live_active = frame.raw_receiver_count > 0 || (frame.graph_has_image_output && frame.host_receiver_count > 0) || frame.encode_demand_active || frame.graph_sample_demand_active;
 
         crate::ipc::StreamRuntimeState {
             capture: crate::ipc::StreamCaptureRuntimeState {
@@ -777,12 +770,7 @@ impl StreamRunner {
             return None;
         }
 
-        let quality = self
-            .encoder_settings
-            .as_ref()
-            .and_then(|settings| settings.quality())
-            .filter(|value| *value > 0)
-            .unwrap_or(85) as i32;
+        let quality = self.encoder_settings.as_ref().and_then(|settings| settings.quality()).filter(|value| *value > 0).unwrap_or(85) as i32;
 
         Some(Arc::new(TurbojpegEncoder::new(encode_input, quality)) as Arc<dyn Codec>)
     }
@@ -845,7 +833,7 @@ impl StreamRunner {
 
 #[cfg(test)]
 mod tests {
-    use super::{StreamRunner, capture_session_error_to_engine_error};
+    use super::{capture_session_error_to_engine_error, StreamRunner};
     use crate::capture::{CaptureConfigError, CaptureSessionError};
     use crate::error::Error;
 

@@ -2805,6 +2805,15 @@ pub fn default_decoder_enabled() -> bool {
     true
 }
 
+pub fn preview_format_for_encoder_selector(selector: Option<&str>) -> &'static str {
+    match encoder_settings_kind_for_selector(selector) {
+        Some(EncoderSettingsKind::Turbojpeg | EncoderSettingsKind::Mozjpeg | EncoderSettingsKind::FfmpegMjpeg) => "mjpeg",
+        Some(EncoderSettingsKind::H264) => "h264",
+        Some(EncoderSettingsKind::H265) => "h265",
+        None => "unknown",
+    }
+}
+
 fn max_host_buffer() -> usize {
     env::var("HELIOS_HOST_BUFFER_MAX").ok().and_then(|v| v.parse().ok()).filter(|v| *v > 0).unwrap_or(64)
 }

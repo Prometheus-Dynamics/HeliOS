@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { Panel, StreamPreview } from '$lib';
+  import type { StreamPreviewFormat } from '$lib/api/streamPreviewFormat';
 
   export type StreamPreviewItem = {
     id: string;
@@ -9,6 +10,7 @@
     captureSessionId?: string | null;
     captureSessionAlias?: string | null;
     cameraUid?: string | null;
+    previewFormat?: StreamPreviewFormat | null;
     recordingActive?: boolean;
     recordingSinceMs?: number | null;
   };
@@ -57,6 +59,7 @@ export interface $$Slots {
               captureSessionId={stream.captureSessionId}
               captureSessionAlias={stream.captureSessionAlias}
               cameraUid={stream.cameraUid}
+              previewFormatHint={stream.previewFormat ?? 'unknown'}
             />
           </div>
         {/each}

@@ -2,6 +2,7 @@
   import { browser } from '$app/environment';
   import { onDestroy } from 'svelte';
   import StreamPreview from './StreamPreview.svelte';
+  import { streamPreviewFormatFromStreamInfo } from '$lib/api/streamPreviewFormat';
   import { floatingStreamViewer, type FloatingStreamViewerState } from '$lib/stores/floatingStreamViewer';
   import { StreamsApi } from '$lib/api/streamsApi';
   import { streamHealthStatus, streamRecordingActive, streamRecordingSinceMs } from '$lib/api/streamRuntime';
@@ -87,6 +88,7 @@
           cameraUid: null,
           recordingActive: streamRecordingActive(stream),
           recordingSinceMs: streamRecordingSinceMs(stream),
+          previewFormatHint: streamPreviewFormatFromStreamInfo(stream),
           pipelineId:
             stream.manifest?.active_pipeline_id ??
             (Array.isArray(stream.manifest?.pipelines) ? stream.manifest?.pipelines?.[0]?.pipeline_id : null) ??
@@ -261,6 +263,7 @@
       {#if viewer.stream?.captureSessionId}
         <StreamPreview
           captureSessionId={viewer.stream.captureSessionId}
+          previewFormatHint={viewer.stream.previewFormatHint ?? 'unknown'}
           className="h-full w-full"
           recording={viewer.stream.recordingActive ?? false}
           fillParent

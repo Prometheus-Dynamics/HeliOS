@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import type { Snippet } from 'svelte';
+  import type { StreamPreviewFormat } from '$lib/api/streamPreviewFormat';
   import { connectionState } from '$lib/api/connection';
   import EncodedStreamPlayer from '$lib/components/EncodedStreamPlayer.svelte';
   import MjpegStreamPlayer from '$lib/components/MjpegStreamPlayer.svelte';
@@ -21,6 +22,7 @@
     pipelineId?: string | null;
     pipelineOutput?: string | null;
     previewFormat?: 'auto' | 'mjpeg' | 'h264' | 'h265';
+    previewFormatHint?: StreamPreviewFormat | null;
     enablePopout?: boolean;
     fitMode?: 'cover' | 'contain';
     enforceAspect?: boolean;
@@ -44,6 +46,7 @@
     pipelineId = $bindable<string | null>(null),
     pipelineOutput = $bindable<string | null>(null),
     previewFormat = $bindable<'auto' | 'mjpeg' | 'h264' | 'h265'>('auto'),
+    previewFormatHint = $bindable<StreamPreviewFormat | null>('unknown'),
     enablePopout = $bindable(true),
     fitMode = $bindable<'cover' | 'contain'>('cover'),
     enforceAspect = $bindable(true),
@@ -90,6 +93,7 @@
       pipelineId,
       pipelineOutput,
       previewFormat,
+      previewFormatHint,
       autoPlay,
       canPreview,
       supportsLivePreview,
@@ -99,7 +103,7 @@
   });
 
   $effect(() => {
-    const _ = `${captureSessionId ?? ''}:${previewFormat}:${pipelineId ?? ''}:${pipelineOutput ?? ''}`;
+    const _ = `${captureSessionId ?? ''}:${previewFormat}:${previewFormatHint ?? 'unknown'}:${pipelineId ?? ''}:${pipelineOutput ?? ''}`;
     void _;
     void controller.resolveConfiguredFormat();
   });
@@ -122,7 +126,8 @@
       cameraUid,
       pipelineId,
       pipelineOutput,
-      previewFormat: previewFormat === 'auto' ? 'auto' : resolvedFormat === 'unknown' ? 'mjpeg' : resolvedFormat
+      previewFormat: previewFormat === 'auto' ? 'auto' : resolvedFormat === 'unknown' ? 'mjpeg' : resolvedFormat,
+      previewFormatHint
     });
   }
 

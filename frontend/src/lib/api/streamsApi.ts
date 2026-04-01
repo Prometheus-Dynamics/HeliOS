@@ -341,8 +341,6 @@ export const StreamsApi = {
     args: Parameters<typeof EngineStreamsService.getPipelineOutputSample>[0],
     options?: ApiRequestOptions
   ) => runApiRequest(() => EngineStreamsService.getPipelineOutputSample(args), { label: 'getPipelineOutputSample', ...options }),
-  streamFormat: (args: Parameters<typeof EngineStreamsService.streamFormat>[0], options?: ApiRequestOptions) =>
-    runApiRequest(() => EngineStreamsService.streamFormat(args), { label: 'streamFormat', ...options }),
   getControls: (args: Parameters<typeof EngineStreamsService.getControls>[0], options?: ApiRequestOptions) =>
     runApiRequest(() => EngineStreamsService.getControls(args), { label: 'getControls', ...options }),
   deleteStream: (args: Parameters<typeof EngineStreamsService.deleteStream>[0], options?: ApiRequestOptions) =>

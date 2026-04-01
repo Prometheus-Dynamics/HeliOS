@@ -31,6 +31,7 @@ import {
   normalizePhotonvisionStreamsResponse,
   serializeIntegrationMetadata
 } from './mappers';
+import { normalizeStreamPreviewFormat } from '$lib/api/streamPreviewFormat';
 
 const API_PREFIX = '/v1/peers';
 
@@ -61,6 +62,7 @@ type ApiPeerRemoteStreamSummary = {
   pose?: ApiPeerRemoteRigPose | null;
   outputs?: ApiPeerStreamOutputSummary[] | null;
   imu_output_keys?: string[] | null;
+  preview_format?: unknown;
   proxy_preview_url?: string;
   proxy_frame_url?: string;
   proxy_format_url?: string;
@@ -249,19 +251,6 @@ export async function testPeerEndpointJson(target: string, timeoutMs: number = D
   return requestJson<unknown>(trimmed, { method: 'GET' }, { timeoutMs });
 }
 
-export async function fetchPeerStreamFormat(peerId: string, streamId: string, timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS): Promise<unknown> {
-  const trimmedPeerId = peerId.trim();
-  const trimmedStreamId = streamId.trim();
-  if (!trimmedPeerId || !trimmedStreamId) {
-    throw new Error('Peer stream reference is required');
-  }
-  return requestJson<unknown>(
-    `${API_PREFIX}/${encodeURIComponent(trimmedPeerId)}/streams/${encodeURIComponent(trimmedStreamId)}/format`,
-    { method: 'GET' },
-    { timeoutMs }
-  );
-}
-
 function normalizePeerStreamSummary(entry: ApiPeerRemoteStreamSummary) {
   const peerId = String(entry?.peer_id ?? '').trim();
   const streamRef = String(entry?.stream_ref ?? '').trim();
@@ -318,6 +307,7 @@ function normalizePeerStreamSummary(entry: ApiPeerRemoteStreamSummary) {
     pose,
     outputs,
     imuOutputKeys,
+    previewFormat: normalizeStreamPreviewFormat(entry.preview_format),
     proxyPreviewUrl,
     proxyFrameUrl,
     proxyFormatUrl

@@ -280,6 +280,7 @@
                         recording={streamRecordingActive(stream)}
                         captureSessionId={deviceId}
                         captureSessionAlias={streamCaptureAlias(stream)}
+                        previewFormatHint={stream.preview_format ?? 'unknown'}
                         enablePopout={false}
                         enforceAspect={false}
                         hideControls={true}

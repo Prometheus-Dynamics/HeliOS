@@ -1,3 +1,4 @@
+import type { StreamPreviewFormat } from '$lib/api/streamPreviewFormat';
 import type { ResourceSample } from '$lib/api/telemetry';
 
 export type PeerStatus = 'joining' | 'online' | 'offline' | 'unreachable';
@@ -166,6 +167,7 @@ export interface PeerRemoteStreamSummary {
   pose?: PeerRemoteRigPose | null;
   outputs: PeerStreamOutputSummary[];
   imuOutputKeys: string[];
+  previewFormat: StreamPreviewFormat;
   proxyPreviewUrl: string;
   proxyFrameUrl: string;
   proxyFormatUrl: string;

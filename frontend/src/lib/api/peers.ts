@@ -8,5 +8,4 @@ export {
   fetchPeerStreams,
   syncPeerPipelines,
   testPeerEndpointJson,
-  fetchPeerStreamFormat,
 } from './peers/fetchers';

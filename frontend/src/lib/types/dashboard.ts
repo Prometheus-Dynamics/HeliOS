@@ -1,3 +1,5 @@
+import type { StreamPreviewFormat } from '$lib/api/streamPreviewFormat';
+
 export type SummaryStat = {
   label: string;
   value: string;
@@ -27,6 +29,7 @@ export type StreamGalleryItem = {
   captureSessionId: string | null;
   captureSessionAlias: string | null;
   cameraUid: string | null;
+  previewFormat: StreamPreviewFormat;
   recordingActive?: boolean;
   recordingSinceMs?: number | null;
 };

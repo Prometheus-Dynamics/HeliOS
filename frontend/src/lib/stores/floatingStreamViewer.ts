@@ -1,4 +1,5 @@
 import { writable, type Writable } from 'svelte/store';
+import type { StreamPreviewFormat } from '$lib/api/streamPreviewFormat';
 import { getLocalStorage, readJson, writeJson } from '$lib/utils/storage';
 
 export type FloatingStreamStatus = 'live' | 'degraded' | 'offline' | 'idle';
@@ -15,6 +16,7 @@ export type FloatingStreamSource = {
   pipelineId?: string | null;
   pipelineOutput?: string | null;
   previewFormat?: FloatingStreamFormat;
+  previewFormatHint?: StreamPreviewFormat | null;
 };
 
 export type FloatingStreamViewerState = {

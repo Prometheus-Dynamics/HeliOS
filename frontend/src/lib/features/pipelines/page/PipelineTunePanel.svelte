@@ -823,6 +823,7 @@
               captureSessionId={tunePreviewStream.id}
               captureSessionAlias={streamLabel(tunePreviewStream)}
               recording={streamRecordingActive(tunePreviewStream)}
+              previewFormatHint={tunePreviewStream.preview_format ?? 'unknown'}
               showCaption={false}
               showFrame={false}
               fitMode="contain"

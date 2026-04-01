@@ -1,4 +1,5 @@
 import { env } from '$env/dynamic/public';
+import { streamPreviewFormatFromPeerSummary, streamPreviewFormatFromStreamInfo } from '$lib/api/streamPreviewFormat';
 import type { PeerRemoteStreamSummary } from '$lib/types/peer';
 import type {
   DeviceMetrics,
@@ -67,6 +68,7 @@ export function buildCameraCards(streams: StreamInfo[], peerStreams: PeerRemoteS
       cameraUid: stream.id,
       captureSessionId: stream.id,
       captureSessionAlias: alias,
+      previewFormat: streamPreviewFormatFromStreamInfo(stream),
       driverNamespace: 'stream',
       driverId: null,
       driverCameraId: null,
@@ -91,6 +93,7 @@ export function buildCameraCards(streams: StreamInfo[], peerStreams: PeerRemoteS
       cameraUid: String(stream.cameraUid ?? stream.streamRef).trim() || stream.streamRef,
       captureSessionId: stream.streamRef,
       captureSessionAlias: String(stream.streamAlias ?? stream.displayName ?? '').trim() || null,
+      previewFormat: streamPreviewFormatFromPeerSummary(stream),
       driverNamespace: 'peer',
       driverId: stream.peerId,
       driverCameraId: stream.remoteStreamId,
