@@ -5,7 +5,7 @@ use axum::{
 };
 use helios_engine::capture::CaptureDescriptor;
 use helios_engine::ipc::{
-    EncoderSettings, EngineErrorCode, FrameRate, JsonWire, ResolvedStreamConfig, ResolutionHint, StreamManifest, StreamPipelineGridSlot, StreamPipelineLayout, StreamStatus,
+    EncoderSettings, EngineErrorCode, FrameRate, JsonWire, ResolutionHint, ResolvedStreamConfig, StreamManifest, StreamPipelineGridSlot, StreamPipelineLayout, StreamStatus,
     normalize_requested_stream_decoder, normalize_requested_stream_encoder,
 };
 use lib_ipc::client::ClientTransportError;
@@ -95,27 +95,9 @@ pub(crate) fn default_encoder_settings_for_codec(fourcc: FourCc, implementation:
     let default_output_resolution = Some(ResolutionHint { width: 854, height: 480 });
 
     match &fourcc.to_u32().to_le_bytes() {
-        b"MJPG" | b"JPEG" => Some(EncoderSettings::FfmpegMjpeg {
-            bitrate: Some(4_000_000),
-            gop: None,
-            framerate: default_framerate,
-            thread_count: None,
-            output_resolution: default_output_resolution,
-        }),
-        b"H264" => Some(EncoderSettings::H264 {
-            bitrate: Some(4_000_000),
-            gop: None,
-            framerate: default_framerate,
-            thread_count: None,
-            output_resolution: default_output_resolution,
-        }),
-        b"H265" | b"HEVC" => Some(EncoderSettings::H265 {
-            bitrate: Some(4_000_000),
-            gop: None,
-            framerate: default_framerate,
-            thread_count: None,
-            output_resolution: default_output_resolution,
-        }),
+        b"MJPG" | b"JPEG" => Some(EncoderSettings::FfmpegMjpeg { bitrate: Some(4_000_000), gop: None, framerate: default_framerate, thread_count: None, output_resolution: default_output_resolution }),
+        b"H264" => Some(EncoderSettings::H264 { bitrate: Some(4_000_000), gop: None, framerate: default_framerate, thread_count: None, output_resolution: default_output_resolution }),
+        b"H265" | b"HEVC" => Some(EncoderSettings::H265 { bitrate: Some(4_000_000), gop: None, framerate: default_framerate, thread_count: None, output_resolution: default_output_resolution }),
         _ => None,
     }
 }
@@ -179,10 +161,7 @@ mod tests {
         assert!(resolved.encoder.enabled);
         assert_eq!(resolved.encoder.codec_id.as_deref(), default_stream_encoder_selector().as_deref());
         assert!(resolved.decoder.enabled);
-        assert_eq!(
-            resolved.decoder.codec_id.as_deref(),
-            helios_engine::ipc::default_decoder_selector_for_capture_format(FourCc::new(*b"NV12")).as_deref()
-        );
+        assert_eq!(resolved.decoder.codec_id.as_deref(), helios_engine::ipc::default_decoder_selector_for_capture_format(FourCc::new(*b"NV12")).as_deref());
     }
 
     #[test]
@@ -566,7 +545,7 @@ where
     F: FnOnce(&mut StreamManifest),
 {
     for record in streams_persist::list_persisted_records().await {
-        let Some(mut manifest) = record.manifest else {
+        let Some(mut manifest) = record.requested_manifest() else {
             continue;
         };
         if manifest.internal {

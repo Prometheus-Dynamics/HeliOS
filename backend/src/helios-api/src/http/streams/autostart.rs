@@ -24,13 +24,13 @@ pub(super) async fn restore_autostart_streams(state: AppState) {
 
     let mut manifests = Vec::new();
     for record in crate::http::streams_persist::list_persisted_records().await {
-        let Some(mut manifest) = record.manifest else {
+        let Some(mut manifest) = record.requested_manifest() else {
             continue;
         };
         if manifest.internal || !manifest.start_on_boot {
             continue;
         }
-        manifest.identity.id = manifest.identity.id.or(record.last_stream_id);
+        manifest.identity.id = manifest.identity.id.or(record.stream_id());
         manifests.push((record.camera_id, manifest));
     }
 

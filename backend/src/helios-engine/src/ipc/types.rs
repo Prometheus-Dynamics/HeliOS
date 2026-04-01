@@ -1645,7 +1645,7 @@ pub struct ResolvedStreamConfig {
     #[serde(default)]
     pub decoder: ResolvedDecoderConfig,
     pub preview_jpeg_quality: u8,
-    #[serde(default, with = "stream_recording_mode_serde", alias = "shadowRecorderEnabled", alias = "shadow_recorder_enabled")]
+    #[serde(default, with = "stream_recording_mode_serde")]
     pub recording_mode: StreamRecordingMode,
     pub start_on_boot: bool,
 }

@@ -66,7 +66,7 @@ fn merge_persisted_streams(mut active: Vec<StreamInfo>, persisted: Vec<streams_p
         if resolved.internal {
             continue;
         }
-        let stream_id = record.effective_stream_id().unwrap_or_else(|| streams_persist::derived_stream_id(&record.camera_id));
+        let stream_id = record.stream_id().unwrap_or_else(|| streams_persist::derived_stream_id(&record.camera_id));
         if let Some(pose) = resolved.pose.clone() {
             pose_by_stream.insert(stream_id, pose);
         }
@@ -82,7 +82,7 @@ fn merge_persisted_streams(mut active: Vec<StreamInfo>, persisted: Vec<streams_p
     }
 
     for record in persisted {
-        let stream_id = record.effective_stream_id().unwrap_or_else(|| streams_persist::derived_stream_id(&record.camera_id));
+        let stream_id = record.stream_id().unwrap_or_else(|| streams_persist::derived_stream_id(&record.camera_id));
         let Some(mut resolved) = record.resolved_config else {
             continue;
         };
@@ -239,7 +239,6 @@ mod tests {
         let persisted = vec![streams_persist::PersistedStreamRecord {
             camera_id: "virtual-camera".to_string(),
             last_stream_id: Some(stream_id),
-            manifest: None,
             resolved_config: Some(manifest.clone().resolve()),
             ..Default::default()
         }];

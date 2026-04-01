@@ -225,10 +225,10 @@ async fn resolve_stream_owner_camera_id(state: &AppState, requested_id: Uuid) ->
     }
     let persisted = streams_persist::list_persisted_records().await;
     for record in persisted {
-        let Some(record_manifest) = record.manifest else {
+        let Some(_) = record.requested_manifest() else {
             continue;
         };
-        let record_stream_id = record_manifest.identity.id.or(record.last_stream_id).unwrap_or_else(|| streams_persist::derived_stream_id(&record.camera_id));
+        let record_stream_id = record.stream_id().unwrap_or_else(|| streams_persist::derived_stream_id(&record.camera_id));
         if record_stream_id == requested_id {
             return Some(record.camera_id);
         }
@@ -263,13 +263,13 @@ async fn ensure_unique_stream_identity(state: &AppState, manifest: &StreamManife
 
     let persisted = streams_persist::list_persisted_records().await;
     for record in persisted {
-        let Some(record_manifest) = record.manifest else {
+        let Some(record_manifest) = record.requested_manifest() else {
             continue;
         };
         if record_manifest.internal {
             continue;
         }
-        let record_stream_id = record_manifest.identity.id.or(record.last_stream_id).unwrap_or_else(|| streams_persist::derived_stream_id(&record.camera_id));
+        let record_stream_id = record.stream_id().unwrap_or_else(|| streams_persist::derived_stream_id(&record.camera_id));
         if record_stream_id == requested_id {
             if record.camera_id != camera_id {
                 return Some((StatusCode::CONFLICT, Json(engine_error_body(Some(EngineErrorCode::Conflict), "stream uuid already assigned to another camera"))).into_response());
@@ -511,13 +511,13 @@ pub(crate) async fn get_stream(state: AppState, id: Uuid) -> Response {
                 // UI can recover (edit settings/pipeline) without requiring the user to delete and
                 // recreate the stream.
                 for record in streams_persist::list_persisted_records().await {
-                    let Some(mut manifest) = record.manifest else {
+                    let Some(mut manifest) = record.requested_manifest() else {
                         continue;
                     };
                     if manifest.internal {
                         continue;
                     }
-                    let matches = manifest.identity.id == Some(id) || record.last_stream_id == Some(id) || streams_persist::derived_stream_id(&record.camera_id) == id;
+                    let matches = manifest.identity.id == Some(id) || record.stream_id() == Some(id) || streams_persist::derived_stream_id(&record.camera_id) == id;
                     if !matches {
                         continue;
                     }
@@ -842,5 +842,4 @@ mod tests {
 
         assert!(!manifest.capture.enable_tdn_output);
     }
-
 }

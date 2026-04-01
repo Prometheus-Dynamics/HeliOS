@@ -110,13 +110,13 @@ pub(super) async fn detach_pipeline_from_streams(state: &AppState, pipeline_id: 
 
     let records = streams_persist::list_persisted_records().await;
     for record in records {
-        let Some(mut manifest) = record.manifest else {
+        let Some(mut manifest) = record.requested_manifest() else {
             continue;
         };
         if manifest.internal {
             continue;
         }
-        let stream_id = manifest.identity.id.or(record.last_stream_id).unwrap_or_else(|| streams_persist::derived_stream_id(&record.camera_id));
+        let stream_id = record.stream_id().unwrap_or_else(|| streams_persist::derived_stream_id(&record.camera_id));
         if updated_streams.contains(&stream_id) {
             continue;
         }

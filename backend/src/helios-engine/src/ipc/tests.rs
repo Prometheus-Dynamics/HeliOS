@@ -299,25 +299,3 @@ fn stream_manifest_defaults_preview_quality_when_encoder_disabled() {
     let parsed: StreamManifest = serde_json::from_value(payload).expect("decode manifest");
     assert_eq!(parsed.preview_jpeg_quality, 30);
 }
-
-#[test]
-fn resolved_stream_config_accepts_legacy_shadow_recorder_enabled_false() {
-    let mut payload = serde_json::to_value(sample_manifest().resolve()).expect("encode resolved config");
-    let object = payload.as_object_mut().expect("resolved config object");
-    object.remove("recordingMode");
-    object.insert("shadowRecorderEnabled".to_string(), serde_json::json!(false));
-
-    let parsed: ResolvedStreamConfig = serde_json::from_value(payload).expect("decode resolved config");
-    assert_eq!(parsed.recording_mode, StreamRecordingMode::Disabled);
-}
-
-#[test]
-fn resolved_stream_config_accepts_legacy_shadow_recorder_enabled_true() {
-    let mut payload = serde_json::to_value(sample_manifest().resolve()).expect("encode resolved config");
-    let object = payload.as_object_mut().expect("resolved config object");
-    object.remove("recordingMode");
-    object.insert("shadowRecorderEnabled".to_string(), serde_json::json!(true));
-
-    let parsed: ResolvedStreamConfig = serde_json::from_value(payload).expect("decode resolved config");
-    assert_eq!(parsed.recording_mode, StreamRecordingMode::shadow_buffer(default_shadow_recording_codec()));
-}

@@ -19,9 +19,7 @@ use crate::http::{AppState, storage, streams_persist};
 use helios_engine::capture::{BackendHandle, BackendKind, CaptureConfig, ModeId};
 use helios_engine::identity::DeviceIdentity;
 use helios_engine::ipc::EngineErrorCode;
-use helios_engine::ipc::{
-    CURRENT_STREAM_CONFIG_SCHEMA_VERSION, RequestedDecoderConfig, RequestedEncoderConfig, StreamManifest, StreamPipelineGridSlot, StreamPipelineLayout,
-};
+use helios_engine::ipc::{CURRENT_STREAM_CONFIG_SCHEMA_VERSION, RequestedDecoderConfig, RequestedEncoderConfig, StreamManifest, StreamPipelineGridSlot, StreamPipelineLayout};
 use styx::capture_api::make_file_device;
 use styx::core::format::{ColorSpace, MediaFormat, Resolution};
 use styx::prelude::FourCc;
@@ -280,7 +278,7 @@ async fn resolve_replay_calibration(state: &AppState, source_stream_id: Option<U
         }
 
         for record in streams_persist::list_persisted_records().await {
-            let Some(manifest) = record.manifest else {
+            let Some(manifest) = record.requested_manifest() else {
                 continue;
             };
             if manifest.internal {
@@ -315,8 +313,13 @@ async fn resolve_replay_calibration(state: &AppState, source_stream_id: Option<U
         }
     }
 
-    let mut persisted_candidates: Vec<helios_engine::ipc::StreamCalibration> =
-        streams_persist::list_persisted_records().await.into_iter().filter_map(|record| record.manifest).filter(|manifest| !manifest.internal).filter_map(|manifest| manifest.calibration).collect();
+    let mut persisted_candidates: Vec<helios_engine::ipc::StreamCalibration> = streams_persist::list_persisted_records()
+        .await
+        .into_iter()
+        .filter_map(|record| record.requested_manifest())
+        .filter(|manifest| !manifest.internal)
+        .filter_map(|manifest| manifest.calibration)
+        .collect();
     if persisted_candidates.len() == 1 {
         return persisted_candidates.pop();
     }

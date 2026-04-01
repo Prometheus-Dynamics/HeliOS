@@ -2,8 +2,10 @@ use crate::http::streams::validation::{StreamValidationResult, normalize_stream_
 use crate::http::{json_store, storage};
 use crate::ipc::IpcHandles;
 use chrono::Utc;
+use futures::future::BoxFuture;
 use helios_engine::ipc::{ResolvedStreamConfig, RigPose, StreamManifest};
 use serde::{Deserialize, Serialize};
+use serde_json::{Map as JsonMap, Value as JsonValue};
 use std::path::PathBuf;
 use std::{collections::HashMap, io};
 use tokio::fs;
@@ -57,40 +59,40 @@ struct PersistedStreamMetadata {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct PersistedStreamConfigPayload {
-    #[serde(default)]
-    pub manifest: Option<StreamManifest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolved_config: Option<ResolvedStreamConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct PersistedStreamRecordV2Wire {
+struct PersistedStreamRecordWire {
     #[serde(default)]
     pub schema_version: u32,
     pub metadata: PersistedStreamMetadata,
     pub stream: PersistedStreamConfigPayload,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct PersistedStreamRecordFlatWire {
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct PersistedStreamCompatPayload {
+    #[serde(default)]
+    pub manifest: Option<JsonValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_config: Option<JsonValue>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct PersistedStreamCompatRecordWire {
     #[serde(default)]
     pub schema_version: u32,
+    #[serde(default)]
     pub camera_id: String,
     #[serde(default)]
     pub last_stream_id: Option<Uuid>,
     #[serde(default)]
     pub updated_at: Option<String>,
     #[serde(default)]
-    pub manifest: Option<StreamManifest>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub resolved_config: Option<ResolvedStreamConfig>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-enum PersistedStreamRecordWire {
-    Nested(PersistedStreamRecordV2Wire),
-    Flat(PersistedStreamRecordFlatWire),
+    pub metadata: PersistedStreamMetadata,
+    #[serde(default)]
+    pub stream: PersistedStreamCompatPayload,
 }
 
 #[derive(Debug, Clone)]
@@ -99,42 +101,33 @@ pub struct PersistedStreamRecord {
     pub camera_id: String,
     pub last_stream_id: Option<Uuid>,
     pub updated_at: Option<String>,
-    pub manifest: Option<StreamManifest>,
     pub resolved_config: Option<ResolvedStreamConfig>,
 }
 
-impl From<PersistedStreamRecordFlatWire> for PersistedStreamRecord {
-    fn from(value: PersistedStreamRecordFlatWire) -> Self {
-        Self {
-            schema_version: value.schema_version,
-            camera_id: value.camera_id,
-            last_stream_id: value.last_stream_id,
-            updated_at: value.updated_at,
-            manifest: value.manifest,
-            resolved_config: value.resolved_config,
-        }
-    }
+#[derive(Debug)]
+struct ParsedPersistedStreamRecord {
+    record: PersistedStreamRecord,
+    dirty: bool,
 }
 
-impl From<PersistedStreamRecordV2Wire> for PersistedStreamRecord {
-    fn from(value: PersistedStreamRecordV2Wire) -> Self {
+impl From<PersistedStreamRecordWire> for PersistedStreamRecord {
+    fn from(value: PersistedStreamRecordWire) -> Self {
         Self {
             schema_version: value.schema_version,
             camera_id: value.metadata.camera_id,
             last_stream_id: value.metadata.last_stream_id,
             updated_at: value.metadata.updated_at,
-            manifest: value.stream.manifest,
             resolved_config: value.stream.resolved_config,
         }
     }
 }
 
-impl From<PersistedStreamRecord> for PersistedStreamRecordV2Wire {
+impl From<PersistedStreamRecord> for PersistedStreamRecordWire {
     fn from(value: PersistedStreamRecord) -> Self {
         Self {
             schema_version: value.schema_version,
             metadata: PersistedStreamMetadata { camera_id: value.camera_id, last_stream_id: value.last_stream_id, updated_at: value.updated_at },
-            stream: PersistedStreamConfigPayload { manifest: value.manifest, resolved_config: value.resolved_config },
+            stream: PersistedStreamConfigPayload { resolved_config: value.resolved_config },
         }
     }
 }
@@ -144,7 +137,7 @@ impl Serialize for PersistedStreamRecord {
     where
         S: serde::Serializer,
     {
-        PersistedStreamRecordV2Wire::from(self.clone()).serialize(serializer)
+        PersistedStreamRecordWire::from(self.clone()).serialize(serializer)
     }
 }
 
@@ -153,32 +146,23 @@ impl<'de> Deserialize<'de> for PersistedStreamRecord {
     where
         D: serde::Deserializer<'de>,
     {
-        let wire = PersistedStreamRecordWire::deserialize(deserializer)?;
-        Ok(match wire {
-            PersistedStreamRecordWire::Nested(record) => record.into(),
-            PersistedStreamRecordWire::Flat(record) => record.into(),
-        })
+        PersistedStreamRecordWire::deserialize(deserializer).map(Into::into)
     }
 }
 
 impl PersistedStreamRecord {
-    pub(crate) fn effective_manifest(&self) -> Option<StreamManifest> {
-        self.resolved_config.as_ref().map(ResolvedStreamConfig::to_requested_manifest).or_else(|| self.manifest.clone())
+    pub(crate) fn requested_manifest(&self) -> Option<StreamManifest> {
+        self.resolved_config.as_ref().map(ResolvedStreamConfig::to_requested_manifest)
     }
 
-    pub(crate) fn effective_stream_id(&self) -> Option<Uuid> {
-        self.resolved_config
-            .as_ref()
-            .and_then(|resolved| resolved.identity.id)
-            .or_else(|| self.manifest.as_ref().and_then(|manifest| manifest.identity.id))
-            .or(self.last_stream_id)
-            .or_else(|| (!self.camera_id.is_empty()).then(|| derived_stream_id(&self.camera_id)))
+    pub(crate) fn stream_id(&self) -> Option<Uuid> {
+        self.resolved_config.as_ref().and_then(|resolved| resolved.identity.id).or(self.last_stream_id).or_else(|| (!self.camera_id.is_empty()).then(|| derived_stream_id(&self.camera_id)))
     }
 
     fn canonicalize_for_write(mut self) -> Self {
         self.schema_version = CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION;
-        if self.resolved_config.is_some() {
-            self.manifest = None;
+        if self.last_stream_id.is_none() {
+            self.last_stream_id = self.resolved_config.as_ref().and_then(|resolved| resolved.identity.id);
         }
         self
     }
@@ -186,47 +170,11 @@ impl PersistedStreamRecord {
 
 impl Default for PersistedStreamRecord {
     fn default() -> Self {
-        Self { schema_version: CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION, camera_id: String::new(), last_stream_id: None, updated_at: None, manifest: None, resolved_config: None }
+        Self { schema_version: CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION, camera_id: String::new(), last_stream_id: None, updated_at: None, resolved_config: None }
     }
 }
 
-type PersistedStreamRecordMigration = fn(PersistedStreamRecord) -> Result<PersistedStreamRecord, String>;
-
-fn migrate_persisted_stream_record_v0_to_v1(mut record: PersistedStreamRecord) -> Result<PersistedStreamRecord, String> {
-    record.schema_version = FLAT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION;
-    Ok(record)
-}
-
-fn migrate_persisted_stream_record_v1_to_v2(mut record: PersistedStreamRecord) -> Result<PersistedStreamRecord, String> {
-    record.schema_version = CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION;
-    Ok(record)
-}
-
-const PERSISTED_STREAM_RECORD_MIGRATIONS: &[(u32, PersistedStreamRecordMigration)] =
-    &[(LEGACY_PERSISTED_STREAM_RECORD_SCHEMA_VERSION, migrate_persisted_stream_record_v0_to_v1), (FLAT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION, migrate_persisted_stream_record_v1_to_v2)];
-
-fn migrate_persisted_stream_record(mut record: PersistedStreamRecord) -> Result<PersistedStreamRecord, String> {
-    let mut version = record.schema_version;
-    if version > CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION {
-        return Err(format!("unsupported persisted stream record schema_version {}; current version is {}", version, CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION));
-    }
-
-    while version < CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION {
-        let Some((_, migration)) = PERSISTED_STREAM_RECORD_MIGRATIONS.iter().find(|(from, _)| *from == version) else {
-            return Err(format!("no persisted stream record migration registered from schema_version {} to {}", version, version + 1));
-        };
-        record = migration(record)?;
-        version = record.schema_version.max(version + 1);
-    }
-
-    record.schema_version = CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION;
-    Ok(record)
-}
-
-fn parse_persisted_stream_record(bytes: &[u8]) -> Result<PersistedStreamRecord, String> {
-    let record = serde_json::from_slice::<PersistedStreamRecord>(bytes).map_err(|err| format!("failed to decode persisted stream record: {err}"))?;
-    migrate_persisted_stream_record(record)
-}
+type PersistedStreamRecordMigration = fn(JsonValue) -> BoxFuture<'static, Result<JsonValue, String>>;
 
 fn now_rfc3339() -> String {
     Utc::now().to_rfc3339()
@@ -243,6 +191,41 @@ async fn records_dir() -> std::io::Result<PathBuf> {
 async fn record_path(camera_id: &str) -> std::io::Result<PathBuf> {
     let dir = records_dir().await?;
     Ok(dir.join(format!("{}.json", record_key(camera_id))))
+}
+
+async fn load_record_from_path(path: PathBuf, camera_id_hint: Option<&str>) -> std::io::Result<Option<PersistedStreamRecord>> {
+    let bytes = match fs::read(&path).await {
+        Ok(bytes) => bytes,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err),
+    };
+
+    let parsed = match parse_persisted_stream_record(&bytes).await {
+        Ok(parsed) => parsed,
+        Err(err) => {
+            if let Some(camera_id) = camera_id_hint {
+                warn!(camera_id, error = %err, "failed to load persisted stream record");
+            } else {
+                warn!(path = %path.display(), error = %err, "failed to load persisted stream record");
+            }
+            return Ok(None);
+        }
+    };
+
+    let mut record = parsed.record;
+    let mut dirty = parsed.dirty;
+    if record.camera_id.is_empty()
+        && let Some(camera_id) = camera_id_hint
+    {
+        record.camera_id = camera_id.to_string();
+        dirty = true;
+    }
+
+    if dirty {
+        json_store::write_json(path.clone(), &record).await?;
+    }
+
+    Ok(Some(record))
 }
 
 async fn hydrate_manifest(mut manifest: StreamManifest) -> StreamManifest {
@@ -284,36 +267,149 @@ async fn hydrate_manifest(mut manifest: StreamManifest) -> StreamManifest {
     normalize_stream_manifest(manifest).manifest
 }
 
-async fn hydrate_record(mut record: PersistedStreamRecord) -> PersistedStreamRecord {
-    record.schema_version = CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION;
-    if let Some(resolved) = record.resolved_config.clone() {
-        record.manifest = Some(resolved.to_requested_manifest());
-        return record;
-    }
+fn schema_version_from_value(value: &JsonValue) -> Result<u32, String> {
+    let Some(object) = value.as_object() else {
+        return Err("persisted stream record must be a JSON object".to_string());
+    };
+    let Some(version) = object.get("schema_version") else {
+        return Ok(LEGACY_PERSISTED_STREAM_RECORD_SCHEMA_VERSION);
+    };
+    let Some(version) = version.as_u64() else {
+        return Err("persisted stream record `schema_version` must be an unsigned integer".to_string());
+    };
+    u32::try_from(version).map_err(|_| format!("persisted stream record schema_version {version} does not fit in u32"))
+}
 
-    if let Some(manifest) = record.manifest.take() {
-        let manifest = hydrate_manifest(manifest).await;
-        match validate_stream_manifest(manifest.clone()).await {
-            Ok(prepared) => {
-                record.manifest = Some(prepared.manifest);
-                record.resolved_config = Some(prepared.resolved);
-            }
-            Err(err) => {
-                warn!(
-                    camera_id = record.camera_id,
-                    issue_count = err.issues.len(),
-                    warning_count = err.warnings.len(),
-                    issues = ?err.issues,
-                    warnings = ?err.warnings,
-                    "persisted stream record remains manifest-only because semantic validation failed"
-                );
-                record.manifest = Some(manifest);
-                record.resolved_config = None;
-            }
+fn migrate_legacy_resolved_config_value(value: &mut JsonValue) -> Result<(), String> {
+    let Some(object) = value.as_object_mut() else {
+        return Err("persisted resolved_config must be a JSON object".to_string());
+    };
+
+    let legacy_recording_mode = object.remove("shadowRecorderEnabled").or_else(|| object.remove("shadow_recorder_enabled"));
+    let current_recording_mode = object.contains_key("recordingMode") || object.contains_key("recording_mode");
+    match (current_recording_mode, legacy_recording_mode) {
+        (true, Some(_)) => Err("persisted resolved_config may not mix `recordingMode` with legacy `shadowRecorderEnabled`".to_string()),
+        (false, Some(JsonValue::Bool(enabled))) => {
+            object.insert("recordingMode".to_string(), JsonValue::Bool(enabled));
+            Ok(())
         }
+        (false, Some(_)) => Err("persisted resolved_config legacy `shadowRecorderEnabled` must be a boolean".to_string()),
+        _ => Ok(()),
+    }
+}
+
+async fn resolve_legacy_manifest_record(camera_id: &str, stream_id: Option<Uuid>, manifest_value: JsonValue) -> Result<ResolvedStreamConfig, String> {
+    let manifest = serde_json::from_value::<StreamManifest>(manifest_value).map_err(|err| format!("failed to decode persisted stream manifest: {err}"))?;
+    let prepared = prepare_manifest_for_persistence(camera_id, stream_id, manifest).await.map_err(|err| format!("persisted stream manifest for `{camera_id}` failed migration validation: {err}"))?;
+    Ok(prepared.resolved)
+}
+
+async fn canonicalize_current_record_value(value: JsonValue) -> Result<JsonValue, String> {
+    let compat = serde_json::from_value::<PersistedStreamCompatRecordWire>(value).map_err(|err| format!("failed to decode persisted stream record: {err}"))?;
+    let metadata = PersistedStreamMetadata {
+        camera_id: if compat.metadata.camera_id.is_empty() { compat.camera_id } else { compat.metadata.camera_id },
+        last_stream_id: compat.metadata.last_stream_id.or(compat.last_stream_id),
+        updated_at: compat.metadata.updated_at.or(compat.updated_at),
+    };
+
+    let resolved_config = match (compat.stream.resolved_config, compat.stream.manifest) {
+        (Some(mut resolved_value), _) => {
+            migrate_legacy_resolved_config_value(&mut resolved_value)?;
+            serde_json::from_value::<ResolvedStreamConfig>(resolved_value).map_err(|err| format!("failed to decode persisted resolved_config: {err}"))?
+        }
+        (None, Some(manifest_value)) => resolve_legacy_manifest_record(&metadata.camera_id, metadata.last_stream_id, manifest_value).await?,
+        (None, None) => return Err("persisted stream record missing `stream.resolved_config` payload".to_string()),
+    };
+
+    let record = PersistedStreamRecord {
+        schema_version: CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION,
+        camera_id: metadata.camera_id,
+        last_stream_id: metadata.last_stream_id,
+        updated_at: metadata.updated_at,
+        resolved_config: Some(resolved_config),
+    }
+    .canonicalize_for_write();
+
+    serde_json::to_value(PersistedStreamRecordWire::from(record)).map_err(|err| format!("failed to encode migrated persisted stream record: {err}"))
+}
+
+fn migrate_persisted_stream_record_v0_to_v1(mut value: JsonValue) -> BoxFuture<'static, Result<JsonValue, String>> {
+    Box::pin(async move {
+        let Some(object) = value.as_object_mut() else {
+            return Err("persisted stream record must be a JSON object".to_string());
+        };
+        object.insert("schema_version".to_string(), JsonValue::from(FLAT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION));
+        Ok(value)
+    })
+}
+
+fn migrate_persisted_stream_record_v1_to_v2(value: JsonValue) -> BoxFuture<'static, Result<JsonValue, String>> {
+    Box::pin(async move {
+        let JsonValue::Object(mut object) = value else {
+            return Err("persisted stream record must be a JSON object".to_string());
+        };
+
+        let camera_id = object.remove("camera_id").unwrap_or_else(|| JsonValue::String(String::new()));
+        let last_stream_id = object.remove("last_stream_id").filter(|value| !value.is_null());
+        let updated_at = object.remove("updated_at").filter(|value| !value.is_null());
+        let manifest = object.remove("manifest").filter(|value| !value.is_null());
+        let resolved_config = object.remove("resolved_config").filter(|value| !value.is_null());
+
+        let mut metadata = JsonMap::new();
+        metadata.insert("camera_id".to_string(), camera_id);
+        if let Some(last_stream_id) = last_stream_id {
+            metadata.insert("last_stream_id".to_string(), last_stream_id);
+        }
+        if let Some(updated_at) = updated_at {
+            metadata.insert("updated_at".to_string(), updated_at);
+        }
+
+        let mut stream = JsonMap::new();
+        if let Some(resolved_config) = resolved_config {
+            stream.insert("resolved_config".to_string(), resolved_config);
+        }
+        if let Some(manifest) = manifest {
+            stream.insert("manifest".to_string(), manifest);
+        }
+
+        let mut migrated = JsonMap::new();
+        migrated.insert("schema_version".to_string(), JsonValue::from(CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION));
+        migrated.insert("metadata".to_string(), JsonValue::Object(metadata));
+        migrated.insert("stream".to_string(), JsonValue::Object(stream));
+        Ok(JsonValue::Object(migrated))
+    })
+}
+
+const PERSISTED_STREAM_RECORD_MIGRATIONS: &[(u32, PersistedStreamRecordMigration)] =
+    &[(LEGACY_PERSISTED_STREAM_RECORD_SCHEMA_VERSION, migrate_persisted_stream_record_v0_to_v1), (FLAT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION, migrate_persisted_stream_record_v1_to_v2)];
+
+async fn migrate_persisted_stream_record_value(mut value: JsonValue) -> Result<(JsonValue, bool), String> {
+    let original = value.clone();
+    let mut version = schema_version_from_value(&value)?;
+    if version > CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION {
+        return Err(format!("unsupported persisted stream record schema_version {}; current version is {}", version, CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION));
     }
 
-    record
+    while version < CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION {
+        let Some((_, migration)) = PERSISTED_STREAM_RECORD_MIGRATIONS.iter().find(|(from, _)| *from == version) else {
+            return Err(format!("no persisted stream record migration registered from schema_version {} to {}", version, version + 1));
+        };
+        value = migration(value).await?;
+        version = schema_version_from_value(&value)?.max(version + 1);
+    }
+
+    let canonical = canonicalize_current_record_value(value).await?;
+    Ok((canonical.clone(), canonical != original))
+}
+
+async fn parse_persisted_stream_record(bytes: &[u8]) -> Result<ParsedPersistedStreamRecord, String> {
+    let raw = serde_json::from_slice::<JsonValue>(bytes).map_err(|err| format!("failed to decode persisted stream record: {err}"))?;
+    let (value, dirty) = migrate_persisted_stream_record_value(raw).await?;
+    let record = serde_json::from_value::<PersistedStreamRecord>(value).map_err(|err| format!("failed to decode migrated persisted stream record: {err}"))?;
+    if record.resolved_config.is_none() {
+        return Err("migrated persisted stream record is missing `stream.resolved_config`".to_string());
+    }
+    Ok(ParsedPersistedStreamRecord { record: record.canonicalize_for_write(), dirty })
 }
 
 async fn update_record<F, Fut>(camera_id: &str, updater: F) -> std::io::Result<PersistedStreamRecord>
@@ -322,14 +418,8 @@ where
     Fut: std::future::Future<Output = PersistedStreamRecord>,
 {
     let path = record_path(camera_id).await?;
+    let _ = load_record_from_path(path.clone(), Some(camera_id)).await?;
     json_store::update_json(path, move |mut current: PersistedStreamRecord| async move {
-        current = match migrate_persisted_stream_record(current) {
-            Ok(record) => record,
-            Err(err) => {
-                warn!(camera_id, error = %err, "failed to migrate persisted stream record during update; rewriting with current schema");
-                PersistedStreamRecord::default()
-            }
-        };
         if current.camera_id.is_empty() {
             current.camera_id = camera_id.to_string();
         }
@@ -351,11 +441,10 @@ async fn persist_resolved_config_impl(camera_id: &str, stream_id: Option<Uuid>, 
             record.last_stream_id = Some(id);
         }
         if resolved.pose.is_none()
-            && let Some(existing_pose) = record.resolved_config.as_ref().and_then(|config| config.pose.clone()).or_else(|| record.effective_manifest().and_then(|manifest| manifest.pose))
+            && let Some(existing_pose) = record.resolved_config.as_ref().and_then(|config| config.pose.clone())
         {
             resolved.pose = Some(existing_pose);
         }
-        record.manifest = None;
         record.resolved_config = Some(resolved);
         record.updated_at = Some(now_rfc3339());
         record
@@ -430,16 +519,7 @@ pub async fn load_manifest(camera_id: &str) -> Option<StreamManifest> {
 
 pub async fn load_resolved_config(camera_id: &str) -> Option<ResolvedStreamConfig> {
     let path = record_path(camera_id).await.ok()?;
-    let bytes = fs::read(&path).await.ok()?;
-    let record = match parse_persisted_stream_record(&bytes) {
-        Ok(record) => record,
-        Err(err) => {
-            warn!(camera_id, error = %err, "failed to load persisted stream record");
-            return None;
-        }
-    };
-    let record = hydrate_record(record).await;
-    record.resolved_config
+    load_record_from_path(path, Some(camera_id)).await.ok().flatten()?.resolved_config
 }
 
 async fn list_records() -> Vec<PersistedStreamRecord> {
@@ -463,10 +543,18 @@ async fn list_records() -> Vec<PersistedStreamRecord> {
         let Ok(bytes) = fs::read(&path).await else {
             continue;
         };
-        let Ok(record) = parse_persisted_stream_record(&bytes) else {
+        let Ok(parsed) = parse_persisted_stream_record(&bytes).await else {
             continue;
         };
-        out.push(hydrate_record(record).await);
+        let record = parsed.record;
+        let mut dirty = parsed.dirty;
+        if record.camera_id.is_empty() {
+            dirty = true;
+        }
+        if dirty {
+            let _ = json_store::write_json(path.clone(), &record).await;
+        }
+        out.push(record);
     }
 
     out
@@ -478,7 +566,7 @@ async fn migrate_file_camera_ids_once() {
     // same stream UUID/alias. Canonicalize file streams to be stored under their alias.
     let records = list_records().await;
     for record in records {
-        let Some(manifest) = record.effective_manifest() else {
+        let Some(manifest) = record.requested_manifest() else {
             continue;
         };
         if manifest.internal {
@@ -494,7 +582,7 @@ async fn migrate_file_camera_ids_once() {
             continue;
         }
 
-        let stream_id = record.effective_stream_id().unwrap_or_else(|| derived_stream_id(&record.camera_id));
+        let stream_id = record.stream_id().unwrap_or_else(|| derived_stream_id(&record.camera_id));
 
         // Persist under the canonical alias key.
         persist_manifest_quick(&alias, Some(stream_id), manifest.clone()).await;
@@ -514,12 +602,9 @@ pub async fn list_persisted_records() -> Vec<PersistedStreamRecord> {
 
 pub async fn update_manifest_pose_by_camera_id(camera_id: &str, pose: Option<RigPose>) -> std::io::Result<bool> {
     let path = record_path(camera_id).await?;
-    let bytes = match fs::read(&path).await {
-        Ok(bytes) => bytes,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(false),
-        Err(err) => return Err(err),
+    let Some(mut record) = load_record_from_path(path.clone(), Some(camera_id)).await? else {
+        return Ok(false);
     };
-    let mut record = hydrate_record(parse_persisted_stream_record(&bytes).unwrap_or_default()).await;
     if record.camera_id.is_empty() {
         record.camera_id = camera_id.to_string();
     }
@@ -527,7 +612,6 @@ pub async fn update_manifest_pose_by_camera_id(camera_id: &str, pose: Option<Rig
         return Ok(false);
     };
     resolved.pose = pose;
-    record.manifest = None;
     record.resolved_config = Some(resolved);
     record.updated_at = Some(now_rfc3339());
 
@@ -573,7 +657,7 @@ pub fn derived_stream_id(camera_id: &str) -> Uuid {
 pub async fn remove_record_by_stream_id(stream_id: Uuid) -> io::Result<bool> {
     let records = list_records().await;
     for record in records {
-        let matches = record.effective_stream_id() == Some(stream_id) || record.last_stream_id == Some(stream_id) || derived_stream_id(&record.camera_id) == stream_id;
+        let matches = record.stream_id() == Some(stream_id) || record.last_stream_id == Some(stream_id) || derived_stream_id(&record.camera_id) == stream_id;
         if !matches {
             continue;
         }
@@ -658,7 +742,7 @@ pub async fn restore_persisted_streams(state: AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use helios_engine::ipc::CURRENT_STREAM_CONFIG_SCHEMA_VERSION;
+    use helios_engine::ipc::{CURRENT_STREAM_CONFIG_SCHEMA_VERSION, StreamRecordingMode, default_shadow_recording_codec};
     use serde_json::json;
     use std::path::PathBuf;
     use std::sync::OnceLock;
@@ -683,21 +767,23 @@ mod tests {
         })
     }
 
-    #[test]
-    fn parse_persisted_record_migrates_legacy_versionless_record() {
+    #[tokio::test]
+    async fn parse_persisted_record_migrates_legacy_versionless_record() {
         let bytes = serde_json::to_vec(&json!({
             "camera_id": "camera-a",
             "manifest": sample_manifest_json()
         }))
         .expect("encode legacy record");
 
-        let record = parse_persisted_stream_record(&bytes).expect("migrate legacy record");
+        let ParsedPersistedStreamRecord { record, dirty } = parse_persisted_stream_record(&bytes).await.expect("migrate legacy record");
+        assert!(dirty);
         assert_eq!(record.schema_version, CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION);
-        assert_eq!(record.manifest.as_ref().map(|manifest| manifest.schema_version), Some(CURRENT_STREAM_CONFIG_SCHEMA_VERSION));
+        assert_eq!(record.requested_manifest().as_ref().map(|manifest| manifest.schema_version), Some(CURRENT_STREAM_CONFIG_SCHEMA_VERSION));
+        assert!(record.resolved_config.is_some());
     }
 
-    #[test]
-    fn parse_persisted_record_rejects_unknown_future_schema_version() {
+    #[tokio::test]
+    async fn parse_persisted_record_rejects_unknown_future_schema_version() {
         let bytes = serde_json::to_vec(&json!({
             "schema_version": CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION + 1,
             "metadata": {
@@ -707,25 +793,52 @@ mod tests {
         }))
         .expect("encode future record");
 
-        let err = parse_persisted_stream_record(&bytes).expect_err("future record should fail");
+        let err = parse_persisted_stream_record(&bytes).await.expect_err("future record should fail");
         assert!(err.contains("unsupported persisted stream record schema_version"));
     }
 
-    #[test]
-    fn parse_persisted_record_migrates_flat_v1_record_to_current_schema() {
+    #[tokio::test]
+    async fn parse_persisted_record_migrates_flat_v1_record_to_current_schema() {
+        let mut resolved = serde_json::to_value(sample_manifest().resolve()).expect("encode resolved config");
+        let object = resolved.as_object_mut().expect("resolved config object");
+        object.remove("recordingMode");
+        object.insert("shadowRecorderEnabled".to_string(), serde_json::json!(true));
+
         let bytes = serde_json::to_vec(&json!({
             "schema_version": FLAT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION,
             "camera_id": "camera-a",
             "last_stream_id": Uuid::nil(),
-            "resolved_config": sample_manifest().resolve()
+            "resolved_config": resolved
         }))
         .expect("encode flat v1 record");
 
-        let record = parse_persisted_stream_record(&bytes).expect("migrate flat v1 record");
+        let ParsedPersistedStreamRecord { record, dirty } = parse_persisted_stream_record(&bytes).await.expect("migrate flat v1 record");
+        assert!(dirty);
         assert_eq!(record.schema_version, CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION);
         assert_eq!(record.camera_id, "camera-a");
         assert_eq!(record.last_stream_id, Some(Uuid::nil()));
+        assert_eq!(record.resolved_config.as_ref().map(|resolved| resolved.recording_mode), Some(StreamRecordingMode::shadow_buffer(default_shadow_recording_codec())));
+    }
+
+    #[tokio::test]
+    async fn parse_persisted_record_migrates_nested_v2_manifest_only_record() {
+        let bytes = serde_json::to_vec(&json!({
+            "schema_version": CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION,
+            "metadata": {
+                "camera_id": "camera-a",
+                "last_stream_id": Uuid::nil()
+            },
+            "stream": {
+                "manifest": sample_manifest_json()
+            }
+        }))
+        .expect("encode manifest-only v2 record");
+
+        let ParsedPersistedStreamRecord { record, dirty } = parse_persisted_stream_record(&bytes).await.expect("migrate manifest-only v2 record");
+        assert!(dirty);
+        assert_eq!(record.schema_version, CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION);
         assert!(record.resolved_config.is_some());
+        assert_eq!(record.requested_manifest().as_ref().map(|manifest| manifest.schema_version), Some(CURRENT_STREAM_CONFIG_SCHEMA_VERSION));
     }
 
     #[test]
@@ -735,7 +848,6 @@ mod tests {
             camera_id: "camera-a".to_string(),
             last_stream_id: Some(Uuid::nil()),
             updated_at: Some("2026-03-31T00:00:00Z".to_string()),
-            manifest: None,
             resolved_config: Some(sample_manifest().resolve()),
         };
 
@@ -792,7 +904,10 @@ mod tests {
 
         let record = list_persisted_records().await.into_iter().find(|record| record.camera_id == camera_id).expect("find persisted record");
         assert_eq!(serde_json::to_value(record.resolved_config.as_ref()).expect("encode resolved"), serde_json::to_value(Some(&prepared.resolved)).expect("encode expected resolved"));
-        assert_eq!(serde_json::to_value(record.manifest.as_ref()).expect("encode manifest"), serde_json::to_value(Some(&prepared.resolved.to_requested_manifest())).expect("encode expected manifest"));
+        assert_eq!(
+            serde_json::to_value(record.requested_manifest()).expect("encode manifest"),
+            serde_json::to_value(Some(prepared.resolved.to_requested_manifest())).expect("encode expected manifest")
+        );
     }
 
     #[tokio::test]
