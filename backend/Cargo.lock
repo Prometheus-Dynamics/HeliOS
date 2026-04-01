@@ -2974,6 +2974,7 @@ version = "0.1.1"
 dependencies = [
  "anyhow",
  "clap",
+ "lib-storage-layout",
  "serde",
  "thiserror 2.0.18",
  "toml",
@@ -2994,6 +2995,7 @@ dependencies = [
  "futures",
  "hex",
  "lib-ipc",
+ "lib-storage-layout",
  "lib-test",
  "reqwest",
  "serde",
@@ -3002,6 +3004,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "toml",
  "tracing",
  "tracing-subscriber",
  "url",
@@ -4057,6 +4060,15 @@ dependencies = [
  "tracing",
  "utoipa",
  "uuid",
+]
+
+[[package]]
+name = "lib-storage-layout"
+version = "1.0.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.18",
+ "toml",
 ]
 
 [[package]]

@@ -20,6 +20,7 @@ members = [
     "src/libs/lib-net",
     "src/libs/lib-math",
     "src/libs/lib-sensors",
+    "src/libs/lib-storage-layout",
     "src/libs/lib-test",
     "src/libs/lib-test-macro",
     "src/libs/lib-cv",

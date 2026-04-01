@@ -10,6 +10,7 @@ src = "assets/services/expand-rootfs/helios-provision-squashfs.service"
 unit = "helios-provision.service"
 targets = ["helios-provision", "local-fs"]
 assets = [
-  { src = "assets/services/expand-rootfs/provisions-squashfs.toml", dst = "/etc/helios/provisions.toml", mode = 420 },
+  { src = "assets/generated/storage-layouts/squashfs-ab.toml", dst = "/etc/helios/storage-layout.toml", mode = 420 },
+  { src = "assets/generated/storage-layouts/squashfs-ab.env", dst = "/etc/helios/storage-layout.env", mode = 420 },
   { src = "assets/services/expand-rootfs/helios-provision-squashfs.sh", dst = "/usr/local/bin/helios-provision-squashfs.sh", mode = 493 },
 ]

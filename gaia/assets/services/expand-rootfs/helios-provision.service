@@ -9,7 +9,7 @@ Before=local-fs.target basic.target
 Type=oneshot
 SyslogIdentifier=helios-provision
 ExecStartPre=/usr/bin/install -d -m0755 /var/lib/helios
-ExecStart=/usr/local/bin/helios-provision --config /etc/helios/provisions.toml
+ExecStart=/usr/local/bin/helios-provision --layout-manifest /etc/helios/storage-layout.toml
 ExecStartPost=/bin/sh -lc 'partprobe /dev/mmcblk0 >/dev/null 2>&1 || true; udevadm settle --timeout=10 >/dev/null 2>&1 || true; systemctl --no-block restart var-lib-helios.mount >/dev/null 2>&1 || true'
 Environment=PATH=/bin:/sbin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 TimeoutStartSec=5min

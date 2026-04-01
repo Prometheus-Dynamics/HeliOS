@@ -3,20 +3,28 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use lib_storage_layout::{PartitionRole, SlotScheme as LayoutSlotScheme, StorageLayoutManifest};
 use tokio::fs as tokio_fs;
 use tokio::process::Command;
 
 use crate::error::{Error, Result};
 
-const SLOT_ACTIVE: &str = "ACTIVE";
-const SLOT_RESERVE: &str = "RESERVE";
-const SLOT_ROOT_A: &str = "ROOT_A";
-const SLOT_ROOT_B: &str = "ROOT_B";
+const LEGACY_SLOT_ACTIVE: &str = "ACTIVE";
+const LEGACY_SLOT_RESERVE: &str = "RESERVE";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SlotScheme {
     Ext4Labels,
     SquashfsAb,
+}
+
+impl From<LayoutSlotScheme> for SlotScheme {
+    fn from(value: LayoutSlotScheme) -> Self {
+        match value {
+            LayoutSlotScheme::Ext4Labels => Self::Ext4Labels,
+            LayoutSlotScheme::SquashfsAb => Self::SquashfsAb,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,15 +94,141 @@ fn boot_partition_from_config() -> Option<String> {
     None
 }
 
-fn boot_device_candidates() -> Vec<String> {
+fn load_layout_manifest() -> Option<StorageLayoutManifest> {
+    StorageLayoutManifest::load_system().ok().or_else(detect_legacy_layout_manifest)
+}
+
+fn detect_legacy_layout_manifest() -> Option<StorageLayoutManifest> {
+    if by_label_path(LEGACY_SLOT_ACTIVE).is_some() || by_label_path(LEGACY_SLOT_RESERVE).is_some() {
+        return toml::from_str::<StorageLayoutManifest>(
+            r#"
+schema_version = 1
+layout_id = "legacy_ext4_labels"
+slot_scheme = "ext4_labels"
+boot_label = "BOOT"
+
+[spans]
+boot_partition = 1
+data_size_mib = 4096
+
+[[partitions]]
+role = "slot_a"
+name = "ACTIVE"
+number = 2
+label = "ACTIVE"
+mode = "resize"
+
+[[partitions]]
+role = "slot_b"
+name = "RESERVE"
+number = 3
+label = "RESERVE"
+mode = "mkpart"
+
+[[partitions]]
+role = "data"
+name = "DATA"
+number = 4
+label = "DATA"
+mode = "mkpart"
+"#,
+        )
+        .ok();
+    }
+
+    if legacy_squashfs_slot_devices().is_some() {
+        return toml::from_str::<StorageLayoutManifest>(
+            r#"
+schema_version = 1
+layout_id = "legacy_squashfs_ab"
+slot_scheme = "squashfs_ab"
+boot_label = "BOOT"
+
+[spans]
+boot_partition = 1
+start_after_partition = 1
+data_size_mib = 0
+
+[[partitions]]
+role = "slot_a"
+name = "ROOT_A"
+number = 2
+mode = "noop"
+
+[[partitions]]
+role = "slot_b"
+name = "ROOT_B"
+number = 3
+mode = "mkpart"
+
+[[partitions]]
+role = "data"
+name = "DATA"
+number = 4
+label = "DATA"
+mode = "mkpart"
+"#,
+        )
+        .ok();
+    }
+
+    None
+}
+
+fn base_disk_candidates(layout: &StorageLayoutManifest) -> Vec<String> {
     let mut candidates = Vec::<String>::new();
-    if let Some(dev) = by_label_path("BOOT") {
+
+    if let Ok(data_partition) = layout.data()
+        && let Some(label) = &data_partition.label
+        && let Some(dev) = by_label_path(label)
+        && let Some(base) = StorageLayoutManifest::disk_from_partition_device(&dev)
+    {
+        candidates.push(base);
+    }
+
+    if let Some(dev) = boot_partition_from_config()
+        && let Some(base) = StorageLayoutManifest::disk_from_partition_device(&dev)
+    {
+        candidates.push(base);
+    }
+
+    if let Ok(dev) = read_mount_root_device()
+        && let Some(base) = StorageLayoutManifest::disk_from_partition_device(&dev)
+    {
+        candidates.push(base);
+    }
+
+    if let Some(root) = read_cmdline_root()
+        && root.starts_with("/dev/")
+        && let Some(path) = canonicalize_existing_path(&root)
+        && let Some(base) = StorageLayoutManifest::disk_from_partition_device(&path)
+    {
+        candidates.push(base);
+    }
+
+    let mut dedup = HashSet::<String>::new();
+    candidates.retain(|candidate| dedup.insert(candidate.clone()));
+    candidates
+}
+
+fn boot_device_candidates_with_layout(layout: &StorageLayoutManifest) -> Vec<String> {
+    let mut candidates = Vec::<String>::new();
+    if let Some(label) = layout.boot_label.as_deref()
+        && let Some(dev) = by_label_path(label)
+    {
         candidates.push(dev);
     }
     if let Some(dev) = boot_partition_from_config() {
         candidates.push(dev);
     }
-    for dev in ["/dev/mmcblk0p1", "/dev/mmcblk1p1", "/dev/sda1"] {
+    if let Some(boot_partition) = layout.boot_partition_number() {
+        for base in base_disk_candidates(layout) {
+            if let Some(canon) = canonicalize_existing_path(&StorageLayoutManifest::partition_device_for_disk(&base, boot_partition)) {
+                candidates.push(canon);
+            }
+        }
+    }
+    for dev in ["/dev/mmcblk0p1", "/dev/mmcblk1p1", "/dev/sda1", "/dev/sdb1", "/dev/nvme0n1p1"] {
         if let Some(canon) = canonicalize_existing_path(dev) {
             candidates.push(canon);
         }
@@ -105,24 +239,15 @@ fn boot_device_candidates() -> Vec<String> {
     candidates
 }
 
+fn resolve_boot_block_device_with_layout(layout: &StorageLayoutManifest) -> Option<String> {
+    boot_device_candidates_with_layout(layout).into_iter().find(|dev| Path::new(dev).exists())
+}
+
 pub fn resolve_boot_block_device() -> Option<String> {
-    boot_device_candidates().into_iter().find(|dev| Path::new(dev).exists())
-}
-
-fn disk_from_partition_device(dev: &str) -> Option<String> {
-    let canonical = canonicalize_existing_path(dev)?;
-    match canonical.as_str() {
-        path if path.starts_with("/dev/mmcblk") || path.starts_with("/dev/nvme") => {
-            let (base, suffix) = path.rsplit_once('p')?;
-            if suffix.chars().all(|ch| ch.is_ascii_digit()) { Some(base.to_string()) } else { None }
-        }
-        path if path.starts_with("/dev/sd") => Some(path.trim_end_matches(char::is_numeric).to_string()),
-        _ => None,
+    if let Some(layout) = load_layout_manifest() {
+        return resolve_boot_block_device_with_layout(&layout);
     }
-}
-
-fn partition_device(disk: &str, part: u32) -> String {
-    if disk.starts_with("/dev/mmcblk") || disk.starts_with("/dev/nvme") { format!("{disk}p{part}") } else { format!("{disk}{part}") }
+    None
 }
 
 fn read_cmdline_root() -> Option<String> {
@@ -164,12 +289,35 @@ fn read_partuuid_for_device(dev: &str) -> Option<String> {
     None
 }
 
-fn squashfs_slot_devices() -> Option<(String, String)> {
-    let base = by_label_path("DATA").and_then(|dev| disk_from_partition_device(&dev)).or_else(|| resolve_boot_block_device().and_then(|dev| disk_from_partition_device(&dev)))?;
-    let slot_a = partition_device(&base, 2);
-    let slot_b = partition_device(&base, 3);
-    let data = partition_device(&base, 4);
+fn legacy_squashfs_slot_devices() -> Option<(String, String)> {
+    let base = by_label_path("DATA")
+        .and_then(|dev| StorageLayoutManifest::disk_from_partition_device(&dev))
+        .or_else(|| boot_partition_from_config().and_then(|dev| StorageLayoutManifest::disk_from_partition_device(&dev)))?;
+    let slot_a = StorageLayoutManifest::partition_device_for_disk(&base, 2);
+    let slot_b = StorageLayoutManifest::partition_device_for_disk(&base, 3);
+    let data = StorageLayoutManifest::partition_device_for_disk(&base, 4);
     if Path::new(&slot_a).exists() && Path::new(&slot_b).exists() && (Path::new(&data).exists() || by_label_path("DATA").is_some()) { Some((slot_a, slot_b)) } else { None }
+}
+
+fn squashfs_slot_devices(layout: &StorageLayoutManifest) -> Option<(String, String)> {
+    let base = layout
+        .data()
+        .ok()
+        .and_then(|partition| partition.label.as_deref())
+        .and_then(by_label_path)
+        .and_then(|dev| StorageLayoutManifest::disk_from_partition_device(&dev))
+        .or_else(|| resolve_boot_block_device_with_layout(layout).and_then(|dev| StorageLayoutManifest::disk_from_partition_device(&dev)))
+        .or_else(|| read_mount_root_device().ok().and_then(|dev| StorageLayoutManifest::disk_from_partition_device(&dev)))?;
+
+    let slot_a = layout.slot_device_for_disk(PartitionRole::SlotA, &base).ok()?;
+    let slot_b = layout.slot_device_for_disk(PartitionRole::SlotB, &base).ok()?;
+    let data_partition = layout.data().ok()?;
+    let data = StorageLayoutManifest::partition_device_for_disk(&base, data_partition.number);
+    if Path::new(&slot_a).exists() && Path::new(&slot_b).exists() && (Path::new(&data).exists() || data_partition.label.as_deref().and_then(by_label_path).is_some()) {
+        Some((slot_a, slot_b))
+    } else {
+        None
+    }
 }
 
 fn root_matches_device_or_partuuid(root: &str, dev: &str) -> bool {
@@ -184,45 +332,45 @@ fn root_matches_device_or_partuuid(root: &str, dev: &str) -> bool {
     false
 }
 
-pub fn slot_pair() -> Option<(&'static str, &'static str)> {
-    if by_label_path(SLOT_ACTIVE).is_some() && by_label_path(SLOT_RESERVE).is_some() { Some((SLOT_ACTIVE, SLOT_RESERVE)) } else { None }
+fn ext4_slot_pair(layout: &StorageLayoutManifest) -> Option<(String, String, String, String)> {
+    let slot_a = layout.slot_a().ok()?;
+    let slot_b = layout.slot_b().ok()?;
+    let slot_a_name = slot_a.name.clone();
+    let slot_b_name = slot_b.name.clone();
+    let slot_a_dev = slot_a.label.as_deref().and_then(by_label_path)?;
+    let slot_b_dev = slot_b.label.as_deref().and_then(by_label_path)?;
+    Some((slot_a_name, slot_a_dev, slot_b_name, slot_b_dev))
 }
 
 pub fn select_target_slot(mut single_slot: bool) -> Result<SlotSelection> {
-    let current_slot = current_slot_label().ok_or_else(|| Error::InvalidState("unable to determine current slot".into()))?;
-    if let Some((slot_a, slot_b)) = slot_pair() {
-        let (slot_a_dev, slot_b_dev) =
-            (by_label_path(slot_a).ok_or_else(|| Error::InvalidState(format!("{slot_a} not found")))?, by_label_path(slot_b).ok_or_else(|| Error::InvalidState(format!("{slot_b} not found")))?);
-        let (target_slot, target_device) = if single_slot {
-            if current_slot == slot_a { (slot_a, slot_a_dev) } else { (slot_b, slot_b_dev) }
-        } else if current_slot == slot_a {
-            (slot_b, slot_b_dev)
-        } else {
-            (slot_a, slot_a_dev)
-        };
-        return Ok(SlotSelection { current_slot, target_slot: target_slot.to_string(), target_device, single_slot, scheme: SlotScheme::Ext4Labels });
-    }
+    let layout = load_layout_manifest().ok_or_else(|| Error::InvalidState("unable to load a system storage layout manifest".into()))?;
+    let current_slot = current_slot_label_with_layout(&layout).ok_or_else(|| Error::InvalidState("unable to determine current slot".into()))?;
 
-    if let Some((slot_a_dev, slot_b_dev)) = squashfs_slot_devices() {
-        single_slot = false;
-        let (target_slot, target_device) = match current_slot.as_str() {
-            SLOT_ROOT_A => (SLOT_ROOT_B, slot_b_dev),
-            SLOT_ROOT_B => (SLOT_ROOT_A, slot_a_dev),
-            other => return Err(Error::InvalidState(format!("unsupported squashfs slot {other}"))),
-        };
-        return Ok(SlotSelection { current_slot, target_slot: target_slot.to_string(), target_device, single_slot, scheme: SlotScheme::SquashfsAb });
+    match layout.slot_scheme {
+        LayoutSlotScheme::Ext4Labels => {
+            let Some((slot_a_name, slot_a_dev, slot_b_name, slot_b_dev)) = ext4_slot_pair(&layout) else {
+                return Err(Error::InvalidState("expected both labeled OTA slots from the layout manifest".into()));
+            };
+            let (target_slot, target_device) = if single_slot {
+                if current_slot == slot_a_name { (slot_a_name, slot_a_dev) } else { (slot_b_name, slot_b_dev) }
+            } else if current_slot == slot_a_name {
+                (slot_b_name, slot_b_dev)
+            } else {
+                (slot_a_name, slot_a_dev)
+            };
+            Ok(SlotSelection { current_slot, target_slot, target_device, single_slot, scheme: SlotScheme::Ext4Labels })
+        }
+        LayoutSlotScheme::SquashfsAb => {
+            single_slot = false;
+            let Some((slot_a_dev, slot_b_dev)) = squashfs_slot_devices(&layout) else {
+                return Err(Error::InvalidState("unable to resolve squashfs slot devices from the layout manifest".into()));
+            };
+            let slot_a_name = layout.slot_name(PartitionRole::SlotA).map_err(|err| Error::InvalidState(err.to_string()))?.to_string();
+            let slot_b_name = layout.slot_name(PartitionRole::SlotB).map_err(|err| Error::InvalidState(err.to_string()))?.to_string();
+            let (target_slot, target_device) = if current_slot == slot_a_name { (slot_b_name, slot_b_dev) } else { (slot_a_name, slot_a_dev) };
+            Ok(SlotSelection { current_slot, target_slot, target_device, single_slot, scheme: SlotScheme::SquashfsAb })
+        }
     }
-
-    single_slot = true;
-    let fallback = if by_label_path(SLOT_ACTIVE).is_some() {
-        SLOT_ACTIVE
-    } else if by_label_path(SLOT_RESERVE).is_some() {
-        SLOT_RESERVE
-    } else {
-        return Err(Error::InvalidState("no OTA slot found (expected ACTIVE/RESERVE labels or squashfs ROOT_A/ROOT_B layout)".into()));
-    };
-    let target_device = by_label_path(fallback).ok_or_else(|| Error::InvalidState(format!("{fallback} not found")))?;
-    Ok(SlotSelection { current_slot, target_slot: fallback.to_string(), target_device, single_slot, scheme: SlotScheme::Ext4Labels })
 }
 
 pub fn read_mount_root_device() -> Result<String> {
@@ -239,12 +387,27 @@ pub fn read_mount_root_device() -> Result<String> {
 }
 
 pub fn current_slot_label() -> Option<String> {
-    fn label_for_dev(dev_path: &str) -> Option<String> {
+    let layout = load_layout_manifest()?;
+    current_slot_label_with_layout(&layout)
+}
+
+fn current_slot_label_with_layout(layout: &StorageLayoutManifest) -> Option<String> {
+    match layout.slot_scheme {
+        LayoutSlotScheme::Ext4Labels => current_ext4_slot_label(layout),
+        LayoutSlotScheme::SquashfsAb => current_squashfs_slot_label(layout),
+    }
+}
+
+fn current_ext4_slot_label(layout: &StorageLayoutManifest) -> Option<String> {
+    let slot_a_name = layout.slot_name(PartitionRole::SlotA).ok()?.to_string();
+    let slot_b_name = layout.slot_name(PartitionRole::SlotB).ok()?.to_string();
+
+    fn label_for_dev(dev_path: &str, slot_a_name: &str, slot_b_name: &str) -> Option<String> {
         let root_canon = fs::canonicalize(dev_path).ok()?;
         if let Ok(rd) = fs::read_dir("/dev/disk/by-label") {
             for entry in rd.flatten() {
                 let name_owned = entry.file_name().to_string_lossy().into_owned();
-                if (name_owned == SLOT_ACTIVE || name_owned == SLOT_RESERVE)
+                if (name_owned == slot_a_name || name_owned == slot_b_name)
                     && let Ok(canon) = fs::canonicalize(entry.path())
                     && canon == root_canon
                 {
@@ -264,63 +427,80 @@ pub fn current_slot_label() -> Option<String> {
     }
 
     if let Some(root_mm) = read_root_maj_min() {
-        for label in [SLOT_ACTIVE, SLOT_RESERVE] {
+        for label in [&slot_a_name, &slot_b_name] {
             if let Some(dev_mm) = dev_maj_min_from_label(label)
                 && dev_mm == root_mm
             {
-                return Some(label.to_string());
+                return Some(label.clone());
             }
         }
     }
 
     if let Ok(root) = read_mount_root_device()
-        && let Some(label) = label_for_dev(&root)
+        && let Some(label) = label_for_dev(&root, &slot_a_name, &slot_b_name)
     {
         return Some(label);
     }
 
     if let Some(root) = read_cmdline_root() {
         if let Some(label) = root.strip_prefix("LABEL=")
-            && (label == SLOT_ACTIVE || label == SLOT_RESERVE)
+            && (label == slot_a_name || label == slot_b_name)
         {
             return Some(label.to_string());
         }
         if let Some(puuid) = root.strip_prefix("PARTUUID=")
             && let Ok(entry_path) = fs::canonicalize(Path::new("/dev/disk/by-partuuid").join(puuid))
-            && let Some(label) = label_for_dev(entry_path.to_string_lossy().as_ref())
+            && let Some(label) = label_for_dev(entry_path.to_string_lossy().as_ref(), &slot_a_name, &slot_b_name)
         {
             return Some(label);
         }
         if root.starts_with("/dev/")
-            && let Some(label) = label_for_dev(&root)
+            && let Some(label) = label_for_dev(&root, &slot_a_name, &slot_b_name)
         {
             return Some(label);
         }
-        if let Some((slot_a_dev, slot_b_dev)) = squashfs_slot_devices() {
-            if root_matches_device_or_partuuid(&root, &slot_a_dev) {
-                return Some(SLOT_ROOT_A.to_string());
-            }
-            if root_matches_device_or_partuuid(&root, &slot_b_dev) {
-                return Some(SLOT_ROOT_B.to_string());
-            }
-        }
-        if root == "/dev/helios-rootfs" && squashfs_slot_devices().is_some() {
-            return read_active_marker().or_else(|| Some(SLOT_ROOT_A.to_string()));
-        }
     }
 
-    if let Some(label) = read_active_marker() {
-        return Some(label);
+    if by_label_path(&slot_a_name).is_some() && by_label_path(&slot_b_name).is_none() {
+        return Some(slot_a_name);
     }
-
-    if by_label_path(SLOT_ACTIVE).is_some() && by_label_path(SLOT_RESERVE).is_none() {
-        return Some(SLOT_ACTIVE.to_string());
-    }
-    if by_label_path(SLOT_RESERVE).is_some() && by_label_path(SLOT_ACTIVE).is_none() {
-        return Some(SLOT_RESERVE.to_string());
+    if by_label_path(&slot_b_name).is_some() && by_label_path(&slot_a_name).is_none() {
+        return Some(slot_b_name);
     }
 
     None
+}
+
+fn current_squashfs_slot_label(layout: &StorageLayoutManifest) -> Option<String> {
+    let slot_a_name = layout.slot_name(PartitionRole::SlotA).ok()?.to_string();
+    let slot_b_name = layout.slot_name(PartitionRole::SlotB).ok()?.to_string();
+
+    if let Some(root) = read_cmdline_root() {
+        if let Some((slot_a_dev, slot_b_dev)) = squashfs_slot_devices(layout) {
+            if root_matches_device_or_partuuid(&root, &slot_a_dev) {
+                return Some(slot_a_name.clone());
+            }
+            if root_matches_device_or_partuuid(&root, &slot_b_dev) {
+                return Some(slot_b_name.clone());
+            }
+        }
+        if root == "/dev/helios-rootfs" {
+            return read_active_marker(layout).or_else(|| Some(slot_a_name.clone()));
+        }
+    }
+
+    if let Ok(root) = read_mount_root_device()
+        && let Some((slot_a_dev, slot_b_dev)) = squashfs_slot_devices(layout)
+    {
+        if root_matches_device_or_partuuid(&root, &slot_a_dev) {
+            return Some(slot_a_name);
+        }
+        if root_matches_device_or_partuuid(&root, &slot_b_dev) {
+            return Some(slot_b_name);
+        }
+    }
+
+    read_active_marker(layout)
 }
 
 pub async fn rewrite_cmdline_root(content: &str, _target_slot: &str, target_dev: &str) -> String {
@@ -339,7 +519,8 @@ pub async fn detect_boot_device() -> Result<Option<(PathBuf, bool)>> {
     }
     let boot_mnt = Path::new("/mnt/boot");
     tokio_fs::create_dir_all(boot_mnt).await.map_err(Error::Io)?;
-    for dev in boot_device_candidates() {
+    let candidates = load_layout_manifest().map(|layout| boot_device_candidates_with_layout(&layout)).unwrap_or_default();
+    for dev in candidates {
         let status = Command::new("mount").args(["-o", "rw"]).arg(&dev).arg(boot_mnt.to_str().unwrap()).status().await.map_err(Error::Io)?;
         if status.success() {
             return Ok(Some((boot_mnt.to_path_buf(), true)));
@@ -355,11 +536,13 @@ pub async fn resolve_boot_dir_rw() -> Result<Option<(PathBuf, bool)>> {
     detect_boot_device().await
 }
 
-fn read_active_marker() -> Option<String> {
+fn read_active_marker(layout: &StorageLayoutManifest) -> Option<String> {
+    let slot_a_name = layout.slot_name(PartitionRole::SlotA).ok()?;
+    let slot_b_name = layout.slot_name(PartitionRole::SlotB).ok()?;
     for candidate in ["/boot/helios/ota/active", "/mnt/boot/helios/ota/active"] {
         if let Ok(contents) = fs::read_to_string(candidate) {
             let trimmed = contents.trim();
-            if matches!(trimmed, SLOT_ACTIVE | SLOT_RESERVE | SLOT_ROOT_A | SLOT_ROOT_B) {
+            if trimmed == slot_a_name || trimmed == slot_b_name {
                 return Some(trimmed.to_string());
             }
         }

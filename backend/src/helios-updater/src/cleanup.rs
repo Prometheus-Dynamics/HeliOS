@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use lib_storage_layout::{PartitionRole, SlotScheme as LayoutSlotScheme, StorageLayoutManifest};
 use tokio::fs;
 use tokio::process::Command;
 use tracing::{info, warn};
@@ -69,14 +70,30 @@ async fn handle_wipe_marker(marker: &PathBuf, current_slot: &str) {
         return;
     }
 
-    if current_slot == "ACTIVE" || current_slot == "RESERVE" {
+    if let Ok(layout) = StorageLayoutManifest::load_system() {
+        if layout.slot_scheme == LayoutSlotScheme::Ext4Labels {
+            let slot_a = layout.slot_name(PartitionRole::SlotA).ok();
+            let slot_b = layout.slot_name(PartitionRole::SlotB).ok();
+            let old_label = match (slot_a, slot_b) {
+                (Some(slot_a), Some(slot_b)) if current_slot == slot_a => Some(slot_b),
+                (Some(slot_a), Some(slot_b)) if current_slot == slot_b => Some(slot_a),
+                _ => None,
+            };
+            if let Some(old_label) = old_label
+                && let Some(old_dev) = by_label_path(old_label)
+            {
+                let _ = Command::new("umount").arg(&old_dev).status().await;
+                let _ = Command::new("mkfs.ext4").args(["-F", "-L", old_label, &old_dev]).status().await;
+            }
+        } else {
+            info!(slot = %current_slot, "wipe-once marker ignored for squashfs OTA layout");
+        }
+    } else if current_slot == "ACTIVE" || current_slot == "RESERVE" {
         let old_label = if current_slot == "ACTIVE" { "RESERVE" } else { "ACTIVE" };
         if let Some(old_dev) = by_label_path(old_label) {
             let _ = Command::new("umount").arg(&old_dev).status().await;
             let _ = Command::new("mkfs.ext4").args(["-F", "-L", old_label, &old_dev]).status().await;
         }
-    } else {
-        info!(slot = %current_slot, "wipe-once marker ignored for squashfs OTA layout");
     }
 
     if let Err(err) = fs::remove_file(marker).await {

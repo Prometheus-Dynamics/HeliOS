@@ -28,6 +28,13 @@ REPO_ROOT="$(resolve_repo_root || true)"
 if [ -z "${REPO_ROOT}" ]; then
 	echo "warning: unable to resolve repo root; custom boot config/overlays may be stale" >&2
 fi
+LAYOUT_DIR="${REPO_ROOT}/assets/generated/storage-layouts"
+EXT4_LAYOUT_MANIFEST="${LAYOUT_DIR}/ext4-labels.toml"
+EXT4_LAYOUT_ENV="${LAYOUT_DIR}/ext4-labels.env"
+if [ -f "${EXT4_LAYOUT_ENV}" ]; then
+	# shellcheck disable=SC1090
+	. "${EXT4_LAYOUT_ENV}"
+fi
 
 # Upstream Pi5/CM5 boot partition (contains firmware blobs and DTBs).
 BOOT_IMG_URL="${BOOT_IMG_URL:-https://downloads.raspberrypi.com/raspios_arm64/images/raspios_arm64-2025-12-04/2025-12-04-raspios-trixie-arm64.img.xz}"
@@ -141,7 +148,7 @@ if [ -n "${KERNEL_FROM_CONFIG}" ] && [ -f "${BINARIES_DIR}/${KERNEL_FROM_CONFIG}
 fi
 
 if [ "${HELIOS_ROOT_BY_LABEL:-0}" = "1" ] && [ -f "${BINARIES_DIR}/rpi-firmware/cmdline.txt" ]; then
-	sed -E -i 's#root=/dev/mmcblk0p2#root=LABEL=ACTIVE#g' "${BINARIES_DIR}/rpi-firmware/cmdline.txt"
+	sed -E -i "s#root=/dev/mmcblk0p2#root=LABEL=${HELIOS_LAYOUT_SLOT_A_LABEL:-ACTIVE}#g" "${BINARIES_DIR}/rpi-firmware/cmdline.txt"
 fi
 
 # Compile repo-owned DT overlays (e.g. OV9782) into rpi-firmware overlays right before genimage.
@@ -225,5 +232,12 @@ genimage \
 	--inputpath "${BINARIES_DIR}"  \
 	--outputpath "${BINARIES_DIR}" \
 	--config "${GENIMAGE_CFG}"
+
+if [ -f "${EXT4_LAYOUT_MANIFEST}" ]; then
+	python3 "${REPO_ROOT}/tools/storage-layout/render_layout_assets.py" \
+		validate-image \
+		--layout "${EXT4_LAYOUT_MANIFEST}" \
+		--image "${BINARIES_DIR}/sdcard.img"
+fi
 
 exit $?
