@@ -264,6 +264,7 @@ mod tests {
     fn sample_config() -> CaptureConfig {
         CaptureConfig {
             device_keys: vec![],
+            device_identity: None,
             backend: BackendKind::Libcamera,
             handle: BackendHandle::Libcamera { id: "camera".to_string() },
             mode: ModeId { format: MediaFormat::new(FourCc::new(*b"NV12"), Resolution::new(1280, 800).unwrap(), ColorSpace::Srgb), interval: None },

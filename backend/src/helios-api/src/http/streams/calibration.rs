@@ -17,7 +17,7 @@ use crate::http::AppState;
 use crate::http::error::{ApiError, ApiResult};
 use crate::http::streams_persist;
 
-use super::util::{camera_id_for_manifest, engine_error_body};
+use super::util::engine_error_body;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BoardParams {
@@ -177,7 +177,7 @@ pub async fn apply_calibration(State(state): State<AppState>, Path(id): Path<Uui
         }
     }
 
-    if let Err(err) = streams_persist::persist_manifest_quick_checked(&camera_id_for_manifest(&manifest), Some(id), manifest.clone()).await {
+    if let Err(err) = streams_persist::persist_manifest_quick_auto_camera_id_checked(Some(id), manifest.clone()).await {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("calibration applied live but failed to persist: {err}")))).into_response();
     }
     Json(manifest).into_response()
@@ -229,7 +229,7 @@ pub async fn save_calibration(State(state): State<AppState>, Path(id): Path<Uuid
     }
 
     manifest.calibration = Some(calibration);
-    if let Err(err) = streams_persist::persist_manifest_checked(&camera_id_for_manifest(&manifest), Some(id), manifest.clone()).await {
+    if let Err(err) = streams_persist::persist_manifest_auto_camera_id_checked(Some(id), manifest.clone()).await {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("calibration updated live but failed to persist: {err}")))).into_response();
     }
     Json(manifest).into_response()

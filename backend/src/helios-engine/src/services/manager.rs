@@ -4420,6 +4420,7 @@ mod tests {
         let format = MediaFormat::new(FourCc::new(*b"RGB3"), Resolution::new(width, height).expect("resolution"), ColorSpace::Srgb);
         let capture = crate::capture::CaptureConfig {
             device_keys: vec![],
+            device_identity: None,
             backend: crate::capture::BackendKind::Virtual,
             handle: crate::capture::BackendHandle::Virtual,
             mode: crate::capture::ModeId { format, interval: None },

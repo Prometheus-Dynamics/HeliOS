@@ -2,7 +2,6 @@ use axum::response::IntoResponse;
 use once_cell::sync::Lazy;
 use reqwest::header::ACCEPT;
 
-use crate::http::streams::util::camera_id_for_manifest;
 use crate::http::{AppState, peers, streams_persist};
 
 use super::{RigPose, UpdateCameraPoseRequest, state::camera_uid_from_keys};
@@ -59,7 +58,7 @@ pub(super) async fn update_running_stream_pose(state: &AppState, camera_uid: &st
         }
         let mut manifest = stream.manifest.clone();
         manifest.pose = pose.clone();
-        streams_persist::persist_resolved_config_checked(&camera_id_for_manifest(&manifest.to_requested_manifest()), Some(stream.stream_id), manifest)
+        streams_persist::persist_resolved_config_auto_camera_id_checked(Some(stream.stream_id), manifest)
             .await
             .map_err(|err| format!("updated live stream pose but failed to persist: {err}"))?;
         return Ok(true);

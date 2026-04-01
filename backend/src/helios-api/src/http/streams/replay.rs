@@ -226,6 +226,7 @@ pub(crate) async fn start_media_replay_stream(State(state): State<AppState>, Jso
         identity: DeviceIdentity { id: None, alias: Some(alias), hardware_id: None },
         capture: CaptureConfig {
             device_keys: Vec::new(),
+            device_identity: None,
             backend: BackendKind::File,
             handle: BackendHandle::File { paths, fps, loop_forever },
             mode: dummy_mode,

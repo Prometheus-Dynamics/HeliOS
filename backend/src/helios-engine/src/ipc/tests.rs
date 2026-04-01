@@ -7,6 +7,7 @@ fn sample_manifest() -> StreamManifest {
     let fmt = MediaFormat::new(FourCc::new(*b"RGB3"), Resolution::new(1, 1).unwrap(), ColorSpace::Srgb);
     let capture = crate::capture::CaptureConfig {
         device_keys: vec![],
+        device_identity: None,
         backend: crate::capture::BackendKind::Virtual,
         handle: crate::capture::BackendHandle::Virtual,
         mode: crate::capture::ModeId { format: fmt, interval: None },

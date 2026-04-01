@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::num::NonZeroU32;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::str::FromStr;
@@ -34,6 +34,8 @@ pub struct DiscoveryResult {
 pub struct CaptureConfig {
     #[serde(default)]
     pub device_keys: Vec<String>,
+    #[serde(default)]
+    pub device_identity: Option<CaptureDeviceIdentity>,
     pub backend: BackendKind,
     pub handle: BackendHandle,
     pub mode: ModeId,
@@ -53,10 +55,100 @@ pub struct CaptureConfig {
     pub enable_tdn_output: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema, Default)]
+pub struct CaptureDeviceIdentity {
+    #[serde(default)]
+    pub display: Option<String>,
+    #[serde(default)]
+    pub primary_key: Option<String>,
+    #[serde(default)]
+    pub keys: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ControlAssignment {
     pub id: u32,
     pub value: CaptureControlValue,
+}
+
+fn normalized_nonempty(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+fn normalized_device_keys(keys: &[String]) -> Vec<String> {
+    keys.iter().filter_map(|key| normalized_nonempty(key)).collect::<BTreeSet<_>>().into_iter().collect()
+}
+
+pub fn canonical_device_id(keys: &[String], fallback: Option<&str>) -> Option<String> {
+    let normalized = normalized_device_keys(keys);
+    if let Some(key) = normalized.iter().find(|key| key.contains('/')) {
+        return Some(key.clone());
+    }
+    if let Some(key) = normalized.iter().find(|key| key.contains(':')) {
+        return Some(key.clone());
+    }
+    normalized.into_iter().next().or_else(|| fallback.and_then(normalized_nonempty))
+}
+
+impl CaptureDeviceIdentity {
+    pub fn from_device(device: &ProbedDevice) -> Self {
+        let display = normalized_nonempty(&device.identity.display);
+        let keys = normalized_device_keys(&device.identity.keys);
+        let primary_key = canonical_device_id(&keys, None);
+        Self { display, primary_key, keys }
+    }
+
+    pub fn camera_id(&self) -> Option<String> {
+        self.primary_key.clone().or_else(|| self.display.clone())
+    }
+
+    pub fn matches_device(&self, device: &ProbedDevice) -> bool {
+        let device_keys = normalized_device_keys(&device.identity.keys);
+        if let Some(primary_key) = self.primary_key.as_deref() {
+            if device_keys.iter().any(|key| key == primary_key) {
+                return true;
+            }
+        }
+
+        if !self.keys.is_empty() && device_keys.iter().any(|key| self.keys.iter().any(|wanted| wanted == key)) {
+            return true;
+        }
+
+        if self.keys.is_empty() {
+            return self.display.as_deref() == normalized_nonempty(&device.identity.display).as_deref();
+        }
+
+        false
+    }
+
+    pub fn overlaps(&self, other: &Self) -> bool {
+        if let (Some(a), Some(b)) = (self.primary_key.as_deref(), other.primary_key.as_deref()) {
+            if a == b {
+                return true;
+            }
+        }
+
+        if !self.keys.is_empty() && !other.keys.is_empty() && self.keys.iter().any(|key| other.keys.iter().any(|other_key| other_key == key)) {
+            return true;
+        }
+
+        if self.keys.is_empty() && other.keys.is_empty() {
+            return self.display.is_some() && self.display == other.display;
+        }
+
+        false
+    }
+
+    pub fn matches_keys(&self, keys: &[String]) -> bool {
+        let keys = normalized_device_keys(keys);
+        if let Some(primary_key) = self.primary_key.as_deref() {
+            if keys.iter().any(|key| key == primary_key) {
+                return true;
+            }
+        }
+        !self.keys.is_empty() && keys.iter().any(|key| self.keys.iter().any(|wanted| wanted == key))
+    }
 }
 
 impl CaptureConfig {
@@ -128,17 +220,12 @@ impl CaptureConfig {
     }
 
     pub fn record_keys(&mut self, device: &ProbedDevice) {
-        self.device_keys = device.identity.keys.clone();
+        self.device_keys = normalized_device_keys(&device.identity.keys);
+        self.device_identity = Some(CaptureDeviceIdentity::from_device(device));
     }
 
     pub fn build_request<'a>(&'a self, devices: &'a [ProbedDevice]) -> Result<(CaptureRequest<'a>, Vec<ControlAssignment>), CaptureConfigError> {
-        let device = devices.iter().find(|dev| self.matches_device(dev)).ok_or(CaptureConfigError::DeviceNotFound)?;
-        let backend = device
-            .backends
-            .iter()
-            .find(|backend| backend.kind == self.backend && backend_handle_matches(&self.handle, &backend.handle))
-            .or_else(|| device.backends.iter().find(|backend| backend.kind == self.backend))
-            .ok_or(CaptureConfigError::BackendUnavailable(self.backend))?;
+        let (device, backend) = find_device_backend_for_config(self, devices).ok_or(CaptureConfigError::DeviceNotFound)?;
 
         let mut request = CaptureRequest::new(device).backend(backend.kind).tdn_output_mode(if self.enable_tdn_output { TdnOutputMode::Force } else { TdnOutputMode::Auto });
         request = request.mode(self.mode.clone());
@@ -157,12 +244,53 @@ impl CaptureConfig {
         Ok((request, controls))
     }
 
-    fn matches_device(&self, device: &ProbedDevice) -> bool {
+    pub fn matches_discovered_device(&self, device: &ProbedDevice) -> bool {
+        if let Some(identity) = self.device_identity.as_ref() {
+            if identity.matches_device(device) {
+                return true;
+            }
+        }
+
         if !self.device_keys.is_empty() && device.identity.keys.iter().any(|key| self.device_keys.iter().any(|target| target == key)) {
             return true;
         }
 
         device.backends.iter().any(|b| b.kind == self.backend && backend_handle_matches(&self.handle, &b.handle))
+    }
+
+    pub fn matches_capture_target(&self, other: &CaptureConfig) -> bool {
+        if let (Some(a), Some(b)) = (self.device_identity.as_ref(), other.device_identity.as_ref()) {
+            if a.overlaps(b) {
+                return true;
+            }
+        }
+
+        if let Some(identity) = self.device_identity.as_ref() {
+            if identity.matches_keys(&other.device_keys) {
+                return true;
+            }
+        }
+
+        if let Some(identity) = other.device_identity.as_ref() {
+            if identity.matches_keys(&self.device_keys) {
+                return true;
+            }
+        }
+
+        if !self.device_keys.is_empty() && !other.device_keys.is_empty() && self.device_keys.iter().any(|key| other.device_keys.iter().any(|other_key| other_key == key)) {
+            return true;
+        }
+
+        self.backend == other.backend && backend_handle_matches(&self.handle, &other.handle)
+    }
+
+    pub fn canonicalize_for_devices(&self, devices: &[ProbedDevice]) -> Option<Self> {
+        let (device, backend) = find_device_backend_for_config(self, devices)?;
+        let mut canonical = self.clone();
+        canonical.record_keys(device);
+        canonical.backend = backend.kind;
+        canonical.handle = backend.handle.clone();
+        Some(canonical)
     }
 }
 
@@ -177,6 +305,16 @@ fn backend_handle_matches(requested: &BackendHandle, available: &BackendHandle) 
     }
 }
 
+fn find_device_backend_for_config<'a>(config: &CaptureConfig, devices: &'a [ProbedDevice]) -> Option<(&'a ProbedDevice, &'a ProbedBackend)> {
+    let device = devices.iter().find(|dev| config.matches_discovered_device(dev))?;
+    let backend = device
+        .backends
+        .iter()
+        .find(|backend| backend.kind == config.backend && backend_handle_matches(&config.handle, &backend.handle))
+        .or_else(|| device.backends.iter().find(|backend| backend.kind == config.backend))?;
+    Some((device, backend))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,6 +322,7 @@ mod tests {
     fn sample_config() -> CaptureConfig {
         CaptureConfig {
             device_keys: vec![],
+            device_identity: None,
             backend: BackendKind::Libcamera,
             handle: BackendHandle::Libcamera { id: "camera".to_string() },
             mode: ModeId { format: MediaFormat::new(FourCc::new(*b"NV12"), Resolution::new(1280, 800).unwrap(), ColorSpace::Srgb), interval: None },
@@ -206,28 +345,104 @@ mod tests {
         config.backend = BackendKind::V4l2;
         assert_eq!(config.effective_interval_for_backend(BackendKind::V4l2), Some(Interval { numerator: NonZeroU32::new(1).unwrap(), denominator: NonZeroU32::new(60).unwrap() }));
     }
+
+    #[test]
+    fn capture_device_identity_prefers_path_like_key_for_camera_id() {
+        let identity = CaptureDeviceIdentity {
+            display: Some("Front Camera".to_string()),
+            primary_key: Some("/base/soc/i2c0mux/i2c@1/ov9782@60".to_string()),
+            keys: vec!["ov9782".to_string(), "/base/soc/i2c0mux/i2c@1/ov9782@60".to_string()],
+        };
+        assert_eq!(identity.camera_id().as_deref(), Some("/base/soc/i2c0mux/i2c@1/ov9782@60"));
+    }
+
+    #[test]
+    fn canonicalize_capture_config_prefers_device_identity_over_stale_handle() {
+        let current_backend = ProbedBackend {
+            kind: BackendKind::Libcamera,
+            handle: BackendHandle::Libcamera { id: "cam-1".to_string() },
+            descriptor: CaptureDescriptor { modes: vec![], controls: vec![] },
+            properties: vec![],
+        };
+        let device = ProbedDevice {
+            identity: styx::DeviceIdentity {
+                display: "front".into(),
+                keys: vec!["ov9782".into(), "libcamera:front".into()],
+            },
+            backends: vec![current_backend.clone()],
+        };
+        let config = CaptureConfig {
+            device_keys: vec!["ov9782".to_string()],
+            device_identity: Some(CaptureDeviceIdentity {
+                display: Some("front".to_string()),
+                primary_key: Some("libcamera:front".to_string()),
+                keys: vec!["libcamera:front".to_string(), "ov9782".to_string()],
+            }),
+            backend: BackendKind::Libcamera,
+            handle: BackendHandle::Libcamera { id: "stale-handle".to_string() },
+            mode: sample_config().mode,
+            target_fps: None,
+            interval: None,
+            controls: vec![],
+            enable_tdn_output: false,
+        };
+
+        let canonical = config.canonicalize_for_devices(&[device]).expect("canonical capture config");
+        assert!(matches!(canonical.handle, BackendHandle::Libcamera { ref id } if id == "cam-1"));
+        assert_eq!(canonical.device_keys, vec!["libcamera:front".to_string(), "ov9782".to_string()]);
+        assert_eq!(canonical.device_identity.as_ref().and_then(CaptureDeviceIdentity::camera_id).as_deref(), Some("libcamera:front"));
+    }
+
+    #[test]
+    fn capture_target_matching_prefers_device_identity() {
+        let a = CaptureConfig {
+            device_keys: vec![],
+            device_identity: Some(CaptureDeviceIdentity {
+                display: Some("front".to_string()),
+                primary_key: Some("libcamera:front".to_string()),
+                keys: vec!["libcamera:front".to_string(), "ov9782".to_string()],
+            }),
+            backend: BackendKind::Libcamera,
+            handle: BackendHandle::Libcamera { id: "stale".to_string() },
+            mode: sample_config().mode,
+            target_fps: None,
+            interval: None,
+            controls: vec![],
+            enable_tdn_output: false,
+        };
+        let b = CaptureConfig {
+            device_keys: vec!["ov9782".to_string()],
+            device_identity: Some(CaptureDeviceIdentity {
+                display: Some("front".to_string()),
+                primary_key: Some("libcamera:front".to_string()),
+                keys: vec!["ov9782".to_string(), "libcamera:front".to_string()],
+            }),
+            backend: BackendKind::Libcamera,
+            handle: BackendHandle::Libcamera { id: "live".to_string() },
+            mode: sample_config().mode,
+            target_fps: None,
+            interval: None,
+            controls: vec![],
+            enable_tdn_output: false,
+        };
+
+        assert!(a.matches_capture_target(&b));
+    }
 }
 
 pub(crate) fn find_backend_for_config<'a>(config: &CaptureConfig, devices: &'a [ProbedDevice]) -> Option<&'a ProbedBackend> {
-    let device = devices.iter().find(|dev| {
-        if !config.device_keys.is_empty() && dev.identity.keys.iter().any(|key| config.device_keys.iter().any(|target| target == key)) {
-            return true;
-        }
-
-        dev.backends.iter().any(|b| b.kind == config.backend && backend_handle_matches(&config.handle, &b.handle))
-    })?;
-
-    device
-        .backends
-        .iter()
-        .find(|backend| backend.kind == config.backend && backend_handle_matches(&config.handle, &backend.handle))
-        .or_else(|| device.backends.iter().find(|backend| backend.kind == config.backend))
+    find_device_backend_for_config(config, devices).map(|(_, backend)| backend)
 }
 
 pub fn descriptor_for_config(config: &CaptureConfig) -> Option<CaptureDescriptor> {
     let devices = devices_for_config(config);
     let backend = find_backend_for_config(config, &devices)?;
     Some(minimize_capture_descriptor(&backend.descriptor, &config.mode))
+}
+
+pub fn canonicalize_capture_config(config: &CaptureConfig) -> CaptureConfig {
+    let devices = devices_for_config(config);
+    config.canonicalize_for_devices(&devices).unwrap_or_else(|| config.clone())
 }
 
 #[derive(Debug, Error)]

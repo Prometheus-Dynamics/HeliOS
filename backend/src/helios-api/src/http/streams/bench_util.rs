@@ -27,7 +27,7 @@ fn interval_from_fps(target_fps: u32) -> Option<Interval> {
 }
 
 pub fn identity_for_keys(keys: &[String]) -> DeviceIdentity {
-    DeviceIdentity { id: None, alias: None, hardware_id: keys.first().cloned() }
+    DeviceIdentity { id: None, alias: None, hardware_id: helios_engine::capture::canonical_device_id(keys, None) }
 }
 
 pub async fn discover_devices(state: &AppState) -> Vec<DiscoveredDevice> {
@@ -100,6 +100,7 @@ pub async fn start_stream_for_mode(args: StartStreamArgs<'_>) -> Result<Uuid, St
     let StartStreamArgs { state, identity, keys, backend, handle, mode_id, target_fps, controls } = args;
     let capture = CaptureConfig {
         device_keys: keys.to_vec(),
+        device_identity: None,
         backend,
         handle,
         mode: mode_id.clone(),

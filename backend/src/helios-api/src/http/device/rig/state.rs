@@ -70,25 +70,11 @@ pub(super) fn backend_label(device: &helios_engine::capture::DiscoveredDevice) -
 }
 
 pub(crate) fn camera_uid_from_keys(keys: &[String], fallback: Option<&str>) -> Option<String> {
-    if keys.is_empty() {
-        return fallback.map(|value| value.to_string());
-    }
-
-    if let Some(key) = keys.iter().find(|key| key.contains('/')) {
-        return Some(key.clone());
-    }
-
-    if let Some(key) = keys.iter().find(|key| key.contains(':')) {
-        return Some(key.clone());
-    }
-
-    let mut normalized = keys.to_vec();
-    normalized.sort();
-    normalized.into_iter().next().or_else(|| fallback.map(|value| value.to_string()))
+    helios_engine::capture::canonical_device_id(keys, fallback)
 }
 
 pub(super) fn canonical_camera_id(device: &helios_engine::capture::DiscoveredDevice) -> String {
-    camera_uid_from_keys(&device.identity.keys, Some(&device.identity.display)).unwrap_or_else(|| device.identity.display.clone())
+    helios_engine::capture::CaptureDeviceIdentity::from_device(device).camera_id().unwrap_or_else(|| device.identity.display.clone())
 }
 
 pub(super) fn camera_hardware_id(device: &helios_engine::capture::DiscoveredDevice) -> Option<String> {
@@ -102,11 +88,7 @@ pub(super) fn camera_hardware_id(device: &helios_engine::capture::DiscoveredDevi
 }
 
 pub(super) fn stream_matches_device(stream: &helios_engine::ipc::StreamSummary, device: &helios_engine::capture::DiscoveredDevice) -> bool {
-    let keys = &stream.manifest.capture.device_keys;
-    if keys.is_empty() {
-        return false;
-    }
-    device.identity.keys.iter().any(|key| keys.iter().any(|k| k == key))
+    stream.manifest.capture.matches_discovered_device(device)
 }
 
 pub(super) fn map_remote_peer_pose(pose: &peers::PeerRemoteRigPose) -> RigPose {

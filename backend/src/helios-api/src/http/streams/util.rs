@@ -128,6 +128,7 @@ mod tests {
             identity: DeviceIdentity { id: None, alias: Some("camera".to_string()), hardware_id: None },
             capture: CaptureConfig {
                 device_keys: vec!["cam".to_string()],
+                device_identity: None,
                 backend: BackendKind::Libcamera,
                 handle: BackendHandle::Libcamera { id: "cam0".to_string() },
                 mode: helios_engine::capture::ModeId { format: MediaFormat::new(FourCc::new(*b"NV12"), Resolution::new(1280, 800).unwrap(), ColorSpace::Srgb), interval: None },
@@ -176,6 +177,20 @@ mod tests {
         assert!(!resolved.encoder.settings_present);
         assert!(!resolved.decoder.enabled);
         assert!(resolved.decoder.codec_id.is_none());
+    }
+
+    #[test]
+    fn camera_id_for_manifest_prefers_capture_device_identity() {
+        let mut manifest = sample_manifest();
+        manifest.capture.device_identity = Some(helios_engine::capture::CaptureDeviceIdentity {
+            display: Some("Front Camera".to_string()),
+            primary_key: Some("libcamera:front".to_string()),
+            keys: vec!["libcamera:front".to_string(), "ov9782".to_string()],
+        });
+        manifest.capture.device_keys = vec!["ov9782".to_string()];
+        manifest.identity.hardware_id = Some("legacy-hardware-id".to_string());
+
+        assert_eq!(camera_id_for_manifest(&manifest), "libcamera:front");
     }
 }
 
@@ -226,6 +241,10 @@ pub(crate) fn camera_id_for_manifest(manifest: &StreamManifest) -> String {
             return path.to_string();
         }
         return "media-file-unknown".to_string();
+    }
+
+    if let Some(camera_id) = manifest.capture.device_identity.as_ref().and_then(|identity| identity.camera_id()) {
+        return camera_id;
     }
 
     let mut keys = manifest.capture.device_keys.clone();
@@ -557,7 +576,7 @@ where
         }
 
         updater(&mut manifest);
-        let manifest = streams_persist::persist_manifest_prepared_checked(&record.camera_id, Some(stream_id), manifest).await?;
+        let manifest = streams_persist::persist_manifest_prepared_auto_camera_id_checked(Some(stream_id), manifest).await?;
         return Ok(Some(manifest));
     }
 
@@ -582,7 +601,7 @@ where
 
     let mut manifest = stream.manifest.to_requested_manifest();
     updater(&mut manifest);
-    let manifest = streams_persist::persist_manifest_prepared_checked(&camera_id_for_manifest(&manifest), Some(stream_id), manifest)
+    let manifest = streams_persist::persist_manifest_prepared_auto_camera_id_checked(Some(stream_id), manifest)
         .await
         .map_err(|err| format!("updated live state but failed to persist stream manifest: {err}"))?;
     state.services.streams.upsert_cached_stream_manifest(stream_id, manifest.clone()).await;

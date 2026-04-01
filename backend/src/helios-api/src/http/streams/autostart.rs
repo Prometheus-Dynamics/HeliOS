@@ -30,7 +30,7 @@ async fn mark_reconcile_status(camera_id: &str, status: PersistedStreamReconcile
 }
 
 async fn mark_running_record(state: &AppState, camera_id: &str, stream_id: uuid::Uuid, manifest: &StreamManifest) {
-    if let Err(err) = persist_effective_stream_manifest(state, camera_id, stream_id, manifest).await {
+    if let Err(err) = persist_effective_stream_manifest(state, Some(camera_id), stream_id, manifest).await {
         warn!(camera_id, stream_id = %stream_id, error = %err, "failed to persist effective startup stream manifest");
     }
     mark_reconcile_status(camera_id, PersistedStreamReconcileStatus::Running, None).await;

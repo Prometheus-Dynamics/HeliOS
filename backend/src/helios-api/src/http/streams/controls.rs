@@ -16,7 +16,6 @@ use crate::http::AppState;
 use crate::http::streams::types::StartStreamResponse;
 
 use super::lifecycle;
-use super::util::camera_id_for_manifest;
 use super::util::{engine_error_body, map_client_error, update_persisted_manifest_by_stream_id_checked};
 use crate::http::streams_persist;
 
@@ -232,7 +231,7 @@ pub(crate) async fn set_control(state: AppState, id: Uuid, control_id: u32, valu
     {
         let previous_manifest = manifest.clone();
         apply_control_to_manifest(&mut manifest, control_id, value.clone());
-        if let Err(err) = streams_persist::persist_manifest_checked(&camera_id_for_manifest(&manifest), Some(id), manifest.clone()).await {
+        if let Err(err) = streams_persist::persist_manifest_auto_camera_id_checked(Some(id), manifest.clone()).await {
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("control update failed to persist before restart: {err}")))).into_response();
         }
         match restart_engine_and_wait_for_stream(&state, id).await {
@@ -247,7 +246,7 @@ pub(crate) async fn set_control(state: AppState, id: Uuid, control_id: u32, valu
                     "controlled engine restart did not restore stream; rolling back manifest"
                 );
 
-                if let Err(err) = streams_persist::persist_manifest_checked(&camera_id_for_manifest(&previous_manifest), Some(id), previous_manifest.clone()).await {
+                if let Err(err) = streams_persist::persist_manifest_auto_camera_id_checked(Some(id), previous_manifest.clone()).await {
                     tracing::error!(
                         stream_id = %id,
                         control_id,
@@ -276,7 +275,7 @@ pub(crate) async fn set_control(state: AppState, id: Uuid, control_id: u32, valu
             "controlled engine restart did not restore stream; rolling back to previous stream manifest"
         );
 
-        if let Err(err) = streams_persist::persist_manifest_checked(&camera_id_for_manifest(&previous_manifest), Some(id), previous_manifest.clone()).await {
+        if let Err(err) = streams_persist::persist_manifest_auto_camera_id_checked(Some(id), previous_manifest.clone()).await {
             tracing::error!(
                 stream_id = %id,
                 control_id,
@@ -330,7 +329,7 @@ pub(crate) async fn set_control(state: AppState, id: Uuid, control_id: u32, valu
                     for (restart_control_id, restart_control_value) in &controls_to_apply {
                         apply_control_to_manifest(&mut manifest, *restart_control_id, restart_control_value.clone());
                     }
-                    if let Err(err) = streams_persist::persist_manifest_checked(&camera_id_for_manifest(&manifest), Some(id), manifest.clone()).await {
+                    if let Err(err) = streams_persist::persist_manifest_auto_camera_id_checked(Some(id), manifest.clone()).await {
                         return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("control update failed to persist before replay restart: {err}"))))
                             .into_response();
                     }
@@ -354,7 +353,7 @@ pub(crate) async fn set_control(state: AppState, id: Uuid, control_id: u32, valu
     // File-backend controls are sanitized/applied in-engine as one coherent set. Persist exactly
     // what the engine now holds to avoid writing stale or transiently-invalid frame ranges.
     if is_file_backend && let Some(manifest) = state.services.streams.load_live_stream_manifest(&state, id).await {
-        if let Err(err) = streams_persist::persist_manifest_checked(&camera_id_for_manifest(&manifest), Some(id), manifest).await {
+        if let Err(err) = streams_persist::persist_manifest_auto_camera_id_checked(Some(id), manifest).await {
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("control applied live but failed to persist: {err}")))).into_response();
         }
         return StatusCode::NO_CONTENT.into_response();
@@ -365,7 +364,7 @@ pub(crate) async fn set_control(state: AppState, id: Uuid, control_id: u32, valu
             apply_control_to_manifest(&mut manifest, paired_control_id, paired_value);
         }
         apply_control_to_manifest(&mut manifest, control_id, value.clone());
-        if let Err(err) = streams_persist::persist_manifest_checked(&camera_id_for_manifest(&manifest), Some(id), manifest).await {
+        if let Err(err) = streams_persist::persist_manifest_auto_camera_id_checked(Some(id), manifest).await {
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("control applied live but failed to persist: {err}")))).into_response();
         }
     } else {
@@ -412,6 +411,7 @@ mod tests {
             identity: DeviceIdentity { id: None, alias: Some("ov9782".to_string()), hardware_id: Some("ov9782".to_string()) },
             capture: CaptureConfig {
                 device_keys: vec!["ov9782".to_string()],
+                device_identity: None,
                 backend: BackendKind::Libcamera,
                 handle: BackendHandle::Libcamera { id: "ov9782".to_string() },
                 mode: ModeId { format, interval: None },

@@ -528,7 +528,7 @@ pub(crate) fn build_graph_handle_for_pipeline_output(host_buffer: usize, manifes
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ipc::{CURRENT_STREAM_CONFIG_SCHEMA_VERSION, RequestedDecoderConfig, RequestedEncoderConfig, StreamManifest};
+    use crate::ipc::{RequestedDecoderConfig, RequestedEncoderConfig, StreamManifest, CURRENT_STREAM_CONFIG_SCHEMA_VERSION};
     use styx::prelude::{ColorSpace, FourCc, MediaFormat, Resolution};
 
     fn sample_manifest() -> ResolvedStreamConfig {
@@ -536,6 +536,7 @@ mod tests {
         let fmt = MediaFormat::new(FourCc::new(*b"RGB3"), Resolution::new(1, 1).expect("resolution"), ColorSpace::Srgb);
         let capture = crate::capture::CaptureConfig {
             device_keys: vec![],
+            device_identity: None,
             backend: crate::capture::BackendKind::Virtual,
             handle: crate::capture::BackendHandle::Virtual,
             mode: crate::capture::ModeId { format: fmt, interval: None },

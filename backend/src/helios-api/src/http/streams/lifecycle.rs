@@ -31,15 +31,19 @@ fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
-pub(super) async fn persist_effective_stream_manifest(state: &AppState, camera_id: &str, stream_id: Uuid, requested_manifest: &StreamManifest) -> std::io::Result<()> {
-    let effective_manifest = state
+pub(super) async fn persist_effective_stream_manifest(state: &AppState, camera_id_override: Option<&str>, stream_id: Uuid, requested_manifest: &StreamManifest) -> std::io::Result<()> {
+    let mut effective_manifest = state
         .engine
         .list_streams()
         .await
         .ok()
         .and_then(|streams| streams.into_iter().find(|stream| stream.stream_id == stream_id).map(|stream| stream.manifest))
         .unwrap_or_else(|| requested_manifest.resolve());
-    streams_persist::persist_resolved_config_checked(camera_id, Some(stream_id), effective_manifest).await
+    effective_manifest.capture = helios_engine::capture::canonicalize_capture_config(&effective_manifest.capture);
+    let camera_id = camera_id_override
+        .map(str::to_string)
+        .unwrap_or_else(|| camera_id_for_manifest(&effective_manifest.to_requested_manifest()));
+    streams_persist::persist_resolved_config_checked(&camera_id, Some(stream_id), effective_manifest).await
 }
 
 pub(crate) fn descriptor_from_persisted_manifest(manifest: &StreamManifest) -> CaptureDescriptor {
@@ -84,10 +88,7 @@ fn maybe_engine_crash_response(state: &AppState, start_ms: u64, _manifest: &Stre
 }
 
 fn manifests_conflict(a: &ResolvedStreamConfig, b: &StreamManifest) -> bool {
-    if a.capture.device_keys.is_empty() || b.capture.device_keys.is_empty() {
-        return false;
-    }
-    a.capture.device_keys.iter().any(|key| b.capture.device_keys.iter().any(|other| other == key))
+    a.capture.matches_capture_target(&b.capture)
 }
 
 fn default_identity_rig_pose() -> helios_engine::ipc::RigPose {
@@ -641,8 +642,7 @@ pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> R
         attempts += 1;
         match state.engine.start_stream(resolved.clone()).await {
             Ok(EngineEvent::Started { stream_id, descriptor, .. }) => {
-                let persist_id = owner_camera_id.clone().unwrap_or_else(|| camera_id_for_manifest(&manifest));
-                if let Err(err) = persist_effective_stream_manifest(&state, &persist_id, stream_id, &manifest).await {
+                if let Err(err) = persist_effective_stream_manifest(&state, owner_camera_id.as_deref(), stream_id, &manifest).await {
                     return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("stream started live but failed to persist: {err}")))).into_response();
                 }
                 state.services.streams.invalidate_stream_list_cache().await;
@@ -677,8 +677,7 @@ pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> R
             }
             Ok(_) | Err(_) => match wait_for_stream_started(&state, requested_id, Duration::from_secs(20)).await {
                 Ok(Some(descriptor)) => {
-                    let persist_id = owner_camera_id.clone().unwrap_or_else(|| camera_id_for_manifest(&manifest));
-                    if let Err(err) = persist_effective_stream_manifest(&state, &persist_id, requested_id, &manifest).await {
+                    if let Err(err) = persist_effective_stream_manifest(&state, owner_camera_id.as_deref(), requested_id, &manifest).await {
                         return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("stream started live but failed to persist: {err}"))))
                             .into_response();
                     }
@@ -792,6 +791,7 @@ mod tests {
             identity: DeviceIdentity { id: None, alias: Some("ov9782 cam".to_string()), hardware_id: None },
             capture: CaptureConfig {
                 device_keys: vec!["ov9782".to_string()],
+                device_identity: None,
                 backend: BackendKind::Libcamera,
                 handle: BackendHandle::Libcamera { id: "ov9782-main".to_string() },
                 mode: ModeId { format, interval: None },

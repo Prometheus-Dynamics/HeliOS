@@ -344,6 +344,7 @@ mod tests {
             identity: DeviceIdentity { id: None, alias: None, hardware_id: None },
             capture: CaptureConfig {
                 device_keys: vec![],
+                device_identity: None,
                 backend: BackendKind::Virtual,
                 handle: BackendHandle::Virtual,
                 mode: ModeId { format, interval: None },

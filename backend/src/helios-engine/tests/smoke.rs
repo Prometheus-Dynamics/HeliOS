@@ -5,7 +5,7 @@ fn virtual_capture_starts() {
     let device = default_virtual_device();
     let backend = device.backends.first().expect("virtual backend present");
     let mode = backend.descriptor.modes.first().expect("virtual mode present").id.clone();
-    let config = CaptureConfig { device_keys: vec![], backend: backend.kind, handle: backend.handle.clone(), mode, target_fps: None, interval: None, controls: vec![], enable_tdn_output: false };
+    let config = CaptureConfig { device_keys: vec![], device_identity: None, backend: backend.kind, handle: backend.handle.clone(), mode, target_fps: None, interval: None, controls: vec![], enable_tdn_output: false };
     let devices = vec![device];
     let handle = start_from_config(&config, &devices).expect("capture should start");
     let _metrics = handle.metrics();

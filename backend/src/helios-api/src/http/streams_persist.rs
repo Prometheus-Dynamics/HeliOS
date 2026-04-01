@@ -2,6 +2,7 @@ use crate::http::streams::validation::{StreamValidationResult, normalize_stream_
 use crate::http::{json_store, storage};
 use chrono::Utc;
 use futures::future::BoxFuture;
+use helios_engine::capture::canonicalize_capture_config;
 use helios_engine::ipc::{ResolvedStreamConfig, RigPose, StreamManifest};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue};
@@ -300,6 +301,32 @@ async fn hydrate_manifest(mut manifest: StreamManifest) -> StreamManifest {
     normalize_stream_manifest(manifest).manifest
 }
 
+fn canonicalize_resolved_capture_identity(mut resolved: ResolvedStreamConfig) -> ResolvedStreamConfig {
+    resolved.capture = canonicalize_capture_config(&resolved.capture);
+    resolved
+}
+
+async fn remove_other_stream_records(camera_id: &str, stream_id: Option<Uuid>) -> io::Result<()> {
+    let Some(stream_id) = stream_id else {
+        return Ok(());
+    };
+
+    for record in list_records().await {
+        let matches = record.stream_id() == Some(stream_id) || record.last_stream_id == Some(stream_id) || derived_stream_id(&record.camera_id) == stream_id;
+        if !matches || record.camera_id == camera_id {
+            continue;
+        }
+        let path = record_path(&record.camera_id).await?;
+        match fs::remove_file(path).await {
+            Ok(()) => {}
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+            Err(err) => return Err(err),
+        }
+    }
+
+    Ok(())
+}
+
 fn schema_version_from_value(value: &JsonValue) -> Result<u32, String> {
     let Some(object) = value.as_object() else {
         return Err("persisted stream record must be a JSON object".to_string());
@@ -470,6 +497,7 @@ where
 }
 
 async fn persist_resolved_config_impl(camera_id: &str, stream_id: Option<Uuid>, mut resolved: ResolvedStreamConfig) -> std::io::Result<()> {
+    resolved = canonicalize_resolved_capture_identity(resolved);
     if let Some(id) = stream_id {
         resolved.identity.id = Some(id);
     }
@@ -496,6 +524,7 @@ async fn persist_resolved_config_impl(camera_id: &str, stream_id: Option<Uuid>, 
 
 pub(crate) async fn prepare_manifest_for_persistence_checked(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) -> std::io::Result<StreamValidationResult> {
     let mut hydrated = hydrate_manifest(manifest).await;
+    hydrated.capture = canonicalize_capture_config(&hydrated.capture);
     if let Some(id) = stream_id {
         hydrated.identity.id = Some(id);
     }
@@ -520,8 +549,32 @@ async fn persist_manifest_impl(camera_id: &str, stream_id: Option<Uuid>, manifes
     Ok(prepared.manifest)
 }
 
-pub(crate) async fn persist_manifest_prepared_checked(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) -> std::io::Result<StreamManifest> {
-    persist_manifest_impl(camera_id, stream_id, manifest).await
+pub async fn persist_manifest_auto_camera_id_checked(stream_id: Option<Uuid>, manifest: StreamManifest) -> std::io::Result<String> {
+    let prepared = prepare_manifest_for_persistence_checked("<auto>", stream_id, manifest).await?;
+    let camera_id = crate::http::streams::util::camera_id_for_manifest(&prepared.manifest);
+    persist_resolved_config_impl(&camera_id, stream_id, prepared.resolved).await?;
+    remove_other_stream_records(&camera_id, stream_id).await?;
+    Ok(camera_id)
+}
+
+pub async fn persist_manifest_prepared_auto_camera_id_checked(stream_id: Option<Uuid>, manifest: StreamManifest) -> std::io::Result<StreamManifest> {
+    let prepared = prepare_manifest_for_persistence_checked("<auto>", stream_id, manifest).await?;
+    let camera_id = crate::http::streams::util::camera_id_for_manifest(&prepared.manifest);
+    persist_resolved_config_impl(&camera_id, stream_id, prepared.resolved).await?;
+    remove_other_stream_records(&camera_id, stream_id).await?;
+    Ok(prepared.manifest)
+}
+
+pub async fn persist_manifest_quick_auto_camera_id_checked(stream_id: Option<Uuid>, manifest: StreamManifest) -> std::io::Result<String> {
+    persist_manifest_auto_camera_id_checked(stream_id, manifest).await
+}
+
+pub async fn persist_resolved_config_auto_camera_id_checked(stream_id: Option<Uuid>, resolved: ResolvedStreamConfig) -> std::io::Result<String> {
+    let resolved = canonicalize_resolved_capture_identity(resolved);
+    let camera_id = crate::http::streams::util::camera_id_for_manifest(&resolved.to_requested_manifest());
+    persist_resolved_config_impl(&camera_id, stream_id, resolved).await?;
+    remove_other_stream_records(&camera_id, stream_id).await?;
+    Ok(camera_id)
 }
 
 pub async fn persist_manifest_checked(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) -> std::io::Result<()> {
@@ -551,7 +604,7 @@ pub(crate) async fn persist_reconciled_resolved_config_checked(
     error: Option<String>,
 ) -> std::io::Result<()> {
     update_record(camera_id, move |mut record| async move {
-        let mut resolved = resolved;
+        let mut resolved = canonicalize_resolved_capture_identity(resolved);
         if let Some(id) = stream_id {
             resolved.identity.id = Some(id);
             record.last_stream_id = Some(id);
@@ -741,10 +794,7 @@ pub async fn remove_record_by_stream_id(stream_id: Uuid) -> io::Result<bool> {
 }
 
 pub(crate) fn manifests_conflict(a: &ResolvedStreamConfig, b: &StreamManifest) -> bool {
-    if a.capture.device_keys.is_empty() || b.capture.device_keys.is_empty() {
-        return false;
-    }
-    a.capture.device_keys.iter().any(|key| b.capture.device_keys.iter().any(|other| other == key))
+    a.capture.matches_capture_target(&b.capture)
 }
 
 #[cfg(test)]
@@ -893,9 +943,45 @@ mod tests {
         assert_eq!(persisted_json.pointer("/stream/resolved_config/identity/id").and_then(serde_json::Value::as_str), stream_id.map(|id| id.to_string()).as_deref());
         let loaded = load_resolved_config(&camera_id).await.expect("load resolved config");
         assert_eq!(loaded.identity.id, stream_id);
-        let mut expected = resolved;
+        let mut expected = canonicalize_resolved_capture_identity(resolved);
         expected.identity.id = stream_id;
         assert_eq!(serde_json::to_value(loaded).expect("encode loaded"), serde_json::to_value(expected).expect("encode resolved"));
+    }
+
+    #[tokio::test]
+    async fn persist_resolved_config_auto_camera_id_checked_migrates_legacy_camera_id_for_same_stream() {
+        let _root = test_data_root();
+        let legacy_camera_id = format!("legacy-camera-{}", Uuid::new_v4());
+        let stable_camera_id = format!("libcamera:front-{}", Uuid::new_v4());
+        let stream_id = Some(Uuid::new_v4());
+
+        let mut manifest = sample_manifest();
+        manifest.capture.backend = styx::BackendKind::Libcamera;
+        manifest.capture.handle = styx::BackendHandle::Libcamera { id: format!("missing-handle-{}", Uuid::new_v4()) };
+        manifest.capture.device_keys = vec!["ov9782".to_string()];
+        manifest.capture.device_identity = Some(helios_engine::capture::CaptureDeviceIdentity {
+            display: Some("Front Camera".to_string()),
+            primary_key: Some(stable_camera_id.clone()),
+            keys: vec![stable_camera_id.clone(), "ov9782".to_string()],
+        });
+
+        let resolved = manifest.resolve();
+        persist_resolved_config_checked(&legacy_camera_id, stream_id, resolved.clone()).await.expect("persist legacy camera id record");
+
+        let legacy_path = record_path(&legacy_camera_id).await.expect("legacy record path");
+        assert!(fs::try_exists(&legacy_path).await.expect("legacy record exists before migration"));
+
+        let persisted_camera_id =
+            persist_resolved_config_auto_camera_id_checked(stream_id, resolved.clone()).await.expect("persist canonical camera id record");
+        assert_eq!(persisted_camera_id, stable_camera_id);
+
+        let stable_path = record_path(&stable_camera_id).await.expect("stable record path");
+        assert!(fs::try_exists(&stable_path).await.expect("stable record exists after migration"));
+        assert!(!fs::try_exists(&legacy_path).await.expect("legacy record removed after migration"));
+
+        let loaded = load_resolved_config(&stable_camera_id).await.expect("load stable resolved config");
+        assert_eq!(loaded.identity.id, stream_id);
+        assert_eq!(loaded.capture.device_identity.as_ref().and_then(|identity| identity.camera_id()), Some(stable_camera_id.clone()));
     }
 
     fn test_data_root() -> PathBuf {

@@ -1040,6 +1040,7 @@ mod tests {
                 backend: BackendKind::Libcamera,
                 handle: BackendHandle::Libcamera { id: "camera".to_string() },
                 mode: ModeId { format, interval: None },
+                device_identity: None,
                 target_fps: None,
                 interval: None,
                 controls: Vec::new(),
