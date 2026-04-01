@@ -1,0 +1,7 @@
+[units."helios-set-governor"]
+enabled = true
+src = "assets/services/cpu-governor/helios-set-governor.service"
+targets = ["multi-user"]
+assets = [
+  { src = "assets/services/cpu-governor/set-governor.sh", dst = "/opt/set-governor.sh", mode = 493 },
+]

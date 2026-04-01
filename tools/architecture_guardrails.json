@@ -1443,6 +1443,11 @@
   ],
   "forbidden_paths": [
     {
+      "path": "gaia/configs/modules/stage/services/runtime_core.toml",
+      "owner": "HeliOS",
+      "reason": "Runtime service wiring now lives in per-service modules under gaia/configs/modules/stage/services/runtime/*. Do not recreate the deleted runtime_core.toml aggregate."
+    },
+    {
       "path": "backend/src/helios-engine/src/localization/solve.rs",
       "owner": "HeliOS",
       "reason": "The localization solver now lives under backend/src/helios-engine/src/localization/solve/*. Do not recreate the old monolithic solve.rs path."

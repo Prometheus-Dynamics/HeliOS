@@ -1,0 +1,13 @@
+[units."helios-diagnostics"]
+enabled = true
+src = "assets/services/diagnostics/helios-diagnostics@.service"
+unit = "helios-diagnostics@.service"
+targets = []
+assets = [
+  { src = "assets/services/diagnostics/helios.diagnostics.conf", dst = "/etc/systemd/system/helios-api.service.d/diagnostics.conf", mode = 420 },
+  { src = "assets/services/diagnostics/helios.diagnostics.conf", dst = "/etc/systemd/system/helios-engine.service.d/diagnostics.conf", mode = 420 },
+  { src = "assets/services/diagnostics/helios.diagnostics.conf", dst = "/etc/systemd/system/helios-updater.service.d/diagnostics.conf", mode = 420 },
+  { src = "assets/services/diagnostics/helios.diagnostics.conf", dst = "/etc/systemd/system/helios-usb-recoveryd.service.d/diagnostics.conf", mode = 420 },
+  { src = "assets/services/diagnostics/helios-usb-gadget.diagnostics.conf", dst = "/etc/systemd/system/helios-usb-gadget.service.d/diagnostics.conf", mode = 420 },
+  { src = "assets/services/diagnostics/helios-dnsmasq.diagnostics.conf", dst = "/etc/systemd/system/helios-dnsmasq.service.d/diagnostics.conf", mode = 420 },
+]
