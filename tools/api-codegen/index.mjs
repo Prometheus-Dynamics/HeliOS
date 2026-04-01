@@ -4,6 +4,7 @@ import path from 'path';
 import { mkdtemp, mkdir, rm, cp, readFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { spawn } from 'child_process';
+import { generateCodecFamilies } from './generate-codec-families.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -221,6 +222,8 @@ async function main() {
 
   await cp(httpSpec, path.join(httpBindingsDir, 'openapi.json'), { force: true });
   await cp(wsSpec, path.join(wsBindingsDir, 'asyncapi.json'), { force: true });
+  log('codec-families', 'Generating shared codec family bindings');
+  await generateCodecFamilies();
   log('done', `Artifacts written to ${path.relative(repoRoot, tsBindingsRoot)}`);
 
   if (cleanupSpecDir) {

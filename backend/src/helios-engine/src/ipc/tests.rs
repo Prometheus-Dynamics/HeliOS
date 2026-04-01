@@ -175,6 +175,48 @@ fn stream_runtime_capabilities_match_enabled_registry() {
 }
 
 #[test]
+fn encoder_settings_kind_for_selector_supports_generated_runtime_ids() {
+    assert!(matches!(empty_encoder_settings_for_selector(Some("h264_v4l2m2m")), Some(EncoderSettings::H264 { .. })));
+    assert!(matches!(empty_encoder_settings_for_selector(Some("hevc_v4l2m2m")), Some(EncoderSettings::H265 { .. })));
+    assert!(matches!(empty_encoder_settings_for_selector(Some("turbojpeg")), Some(EncoderSettings::Turbojpeg { .. })));
+}
+
+#[test]
+fn normalize_requested_stream_encoder_preserves_runtime_implementation_ids() {
+    let mut exact = sample_manifest();
+    exact.encoder = RequestedEncoderConfig::enabled(Some("h264_v4l2m2m".to_string()), None);
+    normalize_requested_stream_encoder(&mut exact);
+    assert_eq!(exact.encoder.id(), Some("h264_v4l2m2m"));
+
+    let mut avc_alias = sample_manifest();
+    avc_alias.encoder = RequestedEncoderConfig::enabled(Some("avc".to_string()), None);
+    normalize_requested_stream_encoder(&mut avc_alias);
+    assert_eq!(avc_alias.encoder.id(), Some("h264"));
+
+    let mut jpeg_alias = sample_manifest();
+    jpeg_alias.encoder = RequestedEncoderConfig::enabled(Some("jpeg".to_string()), None);
+    normalize_requested_stream_encoder(&mut jpeg_alias);
+    assert_eq!(jpeg_alias.encoder.id(), Some("mjpeg"));
+}
+
+#[test]
+fn legacy_shadow_recording_mode_uses_generated_runtime_ids() {
+    let mut payload = sample_manifest_json();
+    let object = payload.as_object_mut().expect("manifest object");
+    object.insert(
+        "encoder".to_string(),
+        serde_json::json!({
+            "state": "enabled",
+            "id": "hevc_v4l2m2m"
+        }),
+    );
+    object.insert("shadow_recorder_enabled".to_string(), serde_json::json!(true));
+
+    let parsed: StreamManifest = serde_json::from_value(payload).expect("decode legacy shadow recorder manifest");
+    assert_eq!(parsed.recording_mode, StreamRecordingMode::ShadowBuffer { codec: RecordingCodec::H265 });
+}
+
+#[test]
 fn encoder_settings_accepts_rational_framerate_json() {
     let payload = serde_json::json!({
         "kind": "h264",

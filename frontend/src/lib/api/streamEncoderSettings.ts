@@ -1,4 +1,10 @@
 import type { CodecInfo, EncoderSettings, FrameRate, ResolutionHint } from '$lib/api/httpClient';
+import {
+  STREAM_ENCODER_FAMILIES,
+  STREAM_ENCODER_FAMILY_IDS,
+  type StreamEncoderFamily,
+  type StreamRecordingCodecId
+} from '$lib/ts-bindings/codecFamilies';
 
 type CodecLike = {
   implementation?: string | null;
@@ -22,6 +28,71 @@ export type EncoderSettingsDraft = {
 
 export type EncoderSettingsKind = EncoderSettings['kind'];
 
+function normalizeCodecToken(value: string | null | undefined): string {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function normalizeFourccToken(value: string | null | undefined): string {
+  const trimmed = String(value ?? '').trim();
+  return trimmed ? trimmed.split(/\s+/)[0]?.toUpperCase() ?? '' : '';
+}
+
+function encoderFamilyForKind(kind: EncoderSettingsKind | null | undefined): StreamEncoderFamily | null {
+  if (!kind) return null;
+  return STREAM_ENCODER_FAMILIES.find((family) => family.settingsKind === kind) ?? null;
+}
+
+function encoderFamilyForSelection(value: string | null | undefined): StreamEncoderFamily | null {
+  const normalized = normalizeCodecToken(value);
+  if (!normalized) return null;
+
+  const implementationMatches = STREAM_ENCODER_FAMILIES.filter((family) =>
+    family.runtimeImplementationAliases.some((alias) => normalizeCodecToken(alias) === normalized)
+  );
+  if (implementationMatches.length === 1 && normalized !== 'ffmpeg') {
+    return implementationMatches[0] ?? null;
+  }
+
+  return (
+    STREAM_ENCODER_FAMILIES.find(
+      (family) =>
+        normalizeCodecToken(family.selectorId) === normalized ||
+        family.selectorAliases.some((alias) => normalizeCodecToken(alias) === normalized)
+    ) ?? null
+  );
+}
+
+function encoderFamilyForCodec(codec: CodecLike | null | undefined): StreamEncoderFamily | null {
+  if (!codec) return null;
+
+  const implementation = normalizeCodecToken(codec.implementation);
+  if (implementation) {
+    const exact = STREAM_ENCODER_FAMILIES.filter((family) =>
+      family.runtimeImplementationAliases.some((alias) => normalizeCodecToken(alias) === implementation)
+    );
+    if (exact.length === 1 && implementation !== 'ffmpeg') {
+      return exact[0] ?? null;
+    }
+    if (implementation === 'ffmpeg') {
+      const outputTokens = [codec.output, codec.fourcc, codec.input].map((value) => normalizeFourccToken(value)).filter(Boolean);
+      const nameToken = normalizeCodecToken(codec.name);
+      const match =
+        exact.find(
+          (family) =>
+            family.outputFourccAliases.some((alias) => outputTokens.includes(normalizeFourccToken(alias))) ||
+            family.runtimeNameAliases.some((alias) => normalizeCodecToken(alias) === nameToken)
+        ) ?? null;
+      if (match) return match;
+    }
+  }
+
+  for (const candidate of [codec.name, codec.fourcc, codec.output, codec.input]) {
+    const match = encoderFamilyForSelection(candidate);
+    if (match) return match;
+  }
+  return null;
+}
+
 export function createEncoderSettingsDraft(): EncoderSettingsDraft {
   return {
     quality: null,
@@ -36,59 +107,42 @@ export function createEncoderSettingsDraft(): EncoderSettingsDraft {
 }
 
 export function encoderSettingsKindForSelection(value: string | null | undefined): EncoderSettingsKind | null {
-  const normalized = String(value ?? '').trim().toLowerCase();
-  if (!normalized) return null;
-  if (normalized.includes('turbojpeg')) return 'turbojpeg';
-  if (normalized.includes('mozjpeg')) return 'mozjpeg';
-  if (normalized === 'h264' || normalized.includes('h264') || normalized.includes('avc')) return 'h264';
-  if (normalized === 'h265' || normalized.includes('h265') || normalized.includes('hevc')) return 'h265';
-  if (normalized === 'mjpeg' || normalized === 'mjpg' || normalized === 'jpeg' || normalized.includes('mjpeg') || normalized.includes('mjpg')) {
-    return 'ffmpeg_mjpeg';
-  }
-  return null;
+  return encoderFamilyForSelection(value)?.settingsKind ?? null;
 }
 
 export function encoderSelectorForKind(kind: EncoderSettingsKind | null | undefined): string | null {
-  switch (kind) {
-    case 'turbojpeg':
-      return 'turbojpeg';
-    case 'mozjpeg':
-      return 'mozjpeg';
-    case 'ffmpeg_mjpeg':
-      return 'mjpeg';
-    case 'h264':
-      return 'h264';
-    case 'h265':
-      return 'h265';
-    default:
-      return null;
-  }
+  return encoderFamilyForKind(kind)?.selectorId ?? null;
 }
 
 export function encoderSettingsKindForCodec(codec: CodecLike | null | undefined): EncoderSettingsKind | null {
-  if (!codec) return null;
-  for (const candidate of [codec.implementation, codec.name, codec.fourcc, codec.output, codec.input]) {
-    const kind = encoderSettingsKindForSelection(candidate);
-    if (kind) return kind;
-  }
-  return null;
+  return encoderFamilyForCodec(codec)?.settingsKind ?? null;
 }
 
 export function encoderSelectionId(codec: CodecLike | null | undefined): string | null {
-  const typed = encoderSelectorForKind(encoderSettingsKindForCodec(codec));
-  if (typed) return typed;
   const implementation = String(codec?.implementation ?? '').trim();
   if (implementation) return implementation;
+  const typed = encoderFamilyForCodec(codec)?.selectorId ?? null;
+  if (typed) return typed;
   const name = String(codec?.name ?? '').trim();
   return name || null;
 }
 
 export function encoderSettingsSupportsQuality(kind: EncoderSettingsKind | null | undefined): boolean {
-  return kind === 'turbojpeg' || kind === 'mozjpeg';
+  const family = encoderFamilyForKind(kind);
+  return family?.id === STREAM_ENCODER_FAMILY_IDS.TURBOJPEG || family?.id === STREAM_ENCODER_FAMILY_IDS.MOZJPEG;
 }
 
 export function encoderSettingsSupportsVideoControls(kind: EncoderSettingsKind | null | undefined): boolean {
-  return kind === 'ffmpeg_mjpeg' || kind === 'h264' || kind === 'h265';
+  const family = encoderFamilyForKind(kind);
+  return (
+    family?.id === STREAM_ENCODER_FAMILY_IDS.FFMPEG_MJPEG ||
+    family?.id === STREAM_ENCODER_FAMILY_IDS.H264 ||
+    family?.id === STREAM_ENCODER_FAMILY_IDS.H265
+  );
+}
+
+export function encoderRecordingCodecForSelection(value: string | null | undefined): StreamRecordingCodecId | null {
+  return encoderFamilyForSelection(value)?.recordingCodec ?? null;
 }
 
 export function encoderSettingsSummary(settings: EncoderSettings | null | undefined): string | null {

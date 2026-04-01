@@ -1,3 +1,5 @@
+import { encoderRecordingCodecForSelection } from './streamEncoderSettings';
+
 export type StreamRecordingCodec = 'h264' | 'h265';
 
 export type StreamRecordingModeWire =
@@ -14,12 +16,7 @@ export function defaultRecordingMode(): StreamRecordingModeWire {
 }
 
 export function inferRecordingCodecFromEncoderId(value: string | null | undefined): StreamRecordingCodec | null {
-  const normalized = String(value ?? '').trim().toLowerCase();
-  if (!normalized) return null;
-  const h264 = normalized === 'h264' || normalized === 'avc' || normalized.includes('h264') || normalized.includes('avc');
-  const h265 = normalized === 'h265' || normalized === 'hevc' || normalized.includes('h265') || normalized.includes('hevc');
-  if (h264 === h265) return null;
-  return h265 ? 'h265' : 'h264';
+  return encoderRecordingCodecForSelection(value);
 }
 
 export function normalizeRecordingMode(value: unknown): StreamRecordingModeWire {

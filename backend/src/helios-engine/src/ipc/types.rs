@@ -21,6 +21,10 @@ use styx::codec::{CodecKind, CodecRegistry};
 use styx::prelude::{FourCc, Resolution};
 use styx::BackendKind;
 
+mod generated_codec_families;
+
+use self::generated_codec_families::{GeneratedEncoderFamilySpec, GeneratedEncoderFamilyVariant, GENERATED_ENCODER_FAMILY_SPECS};
+
 pub type ControlId = u32;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, ToSchema, PartialEq)]
@@ -997,47 +1001,70 @@ fn gcd_u32(mut a: u32, mut b: u32) -> u32 {
     }
 }
 
-fn encoder_settings_kind_for_codec_desc(desc: &styx::codec::CodecDescriptor) -> Option<EncoderSettingsKind> {
+fn encoder_settings_kind_from_generated_variant(variant: GeneratedEncoderFamilyVariant) -> EncoderSettingsKind {
+    match variant {
+        GeneratedEncoderFamilyVariant::Turbojpeg => EncoderSettingsKind::Turbojpeg,
+        GeneratedEncoderFamilyVariant::Mozjpeg => EncoderSettingsKind::Mozjpeg,
+        GeneratedEncoderFamilyVariant::FfmpegMjpeg => EncoderSettingsKind::FfmpegMjpeg,
+        GeneratedEncoderFamilyVariant::H264 => EncoderSettingsKind::H264,
+        GeneratedEncoderFamilyVariant::H265 => EncoderSettingsKind::H265,
+    }
+}
+
+fn generated_encoder_family_spec_for_kind(kind: EncoderSettingsKind) -> &'static GeneratedEncoderFamilySpec {
+    GENERATED_ENCODER_FAMILY_SPECS.iter().find(|spec| encoder_settings_kind_from_generated_variant(spec.variant) == kind).expect("generated encoder family spec for settings kind")
+}
+
+fn generated_encoder_family_spec_for_runtime_descriptor(desc: &styx::codec::CodecDescriptor) -> Option<&'static GeneratedEncoderFamilySpec> {
     if desc.kind != CodecKind::Encoder {
         return None;
     }
-    if desc.impl_name.eq_ignore_ascii_case("turbojpeg") {
-        return Some(EncoderSettingsKind::Turbojpeg);
-    }
-    if desc.impl_name.eq_ignore_ascii_case("mozjpeg") {
-        return Some(EncoderSettingsKind::Mozjpeg);
-    }
-    let output = desc.output.to_u32().to_le_bytes();
-    if matches!(&output, b"H264") || desc.name.eq_ignore_ascii_case("h264") {
-        return Some(EncoderSettingsKind::H264);
-    }
-    if matches!(&output, b"H265" | b"HEVC") || desc.name.eq_ignore_ascii_case("h265") || desc.name.eq_ignore_ascii_case("hevc") {
-        return Some(EncoderSettingsKind::H265);
-    }
-    if matches!(&output, b"MJPG" | b"JPEG") || desc.name.eq_ignore_ascii_case("mjpeg") {
-        return Some(EncoderSettingsKind::FfmpegMjpeg);
-    }
-    None
+
+    GENERATED_ENCODER_FAMILY_SPECS.iter().find(|spec| {
+        let implementation_matches = spec.runtime_implementation_aliases.iter().any(|alias| desc.impl_name.eq_ignore_ascii_case(alias));
+        if !implementation_matches {
+            return false;
+        }
+        if !desc.impl_name.eq_ignore_ascii_case("ffmpeg") {
+            return true;
+        }
+
+        let output = desc.output.to_string();
+        spec.runtime_name_aliases.iter().any(|alias| desc.name.eq_ignore_ascii_case(alias)) || spec.output_fourcc_aliases.iter().any(|alias| output.eq_ignore_ascii_case(alias))
+    })
+}
+
+fn generated_encoder_family_spec_for_runtime_codec(implementation: &str, fourcc: FourCc) -> Option<&'static GeneratedEncoderFamilySpec> {
+    GENERATED_ENCODER_FAMILY_SPECS.iter().find(|spec| {
+        let implementation_matches = spec.runtime_implementation_aliases.iter().any(|alias| implementation.eq_ignore_ascii_case(alias));
+        if !implementation_matches {
+            return false;
+        }
+        if !implementation.eq_ignore_ascii_case("ffmpeg") {
+            return true;
+        }
+
+        let output = fourcc.to_string();
+        spec.output_fourcc_aliases.iter().any(|alias| output.eq_ignore_ascii_case(alias))
+    })
+}
+
+fn generated_encoder_family_spec_for_selector_alias(selector: &str) -> Option<&'static GeneratedEncoderFamilySpec> {
+    GENERATED_ENCODER_FAMILY_SPECS.iter().find(|spec| {
+        spec.selector_id.eq_ignore_ascii_case(selector)
+            || spec.selector_aliases.iter().any(|alias| selector.eq_ignore_ascii_case(alias))
+            || (!selector.eq_ignore_ascii_case("ffmpeg") && spec.runtime_implementation_aliases.iter().any(|alias| selector.eq_ignore_ascii_case(alias)))
+    })
+}
+
+fn encoder_settings_kind_for_codec_desc(desc: &styx::codec::CodecDescriptor) -> Option<EncoderSettingsKind> {
+    generated_encoder_family_spec_for_runtime_descriptor(desc).map(|spec| encoder_settings_kind_from_generated_variant(spec.variant))
 }
 
 fn encoder_settings_kind_for_selector(selector: Option<&str>) -> Option<EncoderSettingsKind> {
     let selector = selector.map(str::trim).filter(|value| !value.is_empty())?;
-    if selector.eq_ignore_ascii_case("turbojpeg") {
-        return Some(EncoderSettingsKind::Turbojpeg);
-    }
-    if selector.eq_ignore_ascii_case("mozjpeg") {
-        return Some(EncoderSettingsKind::Mozjpeg);
-    }
-
-    let lowered = selector.to_ascii_lowercase();
-    if selector.eq_ignore_ascii_case("h264") || selector.eq_ignore_ascii_case("avc") || lowered.contains("h264") || lowered.contains("avc") {
-        return Some(EncoderSettingsKind::H264);
-    }
-    if selector.eq_ignore_ascii_case("h265") || selector.eq_ignore_ascii_case("hevc") || lowered.contains("h265") || lowered.contains("hevc") {
-        return Some(EncoderSettingsKind::H265);
-    }
-    if matches!(lowered.as_str(), "mjpeg" | "mjpg" | "jpeg") {
-        return Some(EncoderSettingsKind::FfmpegMjpeg);
+    if let Some(spec) = generated_encoder_family_spec_for_selector_alias(selector) {
+        return Some(encoder_settings_kind_from_generated_variant(spec.variant));
     }
 
     let Ok(entries) = CodecRegistry::list_enabled_codecs() else {
@@ -1066,34 +1093,30 @@ fn encoder_settings_kind_for_selector(selector: Option<&str>) -> Option<EncoderS
 }
 
 fn selector_name_for_encoder_settings_kind(kind: EncoderSettingsKind) -> &'static str {
-    match kind {
-        EncoderSettingsKind::Turbojpeg => "turbojpeg",
-        EncoderSettingsKind::Mozjpeg => "mozjpeg",
-        EncoderSettingsKind::FfmpegMjpeg => "mjpeg",
-        EncoderSettingsKind::H264 => "h264",
-        EncoderSettingsKind::H265 => "h265",
-    }
+    generated_encoder_family_spec_for_kind(kind).selector_id
 }
 
 pub fn default_encoder_settings_for_codec(fourcc: FourCc, implementation: &str) -> Option<EncoderSettings> {
-    if implementation.eq_ignore_ascii_case("turbojpeg") {
-        return Some(EncoderSettings::Turbojpeg { quality: Some(85) });
-    }
-    if implementation.eq_ignore_ascii_case("mozjpeg") {
-        return Some(EncoderSettings::Mozjpeg { quality: Some(85) });
-    }
-    if !implementation.eq_ignore_ascii_case("ffmpeg") {
-        return None;
-    }
-
-    let default_framerate = Some(FrameRate { numerator: 60, denominator: 1 });
-    let default_output_resolution = Some(ResolutionHint { width: 854, height: 480 });
-
-    match &fourcc.to_u32().to_le_bytes() {
-        b"MJPG" | b"JPEG" => Some(EncoderSettings::FfmpegMjpeg { bitrate: Some(4_000_000), gop: None, framerate: default_framerate, thread_count: None, output_resolution: default_output_resolution }),
-        b"H264" => Some(EncoderSettings::H264 { bitrate: Some(4_000_000), gop: None, framerate: default_framerate, thread_count: None, output_resolution: default_output_resolution }),
-        b"H265" | b"HEVC" => Some(EncoderSettings::H265 { bitrate: Some(4_000_000), gop: None, framerate: default_framerate, thread_count: None, output_resolution: default_output_resolution }),
-        _ => None,
+    let spec = generated_encoder_family_spec_for_runtime_codec(implementation, fourcc)?;
+    match spec.variant {
+        GeneratedEncoderFamilyVariant::Turbojpeg => Some(EncoderSettings::Turbojpeg { quality: Some(85) }),
+        GeneratedEncoderFamilyVariant::Mozjpeg => Some(EncoderSettings::Mozjpeg { quality: Some(85) }),
+        GeneratedEncoderFamilyVariant::FfmpegMjpeg | GeneratedEncoderFamilyVariant::H264 | GeneratedEncoderFamilyVariant::H265 => {
+            let default_framerate = Some(FrameRate { numerator: 60, denominator: 1 });
+            let default_output_resolution = Some(ResolutionHint { width: 854, height: 480 });
+            match spec.variant {
+                GeneratedEncoderFamilyVariant::FfmpegMjpeg => {
+                    Some(EncoderSettings::FfmpegMjpeg { bitrate: Some(4_000_000), gop: None, framerate: default_framerate, thread_count: None, output_resolution: default_output_resolution })
+                }
+                GeneratedEncoderFamilyVariant::H264 => {
+                    Some(EncoderSettings::H264 { bitrate: Some(4_000_000), gop: None, framerate: default_framerate, thread_count: None, output_resolution: default_output_resolution })
+                }
+                GeneratedEncoderFamilyVariant::H265 => {
+                    Some(EncoderSettings::H265 { bitrate: Some(4_000_000), gop: None, framerate: default_framerate, thread_count: None, output_resolution: default_output_resolution })
+                }
+                GeneratedEncoderFamilyVariant::Turbojpeg | GeneratedEncoderFamilyVariant::Mozjpeg => unreachable!("handled above"),
+            }
+        }
     }
 }
 
@@ -1113,14 +1136,10 @@ fn canonical_encoder_selector(selector: Option<&str>, settings: Option<&EncoderS
     if selector.eq_ignore_ascii_case("ffmpeg") {
         return settings.map(EncoderSettings::settings_kind).map(selector_name_for_encoder_settings_kind).map(ToString::to_string);
     }
-    if selector.eq_ignore_ascii_case("avc") {
-        return Some("h264".to_string());
-    }
-    if selector.eq_ignore_ascii_case("hevc") {
-        return Some("h265".to_string());
-    }
-    if matches!(selector.to_ascii_lowercase().as_str(), "mjpg" | "jpeg") {
-        return Some("mjpeg".to_string());
+    if let Some(spec) =
+        GENERATED_ENCODER_FAMILY_SPECS.iter().find(|spec| !spec.selector_id.eq_ignore_ascii_case(selector) && spec.selector_aliases.iter().any(|alias| selector.eq_ignore_ascii_case(alias)))
+    {
+        return Some(spec.selector_id.to_string());
     }
     None
 }
@@ -2796,12 +2815,9 @@ fn legacy_shadow_recording_codec_for_encoder(encoder_id: &str) -> Option<Recordi
         return None;
     }
 
-    let lowered = encoder_id.to_ascii_lowercase();
-    let h264 = encoder_id.eq_ignore_ascii_case("h264") || encoder_id.eq_ignore_ascii_case("avc") || lowered.contains("h264") || lowered.contains("avc");
-    let h265 = encoder_id.eq_ignore_ascii_case("h265") || encoder_id.eq_ignore_ascii_case("hevc") || lowered.contains("h265") || lowered.contains("hevc");
-    match (h264, h265) {
-        (true, false) => Some(RecordingCodec::H264),
-        (false, true) => Some(RecordingCodec::H265),
+    match generated_encoder_family_spec_for_kind(encoder_settings_kind_for_selector(Some(encoder_id))?).recording_codec {
+        Some("h264") => Some(RecordingCodec::H264),
+        Some("h265") => Some(RecordingCodec::H265),
         _ => None,
     }
 }

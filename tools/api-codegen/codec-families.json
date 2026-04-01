@@ -1,0 +1,59 @@
+{
+  "encoderFamilies": [
+    {
+      "id": "turbojpeg",
+      "rustVariant": "Turbojpeg",
+      "settingsKind": "turbojpeg",
+      "selectorId": "turbojpeg",
+      "selectorAliases": ["turbojpeg"],
+      "runtimeImplementationAliases": ["turbojpeg"],
+      "runtimeNameAliases": [],
+      "outputFourccAliases": ["MJPG", "JPEG"],
+      "recordingCodec": null
+    },
+    {
+      "id": "mozjpeg",
+      "rustVariant": "Mozjpeg",
+      "settingsKind": "mozjpeg",
+      "selectorId": "mozjpeg",
+      "selectorAliases": ["mozjpeg"],
+      "runtimeImplementationAliases": ["mozjpeg"],
+      "runtimeNameAliases": [],
+      "outputFourccAliases": ["MJPG", "JPEG"],
+      "recordingCodec": null
+    },
+    {
+      "id": "ffmpeg_mjpeg",
+      "rustVariant": "FfmpegMjpeg",
+      "settingsKind": "ffmpeg_mjpeg",
+      "selectorId": "mjpeg",
+      "selectorAliases": ["mjpeg", "mjpg", "jpeg"],
+      "runtimeImplementationAliases": ["ffmpeg"],
+      "runtimeNameAliases": ["mjpeg"],
+      "outputFourccAliases": ["MJPG", "JPEG"],
+      "recordingCodec": null
+    },
+    {
+      "id": "h264",
+      "rustVariant": "H264",
+      "settingsKind": "h264",
+      "selectorId": "h264",
+      "selectorAliases": ["h264", "avc"],
+      "runtimeImplementationAliases": ["ffmpeg", "h264_v4l2m2m"],
+      "runtimeNameAliases": ["h264", "avc"],
+      "outputFourccAliases": ["H264"],
+      "recordingCodec": "h264"
+    },
+    {
+      "id": "h265",
+      "rustVariant": "H265",
+      "settingsKind": "h265",
+      "selectorId": "h265",
+      "selectorAliases": ["h265", "hevc"],
+      "runtimeImplementationAliases": ["ffmpeg", "hevc_v4l2m2m", "h265_v4l2m2m"],
+      "runtimeNameAliases": ["h265", "hevc"],
+      "outputFourccAliases": ["H265", "HEVC"],
+      "recordingCodec": "h265"
+    }
+  ]
+}
