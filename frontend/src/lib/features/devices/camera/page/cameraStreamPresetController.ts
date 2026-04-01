@@ -2,6 +2,7 @@ import { withCurrentStreamManifestSchema } from '$lib/api/streamSchema';
 import type { CodecInfo, Interval, Mode, ProbedBackend, ProbedDevice, StreamInfo, StreamManifest } from '$lib/api/httpClient';
 import { OpenAPI, getHttpClientBase } from '$lib/api/httpClient';
 import { extractError } from '$lib/api/errors';
+import { buildEncoderSettingsForSelection, type EncoderSettingsDraft } from '$lib/api/streamEncoderSettings';
 import { defaultPreviewJpegQualityForEncoder, type StreamCreationDefaults } from '$lib/api/streamDefaults';
 import { recordingModeFromToggle } from '$lib/api/streamRecordingMode';
 import type { PipelinesApi } from '$lib/api/pipelinesApi';
@@ -42,13 +43,7 @@ type PresetState = {
   get encoderEnabled(): boolean;
   get decoderEnabled(): boolean;
   get encoderSelectionTouched(): boolean;
-  get encoderSettings(): {
-    bitrate: number | null;
-    gop: number | null;
-    threadCount: number | null;
-    outWidth: number | null;
-    outHeight: number | null;
-  };
+  get encoderSettings(): EncoderSettingsDraft;
   get encoderFpsLimit(): number | null;
   get decoderFpsLimit(): number | null;
   get decoderRotationDegrees(): number | null;
@@ -330,6 +325,11 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
         throw new Error('Stream defaults are unavailable');
       }
 
+      const encoderSettingsWire = buildEncoderSettingsForSelection(encoderId, state.encoderSettings, {
+        frameRate: fpsToFrameRate(state.encoderFpsLimit),
+        defaultOutputResolution: defaultEncoderOutputResolution
+      });
+
       const payload = withCurrentStreamManifestSchema({
         identity,
         capture: {
@@ -345,16 +345,7 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
           ? {
               state: 'enabled',
               id: encoderId,
-              settings: {
-                bitrate: state.encoderSettings?.bitrate ?? null,
-                gop: state.encoderSettings?.gop ?? null,
-                thread_count: state.encoderSettings?.threadCount ?? null,
-                framerate: fpsToFrameRate(state.encoderFpsLimit),
-                output_resolution:
-                  state.encoderSettings?.outWidth && state.encoderSettings?.outHeight
-                    ? { width: state.encoderSettings.outWidth, height: state.encoderSettings.outHeight }
-                    : defaultEncoderOutputResolution
-              }
+              settings: encoderSettingsWire ?? undefined
             }
           : {
               state: 'disabled'

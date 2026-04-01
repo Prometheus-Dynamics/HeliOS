@@ -1,4 +1,5 @@
 import type { CodecInfo } from '$lib/api/httpClient';
+import { encoderSelectionId } from '$lib/api/streamEncoderSettings';
 
 import { asTrimmedString, normalizeFormatKey } from './cameraBackendSupport';
 
@@ -15,6 +16,9 @@ export function dedupeCodecs(list: CodecInfo[], keyFn: (codec: CodecInfo) => str
 }
 
 export function codecSelectionId(codec: CodecInfo): string | null {
+  if (String(codec.kind ?? '').toLowerCase() === 'encoder') {
+    return encoderSelectionId(codec);
+  }
   const name = String(codec.name ?? '').trim();
   const implementation = String(codec.implementation ?? '').trim();
   return implementation || name || null;
@@ -23,6 +27,9 @@ export function codecSelectionId(codec: CodecInfo): string | null {
 export function preferredCodecMatch(list: CodecInfo[], key: string): CodecInfo | null {
   const normalized = key.trim().toLowerCase();
   if (!normalized) return null;
+
+  const directSelection = list.find((codec) => String(codecSelectionId(codec) ?? '').trim().toLowerCase() === normalized);
+  if (directSelection) return directSelection;
 
   const directImpl = list.find((codec) => String(codec.implementation ?? '').trim().toLowerCase() === normalized);
   if (directImpl) return directImpl;

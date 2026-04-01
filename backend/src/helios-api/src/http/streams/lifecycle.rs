@@ -21,7 +21,7 @@ use crate::http::validation::validation_error_response;
 use super::sensor_bench;
 use super::types::{CodecInfo, CodecTunables, StartStreamResponse, StreamInfo};
 use super::util::{
-    apply_effective_pipeline_layout, build_stream_info, camera_id_for_manifest, default_ffmpeg_settings_descriptor, engine_error_body, list_streams_timeout, map_client_error,
+    apply_effective_pipeline_layout, build_stream_info, camera_id_for_manifest, default_encoder_settings_for_codec, engine_error_body, list_streams_timeout, map_client_error,
     normalize_pipeline_manifest, normalize_stream_encoder_manifest,
 };
 use super::validation::validate_stream_manifest;
@@ -749,8 +749,8 @@ pub(crate) fn codec_inventory() -> Result<Vec<CodecInfo>, String> {
                 .into_iter()
                 .flat_map(|(fourcc, descs)| {
                     descs.into_iter().map(move |desc| {
-                        let tunables = if desc.kind == CodecKind::Encoder && desc.impl_name.eq_ignore_ascii_case("ffmpeg") {
-                            Some(CodecTunables { encoder_settings: Some(default_ffmpeg_settings_descriptor()) })
+                        let tunables = if desc.kind == CodecKind::Encoder {
+                            default_encoder_settings_for_codec(fourcc, desc.impl_name).map(|encoder_settings| CodecTunables { encoder_settings: Some(encoder_settings) })
                         } else {
                             None
                         };

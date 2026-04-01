@@ -3,6 +3,7 @@
   import { onDestroy, onMount, untrack, type ComponentProps, type Snippet } from 'svelte';
   import type { PageData } from '../../../../../routes/devices/[cameraId]/$types';
   import { DeviceService, OpenAPI, getHttpClientBase } from '$lib/api/httpClient';
+  import { encoderSelectionId } from '$lib/api/streamEncoderSettings';
   import { apiFetchResponse } from '$lib/api/core/http';
   import { PipelinesApi } from '$lib/api/pipelinesApi';
   import { fromApiGraphPlan } from '$lib/features/pipelines/graphConverters';
@@ -809,7 +810,7 @@
     Boolean(
       streamState.encoderEnabled &&
         streamState.encoderImpl &&
-        streamState.encoders.find((c) => c.implementation === streamState.encoderImpl || c.name === streamState.encoderImpl)
+        streamState.encoders.find((c) => encoderSelectionId(c) === streamState.encoderImpl || c.implementation === streamState.encoderImpl || c.name === streamState.encoderImpl)
           ?.tunables?.encoder_settings
     )
   );

@@ -1,5 +1,6 @@
 import type {
   CodecInfo,
+  EncoderSettings,
   ProbedBackend,
   ProbedDevice,
   StreamInfo,
@@ -8,6 +9,7 @@ import type {
   Interval
 } from '$lib/api/httpClient';
 import type { StreamsApi } from '$lib/api/streamsApi';
+import { createEncoderSettingsDraft, encoderSettingsDraftFromUnknown, type EncoderSettingsDraft } from '$lib/api/streamEncoderSettings';
 import {
   defaultPreviewJpegQualityForEncoder,
   resolveStreamCreationDefaults,
@@ -77,14 +79,8 @@ type BackendState = {
   set encoderSelectionTouched(value: boolean);
   get decoderSelectionTouched(): boolean;
   set decoderSelectionTouched(value: boolean);
-  get encoderSettings(): {
-    bitrate: number | null;
-    gop: number | null;
-    threadCount: number | null;
-    outWidth: number | null;
-    outHeight: number | null;
-  };
-  set encoderSettings(value: { bitrate: number | null; gop: number | null; threadCount: number | null; outWidth: number | null; outHeight: number | null });
+  get encoderSettings(): EncoderSettingsDraft;
+  set encoderSettings(value: EncoderSettingsDraft);
   get encoderFpsLimit(): number | null;
   set encoderFpsLimit(value: number | null);
   get decoderFpsLimit(): number | null;
@@ -184,8 +180,8 @@ export function createCameraBackendController(state: BackendState, deps: Backend
     const legacyEnabled = asRecord(manifest)?.encoder_enabled;
     return typeof legacyEnabled === 'boolean' ? (legacyEnabled ? 'enabled' : 'disabled') : null;
   };
-  const requestedEncoderSettingsFor = (manifest?: StreamManifest | null): Record<string, unknown> | null =>
-    asRecord(requestedEncoderRecordFor(manifest)?.settings) ?? asRecord(asRecord(manifest)?.encoder_settings);
+  const requestedEncoderSettingsFor = (manifest?: StreamManifest | null): EncoderSettings | Record<string, unknown> | null =>
+    ((requestedEncoderRecordFor(manifest)?.settings as EncoderSettings | undefined) ?? asRecord(asRecord(manifest)?.encoder_settings));
   const requestedDecoderRecordFor = (manifest?: StreamManifest | null): Record<string, unknown> | null =>
     asRecord(asRecord(manifest)?.decoder);
   const requestedDecoderIdFor = (manifest?: StreamManifest | null): string | null => {
@@ -286,7 +282,7 @@ export function createCameraBackendController(state: BackendState, deps: Backend
     const requestedDecoderState = requestedDecoderStateFor(manifest);
     const decoderSettingsWire = requestedDecoderSettingsFor(manifest);
     if (manifest) {
-      state.decoderFpsLimit = deps.normalizeFpsLimit(decoderSettingsWire?.fps_limit ?? encoderSettingsWire?.decode_fps_limit ?? null);
+      state.decoderFpsLimit = deps.normalizeFpsLimit(decoderSettingsWire?.fps_limit ?? null);
       state.decoderRotationDegrees = deps.normalizeRotationDegrees(decoderSettingsWire?.rotation_degrees ?? 0);
       state.decoderMirrorHorizontal = Boolean(decoderSettingsWire?.mirror_horizontal ?? false);
     }
@@ -405,16 +401,16 @@ export function createCameraBackendController(state: BackendState, deps: Backend
       defaultPreviewJpegQualityForEncoder(streamDefaults, state.encoderEnabled) ??
       state.previewJpegQuality;
     if (encoderSettingsWire) {
-      const outputResolution = asRecord(encoderSettingsWire.output_resolution);
-      state.encoderSettings = {
-        bitrate: asFiniteNumber(encoderSettingsWire.bitrate),
-        gop: asFiniteNumber(encoderSettingsWire.gop),
-        threadCount: asFiniteNumber(encoderSettingsWire.thread_count),
-        outWidth: asFiniteNumber(outputResolution?.width),
-        outHeight: asFiniteNumber(outputResolution?.height)
-      };
-      state.encoderFpsLimit = deps.frameRateToFps(encoderSettingsWire.framerate) ?? null;
+      const parsedEncoderSettings = encoderSettingsDraftFromUnknown(encoderSettingsWire);
+      state.encoderSettings = parsedEncoderSettings;
+      state.encoderFpsLimit =
+        deps.frameRateToFps(
+          parsedEncoderSettings.framerateNum && parsedEncoderSettings.framerateDen
+            ? { numerator: parsedEncoderSettings.framerateNum, denominator: parsedEncoderSettings.framerateDen }
+            : null
+        ) ?? null;
     } else {
+      state.encoderSettings = createEncoderSettingsDraft();
       state.encoderFpsLimit = null;
     }
     if (state.encoders.length && !state.encoderSelectionTouched) {

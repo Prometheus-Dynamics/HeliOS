@@ -7,7 +7,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use metrics::histogram;
 use styx::codec::ffmpeg::{FfmpegEncoderOptions, FfmpegH264Encoder, FfmpegH265Encoder, FfmpegMjpegEncoder};
 use styx::codec::{Codec, CodecKind, CodecPolicy, CodecRegistry};
-use styx::prelude::FourCc;
+use styx::prelude::{FourCc, TurbojpegEncoder};
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
@@ -625,7 +625,7 @@ impl StreamRunner {
         let encoder_shmem = self.shmem.take();
         let encoder_selector = self.encoder_id.clone().unwrap_or_default();
         let encoder = self
-            .build_ffmpeg_encoder_for_worker(encode_input)
+            .build_custom_encoder_for_worker(encode_input)
             .or_else(|| {
                 codecs
                     .lookup_named_kind(encode_input, CodecKind::Encoder, encoder_selector.as_str())
@@ -703,6 +703,32 @@ impl StreamRunner {
         cores.saturating_sub(reserve).clamp(1, 4)
     }
 
+    fn build_custom_encoder_for_worker(&self, encode_input: FourCc) -> Option<Arc<dyn Codec>> {
+        if let Some(encoder) = self.build_ffmpeg_encoder_for_worker(encode_input) {
+            return Some(encoder);
+        }
+        self.build_turbojpeg_encoder_for_worker(encode_input)
+    }
+
+    fn build_turbojpeg_encoder_for_worker(&self, encode_input: FourCc) -> Option<Arc<dyn Codec>> {
+        if !self.encoder_impl.as_deref().is_some_and(|impl_name| impl_name.eq_ignore_ascii_case("turbojpeg")) {
+            return None;
+        }
+        let encode_output = self.encode_fourcc?;
+        if !matches!(&encode_output.to_u32().to_le_bytes(), b"MJPG" | b"JPEG") {
+            return None;
+        }
+
+        let quality = self
+            .encoder_settings
+            .as_ref()
+            .and_then(|settings| settings.quality())
+            .filter(|value| *value > 0)
+            .unwrap_or(85) as i32;
+
+        Some(Arc::new(TurbojpegEncoder::new(encode_input, quality)) as Arc<dyn Codec>)
+    }
+
     fn build_ffmpeg_encoder_for_worker(&self, encode_input: FourCc) -> Option<Arc<dyn Codec>> {
         if !self.encoder_impl.as_deref().is_some_and(|impl_name| impl_name.eq_ignore_ascii_case("ffmpeg")) {
             return None;
@@ -710,17 +736,17 @@ impl StreamRunner {
 
         let mut opts = FfmpegEncoderOptions::default();
         if let Some(settings) = self.encoder_settings.as_ref() {
-            if let Some(bitrate) = settings.bitrate.filter(|value| *value > 0) {
+            if let Some(bitrate) = settings.bitrate().filter(|value| *value > 0) {
                 opts.bitrate = bitrate;
             }
-            if let Some(gop) = settings.gop.filter(|value| *value > 0) {
+            if let Some(gop) = settings.gop().filter(|value| *value > 0) {
                 opts.gop = Some(gop);
             }
-            if let Some(rate) = settings.framerate.as_ref().and_then(|rate| if rate.numerator > 0 && rate.denominator > 0 { Some((rate.numerator, rate.denominator)) } else { None }) {
+            if let Some(rate) = settings.framerate().and_then(|rate| if rate.numerator > 0 && rate.denominator > 0 { Some((rate.numerator, rate.denominator)) } else { None }) {
                 opts.framerate = Some(rate);
             }
-            opts.thread_count = settings.thread_count.filter(|value| *value > 0);
-            if let Some(out) = settings.output_resolution.as_ref().and_then(|res| styx::prelude::Resolution::new(res.width, res.height)) {
+            opts.thread_count = settings.thread_count().filter(|value| *value > 0);
+            if let Some(out) = settings.output_resolution().and_then(|res| styx::prelude::Resolution::new(res.width, res.height)) {
                 opts.output_resolution = Some(out);
             }
         }

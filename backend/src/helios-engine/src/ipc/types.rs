@@ -642,7 +642,7 @@ pub enum EngineCommand {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, ToSchema, PartialEq)]
 pub struct FrameRate {
     pub numerator: u32,
     pub denominator: u32,
@@ -670,14 +670,299 @@ pub struct RecordingSettings {
     pub max_height: Option<u32>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, ToSchema, PartialEq)]
 pub struct ResolutionHint {
     pub width: u32,
     pub height: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, Default, ToSchema)]
-pub struct EncoderSettings {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum EncoderSettingsKind {
+    Turbojpeg,
+    Mozjpeg,
+    FfmpegMjpeg,
+    H264,
+    H265,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, ToSchema, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum EncoderSettings {
+    Turbojpeg {
+        #[serde(default)]
+        quality: Option<u8>,
+    },
+    Mozjpeg {
+        #[serde(default)]
+        quality: Option<u8>,
+    },
+    FfmpegMjpeg {
+        #[serde(default)]
+        bitrate: Option<u64>,
+        #[serde(default)]
+        gop: Option<i32>,
+        #[serde(default, deserialize_with = "deserialize_encoder_frame_rate")]
+        framerate: Option<FrameRate>,
+        #[serde(default)]
+        thread_count: Option<usize>,
+        #[serde(default)]
+        output_resolution: Option<ResolutionHint>,
+    },
+    H264 {
+        #[serde(default)]
+        bitrate: Option<u64>,
+        #[serde(default)]
+        gop: Option<i32>,
+        #[serde(default, deserialize_with = "deserialize_encoder_frame_rate")]
+        framerate: Option<FrameRate>,
+        #[serde(default)]
+        thread_count: Option<usize>,
+        #[serde(default)]
+        output_resolution: Option<ResolutionHint>,
+    },
+    H265 {
+        #[serde(default)]
+        bitrate: Option<u64>,
+        #[serde(default)]
+        gop: Option<i32>,
+        #[serde(default, deserialize_with = "deserialize_encoder_frame_rate")]
+        framerate: Option<FrameRate>,
+        #[serde(default)]
+        thread_count: Option<usize>,
+        #[serde(default)]
+        output_resolution: Option<ResolutionHint>,
+    },
+}
+
+impl EncoderSettings {
+    fn settings_kind(&self) -> EncoderSettingsKind {
+        match self {
+            Self::Turbojpeg { .. } => EncoderSettingsKind::Turbojpeg,
+            Self::Mozjpeg { .. } => EncoderSettingsKind::Mozjpeg,
+            Self::FfmpegMjpeg { .. } => EncoderSettingsKind::FfmpegMjpeg,
+            Self::H264 { .. } => EncoderSettingsKind::H264,
+            Self::H265 { .. } => EncoderSettingsKind::H265,
+        }
+    }
+
+    pub fn bitrate(&self) -> Option<u64> {
+        match self {
+            Self::Turbojpeg { .. } | Self::Mozjpeg { .. } => None,
+            Self::FfmpegMjpeg { bitrate, .. } | Self::H264 { bitrate, .. } | Self::H265 { bitrate, .. } => *bitrate,
+        }
+    }
+
+    pub fn gop(&self) -> Option<i32> {
+        match self {
+            Self::Turbojpeg { .. } | Self::Mozjpeg { .. } => None,
+            Self::FfmpegMjpeg { gop, .. } | Self::H264 { gop, .. } | Self::H265 { gop, .. } => *gop,
+        }
+    }
+
+    pub fn framerate(&self) -> Option<&FrameRate> {
+        match self {
+            Self::Turbojpeg { .. } | Self::Mozjpeg { .. } => None,
+            Self::FfmpegMjpeg { framerate, .. } | Self::H264 { framerate, .. } | Self::H265 { framerate, .. } => framerate.as_ref(),
+        }
+    }
+
+    pub fn thread_count(&self) -> Option<usize> {
+        match self {
+            Self::Turbojpeg { .. } | Self::Mozjpeg { .. } => None,
+            Self::FfmpegMjpeg { thread_count, .. } | Self::H264 { thread_count, .. } | Self::H265 { thread_count, .. } => *thread_count,
+        }
+    }
+
+    pub fn output_resolution(&self) -> Option<&ResolutionHint> {
+        match self {
+            Self::Turbojpeg { .. } | Self::Mozjpeg { .. } => None,
+            Self::FfmpegMjpeg { output_resolution, .. }
+            | Self::H264 { output_resolution, .. }
+            | Self::H265 { output_resolution, .. } => output_resolution.as_ref(),
+        }
+    }
+
+    pub fn quality(&self) -> Option<u8> {
+        match self {
+            Self::Turbojpeg { quality } | Self::Mozjpeg { quality } => *quality,
+            Self::FfmpegMjpeg { .. } | Self::H264 { .. } | Self::H265 { .. } => None,
+        }
+    }
+
+    fn ensure_video_framerate(&mut self, default_framerate: FrameRate) {
+        match self {
+            Self::Turbojpeg { .. } | Self::Mozjpeg { .. } => {}
+            Self::FfmpegMjpeg { framerate, .. } | Self::H264 { framerate, .. } | Self::H265 { framerate, .. } => {
+                if framerate.is_none() {
+                    *framerate = Some(default_framerate);
+                }
+            }
+        }
+    }
+
+    fn ensure_video_output_resolution(&mut self, default_resolution: ResolutionHint) {
+        match self {
+            Self::Turbojpeg { .. } | Self::Mozjpeg { .. } => {}
+            Self::FfmpegMjpeg { output_resolution, .. }
+            | Self::H264 { output_resolution, .. }
+            | Self::H265 { output_resolution, .. } => {
+                let has_explicit_resolution = output_resolution
+                    .as_ref()
+                    .is_some_and(|resolution| resolution.width > 0 && resolution.height > 0);
+                if !has_explicit_resolution {
+                    *output_resolution = Some(default_resolution);
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+enum EncoderSettingsBinaryWire {
+    Turbojpeg {
+        #[serde(default)]
+        quality: Option<u8>,
+    },
+    Mozjpeg {
+        #[serde(default)]
+        quality: Option<u8>,
+    },
+    FfmpegMjpeg {
+        #[serde(default)]
+        bitrate: Option<u64>,
+        #[serde(default)]
+        gop: Option<i32>,
+        #[serde(default)]
+        framerate: Option<FrameRate>,
+        #[serde(default)]
+        thread_count: Option<usize>,
+        #[serde(default)]
+        output_resolution: Option<ResolutionHint>,
+    },
+    H264 {
+        #[serde(default)]
+        bitrate: Option<u64>,
+        #[serde(default)]
+        gop: Option<i32>,
+        #[serde(default)]
+        framerate: Option<FrameRate>,
+        #[serde(default)]
+        thread_count: Option<usize>,
+        #[serde(default)]
+        output_resolution: Option<ResolutionHint>,
+    },
+    H265 {
+        #[serde(default)]
+        bitrate: Option<u64>,
+        #[serde(default)]
+        gop: Option<i32>,
+        #[serde(default)]
+        framerate: Option<FrameRate>,
+        #[serde(default)]
+        thread_count: Option<usize>,
+        #[serde(default)]
+        output_resolution: Option<ResolutionHint>,
+    },
+}
+
+impl From<EncoderSettings> for EncoderSettingsBinaryWire {
+    fn from(value: EncoderSettings) -> Self {
+        match value {
+            EncoderSettings::Turbojpeg { quality } => Self::Turbojpeg { quality },
+            EncoderSettings::Mozjpeg { quality } => Self::Mozjpeg { quality },
+            EncoderSettings::FfmpegMjpeg {
+                bitrate,
+                gop,
+                framerate,
+                thread_count,
+                output_resolution,
+            } => Self::FfmpegMjpeg {
+                bitrate,
+                gop,
+                framerate,
+                thread_count,
+                output_resolution,
+            },
+            EncoderSettings::H264 {
+                bitrate,
+                gop,
+                framerate,
+                thread_count,
+                output_resolution,
+            } => Self::H264 {
+                bitrate,
+                gop,
+                framerate,
+                thread_count,
+                output_resolution,
+            },
+            EncoderSettings::H265 {
+                bitrate,
+                gop,
+                framerate,
+                thread_count,
+                output_resolution,
+            } => Self::H265 {
+                bitrate,
+                gop,
+                framerate,
+                thread_count,
+                output_resolution,
+            },
+        }
+    }
+}
+
+impl From<EncoderSettingsBinaryWire> for EncoderSettings {
+    fn from(value: EncoderSettingsBinaryWire) -> Self {
+        match value {
+            EncoderSettingsBinaryWire::Turbojpeg { quality } => Self::Turbojpeg { quality },
+            EncoderSettingsBinaryWire::Mozjpeg { quality } => Self::Mozjpeg { quality },
+            EncoderSettingsBinaryWire::FfmpegMjpeg {
+                bitrate,
+                gop,
+                framerate,
+                thread_count,
+                output_resolution,
+            } => Self::FfmpegMjpeg {
+                bitrate,
+                gop,
+                framerate,
+                thread_count,
+                output_resolution,
+            },
+            EncoderSettingsBinaryWire::H264 {
+                bitrate,
+                gop,
+                framerate,
+                thread_count,
+                output_resolution,
+            } => Self::H264 {
+                bitrate,
+                gop,
+                framerate,
+                thread_count,
+                output_resolution,
+            },
+            EncoderSettingsBinaryWire::H265 {
+                bitrate,
+                gop,
+                framerate,
+                thread_count,
+                output_resolution,
+            } => Self::H265 {
+                bitrate,
+                gop,
+                framerate,
+                thread_count,
+                output_resolution,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct LegacyEncoderSettings {
     #[serde(default)]
     pub bitrate: Option<u64>,
     #[serde(default)]
@@ -691,6 +976,19 @@ pub struct EncoderSettings {
     /// Optional soft limit for decode FPS; frames above this are dropped before encoding.
     #[serde(default)]
     pub decode_fps_limit: Option<f64>,
+}
+
+impl LegacyEncoderSettings {
+    fn has_explicit_video_tuning(&self) -> bool {
+        self.bitrate.is_some() || self.gop.is_some() || self.framerate.is_some() || self.thread_count.is_some() || self.output_resolution.is_some()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+enum EncoderSettingsHumanWire {
+    Typed(EncoderSettings),
+    Legacy(LegacyEncoderSettings),
 }
 
 fn deserialize_encoder_frame_rate<'de, D>(deserializer: D) -> Result<Option<FrameRate>, D::Error>
@@ -741,6 +1039,172 @@ fn gcd_u32(mut a: u32, mut b: u32) -> u32 {
     } else {
         a
     }
+}
+
+fn encoder_settings_kind_for_codec_desc(desc: &styx::codec::CodecDescriptor) -> Option<EncoderSettingsKind> {
+    if desc.kind != CodecKind::Encoder {
+        return None;
+    }
+    if desc.impl_name.eq_ignore_ascii_case("turbojpeg") {
+        return Some(EncoderSettingsKind::Turbojpeg);
+    }
+    if desc.impl_name.eq_ignore_ascii_case("mozjpeg") {
+        return Some(EncoderSettingsKind::Mozjpeg);
+    }
+    let output = desc.output.to_u32().to_le_bytes();
+    if matches!(&output, b"H264") || desc.name.eq_ignore_ascii_case("h264") {
+        return Some(EncoderSettingsKind::H264);
+    }
+    if matches!(&output, b"H265" | b"HEVC") || desc.name.eq_ignore_ascii_case("h265") || desc.name.eq_ignore_ascii_case("hevc") {
+        return Some(EncoderSettingsKind::H265);
+    }
+    if matches!(&output, b"MJPG" | b"JPEG") || desc.name.eq_ignore_ascii_case("mjpeg") {
+        return Some(EncoderSettingsKind::FfmpegMjpeg);
+    }
+    None
+}
+
+fn encoder_settings_kind_for_selector(selector: Option<&str>) -> Option<EncoderSettingsKind> {
+    let selector = selector.map(str::trim).filter(|value| !value.is_empty())?;
+    if selector.eq_ignore_ascii_case("turbojpeg") {
+        return Some(EncoderSettingsKind::Turbojpeg);
+    }
+    if selector.eq_ignore_ascii_case("mozjpeg") {
+        return Some(EncoderSettingsKind::Mozjpeg);
+    }
+
+    let lowered = selector.to_ascii_lowercase();
+    if selector.eq_ignore_ascii_case("h264") || selector.eq_ignore_ascii_case("avc") || lowered.contains("h264") || lowered.contains("avc") {
+        return Some(EncoderSettingsKind::H264);
+    }
+    if selector.eq_ignore_ascii_case("h265") || selector.eq_ignore_ascii_case("hevc") || lowered.contains("h265") || lowered.contains("hevc") {
+        return Some(EncoderSettingsKind::H265);
+    }
+    if matches!(lowered.as_str(), "mjpeg" | "mjpg" | "jpeg") {
+        return Some(EncoderSettingsKind::FfmpegMjpeg);
+    }
+
+    let Ok(entries) = CodecRegistry::list_enabled_codecs() else {
+        return None;
+    };
+    let mut matches = std::collections::BTreeSet::new();
+    for (_, codecs) in entries {
+        for desc in codecs {
+            if desc.kind != CodecKind::Encoder {
+                continue;
+            }
+            if !(desc.impl_name.eq_ignore_ascii_case(selector) || desc.name.eq_ignore_ascii_case(selector)) {
+                continue;
+            }
+            if let Some(kind) = encoder_settings_kind_for_codec_desc(&desc) {
+                matches.insert(kind);
+            }
+        }
+    }
+
+    if matches.len() == 1 {
+        matches.into_iter().next()
+    } else {
+        None
+    }
+}
+
+fn selector_name_for_encoder_settings_kind(kind: EncoderSettingsKind) -> &'static str {
+    match kind {
+        EncoderSettingsKind::Turbojpeg => "turbojpeg",
+        EncoderSettingsKind::Mozjpeg => "mozjpeg",
+        EncoderSettingsKind::FfmpegMjpeg => "mjpeg",
+        EncoderSettingsKind::H264 => "h264",
+        EncoderSettingsKind::H265 => "h265",
+    }
+}
+
+pub fn empty_encoder_settings_for_selector(selector: Option<&str>) -> Option<EncoderSettings> {
+    match encoder_settings_kind_for_selector(selector) {
+        Some(EncoderSettingsKind::Turbojpeg) => Some(EncoderSettings::Turbojpeg { quality: None }),
+        Some(EncoderSettingsKind::Mozjpeg) => Some(EncoderSettings::Mozjpeg { quality: None }),
+        Some(EncoderSettingsKind::FfmpegMjpeg) => Some(EncoderSettings::FfmpegMjpeg {
+            bitrate: None,
+            gop: None,
+            framerate: None,
+            thread_count: None,
+            output_resolution: None,
+        }),
+        Some(EncoderSettingsKind::H264) => Some(EncoderSettings::H264 {
+            bitrate: None,
+            gop: None,
+            framerate: None,
+            thread_count: None,
+            output_resolution: None,
+        }),
+        Some(EncoderSettingsKind::H265) => Some(EncoderSettings::H265 {
+            bitrate: None,
+            gop: None,
+            framerate: None,
+            thread_count: None,
+            output_resolution: None,
+        }),
+        None => None,
+    }
+}
+
+fn canonical_encoder_selector(selector: Option<&str>, settings: Option<&EncoderSettings>) -> Option<String> {
+    let selector = selector.map(str::trim).filter(|value| !value.is_empty())?;
+    if selector.eq_ignore_ascii_case("ffmpeg") {
+        return settings
+            .map(EncoderSettings::settings_kind)
+            .map(selector_name_for_encoder_settings_kind)
+            .map(ToString::to_string);
+    }
+    if selector.eq_ignore_ascii_case("avc") {
+        return Some("h264".to_string());
+    }
+    if selector.eq_ignore_ascii_case("hevc") {
+        return Some("h265".to_string());
+    }
+    if matches!(selector.to_ascii_lowercase().as_str(), "mjpg" | "jpeg") {
+        return Some("mjpeg".to_string());
+    }
+    None
+}
+
+fn migrate_legacy_encoder_settings(selector: Option<&str>, settings: Option<LegacyEncoderSettings>) -> Result<(Option<EncoderSettings>, Option<f64>), String> {
+    let Some(settings) = settings else {
+        return Ok((None, None));
+    };
+
+    let decode_fps_limit = settings.decode_fps_limit.filter(|value| value.is_finite() && *value > 0.0);
+    let explicit_video_tuning = settings.has_explicit_video_tuning();
+    if !explicit_video_tuning {
+        return Ok((None, decode_fps_limit));
+    }
+
+    let typed = match encoder_settings_kind_for_selector(selector) {
+        Some(EncoderSettingsKind::H264) => Some(EncoderSettings::H264 {
+            bitrate: settings.bitrate,
+            gop: settings.gop,
+            framerate: settings.framerate,
+            thread_count: settings.thread_count,
+            output_resolution: settings.output_resolution,
+        }),
+        Some(EncoderSettingsKind::H265) => Some(EncoderSettings::H265 {
+            bitrate: settings.bitrate,
+            gop: settings.gop,
+            framerate: settings.framerate,
+            thread_count: settings.thread_count,
+            output_resolution: settings.output_resolution,
+        }),
+        Some(EncoderSettingsKind::FfmpegMjpeg) => Some(EncoderSettings::FfmpegMjpeg {
+            bitrate: settings.bitrate,
+            gop: settings.gop,
+            framerate: settings.framerate,
+            thread_count: settings.thread_count,
+            output_resolution: settings.output_resolution,
+        }),
+        Some(EncoderSettingsKind::Turbojpeg) | Some(EncoderSettingsKind::Mozjpeg) | None => None,
+    };
+
+    Ok((typed, decode_fps_limit))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
@@ -1164,6 +1628,86 @@ impl StreamRecordingMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+enum StreamRecordingModeHumanWire {
+    Disabled,
+    ShadowBuffer {
+        codec: RecordingCodec,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+enum StreamRecordingModeBinaryWire {
+    Disabled,
+    ShadowBuffer {
+        codec: RecordingCodec,
+    },
+}
+
+impl From<StreamRecordingMode> for StreamRecordingModeHumanWire {
+    fn from(value: StreamRecordingMode) -> Self {
+        match value {
+            StreamRecordingMode::Disabled => Self::Disabled,
+            StreamRecordingMode::ShadowBuffer { codec } => Self::ShadowBuffer { codec },
+        }
+    }
+}
+
+impl From<StreamRecordingModeHumanWire> for StreamRecordingMode {
+    fn from(value: StreamRecordingModeHumanWire) -> Self {
+        match value {
+            StreamRecordingModeHumanWire::Disabled => Self::Disabled,
+            StreamRecordingModeHumanWire::ShadowBuffer { codec } => Self::ShadowBuffer { codec },
+        }
+    }
+}
+
+impl From<StreamRecordingMode> for StreamRecordingModeBinaryWire {
+    fn from(value: StreamRecordingMode) -> Self {
+        match value {
+            StreamRecordingMode::Disabled => Self::Disabled,
+            StreamRecordingMode::ShadowBuffer { codec } => Self::ShadowBuffer { codec },
+        }
+    }
+}
+
+impl From<StreamRecordingModeBinaryWire> for StreamRecordingMode {
+    fn from(value: StreamRecordingModeBinaryWire) -> Self {
+        match value {
+            StreamRecordingModeBinaryWire::Disabled => Self::Disabled,
+            StreamRecordingModeBinaryWire::ShadowBuffer { codec } => Self::ShadowBuffer { codec },
+        }
+    }
+}
+
+mod stream_recording_mode_serde {
+    use super::{StreamRecordingMode, StreamRecordingModeBinaryWire, StreamRecordingModeHumanWire};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S>(value: &StreamRecordingMode, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if serializer.is_human_readable() {
+            StreamRecordingModeHumanWire::from(*value).serialize(serializer)
+        } else {
+            StreamRecordingModeBinaryWire::from(*value).serialize(serializer)
+        }
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<StreamRecordingMode, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        if deserializer.is_human_readable() {
+            Ok(StreamRecordingModeHumanWire::deserialize(deserializer)?.into())
+        } else {
+            Ok(StreamRecordingModeBinaryWire::deserialize(deserializer)?.into())
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvedStreamConfig {
@@ -1193,7 +1737,7 @@ pub struct ResolvedStreamConfig {
     #[serde(default)]
     pub decoder: ResolvedDecoderConfig,
     pub preview_jpeg_quality: u8,
-    #[serde(default)]
+    #[serde(default, with = "stream_recording_mode_serde")]
     pub recording_mode: StreamRecordingMode,
     pub start_on_boot: bool,
 }
@@ -1229,7 +1773,7 @@ enum RequestedEncoderConfigBinaryWire {
         #[serde(default)]
         id: Option<String>,
         #[serde(default)]
-        settings: Option<EncoderSettings>,
+        settings: Option<EncoderSettingsBinaryWire>,
     },
 }
 
@@ -1241,7 +1785,7 @@ enum RequestedEncoderConfigHumanWire {
         #[serde(default)]
         id: Option<String>,
         #[serde(default)]
-        settings: Option<EncoderSettings>,
+        settings: Option<EncoderSettingsHumanWire>,
     },
 }
 
@@ -1283,6 +1827,15 @@ impl RequestedEncoderConfig {
         }
     }
 
+    pub fn set_id(&mut self, id: Option<String>) {
+        match self {
+            Self::Disabled => {}
+            Self::Enabled { id: existing, .. } => {
+                *existing = normalized_codec_selector(id.as_deref());
+            }
+        }
+    }
+
     pub fn ensure_settings(&mut self, settings: Option<EncoderSettings>) {
         match self {
             Self::Disabled => {}
@@ -1294,15 +1847,16 @@ impl RequestedEncoderConfig {
         }
     }
 
-    fn from_legacy(enabled: Option<bool>, id: Option<String>, settings: Option<EncoderSettings>) -> Result<Self, String> {
+    fn from_legacy(enabled: Option<bool>, id: Option<String>, settings: Option<LegacyEncoderSettings>) -> Result<(Self, Option<f64>), String> {
         let normalized_id = normalized_codec_selector(id.as_deref());
         if enabled == Some(false) {
             if normalized_id.is_some() || settings.is_some() {
                 return Err("legacy encoder_enabled=false may not be combined with encoder_id or encoder_settings".to_string());
             }
-            return Ok(Self::Disabled);
+            return Ok((Self::Disabled, None));
         }
-        Ok(Self::enabled(normalized_id, settings))
+        let (settings, decode_fps_limit) = migrate_legacy_encoder_settings(normalized_id.as_deref(), settings)?;
+        Ok((Self::enabled(normalized_id, settings), decode_fps_limit))
     }
 }
 
@@ -1310,7 +1864,7 @@ impl From<RequestedEncoderConfig> for RequestedEncoderConfigBinaryWire {
     fn from(value: RequestedEncoderConfig) -> Self {
         match value {
             RequestedEncoderConfig::Disabled => Self::Disabled,
-            RequestedEncoderConfig::Enabled { id, settings } => Self::Enabled { id, settings },
+            RequestedEncoderConfig::Enabled { id, settings } => Self::Enabled { id, settings: settings.map(EncoderSettingsBinaryWire::from) },
         }
     }
 }
@@ -1319,7 +1873,7 @@ impl From<RequestedEncoderConfigBinaryWire> for RequestedEncoderConfig {
     fn from(value: RequestedEncoderConfigBinaryWire) -> Self {
         match value {
             RequestedEncoderConfigBinaryWire::Disabled => Self::Disabled,
-            RequestedEncoderConfigBinaryWire::Enabled { id, settings } => Self::Enabled { id, settings },
+            RequestedEncoderConfigBinaryWire::Enabled { id, settings } => Self::Enabled { id, settings: settings.map(EncoderSettings::from) },
         }
     }
 }
@@ -1328,16 +1882,28 @@ impl From<RequestedEncoderConfig> for RequestedEncoderConfigHumanWire {
     fn from(value: RequestedEncoderConfig) -> Self {
         match value {
             RequestedEncoderConfig::Disabled => Self::Disabled,
-            RequestedEncoderConfig::Enabled { id, settings } => Self::Enabled { id, settings },
+            RequestedEncoderConfig::Enabled { id, settings } => Self::Enabled { id, settings: settings.map(EncoderSettingsHumanWire::Typed) },
         }
     }
 }
 
-impl From<RequestedEncoderConfigHumanWire> for RequestedEncoderConfig {
-    fn from(value: RequestedEncoderConfigHumanWire) -> Self {
-        match value {
-            RequestedEncoderConfigHumanWire::Disabled => Self::Disabled,
-            RequestedEncoderConfigHumanWire::Enabled { id, settings } => Self::Enabled { id, settings },
+impl RequestedEncoderConfigHumanWire {
+    fn into_requested(self) -> Result<(RequestedEncoderConfig, Option<f64>), String> {
+        match self {
+            Self::Disabled => Ok((RequestedEncoderConfig::Disabled, None)),
+            Self::Enabled { id, settings } => {
+                let normalized_id = normalized_codec_selector(id.as_deref());
+                match settings {
+                    None => Ok((RequestedEncoderConfig::Enabled { id: normalized_id, settings: None }, None)),
+                    Some(EncoderSettingsHumanWire::Typed(settings)) => {
+                        Ok((RequestedEncoderConfig::Enabled { id: normalized_id, settings: Some(settings) }, None))
+                    }
+                    Some(EncoderSettingsHumanWire::Legacy(settings)) => {
+                        let (settings, decode_fps_limit) = migrate_legacy_encoder_settings(normalized_id.as_deref(), Some(settings))?;
+                        Ok((RequestedEncoderConfig::Enabled { id: normalized_id, settings }, decode_fps_limit))
+                    }
+                }
+            }
         }
     }
 }
@@ -1355,7 +1921,7 @@ impl Serialize for RequestedEncoderConfig {
 impl<'de> Deserialize<'de> for RequestedEncoderConfig {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         if deserializer.is_human_readable() {
-            Ok(RequestedEncoderConfigHumanWire::deserialize(deserializer)?.into())
+            RequestedEncoderConfigHumanWire::deserialize(deserializer)?.into_requested().map(|(config, _)| config).map_err(serde::de::Error::custom)
         } else {
             Ok(RequestedEncoderConfigBinaryWire::deserialize(deserializer)?.into())
         }
@@ -1453,6 +2019,22 @@ impl RequestedDecoderConfig {
             Self::Enabled { settings: existing, .. } => {
                 if existing.is_none() {
                     *existing = settings;
+                }
+            }
+        }
+    }
+
+    pub fn ensure_fps_limit(&mut self, fps_limit: Option<f64>) {
+        let fps_limit = fps_limit.filter(|value| value.is_finite() && *value > 0.0);
+        let Some(fps_limit) = fps_limit else {
+            return;
+        };
+        match self {
+            Self::Disabled => {}
+            Self::Enabled { settings, .. } => {
+                let settings = settings.get_or_insert_with(Default::default);
+                if settings.fps_limit.is_none() {
+                    settings.fps_limit = Some(fps_limit);
                 }
             }
         }
@@ -1633,7 +2215,7 @@ struct StreamManifestBinaryWire {
     pub decoder: RequestedDecoderConfig,
     #[serde(default)]
     pub preview_jpeg_quality: Option<u8>,
-    #[serde(default = "default_recording_mode")]
+    #[serde(default = "default_recording_mode", with = "stream_recording_mode_serde")]
     pub recording_mode: StreamRecordingMode,
     #[serde(default)]
     pub start_on_boot: bool,
@@ -1668,13 +2250,13 @@ struct StreamManifestHumanWire {
     #[serde(default)]
     pub pose: Option<RigPose>,
     #[serde(default)]
-    pub encoder: Option<RequestedEncoderConfig>,
+    pub encoder: Option<RequestedEncoderConfigHumanWire>,
     #[serde(default)]
     pub encoder_enabled: Option<bool>,
     #[serde(default)]
     pub encoder_id: Option<String>,
     #[serde(default)]
-    pub encoder_settings: Option<EncoderSettings>,
+    pub encoder_settings: Option<LegacyEncoderSettings>,
     #[serde(default)]
     pub decoder: Option<RequestedDecoderConfig>,
     #[serde(default)]
@@ -1793,16 +2375,17 @@ impl TryFrom<StreamManifestHumanWire> for StreamManifest {
 
     fn try_from(value: StreamManifestHumanWire) -> Result<Self, Self::Error> {
         let value = migrate_stream_manifest_human_wire(value)?;
-        let encoder = match (value.encoder, value.encoder_enabled, value.encoder_id, value.encoder_settings) {
-            (Some(encoder), None, None, None) => encoder,
+        let (encoder, legacy_decode_fps_limit) = match (value.encoder, value.encoder_enabled, value.encoder_id, value.encoder_settings) {
+            (Some(encoder), None, None, None) => encoder.into_requested()?,
             (Some(_), _, _, _) => return Err("stream manifest may not mix `encoder` with legacy `encoder_enabled`, `encoder_id`, or `encoder_settings` fields".to_string()),
             (None, enabled, id, settings) => RequestedEncoderConfig::from_legacy(enabled, id, settings)?,
         };
-        let decoder = match (value.decoder, value.decoder_enabled, value.decoder_id, value.decoder_settings) {
+        let mut decoder = match (value.decoder, value.decoder_enabled, value.decoder_id, value.decoder_settings) {
             (Some(decoder), None, None, None) => decoder,
             (Some(_), _, _, _) => return Err("stream manifest may not mix `decoder` with legacy `decoder_enabled`, `decoder_id`, or `decoder_settings` fields".to_string()),
             (None, enabled, id, settings) => RequestedDecoderConfig::from_legacy(enabled, id, settings)?,
         };
+        decoder.ensure_fps_limit(legacy_decode_fps_limit);
         let recording_mode = match (value.recording_mode, value.shadow_recorder_enabled) {
             (Some(recording_mode), None) => recording_mode,
             (Some(_), Some(_)) => return Err("stream manifest may not mix `recording_mode` with legacy `shadow_recorder_enabled`".to_string()),
@@ -1861,7 +2444,7 @@ impl From<StreamManifest> for StreamManifestHumanWire {
             pipeline_host_inputs: value.pipeline_host_inputs,
             calibration: value.calibration,
             pose: value.pose,
-            encoder: Some(value.encoder),
+            encoder: Some(value.encoder.into()),
             encoder_enabled: None,
             encoder_id: None,
             encoder_settings: None,
@@ -2140,7 +2723,7 @@ fn encoder_selector_needs_normalization(selector: Option<&str>) -> bool {
     let Some(selector) = selector.map(str::trim).filter(|value| !value.is_empty()) else {
         return true;
     };
-    selector.eq_ignore_ascii_case("ffmpeg") || matches!(selector.to_ascii_lowercase().as_str(), "mjpeg" | "mjpg" | "jpeg")
+    selector.eq_ignore_ascii_case("ffmpeg")
 }
 
 pub fn default_stream_encoder_selector() -> Option<String> {
@@ -2192,6 +2775,10 @@ pub fn normalize_requested_stream_decoder(manifest: &mut StreamManifest) {
 }
 
 fn normalize_stream_encoder_selection(manifest: &mut StreamManifest) {
+    if let Some(selector) = canonical_encoder_selector(manifest.encoder.id(), manifest.encoder.settings()) {
+        manifest.encoder.set_id(Some(selector));
+    }
+
     if !manifest_prefers_default_stream_encoder(manifest) {
         return;
     }
@@ -2300,12 +2887,36 @@ fn default_encoder_output_resolution(capture_resolution: Resolution) -> Resoluti
 }
 
 fn apply_default_encoder_settings(capture: &CaptureConfig, encoder: &mut ResolvedEncoderConfig) {
-    let settings = encoder.settings.get_or_insert_with(Default::default);
-    if settings.framerate.is_none() {
-        settings.framerate = Some(FrameRate { numerator: DEFAULT_STREAM_ENCODER_FPS, denominator: 1 });
+    let Some(kind) = encoder_settings_kind_for_selector(encoder.codec_id.as_deref()) else {
+        return;
+    };
+    if !matches!(kind, EncoderSettingsKind::FfmpegMjpeg | EncoderSettingsKind::H264 | EncoderSettingsKind::H265) {
+        return;
     }
-    let has_explicit_resolution = settings.output_resolution.as_ref().is_some_and(|resolution| resolution.width > 0 && resolution.height > 0);
-    if !has_explicit_resolution {
-        settings.output_resolution = Some(default_encoder_output_resolution(capture.mode.format.resolution));
-    }
+    let settings = encoder.settings.get_or_insert_with(|| match kind {
+        EncoderSettingsKind::FfmpegMjpeg => EncoderSettings::FfmpegMjpeg {
+            bitrate: None,
+            gop: None,
+            framerate: None,
+            thread_count: None,
+            output_resolution: None,
+        },
+        EncoderSettingsKind::H264 => EncoderSettings::H264 {
+            bitrate: None,
+            gop: None,
+            framerate: None,
+            thread_count: None,
+            output_resolution: None,
+        },
+        EncoderSettingsKind::H265 => EncoderSettings::H265 {
+            bitrate: None,
+            gop: None,
+            framerate: None,
+            thread_count: None,
+            output_resolution: None,
+        },
+        EncoderSettingsKind::Turbojpeg | EncoderSettingsKind::Mozjpeg => unreachable!("video defaults are only applied to video encoder settings"),
+    });
+    settings.ensure_video_framerate(FrameRate { numerator: DEFAULT_STREAM_ENCODER_FPS, denominator: 1 });
+    settings.ensure_video_output_resolution(default_encoder_output_resolution(capture.mode.format.resolution));
 }

@@ -1,4 +1,5 @@
 <script lang="ts" module>
+  import { createEncoderSettingsDraft, type EncoderSettingsDraft } from '$lib/api/streamEncoderSettings';
   import type { StreamCreationDefaults } from '$lib/api/streamDefaults';
   import type { CodecInfo, ControlMeta, ProbedDevice, StreamInfo, StreamManifest, StreamMetrics } from '$lib/ts-bindings/http/client';
   import type { StreamControlSocket } from '$lib/api/streamControls';
@@ -55,13 +56,7 @@
       decoderMirrorHorizontal: false,
       encoderFpsLimit: null as number | null,
       encoderSettingsOpen: false,
-      encoderSettings: {
-        bitrate: null as number | null,
-        gop: null as number | null,
-        threadCount: null as number | null,
-        outWidth: null as number | null,
-        outHeight: null as number | null,
-      },
+      encoderSettings: createEncoderSettingsDraft() as EncoderSettingsDraft,
       shadowRecorderEnabled: false,
       streamCrop: [-1, 1, -1, 1] as [number, number, number, number],
       streamCropGuidesEnabled: true,

@@ -3,6 +3,12 @@
   import { toaster } from '$lib';
   import { apiFetch } from '$lib/api/core/http';
   import { resolveStreamCreationDefaults } from '$lib/api/streamDefaults';
+  import {
+    buildEncoderSettingsForSelection,
+    createEncoderSettingsDraft,
+    encoderSelectionId,
+    type EncoderSettingsDraft
+  } from '$lib/api/streamEncoderSettings';
   import { normalizeRecordingMode } from '$lib/api/streamRecordingMode';
   import { withCurrentStreamManifestSchema } from '$lib/api/streamSchema';
   import { ApiError, OpenAPI, PeersService, PeripheralsService } from '$lib/ts-bindings/http/client';
@@ -93,16 +99,7 @@
   let decoderRotationDegrees = $state(0);
   let decoderMirrorHorizontal = $state(false);
   let hostBuffer = $state<number>(0);
-  let encoderSettings = $state({
-    bitrate: null as number | null,
-    gop: null as number | null,
-    framerateNum: null as number | null,
-    framerateDen: null as number | null,
-    threadCount: null as number | null,
-    outWidth: null as number | null,
-    outHeight: null as number | null,
-    decodeFps: null as number | null
-  });
+  let encoderSettings = $state<EncoderSettingsDraft>(createEncoderSettingsDraft());
   let fpsLimit = $state<number | null>(null);
   let showSensorBenchModal = $state(false);
   let showSensorBenchResults = $state(false);
@@ -149,14 +146,6 @@
   });
   const isRegistered = (device: ProbedDevice | null): boolean => isDeviceRegistered(device, registeredHardwareIds);
   let streamCapabilities = $state<StreamCapabilitiesResponse | null>(null);
-  const encoderSelectionId = (codec: CodecInfo | null | undefined): string | null => {
-    if (!codec) return null;
-    const name = String(codec.name ?? '').trim();
-    const impl = String(codec.implementation ?? '').trim();
-    if (impl.length) return impl;
-    if (name.length) return name;
-    return null;
-  };
   const SIMPLE_KIND_FORMATS: Record<SimpleStreamKind, string[]> = {
     bw: ['N12', 'NV12'],
     color: ['YUYV']
@@ -375,6 +364,8 @@
       encoders = dedupeCodecs(
         allCodecs.filter((c) => String(c.kind).toLowerCase() === 'encoder'),
         (codec) => {
+          const selection = encoderSelectionId(codec);
+          if (selection) return `selection|${selection}`;
           const impl = String(codec.implementation ?? '').trim().toLowerCase();
           if (impl) return `impl|${impl}`;
           const output = String(codec.output ?? codec.fourcc ?? '').trim().toLowerCase();
@@ -927,6 +918,14 @@
     const shouldAttachSelectedPipeline = Boolean(attachedPipelineId);
     const useRawMediaPipelineInSimpleMode = isSimpleRegistration && !shouldAttachSelectedPipeline && isMediaBackend;
 
+      const encoderSettingsWire = buildEncoderSettingsForSelection(normalizedEncoderImpl, encoderSettings, {
+        frameRate:
+          encoderSettings.framerateNum && encoderSettings.framerateDen
+            ? { numerator: encoderSettings.framerateNum, denominator: encoderSettings.framerateDen }
+            : null,
+        defaultOutputResolution: defaultEncoderOutputResolution
+      });
+
       const manifest: StreamManifest = withCurrentStreamManifestSchema({
         // Backend expects `DeviceIdentity { id, alias, hardware_id }` for stream manifests.
         // The TS bindings can lag (some shapes still show `{ display, keys }`), so cast through
@@ -990,20 +989,7 @@
           ? {
               state: 'enabled',
               id: normalizedEncoderImpl,
-              settings: {
-                bitrate: encoderSettings.bitrate,
-                gop: encoderSettings.gop,
-                framerate:
-                  encoderSettings.framerateNum && encoderSettings.framerateDen
-                    ? { numerator: encoderSettings.framerateNum, denominator: encoderSettings.framerateDen }
-                    : null,
-                thread_count: encoderSettings.threadCount,
-                output_resolution:
-                  encoderSettings.outWidth && encoderSettings.outHeight
-                    ? { width: encoderSettings.outWidth, height: encoderSettings.outHeight }
-                    : defaultEncoderOutputResolution,
-                decode_fps_limit: encoderSettings.decodeFps
-              }
+              settings: encoderSettingsWire ?? undefined
             }
           : {
               state: 'disabled'
@@ -1013,6 +999,7 @@
               state: 'enabled',
               id: normalizedDecoderImpl,
               settings: {
+                fps_limit: fpsLimit ?? null,
                 rotation_degrees: decoderRotationDegrees,
                 mirror_horizontal: decoderMirrorHorizontal
               }
@@ -1203,7 +1190,7 @@
                 <p class="text-micro uppercase tracking-[0.2em] text-surface-500">Resolution</p>
                 {#if simpleResolutionModes.length}
                   <div class="flex flex-wrap gap-2">
-                    {#each simpleResolutionModes as mode (resolutionKey(mode) ?? mode.id ?? `${mode.format?.resolution?.width ?? 0}x${mode.format?.resolution?.height ?? 0}`)}
+                    {#each simpleResolutionModes as mode, index (`${resolutionKey(mode) ?? mode.id ?? `${mode.format?.resolution?.width ?? 0}x${mode.format?.resolution?.height ?? 0}`}:${index}`)}
                       <button
                         type="button"
                         class={`rounded-md border px-3 py-2 text-sm transition ${
@@ -1237,14 +1224,14 @@
                   <option value="none">None (raw stream)</option>
                   {#if availablePipelines.length}
                     <optgroup label="Pipelines">
-                      {#each availablePipelines as entry (entry.id)}
+                      {#each availablePipelines as entry, index (`${entry.id}:${index}`)}
                         <option value={`pipeline:${entry.id}`}>{pipelineDisplayName(entry)}</option>
                       {/each}
                     </optgroup>
                   {/if}
                   {#if availableTemplates.length}
                     <optgroup label="Templates">
-                      {#each availableTemplates as entry (entry.templateId)}
+                      {#each availableTemplates as entry, index (`${entry.templateId}:${index}`)}
                         <option value={`template:${entry.templateId}`}>{entry.name}</option>
                       {/each}
                     </optgroup>

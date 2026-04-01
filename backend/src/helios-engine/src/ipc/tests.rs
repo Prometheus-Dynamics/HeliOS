@@ -97,10 +97,11 @@ fn stream_list_event_round_trips() {
 #[test]
 fn encoder_settings_accepts_rational_framerate_json() {
     let payload = serde_json::json!({
+        "kind": "h264",
         "framerate": { "numerator": 30, "denominator": 1 }
     });
     let parsed: EncoderSettings = serde_json::from_value(payload).expect("decode encoder settings");
-    let rate = parsed.framerate.expect("framerate");
+    let rate = parsed.framerate().expect("framerate");
     assert_eq!(rate.numerator, 30);
     assert_eq!(rate.denominator, 1);
 }
@@ -108,10 +109,11 @@ fn encoder_settings_accepts_rational_framerate_json() {
 #[test]
 fn encoder_settings_accepts_legacy_fps_framerate_json() {
     let payload = serde_json::json!({
+        "kind": "h264",
         "framerate": { "fps": 29.97 }
     });
     let parsed: EncoderSettings = serde_json::from_value(payload).expect("decode encoder settings");
-    let rate = parsed.framerate.expect("framerate");
+    let rate = parsed.framerate().expect("framerate");
     assert_eq!(rate.numerator, 2997);
     assert_eq!(rate.denominator, 100);
 }
@@ -178,6 +180,7 @@ fn stream_manifest_accepts_typed_encoder_json() {
             "state": "enabled",
             "id": "h264",
             "settings": {
+                "kind": "h264",
                 "bitrate": 4_000_000,
                 "thread_count": 2
             }
@@ -188,8 +191,8 @@ fn stream_manifest_accepts_typed_encoder_json() {
         RequestedEncoderConfig::Enabled { id, settings } => {
             assert_eq!(id.as_deref(), Some("h264"));
             let settings = settings.expect("encoder settings");
-            assert_eq!(settings.bitrate, Some(4_000_000));
-            assert_eq!(settings.thread_count, Some(2));
+            assert_eq!(settings.bitrate(), Some(4_000_000));
+            assert_eq!(settings.thread_count(), Some(2));
         }
         RequestedEncoderConfig::Disabled => panic!("typed encoder config should remain enabled"),
     }

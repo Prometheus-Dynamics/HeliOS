@@ -131,16 +131,16 @@ impl EncoderWorkerRuntime {
             return;
         };
 
-        if let Some(bitrate) = settings.bitrate.filter(|value| *value > 0) {
+        if let Some(bitrate) = settings.bitrate().filter(|value| *value > 0) {
             ffmpeg.set_bitrate(bitrate);
         }
-        if let Some(gop) = settings.gop.filter(|value| *value > 0) {
+        if let Some(gop) = settings.gop().filter(|value| *value > 0) {
             ffmpeg.set_gop(Some(gop));
         }
-        if let Some(rate) = settings.framerate.as_ref().and_then(|rate| if rate.numerator > 0 && rate.denominator > 0 { Some((rate.numerator, rate.denominator)) } else { None }) {
+        if let Some(rate) = settings.framerate().and_then(|rate| if rate.numerator > 0 && rate.denominator > 0 { Some((rate.numerator, rate.denominator)) } else { None }) {
             ffmpeg.set_framerate(Some(rate));
         }
-        if let Some(output_resolution) = settings.output_resolution.as_ref().and_then(|resolution| Resolution::new(resolution.width, resolution.height)) {
+        if let Some(output_resolution) = settings.output_resolution().and_then(|resolution| Resolution::new(resolution.width, resolution.height)) {
             ffmpeg.set_output_resolution(Some(output_resolution));
         }
     }

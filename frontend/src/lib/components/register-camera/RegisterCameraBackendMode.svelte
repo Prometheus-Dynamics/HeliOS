@@ -52,7 +52,7 @@
       <p class="text-sm text-surface-400">No backends reported for this device.</p>
     {:else}
       <div class="flex flex-wrap gap-2">
-        {#each device?.backends ?? [] as backend, index (backend.kind ?? backend.handle ?? `${index}`)}
+        {#each device?.backends ?? [] as backend, index (`${backend.kind ?? 'backend'}:${index}`)}
           <button
             type="button"
             class={`rounded-md border px-3 py-2 text-sm transition ${
@@ -73,7 +73,7 @@
         <p class="text-micro uppercase tracking-[0.2em] text-surface-500">Format</p>
         {#if formats().length}
           <div class="flex flex-wrap gap-2">
-            {#each formats() as fmt (fmt)}
+            {#each formats() as fmt, index (`${fmt}:${index}`)}
               <button
                 type="button"
                 class={`rounded-md border px-3 py-2 text-sm transition ${
@@ -96,7 +96,7 @@
         <p class="text-micro uppercase tracking-[0.2em] text-surface-500">Resolution</p>
         {#if resolutionsForSelectedFormat().length}
           <div class="flex flex-wrap gap-2">
-            {#each resolutionsForSelectedFormat() as mode (resolutionKey(mode))}
+            {#each resolutionsForSelectedFormat() as mode, index (`${resolutionKey(mode) ?? 'resolution'}:${index}`)}
               <button
                 type="button"
                 class={`rounded-md border px-3 py-2 text-sm transition ${

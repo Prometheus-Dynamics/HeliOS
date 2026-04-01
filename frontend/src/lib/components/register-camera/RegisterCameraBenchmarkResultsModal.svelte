@@ -71,7 +71,7 @@
           bind:value={sensorBenchSelectedId}
           disabled={sensorBenchLoading || sensorBenchRuns.length === 0}
         >
-          {#each sensorBenchRuns as item (item.summary.benchmark_id)}
+          {#each sensorBenchRuns as item, index (`${item.summary.benchmark_id}:${index}`)}
             <option value={item.summary.benchmark_id}>
               {item.summary.completed_at}{item.summary.canceled ? ' (canceled)' : ''}
             </option>

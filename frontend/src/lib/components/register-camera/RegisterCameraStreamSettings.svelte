@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { encoderSelectionId } from '$lib/api/streamEncoderSettings';
   import type { CodecInfo, ProbedBackend, ProbedDevice } from '$lib/ts-bindings/http/client';
   import type { SensorBenchCodecStat, SensorBenchListItem, SensorBenchModeResult } from './sensorBenchTypes';
   import FormField from '$lib/components/ui/FormField.svelte';
@@ -125,7 +126,7 @@
           {#if !decodersForFormat().length}
             <option value="" disabled>No decoders for format</option>
           {:else}
-            {#each decodersForFormat() as decoder (`${decoder.implementation ?? decoder.name ?? decoder.fourcc ?? ''}:${decoder.input ?? decoder.fourcc ?? ''}`)}
+            {#each decodersForFormat() as decoder, index (`${decoder.implementation ?? decoder.name ?? decoder.fourcc ?? ''}:${decoder.input ?? decoder.fourcc ?? ''}:${index}`)}
               <option value={decoder.implementation}>
                 {formatLabel(decoder.input || decoder.fourcc)} ({decoder.implementation || decoder.name || 'unknown'})
               </option>
@@ -184,8 +185,8 @@
             {#if codecs.length === 0}
               <option value="" disabled>No codecs reported</option>
             {:else}
-              {#each codecs as codec (`${codec.implementation ?? codec.name ?? codec.fourcc ?? ''}:${codec.output ?? codec.input ?? ''}`)}
-                <option value={(String(codec.implementation ?? '').trim() || String(codec.name ?? '').trim())}>
+              {#each codecs as codec, index (`${encoderSelectionId(codec) ?? codec.implementation ?? codec.name ?? codec.fourcc ?? 'codec'}:${index}`)}
+                <option value={encoderSelectionId(codec) ?? ''}>
                   {(codec.name || codec.output?.toUpperCase()) ?? codec.fourcc?.toUpperCase()} ({codec.implementation || 'unknown'})
                 </option>
               {/each}

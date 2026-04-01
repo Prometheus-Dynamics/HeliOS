@@ -77,7 +77,7 @@ impl StreamRunner {
         let _ = (_encoded_rx, _raw_rx);
         let decode_fps_limit = decoder_settings.as_ref().and_then(|s| s.fps_limit).filter(|v| *v > 0.0);
         let encode_fps_limit =
-            encoder_id.as_ref().and_then(|_| encoder_settings.as_ref().and_then(|s| s.framerate.as_ref())).map(|fr| fr.numerator as f64 / fr.denominator.max(1) as f64).filter(|v| *v > 0.0);
+            encoder_id.as_ref().and_then(|_| encoder_settings.as_ref().and_then(|s| s.framerate())).map(|fr| fr.numerator as f64 / fr.denominator.max(1) as f64).filter(|v| *v > 0.0);
         let capture_fourcc = capture_config.mode.format.code;
         let stream_label: metrics::SharedString = stream_id.map(|id| id.to_string()).unwrap_or_else(|| "unknown".to_string()).into();
         let viewer_idle_timeout = viewer_idle_timeout();
@@ -93,7 +93,7 @@ impl StreamRunner {
         let preview_transport_stats = Arc::new(std::sync::Mutex::new(super::PreviewTransportStats::default()));
         let preview_submit_interval = encoder_settings
             .as_ref()
-            .and_then(|settings| settings.framerate.as_ref())
+            .and_then(|settings| settings.framerate())
             .map(|fr| fr.numerator as f64 / fr.denominator.max(1) as f64)
             .filter(|fps| *fps > 0.0)
             .and_then(|fps| super::preview_submit_interval_for_fps(Some(fps)))

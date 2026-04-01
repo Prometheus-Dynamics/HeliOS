@@ -4,7 +4,10 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use helios_engine::capture::CaptureDescriptor;
-use helios_engine::ipc::{EngineErrorCode, JsonWire, ResolvedStreamConfig, StreamManifest, StreamPipelineGridSlot, StreamPipelineLayout, StreamStatus, normalize_requested_stream_decoder, normalize_requested_stream_encoder};
+use helios_engine::ipc::{
+    EncoderSettings, EngineErrorCode, FrameRate, JsonWire, ResolvedStreamConfig, ResolutionHint, StreamManifest, StreamPipelineGridSlot, StreamPipelineLayout, StreamStatus,
+    normalize_requested_stream_decoder, normalize_requested_stream_encoder,
+};
 use lib_ipc::client::ClientTransportError;
 use std::io;
 use std::time::Duration;
@@ -16,7 +19,7 @@ use crate::http::streams_persist;
 
 use super::CALIBRATION_MODE_PIPELINE_UUID;
 use super::RAW_PIPELINE_UUID;
-use super::types::{EncoderSettingsDescriptor, EngineErrorBody, StreamInfo};
+use super::types::{EngineErrorBody, StreamInfo};
 
 pub(crate) fn map_client_error(err: ClientTransportError) -> Response {
     let status = StatusCode::BAD_GATEWAY;
@@ -77,14 +80,43 @@ pub(crate) fn fourcc_to_format(fourcc: FourCc) -> &'static str {
     }
 }
 
-pub(crate) fn default_ffmpeg_settings_descriptor() -> EncoderSettingsDescriptor {
-    EncoderSettingsDescriptor {
-        bitrate: Some(4_000_000),
-        gop: None,
-        framerate: Some(helios_engine::ipc::FrameRate { numerator: 60, denominator: 1 }),
-        thread_count: None,
-        output_resolution: Some(helios_engine::ipc::ResolutionHint { width: 854, height: 480 }),
-        decode_fps_limit: None,
+pub(crate) fn default_encoder_settings_for_codec(fourcc: FourCc, implementation: &str) -> Option<EncoderSettings> {
+    if implementation.eq_ignore_ascii_case("turbojpeg") {
+        return Some(EncoderSettings::Turbojpeg { quality: Some(85) });
+    }
+    if implementation.eq_ignore_ascii_case("mozjpeg") {
+        return Some(EncoderSettings::Mozjpeg { quality: Some(85) });
+    }
+    if !implementation.eq_ignore_ascii_case("ffmpeg") {
+        return None;
+    }
+
+    let default_framerate = Some(FrameRate { numerator: 60, denominator: 1 });
+    let default_output_resolution = Some(ResolutionHint { width: 854, height: 480 });
+
+    match &fourcc.to_u32().to_le_bytes() {
+        b"MJPG" | b"JPEG" => Some(EncoderSettings::FfmpegMjpeg {
+            bitrate: Some(4_000_000),
+            gop: None,
+            framerate: default_framerate,
+            thread_count: None,
+            output_resolution: default_output_resolution,
+        }),
+        b"H264" => Some(EncoderSettings::H264 {
+            bitrate: Some(4_000_000),
+            gop: None,
+            framerate: default_framerate,
+            thread_count: None,
+            output_resolution: default_output_resolution,
+        }),
+        b"H265" | b"HEVC" => Some(EncoderSettings::H265 {
+            bitrate: Some(4_000_000),
+            gop: None,
+            framerate: default_framerate,
+            thread_count: None,
+            output_resolution: default_output_resolution,
+        }),
+        _ => None,
     }
 }
 

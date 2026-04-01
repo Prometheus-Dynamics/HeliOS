@@ -1,4 +1,5 @@
 import type { CodecInfo, Interval, Mode, ProbedBackend, ProbedDevice, StreamInfo } from '$lib/ts-bindings/http/client';
+import { encoderSelectionId } from '$lib/api/streamEncoderSettings';
 
 export function currentDevice(devices: ProbedDevice[], selectedDeviceIndex: number): ProbedDevice | null {
   return selectedDeviceIndex >= 0 ? devices[selectedDeviceIndex] ?? null : null;
@@ -105,7 +106,7 @@ export function currentEncoder(encoders: CodecInfo[], encoderImpl: string | null
   if (!encoderImpl) return undefined;
   const selected = encoderImpl.trim();
   if (!selected) return undefined;
-  return encoders.find((c) => c.implementation === selected || c.name === selected);
+  return encoders.find((c) => encoderSelectionId(c) === selected || c.implementation === selected || c.name === selected);
 }
 
 export function intervalToFps(interval: Interval | null | undefined): string | null {

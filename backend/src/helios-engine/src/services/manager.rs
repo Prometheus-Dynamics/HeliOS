@@ -480,13 +480,38 @@ impl StreamManager {
             // Shadow-based capture/recording needs frequent keyframes so short windows (5s, 30s)
             // remain decodable and ffmpeg can remux without producing empty MP4s.
             let want_fps = infer_recording_fps(&manifest).unwrap_or(30.0).round().clamp(1.0, 240.0) as u32;
-            let settings = manifest.encoder.settings.get_or_insert_with(Default::default);
-            if settings.framerate.is_none() {
-                settings.framerate = Some(crate::ipc::FrameRate { numerator: want_fps, denominator: 1 });
-            }
-            if settings.gop.is_none() {
-                // 1-second GOP by default (in frames).
-                settings.gop = Some(want_fps as i32);
+            let settings = manifest
+                .encoder
+                .settings
+                .get_or_insert_with(|| {
+                    crate::ipc::empty_encoder_settings_for_selector(manifest.encoder.codec_id.as_deref()).unwrap_or(match recording_codec {
+                        RecordingCodec::H264 => crate::ipc::EncoderSettings::H264 {
+                            bitrate: None,
+                            gop: None,
+                            framerate: None,
+                            thread_count: None,
+                            output_resolution: None,
+                        },
+                        RecordingCodec::H265 => crate::ipc::EncoderSettings::H265 {
+                            bitrate: None,
+                            gop: None,
+                            framerate: None,
+                            thread_count: None,
+                            output_resolution: None,
+                        },
+                    })
+                });
+            if let crate::ipc::EncoderSettings::FfmpegMjpeg { gop, framerate, .. }
+            | crate::ipc::EncoderSettings::H264 { gop, framerate, .. }
+            | crate::ipc::EncoderSettings::H265 { gop, framerate, .. } = settings
+            {
+                if framerate.is_none() {
+                    *framerate = Some(crate::ipc::FrameRate { numerator: want_fps, denominator: 1 });
+                }
+                if gop.is_none() {
+                    // 1-second GOP by default (in frames).
+                    *gop = Some(want_fps as i32);
+                }
             }
         }
         {
@@ -2005,7 +2030,7 @@ fn current_time_ms() -> u64 {
 
 fn infer_recording_fps(manifest: &ResolvedStreamConfig) -> Option<f32> {
     if let Some(settings) = manifest.encoder_settings() {
-        if let Some(rate) = settings.framerate.as_ref() {
+        if let Some(rate) = settings.framerate() {
             if rate.denominator > 0 {
                 return Some(rate.numerator as f32 / rate.denominator as f32);
             }
@@ -4499,7 +4524,12 @@ mod tests {
     #[test]
     fn default_encoder_settings_use_480p_for_1080p_capture() {
         let manifest = sample_manifest_for_encoder_defaults(1920, 1080);
-        let output = manifest.encoder.settings.and_then(|settings| settings.output_resolution).expect("output resolution");
+        let output = manifest
+            .encoder
+            .settings
+            .as_ref()
+            .and_then(|settings| settings.output_resolution())
+            .expect("output resolution");
         assert_eq!(output.width, 854);
         assert_eq!(output.height, 480);
     }
@@ -4507,7 +4537,12 @@ mod tests {
     #[test]
     fn default_encoder_settings_preserve_aspect_for_16_by_10_capture() {
         let manifest = sample_manifest_for_encoder_defaults(1280, 800);
-        let output = manifest.encoder.settings.and_then(|settings| settings.output_resolution).expect("output resolution");
+        let output = manifest
+            .encoder
+            .settings
+            .as_ref()
+            .and_then(|settings| settings.output_resolution())
+            .expect("output resolution");
         assert_eq!(output.width, 768);
         assert_eq!(output.height, 480);
     }
@@ -4516,7 +4551,7 @@ mod tests {
     fn default_encoder_settings_set_framerate_and_preview_quality() {
         let manifest = sample_manifest_for_encoder_defaults(1920, 1080);
         let settings = manifest.encoder.settings.expect("encoder settings");
-        let framerate = settings.framerate.expect("framerate");
+        let framerate = settings.framerate().expect("framerate");
         assert_eq!(framerate.numerator, 60);
         assert_eq!(framerate.denominator, 1);
         assert_eq!(manifest.preview_jpeg_quality, 30);
@@ -4527,10 +4562,12 @@ mod tests {
         let manifest = StreamManifest {
             encoder: RequestedEncoderConfig::enabled(
                 None,
-                Some(crate::ipc::EncoderSettings {
+                Some(crate::ipc::EncoderSettings::H264 {
+                    bitrate: None,
+                    gop: None,
                     framerate: Some(crate::ipc::FrameRate { numerator: 24, denominator: 1 }),
+                    thread_count: None,
                     output_resolution: Some(crate::ipc::ResolutionHint { width: 1280, height: 720 }),
-                    ..Default::default()
                 }),
             ),
             preview_jpeg_quality: 80,
@@ -4538,10 +4575,10 @@ mod tests {
         }
         .resolve();
         let settings = manifest.encoder.settings.expect("encoder settings");
-        let output = settings.output_resolution.expect("output resolution");
+        let output = settings.output_resolution().expect("output resolution");
         assert_eq!(output.width, 1280);
         assert_eq!(output.height, 720);
-        let framerate = settings.framerate.expect("framerate");
+        let framerate = settings.framerate().expect("framerate");
         assert_eq!(framerate.numerator, 24);
         assert_eq!(framerate.denominator, 1);
         assert_eq!(manifest.preview_jpeg_quality, 80);

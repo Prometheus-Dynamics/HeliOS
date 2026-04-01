@@ -1,7 +1,7 @@
 use helios_engine::ipc::{
-    DEFAULT_STREAM_PIPELINE_ENABLED_WHEN_BINDINGS_PRESENT, ResolvedStreamConfig, StreamManifest, StreamRecordingMode, default_decoder_enabled, default_decoder_ids_by_capture_format,
-    default_encoder_enabled, default_host_buffer, default_recording_mode, default_requested_preview_jpeg_quality_disabled, default_requested_preview_jpeg_quality_enabled,
-    default_start_on_boot, default_stream_encoder_selector,
+    DEFAULT_STREAM_PIPELINE_ENABLED_WHEN_BINDINGS_PRESENT, EncoderSettings, ResolvedStreamConfig, StreamManifest, StreamRecordingMode, default_decoder_enabled,
+    default_decoder_ids_by_capture_format, default_encoder_enabled, default_host_buffer, default_recording_mode, default_requested_preview_jpeg_quality_disabled,
+    default_requested_preview_jpeg_quality_enabled, default_start_on_boot, default_stream_encoder_selector, empty_encoder_settings_for_selector,
 };
 #[cfg(test)]
 use helios_engine::ipc::default_shadow_recording_codec;
@@ -211,6 +211,7 @@ fn validate_requested_codec_compatibility(manifest: &StreamManifest, issues: &mu
             "encoder_unavailable",
             issues,
         );
+        validate_encoder_settings_compatibility(manifest, issues);
     }
 
     if !manifest.decoder.is_disabled() {
@@ -223,6 +224,75 @@ fn validate_requested_codec_compatibility(manifest: &StreamManifest, issues: &mu
             "decoder_unavailable",
             issues,
         );
+    }
+}
+
+fn validate_encoder_settings_compatibility(manifest: &StreamManifest, issues: &mut Vec<ValidationIssue>) {
+    let Some(settings) = manifest.encoder.settings() else {
+        return;
+    };
+    let Some(selector) = manifest.encoder.id().map(str::trim).filter(|value| !value.is_empty()) else {
+        return;
+    };
+    let Some(expected) = empty_encoder_settings_for_selector(Some(selector)) else {
+        return;
+    };
+
+    if std::mem::discriminant(settings) != std::mem::discriminant(&expected) {
+        issues.push(issue_with_remediation(
+            "/encoder/settings/kind",
+            "encoder_settings_kind_mismatch",
+            format!("encoder settings kind does not match encoder `{selector}`"),
+            "Choose settings that match the selected encoder family, or switch the encoder selector to match the requested settings kind.",
+        ));
+        return;
+    }
+
+    validate_encoder_settings_values(settings, issues);
+}
+
+fn validate_encoder_settings_values(settings: &EncoderSettings, issues: &mut Vec<ValidationIssue>) {
+    match settings {
+        EncoderSettings::Turbojpeg { quality } | EncoderSettings::Mozjpeg { quality } => {
+            if let Some(quality) = quality
+                && !(*quality >= 1 && *quality <= 100)
+            {
+                issues.push(issue("/encoder/settings/quality", "encoder_quality_out_of_range", "encoder quality must be between 1 and 100"));
+            }
+        }
+        EncoderSettings::FfmpegMjpeg { bitrate, gop, framerate, thread_count, output_resolution }
+        | EncoderSettings::H264 { bitrate, gop, framerate, thread_count, output_resolution }
+        | EncoderSettings::H265 { bitrate, gop, framerate, thread_count, output_resolution } => {
+            if let Some(bitrate) = bitrate
+                && *bitrate == 0
+            {
+                issues.push(issue("/encoder/settings/bitrate", "encoder_bitrate_must_be_positive", "encoder bitrate must be greater than zero"));
+            }
+            if let Some(gop) = gop
+                && *gop <= 0
+            {
+                issues.push(issue("/encoder/settings/gop", "encoder_gop_must_be_positive", "encoder gop must be greater than zero"));
+            }
+            if let Some(framerate) = framerate
+                && (framerate.numerator == 0 || framerate.denominator == 0)
+            {
+                issues.push(issue("/encoder/settings/framerate", "encoder_framerate_invalid", "encoder framerate numerator and denominator must be greater than zero"));
+            }
+            if let Some(thread_count) = thread_count
+                && *thread_count == 0
+            {
+                issues.push(issue("/encoder/settings/thread_count", "encoder_thread_count_must_be_positive", "encoder thread_count must be greater than zero"));
+            }
+            if let Some(output_resolution) = output_resolution
+                && (output_resolution.width == 0 || output_resolution.height == 0)
+            {
+                issues.push(issue(
+                    "/encoder/settings/output_resolution",
+                    "encoder_output_resolution_invalid",
+                    "encoder output resolution width and height must be greater than zero",
+                ));
+            }
+        }
     }
 }
 
@@ -907,6 +977,29 @@ mod tests {
         let issue = err.issues.iter().find(|issue| issue.code == "decoder_unavailable").expect("expected decoder availability issue");
         assert_eq!(issue.path, "/decoder/id");
         assert_eq!(issue.remediation.as_deref(), Some("Choose a decoder selector that supports the selected capture format, or disable decoding."));
+    }
+
+    #[tokio::test]
+    async fn rejects_encoder_settings_kind_mismatch() {
+        let mut manifest = sample_libcamera_manifest();
+        manifest.encoder = helios_engine::ipc::RequestedEncoderConfig::enabled(
+            Some("turbojpeg".to_string()),
+            Some(helios_engine::ipc::EncoderSettings::H264 {
+                bitrate: Some(4_000_000),
+                gop: None,
+                framerate: None,
+                thread_count: None,
+                output_resolution: None,
+            }),
+        );
+
+        let err = validate_stream_manifest(manifest).await.expect_err("expected encoder settings kind mismatch");
+        let issue = err.issues.iter().find(|issue| issue.code == "encoder_settings_kind_mismatch").expect("expected encoder settings kind issue");
+        assert_eq!(issue.path, "/encoder/settings/kind");
+        assert_eq!(
+            issue.remediation.as_deref(),
+            Some("Choose settings that match the selected encoder family, or switch the encoder selector to match the requested settings kind.")
+        );
     }
 
     #[tokio::test]

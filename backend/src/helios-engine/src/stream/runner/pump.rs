@@ -187,10 +187,10 @@ impl StreamRunner {
             return false;
         }
         let tuning_requires_transcode = self.encoder_settings.as_ref().is_some_and(|settings| {
-            settings.bitrate.is_some_and(|value| value > 0)
-                || settings.gop.is_some_and(|value| value > 0)
-                || settings.framerate.as_ref().is_some_and(|rate| rate.numerator > 0 && rate.denominator > 0)
-                || settings.output_resolution.as_ref().is_some_and(|resolution| resolution.width > 0 && resolution.height > 0)
+            settings.bitrate().is_some_and(|value| value > 0)
+                || settings.gop().is_some_and(|value| value > 0)
+                || settings.framerate().is_some_and(|rate| rate.numerator > 0 && rate.denominator > 0)
+                || settings.output_resolution().is_some_and(|resolution| resolution.width > 0 && resolution.height > 0)
         });
         !tuning_requires_transcode
     }

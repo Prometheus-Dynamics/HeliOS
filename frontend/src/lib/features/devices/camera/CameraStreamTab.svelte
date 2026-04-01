@@ -7,6 +7,13 @@
   import { OpenAPI } from '$lib/ts-bindings/http/client';
   import { reportError } from '$lib/ui/errorPolicy';
   import { apiFetchResponse } from '$lib/api/core/http';
+  import {
+    encoderSelectionId,
+    encoderSettingsKindForCodec,
+    encoderSettingsSummary,
+    encoderSettingsSupportsQuality,
+    encoderSettingsSupportsVideoControls
+  } from '$lib/api/streamEncoderSettings';
   import { cancelDebounce, scheduleDebounce, type DebounceHandle } from '$lib/utils/debounce';
   import { toaster } from '$lib';
   import RangeBandSlider from '$lib/components/controls/RangeBandSlider.svelte';
@@ -165,8 +172,10 @@
   const selectedEncoder = $derived.by(() => {
     const selected = String(encoderImpl ?? '').trim();
     if (!selected) return null;
-    return encoders.find((c) => c.implementation === selected || c.name === selected) ?? null;
+    return encoders.find((c) => encoderSelectionId(c) === selected || c.implementation === selected || c.name === selected) ?? null;
   });
+  const selectedEncoderSettingsKind = $derived.by(() => encoderSettingsKindForCodec(selectedEncoder));
+  const selectedEncoderDefaultsSummary = $derived.by(() => encoderSettingsSummary(selectedEncoder?.tunables?.encoder_settings ?? null));
   const normalizedStreamCrop = $derived.by(() => normalizeStreamCrop(readStreamCrop()));
   const normalizedStreamCrosshair = $derived.by(() => normalizeStreamCrosshair(readStreamCrosshair()));
   const normalizedStreamOrderingMode = $derived.by(() => normalizeStreamOrderingMode(streamOrderingMode));
@@ -1086,95 +1095,108 @@
         </button>
       </div>
 
-      {#if selectedEncoder?.tunables?.encoder_settings}
-        <p class="mt-2 text-micro text-surface-500">
-          Defaults: bitrate {selectedEncoder?.tunables?.encoder_settings?.bitrate ?? 'auto'} · threads
-          {selectedEncoder?.tunables?.encoder_settings?.thread_count ?? 'auto'}
-        </p>
+      {#if selectedEncoderDefaultsSummary}
+        <p class="mt-2 text-micro text-surface-500">{selectedEncoderDefaultsSummary}</p>
       {/if}
 
       <div class="mt-4 space-y-3">
-        <div class="grid gap-3 md:grid-cols-3">
+        {#if encoderSettingsSupportsQuality(selectedEncoderSettingsKind)}
           <label class="text-sm">
-            <span class="text-2xs uppercase tracking-[0.3em] text-surface-500">Bitrate (bps)</span>
+            <span class="text-2xs uppercase tracking-[0.3em] text-surface-500">Quality</span>
             <input
               class="mt-1 w-full border border-surface-700 bg-surface-900/70 px-3 py-2"
               type="number"
-              min="0"
-              step="100000"
-              value={encoderSettings.bitrate ?? ''}
-              oninput={(e) => (encoderSettings.bitrate = Number((e.currentTarget as HTMLInputElement).value) || null)}
-              placeholder="4000000"
-            />
-          </label>
-          <label class="text-sm">
-            <span class="text-2xs uppercase tracking-[0.3em] text-surface-500">GOP</span>
-            <input
-              class="mt-1 w-full border border-surface-700 bg-surface-900/70 px-3 py-2"
-              type="number"
-              min="0"
+              min="1"
+              max="100"
               step="1"
-              value={encoderSettings.gop ?? ''}
-              oninput={(e) => (encoderSettings.gop = Number((e.currentTarget as HTMLInputElement).value) || null)}
+              value={encoderSettings.quality ?? ''}
+              oninput={(e) => (encoderSettings.quality = Number((e.currentTarget as HTMLInputElement).value) || null)}
               placeholder="Auto"
             />
           </label>
-          <label class="text-sm">
-            <span class="text-2xs uppercase tracking-[0.3em] text-surface-500">Threads</span>
-            <input
-              class="mt-1 w-full border border-surface-700 bg-surface-900/70 px-3 py-2"
-              type="number"
-              min="0"
-              step="1"
-              value={encoderSettings.threadCount ?? ''}
-              oninput={(e) => (encoderSettings.threadCount = Number((e.currentTarget as HTMLInputElement).value) || null)}
-              placeholder="Auto"
-            />
-          </label>
-        </div>
-        <div class="space-y-2">
-          <div class="flex flex-wrap items-center gap-2">
-            <span class="text-2xs uppercase tracking-[0.3em] text-surface-500">Output scale</span>
-            <button class="btn btn-3xs preset-tonal uppercase tracking-[0.3em]" type="button" onclick={() => applyOutputScale(1)}>1x</button>
-            <button class="btn btn-3xs preset-tonal uppercase tracking-[0.3em]" type="button" onclick={() => applyOutputScale(2)}>2x</button>
-            <button class="btn btn-3xs preset-tonal uppercase tracking-[0.3em]" type="button" onclick={() => applyOutputScale(3)}>3x</button>
-            <button class="btn btn-3xs preset-tonal uppercase tracking-[0.3em]" type="button" onclick={() => applyOutputScale(4)}>4x</button>
+        {:else if encoderSettingsSupportsVideoControls(selectedEncoderSettingsKind)}
+          <div class="grid gap-3 md:grid-cols-3">
+            <label class="text-sm">
+              <span class="text-2xs uppercase tracking-[0.3em] text-surface-500">Bitrate (bps)</span>
+              <input
+                class="mt-1 w-full border border-surface-700 bg-surface-900/70 px-3 py-2"
+                type="number"
+                min="0"
+                step="100000"
+                value={encoderSettings.bitrate ?? ''}
+                oninput={(e) => (encoderSettings.bitrate = Number((e.currentTarget as HTMLInputElement).value) || null)}
+                placeholder="4000000"
+              />
+            </label>
+            <label class="text-sm">
+              <span class="text-2xs uppercase tracking-[0.3em] text-surface-500">GOP</span>
+              <input
+                class="mt-1 w-full border border-surface-700 bg-surface-900/70 px-3 py-2"
+                type="number"
+                min="0"
+                step="1"
+                value={encoderSettings.gop ?? ''}
+                oninput={(e) => (encoderSettings.gop = Number((e.currentTarget as HTMLInputElement).value) || null)}
+                placeholder="Auto"
+              />
+            </label>
+            <label class="text-sm">
+              <span class="text-2xs uppercase tracking-[0.3em] text-surface-500">Threads</span>
+              <input
+                class="mt-1 w-full border border-surface-700 bg-surface-900/70 px-3 py-2"
+                type="number"
+                min="0"
+                step="1"
+                value={encoderSettings.threadCount ?? ''}
+                oninput={(e) => (encoderSettings.threadCount = Number((e.currentTarget as HTMLInputElement).value) || null)}
+                placeholder="Auto"
+              />
+            </label>
           </div>
-          <p class="text-micro text-surface-500">
-            {#if parseSelectedResolution()}
-              Source {parseSelectedResolution()?.width}x{parseSelectedResolution()?.height} · 2x-4x is recommended for higher encode FPS.
-            {:else}
-              Select a stream resolution to enable scale presets.
-            {/if}
-          </p>
-        </div>
+          <div class="space-y-2">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-2xs uppercase tracking-[0.3em] text-surface-500">Output scale</span>
+              <button class="btn btn-3xs preset-tonal uppercase tracking-[0.3em]" type="button" onclick={() => applyOutputScale(1)}>1x</button>
+              <button class="btn btn-3xs preset-tonal uppercase tracking-[0.3em]" type="button" onclick={() => applyOutputScale(2)}>2x</button>
+              <button class="btn btn-3xs preset-tonal uppercase tracking-[0.3em]" type="button" onclick={() => applyOutputScale(3)}>3x</button>
+              <button class="btn btn-3xs preset-tonal uppercase tracking-[0.3em]" type="button" onclick={() => applyOutputScale(4)}>4x</button>
+            </div>
+            <p class="text-micro text-surface-500">
+              {#if parseSelectedResolution()}
+                Source {parseSelectedResolution()?.width}x{parseSelectedResolution()?.height} · 2x-4x is recommended for higher encode FPS.
+              {:else}
+                Select a stream resolution to enable scale presets.
+              {/if}
+            </p>
+          </div>
 
-        <div class="grid gap-3 md:grid-cols-2">
-          <label class="text-sm">
-            <span class="text-2xs uppercase tracking-[0.3em] text-surface-500">Output width</span>
-            <input
-              class="mt-1 w-full border border-surface-700 bg-surface-900/70 px-3 py-2"
-              type="number"
-              min="0"
-              step="1"
-              value={encoderSettings.outWidth ?? ''}
-              oninput={(e) => (encoderSettings.outWidth = Number((e.currentTarget as HTMLInputElement).value) || null)}
-              placeholder="Match source"
-            />
-          </label>
-          <label class="text-sm">
-            <span class="text-2xs uppercase tracking-[0.3em] text-surface-500">Output height</span>
-            <input
-              class="mt-1 w-full border border-surface-700 bg-surface-900/70 px-3 py-2"
-              type="number"
-              min="0"
-              step="1"
-              value={encoderSettings.outHeight ?? ''}
-              oninput={(e) => (encoderSettings.outHeight = Number((e.currentTarget as HTMLInputElement).value) || null)}
-              placeholder="Match source"
-            />
-          </label>
-        </div>
+          <div class="grid gap-3 md:grid-cols-2">
+            <label class="text-sm">
+              <span class="text-2xs uppercase tracking-[0.3em] text-surface-500">Output width</span>
+              <input
+                class="mt-1 w-full border border-surface-700 bg-surface-900/70 px-3 py-2"
+                type="number"
+                min="0"
+                step="1"
+                value={encoderSettings.outWidth ?? ''}
+                oninput={(e) => (encoderSettings.outWidth = Number((e.currentTarget as HTMLInputElement).value) || null)}
+                placeholder="Match source"
+              />
+            </label>
+            <label class="text-sm">
+              <span class="text-2xs uppercase tracking-[0.3em] text-surface-500">Output height</span>
+              <input
+                class="mt-1 w-full border border-surface-700 bg-surface-900/70 px-3 py-2"
+                type="number"
+                min="0"
+                step="1"
+                value={encoderSettings.outHeight ?? ''}
+                oninput={(e) => (encoderSettings.outHeight = Number((e.currentTarget as HTMLInputElement).value) || null)}
+                placeholder="Match source"
+              />
+            </label>
+          </div>
+        {/if}
       </div>
     </div>
   </div>

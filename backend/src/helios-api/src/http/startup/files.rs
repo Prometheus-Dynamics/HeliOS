@@ -149,7 +149,15 @@ mod tests {
         assert_eq!(doc.streams.len(), 1);
         assert_eq!(doc.streams[0].camera_id, "ov9782");
         assert_eq!(doc.streams[0].manifest.capture.target_fps, Some(120));
-        assert_eq!(doc.streams[0].manifest.encoder.settings().and_then(|enc| enc.output_resolution.as_ref()).map(|res| (res.width, res.height)), Some((854, 480)));
+        assert_eq!(
+            doc.streams[0]
+                .manifest
+                .encoder
+                .settings()
+                .and_then(|enc| enc.output_resolution())
+                .map(|res| (res.width, res.height)),
+            Some((854, 480))
+        );
         assert_eq!(doc.streams[0].manifest.decoder.id(), Some("nv12-luma"));
         assert_eq!(doc.streams[0].manifest.decoder.settings().and_then(|decoder| decoder.rotation_degrees), Some(90));
     }

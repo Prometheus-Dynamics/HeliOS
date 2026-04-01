@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { backendFeatures } from '$lib/api/backendFeatures';
+  import { encoderSelectionId } from '$lib/api/streamEncoderSettings';
 
   type CodecOption = { kind: string; implementation: string; name: string };
 
@@ -155,7 +156,7 @@
         >
           <option value="">Disabled</option>
           {#each encoders as enc, idx (`enc-${enc.kind}-${enc.implementation}-${idx}`)}
-            <option value={(String(enc.implementation ?? '').trim() || String(enc.name ?? '').trim())}>{enc.name} ({enc.implementation})</option>
+            <option value={encoderSelectionId(enc) ?? ''}>{enc.name} ({enc.implementation})</option>
           {/each}
         </select>
       </label>
