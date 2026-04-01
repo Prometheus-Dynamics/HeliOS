@@ -37,7 +37,7 @@ use crate::http::pipelines;
 use helios_engine::capture::{CaptureControl, CaptureControlValue};
 use helios_engine::ipc::{EngineErrorCode, EngineEvent, GraphOutputPortDescriptor, StreamManifest, StreamPipelineBinding};
 
-use self::types::{CodecInfo, StartStreamResponse, StreamFormatInfo, StreamInfo};
+use self::types::{CodecInfo, StartStreamResponse, StreamFormatInfo, StreamInfo, StreamInspectInfo};
 use self::validation::{StreamCapabilitiesResponse, StreamValidateResponse, stream_capabilities, validate_stream_manifest};
 
 pub(crate) const RAW_PIPELINE_UUID: Uuid = Uuid::from_u128(0x000000000000000000000000000000aa);
@@ -50,6 +50,7 @@ pub(crate) const CALIBRATION_MODE_PIPELINE_UUID: Uuid = Uuid::from_u128(0x000000
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_streams).post(start_stream))
+        .route("/inspect", get(list_stream_inspect))
         .route("/validate", post(validate_stream))
         .route("/capabilities", get(stream_capabilities_handler))
         .route("/replay/media", post(replay::start_media_replay_stream))
@@ -60,6 +61,7 @@ pub fn router() -> Router<AppState> {
         .route("/bench/sensor/{id}/cancel", post(sensor_bench::cancel_sensor_benchmark))
         .route("/codecs", get(list_codecs))
         .route("/{id}", get(get_stream).delete(delete_stream))
+        .route("/{id}/inspect", get(get_stream_inspect))
         .route("/{id}/controls", get(get_controls))
         .route("/{id}/controls/{control_id}", post(set_control))
         .route("/{id}/metrics", get(get_metrics))
@@ -115,6 +117,16 @@ pub(crate) async fn restart_stream_with_manifest(state: AppState, manifest: Stre
 )]
 async fn list_streams(State(state): State<AppState>, headers: axum::http::HeaderMap) -> impl IntoResponse {
     lifecycle::list_streams(state, headers).await
+}
+
+#[utoipa::path(
+    get,
+    path = "/streams/inspect",
+    tag = "EngineStreams",
+    responses((status = 200, description = "Inspect active streams with resolved config, descriptor, codec chain, and demand state", body = [StreamInspectInfo]))
+)]
+async fn list_stream_inspect(State(state): State<AppState>, headers: axum::http::HeaderMap) -> impl IntoResponse {
+    lifecycle::list_stream_inspect(state, headers).await
 }
 
 #[utoipa::path(
@@ -178,6 +190,17 @@ async fn bench_formats(State(state): State<AppState>, Json(req): Json<bench::Ben
 )]
 async fn delete_stream(State(state): State<AppState>, Path(id): Path<Uuid>) -> impl IntoResponse {
     lifecycle::delete_stream(state, id).await
+}
+
+#[utoipa::path(
+    get,
+    path = "/streams/{id}/inspect",
+    tag = "EngineStreams",
+    params(("id" = Uuid, Path, description = "Stream ID")),
+    responses((status = 200, description = "Inspect one stream with resolved config, descriptor, codec chain, and demand state", body = StreamInspectInfo))
+)]
+async fn get_stream_inspect(State(state): State<AppState>, Path(id): Path<Uuid>) -> impl IntoResponse {
+    lifecycle::get_stream_inspect(state, id).await
 }
 
 #[utoipa::path(

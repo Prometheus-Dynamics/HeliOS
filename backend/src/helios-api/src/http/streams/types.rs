@@ -1,5 +1,8 @@
 use helios_engine::capture::CaptureDescriptor;
-use helios_engine::ipc::{EncoderSettings, EngineErrorCode, ResolvedStreamConfig, StreamManifest, StreamRuntimeState, StreamStatus};
+use helios_engine::ipc::{
+    EncoderSettings, EngineErrorCode, ResolvedStreamConfig, StreamCaptureRuntimeState, StreamCodecChainRuntimeState, StreamDemandRuntimeState, StreamManifest, StreamPipelineRuntimeState,
+    StreamRecordingRuntimeState, StreamRuntimeState, StreamStatus,
+};
 use serde::{Deserialize, Serialize};
 use styx::codec::CodecKind;
 use utoipa::ToSchema;
@@ -15,6 +18,34 @@ pub struct StreamInfo {
     pub status: Option<StreamStatus>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<StreamRuntimeState>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema, Clone)]
+pub struct StreamInspectInfo {
+    pub id: Uuid,
+    pub descriptor: CaptureDescriptor,
+    pub resolved: ResolvedStreamConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture: Option<StreamCaptureRuntimeState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codec_chain: Option<StreamCodecChainRuntimeState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub consumer_demand: Option<StreamDemandRuntimeState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recording: Option<StreamRecordingRuntimeState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pipeline: Option<StreamPipelineRuntimeState>,
+}
+
+impl From<StreamInfo> for StreamInspectInfo {
+    fn from(value: StreamInfo) -> Self {
+        let capture = value.runtime.as_ref().map(|runtime| runtime.capture.clone());
+        let codec_chain = value.runtime.as_ref().map(|runtime| runtime.codecs.clone());
+        let consumer_demand = value.runtime.as_ref().map(|runtime| runtime.demand.clone());
+        let recording = value.runtime.as_ref().map(|runtime| runtime.recording.clone());
+        let pipeline = value.runtime.as_ref().map(|runtime| runtime.pipeline.clone());
+        Self { id: value.id, descriptor: value.descriptor, resolved: value.resolved, capture, codec_chain, consumer_demand, recording, pipeline }
+    }
 }
 
 #[derive(Serialize, Deserialize, ToSchema)]

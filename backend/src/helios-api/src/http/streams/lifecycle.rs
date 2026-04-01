@@ -18,10 +18,10 @@ use crate::http::streams_persist;
 use crate::http::validation::validation_error_response;
 
 use super::sensor_bench;
-use super::types::{CodecInfo, CodecTunables, StartStreamResponse, StreamInfo};
+use super::types::{CodecInfo, CodecTunables, StartStreamResponse, StreamInfo, StreamInspectInfo};
 use super::util::{
-    apply_effective_pipeline_layout, build_stream_info, camera_id_for_manifest, default_encoder_settings_for_codec, engine_error_body, engine_error_body_with_retryable,
-    list_streams_timeout, map_client_error, normalize_pipeline_manifest, normalize_stream_encoder_manifest,
+    apply_effective_pipeline_layout, build_stream_info, camera_id_for_manifest, default_encoder_settings_for_codec, engine_error_body, engine_error_body_with_retryable, list_streams_timeout,
+    map_client_error, normalize_pipeline_manifest, normalize_stream_encoder_manifest,
 };
 use super::validation::validate_stream_manifest;
 use super::wait::{wait_for_stream_gone, wait_for_stream_started};
@@ -55,6 +55,14 @@ pub(crate) fn ensure_descriptor_has_mode(descriptor: &mut CaptureDescriptor, man
 }
 
 fn stream_list_response(payload: Vec<StreamInfo>, stale: bool) -> Response {
+    let mut response = Json(payload).into_response();
+    if stale {
+        response.headers_mut().insert("x-helios-streams-stale", HeaderValue::from_static("1"));
+    }
+    response
+}
+
+fn stream_inspect_response(payload: Vec<StreamInspectInfo>, stale: bool) -> Response {
     let mut response = Json(payload).into_response();
     if stale {
         response.headers_mut().insert("x-helios-streams-stale", HeaderValue::from_static("1"));
@@ -527,6 +535,18 @@ pub(crate) async fn list_streams(state: AppState, headers: axum::http::HeaderMap
     response
 }
 
+pub(crate) async fn list_stream_inspect(state: AppState, headers: axum::http::HeaderMap) -> Response {
+    let (payload, stale, revision) = state.services.streams.get_cached_streams_snapshot_with_revision(&state).await;
+    if matches_if_none_match(&headers, revision) {
+        return not_modified_response(revision);
+    }
+
+    let inspect = payload.into_iter().map(StreamInspectInfo::from).collect();
+    let mut response = stream_inspect_response(inspect, stale);
+    apply_revision_headers(response.headers_mut(), revision);
+    response
+}
+
 pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> Response {
     // Serialize stream starts so identity uniqueness checks (active + persisted) remain reliable.
     let _guard = state.services.streams.stream_start_guard().await;
@@ -667,6 +687,33 @@ pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> R
     }
 }
 
+pub(crate) async fn get_stream_inspect(state: AppState, id: Uuid) -> Response {
+    let (payload, _, _) = state.services.streams.get_cached_streams_snapshot_with_revision(&state).await;
+    if let Some(stream) = payload.into_iter().find(|stream| stream.id == id) {
+        return Json(StreamInspectInfo::from(stream)).into_response();
+    }
+
+    for record in streams_persist::list_persisted_records().await {
+        let Some(mut manifest) = record.requested_manifest() else {
+            continue;
+        };
+        if manifest.internal {
+            continue;
+        }
+        let matches = manifest.identity.id == Some(id) || record.stream_id() == Some(id) || streams_persist::derived_stream_id(&record.camera_id) == id;
+        if !matches {
+            continue;
+        }
+        manifest.identity.id = Some(id);
+        apply_effective_pipeline_layout(&mut manifest);
+        let descriptor = streams_persist::descriptor_snapshot_for_record(&record).unwrap_or_else(|| descriptor_from_persisted_manifest(&manifest));
+        let info = StreamInspectInfo::from(build_stream_info(id, descriptor, manifest.resolve(), None, None));
+        return Json(info).into_response();
+    }
+
+    StatusCode::NOT_FOUND.into_response()
+}
+
 pub(crate) async fn delete_stream(state: AppState, id: Uuid) -> Response {
     // Unregister should be fast and resilient: remove persisted state immediately, and stop the
     // running stream on a best-effort basis (without blocking the HTTP request on engine IPC).
@@ -752,6 +799,10 @@ mod tests {
     use super::*;
     use helios_engine::capture::{BackendHandle, BackendKind, CaptureConfig, ModeId};
     use helios_engine::identity::DeviceIdentity;
+    use helios_engine::ipc::{
+        StreamCaptureRuntimeState, StreamCaptureState, StreamCodecChainRuntimeState, StreamDemandRuntimeState, StreamPipelineRuntimeState, StreamRecordingRuntimeState, StreamRuntimeState,
+    };
+    use helios_engine::stream::StreamFrameDemandMetrics;
     use std::collections::BTreeMap;
     use styx::prelude::{ColorSpace, FourCc, MediaFormat, Resolution};
 
@@ -832,5 +883,89 @@ mod tests {
 
         assert!(descriptor.modes.iter().any(|mode| mode.id == manifest.capture.mode));
         assert_eq!(descriptor.modes.len(), 2);
+    }
+
+    fn sample_stream_runtime() -> StreamRuntimeState {
+        StreamRuntimeState {
+            capture: StreamCaptureRuntimeState {
+                state: StreamCaptureState::Running,
+                started_at_ms: Some(42),
+                capture_fourcc: Some("YUYV".to_string()),
+                disabled_since_ms: None,
+                disabled_reason: None,
+            },
+            codecs: StreamCodecChainRuntimeState {
+                capture_input_fourcc: Some("YUYV".to_string()),
+                decoder_impl: Some("yuyv-cpu".to_string()),
+                encoder_input_fourcc: Some("RG24".to_string()),
+                encoder_impl: Some("turbojpeg".to_string()),
+                encoder_output_fourcc: Some("MJPG".to_string()),
+            },
+            demand: StreamDemandRuntimeState {
+                frame: StreamFrameDemandMetrics {
+                    raw_receiver_count: 1,
+                    host_receiver_count: 2,
+                    preview_demand_active: true,
+                    encode_demand_active: true,
+                    graph_sample_demand_active: false,
+                    needs_decoded_image: true,
+                    graph_has_image_output: true,
+                    graph_has_executor: false,
+                },
+                encoder: helios_engine::stream::StreamEncoderDemandMetrics {
+                    broadcast_receiver_count: 1,
+                    managed_consumer_count: 1,
+                    managed_consumer_last_seen_ms: 99,
+                    encoder_demand_active: true,
+                    encoder_worker_running: true,
+                },
+                live_active: true,
+            },
+            recording: StreamRecordingRuntimeState { state: helios_engine::ipc::StreamRecordingState::Active, started_at_ms: Some(77) },
+            pipeline: StreamPipelineRuntimeState {
+                enabled: true,
+                active_pipeline_id: Some(crate::http::streams::RAW_PIPELINE_UUID),
+                active_output_key: Some("raw".to_string()),
+                pipeline_count: 1,
+                disabled: false,
+                disabled_since_ms: None,
+                disabled_reason: None,
+            },
+        }
+    }
+
+    #[test]
+    fn stream_inspect_info_surfaces_runtime_sections() {
+        let manifest = sample_ov9782_manifest();
+        let descriptor = descriptor_from_persisted_manifest(&manifest);
+        let resolved = manifest.resolve();
+        let info = build_stream_info(Uuid::nil(), descriptor.clone(), resolved.clone(), None, Some(sample_stream_runtime()));
+        let inspect = StreamInspectInfo::from(info);
+
+        assert_eq!(inspect.id, Uuid::nil());
+        assert_eq!(inspect.descriptor.modes.len(), descriptor.modes.len());
+        assert_eq!(inspect.descriptor.controls.len(), descriptor.controls.len());
+        assert_eq!(inspect.descriptor.modes[0].id, descriptor.modes[0].id);
+        assert_eq!(inspect.resolved.identity.id, resolved.identity.id);
+        assert_eq!(inspect.resolved.capture.mode, resolved.capture.mode);
+        assert_eq!(inspect.resolved.encoder.codec_id, resolved.encoder.codec_id);
+        assert_eq!(inspect.capture.as_ref().and_then(|capture| capture.capture_fourcc.as_deref()), Some("YUYV"));
+        assert_eq!(inspect.codec_chain.as_ref().and_then(|codec| codec.encoder_impl.as_deref()), Some("turbojpeg"));
+        assert!(inspect.consumer_demand.as_ref().is_some_and(|demand| demand.live_active));
+        assert_eq!(inspect.recording.as_ref().and_then(|recording| recording.started_at_ms), Some(77));
+        assert_eq!(inspect.pipeline.as_ref().and_then(|pipeline| pipeline.active_output_key.as_deref()), Some("raw"));
+    }
+
+    #[test]
+    fn stream_inspect_info_omits_runtime_sections_when_unavailable() {
+        let manifest = sample_ov9782_manifest();
+        let descriptor = descriptor_from_persisted_manifest(&manifest);
+        let inspect = StreamInspectInfo::from(build_stream_info(Uuid::nil(), descriptor, manifest.resolve(), None, None));
+
+        assert!(inspect.capture.is_none());
+        assert!(inspect.codec_chain.is_none());
+        assert!(inspect.consumer_demand.is_none());
+        assert!(inspect.recording.is_none());
+        assert!(inspect.pipeline.is_none());
     }
 }
