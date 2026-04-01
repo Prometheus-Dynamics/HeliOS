@@ -60,14 +60,14 @@ fn merge_persisted_streams(mut active: Vec<StreamInfo>, persisted: Vec<streams_p
     let mut pose_by_stream = HashMap::new();
 
     for record in &persisted {
-        let Some(manifest) = record.manifest.as_ref() else {
+        let Some(resolved) = record.resolved_config.as_ref() else {
             continue;
         };
-        if manifest.internal {
+        if resolved.internal {
             continue;
         }
-        let stream_id = manifest.identity.id.or(record.last_stream_id).unwrap_or_else(|| streams_persist::derived_stream_id(&record.camera_id));
-        if let Some(pose) = manifest.pose.clone() {
+        let stream_id = record.effective_stream_id().unwrap_or_else(|| streams_persist::derived_stream_id(&record.camera_id));
+        if let Some(pose) = resolved.pose.clone() {
             pose_by_stream.insert(stream_id, pose);
         }
     }
@@ -82,13 +82,13 @@ fn merge_persisted_streams(mut active: Vec<StreamInfo>, persisted: Vec<streams_p
     }
 
     for record in persisted {
+        let stream_id = record.effective_stream_id().unwrap_or_else(|| streams_persist::derived_stream_id(&record.camera_id));
         let Some(mut resolved) = record.resolved_config else {
             continue;
         };
         if resolved.internal {
             continue;
         }
-        let stream_id = resolved.identity.id.or(record.last_stream_id).unwrap_or_else(|| streams_persist::derived_stream_id(&record.camera_id));
         if !persisted_ids.insert(stream_id) {
             tracing::warn!(camera_id = %record.camera_id, stream_id = %stream_id, "duplicate persisted stream id; keeping first record");
             continue;
@@ -192,11 +192,66 @@ impl StreamsReadModelState {
         if let Some(stream) = self.cached_stream_info(stream_id).await {
             return Some(stream.manifest);
         }
-        state
-            .engine
-            .list_streams()
-            .await
-            .ok()
-            .and_then(|streams| streams.into_iter().find(|stream| stream.stream_id == stream_id).map(|stream| stream.manifest.to_requested_manifest()))
+        state.engine.list_streams().await.ok().and_then(|streams| streams.into_iter().find(|stream| stream.stream_id == stream_id).map(|stream| stream.manifest.to_requested_manifest()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn sample_manifest() -> StreamManifest {
+        serde_json::from_value(json!({
+            "identity": {},
+            "capture": {
+                "device_keys": [],
+                "backend": "Virtual",
+                "handle": { "type": "virtual" },
+                "mode": {
+                    "format": {
+                        "code": "RGB3",
+                        "resolution": { "width": 1, "height": 1 },
+                        "color": "Srgb"
+                    },
+                    "interval": null
+                },
+                "controls": []
+            },
+            "pose": {
+                "translation": { "x": 1.0, "y": 2.0, "z": 3.0 },
+                "rotation": { "roll": 4.0, "pitch": 5.0, "yaw": 6.0 },
+                "updated_at": "2026-03-31T00:00:00Z"
+            }
+        }))
+        .expect("decode sample manifest")
+    }
+
+    #[test]
+    fn merge_persisted_streams_reconstructs_requested_manifest_from_resolved_only_record() {
+        let stream_id = Uuid::new_v4();
+        let manifest = sample_manifest();
+        let expected_manifest = {
+            let mut expected = manifest.clone().resolve().to_requested_manifest();
+            expected.identity.id = Some(stream_id);
+            expected
+        };
+        let persisted = vec![streams_persist::PersistedStreamRecord {
+            camera_id: "virtual-camera".to_string(),
+            last_stream_id: Some(stream_id),
+            manifest: None,
+            resolved_config: Some(manifest.clone().resolve()),
+            ..Default::default()
+        }];
+
+        let merged = merge_persisted_streams(Vec::new(), persisted);
+        assert_eq!(merged.len(), 1);
+
+        let stream = &merged[0];
+        assert_eq!(stream.id, stream_id);
+        assert!(stream.status.is_none());
+        assert_eq!(stream.manifest.identity.id, Some(stream_id));
+        assert_eq!(stream.resolved.identity.id, Some(stream_id));
+        assert_eq!(serde_json::to_value(&stream.manifest).expect("encode merged manifest"), serde_json::to_value(expected_manifest).expect("encode expected manifest"));
     }
 }
