@@ -8,8 +8,8 @@ use crate::http::device::metrics::{CpuCoreMetrics, DeviceHealthIssue, DeviceMetr
 use crate::http::storage;
 use crate::ws::device::{CpuCoreSample, CpuTelemetry, DiskTelemetry, MemoryTelemetry, NetworkInterfaceSample, NetworkSample, TelemetrySample};
 
+use super::config::process_metrics_cache_ttl;
 use super::hardware::{read_cpu_temperature_c, read_cpu_throttle_status, sample_gpu};
-use super::process_metrics_cache_ttl;
 use super::processes::collect_process_memory_metrics;
 use super::storage_metrics::{collect_disk_metrics, collect_disk_partitions, filesystem_usage_for_path, select_disk_for_path};
 

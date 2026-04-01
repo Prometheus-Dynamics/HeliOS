@@ -8,21 +8,63 @@
     },
     {
       "path": "backend/src/helios-api/src/system_read_model.rs",
-      "max_lines": 400,
+      "max_lines": 40,
       "owner": "HeliOS",
-      "review_note": "Read-model decomposition is still in progress; after extracting the stream hubs, realtime delivery block, process attribution, log-source subsystem, hardware/storage helpers, and collector internals, keep the parent file from regrowing into the old mixed collector/delivery monolith."
+      "review_note": "The system read-model root is now only module wiring and public re-exports; keep collection, reduction, delivery, and cache ownership in dedicated submodules instead of rebuilding a mixed root file."
+    },
+    {
+      "path": "backend/src/helios-api/src/system_read_model/config.rs",
+      "max_lines": 80,
+      "owner": "HeliOS",
+      "review_note": "Read-model sampler intervals, cache TTLs, and thread spawn policy now live here; keep runtime knob parsing out of collectors, reducers, and delivery hubs."
+    },
+    {
+      "path": "backend/src/helios-api/src/system_read_model/device_metrics.rs",
+      "max_lines": 100,
+      "owner": "HeliOS",
+      "review_note": "Device metrics cache orchestration and stale-fallback refresh policy now live here; keep those stateful cache decisions separate from raw collection and realtime delivery."
+    },
+    {
+      "path": "backend/src/helios-api/src/system_read_model/state.rs",
+      "max_lines": 80,
+      "owner": "HeliOS",
+      "review_note": "Shared read-model state ownership now lives here; keep hub fields, caches, and collectors centralized instead of scattering state construction back across helper modules."
     },
     {
       "path": "backend/src/helios-api/src/system_read_model/streams.rs",
-      "max_lines": 800,
+      "max_lines": 600,
       "owner": "HeliOS",
-      "review_note": "Stream metrics/output hub delivery logic now lives in its own module; keep it focused while the wider read-model split continues."
+      "review_note": "Stream metrics/output delivery stays in its own subsystem; keep stream-specific subscription and broadcast formatting out of the generic realtime and state modules."
     },
     {
-      "path": "backend/src/helios-api/src/system_read_model/realtime.rs",
-      "max_lines": 650,
+      "path": "backend/src/helios-api/src/system_read_model/realtime/mod.rs",
+      "max_lines": 20,
       "owner": "HeliOS",
-      "review_note": "Realtime process/device-update/telemetry delivery now lives in its own module; keep the extracted hub logic contained while the rest of the read-model split continues."
+      "review_note": "Realtime root is now only module wiring and re-exports; keep models, reducers, samplers, and delivery logic in their dedicated files."
+    },
+    {
+      "path": "backend/src/helios-api/src/system_read_model/realtime/models.rs",
+      "max_lines": 80,
+      "owner": "HeliOS",
+      "review_note": "Realtime process/device-update shared payload types now live here; keep runtime models separate from sampler loops and broadcast reducers."
+    },
+    {
+      "path": "backend/src/helios-api/src/system_read_model/realtime/reducers.rs",
+      "max_lines": 240,
+      "owner": "HeliOS",
+      "review_note": "Realtime reduction and broadcast formatting now live here; keep fingerprinting, reason mapping, and payload shaping out of the sampler and delivery layers."
+    },
+    {
+      "path": "backend/src/helios-api/src/system_read_model/realtime/samplers.rs",
+      "max_lines": 320,
+      "owner": "HeliOS",
+      "review_note": "Realtime process, telemetry, and device-update sampling loops now live here; keep hub lifecycle management and payload formatting out of the sampler layer."
+    },
+    {
+      "path": "backend/src/helios-api/src/system_read_model/realtime/delivery.rs",
+      "max_lines": 240,
+      "owner": "HeliOS",
+      "review_note": "Realtime hub ownership and subscription entrypoints now live here; keep spawn policy and subscriber lifecycle separate from raw sampling and reduction helpers."
     },
     {
       "path": "backend/src/helios-api/src/system_read_model/processes.rs",
@@ -1591,6 +1633,13 @@
       "path": "backend/src/helios-api/src/ipc/peripherals.rs",
       "owner": "HeliOS",
       "reason": "Peripherals IPC socket resolution, handshake/bootstrap, pooled-session management, and command implementations now live under backend/src/helios-api/src/ipc/peripherals/*. Do not recreate the deleted ipc/peripherals.rs monolith."
+    }
+  ],
+  "forbidden_paths": [
+    {
+      "path": "backend/src/helios-api/src/system_read_model/realtime.rs",
+      "owner": "HeliOS",
+      "reason": "the read-model split now keeps realtime models, reducers, samplers, and delivery in dedicated modules"
     }
   ]
 }

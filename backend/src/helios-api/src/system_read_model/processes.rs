@@ -8,7 +8,7 @@ use tokio::time::{Duration, Instant};
 
 use crate::http::device::metrics::{ProcessMappingMetrics, ProcessMemoryMetrics};
 
-use super::read_duration_env;
+use super::config::read_duration_env;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum ProcessMappingBucket {

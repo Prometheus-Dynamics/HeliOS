@@ -6,10 +6,12 @@ use tokio::process::{Child, Command};
 use tokio::time::{Duration, Instant};
 use tracing::warn;
 
+use crate::api_observability::ApiCacheMetric;
 use crate::logs;
 use crate::logs::LogSource;
 
-use super::{SystemReadModelState, read_duration_env};
+use super::config::read_duration_env;
+use super::state::SystemReadModelState;
 
 #[derive(Clone)]
 pub(super) struct LogSourcesCacheEntry {
@@ -90,6 +92,10 @@ dmesg 2>/dev/null | tail -n {n}
 }
 
 impl SystemReadModelState {
+    pub fn log_sources_cache_metrics(&self) -> ApiCacheMetric {
+        self.log_sources_stats.snapshot()
+    }
+
     pub async fn load_log_sources_snapshot(&self) -> (Vec<LogSource>, u64) {
         let ttl = log_sources_cache_ttl();
         if ttl != Duration::from_millis(0)
