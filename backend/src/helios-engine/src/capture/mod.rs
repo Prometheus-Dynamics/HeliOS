@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use std::num::NonZeroU32;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::str::FromStr;
 use std::sync::Mutex;
 use std::time::Duration;
-use styx::capture::prelude::Mode;
 pub use styx::capture::ModeId;
+use styx::capture::prelude::Mode;
 use styx::capture_api::make_file_device;
 use styx::capture_api::{CaptureError, CaptureHandle, CaptureRequest, TdnOutputMode};
 use styx::core::controls::ControlId;
@@ -364,13 +364,7 @@ mod tests {
             descriptor: CaptureDescriptor { modes: vec![], controls: vec![] },
             properties: vec![],
         };
-        let device = ProbedDevice {
-            identity: styx::DeviceIdentity {
-                display: "front".into(),
-                keys: vec!["ov9782".into(), "libcamera:front".into()],
-            },
-            backends: vec![current_backend.clone()],
-        };
+        let device = ProbedDevice { identity: styx::DeviceIdentity { display: "front".into(), keys: vec!["ov9782".into(), "libcamera:front".into()] }, backends: vec![current_backend.clone()] };
         let config = CaptureConfig {
             device_keys: vec!["ov9782".to_string()],
             device_identity: Some(CaptureDeviceIdentity {
@@ -432,6 +426,10 @@ mod tests {
 
 pub(crate) fn find_backend_for_config<'a>(config: &CaptureConfig, devices: &'a [ProbedDevice]) -> Option<&'a ProbedBackend> {
     find_device_backend_for_config(config, devices).map(|(_, backend)| backend)
+}
+
+pub fn descriptor_snapshot_for_config(config: &CaptureConfig, devices: &[ProbedDevice]) -> Option<CaptureDescriptor> {
+    find_backend_for_config(config, devices).map(|backend| backend.descriptor.clone())
 }
 
 pub fn descriptor_for_config(config: &CaptureConfig) -> Option<CaptureDescriptor> {
@@ -799,11 +797,7 @@ impl CaptureSession {
     }
 
     pub fn metrics_snapshot(&self) -> CaptureStageMetrics {
-        if let Some(handle) = self.handle.as_ref() {
-            handle.metrics().into()
-        } else {
-            CaptureStageMetrics::default()
-        }
+        if let Some(handle) = self.handle.as_ref() { handle.metrics().into() } else { CaptureStageMetrics::default() }
     }
 
     pub fn config(&self) -> &CaptureConfig {

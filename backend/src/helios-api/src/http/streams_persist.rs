@@ -2,7 +2,7 @@ use crate::http::streams::validation::{StreamValidationResult, normalize_stream_
 use crate::http::{json_store, storage};
 use chrono::Utc;
 use futures::future::BoxFuture;
-use helios_engine::capture::canonicalize_capture_config;
+use helios_engine::capture::{BackendKind, CaptureDescriptor, CaptureMode, canonicalize_capture_config, descriptor_snapshot_for_config, discover_devices};
 use helios_engine::ipc::{ResolvedStreamConfig, RigPose, StreamManifest};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue};
@@ -15,7 +15,8 @@ use uuid::Uuid;
 
 const RAW_PIPELINE_UUID: Uuid = Uuid::from_u128(0x000000000000000000000000000000aa);
 const LEGACY_RAW_PIPELINE_UUID: Uuid = Uuid::from_u128(0x000000000000000000000000000000ab);
-const CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION: u32 = 2;
+const CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION: u32 = 3;
+const RESOLVED_ONLY_PERSISTED_STREAM_RECORD_SCHEMA_VERSION: u32 = 2;
 const FLAT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION: u32 = 1;
 const LEGACY_PERSISTED_STREAM_RECORD_SCHEMA_VERSION: u32 = 0;
 
@@ -73,6 +74,8 @@ pub(crate) enum PersistedStreamReconcileStatus {
 struct PersistedStreamConfigPayload {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolved_config: Option<ResolvedStreamConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub descriptor_snapshot: Option<CaptureDescriptor>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,6 +92,8 @@ struct PersistedStreamCompatPayload {
     pub manifest: Option<JsonValue>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolved_config: Option<JsonValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub descriptor_snapshot: Option<JsonValue>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -117,6 +122,7 @@ pub struct PersistedStreamRecord {
     pub reconcile_error: Option<String>,
     pub reconciled_at: Option<String>,
     pub resolved_config: Option<ResolvedStreamConfig>,
+    pub descriptor_snapshot: Option<CaptureDescriptor>,
 }
 
 #[derive(Debug)]
@@ -136,6 +142,7 @@ impl From<PersistedStreamRecordWire> for PersistedStreamRecord {
             reconcile_error: value.metadata.reconcile_error,
             reconciled_at: value.metadata.reconciled_at,
             resolved_config: value.stream.resolved_config,
+            descriptor_snapshot: value.stream.descriptor_snapshot,
         }
     }
 }
@@ -152,7 +159,7 @@ impl From<PersistedStreamRecord> for PersistedStreamRecordWire {
                 reconcile_error: value.reconcile_error,
                 reconciled_at: value.reconciled_at,
             },
-            stream: PersistedStreamConfigPayload { resolved_config: value.resolved_config },
+            stream: PersistedStreamConfigPayload { resolved_config: value.resolved_config, descriptor_snapshot: value.descriptor_snapshot },
         }
     }
 }
@@ -162,7 +169,7 @@ impl Serialize for PersistedStreamRecord {
     where
         S: serde::Serializer,
     {
-        PersistedStreamRecordWire::from(self.clone()).serialize(serializer)
+        PersistedStreamRecordWire::from(self.clone().canonicalize_for_write()).serialize(serializer)
     }
 }
 
@@ -189,6 +196,14 @@ impl PersistedStreamRecord {
         if self.last_stream_id.is_none() {
             self.last_stream_id = self.resolved_config.as_ref().and_then(|resolved| resolved.identity.id);
         }
+        if let Some(resolved) = self.resolved_config.as_ref() {
+            let manifest = resolved.to_requested_manifest();
+            let mut descriptor = self.descriptor_snapshot.take().unwrap_or_else(|| synthesize_descriptor_snapshot_from_manifest(&manifest));
+            ensure_descriptor_snapshot_has_mode(&mut descriptor, &manifest);
+            self.descriptor_snapshot = Some(descriptor);
+        } else {
+            self.descriptor_snapshot = None;
+        }
         self
     }
 }
@@ -204,8 +219,55 @@ impl Default for PersistedStreamRecord {
             reconcile_error: None,
             reconciled_at: None,
             resolved_config: None,
+            descriptor_snapshot: None,
         }
     }
+}
+
+pub(crate) fn synthesize_descriptor_snapshot_from_manifest(manifest: &StreamManifest) -> CaptureDescriptor {
+    let mode_id = manifest.capture.mode.clone();
+    let format = mode_id.format;
+    let intervals = mode_id.interval.into_iter().collect();
+    let mode = CaptureMode { id: mode_id, format, intervals, interval_stepwise: None };
+    CaptureDescriptor { modes: vec![mode], controls: Vec::new() }
+}
+
+pub(crate) fn ensure_descriptor_snapshot_has_mode(descriptor: &mut CaptureDescriptor, manifest: &StreamManifest) {
+    if descriptor.modes.iter().any(|mode| mode.id == manifest.capture.mode) {
+        return;
+    }
+
+    let mode_id = manifest.capture.mode.clone();
+    let format = mode_id.format;
+    let intervals = mode_id.interval.into_iter().collect();
+    descriptor.modes.push(CaptureMode { id: mode_id, format, intervals, interval_stepwise: None });
+}
+
+fn discover_descriptor_snapshot_for_resolved(resolved: &ResolvedStreamConfig) -> Option<CaptureDescriptor> {
+    match resolved.capture.backend {
+        BackendKind::Libcamera | BackendKind::V4l2 => {
+            let devices = discover_devices();
+            descriptor_snapshot_for_config(&resolved.capture, &devices)
+        }
+        _ => None,
+    }
+}
+
+fn materialize_descriptor_snapshot(record: &PersistedStreamRecord, resolved: &ResolvedStreamConfig, provided: Option<CaptureDescriptor>) -> CaptureDescriptor {
+    let manifest = resolved.to_requested_manifest();
+    let mut descriptor = provided
+        .or_else(|| discover_descriptor_snapshot_for_resolved(resolved))
+        .or_else(|| record.resolved_config.as_ref().filter(|existing| existing.capture.matches_capture_target(&resolved.capture)).and(record.descriptor_snapshot.clone()))
+        .unwrap_or_else(|| synthesize_descriptor_snapshot_from_manifest(&manifest));
+    ensure_descriptor_snapshot_has_mode(&mut descriptor, &manifest);
+    descriptor
+}
+
+pub(crate) fn descriptor_snapshot_for_record(record: &PersistedStreamRecord) -> Option<CaptureDescriptor> {
+    let manifest = record.requested_manifest()?;
+    let mut descriptor = record.descriptor_snapshot.clone().unwrap_or_else(|| synthesize_descriptor_snapshot_from_manifest(&manifest));
+    ensure_descriptor_snapshot_has_mode(&mut descriptor, &manifest);
+    Some(descriptor)
 }
 
 type PersistedStreamRecordMigration = fn(JsonValue) -> BoxFuture<'static, Result<JsonValue, String>>;
@@ -384,6 +446,11 @@ async fn canonicalize_current_record_value(value: JsonValue) -> Result<JsonValue
         (None, Some(manifest_value)) => resolve_legacy_manifest_record(&metadata.camera_id, metadata.last_stream_id, manifest_value).await?,
         (None, None) => return Err("persisted stream record missing `stream.resolved_config` payload".to_string()),
     };
+    let descriptor_snapshot = compat
+        .stream
+        .descriptor_snapshot
+        .map(|value| serde_json::from_value::<CaptureDescriptor>(value).map_err(|err| format!("failed to decode persisted descriptor snapshot: {err}")))
+        .transpose()?;
 
     let record = PersistedStreamRecord {
         schema_version: CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION,
@@ -394,6 +461,7 @@ async fn canonicalize_current_record_value(value: JsonValue) -> Result<JsonValue
         reconcile_error: metadata.reconcile_error,
         reconciled_at: metadata.reconciled_at,
         resolved_config: Some(resolved_config),
+        descriptor_snapshot,
     }
     .canonicalize_for_write();
 
@@ -440,15 +508,28 @@ fn migrate_persisted_stream_record_v1_to_v2(value: JsonValue) -> BoxFuture<'stat
         }
 
         let mut migrated = JsonMap::new();
-        migrated.insert("schema_version".to_string(), JsonValue::from(CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION));
+        migrated.insert("schema_version".to_string(), JsonValue::from(RESOLVED_ONLY_PERSISTED_STREAM_RECORD_SCHEMA_VERSION));
         migrated.insert("metadata".to_string(), JsonValue::Object(metadata));
         migrated.insert("stream".to_string(), JsonValue::Object(stream));
         Ok(JsonValue::Object(migrated))
     })
 }
 
-const PERSISTED_STREAM_RECORD_MIGRATIONS: &[(u32, PersistedStreamRecordMigration)] =
-    &[(LEGACY_PERSISTED_STREAM_RECORD_SCHEMA_VERSION, migrate_persisted_stream_record_v0_to_v1), (FLAT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION, migrate_persisted_stream_record_v1_to_v2)];
+fn migrate_persisted_stream_record_v2_to_v3(mut value: JsonValue) -> BoxFuture<'static, Result<JsonValue, String>> {
+    Box::pin(async move {
+        let Some(object) = value.as_object_mut() else {
+            return Err("persisted stream record must be a JSON object".to_string());
+        };
+        object.insert("schema_version".to_string(), JsonValue::from(CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION));
+        Ok(value)
+    })
+}
+
+const PERSISTED_STREAM_RECORD_MIGRATIONS: &[(u32, PersistedStreamRecordMigration)] = &[
+    (LEGACY_PERSISTED_STREAM_RECORD_SCHEMA_VERSION, migrate_persisted_stream_record_v0_to_v1),
+    (FLAT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION, migrate_persisted_stream_record_v1_to_v2),
+    (RESOLVED_ONLY_PERSISTED_STREAM_RECORD_SCHEMA_VERSION, migrate_persisted_stream_record_v2_to_v3),
+];
 
 async fn migrate_persisted_stream_record_value(mut value: JsonValue) -> Result<(JsonValue, bool), String> {
     let original = value.clone();
@@ -496,7 +577,7 @@ where
     .await
 }
 
-async fn persist_resolved_config_impl(camera_id: &str, stream_id: Option<Uuid>, mut resolved: ResolvedStreamConfig) -> std::io::Result<()> {
+async fn persist_resolved_config_impl(camera_id: &str, stream_id: Option<Uuid>, mut resolved: ResolvedStreamConfig, descriptor_snapshot: Option<CaptureDescriptor>) -> std::io::Result<()> {
     resolved = canonicalize_resolved_capture_identity(resolved);
     if let Some(id) = stream_id {
         resolved.identity.id = Some(id);
@@ -514,6 +595,7 @@ async fn persist_resolved_config_impl(camera_id: &str, stream_id: Option<Uuid>, 
             resolved.pose = Some(existing_pose);
         }
         record.reconcile_error = None;
+        record.descriptor_snapshot = Some(materialize_descriptor_snapshot(&record, &resolved, descriptor_snapshot));
         record.resolved_config = Some(resolved);
         record.updated_at = Some(now_rfc3339());
         record
@@ -545,14 +627,14 @@ pub(crate) async fn prepare_manifest_for_persistence_checked(camera_id: &str, st
 
 async fn persist_manifest_impl(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) -> std::io::Result<StreamManifest> {
     let prepared = prepare_manifest_for_persistence_checked(camera_id, stream_id, manifest).await?;
-    persist_resolved_config_impl(camera_id, stream_id, prepared.resolved).await?;
+    persist_resolved_config_impl(camera_id, stream_id, prepared.resolved, None).await?;
     Ok(prepared.manifest)
 }
 
 pub async fn persist_manifest_auto_camera_id_checked(stream_id: Option<Uuid>, manifest: StreamManifest) -> std::io::Result<String> {
     let prepared = prepare_manifest_for_persistence_checked("<auto>", stream_id, manifest).await?;
     let camera_id = crate::http::streams::util::camera_id_for_manifest(&prepared.manifest);
-    persist_resolved_config_impl(&camera_id, stream_id, prepared.resolved).await?;
+    persist_resolved_config_impl(&camera_id, stream_id, prepared.resolved, None).await?;
     remove_other_stream_records(&camera_id, stream_id).await?;
     Ok(camera_id)
 }
@@ -560,7 +642,7 @@ pub async fn persist_manifest_auto_camera_id_checked(stream_id: Option<Uuid>, ma
 pub async fn persist_manifest_prepared_auto_camera_id_checked(stream_id: Option<Uuid>, manifest: StreamManifest) -> std::io::Result<StreamManifest> {
     let prepared = prepare_manifest_for_persistence_checked("<auto>", stream_id, manifest).await?;
     let camera_id = crate::http::streams::util::camera_id_for_manifest(&prepared.manifest);
-    persist_resolved_config_impl(&camera_id, stream_id, prepared.resolved).await?;
+    persist_resolved_config_impl(&camera_id, stream_id, prepared.resolved, None).await?;
     remove_other_stream_records(&camera_id, stream_id).await?;
     Ok(prepared.manifest)
 }
@@ -572,7 +654,7 @@ pub async fn persist_manifest_quick_auto_camera_id_checked(stream_id: Option<Uui
 pub async fn persist_resolved_config_auto_camera_id_checked(stream_id: Option<Uuid>, resolved: ResolvedStreamConfig) -> std::io::Result<String> {
     let resolved = canonicalize_resolved_capture_identity(resolved);
     let camera_id = crate::http::streams::util::camera_id_for_manifest(&resolved.to_requested_manifest());
-    persist_resolved_config_impl(&camera_id, stream_id, resolved).await?;
+    persist_resolved_config_impl(&camera_id, stream_id, resolved, None).await?;
     remove_other_stream_records(&camera_id, stream_id).await?;
     Ok(camera_id)
 }
@@ -582,7 +664,11 @@ pub async fn persist_manifest_checked(camera_id: &str, stream_id: Option<Uuid>, 
 }
 
 pub async fn persist_resolved_config_checked(camera_id: &str, stream_id: Option<Uuid>, resolved: ResolvedStreamConfig) -> std::io::Result<()> {
-    persist_resolved_config_impl(camera_id, stream_id, resolved).await
+    persist_resolved_config_impl(camera_id, stream_id, resolved, None).await
+}
+
+pub async fn persist_resolved_config_with_descriptor_checked(camera_id: &str, stream_id: Option<Uuid>, resolved: ResolvedStreamConfig, descriptor_snapshot: CaptureDescriptor) -> std::io::Result<()> {
+    persist_resolved_config_impl(camera_id, stream_id, resolved, Some(descriptor_snapshot)).await
 }
 
 pub(crate) async fn persist_reconcile_status_checked(camera_id: &str, status: PersistedStreamReconcileStatus, error: Option<String>) -> std::io::Result<()> {
@@ -614,6 +700,7 @@ pub(crate) async fn persist_reconciled_resolved_config_checked(
         {
             resolved.pose = Some(existing_pose);
         }
+        record.descriptor_snapshot = Some(materialize_descriptor_snapshot(&record, &resolved, None));
         record.resolved_config = Some(resolved);
         record.reconcile_status = Some(status);
         record.reconcile_error = error;
@@ -804,6 +891,7 @@ mod tests {
     use serde_json::json;
     use std::path::PathBuf;
     use std::sync::OnceLock;
+    use styx::prelude::{ColorSpace, FourCc, MediaFormat, Resolution};
 
     fn sample_manifest_json() -> serde_json::Value {
         json!({
@@ -838,6 +926,7 @@ mod tests {
         assert_eq!(record.schema_version, CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION);
         assert_eq!(record.requested_manifest().as_ref().map(|manifest| manifest.schema_version), Some(CURRENT_STREAM_CONFIG_SCHEMA_VERSION));
         assert!(record.resolved_config.is_some());
+        assert!(record.descriptor_snapshot.is_some());
     }
 
     #[tokio::test]
@@ -876,12 +965,13 @@ mod tests {
         assert_eq!(record.camera_id, "camera-a");
         assert_eq!(record.last_stream_id, Some(Uuid::nil()));
         assert_eq!(record.resolved_config.as_ref().map(|resolved| resolved.recording_mode), Some(StreamRecordingMode::shadow_buffer(default_shadow_recording_codec())));
+        assert!(record.descriptor_snapshot.is_some());
     }
 
     #[tokio::test]
     async fn parse_persisted_record_migrates_nested_v2_manifest_only_record() {
         let bytes = serde_json::to_vec(&json!({
-            "schema_version": CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION,
+            "schema_version": RESOLVED_ONLY_PERSISTED_STREAM_RECORD_SCHEMA_VERSION,
             "metadata": {
                 "camera_id": "camera-a",
                 "last_stream_id": Uuid::nil()
@@ -897,6 +987,7 @@ mod tests {
         assert_eq!(record.schema_version, CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION);
         assert!(record.resolved_config.is_some());
         assert_eq!(record.requested_manifest().as_ref().map(|manifest| manifest.schema_version), Some(CURRENT_STREAM_CONFIG_SCHEMA_VERSION));
+        assert!(record.descriptor_snapshot.is_some());
     }
 
     #[test]
@@ -910,6 +1001,7 @@ mod tests {
             reconcile_error: None,
             reconciled_at: Some("2026-03-31T01:00:00Z".to_string()),
             resolved_config: Some(sample_manifest().resolve()),
+            descriptor_snapshot: None,
         };
 
         let encoded = serde_json::to_value(record).expect("encode record");
@@ -921,6 +1013,7 @@ mod tests {
         assert_eq!(encoded.get("metadata").and_then(|value| value.get("reconcile_status")).and_then(serde_json::Value::as_str), Some("running"));
         assert_eq!(encoded.get("metadata").and_then(|value| value.get("reconciled_at")).and_then(serde_json::Value::as_str), Some("2026-03-31T01:00:00Z"));
         assert!(encoded.get("stream").and_then(|value| value.get("resolved_config")).is_some());
+        assert!(encoded.get("stream").and_then(|value| value.get("descriptor_snapshot")).is_some());
     }
 
     #[tokio::test]
@@ -941,6 +1034,7 @@ mod tests {
         assert_eq!(persisted_json.pointer("/metadata/reconcile_error").and_then(serde_json::Value::as_str), Some("warm-start"));
         assert!(persisted_json.pointer("/metadata/reconciled_at").and_then(serde_json::Value::as_str).is_some());
         assert_eq!(persisted_json.pointer("/stream/resolved_config/identity/id").and_then(serde_json::Value::as_str), stream_id.map(|id| id.to_string()).as_deref());
+        assert!(persisted_json.pointer("/stream/descriptor_snapshot").is_some());
         let loaded = load_resolved_config(&camera_id).await.expect("load resolved config");
         assert_eq!(loaded.identity.id, stream_id);
         let mut expected = canonicalize_resolved_capture_identity(resolved);
@@ -971,8 +1065,7 @@ mod tests {
         let legacy_path = record_path(&legacy_camera_id).await.expect("legacy record path");
         assert!(fs::try_exists(&legacy_path).await.expect("legacy record exists before migration"));
 
-        let persisted_camera_id =
-            persist_resolved_config_auto_camera_id_checked(stream_id, resolved.clone()).await.expect("persist canonical camera id record");
+        let persisted_camera_id = persist_resolved_config_auto_camera_id_checked(stream_id, resolved.clone()).await.expect("persist canonical camera id record");
         assert_eq!(persisted_camera_id, stable_camera_id);
 
         let stable_path = record_path(&stable_camera_id).await.expect("stable record path");
@@ -1018,6 +1111,7 @@ mod tests {
         assert!(persisted_json.get("camera_id").is_none());
         assert!(persisted_json.get("resolved_config").is_none());
         assert!(persisted_json.get("stream").and_then(|value| value.get("resolved_config")).is_some());
+        assert!(persisted_json.get("stream").and_then(|value| value.get("descriptor_snapshot")).is_some());
         assert!(
             persisted_json.get("stream").and_then(|value| value.get("manifest")).is_none()
                 || persisted_json.get("stream").and_then(|value| value.get("manifest")).is_some_and(serde_json::Value::is_null)
@@ -1032,6 +1126,80 @@ mod tests {
             serde_json::to_value(record.requested_manifest()).expect("encode manifest"),
             serde_json::to_value(Some(prepared.resolved.to_requested_manifest())).expect("encode expected manifest")
         );
+        assert!(record.descriptor_snapshot.is_some());
+    }
+
+    #[tokio::test]
+    async fn persist_manifest_checked_writes_descriptor_snapshot_with_requested_mode() {
+        let _root = test_data_root();
+        let camera_id = format!("camera-{}", Uuid::new_v4());
+        let stream_id = Some(Uuid::new_v4());
+        let manifest = sample_manifest();
+
+        persist_manifest_checked(&camera_id, stream_id, manifest.clone()).await.expect("persist manifest");
+
+        let record = list_persisted_records().await.into_iter().find(|record| record.camera_id == camera_id).expect("find persisted record");
+        let descriptor = record.descriptor_snapshot.expect("descriptor snapshot");
+        assert!(descriptor.modes.iter().any(|mode| mode.id == manifest.capture.mode));
+    }
+
+    #[test]
+    fn descriptor_snapshot_for_record_synthesizes_when_snapshot_missing() {
+        let manifest = sample_manifest();
+        let record = PersistedStreamRecord { camera_id: "camera-a".to_string(), resolved_config: Some(manifest.resolve()), ..Default::default() };
+
+        let descriptor = descriptor_snapshot_for_record(&record).expect("descriptor snapshot");
+
+        assert!(descriptor.controls.is_empty());
+        assert_eq!(descriptor.modes.len(), 1);
+        assert_eq!(descriptor.modes[0].id, manifest.capture.mode);
+    }
+
+    #[test]
+    fn descriptor_snapshot_for_record_rehydrates_requested_mode_into_existing_snapshot() {
+        let manifest = sample_manifest();
+        let alternate_format = MediaFormat::new(FourCc::new(*b"NV12"), Resolution::new(2, 2).unwrap(), ColorSpace::Srgb);
+        let record = PersistedStreamRecord {
+            camera_id: "camera-a".to_string(),
+            resolved_config: Some(manifest.resolve()),
+            descriptor_snapshot: Some(helios_engine::capture::CaptureDescriptor {
+                modes: vec![helios_engine::capture::CaptureMode {
+                    id: helios_engine::capture::ModeId { format: alternate_format, interval: None },
+                    format: alternate_format,
+                    intervals: Default::default(),
+                    interval_stepwise: None,
+                }],
+                controls: Vec::new(),
+            }),
+            ..Default::default()
+        };
+
+        let descriptor = descriptor_snapshot_for_record(&record).expect("descriptor snapshot");
+
+        assert_eq!(descriptor.modes.len(), 2);
+        assert!(descriptor.modes.iter().any(|mode| mode.id == manifest.capture.mode));
+        assert!(descriptor.modes.iter().any(|mode| mode.id.format == alternate_format));
+    }
+
+    #[test]
+    fn canonicalize_for_write_clears_descriptor_without_resolved_config() {
+        let alternate_format = MediaFormat::new(FourCc::new(*b"NV12"), Resolution::new(2, 2).unwrap(), ColorSpace::Srgb);
+        let record = PersistedStreamRecord {
+            camera_id: "camera-a".to_string(),
+            descriptor_snapshot: Some(helios_engine::capture::CaptureDescriptor {
+                modes: vec![helios_engine::capture::CaptureMode {
+                    id: helios_engine::capture::ModeId { format: alternate_format, interval: None },
+                    format: alternate_format,
+                    intervals: Default::default(),
+                    interval_stepwise: None,
+                }],
+                controls: Vec::new(),
+            }),
+            ..Default::default()
+        }
+        .canonicalize_for_write();
+
+        assert!(record.descriptor_snapshot.is_none());
     }
 
     #[tokio::test]

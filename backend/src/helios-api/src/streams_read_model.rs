@@ -1,6 +1,6 @@
 use crate::api_observability::{ApiCacheMetric, CacheMetricCounters};
 use crate::http::AppState;
-use crate::http::streams::lifecycle::{descriptor_from_persisted_manifest, ensure_descriptor_has_mode};
+use crate::http::streams::lifecycle::ensure_descriptor_has_mode;
 use crate::http::streams::types::StreamInfo;
 use crate::http::streams::util::{apply_effective_pipeline_layout, build_stream_info, list_streams_timeout, normalize_pipeline_manifest};
 use crate::http::streams_persist;
@@ -83,6 +83,7 @@ fn merge_persisted_streams(mut active: Vec<StreamInfo>, persisted: Vec<streams_p
 
     for record in persisted {
         let stream_id = record.stream_id().unwrap_or_else(|| streams_persist::derived_stream_id(&record.camera_id));
+        let descriptor = streams_persist::descriptor_snapshot_for_record(&record);
         let Some(mut resolved) = record.resolved_config else {
             continue;
         };
@@ -101,7 +102,7 @@ fn merge_persisted_streams(mut active: Vec<StreamInfo>, persisted: Vec<streams_p
         let mut manifest = resolved.to_requested_manifest();
         normalize_pipeline_manifest(&mut manifest);
         apply_effective_pipeline_layout(&mut manifest);
-        let descriptor = descriptor_from_persisted_manifest(&manifest);
+        let descriptor = descriptor.unwrap_or_else(|| streams_persist::synthesize_descriptor_snapshot_from_manifest(&manifest));
         active.push(build_stream_info(stream_id, descriptor, resolved, None));
         seen_ids.insert(stream_id);
     }
@@ -199,7 +200,9 @@ impl StreamsReadModelState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use helios_engine::capture::CaptureMode;
     use serde_json::json;
+    use styx::prelude::{ColorSpace, FourCc, MediaFormat, Resolution};
 
     fn sample_manifest() -> StreamManifest {
         serde_json::from_value(json!({
@@ -252,5 +255,30 @@ mod tests {
         assert_eq!(stream.manifest.identity.id, Some(stream_id));
         assert_eq!(stream.resolved.identity.id, Some(stream_id));
         assert_eq!(serde_json::to_value(&stream.manifest).expect("encode merged manifest"), serde_json::to_value(expected_manifest).expect("encode expected manifest"));
+    }
+
+    #[test]
+    fn merge_persisted_streams_prefers_persisted_descriptor_snapshot() {
+        let stream_id = Uuid::new_v4();
+        let manifest = sample_manifest();
+        let alternate_format = MediaFormat::new(FourCc::new(*b"NV12"), Resolution::new(2, 2).unwrap(), ColorSpace::Srgb);
+        let snapshot = helios_engine::capture::CaptureDescriptor {
+            modes: vec![
+                CaptureMode { id: manifest.capture.mode.clone(), format: manifest.capture.mode.format, intervals: Default::default(), interval_stepwise: None },
+                CaptureMode { id: helios_engine::capture::ModeId { format: alternate_format, interval: None }, format: alternate_format, intervals: Default::default(), interval_stepwise: None },
+            ],
+            controls: Vec::new(),
+        };
+        let persisted = vec![streams_persist::PersistedStreamRecord {
+            camera_id: "virtual-camera".to_string(),
+            last_stream_id: Some(stream_id),
+            resolved_config: Some(manifest.resolve()),
+            descriptor_snapshot: Some(snapshot),
+            ..Default::default()
+        }];
+
+        let merged = merge_persisted_streams(Vec::new(), persisted);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].descriptor.modes.len(), 2);
     }
 }

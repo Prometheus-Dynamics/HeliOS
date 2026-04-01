@@ -6,7 +6,6 @@ use axum::{
 use helios_engine::capture::CaptureDescriptor;
 use helios_engine::ipc::{EngineErrorCode, EngineEvent, ResolvedStreamConfig, StreamManifest, StreamSummary};
 use std::time::{SystemTime, UNIX_EPOCH};
-use styx::capture::prelude::Mode as CaptureMode;
 use styx::codec::CodecKind;
 use styx::codec::CodecRegistry;
 use tokio::time::Duration;
@@ -32,41 +31,27 @@ fn now_ms() -> u64 {
 }
 
 pub(super) async fn persist_effective_stream_manifest(state: &AppState, camera_id_override: Option<&str>, stream_id: Uuid, requested_manifest: &StreamManifest) -> std::io::Result<()> {
-    let mut effective_manifest = state
+    let (mut effective_manifest, descriptor_snapshot) = state
         .engine
         .list_streams()
         .await
         .ok()
-        .and_then(|streams| streams.into_iter().find(|stream| stream.stream_id == stream_id).map(|stream| stream.manifest))
-        .unwrap_or_else(|| requested_manifest.resolve());
+        .and_then(|streams| streams.into_iter().find(|stream| stream.stream_id == stream_id).map(|stream| (stream.manifest, Some(stream.descriptor))))
+        .unwrap_or_else(|| (requested_manifest.resolve(), None));
     effective_manifest.capture = helios_engine::capture::canonicalize_capture_config(&effective_manifest.capture);
-    let camera_id = camera_id_override
-        .map(str::to_string)
-        .unwrap_or_else(|| camera_id_for_manifest(&effective_manifest.to_requested_manifest()));
-    streams_persist::persist_resolved_config_checked(&camera_id, Some(stream_id), effective_manifest).await
+    let camera_id = camera_id_override.map(str::to_string).unwrap_or_else(|| camera_id_for_manifest(&effective_manifest.to_requested_manifest()));
+    match descriptor_snapshot {
+        Some(descriptor_snapshot) => streams_persist::persist_resolved_config_with_descriptor_checked(&camera_id, Some(stream_id), effective_manifest, descriptor_snapshot).await,
+        None => streams_persist::persist_resolved_config_checked(&camera_id, Some(stream_id), effective_manifest).await,
+    }
 }
 
 pub(crate) fn descriptor_from_persisted_manifest(manifest: &StreamManifest) -> CaptureDescriptor {
-    // Persisted records may exist even when the stream isn't currently running.
-    // Synthesize a minimal descriptor so the UI can still render format/resolution and
-    // allow the user to re-apply/start the stream without first selecting a backend.
-    let mode_id = manifest.capture.mode.clone();
-    let format = mode_id.format;
-    // Preserve the selected interval (if present) so the UI can show FPS options even when
-    // the stream is stopped and only the persisted manifest is available.
-    let intervals = mode_id.interval.into_iter().collect();
-    let mode = CaptureMode { id: mode_id, format, intervals, interval_stepwise: None };
-    CaptureDescriptor { modes: vec![mode], controls: Vec::new() }
+    streams_persist::synthesize_descriptor_snapshot_from_manifest(manifest)
 }
 
 pub(crate) fn ensure_descriptor_has_mode(descriptor: &mut CaptureDescriptor, manifest: &StreamManifest) {
-    if !descriptor.modes.is_empty() {
-        return;
-    }
-    let mode_id = manifest.capture.mode.clone();
-    let format = mode_id.format;
-    let intervals = mode_id.interval.into_iter().collect();
-    descriptor.modes.push(CaptureMode { id: mode_id, format, intervals, interval_stepwise: None });
+    streams_persist::ensure_descriptor_snapshot_has_mode(descriptor, manifest);
 }
 
 fn stream_list_response(payload: Vec<StreamInfo>, stale: bool) -> Response {
@@ -524,7 +509,7 @@ pub(crate) async fn get_stream(state: AppState, id: Uuid) -> Response {
                     }
                     manifest.identity.id = Some(id);
                     apply_effective_pipeline_layout(&mut manifest);
-                    let descriptor = descriptor_from_persisted_manifest(&manifest);
+                    let descriptor = streams_persist::descriptor_snapshot_for_record(&record).unwrap_or_else(|| descriptor_from_persisted_manifest(&manifest));
                     return Json(build_stream_info(id, descriptor, manifest.resolve(), None)).into_response();
                 }
 
@@ -841,5 +826,25 @@ mod tests {
         apply_new_ov9782_defaults(&mut manifest);
 
         assert!(!manifest.capture.enable_tdn_output);
+    }
+
+    #[test]
+    fn ensure_descriptor_has_mode_adds_requested_mode_to_existing_snapshot() {
+        let manifest = sample_ov9782_manifest();
+        let alternate_format = MediaFormat::new(FourCc::new(*b"RGB3"), Resolution::new(640, 480).unwrap(), ColorSpace::Srgb);
+        let mut descriptor = helios_engine::capture::CaptureDescriptor {
+            modes: vec![helios_engine::capture::CaptureMode {
+                id: ModeId { format: alternate_format, interval: None },
+                format: alternate_format,
+                intervals: Default::default(),
+                interval_stepwise: None,
+            }],
+            controls: Vec::new(),
+        };
+
+        ensure_descriptor_has_mode(&mut descriptor, &manifest);
+
+        assert!(descriptor.modes.iter().any(|mode| mode.id == manifest.capture.mode));
+        assert_eq!(descriptor.modes.len(), 2);
     }
 }
