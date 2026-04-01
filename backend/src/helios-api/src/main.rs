@@ -27,7 +27,6 @@ mod ws;
 
 use crate::config::ApiConfig;
 use crate::http::streams;
-use crate::http::streams_persist;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -145,13 +144,12 @@ fn spawn_startup_read_model_warm(state: http::AppState) {
     });
 }
 
-fn spawn_stream_restore(state: http::AppState, handles: Arc<ipc::IpcHandles>, reason: &'static str) {
+fn spawn_stream_restore(state: http::AppState, reason: &'static str) {
     tokio::spawn(async move {
         info!(reason, "starting background stream restore");
         {
             let _guard = state.services.streams.stream_start_guard().await;
-            streams::restore_autostart_streams(state.clone()).await;
-            streams_persist::restore_persisted_streams(handles).await;
+            streams::reconcile_startup_streams(state.clone(), reason).await;
         }
         info!(reason, "background stream restore completed");
         spawn_startup_read_model_warm(state);
@@ -317,14 +315,14 @@ async fn async_main() {
     }
     http::peers::init_peers_from_disk(&state).await;
     http::startup::apply_startup_preset(state.clone()).await;
-    spawn_stream_restore(state.clone(), handles.clone(), "startup");
+    spawn_stream_restore(state.clone(), "startup");
     {
         let handles = handles.clone();
         let state = state.clone();
         let mut engine_reconnects = handles.engine.subscribe_connect_events();
         tokio::spawn(async move {
             while engine_reconnects.recv().await.is_ok() {
-                spawn_stream_restore(state.clone(), handles.clone(), "engine-reconnect");
+                spawn_stream_restore(state.clone(), "engine-reconnect");
             }
         });
     }

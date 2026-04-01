@@ -1,6 +1,5 @@
 use crate::http::streams::validation::{StreamValidationResult, normalize_stream_manifest, validate_stream_manifest};
 use crate::http::{json_store, storage};
-use crate::ipc::IpcHandles;
 use chrono::Utc;
 use futures::future::BoxFuture;
 use helios_engine::ipc::{ResolvedStreamConfig, RigPose, StreamManifest};
@@ -10,11 +9,8 @@ use std::path::PathBuf;
 use std::{collections::HashMap, io};
 use tokio::fs;
 use tokio::sync::OnceCell;
-use tracing::{info, warn};
+use tracing::warn;
 use uuid::Uuid;
-
-use crate::engine_guard;
-pub type AppState = std::sync::Arc<IpcHandles>;
 
 const RAW_PIPELINE_UUID: Uuid = Uuid::from_u128(0x000000000000000000000000000000aa);
 const LEGACY_RAW_PIPELINE_UUID: Uuid = Uuid::from_u128(0x000000000000000000000000000000ab);
@@ -55,6 +51,21 @@ struct PersistedStreamMetadata {
     pub last_stream_id: Option<Uuid>,
     #[serde(default)]
     pub updated_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reconcile_status: Option<PersistedStreamReconcileStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reconcile_error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reconciled_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum PersistedStreamReconcileStatus {
+    Ready,
+    Running,
+    Invalid,
+    Error,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -101,6 +112,9 @@ pub struct PersistedStreamRecord {
     pub camera_id: String,
     pub last_stream_id: Option<Uuid>,
     pub updated_at: Option<String>,
+    pub reconcile_status: Option<PersistedStreamReconcileStatus>,
+    pub reconcile_error: Option<String>,
+    pub reconciled_at: Option<String>,
     pub resolved_config: Option<ResolvedStreamConfig>,
 }
 
@@ -117,6 +131,9 @@ impl From<PersistedStreamRecordWire> for PersistedStreamRecord {
             camera_id: value.metadata.camera_id,
             last_stream_id: value.metadata.last_stream_id,
             updated_at: value.metadata.updated_at,
+            reconcile_status: value.metadata.reconcile_status,
+            reconcile_error: value.metadata.reconcile_error,
+            reconciled_at: value.metadata.reconciled_at,
             resolved_config: value.stream.resolved_config,
         }
     }
@@ -126,7 +143,14 @@ impl From<PersistedStreamRecord> for PersistedStreamRecordWire {
     fn from(value: PersistedStreamRecord) -> Self {
         Self {
             schema_version: value.schema_version,
-            metadata: PersistedStreamMetadata { camera_id: value.camera_id, last_stream_id: value.last_stream_id, updated_at: value.updated_at },
+            metadata: PersistedStreamMetadata {
+                camera_id: value.camera_id,
+                last_stream_id: value.last_stream_id,
+                updated_at: value.updated_at,
+                reconcile_status: value.reconcile_status,
+                reconcile_error: value.reconcile_error,
+                reconciled_at: value.reconciled_at,
+            },
             stream: PersistedStreamConfigPayload { resolved_config: value.resolved_config },
         }
     }
@@ -170,7 +194,16 @@ impl PersistedStreamRecord {
 
 impl Default for PersistedStreamRecord {
     fn default() -> Self {
-        Self { schema_version: CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION, camera_id: String::new(), last_stream_id: None, updated_at: None, resolved_config: None }
+        Self {
+            schema_version: CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION,
+            camera_id: String::new(),
+            last_stream_id: None,
+            updated_at: None,
+            reconcile_status: None,
+            reconcile_error: None,
+            reconciled_at: None,
+            resolved_config: None,
+        }
     }
 }
 
@@ -300,7 +333,8 @@ fn migrate_legacy_resolved_config_value(value: &mut JsonValue) -> Result<(), Str
 
 async fn resolve_legacy_manifest_record(camera_id: &str, stream_id: Option<Uuid>, manifest_value: JsonValue) -> Result<ResolvedStreamConfig, String> {
     let manifest = serde_json::from_value::<StreamManifest>(manifest_value).map_err(|err| format!("failed to decode persisted stream manifest: {err}"))?;
-    let prepared = prepare_manifest_for_persistence(camera_id, stream_id, manifest).await.map_err(|err| format!("persisted stream manifest for `{camera_id}` failed migration validation: {err}"))?;
+    let prepared =
+        prepare_manifest_for_persistence_checked(camera_id, stream_id, manifest).await.map_err(|err| format!("persisted stream manifest for `{camera_id}` failed migration validation: {err}"))?;
     Ok(prepared.resolved)
 }
 
@@ -310,6 +344,9 @@ async fn canonicalize_current_record_value(value: JsonValue) -> Result<JsonValue
         camera_id: if compat.metadata.camera_id.is_empty() { compat.camera_id } else { compat.metadata.camera_id },
         last_stream_id: compat.metadata.last_stream_id.or(compat.last_stream_id),
         updated_at: compat.metadata.updated_at.or(compat.updated_at),
+        reconcile_status: compat.metadata.reconcile_status,
+        reconcile_error: compat.metadata.reconcile_error,
+        reconciled_at: compat.metadata.reconciled_at,
     };
 
     let resolved_config = match (compat.stream.resolved_config, compat.stream.manifest) {
@@ -326,6 +363,9 @@ async fn canonicalize_current_record_value(value: JsonValue) -> Result<JsonValue
         camera_id: metadata.camera_id,
         last_stream_id: metadata.last_stream_id,
         updated_at: metadata.updated_at,
+        reconcile_status: metadata.reconcile_status,
+        reconcile_error: metadata.reconcile_error,
+        reconciled_at: metadata.reconciled_at,
         resolved_config: Some(resolved_config),
     }
     .canonicalize_for_write();
@@ -445,6 +485,7 @@ async fn persist_resolved_config_impl(camera_id: &str, stream_id: Option<Uuid>, 
         {
             resolved.pose = Some(existing_pose);
         }
+        record.reconcile_error = None;
         record.resolved_config = Some(resolved);
         record.updated_at = Some(now_rfc3339());
         record
@@ -453,7 +494,7 @@ async fn persist_resolved_config_impl(camera_id: &str, stream_id: Option<Uuid>, 
     .map(|_| ())
 }
 
-async fn prepare_manifest_for_persistence(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) -> std::io::Result<StreamValidationResult> {
+pub(crate) async fn prepare_manifest_for_persistence_checked(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) -> std::io::Result<StreamValidationResult> {
     let mut hydrated = hydrate_manifest(manifest).await;
     if let Some(id) = stream_id {
         hydrated.identity.id = Some(id);
@@ -474,7 +515,7 @@ async fn prepare_manifest_for_persistence(camera_id: &str, stream_id: Option<Uui
 }
 
 async fn persist_manifest_impl(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) -> std::io::Result<StreamManifest> {
-    let prepared = prepare_manifest_for_persistence(camera_id, stream_id, manifest).await?;
+    let prepared = prepare_manifest_for_persistence_checked(camera_id, stream_id, manifest).await?;
     persist_resolved_config_impl(camera_id, stream_id, prepared.resolved).await?;
     Ok(prepared.manifest)
 }
@@ -491,16 +532,44 @@ pub async fn persist_resolved_config_checked(camera_id: &str, stream_id: Option<
     persist_resolved_config_impl(camera_id, stream_id, resolved).await
 }
 
-pub async fn persist_manifest(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) {
-    if let Err(err) = persist_manifest_impl(camera_id, stream_id, manifest).await {
-        warn!(camera_id, error = %err, "failed to persist stream manifest");
-    }
+pub(crate) async fn persist_reconcile_status_checked(camera_id: &str, status: PersistedStreamReconcileStatus, error: Option<String>) -> std::io::Result<()> {
+    update_record(camera_id, move |mut record| async move {
+        record.reconcile_status = Some(status);
+        record.reconcile_error = error;
+        record.reconciled_at = Some(now_rfc3339());
+        record
+    })
+    .await
+    .map(|_| ())
 }
 
-pub async fn persist_resolved_config(camera_id: &str, stream_id: Option<Uuid>, resolved: ResolvedStreamConfig) {
-    if let Err(err) = persist_resolved_config_impl(camera_id, stream_id, resolved).await {
-        warn!(camera_id, error = %err, "failed to persist resolved stream config");
-    }
+pub(crate) async fn persist_reconciled_resolved_config_checked(
+    camera_id: &str,
+    stream_id: Option<Uuid>,
+    resolved: ResolvedStreamConfig,
+    status: PersistedStreamReconcileStatus,
+    error: Option<String>,
+) -> std::io::Result<()> {
+    update_record(camera_id, move |mut record| async move {
+        let mut resolved = resolved;
+        if let Some(id) = stream_id {
+            resolved.identity.id = Some(id);
+            record.last_stream_id = Some(id);
+        }
+        if resolved.pose.is_none()
+            && let Some(existing_pose) = record.resolved_config.as_ref().and_then(|config| config.pose.clone())
+        {
+            resolved.pose = Some(existing_pose);
+        }
+        record.resolved_config = Some(resolved);
+        record.reconcile_status = Some(status);
+        record.reconcile_error = error;
+        record.reconciled_at = Some(now_rfc3339());
+        record.updated_at = Some(now_rfc3339());
+        record
+    })
+    .await
+    .map(|_| ())
 }
 
 pub async fn persist_manifest_quick_checked(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) -> std::io::Result<()> {
@@ -678,67 +747,6 @@ pub(crate) fn manifests_conflict(a: &ResolvedStreamConfig, b: &StreamManifest) -
     a.capture.device_keys.iter().any(|key| b.capture.device_keys.iter().any(|other| other == key))
 }
 
-pub async fn restore_persisted_streams(state: AppState) {
-    if engine_guard::safe_mode_active() {
-        warn!("engine crash guard active; skipping persisted streams restore");
-        return;
-    }
-
-    let records = list_records().await;
-    if records.is_empty() {
-        return;
-    }
-
-    let running = state.engine.list_streams().await.unwrap_or_default();
-    for record in records {
-        let Some(resolved) = record.resolved_config.clone() else {
-            continue;
-        };
-        let manifest = resolved.to_requested_manifest();
-        // `start_on_boot` manifests are handled by the autostart restore path. Re-processing them
-        // here can generate duplicate start attempts + conflict spam on every API restart.
-        if manifest.start_on_boot {
-            continue;
-        }
-        // Always attempt to restore persisted streams so they survive rebuilds/uploads.
-        if running.iter().any(|s| manifests_conflict(&s.manifest, &manifest)) {
-            continue;
-        }
-
-        match state.engine.start_stream(resolved.clone()).await {
-            Ok(helios_engine::ipc::EngineEvent::Started { stream_id, .. }) => {
-                persist_resolved_config(&record.camera_id, Some(stream_id), resolved.clone()).await;
-            }
-            Ok(helios_engine::ipc::EngineEvent::Nack { reason, .. }) => {
-                let reason_lc = reason.to_ascii_lowercase();
-                if reason_lc.contains("stream already exists") || reason_lc.contains("already in use") || reason_lc.contains("conflict") {
-                    // Best effort reconciliation: if a compatible stream is already running, bind
-                    // this persisted record to that stream id and avoid warning on every restart.
-                    if let Ok(active) = state.engine.list_streams().await {
-                        let desired_alias = manifest.identity.alias.as_deref().map(str::trim).filter(|alias| !alias.is_empty());
-                        if let Some(existing) = active.into_iter().find(|stream| {
-                            manifests_conflict(&stream.manifest, &manifest)
-                                || (manifest.identity.id.is_some() && stream.manifest.identity.id == manifest.identity.id)
-                                || desired_alias.is_some_and(|alias| stream.manifest.identity.alias.as_deref().map(str::trim) == Some(alias))
-                        }) {
-                            persist_resolved_config(&record.camera_id, Some(existing.stream_id), existing.manifest.clone()).await;
-                            info!(camera_id = %record.camera_id, stream_id = %existing.stream_id, "persisted stream already running; reconciled record");
-                            continue;
-                        }
-                    }
-                }
-                warn!(camera_id = %record.camera_id, error = %reason, "persisted stream was rejected by engine");
-            }
-            Ok(_) => {
-                warn!(camera_id = %record.camera_id, "persisted stream returned unexpected engine response");
-            }
-            Err(err) => {
-                warn!(camera_id = %record.camera_id, error = %err, "failed to start persisted stream");
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -848,6 +856,9 @@ mod tests {
             camera_id: "camera-a".to_string(),
             last_stream_id: Some(Uuid::nil()),
             updated_at: Some("2026-03-31T00:00:00Z".to_string()),
+            reconcile_status: Some(PersistedStreamReconcileStatus::Running),
+            reconcile_error: None,
+            reconciled_at: Some("2026-03-31T01:00:00Z".to_string()),
             resolved_config: Some(sample_manifest().resolve()),
         };
 
@@ -857,7 +868,34 @@ mod tests {
         assert!(encoded.get("last_stream_id").is_none());
         assert!(encoded.get("updated_at").is_none());
         assert_eq!(encoded.get("metadata").and_then(|value| value.get("camera_id")).and_then(serde_json::Value::as_str), Some("camera-a"));
+        assert_eq!(encoded.get("metadata").and_then(|value| value.get("reconcile_status")).and_then(serde_json::Value::as_str), Some("running"));
+        assert_eq!(encoded.get("metadata").and_then(|value| value.get("reconciled_at")).and_then(serde_json::Value::as_str), Some("2026-03-31T01:00:00Z"));
         assert!(encoded.get("stream").and_then(|value| value.get("resolved_config")).is_some());
+    }
+
+    #[tokio::test]
+    async fn persist_reconciled_resolved_config_checked_updates_reconcile_metadata() {
+        let _root = test_data_root();
+        let camera_id = format!("camera-{}", Uuid::new_v4());
+        let stream_id = Some(Uuid::new_v4());
+        let resolved = sample_manifest().resolve();
+
+        persist_reconciled_resolved_config_checked(&camera_id, stream_id, resolved.clone(), PersistedStreamReconcileStatus::Ready, Some("warm-start".to_string()))
+            .await
+            .expect("persist reconciled config");
+
+        let path = record_path(&camera_id).await.expect("record path");
+        let bytes = fs::read(&path).await.expect("read persisted record");
+        let persisted_json: serde_json::Value = serde_json::from_slice(&bytes).expect("decode persisted json");
+        assert_eq!(persisted_json.pointer("/metadata/reconcile_status").and_then(serde_json::Value::as_str), Some("ready"));
+        assert_eq!(persisted_json.pointer("/metadata/reconcile_error").and_then(serde_json::Value::as_str), Some("warm-start"));
+        assert!(persisted_json.pointer("/metadata/reconciled_at").and_then(serde_json::Value::as_str).is_some());
+        assert_eq!(persisted_json.pointer("/stream/resolved_config/identity/id").and_then(serde_json::Value::as_str), stream_id.map(|id| id.to_string()).as_deref());
+        let loaded = load_resolved_config(&camera_id).await.expect("load resolved config");
+        assert_eq!(loaded.identity.id, stream_id);
+        let mut expected = resolved;
+        expected.identity.id = stream_id;
+        assert_eq!(serde_json::to_value(loaded).expect("encode loaded"), serde_json::to_value(expected).expect("encode resolved"));
     }
 
     fn test_data_root() -> PathBuf {
@@ -881,7 +919,7 @@ mod tests {
         let camera_id = format!("camera-{}", Uuid::new_v4());
         let stream_id = Some(Uuid::new_v4());
         let manifest = sample_manifest();
-        let prepared = prepare_manifest_for_persistence(&camera_id, stream_id, manifest.clone()).await.expect("prepare manifest");
+        let prepared = prepare_manifest_for_persistence_checked(&camera_id, stream_id, manifest.clone()).await.expect("prepare manifest");
 
         persist_manifest_checked(&camera_id, stream_id, manifest).await.expect("persist manifest");
 

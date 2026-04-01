@@ -1,162 +1,147 @@
-use futures::StreamExt;
-use helios_engine::ipc::EngineEvent;
-use std::collections::HashSet;
-use std::sync::Arc;
-use styx::BackendKind;
+use helios_engine::ipc::{EngineEvent, StreamManifest, StreamSummary};
 use tokio::time::Duration;
 use tracing::{info, warn};
-use uuid::Uuid;
 
 use crate::engine_guard;
 use crate::http::AppState;
+use crate::http::streams_persist::{self, PersistedStreamReconcileStatus};
 
 use super::lifecycle::persist_effective_stream_manifest;
-use super::util::camera_id_for_manifest;
-use super::validation::validate_stream_manifest;
 use super::wait::wait_for_stream_started;
-use crate::http::streams_persist::manifests_conflict;
 
-pub(super) async fn restore_autostart_streams(state: AppState) {
+fn startup_priority(record: &streams_persist::PersistedStreamRecord) -> (u8, &str) {
+    let autostart = record.requested_manifest().as_ref().is_some_and(|manifest| manifest.start_on_boot);
+    (u8::from(!autostart), record.camera_id.as_str())
+}
+
+fn matching_running_stream<'a>(running: &'a [StreamSummary], manifest: &StreamManifest) -> Option<&'a StreamSummary> {
+    let desired_alias = manifest.identity.alias.as_deref().map(str::trim).filter(|alias| !alias.is_empty());
+    running.iter().find(|stream| {
+        streams_persist::manifests_conflict(&stream.manifest, manifest)
+            || (manifest.identity.id.is_some() && stream.manifest.identity.id == manifest.identity.id)
+            || desired_alias.is_some_and(|alias| stream.manifest.identity.alias.as_deref().map(str::trim) == Some(alias))
+    })
+}
+
+async fn mark_reconcile_status(camera_id: &str, status: PersistedStreamReconcileStatus, error: Option<String>) {
+    if let Err(update_err) = streams_persist::persist_reconcile_status_checked(camera_id, status, error.clone()).await {
+        warn!(camera_id, error = %update_err, reconcile_error = ?error, "failed to persist startup reconcile status");
+    }
+}
+
+async fn mark_running_record(state: &AppState, camera_id: &str, stream_id: uuid::Uuid, manifest: &StreamManifest) {
+    if let Err(err) = persist_effective_stream_manifest(state, camera_id, stream_id, manifest).await {
+        warn!(camera_id, stream_id = %stream_id, error = %err, "failed to persist effective startup stream manifest");
+    }
+    mark_reconcile_status(camera_id, PersistedStreamReconcileStatus::Running, None).await;
+}
+
+pub(super) async fn reconcile_startup_streams(state: AppState, reason: &'static str) {
     if engine_guard::safe_mode_active() {
-        warn!("engine crash guard active; skipping autostart streams restore");
+        warn!(reason, "engine crash guard active; skipping startup stream reconcile");
         return;
     }
 
-    let mut manifests = Vec::new();
-    for record in crate::http::streams_persist::list_persisted_records().await {
+    let mut records = streams_persist::list_persisted_records().await;
+    if records.is_empty() {
+        return;
+    }
+    records.sort_by(|a, b| startup_priority(a).cmp(&startup_priority(b)));
+
+    let mut running = state.engine.list_streams().await.unwrap_or_default();
+    for record in records {
         let Some(mut manifest) = record.requested_manifest() else {
+            mark_reconcile_status(&record.camera_id, PersistedStreamReconcileStatus::Invalid, Some("persisted stream record is missing a requested manifest".to_string())).await;
             continue;
         };
-        if manifest.internal || !manifest.start_on_boot {
+        if manifest.internal {
             continue;
         }
-        manifest.identity.id = manifest.identity.id.or(record.stream_id());
-        manifests.push((record.camera_id, manifest));
-    }
 
-    if manifests.is_empty() {
-        return;
-    }
+        let requested_id = record.stream_id().unwrap_or_else(|| streams_persist::derived_stream_id(&record.camera_id));
+        manifest.identity.id = Some(requested_id);
 
-    let concurrency = std::env::var("HELIOS_AUTOSTART_CONCURRENCY").ok().and_then(|raw| raw.parse::<usize>().ok()).map(|v| v.clamp(1, 8)).unwrap_or(2);
-
-    let running = state.engine.list_streams().await.unwrap_or_default();
-    let mut running_keys = HashSet::new();
-    for stream in &running {
-        running_keys.extend(stream.manifest.capture.device_keys.iter().cloned());
-    }
-    let reserved_keys = Arc::new(tokio::sync::Mutex::new(running_keys));
-
-    let state = state;
-    futures::stream::iter(manifests)
-        .for_each_concurrent(Some(concurrency), |(camera_id, mut manifest)| {
-            let state = state.clone();
-            let reserved_keys = reserved_keys.clone();
-            async move {
-                let prepared = match validate_stream_manifest(manifest).await {
-                    Ok(validated) => {
-                        if !validated.warnings.is_empty() {
-                            warn!(
-                                camera_id,
-                                warning_count = validated.warnings.len(),
-                                warnings = ?validated.warnings,
-                                "autostart manifest required semantic sanitization"
-                            );
-                        }
-                        validated
-                    }
-                    Err(err) => {
-                        warn!(
-                            camera_id,
-                            issue_count = err.issues.len(),
-                            warning_count = err.warnings.len(),
-                            issues = ?err.issues,
-                            warnings = ?err.warnings,
-                            "skipping autostart manifest that failed semantic validation"
-                        );
-                        return;
-                    }
-                };
-                manifest = prepared.manifest;
-
-                let mut device_keys = manifest.capture.device_keys.clone();
-                if manifest.capture.backend == BackendKind::File || device_keys.iter().any(|k| k == "media-file") {
-                    device_keys.clear();
+        let prepared = match streams_persist::prepare_manifest_for_persistence_checked(&record.camera_id, Some(requested_id), manifest).await {
+            Ok(validated) => {
+                if !validated.warnings.is_empty() {
+                    warn!(
+                        reason,
+                        camera_id = %record.camera_id,
+                        warning_count = validated.warnings.len(),
+                        warnings = ?validated.warnings,
+                        "startup stream required semantic sanitization"
+                    );
                 }
-                let mut reserved = Vec::new();
-                if !device_keys.is_empty() {
-                    let mut guard = reserved_keys.lock().await;
-                    if device_keys.iter().any(|k| guard.contains(k)) {
-                        return;
-                    }
-                    for key in &device_keys {
-                        if guard.insert(key.clone()) {
-                            reserved.push(key.clone());
-                        }
-                    }
-                }
-
-                let requested_id = *manifest.identity.id.get_or_insert_with(Uuid::new_v4);
-                let start_result = state.engine.start_stream(prepared.resolved).await;
-                let started = match start_result {
-                    Ok(EngineEvent::Started { stream_id, .. }) => {
-                        let _ = persist_effective_stream_manifest(&state, &camera_id, stream_id, &manifest).await;
-                        true
-                    }
-                    Ok(EngineEvent::Nack { reason, .. }) => {
-                        let reason_lc = reason.to_ascii_lowercase();
-                        if reason_lc.contains("stream already exists") || reason_lc.contains("already in use") || reason_lc.contains("conflict") {
-                            if let Ok(active) = state.engine.list_streams().await {
-                                let desired_alias = manifest.identity.alias.as_deref().map(str::trim).filter(|alias| !alias.is_empty());
-                                if let Some(existing) = active.into_iter().find(|stream| {
-                                    manifests_conflict(&stream.manifest, &manifest)
-                                        || (manifest.identity.id.is_some() && stream.manifest.identity.id == manifest.identity.id)
-                                        || desired_alias.is_some_and(|alias| stream.manifest.identity.alias.as_deref().map(str::trim) == Some(alias))
-                                }) {
-                                    crate::http::streams_persist::persist_resolved_config(&camera_id, Some(existing.stream_id), existing.manifest.clone()).await;
-                                    info!(camera_id, stream_id = %existing.stream_id, "autostart stream already running; reconciled record");
-                                    true
-                                } else {
-                                    warn!(camera_id, error = %reason, "autostart stream was rejected by engine");
-                                    false
-                                }
-                            } else {
-                                warn!(camera_id, error = %reason, "autostart stream was rejected by engine");
-                                false
-                            }
-                        } else {
-                            warn!(camera_id, error = %reason, "autostart stream was rejected by engine");
-                            false
-                        }
-                    }
-                    Ok(_) | Err(_) => match wait_for_stream_started(&state, requested_id, Duration::from_secs(20)).await {
-                        Ok(Some(_descriptor)) => {
-                            let _ = persist_effective_stream_manifest(&state, &camera_id, requested_id, &manifest).await;
-                            true
-                        }
-                        Ok(None) => {
-                            warn!(camera_id, "engine did not confirm autostart stream start");
-                            false
-                        }
-                        Err(err) => {
-                            warn!(camera_id, error = %err, "failed to start autostart stream");
-                            false
-                        }
-                    },
-                };
-
-                if !started {
-                    if !reserved.is_empty() {
-                        let mut guard = reserved_keys.lock().await;
-                        for key in reserved {
-                            guard.remove(&key);
-                        }
-                    }
-                    return;
-                }
-
-                crate::http::streams_persist::persist_manifest(&camera_id_for_manifest(&manifest), manifest.identity.id, manifest).await;
+                validated
             }
-        })
-        .await;
+            Err(err) => {
+                let detail = err.to_string();
+                mark_reconcile_status(&record.camera_id, PersistedStreamReconcileStatus::Invalid, Some(detail.clone())).await;
+                warn!(reason, camera_id = %record.camera_id, error = %detail, "persisted startup stream failed semantic validation");
+                continue;
+            }
+        };
+
+        let manifest = prepared.manifest;
+        let resolved = prepared.resolved;
+        if let Err(err) = streams_persist::persist_reconciled_resolved_config_checked(&record.camera_id, Some(requested_id), resolved.clone(), PersistedStreamReconcileStatus::Ready, None).await {
+            warn!(reason, camera_id = %record.camera_id, error = %err, "failed to persist reconciled startup stream config");
+        }
+
+        if let Some(existing) = matching_running_stream(&running, &manifest) {
+            let existing_stream_id = existing.stream_id;
+            let existing_manifest = existing.manifest.clone();
+            if let Err(err) =
+                streams_persist::persist_reconciled_resolved_config_checked(&record.camera_id, Some(existing_stream_id), existing_manifest, PersistedStreamReconcileStatus::Running, None).await
+            {
+                warn!(reason, camera_id = %record.camera_id, stream_id = %existing_stream_id, error = %err, "failed to reconcile running startup stream");
+            }
+            info!(reason, camera_id = %record.camera_id, stream_id = %existing_stream_id, "startup stream already running; reconciled record");
+            continue;
+        }
+
+        match state.engine.start_stream(resolved.clone()).await {
+            Ok(EngineEvent::Started { stream_id, .. }) => {
+                mark_running_record(&state, &record.camera_id, stream_id, &manifest).await;
+                running = state.engine.list_streams().await.unwrap_or(running);
+            }
+            Ok(EngineEvent::Nack { reason: nack_reason, .. }) => {
+                let reason_lc = nack_reason.to_ascii_lowercase();
+                if (reason_lc.contains("stream already exists") || reason_lc.contains("already in use") || reason_lc.contains("conflict"))
+                    && let Ok(active) = state.engine.list_streams().await
+                    && let Some(existing) = matching_running_stream(&active, &manifest)
+                {
+                    let existing_stream_id = existing.stream_id;
+                    let existing_manifest = existing.manifest.clone();
+                    if let Err(err) =
+                        streams_persist::persist_reconciled_resolved_config_checked(&record.camera_id, Some(existing_stream_id), existing_manifest, PersistedStreamReconcileStatus::Running, None).await
+                    {
+                        warn!(reason, camera_id = %record.camera_id, stream_id = %existing_stream_id, error = %err, "failed to persist conflict-reconciled startup stream");
+                    }
+                    info!(reason, camera_id = %record.camera_id, stream_id = %existing_stream_id, "startup stream conflict resolved to existing running stream");
+                    running = active;
+                    continue;
+                }
+
+                mark_reconcile_status(&record.camera_id, PersistedStreamReconcileStatus::Error, Some(nack_reason.clone())).await;
+                warn!(reason, camera_id = %record.camera_id, error = %nack_reason, "startup stream was rejected by engine");
+            }
+            Ok(_) | Err(_) => match wait_for_stream_started(&state, requested_id, Duration::from_secs(20)).await {
+                Ok(Some(_descriptor)) => {
+                    mark_running_record(&state, &record.camera_id, requested_id, &manifest).await;
+                    running = state.engine.list_streams().await.unwrap_or(running);
+                }
+                Ok(None) => {
+                    let detail = "engine did not confirm startup stream start".to_string();
+                    mark_reconcile_status(&record.camera_id, PersistedStreamReconcileStatus::Error, Some(detail.clone())).await;
+                    warn!(reason, camera_id = %record.camera_id, "engine did not confirm startup stream start");
+                }
+                Err(err) => {
+                    let detail = err.to_string();
+                    mark_reconcile_status(&record.camera_id, PersistedStreamReconcileStatus::Error, Some(detail.clone())).await;
+                    warn!(reason, camera_id = %record.camera_id, error = %detail, "failed to start startup stream");
+                }
+            },
+        }
+    }
 }

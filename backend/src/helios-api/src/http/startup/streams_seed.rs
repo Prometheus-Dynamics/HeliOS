@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use tracing::warn;
 
 use super::StartupStreamPreset;
-use crate::http::{streams, streams_persist};
+use crate::http::streams_persist::{self, PersistedStreamReconcileStatus};
 
 pub(super) async fn seed_streams(presets: &[StartupStreamPreset]) -> usize {
     let mut seeded = 0usize;
@@ -25,8 +25,7 @@ pub(super) async fn seed_streams(presets: &[StartupStreamPreset]) -> usize {
             manifest.identity.id = Some(stream_id);
         }
 
-        let validation = streams::validation::validate_stream_manifest(manifest).await;
-        let manifest = match validation {
+        let prepared = match streams_persist::prepare_manifest_for_persistence_checked(camera_id, manifest.identity.id, manifest).await {
             Ok(validated) => {
                 if !validated.warnings.is_empty() {
                     warn!(
@@ -36,23 +35,19 @@ pub(super) async fn seed_streams(presets: &[StartupStreamPreset]) -> usize {
                         "startup stream preset required sanitization"
                     );
                 }
-                validated.manifest
+                validated
             }
             Err(err) => {
-                warn!(
-                    camera_id,
-                    issue_count = err.issues.len(),
-                    warning_count = err.warnings.len(),
-                    issues = ?err.issues,
-                    warnings = ?err.warnings,
-                    "startup stream preset failed semantic validation; skipping"
-                );
+                warn!(camera_id, error = %err, "startup stream preset failed semantic validation; skipping");
                 continue;
             }
         };
 
-        let stream_id = manifest.identity.id;
-        streams_persist::persist_manifest(camera_id, stream_id, manifest).await;
+        let stream_id = prepared.resolved.identity.id;
+        if let Err(err) = streams_persist::persist_reconciled_resolved_config_checked(camera_id, stream_id, prepared.resolved, PersistedStreamReconcileStatus::Ready, None).await {
+            warn!(camera_id, error = %err, "failed to persist startup stream preset");
+            continue;
+        }
         seeded += 1;
     }
 

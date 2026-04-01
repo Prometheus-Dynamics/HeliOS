@@ -97,8 +97,8 @@ pub fn router() -> Router<AppState> {
         .route("/{id}/pose", put(update_stream_pose).delete(clear_stream_pose))
 }
 
-pub async fn restore_autostart_streams(state: AppState) {
-    autostart::restore_autostart_streams(state).await;
+pub async fn reconcile_startup_streams(state: AppState, reason: &'static str) {
+    autostart::reconcile_startup_streams(state, reason).await;
 }
 
 pub(crate) async fn restart_stream_with_manifest(state: AppState, manifest: StreamManifest) -> Result<(), StatusCode> {
