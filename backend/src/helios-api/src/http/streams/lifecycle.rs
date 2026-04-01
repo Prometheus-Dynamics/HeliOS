@@ -477,7 +477,7 @@ async fn merge_stream_manifest_state(state: &AppState, manifest: &mut StreamMani
 pub(crate) async fn get_stream(state: AppState, id: Uuid) -> Response {
     match state.engine.list_streams().await {
         Ok(streams) => match streams.into_iter().find(|s| s.stream_id == id) {
-            Some(StreamSummary { stream_id, mut descriptor, mut manifest, status }) => {
+            Some(StreamSummary { stream_id, mut descriptor, mut manifest, status, runtime }) => {
                 if manifest.pose.is_none()
                     && let Some(pose) = streams_persist::pose_for_stream_id(stream_id).await
                 {
@@ -486,7 +486,7 @@ pub(crate) async fn get_stream(state: AppState, id: Uuid) -> Response {
                 let mut requested = manifest.to_requested_manifest();
                 apply_effective_pipeline_layout(&mut requested);
                 ensure_descriptor_has_mode(&mut descriptor, &requested);
-                Json(build_stream_info(stream_id, descriptor, manifest, Some(status))).into_response()
+                Json(build_stream_info(stream_id, descriptor, manifest, Some(status), Some(runtime))).into_response()
             }
             None => {
                 // If the stream isn't currently running, fall back to the persisted record so the
@@ -506,7 +506,7 @@ pub(crate) async fn get_stream(state: AppState, id: Uuid) -> Response {
                     manifest.identity.id = Some(id);
                     apply_effective_pipeline_layout(&mut manifest);
                     let descriptor = streams_persist::descriptor_snapshot_for_record(&record).unwrap_or_else(|| descriptor_from_persisted_manifest(&manifest));
-                    return Json(build_stream_info(id, descriptor, manifest.resolve(), None)).into_response();
+                    return Json(build_stream_info(id, descriptor, manifest.resolve(), None, None)).into_response();
                 }
 
                 StatusCode::NOT_FOUND.into_response()

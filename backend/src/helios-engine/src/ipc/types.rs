@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::capture::{CaptureConfig, CaptureControlInfo, CaptureControlValue, CaptureDescriptor};
 use crate::identity::DeviceIdentity;
-use crate::stream::StreamMetrics;
+use crate::stream::{StreamEncoderDemandMetrics, StreamFrameDemandMetrics, StreamMetrics};
 
 use bincode::error::{DecodeError, EncodeError};
 use bincode::{Decode, Encode};
@@ -2518,6 +2518,136 @@ pub struct StreamSummary {
     pub manifest: ResolvedStreamConfig,
     #[serde(default)]
     pub status: StreamStatus,
+    #[serde(default)]
+    pub runtime: StreamRuntimeState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
+pub struct StreamRuntimeState {
+    #[serde(default)]
+    pub capture: StreamCaptureRuntimeState,
+    #[serde(default)]
+    pub codecs: StreamCodecChainRuntimeState,
+    #[serde(default)]
+    pub demand: StreamDemandRuntimeState,
+    #[serde(default)]
+    pub recording: StreamRecordingRuntimeState,
+    #[serde(default)]
+    pub pipeline: StreamPipelineRuntimeState,
+}
+
+impl StreamRuntimeState {
+    pub fn status(&self) -> StreamStatus {
+        let mut status = match self.capture.state {
+            StreamCaptureState::Disabled => StreamStatus {
+                state: StreamState::Disabled,
+                started_at_ms: self.capture.started_at_ms,
+                disabled_since_ms: self.capture.disabled_since_ms,
+                disabled_reason: self.capture.disabled_reason.clone(),
+                recording_active: false,
+                recording_since_ms: None,
+            },
+            StreamCaptureState::Running | StreamCaptureState::Stopped => StreamStatus {
+                state: StreamState::Running,
+                started_at_ms: self.capture.started_at_ms,
+                ..StreamStatus::default()
+            },
+        };
+        if self.recording.state == StreamRecordingState::Active {
+            status.recording_active = true;
+            status.recording_since_ms = self.recording.started_at_ms;
+        }
+        status
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[derive(Default)]
+pub enum StreamCaptureState {
+    Running,
+    #[default]
+    Stopped,
+    Disabled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
+pub struct StreamCaptureRuntimeState {
+    #[serde(default)]
+    pub state: StreamCaptureState,
+    #[serde(default)]
+    pub started_at_ms: Option<u64>,
+    #[serde(default)]
+    pub capture_fourcc: Option<String>,
+    #[serde(default)]
+    pub disabled_since_ms: Option<u64>,
+    #[serde(default)]
+    pub disabled_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
+pub struct StreamCodecChainRuntimeState {
+    #[serde(default)]
+    pub capture_input_fourcc: Option<String>,
+    #[serde(default)]
+    pub decoder_impl: Option<String>,
+    #[serde(default)]
+    pub encoder_input_fourcc: Option<String>,
+    #[serde(default)]
+    pub encoder_impl: Option<String>,
+    #[serde(default)]
+    pub encoder_output_fourcc: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
+pub struct StreamDemandRuntimeState {
+    #[serde(default)]
+    pub frame: StreamFrameDemandMetrics,
+    #[serde(default)]
+    pub encoder: StreamEncoderDemandMetrics,
+    #[serde(default)]
+    pub live_active: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[derive(Default)]
+pub enum StreamRecordingState {
+    #[default]
+    Inactive,
+    Active,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct StreamRecordingRuntimeState {
+    #[serde(default)]
+    pub state: StreamRecordingState,
+    #[serde(default)]
+    pub started_at_ms: Option<u64>,
+}
+
+impl Default for StreamRecordingRuntimeState {
+    fn default() -> Self {
+        Self { state: StreamRecordingState::Inactive, started_at_ms: None }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
+pub struct StreamPipelineRuntimeState {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub active_pipeline_id: Option<Uuid>,
+    #[serde(default)]
+    pub active_output_key: Option<String>,
+    #[serde(default)]
+    pub pipeline_count: u64,
+    #[serde(default)]
+    pub disabled: bool,
+    #[serde(default)]
+    pub disabled_since_ms: Option<u64>,
+    #[serde(default)]
+    pub disabled_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

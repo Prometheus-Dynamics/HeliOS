@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use helios_engine::ipc::{StreamState, StreamSummary};
+use helios_engine::ipc::{StreamCaptureState, StreamSummary};
 
 #[derive(Debug, Clone)]
 pub(super) struct AdapterSeed {
@@ -24,9 +24,10 @@ pub(super) fn build_adapter_seeds(streams: Vec<StreamSummary>) -> Vec<AdapterSee
     for stream in visible {
         let base = candidate_table_base(&stream);
         let table_name = unique_table_name(&base, &mut seen_tables);
-        let stream_state = match stream.status.state {
-            StreamState::Running => "running",
-            StreamState::Disabled => "disabled",
+        let stream_state = match stream.runtime.capture.state {
+            StreamCaptureState::Running => "running",
+            StreamCaptureState::Stopped => "stopped",
+            StreamCaptureState::Disabled => "disabled",
         }
         .to_string();
 
@@ -35,7 +36,7 @@ pub(super) fn build_adapter_seeds(streams: Vec<StreamSummary>) -> Vec<AdapterSee
             stream_id: stream.stream_id,
             stream_alias: stream.manifest.identity.alias.clone().and_then(non_empty_trimmed),
             stream_state,
-            recording_active: stream.status.recording_active,
+            recording_active: stream.runtime.recording.state == helios_engine::ipc::StreamRecordingState::Active || stream.status.recording_active,
         });
     }
     out

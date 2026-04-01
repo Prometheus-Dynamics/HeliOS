@@ -4,6 +4,7 @@
   import StreamPreview from './StreamPreview.svelte';
   import { floatingStreamViewer, type FloatingStreamViewerState } from '$lib/stores/floatingStreamViewer';
   import { StreamsApi } from '$lib/api/streamsApi';
+  import { streamHealthStatus, streamRecordingActive, streamRecordingSinceMs } from '$lib/api/streamRuntime';
   import type { FloatingStreamSource } from '$lib/stores/floatingStreamViewer';
   import { resolveStreamAlias, resolveStreamLabel } from '$lib/utils/streamLabels';
 
@@ -80,12 +81,12 @@
         const name = display || id || 'Unknown stream';
         return {
           name,
-          status: 'live',
+          status: streamHealthStatus(stream),
           captureSessionId: id,
           captureSessionAlias: alias,
           cameraUid: null,
-          recordingActive: Boolean(stream.status?.recording_active),
-          recordingSinceMs: stream.status?.recording_since_ms ?? null,
+          recordingActive: streamRecordingActive(stream),
+          recordingSinceMs: streamRecordingSinceMs(stream),
           pipelineId:
             stream.manifest?.active_pipeline_id ??
             (Array.isArray(stream.manifest?.pipelines) ? stream.manifest?.pipelines?.[0]?.pipeline_id : null) ??

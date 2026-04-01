@@ -3,6 +3,7 @@
   import { toaster } from '$lib';
   import { apiFetchResponse } from '$lib/api/core/http';
   import type { StreamInfo, StreamManifest, StreamPipelineBinding } from '$lib/api/httpClient';
+  import { streamRecordingActive } from '$lib/api/streamRuntime';
   import { recordingModeEnabled } from '$lib/api/streamRecordingMode';
   import FaIcon from '$lib/components/icons/FaIcon.svelte';
   import { emitMediaMutation } from '$lib/features/media/mutations';
@@ -96,7 +97,7 @@
   let recordingGop = $state<number | null>(DEFAULT_RECORDING_GOP);
   let recordingQuality = $state<number | null>(DEFAULT_RECORDING_QUALITY);
   let recordingIncludeImu = $state<boolean>(DEFAULT_RECORDING_INCLUDE_IMU);
-  const recordingLive = $derived(Boolean(ctx.stream?.status?.recording_active) || recordingActive);
+  const recordingLive = $derived(streamRecordingActive(ctx.stream) || recordingActive);
   const activePipelineIds = $derived.by(() => {
     const existing: string[] = Array.isArray(ctx.activePipelineIds) ? ctx.activePipelineIds : [];
     const filteredExisting = dedupePipelineIds(existing).filter((id) => id && id !== ctx.RAW_PIPELINE_ID);

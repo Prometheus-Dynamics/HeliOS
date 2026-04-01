@@ -91,6 +91,7 @@ pub(crate) enum StreamCommand {
     SyncCaptureControls { controls: Vec<crate::capture::ControlAssignment>, enable_tdn_output: bool, respond_to: tokio::sync::oneshot::Sender<Result<()>> },
     GetControls { respond_to: tokio::sync::oneshot::Sender<Result<Vec<CaptureControlInfo>>> },
     GetMetrics { respond_to: tokio::sync::oneshot::Sender<Result<StreamMetrics>> },
+    GetRuntimeState { respond_to: tokio::sync::oneshot::Sender<Result<crate::ipc::StreamRuntimeState>> },
     SnapshotJpeg { quality: u8, respond_to: tokio::sync::oneshot::Sender<Result<Vec<u8>>> },
     SetGraph { graph: GraphHandle, respond_to: tokio::sync::oneshot::Sender<Result<()>> },
     SetCodecs { decoder_id: Option<String>, encoder_id: Option<String>, respond_to: tokio::sync::oneshot::Sender<Result<()>> },
@@ -121,6 +122,10 @@ fn handle_stream_command(runner: &mut StreamRunner, cmd: StreamCommand) -> bool 
         }
         StreamCommand::GetMetrics { respond_to } => {
             let _ = respond_to.send(Ok(runner.metrics()));
+            true
+        }
+        StreamCommand::GetRuntimeState { respond_to } => {
+            let _ = respond_to.send(Ok(runner.runtime_state()));
             true
         }
         StreamCommand::SnapshotJpeg { quality, respond_to } => {

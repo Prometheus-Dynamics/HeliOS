@@ -46,12 +46,12 @@ fn controls_cache_ttl() -> Duration {
     Duration::from_secs(30)
 }
 
-fn stream_info_from_summary(StreamSummary { stream_id, mut descriptor, manifest, status }: StreamSummary) -> StreamInfo {
+fn stream_info_from_summary(StreamSummary { stream_id, mut descriptor, manifest, status, runtime }: StreamSummary) -> StreamInfo {
     let mut requested = manifest.to_requested_manifest();
     normalize_pipeline_manifest(&mut requested);
     apply_effective_pipeline_layout(&mut requested);
     ensure_descriptor_has_mode(&mut descriptor, &requested);
-    build_stream_info(stream_id, descriptor, manifest, Some(status))
+    build_stream_info(stream_id, descriptor, manifest, Some(status), Some(runtime))
 }
 
 fn merge_persisted_streams(mut active: Vec<StreamInfo>, persisted: Vec<streams_persist::PersistedStreamRecord>) -> Vec<StreamInfo> {
@@ -103,7 +103,7 @@ fn merge_persisted_streams(mut active: Vec<StreamInfo>, persisted: Vec<streams_p
         normalize_pipeline_manifest(&mut manifest);
         apply_effective_pipeline_layout(&mut manifest);
         let descriptor = descriptor.unwrap_or_else(|| streams_persist::synthesize_descriptor_snapshot_from_manifest(&manifest));
-        active.push(build_stream_info(stream_id, descriptor, resolved, None));
+        active.push(build_stream_info(stream_id, descriptor, resolved, None, None));
         seen_ids.insert(stream_id);
     }
 
@@ -187,6 +187,12 @@ impl StreamsReadModelState {
         let resolved = manifest.resolve();
         stream.manifest = manifest;
         stream.resolved = resolved;
+        if let Some(runtime) = stream.runtime.as_mut() {
+            runtime.pipeline.enabled = stream.resolved.pipeline_enabled;
+            runtime.pipeline.active_pipeline_id = stream.resolved.active_pipeline_id;
+            runtime.pipeline.active_output_key = stream.resolved.active_pipeline_output.clone();
+            runtime.pipeline.pipeline_count = stream.resolved.pipelines.len() as u64;
+        }
     }
 
     pub async fn load_live_stream_manifest(&self, state: &AppState, stream_id: Uuid) -> Option<StreamManifest> {

@@ -47,6 +47,7 @@ pub(super) async fn build_bridge_payloads(handles: &Arc<IpcHandles>, api_url: &s
                         "url": url,
                         "preview_url": stream_preview_url,
                         "status": stream.status,
+                        "runtime": stream.runtime,
                         "nt": {
                             "value_topic": stream_value_topic,
                             "camera_publisher_topic": camera_publisher_topic,

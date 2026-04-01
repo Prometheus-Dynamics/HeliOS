@@ -2,6 +2,7 @@
   import type { ComponentProps } from 'svelte';
   import { StreamMetricsPanel, StreamPreview } from '$lib';
   import type { StreamInfo } from '$lib/api/httpClient';
+  import { streamHealthStatus, streamRecordingActive } from '$lib/api/streamRuntime';
   import type { StreamMetricsError } from '$lib/api/streamMetrics';
   import StreamMetricsBanners from '$lib/components/StreamMetricsBanners.svelte';
   import CalibrationGuidanceOverlay from '$lib/features/devices/camera/CalibrationGuidanceOverlay.svelte';
@@ -58,8 +59,8 @@
   let metricsStaleMessage = $state<string | null>(null);
   let cropGuideHostWidth = $state(0);
   let cropGuideHostHeight = $state(0);
-  const recordingActive = $derived(Boolean(ctx.stream?.status?.recording_active));
-  const streamStatus = $derived.by(() => (ctx.stream?.status?.state === 'disabled' ? 'degraded' : 'live'));
+  const recordingActive = $derived(streamRecordingActive(ctx.stream));
+  const streamStatus = $derived.by(() => streamHealthStatus(ctx.stream));
   const streamAlias = $derived.by(() => {
     const identity = ctx.stream?.manifest?.identity as LegacyStreamIdentity | undefined;
     const alias = identity?.alias;

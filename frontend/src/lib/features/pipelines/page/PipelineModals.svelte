@@ -4,6 +4,7 @@
   import type { PipelineOverviewPipeline, PipelineTemplateSummary } from '$lib/types/pipeline';
   import type { StreamInfo } from '$lib/ts-bindings/http/client';
   import { StreamPreview } from '$lib';
+  import { streamRecordingActive, streamRuntimeStatusLabel } from '$lib/api/streamRuntime';
   import { resolveStreamLabel } from '$lib/utils/streamLabels';
   import PipelineRegistryDrawer from './PipelineRegistryDrawer.svelte';
   import PipelineIconModal from './PipelineIconModal.svelte';
@@ -149,9 +150,7 @@
   };
 
   const streamStatusLabel = (stream: StreamInfo): string => {
-    if (stream.status?.recording_active) return 'recording';
-    const status = stream.status?.state ?? 'idle';
-    return String(status ?? 'idle');
+    return streamRuntimeStatusLabel(stream);
   };
 
   const streamCaptureAlias = (stream: StreamInfo): string | null => {
@@ -278,7 +277,7 @@
                       <StreamPreview
                         name={displayName}
                         status={statusLabel}
-                        recording={Boolean(stream.status?.recording_active)}
+                        recording={streamRecordingActive(stream)}
                         captureSessionId={deviceId}
                         captureSessionAlias={streamCaptureAlias(stream)}
                         enablePopout={false}
@@ -293,7 +292,7 @@
                     <div class="pointer-events-none absolute inset-0 bg-gradient-to-t from-surface-950/95 via-surface-950/35 to-transparent transition group-hover:from-surface-950/85"></div>
                     <div class="pointer-events-none absolute top-2 left-2 text-micro-tight uppercase tracking-[0.3em]">
                       <span class={`rounded-full border px-2 py-0.5 font-semibold ${
-                        stream.status?.recording_active ? 'border-error-500/60 bg-error-500/30 text-error-100' : 'border-white/30 bg-black/50 text-surface-100'
+                        streamRecordingActive(stream) ? 'border-error-500/60 bg-error-500/30 text-error-100' : 'border-white/30 bg-black/50 text-surface-100'
                       }`}>
                         {statusLabel}
                       </span>

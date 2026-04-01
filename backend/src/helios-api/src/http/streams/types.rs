@@ -1,5 +1,5 @@
 use helios_engine::capture::CaptureDescriptor;
-use helios_engine::ipc::{EncoderSettings, EngineErrorCode, ResolvedStreamConfig, StreamManifest, StreamStatus};
+use helios_engine::ipc::{EncoderSettings, EngineErrorCode, ResolvedStreamConfig, StreamManifest, StreamRuntimeState, StreamStatus};
 use serde::{Deserialize, Serialize};
 use styx::codec::CodecKind;
 use utoipa::ToSchema;
@@ -13,6 +13,8 @@ pub struct StreamInfo {
     pub resolved: ResolvedStreamConfig,
     #[serde(default)]
     pub status: Option<StreamStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<StreamRuntimeState>,
 }
 
 #[derive(Serialize, Deserialize, ToSchema)]

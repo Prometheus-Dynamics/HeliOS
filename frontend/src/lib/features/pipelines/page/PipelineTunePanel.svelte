@@ -8,6 +8,7 @@
   import PipelineTuneConstantsPanel from '$lib/features/pipelines/page/PipelineTuneConstantsPanel.svelte';
   import { extractGraphOutputPorts } from '$lib/features/pipelines/graphOutputPorts';
   import PipelineOutputsPanel from '$lib/components/pipelines/PipelineOutputsPanel.svelte';
+  import { streamRecordingActive } from '$lib/api/streamRuntime';
   import { StreamsApi } from '$lib/api/streamsApi';
   import type { ControlMeta, StreamInfo, StreamPipelineGridSlot, StreamPipelineWire } from '$lib/ts-bindings/http/client';
   import type { PipelineOutputEntry, PipelineTuningConstantGroup } from '$lib/components/pipelines/types';
@@ -821,7 +822,7 @@
               className="h-full w-full"
               captureSessionId={tunePreviewStream.id}
               captureSessionAlias={streamLabel(tunePreviewStream)}
-              recording={Boolean(tunePreviewStream?.status?.recording_active)}
+              recording={streamRecordingActive(tunePreviewStream)}
               showCaption={false}
               showFrame={false}
               fitMode="contain"

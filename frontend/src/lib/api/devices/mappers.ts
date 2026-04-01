@@ -15,6 +15,7 @@ import type { CameraCard, CameraStatus, PeripheralEntry, SummaryTile, TaskEntry 
 import type { ImuStatus } from '$lib/types/systems';
 import { CORAL_ICON, PERIPHERAL_ROW_LIMIT } from './constants';
 import { resolveStreamAlias, resolveStreamLabel } from '$lib/utils/streamLabels';
+import { streamHealthStatus, streamRecordingActive, streamRecordingSinceMs } from '$lib/api/streamRuntime';
 
 type PeripheralStatusResponse = SensorPeripheral & {
   identity?: PeripheralEntry['identity'] | null;
@@ -56,10 +57,9 @@ export function buildCameraCards(streams: StreamInfo[], peerStreams: PeerRemoteS
     const fallbackMode = stream.descriptor.modes?.[0] ?? null;
     const mode = activeMode ?? fallbackMode;
     const res = mode?.format?.resolution ? `${mode.format.resolution.width}x${mode.format.resolution.height}` : 'unknown';
-    const streamState = stream.status?.state ?? 'running';
-    const status: CameraStatus = streamState === 'disabled' ? 'degraded' : 'live';
-    const recordingActive = Boolean(stream.status?.recording_active);
-    const recordingSinceMs = stream.status?.recording_since_ms ?? null;
+    const status = streamHealthStatus(stream) as CameraStatus;
+    const recordingActive = streamRecordingActive(stream);
+    const recordingSinceMs = streamRecordingSinceMs(stream);
     const alias = resolveStreamAlias(stream);
     const name = resolveStreamLabel(stream, stream.id);
     return {

@@ -1,6 +1,7 @@
 import { PeripheralsApi } from '$lib/api/peripheralsApi';
 import { PipelinesApi } from '$lib/api/pipelinesApi';
 import { StreamsApi } from '$lib/api/streamsApi';
+import { streamHealthStatus, streamRecordingActive, streamRecordingSinceMs } from '$lib/api/streamRuntime';
 import { DeviceApi } from '$lib/api/deviceApi';
 import { DEFAULT_REQUEST_TIMEOUT_MS } from '$lib/api/requestUtils';
 import type { DashboardFetchMeta, DashboardPayload, DashboardSourceStatus, PipelineWatchEntry, StreamGalleryItem, SummaryStat, TimelineItem } from '$lib/types/dashboard';
@@ -144,7 +145,7 @@ function buildPipelineWatch(slots: StreamInfo[]): PipelineWatchEntry[] {
   return slots.slice(0, 5).map((slot) => {
     const fps = 0;
     const latencyMs = null;
-    const state = slot.status?.state === 'disabled' ? 'Degraded' : 'Healthy';
+    const state = streamHealthStatus(slot) === 'degraded' ? 'Degraded' : streamHealthStatus(slot) === 'idle' ? 'Idle' : 'Healthy';
     return {
       name: resolveStreamLabel(slot, 'Stream'),
       fps: typeof fps === 'number' && Number.isFinite(fps) ? Math.round(fps) : 0,
@@ -157,9 +158,9 @@ function buildPipelineWatch(slots: StreamInfo[]): PipelineWatchEntry[] {
 function buildStreamGallery(slots: StreamInfo[]): StreamGalleryItem[] {
   if (!slots.length) return [];
   return slots.slice(0, 6).map((slot) => {
-    const status = slot.status?.state === 'disabled' ? 'degraded' : 'live';
-    const recordingActive = Boolean(slot.status?.recording_active);
-    const recordingSinceMs = slot.status?.recording_since_ms ?? null;
+    const status = streamHealthStatus(slot);
+    const recordingActive = streamRecordingActive(slot);
+    const recordingSinceMs = streamRecordingSinceMs(slot);
     return {
       name: resolveStreamLabel(slot, 'Stream'),
       status,

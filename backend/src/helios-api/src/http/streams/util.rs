@@ -5,7 +5,8 @@ use axum::{
 };
 use helios_engine::capture::CaptureDescriptor;
 use helios_engine::ipc::{
-    EncoderSettings, EngineErrorCode, FrameRate, JsonWire, ResolutionHint, ResolvedStreamConfig, StreamManifest, StreamPipelineGridSlot, StreamPipelineLayout, StreamStatus,
+    EncoderSettings, EngineErrorCode, FrameRate, JsonWire, ResolutionHint, ResolvedStreamConfig, StreamManifest, StreamPipelineGridSlot, StreamPipelineLayout, StreamRuntimeState,
+    StreamStatus,
     normalize_requested_stream_decoder, normalize_requested_stream_encoder,
 };
 use lib_ipc::client::ClientTransportError;
@@ -108,9 +109,15 @@ pub(crate) fn default_encoder_settings_for_codec(fourcc: FourCc, implementation:
     }
 }
 
-pub(crate) fn build_stream_info(id: Uuid, descriptor: CaptureDescriptor, resolved: ResolvedStreamConfig, status: Option<StreamStatus>) -> StreamInfo {
+pub(crate) fn build_stream_info(
+    id: Uuid,
+    descriptor: CaptureDescriptor,
+    resolved: ResolvedStreamConfig,
+    status: Option<StreamStatus>,
+    runtime: Option<StreamRuntimeState>,
+) -> StreamInfo {
     let manifest = resolved.to_requested_manifest();
-    StreamInfo { id, descriptor, manifest, resolved, status }
+    StreamInfo { id, descriptor, manifest, resolved, status, runtime }
 }
 
 pub(crate) fn normalize_stream_encoder_manifest(manifest: &mut StreamManifest) {

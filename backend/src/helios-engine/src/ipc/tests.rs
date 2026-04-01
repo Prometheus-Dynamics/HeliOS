@@ -81,7 +81,13 @@ fn start_command_round_trips_over_bincode() {
 #[test]
 fn stream_list_event_round_trips() {
     let (_, descriptor) = crate::capture::default_virtual_device().backends.into_iter().next().map(|b| b.descriptor).map(|d| ((), d)).unwrap();
-    let summary = StreamSummary { stream_id: uuid::Uuid::new_v4(), descriptor, manifest: sample_manifest().resolve(), status: StreamStatus::default() };
+    let summary = StreamSummary {
+        stream_id: uuid::Uuid::new_v4(),
+        descriptor,
+        manifest: sample_manifest().resolve(),
+        status: StreamStatus::default(),
+        runtime: StreamRuntimeState::default(),
+    };
     let event = EngineEvent::StreamList { command_id: CommandId::new(), streams: vec![summary.clone()] };
     let config = bincode::config::standard();
     let encoded = bincode::encode_to_vec(event, config).expect("encode event");
@@ -90,9 +96,54 @@ fn stream_list_event_round_trips() {
         EngineEvent::StreamList { streams, .. } => {
             assert_eq!(streams.len(), 1);
             assert_eq!(streams[0].descriptor.modes.len(), summary.descriptor.modes.len());
+            assert_eq!(streams[0].runtime.capture.state, StreamCaptureState::Stopped);
         }
         other => panic!("unexpected event after decode: {:?}", other),
     }
+}
+
+#[test]
+fn runtime_status_uses_capture_and_recording_state() {
+    let mut runtime = StreamRuntimeState::default();
+    runtime.capture.state = StreamCaptureState::Disabled;
+    runtime.capture.started_at_ms = Some(10);
+    runtime.capture.disabled_since_ms = Some(20);
+    runtime.capture.disabled_reason = Some("graph fault".to_string());
+    runtime.recording.state = StreamRecordingState::Active;
+    runtime.recording.started_at_ms = Some(30);
+
+    let status = runtime.status();
+    assert_eq!(status.state, StreamState::Disabled);
+    assert_eq!(status.started_at_ms, Some(10));
+    assert_eq!(status.disabled_since_ms, Some(20));
+    assert_eq!(status.disabled_reason.as_deref(), Some("graph fault"));
+    assert!(status.recording_active);
+    assert_eq!(status.recording_since_ms, Some(30));
+}
+
+#[test]
+fn runtime_state_round_trips_over_bincode() {
+    let config = bincode::config::standard();
+    let runtime = StreamRuntimeState::default();
+
+    let encoded_capture = bincode::serde::encode_to_vec(&runtime.capture, config).expect("encode capture runtime");
+    let _: StreamCaptureRuntimeState = bincode::serde::decode_from_slice(&encoded_capture, config).expect("decode capture runtime").0;
+
+    let encoded_codecs = bincode::serde::encode_to_vec(&runtime.codecs, config).expect("encode codec runtime");
+    let _: StreamCodecChainRuntimeState = bincode::serde::decode_from_slice(&encoded_codecs, config).expect("decode codec runtime").0;
+
+    let encoded_demand = bincode::serde::encode_to_vec(&runtime.demand, config).expect("encode demand runtime");
+    let _: StreamDemandRuntimeState = bincode::serde::decode_from_slice(&encoded_demand, config).expect("decode demand runtime").0;
+
+    let encoded_recording = bincode::serde::encode_to_vec(&runtime.recording, config).expect("encode recording runtime");
+    let _: StreamRecordingRuntimeState = bincode::serde::decode_from_slice(&encoded_recording, config).expect("decode recording runtime").0;
+
+    let encoded_pipeline = bincode::serde::encode_to_vec(&runtime.pipeline, config).expect("encode pipeline runtime");
+    let _: StreamPipelineRuntimeState = bincode::serde::decode_from_slice(&encoded_pipeline, config).expect("decode pipeline runtime").0;
+
+    let encoded = bincode::serde::encode_to_vec(&runtime, config).expect("encode stream runtime");
+    let decoded: StreamRuntimeState = bincode::serde::decode_from_slice(&encoded, config).expect("decode stream runtime").0;
+    assert_eq!(decoded.capture.state, StreamCaptureState::Stopped);
 }
 
 #[test]

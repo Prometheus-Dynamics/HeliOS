@@ -10,12 +10,33 @@ use crate::ipc::IpcHandles;
 
 use super::{DegradedStream, ReliefAction, ResourceGuardStage};
 
+fn decoder_available(stream: &StreamSummary) -> bool {
+    stream.runtime.codecs.decoder_impl.is_some() || stream.manifest.decoder_id().is_some()
+}
+
+fn encoder_available(stream: &StreamSummary) -> bool {
+    stream.runtime.codecs.encoder_impl.is_some() || stream.manifest.encoder_id().is_some()
+}
+
+fn pipeline_enabled(stream: &StreamSummary) -> bool {
+    stream.runtime.pipeline.enabled || stream.manifest.pipeline_enabled
+}
+
+fn pipeline_count(stream: &StreamSummary) -> usize {
+    let runtime_count = stream.runtime.pipeline.pipeline_count as usize;
+    if runtime_count > 0 { runtime_count } else { stream.manifest.pipelines.len() }
+}
+
+fn recording_active(stream: &StreamSummary) -> bool {
+    stream.runtime.recording.state == helios_engine::ipc::StreamRecordingState::Active || stream.status.recording_active
+}
+
 pub(super) fn relief_action_for_stream(stream: &StreamSummary, degraded: &HashMap<Uuid, DegradedStream>, allow_stop_fallback: bool) -> Option<ReliefAction> {
     match degraded.get(&stream.stream_id).map(|state| state.stage) {
         None => {
-            if stream.manifest.decoder_id().is_some() {
+            if decoder_available(stream) {
                 Some(ReliefAction::DisableDecoder)
-            } else if stream.manifest.encoder_id().is_some() {
+            } else if encoder_available(stream) {
                 Some(ReliefAction::DisableAllCodecs)
             } else if allow_stop_fallback {
                 Some(ReliefAction::StopStream)
@@ -24,7 +45,7 @@ pub(super) fn relief_action_for_stream(stream: &StreamSummary, degraded: &HashMa
             }
         }
         Some(ResourceGuardStage::DecoderDisabled) => {
-            if stream.manifest.encoder_id().is_some() {
+            if encoder_available(stream) {
                 Some(ReliefAction::DisableAllCodecs)
             } else if allow_stop_fallback {
                 Some(ReliefAction::StopStream)
@@ -41,18 +62,18 @@ pub(super) fn rough_stream_score(stream: &StreamSummary) -> f64 {
     if stream.manifest.capture.backend == styx::BackendKind::File {
         score += 140.0;
     }
-    if stream.manifest.decoder_id().is_some() {
+    if decoder_available(stream) {
         score += 220.0;
     }
-    if stream.manifest.encoder_id().is_some() {
+    if encoder_available(stream) {
         score += 140.0;
     }
-    if stream.manifest.pipeline_enabled {
+    if pipeline_enabled(stream) {
         score += 180.0;
     }
-    score += stream.manifest.pipelines.len() as f64 * 45.0;
+    score += pipeline_count(stream) as f64 * 45.0;
     score += stream.manifest.host_buffer as f64 * 8.0;
-    if stream.status.recording_active {
+    if recording_active(stream) {
         score += 80.0;
     }
     score

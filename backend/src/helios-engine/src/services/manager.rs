@@ -52,6 +52,7 @@ const ENV_STREAM_COMMAND_QUEUE_SIZE: &str = "HELIOS_STREAM_COMMAND_QUEUE_SIZE";
 const DEFAULT_STREAM_COMMAND_QUEUE_SIZE: usize = 64;
 const ENV_RECORDING_FRAME_QUEUE_SIZE: &str = "HELIOS_RECORDING_FRAME_QUEUE_SIZE";
 const DEFAULT_RECORDING_FRAME_QUEUE_SIZE: usize = 48;
+const STREAM_RUNTIME_QUERY_TIMEOUT: Duration = Duration::from_millis(250);
 
 static SHADOW_DATA_ROOT: OnceLock<PathBuf> = OnceLock::new();
 
@@ -1272,26 +1273,30 @@ impl StreamManager {
             }
             let host = ctx.host.read().await;
             let graph_state = host.disabled_state();
-            let mut status = if graph_state.disabled {
-                crate::ipc::StreamStatus {
-                    state: crate::ipc::StreamState::Disabled,
-                    started_at_ms: Some(ctx.stream_started_at_ms),
-                    disabled_since_ms: graph_state.disabled_since_ms,
-                    disabled_reason: graph_state.disabled_reason,
-                    recording_active: false,
-                    recording_since_ms: None,
-                }
+            let mut runtime = query_stream_runtime_state(&ctx).await;
+            runtime.capture.started_at_ms = Some(ctx.stream_started_at_ms);
+            runtime.capture.state = if graph_state.disabled {
+                crate::ipc::StreamCaptureState::Disabled
+            } else if runtime.capture.state == crate::ipc::StreamCaptureState::Running {
+                crate::ipc::StreamCaptureState::Running
             } else {
-                crate::ipc::StreamStatus::default()
+                crate::ipc::StreamCaptureState::Stopped
             };
-            if status.started_at_ms.is_none() {
-                status.started_at_ms = Some(ctx.stream_started_at_ms);
-            }
+            runtime.capture.disabled_since_ms = graph_state.disabled_since_ms;
+            runtime.capture.disabled_reason = graph_state.disabled_reason.clone();
+            runtime.pipeline.enabled = manifest.pipeline_enabled;
+            runtime.pipeline.active_pipeline_id = manifest.active_pipeline_id;
+            runtime.pipeline.active_output_key = manifest.active_pipeline_output.clone();
+            runtime.pipeline.pipeline_count = manifest.pipelines.len() as u64;
+            runtime.pipeline.disabled = graph_state.disabled;
+            runtime.pipeline.disabled_since_ms = graph_state.disabled_since_ms;
+            runtime.pipeline.disabled_reason = graph_state.disabled_reason;
             if let Some(started_at) = recording_started.get(&id).copied() {
-                status.recording_active = true;
-                status.recording_since_ms = Some(started_at);
+                runtime.recording.state = crate::ipc::StreamRecordingState::Active;
+                runtime.recording.started_at_ms = Some(started_at);
             }
-            out.push(crate::ipc::StreamSummary { stream_id: id, descriptor: ctx.descriptor.clone(), manifest, status });
+            let status = runtime.status();
+            out.push(crate::ipc::StreamSummary { stream_id: id, descriptor: ctx.descriptor.clone(), manifest, status, runtime });
         }
         out
     }
@@ -1355,6 +1360,29 @@ fn reconcile_manifest_pipeline_references(manifest: &mut ResolvedStreamConfig) {
         manifest.active_pipeline_id = manifest.pipelines.first().map(|binding| binding.pipeline_id);
         if manifest.active_pipeline_id.is_none() {
             manifest.active_pipeline_output = None;
+        }
+    }
+}
+
+async fn query_stream_runtime_state(ctx: &StreamContext) -> crate::ipc::StreamRuntimeState {
+    let (tx, rx) = oneshot::channel();
+    if let Err(err) = enqueue_stream_command(&ctx.command_tx, StreamCommand::GetRuntimeState { respond_to: tx }) {
+        tracing::debug!(error = %err, "stream runtime state unavailable");
+        return crate::ipc::StreamRuntimeState::default();
+    }
+    match timeout(STREAM_RUNTIME_QUERY_TIMEOUT, rx).await {
+        Ok(Ok(Ok(runtime))) => runtime,
+        Ok(Ok(Err(err))) => {
+            tracing::debug!(error = %err, "stream runtime state query failed");
+            crate::ipc::StreamRuntimeState::default()
+        }
+        Ok(Err(_)) => {
+            tracing::debug!("stream runtime state query channel dropped");
+            crate::ipc::StreamRuntimeState::default()
+        }
+        Err(_) => {
+            tracing::debug!("stream runtime state query timed out");
+            crate::ipc::StreamRuntimeState::default()
         }
     }
 }

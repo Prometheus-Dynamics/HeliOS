@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex as StdMutex, Weak};
 use std::time::Duration as StdDuration;
 
-use helios_engine::ipc::StreamState;
+use helios_engine::ipc::{StreamCaptureState, StreamRecordingState, StreamState};
 use schemars::JsonSchema;
 use serde::Serialize;
 use sysinfo::{ProcessesToUpdate, System};
@@ -519,15 +519,34 @@ async fn stream_fingerprint(state: &Arc<IpcHandles>) -> Option<String> {
         }
     };
 
-    let mut keys: Vec<String> = streams.into_iter().map(|summary| format!("{}:{}", summary.stream_id, stream_state_label(summary.status.state))).collect();
+    let mut keys: Vec<String> = streams
+        .into_iter()
+        .map(|summary| {
+            format!(
+                "{}:{}:{}",
+                summary.stream_id,
+                stream_capture_state_label(summary.runtime.capture.state, summary.status.state),
+                stream_recording_state_label(summary.runtime.recording.state, summary.status.recording_active)
+            )
+        })
+        .collect();
     keys.sort();
     Some(keys.join("|"))
 }
 
-fn stream_state_label(state: StreamState) -> &'static str {
-    match state {
-        StreamState::Running => "running",
-        StreamState::Disabled => "disabled",
+fn stream_capture_state_label(runtime_state: StreamCaptureState, _fallback: StreamState) -> &'static str {
+    match runtime_state {
+        StreamCaptureState::Running => "running",
+        StreamCaptureState::Stopped => "stopped",
+        StreamCaptureState::Disabled => "disabled",
+    }
+}
+
+fn stream_recording_state_label(runtime_state: StreamRecordingState, fallback: bool) -> &'static str {
+    match runtime_state {
+        StreamRecordingState::Active => "recording",
+        StreamRecordingState::Inactive if fallback => "recording",
+        StreamRecordingState::Inactive => "idle",
     }
 }
 

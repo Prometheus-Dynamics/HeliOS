@@ -429,6 +429,56 @@ impl StreamRunner {
         self.session.as_ref().map(|s| s.controls()).unwrap_or_default()
     }
 
+    pub fn runtime_state(&self) -> crate::ipc::StreamRuntimeState {
+        let frame_demand_snapshot = match self.last_frame_demand.lock() {
+            Ok(guard) => *guard,
+            Err(poisoned) => *poisoned.into_inner(),
+        };
+        let preview_demand_active = frame_demand_snapshot.preview_demand_active;
+        let encode_demand_active = self.encoder_id.is_some() && (self.encoder_demand() || preview_demand_active);
+        let frame = StreamFrameDemandMetrics {
+            raw_receiver_count: frame_demand_snapshot.raw_receiver_count,
+            host_receiver_count: frame_demand_snapshot.host_receiver_count,
+            preview_demand_active,
+            encode_demand_active,
+            graph_sample_demand_active: frame_demand_snapshot.graph_sample_demand_active,
+            needs_decoded_image: frame_demand_snapshot.needs_decoded_image,
+            graph_has_image_output: frame_demand_snapshot.graph_has_image_output,
+            graph_has_executor: frame_demand_snapshot.graph_has_executor,
+        };
+        let encoder = StreamEncoderDemandMetrics {
+            broadcast_receiver_count: self.encoded_tx.receiver_count() as u64,
+            managed_consumer_count: self.managed_encoded_consumer_count.load(Ordering::Relaxed),
+            managed_consumer_last_seen_ms: self.managed_encoded_consumer_last_seen_ms.load(Ordering::Relaxed),
+            encoder_demand_active: encode_demand_active,
+            encoder_worker_running: self.encoder_worker.is_some(),
+        };
+        let live_active = frame.raw_receiver_count > 0
+            || (frame.graph_has_image_output && frame.host_receiver_count > 0)
+            || frame.encode_demand_active
+            || frame.graph_sample_demand_active;
+
+        crate::ipc::StreamRuntimeState {
+            capture: crate::ipc::StreamCaptureRuntimeState {
+                state: if self.session.is_some() { crate::ipc::StreamCaptureState::Running } else { crate::ipc::StreamCaptureState::Stopped },
+                started_at_ms: None,
+                capture_fourcc: self.capture_fourcc.map(Self::fourcc_code),
+                disabled_since_ms: None,
+                disabled_reason: None,
+            },
+            codecs: crate::ipc::StreamCodecChainRuntimeState {
+                capture_input_fourcc: self.capture_fourcc.map(Self::fourcc_code),
+                decoder_impl: self.decoder_id.clone().and_then(|value| (!value.trim().is_empty()).then_some(value)),
+                encoder_input_fourcc: self.encoder_input_fourcc.map(Self::fourcc_code),
+                encoder_impl: self.encoder_impl.clone().and_then(|value| (!value.trim().is_empty()).then_some(value)),
+                encoder_output_fourcc: self.encode_fourcc.map(Self::fourcc_code),
+            },
+            demand: crate::ipc::StreamDemandRuntimeState { frame, encoder, live_active },
+            recording: crate::ipc::StreamRecordingRuntimeState::default(),
+            pipeline: crate::ipc::StreamPipelineRuntimeState::default(),
+        }
+    }
+
     pub fn metrics(&self) -> StreamMetrics {
         let now = Instant::now();
         let mut capture = cadence_stage_to_capture_metrics(&self.capture_stats);
