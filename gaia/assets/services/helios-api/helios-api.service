@@ -16,7 +16,6 @@ ExecStartPre=/usr/bin/install -d -m0755 /var/lib/helios/api-data
 ExecStartPre=/usr/bin/install -d -m0755 /var/lib/helios/state
 ExecStartPre=/usr/bin/install -d -m0755 /usr/lib/helios/plugins/daedalus
 ExecStartPre=/usr/bin/install -d -m0755 /var/lib/helios/plugins/daedalus
-ExecStartPre=/usr/local/bin/helios-api-startup-sanitize.sh
 # Ensure core dumps land under DATA-backed storage
 ExecStartPre=/bin/sh -lc 'echo 1 > /proc/sys/kernel/core_uses_pid; echo /var/log/helios/core-%%e-%%p > /proc/sys/kernel/core_pattern; ulimit -c unlimited'
 Environment=ENGINE_SOCKET=/run/helios/engine.sock

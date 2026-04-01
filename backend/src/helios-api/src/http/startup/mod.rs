@@ -1,5 +1,6 @@
 mod files;
 mod pipelines_seed;
+mod reconcile;
 mod streams_seed;
 
 use super::AppState;
@@ -15,6 +16,7 @@ use uuid::Uuid;
 use self::{
     files::{decode_startup_preset, pipeline_document_count, startup_marker_path, startup_preset_path, write_marker},
     pipelines_seed::seed_pipelines,
+    reconcile::reconcile_persisted_startup_state,
     streams_seed::seed_streams,
 };
 
@@ -57,6 +59,7 @@ pub(super) struct StartupPresetMarker {
 }
 
 pub(crate) async fn apply_startup_preset(state: AppState) {
+    reconcile_persisted_startup_state().await;
     super::localization::maps::seed_bundled_field_maps().await;
 
     let preset_path = startup_preset_path();
