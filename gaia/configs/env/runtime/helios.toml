@@ -35,6 +35,8 @@ HELIOS_USB_RECOVERY_PORTS = "/dev/ttyGS0,/dev/ttyGS1"
 HELIOS_USB_RECOVERY_BAUD = "115200"
 HELIOS_USB_RECOVERY_STAGING_DIR = "/var/lib/helios/usb-recovery"
 HELIOS_USB_RECOVERY_REBOOT_NORMAL_CMD = "systemctl reboot"
+HELIOS_USB_RECOVERY_UPDATER_SOCKET = "/run/helios/updater.sock"
+HELIOS_USB_RECOVERY_UPDATER_JOURNAL = "/var/lib/helios/journal/ipc/updater-usb-recoveryd.journal"
 
 [sets.helios-peripherals]
 IMU_ANGLE_RANGE = "+-180"

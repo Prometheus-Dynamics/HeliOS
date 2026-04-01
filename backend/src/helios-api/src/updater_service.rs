@@ -2,13 +2,17 @@ use crate::http::AppState;
 use crate::ipc;
 use crate::ipc::command_id_from_context;
 use crate::ipc::updater::UpdaterConnection;
+use async_trait::async_trait;
+use helios_updater::ReleaseManifest;
 use helios_updater::client::{CommandId, UpdaterSession};
-use helios_updater::ipc::{PreflightReport, UpdateState, UpdaterCommand, UpdaterStorageReport};
+use helios_updater::ipc::{MaintenanceWindow, PreflightReport, UpdateState, UpdaterCommand, UpdaterStorageReport};
+use helios_updater::update_core::{UpdateCoreBackend, UpdateCoreError};
 use lib_ipc::protocol::ControlEvent;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::timeout;
+use uuid::Uuid;
 
 pub async fn ensure_updater(state: &AppState) -> Result<Arc<UpdaterConnection>, String> {
     let mut guard = state.updater.lock().await;
@@ -182,6 +186,49 @@ pub async fn fetch_updater_preflight(state: &AppState, update_id: uuid::Uuid) ->
         result
     })
     .await
+}
+
+#[derive(Clone)]
+pub struct ApiUpdateCoreBackend {
+    state: AppState,
+}
+
+impl ApiUpdateCoreBackend {
+    #[must_use]
+    pub fn new(state: AppState) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl UpdateCoreBackend for ApiUpdateCoreBackend {
+    async fn stage_release(&self, update_id: Uuid, manifest: ReleaseManifest) -> Result<(), UpdateCoreError> {
+        let command = UpdaterCommand::StageRelease { command_id: command_id_from_context("ota_core_stage"), update_id, manifest };
+        send_updater_command(&self.state, command, true).await.map_err(UpdateCoreError::from)
+    }
+
+    async fn cancel_update(&self, update_id: Uuid) -> Result<(), UpdateCoreError> {
+        let command = UpdaterCommand::Cancel { command_id: command_id_from_context("ota_core_cancel"), update_id };
+        send_updater_command(&self.state, command, true).await.map_err(UpdateCoreError::from)
+    }
+
+    async fn apply_release(&self, update_id: Uuid, window: MaintenanceWindow) -> Result<(), UpdateCoreError> {
+        let command = UpdaterCommand::ApplyRelease { command_id: command_id_from_context("ota_core_apply"), update_id, window };
+        send_updater_command(&self.state, command, true).await.map_err(UpdateCoreError::from)
+    }
+
+    async fn rollback_update(&self, update_id: Uuid) -> Result<(), UpdateCoreError> {
+        let command = UpdaterCommand::Rollback { command_id: command_id_from_context("ota_core_rollback"), update_id };
+        send_updater_command(&self.state, command, true).await.map_err(UpdateCoreError::from)
+    }
+
+    async fn fetch_state(&self) -> Result<(Option<UpdateState>, u64), UpdateCoreError> {
+        fetch_updater_state(&self.state).await.map_err(UpdateCoreError::from)
+    }
+
+    async fn fetch_preflight(&self, update_id: Uuid) -> Result<PreflightReport, UpdateCoreError> {
+        fetch_updater_preflight(&self.state, update_id).await.map_err(UpdateCoreError::from)
+    }
 }
 
 fn command_id(command: &UpdaterCommand) -> CommandId {

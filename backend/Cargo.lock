@@ -2984,6 +2984,7 @@ dependencies = [
 name = "helios-updater"
 version = "1.0.0"
 dependencies = [
+ "async-trait",
  "base64 0.22.1",
  "bincode",
  "bytes",
@@ -3019,12 +3020,15 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "clap",
+ "helios-updater",
  "libc",
  "serde",
  "serde_json",
  "sha2",
+ "tokio",
  "tracing",
  "tracing-subscriber",
+ "url",
  "uuid",
 ]
 
