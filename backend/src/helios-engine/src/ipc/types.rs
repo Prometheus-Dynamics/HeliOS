@@ -3,6 +3,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
 use std::env;
+use std::sync::OnceLock;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -358,9 +359,42 @@ pub struct LocalizationPipelineSampleRequest {
     pub output_key: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
+pub struct StreamCodecTunables {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encoder_settings: Option<EncoderSettings>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
+pub struct StreamCodecCapability {
+    pub kind: CodecKind,
+    pub fourcc: String,
+    pub name: String,
+    pub implementation: String,
+    pub input: String,
+    pub output: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tunables: Option<StreamCodecTunables>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamRuntimeCapabilities {
+    #[serde(default)]
+    pub codecs: Vec<StreamCodecCapability>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_encoder_id: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub default_decoder_ids_by_capture_format: BTreeMap<String, String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
 pub enum EngineCommand {
     List {
+        #[bincode(with_serde)]
+        command_id: CommandId,
+    },
+    GetStreamRuntimeCapabilities {
         #[bincode(with_serde)]
         command_id: CommandId,
     },
@@ -1041,6 +1075,28 @@ fn selector_name_for_encoder_settings_kind(kind: EncoderSettingsKind) -> &'stati
     }
 }
 
+pub fn default_encoder_settings_for_codec(fourcc: FourCc, implementation: &str) -> Option<EncoderSettings> {
+    if implementation.eq_ignore_ascii_case("turbojpeg") {
+        return Some(EncoderSettings::Turbojpeg { quality: Some(85) });
+    }
+    if implementation.eq_ignore_ascii_case("mozjpeg") {
+        return Some(EncoderSettings::Mozjpeg { quality: Some(85) });
+    }
+    if !implementation.eq_ignore_ascii_case("ffmpeg") {
+        return None;
+    }
+
+    let default_framerate = Some(FrameRate { numerator: 60, denominator: 1 });
+    let default_output_resolution = Some(ResolutionHint { width: 854, height: 480 });
+
+    match &fourcc.to_u32().to_le_bytes() {
+        b"MJPG" | b"JPEG" => Some(EncoderSettings::FfmpegMjpeg { bitrate: Some(4_000_000), gop: None, framerate: default_framerate, thread_count: None, output_resolution: default_output_resolution }),
+        b"H264" => Some(EncoderSettings::H264 { bitrate: Some(4_000_000), gop: None, framerate: default_framerate, thread_count: None, output_resolution: default_output_resolution }),
+        b"H265" | b"HEVC" => Some(EncoderSettings::H265 { bitrate: Some(4_000_000), gop: None, framerate: default_framerate, thread_count: None, output_resolution: default_output_resolution }),
+        _ => None,
+    }
+}
+
 pub fn empty_encoder_settings_for_selector(selector: Option<&str>) -> Option<EncoderSettings> {
     match encoder_settings_kind_for_selector(selector) {
         Some(EncoderSettingsKind::Turbojpeg) => Some(EncoderSettings::Turbojpeg { quality: None }),
@@ -1143,6 +1199,12 @@ pub enum EngineEvent {
         command_id: CommandId,
         #[bincode(with_serde)]
         streams: Vec<StreamSummary>,
+    },
+    StreamRuntimeCapabilities {
+        #[bincode(with_serde)]
+        command_id: CommandId,
+        #[bincode(with_serde)]
+        capabilities: StreamRuntimeCapabilities,
     },
     Started {
         #[bincode(with_serde)]
@@ -1261,6 +1323,7 @@ impl EngineCommand {
     pub fn command_id(&self) -> Option<CommandId> {
         Some(match self {
             EngineCommand::List { command_id }
+            | EngineCommand::GetStreamRuntimeCapabilities { command_id }
             | EngineCommand::Start { command_id, .. }
             | EngineCommand::SetCodecs { command_id, .. }
             | EngineCommand::SetCalibration { command_id, .. }
@@ -1310,6 +1373,7 @@ impl ServerEvent for EngineEvent {
             | Self::GraphOutputs { .. }
             | Self::GraphOutputSample { .. }
             | Self::StreamList { .. }
+            | Self::StreamRuntimeCapabilities { .. }
             | Self::MetricsUpdate { .. }
             | Self::NodeRegistry { .. }
             | Self::Discovery { .. }
@@ -1342,6 +1406,7 @@ impl EngineEvent {
             EngineEvent::Ack { command_id, .. }
             | EngineEvent::Nack { command_id, .. }
             | EngineEvent::StreamList { command_id, .. }
+            | EngineEvent::StreamRuntimeCapabilities { command_id, .. }
             | EngineEvent::Started { command_id, .. }
             | EngineEvent::Stopped { command_id, .. }
             | EngineEvent::Controls { command_id, .. }
@@ -2547,11 +2612,7 @@ impl StreamRuntimeState {
                 recording_active: false,
                 recording_since_ms: None,
             },
-            StreamCaptureState::Running | StreamCaptureState::Stopped => StreamStatus {
-                state: StreamState::Running,
-                started_at_ms: self.capture.started_at_ms,
-                ..StreamStatus::default()
-            },
+            StreamCaptureState::Running | StreamCaptureState::Stopped => StreamStatus { state: StreamState::Running, started_at_ms: self.capture.started_at_ms, ..StreamStatus::default() },
         };
         if self.recording.state == StreamRecordingState::Active {
             status.recording_active = true;
@@ -2891,6 +2952,56 @@ pub fn default_decoder_selector_for_capture_format(fourcc: FourCc) -> Option<Str
     let defaults = default_decoder_ids_by_capture_format();
     let key = String::from_utf8_lossy(&fourcc.to_u32().to_le_bytes()).trim().to_ascii_uppercase();
     defaults.get(&key).cloned().or_else(|| defaults.get("ANY").cloned())
+}
+
+pub fn stream_runtime_capabilities() -> Result<StreamRuntimeCapabilities, String> {
+    let mut codecs: Vec<StreamCodecCapability> = CodecRegistry::list_enabled_codecs()
+        .map_err(|err| err.to_string())?
+        .into_iter()
+        .flat_map(|(fourcc, descs)| {
+            descs.into_iter().map(move |desc| {
+                let tunables = if desc.kind == CodecKind::Encoder {
+                    default_encoder_settings_for_codec(fourcc, desc.impl_name).map(|encoder_settings| StreamCodecTunables { encoder_settings: Some(encoder_settings) })
+                } else {
+                    None
+                };
+                StreamCodecCapability {
+                    kind: desc.kind,
+                    fourcc: fourcc.to_string(),
+                    name: desc.name.to_string(),
+                    implementation: desc.impl_name.to_string(),
+                    input: desc.input.to_string(),
+                    output: desc.output.to_string(),
+                    tunables,
+                }
+            })
+        })
+        .collect();
+
+    codecs.sort_by(|left, right| {
+        let left_kind = match left.kind {
+            CodecKind::Decoder => 0u8,
+            CodecKind::Encoder => 1u8,
+        };
+        let right_kind = match right.kind {
+            CodecKind::Decoder => 0u8,
+            CodecKind::Encoder => 1u8,
+        };
+        left_kind
+            .cmp(&right_kind)
+            .then_with(|| left.fourcc.cmp(&right.fourcc))
+            .then_with(|| left.input.cmp(&right.input))
+            .then_with(|| left.output.cmp(&right.output))
+            .then_with(|| left.implementation.cmp(&right.implementation))
+    });
+
+    Ok(StreamRuntimeCapabilities { codecs, default_encoder_id: default_stream_encoder_selector(), default_decoder_ids_by_capture_format: default_decoder_ids_by_capture_format() })
+}
+
+static STREAM_RUNTIME_CAPABILITIES_CACHE: OnceLock<Result<StreamRuntimeCapabilities, String>> = OnceLock::new();
+
+pub fn cached_stream_runtime_capabilities() -> Result<StreamRuntimeCapabilities, String> {
+    STREAM_RUNTIME_CAPABILITIES_CACHE.get_or_init(stream_runtime_capabilities).clone()
 }
 
 fn default_encoder_output_resolution(capture_resolution: Resolution) -> ResolutionHint {

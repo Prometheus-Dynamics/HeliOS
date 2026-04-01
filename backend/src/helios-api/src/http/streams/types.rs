@@ -1,7 +1,7 @@
 use helios_engine::capture::CaptureDescriptor;
 use helios_engine::ipc::{
-    EncoderSettings, EngineErrorCode, ResolvedStreamConfig, StreamCaptureRuntimeState, StreamCodecChainRuntimeState, StreamDemandRuntimeState, StreamManifest, StreamPipelineRuntimeState,
-    StreamRecordingRuntimeState, StreamRuntimeState, StreamStatus,
+    EngineErrorCode, ResolvedStreamConfig, StreamCaptureRuntimeState, StreamCodecCapability, StreamCodecChainRuntimeState, StreamCodecTunables as RuntimeCodecTunables, StreamDemandRuntimeState,
+    StreamManifest, StreamPipelineRuntimeState, StreamRecordingRuntimeState, StreamRuntimeState, StreamStatus,
 };
 use serde::{Deserialize, Serialize};
 use styx::codec::CodecKind;
@@ -69,7 +69,27 @@ pub struct CodecInfo {
 #[derive(Debug, Serialize, Deserialize, ToSchema, Clone)]
 pub struct CodecTunables {
     #[serde(default)]
-    pub encoder_settings: Option<EncoderSettings>,
+    pub encoder_settings: Option<helios_engine::ipc::EncoderSettings>,
+}
+
+impl From<RuntimeCodecTunables> for CodecTunables {
+    fn from(value: RuntimeCodecTunables) -> Self {
+        Self { encoder_settings: value.encoder_settings }
+    }
+}
+
+impl From<StreamCodecCapability> for CodecInfo {
+    fn from(value: StreamCodecCapability) -> Self {
+        Self {
+            kind: value.kind,
+            fourcc: value.fourcc,
+            name: value.name,
+            implementation: value.implementation,
+            input: value.input,
+            output: value.output,
+            tunables: value.tunables.map(CodecTunables::from),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

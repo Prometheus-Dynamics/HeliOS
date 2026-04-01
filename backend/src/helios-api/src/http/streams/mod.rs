@@ -38,7 +38,7 @@ use helios_engine::capture::{CaptureControl, CaptureControlValue};
 use helios_engine::ipc::{EngineErrorCode, EngineEvent, GraphOutputPortDescriptor, StreamManifest, StreamPipelineBinding};
 
 use self::types::{CodecInfo, StartStreamResponse, StreamFormatInfo, StreamInfo, StreamInspectInfo};
-use self::validation::{StreamCapabilitiesResponse, StreamValidateResponse, stream_capabilities, validate_stream_manifest};
+use self::validation::{StreamCapabilitiesResponse, StreamValidateResponse, stream_capabilities, validate_stream_manifest_with_runtime};
 
 pub(crate) const RAW_PIPELINE_UUID: Uuid = Uuid::from_u128(0x000000000000000000000000000000aa);
 /// Reserved internal pipeline UUID used by the engine for transient calibration-mode graphs.
@@ -150,11 +150,16 @@ async fn start_stream(State(state): State<AppState>, Json(manifest): Json<Stream
     request_body = StreamManifest,
     responses(
         (status = 200, description = "Validated + canonicalized stream manifest", body = StreamValidateResponse),
+        (status = 502, description = "Runtime capability inventory unavailable", body = crate::http::streams::types::EngineErrorBody),
         (status = 422, description = "Semantic validation failure", body = crate::http::validation::ValidationErrorBody)
     )
 )]
-async fn validate_stream(Json(manifest): Json<StreamManifest>) -> impl IntoResponse {
-    match validate_stream_manifest(manifest).await {
+async fn validate_stream(State(state): State<AppState>, Json(manifest): Json<StreamManifest>) -> impl IntoResponse {
+    let runtime = match util::resolve_stream_runtime_capabilities(&state).await {
+        Ok(runtime) => runtime,
+        Err(body) => return (StatusCode::BAD_GATEWAY, Json(body)).into_response(),
+    };
+    match validate_stream_manifest_with_runtime(manifest, &runtime).await {
         Ok(result) => Json(StreamValidateResponse { manifest: result.manifest, resolved: result.resolved, warnings: result.warnings }).into_response(),
         Err(err) => crate::http::validation::validation_error_response("stream manifest failed semantic validation", err.issues, err.warnings),
     }
@@ -164,10 +169,16 @@ async fn validate_stream(Json(manifest): Json<StreamManifest>) -> impl IntoRespo
     get,
     path = "/streams/capabilities",
     tag = "EngineStreams",
-    responses((status = 200, description = "Stream validation constraints and defaults", body = StreamCapabilitiesResponse))
+    responses(
+        (status = 200, description = "Stream validation constraints and defaults", body = StreamCapabilitiesResponse),
+        (status = 502, description = "Runtime capability inventory unavailable", body = crate::http::streams::types::EngineErrorBody)
+    )
 )]
-async fn stream_capabilities_handler() -> impl IntoResponse {
-    Json(stream_capabilities())
+async fn stream_capabilities_handler(State(state): State<AppState>) -> impl IntoResponse {
+    match util::resolve_stream_runtime_capabilities(&state).await {
+        Ok(runtime) => Json(stream_capabilities(&runtime)).into_response(),
+        Err(body) => (StatusCode::BAD_GATEWAY, Json(body)).into_response(),
+    }
 }
 
 #[utoipa::path(
@@ -945,10 +956,13 @@ async fn list_backends(State(state): State<AppState>) -> impl IntoResponse {
     get,
     path = "/streams/codecs",
     tag = "EngineStreams",
-    responses((status = 200, description = "Available codecs (encoders + decoders)", body = [CodecInfo]))
+    responses(
+        (status = 200, description = "Available codecs (encoders + decoders)", body = [CodecInfo]),
+        (status = 502, description = "Runtime capability inventory unavailable", body = crate::http::streams::types::EngineErrorBody)
+    )
 )]
-async fn list_codecs() -> impl IntoResponse {
-    lifecycle::list_codecs().await
+async fn list_codecs(State(state): State<AppState>) -> impl IntoResponse {
+    lifecycle::list_codecs(state).await
 }
 
 async fn resolve_camera_uid(state: &AppState, stream_id: Uuid) -> Result<String, ApiError> {

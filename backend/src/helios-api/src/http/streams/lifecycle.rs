@@ -4,10 +4,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use helios_engine::capture::CaptureDescriptor;
-use helios_engine::ipc::{EngineErrorCode, EngineEvent, ResolvedStreamConfig, StreamManifest, StreamSummary};
+use helios_engine::ipc::{EngineErrorCode, EngineEvent, ResolvedStreamConfig, StreamManifest, StreamRuntimeCapabilities, StreamSummary};
 use std::time::{SystemTime, UNIX_EPOCH};
-use styx::codec::CodecKind;
-use styx::codec::CodecRegistry;
 use tokio::time::Duration;
 use uuid::Uuid;
 
@@ -18,12 +16,12 @@ use crate::http::streams_persist;
 use crate::http::validation::validation_error_response;
 
 use super::sensor_bench;
-use super::types::{CodecInfo, CodecTunables, StartStreamResponse, StreamInfo, StreamInspectInfo};
+use super::types::{CodecInfo, StartStreamResponse, StreamInfo, StreamInspectInfo};
 use super::util::{
-    apply_effective_pipeline_layout, build_stream_info, camera_id_for_manifest, default_encoder_settings_for_codec, engine_error_body, engine_error_body_with_retryable, list_streams_timeout,
-    map_client_error, normalize_pipeline_manifest, normalize_stream_encoder_manifest,
+    apply_effective_pipeline_layout, build_stream_info, camera_id_for_manifest, engine_error_body, engine_error_body_with_retryable, list_streams_timeout, map_client_error,
+    normalize_pipeline_manifest, normalize_stream_encoder_manifest,
 };
-use super::validation::validate_stream_manifest;
+use super::validation::validate_stream_manifest_with_runtime;
 use super::wait::{wait_for_stream_gone, wait_for_stream_started};
 
 fn now_ms() -> u64 {
@@ -571,8 +569,12 @@ pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> R
     // After merge, ensure the manifest has a concrete id (either client-provided, re-used, or new).
     let requested_id = *manifest.identity.id.get_or_insert_with(Uuid::new_v4);
     let camera_id = owner_camera_id.clone().unwrap_or_else(|| camera_id_for_manifest(&manifest));
+    let runtime = match super::util::resolve_stream_runtime_capabilities(&state).await {
+        Ok(runtime) => runtime,
+        Err(body) => return (StatusCode::BAD_GATEWAY, Json(body)).into_response(),
+    };
 
-    let mut resolved = match validate_stream_manifest(manifest).await {
+    let mut resolved = match validate_stream_manifest_with_runtime(manifest, &runtime).await {
         Ok(validated) => {
             if !validated.warnings.is_empty() {
                 tracing::info!(
@@ -652,7 +654,7 @@ pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> R
                 if !output_recovery_attempted && recover_from_missing_selected_output(&mut manifest, code, &reason) {
                     output_recovery_attempted = true;
                     tracing::warn!(stream_id = %requested_id, reason = %reason, "stream start failed due to stale selected output; cleared output selections and retrying");
-                    match validate_stream_manifest(manifest).await {
+                    match validate_stream_manifest_with_runtime(manifest, &runtime).await {
                         Ok(validated) => {
                             manifest = validated.manifest;
                             resolved = validated.resolved;
@@ -759,38 +761,14 @@ pub(crate) async fn list_backends(state: AppState) -> Response {
     }
 }
 
-pub(crate) fn codec_inventory() -> Result<Vec<CodecInfo>, String> {
-    CodecRegistry::list_enabled_codecs()
-        .map(|entries| {
-            entries
-                .into_iter()
-                .flat_map(|(fourcc, descs)| {
-                    descs.into_iter().map(move |desc| {
-                        let tunables = if desc.kind == CodecKind::Encoder {
-                            default_encoder_settings_for_codec(fourcc, desc.impl_name).map(|encoder_settings| CodecTunables { encoder_settings: Some(encoder_settings) })
-                        } else {
-                            None
-                        };
-                        CodecInfo {
-                            kind: desc.kind,
-                            fourcc: fourcc.to_string(),
-                            name: desc.name.to_string(),
-                            implementation: desc.impl_name.to_string(),
-                            input: desc.input.to_string(),
-                            output: desc.output.to_string(),
-                            tunables,
-                        }
-                    })
-                })
-                .collect()
-        })
-        .map_err(|err| err.to_string())
+pub(crate) fn codec_inventory_from_runtime(runtime: StreamRuntimeCapabilities) -> Vec<CodecInfo> {
+    runtime.codecs.into_iter().map(CodecInfo::from).collect()
 }
 
-pub(crate) async fn list_codecs() -> Response {
-    match codec_inventory() {
-        Ok(codecs) => Json(codecs).into_response(),
-        Err(err) => (StatusCode::BAD_GATEWAY, Json(engine_error_body(Some(EngineErrorCode::Internal), err.to_string()))).into_response(),
+pub(crate) async fn list_codecs(state: AppState) -> Response {
+    match super::util::resolve_stream_runtime_capabilities(&state).await {
+        Ok(runtime) => Json(codec_inventory_from_runtime(runtime)).into_response(),
+        Err(body) => (StatusCode::BAD_GATEWAY, Json(body)).into_response(),
     }
 }
 

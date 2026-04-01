@@ -1,5 +1,7 @@
 use super::*;
 use lib_ipc::types::CommandId;
+use std::collections::BTreeSet;
+use styx::codec::{CodecKind, CodecRegistry};
 use styx::prelude::{ColorSpace, FourCc, MediaFormat, Resolution};
 
 fn sample_manifest() -> StreamManifest {
@@ -81,13 +83,7 @@ fn start_command_round_trips_over_bincode() {
 #[test]
 fn stream_list_event_round_trips() {
     let (_, descriptor) = crate::capture::default_virtual_device().backends.into_iter().next().map(|b| b.descriptor).map(|d| ((), d)).unwrap();
-    let summary = StreamSummary {
-        stream_id: uuid::Uuid::new_v4(),
-        descriptor,
-        manifest: sample_manifest().resolve(),
-        status: StreamStatus::default(),
-        runtime: StreamRuntimeState::default(),
-    };
+    let summary = StreamSummary { stream_id: uuid::Uuid::new_v4(), descriptor, manifest: sample_manifest().resolve(), status: StreamStatus::default(), runtime: StreamRuntimeState::default() };
     let event = EngineEvent::StreamList { command_id: CommandId::new(), streams: vec![summary.clone()] };
     let config = bincode::config::standard();
     let encoded = bincode::encode_to_vec(event, config).expect("encode event");
@@ -144,6 +140,38 @@ fn runtime_state_round_trips_over_bincode() {
     let encoded = bincode::serde::encode_to_vec(&runtime, config).expect("encode stream runtime");
     let decoded: StreamRuntimeState = bincode::serde::decode_from_slice(&encoded, config).expect("decode stream runtime").0;
     assert_eq!(decoded.capture.state, StreamCaptureState::Stopped);
+}
+
+#[test]
+fn stream_runtime_capabilities_match_enabled_registry() {
+    fn kind_label(kind: CodecKind) -> &'static str {
+        match kind {
+            CodecKind::Decoder => "decoder",
+            CodecKind::Encoder => "encoder",
+        }
+    }
+
+    let runtime = stream_runtime_capabilities().expect("runtime capabilities");
+    let registry = CodecRegistry::list_enabled_codecs().expect("enabled codecs");
+
+    let actual: BTreeSet<_> = registry
+        .into_iter()
+        .flat_map(|(fourcc, codecs)| {
+            codecs
+                .into_iter()
+                .map(move |desc| (kind_label(desc.kind).to_string(), fourcc.to_string(), desc.name.to_string(), desc.impl_name.to_string(), desc.input.to_string(), desc.output.to_string()))
+        })
+        .collect();
+
+    let advertised: BTreeSet<_> = runtime
+        .codecs
+        .iter()
+        .map(|codec| (kind_label(codec.kind).to_string(), codec.fourcc.clone(), codec.name.clone(), codec.implementation.clone(), codec.input.clone(), codec.output.clone()))
+        .collect();
+
+    assert_eq!(advertised, actual);
+    assert_eq!(runtime.default_encoder_id, default_stream_encoder_selector());
+    assert_eq!(runtime.default_decoder_ids_by_capture_format, default_decoder_ids_by_capture_format());
 }
 
 #[test]

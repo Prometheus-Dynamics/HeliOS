@@ -5,9 +5,8 @@ use axum::{
 };
 use helios_engine::capture::CaptureDescriptor;
 use helios_engine::ipc::{
-    EncoderSettings, EngineErrorCode, FrameRate, JsonWire, ResolutionHint, ResolvedStreamConfig, StreamManifest, StreamPipelineGridSlot, StreamPipelineLayout, StreamRuntimeState,
-    StreamStatus,
-    normalize_requested_stream_decoder, normalize_requested_stream_encoder,
+    EngineErrorCode, JsonWire, ResolvedStreamConfig, StreamManifest, StreamPipelineGridSlot, StreamPipelineLayout, StreamRuntimeCapabilities, StreamRuntimeState, StreamStatus,
+    cached_stream_runtime_capabilities, normalize_requested_stream_decoder, normalize_requested_stream_encoder,
 };
 use lib_ipc::client::ClientTransportError;
 use std::io;
@@ -87,37 +86,20 @@ pub(crate) fn fourcc_to_format(fourcc: FourCc) -> &'static str {
     }
 }
 
-pub(crate) fn default_encoder_settings_for_codec(fourcc: FourCc, implementation: &str) -> Option<EncoderSettings> {
-    if implementation.eq_ignore_ascii_case("turbojpeg") {
-        return Some(EncoderSettings::Turbojpeg { quality: Some(85) });
-    }
-    if implementation.eq_ignore_ascii_case("mozjpeg") {
-        return Some(EncoderSettings::Mozjpeg { quality: Some(85) });
-    }
-    if !implementation.eq_ignore_ascii_case("ffmpeg") {
-        return None;
-    }
-
-    let default_framerate = Some(FrameRate { numerator: 60, denominator: 1 });
-    let default_output_resolution = Some(ResolutionHint { width: 854, height: 480 });
-
-    match &fourcc.to_u32().to_le_bytes() {
-        b"MJPG" | b"JPEG" => Some(EncoderSettings::FfmpegMjpeg { bitrate: Some(4_000_000), gop: None, framerate: default_framerate, thread_count: None, output_resolution: default_output_resolution }),
-        b"H264" => Some(EncoderSettings::H264 { bitrate: Some(4_000_000), gop: None, framerate: default_framerate, thread_count: None, output_resolution: default_output_resolution }),
-        b"H265" | b"HEVC" => Some(EncoderSettings::H265 { bitrate: Some(4_000_000), gop: None, framerate: default_framerate, thread_count: None, output_resolution: default_output_resolution }),
-        _ => None,
-    }
-}
-
-pub(crate) fn build_stream_info(
-    id: Uuid,
-    descriptor: CaptureDescriptor,
-    resolved: ResolvedStreamConfig,
-    status: Option<StreamStatus>,
-    runtime: Option<StreamRuntimeState>,
-) -> StreamInfo {
+pub(crate) fn build_stream_info(id: Uuid, descriptor: CaptureDescriptor, resolved: ResolvedStreamConfig, status: Option<StreamStatus>, runtime: Option<StreamRuntimeState>) -> StreamInfo {
     let manifest = resolved.to_requested_manifest();
     StreamInfo { id, descriptor, manifest, resolved, status, runtime }
+}
+
+pub(crate) async fn resolve_stream_runtime_capabilities(state: &AppState) -> Result<StreamRuntimeCapabilities, EngineErrorBody> {
+    match state.engine.get_stream_runtime_capabilities_with_timeout(Duration::from_secs(2)).await {
+        Ok(runtime) => Ok(runtime),
+        Err(err) => {
+            tracing::warn!(error = %err, "falling back to in-process stream runtime capabilities");
+            cached_stream_runtime_capabilities()
+                .map_err(|fallback_err| engine_error_body(Some(EngineErrorCode::Internal), format!("engine capability rpc failed: {err}; local fallback failed: {fallback_err}")))
+        }
+    }
 }
 
 pub(crate) fn normalize_stream_encoder_manifest(manifest: &mut StreamManifest) {
@@ -623,9 +605,8 @@ where
 
     let mut manifest = stream.manifest.to_requested_manifest();
     updater(&mut manifest);
-    let manifest = streams_persist::persist_manifest_prepared_auto_camera_id_checked(Some(stream_id), manifest)
-        .await
-        .map_err(|err| format!("updated live state but failed to persist stream manifest: {err}"))?;
+    let manifest =
+        streams_persist::persist_manifest_prepared_auto_camera_id_checked(Some(stream_id), manifest).await.map_err(|err| format!("updated live state but failed to persist stream manifest: {err}"))?;
     state.services.streams.upsert_cached_stream_manifest(stream_id, manifest.clone()).await;
     Ok(manifest)
 }

@@ -1,14 +1,14 @@
-use helios_engine::ipc::{
-    DEFAULT_STREAM_PIPELINE_ENABLED_WHEN_BINDINGS_PRESENT, EncoderSettings, ResolvedStreamConfig, StreamManifest, StreamRecordingMode, default_decoder_enabled,
-    default_decoder_ids_by_capture_format, default_encoder_enabled, default_host_buffer, default_recording_mode, default_requested_preview_jpeg_quality_disabled,
-    default_requested_preview_jpeg_quality_enabled, default_start_on_boot, default_stream_encoder_selector, empty_encoder_settings_for_selector,
-};
 #[cfg(test)]
 use helios_engine::ipc::default_shadow_recording_codec;
+use helios_engine::ipc::{
+    DEFAULT_STREAM_PIPELINE_ENABLED_WHEN_BINDINGS_PRESENT, EncoderSettings, ResolvedStreamConfig, StreamManifest, StreamRecordingMode, StreamRuntimeCapabilities, default_decoder_enabled,
+    default_encoder_enabled, default_host_buffer, default_recording_mode, default_requested_preview_jpeg_quality_disabled, default_requested_preview_jpeg_quality_enabled, default_start_on_boot,
+    stream_runtime_capabilities,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
-use styx::codec::{CodecKind, CodecRegistry};
+use styx::codec::CodecKind;
 use styx::{BackendHandle, BackendKind};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -88,10 +88,19 @@ pub struct StreamValidationError {
     pub warnings: Vec<ValidationWarning>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum EncoderSettingsShape {
+    Turbojpeg,
+    Mozjpeg,
+    FfmpegMjpeg,
+    H264,
+    H265,
+}
+
 const FILE_BACKEND_SUPPORTED_EXTENSIONS: &[&str] =
     &["bmp", "gif", "heic", "heif", "jpeg", "jpg", "png", "tif", "tiff", "webp", "h264", "avc", "h265", "hevc", "m4v", "mjpeg", "mjpg", "mov", "mp4", "mpe", "mpeg", "mpg", "webm", "wmv", "y4m"];
 
-pub fn stream_capabilities() -> StreamCapabilitiesResponse {
+pub fn stream_capabilities(runtime: &StreamRuntimeCapabilities) -> StreamCapabilitiesResponse {
     StreamCapabilitiesResponse {
         raw_pipeline_id: RAW_PIPELINE_UUID,
         calibration_mode_pipeline_id: CALIBRATION_MODE_PIPELINE_UUID,
@@ -106,8 +115,8 @@ pub fn stream_capabilities() -> StreamCapabilitiesResponse {
             default_preview_jpeg_quality_when_encoder_disabled: default_requested_preview_jpeg_quality_disabled(),
             default_recording_mode: default_recording_mode(),
             default_start_on_boot: default_start_on_boot(),
-            default_encoder_id: default_stream_encoder_selector(),
-            default_decoder_ids_by_capture_format: default_decoder_ids_by_capture_format(),
+            default_encoder_id: runtime.default_encoder_id.clone(),
+            default_decoder_ids_by_capture_format: runtime.default_decoder_ids_by_capture_format.clone(),
         },
         constraints: StreamValidationConstraints {
             requires_backend_handle_match: true,
@@ -136,6 +145,14 @@ pub fn normalize_stream_manifest(mut manifest: StreamManifest) -> NormalizedStre
 }
 
 pub async fn validate_stream_manifest(manifest: StreamManifest) -> Result<StreamValidationResult, StreamValidationError> {
+    let runtime = stream_runtime_capabilities().map_err(|err| StreamValidationError {
+        issues: vec![issue("/", "runtime_capabilities_unavailable", format!("stream runtime capability inventory unavailable: {err}"))],
+        warnings: Vec::new(),
+    })?;
+    validate_stream_manifest_with_runtime(manifest, &runtime).await
+}
+
+pub async fn validate_stream_manifest_with_runtime(manifest: StreamManifest, runtime: &StreamRuntimeCapabilities) -> Result<StreamValidationResult, StreamValidationError> {
     let NormalizedStreamManifest { manifest, warnings } = normalize_stream_manifest(manifest);
     let mut issues = Vec::<ValidationIssue>::new();
 
@@ -146,7 +163,7 @@ pub async fn validate_stream_manifest(manifest: StreamManifest) -> Result<Stream
     validate_pipeline_layout(&manifest, &mut issues);
     validate_pipeline_wires(&manifest, &mut issues);
     validate_pipeline_bindings(&manifest, &mut issues).await;
-    validate_stream_feature_compatibility(&manifest, &mut issues);
+    validate_stream_feature_compatibility(&manifest, runtime, &mut issues);
 
     if issues.is_empty() {
         let mut manifest = manifest;
@@ -196,49 +213,35 @@ fn validate_backend_and_handle(manifest: &StreamManifest, issues: &mut Vec<Valid
     }
 }
 
-fn validate_stream_feature_compatibility(manifest: &StreamManifest, issues: &mut Vec<ValidationIssue>) {
-    validate_requested_codec_compatibility(manifest, issues);
-    validate_recording_mode_compatibility(manifest, issues);
+fn validate_stream_feature_compatibility(manifest: &StreamManifest, runtime: &StreamRuntimeCapabilities, issues: &mut Vec<ValidationIssue>) {
+    validate_requested_codec_compatibility(manifest, runtime, issues);
+    validate_recording_mode_compatibility(manifest, runtime, issues);
 }
 
-fn validate_requested_codec_compatibility(manifest: &StreamManifest, issues: &mut Vec<ValidationIssue>) {
+fn validate_requested_codec_compatibility(manifest: &StreamManifest, runtime: &StreamRuntimeCapabilities, issues: &mut Vec<ValidationIssue>) {
     if !manifest.encoder.is_disabled() {
-        validate_codec_selector_available(
-            styx::prelude::FourCc::new(*b"RG24"),
-            CodecKind::Encoder,
-            manifest.encoder.id(),
-            "/encoder/id",
-            "encoder_unavailable",
-            issues,
-        );
-        validate_encoder_settings_compatibility(manifest, issues);
+        validate_codec_selector_available(styx::prelude::FourCc::new(*b"RG24"), CodecKind::Encoder, manifest.encoder.id(), runtime, "/encoder/id", "encoder_unavailable", issues);
+        validate_encoder_settings_compatibility(manifest, runtime, issues);
     }
 
     if !manifest.decoder.is_disabled() {
         let capture_fourcc = manifest.capture.mode.format.code;
-        validate_codec_selector_available(
-            capture_fourcc,
-            CodecKind::Decoder,
-            manifest.decoder.id(),
-            "/decoder/id",
-            "decoder_unavailable",
-            issues,
-        );
+        validate_codec_selector_available(capture_fourcc, CodecKind::Decoder, manifest.decoder.id(), runtime, "/decoder/id", "decoder_unavailable", issues);
     }
 }
 
-fn validate_encoder_settings_compatibility(manifest: &StreamManifest, issues: &mut Vec<ValidationIssue>) {
+fn validate_encoder_settings_compatibility(manifest: &StreamManifest, runtime: &StreamRuntimeCapabilities, issues: &mut Vec<ValidationIssue>) {
     let Some(settings) = manifest.encoder.settings() else {
         return;
     };
     let Some(selector) = manifest.encoder.id().map(str::trim).filter(|value| !value.is_empty()) else {
         return;
     };
-    let Some(expected) = empty_encoder_settings_for_selector(Some(selector)) else {
+    let Some(expected) = expected_encoder_settings_shape(runtime, selector) else {
         return;
     };
 
-    if std::mem::discriminant(settings) != std::mem::discriminant(&expected) {
+    if encoder_settings_shape(settings) != expected {
         issues.push(issue_with_remediation(
             "/encoder/settings/kind",
             "encoder_settings_kind_mismatch",
@@ -286,11 +289,7 @@ fn validate_encoder_settings_values(settings: &EncoderSettings, issues: &mut Vec
             if let Some(output_resolution) = output_resolution
                 && (output_resolution.width == 0 || output_resolution.height == 0)
             {
-                issues.push(issue(
-                    "/encoder/settings/output_resolution",
-                    "encoder_output_resolution_invalid",
-                    "encoder output resolution width and height must be greater than zero",
-                ));
+                issues.push(issue("/encoder/settings/output_resolution", "encoder_output_resolution_invalid", "encoder output resolution width and height must be greater than zero"));
             }
         }
     }
@@ -300,6 +299,7 @@ fn validate_codec_selector_available(
     input: styx::prelude::FourCc,
     kind: CodecKind,
     selector: Option<&str>,
+    runtime: &StreamRuntimeCapabilities,
     pointer: &str,
     code: &'static str,
     issues: &mut Vec<ValidationIssue>,
@@ -308,7 +308,7 @@ fn validate_codec_selector_available(
         return;
     };
 
-    if codec_selector_available(input, kind, selector) {
+    if codec_selector_available(runtime, input, kind, selector) {
         return;
     }
 
@@ -321,23 +321,14 @@ fn validate_codec_selector_available(
         CodecKind::Encoder => "Choose an available encoder selector for this stream, or disable encoding.",
         CodecKind::Decoder => "Choose a decoder selector that supports the selected capture format, or disable decoding.",
     };
-    issues.push(issue_with_remediation(
-        pointer,
-        code,
-        format!("{kind_label} `{selector}` is not available for capture format {format_label}"),
-        remediation,
-    ));
+    issues.push(issue_with_remediation(pointer, code, format!("{kind_label} `{selector}` is not available for capture format {format_label}"), remediation));
 }
 
-fn codec_selector_available(input: styx::prelude::FourCc, kind: CodecKind, selector: &str) -> bool {
-    let Ok(registry) = CodecRegistry::with_enabled_codecs() else {
-        return false;
-    };
-    let handle = registry.handle();
-    handle.lookup_named_kind(input, kind, selector).or_else(|_| handle.lookup_auto_kind_by_name(input, kind, selector)).is_ok()
+fn codec_selector_available(runtime: &StreamRuntimeCapabilities, input: styx::prelude::FourCc, kind: CodecKind, selector: &str) -> bool {
+    runtime.codecs.iter().any(|codec| codec.kind == kind && runtime_codec_matches_input(codec, input) && runtime_codec_matches_selector(codec, selector))
 }
 
-fn validate_recording_mode_compatibility(manifest: &StreamManifest, issues: &mut Vec<ValidationIssue>) {
+fn validate_recording_mode_compatibility(manifest: &StreamManifest, runtime: &StreamRuntimeCapabilities, issues: &mut Vec<ValidationIssue>) {
     let Some(requested_codec) = manifest.recording_mode.shadow_buffer_codec() else {
         return;
     };
@@ -372,7 +363,7 @@ fn validate_recording_mode_compatibility(manifest: &StreamManifest, issues: &mut
         return;
     };
 
-    if !encoder_matches_recording_codec(requested_codec, encoder_id) {
+    if !encoder_matches_recording_codec(runtime, requested_codec, encoder_id) {
         issues.push(issue_with_remediation(
             "/recording_mode/codec",
             "recording_mode_codec_mismatch",
@@ -382,7 +373,7 @@ fn validate_recording_mode_compatibility(manifest: &StreamManifest, issues: &mut
     }
 }
 
-fn encoder_matches_recording_codec(codec: helios_engine::ipc::RecordingCodec, encoder_id: &str) -> bool {
+fn encoder_matches_recording_codec(runtime: &StreamRuntimeCapabilities, codec: helios_engine::ipc::RecordingCodec, encoder_id: &str) -> bool {
     let targets: &[&str] = match codec {
         helios_engine::ipc::RecordingCodec::H264 => &["h264", "avc"],
         helios_engine::ipc::RecordingCodec::H265 => &["h265", "hevc"],
@@ -399,21 +390,60 @@ fn encoder_matches_recording_codec(codec: helios_engine::ipc::RecordingCodec, en
         return true;
     }
 
-    let Some(entries) = CodecRegistry::list_enabled_encoders().ok() else {
-        return false;
-    };
     let mut matched_names = BTreeSet::new();
-    for (_, codecs) in entries {
-        for desc in codecs {
-            if desc.kind != CodecKind::Encoder {
-                continue;
-            }
-            if desc.impl_name.eq_ignore_ascii_case(encoder_id) {
-                matched_names.insert(desc.name.to_ascii_lowercase());
-            }
+    for codec in &runtime.codecs {
+        if codec.kind != CodecKind::Encoder {
+            continue;
+        }
+        if runtime_codec_matches_selector(codec, encoder_id) {
+            matched_names.insert(canonical_codec_family(&codec.name));
         }
     }
     matched_names.len() == 1 && targets.iter().any(|target| matched_names.contains(*target))
+}
+
+fn encoder_settings_shape(settings: &EncoderSettings) -> EncoderSettingsShape {
+    match settings {
+        EncoderSettings::Turbojpeg { .. } => EncoderSettingsShape::Turbojpeg,
+        EncoderSettings::Mozjpeg { .. } => EncoderSettingsShape::Mozjpeg,
+        EncoderSettings::FfmpegMjpeg { .. } => EncoderSettingsShape::FfmpegMjpeg,
+        EncoderSettings::H264 { .. } => EncoderSettingsShape::H264,
+        EncoderSettings::H265 { .. } => EncoderSettingsShape::H265,
+    }
+}
+
+fn expected_encoder_settings_shape(runtime: &StreamRuntimeCapabilities, selector: &str) -> Option<EncoderSettingsShape> {
+    let mut matches = BTreeSet::new();
+    for codec in &runtime.codecs {
+        if codec.kind != CodecKind::Encoder || !runtime_codec_matches_selector(codec, selector) {
+            continue;
+        }
+        let Some(settings) = codec.tunables.as_ref().and_then(|tunables| tunables.encoder_settings.as_ref()) else {
+            continue;
+        };
+        matches.insert(encoder_settings_shape(settings));
+    }
+    if matches.len() == 1 { matches.into_iter().next() } else { None }
+}
+
+fn canonical_codec_family(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "mjpg" | "jpeg" => "mjpeg".to_string(),
+        "avc" => "h264".to_string(),
+        "hevc" => "h265".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn runtime_codec_matches_selector(codec: &helios_engine::ipc::StreamCodecCapability, selector: &str) -> bool {
+    codec.implementation.eq_ignore_ascii_case(selector) || canonical_codec_family(&codec.name) == canonical_codec_family(selector)
+}
+
+fn runtime_codec_matches_input(codec: &helios_engine::ipc::StreamCodecCapability, input: styx::prelude::FourCc) -> bool {
+    let target = String::from_utf8_lossy(&input.to_u32().to_le_bytes()).trim().to_ascii_uppercase();
+    let codec_input = codec.input.trim().to_ascii_uppercase();
+    let codec_fourcc = codec.fourcc.trim().to_ascii_uppercase();
+    codec_input == target || codec_fourcc == target || codec_input == "ANY" || codec_fourcc == "ANY"
 }
 
 fn validate_file_backend_paths_present(manifest: &StreamManifest, issues: &mut Vec<ValidationIssue>) {
@@ -693,10 +723,7 @@ fn manifest_controls_require_tdn_output(manifest: &StreamManifest, descriptor: &
         .capture
         .controls
         .iter()
-        .any(|control| {
-            capture_control_value_is_enabled(&control.value)
-                && descriptor.controls.iter().find(|meta| meta.id.0 == control.id).is_some_and(|meta| meta.metadata.requires_tdn_output)
-        })
+        .any(|control| capture_control_value_is_enabled(&control.value) && descriptor.controls.iter().find(|meta| meta.id.0 == control.id).is_some_and(|meta| meta.metadata.requires_tdn_output))
 }
 
 fn normalize_capture_tdn_output_with_descriptor(manifest: &mut StreamManifest, descriptor: Option<&helios_engine::capture::CaptureDescriptor>) {
@@ -813,13 +840,15 @@ mod tests {
 
     #[test]
     fn stream_capabilities_publish_default_encoder_id() {
-        let capabilities = stream_capabilities();
+        let runtime = helios_engine::ipc::stream_runtime_capabilities().expect("runtime capabilities");
+        let capabilities = stream_capabilities(&runtime);
         assert!(capabilities.defaults.default_encoder_id.as_deref().is_some_and(|value| !value.trim().is_empty()));
     }
 
     #[test]
     fn stream_capabilities_publish_decoder_defaults_by_capture_format() {
-        let capabilities = stream_capabilities();
+        let runtime = helios_engine::ipc::stream_runtime_capabilities().expect("runtime capabilities");
+        let capabilities = stream_capabilities(&runtime);
         assert_eq!(capabilities.defaults.default_decoder_ids_by_capture_format.get("MJPG").map(String::as_str), Some("turbojpeg"));
         assert_eq!(capabilities.defaults.default_decoder_ids_by_capture_format.get("H264").map(String::as_str), Some("h264"));
         assert_eq!(capabilities.defaults.default_decoder_ids_by_capture_format.get("RG24").map(String::as_str), Some("passthrough"));
@@ -827,7 +856,8 @@ mod tests {
 
     #[test]
     fn stream_capabilities_publish_effective_stream_defaults() {
-        let capabilities = stream_capabilities();
+        let runtime = helios_engine::ipc::stream_runtime_capabilities().expect("runtime capabilities");
+        let capabilities = stream_capabilities(&runtime);
         assert_eq!(capabilities.defaults.pipeline_enabled_when_bindings_present, DEFAULT_STREAM_PIPELINE_ENABLED_WHEN_BINDINGS_PRESENT);
         assert_eq!(capabilities.defaults.default_encoder_enabled, default_encoder_enabled());
         assert_eq!(capabilities.defaults.default_decoder_enabled, default_decoder_enabled());
@@ -984,22 +1014,13 @@ mod tests {
         let mut manifest = sample_libcamera_manifest();
         manifest.encoder = helios_engine::ipc::RequestedEncoderConfig::enabled(
             Some("turbojpeg".to_string()),
-            Some(helios_engine::ipc::EncoderSettings::H264 {
-                bitrate: Some(4_000_000),
-                gop: None,
-                framerate: None,
-                thread_count: None,
-                output_resolution: None,
-            }),
+            Some(helios_engine::ipc::EncoderSettings::H264 { bitrate: Some(4_000_000), gop: None, framerate: None, thread_count: None, output_resolution: None }),
         );
 
         let err = validate_stream_manifest(manifest).await.expect_err("expected encoder settings kind mismatch");
         let issue = err.issues.iter().find(|issue| issue.code == "encoder_settings_kind_mismatch").expect("expected encoder settings kind issue");
         assert_eq!(issue.path, "/encoder/settings/kind");
-        assert_eq!(
-            issue.remediation.as_deref(),
-            Some("Choose settings that match the selected encoder family, or switch the encoder selector to match the requested settings kind.")
-        );
+        assert_eq!(issue.remediation.as_deref(), Some("Choose settings that match the selected encoder family, or switch the encoder selector to match the requested settings kind."));
     }
 
     #[tokio::test]
@@ -1009,8 +1030,7 @@ mod tests {
         manifest.recording_mode = StreamRecordingMode::shadow_buffer(default_shadow_recording_codec());
 
         let err = validate_stream_manifest(manifest).await.expect_err("expected recording mode encoder requirement failure");
-        let issue =
-            err.issues.iter().find(|issue| issue.code == "recording_mode_requires_encoder").expect("expected recording mode encoder issue");
+        let issue = err.issues.iter().find(|issue| issue.code == "recording_mode_requires_encoder").expect("expected recording mode encoder issue");
         assert_eq!(issue.path, "/recording_mode/state");
         assert_eq!(issue.remediation.as_deref(), Some("Enable the stream encoder before turning on shadow-buffer recording."));
     }
@@ -1024,10 +1044,7 @@ mod tests {
         let err = validate_stream_manifest(manifest).await.expect_err("expected recording mode codec compatibility failure");
         let issue = err.issues.iter().find(|issue| issue.code == "recording_mode_codec_mismatch").expect("expected recording mode codec issue");
         assert_eq!(issue.path, "/recording_mode/codec");
-        assert_eq!(
-            issue.remediation.as_deref(),
-            Some("Choose an encoder selector that matches the requested recording mode codec, or switch the recording mode codec to match the encoder.")
-        );
+        assert_eq!(issue.remediation.as_deref(), Some("Choose an encoder selector that matches the requested recording mode codec, or switch the recording mode codec to match the encoder."));
     }
 
     fn sample_libcamera_manifest() -> StreamManifest {
@@ -1037,10 +1054,10 @@ mod tests {
             identity: DeviceIdentity { id: Some(Uuid::new_v4()), alias: Some("camera".to_string()), hardware_id: Some("camera".to_string()) },
             capture: CaptureConfig {
                 device_keys: vec!["camera".to_string()],
+                device_identity: None,
                 backend: BackendKind::Libcamera,
                 handle: BackendHandle::Libcamera { id: "camera".to_string() },
                 mode: ModeId { format, interval: None },
-                device_identity: None,
                 target_fps: None,
                 interval: None,
                 controls: Vec::new(),

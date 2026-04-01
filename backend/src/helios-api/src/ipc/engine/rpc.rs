@@ -7,7 +7,7 @@ use super::{
 };
 use helios_engine::ipc::{
     CalibrationSolveRequest, EngineCommand, EngineEvent, JsonWire, LocalizationPipelineGraphRequest, LocalizationPipelineSampleRequest, LocalizationPipelineStatusRequest, LocalizationSolveRequest,
-    NodeRegistrySnapshot, ResolvedStreamConfig, StreamCalibration,
+    NodeRegistrySnapshot, ResolvedStreamConfig, StreamCalibration, StreamRuntimeCapabilities,
 };
 use std::{collections::BTreeMap, io, time::Duration};
 use tracing::warn;
@@ -104,6 +104,16 @@ impl EngineConnection {
         }
     }
 
+    pub async fn get_stream_runtime_capabilities_with_timeout(&self, timeout: Duration) -> Result<StreamRuntimeCapabilities, lib_ipc::client::ClientTransportError> {
+        match self.request(|command_id| EngineCommand::GetStreamRuntimeCapabilities { command_id }, ExpectedEvent::StreamRuntimeCapabilities, "get_stream_runtime_capabilities", timeout).await? {
+            EngineEvent::StreamRuntimeCapabilities { capabilities, .. } => Ok(capabilities),
+            EngineEvent::Nack { reason, .. } => Err(lib_ipc::client::ClientTransportError::Io(io::Error::other(reason))),
+            other => {
+                warn!(?other, "engine returned unexpected event for get_stream_runtime_capabilities after filtering");
+                Err(lib_ipc::client::ClientTransportError::UnexpectedMessage { expected: lib_ipc::frame::MessageKind::Event, received: lib_ipc::frame::MessageKind::Event })
+            }
+        }
+    }
     pub async fn validate_graph_event(&self, graph: serde_json::Value, active_features: Vec<String>, enable_lints: bool) -> Result<EngineEvent, lib_ipc::client::ClientTransportError> {
         self.request(
             |command_id| EngineCommand::ValidateGraph { command_id, graph: graph.into(), active_features, enable_lints },

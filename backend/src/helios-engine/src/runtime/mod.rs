@@ -82,6 +82,10 @@ impl EngineRuntime {
                 let streams = self.services.list_streams().await;
                 EngineEvent::StreamList { command_id, streams }
             }
+            EngineCommand::GetStreamRuntimeCapabilities { command_id } => match crate::ipc::cached_stream_runtime_capabilities() {
+                Ok(capabilities) => EngineEvent::StreamRuntimeCapabilities { command_id, capabilities },
+                Err(reason) => EngineEvent::Nack { command_id, code: EngineErrorCode::Internal, reason, retryable: false },
+            },
             EngineCommand::Start { command_id, manifest } => match timeout(START_STREAM_TIMEOUT, self.services.start_stream(*manifest)).await {
                 Ok(Ok((stream_id, descriptor))) => EngineEvent::Started { command_id, stream_id, descriptor },
                 Ok(Err(err)) => nack_from_error(command_id, err),

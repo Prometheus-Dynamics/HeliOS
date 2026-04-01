@@ -178,6 +178,7 @@ enum ExpectedEvent {
     GraphOutputSample { stream_id: uuid::Uuid },
     Ack,
     StreamList,
+    StreamRuntimeCapabilities,
     NodeRegistry,
     Discovery,
     GraphValidation,
@@ -200,6 +201,7 @@ impl ExpectedEvent {
             ExpectedEvent::GraphOutputSample { stream_id } => matches!(event, EngineEvent::GraphOutputSample { stream_id: sid, .. } if sid == stream_id) || matches!(event, EngineEvent::Nack { .. }),
             ExpectedEvent::Ack => matches!(event, EngineEvent::Ack { .. } | EngineEvent::Nack { .. }),
             ExpectedEvent::StreamList => matches!(event, EngineEvent::StreamList { .. }),
+            ExpectedEvent::StreamRuntimeCapabilities => matches!(event, EngineEvent::StreamRuntimeCapabilities { .. } | EngineEvent::Nack { .. }),
             ExpectedEvent::NodeRegistry => {
                 matches!(event, EngineEvent::NodeRegistry { .. } | EngineEvent::Nack { .. })
             }

@@ -37,6 +37,7 @@ pub(crate) enum EngineCommandKind {
     GetLocalizationPipelineStatus = 30,
     ListLocalizationPipelineOutputs = 31,
     SampleLocalizationPipelineOutput = 32,
+    GetStreamRuntimeCapabilities = 33,
 }
 
 #[repr(u16)]
@@ -61,6 +62,7 @@ pub(crate) enum EngineEventKind {
     LocalizationPipelineStatus = 16,
     LocalizationPipelineOutputs = 17,
     LocalizationPipelineOutputSample = 18,
+    StreamRuntimeCapabilities = 19,
 }
 
 impl EngineCommandKind {
@@ -103,6 +105,7 @@ impl EngineCommandKind {
             30 => Some(Self::GetLocalizationPipelineStatus),
             31 => Some(Self::ListLocalizationPipelineOutputs),
             32 => Some(Self::SampleLocalizationPipelineOutput),
+            33 => Some(Self::GetStreamRuntimeCapabilities),
             _ => None,
         }
     }
@@ -134,6 +137,7 @@ impl EngineEventKind {
             16 => Some(Self::LocalizationPipelineStatus),
             17 => Some(Self::LocalizationPipelineOutputs),
             18 => Some(Self::LocalizationPipelineOutputSample),
+            19 => Some(Self::StreamRuntimeCapabilities),
             _ => None,
         }
     }
@@ -169,6 +173,7 @@ const _: () = {
             struct GetLocalizationPipelineStatus { command_id: lib_ipc::types::CommandId => with_serde, request: crate::ipc::JsonWire => with_serde },
             struct ListLocalizationPipelineOutputs { command_id: lib_ipc::types::CommandId => with_serde, request: crate::ipc::JsonWire => with_serde },
             struct SampleLocalizationPipelineOutput { command_id: lib_ipc::types::CommandId => with_serde, request: crate::ipc::JsonWire => with_serde },
+            struct GetStreamRuntimeCapabilities { command_id: lib_ipc::types::CommandId => with_serde },
             struct StartRecording { command_id: lib_ipc::types::CommandId => with_serde, stream_id: uuid::Uuid => with_serde, source: crate::ipc::RecordingSource, output_path: String, container: crate::ipc::RecordingContainer => with_serde, codec: crate::ipc::RecordingCodec => with_serde, duration_ms: Option<u64> => with_serde, settings: Option<crate::ipc::RecordingSettings> => with_serde },
             struct StopRecording { command_id: lib_ipc::types::CommandId => with_serde, stream_id: uuid::Uuid => with_serde },
             struct CaptureShadowRecording { command_id: lib_ipc::types::CommandId => with_serde, stream_id: uuid::Uuid => with_serde, output_path: String, container: crate::ipc::RecordingContainer => with_serde, window_ms: u64 },
@@ -200,6 +205,7 @@ const _: () = {
             struct LocalizationPipelineStatus { command_id: lib_ipc::types::CommandId => with_serde, response: crate::ipc::JsonWire => with_serde },
             struct LocalizationPipelineOutputs { command_id: lib_ipc::types::CommandId => with_serde, outputs: Vec<String> => with_serde },
             struct LocalizationPipelineOutputSample { command_id: lib_ipc::types::CommandId => with_serde, response: crate::ipc::JsonWire => with_serde },
+            struct StreamRuntimeCapabilities { command_id: lib_ipc::types::CommandId => with_serde, capabilities: crate::ipc::StreamRuntimeCapabilities => with_serde },
         }
     }
 };
@@ -247,12 +253,7 @@ mod tests {
 
     #[test]
     fn nack_event_roundtrips_retryable_flag() {
-        let event = EngineEvent::Nack {
-            command_id: CommandId::from_uuid(Uuid::from_u128(0x400)),
-            code: EngineErrorCode::InvalidState,
-            reason: "capture warming up".to_string(),
-            retryable: true,
-        };
+        let event = EngineEvent::Nack { command_id: CommandId::from_uuid(Uuid::from_u128(0x400)), code: EngineErrorCode::InvalidState, reason: "capture warming up".to_string(), retryable: true };
         let envelope: lib_ipc::envelope::TaggedEnvelope = (&event).into();
         let decoded = EngineEvent::try_from(envelope).expect("nack event must decode");
         match decoded {

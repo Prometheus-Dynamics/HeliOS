@@ -1,11 +1,12 @@
 use axum::Json;
 use axum::extract::State;
-use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use chrono::Utc;
-use helios_engine::ipc::EngineErrorCode;
+use helios_engine::ipc::StreamRuntimeCapabilities;
+use helios_engine::ipc::cached_stream_runtime_capabilities;
 use once_cell::sync::Lazy;
 use serde::Serialize;
+use std::time::Duration;
 use std::time::Instant;
 use utoipa::ToSchema;
 
@@ -94,23 +95,27 @@ pub async fn health() -> Json<HealthPayload> {
     tag = "Device",
     responses(
         (status = 200, description = "Runtime status, capabilities, codec inventory, and resolved streams", body = RootStatusPayload),
-        (status = 502, description = "Runtime capability inventory unavailable", body = crate::http::streams::types::EngineErrorBody),
     )
 )]
 pub async fn root_status(State(state): State<crate::http::AppState>) -> Response {
     let (resolved_streams, stale, revision) = state.services.streams.get_cached_streams_snapshot_with_revision(&state).await;
-    let codecs = match crate::http::streams::lifecycle::codec_inventory() {
-        Ok(codecs) => codecs,
-        Err(err) => {
-            return (StatusCode::BAD_GATEWAY, Json(crate::http::streams::util::engine_error_body(Some(EngineErrorCode::Internal), err))).into_response();
-        }
+    let runtime = match state.engine.get_stream_runtime_capabilities_with_timeout(Duration::from_secs(2)).await {
+        Ok(runtime) => runtime,
+        Err(err) => match cached_stream_runtime_capabilities() {
+            Ok(runtime) => {
+                tracing::warn!(error = %err, "root status using local runtime capability fallback");
+                runtime
+            }
+            Err(local_err) => {
+                tracing::warn!(error = %err, fallback_error = %local_err, "root status using empty runtime capability fallback");
+                StreamRuntimeCapabilities { codecs: Vec::new(), default_encoder_id: None, default_decoder_ids_by_capture_format: Default::default() }
+            }
+        },
     };
+    let capabilities = crate::http::streams::validation::stream_capabilities(&runtime);
+    let codecs = crate::http::streams::lifecycle::codec_inventory_from_runtime(runtime);
 
-    Json(RootStatusPayload {
-        health: build_health_payload(),
-        streams: RuntimeStreamsPayload { capabilities: crate::http::streams::validation::stream_capabilities(), codecs, resolved_streams, stale, revision },
-    })
-    .into_response()
+    Json(RootStatusPayload { health: build_health_payload(), streams: RuntimeStreamsPayload { capabilities, codecs, resolved_streams, stale, revision } }).into_response()
 }
 
 #[cfg(test)]
