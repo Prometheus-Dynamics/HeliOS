@@ -39,6 +39,7 @@ imports = [
 
   [stage.env]
   imports = [
+    "../../env/runtime/generated-runtime-policy.toml",
     "../../env/runtime/helios.toml",
   ]
 

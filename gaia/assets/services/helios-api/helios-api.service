@@ -22,17 +22,7 @@ Environment=ENGINE_SOCKET=/run/helios/engine.sock
 Environment=UPDATER_SOCKET=/run/helios/updater.sock
 Environment=ENGINE_JOURNAL_PATH=/var/lib/helios/journal/engine.log
 Environment=UPDATER_JOURNAL_PATH=/var/lib/helios/journal/updater.log
-Environment=LOG_FOLDER=/var/log/helios
-Environment=METRICS_BIND_ADDR=0.0.0.0:5803
-Environment=LD_LIBRARY_PATH=/usr/lib/edgetpu:/usr/lib
 Environment=RUST_LOG=info
-Environment=HELIOS_API_WORKER_THREADS=2
-Environment=HELIOS_API_MAX_BLOCKING_THREADS=4
-Environment=MALLOC_ARENA_MAX=1
-Environment=MALLOC_TRIM_THRESHOLD_=65536
-Environment=MALLOC_MMAP_THRESHOLD_=65536
-Environment=MALLOC_TOP_PAD_=65536
-Environment=RUST_MIN_STACK=1048576
 Environment=STYX_LIBCAMERA_STOP_WHEN_IDLE=1
 Environment=HELIOS_API_WARM_PIPELINE_REGISTRY=0
 Environment=HELIOS_UI_PREFETCH_PIPELINE_REGISTRY=0

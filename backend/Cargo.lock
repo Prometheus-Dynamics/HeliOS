@@ -2807,6 +2807,7 @@ dependencies = [
  "lib-ipc",
  "lib-led-animations",
  "lib-net",
+ "lib-runtime-policy",
  "lib-sensors",
  "lib-test",
  "lopdf",
@@ -2920,6 +2921,7 @@ dependencies = [
  "image",
  "lib-cv",
  "lib-ipc",
+ "lib-runtime-policy",
  "lib-test",
  "libc",
  "metrics",
@@ -2954,6 +2956,7 @@ dependencies = [
  "lib-ai",
  "lib-ipc",
  "lib-math",
+ "lib-runtime-policy",
  "lib-sensors",
  "linux-embedded-hal",
  "nix 0.31.2",
@@ -4042,6 +4045,10 @@ dependencies = [
  "tokio",
  "tracing",
 ]
+
+[[package]]
+name = "lib-runtime-policy"
+version = "1.0.0"
 
 [[package]]
 name = "lib-sensors"

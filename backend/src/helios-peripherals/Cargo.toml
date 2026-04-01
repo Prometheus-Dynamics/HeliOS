@@ -51,6 +51,7 @@ workspace = true
 serde = { workspace = true, features = ["derive"], optional = true }
 uuid = { workspace = true, optional = true }
 lib-ipc = { path = "../libs/lib-ipc", optional = true }
+lib-runtime-policy = { path = "../libs/lib-runtime-policy" }
 derive_more = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 tokio-util = { workspace = true, optional = true }

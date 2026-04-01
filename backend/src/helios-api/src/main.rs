@@ -38,6 +38,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
+use lib_runtime_policy::HELIOS_API_TOKIO_POLICY;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::time::{Duration, sleep};
@@ -54,39 +55,17 @@ fn main() {
     #[cfg(feature = "pprof")]
     spawn_startup_pprof_thread();
 
-    let worker_threads = read_thread_env("HELIOS_API_WORKER_THREADS", default_api_worker_threads(), 1, 8);
-    let max_blocking_threads = read_thread_env("HELIOS_API_MAX_BLOCKING_THREADS", default_api_max_blocking_threads(worker_threads), 1, 32);
-    let thread_stack_size = read_size_env("HELIOS_API_THREAD_STACK_BYTES", default_api_thread_stack_bytes(), 256 * 1024, 8 * 1024 * 1024);
-    let blocking_keep_alive = read_duration_env("HELIOS_API_BLOCKING_KEEP_ALIVE_MS", 500, 100, 60_000);
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(worker_threads)
-        .max_blocking_threads(max_blocking_threads)
-        .thread_stack_size(thread_stack_size)
-        .thread_keep_alive(blocking_keep_alive)
-        .enable_all()
-        .build()
-        .expect("tokio runtime");
+    let runtime_policy = HELIOS_API_TOKIO_POLICY.resolve();
+    let mut runtime_builder = tokio::runtime::Builder::new_multi_thread();
+    runtime_builder.worker_threads(runtime_policy.worker_threads).max_blocking_threads(runtime_policy.max_blocking_threads);
+    if let Some(thread_stack_size) = runtime_policy.thread_stack_bytes {
+        runtime_builder.thread_stack_size(thread_stack_size);
+    }
+    if let Some(blocking_keep_alive) = runtime_policy.blocking_keep_alive {
+        runtime_builder.thread_keep_alive(blocking_keep_alive);
+    }
+    let runtime = runtime_builder.enable_all().build().expect("tokio runtime");
     runtime.block_on(async_main());
-}
-
-fn read_thread_env(var: &str, default: usize, min: usize, max: usize) -> usize {
-    std::env::var(var).ok().and_then(|value| value.trim().parse::<usize>().ok()).unwrap_or(default).clamp(min, max)
-}
-
-fn read_size_env(var: &str, default: usize, min: usize, max: usize) -> usize {
-    read_thread_env(var, default, min, max)
-}
-
-fn default_api_worker_threads() -> usize {
-    std::thread::available_parallelism().map(|value| value.get()).unwrap_or(4).clamp(2, 4)
-}
-
-fn default_api_max_blocking_threads(worker_threads: usize) -> usize {
-    (worker_threads.saturating_mul(2)).clamp(4, 8)
-}
-
-fn default_api_thread_stack_bytes() -> usize {
-    1 * 1024 * 1024
 }
 
 fn startup_cache_warm_delay() -> Duration {
@@ -109,10 +88,6 @@ fn startup_cache_warm_retry_delay() -> Duration {
 
 fn startup_cache_warm_attempts() -> usize {
     std::env::var("HELIOS_STARTUP_CACHE_WARM_ATTEMPTS").ok().and_then(|value| value.trim().parse::<usize>().ok()).unwrap_or(4).clamp(1, 10)
-}
-
-fn read_duration_env(var: &str, default_ms: u64, min_ms: u64, max_ms: u64) -> Duration {
-    Duration::from_millis(std::env::var(var).ok().and_then(|value| value.trim().parse::<u64>().ok()).unwrap_or(default_ms).clamp(min_ms, max_ms))
 }
 
 fn spawn_startup_read_model_warm(state: http::AppState) {
