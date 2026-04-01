@@ -1136,6 +1136,7 @@ pub enum EngineEvent {
         command_id: CommandId,
         code: EngineErrorCode,
         reason: String,
+        retryable: bool,
     },
     StreamList {
         #[bincode(with_serde)]
@@ -1330,7 +1331,7 @@ impl From<ControlEvent> for EngineEvent {
     fn from(event: ControlEvent) -> Self {
         match event {
             ControlEvent::Ack(ack) => EngineEvent::Ack { command_id: ack.command_id, ok: true },
-            ControlEvent::Nack(nack) => EngineEvent::Nack { command_id: nack.command_id, code: EngineErrorCode::InvalidState, reason: nack.reason },
+            ControlEvent::Nack(nack) => EngineEvent::Nack { command_id: nack.command_id, code: EngineErrorCode::InvalidState, reason: nack.reason, retryable: nack.retryable },
         }
     }
 }

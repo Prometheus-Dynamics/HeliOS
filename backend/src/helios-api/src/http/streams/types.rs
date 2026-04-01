@@ -45,6 +45,8 @@ pub struct EngineErrorBody {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engine_code: Option<EngineErrorCode>,
     pub error: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retryable: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

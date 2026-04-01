@@ -23,6 +23,14 @@ use super::super::encode::{cadence_stage_to_capture_metrics, stage_to_capture_me
 use super::super::encoder_worker::EncoderWorkerStart;
 use super::StreamRunner;
 
+fn capture_session_error_to_engine_error(err: crate::capture::CaptureSessionError) -> Error {
+    if err.retryable() {
+        Error::RetryableInvalidStateOwned(err.to_string())
+    } else {
+        Error::InvalidStateOwned(err.to_string())
+    }
+}
+
 impl StreamRunner {
     fn encoded_consumer_stale_ms() -> u64 {
         std::env::var("HELIOS_ENCODED_CONSUMER_STALE_MS").ok().and_then(|raw| raw.parse::<u64>().ok()).unwrap_or(5_000).clamp(500, 60_000)
@@ -243,7 +251,7 @@ impl StreamRunner {
         self.capture_fourcc = Some(capture_fourcc);
 
         tracing::info!(capture_fourcc = ?capture_fourcc, "starting stream runner");
-        let session = CaptureSession::start(self.capture_config.clone()).map_err(|err| Error::InvalidStateOwned(err.to_string()))?;
+        let session = CaptureSession::start(self.capture_config.clone()).map_err(capture_session_error_to_engine_error)?;
         self.session = Some(session);
         self.capture_started_wall = Some(Instant::now());
         tracing::info!("capture session attached to stream runner");
@@ -399,7 +407,7 @@ impl StreamRunner {
         let Some(session) = &self.session else {
             return Err(Error::InvalidState("stream not running"));
         };
-        session.set_control(id, value).map_err(|err| Error::InvalidStateOwned(err.to_string()))?;
+        session.set_control(id, value).map_err(capture_session_error_to_engine_error)?;
         Ok(())
     }
 
@@ -411,7 +419,7 @@ impl StreamRunner {
         // during active playback instead of waiting for the file loop boundary.
         if self.capture_config.backend == styx::BackendKind::File {
             if let Some(session) = self.session.as_mut() {
-                session.reconfigure(self.capture_config.clone()).map_err(|err| Error::InvalidStateOwned(err.to_string()))?;
+                session.reconfigure(self.capture_config.clone()).map_err(capture_session_error_to_engine_error)?;
             }
         }
         Ok(())
@@ -787,7 +795,9 @@ impl StreamRunner {
 
 #[cfg(test)]
 mod tests {
-    use super::StreamRunner;
+    use super::{StreamRunner, capture_session_error_to_engine_error};
+    use crate::capture::{CaptureConfigError, CaptureSessionError};
+    use crate::error::Error;
 
     #[test]
     fn parse_proc_key_bytes_reads_kib_and_plain_values() {
@@ -795,5 +805,14 @@ mod tests {
         assert_eq!(StreamRunner::parse_proc_key_bytes(text, "VmRSS:"), Some(1_263_616));
         assert_eq!(StreamRunner::parse_proc_key_bytes(text, "Threads:"), Some(7));
         assert_eq!(StreamRunner::parse_proc_key_bytes(text, "VmSize:"), None);
+    }
+
+    #[test]
+    fn capture_session_error_to_engine_error_preserves_retryability() {
+        let retryable = capture_session_error_to_engine_error(CaptureSessionError::Config(CaptureConfigError::DeviceNotFound));
+        assert!(matches!(retryable, Error::RetryableInvalidStateOwned(_)));
+
+        let terminal = capture_session_error_to_engine_error(CaptureSessionError::NotRunning);
+        assert!(matches!(terminal, Error::InvalidStateOwned(_)));
     }
 }

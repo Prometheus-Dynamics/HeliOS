@@ -22,7 +22,7 @@ use tokio::sync::RwLock;
 use tokio::time::{sleep_until, timeout, Instant};
 use uuid::Uuid;
 
-use crate::capture::{BackendKind, CaptureControlInfo, CaptureControlValue, CaptureDescriptor, ControlAssignment};
+use crate::capture::{BackendKind, CaptureControlInfo, CaptureControlValue, CaptureDescriptor, ControlAssignment, descriptor_for_config_retrying};
 use crate::error::{Error, Result};
 use crate::ipc::{ControlId, JsonWire, RecordingCodec, RecordingContainer, RecordingSource, ResolvedStreamConfig};
 use crate::stream::{cleanup_all_stream_files, cleanup_stream_files, EncodedFrame, ShmemWriter, StreamMetrics, StreamRunner, StreamRunnerConfig};
@@ -553,7 +553,7 @@ impl StreamManager {
                         None
                     }
                 };
-                let descriptor = crate::capture::descriptor_for_config(&manifest.capture).ok_or(Error::InvalidState("missing capture descriptor"))?;
+                let descriptor = descriptor_for_config_retrying(&manifest.capture).ok_or_else(|| Error::RetryableInvalidStateOwned("missing capture descriptor".to_string()))?;
 
                 let runner = StreamRunner::new(StreamRunnerConfig {
                     capture_config: manifest.capture.clone(),

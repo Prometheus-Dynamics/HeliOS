@@ -182,7 +182,7 @@ const _: () = {
     lib_ipc::tagged_enum! {
         impl crate::ipc::EngineEvent => crate::ipc::EngineEventKind {
             struct Ack { command_id: lib_ipc::types::CommandId => with_serde, ok: bool },
-            struct Nack { command_id: lib_ipc::types::CommandId => with_serde, code: crate::ipc::EngineErrorCode, reason: String },
+            struct Nack { command_id: lib_ipc::types::CommandId => with_serde, code: crate::ipc::EngineErrorCode, reason: String, retryable: bool },
             struct StreamList { command_id: lib_ipc::types::CommandId => with_serde, streams: Vec<crate::ipc::StreamSummary> => with_serde },
             struct Started { command_id: lib_ipc::types::CommandId => with_serde, stream_id: uuid::Uuid => with_serde, descriptor: crate::capture::CaptureDescriptor => with_serde },
             struct Stopped { command_id: lib_ipc::types::CommandId => with_serde, stream_id: uuid::Uuid => with_serde },
@@ -206,7 +206,7 @@ const _: () = {
 
 #[cfg(test)]
 mod tests {
-    use crate::ipc::{EngineCommand, RecordingSource};
+    use crate::ipc::{EngineCommand, EngineErrorCode, EngineEvent, RecordingSource};
     use lib_ipc::types::CommandId;
     use uuid::Uuid;
 
@@ -243,5 +243,26 @@ mod tests {
         assert_snapshot_roundtrip(Some(RecordingSource::Multiplex));
         assert_snapshot_roundtrip(Some(RecordingSource::Raw));
         assert_snapshot_roundtrip(Some(RecordingSource::Pipeline { pipeline_id: Some(Uuid::from_u128(0x300)), output_key: Some("overlay".to_string()) }));
+    }
+
+    #[test]
+    fn nack_event_roundtrips_retryable_flag() {
+        let event = EngineEvent::Nack {
+            command_id: CommandId::from_uuid(Uuid::from_u128(0x400)),
+            code: EngineErrorCode::InvalidState,
+            reason: "capture warming up".to_string(),
+            retryable: true,
+        };
+        let envelope: lib_ipc::envelope::TaggedEnvelope = (&event).into();
+        let decoded = EngineEvent::try_from(envelope).expect("nack event must decode");
+        match decoded {
+            EngineEvent::Nack { command_id, code, reason, retryable } => {
+                assert_eq!(command_id, CommandId::from_uuid(Uuid::from_u128(0x400)));
+                assert_eq!(code, EngineErrorCode::InvalidState);
+                assert_eq!(reason, "capture warming up");
+                assert!(retryable);
+            }
+            other => panic!("unexpected decoded event: {other:?}"),
+        }
     }
 }

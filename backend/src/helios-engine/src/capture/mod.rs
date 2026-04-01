@@ -422,6 +422,16 @@ mod tests {
 
         assert!(a.matches_capture_target(&b));
     }
+
+    #[test]
+    fn capture_session_error_marks_device_not_found_retryable() {
+        assert!(CaptureSessionError::Config(CaptureConfigError::DeviceNotFound).retryable());
+    }
+
+    #[test]
+    fn capture_session_error_marks_not_running_non_retryable() {
+        assert!(!CaptureSessionError::NotRunning.retryable());
+    }
 }
 
 pub(crate) fn find_backend_for_config<'a>(config: &CaptureConfig, devices: &'a [ProbedDevice]) -> Option<&'a ProbedBackend> {
@@ -436,6 +446,19 @@ pub fn descriptor_for_config(config: &CaptureConfig) -> Option<CaptureDescriptor
     let devices = devices_for_config(config);
     let backend = find_backend_for_config(config, &devices)?;
     Some(minimize_capture_descriptor(&backend.descriptor, &config.mode))
+}
+
+pub fn descriptor_for_config_retrying(config: &CaptureConfig) -> Option<CaptureDescriptor> {
+    for attempt in 0..30 {
+        if let Some(descriptor) = descriptor_for_config(config) {
+            return Some(descriptor);
+        }
+        if matches!(config.backend, BackendKind::Virtual | BackendKind::File | BackendKind::Netcam) || attempt >= 29 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(150));
+    }
+    None
 }
 
 pub fn canonicalize_capture_config(config: &CaptureConfig) -> CaptureConfig {
@@ -551,6 +574,16 @@ pub enum CaptureSessionError {
     Capture(#[from] CaptureError),
     #[error("capture session not running")]
     NotRunning,
+}
+
+impl CaptureSessionError {
+    pub fn retryable(&self) -> bool {
+        match self {
+            CaptureSessionError::Config(CaptureConfigError::DeviceNotFound) => true,
+            CaptureSessionError::Config(CaptureConfigError::Capture(err)) | CaptureSessionError::Capture(err) => err.is_transient_start(),
+            CaptureSessionError::Config(CaptureConfigError::BackendUnavailable(_)) | CaptureSessionError::NotRunning => false,
+        }
+    }
 }
 
 /// Capture control metadata + last applied value (when known).

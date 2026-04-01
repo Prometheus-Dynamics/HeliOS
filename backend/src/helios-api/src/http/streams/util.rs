@@ -29,7 +29,13 @@ pub(crate) fn map_client_error(err: ClientTransportError) -> Response {
 
 pub(crate) fn engine_error_body(code: Option<EngineErrorCode>, error: impl Into<String>) -> EngineErrorBody {
     let label = code.map(engine_error_code_label).unwrap_or("engine_error");
-    EngineErrorBody { code: label.to_string(), engine_code: code, error: error.into() }
+    EngineErrorBody { code: label.to_string(), engine_code: code, error: error.into(), retryable: None }
+}
+
+pub(crate) fn engine_error_body_with_retryable(code: Option<EngineErrorCode>, error: impl Into<String>, retryable: Option<bool>) -> EngineErrorBody {
+    let mut body = engine_error_body(code, error);
+    body.retryable = retryable;
+    body
 }
 
 pub(crate) fn list_streams_timeout() -> Duration {
@@ -191,6 +197,15 @@ mod tests {
         manifest.identity.hardware_id = Some("legacy-hardware-id".to_string());
 
         assert_eq!(camera_id_for_manifest(&manifest), "libcamera:front");
+    }
+
+    #[test]
+    fn engine_error_body_with_retryable_sets_flag() {
+        let body = engine_error_body_with_retryable(Some(EngineErrorCode::Busy), "capture warming up", Some(true));
+        assert_eq!(body.code, "busy");
+        assert_eq!(body.engine_code, Some(EngineErrorCode::Busy));
+        assert_eq!(body.error, "capture warming up");
+        assert_eq!(body.retryable, Some(true));
     }
 }
 

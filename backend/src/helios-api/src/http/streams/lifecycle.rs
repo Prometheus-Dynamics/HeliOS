@@ -20,8 +20,8 @@ use crate::http::validation::validation_error_response;
 use super::sensor_bench;
 use super::types::{CodecInfo, CodecTunables, StartStreamResponse, StreamInfo};
 use super::util::{
-    apply_effective_pipeline_layout, build_stream_info, camera_id_for_manifest, default_encoder_settings_for_codec, engine_error_body, list_streams_timeout, map_client_error,
-    normalize_pipeline_manifest, normalize_stream_encoder_manifest,
+    apply_effective_pipeline_layout, build_stream_info, camera_id_for_manifest, default_encoder_settings_for_codec, engine_error_body, engine_error_body_with_retryable,
+    list_streams_timeout, map_client_error, normalize_pipeline_manifest, normalize_stream_encoder_manifest,
 };
 use super::validation::validate_stream_manifest;
 use super::wait::{wait_for_stream_gone, wait_for_stream_started};
@@ -114,10 +114,6 @@ fn recover_from_missing_selected_output(manifest: &mut StreamManifest, code: Eng
         apply_effective_pipeline_layout(manifest);
     }
     changed
-}
-
-fn is_transient_missing_capture_descriptor(manifest: &StreamManifest, code: EngineErrorCode, reason: &str) -> bool {
-    matches!(code, EngineErrorCode::InvalidState) && manifest.capture.backend == styx::BackendKind::Libcamera && reason.to_ascii_lowercase().contains("missing capture descriptor")
 }
 
 fn stream_identity_token_set(stream_id: Uuid, manifest: &StreamManifest) -> std::collections::BTreeSet<String> {
@@ -619,12 +615,8 @@ pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> R
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
 
-    // Libcamera can return EBUSY briefly after a previous stream stops (buffers still unwinding).
-    // Treat that as transient and retry rather than surfacing random start failures to the user.
-    let mut attempts = 0u32;
     let mut output_recovery_attempted = false;
     loop {
-        attempts += 1;
         match state.engine.start_stream(resolved.clone()).await {
             Ok(EngineEvent::Started { stream_id, descriptor, .. }) => {
                 if let Err(err) = persist_effective_stream_manifest(&state, owner_camera_id.as_deref(), stream_id, &manifest).await {
@@ -633,7 +625,7 @@ pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> R
                 state.services.streams.invalidate_stream_list_cache().await;
                 return (StatusCode::OK, Json(StartStreamResponse { stream_id, descriptor })).into_response();
             }
-            Ok(EngineEvent::Nack { code, reason, .. }) => {
+            Ok(EngineEvent::Nack { code, reason, retryable, .. }) => {
                 if let Some(response) = maybe_engine_crash_response(&state, start_ms, &manifest) {
                     return response;
                 }
@@ -651,14 +643,8 @@ pub(crate) async fn start_stream(state: AppState, manifest: StreamManifest) -> R
                     }
                     continue;
                 }
-                let is_transient_busy =
-                    matches!(code, helios_engine::ipc::EngineErrorCode::InvalidState) && (reason.contains("Device or resource busy") || reason.contains("resource busy") || reason.contains("EBUSY"));
-                let is_transient_descriptor = is_transient_missing_capture_descriptor(&manifest, code, &reason);
-                if (is_transient_busy || is_transient_descriptor) && attempts < 10 {
-                    tokio::time::sleep(Duration::from_millis(50 * attempts as u64)).await;
-                    continue;
-                }
-                return (StatusCode::BAD_REQUEST, Json(engine_error_body(Some(code), reason))).into_response();
+                let status = if retryable { StatusCode::SERVICE_UNAVAILABLE } else { StatusCode::BAD_REQUEST };
+                return (status, Json(engine_error_body_with_retryable(Some(code), reason, Some(retryable)))).into_response();
             }
             Ok(_) | Err(_) => match wait_for_stream_started(&state, requested_id, Duration::from_secs(20)).await {
                 Ok(Some(descriptor)) => {

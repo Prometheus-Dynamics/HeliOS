@@ -52,6 +52,17 @@ fn calibration_solve_timeout() -> Duration {
     Duration::from_secs(secs)
 }
 
+fn nack_from_error(command_id: lib_ipc::types::CommandId, err: crate::error::Error) -> EngineEvent {
+    let code = error_code_for(&err);
+    let retryable = err.retryable();
+    let reason = err.to_string();
+    EngineEvent::Nack { command_id, code, reason, retryable }
+}
+
+fn timeout_nack(command_id: lib_ipc::types::CommandId, reason: String) -> EngineEvent {
+    EngineEvent::Nack { command_id, code: EngineErrorCode::Timeout, reason, retryable: true }
+}
+
 impl EngineRuntime {
     pub fn new() -> Self {
         Self { services: EngineServices::new(), node_registry_snapshot: RwLock::new(None) }
@@ -73,20 +84,20 @@ impl EngineRuntime {
             }
             EngineCommand::Start { command_id, manifest } => match timeout(START_STREAM_TIMEOUT, self.services.start_stream(*manifest)).await {
                 Ok(Ok((stream_id, descriptor))) => EngineEvent::Started { command_id, stream_id, descriptor },
-                Ok(Err(err)) => EngineEvent::Nack { command_id, code: error_code_for(&err), reason: err.to_string() },
-                Err(_) => EngineEvent::Nack { command_id, code: EngineErrorCode::Timeout, reason: format!("start stream timed out after {}s", START_STREAM_TIMEOUT.as_secs()) },
+                Ok(Err(err)) => nack_from_error(command_id, err),
+                Err(_) => timeout_nack(command_id, format!("start stream timed out after {}s", START_STREAM_TIMEOUT.as_secs())),
             },
             EngineCommand::SetCodecs { command_id, stream_id, decoder_id, encoder_id } => match self.services.set_codecs(stream_id, decoder_id, encoder_id).await {
                 Ok(_) => EngineEvent::Ack { command_id, ok: true },
-                Err(err) => EngineEvent::Nack { command_id, code: error_code_for(&err), reason: err.to_string() },
+                Err(err) => nack_from_error(command_id, err),
             },
             EngineCommand::SetCalibration { command_id, stream_id, calibration } => match self.services.set_calibration(stream_id, calibration).await {
                 Ok(_) => EngineEvent::Ack { command_id, ok: true },
-                Err(err) => EngineEvent::Nack { command_id, code: error_code_for(&err), reason: err.to_string() },
+                Err(err) => nack_from_error(command_id, err),
             },
             EngineCommand::SetCalibrationMode { command_id, stream_id, enabled, dictionary, mode } => match self.services.set_calibration_mode(stream_id, enabled, dictionary, mode).await {
                 Ok(_) => EngineEvent::Ack { command_id, ok: true },
-                Err(err) => EngineEvent::Nack { command_id, code: error_code_for(&err), reason: err.to_string() },
+                Err(err) => nack_from_error(command_id, err),
             },
             EngineCommand::SolveCalibration { command_id, request } => {
                 let timeout_budget = calibration_solve_timeout();
@@ -98,57 +109,57 @@ impl EngineRuntime {
                             crate::services::calibration::CalibrationSolveFailure::NotFound(reason) => (EngineErrorCode::NotFound, reason),
                             crate::services::calibration::CalibrationSolveFailure::Internal(reason) => (EngineErrorCode::Internal, reason),
                         };
-                        EngineEvent::Nack { command_id, code, reason }
+                        EngineEvent::Nack { command_id, code, reason, retryable: false }
                     }
-                    Err(_) => EngineEvent::Nack { command_id, code: EngineErrorCode::Timeout, reason: format!("calibration solve timed out after {}s", timeout_budget.as_secs()) },
+                    Err(_) => timeout_nack(command_id, format!("calibration solve timed out after {}s", timeout_budget.as_secs())),
                 }
             }
             EngineCommand::SolveLocalization { command_id, request } => {
                 let request: crate::ipc::LocalizationSolveRequest = match serde_json::from_value(request.into()) {
                     Ok(request) => request,
                     Err(err) => {
-                        return EngineEvent::Nack { command_id, code: EngineErrorCode::InvalidInput, reason: format!("invalid localization solve request: {err}") };
+                        return EngineEvent::Nack { command_id, code: EngineErrorCode::InvalidInput, reason: format!("invalid localization solve request: {err}"), retryable: false };
                     }
                 };
                 match solve_localization_request(request).await {
                     Ok(response) => match serde_json::to_value(response) {
                         Ok(response) => EngineEvent::LocalizationSolved { command_id, response: crate::ipc::JsonWire(response) },
-                        Err(err) => EngineEvent::Nack { command_id, code: EngineErrorCode::Internal, reason: format!("failed to encode localization solve response: {err}") },
+                        Err(err) => EngineEvent::Nack { command_id, code: EngineErrorCode::Internal, reason: format!("failed to encode localization solve response: {err}"), retryable: false },
                     },
-                    Err(reason) => EngineEvent::Nack { command_id, code: EngineErrorCode::InvalidInput, reason },
+                    Err(reason) => EngineEvent::Nack { command_id, code: EngineErrorCode::InvalidInput, reason, retryable: false },
                 }
             }
             EngineCommand::GetLocalizationPipelineStatus { command_id, request } => {
                 let request: crate::ipc::LocalizationPipelineStatusRequest = match serde_json::from_value(request.into()) {
                     Ok(request) => request,
                     Err(err) => {
-                        return EngineEvent::Nack { command_id, code: EngineErrorCode::InvalidInput, reason: format!("invalid localization pipeline status request: {err}") };
+                        return EngineEvent::Nack { command_id, code: EngineErrorCode::InvalidInput, reason: format!("invalid localization pipeline status request: {err}"), retryable: false };
                     }
                 };
                 let response = crate::localization::pipeline::status(&request.profile_id).await;
                 match serde_json::to_value(response) {
                     Ok(response) => EngineEvent::LocalizationPipelineStatus { command_id, response: crate::ipc::JsonWire(response) },
-                    Err(err) => EngineEvent::Nack { command_id, code: EngineErrorCode::Internal, reason: format!("failed to encode localization pipeline status: {err}") },
+                    Err(err) => EngineEvent::Nack { command_id, code: EngineErrorCode::Internal, reason: format!("failed to encode localization pipeline status: {err}"), retryable: false },
                 }
             }
             EngineCommand::ListLocalizationPipelineOutputs { command_id, request } => {
                 let request: crate::ipc::LocalizationPipelineGraphRequest = match serde_json::from_value(request.into()) {
                     Ok(request) => request,
                     Err(err) => {
-                        return EngineEvent::Nack { command_id, code: EngineErrorCode::InvalidInput, reason: format!("invalid localization pipeline outputs request: {err}") };
+                        return EngineEvent::Nack { command_id, code: EngineErrorCode::InvalidInput, reason: format!("invalid localization pipeline outputs request: {err}"), retryable: false };
                     }
                 };
                 let graph = localization_pipeline_graph_from_request(&request);
                 match crate::localization::pipeline::list_outputs(&request.profile, &graph).await {
                     Ok(outputs) => EngineEvent::LocalizationPipelineOutputs { command_id, outputs },
-                    Err(reason) => EngineEvent::Nack { command_id, code: EngineErrorCode::InvalidInput, reason },
+                    Err(reason) => EngineEvent::Nack { command_id, code: EngineErrorCode::InvalidInput, reason, retryable: false },
                 }
             }
             EngineCommand::SampleLocalizationPipelineOutput { command_id, request } => {
                 let request: crate::ipc::LocalizationPipelineSampleRequest = match serde_json::from_value(request.into()) {
                     Ok(request) => request,
                     Err(err) => {
-                        return EngineEvent::Nack { command_id, code: EngineErrorCode::InvalidInput, reason: format!("invalid localization pipeline sample request: {err}") };
+                        return EngineEvent::Nack { command_id, code: EngineErrorCode::InvalidInput, reason: format!("invalid localization pipeline sample request: {err}"), retryable: false };
                     }
                 };
                 let graph = localization_pipeline_sample_graph_from_request(&request);
@@ -156,33 +167,33 @@ impl EngineRuntime {
                 match crate::localization::pipeline::sample_output(&fetcher, &request.profile, &request.sources, &graph, &request.output_key).await {
                     Ok(response) => match serde_json::to_value(response) {
                         Ok(response) => EngineEvent::LocalizationPipelineOutputSample { command_id, response: crate::ipc::JsonWire(response) },
-                        Err(err) => EngineEvent::Nack { command_id, code: EngineErrorCode::Internal, reason: format!("failed to encode localization pipeline sample: {err}") },
+                        Err(err) => EngineEvent::Nack { command_id, code: EngineErrorCode::Internal, reason: format!("failed to encode localization pipeline sample: {err}"), retryable: false },
                     },
-                    Err(reason) => EngineEvent::Nack { command_id, code: localization_pipeline_error_code(&reason), reason },
+                    Err(reason) => EngineEvent::Nack { command_id, code: localization_pipeline_error_code(&reason), reason, retryable: false },
                 }
             }
             EngineCommand::Stop { command_id, stream_id } => match timeout(STOP_STREAM_TIMEOUT, self.services.stop_stream(stream_id)).await {
                 Ok(Ok(_)) => EngineEvent::Stopped { command_id, stream_id },
-                Ok(Err(err)) => EngineEvent::Nack { command_id, code: error_code_for(&err), reason: err.to_string() },
-                Err(_) => EngineEvent::Nack { command_id, code: EngineErrorCode::Timeout, reason: format!("stop stream timed out after {}s", STOP_STREAM_TIMEOUT.as_secs()) },
+                Ok(Err(err)) => nack_from_error(command_id, err),
+                Err(_) => timeout_nack(command_id, format!("stop stream timed out after {}s", STOP_STREAM_TIMEOUT.as_secs())),
             },
             EngineCommand::SetControl { command_id, stream_id, control_id, value } => match self.services.set_control(stream_id, control_id, value).await {
                 Ok(_) => EngineEvent::Ack { command_id, ok: true },
-                Err(err) => EngineEvent::Nack { command_id, code: error_code_for(&err), reason: err.to_string() },
+                Err(err) => nack_from_error(command_id, err),
             },
             EngineCommand::GetControls { command_id, stream_id } => match self.services.get_controls(stream_id).await {
                 Ok(controls) => EngineEvent::Controls { command_id, stream_id, controls },
-                Err(err) => EngineEvent::Nack { command_id, code: error_code_for(&err), reason: err.to_string() },
+                Err(err) => nack_from_error(command_id, err),
             },
             EngineCommand::GetMetrics { command_id, stream_id } => match timeout(METRICS_TIMEOUT, self.services.get_metrics(stream_id)).await {
                 Ok(Ok(metrics)) => EngineEvent::Metrics { command_id, stream_id, metrics },
-                Ok(Err(err)) => EngineEvent::Nack { command_id, code: error_code_for(&err), reason: err.to_string() },
-                Err(_) => EngineEvent::Nack { command_id, code: EngineErrorCode::Timeout, reason: format!("get metrics timed out after {}s", METRICS_TIMEOUT.as_secs()) },
+                Ok(Err(err)) => nack_from_error(command_id, err),
+                Err(_) => timeout_nack(command_id, format!("get metrics timed out after {}s", METRICS_TIMEOUT.as_secs())),
             },
             EngineCommand::SnapshotJpeg { command_id, stream_id, quality, source } => match timeout(Duration::from_secs(3), self.services.snapshot_jpeg(stream_id, quality, source)).await {
                 Ok(Ok(bytes)) => EngineEvent::SnapshotJpeg { command_id, stream_id, quality, bytes },
-                Ok(Err(err)) => EngineEvent::Nack { command_id, code: error_code_for(&err), reason: err.to_string() },
-                Err(_) => EngineEvent::Nack { command_id, code: EngineErrorCode::Timeout, reason: "snapshot timed out".into() },
+                Ok(Err(err)) => nack_from_error(command_id, err),
+                Err(_) => timeout_nack(command_id, "snapshot timed out".into()),
             },
             EngineCommand::GetNodeRegistry { command_id } => {
                 if cache_node_registry_snapshot_enabled() {
@@ -199,12 +210,12 @@ impl EngineRuntime {
                         }
                         EngineEvent::NodeRegistry { command_id, snapshot }
                     }
-                    Err(err) => EngineEvent::Nack { command_id, code: EngineErrorCode::Internal, reason: format!("failed to build daedalus registry: {err}") },
+                    Err(err) => EngineEvent::Nack { command_id, code: EngineErrorCode::Internal, reason: format!("failed to build daedalus registry: {err}"), retryable: false },
                 }
             }
             EngineCommand::DiscoverDevices { command_id } => match tokio::task::spawn_blocking(crate::capture::discover_devices_with_errors).await {
                 Ok(discovery) => EngineEvent::Discovery { command_id, discovery },
-                Err(err) => EngineEvent::Nack { command_id, code: EngineErrorCode::Internal, reason: format!("device discovery task failed: {err}") },
+                Err(err) => EngineEvent::Nack { command_id, code: EngineErrorCode::Internal, reason: format!("device discovery task failed: {err}"), retryable: false },
             },
             EngineCommand::RefreshNodeRegistry { command_id } => match build_node_registry_snapshot() {
                 Ok(snapshot) => {
@@ -215,74 +226,74 @@ impl EngineRuntime {
                     }
                     EngineEvent::NodeRegistry { command_id, snapshot }
                 }
-                Err(err) => EngineEvent::Nack { command_id, code: EngineErrorCode::Internal, reason: format!("failed to build daedalus registry: {err}") },
+                Err(err) => EngineEvent::Nack { command_id, code: EngineErrorCode::Internal, reason: format!("failed to build daedalus registry: {err}"), retryable: false },
             },
             EngineCommand::ValidateGraph { command_id, graph, active_features, enable_lints } => match validate_graph_report(graph.into(), active_features, enable_lints) {
                 Ok(report) => EngineEvent::GraphValidation { command_id, report },
-                Err(err) => EngineEvent::Nack { command_id, code: err.code, reason: err.reason },
+                Err(err) => EngineEvent::Nack { command_id, code: err.code, reason: err.reason, retryable: false },
             },
             EngineCommand::SetGraph { command_id, stream_id, graph, pipeline_id, output } => match self.services.set_graph(stream_id, graph.into(), pipeline_id, output).await {
                 Ok(_) => EngineEvent::Ack { command_id, ok: true },
-                Err(err) => EngineEvent::Nack { command_id, code: error_code_for(&err), reason: err.to_string() },
+                Err(err) => nack_from_error(command_id, err),
             },
             EngineCommand::SetGraphPatch { command_id, stream_id, patch, pipeline_id } => match self.services.apply_graph_patch(stream_id, patch.into(), pipeline_id).await {
                 Ok(_) => EngineEvent::Ack { command_id, ok: true },
-                Err(err) => EngineEvent::Nack { command_id, code: error_code_for(&err), reason: err.to_string() },
+                Err(err) => nack_from_error(command_id, err),
             },
             EngineCommand::SetGraphOutput { command_id, stream_id, output } => match self.services.set_graph_output(stream_id, output).await {
                 Ok(_) => EngineEvent::Ack { command_id, ok: true },
-                Err(err) => EngineEvent::Nack { command_id, code: error_code_for(&err), reason: err.to_string() },
+                Err(err) => nack_from_error(command_id, err),
             },
             EngineCommand::SetPipelineInputs { command_id, stream_id, pipeline_id, inputs } => {
                 let inputs = inputs.into_iter().map(|(key, value)| (key, value.map(|wire| wire.0))).collect();
                 match self.services.set_pipeline_inputs(stream_id, pipeline_id, inputs).await {
                     Ok(_) => EngineEvent::Ack { command_id, ok: true },
-                    Err(err) => EngineEvent::Nack { command_id, code: error_code_for(&err), reason: err.to_string() },
+                    Err(err) => nack_from_error(command_id, err),
                 }
             }
             EngineCommand::ListGraphOutputs { command_id, stream_id } => match self.services.list_graph_outputs(stream_id).await {
                 Ok(outputs) => EngineEvent::GraphOutputs { command_id, stream_id, outputs },
-                Err(err) => EngineEvent::Nack { command_id, code: error_code_for(&err), reason: err.to_string() },
+                Err(err) => nack_from_error(command_id, err),
             },
             EngineCommand::GetGraphOutputSample { command_id, stream_id, port, fresh } => match self.services.get_graph_output_sample(stream_id, port.clone(), fresh).await {
                 Ok(value) => EngineEvent::GraphOutputSample { command_id, stream_id, port, value: crate::ipc::JsonWire(value) },
-                Err(err) => EngineEvent::Nack { command_id, code: error_code_for(&err), reason: err.to_string() },
+                Err(err) => nack_from_error(command_id, err),
             },
             EngineCommand::SetPipelineLayout { command_id, stream_id, layout } => match self.services.set_pipeline_layout(stream_id, layout).await {
                 Ok(_) => EngineEvent::Ack { command_id, ok: true },
-                Err(err) => EngineEvent::Nack { command_id, code: error_code_for(&err), reason: err.to_string() },
+                Err(err) => nack_from_error(command_id, err),
             },
             EngineCommand::SetPipelineWires { command_id, stream_id, wires } => match self.services.set_pipeline_wires(stream_id, wires).await {
                 Ok(_) => EngineEvent::Ack { command_id, ok: true },
-                Err(err) => EngineEvent::Nack { command_id, code: error_code_for(&err), reason: err.to_string() },
+                Err(err) => nack_from_error(command_id, err),
             },
             EngineCommand::SetGraphPerf { command_id, stream_id, pipeline_id, enabled } => match self.services.set_graph_perf(stream_id, pipeline_id, enabled).await {
                 Ok(_) => EngineEvent::Ack { command_id, ok: true },
-                Err(err) => EngineEvent::Nack { command_id, code: error_code_for(&err), reason: err.to_string() },
+                Err(err) => nack_from_error(command_id, err),
             },
             EngineCommand::ResetGraphMetrics { command_id, stream_id, pipeline_id } => match self.services.reset_graph_metrics(stream_id, pipeline_id).await {
                 Ok(_) => EngineEvent::Ack { command_id, ok: true },
-                Err(err) => EngineEvent::Nack { command_id, code: error_code_for(&err), reason: err.to_string() },
+                Err(err) => nack_from_error(command_id, err),
             },
             EngineCommand::CaptureGraphFlamegraph { command_id, stream_id, pipeline_id, duration_ms } => match self.services.capture_graph_flamegraph(stream_id, pipeline_id, duration_ms).await {
                 Ok(_) => EngineEvent::Ack { command_id, ok: true },
-                Err(err) => EngineEvent::Nack { command_id, code: error_code_for(&err), reason: err.to_string() },
+                Err(err) => nack_from_error(command_id, err),
             },
             EngineCommand::StartRecording { command_id, stream_id, source, output_path, container, codec, duration_ms, settings } => {
                 let params = crate::services::manager::StartRecordingParams { source, output_path, container, codec, duration_ms, settings };
                 match self.services.start_recording(stream_id, params).await {
                     Ok(_) => EngineEvent::Ack { command_id, ok: true },
-                    Err(err) => EngineEvent::Nack { command_id, code: error_code_for(&err), reason: err.to_string() },
+                    Err(err) => nack_from_error(command_id, err),
                 }
             }
             EngineCommand::StopRecording { command_id, stream_id } => match self.services.stop_recording(stream_id).await {
                 Ok(_) => EngineEvent::Ack { command_id, ok: true },
-                Err(err) => EngineEvent::Nack { command_id, code: error_code_for(&err), reason: err.to_string() },
+                Err(err) => nack_from_error(command_id, err),
             },
             EngineCommand::CaptureShadowRecording { command_id, stream_id, output_path, container, window_ms } => {
                 match self.services.capture_shadow_recording(stream_id, output_path, container, window_ms).await {
                     Ok(_) => EngineEvent::Ack { command_id, ok: true },
-                    Err(err) => EngineEvent::Nack { command_id, code: error_code_for(&err), reason: err.to_string() },
+                    Err(err) => nack_from_error(command_id, err),
                 }
             }
         }
@@ -526,7 +537,7 @@ pub fn build_node_registry_snapshot() -> Result<crate::ipc::NodeRegistrySnapshot
 fn error_code_for(err: &crate::error::Error) -> EngineErrorCode {
     match err {
         crate::error::Error::Unimplemented(_) => EngineErrorCode::Unimplemented,
-        crate::error::Error::InvalidState(_) | crate::error::Error::InvalidStateOwned(_) => EngineErrorCode::InvalidState,
+        crate::error::Error::InvalidState(_) | crate::error::Error::InvalidStateOwned(_) | crate::error::Error::RetryableInvalidStateOwned(_) => EngineErrorCode::InvalidState,
         crate::error::Error::NotFound(_) => EngineErrorCode::NotFound,
         crate::error::Error::Conflict(_) => EngineErrorCode::Conflict,
         crate::error::Error::Timeout => EngineErrorCode::Timeout,
