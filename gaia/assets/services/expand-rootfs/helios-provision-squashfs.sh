@@ -6,6 +6,10 @@ provision_status=unknown
 booted_tmpfs=0
 layout_manifest=/etc/helios/storage-layout.toml
 layout_env=/etc/helios/storage-layout.env
+provision_manifest=/etc/helios/storage-layout.toml
+repartition_request_present=0
+repartition_update_id=
+repartition_layout_copy=/run/helios-provision/repartition-layout.toml
 
 if [ -r "$layout_env" ]; then
   # shellcheck source=/etc/helios/storage-layout.env
@@ -175,6 +179,83 @@ ensure_boot_ota_metadata() {
   fi
 }
 
+load_repartition_request() {
+  boot_dev=
+  boot_mount=/run/helios-provision/boot
+  mounted=0
+  request_env=
+  layout_src=
+
+  [ "$booted_tmpfs" -eq 1 ] || return 0
+
+  boot_dev="$(find_boot_dev || true)"
+  [ -n "$boot_dev" ] || return 0
+
+  if mountpoint -q /boot; then
+    boot_mount=/boot
+  else
+    install -d -m0755 "$boot_mount"
+  fi
+  if ! mountpoint -q "$boot_mount"; then
+    mount -o rw "$boot_dev" "$boot_mount" || return 0
+    mounted=1
+  fi
+
+  request_env="$boot_mount/helios/ota/repartition-request.env"
+  layout_src="$boot_mount/helios/ota/repartition-layout.toml"
+  if [ -r "$request_env" ] && [ -r "$layout_src" ]; then
+    # shellcheck source=/dev/null
+    . "$request_env"
+    install -D -m0644 "$layout_src" "$repartition_layout_copy"
+    repartition_request_present=1
+    repartition_update_id="${HELIOS_REPARTITION_UPDATE_ID:-}"
+    provision_manifest="$repartition_layout_copy"
+  fi
+
+  if [ "$mounted" -eq 1 ]; then
+    umount "$boot_mount" || true
+  fi
+}
+
+write_repartition_result() {
+  status="$1"
+  boot_dev=
+  boot_mount=/run/helios-provision/boot
+  mounted=0
+  ota_dir=
+
+  [ "$repartition_request_present" -eq 1 ] || return 0
+
+  boot_dev="$(find_boot_dev || true)"
+  [ -n "$boot_dev" ] || return 0
+
+  if mountpoint -q /boot; then
+    boot_mount=/boot
+  else
+    install -d -m0755 "$boot_mount"
+  fi
+  if ! mountpoint -q "$boot_mount"; then
+    mount -o rw "$boot_dev" "$boot_mount" || return 0
+    mounted=1
+  fi
+
+  ota_dir="$boot_mount/helios/ota"
+  install -d -m0755 "$ota_dir"
+  cat > "$ota_dir/repartition-result.env" <<EOF
+HELIOS_REPARTITION_RESULT_VERSION=1
+HELIOS_REPARTITION_UPDATE_ID=${repartition_update_id}
+HELIOS_REPARTITION_STATUS=${status}
+EOF
+  rm -f \
+    "$ota_dir/repartition-request.env" \
+    "$ota_dir/repartition-layout.toml"
+
+  sync "$boot_mount" 2>/dev/null || true
+  if [ "$mounted" -eq 1 ]; then
+    umount "$boot_mount" || true
+  fi
+}
+
 seed_data_partition_layout() {
   data_root=/run/helios-provision/data
   slot_a_name="${HELIOS_LAYOUT_SLOT_A_NAME:-ROOT_A}"
@@ -217,14 +298,17 @@ fi
 
 install -d -m0755 /run/helios /run/helios-provision/data /var/lib/helios
 rm -f "$status_file"
+load_repartition_request
 
-/usr/local/bin/helios-provision --layout-manifest "$layout_manifest" --status-file "$status_file"
+/usr/local/bin/helios-provision --layout-manifest "$provision_manifest" --status-file "$status_file"
 
 if [ -r "$status_file" ]; then
   # shellcheck source=/dev/null
   . "$status_file"
   provision_status="${PROVISION_STATUS:-unknown}"
 fi
+
+write_repartition_result "$provision_status"
 
 seed_data_partition_layout
 ensure_boot_ota_metadata

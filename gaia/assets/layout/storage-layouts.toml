@@ -62,6 +62,9 @@ boot_partition = 1
 start_after_partition = 1
 data_size_mib = 0
 
+[layouts.live_repartition]
+allow_destructive_data_borrow = true
+
 [[layouts.partitions]]
 role = "slot_a"
 name = "ROOT_A"

@@ -6,8 +6,9 @@ use tokio::fs;
 use tracing::warn;
 use uuid::Uuid;
 
+use super::repartition::{OfflineDataBorrowAssessment, OfflineDataBorrowBlocker, assess_offline_data_borrow, offline_data_borrow_blocked_summary, offline_data_borrow_summary};
 use super::{ApplyManifestMetadata, SquashfsPreflightContext, SquashfsSlotResizePlan, env_flag_enabled};
-use crate::artifact::{StagedMetadata, load_metadata};
+use crate::artifact::{ReleaseManifest, StagedMetadata, load_metadata};
 use crate::bundle::{is_frontend_bundle, is_service_bundle};
 use crate::config::UpdaterConfig;
 use crate::error::{Error, Result};
@@ -73,7 +74,7 @@ pub(crate) async fn preflight_staged_release(config: &UpdaterConfig, update_id: 
     ensure_directory(&preflight_dir).await?;
     let report = match decompress_if_needed(&staged_path, &preflight_dir).await {
         Ok((expanded_path, temp_file)) => {
-            let report = preflight_disk_image_release(config, update_id, artifact_kind, &slot_selection, &expanded_path, work_dir_available_bytes).await?;
+            let report = preflight_disk_image_release(config, update_id, artifact_kind, &slot_selection, &metadata.manifest, &expanded_path, work_dir_available_bytes).await?;
 
             if temp_file
                 && let Err(err) = fs::remove_file(&expanded_path).await
@@ -124,6 +125,7 @@ async fn preflight_disk_image_release(
     update_id: Uuid,
     artifact_kind: Option<&str>,
     slot_selection: &crate::util::SlotSelection,
+    manifest: &ReleaseManifest,
     expanded_path: &Path,
     work_dir_available_bytes: u64,
 ) -> Result<PreflightReport> {
@@ -196,7 +198,44 @@ async fn preflight_disk_image_release(
             let gap_after_bytes = next_partition.as_ref().map(|next| next.start_bytes().saturating_sub(target_info.end_bytes_exclusive())).unwrap_or(0);
             let ctx =
                 SquashfsPreflightContext { update_id, artifact_kind, slot_selection, target_info: &target_info, image_size_bytes, data_dir_available_bytes, work_dir_available_bytes, gap_after_bytes };
-            Ok(preflight_report_for_squashfs_plan(ctx, super::sync::plan_squashfs_slot_resize(&target_info, next_partition.as_ref(), image_size_bytes, data_dir_available_bytes)))
+            let plan = super::sync::plan_squashfs_slot_resize(&target_info, next_partition.as_ref(), image_size_bytes, data_dir_available_bytes);
+            let mut report = preflight_report_for_squashfs_plan(ctx, plan);
+            let assessment = match plan {
+                SquashfsSlotResizePlan::NeedsDataResize { required_growth_bytes, gap_after_bytes, additional_from_data_bytes, .. }
+                | SquashfsSlotResizePlan::ClearDataDir { required_growth_bytes, gap_after_bytes, additional_from_data_bytes, .. } => {
+                    let layout = lib_storage_layout::StorageLayoutManifest::load_system().map_err(|err| Error::InvalidState(err.to_string()))?;
+                    Some(assess_offline_data_borrow(
+                        config,
+                        &layout,
+                        manifest,
+                        &target_info,
+                        next_partition.as_ref(),
+                        required_growth_bytes,
+                        gap_after_bytes,
+                        additional_from_data_bytes,
+                    ))
+                }
+                _ => None,
+            };
+            if let Some(assessment) = assessment {
+                match assessment {
+                    OfflineDataBorrowAssessment::Disabled => {}
+                    OfflineDataBorrowAssessment::Supported(plan) => {
+                        report.ready = true;
+                        report.verdict = PreflightVerdict::OfflineDataBorrow;
+                        report.summary = offline_data_borrow_summary(&slot_selection.target_device, &plan);
+                    }
+                    OfflineDataBorrowAssessment::Blocked(blocker @ OfflineDataBorrowBlocker::NonReplayableArtifact(_)) => {
+                        report.ready = false;
+                        report.verdict = PreflightVerdict::ReplaySourceRequired;
+                        report.summary = offline_data_borrow_blocked_summary(&slot_selection.target_device, &blocker);
+                    }
+                    OfflineDataBorrowAssessment::Blocked(blocker) => {
+                        report.summary = offline_data_borrow_blocked_summary(&slot_selection.target_device, &blocker);
+                    }
+                }
+            }
+            Ok(report)
         }
     }
 }
@@ -223,7 +262,7 @@ fn ready_preflight_report(update_id: Uuid, artifact_kind: Option<&str>, target_d
 fn simple_preflight_report(update_id: Uuid, artifact_kind: Option<&str>, target_device: Option<String>, single_slot: bool, verdict: PreflightVerdict, summary: String) -> PreflightReport {
     PreflightReport {
         update_id,
-        ready: matches!(verdict, PreflightVerdict::Ready | PreflightVerdict::GrowIntoGap),
+        ready: matches!(verdict, PreflightVerdict::Ready | PreflightVerdict::GrowIntoGap | PreflightVerdict::OfflineDataBorrow),
         verdict,
         summary,
         artifact_kind: artifact_kind.map(str::to_string),

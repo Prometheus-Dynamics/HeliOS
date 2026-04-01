@@ -62,6 +62,12 @@ def render_section(buf: io.StringIO, header: str, values: dict) -> None:
     buf.write("\n")
 
 
+def render_optional_section(buf: io.StringIO, header: str, values: dict | None) -> None:
+    if not values:
+        return
+    render_section(buf, header, values)
+
+
 def render_partition(buf: io.StringIO, partition: dict) -> None:
     buf.write("[[partitions]]\n")
     for key, value in partition.items():
@@ -83,6 +89,7 @@ def render_layout_manifest(source_schema_version: int, layout: dict) -> str:
     buf.write("\n")
     render_section(buf, "defaults", layout.get("defaults", {}))
     render_section(buf, "spans", layout.get("spans", {}))
+    render_optional_section(buf, "live_repartition", layout.get("live_repartition"))
     for partition in layout.get("partitions", []):
         render_partition(buf, partition)
     return buf.getvalue()

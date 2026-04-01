@@ -1,20 +1,20 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub const DEFAULT_SYSTEM_LAYOUT_PATH: &str = "/etc/helios/storage-layout.toml";
 pub const SYSTEM_LAYOUT_ENV_VAR: &str = "HELIOS_STORAGE_LAYOUT_MANIFEST_PATH";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SlotScheme {
     Ext4Labels,
     SquashfsAb,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PartitionRole {
     SlotA,
@@ -22,7 +22,7 @@ pub enum PartitionRole {
     Data,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PartitionMode {
     Resize,
@@ -30,13 +30,13 @@ pub enum PartitionMode {
     Noop,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SizeSource {
     MirrorExisting,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct LayoutDefaults {
     pub disk: Option<String>,
     pub align_mib: Option<u64>,
@@ -45,14 +45,20 @@ pub struct LayoutDefaults {
     pub log_file: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct LayoutSpans {
     pub boot_partition: Option<u32>,
     pub start_after_partition: Option<u32>,
     pub data_size_mib: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct LiveRepartitionPolicy {
+    #[serde(default)]
+    pub allow_destructive_data_borrow: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LayoutPartition {
     pub role: PartitionRole,
     pub name: String,
@@ -79,7 +85,7 @@ pub struct LayoutPartition {
     pub reformat_if_missing_secondary_marker: Option<bool>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StorageLayoutManifest {
     pub schema_version: u32,
     pub layout_id: String,
@@ -89,6 +95,8 @@ pub struct StorageLayoutManifest {
     pub defaults: LayoutDefaults,
     #[serde(default)]
     pub spans: LayoutSpans,
+    #[serde(default)]
+    pub live_repartition: LiveRepartitionPolicy,
     #[serde(default)]
     pub partitions: Vec<LayoutPartition>,
 }
@@ -171,6 +179,10 @@ impl StorageLayoutManifest {
     pub fn slot_partition_numbers(&self) -> Result<(u32, u32), LayoutError> {
         Ok((self.slot_a()?.number, self.slot_b()?.number))
     }
+
+    pub fn allows_destructive_data_borrow(&self) -> bool {
+        self.live_repartition.allow_destructive_data_borrow
+    }
 }
 
 #[cfg(test)]
@@ -201,6 +213,7 @@ mod tests {
         assert_eq!(layout.slot_partition_numbers().unwrap(), (2, 3));
         assert_eq!(layout.data().unwrap().number, 4);
         assert_eq!(layout.data().unwrap().label.as_deref(), Some("DATA"));
+        assert!(layout.allows_destructive_data_borrow());
     }
 
     #[test]

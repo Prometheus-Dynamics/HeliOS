@@ -18,21 +18,24 @@ use crate::config::UpdaterConfig;
 use crate::error::{Error, Result};
 use crate::state::ServiceState;
 use crate::util::{
-    BlockPartitionInfo, ProgressSender, SlotScheme, SlotSelection, StreamFlashOutcome, blockdev_size_bytes, detect_compression_kind, decompress_if_needed, ensure_directory,
-    flash_compressed_image_to_target, select_target_slot, sync_filesystem,
+    BlockPartitionInfo, ProgressSender, SlotScheme, SlotSelection, StreamFlashOutcome, available_bytes_for_path, blockdev_size_bytes, detect_compression_kind, detect_squashfs_partition_in_disk_image,
+    decompress_if_needed, ensure_directory, flash_compressed_image_to_target, inspect_adjacent_partition, inspect_block_partition, select_target_slot, sync_filesystem,
 };
 
 mod preflight;
 mod progress;
+mod repartition;
 mod sync;
 
 use preflight::parse_apply_manifest_metadata;
 use progress::{publish_snapshot, start_apply_progress};
+use repartition::{OfflineDataBorrowAssessment, assess_offline_data_borrow, queue_offline_data_borrow_repartition};
 use sync::{
     cleanup_source_media_after_apply, clear_completed_update_state, flash_image_to_target, relabel_target_filesystem, sync_boot_from_artifact, sync_boot_from_target, sync_persisted_state, update_boot_markers,
     validate_bootable_squashfs_root,
 };
 pub(crate) use preflight::preflight_staged_release;
+pub(crate) use repartition::{clear_queued_repartition_resume, load_queued_repartition_resume};
 pub(crate) use sync::purge_update_dirs;
 
 #[cfg(test)]
@@ -356,6 +359,57 @@ async fn apply_disk_image_release(
                 && !streamed
             {
                 let expanded_path = expanded_path.as_ref().ok_or_else(|| Error::InvalidState("expanded OTA image missing".into()))?;
+                if slot_selection.scheme == SlotScheme::SquashfsAb {
+                    let Some((_, squashfs_size)) = detect_squashfs_partition_in_disk_image(expanded_path).await? else {
+                        return Err(Error::InvalidState(format!(
+                            "no squashfs partition found inside OTA artifact {}; refusing to flash {}",
+                            expanded_path.display(),
+                            slot_selection.target_device
+                        )));
+                    };
+                    let Some(target_info) = inspect_block_partition(&slot_selection.target_device).await? else {
+                        return Err(Error::InvalidState(format!("unable to inspect squashfs target slot {}", slot_selection.target_device)));
+                    };
+                    let next_partition = inspect_adjacent_partition(&slot_selection.target_device, 1).await?;
+                    let data_dir_available_bytes = available_bytes_for_path(config.data_dir()).await?.unwrap_or(0);
+                    let growth_plan = sync::plan_squashfs_slot_resize(&target_info, next_partition.as_ref(), squashfs_size, data_dir_available_bytes);
+                    let offline_assessment = match growth_plan {
+                        SquashfsSlotResizePlan::NeedsDataResize { required_growth_bytes, gap_after_bytes, additional_from_data_bytes, .. }
+                        | SquashfsSlotResizePlan::ClearDataDir { required_growth_bytes, gap_after_bytes, additional_from_data_bytes, .. } => {
+                            let layout = lib_storage_layout::StorageLayoutManifest::load_system().map_err(|err| Error::InvalidState(err.to_string()))?;
+                            let assessment = assess_offline_data_borrow(
+                                config,
+                                &layout,
+                                &metadata.manifest,
+                                &target_info,
+                                next_partition.as_ref(),
+                                required_growth_bytes,
+                                gap_after_bytes,
+                                additional_from_data_bytes,
+                            );
+                            Some((
+                                layout,
+                                assessment,
+                            ))
+                        }
+                        _ => None,
+                    };
+                    if let Some((layout, OfflineDataBorrowAssessment::Supported(offline_plan))) = offline_assessment {
+                        queue_offline_data_borrow_repartition(config, update_id, &metadata.manifest, &layout, &slot_selection, &offline_plan).await?;
+                        if temp_file {
+                            let _ = fs::remove_file(expanded_path).await;
+                        }
+                        {
+                            let mut guard = state.write().await;
+                            guard.update_progress(UpdateStage::Rebooting, Some(92), None);
+                        }
+                        publish_snapshot(state, events).await;
+                        drop(progress_sender);
+                        drop(progress_tx);
+                        let _ = progress_task.await;
+                        return Ok(BundleApplyOutcome::disk_image(false));
+                    }
+                }
                 info!(%update_id, target_slot = %slot_selection.target_slot, target_device = %slot_selection.target_device, "writing staged image");
                 flash_image_to_target(expanded_path, &slot_selection, config.data_dir(), Some(progress_sender.clone())).await?;
             }

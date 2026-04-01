@@ -141,12 +141,15 @@ ROOT_DEV="/dev/mmcblk0p${SLOT_A_PARTITION}"
 BOOT_DEV="/dev/mmcblk0p${BOOT_PARTITION}"
 DATA_DEV=""
 DEBUG_MOUNT="/mnt/boot-debug"
+REQUEST_MOUNT="/mnt/boot-request"
 DATA_MARKER="${HELIOS_LAYOUT_DATA_SECONDARY_MARKER:-/mnt/data/.provision.data_v1}"
+REPARTITION_REQUEST_PATH="${REQUEST_MOUNT}/helios/ota/repartition-request.env"
 ROOT_CANDIDATES=""
 BOOT_CANDIDATES=""
 DATA_CANDIDATES=""
 DATA_DEV_EXPLICIT=0
 BOOT_DEBUG=0
+FORCE_TMPFS_WRITABLE=0
 OVERLAY_SLOT="root-a"
 ROOT_SLOT="${SLOT_A_NAME}"
 
@@ -236,6 +239,39 @@ mount_boot_debug() {
 	done
 
 	return 1
+}
+
+mount_boot_request() {
+	local candidate
+
+	mkdir -p "${REQUEST_MOUNT}" 2>/dev/null || true
+	if is_mounted "${REQUEST_MOUNT}"; then
+		return 0
+	fi
+
+	for candidate in "${BOOT_DEV}" ${BOOT_CANDIDATES}; do
+		[ -n "${candidate}" ] || continue
+		wait_for_block "${candidate}" || continue
+		if mount -t vfat -o ro "${candidate}" "${REQUEST_MOUNT}" 2>/dev/null; then
+			BOOT_DEV="${candidate}"
+			return 0
+		fi
+	done
+
+	return 1
+}
+
+offline_data_borrow_requested() {
+	local found=1
+
+	if mount_boot_request; then
+		if [ -f "${REPARTITION_REQUEST_PATH}" ]; then
+			found=0
+		fi
+		umount "${REQUEST_MOUNT}" 2>/dev/null || true
+	fi
+
+	return "${found}"
 }
 
 mark() {
@@ -490,7 +526,14 @@ mark "20-root-device-found"
 mount -t squashfs -o ro "${ROOT_DEV}" /mnt/lower || panic_shell "failed to mount lower squashfs"
 mark "30-lower-mounted"
 
-if ensure_data_dev && [ -b "${DATA_DEV}" ]; then
+if offline_data_borrow_requested; then
+	FORCE_TMPFS_WRITABLE=1
+	mark "35-repartition-request-detected"
+fi
+
+if [ "${FORCE_TMPFS_WRITABLE}" -eq 1 ]; then
+	mount -t tmpfs -o mode=0755 tmpfs /mnt/data || panic_shell "failed to mount tmpfs writable store"
+elif ensure_data_dev && [ -b "${DATA_DEV}" ]; then
 	if mount -t ext4 -o rw,noatime "${DATA_DEV}" /mnt/data; then
 		if [ ! -f "${DATA_MARKER}" ]; then
 			umount /mnt/data 2>/dev/null || true
