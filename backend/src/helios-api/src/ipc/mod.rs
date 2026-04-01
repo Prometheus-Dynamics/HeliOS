@@ -347,6 +347,13 @@ pub async fn connect_all() -> IpcHandles {
     IpcHandles { engine, sensors: RwLock::new(sensors.map(Arc::new)), sensors_connect: Mutex::new(()), updater: Mutex::new(updater), updates: RealtimeUpdateBus::default() }
 }
 
+#[cfg(test)]
+impl IpcHandles {
+    pub(crate) fn for_tests(engine: EngineConnection) -> Self {
+        Self { engine, sensors: RwLock::new(None), sensors_connect: Mutex::new(()), updater: Mutex::new(None), updates: RealtimeUpdateBus::default() }
+    }
+}
+
 impl IpcHandles {
     /// Ensure a live peripherals connection, attempting to reconnect on demand.
     pub async fn ensure_sensors(&self) -> Option<Arc<SensorsConnection>> {

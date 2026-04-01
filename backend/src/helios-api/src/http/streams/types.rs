@@ -76,6 +76,20 @@ pub struct StartStreamResponse {
     pub descriptor: CaptureDescriptor,
 }
 
+#[derive(Debug, Serialize, Deserialize, ToSchema, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StreamUpdateAction {
+    Restarted,
+    PersistedOnly,
+}
+
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct UpdateStreamResponse {
+    pub stream_id: Uuid,
+    pub descriptor: CaptureDescriptor,
+    pub action: StreamUpdateAction,
+}
+
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct CodecInfo {
     pub kind: CodecKind,

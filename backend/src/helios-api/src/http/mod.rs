@@ -41,6 +41,7 @@ use utoipa::OpenApi;
         streams::validate_stream,
         streams::stream_capabilities_handler,
         streams::delete_stream,
+        streams::update_stream,
         streams::get_controls,
         streams::set_control,
         streams::get_metrics,
@@ -193,6 +194,9 @@ use utoipa::OpenApi;
         schemas(
             helios_engine::ipc::StreamManifest,
             helios_engine::stream::StreamMetrics,
+            streams::types::StartStreamResponse,
+            streams::types::UpdateStreamResponse,
+            streams::types::StreamUpdateAction,
             streams::bench::BenchFormatsRequest,
             streams::bench::BenchFormatsResponse,
             streams::validation::StreamValidateResponse,

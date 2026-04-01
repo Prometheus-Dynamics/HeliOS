@@ -85,6 +85,11 @@ pub async fn connect_engine_best_effort() -> EngineConnection {
     spawn_unavailable_engine()
 }
 
+#[cfg(test)]
+pub(crate) async fn connect_engine_at_for_tests(socket: PathBuf, journal_path: PathBuf) -> Result<EngineConnection, Box<dyn Error + Send + Sync>> {
+    try_connect_lazy(&socket, journal_path)
+}
+
 async fn try_connect(socket: &Path, journal_path: PathBuf) -> Result<EngineConnection, Box<dyn Error + Send + Sync>> {
     let config = EngineClientConfig::new(socket.to_path_buf(), journal_path);
     let client = Arc::new(EngineClient::new(config)?);

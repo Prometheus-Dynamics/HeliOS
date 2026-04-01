@@ -350,6 +350,8 @@ export const StreamsApi = {
   listCodecs: (options?: ApiRequestOptions) => codecInventorySingleflight(options),
   startStream: (args: Parameters<typeof EngineStreamsService.startStream>[0], options?: ApiRequestOptions) =>
     runApiRequest(() => EngineStreamsService.startStream(args), { label: 'startStream', timeoutMs: 45_000, ...options }),
+  updateStream: (args: Parameters<typeof EngineStreamsService.updateStream>[0], options?: ApiRequestOptions) =>
+    runApiRequest(() => EngineStreamsService.updateStream(args), { label: 'updateStream', timeoutMs: 45_000, ...options }),
   registerNetcamStream: async (input: RegisterNetcamStreamInput, options?: ApiRequestOptions) => {
     const capabilities = await streamCapabilitiesSingleflight(options);
     return runApiRequest(

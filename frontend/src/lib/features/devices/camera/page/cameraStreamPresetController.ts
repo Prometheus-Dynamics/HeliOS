@@ -380,10 +380,20 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
         pipelines: pipelineAssignments
       }) as unknown as StreamManifest;
 
-      await deps.streamsApi.startStream({ requestBody: payload });
+      const existingStreamId = state.stream?.id;
+      const response = existingStreamId
+        ? await deps.streamsApi.updateStream({ id: existingStreamId, requestBody: payload })
+        : await deps.streamsApi.startStream({ requestBody: payload });
       deps.onExternalLayoutApplied?.();
       if (!options.silent) {
-        deps.toaster.success({ title: 'Stream updated', description: 'Pipeline & capture settings applied.' });
+        const updateAction = 'action' in response ? response.action : 'restarted';
+        deps.toaster.success({
+          title: 'Stream updated',
+          description:
+            updateAction === 'persisted_only'
+              ? 'Settings saved. The stream will use them on next start.'
+              : 'Pipeline & capture settings applied.'
+        });
       }
     } catch (err) {
       console.warn('Failed to apply stream preset', err);
