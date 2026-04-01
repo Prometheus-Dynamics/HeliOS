@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::api_observability::{ApiCacheMetric, ApiRealtimeMetrics};
 use crate::ipc::updater::UpdaterConnection;
 use crate::logs::LogSource;
-use crate::system_read_model::{SharedDevicesUpdate, SharedProcessesSnapshot, SharedStreamMetricsSnapshot, SharedStreamOutputsEvent, SharedStreamOutputsPortsSnapshot};
+use crate::system_read_model::{ReadModelSnapshot, SharedDevicesUpdate, SharedProcessesSnapshot, SharedStreamMetricsSnapshot, SharedStreamOutputsEvent, SharedStreamOutputsPortsSnapshot};
 use helios_updater::client::UpdaterSession;
 use helios_updater::ipc::{PreflightReport, UpdateState, UpdaterCommand, UpdaterStorageReport};
 
@@ -17,7 +17,7 @@ pub struct SystemReadModelService {
 }
 
 impl SystemReadModelService {
-    pub async fn load_device_metrics_snapshot(&self) -> Result<(crate::http::device::metrics::DeviceMetrics, u64), String> {
+    pub async fn load_device_metrics_snapshot(&self) -> ReadModelSnapshot<crate::http::device::metrics::DeviceMetrics> {
         self.state.load_device_metrics_snapshot().await
     }
 
@@ -74,7 +74,7 @@ impl SystemReadModelService {
         self.state.unsubscribe_stream_outputs(stream_id, client_id).await;
     }
 
-    pub async fn load_log_sources_snapshot(&self) -> (Vec<LogSource>, u64) {
+    pub async fn load_log_sources_snapshot(&self) -> ReadModelSnapshot<Vec<LogSource>> {
         self.state.load_log_sources_snapshot().await
     }
 

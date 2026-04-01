@@ -22,7 +22,13 @@
       "path": "backend/src/helios-api/src/system_read_model/device_metrics.rs",
       "max_lines": 100,
       "owner": "HeliOS",
-      "review_note": "Device metrics cache orchestration and stale-fallback refresh policy now live here; keep those stateful cache decisions separate from raw collection and realtime delivery."
+      "review_note": "Device metrics now only wires the shared freshness cache to the collector; keep cache policy in the dedicated freshness layer instead of rebuilding bespoke retry and stale behavior here."
+    },
+    {
+      "path": "backend/src/helios-api/src/system_read_model/freshness.rs",
+      "max_lines": 320,
+      "owner": "HeliOS",
+      "review_note": "Read-model freshness states, revision publication, and fallback/cache policy now live here; keep stale/unavailable state transitions centralized instead of reintroducing per-endpoint fallback branches."
     },
     {
       "path": "backend/src/helios-api/src/system_read_model/state.rs",
@@ -88,7 +94,7 @@
       "path": "backend/src/helios-api/src/system_read_model/collector.rs",
       "max_lines": 350,
       "owner": "HeliOS",
-      "review_note": "System collector, metrics cache entries, and network delta calculation now live here; keep collection internals isolated from the parent read model."
+      "review_note": "System collector and network delta calculation now live here; keep collection internals isolated from the parent read model instead of rebuilding cache policy in the collector."
     },
     {
       "path": "backend/src/helios-api/src/system_read_model/storage_metrics.rs",

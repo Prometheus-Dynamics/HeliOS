@@ -102,7 +102,7 @@ fn spawn_startup_read_model_warm(state: http::AppState) {
         for attempt in 0..attempts {
             let (streams, stale, _) = state.services.streams.get_cached_streams_snapshot_with_revision(&state).await;
             let streams_ready = !stale;
-            let metrics_ready = state.services.system.load_device_metrics_snapshot().await.is_ok();
+            let metrics_ready = matches!(state.services.system.load_device_metrics_snapshot().await.freshness.state, crate::system_read_model::ReadModelFreshnessState::Live);
             let _ = state.services.system.load_log_sources_snapshot().await;
 
             if streams_ready && metrics_ready {

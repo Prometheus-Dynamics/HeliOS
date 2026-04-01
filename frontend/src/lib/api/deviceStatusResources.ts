@@ -1,10 +1,11 @@
 import { apiFetch } from '$lib/api/core/http';
 import { createDomainResource } from '$lib/api/domainResources';
 import { DeviceApi } from '$lib/api/deviceApi';
+import { readModelFreshnessLabel } from '$lib/api/readModelFreshness';
 import type {
   BootloaderStatus,
   DeviceHealthIssue,
-  DeviceMetrics,
+  DeviceMetricsResponse,
   ResourceGuardAction,
   ResourceGuardActionKind,
   ResourceGuardDegradedStream,
@@ -31,7 +32,8 @@ export async function fetchResourceGuardStatus(): Promise<ResourceGuardStatus> {
 }
 
 export async function fetchOsHealthStatus(): Promise<OsHealthStatus> {
-  const metrics = (await DeviceApi.metrics({ cacheMs: 0 })) as DeviceMetrics;
+  const response = (await DeviceApi.metrics({ cacheMs: 0 })) as DeviceMetricsResponse;
+  const metrics = response.metrics ?? null;
   const issues = Array.isArray(metrics?.issues)
     ? metrics.issues
         .map((issue) => ({
@@ -41,7 +43,15 @@ export async function fetchOsHealthStatus(): Promise<OsHealthStatus> {
         .filter((issue) => issue.code.length > 0 || issue.description.length > 0)
     : [];
 
-  const status = typeof metrics?.status === 'string' && metrics.status.trim().length > 0 ? metrics.status.trim() : issues.length > 0 ? 'degraded' : 'healthy';
+  const freshnessState = response.freshness?.state ?? null;
+  const status =
+    freshnessState && freshnessState !== 'live'
+      ? readModelFreshnessLabel(response.freshness).toLowerCase()
+      : typeof metrics?.status === 'string' && metrics.status.trim().length > 0
+        ? metrics.status.trim()
+        : issues.length > 0
+          ? 'degraded'
+          : 'healthy';
   return { status, issues };
 }
 

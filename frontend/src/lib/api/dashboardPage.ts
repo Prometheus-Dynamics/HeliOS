@@ -1,12 +1,13 @@
 import { PeripheralsApi } from '$lib/api/peripheralsApi';
 import { PipelinesApi } from '$lib/api/pipelinesApi';
+import { readModelFreshnessDetail, readModelFreshnessLabel } from '$lib/api/readModelFreshness';
 import { StreamsApi } from '$lib/api/streamsApi';
 import { streamPreviewFormatFromStreamInfo } from '$lib/api/streamPreviewFormat';
 import { streamHealthStatus, streamRecordingActive, streamRecordingSinceMs } from '$lib/api/streamRuntime';
 import { DeviceApi } from '$lib/api/deviceApi';
 import { DEFAULT_REQUEST_TIMEOUT_MS } from '$lib/api/requestUtils';
 import type { DashboardFetchMeta, DashboardPayload, DashboardSourceStatus, PipelineWatchEntry, StreamGalleryItem, SummaryStat, TimelineItem } from '$lib/types/dashboard';
-import type { DeviceMetrics, PipelineSummary, ProbedDevice, StreamInfo } from '$lib/ts-bindings/http/client';
+import type { DeviceMetrics, DeviceMetricsResponse, PipelineSummary, ProbedDevice, StreamInfo } from '$lib/ts-bindings/http/client';
 import { resolveStreamAlias, resolveStreamLabel } from '$lib/utils/streamLabels';
 
 const REQUEST_TIMEOUT_MS = DEFAULT_REQUEST_TIMEOUT_MS;
@@ -47,6 +48,7 @@ export async function fetchDashboardPageData(): Promise<DashboardPayload> {
     ? pipelinesResult.value
     : [];
   const metricsPayload = metricsResult.status === 'fulfilled' ? metricsResult.value : null;
+  const metrics = metricsPayload?.metrics ?? null;
 
   const meta = buildDashboardMeta(streamsResult.status, camerasResult.status, pipelinesResult.status, metricsResult.status, failures);
   const summaryStats = buildSummaryStats(streams, cameras, pipelines, metricsPayload);
@@ -87,9 +89,14 @@ function buildSummaryStats(
   streams: StreamInfo[],
   cameras: ProbedDevice[],
   pipelines: PipelineSummary[],
-  metrics: DeviceMetrics | null
+  metricsPayload: DeviceMetricsResponse | null
 ): SummaryStat[] {
-  const healthStatus = metrics ? 'OK' : 'Unknown';
+  const metrics = metricsPayload?.metrics ?? null;
+  const healthStatus = metricsPayload
+    ? metricsPayload.freshness?.state === 'live'
+      ? titleCase(metrics?.status ?? 'unknown')
+      : readModelFreshnessLabel(metricsPayload.freshness)
+    : 'Unknown';
 
   return [
     {
@@ -111,22 +118,37 @@ function buildSummaryStats(
   ];
 }
 
-function buildTimeline(metrics: DeviceMetrics | null): TimelineItem[] {
+function buildTimeline(metricsPayload: DeviceMetricsResponse | null): TimelineItem[] {
+  const metrics = metricsPayload?.metrics ?? null;
+  const freshness = metricsPayload?.freshness ?? null;
   const checkedLabel = formatTimestamp(new Date().toISOString());
-  const issues: Array<{ code?: string; description?: string }> = [];
+  const issues = Array.isArray(metrics?.issues) ? metrics.issues : [];
   const items: TimelineItem[] = [
     {
       title: 'Health check',
       time: checkedLabel,
-      detail: metrics ? 'Status · OK' : 'Status unavailable'
+      detail: freshness
+        ? `${readModelFreshnessLabel(freshness)} · ${readModelFreshnessDetail(freshness)}`
+        : metrics
+          ? 'Status · OK'
+          : 'Status unavailable'
     }
   ];
 
+  if (freshness?.state === 'unavailable') {
+    items.push({
+      title: 'Read model unavailable',
+      time: checkedLabel,
+      detail: readModelFreshnessDetail(freshness)
+    });
+    return items;
+  }
+
   if (issues.length === 0) {
     items.push({
-      title: 'All systems nominal',
+      title: freshness?.state === 'stale' ? 'Cached snapshot in use' : 'All systems nominal',
       time: checkedLabel,
-      detail: 'No open issues reported'
+      detail: freshness?.state === 'stale' ? readModelFreshnessDetail(freshness) : 'No open issues reported'
     });
     return items;
   }

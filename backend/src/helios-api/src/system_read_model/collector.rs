@@ -14,13 +14,6 @@ use super::processes::collect_process_memory_metrics;
 use super::storage_metrics::{collect_disk_metrics, collect_disk_partitions, filesystem_usage_for_path, select_disk_for_path};
 
 #[derive(Clone)]
-pub(super) struct MetricsCacheEntry {
-    pub(super) fetched_at: Instant,
-    pub(super) revision: u64,
-    pub(super) body: DeviceMetrics,
-}
-
-#[derive(Clone)]
 struct ProcessMetricsCacheEntry {
     fetched_at: Instant,
     metrics: Vec<ProcessMemoryMetrics>,

@@ -326,13 +326,13 @@ export function createLogsStore(): LogsStore {
     updateState({ logStreamsLoading: true, logStreamsError: null });
     try {
       const cached = logSourcesResource.read();
-      if (cached?.data?.length) {
+      if (cached?.data?.sources?.length) {
         updateState({
-          logStreams: normalizeCachedSources(cached.data)
+          logStreams: normalizeCachedSources(cached.data.sources)
         });
       }
-      const sources = await logSourcesResource.refresh();
-      const normalized = normalizeApiSources(sources ?? []);
+      const sourcesResponse = await logSourcesResource.refresh();
+      const normalized = normalizeApiSources(sourcesResponse?.sources ?? []);
       updateState({ logStreams: normalized });
       if (normalized.length === 0) {
         stopLogTail();

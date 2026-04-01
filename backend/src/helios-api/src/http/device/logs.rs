@@ -2,6 +2,7 @@ use super::super::error::{ApiError, ApiResult};
 use crate::http::AppState;
 use crate::http::revision::{apply_revision_headers, matches_if_none_match, not_modified_response};
 use crate::logs::LogSource;
+use crate::system_read_model::ReadModelFreshness;
 use axum::body::Body;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::{
@@ -10,6 +11,12 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use tokio_util::io::ReaderStream;
+
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
+pub struct LogSourcesResponse {
+    pub freshness: ReadModelFreshness,
+    pub sources: Vec<LogSource>,
+}
 
 #[utoipa::path(
     get,
@@ -75,16 +82,16 @@ pub struct LogParams {
     get,
     path = "/device/logs/sources",
     tag = "Device",
-    responses((status = 200, description = "Available log sources", body = [LogSource]))
+    responses((status = 200, description = "Available log sources", body = LogSourcesResponse))
 )]
 pub async fn sources(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<Response> {
-    let (payload, revision) = state.services.system.load_log_sources_snapshot().await;
-    if matches_if_none_match(&headers, revision) {
-        return Ok(not_modified_response(revision));
+    let snapshot = state.services.system.load_log_sources_snapshot().await;
+    if matches_if_none_match(&headers, snapshot.revision) {
+        return Ok(not_modified_response(snapshot.revision));
     }
 
-    let mut response = Json(payload).into_response();
-    apply_revision_headers(response.headers_mut(), revision);
+    let mut response = Json(LogSourcesResponse { freshness: snapshot.freshness, sources: snapshot.payload.unwrap_or_default() }).into_response();
+    apply_revision_headers(response.headers_mut(), snapshot.revision);
     Ok(response)
 }
 
