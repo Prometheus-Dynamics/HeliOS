@@ -1,3 +1,4 @@
+import { resolve as resolvePath } from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig, loadEnv } from 'vite';
@@ -12,10 +13,18 @@ export default defineConfig(({ mode }) => {
 		(message.includes('@zag-js/svelte') || message.includes('@xyflow/svelte')) &&
 		message.includes('never used');
 
-	return {
-		plugins: [tailwindcss(), sveltekit()],
-		build: {
-			rollupOptions: {
+		return {
+			plugins: [tailwindcss(), sveltekit()],
+			resolve: {
+				alias: [
+					{
+						find: '$lib/ts-bindings/http/client',
+						replacement: resolvePath(process.cwd(), 'src/lib/ts-bindings/http/client/index.ts')
+					}
+				]
+			},
+			build: {
+				rollupOptions: {
 				onwarn(warning, warn) {
 					const message = typeof warning === 'string' ? warning : (warning.message ?? '');
 					if (isKnownVendorNoise(message)) {
