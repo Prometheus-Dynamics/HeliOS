@@ -33,8 +33,9 @@ notes = "Resolved by splitting the claim honestly: lib-cv owns its runtime scrat
 id = 12
 title = "Normal integration without hidden local path patching"
 owner = "Shared HeliOS/Styx/Daedalus"
-status = "blocked"
+status = "landed"
 repo = "styx+daedalus"
 dependency_names = ["styx", "daedalus", "daedalus-data", "daedalus-macros"]
 pinned_revisions = { styx = "ecd4b958cd86155acc81f23254fdc4a31fc3e7a1", daedalus = "910b6b83ce82fef75a4789750e7a85401f2864dc", daedalus-data = "910b6b83ce82fef75a4789750e7a85401f2864dc", daedalus-macros = "910b6b83ce82fef75a4789750e7a85401f2864dc" }
-notes = "Committed backend/Cargo.toml no longer carries absolute-path sibling patches, and local overrides now live only in uncommitted cargo config. This stays blocked until upstream Styx exposes the required codec feature set and a clean clone can validate without any local override."
+proof_reference = "backend/README.md and tools/deploy-live.sh now require explicit cargo --config / HELIOS_CARGO_CONFIG opt-in for local sibling overrides, while committed manifests stay pinned to upstream git revisions with no path patches."
+notes = "Hidden local path patching is no longer part of the normal integration story. The repo no longer relies on an auto-loaded .cargo/config.toml, local sibling overrides live only in uncommitted files such as .cargo/local-overrides.toml, and helper tooling accepts them only through explicit opt-in flags or env vars."

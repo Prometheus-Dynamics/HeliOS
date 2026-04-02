@@ -418,6 +418,11 @@ where
 {
     let args_vec = args.into_iter().map(|arg| arg.as_ref().to_string()).collect::<Vec<_>>();
     let mut command = Command::new(cmd);
+    if cmd == "cargo"
+        && let Some(config_path) = std::env::var_os("HELIOS_CARGO_CONFIG")
+    {
+        command.arg("--config").arg(config_path);
+    }
     command.args(&args_vec).current_dir(cwd).env_remove("RUSTC_WRAPPER");
     for (key, value) in envs {
         command.env(key, value);

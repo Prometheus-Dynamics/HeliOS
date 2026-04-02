@@ -60,6 +60,18 @@ Use it only for the command you are running:
 cargo --config .cargo/local-overrides.toml check --manifest-path backend/Cargo.toml -p helios-api --bin helios-api
 ```
 
+The repo does not auto-load that file. If you need a sibling checkout override, you must opt into it explicitly per command.
+
+The live deploy helper accepts the same override explicitly:
+
+```bash
+HELIOS_CARGO_CONFIG=.cargo/local-overrides.toml \
+STYX_HOST_PATH=/absolute/path/to/Styx \
+./tools/deploy-live.sh --dev-release --only binaries --strict-binaries-only --no-upload --no-restart --no-templates --no-frontend
+```
+
+`xtask validate build-profiles` also honors `HELIOS_CARGO_CONFIG` for the same explicit local-only override path.
+
 That override is a local development convenience only and should never be committed. `cargo run -p xtask -- validate repo-policy` rejects committed local path patches in `backend/Cargo.toml`.
 
 ### Cross compiling

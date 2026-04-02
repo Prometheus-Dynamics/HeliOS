@@ -9,10 +9,24 @@ on:
 jobs:
   repo-validation:
     runs-on: ubuntu-24.04
+    env:
+      HELIOS_CARGO_CONFIG: ${{ runner.temp }}/helios-ci-cargo-overrides.toml
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Checkout Styx override
+        run: |
+          git clone https://github.com/Prometheus-Dynamics/Styx.git "$RUNNER_TEMP/styx"
+          git -C "$RUNNER_TEMP/styx" checkout ecd4b958cd86155acc81f23254fdc4a31fc3e7a1
+
+      - name: Write CI cargo override
+        run: |
+          cat > "$HELIOS_CARGO_CONFIG" <<EOF
+          [patch."https://github.com/Prometheus-Dynamics/Styx.git"]
+          styx = { path = "$RUNNER_TEMP/styx/crates/styx" }
+          EOF
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -48,10 +62,22 @@ jobs:
             ${{ runner.os }}-cargo-target-
 
       - name: Run xtask tests
-        run: cargo test --manifest-path backend/Cargo.toml -p xtask
+        run: cargo --config "$HELIOS_CARGO_CONFIG" test --manifest-path backend/Cargo.toml -p xtask
 
       - name: Validate repo policy
-        run: cargo run --manifest-path backend/Cargo.toml -p xtask -- validate repo-policy
+        run: cargo --config "$HELIOS_CARGO_CONFIG" run --manifest-path backend/Cargo.toml -p xtask -- validate repo-policy
 
       - name: Validate generated contracts
-        run: cargo run --manifest-path backend/Cargo.toml -p xtask -- validate generated-contracts
+        run: cargo --config "$HELIOS_CARGO_CONFIG" run --manifest-path backend/Cargo.toml -p xtask -- validate generated-contracts
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: bun install --frozen-lockfile
+
+      - name: Frontend typecheck
+        working-directory: frontend
+        run: SKIP_CODEGEN=1 bun run check
+
+      - name: Frontend production build
+        working-directory: frontend
+        run: SKIP_CODEGEN=1 SKIP_DOCS_SYNC=1 bun run build

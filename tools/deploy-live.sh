@@ -30,6 +30,7 @@ CROSS_SCCACHE_DIR="${CROSS_SCCACHE_DIR:-$CROSS_BUILD_ROOT_DEFAULT/sccache}"
 DAEDALUS_HOST_PATH="${DAEDALUS_HOST_PATH:-}"
 STYX_HOST_PATH="${STYX_HOST_PATH:-}"
 LIBCAMERA_RS_HOST_PATH="${LIBCAMERA_RS_HOST_PATH:-}"
+HELIOS_CARGO_CONFIG="${HELIOS_CARGO_CONFIG:-}"
 
 BINS_DIR_DEFAULT="$ROOT_DIR/output/cm5/binaries"
 PLUGINS_DIR_DEFAULT="$ROOT_DIR/output/cm5/plugins/daedalus"
@@ -104,6 +105,7 @@ Env vars (optional):
   DAEDALUS_HOST_PATH     Host path to a Daedalus checkout (optional dev override)
   STYX_HOST_PATH         Host path to a Styx checkout (optional dev override)
   LIBCAMERA_RS_HOST_PATH Host path to a libcamera-rs checkout (optional dev override)
+  HELIOS_CARGO_CONFIG    Host path to an explicit cargo config override passed as `cargo --config`
   DOCKER_CONTEXT         Docker build context for the cross image
   TARGET_BUILD_DIR       Host path for cross-built Cargo target artifacts
   CROSS_CARGO_HOME       Host path for cross-build Cargo cache
@@ -277,6 +279,10 @@ ensure_deps() {
     if [[ -n "${LIBCAMERA_RS_HOST_PATH// }" ]]; then
       [[ -d "$LIBCAMERA_RS_HOST_PATH" ]] || die "missing LIBCAMERA_RS_HOST_PATH dir: $LIBCAMERA_RS_HOST_PATH"
     fi
+    if [[ -n "${HELIOS_CARGO_CONFIG// }" ]]; then
+      HELIOS_CARGO_CONFIG="$(readlink -f "$HELIOS_CARGO_CONFIG")"
+      [[ -f "$HELIOS_CARGO_CONFIG" ]] || die "missing HELIOS_CARGO_CONFIG file: $HELIOS_CARGO_CONFIG"
+    fi
   fi
   if [[ "$UPLOAD" == "1" ]]; then
     needs_ssh="0"
@@ -377,6 +383,12 @@ docker_run_cargo_build() {
     docker_args+=(-e "RUSTFLAGS=$RUSTFLAGS")
   fi
 
+  local cargo_prefix="cargo"
+  if [[ -n "${HELIOS_CARGO_CONFIG// }" ]]; then
+    docker_args+=(-v "$HELIOS_CARGO_CONFIG:/tmp/helios-local-cargo-config.toml:ro")
+    cargo_prefix="cargo --config '/tmp/helios-local-cargo-config.toml'"
+  fi
+
   local features_arg=""
   if [[ -n "${features// }" ]]; then
     features_arg="--features '$features'"
@@ -390,7 +402,7 @@ docker_run_cargo_build() {
   run docker run "${docker_args[@]}" "$IMAGE_TAG" bash -lc \
     "export GIT_CONFIG_GLOBAL=/tmp/gitconfig; \
      : > \"\$GIT_CONFIG_GLOBAL\"; \
-     cargo build --target '$target_triple' $profile_flag ${features_arg:+$features_arg }$target_arg"
+     $cargo_prefix build --target '$target_triple' $profile_flag ${features_arg:+$features_arg }$target_arg"
 }
 
 binary_output_path() {

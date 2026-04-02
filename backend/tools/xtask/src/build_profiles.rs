@@ -34,7 +34,11 @@ pub(crate) fn validate(repo_root: &Path) -> Result<()> {
 }
 
 fn run_cargo(repo_root: &Path, name: &str, args: &[&str]) -> Result<()> {
-    let status = Command::new("cargo").args(args).current_dir(repo_root).status().with_context(|| format!("failed to launch cargo for {name}"))?;
+    let mut command = Command::new("cargo");
+    if let Some(config_path) = std::env::var_os("HELIOS_CARGO_CONFIG") {
+        command.arg("--config").arg(config_path);
+    }
+    let status = command.args(args).current_dir(repo_root).status().with_context(|| format!("failed to launch cargo for {name}"))?;
     if !status.success() {
         bail!("{name} failed with status {status}");
     }
