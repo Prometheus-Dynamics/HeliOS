@@ -37,20 +37,7 @@ const CALIBRATION_MODE_HOST_BUFFER: usize = 1;
 // Stopping a recording may include MP4 finalize (ffmpeg remux/transcode) which can be slow.
 const RECORDING_STOP_TIMEOUT: Duration = Duration::from_secs(180);
 const SNAPSHOT_SOURCE_TIMEOUT: Duration = Duration::from_secs(3);
-const RECORDING_STOP_GRACE_DEFAULT_MS: u64 = 0;
-const RECORDING_STOP_GRACE_MIN_MS: u64 = 0;
-const RECORDING_STOP_GRACE_MAX_MS: u64 = 2_000;
 const SHADOW_STOP_TIMEOUT: Duration = Duration::from_secs(10);
-const SHADOW_WINDOW_DEFAULT_MS: u64 = 120_000;
-const SHADOW_WINDOW_MIN_MS: u64 = 5_000;
-const SHADOW_WINDOW_MAX_MS: u64 = 600_000;
-const SHADOW_SEGMENT_DEFAULT_MS: u64 = 2_000;
-const SHADOW_SEGMENT_MIN_MS: u64 = 250;
-const SHADOW_SEGMENT_MAX_MS: u64 = 10_000;
-const ENV_STREAM_COMMAND_QUEUE_SIZE: &str = "HELIOS_STREAM_COMMAND_QUEUE_SIZE";
-const DEFAULT_STREAM_COMMAND_QUEUE_SIZE: usize = 64;
-const ENV_RECORDING_FRAME_QUEUE_SIZE: &str = "HELIOS_RECORDING_FRAME_QUEUE_SIZE";
-const DEFAULT_RECORDING_FRAME_QUEUE_SIZE: usize = 48;
 const STREAM_RUNTIME_QUERY_TIMEOUT: Duration = Duration::from_millis(250);
 
 static SHADOW_DATA_ROOT: OnceLock<PathBuf> = OnceLock::new();
@@ -61,20 +48,6 @@ mod policy;
 mod recording;
 #[path = "manager/runtime.rs"]
 mod runtime;
-
-fn thread_stack_size_bytes(var: &str, default: usize) -> usize {
-    const MIN: usize = 256 * 1024;
-    const MAX: usize = 8 * 1024 * 1024;
-    std::env::var(var).ok().and_then(|raw| raw.trim().parse::<usize>().ok()).unwrap_or(default).clamp(MIN, MAX)
-}
-
-fn stream_worker_stack_size_bytes() -> usize {
-    thread_stack_size_bytes("HELIOS_ENGINE_STREAM_THREAD_STACK_BYTES", 2 * 1024 * 1024)
-}
-
-fn recording_worker_stack_size_bytes() -> usize {
-    thread_stack_size_bytes("HELIOS_ENGINE_RECORDING_THREAD_STACK_BYTES", 1 * 1024 * 1024)
-}
 
 struct ManagedEncodedConsumer {
     count: Arc<AtomicU64>,
@@ -1323,10 +1296,6 @@ async fn query_stream_runtime_state(ctx: &StreamContext) -> crate::ipc::StreamRu
     }
 }
 
-fn stream_command_queue_size() -> usize {
-    std::env::var(ENV_STREAM_COMMAND_QUEUE_SIZE).ok().and_then(|raw| raw.parse::<usize>().ok()).filter(|size| *size > 0).unwrap_or(DEFAULT_STREAM_COMMAND_QUEUE_SIZE).clamp(8, 512)
-}
-
 fn enqueue_stream_command(tx: &SyncSender<StreamCommand>, command: StreamCommand) -> Result<()> {
     match tx.try_send(command) {
         Ok(()) => Ok(()),
@@ -1618,60 +1587,65 @@ fn find_annexb_start(bytes: &[u8], from: usize) -> Option<(usize, usize)> {
     None
 }
 
-#[allow(clippy::too_many_arguments)]
-fn write_payload_to_raw(
-    writer: &mut dyn Write,
+struct RawPayloadWriteState<'a> {
+    writer: &'a mut dyn Write,
+    raw_format: &'a mut RawRecordingFormat,
+    format_tracker: Option<&'a Arc<AtomicU8>>,
+    bitstream: &'a mut RecordingBitstream,
+    convert_buf: &'a mut Vec<u8>,
+    config_cache: &'a mut RecordingConfigCache,
+    wrote_prefix: &'a mut bool,
+    pending_before_config: &'a mut std::collections::VecDeque<Vec<u8>>,
+    pending_bytes: &'a mut usize,
+    stats: &'a mut RecordingStats,
+    ts_writer: &'a mut Option<RecordingTimestampWriter>,
+}
+
+struct RawPayloadWriteInput<'a> {
     codec: RecordingCodec,
-    raw_format: &mut RawRecordingFormat,
-    format_tracker: Option<&Arc<AtomicU8>>,
-    bitstream: &mut RecordingBitstream,
-    convert_buf: &mut Vec<u8>,
-    config_cache: &mut RecordingConfigCache,
-    wrote_prefix: &mut bool,
-    pending_before_config: &mut std::collections::VecDeque<Vec<u8>>,
-    pending_bytes: &mut usize,
-    pending_max_bytes: usize,
-    stats: &mut RecordingStats,
-    ts_writer: &mut Option<RecordingTimestampWriter>,
-    payload: &[u8],
+    payload: &'a [u8],
     ts_ms: u64,
+    pending_max_bytes: usize,
     allow_mjpeg_switch: bool,
-) -> std::result::Result<(), String> {
-    if *raw_format != RawRecordingFormat::Mjpeg && is_mjpeg_payload(payload) {
+}
+
+fn write_payload_to_raw(state: RawPayloadWriteState<'_>, input: RawPayloadWriteInput<'_>) -> std::result::Result<(), String> {
+    let RawPayloadWriteInput { codec, payload, ts_ms, pending_max_bytes, allow_mjpeg_switch } = input;
+    if *state.raw_format != RawRecordingFormat::Mjpeg && is_mjpeg_payload(payload) {
         if !allow_mjpeg_switch {
             return Err("encoded payload was MJPEG but H264/H265 was expected".to_string());
         }
         tracing::warn!(codec = ?codec, "recording encoder output appears to be MJPEG; treating as MJPEG");
-        *raw_format = RawRecordingFormat::Mjpeg;
-        stats.raw_format = Some(RawRecordingFormat::Mjpeg);
-        if let Some(tracker) = format_tracker {
+        *state.raw_format = RawRecordingFormat::Mjpeg;
+        state.stats.raw_format = Some(RawRecordingFormat::Mjpeg);
+        if let Some(tracker) = state.format_tracker {
             tracker.store(RawRecordingFormat::Mjpeg.to_u8(), Ordering::Release);
         }
     }
 
-    if matches!(*raw_format, RawRecordingFormat::Mjpeg) {
-        writer.write_all(payload).map_err(|err| format!("recording write failed: {err}"))?;
-        stats.record_ts(ts_ms);
-        stats.frames = stats.frames.saturating_add(1);
-        stats.bytes = stats.bytes.saturating_add(payload.len() as u64);
-        if let Some(writer) = ts_writer.as_mut() {
+    if matches!(*state.raw_format, RawRecordingFormat::Mjpeg) {
+        state.writer.write_all(payload).map_err(|err| format!("recording write failed: {err}"))?;
+        state.stats.record_ts(ts_ms);
+        state.stats.frames = state.stats.frames.saturating_add(1);
+        state.stats.bytes = state.stats.bytes.saturating_add(payload.len() as u64);
+        if let Some(writer) = state.ts_writer.as_mut() {
             writer.record(ts_ms)?;
         }
         return Ok(());
     }
 
     let mut out_payload = payload;
-    if *bitstream == RecordingBitstream::Unknown {
-        *bitstream = if is_annexb_prefix(out_payload) { RecordingBitstream::AnnexB } else { RecordingBitstream::LengthPrefixed };
+    if *state.bitstream == RecordingBitstream::Unknown {
+        *state.bitstream = if is_annexb_prefix(out_payload) { RecordingBitstream::AnnexB } else { RecordingBitstream::LengthPrefixed };
     }
-    if *bitstream == RecordingBitstream::LengthPrefixed {
-        if length_prefixed_to_annexb_best_effort(out_payload, convert_buf) {
-            out_payload = convert_buf.as_slice();
+    if *state.bitstream == RecordingBitstream::LengthPrefixed {
+        if length_prefixed_to_annexb_best_effort(out_payload, state.convert_buf) {
+            out_payload = state.convert_buf.as_slice();
         } else if is_annexb_prefix(out_payload) {
-            *bitstream = RecordingBitstream::AnnexB;
+            *state.bitstream = RecordingBitstream::AnnexB;
         } else if let Some((start, _)) = find_annexb_start(out_payload, 0) {
             // Some sources prepend non-startcode bytes; best-effort salvage if AnnexB is present.
-            *bitstream = RecordingBitstream::AnnexB;
+            *state.bitstream = RecordingBitstream::AnnexB;
             out_payload = &out_payload[start..];
         } else {
             // Drop malformed payload.
@@ -1679,26 +1653,26 @@ fn write_payload_to_raw(
         }
     }
 
-    config_cache.update_from_annexb(codec, out_payload);
-    if !*wrote_prefix {
-        if let Some(prefix) = config_cache.prefix(codec) {
-            writer.write_all(&prefix).map_err(|err| format!("recording write failed: {err}"))?;
-            *wrote_prefix = true;
-            while let Some(buf) = pending_before_config.pop_front() {
-                *pending_bytes = pending_bytes.saturating_sub(buf.len());
-                writer.write_all(&buf).map_err(|err| format!("recording write failed: {err}"))?;
-                stats.bytes = stats.bytes.saturating_add(buf.len() as u64);
+    state.config_cache.update_from_annexb(codec, out_payload);
+    if !*state.wrote_prefix {
+        if let Some(prefix) = state.config_cache.prefix(codec) {
+            state.writer.write_all(&prefix).map_err(|err| format!("recording write failed: {err}"))?;
+            *state.wrote_prefix = true;
+            while let Some(buf) = state.pending_before_config.pop_front() {
+                *state.pending_bytes = state.pending_bytes.saturating_sub(buf.len());
+                state.writer.write_all(&buf).map_err(|err| format!("recording write failed: {err}"))?;
+                state.stats.bytes = state.stats.bytes.saturating_add(buf.len() as u64);
             }
         } else {
             let mut v = Vec::with_capacity(out_payload.len());
             v.extend_from_slice(out_payload);
-            *pending_bytes = pending_bytes.saturating_add(v.len());
-            pending_before_config.push_back(v);
-            while *pending_bytes > pending_max_bytes {
-                if let Some(dropped) = pending_before_config.pop_front() {
-                    *pending_bytes = pending_bytes.saturating_sub(dropped.len());
+            *state.pending_bytes = state.pending_bytes.saturating_add(v.len());
+            state.pending_before_config.push_back(v);
+            while *state.pending_bytes > pending_max_bytes {
+                if let Some(dropped) = state.pending_before_config.pop_front() {
+                    *state.pending_bytes = state.pending_bytes.saturating_sub(dropped.len());
                 } else {
-                    *pending_bytes = 0;
+                    *state.pending_bytes = 0;
                     break;
                 }
             }
@@ -1706,11 +1680,11 @@ fn write_payload_to_raw(
         }
     }
 
-    writer.write_all(out_payload).map_err(|err| format!("recording write failed: {err}"))?;
-    stats.record_ts(ts_ms);
-    stats.frames = stats.frames.saturating_add(1);
-    stats.bytes = stats.bytes.saturating_add(out_payload.len() as u64);
-    if let Some(writer) = ts_writer.as_mut() {
+    state.writer.write_all(out_payload).map_err(|err| format!("recording write failed: {err}"))?;
+    state.stats.record_ts(ts_ms);
+    state.stats.frames = state.stats.frames.saturating_add(1);
+    state.stats.bytes = state.stats.bytes.saturating_add(out_payload.len() as u64);
+    if let Some(writer) = state.ts_writer.as_mut() {
         writer.record(ts_ms)?;
     }
     Ok(())
@@ -1791,7 +1765,7 @@ impl RecordingEncoderWorker {
         let rx = Arc::clone(&mailbox);
         let join = std::thread::Builder::new()
             .name("helios-recording".into())
-            .stack_size(recording_worker_stack_size_bytes())
+            .stack_size(policy::recording_worker_stack_size_bytes())
             .spawn(move || run_recording_encoder(rx, config))
             .map_err(|err| format!("recording worker spawn failed: {err}"))?;
         Ok(Self { mailbox, join: Some(join) })
@@ -1815,7 +1789,7 @@ impl ShadowRecorderWorker {
         let (tx, rx) = sync_channel::<ShadowRecorderJob>(32);
         let join = std::thread::Builder::new()
             .name("helios-shadow-record".into())
-            .stack_size(recording_worker_stack_size_bytes())
+            .stack_size(policy::recording_worker_stack_size_bytes())
             .spawn(move || run_shadow_recorder_worker(rx, config))
             .map_err(|err| format!("shadow recorder spawn failed: {err}"))?;
         Ok(Self { tx, join: Some(join) })
@@ -2074,22 +2048,20 @@ impl RecordingEncoderRuntime {
     fn write_encoded_payload(&mut self, payload: &[u8], ts_ms: u64) -> std::result::Result<(), String> {
         let mut raw_format = self.raw_format;
         write_payload_to_raw(
-            &mut self.writer,
-            self.codec,
-            &mut raw_format,
-            self.format_tracker.as_ref(),
-            &mut self.bitstream,
-            &mut self.convert_buf,
-            &mut self.config_cache,
-            &mut self.wrote_prefix,
-            &mut self.pending_before_config,
-            &mut self.pending_bytes,
-            4 * 1024 * 1024,
-            &mut self.stats,
-            &mut self.ts_writer,
-            payload,
-            ts_ms,
-            true,
+            RawPayloadWriteState {
+                writer: &mut self.writer,
+                raw_format: &mut raw_format,
+                format_tracker: self.format_tracker.as_ref(),
+                bitstream: &mut self.bitstream,
+                convert_buf: &mut self.convert_buf,
+                config_cache: &mut self.config_cache,
+                wrote_prefix: &mut self.wrote_prefix,
+                pending_before_config: &mut self.pending_before_config,
+                pending_bytes: &mut self.pending_bytes,
+                stats: &mut self.stats,
+                ts_writer: &mut self.ts_writer,
+            },
+            RawPayloadWriteInput { codec: self.codec, payload, ts_ms, pending_max_bytes: 4 * 1024 * 1024, allow_mjpeg_switch: true },
         )?;
         if raw_format != self.raw_format {
             self.set_raw_format(raw_format);
@@ -2471,22 +2443,20 @@ fn write_encoded_chunks_to_raw(path: PathBuf, codec: RecordingCodec, timestamps_
 
     while let Ok((payload, ts_ms)) = rx.recv() {
         write_payload_to_raw(
-            &mut writer,
-            codec,
-            &mut raw_format,
-            None,
-            &mut bitstream,
-            &mut convert_buf,
-            &mut config_cache,
-            &mut wrote_prefix,
-            &mut pending_before_config,
-            &mut pending_bytes,
-            pending_max_bytes,
-            &mut stats,
-            &mut ts_writer,
-            payload.as_ref(),
-            ts_ms,
-            true,
+            RawPayloadWriteState {
+                writer: &mut writer,
+                raw_format: &mut raw_format,
+                format_tracker: None,
+                bitstream: &mut bitstream,
+                convert_buf: &mut convert_buf,
+                config_cache: &mut config_cache,
+                wrote_prefix: &mut wrote_prefix,
+                pending_before_config: &mut pending_before_config,
+                pending_bytes: &mut pending_bytes,
+                stats: &mut stats,
+                ts_writer: &mut ts_writer,
+            },
+            RawPayloadWriteInput { codec, payload: payload.as_ref(), ts_ms, pending_max_bytes, allow_mjpeg_switch: true },
         )?;
     }
 
@@ -2613,12 +2583,11 @@ async fn record_encoded_stream(
     write_task.await.map_err(|_| "recording writer join failed".to_string())?
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn record_encoded_session(
+struct EncodedRecordingSessionRequest {
     rx: Receiver<EncodedFrame>,
     stop_rx: oneshot::Receiver<()>,
-    output_path: &Path,
-    raw_path: &Path,
+    output_path: PathBuf,
+    raw_path: PathBuf,
     container: RecordingContainer,
     source_codec: RecordingCodec,
     target_codec: RecordingCodec,
@@ -2627,8 +2596,11 @@ async fn record_encoded_session(
     settings: Option<crate::ipc::RecordingSettings>,
     timestamps_path: Option<PathBuf>,
     consumer_touch: Option<Arc<AtomicU64>>,
-) -> std::result::Result<RecordingStats, String> {
-    let record_path = if matches!(container, RecordingContainer::Mp4) { raw_path } else { output_path };
+}
+
+async fn record_encoded_session(request: EncodedRecordingSessionRequest) -> std::result::Result<RecordingStats, String> {
+    let EncodedRecordingSessionRequest { rx, stop_rx, output_path, raw_path, container, source_codec, target_codec, duration_ms, fps, settings, timestamps_path, consumer_touch } = request;
+    let record_path = if matches!(container, RecordingContainer::Mp4) { raw_path.as_path() } else { output_path.as_path() };
     let wall_start_ms = current_time_ms();
     let rewrite_timestamps_path = timestamps_path.clone();
     let stats = record_encoded_stream(rx, stop_rx, record_path, source_codec, duration_ms, timestamps_path, consumer_touch).await?;
@@ -2645,8 +2617,6 @@ async fn record_encoded_session(
         let transcode = settings.as_ref().is_some_and(|s| s.bitrate_bps.is_some() || s.gop.is_some() || s.quality.is_some() || s.max_width.is_some() || s.max_height.is_some());
         let raw_format = stats.raw_format.unwrap_or_else(|| RawRecordingFormat::from_codec(source_codec));
         let needs_transcode = transcode || raw_format.as_codec() != Some(target_codec);
-        let raw_path = raw_path.to_path_buf();
-        let output_path = output_path.to_path_buf();
         let settings = if needs_transcode { settings } else { None };
         if needs_transcode {
             finalize_recording_mp4(raw_path, output_path, raw_format, target_codec, remux_fps, settings).await?;
@@ -2659,7 +2629,7 @@ async fn record_encoded_session(
 }
 
 async fn maybe_rewrite_encoded_frame_timestamps(path: &Path, stats: &RecordingStats, wall_start_ms: u64, wall_end_ms: u64) -> std::result::Result<(), String> {
-    if !rewrite_encoded_frame_timestamps_to_wall_enabled() {
+    if !policy::rewrite_encoded_frame_timestamps_to_wall_enabled() {
         return Ok(());
     }
     if stats.frames == 0 {
@@ -2685,19 +2655,6 @@ async fn maybe_rewrite_encoded_frame_timestamps(path: &Path, stats: &RecordingSt
         "rewriting encoded frame timestamps to wall-clock span"
     );
     rewrite_timestamp_file(path, wall_start_ms, wall_end_ms, stats.frames).await
-}
-
-fn rewrite_encoded_frame_timestamps_to_wall_enabled() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| {
-        std::env::var("HELIOS_RECORDING_REWRITE_FRAME_TS_TO_WALL")
-            .ok()
-            .map(|raw| {
-                let normalized = raw.trim().to_ascii_lowercase();
-                matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
-            })
-            .unwrap_or(false)
-    })
 }
 
 async fn rewrite_timestamp_file(path: &Path, start_ms: u64, end_ms: u64, frames: u64) -> std::result::Result<(), String> {
@@ -2751,25 +2708,27 @@ async fn probe_prefix_from_segments(selection: &[(u64, PathBuf)], codec: Recordi
     cache.prefix(codec)
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn record_shadow_segments_session(
-    _stream_id: Uuid,
-    shadow_dir: &Path,
+struct ShadowRecordingSessionRequest {
+    stream_id: Uuid,
+    shadow_dir: PathBuf,
     codec: RecordingCodec,
-    output_path: &Path,
-    raw_path: &Path,
+    output_path: PathBuf,
+    raw_path: PathBuf,
     container: RecordingContainer,
     started_at_ms: u64,
     duration_ms: Option<u64>,
     fps: Option<f32>,
     settings: Option<crate::ipc::RecordingSettings>,
-    mut stop_rx: oneshot::Receiver<()>,
-) -> std::result::Result<RecordingStats, String> {
-    if fs::metadata(shadow_dir).await.is_err() {
+    stop_rx: oneshot::Receiver<()>,
+}
+
+async fn record_shadow_segments_session(request: ShadowRecordingSessionRequest) -> std::result::Result<RecordingStats, String> {
+    let ShadowRecordingSessionRequest { stream_id: _stream_id, shadow_dir, codec, output_path, raw_path, container, started_at_ms, duration_ms, fps, settings, mut stop_rx } = request;
+    if fs::metadata(&shadow_dir).await.is_err() {
         return Err("shadow recorder data not found".to_string());
     }
 
-    let record_path = if matches!(container, RecordingContainer::Mp4) { raw_path } else { output_path };
+    let record_path = if matches!(container, RecordingContainer::Mp4) { raw_path.as_path() } else { output_path.as_path() };
     let wall_start_ms = started_at_ms;
 
     // Wait for the requested window to elapse, then do a single shadow capture ending "now".
@@ -2826,22 +2785,20 @@ async fn record_shadow_segments_session(
 
     let preroll_ms = shadow_segment_ms().max(1_000);
     let capture_ms = window_ms.saturating_add(preroll_ms).min(max_window);
-    let total_bytes = capture_shadow_segments(shadow_dir, record_path, codec, capture_ms).await?;
+    let total_bytes = capture_shadow_segments(&shadow_dir, record_path, codec, capture_ms).await?;
 
     if matches!(container, RecordingContainer::Mp4) {
         let raw_format = RawRecordingFormat::from_codec(codec);
-        let output = output_path.to_path_buf();
-        let raw = raw_path.to_path_buf();
         // Shadow segments can start mid-GOP; pre-roll improves the chance ffmpeg sees an IDR
         // before the requested window. We then trim down to the requested duration.
-        let forced_fps = probe_raw_frames(&raw, raw_format).await.ok().map(|frames| {
+        let forced_fps = probe_raw_frames(&raw_path, raw_format).await.ok().map(|frames| {
             let secs = (capture_ms as f32 / 1000.0).max(0.001);
             (frames as f32 / secs).clamp(1.0, 240.0)
         });
         let fps = forced_fps.or(fps);
-        let pretrim = pretrim_output_path(&output);
-        finalize_recording_mp4(raw, pretrim.clone(), raw_format, codec, fps, settings).await?;
-        let trim_res = trim_mp4_to_last_window(&pretrim, &output, window_ms, codec).await;
+        let pretrim = pretrim_output_path(&output_path);
+        finalize_recording_mp4(raw_path, pretrim.clone(), raw_format, codec, fps, settings).await?;
+        let trim_res = trim_mp4_to_last_window(&pretrim, &output_path, window_ms, codec).await;
         let _ = tokio::fs::remove_file(&pretrim).await;
         trim_res?;
     }

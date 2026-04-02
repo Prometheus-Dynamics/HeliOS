@@ -1,4 +1,10 @@
 use super::*;
+use lib_runtime_policy::{ResolvedEngineRecordingPolicy, HELIOS_ENGINE_RECORDING_POLICY};
+
+pub(super) fn recording_policy() -> &'static ResolvedEngineRecordingPolicy {
+    static VALUE: OnceLock<ResolvedEngineRecordingPolicy> = OnceLock::new();
+    VALUE.get_or_init(|| HELIOS_ENGINE_RECORDING_POLICY.resolve())
+}
 
 pub(super) fn apply_stream_start_policy(manifest: &mut ResolvedStreamConfig) -> Result<()> {
     let Some(recording_codec) = manifest.recording_mode.shadow_buffer_codec() else {
@@ -108,56 +114,56 @@ pub(super) fn encoder_matches(codec: RecordingCodec, encoder_id: &str) -> bool {
     false
 }
 
+pub(super) fn stream_command_queue_size() -> usize {
+    recording_policy().stream_command_queue_size
+}
+
+pub(super) fn stream_worker_stack_size_bytes() -> usize {
+    recording_policy().stream_worker_stack_bytes
+}
+
+pub(super) fn recording_worker_stack_size_bytes() -> usize {
+    recording_policy().recording_worker_stack_bytes
+}
+
 pub(super) fn shadow_window_ms() -> u64 {
-    let requested = std::env::var("HELIOS_SHADOW_WINDOW_MS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(SHADOW_WINDOW_DEFAULT_MS);
-    requested.clamp(SHADOW_WINDOW_MIN_MS, SHADOW_WINDOW_MAX_MS)
+    recording_policy().shadow_window_ms
 }
 
 pub(super) fn shadow_segment_ms() -> u64 {
-    let requested = std::env::var("HELIOS_SHADOW_SEGMENT_MS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(SHADOW_SEGMENT_DEFAULT_MS);
-    let clamped = requested.clamp(SHADOW_SEGMENT_MIN_MS, SHADOW_SEGMENT_MAX_MS);
-    clamped.min(shadow_window_ms())
+    recording_policy().shadow_segment_ms
 }
 
 pub(super) fn shadow_flush_interval_ms() -> u64 {
-    std::env::var("HELIOS_SHADOW_FLUSH_MS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(1_000).clamp(100, 5_000)
+    recording_policy().shadow_flush_interval_ms
 }
 
 pub(super) fn shadow_writer_buffer_bytes() -> usize {
-    std::env::var("HELIOS_SHADOW_WRITER_BYTES").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(1 << 20).clamp(64 << 10, 8 << 20)
+    recording_policy().shadow_writer_buffer_bytes
 }
 
 pub(super) fn shadow_config_scan_interval_ms() -> u64 {
-    std::env::var("HELIOS_SHADOW_CONFIG_SCAN_MS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(1_000).clamp(100, 10_000)
+    recording_policy().shadow_config_scan_interval_ms
 }
 
 pub(super) fn recording_stop_grace_ms() -> u64 {
-    std::env::var("HELIOS_RECORDING_STOP_GRACE_MS")
-        .ok()
-        .and_then(|v| v.trim().parse::<u64>().ok())
-        .unwrap_or(RECORDING_STOP_GRACE_DEFAULT_MS)
-        .clamp(RECORDING_STOP_GRACE_MIN_MS, RECORDING_STOP_GRACE_MAX_MS)
+    recording_policy().recording_stop_grace_ms
 }
 
 pub(super) fn recording_frame_queue_size() -> usize {
-    std::env::var(ENV_RECORDING_FRAME_QUEUE_SIZE).ok().and_then(|v| v.trim().parse::<usize>().ok()).unwrap_or(DEFAULT_RECORDING_FRAME_QUEUE_SIZE).clamp(1, 256)
+    recording_policy().recording_frame_queue_size
 }
 
 pub(super) fn keep_raw_on_record_fail() -> bool {
-    static VALUE: OnceLock<bool> = OnceLock::new();
-    *VALUE.get_or_init(|| {
-        let raw = std::env::var("HELIOS_KEEP_RAW_ON_RECORD_FAIL").ok().unwrap_or_default();
-        let v = raw.trim().to_ascii_lowercase();
-        matches!(v.as_str(), "1" | "true" | "yes" | "y" | "on" | "enabled")
-    })
+    recording_policy().keep_raw_on_record_fail
 }
 
 pub(super) fn normalize_shadow_window_ms(requested: u64) -> u64 {
-    let base = shadow_window_ms();
+    let base = recording_policy().shadow_window_ms;
     if requested == 0 {
         return base;
     }
-    requested.clamp(SHADOW_WINDOW_MIN_MS, base)
+    requested.clamp(HELIOS_ENGINE_RECORDING_POLICY.shadow_window_ms.min, base)
 }
 
 pub(super) fn shadow_data_root() -> PathBuf {
@@ -180,31 +186,20 @@ pub(super) fn shadow_data_root() -> PathBuf {
         .clone()
 }
 
-pub(super) fn env_flag_enabled(var: &str, default_value: bool) -> bool {
-    let raw = match std::env::var(var) {
-        Ok(value) => value,
-        Err(_) => return default_value,
-    };
-    let value = raw.trim().to_ascii_lowercase();
-    if value.is_empty() {
-        return default_value;
-    }
-    matches!(value.as_str(), "1" | "true" | "yes" | "y" | "on" | "enabled")
-}
-
 pub(super) fn shadow_recorder_feature_enabled() -> bool {
-    static VALUE: OnceLock<bool> = OnceLock::new();
-    *VALUE.get_or_init(|| env_flag_enabled("HELIOS_ENABLE_SHADOW_RECORDER", true))
+    recording_policy().shadow_recorder_enabled
 }
 
 pub(super) fn recording_encoded_passthrough_enabled() -> bool {
-    static VALUE: OnceLock<bool> = OnceLock::new();
-    *VALUE.get_or_init(|| env_flag_enabled("HELIOS_RECORDING_USE_ENCODED_PASSTHROUGH", false))
+    recording_policy().recording_encoded_passthrough
 }
 
 pub(super) fn recording_shadow_start_stop_enabled() -> bool {
-    static VALUE: OnceLock<bool> = OnceLock::new();
-    *VALUE.get_or_init(|| env_flag_enabled("HELIOS_RECORDING_USE_SHADOW_START_STOP", false))
+    recording_policy().recording_shadow_start_stop
+}
+
+pub(super) fn rewrite_encoded_frame_timestamps_to_wall_enabled() -> bool {
+    recording_policy().rewrite_encoded_frame_timestamps_to_wall
 }
 
 pub(super) fn shadow_dir_for_stream(stream_id: Uuid) -> PathBuf {

@@ -16,7 +16,6 @@ use lib_cv::modules::aruco::ArucoDetection2D;
 use metrics::histogram;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::env;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -42,6 +41,7 @@ mod flamegraph;
 mod multiplex;
 mod payload;
 mod perf;
+mod policy;
 mod roi;
 #[cfg(test)]
 mod tests;
@@ -978,23 +978,23 @@ impl GraphHandle {
     /// Build a graph handle from a Daedalus graph JSON payload. This validates the graph
     /// and installs a Daedalus-backed executor so host frames are routed through the graph.
     pub fn from_json(buffer: usize, json: &Value) -> Result<Self, GraphError> {
-        Self::build_graph_handle(buffer, json, pool_size_from_env(), None)
+        Self::build_graph_handle(buffer, json, policy::pool_size(), None)
     }
 
     /// Build a graph handle from persisted/imported graph JSON using the same strict
     /// canonical decoding path as user-authored graphs.
     pub fn from_persisted_json(buffer: usize, json: &Value) -> Result<Self, GraphError> {
-        Self::build_graph_handle(buffer, json, pool_size_from_env(), None)
+        Self::build_graph_handle(buffer, json, policy::pool_size(), None)
     }
 
     /// Same as `from_json` but optionally selects a single host output port to forward.
     pub fn from_json_with_output(buffer: usize, json: &Value, output_port: Option<&str>) -> Result<Self, GraphError> {
-        Self::build_graph_handle(buffer, json, pool_size_from_env(), output_port)
+        Self::build_graph_handle(buffer, json, policy::pool_size(), output_port)
     }
 
     /// Same as `from_persisted_json` but optionally selects a single host output port to forward.
     pub fn from_persisted_json_with_output(buffer: usize, json: &Value, output_port: Option<&str>) -> Result<Self, GraphError> {
-        Self::build_graph_handle(buffer, json, pool_size_from_env(), output_port)
+        Self::build_graph_handle(buffer, json, policy::pool_size(), output_port)
     }
 
     /// Same as `from_json` but allows overriding the Daedalus executor pool size.
@@ -1404,7 +1404,6 @@ fn node_metrics_window(level: DaedalusMetricsLevel) -> usize {
     }
 }
 const GRAPH_ERROR_DISABLE_THRESHOLD: u64 = 5;
-const DEFAULT_HOST_OUTPUT_SAMPLE_TTL_MS: u64 = 500;
 
 #[derive(Debug, Clone)]
 struct NodeInfo {
@@ -2220,8 +2219,7 @@ impl DaedalusGraphExecutor {
                 cfg.planner.enable_gpu = true;
             }
             if !runtime_policy_overridden {
-                let queue_cap = env::var("HELIOS_DAEDALUS_RUNTIME_QUEUE_CAP").ok().and_then(|raw| raw.parse::<usize>().ok()).filter(|cap| *cap > 0).unwrap_or(4);
-                cfg.runtime.default_policy = EdgePolicyKind::Bounded { cap: queue_cap };
+                cfg.runtime.default_policy = EdgePolicyKind::Bounded { cap: policy::runtime_queue_cap() };
             }
             if !runtime_backpressure_overridden {
                 cfg.runtime.backpressure = BackpressureStrategy::BoundedQueues;
@@ -2272,7 +2270,7 @@ impl DaedalusGraphExecutor {
             }
         }
         let graph_has_color_sensitive_nodes = graph.nodes.iter().any(|node| node_requires_color_input(node.id.0.as_str()));
-        let graph_auto_target_roi_enabled = metadata_bool_flag(&graph.metadata, "helios.auto_target_roi").unwrap_or_else(auto_target_roi_enabled);
+        let graph_auto_target_roi_enabled = metadata_bool_flag(&graph.metadata, "helios.auto_target_roi").unwrap_or_else(policy::auto_target_roi_enabled);
         let planner_output = engine.plan(&registry.registry, graph).map_err(|e| GraphError::Build(e.to_string()))?;
         let runtime_plan = engine.build_runtime_plan(&planner_output.plan).map_err(|e| GraphError::Build(e.to_string()))?;
         host_mgr.populate_from_plan(&runtime_plan);
@@ -2428,8 +2426,8 @@ impl DaedalusGraphExecutor {
         }
 
         let gpu_plan_active = gpu.is_some() && plan_uses_gpu(plan.as_ref());
-        let host_outputs_in_graph = host_outputs_in_graph_enabled(Some(plan.as_ref()), gpu_plan_active);
-        let demand_driven = demand_driven_enabled(Some(plan.as_ref()), gpu_plan_active);
+        let host_outputs_in_graph = policy::host_outputs_in_graph_enabled(Some(plan.as_ref()), gpu_plan_active);
+        let demand_driven = policy::demand_driven_enabled(Some(plan.as_ref()), gpu_plan_active);
         let run_metrics_level = engine.config().runtime.metrics_level;
         let roi_ports_present = declared_host_bridge_ports.contains("roi_x")
             && declared_host_bridge_ports.contains("roi_y")
@@ -2467,9 +2465,9 @@ impl DaedalusGraphExecutor {
         if let Some(size) = pool_size {
             executor = executor.with_pool_size(Some(size));
         }
-        let dedicated_executor = dedicated_executor_from_env();
-        let busy_behavior = executor_busy_behavior_from_env();
-        let busy_timeout = executor_busy_timeout_from_env();
+        let dedicated_executor = policy::dedicated_executor();
+        let busy_behavior = policy::executor_busy_behavior();
+        let busy_timeout = policy::executor_busy_timeout();
 
         tracing::info!(
             input_host = %input_host_alias,
@@ -2495,8 +2493,8 @@ impl DaedalusGraphExecutor {
             seeded_input_values.insert(key, default_value);
         }
 
-        let pprof_enabled = pprof_enabled_from_env();
-        let pprof_duration_ms = if pprof_enabled { pprof_duration_ms_from_env() } else { None };
+        let pprof_enabled = policy::pprof_enabled();
+        let pprof_duration_ms = if pprof_enabled { policy::pprof_duration_ms() } else { None };
         let pprof_until_ms = pprof_duration_ms.and_then(|d| now_ms().checked_add(d)).unwrap_or(0);
         Ok(Self {
             plan,
@@ -2536,9 +2534,9 @@ impl DaedalusGraphExecutor {
             requested_sample_ports: Mutex::new(BTreeMap::new()),
             image_working_set: GraphImageWorkingSetTracker::default(),
             process_calls: AtomicU64::new(0),
-            perf_enabled: AtomicBool::new(perf_counters_enabled_from_env()),
+            perf_enabled: AtomicBool::new(policy::perf_counters_enabled()),
             pprof_pending: AtomicBool::new(pprof_enabled),
-            pprof_remaining: AtomicU64::new(if pprof_enabled && pprof_until_ms == 0 { pprof_frames_from_env() } else { 0 }),
+            pprof_remaining: AtomicU64::new(if pprof_enabled && pprof_until_ms == 0 { policy::pprof_frames() } else { 0 }),
             pprof_until_ms: AtomicU64::new(pprof_until_ms),
             pprof_guard: Mutex::new(None),
             calibration_payload: std::sync::RwLock::new(calibration_to_daedalus_value(None)),
@@ -2557,7 +2555,7 @@ impl DaedalusGraphExecutor {
 
     fn rebuild_shared_executor(&self) -> Result<(), String> {
         let gpu_plan_active = self.gpu.is_some() && plan_uses_gpu(self.plan.as_ref());
-        let host_outputs_in_graph = host_outputs_in_graph_enabled(Some(self.plan.as_ref()), gpu_plan_active);
+        let host_outputs_in_graph = policy::host_outputs_in_graph_enabled(Some(self.plan.as_ref()), gpu_plan_active);
         let mut executor = DaedalusOwnedExecutor::new(self.plan.clone(), self.handlers.clone_arc())
             .with_host_bridges(self.host_mgr.clone())
             .with_const_coercers(self.const_coercers.clone())
@@ -2758,7 +2756,7 @@ impl GraphExecutor for DaedalusGraphExecutor {
         let mut lock_duration = Duration::default();
         let run_result: Result<(DaedalusExecutionTelemetry, Duration), String> = if self.dedicated_executor {
             push_host_inputs(image)?;
-            let host_outputs_in_graph = host_outputs_in_graph_enabled(Some(self.plan.as_ref()), gpu_plan_active);
+            let host_outputs_in_graph = policy::host_outputs_in_graph_enabled(Some(self.plan.as_ref()), gpu_plan_active);
             let active_nodes = self.active_nodes_for_process_options(options);
             let mut exec = DaedalusOwnedExecutor::new(self.plan.clone(), self.handlers.clone_arc())
                 .with_host_bridges(self.host_mgr.clone())
@@ -2942,7 +2940,7 @@ impl GraphExecutor for DaedalusGraphExecutor {
                 let prefers_grayscale_preview = direct_preview && preview_port_accepts_grayscale_input(&port_lc, &self.host_output_port_types);
                 let is_image_type = port_type.map(is_image_payload).unwrap_or(false);
                 let typed_image = is_image_type;
-                if host_output_debug_enabled() && (call_idx < 3 || call_idx.is_multiple_of(120)) {
+                if policy::host_output_debug_enabled() && (call_idx < 3 || call_idx.is_multiple_of(120)) {
                     tracing::info!(
                         target: "helios_engine::graph",
                         port = %port_name,
@@ -2994,7 +2992,7 @@ impl GraphExecutor for DaedalusGraphExecutor {
                                                 image_popped = true;
                                             }
                                             Err(err) => {
-                                                if wants_preview || host_output_debug_enabled() {
+                                                if wants_preview || policy::host_output_debug_enabled() {
                                                     tracing::warn!(target: "helios_engine::graph", port = %port_name, error = ?err, "host output GPU gray decode failed");
                                                 }
                                             }
@@ -3082,7 +3080,7 @@ impl GraphExecutor for DaedalusGraphExecutor {
                                                         image_popped = true;
                                                     }
                                                     Err(err) => {
-                                                        if wants_preview || host_output_debug_enabled() {
+                                                        if wants_preview || policy::host_output_debug_enabled() {
                                                             tracing::warn!(target: "helios_engine::graph", port = %port_name, error = ?err, "host output GPU image download failed");
                                                         }
                                                     }
@@ -3128,7 +3126,7 @@ impl GraphExecutor for DaedalusGraphExecutor {
                                                             image_popped = true;
                                                         }
                                                         Err(err) => {
-                                                            if wants_preview || host_output_debug_enabled() {
+                                                            if wants_preview || policy::host_output_debug_enabled() {
                                                                 tracing::warn!(target: "helios_engine::graph", port = %port_name, error = ?err, "host output GPU gray decode failed");
                                                             }
                                                         }
@@ -3243,7 +3241,7 @@ impl GraphExecutor for DaedalusGraphExecutor {
                             port.restore_raw(raw);
                         }
 
-                        if host_output_debug_enabled() {
+                        if policy::host_output_debug_enabled() {
                             // Many ports are neither image nor value-like; ignore unless debugging.
                             tracing::warn!(target: "helios_engine::graph", port = %port_name, error = ?err, "host output value decode failed");
                         }
@@ -3500,7 +3498,7 @@ impl DaedalusGraphExecutor {
     }
 
     fn maybe_trim_background_graph_allocators(&self, options: GraphProcessOptions) {
-        let interval_ms = if options.require_image_output { active_graph_trim_interval_ms() } else { background_graph_trim_interval_ms() };
+        let interval_ms = if options.require_image_output { policy::active_graph_trim_interval_ms() } else { policy::background_graph_trim_interval_ms() };
         if interval_ms == 0 {
             return;
         }
@@ -3528,7 +3526,7 @@ impl DaedalusGraphExecutor {
         };
         if let Ok(mut guard) = self.requested_sample_ports.lock() {
             let requested_at_ms = now_ms();
-            if host_output_debug_enabled() {
+            if policy::host_output_debug_enabled() {
                 tracing::info!(
                     target: "helios_engine::graph",
                     port = %key,
@@ -3543,7 +3541,7 @@ impl DaedalusGraphExecutor {
     fn active_requested_sample_ports(&self) -> BTreeSet<String> {
         let mut active = BTreeSet::new();
         let now = now_ms();
-        let ttl_ms = host_output_sample_ttl_ms();
+        let ttl_ms = policy::host_output_sample_ttl_ms();
         if let Ok(mut guard) = self.requested_sample_ports.lock() {
             guard.retain(|port, requested_at_ms| {
                 let keep = now.saturating_sub(*requested_at_ms) <= ttl_ms;
@@ -3563,17 +3561,6 @@ impl DaedalusGraphExecutor {
             guard.retain(|port, _| requested_ports.contains(port));
         }
     }
-}
-
-fn host_output_debug_enabled() -> bool {
-    static ENABLED: AtomicU64 = AtomicU64::new(u64::MAX);
-    let cached = ENABLED.load(Ordering::Relaxed);
-    if cached != u64::MAX {
-        return cached == 1;
-    }
-    let enabled = env::var("HELIOS_HOST_OUTPUT_DEBUG").map(|v| v == "1" || v.eq_ignore_ascii_case("true")).unwrap_or(false);
-    ENABLED.store(if enabled { 1 } else { 0 }, Ordering::Relaxed);
-    enabled
 }
 
 fn daedalus_value_to_json(value: &daedalus::data::model::Value) -> Option<Value> {
@@ -4235,119 +4222,8 @@ fn build_demand_sinks(
         .collect()
 }
 
-fn pool_size_from_env() -> Option<usize> {
-    env::var("HELIOS_DAEDALUS_POOL_SIZE").ok().and_then(|v| v.parse::<usize>().ok()).filter(|v| *v > 0)
-}
-
-fn dedicated_executor_from_env() -> bool {
-    env::var("HELIOS_DAEDALUS_DEDICATED_EXECUTOR").ok().map(|v| v == "1" || v.eq_ignore_ascii_case("true")).unwrap_or(false)
-}
-
-fn executor_busy_behavior_from_env() -> ExecutorBusyBehavior {
-    match env::var("HELIOS_DAEDALUS_EXECUTOR_BUSY").ok().as_deref() {
-        Some(raw) if raw.eq_ignore_ascii_case("block") => ExecutorBusyBehavior::Block,
-        Some(raw) if raw.eq_ignore_ascii_case("drop") => ExecutorBusyBehavior::Drop,
-        Some(raw) if raw.eq_ignore_ascii_case("true") || raw == "1" => ExecutorBusyBehavior::Block,
-        _ => ExecutorBusyBehavior::Drop,
-    }
-}
-
-fn executor_busy_timeout_from_env() -> Option<Duration> {
-    env::var("HELIOS_DAEDALUS_EXECUTOR_BUSY_TIMEOUT_MS").ok().and_then(|v| v.parse::<u64>().ok()).filter(|v| *v > 0).map(Duration::from_millis)
-}
-
-fn env_flag(name: &str) -> bool {
-    env::var(name).ok().map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")).unwrap_or(false)
-}
-
-fn auto_target_roi_enabled() -> bool {
-    match env::var("HELIOS_DAEDALUS_AUTO_TARGET_ROI") {
-        Ok(raw) => matches!(raw.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"),
-        Err(_) => true,
-    }
-}
-
 fn plan_uses_gpu(plan: &RuntimePlan) -> bool {
     plan.segments.iter().any(|segment| !matches!(segment.compute, ComputeAffinity::CpuOnly))
-}
-
-fn host_outputs_in_graph_enabled(plan: Option<&RuntimePlan>, gpu_plan_active: bool) -> bool {
-    let requested = env_flag("HELIOS_DAEDALUS_HOST_OUTPUTS_IN_GRAPH");
-    if !requested {
-        return false;
-    }
-    if gpu_plan_active && plan.is_some_and(plan_uses_gpu) {
-        tracing::warn!("HELIOS_DAEDALUS_HOST_OUTPUTS_IN_GRAPH is disabled for GPU plans (stability guard)");
-        return false;
-    }
-    true
-}
-
-fn demand_driven_enabled(plan: Option<&RuntimePlan>, gpu_plan_active: bool) -> bool {
-    let requested = env_flag("HELIOS_DAEDALUS_DEMAND_DRIVEN");
-    if !requested {
-        return false;
-    }
-    if gpu_plan_active && plan.is_some_and(plan_uses_gpu) {
-        tracing::warn!("HELIOS_DAEDALUS_DEMAND_DRIVEN is disabled for GPU plans (stability guard)");
-        return false;
-    }
-    true
-}
-
-fn perf_counters_enabled_from_env() -> bool {
-    cfg!(all(feature = "perf-counters", target_os = "linux")) && env_flag("HELIOS_PERF_COUNTERS")
-}
-
-fn pprof_enabled_from_env() -> bool {
-    cfg!(feature = "pprof") && env_flag("HELIOS_PPROF")
-}
-
-fn background_graph_trim_interval_ms() -> u64 {
-    static VALUE: AtomicU64 = AtomicU64::new(u64::MAX);
-    let cached = VALUE.load(Ordering::Relaxed);
-    if cached != u64::MAX {
-        return cached;
-    }
-    let value = env::var("HELIOS_GRAPH_BACKGROUND_TRIM_INTERVAL_MS").ok().and_then(|raw| raw.trim().parse::<u64>().ok()).unwrap_or(5_000);
-    VALUE.store(value, Ordering::Relaxed);
-    value
-}
-
-fn active_graph_trim_interval_ms() -> u64 {
-    static VALUE: AtomicU64 = AtomicU64::new(u64::MAX);
-    let cached = VALUE.load(Ordering::Relaxed);
-    if cached != u64::MAX {
-        return cached;
-    }
-    // Active preview/graph workloads should stay on the fast path and clean up on idle instead of
-    // paying periodic cross-thread compaction every second.
-    let value = env::var("HELIOS_GRAPH_ACTIVE_TRIM_INTERVAL_MS").ok().and_then(|raw| raw.trim().parse::<u64>().ok()).unwrap_or(0);
-    VALUE.store(value, Ordering::Relaxed);
-    value
-}
-
-fn host_output_sample_ttl_ms() -> u64 {
-    static VALUE: AtomicU64 = AtomicU64::new(u64::MAX);
-    let cached = VALUE.load(Ordering::Relaxed);
-    if cached != u64::MAX {
-        return cached;
-    }
-    let value = env::var("HELIOS_HOST_OUTPUT_SAMPLE_TTL_MS").ok().and_then(|raw| raw.trim().parse::<u64>().ok()).unwrap_or(DEFAULT_HOST_OUTPUT_SAMPLE_TTL_MS).clamp(50, 5_000);
-    VALUE.store(value, Ordering::Relaxed);
-    value
-}
-
-fn pprof_frames_from_env() -> u64 {
-    env::var("HELIOS_PPROF_FRAMES").ok().and_then(|v| v.parse::<u64>().ok()).filter(|v| *v > 0).unwrap_or(1)
-}
-
-fn pprof_duration_ms_from_env() -> Option<u64> {
-    // Prefer ms if specified, otherwise accept seconds.
-    if let Some(ms) = env::var("HELIOS_PPROF_DURATION_MS").ok().and_then(|v| v.parse::<u64>().ok()).filter(|v| *v > 0) {
-        return Some(ms);
-    }
-    env::var("HELIOS_PPROF_DURATION_SECS").ok().and_then(|v| v.parse::<u64>().ok()).filter(|v| *v > 0).map(|s| s.saturating_mul(1000))
 }
 
 fn now_ms() -> u64 {

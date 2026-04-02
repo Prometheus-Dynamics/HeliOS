@@ -1,3 +1,4 @@
+#[cfg(feature = "engine")]
 use daedalus::runtime::state::{ExecutionContext, ManagedResource};
 use image::{DynamicImage, GrayImage, ImageBuffer, Rgb};
 use rayon::prelude::*;
@@ -21,9 +22,14 @@ const ADAPTIVE_MASK_RETAIN_CAP: usize = 1280 * 800;
 mod neon;
 
 mod adaptive;
+#[cfg(feature = "engine")]
 pub use adaptive::{
     adaptive_mean_threshold_fast, adaptive_mean_threshold_fast_into, adaptive_mean_threshold_fast_with_invert, adaptive_mean_threshold_fast_with_invert_in, with_adaptive_mean_threshold_fast,
     with_adaptive_mean_threshold_fast_timed,
+};
+#[cfg(not(feature = "engine"))]
+pub use adaptive::{
+    adaptive_mean_threshold_fast, adaptive_mean_threshold_fast_into, adaptive_mean_threshold_fast_with_invert, with_adaptive_mean_threshold_fast, with_adaptive_mean_threshold_fast_timed,
 };
 
 #[derive(Default)]
@@ -39,6 +45,7 @@ struct MaskBuffer {
     buf: Vec<u8>,
 }
 
+#[cfg(feature = "engine")]
 #[derive(Default)]
 struct ManagedAdaptiveBuffers {
     buffers: AdaptiveBuffers,
@@ -60,6 +67,7 @@ fn clear_adaptive_buffers_live(buffers: &mut AdaptiveBuffers) {
     buffers.col_sum.clear();
 }
 
+#[cfg(feature = "engine")]
 impl ManagedResource for ManagedAdaptiveBuffers {
     fn live_bytes(&self) -> u64 {
         adaptive_buffers_live_bytes(&self.buffers) as u64
@@ -92,6 +100,7 @@ impl ManagedResource for ManagedAdaptiveBuffers {
     }
 }
 
+#[cfg(feature = "engine")]
 pub(super) fn with_managed_adaptive_buffers<R>(exec_ctx: &ExecutionContext, f: impl FnOnce(&mut AdaptiveBuffers) -> R) -> Result<R, String> {
     exec_ctx.with_frame_scratch("image.binary.adaptive", ManagedAdaptiveBuffers::default, |scratch| f(&mut scratch.buffers))
 }

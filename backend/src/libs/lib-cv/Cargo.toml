@@ -10,7 +10,7 @@ doctest = false
 workspace = true
 
 [features]
-default = ["all", "engine", "plugins"]
+default = ["all", "plugins"]
 all = ["contour", "ai", "draw", "aruco"]
 contour = []
 ai = []

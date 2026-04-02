@@ -4,7 +4,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[cfg(feature = "updater-ipc")]
 mod apply;
-#[cfg(feature = "updater-ipc")]
+#[cfg(any(feature = "updater-ipc", feature = "dto"))]
 mod artifact;
 #[cfg(feature = "updater-ipc")]
 mod bundle;
@@ -28,7 +28,7 @@ pub mod update_core;
 #[cfg(feature = "updater-ipc")]
 mod util;
 
-#[cfg(feature = "updater-ipc")]
+#[cfg(any(feature = "updater-ipc", feature = "dto"))]
 pub use artifact::{ManifestArtifact, ReleaseManifest, ReleaseManifestMetadata, StagedArtifact, StagedMetadata};
 #[cfg(feature = "updater-ipc")]
 pub use config::{SignaturePolicy, UpdaterConfig};

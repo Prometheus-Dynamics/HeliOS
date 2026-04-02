@@ -1,4 +1,5 @@
 mod architecture_guardrails;
+mod build_profiles;
 mod generated_contracts;
 mod shared_owner;
 mod shim_guardrails;
@@ -47,6 +48,7 @@ enum GenerateCommand {
 
 #[derive(Subcommand, Debug)]
 enum ValidateCommand {
+    BuildProfiles(RepoArgs),
     RepoPolicy(RepoArgs),
     GeneratedContracts(RepoArgs),
     All(RepoArgs),
@@ -169,6 +171,10 @@ fn main() -> Result<()> {
             }
         },
         Commands::Validate { command } => match command {
+            ValidateCommand::BuildProfiles(args) => {
+                let repo_root = resolve_repo_root(&args);
+                build_profiles::validate(&repo_root)
+            }
             ValidateCommand::RepoPolicy(args) => {
                 let repo_root = resolve_repo_root(&args);
                 run_repo_policy(&repo_root)
@@ -180,7 +186,8 @@ fn main() -> Result<()> {
             ValidateCommand::All(args) => {
                 let repo_root = resolve_repo_root(&args);
                 run_repo_policy(&repo_root)?;
-                generated_contracts::validate(&repo_root)
+                generated_contracts::validate(&repo_root)?;
+                build_profiles::validate(&repo_root)
             }
         },
     }

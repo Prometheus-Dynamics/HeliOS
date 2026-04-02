@@ -49,9 +49,21 @@ pub(super) async fn start_recording(manager: &StreamManager, stream_id: Uuid, pa
         let frame_ts_path = frame_ts_path.clone();
         tokio::spawn(async move {
             let _encoded_consumer = encoded_consumer;
-            let result =
-                record_encoded_session(rx, stop_rx, &record_path, &raw_path, container, source_codec, codec, duration_ms, requested_fps, settings, Some(frame_ts_path), Some(encoded_consumer_touch))
-                    .await;
+            let result = record_encoded_session(EncodedRecordingSessionRequest {
+                rx,
+                stop_rx,
+                output_path: record_path,
+                raw_path,
+                container,
+                source_codec,
+                target_codec: codec,
+                duration_ms,
+                fps: requested_fps,
+                settings,
+                timestamps_path: Some(frame_ts_path),
+                consumer_touch: Some(encoded_consumer_touch),
+            })
+            .await;
             let _ = done_tx.send(RecordingState::Completed(result.clone()));
             manager.finish_recording(stream_id, result).await;
         });
@@ -93,7 +105,20 @@ pub(super) async fn start_recording(manager: &StreamManager, stream_id: Uuid, pa
         let manager = manager.clone();
         let shadow_dir = super::policy::shadow_dir_for_stream(stream_id);
         tokio::spawn(async move {
-            let result = record_shadow_segments_session(stream_id, &shadow_dir, codec, &record_path, &raw_path, container, started_at_ms, duration_ms, fps, settings, stop_rx).await;
+            let result = record_shadow_segments_session(ShadowRecordingSessionRequest {
+                stream_id,
+                shadow_dir,
+                codec,
+                output_path: record_path,
+                raw_path,
+                container,
+                started_at_ms,
+                duration_ms,
+                fps,
+                settings,
+                stop_rx,
+            })
+            .await;
             let _ = done_tx.send(RecordingState::Completed(result.clone()));
             manager.finish_recording(stream_id, result).await;
         });

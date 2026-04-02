@@ -76,11 +76,11 @@ pub(super) async fn start_stream(manager: &StreamManager, manifest: ResolvedStre
             let managed_encoded_consumer_count = runner.managed_encoded_consumer_count_handle();
             let managed_encoded_consumer_last_seen_ms = runner.managed_encoded_consumer_last_seen_handle();
             let raw_tx = runner.raw_sender();
-            let (command_tx, command_rx) = sync_channel::<StreamCommand>(stream_command_queue_size());
+            let (command_tx, command_rx) = sync_channel::<StreamCommand>(super::policy::stream_command_queue_size());
             let (exit_tx, exit_rx) = watch::channel(StreamExit::Running);
             let join: JoinHandle<()> = std::thread::Builder::new()
                 .name(format!("helios-stream-{stream_id}"))
-                .stack_size(stream_worker_stack_size_bytes())
+                .stack_size(super::policy::stream_worker_stack_size_bytes())
                 .spawn(move || run_stream_worker(runner, command_rx, exit_tx))
                 .map_err(|err| Error::InvalidStateOwned(format!("stream worker spawn failed: {err}")))?;
             Ok::<_, Error>((descriptor, graph, encoded_tx, managed_encoded_consumer_count, managed_encoded_consumer_last_seen_ms, raw_tx, command_tx, exit_rx, join))

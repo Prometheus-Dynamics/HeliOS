@@ -105,6 +105,7 @@ pub fn adaptive_mean_threshold_fast_with_invert(image: &GrayImage, window: u32, 
     out
 }
 
+#[cfg(feature = "engine")]
 pub fn adaptive_mean_threshold_fast_with_invert_in(exec_ctx: &daedalus::runtime::state::ExecutionContext, image: &GrayImage, window: u32, offset: f32, invert: bool) -> Result<GrayImage, String> {
     super::with_managed_adaptive_buffers(exec_ctx, |buffers| adaptive_mean_threshold_fast_inner(image, window, offset, invert, buffers))
 }

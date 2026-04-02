@@ -6,11 +6,14 @@
 
 pub mod rotation;
 pub mod translation;
+#[cfg(feature = "contour")]
 use crate::modules::contour::scaling::scale_contour;
 use crate::modules::image::resize::resize_fast;
 use image::DynamicImage;
 use image::GenericImageView;
+#[cfg(feature = "contour")]
 use imageproc::geometry::arc_length;
+#[cfg(feature = "contour")]
 use imageproc::point::Point as CvPoint;
 use num::NumCast;
 
@@ -61,6 +64,7 @@ pub fn _calculate_image_pyramid(image: &DynamicImage, _tc: f32) -> Vec<DynamicIm
     pyramid
 }
 
+#[cfg(feature = "contour")]
 pub fn _find_best_pyramid_level(pyramid: &[DynamicImage], candidate: &[CvPoint<u32>], canonical_length: f32, original_dimensions: (u32, u32)) -> (usize, Vec<CvPoint<u32>>) {
     let mut best_level = 0;
     let mut best_points = candidate.to_owned();
