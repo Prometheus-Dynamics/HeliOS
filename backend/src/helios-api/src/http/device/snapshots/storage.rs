@@ -1,6 +1,8 @@
 use std::path::{Path as StdPath, PathBuf};
 
-use crate::http::device::snapshots::types::{DeviceSnapshotResponse, SnapshotMeta};
+use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
+
+use crate::http::device::snapshots::types::{CURRENT_SNAPSHOT_META_SCHEMA_VERSION, DeviceSnapshotResponse, SnapshotMeta};
 
 const DIAGNOSTICS_DIR: &str = "/var/lib/helios/diagnostics";
 
@@ -16,9 +18,18 @@ pub(super) fn snapshot_tar(root: &StdPath, id: &str) -> PathBuf {
     root.join(format!("{id}.tar.gz"))
 }
 
+const SNAPSHOT_META_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> =
+    SyncSchemaPlan { document_name: "snapshot metadata", legacy_version: CURRENT_SNAPSHOT_META_SCHEMA_VERSION, current_version: CURRENT_SNAPSHOT_META_SCHEMA_VERSION, migrations: &[] };
+
+pub(super) fn decode_snapshot_meta(bytes: &[u8]) -> Result<SnapshotMeta, String> {
+    let raw = serde_json::from_slice::<serde_json::Value>(bytes).map_err(|err| format!("failed to decode snapshot metadata: {err}"))?;
+    let migrated = migrate_to_current(raw, &SNAPSHOT_META_SCHEMA_PLAN)?;
+    serde_json::from_value(migrated).map_err(|err| format!("failed to parse snapshot metadata: {err}"))
+}
+
 async fn read_snapshot_meta(dir: &StdPath) -> Option<SnapshotMeta> {
     let bytes = tokio::fs::read(dir.join("meta.json")).await.ok()?;
-    serde_json::from_slice::<SnapshotMeta>(&bytes).ok()
+    decode_snapshot_meta(&bytes).ok()
 }
 
 async fn read_created_by(dir: &StdPath, fallback: &str) -> String {

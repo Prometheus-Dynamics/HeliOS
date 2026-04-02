@@ -5,54 +5,49 @@ use tokio::fs;
 use uuid::Uuid;
 
 pub(crate) const DATA_ROOT: &str = "/var/lib/helios";
-// TEMP_SHIM: persisted-files-etc-mirror
-// Keep mirrored /etc/helios reads and writes until all runtime consumers are migrated onto /var/lib/helios.
-pub(crate) const LEGACY_HELIOS_ETC_DIR: &str = "/etc/helios";
 
 pub(crate) fn data_root_file(name: &str) -> PathBuf {
     Path::new(DATA_ROOT).join(name)
 }
 
-pub(crate) fn legacy_helios_etc_file(name: &str) -> PathBuf {
-    Path::new(LEGACY_HELIOS_ETC_DIR).join(name)
-}
-
-pub(crate) async fn read(path: &Path, fallback: Option<&Path>) -> io::Result<Vec<u8>> {
-    match fs::read(path).await {
-        Ok(bytes) => Ok(bytes),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => match fallback {
-            Some(fallback) => fs::read(fallback).await,
-            None => Err(err),
-        },
-        Err(err) => Err(err),
+pub(crate) fn team_file_path() -> PathBuf {
+    match std::env::var_os("HELIOS_TEAM_FILE") {
+        Some(path) => PathBuf::from(path),
+        None => data_root_file("team"),
     }
 }
 
-pub(crate) async fn read_to_string(path: &Path, fallback: Option<&Path>) -> io::Result<String> {
-    match fs::read_to_string(path).await {
-        Ok(raw) => Ok(raw),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => match fallback {
-            Some(fallback) => fs::read_to_string(fallback).await,
-            None => Err(err),
-        },
-        Err(err) => Err(err),
+pub(crate) async fn read_team_number() -> io::Result<Option<u32>> {
+    let path = team_file_path();
+    let content = fs::read_to_string(&path).await?;
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
     }
+    let parsed = trimmed.parse::<u32>().map_err(|err| io::Error::new(io::ErrorKind::InvalidData, format!("invalid team file {}: {err}", path.display())))?;
+    if parsed == 0 {
+        return Ok(None);
+    }
+    Ok(Some(parsed))
 }
 
-pub(crate) async fn write_mirrored(path: &Path, legacy: Option<&Path>, bytes: &[u8]) -> io::Result<()> {
-    write_atomic(path, bytes).await?;
-    if let Some(legacy) = legacy {
-        write_atomic(legacy, bytes).await?;
-    }
-    Ok(())
+pub(crate) async fn write_team_number(team: u32) -> io::Result<()> {
+    let path = team_file_path();
+    let body = format!("{team}\n");
+    write_canonical(&path, body.as_bytes()).await
 }
 
-pub(crate) async fn remove_mirrored(path: &Path, legacy: Option<&Path>) -> io::Result<()> {
-    remove_if_exists(path).await?;
-    if let Some(legacy) = legacy {
-        remove_if_exists(legacy).await?;
-    }
-    Ok(())
+pub(crate) async fn clear_team_number() -> io::Result<()> {
+    let path = team_file_path();
+    remove_canonical(&path).await
+}
+
+pub(crate) async fn write_canonical(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_atomic(path, bytes).await
+}
+
+pub(crate) async fn remove_canonical(path: &Path) -> io::Result<()> {
+    remove_if_exists(path).await
 }
 
 pub(crate) async fn remove_if_exists(path: &Path) -> io::Result<()> {

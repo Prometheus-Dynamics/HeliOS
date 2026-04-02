@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use lib_sensors::fan_config::{self, FanConfig, FanMode, FanStatus};
-use serde::{Deserialize, Serialize};
 use tokio::fs as async_fs;
 use tokio::sync::{Mutex, Notify, RwLock};
 use tokio::task::JoinHandle;
@@ -498,11 +497,6 @@ fn clamp_percent(value: u8, min: u8, max: u8) -> u8 {
     value.max(min).min(max)
 }
 
-#[derive(Serialize, Deserialize)]
-struct FanConfigDoc {
-    fan: FanConfig,
-}
-
 async fn load_fan_settings() -> Result<FanConfig> {
     let paths = fan_config::default_paths();
     let raw = fan_config::load_fan_config(&paths).unwrap_or_default();
@@ -520,8 +514,7 @@ async fn write_fan_settings(config: &FanConfig) -> Result<()> {
     if let Some(parent) = path.parent() {
         async_fs::create_dir_all(parent).await.map_err(|err| Error::InvalidState(format!("failed to create {}: {err}", parent.display())))?;
     }
-    let doc = FanConfigDoc { fan: config.clone() };
-    let serialized = toml::to_string_pretty(&doc).map_err(|err| Error::InvalidState(format!("failed to serialize fan configuration: {err}")))?;
+    let serialized = fan_config::encode_fan_config_doc(config).map_err(|err| Error::InvalidState(format!("failed to serialize fan configuration: {err}")))?;
     async_fs::write(&path, serialized).await.map_err(|err| Error::InvalidState(format!("failed to write fan configuration to {}: {err}", path.display())))
 }
 

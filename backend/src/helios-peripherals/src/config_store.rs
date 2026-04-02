@@ -1,8 +1,11 @@
+use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, env, fs, path::PathBuf};
+use tracing::warn;
 
 const DEFAULT_PATH: &str = "/var/lib/helios/sensor_configuration.json";
 const DEFAULT_FILENAME: &str = "sensor_configuration.json";
+const CURRENT_SENSOR_CONFIG_STORE_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SensorDeviceOverride {
@@ -11,13 +14,21 @@ pub struct SensorDeviceOverride {
     pub last_error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SensorConfigData {
+    #[serde(default)]
+    schema_version: u32,
     devices: BTreeMap<String, SensorDeviceOverride>,
     #[serde(default)]
     aliases: BTreeMap<String, String>,
     #[serde(default)]
     alias_overrides: BTreeMap<String, String>,
+}
+
+impl Default for SensorConfigData {
+    fn default() -> Self {
+        Self { schema_version: CURRENT_SENSOR_CONFIG_STORE_SCHEMA_VERSION, devices: BTreeMap::new(), aliases: BTreeMap::new(), alias_overrides: BTreeMap::new() }
+    }
 }
 
 pub struct SensorConfigStore {
@@ -29,7 +40,13 @@ impl SensorConfigStore {
     pub fn load() -> Self {
         let path = resolve_store_path();
         let data = match fs::read_to_string(&path) {
-            Ok(contents) => serde_json::from_str(&contents).unwrap_or_default(),
+            Ok(contents) => match parse_sensor_config_data(&contents) {
+                Ok(data) => data,
+                Err(error) => {
+                    warn!(path = %path.display(), %error, "failed to load sensor config store; using defaults");
+                    SensorConfigData::default()
+                }
+            },
             Err(_) => SensorConfigData::default(),
         };
         Self { path, data }
@@ -89,10 +106,21 @@ impl SensorConfigStore {
         if let Some(parent) = self.path.parent() {
             let _ = fs::create_dir_all(parent);
         }
-        if let Ok(json) = serde_json::to_string_pretty(&self.data) {
+        let mut canonical = self.data.clone();
+        canonical.schema_version = CURRENT_SENSOR_CONFIG_STORE_SCHEMA_VERSION;
+        if let Ok(json) = serde_json::to_string_pretty(&canonical) {
             let _ = fs::write(&self.path, json);
         }
     }
+}
+
+const SENSOR_CONFIG_STORE_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> =
+    SyncSchemaPlan { document_name: "sensor config store", legacy_version: CURRENT_SENSOR_CONFIG_STORE_SCHEMA_VERSION, current_version: CURRENT_SENSOR_CONFIG_STORE_SCHEMA_VERSION, migrations: &[] };
+
+fn parse_sensor_config_data(raw: &str) -> Result<SensorConfigData, String> {
+    let value = serde_json::from_str::<serde_json::Value>(raw).map_err(|err| format!("failed to decode sensor config store: {err}"))?;
+    let migrated = migrate_to_current(value, &SENSOR_CONFIG_STORE_SCHEMA_PLAN)?;
+    serde_json::from_value(migrated).map_err(|err| format!("failed to parse sensor config store: {err}"))
 }
 
 fn resolve_store_path() -> PathBuf {
@@ -121,4 +149,57 @@ fn select_env(names: &[&str]) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::{CURRENT_SENSOR_CONFIG_STORE_SCHEMA_VERSION, SensorConfigData, SensorConfigStore, parse_sensor_config_data};
+
+    fn temp_path(label: &str) -> std::path::PathBuf {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).expect("clock").as_nanos();
+        std::env::temp_dir().join(format!("helios-peripherals-{label}-{unique}.json"))
+    }
+
+    #[test]
+    fn parse_sensor_config_data_rejects_missing_schema_version() {
+        let raw = serde_json::json!({
+            "devices": {
+                "camera-a": {
+                    "firmware": "v1.2.3"
+                }
+            },
+            "aliases": {
+                "hw-a": "Front Camera"
+            }
+        });
+
+        let err = parse_sensor_config_data(&serde_json::to_string(&raw).expect("encode")).expect_err("missing schema version should fail");
+        assert!(err.contains("missing required schema_version"));
+    }
+
+    #[test]
+    fn parse_sensor_config_data_rejects_future_schema_version() {
+        let raw = serde_json::json!({
+            "schema_version": CURRENT_SENSOR_CONFIG_STORE_SCHEMA_VERSION + 1,
+            "devices": {}
+        });
+
+        let err = parse_sensor_config_data(&serde_json::to_string(&raw).expect("encode")).expect_err("future schema should fail");
+        assert!(err.contains("unsupported sensor config store schema_version"));
+    }
+
+    #[test]
+    fn save_writes_current_schema_version() {
+        let path = temp_path("sensor-config-store");
+        let mut store = SensorConfigStore { path: path.clone(), data: SensorConfigData::default() };
+        store.get_or_default("camera-a").firmware = Some("v9".into());
+        store.save();
+
+        let raw = std::fs::read_to_string(&path).expect("read saved file");
+        let parsed = serde_json::from_str::<serde_json::Value>(&raw).expect("decode json");
+        assert_eq!(parsed.get("schema_version").and_then(serde_json::Value::as_u64), Some(u64::from(CURRENT_SENSOR_CONFIG_STORE_SCHEMA_VERSION)));
+        let _ = std::fs::remove_file(&path);
+    }
 }

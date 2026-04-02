@@ -1,6 +1,5 @@
 use axum::{Json, http::StatusCode, response::IntoResponse};
 use lib_sensors::led_config::{self, LedConfig};
-use serde::Serialize;
 use tokio::fs;
 use tracing::debug;
 
@@ -10,13 +9,6 @@ use crate::http::{
 };
 
 use super::LightingConfigRequest;
-
-const LEGACY_LED_SETTINGS_PATH: &str = "/etc/helios/leds.toml";
-
-#[derive(Debug, Serialize)]
-struct LightingConfigDoc {
-    leds: LedConfig,
-}
 
 #[utoipa::path(
     get,
@@ -76,12 +68,9 @@ async fn load_lighting_config() -> LedConfig {
 }
 
 async fn persist_lighting_config(config: &LedConfig) -> ApiResult<()> {
-    let doc = LightingConfigDoc { leds: config.clone() };
-    let serialized = toml::to_string_pretty(&doc).map_err(|err| ApiError::bad_request(format!("failed to serialize lighting config: {err}")))?;
+    let serialized = led_config::encode_led_config_doc(config).map_err(|err| ApiError::bad_request(format!("failed to serialize lighting config: {err}")))?;
     let persistent_path = led_config::writable_path();
-    persisted_files::write_mirrored(&persistent_path, Some(std::path::Path::new(LEGACY_LED_SETTINGS_PATH)), serialized.as_bytes())
-        .await
-        .map_err(|err| ApiError::internal(format!("failed to write lighting config: {err}")))?;
+    persisted_files::write_canonical(&persistent_path, serialized.as_bytes()).await.map_err(|err| ApiError::internal(format!("failed to write lighting config: {err}")))?;
     fs::metadata(&persistent_path).await.map_err(|err| ApiError::internal(format!("failed to confirm lighting config write: {err}")))?;
     Ok(())
 }

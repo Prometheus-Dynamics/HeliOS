@@ -1,18 +1,26 @@
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use helios_peripherals::dto::{LightingColor, LightingCommand};
+use lib_lighting::{LightingColor, LightingCommand};
+use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
 use serde::{Deserialize, Serialize};
 
 pub const LED_ANIMATIONS_PATH: &str = "/var/lib/helios/led-animations.json";
-pub const LEGACY_LED_ANIMATIONS_PATH: &str = "/etc/helios/led-animations.json";
 const DEFAULT_TIMELINE_SAMPLE_MS: u32 = 50;
 const MIN_FRAME_DURATION_MS: u32 = 20;
+const CURRENT_LED_ANIMATION_DOC_SCHEMA_VERSION: u32 = 1;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LedAnimationDoc {
+    pub schema_version: u32,
     #[serde(default)]
     pub animations: Vec<LedAnimationEntry>,
+}
+
+impl Default for LedAnimationDoc {
+    fn default() -> Self {
+        Self { schema_version: CURRENT_LED_ANIMATION_DOC_SCHEMA_VERSION, animations: Vec::new() }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -152,6 +160,7 @@ fn lerp_u8(start: u8, end: u8, t: f32) -> u8 {
 }
 
 fn normalize_doc(mut doc: LedAnimationDoc) -> LedAnimationDoc {
+    doc.schema_version = CURRENT_LED_ANIMATION_DOC_SCHEMA_VERSION;
     for entry in &mut doc.animations {
         if entry.sequence.is_empty()
             && let Some(timeline) = entry.timeline.as_ref()
@@ -162,34 +171,31 @@ fn normalize_doc(mut doc: LedAnimationDoc) -> LedAnimationDoc {
     doc
 }
 
-fn candidate_paths(path: &Path) -> Vec<PathBuf> {
-    let mut candidates = vec![path.to_path_buf()];
-    if path == Path::new(LED_ANIMATIONS_PATH) {
-        candidates.push(PathBuf::from(LEGACY_LED_ANIMATIONS_PATH));
-    }
-    candidates
+const LED_ANIMATION_DOC_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> =
+    SyncSchemaPlan { document_name: "led animation document", legacy_version: CURRENT_LED_ANIMATION_DOC_SCHEMA_VERSION, current_version: CURRENT_LED_ANIMATION_DOC_SCHEMA_VERSION, migrations: &[] };
+
+fn decode_led_animation_doc(raw: &str) -> Result<LedAnimationDoc, String> {
+    let value = serde_json::from_str::<serde_json::Value>(raw).map_err(|err| format!("failed to decode led animation document: {err}"))?;
+    let migrated = migrate_to_current(value, &LED_ANIMATION_DOC_SCHEMA_PLAN)?;
+    serde_json::from_value(migrated).map(normalize_doc).map_err(|err| format!("failed to parse led animation document: {err}"))
 }
 
 pub fn load_led_animations_sync(path: impl AsRef<Path>) -> LedAnimationDoc {
-    for path in candidate_paths(path.as_ref()) {
-        match std::fs::read_to_string(&path) {
-            Ok(raw) => return normalize_doc(serde_json::from_str::<LedAnimationDoc>(&raw).unwrap_or_default()),
-            Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
-            Err(_) => return normalize_doc(LedAnimationDoc::default()),
-        }
+    let path = path.as_ref();
+    match std::fs::read_to_string(path) {
+        Ok(raw) => decode_led_animation_doc(&raw).unwrap_or_default(),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => normalize_doc(LedAnimationDoc::default()),
+        Err(_) => normalize_doc(LedAnimationDoc::default()),
     }
-    normalize_doc(LedAnimationDoc::default())
 }
 
 pub async fn load_led_animations(path: impl AsRef<Path>) -> LedAnimationDoc {
-    for path in candidate_paths(path.as_ref()) {
-        match tokio::fs::read_to_string(&path).await {
-            Ok(raw) => return normalize_doc(serde_json::from_str::<LedAnimationDoc>(&raw).unwrap_or_default()),
-            Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
-            Err(_) => return normalize_doc(LedAnimationDoc::default()),
-        }
+    let path = path.as_ref();
+    match tokio::fs::read_to_string(path).await {
+        Ok(raw) => decode_led_animation_doc(&raw).unwrap_or_default(),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => normalize_doc(LedAnimationDoc::default()),
+        Err(_) => normalize_doc(LedAnimationDoc::default()),
     }
-    normalize_doc(LedAnimationDoc::default())
 }
 
 pub async fn persist_led_animations(path: impl AsRef<Path>, doc: &LedAnimationDoc) -> io::Result<()> {
@@ -197,8 +203,9 @@ pub async fn persist_led_animations(path: impl AsRef<Path>, doc: &LedAnimationDo
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
-    let serialized = serde_json::to_string_pretty(doc).unwrap_or_else(|_| "{\"animations\":[]}".to_string());
-    tokio::fs::write(path, serialized).await
+    let serialized = serde_json::to_string_pretty(&normalize_doc(doc.clone())).unwrap_or_else(|_| "{\"animations\":[]}".to_string());
+    tokio::fs::write(path, serialized).await?;
+    Ok(())
 }
 
 #[must_use]
@@ -228,4 +235,62 @@ pub fn command_for_animation_name(doc: &LedAnimationDoc, name: &str, fallback_br
 pub fn sequence_for_animation_name(doc: &LedAnimationDoc, name: &str) -> Option<Vec<LedAnimationFrame>> {
     let entry = find_animation_entry(doc, name)?;
     if entry.sequence.is_empty() { None } else { Some(entry.sequence.clone()) }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::{CURRENT_LED_ANIMATION_DOC_SCHEMA_VERSION, LedAnimationDoc, LedAnimationEntry, LedAnimationFrame, decode_led_animation_doc, load_led_animations_sync, persist_led_animations};
+
+    fn temp_path(label: &str) -> std::path::PathBuf {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).expect("clock").as_nanos();
+        std::env::temp_dir().join(format!("helios-led-animations-{label}-{unique}.json"))
+    }
+
+    #[test]
+    fn decode_led_animation_doc_rejects_missing_schema_version() {
+        let raw = serde_json::json!({
+            "animations": [
+                {
+                    "name": "boot",
+                    "sequence": [
+                        { "frame": [], "duration_ms": 40 }
+                    ]
+                }
+            ]
+        });
+
+        let err = decode_led_animation_doc(&serde_json::to_string(&raw).expect("encode")).expect_err("missing schema version should fail");
+        assert!(err.contains("missing required schema_version"));
+    }
+
+    #[test]
+    fn decode_led_animation_doc_rejects_future_schema_version() {
+        let err = decode_led_animation_doc(r#"{"schema_version":2,"animations":[]}"#).expect_err("future schema should fail");
+        assert!(err.contains("unsupported led animation document schema_version"));
+    }
+
+    #[tokio::test]
+    async fn persist_led_animations_writes_current_schema_version() {
+        let path = temp_path("persist");
+        let doc = LedAnimationDoc {
+            schema_version: 0,
+            animations: vec![LedAnimationEntry {
+                name: "boot".into(),
+                command: Default::default(),
+                duration_ms: None,
+                sequence: vec![LedAnimationFrame { frame: Vec::new(), duration_ms: 50 }],
+                timeline: None,
+            }],
+        };
+
+        persist_led_animations(&path, &doc).await.expect("persist");
+
+        let parsed = load_led_animations_sync(&path);
+        assert_eq!(parsed.schema_version, CURRENT_LED_ANIMATION_DOC_SCHEMA_VERSION);
+        assert_eq!(parsed.animations.first().map(|entry| entry.name.as_str()), Some("boot"));
+
+        let _ = tokio::fs::remove_file(&path).await;
+    }
 }

@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use clap::{ArgAction, Parser};
 use helios_peripherals::{ImuRange, SensorsConfig, SensorsRuntime, SensorsService};
-use lib_runtime_policy::HELIOS_PERIPHERALS_TOKIO_POLICY;
 use lib_ipc::types::ProtocolVersion;
+use lib_runtime_policy::HELIOS_PERIPHERALS_TOKIO_POLICY;
 use serde_json::Value as JsonValue;
 use tokio::time::{Duration as TokioDuration, timeout};
 use tokio_util::sync::CancellationToken;

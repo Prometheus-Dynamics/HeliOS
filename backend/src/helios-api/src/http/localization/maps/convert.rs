@@ -2,7 +2,7 @@ use serde::Deserialize;
 
 use super::super::super::error::ApiError;
 use super::super::super::storage;
-use helios_engine::localization::maps::{FieldMapDocument, FieldMapMarker, FieldMapOverlay, FieldMapSource, FieldQuaternion, aruco_bits_for_family};
+use helios_engine::localization::maps::{CURRENT_FIELD_MAP_SCHEMA_VERSION, FieldMapDocument, FieldMapMarker, FieldMapOverlay, FieldMapSource, FieldQuaternion, aruco_bits_for_family};
 
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct LimelightFmap {
@@ -93,7 +93,7 @@ pub(super) fn convert_limelight_fmap(id: &str, name: &str, filename: &str, fmap:
     markers.sort_by_key(|marker| marker.id);
 
     Ok(FieldMapDocument {
-        schema_version: 1,
+        schema_version: CURRENT_FIELD_MAP_SCHEMA_VERSION,
         id: id.to_string(),
         name: name.to_string(),
         width_m,

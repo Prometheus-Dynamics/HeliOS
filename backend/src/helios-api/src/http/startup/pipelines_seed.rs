@@ -67,9 +67,9 @@ pub(super) async fn seed_pipelines(state: &AppState, presets: &[StartupPipelineP
 
         pipelines::inject_pipeline_alias_metadata(&mut graph_json, name.as_deref());
 
-        let doc = pipelines::PipelineDocument { id: preset.id, name, graph: graph_json, updated_at_ms: Utc::now().timestamp_millis() };
+        let doc = pipelines::PipelineDocument::new(preset.id, name, graph_json, Utc::now().timestamp_millis());
         let path = dir.join(format!("{}.json", preset.id));
-        let bytes = match serde_json::to_vec_pretty(&doc) {
+        let bytes = match doc.encode_pretty() {
             Ok(bytes) => bytes,
             Err(err) => {
                 warn!(pipeline_id = %preset.id, error = %err, "failed to encode startup pipeline document");

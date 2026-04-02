@@ -69,6 +69,8 @@ pub(super) fn parse_download_media_archive_params(raw_query: Option<&str>) -> Do
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct MediaMetadata {
     #[serde(default)]
+    pub(crate) schema_version: u32,
+    #[serde(default)]
     pub(crate) stream_id: Option<Uuid>,
     #[serde(default)]
     pub(crate) kind: Option<String>,

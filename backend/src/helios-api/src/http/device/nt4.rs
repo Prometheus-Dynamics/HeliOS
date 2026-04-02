@@ -1,4 +1,5 @@
 use axum::{Json, http::StatusCode, response::IntoResponse};
+use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use utoipa::ToSchema;
@@ -46,22 +47,43 @@ fn default_subscriptions_enabled() -> bool {
     true
 }
 
-fn settings_paths() -> (PathBuf, Option<PathBuf>) {
-    // TEMP_SHIM: device-nt4-settings-etc-fallback
-    // Keep the /etc fallback until every deployed image writes NT4 settings into the data-root path.
+const CURRENT_NT4_SETTINGS_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct StoredNt4SettingsFile {
+    schema_version: u32,
+    settings: Nt4Settings,
+}
+
+const NT4_SETTINGS_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> =
+    SyncSchemaPlan { document_name: "nt4 settings file", legacy_version: CURRENT_NT4_SETTINGS_SCHEMA_VERSION, current_version: CURRENT_NT4_SETTINGS_SCHEMA_VERSION, migrations: &[] };
+
+fn parse_nt4_settings_file(bytes: &[u8]) -> Result<(StoredNt4SettingsFile, bool), String> {
+    let raw = serde_json::from_slice::<serde_json::Value>(bytes).map_err(|err| format!("failed to decode nt4 settings: {err}"))?;
+    let migrated = migrate_to_current(raw.clone(), &NT4_SETTINGS_SCHEMA_PLAN)?;
+    let parsed = serde_json::from_value::<StoredNt4SettingsFile>(migrated.clone()).map_err(|err| format!("failed to parse nt4 settings: {err}"))?;
+    Ok((parsed, migrated != raw))
+}
+
+fn settings_path() -> PathBuf {
     match std::env::var_os("HELIOS_NT4_SETTINGS_FILE") {
-        Some(path) => (PathBuf::from(path), None),
-        None => (persisted_files::data_root_file("nt4.json"), Some(persisted_files::legacy_helios_etc_file("nt4.json"))),
+        Some(path) => PathBuf::from(path),
+        None => persisted_files::data_root_file("nt4.json"),
     }
 }
 
 pub(crate) async fn load_settings() -> Nt4Settings {
-    let (path, legacy_path) = settings_paths();
-    let bytes = match persisted_files::read(&path, legacy_path.as_deref()).await {
+    let path = settings_path();
+    let bytes = match tokio::fs::read(&path).await {
         Ok(bytes) => bytes,
         Err(_) => return Nt4Settings::default(),
     };
-    serde_json::from_slice(&bytes).unwrap_or_default()
+    let (parsed, _) = match parse_nt4_settings_file(&bytes) {
+        Ok(parsed) => parsed,
+        Err(_) => return Nt4Settings::default(),
+    };
+    parsed.settings
 }
 
 #[utoipa::path(
@@ -97,8 +119,9 @@ pub async fn set_nt4_settings(Json(payload): Json<Nt4Settings>) -> ApiResult<imp
         return Err(ApiError::bad_request("server_port must be > 0"));
     }
 
-    let (path, legacy_path) = settings_paths();
-    let bytes = serde_json::to_vec(&next).map_err(|err| ApiError::internal(format!("failed to encode nt4 settings: {err}")))?;
-    persisted_files::write_mirrored(&path, legacy_path.as_deref(), &bytes).await.map_err(|err| ApiError::internal(format!("failed to persist nt4 settings: {err}")))?;
+    let path = settings_path();
+    let stored = StoredNt4SettingsFile { schema_version: CURRENT_NT4_SETTINGS_SCHEMA_VERSION, settings: next };
+    let bytes = serde_json::to_vec(&stored).map_err(|err| ApiError::internal(format!("failed to encode nt4 settings: {err}")))?;
+    persisted_files::write_canonical(&path, &bytes).await.map_err(|err| ApiError::internal(format!("failed to persist nt4 settings: {err}")))?;
     Ok(StatusCode::NO_CONTENT)
 }

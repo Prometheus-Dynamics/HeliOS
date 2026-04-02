@@ -1,3 +1,4 @@
+use lib_schema_migration::{migrate_to_current, SyncSchemaPlan};
 use serde_json::Value as JsonValue;
 use std::io;
 use std::path::PathBuf;
@@ -5,6 +6,8 @@ use std::sync::OnceLock;
 use uuid::Uuid;
 
 static DATA_ROOT: OnceLock<PathBuf> = OnceLock::new();
+const CURRENT_PIPELINE_DOCUMENT_SCHEMA_VERSION: u32 = 1;
+const CURRENT_PIPELINE_TEMPLATE_DOCUMENT_SCHEMA_VERSION: u32 = 1;
 
 fn data_root() -> PathBuf {
     DATA_ROOT
@@ -49,7 +52,7 @@ fn template_dir() -> PathBuf {
 pub(crate) fn load_pipeline_graph_json(pipeline_id: Uuid) -> io::Result<JsonValue> {
     let path = pipeline_dir().join(format!("{pipeline_id}.json"));
     let data = std::fs::read(&path)?;
-    let doc = serde_json::from_slice::<JsonValue>(&data).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    let doc = decode_pipeline_document(&data)?;
     let mut graph = doc.get("graph").cloned().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "pipeline graph missing 'graph' field"))?;
     if let Some(unwrapped) = unwrap_pipeline_export_graph(&graph) {
         graph = unwrapped;
@@ -70,7 +73,68 @@ fn unwrap_pipeline_export_graph(payload: &JsonValue) -> Option<JsonValue> {
 pub fn load_template_graph_json(template_id: &str) -> io::Result<JsonValue> {
     let path = template_dir().join(format!("{template_id}.json"));
     let data = std::fs::read(&path)?;
-    let doc = serde_json::from_slice::<JsonValue>(&data).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    let doc = decode_pipeline_template_document(&data)?;
     let graph = doc.get("graph").cloned().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "template graph missing 'graph' field"))?;
     Ok(graph)
+}
+
+fn decode_pipeline_document(bytes: &[u8]) -> io::Result<JsonValue> {
+    let raw = serde_json::from_slice::<JsonValue>(bytes).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    migrate_to_current(raw, &PIPELINE_DOCUMENT_SCHEMA_PLAN).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
+}
+
+fn decode_pipeline_template_document(bytes: &[u8]) -> io::Result<JsonValue> {
+    let raw = serde_json::from_slice::<JsonValue>(bytes).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    migrate_to_current(raw, &PIPELINE_TEMPLATE_DOCUMENT_SCHEMA_PLAN).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
+}
+
+const PIPELINE_DOCUMENT_SCHEMA_PLAN: SyncSchemaPlan<JsonValue> =
+    SyncSchemaPlan { document_name: "pipeline document", legacy_version: CURRENT_PIPELINE_DOCUMENT_SCHEMA_VERSION, current_version: CURRENT_PIPELINE_DOCUMENT_SCHEMA_VERSION, migrations: &[] };
+
+const PIPELINE_TEMPLATE_DOCUMENT_SCHEMA_PLAN: SyncSchemaPlan<JsonValue> = SyncSchemaPlan {
+    document_name: "pipeline template document",
+    legacy_version: CURRENT_PIPELINE_TEMPLATE_DOCUMENT_SCHEMA_VERSION,
+    current_version: CURRENT_PIPELINE_TEMPLATE_DOCUMENT_SCHEMA_VERSION,
+    migrations: &[],
+};
+
+#[cfg(test)]
+mod tests {
+    use super::{decode_pipeline_document, decode_pipeline_template_document, CURRENT_PIPELINE_DOCUMENT_SCHEMA_VERSION, CURRENT_PIPELINE_TEMPLATE_DOCUMENT_SCHEMA_VERSION};
+
+    #[test]
+    fn decode_pipeline_document_rejects_missing_schema_version() {
+        let raw = serde_json::json!({
+            "id": uuid::Uuid::nil(),
+            "graph": { "nodes": [], "edges": [] },
+            "updated_at_ms": 10
+        });
+
+        let err = decode_pipeline_document(serde_json::to_string(&raw).expect("encode").as_bytes()).expect_err("missing schema version should fail");
+        assert!(err.to_string().contains("missing required schema_version"));
+    }
+
+    #[test]
+    fn decode_pipeline_document_rejects_future_schema_version() {
+        let raw = serde_json::json!({
+            "schema_version": CURRENT_PIPELINE_DOCUMENT_SCHEMA_VERSION + 1,
+            "id": uuid::Uuid::nil(),
+            "graph": { "nodes": [], "edges": [] },
+            "updated_at_ms": 10
+        });
+
+        let err = decode_pipeline_document(serde_json::to_string(&raw).expect("encode").as_bytes()).expect_err("future version should fail");
+        assert!(err.to_string().contains("unsupported pipeline document schema_version"));
+    }
+
+    #[test]
+    fn decode_pipeline_template_document_rejects_missing_schema_version() {
+        let raw = serde_json::json!({
+            "id": "demo",
+            "graph": { "nodes": [], "edges": [] }
+        });
+
+        let err = decode_pipeline_template_document(serde_json::to_string(&raw).expect("encode").as_bytes()).expect_err("missing schema version should fail");
+        assert!(err.to_string().contains("missing required schema_version"));
+    }
 }

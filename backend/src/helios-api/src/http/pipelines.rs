@@ -35,7 +35,7 @@ use self::{
     identity::{ensure_unique_pipeline_identity, pipeline_identity_conflict},
     refresh::detach_pipeline_from_streams,
     registry::{clear_graph_validation_state, inject_cached_port_metadata, invalidate_graph_list_cache, set_graph_validation_error, set_graph_validation_state},
-    storage_support::{map_template_io_error, normalize_template_id, template_exists},
+    storage_support::{load_graph_document_from_path, map_template_io_error, normalize_template_id, template_exists, template_raw_into_document, template_raw_into_summary},
     types::PipelineTemplateDocumentRaw,
 };
 use super::{
@@ -214,9 +214,9 @@ async fn upload_graph(State(state): State<AppState>, Json(payload): Json<UploadG
     if let Some(resp) = ensure_unique_pipeline_identity(&dir, id, name.as_deref(), &graph_json).await {
         return resp;
     }
-    let doc = PipelineDocument { id, name, graph: graph_json, updated_at_ms: chrono::Utc::now().timestamp_millis() };
+    let doc = PipelineDocument::new(id, name, graph_json, chrono::Utc::now().timestamp_millis());
     let path = dir.join(format!("{id}.json"));
-    let data = match serde_json::to_vec_pretty(&doc) {
+    let data = match doc.encode_pretty() {
         Ok(bytes) => bytes,
         Err(err) => {
             return (StatusCode::BAD_REQUEST, Json(PipelineError { error: format!("invalid graph payload: {err}") })).into_response();
@@ -269,8 +269,8 @@ async fn update_graph(State(state): State<AppState>, Path(id): Path<Uuid>, Json(
         Err(err) => return map_io_error(err, "failed to stat graph"),
     }
 
-    let existing_doc = match fs::read_to_string(&path).await {
-        Ok(data) => serde_json::from_str::<PipelineDocument>(&data).ok(),
+    let existing_doc = match fs::read(&path).await {
+        Ok(data) => PipelineDocument::decode_slice(&data).ok(),
         Err(_) => None,
     };
 
@@ -310,8 +310,8 @@ async fn update_graph(State(state): State<AppState>, Path(id): Path<Uuid>, Json(
     if let Some(resp) = ensure_unique_pipeline_identity(&dir, id, name.as_deref(), &graph_json).await {
         return resp;
     }
-    let doc = PipelineDocument { id, name, graph: graph_json, updated_at_ms: chrono::Utc::now().timestamp_millis() };
-    let data = match serde_json::to_vec_pretty(&doc) {
+    let doc = PipelineDocument::new(id, name, graph_json, chrono::Utc::now().timestamp_millis());
+    let data = match doc.encode_pretty() {
         Ok(bytes) => bytes,
         Err(err) => {
             return (StatusCode::BAD_REQUEST, Json(PipelineError { error: format!("invalid graph payload: {err}") })).into_response();
@@ -365,15 +365,13 @@ async fn fetch_graph(State(state): State<AppState>, Path(id): Path<Uuid>) -> imp
         Err(resp) => return *resp,
     };
     let path = dir.join(format!("{id}.json"));
-    match fs::read_to_string(&path).await {
-        Ok(data) => match serde_json::from_str::<PipelineDocument>(&data) {
-            Ok(mut doc) => {
-                inject_cached_port_metadata(&state, &mut doc.graph).await;
-                Json(doc).into_response()
-            }
-            Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, Json(PipelineError { error: format!("failed to decode graph: {err}") })).into_response(),
-        },
+    match load_graph_document_from_path(&path).await {
+        Ok(mut doc) => {
+            inject_cached_port_metadata(&state, &mut doc.graph).await;
+            Json(doc).into_response()
+        }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => (StatusCode::NOT_FOUND, Json(PipelineError { error: "graph not found".into() })).into_response(),
+        Err(err) if err.kind() == io::ErrorKind::InvalidData => (StatusCode::INTERNAL_SERVER_ERROR, Json(PipelineError { error: format!("failed to decode graph: {err}") })).into_response(),
         Err(err) => map_io_error(err, "failed to read graph"),
     }
 }
@@ -447,13 +445,10 @@ async fn list_templates() -> impl IntoResponse {
             Ok(data) => data,
             Err(err) => return map_template_io_error(err, "failed to read template file"),
         };
-        let Ok(raw) = serde_json::from_str::<PipelineTemplateDocumentRaw>(&data) else {
+        let Ok(raw) = PipelineTemplateDocumentRaw::decode_str(&data) else {
             continue;
         };
-        let PipelineTemplateDocumentRaw { id, name, summary, tags, graph: _ } = raw;
-        let _raw_id = id.as_deref().and_then(normalize_template_id);
-        let name = name.unwrap_or_else(|| template_id.clone());
-        summaries.push(PipelineTemplateSummary { template_id, name, summary, tags });
+        summaries.push(template_raw_into_summary(template_id, raw));
     }
 
     summaries.sort_by(|a, b| a.name.cmp(&b.name));
@@ -479,21 +474,13 @@ async fn fetch_template(State(state): State<AppState>, Path(id): Path<String>) -
         }
         Err(err) => return map_template_io_error(err, "failed to read template file"),
     };
-    let raw = match serde_json::from_str::<PipelineTemplateDocumentRaw>(&data) {
+    let raw = match PipelineTemplateDocumentRaw::decode_str(&data) {
         Ok(raw) => raw,
         Err(err) => {
             return map_template_io_error(io::Error::new(io::ErrorKind::InvalidData, err), "failed to decode template");
         }
     };
-    let PipelineTemplateDocumentRaw { id, name, summary, tags, graph } = raw;
-    let _raw_id = id.as_deref().and_then(normalize_template_id);
-    let name = name.unwrap_or_else(|| template_id.clone());
-    let mut graph = graph;
-    if let Some(unwrapped) = unwrap_pipeline_export_graph(&graph) {
-        graph = unwrapped;
-    }
-    normalize_graph_metadata(&mut graph);
-    inject_cached_port_metadata(&state, &mut graph).await;
-    let doc = PipelineTemplateDocument { id: template_id, name, summary, tags, graph };
+    let mut doc = template_raw_into_document(template_id, raw);
+    inject_cached_port_metadata(&state, &mut doc.graph).await;
     Json(doc).into_response()
 }

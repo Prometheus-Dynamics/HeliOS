@@ -1,5 +1,8 @@
 use axum::{Json, http::StatusCode, response::IntoResponse};
-use std::{io, path::PathBuf};
+use std::{
+    io,
+    path::{Path, PathBuf},
+};
 use tokio::fs;
 use uuid::Uuid;
 
@@ -7,7 +10,7 @@ use crate::http::storage;
 
 use super::{
     graph_support::{normalize_graph_metadata, unwrap_pipeline_export_graph},
-    types::{PipelineDocument, PipelineError, PipelineTemplateDocumentRaw, map_io_error_response},
+    types::{PipelineDocument, PipelineError, PipelineTemplateDocument, PipelineTemplateDocumentRaw, PipelineTemplateSummary, map_io_error_response},
 };
 
 pub(crate) fn pipeline_dir() -> Result<PathBuf, Box<axum::response::Response>> {
@@ -58,11 +61,38 @@ pub(crate) fn map_io_error<E: Into<std::io::Error>>(err: E, context: &str) -> ax
     map_io_error_response(err, context)
 }
 
+pub(crate) async fn load_graph_document_from_path(path: &Path) -> io::Result<PipelineDocument> {
+    let data = fs::read(path).await?;
+    PipelineDocument::decode_slice(&data).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
+}
+
 pub async fn load_graph_document(id: Uuid) -> io::Result<PipelineDocument> {
     let dir = storage::ensure_subdir_async("pipelines").await?;
     let path = dir.join(format!("{id}.json"));
-    let data = fs::read(&path).await?;
-    serde_json::from_slice::<PipelineDocument>(&data).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
+    load_graph_document_from_path(&path).await
+}
+
+fn template_name(template_id: &str, raw_name: Option<&str>) -> String {
+    raw_name.map(str::trim).filter(|value| !value.is_empty()).unwrap_or(template_id).to_string()
+}
+
+fn template_summary(summary: Option<String>) -> Option<String> {
+    summary.map(|value| value.trim().to_string()).filter(|value| !value.is_empty())
+}
+
+pub(super) fn template_raw_into_summary(template_id: String, raw: PipelineTemplateDocumentRaw) -> PipelineTemplateSummary {
+    let _raw_id = raw.id.as_deref().and_then(normalize_template_id);
+    PipelineTemplateSummary { template_id: template_id.clone(), name: template_name(&template_id, raw.name.as_deref()), summary: template_summary(raw.summary), tags: raw.tags }
+}
+
+pub(super) fn template_raw_into_document(template_id: String, raw: PipelineTemplateDocumentRaw) -> PipelineTemplateDocument {
+    let _raw_id = raw.id.as_deref().and_then(normalize_template_id);
+    let mut graph = raw.graph;
+    if let Some(unwrapped) = unwrap_pipeline_export_graph(&graph) {
+        graph = unwrapped;
+    }
+    normalize_graph_metadata(&mut graph);
+    PipelineTemplateDocument { id: template_id.clone(), name: template_name(&template_id, raw.name.as_deref()), summary: template_summary(raw.summary), tags: raw.tags, graph }
 }
 
 pub(crate) async fn load_template_graph(template_id: &str) -> io::Result<serde_json::Value> {
@@ -71,11 +101,27 @@ pub(crate) async fn load_template_graph(template_id: &str) -> io::Result<serde_j
     };
     let path = pipeline_template_dir().join(format!("{template_id}.json"));
     let data = fs::read_to_string(&path).await?;
-    let raw = serde_json::from_str::<PipelineTemplateDocumentRaw>(&data).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-    let mut graph = raw.graph;
-    if let Some(unwrapped) = unwrap_pipeline_export_graph(&graph) {
-        graph = unwrapped;
+    let raw = PipelineTemplateDocumentRaw::decode_str(&data).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    Ok(template_raw_into_document(template_id, raw).graph)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PipelineTemplateDocumentRaw, template_raw_into_summary};
+
+    #[test]
+    fn template_raw_into_summary_uses_template_id_when_name_is_blank() {
+        let raw = PipelineTemplateDocumentRaw {
+            schema_version: 1,
+            id: Some("demo".to_string()),
+            name: Some("   ".to_string()),
+            summary: Some("  Example  ".to_string()),
+            tags: vec!["vision".to_string()],
+            graph: serde_json::json!({ "nodes": [], "edges": [] }),
+        };
+
+        let summary = template_raw_into_summary("demo".to_string(), raw);
+        assert_eq!(summary.name, "demo");
+        assert_eq!(summary.summary.as_deref(), Some("Example"));
     }
-    normalize_graph_metadata(&mut graph);
-    Ok(graph)
 }

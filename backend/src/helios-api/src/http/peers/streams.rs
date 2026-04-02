@@ -187,6 +187,10 @@ pub(crate) async fn sync_peer_pipelines(State(state): State<AppState>, Path(id):
                 continue;
             }
         };
+        if let Err(err) = remote_doc.ensure_supported_schema_version() {
+            errors.push(format!("{}: {err}", remote_pipeline_id));
+            continue;
+        }
 
         let local_pipeline_id = synced_pipeline_local_id(peer.id.as_str(), remote_pipeline_id);
         let remote_name = remote_doc.name.clone().or(summary_name);
@@ -436,7 +440,7 @@ async fn upsert_synced_pipeline(
     let dir = crate::http::storage::ensure_subdir_async("pipelines").await.map_err(|err| err.to_string())?;
     let path = dir.join(format!("{local_pipeline_id}.json"));
     if let Ok(data) = tokio::fs::read(&path).await
-        && let Ok(existing) = serde_json::from_slice::<PipelineDocument>(&data)
+        && let Ok(existing) = PipelineDocument::decode_slice(&data)
     {
         if !force && remote_updated_at_ms > 0 && existing.updated_at_ms >= remote_updated_at_ms {
             return Ok((false, Vec::new()));
@@ -447,8 +451,8 @@ async fn upsert_synced_pipeline(
     }
 
     let updated_at_ms = if remote_updated_at_ms > 0 { remote_updated_at_ms } else { Utc::now().timestamp_millis() };
-    let doc = PipelineDocument { id: local_pipeline_id, name: local_name, graph, updated_at_ms };
-    let data = serde_json::to_vec_pretty(&doc).map_err(|err| format!("failed to serialize pipeline: {err}"))?;
+    let doc = PipelineDocument::new(local_pipeline_id, local_name, graph, updated_at_ms);
+    let data = doc.encode_pretty().map_err(|err| format!("failed to serialize pipeline: {err}"))?;
     tokio::fs::write(&path, data).await.map_err(|err| format!("failed to persist pipeline: {err}"))?;
 
     pipelines::refresh_graph_validation(state, local_pipeline_id, &doc.graph).await;

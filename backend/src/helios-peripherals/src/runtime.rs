@@ -6,8 +6,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use futures::FutureExt;
+use lib_led_animations::{LED_ANIMATIONS_PATH, command_for_animation_name, load_led_animations, sequence_for_animation_name};
 use lib_sensors::led_config::{DEFAULT_ANIMATION_EVENT_STARTUP, DEFAULT_ANIMATION_EVENT_STARTUP_IDLE, LedConfig};
-use serde::Deserialize;
 use tokio::fs as tokio_fs;
 use tokio::net::UnixListener;
 use tokio::task::JoinSet;
@@ -25,8 +25,6 @@ use crate::usb_proxy;
 use self::session::handle_connection;
 use self::shutdown::wait_for_shutdown;
 
-const LED_ANIMATIONS_PATH: &str = "/var/lib/helios/led-animations.json";
-const LEGACY_LED_ANIMATIONS_PATH: &str = "/etc/helios/led-animations.json";
 const MEMORY_TRACE_ENV: &str = "HELIOS_PERIPHERALS_MEMORY_TRACE";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,29 +66,6 @@ impl BootLightingConfig {
             hold_delay: Duration::from_millis(env_u64("HELIOS_LED_BOOT_HOLD_MS", 200)),
         }
     }
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-struct StoredAnimationDoc {
-    #[serde(default)]
-    animations: Vec<StoredAnimationEntry>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct StoredAnimationEntry {
-    name: String,
-    #[serde(default)]
-    command: LightingCommand,
-    #[serde(default)]
-    sequence: Vec<StoredAnimationFrame>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct StoredAnimationFrame {
-    #[serde(default)]
-    frame: Vec<LightingColor>,
-    #[serde(default)]
-    duration_ms: u32,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -303,9 +278,9 @@ async fn run_configured_startup_animation(service: &SensorsService, led_config: 
     let Some(animation_name) = led_config.animation_for_event(DEFAULT_ANIMATION_EVENT_STARTUP).map(ToOwned::to_owned) else {
         return false;
     };
-    let doc = load_stored_animation_doc().await;
+    let doc = load_led_animations(LED_ANIMATIONS_PATH).await;
 
-    if let Some(sequence) = stored_sequence_for_name(&doc, &animation_name) {
+    if let Some(sequence) = sequence_for_animation_name(&doc, &animation_name) {
         for frame in sequence {
             if shutdown.is_cancelled() {
                 return true;
@@ -328,7 +303,7 @@ async fn run_configured_startup_animation(service: &SensorsService, led_config: 
         return true;
     }
 
-    if let Some(command) = stored_command_for_name(&doc, &animation_name, led_config.brightness) {
+    if let Some(command) = command_for_animation_name(&doc, &animation_name, led_config.brightness) {
         if let Err(err) = service.lighting_command(command).await {
             warn!(
                 %err,
@@ -349,8 +324,8 @@ async fn try_apply_default_event_command(service: &SensorsService, led_config: &
     let Some(animation_name) = led_config.animation_for_event(event).map(ToOwned::to_owned) else {
         return false;
     };
-    let doc = load_stored_animation_doc().await;
-    let Some(command) = stored_command_for_name(&doc, &animation_name, led_config.brightness) else {
+    let doc = load_led_animations(LED_ANIMATIONS_PATH).await;
+    let Some(command) = command_for_animation_name(&doc, &animation_name, led_config.brightness) else {
         warn!(event, animation = %animation_name, "configured default animation was not found");
         return false;
     };
@@ -358,38 +333,6 @@ async fn try_apply_default_event_command(service: &SensorsService, led_config: &
         warn!(%err, event, animation = %animation_name, "failed to apply configured default animation");
     }
     true
-}
-
-async fn load_stored_animation_doc() -> StoredAnimationDoc {
-    for path in [LED_ANIMATIONS_PATH, LEGACY_LED_ANIMATIONS_PATH] {
-        match tokio_fs::read_to_string(path).await {
-            Ok(raw) => return serde_json::from_str::<StoredAnimationDoc>(&raw).unwrap_or_default(),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(_) => return StoredAnimationDoc::default(),
-        }
-    }
-    StoredAnimationDoc::default()
-}
-
-fn find_stored_animation_entry<'a>(doc: &'a StoredAnimationDoc, name: &str) -> Option<&'a StoredAnimationEntry> {
-    let target = name.trim();
-    if target.is_empty() {
-        return None;
-    }
-    doc.animations.iter().find(|entry| entry.name.trim().eq_ignore_ascii_case(target))
-}
-
-fn stored_command_for_name(doc: &StoredAnimationDoc, name: &str, fallback_brightness: Option<u8>) -> Option<LightingCommand> {
-    let entry = find_stored_animation_entry(doc, name)?;
-    if entry.command.frame.is_some() || entry.command.animation.is_some() {
-        return Some(LightingCommand { frame: entry.command.frame.clone(), brightness: entry.command.brightness.or(fallback_brightness), animation: entry.command.animation.clone() });
-    }
-    entry.sequence.first().map(|frame| LightingCommand { frame: Some(frame.frame.clone()), brightness: entry.command.brightness.or(fallback_brightness), animation: None })
-}
-
-fn stored_sequence_for_name(doc: &StoredAnimationDoc, name: &str) -> Option<Vec<StoredAnimationFrame>> {
-    let entry = find_stored_animation_entry(doc, name)?;
-    if entry.sequence.is_empty() { None } else { Some(entry.sequence.clone()) }
 }
 
 async fn triple_blink(service: &SensorsService, led_count: usize, color: &LightingColor, brightness: u8, shutdown: &CancellationToken) -> bool {

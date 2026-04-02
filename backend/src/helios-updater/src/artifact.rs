@@ -6,6 +6,7 @@ use base64::Engine as _;
 use chrono::{DateTime, Utc};
 use ed25519_dalek::Signature;
 use futures::StreamExt;
+use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -21,6 +22,12 @@ use crate::error::{Error, Result};
 use crate::ipc::UrlArtifact;
 
 const SIGNATURE_CONTEXT: &[u8] = b"helios-ota-v1\0";
+const CURRENT_RELEASE_MANIFEST_METADATA_SCHEMA_VERSION: u32 = 1;
+const CURRENT_STAGED_METADATA_SCHEMA_VERSION: u32 = 1;
+
+const fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReleaseManifest {
@@ -38,6 +45,50 @@ pub struct ReleaseManifest {
     /// command decode to fail).
     #[serde(default)]
     pub metadata_json: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReleaseManifestMetadata {
+    pub schema_version: u32,
+    #[serde(default = "default_true")]
+    pub auto_apply: bool,
+    #[serde(default = "default_true")]
+    pub delete_image_after_apply: bool,
+    #[serde(default)]
+    pub source_artifact_path: Option<String>,
+}
+
+impl Default for ReleaseManifestMetadata {
+    fn default() -> Self {
+        Self { schema_version: CURRENT_RELEASE_MANIFEST_METADATA_SCHEMA_VERSION, auto_apply: true, delete_image_after_apply: true, source_artifact_path: None }
+    }
+}
+
+impl ReleaseManifestMetadata {
+    #[must_use]
+    pub fn manual_stage(delete_image_after_apply: bool, source_artifact_path: Option<String>) -> Self {
+        Self { auto_apply: false, delete_image_after_apply, source_artifact_path, ..Self::default() }
+    }
+
+    pub fn encode_json(&self) -> core::result::Result<String, String> {
+        let mut canonical = self.clone();
+        canonical.schema_version = CURRENT_RELEASE_MANIFEST_METADATA_SCHEMA_VERSION;
+        serde_json::to_string(&canonical).map_err(|err| format!("failed to encode release manifest metadata: {err}"))
+    }
+
+    pub fn decode_json(raw: &str) -> core::result::Result<Self, String> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() || trimmed == "{}" {
+            return Ok(Self::default());
+        }
+        let value = serde_json::from_str::<serde_json::Value>(trimmed).map_err(|err| format!("failed to decode release manifest metadata: {err}"))?;
+        let migrated = migrate_to_current(value, &RELEASE_MANIFEST_METADATA_SCHEMA_PLAN)?;
+        serde_json::from_value(migrated).map_err(|err| format!("failed to parse release manifest metadata: {err}"))
+    }
+
+    pub fn from_manifest(manifest: &ReleaseManifest) -> core::result::Result<Self, String> {
+        Self::decode_json(&manifest.metadata_json)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,9 +129,26 @@ pub struct StagedArtifact {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StagedMetadata {
+    pub schema_version: u32,
     pub manifest: ReleaseManifest,
     pub artifacts: Vec<StagedArtifact>,
     pub staged_at: DateTime<Utc>,
+}
+
+const RELEASE_MANIFEST_METADATA_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan {
+    document_name: "release manifest metadata",
+    legacy_version: CURRENT_RELEASE_MANIFEST_METADATA_SCHEMA_VERSION,
+    current_version: CURRENT_RELEASE_MANIFEST_METADATA_SCHEMA_VERSION,
+    migrations: &[],
+};
+
+const STAGED_METADATA_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> =
+    SyncSchemaPlan { document_name: "staged metadata", legacy_version: CURRENT_STAGED_METADATA_SCHEMA_VERSION, current_version: CURRENT_STAGED_METADATA_SCHEMA_VERSION, migrations: &[] };
+
+fn parse_staged_metadata(bytes: &[u8]) -> Result<StagedMetadata> {
+    let raw = serde_json::from_slice::<serde_json::Value>(bytes).map_err(Error::SerdeJson)?;
+    let migrated = migrate_to_current(raw, &STAGED_METADATA_SCHEMA_PLAN).map_err(Error::InvalidState)?;
+    serde_json::from_value(migrated).map_err(Error::SerdeJson)
 }
 
 struct DownloadContext {
@@ -250,7 +318,7 @@ async fn download_artifact(
 }
 
 async fn persist_metadata(dir: &Path, manifest: ReleaseManifest, artifacts: Vec<StagedArtifact>, staged_at: DateTime<Utc>) -> Result<()> {
-    let metadata = StagedMetadata { manifest, artifacts, staged_at };
+    let metadata = StagedMetadata { schema_version: CURRENT_STAGED_METADATA_SCHEMA_VERSION, manifest, artifacts, staged_at };
     let path = dir.join("metadata.json");
     let serialized = serde_json::to_vec_pretty(&metadata)?;
     fs::write(path, serialized).await?;
@@ -326,6 +394,76 @@ pub async fn load_metadata(config: &UpdaterConfig, update_id: Uuid) -> Result<St
         Err(err) if err.kind() == ErrorKind::NotFound => return Err(Error::InvalidState(format!("staged metadata missing for update {}", update_id))),
         Err(err) => return Err(Error::Io(err)),
     };
-    let metadata = serde_json::from_slice(&bytes).map_err(Error::SerdeJson)?;
-    Ok(metadata)
+    parse_staged_metadata(&bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_manifest() -> ReleaseManifest {
+        ReleaseManifest {
+            update_id: Some(Uuid::nil()),
+            version: Some("test".into()),
+            artifacts: vec![ManifestArtifact {
+                url: Url::parse("https://example.invalid/update.bin").expect("url"),
+                filename: Some("update.bin".into()),
+                size_bytes: Some(42),
+                sha256: None,
+                signature: None,
+                kind: Some("disk-image".into()),
+            }],
+            metadata_json: "{}".into(),
+        }
+    }
+
+    #[test]
+    fn release_manifest_metadata_defaults_for_empty_payload() {
+        let parsed = ReleaseManifestMetadata::decode_json("").expect("parse");
+        assert_eq!(parsed, ReleaseManifestMetadata { schema_version: CURRENT_RELEASE_MANIFEST_METADATA_SCHEMA_VERSION, auto_apply: true, delete_image_after_apply: true, source_artifact_path: None });
+    }
+
+    #[test]
+    fn release_manifest_metadata_rejects_missing_schema_version() {
+        let err = ReleaseManifestMetadata::decode_json(r#"{"auto_apply":false,"delete_image_after_apply":true,"source_artifact_path":"/var/lib/helios/api-data/media/update.tar"}"#)
+            .expect_err("missing schema version should fail");
+        assert!(err.contains("missing required schema_version"));
+    }
+
+    #[test]
+    fn release_manifest_metadata_rejects_future_schema() {
+        let err = ReleaseManifestMetadata::decode_json(r#"{"schema_version":2,"auto_apply":true}"#).expect_err("future schema should fail");
+        assert!(err.contains("unsupported release manifest metadata schema_version"));
+    }
+
+    #[test]
+    fn parse_staged_metadata_rejects_missing_schema_version() {
+        let raw = serde_json::json!({
+            "manifest": sample_manifest(),
+            "artifacts": [],
+            "staged_at": "2026-01-01T00:00:00Z"
+        });
+
+        let err = parse_staged_metadata(&serde_json::to_vec(&raw).expect("encode")).expect_err("missing schema version should fail");
+        match err {
+            Error::InvalidState(message) => assert!(message.contains("missing required schema_version")),
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_staged_metadata_rejects_future_schema() {
+        let raw = serde_json::json!({
+            "schema_version": CURRENT_STAGED_METADATA_SCHEMA_VERSION + 1,
+            "manifest": sample_manifest(),
+            "artifacts": [],
+            "staged_at": "2026-01-01T00:00:00Z"
+        });
+
+        let err = parse_staged_metadata(&serde_json::to_vec(&raw).expect("encode")).expect_err("future schema should fail");
+        match err {
+            Error::InvalidState(message) => assert!(message.contains("unsupported staged metadata schema_version")),
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
 }

@@ -1,6 +1,9 @@
 use lib_cv::modules::aruco::tag::ArucoTagDecoding;
+use lib_schema_migration::{migrate_to_current, SyncSchemaPlan};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
+
+pub const CURRENT_FIELD_MAP_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -91,6 +94,16 @@ pub enum FieldMapSource {
     },
 }
 
+const FIELD_MAP_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> =
+    SyncSchemaPlan { document_name: "field map document", legacy_version: CURRENT_FIELD_MAP_SCHEMA_VERSION, current_version: CURRENT_FIELD_MAP_SCHEMA_VERSION, migrations: &[] };
+
+pub fn parse_field_map_document(bytes: &[u8]) -> Result<(FieldMapDocument, bool), String> {
+    let raw = serde_json::from_slice::<serde_json::Value>(bytes).map_err(|err| format!("failed to decode field map document: {err}"))?;
+    let migrated = migrate_to_current(raw.clone(), &FIELD_MAP_SCHEMA_PLAN)?;
+    let parsed = serde_json::from_value::<FieldMapDocument>(migrated.clone()).map_err(|err| format!("failed to parse field map document: {err}"))?;
+    Ok((parsed, migrated != raw))
+}
+
 pub fn hydrate_map_document(doc: &mut FieldMapDocument) {
     for marker in &mut doc.markers {
         if marker.tag_bits.is_none() {
@@ -136,6 +149,7 @@ fn normalize_aruco_family_label(raw: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn limelight_family_strings_produce_bits() {
@@ -152,5 +166,36 @@ mod tests {
         // FRC tags are typically indexed as 1..N; ensure common ids resolve.
         assert!(aruco_bits_for_family("apriltag3_36h11_classic", 15).is_some());
         assert!(aruco_bits_for_family("apriltag3_36h11_classic", 16).is_some());
+    }
+
+    #[test]
+    fn parse_field_map_document_rejects_missing_schema_version() {
+        let bytes = serde_json::to_vec(&json!({
+            "id": "field-a",
+            "name": "Field A",
+            "width_m": 1.0,
+            "depth_m": 2.0,
+            "markers": [],
+            "source": { "kind": "limelight_fmap" }
+        }))
+        .expect("encode field map");
+        let err = parse_field_map_document(&bytes).expect_err("missing schema version should fail");
+        assert!(err.contains("missing required schema_version"));
+    }
+
+    #[test]
+    fn parse_field_map_document_rejects_future_schema_version() {
+        let bytes = serde_json::to_vec(&json!({
+            "schema_version": CURRENT_FIELD_MAP_SCHEMA_VERSION + 1,
+            "id": "field-a",
+            "name": "Field A",
+            "width_m": 1.0,
+            "depth_m": 2.0,
+            "markers": [],
+            "source": { "kind": "limelight_fmap" }
+        }))
+        .expect("encode field map");
+        let err = parse_field_map_document(&bytes).expect_err("future field map should fail");
+        assert!(err.contains("unsupported field map document schema_version"));
     }
 }

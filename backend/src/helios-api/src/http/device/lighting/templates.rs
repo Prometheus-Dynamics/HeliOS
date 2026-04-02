@@ -1,6 +1,7 @@
 use std::{io, path::PathBuf};
 
 use axum::{Json, extract::Path, response::IntoResponse};
+use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
 use tokio::fs;
 
 use crate::http::error::{ApiError, ApiResult, ErrorBody};
@@ -8,6 +9,7 @@ use crate::http::error::{ApiError, ApiResult, ErrorBody};
 use super::{LightingAnimationPayload, LightingAnimationTemplateDocument, LightingAnimationTemplateSummary, LightingColorPayload, LightingFramePayload, LightingTimelinePayload};
 
 const LIGHTING_TEMPLATE_DIR: &str = "/usr/share/helios/lighting-templates";
+const CURRENT_LIGHTING_TEMPLATE_DOCUMENT_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub(super) struct LightingTemplateCommandRaw {
@@ -21,6 +23,7 @@ pub(super) struct LightingTemplateCommandRaw {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub(super) struct LightingAnimationTemplateDocumentRaw {
+    pub(super) schema_version: u32,
     #[serde(default)]
     pub(super) id: Option<String>,
     #[serde(default)]
@@ -48,6 +51,16 @@ pub(super) struct LightingAnimationTemplateDocumentRaw {
 }
 
 use serde::Deserialize;
+
+impl LightingAnimationTemplateDocumentRaw {
+    pub(super) fn decode_str(raw: &str) -> Result<Self, String> {
+        let value = serde_json::from_str::<serde_json::Value>(raw).map_err(|err| format!("failed to decode lighting template: {err}"))?;
+        let migrated = migrate_to_current(value, &LIGHTING_TEMPLATE_DOCUMENT_SCHEMA_PLAN)?;
+        let mut parsed: Self = serde_json::from_value(migrated).map_err(|err| format!("failed to parse lighting template: {err}"))?;
+        parsed.schema_version = CURRENT_LIGHTING_TEMPLATE_DOCUMENT_SCHEMA_VERSION;
+        Ok(parsed)
+    }
+}
 
 #[utoipa::path(
     get,
@@ -81,7 +94,7 @@ pub async fn list_lighting_templates() -> ApiResult<impl IntoResponse> {
             Ok(data) => data,
             Err(err) => return Err(map_template_io_error(err, "failed to read lighting template file")),
         };
-        let Ok(raw) = serde_json::from_str::<LightingAnimationTemplateDocumentRaw>(&data) else {
+        let Ok(raw) = LightingAnimationTemplateDocumentRaw::decode_str(&data) else {
             continue;
         };
         let name = raw.name.as_deref().map(str::trim).filter(|value| !value.is_empty()).unwrap_or(&template_id).to_string();
@@ -116,8 +129,7 @@ pub async fn fetch_lighting_template(Path(id): Path<String>) -> ApiResult<impl I
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Err(ApiError::not_found("template not found")),
         Err(err) => return Err(map_template_io_error(err, "failed to read lighting template file")),
     };
-    let raw = serde_json::from_str::<LightingAnimationTemplateDocumentRaw>(&data)
-        .map_err(|err| map_template_io_error(io::Error::new(io::ErrorKind::InvalidData, err), "failed to decode lighting template"))?;
+    let raw = LightingAnimationTemplateDocumentRaw::decode_str(&data).map_err(|err| map_template_io_error(io::Error::new(io::ErrorKind::InvalidData, err), "failed to decode lighting template"))?;
     let doc = template_raw_into_document(template_id, raw).map_err(|err| map_template_io_error(io::Error::new(io::ErrorKind::InvalidData, err), "invalid lighting template"))?;
     Ok(Json(doc))
 }
@@ -184,3 +196,10 @@ pub(super) fn template_raw_into_document(template_id: String, raw: LightingAnima
 fn map_template_io_error(err: io::Error, context: &str) -> ApiError {
     if err.kind() == io::ErrorKind::NotFound { ApiError::not_found(format!("{context}: {err}")) } else { ApiError::internal(format!("{context}: {err}")) }
 }
+
+const LIGHTING_TEMPLATE_DOCUMENT_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan {
+    document_name: "lighting template document",
+    legacy_version: CURRENT_LIGHTING_TEMPLATE_DOCUMENT_SCHEMA_VERSION,
+    current_version: CURRENT_LIGHTING_TEMPLATE_DOCUMENT_SCHEMA_VERSION,
+    migrations: &[],
+};

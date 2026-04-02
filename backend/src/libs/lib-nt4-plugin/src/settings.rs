@@ -1,4 +1,5 @@
 use daedalus::runtime::NodeError;
+use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
 use serde::Deserialize;
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
@@ -23,6 +24,21 @@ pub struct Nt4SettingsFile {
     #[serde(default)]
     pub server_port: Option<u16>,
 }
+
+const CURRENT_NT4_SETTINGS_SCHEMA_VERSION: u32 = 1;
+const CANONICAL_NT4_SETTINGS_PATH: &str = "/var/lib/helios/nt4.json";
+const CANONICAL_TEAM_FILE_PATH: &str = "/var/lib/helios/team";
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+struct StoredNt4SettingsFile {
+    schema_version: u32,
+    #[serde(default)]
+    settings: Nt4SettingsFile,
+}
+
+const NT4_SETTINGS_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> =
+    SyncSchemaPlan { document_name: "nt4 settings file", legacy_version: CURRENT_NT4_SETTINGS_SCHEMA_VERSION, current_version: CURRENT_NT4_SETTINGS_SCHEMA_VERSION, migrations: &[] };
 
 pub fn resolve_target(settings: &Nt4SettingsFile) -> Result<(String, u16), NodeError> {
     if !settings.enabled {
@@ -54,41 +70,46 @@ pub fn sanitize_segment(raw: &str, fallback: &str) -> String {
     if filtered.is_empty() { fallback.to_string() } else { filtered }
 }
 
-fn settings_paths() -> (PathBuf, Option<PathBuf>) {
-    // TEMP_SHIM: nt4-plugin-settings-etc-fallback
-    // Keep the /etc fallback until every deployed image migrates nt4.json into /var/lib/helios.
+fn settings_path() -> PathBuf {
     match std::env::var_os("HELIOS_NT4_SETTINGS_FILE") {
-        Some(path) => (PathBuf::from(path), None),
-        None => (PathBuf::from("/var/lib/helios/nt4.json"), Some(PathBuf::from("/etc/helios/nt4.json"))),
+        Some(path) => PathBuf::from(path),
+        None => PathBuf::from(CANONICAL_NT4_SETTINGS_PATH),
     }
 }
 
-fn team_file_paths() -> (PathBuf, Option<PathBuf>) {
-    // TEMP_SHIM: nt4-plugin-team-file-etc-fallback
-    // Keep the /etc team fallback until every deployed image migrates the team file into /var/lib/helios.
+fn team_file_path() -> PathBuf {
     match std::env::var_os("HELIOS_TEAM_FILE") {
-        Some(path) => (PathBuf::from(path), None),
-        None => (PathBuf::from("/var/lib/helios/team"), Some(PathBuf::from("/etc/helios/team"))),
+        Some(path) => PathBuf::from(path),
+        None => PathBuf::from(CANONICAL_TEAM_FILE_PATH),
     }
 }
 
-fn read_to_string_with_fallback(path: &PathBuf, fallback: Option<&PathBuf>) -> std::io::Result<String> {
-    match std::fs::read_to_string(path) {
-        Ok(raw) => Ok(raw),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => match fallback {
-            Some(fallback) => std::fs::read_to_string(fallback),
-            None => Err(err),
-        },
-        Err(err) => Err(err),
+fn parse_nt4_settings(raw: &str) -> Nt4SettingsFile {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return Nt4SettingsFile::default();
+    };
+    let Ok(migrated) = migrate_to_current(value, &NT4_SETTINGS_SCHEMA_PLAN) else {
+        return Nt4SettingsFile::default();
+    };
+    let Ok(stored) = serde_json::from_value::<StoredNt4SettingsFile>(migrated) else {
+        return Nt4SettingsFile::default();
+    };
+    stored.settings
+}
+
+fn current_settings_source(path: &PathBuf) -> Option<PathBuf> {
+    if path.is_file() {
+        return Some(path.clone());
     }
+    None
 }
 
 pub fn read_settings_file() -> Nt4SettingsFile {
-    let (path, legacy_path) = settings_paths();
-    let Ok(data) = read_to_string_with_fallback(&path, legacy_path.as_ref()) else {
+    let path = settings_path();
+    let Ok(data) = std::fs::read_to_string(&path) else {
         return Nt4SettingsFile::default();
     };
-    serde_json::from_str::<Nt4SettingsFile>(&data).unwrap_or_default()
+    parse_nt4_settings(&data)
 }
 
 #[derive(Debug)]
@@ -113,8 +134,8 @@ pub fn cached_settings() -> Nt4SettingsFile {
     }
     guard.last_check = now;
 
-    let (path, legacy_path) = settings_paths();
-    let source_path = if path.is_file() { Some(path) } else { legacy_path.filter(|candidate| candidate.is_file()) };
+    let path = settings_path();
+    let source_path = current_settings_source(&path);
     let modified = source_path.as_ref().and_then(|source| std::fs::metadata(source).ok()).and_then(|meta| meta.modified().ok());
     if modified != guard.modified || source_path != guard.source_path {
         guard.source_path = source_path;
@@ -129,8 +150,8 @@ fn default_subscriptions_enabled() -> bool {
 }
 
 fn default_nt4_server_host_from_team_file() -> Option<String> {
-    let (path, legacy_path) = team_file_paths();
-    let content = read_to_string_with_fallback(&path, legacy_path.as_ref()).ok()?;
+    let path = team_file_path();
+    let content = std::fs::read_to_string(&path).ok()?;
     let trimmed = content.trim();
     if trimmed.is_empty() {
         return None;

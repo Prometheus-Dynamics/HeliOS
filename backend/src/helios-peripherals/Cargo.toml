@@ -13,6 +13,7 @@ dto = [
     "derive_more",
     "bincode",
     "lib-sensors",
+    "lib-lighting",
 ]
 runtime = [
     "dto",
@@ -28,11 +29,12 @@ runtime = [
     "nix",
     "lib-ai",
     "lib-sensors",
+    "lib-led-animations",
     "lib-math",
     "linux-embedded-hal",
     "toml",
 ]
-schema = ["dto", "dep:utoipa"]
+schema = ["dto", "dep:utoipa", "lib-lighting/schema"]
 
 [[bin]]
 name = "helios-peripherals"
@@ -52,6 +54,9 @@ serde = { workspace = true, features = ["derive"], optional = true }
 uuid = { workspace = true, optional = true }
 lib-ipc = { path = "../libs/lib-ipc", optional = true }
 lib-runtime-policy = { path = "../libs/lib-runtime-policy" }
+lib-schema-migration = { path = "../libs/lib-schema-migration" }
+lib-lighting = { path = "../libs/lib-lighting", optional = true }
+lib-led-animations = { path = "../libs/lib-led-animations", optional = true }
 derive_more = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 tokio-util = { workspace = true, optional = true }

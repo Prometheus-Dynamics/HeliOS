@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
     response::IntoResponse,
 };
-use lib_led_animations::{LED_ANIMATIONS_PATH, LEGACY_LED_ANIMATIONS_PATH, LedAnimationEntry, LedAnimationFrame, load_led_animations, persist_led_animations, timeline_to_sequence};
+use lib_led_animations::{LED_ANIMATIONS_PATH, LedAnimationEntry, LedAnimationFrame, load_led_animations, persist_led_animations, timeline_to_sequence};
 use tracing::debug;
 
 use crate::http::{
@@ -80,7 +80,6 @@ pub async fn save_lighting_animation(State(state): State<AppState>, Json(payload
     doc.animations.sort_by(|a, b| a.name.to_ascii_lowercase().cmp(&b.name.to_ascii_lowercase()));
 
     persist_led_animations(LED_ANIMATIONS_PATH, &doc).await.map_err(|err| ApiError::internal(format!("failed to persist lighting animations: {err}")))?;
-    persist_led_animations(LEGACY_LED_ANIMATIONS_PATH, &doc).await.map_err(|err| ApiError::internal(format!("failed to mirror lighting animations: {err}")))?;
     state.services.pipelines.invalidate_registry_cache().await;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -102,7 +101,6 @@ pub async fn delete_lighting_animation(State(state): State<AppState>, Path(name)
     doc.animations.retain(|entry| !entry.name.eq_ignore_ascii_case(trimmed));
     if doc.animations.len() != before {
         persist_led_animations(LED_ANIMATIONS_PATH, &doc).await.map_err(|err| ApiError::internal(format!("failed to persist lighting animations: {err}")))?;
-        persist_led_animations(LEGACY_LED_ANIMATIONS_PATH, &doc).await.map_err(|err| ApiError::internal(format!("failed to mirror lighting animations: {err}")))?;
         state.services.pipelines.invalidate_registry_cache().await;
     }
 

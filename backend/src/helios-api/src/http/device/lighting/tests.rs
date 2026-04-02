@@ -17,6 +17,7 @@ fn normalize_template_id_rejects_empty_and_sanitizes_json_suffix() {
 #[test]
 fn template_raw_into_document_materializes_sequence_from_timeline() {
     let raw = LightingAnimationTemplateDocumentRaw {
+        schema_version: 1,
         name: Some("Pulse".to_string()),
         timeline: Some(LightingTimelinePayload {
             duration_ms: Some(200),
@@ -39,6 +40,7 @@ fn template_raw_into_document_materializes_sequence_from_timeline() {
 #[test]
 fn template_raw_into_document_supports_legacy_command_shape() {
     let raw = LightingAnimationTemplateDocumentRaw {
+        schema_version: 1,
         command: Some(LightingTemplateCommandRaw {
             frame: Some(vec![LightingColorPayload { r: 1, g: 2, b: 3, w: 4 }]),
             brightness: Some(32),
@@ -68,4 +70,26 @@ fn entry_to_response_preserves_sequence_and_animation() {
     assert_eq!(response.brightness, Some(64));
     assert!(matches!(response.animation, Some(LightingAnimationPayload::Chase { speed_hz, .. }) if (speed_hz - 2.0).abs() < f32::EPSILON));
     assert_eq!(response.frames, Some(vec![LightingFramePayload { frame: vec![LightingColorPayload { r: 5, g: 6, b: 7, w: 0 }], duration_ms: 50 }]));
+}
+
+#[test]
+fn lighting_template_decode_rejects_missing_schema_version() {
+    let raw = serde_json::json!({
+        "name": "Pulse",
+        "frame": [{ "r": 255, "g": 0, "b": 0, "w": 0 }]
+    });
+
+    let err = LightingAnimationTemplateDocumentRaw::decode_str(&serde_json::to_string(&raw).expect("encode")).expect_err("missing schema version should fail");
+    assert!(err.contains("missing required schema_version"));
+}
+
+#[test]
+fn lighting_template_decode_rejects_future_schema_version() {
+    let raw = serde_json::json!({
+        "schema_version": 2,
+        "frame": [{ "r": 255, "g": 0, "b": 0, "w": 0 }]
+    });
+
+    let err = LightingAnimationTemplateDocumentRaw::decode_str(&serde_json::to_string(&raw).expect("encode")).expect_err("future schema should fail");
+    assert!(err.contains("unsupported lighting template document schema_version"));
 }

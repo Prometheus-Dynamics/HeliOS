@@ -2,9 +2,10 @@ use crate::http::streams::validation::{StreamValidationResult, normalize_stream_
 use crate::http::{json_store, storage};
 use chrono::Utc;
 use futures::future::BoxFuture;
-use helios_engine::contracts::stream_ids::{LEGACY_RAW_PIPELINE_UUID, RAW_PIPELINE_UUID};
 use helios_engine::capture::{BackendKind, CaptureDescriptor, CaptureMode, canonicalize_capture_config, descriptor_snapshot_for_config, discover_devices};
+use helios_engine::contracts::stream_ids::{LEGACY_RAW_PIPELINE_UUID, RAW_PIPELINE_UUID};
 use helios_engine::ipc::{ResolvedStreamConfig, RigPose, StreamManifest};
+use lib_schema_migration::{AsyncMigration, AsyncSchemaPlan, migrate_to_current_async};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use std::path::PathBuf;
@@ -269,8 +270,6 @@ pub(crate) fn descriptor_snapshot_for_record(record: &PersistedStreamRecord) -> 
     Some(descriptor)
 }
 
-type PersistedStreamRecordMigration = fn(JsonValue) -> BoxFuture<'static, Result<JsonValue, String>>;
-
 fn now_rfc3339() -> String {
     Utc::now().to_rfc3339()
 }
@@ -386,19 +385,6 @@ async fn remove_other_stream_records(camera_id: &str, stream_id: Option<Uuid>) -
     }
 
     Ok(())
-}
-
-fn schema_version_from_value(value: &JsonValue) -> Result<u32, String> {
-    let Some(object) = value.as_object() else {
-        return Err("persisted stream record must be a JSON object".to_string());
-    };
-    let Some(version) = object.get("schema_version") else {
-        return Ok(LEGACY_PERSISTED_STREAM_RECORD_SCHEMA_VERSION);
-    };
-    let Some(version) = version.as_u64() else {
-        return Err("persisted stream record `schema_version` must be an unsigned integer".to_string());
-    };
-    u32::try_from(version).map_err(|_| format!("persisted stream record schema_version {version} does not fit in u32"))
 }
 
 fn migrate_legacy_resolved_config_value(value: &mut JsonValue) -> Result<(), String> {
@@ -524,27 +510,22 @@ fn migrate_persisted_stream_record_v2_to_v3(mut value: JsonValue) -> BoxFuture<'
     })
 }
 
-const PERSISTED_STREAM_RECORD_MIGRATIONS: &[(u32, PersistedStreamRecordMigration)] = &[
+const PERSISTED_STREAM_RECORD_MIGRATIONS: &[(u32, AsyncMigration<JsonValue>)] = &[
     (LEGACY_PERSISTED_STREAM_RECORD_SCHEMA_VERSION, migrate_persisted_stream_record_v0_to_v1),
     (FLAT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION, migrate_persisted_stream_record_v1_to_v2),
     (RESOLVED_ONLY_PERSISTED_STREAM_RECORD_SCHEMA_VERSION, migrate_persisted_stream_record_v2_to_v3),
 ];
 
+const PERSISTED_STREAM_RECORD_SCHEMA_PLAN: AsyncSchemaPlan<JsonValue> = AsyncSchemaPlan {
+    document_name: "persisted stream record",
+    legacy_version: LEGACY_PERSISTED_STREAM_RECORD_SCHEMA_VERSION,
+    current_version: CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION,
+    migrations: PERSISTED_STREAM_RECORD_MIGRATIONS,
+};
+
 async fn migrate_persisted_stream_record_value(mut value: JsonValue) -> Result<(JsonValue, bool), String> {
     let original = value.clone();
-    let mut version = schema_version_from_value(&value)?;
-    if version > CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION {
-        return Err(format!("unsupported persisted stream record schema_version {}; current version is {}", version, CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION));
-    }
-
-    while version < CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION {
-        let Some((_, migration)) = PERSISTED_STREAM_RECORD_MIGRATIONS.iter().find(|(from, _)| *from == version) else {
-            return Err(format!("no persisted stream record migration registered from schema_version {} to {}", version, version + 1));
-        };
-        value = migration(value).await?;
-        version = schema_version_from_value(&value)?.max(version + 1);
-    }
-
+    value = migrate_to_current_async(value, &PERSISTED_STREAM_RECORD_SCHEMA_PLAN).await?;
     let canonical = canonicalize_current_record_value(value).await?;
     Ok((canonical.clone(), canonical != original))
 }
@@ -948,19 +929,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn parse_persisted_record_migrates_legacy_versionless_record() {
+    async fn parse_persisted_record_rejects_missing_schema_version() {
         let bytes = serde_json::to_vec(&json!({
             "camera_id": "camera-a",
             "manifest": sample_manifest_json()
         }))
-        .expect("encode legacy record");
+        .expect("encode record");
 
-        let ParsedPersistedStreamRecord { record, dirty } = parse_persisted_stream_record(&bytes).await.expect("migrate legacy record");
-        assert!(dirty);
-        assert_eq!(record.schema_version, CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION);
-        assert_eq!(record.requested_manifest().as_ref().map(|manifest| manifest.schema_version), Some(CURRENT_STREAM_CONFIG_SCHEMA_VERSION));
-        assert!(record.resolved_config.is_some());
-        assert!(record.descriptor_snapshot.is_some());
+        let err = parse_persisted_stream_record(&bytes).await.expect_err("missing schema version should fail");
+        assert!(err.contains("missing required schema_version"));
     }
 
     #[tokio::test]
@@ -1135,9 +1112,8 @@ mod tests {
         let legacy_path = record_path(&legacy_camera_id).await.expect("legacy record path");
         assert!(fs::try_exists(&legacy_path).await.expect("legacy record exists before migration"));
 
-        let persisted_camera_id = persist_resolved_config_with_descriptor_auto_camera_id_checked(stream_id, resolved, descriptor_snapshot.clone())
-            .await
-            .expect("persist canonical camera id record with descriptor");
+        let persisted_camera_id =
+            persist_resolved_config_with_descriptor_auto_camera_id_checked(stream_id, resolved, descriptor_snapshot.clone()).await.expect("persist canonical camera id record with descriptor");
         assert_eq!(persisted_camera_id, stable_camera_id);
 
         let stable_path = record_path(&stable_camera_id).await.expect("stable record path");
@@ -1167,11 +1143,7 @@ mod tests {
     fn round_trip_fixtures() -> &'static [RoundTripFixtureCase] {
         static FIXTURES: OnceLock<Vec<RoundTripFixtureCase>> = OnceLock::new();
         FIXTURES
-            .get_or_init(|| {
-                serde_json::from_str::<RoundTripFixtureFile>(include_str!("../../../../../testdata/stream_config_roundtrip.json"))
-                    .expect("decode round-trip fixture file")
-                    .cases
-            })
+            .get_or_init(|| serde_json::from_str::<RoundTripFixtureFile>(include_str!("../../../../../testdata/stream_config_roundtrip.json")).expect("decode round-trip fixture file").cases)
             .as_slice()
     }
 
@@ -1335,57 +1307,31 @@ mod tests {
 
             let validated = validate_stream_manifest(requested.clone()).await.unwrap_or_else(|err| panic!("fixture {} should validate: {err:?}", fixture.name));
             assert_eq!(serde_json::to_value(&validated.manifest).expect("encode validated manifest"), expected_requested);
-            assert_eq!(
-                serde_json::to_value(validated.resolved.to_requested_manifest()).expect("encode round-tripped manifest"),
-                expected_requested
-            );
+            assert_eq!(serde_json::to_value(validated.resolved.to_requested_manifest()).expect("encode round-tripped manifest"), expected_requested);
 
-            persist_manifest_checked(&camera_id, Some(stream_id), requested.clone())
-                .await
-                .unwrap_or_else(|err| panic!("fixture {} should persist: {err}", fixture.name));
+            persist_manifest_checked(&camera_id, Some(stream_id), requested.clone()).await.unwrap_or_else(|err| panic!("fixture {} should persist: {err}", fixture.name));
 
             let loaded_requested = load_manifest(&camera_id).await.expect("load requested manifest");
             assert_eq!(serde_json::to_value(&loaded_requested).expect("encode loaded requested manifest"), expected_canonical);
 
             let loaded_resolved = load_resolved_config(&camera_id).await.expect("load resolved config");
-            assert_eq!(
-                serde_json::to_value(loaded_resolved.to_requested_manifest()).expect("encode loaded resolved manifest"),
-                expected_canonical
-            );
+            assert_eq!(serde_json::to_value(loaded_resolved.to_requested_manifest()).expect("encode loaded resolved manifest"), expected_canonical);
 
             let manager = StreamManager::new();
-            let (started_id, descriptor) = manager
-                .start_stream(loaded_resolved.clone())
-                .await
-                .unwrap_or_else(|err| panic!("fixture {} should start: {err}", fixture.name));
+            let (started_id, descriptor) = manager.start_stream(loaded_resolved.clone()).await.unwrap_or_else(|err| panic!("fixture {} should start: {err}", fixture.name));
             assert_eq!(started_id, stream_id);
 
             let mut summaries = manager.list_streams().await;
             assert_eq!(summaries.len(), 1, "fixture {} should expose one active stream", fixture.name);
             let summary = summaries.pop().expect("summary");
             assert_eq!(summary.stream_id, stream_id);
-            assert_eq!(
-                serde_json::to_value(&summary.manifest).expect("encode runtime summary manifest"),
-                serde_json::to_value(&loaded_resolved).expect("encode expected runtime manifest")
-            );
+            assert_eq!(serde_json::to_value(&summary.manifest).expect("encode runtime summary manifest"), serde_json::to_value(&loaded_resolved).expect("encode expected runtime manifest"));
 
-            let readback = build_stream_info(
-                summary.stream_id,
-                descriptor.clone(),
-                summary.manifest.clone(),
-                Some(summary.status.clone()),
-                Some(summary.runtime.clone()),
-            );
+            let readback = build_stream_info(summary.stream_id, descriptor.clone(), summary.manifest.clone(), Some(summary.status.clone()), Some(summary.runtime.clone()));
             assert_eq!(serde_json::to_value(&readback.manifest).expect("encode readback manifest"), expected_canonical);
-            assert_eq!(
-                serde_json::to_value(readback.resolved.to_requested_manifest()).expect("encode readback resolved manifest"),
-                expected_canonical
-            );
+            assert_eq!(serde_json::to_value(readback.resolved.to_requested_manifest()).expect("encode readback resolved manifest"), expected_canonical);
 
-            manager
-                .stop_stream(stream_id)
-                .await
-                .unwrap_or_else(|err| panic!("fixture {} should stop cleanly: {err}", fixture.name));
+            manager.stop_stream(stream_id).await.unwrap_or_else(|err| panic!("fixture {} should stop cleanly: {err}", fixture.name));
             assert!(manager.list_streams().await.is_empty(), "fixture {} should leave no active streams", fixture.name);
         }
     }

@@ -10,7 +10,6 @@ use crate::http::{
 use super::UsbPowerSettings;
 
 const USB_POWER_ENV_PATH: &str = "/var/lib/helios/usb-power.env";
-const LEGACY_USB_POWER_ENV_PATH: &str = "/etc/helios/usb-power.env";
 const USB_POWER_SCRIPT_PATH: &str = "/usr/local/bin/helios-usb-power-setup.sh";
 
 pub(super) fn parse_env_file(contents: &str) -> BTreeMap<String, String> {
@@ -44,7 +43,7 @@ fn parse_u32(value: Option<&str>) -> Option<u32> {
 }
 
 pub(super) async fn load_settings() -> UsbPowerSettings {
-    let Ok(raw) = persisted_files::read_to_string(Path::new(USB_POWER_ENV_PATH), Some(Path::new(LEGACY_USB_POWER_ENV_PATH))).await else {
+    let Ok(raw) = tokio::fs::read_to_string(Path::new(USB_POWER_ENV_PATH)).await else {
         return UsbPowerSettings::default();
     };
     let env = parse_env_file(&raw);
@@ -85,9 +84,7 @@ fn render_settings(settings: &UsbPowerSettings) -> String {
 
 pub(super) async fn persist_settings(settings: &UsbPowerSettings) -> ApiResult<()> {
     let out = render_settings(settings);
-    persisted_files::write_mirrored(Path::new(USB_POWER_ENV_PATH), Some(Path::new(LEGACY_USB_POWER_ENV_PATH)), out.as_bytes())
-        .await
-        .map_err(|err| ApiError::internal(format!("failed to write usb power config: {err}")))?;
+    persisted_files::write_canonical(Path::new(USB_POWER_ENV_PATH), out.as_bytes()).await.map_err(|err| ApiError::internal(format!("failed to write usb power config: {err}")))?;
     Ok(())
 }
 
@@ -95,9 +92,7 @@ pub(super) async fn apply_usb_power() -> ApiResult<()> {
     if !Path::new(USB_POWER_SCRIPT_PATH).exists() {
         return Err(ApiError::service_unavailable("usb power setup script not available"));
     }
-    let raw = persisted_files::read_to_string(Path::new(USB_POWER_ENV_PATH), Some(Path::new(LEGACY_USB_POWER_ENV_PATH)))
-        .await
-        .map_err(|err| ApiError::internal(format!("failed to read usb power config: {err}")))?;
+    let raw = tokio::fs::read_to_string(Path::new(USB_POWER_ENV_PATH)).await.map_err(|err| ApiError::internal(format!("failed to read usb power config: {err}")))?;
     let env = parse_env_file(&raw);
     let mut cmd = Command::new(USB_POWER_SCRIPT_PATH);
     for (key, value) in env {

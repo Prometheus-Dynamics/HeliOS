@@ -28,6 +28,9 @@ struct AiModelEntry {
 
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 struct AiModelManifest {
+    #[serde(default)]
+    schema_version: u32,
+    #[serde(default)]
     models: Vec<AiModelManifestEntry>,
 }
 
@@ -295,7 +298,7 @@ impl AiModelManager {
 
     fn read_manifest(&self) -> Result<AiModelManifest> {
         match fs::read_to_string(&self.manifest_path) {
-            Ok(contents) => serde_json::from_str(&contents).map_err(|err| Error::InvalidState(format!("failed to parse AI model manifest: {err}"))),
+            Ok(contents) => lib_ai::storage::decode_manifest(&contents).map_err(|err| Error::InvalidState(format!("failed to parse AI model manifest: {err}"))),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(AiModelManifest::default()),
             Err(err) => Err(err.into()),
         }
@@ -303,6 +306,7 @@ impl AiModelManager {
 
     fn save_manifest_locked(&self, models: &HashMap<AiModelId, AiModelEntry>) -> Result<()> {
         let manifest = AiModelManifest {
+            schema_version: lib_ai::storage::CURRENT_AI_MODEL_MANIFEST_SCHEMA_VERSION,
             models: models
                 .values()
                 .map(|entry| AiModelManifestEntry {

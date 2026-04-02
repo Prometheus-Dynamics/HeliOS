@@ -4,12 +4,15 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 /// Default locations searched for LED configuration.
 /// Prefer the on-device file, then fall back to the shared preset shipped with the repo.
-pub const DEFAULT_LED_CONFIG_PATHS: &[&str] = &["/var/lib/helios/leds.toml", "/etc/helios/leds.toml", "configs/presets/common.toml"];
+pub const CANONICAL_LED_CONFIG_PATH: &str = "/var/lib/helios/leds.toml";
+pub const DEFAULT_LED_CONFIG_PATHS: &[&str] = &[CANONICAL_LED_CONFIG_PATH, "configs/presets/common.toml"];
+pub const CURRENT_LED_CONFIG_SCHEMA_VERSION: u32 = 1;
 
 fn default_enabled() -> bool {
     true
@@ -117,10 +120,17 @@ impl LedConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct LedDoc {
+    schema_version: u32,
     #[serde(default)]
     leds: Option<LedConfig>,
+}
+
+impl Default for LedDoc {
+    fn default() -> Self {
+        Self { schema_version: CURRENT_LED_CONFIG_SCHEMA_VERSION, leds: None }
+    }
 }
 
 /// Returns the default LED configuration search paths.
@@ -143,11 +153,62 @@ where
 {
     for path in paths {
         if let Ok(contents) = fs::read_to_string(path)
-            && let Ok(doc) = toml::from_str::<LedDoc>(&contents)
+            && let Ok(doc) = parse_led_config_doc(&contents)
             && let Some(leds) = doc.leds
         {
             return Some(leds);
         }
     }
     None
+}
+
+const LED_CONFIG_DOC_SCHEMA_PLAN: SyncSchemaPlan<toml::Value> =
+    SyncSchemaPlan { document_name: "LED configuration document", legacy_version: CURRENT_LED_CONFIG_SCHEMA_VERSION, current_version: CURRENT_LED_CONFIG_SCHEMA_VERSION, migrations: &[] };
+
+fn parse_led_config_doc(raw: &str) -> Result<LedDoc, String> {
+    let value = toml::from_str::<toml::Value>(raw).map_err(|err| err.to_string())?;
+    let migrated = migrate_to_current(value, &LED_CONFIG_DOC_SCHEMA_PLAN)?;
+    migrated.try_into().map_err(|err: toml::de::Error| err.to_string())
+}
+
+pub fn encode_led_config_doc(config: &LedConfig) -> Result<String, String> {
+    let doc = LedDoc { schema_version: CURRENT_LED_CONFIG_SCHEMA_VERSION, leds: Some(config.clone()) };
+    toml::to_string_pretty(&doc).map_err(|err| err.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CURRENT_LED_CONFIG_SCHEMA_VERSION, LedConfig, encode_led_config_doc, parse_led_config_doc};
+
+    #[test]
+    fn parse_led_config_doc_rejects_missing_schema_version() {
+        let raw = r#"
+            [leds]
+            enabled = true
+            gpio = 13
+            count = 16
+            color_order = "rgbw"
+            frequency_hz = 800000
+            use_pwm = true
+            protocol = "sk6812-ec20"
+        "#;
+
+        let err = parse_led_config_doc(raw).expect_err("missing schema version should fail");
+        assert!(err.contains("missing required schema_version"));
+    }
+
+    #[test]
+    fn parse_led_config_doc_rejects_future_schema_version() {
+        let raw = format!("schema_version = {}\n[leds]\nenabled = true\n", CURRENT_LED_CONFIG_SCHEMA_VERSION + 1);
+        let err = parse_led_config_doc(&raw).expect_err("future schema should fail");
+        assert!(err.contains("unsupported LED configuration document schema_version"));
+    }
+
+    #[test]
+    fn encode_led_config_doc_writes_current_schema_version() {
+        let raw = encode_led_config_doc(&LedConfig::default()).expect("encode");
+        let parsed = parse_led_config_doc(&raw).expect("parse");
+        assert_eq!(parsed.schema_version, CURRENT_LED_CONFIG_SCHEMA_VERSION);
+        assert!(parsed.leds.is_some());
+    }
 }

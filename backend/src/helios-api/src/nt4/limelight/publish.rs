@@ -186,19 +186,6 @@ async fn set_string(handle: &nt_client::ClientHandle, publishers: &mut HashMap<S
 }
 
 async fn default_nt4_server_host_from_team_file() -> Option<String> {
-    // TEMP_SHIM: nt4-limelight-team-file-etc-fallback
-    // Keep the /etc team fallback until every deployed image writes the canonical team file into /var/lib/helios.
-    let primary = std::env::var_os("HELIOS_TEAM_FILE").map(std::path::PathBuf::from).unwrap_or_else(|| "/var/lib/helios/team".into());
-    let fallback = (primary.as_path() == std::path::Path::new("/var/lib/helios/team")).then_some(std::path::Path::new("/etc/helios/team"));
-    let content = match tokio::fs::read_to_string(&primary).await {
-        Ok(raw) => raw,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => tokio::fs::read_to_string(fallback?).await.ok()?,
-        Err(_) => return None,
-    };
-    let trimmed = content.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let team: u32 = trimmed.parse().ok()?;
+    let team = crate::http::persisted_files::read_team_number().await.ok().flatten()?;
     team_number_to_rio_ip(team).map(|ip| ip.to_string())
 }

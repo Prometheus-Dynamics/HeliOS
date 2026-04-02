@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
 use lib_storage_layout::{LayoutPartition, PartitionMode, PartitionRole, StorageLayoutManifest};
 use serde::{Deserialize, Serialize};
 use tokio::fs;
@@ -7,7 +8,7 @@ use tokio::process::Command;
 use tracing::warn;
 use uuid::Uuid;
 
-use crate::artifact::ReleaseManifest;
+use crate::artifact::{ReleaseManifest, ReleaseManifestMetadata};
 use crate::config::UpdaterConfig;
 use crate::error::{Error, Result};
 use crate::util::{BlockPartitionInfo, SlotSelection, resolve_boot_dir_rw, sync_filesystem};
@@ -19,6 +20,7 @@ const REQUEST_ENV_NAME: &str = "repartition-request.env";
 const RESULT_ENV_NAME: &str = "repartition-result.env";
 const RESUME_JSON_NAME: &str = "repartition-resume.json";
 const LAYOUT_TOML_NAME: &str = "repartition-layout.toml";
+const CURRENT_QUEUED_REPARTITION_RESUME_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct OfflineDataBorrowPlan {
@@ -45,8 +47,22 @@ pub(super) enum OfflineDataBorrowAssessment {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct QueuedRepartitionResume {
+    pub schema_version: u32,
     pub update_id: Uuid,
     pub manifest: ReleaseManifest,
+}
+
+const QUEUED_REPARTITION_RESUME_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan {
+    document_name: "queued repartition resume",
+    legacy_version: CURRENT_QUEUED_REPARTITION_RESUME_SCHEMA_VERSION,
+    current_version: CURRENT_QUEUED_REPARTITION_RESUME_SCHEMA_VERSION,
+    migrations: &[],
+};
+
+fn parse_queued_repartition_resume(bytes: &[u8]) -> Result<QueuedRepartitionResume> {
+    let raw = serde_json::from_slice::<serde_json::Value>(bytes)?;
+    let migrated = migrate_to_current(raw, &QUEUED_REPARTITION_RESUME_SCHEMA_PLAN).map_err(Error::InvalidState)?;
+    serde_json::from_value(migrated).map_err(Error::SerdeJson)
 }
 
 pub(super) fn assess_offline_data_borrow(
@@ -63,9 +79,13 @@ pub(super) fn assess_offline_data_borrow(
         return OfflineDataBorrowAssessment::Disabled;
     }
 
-    let target_role = match layout.partition_by_role(PartitionRole::SlotA).ok().filter(|partition| partition.number == target_info.number).map(|_| PartitionRole::SlotA).or_else(|| {
-        layout.partition_by_role(PartitionRole::SlotB).ok().filter(|partition| partition.number == target_info.number).map(|_| PartitionRole::SlotB)
-    }) {
+    let target_role = match layout
+        .partition_by_role(PartitionRole::SlotA)
+        .ok()
+        .filter(|partition| partition.number == target_info.number)
+        .map(|_| PartitionRole::SlotA)
+        .or_else(|| layout.partition_by_role(PartitionRole::SlotB).ok().filter(|partition| partition.number == target_info.number).map(|_| PartitionRole::SlotB))
+    {
         Some(role) => role,
         None => return OfflineDataBorrowAssessment::Blocked(OfflineDataBorrowBlocker::TargetNotAdjacentToData),
     };
@@ -87,14 +107,7 @@ pub(super) fn assess_offline_data_borrow(
     let target_start_mib = bytes_to_mib_floor(target_info.start_bytes());
     let target_end_mib = align_up_mib(bytes_to_mib_ceil(target_info.start_bytes().saturating_add(required_capacity_bytes)), align_mib);
 
-    OfflineDataBorrowAssessment::Supported(OfflineDataBorrowPlan {
-        target_role,
-        target_start_mib,
-        target_end_mib,
-        gap_after_bytes,
-        required_growth_bytes,
-        additional_from_data_bytes,
-    })
+    OfflineDataBorrowAssessment::Supported(OfflineDataBorrowPlan { target_role, target_start_mib, target_end_mib, gap_after_bytes, required_growth_bytes, additional_from_data_bytes })
 }
 
 pub(super) fn offline_data_borrow_summary(target_device: &str, plan: &OfflineDataBorrowPlan) -> String {
@@ -106,14 +119,12 @@ pub(super) fn offline_data_borrow_summary(target_device: &str, plan: &OfflineDat
 
 pub(super) fn offline_data_borrow_blocked_summary(target_device: &str, blocker: &OfflineDataBorrowBlocker) -> String {
     match blocker {
-        OfflineDataBorrowBlocker::TargetNotAdjacentToData => format!(
-            "inactive squashfs slot {} is not the DATA-adjacent slot, so updater cannot safely borrow DATA space without moving the currently booted root slot",
-            target_device
-        ),
-        OfflineDataBorrowBlocker::NonReplayableArtifact(reason) => format!(
-            "inactive squashfs slot {} would need destructive DATA repartitioning, but updater cannot replay the staged artifact after DATA is recreated: {}",
-            target_device, reason
-        ),
+        OfflineDataBorrowBlocker::TargetNotAdjacentToData => {
+            format!("inactive squashfs slot {} is not the DATA-adjacent slot, so updater cannot safely borrow DATA space without moving the currently booted root slot", target_device)
+        }
+        OfflineDataBorrowBlocker::NonReplayableArtifact(reason) => {
+            format!("inactive squashfs slot {} would need destructive DATA repartitioning, but updater cannot replay the staged artifact after DATA is recreated: {}", target_device, reason)
+        }
     }
 }
 
@@ -175,7 +186,7 @@ async fn queue_offline_data_borrow_repartition_into(
 
     let repartition_layout = build_offline_data_borrow_layout(layout, plan)?;
     let layout_body = toml::to_string_pretty(&repartition_layout).map_err(|err| Error::InvalidState(format!("failed to serialize queued repartition layout: {err}")))?;
-    let resume_body = serde_json::to_vec_pretty(&QueuedRepartitionResume { update_id, manifest: force_auto_apply(manifest) })?;
+    let resume_body = serde_json::to_vec_pretty(&QueuedRepartitionResume { schema_version: CURRENT_QUEUED_REPARTITION_RESUME_SCHEMA_VERSION, update_id, manifest: force_auto_apply(manifest)? })?;
     let request_body = render_request_env(update_id, &slot_selection.target_slot);
 
     let layout_tmp = ota_dir.join(format!("{LAYOUT_TOML_NAME}.tmp"));
@@ -216,14 +227,11 @@ async fn load_queued_repartition_resume_from_dir(boot_dir: &Path) -> Result<Opti
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(err) => return Err(Error::Io(err)),
     };
-    let resume: QueuedRepartitionResume = serde_json::from_slice(&resume_raw)?;
+    let resume = parse_queued_repartition_resume(&resume_raw)?;
     if let Some(update_id) = values.get("HELIOS_REPARTITION_UPDATE_ID")
         && update_id != &resume.update_id.to_string()
     {
-        return Err(Error::InvalidState(format!(
-            "repartition result/update mismatch: result update_id={} resume update_id={}",
-            update_id, resume.update_id
-        )));
+        return Err(Error::InvalidState(format!("repartition result/update mismatch: result update_id={} resume update_id={}", update_id, resume.update_id)));
     }
 
     Ok(Some(resume))
@@ -301,10 +309,7 @@ fn manifest_is_replayable_after_data_repartition(config: &UpdaterConfig, manifes
         match artifact.url.scheme() {
             "http" | "https" => {}
             "file" => {
-                let path = artifact
-                    .url
-                    .to_file_path()
-                    .map_err(|_| format!("artifact {} is not a valid absolute file URL", artifact.url))?;
+                let path = artifact.url.to_file_path().map_err(|_| format!("artifact {} is not a valid absolute file URL", artifact.url))?;
                 if path.starts_with(config.data_dir()) || path.starts_with(config.cache_dir()) || path.starts_with(config.work_dir()) {
                     return Err(format!("artifact {} lives under {}, so it will disappear when DATA is recreated", artifact.url, config.data_dir().display()));
                 }
@@ -318,29 +323,16 @@ fn manifest_is_replayable_after_data_repartition(config: &UpdaterConfig, manifes
     Ok(())
 }
 
-fn force_auto_apply(manifest: &ReleaseManifest) -> ReleaseManifest {
+fn force_auto_apply(manifest: &ReleaseManifest) -> Result<ReleaseManifest> {
     let mut updated = manifest.clone();
-    let mut metadata = if updated.metadata_json.trim().is_empty() {
-        serde_json::Value::Object(serde_json::Map::new())
-    } else {
-        serde_json::from_str::<serde_json::Value>(&updated.metadata_json).unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()))
-    };
-
-    if !metadata.is_object() {
-        metadata = serde_json::Value::Object(serde_json::Map::new());
-    }
-    if let Some(object) = metadata.as_object_mut() {
-        object.insert("auto_apply".into(), serde_json::Value::Bool(true));
-    }
-    updated.metadata_json = serde_json::to_string(&metadata).unwrap_or_else(|_| "{\"auto_apply\":true}".to_string());
-    updated
+    let mut metadata = ReleaseManifestMetadata::from_manifest(&updated).map_err(Error::InvalidState)?;
+    metadata.auto_apply = true;
+    updated.metadata_json = metadata.encode_json().map_err(Error::InvalidState)?;
+    Ok(updated)
 }
 
 fn render_request_env(update_id: Uuid, target_slot: &str) -> String {
-    format!(
-        "HELIOS_REPARTITION_REQUEST_VERSION={}\nHELIOS_REPARTITION_UPDATE_ID={}\nHELIOS_REPARTITION_TARGET_SLOT={}\n",
-        REPARTITION_REQUEST_VERSION, update_id, target_slot
-    )
+    format!("HELIOS_REPARTITION_REQUEST_VERSION={}\nHELIOS_REPARTITION_UPDATE_ID={}\nHELIOS_REPARTITION_TARGET_SLOT={}\n", REPARTITION_REQUEST_VERSION, update_id, target_slot)
 }
 
 fn parse_env_map(raw: &str) -> std::collections::BTreeMap<String, String> {
@@ -361,11 +353,7 @@ async fn maybe_unmount_boot_dir(boot_dir: &Path, mounted: bool) -> Result<()> {
         return Ok(());
     }
     let status = Command::new("umount").arg(boot_dir).status().await.map_err(Error::Io)?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(Error::InvalidState(format!("failed to unmount BOOT at {}", boot_dir.display())))
-    }
+    if status.success() { Ok(()) } else { Err(Error::InvalidState(format!("failed to unmount BOOT at {}", boot_dir.display()))) }
 }
 
 async fn remove_if_exists(path: &Path) -> Result<()> {
@@ -399,6 +387,7 @@ mod tests {
         build_offline_data_borrow_layout, clear_queued_repartition_resume_from_dir, load_queued_repartition_resume_from_dir, ota_dir_for_boot,
     };
     use crate::artifact::{ManifestArtifact, ReleaseManifest};
+    use crate::error::Error;
     use crate::util::BlockPartitionInfo;
     use lib_storage_layout::PartitionRole;
     use std::path::PathBuf;
@@ -513,7 +502,8 @@ mod tests {
         tokio::fs::create_dir_all(&ota_dir).await.expect("ota dir");
 
         let update_id = Uuid::new_v4();
-        let resume = super::QueuedRepartitionResume { update_id, manifest: replayable_manifest("https://example.invalid/helios.img") };
+        let resume =
+            super::QueuedRepartitionResume { schema_version: super::CURRENT_QUEUED_REPARTITION_RESUME_SCHEMA_VERSION, update_id, manifest: replayable_manifest("https://example.invalid/helios.img") };
         tokio::fs::write(ota_dir.join(RESULT_ENV_NAME), format!("HELIOS_REPARTITION_RESULT_VERSION=1\nHELIOS_REPARTITION_UPDATE_ID={update_id}\nHELIOS_REPARTITION_STATUS=applied\n"))
             .await
             .expect("result env");
@@ -529,5 +519,19 @@ mod tests {
         assert!(tokio::fs::metadata(ota_dir.join(RESULT_ENV_NAME)).await.is_err());
         assert!(tokio::fs::metadata(ota_dir.join(RESUME_JSON_NAME)).await.is_err());
         assert!(tokio::fs::metadata(ota_dir.join(LAYOUT_TOML_NAME)).await.is_err());
+    }
+
+    #[test]
+    fn parse_queued_repartition_resume_rejects_missing_schema_version() {
+        let raw = serde_json::json!({
+            "update_id": Uuid::nil(),
+            "manifest": replayable_manifest("https://example.invalid/helios.img")
+        });
+
+        let err = super::parse_queued_repartition_resume(&serde_json::to_vec(&raw).expect("encode")).expect_err("missing schema version should fail");
+        match err {
+            Error::InvalidState(message) => assert!(message.contains("missing required schema_version")),
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 }

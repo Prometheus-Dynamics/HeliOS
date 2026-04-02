@@ -15,7 +15,7 @@ pub(crate) use attachments::{
     __path_attach_label, __path_attach_media_imu, __path_delete_media_imu, __path_fetch_label, __path_fetch_media_imu, attach_label, attach_media_imu, delete_media_imu, fetch_label, fetch_media_imu,
 };
 pub(crate) use catalog::{__path_list_media, __path_upload_media, list_media, upload_media};
-pub(crate) use support::write_media_metadata;
+pub(crate) use support::{load_media_metadata, load_named_media_metadata, write_media_metadata};
 pub(crate) use transforms::{__path_apply_image_edits, apply_image_edits};
 pub use types::MediaItem;
 pub(crate) use types::MediaMetadata;

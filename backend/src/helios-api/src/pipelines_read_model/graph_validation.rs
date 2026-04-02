@@ -123,11 +123,11 @@ impl PipelinesReadModelState {
                 Err(err) => return Err(Box::new(map_io_error(err, "failed to stat pipeline file"))),
             };
 
-            let data = match fs::read_to_string(entry.path()).await {
+            let data = match fs::read(entry.path()).await {
                 Ok(data) => data,
                 Err(err) => return Err(Box::new(map_io_error(err, "failed to read pipeline file"))),
             };
-            if let Ok(doc) = serde_json::from_str::<PipelineDocument>(&data) {
+            if let Ok(doc) = PipelineDocument::decode_slice(&data) {
                 let doc_id = doc.id;
                 let mut updated_at_ms = doc.updated_at_ms.max(0);
                 if updated_at_ms == 0

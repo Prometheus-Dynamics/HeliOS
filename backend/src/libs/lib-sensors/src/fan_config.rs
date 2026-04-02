@@ -4,11 +4,14 @@ use std::{
 };
 
 use bincode::{Decode, Encode};
+use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 /// Default locations searched for fan configuration.
-pub const DEFAULT_FAN_CONFIG_PATHS: &[&str] = &["/var/lib/helios/fan.toml", "/etc/helios/fan.toml", "configs/presets/common.toml"];
+pub const CANONICAL_FAN_CONFIG_PATH: &str = "/var/lib/helios/fan.toml";
+pub const DEFAULT_FAN_CONFIG_PATHS: &[&str] = &[CANONICAL_FAN_CONFIG_PATH, "configs/presets/common.toml"];
+pub const CURRENT_FAN_CONFIG_SCHEMA_VERSION: u32 = 1;
 
 fn default_enabled() -> bool {
     true
@@ -123,10 +126,17 @@ pub struct FanStatus {
     pub updated_at_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct FanDoc {
+    schema_version: u32,
     #[serde(default)]
     fan: Option<FanConfig>,
+}
+
+impl Default for FanDoc {
+    fn default() -> Self {
+        Self { schema_version: CURRENT_FAN_CONFIG_SCHEMA_VERSION, fan: None }
+    }
 }
 
 /// Returns the default fan configuration search paths.
@@ -150,13 +160,61 @@ where
 {
     for path in paths {
         if let Ok(contents) = fs::read_to_string(path)
-            && let Ok(doc) = toml::from_str::<FanDoc>(&contents)
+            && let Ok(doc) = parse_fan_config_doc(&contents)
             && let Some(fan) = doc.fan
         {
             return Some(fan);
         }
     }
     None
+}
+
+const FAN_CONFIG_DOC_SCHEMA_PLAN: SyncSchemaPlan<toml::Value> =
+    SyncSchemaPlan { document_name: "fan configuration document", legacy_version: CURRENT_FAN_CONFIG_SCHEMA_VERSION, current_version: CURRENT_FAN_CONFIG_SCHEMA_VERSION, migrations: &[] };
+
+fn parse_fan_config_doc(raw: &str) -> Result<FanDoc, String> {
+    let value = toml::from_str::<toml::Value>(raw).map_err(|err| err.to_string())?;
+    let migrated = migrate_to_current(value, &FAN_CONFIG_DOC_SCHEMA_PLAN)?;
+    migrated.try_into().map_err(|err: toml::de::Error| err.to_string())
+}
+
+pub fn encode_fan_config_doc(config: &FanConfig) -> Result<String, String> {
+    let doc = FanDoc { schema_version: CURRENT_FAN_CONFIG_SCHEMA_VERSION, fan: Some(config.clone()) };
+    toml::to_string_pretty(&doc).map_err(|err| err.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CURRENT_FAN_CONFIG_SCHEMA_VERSION, FanConfig, encode_fan_config_doc, parse_fan_config_doc};
+
+    #[test]
+    fn parse_fan_config_doc_rejects_missing_schema_version() {
+        let raw = r#"
+            [fan]
+            enabled = true
+            pwm_path = "/sys/class/hwmon/hwmon0/pwm1"
+            min_percent = 20
+            max_percent = 100
+        "#;
+
+        let err = parse_fan_config_doc(raw).expect_err("missing schema version should fail");
+        assert!(err.contains("missing required schema_version"));
+    }
+
+    #[test]
+    fn parse_fan_config_doc_rejects_future_schema_version() {
+        let raw = format!("schema_version = {}\n[fan]\nenabled = true\n", CURRENT_FAN_CONFIG_SCHEMA_VERSION + 1);
+        let err = parse_fan_config_doc(&raw).expect_err("future schema should fail");
+        assert!(err.contains("unsupported fan configuration document schema_version"));
+    }
+
+    #[test]
+    fn encode_fan_config_doc_writes_current_schema_version() {
+        let raw = encode_fan_config_doc(&FanConfig::default()).expect("encode");
+        let parsed = parse_fan_config_doc(&raw).expect("parse");
+        assert_eq!(parsed.schema_version, CURRENT_FAN_CONFIG_SCHEMA_VERSION);
+        assert!(parsed.fan.is_some());
+    }
 }
 
 /// Validates and normalizes a fan configuration.

@@ -122,6 +122,7 @@ fn sample_metadata(config: &UpdaterConfig, update_id: Uuid) -> StagedMetadata {
         staged_at: Utc::now(),
     };
     StagedMetadata {
+        schema_version: 1,
         manifest: ReleaseManifest { update_id: Some(update_id), version: Some("1.2.3".into()), artifacts: vec![manifest_artifact], metadata_json: "{}".into() },
         artifacts: vec![staged_artifact],
         staged_at: Utc::now(),

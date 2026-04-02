@@ -126,11 +126,7 @@ mod tests {
     use super::{StartupReconcileReport, reconcile_persisted_startup_state_in_root};
 
     fn startup_tempdir() -> TempDir {
-        if Path::new("/dev/shm").is_dir() {
-            Builder::new().prefix("helios-startup-reconcile-").tempdir_in("/dev/shm").expect("tempdir in /dev/shm")
-        } else {
-            tempdir().expect("tempdir")
-        }
+        if Path::new("/dev/shm").is_dir() { Builder::new().prefix("helios-startup-reconcile-").tempdir_in("/dev/shm").expect("tempdir in /dev/shm") } else { tempdir().expect("tempdir") }
     }
 
     #[tokio::test]
@@ -152,15 +148,7 @@ mod tests {
 
         let report = reconcile_persisted_startup_state_in_root(&data_root, &marker).await.expect("reconcile");
 
-        assert_eq!(
-            report,
-            StartupReconcileReport {
-                pipelines_pruned: 1,
-                streams_pruned: 1,
-                zero_byte_marker_removed: false,
-                startup_marker_cleared_after_prune: true,
-            }
-        );
+        assert_eq!(report, StartupReconcileReport { pipelines_pruned: 1, streams_pruned: 1, zero_byte_marker_removed: false, startup_marker_cleared_after_prune: true });
         assert!(!pipelines.join("empty.json").exists());
         assert!(pipelines.join("keep.txt").exists());
         assert!(!streams.join("empty.json").exists());
@@ -180,15 +168,7 @@ mod tests {
 
         let report = reconcile_persisted_startup_state_in_root(&data_root, &marker).await.expect("reconcile");
 
-        assert_eq!(
-            report,
-            StartupReconcileReport {
-                pipelines_pruned: 0,
-                streams_pruned: 0,
-                zero_byte_marker_removed: true,
-                startup_marker_cleared_after_prune: false,
-            }
-        );
+        assert_eq!(report, StartupReconcileReport { pipelines_pruned: 0, streams_pruned: 0, zero_byte_marker_removed: true, startup_marker_cleared_after_prune: false });
         assert!(!marker.exists());
     }
 

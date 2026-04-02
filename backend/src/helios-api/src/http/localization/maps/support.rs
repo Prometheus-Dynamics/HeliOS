@@ -4,7 +4,7 @@ use tokio::fs;
 use uuid::Uuid;
 
 use super::super::super::error::{ApiError, ApiResult};
-use super::super::super::media::{MediaMetadata, write_media_metadata};
+use super::super::super::media::{MediaMetadata, load_media_metadata, write_media_metadata};
 use super::super::super::storage;
 
 const DEFAULT_MEDIA_SEED_DIR: &str = "/usr/share/helios/media";
@@ -20,11 +20,7 @@ pub(super) fn seeded_map_id_for_filename(filename: &str) -> String {
 
 pub(super) async fn ensure_field_map_media_metadata(media_name: &str, map_name: &str, source_filename: &str) -> ApiResult<()> {
     let meta_dir = storage::ensure_subdir_async("media-meta").await.map_err(|err| ApiError::internal(format!("failed to open media metadata storage: {err}")))?;
-    let meta_path = meta_dir.join(format!("{media_name}.json"));
-    let mut metadata: MediaMetadata = match fs::read(&meta_path).await {
-        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
-        Err(_) => MediaMetadata::default(),
-    };
+    let mut metadata: MediaMetadata = load_media_metadata(&meta_dir, media_name).await.unwrap_or_default();
 
     metadata.kind = Some("field-map".to_string());
     if metadata.description.as_deref().map(str::trim).is_none_or(|value| value.is_empty()) {

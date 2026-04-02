@@ -11,12 +11,12 @@ use crate::http::storage;
 pub(crate) async fn load_pipeline_doc(pipeline_id: Uuid) -> Result<PipelineDocument, String> {
     let path = pipeline_path(pipeline_id).await.map_err(|err| format!("failed to resolve pipeline path: {err}"))?;
     let data = fs::read(&path).await.map_err(|err| format!("failed to read pipeline: {err}"))?;
-    serde_json::from_slice::<PipelineDocument>(&data).map_err(|err| format!("failed to decode pipeline: {err}"))
+    PipelineDocument::decode_slice(&data).map_err(|err| format!("failed to decode pipeline: {err}"))
 }
 
 pub(crate) async fn save_pipeline_doc(pipeline_id: Uuid, doc: &PipelineDocument) -> Result<(), String> {
     let path = pipeline_path(pipeline_id).await.map_err(|err| format!("failed to resolve pipeline path: {err}"))?;
-    let data = serde_json::to_vec_pretty(doc).map_err(|err| format!("failed to encode pipeline: {err}"))?;
+    let data = doc.encode_pretty().map_err(|err| format!("failed to encode pipeline: {err}"))?;
     fs::write(&path, data).await.map_err(|err| format!("failed to write pipeline: {err}"))
 }
 

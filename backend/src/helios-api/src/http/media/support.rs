@@ -1,5 +1,6 @@
 use chrono::Utc;
 use flate2::read::GzDecoder;
+use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
 use mime_guess::MimeGuess;
 use std::io::{BufRead, BufReader, Cursor};
 use std::path::{Path, PathBuf};
@@ -17,6 +18,11 @@ use super::{
     types::MediaMetadata,
 };
 
+const CURRENT_MEDIA_METADATA_SCHEMA_VERSION: u32 = 1;
+
+const MEDIA_METADATA_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> =
+    SyncSchemaPlan { document_name: "media metadata", legacy_version: CURRENT_MEDIA_METADATA_SCHEMA_VERSION, current_version: CURRENT_MEDIA_METADATA_SCHEMA_VERSION, migrations: &[] };
+
 pub(super) fn is_internal_media_artifact(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     lower.ends_with(".frame_ts.txt")
@@ -32,10 +38,22 @@ pub(super) fn media_meta_dir() -> Result<PathBuf, ApiError> {
     storage::ensure_subdir("media-meta").map_err(|err| map_io_error(err, "failed to prepare media metadata directory"))
 }
 
-pub(super) async fn load_media_metadata(dir: &Path, name: &str) -> Option<MediaMetadata> {
+fn decode_media_metadata(bytes: &[u8]) -> Option<MediaMetadata> {
+    let raw = serde_json::from_slice::<serde_json::Value>(bytes).ok()?;
+    let migrated = migrate_to_current(raw, &MEDIA_METADATA_SCHEMA_PLAN).ok()?;
+    serde_json::from_value(migrated).ok()
+}
+
+pub(crate) async fn load_media_metadata(dir: &Path, name: &str) -> Option<MediaMetadata> {
     let path = dir.join(format!("{name}.json"));
     let bytes = fs::read(&path).await.ok()?;
-    serde_json::from_slice(&bytes).ok()
+    decode_media_metadata(&bytes)
+}
+
+pub(crate) async fn load_named_media_metadata(name: &str) -> Option<MediaMetadata> {
+    let base = sanitize_name(name)?;
+    let meta_dir = media_meta_dir().ok()?;
+    load_media_metadata(&meta_dir, &base).await
 }
 
 pub(crate) async fn write_media_metadata(name: &str, metadata: MediaMetadata) -> Result<(), ApiError> {
@@ -44,6 +62,8 @@ pub(crate) async fn write_media_metadata(name: &str, metadata: MediaMetadata) ->
     };
     let meta_dir = media_meta_dir()?;
     let path = meta_dir.join(format!("{base}.json"));
+    let mut metadata = metadata;
+    metadata.schema_version = CURRENT_MEDIA_METADATA_SCHEMA_VERSION;
     let bytes = serde_json::to_vec(&metadata).map_err(|err| ApiError::bad_request(format!("invalid metadata: {err}")))?;
     fs::write(&path, bytes).await.map_err(|err| map_io_error(err, "failed to write media metadata"))?;
     Ok(())
@@ -152,4 +172,22 @@ pub(super) fn guess_content_type(name: &str) -> String {
 pub(super) fn max_upload_bytes() -> u64 {
     const DEFAULT_MB: u64 = 512;
     std::env::var("HELIOS_API_MAX_UPLOAD_MB").ok().and_then(|raw| raw.parse::<u64>().ok()).map(|mb| mb.saturating_mul(1024 * 1024)).filter(|&bytes| bytes > 0).unwrap_or(DEFAULT_MB * 1024 * 1024)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    #[test]
+    fn decode_media_metadata_rejects_missing_schema_version() {
+        let raw = serde_json::json!({
+            "stream_id": Uuid::nil(),
+            "kind": "recording",
+            "captured_at_ms": 123
+        });
+
+        let parsed = decode_media_metadata(&serde_json::to_vec(&raw).expect("encode"));
+        assert!(parsed.is_none());
+    }
 }

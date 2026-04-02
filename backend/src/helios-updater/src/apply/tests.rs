@@ -1,12 +1,8 @@
-use super::{
-    ApplyManifestMetadata, PersistedFileSync, SquashfsPreflightContext, SquashfsSlotResizePlan, parse_env_flag, reboot_failure_message, reboot_output_is_expected_success,
-};
-use super::preflight::{parse_apply_manifest_metadata, preflight_report_for_squashfs_plan};
-use super::sync::{
-    clear_completed_update_state, missing_bootable_root_paths, plan_squashfs_slot_resize, purge_update_dirs, sync_persisted_files_with_mappings_into, sync_persisted_networkd_into,
-};
+use super::preflight::preflight_report_for_squashfs_plan;
+use super::sync::{clear_completed_update_state, missing_bootable_root_paths, plan_squashfs_slot_resize, purge_update_dirs, sync_persisted_files_with_mappings_into, sync_persisted_networkd_into};
+use super::{PersistedFileSync, SquashfsPreflightContext, SquashfsSlotResizePlan, parse_env_flag, reboot_failure_message, reboot_output_is_expected_success};
 use crate::{
-    artifact::ReleaseManifest,
+    artifact::{ReleaseManifest, ReleaseManifestMetadata},
     config::UpdaterConfig,
     ipc::{PreflightVerdict, UpdateStage, UpdaterEvent},
     state::ServiceState,
@@ -58,9 +54,7 @@ fn parse_apply_manifest_metadata_accepts_new_source_artifact_path() {
         artifacts: Vec::new(),
         metadata_json: r#"{"delete_image_after_apply":true,"source_artifact_path":"/var/lib/helios/updater/api-uploads/bundle.tar"}"#.into(),
     };
-    let metadata = crate::artifact::StagedMetadata { manifest, artifacts: Vec::new(), staged_at: chrono::Utc::now() };
-
-    let parsed = parse_apply_manifest_metadata(&metadata);
+    let parsed = ReleaseManifestMetadata::from_manifest(&manifest).expect("decode metadata");
 
     assert!(parsed.delete_image_after_apply);
     assert_eq!(parsed.source_artifact_path.as_deref(), Some("/var/lib/helios/updater/api-uploads/bundle.tar"));
@@ -74,11 +68,9 @@ fn parse_apply_manifest_metadata_accepts_legacy_source_media_path_alias() {
         artifacts: Vec::new(),
         metadata_json: r#"{"delete_image_after_apply":true,"source_media_path":"/var/lib/helios/api-data/media/update.tar"}"#.into(),
     };
-    let metadata = crate::artifact::StagedMetadata { manifest, artifacts: Vec::new(), staged_at: chrono::Utc::now() };
+    let parsed = ReleaseManifestMetadata::from_manifest(&manifest).expect("decode metadata");
 
-    let parsed = parse_apply_manifest_metadata(&metadata);
-
-    assert_eq!(parsed, ApplyManifestMetadata { delete_image_after_apply: true, source_artifact_path: Some("/var/lib/helios/api-data/media/update.tar".into()) });
+    assert_eq!(parsed, ReleaseManifestMetadata { schema_version: 1, auto_apply: true, delete_image_after_apply: true, source_artifact_path: Some("/var/lib/helios/api-data/media/update.tar".into()) });
 }
 
 #[tokio::test]
@@ -160,11 +152,11 @@ async fn sync_persisted_files_prefers_data_candidate() {
     let primary_str: &'static str = Box::leak(primary.display().to_string().into_boxed_str());
     let legacy_str: &'static str = Box::leak(legacy.display().to_string().into_boxed_str());
     let candidates: &'static [&'static str] = Box::leak(vec![primary_str, legacy_str].into_boxed_slice());
-    let mappings = [PersistedFileSync { source_candidates: candidates, target_path: "/etc/helios/team" }];
+    let mappings = [PersistedFileSync { source_candidates: candidates, target_path: "/var/lib/helios/team" }];
 
     sync_persisted_files_with_mappings_into(&root, &mappings).await.expect("sync files");
 
-    let written = tokio::fs::read_to_string(root.join("etc/helios/team")).await.expect("read target");
+    let written = tokio::fs::read_to_string(root.join("var/lib/helios/team")).await.expect("read target");
     assert_eq!(written, "2468\n");
 }
 

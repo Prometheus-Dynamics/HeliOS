@@ -158,8 +158,14 @@ fn parse_label_bytes(bytes: &[u8]) -> Option<Vec<String>> {
     if labels.is_empty() { None } else { Some(labels) }
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+fn current_ai_model_manifest_schema_version() -> u32 {
+    lib_ai::storage::CURRENT_AI_MODEL_MANIFEST_SCHEMA_VERSION
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct AiModelManifest {
+    #[serde(default = "current_ai_model_manifest_schema_version")]
+    schema_version: u32,
     #[serde(default)]
     models: Vec<AiModelManifestEntry>,
 }
@@ -272,15 +278,17 @@ pub(super) async fn remove_ai_model(model_id: Uuid) -> Result<(), ApiError> {
 }
 
 async fn load_ai_model_manifest(path: &StdPath) -> Result<AiModelManifest, ApiError> {
-    match fs::read(path).await {
-        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|err| ApiError::internal(format!("invalid AI model manifest: {err}"))),
+    match fs::read_to_string(path).await {
+        Ok(raw) => lib_ai::storage::decode_manifest(&raw).map_err(|err| ApiError::internal(format!("invalid AI model manifest: {err}"))),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(AiModelManifest::default()),
         Err(err) => Err(map_io_error(err, "failed to read AI model manifest")),
     }
 }
 
 async fn save_ai_model_manifest(path: &StdPath, manifest: &AiModelManifest) -> Result<(), ApiError> {
-    let bytes = serde_json::to_vec_pretty(manifest).map_err(|err| ApiError::internal(format!("failed to serialize AI model manifest: {err}")))?;
+    let mut canonical = manifest.clone();
+    canonical.schema_version = lib_ai::storage::CURRENT_AI_MODEL_MANIFEST_SCHEMA_VERSION;
+    let bytes = serde_json::to_vec_pretty(&canonical).map_err(|err| ApiError::internal(format!("failed to serialize AI model manifest: {err}")))?;
     fs::write(path, bytes).await.map_err(|err| map_io_error(err, "failed to write AI model manifest"))?;
     Ok(())
 }

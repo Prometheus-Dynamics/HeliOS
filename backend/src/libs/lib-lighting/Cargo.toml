@@ -1,0 +1,17 @@
+[package]
+name = "lib-lighting"
+version.workspace = true
+edition = "2024"
+publish = false
+
+[features]
+default = []
+schema = ["dep:utoipa"]
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+bincode = { workspace = true, features = ["serde", "derive"] }
+utoipa = { workspace = true, optional = true }

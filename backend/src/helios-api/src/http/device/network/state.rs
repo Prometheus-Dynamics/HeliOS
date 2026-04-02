@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr};
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use lib_net::interface::{NetworkInterfaceSettings, get_interfaces};
@@ -110,41 +109,24 @@ impl DeviceNetworkState {
     }
 }
 
-fn team_file_paths() -> (PathBuf, Option<PathBuf>) {
-    match std::env::var_os("HELIOS_TEAM_FILE") {
-        Some(path) => (PathBuf::from(path), None),
-        None => (persisted_files::data_root_file("team"), Some(persisted_files::legacy_helios_etc_file("team"))),
-    }
-}
-
 async fn read_team_file() -> Result<Option<u32>, ApiError> {
-    let (path, legacy_path) = team_file_paths();
-    let content = match persisted_files::read_to_string(&path, legacy_path.as_deref()).await {
-        Ok(data) => data,
+    let path = persisted_files::team_file_path();
+    match persisted_files::read_team_number().await {
+        Ok(team) => Ok(team),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(err) => return Err(ApiError::internal(format!("failed to read team file {}: {err}", path.display()))),
-    };
-    let trimmed = content.trim();
-    if trimmed.is_empty() {
-        return Ok(None);
     }
-    let parsed: u32 = trimmed.parse().map_err(|err| ApiError::internal(format!("invalid team file {}: {err}", path.display())))?;
-    if parsed == 0 {
-        return Ok(None);
-    }
-    Ok(Some(parsed))
 }
 
 async fn write_team_file(team: u32) -> Result<(), ApiError> {
-    let (path, legacy_path) = team_file_paths();
-    let body = format!("{team}\n");
-    persisted_files::write_mirrored(&path, legacy_path.as_deref(), body.as_bytes()).await.map_err(|err| ApiError::internal(format!("failed to write team file {}: {err}", path.display())))?;
+    let path = persisted_files::team_file_path();
+    persisted_files::write_team_number(team).await.map_err(|err| ApiError::internal(format!("failed to write team file {}: {err}", path.display())))?;
     Ok(())
 }
 
 async fn clear_team_file() -> Result<(), ApiError> {
-    let (path, legacy_path) = team_file_paths();
-    persisted_files::remove_mirrored(&path, legacy_path.as_deref()).await.map_err(|err| ApiError::internal(format!("failed to remove team file {}: {err}", path.display())))
+    let path = persisted_files::team_file_path();
+    persisted_files::clear_team_number().await.map_err(|err| ApiError::internal(format!("failed to remove team file {}: {err}", path.display())))
 }
 
 fn candidate_team_bytes_from_ipv4(ip: Ipv4Addr) -> Option<(u8, u8)> {

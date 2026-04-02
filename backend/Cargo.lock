@@ -2808,6 +2808,7 @@ dependencies = [
  "lib-led-animations",
  "lib-net",
  "lib-runtime-policy",
+ "lib-schema-migration",
  "lib-sensors",
  "lib-test",
  "lopdf",
@@ -2922,6 +2923,7 @@ dependencies = [
  "lib-cv",
  "lib-ipc",
  "lib-runtime-policy",
+ "lib-schema-migration",
  "lib-test",
  "libc",
  "metrics",
@@ -2955,8 +2957,11 @@ dependencies = [
  "futures",
  "lib-ai",
  "lib-ipc",
+ "lib-led-animations",
+ "lib-lighting",
  "lib-math",
  "lib-runtime-policy",
+ "lib-schema-migration",
  "lib-sensors",
  "linux-embedded-hal",
  "nix 0.31.2",
@@ -2999,6 +3004,7 @@ dependencies = [
  "futures",
  "hex",
  "lib-ipc",
+ "lib-schema-migration",
  "lib-storage-layout",
  "lib-test",
  "reqwest",
@@ -3826,6 +3832,7 @@ dependencies = [
  "image",
  "imageproc",
  "lib-cv",
+ "lib-schema-migration",
  "libc",
  "libloading 0.9.0",
  "paste",
@@ -3941,7 +3948,8 @@ dependencies = [
 name = "lib-led-animations"
 version = "1.0.0"
 dependencies = [
- "helios-peripherals",
+ "lib-lighting",
+ "lib-schema-migration",
  "serde",
  "serde_json",
  "tokio",
@@ -3959,6 +3967,15 @@ dependencies = [
  "serde",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "lib-lighting"
+version = "1.0.0"
+dependencies = [
+ "bincode",
+ "serde",
+ "utoipa",
 ]
 
 [[package]]
@@ -4036,6 +4053,7 @@ dependencies = [
  "base64 0.22.1",
  "daedalus-rs",
  "lib-net",
+ "lib-schema-migration",
  "nt_client",
  "once_cell",
  "paste",
@@ -4051,6 +4069,16 @@ name = "lib-runtime-policy"
 version = "1.0.0"
 
 [[package]]
+name = "lib-schema-migration"
+version = "1.0.0"
+dependencies = [
+ "futures",
+ "serde_json",
+ "tokio",
+ "toml",
+]
+
+[[package]]
 name = "lib-sensors"
 version = "1.0.0"
 dependencies = [
@@ -4061,6 +4089,7 @@ dependencies = [
  "lib-asyncapi",
  "lib-asyncapi-macro",
  "lib-math",
+ "lib-schema-migration",
  "linux-embedded-hal",
  "schemars",
  "serde",
@@ -4077,6 +4106,7 @@ dependencies = [
 name = "lib-storage-layout"
 version = "1.0.0"
 dependencies = [
+ "lib-schema-migration",
  "serde",
  "thiserror 2.0.18",
  "toml",
@@ -9057,6 +9087,18 @@ name = "xml-rs"
 version = "0.8.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ae8337f8a065cfc972643663ea4279e04e7256de865aa66fe25cec5fb912d3f"
+
+[[package]]
+name = "xtask"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "y4m"

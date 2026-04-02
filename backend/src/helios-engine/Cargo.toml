@@ -73,6 +73,7 @@ uuid = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 lib-ipc = { path = "../libs/lib-ipc", optional = true }
+lib-schema-migration = { path = "../libs/lib-schema-migration" }
 lib-runtime-policy = { path = "../libs/lib-runtime-policy" }
 image = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }

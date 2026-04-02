@@ -27,6 +27,7 @@ lib-led-animations = { path = "../libs/lib-led-animations" }
 lib-ipc = { path = "../libs/lib-ipc" }
 lib-net = { path = "../libs/lib-net" }
 lib-runtime-policy = { path = "../libs/lib-runtime-policy" }
+lib-schema-migration = { path = "../libs/lib-schema-migration" }
 lib-sensors = { path = "../libs/lib-sensors" }
 chrono = { workspace = true }
 url = { workspace = true }

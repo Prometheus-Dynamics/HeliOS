@@ -8,26 +8,34 @@ use crate::features;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use std::io;
 use tokio::fs;
 use tracing::{info, warn};
 use uuid::Uuid;
 
 use self::{
-    files::{decode_startup_preset, pipeline_document_count, startup_marker_path, startup_preset_path, write_marker},
+    files::{load_startup_preset, pipeline_document_count, startup_marker_path, write_marker},
     pipelines_seed::seed_pipelines,
     reconcile::reconcile_persisted_startup_state,
     streams_seed::seed_streams,
 };
 
-#[derive(Debug, Clone, Deserialize, Default)]
+pub(super) const CURRENT_STARTUP_PRESET_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub(super) struct StartupPresetDocument {
+    pub(super) schema_version: u32,
     pub(super) pipelines: Vec<StartupPipelinePreset>,
     pub(super) streams: Vec<StartupStreamPreset>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+impl Default for StartupPresetDocument {
+    fn default() -> Self {
+        Self { schema_version: CURRENT_STARTUP_PRESET_SCHEMA_VERSION, pipelines: Vec::new(), streams: Vec::new() }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct StartupPipelinePreset {
     pub(super) id: Uuid,
@@ -39,7 +47,7 @@ pub(super) struct StartupPipelinePreset {
     pub(super) template_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct StartupStreamPreset {
     pub(super) camera_id: String,
@@ -62,26 +70,17 @@ pub(crate) async fn apply_startup_preset(state: AppState) {
     reconcile_persisted_startup_state().await;
     super::localization::maps::seed_bundled_field_maps().await;
 
-    let preset_path = startup_preset_path();
     let marker_path = startup_marker_path();
 
     if fs::metadata(&marker_path).await.is_ok() {
         return;
     }
 
-    let bytes = match fs::read(&preset_path).await {
-        Ok(bytes) => bytes,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return,
+    let (preset_path, preset) = match load_startup_preset().await {
+        Ok(Some(result)) => result,
+        Ok(None) => return,
         Err(err) => {
-            warn!(path = %preset_path.display(), error = %err, "failed to read startup preset");
-            return;
-        }
-    };
-
-    let preset = match decode_startup_preset(&preset_path, &bytes) {
-        Ok(preset) => preset,
-        Err(err) => {
-            warn!(path = %preset_path.display(), error = %err, "failed to parse startup preset");
+            warn!(error = %err, "failed to load startup preset");
             return;
         }
     };

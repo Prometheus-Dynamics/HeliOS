@@ -7,9 +7,9 @@ use serde_json::Value;
 use tokio::fs;
 
 use super::super::super::error::{ApiError, ApiResult};
-use super::super::super::storage;
+use super::super::super::{json_store, storage};
 use super::overlay::extract_overlay;
-use helios_engine::localization::maps::{FieldMapDocument, FieldMapSource, FieldMapSummary, hydrate_map_document};
+use helios_engine::localization::maps::{FieldMapDocument, FieldMapSource, FieldMapSummary, hydrate_map_document, parse_field_map_document};
 use tracing::warn;
 
 pub(crate) async fn load_map_document(id: &str) -> ApiResult<FieldMapDocument> {
@@ -46,8 +46,8 @@ pub(super) async fn load_existing_map_source_filenames(map_dir: &Path) -> HashSe
             Ok(bytes) => bytes,
             Err(_) => continue,
         };
-        let doc: FieldMapDocument = match serde_json::from_slice(&bytes) {
-            Ok(doc) => doc,
+        let doc: FieldMapDocument = match parse_field_map_document(&bytes) {
+            Ok((doc, _)) => doc,
             Err(_) => continue,
         };
         if let FieldMapSource::LimelightFmap { original_file_name: Some(file), .. } = doc.source
@@ -77,8 +77,8 @@ pub(super) async fn find_map_id_for_source_file(filename: &str) -> ApiResult<Opt
             Ok(bytes) => bytes,
             Err(_) => continue,
         };
-        let doc: FieldMapDocument = match serde_json::from_slice(&bytes) {
-            Ok(doc) => doc,
+        let doc: FieldMapDocument = match parse_field_map_document(&bytes) {
+            Ok((doc, _)) => doc,
             Err(_) => continue,
         };
         if let FieldMapSource::LimelightFmap { original_file_name: Some(original), .. } = doc.source
@@ -107,8 +107,8 @@ pub(super) async fn list_map_summaries() -> ApiResult<Vec<FieldMapSummary>> {
             Ok(bytes) => bytes,
             Err(_) => continue,
         };
-        let doc: FieldMapDocument = match serde_json::from_slice(&bytes) {
-            Ok(doc) => doc,
+        let doc: FieldMapDocument = match parse_field_map_document(&bytes) {
+            Ok((doc, _)) => doc,
             Err(_) => continue,
         };
         out.push(FieldMapSummary {
@@ -130,7 +130,11 @@ async fn read_map(id: &str) -> ApiResult<FieldMapDocument> {
     let dir = map_storage_dir().await?;
     let path = dir.join(format!("{id}.json"));
     let bytes = fs::read(&path).await.map_err(|_| ApiError::not_found("field map not found"))?;
-    serde_json::from_slice(&bytes).map_err(|err| ApiError::internal(format!("invalid stored map: {err}")))
+    let (doc, dirty) = parse_field_map_document(&bytes).map_err(|err| ApiError::internal(format!("invalid stored map: {err}")))?;
+    if dirty && let Err(err) = json_store::write_json(path.clone(), &doc).await {
+        warn!(path = %path.display(), error = %err, "failed to rewrite canonical field map document");
+    }
+    Ok(doc)
 }
 
 async fn maybe_backfill_overlay_from_media(id: &str, doc: &mut FieldMapDocument) {

@@ -1,11 +1,13 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub const DEFAULT_SYSTEM_LAYOUT_PATH: &str = "/etc/helios/storage-layout.toml";
 pub const SYSTEM_LAYOUT_ENV_VAR: &str = "HELIOS_STORAGE_LAYOUT_MANIFEST_PATH";
+pub const CURRENT_STORAGE_LAYOUT_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -115,14 +117,27 @@ pub enum LayoutError {
         #[source]
         source: toml::de::Error,
     },
+    #[error("failed to migrate layout manifest {path}: {message}")]
+    Migration { path: PathBuf, message: String },
     #[error("layout manifest is missing required role {0:?}")]
     MissingRole(PartitionRole),
 }
 
+const STORAGE_LAYOUT_SCHEMA_PLAN: SyncSchemaPlan<toml::Value> =
+    SyncSchemaPlan { document_name: "storage layout manifest", legacy_version: CURRENT_STORAGE_LAYOUT_SCHEMA_VERSION, current_version: CURRENT_STORAGE_LAYOUT_SCHEMA_VERSION, migrations: &[] };
+
 impl StorageLayoutManifest {
     pub fn load_from_path(path: &Path) -> Result<Self, LayoutError> {
         let raw = fs::read_to_string(path).map_err(|source| LayoutError::Io { path: path.to_path_buf(), source })?;
-        toml::from_str(&raw).map_err(|source| LayoutError::Parse { path: path.to_path_buf(), source })
+        Self::load_from_str(path, &raw)
+    }
+
+    fn load_from_str(path: &Path, raw: &str) -> Result<Self, LayoutError> {
+        let raw_value = toml::from_str::<toml::Value>(raw).map_err(|source| LayoutError::Parse { path: path.to_path_buf(), source })?;
+        let migrated = migrate_to_current(raw_value, &STORAGE_LAYOUT_SCHEMA_PLAN).map_err(|message| LayoutError::Migration { path: path.to_path_buf(), message })?;
+        let mut manifest: StorageLayoutManifest = migrated.try_into().map_err(|source| LayoutError::Parse { path: path.to_path_buf(), source })?;
+        manifest.schema_version = CURRENT_STORAGE_LAYOUT_SCHEMA_VERSION;
+        Ok(manifest)
     }
 
     pub fn system_layout_path() -> PathBuf {
@@ -187,7 +202,7 @@ impl StorageLayoutManifest {
 
 #[cfg(test)]
 mod tests {
-    use super::{PartitionRole, SlotScheme, StorageLayoutManifest};
+    use super::{CURRENT_STORAGE_LAYOUT_SCHEMA_VERSION, PartitionRole, SlotScheme, StorageLayoutManifest};
     use std::path::PathBuf;
 
     fn fixture(name: &str) -> PathBuf {
@@ -221,5 +236,23 @@ mod tests {
         assert_eq!(StorageLayoutManifest::partition_device_for_disk("/dev/mmcblk0", 3), "/dev/mmcblk0p3");
         assert_eq!(StorageLayoutManifest::partition_device_for_disk("/dev/nvme0n1", 4), "/dev/nvme0n1p4");
         assert_eq!(StorageLayoutManifest::partition_device_for_disk("/dev/sda", 2), "/dev/sda2");
+    }
+
+    #[test]
+    fn rejects_missing_layout_schema_version() {
+        let path = fixture("ext4-labels.toml");
+        let raw = std::fs::read_to_string(&path).expect("read layout fixture");
+        let raw = raw.replace("schema_version = 1\n", "");
+        let err = StorageLayoutManifest::load_from_str(&path, &raw).expect_err("missing schema version should fail");
+        assert!(err.to_string().contains("missing required schema_version"));
+    }
+
+    #[test]
+    fn rejects_future_layout_schema_version() {
+        let path = fixture("ext4-labels.toml");
+        let raw = std::fs::read_to_string(&path).expect("read layout fixture");
+        let raw = raw.replace("schema_version = 1", "schema_version = 2");
+        let err = StorageLayoutManifest::load_from_str(&path, &raw).expect_err("future layout should fail");
+        assert!(err.to_string().contains("unsupported storage layout manifest schema_version"));
     }
 }
