@@ -758,15 +758,45 @@
     },
     {
       "path": "frontend/src/routes/+layout.svelte",
-      "max_lines": 450,
+      "max_lines": 140,
       "owner": "HeliOS",
-      "review_note": "The root layout now composes navigation and page-level chrome while app-shell runtime bootstrapping, runtime error policy, persisted shell preferences, and health/resource banners live in a dedicated helper; keep cross-route shell state out of the layout component."
+      "review_note": "The root layout now composes page chrome only; keep app-shell runtime bootstrapping, persisted shell state, sidebar behavior, and health/resource banners in dedicated route modules instead of rebuilding cross-route shell policy in the layout."
     },
     {
       "path": "frontend/src/routes/appShellSupport.ts",
+      "max_lines": 140,
+      "owner": "HeliOS",
+      "review_note": "App-shell runtime bootstrap wiring lives here; keep persisted shell preferences, banner derivation, sidebar behavior, and runtime error policy split into dedicated modules instead of growing this back into a second root shell blob."
+    },
+    {
+      "path": "frontend/src/routes/appShellPolicy.ts",
+      "max_lines": 220,
+      "owner": "HeliOS",
+      "review_note": "App-shell runtime error normalization and banner policy live here; keep shell policy pure and reusable instead of duplicating it in the layout, runtime component, or stores."
+    },
+    {
+      "path": "frontend/src/routes/appShellState.ts",
+      "max_lines": 140,
+      "owner": "HeliOS",
+      "review_note": "Persisted app-shell state and cross-route derived warning state live here; keep writable shell stores out of the root layout and route components."
+    },
+    {
+      "path": "frontend/src/routes/AppShellRuntime.svelte",
+      "max_lines": 40,
+      "owner": "HeliOS",
+      "review_note": "This headless component mounts global app-shell side effects; keep UI chrome and banner markup out of the runtime mount point."
+    },
+    {
+      "path": "frontend/src/routes/AppShellSidebar.svelte",
       "max_lines": 320,
       "owner": "HeliOS",
-      "review_note": "App-shell runtime bootstrapping, banner derivation, resource refresh wiring, and runtime error normalization live here; keep global shell policy out of the root layout."
+      "review_note": "The app sidebar owns shell navigation chrome and warning affordances; keep refresh policy, persisted shell state, and cross-route runtime concerns out of the sidebar component."
+    },
+    {
+      "path": "frontend/src/routes/AppShellBanners.svelte",
+      "max_lines": 90,
+      "owner": "HeliOS",
+      "review_note": "Page-wide OS health and resource guard banners live here; keep banner policy and persisted dismissal state out of the layout and sidebar."
     },
     {
       "path": "frontend/src/routes/devices/+page.svelte",
