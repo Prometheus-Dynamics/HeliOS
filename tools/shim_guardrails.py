@@ -33,13 +33,9 @@ class ShimGuardrailConfigError(RuntimeError):
 @dataclass(frozen=True)
 class RequiredShim:
     id: str
-    subsystem: str
     path: str
     owner: str
     delete_by: date
-    legacy_path: str
-    canonical_path: str
-    removal_trigger: str
     reason: str
     replace_with: str
 
@@ -83,38 +79,12 @@ def parse_required_shim(raw: Any, index: int) -> RequiredShim:
         raise ShimGuardrailConfigError(f"{context} must be an object")
     return RequiredShim(
         id=require_non_empty_text(raw.get("id"), field_name="id", context=context),
-        subsystem=require_non_empty_text(raw.get("subsystem"), field_name="subsystem", context=context),
         path=require_non_empty_text(raw.get("path"), field_name="path", context=context),
         owner=require_non_empty_text(raw.get("owner"), field_name="owner", context=context),
         delete_by=require_iso_date(raw.get("delete_by"), field_name="delete_by", context=context),
-        legacy_path=require_non_empty_text(raw.get("legacy_path"), field_name="legacy_path", context=context),
-        canonical_path=require_non_empty_text(raw.get("canonical_path"), field_name="canonical_path", context=context),
-        removal_trigger=require_non_empty_text(raw.get("removal_trigger"), field_name="removal_trigger", context=context),
         reason=require_non_empty_text(raw.get("reason"), field_name="reason", context=context),
         replace_with=require_non_empty_text(raw.get("replace_with"), field_name="replace_with", context=context),
     )
-
-
-def validate_required_shims(required: tuple[RequiredShim, ...]) -> None:
-    duplicate_ids = find_duplicates(rule.id for rule in required)
-    if duplicate_ids:
-        raise ShimGuardrailConfigError(f"shim guardrail config defines duplicate ids: {', '.join(duplicate_ids)}")
-
-    canonical_by_subsystem: dict[str, str] = {}
-    for rule in required:
-        if rule.legacy_path == rule.canonical_path:
-            raise ShimGuardrailConfigError(
-                f"shim {rule.id!r} declares the same legacy_path and canonical_path: {rule.legacy_path}"
-            )
-        prior = canonical_by_subsystem.get(rule.subsystem)
-        if prior is None:
-            canonical_by_subsystem[rule.subsystem] = rule.canonical_path
-            continue
-        if prior != rule.canonical_path:
-            raise ShimGuardrailConfigError(
-                "shim guardrail config defines multiple canonical paths for subsystem "
-                f"{rule.subsystem!r}: {prior!r} vs {rule.canonical_path!r}"
-            )
 
 
 def load_config(config_path: Path) -> ShimGuardrailConfig:
@@ -133,7 +103,9 @@ def load_config(config_path: Path) -> ShimGuardrailConfig:
         raise ShimGuardrailConfigError("required_shims must be an array")
 
     required = tuple(parse_required_shim(item, index) for index, item in enumerate(raw_required))
-    validate_required_shims(required)
+    duplicate_ids = find_duplicates(rule.id for rule in required)
+    if duplicate_ids:
+        raise ShimGuardrailConfigError(f"shim guardrail config defines duplicate ids: {', '.join(duplicate_ids)}")
 
     return ShimGuardrailConfig(required_shims=required)
 
@@ -276,11 +248,7 @@ def evaluate_guardrails(
                 Violation(
                     code="SHIM_FILE_MISSING",
                     path=rule.path,
-                    message=(
-                        "shim source file is missing "
-                        f"(subsystem: {rule.subsystem}; owner: {rule.owner}; canonical path: {rule.canonical_path}; "
-                        f"removal trigger: {rule.removal_trigger})"
-                    ),
+                    message=f"shim source file is missing (owner: {rule.owner}; reason: {rule.reason})",
                 )
             )
             continue
@@ -292,8 +260,7 @@ def evaluate_guardrails(
                     path=rule.path,
                     message=(
                         f"shim {rule.id!r} expired on {rule.delete_by.isoformat()} "
-                        f"(subsystem: {rule.subsystem}; legacy path: {rule.legacy_path}; canonical path: {rule.canonical_path}; "
-                        f"removal trigger: {rule.removal_trigger}; replace with: {rule.replace_with})"
+                        f"(owner: {rule.owner}; replace with: {rule.replace_with})"
                     ),
                 )
             )
@@ -306,8 +273,7 @@ def evaluate_guardrails(
                     path=rule.path,
                     message=(
                         f"required shim marker {rule.id!r} is missing "
-                        f"(subsystem: {rule.subsystem}; legacy path: {rule.legacy_path}; canonical path: {rule.canonical_path}; "
-                        f"delete by: {rule.delete_by.isoformat()}; removal trigger: {rule.removal_trigger})"
+                        f"(owner: {rule.owner}; delete by: {rule.delete_by.isoformat()})"
                     ),
                 )
             )
@@ -345,12 +311,7 @@ def format_violations(violations: list[Violation]) -> str:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Fail when temporary compatibility shims are unregistered, missing canonical-path migration metadata, "
-            "or past their removal deadline."
-        )
-    )
+    parser = argparse.ArgumentParser(description="Fail when temporary compatibility shims are unregistered or past their removal deadline.")
     parser.add_argument(
         "--repo-root",
         type=Path,
@@ -390,11 +351,7 @@ def main(argv: list[str] | None = None) -> int:
         print(format_violations(violations), file=sys.stderr)
         return 1
 
-    subsystem_count = len({rule.subsystem for rule in config.required_shims})
-    print(
-        "Shim guardrails passed: "
-        f"{len(config.required_shims)} required shims checked across {subsystem_count} canonical-path subsystems"
-    )
+    print(f"Shim guardrails passed: {len(config.required_shims)} required shims checked")
     return 0
 
 

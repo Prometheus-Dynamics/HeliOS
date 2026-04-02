@@ -260,7 +260,6 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Reference',
       items: [
-        'reference/engineering-review',
         'reference/hardware',
         'reference/api',
         'reference/sdk',

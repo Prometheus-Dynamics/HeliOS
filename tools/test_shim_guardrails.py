@@ -10,23 +10,6 @@ from pathlib import Path
 import shim_guardrails as guardrails
 
 
-def demo_required_shim(**overrides: object) -> guardrails.RequiredShim:
-    payload = {
-        "id": "demo-shim",
-        "subsystem": "demo-subsystem",
-        "path": "backend/src/example.rs",
-        "owner": "HeliOS",
-        "delete_by": date(2026, 9, 30),
-        "legacy_path": "/etc/helios/demo.json",
-        "canonical_path": "/var/lib/helios/demo.json",
-        "removal_trigger": "Delete the fallback after every deployed image reads from the data root.",
-        "reason": "demo reason",
-        "replace_with": "delete the fallback",
-    }
-    payload.update(overrides)
-    return guardrails.RequiredShim(**payload)
-
-
 class ShimGuardrailsTests(unittest.TestCase):
     def test_load_config_requires_delete_by(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -38,12 +21,8 @@ class ShimGuardrailsTests(unittest.TestCase):
                         "required_shims": [
                             {
                                 "id": "demo-shim",
-                                "subsystem": "demo-subsystem",
                                 "path": "backend/src/example.rs",
                                 "owner": "HeliOS",
-                                "legacy_path": "/etc/helios/demo.json",
-                                "canonical_path": "/var/lib/helios/demo.json",
-                                "removal_trigger": "Delete the fallback after migration.",
                                 "reason": "demo shim",
                                 "replace_with": "delete it",
                             }
@@ -56,75 +35,6 @@ class ShimGuardrailsTests(unittest.TestCase):
             with self.assertRaisesRegex(guardrails.ShimGuardrailConfigError, "delete_by"):
                 guardrails.load_config(config_path)
 
-    def test_load_config_requires_canonical_path(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            config_path = root / "shim_guardrails.json"
-            config_path.write_text(
-                json.dumps(
-                    {
-                        "required_shims": [
-                            {
-                                "id": "demo-shim",
-                                "subsystem": "demo-subsystem",
-                                "path": "backend/src/example.rs",
-                                "owner": "HeliOS",
-                                "delete_by": "2026-09-30",
-                                "legacy_path": "/etc/helios/demo.json",
-                                "removal_trigger": "Delete the fallback after migration.",
-                                "reason": "demo shim",
-                                "replace_with": "delete it",
-                            }
-                        ]
-                    }
-                ),
-                encoding="utf-8",
-            )
-
-            with self.assertRaisesRegex(guardrails.ShimGuardrailConfigError, "canonical_path"):
-                guardrails.load_config(config_path)
-
-    def test_load_config_rejects_conflicting_canonical_paths_for_subsystem(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            config_path = root / "shim_guardrails.json"
-            config_path.write_text(
-                json.dumps(
-                    {
-                        "required_shims": [
-                            {
-                                "id": "demo-shim-a",
-                                "subsystem": "demo-subsystem",
-                                "path": "backend/src/a.rs",
-                                "owner": "HeliOS",
-                                "delete_by": "2026-09-30",
-                                "legacy_path": "/etc/helios/demo-a.json",
-                                "canonical_path": "/var/lib/helios/demo-a.json",
-                                "removal_trigger": "Delete after migration A.",
-                                "reason": "demo shim a",
-                                "replace_with": "delete it",
-                            },
-                            {
-                                "id": "demo-shim-b",
-                                "subsystem": "demo-subsystem",
-                                "path": "backend/src/b.rs",
-                                "owner": "HeliOS",
-                                "delete_by": "2026-09-30",
-                                "legacy_path": "/etc/helios/demo-b.json",
-                                "canonical_path": "/var/lib/helios/demo-b.json",
-                                "removal_trigger": "Delete after migration B.",
-                                "reason": "demo shim b",
-                                "replace_with": "delete it",
-                            }
-                        ]
-                    }
-                ),
-                encoding="utf-8",
-            )
-
-            with self.assertRaisesRegex(guardrails.ShimGuardrailConfigError, "multiple canonical paths"):
-                guardrails.load_config(config_path)
-
     def test_evaluate_reports_missing_marker(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -132,7 +42,18 @@ class ShimGuardrailsTests(unittest.TestCase):
             guarded_file.parent.mkdir(parents=True)
             guarded_file.write_text("// no shim marker here\n", encoding="utf-8")
 
-            config = guardrails.ShimGuardrailConfig(required_shims=(demo_required_shim(),))
+            config = guardrails.ShimGuardrailConfig(
+                required_shims=(
+                    guardrails.RequiredShim(
+                        id="demo-shim",
+                        path="backend/src/example.rs",
+                        owner="HeliOS",
+                        delete_by=date(2026, 9, 30),
+                        reason="demo reason",
+                        replace_with="delete the fallback",
+                    ),
+                )
+            )
 
             violations = guardrails.evaluate_guardrails(
                 root,
@@ -188,7 +109,18 @@ class ShimGuardrailsTests(unittest.TestCase):
             shim_file.parent.mkdir(parents=True)
             shim_file.write_text("// TEMP_SHIM: demo-shim\n// TEMP_SHIM: demo-shim\n", encoding="utf-8")
 
-            config = guardrails.ShimGuardrailConfig(required_shims=(demo_required_shim(),))
+            config = guardrails.ShimGuardrailConfig(
+                required_shims=(
+                    guardrails.RequiredShim(
+                        id="demo-shim",
+                        path="backend/src/example.rs",
+                        owner="HeliOS",
+                        delete_by=date(2026, 9, 30),
+                        reason="demo reason",
+                        replace_with="delete the fallback",
+                    ),
+                )
+            )
 
             violations = guardrails.evaluate_guardrails(
                 root,
@@ -207,7 +139,18 @@ class ShimGuardrailsTests(unittest.TestCase):
             shim_file.parent.mkdir(parents=True)
             shim_file.write_text("// TEMP_SHIM: demo-shim\n", encoding="utf-8")
 
-            config = guardrails.ShimGuardrailConfig(required_shims=(demo_required_shim(delete_by=date(2026, 1, 1)),))
+            config = guardrails.ShimGuardrailConfig(
+                required_shims=(
+                    guardrails.RequiredShim(
+                        id="demo-shim",
+                        path="backend/src/example.rs",
+                        owner="HeliOS",
+                        delete_by=date(2026, 1, 1),
+                        reason="demo reason",
+                        replace_with="delete the fallback",
+                    ),
+                )
+            )
 
             violations = guardrails.evaluate_guardrails(
                 root,
@@ -235,7 +178,18 @@ class ShimGuardrailsTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            config = guardrails.ShimGuardrailConfig(required_shims=(demo_required_shim(),))
+            config = guardrails.ShimGuardrailConfig(
+                required_shims=(
+                    guardrails.RequiredShim(
+                        id="demo-shim",
+                        path="backend/src/example.rs",
+                        owner="HeliOS",
+                        delete_by=date(2026, 9, 30),
+                        reason="demo reason",
+                        replace_with="delete the fallback",
+                    ),
+                )
+            )
 
             violations = guardrails.evaluate_guardrails(
                 root,
