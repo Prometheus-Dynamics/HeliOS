@@ -14,18 +14,17 @@ use crate::ipc::IpcHandles;
 use super::scoring::{relief_action_for_stream, rough_stream_score, runtime_stream_score};
 use super::system::{now_ms, read_mem_available_kb};
 use super::{
-    COMMAND_TX, DegradedStream, GuardCommand, GuardConfig, GuardRuntimeState, ReliefAction, ReliefCandidate, ResourceGuardAction, ResourceGuardActionKind, ResourceGuardStage, ResourceGuardStatus,
-    STATE,
+    DegradedStream, GuardCommand, GuardConfig, GuardRuntimeState, ReliefAction, ReliefCandidate, ResourceGuardAction, ResourceGuardActionKind, ResourceGuardStage, ResourceGuardStatus, runtime,
 };
 
 pub fn snapshot() -> ResourceGuardStatus {
-    let guard = STATE.lock().expect("resource guard state lock");
+    let guard = runtime().state.lock().expect("resource guard state lock");
     guard.snapshot()
 }
 
 pub async fn restore_stream(stream_id: Uuid) -> Result<ResourceGuardAction, String> {
     let tx = {
-        let guard = COMMAND_TX.lock().expect("resource guard command lock");
+        let guard = runtime().command_tx.lock().expect("resource guard command lock");
         guard.clone()
     }
     .ok_or_else(|| "resource guard command channel unavailable".to_string())?;
@@ -44,18 +43,18 @@ pub fn spawn_resource_guard_task(handles: Arc<IpcHandles>) {
     let cfg = GuardConfig::from_env();
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
     {
-        let mut guard = COMMAND_TX.lock().expect("resource guard command lock");
+        let mut guard = runtime().command_tx.lock().expect("resource guard command lock");
         *guard = Some(cmd_tx);
     }
     if !cfg.enabled {
-        let mut guard = STATE.lock().expect("resource guard state lock");
+        let mut guard = runtime().state.lock().expect("resource guard state lock");
         *guard = GuardRuntimeState::disabled();
         info!("resource guard disabled");
         return;
     }
 
     {
-        let mut guard = STATE.lock().expect("resource guard state lock");
+        let mut guard = runtime().state.lock().expect("resource guard state lock");
         *guard = GuardRuntimeState::from_config(cfg);
     }
 
@@ -146,7 +145,7 @@ async fn run_resource_guard_loop(handles: Arc<IpcHandles>, cfg: GuardConfig, mut
 }
 
 fn update_runtime_state(cfg: GuardConfig, mem_available_kb: u64, degraded: &HashMap<Uuid, DegradedStream>) {
-    let mut guard = STATE.lock().expect("resource guard state lock");
+    let mut guard = runtime().state.lock().expect("resource guard state lock");
     guard.enabled = cfg.enabled;
     guard.poll_ms = cfg.poll_ms;
     guard.cooldown_ms = cfg.cooldown_ms;
@@ -157,12 +156,12 @@ fn update_runtime_state(cfg: GuardConfig, mem_available_kb: u64, degraded: &Hash
 }
 
 fn update_runtime_degraded_only(degraded: &HashMap<Uuid, DegradedStream>) {
-    let mut guard = STATE.lock().expect("resource guard state lock");
+    let mut guard = runtime().state.lock().expect("resource guard state lock");
     guard.sync_degraded(degraded);
 }
 
 fn record_runtime_action(action: ResourceGuardAction) {
-    let mut guard = STATE.lock().expect("resource guard state lock");
+    let mut guard = runtime().state.lock().expect("resource guard state lock");
     guard.push_action(action);
 }
 

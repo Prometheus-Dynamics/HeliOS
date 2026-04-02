@@ -7,9 +7,9 @@ use helios_peripherals::dto::SensorScope;
 use helios_peripherals::ipc::{FirmwareUpdate, SensorCommand, SensorEvent};
 use lib_ipc::types::CommandId;
 use serde::Serialize;
-use std::sync::{Arc, Mutex as StdMutex, Weak};
+use std::sync::{Arc, Weak};
 use std::time::Duration;
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{Mutex, RwLock, broadcast};
 use tokio::task::JoinHandle;
 
 const HUB_POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -17,21 +17,21 @@ const HUB_RETRY_DELAY: Duration = Duration::from_millis(500);
 
 pub(crate) struct SensorEventsState {
     tx: broadcast::Sender<Arc<SharedSensorEvent>>,
-    latest: Arc<StdMutex<SharedSensorLatest>>,
+    latest: Arc<RwLock<SharedSensorLatest>>,
     task: Mutex<Option<JoinHandle<()>>>,
-    state: StdMutex<Option<Weak<IpcHandles>>>,
+    state: RwLock<Option<Weak<IpcHandles>>>,
 }
 
 impl Default for SensorEventsState {
     fn default() -> Self {
         let (tx, _) = broadcast::channel(128);
-        Self { tx, latest: Arc::new(StdMutex::new(SharedSensorLatest::default())), task: Mutex::new(None), state: StdMutex::new(None) }
+        Self { tx, latest: Arc::new(RwLock::new(SharedSensorLatest::default())), task: Mutex::new(None), state: RwLock::new(None) }
     }
 }
 
 impl SensorEventsState {
-    pub(crate) fn bind_state(&self, state: &AppState) {
-        let mut guard = self.state.lock().unwrap();
+    pub(crate) async fn bind_state(&self, state: &AppState) {
+        let mut guard = self.state.write().await;
         if guard.as_ref().and_then(|weak| weak.upgrade()).is_none() {
             *guard = Some(Arc::downgrade(state.ipc()));
         }
@@ -39,7 +39,7 @@ impl SensorEventsState {
 
     pub(crate) async fn subscribe(&self) -> (broadcast::Receiver<Arc<SharedSensorEvent>>, SharedSensorLatest) {
         self.ensure_task().await;
-        let latest = self.latest.lock().ok().map(|guard| guard.clone()).unwrap_or_default();
+        let latest = self.latest.read().await.clone();
         (self.tx.subscribe(), latest)
     }
 
@@ -49,7 +49,7 @@ impl SensorEventsState {
         if needs_spawn {
             let tx = self.tx.clone();
             let latest = self.latest.clone();
-            let state = self.state.lock().unwrap().clone();
+            let state = self.state.read().await.clone();
             *guard = Some(tokio::spawn(run_sensor_events_sampler(tx, latest, state)));
         }
     }
@@ -81,7 +81,7 @@ pub(crate) enum SharedSensorEvent {
     Error(Arc<str>),
 }
 
-async fn run_sensor_events_sampler(tx: broadcast::Sender<Arc<SharedSensorEvent>>, latest: Arc<StdMutex<SharedSensorLatest>>, state: Option<Weak<IpcHandles>>) {
+async fn run_sensor_events_sampler(tx: broadcast::Sender<Arc<SharedSensorEvent>>, latest: Arc<RwLock<SharedSensorLatest>>, state: Option<Weak<IpcHandles>>) {
     let Some(state) = state.and_then(|weak| weak.upgrade()) else {
         return;
     };
@@ -97,7 +97,7 @@ async fn run_sensor_events_sampler(tx: broadcast::Sender<Arc<SharedSensorEvent>>
         }
 
         if state.ensure_sensors().await.is_none() {
-            broadcast_sensor_error(&tx, &latest, "peripherals IPC unavailable");
+            broadcast_sensor_error(&tx, &latest, "peripherals IPC unavailable").await;
             tokio::time::sleep(HUB_RETRY_DELAY).await;
             continue;
         }
@@ -105,7 +105,7 @@ async fn run_sensor_events_sampler(tx: broadcast::Sender<Arc<SharedSensorEvent>>
         let conn = match crate::ipc::peripherals::connect_sensors_stream().await {
             Ok(conn) => conn,
             Err(err) => {
-                broadcast_sensor_error(&tx, &latest, err.to_string());
+                broadcast_sensor_error(&tx, &latest, err.to_string()).await;
                 tokio::time::sleep(HUB_RETRY_DELAY).await;
                 continue;
             }
@@ -114,11 +114,11 @@ async fn run_sensor_events_sampler(tx: broadcast::Sender<Arc<SharedSensorEvent>>
         let mut session = conn.session;
         let subscribe = SensorCommand::Subscribe { command_id: CommandId::new(), scope: scope.clone() };
         if let Err(err) = session.send_command(conn.client.journal(), &subscribe).await {
-            broadcast_sensor_error(&tx, &latest, format!("failed to subscribe: {err}"));
+            broadcast_sensor_error(&tx, &latest, format!("failed to subscribe: {err}")).await;
             tokio::time::sleep(HUB_RETRY_DELAY).await;
             continue;
         }
-        clear_sensor_error(&latest);
+        clear_sensor_error(&latest).await;
 
         let mut should_retry = true;
         loop {
@@ -139,33 +139,33 @@ async fn run_sensor_events_sampler(tx: broadcast::Sender<Arc<SharedSensorEvent>>
                                 power: Some(power_status_from_snapshot(&values)),
                                 lighting: None,
                             });
-                            update_latest_snapshot(&latest, payload.clone());
+                            update_latest_snapshot(&latest, payload.clone()).await;
                             let _ = tx.send(Arc::new(SharedSensorEvent::Snapshot(payload)));
                         }
                         Ok(Some(SensorEvent::FirmwareUpdate { update })) => {
                             let payload = Arc::new(update);
-                            update_latest_firmware(&latest, payload.clone());
+                            update_latest_firmware(&latest, payload.clone()).await;
                             let _ = tx.send(Arc::new(SharedSensorEvent::Firmware(payload)));
                         }
                         Ok(Some(SensorEvent::LightingState { state, .. })) => {
                             let payload = Arc::new(LightingRuntimeStatePayload::from(state));
-                            update_latest_lighting(&latest, payload.clone());
+                            update_latest_lighting(&latest, payload.clone()).await;
                             let _ = tx.send(Arc::new(SharedSensorEvent::Lighting(payload)));
                         }
                         Ok(Some(SensorEvent::Nack { reason, .. })) => {
-                            broadcast_sensor_error(&tx, &latest, reason);
+                            broadcast_sensor_error(&tx, &latest, reason).await;
                             break;
                         }
                         Ok(Some(SensorEvent::Unsubscribed { scope: event_scope })) if event_scope == scope => {
-                            broadcast_sensor_error(&tx, &latest, "sensor stream closed");
+                            broadcast_sensor_error(&tx, &latest, "sensor stream closed").await;
                             break;
                         }
                         Ok(None) => {
-                            broadcast_sensor_error(&tx, &latest, "sensor stream closed");
+                            broadcast_sensor_error(&tx, &latest, "sensor stream closed").await;
                             break;
                         }
                         Err(err) => {
-                            broadcast_sensor_error(&tx, &latest, err.to_string());
+                            broadcast_sensor_error(&tx, &latest, err.to_string()).await;
                             break;
                         }
                         _ => {}
@@ -182,37 +182,30 @@ async fn run_sensor_events_sampler(tx: broadcast::Sender<Arc<SharedSensorEvent>>
     }
 }
 
-fn update_latest_snapshot(latest: &Arc<StdMutex<SharedSensorLatest>>, payload: Arc<SnapshotPayload>) {
-    if let Ok(mut guard) = latest.lock() {
-        guard.snapshot = Some(payload);
-        guard.error = None;
-    }
+async fn update_latest_snapshot(latest: &Arc<RwLock<SharedSensorLatest>>, payload: Arc<SnapshotPayload>) {
+    let mut guard = latest.write().await;
+    guard.snapshot = Some(payload);
+    guard.error = None;
 }
 
-fn update_latest_firmware(latest: &Arc<StdMutex<SharedSensorLatest>>, payload: Arc<FirmwareUpdate>) {
-    if let Ok(mut guard) = latest.lock() {
-        guard.firmware = Some(payload);
-        guard.error = None;
-    }
+async fn update_latest_firmware(latest: &Arc<RwLock<SharedSensorLatest>>, payload: Arc<FirmwareUpdate>) {
+    let mut guard = latest.write().await;
+    guard.firmware = Some(payload);
+    guard.error = None;
 }
 
-fn update_latest_lighting(latest: &Arc<StdMutex<SharedSensorLatest>>, payload: Arc<LightingRuntimeStatePayload>) {
-    if let Ok(mut guard) = latest.lock() {
-        guard.lighting = Some(payload);
-        guard.error = None;
-    }
+async fn update_latest_lighting(latest: &Arc<RwLock<SharedSensorLatest>>, payload: Arc<LightingRuntimeStatePayload>) {
+    let mut guard = latest.write().await;
+    guard.lighting = Some(payload);
+    guard.error = None;
 }
 
-fn clear_sensor_error(latest: &Arc<StdMutex<SharedSensorLatest>>) {
-    if let Ok(mut guard) = latest.lock() {
-        guard.error = None;
-    }
+async fn clear_sensor_error(latest: &Arc<RwLock<SharedSensorLatest>>) {
+    latest.write().await.error = None;
 }
 
-fn broadcast_sensor_error(tx: &broadcast::Sender<Arc<SharedSensorEvent>>, latest: &Arc<StdMutex<SharedSensorLatest>>, reason: impl Into<String>) {
+async fn broadcast_sensor_error(tx: &broadcast::Sender<Arc<SharedSensorEvent>>, latest: &Arc<RwLock<SharedSensorLatest>>, reason: impl Into<String>) {
     let reason = Arc::<str>::from(reason.into());
-    if let Ok(mut guard) = latest.lock() {
-        *guard = SharedSensorLatest { error: Some(reason.clone()), ..SharedSensorLatest::default() };
-    }
+    *latest.write().await = SharedSensorLatest { error: Some(reason.clone()), ..SharedSensorLatest::default() };
     let _ = tx.send(Arc::new(SharedSensorEvent::Error(reason)));
 }

@@ -72,7 +72,7 @@ struct OutputsSubscription {
 
 pub(super) async fn handle_stream_outputs(socket: WebSocket, state: AppState, stream_id: Uuid, default_interval: Duration, ports_interval: Duration) {
     let (mut ws_sender, mut ws_receiver) = socket.split();
-    state.services.system.bind_stream_outputs_state(&state);
+    state.services.system.bind_stream_outputs_state(&state).await;
     let (client_id, mut outputs_rx, initial_ports) = match state.services.system.subscribe_stream_outputs(stream_id, default_interval, ports_interval).await {
         Ok(subscription) => subscription,
         Err(err) => {

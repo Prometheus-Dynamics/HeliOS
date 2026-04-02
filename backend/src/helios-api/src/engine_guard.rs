@@ -1,8 +1,7 @@
 use std::collections::VecDeque;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use once_cell::sync::Lazy;
 use tokio::time::sleep;
 use tracing::warn;
 
@@ -38,10 +37,19 @@ struct GuardState {
     safe_mode_until_ms: u64,
 }
 
-static CONFIG: Lazy<GuardConfig> = Lazy::new(GuardConfig::from_env);
-static STATE: Lazy<Mutex<GuardState>> = Lazy::new(|| Mutex::new(GuardState { recent: VecDeque::new(), safe_mode_until_ms: 0 }));
+struct EngineCrashGuardRuntime {
+    config: GuardConfig,
+    state: Mutex<GuardState>,
+}
+
+fn runtime() -> &'static EngineCrashGuardRuntime {
+    static RUNTIME: OnceLock<EngineCrashGuardRuntime> = OnceLock::new();
+    RUNTIME.get_or_init(|| EngineCrashGuardRuntime { config: GuardConfig::from_env(), state: Mutex::new(GuardState { recent: VecDeque::new(), safe_mode_until_ms: 0 }) })
+}
 
 pub fn spawn_engine_crash_guard_task(handles: std::sync::Arc<IpcHandles>) {
+    let poll_ms = runtime().config.poll_ms;
+    let min_downtime_ms = runtime().config.min_downtime_ms;
     tokio::spawn(async move {
         let mut last_seen = 0u64;
         let mut pending_disconnect: Option<u64> = None;
@@ -51,13 +59,13 @@ pub fn spawn_engine_crash_guard_task(handles: std::sync::Arc<IpcHandles>) {
         let mut connect_events = handles.engine.subscribe_connect_events();
         loop {
             tokio::select! {
-                _ = sleep(Duration::from_millis(CONFIG.poll_ms)) => {}
+                _ = sleep(Duration::from_millis(poll_ms)) => {}
                 _ = connect_events.recv() => {
                     ever_connected = true;
                     if let Some(ts) = pending_disconnect.take() {
                         let now = now_ms();
                         let downtime = now.saturating_sub(ts);
-                        if downtime >= CONFIG.min_downtime_ms {
+                        if downtime >= min_downtime_ms {
                             record_disconnect(ts);
                         }
                     }
@@ -86,23 +94,29 @@ pub fn spawn_engine_crash_guard_task(handles: std::sync::Arc<IpcHandles>) {
 
 pub fn safe_mode_active() -> bool {
     let now = now_ms();
-    let guard = STATE.lock().expect("engine crash guard lock");
+    let guard = runtime().state.lock().expect("engine crash guard lock");
     guard.safe_mode_until_ms > now
 }
 
 fn record_disconnect(ts_ms: u64) {
     let now = now_ms();
-    let mut guard = STATE.lock().expect("engine crash guard lock");
-    let window_start = ts_ms.saturating_sub(CONFIG.window_ms);
+    let runtime = runtime();
+    let mut guard = runtime.state.lock().expect("engine crash guard lock");
+    let window_start = ts_ms.saturating_sub(runtime.config.window_ms);
     // Only trim while we actually have elements; otherwise we'd spin forever on an empty deque.
     while guard.recent.front().copied().is_some_and(|value| value < window_start) {
         guard.recent.pop_front();
     }
     guard.recent.push_back(ts_ms);
 
-    if guard.recent.len() >= CONFIG.threshold && guard.safe_mode_until_ms <= now {
-        guard.safe_mode_until_ms = ts_ms.saturating_add(CONFIG.suppress_ms);
-        warn!(disconnects = guard.recent.len(), window_ms = CONFIG.window_ms, suppress_ms = CONFIG.suppress_ms, "engine crash guard active: suppressing auto-restore to keep UI responsive");
+    if guard.recent.len() >= runtime.config.threshold && guard.safe_mode_until_ms <= now {
+        guard.safe_mode_until_ms = ts_ms.saturating_add(runtime.config.suppress_ms);
+        warn!(
+            disconnects = guard.recent.len(),
+            window_ms = runtime.config.window_ms,
+            suppress_ms = runtime.config.suppress_ms,
+            "engine crash guard active: suppressing auto-restore to keep UI responsive"
+        );
     }
 }
 

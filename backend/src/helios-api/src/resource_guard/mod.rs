@@ -6,9 +6,8 @@ mod system;
 mod tests;
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
-use once_cell::sync::Lazy;
 use serde::Serialize;
 use tokio::sync::{mpsc, oneshot};
 use utoipa::ToSchema;
@@ -215,5 +214,12 @@ impl GuardRuntimeState {
     }
 }
 
-static STATE: Lazy<Mutex<GuardRuntimeState>> = Lazy::new(|| Mutex::new(GuardRuntimeState::disabled()));
-static COMMAND_TX: Lazy<Mutex<Option<mpsc::UnboundedSender<GuardCommand>>>> = Lazy::new(|| Mutex::new(None));
+pub(super) struct ResourceGuardRuntime {
+    state: Mutex<GuardRuntimeState>,
+    command_tx: Mutex<Option<mpsc::UnboundedSender<GuardCommand>>>,
+}
+
+pub(super) fn runtime() -> &'static ResourceGuardRuntime {
+    static RUNTIME: OnceLock<ResourceGuardRuntime> = OnceLock::new();
+    RUNTIME.get_or_init(|| ResourceGuardRuntime { state: Mutex::new(GuardRuntimeState::disabled()), command_tx: Mutex::new(None) })
+}

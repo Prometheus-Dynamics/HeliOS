@@ -46,7 +46,7 @@ struct FirmwarePayload {
 }
 
 pub(super) async fn sensors_loop(mut socket: WebSocket, state: AppState) -> Result<(), String> {
-    state.services.hardware.bind_sensor_events_state(&state);
+    state.services.hardware.bind_sensor_events_state(&state).await;
 
     let error_context = WsErrorContext { request_id: Uuid::new_v4().to_string(), trace_id: Uuid::new_v4().to_string() };
     let (mut updates, mut latest) = state.services.hardware.subscribe_sensor_events().await;

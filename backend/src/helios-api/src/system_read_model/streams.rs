@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex as StdMutex, Weak};
+use std::sync::{Arc, Weak};
 
 use helios_engine::ipc::{EngineEvent, GraphOutputPortDescriptor};
 use helios_engine::stream::StreamMetrics;
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{Mutex, RwLock, broadcast};
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, Instant};
 
@@ -40,13 +40,13 @@ pub enum SharedStreamOutputsEvent {
 
 struct StreamMetricsTopic {
     tx: broadcast::Sender<Arc<SharedStreamMetricsSnapshot>>,
-    latest: Arc<StdMutex<Option<Arc<SharedStreamMetricsSnapshot>>>>,
+    latest: Arc<RwLock<Option<Arc<SharedStreamMetricsSnapshot>>>>,
 }
 
 pub(super) struct StreamMetricsHub {
-    topics: Arc<StdMutex<BTreeMap<uuid::Uuid, Arc<StreamMetricsTopic>>>>,
+    topics: Arc<RwLock<BTreeMap<uuid::Uuid, Arc<StreamMetricsTopic>>>>,
     task: Mutex<Option<JoinHandle<()>>>,
-    state: StdMutex<Option<Weak<IpcHandles>>>,
+    state: RwLock<Option<Weak<IpcHandles>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -58,27 +58,27 @@ struct StreamOutputsClientConfig {
 
 struct StreamOutputsTopic {
     tx: broadcast::Sender<Arc<SharedStreamOutputsEvent>>,
-    latest_ports: Arc<StdMutex<Option<Arc<SharedStreamOutputsPortsSnapshot>>>>,
-    clients: Arc<Mutex<BTreeMap<uuid::Uuid, StreamOutputsClientConfig>>>,
+    latest_ports: Arc<RwLock<Option<Arc<SharedStreamOutputsPortsSnapshot>>>>,
+    clients: Arc<RwLock<BTreeMap<uuid::Uuid, StreamOutputsClientConfig>>>,
     task: Mutex<Option<JoinHandle<()>>>,
 }
 
 pub(super) struct StreamOutputsHub {
-    topics: Arc<StdMutex<BTreeMap<uuid::Uuid, Arc<StreamOutputsTopic>>>>,
-    state: StdMutex<Option<Weak<IpcHandles>>>,
+    topics: Arc<RwLock<BTreeMap<uuid::Uuid, Arc<StreamOutputsTopic>>>>,
+    state: RwLock<Option<Weak<IpcHandles>>>,
 }
 
 impl StreamMetricsTopic {
     fn new() -> Self {
         let (tx, _) = broadcast::channel(32);
-        Self { tx, latest: Arc::new(StdMutex::new(None)) }
+        Self { tx, latest: Arc::new(RwLock::new(None)) }
     }
 }
 
 impl StreamOutputsTopic {
     fn new() -> Self {
         let (tx, _) = broadcast::channel(64);
-        Self { tx, latest_ports: Arc::new(StdMutex::new(None)), clients: Arc::new(Mutex::new(BTreeMap::new())), task: Mutex::new(None) }
+        Self { tx, latest_ports: Arc::new(RwLock::new(None)), clients: Arc::new(RwLock::new(BTreeMap::new())), task: Mutex::new(None) }
     }
 
     async fn ensure_task(&self, stream_id: uuid::Uuid, state: Option<Weak<IpcHandles>>) {
@@ -93,7 +93,7 @@ impl StreamOutputsTopic {
     }
 
     async fn prime_ports(&self, stream_id: uuid::Uuid, state: Option<Weak<IpcHandles>>) -> Result<Arc<SharedStreamOutputsPortsSnapshot>, String> {
-        if let Some(snapshot) = self.latest_ports.lock().ok().and_then(|guard| guard.clone()) {
+        if let Some(snapshot) = self.latest_ports.read().await.clone() {
             return Ok(snapshot);
         }
 
@@ -102,9 +102,8 @@ impl StreamOutputsTopic {
         };
 
         let snapshot = Arc::new(fetch_stream_outputs_ports(&state, stream_id).await?);
-        if let Ok(mut guard) = self.latest_ports.lock()
-            && guard.is_none()
-        {
+        let mut guard = self.latest_ports.write().await;
+        if guard.is_none() {
             *guard = Some(snapshot.clone());
         }
         let _ = self.tx.send(Arc::new(SharedStreamOutputsEvent::Ports((*snapshot).clone())));
@@ -114,11 +113,11 @@ impl StreamOutputsTopic {
 
 impl StreamMetricsHub {
     pub(super) fn new() -> Self {
-        Self { topics: Arc::new(StdMutex::new(BTreeMap::new())), task: Mutex::new(None), state: StdMutex::new(None) }
+        Self { topics: Arc::new(RwLock::new(BTreeMap::new())), task: Mutex::new(None), state: RwLock::new(None) }
     }
 
-    pub(super) fn set_state(&self, state: &Arc<IpcHandles>) {
-        let mut guard = self.state.lock().expect("stream metrics state poisoned");
+    pub(super) async fn set_state(&self, state: &Arc<IpcHandles>) {
+        let mut guard = self.state.write().await;
         if guard.as_ref().and_then(|weak| weak.upgrade()).is_none() {
             *guard = Some(Arc::downgrade(state));
         }
@@ -126,9 +125,9 @@ impl StreamMetricsHub {
 
     pub(super) async fn subscribe(&self, stream_id: uuid::Uuid) -> Result<(broadcast::Receiver<Arc<SharedStreamMetricsSnapshot>>, Option<Arc<SharedStreamMetricsSnapshot>>), String> {
         self.ensure_task().await;
-        let topic = self.topic(stream_id);
+        let topic = self.topic(stream_id).await;
         self.prime_topic(stream_id, &topic).await?;
-        let latest = topic.latest.lock().ok().and_then(|guard| guard.clone());
+        let latest = topic.latest.read().await.clone();
         Ok((topic.tx.subscribe(), latest))
     }
 
@@ -137,46 +136,40 @@ impl StreamMetricsHub {
         let needs_spawn = guard.as_ref().map(|handle| handle.is_finished()).unwrap_or(true);
         if needs_spawn {
             let topics = self.topics.clone();
-            let state = self.state.lock().expect("stream metrics state poisoned").clone();
+            let state = self.state.read().await.clone();
             *guard = Some(tokio::spawn(run_stream_metrics_sampler(topics, state)));
         }
     }
 
-    fn topic(&self, stream_id: uuid::Uuid) -> Arc<StreamMetricsTopic> {
-        let mut guard = self.topics.lock().expect("stream metrics topics poisoned");
+    async fn topic(&self, stream_id: uuid::Uuid) -> Arc<StreamMetricsTopic> {
+        let mut guard = self.topics.write().await;
         guard.entry(stream_id).or_insert_with(|| Arc::new(StreamMetricsTopic::new())).clone()
     }
 
-    pub(super) fn stats(&self) -> (u64, u64) {
-        let Ok(guard) = self.topics.lock() else {
-            return (0, 0);
-        };
+    pub(super) async fn stats(&self) -> (u64, u64) {
+        let guard = self.topics.read().await;
         let topics = guard.len() as u64;
         let subscribers = guard.values().map(|topic| topic.tx.receiver_count() as u64).sum();
         (topics, subscribers)
     }
 
     pub(super) async fn unsubscribe(&self, stream_id: uuid::Uuid) {
-        let Some(topic) = self.find_topic(stream_id) else {
+        let Some(topic) = self.find_topic(stream_id).await else {
             return;
         };
         if topic.tx.receiver_count() > 0 {
             return;
         }
-        if let Ok(mut guard) = topic.latest.lock() {
-            guard.take();
-        }
-        if let Ok(mut topics) = self.topics.lock() {
-            topics.remove(&stream_id);
-        }
+        topic.latest.write().await.take();
+        self.topics.write().await.remove(&stream_id);
     }
 
     async fn prime_topic(&self, stream_id: uuid::Uuid, topic: &Arc<StreamMetricsTopic>) -> Result<(), String> {
-        if topic.latest.lock().ok().and_then(|guard| guard.clone()).is_some() {
+        if topic.latest.read().await.is_some() {
             return Ok(());
         }
 
-        let Some(state) = self.state.lock().expect("stream metrics state poisoned").as_ref().and_then(|weak| weak.upgrade()) else {
+        let Some(state) = self.state.read().await.as_ref().and_then(|weak| weak.upgrade()) else {
             return Err("engine unavailable".into());
         };
 
@@ -187,27 +180,26 @@ impl StreamMetricsHub {
             Err(err) => return Err(err.to_string()),
         };
 
-        if let Ok(mut guard) = topic.latest.lock()
-            && guard.is_none()
-        {
+        let mut guard = topic.latest.write().await;
+        if guard.is_none() {
             *guard = Some(snapshot.clone());
         }
         let _ = topic.tx.send(snapshot);
         Ok(())
     }
 
-    fn find_topic(&self, stream_id: uuid::Uuid) -> Option<Arc<StreamMetricsTopic>> {
-        self.topics.lock().ok()?.get(&stream_id).cloned()
+    async fn find_topic(&self, stream_id: uuid::Uuid) -> Option<Arc<StreamMetricsTopic>> {
+        self.topics.read().await.get(&stream_id).cloned()
     }
 }
 
 impl StreamOutputsHub {
     pub(super) fn new() -> Self {
-        Self { topics: Arc::new(StdMutex::new(BTreeMap::new())), state: StdMutex::new(None) }
+        Self { topics: Arc::new(RwLock::new(BTreeMap::new())), state: RwLock::new(None) }
     }
 
-    pub(super) fn set_state(&self, state: &Arc<IpcHandles>) {
-        let mut guard = self.state.lock().expect("stream outputs state poisoned");
+    pub(super) async fn set_state(&self, state: &Arc<IpcHandles>) {
+        let mut guard = self.state.write().await;
         if guard.as_ref().and_then(|weak| weak.upgrade()).is_none() {
             *guard = Some(Arc::downgrade(state));
         }
@@ -219,27 +211,27 @@ impl StreamOutputsHub {
         sample_interval: Duration,
         ports_interval: Duration,
     ) -> Result<(uuid::Uuid, broadcast::Receiver<Arc<SharedStreamOutputsEvent>>, Arc<SharedStreamOutputsPortsSnapshot>), String> {
-        let topic = self.topic(stream_id);
-        let state = self.state.lock().expect("stream outputs state poisoned").clone();
+        let topic = self.topic(stream_id).await;
+        let state = self.state.read().await.clone();
         topic.ensure_task(stream_id, state.clone()).await;
 
         let client_id = uuid::Uuid::new_v4();
-        topic.clients.lock().await.insert(client_id, StreamOutputsClientConfig { ports: Vec::new(), sample_interval, ports_interval });
+        topic.clients.write().await.insert(client_id, StreamOutputsClientConfig { ports: Vec::new(), sample_interval, ports_interval });
 
         match topic.prime_ports(stream_id, state).await {
             Ok(snapshot) => Ok((client_id, topic.tx.subscribe(), snapshot)),
             Err(err) => {
-                topic.clients.lock().await.remove(&client_id);
+                topic.clients.write().await.remove(&client_id);
                 Err(err)
             }
         }
     }
 
     pub(super) async fn update_client(&self, stream_id: uuid::Uuid, client_id: uuid::Uuid, ports: Vec<String>, sample_interval: Duration) -> Result<(), String> {
-        let Some(topic) = self.find_topic(stream_id) else {
+        let Some(topic) = self.find_topic(stream_id).await else {
             return Err("stream outputs subscription unavailable".into());
         };
-        let mut clients = topic.clients.lock().await;
+        let mut clients = topic.clients.write().await;
         let Some(client) = clients.get_mut(&client_id) else {
             return Err("stream outputs subscriber missing".into());
         };
@@ -249,11 +241,11 @@ impl StreamOutputsHub {
     }
 
     pub(super) async fn unsubscribe(&self, stream_id: uuid::Uuid, client_id: uuid::Uuid) {
-        let Some(topic) = self.find_topic(stream_id) else {
+        let Some(topic) = self.find_topic(stream_id).await else {
             return;
         };
         let idle = {
-            let mut clients = topic.clients.lock().await;
+            let mut clients = topic.clients.write().await;
             clients.remove(&client_id);
             clients.is_empty()
         };
@@ -261,47 +253,44 @@ impl StreamOutputsHub {
             return;
         }
 
-        if let Ok(mut guard) = topic.latest_ports.lock() {
-            *guard = None;
-        }
+        *topic.latest_ports.write().await = None;
 
-        if let Ok(mut topics) = self.topics.lock()
-            && topics.get(&stream_id).is_some_and(|current| Arc::ptr_eq(current, &topic))
-        {
+        let mut topics = self.topics.write().await;
+        if topics.get(&stream_id).is_some_and(|current| Arc::ptr_eq(current, &topic)) {
             topics.remove(&stream_id);
         }
     }
 
     pub(super) async fn current_ports(&self, stream_id: uuid::Uuid) -> Result<Arc<SharedStreamOutputsPortsSnapshot>, String> {
-        let topic = self.topic(stream_id);
-        let state = self.state.lock().expect("stream outputs state poisoned").clone();
+        let topic = self.topic(stream_id).await;
+        let state = self.state.read().await.clone();
         topic.ensure_task(stream_id, state.clone()).await;
         topic.prime_ports(stream_id, state).await
     }
 
-    fn topic(&self, stream_id: uuid::Uuid) -> Arc<StreamOutputsTopic> {
-        let mut guard = self.topics.lock().expect("stream outputs topics poisoned");
+    async fn topic(&self, stream_id: uuid::Uuid) -> Arc<StreamOutputsTopic> {
+        let mut guard = self.topics.write().await;
         guard.entry(stream_id).or_insert_with(|| Arc::new(StreamOutputsTopic::new())).clone()
     }
 
-    fn find_topic(&self, stream_id: uuid::Uuid) -> Option<Arc<StreamOutputsTopic>> {
-        self.topics.lock().ok()?.get(&stream_id).cloned()
+    async fn find_topic(&self, stream_id: uuid::Uuid) -> Option<Arc<StreamOutputsTopic>> {
+        self.topics.read().await.get(&stream_id).cloned()
     }
 
     pub(super) async fn stats(&self) -> (u64, u64) {
-        let topics = self.topics.lock().ok().map(|guard| guard.values().cloned().collect::<Vec<_>>()).unwrap_or_default();
+        let topics = self.topics.read().await.values().cloned().collect::<Vec<_>>();
         let topic_count = topics.len() as u64;
         let mut subscribers = 0_u64;
         for topic in topics {
-            subscribers = subscribers.saturating_add(topic.clients.lock().await.len() as u64);
+            subscribers = subscribers.saturating_add(topic.clients.read().await.len() as u64);
         }
         (topic_count, subscribers)
     }
 }
 
 impl SystemReadModelState {
-    pub fn bind_stream_metrics_state(&self, state: &crate::http::AppState) {
-        self.stream_metrics_hub.set_state(state.ipc());
+    pub async fn bind_stream_metrics_state(&self, state: &crate::http::AppState) {
+        self.stream_metrics_hub.set_state(state.ipc()).await;
     }
 
     pub async fn subscribe_stream_metrics(&self, stream_id: uuid::Uuid) -> Result<(broadcast::Receiver<Arc<SharedStreamMetricsSnapshot>>, Option<Arc<SharedStreamMetricsSnapshot>>), String> {
@@ -312,8 +301,8 @@ impl SystemReadModelState {
         self.stream_metrics_hub.unsubscribe(stream_id).await;
     }
 
-    pub fn bind_stream_outputs_state(&self, state: &crate::http::AppState) {
-        self.stream_outputs_hub.set_state(state.ipc());
+    pub async fn bind_stream_outputs_state(&self, state: &crate::http::AppState) {
+        self.stream_outputs_hub.set_state(state.ipc()).await;
     }
 
     pub async fn subscribe_stream_outputs(
@@ -338,16 +327,16 @@ impl SystemReadModelState {
     }
 }
 
-async fn run_stream_metrics_sampler(topics: Arc<StdMutex<BTreeMap<uuid::Uuid, Arc<StreamMetricsTopic>>>>, state: Option<Weak<IpcHandles>>) {
+async fn run_stream_metrics_sampler(topics: Arc<RwLock<BTreeMap<uuid::Uuid, Arc<StreamMetricsTopic>>>>, state: Option<Weak<IpcHandles>>) {
     let Some(state) = state.and_then(|weak| weak.upgrade()) else {
         return;
     };
 
     let mut events = state.engine.subscribe_events();
-    let mut saw_receiver = stream_metrics_has_receivers(&topics);
+    let mut saw_receiver = stream_metrics_has_receivers(&topics).await;
 
     loop {
-        let has_receivers = stream_metrics_has_receivers(&topics);
+        let has_receivers = stream_metrics_has_receivers(&topics).await;
         saw_receiver |= has_receivers;
         if saw_receiver && !has_receivers {
             break;
@@ -355,13 +344,11 @@ async fn run_stream_metrics_sampler(topics: Arc<StdMutex<BTreeMap<uuid::Uuid, Ar
 
         match events.recv().await {
             Ok(EngineEvent::Metrics { stream_id, metrics, .. }) | Ok(EngineEvent::MetricsUpdate { stream_id, metrics }) => {
-                let Some(topic) = stream_metrics_topic(&topics, stream_id) else {
+                let Some(topic) = stream_metrics_topic(&topics, stream_id).await else {
                     continue;
                 };
                 let snapshot = Arc::new(build_stream_metrics_snapshot(stream_id, metrics));
-                if let Ok(mut guard) = topic.latest.lock() {
-                    *guard = Some(snapshot.clone());
-                }
+                *topic.latest.write().await = Some(snapshot.clone());
                 let _ = topic.tx.send(snapshot);
             }
             Ok(_) => {}
@@ -374,8 +361,8 @@ async fn run_stream_metrics_sampler(topics: Arc<StdMutex<BTreeMap<uuid::Uuid, Ar
 async fn run_stream_outputs_sampler(
     stream_id: uuid::Uuid,
     tx: broadcast::Sender<Arc<SharedStreamOutputsEvent>>,
-    latest_ports: Arc<StdMutex<Option<Arc<SharedStreamOutputsPortsSnapshot>>>>,
-    clients: Arc<Mutex<BTreeMap<uuid::Uuid, StreamOutputsClientConfig>>>,
+    latest_ports: Arc<RwLock<Option<Arc<SharedStreamOutputsPortsSnapshot>>>>,
+    clients: Arc<RwLock<BTreeMap<uuid::Uuid, StreamOutputsClientConfig>>>,
     state: Option<Weak<IpcHandles>>,
 ) {
     let Some(state) = state.and_then(|weak| weak.upgrade()) else {
@@ -393,7 +380,7 @@ async fn run_stream_outputs_sampler(
         ticker.tick().await;
 
         let receiver_count = tx.receiver_count();
-        let client_snapshot = clients.lock().await.clone();
+        let client_snapshot = clients.read().await.clone();
         let has_activity = receiver_count > 0 || !client_snapshot.is_empty();
         saw_receiver |= has_activity;
         if saw_receiver && !has_activity {
@@ -406,14 +393,12 @@ async fn run_stream_outputs_sampler(
 
         next_samples.retain(|port, _| active_ports.contains_key(port));
 
-        let needs_ports_refresh = latest_ports.lock().ok().and_then(|guard| guard.clone()).is_none() || now.duration_since(last_ports_refresh) >= ports_interval;
+        let needs_ports_refresh = latest_ports.read().await.is_none() || now.duration_since(last_ports_refresh) >= ports_interval;
         if needs_ports_refresh {
             if let Ok(snapshot) = fetch_stream_outputs_ports(&state, stream_id).await {
                 let snapshot = Arc::new(snapshot);
-                let changed = latest_ports.lock().ok().and_then(|guard| guard.as_ref().map(|current| current.outputs != snapshot.outputs)).unwrap_or(true);
-                if let Ok(mut guard) = latest_ports.lock() {
-                    *guard = Some(snapshot.clone());
-                }
+                let changed = latest_ports.read().await.as_ref().map(|current| current.outputs != snapshot.outputs).unwrap_or(true);
+                *latest_ports.write().await = Some(snapshot.clone());
                 if changed {
                     let _ = tx.send(Arc::new(SharedStreamOutputsEvent::Ports((*snapshot).clone())));
                 }
@@ -477,12 +462,12 @@ fn aggregate_stream_outputs_ports_interval(clients: &BTreeMap<uuid::Uuid, Stream
     clients.values().map(|client| client.ports_interval).min().unwrap_or_else(|| Duration::from_secs(2))
 }
 
-fn stream_metrics_topic(topics: &Arc<StdMutex<BTreeMap<uuid::Uuid, Arc<StreamMetricsTopic>>>>, stream_id: uuid::Uuid) -> Option<Arc<StreamMetricsTopic>> {
-    topics.lock().ok()?.get(&stream_id).cloned()
+async fn stream_metrics_topic(topics: &Arc<RwLock<BTreeMap<uuid::Uuid, Arc<StreamMetricsTopic>>>>, stream_id: uuid::Uuid) -> Option<Arc<StreamMetricsTopic>> {
+    topics.read().await.get(&stream_id).cloned()
 }
 
-fn stream_metrics_has_receivers(topics: &Arc<StdMutex<BTreeMap<uuid::Uuid, Arc<StreamMetricsTopic>>>>) -> bool {
-    topics.lock().map(|guard| guard.values().any(|topic| topic.tx.receiver_count() > 0)).unwrap_or(false)
+async fn stream_metrics_has_receivers(topics: &Arc<RwLock<BTreeMap<uuid::Uuid, Arc<StreamMetricsTopic>>>>) -> bool {
+    topics.read().await.values().any(|topic| topic.tx.receiver_count() > 0)
 }
 
 #[cfg(test)]
@@ -493,13 +478,13 @@ mod tests {
     async fn stream_outputs_unsubscribe_prunes_idle_topic() {
         let hub = StreamOutputsHub::new();
         let stream_id = uuid::Uuid::new_v4();
-        let topic = hub.topic(stream_id);
+        let topic = hub.topic(stream_id).await;
         let client_id = uuid::Uuid::new_v4();
 
-        topic.clients.lock().await.insert(client_id, StreamOutputsClientConfig { ports: Vec::new(), sample_interval: Duration::from_millis(10), ports_interval: Duration::from_millis(20) });
+        topic.clients.write().await.insert(client_id, StreamOutputsClientConfig { ports: Vec::new(), sample_interval: Duration::from_millis(10), ports_interval: Duration::from_millis(20) });
 
         let receiver = topic.tx.subscribe();
-        assert!(hub.find_topic(stream_id).is_some());
+        assert!(hub.find_topic(stream_id).await.is_some());
 
         drop(receiver);
         hub.unsubscribe(stream_id, client_id).await;
@@ -507,28 +492,26 @@ mod tests {
         let (topic_count, subscriber_count) = hub.stats().await;
         assert_eq!(topic_count, 0);
         assert_eq!(subscriber_count, 0);
-        assert!(hub.find_topic(stream_id).is_none());
+        assert!(hub.find_topic(stream_id).await.is_none());
     }
 
     #[tokio::test]
     async fn stream_metrics_unsubscribe_prunes_idle_topic() {
         let hub = StreamMetricsHub::new();
         let stream_id = uuid::Uuid::new_v4();
-        let topic = hub.topic(stream_id);
+        let topic = hub.topic(stream_id).await;
         let latest = Arc::new(SharedStreamMetricsSnapshot { stream_id, metrics: StreamMetrics::default(), timestamp_ms: 1 });
-        if let Ok(mut guard) = topic.latest.lock() {
-            *guard = Some(latest);
-        }
+        *topic.latest.write().await = Some(latest);
 
         let receiver = topic.tx.subscribe();
-        assert!(hub.find_topic(stream_id).is_some());
+        assert!(hub.find_topic(stream_id).await.is_some());
 
         drop(receiver);
         hub.unsubscribe(stream_id).await;
 
-        let (topic_count, subscriber_count) = hub.stats();
+        let (topic_count, subscriber_count) = hub.stats().await;
         assert_eq!(topic_count, 0);
         assert_eq!(subscriber_count, 0);
-        assert!(hub.find_topic(stream_id).is_none());
+        assert!(hub.find_topic(stream_id).await.is_none());
     }
 }

@@ -10,7 +10,7 @@ use crate::{
 };
 
 pub async fn handle_imu_ws(mut socket: WebSocket, state: AppState) -> Result<(), String> {
-    state.services.hardware.bind_sensor_events_state(&state);
+    state.services.hardware.bind_sensor_events_state(&state).await;
 
     let error_context = WsErrorContext { request_id: Uuid::new_v4().to_string(), trace_id: Uuid::new_v4().to_string() };
     let (mut updates, latest): (tokio::sync::broadcast::Receiver<Arc<SharedSensorEvent>>, _) = state.services.hardware.subscribe_sensor_events().await;

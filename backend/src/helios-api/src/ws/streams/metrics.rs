@@ -19,7 +19,7 @@ use super::{MAX_INTERVAL_MS, MIN_INTERVAL_MS, WsSender};
 
 pub(super) async fn handle_stream_metrics(socket: WebSocket, state: AppState, stream_id: Uuid, interval: Duration) {
     let (mut sender, mut receiver) = socket.split();
-    state.services.system.bind_stream_metrics_state(&state);
+    state.services.system.bind_stream_metrics_state(&state).await;
     let (mut metrics_rx, latest) = match state.services.system.subscribe_stream_metrics(stream_id).await {
         Ok(subscription) => subscription,
         Err(err) => {

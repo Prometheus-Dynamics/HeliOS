@@ -30,8 +30,8 @@ impl HardwareReadModelService {
         self.state.allow_inventory_refresh().await
     }
 
-    pub fn bind_sensor_events_state(&self, state: &crate::http::AppState) {
-        self.sensor_events.bind_state(state);
+    pub async fn bind_sensor_events_state(&self, state: &crate::http::AppState) {
+        self.sensor_events.bind_state(state).await;
     }
 
     pub async fn subscribe_sensor_events(&self) -> (broadcast::Receiver<Arc<SharedSensorEvent>>, SharedSensorLatest) {

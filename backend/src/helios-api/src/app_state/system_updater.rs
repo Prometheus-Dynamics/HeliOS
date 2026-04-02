@@ -37,8 +37,8 @@ impl SystemReadModelService {
         self.state.subscribe_devices_updates().await
     }
 
-    pub fn bind_stream_metrics_state(&self, state: &crate::http::AppState) {
-        self.state.bind_stream_metrics_state(state);
+    pub async fn bind_stream_metrics_state(&self, state: &crate::http::AppState) {
+        self.state.bind_stream_metrics_state(state).await;
     }
 
     pub async fn subscribe_stream_metrics(&self, stream_id: Uuid) -> Result<(broadcast::Receiver<Arc<SharedStreamMetricsSnapshot>>, Option<Arc<SharedStreamMetricsSnapshot>>), String> {
@@ -49,8 +49,8 @@ impl SystemReadModelService {
         self.state.unsubscribe_stream_metrics(stream_id).await;
     }
 
-    pub fn bind_stream_outputs_state(&self, state: &crate::http::AppState) {
-        self.state.bind_stream_outputs_state(state);
+    pub async fn bind_stream_outputs_state(&self, state: &crate::http::AppState) {
+        self.state.bind_stream_outputs_state(state).await;
     }
 
     pub async fn subscribe_stream_outputs(

@@ -147,7 +147,7 @@ impl ProcessesHub {
 
 impl SystemReadModelState {
     pub async fn realtime_metrics(&self) -> ApiRealtimeMetrics {
-        let (stream_metrics_topics, stream_metrics_subscribers) = self.stream_metrics_hub.stats();
+        let (stream_metrics_topics, stream_metrics_subscribers) = self.stream_metrics_hub.stats().await;
         let (stream_outputs_topics, stream_outputs_subscribers) = self.stream_outputs_hub.stats().await;
         ApiRealtimeMetrics {
             telemetry_subscribers: self.telemetry_hub.subscriber_count(),

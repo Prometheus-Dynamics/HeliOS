@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use tracing::{warn, warn_span};
 
 pub async fn sensors_upgrade(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
-    state.services.hardware.bind_sensor_events_state(&state);
+    state.services.hardware.bind_sensor_events_state(&state).await;
     ws.on_upgrade(move |socket| async move {
         let span = warn_span!("sensors_ws");
         let _guard = span.enter();
