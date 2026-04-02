@@ -36,5 +36,4 @@ jobs:
             ${{ runner.os }}-backend-target-
 
       - name: Verify capability and compatibility goldens
-        working-directory: backend
-        run: cargo test -p helios-api stream_capability_compatibility_goldens_are_in_sync -- --nocapture
+        run: cargo run --manifest-path backend/Cargo.toml -p xtask -- validate stream-capability-goldens

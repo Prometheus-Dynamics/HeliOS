@@ -28,17 +28,6 @@ use styx::runtime_codec::{
 };
 use styx::BackendKind;
 
-#[cfg(test)]
-mod generated_codec_families;
-
-#[cfg(test)]
-use self::generated_codec_families::GENERATED_ENCODER_FAMILY_SPECS;
-
-#[cfg(test)]
-pub(crate) fn generated_encoder_family_specs_for_tests() -> Vec<(&'static str, &'static [&'static str], &'static [&'static str], &'static [&'static str], &'static [&'static str])> {
-    GENERATED_ENCODER_FAMILY_SPECS.iter().map(|spec| (spec.selector_id, spec.selector_aliases, spec.runtime_implementation_aliases, spec.runtime_name_aliases, spec.output_fourcc_aliases)).collect()
-}
-
 pub type ControlId = u32;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, ToSchema, PartialEq)]

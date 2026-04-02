@@ -1,5 +1,6 @@
 use super::*;
 use lib_ipc::types::CommandId;
+use serde::Deserialize;
 use std::collections::BTreeSet;
 use styx::codec::{CodecKind, CodecRegistry};
 use styx::prelude::{ColorSpace, FourCc, MediaFormat, Resolution};
@@ -182,16 +183,36 @@ fn encoder_settings_kind_for_selector_supports_generated_runtime_ids() {
 }
 
 #[test]
-fn generated_codec_family_bindings_match_styx_runtime_specs() {
-    assert_eq!(generated_encoder_family_specs_for_tests().len(), styx::runtime_codec::ENCODER_FAMILY_SPECS.len());
+fn codec_family_spec_matches_styx_runtime_specs() {
+    #[derive(Debug, Deserialize)]
+    struct CodecFamiliesSpec {
+        encoder_families: Vec<CodecFamilySpec>,
+    }
 
-    for (selector_id, selector_aliases, runtime_implementation_aliases, runtime_name_aliases, output_fourcc_aliases) in generated_encoder_family_specs_for_tests() {
-        let runtime = styx::runtime_codec::ENCODER_FAMILY_SPECS.iter().find(|spec| spec.selector_id == selector_id).expect("matching styx codec family");
+    #[derive(Debug, Deserialize)]
+    struct CodecFamilySpec {
+        id: String,
+        selector_id: String,
+        selector_aliases: Vec<String>,
+        runtime_implementation_aliases: Vec<String>,
+        runtime_name_aliases: Vec<String>,
+        output_fourcc_aliases: Vec<String>,
+        recording_codec: Option<String>,
+    }
 
-        assert_eq!(runtime.selector_aliases, selector_aliases);
-        assert_eq!(runtime.runtime_implementation_aliases, runtime_implementation_aliases);
-        assert_eq!(runtime.runtime_name_aliases, runtime_name_aliases);
-        assert_eq!(runtime.output_fourcc_aliases, output_fourcc_aliases);
+    let spec: CodecFamiliesSpec = toml::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../tools/api-codegen/codec-families.toml"))).expect("parse codec family spec");
+
+    assert_eq!(spec.encoder_families.len(), styx::runtime_codec::ENCODER_FAMILY_SPECS.len());
+
+    for family in spec.encoder_families {
+        let runtime = styx::runtime_codec::ENCODER_FAMILY_SPECS.iter().find(|spec| spec.id == family.id).expect("matching styx codec family");
+
+        assert_eq!(runtime.selector_id, family.selector_id);
+        assert_eq!(runtime.selector_aliases, family.selector_aliases);
+        assert_eq!(runtime.runtime_implementation_aliases, family.runtime_implementation_aliases);
+        assert_eq!(runtime.runtime_name_aliases, family.runtime_name_aliases);
+        assert_eq!(runtime.output_fourcc_aliases, family.output_fourcc_aliases);
+        assert_eq!(runtime.recording_codec, family.recording_codec.as_deref());
     }
 }
 

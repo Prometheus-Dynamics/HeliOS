@@ -343,7 +343,7 @@ async fn stream_capability_compatibility_goldens_are_in_sync() {
     assert_eq!(
         actual_json,
         expected_json,
-        "stream capability/compatibility goldens changed; review the diff in {} and rerun `python3 tools/update_stream_capability_goldens.py` if the change is intentional",
+        "stream capability/compatibility goldens changed; review the diff in {} and rerun `cargo run --manifest-path backend/Cargo.toml -p xtask -- generate stream-capability-goldens` if the change is intentional",
         path.display()
     );
 }

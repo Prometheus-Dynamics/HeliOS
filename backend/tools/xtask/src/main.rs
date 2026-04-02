@@ -3,6 +3,7 @@ mod build_profiles;
 mod generated_contracts;
 mod shared_owner;
 mod shim_guardrails;
+mod stream_capability_goldens;
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -44,6 +45,7 @@ enum GuardrailCommand {
 #[derive(Subcommand, Debug)]
 enum GenerateCommand {
     GeneratedContracts(RepoArgs),
+    StreamCapabilityGoldens(RepoArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -51,6 +53,7 @@ enum ValidateCommand {
     BuildProfiles(RepoArgs),
     RepoPolicy(RepoArgs),
     GeneratedContracts(RepoArgs),
+    StreamCapabilityGoldens(RepoArgs),
     All(RepoArgs),
 }
 
@@ -155,6 +158,10 @@ fn main() -> Result<()> {
                 let repo_root = resolve_repo_root(&args);
                 generated_contracts::generate(&repo_root)
             }
+            GenerateCommand::StreamCapabilityGoldens(args) => {
+                let repo_root = resolve_repo_root(&args);
+                stream_capability_goldens::generate(&repo_root)
+            }
         },
         Commands::Guardrails { command } => match command {
             GuardrailCommand::Architecture(args) => {
@@ -183,10 +190,15 @@ fn main() -> Result<()> {
                 let repo_root = resolve_repo_root(&args);
                 generated_contracts::validate(&repo_root)
             }
+            ValidateCommand::StreamCapabilityGoldens(args) => {
+                let repo_root = resolve_repo_root(&args);
+                stream_capability_goldens::validate(&repo_root)
+            }
             ValidateCommand::All(args) => {
                 let repo_root = resolve_repo_root(&args);
                 run_repo_policy(&repo_root)?;
                 generated_contracts::validate(&repo_root)?;
+                stream_capability_goldens::validate(&repo_root)?;
                 build_profiles::validate(&repo_root)
             }
         },

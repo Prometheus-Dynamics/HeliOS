@@ -93,6 +93,7 @@ ffmpeg = { workspace = true, optional = true }
 tempfile = "3.26.0"
 async-trait = "0.1"
 lib-test.workspace = true
+toml = { workspace = true }
 
 [build-dependencies]
 serde = { workspace = true, features = ["derive"] }
