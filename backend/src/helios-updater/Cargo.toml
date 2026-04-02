@@ -20,6 +20,7 @@ updater-ipc = [
     "tracing",
     "tokio",
     "tokio-util",
+    "async-trait",
     "tracing-subscriber",
     "clap",
     "base64",
@@ -51,13 +52,16 @@ workspace = true
 tracing = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 tokio-util = { workspace = true, optional = true }
+async-trait = { workspace = true, optional = true }
 tracing-subscriber = { workspace = true, optional = true }
 clap = { workspace = true, optional = true }
+lib-storage-layout = { path = "../libs/lib-storage-layout" }
 lib-ipc = { path = "../libs/lib-ipc", optional = true }
 base64 = { workspace = true, optional = true }
 ed25519-dalek = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json = { workspace = true, optional = true }
+toml = { workspace = true }
 derive_more = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }

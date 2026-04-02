@@ -1,6 +1,6 @@
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use tokio::sync::broadcast;
 use uuid::Uuid;
@@ -19,35 +19,6 @@ mod encode_path;
 mod pump;
 
 pub use config::StreamRunnerConfig;
-
-fn preview_submit_interval_for_fps(max_fps: Option<f64>) -> Option<Duration> {
-    let fps = max_fps?;
-    if !fps.is_finite() || fps <= 0.0 {
-        return None;
-    }
-    Some(Duration::from_secs_f64(1.0 / fps.clamp(1.0, 120.0)))
-}
-
-fn preview_default_submit_interval() -> Option<Duration> {
-    let fps = std::env::var("HELIOS_PREVIEW_MAX_FPS").ok().and_then(|raw| raw.parse::<f64>().ok())?;
-    preview_submit_interval_for_fps((fps > 0.0).then_some(fps))
-}
-
-pub(super) fn preview_submit_due(last_submit_wall: Option<Instant>, interval: Option<Duration>, now: Instant) -> bool {
-    !interval.is_some_and(|interval| last_submit_wall.is_some_and(|last| now.saturating_duration_since(last) < interval))
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-pub(super) struct LastFrameDemandSnapshot {
-    pub raw_receiver_count: u64,
-    pub host_receiver_count: u64,
-    pub preview_demand_active: bool,
-    pub encode_demand_active: bool,
-    pub graph_sample_demand_active: bool,
-    pub needs_decoded_image: bool,
-    pub graph_has_image_output: bool,
-    pub graph_has_executor: bool,
-}
 
 pub struct StreamRunner {
     stream_label: metrics::SharedString,
@@ -91,11 +62,9 @@ pub struct StreamRunner {
     pub(super) viewer_check_interval: std::time::Duration,
     pub(super) last_viewer_check_wall: Option<Instant>,
     pub(super) viewer_recently_active: bool,
-    pub(super) last_preview_submit_wall: Option<Instant>,
-    pub(super) preview_submit_interval: Option<Duration>,
     pub(super) preview_transport_stats: Arc<Mutex<PreviewTransportStats>>,
     pub(super) last_idle_compaction_wall: Option<Instant>,
-    pub(super) last_frame_demand: Mutex<LastFrameDemandSnapshot>,
+    pub(super) last_demand_state: Mutex<crate::ipc::StreamDemandRuntimeState>,
     pub(super) runner_memory: RunnerMemoryTracker,
 }
 
@@ -224,37 +193,5 @@ impl StreamRunner {
             }
         }
         Err(Error::NotFound("preview frame unavailable"))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn preview_submit_interval_for_fps_disables_non_positive_limits() {
-        assert_eq!(preview_submit_interval_for_fps(None), None);
-        assert_eq!(preview_submit_interval_for_fps(Some(0.0)), None);
-        assert_eq!(preview_submit_interval_for_fps(Some(-1.0)), None);
-    }
-
-    #[test]
-    fn preview_submit_interval_for_fps_computes_expected_rate() {
-        assert_eq!(preview_submit_interval_for_fps(Some(30.0)), Some(Duration::from_secs_f64(1.0 / 30.0)));
-        assert_eq!(preview_submit_interval_for_fps(Some(240.0)), Some(Duration::from_secs_f64(1.0 / 120.0)));
-    }
-
-    #[test]
-    fn preview_submit_due_allows_first_frame_and_after_interval() {
-        let now = Instant::now();
-        assert!(preview_submit_due(None, Some(Duration::from_millis(33)), now));
-        assert!(preview_submit_due(Some(now - Duration::from_millis(40)), Some(Duration::from_millis(33)), now));
-    }
-
-    #[test]
-    fn preview_submit_due_blocks_frames_inside_interval() {
-        let now = Instant::now();
-        assert!(!preview_submit_due(Some(now - Duration::from_millis(10)), Some(Duration::from_millis(33)), now));
-        assert!(preview_submit_due(Some(now - Duration::from_millis(10)), None, now));
     }
 }

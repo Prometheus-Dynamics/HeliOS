@@ -1,17 +1,22 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import DeviceLogsTerminal from './DeviceLogsTerminal.svelte';
-  import { buildLogsDownloadUrl, fetchLogSources, type LogSource } from '$lib/api/deviceLogs';
+  import { buildLogsDownloadUrl, fetchLogSources, type LogSource, type LogSourcesResponse, type ReadModelFreshness } from '$lib/api/deviceLogs';
+  import { readModelFreshnessDetail, readModelFreshnessLabel } from '$lib/api/readModelFreshness';
   import { createDomainResource } from '$lib/api/domainResources';
   import { createAsyncState } from '$lib/utils/asyncState';
   import { SvelteMap } from 'svelte/reactivity';
 
   let sources = $state<LogSource[]>([]);
+  let sourcesPayload = $state<LogSourcesResponse | null>(null);
   const sourcesState = createAsyncState();
   const sourcesStateStore = sourcesState.state;
   const sourcesSnapshot = $derived($sourcesStateStore);
   const sourcesLoading = $derived(sourcesSnapshot.busy);
   const sourcesError = $derived(sourcesSnapshot.error);
+  const sourcesFreshness = $derived<ReadModelFreshness | null>(sourcesPayload?.freshness ?? null);
+  const sourcesFreshnessLabel = $derived(readModelFreshnessLabel(sourcesFreshness));
+  const sourcesFreshnessDetail = $derived(readModelFreshnessDetail(sourcesFreshness));
   let selectedSourceId = $state<string | null>(null);
 
   let follow = $state(true);
@@ -55,9 +60,10 @@
   onMount(() => {
     const cached = logSourcesResource.read();
     if (cached?.data) {
-      sources = cached.data;
-      if (!selectedSourceId || !cached.data.some((s) => s.id === selectedSourceId)) {
-        selectedSourceId = cached.data.find((s) => s.important)?.id ?? cached.data[0]?.id ?? null;
+      sourcesPayload = cached.data;
+      sources = cached.data.sources ?? [];
+      if (!selectedSourceId || !sources.some((s) => s.id === selectedSourceId)) {
+        selectedSourceId = sources.find((s) => s.important)?.id ?? sources[0]?.id ?? null;
       }
     }
     void refreshSources();
@@ -70,17 +76,20 @@
     sourcesState.setBusy(true);
     sourcesState.setError(null);
     try {
-      const list = await logSourcesResource.refresh();
+      const nextPayload = await logSourcesResource.refresh();
+      const list = nextPayload.sources ?? [];
+      sourcesPayload = nextPayload;
       sources = list;
       if (!selectedSourceId || !list.some((s) => s.id === selectedSourceId)) {
         selectedSourceId = list.find((s) => s.important)?.id ?? list[0]?.id ?? null;
       }
-  } catch (err) {
-    sourcesState.setError((err as Error)?.message ?? String(err));
-    sources = [];
-    selectedSourceId = null;
-    logSourcesResource.invalidate();
-  } finally {
+    } catch (err) {
+      sourcesState.setError((err as Error)?.message ?? String(err));
+      sourcesPayload = null;
+      sources = [];
+      selectedSourceId = null;
+      logSourcesResource.invalidate();
+    } finally {
       sourcesState.setBusy(false);
     }
   }
@@ -243,6 +252,11 @@
 
     <div class="flex flex-wrap items-center gap-3">
       <div class="min-w-0 flex-1">
+        {#if sourcesFreshness}
+          <p class:text-warning-300={sourcesFreshness.state === 'stale'} class:text-error-300={sourcesFreshness.state === 'unavailable'} class="text-xs text-surface-400">
+            Sources {sourcesFreshnessLabel}. {sourcesFreshnessDetail}
+          </p>
+        {/if}
         {#if sourcesError}
           <p class="text-xs text-error-300">{sourcesError}</p>
         {/if}

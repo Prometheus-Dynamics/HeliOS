@@ -10,12 +10,15 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use base64::Engine;
 use clap::Parser;
+use helios_updater::client::UpdaterClientConfig;
+use helios_updater::update_core::{IpcUpdateCoreBackend, ManualUpdateArtifact, PreparedApply, UpdateArtifactKind, UpdateSource, apply_prepared_update, prepare_update_for_apply};
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
+use url::Url;
 use uuid::Uuid;
 
 #[derive(Parser, Debug)]
@@ -41,13 +44,17 @@ struct Args {
     #[arg(long, env = "HELIOS_USB_RECOVERY_REBOOT_BOOTLOADER_CMD")]
     reboot_bootloader_cmd: Option<String>,
 
-    /// Command template used for ota.activate (supports {image}, {transfer_id}, {sha256}, {size}, {version})
-    #[arg(long, env = "HELIOS_USB_RECOVERY_OTA_ACTIVATE_CMD")]
-    ota_activate_cmd: Option<String>,
-
     /// Optional fixed device identifier returned by status.get
     #[arg(long, env = "HELIOS_USB_RECOVERY_DEVICE_ID")]
     device_id: Option<String>,
+
+    /// Updater IPC socket used for ota.activate orchestration
+    #[arg(long, env = "HELIOS_USB_RECOVERY_UPDATER_SOCKET", default_value = "/run/helios/updater.sock")]
+    updater_socket: PathBuf,
+
+    /// Journal file used by updater IPC commands issued from recovery mode
+    #[arg(long, env = "HELIOS_USB_RECOVERY_UPDATER_JOURNAL", default_value = "/var/lib/helios/journal/ipc/updater-usb-recoveryd.journal")]
+    updater_journal_path: PathBuf,
 
     /// Maximum accepted JSON line size
     #[arg(long, env = "HELIOS_USB_RECOVERY_MAX_LINE_BYTES", default_value_t = 1_048_576)]
@@ -65,8 +72,9 @@ struct Config {
     staging_dir: PathBuf,
     reboot_normal_cmd: String,
     reboot_bootloader_cmd: Option<String>,
-    ota_activate_cmd: Option<String>,
     device_id: Option<String>,
+    updater_socket: PathBuf,
+    updater_journal_path: PathBuf,
     max_line_bytes: usize,
     pending_reset_idle: Duration,
 }
@@ -218,6 +226,9 @@ fn main() -> Result<()> {
     }
 
     fs::create_dir_all(&args.staging_dir).with_context(|| format!("failed to create staging directory {}", args.staging_dir.display()))?;
+    if let Some(parent) = args.updater_journal_path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("failed to create updater journal directory {}", parent.display()))?;
+    }
 
     let cfg = Config {
         ports,
@@ -225,8 +236,9 @@ fn main() -> Result<()> {
         staging_dir: args.staging_dir,
         reboot_normal_cmd: args.reboot_normal_cmd,
         reboot_bootloader_cmd: args.reboot_bootloader_cmd,
-        ota_activate_cmd: args.ota_activate_cmd,
         device_id: args.device_id,
+        updater_socket: args.updater_socket,
+        updater_journal_path: args.updater_journal_path,
         max_line_bytes: args.max_line_bytes,
         pending_reset_idle: Duration::from_millis(args.pending_reset_idle_ms),
     };
@@ -423,7 +435,7 @@ impl App {
                 "reboot_normal": !self.cfg.reboot_normal_cmd.trim().is_empty(),
                 "reboot_bootloader": self.cfg.reboot_bootloader_cmd.is_some(),
                 "ota_upload": true,
-                "ota_activate": self.cfg.ota_activate_cmd.is_some(),
+                "ota_activate": true,
             }
         }))
     }
@@ -601,32 +613,40 @@ impl App {
             verified
         };
 
-        let template = self.cfg.ota_activate_cmd.clone().ok_or_else(|| ApiError::not_supported("ota.activate command is not configured"))?;
+        let image_url = Url::from_file_path(&verified.path).map_err(|_| ApiError::internal("failed to construct updater image URL"))?;
+        let manual_update = ManualUpdateArtifact::new(image_url, UpdateArtifactKind::DiskImage)
+            .with_size_bytes(Some(verified.size))
+            .with_checksum(Some(verified.sha256.clone()))
+            .with_delete_source_after_apply(true)
+            .with_source_artifact_path(Some(verified.path.display().to_string()));
+        let updater_config = UpdaterClientConfig::new(self.cfg.updater_socket.clone(), self.cfg.updater_journal_path.clone()).with_client_info("helios-usb-recoveryd", env!("CARGO_PKG_VERSION"));
 
-        let command = render_activate_command(&template, &verified);
-        info!(transfer_id = %verified.transfer_id, command = %command, "running ota.activate command");
-
-        let status = Command::new("/bin/sh").arg("-lc").arg(&command).status().map_err(|err| ApiError::internal(format!("failed to run activate command: {err}")))?;
-
-        if !status.success() {
-            return Err(ApiError::internal(format!("activate command failed with status {:?}", status.code())));
-        }
-
-        let reboot_scheduled = payload.reboot.unwrap_or(false) && !self.cfg.reboot_normal_cmd.trim().is_empty();
-        if reboot_scheduled {
-            let command = self.cfg.reboot_normal_cmd.clone();
-            thread::spawn(move || {
-                if let Err(err) = Command::new("/bin/sh").arg("-lc").arg(&command).status() {
-                    error!(error = %err, "failed to trigger reboot after ota.activate");
+        let activation = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|err| ApiError::internal(format!("failed to create updater runtime: {err}")))?.block_on(async {
+            let backend = IpcUpdateCoreBackend::new(updater_config).map_err(|err| ApiError::internal(format!("failed to initialize updater IPC backend: {err}")))?;
+            match prepare_update_for_apply(&backend, UpdateSource::Manual(&manual_update)).await {
+                Ok(PreparedApply::Ready(prepared)) => {
+                    apply_prepared_update(&backend, prepared.update_id).await.map_err(|err| ApiError::internal(format!("failed to schedule OTA apply: {err}")))?;
+                    Ok((prepared.update_id, prepared.preflight))
                 }
-            });
+                Ok(PreparedApply::Blocked(prepared)) => Err(ApiError::bad_state(format!("update preflight blocked: {}", prepared.preflight.summary))),
+                Err(err) => Err(ApiError::internal(format!("failed to prepare OTA apply: {err}"))),
+            }
+        })?;
+
+        if let Ok(mut state) = self.state.lock() {
+            state.last_error = None;
+            state.ota.verified = None;
         }
 
         Ok(json!({
             "activated": true,
             "transfer_id": verified.transfer_id,
+            "update_id": activation.0.to_string(),
             "path": verified.path,
-            "reboot_scheduled": reboot_scheduled,
+            "reboot_requested": payload.reboot.unwrap_or(false),
+            "reboot_managed_by_updater": true,
+            "reboot_scheduled": true,
+            "preflight": activation.1,
         }))
     }
 
@@ -665,15 +685,6 @@ fn normalize_sha256(input: &str) -> Option<String> {
         return None;
     }
     Some(cleaned)
-}
-
-fn render_activate_command(template: &str, verified: &VerifiedTransfer) -> String {
-    template
-        .replace("{image}", &verified.path.display().to_string())
-        .replace("{transfer_id}", &verified.transfer_id)
-        .replace("{sha256}", &verified.sha256)
-        .replace("{size}", &verified.size.to_string())
-        .replace("{version}", verified.version.as_deref().unwrap_or(""))
 }
 
 fn detect_device_id() -> String {

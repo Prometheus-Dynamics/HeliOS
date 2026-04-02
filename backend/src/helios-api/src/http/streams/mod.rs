@@ -37,7 +37,7 @@ use crate::http::pipelines;
 use helios_engine::capture::{CaptureControl, CaptureControlValue};
 use helios_engine::ipc::{EngineErrorCode, EngineEvent, GraphOutputPortDescriptor, StreamManifest, StreamPipelineBinding};
 
-use self::types::{CodecInfo, StartStreamResponse, StreamFormatInfo, StreamInfo, StreamInspectInfo};
+use self::types::{CodecInfo, StartStreamResponse, StreamFormatInfo, StreamInfo, StreamInspectInfo, UpdateStreamResponse};
 use self::validation::{StreamCapabilitiesResponse, StreamValidateResponse, stream_capabilities, validate_stream_manifest_with_runtime};
 
 pub(crate) use helios_engine::contracts::stream_ids::{CALIBRATION_MODE_PIPELINE_UUID, RAW_PIPELINE_UUID};
@@ -59,7 +59,7 @@ pub fn router() -> Router<AppState> {
         .route("/bench/sensor/{id}", get(sensor_bench::get_sensor_benchmark))
         .route("/bench/sensor/{id}/cancel", post(sensor_bench::cancel_sensor_benchmark))
         .route("/codecs", get(list_codecs))
-        .route("/{id}", get(get_stream).delete(delete_stream))
+        .route("/{id}", get(get_stream).put(update_stream).delete(delete_stream))
         .route("/{id}/inspect", get(get_stream_inspect))
         .route("/{id}/controls", get(get_controls))
         .route("/{id}/controls/{control_id}", post(set_control))
@@ -103,7 +103,10 @@ pub async fn reconcile_startup_streams(state: AppState, reason: &'static str) {
 }
 
 pub(crate) async fn restart_stream_with_manifest(state: AppState, manifest: StreamManifest) -> Result<(), StatusCode> {
-    let response = lifecycle::start_stream(state, manifest).await;
+    let response = match manifest.identity.id {
+        Some(stream_id) => lifecycle::update_stream(state, stream_id, manifest).await,
+        None => lifecycle::start_stream(state, manifest).await,
+    };
     let status = response.status();
     if status == StatusCode::OK { Ok(()) } else { Err(status) }
 }
@@ -140,6 +143,22 @@ async fn list_stream_inspect(State(state): State<AppState>, headers: axum::http:
 )]
 async fn start_stream(State(state): State<AppState>, Json(manifest): Json<StreamManifest>) -> impl IntoResponse {
     lifecycle::start_stream(state, manifest).await
+}
+
+#[utoipa::path(
+    put,
+    path = "/streams/{id}",
+    tag = "EngineStreams",
+    params(("id" = Uuid, Path, description = "Stream ID")),
+    request_body = StreamManifest,
+    responses(
+        (status = 200, description = "Stream updated", body = UpdateStreamResponse),
+        (status = 404, description = "Stream not found"),
+        (status = 422, description = "Semantic validation failure", body = crate::http::validation::ValidationErrorBody)
+    )
+)]
+async fn update_stream(State(state): State<AppState>, Path(id): Path<Uuid>, Json(manifest): Json<StreamManifest>) -> impl IntoResponse {
+    lifecycle::update_stream(state, id, manifest).await
 }
 
 #[utoipa::path(

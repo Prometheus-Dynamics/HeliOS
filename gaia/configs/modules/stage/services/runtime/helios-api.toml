@@ -1,0 +1,10 @@
+[units."helios-api"]
+enabled = true
+src = "assets/services/helios-api/helios-api.service"
+targets = ["multi-user"]
+env_set = "helios-api"
+env_file = "/etc/default/helios-api"
+assets = [
+  { src = "assets/services/helios-api/startup.toml", dst = "/etc/helios/startup.toml", mode = 420 },
+  { src = "assets/services/helios-api/FRC2026_ANDYMARK.fmap", dst = "/usr/share/helios/media/FRC2026_ANDYMARK.fmap", mode = 420 },
+]

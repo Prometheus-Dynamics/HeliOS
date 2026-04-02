@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use clap::{ArgAction, Parser};
 use helios_peripherals::{ImuRange, SensorsConfig, SensorsRuntime, SensorsService};
+use lib_runtime_policy::HELIOS_PERIPHERALS_TOKIO_POLICY;
 use lib_ipc::types::ProtocolVersion;
 use serde_json::Value as JsonValue;
 use tokio::time::{Duration as TokioDuration, timeout};
@@ -63,9 +64,16 @@ struct PeripheralsArgs {
 }
 
 fn main() {
-    let worker_threads = read_thread_env("HELIOS_PERIPHERALS_WORKER_THREADS", default_peripherals_worker_threads(), 1, 4);
-    let max_blocking_threads = read_thread_env("HELIOS_PERIPHERALS_MAX_BLOCKING_THREADS", default_peripherals_max_blocking_threads(worker_threads), 1, 16);
-    let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(worker_threads).max_blocking_threads(max_blocking_threads).enable_all().build().expect("tokio runtime");
+    let runtime_policy = HELIOS_PERIPHERALS_TOKIO_POLICY.resolve();
+    let mut runtime_builder = tokio::runtime::Builder::new_multi_thread();
+    runtime_builder.worker_threads(runtime_policy.worker_threads).max_blocking_threads(runtime_policy.max_blocking_threads);
+    if let Some(thread_stack_size) = runtime_policy.thread_stack_bytes {
+        runtime_builder.thread_stack_size(thread_stack_size);
+    }
+    if let Some(blocking_keep_alive) = runtime_policy.blocking_keep_alive {
+        runtime_builder.thread_keep_alive(blocking_keep_alive);
+    }
+    let runtime = runtime_builder.enable_all().build().expect("tokio runtime");
     runtime.block_on(async_main());
 }
 
@@ -163,18 +171,6 @@ async fn async_main() {
     }
 
     info!("helios-peripherals shutting down");
-}
-
-fn read_thread_env(var: &str, default: usize, min: usize, max: usize) -> usize {
-    std::env::var(var).ok().and_then(|value| value.trim().parse::<usize>().ok()).unwrap_or(default).clamp(min, max)
-}
-
-fn default_peripherals_worker_threads() -> usize {
-    std::thread::available_parallelism().map(|value| value.get()).unwrap_or(2).clamp(1, 2)
-}
-
-fn default_peripherals_max_blocking_threads(worker_threads: usize) -> usize {
-    (worker_threads.saturating_mul(2)).clamp(2, 4)
 }
 
 async fn print_inventory(config: &SensorsConfig) -> Result<(), Box<dyn std::error::Error>> {

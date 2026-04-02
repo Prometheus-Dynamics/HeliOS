@@ -182,6 +182,16 @@ fn encoder_settings_kind_for_selector_supports_generated_runtime_ids() {
 }
 
 #[test]
+fn preview_format_for_encoder_selector_uses_generated_codec_families() {
+    assert_eq!(preview_format_for_encoder_selector(Some("turbojpeg")), "mjpeg");
+    assert_eq!(preview_format_for_encoder_selector(Some("mozjpeg")), "mjpeg");
+    assert_eq!(preview_format_for_encoder_selector(Some("mjpeg")), "mjpeg");
+    assert_eq!(preview_format_for_encoder_selector(Some("h264_v4l2m2m")), "h264");
+    assert_eq!(preview_format_for_encoder_selector(Some("hevc_v4l2m2m")), "h265");
+    assert_eq!(preview_format_for_encoder_selector(None), "unknown");
+}
+
+#[test]
 fn normalize_requested_stream_encoder_preserves_runtime_implementation_ids() {
     let mut exact = sample_manifest();
     exact.encoder = RequestedEncoderConfig::enabled(Some("h264_v4l2m2m".to_string()), None);

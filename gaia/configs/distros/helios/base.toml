@@ -39,6 +39,7 @@ imports = [
 
   [stage.env]
   imports = [
+    "../../env/runtime/generated-runtime-policy.toml",
     "../../env/runtime/helios.toml",
   ]
 
@@ -49,7 +50,21 @@ imports = [
     "../../modules/stage/services/networkd.toml",
     "../../modules/stage/services/ssh.toml",
     "../../modules/stage/services/login_banner.toml",
-    "../../modules/stage/services/runtime_core.toml",
+    "../../modules/stage/services/runtime/helios-engine.toml",
+    "../../modules/stage/services/runtime/helios-updater.toml",
+    "../../modules/stage/services/runtime/helios-usb-recoveryd.toml",
+    "../../modules/stage/services/runtime/helios-boot-buttond.toml",
+    "../../modules/stage/services/runtime/helios-peripherals.toml",
+    "../../modules/stage/services/runtime/helios-fan-overlays.toml",
+    "../../modules/stage/services/runtime/helios-os-self-check.toml",
+    "../../modules/stage/services/runtime/helios-api.toml",
+    "../../modules/stage/services/runtime/helios-ide.toml",
+    "../../modules/stage/services/runtime/helios-diagnostics.toml",
+    "../../modules/stage/services/runtime/helios-frontend.toml",
+    "../../modules/stage/services/runtime/helios-set-governor.toml",
+    "../../modules/stage/services/runtime/helios-set-build-time.toml",
+    "../../modules/stage/services/runtime/helios-journal-vacuum.toml",
+    "../../modules/stage/services/runtime/helios-ota-confirm.toml",
     "../../modules/stage/services/gadget.toml",
     "../../modules/stage/services/usb_power.toml",
   ]

@@ -22,6 +22,7 @@ HeliOS exposes an HTTP API under the `/v1` prefix.
 | `GET` | `/v1/streams` | List active streams | `200` |
 | `POST` | `/v1/streams` | Stream started | `200, 422` |
 | `GET` | `/v1/streams/{id}` | Stream info | `200, 404` |
+| `PUT` | `/v1/streams/{id}` | Stream updated | `200, 404, 422` |
 | `DELETE` | `/v1/streams/{id}` | Stream stopped | `204` |
 | `POST` | `/v1/streams/{id}/calibration/apply` | Updated stream manifest | `200` |
 | `GET` | `/v1/streams/{id}/calibration/board` | Calibration board PNG | `200` |
@@ -47,14 +48,15 @@ HeliOS exposes an HTTP API under the `/v1` prefix.
 | `POST` | `/v1/streams/{id}/snapshot` | Snapshot stored | `201, 400, 404, 502, 503` |
 | `GET` | `/v1/streams/backends` | Available capture backends/devices | `200` |
 | `POST` | `/v1/streams/bench/formats` | Benchmark results | `200` |
-| `GET` | `/v1/streams/capabilities` | Stream validation constraints and defaults | `200` |
-| `GET` | `/v1/streams/codecs` | Available codecs (encoders + decoders) | `200` |
-| `POST` | `/v1/streams/validate` | Validated + canonicalized stream manifest | `200, 422` |
+| `GET` | `/v1/streams/capabilities` | Stream validation constraints and defaults | `200, 502` |
+| `GET` | `/v1/streams/codecs` | Available codecs (encoders + decoders) | `200, 502` |
+| `POST` | `/v1/streams/validate` | Validated + canonicalized stream manifest | `200, 422, 502` |
 
 ### Device
 
 | Method | Path | Description | Responses |
 |---|---|---|---|
+| `GET` | `/v1/` | Runtime status, capabilities, codec inventory, and resolved streams | `200` |
 | `GET` | `/v1/device/bootloader` | Bootloader firmware status | `200` |
 | `POST` | `/v1/device/bootloader/update` | Bootloader firmware update staged | `200` |
 | `GET` | `/v1/device/camera-layout` | Camera + rig layout snapshot | `200` |

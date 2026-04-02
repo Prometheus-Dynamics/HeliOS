@@ -1,12 +1,16 @@
 import { env } from '$env/dynamic/public';
+import { readModelFreshnessDetail, readModelFreshnessLabel } from '$lib/api/readModelFreshness';
+import { streamPreviewFormatFromPeerSummary, streamPreviewFormatFromStreamInfo } from '$lib/api/streamPreviewFormat';
 import type { PeerRemoteStreamSummary } from '$lib/types/peer';
 import type {
   DeviceMetrics,
+  DeviceMetricsResponse,
   FanStatus,
   I2cBusInfo,
   I2cInventory,
   LightingStatus,
   PeripheralInventory,
+  ReadModelFreshness,
   SensorPeripheral,
   StreamInfo,
   UsbPeripheral
@@ -43,8 +47,8 @@ type PeripheralsPayload = Partial<PeripheralInventory> & {
   } | null;
 };
 
-export function extractHealth(payload: DeviceMetrics | null): DeviceMetrics | null {
-  return payload ?? null;
+export function extractHealth(payload: DeviceMetricsResponse | null): DeviceMetrics | null {
+  return payload?.metrics ?? null;
 }
 
 export function buildCameraCards(streams: StreamInfo[], peerStreams: PeerRemoteStreamSummary[] = []): CameraCard[] {
@@ -67,6 +71,7 @@ export function buildCameraCards(streams: StreamInfo[], peerStreams: PeerRemoteS
       cameraUid: stream.id,
       captureSessionId: stream.id,
       captureSessionAlias: alias,
+      previewFormat: streamPreviewFormatFromStreamInfo(stream),
       driverNamespace: 'stream',
       driverId: null,
       driverCameraId: null,
@@ -91,6 +96,7 @@ export function buildCameraCards(streams: StreamInfo[], peerStreams: PeerRemoteS
       cameraUid: String(stream.cameraUid ?? stream.streamRef).trim() || stream.streamRef,
       captureSessionId: stream.streamRef,
       captureSessionAlias: String(stream.streamAlias ?? stream.displayName ?? '').trim() || null,
+      previewFormat: streamPreviewFormatFromPeerSummary(stream),
       driverNamespace: 'peer',
       driverId: stream.peerId,
       driverCameraId: stream.remoteStreamId,
@@ -415,7 +421,8 @@ function inferI2CLabel(label: string): string | null {
 
 export function buildSummary(
   cameras: CameraCard[],
-  health: DeviceHealth | null
+  health: DeviceHealth | null,
+  freshness: ReadModelFreshness | null = null
 ): SummaryTile[] {
   const counts: Record<CameraStatus, number> = { live: 0, degraded: 0, idle: 0, offline: 0 };
   for (const cam of cameras) {
@@ -434,12 +441,18 @@ export function buildSummary(
     }
   ];
 
-  if (health) {
+  if (health || freshness) {
     const issueCount = Array.isArray(health.issues) ? health.issues.length : 0;
+    const freshnessState = freshness?.state ?? null;
+    const freshnessLive = freshnessState === 'live' || freshnessState == null;
     summary.push({
       label: 'Device Health',
-      value: titleCase(health.status ?? 'unknown'),
-      detail: issueCount ? `${issueCount} open ${pluralize('issue', issueCount)}` : 'No issues reported'
+      value: freshnessLive ? titleCase(health?.status ?? 'unknown') : readModelFreshnessLabel(freshness),
+      detail: freshnessLive
+        ? issueCount
+          ? `${issueCount} open ${pluralize('issue', issueCount)}`
+          : 'No issues reported'
+        : readModelFreshnessDetail(freshness)
     });
   }
 

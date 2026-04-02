@@ -42,7 +42,13 @@ impl UpdaterService {
     }
 
     pub async fn run_post_boot_cleanup(&self) -> Result<bool> {
-        cleanup::run_post_boot_cleanup(&self.config).await
+        let cleaned = cleanup::run_post_boot_cleanup(&self.config).await?;
+        if let Some(resume) = apply::load_queued_repartition_resume(&self.config).await? {
+            info!(update_id = %resume.update_id, "resuming OTA after offline DATA-borrow repartition");
+            self.queue_stage_release(resume.update_id, resume.manifest).await?;
+            apply::clear_queued_repartition_resume(&self.config).await?;
+        }
+        Ok(cleaned)
     }
 
     pub async fn handle_command(&self, command: UpdaterCommand) -> Result<()> {

@@ -9,12 +9,7 @@ StartLimitBurst=5
 Type=simple
 ExecStartPre=/bin/sh -lc 'awk '\''$5==\"/var/lib/helios\"{found=1} END{exit !found}'\'' /proc/self/mountinfo || { echo \"DATA mount missing: /var/lib/helios is not a mountpoint\" >&2; exit 1; }'
 ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios/peripherals
-Environment=LOG_FOLDER=/var/log/helios
 Environment=LIBAI_CORAL_RUNTIME_ENUMERATION=0
-Environment=HELIOS_PERIPHERALS_WORKER_THREADS=1
-Environment=HELIOS_PERIPHERALS_MAX_BLOCKING_THREADS=1
-Environment=MALLOC_ARENA_MAX=2
-Environment=MALLOC_TRIM_THRESHOLD_=131072
 EnvironmentFile=-/etc/default/helios-peripherals
 ExecStart=/usr/bin/helios-peripherals
 Restart=always

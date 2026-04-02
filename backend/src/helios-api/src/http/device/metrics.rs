@@ -1,10 +1,11 @@
 use axum::{Json, http::StatusCode};
 use utoipa::ToSchema;
 
-use super::super::error::{ApiError, ApiResult};
+use super::super::error::ApiResult;
 use crate::api_observability::ApiRuntimeMetrics;
 use crate::http::AppState;
 use crate::http::revision::{apply_revision_headers, matches_if_none_match, not_modified_response};
+use crate::system_read_model::ReadModelFreshness;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::IntoResponse;
@@ -27,6 +28,13 @@ pub struct DeviceMetrics {
     pub temps: Vec<TempReading>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api: Option<ApiRuntimeMetrics>,
+}
+
+#[derive(Debug, Clone, ToSchema, serde::Serialize)]
+pub struct DeviceMetricsResponse {
+    pub freshness: ReadModelFreshness,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metrics: Option<DeviceMetrics>,
 }
 
 #[derive(Debug, Clone, ToSchema, serde::Serialize)]
@@ -93,26 +101,30 @@ pub struct TempReading {
     get,
     path = "/device/metrics",
     tag = "Device",
-    responses((status = 200, description = "Device metrics", body = DeviceMetrics))
+    responses((status = 200, description = "Device metrics", body = DeviceMetricsResponse))
 )]
 pub async fn metrics(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<impl axum::response::IntoResponse> {
-    let (mut body, revision) = state.services.system.load_device_metrics_snapshot().await.map_err(ApiError::internal)?;
-    if matches_if_none_match(&headers, revision) {
-        return Ok(not_modified_response(revision));
+    let snapshot = state.services.system.load_device_metrics_snapshot().await;
+    if matches_if_none_match(&headers, snapshot.revision) {
+        return Ok(not_modified_response(snapshot.revision));
     }
 
-    body.api = Some(ApiRuntimeMetrics {
-        system_metrics_cache: state.services.system.device_metrics_cache_metrics(),
-        log_sources_cache: state.services.system.log_sources_cache_metrics(),
-        pipelines_graphs_cache: state.services.pipelines.graph_list_cache_metrics(),
-        pipelines_registry_cache: state.services.pipelines.registry_cache_metrics(),
-        streams_list_cache: state.services.streams.stream_list_cache_metrics(),
-        peripherals_inventory_cache: state.services.hardware.peripheral_inventory_cache_metrics(),
-        camera_discovery_cache: state.services.hardware.camera_discovery_cache_metrics(),
-        realtime: state.services.system.realtime_metrics().await,
-        media: state.services.media.cache_metrics().await,
-    });
-    let mut response = (StatusCode::OK, Json(body)).into_response();
-    apply_revision_headers(response.headers_mut(), revision);
+    let mut metrics = snapshot.payload;
+    if let Some(body) = metrics.as_mut() {
+        body.api = Some(ApiRuntimeMetrics {
+            system_metrics_cache: state.services.system.device_metrics_cache_metrics(),
+            log_sources_cache: state.services.system.log_sources_cache_metrics(),
+            pipelines_graphs_cache: state.services.pipelines.graph_list_cache_metrics(),
+            pipelines_registry_cache: state.services.pipelines.registry_cache_metrics(),
+            streams_list_cache: state.services.streams.stream_list_cache_metrics(),
+            peripherals_inventory_cache: state.services.hardware.peripheral_inventory_cache_metrics(),
+            camera_discovery_cache: state.services.hardware.camera_discovery_cache_metrics(),
+            realtime: state.services.system.realtime_metrics().await,
+            media: state.services.media.cache_metrics().await,
+        });
+    }
+
+    let mut response = (StatusCode::OK, Json(DeviceMetricsResponse { freshness: snapshot.freshness, metrics })).into_response();
+    apply_revision_headers(response.headers_mut(), snapshot.revision);
     Ok(response)
 }

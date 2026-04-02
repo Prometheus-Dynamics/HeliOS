@@ -394,6 +394,12 @@
     set selectedBackendIndex(value) {
       streamState.selectedBackendIndex = value;
     },
+    get selectedModeKey() {
+      return streamState.selectedModeKey;
+    },
+    set selectedModeKey(value) {
+      streamState.selectedModeKey = value;
+    },
     get selectedFormat() {
       return streamState.selectedFormat;
     },
@@ -411,12 +417,6 @@
     },
     set selectedIntervalIdx(value) {
       streamState.selectedIntervalIdx = value;
-    },
-    get selectedInterval() {
-      return streamState.selectedInterval;
-    },
-    set selectedInterval(value) {
-      streamState.selectedInterval = value;
     },
     get libcameraTargetFps() {
       return streamState.libcameraTargetFps;
@@ -484,17 +484,17 @@
     set encoderEnabled(value) {
       streamState.encoderEnabled = value;
     },
-    get decoderSelectionTouched() {
-      return streamState.decoderSelectionTouched;
+    get decoderSelectionMode() {
+      return streamState.decoderSelectionMode;
     },
-    set decoderSelectionTouched(value) {
-      streamState.decoderSelectionTouched = value;
+    set decoderSelectionMode(value) {
+      streamState.decoderSelectionMode = value;
     },
-    get encoderSelectionTouched() {
-      return streamState.encoderSelectionTouched;
+    get encoderSelectionMode() {
+      return streamState.encoderSelectionMode;
     },
-    set encoderSelectionTouched(value) {
-      streamState.encoderSelectionTouched = value;
+    set encoderSelectionMode(value) {
+      streamState.encoderSelectionMode = value;
     },
     get hostBuffer() {
       return streamState.hostBuffer;
@@ -1041,83 +1041,6 @@
 
 
 
-  $effect(() => {
-    void pipelineState.pipelineGridRows;
-    void pipelineState.pipelineGridColumns;
-    void pipelineState.pipelineGridSlots;
-    void pipelineState.assignedPipelineIds;
-    void pipelineState.selectedPipelineId;
-    void pipelineState.pipelineOutputByPipelineId;
-    void streamState.encoders;
-    void streamState.decoders;
-    void streamState.selectedFormat;
-
-    const rows = Math.min(Math.max(Math.trunc(pipelineState.pipelineGridRows), 1), 6);
-    const columns = Math.min(Math.max(Math.trunc(pipelineState.pipelineGridColumns), 1), 6);
-    const multiplex = rows * columns > 1;
-    const hasPipelines =
-      Boolean(pipelineState.selectedPipelineId) ||
-      (pipelineState.assignedPipelineIds?.length ?? 0) > 0 ||
-      Object.values(pipelineState.pipelineGridSlots ?? {}).some(Boolean);
-    if (!multiplex && !hasPipelines) {
-      return;
-    }
-
-    const resolvedEncoderId = String(streamState.stream?.resolved?.encoder?.codecId ?? '').trim();
-    const resolvedDecoderId = String(streamState.stream?.resolved?.decoder?.codecId ?? '').trim();
-
-    if (!streamState.encoderSelectionTouched && streamState.encoders.length) {
-      const preferred = pickCodecId(
-        streamState.encoders,
-        resolvedEncoderId || streamState.encoderImpl
-      );
-      if (preferred) {
-        if (streamState.encoderImpl !== preferred) {
-          streamState.encoderImpl = preferred;
-        }
-      }
-    }
-
-    if (!streamState.decoderSelectionTouched) {
-      const normalizedFormat = String(streamState.selectedFormat ?? '')
-        .trim()
-        .split(/\s+/)[0]
-        ?.toUpperCase() ?? '';
-      const preferredDecoderIds = [
-        normalizedFormat ? streamState.decoderDefaultIdsByCaptureFormat[normalizedFormat] : null,
-        streamState.decoderDefaultIdsByCaptureFormat.ANY ?? null
-      ].filter((value, index, list): value is string => typeof value === 'string' && value.trim().length > 0 && list.indexOf(value) === index);
-      const preferred = pickCodecId(
-        streamState.decoders,
-        resolvedDecoderId || streamState.decoderImpl,
-        preferredDecoderIds
-      );
-      if (preferred) {
-        if (streamState.decoderImpl !== preferred) {
-          streamState.decoderImpl = preferred;
-        }
-      }
-    }
-  });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -1166,29 +1089,17 @@
       get pipelineGridSlots() {
         return pipelineState.pipelineGridSlots;
       },
-      set pipelineGridSlots(value) {
-        pipelineState.pipelineGridSlots = value;
-      },
       get pipelineGridSlotOutputKeys() {
         return pipelineState.pipelineGridSlotOutputKeys;
+      },
+      get pipelineOutputByPipelineId() {
+        return pipelineState.pipelineOutputByPipelineId;
       },
       get assignedPipelineIds() {
         return pipelineState.assignedPipelineIds;
       },
-      set assignedPipelineIds(value) {
-        pipelineState.assignedPipelineIds = value;
-      },
       get selectedPipelineId() {
         return pipelineState.selectedPipelineId;
-      },
-      set selectedPipelineId(value) {
-        pipelineState.selectedPipelineId = value;
-      },
-      get selectedPipelineOutput() {
-        return pipelineState.selectedPipelineOutput;
-      },
-      set selectedPipelineOutput(value) {
-        pipelineState.selectedPipelineOutput = value;
       },
       get cameraAlias() {
         return streamState.cameraAlias;
@@ -1199,9 +1110,6 @@
       get decoderImpl() {
         return streamState.decoderImpl;
       },
-      get decoders() {
-        return streamState.decoders;
-      },
       get encoderEnabled() {
         return streamState.encoderEnabled;
       },
@@ -1210,9 +1118,6 @@
       },
       get encoderSettings() {
         return streamState.encoderSettings;
-      },
-      get encoderSelectionTouched() {
-        return streamState.encoderSelectionTouched;
       },
       get encoderFpsLimit() {
         return streamState.encoderFpsLimit;
@@ -1270,7 +1175,6 @@
       }
     },
     {
-      pipelinesApi: PipelinesApi,
       streamsApi: StreamsApi,
       apiBase,
       toaster,
@@ -1279,10 +1183,6 @@
       currentDevice,
       currentMode,
       intervalsForSelection,
-      pickCodecId,
-      outputSelectionForPipeline,
-      applyPipelineOverridesToGraph,
-      dropPipelineEverywhere,
       reportError,
       onExternalLayoutApplied: () => dismissGuidedCalibrationOverlay()
     }

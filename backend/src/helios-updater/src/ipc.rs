@@ -146,9 +146,11 @@ pub struct UpdateState {
 pub enum PreflightVerdict {
     Ready,
     GrowIntoGap,
+    OfflineDataBorrow,
     TargetTooSmall,
     NeedsDataResize,
     ClearDataDir,
+    ReplaySourceRequired,
     WorkDirFull,
     InvalidArtifact,
     SingleSlotDisabled,

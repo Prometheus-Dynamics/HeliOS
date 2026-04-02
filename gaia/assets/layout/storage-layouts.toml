@@ -1,0 +1,103 @@
+schema_version = 1
+
+[[layouts]]
+layout_id = "ext4_labels"
+slot_scheme = "ext4_labels"
+boot_label = "BOOT"
+
+[layouts.defaults]
+align_mib = 4
+root_min_mib = 256
+log_file = "/var/log/expand-rootfs-prepare.log"
+
+[layouts.spans]
+boot_partition = 1
+data_size_mib = 4096
+
+[[layouts.partitions]]
+role = "slot_a"
+name = "ACTIVE"
+number = 2
+label = "ACTIVE"
+mode = "resize"
+target_percent = 50
+max_mib = 5120
+marker = "/etc/helios/.provision.active_v1"
+
+[[layouts.partitions]]
+role = "slot_b"
+name = "RESERVE"
+number = 3
+label = "RESERVE"
+mode = "mkpart"
+target_percent = 50
+max_mib = 5120
+fs_type = "ext4"
+marker = "/etc/helios/.provision.reserve_v1"
+
+[[layouts.partitions]]
+role = "data"
+name = "DATA"
+number = 4
+label = "DATA"
+mode = "mkpart"
+size_mib = 4096
+fs_type = "ext4"
+marker = "/etc/helios/.provision.data_v1"
+mount_point = "/var/lib/helios"
+secondary_marker = "/var/lib/helios/.provision.data_v1"
+
+[[layouts]]
+layout_id = "squashfs_ab"
+slot_scheme = "squashfs_ab"
+boot_label = "BOOT"
+
+[layouts.defaults]
+align_mib = 4
+gap_mib = 4
+log_file = "/var/log/helios-provision-squashfs.log"
+
+[layouts.spans]
+boot_partition = 1
+start_after_partition = 1
+data_size_mib = 0
+
+[layouts.live_repartition]
+allow_destructive_data_borrow = true
+
+[[layouts.partitions]]
+role = "slot_a"
+name = "ROOT_A"
+number = 2
+mode = "noop"
+fs_type = "none"
+size_source = "mirror_existing"
+mkfs = false
+wipe_signatures = false
+run_fsck = false
+run_resizefs = false
+
+[[layouts.partitions]]
+role = "slot_b"
+name = "ROOT_B"
+number = 3
+mode = "mkpart"
+fs_type = "ext4"
+size_source = "mirror_existing"
+mkfs = false
+wipe_signatures = true
+gap_after_mib = 256
+marker = "/var/lib/helios/.provision.reserve_v1"
+
+[[layouts.partitions]]
+role = "data"
+name = "DATA"
+number = 4
+label = "DATA"
+mode = "mkpart"
+fs_type = "ext4"
+fill_to_end = true
+marker = "/var/lib/helios/.provision.data_v1"
+mount_point = "/run/helios-provision/data"
+secondary_marker = "/run/helios-provision/data/.provision.data_v1"
+reformat_if_missing_secondary_marker = true

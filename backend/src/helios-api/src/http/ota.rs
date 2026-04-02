@@ -7,15 +7,16 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use chrono::Utc;
-use helios_updater::ipc::{MaintenanceWindow, PreflightReport, UpdateStage, UpdateState, UpdaterCommand, UpdaterStorageReport};
-use helios_updater::{ManifestArtifact, ReleaseManifest};
+use helios_updater::ipc::{PreflightReport, UpdateState, UpdaterCommand, UpdaterStorageReport};
+use helios_updater::update_core::{
+    ManualUpdateArtifact, PreparedApply, UpdateArtifactKind, UpdateSource, apply_prepared_update, prepare_update_for_apply, run_transient_preflight as run_shared_transient_preflight,
+    stage_manual_update,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
-use tokio::time::{Duration, Instant, sleep};
 use tracing::warn;
 use url::Url;
 use utoipa::ToSchema;
@@ -26,6 +27,7 @@ use super::ota_storage;
 use super::storage::sanitize_name;
 use super::upload_integrity;
 use crate::ipc::command_id_from_context;
+use crate::updater_service::ApiUpdateCoreBackend;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -127,6 +129,16 @@ impl ApplyArtifactKind {
     }
 }
 
+impl From<ApplyArtifactKind> for UpdateArtifactKind {
+    fn from(value: ApplyArtifactKind) -> Self {
+        match value {
+            ApplyArtifactKind::DiskImage => Self::DiskImage,
+            ApplyArtifactKind::FrontendBundle => Self::FrontendBundle,
+            ApplyArtifactKind::ServiceBundle => Self::ServiceBundle,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CancelUpdateRequest {
     /// Optional update id to cancel. When omitted, the currently active update is canceled.
@@ -191,24 +203,13 @@ pub struct ApplyConflictResponse {
 enum PreflightRequestMode<'a> {
     Active,
     Existing(Uuid),
-    Transient {
-        image_url: &'a str,
-        artifact_kind: ApplyArtifactKind,
-        size_bytes: Option<u64>,
-        checksum: Option<&'a str>,
-    },
+    Transient { image_url: &'a str, artifact_kind: ApplyArtifactKind, size_bytes: Option<u64>, checksum: Option<&'a str> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ApplyRequestMode<'a> {
     Existing(Uuid),
-    Transient {
-        image_url: &'a str,
-        artifact_kind: ApplyArtifactKind,
-        size_bytes: Option<u64>,
-        checksum: Option<&'a str>,
-        delete_image_after_apply: bool,
-    },
+    Transient { image_url: &'a str, artifact_kind: ApplyArtifactKind, size_bytes: Option<u64>, checksum: Option<&'a str>, delete_image_after_apply: bool },
 }
 
 #[utoipa::path(
@@ -349,20 +350,16 @@ pub async fn upload_update(headers: HeaderMap, mut multipart: Multipart) -> impl
         (status = 410, description = "Staging removed", body = UploadUpdateError)
     )
 )]
-pub async fn stage_update(State(_state): State<AppState>, Json(payload): Json<StageUpdateRequest>) -> impl IntoResponse {
+pub async fn stage_update(State(state): State<AppState>, Json(payload): Json<StageUpdateRequest>) -> impl IntoResponse {
     let artifact_kind = payload.artifact_kind.unwrap_or(ApplyArtifactKind::DiskImage);
-    match stage_and_wait_for_update(
-        &_state,
-        &payload.image_url,
-        artifact_kind,
-        payload.size_bytes,
-        payload.checksum.as_deref(),
-        payload.delete_image_after_apply,
-    )
-    .await
-    {
+    let backend = ApiUpdateCoreBackend::new(state.clone());
+    let artifact = match manual_update_artifact(&payload.image_url, payload.size_bytes, payload.checksum.as_deref(), payload.delete_image_after_apply, artifact_kind).await {
+        Ok(artifact) => artifact,
+        Err(err) => return err.into_response(),
+    };
+    match stage_manual_update(&backend, &artifact).await {
         Ok(update_id) => (StatusCode::OK, Json(UpdateAckResponse { update_id: Some(update_id.to_string()), message: "update staged".into() })).into_response(),
-        Err(err) => err.into_response(),
+        Err(err) => UploadUpdateError::from(err).into_response(),
     }
 }
 
@@ -379,36 +376,43 @@ pub async fn stage_update(State(_state): State<AppState>, Json(payload): Json<St
 )]
 pub async fn apply_update(State(state): State<AppState>, Json(payload): Json<ApplyUpdateRequest>) -> impl IntoResponse {
     let _ = payload.requested_by.as_deref();
-    let update_id = match resolve_apply_request_mode(&payload) {
-        Ok(ApplyRequestMode::Existing(update_id)) => update_id,
+    let backend = ApiUpdateCoreBackend::new(state.clone());
+    let prepared = match resolve_apply_request_mode(&payload) {
+        Ok(ApplyRequestMode::Existing(update_id)) => match prepare_update_for_apply(&backend, UpdateSource::Existing(update_id)).await {
+            Ok(prepared) => prepared,
+            Err(err) => return UploadUpdateError::from(err).into_response(),
+        },
         Ok(ApplyRequestMode::Transient { image_url, artifact_kind, size_bytes, checksum, delete_image_after_apply }) => {
-            match stage_and_wait_for_update(&state, image_url, artifact_kind, size_bytes, checksum, delete_image_after_apply).await {
-                Ok(update_id) => update_id,
+            let artifact = match manual_update_artifact(image_url, size_bytes, checksum, delete_image_after_apply, artifact_kind).await {
+                Ok(artifact) => artifact,
                 Err(err) => return err.into_response(),
+            };
+            match prepare_update_for_apply(&backend, UpdateSource::Manual(&artifact)).await {
+                Ok(prepared) => prepared,
+                Err(err) => return UploadUpdateError::from(err).into_response(),
             }
         }
         Err(err) => return (StatusCode::BAD_REQUEST, Json(err)).into_response(),
     };
-    let report = match fetch_updater_preflight(&state, update_id).await {
-        Ok(report) => report,
-        Err(err) => {
-            let _ = cancel_update_by_id(&state, update_id).await;
-            return err.into_response();
+
+    let prepared = match prepared {
+        PreparedApply::Ready(prepared) => prepared,
+        PreparedApply::Blocked(prepared) => {
+            return (StatusCode::CONFLICT, Json(ApplyConflictResponse { update_id: prepared.update_id.to_string(), error: prepared.preflight.summary.clone(), preflight: prepared.preflight }))
+                .into_response();
         }
     };
-    if !report.ready {
-        let _ = cancel_update_by_id(&state, update_id).await;
-        return (StatusCode::CONFLICT, Json(ApplyConflictResponse { update_id: update_id.to_string(), error: report.summary.clone(), preflight: report })).into_response();
-    }
-    let stopped_streams = if preflight_requires_stream_shutdown(&report) { stop_streams_for_update(&state).await.unwrap_or(0) } else { 0 };
-    if let Err(err) = send_apply_release(&state, update_id).await {
-        return err.into_response();
+
+    let stopped_streams = if preflight_requires_stream_shutdown(&prepared.preflight) { stop_streams_for_update(&state).await.unwrap_or(0) } else { 0 };
+    if let Err(err) = apply_prepared_update(&backend, prepared.update_id).await {
+        return UploadUpdateError::from(err).into_response();
     }
     let message = if stopped_streams > 0 { format!("apply scheduled (stopped {} stream{})", stopped_streams, if stopped_streams == 1 { "" } else { "s" }) } else { "apply scheduled".to_string() };
-    (StatusCode::OK, Json(UpdateAckResponse { update_id: Some(update_id.to_string()), message })).into_response()
+    (StatusCode::OK, Json(UpdateAckResponse { update_id: Some(prepared.update_id.to_string()), message })).into_response()
 }
 
 pub async fn preflight_update(State(state): State<AppState>, Json(payload): Json<PreflightUpdateRequest>) -> impl IntoResponse {
+    let backend = ApiUpdateCoreBackend::new(state.clone());
     match resolve_preflight_request_mode(&payload) {
         Ok(PreflightRequestMode::Active) => {
             let update_id = match active_update_id(&state).await {
@@ -425,12 +429,17 @@ pub async fn preflight_update(State(state): State<AppState>, Json(payload): Json
             Err(err) => err.into_response(),
         },
         Ok(PreflightRequestMode::Transient { image_url, artifact_kind, size_bytes, checksum }) => {
-            match run_transient_preflight(&state, image_url, artifact_kind, size_bytes, checksum).await {
-                Ok(response) => (StatusCode::OK, Json(response)).into_response(),
-                Err(err) => err.into_response(),
+            let artifact = match manual_update_artifact(image_url, size_bytes, checksum, false, artifact_kind).await {
+                Ok(artifact) => artifact,
+                Err(err) => return err.into_response(),
+            };
+            match run_shared_transient_preflight(&backend, &artifact).await {
+                Ok(response) => (StatusCode::OK, Json(PreflightUpdateResponse { update_id: response.update_id.to_string(), ready: response.report.ready, transient: true, report: response.report }))
+                    .into_response(),
+                Err(err) => UploadUpdateError::from(err).into_response(),
             }
         }
-        Err(err) => (StatusCode::BAD_REQUEST, Json(err)).into_response(),
+        Err(err) => return (StatusCode::BAD_REQUEST, Json(err)).into_response(),
     }
 }
 
@@ -562,145 +571,24 @@ async fn active_update_id(state: &AppState) -> Result<Uuid, UploadUpdateError> {
     }
 }
 
-async fn run_transient_preflight(
-    state: &AppState,
-    image_url: &str,
-    artifact_kind: ApplyArtifactKind,
-    size_bytes: Option<u64>,
-    checksum: Option<&str>,
-) -> Result<PreflightUpdateResponse, UploadUpdateError> {
-    let update_id = stage_update_for_manual_apply(state, image_url, size_bytes, checksum, false, artifact_kind).await?;
-    let preflight_result = transient_preflight_inner(state, update_id).await;
-    let cleanup_result = ensure_transient_preflight_cleared(state, update_id).await;
-
-    match (preflight_result, cleanup_result) {
-        (Ok(report), Ok(())) => Ok(PreflightUpdateResponse { update_id: update_id.to_string(), ready: report.ready, transient: true, report }),
-        (Err(err), Ok(())) => Err(err),
-        (Ok(_), Err(cleanup_err)) => Err(cleanup_err),
-        (Err(err), Err(cleanup_err)) => Err(UploadUpdateError { error: format!("{}; cleanup failed: {}", err.error, cleanup_err.error) }),
-    }
-}
-
-async fn transient_preflight_inner(state: &AppState, update_id: Uuid) -> Result<PreflightReport, UploadUpdateError> {
-    wait_for_staged_update(state, update_id).await?;
-    fetch_updater_preflight(state, update_id).await
-}
-
-async fn ensure_transient_preflight_cleared(state: &AppState, update_id: Uuid) -> Result<(), UploadUpdateError> {
-    let active = fetch_updater_state(state).await?.0;
-    if !matches!(active, Some(current) if current.update_id == update_id) {
-        return Ok(());
-    }
-    cancel_update_by_id(state, update_id).await?;
-    wait_for_update_cleared(state, update_id).await
-}
-
-async fn stage_and_wait_for_update(
-    state: &AppState,
-    image_url: &str,
-    artifact_kind: ApplyArtifactKind,
-    size_bytes: Option<u64>,
-    checksum: Option<&str>,
-    delete_image_after_apply: bool,
-) -> Result<Uuid, UploadUpdateError> {
-    let update_id = stage_update_for_manual_apply(state, image_url, size_bytes, checksum, delete_image_after_apply, artifact_kind).await?;
-    if let Err(err) = wait_for_staged_update(state, update_id).await {
-        let _ = cancel_update_by_id(state, update_id).await;
-        return Err(err);
-    }
-    Ok(update_id)
-}
-
-async fn stage_update_for_manual_apply(
-    state: &AppState,
+async fn manual_update_artifact(
     image_url: &str,
     size_bytes: Option<u64>,
     checksum: Option<&str>,
     delete_image_after_apply: bool,
     artifact_kind: ApplyArtifactKind,
-) -> Result<Uuid, UploadUpdateError> {
+) -> Result<ManualUpdateArtifact, UploadUpdateError> {
     let image_url = Url::parse(image_url.trim()).map_err(|_| UploadUpdateError { error: "invalid image_url".into() })?;
-
-    let mut artifact =
-        ManifestArtifact { url: image_url.clone(), filename: None, size_bytes, sha256: checksum.map(|s| s.to_string()), signature: None, kind: Some(artifact_kind.manifest_kind().into()) };
-    if image_url.scheme() == "file" {
-        let Ok(path) = image_url.to_file_path() else {
-            return Err(UploadUpdateError { error: "invalid image path".into() });
-        };
-        if artifact.size_bytes.is_none()
-            && let Ok(meta) = fs::metadata(&path).await
-        {
-            artifact.size_bytes = Some(meta.len());
-        }
-    }
-
-    let update_id = Uuid::new_v4();
     let source_artifact_path = ota_storage::source_upload_path_for_image_url(&image_url).await;
-    let metadata_json = serde_json::json!({
-        "auto_apply": false,
-        "delete_image_after_apply": delete_image_after_apply,
-        "source_artifact_path": source_artifact_path,
-    })
-    .to_string();
-    let manifest = ReleaseManifest { update_id: Some(update_id), version: None, artifacts: vec![artifact], metadata_json };
-    let command = UpdaterCommand::StageRelease { command_id: command_id_from_context("ota_stage_apply"), update_id, manifest };
-    state.services.updater.send_updater_command(state, command, true).await.map_err(|error| UploadUpdateError { error })?;
-    Ok(update_id)
-}
-
-async fn wait_for_staged_update(state: &AppState, update_id: Uuid) -> Result<UpdateState, UploadUpdateError> {
-    let deadline = Instant::now() + Duration::from_secs(60);
-    loop {
-        let (active, _) = fetch_updater_state(state).await?;
-        if let Some(active) = active {
-            if active.update_id != update_id {
-                return Err(UploadUpdateError { error: format!("different update {} became active while waiting for {}", active.update_id, update_id) });
-            }
-            match active.stage {
-                UpdateStage::AwaitingWindow => return Ok(active),
-                UpdateStage::RolledBack => {
-                    return Err(UploadUpdateError { error: active.last_error.unwrap_or_else(|| format!("staging update {} failed", update_id)) });
-                }
-                UpdateStage::Applying | UpdateStage::Rebooting | UpdateStage::Complete => {
-                    return Err(UploadUpdateError { error: format!("update {} unexpectedly entered {:?} before apply was authorized", update_id, active.stage) });
-                }
-                _ => {}
-            }
-        }
-        if Instant::now() >= deadline {
-            return Err(UploadUpdateError { error: format!("timed out waiting for staged update {}", update_id) });
-        }
-        sleep(Duration::from_millis(250)).await;
-    }
-}
-
-async fn wait_for_update_cleared(state: &AppState, update_id: Uuid) -> Result<(), UploadUpdateError> {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        let (active, _) = fetch_updater_state(state).await?;
-        if !matches!(active, Some(current) if current.update_id == update_id) {
-            return Ok(());
-        }
-        if Instant::now() >= deadline {
-            return Err(UploadUpdateError { error: format!("timed out waiting for transient preflight cleanup of update {}", update_id) });
-        }
-        sleep(Duration::from_millis(200)).await;
-    }
+    Ok(ManualUpdateArtifact::new(image_url, artifact_kind.into())
+        .with_size_bytes(size_bytes)
+        .with_checksum(checksum.map(str::to_string))
+        .with_delete_source_after_apply(delete_image_after_apply)
+        .with_source_artifact_path(source_artifact_path))
 }
 
 async fn fetch_updater_preflight(state: &AppState, update_id: Uuid) -> Result<PreflightReport, UploadUpdateError> {
     state.services.updater.fetch_updater_preflight(state, update_id).await.map_err(|error| UploadUpdateError { error })
-}
-
-async fn send_apply_release(state: &AppState, update_id: Uuid) -> Result<(), UploadUpdateError> {
-    let command =
-        UpdaterCommand::ApplyRelease { command_id: command_id_from_context("ota_apply_release"), update_id, window: MaintenanceWindow { start: Utc::now(), duration: Duration::from_secs(1) } };
-    state.services.updater.send_updater_command(state, command, true).await.map_err(|error| UploadUpdateError { error })
-}
-
-async fn cancel_update_by_id(state: &AppState, update_id: Uuid) -> Result<(), UploadUpdateError> {
-    let command = UpdaterCommand::Cancel { command_id: command_id_from_context("ota_cancel_auto"), update_id };
-    state.services.updater.send_updater_command(state, command, true).await.map_err(|error| UploadUpdateError { error })
 }
 
 #[utoipa::path(
@@ -832,6 +720,12 @@ const fn default_true() -> bool {
     true
 }
 
+impl From<helios_updater::update_core::UpdateCoreError> for UploadUpdateError {
+    fn from(value: helios_updater::update_core::UpdateCoreError) -> Self {
+        Self { error: value.to_string() }
+    }
+}
+
 impl IntoResponse for UploadUpdateError {
     fn into_response(self) -> axum::response::Response {
         (StatusCode::SERVICE_UNAVAILABLE, Json(self)).into_response()
@@ -840,9 +734,7 @@ impl IntoResponse for UploadUpdateError {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ApplyArtifactKind, ApplyRequestMode, ApplyUpdateRequest, PreflightRequestMode, PreflightUpdateRequest, resolve_apply_request_mode, resolve_preflight_request_mode,
-    };
+    use super::{ApplyArtifactKind, ApplyRequestMode, ApplyUpdateRequest, PreflightRequestMode, PreflightUpdateRequest, resolve_apply_request_mode, resolve_preflight_request_mode};
     use uuid::Uuid;
 
     #[test]
@@ -880,34 +772,18 @@ mod tests {
 
     #[test]
     fn resolve_preflight_request_mode_rejects_artifact_fields_without_image_url() {
-        let payload = PreflightUpdateRequest {
-            update_id: None,
-            artifact_kind: Some(ApplyArtifactKind::FrontendBundle),
-            image_url: None,
-            size_bytes: Some(1024),
-            checksum: Some("abc".into()),
-        };
+        let payload = PreflightUpdateRequest { update_id: None, artifact_kind: Some(ApplyArtifactKind::FrontendBundle), image_url: None, size_bytes: Some(1024), checksum: Some("abc".into()) };
         let err = resolve_preflight_request_mode(&payload).unwrap_err();
         assert_eq!(err.error, "artifact_kind, size_bytes, and checksum are only valid when image_url is provided");
     }
 
     #[test]
     fn resolve_preflight_request_mode_defaults_transient_artifact_kind_to_disk_image() {
-        let payload = PreflightUpdateRequest {
-            update_id: None,
-            artifact_kind: None,
-            image_url: Some("file:///tmp/update.img.xz".into()),
-            size_bytes: Some(4096),
-            checksum: Some("  deadbeef  ".into()),
-        };
+        let payload =
+            PreflightUpdateRequest { update_id: None, artifact_kind: None, image_url: Some("file:///tmp/update.img.xz".into()), size_bytes: Some(4096), checksum: Some("  deadbeef  ".into()) };
         assert_eq!(
             resolve_preflight_request_mode(&payload).unwrap(),
-            PreflightRequestMode::Transient {
-                image_url: "file:///tmp/update.img.xz",
-                artifact_kind: ApplyArtifactKind::DiskImage,
-                size_bytes: Some(4096),
-                checksum: Some("deadbeef"),
-            }
+            PreflightRequestMode::Transient { image_url: "file:///tmp/update.img.xz", artifact_kind: ApplyArtifactKind::DiskImage, size_bytes: Some(4096), checksum: Some("deadbeef") }
         );
     }
 
@@ -922,26 +798,13 @@ mod tests {
         };
         assert_eq!(
             resolve_preflight_request_mode(&payload).unwrap(),
-            PreflightRequestMode::Transient {
-                image_url: "file:///tmp/service_bundle.tar",
-                artifact_kind: ApplyArtifactKind::ServiceBundle,
-                size_bytes: None,
-                checksum: None,
-            }
+            PreflightRequestMode::Transient { image_url: "file:///tmp/service_bundle.tar", artifact_kind: ApplyArtifactKind::ServiceBundle, size_bytes: None, checksum: None }
         );
     }
 
     #[test]
     fn resolve_apply_request_mode_rejects_missing_target() {
-        let payload = ApplyUpdateRequest {
-            requested_by: None,
-            update_id: None,
-            artifact_kind: None,
-            image_url: None,
-            size_bytes: None,
-            checksum: None,
-            delete_image_after_apply: true,
-        };
+        let payload = ApplyUpdateRequest { requested_by: None, update_id: None, artifact_kind: None, image_url: None, size_bytes: None, checksum: None, delete_image_after_apply: true };
         let err = resolve_apply_request_mode(&payload).unwrap_err();
         assert_eq!(err.error, "image_url or update_id is required");
     }

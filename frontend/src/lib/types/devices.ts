@@ -1,3 +1,4 @@
+import type { StreamPreviewFormat } from '$lib/api/streamPreviewFormat';
 import type { DeviceIdentity, DeviceMetrics, SensorPeripheralFirmwareStatus } from '$lib/ts-bindings/http/client';
 
 export type CameraStatus = 'live' | 'degraded' | 'idle' | 'offline';
@@ -13,6 +14,7 @@ export type CameraCard = {
   cameraUid: string;
   captureSessionId: string | null;
   captureSessionAlias: string | null;
+  previewFormat?: StreamPreviewFormat | null;
   hardwareId?: string | null;
   name: string;
   driverNamespace: string;

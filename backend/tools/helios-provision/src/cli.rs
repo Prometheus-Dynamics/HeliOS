@@ -3,11 +3,14 @@ use std::path::PathBuf;
 use clap::Parser;
 
 #[derive(Debug, Parser)]
-#[command(author, version, about = "Helios disk provisioning (TOML-driven)")]
+#[command(author, version, about = "Helios disk provisioning (layout-manifest driven)")]
 pub struct Cli {
-    /// Path to provisions config
-    #[arg(long, default_value = "/etc/helios/provisions.toml")]
-    pub config: PathBuf,
+    /// Path to the shared layout manifest
+    #[arg(long)]
+    pub layout_manifest: Option<PathBuf>,
+    /// Legacy provisions config path
+    #[arg(long)]
+    pub config: Option<PathBuf>,
     /// Optional file to write provisioning outcome into
     #[arg(long)]
     pub status_file: Option<PathBuf>,

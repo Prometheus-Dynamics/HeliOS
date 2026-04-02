@@ -2680,11 +2680,71 @@ pub struct StreamCodecChainRuntimeState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
+pub struct StreamViewerDemandRuntimeState {
+    #[serde(default)]
+    pub raw_receiver_count: u64,
+    #[serde(default)]
+    pub host_receiver_count: u64,
+    #[serde(default)]
+    pub preview_viewer_active: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
+pub struct StreamGraphDemandRuntimeState {
+    #[serde(default)]
+    pub output_sample_pending: bool,
+    #[serde(default)]
+    pub has_image_output: bool,
+    #[serde(default)]
+    pub has_executor: bool,
+    #[serde(default)]
+    pub image_output_active: bool,
+    #[serde(default)]
+    pub execution_active: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
+pub struct StreamRecordingDemandRuntimeState {
+    #[serde(default)]
+    pub recording_session_active: bool,
+    #[serde(default)]
+    pub shadow_recorder_active: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
+pub struct StreamDemandPipelineRuntimeState {
+    #[serde(default)]
+    pub decoded_image_active: bool,
+    #[serde(default)]
+    pub encoded_output_active: bool,
+    #[serde(default)]
+    pub preview_transport_active: bool,
+    #[serde(default)]
+    pub graph_image_output_active: bool,
+    #[serde(default)]
+    pub graph_execution_active: bool,
+    #[serde(default)]
+    pub encoded_passthrough_possible: bool,
+    #[serde(default)]
+    pub encoded_passthrough_active: bool,
+    #[serde(default)]
+    pub live_active: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
 pub struct StreamDemandRuntimeState {
     #[serde(default)]
     pub frame: StreamFrameDemandMetrics,
     #[serde(default)]
     pub encoder: StreamEncoderDemandMetrics,
+    #[serde(default)]
+    pub viewers: StreamViewerDemandRuntimeState,
+    #[serde(default)]
+    pub graph: StreamGraphDemandRuntimeState,
+    #[serde(default)]
+    pub recording: StreamRecordingDemandRuntimeState,
+    #[serde(default)]
+    pub pipeline: StreamDemandPipelineRuntimeState,
     #[serde(default)]
     pub live_active: bool,
 }
@@ -2803,6 +2863,15 @@ pub fn default_encoder_enabled() -> bool {
 
 pub fn default_decoder_enabled() -> bool {
     true
+}
+
+pub fn preview_format_for_encoder_selector(selector: Option<&str>) -> &'static str {
+    match encoder_settings_kind_for_selector(selector) {
+        Some(EncoderSettingsKind::Turbojpeg | EncoderSettingsKind::Mozjpeg | EncoderSettingsKind::FfmpegMjpeg) => "mjpeg",
+        Some(EncoderSettingsKind::H264) => "h264",
+        Some(EncoderSettingsKind::H265) => "h265",
+        None => "unknown",
+    }
 }
 
 fn max_host_buffer() -> usize {

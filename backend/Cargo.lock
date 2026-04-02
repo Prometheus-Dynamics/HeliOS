@@ -2807,6 +2807,7 @@ dependencies = [
  "lib-ipc",
  "lib-led-animations",
  "lib-net",
+ "lib-runtime-policy",
  "lib-sensors",
  "lib-test",
  "lopdf",
@@ -2920,6 +2921,7 @@ dependencies = [
  "image",
  "lib-cv",
  "lib-ipc",
+ "lib-runtime-policy",
  "lib-test",
  "libc",
  "metrics",
@@ -2954,6 +2956,7 @@ dependencies = [
  "lib-ai",
  "lib-ipc",
  "lib-math",
+ "lib-runtime-policy",
  "lib-sensors",
  "linux-embedded-hal",
  "nix 0.31.2",
@@ -2974,6 +2977,7 @@ version = "0.1.1"
 dependencies = [
  "anyhow",
  "clap",
+ "lib-storage-layout",
  "serde",
  "thiserror 2.0.18",
  "toml",
@@ -2983,6 +2987,7 @@ dependencies = [
 name = "helios-updater"
 version = "1.0.0"
 dependencies = [
+ "async-trait",
  "base64 0.22.1",
  "bincode",
  "bytes",
@@ -2994,6 +2999,7 @@ dependencies = [
  "futures",
  "hex",
  "lib-ipc",
+ "lib-storage-layout",
  "lib-test",
  "reqwest",
  "serde",
@@ -3002,6 +3008,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "toml",
  "tracing",
  "tracing-subscriber",
  "url",
@@ -3016,12 +3023,15 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "clap",
+ "helios-updater",
  "libc",
  "serde",
  "serde_json",
  "sha2",
+ "tokio",
  "tracing",
  "tracing-subscriber",
+ "url",
  "uuid",
 ]
 
@@ -4037,6 +4047,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lib-runtime-policy"
+version = "1.0.0"
+
+[[package]]
 name = "lib-sensors"
 version = "1.0.0"
 dependencies = [
@@ -4057,6 +4071,15 @@ dependencies = [
  "tracing",
  "utoipa",
  "uuid",
+]
+
+[[package]]
+name = "lib-storage-layout"
+version = "1.0.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.18",
+ "toml",
 ]
 
 [[package]]

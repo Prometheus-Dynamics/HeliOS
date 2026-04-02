@@ -73,7 +73,8 @@ export async function fetchDevicesPageData(): Promise<DevicesPayload> {
 
   const cameras = buildCameraCards(streams, peerStreams);
 
-  const health = extractHealth(metricsResult.status === 'fulfilled' ? metricsResult.value : null);
+  const metricsPayload = metricsResult.status === 'fulfilled' ? metricsResult.value : null;
+  const health = extractHealth(metricsPayload);
   const imu = emptyImuStatus();
   const coralSensors = (peripheralPayload?.sensors ?? []).filter((entry) => {
     const driver = (entry?.driver_namespace ?? '').trim().toLowerCase();
@@ -90,7 +91,7 @@ export async function fetchDevicesPageData(): Promise<DevicesPayload> {
     imu
   );
   const tasks = buildTasks(health);
-  const summary = buildSummary(cameras, health);
+  const summary = buildSummary(cameras, health, metricsPayload?.freshness ?? null);
 
   return {
     summary,

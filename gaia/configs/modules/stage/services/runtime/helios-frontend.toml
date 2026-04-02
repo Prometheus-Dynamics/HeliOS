@@ -1,0 +1,8 @@
+[units."helios-frontend"]
+enabled = true
+src = "assets/services/helios-frontend/helios-frontend.service"
+targets = ["multi-user"]
+assets = [
+  { src = "assets/services/helios-frontend/helios-frontend.conf", dst = "/etc/lighttpd/helios-frontend.conf", mode = 420 },
+  { src = "assets/services/helios-frontend/90-helios-frontend-proxy.conf", dst = "/etc/lighttpd/conf-enabled/90-helios-frontend-proxy.conf", mode = 420 },
+]

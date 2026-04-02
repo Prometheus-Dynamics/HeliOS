@@ -658,6 +658,18 @@ pub async fn persist_resolved_config_auto_camera_id_checked(stream_id: Option<Uu
     Ok(camera_id)
 }
 
+pub async fn persist_resolved_config_with_descriptor_auto_camera_id_checked(
+    stream_id: Option<Uuid>,
+    resolved: ResolvedStreamConfig,
+    descriptor_snapshot: CaptureDescriptor,
+) -> std::io::Result<String> {
+    let resolved = canonicalize_resolved_capture_identity(resolved);
+    let camera_id = crate::http::streams::util::camera_id_for_manifest(&resolved.to_requested_manifest());
+    persist_resolved_config_impl(&camera_id, stream_id, resolved, Some(descriptor_snapshot)).await?;
+    remove_other_stream_records(&camera_id, stream_id).await?;
+    Ok(camera_id)
+}
+
 pub async fn persist_manifest_checked(camera_id: &str, stream_id: Option<Uuid>, manifest: StreamManifest) -> std::io::Result<()> {
     persist_manifest_impl(camera_id, stream_id, manifest).await.map(|_| ())
 }
@@ -1097,6 +1109,44 @@ mod tests {
         let loaded = load_resolved_config(&stable_camera_id).await.expect("load stable resolved config");
         assert_eq!(loaded.identity.id, stream_id);
         assert_eq!(loaded.capture.device_identity.as_ref().and_then(|identity| identity.camera_id()), Some(stable_camera_id.clone()));
+    }
+
+    #[tokio::test]
+    async fn persist_resolved_config_with_descriptor_auto_camera_id_checked_migrates_legacy_camera_id_for_same_stream() {
+        let _root = test_data_root();
+        let legacy_camera_id = format!("legacy-camera-{}", Uuid::new_v4());
+        let stable_camera_id = format!("libcamera:front-{}", Uuid::new_v4());
+        let stream_id = Some(Uuid::new_v4());
+
+        let mut manifest = sample_manifest();
+        manifest.capture.backend = styx::BackendKind::Libcamera;
+        manifest.capture.handle = styx::BackendHandle::Libcamera { id: format!("missing-handle-{}", Uuid::new_v4()) };
+        manifest.capture.device_keys = vec!["ov9782".to_string()];
+        manifest.capture.device_identity = Some(helios_engine::capture::CaptureDeviceIdentity {
+            display: Some("Front Camera".to_string()),
+            primary_key: Some(stable_camera_id.clone()),
+            keys: vec![stable_camera_id.clone(), "ov9782".to_string()],
+        });
+
+        let resolved = manifest.resolve();
+        let descriptor_snapshot = synthesize_descriptor_snapshot_from_manifest(&resolved.to_requested_manifest());
+        persist_resolved_config_checked(&legacy_camera_id, stream_id, resolved.clone()).await.expect("persist legacy camera id record");
+
+        let legacy_path = record_path(&legacy_camera_id).await.expect("legacy record path");
+        assert!(fs::try_exists(&legacy_path).await.expect("legacy record exists before migration"));
+
+        let persisted_camera_id = persist_resolved_config_with_descriptor_auto_camera_id_checked(stream_id, resolved, descriptor_snapshot.clone())
+            .await
+            .expect("persist canonical camera id record with descriptor");
+        assert_eq!(persisted_camera_id, stable_camera_id);
+
+        let stable_path = record_path(&stable_camera_id).await.expect("stable record path");
+        assert!(fs::try_exists(&stable_path).await.expect("stable record exists after migration"));
+        assert!(!fs::try_exists(&legacy_path).await.expect("legacy record removed after migration"));
+
+        let record = list_persisted_records().await.into_iter().find(|record| record.camera_id == stable_camera_id).expect("find stable record");
+        let persisted_descriptor = record.descriptor_snapshot.expect("descriptor snapshot");
+        assert_eq!(serde_json::to_value(&persisted_descriptor).expect("encode descriptor"), serde_json::to_value(&descriptor_snapshot).expect("encode expected descriptor"));
     }
 
     fn test_data_root() -> PathBuf {

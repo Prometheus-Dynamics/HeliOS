@@ -9,6 +9,8 @@ use tokio::time::{Duration, Instant};
 
 use crate::ipc::IpcHandles;
 
+use super::state::SystemReadModelState;
+
 #[derive(Debug, Clone)]
 pub struct SharedStreamMetricsSnapshot {
     pub stream_id: uuid::Uuid,
@@ -294,6 +296,45 @@ impl StreamOutputsHub {
             subscribers = subscribers.saturating_add(topic.clients.lock().await.len() as u64);
         }
         (topic_count, subscribers)
+    }
+}
+
+impl SystemReadModelState {
+    pub fn bind_stream_metrics_state(&self, state: &crate::http::AppState) {
+        self.stream_metrics_hub.set_state(state.ipc());
+    }
+
+    pub async fn subscribe_stream_metrics(&self, stream_id: uuid::Uuid) -> Result<(broadcast::Receiver<Arc<SharedStreamMetricsSnapshot>>, Option<Arc<SharedStreamMetricsSnapshot>>), String> {
+        self.stream_metrics_hub.subscribe(stream_id).await
+    }
+
+    pub async fn unsubscribe_stream_metrics(&self, stream_id: uuid::Uuid) {
+        self.stream_metrics_hub.unsubscribe(stream_id).await;
+    }
+
+    pub fn bind_stream_outputs_state(&self, state: &crate::http::AppState) {
+        self.stream_outputs_hub.set_state(state.ipc());
+    }
+
+    pub async fn subscribe_stream_outputs(
+        &self,
+        stream_id: uuid::Uuid,
+        sample_interval: Duration,
+        ports_interval: Duration,
+    ) -> Result<(uuid::Uuid, broadcast::Receiver<Arc<SharedStreamOutputsEvent>>, Arc<SharedStreamOutputsPortsSnapshot>), String> {
+        self.stream_outputs_hub.subscribe(stream_id, sample_interval, ports_interval).await
+    }
+
+    pub async fn update_stream_outputs_subscription(&self, stream_id: uuid::Uuid, client_id: uuid::Uuid, ports: Vec<String>, sample_interval: Duration) -> Result<(), String> {
+        self.stream_outputs_hub.update_client(stream_id, client_id, ports, sample_interval).await
+    }
+
+    pub async fn current_stream_outputs_ports(&self, stream_id: uuid::Uuid) -> Result<Arc<SharedStreamOutputsPortsSnapshot>, String> {
+        self.stream_outputs_hub.current_ports(stream_id).await
+    }
+
+    pub async fn unsubscribe_stream_outputs(&self, stream_id: uuid::Uuid, client_id: uuid::Uuid) {
+        self.stream_outputs_hub.unsubscribe(stream_id, client_id).await;
     }
 }
 

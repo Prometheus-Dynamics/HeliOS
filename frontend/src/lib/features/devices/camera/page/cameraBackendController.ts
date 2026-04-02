@@ -17,11 +17,11 @@ import {
 } from '$lib/api/streamDefaults';
 import { recordingModeEnabled } from '$lib/api/streamRecordingMode';
 import {
-  decoderPreferencesForFormat,
   dedupeCodecs,
   normalizeDecoderDefaultIdsByCaptureFormat,
   pickCodecId
 } from './cameraBackendCodecs';
+import { deriveStreamCodecSelections } from './cameraStreamConfigBuilder';
 import {
   asInterval,
   asJpegQuality,
@@ -38,6 +38,14 @@ import {
   normalizeFormatKey,
   resolvedCodecId
 } from './cameraBackendSupport';
+import {
+  applyCameraStreamModeSelection,
+  clampCameraStreamIntervalSelection,
+  syncCameraStreamEditorCodecs,
+  type CameraStreamEditorState,
+  type StreamSelectionMode
+} from './cameraStreamEditorReducer';
+import { cameraIntervalsForSelection } from './cameraModeSelectors';
 import { layoutSignature } from './cameraPipelineState';
 import {
   PIPELINE_OUTPUT_CELL_KEY,
@@ -75,10 +83,10 @@ type BackendState = {
   set encoderEnabled(value: boolean);
   get decoderEnabled(): boolean;
   set decoderEnabled(value: boolean);
-  get encoderSelectionTouched(): boolean;
-  set encoderSelectionTouched(value: boolean);
-  get decoderSelectionTouched(): boolean;
-  set decoderSelectionTouched(value: boolean);
+  get encoderSelectionMode(): StreamSelectionMode;
+  set encoderSelectionMode(value: StreamSelectionMode);
+  get decoderSelectionMode(): StreamSelectionMode;
+  set decoderSelectionMode(value: StreamSelectionMode);
   get encoderSettings(): EncoderSettingsDraft;
   set encoderSettings(value: EncoderSettingsDraft);
   get encoderFpsLimit(): number | null;
@@ -103,8 +111,6 @@ type BackendState = {
   set selectedFormat(value: string);
   get selectedResolution(): string;
   set selectedResolution(value: string);
-  get selectedInterval(): string;
-  set selectedInterval(value: string);
   get selectedIntervalIdx(): number;
   set selectedIntervalIdx(value: number);
   get libcameraTargetFps(): number | null;
@@ -162,6 +168,34 @@ type BackendDeps = {
 };
 
 export function createCameraBackendController(state: BackendState, deps: BackendDeps) {
+  const editorStateFor = (): CameraStreamEditorState => ({
+    selectedBackendIndex: state.selectedBackendIndex,
+    selectedModeKey: state.selectedModeKey,
+    selectedFormat: state.selectedFormat,
+    selectedResolution: state.selectedResolution,
+    selectedIntervalIdx: state.selectedIntervalIdx,
+    shadowRecorderEnabled: state.shadowRecorderEnabled,
+    encoderImpl: state.encoderImpl,
+    decoderImpl: state.decoderImpl,
+    encoderEnabled: state.encoderEnabled,
+    decoderEnabled: state.decoderEnabled,
+    encoderSelectionMode: state.encoderSelectionMode,
+    decoderSelectionMode: state.decoderSelectionMode
+  });
+  const applyEditorState = (next: CameraStreamEditorState): void => {
+    state.selectedBackendIndex = next.selectedBackendIndex;
+    state.selectedModeKey = next.selectedModeKey;
+    state.selectedFormat = next.selectedFormat;
+    state.selectedResolution = next.selectedResolution;
+    state.selectedIntervalIdx = next.selectedIntervalIdx;
+    state.shadowRecorderEnabled = next.shadowRecorderEnabled;
+    state.encoderImpl = next.encoderImpl;
+    state.decoderImpl = next.decoderImpl;
+    state.encoderEnabled = next.encoderEnabled;
+    state.decoderEnabled = next.decoderEnabled;
+    state.encoderSelectionMode = next.encoderSelectionMode;
+    state.decoderSelectionMode = next.decoderSelectionMode;
+  };
   const resolvedEncoderStateFor = (): StreamInfo['resolved']['encoder'] | null =>
     state.stream?.resolved?.encoder ?? null;
   const resolvedDecoderStateFor = (): StreamInfo['resolved']['decoder'] | null =>
@@ -247,20 +281,22 @@ export function createCameraBackendController(state: BackendState, deps: Backend
         state.codecs.filter((c) => String(c.kind).toLowerCase() === 'decoder'),
         (c) => `${c.name}::${c.implementation}::${c.input}::${c.output}`
       );
-
-      state.encoderImpl = pickCodecId(
-        state.encoders,
-        resolvedEncoderId || requestedEncoderIdFor(manifest),
-        defaultEncoderId ? [defaultEncoderId] : []
-      );
-      state.decoderImpl = pickCodecId(
-        state.decoders,
-        resolvedDecoderId || requestedDecoderIdFor(manifest),
-        decoderPreferencesForFormat(
-          manifest?.capture?.mode?.format?.code ?? null,
-          state.decoderDefaultIdsByCaptureFormat
-        )
-      );
+      const selections = deriveStreamCodecSelections({
+        encoders: state.encoders,
+        decoders: state.decoders,
+        encoderImpl: state.encoderImpl,
+        decoderImpl: state.decoderImpl,
+        resolvedEncoderId,
+        resolvedDecoderId,
+        requestedEncoderId: requestedEncoderIdFor(manifest),
+        requestedDecoderId: requestedDecoderIdFor(manifest),
+        defaultEncoderId,
+        selectedFormat: manifest?.capture?.mode?.format?.code ?? null,
+        decoderDefaultIdsByCaptureFormat: state.decoderDefaultIdsByCaptureFormat,
+        encoderSelectionMode: state.encoderSelectionMode,
+        decoderSelectionMode: state.decoderSelectionMode
+      });
+      applyEditorState({ ...editorStateFor(), encoderImpl: selections.encoderImpl, decoderImpl: selections.decoderImpl });
     } catch (err) {
       console.warn('Failed to load codec catalog', err);
     }
@@ -316,18 +352,45 @@ export function createCameraBackendController(state: BackendState, deps: Backend
     const modes = deps.effectiveModes();
     const wantedFormat = captureModeRecord?.format ?? null;
     const mode = modes.find((m) => deps.mediaFormatMatches(m, wantedFormat)) ?? modes[0] ?? null;
-    state.selectedModeKey = deps.modeKey(captureModeRecord ?? null) ?? deps.modeKey(mode?.id) ?? null;
-    state.selectedFormat = deps.modeFormat(mode);
-    state.selectedResolution = deps.modeResolution(mode);
-    const intervals = deps.intervalsForSelection();
     const wantedInterval = asInterval(captureRecord?.interval ?? captureModeRecord?.interval ?? null);
-    if (wantedInterval) {
-      const idx = intervals.findIndex((int) => int?.numerator === wantedInterval?.numerator && int?.denominator === wantedInterval?.denominator);
-      state.selectedIntervalIdx = idx >= 0 ? idx : 0;
-    } else {
-      state.selectedIntervalIdx = 0;
-    }
-    state.selectedInterval = intervals[state.selectedIntervalIdx] ? deps.fpsLabel(intervals[state.selectedIntervalIdx]) : '';
+    const nextEditorState = applyCameraStreamModeSelection(
+      {
+        ...editorStateFor(),
+        selectedBackendIndex: backendIdx >= 0 ? backendIdx : 0,
+        selectedModeKey: deps.modeKey(captureModeRecord ?? null) ?? deps.modeKey(mode?.id) ?? null,
+        selectedFormat: deps.modeFormat(mode),
+        selectedResolution: deps.modeResolution(mode),
+        selectedIntervalIdx: 0
+      },
+      modes,
+      deps
+    );
+    const nextIntervals = cameraIntervalsForSelection(
+      modes,
+      nextEditorState.selectedFormat,
+      nextEditorState.selectedResolution
+    );
+    const nextIntervalIdx = wantedInterval
+      ? Math.max(
+          0,
+          nextIntervals.findIndex(
+            (int) => int?.numerator === wantedInterval?.numerator && int?.denominator === wantedInterval?.denominator
+          )
+        )
+      : 0;
+    const hydratedEditorState = clampCameraStreamIntervalSelection(
+      {
+        ...nextEditorState,
+        selectedIntervalIdx: nextIntervalIdx
+      },
+      modes
+    );
+    applyEditorState(hydratedEditorState);
+    const intervals = cameraIntervalsForSelection(
+      modes,
+      hydratedEditorState.selectedFormat,
+      hydratedEditorState.selectedResolution
+    );
     const isLibcamera = String(capture?.backend ?? '').toLowerCase() === 'libcamera';
     state.libcameraTargetFps =
       (typeof captureRecord?.target_fps === 'number' ? captureRecord.target_fps : null) ??
@@ -371,15 +434,23 @@ export function createCameraBackendController(state: BackendState, deps: Backend
       : recordingModeEnabled(manifest?.recording_mode ?? streamDefaults?.defaultRecordingMode);
     state.cameraAlias = asTrimmedString(identityRecord?.alias ?? identityRecord?.display);
     const encoderEnabledFlag = manifestRecord?.encoder_enabled;
-    const nextEncoderId = pickCodecId(
-      state.encoders,
-      resolvedEncoderId || requestedEncoderIdFor(manifest) || state.encoderImpl
-    );
-    const nextDecoderId = pickCodecId(
-      state.decoders,
-      resolvedDecoderId || requestedDecoderIdFor(manifest) || state.decoderImpl,
-      decoderPreferencesForFormat(state.selectedFormat, state.decoderDefaultIdsByCaptureFormat)
-    );
+    const selections = deriveStreamCodecSelections({
+      encoders: state.encoders,
+      decoders: state.decoders,
+      encoderImpl: state.encoderImpl,
+      decoderImpl: state.decoderImpl,
+      resolvedEncoderId,
+      resolvedDecoderId,
+      requestedEncoderId: requestedEncoderIdFor(manifest),
+      requestedDecoderId: requestedDecoderIdFor(manifest),
+      defaultEncoderId: streamDefaults?.defaultEncoderId ?? null,
+      selectedFormat: state.selectedFormat,
+      decoderDefaultIdsByCaptureFormat: state.decoderDefaultIdsByCaptureFormat,
+      encoderSelectionMode: state.encoderSelectionMode,
+      decoderSelectionMode: state.decoderSelectionMode
+    });
+    const nextEncoderId = selections.encoderImpl;
+    const nextDecoderId = selections.decoderImpl;
     state.encoderEnabled = typeof resolvedEncoder?.enabled === 'boolean'
       ? resolvedEncoder.enabled
       : requestedEncoderState === 'enabled'
@@ -413,12 +484,25 @@ export function createCameraBackendController(state: BackendState, deps: Backend
       state.encoderSettings = createEncoderSettingsDraft();
       state.encoderFpsLimit = null;
     }
-    if (state.encoders.length && !state.encoderSelectionTouched) {
-      state.encoderImpl = nextEncoderId;
-    }
-    if (state.decoders.length && !state.decoderSelectionTouched) {
-      state.decoderImpl = nextDecoderId;
-    }
+    applyEditorState(
+      syncCameraStreamEditorCodecs({
+        state: {
+          ...editorStateFor(),
+          encoderEnabled: state.encoderEnabled,
+          decoderEnabled: state.decoderEnabled,
+          encoderImpl: nextEncoderId,
+          decoderImpl: nextDecoderId
+        },
+        encoders: state.encoders,
+        decoders: state.decoders,
+        resolvedEncoderId,
+        resolvedDecoderId,
+        requestedEncoderId: requestedEncoderIdFor(manifest),
+        requestedDecoderId: requestedDecoderIdFor(manifest),
+        defaultEncoderId: streamDefaults?.defaultEncoderId ?? null,
+        decoderDefaultIdsByCaptureFormat: state.decoderDefaultIdsByCaptureFormat
+      })
+    );
 
     const pipelineEnabled = manifest?.pipeline_enabled ?? manifestRecord?.pipeline_enabled ?? false;
     state.selectedPipelineId =

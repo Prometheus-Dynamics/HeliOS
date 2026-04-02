@@ -5,6 +5,7 @@
   import type { StreamControlSocket } from '$lib/api/streamControls';
   import type { connectStreamUpdates } from '$lib/api/streamUpdates';
   import { SvelteMap } from 'svelte/reactivity';
+  import type { StreamSelectionMode } from './cameraStreamEditorReducer';
 
   export function createCameraStreamState() {
     const state = $state({
@@ -30,7 +31,6 @@
       selectedModeKey: null as string | null,
       selectedFormat: '',
       selectedResolution: '',
-      selectedInterval: '',
       devices: [] as ProbedDevice[],
       codecs: [] as CodecInfo[],
       encoders: [] as CodecInfo[],
@@ -46,8 +46,8 @@
       decoderImpl: null as string | null,
       encoderEnabled: false,
       decoderEnabled: false,
-      encoderSelectionTouched: false,
-      decoderSelectionTouched: false,
+      encoderSelectionMode: 'auto' as StreamSelectionMode,
+      decoderSelectionMode: 'auto' as StreamSelectionMode,
       hostBuffer: null as number | null,
       previewJpegQuality: null as number | null,
       cameraAlias: '',

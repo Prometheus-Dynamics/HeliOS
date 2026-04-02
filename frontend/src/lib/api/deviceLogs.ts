@@ -2,20 +2,33 @@ import { apiFetchCachedJson } from '$lib/api/core/http';
 import { getHttpClientBase } from '$lib/api/httpClient';
 import { buildWsUrlFromHttpBase, canUseWebSockets } from '$lib/api/core/ws';
 import { cacheResourceData, type ResourceCacheContext, type ResourceCacheResult } from '$lib/api/resourceCache';
-import type { LogSource, LogSourceKind, SystemdUnitStatus } from '$lib/ts-bindings/http/client';
+import type { LogSource, LogSourceKind, LogSourcesResponse, ReadModelFreshness, SystemdUnitStatus } from '$lib/ts-bindings/http/client';
 
-export type { LogSource, LogSourceKind, SystemdUnitStatus };
+export type { LogSource, LogSourceKind, LogSourcesResponse, ReadModelFreshness, SystemdUnitStatus };
 
-export async function fetchLogSources(context: ResourceCacheContext<LogSource[]> = {}): Promise<LogSource[] | ResourceCacheResult<LogSource[]>> {
-  const payload = await apiFetchCachedJson<LogSource[]>('/device/logs/sources', context);
+export async function fetchLogSources(
+  context: ResourceCacheContext<LogSourcesResponse> = {}
+): Promise<LogSourcesResponse | ResourceCacheResult<LogSourcesResponse>> {
+  const payload = await apiFetchCachedJson<LogSourcesResponse>('/device/logs/sources', context);
   if (payload.status === 'not_modified') {
-    return payload as ResourceCacheResult<LogSource[]>;
+    return payload as ResourceCacheResult<LogSourcesResponse>;
   }
-  const sources = Array.isArray(payload.data) ? payload.data : [];
-  return cacheResourceData(sources, {
+
+  const nextPayload = payload.data;
+  if (!nextPayload || typeof nextPayload !== 'object') {
+    throw new Error('Log sources unavailable');
+  }
+
+  return cacheResourceData(
+    {
+      ...nextPayload,
+      sources: Array.isArray(nextPayload.sources) ? nextPayload.sources : []
+    },
+    {
     etag: payload.etag ?? null,
     revision: payload.revision ?? null
-  });
+    }
+  );
 }
 
 export function buildLogsSocketUrl(sourceId: string, options: { lines?: number; follow?: boolean } = {}): string {

@@ -2,6 +2,7 @@ mod cli;
 mod config;
 mod exec;
 mod geometry;
+mod layout;
 mod logger;
 
 use anyhow::{anyhow, Result};
@@ -13,7 +14,9 @@ use crate::cli::Cli;
 use crate::config::load_config;
 use crate::exec::{execute_plan, recover_from_secondary_markers};
 use crate::geometry::{build_plan, detect_disk, disk_bn, read_part_info, read_to_u64, sectors_to_mib_ceil, sectors_to_mib_floor, PartPlan};
+use crate::layout::load_layout_config;
 use crate::logger::Logger;
+use lib_storage_layout::StorageLayoutManifest;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ProvisionStatus {
@@ -34,11 +37,24 @@ impl ProvisionStatus {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let cfg = load_config(&cli.config)?;
+    let layout_manifest_path = cli.layout_manifest.clone().unwrap_or_else(StorageLayoutManifest::system_layout_path);
+    let cfg = if layout_manifest_path.exists() {
+        load_layout_config(&layout_manifest_path)?
+    } else if let Some(config_path) = &cli.config {
+        load_config(config_path)?
+    } else {
+        return Err(anyhow!("layout manifest {} is missing and no legacy --config path was provided", layout_manifest_path.display()));
+    };
+
     let log_path = cfg.defaults.log_file.as_deref().unwrap_or("/var/log/provision-disk.log");
     let mut logger = Logger::new(log_path, cli.verbose);
 
-    logger.log(format!("helios-provision v{} config={}", env!("CARGO_PKG_VERSION"), cli.config.display()));
+    logger.log(format!(
+        "helios-provision v{} layout_manifest={} legacy_config={}",
+        env!("CARGO_PKG_VERSION"),
+        layout_manifest_path.display(),
+        cli.config.as_ref().map(|path| path.display().to_string()).unwrap_or_else(|| "-".to_string())
+    ));
 
     let disk = cli.disk.or_else(|| cfg.defaults.disk.clone()).or_else(detect_disk).unwrap_or_else(|| "/dev/mmcblk0".to_string());
 

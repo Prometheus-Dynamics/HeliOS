@@ -26,6 +26,7 @@ lib-asyncapi = { path = "../libs/lib-api/lib-asyncapi" }
 lib-led-animations = { path = "../libs/lib-led-animations" }
 lib-ipc = { path = "../libs/lib-ipc" }
 lib-net = { path = "../libs/lib-net" }
+lib-runtime-policy = { path = "../libs/lib-runtime-policy" }
 lib-sensors = { path = "../libs/lib-sensors" }
 chrono = { workspace = true }
 url = { workspace = true }

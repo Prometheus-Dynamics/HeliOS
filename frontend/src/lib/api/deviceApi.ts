@@ -1,5 +1,5 @@
 import { apiFetchCachedJson, type ApiRequestOptions } from '$lib/api/core/http';
-import type { DeviceMetrics } from '$lib/ts-bindings/http/client';
+import type { DeviceMetricsResponse } from '$lib/ts-bindings/http/client';
 
 type CacheEntry<T> = {
   fetchedAt: number;
@@ -10,8 +10,8 @@ type CacheEntry<T> = {
 
 const DEFAULT_METRICS_CACHE_MS = 750;
 
-let metricsCache: CacheEntry<DeviceMetrics> | null = null;
-let metricsInflight: Promise<DeviceMetrics> | null = null;
+let metricsCache: CacheEntry<DeviceMetricsResponse> | null = null;
+let metricsInflight: Promise<DeviceMetricsResponse> | null = null;
 
 function resolveCacheMs(options?: ApiRequestOptions): number {
   const raw = options?.cacheMs;
@@ -21,7 +21,7 @@ function resolveCacheMs(options?: ApiRequestOptions): number {
   return Math.max(0, Math.floor(raw));
 }
 
-async function metricsSingleflight(options?: ApiRequestOptions): Promise<DeviceMetrics> {
+async function metricsSingleflight(options?: ApiRequestOptions): Promise<DeviceMetricsResponse> {
   const cacheMs = resolveCacheMs(options);
   const now = Date.now();
   if (!options?.forceRefresh && cacheMs > 0 && metricsCache && now - metricsCache.fetchedAt < cacheMs) {
@@ -32,7 +32,7 @@ async function metricsSingleflight(options?: ApiRequestOptions): Promise<DeviceM
     return metricsInflight;
   }
 
-  metricsInflight = apiFetchCachedJson<DeviceMetrics>(
+  metricsInflight = apiFetchCachedJson<DeviceMetricsResponse>(
     '/device/metrics',
     {
       cached: metricsCache?.value,

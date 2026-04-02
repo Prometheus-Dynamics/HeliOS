@@ -1,0 +1,10 @@
+[units."helios-updater.socket"]
+enabled = true
+src = "assets/services/helios-updater/helios-updater.socket"
+unit = "helios-updater.socket"
+targets = ["sockets"]
+
+[units."helios-updater"]
+enabled = true
+src = "assets/services/helios-updater/helios-updater.service"
+targets = ["network", "multi-user"]

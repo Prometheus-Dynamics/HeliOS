@@ -341,8 +341,6 @@ export const StreamsApi = {
     args: Parameters<typeof EngineStreamsService.getPipelineOutputSample>[0],
     options?: ApiRequestOptions
   ) => runApiRequest(() => EngineStreamsService.getPipelineOutputSample(args), { label: 'getPipelineOutputSample', ...options }),
-  streamFormat: (args: Parameters<typeof EngineStreamsService.streamFormat>[0], options?: ApiRequestOptions) =>
-    runApiRequest(() => EngineStreamsService.streamFormat(args), { label: 'streamFormat', ...options }),
   getControls: (args: Parameters<typeof EngineStreamsService.getControls>[0], options?: ApiRequestOptions) =>
     runApiRequest(() => EngineStreamsService.getControls(args), { label: 'getControls', ...options }),
   deleteStream: (args: Parameters<typeof EngineStreamsService.deleteStream>[0], options?: ApiRequestOptions) =>
@@ -352,6 +350,8 @@ export const StreamsApi = {
   listCodecs: (options?: ApiRequestOptions) => codecInventorySingleflight(options),
   startStream: (args: Parameters<typeof EngineStreamsService.startStream>[0], options?: ApiRequestOptions) =>
     runApiRequest(() => EngineStreamsService.startStream(args), { label: 'startStream', timeoutMs: 45_000, ...options }),
+  updateStream: (args: Parameters<typeof EngineStreamsService.updateStream>[0], options?: ApiRequestOptions) =>
+    runApiRequest(() => EngineStreamsService.updateStream(args), { label: 'updateStream', timeoutMs: 45_000, ...options }),
   registerNetcamStream: async (input: RegisterNetcamStreamInput, options?: ApiRequestOptions) => {
     const capabilities = await streamCapabilitiesSingleflight(options);
     return runApiRequest(

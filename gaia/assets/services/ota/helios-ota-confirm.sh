@@ -1,6 +1,22 @@
 #!/bin/sh
 set -eu
 
+if [ -r /etc/helios/storage-layout.env ]; then
+  # shellcheck source=/etc/helios/storage-layout.env
+  . /etc/helios/storage-layout.env
+fi
+
+BOOT_LABEL="${HELIOS_LAYOUT_BOOT_LABEL:-BOOT}"
+BOOT_PARTITION="${HELIOS_LAYOUT_BOOT_PARTITION:-1}"
+DATA_LABEL="${HELIOS_LAYOUT_DATA_LABEL:-DATA}"
+SLOT_A_NAME="${HELIOS_LAYOUT_SLOT_A_NAME:-ACTIVE}"
+SLOT_A_LABEL="${HELIOS_LAYOUT_SLOT_A_LABEL:-ACTIVE}"
+SLOT_A_PARTITION="${HELIOS_LAYOUT_SLOT_A_PARTITION:-2}"
+SLOT_B_NAME="${HELIOS_LAYOUT_SLOT_B_NAME:-RESERVE}"
+SLOT_B_LABEL="${HELIOS_LAYOUT_SLOT_B_LABEL:-RESERVE}"
+SLOT_B_PARTITION="${HELIOS_LAYOUT_SLOT_B_PARTITION:-3}"
+SLOT_SCHEME="${HELIOS_LAYOUT_SLOT_SCHEME:-ext4_labels}"
+
 canon() { readlink -f "$1" 2>/dev/null || echo "$1"; }
 
 set_label() {
@@ -41,8 +57,8 @@ boot_part_from_config() {
 
 find_boot_dev() {
   boot_dev=""
-  if [ -e /dev/disk/by-label/BOOT ]; then
-    boot_dev=$(canon /dev/disk/by-label/BOOT)
+  if [ -n "$BOOT_LABEL" ] && [ -e "/dev/disk/by-label/$BOOT_LABEL" ]; then
+    boot_dev=$(canon "/dev/disk/by-label/$BOOT_LABEL")
   fi
   if [ -z "$boot_dev" ]; then
     cfg_boot="$(boot_part_from_config || true)"
@@ -50,12 +66,12 @@ find_boot_dev() {
       boot_dev=$(canon "$cfg_boot")
     fi
   fi
-  if [ -z "$boot_dev" ] && [ -e /dev/disk/by-label/DATA ]; then
-    data_dev=$(canon /dev/disk/by-label/DATA)
-    boot_dev=$(part_dev "$(disk_from_part "$data_dev")" 1)
+  if [ -z "$boot_dev" ] && [ -n "$DATA_LABEL" ] && [ -e "/dev/disk/by-label/$DATA_LABEL" ]; then
+    data_dev=$(canon "/dev/disk/by-label/$DATA_LABEL")
+    boot_dev=$(part_dev "$(disk_from_part "$data_dev")" "$BOOT_PARTITION")
   fi
   if [ -z "$boot_dev" ] && [ -n "$rootdev" ]; then
-    boot_dev=$(part_dev "$(disk_from_part "$rootdev")" 1)
+    boot_dev=$(part_dev "$(disk_from_part "$rootdev")" "$BOOT_PARTITION")
   fi
   [ -b "$boot_dev" ] || return 1
   printf '%s\n' "$boot_dev"
@@ -131,9 +147,9 @@ for l in /dev/disk/by-label/*; do
   tgt=$(canon "$l")
   if [ "$tgt" = "$rootcanon" ]; then
     base=$(basename "$l")
-    case "$base" in
-      ACTIVE|RESERVE) rootlabel="$base" ;;
-    esac
+    if [ "$base" = "$SLOT_A_LABEL" ] || [ "$base" = "$SLOT_B_LABEL" ]; then
+      rootlabel="$base"
+    fi
   fi
 done
 
@@ -162,73 +178,73 @@ if [ -f "$ota_dir/pending" ]; then
 fi
 
 if [ -n "$pending" ]; then
-  if [ -e /dev/disk/by-label/ACTIVE ] || [ -e /dev/disk/by-label/RESERVE ]; then
-    slot_a_dev="$(canon /dev/disk/by-label/ACTIVE 2>/dev/null || true)"
-    slot_b_dev="$(canon /dev/disk/by-label/RESERVE 2>/dev/null || true)"
+  if [ -n "$SLOT_A_LABEL" ] && [ -n "$SLOT_B_LABEL" ] && { [ -e "/dev/disk/by-label/$SLOT_A_LABEL" ] || [ -e "/dev/disk/by-label/$SLOT_B_LABEL" ]; }; then
+    slot_a_dev="$(canon "/dev/disk/by-label/$SLOT_A_LABEL" 2>/dev/null || true)"
+    slot_b_dev="$(canon "/dev/disk/by-label/$SLOT_B_LABEL" 2>/dev/null || true)"
     current_slot=""
     if [ -n "$rootlabel" ]; then
       current_slot="$rootlabel"
-    elif current_slot=$(slot_from_value "$cmdline_root" "ACTIVE" "$slot_a_dev" "RESERVE" "$slot_b_dev" 2>/dev/null); then
+    elif current_slot=$(slot_from_value "$cmdline_root" "$SLOT_A_LABEL" "$slot_a_dev" "$SLOT_B_LABEL" "$slot_b_dev" 2>/dev/null); then
       :
     fi
     target_slot=""
-    if target_slot=$(slot_from_value "$pending" "ACTIVE" "$slot_a_dev" "RESERVE" "$slot_b_dev" 2>/dev/null); then
+    if target_slot=$(slot_from_value "$pending" "$SLOT_A_LABEL" "$slot_a_dev" "$SLOT_B_LABEL" "$slot_b_dev" 2>/dev/null); then
       :
     fi
 
     if [ -n "$current_slot" ] && [ "$current_slot" = "$target_slot" ]; then
       active_dev=""
       reserve_dev=""
-      if [ "$current_slot" = "ACTIVE" ]; then
+      if [ "$current_slot" = "$SLOT_A_LABEL" ]; then
         active_dev="$slot_a_dev"
         reserve_dev="$slot_b_dev"
-      elif [ "$current_slot" = "RESERVE" ]; then
+      elif [ "$current_slot" = "$SLOT_B_LABEL" ]; then
         active_dev="$slot_b_dev"
         reserve_dev="$slot_a_dev"
       fi
 
       if [ -n "$active_dev" ] && [ -n "$reserve_dev" ]; then
         set_label "$reserve_dev" "HELIOS-TMP" || true
-        set_label "$active_dev" "ACTIVE" || true
-        set_label "$reserve_dev" "RESERVE" || true
+        set_label "$active_dev" "$SLOT_A_LABEL" || true
+        set_label "$reserve_dev" "$SLOT_B_LABEL" || true
         if command -v udevadm >/dev/null 2>&1; then
           udevadm trigger --subsystem-match=block >/dev/null 2>&1 || true
           udevadm settle >/dev/null 2>&1 || true
         fi
       fi
 
-      printf '%s\n' "ACTIVE" > "$ota_dir/active"
-      printf '%s\n' "RESERVE" > "$ota_dir/reserve"
-      printf '%s\n' "ACTIVE" > "$ota_state_dir/active"
-      printf '%s\n' "RESERVE" > "$ota_state_dir/reserve"
+      printf '%s\n' "$SLOT_A_NAME" > "$ota_dir/active"
+      printf '%s\n' "$SLOT_B_NAME" > "$ota_dir/reserve"
+      printf '%s\n' "$SLOT_A_NAME" > "$ota_state_dir/active"
+      printf '%s\n' "$SLOT_B_NAME" > "$ota_state_dir/reserve"
       rm -f "$ota_dir/pending"
       rm -f "$ota_state_dir/pending" /root/helios-updater/ota/pending
     fi
   else
     data_dev=""
-    if [ -e /dev/disk/by-label/DATA ]; then
-      data_dev="$(canon /dev/disk/by-label/DATA)"
+    if [ -n "$DATA_LABEL" ] && [ -e "/dev/disk/by-label/$DATA_LABEL" ]; then
+      data_dev="$(canon "/dev/disk/by-label/$DATA_LABEL")"
     fi
     if [ -n "$data_dev" ]; then
       disk="$(disk_from_part "$data_dev")"
-      slot_a_dev="$(part_dev "$disk" 2)"
-      slot_b_dev="$(part_dev "$disk" 3)"
+      slot_a_dev="$(part_dev "$disk" "$SLOT_A_PARTITION")"
+      slot_b_dev="$(part_dev "$disk" "$SLOT_B_PARTITION")"
       current_slot=""
-      if current_slot=$(slot_from_value "$cmdline_root" "ROOT_A" "$slot_a_dev" "ROOT_B" "$slot_b_dev" 2>/dev/null); then
+      if current_slot=$(slot_from_value "$cmdline_root" "$SLOT_A_NAME" "$slot_a_dev" "$SLOT_B_NAME" "$slot_b_dev" 2>/dev/null); then
         :
       elif [ -f "$ota_dir/active" ]; then
         current_slot=$(cat "$ota_dir/active" || true)
       fi
       target_slot=""
-      if target_slot=$(slot_from_value "$pending" "ROOT_A" "$slot_a_dev" "ROOT_B" "$slot_b_dev" 2>/dev/null); then
+      if target_slot=$(slot_from_value "$pending" "$SLOT_A_NAME" "$slot_a_dev" "$SLOT_B_NAME" "$slot_b_dev" 2>/dev/null); then
         :
       fi
 
       if [ -n "$current_slot" ] && [ "$current_slot" = "$target_slot" ]; then
-        if [ "$current_slot" = "ROOT_A" ]; then
-          reserve_slot="ROOT_B"
+        if [ "$current_slot" = "$SLOT_A_NAME" ]; then
+          reserve_slot="$SLOT_B_NAME"
         else
-          reserve_slot="ROOT_A"
+          reserve_slot="$SLOT_A_NAME"
         fi
         printf '%s\n' "$current_slot" > "$ota_dir/active"
         printf '%s\n' "$reserve_slot" > "$ota_dir/reserve"

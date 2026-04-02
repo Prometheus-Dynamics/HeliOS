@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::http::streams::types::StreamPreviewFormat;
+
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum PeerStatus {
@@ -300,6 +302,7 @@ pub struct PeerRemoteStreamSummary {
     pub outputs: Vec<PeerStreamOutputSummary>,
     #[serde(default)]
     pub imu_output_keys: Vec<String>,
+    pub preview_format: StreamPreviewFormat,
     pub proxy_preview_url: String,
     pub proxy_frame_url: String,
     pub proxy_format_url: String,

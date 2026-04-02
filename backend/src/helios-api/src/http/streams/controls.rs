@@ -325,16 +325,11 @@ pub(crate) async fn set_control(state: AppState, id: Uuid, control_id: u32, valu
                     && let Some(mut manifest) = stream_manifest.clone()
                 {
                     // File replay controls can hang while seeking/decoder reconfigures. Recover by
-                    // restarting the stream with the intended control set so frame output doesn't wedge.
+                    // updating the stream transactionally so runtime restart and persistence stay in sync.
                     for (restart_control_id, restart_control_value) in &controls_to_apply {
                         apply_control_to_manifest(&mut manifest, *restart_control_id, restart_control_value.clone());
                     }
-                    if let Err(err) = streams_persist::persist_manifest_auto_camera_id_checked(Some(id), manifest.clone()).await {
-                        return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("control update failed to persist before replay restart: {err}"))))
-                            .into_response();
-                    }
-                    let _ = state.engine.stop_stream(id).await;
-                    let restart = lifecycle::start_stream(state.clone(), manifest).await;
+                    let restart = lifecycle::update_stream(state.clone(), id, manifest).await;
                     if restart.status().is_success() {
                         return StatusCode::NO_CONTENT.into_response();
                     }

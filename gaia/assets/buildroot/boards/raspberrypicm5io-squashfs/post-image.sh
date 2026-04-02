@@ -26,6 +26,13 @@ resolve_repo_root() {
 
 REPO_ROOT="$(resolve_repo_root || true)"
 BASE_BOARD_DIR="$(realpath -m "${BOARD_DIR}/../raspberrypicm5io")"
+LAYOUT_DIR="${REPO_ROOT}/assets/generated/storage-layouts"
+SQUASHFS_LAYOUT_MANIFEST="${LAYOUT_DIR}/squashfs-ab.toml"
+SQUASHFS_LAYOUT_ENV="${LAYOUT_DIR}/squashfs-ab.env"
+if [ -f "${SQUASHFS_LAYOUT_ENV}" ]; then
+	# shellcheck disable=SC1090
+	. "${SQUASHFS_LAYOUT_ENV}"
+fi
 
 BOOT_IMG_URL="${BOOT_IMG_URL:-https://downloads.raspberrypi.com/raspios_arm64/images/raspios_arm64-2025-12-04/2025-12-04-raspios-trixie-arm64.img.xz}"
 BOOT_IMG_SHA256="${BOOT_IMG_SHA256:-f7afb40e587746128538d84f217bf478a23af59484d4db77f2d06bf647f7c82e}"
@@ -85,7 +92,7 @@ build_initramfs() {
 
 	rm -rf "${init_root}"
 	mkdir -p "${init_root}/bin" "${init_root}/lib" "${init_root}/usr" \
-		"${init_root}/proc" "${init_root}/sys" "${init_root}/dev" \
+		"${init_root}/proc" "${init_root}/sys" "${init_root}/dev" "${init_root}/etc/helios" \
 		"${init_root}/mnt/lower" "${init_root}/mnt/data" "${init_root}/newroot"
 	ln -sfn lib "${init_root}/lib64"
 	ln -sfn ../lib "${init_root}/usr/lib64"
@@ -103,6 +110,9 @@ build_initramfs() {
 	install -m 0755 "${target_lib}/ld-linux-aarch64.so.1" "${init_root}/lib/ld-linux-aarch64.so.1"
 	install -m 0644 "${target_lib}/libc.so.6" "${init_root}/lib/libc.so.6"
 	install -m 0644 "${target_lib}/libresolv.so.2" "${init_root}/lib/libresolv.so.2"
+	if [ -f "${SQUASHFS_LAYOUT_ENV}" ]; then
+		install -m 0644 "${SQUASHFS_LAYOUT_ENV}" "${init_root}/etc/helios/storage-layout.env"
+	fi
 
 	cat > "${init_root}/init" <<'EOF'
 #!/bin/sh
@@ -114,18 +124,34 @@ panic_shell() {
 	exec sh
 }
 
-ROOT_DEV="/dev/mmcblk0p2"
-BOOT_DEV="/dev/mmcblk0p1"
+LAYOUT_ENV="/etc/helios/storage-layout.env"
+if [ -r "${LAYOUT_ENV}" ]; then
+	# shellcheck source=/etc/helios/storage-layout.env
+	. "${LAYOUT_ENV}"
+fi
+
+BOOT_PARTITION="${HELIOS_LAYOUT_BOOT_PARTITION:-1}"
+SLOT_A_NAME="${HELIOS_LAYOUT_SLOT_A_NAME:-ROOT_A}"
+SLOT_A_PARTITION="${HELIOS_LAYOUT_SLOT_A_PARTITION:-2}"
+SLOT_B_NAME="${HELIOS_LAYOUT_SLOT_B_NAME:-ROOT_B}"
+SLOT_B_PARTITION="${HELIOS_LAYOUT_SLOT_B_PARTITION:-3}"
+DATA_PARTITION="${HELIOS_LAYOUT_DATA_PARTITION:-4}"
+
+ROOT_DEV="/dev/mmcblk0p${SLOT_A_PARTITION}"
+BOOT_DEV="/dev/mmcblk0p${BOOT_PARTITION}"
 DATA_DEV=""
 DEBUG_MOUNT="/mnt/boot-debug"
-DATA_MARKER="/mnt/data/.provision.data_v1"
-ROOT_CANDIDATES="/dev/mmcblk0p2 /dev/mmcblk0p3 /dev/mmcblk1p2 /dev/mmcblk1p3 /dev/sda2 /dev/sda3 /dev/sdb2 /dev/sdb3 /dev/nvme0n1p2 /dev/nvme0n1p3"
-BOOT_CANDIDATES="/dev/mmcblk0p1 /dev/mmcblk1p1 /dev/sda1 /dev/sdb1 /dev/nvme0n1p1"
-		DATA_CANDIDATES="/dev/mmcblk0p4 /dev/mmcblk1p4 /dev/sda4 /dev/sdb4 /dev/nvme0n1p4 /dev/mmcblk0p3 /dev/mmcblk1p3 /dev/sda3 /dev/sdb3 /dev/nvme0n1p3"
+REQUEST_MOUNT="/mnt/boot-request"
+DATA_MARKER="${HELIOS_LAYOUT_DATA_SECONDARY_MARKER:-/mnt/data/.provision.data_v1}"
+REPARTITION_REQUEST_PATH="${REQUEST_MOUNT}/helios/ota/repartition-request.env"
+ROOT_CANDIDATES=""
+BOOT_CANDIDATES=""
+DATA_CANDIDATES=""
 DATA_DEV_EXPLICIT=0
 BOOT_DEBUG=0
+FORCE_TMPFS_WRITABLE=0
 OVERLAY_SLOT="root-a"
-ROOT_SLOT="ROOT_A"
+ROOT_SLOT="${SLOT_A_NAME}"
 
 is_mounted() {
 	local target="$1"
@@ -168,6 +194,16 @@ partition_dev() {
 	esac
 }
 
+build_candidate_devices() {
+	local part="$1"
+	printf '/dev/mmcblk0p%s /dev/mmcblk1p%s /dev/sda%s /dev/sdb%s /dev/nvme0n1p%s' \
+		"${part}" "${part}" "${part}" "${part}" "${part}"
+}
+
+ROOT_CANDIDATES="$(build_candidate_devices "${SLOT_A_PARTITION}") $(build_candidate_devices "${SLOT_B_PARTITION}")"
+BOOT_CANDIDATES="$(build_candidate_devices "${BOOT_PARTITION}")"
+DATA_CANDIDATES="$(build_candidate_devices "${DATA_PARTITION}") $(build_candidate_devices "${SLOT_B_PARTITION}")"
+
 wait_for_block() {
 	local dev="$1"
 	local root_wait=0
@@ -203,6 +239,39 @@ mount_boot_debug() {
 	done
 
 	return 1
+}
+
+mount_boot_request() {
+	local candidate
+
+	mkdir -p "${REQUEST_MOUNT}" 2>/dev/null || true
+	if is_mounted "${REQUEST_MOUNT}"; then
+		return 0
+	fi
+
+	for candidate in "${BOOT_DEV}" ${BOOT_CANDIDATES}; do
+		[ -n "${candidate}" ] || continue
+		wait_for_block "${candidate}" || continue
+		if mount -t vfat -o ro "${candidate}" "${REQUEST_MOUNT}" 2>/dev/null; then
+			BOOT_DEV="${candidate}"
+			return 0
+		fi
+	done
+
+	return 1
+}
+
+offline_data_borrow_requested() {
+	local found=1
+
+	if mount_boot_request; then
+		if [ -f "${REPARTITION_REQUEST_PATH}" ]; then
+			found=0
+		fi
+		umount "${REQUEST_MOUNT}" 2>/dev/null || true
+	fi
+
+	return "${found}"
 }
 
 mark() {
@@ -275,14 +344,7 @@ resolve_root_dev() {
 		[ -b "${candidate}" ] || continue
 		if mount -t squashfs -o ro "${candidate}" /mnt/probe 2>/dev/null; then
 			umount /mnt/probe 2>/dev/null || true
-			case "${candidate}" in
-				*p3|*3)
-					ROOT_SLOT="ROOT_B"
-					;;
-				*)
-					ROOT_SLOT="ROOT_A"
-					;;
-			esac
+			ROOT_SLOT="$(slot_for_root_dev "${candidate}")"
 			echo "${candidate}"
 			return 0
 		fi
@@ -292,20 +354,11 @@ resolve_root_dev() {
 }
 
 resolve_requested_root_slot() {
-	case "${ROOT_DEV}" in
-		/dev/helios-rootfs)
-			read_active_slot_marker || printf '%s\n' "ROOT_A"
-			;;
-		/dev/*p2|/dev/*2)
-			printf '%s\n' "ROOT_A"
-			;;
-		/dev/*p3|/dev/*3)
-			printf '%s\n' "ROOT_B"
-			;;
-		*)
-			return 1
-			;;
-	esac
+	if [ "${ROOT_DEV}" = "/dev/helios-rootfs" ]; then
+		read_active_slot_marker || printf '%s\n' "${SLOT_A_NAME}"
+		return 0
+	fi
+	slot_for_root_dev "${ROOT_DEV}"
 }
 
 resolve_base_disk() {
@@ -336,11 +389,11 @@ root_device_for_slot() {
 
 	base="$(resolve_base_disk)" || return 1
 	case "${slot}" in
-		ROOT_A)
-			partition_dev "${base}" 2
+		"${SLOT_A_NAME}")
+			partition_dev "${base}" "${SLOT_A_PARTITION}"
 			;;
-		ROOT_B)
-			partition_dev "${base}" 3
+		"${SLOT_B_NAME}")
+			partition_dev "${base}" "${SLOT_B_PARTITION}"
 			;;
 		*)
 			return 1
@@ -360,12 +413,10 @@ read_active_slot_marker() {
 		if mount -t ext4 -o ro "${candidate}" "${mountpoint}" 2>/dev/null; then
 			active="$(cat "${mountpoint}/ota/active" 2>/dev/null || true)"
 			umount "${mountpoint}" 2>/dev/null || true
-			case "${active}" in
-				ROOT_A|ROOT_B)
-					printf '%s\n' "${active}"
-					return 0
-					;;
-			esac
+			if [ "${active}" = "${SLOT_A_NAME}" ] || [ "${active}" = "${SLOT_B_NAME}" ]; then
+				printf '%s\n' "${active}"
+				return 0
+			fi
 		fi
 	done
 
@@ -375,12 +426,10 @@ read_active_slot_marker() {
 		if mount -t vfat -o ro "${candidate}" "${mountpoint}" 2>/dev/null; then
 			active="$(cat "${mountpoint}/helios/ota/active" 2>/dev/null || true)"
 			umount "${mountpoint}" 2>/dev/null || true
-			case "${active}" in
-				ROOT_A|ROOT_B)
-					printf '%s\n' "${active}"
-					return 0
-					;;
-			esac
+			if [ "${active}" = "${SLOT_A_NAME}" ] || [ "${active}" = "${SLOT_B_NAME}" ]; then
+				printf '%s\n' "${active}"
+				return 0
+			fi
 		fi
 	done
 
@@ -393,16 +442,16 @@ derive_related_devices() {
 	base="$(partition_base "${ROOT_DEV}")"
 	[ -n "${base}" ] || return 1
 
-	BOOT_DEV="$(partition_dev "${base}" 1)"
+	BOOT_DEV="$(partition_dev "${base}" "${BOOT_PARTITION}")"
 	if [ "${DATA_DEV_EXPLICIT}" -ne 1 ]; then
-		DATA_DEV="$(partition_dev "${base}" 4)"
+		DATA_DEV="$(partition_dev "${base}" "${DATA_PARTITION}")"
 	fi
 	return 0
 }
 
 set_overlay_slot() {
 	case "${ROOT_SLOT}" in
-		ROOT_B)
+		"${SLOT_B_NAME}")
 			OVERLAY_SLOT="root-b"
 			;;
 		*)
@@ -412,14 +461,21 @@ set_overlay_slot() {
 }
 
 slot_for_root_dev() {
-	case "$1" in
-		*p3|*3)
-			printf '%s\n' "ROOT_B"
-			;;
-		*)
-			printf '%s\n' "ROOT_A"
-			;;
-	esac
+	local root_dev="$1"
+	local slot_a_dev
+	local slot_b_dev
+
+	slot_a_dev="$(root_device_for_slot "${SLOT_A_NAME}" 2>/dev/null || true)"
+	slot_b_dev="$(root_device_for_slot "${SLOT_B_NAME}" 2>/dev/null || true)"
+	if [ -n "${slot_b_dev}" ] && [ "${root_dev}" = "${slot_b_dev}" ]; then
+		printf '%s\n' "${SLOT_B_NAME}"
+		return 0
+	fi
+	if [ -n "${slot_a_dev}" ] && [ "${root_dev}" = "${slot_a_dev}" ]; then
+		printf '%s\n' "${SLOT_A_NAME}"
+		return 0
+	fi
+	return 1
 }
 
 ensure_data_dev() {
@@ -470,7 +526,14 @@ mark "20-root-device-found"
 mount -t squashfs -o ro "${ROOT_DEV}" /mnt/lower || panic_shell "failed to mount lower squashfs"
 mark "30-lower-mounted"
 
-if ensure_data_dev && [ -b "${DATA_DEV}" ]; then
+if offline_data_borrow_requested; then
+	FORCE_TMPFS_WRITABLE=1
+	mark "35-repartition-request-detected"
+fi
+
+if [ "${FORCE_TMPFS_WRITABLE}" -eq 1 ]; then
+	mount -t tmpfs -o mode=0755 tmpfs /mnt/data || panic_shell "failed to mount tmpfs writable store"
+elif ensure_data_dev && [ -b "${DATA_DEV}" ]; then
 	if mount -t ext4 -o rw,noatime "${DATA_DEV}" /mnt/data; then
 		if [ ! -f "${DATA_MARKER}" ]; then
 			umount /mnt/data 2>/dev/null || true
@@ -658,5 +721,12 @@ genimage \
 	--inputpath "${BINARIES_DIR}" \
 	--outputpath "${BINARIES_DIR}" \
 	--config "${GENIMAGE_CFG}"
+
+if [ -f "${SQUASHFS_LAYOUT_MANIFEST}" ]; then
+	python3 "${REPO_ROOT}/tools/storage-layout/render_layout_assets.py" \
+		validate-image \
+		--layout "${SQUASHFS_LAYOUT_MANIFEST}" \
+		--image "${BINARIES_DIR}/sdcard.img"
+fi
 
 exit $?

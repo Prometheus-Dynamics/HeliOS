@@ -1,0 +1,7 @@
+[units."helios-ide"]
+enabled = false
+src = "assets/services/helios-ide/helios-ide.service"
+targets = ["multi-user"]
+assets = [
+  { src = "assets/services/helios-ide/helios-ide-setup.sh", dst = "/usr/local/bin/helios-ide-setup.sh", mode = 493 },
+]

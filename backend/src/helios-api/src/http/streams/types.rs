@@ -8,12 +8,33 @@ use styx::codec::CodecKind;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+#[derive(Debug, Serialize, Deserialize, ToSchema, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StreamPreviewFormat {
+    Mjpeg,
+    H264,
+    H265,
+    Unknown,
+}
+
+impl StreamPreviewFormat {
+    pub fn from_encoder_selector(selector: Option<&str>) -> Self {
+        match helios_engine::ipc::preview_format_for_encoder_selector(selector) {
+            "mjpeg" => Self::Mjpeg,
+            "h264" => Self::H264,
+            "h265" => Self::H265,
+            _ => Self::Unknown,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, ToSchema, Clone)]
 pub struct StreamInfo {
     pub id: Uuid,
     pub descriptor: CaptureDescriptor,
     pub manifest: StreamManifest,
     pub resolved: ResolvedStreamConfig,
+    pub preview_format: StreamPreviewFormat,
     #[serde(default)]
     pub status: Option<StreamStatus>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -25,6 +46,7 @@ pub struct StreamInspectInfo {
     pub id: Uuid,
     pub descriptor: CaptureDescriptor,
     pub resolved: ResolvedStreamConfig,
+    pub preview_format: StreamPreviewFormat,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capture: Option<StreamCaptureRuntimeState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -44,7 +66,7 @@ impl From<StreamInfo> for StreamInspectInfo {
         let consumer_demand = value.runtime.as_ref().map(|runtime| runtime.demand.clone());
         let recording = value.runtime.as_ref().map(|runtime| runtime.recording.clone());
         let pipeline = value.runtime.as_ref().map(|runtime| runtime.pipeline.clone());
-        Self { id: value.id, descriptor: value.descriptor, resolved: value.resolved, capture, codec_chain, consumer_demand, recording, pipeline }
+        Self { id: value.id, descriptor: value.descriptor, resolved: value.resolved, preview_format: value.preview_format, capture, codec_chain, consumer_demand, recording, pipeline }
     }
 }
 
@@ -52,6 +74,20 @@ impl From<StreamInfo> for StreamInspectInfo {
 pub struct StartStreamResponse {
     pub stream_id: Uuid,
     pub descriptor: CaptureDescriptor,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StreamUpdateAction {
+    Restarted,
+    PersistedOnly,
+}
+
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct UpdateStreamResponse {
+    pub stream_id: Uuid,
+    pub descriptor: CaptureDescriptor,
+    pub action: StreamUpdateAction,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

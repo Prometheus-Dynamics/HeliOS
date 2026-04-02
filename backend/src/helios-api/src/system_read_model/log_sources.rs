@@ -3,20 +3,16 @@ use std::process::Stdio;
 use std::sync::OnceLock;
 
 use tokio::process::{Child, Command};
-use tokio::time::{Duration, Instant};
+use tokio::time::Duration;
 use tracing::warn;
 
+use crate::api_observability::ApiCacheMetric;
 use crate::logs;
 use crate::logs::LogSource;
 
-use super::{SystemReadModelState, read_duration_env};
-
-#[derive(Clone)]
-pub(super) struct LogSourcesCacheEntry {
-    pub(super) fetched_at: Instant,
-    pub(super) revision: u64,
-    pub(super) payload: Vec<LogSource>,
-}
+use super::config::read_duration_env;
+use super::freshness::{ReadModelFreshnessReason, ReadModelRefreshOutcome, ReadModelSnapshot};
+use super::state::SystemReadModelState;
 
 fn log_sources_cache_ttl() -> Duration {
     static TTL: OnceLock<Duration> = OnceLock::new();
@@ -90,47 +86,27 @@ dmesg 2>/dev/null | tail -n {n}
 }
 
 impl SystemReadModelState {
-    pub async fn load_log_sources_snapshot(&self) -> (Vec<LogSource>, u64) {
-        let ttl = log_sources_cache_ttl();
-        if ttl != Duration::from_millis(0)
-            && let Some(entry) = self.log_sources_cache.read().await.clone()
-            && entry.fetched_at.elapsed() < ttl
-        {
-            self.log_sources_stats.record_hit();
-            return (entry.payload, entry.revision);
-        }
+    pub fn log_sources_cache_metrics(&self) -> ApiCacheMetric {
+        self.log_sources_cache.metrics()
+    }
 
-        self.log_sources_stats.record_miss();
-        let _refresh_guard = self.log_sources_refresh_lock.lock().await;
-        if ttl != Duration::from_millis(0)
-            && let Some(entry) = self.log_sources_cache.read().await.clone()
-            && entry.fetched_at.elapsed() < ttl
-        {
-            self.log_sources_stats.record_hit();
-            return (entry.payload, entry.revision);
-        }
-
-        let stale = self.log_sources_cache.read().await.clone();
-        let base = build_log_sources();
-        let sources = match tokio::time::timeout(log_sources_refresh_timeout(), logs::hydrate_systemd_statuses(base.clone())).await {
-            Ok(hydrated) => hydrated,
-            Err(_) => {
-                warn!(timeout_ms = log_sources_refresh_timeout().as_millis(), "log source hydration timed out");
-                if let Some(entry) = stale {
-                    self.log_sources_stats.record_stale_fallback();
-                    return (entry.payload, entry.revision);
+    pub async fn load_log_sources_snapshot(&self) -> ReadModelSnapshot<Vec<LogSource>> {
+        self.log_sources_cache
+            .load_snapshot(log_sources_cache_ttl(), || async {
+                let base = build_log_sources();
+                match tokio::time::timeout(log_sources_refresh_timeout(), logs::hydrate_systemd_statuses(base.clone())).await {
+                    Ok(hydrated) => ReadModelRefreshOutcome::fresh(hydrated),
+                    Err(_) => {
+                        warn!(timeout_ms = log_sources_refresh_timeout().as_millis(), "log source hydration timed out");
+                        ReadModelRefreshOutcome::stale_fallback(base, ReadModelFreshnessReason::RefreshTimeout)
+                    }
                 }
-                base
-            }
-        };
-
-        let revision = self.log_sources_stats.record_refresh();
-        *self.log_sources_cache.write().await = Some(LogSourcesCacheEntry { fetched_at: Instant::now(), revision, payload: sources.clone() });
-        (sources, revision)
+            })
+            .await
     }
 
     pub async fn load_log_sources(&self) -> Vec<LogSource> {
-        self.load_log_sources_snapshot().await.0
+        self.load_log_sources_snapshot().await.payload.unwrap_or_default()
     }
 
     pub async fn resolve_log_source(&self, source_id: &str) -> Option<LogSource> {

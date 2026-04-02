@@ -4,7 +4,17 @@ set -eu
 status_file=/run/helios/provision-status.env
 provision_status=unknown
 booted_tmpfs=0
-effective_provisions=/run/helios/provisions.effective.toml
+layout_manifest=/etc/helios/storage-layout.toml
+layout_env=/etc/helios/storage-layout.env
+provision_manifest=/etc/helios/storage-layout.toml
+repartition_request_present=0
+repartition_update_id=
+repartition_layout_copy=/run/helios-provision/repartition-layout.toml
+
+if [ -r "$layout_env" ]; then
+  # shellcheck source=/etc/helios/storage-layout.env
+  . "$layout_env"
+fi
 
 canon() {
   readlink -f "$1" 2>/dev/null || printf '%s\n' "$1"
@@ -64,39 +74,6 @@ read_block_size_mib() {
   printf '%s\n' $(( (sectors * sector_bytes + 1048576 - 1) / 1048576 ))
 }
 
-compute_root_slot_size_mib() {
-  boot_dev="$(find_boot_dev || true)"
-  if [ -z "$boot_dev" ]; then
-    printf '%s\n' "112"
-    return 0
-  fi
-
-  disk=$(disk_from_part "$boot_dev")
-  root_a_dev=$(part_dev "$disk" 2)
-  root_a_size_mib=$(read_block_size_mib "$root_a_dev" 2>/dev/null || true)
-  boot_size_mib=$(read_block_size_mib "$boot_dev" 2>/dev/null || true)
-  if [ -z "$root_a_size_mib" ] || [ -z "$boot_size_mib" ]; then
-    printf '%s\n' "112"
-    return 0
-  fi
-
-  slot_start_mib=$(align_up_mib "$boot_size_mib" 4)
-  slot_size_mib=$(( root_a_size_mib - (slot_start_mib - boot_size_mib) ))
-  if [ "$slot_size_mib" -le 0 ]; then
-    printf '%s\n' "112"
-    return 0
-  fi
-
-  align_up_mib "$slot_size_mib" 4
-}
-
-render_provision_config() {
-  slot_size_mib="$(compute_root_slot_size_mib)"
-  install -d -m0755 /run/helios
-  sed "s/__ROOT_SLOT_SIZE_MIB__/${slot_size_mib}/g" /etc/helios/provisions.toml > "$effective_provisions"
-  printf '%s\n' "$effective_provisions"
-}
-
 boot_part_from_config() {
   [ -r /etc/helios/bootloader.conf ] || return 1
   awk -F= '$1=="boot_partition"{print $2}' /etc/helios/bootloader.conf | head -n 1
@@ -125,8 +102,11 @@ reboot_immediately() {
 
 find_boot_dev() {
   boot_dev=""
-  if [ -e /dev/disk/by-label/BOOT ]; then
-    boot_dev=$(canon /dev/disk/by-label/BOOT)
+  boot_label="${HELIOS_LAYOUT_BOOT_LABEL:-BOOT}"
+  boot_part="${HELIOS_LAYOUT_BOOT_PARTITION:-1}"
+  data_label="${HELIOS_LAYOUT_DATA_LABEL:-DATA}"
+  if [ -n "$boot_label" ] && [ -e "/dev/disk/by-label/$boot_label" ]; then
+    boot_dev=$(canon "/dev/disk/by-label/$boot_label")
   fi
   if [ -z "$boot_dev" ]; then
     cfg_boot="$(boot_part_from_config || true)"
@@ -134,9 +114,9 @@ find_boot_dev() {
       boot_dev=$(canon "$cfg_boot")
     fi
   fi
-  if [ -z "$boot_dev" ] && [ -e /dev/disk/by-label/DATA ]; then
-    data_dev=$(canon /dev/disk/by-label/DATA)
-    boot_dev=$(part_dev "$(disk_from_part "$data_dev")" 1)
+  if [ -z "$boot_dev" ] && [ -n "$data_label" ] && [ -e "/dev/disk/by-label/$data_label" ]; then
+    data_dev=$(canon "/dev/disk/by-label/$data_label")
+    boot_dev=$(part_dev "$(disk_from_part "$data_dev")" "$boot_part")
   fi
   [ -b "$boot_dev" ] || return 1
   printf '%s\n' "$boot_dev"
@@ -148,23 +128,27 @@ ensure_boot_ota_metadata() {
   mounted=0
 
   data_dev=""
-  if [ -e /dev/disk/by-label/DATA ]; then
-    data_dev=$(canon /dev/disk/by-label/DATA)
+  data_label="${HELIOS_LAYOUT_DATA_LABEL:-DATA}"
+  slot_a_name="${HELIOS_LAYOUT_SLOT_A_NAME:-ROOT_A}"
+  slot_b_name="${HELIOS_LAYOUT_SLOT_B_NAME:-ROOT_B}"
+  reserve_part="${HELIOS_LAYOUT_SLOT_B_PARTITION:-3}"
+  if [ -n "$data_label" ] && [ -e "/dev/disk/by-label/$data_label" ]; then
+    data_dev=$(canon "/dev/disk/by-label/$data_label")
   fi
   [ -n "$data_dev" ] || return 0
   boot_dev="$(find_boot_dev || true)"
 
   disk=$(disk_from_part "$data_dev")
-  reserve_dev=$(part_dev "$disk" 3)
+  reserve_dev=$(part_dev "$disk" "$reserve_part")
   [ -b "$reserve_dev" ] || return 0
 
   ota_state_dir=/var/lib/helios/ota
   install -d -m0755 "$ota_state_dir"
   if [ ! -s "$ota_state_dir/active" ]; then
-    printf '%s\n' "ROOT_A" > "$ota_state_dir/active"
+    printf '%s\n' "$slot_a_name" > "$ota_state_dir/active"
   fi
   if [ ! -s "$ota_state_dir/reserve" ]; then
-    printf '%s\n' "ROOT_B" > "$ota_state_dir/reserve"
+    printf '%s\n' "$slot_b_name" > "$ota_state_dir/reserve"
   fi
 
   [ -n "$boot_dev" ] || return 0
@@ -183,11 +167,88 @@ ensure_boot_ota_metadata() {
   install -d -m0755 "$ota_dir"
 
   if [ ! -s "$ota_dir/active" ]; then
-    printf '%s\n' "ROOT_A" > "$ota_dir/active"
+    printf '%s\n' "$slot_a_name" > "$ota_dir/active"
   fi
   if [ ! -s "$ota_dir/reserve" ]; then
-    printf '%s\n' "ROOT_B" > "$ota_dir/reserve"
+    printf '%s\n' "$slot_b_name" > "$ota_dir/reserve"
   fi
+
+  sync "$boot_mount" 2>/dev/null || true
+  if [ "$mounted" -eq 1 ]; then
+    umount "$boot_mount" || true
+  fi
+}
+
+load_repartition_request() {
+  boot_dev=
+  boot_mount=/run/helios-provision/boot
+  mounted=0
+  request_env=
+  layout_src=
+
+  [ "$booted_tmpfs" -eq 1 ] || return 0
+
+  boot_dev="$(find_boot_dev || true)"
+  [ -n "$boot_dev" ] || return 0
+
+  if mountpoint -q /boot; then
+    boot_mount=/boot
+  else
+    install -d -m0755 "$boot_mount"
+  fi
+  if ! mountpoint -q "$boot_mount"; then
+    mount -o rw "$boot_dev" "$boot_mount" || return 0
+    mounted=1
+  fi
+
+  request_env="$boot_mount/helios/ota/repartition-request.env"
+  layout_src="$boot_mount/helios/ota/repartition-layout.toml"
+  if [ -r "$request_env" ] && [ -r "$layout_src" ]; then
+    # shellcheck source=/dev/null
+    . "$request_env"
+    install -D -m0644 "$layout_src" "$repartition_layout_copy"
+    repartition_request_present=1
+    repartition_update_id="${HELIOS_REPARTITION_UPDATE_ID:-}"
+    provision_manifest="$repartition_layout_copy"
+  fi
+
+  if [ "$mounted" -eq 1 ]; then
+    umount "$boot_mount" || true
+  fi
+}
+
+write_repartition_result() {
+  status="$1"
+  boot_dev=
+  boot_mount=/run/helios-provision/boot
+  mounted=0
+  ota_dir=
+
+  [ "$repartition_request_present" -eq 1 ] || return 0
+
+  boot_dev="$(find_boot_dev || true)"
+  [ -n "$boot_dev" ] || return 0
+
+  if mountpoint -q /boot; then
+    boot_mount=/boot
+  else
+    install -d -m0755 "$boot_mount"
+  fi
+  if ! mountpoint -q "$boot_mount"; then
+    mount -o rw "$boot_dev" "$boot_mount" || return 0
+    mounted=1
+  fi
+
+  ota_dir="$boot_mount/helios/ota"
+  install -d -m0755 "$ota_dir"
+  cat > "$ota_dir/repartition-result.env" <<EOF
+HELIOS_REPARTITION_RESULT_VERSION=1
+HELIOS_REPARTITION_UPDATE_ID=${repartition_update_id}
+HELIOS_REPARTITION_STATUS=${status}
+EOF
+  rm -f \
+    "$ota_dir/repartition-request.env" \
+    "$ota_dir/repartition-layout.toml"
 
   sync "$boot_mount" 2>/dev/null || true
   if [ "$mounted" -eq 1 ]; then
@@ -197,6 +258,8 @@ ensure_boot_ota_metadata() {
 
 seed_data_partition_layout() {
   data_root=/run/helios-provision/data
+  slot_a_name="${HELIOS_LAYOUT_SLOT_A_NAME:-ROOT_A}"
+  slot_b_name="${HELIOS_LAYOUT_SLOT_B_NAME:-ROOT_B}"
 
   mountpoint -q "$data_root" || return 0
 
@@ -218,10 +281,10 @@ seed_data_partition_layout() {
     "$data_root/api-data/localization/maps"
 
   if [ ! -s "$data_root/ota/active" ]; then
-    printf '%s\n' "ROOT_A" > "$data_root/ota/active"
+    printf '%s\n' "$slot_a_name" > "$data_root/ota/active"
   fi
   if [ ! -s "$data_root/ota/reserve" ]; then
-    printf '%s\n' "ROOT_B" > "$data_root/ota/reserve"
+    printf '%s\n' "$slot_b_name" > "$data_root/ota/reserve"
   fi
 
   seed_file_if_missing \
@@ -235,15 +298,17 @@ fi
 
 install -d -m0755 /run/helios /run/helios-provision/data /var/lib/helios
 rm -f "$status_file"
+load_repartition_request
 
-provision_config="$(render_provision_config)"
-/usr/local/bin/helios-provision --config "$provision_config" --status-file "$status_file"
+/usr/local/bin/helios-provision --layout-manifest "$provision_manifest" --status-file "$status_file"
 
 if [ -r "$status_file" ]; then
   # shellcheck source=/dev/null
   . "$status_file"
   provision_status="${PROVISION_STATUS:-unknown}"
 fi
+
+write_repartition_result "$provision_status"
 
 seed_data_partition_layout
 ensure_boot_ota_metadata
