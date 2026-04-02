@@ -61,6 +61,35 @@ Plugins (Daedalus) are searched from:
 - `/usr/lib/helios/plugins/daedalus` (image-provided)
 - `/var/lib/helios/plugins/daedalus` (user-installed/persisted)
 
+## One Canonical Path Rule
+
+Each subsystem gets exactly one canonical runtime path for durable state, identity, or externally visible routing.
+
+Alternate paths are allowed only as temporary migration shims. If code still accepts an old path, that old path is
+considered migration-only and must carry an owner, a delete-by date, and a removal trigger.
+
+Current migration-only alternate paths are registered in `tools/shim_guardrails.json`. Each entry must declare:
+
+- the subsystem that owns the migration
+- the legacy path being retired
+- the canonical path that survives
+- the removal trigger that tells reviewers when the old path must be deleted
+- the owner, reason, and delete-by date
+
+### Review Guidance
+
+When a pull request adds or preserves a fallback path:
+
+1. Declare which path is canonical and which path is temporary.
+2. Add or update a `TEMP_SHIM:` marker in the code that implements the fallback.
+3. Register the shim in `tools/shim_guardrails.json` with `subsystem`, `legacy_path`, `canonical_path`, and `removal_trigger`.
+4. Reject the change if it keeps two permanent runtime paths alive for the same subsystem.
+
+CI enforces this where it can:
+
+- `tools/shim_guardrails.py` fails when a temporary shim is unregistered, expired, or missing canonical-path metadata.
+- The shim registry rejects configs that try to assign two different canonical paths to the same subsystem.
+
 ## Disk Layout and First Boot Provisioning
 
 The image is set up for an A/B root filesystem and a dedicated data partition.
