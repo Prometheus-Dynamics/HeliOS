@@ -25,7 +25,7 @@ use uuid::Uuid;
 use crate::capture::{descriptor_for_config_retrying, BackendKind, CaptureControlInfo, CaptureControlValue, CaptureDescriptor, ControlAssignment};
 use crate::contracts::stream_ids::{CALIBRATION_MODE_PIPELINE_UUID, RAW_PIPELINE_UUID as RAW_STREAM_PIPELINE_UUID};
 use crate::error::{Error, Result};
-use crate::ipc::{ControlId, JsonWire, RecordingCodec, RecordingContainer, RecordingSource, ResolvedStreamConfig, normalize_pipeline_output_selection};
+use crate::ipc::{normalize_pipeline_output_selection, ControlId, JsonWire, RecordingCodec, RecordingContainer, RecordingSource, ResolvedStreamConfig};
 use crate::stream::{cleanup_all_stream_files, cleanup_stream_files, EncodedFrame, ShmemWriter, StreamMetrics, StreamRunner, StreamRunnerConfig};
 use daedalus::planner::GraphPatch;
 
@@ -773,13 +773,8 @@ impl StreamManager {
         // even if `active_pipeline_id` still points at a different (hidden) pipeline instance.
         let view_pipeline_id = single_view_slot_pipeline_id(&manifest_snapshot).or(active_pipeline_id);
         let output_targets_active_pipeline = view_pipeline_id == active_pipeline_id;
-        let effective_view_pipeline_id = if view_pipeline_id.is_none() && manifest_snapshot.pipelines.is_empty() {
-            Some(RAW_STREAM_PIPELINE_UUID)
-        } else {
-            view_pipeline_id
-        };
-        let normalized_output = normalize_output_for_pipeline(output.clone(), effective_view_pipeline_id)
-            .map_err(|err| Error::InvalidStateOwned(format!("invalid pipeline output: {err}")))?;
+        let effective_view_pipeline_id = if view_pipeline_id.is_none() && manifest_snapshot.pipelines.is_empty() { Some(RAW_STREAM_PIPELINE_UUID) } else { view_pipeline_id };
+        let normalized_output = normalize_output_for_pipeline(output.clone(), effective_view_pipeline_id).map_err(|err| Error::InvalidStateOwned(format!("invalid pipeline output: {err}")))?;
 
         // Special-case: allow users to switch the RAW stream view (`raw` vs `undistorted`)
         // even when pipelines are currently disabled.
@@ -3734,16 +3729,8 @@ mod tests {
 
     #[test]
     fn normalize_output_for_raw_pipeline_rejects_invalid_ports() {
-        assert_eq!(
-            normalize_output_for_pipeline(Some("raw".to_string()), Some(RAW_STREAM_PIPELINE_UUID)).expect("raw should be accepted").as_deref(),
-            Some("raw")
-        );
-        assert_eq!(
-            normalize_output_for_pipeline(Some("undistorted".to_string()), Some(RAW_STREAM_PIPELINE_UUID))
-                .expect("undistorted should be accepted")
-                .as_deref(),
-            Some("undistorted")
-        );
+        assert_eq!(normalize_output_for_pipeline(Some("raw".to_string()), Some(RAW_STREAM_PIPELINE_UUID)).expect("raw should be accepted").as_deref(), Some("raw"));
+        assert_eq!(normalize_output_for_pipeline(Some("undistorted".to_string()), Some(RAW_STREAM_PIPELINE_UUID)).expect("undistorted should be accepted").as_deref(), Some("undistorted"));
         assert!(normalize_output_for_pipeline(Some("frame".to_string()), Some(RAW_STREAM_PIPELINE_UUID)).is_err());
         assert!(normalize_output_for_pipeline(Some("overlay".to_string()), Some(RAW_STREAM_PIPELINE_UUID)).is_err());
     }
@@ -3874,7 +3861,7 @@ mod tests {
     }
 
     #[test]
-    fn sanitize_file_video_controls_clamps_invalid_stop_to_start() {
+    fn sanitize_file_video_controls_expands_invalid_stop_to_non_empty_range() {
         let descriptor = file_video_descriptor(10, 11, 800);
         let mut controls = vec![ControlAssignment { id: 10, value: CaptureControlValue::Uint(200) }, ControlAssignment { id: 11, value: CaptureControlValue::Uint(120) }];
 
@@ -3883,11 +3870,11 @@ mod tests {
         let start = controls.iter().find(|ctl| ctl.id == 10).and_then(|ctl| control_value_to_u32(&ctl.value));
         let stop = controls.iter().find(|ctl| ctl.id == 11).and_then(|ctl| control_value_to_u32(&ctl.value));
         assert_eq!(start, Some(200));
-        assert_eq!(stop, Some(200));
+        assert_eq!(stop, Some(201));
     }
 
     #[test]
-    fn sanitize_file_video_controls_clamps_to_known_frame_count() {
+    fn sanitize_file_video_controls_clamps_to_known_frame_count_with_non_empty_range() {
         let descriptor = file_video_descriptor(10, 11, 500);
         let mut controls = vec![ControlAssignment { id: 10, value: CaptureControlValue::Uint(800) }, ControlAssignment { id: 11, value: CaptureControlValue::Uint(700) }];
 
@@ -3895,7 +3882,7 @@ mod tests {
 
         let start = controls.iter().find(|ctl| ctl.id == 10).and_then(|ctl| control_value_to_u32(&ctl.value));
         let stop = controls.iter().find(|ctl| ctl.id == 11).and_then(|ctl| control_value_to_u32(&ctl.value));
-        assert_eq!(start, Some(500));
+        assert_eq!(start, Some(499));
         assert_eq!(stop, Some(500));
     }
 

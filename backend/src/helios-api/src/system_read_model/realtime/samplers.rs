@@ -85,12 +85,7 @@ pub(super) async fn run_devices_updates_sampler(tx: broadcast::Sender<Arc<Shared
     }
 }
 
-pub(super) async fn run_telemetry_sampler(
-    tx: broadcast::Sender<Arc<str>>,
-    latest: Arc<StdMutex<Option<Arc<str>>>>,
-    state: Option<Weak<IpcHandles>>,
-    collector: Arc<StdMutex<SystemCollector>>,
-) {
+pub(super) async fn run_telemetry_sampler(tx: broadcast::Sender<Arc<str>>, latest: Arc<StdMutex<Option<Arc<str>>>>, state: Option<Weak<IpcHandles>>, collector: Arc<StdMutex<SystemCollector>>) {
     let sample_interval = std::env::var("HELIOS_TELEMETRY_SAMPLE_INTERVAL_MS")
         .ok()
         .and_then(|raw| raw.parse::<u64>().ok())

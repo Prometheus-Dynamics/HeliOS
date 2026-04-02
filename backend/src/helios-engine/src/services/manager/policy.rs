@@ -27,9 +27,8 @@ pub(super) fn apply_stream_start_policy(manifest: &mut ResolvedStreamConfig) -> 
             RecordingCodec::H265 => crate::ipc::EncoderSettings::H265 { bitrate: None, gop: None, framerate: None, thread_count: None, output_resolution: None },
         })
     });
-    if let crate::ipc::EncoderSettings::FfmpegMjpeg { gop, framerate, .. }
-    | crate::ipc::EncoderSettings::H264 { gop, framerate, .. }
-    | crate::ipc::EncoderSettings::H265 { gop, framerate, .. } = settings
+    if let crate::ipc::EncoderSettings::FfmpegMjpeg { gop, framerate, .. } | crate::ipc::EncoderSettings::H264 { gop, framerate, .. } | crate::ipc::EncoderSettings::H265 { gop, framerate, .. } =
+        settings
     {
         if framerate.is_none() {
             *framerate = Some(crate::ipc::FrameRate { numerator: want_fps, denominator: 1 });

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::contracts::stream_ids::RAW_PIPELINE_UUID as RAW_STREAM_PIPELINE_UUID;
-use crate::ipc::{ResolvedStreamConfig, StreamPipelineBinding, StreamPipelineGridSlot, normalize_pipeline_output_selection};
+use crate::ipc::{normalize_pipeline_output_selection, ResolvedStreamConfig, StreamPipelineBinding, StreamPipelineGridSlot};
 use crate::pipelines;
 use daedalus::planner::Graph;
 use daedalus::planner::GraphPatch;

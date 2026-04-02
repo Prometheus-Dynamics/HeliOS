@@ -3,9 +3,7 @@ mod generated_runtime_contracts;
 /// Shared runtime-visible identifiers that must stay stable across engine, API,
 /// persistence, and generated frontend contracts.
 pub mod stream_ids {
-    pub use super::generated_runtime_contracts::stream_ids::{
-        CALIBRATION_MODE_PIPELINE_UUID, LEGACY_RAW_PIPELINE_UUID, RAW_PIPELINE_UUID,
-    };
+    pub use super::generated_runtime_contracts::stream_ids::{CALIBRATION_MODE_PIPELINE_UUID, LEGACY_RAW_PIPELINE_UUID, RAW_PIPELINE_UUID};
 }
 
 pub mod localization {

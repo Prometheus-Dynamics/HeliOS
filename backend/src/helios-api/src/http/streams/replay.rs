@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use super::types::EngineErrorBody;
 use super::util::engine_error_body;
-use crate::http::media::MediaMetadata;
+use crate::http::media::{MediaMetadata, load_media_metadata};
 use crate::http::{AppState, storage, streams_persist};
 use helios_engine::capture::{BackendHandle, BackendKind, CaptureConfig, ModeId};
 use helios_engine::identity::DeviceIdentity;
@@ -94,16 +94,6 @@ pub(crate) async fn start_media_replay_stream(State(state): State<AppState>, Jso
     let files = if !req.files.is_empty() {
         req.files.clone()
     } else if let Some(stream_id) = req.stream_id {
-        #[derive(Debug, Clone, Deserialize)]
-        struct MediaMetadata {
-            #[serde(default)]
-            stream_id: Option<Uuid>,
-            #[serde(default)]
-            kind: Option<String>,
-            #[serde(default)]
-            captured_at_ms: Option<i64>,
-        }
-
         let kind = req.kind.as_deref().map(str::trim).filter(|v| !v.is_empty()).unwrap_or("calibration");
 
         let mut entries = match tokio::fs::read_dir(&media_dir).await {
@@ -134,14 +124,9 @@ pub(crate) async fn start_media_replay_stream(State(state): State<AppState>, Jso
             if name.ends_with(".json") {
                 continue;
             }
-            let md_path = meta_dir.join(format!("{name}.json"));
-            let bytes = match tokio::fs::read(&md_path).await {
-                Ok(bytes) => bytes,
-                Err(_) => continue,
-            };
-            let md: MediaMetadata = match serde_json::from_slice(&bytes) {
-                Ok(md) => md,
-                Err(_) => continue,
+            let md = match load_media_metadata(&meta_dir, &name).await {
+                Some(md) => md,
+                None => continue,
             };
             if md.stream_id != Some(stream_id) {
                 continue;
@@ -240,7 +225,7 @@ pub(crate) async fn start_media_replay_stream(State(state): State<AppState>, Jso
         // The reserved RAW pipeline provides a cheap preview path (and can be wired into other pipelines).
         pipeline_enabled: true,
         pipelines: Vec::new(),
-            active_pipeline_id: Some(super::RAW_PIPELINE_UUID),
+        active_pipeline_id: Some(super::RAW_PIPELINE_UUID),
         // Use the engine-native key for the raw passthrough port.
         active_pipeline_output: Some("raw".to_string()),
         pipeline_layout: Some(StreamPipelineLayout {
@@ -263,8 +248,7 @@ pub(crate) async fn start_media_replay_stream(State(state): State<AppState>, Jso
 }
 
 async fn media_metadata_stream_id(meta_dir: &Path, media_name: &str) -> Option<Uuid> {
-    let bytes = tokio::fs::read(meta_dir.join(format!("{media_name}.json"))).await.ok()?;
-    let meta: MediaMetadata = serde_json::from_slice(&bytes).ok()?;
+    let meta = load_media_metadata(meta_dir, media_name).await?;
     meta.stream_id
 }
 

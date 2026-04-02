@@ -71,7 +71,7 @@ fn solve_calibration_sync(request: CalibrationSolveRequest) -> Result<Calibratio
         let graph_json = load_graph_json(&request)?;
         // We generate overlays ourselves from the input frame + detections, so the graph does not
         // need to expose a dedicated overlay output port.
-        let graph = crate::graph::GraphHandle::from_json(2, &graph_json).map_err(|err| CalibrationSolveFailure::InvalidInput(compact_calibration_graph_error(&err.to_string())))?;
+        let graph = crate::graph::GraphHandle::from_persisted_json(2, &graph_json).map_err(|err| CalibrationSolveFailure::InvalidInput(compact_calibration_graph_error(&err.to_string())))?;
         Some(graph)
     };
     let graph_output_ports = graph.as_ref().and_then(|g| g.host_output_ports()).unwrap_or_default();

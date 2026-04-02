@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use std::num::NonZeroU32;
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::str::FromStr;
 use std::sync::Mutex;
 use std::time::Duration;
-pub use styx::capture::ModeId;
 use styx::capture::prelude::Mode;
+pub use styx::capture::ModeId;
 use styx::capture_api::make_file_device;
 use styx::capture_api::{CaptureError, CaptureHandle, CaptureRequest, TdnOutputMode};
 use styx::core::controls::ControlId;
@@ -830,7 +830,11 @@ impl CaptureSession {
     }
 
     pub fn metrics_snapshot(&self) -> CaptureStageMetrics {
-        if let Some(handle) = self.handle.as_ref() { handle.metrics().into() } else { CaptureStageMetrics::default() }
+        if let Some(handle) = self.handle.as_ref() {
+            handle.metrics().into()
+        } else {
+            CaptureStageMetrics::default()
+        }
     }
 
     pub fn config(&self) -> &CaptureConfig {

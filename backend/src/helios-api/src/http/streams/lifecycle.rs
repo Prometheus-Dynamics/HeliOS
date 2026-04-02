@@ -77,9 +77,7 @@ pub(super) async fn persist_effective_stream_manifest(state: &AppState, camera_i
             if let Some(camera_id) = camera_id_override {
                 streams_persist::persist_resolved_config_with_descriptor_checked(camera_id, Some(stream_id), effective_manifest, descriptor_snapshot).await
             } else {
-                streams_persist::persist_resolved_config_with_descriptor_auto_camera_id_checked(Some(stream_id), effective_manifest, descriptor_snapshot)
-                    .await
-                    .map(|_| ())
+                streams_persist::persist_resolved_config_with_descriptor_auto_camera_id_checked(Some(stream_id), effective_manifest, descriptor_snapshot).await.map(|_| ())
             }
         }
         None => {
@@ -600,13 +598,7 @@ async fn prepare_stream_update_transaction(state: &AppState, stream_id: Uuid, ma
     manifest.identity.id = Some(stream_id);
 
     let (manifest, resolved, runtime) = prepare_resolved_stream_manifest(state, manifest, stream_id, &existing.camera_id).await?;
-    Ok(PreparedStreamUpdateTransaction {
-        stream_id,
-        manifest,
-        resolved,
-        runtime,
-        previous_running_manifest: existing.previous_running_manifest,
-    })
+    Ok(PreparedStreamUpdateTransaction { stream_id, manifest, resolved, runtime, previous_running_manifest: existing.previous_running_manifest })
 }
 
 async fn preflight_stream_runtime_activation(state: &AppState, manifest: &StreamManifest, requested_id: Uuid) -> Option<Response> {
@@ -839,8 +831,7 @@ pub(crate) async fn update_stream(state: AppState, stream_id: Uuid, manifest: St
                 return (StatusCode::OK, Json(UpdateStreamResponse { stream_id: prepared.stream_id, descriptor, action: StreamUpdateAction::PersistedOnly })).into_response();
             }
             Err(err) => {
-                return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("failed to persist updated stream manifest: {err}"))))
-                    .into_response();
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("failed to persist updated stream manifest: {err}")))).into_response();
             }
         }
     }
@@ -852,15 +843,7 @@ pub(crate) async fn update_stream(state: AppState, stream_id: Uuid, manifest: St
     let previous_running_manifest = prepared.previous_running_manifest.clone().expect("checked above");
     stop_stream_for_reconfigure(&state, prepared.stream_id).await;
 
-    let (manifest, started) = match apply_stream_runtime_start(
-        &state,
-        prepared.stream_id,
-        prepared.manifest,
-        prepared.resolved,
-        &prepared.runtime,
-    )
-    .await
-    {
+    let (manifest, started) = match apply_stream_runtime_start(&state, prepared.stream_id, prepared.manifest, prepared.resolved, &prepared.runtime).await {
         Ok(started) => started,
         Err(response) => {
             let rollback_ok = rollback_stream_update_runtime(&state, prepared.stream_id, previous_running_manifest).await;
@@ -877,8 +860,7 @@ pub(crate) async fn update_stream(state: AppState, stream_id: Uuid, manifest: St
         if !rollback_ok {
             tracing::error!(stream_id = %prepared.stream_id, "stream update persistence failed and rollback did not restore the prior runtime");
         }
-        return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("updated stream started live but failed to persist: {err}"))))
-            .into_response();
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("updated stream started live but failed to persist: {err}")))).into_response();
     }
 
     state.services.streams.invalidate_stream_list_cache().await;
@@ -977,12 +959,12 @@ mod tests {
     use helios_engine::identity::DeviceIdentity;
     use helios_engine::ipc::{
         EngineCommand, EngineEvent, StreamCaptureRuntimeState, StreamCaptureState, StreamCodecChainRuntimeState, StreamDemandPipelineRuntimeState, StreamDemandRuntimeState,
-        StreamGraphDemandRuntimeState, StreamPipelineRuntimeState, StreamRecordingDemandRuntimeState, StreamRecordingRuntimeState, StreamRuntimeCapabilities, StreamRuntimeState,
-        StreamSummary, StreamViewerDemandRuntimeState, cached_stream_runtime_capabilities,
+        StreamGraphDemandRuntimeState, StreamPipelineRuntimeState, StreamRecordingDemandRuntimeState, StreamRecordingRuntimeState, StreamRuntimeCapabilities, StreamRuntimeState, StreamSummary,
+        StreamViewerDemandRuntimeState, cached_stream_runtime_capabilities,
     };
+    use helios_engine::stream::StreamFrameDemandMetrics;
     use lib_ipc::server;
     use lib_ipc::types::{FeatureSet, ProtocolVersion};
-    use helios_engine::stream::StreamFrameDemandMetrics;
     use std::collections::BTreeMap;
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -1040,7 +1022,10 @@ mod tests {
     fn runtime_summary_for_manifest(manifest: &StreamManifest) -> StreamSummary {
         let descriptor = descriptor_from_persisted_manifest(manifest);
         let resolved = manifest.resolve();
-        let runtime = StreamRuntimeState { capture: StreamCaptureRuntimeState { state: StreamCaptureState::Running, started_at_ms: Some(1), capture_fourcc: Some("NV12".to_string()), ..Default::default() }, ..Default::default() };
+        let runtime = StreamRuntimeState {
+            capture: StreamCaptureRuntimeState { state: StreamCaptureState::Running, started_at_ms: Some(1), capture_fourcc: Some("NV12".to_string()), ..Default::default() },
+            ..Default::default()
+        };
         StreamSummary { stream_id: manifest.identity.id.expect("stream id"), descriptor, manifest: resolved, status: runtime.status(), runtime }
     }
 
@@ -1121,12 +1106,7 @@ mod tests {
                             let mut guard = state.lock().await;
                             if !guard.failed_update_once && requested.identity.alias.as_deref() == Some(guard.failing_alias.as_str()) {
                                 guard.failed_update_once = true;
-                                EngineEvent::Nack {
-                                    command_id,
-                                    code: EngineErrorCode::InvalidInput,
-                                    reason: "synthetic update failure".to_string(),
-                                    retryable: false,
-                                }
+                                EngineEvent::Nack { command_id, code: EngineErrorCode::InvalidInput, reason: "synthetic update failure".to_string(), retryable: false }
                             } else {
                                 let summary = runtime_summary_for_manifest(&requested);
                                 let descriptor = summary.descriptor.clone();
@@ -1141,18 +1121,11 @@ mod tests {
                 }
             };
 
-            let result = server::run_snapshot_server(
-                stream,
-                shutdown_token,
-                server_config,
-                subscribe,
-                snapshot,
-                handle_command,
-                server::no_heartbeat(),
-                server::log_accept,
-                |command: &EngineCommand| command.command_id(),
-            )
-            .await;
+            let result =
+                server::run_snapshot_server(stream, shutdown_token, server_config, subscribe, snapshot, handle_command, server::no_heartbeat(), server::log_accept, |command: &EngineCommand| {
+                    command.command_id()
+                })
+                .await;
             if let Err(err) = result {
                 panic!("mock engine server failed: {err}");
             }
@@ -1321,9 +1294,7 @@ mod tests {
         edited_manifest.identity.hardware_id = Some("item26-after-hw".to_string());
         edited_manifest.preview_jpeg_quality = 47;
 
-        let response = tokio::time::timeout(Duration::from_secs(15), update_stream(state.clone(), stream_id, edited_manifest))
-            .await
-            .expect("update_stream timed out");
+        let response = tokio::time::timeout(Duration::from_secs(15), update_stream(state.clone(), stream_id, edited_manifest)).await.expect("update_stream timed out");
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
         let streams = state.engine.list_streams().await.expect("list streams after rollback");

@@ -1213,9 +1213,6 @@
         "decoder": {
           "state": "disabled"
         },
-        "decoder_enabled": null,
-        "decoder_id": null,
-        "decoder_settings": null,
         "encoder": {
           "id": "turbojpeg",
           "settings": {
@@ -1224,9 +1221,6 @@
           },
           "state": "enabled"
         },
-        "encoder_enabled": null,
-        "encoder_id": null,
-        "encoder_settings": null,
         "host_buffer": 2,
         "identity": {
           "alias": "golden-camera",
@@ -1263,7 +1257,6 @@
           "state": "disabled"
         },
         "schema_version": 1,
-        "shadow_recorder_enabled": null,
         "start_on_boot": false
       },
       "outcome": {
@@ -1300,9 +1293,6 @@
           "decoder": {
             "state": "disabled"
           },
-          "decoder_enabled": null,
-          "decoder_id": null,
-          "decoder_settings": null,
           "encoder": {
             "id": "turbojpeg",
             "settings": {
@@ -1311,9 +1301,6 @@
             },
             "state": "enabled"
           },
-          "encoder_enabled": null,
-          "encoder_id": null,
-          "encoder_settings": null,
           "host_buffer": 2,
           "identity": {
             "alias": "golden-camera",
@@ -1350,7 +1337,6 @@
             "state": "disabled"
           },
           "schema_version": 1,
-          "shadow_recorder_enabled": null,
           "start_on_boot": false
         },
         "resolved": {
@@ -1478,15 +1464,9 @@
         "decoder": {
           "state": "disabled"
         },
-        "decoder_enabled": null,
-        "decoder_id": null,
-        "decoder_settings": null,
         "encoder": {
           "state": "disabled"
         },
-        "encoder_enabled": null,
-        "encoder_id": null,
-        "encoder_settings": null,
         "host_buffer": 9,
         "identity": {
           "alias": "golden-camera",
@@ -1517,7 +1497,6 @@
           "state": "disabled"
         },
         "schema_version": 1,
-        "shadow_recorder_enabled": null,
         "start_on_boot": true
       },
       "outcome": {
@@ -1557,15 +1536,9 @@
           "decoder": {
             "state": "disabled"
           },
-          "decoder_enabled": null,
-          "decoder_id": null,
-          "decoder_settings": null,
           "encoder": {
             "state": "disabled"
           },
-          "encoder_enabled": null,
-          "encoder_id": null,
-          "encoder_settings": null,
           "host_buffer": 9,
           "identity": {
             "alias": "golden-camera",
@@ -1596,7 +1569,6 @@
             "state": "disabled"
           },
           "schema_version": 1,
-          "shadow_recorder_enabled": null,
           "start_on_boot": true
         },
         "resolved": {
@@ -1715,17 +1687,11 @@
         "decoder": {
           "state": "disabled"
         },
-        "decoder_enabled": null,
-        "decoder_id": null,
-        "decoder_settings": null,
         "encoder": {
           "id": "missing-encoder",
           "settings": null,
           "state": "enabled"
         },
-        "encoder_enabled": null,
-        "encoder_id": null,
-        "encoder_settings": null,
         "host_buffer": 2,
         "identity": {
           "alias": "golden-camera",
@@ -1744,7 +1710,6 @@
           "state": "disabled"
         },
         "schema_version": 1,
-        "shadow_recorder_enabled": null,
         "start_on_boot": false
       },
       "outcome": {
@@ -1798,15 +1763,9 @@
           "settings": null,
           "state": "enabled"
         },
-        "decoder_enabled": null,
-        "decoder_id": null,
-        "decoder_settings": null,
         "encoder": {
           "state": "disabled"
         },
-        "encoder_enabled": null,
-        "encoder_id": null,
-        "encoder_settings": null,
         "host_buffer": 2,
         "identity": {
           "alias": "golden-camera",
@@ -1825,7 +1784,6 @@
           "state": "disabled"
         },
         "schema_version": 1,
-        "shadow_recorder_enabled": null,
         "start_on_boot": false
       },
       "outcome": {
@@ -1877,15 +1835,9 @@
         "decoder": {
           "state": "disabled"
         },
-        "decoder_enabled": null,
-        "decoder_id": null,
-        "decoder_settings": null,
         "encoder": {
           "state": "disabled"
         },
-        "encoder_enabled": null,
-        "encoder_id": null,
-        "encoder_settings": null,
         "host_buffer": 2,
         "identity": {
           "alias": "golden-camera",
@@ -1905,7 +1857,6 @@
           "state": "shadow_buffer"
         },
         "schema_version": 1,
-        "shadow_recorder_enabled": null,
         "start_on_boot": false
       },
       "outcome": {
@@ -1957,17 +1908,11 @@
         "decoder": {
           "state": "disabled"
         },
-        "decoder_enabled": null,
-        "decoder_id": null,
-        "decoder_settings": null,
         "encoder": {
           "id": "turbojpeg",
           "settings": null,
           "state": "enabled"
         },
-        "encoder_enabled": null,
-        "encoder_id": null,
-        "encoder_settings": null,
         "host_buffer": 2,
         "identity": {
           "alias": "golden-camera",
@@ -1987,7 +1932,6 @@
           "state": "shadow_buffer"
         },
         "schema_version": 1,
-        "shadow_recorder_enabled": null,
         "start_on_boot": false
       },
       "outcome": {
@@ -2039,9 +1983,6 @@
         "decoder": {
           "state": "disabled"
         },
-        "decoder_enabled": null,
-        "decoder_id": null,
-        "decoder_settings": null,
         "encoder": {
           "id": "turbojpeg",
           "settings": {
@@ -2054,9 +1995,6 @@
           },
           "state": "enabled"
         },
-        "encoder_enabled": null,
-        "encoder_id": null,
-        "encoder_settings": null,
         "host_buffer": 2,
         "identity": {
           "alias": "golden-camera",
@@ -2075,7 +2013,6 @@
           "state": "disabled"
         },
         "schema_version": 1,
-        "shadow_recorder_enabled": null,
         "start_on_boot": false
       },
       "outcome": {
@@ -2127,17 +2064,11 @@
         "decoder": {
           "state": "disabled"
         },
-        "decoder_enabled": null,
-        "decoder_id": null,
-        "decoder_settings": null,
         "encoder": {
           "id": "turbojpeg",
           "settings": null,
           "state": "enabled"
         },
-        "encoder_enabled": null,
-        "encoder_id": null,
-        "encoder_settings": null,
         "host_buffer": 2,
         "identity": {
           "alias": "golden-camera",
@@ -2174,7 +2105,6 @@
           "state": "disabled"
         },
         "schema_version": 1,
-        "shadow_recorder_enabled": null,
         "start_on_boot": false
       },
       "outcome": {

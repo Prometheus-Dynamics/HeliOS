@@ -12,7 +12,7 @@ use helios_engine::ipc::{CalibrationBoard, CalibrationImage, CalibrationSolveCon
 
 use crate::http::AppState;
 use crate::http::error::ApiError;
-use crate::http::media::{MediaMetadata, write_media_metadata};
+use crate::http::media::{MediaMetadata, load_named_media_metadata, write_media_metadata};
 use crate::http::storage;
 use crate::http::streams::calibration::StreamCalibrationParams;
 use crate::http::streams::types::EngineErrorBody;
@@ -226,11 +226,7 @@ async fn resolve_overlay_stream_id(images: &[String]) -> Option<Uuid> {
 }
 
 async fn load_media_metadata(name: &str) -> Option<MediaMetadata> {
-    let base = storage::sanitize_name(name)?;
-    let dir = storage::ensure_subdir_async("media-meta").await.ok()?;
-    let path = dir.join(format!("{base}.json"));
-    let bytes = tokio::fs::read(&path).await.ok()?;
-    serde_json::from_slice::<MediaMetadata>(&bytes).ok()
+    load_named_media_metadata(name).await
 }
 
 async fn attach_overlay_metadata(views: &[SolveCalibrationDebugView], stream_id: Option<Uuid>) {

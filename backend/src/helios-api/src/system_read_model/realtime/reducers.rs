@@ -133,15 +133,7 @@ mod tests {
     use super::*;
 
     fn sample(pid: u32, cpu_percent: f32, memory_bytes: u64) -> ProcessSample {
-        ProcessSample {
-            pid,
-            name: format!("proc-{pid}"),
-            cpu_percent,
-            memory_bytes,
-            virtual_memory_bytes: memory_bytes * 2,
-            status: Some("Running".into()),
-            cmd: vec![format!("proc-{pid}")],
-        }
+        ProcessSample { pid, name: format!("proc-{pid}"), cpu_percent, memory_bytes, virtual_memory_bytes: memory_bytes * 2, status: Some("Running".into()), cmd: vec![format!("proc-{pid}")] }
     }
 
     #[test]

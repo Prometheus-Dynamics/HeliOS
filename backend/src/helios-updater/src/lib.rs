@@ -29,7 +29,7 @@ pub mod update_core;
 mod util;
 
 #[cfg(feature = "updater-ipc")]
-pub use artifact::{ManifestArtifact, ReleaseManifest, StagedArtifact, StagedMetadata};
+pub use artifact::{ManifestArtifact, ReleaseManifest, ReleaseManifestMetadata, StagedArtifact, StagedMetadata};
 #[cfg(feature = "updater-ipc")]
 pub use config::{SignaturePolicy, UpdaterConfig};
 #[cfg(feature = "updater-ipc")]

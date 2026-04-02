@@ -698,28 +698,10 @@ fn normalize_preview_graph_json_for_runtime(json: &Value, selected_output: &str)
 }
 
 fn normalize_graph_enum_const_inputs(graph: &mut Graph, registry: &daedalus::runtime::plugins::PluginRegistry) {
-    fn unwrap_legacy_typed_value(value: &DaedalusValue) -> Option<DaedalusValue> {
+    fn unwrap_serialized_typed_value(value: &DaedalusValue) -> Option<DaedalusValue> {
         let mut ty: Option<String> = None;
         let mut raw: Option<DaedalusValue> = None;
         match value {
-            // Older graphs occasionally stored consts as generic map payloads.
-            DaedalusValue::Map(items) => {
-                for (k, v) in items {
-                    let DaedalusValue::String(name) = k else {
-                        continue;
-                    };
-                    match name.as_ref() {
-                        "type" => {
-                            if let DaedalusValue::String(kind) = v {
-                                ty = Some(kind.to_string());
-                            }
-                        }
-                        "value" => raw = Some(v.clone()),
-                        _ => {}
-                    }
-                }
-            }
-            // Common JSON form (`{\"type\": ..., \"value\": ...}`) can deserialize to Struct.
             DaedalusValue::Struct(fields) => {
                 for field in fields {
                     match field.name.as_str() {
@@ -769,7 +751,7 @@ fn normalize_graph_enum_const_inputs(graph: &mut Graph, registry: &daedalus::run
             continue;
         };
         for (port, value) in &mut node.const_inputs {
-            if let Some(unwrapped) = unwrap_legacy_typed_value(value) {
+            if let Some(unwrapped) = unwrap_serialized_typed_value(value) {
                 *value = unwrapped;
             }
             let Some(input) = desc.inputs.iter().find(|p| p.name == *port) else {
@@ -999,25 +981,45 @@ impl GraphHandle {
     /// Build a graph handle from a Daedalus graph JSON payload. This validates the graph
     /// and installs a Daedalus-backed executor so host frames are routed through the graph.
     pub fn from_json(buffer: usize, json: &Value) -> Result<Self, GraphError> {
-        Self::from_json_with_pool(buffer, json, pool_size_from_env(), None)
+        Self::build_graph_handle(buffer, json, pool_size_from_env(), None, GraphCompatibilityMode::Strict)
+    }
+
+    /// Build a graph handle from persisted/imported graph JSON that may still require
+    /// bounded compatibility fixes while old serialized shapes are being retired.
+    pub fn from_persisted_json(buffer: usize, json: &Value) -> Result<Self, GraphError> {
+        Self::build_graph_handle(buffer, json, pool_size_from_env(), None, GraphCompatibilityMode::PersistedImport)
     }
 
     /// Same as `from_json` but optionally selects a single host output port to forward.
     pub fn from_json_with_output(buffer: usize, json: &Value, output_port: Option<&str>) -> Result<Self, GraphError> {
-        Self::from_json_with_pool(buffer, json, pool_size_from_env(), output_port)
+        Self::build_graph_handle(buffer, json, pool_size_from_env(), output_port, GraphCompatibilityMode::Strict)
+    }
+
+    /// Same as `from_persisted_json` but optionally selects a single host output port to forward.
+    pub fn from_persisted_json_with_output(buffer: usize, json: &Value, output_port: Option<&str>) -> Result<Self, GraphError> {
+        Self::build_graph_handle(buffer, json, pool_size_from_env(), output_port, GraphCompatibilityMode::PersistedImport)
     }
 
     /// Same as `from_json` but allows overriding the Daedalus executor pool size.
     pub fn from_json_with_pool(buffer: usize, json: &Value, pool_size: Option<usize>, output_port: Option<&str>) -> Result<Self, GraphError> {
+        Self::build_graph_handle(buffer, json, pool_size, output_port, GraphCompatibilityMode::Strict)
+    }
+
+    /// Same as `from_persisted_json` but allows overriding the Daedalus executor pool size.
+    pub fn from_persisted_json_with_pool(buffer: usize, json: &Value, pool_size: Option<usize>, output_port: Option<&str>) -> Result<Self, GraphError> {
+        Self::build_graph_handle(buffer, json, pool_size, output_port, GraphCompatibilityMode::PersistedImport)
+    }
+
+    fn build_graph_handle(buffer: usize, json: &Value, pool_size: Option<usize>, output_port: Option<&str>, compatibility: GraphCompatibilityMode) -> Result<Self, GraphError> {
         let normalized = normalize_graph_json_for_runtime(json);
         let graph: Graph = serde_json::from_value(normalized).map_err(|e| GraphError::Parse(e.to_string()))?;
         let (host, rx) = HostBridgeHandle::new(buffer);
         let _ = rx;
-        let executor = DaedalusGraphExecutor::new(graph, pool_size, output_port.map(str::to_string))?;
+        let executor = DaedalusGraphExecutor::new(graph, pool_size, output_port.map(str::to_string), compatibility)?;
         let preview_executor = if let Some(selected_output) = output_port {
             let preview_json = normalize_preview_graph_json_for_runtime(json, selected_output);
             let preview_graph: Graph = serde_json::from_value(preview_json).map_err(|e| GraphError::Parse(e.to_string()))?;
-            let preview = DaedalusGraphExecutor::new(preview_graph, pool_size, Some(selected_output.to_string()))?;
+            let preview = DaedalusGraphExecutor::new(preview_graph, pool_size, Some(selected_output.to_string()), compatibility)?;
             Some(Arc::new(preview) as Arc<dyn GraphExecutor>)
         } else {
             None
@@ -2186,8 +2188,14 @@ enum ExecutorBusyBehavior {
     Block,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GraphCompatibilityMode {
+    Strict,
+    PersistedImport,
+}
+
 impl DaedalusGraphExecutor {
-    fn new(graph: Graph, pool_size: Option<usize>, output_port: Option<String>) -> Result<Self, GraphError> {
+    fn new(graph: Graph, pool_size: Option<usize>, output_port: Option<String>, compatibility: GraphCompatibilityMode) -> Result<Self, GraphError> {
         let mut graph = graph;
         let host_mgr = DaedalusBridgeManager::new();
         let built = build_daedalus_runtime_registry(&host_mgr, Some(&graph)).map_err(|e| GraphError::Build(e.to_string()))?;
@@ -2197,7 +2205,9 @@ impl DaedalusGraphExecutor {
 
         sync_graph_node_port_declarations(&mut graph, &registry);
         enforce_registry_default_compute_affinity(&mut graph, &registry);
-        normalize_graph_enum_const_inputs(&mut graph, &registry);
+        if matches!(compatibility, GraphCompatibilityMode::PersistedImport) {
+            normalize_graph_enum_const_inputs(&mut graph, &registry);
+        }
         if std::env::var_os("HELIOS_TRACE_GRAPH_CONSTS_STDERR").is_some() {
             for node in &graph.nodes {
                 if node.id.0 == "cv:image:blur" || node.id.0 == "cv:color:grayscale" {

@@ -9,9 +9,6 @@ use tokio::process::Command;
 
 use crate::error::{Error, Result};
 
-const LEGACY_SLOT_ACTIVE: &str = "ACTIVE";
-const LEGACY_SLOT_RESERVE: &str = "RESERVE";
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SlotScheme {
     Ext4Labels,
@@ -95,84 +92,7 @@ fn boot_partition_from_config() -> Option<String> {
 }
 
 fn load_layout_manifest() -> Option<StorageLayoutManifest> {
-    StorageLayoutManifest::load_system().ok().or_else(detect_legacy_layout_manifest)
-}
-
-fn detect_legacy_layout_manifest() -> Option<StorageLayoutManifest> {
-    if by_label_path(LEGACY_SLOT_ACTIVE).is_some() || by_label_path(LEGACY_SLOT_RESERVE).is_some() {
-        return toml::from_str::<StorageLayoutManifest>(
-            r#"
-schema_version = 1
-layout_id = "legacy_ext4_labels"
-slot_scheme = "ext4_labels"
-boot_label = "BOOT"
-
-[spans]
-boot_partition = 1
-data_size_mib = 4096
-
-[[partitions]]
-role = "slot_a"
-name = "ACTIVE"
-number = 2
-label = "ACTIVE"
-mode = "resize"
-
-[[partitions]]
-role = "slot_b"
-name = "RESERVE"
-number = 3
-label = "RESERVE"
-mode = "mkpart"
-
-[[partitions]]
-role = "data"
-name = "DATA"
-number = 4
-label = "DATA"
-mode = "mkpart"
-"#,
-        )
-        .ok();
-    }
-
-    if legacy_squashfs_slot_devices().is_some() {
-        return toml::from_str::<StorageLayoutManifest>(
-            r#"
-schema_version = 1
-layout_id = "legacy_squashfs_ab"
-slot_scheme = "squashfs_ab"
-boot_label = "BOOT"
-
-[spans]
-boot_partition = 1
-start_after_partition = 1
-data_size_mib = 0
-
-[[partitions]]
-role = "slot_a"
-name = "ROOT_A"
-number = 2
-mode = "noop"
-
-[[partitions]]
-role = "slot_b"
-name = "ROOT_B"
-number = 3
-mode = "mkpart"
-
-[[partitions]]
-role = "data"
-name = "DATA"
-number = 4
-label = "DATA"
-mode = "mkpart"
-"#,
-        )
-        .ok();
-    }
-
-    None
+    StorageLayoutManifest::load_system().ok()
 }
 
 fn base_disk_candidates(layout: &StorageLayoutManifest) -> Vec<String> {
@@ -287,16 +207,6 @@ fn read_partuuid_for_device(dev: &str) -> Option<String> {
         }
     }
     None
-}
-
-fn legacy_squashfs_slot_devices() -> Option<(String, String)> {
-    let base = by_label_path("DATA")
-        .and_then(|dev| StorageLayoutManifest::disk_from_partition_device(&dev))
-        .or_else(|| boot_partition_from_config().and_then(|dev| StorageLayoutManifest::disk_from_partition_device(&dev)))?;
-    let slot_a = StorageLayoutManifest::partition_device_for_disk(&base, 2);
-    let slot_b = StorageLayoutManifest::partition_device_for_disk(&base, 3);
-    let data = StorageLayoutManifest::partition_device_for_disk(&base, 4);
-    if Path::new(&slot_a).exists() && Path::new(&slot_b).exists() && (Path::new(&data).exists() || by_label_path("DATA").is_some()) { Some((slot_a, slot_b)) } else { None }
 }
 
 fn squashfs_slot_devices(layout: &StorageLayoutManifest) -> Option<(String, String)> {

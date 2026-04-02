@@ -662,13 +662,14 @@ impl StreamRunner {
 
     pub(crate) fn live_demand_active(&mut self) -> bool {
         let graph_has_image_output = self.graph.has_image_output();
-        let graph_has_executor = self.graph.has_executor();
         let graph_host = self.graph.host();
         let raw_receiver_count = self.raw_tx.receiver_count() as u64;
         let host_receiver_count = graph_host.receiver_count() as u64;
-        let demand = self.compose_demand_state(raw_receiver_count, host_receiver_count, graph_has_image_output, graph_has_executor, false);
-        self.update_last_demand_state(&demand);
-        demand.pipeline.live_active
+        let preview_demand_active = self.preview_demand();
+        let encode_demand_active = self.encoder_id.is_some() && (self.encoder_demand() || preview_demand_active);
+        let graph_sample_demand_active = self.graph.has_output_sample_demand();
+
+        raw_receiver_count > 0 || (graph_has_image_output && host_receiver_count > 0) || encode_demand_active || graph_sample_demand_active
     }
 
     pub(crate) fn idle_stop_timeout(&self) -> Duration {
@@ -863,27 +864,8 @@ impl StreamRunner {
 #[cfg(test)]
 mod tests {
     use super::{capture_session_error_to_engine_error, StreamRunner};
-    use crate::capture::{BackendHandle, BackendKind, CaptureConfig, ModeId};
     use crate::capture::{CaptureConfigError, CaptureSessionError};
     use crate::error::Error;
-    use crate::graph::GraphHandle;
-    use crate::stream::StreamRunnerConfig;
-    use std::sync::atomic::Ordering;
-    use styx::prelude::{ColorSpace, FourCc, MediaFormat, Resolution};
-
-    fn sample_capture_config() -> CaptureConfig {
-        CaptureConfig {
-            device_keys: vec![],
-            device_identity: None,
-            backend: BackendKind::Virtual,
-            handle: BackendHandle::Virtual,
-            mode: ModeId { format: MediaFormat::new(FourCc::new(*b"RGB3"), Resolution::new(640, 480).unwrap(), ColorSpace::Srgb), interval: None },
-            target_fps: None,
-            interval: None,
-            controls: vec![],
-            enable_tdn_output: false,
-        }
-    }
 
     #[test]
     fn parse_proc_key_bytes_reads_kib_and_plain_values() {
@@ -900,35 +882,5 @@ mod tests {
 
         let terminal = capture_session_error_to_engine_error(CaptureSessionError::NotRunning);
         assert!(matches!(terminal, Error::InvalidStateOwned(_)));
-    }
-
-    #[test]
-    fn compose_demand_state_derives_aggregate_pipeline_flags() {
-        let mut runner = StreamRunner::new(StreamRunnerConfig {
-            capture_config: sample_capture_config(),
-            graph: GraphHandle::with_default_host(1),
-            encoder_id: Some("h264".to_string()),
-            decoder_id: None,
-            encoder_settings: None,
-            decoder_settings: None,
-            preview_jpeg_quality: 65,
-            shmem: None,
-            stream_id: None,
-        });
-        runner.managed_encoded_consumer_count.store(1, Ordering::Relaxed);
-        runner.managed_encoded_consumer_last_seen_ms.store(StreamRunner::unix_now_ms(), Ordering::Relaxed);
-
-        let demand = runner.compose_demand_state(0, 1, true, false, true);
-
-        assert_eq!(demand.viewers.host_receiver_count, 1);
-        assert!(!demand.viewers.preview_viewer_active);
-        assert!(demand.pipeline.encoded_output_active);
-        assert!(demand.pipeline.graph_image_output_active);
-        assert!(!demand.pipeline.graph_execution_active);
-        assert!(demand.pipeline.decoded_image_active);
-        assert!(demand.pipeline.encoded_passthrough_possible);
-        assert!(demand.pipeline.encoded_passthrough_active);
-        assert!(demand.live_active);
-        assert!(!demand.recording.recording_session_active);
     }
 }

@@ -1492,7 +1492,6 @@ impl StreamRecordingMode {
             Self::ShadowBuffer { codec } => Some(*codec),
         }
     }
-
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -1709,7 +1708,6 @@ impl RequestedEncoderConfig {
             }
         }
     }
-
 }
 
 impl From<RequestedEncoderConfig> for RequestedEncoderConfigBinaryWire {
@@ -1882,7 +1880,6 @@ impl RequestedDecoderConfig {
             }
         }
     }
-
 }
 
 impl From<RequestedDecoderConfig> for RequestedDecoderConfigBinaryWire {
@@ -1979,7 +1976,11 @@ pub const CURRENT_STREAM_CONFIG_SCHEMA_VERSION: u32 = 1;
 fn trim_pipeline_output_selection(value: Option<&str>) -> Option<String> {
     value.and_then(|raw| {
         let trimmed = raw.trim();
-        if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
     })
 }
 
@@ -2157,18 +2158,11 @@ fn enforce_current_stream_manifest_schema(mut wire: StreamManifestHumanWire) -> 
             wire.schema_version = Some(CURRENT_STREAM_CONFIG_SCHEMA_VERSION);
             Ok(wire)
         }
-        Some(version) if version > CURRENT_STREAM_CONFIG_SCHEMA_VERSION => Err(format!(
-            "unsupported stream manifest schema_version {}; current version is {}",
-            version, CURRENT_STREAM_CONFIG_SCHEMA_VERSION
-        )),
-        Some(version) => Err(format!(
-            "unsupported stream manifest schema_version {}; old stream manifests are no longer supported after the teardown reset",
-            version
-        )),
-        None => Err(format!(
-            "stream manifest schema_version is required; legacy manifests without schema_version are no longer supported (expected {})",
-            CURRENT_STREAM_CONFIG_SCHEMA_VERSION
-        )),
+        Some(version) if version > CURRENT_STREAM_CONFIG_SCHEMA_VERSION => {
+            Err(format!("unsupported stream manifest schema_version {}; current version is {}", version, CURRENT_STREAM_CONFIG_SCHEMA_VERSION))
+        }
+        Some(version) => Err(format!("unsupported stream manifest schema_version {}; old stream manifests are no longer supported after the teardown reset", version)),
+        None => Err(format!("stream manifest schema_version is required; legacy manifests without schema_version are no longer supported (expected {})", CURRENT_STREAM_CONFIG_SCHEMA_VERSION)),
     }
 }
 

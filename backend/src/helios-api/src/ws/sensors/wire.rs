@@ -38,12 +38,7 @@ pub(super) async fn send_json_message<T: Serialize>(socket: &mut WebSocket, payl
     socket.send(Message::Text(body.into())).await.map_err(|_| ())
 }
 
-pub(super) async fn send_ws_error(
-    socket: &mut WebSocket,
-    context: &WsErrorContext,
-    reason: impl Into<String>,
-    operation: &str,
-) {
+pub(super) async fn send_ws_error(socket: &mut WebSocket, context: &WsErrorContext, reason: impl Into<String>, operation: &str) {
     let reason = reason.into();
     let payload = ErrorPayload {
         status: "sensors_stream_unavailable",
@@ -80,13 +75,7 @@ pub(super) async fn send_ws_error(
         }
         Err(err) => {
             warn!(%err, "failed to serialize websocket error payload");
-            let _ = socket
-                .send(Message::Text(
-                    r#"{"status":"sensors_stream_unavailable","reason":"internal error"}"#
-                        .to_string()
-                        .into(),
-                ))
-                .await;
+            let _ = socket.send(Message::Text(r#"{"status":"sensors_stream_unavailable","reason":"internal error"}"#.to_string().into())).await;
         }
     }
 }

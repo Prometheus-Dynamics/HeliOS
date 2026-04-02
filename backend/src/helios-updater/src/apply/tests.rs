@@ -52,7 +52,7 @@ fn parse_apply_manifest_metadata_accepts_new_source_artifact_path() {
         update_id: None,
         version: None,
         artifacts: Vec::new(),
-        metadata_json: r#"{"delete_image_after_apply":true,"source_artifact_path":"/var/lib/helios/updater/api-uploads/bundle.tar"}"#.into(),
+        metadata_json: r#"{"schema_version":1,"delete_image_after_apply":true,"source_artifact_path":"/var/lib/helios/updater/api-uploads/bundle.tar"}"#.into(),
     };
     let parsed = ReleaseManifestMetadata::from_manifest(&manifest).expect("decode metadata");
 
@@ -61,16 +61,15 @@ fn parse_apply_manifest_metadata_accepts_new_source_artifact_path() {
 }
 
 #[test]
-fn parse_apply_manifest_metadata_accepts_legacy_source_media_path_alias() {
+fn parse_apply_manifest_metadata_rejects_missing_schema_version() {
     let manifest = ReleaseManifest {
         update_id: None,
         version: None,
         artifacts: Vec::new(),
-        metadata_json: r#"{"delete_image_after_apply":true,"source_media_path":"/var/lib/helios/api-data/media/update.tar"}"#.into(),
+        metadata_json: r#"{"delete_image_after_apply":true,"source_artifact_path":"/var/lib/helios/api-data/media/update.tar"}"#.into(),
     };
-    let parsed = ReleaseManifestMetadata::from_manifest(&manifest).expect("decode metadata");
-
-    assert_eq!(parsed, ReleaseManifestMetadata { schema_version: 1, auto_apply: true, delete_image_after_apply: true, source_artifact_path: Some("/var/lib/helios/api-data/media/update.tar".into()) });
+    let err = ReleaseManifestMetadata::from_manifest(&manifest).expect_err("missing schema version should fail");
+    assert!(err.contains("missing required schema_version"));
 }
 
 #[tokio::test]
@@ -139,20 +138,15 @@ async fn clear_completed_update_state_purges_dirs_and_resets_snapshot() {
 }
 
 #[tokio::test]
-async fn sync_persisted_files_prefers_data_candidate() {
+async fn sync_persisted_files_copies_canonical_source_only() {
     let temp = tempfile::tempdir().expect("temp dir");
     let root = temp.path().join("root");
     let primary = temp.path().join("primary/team");
-    let legacy = temp.path().join("legacy/team");
     tokio::fs::create_dir_all(primary.parent().expect("primary parent")).await.expect("create primary parent");
-    tokio::fs::create_dir_all(legacy.parent().expect("legacy parent")).await.expect("create legacy parent");
     tokio::fs::write(&primary, "2468\n").await.expect("write primary");
-    tokio::fs::write(&legacy, "1111\n").await.expect("write legacy");
 
     let primary_str: &'static str = Box::leak(primary.display().to_string().into_boxed_str());
-    let legacy_str: &'static str = Box::leak(legacy.display().to_string().into_boxed_str());
-    let candidates: &'static [&'static str] = Box::leak(vec![primary_str, legacy_str].into_boxed_slice());
-    let mappings = [PersistedFileSync { source_candidates: candidates, target_path: "/var/lib/helios/team" }];
+    let mappings = [PersistedFileSync { source_path: primary_str, target_path: "/var/lib/helios/team" }];
 
     sync_persisted_files_with_mappings_into(&root, &mappings).await.expect("sync files");
 

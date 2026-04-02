@@ -25,12 +25,7 @@ pub(crate) struct SensorEventsState {
 impl Default for SensorEventsState {
     fn default() -> Self {
         let (tx, _) = broadcast::channel(128);
-        Self {
-            tx,
-            latest: Arc::new(StdMutex::new(SharedSensorLatest::default())),
-            task: Mutex::new(None),
-            state: StdMutex::new(None),
-        }
+        Self { tx, latest: Arc::new(StdMutex::new(SharedSensorLatest::default())), task: Mutex::new(None), state: StdMutex::new(None) }
     }
 }
 
@@ -44,12 +39,7 @@ impl SensorEventsState {
 
     pub(crate) async fn subscribe(&self) -> (broadcast::Receiver<Arc<SharedSensorEvent>>, SharedSensorLatest) {
         self.ensure_task().await;
-        let latest = self
-            .latest
-            .lock()
-            .ok()
-            .map(|guard| guard.clone())
-            .unwrap_or_default();
+        let latest = self.latest.lock().ok().map(|guard| guard.clone()).unwrap_or_default();
         (self.tx.subscribe(), latest)
     }
 
@@ -91,11 +81,7 @@ pub(crate) enum SharedSensorEvent {
     Error(Arc<str>),
 }
 
-async fn run_sensor_events_sampler(
-    tx: broadcast::Sender<Arc<SharedSensorEvent>>,
-    latest: Arc<StdMutex<SharedSensorLatest>>,
-    state: Option<Weak<IpcHandles>>,
-) {
+async fn run_sensor_events_sampler(tx: broadcast::Sender<Arc<SharedSensorEvent>>, latest: Arc<StdMutex<SharedSensorLatest>>, state: Option<Weak<IpcHandles>>) {
     let Some(state) = state.and_then(|weak| weak.upgrade()) else {
         return;
     };
@@ -126,10 +112,7 @@ async fn run_sensor_events_sampler(
         };
 
         let mut session = conn.session;
-        let subscribe = SensorCommand::Subscribe {
-            command_id: CommandId::new(),
-            scope: scope.clone(),
-        };
+        let subscribe = SensorCommand::Subscribe { command_id: CommandId::new(), scope: scope.clone() };
         if let Err(err) = session.send_command(conn.client.journal(), &subscribe).await {
             broadcast_sensor_error(&tx, &latest, format!("failed to subscribe: {err}"));
             tokio::time::sleep(HUB_RETRY_DELAY).await;
@@ -142,15 +125,7 @@ async fn run_sensor_events_sampler(
             let receiver_count = tx.receiver_count();
             saw_receiver |= receiver_count > 0;
             if saw_receiver && receiver_count == 0 {
-                let _ = session
-                    .send_command(
-                        conn.client.journal(),
-                        &SensorCommand::Unsubscribe {
-                            command_id: CommandId::new(),
-                            scope: scope.clone(),
-                        },
-                    )
-                    .await;
+                let _ = session.send_command(conn.client.journal(), &SensorCommand::Unsubscribe { command_id: CommandId::new(), scope: scope.clone() }).await;
                 should_retry = false;
                 break;
             }
@@ -234,17 +209,10 @@ fn clear_sensor_error(latest: &Arc<StdMutex<SharedSensorLatest>>) {
     }
 }
 
-fn broadcast_sensor_error(
-    tx: &broadcast::Sender<Arc<SharedSensorEvent>>,
-    latest: &Arc<StdMutex<SharedSensorLatest>>,
-    reason: impl Into<String>,
-) {
+fn broadcast_sensor_error(tx: &broadcast::Sender<Arc<SharedSensorEvent>>, latest: &Arc<StdMutex<SharedSensorLatest>>, reason: impl Into<String>) {
     let reason = Arc::<str>::from(reason.into());
     if let Ok(mut guard) = latest.lock() {
-        *guard = SharedSensorLatest {
-            error: Some(reason.clone()),
-            ..SharedSensorLatest::default()
-        };
+        *guard = SharedSensorLatest { error: Some(reason.clone()), ..SharedSensorLatest::default() };
     }
     let _ = tx.send(Arc::new(SharedSensorEvent::Error(reason)));
 }

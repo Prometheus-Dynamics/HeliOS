@@ -13,7 +13,6 @@ use styx::{BackendHandle, BackendKind};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use crate::http::identity_tokens;
 use crate::http::pipelines;
 use crate::http::validation::{ValidationIssue, ValidationWarning, issue, issue_with_remediation, warning};
 
@@ -670,27 +669,15 @@ fn normalize_pipeline_output_fields(manifest: &mut StreamManifest, warnings: &mu
     }
 }
 
-fn is_legacy_media_file_token(raw: &str) -> bool {
-    // TEMP_SHIM: streams-lifecycle-media-file-token-compat
-    // Keep coercing the old media-file token until persisted file-stream manifests have been migrated in place.
-    identity_tokens::normalize_token(raw).as_deref() == Some("media-file")
-}
-
 fn normalize_file_stream_identity(manifest: &mut StreamManifest) {
     if manifest.capture.backend != styx::BackendKind::File {
         return;
     }
 
-    manifest.capture.device_keys.retain(|key| !is_legacy_media_file_token(key));
-
     let alias_missing = manifest.identity.alias.as_deref().map(str::trim).is_none_or(|value| value.is_empty());
     if alias_missing {
         let fallback = manifest.identity.id.map(|id| format!("media-replay-{id}")).unwrap_or_else(|| format!("media-replay-{}", Uuid::new_v4()));
         manifest.identity.alias = Some(fallback);
-    }
-
-    if manifest.identity.hardware_id.as_deref().is_some_and(is_legacy_media_file_token) {
-        manifest.identity.hardware_id = manifest.identity.alias.clone().or_else(|| manifest.identity.id.map(|id| id.to_string()));
     }
 }
 
@@ -1111,7 +1098,7 @@ mod tests {
     }
 
     #[test]
-    fn normalize_stream_manifest_clears_legacy_media_file_identity() {
+    fn normalize_stream_manifest_sets_missing_media_replay_alias() {
         let mut manifest = sample_libcamera_manifest();
         manifest.capture.backend = BackendKind::File;
         manifest.capture.handle = BackendHandle::File { paths: Vec::new(), fps: 30, loop_forever: false };
@@ -1120,9 +1107,9 @@ mod tests {
         manifest.identity.hardware_id = Some("media-file".to_string());
 
         let normalized = normalize_stream_manifest(manifest);
-        assert_eq!(normalized.manifest.capture.device_keys, vec!["video-0".to_string()]);
         assert!(normalized.manifest.identity.alias.as_deref().is_some_and(|value| value.starts_with("media-replay-")));
-        assert_eq!(normalized.manifest.identity.hardware_id, normalized.manifest.identity.alias);
+        assert_eq!(normalized.manifest.capture.device_keys, vec!["media-file".to_string(), "video-0".to_string()]);
+        assert_eq!(normalized.manifest.identity.hardware_id.as_deref(), Some("media-file"));
     }
 
     #[test]

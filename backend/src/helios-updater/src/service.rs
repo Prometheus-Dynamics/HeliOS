@@ -2,14 +2,13 @@ use std::sync::Arc;
 
 use crate::ipc::{MaintenanceWindow, StorageDirectoryReport, UpdateStage, UpdaterCommand, UpdaterEvent, UpdaterStorageReport};
 use chrono::Utc;
-use serde::Deserialize;
 use tokio::sync::{Mutex, RwLock, broadcast};
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::apply;
-use crate::artifact::{self, ReleaseManifest};
+use crate::artifact::{self, ReleaseManifest, ReleaseManifestMetadata};
 use crate::cleanup;
 use crate::config::{SignaturePolicy, UpdaterConfig};
 use crate::error::{Error, Result};
@@ -228,6 +227,8 @@ impl UpdaterService {
             }
         }
 
+        ReleaseManifestMetadata::from_manifest(manifest).map_err(Error::Manifest)?;
+
         Ok(())
     }
 
@@ -264,7 +265,7 @@ async fn stage_release_job(
     update_id: Uuid,
     manifest: ReleaseManifest,
 ) -> Result<()> {
-    let auto_apply = manifest_auto_apply(&manifest);
+    let auto_apply = ReleaseManifestMetadata::from_manifest(&manifest).map_err(Error::Manifest)?.auto_apply;
     let staged_files = artifact::stage_release(&client, &config, update_id, &manifest, &events).await?;
 
     let artifacts_summary = artifact::staged_to_url_artifacts(&staged_files);
@@ -297,24 +298,6 @@ async fn stage_release_job(
         apply::spawn_apply_job(Arc::clone(&config), Arc::clone(&state), events.clone(), update_id);
     }
     Ok(())
-}
-
-#[derive(Deserialize)]
-struct ManifestMetadata {
-    #[serde(default = "default_true")]
-    auto_apply: bool,
-}
-
-const fn default_true() -> bool {
-    true
-}
-
-fn manifest_auto_apply(manifest: &ReleaseManifest) -> bool {
-    let metadata = manifest.metadata_json.trim();
-    if metadata.is_empty() || metadata == "{}" {
-        return true;
-    }
-    serde_json::from_str::<ManifestMetadata>(metadata).map(|value| value.auto_apply).unwrap_or(true)
 }
 
 fn spawn_state_sync(state: Arc<RwLock<ServiceState>>, mut rx: broadcast::Receiver<UpdaterEvent>) {

@@ -91,7 +91,7 @@ async fn ensure_graph(runtime: &mut LocalizationPipelineRuntime, profile: &Local
         return Ok(());
     }
 
-    let graph = GraphHandle::from_json(2, &graph_doc.graph).map_err(|err| format!("failed to build localization graph: {err}"))?;
+    let graph = GraphHandle::from_persisted_json(2, &graph_doc.graph).map_err(|err| format!("failed to build localization graph: {err}"))?;
     runtime.graph = Some(graph);
     runtime.profile_id = Some(profile.id.clone());
     runtime.last_error = None;

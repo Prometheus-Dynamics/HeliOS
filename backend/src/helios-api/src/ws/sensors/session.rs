@@ -48,10 +48,7 @@ struct FirmwarePayload {
 pub(super) async fn sensors_loop(mut socket: WebSocket, state: AppState) -> Result<(), String> {
     state.services.hardware.bind_sensor_events_state(&state);
 
-    let error_context = WsErrorContext {
-        request_id: Uuid::new_v4().to_string(),
-        trace_id: Uuid::new_v4().to_string(),
-    };
+    let error_context = WsErrorContext { request_id: Uuid::new_v4().to_string(), trace_id: Uuid::new_v4().to_string() };
     let (mut updates, mut latest) = state.services.hardware.subscribe_sensor_events().await;
     if let Some(reason) = latest.error.as_ref() {
         send_ws_error(&mut socket, &error_context, reason.as_ref(), "connect").await;
@@ -146,11 +143,7 @@ pub(super) async fn sensors_loop(mut socket: WebSocket, state: AppState) -> Resu
     Ok(())
 }
 
-pub(super) fn handle_client_message(
-    text: &str,
-    requested: &mut BTreeSet<Kind>,
-    min_interval: &mut Duration,
-) -> Result<(), String> {
+pub(super) fn handle_client_message(text: &str, requested: &mut BTreeSet<Kind>, min_interval: &mut Duration) -> Result<(), String> {
     let msg: ClientMessage = serde_json::from_str(text).map_err(|err| format!("invalid message: {err}"))?;
     let op = msg.op.trim().to_ascii_lowercase();
 
@@ -178,17 +171,10 @@ pub(super) fn handle_client_message(
                 }
             }
             if !unknown.is_empty() {
-                return Err(format!(
-                    "unsupported kinds: {} (valid: {})",
-                    unknown.join(", "),
-                    VALID_KIND_NAMES.join(", ")
-                ));
+                return Err(format!("unsupported kinds: {} (valid: {})", unknown.join(", "), VALID_KIND_NAMES.join(", ")));
             }
             if accepted == 0 {
-                return Err(format!(
-                    "subscribe requires at least one valid kind ({})",
-                    VALID_KIND_NAMES.join(", ")
-                ));
+                return Err(format!("subscribe requires at least one valid kind ({})", VALID_KIND_NAMES.join(", ")));
             }
             Ok(())
         }
@@ -205,17 +191,10 @@ pub(super) fn handle_client_message(
                     }
                 }
                 if !unknown.is_empty() {
-                    return Err(format!(
-                        "unsupported kinds: {} (valid: {})",
-                        unknown.join(", "),
-                        VALID_KIND_NAMES.join(", ")
-                    ));
+                    return Err(format!("unsupported kinds: {} (valid: {})", unknown.join(", "), VALID_KIND_NAMES.join(", ")));
                 }
                 if removed == 0 {
-                    return Err(format!(
-                        "unsubscribe requires at least one valid kind ({})",
-                        VALID_KIND_NAMES.join(", ")
-                    ));
+                    return Err(format!("unsubscribe requires at least one valid kind ({})", VALID_KIND_NAMES.join(", ")));
                 }
             } else {
                 requested.clear();
@@ -236,19 +215,10 @@ pub(super) fn build_payload(requested: &BTreeSet<Kind>, values: &SnapshotPayload
             Kind::Lighting => payload.lighting = values.lighting.clone(),
         }
     }
-    if payload.imu.is_none() && payload.power.is_none() && payload.lighting.is_none() {
-        None
-    } else {
-        Some(payload)
-    }
+    if payload.imu.is_none() && payload.power.is_none() && payload.lighting.is_none() { None } else { Some(payload) }
 }
 
-async fn send_cached_for_requested(
-    socket: &mut WebSocket,
-    requested: &BTreeSet<Kind>,
-    latest: &SharedSensorLatest,
-    error_context: &WsErrorContext,
-) -> Result<(), ()> {
+async fn send_cached_for_requested(socket: &mut WebSocket, requested: &BTreeSet<Kind>, latest: &SharedSensorLatest, error_context: &WsErrorContext) -> Result<(), ()> {
     if requested.is_empty() {
         return Ok(());
     }
@@ -268,10 +238,7 @@ async fn send_cached_for_requested(
     if requested.contains(&Kind::Lighting)
         && let Some(lighting) = latest.lighting.as_ref()
     {
-        let payload = SnapshotPayload {
-            lighting: Some((*lighting.as_ref()).clone()),
-            ..SnapshotPayload::default()
-        };
+        let payload = SnapshotPayload { lighting: Some((*lighting.as_ref()).clone()), ..SnapshotPayload::default() };
         if send_json_message(socket, &payload).await.is_err() {
             return Err(());
         }
@@ -280,9 +247,7 @@ async fn send_cached_for_requested(
     if requested.contains(&Kind::Firmware)
         && let Some(update) = latest.firmware.as_ref()
     {
-        let payload = FirmwarePayload {
-            firmware: (*update.as_ref()).clone(),
-        };
+        let payload = FirmwarePayload { firmware: (*update.as_ref()).clone() };
         if send_json_message(socket, &payload).await.is_err() {
             return Err(());
         }

@@ -212,6 +212,7 @@ mod tests {
 
     fn sample_manifest() -> StreamManifest {
         serde_json::from_value(json!({
+            "schema_version": 1,
             "identity": {},
             "capture": {
                 "device_keys": [],

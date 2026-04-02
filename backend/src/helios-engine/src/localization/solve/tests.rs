@@ -5,7 +5,7 @@ use nalgebra::{Quaternion, UnitQuaternion};
 
 use super::*;
 use crate::localization::config::{LocalizationPoseSpace, LocalizationSolverConfig, LocalizationSolverMode, LocalizationSolverRuntimeTuningConfig, LocalizationTemporalStabilizationConfig};
-use crate::localization::math::{PoseTransform, compose_transforms};
+use crate::localization::math::{compose_transforms, PoseTransform};
 use crate::localization::types::{LocalizationPose, LocalizationQuaternion, LocalizationRotation, LocalizationSolverOutputs, LocalizationSolverPose, LocalizationSolverResult, LocalizationVector};
 
 fn dummy_pose(x: f64, y: f64, z: f64) -> LocalizationPose {

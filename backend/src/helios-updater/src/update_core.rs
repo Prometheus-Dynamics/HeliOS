@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::client::{CommandId, UpdaterClient, UpdaterClientConfig, UpdaterSession};
 use crate::ipc::{MaintenanceWindow, PreflightReport, UpdateStage, UpdateState, UpdaterCommand, UpdaterEvent};
-use crate::{ManifestArtifact, ReleaseManifest};
+use crate::{ManifestArtifact, ReleaseManifest, ReleaseManifestMetadata};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpdateArtifactKind {
@@ -158,12 +158,7 @@ pub async fn build_manual_release_manifest(request: &ManualUpdateArtifact, updat
         }
     }
 
-    let metadata_json = serde_json::json!({
-        "auto_apply": false,
-        "delete_image_after_apply": request.delete_source_after_apply,
-        "source_artifact_path": request.source_artifact_path,
-    })
-    .to_string();
+    let metadata_json = ReleaseManifestMetadata::manual_stage(request.delete_source_after_apply, request.source_artifact_path.clone()).encode_json().map_err(UpdateCoreError::new)?;
 
     Ok(ReleaseManifest { update_id: Some(update_id), version: None, artifacts: vec![artifact], metadata_json })
 }
@@ -566,9 +561,10 @@ mod tests {
         assert_eq!(manifest.artifacts.len(), 1);
         assert_eq!(manifest.artifacts[0].size_bytes, Some(11));
         assert_eq!(manifest.artifacts[0].kind.as_deref(), Some("disk-image"));
-        assert!(manifest.metadata_json.contains("\"auto_apply\":false"));
-        assert!(manifest.metadata_json.contains("\"delete_image_after_apply\":true"));
-        assert!(manifest.metadata_json.contains(&image.display().to_string()));
+        let metadata = ReleaseManifestMetadata::decode_json(&manifest.metadata_json).expect("decode metadata");
+        assert!(!metadata.auto_apply);
+        assert!(metadata.delete_image_after_apply);
+        assert_eq!(metadata.source_artifact_path.as_deref(), Some(image.display().to_string().as_str()));
     }
 
     #[tokio::test]

@@ -3,7 +3,7 @@ use std::path::{Path as StdPath, PathBuf};
 use tokio::fs;
 use uuid::Uuid;
 
-use crate::http::media::{MediaMetadata, write_media_metadata};
+use crate::http::media::{load_named_media_metadata, write_media_metadata};
 use crate::http::storage;
 
 use super::ActiveRecordingSession;
@@ -20,18 +20,11 @@ pub(super) async fn media_meta_dir_async() -> Result<PathBuf, String> {
     storage::ensure_subdir_async("media-meta").await.map_err(|err| format!("failed to prepare media metadata directory: {err}"))
 }
 
-async fn load_media_metadata_entry(name: &str) -> Option<MediaMetadata> {
-    let base = storage::sanitize_name(name)?;
-    let dir = storage::ensure_subdir_async("media-meta").await.ok()?;
-    let bytes = fs::read(dir.join(format!("{base}.json"))).await.ok()?;
-    serde_json::from_slice::<MediaMetadata>(&bytes).ok()
-}
-
 pub(super) async fn update_media_recording_fps_from_frame_ts(name: &str) -> Result<(), String> {
     let Some(base) = storage::sanitize_name(name) else {
         return Err("invalid media name".to_string());
     };
-    let mut metadata = load_media_metadata_entry(&base).await.unwrap_or_default();
+    let mut metadata = load_named_media_metadata(&base).await.unwrap_or_default();
     let Some(frame_ts_name) = metadata.frame_timestamps_file_name.as_deref().and_then(storage::sanitize_name) else {
         return Ok(());
     };
@@ -97,7 +90,7 @@ pub(super) async fn update_media_imu_sidecar(name: &str, sidecar_name: Option<St
     let Some(base) = storage::sanitize_name(name) else {
         return Err("invalid media name".to_string());
     };
-    let mut metadata = load_media_metadata_entry(&base).await.unwrap_or_default();
+    let mut metadata = load_named_media_metadata(&base).await.unwrap_or_default();
     metadata.imu_data_file_name = sidecar_name;
     metadata.imu_data_samples = samples;
     write_media_metadata(&base, metadata).await.map_err(|err| err.to_string())

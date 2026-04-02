@@ -18,12 +18,12 @@ use super::fetch::LocalizationSourceFetcher;
 use super::maps::FieldMapDocument;
 use super::math::PoseTransform;
 use super::solvers::{SolverContext, SolverRegistry};
-use super::sources::{SourceParserRegistry, SourceSample, fetch_source_samples_with_registry};
+use super::sources::{fetch_source_samples_with_registry, SourceParserRegistry, SourceSample};
 use super::types::{LocalizationSolveResponse, LocalizationSolveTimings, LocalizationSolverOutputs, LocalizationSolverResult, LocalizationSourceSampleStatus};
 use marker_map::marker_map_from_field_map;
 use postprocess::apply_profile_postprocessing;
 #[cfg(test)]
-use smoothing::{LocalizationPoseSmoothingInput, smooth_localization_pose};
+use smoothing::{smooth_localization_pose, LocalizationPoseSmoothingInput};
 use solver_scope::filter_solver_output_spaces_for_scope;
 
 #[derive(Debug, Clone)]

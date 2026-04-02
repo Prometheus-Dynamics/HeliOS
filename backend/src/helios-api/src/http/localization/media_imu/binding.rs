@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 use crate::http::AppState;
-use crate::http::media::MediaMetadata;
+use crate::http::media::{MediaMetadata, load_media_metadata as load_shared_media_metadata};
 use crate::http::storage;
 use helios_engine::ipc::StreamSummary;
 
@@ -114,6 +114,5 @@ pub(super) fn media_name_candidates(path: &Path) -> Vec<String> {
 }
 
 async fn load_media_metadata(media_meta_dir: &Path, media_name: &str) -> Option<MediaMetadata> {
-    let bytes = tokio::fs::read(media_meta_dir.join(format!("{media_name}.json"))).await.ok()?;
-    serde_json::from_slice(&bytes).ok()
+    load_shared_media_metadata(media_meta_dir, media_name).await
 }

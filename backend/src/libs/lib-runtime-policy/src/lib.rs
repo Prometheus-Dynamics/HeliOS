@@ -10,11 +10,7 @@ pub struct BoundedUsizePolicy {
 
 impl BoundedUsizePolicy {
     pub fn resolve(self) -> usize {
-        std::env::var(self.env_var)
-            .ok()
-            .and_then(|value| value.trim().parse::<usize>().ok())
-            .unwrap_or(self.default)
-            .clamp(self.min, self.max)
+        std::env::var(self.env_var).ok().and_then(|value| value.trim().parse::<usize>().ok()).unwrap_or(self.default).clamp(self.min, self.max)
     }
 }
 
@@ -28,11 +24,7 @@ pub struct BoundedU64Policy {
 
 impl BoundedU64Policy {
     pub fn resolve(self) -> u64 {
-        std::env::var(self.env_var)
-            .ok()
-            .and_then(|value| value.trim().parse::<u64>().ok())
-            .unwrap_or(self.default)
-            .clamp(self.min, self.max)
+        std::env::var(self.env_var).ok().and_then(|value| value.trim().parse::<u64>().ok()).unwrap_or(self.default).clamp(self.min, self.max)
     }
 }
 

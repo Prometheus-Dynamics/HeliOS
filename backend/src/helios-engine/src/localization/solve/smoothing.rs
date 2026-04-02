@@ -7,7 +7,7 @@ use nalgebra::{Quaternion, UnitQuaternion};
 use crate::localization::config::{LocalizationProfile, LocalizationSolverRuntimeTuningConfig, LocalizationTemporalStabilizationConfig};
 use crate::localization::types::{LocalizationPose, LocalizationSolverOutputs, LocalizationSolverResult};
 
-use super::{SOLVER_TEMPORAL_STATE, TemporalPoseState};
+use super::{TemporalPoseState, SOLVER_TEMPORAL_STATE};
 
 pub(super) fn apply_temporal_pose_stabilization(profile: &LocalizationProfile, solver_results: &mut [LocalizationSolverResult]) {
     let now = Instant::now();

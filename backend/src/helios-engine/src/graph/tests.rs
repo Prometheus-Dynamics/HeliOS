@@ -300,11 +300,11 @@ fn raw_stream_graph_can_select_undistorted_output() {
         lens_model: lib_cv::modules::calibration::LensModel::Pinhole,
     };
 
-    let raw = super::GraphHandle::from_json_with_output(1, &graph_json, Some("frame")).expect("raw graph");
+    let raw = super::GraphHandle::from_persisted_json_with_output(1, &graph_json, Some("frame")).expect("raw graph");
     raw.set_calibration(Some(calib.clone()));
     let out_raw = raw.process(input.clone()).expect("raw output");
 
-    let undist = super::GraphHandle::from_json_with_output(1, &graph_json, Some("undistorted")).expect("undist graph");
+    let undist = super::GraphHandle::from_persisted_json_with_output(1, &graph_json, Some("undistorted")).expect("undist graph");
     undist.set_calibration(Some(calib));
     let out_undist = undist.process(input).expect("undistorted output");
 

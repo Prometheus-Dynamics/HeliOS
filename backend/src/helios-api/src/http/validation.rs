@@ -39,18 +39,8 @@ pub fn issue(path: impl Into<String>, code: impl Into<String>, message: impl Int
     ValidationIssue { path: path.into(), code: code.into(), message: message.into(), remediation: None }
 }
 
-pub fn issue_with_remediation(
-    path: impl Into<String>,
-    code: impl Into<String>,
-    message: impl Into<String>,
-    remediation: impl Into<String>,
-) -> ValidationIssue {
-    ValidationIssue {
-        path: path.into(),
-        code: code.into(),
-        message: message.into(),
-        remediation: Some(remediation.into()),
-    }
+pub fn issue_with_remediation(path: impl Into<String>, code: impl Into<String>, message: impl Into<String>, remediation: impl Into<String>) -> ValidationIssue {
+    ValidationIssue { path: path.into(), code: code.into(), message: message.into(), remediation: Some(remediation.into()) }
 }
 
 pub fn warning(path: impl Into<String>, code: impl Into<String>, message: impl Into<String>) -> ValidationWarning {

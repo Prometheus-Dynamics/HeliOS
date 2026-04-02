@@ -1,7 +1,7 @@
 #[cfg(feature = "runtime")]
 use super::StreamRunner;
 #[cfg(feature = "runtime")]
-use crate::capture::{find_backend_for_config, discover_devices, BackendKind};
+use crate::capture::{discover_devices, find_backend_for_config, BackendKind};
 #[cfg(feature = "runtime")]
 use styx::prelude::FourCc;
 

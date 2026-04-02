@@ -7,8 +7,11 @@ use crate::error::Result;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
+const CURRENT_SNAPSHOT_META_SCHEMA_VERSION: u32 = 1;
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Meta {
+    pub schema_version: u32,
     pub id: String,
     pub created_utc: DateTime<Utc>,
     pub host: Option<String>,
@@ -65,7 +68,12 @@ impl SnapshotBuilder {
         };
         let out_dir = cfg.base_dir.join(&id);
         ensure_dir(&out_dir)?;
-        Ok(Self { cfg, meta: Meta { id, created_utc: Utc::now(), host, trigger: trigger.to_string(), unit, tag, version: None }, out_dir, commands: Vec::new() })
+        Ok(Self {
+            cfg,
+            meta: Meta { schema_version: CURRENT_SNAPSHOT_META_SCHEMA_VERSION, id, created_utc: Utc::now(), host, trigger: trigger.to_string(), unit, tag, version: None },
+            out_dir,
+            commands: Vec::new(),
+        })
     }
 
     pub fn out_dir(&self) -> &Path {

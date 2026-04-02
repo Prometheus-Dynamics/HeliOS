@@ -7,8 +7,8 @@ use tracing::warn;
 use uuid::Uuid;
 
 use super::repartition::{OfflineDataBorrowAssessment, OfflineDataBorrowBlocker, assess_offline_data_borrow, offline_data_borrow_blocked_summary, offline_data_borrow_summary};
-use super::{ApplyManifestMetadata, SquashfsPreflightContext, SquashfsSlotResizePlan, env_flag_enabled};
-use crate::artifact::{ReleaseManifest, StagedMetadata, load_metadata};
+use super::{SquashfsPreflightContext, SquashfsSlotResizePlan, env_flag_enabled};
+use crate::artifact::{ReleaseManifest, ReleaseManifestMetadata, load_metadata};
 use crate::bundle::{is_frontend_bundle, is_service_bundle};
 use crate::config::UpdaterConfig;
 use crate::error::{Error, Result};
@@ -18,16 +18,9 @@ use crate::util::{
     inspect_adjacent_partition, inspect_block_partition, select_target_slot,
 };
 
-pub(super) fn parse_apply_manifest_metadata(metadata: &StagedMetadata) -> ApplyManifestMetadata {
-    let raw = metadata.manifest.metadata_json.trim();
-    if raw.is_empty() || raw == "{}" {
-        return ApplyManifestMetadata::default();
-    }
-    serde_json::from_str::<ApplyManifestMetadata>(raw).unwrap_or_default()
-}
-
 pub(crate) async fn preflight_staged_release(config: &UpdaterConfig, update_id: Uuid) -> Result<PreflightReport> {
     let metadata = load_metadata(config, update_id).await?;
+    let _ = ReleaseManifestMetadata::from_manifest(&metadata.manifest).map_err(Error::InvalidState)?;
     let artifact_kind = metadata.manifest.artifacts.first().and_then(|artifact| artifact.kind.as_deref());
 
     if is_frontend_bundle(artifact_kind) {
@@ -204,16 +197,7 @@ async fn preflight_disk_image_release(
                 SquashfsSlotResizePlan::NeedsDataResize { required_growth_bytes, gap_after_bytes, additional_from_data_bytes, .. }
                 | SquashfsSlotResizePlan::ClearDataDir { required_growth_bytes, gap_after_bytes, additional_from_data_bytes, .. } => {
                     let layout = lib_storage_layout::StorageLayoutManifest::load_system().map_err(|err| Error::InvalidState(err.to_string()))?;
-                    Some(assess_offline_data_borrow(
-                        config,
-                        &layout,
-                        manifest,
-                        &target_info,
-                        next_partition.as_ref(),
-                        required_growth_bytes,
-                        gap_after_bytes,
-                        additional_from_data_bytes,
-                    ))
+                    Some(assess_offline_data_borrow(config, &layout, manifest, &target_info, next_partition.as_ref(), required_growth_bytes, gap_after_bytes, additional_from_data_bytes))
                 }
                 _ => None,
             };

@@ -29,13 +29,7 @@ pub async fn sensors_upgrade(ws: WebSocketUpgrade, State(state): State<AppState>
     })
 }
 
-pub fn register_docs(
-    host: Option<String>,
-    _registry: &mut SchemaRegistry,
-    servers: &mut BTreeMap<String, Server>,
-    tags: &mut Vec<Tag>,
-    docs: &mut Vec<WsDoc>,
-) {
+pub fn register_docs(host: Option<String>, _registry: &mut SchemaRegistry, servers: &mut BTreeMap<String, Server>, tags: &mut Vec<Tag>, docs: &mut Vec<WsDoc>) {
     let doc = WsDoc {
         path: "sensors.stream",
         summary: "Peripheral sensor stream",
@@ -47,16 +41,7 @@ pub fn register_docs(
     };
 
     let server_host = host.unwrap_or_else(|| "localhost:5800/v1/ws".to_string());
-    servers.entry("primary".into()).or_insert(Server {
-        host: server_host,
-        protocol: "ws".into(),
-        protocol_version: None,
-        description: Some("Primary WebSocket entrypoint".into()),
-    });
+    servers.entry("primary".into()).or_insert(Server { host: server_host, protocol: "ws".into(), protocol_version: None, description: Some("Primary WebSocket entrypoint".into()) });
     docs.push(doc);
-    tags.push(Tag {
-        name: "sensors".into(),
-        description: Some("Peripheral sensor events".to_string()),
-        external_docs: None,
-    });
+    tags.push(Tag { name: "sensors".into(), description: Some("Peripheral sensor events".to_string()), external_docs: None });
 }

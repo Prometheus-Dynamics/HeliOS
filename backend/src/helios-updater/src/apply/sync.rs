@@ -8,7 +8,7 @@ use tokio::sync::{RwLock, broadcast::Sender};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::artifact::cache_usage_bytes;
+use crate::artifact::{ReleaseManifestMetadata, cache_usage_bytes};
 use crate::config::UpdaterConfig;
 use crate::error::{Error, Result};
 use crate::ipc::{UpdateStage, UpdaterEvent};
@@ -19,12 +19,10 @@ use crate::util::{
     resolve_boot_block_device, resolve_boot_dir_rw, rewrite_cmdline_root, sync_filesystem,
 };
 
-use super::{
-    PERSISTED_FILE_SYNCS, PERSIST_NETWORKD_DIR, PERSIST_NETWORKD_PREFIX, REQUIRED_BOOTABLE_ROOT_PATHS, PersistedFileSync, SquashfsSlotResizePlan,
-};
 use super::progress::publish_snapshot;
+use super::{PERSIST_NETWORKD_DIR, PERSIST_NETWORKD_PREFIX, PERSISTED_FILE_SYNCS, PersistedFileSync, REQUIRED_BOOTABLE_ROOT_PATHS, SquashfsSlotResizePlan};
 
-pub(super) async fn cleanup_source_media_after_apply(config: &UpdaterConfig, update_id: Uuid, metadata: &super::ApplyManifestMetadata) {
+pub(super) async fn cleanup_source_media_after_apply(config: &UpdaterConfig, update_id: Uuid, metadata: &ReleaseManifestMetadata) {
     if !metadata.delete_image_after_apply {
         return;
     }
@@ -471,15 +469,12 @@ pub(super) async fn sync_persisted_files_with_mappings_into(root: &Path, mapping
 }
 
 async fn resolve_persisted_file_source(mapping: &PersistedFileSync) -> Result<Option<PathBuf>> {
-    for candidate in mapping.source_candidates {
-        match tokio::fs::metadata(candidate).await {
-            Ok(meta) if meta.is_file() => return Ok(Some(PathBuf::from(candidate))),
-            Ok(_) => continue,
-            Err(err) if err.kind() == ErrorKind::NotFound => continue,
-            Err(err) => return Err(Error::Io(err)),
-        }
+    match tokio::fs::metadata(mapping.source_path).await {
+        Ok(meta) if meta.is_file() => Ok(Some(PathBuf::from(mapping.source_path))),
+        Ok(_) => Ok(None),
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(Error::Io(err)),
     }
-    Ok(None)
 }
 
 pub(super) async fn validate_bootable_squashfs_root(target_device: &str, work_dir: &Path) -> Result<()> {

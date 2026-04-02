@@ -85,11 +85,11 @@ pub(super) async fn pipeline_identity_conflict(
             continue;
         }
 
-        let data = match fs::read_to_string(entry.path()).await {
+        let data = match fs::read(entry.path()).await {
             Ok(data) => data,
             Err(err) => return Err(map_io_error(err, "failed to read pipeline file")),
         };
-        let Ok(doc) = serde_json::from_str::<PipelineDocument>(&data) else {
+        let Ok(doc) = PipelineDocument::decode_slice(&data) else {
             continue;
         };
         if doc.id == requested_id {

@@ -3,8 +3,8 @@ use crate::http::streams::lifecycle::codec_inventory_from_runtime;
 use helios_engine::capture::{BackendHandle, BackendKind, CaptureConfig, ModeId};
 use helios_engine::identity::DeviceIdentity;
 use helios_engine::ipc::{
-    CURRENT_STREAM_CONFIG_SCHEMA_VERSION, EncoderSettings, PoseRotation, PoseVector, RequestedDecoderConfig, RequestedEncoderConfig, RigPose, StreamCodecCapability,
-    StreamCodecTunables, StreamManifest, StreamPipelineGridSlot, StreamRecordingMode, StreamRuntimeCapabilities, default_shadow_recording_codec, stream_runtime_capabilities,
+    CURRENT_STREAM_CONFIG_SCHEMA_VERSION, EncoderSettings, PoseRotation, PoseVector, RequestedDecoderConfig, RequestedEncoderConfig, RigPose, StreamCodecCapability, StreamCodecTunables,
+    StreamManifest, StreamPipelineGridSlot, StreamRecordingMode, StreamRuntimeCapabilities, default_shadow_recording_codec, stream_runtime_capabilities,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -100,23 +100,14 @@ impl ValidationCaseDef {
                 manifest.encoder = RequestedEncoderConfig::enabled(Some("turbojpeg".to_string()), Some(EncoderSettings::Turbojpeg { quality: Some(72) }));
                 manifest.decoder = RequestedDecoderConfig::disabled();
                 manifest.pipeline_enabled = true;
-                manifest.pipelines = vec![helios_engine::ipc::StreamPipelineBinding {
-                    pipeline_id: RAW_PIPELINE_UUID,
-                    pipeline_graph: None,
-                    pipeline_output: Some("raw".to_string()),
-                    pipeline_patch: None,
-                }];
+                manifest.pipelines =
+                    vec![helios_engine::ipc::StreamPipelineBinding { pipeline_id: RAW_PIPELINE_UUID, pipeline_graph: None, pipeline_output: Some("raw".to_string()), pipeline_patch: None }];
                 manifest.active_pipeline_id = Some(RAW_PIPELINE_UUID);
                 manifest.active_pipeline_output = Some("raw".to_string());
                 manifest.pipeline_layout = Some(helios_engine::ipc::StreamPipelineLayout {
                     rows: 1,
                     columns: 1,
-                    slots: vec![StreamPipelineGridSlot {
-                        row: 0,
-                        column: 0,
-                        pipeline_id: Some(RAW_PIPELINE_UUID),
-                        output_key: Some("raw".to_string()),
-                    }],
+                    slots: vec![StreamPipelineGridSlot { row: 0, column: 0, pipeline_id: Some(RAW_PIPELINE_UUID), output_key: Some("raw".to_string()) }],
                 });
                 manifest.preview_jpeg_quality = 72;
                 manifest
@@ -125,8 +116,7 @@ impl ValidationCaseDef {
                 let mut manifest = sample_libcamera_manifest(FourCc::new(*b"RG24"));
                 manifest.host_buffer = 9;
                 manifest.preview_jpeg_quality = 44;
-                manifest.capture.interval =
-                    Some(Interval { numerator: NonZeroU32::new(1).expect("non-zero numerator"), denominator: NonZeroU32::new(15).expect("non-zero denominator") });
+                manifest.capture.interval = Some(Interval { numerator: NonZeroU32::new(1).expect("non-zero numerator"), denominator: NonZeroU32::new(15).expect("non-zero denominator") });
                 manifest.encoder = RequestedEncoderConfig::disabled();
                 manifest.decoder = RequestedDecoderConfig::disabled();
                 manifest.pose = Some(RigPose {
@@ -176,19 +166,10 @@ impl ValidationCaseDef {
                 manifest.pipeline_layout = Some(helios_engine::ipc::StreamPipelineLayout {
                     rows: 1,
                     columns: 1,
-                    slots: vec![StreamPipelineGridSlot {
-                        row: 0,
-                        column: 0,
-                        pipeline_id: Some(RAW_PIPELINE_UUID),
-                        output_key: Some("raw".to_string()),
-                    }],
+                    slots: vec![StreamPipelineGridSlot { row: 0, column: 0, pipeline_id: Some(RAW_PIPELINE_UUID), output_key: Some("raw".to_string()) }],
                 });
-                manifest.pipelines = vec![helios_engine::ipc::StreamPipelineBinding {
-                    pipeline_id: RAW_PIPELINE_UUID,
-                    pipeline_graph: None,
-                    pipeline_output: Some("raw".to_string()),
-                    pipeline_patch: None,
-                }];
+                manifest.pipelines =
+                    vec![helios_engine::ipc::StreamPipelineBinding { pipeline_id: RAW_PIPELINE_UUID, pipeline_graph: None, pipeline_output: Some("raw".to_string()), pipeline_patch: None }];
                 manifest
             }
         }
@@ -230,9 +211,7 @@ fn focused_runtime_capabilities() -> StreamRuntimeCapabilities {
                 "h264",
                 "RG24",
                 "H264",
-                Some(StreamCodecTunables {
-                    encoder_settings: Some(EncoderSettings::H264 { bitrate: Some(4_000_000), gop: None, framerate: None, thread_count: None, output_resolution: None }),
-                }),
+                Some(StreamCodecTunables { encoder_settings: Some(EncoderSettings::H264 { bitrate: Some(4_000_000), gop: None, framerate: None, thread_count: None, output_resolution: None }) }),
             ),
         ],
         default_encoder_id: Some("turbojpeg".to_string()),
@@ -245,24 +224,8 @@ fn focused_runtime_capabilities() -> StreamRuntimeCapabilities {
     }
 }
 
-fn codec_capability(
-    kind: CodecKind,
-    fourcc: &str,
-    name: &str,
-    implementation: &str,
-    input: &str,
-    output: &str,
-    tunables: Option<StreamCodecTunables>,
-) -> StreamCodecCapability {
-    StreamCodecCapability {
-        kind,
-        fourcc: fourcc.to_string(),
-        name: name.to_string(),
-        implementation: implementation.to_string(),
-        input: input.to_string(),
-        output: output.to_string(),
-        tunables,
-    }
+fn codec_capability(kind: CodecKind, fourcc: &str, name: &str, implementation: &str, input: &str, output: &str, tunables: Option<StreamCodecTunables>) -> StreamCodecCapability {
+    StreamCodecCapability { kind, fourcc: fourcc.to_string(), name: name.to_string(), implementation: implementation.to_string(), input: input.to_string(), output: output.to_string(), tunables }
 }
 
 fn sample_libcamera_manifest(fourcc: FourCc) -> StreamManifest {
@@ -323,20 +286,12 @@ fn write_goldens(path: &Path, goldens: &StreamCapabilityGoldenFile) {
 
 fn capability_case(name: &str, profile: RuntimeProfile) -> CapabilityGoldenSnapshot {
     let runtime = profile.runtime();
-    CapabilityGoldenSnapshot {
-        name: name.to_string(),
-        profile: profile.name().to_string(),
-        response: serde_json::to_value(stream_capabilities(&runtime)).expect("serialize capability response"),
-    }
+    CapabilityGoldenSnapshot { name: name.to_string(), profile: profile.name().to_string(), response: serde_json::to_value(stream_capabilities(&runtime)).expect("serialize capability response") }
 }
 
 fn codec_case(name: &str, profile: RuntimeProfile) -> CodecGoldenSnapshot {
     let runtime = profile.runtime();
-    CodecGoldenSnapshot {
-        name: name.to_string(),
-        profile: profile.name().to_string(),
-        response: serde_json::to_value(codec_inventory_from_runtime(runtime)).expect("serialize codec inventory"),
-    }
+    CodecGoldenSnapshot { name: name.to_string(), profile: profile.name().to_string(), response: serde_json::to_value(codec_inventory_from_runtime(runtime)).expect("serialize codec inventory") }
 }
 
 async fn validation_case(def: ValidationCaseDef) -> ValidationGoldenSnapshot {
@@ -355,12 +310,7 @@ async fn validation_case(def: ValidationCaseDef) -> ValidationGoldenSnapshot {
             "warnings": err.warnings,
         }),
     };
-    ValidationGoldenSnapshot {
-        name: def.name.to_string(),
-        profile: def.profile.name().to_string(),
-        manifest: serde_json::to_value(manifest).expect("serialize manifest"),
-        outcome,
-    }
+    ValidationGoldenSnapshot { name: def.name.to_string(), profile: def.profile.name().to_string(), manifest: serde_json::to_value(manifest).expect("serialize manifest"), outcome }
 }
 
 async fn generate_goldens() -> StreamCapabilityGoldenFile {
@@ -369,10 +319,7 @@ async fn generate_goldens() -> StreamCapabilityGoldenFile {
         capability_case("focused_runtime_defaults_and_constraints", RuntimeProfile::FocusedRuntime),
         capability_case("no_codec_defaults_and_constraints", RuntimeProfile::NoCodecs),
     ];
-    let codec_cases = vec![
-        codec_case("current_runtime_codec_inventory", RuntimeProfile::CurrentRuntime),
-        codec_case("focused_runtime_codec_inventory", RuntimeProfile::FocusedRuntime),
-    ];
+    let codec_cases = vec![codec_case("current_runtime_codec_inventory", RuntimeProfile::CurrentRuntime), codec_case("focused_runtime_codec_inventory", RuntimeProfile::FocusedRuntime)];
     let mut validation_cases = Vec::new();
     for def in validation_case_defs() {
         validation_cases.push(validation_case(def).await);

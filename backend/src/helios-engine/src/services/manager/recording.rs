@@ -49,21 +49,9 @@ pub(super) async fn start_recording(manager: &StreamManager, stream_id: Uuid, pa
         let frame_ts_path = frame_ts_path.clone();
         tokio::spawn(async move {
             let _encoded_consumer = encoded_consumer;
-            let result = record_encoded_session(
-                rx,
-                stop_rx,
-                &record_path,
-                &raw_path,
-                container,
-                source_codec,
-                codec,
-                duration_ms,
-                requested_fps,
-                settings,
-                Some(frame_ts_path),
-                Some(encoded_consumer_touch),
-            )
-            .await;
+            let result =
+                record_encoded_session(rx, stop_rx, &record_path, &raw_path, container, source_codec, codec, duration_ms, requested_fps, settings, Some(frame_ts_path), Some(encoded_consumer_touch))
+                    .await;
             let _ = done_tx.send(RecordingState::Completed(result.clone()));
             manager.finish_recording(stream_id, result).await;
         });
@@ -172,13 +160,7 @@ pub(super) async fn stop_recording(manager: &StreamManager, stream_id: Uuid) -> 
     }
 }
 
-pub(super) async fn capture_shadow_recording(
-    manager: &StreamManager,
-    stream_id: Uuid,
-    output_path: String,
-    container: RecordingContainer,
-    window_ms: u64,
-) -> Result<()> {
+pub(super) async fn capture_shadow_recording(manager: &StreamManager, stream_id: Uuid, output_path: String, container: RecordingContainer, window_ms: u64) -> Result<()> {
     if !super::policy::shadow_recorder_feature_enabled() {
         return Err(Error::InvalidState("shadow recorder feature is disabled"));
     }
@@ -262,13 +244,7 @@ pub(super) async fn start_shadow_recorder(manager: &StreamManager, stream_id: Uu
     let mut encoded_rx = ctx.encoded_tx.subscribe();
     let join = tokio::spawn(async move {
         let _encoded_consumer = encoded_consumer;
-        let worker = match ShadowRecorderWorker::start(ShadowRecorderConfig {
-            shadow_dir: shadow_dir.clone(),
-            codec: preferred_codec,
-            segment_ms,
-            window_ms,
-            format_tracker: tracker_for_worker,
-        }) {
+        let worker = match ShadowRecorderWorker::start(ShadowRecorderConfig { shadow_dir: shadow_dir.clone(), codec: preferred_codec, segment_ms, window_ms, format_tracker: tracker_for_worker }) {
             Ok(worker) => worker,
             Err(err) => {
                 tracing::warn!(stream_id = %stream_id, error = %err, "shadow recorder worker start failed");

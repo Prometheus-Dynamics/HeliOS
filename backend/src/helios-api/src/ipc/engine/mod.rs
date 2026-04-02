@@ -24,9 +24,9 @@ use tokio::time::{Duration, Instant};
 
 use super::command_id_from_context;
 use timeouts::{engine_request_send_timeout, scale_timeout, timeout_scale_for_streams};
-pub use transport::connect_engine_best_effort;
 #[cfg(test)]
 pub(crate) use transport::connect_engine_at_for_tests;
+pub use transport::connect_engine_best_effort;
 
 pub type EngineClient = GenericClient<EngineClientConfig, EngineCommand, EngineEvent>;
 pub type EngineSession = GenericSession<EngineCommand, EngineEvent>;
