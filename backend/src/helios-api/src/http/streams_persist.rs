@@ -886,11 +886,34 @@ pub(crate) fn manifests_conflict(a: &ResolvedStreamConfig, b: &StreamManifest) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::http::streams::util::build_stream_info;
+    use crate::http::streams::validation::validate_stream_manifest;
     use helios_engine::ipc::{CURRENT_STREAM_CONFIG_SCHEMA_VERSION, StreamRecordingMode, default_shadow_recording_codec};
+    use helios_engine::services::StreamManager;
+    use serde::Deserialize;
     use serde_json::json;
     use std::path::PathBuf;
     use std::sync::OnceLock;
     use styx::prelude::{ColorSpace, FourCc, MediaFormat, Resolution};
+
+    #[derive(Debug, Clone, Deserialize)]
+    struct RoundTripFixtureFile {
+        cases: Vec<RoundTripFixtureCase>,
+    }
+
+    #[derive(Debug, Clone, Deserialize)]
+    struct RoundTripFixtureCase {
+        name: String,
+        requested_manifest: StreamManifest,
+        #[serde(default)]
+        canonical_manifest: Option<StreamManifest>,
+    }
+
+    impl RoundTripFixtureCase {
+        fn canonical_manifest(&self) -> &StreamManifest {
+            self.canonical_manifest.as_ref().unwrap_or(&self.requested_manifest)
+        }
+    }
 
     fn sample_manifest_json() -> serde_json::Value {
         json!({
@@ -1091,6 +1114,17 @@ mod tests {
         serde_json::from_value(sample_manifest_json()).expect("decode sample manifest")
     }
 
+    fn round_trip_fixtures() -> &'static [RoundTripFixtureCase] {
+        static FIXTURES: OnceLock<Vec<RoundTripFixtureCase>> = OnceLock::new();
+        FIXTURES
+            .get_or_init(|| {
+                serde_json::from_str::<RoundTripFixtureFile>(include_str!("../../../../../testdata/stream_config_roundtrip.json"))
+                    .expect("decode round-trip fixture file")
+                    .cases
+            })
+            .as_slice()
+    }
+
     #[tokio::test]
     async fn persist_manifest_checked_writes_resolved_config_only() {
         let _root = test_data_root();
@@ -1236,5 +1270,73 @@ mod tests {
         );
         let loaded = load_resolved_config(&camera_id).await.expect("load resolved config");
         assert_eq!(serde_json::to_value(loaded.pose).expect("encode loaded pose"), serde_json::to_value(Some(pose)).expect("encode expected loaded pose"));
+    }
+
+    #[tokio::test]
+    async fn stream_config_fixtures_round_trip_through_validation_persistence_runtime_and_readback() {
+        let _root = test_data_root();
+
+        for fixture in round_trip_fixtures() {
+            let requested = fixture.requested_manifest.clone();
+            let expected_requested = serde_json::to_value(&requested).expect("encode requested fixture");
+            let expected_canonical = serde_json::to_value(fixture.canonical_manifest()).expect("encode canonical fixture");
+            let stream_id = requested.identity.id.expect("fixture stream id");
+            let camera_id = format!("roundtrip-{}-{}", fixture.name, Uuid::new_v4());
+
+            let validated = validate_stream_manifest(requested.clone()).await.unwrap_or_else(|err| panic!("fixture {} should validate: {err:?}", fixture.name));
+            assert_eq!(serde_json::to_value(&validated.manifest).expect("encode validated manifest"), expected_requested);
+            assert_eq!(
+                serde_json::to_value(validated.resolved.to_requested_manifest()).expect("encode round-tripped manifest"),
+                expected_requested
+            );
+
+            persist_manifest_checked(&camera_id, Some(stream_id), requested.clone())
+                .await
+                .unwrap_or_else(|err| panic!("fixture {} should persist: {err}", fixture.name));
+
+            let loaded_requested = load_manifest(&camera_id).await.expect("load requested manifest");
+            assert_eq!(serde_json::to_value(&loaded_requested).expect("encode loaded requested manifest"), expected_canonical);
+
+            let loaded_resolved = load_resolved_config(&camera_id).await.expect("load resolved config");
+            assert_eq!(
+                serde_json::to_value(loaded_resolved.to_requested_manifest()).expect("encode loaded resolved manifest"),
+                expected_canonical
+            );
+
+            let manager = StreamManager::new();
+            let (started_id, descriptor) = manager
+                .start_stream(loaded_resolved.clone())
+                .await
+                .unwrap_or_else(|err| panic!("fixture {} should start: {err}", fixture.name));
+            assert_eq!(started_id, stream_id);
+
+            let mut summaries = manager.list_streams().await;
+            assert_eq!(summaries.len(), 1, "fixture {} should expose one active stream", fixture.name);
+            let summary = summaries.pop().expect("summary");
+            assert_eq!(summary.stream_id, stream_id);
+            assert_eq!(
+                serde_json::to_value(&summary.manifest).expect("encode runtime summary manifest"),
+                serde_json::to_value(&loaded_resolved).expect("encode expected runtime manifest")
+            );
+
+            let readback = build_stream_info(
+                summary.stream_id,
+                descriptor.clone(),
+                summary.manifest.clone(),
+                Some(summary.status.clone()),
+                Some(summary.runtime.clone()),
+            );
+            assert_eq!(serde_json::to_value(&readback.manifest).expect("encode readback manifest"), expected_canonical);
+            assert_eq!(
+                serde_json::to_value(readback.resolved.to_requested_manifest()).expect("encode readback resolved manifest"),
+                expected_canonical
+            );
+
+            manager
+                .stop_stream(stream_id)
+                .await
+                .unwrap_or_else(|err| panic!("fixture {} should stop cleanly: {err}", fixture.name));
+            assert!(manager.list_streams().await.is_empty(), "fixture {} should leave no active streams", fixture.name);
+        }
     }
 }

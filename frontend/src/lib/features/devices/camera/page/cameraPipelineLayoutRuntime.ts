@@ -2,7 +2,7 @@ import { PipelinesApi } from '$lib/api/pipelinesApi';
 import { StreamsApi } from '$lib/api/streamsApi';
 import { reportError } from '$lib/ui/errorPolicy';
 import { createPipelineLayoutController } from './cameraPipelineLayoutController';
-import { PIPELINE_UI_STORAGE_PREFIX } from './cameraPipelineTuningController';
+import { PIPELINE_UI_STORAGE_PREFIX } from './cameraPipelineShared';
 
 type LayoutControllerState = Parameters<typeof createPipelineLayoutController>[0];
 type LayoutControllerDeps = Parameters<typeof createPipelineLayoutController>[1];

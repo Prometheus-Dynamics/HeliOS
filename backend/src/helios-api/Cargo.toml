@@ -79,6 +79,7 @@ default = []
 pprof = ["dep:pprof"]
 
 [dev-dependencies]
+helios-engine = { path = "../helios-engine", default-features = false, features = ["runtime"] }
 tempfile = "3.26.0"
 lib-test.workspace = true
 tower = "0.5.3"

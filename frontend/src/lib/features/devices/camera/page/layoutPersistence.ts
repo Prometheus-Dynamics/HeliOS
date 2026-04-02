@@ -1,5 +1,5 @@
 import { normalizeGridOutputKeys, normalizeGridSlots } from './cameraPipelineState';
-import { normalizeAssignedPipelineIds, normalizePipelineOutputMap } from './cameraPipelineTuningController';
+import { normalizeAssignedPipelineIds, normalizePipelineOutputMap } from './cameraPipelineShared';
 import { readJson, writeJson } from '$lib/utils/storage';
 
 export type PipelineLayoutPersistenceState = {

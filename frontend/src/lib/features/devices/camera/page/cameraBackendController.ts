@@ -45,7 +45,7 @@ import {
   RAW_PIPELINE_UUID,
   normalizeAssignedPipelineIds,
   normalizePipelineOutputMap
-} from './cameraPipelineTuningController';
+} from './cameraPipelineShared';
 
 type BackendState = {
   get stream(): StreamInfo | null;

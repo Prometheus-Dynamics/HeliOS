@@ -18,7 +18,7 @@ import {
   RAW_PIPELINE_ID,
   RAW_PIPELINE_UUID,
   normalizeAssignedPipelineIds
-} from './cameraPipelineTuningController';
+} from './cameraPipelineShared';
 import {
   hydratePipelineUi as hydratePipelineUiState,
   persistPipelineUi as persistPipelineUiState,

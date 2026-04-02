@@ -5,7 +5,7 @@ import type {
   StreamMetrics,
   StreamPipelineBinding
 } from '$lib/api/httpClient';
-import { RAW_PIPELINE_ID, RAW_PIPELINE_UUID } from './cameraPipelineTuningController';
+import { RAW_PIPELINE_ID, RAW_PIPELINE_UUID } from './cameraPipelineShared';
 
 type UnknownRecord = Record<string, unknown>;
 type LegacyPipelineBinding = {

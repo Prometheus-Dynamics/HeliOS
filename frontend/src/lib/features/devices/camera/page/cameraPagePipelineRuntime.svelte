@@ -11,7 +11,7 @@
     PIPELINE_OUTPUT_CELL_KEY,
     RAW_PIPELINE_UUID,
     normalizeAssignedPipelineIds
-  } from './cameraPipelineTuningController';
+  } from './cameraPipelineShared';
   import { createCameraPipelineLayoutRuntime } from './cameraPipelineLayoutRuntime';
   import { createCameraPipelineTuningRuntime } from './cameraPipelineTuningRuntime';
 

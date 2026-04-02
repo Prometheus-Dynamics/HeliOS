@@ -45,6 +45,9 @@
     RAW_LOOPBACK_GRAPH,
     RAW_PIPELINE_ID,
     RAW_PIPELINE_UUID,
+    setRawPipelineUuid
+  } from './cameraPipelineShared';
+  import {
     applyDaedalusNodeOverrides,
     extractNodeOverrides,
     extractNodeValueDescriptors,
@@ -59,7 +62,6 @@
     pipelineDataTypeFromTypeExpr,
     registryPortMetadataFor,
     registryPortTypeFor,
-    setRawPipelineUuid,
     safeCloneGraph
   } from './cameraPipelineTuningController';
 
