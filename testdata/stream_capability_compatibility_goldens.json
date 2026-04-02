@@ -978,12 +978,7 @@
           "kind": "Encoder",
           "name": "mjpeg",
           "output": "MJPG",
-          "tunables": {
-            "encoder_settings": {
-              "kind": "turbojpeg",
-              "quality": 85
-            }
-          }
+          "tunables": null
         },
         {
           "fourcc": "NV12",
@@ -1019,12 +1014,7 @@
           "kind": "Encoder",
           "name": "mjpeg",
           "output": "MJPG",
-          "tunables": {
-            "encoder_settings": {
-              "kind": "turbojpeg",
-              "quality": 85
-            }
-          }
+          "tunables": null
         },
         {
           "fourcc": "RG24",
@@ -1060,12 +1050,7 @@
           "kind": "Encoder",
           "name": "mjpeg",
           "output": "MJPG",
-          "tunables": {
-            "encoder_settings": {
-              "kind": "turbojpeg",
-              "quality": 85
-            }
-          }
+          "tunables": null
         },
         {
           "fourcc": "RGBA",
@@ -1074,12 +1059,7 @@
           "kind": "Encoder",
           "name": "mjpeg",
           "output": "MJPG",
-          "tunables": {
-            "encoder_settings": {
-              "kind": "turbojpeg",
-              "quality": 85
-            }
-          }
+          "tunables": null
         },
         {
           "fourcc": "YUYV",

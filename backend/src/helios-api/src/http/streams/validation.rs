@@ -3,7 +3,7 @@ use helios_engine::ipc::default_shadow_recording_codec;
 use helios_engine::ipc::{
     DEFAULT_STREAM_PIPELINE_ENABLED_WHEN_BINDINGS_PRESENT, EncoderSettings, ResolvedStreamConfig, StreamManifest, StreamRecordingMode, StreamRuntimeCapabilities, default_decoder_enabled,
     default_encoder_enabled, default_host_buffer, default_recording_mode, default_requested_preview_jpeg_quality_disabled, default_requested_preview_jpeg_quality_enabled, default_start_on_boot,
-    normalize_pipeline_output_selection, stream_runtime_capabilities,
+    empty_encoder_settings_for_selector, normalize_pipeline_output_selection, stream_runtime_capabilities,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -230,14 +230,14 @@ fn validate_requested_codec_compatibility(manifest: &StreamManifest, runtime: &S
     }
 }
 
-fn validate_encoder_settings_compatibility(manifest: &StreamManifest, runtime: &StreamRuntimeCapabilities, issues: &mut Vec<ValidationIssue>) {
+fn validate_encoder_settings_compatibility(manifest: &StreamManifest, _runtime: &StreamRuntimeCapabilities, issues: &mut Vec<ValidationIssue>) {
     let Some(settings) = manifest.encoder.settings() else {
         return;
     };
     let Some(selector) = manifest.encoder.id().map(str::trim).filter(|value| !value.is_empty()) else {
         return;
     };
-    let Some(expected) = expected_encoder_settings_shape(runtime, selector) else {
+    let Some(expected) = expected_encoder_settings_shape(selector) else {
         return;
     };
 
@@ -412,18 +412,8 @@ fn encoder_settings_shape(settings: &EncoderSettings) -> EncoderSettingsShape {
     }
 }
 
-fn expected_encoder_settings_shape(runtime: &StreamRuntimeCapabilities, selector: &str) -> Option<EncoderSettingsShape> {
-    let mut matches = BTreeSet::new();
-    for codec in &runtime.codecs {
-        if codec.kind != CodecKind::Encoder || !runtime_codec_matches_selector(codec, selector) {
-            continue;
-        }
-        let Some(settings) = codec.tunables.as_ref().and_then(|tunables| tunables.encoder_settings.as_ref()) else {
-            continue;
-        };
-        matches.insert(encoder_settings_shape(settings));
-    }
-    if matches.len() == 1 { matches.into_iter().next() } else { None }
+fn expected_encoder_settings_shape(selector: &str) -> Option<EncoderSettingsShape> {
+    empty_encoder_settings_for_selector(Some(selector)).as_ref().map(encoder_settings_shape)
 }
 
 fn canonical_codec_family(value: &str) -> String {

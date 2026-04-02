@@ -8,7 +8,7 @@ use std::time::Duration;
 use styx::capture::prelude::Mode;
 pub use styx::capture::ModeId;
 use styx::capture_api::make_file_device;
-use styx::capture_api::{CaptureError, CaptureHandle, CaptureRequest, TdnOutputMode};
+use styx::capture_api::{CaptureError, CaptureHandle, CaptureRequest, CaptureStartPolicy, TdnOutputMode};
 use styx::core::controls::ControlId;
 use styx::core::format::{ColorSpace, Interval, MediaFormat, Resolution};
 use styx::prelude::{CaptureSource, FourCc, StageMetrics};
@@ -439,13 +439,14 @@ pub(crate) fn find_backend_for_config<'a>(config: &CaptureConfig, devices: &'a [
 }
 
 pub fn descriptor_snapshot_for_config(config: &CaptureConfig, devices: &[ProbedDevice]) -> Option<CaptureDescriptor> {
-    find_backend_for_config(config, devices).map(|backend| backend.descriptor.clone())
+    let (request, _) = config.build_request(devices).ok()?;
+    request.resolved_descriptor().ok()
 }
 
 pub fn descriptor_for_config(config: &CaptureConfig) -> Option<CaptureDescriptor> {
     let devices = devices_for_config(config);
-    let backend = find_backend_for_config(config, &devices)?;
-    Some(minimize_capture_descriptor(&backend.descriptor, &config.mode))
+    let (request, _) = config.build_request(&devices).ok()?;
+    request.resolved_descriptor().ok()
 }
 
 pub fn descriptor_for_config_retrying(config: &CaptureConfig) -> Option<CaptureDescriptor> {
@@ -498,9 +499,18 @@ pub fn start_from_config(config: &CaptureConfig, devices: &[ProbedDevice]) -> Re
     request.start().map_err(CaptureConfigError::from)
 }
 
+fn virtual_device_for_mode(mode_id: &ModeId) -> ProbedDevice {
+    let format = mode_id.format;
+    let mode = Mode { id: mode_id.clone(), format, intervals: mode_id.interval.into_iter().collect(), interval_stepwise: None };
+    ProbedDevice {
+        identity: styx::DeviceIdentity { display: "virtual".into(), keys: vec!["virtual".into()] },
+        backends: vec![ProbedBackend { kind: BackendKind::Virtual, handle: BackendHandle::Virtual, descriptor: CaptureDescriptor { modes: vec![mode], controls: vec![] }, properties: vec![] }],
+    }
+}
+
 fn devices_for_config(config: &CaptureConfig) -> Vec<ProbedDevice> {
     if config.backend == BackendKind::Virtual {
-        return vec![default_virtual_device()];
+        return vec![virtual_device_for_mode(&config.mode)];
     }
     if config.backend == BackendKind::File {
         let BackendHandle::File { paths, fps, loop_forever } = &config.handle else {
@@ -520,20 +530,7 @@ fn devices_for_config(config: &CaptureConfig) -> Vec<ProbedDevice> {
 /// Build a basic virtual capture device descriptor for testing/in-memory use.
 pub fn default_virtual_device() -> ProbedDevice {
     let format = MediaFormat::new(FourCc::from_str("RGBA").unwrap_or_else(|_| FourCc::new(*b"RGB0")), Resolution::new(640, 480).unwrap(), ColorSpace::Srgb);
-    let mode = Mode {
-        id: ModeId { format, interval: None },
-        format,
-        intervals: {
-            let mut intervals = smallvec::SmallVec::new();
-            intervals.push(Interval { numerator: NonZeroU32::new(1).unwrap(), denominator: NonZeroU32::new(30).unwrap() });
-            intervals
-        },
-        interval_stepwise: None,
-    };
-    ProbedDevice {
-        identity: styx::DeviceIdentity { display: "virtual".into(), keys: vec!["virtual".into()] },
-        backends: vec![ProbedBackend { kind: BackendKind::Virtual, handle: BackendHandle::Virtual, descriptor: CaptureDescriptor { modes: vec![mode], controls: vec![] }, properties: vec![] }],
-    }
+    virtual_device_for_mode(&ModeId { format, interval: Some(Interval { numerator: NonZeroU32::new(1).unwrap(), denominator: NonZeroU32::new(30).unwrap() }) })
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, ToSchema)]
@@ -640,9 +637,7 @@ impl CaptureSession {
     }
 
     pub fn start(config: CaptureConfig) -> Result<Self, CaptureSessionError> {
-        let mut config = config;
-        let mut tdn_disabled = false;
-        let mut controls_cleared = false;
+        let config = config;
         // libcamera occasionally "blinks" the device list during stop/restart, which can make
         // rapid stream restarts fail with "no device matched capture config". Retry briefly.
         for attempt in 0..30 {
@@ -661,35 +656,12 @@ impl CaptureSession {
                         controls = config.controls.len(),
                         "starting capture session"
                     );
-                    let handle = match request.start() {
+                    let handle = match request.start_with_policy(CaptureStartPolicy::resilient()) {
                         Ok(handle) => handle,
-                        Err(err) => {
-                            if !tdn_disabled && err.requires_disabling_tdn() {
-                                tdn_disabled = disable_noise_reduction(&mut config.controls);
-                                if tdn_disabled {
-                                    tracing::warn!(attempt, error = %err, "capture start failed with TDN enabled; retrying with NoiseReductionMode=Off");
-                                    std::thread::sleep(Duration::from_millis(250));
-                                    continue;
-                                }
-                            }
-                            if !controls_cleared && config.backend == BackendKind::Libcamera && !config.controls.is_empty() && err.requires_dropping_controls() {
-                                controls_cleared = true;
-                                config.controls.clear();
-                                config.enable_tdn_output = false;
-                                tracing::warn!(attempt, error = %err, "capture start failed while applying controls; retrying without controls");
-                                std::thread::sleep(Duration::from_millis(250));
-                                continue;
-                            }
-                            if err.is_transient_start() && attempt < 29 {
-                                tracing::warn!(attempt, error = %err, "capture start transient failure; retrying");
-                                std::thread::sleep(Duration::from_millis(250));
-                                continue;
-                            }
-                            return Err(CaptureSessionError::Capture(err));
-                        }
+                        Err(err) => return Err(CaptureSessionError::Capture(err)),
                     };
                     tracing::info!("capture session started");
-                    let descriptor = Some(minimize_capture_descriptor(handle.descriptor(), &config.mode));
+                    let descriptor = Some(handle.descriptor().clone());
                     let metrics = handle.metrics();
                     return Ok(Self { config, devices, handle: Some(handle), descriptor, metrics, applied_controls: Mutex::new(applied) });
                 }
@@ -707,9 +679,7 @@ impl CaptureSession {
     }
 
     pub fn reconfigure(&mut self, config: CaptureConfig) -> Result<(), CaptureSessionError> {
-        let mut config = config;
-        let mut tdn_disabled = false;
-        let mut controls_cleared = false;
+        let config = config;
         for attempt in 0..30 {
             let devices = devices_for_config(&config);
             match config.build_request(&devices) {
@@ -725,56 +695,20 @@ impl CaptureSession {
                         "reconfiguring capture session"
                     );
                     if let Some(handle) = self.handle.take() {
-                        let handle = match handle.reconfigure(request) {
+                        let handle = match handle.reconfigure_with_policy(request, CaptureStartPolicy::resilient()) {
                             Ok(handle) => handle,
-                            Err(err) => {
-                                if !tdn_disabled && err.requires_disabling_tdn() {
-                                    tdn_disabled = disable_noise_reduction(&mut config.controls);
-                                    if tdn_disabled {
-                                        tracing::warn!(attempt, error = %err, "capture reconfigure failed with TDN enabled; retrying with NoiseReductionMode=Off");
-                                        std::thread::sleep(Duration::from_millis(250));
-                                        // Ensure any partially-started worker is torn down before retry.
-                                        self.stop();
-                                        continue;
-                                    }
-                                }
-                                if !controls_cleared && config.backend == BackendKind::Libcamera && !config.controls.is_empty() && err.requires_dropping_controls() {
-                                    controls_cleared = true;
-                                    config.controls.clear();
-                                    config.enable_tdn_output = false;
-                                    tracing::warn!(attempt, error = %err, "capture reconfigure failed while applying controls; retrying without controls");
-                                    std::thread::sleep(Duration::from_millis(250));
-                                    // Ensure any partially-started worker is torn down before retry.
-                                    self.stop();
-                                    continue;
-                                }
-                                if err.is_transient_start() && attempt < 29 {
-                                    tracing::warn!(attempt, error = %err, "capture reconfigure transient failure; retrying");
-                                    std::thread::sleep(Duration::from_millis(250));
-                                    // Ensure any partially-started worker is torn down before retry.
-                                    self.stop();
-                                    continue;
-                                }
-                                return Err(CaptureSessionError::Capture(err));
-                            }
+                            Err(err) => return Err(CaptureSessionError::Capture(err)),
                         };
                         self.metrics = handle.metrics();
-                        self.descriptor = Some(minimize_capture_descriptor(handle.descriptor(), &config.mode));
+                        self.descriptor = Some(handle.descriptor().clone());
                         self.handle = Some(handle);
                     } else {
-                        let handle = match request.start() {
+                        let handle = match request.start_with_policy(CaptureStartPolicy::resilient()) {
                             Ok(handle) => handle,
-                            Err(err) => {
-                                if err.is_transient_start() && attempt < 29 {
-                                    tracing::warn!(attempt, error = %err, "capture start transient failure; retrying");
-                                    std::thread::sleep(Duration::from_millis(250));
-                                    continue;
-                                }
-                                return Err(CaptureSessionError::Capture(err));
-                            }
+                            Err(err) => return Err(CaptureSessionError::Capture(err)),
                         };
                         self.metrics = handle.metrics();
-                        self.descriptor = Some(minimize_capture_descriptor(handle.descriptor(), &config.mode));
+                        self.descriptor = Some(handle.descriptor().clone());
                         self.handle = Some(handle);
                     }
                     self.config = config;
@@ -848,26 +782,4 @@ impl CaptureSession {
     pub fn handle(&self) -> Option<&CaptureHandle> {
         self.handle.as_ref()
     }
-}
-
-fn disable_noise_reduction(controls: &mut Vec<ControlAssignment>) -> bool {
-    const NOISE_REDUCTION_MODE: u32 = 10002;
-    let mut updated = false;
-    for control in controls.iter_mut() {
-        if control.id == NOISE_REDUCTION_MODE {
-            if !matches!(control.value, CaptureControlValue::Int(0)) {
-                control.value = CaptureControlValue::Int(0);
-                updated = true;
-            }
-            return updated;
-        }
-    }
-    controls.push(ControlAssignment { id: NOISE_REDUCTION_MODE, value: CaptureControlValue::Int(0) });
-    true
-}
-
-fn minimize_capture_descriptor(descriptor: &CaptureDescriptor, selected_mode: &ModeId) -> CaptureDescriptor {
-    let controls = descriptor.controls.clone();
-    let modes = descriptor.modes.iter().find(|m| &m.id == selected_mode).cloned().into_iter().collect();
-    CaptureDescriptor { modes, controls }
 }

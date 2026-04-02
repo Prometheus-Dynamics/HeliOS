@@ -182,7 +182,21 @@ fn encoder_settings_kind_for_selector_supports_generated_runtime_ids() {
 }
 
 #[test]
-fn preview_format_for_encoder_selector_uses_generated_codec_families() {
+fn generated_codec_family_bindings_match_styx_runtime_specs() {
+    assert_eq!(generated_encoder_family_specs_for_tests().len(), styx::runtime_codec::ENCODER_FAMILY_SPECS.len());
+
+    for (selector_id, selector_aliases, runtime_implementation_aliases, runtime_name_aliases, output_fourcc_aliases) in generated_encoder_family_specs_for_tests() {
+        let runtime = styx::runtime_codec::ENCODER_FAMILY_SPECS.iter().find(|spec| spec.selector_id == selector_id).expect("matching styx codec family");
+
+        assert_eq!(runtime.selector_aliases, selector_aliases);
+        assert_eq!(runtime.runtime_implementation_aliases, runtime_implementation_aliases);
+        assert_eq!(runtime.runtime_name_aliases, runtime_name_aliases);
+        assert_eq!(runtime.output_fourcc_aliases, output_fourcc_aliases);
+    }
+}
+
+#[test]
+fn preview_format_for_encoder_selector_uses_styx_codec_families() {
     assert_eq!(preview_format_for_encoder_selector(Some("turbojpeg")), "mjpeg");
     assert_eq!(preview_format_for_encoder_selector(Some("mozjpeg")), "mjpeg");
     assert_eq!(preview_format_for_encoder_selector(Some("mjpeg")), "mjpeg");

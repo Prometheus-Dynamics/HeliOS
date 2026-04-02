@@ -3,6 +3,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
 use std::env;
+use std::str::FromStr;
 use std::sync::OnceLock;
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -18,13 +19,25 @@ use lib_ipc::frame::MessageKind;
 use lib_ipc::protocol::ControlEvent;
 use lib_ipc::server::ServerEvent;
 use lib_ipc::types::CommandId;
-use styx::codec::{CodecKind, CodecRegistry};
+use styx::codec::CodecKind;
 use styx::prelude::{FourCc, Resolution};
+use styx::runtime_codec::{
+    default_decoder_ids_by_capture_format as styx_default_decoder_ids_by_capture_format, default_decoder_selector_for_capture_format as styx_default_decoder_selector_for_capture_format,
+    default_stream_encoder_selector as styx_default_stream_encoder_selector, encoder_family_for_selector as styx_encoder_family_for_selector,
+    preview_format_for_encoder_selector as styx_preview_format_for_encoder_selector, runtime_codec_inventory as styx_runtime_codec_inventory,
+};
 use styx::BackendKind;
 
+#[cfg(test)]
 mod generated_codec_families;
 
-use self::generated_codec_families::{GeneratedEncoderFamilySpec, GeneratedEncoderFamilyVariant, GENERATED_ENCODER_FAMILY_SPECS};
+#[cfg(test)]
+use self::generated_codec_families::GENERATED_ENCODER_FAMILY_SPECS;
+
+#[cfg(test)]
+pub(crate) fn generated_encoder_family_specs_for_tests() -> Vec<(&'static str, &'static [&'static str], &'static [&'static str], &'static [&'static str], &'static [&'static str])> {
+    GENERATED_ENCODER_FAMILY_SPECS.iter().map(|spec| (spec.selector_id, spec.selector_aliases, spec.runtime_implementation_aliases, spec.runtime_name_aliases, spec.output_fourcc_aliases)).collect()
+}
 
 pub type ControlId = u32;
 
@@ -929,123 +942,68 @@ where
     Option::<FrameRate>::deserialize(deserializer)
 }
 
-fn encoder_settings_kind_from_generated_variant(variant: GeneratedEncoderFamilyVariant) -> EncoderSettingsKind {
-    match variant {
-        GeneratedEncoderFamilyVariant::Turbojpeg => EncoderSettingsKind::Turbojpeg,
-        GeneratedEncoderFamilyVariant::Mozjpeg => EncoderSettingsKind::Mozjpeg,
-        GeneratedEncoderFamilyVariant::FfmpegMjpeg => EncoderSettingsKind::FfmpegMjpeg,
-        GeneratedEncoderFamilyVariant::H264 => EncoderSettingsKind::H264,
-        GeneratedEncoderFamilyVariant::H265 => EncoderSettingsKind::H265,
+fn encoder_settings_kind_for_family_id(family_id: &str) -> Option<EncoderSettingsKind> {
+    match family_id {
+        "turbojpeg" => Some(EncoderSettingsKind::Turbojpeg),
+        "mozjpeg" => Some(EncoderSettingsKind::Mozjpeg),
+        "ffmpeg_mjpeg" => Some(EncoderSettingsKind::FfmpegMjpeg),
+        "h264" => Some(EncoderSettingsKind::H264),
+        "h265" => Some(EncoderSettingsKind::H265),
+        _ => None,
     }
-}
-
-fn generated_encoder_family_spec_for_kind(kind: EncoderSettingsKind) -> &'static GeneratedEncoderFamilySpec {
-    GENERATED_ENCODER_FAMILY_SPECS.iter().find(|spec| encoder_settings_kind_from_generated_variant(spec.variant) == kind).expect("generated encoder family spec for settings kind")
-}
-
-fn generated_encoder_family_spec_for_runtime_descriptor(desc: &styx::codec::CodecDescriptor) -> Option<&'static GeneratedEncoderFamilySpec> {
-    if desc.kind != CodecKind::Encoder {
-        return None;
-    }
-
-    GENERATED_ENCODER_FAMILY_SPECS.iter().find(|spec| {
-        let implementation_matches = spec.runtime_implementation_aliases.iter().any(|alias| desc.impl_name.eq_ignore_ascii_case(alias));
-        if !implementation_matches {
-            return false;
-        }
-        if !desc.impl_name.eq_ignore_ascii_case("ffmpeg") {
-            return true;
-        }
-
-        let output = desc.output.to_string();
-        spec.runtime_name_aliases.iter().any(|alias| desc.name.eq_ignore_ascii_case(alias)) || spec.output_fourcc_aliases.iter().any(|alias| output.eq_ignore_ascii_case(alias))
-    })
-}
-
-fn generated_encoder_family_spec_for_runtime_codec(implementation: &str, fourcc: FourCc) -> Option<&'static GeneratedEncoderFamilySpec> {
-    GENERATED_ENCODER_FAMILY_SPECS.iter().find(|spec| {
-        let implementation_matches = spec.runtime_implementation_aliases.iter().any(|alias| implementation.eq_ignore_ascii_case(alias));
-        if !implementation_matches {
-            return false;
-        }
-        if !implementation.eq_ignore_ascii_case("ffmpeg") {
-            return true;
-        }
-
-        let output = fourcc.to_string();
-        spec.output_fourcc_aliases.iter().any(|alias| output.eq_ignore_ascii_case(alias))
-    })
-}
-
-fn generated_encoder_family_spec_for_selector_alias(selector: &str) -> Option<&'static GeneratedEncoderFamilySpec> {
-    GENERATED_ENCODER_FAMILY_SPECS.iter().find(|spec| {
-        spec.selector_id.eq_ignore_ascii_case(selector)
-            || spec.selector_aliases.iter().any(|alias| selector.eq_ignore_ascii_case(alias))
-            || (!selector.eq_ignore_ascii_case("ffmpeg") && spec.runtime_implementation_aliases.iter().any(|alias| selector.eq_ignore_ascii_case(alias)))
-    })
-}
-
-fn encoder_settings_kind_for_codec_desc(desc: &styx::codec::CodecDescriptor) -> Option<EncoderSettingsKind> {
-    generated_encoder_family_spec_for_runtime_descriptor(desc).map(|spec| encoder_settings_kind_from_generated_variant(spec.variant))
 }
 
 fn encoder_settings_kind_for_selector(selector: Option<&str>) -> Option<EncoderSettingsKind> {
     let selector = selector.map(str::trim).filter(|value| !value.is_empty())?;
-    if let Some(spec) = generated_encoder_family_spec_for_selector_alias(selector) {
-        return Some(encoder_settings_kind_from_generated_variant(spec.variant));
-    }
-
-    let Ok(entries) = CodecRegistry::list_enabled_codecs() else {
-        return None;
-    };
-    let mut matches = std::collections::BTreeSet::new();
-    for (_, codecs) in entries {
-        for desc in codecs {
-            if desc.kind != CodecKind::Encoder {
-                continue;
-            }
-            if !(desc.impl_name.eq_ignore_ascii_case(selector) || desc.name.eq_ignore_ascii_case(selector)) {
-                continue;
-            }
-            if let Some(kind) = encoder_settings_kind_for_codec_desc(&desc) {
-                matches.insert(kind);
-            }
-        }
-    }
-
-    if matches.len() == 1 {
-        matches.into_iter().next()
-    } else {
-        None
-    }
+    styx_encoder_family_for_selector(selector).and_then(|spec| encoder_settings_kind_for_family_id(spec.id))
 }
 
 fn selector_name_for_encoder_settings_kind(kind: EncoderSettingsKind) -> &'static str {
-    generated_encoder_family_spec_for_kind(kind).selector_id
+    match kind {
+        EncoderSettingsKind::Turbojpeg => "turbojpeg",
+        EncoderSettingsKind::Mozjpeg => "mozjpeg",
+        EncoderSettingsKind::FfmpegMjpeg => "mjpeg",
+        EncoderSettingsKind::H264 => "h264",
+        EncoderSettingsKind::H265 => "h265",
+    }
+}
+
+fn default_encoder_settings_for_kind(kind: EncoderSettingsKind) -> EncoderSettings {
+    match kind {
+        EncoderSettingsKind::Turbojpeg => EncoderSettings::Turbojpeg { quality: Some(85) },
+        EncoderSettingsKind::Mozjpeg => EncoderSettings::Mozjpeg { quality: Some(85) },
+        EncoderSettingsKind::FfmpegMjpeg => EncoderSettings::FfmpegMjpeg {
+            bitrate: Some(4_000_000),
+            gop: None,
+            framerate: Some(FrameRate { numerator: 60, denominator: 1 }),
+            thread_count: None,
+            output_resolution: Some(ResolutionHint { width: 854, height: 480 }),
+        },
+        EncoderSettingsKind::H264 => EncoderSettings::H264 {
+            bitrate: Some(4_000_000),
+            gop: None,
+            framerate: Some(FrameRate { numerator: 60, denominator: 1 }),
+            thread_count: None,
+            output_resolution: Some(ResolutionHint { width: 854, height: 480 }),
+        },
+        EncoderSettingsKind::H265 => EncoderSettings::H265 {
+            bitrate: Some(4_000_000),
+            gop: None,
+            framerate: Some(FrameRate { numerator: 60, denominator: 1 }),
+            thread_count: None,
+            output_resolution: Some(ResolutionHint { width: 854, height: 480 }),
+        },
+    }
 }
 
 pub fn default_encoder_settings_for_codec(fourcc: FourCc, implementation: &str) -> Option<EncoderSettings> {
-    let spec = generated_encoder_family_spec_for_runtime_codec(implementation, fourcc)?;
-    match spec.variant {
-        GeneratedEncoderFamilyVariant::Turbojpeg => Some(EncoderSettings::Turbojpeg { quality: Some(85) }),
-        GeneratedEncoderFamilyVariant::Mozjpeg => Some(EncoderSettings::Mozjpeg { quality: Some(85) }),
-        GeneratedEncoderFamilyVariant::FfmpegMjpeg | GeneratedEncoderFamilyVariant::H264 | GeneratedEncoderFamilyVariant::H265 => {
-            let default_framerate = Some(FrameRate { numerator: 60, denominator: 1 });
-            let default_output_resolution = Some(ResolutionHint { width: 854, height: 480 });
-            match spec.variant {
-                GeneratedEncoderFamilyVariant::FfmpegMjpeg => {
-                    Some(EncoderSettings::FfmpegMjpeg { bitrate: Some(4_000_000), gop: None, framerate: default_framerate, thread_count: None, output_resolution: default_output_resolution })
-                }
-                GeneratedEncoderFamilyVariant::H264 => {
-                    Some(EncoderSettings::H264 { bitrate: Some(4_000_000), gop: None, framerate: default_framerate, thread_count: None, output_resolution: default_output_resolution })
-                }
-                GeneratedEncoderFamilyVariant::H265 => {
-                    Some(EncoderSettings::H265 { bitrate: Some(4_000_000), gop: None, framerate: default_framerate, thread_count: None, output_resolution: default_output_resolution })
-                }
-                GeneratedEncoderFamilyVariant::Turbojpeg | GeneratedEncoderFamilyVariant::Mozjpeg => unreachable!("handled above"),
-            }
-        }
-    }
+    let runtime = styx_runtime_codec_inventory().ok()?;
+    let family_id = runtime
+        .codecs
+        .into_iter()
+        .find(|codec| codec.kind == CodecKind::Encoder && codec.fourcc.eq_ignore_ascii_case(&fourcc.to_string()) && codec.implementation.eq_ignore_ascii_case(implementation))
+        .and_then(|codec| codec.family_id)?;
+    encoder_settings_kind_for_family_id(family_id).map(default_encoder_settings_for_kind)
 }
 
 pub fn empty_encoder_settings_for_selector(selector: Option<&str>) -> Option<EncoderSettings> {
@@ -1064,12 +1022,13 @@ fn canonical_encoder_selector(selector: Option<&str>, settings: Option<&EncoderS
     if selector.eq_ignore_ascii_case("ffmpeg") {
         return settings.map(EncoderSettings::settings_kind).map(selector_name_for_encoder_settings_kind).map(ToString::to_string);
     }
-    if let Some(spec) =
-        GENERATED_ENCODER_FAMILY_SPECS.iter().find(|spec| !spec.selector_id.eq_ignore_ascii_case(selector) && spec.selector_aliases.iter().any(|alias| selector.eq_ignore_ascii_case(alias)))
-    {
-        return Some(spec.selector_id.to_string());
+
+    match selector.to_ascii_lowercase().as_str() {
+        "avc" => Some("h264".to_string()),
+        "hevc" => Some("h265".to_string()),
+        "mjpg" | "jpeg" | "ffmpeg_mjpeg" => Some("mjpeg".to_string()),
+        _ => None,
     }
-    None
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
@@ -2685,12 +2644,7 @@ pub fn default_decoder_enabled() -> bool {
 }
 
 pub fn preview_format_for_encoder_selector(selector: Option<&str>) -> &'static str {
-    match encoder_settings_kind_for_selector(selector) {
-        Some(EncoderSettingsKind::Turbojpeg | EncoderSettingsKind::Mozjpeg | EncoderSettingsKind::FfmpegMjpeg) => "mjpeg",
-        Some(EncoderSettingsKind::H264) => "h264",
-        Some(EncoderSettingsKind::H265) => "h265",
-        None => "unknown",
-    }
+    styx_preview_format_for_encoder_selector(selector)
 }
 
 fn max_host_buffer() -> usize {
@@ -2709,43 +2663,7 @@ fn encoder_selector_needs_normalization(selector: Option<&str>) -> bool {
 }
 
 pub fn default_stream_encoder_selector() -> Option<String> {
-    let preferred_input = FourCc::new(*b"RG24");
-    let entries = CodecRegistry::list_enabled_encoders().ok()?;
-    let mut preferred_mjpeg: Option<String> = None;
-    let mut fallback_mjpeg: Option<String> = None;
-    let mut fallback_any: Option<String> = None;
-
-    for (input, codecs) in entries {
-        if input != preferred_input {
-            continue;
-        }
-        for desc in codecs {
-            if desc.kind != CodecKind::Encoder {
-                continue;
-            }
-            let impl_name = desc.impl_name.trim();
-            if impl_name.is_empty() {
-                continue;
-            }
-            if fallback_any.is_none() {
-                fallback_any = Some(impl_name.to_string());
-            }
-            if desc.name.eq_ignore_ascii_case("mjpeg") {
-                if desc.impl_name.eq_ignore_ascii_case("turbojpeg") {
-                    preferred_mjpeg = Some(impl_name.to_string());
-                    break;
-                }
-                if fallback_mjpeg.is_none() {
-                    fallback_mjpeg = Some(impl_name.to_string());
-                }
-            }
-        }
-        if preferred_mjpeg.is_some() {
-            break;
-        }
-    }
-
-    preferred_mjpeg.or(fallback_mjpeg).or(fallback_any)
+    styx_default_stream_encoder_selector()
 }
 
 pub fn normalize_requested_stream_encoder(manifest: &mut StreamManifest) {
@@ -2793,100 +2711,31 @@ fn normalized_codec_selector(value: Option<&str>) -> Option<String> {
     value.map(str::trim).filter(|value| !value.is_empty()).map(ToString::to_string)
 }
 
-fn default_decoder_selector_for_codec(descs: &[styx::codec::CodecDescriptor]) -> Option<String> {
-    if descs.is_empty() {
-        return None;
-    }
-
-    if let Some(codec) = descs.iter().find(|desc| desc.name.eq_ignore_ascii_case("mjpeg") && desc.impl_name.eq_ignore_ascii_case("turbojpeg")) {
-        return Some(codec.impl_name.to_string());
-    }
-
-    match descs[0].input.to_u32().to_le_bytes() {
-        [b'H', b'2', b'6', b'4'] => return Some("h264".to_string()),
-        [b'H', b'2', b'6', b'5'] | [b'H', b'E', b'V', b'C'] => return Some("h265".to_string()),
-        [b'M', b'J', b'P', b'G'] | [b'J', b'P', b'E', b'G'] => {}
-        _ => {}
-    }
-
-    if let Some(codec) = descs.iter().find(|desc| desc.impl_name.eq_ignore_ascii_case("passthrough")) {
-        return Some(codec.impl_name.to_string());
-    }
-
-    descs.first().map(|desc| desc.impl_name.to_string())
-}
-
 pub fn default_decoder_ids_by_capture_format() -> BTreeMap<String, String> {
-    let mut defaults = BTreeMap::new();
-    let Ok(entries) = CodecRegistry::list_enabled_codecs() else {
-        return defaults;
-    };
-
-    for (input, codecs) in entries {
-        let decoder_descs: Vec<_> = codecs.into_iter().filter(|desc| desc.kind == CodecKind::Decoder).collect();
-        if decoder_descs.is_empty() {
-            continue;
-        }
-        let key = String::from_utf8_lossy(&input.to_u32().to_le_bytes()).trim().to_ascii_uppercase();
-        if key.is_empty() {
-            continue;
-        }
-        if let Some(selector) = default_decoder_selector_for_codec(&decoder_descs) {
-            defaults.insert(key, selector);
-        }
-    }
-
-    defaults
+    styx_default_decoder_ids_by_capture_format()
 }
 
 pub fn default_decoder_selector_for_capture_format(fourcc: FourCc) -> Option<String> {
-    let defaults = default_decoder_ids_by_capture_format();
-    let key = String::from_utf8_lossy(&fourcc.to_u32().to_le_bytes()).trim().to_ascii_uppercase();
-    defaults.get(&key).cloned().or_else(|| defaults.get("ANY").cloned())
+    styx_default_decoder_selector_for_capture_format(fourcc)
 }
 
 pub fn stream_runtime_capabilities() -> Result<StreamRuntimeCapabilities, String> {
-    let mut codecs: Vec<StreamCodecCapability> = CodecRegistry::list_enabled_codecs()
-        .map_err(|err| err.to_string())?
+    let runtime = styx_runtime_codec_inventory().map_err(|err| err.to_string())?;
+    let codecs = runtime
+        .codecs
         .into_iter()
-        .flat_map(|(fourcc, descs)| {
-            descs.into_iter().map(move |desc| {
-                let tunables = if desc.kind == CodecKind::Encoder {
-                    default_encoder_settings_for_codec(fourcc, desc.impl_name).map(|encoder_settings| StreamCodecTunables { encoder_settings: Some(encoder_settings) })
-                } else {
-                    None
-                };
-                StreamCodecCapability {
-                    kind: desc.kind,
-                    fourcc: fourcc.to_string(),
-                    name: desc.name.to_string(),
-                    implementation: desc.impl_name.to_string(),
-                    input: desc.input.to_string(),
-                    output: desc.output.to_string(),
-                    tunables,
-                }
-            })
+        .map(|codec| {
+            let tunables = if codec.kind == CodecKind::Encoder {
+                default_encoder_settings_for_codec(FourCc::from_str(&codec.output).unwrap_or_else(|_| FourCc::new(*b"ANY ")), &codec.implementation)
+                    .map(|encoder_settings| StreamCodecTunables { encoder_settings: Some(encoder_settings) })
+            } else {
+                None
+            };
+            StreamCodecCapability { kind: codec.kind, fourcc: codec.fourcc, name: codec.name, implementation: codec.implementation, input: codec.input, output: codec.output, tunables }
         })
         .collect();
 
-    codecs.sort_by(|left, right| {
-        let left_kind = match left.kind {
-            CodecKind::Decoder => 0u8,
-            CodecKind::Encoder => 1u8,
-        };
-        let right_kind = match right.kind {
-            CodecKind::Decoder => 0u8,
-            CodecKind::Encoder => 1u8,
-        };
-        left_kind
-            .cmp(&right_kind)
-            .then_with(|| left.fourcc.cmp(&right.fourcc))
-            .then_with(|| left.input.cmp(&right.input))
-            .then_with(|| left.output.cmp(&right.output))
-            .then_with(|| left.implementation.cmp(&right.implementation))
-    });
-
-    Ok(StreamRuntimeCapabilities { codecs, default_encoder_id: default_stream_encoder_selector(), default_decoder_ids_by_capture_format: default_decoder_ids_by_capture_format() })
+    Ok(StreamRuntimeCapabilities { codecs, default_encoder_id: runtime.default_encoder_selector, default_decoder_ids_by_capture_format: runtime.default_decoder_ids_by_capture_format })
 }
 
 static STREAM_RUNTIME_CAPABILITIES_CACHE: OnceLock<Result<StreamRuntimeCapabilities, String>> = OnceLock::new();
