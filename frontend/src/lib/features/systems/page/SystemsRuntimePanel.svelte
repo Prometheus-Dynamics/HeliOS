@@ -21,6 +21,8 @@
     ['Active root', runtime.capabilities.activeRoot]
   ] as const);
 
+  const cvScratchMetrics = $derived(runtime.observability.cvRuntimeScratchHighWater);
+
   const formatPlatformFamily = (family: PlatformFamily): string => {
     switch (family) {
       case 'raspberry_pi':
@@ -218,7 +220,29 @@
               <dt class="text-surface-400">Degraded streams</dt>
               <dd>{formatCount(runtime.observability.resourceGuard.degradedStreamCount)}</dd>
             </div>
+            <div class="flex items-center justify-between gap-3">
+              <dt class="text-surface-400">CV scratch pools</dt>
+              <dd>{formatCount(cvScratchMetrics.length)}</dd>
+            </div>
           </dl>
+
+          <div class="mt-3 space-y-2">
+            {#if cvScratchMetrics.length > 0}
+              {#each cvScratchMetrics as metric (metric.name)}
+                <div class="rounded border border-surface-800/70 bg-surface-950/40 px-3 py-2">
+                  <div class="flex items-center justify-between gap-3 text-sm text-surface-100">
+                    <span class="font-medium">{metric.name}</span>
+                    <span>{formatBytes(metric.highWaterBytes)}</span>
+                  </div>
+                  <p class="mt-1 text-[0.72rem] text-surface-500">lib-cv scratch high-water mark</p>
+                </div>
+              {/each}
+            {:else}
+              <div class="rounded border border-surface-800/70 bg-surface-950/40 px-3 py-2 text-sm text-surface-400">
+                No lib-cv scratch pools have reported high-water data yet.
+              </div>
+            {/if}
+          </div>
         </div>
 
         <div class="rounded border border-surface-800/70 bg-surface-900/50 p-3">

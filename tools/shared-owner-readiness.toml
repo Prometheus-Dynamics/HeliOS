@@ -12,18 +12,22 @@ patch_dependency_names = ["styx"]
 id = 10
 title = "Daedalus conversion and compute-affinity upstreaming"
 owner = "Daedalus"
-status = "open"
+status = "landed"
 repo = "daedalus"
 dependency_names = ["daedalus", "daedalus-data", "daedalus-macros"]
 patch_table = "https://github.com/Prometheus-Dynamics/Daedalus.git"
 patch_dependency_names = ["daedalus-rs", "daedalus-data", "daedalus-macros"]
+pinned_revision = "910b6b83ce82fef75a4789750e7a85401f2864dc"
+proof_reference = "https://github.com/Prometheus-Dynamics/Daedalus/commit/910b6b83ce82fef75a4789750e7a85401f2864dc"
+notes = "HeliOS no longer depends on the local-only Daedalus host output filter API and now pins the upstream Daedalus main revision explicitly."
 
 [[items]]
 id = 11
 title = "Shared frame scratch or arena contract"
 owner = "Shared HeliOS/Daedalus"
-status = "open"
-notes = "Still an unresolved ownership and design question; no upstream contract is pinned yet."
+status = "landed"
+proof_reference = "lib-cv runtime scratch ownership is explicit in backend/src/libs/lib-cv/src/runtime_scratch.rs and surfaced live via /v1/device/runtime."
+notes = "Resolved by splitting the claim honestly: lib-cv owns its runtime scratch pools and high-water telemetry locally, and the systems runtime surface now exposes those metrics directly instead of implying a shared Daedalus arena contract."
 
 [[items]]
 id = 12
@@ -32,6 +36,5 @@ owner = "Shared HeliOS/Styx/Daedalus"
 status = "blocked"
 repo = "styx+daedalus"
 dependency_names = ["styx", "daedalus", "daedalus-data", "daedalus-macros"]
-patch_table = "https://github.com/Prometheus-Dynamics/Styx.git"
-patch_dependency_names = ["styx"]
-notes = "Fresh-clone cargo check without the local path patches still fails because upstream Styx lacks codec-turbojpeg and HeliOS is not pinned to the local Daedalus item50 branch."
+pinned_revisions = { styx = "ecd4b958cd86155acc81f23254fdc4a31fc3e7a1", daedalus = "910b6b83ce82fef75a4789750e7a85401f2864dc", daedalus-data = "910b6b83ce82fef75a4789750e7a85401f2864dc", daedalus-macros = "910b6b83ce82fef75a4789750e7a85401f2864dc" }
+notes = "Committed backend/Cargo.toml no longer carries absolute-path sibling patches, and local overrides now live only in uncommitted cargo config. This stays blocked until upstream Styx exposes the required codec feature set and a clean clone can validate without any local override."

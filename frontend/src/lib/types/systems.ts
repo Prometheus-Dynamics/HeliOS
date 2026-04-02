@@ -237,6 +237,11 @@ export type SystemsObservabilityStreams = {
   revision: number;
 };
 
+export type SystemsCvRuntimeScratchMetric = {
+  name: string;
+  highWaterBytes: number;
+};
+
 export type SystemsRuntimeObservability = {
   health: SystemsObservabilityHealth;
   streams: SystemsObservabilityStreams;
@@ -256,6 +261,7 @@ export type SystemsRuntimeObservability = {
   logSourceCount: number;
   logSourcesFreshness: SystemsLogSourcesFreshness;
   logSourcesRevision: number;
+  cvRuntimeScratchHighWater: SystemsCvRuntimeScratchMetric[];
 };
 
 export type SystemsRuntimeSnapshot = {

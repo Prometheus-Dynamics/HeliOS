@@ -72,5 +72,5 @@ pub(super) const GENERATED_ENCODER_FAMILY_SPECS: &[GeneratedEncoderFamilySpec] =
         runtime_name_aliases: &["h265", "hevc"],
         output_fourcc_aliases: &["H265", "HEVC"],
         recording_codec: Some("h265"),
-    },
+    }
 ];

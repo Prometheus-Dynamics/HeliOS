@@ -26,17 +26,10 @@ CROSS_CARGO_HOME="${CROSS_CARGO_HOME:-$CROSS_BUILD_ROOT_DEFAULT/cargo}"
 CROSS_SCCACHE_DIR="${CROSS_SCCACHE_DIR:-$CROSS_BUILD_ROOT_DEFAULT/sccache}"
 
 # Optional local checkouts used when you want to patch these dependencies during development.
-# In a clean/public clone, leave unset.
-default_checkout_path() {
-  local path="$1"
-  if [[ -d "$path" ]]; then
-    printf '%s' "$path"
-  fi
-}
-
-DAEDALUS_HOST_PATH="${DAEDALUS_HOST_PATH:-$(default_checkout_path /home/sozo/Documents/GitHub/Daedalus)}"
-STYX_HOST_PATH="${STYX_HOST_PATH:-$(default_checkout_path /home/sozo/Documents/GitHub/Styx)}"
-LIBCAMERA_RS_HOST_PATH="${LIBCAMERA_RS_HOST_PATH:-$(default_checkout_path /home/sozo/Documents/GitHub/libcamera-rs)}"
+# In a clean/public clone, leave unset and the script will use the pinned upstream revisions.
+DAEDALUS_HOST_PATH="${DAEDALUS_HOST_PATH:-}"
+STYX_HOST_PATH="${STYX_HOST_PATH:-}"
+LIBCAMERA_RS_HOST_PATH="${LIBCAMERA_RS_HOST_PATH:-}"
 
 BINS_DIR_DEFAULT="$ROOT_DIR/output/cm5/binaries"
 PLUGINS_DIR_DEFAULT="$ROOT_DIR/output/cm5/plugins/daedalus"

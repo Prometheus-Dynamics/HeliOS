@@ -108,6 +108,12 @@ pub struct StyxCaptureTunablesSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct CvRuntimeScratchMetricSnapshot {
+    pub name: String,
+    pub high_water_bytes: usize,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct DeviceRuntimePoliciesSnapshot {
     pub log_filter: String,
     pub api_tokio: TokioRuntimePolicySnapshot,
@@ -127,6 +133,7 @@ pub struct DeviceRuntimeObservabilitySnapshot {
     pub streams: crate::http::health::RuntimeStreamsPayload,
     pub os: super::os_release::OsReleaseInfo,
     pub resource_guard: crate::resource_guard::ResourceGuardStatus,
+    pub cv_runtime_scratch_high_water: Vec<CvRuntimeScratchMetricSnapshot>,
     pub log_source_count: usize,
     pub log_sources_freshness: crate::system_read_model::ReadModelFreshness,
     pub log_sources_revision: u64,
@@ -182,6 +189,10 @@ pub async fn runtime(State(state): State<crate::http::AppState>) -> ApiResult<im
             streams,
             os,
             resource_guard,
+            cv_runtime_scratch_high_water: lib_cv::runtime_scratch::snapshot_high_water()
+                .into_iter()
+                .map(|metric| CvRuntimeScratchMetricSnapshot { name: metric.name.to_string(), high_water_bytes: metric.high_water_bytes })
+                .collect(),
             log_source_count: log_sources_snapshot.payload.as_ref().map_or(0, Vec::len),
             log_sources_freshness: log_sources_snapshot.freshness,
             log_sources_revision: log_sources_snapshot.revision,

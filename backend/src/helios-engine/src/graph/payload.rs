@@ -8,7 +8,7 @@ use std::any::Any;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use super::json_to_daedalus_value;
+use super::runtime_json::json_to_daedalus_value;
 
 pub(super) fn is_image_payload(ty: &DaedalusTypeExpr) -> bool {
     match ty {

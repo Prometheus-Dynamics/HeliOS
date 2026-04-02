@@ -205,6 +205,12 @@ type DeviceRuntimeResponse = {
       last_success_at_ms?: number | null;
     } | null;
     log_sources_revision?: number | null;
+    cv_runtime_scratch_high_water?:
+      | Array<{
+          name?: string | null;
+          high_water_bytes?: number | null;
+        }>
+      | null;
   } | null;
 };
 
@@ -299,7 +305,8 @@ export function emptySystemsRuntime(): SystemsRuntimeSnapshot {
         observedAtMs: 0,
         lastSuccessAtMs: null
       },
-      logSourcesRevision: 0
+      logSourcesRevision: 0,
+      cvRuntimeScratchHighWater: []
     }
   };
 }
@@ -408,7 +415,15 @@ export function mapSystemsRuntime(payload: DeviceRuntimeResponse | null): System
         observedAtMs: finiteOrDefault(payload.observability?.log_sources_freshness?.observed_at_ms, 0),
         lastSuccessAtMs: finiteOrNull(payload.observability?.log_sources_freshness?.last_success_at_ms)
       },
-      logSourcesRevision: finiteOrDefault(payload.observability?.log_sources_revision, 0)
+      logSourcesRevision: finiteOrDefault(payload.observability?.log_sources_revision, 0),
+      cvRuntimeScratchHighWater: Array.isArray(payload.observability?.cv_runtime_scratch_high_water)
+        ? payload.observability.cv_runtime_scratch_high_water
+            .map((metric) => ({
+              name: trimOrNull(metric?.name) ?? 'unnamed',
+              highWaterBytes: finiteOrDefault(metric?.high_water_bytes, 0)
+            }))
+            .sort((a, b) => b.highWaterBytes - a.highWaterBytes || a.name.localeCompare(b.name))
+        : []
     }
   };
 }

@@ -39,6 +39,29 @@ For production-style performance verification, use full release:
 RUSTFLAGS="-C target-cpu=native -Z threads=16" cargo run -p helios-api --release
 ```
 
+### Local dependency overrides
+
+The committed workspace pins Styx and Daedalus to explicit git revisions and must stay free of local absolute-path patches.
+If you need to test against a sibling checkout during development, keep the override in an uncommitted file such as `.cargo/local-overrides.toml` and opt into it explicitly:
+
+```toml
+[patch."https://github.com/Prometheus-Dynamics/Styx.git"]
+styx = { path = "/absolute/path/to/Styx/crates/styx" }
+
+[patch."https://github.com/Prometheus-Dynamics/Daedalus.git"]
+daedalus-rs = { path = "/absolute/path/to/Daedalus/crates/daedalus" }
+daedalus-data = { path = "/absolute/path/to/Daedalus/crates/data" }
+daedalus-macros = { path = "/absolute/path/to/Daedalus/crates/macros" }
+```
+
+Use it only for the command you are running:
+
+```bash
+cargo --config .cargo/local-overrides.toml check --manifest-path backend/Cargo.toml -p helios-api --bin helios-api
+```
+
+That override is a local development convenience only and should never be committed. `cargo run -p xtask -- validate repo-policy` rejects committed local path patches in `backend/Cargo.toml`.
+
 ### Cross compiling
 
 Use [`cross`](https://github.com/cross-rs/cross) to target Raspberry Pi boards. Example commands:

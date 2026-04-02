@@ -105,10 +105,10 @@ clap = { version = "4.5.60", features = ["derive", "env"] }
 actix-web = "4.13.0"
 actix-web-actors = "4.3.1"
 actix = "0.13.5"
-styx = { git = "https://github.com/Prometheus-Dynamics/Styx.git", branch = "main", default-features = false }
-daedalus = { package = "daedalus-rs", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "main" }
-daedalus-data = { package = "daedalus-data", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "main" }
-daedalus-macros = { package = "daedalus-macros", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "main" }
+styx = { git = "https://github.com/Prometheus-Dynamics/Styx.git", rev = "ecd4b958cd86155acc81f23254fdc4a31fc3e7a1", default-features = false }
+daedalus = { package = "daedalus-rs", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "910b6b83ce82fef75a4789750e7a85401f2864dc" }
+daedalus-data = { package = "daedalus-data", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "910b6b83ce82fef75a4789750e7a85401f2864dc" }
+daedalus-macros = { package = "daedalus-macros", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "910b6b83ce82fef75a4789750e7a85401f2864dc" }
 geo = { version = "0.32.0", default-features = false }
 linux-embedded-hal = "0.4.1"
 rand = "0.10.0"
@@ -145,12 +145,4 @@ incremental = true
 
 [patch.crates-io]
 libcamera = { path = "vendor/libcamera" }
-
-[patch."https://github.com/Prometheus-Dynamics/Styx.git"]
-styx = { path = "/home/sozo/Documents/GitHub/Styx/crates/styx" }
-
-[patch."https://github.com/Prometheus-Dynamics/Daedalus.git"]
-daedalus-rs = { path = "/home/sozo/Documents/GitHub/Daedalus/crates/daedalus" }
-daedalus-data = { path = "/home/sozo/Documents/GitHub/Daedalus/crates/data" }
-daedalus-macros = { path = "/home/sozo/Documents/GitHub/Daedalus/crates/macros" }
                                        

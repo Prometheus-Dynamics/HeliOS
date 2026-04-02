@@ -1,6 +1,6 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 use serde::Deserialize;
 use thiserror::Error;
@@ -32,6 +32,8 @@ pub struct SharedOwnerItem {
     pub proof_reference: String,
     #[serde(default)]
     pub pinned_revision: String,
+    #[serde(default)]
+    pub pinned_revisions: BTreeMap<String, String>,
     #[serde(default)]
     pub notes: String,
 }
@@ -112,7 +114,7 @@ pub fn evaluate_guardrails(repo_root: &Path, config: &SharedOwnerConfig) -> Vec<
             continue;
         }
 
-        if item.pinned_revision.trim().is_empty() {
+        if item.pinned_revision.trim().is_empty() && item.pinned_revisions.is_empty() {
             violations.push(Violation {
                 code: "SHARED_OWNER_PIN_MISSING".into(),
                 path: path.clone(),
@@ -131,15 +133,23 @@ pub fn evaluate_guardrails(repo_root: &Path, config: &SharedOwnerConfig) -> Vec<
         };
 
         for dependency_name in &item.dependency_names {
+            let Some(expected_revision) = expected_revision(item, dependency_name) else {
+                violations.push(Violation {
+                    code: "SHARED_OWNER_PIN_MISSING".into(),
+                    path: path.clone(),
+                    message: format!("{} is marked landed for {} but has no pinned revision for dependency {}", item.title, item.owner, dependency_name),
+                });
+                continue;
+            };
             match workspace_dependency(manifest, dependency_name) {
                 Some(dep) => {
                     let rev = dep.get("rev").and_then(toml::Value::as_str);
                     let branch = dep.get("branch").and_then(toml::Value::as_str);
-                    if rev != Some(item.pinned_revision.as_str()) {
+                    if rev != Some(expected_revision) {
                         violations.push(Violation {
                             code: "SHARED_OWNER_DEP_NOT_PINNED".into(),
                             path: path.clone(),
-                            message: format!("{} expected workspace dependency {} to pin rev {}, found {:?}", item.title, dependency_name, item.pinned_revision, rev),
+                            message: format!("{} expected workspace dependency {} to pin rev {}, found {:?}", item.title, dependency_name, expected_revision, rev),
                         });
                     }
                     if branch.is_some() {
@@ -171,7 +181,18 @@ pub fn evaluate_guardrails(repo_root: &Path, config: &SharedOwnerConfig) -> Vec<
         }
     }
 
+    if let Some(manifest) = manifest.as_ref() {
+        violations.extend(scan_committed_local_patches(repo_root, manifest));
+    }
+
     violations
+}
+
+fn expected_revision<'a>(item: &'a SharedOwnerItem, dependency_name: &str) -> Option<&'a str> {
+    item.pinned_revisions.get(dependency_name).map(String::as_str).or_else(|| {
+        let revision = item.pinned_revision.trim();
+        (!revision.is_empty()).then_some(revision)
+    })
 }
 
 fn workspace_dependency<'a>(manifest: &'a toml::Value, dependency_name: &str) -> Option<&'a toml::value::Table> {
@@ -182,6 +203,52 @@ fn patch_dependency_exists(manifest: &toml::Value, patch_table: &str, dependency
     manifest.get("patch").and_then(|patches| patches.get(patch_table)).and_then(toml::Value::as_table).and_then(|table| table.get(dependency_name)).is_some()
 }
 
+fn scan_committed_local_patches(repo_root: &Path, manifest: &toml::Value) -> Vec<Violation> {
+    let mut violations = Vec::new();
+    let manifest_dir = repo_root.join("backend");
+    let Some(patch_tables) = manifest.get("patch").and_then(toml::Value::as_table) else {
+        return violations;
+    };
+
+    for (patch_source, dependencies) in patch_tables {
+        let Some(dependencies) = dependencies.as_table() else {
+            continue;
+        };
+        for (dependency_name, dependency) in dependencies {
+            let Some(path) = dependency.as_table().and_then(|table| table.get("path")).and_then(toml::Value::as_str) else {
+                continue;
+            };
+            let resolved = normalize_patch_path(&manifest_dir, path);
+            if Path::new(path).is_absolute() || !resolved.starts_with(repo_root) {
+                violations.push(Violation {
+                    code: "COMMITTED_LOCAL_PATCH_PRESENT".into(),
+                    path: BACKEND_MANIFEST_PATH.into(),
+                    message: format!("backend/Cargo.toml patches {dependency_name} from {patch_source} via local path {path}; move developer-only overrides to uncommitted local cargo config"),
+                });
+            }
+        }
+    }
+
+    violations
+}
+
+fn normalize_patch_path(base_dir: &Path, raw_path: &str) -> PathBuf {
+    let raw_path = Path::new(raw_path);
+    let mut normalized = if raw_path.is_absolute() { PathBuf::new() } else { base_dir.to_path_buf() };
+    for component in raw_path.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                let _ = normalized.pop();
+            }
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+    normalized
+}
+
 pub fn format_violations(violations: &[Violation]) -> String {
     let mut lines = vec!["Shared owner readiness failed:".to_string()];
     lines.extend(violations.iter().map(|violation| format!("- [{}] {}: {}", violation.code, violation.path, violation.message)));
@@ -190,6 +257,7 @@ pub fn format_violations(violations: &[Violation]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::fs;
 
     use tempfile::tempdir;
@@ -243,6 +311,7 @@ mod tests {
                 patch_dependency_names: Vec::new(),
                 proof_reference: String::new(),
                 pinned_revision: "abcd".into(),
+                pinned_revisions: BTreeMap::new(),
                 notes: String::new(),
             }],
         };
@@ -279,6 +348,7 @@ mod tests {
                 patch_dependency_names: Vec::new(),
                 proof_reference: "https://example.com/pr/9".into(),
                 pinned_revision: "abcd".into(),
+                pinned_revisions: BTreeMap::new(),
                 notes: String::new(),
             }],
         };
@@ -289,7 +359,7 @@ mod tests {
     }
 
     #[test]
-    fn evaluate_reports_local_patch_for_landed_item() {
+    fn evaluate_reports_item_specific_patch_for_landed_item() {
         let temp_dir = tempdir().expect("tempdir");
         fs::create_dir_all(temp_dir.path().join("backend")).expect("mkdir backend");
         fs::write(
@@ -301,7 +371,7 @@ mod tests {
                 styx = { git = "https://example.com/styx.git", rev = "abcd" }
 
                 [patch."https://example.com/styx.git"]
-                styx = { path = "/tmp/styx" }
+                styx = { path = "vendor/styx" }
             "#,
         )
         .expect("write manifest");
@@ -318,6 +388,7 @@ mod tests {
                 patch_dependency_names: vec!["styx".into()],
                 proof_reference: "https://example.com/pr/9".into(),
                 pinned_revision: "abcd".into(),
+                pinned_revisions: BTreeMap::new(),
                 notes: String::new(),
             }],
         };
@@ -325,6 +396,80 @@ mod tests {
         let violations = evaluate_guardrails(temp_dir.path(), &config);
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].code, "SHARED_OWNER_LOCAL_PATCH_PRESENT");
+    }
+
+    #[test]
+    fn evaluate_reports_committed_absolute_patch_even_for_open_items() {
+        let temp_dir = tempdir().expect("tempdir");
+        fs::create_dir_all(temp_dir.path().join("backend")).expect("mkdir backend");
+        fs::write(
+            temp_dir.path().join("backend/Cargo.toml"),
+            r#"
+                [workspace]
+
+                [patch."https://example.com/styx.git"]
+                styx = { path = "/tmp/styx" }
+            "#,
+        )
+        .expect("write manifest");
+
+        let config = SharedOwnerConfig {
+            items: vec![SharedOwnerItem {
+                id: 9,
+                title: "Styx capture ownership".into(),
+                owner: "Styx".into(),
+                status: SharedOwnerStatus::Open,
+                repo: Some("styx".into()),
+                dependency_names: vec!["styx".into()],
+                patch_table: None,
+                patch_dependency_names: Vec::new(),
+                proof_reference: String::new(),
+                pinned_revision: String::new(),
+                pinned_revisions: BTreeMap::new(),
+                notes: String::new(),
+            }],
+        };
+
+        let violations = evaluate_guardrails(temp_dir.path(), &config);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].code, "COMMITTED_LOCAL_PATCH_PRESENT");
+    }
+
+    #[test]
+    fn evaluate_supports_dependency_specific_pin_map() {
+        let temp_dir = tempdir().expect("tempdir");
+        fs::create_dir_all(temp_dir.path().join("backend")).expect("mkdir backend");
+        fs::write(
+            temp_dir.path().join("backend/Cargo.toml"),
+            r#"
+                [workspace]
+
+                [workspace.dependencies]
+                styx = { git = "https://example.com/styx.git", rev = "styxrev" }
+                daedalus = { git = "https://example.com/daedalus.git", rev = "dae-rev" }
+            "#,
+        )
+        .expect("write manifest");
+
+        let config = SharedOwnerConfig {
+            items: vec![SharedOwnerItem {
+                id: 12,
+                title: "No committed local patches".into(),
+                owner: "Shared".into(),
+                status: SharedOwnerStatus::Landed,
+                repo: Some("shared".into()),
+                dependency_names: vec!["styx".into(), "daedalus".into()],
+                patch_table: None,
+                patch_dependency_names: Vec::new(),
+                proof_reference: "repo policy".into(),
+                pinned_revision: String::new(),
+                pinned_revisions: BTreeMap::from([(String::from("styx"), String::from("styxrev")), (String::from("daedalus"), String::from("dae-rev"))]),
+                notes: String::new(),
+            }],
+        };
+
+        let violations = evaluate_guardrails(temp_dir.path(), &config);
+        assert!(violations.is_empty());
     }
 
     #[test]
@@ -345,6 +490,7 @@ mod tests {
                 patch_dependency_names: vec!["daedalus-rs".into()],
                 proof_reference: String::new(),
                 pinned_revision: String::new(),
+                pinned_revisions: BTreeMap::new(),
                 notes: String::new(),
             }],
         };

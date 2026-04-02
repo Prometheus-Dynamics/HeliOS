@@ -881,10 +881,10 @@ owner = "HeliOS"
 review_note = "The systems route now composes activity tabs and panel props while I2C/IMU bootstrap, refresh policy, and IMU stream/config controllers live in a dedicated helper; keep the page focused on orchestration instead of rebuilding device runtime policy inline."
 
 [[line_limits]]
-path = "frontend/src/routes/systems/systemsPageSupport.ts"
-max_lines = 980
+path = "frontend/src/lib/features/systems/page/systemsPageRuntime.ts"
+max_lines = 360
 owner = "HeliOS"
-review_note = "Systems page bootstrap refresh, I2C rescans, IMU stream/poll fallback, IMU config mutation, and form/state synchronization now live here; keep visual panel wiring out of this runtime controller and continue splitting if another subsystem regrows."
+review_note = "Systems page bootstrap refresh, I2C rescans, IMU refresh/error policy, and runtime cache orchestration now live here; keep layout concerns and panel rendering out of this runtime controller and split further before it regrows."
 
 [[line_limits]]
 path = "frontend/src/routes/media/+page.svelte"
