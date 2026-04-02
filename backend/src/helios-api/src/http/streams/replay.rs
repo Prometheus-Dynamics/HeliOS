@@ -253,59 +253,32 @@ async fn media_metadata_stream_id(meta_dir: &Path, media_name: &str) -> Option<U
 }
 
 async fn resolve_replay_calibration(state: &AppState, source_stream_id: Option<Uuid>) -> Option<helios_engine::ipc::StreamCalibration> {
-    if let Some(source_stream_id) = source_stream_id {
-        if let Ok(streams) = state.engine.list_streams().await
-            && let Some(summary) = streams.into_iter().find(|entry| entry.stream_id == source_stream_id)
-            && summary.manifest.calibration.is_some()
-        {
-            return summary.manifest.calibration;
-        }
+    let Some(source_stream_id) = source_stream_id else {
+        return None;
+    };
 
-        for record in streams_persist::list_persisted_records().await {
-            let Some(manifest) = record.requested_manifest() else {
-                continue;
-            };
-            if manifest.internal {
-                continue;
-            }
-            let matches =
-                manifest.identity.id == Some(source_stream_id) || record.last_stream_id == Some(source_stream_id) || streams_persist::derived_stream_id(&record.camera_id) == source_stream_id;
-            if !matches {
-                continue;
-            }
-            if manifest.calibration.is_some() {
-                return manifest.calibration;
-            }
-        }
+    if let Ok(streams) = state.engine.list_streams().await
+        && let Some(summary) = streams.into_iter().find(|entry| entry.stream_id == source_stream_id)
+        && summary.manifest.calibration.is_some()
+    {
+        return summary.manifest.calibration;
     }
 
-    // TEMP_SHIM: streams-replay-calibration-guess-fallback
-    // Fallback for legacy/offboard media with missing stream-id metadata:
-    // if there is exactly one calibrated camera profile available, use it.
-    //
-    // Prefer currently-running non-file streams (live cameras), then persisted manifests.
-    // If multiple candidates exist, keep behavior deterministic by refusing to guess.
-    if let Ok(streams) = state.engine.list_streams().await {
-        let mut live_candidates: Vec<helios_engine::ipc::StreamCalibration> = streams
-            .into_iter()
-            .filter(|entry| !entry.manifest.internal)
-            .filter(|entry| entry.manifest.capture.backend != helios_engine::capture::BackendKind::File)
-            .filter_map(|entry| entry.manifest.calibration)
-            .collect();
-        if live_candidates.len() == 1 {
-            return live_candidates.pop();
+    for record in streams_persist::list_persisted_records().await {
+        let Some(manifest) = record.requested_manifest() else {
+            continue;
+        };
+        if manifest.internal {
+            continue;
         }
-    }
-
-    let mut persisted_candidates: Vec<helios_engine::ipc::StreamCalibration> = streams_persist::list_persisted_records()
-        .await
-        .into_iter()
-        .filter_map(|record| record.requested_manifest())
-        .filter(|manifest| !manifest.internal)
-        .filter_map(|manifest| manifest.calibration)
-        .collect();
-    if persisted_candidates.len() == 1 {
-        return persisted_candidates.pop();
+        let matches =
+            manifest.identity.id == Some(source_stream_id) || record.last_stream_id == Some(source_stream_id) || streams_persist::derived_stream_id(&record.camera_id) == source_stream_id;
+        if !matches {
+            continue;
+        }
+        if manifest.calibration.is_some() {
+            return manifest.calibration;
+        }
     }
 
     None

@@ -129,10 +129,6 @@ pub fn apply_daedalus_engine_config_overrides(cfg: &mut EngineConfig, graph: &Gr
             KEY_RUNTIME_MODE => {
                 if let Some(mode) = parse_runtime_mode(raw) {
                     cfg.runtime.mode = mode;
-                } else if raw.trim().eq_ignore_ascii_case("parallel_pool") || raw.trim().eq_ignore_ascii_case("pool") {
-                    // Daedalus removed `ParallelPool`; treat legacy values as `Parallel`.
-                    cfg.runtime.mode = RuntimeMode::Parallel;
-                    warn!(key, raw, "runtime mode `parallel_pool` is deprecated; using `parallel`");
                 } else {
                     warn!(key, raw, "invalid daedalus runtime mode override");
                 }

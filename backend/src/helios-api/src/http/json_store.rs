@@ -47,6 +47,32 @@ where
     Ok(next)
 }
 
+pub(crate) async fn update_bytes<T, F, Fut, D, E>(path: PathBuf, default: T, decode: D, encode: E, updater: F) -> std::io::Result<T>
+where
+    F: FnOnce(T) -> Fut,
+    Fut: Future<Output = T>,
+    D: Fn(&[u8]) -> std::io::Result<T>,
+    E: Fn(&T) -> std::io::Result<Vec<u8>>,
+{
+    let lock = lock_for(&path).await;
+    let _guard = lock.lock().await;
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).await?;
+    }
+
+    let current = match fs::read(&path).await {
+        Ok(bytes) => decode(&bytes)?,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => default,
+        Err(err) => return Err(err),
+    };
+    let next = updater(current).await;
+
+    let bytes = encode(&next)?;
+    write_atomic(&path, &bytes).await?;
+    Ok(next)
+}
+
 pub(crate) async fn write_json<T>(path: PathBuf, value: &T) -> std::io::Result<()>
 where
     T: Serialize,

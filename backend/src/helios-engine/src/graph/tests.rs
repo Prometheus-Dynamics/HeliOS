@@ -174,7 +174,7 @@ fn normalize_graph_enum_consts_unwraps_struct_wrapped_values() {
     let mut registry = PluginRegistry::new();
     registry.registry.register_node(desc).expect("descriptor register");
 
-    super::normalize_graph_enum_const_inputs(&mut graph, &registry);
+    super::canonicalize_graph_const_inputs(&mut graph, &registry);
 
     let value = graph.nodes[0].const_inputs.iter().find(|(name, _)| name == "mode").map(|(_, value)| value.clone()).expect("mode const input");
     assert_eq!(value, Value::Int(2));
@@ -231,6 +231,34 @@ fn sync_graph_node_port_declarations_repairs_stale_ports() {
     let const_ports = node.const_inputs.iter().map(|(name, _)| name.to_ascii_lowercase()).collect::<BTreeSet<_>>();
     assert!(const_ports.contains("fallback_to_nearest"));
     assert!(!const_ports.contains("legacy_port"));
+}
+
+#[test]
+fn sync_graph_node_port_declarations_rejects_plus_suffix_fanin_names() {
+    let graph_json = serde_json::json!({
+        "nodes": [
+            {
+                "id": "cv:test:fanin",
+                "inputs": ["sources0+"],
+                "outputs": [],
+                "const_inputs": []
+            }
+        ],
+        "edges": []
+    });
+    let mut graph: daedalus::planner::Graph = serde_json::from_value(graph_json).expect("graph parse");
+
+    let desc = NodeDescriptorBuilder::new("cv:test:fanin")
+        .fanin_input("sources", 0, TypeExpr::scalar(daedalus::data::model::ValueType::Int))
+        .build()
+        .expect("descriptor build");
+
+    let mut registry = PluginRegistry::new();
+    registry.registry.register_node(desc).expect("descriptor register");
+
+    super::sync_graph_node_port_declarations(&mut graph, &registry);
+
+    assert_eq!(graph.nodes[0].inputs, Vec::<String>::new());
 }
 
 #[test]

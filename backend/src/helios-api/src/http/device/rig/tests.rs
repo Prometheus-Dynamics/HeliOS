@@ -1,7 +1,7 @@
 use super::{
     UpdateRobotDimensionsRequest,
     peer_forward::encode_path_segment,
-    state::{apply_robot_dimensions_patch, camera_uid_from_keys},
+    state::{apply_robot_dimensions_patch, camera_uid_from_keys, decode_robot_dimensions},
     types::RobotDimensions,
 };
 
@@ -35,4 +35,25 @@ fn apply_robot_dimensions_patch_ignores_invalid_values() {
 #[test]
 fn encode_path_segment_uses_percent_encoding_for_spaces() {
     assert_eq!(encode_path_segment("front camera/pose value"), "front%20camera%2Fpose%20value");
+}
+
+#[test]
+fn decode_robot_dimensions_rejects_missing_schema_version() {
+    let raw = serde_json::json!({
+        "robot": RobotDimensions::default()
+    });
+
+    let err = decode_robot_dimensions(&serde_json::to_vec(&raw).expect("encode")).expect_err("missing schema version should fail");
+    assert!(err.contains("missing required schema_version"));
+}
+
+#[test]
+fn decode_robot_dimensions_rejects_future_schema_version() {
+    let raw = serde_json::json!({
+        "schema_version": 2,
+        "robot": RobotDimensions::default()
+    });
+
+    let err = decode_robot_dimensions(&serde_json::to_vec(&raw).expect("encode")).expect_err("future schema version should fail");
+    assert!(err.contains("unsupported robot dimensions document schema_version"));
 }

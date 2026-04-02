@@ -3,7 +3,7 @@ use lib_led_animations::{LedAnimationEntry, LedAnimationTimeline};
 
 use super::{
     animations::entry_to_response,
-    templates::{LightingAnimationTemplateDocumentRaw, LightingTemplateCommandRaw, normalize_template_id, template_raw_into_document},
+    templates::{LightingAnimationTemplateDocumentRaw, normalize_template_id, template_raw_into_document},
     types::{LightingAnimationPayload, LightingColorPayload, LightingFramePayload, LightingTimelineEasingPayload, LightingTimelineKeyframePayload, LightingTimelinePayload},
 };
 
@@ -35,24 +35,6 @@ fn template_raw_into_document_materializes_sequence_from_timeline() {
     assert_eq!(doc.name, "Pulse");
     assert!(doc.timeline.is_some());
     assert!(doc.frames.as_ref().is_some_and(|frames| !frames.is_empty()));
-}
-
-#[test]
-fn template_raw_into_document_supports_legacy_command_shape() {
-    let raw = LightingAnimationTemplateDocumentRaw {
-        schema_version: 1,
-        command: Some(LightingTemplateCommandRaw {
-            frame: Some(vec![LightingColorPayload { r: 1, g: 2, b: 3, w: 4 }]),
-            brightness: Some(32),
-            animation: Some(LightingAnimationPayload::Rainbow { speed_hz: 1.5 }),
-        }),
-        ..Default::default()
-    };
-
-    let doc = template_raw_into_document("legacy".to_string(), raw).expect("legacy template should be valid");
-    assert_eq!(doc.brightness, Some(32));
-    assert!(matches!(doc.animation, Some(LightingAnimationPayload::Rainbow { speed_hz }) if (speed_hz - 1.5).abs() < f32::EPSILON));
-    assert_eq!(doc.frame, Some(vec![LightingColorPayload { r: 1, g: 2, b: 3, w: 4 }]));
 }
 
 #[test]
@@ -92,4 +74,18 @@ fn lighting_template_decode_rejects_future_schema_version() {
 
     let err = LightingAnimationTemplateDocumentRaw::decode_str(&serde_json::to_string(&raw).expect("encode")).expect_err("future schema should fail");
     assert!(err.contains("unsupported lighting template document schema_version"));
+}
+
+#[test]
+fn lighting_template_decode_rejects_legacy_command_shape() {
+    let raw = serde_json::json!({
+        "schema_version": 1,
+        "command": {
+            "frame": [{ "r": 1, "g": 2, "b": 3, "w": 4 }],
+            "brightness": 32
+        }
+    });
+
+    let err = LightingAnimationTemplateDocumentRaw::decode_str(&serde_json::to_string(&raw).expect("encode")).expect_err("legacy nested command payload should fail");
+    assert!(err.contains("unknown field `command`"));
 }

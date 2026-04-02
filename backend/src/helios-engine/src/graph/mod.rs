@@ -697,7 +697,7 @@ fn normalize_preview_graph_json_for_runtime(json: &Value, selected_output: &str)
     normalized
 }
 
-fn normalize_graph_enum_const_inputs(graph: &mut Graph, registry: &daedalus::runtime::plugins::PluginRegistry) {
+fn canonicalize_graph_const_inputs(graph: &mut Graph, registry: &daedalus::runtime::plugins::PluginRegistry) {
     fn unwrap_serialized_typed_value(value: &DaedalusValue) -> Option<DaedalusValue> {
         let mut ty: Option<String> = None;
         let mut raw: Option<DaedalusValue> = None;
@@ -743,8 +743,8 @@ fn normalize_graph_enum_const_inputs(graph: &mut Graph, registry: &daedalus::run
         }
     }
 
-    // Convert enum constants to index-based ints (Daedalus now accepts enums by discriminant).
-    // Legacy graphs may still provide strings; map them to the registered variant order.
+    // Canonicalize persisted graph const inputs into the runtime value form Daedalus expects.
+    // Graph JSON still stores typed scalar wrappers and enum names; convert those once here.
     let view = registry.registry.view();
     for node in &mut graph.nodes {
         let Some(desc) = view.nodes.get(&daedalus::registry::ids::NodeId(node.id.0.clone())) else {
@@ -795,10 +795,7 @@ fn canonical_fanin_input_name(name: &str, fanins: &[daedalus::registry::store::F
             continue;
         }
         let prefix_lc = prefix_raw.to_ascii_lowercase();
-        let Some(mut suffix) = name_lc.strip_prefix(&prefix_lc) else { continue };
-        if let Some(stripped) = suffix.strip_suffix('+') {
-            suffix = stripped;
-        }
+        let Some(suffix) = name_lc.strip_prefix(&prefix_lc) else { continue };
         let idx = if suffix.is_empty() {
             fanin.start
         } else {
@@ -823,8 +820,8 @@ fn is_fanin_input_name(name: &str, fanins: &[daedalus::registry::store::FanInPor
 fn sync_graph_node_port_declarations(graph: &mut Graph, registry: &daedalus::runtime::plugins::PluginRegistry) {
     let view = registry.registry.view();
 
-    // Canonicalize fan-in edge target ports (e.g. `sources0+` -> `sources0`) so planner
-    // validation/typecheck uses the same naming convention as registry `input_ty_for`.
+    // Canonicalize fan-in edge target ports so planner validation/typecheck uses the
+    // same naming convention as registry `input_ty_for`.
     for edge in &mut graph.edges {
         let Some(to_node_id) = graph.nodes.get(edge.to.node.0).map(|node| node.id.clone()) else {
             continue;
@@ -852,7 +849,7 @@ fn sync_graph_node_port_declarations(graph: &mut Graph, registry: &daedalus::run
         let fixed_inputs: Vec<String> = desc.inputs.iter().map(|p| p.name.clone()).collect();
         let fixed_outputs: Vec<String> = desc.outputs.iter().map(|p| p.name.clone()).collect();
 
-        // Canonicalize fan-in input declarations/consts (legacy `sources0+` => `sources0`).
+        // Canonicalize fan-in input declarations/consts.
         for input in &mut node.inputs {
             if let Some(canonical) = canonical_fanin_input_name(input, &desc.fanin_inputs) {
                 *input = canonical;
@@ -981,45 +978,45 @@ impl GraphHandle {
     /// Build a graph handle from a Daedalus graph JSON payload. This validates the graph
     /// and installs a Daedalus-backed executor so host frames are routed through the graph.
     pub fn from_json(buffer: usize, json: &Value) -> Result<Self, GraphError> {
-        Self::build_graph_handle(buffer, json, pool_size_from_env(), None, GraphCompatibilityMode::Strict)
+        Self::build_graph_handle(buffer, json, pool_size_from_env(), None)
     }
 
-    /// Build a graph handle from persisted/imported graph JSON that may still require
-    /// bounded compatibility fixes while old serialized shapes are being retired.
+    /// Build a graph handle from persisted/imported graph JSON using the same strict
+    /// canonical decoding path as user-authored graphs.
     pub fn from_persisted_json(buffer: usize, json: &Value) -> Result<Self, GraphError> {
-        Self::build_graph_handle(buffer, json, pool_size_from_env(), None, GraphCompatibilityMode::PersistedImport)
+        Self::build_graph_handle(buffer, json, pool_size_from_env(), None)
     }
 
     /// Same as `from_json` but optionally selects a single host output port to forward.
     pub fn from_json_with_output(buffer: usize, json: &Value, output_port: Option<&str>) -> Result<Self, GraphError> {
-        Self::build_graph_handle(buffer, json, pool_size_from_env(), output_port, GraphCompatibilityMode::Strict)
+        Self::build_graph_handle(buffer, json, pool_size_from_env(), output_port)
     }
 
     /// Same as `from_persisted_json` but optionally selects a single host output port to forward.
     pub fn from_persisted_json_with_output(buffer: usize, json: &Value, output_port: Option<&str>) -> Result<Self, GraphError> {
-        Self::build_graph_handle(buffer, json, pool_size_from_env(), output_port, GraphCompatibilityMode::PersistedImport)
+        Self::build_graph_handle(buffer, json, pool_size_from_env(), output_port)
     }
 
     /// Same as `from_json` but allows overriding the Daedalus executor pool size.
     pub fn from_json_with_pool(buffer: usize, json: &Value, pool_size: Option<usize>, output_port: Option<&str>) -> Result<Self, GraphError> {
-        Self::build_graph_handle(buffer, json, pool_size, output_port, GraphCompatibilityMode::Strict)
+        Self::build_graph_handle(buffer, json, pool_size, output_port)
     }
 
     /// Same as `from_persisted_json` but allows overriding the Daedalus executor pool size.
     pub fn from_persisted_json_with_pool(buffer: usize, json: &Value, pool_size: Option<usize>, output_port: Option<&str>) -> Result<Self, GraphError> {
-        Self::build_graph_handle(buffer, json, pool_size, output_port, GraphCompatibilityMode::PersistedImport)
+        Self::build_graph_handle(buffer, json, pool_size, output_port)
     }
 
-    fn build_graph_handle(buffer: usize, json: &Value, pool_size: Option<usize>, output_port: Option<&str>, compatibility: GraphCompatibilityMode) -> Result<Self, GraphError> {
+    fn build_graph_handle(buffer: usize, json: &Value, pool_size: Option<usize>, output_port: Option<&str>) -> Result<Self, GraphError> {
         let normalized = normalize_graph_json_for_runtime(json);
         let graph: Graph = serde_json::from_value(normalized).map_err(|e| GraphError::Parse(e.to_string()))?;
         let (host, rx) = HostBridgeHandle::new(buffer);
         let _ = rx;
-        let executor = DaedalusGraphExecutor::new(graph, pool_size, output_port.map(str::to_string), compatibility)?;
+        let executor = DaedalusGraphExecutor::new(graph, pool_size, output_port.map(str::to_string))?;
         let preview_executor = if let Some(selected_output) = output_port {
             let preview_json = normalize_preview_graph_json_for_runtime(json, selected_output);
             let preview_graph: Graph = serde_json::from_value(preview_json).map_err(|e| GraphError::Parse(e.to_string()))?;
-            let preview = DaedalusGraphExecutor::new(preview_graph, pool_size, Some(selected_output.to_string()), compatibility)?;
+            let preview = DaedalusGraphExecutor::new(preview_graph, pool_size, Some(selected_output.to_string()))?;
             Some(Arc::new(preview) as Arc<dyn GraphExecutor>)
         } else {
             None
@@ -2188,14 +2185,8 @@ enum ExecutorBusyBehavior {
     Block,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum GraphCompatibilityMode {
-    Strict,
-    PersistedImport,
-}
-
 impl DaedalusGraphExecutor {
-    fn new(graph: Graph, pool_size: Option<usize>, output_port: Option<String>, compatibility: GraphCompatibilityMode) -> Result<Self, GraphError> {
+    fn new(graph: Graph, pool_size: Option<usize>, output_port: Option<String>) -> Result<Self, GraphError> {
         let mut graph = graph;
         let host_mgr = DaedalusBridgeManager::new();
         let built = build_daedalus_runtime_registry(&host_mgr, Some(&graph)).map_err(|e| GraphError::Build(e.to_string()))?;
@@ -2205,9 +2196,7 @@ impl DaedalusGraphExecutor {
 
         sync_graph_node_port_declarations(&mut graph, &registry);
         enforce_registry_default_compute_affinity(&mut graph, &registry);
-        if matches!(compatibility, GraphCompatibilityMode::PersistedImport) {
-            normalize_graph_enum_const_inputs(&mut graph, &registry);
-        }
+        canonicalize_graph_const_inputs(&mut graph, &registry);
         if std::env::var_os("HELIOS_TRACE_GRAPH_CONSTS_STDERR").is_some() {
             for node in &graph.nodes {
                 if node.id.0 == "cv:image:blur" || node.id.0 == "cv:color:grayscale" {

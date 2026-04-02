@@ -1,10 +1,27 @@
 use chrono::Utc;
+use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
+use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 use crate::http::{json_store, peers, storage};
 
 use super::{CameraLayoutCameraResponse, PoseRotation, PoseVector, RigPose, RobotDimensions, UpdateRobotDimensionsRequest};
 
 const DEFAULT_ROBOT: RobotDimensions = RobotDimensions { width_m: 0.6, length_m: 0.6, bumper_height_m: 0.127, bumper_thickness_m: 0.0508, ground_clearance_m: 0.0 };
+const CURRENT_ROBOT_DIMENSIONS_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredRobotDimensionsDocument {
+    schema_version: u32,
+    robot: RobotDimensions,
+}
+
+const ROBOT_DIMENSIONS_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan {
+    document_name: "robot dimensions document",
+    legacy_version: CURRENT_ROBOT_DIMENSIONS_SCHEMA_VERSION,
+    current_version: CURRENT_ROBOT_DIMENSIONS_SCHEMA_VERSION,
+    migrations: &[],
+};
 
 impl Default for RobotDimensions {
     fn default() -> Self {
@@ -26,7 +43,18 @@ pub(super) async fn load_robot_dimensions() -> RobotDimensions {
         Ok(path) => path,
         Err(_) => return RobotDimensions::default(),
     };
-    json_store::read_json_or_default(&path).await
+    let bytes = match tokio::fs::read(&path).await {
+        Ok(bytes) => bytes,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return RobotDimensions::default(),
+        Err(_) => return RobotDimensions::default(),
+    };
+    match decode_robot_dimensions(&bytes) {
+        Ok(robot) => robot,
+        Err(err) => {
+            warn!(path = %path.display(), %err, "invalid persisted robot dimensions; using defaults");
+            RobotDimensions::default()
+        }
+    }
 }
 
 pub(super) async fn update_robot_dimensions_state<F, Fut>(updater: F) -> std::io::Result<RobotDimensions>
@@ -35,7 +63,20 @@ where
     Fut: std::future::Future<Output = RobotDimensions>,
 {
     let path = robot_state_path().await?;
-    json_store::update_json(path, updater).await
+    json_store::update_bytes(
+        path,
+        RobotDimensions::default(),
+        |bytes| decode_robot_dimensions(bytes).map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err)),
+        |robot| {
+            serde_json::to_vec(&StoredRobotDimensionsDocument {
+                schema_version: CURRENT_ROBOT_DIMENSIONS_SCHEMA_VERSION,
+                robot: robot.clone(),
+            })
+            .map_err(std::io::Error::other)
+        },
+        updater,
+    )
+    .await
 }
 
 pub(super) fn apply_robot_dimensions_patch(mut robot: RobotDimensions, patch_req: UpdateRobotDimensionsRequest) -> RobotDimensions {
@@ -63,6 +104,13 @@ pub(super) fn apply_robot_dimensions_patch(mut robot: RobotDimensions, patch_req
     let _ = apply(&mut robot.bumper_thickness_m, patch_req.bumper_thickness_m, false);
     let _ = apply(&mut robot.ground_clearance_m, patch_req.ground_clearance_m, true);
     robot
+}
+
+pub(super) fn decode_robot_dimensions(bytes: &[u8]) -> Result<RobotDimensions, String> {
+    let raw = serde_json::from_slice::<serde_json::Value>(bytes).map_err(|err| format!("failed to decode robot dimensions document: {err}"))?;
+    let migrated = migrate_to_current(raw, &ROBOT_DIMENSIONS_SCHEMA_PLAN)?;
+    let parsed: StoredRobotDimensionsDocument = serde_json::from_value(migrated).map_err(|err| format!("failed to parse robot dimensions document: {err}"))?;
+    Ok(parsed.robot)
 }
 
 pub(super) fn backend_label(device: &helios_engine::capture::DiscoveredDevice) -> String {

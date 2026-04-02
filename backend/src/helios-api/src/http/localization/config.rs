@@ -1,5 +1,6 @@
 use axum::http::HeaderMap;
 use axum::{Json, extract::State, response::IntoResponse};
+use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
@@ -17,6 +18,21 @@ use crate::http::validation::validation_error_response;
 use super::validation::validate_localization_config;
 
 const LOCALIZATION_PROFILES_SCHEMA_V1: &str = "helios.localization.profiles.v1";
+const CURRENT_LOCALIZATION_CONFIG_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredLocalizationConfigDocument {
+    pub schema_version: u32,
+    #[serde(default)]
+    pub config: LocalizationConfig,
+}
+
+const LOCALIZATION_CONFIG_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan {
+    document_name: "localization config document",
+    legacy_version: CURRENT_LOCALIZATION_CONFIG_SCHEMA_VERSION,
+    current_version: CURRENT_LOCALIZATION_CONFIG_SCHEMA_VERSION,
+    migrations: &[],
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -92,7 +108,7 @@ pub async fn update_config(State(_state): State<AppState>, Json(body): Json<Loca
         );
     }
 
-    match json_store::write_json(path, &validated.config).await {
+    match json_store::write_json(path, &StoredLocalizationConfigDocument { schema_version: CURRENT_LOCALIZATION_CONFIG_SCHEMA_VERSION, config: validated.config.clone() }).await {
         Ok(()) => Json(validated.config).into_response(),
         Err(err) => ApiError::internal(format!("failed to write localization config: {err}")).into_response(),
     }
@@ -153,7 +169,7 @@ pub async fn import_profiles(State(_state): State<AppState>, Json(body): Json<Va
         );
     }
 
-    match json_store::write_json(path, &validated.config).await {
+    match json_store::write_json(path, &StoredLocalizationConfigDocument { schema_version: CURRENT_LOCALIZATION_CONFIG_SCHEMA_VERSION, config: validated.config.clone() }).await {
         Ok(()) => Json(validated.config).into_response(),
         Err(err) => ApiError::internal(format!("failed to write localization config: {err}")).into_response(),
     }
@@ -161,7 +177,18 @@ pub async fn import_profiles(State(_state): State<AppState>, Json(body): Json<Va
 
 pub(crate) async fn load_config() -> ApiResult<LocalizationConfig> {
     let path = config_path().await.map_err(|err| ApiError::internal(format!("failed to resolve localization config: {err}")))?;
-    Ok(json_store::read_json_or_default(&path).await)
+    let bytes = match tokio::fs::read(&path).await {
+        Ok(bytes) => bytes,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(LocalizationConfig::default()),
+        Err(err) => return Err(ApiError::internal(format!("failed to read localization config: {err}"))),
+    };
+    match decode_localization_config(&bytes) {
+        Ok(config) => Ok(config),
+        Err(err) => {
+            warn!(path = %path.display(), %err, "invalid persisted localization config; using defaults");
+            Ok(LocalizationConfig::default())
+        }
+    }
 }
 
 async fn config_path() -> std::io::Result<PathBuf> {
@@ -191,4 +218,48 @@ fn extract_imported_config(body: Value) -> Result<LocalizationConfig, String> {
 
     serde_json::from_value::<LocalizationConfig>(body)
         .map_err(|err| format!("invalid localization profiles payload: expected `{LOCALIZATION_PROFILES_SCHEMA_V1}` envelope or localization config: {err}"))
+}
+
+fn decode_localization_config(bytes: &[u8]) -> Result<LocalizationConfig, String> {
+    let raw = serde_json::from_slice::<serde_json::Value>(bytes).map_err(|err| format!("failed to decode localization config document: {err}"))?;
+    let migrated = migrate_to_current(raw, &LOCALIZATION_CONFIG_SCHEMA_PLAN)?;
+    let parsed: StoredLocalizationConfigDocument = serde_json::from_value(migrated).map_err(|err| format!("failed to parse localization config document: {err}"))?;
+    Ok(parsed.config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CURRENT_LOCALIZATION_CONFIG_SCHEMA_VERSION, LocalizationConfig, StoredLocalizationConfigDocument, decode_localization_config};
+
+    #[test]
+    fn decode_localization_config_rejects_missing_schema_version() {
+        let raw = serde_json::json!({
+            "config": LocalizationConfig::default()
+        });
+
+        let err = decode_localization_config(&serde_json::to_vec(&raw).expect("encode")).expect_err("missing schema version should fail");
+        assert!(err.contains("missing required schema_version"));
+    }
+
+    #[test]
+    fn decode_localization_config_rejects_future_schema_version() {
+        let raw = serde_json::json!({
+            "schema_version": CURRENT_LOCALIZATION_CONFIG_SCHEMA_VERSION + 1,
+            "config": LocalizationConfig::default()
+        });
+
+        let err = decode_localization_config(&serde_json::to_vec(&raw).expect("encode")).expect_err("future schema version should fail");
+        assert!(err.contains("unsupported localization config document schema_version"));
+    }
+
+    #[test]
+    fn stored_localization_config_document_serializes_current_schema_version() {
+        let raw = serde_json::to_value(StoredLocalizationConfigDocument {
+            schema_version: CURRENT_LOCALIZATION_CONFIG_SCHEMA_VERSION,
+            config: LocalizationConfig::default(),
+        })
+        .expect("encode");
+
+        assert_eq!(raw.get("schema_version").and_then(serde_json::Value::as_u64), Some(u64::from(CURRENT_LOCALIZATION_CONFIG_SCHEMA_VERSION)));
+    }
 }

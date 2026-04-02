@@ -12,16 +12,7 @@ const LIGHTING_TEMPLATE_DIR: &str = "/usr/share/helios/lighting-templates";
 const CURRENT_LIGHTING_TEMPLATE_DOCUMENT_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Deserialize, Default)]
-pub(super) struct LightingTemplateCommandRaw {
-    #[serde(default)]
-    pub(super) frame: Option<Vec<LightingColorPayload>>,
-    #[serde(default)]
-    pub(super) brightness: Option<u8>,
-    #[serde(default)]
-    pub(super) animation: Option<LightingAnimationPayload>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub(super) struct LightingAnimationTemplateDocumentRaw {
     pub(super) schema_version: u32,
     #[serde(default)]
@@ -32,8 +23,6 @@ pub(super) struct LightingAnimationTemplateDocumentRaw {
     pub(super) summary: Option<String>,
     #[serde(default)]
     pub(super) tags: Vec<String>,
-    #[serde(default)]
-    pub(super) command: Option<LightingTemplateCommandRaw>,
     #[serde(default)]
     pub(super) frame: Option<Vec<LightingColorPayload>>,
     #[serde(default)]
@@ -157,8 +146,7 @@ pub(super) fn normalize_template_id(raw: &str) -> Option<String> {
 }
 
 pub(super) fn template_raw_into_document(template_id: String, raw: LightingAnimationTemplateDocumentRaw) -> Result<LightingAnimationTemplateDocument, String> {
-    let command = raw.command.unwrap_or_default();
-    let frame = raw.frame.or(command.frame);
+    let frame = raw.frame;
     let mut frames = raw.frames.or(raw.sequence);
     if let Some(existing_frames) = frames.as_ref()
         && existing_frames.is_empty()
@@ -179,8 +167,8 @@ pub(super) fn template_raw_into_document(template_id: String, raw: LightingAnima
             frames = Some(sequence.into_iter().map(|item| LightingFramePayload { frame: item.frame.into_iter().map(Into::into).collect(), duration_ms: item.duration_ms }).collect());
         }
     }
-    let brightness = raw.brightness.or(command.brightness);
-    let animation = raw.animation.or(command.animation);
+    let brightness = raw.brightness;
+    let animation = raw.animation;
     if frame.is_none() && animation.is_none() && frames.is_none() && timeline.is_none() {
         return Err("template must include a frame, frames, timeline, or animation payload".to_string());
     }
