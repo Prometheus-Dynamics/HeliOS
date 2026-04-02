@@ -80,7 +80,7 @@ Regenerate frontend API bindings from backend schema:
 
 ```bash
 cd ../frontend
-bun run codegen
+cargo run --manifest-path ../backend/Cargo.toml -p xtask -- generate generated-contracts
 ```
 
 ### Generate API specs from code

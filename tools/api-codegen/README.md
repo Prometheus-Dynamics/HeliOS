@@ -15,8 +15,8 @@ Generates the latest API descriptions from the backend and hydrates the frontend
 # from the repo root (performs every step end-to-end)
 ./tools/api-codegen/run.sh
 
-# equivalent Node entry point
-node tools/api-codegen/index.mjs
+# equivalent Rust entry point
+cargo run --manifest-path backend/Cargo.toml -p xtask -- generate generated-contracts
 
 # or from frontend (wires output straight into src/lib/ts-bindings)
 bun run codegen
@@ -27,6 +27,4 @@ Run this whenever backend contracts change so the frontend imports stay in sync.
 ## Notes
 
 - The first run may be slow because it builds the `helios-api` binary; subsequent runs should be fast due to Cargo caching.
-- Set `API_CODEGEN_SPEC_TIMEOUT_MS` to raise the Rust spec-generation timeout (default: 600000).
-- By default, codegen uses a dedicated Cargo target directory under `.cache/api-codegen/cargo-target`.
-- Set `API_CODEGEN_CARGO_TARGET_DIR` to override the Cargo target directory (e.g., to reuse your main workspace `target`).
+- By default, xtask uses `.tmp/api-codegen` and `.tmp/api-codegen-target` for temporary specs and the codegen cargo target directory.

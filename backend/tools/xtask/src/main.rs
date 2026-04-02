@@ -1,9 +1,9 @@
 mod architecture_guardrails;
+mod generated_contracts;
 mod shim_guardrails;
 
+use std::env;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::{env, fs};
 
 use anyhow::{Context, Result, bail};
 use chrono::{Local, NaiveDate};
@@ -18,6 +18,10 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    Generate {
+        #[command(subcommand)]
+        command: GenerateCommand,
+    },
     Guardrails {
         #[command(subcommand)]
         command: GuardrailCommand,
@@ -32,6 +36,11 @@ enum Commands {
 enum GuardrailCommand {
     Architecture(ArchitectureArgs),
     Shim(ShimArgs),
+}
+
+#[derive(Subcommand, Debug)]
+enum GenerateCommand {
+    GeneratedContracts(RepoArgs),
 }
 
 #[derive(Subcommand, Debug)]
@@ -105,27 +114,6 @@ fn run_shim_guardrails(repo_root: &Path, config_path: &Path, today: NaiveDate) -
     Ok(())
 }
 
-fn run_generated_contracts(repo_root: &Path) -> Result<()> {
-    let script = repo_root.join("tools/api-codegen/check.mjs");
-    let temp_root = repo_root.join(".tmp").join("api-codegen");
-    let cargo_target_dir = repo_root.join(".tmp").join("api-codegen-target");
-    fs::create_dir_all(&temp_root).with_context(|| format!("failed to create {}", temp_root.display()))?;
-    fs::create_dir_all(&cargo_target_dir).with_context(|| format!("failed to create {}", cargo_target_dir.display()))?;
-
-    let status = Command::new("node")
-        .arg(&script)
-        .current_dir(repo_root)
-        .env("API_CODEGEN_TMPDIR", &temp_root)
-        .env("API_CODEGEN_CARGO_TARGET_DIR", &cargo_target_dir)
-        .env_remove("RUSTC_WRAPPER")
-        .status()
-        .with_context(|| format!("failed to launch node {}", script.display()))?;
-    if !status.success() {
-        bail!("generated-contracts validation failed with status {status}");
-    }
-    Ok(())
-}
-
 fn run_repo_policy(repo_root: &Path) -> Result<()> {
     run_architecture_guardrails(repo_root, &architecture_config_path(repo_root, None))?;
     run_shim_guardrails(repo_root, &shim_config_path(repo_root, None), Local::now().date_naive())?;
@@ -135,6 +123,12 @@ fn run_repo_policy(repo_root: &Path) -> Result<()> {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Commands::Generate { command } => match command {
+            GenerateCommand::GeneratedContracts(args) => {
+                let repo_root = resolve_repo_root(&args);
+                generated_contracts::generate(&repo_root)
+            }
+        },
         Commands::Guardrails { command } => match command {
             GuardrailCommand::Architecture(args) => {
                 let repo_root = resolve_repo_root(&args.repo);
@@ -152,12 +146,12 @@ fn main() -> Result<()> {
             }
             ValidateCommand::GeneratedContracts(args) => {
                 let repo_root = resolve_repo_root(&args);
-                run_generated_contracts(&repo_root)
+                generated_contracts::validate(&repo_root)
             }
             ValidateCommand::All(args) => {
                 let repo_root = resolve_repo_root(&args);
                 run_repo_policy(&repo_root)?;
-                run_generated_contracts(&repo_root)
+                generated_contracts::validate(&repo_root)
             }
         },
     }

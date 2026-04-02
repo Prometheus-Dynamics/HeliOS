@@ -10,7 +10,7 @@
   },
   "scripts": {
     "ensure:deps": "if [ -x ./node_modules/.bin/vite ]; then echo \"Frontend dependencies present\"; else bun install --frozen-lockfile; fi",
-    "codegen": "node ../tools/api-codegen/index.mjs",
+    "codegen": "cargo run --manifest-path ../backend/Cargo.toml -p xtask -- generate generated-contracts",
     "predev": "bun run ensure:deps && bun run codegen && bun run prebuild:docs",
     "dev": "vite dev",
     "prebuild": "bun run ensure:deps && bun run prebuild:codegen && bun run prebuild:docs",
