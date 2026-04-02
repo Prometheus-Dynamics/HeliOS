@@ -4,15 +4,15 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use chrono::NaiveDate;
-use serde_json::Value;
+use serde::Deserialize;
 use thiserror::Error;
 
-pub const DEFAULT_CONFIG_NAME: &str = "shim_guardrails.json";
+pub const DEFAULT_CONFIG_NAME: &str = "shim_guardrails.toml";
 pub const DEFAULT_SCAN_ROOTS: &[&str] = &["backend", "frontend", "tools", ".github"];
 const MARKER_TOKEN: &str = "TEMP_SHIM:";
 const SKIP_DIR_NAMES: &[&str] = &[".git", ".svelte-kit", "build", "coverage", "dist", "node_modules", "target", "vendor"];
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct RequiredShim {
     pub id: String,
     pub path: String,
@@ -22,8 +22,9 @@ pub struct RequiredShim {
     pub replace_with: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
 pub struct ShimGuardrailConfig {
+    #[serde(default)]
     pub required_shims: Vec<RequiredShim>,
 }
 
@@ -51,49 +52,35 @@ impl ShimGuardrailConfigError {
     }
 }
 
-fn require_non_empty_text(value: Option<&Value>, field_name: &str, context: &str) -> Result<String, ShimGuardrailConfigError> {
-    match value {
-        Some(Value::String(text)) if !text.trim().is_empty() => Ok(text.trim().to_string()),
-        _ => Err(ShimGuardrailConfigError::new(format!("{context} is missing required text field {field_name}"))),
+fn validate_non_empty_text(value: &str, field_name: &str, context: &str) -> Result<(), ShimGuardrailConfigError> {
+    if value.trim().is_empty() {
+        return Err(ShimGuardrailConfigError::new(format!("{context} is missing required text field {field_name}")));
     }
+    Ok(())
 }
 
-fn require_iso_date(value: Option<&Value>, field_name: &str, context: &str) -> Result<NaiveDate, ShimGuardrailConfigError> {
-    let raw = require_non_empty_text(value, field_name, context)?;
-    NaiveDate::parse_from_str(&raw, "%Y-%m-%d").map_err(|_| ShimGuardrailConfigError::new(format!("{context} has invalid ISO date field {field_name}: {raw}")))
-}
+fn validate_config(config: ShimGuardrailConfig) -> Result<ShimGuardrailConfig, ShimGuardrailConfigError> {
+    for (index, rule) in config.required_shims.iter().enumerate() {
+        let context = format!("required_shims[{index}]");
+        validate_non_empty_text(&rule.id, "id", &context)?;
+        validate_non_empty_text(&rule.path, "path", &context)?;
+        validate_non_empty_text(&rule.owner, "owner", &context)?;
+        validate_non_empty_text(&rule.reason, "reason", &context)?;
+        validate_non_empty_text(&rule.replace_with, "replace_with", &context)?;
+    }
 
-fn parse_required_shim(raw: &Value, index: usize) -> Result<RequiredShim, ShimGuardrailConfigError> {
-    let context = format!("required_shims[{index}]");
-    let object = raw.as_object().ok_or_else(|| ShimGuardrailConfigError::new(format!("{context} must be an object")))?;
-    Ok(RequiredShim {
-        id: require_non_empty_text(object.get("id"), "id", &context)?,
-        path: require_non_empty_text(object.get("path"), "path", &context)?,
-        owner: require_non_empty_text(object.get("owner"), "owner", &context)?,
-        delete_by: require_iso_date(object.get("delete_by"), "delete_by", &context)?,
-        reason: require_non_empty_text(object.get("reason"), "reason", &context)?,
-        replace_with: require_non_empty_text(object.get("replace_with"), "replace_with", &context)?,
-    })
-}
-
-pub fn load_config(config_path: &Path) -> Result<ShimGuardrailConfig, ShimGuardrailConfigError> {
-    let raw_text = fs::read_to_string(config_path).map_err(|err| ShimGuardrailConfigError::new(format!("shim guardrail config not found: {}: {err}", config_path.display())))?;
-    let raw: Value = serde_json::from_str(&raw_text).map_err(|err| ShimGuardrailConfigError::new(format!("shim guardrail config is not valid json: {}: {err}", config_path.display())))?;
-    let root = raw.as_object().ok_or_else(|| ShimGuardrailConfigError::new("shim guardrail config root must be an object"))?;
-
-    let raw_required: &[Value] = match root.get("required_shims") {
-        Some(Value::Array(items)) => items,
-        Some(_) => return Err(ShimGuardrailConfigError::new("required_shims must be an array")),
-        None => &[],
-    };
-
-    let required = raw_required.iter().enumerate().map(|(index, item)| parse_required_shim(item, index)).collect::<Result<Vec<_>, _>>()?;
-    let duplicate_ids = find_duplicates(required.iter().map(|rule| rule.id.as_str()));
+    let duplicate_ids = find_duplicates(config.required_shims.iter().map(|rule| rule.id.as_str()));
     if !duplicate_ids.is_empty() {
         return Err(ShimGuardrailConfigError::new(format!("shim guardrail config defines duplicate ids: {}", duplicate_ids.join(", "))));
     }
 
-    Ok(ShimGuardrailConfig { required_shims: required })
+    Ok(config)
+}
+
+pub fn load_config(config_path: &Path) -> Result<ShimGuardrailConfig, ShimGuardrailConfigError> {
+    let raw_text = fs::read_to_string(config_path).map_err(|err| ShimGuardrailConfigError::new(format!("shim guardrail config not found: {}: {err}", config_path.display())))?;
+    let config: ShimGuardrailConfig = toml::from_str(&raw_text).map_err(|err| ShimGuardrailConfigError::new(format!("shim guardrail config is not valid toml: {}: {err}", config_path.display())))?;
+    validate_config(config)
 }
 
 fn find_duplicates<'a>(values: impl IntoIterator<Item = &'a str>) -> Vec<String> {
@@ -294,8 +281,19 @@ mod tests {
     #[test]
     fn load_config_requires_delete_by() {
         let temp_dir = tempdir().expect("tempdir");
-        let config_path = temp_dir.path().join("shim_guardrails.json");
-        fs::write(&config_path, r#"{"required_shims":[{"id":"demo-shim","path":"backend/src/example.rs","owner":"HeliOS","reason":"demo shim","replace_with":"delete it"}]}"#).expect("write config");
+        let config_path = temp_dir.path().join("shim_guardrails.toml");
+        fs::write(
+            &config_path,
+            r#"
+                [[required_shims]]
+                id = "demo-shim"
+                path = "backend/src/example.rs"
+                owner = "HeliOS"
+                reason = "demo shim"
+                replace_with = "delete it"
+            "#,
+        )
+        .expect("write config");
 
         let err = load_config(&config_path).expect_err("missing delete_by should fail");
         assert!(matches!(err, ShimGuardrailConfigError(message) if message.contains("delete_by")));

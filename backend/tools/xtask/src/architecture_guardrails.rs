@@ -1,12 +1,12 @@
 use std::fs;
 use std::path::Path;
 
-use serde_json::Value;
+use serde::Deserialize;
 use thiserror::Error;
 
-pub const DEFAULT_CONFIG_NAME: &str = "architecture_guardrails.json";
+pub const DEFAULT_CONFIG_NAME: &str = "architecture_guardrails.toml";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct LineLimitRule {
     pub path: String,
     pub max_lines: usize,
@@ -14,16 +14,18 @@ pub struct LineLimitRule {
     pub review_note: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct ForbiddenPathRule {
     pub path: String,
     pub owner: String,
     pub reason: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
 pub struct GuardrailConfig {
+    #[serde(default)]
     pub line_limits: Vec<LineLimitRule>,
+    #[serde(default)]
     pub forbidden_paths: Vec<ForbiddenPathRule>,
 }
 
@@ -44,65 +46,38 @@ impl GuardrailConfigError {
     }
 }
 
-fn require_non_empty_text(value: Option<&Value>, field_name: &str, context: &str) -> Result<String, GuardrailConfigError> {
-    match value {
-        Some(Value::String(text)) if !text.trim().is_empty() => Ok(text.trim().to_string()),
-        _ => Err(GuardrailConfigError::new(format!("{context} is missing required text field {field_name}"))),
+fn validate_non_empty_text(value: &str, field_name: &str, context: &str) -> Result<(), GuardrailConfigError> {
+    if value.trim().is_empty() {
+        return Err(GuardrailConfigError::new(format!("{context} is missing required text field {field_name}")));
     }
+    Ok(())
 }
 
-fn require_positive_usize(value: Option<&Value>, field_name: &str, context: &str) -> Result<usize, GuardrailConfigError> {
-    match value {
-        Some(Value::Number(number)) => number
-            .as_u64()
-            .filter(|value| *value > 0)
-            .and_then(|value| usize::try_from(value).ok())
-            .ok_or_else(|| GuardrailConfigError::new(format!("{context} has invalid positive integer field {field_name}"))),
-        _ => Err(GuardrailConfigError::new(format!("{context} has invalid positive integer field {field_name}"))),
+fn validate_config(config: GuardrailConfig) -> Result<GuardrailConfig, GuardrailConfigError> {
+    for (index, rule) in config.line_limits.iter().enumerate() {
+        let context = format!("line_limits[{index}]");
+        validate_non_empty_text(&rule.path, "path", &context)?;
+        if rule.max_lines == 0 {
+            return Err(GuardrailConfigError::new(format!("{context} has invalid positive integer field max_lines")));
+        }
+        validate_non_empty_text(&rule.owner, "owner", &context)?;
+        validate_non_empty_text(&rule.review_note, "review_note", &context)?;
     }
-}
 
-fn parse_line_limit_rule(raw: &Value, index: usize) -> Result<LineLimitRule, GuardrailConfigError> {
-    let context = format!("line_limits[{index}]");
-    let object = raw.as_object().ok_or_else(|| GuardrailConfigError::new(format!("{context} must be an object")))?;
-    Ok(LineLimitRule {
-        path: require_non_empty_text(object.get("path"), "path", &context)?,
-        max_lines: require_positive_usize(object.get("max_lines"), "max_lines", &context)?,
-        owner: require_non_empty_text(object.get("owner"), "owner", &context)?,
-        review_note: require_non_empty_text(object.get("review_note"), "review_note", &context)?,
-    })
-}
+    for (index, rule) in config.forbidden_paths.iter().enumerate() {
+        let context = format!("forbidden_paths[{index}]");
+        validate_non_empty_text(&rule.path, "path", &context)?;
+        validate_non_empty_text(&rule.owner, "owner", &context)?;
+        validate_non_empty_text(&rule.reason, "reason", &context)?;
+    }
 
-fn parse_forbidden_path_rule(raw: &Value, index: usize) -> Result<ForbiddenPathRule, GuardrailConfigError> {
-    let context = format!("forbidden_paths[{index}]");
-    let object = raw.as_object().ok_or_else(|| GuardrailConfigError::new(format!("{context} must be an object")))?;
-    Ok(ForbiddenPathRule {
-        path: require_non_empty_text(object.get("path"), "path", &context)?,
-        owner: require_non_empty_text(object.get("owner"), "owner", &context)?,
-        reason: require_non_empty_text(object.get("reason"), "reason", &context)?,
-    })
+    Ok(config)
 }
 
 pub fn load_config(config_path: &Path) -> Result<GuardrailConfig, GuardrailConfigError> {
     let raw_text = fs::read_to_string(config_path).map_err(|err| GuardrailConfigError::new(format!("guardrail config not found: {}: {err}", config_path.display())))?;
-    let raw: Value = serde_json::from_str(&raw_text).map_err(|err| GuardrailConfigError::new(format!("guardrail config is not valid json: {}: {err}", config_path.display())))?;
-    let root = raw.as_object().ok_or_else(|| GuardrailConfigError::new("guardrail config root must be an object"))?;
-
-    let raw_line_limits: &[Value] = match root.get("line_limits") {
-        Some(Value::Array(items)) => items,
-        Some(_) => return Err(GuardrailConfigError::new("line_limits must be an array")),
-        None => &[],
-    };
-    let raw_forbidden_paths: &[Value] = match root.get("forbidden_paths") {
-        Some(Value::Array(items)) => items,
-        Some(_) => return Err(GuardrailConfigError::new("forbidden_paths must be an array")),
-        None => &[],
-    };
-
-    Ok(GuardrailConfig {
-        line_limits: raw_line_limits.iter().enumerate().map(|(index, rule)| parse_line_limit_rule(rule, index)).collect::<Result<Vec<_>, _>>()?,
-        forbidden_paths: raw_forbidden_paths.iter().enumerate().map(|(index, rule)| parse_forbidden_path_rule(rule, index)).collect::<Result<Vec<_>, _>>()?,
-    })
+    let config: GuardrailConfig = toml::from_str(&raw_text).map_err(|err| GuardrailConfigError::new(format!("guardrail config is not valid toml: {}: {err}", config_path.display())))?;
+    validate_config(config)
 }
 
 fn count_lines(path: &Path) -> Result<usize, std::io::Error> {
@@ -170,8 +145,17 @@ mod tests {
     #[test]
     fn load_config_requires_review_note() {
         let temp_dir = tempdir().expect("tempdir");
-        let config_path = temp_dir.path().join("guardrails.json");
-        fs::write(&config_path, r#"{"line_limits":[{"path":"backend/src/example.rs","max_lines":10,"owner":"HeliOS"}]}"#).expect("write config");
+        let config_path = temp_dir.path().join("guardrails.toml");
+        fs::write(
+            &config_path,
+            r#"
+                [[line_limits]]
+                path = "backend/src/example.rs"
+                max_lines = 10
+                owner = "HeliOS"
+            "#,
+        )
+        .expect("write config");
 
         let err = load_config(&config_path).expect_err("missing review note should fail");
         assert!(matches!(err, GuardrailConfigError(message) if message.contains("review_note")));

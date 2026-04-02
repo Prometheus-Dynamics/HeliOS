@@ -1,0 +1,31 @@
+[[required_shims]]
+id = "streams-lifecycle-media-file-token-compat"
+path = "backend/src/helios-api/src/http/streams/validation.rs"
+owner = "HeliOS"
+delete_by = "2026-09-30"
+reason = "File-backed streams still sanitize the legacy media-file identity token so old persisted manifests remain startable."
+replace_with = "Drop media-file token coercion after persisted file-stream manifests have been migrated to stable alias and hardware-id fields."
+
+[[required_shims]]
+id = "streams-replay-calibration-guess-fallback"
+path = "backend/src/helios-api/src/http/streams/replay.rs"
+owner = "HeliOS"
+delete_by = "2026-12-31"
+reason = "Media replay still guesses calibration from the only live/persisted calibrated camera when old media lacks stream-id metadata."
+replace_with = "Require replay metadata to carry source stream identity and stop guessing calibration from unrelated cameras."
+
+[[required_shims]]
+id = "streams-replay-annexb-remux-compat-cache"
+path = "backend/src/helios-api/src/http/streams/replay.rs"
+owner = "HeliOS"
+delete_by = "2026-12-31"
+reason = "Replay still remuxes raw annex-b H264/H265 captures into MP4 as a compatibility bridge for older/offboard media archives."
+replace_with = "Standardize replay inputs on supported containerized media and remove the on-demand remux cache."
+
+[[required_shims]]
+id = "storage-temp-data-root-fallback"
+path = "backend/src/helios-api/src/http/storage/paths.rs"
+owner = "HeliOS"
+delete_by = "2026-09-30"
+reason = "helios-api still falls back to a temp data root when persistent partitions are unavailable during bring-up or tests."
+replace_with = "Require a mounted persistent data root outside of explicit test overrides and fail startup instead of silently degrading to tmp."
