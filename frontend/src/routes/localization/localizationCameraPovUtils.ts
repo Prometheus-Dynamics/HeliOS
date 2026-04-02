@@ -3,6 +3,7 @@ import type {
   LocalizationDetectionPose,
   LocalizationPoseSpace
 } from '$lib/features/localization/localizationConfig';
+import { isDeviceImuExternalStreamId } from '$lib/features/localization/externalSourceIds';
 import type { LocalizationPipelineSource } from '$lib/features/localization/pipelineSources';
 import {
   composeTransforms,
@@ -364,7 +365,7 @@ export const isImuSource = (source: LocalizationPipelineSource): boolean =>
 
 export const imuSourcePriority = (source: LocalizationPipelineSource): number => {
   if (source.streamId.startsWith('external:media-imu-')) return 0;
-  if (source.streamId === 'external:imu') return 1;
+  if (isDeviceImuExternalStreamId(source.streamId)) return 1;
   if (source.streamId.startsWith('external:') && hasImuToken(source.streamLabel)) return 2;
   return 3;
 };

@@ -27,6 +27,10 @@ import {
   mediaImuParentStreamIdForSource,
   profileColorForId
 } from '$lib/features/localization/utils';
+import {
+  hasDeviceImuExternalStreamPrefix,
+  isDeviceImuCameraUid
+} from '$lib/features/localization/externalSourceIds';
 import { pipelineGraphTotalMs } from '$lib/features/localization/page/localizationMetricsUtils';
 
 export type LocalizationBaseFrame = 'camera' | 'robot' | 'field';
@@ -293,10 +297,10 @@ export const buildViewerCameras = (options: {
     const outputKey = String(source.outputKey ?? '').trim().toLowerCase();
     const cameraUid = String(source.cameraUid ?? '').trim().toLowerCase();
     return (
-      streamId.startsWith('external:imu') ||
+      hasDeviceImuExternalStreamPrefix(streamId) ||
       streamId.startsWith('external:media-imu-') ||
       outputKey.includes('imu') ||
-      cameraUid === 'imu'
+      isDeviceImuCameraUid(cameraUid)
     );
   };
 
@@ -344,7 +348,7 @@ export const buildViewerCameras = (options: {
     const nonImuCameraUid =
       sources
         .map((source) => String(source.cameraUid ?? '').trim())
-        .find((cameraUid) => cameraUid.length > 0 && cameraUid.toLowerCase() !== 'imu') ?? null;
+        .find((cameraUid) => cameraUid.length > 0 && !isDeviceImuCameraUid(cameraUid)) ?? null;
     const cameraUid = nonImuCameraUid ?? (representative ? String(representative.cameraUid ?? '').trim() || null : null);
     const streamAlias =
       String(group.label ?? '').trim() ||

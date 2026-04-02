@@ -5,7 +5,11 @@ import { spawn } from 'child_process';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..', '..');
-const generatedPaths = ['frontend/src/lib/ts-bindings', 'backend/src/helios-engine/src/ipc/types/generated_codec_families.rs'];
+const generatedPaths = [
+  'frontend/src/lib/ts-bindings',
+  'backend/src/helios-engine/src/ipc/types/generated_codec_families.rs',
+  'backend/src/helios-engine/src/contracts/generated_runtime_contracts.rs'
+];
 
 function run(cmd, args, options = {}) {
   return new Promise((resolve, reject) => {

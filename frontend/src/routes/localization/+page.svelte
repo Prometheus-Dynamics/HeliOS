@@ -41,6 +41,7 @@
     isLocalizationImuSource,
     type LocalizationPipelineSource
   } from '$lib/features/localization/pipelineSources';
+  import { DEVICE_IMU_EXTERNAL_STREAM_ID } from '$lib/features/localization/externalSourceIds';
   import {
     fetchLocalizationProfilesExport,
     fetchLocalizationSolve,
@@ -478,7 +479,7 @@
     const fallbackDetectionSource = sources.find((source) => isLocalizationDetectionSource(source)) ?? null;
     const detectionSource = streamDetectionSource ?? fallbackDetectionSource;
     const imuSource =
-      sources.find((source) => source.streamId.startsWith('external:imu') && isLocalizationImuSource(source)) ??
+      sources.find((source) => source.streamId.startsWith(DEVICE_IMU_EXTERNAL_STREAM_ID) && isLocalizationImuSource(source)) ??
       sources.find((source) => isLocalizationImuSource(source)) ??
       null;
     const fieldMapId = fieldMaps[0]?.id ?? null;

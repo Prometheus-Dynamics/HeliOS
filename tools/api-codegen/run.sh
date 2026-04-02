@@ -56,4 +56,10 @@ log sync "Copying emitted specs into frontend bindings"
 cp "$HTTP_SPEC" "$HTTP_BINDINGS_DIR/openapi.json"
 cp "$WS_SPEC" "$WS_BINDINGS_DIR/asyncapi.json"
 
+log codec-families "Generating shared codec family bindings"
+(cd "$REPO_ROOT" && node "$SCRIPT_DIR/generate-codec-families.mjs")
+
+log runtime-contracts "Generating shared runtime contract bindings"
+(cd "$REPO_ROOT" && node "$SCRIPT_DIR/generate-runtime-contracts.mjs")
+
 log done "Artifacts written to $(realpath --relative-to="$REPO_ROOT" "$TS_BINDINGS_ROOT")"

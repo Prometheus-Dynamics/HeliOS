@@ -3,13 +3,22 @@ import { createDomainResource } from '$lib/api/domainResources';
 import { apiFetch, apiFetchCachedJson } from '$lib/api/core/http';
 import { cacheResourceData, type ResourceCacheContext, type ResourceCacheResult } from '$lib/api/resourceCache';
 import type {
+  LocalizationDetectionPose as GeneratedLocalizationDetectionPose,
   LocalizationCustomFieldOrigin as GeneratedLocalizationCustomFieldOrigin,
   LocalizationFieldOriginConfig as GeneratedLocalizationFieldOriginConfig,
   LocalizationFieldOriginMode as GeneratedLocalizationFieldOriginMode,
+  LocalizationPose as GeneratedLocalizationPose,
   LocalizationPoseSpace as GeneratedLocalizationPoseSpace,
   LocalizationProfilesExportEnvelope as GeneratedLocalizationProfilesExportEnvelope,
+  LocalizationSolveResponse as GeneratedLocalizationSolveResponse,
+  LocalizationSolveTimings as GeneratedLocalizationSolveTimings,
+  LocalizationSolverOutputs as GeneratedLocalizationSolverOutputs,
+  LocalizationSolverPose as GeneratedLocalizationSolverPose,
+  LocalizationSolverResult as GeneratedLocalizationSolverResult,
   LocalizationSolverMode as GeneratedLocalizationSolverMode,
   LocalizationSolverRuntimeTuningConfig as GeneratedLocalizationSolverRuntimeTuningConfig,
+  LocalizationSourcePose as GeneratedLocalizationSourcePose,
+  LocalizationSourceSampleStatus as GeneratedLocalizationSourceSampleStatus,
   LocalizationTemporalStabilizationConfig as GeneratedLocalizationTemporalStabilizationConfig
 } from '$lib/ts-bindings/http/client';
 
@@ -121,82 +130,15 @@ export const DEFAULT_FIELD_ORIGIN: LocalizationFieldOriginConfig = {
   custom: null
 };
 
-export type LocalizationSolveResponse = {
-  profileId: string;
-  solvers: LocalizationSolverResult[];
-  sources: LocalizationSourceSampleStatus[];
-  timings: LocalizationSolveTimings;
-};
-
-export type LocalizationSolveTimings = {
-  sourceFetchMs: number;
-  sourceParseMs: number;
-  solverMs: number;
-  engineMs: number;
-  totalMs: number;
-  cacheHit: boolean;
-};
-
-export type LocalizationSourceSampleStatus = {
-  sourceId: string;
-  streamId: string;
-  outputKey: string;
-  cameraUid: string;
-  detections: number;
-  pollMs: number;
-  tagSize?: number | null;
-  error?: string | null;
-};
-
-export type LocalizationSolverResult = {
-  id: string;
-  name: string;
-  mode: LocalizationSolverMode;
-  outputSpaces: LocalizationPoseSpace[];
-  outputs: LocalizationSolverOutputs;
-  errors: string[];
-};
-
-export type LocalizationSolverOutputs = {
-  tagInCamera?: LocalizationDetectionPose[];
-  cameraInTag?: LocalizationDetectionPose[];
-  tagInRobot?: LocalizationDetectionPose[];
-  robotInTag?: LocalizationDetectionPose[];
-  cameraInField?: LocalizationSourcePose[];
-  robotInField?: LocalizationSolverPose;
-};
-
-export type LocalizationDetectionPose = {
-  sourceId: string;
-  cameraUid: string;
-  tagId: number;
-  pose: LocalizationPose;
-  tagSize?: number | null;
-  codeRotation?: number | null;
-  tagBits?: { width: number; border: number; rows: string[] } | null;
-};
-
-export type LocalizationSourcePose = {
-  sourceId: string;
-  cameraUid: string;
-  weight: number;
-  pose: LocalizationPose;
-};
-
-export type LocalizationSolverPose = {
-  pose: LocalizationPose;
-  sourceIds: string[];
-};
-
-export type LocalizationPose = {
-  translation: { x: number; y: number; z: number };
-  rotation: {
-    roll: number;
-    pitch: number;
-    yaw: number;
-    quaternion: { x: number; y: number; z: number; w: number };
-  };
-};
+export type LocalizationSolveResponse = GeneratedLocalizationSolveResponse;
+export type LocalizationSolveTimings = GeneratedLocalizationSolveTimings;
+export type LocalizationSourceSampleStatus = GeneratedLocalizationSourceSampleStatus;
+export type LocalizationSolverResult = GeneratedLocalizationSolverResult;
+export type LocalizationSolverOutputs = GeneratedLocalizationSolverOutputs;
+export type LocalizationDetectionPose = GeneratedLocalizationDetectionPose;
+export type LocalizationSourcePose = GeneratedLocalizationSourcePose;
+export type LocalizationSolverPose = GeneratedLocalizationSolverPose;
+export type LocalizationPose = GeneratedLocalizationPose;
 
 export async function fetchLocalizationConfig(): Promise<LocalizationConfig>;
 export async function fetchLocalizationConfig(

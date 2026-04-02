@@ -1,6 +1,11 @@
 import type { PipelineDataType } from '$lib/types/pipeline';
 import { apiUrl } from '$lib/api/httpClient';
 import { apiFetch, apiFetchResponse } from '$lib/api/core/http';
+import {
+  DEVICE_IMU_EXTERNAL_SOURCE_ID,
+  hasDeviceImuExternalStreamPrefix,
+  isDeviceImuCameraUid
+} from '$lib/features/localization/externalSourceIds';
 import { extractGraphOutputPorts } from '$lib/features/pipelines/graphOutputPorts';
 import { extractGraphOutputPortTypes } from '$lib/features/pipelines/outputFilters';
 import { resolveStreamLabel } from '$lib/utils/streamLabels';
@@ -57,10 +62,11 @@ export const isLocalizationImuSource = (source: LocalizationPipelineSource): boo
   const outputKey = toLower(source.outputKey);
   const cameraUid = toLower(source.cameraUid);
   return (
-    streamId.startsWith('external:imu') ||
+    hasDeviceImuExternalStreamPrefix(streamId) ||
     outputKey.includes('imu_pose') ||
     outputKey.startsWith('imu_') ||
-    cameraUid === 'imu'
+    cameraUid === DEVICE_IMU_EXTERNAL_SOURCE_ID ||
+    isDeviceImuCameraUid(cameraUid)
   );
 };
 

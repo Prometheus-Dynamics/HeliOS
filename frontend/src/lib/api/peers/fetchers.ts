@@ -3,8 +3,11 @@ import { requestJson } from '$lib/api/pagePayload/request';
 import type {
   PeerDiscoveryResponse as ApiDiscoveryResponse,
   PeerInventoryResponse as ApiPeerListResponse,
+  PeerPipelineSyncResponse as ApiPeerPipelineSyncResponse,
   PeerProbeResponse as ApiPeerProbeResponse,
   PeerRegistrationResponse as ApiRegisterResponse,
+  PeerRemoteStreamSummary as ApiPeerRemoteStreamSummary,
+  PeerRemoteStreamsResponse as ApiPeerRemoteStreamsResponse,
   PeerRemovalResponse as ApiRemovalResponse,
   PhotonvisionDiscoverStreamsResponse as ApiPhotonvisionDiscoverStreamsResponse
 } from '$lib/ts-bindings/http/client';
@@ -34,52 +37,6 @@ import {
 import { normalizeStreamPreviewFormat } from '$lib/api/streamPreviewFormat';
 
 const API_PREFIX = '/v1/peers';
-
-type ApiPeerStreamOutputSummary = {
-  output_key?: string | null;
-  data_type?: unknown;
-};
-
-type ApiPeerRemoteRigPose = {
-  translation?: { x?: number; y?: number; z?: number } | null;
-  rotation?: { roll?: number; pitch?: number; yaw?: number } | null;
-  updated_at?: string | null;
-};
-
-type ApiPeerRemoteStreamSummary = {
-  peer_id?: string;
-  peer_alias?: string | null;
-  peer_kind?: string;
-  stream_ref?: string;
-  remote_stream_id?: string;
-  stream_alias?: string | null;
-  display_name?: string | null;
-  backend?: string | null;
-  state?: string | null;
-  active_pipeline_id?: string | null;
-  active_pipeline_output?: string | null;
-  camera_uid?: string | null;
-  pose?: ApiPeerRemoteRigPose | null;
-  outputs?: ApiPeerStreamOutputSummary[] | null;
-  imu_output_keys?: string[] | null;
-  preview_format?: unknown;
-  proxy_preview_url?: string;
-  proxy_frame_url?: string;
-  proxy_format_url?: string;
-};
-
-type ApiPeerRemoteStreamsResponse = {
-  streams?: ApiPeerRemoteStreamSummary[] | null;
-  errors?: Array<{ peer_id?: string; peer_alias?: string | null; error?: string | null }> | null;
-  fetched_at?: string | null;
-};
-
-type ApiPeerPipelineSyncResponse = {
-  peer_id?: string;
-  peer_alias?: string | null;
-  synced?: Array<{ remote_pipeline_id?: string; local_pipeline_id?: string; name?: string | null; updated?: boolean }> | null;
-  errors?: Array<string | null> | null;
-};
 
 export async function discoverPhotonvisionStreams(host: string, timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS): Promise<PhotonvisionDiscoverStreamsResponse> {
   const trimmed = host.trim();

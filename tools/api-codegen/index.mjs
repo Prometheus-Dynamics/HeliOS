@@ -5,6 +5,7 @@ import { mkdtemp, mkdir, rm, cp, readFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { spawn } from 'child_process';
 import { generateCodecFamilies } from './generate-codec-families.mjs';
+import { generateRuntimeContracts } from './generate-runtime-contracts.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -224,6 +225,8 @@ async function main() {
   await cp(wsSpec, path.join(wsBindingsDir, 'asyncapi.json'), { force: true });
   log('codec-families', 'Generating shared codec family bindings');
   await generateCodecFamilies();
+  log('runtime-contracts', 'Generating shared runtime contract bindings');
+  await generateRuntimeContracts();
   log('done', `Artifacts written to ${path.relative(repoRoot, tsBindingsRoot)}`);
 
   if (cleanupSpecDir) {
