@@ -334,7 +334,7 @@
       captureSessionId: stream.captureSessionId,
       captureSessionAlias: stream.captureSessionAlias,
       cameraUid: stream.cameraUid,
-      previewFormat: stream.previewFormat
+      previewFormat: stream.previewFormat === 'unknown' ? 'auto' : stream.previewFormat
     }))
   )());
 

@@ -6,6 +6,7 @@ export {
   discoverPeers,
   removePeer,
   fetchPeerStreams,
+  fetchPeerStreamFormat,
   syncPeerPipelines,
   testPeerEndpointJson,
 } from './peers/fetchers';

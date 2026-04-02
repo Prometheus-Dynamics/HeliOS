@@ -254,11 +254,7 @@ mod tests {
 
     #[test]
     fn stored_localization_config_document_serializes_current_schema_version() {
-        let raw = serde_json::to_value(StoredLocalizationConfigDocument {
-            schema_version: CURRENT_LOCALIZATION_CONFIG_SCHEMA_VERSION,
-            config: LocalizationConfig::default(),
-        })
-        .expect("encode");
+        let raw = serde_json::to_value(StoredLocalizationConfigDocument { schema_version: CURRENT_LOCALIZATION_CONFIG_SCHEMA_VERSION, config: LocalizationConfig::default() }).expect("encode");
 
         assert_eq!(raw.get("schema_version").and_then(serde_json::Value::as_u64), Some(u64::from(CURRENT_LOCALIZATION_CONFIG_SCHEMA_VERSION)));
     }

@@ -77,6 +77,27 @@ pub(crate) fn build_health_payload() -> HealthPayload {
     }
 }
 
+pub(crate) async fn build_runtime_streams_payload(state: &crate::http::AppState) -> RuntimeStreamsPayload {
+    let (resolved_streams, stale, revision) = state.services.streams.get_cached_streams_snapshot_with_revision(state).await;
+    let runtime = match state.engine.get_stream_runtime_capabilities_with_timeout(Duration::from_secs(2)).await {
+        Ok(runtime) => runtime,
+        Err(err) => match cached_stream_runtime_capabilities() {
+            Ok(runtime) => {
+                tracing::warn!(error = %err, "runtime stream snapshot using local runtime capability fallback");
+                runtime
+            }
+            Err(local_err) => {
+                tracing::warn!(error = %err, fallback_error = %local_err, "runtime stream snapshot using empty runtime capability fallback");
+                StreamRuntimeCapabilities { codecs: Vec::new(), default_encoder_id: None, default_decoder_ids_by_capture_format: Default::default() }
+            }
+        },
+    };
+    let capabilities = crate::http::streams::validation::stream_capabilities(&runtime);
+    let codecs = crate::http::streams::lifecycle::codec_inventory_from_runtime(runtime);
+
+    RuntimeStreamsPayload { capabilities, codecs, resolved_streams, stale, revision }
+}
+
 #[utoipa::path(
     get,
     path = "/health",
@@ -98,24 +119,7 @@ pub async fn health() -> Json<HealthPayload> {
     )
 )]
 pub async fn root_status(State(state): State<crate::http::AppState>) -> Response {
-    let (resolved_streams, stale, revision) = state.services.streams.get_cached_streams_snapshot_with_revision(&state).await;
-    let runtime = match state.engine.get_stream_runtime_capabilities_with_timeout(Duration::from_secs(2)).await {
-        Ok(runtime) => runtime,
-        Err(err) => match cached_stream_runtime_capabilities() {
-            Ok(runtime) => {
-                tracing::warn!(error = %err, "root status using local runtime capability fallback");
-                runtime
-            }
-            Err(local_err) => {
-                tracing::warn!(error = %err, fallback_error = %local_err, "root status using empty runtime capability fallback");
-                StreamRuntimeCapabilities { codecs: Vec::new(), default_encoder_id: None, default_decoder_ids_by_capture_format: Default::default() }
-            }
-        },
-    };
-    let capabilities = crate::http::streams::validation::stream_capabilities(&runtime);
-    let codecs = crate::http::streams::lifecycle::codec_inventory_from_runtime(runtime);
-
-    Json(RootStatusPayload { health: build_health_payload(), streams: RuntimeStreamsPayload { capabilities, codecs, resolved_streams, stale, revision } }).into_response()
+    Json(RootStatusPayload { health: build_health_payload(), streams: build_runtime_streams_payload(&state).await }).into_response()
 }
 
 #[cfg(test)]

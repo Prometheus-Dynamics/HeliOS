@@ -3004,6 +3004,7 @@ dependencies = [
  "futures",
  "hex",
  "lib-ipc",
+ "lib-runtime-policy",
  "lib-schema-migration",
  "lib-storage-layout",
  "lib-test",

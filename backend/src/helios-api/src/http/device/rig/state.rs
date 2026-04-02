@@ -16,12 +16,8 @@ struct StoredRobotDimensionsDocument {
     robot: RobotDimensions,
 }
 
-const ROBOT_DIMENSIONS_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan {
-    document_name: "robot dimensions document",
-    legacy_version: CURRENT_ROBOT_DIMENSIONS_SCHEMA_VERSION,
-    current_version: CURRENT_ROBOT_DIMENSIONS_SCHEMA_VERSION,
-    migrations: &[],
-};
+const ROBOT_DIMENSIONS_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> =
+    SyncSchemaPlan { document_name: "robot dimensions document", legacy_version: CURRENT_ROBOT_DIMENSIONS_SCHEMA_VERSION, current_version: CURRENT_ROBOT_DIMENSIONS_SCHEMA_VERSION, migrations: &[] };
 
 impl Default for RobotDimensions {
     fn default() -> Self {
@@ -67,13 +63,7 @@ where
         path,
         RobotDimensions::default(),
         |bytes| decode_robot_dimensions(bytes).map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err)),
-        |robot| {
-            serde_json::to_vec(&StoredRobotDimensionsDocument {
-                schema_version: CURRENT_ROBOT_DIMENSIONS_SCHEMA_VERSION,
-                robot: robot.clone(),
-            })
-            .map_err(std::io::Error::other)
-        },
+        |robot| serde_json::to_vec(&StoredRobotDimensionsDocument { schema_version: CURRENT_ROBOT_DIMENSIONS_SCHEMA_VERSION, robot: robot.clone() }).map_err(std::io::Error::other),
         updater,
     )
     .await

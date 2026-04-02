@@ -11,7 +11,7 @@ mod storage_metrics;
 mod streams;
 
 pub(crate) use self::freshness::ReadModelSnapshot;
-pub use self::freshness::{ReadModelFreshness, ReadModelFreshnessState};
+pub use self::freshness::{ReadModelFreshness, ReadModelFreshnessReason, ReadModelFreshnessState};
 pub use self::realtime::{DevicesUpdateReason, ProcessSample, SharedDevicesUpdate, SharedProcessesSnapshot};
 pub use self::state::SystemReadModelState;
 pub use self::streams::{SharedStreamMetricsSnapshot, SharedStreamOutputSample, SharedStreamOutputsEvent, SharedStreamOutputsPortsSnapshot};

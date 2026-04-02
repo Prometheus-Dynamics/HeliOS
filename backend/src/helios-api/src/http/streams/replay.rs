@@ -271,8 +271,7 @@ async fn resolve_replay_calibration(state: &AppState, source_stream_id: Option<U
         if manifest.internal {
             continue;
         }
-        let matches =
-            manifest.identity.id == Some(source_stream_id) || record.last_stream_id == Some(source_stream_id) || streams_persist::derived_stream_id(&record.camera_id) == source_stream_id;
+        let matches = manifest.identity.id == Some(source_stream_id) || record.last_stream_id == Some(source_stream_id) || streams_persist::derived_stream_id(&record.camera_id) == source_stream_id;
         if !matches {
             continue;
         }

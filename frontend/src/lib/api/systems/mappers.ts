@@ -1,4 +1,11 @@
-import type { ImuAxes, ImuOptions, ImuStatus, I2cInventory } from '$lib/types/systems';
+import type {
+  ImuAxes,
+  ImuOptions,
+  ImuStatus,
+  I2cInventory,
+  PlatformFamily,
+  SystemsRuntimeSnapshot
+} from '$lib/types/systems';
 import type { I2cInventory as I2cInventoryPayload, ImuStatusPayload } from '$lib/ts-bindings/http/client';
 
 export type I2cInventoryResponse = I2cInventoryPayload;
@@ -94,6 +101,316 @@ export function emptyImuStatus(): ImuStatus {
 
 export function emptyImuOptions(): ImuOptions {
   return { fusion: [], range: [], intervalsMs: [] };
+}
+
+type DeviceRuntimeResponse = {
+  platform?: {
+    family?: string | null;
+    model?: string | null;
+    architecture?: string | null;
+  } | null;
+  capabilities?: {
+    logs?: boolean | null;
+    console?: boolean | null;
+    processes?: boolean | null;
+    sensors?: boolean | null;
+    i2c?: boolean | null;
+    imu?: boolean | null;
+    updater?: boolean | null;
+    resource_guard?: boolean | null;
+    active_root?: boolean | null;
+  } | null;
+  policies?: {
+    log_filter?: string | null;
+    api_tokio?: RuntimeTokioPolicyResponse | null;
+    engine_tokio?: RuntimeTokioPolicyResponse | null;
+    peripherals_tokio?: RuntimeTokioPolicyResponse | null;
+    startup_cache_warm?: {
+      initial_delay_ms?: number | null;
+      retry_delay_ms?: number | null;
+      attempts?: number | null;
+    } | null;
+    log_sources?: {
+      cache_ms?: number | null;
+      refresh_timeout_ms?: number | null;
+    } | null;
+    i2c_inventory?: {
+      timeout_ms?: number | null;
+      cache_ttl_ms?: number | null;
+    } | null;
+    imu?: {
+      idle_interval_ms?: number | null;
+    } | null;
+    resource_guard?: {
+      enabled?: boolean | null;
+      poll_ms?: number | null;
+      mem_low_kb?: number | null;
+      mem_recover_kb?: number | null;
+      cooldown_ms?: number | null;
+      metrics_top_n?: number | null;
+      metrics_timeout_ms?: number | null;
+      allow_stop_fallback?: boolean | null;
+      stop_timeout_ms?: number | null;
+    } | null;
+    styx_capture?: {
+      queue_depth?: number | null;
+      pool_min?: number | null;
+      pool_bytes?: number | null;
+      pool_spare?: number | null;
+      any_overridden?: boolean | null;
+    } | null;
+  } | null;
+  observability?: {
+    health?: {
+      ok?: boolean | null;
+      server_time_ms?: number | null;
+      uptime_ms?: number | null;
+      version?: string | null;
+      features?: {
+        shadow_recorder?: boolean | null;
+        pipeline_registry_startup_warm?: boolean | null;
+        pipeline_registry_prefetch?: boolean | null;
+      } | null;
+      dependencies?: {
+        api_tools_helper?: {
+          ok?: boolean | null;
+          path?: string | null;
+        } | null;
+      } | null;
+    } | null;
+    streams?: {
+      stale?: boolean | null;
+      revision?: number | null;
+      codecs?: Array<unknown> | null;
+      resolved_streams?: Array<unknown> | null;
+    } | null;
+    os?: {
+      version_id?: string | null;
+      build_id?: string | null;
+      pretty_name?: string | null;
+      active_root?: string | null;
+    } | null;
+    resource_guard?: {
+      enabled?: boolean | null;
+      pressure_active?: boolean | null;
+      degraded_streams?: Array<unknown> | null;
+      recent_actions?: Array<unknown> | null;
+      last_mem_available_kb?: number | null;
+    } | null;
+    log_source_count?: number | null;
+    log_sources_freshness?: {
+      state?: string | null;
+      reason?: string | null;
+      observed_at_ms?: number | null;
+      last_success_at_ms?: number | null;
+    } | null;
+    log_sources_revision?: number | null;
+  } | null;
+};
+
+type RuntimeTokioPolicyResponse = {
+  worker_threads?: number | null;
+  max_blocking_threads?: number | null;
+  thread_stack_bytes?: number | null;
+  blocking_keep_alive_ms?: number | null;
+};
+
+export function emptySystemsRuntime(): SystemsRuntimeSnapshot {
+  return {
+    platform: {
+      family: 'unknown',
+      model: null,
+      architecture: 'unknown'
+    },
+    capabilities: {
+      logs: true,
+      console: true,
+      processes: true,
+      sensors: false,
+      i2c: false,
+      imu: false,
+      updater: false,
+      resourceGuard: true,
+      activeRoot: false
+    },
+    policies: {
+      logFilter: 'info',
+      apiTokio: { workerThreads: 0, maxBlockingThreads: 0, threadStackBytes: null, blockingKeepAliveMs: null },
+      engineTokio: { workerThreads: 0, maxBlockingThreads: 0, threadStackBytes: null, blockingKeepAliveMs: null },
+      peripheralsTokio: { workerThreads: 0, maxBlockingThreads: 0, threadStackBytes: null, blockingKeepAliveMs: null },
+      startupCacheWarm: { initialDelayMs: 0, retryDelayMs: 0, attempts: 0 },
+      logSources: { cacheMs: 0, refreshTimeoutMs: 0 },
+      i2cInventory: { timeoutMs: 0, cacheTtlMs: 0 },
+      imu: { idleIntervalMs: 0 },
+      resourceGuard: {
+        enabled: false,
+        pollMs: 0,
+        memLowKb: 0,
+        memRecoverKb: 0,
+        cooldownMs: 0,
+        metricsTopN: 0,
+        metricsTimeoutMs: 0,
+        allowStopFallback: false,
+        stopTimeoutMs: 0
+      },
+      styxCapture: {
+        queueDepth: null,
+        poolMin: null,
+        poolBytes: null,
+        poolSpare: null,
+        anyOverridden: false
+      }
+    },
+    observability: {
+      health: {
+        ok: false,
+        serverTimeMs: 0,
+        uptimeMs: 0,
+        version: '',
+        shadowRecorder: false,
+        pipelineRegistryStartupWarm: false,
+        pipelineRegistryPrefetch: false,
+        apiToolsHelperOk: false,
+        apiToolsHelperPath: ''
+      },
+      streams: {
+        streamCount: 0,
+        codecCount: 0,
+        stale: true,
+        revision: 0
+      },
+      os: {
+        versionId: null,
+        buildId: null,
+        prettyName: null,
+        activeRoot: null
+      },
+      resourceGuard: {
+        enabled: false,
+        pressureActive: false,
+        degradedStreamCount: 0,
+        recentActionCount: 0,
+        lastMemAvailableKb: null
+      },
+      logSourceCount: 0,
+      logSourcesFreshness: {
+        state: 'unavailable',
+        reason: 'refresh_error',
+        observedAtMs: 0,
+        lastSuccessAtMs: null
+      },
+      logSourcesRevision: 0
+    }
+  };
+}
+
+export function mapSystemsRuntime(payload: DeviceRuntimeResponse | null): SystemsRuntimeSnapshot {
+  const fallback = emptySystemsRuntime();
+  if (!payload) return fallback;
+
+  const health = payload.observability?.health;
+  const streams = payload.observability?.streams;
+  const logHelper = health?.dependencies?.api_tools_helper;
+  const resourceGuard = payload.observability?.resource_guard;
+
+  return {
+    platform: {
+      family: normalizePlatformFamily(payload.platform?.family),
+      model: trimOrNull(payload.platform?.model),
+      architecture: trimOrNull(payload.platform?.architecture) ?? fallback.platform.architecture
+    },
+    capabilities: {
+      logs: Boolean(payload.capabilities?.logs ?? fallback.capabilities.logs),
+      console: Boolean(payload.capabilities?.console ?? fallback.capabilities.console),
+      processes: Boolean(payload.capabilities?.processes ?? fallback.capabilities.processes),
+      sensors: Boolean(payload.capabilities?.sensors),
+      i2c: Boolean(payload.capabilities?.i2c),
+      imu: Boolean(payload.capabilities?.imu),
+      updater: Boolean(payload.capabilities?.updater),
+      resourceGuard: Boolean(payload.capabilities?.resource_guard ?? fallback.capabilities.resourceGuard),
+      activeRoot: Boolean(payload.capabilities?.active_root)
+    },
+    policies: {
+      logFilter: trimOrNull(payload.policies?.log_filter) ?? fallback.policies.logFilter,
+      apiTokio: mapTokioRuntimePolicy(payload.policies?.api_tokio),
+      engineTokio: mapTokioRuntimePolicy(payload.policies?.engine_tokio),
+      peripheralsTokio: mapTokioRuntimePolicy(payload.policies?.peripherals_tokio),
+      startupCacheWarm: {
+        initialDelayMs: finiteOrDefault(payload.policies?.startup_cache_warm?.initial_delay_ms, 0),
+        retryDelayMs: finiteOrDefault(payload.policies?.startup_cache_warm?.retry_delay_ms, 0),
+        attempts: finiteOrDefault(payload.policies?.startup_cache_warm?.attempts, 0)
+      },
+      logSources: {
+        cacheMs: finiteOrDefault(payload.policies?.log_sources?.cache_ms, 0),
+        refreshTimeoutMs: finiteOrDefault(payload.policies?.log_sources?.refresh_timeout_ms, 0)
+      },
+      i2cInventory: {
+        timeoutMs: finiteOrDefault(payload.policies?.i2c_inventory?.timeout_ms, 0),
+        cacheTtlMs: finiteOrDefault(payload.policies?.i2c_inventory?.cache_ttl_ms, 0)
+      },
+      imu: {
+        idleIntervalMs: finiteOrDefault(payload.policies?.imu?.idle_interval_ms, 0)
+      },
+      resourceGuard: {
+        enabled: Boolean(payload.policies?.resource_guard?.enabled),
+        pollMs: finiteOrDefault(payload.policies?.resource_guard?.poll_ms, 0),
+        memLowKb: finiteOrDefault(payload.policies?.resource_guard?.mem_low_kb, 0),
+        memRecoverKb: finiteOrDefault(payload.policies?.resource_guard?.mem_recover_kb, 0),
+        cooldownMs: finiteOrDefault(payload.policies?.resource_guard?.cooldown_ms, 0),
+        metricsTopN: finiteOrDefault(payload.policies?.resource_guard?.metrics_top_n, 0),
+        metricsTimeoutMs: finiteOrDefault(payload.policies?.resource_guard?.metrics_timeout_ms, 0),
+        allowStopFallback: Boolean(payload.policies?.resource_guard?.allow_stop_fallback),
+        stopTimeoutMs: finiteOrDefault(payload.policies?.resource_guard?.stop_timeout_ms, 0)
+      },
+      styxCapture: {
+        queueDepth: finiteOrNull(payload.policies?.styx_capture?.queue_depth),
+        poolMin: finiteOrNull(payload.policies?.styx_capture?.pool_min),
+        poolBytes: finiteOrNull(payload.policies?.styx_capture?.pool_bytes),
+        poolSpare: finiteOrNull(payload.policies?.styx_capture?.pool_spare),
+        anyOverridden: Boolean(payload.policies?.styx_capture?.any_overridden)
+      }
+    },
+    observability: {
+      health: {
+        ok: Boolean(health?.ok),
+        serverTimeMs: finiteOrDefault(health?.server_time_ms, 0),
+        uptimeMs: finiteOrDefault(health?.uptime_ms, 0),
+        version: trimOrNull(health?.version) ?? '',
+        shadowRecorder: Boolean(health?.features?.shadow_recorder),
+        pipelineRegistryStartupWarm: Boolean(health?.features?.pipeline_registry_startup_warm),
+        pipelineRegistryPrefetch: Boolean(health?.features?.pipeline_registry_prefetch),
+        apiToolsHelperOk: Boolean(logHelper?.ok),
+        apiToolsHelperPath: trimOrNull(logHelper?.path) ?? ''
+      },
+      streams: {
+        streamCount: Array.isArray(streams?.resolved_streams) ? streams.resolved_streams.length : 0,
+        codecCount: Array.isArray(streams?.codecs) ? streams.codecs.length : 0,
+        stale: Boolean(streams?.stale ?? true),
+        revision: finiteOrDefault(streams?.revision, 0)
+      },
+      os: {
+        versionId: trimOrNull(payload.observability?.os?.version_id),
+        buildId: trimOrNull(payload.observability?.os?.build_id),
+        prettyName: trimOrNull(payload.observability?.os?.pretty_name),
+        activeRoot: trimOrNull(payload.observability?.os?.active_root)
+      },
+      resourceGuard: {
+        enabled: Boolean(resourceGuard?.enabled),
+        pressureActive: Boolean(resourceGuard?.pressure_active),
+        degradedStreamCount: Array.isArray(resourceGuard?.degraded_streams) ? resourceGuard.degraded_streams.length : 0,
+        recentActionCount: Array.isArray(resourceGuard?.recent_actions) ? resourceGuard.recent_actions.length : 0,
+        lastMemAvailableKb: finiteOrNull(resourceGuard?.last_mem_available_kb)
+      },
+      logSourceCount: finiteOrDefault(payload.observability?.log_source_count, 0),
+      logSourcesFreshness: {
+        state: trimOrNull(payload.observability?.log_sources_freshness?.state) ?? fallback.observability.logSourcesFreshness.state,
+        reason: trimOrNull(payload.observability?.log_sources_freshness?.reason) ?? fallback.observability.logSourcesFreshness.reason,
+        observedAtMs: finiteOrDefault(payload.observability?.log_sources_freshness?.observed_at_ms, 0),
+        lastSuccessAtMs: finiteOrNull(payload.observability?.log_sources_freshness?.last_success_at_ms)
+      },
+      logSourcesRevision: finiteOrDefault(payload.observability?.log_sources_revision, 0)
+    }
+  };
 }
 
 export function mapImuStatus(payload: ImuStatusPayload | null): ImuStatus {
@@ -226,6 +543,15 @@ function finiteOrDefault(value: number | null | undefined, fallback: number): nu
   return Number.isFinite(value) ? (value as number) : fallback;
 }
 
+function mapTokioRuntimePolicy(payload: RuntimeTokioPolicyResponse | null | undefined) {
+  return {
+    workerThreads: finiteOrDefault(payload?.worker_threads, 0),
+    maxBlockingThreads: finiteOrDefault(payload?.max_blocking_threads, 0),
+    threadStackBytes: finiteOrNull(payload?.thread_stack_bytes),
+    blockingKeepAliveMs: finiteOrNull(payload?.blocking_keep_alive_ms)
+  };
+}
+
 function trimOrNull(value: string | null | undefined): string | null {
   if (typeof value !== 'string') {
     return null;
@@ -239,6 +565,17 @@ function finiteOrNull(value: number | null | undefined): number | null {
     return null;
   }
   return value;
+}
+
+function normalizePlatformFamily(value: string | null | undefined): PlatformFamily {
+  switch ((value ?? '').trim().toLowerCase()) {
+    case 'raspberry_pi':
+      return 'raspberry_pi';
+    case 'generic_linux':
+      return 'generic_linux';
+    default:
+      return 'unknown';
+  }
 }
 
 function vectorNorm(axes: ImuAxes): number {

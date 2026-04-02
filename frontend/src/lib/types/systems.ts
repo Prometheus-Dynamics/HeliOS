@@ -131,6 +131,140 @@ export type LogStreamEntry = {
   retentionCount: number;
 };
 
+export type PlatformFamily = 'raspberry_pi' | 'generic_linux' | 'unknown';
+
+export type SystemsPlatformIdentity = {
+  family: PlatformFamily;
+  model: string | null;
+  architecture: string;
+};
+
+export type SystemsCapabilitySnapshot = {
+  logs: boolean;
+  console: boolean;
+  processes: boolean;
+  sensors: boolean;
+  i2c: boolean;
+  imu: boolean;
+  updater: boolean;
+  resourceGuard: boolean;
+  activeRoot: boolean;
+};
+
+export type SystemsTokioRuntimePolicy = {
+  workerThreads: number;
+  maxBlockingThreads: number;
+  threadStackBytes: number | null;
+  blockingKeepAliveMs: number | null;
+};
+
+export type SystemsStartupCacheWarmPolicy = {
+  initialDelayMs: number;
+  retryDelayMs: number;
+  attempts: number;
+};
+
+export type SystemsLogSourcesPolicy = {
+  cacheMs: number;
+  refreshTimeoutMs: number;
+};
+
+export type SystemsI2cInventoryPolicy = {
+  timeoutMs: number;
+  cacheTtlMs: number;
+};
+
+export type SystemsImuRuntimePolicy = {
+  idleIntervalMs: number;
+};
+
+export type SystemsResourceGuardPolicy = {
+  enabled: boolean;
+  pollMs: number;
+  memLowKb: number;
+  memRecoverKb: number;
+  cooldownMs: number;
+  metricsTopN: number;
+  metricsTimeoutMs: number;
+  allowStopFallback: boolean;
+  stopTimeoutMs: number;
+};
+
+export type SystemsStyxCaptureTunables = {
+  queueDepth: number | null;
+  poolMin: number | null;
+  poolBytes: number | null;
+  poolSpare: number | null;
+  anyOverridden: boolean;
+};
+
+export type SystemsRuntimePolicies = {
+  logFilter: string;
+  apiTokio: SystemsTokioRuntimePolicy;
+  engineTokio: SystemsTokioRuntimePolicy;
+  peripheralsTokio: SystemsTokioRuntimePolicy;
+  startupCacheWarm: SystemsStartupCacheWarmPolicy;
+  logSources: SystemsLogSourcesPolicy;
+  i2cInventory: SystemsI2cInventoryPolicy;
+  imu: SystemsImuRuntimePolicy;
+  resourceGuard: SystemsResourceGuardPolicy;
+  styxCapture: SystemsStyxCaptureTunables;
+};
+
+export type SystemsLogSourcesFreshness = {
+  state: string;
+  reason: string;
+  observedAtMs: number;
+  lastSuccessAtMs: number | null;
+};
+
+export type SystemsObservabilityHealth = {
+  ok: boolean;
+  serverTimeMs: number;
+  uptimeMs: number;
+  version: string;
+  shadowRecorder: boolean;
+  pipelineRegistryStartupWarm: boolean;
+  pipelineRegistryPrefetch: boolean;
+  apiToolsHelperOk: boolean;
+  apiToolsHelperPath: string;
+};
+
+export type SystemsObservabilityStreams = {
+  streamCount: number;
+  codecCount: number;
+  stale: boolean;
+  revision: number;
+};
+
+export type SystemsRuntimeObservability = {
+  health: SystemsObservabilityHealth;
+  streams: SystemsObservabilityStreams;
+  os: {
+    versionId: string | null;
+    buildId: string | null;
+    prettyName: string | null;
+    activeRoot: string | null;
+  };
+  resourceGuard: {
+    enabled: boolean;
+    pressureActive: boolean;
+    degradedStreamCount: number;
+    recentActionCount: number;
+    lastMemAvailableKb: number | null;
+  };
+  logSourceCount: number;
+  logSourcesFreshness: SystemsLogSourcesFreshness;
+  logSourcesRevision: number;
+};
+
+export type SystemsRuntimeSnapshot = {
+  platform: SystemsPlatformIdentity;
+  capabilities: SystemsCapabilitySnapshot;
+  policies: SystemsRuntimePolicies;
+  observability: SystemsRuntimeObservability;
+};
+
 export type I2cBus = {
   bus: number;
   adapter: string;
@@ -157,6 +291,7 @@ export type I2cInventory = {
 
 export type SystemsPageErrors = {
   logs?: string | null;
+  runtime?: string | null;
   i2c?: string | null;
   imu?: string | null;
 };
@@ -168,6 +303,7 @@ export type SystemsPageData = {
   sessions: CaptureSessionSummary[];
   rig: RigLayout;
   logs: LogStreamEntry[];
+  runtime: SystemsRuntimeSnapshot;
   i2cInventory: I2cInventory;
   imu: ImuStatus;
   fetchedAt: number;

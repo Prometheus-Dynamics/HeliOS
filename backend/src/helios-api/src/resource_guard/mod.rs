@@ -14,7 +14,7 @@ use tokio::sync::{mpsc, oneshot};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use self::system::{env_flag, env_u64, env_usize};
+use lib_runtime_policy::HELIOS_RESOURCE_GUARD_POLICY;
 
 pub use runtime::{restore_stream, snapshot, spawn_resource_guard_task};
 
@@ -100,18 +100,17 @@ struct GuardConfig {
 
 impl GuardConfig {
     fn from_env() -> Self {
-        let mem_low_kb = env_u64("HELIOS_RESOURCE_GUARD_MEM_LOW_KB", 700_000).max(64 * 1024);
-        let mem_recover_kb = env_u64("HELIOS_RESOURCE_GUARD_MEM_RECOVER_KB", mem_low_kb.saturating_add(300_000)).max(mem_low_kb.saturating_add(64 * 1024));
+        let resolved = HELIOS_RESOURCE_GUARD_POLICY.resolve();
         Self {
-            enabled: env_flag("HELIOS_RESOURCE_GUARD_ENABLED", true),
-            poll_ms: env_u64("HELIOS_RESOURCE_GUARD_POLL_MS", 1500).max(250),
-            mem_low_kb,
-            mem_recover_kb,
-            cooldown_ms: env_u64("HELIOS_RESOURCE_GUARD_COOLDOWN_MS", 5000).max(500),
-            metrics_top_n: env_usize("HELIOS_RESOURCE_GUARD_METRICS_TOP_N", 6).clamp(1, 24),
-            metrics_timeout_ms: env_u64("HELIOS_RESOURCE_GUARD_METRICS_TIMEOUT_MS", 300).max(50),
-            allow_stop_fallback: env_flag("HELIOS_RESOURCE_GUARD_ALLOW_STOP_FALLBACK", false),
-            stop_timeout_ms: env_u64("HELIOS_RESOURCE_GUARD_STOP_TIMEOUT_MS", 4000).max(500),
+            enabled: resolved.enabled,
+            poll_ms: resolved.poll_ms,
+            mem_low_kb: resolved.mem_low_kb,
+            mem_recover_kb: resolved.mem_recover_kb,
+            cooldown_ms: resolved.cooldown_ms,
+            metrics_top_n: resolved.metrics_top_n,
+            metrics_timeout_ms: resolved.metrics_timeout_ms,
+            allow_stop_fallback: resolved.allow_stop_fallback,
+            stop_timeout_ms: resolved.stop_timeout_ms,
         }
     }
 }

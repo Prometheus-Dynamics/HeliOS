@@ -5,7 +5,7 @@ use std::time::Duration;
 use clap::{ArgAction, Parser};
 use helios_peripherals::{ImuRange, SensorsConfig, SensorsRuntime, SensorsService};
 use lib_ipc::types::ProtocolVersion;
-use lib_runtime_policy::HELIOS_PERIPHERALS_TOKIO_POLICY;
+use lib_runtime_policy::{HELIOS_LOG_FILTER_POLICY, HELIOS_PERIPHERALS_TOKIO_POLICY};
 use serde_json::Value as JsonValue;
 use tokio::time::{Duration as TokioDuration, timeout};
 use tokio_util::sync::CancellationToken;
@@ -230,7 +230,7 @@ fn json_value_to_map(value: &JsonValue) -> Option<Vec<(String, String)>> {
 fn init_tracing() {
     use tracing_subscriber::EnvFilter;
 
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter = EnvFilter::try_new(HELIOS_LOG_FILTER_POLICY.resolve()).unwrap_or_else(|_| EnvFilter::new("info"));
     let running_under_systemd = std::env::var_os("JOURNAL_STREAM").is_some() || std::env::var_os("INVOCATION_ID").is_some();
 
     let fmt = tracing_subscriber::fmt().with_env_filter(env_filter).with_ansi(!running_under_systemd);

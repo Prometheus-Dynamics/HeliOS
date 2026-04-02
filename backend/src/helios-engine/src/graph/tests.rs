@@ -248,10 +248,7 @@ fn sync_graph_node_port_declarations_rejects_plus_suffix_fanin_names() {
     });
     let mut graph: daedalus::planner::Graph = serde_json::from_value(graph_json).expect("graph parse");
 
-    let desc = NodeDescriptorBuilder::new("cv:test:fanin")
-        .fanin_input("sources", 0, TypeExpr::scalar(daedalus::data::model::ValueType::Int))
-        .build()
-        .expect("descriptor build");
+    let desc = NodeDescriptorBuilder::new("cv:test:fanin").fanin_input("sources", 0, TypeExpr::scalar(daedalus::data::model::ValueType::Int)).build().expect("descriptor build");
 
     let mut registry = PluginRegistry::new();
     registry.registry.register_node(desc).expect("descriptor register");

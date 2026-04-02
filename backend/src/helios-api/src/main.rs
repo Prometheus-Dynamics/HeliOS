@@ -38,7 +38,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use lib_runtime_policy::HELIOS_API_TOKIO_POLICY;
+use lib_runtime_policy::{HELIOS_API_STARTUP_CACHE_WARM_POLICY, HELIOS_API_TOKIO_POLICY, HELIOS_LOG_FILTER_POLICY};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::time::{Duration, sleep};
@@ -68,32 +68,11 @@ fn main() {
     runtime.block_on(async_main());
 }
 
-fn startup_cache_warm_delay() -> Duration {
-    std::env::var("HELIOS_STARTUP_CACHE_WARM_DELAY_MS")
-        .ok()
-        .and_then(|value| value.trim().parse::<u64>().ok())
-        .map(Duration::from_millis)
-        .map(|duration| duration.clamp(Duration::from_millis(0), Duration::from_secs(30)))
-        .unwrap_or_else(|| Duration::from_millis(1500))
-}
-
-fn startup_cache_warm_retry_delay() -> Duration {
-    std::env::var("HELIOS_STARTUP_CACHE_WARM_RETRY_MS")
-        .ok()
-        .and_then(|value| value.trim().parse::<u64>().ok())
-        .map(Duration::from_millis)
-        .map(|duration| duration.clamp(Duration::from_millis(100), Duration::from_secs(30)))
-        .unwrap_or_else(|| Duration::from_millis(1000))
-}
-
-fn startup_cache_warm_attempts() -> usize {
-    std::env::var("HELIOS_STARTUP_CACHE_WARM_ATTEMPTS").ok().and_then(|value| value.trim().parse::<usize>().ok()).unwrap_or(4).clamp(1, 10)
-}
-
 fn spawn_startup_read_model_warm(state: http::AppState) {
-    let initial_delay = startup_cache_warm_delay();
-    let retry_delay = startup_cache_warm_retry_delay();
-    let attempts = startup_cache_warm_attempts();
+    let policy = HELIOS_API_STARTUP_CACHE_WARM_POLICY.resolve();
+    let initial_delay = Duration::from_millis(policy.initial_delay_ms);
+    let retry_delay = Duration::from_millis(policy.retry_delay_ms);
+    let attempts = policy.attempts;
     tokio::spawn(async move {
         if !initial_delay.is_zero() {
             sleep(initial_delay).await;
@@ -347,7 +326,7 @@ fn console_child() -> ! {
 fn init_tracing() {
     use tracing_subscriber::EnvFilter;
 
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter = EnvFilter::try_new(HELIOS_LOG_FILTER_POLICY.resolve()).unwrap_or_else(|_| EnvFilter::new("info"));
     let running_under_systemd = std::env::var_os("JOURNAL_STREAM").is_some() || std::env::var_os("INVOCATION_ID").is_some();
 
     let fmt = tracing_subscriber::fmt().with_env_filter(env_filter).with_ansi(!running_under_systemd);

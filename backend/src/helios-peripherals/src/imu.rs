@@ -4,6 +4,7 @@ use std::sync::{
 };
 use std::time::Instant;
 
+use lib_runtime_policy::HELIOS_IMU_RUNTIME_POLICY;
 use lib_sensors::imu::{ImuDevice, ImuFusionState, ImuProbeConfig, ImuSources};
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
@@ -20,8 +21,7 @@ const IMU_DETECT_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 const IMU_MAX_CONSECUTIVE_SAMPLE_ERRORS: usize = 10;
 
 fn idle_imu_update_interval() -> Duration {
-    let ms = std::env::var("HELIOS_IMU_IDLE_INTERVAL_MS").ok().and_then(|raw| raw.parse::<u64>().ok()).unwrap_or(100).clamp(20, 5_000);
-    Duration::from_millis(ms)
+    Duration::from_millis(HELIOS_IMU_RUNTIME_POLICY.resolve().idle_interval_ms)
 }
 
 fn effective_imu_update_interval(active_interval: Duration, idle_interval: Duration, has_live_subscribers: bool) -> Duration {

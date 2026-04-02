@@ -1,6 +1,6 @@
 import type { PageLoad } from './$types';
 import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rigDefaults';
-import { emptyImuStatus, fetchSystemsPageData } from '$lib/api/systemsPage';
+import { emptyImuStatus, emptySystemsRuntime, fetchSystemsPageData } from '$lib/api/systemsPage';
 import type { SystemsPageData } from '$lib/types/systems';
 
 type SystemsPageLoadResult = {
@@ -17,12 +17,14 @@ const EMPTY_PAYLOAD: SystemsPageData = {
     cameras: []
   },
   logs: [],
+  runtime: emptySystemsRuntime(),
   i2cInventory: { buses: [], devices: [] },
   imu: emptyImuStatus(),
   fetchedAt: 0,
   errorMessage: 'Systems data unavailable',
   errors: {
     logs: null,
+    runtime: null,
     i2c: null,
     imu: null
   }

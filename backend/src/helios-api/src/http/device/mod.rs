@@ -14,6 +14,7 @@ pub mod power;
 pub mod resource_guard;
 pub mod restart;
 pub mod rig;
+pub mod runtime;
 pub mod snapshots;
 pub mod usb_power;
 
@@ -64,6 +65,7 @@ pub fn router() -> Router<AppState> {
         .route("/resource-guard/restore/{stream_id}", axum::routing::post(resource_guard::restore))
         .route("/bootloader", get(bootloader::status).post(bootloader::update))
         .route("/os", get(os_release::os_release))
+        .route("/runtime", get(runtime::runtime))
         .route("/restart", axum::routing::post(restart::restart))
         .merge(rig::router())
 }

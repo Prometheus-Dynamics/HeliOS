@@ -1,6 +1,7 @@
 import { PeripheralsApi } from '$lib/api/peripheralsApi';
 import { PipelinesApi } from '$lib/api/pipelinesApi';
 import { readModelFreshnessDetail, readModelFreshnessLabel } from '$lib/api/readModelFreshness';
+import { streamPreviewFormatFromStreamInfo } from '$lib/api/streamPreviewFormat';
 import { buildOwnedStreamRecords, loadOwnedStreams } from '$lib/api/streamResources';
 import { streamHealthStatus } from '$lib/api/streamRuntime';
 import { DeviceApi } from '$lib/api/deviceApi';
@@ -186,6 +187,7 @@ function buildStreamGallery(slots: StreamInfo[]): StreamGalleryItem[] {
       captureSessionId: record.id || null,
       captureSessionAlias: record.alias,
       cameraUid: record.cameraUid,
+      previewFormat: streamPreviewFormatFromStreamInfo(record.stream),
       recordingActive: record.recordingActive,
       recordingSinceMs: record.recordingSinceMs
     };

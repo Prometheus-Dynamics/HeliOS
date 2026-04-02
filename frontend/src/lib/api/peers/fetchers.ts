@@ -168,6 +168,26 @@ export async function fetchPeerStreams(timeoutMs: number = DEFAULT_REQUEST_TIMEO
   };
 }
 
+export async function fetchPeerStreamFormat(
+  peerId: string,
+  streamId: string,
+  timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS
+): Promise<{ format: ReturnType<typeof normalizeStreamPreviewFormat> } | null> {
+  const normalizedPeerId = peerId.trim();
+  const normalizedStreamId = streamId.trim();
+  if (!normalizedPeerId || !normalizedStreamId) {
+    throw new Error('peerId and streamId are required');
+  }
+  const payload = await fetchPeerStreams(timeoutMs);
+  const match =
+    payload.streams.find(
+      (entry) =>
+        entry.peerId === normalizedPeerId &&
+        (entry.remoteStreamId === normalizedStreamId || entry.streamRef === normalizedStreamId)
+    ) ?? null;
+  return match ? { format: match.previewFormat } : null;
+}
+
 export async function syncPeerPipelines(
   peerId: string,
   input: { pipelineIds?: string[]; force?: boolean } = {},

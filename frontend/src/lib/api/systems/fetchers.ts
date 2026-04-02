@@ -11,7 +11,7 @@ import type {
   TeamNumberPayload
 } from '$lib/ts-bindings/http/client';
 import { FAILURE_MESSAGE_ALL, REQUEST_TIMEOUT_MS, SENSOR_REQUEST_TIMEOUT_MS, SYSTEMS_RETRY_OPTIONS } from './constants';
-import { emptyImuStatus, mapI2cInventory, mapImuStatus } from './mappers';
+import { emptyImuStatus, emptySystemsRuntime, mapI2cInventory, mapImuStatus, mapSystemsRuntime } from './mappers';
 
 type DeviceSettingsSnapshot = {
   hostname: string;
@@ -30,34 +30,50 @@ function asRecord<T extends Record<string, unknown>>(value: unknown): T | null {
 }
 
 export async function fetchSystemsPageData(): Promise<SystemsPageData> {
-  // The Systems page no longer depends on legacy RouterRoutes* shims.
-  // Fetch only data that is still rendered (I2C + IMU + basic settings).
-  const [settingsResult, i2cResult, imuResult] = await Promise.allSettled([
-    fetchDeviceSettings(REQUEST_TIMEOUT_MS),
-    fetchI2cInventory(SENSOR_REQUEST_TIMEOUT_MS),
-    fetchImuStatus(SENSOR_REQUEST_TIMEOUT_MS)
+  const [runtimeResult, settingsResult] = await Promise.allSettled([
+    fetchDeviceRuntime(REQUEST_TIMEOUT_MS),
+    fetchDeviceSettings(REQUEST_TIMEOUT_MS)
   ]);
 
+  const runtime = runtimeResult.status === 'fulfilled' ? runtimeResult.value : emptySystemsRuntime();
+  const shouldFetchI2c = runtimeResult.status !== 'fulfilled' || runtime.capabilities.i2c;
+  const shouldFetchImu = runtimeResult.status !== 'fulfilled' || runtime.capabilities.imu;
+  const [i2cResult, imuResult] = await Promise.allSettled([
+    shouldFetchI2c ? fetchI2cInventory(SENSOR_REQUEST_TIMEOUT_MS) : Promise.resolve<I2cInventoryPayload | null>(null),
+    shouldFetchImu ? fetchImuStatus(SENSOR_REQUEST_TIMEOUT_MS) : Promise.resolve<ImuStatusPayload | null>(null)
+  ]);
+
+  if (runtimeResult.status === 'rejected') {
+    console.warn('Device runtime request failed', runtimeResult.reason);
+  }
   if (settingsResult.status === 'rejected') {
     console.warn('Device settings request failed', settingsResult.reason);
   }
-  if (i2cResult.status === 'rejected') {
+  if (shouldFetchI2c && i2cResult.status === 'rejected') {
     console.warn('I2C inventory request failed', i2cResult.reason);
   }
-  if (imuResult.status === 'rejected') {
+  if (shouldFetchImu && imuResult.status === 'rejected') {
     console.warn('IMU status request failed', imuResult.reason);
   }
 
-  const i2cInventory = i2cResult.status === 'fulfilled' ? mapI2cInventory(i2cResult.value) : { buses: [], devices: [] };
-  const imu = imuResult.status === 'fulfilled' ? mapImuStatus(imuResult.value) : emptyImuStatus();
+  const i2cInventory =
+    i2cResult.status === 'fulfilled' && i2cResult.value
+      ? mapI2cInventory(i2cResult.value)
+      : { buses: [], devices: [] };
+  const imu =
+    imuResult.status === 'fulfilled' && imuResult.value
+      ? mapImuStatus(imuResult.value)
+      : emptyImuStatus();
   const errors = {
     logs: null,
-    i2c: i2cResult.status === 'rejected' ? formatFailureReason(i2cResult.reason) : null,
-    imu: imuResult.status === 'rejected' ? formatFailureReason(imuResult.reason) : null
+    runtime: runtimeResult.status === 'rejected' ? formatFailureReason(runtimeResult.reason) : null,
+    i2c: shouldFetchI2c && i2cResult.status === 'rejected' ? formatFailureReason(i2cResult.reason) : null,
+    imu: shouldFetchImu && imuResult.status === 'rejected' ? formatFailureReason(imuResult.reason) : null
   };
 
-  const failures = [settingsResult, i2cResult, imuResult].filter((r) => r.status === 'rejected').length;
-  const errorMessage = failures === 3 ? FAILURE_MESSAGE_ALL : null;
+  const failures = [runtimeResult, settingsResult, i2cResult, imuResult].filter((result) => result.status === 'rejected').length;
+  const attemptedRequests = 2 + Number(shouldFetchI2c) + Number(shouldFetchImu);
+  const errorMessage = failures === attemptedRequests ? FAILURE_MESSAGE_ALL : null;
 
   return {
     summary: [],
@@ -69,6 +85,7 @@ export async function fetchSystemsPageData(): Promise<SystemsPageData> {
       cameras: []
     },
     logs: [],
+    runtime,
     i2cInventory,
     imu,
     fetchedAt: Date.now(),
@@ -120,6 +137,15 @@ async function fetchDeviceSettings(timeoutMs: number): Promise<DeviceSettingsSna
     : null;
 
   return { hostname, team_number, interfaces };
+}
+
+async function fetchDeviceRuntime(timeoutMs: number) {
+  const payload = await requestOptionalJson<unknown>('/device/runtime', { method: 'GET' }, { timeoutMs, retry: SYSTEMS_RETRY_OPTIONS });
+  return mapSystemsRuntime(payload as any);
+}
+
+export async function fetchSystemsRuntimeSnapshot(timeoutMs: number = REQUEST_TIMEOUT_MS) {
+  return fetchDeviceRuntime(timeoutMs);
 }
 
 async function fetchI2cInventory(timeoutMs: number): Promise<I2cInventoryPayload> {

@@ -1089,6 +1089,9 @@
       get pipelineGridSlots() {
         return pipelineState.pipelineGridSlots;
       },
+      set pipelineGridSlots(value) {
+        pipelineState.pipelineGridSlots = value;
+      },
       get pipelineGridSlotOutputKeys() {
         return pipelineState.pipelineGridSlotOutputKeys;
       },
@@ -1098,8 +1101,20 @@
       get assignedPipelineIds() {
         return pipelineState.assignedPipelineIds;
       },
+      set assignedPipelineIds(value) {
+        pipelineState.assignedPipelineIds = value;
+      },
       get selectedPipelineId() {
         return pipelineState.selectedPipelineId;
+      },
+      set selectedPipelineId(value) {
+        pipelineState.selectedPipelineId = value;
+      },
+      get selectedPipelineOutput() {
+        return pipelineState.selectedPipelineOutput;
+      },
+      set selectedPipelineOutput(value) {
+        pipelineState.selectedPipelineOutput = value;
       },
       get cameraAlias() {
         return streamState.cameraAlias;
@@ -1110,11 +1125,17 @@
       get decoderImpl() {
         return streamState.decoderImpl;
       },
+      get decoders() {
+        return streamState.decoders;
+      },
       get encoderEnabled() {
         return streamState.encoderEnabled;
       },
       get decoderEnabled() {
         return streamState.decoderEnabled;
+      },
+      get encoderSelectionTouched() {
+        return streamState.encoderSelectionMode === 'manual';
       },
       get encoderSettings() {
         return streamState.encoderSettings;
@@ -1175,6 +1196,7 @@
       }
     },
     {
+      pipelinesApi: PipelinesApi,
       streamsApi: StreamsApi,
       apiBase,
       toaster,
@@ -1183,6 +1205,10 @@
       currentDevice,
       currentMode,
       intervalsForSelection,
+      pickCodecId,
+      outputSelectionForPipeline,
+      applyPipelineOverridesToGraph,
+      dropPipelineEverywhere,
       reportError,
       onExternalLayoutApplied: () => dismissGuidedCalibrationOverlay()
     }

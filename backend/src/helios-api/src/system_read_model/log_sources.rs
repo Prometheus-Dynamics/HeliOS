@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::OnceLock;
 
+use lib_runtime_policy::HELIOS_API_LOG_SOURCES_POLICY;
 use tokio::process::{Child, Command};
 use tokio::time::Duration;
 use tracing::warn;
@@ -10,18 +10,15 @@ use crate::api_observability::ApiCacheMetric;
 use crate::logs;
 use crate::logs::LogSource;
 
-use super::config::read_duration_env;
 use super::freshness::{ReadModelFreshnessReason, ReadModelRefreshOutcome, ReadModelSnapshot};
 use super::state::SystemReadModelState;
 
 fn log_sources_cache_ttl() -> Duration {
-    static TTL: OnceLock<Duration> = OnceLock::new();
-    *TTL.get_or_init(|| read_duration_env("HELIOS_LOG_SOURCES_CACHE_MS", 5_000, 0, 60_000))
+    Duration::from_millis(HELIOS_API_LOG_SOURCES_POLICY.resolve().cache_ms)
 }
 
 fn log_sources_refresh_timeout() -> Duration {
-    static TTL: OnceLock<Duration> = OnceLock::new();
-    *TTL.get_or_init(|| read_duration_env("HELIOS_LOG_SOURCES_REFRESH_TIMEOUT_MS", 3_000, 500, 15_000))
+    Duration::from_millis(HELIOS_API_LOG_SOURCES_POLICY.resolve().refresh_timeout_ms)
 }
 
 fn build_log_sources() -> Vec<LogSource> {

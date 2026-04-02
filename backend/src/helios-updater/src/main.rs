@@ -5,6 +5,7 @@ use clap::{ArgAction, Parser};
 use ed25519_dalek::VerifyingKey;
 use helios_updater::{SignaturePolicy, UpdaterConfig, UpdaterRuntime};
 use lib_ipc::types::{FeatureSet, ProtocolVersion};
+use lib_runtime_policy::HELIOS_LOG_FILTER_POLICY;
 use tracing::{error, info};
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{EnvFilter, fmt};
@@ -152,7 +153,7 @@ async fn main() {
 }
 
 fn init_tracing() {
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter = EnvFilter::try_new(HELIOS_LOG_FILTER_POLICY.resolve()).unwrap_or_else(|_| EnvFilter::new("info"));
     let running_under_systemd = std::env::var_os("JOURNAL_STREAM").is_some() || std::env::var_os("INVOCATION_ID").is_some();
 
     let journal_layer = if running_under_systemd {

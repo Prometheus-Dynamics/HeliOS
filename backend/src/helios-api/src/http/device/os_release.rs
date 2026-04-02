@@ -23,6 +23,10 @@ pub struct OsReleaseInfo {
     responses((status = 200, description = "OS release info", body = OsReleaseInfo), (status = 404, description = "OS release not found", body = super::super::error::ErrorBody))
 )]
 pub async fn os_release() -> ApiResult<impl axum::response::IntoResponse> {
+    Ok((StatusCode::OK, Json(load_os_release_info().await?)))
+}
+
+pub(crate) async fn load_os_release_info() -> ApiResult<OsReleaseInfo> {
     let contents = tokio::fs::read_to_string("/etc/os-release").await?;
     let mut info = parse_os_release(&contents);
     if info.version_id.is_none() {
@@ -32,7 +36,7 @@ pub async fn os_release() -> ApiResult<impl axum::response::IntoResponse> {
         info.build_id = read_text_value("/etc/helios/build-id").await.or_else(|| info.version_id.clone());
     }
     info.active_root = read_active_root().await;
-    Ok((StatusCode::OK, Json(info)))
+    Ok(info)
 }
 
 fn parse_os_release(contents: &str) -> OsReleaseInfo {

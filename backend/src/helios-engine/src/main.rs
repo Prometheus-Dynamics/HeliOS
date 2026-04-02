@@ -4,7 +4,7 @@ use std::{fs, io::Write, path::PathBuf};
 use helios_engine::ipc::server::EngineIpcServer;
 use helios_engine::ipc::{GraphValidationHelperRequest, GraphValidationHelperResponse, NodeRegistrySnapshot};
 use helios_engine::runtime::EngineRuntime;
-use lib_runtime_policy::HELIOS_ENGINE_TOKIO_POLICY;
+use lib_runtime_policy::{HELIOS_ENGINE_TOKIO_POLICY, HELIOS_LOG_FILTER_POLICY, HELIOS_STYX_CAPTURE_TUNABLES_POLICY};
 use styx::prelude::{set_capture_tunables, CaptureTunables};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -58,34 +58,25 @@ fn init_ffmpeg_logging() {
 }
 
 fn apply_styx_capture_tunables_from_env() {
+    let policy = HELIOS_STYX_CAPTURE_TUNABLES_POLICY.resolve();
     let mut tunables = CaptureTunables::default();
-    let mut changed = false;
-
-    if let Some(value) = read_usize_env("HELIOS_STYX_CAPTURE_QUEUE_DEPTH") {
+    if let Some(value) = policy.queue_depth {
         tunables.queue_depth = value;
-        changed = true;
     }
-    if let Some(value) = read_usize_env("HELIOS_STYX_CAPTURE_POOL_MIN") {
+    if let Some(value) = policy.pool_min {
         tunables.pool_min = value;
-        changed = true;
     }
-    if let Some(value) = read_usize_env("HELIOS_STYX_CAPTURE_POOL_BYTES") {
+    if let Some(value) = policy.pool_bytes {
         tunables.pool_bytes = value;
-        changed = true;
     }
-    if let Some(value) = read_usize_env("HELIOS_STYX_CAPTURE_POOL_SPARE") {
+    if let Some(value) = policy.pool_spare {
         tunables.pool_spare = value;
-        changed = true;
     }
 
-    if changed {
+    if policy.any_overridden() {
         set_capture_tunables(tunables);
         info!(queue_depth = tunables.queue_depth, pool_min = tunables.pool_min, pool_bytes = tunables.pool_bytes, pool_spare = tunables.pool_spare, "applied Styx capture tunables from env");
     }
-}
-
-fn read_usize_env(var: &str) -> Option<usize> {
-    std::env::var(var).ok()?.trim().parse::<usize>().ok()
 }
 
 fn ensure_backtraces() {
@@ -247,7 +238,7 @@ COMMANDS:\n\
 fn init_tracing() {
     use tracing_subscriber::EnvFilter;
 
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter = EnvFilter::try_new(HELIOS_LOG_FILTER_POLICY.resolve()).unwrap_or_else(|_| EnvFilter::new("info"));
     let running_under_systemd = std::env::var_os("JOURNAL_STREAM").is_some() || std::env::var_os("INVOCATION_ID").is_some();
 
     let fmt = tracing_subscriber::fmt().with_env_filter(env_filter).with_ansi(!running_under_systemd);

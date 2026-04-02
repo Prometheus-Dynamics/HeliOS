@@ -22,6 +22,7 @@ type PresetState = {
   get pipelineGridSlots(): Record<string, string | null>;
   set pipelineGridSlots(value: Record<string, string | null>);
   get pipelineGridSlotOutputKeys(): Record<string, string | null>;
+  get pipelineOutputByPipelineId(): Record<string, string | null>;
   get assignedPipelineIds(): string[];
   set assignedPipelineIds(value: string[]);
   get selectedPipelineId(): string | null;

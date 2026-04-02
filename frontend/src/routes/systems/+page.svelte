@@ -10,6 +10,10 @@
   import SystemsActivityTabs from '$lib/features/systems/page/SystemsActivityTabs.svelte';
   import SystemsI2cPanel from '$lib/features/systems/page/SystemsI2cPanel.svelte';
   import SystemsImuPanel from '$lib/features/systems/page/SystemsImuPanel.svelte';
+  import SystemsRuntimePanel from '$lib/features/systems/page/SystemsRuntimePanel.svelte';
+  import { buildActivityTabs, type ActivityTabId } from '$lib/features/systems/page/systemsPageTabs';
+  import { createSystemsPageImuController } from '$lib/features/systems/page/systemsPageImuController';
+  import { createSystemsPageRuntime } from '$lib/features/systems/page/systemsPageRuntime';
   import {
     buildImuStatusBadge,
     busDevices,
@@ -23,15 +27,9 @@
     imuIntervalList,
     imuOptionsList
   } from '$lib/features/systems/page/systemsPageUtils';
-  import { emptyImuStatus } from '$lib/api/systemsPage';
+  import { emptyImuStatus, emptySystemsRuntime } from '$lib/api/systemsPage';
   import { connectionState } from '$lib/api/connection';
   import { SvelteSet } from 'svelte/reactivity';
-  import {
-    activityTabs,
-    createSystemsPageImuController,
-    createSystemsPageRuntime,
-    type ActivityTabId
-  } from './systemsPageSupport';
 
   const EMPTY_PAYLOAD: SystemsPageData = {
     summary: [],
@@ -43,6 +41,7 @@
       cameras: []
     },
     logs: [],
+    runtime: emptySystemsRuntime(),
     i2cInventory: { buses: [], devices: [] },
     imu: emptyImuStatus(),
     fetchedAt: 0,
@@ -54,9 +53,11 @@
   let systems = $state<SystemsPageData>(clonePayload(readPayload()));
   let loadError = $state<string | null>(readPayload().errorMessage ?? null);
   let isRefreshing = $state(false);
+  let runtimeLoading = $state(false);
   let i2cLoading = $state(false);
   let imuLoading = $state(false);
   let isRescanningI2c = $state(false);
+  let runtimeError = $state<string | null>(readPayload().errors?.runtime ?? null);
   let i2cError = $state<string | null>(readPayload().errors?.i2c ?? null);
   let imuError = $state<string | null>(readPayload().errors?.imu ?? null);
   let isRefreshingImu = $state(false);
@@ -89,8 +90,10 @@
   let hasLoadedOnce = $state((readPayload().fetchedAt ?? 0) > 0);
 
   const device = $derived(systems.device);
+  const runtime = $derived(systems.runtime ?? emptySystemsRuntime());
   const i2cInventory = $derived(systems.i2cInventory ?? { buses: [], devices: [] });
   const tabErrors = $derived(systems.errors ?? {});
+  const activityTabs = $derived(buildActivityTabs(runtime));
   const imu = $derived(systems.imu ?? emptyImuStatus());
   const connectionStatus = $derived($connectionState.status);
   const isBackendUnavailable = $derived(browser && navigator.onLine === false);
@@ -114,7 +117,7 @@
   const imuHasMag = $derived(Boolean(imu.mag) || imuMagSeries.length > 0);
   const imuTimestampsMs = $derived(imuHistory.length ? imuHistory.map((entry) => entry.t) : []);
   let imuGraphsAutoScale = $state(true);
-  let activeActivityTab = $state<ActivityTabId>('logs');
+  let activeActivityTab = $state<ActivityTabId>('runtime');
   let stopSystemsPageRuntime: (() => void) | null = null;
 
   const systemsPageImuController = createSystemsPageImuController({
@@ -226,11 +229,17 @@
     setLoadError: (value) => {
       loadError = value;
     },
+    setRuntimeLoading: (value) => {
+      runtimeLoading = value;
+    },
     setI2cLoading: (value) => {
       i2cLoading = value;
     },
     setImuLoading: (value) => {
       imuLoading = value;
+    },
+    setRuntimeError: (value) => {
+      runtimeError = value;
     },
     setI2cError: (value) => {
       i2cError = value;
@@ -243,6 +252,14 @@
     imuFormDirty &&
       Object.keys(systemsPageImuController.buildImuConfigPayload()).length > 0
   );
+
+  $effect(() => {
+    const availableTabs = activityTabs.map((tab) => tab.id);
+    if (!availableTabs.includes(activeActivityTab)) {
+      activeActivityTab = 'runtime';
+      systemsPageImuController.syncActiveTabRuntime();
+    }
+  });
 
   onMount(() => {
     stopSystemsPageRuntime = systemsPageRuntime.start();
@@ -279,7 +296,13 @@
         />
 
         <div class="flex min-h-0 flex-1 flex-col overflow-y-auto">
-          {#if activeActivityTab === 'logs'}
+          {#if activeActivityTab === 'runtime'}
+            <SystemsRuntimePanel
+              {runtime}
+              {runtimeLoading}
+              {runtimeError}
+            />
+          {:else if activeActivityTab === 'logs'}
             <div class="flex min-h-0 flex-1 flex-col gap-2">
               {#if tabErrors.logs}
                 <div class="rounded border border-warning-500/40 bg-warning-500/10 px-3 py-2 text-xs text-warning-100">
