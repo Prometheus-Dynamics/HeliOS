@@ -1,41 +1,35 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { Panel, StreamPreview } from '$lib';
+  import { buildStreamPreviewProps, type StreamViewerSource } from '$lib/components/streamViewerSurface';
 
-  export type StreamPreviewItem = {
-    id: string;
-    name: string;
-    status: string;
-    captureSessionId?: string | null;
-    captureSessionAlias?: string | null;
-    cameraUid?: string | null;
-    recordingActive?: boolean;
-    recordingSinceMs?: number | null;
+  export type StreamPreviewItem = StreamViewerSource & { id: string };
+
+  type StreamsPanelProps = {
+    streams?: StreamPreviewItem[];
+    title?: string;
+    eyebrow?: string;
+    emptyMessage?: string;
+    actions?: Snippet;
+    children?: Snippet;
   };
 
-type StreamsPanelProps = {
-  streams?: StreamPreviewItem[];
-  title?: string;
-  eyebrow?: string;
-  emptyMessage?: string;
-  actions?: Snippet;
-  children?: Snippet;
-};
+  const {
+    streams = [],
+    title = 'Active streams',
+    eyebrow = 'Stream snapshot',
+    emptyMessage = 'No streams reported',
+    actions,
+    children
+  }: StreamsPanelProps = $props();
 
-const {
-  streams = [],
-  title = 'Active streams',
-  eyebrow = 'Stream snapshot',
-  emptyMessage = 'No streams reported',
-  actions,
-  children
-}: StreamsPanelProps = $props();
+  export type $$Props = StreamsPanelProps;
+  export interface $$Slots {
+    default?: Record<string, never>;
+    actions?: Record<string, never>;
+  }
 
-export type $$Props = StreamsPanelProps;
-export interface $$Slots {
-  default?: Record<string, never>;
-  actions?: Record<string, never>;
-}
+  const previewProps = (stream: StreamPreviewItem) => buildStreamPreviewProps(stream, 'dashboard-card');
 </script>
 
 <Panel tone="subtle" {eyebrow} {title} {actions}>
@@ -50,14 +44,7 @@ export interface $$Slots {
       <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {#each streams as stream (stream.id)}
           <div class="rounded border border-surface-800 bg-surface-950/50 p-2 shadow shadow-black/20">
-            <StreamPreview
-              name={stream.name}
-              status={stream.status}
-              recording={stream.recordingActive ?? false}
-              captureSessionId={stream.captureSessionId}
-              captureSessionAlias={stream.captureSessionAlias}
-              cameraUid={stream.cameraUid}
-            />
+            <StreamPreview {...previewProps(stream)} />
           </div>
         {/each}
       </div>

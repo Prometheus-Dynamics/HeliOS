@@ -2,6 +2,7 @@
   import { browser } from '$app/environment';
   import { onDestroy } from 'svelte';
   import StreamPreview from './StreamPreview.svelte';
+  import { buildStreamPreviewProps } from './streamViewerSurface';
   import { floatingStreamViewer, type FloatingStreamViewerState } from '$lib/stores/floatingStreamViewer';
   import { StreamsApi } from '$lib/api/streamsApi';
   import { streamHealthStatus, streamRecordingActive, streamRecordingSinceMs } from '$lib/api/streamRuntime';
@@ -209,6 +210,10 @@
     };
     startPointerTracking();
   }
+
+  const previewProps = $derived.by(() =>
+    viewer.stream ? buildStreamPreviewProps(viewer.stream, 'floating') : null
+  );
 </script>
 
 {#if viewer.isOpen}
@@ -260,16 +265,8 @@
     <div class="flex-1 min-h-0">
       {#if viewer.stream?.captureSessionId}
         <StreamPreview
-          captureSessionId={viewer.stream.captureSessionId}
+          {...previewProps}
           className="h-full w-full"
-          recording={viewer.stream.recordingActive ?? false}
-          fillParent
-          showCaption={false}
-          showFrame={false}
-          enforceAspect={false}
-          fitMode="contain"
-          enablePopout={false}
-          autoPlay
         />
       {:else}
         <div class="flex h-full items-center justify-center p-4 text-xs text-surface-400">

@@ -752,9 +752,21 @@
     },
     {
       "path": "frontend/src/lib/components/streamPreviewController.ts",
-      "max_lines": 680,
+      "max_lines": 650,
       "owner": "HeliOS",
       "review_note": "Shared preview runtime behavior for dashboard, devices, camera detail, floating viewer, and pipeline preview surfaces now lives here; keep autoplay, pause/resume, visibility demand, transport selection, and fallback logic out of per-route components."
+    },
+    {
+      "path": "frontend/src/lib/components/streamViewerSurface.ts",
+      "max_lines": 180,
+      "owner": "HeliOS",
+      "review_note": "Shared stream-viewer surface policy now lives here; keep per-surface autoplay, visibility, framing, and popout defaults out of the route and feature components."
+    },
+    {
+      "path": "frontend/src/lib/components/streamPreviewControllerBrowserDeps.ts",
+      "max_lines": 40,
+      "owner": "HeliOS",
+      "review_note": "SvelteKit/browser-specific preview-controller wiring now lives here; keep environment-bound API helpers out of the pure controller module so controller tests stay framework-agnostic."
     },
     {
       "path": "frontend/src/routes/+layout.svelte",

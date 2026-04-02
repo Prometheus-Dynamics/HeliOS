@@ -1,18 +1,24 @@
-import { buildHttpCandidateUrls } from '$lib/api/httpCandidates';
-import { apiUrl } from '$lib/api/httpClient';
-import { fetchPeerStreamFormat } from '$lib/api/peers';
-import { resolveStreamPreviewFormat, type StreamPreviewFormat } from '$lib/api/streamPreviewFormat';
-import { StreamsApi } from '$lib/api/streamsApi';
 import type { FloatingStreamStatus } from '$lib/stores/floatingStreamViewer';
 import { SvelteURLSearchParams } from 'svelte/reactivity';
 
-export type ResolvedPreviewFormat = 'mjpeg' | 'h264' | 'h265' | 'unknown';
+import type {
+  ResolvedStreamViewerFormat,
+  StreamViewerFormat
+} from './streamViewerSurface';
+
+export type ResolvedPreviewFormat = ResolvedStreamViewerFormat;
 export type StreamPreviewConnectionStatus = 'unknown' | 'online' | 'offline' | 'degraded';
-export type StreamPreviewExplicitFormat = 'auto' | 'mjpeg' | 'h264' | 'h265';
+export type StreamPreviewExplicitFormat = StreamViewerFormat;
 
 type PeerStreamRef = { peerId: string; streamId: string };
 
-type StreamPreviewConfigSnapshot = {
+type StreamPreviewFormatProbe = {
+  format?: unknown;
+} | null | undefined;
+
+type StreamPreviewFormatLoader = () => Promise<ResolvedPreviewFormat | null>;
+
+export type StreamPreviewConfigSnapshot = {
   captureSessionId: string | null;
   captureSessionAlias: string | null;
   cameraUid: string | null;
@@ -45,6 +51,19 @@ export type StreamPreviewRuntimeState = {
   documentVisible: boolean;
   viewportVisible: boolean;
   resolvedFormat: ResolvedPreviewFormat;
+};
+
+type TimerHandle = ReturnType<typeof globalThis.setTimeout>;
+
+export type StreamPreviewControllerDeps = {
+  apiUrl: (path: string) => string;
+  buildHttpCandidateUrls: (url: string) => string[];
+  clearTimeout: (handle: TimerHandle) => void;
+  fetchPeerStreamFormat: (peerId: string, streamId: string) => Promise<StreamPreviewFormatProbe>;
+  fetchStreamFormat: (args: { id: string }) => Promise<StreamPreviewFormatProbe>;
+  now: () => number;
+  resolveStreamPreviewFormat: (key: string, loader: StreamPreviewFormatLoader) => Promise<ResolvedPreviewFormat | null>;
+  setTimeout: typeof globalThis.setTimeout;
 };
 
 export const createStreamPreviewRuntimeState = (): StreamPreviewRuntimeState => ({
@@ -107,7 +126,7 @@ function previewFormatCacheKey(config: StreamPreviewConfigSnapshot, peer: PeerSt
   return `${base}:${pipelineTag}:${outputTag}`;
 }
 
-function mapEncodedInfoFormat(raw: unknown): StreamPreviewFormat | null {
+function mapEncodedInfoFormat(raw: unknown): ResolvedPreviewFormat | null {
   if (!raw || typeof raw !== 'object' || !('format' in raw)) return null;
   const format = (raw as { format?: unknown }).format;
   if (format === 'mjpeg' || format === 'h264' || format === 'h265') return format;
@@ -118,30 +137,31 @@ function mapEncodedInfoFormat(raw: unknown): StreamPreviewFormat | null {
 export const createStreamPreviewController = (options: {
   state: StreamPreviewRuntimeState;
   readConfig: () => StreamPreviewConfigSnapshot;
+  deps: StreamPreviewControllerDeps;
 }) => {
-  const { state, readConfig } = options;
+  const { state, readConfig, deps } = options;
   let reconnectAttempt = 0;
-  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  let stallBannerTimer: ReturnType<typeof setTimeout> | null = null;
-  let frameRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectTimer: TimerHandle | null = null;
+  let stallBannerTimer: TimerHandle | null = null;
+  let frameRetryTimer: TimerHandle | null = null;
   let lastStatus: FloatingStreamStatus | null = null;
   let lastConnectionStatus: StreamPreviewConnectionStatus | null = null;
 
   const clearReconnectTimer = (): void => {
     if (!reconnectTimer) return;
-    clearTimeout(reconnectTimer);
+    deps.clearTimeout(reconnectTimer);
     reconnectTimer = null;
   };
 
   const clearStallBannerTimer = (): void => {
     if (!stallBannerTimer) return;
-    clearTimeout(stallBannerTimer);
+    deps.clearTimeout(stallBannerTimer);
     stallBannerTimer = null;
   };
 
   const clearFrameRetryTimer = (): void => {
     if (!frameRetryTimer) return;
-    clearTimeout(frameRetryTimer);
+    deps.clearTimeout(frameRetryTimer);
     frameRetryTimer = null;
   };
 
@@ -162,7 +182,7 @@ export const createStreamPreviewController = (options: {
   };
 
   const nextNonce = (current: number): number => {
-    const now = Date.now();
+    const now = deps.now();
     return now <= current ? current + 1 : now;
   };
 
@@ -187,15 +207,15 @@ export const createStreamPreviewController = (options: {
     const query = suffix.length ? `?${suffix}` : '';
     const peer = parsePeerStreamRef(config.captureSessionId);
     if (peer) {
-      return apiUrl(`${peerProxyPath(peer, 'preview')}${query}`);
+      return deps.apiUrl(`${peerProxyPath(peer, 'preview')}${query}`);
     }
     if (state.resolvedFormat === 'mjpeg') {
       const ref = config.captureSessionId ?? config.captureSessionAlias;
       if (!ref) return null;
-      return apiUrl(`/streams/${encodeURIComponent(ref)}/preview${query}`);
+      return deps.apiUrl(`/streams/${encodeURIComponent(ref)}/preview${query}`);
     }
     if (!config.captureSessionId) return null;
-    return apiUrl(`/streams/${encodeURIComponent(config.captureSessionId)}/preview${query}`);
+    return deps.apiUrl(`/streams/${encodeURIComponent(config.captureSessionId)}/preview${query}`);
   };
 
   const buildFrameUrl = (): string | null => {
@@ -207,19 +227,19 @@ export const createStreamPreviewController = (options: {
     if (config.pipelineId?.trim()) params.set('pipeline', config.pipelineId.trim());
     if (config.pipelineOutput?.trim()) params.set('output', config.pipelineOutput.trim());
     if (peer) {
-      return apiUrl(`${peerProxyPath(peer, 'frame')}?${params.toString()}`);
+      return deps.apiUrl(`${peerProxyPath(peer, 'frame')}?${params.toString()}`);
     }
-    return apiUrl(`/streams/${encodeURIComponent(ref)}/frame?${params.toString()}`);
+    return deps.apiUrl(`/streams/${encodeURIComponent(ref)}/frame?${params.toString()}`);
   };
 
   const buildPreviewUrlCandidates = (): string[] => {
     const url = buildPreviewUrl();
-    return url ? buildHttpCandidateUrls(url) : [];
+    return url ? deps.buildHttpCandidateUrls(url) : [];
   };
 
   const buildFrameUrlCandidates = (): string[] => {
     const url = buildFrameUrl();
-    return url ? buildHttpCandidateUrls(url) : [];
+    return url ? deps.buildHttpCandidateUrls(url) : [];
   };
 
   const switchToNextPreviewCandidate = (): boolean => {
@@ -262,7 +282,7 @@ export const createStreamPreviewController = (options: {
     if (!state.isPlaying || !config.supportsLivePreview || !config.canPreview || !config.livePreviewVisible) return;
     clearReconnectTimer();
     const delay = immediate ? 0 : nextReconnectDelay();
-    reconnectTimer = setTimeout(() => {
+    reconnectTimer = deps.setTimeout(() => {
       reconnectTimer = null;
       const latest = readConfig();
       if (!state.isPlaying || !latest.supportsLivePreview || !latest.canPreview) return;
@@ -278,7 +298,7 @@ export const createStreamPreviewController = (options: {
     const config = readConfig();
     if (state.isPlaying || !config.canPreview) return;
     clearFrameRetryTimer();
-    frameRetryTimer = setTimeout(() => {
+    frameRetryTimer = deps.setTimeout(() => {
       frameRetryTimer = null;
       const latest = readConfig();
       if (state.isPlaying || !latest.canPreview) return;
@@ -356,10 +376,10 @@ export const createStreamPreviewController = (options: {
     const sessionId = config.captureSessionId;
     const peer = parsePeerStreamRef(sessionId);
     try {
-      const mapped = await resolveStreamPreviewFormat(previewFormatCacheKey(config, peer, sessionId), async () => {
+      const mapped = await deps.resolveStreamPreviewFormat(previewFormatCacheKey(config, peer, sessionId), async () => {
         const json = peer
-          ? await fetchPeerStreamFormat(peer.peerId, peer.streamId)
-          : await StreamsApi.streamFormat({ id: sessionId });
+          ? await deps.fetchPeerStreamFormat(peer.peerId, peer.streamId)
+          : await deps.fetchStreamFormat({ id: sessionId });
         return mapEncodedInfoFormat(json);
       });
       if (mapped && readConfig().captureSessionId === sessionId) {
@@ -375,7 +395,7 @@ export const createStreamPreviewController = (options: {
     const current = config.captureSessionId ?? null;
     if (current === state.lastCaptureSessionId) return;
     state.lastCaptureSessionId = current;
-    state.lastSwitchAt = Date.now();
+    state.lastSwitchAt = deps.now();
     state.previewError = null;
     state.lastAutoPlayKey = null;
     state.lastKey = null;
@@ -415,7 +435,7 @@ export const createStreamPreviewController = (options: {
     state.previewUrl = null;
     const resolvedMessage = message ?? 'Stream preview error';
     const normalizedMessage = resolvedMessage.toLowerCase();
-    const recentSwitch = state.lastSwitchAt != null && Date.now() - state.lastSwitchAt < 2000;
+    const recentSwitch = state.lastSwitchAt != null && deps.now() - state.lastSwitchAt < 2000;
     const transientAbort = normalizedMessage.includes('abort');
     const transient404 = recentSwitch && normalizedMessage.includes('404');
     if (transientAbort || transient404) {
@@ -426,7 +446,7 @@ export const createStreamPreviewController = (options: {
     incrementReconnectAttempt();
     if (normalizedMessage.includes('stalled')) {
       clearStallBannerTimer();
-      stallBannerTimer = setTimeout(() => {
+      stallBannerTimer = deps.setTimeout(() => {
         stallBannerTimer = null;
         if (!state.isPlaying || state.previewError) return;
         state.previewError = resolvedMessage;

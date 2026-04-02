@@ -3,6 +3,7 @@
   import { getVirtualWindow, virtualViewport } from '$lib/ui/virtualViewport';
   import type { Snippet } from 'svelte';
   import { Panel, StreamPreview } from '$lib';
+  import { buildStreamPreviewProps } from '$lib/components/streamViewerSurface';
 
   export type CameraRow = {
     id: string;
@@ -95,6 +96,19 @@
   const gridSlice = $derived.by(() =>
     cameras.slice(gridWindow.startIndex * gridColumns, gridWindow.endIndex * gridColumns)
   );
+
+  const previewProps = (camera: CameraRow) =>
+    buildStreamPreviewProps(
+      {
+        name: camera.name,
+        status: camera.status,
+        captureSessionId: camera.captureSessionId ?? null,
+        captureSessionAlias: camera.captureSessionAlias ?? null,
+        cameraUid: camera.cameraUid ?? null,
+        recordingActive: camera.recordingActive ?? false
+      },
+      'device-card'
+    );
 </script>
  
 <Panel tone="default" density="compact" {eyebrow} {title} {actions}>
@@ -126,17 +140,7 @@
                   >
                     <div class="relative aspect-video overflow-hidden">
                       <div class="stream-card__preview">
-                        <StreamPreview
-                          name={camera.name}
-                          status={camera.status}
-                          recording={camera.recordingActive ?? false}
-                          captureSessionId={camera.captureSessionId}
-                          captureSessionAlias={camera.captureSessionAlias}
-                          cameraUid={camera.cameraUid}
-                          enablePopout={false}
-                          enforceAspect={false}
-                          hideControls={true}
-                        />
+                        <StreamPreview {...previewProps(camera)} />
                       </div>
                       <div class="pointer-events-none absolute inset-0 bg-gradient-to-t from-surface-950/95 via-surface-950/25 to-transparent transition group-hover:from-surface-950/80"></div>
                       <div class="pointer-events-none absolute top-3 left-3 text-micro-tight uppercase tracking-[0.22em]">
@@ -199,17 +203,7 @@
             >
               <div class="relative aspect-video overflow-hidden">
                 <div class="stream-card__preview">
-                  <StreamPreview
-                    name={camera.name}
-                    status={camera.status}
-                    recording={camera.recordingActive ?? false}
-                    captureSessionId={camera.captureSessionId}
-                    captureSessionAlias={camera.captureSessionAlias}
-                    cameraUid={camera.cameraUid}
-                    enablePopout={false}
-                    enforceAspect={false}
-                    hideControls={true}
-                  />
+                  <StreamPreview {...previewProps(camera)} />
                 </div>
                 <div class="pointer-events-none absolute inset-0 bg-gradient-to-t from-surface-950/95 via-surface-950/25 to-transparent transition group-hover:from-surface-950/80"></div>
                 <div class="pointer-events-none absolute top-3 left-3 text-micro-tight uppercase tracking-[0.22em]">

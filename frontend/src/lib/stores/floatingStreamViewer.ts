@@ -1,21 +1,10 @@
 import { writable, type Writable } from 'svelte/store';
 import { getLocalStorage, readJson, writeJson } from '$lib/utils/storage';
+import type { StreamViewerFormat, StreamViewerSource, StreamViewerStatus } from '$lib/components/streamViewerSurface';
 
-export type FloatingStreamStatus = 'live' | 'degraded' | 'offline' | 'idle';
-export type FloatingStreamFormat = 'auto' | 'mjpeg' | 'h264' | 'h265';
-
-export type FloatingStreamSource = {
-  name: string;
-  status: FloatingStreamStatus;
-  captureSessionId: string | null;
-  captureSessionAlias: string | null;
-  cameraUid: string | null;
-  recordingActive?: boolean;
-  recordingSinceMs?: number | null;
-  pipelineId?: string | null;
-  pipelineOutput?: string | null;
-  previewFormat?: FloatingStreamFormat;
-};
+export type FloatingStreamStatus = StreamViewerStatus;
+export type FloatingStreamFormat = StreamViewerFormat;
+export type FloatingStreamSource = StreamViewerSource;
 
 export type FloatingStreamViewerState = {
   isOpen: boolean;

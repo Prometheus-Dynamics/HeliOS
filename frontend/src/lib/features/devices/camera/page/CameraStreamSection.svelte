@@ -5,6 +5,7 @@
   import { streamHealthStatus, streamRecordingActive } from '$lib/api/streamRuntime';
   import type { StreamMetricsError } from '$lib/api/streamMetrics';
   import StreamMetricsBanners from '$lib/components/StreamMetricsBanners.svelte';
+  import { buildStreamPreviewProps } from '$lib/components/streamViewerSurface';
   import CalibrationGuidanceOverlay from '$lib/features/devices/camera/CalibrationGuidanceOverlay.svelte';
 
   type StreamMetricsPanelProps = ComponentProps<typeof StreamMetricsPanel>;
@@ -134,27 +135,27 @@
     if (calib) return null;
     return 'Undistorted view requires a saved calibration. You are currently seeing the raw frame.';
   });
+  const previewProps = $derived.by(() =>
+    buildStreamPreviewProps(
+      {
+        name: ctx.stream?.id ?? 'Stream',
+        status: streamStatus,
+        captureSessionId: ctx.stream?.id ?? ctx.streamId,
+        captureSessionAlias: streamAlias,
+        cameraUid: null,
+        recordingActive
+      },
+      'device-detail'
+    )
+  );
 </script>
 
 <div class="flex flex-col gap-4 xl:min-h-0 xl:overflow-hidden xl:pr-1">
   <div class="flex flex-col overflow-hidden rounded border border-surface-800/70 bg-surface-950 xl:flex-1 xl:min-h-0">
     <div class="relative flex items-center justify-center bg-black/95 aspect-video xl:aspect-auto xl:flex-1 xl:min-h-0">
-      <div bind:this={ctx.streamViewerHost} class="absolute inset-0 flex items-center justify-center p-2">
-        <div class="h-full w-full">
-          <StreamPreview
-            name={ctx.stream?.id ?? 'Stream'}
-            status={streamStatus}
-            recording={recordingActive}
-            captureSessionId={ctx.stream?.id ?? ctx.streamId}
-            captureSessionAlias={streamAlias}
-            hideControls={false}
-            enforceAspect={false}
-            fitMode="contain"
-            fillParent={true}
-            enablePopout={false}
-            showCaption={false}
-            showFrame={false}
-          >
+        <div bind:this={ctx.streamViewerHost} class="absolute inset-0 flex items-center justify-center p-2">
+          <div class="h-full w-full">
+          <StreamPreview {...previewProps}>
             {#if ctx.streamState.activeTab === 'calibration' && ctx.calibrationState.calibrationGuidedMode && ctx.stream?.id}
               <CalibrationGuidanceOverlay
                 enabled={ctx.calibrationState.calibrationGuidedMode}

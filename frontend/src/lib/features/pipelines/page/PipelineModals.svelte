@@ -5,6 +5,7 @@
   import type { StreamInfo } from '$lib/ts-bindings/http/client';
   import { StreamPreview } from '$lib';
   import { streamRecordingActive, streamRuntimeStatusLabel } from '$lib/api/streamRuntime';
+  import { buildStreamPreviewProps } from '$lib/components/streamViewerSurface';
   import { resolveStreamLabel } from '$lib/utils/streamLabels';
   import PipelineRegistryDrawer from './PipelineRegistryDrawer.svelte';
   import PipelineIconModal from './PipelineIconModal.svelte';
@@ -158,6 +159,19 @@
     return typeof identity.alias === 'string' && identity.alias.trim().length > 0 ? identity.alias : null;
   };
 
+  const previewProps = (displayName: string, statusLabel: string, stream: StreamInfo, deviceId: string) =>
+    buildStreamPreviewProps(
+      {
+        name: displayName,
+        status: statusLabel,
+        captureSessionId: deviceId,
+        captureSessionAlias: streamCaptureAlias(stream),
+        cameraUid: null,
+        recordingActive: streamRecordingActive(stream)
+      },
+      'pipeline-modal'
+    );
+
   export type $$Props = PipelineModalsProps;
 </script>
 
@@ -272,23 +286,10 @@
                       : 'border-surface-800/80 bg-surface-950/30 hover:border-primary-500/60'
                   }`}
                 >
-                  <div class="relative aspect-video overflow-hidden">
-                    <div class="stream-card__preview">
-                      <StreamPreview
-                        name={displayName}
-                        status={statusLabel}
-                        recording={streamRecordingActive(stream)}
-                        captureSessionId={deviceId}
-                        captureSessionAlias={streamCaptureAlias(stream)}
-                        enablePopout={false}
-                        enforceAspect={false}
-                        hideControls={true}
-                        fitMode="cover"
-                        fillParent={true}
-                        showCaption={false}
-                        showFrame={false}
-                      />
-                    </div>
+                    <div class="relative aspect-video overflow-hidden">
+                      <div class="stream-card__preview">
+                      <StreamPreview {...previewProps(displayName, statusLabel, stream, deviceId)} />
+                      </div>
                     <div class="pointer-events-none absolute inset-0 bg-gradient-to-t from-surface-950/95 via-surface-950/35 to-transparent transition group-hover:from-surface-950/85"></div>
                     <div class="pointer-events-none absolute top-2 left-2 text-micro-tight uppercase tracking-[0.3em]">
                       <span class={`rounded-full border px-2 py-0.5 font-semibold ${

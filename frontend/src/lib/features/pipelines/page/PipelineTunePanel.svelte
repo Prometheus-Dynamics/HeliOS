@@ -2,6 +2,7 @@
   import FaIcon from '$lib/components/icons/FaIcon.svelte';
   import { faPencil } from '@fortawesome/free-solid-svg-icons';
   import StreamPreview from '$lib/components/StreamPreview.svelte';
+  import { buildStreamPreviewProps } from '$lib/components/streamViewerSurface';
   import PipelineStreamOverridesPanel from '$lib/components/pipelines/PipelineStreamOverridesPanel.svelte';
   import PipelineUiEditorPanel from '$lib/components/pipelines/PipelineUiEditorPanel.svelte';
   import PipelineUiOverridesPanel from '$lib/components/pipelines/PipelineUiOverridesPanel.svelte';
@@ -446,6 +447,21 @@
   }
 
   const tuneLayoutEditStream = $derived.by(() => tunePreviewStream ?? null);
+  const tunePreviewProps = $derived.by(() =>
+    tunePreviewStream
+      ? buildStreamPreviewProps(
+          {
+            name: streamLabel(tunePreviewStream),
+            status: 'live',
+            captureSessionId: tunePreviewStream.id ?? null,
+            captureSessionAlias: streamLabel(tunePreviewStream),
+            cameraUid: null,
+            recordingActive: streamRecordingActive(tunePreviewStream)
+          },
+          'pipeline-tune'
+        )
+      : null
+  );
   const tuneLayoutWires = $derived.by(() => {
     const streamId = normalizeId(tuneLayoutEditStream?.id);
     if (!streamId.length) return [];
@@ -819,14 +835,8 @@
         <div class="mt-3 tune-preview-frame aspect-video min-h-[9rem] overflow-hidden rounded border border-surface-800/70 bg-black">
           {#if tunePreviewStream}
             <StreamPreview
+              {...tunePreviewProps}
               className="h-full w-full"
-              captureSessionId={tunePreviewStream.id}
-              captureSessionAlias={streamLabel(tunePreviewStream)}
-              recording={streamRecordingActive(tunePreviewStream)}
-              showCaption={false}
-              showFrame={false}
-              fitMode="contain"
-              enablePopout
             />
           {:else}
             <div class="flex h-full w-full items-center justify-center text-xs text-surface-500">

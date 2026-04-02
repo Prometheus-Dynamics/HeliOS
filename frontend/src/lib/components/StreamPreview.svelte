@@ -5,6 +5,8 @@
   import EncodedStreamPlayer from '$lib/components/EncodedStreamPlayer.svelte';
   import MjpegStreamPlayer from '$lib/components/MjpegStreamPlayer.svelte';
   import { floatingStreamViewer, type FloatingStreamStatus } from '$lib/stores/floatingStreamViewer';
+  import { normalizeStreamViewerStatus, type StreamViewerFormat } from './streamViewerSurface';
+  import { STREAM_PREVIEW_CONTROLLER_BROWSER_DEPS } from './streamPreviewControllerBrowserDeps';
   import {
     createStreamPreviewController,
     createStreamPreviewRuntimeState
@@ -20,7 +22,7 @@
     cameraUid?: string | null;
     pipelineId?: string | null;
     pipelineOutput?: string | null;
-    previewFormat?: 'auto' | 'mjpeg' | 'h264' | 'h265';
+    previewFormat?: StreamViewerFormat;
     enablePopout?: boolean;
     fitMode?: 'cover' | 'contain';
     enforceAspect?: boolean;
@@ -43,7 +45,7 @@
     cameraUid = $bindable<string | null>(null),
     pipelineId = $bindable<string | null>(null),
     pipelineOutput = $bindable<string | null>(null),
-    previewFormat = $bindable<'auto' | 'mjpeg' | 'h264' | 'h265'>('auto'),
+    previewFormat = $bindable<StreamViewerFormat>('auto'),
     enablePopout = $bindable(true),
     fitMode = $bindable<'cover' | 'contain'>('cover'),
     enforceAspect = $bindable(true),
@@ -94,8 +96,9 @@
       canPreview,
       supportsLivePreview,
       livePreviewVisible,
-      status: status === 'recording' ? 'live' : (status as FloatingStreamStatus)
-    })
+      status: normalizeStreamViewerStatus(status === 'recording' ? 'live' : status) as FloatingStreamStatus
+    }),
+    deps: STREAM_PREVIEW_CONTROLLER_BROWSER_DEPS
   });
 
   $effect(() => {
@@ -112,10 +115,9 @@
     event.preventDefault();
     event.stopPropagation();
     if (!canPreview) return;
-    const popoutStatus = status === 'recording' ? 'live' : (status as FloatingStreamStatus);
     floatingStreamViewer.open({
       name,
-      status: popoutStatus,
+      status: normalizeStreamViewerStatus(status === 'recording' ? 'live' : status),
       recordingActive: recording ? true : undefined,
       captureSessionId,
       captureSessionAlias,
