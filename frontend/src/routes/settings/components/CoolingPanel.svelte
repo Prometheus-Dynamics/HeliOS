@@ -2,7 +2,7 @@
   import { onDestroy, onMount } from 'svelte';
   import { resourceTelemetryStore, type ResourceSample } from '$lib/api/telemetry';
   import { deviceSettingsStore, type DeviceSettingsState } from '../deviceSettingsStore';
-  import type { FanCurvePoint, FanSettings, FanStatus } from '../types';
+  import type { FanConfig, FanCurvePoint, FanStatus } from '../types';
   import { REQUESTED_BY } from '../api';
   import { buildErrorMessage } from '$lib/ui/errorPolicy';
   import { cancelDebounce, scheduleDebounce, type DebounceHandle } from '$lib/utils/debounce';
@@ -17,7 +17,7 @@
     { temp_c: 60, percent: 100 }
   ];
 
-  const DEFAULT_FAN: FanSettings = {
+  const DEFAULT_FAN: FanConfig = {
     enabled: true,
     pwm_path: 'auto',
     tacho_path: 'auto',
@@ -29,7 +29,7 @@
     curve: DEFAULT_CURVE
   };
 
-  let form = $state<FanSettings>({ ...DEFAULT_FAN });
+  let form = $state<FanConfig>({ ...DEFAULT_FAN });
   let status = $state<string | null>(null);
   let error = $state<string | null>(null);
   let busy = $state(false);
@@ -69,7 +69,7 @@
     return Math.min(Math.max(value, min), max);
   }
 
-  function normalizeFan(input: FanSettings): FanSettings {
+  function normalizeFan(input: FanConfig): FanConfig {
     const min = clamp(input.min_percent ?? DEFAULT_FAN.min_percent, 0, 100);
     const max = clamp(input.max_percent ?? DEFAULT_FAN.max_percent, min, 100);
     const poll = Math.max(500, Math.round(input.poll_interval_ms || DEFAULT_FAN.poll_interval_ms));
@@ -252,7 +252,7 @@
     return 'Curve';
   }
 
-  function fanEquals(a: FanSettings, b: FanSettings): boolean {
+  function fanEquals(a: FanConfig, b: FanConfig): boolean {
     const key = (curve: FanCurvePoint[]) => curve.map((p) => `${p.temp_c}:${p.percent}`).join('|');
     return (
       a.enabled === b.enabled &&

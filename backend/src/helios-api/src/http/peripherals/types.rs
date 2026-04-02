@@ -66,11 +66,17 @@ pub struct FanStatus {
     #[serde(default)]
     pub(crate) rpm: Option<u32>,
     #[serde(default)]
-    pub(crate) mode: Option<String>,
+    pub(crate) mode: Option<lib_sensors::fan_config::FanMode>,
     #[serde(default)]
     pub(crate) target_percent: Option<u8>,
     #[serde(default)]
+    pub(crate) temperature_c: Option<f32>,
+    #[serde(default)]
+    pub(crate) path_in_use: Option<String>,
+    #[serde(default)]
     pub(crate) last_error: Option<String>,
+    #[serde(default)]
+    pub(crate) updated_at_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]

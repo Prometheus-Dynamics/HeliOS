@@ -1,6 +1,6 @@
 <script lang="ts">
   import { apiFetch } from '$lib/api/core/http';
-  import type { Nt4TopicInfo, Nt4TopicsResponse, Nt4ValueResponse } from '../types';
+  import type { Nt4TopicInfo, Nt4TopicsRequest, Nt4TopicsResponse, Nt4ValueRequest, Nt4ValueResponse } from '../types';
   import { buildErrorMessage } from '$lib/ui/errorPolicy';
   import Nt4Tree from './Nt4Tree.svelte';
   import type { NtTreeNode } from './nt4TreeTypes';
@@ -110,17 +110,18 @@
     error = null;
 
     try {
+      const request: Nt4TopicsRequest = {
+        host,
+        port,
+        prefix: '/',
+        scan_ms: 550,
+        limit: 20000
+      };
       const response = await apiFetch<Nt4TopicsResponse>(
         '/nt4/topics',
         {
           method: 'POST',
-          body: {
-            host,
-            port,
-            prefix: '/',
-            scan_ms: 550,
-            limit: 20000
-          }
+          body: request
         },
         { timeoutMs: 1600, recordConnection: false }
       );
@@ -162,11 +163,12 @@
     valueLoaded = false;
 
     try {
+      const request: Nt4ValueRequest = { host, port, topic };
       const response = await apiFetch<Nt4ValueResponse>(
         '/nt4/value',
         {
           method: 'POST',
-          body: { host, port, topic }
+          body: request
         },
         { timeoutMs: 1600, recordConnection: false }
       );

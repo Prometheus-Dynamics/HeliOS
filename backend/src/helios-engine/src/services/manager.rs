@@ -22,7 +22,11 @@ use tokio::sync::RwLock;
 use tokio::time::{sleep_until, timeout, Instant};
 use uuid::Uuid;
 
-use crate::capture::{BackendKind, CaptureControlInfo, CaptureControlValue, CaptureDescriptor, ControlAssignment, descriptor_for_config_retrying};
+use crate::contracts::stream_ids::{
+    CALIBRATION_MODE_PIPELINE_UUID,
+    RAW_PIPELINE_UUID as RAW_STREAM_PIPELINE_UUID,
+};
+use crate::capture::{descriptor_for_config_retrying, BackendKind, CaptureControlInfo, CaptureControlValue, CaptureDescriptor, ControlAssignment};
 use crate::error::{Error, Result};
 use crate::ipc::{ControlId, JsonWire, RecordingCodec, RecordingContainer, RecordingSource, ResolvedStreamConfig};
 use crate::stream::{cleanup_all_stream_files, cleanup_stream_files, EncodedFrame, ShmemWriter, StreamMetrics, StreamRunner, StreamRunnerConfig};
@@ -32,9 +36,7 @@ use super::worker::{run_stream_worker, CalibrationModeRestore, StreamCommand, St
 
 const CALIBRATION_TEMPLATE_ID: &str = "daedalus_aruco";
 const UNDISTORT_TEMPLATE_ID: &str = "daedalus_undistort_preview";
-const CALIBRATION_MODE_PIPELINE_UUID: Uuid = Uuid::from_u128(0x00000000_0000_0000_0000_00000000c411);
 const CALIBRATION_MODE_HOST_BUFFER: usize = 1;
-const RAW_STREAM_PIPELINE_UUID: Uuid = Uuid::from_u128(0x00000000_0000_0000_0000_0000000000aa);
 // Stopping a recording may include MP4 finalize (ffmpeg remux/transcode) which can be slow.
 const RECORDING_STOP_TIMEOUT: Duration = Duration::from_secs(180);
 const SNAPSHOT_SOURCE_TIMEOUT: Duration = Duration::from_secs(3);
@@ -1130,7 +1132,6 @@ impl StreamManager {
             manifest_snapshot.pipeline_enabled = true;
         }
 
-        const RAW_STREAM_PIPELINE_UUID: Uuid = Uuid::from_u128(0x00000000_0000_0000_0000_0000000000aa);
         let mut referenced: std::collections::BTreeSet<Uuid> = std::collections::BTreeSet::new();
         for wire in &manifest_snapshot.pipeline_wires {
             if wire.from.pipeline_id != RAW_STREAM_PIPELINE_UUID {
@@ -3728,7 +3729,7 @@ fn upsert_control_assignment(controls: &mut Vec<ControlAssignment>, id: u32, val
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ipc::{CURRENT_STREAM_CONFIG_SCHEMA_VERSION, RequestedDecoderConfig, RequestedEncoderConfig, StreamManifest};
+    use crate::ipc::{RequestedDecoderConfig, RequestedEncoderConfig, StreamManifest, CURRENT_STREAM_CONFIG_SCHEMA_VERSION};
     use serde_json::json;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
@@ -3844,12 +3845,7 @@ mod tests {
     #[test]
     fn default_encoder_settings_use_480p_for_1080p_capture() {
         let manifest = sample_manifest_for_encoder_defaults(1920, 1080);
-        let output = manifest
-            .encoder
-            .settings
-            .as_ref()
-            .and_then(|settings| settings.output_resolution())
-            .expect("output resolution");
+        let output = manifest.encoder.settings.as_ref().and_then(|settings| settings.output_resolution()).expect("output resolution");
         assert_eq!(output.width, 854);
         assert_eq!(output.height, 480);
     }
@@ -3857,12 +3853,7 @@ mod tests {
     #[test]
     fn default_encoder_settings_preserve_aspect_for_16_by_10_capture() {
         let manifest = sample_manifest_for_encoder_defaults(1280, 800);
-        let output = manifest
-            .encoder
-            .settings
-            .as_ref()
-            .and_then(|settings| settings.output_resolution())
-            .expect("output resolution");
+        let output = manifest.encoder.settings.as_ref().and_then(|settings| settings.output_resolution()).expect("output resolution");
         assert_eq!(output.width, 768);
         assert_eq!(output.height, 480);
     }

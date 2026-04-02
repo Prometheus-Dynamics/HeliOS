@@ -18,21 +18,23 @@ use super::{
 #[utoipa::path(
     get,
     path = "/device/snapshots",
+    operation_id = "device_snapshots_list",
     tag = "Device",
     responses((status = 200, description = "List diagnostics snapshots", body = DeviceSnapshotsResponse))
 )]
-pub async fn list_snapshots(State(_state): State<AppState>) -> impl IntoResponse {
+pub async fn list_device_snapshots(State(_state): State<AppState>) -> impl IntoResponse {
     Json(DeviceSnapshotsResponse { snapshots: list_snapshots_impl().await })
 }
 
 #[utoipa::path(
     post,
     path = "/device/snapshots",
+    operation_id = "device_snapshots_capture",
     tag = "Device",
     request_body = CaptureSnapshotRequest,
     responses((status = 200, description = "Snapshot captured", body = DeviceSnapshotResponse))
 )]
-pub async fn capture_snapshot(State(_state): State<AppState>, Json(req): Json<CaptureSnapshotRequest>) -> Response {
+pub async fn capture_device_snapshot(State(_state): State<AppState>, Json(req): Json<CaptureSnapshotRequest>) -> Response {
     let mut cmd = Command::new("helios-diagnostics");
     cmd.arg("--trigger").arg("manual").arg("--tar");
     if let Some(label) = req.label.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
@@ -69,11 +71,12 @@ pub async fn capture_snapshot(State(_state): State<AppState>, Json(req): Json<Ca
 #[utoipa::path(
     delete,
     path = "/device/snapshots/{id}",
+    operation_id = "device_snapshots_delete",
     tag = "Device",
     params(("id" = String, Path, description = "Snapshot ID")),
     responses((status = 204, description = "Snapshot deleted"))
 )]
-pub async fn delete_snapshot(State(_state): State<AppState>, Path(id): Path<String>, Query(q): Query<RequestedByQuery>) -> impl IntoResponse {
+pub async fn delete_device_snapshot(State(_state): State<AppState>, Path(id): Path<String>, Query(q): Query<RequestedByQuery>) -> impl IntoResponse {
     if let Some(requested_by) = q.requested_by.as_deref() {
         info!(%id, %requested_by, "snapshot deletion requested");
     }
@@ -93,7 +96,7 @@ pub async fn delete_snapshot(State(_state): State<AppState>, Path(id): Path<Stri
     params(("id" = String, Path, description = "Snapshot ID")),
     responses((status = 200, description = "Snapshot archive"))
 )]
-pub async fn download_snapshot(State(_state): State<AppState>, Path(id): Path<String>) -> Response {
+pub async fn download_device_snapshot(State(_state): State<AppState>, Path(id): Path<String>) -> Response {
     let root = diagnostics_root();
     let tar = snapshot_tar(&root, &id);
     if !tokio::fs::try_exists(&tar).await.unwrap_or(false) {

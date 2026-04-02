@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::contracts::stream_ids::RAW_PIPELINE_UUID as RAW_STREAM_PIPELINE_UUID;
 use crate::ipc::{ResolvedStreamConfig, StreamPipelineBinding, StreamPipelineGridSlot};
 use crate::pipelines;
 use daedalus::planner::Graph;
@@ -13,7 +14,6 @@ use super::multiplex::{MultiplexGraphExecutor, MultiplexPipeline};
 use super::{GraphError, GraphExecutor, GraphHandle, HostBridgeHandle};
 
 const MULTIPLEX_DIMENSION_MAX: u32 = 6;
-const RAW_STREAM_PIPELINE_UUID: Uuid = Uuid::from_u128(0x00000000_0000_0000_0000_0000000000aa);
 
 fn clamp_dimension(value: u8) -> u32 {
     u32::from(value).clamp(1, MULTIPLEX_DIMENSION_MAX)

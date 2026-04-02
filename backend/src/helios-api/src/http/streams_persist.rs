@@ -2,6 +2,7 @@ use crate::http::streams::validation::{StreamValidationResult, normalize_stream_
 use crate::http::{json_store, storage};
 use chrono::Utc;
 use futures::future::BoxFuture;
+use helios_engine::contracts::stream_ids::{LEGACY_RAW_PIPELINE_UUID, RAW_PIPELINE_UUID};
 use helios_engine::capture::{BackendKind, CaptureDescriptor, CaptureMode, canonicalize_capture_config, descriptor_snapshot_for_config, discover_devices};
 use helios_engine::ipc::{ResolvedStreamConfig, RigPose, StreamManifest};
 use serde::{Deserialize, Serialize};
@@ -13,8 +14,6 @@ use tokio::sync::OnceCell;
 use tracing::warn;
 use uuid::Uuid;
 
-const RAW_PIPELINE_UUID: Uuid = Uuid::from_u128(0x000000000000000000000000000000aa);
-const LEGACY_RAW_PIPELINE_UUID: Uuid = Uuid::from_u128(0x000000000000000000000000000000ab);
 const CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION: u32 = 3;
 const RESOLVED_ONLY_PERSISTED_STREAM_RECORD_SCHEMA_VERSION: u32 = 2;
 const FLAT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION: u32 = 1;

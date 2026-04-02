@@ -42,7 +42,7 @@
     stopLightingOutput
   } from './lighting/lightingModalApi';
   import { deviceSettingsStore, type DeviceSettingsState } from '../../../routes/settings/deviceSettingsStore';
-  import type { LightingSettings } from '../../../routes/settings/types';
+  import type { LedConfig } from '../../../routes/settings/types';
   import { REQUESTED_BY } from '../../../routes/settings/api';
   import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
@@ -90,7 +90,7 @@
     'Split Red Blue Timeline',
     'Color Wipe Sequence'
   ] as const;
-  const DEFAULT_LIGHTING: LightingSettings = {
+  const DEFAULT_LIGHTING: LedConfig = {
     enabled: true,
     gpio: 13,
     count: 16,
@@ -105,7 +105,7 @@
 
   const deviceState = $derived($deviceSettingsStore as DeviceSettingsState);
 
-  let form = $state<LightingSettings>({ ...DEFAULT_LIGHTING });
+  let form = $state<LedConfig>({ ...DEFAULT_LIGHTING });
   let lightingCount = $state<number>(DEFAULT_LIGHTING.count);
   let ledColors = $state<string[]>(Array.from({ length: DEFAULT_LIGHTING.count }, () => '#00c8ff'));
   let ledWhites = $state<number[]>(Array.from({ length: DEFAULT_LIGHTING.count }, () => 0));

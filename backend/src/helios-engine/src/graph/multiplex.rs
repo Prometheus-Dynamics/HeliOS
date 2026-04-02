@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
+use crate::contracts::stream_ids::RAW_PIPELINE_UUID as RAW_STREAM_PIPELINE_UUID;
 use lib_cv::modules::calibration::LensModel;
 
 use crate::stream::PipelineGraphMetrics;
@@ -73,8 +74,6 @@ impl MultiplexGraphExecutor {
         fn norm_key(value: Option<&str>) -> Option<String> {
             value.map(str::trim).filter(|v| !v.is_empty()).map(|v| v.to_string())
         }
-
-        const RAW_STREAM_PIPELINE_UUID: Uuid = Uuid::from_u128(0x00000000_0000_0000_0000_0000000000aa);
 
         let mut used: BTreeSet<usize> = if process_all_pipelines {
             (0..pipelines.len()).collect()
@@ -429,8 +428,6 @@ impl GraphExecutor for MultiplexGraphExecutor {
         }
 
         let mut raw_rgba_full: Option<RgbaImage> = None;
-
-        const RAW_STREAM_PIPELINE_UUID: Uuid = Uuid::from_u128(0x00000000_0000_0000_0000_0000000000aa);
 
         for idx in self.exec_order.iter().copied() {
             let Some(pipeline) = self.pipelines.get(idx) else { continue };

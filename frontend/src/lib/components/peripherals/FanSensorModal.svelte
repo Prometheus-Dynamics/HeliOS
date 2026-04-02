@@ -2,8 +2,7 @@
   import { onDestroy, onMount } from 'svelte';
 
   import { toaster } from '$lib';
-  import { apiUrl } from '$lib/api/httpClient';
-  import { apiFetchResponse } from '$lib/api/core/http';
+  import { apiFetch } from '$lib/api/core/http';
   import { resourceTelemetryStore, type ResourceSample } from '$lib/api/telemetry';
   import type { PeripheralEntry } from '$lib/types/devices';
   import SensorModalShell from './SensorModalShell.svelte';
@@ -11,7 +10,7 @@
   import FanControlPanel from './fan/FanControlPanel.svelte';
   import FanConfigPanel from './fan/FanConfigPanel.svelte';
   import FanAdvancedModal from './fan/FanAdvancedModal.svelte';
-  import type { FanCurvePoint, FanSettings } from '../../../routes/settings/types';
+  import type { FanConfig, FanCurvePoint, FanStatus } from '../../../routes/settings/types';
   import { deviceSettingsStore, type DeviceSettingsState } from '../../../routes/settings/deviceSettingsStore';
   import { REQUESTED_BY } from '../../../routes/settings/api';
   import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
@@ -28,22 +27,6 @@
   const telemetry = $derived($resourceTelemetryStore as ResourceSample);
   const deviceState = $derived($deviceSettingsStore as DeviceSettingsState);
 
-  type FanStatusPayload = {
-    present?: boolean | null;
-    rpm?: number | null;
-    mode?: string | null;
-    target_percent?: number | null;
-    last_error?: string | null;
-  };
-
-  type FanStatus = {
-    present: boolean;
-    rpm: number | null;
-    mode: string | null;
-    targetPercent: number | null;
-    lastError: string | null;
-  };
-
   let fanStatus = $state<FanStatus | null>(null);
 
   const FAN_STATUS_REFRESH_MS = 5000;
@@ -55,7 +38,7 @@
     { temp_c: 60, percent: 100 }
   ];
 
-  const DEFAULT_FAN: FanSettings = {
+  const DEFAULT_FAN: FanConfig = {
     enabled: true,
     pwm_path: 'auto',
     tacho_path: 'auto',
@@ -67,7 +50,7 @@
     curve: DEFAULT_CURVE
   };
 
-  let form = $state<FanSettings>(normalizeFan(DEFAULT_FAN));
+  let form = $state<FanConfig>(normalizeFan(DEFAULT_FAN));
   let manualInput = $state('');
   let selectedPointIndex = $state(0);
   let fixedPercent = $state(50);
@@ -88,7 +71,7 @@
   const statusMode = $derived(normalizeStatusMode(fanStatus?.mode));
   const displayMode = $derived(dirty ? mode : statusMode ?? mode);
   const statusMessage = $derived.by(() => status ?? (refreshingStatus ? 'Refreshing status…' : null));
-  const currentTemp = $derived(telemetry.cpu.temperature_c ?? null);
+  const currentTemp = $derived(fanStatus?.temperature_c ?? telemetry.cpu.temperature_c ?? null);
   const previewTarget = $derived(computeTarget(form, currentTemp));
   const ensureDeviceSettings = createSettingsLoader({
     load: deviceSettingsStore.load,
@@ -187,7 +170,7 @@
     });
   }
 
-  function normalizeFan(input: FanSettings): FanSettings {
+  function normalizeFan(input: FanConfig): FanConfig {
     const min = 0;
     const max = 100;
     const poll = Math.max(500, Math.round(input.poll_interval_ms || DEFAULT_FAN.poll_interval_ms));
@@ -213,7 +196,7 @@
     };
   }
 
-  function fanFromDevice(input: FanSettings): FanSettings {
+  function fanFromDevice(input: FanConfig): FanConfig {
     const curveBase = (input.curve ?? []).map((point) => ({
       temp_c: point.temp_c,
       percent: point.percent
@@ -224,11 +207,11 @@
     });
   }
 
-  function fanToDevice(input: FanSettings): FanSettings {
+  function fanToDevice(input: FanConfig): FanConfig {
     return normalizeFan(input);
   }
 
-  function computeTarget(config: FanSettings, temperature: number | null): number {
+  function computeTarget(config: FanConfig, temperature: number | null): number {
     if (!config.enabled) return 0;
     if (config.manual_percent != null) return clamp(config.manual_percent, 0, 100);
     const points = (config.curve ?? []).slice().sort((a, b) => a.temp_c - b.temp_c);
@@ -339,30 +322,11 @@
     selectedPointIndex = clamp(selectedPointIndex, 0, Math.max(0, next.length - 1));
   }
 
-  function normalizeFanStatus(payload: unknown): FanStatus {
-    const value = payload as FanStatusPayload | null;
-    const present = Boolean(value?.present);
-    const rpm = typeof value?.rpm === 'number' && Number.isFinite(value.rpm) ? Math.trunc(value.rpm) : null;
-    const targetPercent =
-      typeof value?.target_percent === 'number' && Number.isFinite(value.target_percent)
-        ? Math.trunc(value.target_percent)
-        : null;
-    const mode = typeof value?.mode === 'string' && value.mode.trim().length ? value.mode.trim() : null;
-    const lastError = typeof value?.last_error === 'string' && value.last_error.trim().length ? value.last_error.trim() : null;
-    return { present, rpm, mode, targetPercent, lastError };
-  }
-
   async function refreshFanStatus(options: { silent?: boolean } = {}): Promise<void> {
     const { silent = false } = options;
     if (!silent) refreshingStatus = true;
     try {
-      const url = apiUrl('/peripherals/fan');
-      const response = await apiFetchResponse(url, { headers: { Accept: 'application/json' } });
-      if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        throw new Error(text || `Fan status request failed (${response.status})`);
-      }
-      fanStatus = normalizeFanStatus(await response.json());
+      fanStatus = await apiFetch<FanStatus>('/peripherals/fan');
       statusRefreshError = null;
     } catch (err) {
       statusRefreshError = buildErrorMessage({ error: err, fallback: 'Unable to refresh fan status.' });
@@ -449,7 +413,7 @@
     return null;
   }
 
-  function fanEquals(a: FanSettings, b: FanSettings): boolean {
+  function fanEquals(a: FanConfig, b: FanConfig): boolean {
     const key = (curve: FanCurvePoint[]) => curve.map((p) => `${p.temp_c}:${p.percent}`).join('|');
     return (
       a.enabled === b.enabled &&
@@ -517,7 +481,7 @@
 
   {#snippet footer()}
     <div class="flex flex-wrap items-center gap-2 text-xs text-surface-500">
-      <span>Target {fanStatus?.targetPercent ?? '—'}%</span>
+      <span>Target {fanStatus?.target_percent ?? '—'}%</span>
       <span class="text-surface-700">·</span>
       <span>Preview {previewTarget}%</span>
     </div>

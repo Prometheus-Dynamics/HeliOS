@@ -1,6 +1,8 @@
 #![deny(unsafe_code)]
 
 pub mod capture;
+#[cfg(feature = "dto")]
+pub mod contracts;
 #[cfg(feature = "runtime")]
 pub mod daedalus_registry;
 pub mod error;

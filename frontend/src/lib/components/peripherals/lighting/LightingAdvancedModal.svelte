@@ -1,8 +1,8 @@
 <script lang="ts">
-  import type { LightingSettings } from '../../../../routes/settings/types';
+  import type { LedConfig } from '../../../../routes/settings/types';
 
   type Props = {
-    form: LightingSettings;
+    form: LedConfig;
     settingsBusy: boolean;
     settingsError: string | null;
     busy: boolean;

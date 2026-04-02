@@ -16,7 +16,7 @@ use axum::{
 
 use super::super::AppState;
 
-pub(super) const IMU_EXTERNAL_ID: &str = "imu";
+pub(super) use helios_engine::contracts::localization::DEVICE_IMU_EXTERNAL_SOURCE_ID as IMU_EXTERNAL_ID;
 
 pub fn router() -> Router<AppState> {
     Router::new()

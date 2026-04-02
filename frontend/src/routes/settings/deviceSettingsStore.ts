@@ -2,11 +2,11 @@ import { get, writable, type Readable } from 'svelte/store';
 import { apiFetch } from './api';
 import { buildErrorMessage } from '$lib/ui/errorPolicy';
 import { invalidateSWR, readSWR, primeSWR } from '$lib/utils/swrCache';
-import type { DeviceSettingsResponse, DeviceNetworkInterfaceResponse, FanSettings, FanStatus, LightingSettings, Nt4SettingsResponse, OsReleaseInfo, UsbPowerSettings, UpdateDeviceSettingsRequest } from './types';
+import type { DeviceNetworkInterfaceView, DeviceSettingsData, DeviceSettingsPatchRequest, FanConfig, FanStatus, LedConfig, Nt4Settings, OsReleaseInfo, UsbPowerSettings } from './types';
 import type { HostnamePayload, NetworkInterfaceSettings, TeamNumberPayload } from '$lib/ts-bindings/http/client';
 
 export type DeviceSettingsState = {
-  data: DeviceSettingsResponse | null;
+  data: DeviceSettingsData | null;
   loading: boolean;
   error: string | null;
   revision: string | null;
@@ -30,7 +30,7 @@ let loadNonce = 0;
 
 const DEFAULT_DIAGNOSTICS = { keep: 0, max_mb: 0, tar: false };
 
-function buildSettingsBase(current: DeviceSettingsResponse | null): DeviceSettingsResponse {
+function buildSettingsBase(current: DeviceSettingsData | null): DeviceSettingsData {
   return {
     hostname: current?.hostname ?? 'unknown',
     team_number: typeof current?.team_number === 'number' ? current.team_number : null,
@@ -85,7 +85,7 @@ function prefixToNetmask(prefix: number): string {
   return `${(mask >>> 24) & 255}.${(mask >>> 16) & 255}.${(mask >>> 8) & 255}.${mask & 255}`;
 }
 
-function mapInterfaces(raw: NetworkInterfaceSettings[]): DeviceNetworkInterfaceResponse[] {
+function mapInterfaces(raw: NetworkInterfaceSettings[]): DeviceNetworkInterfaceView[] {
   return raw
     .filter((iface) => typeof iface.name === 'string' && iface.name.trim().length)
     .map((iface) => {
@@ -135,7 +135,7 @@ async function loadDeviceSettings(options: { quiet?: boolean; force?: boolean } 
   const { quiet = false, force = false } = options;
   const cached = force
     ? null
-    : readSWR<DeviceSettingsResponse>(SETTINGS_CACHE_KEY, {
+    : readSWR<DeviceSettingsData>(SETTINGS_CACHE_KEY, {
         staleMs: SETTINGS_CACHE_STALE_MS,
         maxAgeMs: SETTINGS_CACHE_MAX_MS
       });
@@ -167,7 +167,7 @@ async function loadDeviceSettings(options: { quiet?: boolean; force?: boolean } 
     if (requestId !== loadNonce) return;
 
     const failures: unknown[] = [];
-    const partial: Partial<DeviceSettingsResponse> = {};
+    const partial: Partial<DeviceSettingsData> = {};
 
     if (interfacesResult.status === 'fulfilled') {
       partial.interfaces = mapInterfaces(interfacesResult.value);
@@ -212,7 +212,7 @@ async function loadDeviceSettings(options: { quiet?: boolean; force?: boolean } 
       initialized: true
     });
 
-    const applyOptional = (update: Partial<DeviceSettingsResponse>) => {
+    const applyOptional = (update: Partial<DeviceSettingsData>) => {
       store.update((state) => {
         if (requestId !== loadNonce) return state;
         const next = { ...buildSettingsBase(state.data ?? null), ...update };
@@ -221,19 +221,19 @@ async function loadDeviceSettings(options: { quiet?: boolean; force?: boolean } 
       });
     };
 
-    void apiFetch<Nt4SettingsResponse>('/device/nt4')
+    void apiFetch<Nt4Settings>('/device/nt4')
       .then((nt4) => applyOptional({ nt4: nt4 ?? null }))
       .catch(() => applyOptional({ nt4: null }));
     void apiFetch<OsReleaseInfo>('/device/os')
       .then((osRelease) => applyOptional({ os_release: osRelease ?? null }))
       .catch(() => applyOptional({ os_release: null }));
-    void apiFetch<LightingSettings>('/device/lighting/config')
+    void apiFetch<LedConfig>('/device/lighting/config')
       .then((lighting) => applyOptional({ lighting: lighting ?? null }))
       .catch(() => applyOptional({ lighting: null }));
     void apiFetch<UsbPowerSettings>('/device/usb-power')
       .then((usbPower) => applyOptional({ usb_power: usbPower ?? null }))
       .catch(() => applyOptional({ usb_power: null }));
-    void apiFetch<FanSettings>('/device/fan/config')
+    void apiFetch<FanConfig>('/device/fan/config')
       .then((fan) => applyOptional({ fan: fan ?? null }))
       .catch(() => applyOptional({ fan: null }));
     void apiFetch<FanStatus>('/peripherals/fan')
@@ -254,9 +254,9 @@ async function loadDeviceSettings(options: { quiet?: boolean; force?: boolean } 
   }
 }
 
-async function patchDeviceSettings(request: UpdateDeviceSettingsRequest): Promise<void> {
+async function patchDeviceSettings(request: DeviceSettingsPatchRequest): Promise<void> {
   const operations: Promise<unknown>[] = [];
-  const optimistic: Partial<DeviceSettingsResponse> = {};
+  const optimistic: Partial<DeviceSettingsData> = {};
 
   if (typeof request.hostname === 'string') {
     operations.push(

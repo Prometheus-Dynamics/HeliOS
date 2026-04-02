@@ -40,12 +40,11 @@ use helios_engine::ipc::{EngineErrorCode, EngineEvent, GraphOutputPortDescriptor
 use self::types::{CodecInfo, StartStreamResponse, StreamFormatInfo, StreamInfo, StreamInspectInfo};
 use self::validation::{StreamCapabilitiesResponse, StreamValidateResponse, stream_capabilities, validate_stream_manifest_with_runtime};
 
-pub(crate) const RAW_PIPELINE_UUID: Uuid = Uuid::from_u128(0x000000000000000000000000000000aa);
+pub(crate) use helios_engine::contracts::stream_ids::{CALIBRATION_MODE_PIPELINE_UUID, RAW_PIPELINE_UUID};
 /// Reserved internal pipeline UUID used by the engine for transient calibration-mode graphs.
 ///
 /// This must never be persisted or exposed as a user-selectable pipeline; it has no on-disk
 /// graph document and will break stream restart/apply if it leaks into saved layouts.
-pub(crate) const CALIBRATION_MODE_PIPELINE_UUID: Uuid = Uuid::from_u128(0x00000000_0000_0000_0000_00000000c411);
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -404,7 +403,6 @@ async fn set_pipeline_output(State(state): State<AppState>, Path(id): Path<Uuid>
     responses((status = 204, description = "Pipeline layout updated"))
 )]
 async fn set_pipeline_layout(State(state): State<AppState>, Path(id): Path<Uuid>, Json(req): Json<SetPipelineLayoutRequest>) -> impl IntoResponse {
-    const RAW_STREAM_PIPELINE_UUID: Uuid = Uuid::from_u128(0x00000000_0000_0000_0000_0000000000aa);
     let apply_layout = |manifest: &mut helios_engine::ipc::StreamManifest| {
         manifest.pipeline_layout = req.pipeline_layout.clone();
         if manifest.pipeline_layout.is_some() {
@@ -418,7 +416,7 @@ async fn set_pipeline_layout(State(state): State<AppState>, Path(id): Path<Uuid>
                     slot.pipeline_id = None;
                     slot.output_key = None;
                 }
-                if slot.pipeline_id == Some(RAW_STREAM_PIPELINE_UUID) && slot.output_key.as_deref().is_some_and(|value| value.trim().eq_ignore_ascii_case("frame")) {
+                if slot.pipeline_id == Some(RAW_PIPELINE_UUID) && slot.output_key.as_deref().is_some_and(|value| value.trim().eq_ignore_ascii_case("frame")) {
                     slot.output_key = Some("raw".to_string());
                 }
             }
@@ -431,7 +429,7 @@ async fn set_pipeline_layout(State(state): State<AppState>, Path(id): Path<Uuid>
                     continue;
                 }
                 layout_selected_ids.insert(pipeline_id);
-                if pipeline_id == RAW_STREAM_PIPELINE_UUID {
+                if pipeline_id == RAW_PIPELINE_UUID {
                     continue;
                 }
                 if existing.insert(pipeline_id) {
@@ -451,10 +449,10 @@ async fn set_pipeline_layout(State(state): State<AppState>, Path(id): Path<Uuid>
                 if let Some((active_id, slot_output)) = selected_slot {
                     manifest.active_pipeline_id = Some(active_id);
                     let active_changed = previous_active_pipeline_id != Some(active_id);
-                    if active_id == RAW_STREAM_PIPELINE_UUID {
+                    if active_id == RAW_PIPELINE_UUID {
                         // Preserve RAW output selection (`raw` vs `undistorted`) when present.
                         if let Some(slot_output) = slot_output {
-                            manifest.active_pipeline_output = canonicalize_output_for_pipeline(Some(slot_output), Some(RAW_STREAM_PIPELINE_UUID));
+                            manifest.active_pipeline_output = canonicalize_output_for_pipeline(Some(slot_output), Some(RAW_PIPELINE_UUID));
                         } else if active_changed {
                             manifest.active_pipeline_output = manifest.pipelines.iter().find(|p| p.pipeline_id == active_id).and_then(|binding| binding.pipeline_output.clone());
                         }

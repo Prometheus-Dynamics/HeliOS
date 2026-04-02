@@ -1,4 +1,4 @@
-import type { LightingSettings } from '../../../../routes/settings/types';
+import type { LedConfig } from '../../../../routes/settings/types';
 
 const DEFAULT_TIMELINE_SAMPLE_MS = 50;
 const MIN_TIMELINE_SAMPLE_MS = 20;
@@ -97,7 +97,7 @@ export function clampNumber(value: number, min = 0, max = 255): number {
   return Math.min(max, Math.max(min, Math.trunc(value)));
 }
 
-export function normalizeLighting(raw: LightingSettings | undefined, defaults: LightingSettings): LightingSettings {
+export function normalizeLighting(raw: LedConfig | undefined, defaults: LedConfig): LedConfig {
   if (!raw) return { ...defaults };
   const brightness =
     typeof raw.brightness === 'number' && Number.isFinite(raw.brightness) ? raw.brightness : defaults.brightness ?? null;

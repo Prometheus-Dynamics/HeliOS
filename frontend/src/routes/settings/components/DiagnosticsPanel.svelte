@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { subscribeDomainInvalidations } from '$lib/api/invalidation';
-  import type { UpdateDeviceSettingsRequest } from '../types';
+  import type { CaptureSnapshotRequest, DeviceSettingsPatchRequest } from '../types';
   import { apiFetch, REQUESTED_BY, downloadSnapshotArchive } from '../api';
   import { osHealthStatusResource, type OsHealthStatus } from '$lib/api/deviceStatusResources';
   import { buildErrorMessage } from '$lib/ui/errorPolicy';
@@ -105,7 +105,7 @@
       return;
     }
 
-    const payload: UpdateDeviceSettingsRequest = {
+    const payload: DeviceSettingsPatchRequest = {
       requested_by: REQUESTED_BY,
       diagnostics: {
         keep,
@@ -130,12 +130,13 @@
     snapshotStatus = 'Capturing diagnostics bundle…';
     snapshotsError = null;
     try {
+      const request: CaptureSnapshotRequest = {
+        label: snapshotLabel.trim() || undefined,
+        requested_by: REQUESTED_BY
+      };
       await apiFetch<DeviceSnapshotResponse>('/device/snapshots', {
         method: 'POST',
-        body: {
-          label: snapshotLabel.trim() || undefined,
-          requested_by: REQUESTED_BY
-        }
+        body: request
       });
       snapshotLabel = '';
       snapshotStatus = 'Diagnostics bundle captured.';

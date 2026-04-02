@@ -1,10 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
+use crate::http::streams::RAW_PIPELINE_UUID;
 use helios_engine::ipc::StreamSummary;
 use helios_engine::localization::config::LocalizationSourceConfig;
-
-const RAW_STREAM_PIPELINE_UUID: Uuid = Uuid::from_u128(0x00000000_0000_0000_0000_0000000000aa);
 
 pub(crate) fn dedupe_enabled_sources(sources: Vec<LocalizationSourceConfig>) -> Vec<LocalizationSourceConfig> {
     let mut seen = HashSet::<(String, String, String)>::new();
@@ -71,10 +70,10 @@ fn has_imu_token(value: &str) -> bool {
 
 fn infer_source_input_key(stream: &StreamSummary, source: &LocalizationSourceConfig) -> Option<String> {
     let manifest = &stream.manifest;
-    let active_pipeline_id = manifest.active_pipeline_id.or_else(|| manifest.pipelines.first().map(|binding| binding.pipeline_id)).unwrap_or(RAW_STREAM_PIPELINE_UUID);
+    let active_pipeline_id = manifest.active_pipeline_id.or_else(|| manifest.pipelines.first().map(|binding| binding.pipeline_id)).unwrap_or(RAW_PIPELINE_UUID);
     let source_output_key = normalize_key(Some(source.output_key.as_str()));
 
-    if active_pipeline_id == RAW_STREAM_PIPELINE_UUID {
+    if active_pipeline_id == RAW_PIPELINE_UUID {
         return canonical_input_space_hint(Some(source.output_key.as_str())).map(str::to_string);
     }
 

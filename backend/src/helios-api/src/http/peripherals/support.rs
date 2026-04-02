@@ -138,7 +138,16 @@ fn read_system_undervoltage() -> Option<bool> {
 }
 
 pub(crate) fn map_fan_status(status: lib_sensors::fan_config::FanStatus) -> FanStatus {
-    FanStatus { present: true, rpm: status.rpm, mode: Some(format!("{:?}", status.mode)), target_percent: Some(status.target_percent), last_error: status.last_error }
+    FanStatus {
+        present: true,
+        rpm: status.rpm,
+        mode: Some(status.mode),
+        target_percent: Some(status.target_percent),
+        temperature_c: status.temperature_c,
+        path_in_use: status.path_in_use,
+        last_error: status.last_error,
+        updated_at_ms: status.updated_at_ms,
+    }
 }
 
 fn read_timeout_env(var: &str, default_ms: u64, min_ms: u64, max_ms: u64) -> Duration {
@@ -211,9 +220,12 @@ mod tests {
 
         let mapped = map_fan_status(status);
         assert!(mapped.present);
-        assert_eq!(mapped.mode.as_deref(), Some("Manual"));
+        assert_eq!(mapped.mode, Some(FanMode::Manual));
         assert_eq!(mapped.target_percent, Some(42));
+        assert_eq!(mapped.temperature_c, Some(51.5));
         assert_eq!(mapped.rpm, Some(2_100));
+        assert_eq!(mapped.path_in_use, None);
         assert_eq!(mapped.last_error.as_deref(), Some("none"));
+        assert_eq!(mapped.updated_at_ms, Some(7));
     }
 }

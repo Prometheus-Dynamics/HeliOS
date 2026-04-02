@@ -1,6 +1,6 @@
 <script lang="ts">
   import { deviceSettingsStore, type DeviceSettingsState } from '../deviceSettingsStore';
-  import type { DeviceNetworkInterfaceResponse, InterfaceForm, UpdateDeviceSettingsRequest } from '../types';
+  import type { DeviceNetworkInterfaceView, DeviceSettingsPatchRequest, InterfaceForm } from '../types';
   import { REQUESTED_BY } from '../api';
   import { buildErrorMessage } from '$lib/ui/errorPolicy';
   import Nt4ExplorerModal from './Nt4ExplorerModal.svelte';
@@ -81,16 +81,16 @@
     const interfaces = deviceState.data.interfaces;
     if (
       !selectedInterface ||
-      !interfaces.some((iface: DeviceNetworkInterfaceResponse) => iface.name === selectedInterface)
+      !interfaces.some((iface: DeviceNetworkInterfaceView) => iface.name === selectedInterface)
     ) {
       selectedInterface = interfaces[0]?.name ?? null;
     }
     hydrateInterfaceForm(
-      interfaces.find((iface: DeviceNetworkInterfaceResponse) => iface.name === selectedInterface) ?? null
+      interfaces.find((iface: DeviceNetworkInterfaceView) => iface.name === selectedInterface) ?? null
     );
   });
 
-  function hydrateInterfaceForm(iface: DeviceNetworkInterfaceResponse | null): void {
+  function hydrateInterfaceForm(iface: DeviceNetworkInterfaceView | null): void {
     if (!iface) {
       interfaceForm = null;
       return;
@@ -115,8 +115,7 @@
   function selectInterface(name: string): void {
     selectedInterface = name;
     if (!deviceState.data) return;
-    const iface =
-      deviceState.data.interfaces.find((entry: DeviceNetworkInterfaceResponse) => entry.name === name) ?? null;
+    const iface = deviceState.data.interfaces.find((entry: DeviceNetworkInterfaceView) => entry.name === name) ?? null;
     hydrateInterfaceForm(iface);
   }
 
@@ -139,7 +138,7 @@
     identityError = null;
     identityStatus = null;
 
-    const request: UpdateDeviceSettingsRequest = {
+    const request: DeviceSettingsPatchRequest = {
       requested_by: REQUESTED_BY,
       hostname: trimmed,
       team_number: parsedTeam
@@ -177,7 +176,7 @@
     interfaceError = null;
     interfaceStatus = null;
 
-    const request: UpdateDeviceSettingsRequest = {
+    const request: DeviceSettingsPatchRequest = {
       requested_by: REQUESTED_BY,
       interfaces: [
         {
@@ -217,7 +216,7 @@
       return;
     }
 
-    const request: UpdateDeviceSettingsRequest = {
+    const request: DeviceSettingsPatchRequest = {
       requested_by: REQUESTED_BY,
       nt4: {
         enabled: nt4Enabled,

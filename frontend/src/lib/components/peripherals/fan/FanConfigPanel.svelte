@@ -1,8 +1,8 @@
 <script lang="ts">
-  import type { FanSettings } from '../../../../routes/settings/types';
+  import type { FanConfig } from '../../../../routes/settings/types';
 
   type Props = {
-    form: FanSettings;
+    form: FanConfig;
     selectedPointIndex: number;
     settingsBusy: boolean;
     busy: boolean;

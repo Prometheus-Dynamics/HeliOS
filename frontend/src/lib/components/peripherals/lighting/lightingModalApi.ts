@@ -1,4 +1,4 @@
-import type { LightingSettings } from '../../../../routes/settings/types';
+import type { LedConfig } from '../../../../routes/settings/types';
 import { apiFetch } from '$lib/api/core/http';
 import { buildWsUrlFromHttpBase, canUseWebSockets, connectWebSocketWithFallback, sendJson } from '$lib/api/core/ws';
 import type {
@@ -36,8 +36,8 @@ export async function saveLightingConfig(
   await deviceSettingsStore.patch(payload);
 }
 
-export async function resetLightingConfig(): Promise<LightingSettings> {
-  return apiFetch<LightingSettings>('/device/lighting/config/reset', { method: 'POST' });
+export async function resetLightingConfig(): Promise<LedConfig> {
+  return apiFetch<LedConfig>('/device/lighting/config/reset', { method: 'POST' });
 }
 
 export async function postLightingFrame(

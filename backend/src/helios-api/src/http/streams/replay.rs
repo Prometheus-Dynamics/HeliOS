@@ -61,7 +61,6 @@ pub struct MediaReplayRequest {
     )
 )]
 pub(crate) async fn start_media_replay_stream(State(state): State<AppState>, Json(req): Json<MediaReplayRequest>) -> Response {
-    const RAW_STREAM_PIPELINE_UUID: Uuid = Uuid::from_u128(0x00000000_0000_0000_0000_0000000000aa);
     const MAX_REPLAY_FILES: usize = 64;
 
     if req.files.len() > MAX_REPLAY_FILES {
@@ -241,13 +240,13 @@ pub(crate) async fn start_media_replay_stream(State(state): State<AppState>, Jso
         // The reserved RAW pipeline provides a cheap preview path (and can be wired into other pipelines).
         pipeline_enabled: true,
         pipelines: Vec::new(),
-        active_pipeline_id: Some(RAW_STREAM_PIPELINE_UUID),
+            active_pipeline_id: Some(super::RAW_PIPELINE_UUID),
         // Use the engine-native key for the raw passthrough port.
         active_pipeline_output: Some("raw".to_string()),
         pipeline_layout: Some(StreamPipelineLayout {
             rows: 1,
             columns: 1,
-            slots: vec![StreamPipelineGridSlot { row: 0, column: 0, pipeline_id: Some(RAW_STREAM_PIPELINE_UUID), output_key: Some("raw".to_string()) }],
+            slots: vec![StreamPipelineGridSlot { row: 0, column: 0, pipeline_id: Some(super::RAW_PIPELINE_UUID), output_key: Some("raw".to_string()) }],
         }),
         pipeline_wires: Vec::new(),
         pipeline_host_inputs: std::collections::BTreeMap::new(),

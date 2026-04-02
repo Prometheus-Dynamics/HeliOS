@@ -1,9 +1,9 @@
 <script lang="ts">
   import FanCurveEditor from '../../charts/FanCurveEditor.svelte';
-  import type { FanCurvePoint, FanSettings } from '../../../../routes/settings/types';
+  import type { FanConfig, FanCurvePoint } from '../../../../routes/settings/types';
 
   type Props = {
-    form: FanSettings;
+    form: FanConfig;
     mode: 'fixed' | 'curve' | 'disabled';
     displayMode: 'fixed' | 'curve' | 'disabled' | null;
     currentTemp: number | null;

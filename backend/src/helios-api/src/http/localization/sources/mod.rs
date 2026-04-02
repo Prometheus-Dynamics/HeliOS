@@ -20,7 +20,7 @@ use helios_engine::localization::config::LocalizationSourceConfig;
 use helios_engine::localization::fetch::LocalizationSourceFetcher;
 use helios_engine::localization::types::{LocalizationPipelineSource, PipelineOutputSample};
 
-pub(super) const IMU_EXTERNAL_ID: &str = "imu";
+pub(super) use helios_engine::contracts::localization::DEVICE_IMU_EXTERNAL_SOURCE_ID as IMU_EXTERNAL_ID;
 pub(super) const PROFILE_STREAM_PREFIX: &str = "profile:";
 pub(super) const PROFILE_OUTPUT_PREFIX: &str = "solver:";
 

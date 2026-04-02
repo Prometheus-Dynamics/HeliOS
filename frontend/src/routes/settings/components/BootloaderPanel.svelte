@@ -3,7 +3,7 @@
   import { subscribeDomainInvalidations } from '$lib/api/invalidation';
   import { apiFetch } from '../api';
   import { buildErrorMessage } from '$lib/ui/errorPolicy';
-  import type { BootloaderStatus, BootloaderUpdateResponse } from '../types';
+  import type { BootloaderStatus, BootloaderUpdateRequest, BootloaderUpdateResponse } from '../types';
   import { realtimeUpdateMatchesKind, type RealtimeUpdateEvent } from '$lib/api/realtimeUpdates';
 
   let status = $state<BootloaderStatus | null>(null);
@@ -77,9 +77,10 @@
     updateError = null;
     updateStatus = null;
     try {
+      const request: BootloaderUpdateRequest = { confirm: true, reboot: true };
       const response = await apiFetch<BootloaderUpdateResponse>('/device/bootloader', {
         method: 'POST',
-        body: { confirm: true, reboot: true }
+        body: request
       });
       updateStatus = response?.message ?? 'Update staged. Rebooting to apply firmware.';
       await refreshStatus();
