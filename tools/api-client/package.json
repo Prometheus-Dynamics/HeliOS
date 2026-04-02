@@ -2,6 +2,11 @@
   "name": "helios-api-client",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "bun@1.2.9",
+  "engines": {
+    "bun": ">=1.2.9 <1.3.0",
+    "node": ">=22.20.0 <23"
+  },
   "devDependencies": {
     "openapi-typescript": "7.8.0",
     "openapi-typescript-codegen": "0.29.0"

@@ -107,8 +107,8 @@ fn run_shim_guardrails(repo_root: &Path, config_path: &Path, today: NaiveDate) -
 
 fn run_generated_contracts(repo_root: &Path) -> Result<()> {
     let script = repo_root.join("tools/api-codegen/check.mjs");
-    let temp_root = env::temp_dir().join("helios-api-codegen");
-    let cargo_target_dir = env::temp_dir().join("helios-api-codegen-target");
+    let temp_root = repo_root.join(".tmp").join("api-codegen");
+    let cargo_target_dir = repo_root.join(".tmp").join("api-codegen-target");
     fs::create_dir_all(&temp_root).with_context(|| format!("failed to create {}", temp_root.display()))?;
     fs::create_dir_all(&cargo_target_dir).with_context(|| format!("failed to create {}", cargo_target_dir.display()))?;
 
