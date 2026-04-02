@@ -829,6 +829,10 @@ fn handle_label(handle: &BackendHandle) -> &'static str {
 }
 
 #[cfg(test)]
+#[path = "validation_goldens.rs"]
+mod validation_goldens;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use helios_engine::capture::{BackendHandle, BackendKind, CaptureConfig, CaptureControl, CaptureControlValue, ControlAssignment, ModeId};
