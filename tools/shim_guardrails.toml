@@ -1,20 +1,4 @@
 [[required_shims]]
-id = "streams-lifecycle-media-file-token-compat"
-path = "backend/src/helios-api/src/http/streams/validation.rs"
-owner = "HeliOS"
-delete_by = "2026-09-30"
-reason = "File-backed streams still sanitize the legacy media-file identity token so old persisted manifests remain startable."
-replace_with = "Drop media-file token coercion after persisted file-stream manifests have been migrated to stable alias and hardware-id fields."
-
-[[required_shims]]
-id = "streams-replay-calibration-guess-fallback"
-path = "backend/src/helios-api/src/http/streams/replay.rs"
-owner = "HeliOS"
-delete_by = "2026-12-31"
-reason = "Media replay still guesses calibration from the only live/persisted calibrated camera when old media lacks stream-id metadata."
-replace_with = "Require replay metadata to carry source stream identity and stop guessing calibration from unrelated cameras."
-
-[[required_shims]]
 id = "streams-replay-annexb-remux-compat-cache"
 path = "backend/src/helios-api/src/http/streams/replay.rs"
 owner = "HeliOS"

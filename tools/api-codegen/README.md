@@ -1,6 +1,10 @@
 # API Codegen Tool
 
 Generates the latest API descriptions from the backend and hydrates the frontend with fresh TypeScript bindings.
+The narrow runtime contract manifests that feed the generated Rust/TypeScript shared constants live in:
+
+- `tools/api-codegen/runtime-contracts.toml`
+- `tools/api-codegen/codec-families.toml`
 
 ## What it does
 
@@ -8,6 +12,7 @@ Generates the latest API descriptions from the backend and hydrates the frontend
 2. Installs / reuses the shared JS toolchain in `tools/api-client` (powered by `bun`).
 3. Uses `openapi-typescript` to create shared DTO typings at `frontend/src/lib/ts-bindings/types.ts`.
 4. Uses `openapi-typescript-codegen` to create a REST client under `frontend/src/lib/ts-bindings/http/client` and copies the AsyncAPI document to `frontend/src/lib/ts-bindings/ws/asyncapi.json`.
+5. Generates the explicitly owned shared runtime contract outputs from the TOML manifests above.
 
 ## Usage
 
@@ -23,6 +28,14 @@ bun run codegen
 ```
 
 Run this whenever backend contracts change so the frontend imports stay in sync.
+
+Each shared runtime contract manifest records:
+
+- the owner of the contract
+- the cross-boundary surface it belongs to
+- the source-of-truth file or registry for the values
+
+These manifests are intentionally narrow. They are for stable ids and runtime-facing cross-boundary constants, not for general UI DTO generation.
 
 ## Notes
 

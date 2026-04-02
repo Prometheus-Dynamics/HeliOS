@@ -1,5 +1,6 @@
 mod architecture_guardrails;
 mod generated_contracts;
+mod shared_owner;
 mod shim_guardrails;
 
 use std::env;
@@ -35,6 +36,7 @@ enum Commands {
 #[derive(Subcommand, Debug)]
 enum GuardrailCommand {
     Architecture(ArchitectureArgs),
+    SharedOwner(SharedOwnerArgs),
     Shim(ShimArgs),
 }
 
@@ -74,6 +76,14 @@ struct ShimArgs {
     today: Option<NaiveDate>,
 }
 
+#[derive(Args, Debug)]
+struct SharedOwnerArgs {
+    #[command(flatten)]
+    repo: RepoArgs,
+    #[arg(long)]
+    config: Option<PathBuf>,
+}
+
 fn default_repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).ancestors().nth(3).expect("xtask must live at backend/tools/xtask").to_path_buf()
 }
@@ -88,6 +98,10 @@ fn architecture_config_path(repo_root: &Path, override_path: Option<PathBuf>) ->
 
 fn shim_config_path(repo_root: &Path, override_path: Option<PathBuf>) -> PathBuf {
     override_path.unwrap_or_else(|| repo_root.join("tools").join(shim_guardrails::DEFAULT_CONFIG_NAME))
+}
+
+fn shared_owner_config_path(repo_root: &Path, override_path: Option<PathBuf>) -> PathBuf {
+    override_path.unwrap_or_else(|| repo_root.join("tools").join(shared_owner::DEFAULT_CONFIG_NAME))
 }
 
 fn parse_iso_date(value: &str) -> Result<NaiveDate, String> {
@@ -114,8 +128,19 @@ fn run_shim_guardrails(repo_root: &Path, config_path: &Path, today: NaiveDate) -
     Ok(())
 }
 
+fn run_shared_owner_guardrails(repo_root: &Path, config_path: &Path) -> Result<()> {
+    let config = shared_owner::load_config(config_path).with_context(|| format!("failed to load shared owner readiness config {}", config_path.display()))?;
+    let violations = shared_owner::evaluate_guardrails(repo_root, &config);
+    if !violations.is_empty() {
+        bail!("{}", shared_owner::format_violations(&violations));
+    }
+    println!("Shared owner readiness passed: {} tracked items checked", config.items.len());
+    Ok(())
+}
+
 fn run_repo_policy(repo_root: &Path) -> Result<()> {
     run_architecture_guardrails(repo_root, &architecture_config_path(repo_root, None))?;
+    run_shared_owner_guardrails(repo_root, &shared_owner_config_path(repo_root, None))?;
     run_shim_guardrails(repo_root, &shim_config_path(repo_root, None), Local::now().date_naive())?;
     Ok(())
 }
@@ -133,6 +158,10 @@ fn main() -> Result<()> {
             GuardrailCommand::Architecture(args) => {
                 let repo_root = resolve_repo_root(&args.repo);
                 run_architecture_guardrails(&repo_root, &architecture_config_path(&repo_root, args.config))
+            }
+            GuardrailCommand::SharedOwner(args) => {
+                let repo_root = resolve_repo_root(&args.repo);
+                run_shared_owner_guardrails(&repo_root, &shared_owner_config_path(&repo_root, args.config))
             }
             GuardrailCommand::Shim(args) => {
                 let repo_root = resolve_repo_root(&args.repo);

@@ -1,11 +1,10 @@
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 const REQUIRED_FRONTEND_GENERATED_PATHS: &[&str] = &[
     "frontend/src/lib/ts-bindings/types.ts",
@@ -18,39 +17,71 @@ const REQUIRED_FRONTEND_GENERATED_PATHS: &[&str] = &[
 ];
 
 const TRACKED_GENERATED_PATHS: &[&str] = &["backend/src/helios-engine/src/ipc/types/generated_codec_families.rs", "backend/src/helios-engine/src/contracts/generated_runtime_contracts.rs"];
+const RUNTIME_CONTRACTS_SPEC_PATH: &str = "tools/api-codegen/runtime-contracts.toml";
+const CODEC_FAMILIES_SPEC_PATH: &str = "tools/api-codegen/codec-families.toml";
 
-#[derive(Debug, Deserialize)]
-struct RuntimeContractsSpec {
-    #[serde(rename = "streamIds")]
-    stream_ids: BTreeMap<String, String>,
-    localization: BTreeMap<String, String>,
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct ContractMetadata {
+    owner: String,
+    boundary: String,
+    source_of_truth: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct ReservedPipelineIdsContract {
+    #[serde(flatten)]
+    metadata: ContractMetadata,
+    raw_pipeline_uuid: String,
+    legacy_raw_pipeline_uuid: String,
+    calibration_mode_pipeline_uuid: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct LocalizationExternalSourceIdsContract {
+    #[serde(flatten)]
+    metadata: ContractMetadata,
+    device_imu_external_source_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+struct RuntimeContractsSpec {
+    schema_version: u32,
+    reserved_pipeline_ids: ReservedPipelineIdsContract,
+    localization_external_source_ids: LocalizationExternalSourceIdsContract,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 struct CodecFamiliesSpec {
-    #[serde(rename = "encoderFamilies")]
+    schema_version: u32,
+    spec: ContractMetadata,
     encoder_families: Vec<CodecFamilySpec>,
 }
 
-#[derive(Debug, Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 struct CodecFamilySpec {
     id: String,
-    #[serde(rename = "rustVariant")]
     rust_variant: String,
-    #[serde(rename = "settingsKind")]
     settings_kind: String,
-    #[serde(rename = "selectorId")]
     selector_id: String,
-    #[serde(rename = "selectorAliases")]
     selector_aliases: Vec<String>,
-    #[serde(rename = "runtimeImplementationAliases")]
     runtime_implementation_aliases: Vec<String>,
-    #[serde(rename = "runtimeNameAliases")]
     runtime_name_aliases: Vec<String>,
-    #[serde(rename = "outputFourccAliases")]
     output_fourcc_aliases: Vec<String>,
-    #[serde(rename = "recordingCodec")]
     recording_codec: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CodecFamilyTsSpec<'a> {
+    id: &'a str,
+    rust_variant: &'a str,
+    settings_kind: &'a str,
+    selector_id: &'a str,
+    selector_aliases: &'a [String],
+    runtime_implementation_aliases: &'a [String],
+    runtime_name_aliases: &'a [String],
+    output_fourcc_aliases: &'a [String],
+    recording_codec: Option<&'a str>,
 }
 
 pub fn generate(repo_root: &Path) -> Result<()> {
@@ -142,9 +173,8 @@ pub fn validate(repo_root: &Path) -> Result<()> {
 }
 
 fn generate_runtime_contracts(repo_root: &Path) -> Result<()> {
-    let spec_path = repo_root.join("tools").join("api-codegen").join("runtime-contracts.json");
-    let spec: RuntimeContractsSpec = serde_json::from_str(&fs::read_to_string(&spec_path).with_context(|| format!("failed to read {}", spec_path.display()))?)
-        .with_context(|| format!("failed to parse {}", spec_path.display()))?;
+    let spec_path = repo_root.join(RUNTIME_CONTRACTS_SPEC_PATH);
+    let spec = load_runtime_contracts_spec(&spec_path)?;
 
     let rust_output_path = repo_root.join("backend").join("src").join("helios-engine").join("src").join("contracts").join("generated_runtime_contracts.rs");
     let ts_output_path = repo_root.join("frontend").join("src").join("lib").join("ts-bindings").join("runtimeContracts.ts");
@@ -154,9 +184,8 @@ fn generate_runtime_contracts(repo_root: &Path) -> Result<()> {
 }
 
 fn generate_codec_families(repo_root: &Path) -> Result<()> {
-    let spec_path = repo_root.join("tools").join("api-codegen").join("codec-families.json");
-    let spec: CodecFamiliesSpec = serde_json::from_str(&fs::read_to_string(&spec_path).with_context(|| format!("failed to read {}", spec_path.display()))?)
-        .with_context(|| format!("failed to parse {}", spec_path.display()))?;
+    let spec_path = repo_root.join(CODEC_FAMILIES_SPEC_PATH);
+    let spec = load_codec_families_spec(&spec_path)?;
 
     let rust_output_path = repo_root.join("backend").join("src").join("helios-engine").join("src").join("ipc").join("types").join("generated_codec_families.rs");
     let ts_output_path = repo_root.join("frontend").join("src").join("lib").join("ts-bindings").join("codecFamilies.ts");
@@ -165,20 +194,109 @@ fn generate_codec_families(repo_root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn render_runtime_contracts_rust(spec: &RuntimeContractsSpec) -> String {
-    let stream_entries = spec.stream_ids.iter().map(|(key, value)| format!("    pub const {}: Uuid = uuid::uuid!({:?});", upper_snake(key), value)).collect::<Vec<_>>().join("\n");
-    let localization_entries = spec.localization.iter().map(|(key, value)| format!("    pub const {}: &str = {:?};", upper_snake(key), value)).collect::<Vec<_>>().join("\n");
+fn load_runtime_contracts_spec(spec_path: &Path) -> Result<RuntimeContractsSpec> {
+    let raw = fs::read_to_string(spec_path).with_context(|| format!("failed to read {}", spec_path.display()))?;
+    let spec: RuntimeContractsSpec = toml::from_str(&raw).with_context(|| format!("failed to parse {}", spec_path.display()))?;
+    validate_runtime_contracts_spec(spec, spec_path)
+}
 
-    format!("// Generated by backend/tools/xtask. Do not edit by hand.\n\npub mod stream_ids {{\n    use uuid::Uuid;\n\n{stream_entries}\n}}\n\npub mod localization {{\n{localization_entries}\n}}\n")
+fn load_codec_families_spec(spec_path: &Path) -> Result<CodecFamiliesSpec> {
+    let raw = fs::read_to_string(spec_path).with_context(|| format!("failed to read {}", spec_path.display()))?;
+    let spec: CodecFamiliesSpec = toml::from_str(&raw).with_context(|| format!("failed to parse {}", spec_path.display()))?;
+    validate_codec_families_spec(spec, spec_path)
+}
+
+fn validate_runtime_contracts_spec(spec: RuntimeContractsSpec, spec_path: &Path) -> Result<RuntimeContractsSpec> {
+    if spec.schema_version != 1 {
+        bail!("{} must declare schema_version = 1", spec_path.display());
+    }
+
+    validate_contract_metadata(&spec.reserved_pipeline_ids.metadata, "reserved_pipeline_ids", spec_path)?;
+    validate_non_empty(&spec.reserved_pipeline_ids.raw_pipeline_uuid, "raw_pipeline_uuid", "reserved_pipeline_ids", spec_path)?;
+    validate_non_empty(&spec.reserved_pipeline_ids.legacy_raw_pipeline_uuid, "legacy_raw_pipeline_uuid", "reserved_pipeline_ids", spec_path)?;
+    validate_non_empty(&spec.reserved_pipeline_ids.calibration_mode_pipeline_uuid, "calibration_mode_pipeline_uuid", "reserved_pipeline_ids", spec_path)?;
+
+    validate_contract_metadata(&spec.localization_external_source_ids.metadata, "localization_external_source_ids", spec_path)?;
+    validate_non_empty(&spec.localization_external_source_ids.device_imu_external_source_id, "device_imu_external_source_id", "localization_external_source_ids", spec_path)?;
+
+    Ok(spec)
+}
+
+fn validate_codec_families_spec(spec: CodecFamiliesSpec, spec_path: &Path) -> Result<CodecFamiliesSpec> {
+    if spec.schema_version != 1 {
+        bail!("{} must declare schema_version = 1", spec_path.display());
+    }
+
+    validate_contract_metadata(&spec.spec, "spec", spec_path)?;
+    if spec.encoder_families.is_empty() {
+        bail!("{} must define at least one encoder_families entry", spec_path.display());
+    }
+
+    for family in &spec.encoder_families {
+        let context = format!("encoder_families[{}]", family.id);
+        validate_non_empty(&family.id, "id", &context, spec_path)?;
+        validate_non_empty(&family.rust_variant, "rust_variant", &context, spec_path)?;
+        validate_non_empty(&family.settings_kind, "settings_kind", &context, spec_path)?;
+        validate_non_empty(&family.selector_id, "selector_id", &context, spec_path)?;
+    }
+
+    Ok(spec)
+}
+
+fn validate_contract_metadata(metadata: &ContractMetadata, context: &str, spec_path: &Path) -> Result<()> {
+    validate_non_empty(&metadata.owner, "owner", context, spec_path)?;
+    validate_non_empty(&metadata.boundary, "boundary", context, spec_path)?;
+    validate_non_empty(&metadata.source_of_truth, "source_of_truth", context, spec_path)?;
+    Ok(())
+}
+
+fn validate_non_empty(value: &str, field_name: &str, context: &str, spec_path: &Path) -> Result<()> {
+    if value.trim().is_empty() {
+        bail!("{} {} is missing required field {}", spec_path.display(), context, field_name);
+    }
+    Ok(())
+}
+
+fn render_runtime_contracts_rust(spec: &RuntimeContractsSpec) -> String {
+    format!(
+        "// Generated by backend/tools/xtask from {RUNTIME_CONTRACTS_SPEC_PATH}. Do not edit by hand.\n// reserved_pipeline_ids owner: {} | boundary: {} | source_of_truth: {}\n// localization_external_source_ids owner: {} | boundary: {} | source_of_truth: {}\n\npub mod stream_ids {{\n    use uuid::Uuid;\n\n    pub const CALIBRATION_MODE_PIPELINE_UUID: Uuid = uuid::uuid!({:?});\n    pub const LEGACY_RAW_PIPELINE_UUID: Uuid = uuid::uuid!({:?});\n    pub const RAW_PIPELINE_UUID: Uuid = uuid::uuid!({:?});\n}}\n\npub mod localization {{\n    pub const DEVICE_IMU_EXTERNAL_SOURCE_ID: &str = {:?};\n}}\n",
+        spec.reserved_pipeline_ids.metadata.owner,
+        spec.reserved_pipeline_ids.metadata.boundary,
+        spec.reserved_pipeline_ids.metadata.source_of_truth,
+        spec.localization_external_source_ids.metadata.owner,
+        spec.localization_external_source_ids.metadata.boundary,
+        spec.localization_external_source_ids.metadata.source_of_truth,
+        spec.reserved_pipeline_ids.calibration_mode_pipeline_uuid,
+        spec.reserved_pipeline_ids.legacy_raw_pipeline_uuid,
+        spec.reserved_pipeline_ids.raw_pipeline_uuid,
+        spec.localization_external_source_ids.device_imu_external_source_id,
+    )
 }
 
 fn render_runtime_contracts_ts(spec: &RuntimeContractsSpec) -> String {
-    let stream_entries = spec.stream_ids.iter().map(|(key, value)| format!("export const {} = {:?};", upper_snake(key), value)).collect::<Vec<_>>().join("\n");
-    let localization_entries = spec.localization.iter().map(|(key, value)| format!("export const {} = {:?};", upper_snake(key), value)).collect::<Vec<_>>().join("\n");
-    let device_imu_external_source_id = spec.localization.get("deviceImuExternalSourceId").cloned().unwrap_or_default();
+    let device_imu_external_source_id = &spec.localization_external_source_ids.device_imu_external_source_id;
 
     format!(
-        "/* Generated by backend/tools/xtask. Do not edit by hand. */\n\n{stream_entries}\n{localization_entries}\n\nexport const STREAM_PIPELINE_UUIDS = {{\n  RAW: RAW_PIPELINE_UUID,\n  LEGACY_RAW: LEGACY_RAW_PIPELINE_UUID,\n  CALIBRATION_MODE: CALIBRATION_MODE_PIPELINE_UUID\n}} as const;\n\nexport const LOCALIZATION_EXTERNAL_SOURCE_IDS = {{\n  DEVICE_IMU: DEVICE_IMU_EXTERNAL_SOURCE_ID\n}} as const;\n\nexport const LOCALIZATION_EXTERNAL_STREAM_IDS = {{\n  DEVICE_IMU: {:?}\n}} as const;\n",
+        "/* Generated by backend/tools/xtask from {RUNTIME_CONTRACTS_SPEC_PATH}. Do not edit by hand. */\n\
+/* reserved_pipeline_ids owner: {} | boundary: {} | source_of_truth: {} */\n\
+/* localization_external_source_ids owner: {} | boundary: {} | source_of_truth: {} */\n\n\
+export const CALIBRATION_MODE_PIPELINE_UUID = {:?};\n\
+export const LEGACY_RAW_PIPELINE_UUID = {:?};\n\
+export const RAW_PIPELINE_UUID = {:?};\n\
+export const DEVICE_IMU_EXTERNAL_SOURCE_ID = {:?};\n\n\
+export const STREAM_PIPELINE_UUIDS = {{\n  RAW: RAW_PIPELINE_UUID,\n  LEGACY_RAW: LEGACY_RAW_PIPELINE_UUID,\n  CALIBRATION_MODE: CALIBRATION_MODE_PIPELINE_UUID\n}} as const;\n\n\
+export const LOCALIZATION_EXTERNAL_SOURCE_IDS = {{\n  DEVICE_IMU: DEVICE_IMU_EXTERNAL_SOURCE_ID\n}} as const;\n\n\
+export const LOCALIZATION_EXTERNAL_STREAM_IDS = {{\n  DEVICE_IMU: {:?}\n}} as const;\n",
+        spec.reserved_pipeline_ids.metadata.owner,
+        spec.reserved_pipeline_ids.metadata.boundary,
+        spec.reserved_pipeline_ids.metadata.source_of_truth,
+        spec.localization_external_source_ids.metadata.owner,
+        spec.localization_external_source_ids.metadata.boundary,
+        spec.localization_external_source_ids.metadata.source_of_truth,
+        spec.reserved_pipeline_ids.calibration_mode_pipeline_uuid,
+        spec.reserved_pipeline_ids.legacy_raw_pipeline_uuid,
+        spec.reserved_pipeline_ids.raw_pipeline_uuid,
+        device_imu_external_source_id,
         format!("external:{device_imu_external_source_id}")
     )
 }
@@ -210,7 +328,10 @@ fn render_codec_families_rust(spec: &CodecFamiliesSpec) -> String {
         .join(",\n");
 
     format!(
-        "// Generated by backend/tools/xtask. Do not edit by hand.\n\n#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]\npub(super) enum GeneratedEncoderFamilyVariant {{\n{}\n}}\n\n#[derive(Debug, Clone, Copy)]\npub(super) struct GeneratedEncoderFamilySpec {{\n    pub variant: GeneratedEncoderFamilyVariant,\n    pub selector_id: &'static str,\n    pub selector_aliases: &'static [&'static str],\n    pub runtime_implementation_aliases: &'static [&'static str],\n    pub runtime_name_aliases: &'static [&'static str],\n    pub output_fourcc_aliases: &'static [&'static str],\n    pub recording_codec: Option<&'static str>,\n}}\n\n{selector_consts}\n\npub(super) const GENERATED_ENCODER_FAMILY_SPECS: &[GeneratedEncoderFamilySpec] = &[\n{entries}\n];\n",
+        "// Generated by backend/tools/xtask from {CODEC_FAMILIES_SPEC_PATH}. Do not edit by hand.\n// owner: {} | boundary: {} | source_of_truth: {}\n\n#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]\npub(super) enum GeneratedEncoderFamilyVariant {{\n{}\n}}\n\n#[derive(Debug, Clone, Copy)]\npub(super) struct GeneratedEncoderFamilySpec {{\n    pub variant: GeneratedEncoderFamilyVariant,\n    pub selector_id: &'static str,\n    pub selector_aliases: &'static [&'static str],\n    pub runtime_implementation_aliases: &'static [&'static str],\n    pub runtime_name_aliases: &'static [&'static str],\n    pub output_fourcc_aliases: &'static [&'static str],\n    pub recording_codec: Option<&'static str>,\n}}\n\n{selector_consts}\n\npub(super) const GENERATED_ENCODER_FAMILY_SPECS: &[GeneratedEncoderFamilySpec] = &[\n{entries}\n];\n",
+        spec.spec.owner,
+        spec.spec.boundary,
+        spec.spec.source_of_truth,
         spec.encoder_families.iter().map(|family| format!("    {},", family.rust_variant)).collect::<Vec<_>>().join("\n"),
     )
 }
@@ -218,10 +339,34 @@ fn render_codec_families_rust(spec: &CodecFamiliesSpec) -> String {
 fn render_codec_families_ts(spec: &CodecFamiliesSpec) -> Result<String> {
     let id_entries = spec.encoder_families.iter().map(|family| format!("  {}: {:?}", constant_case(&family.id), family.id)).collect::<Vec<_>>().join(",\n");
     let selector_entries = spec.encoder_families.iter().map(|family| format!("  {}: {:?}", constant_case(&family.id), family.selector_id)).collect::<Vec<_>>().join(",\n");
-    let families_json = serde_json::to_string_pretty(&spec.encoder_families).context("failed to serialize codec family spec")?;
+    let families = spec
+        .encoder_families
+        .iter()
+        .map(|family| CodecFamilyTsSpec {
+            id: &family.id,
+            rust_variant: &family.rust_variant,
+            settings_kind: &family.settings_kind,
+            selector_id: &family.selector_id,
+            selector_aliases: &family.selector_aliases,
+            runtime_implementation_aliases: &family.runtime_implementation_aliases,
+            runtime_name_aliases: &family.runtime_name_aliases,
+            output_fourcc_aliases: &family.output_fourcc_aliases,
+            recording_codec: family.recording_codec.as_deref(),
+        })
+        .collect::<Vec<_>>();
+    let families_json = serde_json::to_string_pretty(&families).context("failed to serialize codec family spec")?;
 
     Ok(format!(
-        "/* Generated by backend/tools/xtask. Do not edit by hand. */\n\nexport const STREAM_ENCODER_FAMILY_IDS = {{\n{id_entries}\n}} as const;\n\nexport const STREAM_ENCODER_SELECTOR_IDS = {{\n{selector_entries}\n}} as const;\n\nexport const STREAM_ENCODER_FAMILIES = {families_json} as const;\n\nexport type StreamEncoderFamily = (typeof STREAM_ENCODER_FAMILIES)[number];\nexport type StreamEncoderFamilyId = StreamEncoderFamily['id'];\nexport type StreamEncoderSelectionId = StreamEncoderFamily['selectorId'];\nexport type StreamRecordingCodecId = Exclude<StreamEncoderFamily['recordingCodec'], null>;\n"
+        "/* Generated by backend/tools/xtask from {CODEC_FAMILIES_SPEC_PATH}. Do not edit by hand. */\n\
+/* owner: {} | boundary: {} | source_of_truth: {} */\n\n\
+export const STREAM_ENCODER_FAMILY_IDS = {{\n{id_entries}\n}} as const;\n\n\
+export const STREAM_ENCODER_SELECTOR_IDS = {{\n{selector_entries}\n}} as const;\n\n\
+export const STREAM_ENCODER_FAMILIES = {families_json} as const;\n\n\
+export type StreamEncoderFamily = (typeof STREAM_ENCODER_FAMILIES)[number];\n\
+export type StreamEncoderFamilyId = StreamEncoderFamily['id'];\n\
+export type StreamEncoderSelectionId = StreamEncoderFamily['selectorId'];\n\
+export type StreamRecordingCodecId = Exclude<StreamEncoderFamily['recordingCodec'], null>;\n",
+        spec.spec.owner, spec.spec.boundary, spec.spec.source_of_truth,
     ))
 }
 
@@ -332,4 +477,81 @@ fn remove_path(path: &Path) -> Result<()> {
 
 fn log(step: &str, message: &str) {
     println!("[api-codegen:{step}] {message}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        CODEC_FAMILIES_SPEC_PATH, ContractMetadata, LocalizationExternalSourceIdsContract, RUNTIME_CONTRACTS_SPEC_PATH, ReservedPipelineIdsContract, RuntimeContractsSpec,
+        validate_codec_families_spec, validate_runtime_contracts_spec,
+    };
+
+    use std::path::Path;
+
+    #[test]
+    fn runtime_contracts_require_owner_metadata() {
+        let spec = RuntimeContractsSpec {
+            schema_version: 1,
+            reserved_pipeline_ids: ReservedPipelineIdsContract {
+                metadata: ContractMetadata { owner: String::new(), boundary: "helios-engine <-> frontend".into(), source_of_truth: "backend/src/helios-engine/src/contracts.rs".into() },
+                raw_pipeline_uuid: "00000000-0000-0000-0000-0000000000aa".into(),
+                legacy_raw_pipeline_uuid: "00000000-0000-0000-0000-0000000000ab".into(),
+                calibration_mode_pipeline_uuid: "00000000-0000-0000-0000-00000000c411".into(),
+            },
+            localization_external_source_ids: LocalizationExternalSourceIdsContract {
+                metadata: ContractMetadata { owner: "HeliOS".into(), boundary: "helios-api <-> frontend".into(), source_of_truth: "backend/src/helios-api/src/http/localization/config.rs".into() },
+                device_imu_external_source_id: "imu".into(),
+            },
+        };
+
+        let err = validate_runtime_contracts_spec(spec, Path::new(RUNTIME_CONTRACTS_SPEC_PATH)).expect_err("missing owner should fail");
+        assert!(err.to_string().contains("reserved_pipeline_ids is missing required field owner"));
+    }
+
+    #[test]
+    fn codec_families_require_owner_metadata() {
+        let raw = r#"
+schema_version = 1
+
+[spec]
+owner = ""
+boundary = "helios-api/engine <-> frontend"
+source_of_truth = "tools/api-codegen/codec-families.toml"
+
+[[encoder_families]]
+id = "turbojpeg"
+rust_variant = "Turbojpeg"
+settings_kind = "turbojpeg"
+selector_id = "turbojpeg"
+selector_aliases = ["turbojpeg"]
+runtime_implementation_aliases = ["turbojpeg"]
+runtime_name_aliases = []
+output_fourcc_aliases = ["MJPG", "JPEG"]
+"#;
+
+        let spec: super::CodecFamiliesSpec = toml::from_str(raw).expect("parse spec");
+        let err = validate_codec_families_spec(spec, Path::new(CODEC_FAMILIES_SPEC_PATH)).expect_err("missing owner should fail");
+        assert!(err.to_string().contains("spec is missing required field owner"));
+    }
+
+    #[test]
+    fn runtime_contracts_render_comments_with_owner_metadata() {
+        let spec = RuntimeContractsSpec {
+            schema_version: 1,
+            reserved_pipeline_ids: ReservedPipelineIdsContract {
+                metadata: ContractMetadata { owner: "HeliOS".into(), boundary: "helios-engine <-> frontend".into(), source_of_truth: "backend/src/helios-engine/src/contracts.rs".into() },
+                raw_pipeline_uuid: "00000000-0000-0000-0000-0000000000aa".into(),
+                legacy_raw_pipeline_uuid: "00000000-0000-0000-0000-0000000000ab".into(),
+                calibration_mode_pipeline_uuid: "00000000-0000-0000-0000-00000000c411".into(),
+            },
+            localization_external_source_ids: LocalizationExternalSourceIdsContract {
+                metadata: ContractMetadata { owner: "HeliOS".into(), boundary: "helios-api <-> frontend".into(), source_of_truth: "backend/src/helios-api/src/http/localization/config.rs".into() },
+                device_imu_external_source_id: "imu".into(),
+            },
+        };
+
+        let rendered = super::render_runtime_contracts_ts(&spec);
+        assert!(rendered.contains("reserved_pipeline_ids owner: HeliOS"));
+        assert!(rendered.contains("LOCALIZATION_EXTERNAL_STREAM_IDS"));
+    }
 }

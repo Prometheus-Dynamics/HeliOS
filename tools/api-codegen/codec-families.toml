@@ -1,0 +1,58 @@
+schema_version = 1
+
+[spec]
+owner = "Shared HeliOS/Styx"
+boundary = "helios-api/engine <-> frontend stream encoder family ids"
+source_of_truth = "tools/api-codegen/codec-families.toml"
+
+[[encoder_families]]
+id = "turbojpeg"
+rust_variant = "Turbojpeg"
+settings_kind = "turbojpeg"
+selector_id = "turbojpeg"
+selector_aliases = ["turbojpeg"]
+runtime_implementation_aliases = ["turbojpeg"]
+runtime_name_aliases = []
+output_fourcc_aliases = ["MJPG", "JPEG"]
+
+[[encoder_families]]
+id = "mozjpeg"
+rust_variant = "Mozjpeg"
+settings_kind = "mozjpeg"
+selector_id = "mozjpeg"
+selector_aliases = ["mozjpeg"]
+runtime_implementation_aliases = ["mozjpeg"]
+runtime_name_aliases = []
+output_fourcc_aliases = ["MJPG", "JPEG"]
+
+[[encoder_families]]
+id = "ffmpeg_mjpeg"
+rust_variant = "FfmpegMjpeg"
+settings_kind = "ffmpeg_mjpeg"
+selector_id = "mjpeg"
+selector_aliases = ["mjpeg", "mjpg", "jpeg"]
+runtime_implementation_aliases = ["ffmpeg"]
+runtime_name_aliases = ["mjpeg"]
+output_fourcc_aliases = ["MJPG", "JPEG"]
+
+[[encoder_families]]
+id = "h264"
+rust_variant = "H264"
+settings_kind = "h264"
+selector_id = "h264"
+selector_aliases = ["h264", "avc"]
+runtime_implementation_aliases = ["ffmpeg", "h264_v4l2m2m"]
+runtime_name_aliases = ["h264", "avc"]
+output_fourcc_aliases = ["H264"]
+recording_codec = "h264"
+
+[[encoder_families]]
+id = "h265"
+rust_variant = "H265"
+settings_kind = "h265"
+selector_id = "h265"
+selector_aliases = ["h265", "hevc"]
+runtime_implementation_aliases = ["ffmpeg", "hevc_v4l2m2m", "h265_v4l2m2m"]
+runtime_name_aliases = ["h265", "hevc"]
+output_fourcc_aliases = ["H265", "HEVC"]
+recording_codec = "h265"

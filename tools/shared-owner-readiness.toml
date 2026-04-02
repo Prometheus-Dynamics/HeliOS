@@ -1,0 +1,37 @@
+[[items]]
+id = 9
+title = "Styx-owned capture and codec capability work"
+owner = "Styx"
+status = "open"
+repo = "styx"
+dependency_names = ["styx"]
+patch_table = "https://github.com/Prometheus-Dynamics/Styx.git"
+patch_dependency_names = ["styx"]
+
+[[items]]
+id = 10
+title = "Daedalus conversion and compute-affinity upstreaming"
+owner = "Daedalus"
+status = "open"
+repo = "daedalus"
+dependency_names = ["daedalus", "daedalus-data", "daedalus-macros"]
+patch_table = "https://github.com/Prometheus-Dynamics/Daedalus.git"
+patch_dependency_names = ["daedalus-rs", "daedalus-data", "daedalus-macros"]
+
+[[items]]
+id = 11
+title = "Shared frame scratch or arena contract"
+owner = "Shared HeliOS/Daedalus"
+status = "open"
+notes = "Still an unresolved ownership and design question; no upstream contract is pinned yet."
+
+[[items]]
+id = 12
+title = "Normal integration without hidden local path patching"
+owner = "Shared HeliOS/Styx/Daedalus"
+status = "blocked"
+repo = "styx+daedalus"
+dependency_names = ["styx", "daedalus", "daedalus-data", "daedalus-macros"]
+patch_table = "https://github.com/Prometheus-Dynamics/Styx.git"
+patch_dependency_names = ["styx"]
+notes = "Fresh-clone cargo check without the local path patches still fails because upstream Styx lacks codec-turbojpeg and HeliOS is not pinned to the local Daedalus item50 branch."
