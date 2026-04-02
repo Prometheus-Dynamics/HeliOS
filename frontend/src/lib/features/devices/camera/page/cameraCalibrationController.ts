@@ -1,7 +1,7 @@
 import type { StreamInfo } from '$lib/api/httpClient';
 import { apiFetchResponse } from '$lib/api/core/http';
 import type { CalibrationBoard, CalibrationImage, CalibrationParams, CalibrationResult, IpaStatus } from '$lib/features/devices/camera/cameraCalibrationTypes';
-import { StreamsApi } from '$lib/api/streamsApi';
+import { loadOwnedStreams } from '$lib/api/streamResources';
 import { emitMediaMutation } from '$lib/features/media/mutations';
 import { compareMediaRecent } from '$lib/features/media/sort';
 import { resolveStreamLabel } from '$lib/utils/streamLabels';
@@ -247,7 +247,7 @@ export function createCameraCalibrationController(state: CalibrationState, deps:
     state.calibrationImportSourcesLoading = true;
     state.calibrationImportError = null;
     try {
-      const streams = await StreamsApi.resolvedStreams({ forceRefresh: true, cacheMs: 0 });
+      const streams = await loadOwnedStreams({ force: true, preferCached: false });
       const currentId = (state.stream?.id ?? state.streamId).trim();
       const nextSources: CalibrationImportSource[] = [];
       for (const stream of streams ?? []) {

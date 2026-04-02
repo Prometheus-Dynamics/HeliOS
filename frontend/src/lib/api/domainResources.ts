@@ -1,15 +1,44 @@
-import { subscribeDomainInvalidations, type DomainUpdateKind } from '$lib/api/invalidation';
-import type { RealtimeUpdateEvent } from '$lib/api/realtimeUpdates';
+import type { RealtimeUpdateDomain, RealtimeUpdateEvent, RealtimeUpdateKind } from '$lib/api/realtimeUpdates';
 import { createRefreshableResource, type RefreshableLoaderLike, type RefreshableResource } from '$lib/utils/refreshableResource';
+
+type DomainUpdateKind = RealtimeUpdateKind | RealtimeUpdateDomain;
+type DomainInvalidationHandler = (event: RealtimeUpdateEvent) => void;
+type DomainInvalidationOptions = {
+  debounceMs?: number;
+};
 
 export type DomainResource<T> = RefreshableResource<T> & {
   subscribeInvalidations: (
-    handler?: Parameters<typeof subscribeDomainInvalidations>[1],
-    options?: Parameters<typeof subscribeDomainInvalidations>[2]
+    handler?: DomainInvalidationHandler,
+    options?: DomainInvalidationOptions
   ) => () => void;
 };
 
 type InvalidatableResource = Pick<RefreshableResource<unknown>, 'invalidate'>;
+
+function subscribeDomainInvalidationsLazy(
+  kinds: DomainUpdateKind[],
+  handler: DomainInvalidationHandler,
+  options?: DomainInvalidationOptions
+): () => void {
+  let closed = false;
+  let stop: (() => void) | null = null;
+
+  void import('$lib/api/invalidation')
+    .then(({ subscribeDomainInvalidations }) => {
+      if (closed) return;
+      stop = subscribeDomainInvalidations(kinds, handler, options);
+    })
+    .catch(() => {
+      stop = null;
+    });
+
+  return () => {
+    closed = true;
+    stop?.();
+    stop = null;
+  };
+}
 
 export function createDomainResource<T>(options: {
   key: string;
@@ -39,13 +68,13 @@ export function createDomainResource<T>(options: {
 export function subscribeDomainResourceInvalidations(
   kinds: DomainUpdateKind[],
   resources: InvalidatableResource | InvalidatableResource[],
-  handler?: Parameters<typeof subscribeDomainInvalidations>[1],
-  options?: Parameters<typeof subscribeDomainInvalidations>[2] & {
+  handler?: DomainInvalidationHandler,
+  options?: DomainInvalidationOptions & {
     matchEvent?: (event: RealtimeUpdateEvent) => boolean;
   }
 ): () => void {
   const resourceList = Array.isArray(resources) ? resources : [resources];
-  return subscribeDomainInvalidations(
+  return subscribeDomainInvalidationsLazy(
     kinds,
     (event) => {
       if (options?.matchEvent && !options.matchEvent(event)) {

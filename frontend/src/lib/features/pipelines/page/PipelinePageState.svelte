@@ -6,6 +6,7 @@
   import { toaster, OpenAPI } from '$lib';
   import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
   import { PipelinesApi } from '$lib/api/pipelinesApi';
+  import { loadOwnedStreamCapabilities } from '$lib/api/streamResources';
   import { StreamsApi } from '$lib/api/streamsApi';
   import { createPipelinePageStore } from '$lib/features/pipelines/pageStore';
   import type { PageData } from '../../../../routes/pipelines/$types';
@@ -391,7 +392,7 @@
 
   async function loadStreamCapabilities(): Promise<void> {
     try {
-      const capabilities = await StreamsApi.streamCapabilities();
+      const capabilities = await loadOwnedStreamCapabilities();
       const normalized = String(capabilities?.rawPipelineId ?? '').trim().toLowerCase();
       if (normalized.length) {
         rawStreamPipelineUuid = normalized;

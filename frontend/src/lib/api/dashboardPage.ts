@@ -1,18 +1,18 @@
 import { PeripheralsApi } from '$lib/api/peripheralsApi';
 import { PipelinesApi } from '$lib/api/pipelinesApi';
-import { StreamsApi } from '$lib/api/streamsApi';
-import { streamHealthStatus, streamRecordingActive, streamRecordingSinceMs } from '$lib/api/streamRuntime';
+import { buildOwnedStreamRecords, loadOwnedStreams } from '$lib/api/streamResources';
+import { streamHealthStatus } from '$lib/api/streamRuntime';
 import { DeviceApi } from '$lib/api/deviceApi';
 import { DEFAULT_REQUEST_TIMEOUT_MS } from '$lib/api/requestUtils';
 import type { DashboardFetchMeta, DashboardPayload, DashboardSourceStatus, PipelineWatchEntry, StreamGalleryItem, SummaryStat, TimelineItem } from '$lib/types/dashboard';
 import type { DeviceMetrics, PipelineSummary, ProbedDevice, StreamInfo } from '$lib/ts-bindings/http/client';
-import { resolveStreamAlias, resolveStreamLabel } from '$lib/utils/streamLabels';
+import { resolveStreamLabel } from '$lib/utils/streamLabels';
 
 const REQUEST_TIMEOUT_MS = DEFAULT_REQUEST_TIMEOUT_MS;
 
 export async function fetchDashboardPageData(): Promise<DashboardPayload> {
   const [streamsResult, camerasResult, pipelinesResult, metricsResult] = await Promise.allSettled([
-    StreamsApi.resolvedStreams({ timeoutMs: REQUEST_TIMEOUT_MS }),
+    loadOwnedStreams({ preferCached: false }),
     PeripheralsApi.listCameras({ timeoutMs: REQUEST_TIMEOUT_MS }),
     PipelinesApi.listGraphs({ timeoutMs: REQUEST_TIMEOUT_MS }),
     DeviceApi.metrics({ timeoutMs: REQUEST_TIMEOUT_MS })
@@ -156,19 +156,17 @@ function buildPipelineWatch(slots: StreamInfo[]): PipelineWatchEntry[] {
 }
 
 function buildStreamGallery(slots: StreamInfo[]): StreamGalleryItem[] {
-  if (!slots.length) return [];
-  return slots.slice(0, 6).map((slot) => {
-    const status = streamHealthStatus(slot);
-    const recordingActive = streamRecordingActive(slot);
-    const recordingSinceMs = streamRecordingSinceMs(slot);
+  const records = buildOwnedStreamRecords(slots);
+  if (!records.length) return [];
+  return records.slice(0, 6).map((record) => {
     return {
-      name: resolveStreamLabel(slot, 'Stream'),
-      status,
-      captureSessionId: slot.id ?? null,
-      captureSessionAlias: resolveStreamAlias(slot),
-      cameraUid: null,
-      recordingActive,
-      recordingSinceMs
+      name: record.label,
+      status: record.status,
+      captureSessionId: record.id || null,
+      captureSessionAlias: record.alias,
+      cameraUid: record.cameraUid,
+      recordingActive: record.recordingActive,
+      recordingSinceMs: record.recordingSinceMs
     };
   });
 }

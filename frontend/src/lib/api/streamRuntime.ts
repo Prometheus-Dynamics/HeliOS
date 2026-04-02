@@ -1,4 +1,4 @@
-import type { StreamInfo } from '$lib/ts-bindings/http/client';
+import type { StreamInfo } from '$lib/ts-bindings/http/client/models/StreamInfo';
 
 export type StreamCaptureRuntimeState = 'running' | 'stopped' | 'disabled';
 export type StreamHealthStatus = 'live' | 'idle' | 'degraded';

@@ -6,9 +6,9 @@ import { scheduleWhenIdle } from '$lib/utils/browserSchedule';
 import { resourceGuardStatusResource, type ResourceGuardStatus } from '$lib/api/deviceStatusResources';
 import { connectDevicesUpdatesStream } from '$lib/api/devicesUpdates';
 import { startRefreshScheduler } from '$lib/api/refreshScheduler';
+import { invalidateOwnedStreamMutationResources } from '$lib/api/streamResources';
 import { StreamsApi } from '$lib/api/streamsApi';
 import { apiFetch } from '$lib/api/core/http';
-import { invalidateSWR, invalidateSWRPrefix } from '$lib/utils/swrCache';
 import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
 import { createBackoffTimer } from '$lib/utils/backoff';
 import { fetchDevicesCamerasSnapshot, fetchDevicesPeripheralsSnapshot } from '$lib/api/devicesPage';
@@ -406,9 +406,7 @@ export const createDevicesPageSupport = (options: DevicesPageSupportOptions) => 
         title: 'Stream deleted',
         description: `${camera.name} capture session removed`
       });
-      invalidateSWRPrefix('devices:');
-      invalidateSWRPrefix('media:');
-      invalidateSWR('media:stream-labels:v1');
+      invalidateOwnedStreamMutationResources();
       await refreshDevices();
     } catch (error) {
       reportError({

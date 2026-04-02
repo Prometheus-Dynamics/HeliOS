@@ -1,5 +1,5 @@
 import { PipelinesApi } from '$lib/api/pipelinesApi';
-import { StreamsApi } from '$lib/api/streamsApi';
+import { loadOwnedStreams } from '$lib/api/streamResources';
 
 export async function fetchPipelineGraph(pipelineId: string) {
   return PipelinesApi.fetchGraph({ id: pipelineId });
@@ -23,7 +23,7 @@ export async function uploadPipelineGraph(graph: unknown, name?: string | null) 
 }
 
 export async function listCaptureBackends() {
-  return StreamsApi.resolvedStreams();
+  return loadOwnedStreams();
 }
 
 export async function listPipelineRegistry() {

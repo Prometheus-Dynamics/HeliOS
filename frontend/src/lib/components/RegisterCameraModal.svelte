@@ -14,10 +14,14 @@
   import { ApiError, OpenAPI, PeersService, PeripheralsService } from '$lib/ts-bindings/http/client';
   import { connectDevicesUpdatesStream } from '$lib/api/devicesUpdates';
   import { PipelinesApi } from '$lib/api/pipelinesApi';
+  import {
+    invalidateOwnedStreamMutationResources,
+    loadOwnedStreamCapabilities,
+    loadOwnedStreams
+  } from '$lib/api/streamResources';
   import { StreamsApi } from '$lib/api/streamsApi';
   import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
   import { extractValidationReport } from '$lib/api/errors';
-  import { invalidateSWR, invalidateSWRPrefix } from '$lib/utils/swrCache';
   import type {
     CaptureConfig,
     CodecInfo,
@@ -29,11 +33,10 @@
     ProbedBackend,
     ProbedDevice,
     PeerInfo,
-    StreamInfo,
-    StreamCapabilitiesResponse,
     StreamManifest,
     ValidationIssue
   } from '$lib/ts-bindings/http/client';
+  import type { StreamCapabilitiesResponse } from '$lib/ts-bindings/http/client/models/StreamCapabilitiesResponse';
   import { registerCameraModal } from '$lib/stores/modals';
   import ModalShell from '$lib/components/ui/ModalShell.svelte';
   import ValidationIssueList from '$lib/components/ui/ValidationIssueList.svelte';
@@ -341,11 +344,11 @@
       const [cameraResp, codecResp, streamsResp, peersResp, pipelineResp, templateResp, streamCapabilitiesResp] = await Promise.all([
         PeripheralsService.listCameras(),
         StreamsApi.listCodecs().catch(() => null) as Promise<CodecInfo[] | null>,
-        StreamsApi.resolvedStreams().catch(() => []) as Promise<StreamInfo[]>,
+        loadOwnedStreams({ preferCached: false }).catch(() => []),
         PeersService.listPeers().catch(() => null) as Promise<{ peers?: PeerInfo[] } | null>,
         PipelinesApi.listGraphs().catch(() => []) as Promise<PipelineSummary[]>,
         PipelinesApi.listTemplates().catch(() => []) as Promise<PipelineTemplateSummary[]>,
-        StreamsApi.streamCapabilities().catch(() => null) as Promise<StreamCapabilitiesResponse | null>
+        loadOwnedStreamCapabilities({ preferCached: false }).catch(() => null)
       ]);
 
       const allCodecs = Array.isArray(codecResp) ? codecResp.filter((c) => c?.fourcc) : [];
@@ -1017,9 +1020,7 @@
       const response = await StreamsApi.startStream({ requestBody: manifest });
       const streamId = response.stream_id;
       toaster.success({ title: 'Stream created', description: streamId ? `Stream ${streamId} started` : 'Capture stream started' });
-      invalidateSWRPrefix('devices:');
-      invalidateSWRPrefix('media:');
-      invalidateSWR('media:stream-labels:v1');
+      invalidateOwnedStreamMutationResources();
       dispatch('create', { streamId, descriptor: response.descriptor });
       registerCameraModal.set(false);
     } catch (err) {

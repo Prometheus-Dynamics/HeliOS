@@ -7,7 +7,7 @@
   import { scheduleAfterPaint, scheduleWhenIdle } from '$lib/utils/browserSchedule';
   import { apiUrl } from '$lib/api/httpClient';
   import { openStreamMetricsSocket } from '$lib/api/streamMetrics';
-  import { StreamsApi } from '$lib/api/streamsApi';
+  import { loadOwnedStreams } from '$lib/api/streamResources';
   import { realtimeUpdateMatchesKind, type RealtimeUpdateEvent } from '$lib/api/realtimeUpdates';
   import {
     LocalizationService,
@@ -1043,7 +1043,7 @@
 
   const loadStreamsSnapshot = async (): Promise<void> => {
     try {
-      streamInfos = await StreamsApi.resolvedStreams({ cacheMs: 5_000 });
+      streamInfos = await loadOwnedStreams();
     } catch {
       streamInfos = [];
     }

@@ -4,32 +4,19 @@
   import StreamPreview from './StreamPreview.svelte';
   import { buildStreamPreviewProps } from './streamViewerSurface';
   import { floatingStreamViewer, type FloatingStreamViewerState } from '$lib/stores/floatingStreamViewer';
-  import { StreamsApi } from '$lib/api/streamsApi';
-  import { streamHealthStatus, streamRecordingActive, streamRecordingSinceMs } from '$lib/api/streamRuntime';
+  import { loadOwnedStreamRecords } from '$lib/api/streamResources';
   import type { FloatingStreamSource } from '$lib/stores/floatingStreamViewer';
-  import { resolveStreamAlias, resolveStreamLabel } from '$lib/utils/streamLabels';
+
+  type AvailableStreamOption = FloatingStreamSource & { optionLabel: string };
 
   let viewer = $state<FloatingStreamViewerState>(floatingStreamViewer.getDefaultState());
   let unsubscribe: (() => void) | null = null;
   let dragState = $state<null | { startX: number; startY: number; originX: number; originY: number }>(null);
   let resizeState = $state<null | { startX: number; startY: number; originW: number; originH: number }>(null);
-  let availableStreams = $state<FloatingStreamSource[]>([]);
+  let availableStreams = $state<AvailableStreamOption[]>([]);
   let selectedStreamId = $state<string>('');
   let loadingStreams = $state(false);
   let loadError = $state<string | null>(null);
-
-  function resolveStreamDisplay(raw: unknown): string {
-    return resolveStreamLabel(raw, '');
-  }
-
-  function normalizeLabel(label: string | null | undefined, id: string | null | undefined): string {
-    const trimmedLabel = label?.trim() ?? '';
-    const trimmedId = id?.trim() ?? '';
-    if (trimmedLabel && trimmedId && trimmedLabel !== trimmedId) {
-      return `${trimmedLabel} · ${trimmedId}`;
-    }
-    return trimmedLabel || trimmedId || 'Unknown stream';
-  }
 
   function streamHeaderLabel(source: FloatingStreamSource | null): string {
     if (!source) return 'Floating stream viewer';
@@ -37,8 +24,8 @@
     return label || source.captureSessionId?.trim() || 'Floating stream viewer';
   }
 
-  function streamOptionLabel(source: FloatingStreamSource): string {
-    return normalizeLabel(source.captureSessionAlias ?? source.name ?? null, source.captureSessionId);
+  function streamOptionLabel(source: AvailableStreamOption): string {
+    return source.optionLabel;
   }
 
   if (browser) {
@@ -74,34 +61,19 @@
     loadingStreams = true;
     loadError = null;
     try {
-      const streams = await StreamsApi.resolvedStreams();
-      const nextStreams = (streams ?? []).map((stream) => {
-        const display = resolveStreamDisplay(stream);
-        const alias = resolveStreamAlias(stream);
-        const id = stream.id ?? null;
-        const name = display || id || 'Unknown stream';
-        return {
-          name,
-          status: streamHealthStatus(stream),
-          captureSessionId: id,
-          captureSessionAlias: alias,
-          cameraUid: null,
-          recordingActive: streamRecordingActive(stream),
-          recordingSinceMs: streamRecordingSinceMs(stream),
-          pipelineId:
-            stream.manifest?.active_pipeline_id ??
-            (Array.isArray(stream.manifest?.pipelines) ? stream.manifest?.pipelines?.[0]?.pipeline_id : null) ??
-            null,
-          pipelineOutput:
-            stream.manifest?.active_pipeline_output ??
-            (Array.isArray(stream.manifest?.pipelines) ? stream.manifest?.pipelines?.[0]?.pipeline_output : null) ??
-            null,
-          previewFormat: 'auto'
-        } as FloatingStreamSource;
-      });
-      availableStreams = nextStreams.sort((a, b) =>
-        streamOptionLabel(a).localeCompare(streamOptionLabel(b), undefined, { sensitivity: 'base' })
-      );
+      availableStreams = (await loadOwnedStreamRecords()).map((record) => ({
+        name: record.label,
+        status: record.status,
+        captureSessionId: record.id || null,
+        captureSessionAlias: record.alias,
+        cameraUid: record.cameraUid,
+        recordingActive: record.recordingActive,
+        recordingSinceMs: record.recordingSinceMs,
+        pipelineId: record.pipelineId,
+        pipelineOutput: record.pipelineOutput,
+        previewFormat: 'auto',
+        optionLabel: record.optionLabel
+      }));
       const currentSelection = viewer.stream?.captureSessionId ?? selectedStreamId;
       if (!availableStreams.length) {
         selectedStreamId = '';

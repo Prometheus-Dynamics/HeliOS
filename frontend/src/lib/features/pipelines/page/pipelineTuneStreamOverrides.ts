@@ -1,4 +1,5 @@
 import type { StreamsApi as SharedStreamsApi } from '$lib/api/streamsApi';
+import { loadOwnedStreams } from '$lib/api/streamResources';
 import type { StreamInfo } from '$lib/ts-bindings/http/client';
 import type { PipelineGraphPlan, PipelineNodeValue, PipelineOverviewPipeline } from '$lib/types/pipeline';
 import { fromApiGraphPlan } from '$lib/features/pipelines/graphConverters';
@@ -12,14 +13,7 @@ import {
   normalizePortKey
 } from './pipelineTuneState';
 
-type StreamsApi = Pick<typeof SharedStreamsApi, 'resolvedStreams' | 'setPipelineGraphPatch' | 'setPipelineGraph' | 'setPipelineInputs'>;
-
-type ListedStreamsResult = {
-  items?: StreamInfo[] | null;
-};
-
-const asListedStreamsResult = (value: unknown): ListedStreamsResult | null =>
-  value && typeof value === 'object' ? (value as ListedStreamsResult) : null;
+type StreamsApi = Pick<typeof SharedStreamsApi, 'setPipelineGraphPatch' | 'setPipelineGraph' | 'setPipelineInputs'>;
 
 type DaedalusPatch = Parameters<typeof nodeOverridesFromDaedalusPatch>[0];
 
@@ -36,10 +30,7 @@ export const createTuneStreamOverrides = (options: {
   setTuneStreamInputOverridesById: (next: Record<string, Record<string, PipelineNodeValue>>) => void;
 }) => {
   const fetchTuneStreams = async (): Promise<StreamInfo[]> => {
-    const listResult = await options.StreamsApi.resolvedStreams();
-    if (Array.isArray(listResult)) return listResult as StreamInfo[];
-    const items = asListedStreamsResult(listResult)?.items ?? null;
-    return Array.isArray(items) ? items : [];
+    return loadOwnedStreams();
   };
 
   const seedStreamOverrides = (stream: StreamInfo, pipelineId: string, baseGraph: PipelineGraphPlan | null): void => {

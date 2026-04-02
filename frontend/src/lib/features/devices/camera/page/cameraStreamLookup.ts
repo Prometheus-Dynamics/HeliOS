@@ -1,5 +1,6 @@
 import type { CameraLayoutCameraResponse, DeviceService, StreamInfo } from '$lib/api/httpClient';
 import type { StreamsApi } from '$lib/api/streamsApi';
+import { findOwnedStreamByEffectiveId, loadOwnedStreams, streamLookupKeys } from '$lib/api/streamResources';
 
 type StreamLookupResult = {
   info: StreamInfo | null;
@@ -33,32 +34,6 @@ function normalizeKeys(values: Array<unknown>): string[] {
   return values.map((value) => String(value ?? '').trim()).filter(Boolean);
 }
 
-function streamMatchKeys(info: StreamInfo): string[] {
-  const manifestRecord = asRecord(info.manifest);
-  const identityRecord = asRecord(manifestRecord?.identity);
-  const captureRecord = asRecord(manifestRecord?.capture);
-  const identityKeys = Array.isArray(info.manifest?.identity?.keys) ? normalizeKeys(info.manifest.identity.keys) : [];
-  const deviceKeys = Array.isArray(captureRecord?.device_keys) ? normalizeKeys(captureRecord.device_keys) : [];
-  return normalizeKeys([
-    readString(identityRecord, 'id', 'alias', 'display'),
-    ...identityKeys,
-    ...deviceKeys
-  ]);
-}
-
-function matchesEffectiveId(info: StreamInfo, effectiveId: string): boolean {
-  const id = String(info?.id ?? '').trim();
-  if (id && id === effectiveId) return true;
-  return streamMatchKeys(info).includes(effectiveId);
-}
-
-function asStreamInfoArray(value: unknown): StreamInfo[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value.filter((entry): entry is StreamInfo => typeof asRecord(entry)?.id === 'string');
-}
-
 function cameraLayoutKeys(camera: CameraLayoutCameraResponse | null | undefined): string[] {
   return normalizeKeys([
     camera?.stream_id,
@@ -77,11 +52,8 @@ export async function resolveStreamInfo({ effectiveId, streamsApi, deviceService
   let error: string | null = null;
 
   if (!info?.id) {
-    const list = await streamsApi.resolvedStreams({ forceRefresh: true }).catch(() => null);
-    const wrappedCandidates = asStreamInfoArray(asRecord(list)?.items);
-    candidates = wrappedCandidates.length ? wrappedCandidates : asStreamInfoArray(list);
-    const match = candidates.find((item) => matchesEffectiveId(item, effectiveId));
-    info = match ?? null;
+    candidates = await loadOwnedStreams({ force: true, preferCached: false }).catch(() => []);
+    info = findOwnedStreamByEffectiveId(candidates, effectiveId);
   }
 
   if (!info?.id) {
@@ -94,7 +66,7 @@ export async function resolveStreamInfo({ effectiveId, streamsApi, deviceService
       info = await streamsApi.getStream({ id: resolvedId }).catch(() => null);
     } else if (layoutMatch && candidates.length) {
       const layoutCandidates = cameraLayoutKeys(layoutMatch);
-      const fallback = candidates.find((item) => layoutCandidates.some((value) => streamMatchKeys(item).includes(value)));
+      const fallback = candidates.find((item) => layoutCandidates.some((value) => streamLookupKeys(item).includes(value)));
       if (fallback?.id) {
         info = fallback;
       }

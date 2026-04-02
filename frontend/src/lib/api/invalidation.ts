@@ -1,4 +1,3 @@
-import { browser } from '$app/environment';
 import {
   connectRealtimeUpdatesStream,
   normalizeRealtimeUpdateKind,
@@ -57,6 +56,10 @@ const latestResourceRevisions = new Map<string, number>();
 
 let bridgeStarted = false;
 let bridgeStop: (() => void) | null = null;
+
+function hasBrowserRuntime(): boolean {
+  return typeof window !== 'undefined' && typeof window.setTimeout === 'function';
+}
 
 function matchingInvalidationKinds(kind: string): DomainUpdateKind[] {
   const matches = DOMAIN_INVALIDATION_KEYS.filter((candidate) => realtimeUpdateMatchesKind(kind, candidate));
@@ -123,7 +126,7 @@ function shouldApplyRealtimeUpdate(event: RealtimeUpdateEvent, kind: string): bo
 }
 
 function connectBridge(): void {
-  if (!browser) return;
+  if (!hasBrowserRuntime()) return;
   bridgeStop?.();
   bridgeStop = connectRealtimeUpdatesStream(
     {
@@ -146,7 +149,7 @@ function connectBridge(): void {
 }
 
 export function startDomainInvalidationBridge(): void {
-  if (!browser || bridgeStarted) return;
+  if (!hasBrowserRuntime() || bridgeStarted) return;
   bridgeStarted = true;
   reconnectBackoff.reset();
   connectBridge();

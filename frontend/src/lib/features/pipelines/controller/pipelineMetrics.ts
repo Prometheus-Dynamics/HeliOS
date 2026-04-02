@@ -1,6 +1,7 @@
 import { browser } from "$app/environment";
 import { get } from "svelte/store";
 import { toaster } from "$lib";
+import { loadOwnedStreams } from "$lib/api/streamResources";
 import { StreamsApi } from "$lib/api/streamsApi";
 import { cancellableWithTimeout } from "$lib/api/requestUtils";
 import type { Readable, Writable } from "svelte/store";
@@ -131,16 +132,10 @@ export function createPipelineMetricsManager(deps: PipelineMetricsManagerDeps) {
     const { quiet = false } = options;
     const current = ensurePipelineMetricsEntry(pipelineId);
     try {
-      const listResult = await cancellableWithTimeout(
-        () => StreamsApi.resolvedStreams(),
+      const streams = await cancellableWithTimeout(
+        () => loadOwnedStreams({ preferCached: false }),
         PIPELINE_METRICS_REQUEST_TIMEOUT_MS,
       );
-      const listRecord = asRecord(listResult);
-      const streams = Array.isArray(listResult)
-        ? listResult
-        : Array.isArray(listRecord?.items)
-          ? listRecord.items
-          : [];
       const pipelineRecord = get(deps.pipelines).find((entry) => entry.id === pipelineId) ?? null;
       const pipelineAliases = new Set<string>();
       const attachmentStreamIds = new Set<string>();

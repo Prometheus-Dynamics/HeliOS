@@ -769,6 +769,12 @@
       "review_note": "SvelteKit/browser-specific preview-controller wiring now lives here; keep environment-bound API helpers out of the pure controller module so controller tests stay framework-agnostic."
     },
     {
+      "path": "frontend/src/lib/api/streamResources.ts",
+      "max_lines": 280,
+      "owner": "HeliOS",
+      "review_note": "Shared app-level ownership for resolved stream inventory, capabilities, lookup keys, and invalidation now lives here; keep per-route shaping, modal workflow logic, and view-specific state out of this resource authority."
+    },
+    {
       "path": "frontend/src/routes/+layout.svelte",
       "max_lines": 140,
       "owner": "HeliOS",

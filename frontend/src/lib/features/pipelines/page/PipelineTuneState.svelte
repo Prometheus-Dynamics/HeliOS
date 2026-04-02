@@ -3,6 +3,7 @@
   import { onDestroy, untrack, type Snippet } from 'svelte';
   import { get, type Readable } from 'svelte/store';
   import { toaster } from '$lib';
+  import { loadOwnedStreams } from '$lib/api/streamResources';
   import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
   import { connectStreamControls, type StreamControlSocket } from '$lib/api/streamControls';
   import type { StreamsApi as SharedStreamsApi } from '$lib/api/streamsApi';
@@ -1484,16 +1485,11 @@
       void (async () => {
         try {
           const listResult = await cancellableWithTimeout(
-            () => StreamsApi.resolvedStreams(),
+            () => loadOwnedStreams({ preferCached: false }),
             TUNE_METRICS_SNAPSHOT_TIMEOUT_MS
           );
           if (!isMounted) return;
-          const listRecord = asRecord(listResult);
-          const streams = Array.isArray(listResult)
-            ? listResult
-            : Array.isArray(listRecord?.items)
-              ? listRecord.items
-              : [];
+          const streams = listResult;
 
           const aliases = new SvelteSet<string>();
           const name = typeof pipeline?.name === 'string' ? pipeline.name.trim().toLowerCase() : '';

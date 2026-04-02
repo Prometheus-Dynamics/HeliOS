@@ -6,6 +6,7 @@
   import { encoderSelectionId } from '$lib/api/streamEncoderSettings';
   import { apiFetchResponse } from '$lib/api/core/http';
   import { PipelinesApi } from '$lib/api/pipelinesApi';
+  import { loadOwnedStreamCapabilities } from '$lib/api/streamResources';
   import { fromApiGraphPlan } from '$lib/features/pipelines/graphConverters';
   import { serializeGraphPlan } from '$lib/features/pipelines/graph';
   import { buildDaedalusGraphPatch } from '$lib/features/pipelines/daedalusGraph';
@@ -823,7 +824,7 @@
 
   const loadStreamCapabilities = async (): Promise<void> => {
     try {
-      const capabilities = await StreamsApi.streamCapabilities();
+      const capabilities = await loadOwnedStreamCapabilities();
       const rawId = normalizePipelineUuid(capabilities?.rawPipelineId);
       if (rawId) {
         rawPipelineUuid = setRawPipelineUuid(rawId);

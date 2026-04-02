@@ -54,6 +54,7 @@
   import { onDestroy, untrack } from 'svelte';
   import { SvelteMap } from 'svelte/reactivity';
   import { PipelinesApi } from '$lib/api/pipelinesApi';
+  import { loadOwnedStreamCapabilities } from '$lib/api/streamResources';
   import { StreamsApi } from '$lib/api/streamsApi';
 
   type Corner2D = { x: number; y: number };
@@ -875,7 +876,7 @@
     if (streamCapabilitiesPromise) return streamCapabilitiesPromise;
     streamCapabilitiesPromise = (async () => {
       try {
-        const capabilities = await StreamsApi.streamCapabilities();
+        const capabilities = await loadOwnedStreamCapabilities();
         const rawId = normalizePipelineId(capabilities?.rawPipelineId);
         if (rawId) rawPipelineUuid = rawId;
         const calibrationId = normalizePipelineId(capabilities?.calibrationModePipelineId);

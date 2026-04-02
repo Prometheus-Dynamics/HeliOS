@@ -1,6 +1,6 @@
 import { PeripheralsService } from '$lib/ts-bindings/http/client';
 import { fetchPeerStreams } from '$lib/api/peers';
-import { StreamsApi } from '$lib/api/streamsApi';
+import { loadOwnedStreams } from '$lib/api/streamResources';
 import { PeripheralsApi } from '$lib/api/peripheralsApi';
 import { DeviceApi } from '$lib/api/deviceApi';
 import { emptyImuStatus } from '$lib/api/systemsPage';
@@ -17,7 +17,7 @@ export async function fetchDevicesPageData(): Promise<DevicesPayload> {
   const [metricsResult, peripheralsResult, streamsResult, peerStreamsResult] = await Promise.allSettled([
     DeviceApi.metrics({ timeoutMs: REQUEST_TIMEOUT_MS }),
     PeripheralsApi.listPeripherals({ timeoutMs: REQUEST_TIMEOUT_MS }),
-    StreamsApi.resolvedStreams({ timeoutMs: REQUEST_TIMEOUT_MS }),
+    loadOwnedStreams({ preferCached: false }),
     fetchPeerStreams(REQUEST_TIMEOUT_MS)
   ]);
 
@@ -103,7 +103,7 @@ export async function fetchDevicesPageData(): Promise<DevicesPayload> {
 
 export async function fetchDevicesCamerasSnapshot(): Promise<DevicesPayload['cameras']> {
   const [streamsResult, peerStreamsResult] = await Promise.allSettled([
-    StreamsApi.resolvedStreams({ timeoutMs: REQUEST_TIMEOUT_MS }),
+    loadOwnedStreams({ preferCached: false }),
     fetchPeerStreams(REQUEST_TIMEOUT_MS)
   ]);
   const streamsRaw = streamsResult.status === 'fulfilled' ? streamsResult.value ?? [] : [];
