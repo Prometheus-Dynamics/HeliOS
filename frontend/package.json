@@ -22,7 +22,7 @@
     "prepare": "svelte-kit sync || echo ''",
     "precheck": "if [ \"$SKIP_CODEGEN\" = \"1\" ]; then echo \"Skipping codegen\"; else bun run codegen; fi",
     "check": "svelte-check --tsconfig ./tsconfig.json",
-    "check:contracts": "node ../tools/api-codegen/check.mjs",
+    "check:contracts": "cargo run --manifest-path ../backend/Cargo.toml -p xtask -- validate generated-contracts",
     "check:watch": "svelte-check --watch --tsconfig ./tsconfig.json",
     "prelint": "if [ \"$SKIP_CODEGEN\" = \"1\" ]; then echo \"Skipping codegen\"; else bun run codegen; fi",
     "lint": "eslint src --ext .ts,.svelte"

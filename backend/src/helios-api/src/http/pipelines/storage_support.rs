@@ -13,6 +13,9 @@ use super::{
     types::{PipelineDocument, PipelineError, PipelineTemplateDocument, PipelineTemplateDocumentRaw, PipelineTemplateSummary, map_io_error_response},
 };
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) fn pipeline_dir() -> Result<PathBuf, Box<axum::response::Response>> {
     storage::ensure_subdir("pipelines").map_err(|err| Box::new(map_io_error(err, "failed to prepare pipeline directory")))
 }
@@ -103,25 +106,4 @@ pub(crate) async fn load_template_graph(template_id: &str) -> io::Result<serde_j
     let data = fs::read_to_string(&path).await?;
     let raw = PipelineTemplateDocumentRaw::decode_str(&data).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
     Ok(template_raw_into_document(template_id, raw).graph)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{PipelineTemplateDocumentRaw, template_raw_into_summary};
-
-    #[test]
-    fn template_raw_into_summary_uses_template_id_when_name_is_blank() {
-        let raw = PipelineTemplateDocumentRaw {
-            schema_version: 1,
-            id: Some("demo".to_string()),
-            name: Some("   ".to_string()),
-            summary: Some("  Example  ".to_string()),
-            tags: vec!["vision".to_string()],
-            graph: serde_json::json!({ "nodes": [], "edges": [] }),
-        };
-
-        let summary = template_raw_into_summary("demo".to_string(), raw);
-        assert_eq!(summary.name, "demo");
-        assert_eq!(summary.summary.as_deref(), Some("Example"));
-    }
 }

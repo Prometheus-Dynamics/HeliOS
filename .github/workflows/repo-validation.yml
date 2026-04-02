@@ -1,4 +1,4 @@
-name: Generated Contracts
+name: Repo Validation
 
 on:
   pull_request:
@@ -7,15 +7,12 @@ on:
       - main
 
 jobs:
-  generated-contracts:
+  repo-validation:
     runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Install Bun
-        uses: oven-sh/setup-bun@v2
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -33,11 +30,16 @@ jobs:
       - name: Cache cargo target
         uses: actions/cache@v4
         with:
-          path: .cache/api-codegen/cargo-target
+          path: backend/target
           key: ${{ runner.os }}-cargo-target-${{ hashFiles('backend/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-target-
 
-      - name: Check generated contracts
-        working-directory: frontend
-        run: bun run check:contracts
+      - name: Run xtask tests
+        run: cargo test --manifest-path backend/Cargo.toml -p xtask
+
+      - name: Validate repo policy
+        run: cargo run --manifest-path backend/Cargo.toml -p xtask -- validate repo-policy
+
+      - name: Validate generated contracts
+        run: cargo run --manifest-path backend/Cargo.toml -p xtask -- validate generated-contracts
