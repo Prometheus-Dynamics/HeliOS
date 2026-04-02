@@ -210,7 +210,7 @@ fn normalize_requested_stream_encoder_preserves_runtime_implementation_ids() {
 }
 
 #[test]
-fn legacy_shadow_recording_mode_uses_generated_runtime_ids() {
+fn stream_manifest_rejects_legacy_shadow_recorder_field() {
     let mut payload = sample_manifest_json();
     let object = payload.as_object_mut().expect("manifest object");
     object.insert(
@@ -222,8 +222,8 @@ fn legacy_shadow_recording_mode_uses_generated_runtime_ids() {
     );
     object.insert("shadow_recorder_enabled".to_string(), serde_json::json!(true));
 
-    let parsed: StreamManifest = serde_json::from_value(payload).expect("decode legacy shadow recorder manifest");
-    assert_eq!(parsed.recording_mode, StreamRecordingMode::ShadowBuffer { codec: RecordingCodec::H265 });
+    let err = serde_json::from_value::<StreamManifest>(payload).expect_err("legacy shadow recorder field should fail");
+    assert!(err.to_string().contains("unknown field `shadow_recorder_enabled`"));
 }
 
 #[test]
@@ -239,15 +239,14 @@ fn encoder_settings_accepts_rational_framerate_json() {
 }
 
 #[test]
-fn encoder_settings_accepts_legacy_fps_framerate_json() {
+fn encoder_settings_rejects_legacy_fps_framerate_json() {
     let payload = serde_json::json!({
         "kind": "h264",
         "framerate": { "fps": 29.97 }
     });
-    let parsed: EncoderSettings = serde_json::from_value(payload).expect("decode encoder settings");
-    let rate = parsed.framerate().expect("framerate");
-    assert_eq!(rate.numerator, 2997);
-    assert_eq!(rate.denominator, 100);
+    let err = serde_json::from_value::<EncoderSettings>(payload).expect_err("legacy fps form should fail");
+    let message = err.to_string();
+    assert!(message.contains("fps") || message.contains("numerator") || message.contains("denominator"));
 }
 
 #[test]
@@ -263,6 +262,7 @@ fn stream_manifest_defaults_recording_mode_to_disabled_when_omitted() {
 
 fn sample_manifest_json() -> serde_json::Value {
     serde_json::json!({
+        "schema_version": CURRENT_STREAM_CONFIG_SCHEMA_VERSION,
         "identity": {},
         "capture": {
             "device_keys": [],
@@ -289,9 +289,12 @@ fn stream_manifest_serializes_current_schema_version() {
 }
 
 #[test]
-fn stream_manifest_accepts_legacy_versionless_json() {
-    let parsed: StreamManifest = serde_json::from_value(sample_manifest_json()).expect("decode legacy manifest");
-    assert_eq!(parsed.schema_version, CURRENT_STREAM_CONFIG_SCHEMA_VERSION);
+fn stream_manifest_rejects_versionless_json() {
+    let mut payload = sample_manifest_json();
+    payload.as_object_mut().expect("manifest object").remove("schema_version");
+
+    let err = serde_json::from_value::<StreamManifest>(payload).expect_err("versionless manifest should fail");
+    assert!(err.to_string().contains("schema_version is required"));
 }
 
 #[test]
@@ -366,7 +369,7 @@ fn stream_manifest_rejects_mixed_new_and_legacy_encoder_json() {
     object.insert("encoder_id".to_string(), serde_json::json!("turbojpeg"));
 
     let err = serde_json::from_value::<StreamManifest>(payload).expect_err("mixed encoder config should fail");
-    assert!(err.to_string().contains("may not mix `encoder`"));
+    assert!(err.to_string().contains("unknown field `encoder_id`"));
 }
 
 #[test]
@@ -377,7 +380,7 @@ fn stream_manifest_rejects_mixed_new_and_legacy_decoder_json() {
     object.insert("decoder_id".to_string(), serde_json::json!("h264"));
 
     let err = serde_json::from_value::<StreamManifest>(payload).expect_err("mixed decoder config should fail");
-    assert!(err.to_string().contains("may not mix `decoder`"));
+    assert!(err.to_string().contains("unknown field `decoder_id`"));
 }
 
 #[test]
@@ -393,7 +396,7 @@ fn stream_manifest_rejects_legacy_disabled_encoder_with_settings() {
     );
 
     let err = serde_json::from_value::<StreamManifest>(payload).expect_err("legacy disabled encoder should not accept settings");
-    assert!(err.to_string().contains("legacy encoder_enabled=false"));
+    assert!(err.to_string().contains("unknown field `encoder_enabled`"));
 }
 
 #[test]
@@ -409,7 +412,16 @@ fn stream_manifest_rejects_legacy_disabled_decoder_with_settings() {
     );
 
     let err = serde_json::from_value::<StreamManifest>(payload).expect_err("legacy disabled decoder should not accept settings");
-    assert!(err.to_string().contains("legacy decoder_enabled=false"));
+    assert!(err.to_string().contains("unknown field `decoder_enabled`"));
+}
+
+#[test]
+fn stream_manifest_rejects_legacy_boolean_recording_mode() {
+    let mut payload = sample_manifest_json();
+    payload.as_object_mut().expect("manifest object").insert("recording_mode".to_string(), serde_json::json!(true));
+
+    let err = serde_json::from_value::<StreamManifest>(payload).expect_err("legacy boolean recording mode should fail");
+    assert!(err.to_string().contains("invalid type"));
 }
 
 #[test]

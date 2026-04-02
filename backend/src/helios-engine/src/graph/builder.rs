@@ -4,7 +4,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::contracts::stream_ids::RAW_PIPELINE_UUID as RAW_STREAM_PIPELINE_UUID;
-use crate::ipc::{ResolvedStreamConfig, StreamPipelineBinding, StreamPipelineGridSlot};
+use crate::ipc::{ResolvedStreamConfig, StreamPipelineBinding, StreamPipelineGridSlot, normalize_pipeline_output_selection};
 use crate::pipelines;
 use daedalus::planner::Graph;
 use daedalus::planner::GraphPatch;
@@ -189,8 +189,7 @@ fn builtin_raw_stream_graph_json() -> Value {
 
 fn build_builtin_raw_stream_graph_handle(host_buffer: usize, manifest: &ResolvedStreamConfig, output_port: Option<&str>) -> Result<GraphHandle, GraphError> {
     // RAW stream outputs are explicitly `raw` (fast path) or `undistorted` (requires undistort node).
-    // Keep `frame` as compatibility alias and coerce stale/invalid values back to `raw`.
-    let canonical = normalize_raw_output_key(output_port).unwrap_or_else(|| "raw".to_string());
+    let canonical = normalize_raw_output_key(output_port)?.unwrap_or_else(|| "raw".to_string());
     // Keep `raw` as the public/raw-stream selector while routing runtime selection through
     // `frame` so solved image typing remains stable across cold starts.
     let runtime_output = match canonical.as_str() {
@@ -208,7 +207,7 @@ fn build_builtin_raw_stream_graph_handle(host_buffer: usize, manifest: &Resolved
     let mut graph_json_for_build = graph_json;
     context::inject_node_context(&mut graph_json_for_build, &stream_alias, &pipeline_alias);
 
-    let graph = GraphHandle::from_json_with_output(host_buffer, &graph_json_for_build, runtime_output)?;
+    let graph = GraphHandle::from_persisted_json_with_output(host_buffer, &graph_json_for_build, runtime_output)?;
     graph.set_calibration(manifest.calibration.clone());
     apply_manifest_host_inputs(&graph, manifest, Some(pipeline_id));
     Ok(graph)
@@ -265,16 +264,8 @@ fn apply_manifest_host_inputs(graph: &GraphHandle, manifest: &ResolvedStreamConf
     graph.set_pipeline_inputs(pipeline_id, &inputs);
 }
 
-fn normalize_raw_output_key(key: Option<&str>) -> Option<String> {
-    normalize_output_key(key).map(|value| {
-        if value.eq_ignore_ascii_case("undistorted") {
-            "undistorted".to_string()
-        } else {
-            // RAW pipeline only supports `raw` and `undistorted`.
-            // Treat legacy/invalid values (e.g. `frame`, `overlay`) as `raw`.
-            "raw".to_string()
-        }
-    })
+fn normalize_raw_output_key(key: Option<&str>) -> Result<Option<String>, GraphError> {
+    normalize_pipeline_output_selection(key, Some(RAW_STREAM_PIPELINE_UUID)).map_err(GraphError::Build)
 }
 
 fn wire_source_instance_key(endpoint: &crate::ipc::StreamPipelineEndpoint) -> Option<String> {
@@ -282,12 +273,12 @@ fn wire_source_instance_key(endpoint: &crate::ipc::StreamPipelineEndpoint) -> Op
         return normalize_output_key(endpoint.output_key.as_deref());
     }
 
-    if let Some(key) = normalize_raw_output_key(endpoint.output_key.as_deref()) {
+    if let Ok(Some(key)) = normalize_raw_output_key(endpoint.output_key.as_deref()) {
         return Some(key);
     }
 
     match normalize_raw_output_key(endpoint.port.as_deref()) {
-        Some(port) if matches!(port.as_str(), "raw" | "undistorted") => Some(port),
+        Ok(Some(port)) if matches!(port.as_str(), "raw" | "undistorted") => Some(port),
         _ => None,
     }
 }
@@ -316,7 +307,7 @@ pub(crate) fn build_graph_handle_for_manifest(host_buffer: usize, manifest: &Res
 
             let slot_output = slots.iter().find(|slot| slot.row == 0 && slot.column == 0 && slot.pipeline_id == Some(RAW_STREAM_PIPELINE_UUID)).and_then(|slot| slot.output_key.as_deref());
             let output = slot_output.or(output_override_for_active(manifest, override_active_output));
-            let output_port = normalize_raw_output_key(output);
+            let output_port = normalize_raw_output_key(output)?;
             let raw_graph = build_builtin_raw_stream_graph_handle(host_buffer, manifest, output)?;
             let pipelines = vec![MultiplexPipeline { pipeline_id: RAW_STREAM_PIPELINE_UUID, output_key: output_port.clone(), output_port, graph: raw_graph }];
 
@@ -378,7 +369,7 @@ pub(crate) fn build_graph_handle_for_manifest(host_buffer: usize, manifest: &Res
                 let pipeline_alias = context::pipeline_alias_from_graph(&graph_json, &active_id.to_string());
                 let mut graph_json_for_build = graph_json;
                 context::inject_node_context(&mut graph_json_for_build, &stream_alias, &pipeline_alias);
-                let graph = GraphHandle::from_json_with_output(host_buffer, &graph_json_for_build, output)?;
+                let graph = GraphHandle::from_persisted_json_with_output(host_buffer, &graph_json_for_build, output)?;
                 graph.set_calibration(manifest.calibration.clone());
                 apply_manifest_host_inputs(&graph, manifest, Some(active_id));
                 return Ok(graph);
@@ -434,7 +425,7 @@ pub(crate) fn build_graph_handle_for_manifest(host_buffer: usize, manifest: &Res
                 output = active_output_override.as_deref();
             }
 
-            let output_port = normalize_raw_output_key(output);
+            let output_port = normalize_raw_output_key(output)?;
             let graph = build_builtin_raw_stream_graph_handle(host_buffer, manifest, output)?;
             pipelines.push(MultiplexPipeline { pipeline_id: RAW_STREAM_PIPELINE_UUID, output_key: key.output_key.clone(), output_port, graph });
             continue;
@@ -458,7 +449,7 @@ pub(crate) fn build_graph_handle_for_manifest(host_buffer: usize, manifest: &Res
         let pipeline_alias = context::pipeline_alias_from_graph(&graph_json, &key.pipeline_id.to_string());
         let mut graph_json_for_build = graph_json;
         context::inject_node_context(&mut graph_json_for_build, &stream_alias, &pipeline_alias);
-        let graph = GraphHandle::from_json_with_output(host_buffer, &graph_json_for_build, output)?;
+        let graph = GraphHandle::from_persisted_json_with_output(host_buffer, &graph_json_for_build, output)?;
         graph.set_calibration(manifest.calibration.clone());
         let output_port = output.map(|value| value.trim().to_string()).filter(|value| !value.is_empty());
         pipelines.push(MultiplexPipeline { pipeline_id: key.pipeline_id, output_key: key.output_key.clone(), output_port, graph });
@@ -519,7 +510,7 @@ pub(crate) fn build_graph_handle_for_pipeline_output(host_buffer: usize, manifes
     let pipeline_alias = context::pipeline_alias_from_graph(&graph_json, &pipeline_id.to_string());
     let mut graph_json_for_build = graph_json;
     context::inject_node_context(&mut graph_json_for_build, &stream_alias, &pipeline_alias);
-    let graph = GraphHandle::from_json_with_output(host_buffer, &graph_json_for_build, output)?;
+    let graph = GraphHandle::from_persisted_json_with_output(host_buffer, &graph_json_for_build, output)?;
     graph.set_calibration(manifest.calibration.clone());
     apply_manifest_host_inputs(&graph, manifest, Some(pipeline_id));
     Ok(graph)
@@ -588,10 +579,10 @@ mod tests {
     }
 
     #[test]
-    fn normalize_raw_output_key_coerces_invalid_to_raw() {
-        assert_eq!(normalize_raw_output_key(Some("frame")), Some("raw".to_string()));
-        assert_eq!(normalize_raw_output_key(Some("raw")), Some("raw".to_string()));
-        assert_eq!(normalize_raw_output_key(Some("undistorted")), Some("undistorted".to_string()));
-        assert_eq!(normalize_raw_output_key(Some("overlay")), Some("raw".to_string()));
+    fn normalize_raw_output_key_rejects_invalid_ports() {
+        assert_eq!(normalize_raw_output_key(Some("raw")).expect("raw should be accepted"), Some("raw".to_string()));
+        assert_eq!(normalize_raw_output_key(Some("undistorted")).expect("undistorted should be accepted"), Some("undistorted".to_string()));
+        assert!(normalize_raw_output_key(Some("frame")).is_err());
+        assert!(normalize_raw_output_key(Some("overlay")).is_err());
     }
 }

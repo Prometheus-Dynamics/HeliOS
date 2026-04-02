@@ -22,13 +22,10 @@ use tokio::sync::RwLock;
 use tokio::time::{sleep_until, timeout, Instant};
 use uuid::Uuid;
 
-use crate::contracts::stream_ids::{
-    CALIBRATION_MODE_PIPELINE_UUID,
-    RAW_PIPELINE_UUID as RAW_STREAM_PIPELINE_UUID,
-};
 use crate::capture::{descriptor_for_config_retrying, BackendKind, CaptureControlInfo, CaptureControlValue, CaptureDescriptor, ControlAssignment};
+use crate::contracts::stream_ids::{CALIBRATION_MODE_PIPELINE_UUID, RAW_PIPELINE_UUID as RAW_STREAM_PIPELINE_UUID};
 use crate::error::{Error, Result};
-use crate::ipc::{ControlId, JsonWire, RecordingCodec, RecordingContainer, RecordingSource, ResolvedStreamConfig};
+use crate::ipc::{ControlId, JsonWire, RecordingCodec, RecordingContainer, RecordingSource, ResolvedStreamConfig, normalize_pipeline_output_selection};
 use crate::stream::{cleanup_all_stream_files, cleanup_stream_files, EncodedFrame, ShmemWriter, StreamMetrics, StreamRunner, StreamRunnerConfig};
 use daedalus::planner::GraphPatch;
 
@@ -776,7 +773,13 @@ impl StreamManager {
         // even if `active_pipeline_id` still points at a different (hidden) pipeline instance.
         let view_pipeline_id = single_view_slot_pipeline_id(&manifest_snapshot).or(active_pipeline_id);
         let output_targets_active_pipeline = view_pipeline_id == active_pipeline_id;
-        let canonical_output = canonicalize_output_for_pipeline(output.clone(), view_pipeline_id);
+        let effective_view_pipeline_id = if view_pipeline_id.is_none() && manifest_snapshot.pipelines.is_empty() {
+            Some(RAW_STREAM_PIPELINE_UUID)
+        } else {
+            view_pipeline_id
+        };
+        let normalized_output = normalize_output_for_pipeline(output.clone(), effective_view_pipeline_id)
+            .map_err(|err| Error::InvalidStateOwned(format!("invalid pipeline output: {err}")))?;
 
         // Special-case: allow users to switch the RAW stream view (`raw` vs `undistorted`)
         // even when pipelines are currently disabled.
@@ -784,28 +787,28 @@ impl StreamManager {
         // When pipelines are disabled, the stream normally runs with a passthrough host (no graph).
         // Selecting a non-default output implies we need to enable the built-in RAW graph so the
         // requested port can be produced.
-        let wants_output = canonical_output.as_deref().map(str::trim).filter(|v| !v.is_empty());
-        let wants_non_default_raw_output = wants_output.is_some_and(|v| !(v.eq_ignore_ascii_case("raw") || v.eq_ignore_ascii_case("frame")));
+        let wants_output = normalized_output.as_deref().map(str::trim).filter(|v| !v.is_empty());
+        let wants_non_default_raw_output = wants_output.is_some_and(|v| !v.eq_ignore_ascii_case("raw"));
         // When no pipelines/layout are configured, the stream is implicitly the RAW view.
         // Selecting `undistorted` in that state must enable the RAW graph (otherwise
         // `pipeline_enabled=false` forces passthrough and ignores output selection).
         let implicit_raw_view = view_pipeline_id.is_none() && manifest_snapshot.pipelines.is_empty();
-        let wants_raw_graph = (view_pipeline_id == Some(RAW_STREAM_PIPELINE_UUID) || implicit_raw_view) && wants_non_default_raw_output;
+        let wants_raw_graph = (effective_view_pipeline_id == Some(RAW_STREAM_PIPELINE_UUID) || implicit_raw_view) && wants_non_default_raw_output;
         if !manifest_snapshot.pipeline_enabled && wants_raw_graph {
             manifest_snapshot.pipeline_enabled = true;
         }
         if output_targets_active_pipeline {
-            manifest_snapshot.active_pipeline_output = canonical_output.clone();
+            manifest_snapshot.active_pipeline_output = normalized_output.clone();
         }
         if let Some(target_id) = view_pipeline_id {
             if let Some(binding) = manifest_snapshot.pipelines.iter_mut().find(|p| p.pipeline_id == target_id) {
-                binding.pipeline_output = canonical_output.clone();
+                binding.pipeline_output = normalized_output.clone();
             }
         }
         if let Some(layout) = manifest_snapshot.pipeline_layout.as_mut() {
             if layout.rows == 1 && layout.columns == 1 {
                 if let Some(slot) = layout.slots.iter_mut().find(|slot| slot.row == 0 && slot.column == 0) {
-                    slot.output_key = canonicalize_output_for_pipeline(canonical_output.clone(), slot.pipeline_id);
+                    slot.output_key = normalized_output.clone();
                 }
             }
         }
@@ -818,35 +821,8 @@ impl StreamManager {
             .map_err(|err| Error::InvalidStateOwned(format!("pipeline graph build failed: {err}")))?
         };
 
-        let mut selected_output = if output_targets_active_pipeline { canonical_output.clone() } else { manifest_snapshot.active_pipeline_output.clone() };
-        let graph = match build_graph(selected_output.clone(), host_buffer, manifest_snapshot.clone()).await {
-            Ok(graph) => graph,
-            Err(err) => {
-                if selected_output.is_some() {
-                    tracing::warn!(stream_id = %stream_id, output = ?selected_output, "pipeline output invalid; retrying without output override");
-                    selected_output = None;
-                    manifest_snapshot.active_pipeline_output = None;
-                    if let Some(active_id) = active_pipeline_id {
-                        if let Some(binding) = manifest_snapshot.pipelines.iter_mut().find(|p| p.pipeline_id == active_id) {
-                            binding.pipeline_output = None;
-                        }
-                    }
-                    if output_targets_active_pipeline {
-                        if let Some(layout) = manifest_snapshot.pipeline_layout.as_mut() {
-                            if layout.rows == 1 && layout.columns == 1 {
-                                if let Some(slot) = layout.slots.iter_mut().find(|slot| slot.row == 0 && slot.column == 0) {
-                                    slot.output_key = None;
-                                }
-                            }
-                        }
-                    }
-                    let host_buffer = manifest_snapshot.host_buffer();
-                    build_graph(selected_output.clone(), host_buffer, manifest_snapshot.clone()).await?
-                } else {
-                    return Err(err);
-                }
-            }
-        };
+        let selected_output = if output_targets_active_pipeline { normalized_output.clone() } else { manifest_snapshot.active_pipeline_output.clone() };
+        let graph = build_graph(selected_output.clone(), host_buffer, manifest_snapshot.clone()).await?;
 
         let (tx, rx) = oneshot::channel();
         enqueue_stream_command(&ctx.command_tx, StreamCommand::SetGraph { graph: graph.clone(), respond_to: tx })?;
@@ -870,7 +846,7 @@ impl StreamManager {
                     }
                 }
             }
-            let applied_view_output = if output_targets_active_pipeline { selected_output.clone() } else { canonical_output.clone() };
+            let applied_view_output = if output_targets_active_pipeline { selected_output.clone() } else { normalized_output.clone() };
             if let Some(target_id) = view_pipeline_id {
                 if let Some(binding) = manifest.pipelines.iter_mut().find(|p| p.pipeline_id == target_id) {
                     binding.pipeline_output = applied_view_output.clone();
@@ -883,7 +859,7 @@ impl StreamManager {
             if let Some(layout) = manifest.pipeline_layout.as_mut() {
                 if layout.rows == 1 && layout.columns == 1 {
                     if let Some(slot) = layout.slots.iter_mut().find(|slot| slot.row == 0 && slot.column == 0) {
-                        slot.output_key = canonicalize_output_for_pipeline(applied_view_output.clone(), slot.pipeline_id);
+                        slot.output_key = applied_view_output.clone();
                     }
                 }
             }
@@ -1030,7 +1006,8 @@ impl StreamManager {
             let mut layout_selected_ids = std::collections::BTreeSet::new();
             for slot in &mut layout.slots {
                 if slot.pipeline_id == Some(RAW_STREAM_PIPELINE_UUID) {
-                    slot.output_key = canonicalize_output_for_pipeline(slot.output_key.clone(), Some(RAW_STREAM_PIPELINE_UUID));
+                    slot.output_key = normalize_output_for_pipeline(slot.output_key.clone(), Some(RAW_STREAM_PIPELINE_UUID))
+                        .map_err(|err| Error::InvalidStateOwned(format!("invalid RAW pipeline layout output: {err}")))?;
                 }
                 if let Some(id) = slot.pipeline_id {
                     layout_selected_ids.insert(id);
@@ -1065,7 +1042,7 @@ impl StreamManager {
                     if active_id == RAW_STREAM_PIPELINE_UUID {
                         // Keep 1x1/raw output selection in sync with the selected slot.
                         if let Some(slot_output) = slot_output {
-                            manifest_snapshot.active_pipeline_output = canonicalize_output_for_pipeline(Some(slot_output), Some(RAW_STREAM_PIPELINE_UUID));
+                            manifest_snapshot.active_pipeline_output = Some(slot_output);
                         } else if active_changed {
                             manifest_snapshot.active_pipeline_output = manifest_snapshot.pipelines.iter().find(|p| p.pipeline_id == active_id).and_then(|binding| binding.pipeline_output.clone());
                         }
@@ -1080,8 +1057,9 @@ impl StreamManager {
         }
 
         let host_buffer = manifest_snapshot.host_buffer();
-        manifest_snapshot.active_pipeline_output = canonicalize_output_for_pipeline(manifest_snapshot.active_pipeline_output.clone(), manifest_snapshot.active_pipeline_id);
-        let mut selected_output = manifest_snapshot.active_pipeline_output.clone();
+        manifest_snapshot.active_pipeline_output = normalize_output_for_pipeline(manifest_snapshot.active_pipeline_output.clone(), manifest_snapshot.active_pipeline_id)
+            .map_err(|err| Error::InvalidStateOwned(format!("invalid pipeline layout output: {err}")))?;
+        let selected_output = manifest_snapshot.active_pipeline_output.clone();
         let manifest_for_build = manifest_snapshot.clone();
 
         let build_graph = |output: Option<String>, host_buffer: usize, manifest: crate::ipc::ResolvedStreamConfig| async move {
@@ -1092,26 +1070,7 @@ impl StreamManager {
             .map_err(|err| Error::InvalidStateOwned(format!("pipeline graph build failed: {err}")))?
         };
 
-        let graph = match build_graph(selected_output.clone(), host_buffer, manifest_for_build).await {
-            Ok(graph) => graph,
-            Err(err) => {
-                if selected_output.is_some() {
-                    tracing::warn!(stream_id = %stream_id, output = ?selected_output, "pipeline layout output invalid; retrying without output override");
-                    selected_output = None;
-                    manifest_snapshot.active_pipeline_output = None;
-                    if let Some(active_id) = manifest_snapshot.active_pipeline_id {
-                        if let Some(binding) = manifest_snapshot.pipelines.iter_mut().find(|p| p.pipeline_id == active_id) {
-                            binding.pipeline_output = None;
-                        }
-                    }
-                    let host_buffer = manifest_snapshot.host_buffer();
-                    let manifest_for_retry = manifest_snapshot.clone();
-                    build_graph(selected_output.clone(), host_buffer, manifest_for_retry).await?
-                } else {
-                    return Err(err);
-                }
-            }
-        };
+        let graph = build_graph(selected_output.clone(), host_buffer, manifest_for_build).await?;
 
         let (tx, rx) = oneshot::channel();
         enqueue_stream_command(&ctx.command_tx, StreamCommand::SetGraph { graph: graph.clone(), respond_to: tx })?;
@@ -1151,8 +1110,8 @@ impl StreamManager {
         }
 
         let host_buffer = manifest_snapshot.host_buffer();
-        let mut selected_output = manifest_snapshot.active_pipeline_output.clone();
-        let mut manifest_for_build = manifest_snapshot.clone();
+        let selected_output = manifest_snapshot.active_pipeline_output.clone();
+        let manifest_for_build = manifest_snapshot.clone();
 
         let build_graph = |output: Option<String>, host_buffer: usize, manifest: crate::ipc::ResolvedStreamConfig| async move {
             tokio::task::spawn_blocking(move || {
@@ -1162,26 +1121,7 @@ impl StreamManager {
             .map_err(|err| Error::InvalidStateOwned(format!("pipeline graph build failed: {err}")))?
         };
 
-        let graph = match build_graph(selected_output.clone(), host_buffer, manifest_for_build.clone()).await {
-            Ok(graph) => graph,
-            Err(err) => {
-                if selected_output.is_some() {
-                    tracing::warn!(stream_id = %stream_id, output = ?selected_output, "pipeline wires output invalid; retrying without output override");
-                    selected_output = None;
-                    manifest_snapshot.active_pipeline_output = None;
-                    if let Some(active_id) = manifest_snapshot.active_pipeline_id {
-                        if let Some(binding) = manifest_snapshot.pipelines.iter_mut().find(|p| p.pipeline_id == active_id) {
-                            binding.pipeline_output = None;
-                        }
-                    }
-                    manifest_for_build = manifest_snapshot.clone();
-                    let host_buffer = manifest_snapshot.host_buffer();
-                    build_graph(selected_output.clone(), host_buffer, manifest_for_build).await?
-                } else {
-                    return Err(err);
-                }
-            }
-        };
+        let graph = build_graph(selected_output.clone(), host_buffer, manifest_for_build).await?;
 
         let (tx, rx) = oneshot::channel();
         enqueue_stream_command(&ctx.command_tx, StreamCommand::SetGraph { graph: graph.clone(), respond_to: tx })?;
@@ -3278,27 +3218,8 @@ fn single_view_slot_pipeline_id(manifest: &ResolvedStreamConfig) -> Option<Uuid>
     layout.slots.iter().find(|slot| slot.row == 0 && slot.column == 0).and_then(|slot| slot.pipeline_id).or_else(|| layout.slots.iter().find_map(|slot| slot.pipeline_id))
 }
 
-fn canonicalize_output_for_pipeline(output: Option<String>, pipeline_id: Option<Uuid>) -> Option<String> {
-    let normalized = output.and_then(|value| {
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_string())
-        }
-    });
-    if pipeline_id == Some(RAW_STREAM_PIPELINE_UUID) {
-        return normalized.map(|value| {
-            if value.eq_ignore_ascii_case("undistorted") {
-                "undistorted".to_string()
-            } else {
-                // RAW pipeline only supports `raw` and `undistorted`.
-                // Coerce legacy/invalid values (e.g. `frame`, `overlay`) to `raw`.
-                "raw".to_string()
-            }
-        });
-    }
-    normalized
+fn normalize_output_for_pipeline(output: Option<String>, pipeline_id: Option<Uuid>) -> std::result::Result<Option<String>, String> {
+    normalize_pipeline_output_selection(output.as_deref(), pipeline_id)
 }
 
 fn calibration_mode_output_port(_template_id: &str) -> &'static str {
@@ -3812,11 +3733,19 @@ mod tests {
     }
 
     #[test]
-    fn canonicalize_output_for_raw_pipeline_coerces_invalid_ports() {
-        assert_eq!(canonicalize_output_for_pipeline(Some("frame".to_string()), Some(RAW_STREAM_PIPELINE_UUID)).as_deref(), Some("raw"));
-        assert_eq!(canonicalize_output_for_pipeline(Some("raw".to_string()), Some(RAW_STREAM_PIPELINE_UUID)).as_deref(), Some("raw"));
-        assert_eq!(canonicalize_output_for_pipeline(Some("undistorted".to_string()), Some(RAW_STREAM_PIPELINE_UUID)).as_deref(), Some("undistorted"));
-        assert_eq!(canonicalize_output_for_pipeline(Some("overlay".to_string()), Some(RAW_STREAM_PIPELINE_UUID)).as_deref(), Some("raw"));
+    fn normalize_output_for_raw_pipeline_rejects_invalid_ports() {
+        assert_eq!(
+            normalize_output_for_pipeline(Some("raw".to_string()), Some(RAW_STREAM_PIPELINE_UUID)).expect("raw should be accepted").as_deref(),
+            Some("raw")
+        );
+        assert_eq!(
+            normalize_output_for_pipeline(Some("undistorted".to_string()), Some(RAW_STREAM_PIPELINE_UUID))
+                .expect("undistorted should be accepted")
+                .as_deref(),
+            Some("undistorted")
+        );
+        assert!(normalize_output_for_pipeline(Some("frame".to_string()), Some(RAW_STREAM_PIPELINE_UUID)).is_err());
+        assert!(normalize_output_for_pipeline(Some("overlay".to_string()), Some(RAW_STREAM_PIPELINE_UUID)).is_err());
     }
 
     #[test]

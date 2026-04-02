@@ -8,6 +8,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::capture::{CaptureConfig, CaptureControlInfo, CaptureControlValue, CaptureDescriptor};
+use crate::contracts::stream_ids::RAW_PIPELINE_UUID;
 use crate::identity::DeviceIdentity;
 use crate::stream::{StreamEncoderDemandMetrics, StreamFrameDemandMetrics, StreamMetrics};
 
@@ -921,84 +922,11 @@ impl From<EncoderSettingsBinaryWire> for EncoderSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct LegacyEncoderSettings {
-    #[serde(default)]
-    pub bitrate: Option<u64>,
-    #[serde(default)]
-    pub gop: Option<i32>,
-    #[serde(default, deserialize_with = "deserialize_encoder_frame_rate")]
-    pub framerate: Option<FrameRate>,
-    #[serde(default)]
-    pub thread_count: Option<usize>,
-    #[serde(default)]
-    pub output_resolution: Option<ResolutionHint>,
-    /// Optional soft limit for decode FPS; frames above this are dropped before encoding.
-    #[serde(default)]
-    pub decode_fps_limit: Option<f64>,
-}
-
-impl LegacyEncoderSettings {
-    fn has_explicit_video_tuning(&self) -> bool {
-        self.bitrate.is_some() || self.gop.is_some() || self.framerate.is_some() || self.thread_count.is_some() || self.output_resolution.is_some()
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-enum EncoderSettingsHumanWire {
-    Typed(EncoderSettings),
-    Legacy(LegacyEncoderSettings),
-}
-
 fn deserialize_encoder_frame_rate<'de, D>(deserializer: D) -> Result<Option<FrameRate>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    // Preserve exact binary compatibility for IPC/bincode.
-    if !deserializer.is_human_readable() {
-        return Option::<FrameRate>::deserialize(deserializer);
-    }
-
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum FrameRateWire {
-        Rational(FrameRate),
-        LegacyFps { fps: f64 },
-    }
-
-    let parsed = Option::<FrameRateWire>::deserialize(deserializer)?;
-    match parsed {
-        None => Ok(None),
-        Some(FrameRateWire::Rational(rate)) => Ok(Some(rate)),
-        Some(FrameRateWire::LegacyFps { fps }) => {
-            if !fps.is_finite() || fps <= 0.0 {
-                return Err(serde::de::Error::custom("framerate.fps must be a positive finite number"));
-            }
-            const SCALE: u32 = 1000;
-            let scaled = (fps * f64::from(SCALE)).round();
-            if !scaled.is_finite() || scaled <= 0.0 || scaled > u32::MAX as f64 {
-                return Err(serde::de::Error::custom("framerate.fps is out of range"));
-            }
-            let numerator = scaled as u32;
-            let denominator = SCALE;
-            let divisor = gcd_u32(numerator, denominator);
-            Ok(Some(FrameRate { numerator: numerator / divisor, denominator: denominator / divisor }))
-        }
-    }
-}
-
-fn gcd_u32(mut a: u32, mut b: u32) -> u32 {
-    while b != 0 {
-        let t = a % b;
-        a = b;
-        b = t;
-    }
-    if a == 0 {
-        1
-    } else {
-        a
-    }
+    Option::<FrameRate>::deserialize(deserializer)
 }
 
 fn encoder_settings_kind_from_generated_variant(variant: GeneratedEncoderFamilyVariant) -> EncoderSettingsKind {
@@ -1142,45 +1070,6 @@ fn canonical_encoder_selector(selector: Option<&str>, settings: Option<&EncoderS
         return Some(spec.selector_id.to_string());
     }
     None
-}
-
-fn migrate_legacy_encoder_settings(selector: Option<&str>, settings: Option<LegacyEncoderSettings>) -> Result<(Option<EncoderSettings>, Option<f64>), String> {
-    let Some(settings) = settings else {
-        return Ok((None, None));
-    };
-
-    let decode_fps_limit = settings.decode_fps_limit.filter(|value| value.is_finite() && *value > 0.0);
-    let explicit_video_tuning = settings.has_explicit_video_tuning();
-    if !explicit_video_tuning {
-        return Ok((None, decode_fps_limit));
-    }
-
-    let typed = match encoder_settings_kind_for_selector(selector) {
-        Some(EncoderSettingsKind::H264) => Some(EncoderSettings::H264 {
-            bitrate: settings.bitrate,
-            gop: settings.gop,
-            framerate: settings.framerate,
-            thread_count: settings.thread_count,
-            output_resolution: settings.output_resolution,
-        }),
-        Some(EncoderSettingsKind::H265) => Some(EncoderSettings::H265 {
-            bitrate: settings.bitrate,
-            gop: settings.gop,
-            framerate: settings.framerate,
-            thread_count: settings.thread_count,
-            output_resolution: settings.output_resolution,
-        }),
-        Some(EncoderSettingsKind::FfmpegMjpeg) => Some(EncoderSettings::FfmpegMjpeg {
-            bitrate: settings.bitrate,
-            gop: settings.gop,
-            framerate: settings.framerate,
-            thread_count: settings.thread_count,
-            output_resolution: settings.output_resolution,
-        }),
-        Some(EncoderSettingsKind::Turbojpeg) | Some(EncoderSettingsKind::Mozjpeg) | None => None,
-    };
-
-    Ok((typed, decode_fps_limit))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
@@ -1604,14 +1493,6 @@ impl StreamRecordingMode {
         }
     }
 
-    fn from_legacy_shadow_recorder(enabled: bool, encoder: &RequestedEncoderConfig) -> Self {
-        if !enabled {
-            return Self::Disabled;
-        }
-
-        let inferred_codec = encoder.id().map(str::trim).filter(|value| !value.is_empty()).and_then(legacy_shadow_recording_codec_for_encoder);
-        Self::ShadowBuffer { codec: inferred_codec.unwrap_or_else(default_shadow_recording_codec) }
-    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -1664,15 +1545,8 @@ impl From<StreamRecordingModeBinaryWire> for StreamRecordingMode {
 }
 
 mod stream_recording_mode_serde {
-    use super::{default_shadow_recording_codec, StreamRecordingMode, StreamRecordingModeBinaryWire, StreamRecordingModeHumanWire};
+    use super::{StreamRecordingMode, StreamRecordingModeBinaryWire, StreamRecordingModeHumanWire};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum StreamRecordingModeHumanCompatWire {
-        Mode(StreamRecordingModeHumanWire),
-        LegacyBool(bool),
-    }
 
     pub fn serialize<S>(value: &StreamRecordingMode, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -1690,11 +1564,7 @@ mod stream_recording_mode_serde {
         D: Deserializer<'de>,
     {
         if deserializer.is_human_readable() {
-            Ok(match StreamRecordingModeHumanCompatWire::deserialize(deserializer)? {
-                StreamRecordingModeHumanCompatWire::Mode(mode) => mode.into(),
-                StreamRecordingModeHumanCompatWire::LegacyBool(false) => StreamRecordingMode::Disabled,
-                StreamRecordingModeHumanCompatWire::LegacyBool(true) => StreamRecordingMode::ShadowBuffer { codec: default_shadow_recording_codec() },
-            })
+            Ok(StreamRecordingModeHumanWire::deserialize(deserializer)?.into())
         } else {
             Ok(StreamRecordingModeBinaryWire::deserialize(deserializer)?.into())
         }
@@ -1778,7 +1648,7 @@ enum RequestedEncoderConfigHumanWire {
         #[serde(default)]
         id: Option<String>,
         #[serde(default)]
-        settings: Option<EncoderSettingsHumanWire>,
+        settings: Option<EncoderSettings>,
     },
 }
 
@@ -1840,17 +1710,6 @@ impl RequestedEncoderConfig {
         }
     }
 
-    fn from_legacy(enabled: Option<bool>, id: Option<String>, settings: Option<LegacyEncoderSettings>) -> Result<(Self, Option<f64>), String> {
-        let normalized_id = normalized_codec_selector(id.as_deref());
-        if enabled == Some(false) {
-            if normalized_id.is_some() || settings.is_some() {
-                return Err("legacy encoder_enabled=false may not be combined with encoder_id or encoder_settings".to_string());
-            }
-            return Ok((Self::Disabled, None));
-        }
-        let (settings, decode_fps_limit) = migrate_legacy_encoder_settings(normalized_id.as_deref(), settings)?;
-        Ok((Self::enabled(normalized_id, settings), decode_fps_limit))
-    }
 }
 
 impl From<RequestedEncoderConfig> for RequestedEncoderConfigBinaryWire {
@@ -1875,7 +1734,7 @@ impl From<RequestedEncoderConfig> for RequestedEncoderConfigHumanWire {
     fn from(value: RequestedEncoderConfig) -> Self {
         match value {
             RequestedEncoderConfig::Disabled => Self::Disabled,
-            RequestedEncoderConfig::Enabled { id, settings } => Self::Enabled { id, settings: settings.map(EncoderSettingsHumanWire::Typed) },
+            RequestedEncoderConfig::Enabled { id, settings } => Self::Enabled { id, settings },
         }
     }
 }
@@ -1886,14 +1745,7 @@ impl RequestedEncoderConfigHumanWire {
             Self::Disabled => Ok((RequestedEncoderConfig::Disabled, None)),
             Self::Enabled { id, settings } => {
                 let normalized_id = normalized_codec_selector(id.as_deref());
-                match settings {
-                    None => Ok((RequestedEncoderConfig::Enabled { id: normalized_id, settings: None }, None)),
-                    Some(EncoderSettingsHumanWire::Typed(settings)) => Ok((RequestedEncoderConfig::Enabled { id: normalized_id, settings: Some(settings) }, None)),
-                    Some(EncoderSettingsHumanWire::Legacy(settings)) => {
-                        let (settings, decode_fps_limit) = migrate_legacy_encoder_settings(normalized_id.as_deref(), Some(settings))?;
-                        Ok((RequestedEncoderConfig::Enabled { id: normalized_id, settings }, decode_fps_limit))
-                    }
-                }
+                Ok((RequestedEncoderConfig::Enabled { id: normalized_id, settings }, None))
             }
         }
     }
@@ -2031,16 +1883,6 @@ impl RequestedDecoderConfig {
         }
     }
 
-    fn from_legacy(enabled: Option<bool>, id: Option<String>, settings: Option<DecoderSettings>) -> Result<Self, String> {
-        let normalized_id = normalized_codec_selector(id.as_deref());
-        if enabled == Some(false) {
-            if normalized_id.is_some() || settings.is_some() {
-                return Err("legacy decoder_enabled=false may not be combined with decoder_id or decoder_settings".to_string());
-            }
-            return Ok(Self::Disabled);
-        }
-        Ok(Self::enabled(normalized_id, settings))
-    }
 }
 
 impl From<RequestedDecoderConfig> for RequestedDecoderConfigBinaryWire {
@@ -2133,7 +1975,27 @@ fn canonical_requested_preview_jpeg_quality(value: Option<u8>, encoder: &Request
 }
 
 pub const CURRENT_STREAM_CONFIG_SCHEMA_VERSION: u32 = 1;
-const LEGACY_STREAM_CONFIG_SCHEMA_VERSION: u32 = 0;
+
+fn trim_pipeline_output_selection(value: Option<&str>) -> Option<String> {
+    value.and_then(|raw| {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+    })
+}
+
+pub fn normalize_pipeline_output_selection(value: Option<&str>, pipeline_id: Option<Uuid>) -> Result<Option<String>, String> {
+    let normalized = trim_pipeline_output_selection(value);
+    if pipeline_id != Some(RAW_PIPELINE_UUID) {
+        return Ok(normalized);
+    }
+
+    match normalized.as_deref() {
+        None => Ok(None),
+        Some(raw) if raw.eq_ignore_ascii_case("raw") => Ok(Some("raw".to_string())),
+        Some(raw) if raw.eq_ignore_ascii_case("undistorted") => Ok(Some("undistorted".to_string())),
+        Some(raw) => Err(format!("unsupported RAW pipeline output '{raw}'; expected `raw` or `undistorted`")),
+    }
+}
 
 #[derive(Debug, Clone, ToSchema)]
 pub struct StreamManifest {
@@ -2213,6 +2075,7 @@ struct StreamManifestBinaryWire {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct StreamManifestHumanWire {
     #[serde(default)]
     pub schema_version: Option<u32>,
@@ -2243,25 +2106,11 @@ struct StreamManifestHumanWire {
     #[serde(default)]
     pub encoder: Option<RequestedEncoderConfigHumanWire>,
     #[serde(default)]
-    pub encoder_enabled: Option<bool>,
-    #[serde(default)]
-    pub encoder_id: Option<String>,
-    #[serde(default)]
-    pub encoder_settings: Option<LegacyEncoderSettings>,
-    #[serde(default)]
     pub decoder: Option<RequestedDecoderConfig>,
-    #[serde(default)]
-    pub decoder_enabled: Option<bool>,
-    #[serde(default)]
-    pub decoder_id: Option<String>,
-    #[serde(default)]
-    pub decoder_settings: Option<DecoderSettings>,
     #[serde(default)]
     pub preview_jpeg_quality: Option<u8>,
     #[serde(default)]
     pub recording_mode: Option<StreamRecordingMode>,
-    #[serde(default)]
-    pub shadow_recorder_enabled: Option<bool>,
     #[serde(default)]
     pub start_on_boot: bool,
 }
@@ -2302,31 +2151,25 @@ impl From<StreamManifestBinaryWire> for StreamManifest {
     }
 }
 
-type StreamManifestHumanMigration = fn(StreamManifestHumanWire) -> Result<StreamManifestHumanWire, String>;
-
-fn migrate_stream_manifest_v0_to_v1(mut wire: StreamManifestHumanWire) -> Result<StreamManifestHumanWire, String> {
-    wire.schema_version = Some(CURRENT_STREAM_CONFIG_SCHEMA_VERSION);
-    Ok(wire)
-}
-
-const STREAM_MANIFEST_HUMAN_MIGRATIONS: &[(u32, StreamManifestHumanMigration)] = &[(LEGACY_STREAM_CONFIG_SCHEMA_VERSION, migrate_stream_manifest_v0_to_v1)];
-
-fn migrate_stream_manifest_human_wire(mut wire: StreamManifestHumanWire) -> Result<StreamManifestHumanWire, String> {
-    let mut version = wire.schema_version.unwrap_or(LEGACY_STREAM_CONFIG_SCHEMA_VERSION);
-    if version > CURRENT_STREAM_CONFIG_SCHEMA_VERSION {
-        return Err(format!("unsupported stream manifest schema_version {}; current version is {}", version, CURRENT_STREAM_CONFIG_SCHEMA_VERSION));
+fn enforce_current_stream_manifest_schema(mut wire: StreamManifestHumanWire) -> Result<StreamManifestHumanWire, String> {
+    match wire.schema_version {
+        Some(version) if version == CURRENT_STREAM_CONFIG_SCHEMA_VERSION => {
+            wire.schema_version = Some(CURRENT_STREAM_CONFIG_SCHEMA_VERSION);
+            Ok(wire)
+        }
+        Some(version) if version > CURRENT_STREAM_CONFIG_SCHEMA_VERSION => Err(format!(
+            "unsupported stream manifest schema_version {}; current version is {}",
+            version, CURRENT_STREAM_CONFIG_SCHEMA_VERSION
+        )),
+        Some(version) => Err(format!(
+            "unsupported stream manifest schema_version {}; old stream manifests are no longer supported after the teardown reset",
+            version
+        )),
+        None => Err(format!(
+            "stream manifest schema_version is required; legacy manifests without schema_version are no longer supported (expected {})",
+            CURRENT_STREAM_CONFIG_SCHEMA_VERSION
+        )),
     }
-
-    while version < CURRENT_STREAM_CONFIG_SCHEMA_VERSION {
-        let Some((_, migration)) = STREAM_MANIFEST_HUMAN_MIGRATIONS.iter().find(|(from, _)| *from == version) else {
-            return Err(format!("no stream manifest migration registered from schema_version {} to {}", version, version + 1));
-        };
-        wire = migration(wire)?;
-        version = wire.schema_version.unwrap_or(version + 1);
-    }
-
-    wire.schema_version = Some(CURRENT_STREAM_CONFIG_SCHEMA_VERSION);
-    Ok(wire)
 }
 
 impl From<StreamManifest> for StreamManifestBinaryWire {
@@ -2358,24 +2201,13 @@ impl TryFrom<StreamManifestHumanWire> for StreamManifest {
     type Error = String;
 
     fn try_from(value: StreamManifestHumanWire) -> Result<Self, Self::Error> {
-        let value = migrate_stream_manifest_human_wire(value)?;
-        let (encoder, legacy_decode_fps_limit) = match (value.encoder, value.encoder_enabled, value.encoder_id, value.encoder_settings) {
-            (Some(encoder), None, None, None) => encoder.into_requested()?,
-            (Some(_), _, _, _) => return Err("stream manifest may not mix `encoder` with legacy `encoder_enabled`, `encoder_id`, or `encoder_settings` fields".to_string()),
-            (None, enabled, id, settings) => RequestedEncoderConfig::from_legacy(enabled, id, settings)?,
+        let value = enforce_current_stream_manifest_schema(value)?;
+        let (encoder, _) = match value.encoder {
+            Some(encoder) => encoder.into_requested()?,
+            None => (RequestedEncoderConfig::default(), None),
         };
-        let mut decoder = match (value.decoder, value.decoder_enabled, value.decoder_id, value.decoder_settings) {
-            (Some(decoder), None, None, None) => decoder,
-            (Some(_), _, _, _) => return Err("stream manifest may not mix `decoder` with legacy `decoder_enabled`, `decoder_id`, or `decoder_settings` fields".to_string()),
-            (None, enabled, id, settings) => RequestedDecoderConfig::from_legacy(enabled, id, settings)?,
-        };
-        decoder.ensure_fps_limit(legacy_decode_fps_limit);
-        let recording_mode = match (value.recording_mode, value.shadow_recorder_enabled) {
-            (Some(recording_mode), None) => recording_mode,
-            (Some(_), Some(_)) => return Err("stream manifest may not mix `recording_mode` with legacy `shadow_recorder_enabled`".to_string()),
-            (None, Some(enabled)) => StreamRecordingMode::from_legacy_shadow_recorder(enabled, &encoder),
-            (None, None) => default_recording_mode(),
-        };
+        let decoder = value.decoder.unwrap_or_default();
+        let recording_mode = value.recording_mode.unwrap_or_else(default_recording_mode);
         let pipeline_enabled = canonical_requested_pipeline_enabled(
             value.pipeline_enabled,
             &value.pipelines,
@@ -2429,16 +2261,9 @@ impl From<StreamManifest> for StreamManifestHumanWire {
             calibration: value.calibration,
             pose: value.pose,
             encoder: Some(value.encoder.into()),
-            encoder_enabled: None,
-            encoder_id: None,
-            encoder_settings: None,
             decoder: Some(value.decoder),
-            decoder_enabled: None,
-            decoder_id: None,
-            decoder_settings: None,
             preview_jpeg_quality: Some(value.preview_jpeg_quality),
             recording_mode: Some(value.recording_mode),
-            shadow_recorder_enabled: None,
             start_on_boot: value.start_on_boot,
         }
     }
@@ -2876,19 +2701,6 @@ pub fn preview_format_for_encoder_selector(selector: Option<&str>) -> &'static s
 
 fn max_host_buffer() -> usize {
     env::var("HELIOS_HOST_BUFFER_MAX").ok().and_then(|v| v.parse().ok()).filter(|v| *v > 0).unwrap_or(64)
-}
-
-fn legacy_shadow_recording_codec_for_encoder(encoder_id: &str) -> Option<RecordingCodec> {
-    let encoder_id = encoder_id.trim();
-    if encoder_id.is_empty() {
-        return None;
-    }
-
-    match generated_encoder_family_spec_for_kind(encoder_settings_kind_for_selector(Some(encoder_id))?).recording_codec {
-        Some("h264") => Some(RecordingCodec::H264),
-        Some("h265") => Some(RecordingCodec::H265),
-        _ => None,
-    }
 }
 
 fn manifest_prefers_default_stream_encoder(manifest: &StreamManifest) -> bool {

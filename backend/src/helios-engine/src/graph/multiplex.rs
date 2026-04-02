@@ -97,8 +97,7 @@ impl MultiplexGraphExecutor {
             if candidates.is_empty() {
                 return None;
             }
-            let want_key =
-                norm_key(endpoint.output_key.as_deref()).map(|value| if endpoint.pipeline_id == RAW_STREAM_PIPELINE_UUID && value.eq_ignore_ascii_case("frame") { "raw".to_string() } else { value });
+            let want_key = norm_key(endpoint.output_key.as_deref());
             if let Some(want_key) = want_key {
                 for idx in candidates.iter().copied() {
                     if pipelines.get(idx).is_some_and(|p| p.output_key.as_deref().map(str::trim) == Some(want_key.as_str())) {
@@ -110,7 +109,7 @@ impl MultiplexGraphExecutor {
             }
 
             if endpoint.pipeline_id == RAW_STREAM_PIPELINE_UUID {
-                let preferred_key = preferred_source_port.and_then(|value| norm_key(Some(value))).map(|value| if value.eq_ignore_ascii_case("frame") { "raw".to_string() } else { value });
+                let preferred_key = preferred_source_port.and_then(|value| norm_key(Some(value)));
                 if let Some(preferred_key) = preferred_key {
                     if matches!(preferred_key.as_str(), "raw" | "undistorted") {
                         for idx in candidates.iter().copied() {
@@ -152,7 +151,7 @@ impl MultiplexGraphExecutor {
                 let mut from_port = norm_key(wire.from.port.as_deref()).map(|p| p.to_ascii_lowercase());
                 if from_port.is_none() && wire.from.pipeline_id == RAW_STREAM_PIPELINE_UUID {
                     let key_as_port = norm_key(wire.from.output_key.as_deref()).map(|p| p.to_ascii_lowercase());
-                    if matches!(key_as_port.as_deref(), Some("raw" | "frame" | "undistorted")) {
+                    if matches!(key_as_port.as_deref(), Some("raw" | "undistorted")) {
                         from_port = key_as_port;
                     }
                 }
@@ -162,7 +161,7 @@ impl MultiplexGraphExecutor {
                 let mut from_port = norm_key(wire.from.port.as_deref()).map(|p| p.to_ascii_lowercase());
                 if from_port.is_none() && wire.from.pipeline_id == RAW_STREAM_PIPELINE_UUID {
                     let key_as_port = norm_key(wire.from.output_key.as_deref()).map(|p| p.to_ascii_lowercase());
-                    if matches!(key_as_port.as_deref(), Some("raw" | "frame" | "undistorted")) {
+                    if matches!(key_as_port.as_deref(), Some("raw" | "undistorted")) {
                         from_port = key_as_port;
                     }
                 }

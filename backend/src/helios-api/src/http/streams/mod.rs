@@ -35,7 +35,7 @@ use super::device::rig::UpdateCameraPoseRequest;
 use super::error::ApiError;
 use crate::http::pipelines;
 use helios_engine::capture::{CaptureControl, CaptureControlValue};
-use helios_engine::ipc::{EngineErrorCode, EngineEvent, GraphOutputPortDescriptor, StreamManifest, StreamPipelineBinding};
+use helios_engine::ipc::{EngineErrorCode, EngineEvent, GraphOutputPortDescriptor, StreamManifest, StreamPipelineBinding, normalize_pipeline_output_selection};
 
 use self::types::{CodecInfo, StartStreamResponse, StreamFormatInfo, StreamInfo, StreamInspectInfo, UpdateStreamResponse};
 use self::validation::{StreamCapabilitiesResponse, StreamValidateResponse, stream_capabilities, validate_stream_manifest_with_runtime};
@@ -310,15 +310,15 @@ struct SetPipelineWiresRequest {
     wires: Vec<helios_engine::ipc::StreamPipelineWire>,
 }
 
-fn canonicalize_output_for_pipeline(output: Option<String>, pipeline_id: Option<Uuid>) -> Option<String> {
+fn normalize_output_for_pipeline(output: Option<String>, pipeline_id: Option<Uuid>) -> Option<String> {
     let normalized = output.and_then(|value| {
         let trimmed = value.trim();
         if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
     });
-    if pipeline_id == Some(RAW_PIPELINE_UUID) {
-        return normalized.map(|value| if value.eq_ignore_ascii_case("undistorted") { "undistorted".to_string() } else { "raw".to_string() });
+    match normalize_pipeline_output_selection(normalized.as_deref(), pipeline_id) {
+        Ok(output) => output,
+        Err(_) => normalized,
     }
-    normalized
 }
 
 fn single_view_slot_pipeline_id(manifest: &helios_engine::ipc::StreamManifest) -> Option<Uuid> {
@@ -344,7 +344,7 @@ async fn set_pipeline_output(State(state): State<AppState>, Path(id): Path<Uuid>
         let active_pipeline_id = manifest.active_pipeline_id.or_else(|| manifest.pipelines.first().map(|binding| binding.pipeline_id));
         let view_pipeline_id = single_view_slot_pipeline_id(manifest).or(active_pipeline_id);
         let output_targets_active_pipeline = view_pipeline_id == active_pipeline_id;
-        let normalized_output = canonicalize_output_for_pipeline(requested_output_for_manifest.clone(), view_pipeline_id);
+        let normalized_output = normalize_output_for_pipeline(requested_output_for_manifest.clone(), view_pipeline_id);
 
         let implicit_raw_view = view_pipeline_id.is_none() && manifest.pipelines.is_empty();
         if (view_pipeline_id == Some(RAW_PIPELINE_UUID) || implicit_raw_view)
@@ -435,9 +435,7 @@ async fn set_pipeline_layout(State(state): State<AppState>, Path(id): Path<Uuid>
                     slot.pipeline_id = None;
                     slot.output_key = None;
                 }
-                if slot.pipeline_id == Some(RAW_PIPELINE_UUID) && slot.output_key.as_deref().is_some_and(|value| value.trim().eq_ignore_ascii_case("frame")) {
-                    slot.output_key = Some("raw".to_string());
-                }
+                slot.output_key = normalize_output_for_pipeline(slot.output_key.clone(), slot.pipeline_id);
             }
 
             let mut existing: std::collections::BTreeSet<Uuid> = manifest.pipelines.iter().map(|binding| binding.pipeline_id).collect();
@@ -471,7 +469,7 @@ async fn set_pipeline_layout(State(state): State<AppState>, Path(id): Path<Uuid>
                     if active_id == RAW_PIPELINE_UUID {
                         // Preserve RAW output selection (`raw` vs `undistorted`) when present.
                         if let Some(slot_output) = slot_output {
-                            manifest.active_pipeline_output = canonicalize_output_for_pipeline(Some(slot_output), Some(RAW_PIPELINE_UUID));
+                            manifest.active_pipeline_output = Some(slot_output);
                         } else if active_changed {
                             manifest.active_pipeline_output = manifest.pipelines.iter().find(|p| p.pipeline_id == active_id).and_then(|binding| binding.pipeline_output.clone());
                         }

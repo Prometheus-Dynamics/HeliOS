@@ -6,7 +6,7 @@ use axum::{
 use helios_engine::capture::CaptureDescriptor;
 use helios_engine::ipc::{
     EngineErrorCode, JsonWire, ResolvedStreamConfig, StreamManifest, StreamPipelineGridSlot, StreamPipelineLayout, StreamRuntimeCapabilities, StreamRuntimeState, StreamStatus,
-    cached_stream_runtime_capabilities, normalize_requested_stream_decoder, normalize_requested_stream_encoder,
+    cached_stream_runtime_capabilities, normalize_pipeline_output_selection, normalize_requested_stream_decoder, normalize_requested_stream_encoder,
 };
 use lib_ipc::client::ClientTransportError;
 use std::io;
@@ -282,7 +282,7 @@ pub(crate) fn normalize_pipeline_manifest(manifest: &mut StreamManifest) {
     // Internal/system pipeline IDs may temporarily appear in engine manifests (e.g. calibration mode),
     // but they must never leak into persisted user configs or be treated as normal pipelines by the API.
     strip_reserved_pipeline_ids(manifest);
-    canonicalize_raw_output_aliases(manifest);
+    normalize_pipeline_output_fields(manifest);
 
     if !manifest.pipeline_enabled {
         manifest.pipelines.clear();
@@ -339,7 +339,7 @@ pub(crate) fn normalize_pipeline_manifest(manifest: &mut StreamManifest) {
     }
 
     // Re-canonicalize after any active/slot-derived output updates.
-    canonicalize_raw_output_aliases(manifest);
+    normalize_pipeline_output_fields(manifest);
 
     for binding in &mut manifest.pipelines {
         binding.pipeline_graph = None;
@@ -472,45 +472,31 @@ fn recover_single_view_slot_from_active(manifest: &mut StreamManifest) {
     layout.slots.push(StreamPipelineGridSlot { row: 0, column: 0, pipeline_id: Some(pipeline_id), output_key: manifest.active_pipeline_output.clone() });
 }
 
-fn canonicalize_raw_output_aliases(manifest: &mut StreamManifest) {
+fn normalize_pipeline_output_fields(manifest: &mut StreamManifest) {
     if manifest.active_pipeline_id == Some(RAW_PIPELINE_UUID) {
-        manifest.active_pipeline_output = canonicalize_raw_output_value(manifest.active_pipeline_output.take());
+        manifest.active_pipeline_output = normalize_pipeline_output_value(manifest.active_pipeline_output.take(), Some(RAW_PIPELINE_UUID));
     }
 
     for binding in &mut manifest.pipelines {
-        if binding.pipeline_id != RAW_PIPELINE_UUID {
-            continue;
-        }
-        binding.pipeline_output = canonicalize_raw_output_value(binding.pipeline_output.take());
+        binding.pipeline_output = normalize_pipeline_output_value(binding.pipeline_output.take(), Some(binding.pipeline_id));
     }
 
     if let Some(layout) = manifest.pipeline_layout.as_mut() {
         for slot in &mut layout.slots {
-            if slot.pipeline_id != Some(RAW_PIPELINE_UUID) {
-                continue;
-            }
-            slot.output_key = canonicalize_raw_output_value(slot.output_key.take());
+            slot.output_key = normalize_pipeline_output_value(slot.output_key.take(), slot.pipeline_id);
         }
     }
 
     for wire in &mut manifest.pipeline_wires {
-        if wire.from.pipeline_id == RAW_PIPELINE_UUID {
-            wire.from.output_key = canonicalize_raw_output_value(wire.from.output_key.take());
-        }
+        wire.from.output_key = normalize_pipeline_output_value(wire.from.output_key.take(), Some(wire.from.pipeline_id));
     }
 }
 
-fn canonicalize_raw_output_value(value: Option<String>) -> Option<String> {
-    let value = value.and_then(|value| {
-        let trimmed = value.trim();
-        if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
-    })?;
-    if value.eq_ignore_ascii_case("undistorted") {
-        Some("undistorted".to_string())
-    } else {
-        // RAW pipeline only supports `raw` and `undistorted`.
-        // Coerce legacy/invalid values (e.g. `frame`, `overlay`) to `raw`.
-        Some("raw".to_string())
+fn normalize_pipeline_output_value(value: Option<String>, pipeline_id: Option<Uuid>) -> Option<String> {
+    let value = normalized_output_value(value);
+    match normalize_pipeline_output_selection(value.as_deref(), pipeline_id) {
+        Ok(normalized) => normalized,
+        Err(_) => value,
     }
 }
 

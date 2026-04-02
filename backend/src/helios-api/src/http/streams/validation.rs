@@ -3,7 +3,7 @@ use helios_engine::ipc::default_shadow_recording_codec;
 use helios_engine::ipc::{
     DEFAULT_STREAM_PIPELINE_ENABLED_WHEN_BINDINGS_PRESENT, EncoderSettings, ResolvedStreamConfig, StreamManifest, StreamRecordingMode, StreamRuntimeCapabilities, default_decoder_enabled,
     default_encoder_enabled, default_host_buffer, default_recording_mode, default_requested_preview_jpeg_quality_disabled, default_requested_preview_jpeg_quality_enabled, default_start_on_boot,
-    stream_runtime_capabilities,
+    normalize_pipeline_output_selection, stream_runtime_capabilities,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -137,7 +137,7 @@ pub fn normalize_stream_manifest(mut manifest: StreamManifest) -> NormalizedStre
     normalize_file_backend_paths(&mut manifest, &mut warnings);
     normalize_file_capture_manifest(&mut manifest);
     normalize_reserved_pipeline_ids(&mut manifest, &mut warnings);
-    canonicalize_pipeline_output_aliases(&mut manifest, &mut warnings);
+    normalize_pipeline_output_fields(&mut manifest, &mut warnings);
     util::normalize_stream_encoder_manifest(&mut manifest);
     normalize_capture_tdn_output(&mut manifest);
 
@@ -162,6 +162,7 @@ pub async fn validate_stream_manifest_with_runtime(manifest: StreamManifest, run
     validate_file_backend_media_paths(&manifest, &mut issues).await;
     validate_pipeline_layout(&manifest, &mut issues);
     validate_pipeline_wires(&manifest, &mut issues);
+    validate_raw_pipeline_output_values(&manifest, &mut issues);
     validate_pipeline_bindings(&manifest, &mut issues).await;
     validate_stream_feature_compatibility(&manifest, runtime, &mut issues);
 
@@ -650,37 +651,22 @@ async fn validate_pipeline_bindings(manifest: &StreamManifest, issues: &mut Vec<
     }
 }
 
-fn canonicalize_pipeline_output_aliases(manifest: &mut StreamManifest, warnings: &mut Vec<ValidationWarning>) {
-    if manifest.active_pipeline_id == Some(RAW_PIPELINE_UUID) {
-        canonicalize_raw_output_field(&mut manifest.active_pipeline_output, "/activePipelineOutput", "active pipeline output", warnings);
-    } else {
-        trim_optional_output_field(&mut manifest.active_pipeline_output, "/activePipelineOutput", "active pipeline output", warnings);
-    }
+fn normalize_pipeline_output_fields(manifest: &mut StreamManifest, warnings: &mut Vec<ValidationWarning>) {
+    trim_optional_output_field(&mut manifest.active_pipeline_output, "/activePipelineOutput", "active pipeline output", warnings);
 
     for (index, binding) in manifest.pipelines.iter_mut().enumerate() {
-        if binding.pipeline_id == RAW_PIPELINE_UUID {
-            canonicalize_raw_output_field(&mut binding.pipeline_output, format!("/pipelines/{index}/pipelineOutput"), "pipeline output", warnings);
-        } else {
-            trim_optional_output_field(&mut binding.pipeline_output, format!("/pipelines/{index}/pipelineOutput"), "pipeline output", warnings);
-        }
+        trim_optional_output_field(&mut binding.pipeline_output, format!("/pipelines/{index}/pipelineOutput"), "pipeline output", warnings);
     }
 
     if let Some(layout) = manifest.pipeline_layout.as_mut() {
         for (index, slot) in layout.slots.iter_mut().enumerate() {
-            if slot.pipeline_id == Some(RAW_PIPELINE_UUID) {
-                canonicalize_raw_output_field(&mut slot.output_key, format!("/pipelineLayout/slots/{index}/outputKey"), "layout output", warnings);
-            } else {
-                trim_optional_output_field(&mut slot.output_key, format!("/pipelineLayout/slots/{index}/outputKey"), "layout output", warnings);
-            }
+            trim_optional_output_field(&mut slot.output_key, format!("/pipelineLayout/slots/{index}/outputKey"), "layout output", warnings);
         }
     }
 
     for (index, wire) in manifest.pipeline_wires.iter_mut().enumerate() {
-        if wire.from.pipeline_id == RAW_PIPELINE_UUID {
-            canonicalize_raw_output_field(&mut wire.from.output_key, format!("/pipelineWires/{index}/from/outputKey"), "wire output selector", warnings);
-        } else {
-            trim_optional_output_field(&mut wire.from.output_key, format!("/pipelineWires/{index}/from/outputKey"), "wire output selector", warnings);
-        }
+        trim_optional_output_field(&mut wire.from.output_key, format!("/pipelineWires/{index}/from/outputKey"), "wire output selector", warnings);
+        trim_optional_output_field(&mut wire.from.port, format!("/pipelineWires/{index}/from/port"), "wire output port", warnings);
     }
 }
 
@@ -771,16 +757,6 @@ fn normalize_file_capture_manifest(manifest: &mut StreamManifest) {
     }
 }
 
-fn canonicalize_raw_output_field(value: &mut Option<String>, path: impl Into<String>, label: &'static str, warnings: &mut Vec<ValidationWarning>) {
-    let path = path.into();
-    let original = value.clone();
-    let canonical = canonicalize_raw_output(value.take());
-    if canonical != original {
-        warnings.push(warning(path, "raw_output_canonicalized", format!("{label} was canonicalized to a supported RAW output value")));
-    }
-    *value = canonical;
-}
-
 fn trim_optional_output_field(value: &mut Option<String>, path: impl Into<String>, label: &'static str, warnings: &mut Vec<ValidationWarning>) {
     let path = path.into();
     let original = value.clone();
@@ -794,12 +770,37 @@ fn trim_optional_output_field(value: &mut Option<String>, path: impl Into<String
     *value = trimmed;
 }
 
-fn canonicalize_raw_output(value: Option<String>) -> Option<String> {
-    let normalized = value.and_then(|raw| {
-        let trimmed = raw.trim();
-        if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
-    })?;
-    if normalized.eq_ignore_ascii_case("undistorted") { Some("undistorted".to_string()) } else { Some("raw".to_string()) }
+fn validate_raw_pipeline_output_values(manifest: &StreamManifest, issues: &mut Vec<ValidationIssue>) {
+    if manifest.active_pipeline_id == Some(RAW_PIPELINE_UUID) {
+        validate_raw_output_value(&manifest.active_pipeline_output, "/activePipelineOutput", "active pipeline output", issues);
+    }
+
+    for (index, binding) in manifest.pipelines.iter().enumerate() {
+        if binding.pipeline_id == RAW_PIPELINE_UUID {
+            validate_raw_output_value(&binding.pipeline_output, format!("/pipelines/{index}/pipelineOutput"), "pipeline output", issues);
+        }
+    }
+
+    if let Some(layout) = manifest.pipeline_layout.as_ref() {
+        for (index, slot) in layout.slots.iter().enumerate() {
+            if slot.pipeline_id == Some(RAW_PIPELINE_UUID) {
+                validate_raw_output_value(&slot.output_key, format!("/pipelineLayout/slots/{index}/outputKey"), "layout output", issues);
+            }
+        }
+    }
+
+    for (index, wire) in manifest.pipeline_wires.iter().enumerate() {
+        if wire.from.pipeline_id == RAW_PIPELINE_UUID {
+            validate_raw_output_value(&wire.from.output_key, format!("/pipelineWires/{index}/from/outputKey"), "wire output selector", issues);
+            validate_raw_output_value(&wire.from.port, format!("/pipelineWires/{index}/from/port"), "wire output port", issues);
+        }
+    }
+}
+
+fn validate_raw_output_value(value: &Option<String>, path: impl Into<String>, label: &'static str, issues: &mut Vec<ValidationIssue>) {
+    if let Err(err) = normalize_pipeline_output_selection(value.as_deref(), Some(RAW_PIPELINE_UUID)) {
+        issues.push(issue(path.into(), "unsupported_raw_output", format!("{label} is invalid: {err}")));
+    }
 }
 
 fn known_pipeline_ids(manifest: &StreamManifest) -> BTreeSet<Uuid> {
@@ -878,6 +879,7 @@ mod tests {
 
     fn base_manifest(path: &Path) -> StreamManifest {
         manifest_from_json(json!({
+            "schema_version": helios_engine::ipc::CURRENT_STREAM_CONFIG_SCHEMA_VERSION,
             "identity": { "alias": "cam0", "hardware_id": "cam0" },
             "capture": {
                 "backend": "File",
@@ -898,13 +900,12 @@ mod tests {
                 "controls": []
             },
             "pipelines": [],
-            "pipelineLayout": null,
-            "pipelineWires": [],
-            "pipelineHostInputs": {},
-            "hostBuffer": 2,
+            "pipeline_layout": null,
+            "pipeline_wires": [],
+            "pipeline_host_inputs": {},
+            "host_buffer": 2,
             "internal": false,
-            "shadowRecorderEnabled": false,
-            "startOnBoot": false
+            "start_on_boot": false
         }))
     }
 
@@ -943,16 +944,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn warns_for_raw_output_alias_normalization() {
+    async fn rejects_invalid_raw_output_alias() {
         let file = create_temp_media_file("mp4").await;
         let mut manifest = base_manifest(&file);
         manifest.pipeline_enabled = true;
         manifest.active_pipeline_id = Some(RAW_PIPELINE_UUID);
         manifest.active_pipeline_output = Some("FRAME".to_string());
 
-        let result = validate_stream_manifest(manifest).await.expect("validation should succeed");
-        assert_eq!(result.manifest.active_pipeline_output.as_deref(), Some("raw"));
-        assert!(result.warnings.iter().any(|warning| warning.code == "raw_output_canonicalized"));
+        let err = validate_stream_manifest(manifest).await.expect_err("legacy RAW alias should fail");
+        assert!(err.issues.iter().any(|issue| issue.code == "unsupported_raw_output"));
         let _ = tokio::fs::remove_file(&file).await;
     }
 
