@@ -182,10 +182,6 @@ pub trait RetryableError {
     }
 }
 
-pub trait ServerEvent: Clone {
-    fn message_kind(&self) -> crate::frame::MessageKind;
-}
-
 impl<E> std::error::Error for ServerLoopError<E>
 where
     E: std::error::Error + 'static,

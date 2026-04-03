@@ -13,9 +13,6 @@ use crate::contracts::stream_ids::RAW_PIPELINE_UUID;
 use crate::identity::DeviceIdentity;
 use crate::stream::{StreamEncoderDemandMetrics, StreamFrameDemandMetrics, StreamMetrics};
 
-use lib_ipc::frame::MessageKind;
-use lib_ipc::protocol::ControlEvent;
-use lib_ipc::server::ServerEvent;
 use lib_ipc::types::{CommandId, RequestIdentity};
 use styx::codec::CodecKind;
 use styx::prelude::{FourCc, Resolution};
@@ -1039,42 +1036,6 @@ impl EngineCommand {
 impl RequestIdentity for EngineCommand {
     fn request_id(&self) -> CommandId {
         self.command_id().expect("engine command must carry a request id")
-    }
-}
-
-impl ServerEvent for EngineEvent {
-    fn message_kind(&self) -> MessageKind {
-        match self {
-            Self::Ack { .. }
-            | Self::Nack { .. }
-            | Self::Started { .. }
-            | Self::Stopped { .. }
-            | Self::Controls { .. }
-            | Self::Metrics { .. }
-            | Self::SnapshotJpeg { .. }
-            | Self::GraphOutputs { .. }
-            | Self::GraphOutputSample { .. }
-            | Self::StreamList { .. }
-            | Self::StreamRuntimeCapabilities { .. }
-            | Self::MetricsUpdate { .. }
-            | Self::NodeRegistry { .. }
-            | Self::Discovery { .. }
-            | Self::GraphValidation { .. }
-            | Self::CalibrationSolved { .. }
-            | Self::LocalizationSolved { .. }
-            | Self::LocalizationPipelineStatus { .. }
-            | Self::LocalizationPipelineOutputs { .. }
-            | Self::LocalizationPipelineOutputSample { .. } => MessageKind::Event,
-        }
-    }
-}
-
-impl From<ControlEvent> for EngineEvent {
-    fn from(event: ControlEvent) -> Self {
-        match event {
-            ControlEvent::Ack(ack) => EngineEvent::Ack { command_id: ack.command_id, ok: true },
-            ControlEvent::Nack(nack) => EngineEvent::Nack { command_id: nack.command_id, code: EngineErrorCode::InvalidState, reason: nack.reason, retryable: nack.retryable },
-        }
     }
 }
 

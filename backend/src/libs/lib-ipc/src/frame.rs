@@ -13,17 +13,6 @@ fn archive_err(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MessageKind {
-    Handshake,
-    Request,
-    Reply,
-    Event,
-    Command,
-    Control,
-    Heartbeat,
-}
-
 #[derive(Debug, Clone)]
 pub struct Frame {
     pub header: FrameHeader,

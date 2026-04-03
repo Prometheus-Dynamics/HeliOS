@@ -1,12 +1,8 @@
 use std::time::Duration;
 
 use crate::artifact::ReleaseManifest;
-use lib_ipc::frame::MessageKind;
-use lib_ipc::protocol::ControlEvent;
-use lib_ipc::server::ServerEvent;
 use lib_ipc::types::{CommandId, RequestIdentity, Timestamp};
 use serde::{Deserialize, Serialize};
-use tracing::error;
 use url::Url;
 use uuid::Uuid;
 
@@ -156,7 +152,8 @@ pub struct PreflightReport {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum UpdaterEvent {
-    Control(ControlEvent),
+    Ack { command_id: CommandId, processed_at: Timestamp },
+    Nack { command_id: CommandId, reason: String, retryable: bool },
     StageProgress { update_id: Uuid, percent: u8, detail: Option<String> },
     StageComplete { update_id: Uuid },
     ApplyScheduled { update_id: Uuid, eta: Timestamp },
@@ -167,143 +164,22 @@ pub enum UpdaterEvent {
     PreflightReport { report: PreflightReport },
     Heartbeat { uptime_ms: u64, sequence: u64, stage_queue_depth: u32 },
     LogRecord { level: LogLevel, span: Vec<String>, message: String },
-    Unknown { kind: u16, payload: Vec<u8> },
-}
-
-impl From<ControlEvent> for UpdaterEvent {
-    fn from(value: ControlEvent) -> Self {
-        Self::Control(value)
-    }
-}
-
-#[repr(u16)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum UpdaterCommandKind {
-    StageRelease = 0,
-    Cancel = 1,
-    ApplyRelease = 2,
-    Rollback = 3,
-    QueryState = 4,
-    QueryStorage = 5,
-    PreflightRelease = 6,
-}
-
-impl UpdaterCommandKind {
-    const fn to_u16(self) -> u16 {
-        self as u16
-    }
-
-    fn from_u16(value: u16) -> Option<Self> {
-        match value {
-            0 => Some(Self::StageRelease),
-            1 => Some(Self::Cancel),
-            2 => Some(Self::ApplyRelease),
-            3 => Some(Self::Rollback),
-            4 => Some(Self::QueryState),
-            5 => Some(Self::QueryStorage),
-            6 => Some(Self::PreflightRelease),
-            _ => None,
-        }
-    }
-}
-
-#[repr(u16)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum UpdaterEventKind {
-    Control = 0,
-    StageProgress = 1,
-    StageComplete = 2,
-    ApplyScheduled = 3,
-    ApplyComplete = 4,
-    RollbackTriggered = 5,
-    StateSnapshot = 6,
-    StorageReport = 7,
-    PreflightReport = 8,
-    Heartbeat = 9,
-    LogRecord = 10,
-}
-
-impl UpdaterEventKind {
-    const fn to_u16(self) -> u16 {
-        self as u16
-    }
-
-    fn from_u16(value: u16) -> Option<Self> {
-        match value {
-            0 => Some(Self::Control),
-            1 => Some(Self::StageProgress),
-            2 => Some(Self::StageComplete),
-            3 => Some(Self::ApplyScheduled),
-            4 => Some(Self::ApplyComplete),
-            5 => Some(Self::RollbackTriggered),
-            6 => Some(Self::StateSnapshot),
-            7 => Some(Self::StorageReport),
-            8 => Some(Self::PreflightReport),
-            9 => Some(Self::Heartbeat),
-            10 => Some(Self::LogRecord),
-            _ => None,
-        }
-    }
-}
-
-#[allow(unreachable_code)]
-const _: () = {
-    lib_ipc::tagged_enum! {
-        impl crate::ipc::UpdaterCommand => crate::ipc::UpdaterCommandKind {
-            struct StageRelease { command_id: CommandId, update_id: Uuid => with_serde, manifest: ReleaseManifest => with_serde },
-            struct Cancel { command_id: CommandId, update_id: Uuid => with_serde },
-            struct ApplyRelease { command_id: CommandId, update_id: Uuid => with_serde, window: MaintenanceWindow => with_serde },
-            struct Rollback { command_id: CommandId, update_id: Uuid => with_serde },
-            struct QueryState { command_id: CommandId },
-            struct QueryStorage { command_id: CommandId },
-            struct PreflightRelease { command_id: CommandId, update_id: Uuid => with_serde },
-        }
-    }
-
-    lib_ipc::tagged_enum! {
-        impl crate::ipc::UpdaterEvent => crate::ipc::UpdaterEventKind, unknown = Unknown {
-            struct StageProgress { update_id: Uuid => with_serde, percent: u8, detail: Option<String> },
-            struct StageComplete { update_id: Uuid => with_serde },
-            struct ApplyScheduled { update_id: Uuid => with_serde, eta: Timestamp => with_serde },
-            struct ApplyComplete { update_id: Uuid => with_serde, reboot_required: bool },
-            struct RollbackTriggered { update_id: Uuid => with_serde, reason: String },
-            struct StateSnapshot { active_update: Option<UpdateState> => with_serde, cache_usage_bytes: u64 },
-            struct StorageReport { report: UpdaterStorageReport => with_serde },
-            struct PreflightReport { report: PreflightReport => with_serde },
-            struct Heartbeat { uptime_ms: u64, sequence: u64, stage_queue_depth: u32 },
-            struct LogRecord { level: LogLevel => with_serde, span: Vec<String>, message: String },
-            tuple Control (ControlEvent),
-        }
-    }
-};
-
-impl ServerEvent for UpdaterEvent {
-    fn message_kind(&self) -> MessageKind {
-        match self {
-            Self::Control(_) => MessageKind::Control,
-            Self::Heartbeat { .. } => MessageKind::Heartbeat,
-            Self::StageProgress { .. }
-            | Self::StageComplete { .. }
-            | Self::ApplyScheduled { .. }
-            | Self::ApplyComplete { .. }
-            | Self::RollbackTriggered { .. }
-            | Self::StateSnapshot { .. }
-            | Self::StorageReport { .. }
-            | Self::PreflightReport { .. }
-            | Self::LogRecord { .. }
-            | Self::Unknown { .. } => MessageKind::Event,
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::Utc;
-    use lib_ipc::envelope::{TaggedDecodeError, TaggedEnvelope};
-    use lib_ipc::protocol::{AckEvent, ControlEvent, NackEvent};
-    use serde::{Serialize, de::DeserializeOwned};
+    use lib_ipc::wire::{FrameFlags, ServiceKind, StreamKind};
     use serde_json::Value;
+
+    fn assert_ipc_round_trip<T>(stream: StreamKind, value: &T) -> T
+    where
+        T: Serialize + for<'de> Deserialize<'de>,
+    {
+        let frame = lib_ipc::frame::Frame::encode_payload(ServiceKind::Updater, stream, CommandId::new(), FrameFlags::empty(), value).expect("encode ipc payload");
+        frame.decode_payload().expect("decode ipc payload")
+    }
 
     fn sample_update_state() -> UpdateState {
         UpdateState {
@@ -341,8 +217,8 @@ mod tests {
             frontend_releases: StorageDirectoryReport { path: "/opt/helios/releases/frontend".into(), usage_bytes: 1024, available_bytes: Some(1_048_576) },
         };
         vec![
-            UpdaterEvent::Control(ControlEvent::Ack(AckEvent { command_id: CommandId::new(), processed_at: Utc::now() })),
-            UpdaterEvent::Control(ControlEvent::Nack(NackEvent { command_id: CommandId::new(), reason: "error".into(), retryable: false })),
+            UpdaterEvent::Ack { command_id: CommandId::new(), processed_at: Utc::now() },
+            UpdaterEvent::Nack { command_id: CommandId::new(), reason: "error".into(), retryable: false },
             UpdaterEvent::StageProgress { update_id: Uuid::new_v4(), percent: 42, detail: Some("downloading".into()) },
             UpdaterEvent::StageComplete { update_id: Uuid::new_v4() },
             UpdaterEvent::ApplyScheduled { update_id: Uuid::new_v4(), eta: Utc::now() },
@@ -373,16 +249,11 @@ mod tests {
         ]
     }
 
-    fn check_round_trip<T>(value: &T) -> Result<(), String>
+    fn check_round_trip<T>(stream: StreamKind, value: &T) -> Result<(), String>
     where
-        T: Serialize + DeserializeOwned + Clone + std::fmt::Debug + Into<TaggedEnvelope> + TryFrom<TaggedEnvelope, Error = TaggedDecodeError>,
+        T: Serialize + for<'de> Deserialize<'de> + Clone,
     {
-        let envelope: TaggedEnvelope = value.clone().into();
-        let decoded: T = T::try_from(envelope.clone()).map_err(|err| err.to_string())?;
-        let reencoded: TaggedEnvelope = decoded.clone().into();
-        if envelope.kind != reencoded.kind || envelope.payload != reencoded.payload {
-            return Err("tagged payload mismatch".into());
-        }
+        let decoded: T = assert_ipc_round_trip(stream, value);
 
         let original_json: Value = serde_json::to_value(value).map_err(|err| err.to_string())?;
         let decoded_json: Value = serde_json::to_value(&decoded).map_err(|err| err.to_string())?;
@@ -396,7 +267,7 @@ mod tests {
     #[test]
     fn updater_event_roundtrip() {
         for event in sample_events() {
-            if let Err(err) = check_round_trip(&event) {
+            if let Err(err) = check_round_trip(StreamKind::Event, &event) {
                 panic!("updater event round-trip failed ({event:?}): {err}");
             }
         }
@@ -405,7 +276,7 @@ mod tests {
     #[test]
     fn updater_command_roundtrip() {
         for command in sample_commands() {
-            if let Err(err) = check_round_trip(&command) {
+            if let Err(err) = check_round_trip(StreamKind::Request, &command) {
                 panic!("updater command round-trip failed ({command:?}): {err}");
             }
         }

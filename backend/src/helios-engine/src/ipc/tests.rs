@@ -1,6 +1,6 @@
 use super::*;
-use lib_ipc::envelope::TaggedEnvelope;
 use lib_ipc::types::CommandId;
+use lib_ipc::wire::{FrameFlags, ServiceKind, StreamKind};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::BTreeSet;
 use styx::codec::{CodecKind, CodecRegistry};
@@ -51,8 +51,16 @@ where
     serde_json::from_slice(&encoded).expect("decode json")
 }
 
+fn assert_ipc_round_trip<T>(service: ServiceKind, stream: StreamKind, request_id: CommandId, value: &T) -> T
+where
+    T: Serialize + DeserializeOwned,
+{
+    let frame = lib_ipc::frame::Frame::encode_payload(service, stream, request_id, FrameFlags::empty(), value).expect("encode ipc payload");
+    frame.decode_payload().expect("decode ipc payload")
+}
+
 #[test]
-fn start_command_round_trips_over_tagged_ipc() {
+fn start_command_round_trips_over_ipc_frame() {
     let base_manifest = sample_manifest();
 
     let decoded_identity: crate::identity::DeviceIdentity = assert_json_round_trip(&base_manifest.identity);
@@ -73,8 +81,7 @@ fn start_command_round_trips_over_tagged_ipc() {
     assert_eq!(decoded_manifest.capture.backend, base_manifest.capture.backend);
 
     let command = EngineCommand::Start { command_id: CommandId::new(), manifest: Box::new(base_manifest.clone().resolve()) };
-    let envelope: TaggedEnvelope = (&command).into();
-    let decoded = EngineCommand::try_from(envelope).expect("decode command");
+    let decoded: EngineCommand = assert_ipc_round_trip(ServiceKind::Engine, StreamKind::Request, CommandId::new(), &command);
     if let EngineCommand::Start { manifest: round_trip, .. } = decoded {
         assert_eq!(round_trip.capture.backend, base_manifest.capture.backend);
     } else {
@@ -83,12 +90,11 @@ fn start_command_round_trips_over_tagged_ipc() {
 }
 
 #[test]
-fn stream_list_event_round_trips() {
+fn stream_list_event_round_trips_over_ipc_frame() {
     let (_, descriptor) = crate::capture::default_virtual_device().backends.into_iter().next().map(|b| b.descriptor).map(|d| ((), d)).unwrap();
     let summary = StreamSummary { stream_id: uuid::Uuid::new_v4(), descriptor, manifest: sample_manifest().resolve(), status: StreamStatus::default(), runtime: StreamRuntimeState::default() };
     let event = EngineEvent::StreamList { command_id: CommandId::new(), streams: vec![summary.clone()] };
-    let envelope: TaggedEnvelope = (&event).into();
-    let decoded = EngineEvent::try_from(envelope).expect("decode event");
+    let decoded: EngineEvent = assert_ipc_round_trip(ServiceKind::Engine, StreamKind::Event, CommandId::new(), &event);
     match decoded {
         EngineEvent::StreamList { streams, .. } => {
             assert_eq!(streams.len(), 1);

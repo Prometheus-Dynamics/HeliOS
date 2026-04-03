@@ -3,7 +3,6 @@ use std::{path::PathBuf, sync::Arc};
 use helios_updater::client::Error as UpdaterError;
 use helios_updater::client::{UpdaterClient, UpdaterClientConfig, UpdaterSession};
 use helios_updater::ipc::{UpdaterCommand, UpdaterEvent};
-use lib_ipc::protocol::ControlEvent;
 use tokio::time::{Duration, timeout};
 use tracing::{error, info};
 
@@ -43,7 +42,7 @@ async fn try_connect_updater(socket: PathBuf, journal_path: PathBuf) -> Result<U
     let command = UpdaterCommand::QueryState { command_id };
     let journal_entry = session.send_command(client.journal(), &command).await?;
     match session.next_event().await {
-        Ok(Some(UpdaterEvent::Control(ControlEvent::Ack(ack)))) if ack.command_id == command_id => {
+        Ok(Some(UpdaterEvent::Ack { command_id: ack_id, .. })) if ack_id == command_id => {
             info!("updater acked QueryState (journal offset {})", journal_entry.offset)
         }
         Ok(Some(other)) => info!("updater initial event: {:?}", other),

@@ -7,7 +7,6 @@ use helios_updater::ReleaseManifest;
 use helios_updater::client::{CommandId, UpdaterSession};
 use helios_updater::ipc::{MaintenanceWindow, PreflightReport, UpdateState, UpdaterCommand, UpdaterStorageReport};
 use helios_updater::update_core::{UpdateCoreBackend, UpdateCoreError};
-use lib_ipc::protocol::ControlEvent;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
@@ -71,8 +70,8 @@ pub async fn send_updater_command(state: &AppState, command: UpdaterCommand, wai
             };
 
             match event {
-                helios_updater::ipc::UpdaterEvent::Control(ControlEvent::Ack(ack)) if ack.command_id == command_id => break Ok(()),
-                helios_updater::ipc::UpdaterEvent::Control(ControlEvent::Nack(nack)) if nack.command_id == command_id => break Err(nack.reason),
+                helios_updater::ipc::UpdaterEvent::Ack { command_id: ack_id, .. } if ack_id == command_id => break Ok(()),
+                helios_updater::ipc::UpdaterEvent::Nack { command_id: nack_id, reason, .. } if nack_id == command_id => break Err(reason),
                 _ => {
                     if attempts > 32 {
                         break Err("updater did not acknowledge command".to_string());
@@ -109,7 +108,7 @@ pub async fn fetch_updater_state(state: &AppState) -> Result<(Option<UpdateState
 
             match event {
                 helios_updater::ipc::UpdaterEvent::StateSnapshot { active_update, cache_usage_bytes } => break Ok((active_update, cache_usage_bytes)),
-                helios_updater::ipc::UpdaterEvent::Control(ControlEvent::Nack(nack)) if nack.command_id == cmd_id => break Err(nack.reason),
+                helios_updater::ipc::UpdaterEvent::Nack { command_id: nack_id, reason, .. } if nack_id == cmd_id => break Err(reason),
                 _ => continue,
             }
         };
@@ -142,7 +141,7 @@ pub async fn fetch_updater_storage(state: &AppState) -> Result<UpdaterStorageRep
 
             match event {
                 helios_updater::ipc::UpdaterEvent::StorageReport { report } => break Ok(report),
-                helios_updater::ipc::UpdaterEvent::Control(ControlEvent::Nack(nack)) if nack.command_id == cmd_id => break Err(nack.reason),
+                helios_updater::ipc::UpdaterEvent::Nack { command_id: nack_id, reason, .. } if nack_id == cmd_id => break Err(reason),
                 _ => continue,
             }
         };
@@ -175,7 +174,7 @@ pub async fn fetch_updater_preflight(state: &AppState, update_id: uuid::Uuid) ->
 
             match event {
                 helios_updater::ipc::UpdaterEvent::PreflightReport { report } if report.update_id == update_id => break Ok(report),
-                helios_updater::ipc::UpdaterEvent::Control(ControlEvent::Nack(nack)) if nack.command_id == cmd_id => break Err(nack.reason),
+                helios_updater::ipc::UpdaterEvent::Nack { command_id: nack_id, reason, .. } if nack_id == cmd_id => break Err(reason),
                 _ => continue,
             }
         };

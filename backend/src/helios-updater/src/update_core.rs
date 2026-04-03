@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::Utc;
-use lib_ipc::protocol::ControlEvent;
 use tokio::fs;
 use tokio::time::{Instant, sleep, timeout};
 use url::Url;
@@ -334,8 +333,8 @@ impl IpcUpdateCoreBackend {
             };
 
             match event {
-                UpdaterEvent::Control(ControlEvent::Ack(ack)) if ack.command_id == command_id => break Ok(()),
-                UpdaterEvent::Control(ControlEvent::Nack(nack)) if nack.command_id == command_id => break Err(UpdateCoreError::new(nack.reason)),
+                UpdaterEvent::Ack { command_id: ack_id, .. } if ack_id == command_id => break Ok(()),
+                UpdaterEvent::Nack { command_id: nack_id, reason, .. } if nack_id == command_id => break Err(UpdateCoreError::new(reason)),
                 _ => {
                     if attempts > 32 {
                         break Err(UpdateCoreError::new("updater did not acknowledge command"));
@@ -388,7 +387,7 @@ impl UpdateCoreBackend for IpcUpdateCoreBackend {
 
             match event {
                 UpdaterEvent::StateSnapshot { active_update, cache_usage_bytes } => break Ok((active_update, cache_usage_bytes)),
-                UpdaterEvent::Control(ControlEvent::Nack(nack)) if nack.command_id == command_id => break Err(UpdateCoreError::new(nack.reason)),
+                UpdaterEvent::Nack { command_id: nack_id, reason, .. } if nack_id == command_id => break Err(UpdateCoreError::new(reason)),
                 _ => continue,
             }
         };
@@ -418,7 +417,7 @@ impl UpdateCoreBackend for IpcUpdateCoreBackend {
 
             match event {
                 UpdaterEvent::PreflightReport { report } if report.update_id == update_id => break Ok(report),
-                UpdaterEvent::Control(ControlEvent::Nack(nack)) if nack.command_id == command_id => break Err(UpdateCoreError::new(nack.reason)),
+                UpdaterEvent::Nack { command_id: nack_id, reason, .. } if nack_id == command_id => break Err(UpdateCoreError::new(reason)),
                 _ => continue,
             }
         };

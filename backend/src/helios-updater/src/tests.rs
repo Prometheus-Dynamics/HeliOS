@@ -16,7 +16,6 @@ use crate::artifact::{ManifestArtifact, ReleaseManifest, StagedArtifact, StagedM
 use crate::client::{UpdaterClient, UpdaterClientConfig};
 use crate::service::UpdaterService;
 use crate::{UpdaterConfig, UpdaterRuntime};
-use lib_ipc::protocol::ControlEvent;
 
 async fn wait_for_socket(path: &Path) {
     for _ in 0..100 {
@@ -86,8 +85,8 @@ async fn runtime_accepts_handshake_and_ack() {
     for _ in 0..5 {
         if let Some(event) = session.next_event().await.expect("event result") {
             match event {
-                crate::ipc::UpdaterEvent::Control(ControlEvent::Ack(ack)) => {
-                    assert_eq!(ack.command_id, command_id);
+                crate::ipc::UpdaterEvent::Ack { command_id: ack_id, .. } => {
+                    assert_eq!(ack_id, command_id);
                     saw_ack = true;
                     break;
                 }

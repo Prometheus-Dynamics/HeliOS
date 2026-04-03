@@ -33,7 +33,7 @@ updater-ipc = [
     "flate2",
     "webpki-root-certs",
 ]
-mock = ["updater-ipc"]
+mock = ["updater-ipc", "lib-ipc/mock"]
 
 [[bin]]
 name = "helios-updater"

@@ -12,7 +12,6 @@ use futures::{FutureExt, future::BoxFuture};
 use lib_ipc::frame::Frame;
 use lib_ipc::handshake::{ClientHello, ServerHello};
 use lib_ipc::journal::JournalWriter;
-use lib_ipc::protocol::{AckEvent, ControlEvent, NackEvent};
 use lib_ipc::server::{self, BroadcastHandler};
 use lib_ipc::types::CommandId;
 use lib_ipc::wire::ServiceKind;
@@ -107,17 +106,17 @@ async fn handle_command(journal: &Arc<JournalWriter<UpdaterCommand>>, service: &
     match journal.append(&command) {
         Ok(_) => match service.handle_command(command).await {
             Ok(()) => {
-                service.publish_event(UpdaterEvent::Control(ControlEvent::Ack(AckEvent { command_id, processed_at: Utc::now() })));
+                service.publish_event(UpdaterEvent::Ack { command_id, processed_at: Utc::now() });
                 info!(%command_id, command = command_name, "updater command acknowledged");
             }
             Err(err) => {
                 warn!(%err, %command_id, command = command_name, "updater command execution failed");
-                service.publish_event(UpdaterEvent::Control(ControlEvent::Nack(NackEvent { command_id, reason: err.to_string(), retryable: matches!(err, Error::Http(_) | Error::Io(_)) })));
+                service.publish_event(UpdaterEvent::Nack { command_id, reason: err.to_string(), retryable: matches!(err, Error::Http(_) | Error::Io(_)) });
             }
         },
         Err(err) => {
             warn!(%err, %command_id, command = command_name, "failed to append updater command to journal");
-            service.publish_event(UpdaterEvent::Control(ControlEvent::Nack(NackEvent { command_id, reason: err.to_string(), retryable: false })));
+            service.publish_event(UpdaterEvent::Nack { command_id, reason: err.to_string(), retryable: false });
         }
     }
 

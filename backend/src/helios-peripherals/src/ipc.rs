@@ -1,22 +1,7 @@
 use std::collections::BTreeMap;
 
-use lib_ipc::frame::MessageKind;
-use lib_ipc::protocol::ControlEvent;
-use lib_ipc::server::ServerEvent;
 use lib_ipc::types::{CommandId, RequestIdentity, Timestamp};
 use serde::{Deserialize, Serialize};
-
-#[cfg(feature = "tracing")]
-macro_rules! error {
-    ($($tt:tt)*) => {
-        tracing::error!($($tt)*)
-    };
-}
-
-#[cfg(not(feature = "tracing"))]
-macro_rules! error {
-    ($($tt:tt)*) => {};
-}
 
 use crate::dto::{AiModelDescriptor, AiModelId, AiModelInventory, AiModelUpload, I2cInventory, LightingCommand, LightingRuntimeState, SensorData, SensorInventory, SensorKind, SensorScope};
 use lib_sensors::fan_config::{FanConfig, FanStatus};
@@ -113,23 +98,13 @@ pub enum SensorCommand {
 pub enum SensorEvent {
     /// Command acknowledgement emitted upon successful processing.
     #[serde(rename = "ack")]
-    Ack {
-        command_id: CommandId,
-        processed_at: Timestamp,
-    },
+    Ack { command_id: CommandId, processed_at: Timestamp },
     /// Command rejection emitted when processing fails.
     #[serde(rename = "nack")]
-    Nack {
-        command_id: CommandId,
-        reason: String,
-        retryable: bool,
-    },
+    Nack { command_id: CommandId, reason: String, retryable: bool },
     /// Updated sensor inventory delivered in response to [`SensorCommand::Inventory`].
     #[serde(rename = "inventory")]
-    Inventory {
-        command_id: CommandId,
-        inventory: SensorInventory,
-    },
+    Inventory { command_id: CommandId, inventory: SensorInventory },
     /// Live or on-demand sensor snapshot payload.
     #[serde(rename = "snapshot")]
     Snapshot {
@@ -148,60 +123,31 @@ pub enum SensorEvent {
     },
     /// Confirmation that subscription has been established.
     #[serde(rename = "subscribed")]
-    Subscribed {
-        command_id: CommandId,
-        scope: SensorScope,
-    },
+    Subscribed { command_id: CommandId, scope: SensorScope },
     /// Notification that a subscription has been terminated.
     #[serde(rename = "unsubscribed")]
-    Unsubscribed {
-        scope: SensorScope,
-    },
+    Unsubscribed { scope: SensorScope },
     /// Snapshot of AI model inventory.
     #[serde(rename = "ai_models")]
-    AiModelInventory {
-        command_id: CommandId,
-        inventory: AiModelInventory,
-    },
+    AiModelInventory { command_id: CommandId, inventory: AiModelInventory },
     /// Notification emitted when a model upload succeeds.
     #[serde(rename = "ai_model_uploaded")]
-    AiModelUploaded {
-        command_id: CommandId,
-        model: Box<AiModelDescriptor>,
-    },
+    AiModelUploaded { command_id: CommandId, model: Box<AiModelDescriptor> },
     /// Notification that a model has been deleted.
     #[serde(rename = "ai_model_deleted")]
-    AiModelDeleted {
-        command_id: CommandId,
-        model_id: AiModelId,
-    },
+    AiModelDeleted { command_id: CommandId, model_id: AiModelId },
     /// Snapshot of available I2C buses and devices.
     #[serde(rename = "i2c_inventory")]
-    I2cInventory {
-        command_id: CommandId,
-        inventory: I2cInventory,
-    },
+    I2cInventory { command_id: CommandId, inventory: I2cInventory },
     /// Notification emitted when firmware update status changes.
     #[serde(rename = "firmware_update")]
-    FirmwareUpdate {
-        update: FirmwareUpdate,
-    },
-    Unknown {
-        kind: u16,
-        payload: Vec<u8>,
-    },
+    FirmwareUpdate { update: FirmwareUpdate },
     /// Latest fan status snapshot.
     #[serde(rename = "fan_status")]
-    FanStatus {
-        command_id: CommandId,
-        status: FanStatus,
-    },
+    FanStatus { command_id: CommandId, status: FanStatus },
     /// Current fan configuration.
     #[serde(rename = "fan_config")]
-    FanConfig {
-        command_id: CommandId,
-        config: FanConfig,
-    },
+    FanConfig { command_id: CommandId, config: FanConfig },
     /// Latest applied lighting command/runtime state.
     #[serde(rename = "lighting_state")]
     LightingState {
@@ -242,187 +188,18 @@ impl RequestIdentity for SensorCommand {
     }
 }
 
-impl ServerEvent for SensorEvent {
-    fn message_kind(&self) -> MessageKind {
-        match self {
-            SensorEvent::Ack { .. } | SensorEvent::Nack { .. } => MessageKind::Event,
-            SensorEvent::Inventory { .. }
-            | SensorEvent::Snapshot { .. }
-            | SensorEvent::SnapshotTyped { .. }
-            | SensorEvent::Subscribed { .. }
-            | SensorEvent::Unsubscribed { .. }
-            | SensorEvent::AiModelInventory { .. }
-            | SensorEvent::AiModelUploaded { .. }
-            | SensorEvent::AiModelDeleted { .. }
-            | SensorEvent::I2cInventory { .. }
-            | SensorEvent::FirmwareUpdate { .. }
-            | SensorEvent::FanStatus { .. }
-            | SensorEvent::FanConfig { .. }
-            | SensorEvent::LightingState { .. }
-            | SensorEvent::Unknown { .. } => MessageKind::Event,
-        }
-    }
-}
-
-impl From<ControlEvent> for SensorEvent {
-    fn from(value: ControlEvent) -> Self {
-        match value {
-            ControlEvent::Ack(ack) => SensorEvent::Ack { command_id: ack.command_id, processed_at: ack.processed_at },
-            ControlEvent::Nack(nack) => SensorEvent::Nack { command_id: nack.command_id, reason: nack.reason, retryable: nack.retryable },
-        }
-    }
-}
-
-#[repr(u16)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SensorCommandKind {
-    Discover = 0,
-    Inventory = 1,
-    Snapshot = 2,
-    SnapshotTyped = 3,
-    Update = 4,
-    Subscribe = 5,
-    Unsubscribe = 6,
-    ConfigureFirmware = 7,
-    AiListModels = 8,
-    AiUploadModel = 9,
-    AiDeleteModel = 10,
-    I2cInventory = 11,
-    Lighting = 12,
-    FanStatus = 13,
-    FanConfig = 14,
-    UpdateFanConfig = 15,
-    ConfigureAlias = 16,
-    LightingState = 17,
-}
-
-impl SensorCommandKind {
-    const fn to_u16(self) -> u16 {
-        self as u16
-    }
-
-    fn from_u16(value: u16) -> Option<Self> {
-        match value {
-            0 => Some(Self::Discover),
-            1 => Some(Self::Inventory),
-            2 => Some(Self::Snapshot),
-            3 => Some(Self::SnapshotTyped),
-            4 => Some(Self::Update),
-            5 => Some(Self::Subscribe),
-            6 => Some(Self::Unsubscribe),
-            7 => Some(Self::ConfigureFirmware),
-            8 => Some(Self::AiListModels),
-            9 => Some(Self::AiUploadModel),
-            10 => Some(Self::AiDeleteModel),
-            11 => Some(Self::I2cInventory),
-            12 => Some(Self::Lighting),
-            13 => Some(Self::FanStatus),
-            14 => Some(Self::FanConfig),
-            15 => Some(Self::UpdateFanConfig),
-            16 => Some(Self::ConfigureAlias),
-            17 => Some(Self::LightingState),
-            _ => None,
-        }
-    }
-}
-
-#[repr(u16)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SensorEventKind {
-    Ack = 0,
-    Nack = 1,
-    Inventory = 2,
-    Snapshot = 3,
-    SnapshotTyped = 4,
-    Subscribed = 5,
-    Unsubscribed = 6,
-    AiModelInventory = 7,
-    AiModelUploaded = 8,
-    AiModelDeleted = 9,
-    I2cInventory = 10,
-    FanStatus = 11,
-    FanConfig = 12,
-    FirmwareUpdate = 13,
-    LightingState = 14,
-}
-
-impl SensorEventKind {
-    const fn to_u16(self) -> u16 {
-        self as u16
-    }
-
-    fn from_u16(value: u16) -> Option<Self> {
-        match value {
-            0 => Some(Self::Ack),
-            1 => Some(Self::Nack),
-            2 => Some(Self::Inventory),
-            3 => Some(Self::Snapshot),
-            4 => Some(Self::SnapshotTyped),
-            5 => Some(Self::Subscribed),
-            6 => Some(Self::Unsubscribed),
-            7 => Some(Self::AiModelInventory),
-            8 => Some(Self::AiModelUploaded),
-            9 => Some(Self::AiModelDeleted),
-            10 => Some(Self::I2cInventory),
-            11 => Some(Self::FanStatus),
-            12 => Some(Self::FanConfig),
-            13 => Some(Self::FirmwareUpdate),
-            14 => Some(Self::LightingState),
-            _ => None,
-        }
-    }
-}
-
-#[allow(unreachable_code)]
-const _: () = {
-    lib_ipc::tagged_enum! {
-        impl crate::ipc::SensorCommand => crate::ipc::SensorCommandKind {
-            struct Discover { command_id: CommandId, refresh: bool },
-            struct Inventory { command_id: CommandId },
-            struct Snapshot { command_id: CommandId, scope: SensorScope => with_serde },
-            struct SnapshotTyped { command_id: CommandId, scope: SensorScope => with_serde },
-            struct Update { command_id: CommandId, scope: SensorScope => with_serde, sensor: SensorKind => with_serde, payload: SensorData => with_serde },
-            struct Subscribe { command_id: CommandId, scope: SensorScope => with_serde },
-            struct Unsubscribe { command_id: CommandId, scope: SensorScope => with_serde },
-            struct ConfigureFirmware { command_id: CommandId, device_id: String, firmware: String },
-            struct ConfigureAlias { command_id: CommandId, hardware_key: String, alias: String },
-            struct AiListModels { command_id: CommandId },
-            struct AiUploadModel { command_id: CommandId, model: AiModelUpload => with_serde },
-            struct AiDeleteModel { command_id: CommandId, model_id: AiModelId => with_serde },
-            struct I2cInventory { command_id: CommandId },
-            struct Lighting { command_id: CommandId, command: LightingCommand => with_serde },
-            struct LightingState { command_id: CommandId },
-            struct FanStatus { command_id: CommandId },
-            struct FanConfig { command_id: CommandId },
-            struct UpdateFanConfig { command_id: CommandId, config: FanConfig => with_serde },
-        }
-    }
-
-    lib_ipc::tagged_enum! {
-        impl crate::ipc::SensorEvent => crate::ipc::SensorEventKind, unknown = Unknown {
-            struct Ack { command_id: CommandId, processed_at: Timestamp => with_serde },
-            struct Nack { command_id: CommandId, reason: String, retryable: bool },
-            struct Inventory { command_id: CommandId, inventory: SensorInventory => with_serde },
-            struct Snapshot { command_id: Option<CommandId>, scope: SensorScope => with_serde, values: BTreeMap<SensorKind, SensorData> => with_serde },
-            struct SnapshotTyped { command_id: Option<CommandId>, scope: SensorScope => with_serde, values: BTreeMap<SensorKind, SensorReading> => with_serde },
-            struct Subscribed { command_id: CommandId, scope: SensorScope => with_serde },
-            struct Unsubscribed { scope: SensorScope => with_serde },
-            struct AiModelInventory { command_id: CommandId, inventory: AiModelInventory => with_serde },
-            struct AiModelUploaded { command_id: CommandId, model: Box<AiModelDescriptor> => with_serde },
-            struct AiModelDeleted { command_id: CommandId, model_id: AiModelId => with_serde },
-            struct I2cInventory { command_id: CommandId, inventory: I2cInventory => with_serde },
-            struct FirmwareUpdate { update: FirmwareUpdate => with_serde },
-            struct FanStatus { command_id: CommandId, status: FanStatus => with_serde },
-            struct FanConfig { command_id: CommandId, config: FanConfig => with_serde },
-            struct LightingState { command_id: Option<CommandId>, state: LightingRuntimeState => with_serde },
-        }
-    }
-};
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dto::SensorDescriptor;
+    use lib_ipc::wire::{FrameFlags, ServiceKind, StreamKind};
+
+    fn assert_ipc_round_trip<T>(stream: StreamKind, value: &T) -> T
+    where
+        T: Serialize + for<'de> Deserialize<'de>,
+    {
+        let frame = lib_ipc::frame::Frame::encode_payload(ServiceKind::Peripherals, stream, CommandId::new(), FrameFlags::empty(), value).expect("encode ipc payload");
+        frame.decode_payload().expect("decode ipc payload")
+    }
 
     #[test]
     fn sensor_command_roundtrip() {
@@ -438,19 +215,8 @@ mod tests {
     #[test]
     fn sensor_event_roundtrip() {
         let event = SensorEvent::Inventory { command_id: CommandId::new(), inventory: SensorInventory::default() };
-        let serialized = serde_json::to_string(&event).expect("serialize");
-        let deserialized: SensorEvent = serde_json::from_str(&serialized).expect("deserialize");
+        let deserialized: SensorEvent = assert_ipc_round_trip(StreamKind::Event, &event);
         assert!(matches!(deserialized, SensorEvent::Inventory { .. }));
-    }
-
-    #[test]
-    fn sensor_event_tagged_roundtrip() {
-        let descriptor = SensorDescriptor { backend: "mock".into(), identifier: "device0".into(), present: true, info: None, metadata: None, stream_id: None, value: None };
-        let inventory = SensorInventory { sensors: vec![descriptor] };
-        let event = SensorEvent::Inventory { command_id: CommandId::new(), inventory };
-        let envelope: lib_ipc::envelope::TaggedEnvelope = event.clone().into();
-        let decoded: SensorEvent = SensorEvent::try_from(envelope).expect("decode envelope");
-        assert!(matches!(decoded, SensorEvent::Inventory { .. }));
     }
 
     #[test]
