@@ -1,8 +1,8 @@
-use super::{EngineClient, EngineConnectionMetrics, EngineRequest, EngineSession, ExpectedEvent, JournalMode, disconnected_error, mark_disconnected};
-use crate::ipc::engine::timeouts::{ENGINE_RECONNECT_INITIAL, ENGINE_RECONNECT_MAX, engine_command_send_timeout, scale_timeout, timeout_scale_for_streams};
+use super::{EngineClient, EngineConnectionMetrics, EngineRequest, EngineSession, ExpectedEvent, JournalMode, disconnected_error, engine_ipc_policy, mark_disconnected};
 use helios_engine::ipc::{EngineCommand, EngineEvent};
 use lib_ipc::journal::JournalEntry;
 use lib_ipc::types::CommandId;
+use lib_runtime_policy::{HELIOS_ENGINE_RECONNECT_INITIAL, HELIOS_ENGINE_RECONNECT_MAX, scale_timeout};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     future, io,
@@ -31,7 +31,7 @@ pub(super) async fn run_engine_dispatcher(
     let mut journal_order: VecDeque<(CommandId, JournalEntry<EngineCommand>)> = VecDeque::new();
     let mut completed_journal_ids: HashSet<CommandId> = HashSet::new();
     let mut session: Option<EngineSession> = None;
-    let mut backoff = ENGINE_RECONNECT_INITIAL;
+    let mut backoff = HELIOS_ENGINE_RECONNECT_INITIAL;
     let mut rx_closed = false;
 
     loop {
@@ -40,7 +40,7 @@ pub(super) async fn run_engine_dispatcher(
                 Ok(Ok(sess)) => {
                     info!("connected to engine IPC");
                     session = Some(sess);
-                    backoff = ENGINE_RECONNECT_INITIAL;
+                    backoff = HELIOS_ENGINE_RECONNECT_INITIAL;
                     let _ = connect_events.send(());
                     connected.store(true, Ordering::Relaxed);
                     metrics.record_connect();
@@ -50,7 +50,7 @@ pub(super) async fn run_engine_dispatcher(
                     flush_pending_disconnect(&mut pending, &mut journal_order, &mut completed_journal_ids, client.journal(), &metrics, false);
                     mark_disconnected(&connected, &last_disconnect_ms);
                     sleep(backoff).await;
-                    backoff = (backoff * 2).min(ENGINE_RECONNECT_MAX);
+                    backoff = (backoff * 2).min(HELIOS_ENGINE_RECONNECT_MAX);
                     continue;
                 }
                 Err(_) => {
@@ -58,7 +58,7 @@ pub(super) async fn run_engine_dispatcher(
                     flush_pending_disconnect(&mut pending, &mut journal_order, &mut completed_journal_ids, client.journal(), &metrics, false);
                     mark_disconnected(&connected, &last_disconnect_ms);
                     sleep(backoff).await;
-                    backoff = (backoff * 2).min(ENGINE_RECONNECT_MAX);
+                    backoff = (backoff * 2).min(HELIOS_ENGINE_RECONNECT_MAX);
                     continue;
                 }
             }
@@ -79,7 +79,7 @@ pub(super) async fn run_engine_dispatcher(
                         let mut disconnect = false;
                         if let Some(sess) = session.as_mut() {
                             let send_timeout = scale_timeout(
-                                engine_command_send_timeout(),
+                                engine_ipc_policy().command_send_timeout,
                                 timeout_scale_ppm.load(Ordering::Relaxed),
                             );
                             let send = match request.journal_mode {
@@ -304,7 +304,7 @@ fn update_scale_from_event(event: &EngineEvent, timeout_scale_ppm: &AtomicU64, a
         EngineEvent::StreamList { streams, .. } => {
             let count = streams.len();
             active_streams.store(count, Ordering::Relaxed);
-            timeout_scale_ppm.store(timeout_scale_for_streams(count), Ordering::Relaxed);
+            timeout_scale_ppm.store(engine_ipc_policy().timeout_scale_for_streams(count), Ordering::Relaxed);
         }
         EngineEvent::Started { .. } => {
             update_scale_from_delta(timeout_scale_ppm, active_streams, 1);
@@ -323,7 +323,7 @@ fn update_scale_from_delta(timeout_scale_ppm: &AtomicU64, active_streams: &Atomi
         let next = if delta < 0 { current.saturating_sub(delta_abs) } else { current.saturating_add(delta_abs) };
         match active_streams.compare_exchange(current, next, Ordering::Relaxed, Ordering::Relaxed) {
             Ok(_) => {
-                timeout_scale_ppm.store(timeout_scale_for_streams(next), Ordering::Relaxed);
+                timeout_scale_ppm.store(engine_ipc_policy().timeout_scale_for_streams(next), Ordering::Relaxed);
                 break;
             }
             Err(observed) => current = observed,

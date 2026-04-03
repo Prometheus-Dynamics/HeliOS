@@ -632,13 +632,7 @@ review_note = "Localization sources root should stay as thin route/fetcher orche
 path = "backend/src/helios-api/src/http/localization/sources/catalog.rs"
 max_lines = 170
 owner = "HeliOS"
-review_note = "Localization source catalog assembly now lives here; keep sample fetching, solver output parsing, and compatibility heuristics out of the listing path."
-
-[[line_limits]]
-path = "backend/src/helios-api/src/http/localization/sources/compat.rs"
-max_lines = 160
-owner = "HeliOS"
-review_note = "Localization-output compatibility heuristics and cached sample refresh timing now live here; keep route and profile solver orchestration separate."
+review_note = "Localization source catalog assembly and explicit localization-capability filtering now live here; keep sample fetching and profile/source sampling responses out of the listing path."
 
 [[line_limits]]
 path = "backend/src/helios-api/src/http/localization/sources/profile.rs"
@@ -650,7 +644,7 @@ review_note = "Profile-derived source exposure, output-key parsing, and profile 
 path = "backend/src/helios-api/src/http/localization/sources/sampling.rs"
 max_lines = 130
 owner = "HeliOS"
-review_note = "Localization stream, peer, and profile output sampling endpoints now live here; keep compatibility heuristics and catalog construction out of the response path."
+review_note = "Localization stream, peer, and profile output sampling endpoints now live here; keep catalog construction and graph capability filtering out of the response path."
 
 [[line_limits]]
 path = "backend/src/helios-api/src/http/localization/validation/mod.rs"
@@ -911,10 +905,10 @@ owner = "HeliOS"
 review_note = "Pipeline page lazy component loading, live-refresh/focus policy, warmup scheduling, and icon-modal actions now live here; keep route rendering state and graph/tune composition out of this runtime helper."
 
 [[line_limits]]
-path = "frontend/src/lib/features/pipelines/page/PipelineTuneState.svelte"
+path = "frontend/src/lib/features/pipelines/page/PipelineTuneWorkspace.svelte"
 max_lines = 2080
 owner = "HeliOS"
-review_note = "Pipeline tune state still owns runtime composition, effects, and tuning orchestration, but stream-association/metrics targeting and page-binding helpers have been extracted; keep adding helpers instead of rebuilding more page-local support logic."
+review_note = "Pipeline tune workspace still owns runtime composition, effects, and tuning orchestration, but stream-association/metrics targeting and page-binding helpers have been extracted; keep adding helpers instead of rebuilding more page-local support logic."
 
 [[line_limits]]
 path = "frontend/src/lib/features/pipelines/page/pipelineTunePageSupport.ts"
@@ -1028,13 +1022,19 @@ review_note = "Engine IPC dispatcher state, journal retirement, reconnect handli
 path = "backend/src/helios-api/src/ipc/engine/rpc.rs"
 max_lines = 820
 owner = "HeliOS"
-review_note = "Engine IPC RPC wrappers now live here; keep transport/session bootstrap, dispatcher internals, and timeout policy definitions out of this request surface."
+review_note = "Engine IPC RPC wrappers now live here; keep transport/session bootstrap, dispatcher internals, and runtime-policy definitions out of this request surface."
 
 [[line_limits]]
-path = "backend/src/helios-api/src/ipc/engine/timeouts.rs"
+path = "backend/src/libs/lib-runtime-policy/src/engine_ipc.rs"
 max_lines = 180
 owner = "HeliOS"
-review_note = "Engine IPC timeout constants, queue sizing, and scaling policy now live here; keep request dispatch and transport bootstrap separate."
+review_note = "Engine IPC socket discovery policy, timeout constants, queue sizing, and scaling policy now live here; keep request dispatch and transport bootstrap separate."
+
+[[line_limits]]
+path = "backend/src/libs/lib-runtime-policy/src/daedalus_runtime.rs"
+max_lines = 140
+owner = "HeliOS"
+review_note = "Daedalus plugin install roots, upload roots, registry snapshot ownership, and plugin search paths now live here; keep API/engine registry consumers free of local env parsing."
 
 [[line_limits]]
 path = "backend/src/helios-api/src/ipc/engine/transport.rs"

@@ -1,6 +1,6 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 
+use lib_runtime_policy::HELIOS_ENGINE_IPC_POLICY;
 use tokio::net::UnixListener;
 use tokio::time::{Duration, MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
@@ -15,16 +15,6 @@ use lib_ipc::types::{FeatureSet, ProtocolVersion};
 use lib_ipc::wire::ServiceKind;
 use tokio::sync::broadcast;
 
-/// Default engine IPC socket path.
-pub const ENGINE_SOCKET: &str = "/run/helios/engine.sock";
-
-fn resolve_engine_socket() -> PathBuf {
-    match std::env::var("HELIOS_ENGINE_SOCKET").or_else(|_| std::env::var("ENGINE_SOCKET")) {
-        Ok(value) => PathBuf::from(value),
-        Err(_) => PathBuf::from(ENGINE_SOCKET),
-    }
-}
-
 pub struct EngineIpcServer {
     pub runtime: Arc<EngineRuntime>,
     shutdown: CancellationToken,
@@ -33,13 +23,13 @@ pub struct EngineIpcServer {
 
 impl EngineIpcServer {
     pub fn new(runtime: Arc<EngineRuntime>, shutdown: CancellationToken) -> Self {
-        let (tx, _rx) = broadcast::channel(engine_ipc_event_buffer());
+        let (tx, _rx) = broadcast::channel(HELIOS_ENGINE_IPC_POLICY.resolve().event_buffer);
         let _ = _rx;
         Self { runtime, shutdown, tx }
     }
 
     pub async fn run(&self) -> Result<(), Error> {
-        let socket_path = resolve_engine_socket();
+        let socket_path = HELIOS_ENGINE_IPC_POLICY.resolve().socket;
         if let Some(parent) = socket_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
@@ -47,7 +37,7 @@ impl EngineIpcServer {
         let listener = UnixListener::bind(&socket_path).map_err(|_| Error::InvalidState("engine socket bind failed"))?;
         info!(socket = %socket_path.display(), "engine IPC listening");
 
-        tokio::spawn(run_metrics_broadcaster(self.runtime.clone(), self.tx.clone(), self.shutdown.clone()));
+        tokio::spawn(run_metrics_broadcaster(self.runtime.clone(), self.tx.clone(), self.shutdown.clone(), HELIOS_ENGINE_IPC_POLICY.resolve().metrics_broadcast_interval));
 
         loop {
             tokio::select! {
@@ -111,8 +101,8 @@ impl EngineIpcServer {
     }
 }
 
-async fn run_metrics_broadcaster(runtime: Arc<EngineRuntime>, tx: broadcast::Sender<EngineEvent>, shutdown: CancellationToken) {
-    let mut ticker = tokio::time::interval(metrics_broadcast_interval());
+async fn run_metrics_broadcaster(runtime: Arc<EngineRuntime>, tx: broadcast::Sender<EngineEvent>, shutdown: CancellationToken, interval: Duration) {
+    let mut ticker = tokio::time::interval(interval);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
     loop {
@@ -136,13 +126,4 @@ async fn run_metrics_broadcaster(runtime: Arc<EngineRuntime>, tx: broadcast::Sen
             }
         }
     }
-}
-
-fn engine_ipc_event_buffer() -> usize {
-    std::env::var("HELIOS_ENGINE_IPC_EVENT_BUFFER").ok().and_then(|raw| raw.parse::<usize>().ok()).unwrap_or(4096).clamp(128, 16384)
-}
-
-fn metrics_broadcast_interval() -> Duration {
-    let ms = std::env::var("HELIOS_ENGINE_METRICS_BROADCAST_MS").ok().and_then(|raw| raw.parse::<u64>().ok()).unwrap_or(5000);
-    Duration::from_millis(ms.clamp(250, 10_000))
 }

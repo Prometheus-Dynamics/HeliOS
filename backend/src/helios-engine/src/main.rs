@@ -4,7 +4,7 @@ use std::{fs, io::Write, path::PathBuf};
 use helios_engine::ipc::server::EngineIpcServer;
 use helios_engine::ipc::{GraphValidationHelperRequest, GraphValidationHelperResponse, NodeRegistrySnapshot};
 use helios_engine::runtime::EngineRuntime;
-use lib_runtime_policy::{HELIOS_ENGINE_TOKIO_POLICY, HELIOS_LOG_FILTER_POLICY, HELIOS_STYX_CAPTURE_TUNABLES_POLICY};
+use lib_runtime_policy::{HELIOS_DAEDALUS_RUNTIME_POLICY, HELIOS_ENGINE_TOKIO_POLICY, HELIOS_LOG_FILTER_POLICY, HELIOS_STYX_CAPTURE_TUNABLES_POLICY};
 use styx::prelude::{set_capture_tunables, CaptureTunables};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -198,7 +198,7 @@ fn write_snapshot_json_atomic(path: &std::path::Path, snapshot: &NodeRegistrySna
 }
 
 fn default_registry_snapshot_path() -> PathBuf {
-    std::env::var("HELIOS_NODE_REGISTRY_SNAPSHOT_PATH").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/var/lib/helios/state/node-registry.snapshot.json"))
+    HELIOS_DAEDALUS_RUNTIME_POLICY.resolve().registry_snapshot_path
 }
 
 fn validate_graph_from_stdio() -> Result<(), String> {

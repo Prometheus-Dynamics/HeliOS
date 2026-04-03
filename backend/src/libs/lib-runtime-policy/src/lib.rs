@@ -2,6 +2,12 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+mod daedalus_runtime;
+mod engine_ipc;
+
+pub use daedalus_runtime::*;
+pub use engine_ipc::*;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BoundedUsizePolicy {
     pub env_var: &'static str,
@@ -782,9 +788,10 @@ pub use generated::*;
 mod tests {
     use super::{
         EngineExecutorBusyPolicy, HELIOS_API_DATA_ROOT_POLICY, HELIOS_API_HARDWARE_READ_MODEL_POLICY, HELIOS_API_LOG_SOURCES_POLICY, HELIOS_API_STARTUP_CACHE_WARM_POLICY, HELIOS_API_STREAMS_POLICY,
-        HELIOS_API_SYSTEM_READ_MODEL_POLICY, HELIOS_API_TOKIO_POLICY, HELIOS_ENGINE_CRASH_GUARD_POLICY, HELIOS_ENGINE_GRAPH_POLICY, HELIOS_ENGINE_RECORDING_POLICY, HELIOS_ENGINE_TOKIO_POLICY,
-        HELIOS_I2C_INVENTORY_POLICY, HELIOS_IMU_RUNTIME_POLICY, HELIOS_LOG_FILTER_POLICY, HELIOS_PERIPHERALS_POWER_POLICY, HELIOS_PERIPHERALS_TOKIO_POLICY, HELIOS_RESOURCE_GUARD_POLICY,
-        HELIOS_SHADOW_RECORD_DATA_ROOT_POLICY, HELIOS_STYX_CAPTURE_TUNABLES_POLICY, PersistentDirPolicy, PlatformFamily, classify_platform_family,
+        HELIOS_API_SYSTEM_READ_MODEL_POLICY, HELIOS_API_TOKIO_POLICY, HELIOS_DAEDALUS_RUNTIME_POLICY, HELIOS_ENGINE_CRASH_GUARD_POLICY, HELIOS_ENGINE_GRAPH_POLICY, HELIOS_ENGINE_IPC_POLICY,
+        HELIOS_ENGINE_RECORDING_POLICY, HELIOS_ENGINE_TOKIO_POLICY, HELIOS_I2C_INVENTORY_POLICY, HELIOS_IMU_RUNTIME_POLICY, HELIOS_LOG_FILTER_POLICY, HELIOS_PERIPHERALS_POWER_POLICY,
+        HELIOS_PERIPHERALS_TOKIO_POLICY, HELIOS_RESOURCE_GUARD_POLICY, HELIOS_SHADOW_RECORD_DATA_ROOT_POLICY, HELIOS_STYX_CAPTURE_TUNABLES_POLICY, PersistentDirPolicy, PlatformFamily,
+        classify_platform_family,
     };
     use std::path::PathBuf;
 
@@ -946,6 +953,47 @@ mod tests {
         let shadow_policy = HELIOS_SHADOW_RECORD_DATA_ROOT_POLICY;
         assert!(!shadow_policy.candidates.is_empty());
         let _ = std::fs::remove_dir_all(&candidate);
+    }
+
+    #[test]
+    fn daedalus_runtime_policy_defaults_match_expected_values() {
+        let resolved = HELIOS_DAEDALUS_RUNTIME_POLICY.resolve();
+        assert_eq!(resolved.install_dir, PathBuf::from("/var/lib/helios/plugins/daedalus"));
+        assert_eq!(resolved.upload_dir, PathBuf::from("/var/lib/helios/plugins/uploads"));
+        assert_eq!(resolved.registry_snapshot_path, PathBuf::from("/var/lib/helios/state/node-registry.snapshot.json"));
+        assert_eq!(resolved.registry_generator_binary, PathBuf::from("/usr/bin/helios-engine"));
+        assert_eq!(resolved.plugin_search_dirs, vec![PathBuf::from("/var/lib/helios/plugins/daedalus"), PathBuf::from("/usr/lib/helios/plugins/daedalus")]);
+        assert_eq!(resolved.max_plugin_upload_bytes, 64 * 1024 * 1024);
+    }
+
+    #[test]
+    fn daedalus_runtime_policy_prefers_single_plugin_dir_override() {
+        unsafe {
+            std::env::set_var("HELIOS_DAEDALUS_PLUGIN_DIR", "/tmp/helios-plugin-override");
+            std::env::remove_var("HELIOS_DAEDALUS_PLUGIN_DIRS");
+        }
+        let resolved = HELIOS_DAEDALUS_RUNTIME_POLICY.resolve();
+        assert_eq!(resolved.plugin_search_dirs, vec![PathBuf::from("/tmp/helios-plugin-override")]);
+        unsafe {
+            std::env::remove_var("HELIOS_DAEDALUS_PLUGIN_DIR");
+        }
+    }
+
+    #[test]
+    fn engine_ipc_policy_defaults_match_expected_values() {
+        let resolved = HELIOS_ENGINE_IPC_POLICY.resolve();
+        assert_eq!(resolved.socket, PathBuf::from("/run/helios/engine.sock"));
+        assert_eq!(resolved.event_buffer, 4096);
+        assert_eq!(resolved.metrics_broadcast_interval.as_millis(), 5_000);
+        assert_eq!(resolved.calibration_solve_timeout.as_secs(), 300);
+        assert_eq!(resolved.localization_solve_timeout.as_millis(), 30_000);
+        assert_eq!(resolved.request_send_timeout.as_millis(), 1_000);
+        assert_eq!(resolved.command_send_timeout.as_millis(), 2_000);
+        assert_eq!(resolved.request_queue_base, 256);
+        assert_eq!(resolved.request_queue_per_stream, 8);
+        assert_eq!(resolved.request_queue_max, 2_048);
+        assert_eq!(resolved.timeout_scale_for_streams(4), 1_200_000);
+        assert_eq!(resolved.request_queue_size(4), 288);
     }
 
     #[test]

@@ -7,8 +7,8 @@ use daedalus::runtime::host_bridge::HostBridgeManager as DaedalusBridgeManager;
 use daedalus::runtime::host_bridge::{bridge_handler, HOST_BRIDGE_META_KEY};
 use daedalus::runtime::plugins::PluginRegistry;
 use daedalus::PluginLibrary;
+use lib_runtime_policy::HELIOS_DAEDALUS_RUNTIME_POLICY;
 use std::collections::{BTreeMap, BTreeSet};
-use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -102,25 +102,7 @@ fn plugin_requested_for_graph(name: &str, requested_namespaces: Option<&BTreeSet
 }
 
 fn parse_plugin_dirs() -> Vec<PathBuf> {
-    // Match helios-api behavior:
-    // - If a single override dir is set, use it exclusively (so dev deployments can override
-    //   system-installed plugins without being shadowed by duplicate filenames).
-    // - Otherwise, fall back to the colon-separated search list.
-    if let Ok(single) = env::var("HELIOS_DAEDALUS_PLUGIN_DIR") {
-        let trimmed = single.trim();
-        if !trimmed.is_empty() {
-            return vec![PathBuf::from(trimmed)];
-        }
-    }
-
-    if let Ok(list) = env::var("HELIOS_DAEDALUS_PLUGIN_DIRS") {
-        let dirs: Vec<_> = env::split_paths(&list).collect();
-        if !dirs.is_empty() {
-            return dirs;
-        }
-    }
-
-    vec![PathBuf::from("/var/lib/helios/plugins/daedalus"), PathBuf::from("/usr/lib/helios/plugins/daedalus")]
+    HELIOS_DAEDALUS_RUNTIME_POLICY.resolve().plugin_search_dirs
 }
 
 fn collect_shared_objects(dir: &Path) -> Vec<PathBuf> {

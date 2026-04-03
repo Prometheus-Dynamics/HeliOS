@@ -1,5 +1,5 @@
-use super::timeouts::{scale_timeout, timeout_scale_for_streams};
-use super::{EngineCommand, EngineConnectionMetrics, JournalMode};
+use super::{EngineCommand, EngineConnectionMetrics, JournalMode, engine_ipc_policy};
+use lib_runtime_policy::scale_timeout;
 use std::time::Duration;
 
 #[test]
@@ -15,7 +15,7 @@ fn scale_timeout_applies_timeout_multiplier() {
 
 #[test]
 fn timeout_scale_grows_with_stream_count() {
-    assert!(timeout_scale_for_streams(4) >= timeout_scale_for_streams(0));
+    assert!(engine_ipc_policy().timeout_scale_for_streams(4) >= engine_ipc_policy().timeout_scale_for_streams(0));
 }
 
 #[test]

@@ -1,6 +1,7 @@
 use crate::ipc::{EngineCommand, EngineErrorCode, EngineEvent};
 use crate::services::EngineServices;
 use crate::stream::read_latest_frame_async;
+use lib_runtime_policy::HELIOS_ENGINE_IPC_POLICY;
 use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 use tokio::sync::RwLock;
@@ -45,11 +46,7 @@ fn cache_node_registry_snapshot_enabled() -> bool {
 }
 
 fn calibration_solve_timeout() -> Duration {
-    const DEFAULT_SECS: u64 = 300;
-    const MIN_SECS: u64 = 30;
-    const MAX_SECS: u64 = 1800;
-    let secs = std::env::var("HELIOS_CALIBRATION_SOLVE_TIMEOUT_SECS").ok().and_then(|value| value.trim().parse::<u64>().ok()).unwrap_or(DEFAULT_SECS).clamp(MIN_SECS, MAX_SECS);
-    Duration::from_secs(secs)
+    HELIOS_ENGINE_IPC_POLICY.resolve().calibration_solve_timeout
 }
 
 fn nack_from_error(command_id: lib_ipc::types::CommandId, err: crate::error::Error) -> EngineEvent {

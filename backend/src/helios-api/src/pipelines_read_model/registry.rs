@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use helios_engine::ipc::NodeRegistrySnapshot;
+use lib_runtime_policy::HELIOS_DAEDALUS_RUNTIME_POLICY;
 use tokio::fs;
 use tokio::process::Command;
 use tokio::time::{Duration, Instant};
@@ -190,7 +191,7 @@ fn build_registry_response_body(snapshot: &NodeRegistrySnapshot) -> Result<Bytes
 }
 
 fn registry_snapshot_path() -> PathBuf {
-    std::env::var("HELIOS_NODE_REGISTRY_SNAPSHOT_PATH").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/var/lib/helios/state/node-registry.snapshot.json"))
+    HELIOS_DAEDALUS_RUNTIME_POLICY.resolve().registry_snapshot_path
 }
 
 async fn invalidate_registry_snapshot_file() {
@@ -198,23 +199,11 @@ async fn invalidate_registry_snapshot_file() {
 }
 
 pub(super) fn registry_generator_binary() -> PathBuf {
-    std::env::var("HELIOS_ENGINE_BIN").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/usr/bin/helios-engine"))
+    HELIOS_DAEDALUS_RUNTIME_POLICY.resolve().registry_generator_binary
 }
 
 fn registry_plugin_dirs() -> Vec<PathBuf> {
-    if let Ok(single) = std::env::var("HELIOS_DAEDALUS_PLUGIN_DIR") {
-        let trimmed = single.trim();
-        if !trimmed.is_empty() {
-            return vec![PathBuf::from(trimmed)];
-        }
-    }
-    if let Ok(list) = std::env::var("HELIOS_DAEDALUS_PLUGIN_DIRS") {
-        let dirs: Vec<_> = std::env::split_paths(&list).collect();
-        if !dirs.is_empty() {
-            return dirs;
-        }
-    }
-    vec![PathBuf::from("/var/lib/helios/plugins/daedalus"), PathBuf::from("/usr/lib/helios/plugins/daedalus")]
+    HELIOS_DAEDALUS_RUNTIME_POLICY.resolve().plugin_search_dirs
 }
 
 pub(crate) async fn load_registry_snapshot_from_disk_or_helper() -> Result<NodeRegistrySnapshot, String> {

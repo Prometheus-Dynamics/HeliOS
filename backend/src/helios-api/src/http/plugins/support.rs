@@ -4,6 +4,7 @@ use axum::{
 };
 use daedalus::ffi::{FFI_VERSION, PLUGIN_ABI_VERSION, PluginLibrary};
 use helios_engine::ipc::PluginCompatibility;
+use lib_runtime_policy::HELIOS_DAEDALUS_RUNTIME_POLICY;
 use mime_guess::MimeGuess;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -225,27 +226,15 @@ pub(crate) fn guess_content_type(name: &str) -> String {
 }
 
 pub(crate) fn install_dir() -> PathBuf {
-    std::env::var("HELIOS_DAEDALUS_PLUGIN_INSTALL_DIR").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/var/lib/helios/plugins/daedalus"))
+    HELIOS_DAEDALUS_RUNTIME_POLICY.resolve().install_dir
 }
 
 pub(crate) fn plugin_dirs() -> Vec<PathBuf> {
-    if let Ok(single) = std::env::var("HELIOS_DAEDALUS_PLUGIN_DIR") {
-        let trimmed = single.trim();
-        if !trimmed.is_empty() {
-            return vec![PathBuf::from(trimmed)];
-        }
-    }
-    if let Ok(list) = std::env::var("HELIOS_DAEDALUS_PLUGIN_DIRS") {
-        let dirs: Vec<_> = std::env::split_paths(&list).collect();
-        if !dirs.is_empty() {
-            return dirs;
-        }
-    }
-    vec![install_dir(), PathBuf::from("/usr/lib/helios/plugins/daedalus")]
+    HELIOS_DAEDALUS_RUNTIME_POLICY.resolve().plugin_search_dirs
 }
 
 pub(crate) fn upload_dir() -> PathBuf {
-    std::env::var("HELIOS_DAEDALUS_PLUGIN_UPLOAD_DIR").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/var/lib/helios/plugins/uploads"))
+    HELIOS_DAEDALUS_RUNTIME_POLICY.resolve().upload_dir
 }
 
 pub(crate) async fn ensure_install_dir() -> ApiResult<PathBuf> {
@@ -261,8 +250,7 @@ pub(crate) async fn ensure_upload_dir() -> ApiResult<PathBuf> {
 }
 
 pub(crate) async fn invalidate_registry_snapshot_file() {
-    let path = std::env::var("HELIOS_NODE_REGISTRY_SNAPSHOT_PATH").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/var/lib/helios/state/node-registry.snapshot.json"));
-    let _ = fs::remove_file(path).await;
+    let _ = fs::remove_file(HELIOS_DAEDALUS_RUNTIME_POLICY.resolve().registry_snapshot_path).await;
 }
 
 pub(crate) fn ensure_plugin_filename(name: &str) -> Result<(), Box<ApiError>> {
@@ -280,8 +268,7 @@ pub(crate) fn map_io_error(err: std::io::Error, context: &str) -> ApiError {
 }
 
 pub(crate) fn max_upload_bytes() -> u64 {
-    const DEFAULT_MB: u64 = 64;
-    std::env::var("HELIOS_API_MAX_PLUGIN_MB").ok().and_then(|raw| raw.parse::<u64>().ok()).filter(|value| *value > 0).map(|mb| mb.saturating_mul(1024 * 1024)).unwrap_or(DEFAULT_MB * 1024 * 1024)
+    HELIOS_DAEDALUS_RUNTIME_POLICY.resolve().max_plugin_upload_bytes
 }
 
 pub(crate) fn build_compatibility_map(compatibility: Vec<PluginCompatibility>) -> BTreeMap<String, PluginCompatibility> {

@@ -1,7 +1,6 @@
 mod dispatcher;
 mod observability;
 mod rpc;
-mod timeouts;
 mod transport;
 
 #[cfg(test)]
@@ -11,7 +10,7 @@ use std::{
     io,
     path::PathBuf,
     sync::{
-        Arc,
+        Arc, OnceLock,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     time::{SystemTime, UNIX_EPOCH},
@@ -21,13 +20,13 @@ use helios_engine::ipc::{EngineCommand, EngineEvent};
 use lib_ipc::client::{Client as GenericClient, Session as GenericSession, TransportConfig};
 use lib_ipc::types::{CommandId, FeatureSet};
 use lib_ipc::wire::ServiceKind;
+use lib_runtime_policy::{HELIOS_ENGINE_IPC_POLICY, ResolvedEngineIpcPolicy, scale_timeout};
 pub(crate) use observability::EngineConnectionMetrics;
 pub use observability::EngineConnectionObservabilitySnapshot;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::time::{Duration, Instant};
 
 use super::command_id_from_context;
-use timeouts::{engine_request_send_timeout, scale_timeout, timeout_scale_for_streams};
 #[cfg(test)]
 pub(crate) use transport::connect_engine_at_for_tests;
 pub use transport::connect_engine_best_effort;
@@ -112,6 +111,11 @@ pub struct EngineConnection {
     metrics: Arc<EngineConnectionMetrics>,
 }
 
+pub(super) fn engine_ipc_policy() -> &'static ResolvedEngineIpcPolicy {
+    static VALUE: OnceLock<ResolvedEngineIpcPolicy> = OnceLock::new();
+    VALUE.get_or_init(|| HELIOS_ENGINE_IPC_POLICY.resolve())
+}
+
 impl EngineConnection {
     fn timeout_scale_ppm(&self) -> u64 {
         self.timeout_scale_ppm.load(Ordering::Relaxed)
@@ -119,7 +123,7 @@ impl EngineConnection {
 
     fn update_timeout_scale_from_count(&self, count: usize) {
         self.active_streams.store(count, Ordering::Relaxed);
-        self.timeout_scale_ppm.store(timeout_scale_for_streams(count), Ordering::Relaxed);
+        self.timeout_scale_ppm.store(engine_ipc_policy().timeout_scale_for_streams(count), Ordering::Relaxed);
     }
 
     fn scaled_timeout(&self, base: Duration) -> Duration {
@@ -137,7 +141,7 @@ impl EngineConnection {
         let (tx, rx) = oneshot::channel();
         let issued_at = Instant::now();
         let msg = EngineRequest { command_id, command, expected, respond_to: tx, label, issued_at, deadline: issued_at + timeout, saw_transport_ack: false, journal_mode };
-        let send_timeout = self.scaled_timeout(engine_request_send_timeout());
+        let send_timeout = self.scaled_timeout(engine_ipc_policy().request_send_timeout);
         match tokio::time::timeout(send_timeout, self.requests.send(msg)).await {
             Ok(Ok(())) => {
                 self.metrics.record_queue_enqueue();
