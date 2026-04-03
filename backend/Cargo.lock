@@ -1583,7 +1583,7 @@ dependencies = [
 [[package]]
 name = "daedalus-core"
 version = "0.1.1"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=910b6b83ce82fef75a4789750e7a85401f2864dc#910b6b83ce82fef75a4789750e7a85401f2864dc"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=e334908a343779ac71e0dee7f0efd8d4e430e995#e334908a343779ac71e0dee7f0efd8d4e430e995"
 dependencies = [
  "crossbeam-queue",
  "serde",
@@ -1593,7 +1593,7 @@ dependencies = [
 [[package]]
 name = "daedalus-data"
 version = "0.1.1"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=910b6b83ce82fef75a4789750e7a85401f2864dc#910b6b83ce82fef75a4789750e7a85401f2864dc"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=e334908a343779ac71e0dee7f0efd8d4e430e995#e334908a343779ac71e0dee7f0efd8d4e430e995"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -1604,7 +1604,7 @@ dependencies = [
 [[package]]
 name = "daedalus-engine"
 version = "0.1.1"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=910b6b83ce82fef75a4789750e7a85401f2864dc#910b6b83ce82fef75a4789750e7a85401f2864dc"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=e334908a343779ac71e0dee7f0efd8d4e430e995#e334908a343779ac71e0dee7f0efd8d4e430e995"
 dependencies = [
  "daedalus-gpu",
  "daedalus-planner",
@@ -1618,7 +1618,7 @@ dependencies = [
 [[package]]
 name = "daedalus-ffi"
 version = "0.1.1"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=910b6b83ce82fef75a4789750e7a85401f2864dc#910b6b83ce82fef75a4789750e7a85401f2864dc"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=e334908a343779ac71e0dee7f0efd8d4e430e995#e334908a343779ac71e0dee7f0efd8d4e430e995"
 dependencies = [
  "base64 0.22.1",
  "daedalus-core",
@@ -1636,7 +1636,7 @@ dependencies = [
 [[package]]
 name = "daedalus-gpu"
 version = "0.1.1"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=910b6b83ce82fef75a4789750e7a85401f2864dc#910b6b83ce82fef75a4789750e7a85401f2864dc"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=e334908a343779ac71e0dee7f0efd8d4e430e995#e334908a343779ac71e0dee7f0efd8d4e430e995"
 dependencies = [
  "bitflags 2.11.0",
  "bytemuck",
@@ -1651,7 +1651,7 @@ dependencies = [
 [[package]]
 name = "daedalus-macros"
 version = "0.1.1"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=910b6b83ce82fef75a4789750e7a85401f2864dc#910b6b83ce82fef75a4789750e7a85401f2864dc"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=e334908a343779ac71e0dee7f0efd8d4e430e995#e334908a343779ac71e0dee7f0efd8d4e430e995"
 dependencies = [
  "daedalus-runtime",
  "daedalus-wgsl-infer",
@@ -1664,7 +1664,7 @@ dependencies = [
 [[package]]
 name = "daedalus-nodes"
 version = "0.1.1"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=910b6b83ce82fef75a4789750e7a85401f2864dc#910b6b83ce82fef75a4789750e7a85401f2864dc"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=e334908a343779ac71e0dee7f0efd8d4e430e995#e334908a343779ac71e0dee7f0efd8d4e430e995"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -1679,7 +1679,7 @@ dependencies = [
 [[package]]
 name = "daedalus-planner"
 version = "0.1.1"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=910b6b83ce82fef75a4789750e7a85401f2864dc#910b6b83ce82fef75a4789750e7a85401f2864dc"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=e334908a343779ac71e0dee7f0efd8d4e430e995#e334908a343779ac71e0dee7f0efd8d4e430e995"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -1692,7 +1692,7 @@ dependencies = [
 [[package]]
 name = "daedalus-registry"
 version = "0.1.1"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=910b6b83ce82fef75a4789750e7a85401f2864dc#910b6b83ce82fef75a4789750e7a85401f2864dc"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=e334908a343779ac71e0dee7f0efd8d4e430e995#e334908a343779ac71e0dee7f0efd8d4e430e995"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -1705,7 +1705,7 @@ dependencies = [
 [[package]]
 name = "daedalus-rs"
 version = "0.1.1"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=910b6b83ce82fef75a4789750e7a85401f2864dc#910b6b83ce82fef75a4789750e7a85401f2864dc"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=e334908a343779ac71e0dee7f0efd8d4e430e995#e334908a343779ac71e0dee7f0efd8d4e430e995"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -1723,7 +1723,7 @@ dependencies = [
 [[package]]
 name = "daedalus-runtime"
 version = "0.1.1"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=910b6b83ce82fef75a4789750e7a85401f2864dc#910b6b83ce82fef75a4789750e7a85401f2864dc"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=e334908a343779ac71e0dee7f0efd8d4e430e995#e334908a343779ac71e0dee7f0efd8d4e430e995"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -1742,7 +1742,7 @@ dependencies = [
 [[package]]
 name = "daedalus-wgsl-infer"
 version = "0.1.1"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=910b6b83ce82fef75a4789750e7a85401f2864dc#910b6b83ce82fef75a4789750e7a85401f2864dc"
+source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=e334908a343779ac71e0dee7f0efd8d4e430e995#e334908a343779ac71e0dee7f0efd8d4e430e995"
 
 [[package]]
 name = "data-encoding"
@@ -5833,7 +5833,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27c6023962132f4b30eb4c172c91ce92d933da334c59c23cddee82358ddafb0b"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -7082,6 +7082,7 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 [[package]]
 name = "styx"
 version = "0.1.0"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=ef3810b8b87118489a02b3506313be1e2b3b76e3#ef3810b8b87118489a02b3506313be1e2b3b76e3"
 dependencies = [
  "ffmpeg-next",
  "futures-core",
@@ -7109,6 +7110,7 @@ dependencies = [
 [[package]]
 name = "styx-capture"
 version = "0.1.0"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=ef3810b8b87118489a02b3506313be1e2b3b76e3#ef3810b8b87118489a02b3506313be1e2b3b76e3"
 dependencies = [
  "serde",
  "smallvec",
@@ -7119,6 +7121,7 @@ dependencies = [
 [[package]]
 name = "styx-codec"
 version = "0.1.0"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=ef3810b8b87118489a02b3506313be1e2b3b76e3#ef3810b8b87118489a02b3506313be1e2b3b76e3"
 dependencies = [
  "ffmpeg-next",
  "image",
@@ -7137,6 +7140,7 @@ dependencies = [
 [[package]]
 name = "styx-core-rs"
 version = "0.1.0"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=ef3810b8b87118489a02b3506313be1e2b3b76e3#ef3810b8b87118489a02b3506313be1e2b3b76e3"
 dependencies = [
  "crossbeam-queue",
  "parking_lot",
@@ -7150,6 +7154,7 @@ dependencies = [
 [[package]]
 name = "styx-libcamera"
 version = "0.1.0"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=ef3810b8b87118489a02b3506313be1e2b3b76e3#ef3810b8b87118489a02b3506313be1e2b3b76e3"
 dependencies = [
  "libcamera",
  "libcamera-sys",
@@ -7161,6 +7166,7 @@ dependencies = [
 [[package]]
 name = "styx-v4l2"
 version = "0.1.0"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=ef3810b8b87118489a02b3506313be1e2b3b76e3#ef3810b8b87118489a02b3506313be1e2b3b76e3"
 dependencies = [
  "smallvec",
  "styx-capture",
