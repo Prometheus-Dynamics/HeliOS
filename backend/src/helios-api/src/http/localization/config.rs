@@ -1,6 +1,6 @@
 use axum::http::HeaderMap;
 use axum::{Json, extract::State, response::IntoResponse};
-use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
+use lib_schema_migration::{SyncSchemaPlan, normalize_to_current};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
@@ -27,12 +27,7 @@ struct StoredLocalizationConfigDocument {
     pub config: LocalizationConfig,
 }
 
-const LOCALIZATION_CONFIG_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan {
-    document_name: "localization config document",
-    legacy_version: CURRENT_LOCALIZATION_CONFIG_SCHEMA_VERSION,
-    current_version: CURRENT_LOCALIZATION_CONFIG_SCHEMA_VERSION,
-    migrations: &[],
-};
+const LOCALIZATION_CONFIG_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan::strict("localization config document", CURRENT_LOCALIZATION_CONFIG_SCHEMA_VERSION);
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -222,7 +217,7 @@ fn extract_imported_config(body: Value) -> Result<LocalizationConfig, String> {
 
 fn decode_localization_config(bytes: &[u8]) -> Result<LocalizationConfig, String> {
     let raw = serde_json::from_slice::<serde_json::Value>(bytes).map_err(|err| format!("failed to decode localization config document: {err}"))?;
-    let migrated = migrate_to_current(raw, &LOCALIZATION_CONFIG_SCHEMA_PLAN)?;
+    let migrated = normalize_to_current(raw, &LOCALIZATION_CONFIG_SCHEMA_PLAN)?;
     let parsed: StoredLocalizationConfigDocument = serde_json::from_value(migrated).map_err(|err| format!("failed to parse localization config document: {err}"))?;
     Ok(parsed.config)
 }

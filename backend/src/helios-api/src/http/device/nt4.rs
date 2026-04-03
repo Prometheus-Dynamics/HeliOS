@@ -1,5 +1,5 @@
 use axum::{Json, http::StatusCode, response::IntoResponse};
-use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
+use lib_schema_migration::{SyncSchemaPlan, normalize_to_current};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use utoipa::ToSchema;
@@ -56,12 +56,11 @@ struct StoredNt4SettingsFile {
     settings: Nt4Settings,
 }
 
-const NT4_SETTINGS_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> =
-    SyncSchemaPlan { document_name: "nt4 settings file", legacy_version: CURRENT_NT4_SETTINGS_SCHEMA_VERSION, current_version: CURRENT_NT4_SETTINGS_SCHEMA_VERSION, migrations: &[] };
+const NT4_SETTINGS_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan::strict("nt4 settings file", CURRENT_NT4_SETTINGS_SCHEMA_VERSION);
 
 fn parse_nt4_settings_file(bytes: &[u8]) -> Result<(StoredNt4SettingsFile, bool), String> {
     let raw = serde_json::from_slice::<serde_json::Value>(bytes).map_err(|err| format!("failed to decode nt4 settings: {err}"))?;
-    let migrated = migrate_to_current(raw.clone(), &NT4_SETTINGS_SCHEMA_PLAN)?;
+    let migrated = normalize_to_current(raw.clone(), &NT4_SETTINGS_SCHEMA_PLAN)?;
     let parsed = serde_json::from_value::<StoredNt4SettingsFile>(migrated.clone()).map_err(|err| format!("failed to parse nt4 settings: {err}"))?;
     Ok((parsed, migrated != raw))
 }

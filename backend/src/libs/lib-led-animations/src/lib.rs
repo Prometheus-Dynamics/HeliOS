@@ -2,7 +2,7 @@ use std::io;
 use std::path::Path;
 
 use lib_lighting::{LightingColor, LightingCommand};
-use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
+use lib_schema_migration::{SyncSchemaPlan, normalize_to_current};
 use serde::{Deserialize, Serialize};
 
 pub const LED_ANIMATIONS_PATH: &str = "/var/lib/helios/led-animations.json";
@@ -171,12 +171,11 @@ fn normalize_doc(mut doc: LedAnimationDoc) -> LedAnimationDoc {
     doc
 }
 
-const LED_ANIMATION_DOC_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> =
-    SyncSchemaPlan { document_name: "led animation document", legacy_version: CURRENT_LED_ANIMATION_DOC_SCHEMA_VERSION, current_version: CURRENT_LED_ANIMATION_DOC_SCHEMA_VERSION, migrations: &[] };
+const LED_ANIMATION_DOC_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan::strict("led animation document", CURRENT_LED_ANIMATION_DOC_SCHEMA_VERSION);
 
 fn decode_led_animation_doc(raw: &str) -> Result<LedAnimationDoc, String> {
     let value = serde_json::from_str::<serde_json::Value>(raw).map_err(|err| format!("failed to decode led animation document: {err}"))?;
-    let migrated = migrate_to_current(value, &LED_ANIMATION_DOC_SCHEMA_PLAN)?;
+    let migrated = normalize_to_current(value, &LED_ANIMATION_DOC_SCHEMA_PLAN)?;
     serde_json::from_value(migrated).map(normalize_doc).map_err(|err| format!("failed to parse led animation document: {err}"))
 }
 

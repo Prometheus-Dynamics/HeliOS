@@ -1,5 +1,5 @@
 use lib_cv::modules::aruco::tag::ArucoTagDecoding;
-use lib_schema_migration::{migrate_to_current, SyncSchemaPlan};
+use lib_schema_migration::{normalize_to_current, SyncSchemaPlan};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -94,12 +94,11 @@ pub enum FieldMapSource {
     },
 }
 
-const FIELD_MAP_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> =
-    SyncSchemaPlan { document_name: "field map document", legacy_version: CURRENT_FIELD_MAP_SCHEMA_VERSION, current_version: CURRENT_FIELD_MAP_SCHEMA_VERSION, migrations: &[] };
+const FIELD_MAP_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan::strict("field map document", CURRENT_FIELD_MAP_SCHEMA_VERSION);
 
 pub fn parse_field_map_document(bytes: &[u8]) -> Result<(FieldMapDocument, bool), String> {
     let raw = serde_json::from_slice::<serde_json::Value>(bytes).map_err(|err| format!("failed to decode field map document: {err}"))?;
-    let migrated = migrate_to_current(raw.clone(), &FIELD_MAP_SCHEMA_PLAN)?;
+    let migrated = normalize_to_current(raw.clone(), &FIELD_MAP_SCHEMA_PLAN)?;
     let parsed = serde_json::from_value::<FieldMapDocument>(migrated.clone()).map_err(|err| format!("failed to parse field map document: {err}"))?;
     Ok((parsed, migrated != raw))
 }

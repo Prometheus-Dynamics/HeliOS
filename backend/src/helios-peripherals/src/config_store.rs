@@ -1,4 +1,4 @@
-use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
+use lib_schema_migration::{SyncSchemaPlan, normalize_to_current};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, env, fs, path::PathBuf};
 use tracing::warn;
@@ -114,12 +114,11 @@ impl SensorConfigStore {
     }
 }
 
-const SENSOR_CONFIG_STORE_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> =
-    SyncSchemaPlan { document_name: "sensor config store", legacy_version: CURRENT_SENSOR_CONFIG_STORE_SCHEMA_VERSION, current_version: CURRENT_SENSOR_CONFIG_STORE_SCHEMA_VERSION, migrations: &[] };
+const SENSOR_CONFIG_STORE_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan::strict("sensor config store", CURRENT_SENSOR_CONFIG_STORE_SCHEMA_VERSION);
 
 fn parse_sensor_config_data(raw: &str) -> Result<SensorConfigData, String> {
     let value = serde_json::from_str::<serde_json::Value>(raw).map_err(|err| format!("failed to decode sensor config store: {err}"))?;
-    let migrated = migrate_to_current(value, &SENSOR_CONFIG_STORE_SCHEMA_PLAN)?;
+    let migrated = normalize_to_current(value, &SENSOR_CONFIG_STORE_SCHEMA_PLAN)?;
     serde_json::from_value(migrated).map_err(|err| format!("failed to parse sensor config store: {err}"))
 }
 

@@ -6,7 +6,7 @@ use base64::Engine as _;
 use chrono::{DateTime, Utc};
 use ed25519_dalek::Signature;
 use futures::StreamExt;
-use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
+use lib_schema_migration::{SyncSchemaPlan, normalize_to_current};
 use reqwest::Client;
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
@@ -83,7 +83,7 @@ impl ReleaseManifestMetadata {
             return Ok(Self::default());
         }
         let value = serde_json::from_str::<serde_json::Value>(trimmed).map_err(|err| format!("failed to decode release manifest metadata: {err}"))?;
-        let migrated = migrate_to_current(value, &RELEASE_MANIFEST_METADATA_SCHEMA_PLAN)?;
+        let migrated = normalize_to_current(value, &RELEASE_MANIFEST_METADATA_SCHEMA_PLAN)?;
         serde_json::from_value(migrated).map_err(|err| format!("failed to parse release manifest metadata: {err}"))
     }
 
@@ -141,19 +141,13 @@ pub struct StagedMetadata {
     pub staged_at: DateTime<Utc>,
 }
 
-const RELEASE_MANIFEST_METADATA_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan {
-    document_name: "release manifest metadata",
-    legacy_version: CURRENT_RELEASE_MANIFEST_METADATA_SCHEMA_VERSION,
-    current_version: CURRENT_RELEASE_MANIFEST_METADATA_SCHEMA_VERSION,
-    migrations: &[],
-};
+const RELEASE_MANIFEST_METADATA_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan::strict("release manifest metadata", CURRENT_RELEASE_MANIFEST_METADATA_SCHEMA_VERSION);
 
-const STAGED_METADATA_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> =
-    SyncSchemaPlan { document_name: "staged metadata", legacy_version: CURRENT_STAGED_METADATA_SCHEMA_VERSION, current_version: CURRENT_STAGED_METADATA_SCHEMA_VERSION, migrations: &[] };
+const STAGED_METADATA_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan::strict("staged metadata", CURRENT_STAGED_METADATA_SCHEMA_VERSION);
 
 fn parse_staged_metadata(bytes: &[u8]) -> Result<StagedMetadata> {
     let raw = serde_json::from_slice::<serde_json::Value>(bytes).map_err(Error::SerdeJson)?;
-    let migrated = migrate_to_current(raw, &STAGED_METADATA_SCHEMA_PLAN).map_err(Error::InvalidState)?;
+    let migrated = normalize_to_current(raw, &STAGED_METADATA_SCHEMA_PLAN).map_err(Error::InvalidState)?;
     serde_json::from_value(migrated).map_err(Error::SerdeJson)
 }
 

@@ -1,6 +1,6 @@
 use crate::error::AiError;
 use crate::model::{ModelFormat, ModelId, ModelMetadata};
-use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
+use lib_schema_migration::{SyncSchemaPlan, normalize_to_current};
 use serde::{Deserialize, de::DeserializeOwned};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -39,15 +39,14 @@ impl From<ModelStorageError> for AiError {
     }
 }
 
-const AI_MODEL_MANIFEST_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> =
-    SyncSchemaPlan { document_name: "ai model manifest", legacy_version: CURRENT_AI_MODEL_MANIFEST_SCHEMA_VERSION, current_version: CURRENT_AI_MODEL_MANIFEST_SCHEMA_VERSION, migrations: &[] };
+const AI_MODEL_MANIFEST_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan::strict("ai model manifest", CURRENT_AI_MODEL_MANIFEST_SCHEMA_VERSION);
 
 pub fn decode_manifest<T>(raw: &str) -> Result<T, String>
 where
     T: DeserializeOwned,
 {
     let value = serde_json::from_str::<serde_json::Value>(raw).map_err(|err| format!("failed to decode ai model manifest: {err}"))?;
-    let migrated = migrate_to_current(value, &AI_MODEL_MANIFEST_SCHEMA_PLAN)?;
+    let migrated = normalize_to_current(value, &AI_MODEL_MANIFEST_SCHEMA_PLAN)?;
     serde_json::from_value(migrated).map_err(|err| format!("failed to parse ai model manifest: {err}"))
 }
 

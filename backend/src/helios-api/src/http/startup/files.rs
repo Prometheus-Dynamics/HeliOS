@@ -1,4 +1,4 @@
-use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
+use lib_schema_migration::{SyncSchemaPlan, normalize_to_current};
 use std::ffi::OsStr;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -56,22 +56,20 @@ async fn write_canonical_startup_preset(path: &Path, preset: &StartupPresetDocum
     fs::write(path, encoded).await
 }
 
-const STARTUP_PRESET_JSON_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> =
-    SyncSchemaPlan { document_name: "startup preset document", legacy_version: CURRENT_STARTUP_PRESET_SCHEMA_VERSION, current_version: CURRENT_STARTUP_PRESET_SCHEMA_VERSION, migrations: &[] };
+const STARTUP_PRESET_JSON_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan::strict("startup preset document", CURRENT_STARTUP_PRESET_SCHEMA_VERSION);
 
-const STARTUP_PRESET_TOML_SCHEMA_PLAN: SyncSchemaPlan<toml::Value> =
-    SyncSchemaPlan { document_name: "startup preset document", legacy_version: CURRENT_STARTUP_PRESET_SCHEMA_VERSION, current_version: CURRENT_STARTUP_PRESET_SCHEMA_VERSION, migrations: &[] };
+const STARTUP_PRESET_TOML_SCHEMA_PLAN: SyncSchemaPlan<toml::Value> = SyncSchemaPlan::strict("startup preset document", CURRENT_STARTUP_PRESET_SCHEMA_VERSION);
 
 fn decode_startup_preset_json(bytes: &[u8]) -> Result<(StartupPresetDocument, bool), String> {
     let raw = serde_json::from_slice::<serde_json::Value>(bytes).map_err(|err| err.to_string())?;
-    let migrated = migrate_to_current(raw.clone(), &STARTUP_PRESET_JSON_SCHEMA_PLAN)?;
+    let migrated = normalize_to_current(raw.clone(), &STARTUP_PRESET_JSON_SCHEMA_PLAN)?;
     let parsed = serde_json::from_value(migrated.clone()).map_err(|err| err.to_string())?;
     Ok((parsed, migrated != raw))
 }
 
 fn decode_startup_preset_toml(raw: &str) -> Result<(StartupPresetDocument, bool), String> {
     let value = toml::from_str::<toml::Value>(raw).map_err(|err| err.to_string())?;
-    let migrated = migrate_to_current(value.clone(), &STARTUP_PRESET_TOML_SCHEMA_PLAN)?;
+    let migrated = normalize_to_current(value.clone(), &STARTUP_PRESET_TOML_SCHEMA_PLAN)?;
     let parsed = migrated.clone().try_into().map_err(|err: toml::de::Error| err.to_string())?;
     Ok((parsed, migrated != value))
 }

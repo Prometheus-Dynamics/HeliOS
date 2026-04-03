@@ -1,7 +1,7 @@
 use std::{io, path::PathBuf};
 
 use axum::{Json, extract::Path, response::IntoResponse};
-use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
+use lib_schema_migration::{SyncSchemaPlan, normalize_to_current};
 use tokio::fs;
 
 use crate::http::error::{ApiError, ApiResult, ErrorBody};
@@ -44,7 +44,7 @@ use serde::Deserialize;
 impl LightingAnimationTemplateDocumentRaw {
     pub(super) fn decode_str(raw: &str) -> Result<Self, String> {
         let value = serde_json::from_str::<serde_json::Value>(raw).map_err(|err| format!("failed to decode lighting template: {err}"))?;
-        let migrated = migrate_to_current(value, &LIGHTING_TEMPLATE_DOCUMENT_SCHEMA_PLAN)?;
+        let migrated = normalize_to_current(value, &LIGHTING_TEMPLATE_DOCUMENT_SCHEMA_PLAN)?;
         let mut parsed: Self = serde_json::from_value(migrated).map_err(|err| format!("failed to parse lighting template: {err}"))?;
         parsed.schema_version = CURRENT_LIGHTING_TEMPLATE_DOCUMENT_SCHEMA_VERSION;
         Ok(parsed)
@@ -185,9 +185,4 @@ fn map_template_io_error(err: io::Error, context: &str) -> ApiError {
     if err.kind() == io::ErrorKind::NotFound { ApiError::not_found(format!("{context}: {err}")) } else { ApiError::internal(format!("{context}: {err}")) }
 }
 
-const LIGHTING_TEMPLATE_DOCUMENT_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan {
-    document_name: "lighting template document",
-    legacy_version: CURRENT_LIGHTING_TEMPLATE_DOCUMENT_SCHEMA_VERSION,
-    current_version: CURRENT_LIGHTING_TEMPLATE_DOCUMENT_SCHEMA_VERSION,
-    migrations: &[],
-};
+const LIGHTING_TEMPLATE_DOCUMENT_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan::strict("lighting template document", CURRENT_LIGHTING_TEMPLATE_DOCUMENT_SCHEMA_VERSION);

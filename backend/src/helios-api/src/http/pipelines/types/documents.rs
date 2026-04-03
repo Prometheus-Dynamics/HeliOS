@@ -1,4 +1,4 @@
-use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
+use lib_schema_migration::{SyncSchemaPlan, normalize_to_current};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -39,7 +39,7 @@ impl PipelineDocument {
 
     pub fn decode_slice(bytes: &[u8]) -> Result<Self, String> {
         let raw = serde_json::from_slice::<serde_json::Value>(bytes).map_err(|err| format!("failed to decode pipeline document: {err}"))?;
-        let migrated = migrate_to_current(raw, &PIPELINE_DOCUMENT_SCHEMA_PLAN)?;
+        let migrated = normalize_to_current(raw, &PIPELINE_DOCUMENT_SCHEMA_PLAN)?;
         let mut parsed: Self = serde_json::from_value(migrated).map_err(|err| format!("failed to parse pipeline document: {err}"))?;
         parsed.schema_version = CURRENT_PIPELINE_DOCUMENT_SCHEMA_VERSION;
         Ok(parsed)
@@ -93,19 +93,13 @@ pub(crate) struct PipelineTemplateDocumentRaw {
 impl PipelineTemplateDocumentRaw {
     pub(crate) fn decode_str(raw: &str) -> Result<Self, String> {
         let raw = serde_json::from_str::<serde_json::Value>(raw).map_err(|err| format!("failed to decode pipeline template document: {err}"))?;
-        let migrated = migrate_to_current(raw, &PIPELINE_TEMPLATE_DOCUMENT_SCHEMA_PLAN)?;
+        let migrated = normalize_to_current(raw, &PIPELINE_TEMPLATE_DOCUMENT_SCHEMA_PLAN)?;
         let mut parsed: Self = serde_json::from_value(migrated).map_err(|err| format!("failed to parse pipeline template document: {err}"))?;
         parsed.schema_version = CURRENT_PIPELINE_TEMPLATE_DOCUMENT_SCHEMA_VERSION;
         Ok(parsed)
     }
 }
 
-const PIPELINE_DOCUMENT_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> =
-    SyncSchemaPlan { document_name: "pipeline document", legacy_version: CURRENT_PIPELINE_DOCUMENT_SCHEMA_VERSION, current_version: CURRENT_PIPELINE_DOCUMENT_SCHEMA_VERSION, migrations: &[] };
+const PIPELINE_DOCUMENT_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan::strict("pipeline document", CURRENT_PIPELINE_DOCUMENT_SCHEMA_VERSION);
 
-const PIPELINE_TEMPLATE_DOCUMENT_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan {
-    document_name: "pipeline template document",
-    legacy_version: CURRENT_PIPELINE_TEMPLATE_DOCUMENT_SCHEMA_VERSION,
-    current_version: CURRENT_PIPELINE_TEMPLATE_DOCUMENT_SCHEMA_VERSION,
-    migrations: &[],
-};
+const PIPELINE_TEMPLATE_DOCUMENT_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan::strict("pipeline template document", CURRENT_PIPELINE_TEMPLATE_DOCUMENT_SCHEMA_VERSION);

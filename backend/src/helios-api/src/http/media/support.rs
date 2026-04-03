@@ -1,6 +1,6 @@
 use chrono::Utc;
 use flate2::read::GzDecoder;
-use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
+use lib_schema_migration::{SyncSchemaPlan, normalize_to_current};
 use mime_guess::MimeGuess;
 use std::io::{BufRead, BufReader, Cursor};
 use std::path::{Path, PathBuf};
@@ -20,8 +20,7 @@ use super::{
 
 const CURRENT_MEDIA_METADATA_SCHEMA_VERSION: u32 = 1;
 
-const MEDIA_METADATA_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> =
-    SyncSchemaPlan { document_name: "media metadata", legacy_version: CURRENT_MEDIA_METADATA_SCHEMA_VERSION, current_version: CURRENT_MEDIA_METADATA_SCHEMA_VERSION, migrations: &[] };
+const MEDIA_METADATA_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan::strict("media metadata", CURRENT_MEDIA_METADATA_SCHEMA_VERSION);
 
 pub(super) fn is_internal_media_artifact(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
@@ -40,7 +39,7 @@ pub(super) fn media_meta_dir() -> Result<PathBuf, ApiError> {
 
 fn decode_media_metadata(bytes: &[u8]) -> Option<MediaMetadata> {
     let raw = serde_json::from_slice::<serde_json::Value>(bytes).ok()?;
-    let migrated = migrate_to_current(raw, &MEDIA_METADATA_SCHEMA_PLAN).ok()?;
+    let migrated = normalize_to_current(raw, &MEDIA_METADATA_SCHEMA_PLAN).ok()?;
     serde_json::from_value(migrated).ok()
 }
 

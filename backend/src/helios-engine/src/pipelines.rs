@@ -1,4 +1,4 @@
-use lib_schema_migration::{migrate_to_current, SyncSchemaPlan};
+use lib_schema_migration::{normalize_to_current, SyncSchemaPlan};
 use serde_json::Value as JsonValue;
 use std::io;
 use std::path::PathBuf;
@@ -80,23 +80,17 @@ pub fn load_template_graph_json(template_id: &str) -> io::Result<JsonValue> {
 
 fn decode_pipeline_document(bytes: &[u8]) -> io::Result<JsonValue> {
     let raw = serde_json::from_slice::<JsonValue>(bytes).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-    migrate_to_current(raw, &PIPELINE_DOCUMENT_SCHEMA_PLAN).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
+    normalize_to_current(raw, &PIPELINE_DOCUMENT_SCHEMA_PLAN).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
 }
 
 fn decode_pipeline_template_document(bytes: &[u8]) -> io::Result<JsonValue> {
     let raw = serde_json::from_slice::<JsonValue>(bytes).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-    migrate_to_current(raw, &PIPELINE_TEMPLATE_DOCUMENT_SCHEMA_PLAN).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
+    normalize_to_current(raw, &PIPELINE_TEMPLATE_DOCUMENT_SCHEMA_PLAN).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
 }
 
-const PIPELINE_DOCUMENT_SCHEMA_PLAN: SyncSchemaPlan<JsonValue> =
-    SyncSchemaPlan { document_name: "pipeline document", legacy_version: CURRENT_PIPELINE_DOCUMENT_SCHEMA_VERSION, current_version: CURRENT_PIPELINE_DOCUMENT_SCHEMA_VERSION, migrations: &[] };
+const PIPELINE_DOCUMENT_SCHEMA_PLAN: SyncSchemaPlan<JsonValue> = SyncSchemaPlan::strict("pipeline document", CURRENT_PIPELINE_DOCUMENT_SCHEMA_VERSION);
 
-const PIPELINE_TEMPLATE_DOCUMENT_SCHEMA_PLAN: SyncSchemaPlan<JsonValue> = SyncSchemaPlan {
-    document_name: "pipeline template document",
-    legacy_version: CURRENT_PIPELINE_TEMPLATE_DOCUMENT_SCHEMA_VERSION,
-    current_version: CURRENT_PIPELINE_TEMPLATE_DOCUMENT_SCHEMA_VERSION,
-    migrations: &[],
-};
+const PIPELINE_TEMPLATE_DOCUMENT_SCHEMA_PLAN: SyncSchemaPlan<JsonValue> = SyncSchemaPlan::strict("pipeline template document", CURRENT_PIPELINE_TEMPLATE_DOCUMENT_SCHEMA_VERSION);
 
 #[cfg(test)]
 mod tests {

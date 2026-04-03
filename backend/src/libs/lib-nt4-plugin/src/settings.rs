@@ -1,5 +1,5 @@
 use daedalus::runtime::NodeError;
-use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
+use lib_schema_migration::{SyncSchemaPlan, normalize_to_current};
 use serde::Deserialize;
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
@@ -37,8 +37,7 @@ struct StoredNt4SettingsFile {
     settings: Nt4SettingsFile,
 }
 
-const NT4_SETTINGS_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> =
-    SyncSchemaPlan { document_name: "nt4 settings file", legacy_version: CURRENT_NT4_SETTINGS_SCHEMA_VERSION, current_version: CURRENT_NT4_SETTINGS_SCHEMA_VERSION, migrations: &[] };
+const NT4_SETTINGS_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan::strict("nt4 settings file", CURRENT_NT4_SETTINGS_SCHEMA_VERSION);
 
 pub fn resolve_target(settings: &Nt4SettingsFile) -> Result<(String, u16), NodeError> {
     if !settings.enabled {
@@ -88,7 +87,7 @@ fn parse_nt4_settings(raw: &str) -> Nt4SettingsFile {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) else {
         return Nt4SettingsFile::default();
     };
-    let Ok(migrated) = migrate_to_current(value, &NT4_SETTINGS_SCHEMA_PLAN) else {
+    let Ok(migrated) = normalize_to_current(value, &NT4_SETTINGS_SCHEMA_PLAN) else {
         return Nt4SettingsFile::default();
     };
     let Ok(stored) = serde_json::from_value::<StoredNt4SettingsFile>(migrated) else {

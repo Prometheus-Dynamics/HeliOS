@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
+use lib_schema_migration::{SyncSchemaPlan, normalize_to_current};
 use lib_storage_layout::{LayoutPartition, PartitionMode, PartitionRole, StorageLayoutManifest};
 use serde::{Deserialize, Serialize};
 use tokio::fs;
@@ -52,16 +52,11 @@ pub(crate) struct QueuedRepartitionResume {
     pub manifest: ReleaseManifest,
 }
 
-const QUEUED_REPARTITION_RESUME_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan {
-    document_name: "queued repartition resume",
-    legacy_version: CURRENT_QUEUED_REPARTITION_RESUME_SCHEMA_VERSION,
-    current_version: CURRENT_QUEUED_REPARTITION_RESUME_SCHEMA_VERSION,
-    migrations: &[],
-};
+const QUEUED_REPARTITION_RESUME_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan::strict("queued repartition resume", CURRENT_QUEUED_REPARTITION_RESUME_SCHEMA_VERSION);
 
 fn parse_queued_repartition_resume(bytes: &[u8]) -> Result<QueuedRepartitionResume> {
     let raw = serde_json::from_slice::<serde_json::Value>(bytes)?;
-    let migrated = migrate_to_current(raw, &QUEUED_REPARTITION_RESUME_SCHEMA_PLAN).map_err(Error::InvalidState)?;
+    let migrated = normalize_to_current(raw, &QUEUED_REPARTITION_RESUME_SCHEMA_PLAN).map_err(Error::InvalidState)?;
     serde_json::from_value(migrated).map_err(Error::SerdeJson)
 }
 

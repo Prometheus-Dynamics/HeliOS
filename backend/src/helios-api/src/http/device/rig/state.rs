@@ -1,5 +1,5 @@
 use chrono::Utc;
-use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
+use lib_schema_migration::{SyncSchemaPlan, normalize_to_current};
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
@@ -16,8 +16,7 @@ struct StoredRobotDimensionsDocument {
     robot: RobotDimensions,
 }
 
-const ROBOT_DIMENSIONS_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> =
-    SyncSchemaPlan { document_name: "robot dimensions document", legacy_version: CURRENT_ROBOT_DIMENSIONS_SCHEMA_VERSION, current_version: CURRENT_ROBOT_DIMENSIONS_SCHEMA_VERSION, migrations: &[] };
+const ROBOT_DIMENSIONS_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan::strict("robot dimensions document", CURRENT_ROBOT_DIMENSIONS_SCHEMA_VERSION);
 
 impl Default for RobotDimensions {
     fn default() -> Self {
@@ -98,7 +97,7 @@ pub(super) fn apply_robot_dimensions_patch(mut robot: RobotDimensions, patch_req
 
 pub(super) fn decode_robot_dimensions(bytes: &[u8]) -> Result<RobotDimensions, String> {
     let raw = serde_json::from_slice::<serde_json::Value>(bytes).map_err(|err| format!("failed to decode robot dimensions document: {err}"))?;
-    let migrated = migrate_to_current(raw, &ROBOT_DIMENSIONS_SCHEMA_PLAN)?;
+    let migrated = normalize_to_current(raw, &ROBOT_DIMENSIONS_SCHEMA_PLAN)?;
     let parsed: StoredRobotDimensionsDocument = serde_json::from_value(migrated).map_err(|err| format!("failed to parse robot dimensions document: {err}"))?;
     Ok(parsed.robot)
 }

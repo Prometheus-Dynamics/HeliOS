@@ -3,7 +3,7 @@ use crate::http::{json_store, storage};
 use chrono::Utc;
 use helios_engine::capture::{BackendKind, CaptureDescriptor, CaptureMode, canonicalize_capture_config, descriptor_snapshot_for_config, discover_devices};
 use helios_engine::ipc::{ResolvedStreamConfig, RigPose, StreamManifest};
-use lib_schema_migration::{AsyncSchemaPlan, migrate_to_current_async};
+use lib_schema_migration::{AsyncSchemaPlan, normalize_to_current_async};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::path::PathBuf;
@@ -338,17 +338,12 @@ async fn canonicalize_current_record_value(value: JsonValue) -> Result<JsonValue
     serde_json::to_value(PersistedStreamRecordWire::from(record)).map_err(|err| format!("failed to encode canonical persisted stream record: {err}"))
 }
 
-const PERSISTED_STREAM_RECORD_SCHEMA_PLAN: AsyncSchemaPlan<JsonValue> = AsyncSchemaPlan {
-    document_name: "persisted stream record",
-    legacy_version: CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION,
-    current_version: CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION,
-    migrations: &[],
-};
+const PERSISTED_STREAM_RECORD_SCHEMA_PLAN: AsyncSchemaPlan<JsonValue> = AsyncSchemaPlan::strict("persisted stream record", CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION);
 
 async fn parse_persisted_stream_record(bytes: &[u8]) -> Result<ParsedPersistedStreamRecord, String> {
     let mut value = serde_json::from_slice::<JsonValue>(bytes).map_err(|err| format!("failed to decode persisted stream record: {err}"))?;
     let original = value.clone();
-    value = migrate_to_current_async(value, &PERSISTED_STREAM_RECORD_SCHEMA_PLAN).await?;
+    value = normalize_to_current_async(value, &PERSISTED_STREAM_RECORD_SCHEMA_PLAN).await?;
     let canonical = canonicalize_current_record_value(value).await?;
     let dirty = canonical != original;
     let record = serde_json::from_value::<PersistedStreamRecord>(canonical).map_err(|err| format!("failed to decode canonical persisted stream record: {err}"))?;

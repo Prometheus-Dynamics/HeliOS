@@ -5,7 +5,7 @@ use axum::{
     response::IntoResponse,
 };
 use chrono::{Duration, Utc};
-use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
+use lib_schema_migration::{SyncSchemaPlan, normalize_to_current};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::io;
 use std::path::PathBuf;
@@ -83,12 +83,11 @@ struct StoredPeer {
     integration: PeerIntegrationMetadata,
 }
 
-const STORED_PEERS_FILE_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> =
-    SyncSchemaPlan { document_name: "stored peers file", legacy_version: CURRENT_STORED_PEERS_FILE_SCHEMA_VERSION, current_version: CURRENT_STORED_PEERS_FILE_SCHEMA_VERSION, migrations: &[] };
+const STORED_PEERS_FILE_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan::strict("stored peers file", CURRENT_STORED_PEERS_FILE_SCHEMA_VERSION);
 
 fn parse_stored_peers_file(bytes: &[u8]) -> Result<(StoredPeersFile, bool), String> {
     let raw = serde_json::from_slice::<serde_json::Value>(bytes).map_err(|err| format!("failed to decode peers file: {err}"))?;
-    let migrated = migrate_to_current(raw.clone(), &STORED_PEERS_FILE_SCHEMA_PLAN)?;
+    let migrated = normalize_to_current(raw.clone(), &STORED_PEERS_FILE_SCHEMA_PLAN)?;
     let parsed = serde_json::from_value::<StoredPeersFile>(migrated.clone()).map_err(|err| format!("failed to parse peers file: {err}"))?;
     Ok((parsed, migrated != raw))
 }

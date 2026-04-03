@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
+use lib_schema_migration::{SyncSchemaPlan, normalize_to_current};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 use utoipa::ToSchema;
@@ -112,12 +112,11 @@ where
     fs::write(path, toml)
 }
 
-const SENSOR_CONFIG_DOC_SCHEMA_PLAN: SyncSchemaPlan<toml::Value> =
-    SyncSchemaPlan { document_name: "sensor configuration document", legacy_version: CURRENT_SENSOR_CONFIG_SCHEMA_VERSION, current_version: CURRENT_SENSOR_CONFIG_SCHEMA_VERSION, migrations: &[] };
+const SENSOR_CONFIG_DOC_SCHEMA_PLAN: SyncSchemaPlan<toml::Value> = SyncSchemaPlan::strict("sensor configuration document", CURRENT_SENSOR_CONFIG_SCHEMA_VERSION);
 
 fn parse_sensor_config_doc(raw: &str) -> Result<SensorsDocCfg, String> {
     let value = toml::from_str::<toml::Value>(raw).map_err(|err| err.to_string())?;
-    let migrated = migrate_to_current(value, &SENSOR_CONFIG_DOC_SCHEMA_PLAN)?;
+    let migrated = normalize_to_current(value, &SENSOR_CONFIG_DOC_SCHEMA_PLAN)?;
     migrated.try_into().map_err(|err: toml::de::Error| err.to_string())
 }
 
