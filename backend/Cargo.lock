@@ -3992,7 +3992,6 @@ dependencies = [
  "imageproc",
  "libblur",
  "memchr",
- "naga",
  "nalgebra",
  "num",
  "once_cell",
