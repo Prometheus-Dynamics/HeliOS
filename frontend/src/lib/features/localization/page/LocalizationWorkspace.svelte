@@ -17,7 +17,7 @@
   import type { PoseQuaternion, Vec3 } from '$lib/features/localization/poseMath';
   import type { SensorOrientation } from '$lib/types/devices';
   import type LocalizationViewers from '$lib/components/LocalizationViewers.svelte';
-  import LocalizationConfigPanel from '$lib/features/localization/page/LocalizationConfigPanel.svelte';
+  import LocalizationConfigPanel from '$lib/features/localization/page/LocalizationConfigEditor.svelte';
   import SolverPanel from '$lib/features/localization/page/SolverPanel.svelte';
   import CameraPoseOverlay from '$lib/features/localization/page/CameraPoseOverlay.svelte';
   import FieldMapManager from '$lib/features/localization/page/FieldMapManager.svelte';

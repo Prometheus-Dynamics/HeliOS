@@ -3,9 +3,9 @@
   import type CameraCalibrationTab from '$lib/features/devices/camera/CameraCalibrationTab.svelte';
   import type CameraControlsTab from '$lib/features/devices/camera/CameraControlsTab.svelte';
   import type CameraMediaTab from '$lib/features/devices/camera/CameraMediaTab.svelte';
-  import type CameraPipelinesTab from '$lib/features/devices/camera/CameraPipelinesTab.svelte';
+  import type CameraPipelinesTab from '$lib/features/devices/camera/CameraPipelinesEditorTab.svelte';
   import type CameraPoseTab from '$lib/features/devices/camera/CameraPoseTab.svelte';
-  import type CameraStreamTab from '$lib/features/devices/camera/CameraStreamTab.svelte';
+  import type CameraStreamTab from '$lib/features/devices/camera/CameraStreamEditorTab.svelte';
   import type {
     StreamInfo,
     StreamPipelineEndpoint,
@@ -257,10 +257,10 @@
 
   let { ctx = $bindable() }: { ctx: CameraSidebarSectionCtx } = $props();
 
-  let CameraStreamTabComponent = $state<(typeof import('$lib/features/devices/camera/CameraStreamTab.svelte'))['default'] | null>(null);
+  let CameraStreamTabComponent = $state<(typeof import('$lib/features/devices/camera/CameraStreamEditorTab.svelte'))['default'] | null>(null);
   let CameraMediaTabComponent = $state<(typeof import('$lib/features/devices/camera/CameraMediaTab.svelte'))['default'] | null>(null);
   let CameraControlsTabComponent = $state<(typeof import('$lib/features/devices/camera/CameraControlsTab.svelte'))['default'] | null>(null);
-  let CameraPipelinesTabComponent = $state<(typeof import('$lib/features/devices/camera/CameraPipelinesTab.svelte'))['default'] | null>(null);
+  let CameraPipelinesTabComponent = $state<(typeof import('$lib/features/devices/camera/CameraPipelinesEditorTab.svelte'))['default'] | null>(null);
   let CameraPoseTabComponent = $state<(typeof import('$lib/features/devices/camera/CameraPoseTab.svelte'))['default'] | null>(null);
   let CameraCalibrationTabComponent = $state<(typeof import('$lib/features/devices/camera/CameraCalibrationTab.svelte'))['default'] | null>(null);
 
@@ -283,7 +283,7 @@
       case 'stream':
         if (CameraStreamTabComponent) return;
         await loadTabOnce(tab, async () => {
-          const module = await import('$lib/features/devices/camera/CameraStreamTab.svelte');
+          const module = await import('$lib/features/devices/camera/CameraStreamEditorTab.svelte');
           CameraStreamTabComponent = module.default;
         });
         return;
@@ -304,7 +304,7 @@
       case 'pipelines':
         if (CameraPipelinesTabComponent) return;
         await loadTabOnce(tab, async () => {
-          const module = await import('$lib/features/devices/camera/CameraPipelinesTab.svelte');
+          const module = await import('$lib/features/devices/camera/CameraPipelinesEditorTab.svelte');
           CameraPipelinesTabComponent = module.default;
         });
         return;

@@ -259,7 +259,7 @@
 
   let tuneMetricsSort = $state<'desc' | 'asc'>('desc');
   let CameraControlsTabComponent = $state<(typeof import('$lib/features/devices/camera/CameraControlsTab.svelte'))['default'] | null>(null);
-  let CameraPipelinesTabComponent = $state<(typeof import('$lib/features/devices/camera/CameraPipelinesTab.svelte'))['default'] | null>(null);
+  let CameraPipelinesTabComponent = $state<(typeof import('$lib/features/devices/camera/CameraPipelinesEditorTab.svelte'))['default'] | null>(null);
   const tunePanelLoads: Partial<Record<'controls' | 'layout', Promise<void>>> = {};
 
   function loadTunePanelOnce(key: 'controls' | 'layout', loader: () => Promise<void>): Promise<void> {
@@ -285,7 +285,7 @@
   async function loadCameraPipelinesTab(): Promise<void> {
     if (CameraPipelinesTabComponent) return;
     await loadTunePanelOnce('layout', async () => {
-      const module = await import('$lib/features/devices/camera/CameraPipelinesTab.svelte');
+      const module = await import('$lib/features/devices/camera/CameraPipelinesEditorTab.svelte');
       CameraPipelinesTabComponent = module.default;
     });
   }
