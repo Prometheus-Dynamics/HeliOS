@@ -4,7 +4,7 @@ use crate::artifact::ReleaseManifest;
 use lib_ipc::frame::MessageKind;
 use lib_ipc::protocol::ControlEvent;
 use lib_ipc::server::ServerEvent;
-use lib_ipc::types::{CommandId, Timestamp};
+use lib_ipc::types::{CommandId, RequestIdentity, Timestamp};
 use serde::{Deserialize, Serialize};
 use tracing::error;
 use url::Url;
@@ -53,6 +53,20 @@ pub enum UpdaterCommand {
     QueryState { command_id: CommandId },
     QueryStorage { command_id: CommandId },
     PreflightRelease { command_id: CommandId, update_id: Uuid },
+}
+
+impl RequestIdentity for UpdaterCommand {
+    fn request_id(&self) -> CommandId {
+        match self {
+            Self::StageRelease { command_id, .. }
+            | Self::Cancel { command_id, .. }
+            | Self::ApplyRelease { command_id, .. }
+            | Self::Rollback { command_id, .. }
+            | Self::QueryState { command_id }
+            | Self::QueryStorage { command_id }
+            | Self::PreflightRelease { command_id, .. } => *command_id,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -278,13 +292,6 @@ impl ServerEvent for UpdaterEvent {
             | Self::PreflightReport { .. }
             | Self::LogRecord { .. }
             | Self::Unknown { .. } => MessageKind::Event,
-        }
-    }
-
-    fn as_control(&self) -> Option<&ControlEvent> {
-        match self {
-            Self::Control(event) => Some(event),
-            _ => None,
         }
     }
 }

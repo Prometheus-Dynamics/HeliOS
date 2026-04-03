@@ -10,11 +10,12 @@ use crate::service::SensorsService;
 use lib_ipc::handshake::{ClientHello, ServerHello};
 use lib_ipc::server::{self, RetryableError, ServerHandshakeError, ServerLoopError, ServerTransportError};
 use lib_ipc::types::CommandId;
+use lib_ipc::wire::ServiceKind;
 use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 pub(super) async fn handle_connection(stream: UnixStream, config: Arc<SensorsConfig>, shutdown: CancellationToken, service: Arc<SensorsService>, runtime_start: Instant) -> Result<()> {
-    let server_config = server::ServerConfig::new(config.protocol(), config.server_name(), config.server_version(), config.features().clone()).with_snapshot_required(false);
+    let server_config = server::ServerConfig::new(config.protocol(), config.server_name(), config.server_version(), config.features().clone(), ServiceKind::Peripherals).with_snapshot_required(false);
     let runtime_origin = runtime_start;
     let heartbeat_sequence = Arc::new(AtomicU64::new(0));
 
@@ -37,7 +38,10 @@ pub(super) async fn handle_connection(stream: UnixStream, config: Arc<SensorsCon
         },
         move |command| {
             let service = Arc::clone(&service_for_command);
-            async move { handle_command(&service, command).await }
+            async move {
+                handle_command(&service, command).await?;
+                Ok(None)
+            }
         },
         move || {
             let heartbeat_sequence = Arc::clone(&heartbeat_sequence);
@@ -56,7 +60,6 @@ pub(super) async fn handle_connection(stream: UnixStream, config: Arc<SensorsCon
                 "sensor IPC client connected"
             );
         },
-        |command: &SensorCommand| Some(command.command_id()),
     )
     .await;
 

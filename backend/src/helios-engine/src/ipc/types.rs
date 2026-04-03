@@ -16,7 +16,7 @@ use crate::stream::{StreamEncoderDemandMetrics, StreamFrameDemandMetrics, Stream
 use lib_ipc::frame::MessageKind;
 use lib_ipc::protocol::ControlEvent;
 use lib_ipc::server::ServerEvent;
-use lib_ipc::types::CommandId;
+use lib_ipc::types::{CommandId, RequestIdentity};
 use styx::codec::CodecKind;
 use styx::prelude::{FourCc, Resolution};
 use styx::runtime_codec::{
@@ -1036,6 +1036,12 @@ impl EngineCommand {
     }
 }
 
+impl RequestIdentity for EngineCommand {
+    fn request_id(&self) -> CommandId {
+        self.command_id().expect("engine command must carry a request id")
+    }
+}
+
 impl ServerEvent for EngineEvent {
     fn message_kind(&self) -> MessageKind {
         match self {
@@ -1060,10 +1066,6 @@ impl ServerEvent for EngineEvent {
             | Self::LocalizationPipelineOutputs { .. }
             | Self::LocalizationPipelineOutputSample { .. } => MessageKind::Event,
         }
-    }
-
-    fn as_control(&self) -> Option<&ControlEvent> {
-        None
     }
 }
 

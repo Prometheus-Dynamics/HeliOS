@@ -3,22 +3,15 @@ use std::io;
 use std::marker::PhantomData;
 use std::path::Path;
 
-use crate::archive;
-use crate::codec::default_codec;
-use crate::envelope::{TaggedDecodeError, TaggedEncode, TaggedEnvelope};
-use crate::frame::{Frame, FrameFlags, MessageKind};
-use crate::handshake::{ClientHello, ServerHello, client};
+use crate::frame::Frame;
+use crate::handshake::{ClientHello, HandshakeReject, HandshakeResponse, ServerHello};
 use crate::journal::{JournalEntry, JournalWriter};
-use crate::protocol::ControlEvent;
-use crate::types::{FeatureSet, ProtocolVersion};
-use futures::{SinkExt, StreamExt};
-use rkyv::rancor::Error as ArchiveError;
+use crate::types::{FeatureSet, ProtocolVersion, RequestIdentity};
+use crate::wire::{FrameFlags, ServiceKind, StreamKind};
+use serde::{Serialize, de::DeserializeOwned};
 use tokio::net::UnixStream;
-use tokio_util::codec::{Framed, LengthDelimitedCodec};
 use tracing::warn;
-use uuid::Uuid;
 
-/// Minimal descriptor required to establish an IPC client connection.
 pub trait TransportConfig {
     fn socket_path(&self) -> &Path;
     fn journal_path(&self) -> &Path;
@@ -26,26 +19,26 @@ pub trait TransportConfig {
     fn client_name(&self) -> &str;
     fn client_version(&self) -> &str;
     fn features(&self) -> &FeatureSet;
+    fn service_kind(&self) -> ServiceKind;
 }
 
-/// Generic IPC client that owns connection settings and the command journal.
-pub struct Client<C, Command, Event>
+pub struct Client<C, Request, Event>
 where
     C: TransportConfig,
 {
     config: C,
-    journal: JournalWriter<Command>,
+    journal: JournalWriter<Request>,
     _marker: PhantomData<Event>,
 }
 
-impl<C, Command, Event> Client<C, Command, Event>
+impl<C, Request, Event> Client<C, Request, Event>
 where
     C: TransportConfig,
-    Command: Clone + TaggedEncode + TryFrom<TaggedEnvelope, Error = TaggedDecodeError>,
-    Event: TryFrom<TaggedEnvelope, Error = TaggedDecodeError> + From<ControlEvent>,
+    Request: Clone + Serialize + DeserializeOwned + RequestIdentity,
+    Event: Serialize + DeserializeOwned,
 {
     pub fn new(config: C) -> io::Result<Self> {
-        let journal = JournalWriter::open(config.journal_path())?;
+        let journal = JournalWriter::open(config.journal_path(), config.service_kind())?;
         Ok(Self { config, journal, _marker: PhantomData })
     }
 
@@ -55,52 +48,64 @@ where
     }
 
     #[must_use]
-    pub fn journal(&self) -> &JournalWriter<Command> {
+    pub fn journal(&self) -> &JournalWriter<Request> {
         &self.journal
     }
 
-    pub async fn handshake(&self) -> Result<Session<Command, Event>, client::ClientHandshakeError> {
-        let stream = UnixStream::connect(self.config.socket_path()).await.map_err(client::ClientHandshakeError::Io)?;
-        let codec = default_codec();
-        let framed = Framed::new(stream, codec);
+    pub async fn handshake(&self) -> Result<Session<Request, Event>, ClientHandshakeError> {
+        let mut stream = UnixStream::connect(self.config.socket_path()).await.map_err(ClientHandshakeError::Io)?;
         let hello = ClientHello::new(self.config.protocol(), self.config.client_name().to_owned(), self.config.client_version().to_owned(), self.config.features().clone());
-        let (framed, server) = client::perform_handshake(framed, hello).await?;
-        Ok(Session::new(framed, server))
+        let request_id = crate::types::CommandId::new();
+        let hello_frame = Frame::encode_payload(self.config.service_kind(), StreamKind::Handshake, request_id, FrameFlags::empty(), &hello).map_err(ClientHandshakeError::Encode)?;
+        hello_frame.write_to(&mut stream).await.map_err(ClientHandshakeError::Io)?;
+
+        let response_frame = Frame::read_from(&mut stream).await.map_err(ClientHandshakeError::Io)?.ok_or(ClientHandshakeError::Closed)?;
+        if response_frame.header.service != self.config.service_kind() {
+            return Err(ClientHandshakeError::WrongService { expected: self.config.service_kind(), received: response_frame.header.service });
+        }
+        if response_frame.header.stream != StreamKind::Handshake {
+            return Err(ClientHandshakeError::UnexpectedStream { expected: StreamKind::Handshake, received: response_frame.header.stream });
+        }
+
+        let handshake: HandshakeResponse = response_frame.decode_payload().map_err(ClientHandshakeError::Decode)?;
+        match handshake {
+            HandshakeResponse::Accepted(server) => {
+                if !self.config.protocol().is_compatible(&server.protocol) {
+                    return Err(ClientHandshakeError::ProtocolMismatch { expected: self.config.protocol(), received: server.protocol });
+                }
+                Ok(Session::new(stream, self.config.service_kind(), server))
+            }
+            HandshakeResponse::Rejected(reject) => Err(ClientHandshakeError::Rejected(reject)),
+        }
     }
 }
 
-impl<C, Command, Event> fmt::Debug for Client<C, Command, Event>
+impl<C, Request, Event> fmt::Debug for Client<C, Request, Event>
 where
     C: TransportConfig + fmt::Debug,
-    Command: Clone + TaggedEncode + TryFrom<TaggedEnvelope, Error = TaggedDecodeError>,
-    Event: TryFrom<TaggedEnvelope, Error = TaggedDecodeError> + From<ControlEvent>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Client").field("config", &self.config).finish()
     }
 }
 
-/// Active IPC session that wraps the framed transport.
-pub struct Session<Command, Event>
-where
-    Command: Clone + TaggedEncode + TryFrom<TaggedEnvelope, Error = TaggedDecodeError>,
-    Event: TryFrom<TaggedEnvelope, Error = TaggedDecodeError> + From<ControlEvent>,
-{
-    framed: Framed<UnixStream, LengthDelimitedCodec>,
+pub struct Session<Request, Event> {
+    stream: UnixStream,
+    service: ServiceKind,
     server: ServerHello,
     protocol: ProtocolVersion,
-    _command: PhantomData<Command>,
+    _request: PhantomData<Request>,
     _event: PhantomData<Event>,
 }
 
-impl<Command, Event> Session<Command, Event>
+impl<Request, Event> Session<Request, Event>
 where
-    Command: Clone + TaggedEncode + TryFrom<TaggedEnvelope, Error = TaggedDecodeError>,
-    Event: TryFrom<TaggedEnvelope, Error = TaggedDecodeError> + From<ControlEvent>,
+    Request: Clone + Serialize + DeserializeOwned + RequestIdentity,
+    Event: Serialize + DeserializeOwned,
 {
-    fn new(framed: Framed<UnixStream, LengthDelimitedCodec>, server: ServerHello) -> Self {
+    fn new(stream: UnixStream, service: ServiceKind, server: ServerHello) -> Self {
         let protocol = server.protocol;
-        Self { framed, server, protocol, _command: PhantomData, _event: PhantomData }
+        Self { stream, service, server, protocol, _request: PhantomData, _event: PhantomData }
     }
 
     #[must_use]
@@ -113,87 +118,100 @@ where
         self.protocol
     }
 
-    async fn send_frame(&mut self, command: &Command) -> Result<(), ClientTransportError> {
-        let envelope = command.encode_envelope().map_err(|err| ClientTransportError::Encode(err.into_inner()))?;
-        let frame = Frame::encode(self.protocol, MessageKind::Command, Uuid::new_v4(), FrameFlags::ACK_REQUIRED, &envelope).map_err(ClientTransportError::Encode)?;
-        self.framed.send(frame).await.map_err(ClientTransportError::Io)?;
-        Ok(())
+    async fn send_frame(&mut self, request: &Request, flags: FrameFlags) -> Result<(), ClientTransportError> {
+        let frame = Frame::encode_payload(self.service, StreamKind::Request, request.request_id(), flags, request).map_err(ClientTransportError::Encode)?;
+        frame.write_to(&mut self.stream).await.map_err(ClientTransportError::Io)
     }
 
-    pub async fn send_command(&mut self, journal: &JournalWriter<Command>, command: &Command) -> Result<JournalEntry<Command>, ClientTransportError> {
-        let entry = journal.append(command).map_err(ClientTransportError::Io)?;
-        self.send_frame(command).await?;
+    pub async fn send_command(&mut self, journal: &JournalWriter<Request>, request: &Request) -> Result<JournalEntry<Request>, ClientTransportError> {
+        let entry = journal.append(request).map_err(ClientTransportError::Io)?;
+        self.send_frame(request, FrameFlags::empty()).await?;
         Ok(entry)
     }
 
-    pub async fn send_ephemeral_command(&mut self, command: &Command) -> Result<(), ClientTransportError> {
-        self.send_frame(command).await
+    pub async fn send_ephemeral_command(&mut self, request: &Request) -> Result<(), ClientTransportError> {
+        self.send_frame(request, FrameFlags::empty()).await
     }
 
     pub async fn next_event(&mut self) -> Result<Option<Event>, ClientTransportError> {
         loop {
-            match self.framed.next().await {
-                Some(Ok(bytes)) => {
-                    let frame = Frame::decode(bytes.freeze()).map_err(ClientTransportError::Decode)?;
-                    match frame.header.message_kind {
-                        MessageKind::Event | MessageKind::Heartbeat => {
-                            let envelope: TaggedEnvelope = archive::decode_from_slice(frame.payload.as_ref()).map_err(ClientTransportError::Decode)?;
-                            match Event::try_from(envelope.clone()) {
-                                Ok(event) => return Ok(Some(event)),
-                                Err(err @ TaggedDecodeError::Decode { .. }) => {
-                                    warn!(kind = envelope.kind, bytes = envelope.payload.len(), error = %err, "dropping undecodable tagged event");
-                                    continue;
-                                }
-                                Err(err @ TaggedDecodeError::UnknownKind(kind)) => {
-                                    warn!(kind, bytes = envelope.payload.len(), error = %err, "dropping unknown tagged event");
-                                    continue;
-                                }
-                            }
-                        }
-                        MessageKind::Control => {
-                            let control: ControlEvent = archive::decode_from_slice(frame.payload.as_ref()).map_err(ClientTransportError::Decode)?;
-                            return Ok(Some(Event::from(control)));
-                        }
-                        other => return Err(ClientTransportError::UnexpectedMessage { expected: MessageKind::Event, received: other }),
-                    }
+            let Some(frame) = Frame::read_from(&mut self.stream).await.map_err(ClientTransportError::Io)? else {
+                return Ok(None);
+            };
+            if frame.header.service != self.service {
+                return Err(ClientTransportError::WrongService { expected: self.service, received: frame.header.service });
+            }
+            match frame.header.stream {
+                StreamKind::Reply | StreamKind::Event => return frame.decode_payload().map(Some).map_err(ClientTransportError::Decode),
+                StreamKind::Handshake => {
+                    warn!("dropping unexpected handshake frame on established IPC session");
+                    continue;
                 }
-                Some(Err(err)) => return Err(ClientTransportError::Io(err)),
-                None => return Ok(None),
+                StreamKind::Request => return Err(ClientTransportError::UnexpectedStream { expected: StreamKind::Reply, received: StreamKind::Request }),
             }
         }
     }
 }
 
-impl<Command, Event> fmt::Debug for Session<Command, Event>
-where
-    Command: Clone + TaggedEncode + TryFrom<TaggedEnvelope, Error = TaggedDecodeError>,
-    Event: TryFrom<TaggedEnvelope, Error = TaggedDecodeError> + From<ControlEvent>,
-{
+impl<Request, Event> fmt::Debug for Session<Request, Event> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Session").field("protocol", &self.protocol).field("server", &self.server).finish()
+        f.debug_struct("Session").field("service", &self.service).field("protocol", &self.protocol).field("server", &self.server).finish()
     }
 }
 
-/// Errors that can occur while exchanging frames over an established session.
+#[derive(Debug)]
+pub enum ClientHandshakeError {
+    Io(io::Error),
+    Encode(io::Error),
+    Decode(io::Error),
+    Closed,
+    UnexpectedStream { expected: StreamKind, received: StreamKind },
+    WrongService { expected: ServiceKind, received: ServiceKind },
+    Rejected(HandshakeReject),
+    ProtocolMismatch { expected: ProtocolVersion, received: ProtocolVersion },
+}
+
+impl fmt::Display for ClientHandshakeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(err) => write!(f, "handshake IO error: {err}"),
+            Self::Encode(err) => write!(f, "handshake encode error: {err}"),
+            Self::Decode(err) => write!(f, "handshake decode error: {err}"),
+            Self::Closed => f.write_str("handshake stream closed"),
+            Self::UnexpectedStream { expected, received } => write!(f, "unexpected handshake stream kind (expected {expected:?}, received {received:?})"),
+            Self::WrongService { expected, received } => write!(f, "unexpected handshake service (expected {expected:?}, received {received:?})"),
+            Self::Rejected(reject) => write!(f, "handshake rejected: {}", reject.reason),
+            Self::ProtocolMismatch { expected, received } => write!(f, "protocol mismatch (expected {expected}, received {received})"),
+        }
+    }
+}
+
+impl std::error::Error for ClientHandshakeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(err) | Self::Encode(err) | Self::Decode(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum ClientTransportError {
-    Io(std::io::Error),
-    Encode(ArchiveError),
-    Decode(ArchiveError),
-    Tagged(TaggedDecodeError),
-    TaggedPayload { envelope: TaggedEnvelope, error: TaggedDecodeError },
-    UnexpectedMessage { expected: MessageKind, received: MessageKind },
+    Io(io::Error),
+    Encode(io::Error),
+    Decode(io::Error),
+    UnexpectedStream { expected: StreamKind, received: StreamKind },
+    WrongService { expected: ServiceKind, received: ServiceKind },
 }
 
 impl fmt::Display for ClientTransportError {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Io(err) => write!(fmt, "transport IO error: {err}"),
-            Self::Encode(err) => write!(fmt, "transport serialization error: {err}"),
-            Self::Decode(err) => write!(fmt, "transport deserialization error: {err}"),
-            Self::Tagged(err) => write!(fmt, "invalid tagged payload: {err}"),
-            Self::TaggedPayload { envelope, error } => write!(fmt, "invalid tagged payload {} ({} bytes): {error}", envelope.kind, envelope.payload.len()),
-            Self::UnexpectedMessage { expected, received } => write!(fmt, "unexpected message kind (expected {expected:?}, received {received:?})"),
+            Self::Io(err) => write!(f, "transport IO error: {err}"),
+            Self::Encode(err) => write!(f, "transport encode error: {err}"),
+            Self::Decode(err) => write!(f, "transport decode error: {err}"),
+            Self::UnexpectedStream { expected, received } => write!(f, "unexpected stream kind (expected {expected:?}, received {received:?})"),
+            Self::WrongService { expected, received } => write!(f, "unexpected service kind (expected {expected:?}, received {received:?})"),
         }
     }
 }
@@ -201,12 +219,8 @@ impl fmt::Display for ClientTransportError {
 impl std::error::Error for ClientTransportError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Io(err) => Some(err),
-            Self::Encode(err) => Some(err),
-            Self::Decode(err) => Some(err),
-            Self::Tagged(err) => Some(err),
-            Self::TaggedPayload { error, .. } => Some(error),
-            Self::UnexpectedMessage { .. } => None,
+            Self::Io(err) | Self::Encode(err) | Self::Decode(err) => Some(err),
+            _ => None,
         }
     }
 }

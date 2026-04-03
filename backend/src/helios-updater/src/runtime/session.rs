@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 use std::time::Instant;
 
 use crate::config::UpdaterConfig;
@@ -14,6 +15,7 @@ use lib_ipc::journal::JournalWriter;
 use lib_ipc::protocol::{AckEvent, ControlEvent, NackEvent};
 use lib_ipc::server::{self, BroadcastHandler};
 use lib_ipc::types::CommandId;
+use lib_ipc::wire::ServiceKind;
 use tokio::net::UnixStream;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
@@ -45,12 +47,14 @@ impl UpdaterSessionHandler {
 }
 
 impl BroadcastHandler for UpdaterSessionHandler {
-    type Command = UpdaterCommand;
+    type Request = UpdaterCommand;
     type Event = UpdaterEvent;
     type Error = Error;
 
     fn server_config(&self) -> server::ServerConfig {
-        server::ServerConfig::new(self.config.protocol(), self.config.server_name(), self.config.server_version(), self.config.features().clone()).with_snapshot_required(false)
+        server::ServerConfig::new(self.config.protocol(), self.config.server_name(), self.config.server_version(), self.config.features().clone(), ServiceKind::Updater)
+            .with_snapshot_required(false)
+            .with_heartbeat_interval(Duration::from_secs(1))
     }
 
     fn event_receiver(&self) -> tokio::sync::broadcast::Receiver<Self::Event> {
@@ -66,21 +70,22 @@ impl BroadcastHandler for UpdaterSessionHandler {
         .boxed()
     }
 
-    fn handle_command(&self, command: Self::Command) -> BoxFuture<'_, Result<()>> {
+    fn handle_request(&self, command: Self::Request) -> BoxFuture<'_, Result<Option<Self::Event>>> {
         let journal = Arc::clone(&self.journal);
         let service = Arc::clone(&self.service);
-        async move { handle_command(&journal, &service, command).await }.boxed()
+        async move {
+            handle_command(&journal, &service, command).await?;
+            Ok(None)
+        }
+        .boxed()
     }
 
     fn handle_heartbeat(&self) -> BoxFuture<'_, Result<Option<Self::Event>>> {
-        let service = Arc::clone(&self.service);
         let runtime_origin = self.runtime_origin;
         let sequence = self.heartbeat_sequence.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
         async move {
             let uptime = runtime_origin.elapsed().as_millis() as u64;
-            service.publish_event(UpdaterEvent::Heartbeat { uptime_ms: uptime, sequence, stage_queue_depth: 0 });
-            service.publish_snapshot().await;
-            Ok(None)
+            Ok(Some(UpdaterEvent::Heartbeat { uptime_ms: uptime, sequence, stage_queue_depth: 0 }))
         }
         .boxed()
     }
@@ -90,7 +95,7 @@ impl BroadcastHandler for UpdaterSessionHandler {
     }
 
     fn handle_other(&self, frame: Frame) {
-        warn!(kind = ?frame.header.message_kind, "unexpected message kind from client");
+        warn!(stream = ?frame.header.stream, "unexpected IPC frame from updater client");
     }
 
     fn on_accept(&self, _client: &ClientHello, _server: &ServerHello) {}

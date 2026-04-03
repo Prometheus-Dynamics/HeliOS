@@ -10,6 +10,7 @@ use lib_ipc::client::{Client as GenericClient, Session as GenericSession, Transp
 use lib_ipc::handshake::ServerHello;
 use lib_ipc::journal::{JournalEntry, JournalWriter};
 use lib_ipc::types::{FeatureSet, ProtocolVersion};
+use lib_ipc::wire::ServiceKind;
 
 pub use error::{Error, Result};
 
@@ -152,5 +153,9 @@ impl TransportConfig for UpdaterClientConfig {
 
     fn features(&self) -> &FeatureSet {
         &self.features
+    }
+
+    fn service_kind(&self) -> ServiceKind {
+        ServiceKind::Updater
     }
 }

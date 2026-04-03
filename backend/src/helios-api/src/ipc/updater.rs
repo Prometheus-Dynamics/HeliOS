@@ -4,7 +4,6 @@ use helios_updater::client::Error as UpdaterError;
 use helios_updater::client::{UpdaterClient, UpdaterClientConfig, UpdaterSession};
 use helios_updater::ipc::{UpdaterCommand, UpdaterEvent};
 use lib_ipc::protocol::ControlEvent;
-use tokio::sync::Mutex;
 use tokio::time::{Duration, timeout};
 use tracing::{error, info};
 
@@ -14,7 +13,6 @@ const DEV_UPDATER_SOCKET: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/target/de
 
 pub struct UpdaterConnection {
     pub client: Arc<UpdaterClient>,
-    sessions: Mutex<Vec<UpdaterSession>>,
 }
 
 pub async fn connect_updater() -> Result<UpdaterConnection, Box<dyn std::error::Error + Send + Sync>> {
@@ -53,23 +51,17 @@ async fn try_connect_updater(socket: PathBuf, journal_path: PathBuf) -> Result<U
         Err(err) => error!(%err, "failed waiting for updater event"),
     }
 
-    Ok(UpdaterConnection { client, sessions: Mutex::new(vec![session]) })
+    drop(session);
+    Ok(UpdaterConnection { client })
 }
 
 impl UpdaterConnection {
     pub async fn checkout_session(&self) -> Result<UpdaterSession, UpdaterError> {
-        if let Some(session) = self.sessions.lock().await.pop() {
-            return Ok(session);
-        }
         handshake_with_timeout(&self.client).await
     }
 
     pub async fn recycle_session(&self, session: UpdaterSession) {
-        const MAX_SESSIONS: usize = 4;
-        let mut guard = self.sessions.lock().await;
-        if guard.len() < MAX_SESSIONS {
-            guard.push(session);
-        }
+        drop(session);
     }
 }
 

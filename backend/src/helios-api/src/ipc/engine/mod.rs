@@ -19,6 +19,7 @@ use std::{
 use helios_engine::ipc::{EngineCommand, EngineEvent};
 use lib_ipc::client::{Client as GenericClient, Session as GenericSession, TransportConfig};
 use lib_ipc::types::{CommandId, FeatureSet};
+use lib_ipc::wire::ServiceKind;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::time::{Duration, Instant};
 
@@ -77,6 +78,10 @@ impl TransportConfig for EngineClientConfig {
 
     fn features(&self) -> &FeatureSet {
         &self.features
+    }
+
+    fn service_kind(&self) -> ServiceKind {
+        ServiceKind::Engine
     }
 }
 

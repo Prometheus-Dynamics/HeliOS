@@ -8,6 +8,7 @@ use helios_peripherals::dto::{LightingAnimation, LightingCommand};
 use helios_peripherals::ipc::{SensorCommand, SensorEvent};
 use lib_ipc::client::{Client as GenericClient, Session as GenericSession, TransportConfig};
 use lib_ipc::types::{CommandId, FeatureSet};
+use lib_ipc::wire::ServiceKind;
 use lib_led_animations::LedAnimationEntry;
 use tokio::sync::mpsc;
 use tokio::time::{Instant, timeout};
@@ -229,6 +230,10 @@ impl TransportConfig for SensorsClientConfig {
     }
     fn features(&self) -> &FeatureSet {
         &self.features
+    }
+
+    fn service_kind(&self) -> ServiceKind {
+        ServiceKind::Peripherals
     }
 }
 

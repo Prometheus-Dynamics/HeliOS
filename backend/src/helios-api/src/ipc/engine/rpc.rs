@@ -42,7 +42,7 @@ impl EngineConnection {
             EngineEvent::Nack { reason, .. } => Err(lib_ipc::client::ClientTransportError::Io(io::Error::other(reason))),
             other => {
                 warn!(?other, "engine returned unexpected event for snapshot_jpeg after filtering");
-                Err(lib_ipc::client::ClientTransportError::UnexpectedMessage { expected: lib_ipc::frame::MessageKind::Event, received: lib_ipc::frame::MessageKind::Event })
+                Err(lib_ipc::client::ClientTransportError::Io(io::Error::new(io::ErrorKind::InvalidData, "unexpected engine reply for snapshot_jpeg")))
             }
         }
     }
@@ -88,7 +88,7 @@ impl EngineConnection {
             EngineEvent::Nack { reason, .. } => Err(lib_ipc::client::ClientTransportError::Io(io::Error::other(reason))),
             other => {
                 warn!(?other, "engine returned unexpected event for get_node_registry after filtering");
-                Err(lib_ipc::client::ClientTransportError::UnexpectedMessage { expected: lib_ipc::frame::MessageKind::Event, received: lib_ipc::frame::MessageKind::Event })
+                Err(lib_ipc::client::ClientTransportError::Io(io::Error::new(io::ErrorKind::InvalidData, "unexpected engine reply for get_node_registry")))
             }
         }
     }
@@ -99,7 +99,7 @@ impl EngineConnection {
             EngineEvent::Nack { reason, .. } => Err(lib_ipc::client::ClientTransportError::Io(io::Error::other(reason))),
             other => {
                 warn!(?other, "engine returned unexpected event for discover_devices after filtering");
-                Err(lib_ipc::client::ClientTransportError::UnexpectedMessage { expected: lib_ipc::frame::MessageKind::Event, received: lib_ipc::frame::MessageKind::Event })
+                Err(lib_ipc::client::ClientTransportError::Io(io::Error::new(io::ErrorKind::InvalidData, "unexpected engine reply for discover_devices")))
             }
         }
     }
@@ -110,7 +110,7 @@ impl EngineConnection {
             EngineEvent::Nack { reason, .. } => Err(lib_ipc::client::ClientTransportError::Io(io::Error::other(reason))),
             other => {
                 warn!(?other, "engine returned unexpected event for get_stream_runtime_capabilities after filtering");
-                Err(lib_ipc::client::ClientTransportError::UnexpectedMessage { expected: lib_ipc::frame::MessageKind::Event, received: lib_ipc::frame::MessageKind::Event })
+                Err(lib_ipc::client::ClientTransportError::Io(io::Error::new(io::ErrorKind::InvalidData, "unexpected engine reply for get_stream_runtime_capabilities")))
             }
         }
     }
@@ -271,7 +271,7 @@ impl EngineConnection {
             }
             other => {
                 warn!(?other, "engine returned unexpected event for list_streams after filtering");
-                Err(lib_ipc::client::ClientTransportError::UnexpectedMessage { expected: lib_ipc::frame::MessageKind::Event, received: lib_ipc::frame::MessageKind::Event })
+                Err(lib_ipc::client::ClientTransportError::Io(io::Error::new(io::ErrorKind::InvalidData, "unexpected engine reply for list_streams")))
             }
         }
     }

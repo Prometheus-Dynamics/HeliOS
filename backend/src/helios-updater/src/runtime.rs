@@ -7,6 +7,7 @@ use std::time::Instant;
 
 use futures::FutureExt;
 use lib_ipc::journal::JournalWriter;
+use lib_ipc::wire::ServiceKind;
 use tokio::fs;
 use tokio::net::UnixListener;
 use tokio::task::JoinSet;
@@ -72,7 +73,7 @@ impl UpdaterRuntime {
         self.state = RuntimeState::Starting;
         self.started_at = Instant::now();
 
-        let journal = Arc::new(JournalWriter::open(self.config.journal_path())?);
+        let journal = Arc::new(JournalWriter::open(self.config.journal_path(), ServiceKind::Updater)?);
         let service = Arc::new(UpdaterService::new(Arc::clone(&self.config))?);
         if let Err(err) = service.run_post_boot_cleanup().await {
             warn!(%err, "post-boot cleanup task failed");

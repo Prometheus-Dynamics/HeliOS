@@ -2,6 +2,7 @@ use std::{path::PathBuf, time::Duration};
 
 use lib_ipc::client::TransportConfig;
 use lib_ipc::types::FeatureSet;
+use lib_ipc::wire::ServiceKind;
 
 use crate::ipc::PERIPHERALS_SOCKET;
 
@@ -56,6 +57,10 @@ impl TransportConfig for SensorsClientConfig {
 
     fn features(&self) -> &FeatureSet {
         &self.features
+    }
+
+    fn service_kind(&self) -> ServiceKind {
+        ServiceKind::Peripherals
     }
 }
 

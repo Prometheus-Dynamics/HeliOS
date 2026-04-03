@@ -1065,7 +1065,7 @@ mod tests {
     }
 
     async fn spawn_mock_engine_runtime(initial_summary: StreamSummary, failing_alias: String) -> MockEngineRuntime {
-        let tempdir = tempfile::Builder::new().prefix("item26-engine-").tempdir_in("/tmp").expect("tempdir");
+        let tempdir = tempfile::Builder::new().prefix("item26-engine-").tempdir_in(std::env::temp_dir()).expect("tempdir");
         let socket_path = tempdir.path().join("engine.sock");
         let journal_path = tempdir.path().join("engine.journal");
         let listener = UnixListener::bind(&socket_path).expect("bind mock engine");
@@ -1073,7 +1073,8 @@ mod tests {
         let runtime: StreamRuntimeCapabilities = cached_stream_runtime_capabilities().expect("runtime capabilities");
         let state = Arc::new(Mutex::new(MockEngineState { active: Some(initial_summary), failing_alias, failed_update_once: false }));
         let (events, _) = broadcast::channel(32);
-        let server_config = server::ServerConfig::new(ProtocolVersion::default(), "mock-engine", env!("CARGO_PKG_VERSION").to_string(), FeatureSet::default()).with_snapshot_required(false);
+        let server_config = server::ServerConfig::new(ProtocolVersion::default(), "mock-engine", env!("CARGO_PKG_VERSION").to_string(), FeatureSet::default(), lib_ipc::wire::ServiceKind::Engine)
+            .with_snapshot_required(false);
         let shutdown_token = shutdown.clone();
         let command_task = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.expect("accept mock engine");
@@ -1116,16 +1117,12 @@ mod tests {
                         }
                         other => return Err(MockEngineError(format!("unexpected engine command in lifecycle rollback test: {other:?}"))),
                     };
-                    let _ = events.send(event);
-                    Ok::<(), MockEngineError>(())
+                    let _ = events.send(event.clone());
+                    Ok::<_, MockEngineError>(Some(event))
                 }
             };
 
-            let result =
-                server::run_snapshot_server(stream, shutdown_token, server_config, subscribe, snapshot, handle_command, server::no_heartbeat(), server::log_accept, |command: &EngineCommand| {
-                    command.command_id()
-                })
-                .await;
+            let result = server::run_snapshot_server(stream, shutdown_token, server_config, subscribe, snapshot, handle_command, server::no_heartbeat(), server::log_accept).await;
             if let Err(err) = result {
                 panic!("mock engine server failed: {err}");
             }

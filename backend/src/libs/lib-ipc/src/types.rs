@@ -26,6 +26,11 @@ impl CommandId {
     pub fn as_uuid(&self) -> Uuid {
         self.0
     }
+
+    #[must_use]
+    pub fn nil() -> Self {
+        Self(Uuid::nil())
+    }
 }
 
 impl From<Uuid> for CommandId {
@@ -44,6 +49,10 @@ impl Default for CommandId {
     fn default() -> Self {
         Self::new()
     }
+}
+
+pub trait RequestIdentity {
+    fn request_id(&self) -> CommandId;
 }
 
 impl fmt::Display for CommandId {

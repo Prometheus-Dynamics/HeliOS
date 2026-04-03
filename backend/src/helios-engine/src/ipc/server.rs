@@ -12,6 +12,7 @@ use crate::runtime::EngineRuntime;
 
 use lib_ipc::server;
 use lib_ipc::types::{FeatureSet, ProtocolVersion};
+use lib_ipc::wire::ServiceKind;
 use tokio::sync::broadcast;
 
 /// Default engine IPC socket path.
@@ -56,7 +57,14 @@ impl EngineIpcServer {
                 }
                 accept_res = listener.accept() => {
                     let (stream, _addr) = accept_res.map_err(|_| Error::InvalidState("engine socket accept failed"))?;
-                    let server_config = server::ServerConfig::new(ProtocolVersion::default(), "helios-engine", crate::VERSION.to_string(), FeatureSet::default()).with_snapshot_required(false);
+                    let server_config = server::ServerConfig::new(
+                        ProtocolVersion::default(),
+                        "helios-engine",
+                        crate::VERSION.to_string(),
+                        FeatureSet::default(),
+                        ServiceKind::Engine,
+                    )
+                    .with_snapshot_required(false);
                     let shutdown = self.shutdown.clone();
                     let runtime = self.runtime.clone();
                     let tx = self.tx.clone();
@@ -71,8 +79,8 @@ impl EngineIpcServer {
                             let tx = tx.clone();
                             async move {
                                 let event = runtime.handle_command(command).await;
-                                let _ = tx.send(event);
-                                Ok(())
+                                let _ = tx.send(event.clone());
+                                Ok(Some(event))
                             }
                         };
 
@@ -90,7 +98,6 @@ impl EngineIpcServer {
                             handle_command,
                             heartbeat,
                             on_accept,
-                            |cmd: &EngineCommand| cmd.command_id(),
                         ).await;
                         if let Err(err) = result {
                             warn!(error = %err, "engine IPC session terminated");

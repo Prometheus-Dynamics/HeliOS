@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use lib_ipc::frame::MessageKind;
 use lib_ipc::protocol::ControlEvent;
 use lib_ipc::server::ServerEvent;
-use lib_ipc::types::{CommandId, Timestamp};
+use lib_ipc::types::{CommandId, RequestIdentity, Timestamp};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "tracing")]
@@ -236,6 +236,12 @@ impl SensorCommand {
     }
 }
 
+impl RequestIdentity for SensorCommand {
+    fn request_id(&self) -> CommandId {
+        self.command_id()
+    }
+}
+
 impl ServerEvent for SensorEvent {
     fn message_kind(&self) -> MessageKind {
         match self {
@@ -255,10 +261,6 @@ impl ServerEvent for SensorEvent {
             | SensorEvent::LightingState { .. }
             | SensorEvent::Unknown { .. } => MessageKind::Event,
         }
-    }
-
-    fn as_control(&self) -> Option<&ControlEvent> {
-        None
     }
 }
 

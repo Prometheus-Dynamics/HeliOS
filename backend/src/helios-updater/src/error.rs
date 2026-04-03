@@ -46,8 +46,11 @@ impl From<lib_ipc::server::ServerHandshakeError> for Error {
             lib_ipc::server::ServerHandshakeError::Encode(err) => Self::InvalidState(format!("handshake serialization error: {err}")),
             lib_ipc::server::ServerHandshakeError::Decode(err) => Self::InvalidState(format!("handshake deserialization error: {err}")),
             lib_ipc::server::ServerHandshakeError::Closed => Self::InvalidState("handshake stream closed".into()),
-            lib_ipc::server::ServerHandshakeError::UnexpectedMessage { expected, received } => {
-                Self::InvalidState(format!("unexpected handshake message kind (expected {expected:?}, received {received:?})"))
+            lib_ipc::server::ServerHandshakeError::UnexpectedStream { expected, received } => {
+                Self::InvalidState(format!("unexpected handshake stream kind (expected {expected:?}, received {received:?})"))
+            }
+            lib_ipc::server::ServerHandshakeError::WrongService { expected, received } => {
+                Self::InvalidState(format!("unexpected handshake service kind (expected {expected:?}, received {received:?})"))
             }
         }
     }
@@ -59,9 +62,12 @@ impl From<lib_ipc::server::ServerTransportError> for Error {
             lib_ipc::server::ServerTransportError::Io(err) => Self::Io(err),
             lib_ipc::server::ServerTransportError::Encode(err) => Self::InvalidState(format!("transport serialization error: {err}")),
             lib_ipc::server::ServerTransportError::Decode(err) => Self::InvalidState(format!("transport deserialization error: {err}")),
-            lib_ipc::server::ServerTransportError::Tagged(err) => Self::InvalidState(format!("transport tagged payload error: {err}")),
-            lib_ipc::server::ServerTransportError::MissingControlPayload => Self::InvalidState("missing control payload for control message".into()),
-            lib_ipc::server::ServerTransportError::InvalidEventKind(kind) => Self::InvalidState(format!("invalid outgoing event kind: {kind:?}")),
+            lib_ipc::server::ServerTransportError::UnexpectedStream { expected, received } => {
+                Self::InvalidState(format!("unexpected transport stream kind (expected {expected:?}, received {received:?})"))
+            }
+            lib_ipc::server::ServerTransportError::WrongService { expected, received } => {
+                Self::InvalidState(format!("unexpected transport service kind (expected {expected:?}, received {received:?})"))
+            }
         }
     }
 }

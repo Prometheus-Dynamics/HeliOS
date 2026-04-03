@@ -6,7 +6,6 @@ use async_trait::async_trait;
 use chrono::Utc;
 use lib_ipc::protocol::ControlEvent;
 use tokio::fs;
-use tokio::sync::Mutex;
 use tokio::time::{Instant, sleep, timeout};
 use url::Url;
 use uuid::Uuid;
@@ -14,6 +13,9 @@ use uuid::Uuid;
 use crate::client::{CommandId, UpdaterClient, UpdaterClientConfig, UpdaterSession};
 use crate::ipc::{MaintenanceWindow, PreflightReport, UpdateStage, UpdateState, UpdaterCommand, UpdaterEvent};
 use crate::{ManifestArtifact, ReleaseManifest, ReleaseManifestMetadata};
+
+#[cfg(test)]
+use tokio::sync::Mutex;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpdateArtifactKind {
@@ -294,19 +296,15 @@ where
 
 pub struct IpcUpdateCoreBackend {
     client: Arc<UpdaterClient>,
-    sessions: Mutex<Vec<UpdaterSession>>,
 }
 
 impl IpcUpdateCoreBackend {
     pub fn new(config: UpdaterClientConfig) -> Result<Self, UpdateCoreError> {
         let client = Arc::new(UpdaterClient::new(config).map_err(|err| UpdateCoreError::new(err.to_string()))?);
-        Ok(Self { client, sessions: Mutex::new(Vec::new()) })
+        Ok(Self { client })
     }
 
     async fn checkout_session(&self) -> Result<UpdaterSession, UpdateCoreError> {
-        if let Some(session) = self.sessions.lock().await.pop() {
-            return Ok(session);
-        }
         match timeout(Duration::from_secs(5), self.client.handshake()).await {
             Ok(result) => result.map_err(|err| UpdateCoreError::new(err.to_string())),
             Err(_) => Err(UpdateCoreError::new("updater handshake timed out")),
@@ -314,11 +312,7 @@ impl IpcUpdateCoreBackend {
     }
 
     async fn recycle_session(&self, session: UpdaterSession) {
-        const MAX_SESSIONS: usize = 4;
-        let mut guard = self.sessions.lock().await;
-        if guard.len() < MAX_SESSIONS {
-            guard.push(session);
-        }
+        drop(session);
     }
 
     async fn send_command_wait_ack(&self, command: UpdaterCommand) -> Result<(), UpdateCoreError> {
