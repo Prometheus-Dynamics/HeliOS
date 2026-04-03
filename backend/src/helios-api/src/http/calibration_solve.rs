@@ -143,7 +143,7 @@ pub async fn solve_calibration(State(state): State<AppState>, Json(payload): Jso
             marker_size: board.marker_size,
             dictionary: board.dictionary.as_ref().map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
         },
-        graph: payload.graph.map(JsonWire),
+        graph: payload.graph.map(JsonWire::from),
         graph_id: payload.graph_id,
         graph_template_id: if explicit_graph { payload.graph_template_id } else { Some(CALIBRATION_TEMPLATE_ID.to_string()) },
         detections_port: payload.detections_port,

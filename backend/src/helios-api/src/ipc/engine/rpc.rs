@@ -216,13 +216,13 @@ impl EngineConnection {
 
     pub async fn solve_localization_event(&self, request: LocalizationSolveRequest) -> Result<EngineEvent, lib_ipc::client::ClientTransportError> {
         let request =
-            serde_json::to_value(request).map(JsonWire).map_err(|err| lib_ipc::client::ClientTransportError::Io(io::Error::other(format!("failed to encode localization request: {err}"))))?;
+            serde_json::to_value(request).map(JsonWire::from).map_err(|err| lib_ipc::client::ClientTransportError::Io(io::Error::other(format!("failed to encode localization request: {err}"))))?;
         self.request(|command_id| EngineCommand::SolveLocalization { command_id, request }, ExpectedEvent::LocalizationSolved, "solve_localization", localization_solve_timeout()).await
     }
 
     pub async fn localization_pipeline_status_event(&self, request: LocalizationPipelineStatusRequest) -> Result<EngineEvent, lib_ipc::client::ClientTransportError> {
         let request = serde_json::to_value(request)
-            .map(JsonWire)
+            .map(JsonWire::from)
             .map_err(|err| lib_ipc::client::ClientTransportError::Io(io::Error::other(format!("failed to encode localization pipeline status request: {err}"))))?;
         self.request(
             |command_id| EngineCommand::GetLocalizationPipelineStatus { command_id, request },
@@ -235,7 +235,7 @@ impl EngineConnection {
 
     pub async fn localization_pipeline_outputs_event(&self, request: LocalizationPipelineGraphRequest) -> Result<EngineEvent, lib_ipc::client::ClientTransportError> {
         let request = serde_json::to_value(request)
-            .map(JsonWire)
+            .map(JsonWire::from)
             .map_err(|err| lib_ipc::client::ClientTransportError::Io(io::Error::other(format!("failed to encode localization pipeline outputs request: {err}"))))?;
         self.request(
             |command_id| EngineCommand::ListLocalizationPipelineOutputs { command_id, request },
@@ -248,7 +248,7 @@ impl EngineConnection {
 
     pub async fn localization_pipeline_output_sample_event(&self, request: LocalizationPipelineSampleRequest) -> Result<EngineEvent, lib_ipc::client::ClientTransportError> {
         let request = serde_json::to_value(request)
-            .map(JsonWire)
+            .map(JsonWire::from)
             .map_err(|err| lib_ipc::client::ClientTransportError::Io(io::Error::other(format!("failed to encode localization pipeline sample request: {err}"))))?;
         self.request(
             |command_id| EngineCommand::SampleLocalizationPipelineOutput { command_id, request },

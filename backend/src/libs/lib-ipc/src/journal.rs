@@ -9,8 +9,6 @@ use crate::archive;
 use crate::types::{CommandId, JournalMetadata, RequestIdentity};
 use crate::wire::{SCHEMA_VERSION, ServiceKind};
 use chrono::{DateTime, Utc};
-use serde::{Serialize, de::DeserializeOwned};
-
 const HEADER_LEN: usize = 24;
 const DEFAULT_MAX_JOURNAL_BYTES: u64 = 8 * 1024 * 1024;
 const MIN_MAX_JOURNAL_BYTES: u64 = 64 * 1024;
@@ -75,10 +73,10 @@ impl<T> Journal<T> {
 
     pub fn append(&self, payload: &T) -> io::Result<JournalEntry<T>>
     where
-        T: Clone + Serialize + DeserializeOwned + RequestIdentity,
+        T: Clone + archive::TransportEncode + RequestIdentity,
     {
         let request_id = payload.request_id();
-        let encoded = archive::encode_serde(payload).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+        let encoded = archive::encode_to_vec(payload).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
         self.append_encoded(payload.clone(), request_id, encoded)
     }
 
@@ -160,7 +158,8 @@ impl<T> Journal<T> {
 
     pub fn replay(&self) -> io::Result<Vec<JournalEntry<T>>>
     where
-        T: Serialize + DeserializeOwned + RequestIdentity,
+        T: rkyv::Archive + RequestIdentity,
+        T::Archived: for<'a> rkyv::bytecheck::CheckBytes<archive::DecodeValidator<'a>> + rkyv::Deserialize<T, archive::DecodeStrategy>,
     {
         let mut file = File::open(&self.path)?;
         let mut entries = Vec::new();
@@ -190,7 +189,7 @@ impl<T> Journal<T> {
             let len = u32::from_le_bytes(header[20..24].try_into().expect("journal payload len slice")) as usize;
             let mut payload_bytes = vec![0u8; len];
             file.read_exact(&mut payload_bytes)?;
-            let payload = archive::decode_serde(&payload_bytes).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+            let payload = archive::decode_from_slice(&payload_bytes).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
 
             let next_offset = offset + HEADER_LEN as u64 + len as u64;
             entries.push(JournalEntry { offset, next_offset, request_id, payload });
@@ -248,11 +247,12 @@ pub type JournalReader<T> = Journal<T>;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
     use serde::{Deserialize, Serialize};
     use tempfile::tempdir;
     use uuid::Uuid;
 
-    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
     enum TestCommand {
         ApplyInput { command_id: CommandId, pipeline_id: Uuid, port: String, value: i64 },
         Heartbeat { command_id: CommandId, sequence: u64 },

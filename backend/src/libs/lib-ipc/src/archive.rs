@@ -12,12 +12,17 @@ use rkyv::{
     with::{ArchiveWith, DeserializeWith, SerializeWith},
 };
 use serde::{Serialize, de::DeserializeOwned};
-
 pub type Result<T> = core::result::Result<T, ArchiveError>;
+pub type DecodeStrategy = Strategy<Pool, ArchiveError>;
+pub type DecodeValidator<'a> = HighValidator<'a, ArchiveError>;
+
+pub trait TransportEncode: Sized + for<'a> RkyvSerialize<HighSerializer<AlignedVec, ArenaHandle<'a>, ArchiveError>> {}
+
+impl<T> TransportEncode for T where T: Sized + for<'a> RkyvSerialize<HighSerializer<AlignedVec, ArenaHandle<'a>, ArchiveError>> {}
 
 pub fn encode_to_vec<T>(value: &T) -> Result<Vec<u8>>
 where
-    T: for<'a> RkyvSerialize<HighSerializer<AlignedVec, ArenaHandle<'a>, ArchiveError>>,
+    T: TransportEncode,
 {
     let bytes = rkyv::to_bytes::<ArchiveError>(value)?;
     Ok(bytes.as_ref().to_vec())
@@ -26,7 +31,7 @@ where
 pub fn decode_from_slice<T>(payload: &[u8]) -> Result<T>
 where
     T: Archive,
-    T::Archived: for<'a> CheckBytes<HighValidator<'a, ArchiveError>> + RkyvDeserialize<T, Strategy<Pool, ArchiveError>>,
+    T::Archived: for<'a> CheckBytes<DecodeValidator<'a>> + RkyvDeserialize<T, DecodeStrategy>,
 {
     if payload.is_empty() || payload.as_ptr().align_offset(align_of::<T::Archived>()) == 0 {
         return rkyv::from_bytes::<T, ArchiveError>(payload);
@@ -37,14 +42,6 @@ where
     let mut aligned = AlignedVec::<16>::with_capacity(payload.len());
     aligned.extend_from_slice(payload);
     rkyv::from_bytes::<T, ArchiveError>(&aligned)
-}
-
-pub fn encode_serde<T: Serialize>(value: &T) -> Result<Vec<u8>> {
-    serde_json::to_vec(value).map_err(ArchiveError::new)
-}
-
-pub fn decode_serde<T: DeserializeOwned>(payload: &[u8]) -> Result<T> {
-    serde_json::from_slice(payload).map_err(ArchiveError::new)
 }
 
 pub mod with {

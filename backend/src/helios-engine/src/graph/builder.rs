@@ -86,13 +86,13 @@ fn resolve_graph_json(binding: &StreamPipelineBinding) -> Result<Value, GraphErr
         return Ok(builtin_raw_stream_graph_json());
     }
     let mut graph_json = if let Some(graph) = binding.pipeline_graph.as_ref() {
-        graph.as_value().clone()
+        graph.as_value()
     } else {
         pipelines::load_pipeline_graph_json(binding.pipeline_id).map_err(|err| GraphError::Build(format!("pipeline {} missing graph payload: {err}", binding.pipeline_id)))?
     };
 
     if let Some(patch_wire) = binding.pipeline_patch.as_ref() {
-        let patch: GraphPatch = serde_json::from_value(patch_wire.as_value().clone()).map_err(|err| GraphError::Build(format!("pipeline {} patch invalid: {err}", binding.pipeline_id)))?;
+        let patch: GraphPatch = serde_json::from_value(patch_wire.as_value()).map_err(|err| GraphError::Build(format!("pipeline {} patch invalid: {err}", binding.pipeline_id)))?;
         let mut graph: Graph = serde_json::from_value(graph_json.clone()).map_err(|err| GraphError::Build(format!("pipeline {} graph invalid: {err}", binding.pipeline_id)))?;
         patch.apply_to_graph(&mut graph);
         graph_json = serde_json::to_value(graph).map_err(|err| GraphError::Build(format!("pipeline {} patch encode failed: {err}", binding.pipeline_id)))?;
@@ -251,7 +251,7 @@ fn manifest_host_inputs_for_runtime(manifest: &ResolvedStreamConfig) -> BTreeMap
         if key.is_empty() {
             continue;
         }
-        out.insert(key, Some(raw_value.as_value().clone()));
+        out.insert(key, Some(raw_value.as_value()));
     }
     out
 }

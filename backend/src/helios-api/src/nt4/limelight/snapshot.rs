@@ -142,7 +142,7 @@ async fn fetch_stream_metrics(handles: &Arc<IpcHandles>, stream_id: uuid::Uuid) 
 
 async fn fetch_graph_output_sample(handles: &Arc<IpcHandles>, stream_id: uuid::Uuid, port: &str) -> Option<serde_json::Value> {
     match handles.engine.get_graph_output_sample_event(stream_id, port.to_string()).await {
-        Ok(EngineEvent::GraphOutputSample { value, .. }) => Some(value.0),
+        Ok(EngineEvent::GraphOutputSample { value, .. }) => Some(value.into()),
         _ => None,
     }
 }

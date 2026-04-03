@@ -504,7 +504,7 @@ impl GraphHandle {
                 let key = name.to_ascii_lowercase();
                 let ty = types.get(&key).cloned();
                 let previewable = ty.as_ref().map(is_image_payload).unwrap_or(false);
-                let ty = ty.and_then(|expr| serde_json::to_value(expr).ok()).map(crate::ipc::JsonWire);
+                let ty = ty.and_then(|expr| serde_json::to_value(expr).ok()).map(crate::ipc::JsonWire::from);
                 crate::ipc::GraphOutputPortDescriptor { name, ty, previewable }
             })
             .collect()

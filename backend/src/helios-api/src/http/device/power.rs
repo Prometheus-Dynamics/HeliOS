@@ -68,7 +68,7 @@ pub async fn power_status(State(state): State<AppState>) -> ApiResult<impl IntoR
 
 pub(crate) fn power_status_from_snapshot(values: &SensorSnapshot) -> PowerStatusPayload {
     let mut status = PowerStatusPayload::default();
-    let Some(JsonValue::Object(map)) = values.get(&SensorKind::Power).and_then(|data| data.to_value().ok()) else {
+    let Some(JsonValue::Object(map)) = values.get(&SensorKind::Power).map(|data| data.to_value()) else {
         return status;
     };
 

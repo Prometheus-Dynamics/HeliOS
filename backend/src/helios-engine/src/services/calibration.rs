@@ -765,7 +765,7 @@ fn load_graph_json(request: &CalibrationSolveRequest) -> Result<JsonValue, Calib
     let max_board_id = board_marker_capacity(&request.board).saturating_sub(1);
 
     if let Some(graph) = request.graph.as_ref() {
-        let mut graph = graph.0.clone();
+        let mut graph = graph.as_value();
         if let Some(dictionary) = dictionary_override.as_deref() {
             patch_dictionary_const(&mut graph, dictionary);
         }

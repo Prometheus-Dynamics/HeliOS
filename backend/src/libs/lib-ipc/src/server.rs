@@ -4,7 +4,6 @@ use std::io;
 use std::time::Duration;
 
 use futures::future::{self, BoxFuture};
-use serde::{Serialize, de::DeserializeOwned};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::broadcast;
 use tokio::time::{Instant, MissedTickBehavior, interval_at};
@@ -196,8 +195,8 @@ where
 }
 
 pub trait BroadcastHandler {
-    type Request: Serialize + DeserializeOwned + RequestIdentity + Send + 'static;
-    type Event: Serialize + DeserializeOwned + Clone + Send + 'static;
+    type Request: RequestIdentity + Send + 'static;
+    type Event: Clone + Send + 'static;
     type Error: RetryableError + std::error::Error + fmt::Display + Send + Sync + 'static;
 
     fn server_config(&self) -> ServerConfig;
@@ -255,7 +254,8 @@ where
 
     pub async fn next_message<Request>(&mut self) -> Result<Option<ServerMessage<Request>>, ServerTransportError>
     where
-        Request: Serialize + DeserializeOwned + RequestIdentity,
+        Request: RequestIdentity + rkyv::Archive,
+        Request::Archived: for<'a> rkyv::bytecheck::CheckBytes<crate::archive::DecodeValidator<'a>> + rkyv::Deserialize<Request, crate::archive::DecodeStrategy>,
     {
         match self.next_frame().await? {
             Some(frame) => match frame.header.stream {
@@ -275,7 +275,7 @@ where
 
     pub async fn send_reply<Event>(&mut self, request_id: CommandId, event: &Event) -> Result<(), ServerTransportError>
     where
-        Event: Serialize + DeserializeOwned,
+        Event: crate::archive::TransportEncode,
     {
         let frame = Frame::encode_payload(self.service, StreamKind::Reply, request_id, FrameFlags::empty(), event).map_err(ServerTransportError::Encode)?;
         frame.write_to(&mut self.stream).await.map_err(ServerTransportError::Io)
@@ -283,7 +283,7 @@ where
 
     pub async fn send_event<Event>(&mut self, event: &Event) -> Result<(), ServerTransportError>
     where
-        Event: Serialize + DeserializeOwned,
+        Event: crate::archive::TransportEncode,
     {
         let frame = Frame::encode_payload(self.service, StreamKind::Event, CommandId::new(), FrameFlags::empty(), event).map_err(ServerTransportError::Encode)?;
         frame.write_to(&mut self.stream).await.map_err(ServerTransportError::Io)
@@ -301,8 +301,9 @@ where
         mut handle_other: HandleOther,
     ) -> Result<(), ServerLoopError<E>>
     where
-        Request: Serialize + DeserializeOwned + RequestIdentity + Send + 'static,
-        Event: Serialize + DeserializeOwned + Clone + Send + 'static,
+        Request: RequestIdentity + Send + 'static + rkyv::Archive,
+        Request::Archived: for<'a> rkyv::bytecheck::CheckBytes<crate::archive::DecodeValidator<'a>> + rkyv::Deserialize<Request, crate::archive::DecodeStrategy>,
+        Event: crate::archive::TransportEncode + Clone + Send + 'static,
         E: RetryableError + fmt::Display + std::error::Error + 'static,
         HandleRequest: FnMut(Request) -> RequestFuture,
         RequestFuture: Future<Output = Result<Option<Event>, E>> + Send,
@@ -418,6 +419,9 @@ pub async fn run_broadcast<S, H>(stream: S, shutdown: CancellationToken, handler
 where
     S: AsyncRead + AsyncWrite + Unpin,
     H: BroadcastHandler,
+    H::Request: rkyv::Archive,
+    <H::Request as rkyv::Archive>::Archived: for<'a> rkyv::bytecheck::CheckBytes<crate::archive::DecodeValidator<'a>> + rkyv::Deserialize<H::Request, crate::archive::DecodeStrategy>,
+    H::Event: crate::archive::TransportEncode,
 {
     let config = handler.server_config();
     let heartbeat_interval = config.heartbeat_interval();
@@ -460,8 +464,9 @@ pub async fn run_snapshot_server<S, Request, Event, Error, Subscribe, Snapshot, 
 ) -> Result<(), ServerLoopError<Error>>
 where
     S: AsyncRead + AsyncWrite + Unpin,
-    Request: Serialize + DeserializeOwned + RequestIdentity + Send + 'static,
-    Event: Serialize + DeserializeOwned + Clone + Send + 'static,
+    Request: RequestIdentity + Send + 'static + rkyv::Archive,
+    Request::Archived: for<'a> rkyv::bytecheck::CheckBytes<crate::archive::DecodeValidator<'a>> + rkyv::Deserialize<Request, crate::archive::DecodeStrategy>,
+    Event: crate::archive::TransportEncode + Clone + Send + 'static,
     Error: RetryableError + std::error::Error + fmt::Display + Send + Sync + 'static,
     Subscribe: FnMut() -> broadcast::Receiver<Event>,
     Snapshot: FnMut() -> SnapshotFuture,

@@ -113,7 +113,7 @@ async fn handle_command_inner(service: &Arc<SensorsService>, command: SensorComm
         }
         SensorCommand::SnapshotTyped { command_id, scope } => {
             let values = service.snapshot_typed(&scope).await?;
-            service.publish_event(SensorEvent::SnapshotTyped { command_id: Some(command_id), scope, values });
+            service.publish_event(SensorEvent::SnapshotTyped { command_id: Some(command_id), scope, values: values.into() });
         }
         SensorCommand::Update { command_id, scope, sensor, payload } => {
             service.update_sensor(&scope, sensor, payload).await?;
@@ -125,7 +125,7 @@ async fn handle_command_inner(service: &Arc<SensorsService>, command: SensorComm
             service.publish_snapshot(None, &scope).await;
             if matches!(scope, crate::dto::SensorScope::Device) {
                 let lighting = service.lighting_state().await;
-                service.publish_event(SensorEvent::LightingState { command_id: None, state: lighting });
+                service.publish_event(SensorEvent::LightingState { command_id: None, state: lighting.into() });
             }
         }
         SensorCommand::Unsubscribe { command_id: _, scope } => match service.unsubscribe_scope(&scope).await? {
@@ -157,24 +157,24 @@ async fn handle_command_inner(service: &Arc<SensorsService>, command: SensorComm
             service.publish_event(SensorEvent::I2cInventory { command_id, inventory });
         }
         SensorCommand::Lighting { command_id, command } => {
-            service.lighting_command(command).await?;
+            service.lighting_command(command.into()).await?;
             service.publish_ack(command_id);
         }
         SensorCommand::LightingState { command_id } => {
             let state = service.lighting_state().await;
-            service.publish_event(SensorEvent::LightingState { command_id: Some(command_id), state });
+            service.publish_event(SensorEvent::LightingState { command_id: Some(command_id), state: state.into() });
             service.publish_ack(command_id);
         }
         SensorCommand::FanStatus { command_id } => {
             let status = service.fan_status().await?;
-            service.publish_event(SensorEvent::FanStatus { command_id, status });
+            service.publish_event(SensorEvent::FanStatus { command_id, status: status.into() });
         }
         SensorCommand::FanConfig { command_id } => {
             let config = service.fan_config().await?;
-            service.publish_event(SensorEvent::FanConfig { command_id, config });
+            service.publish_event(SensorEvent::FanConfig { command_id, config: config.into() });
         }
         SensorCommand::UpdateFanConfig { command_id, config } => {
-            service.update_fan_config(config).await?;
+            service.update_fan_config(config.into()).await?;
             service.publish_ack(command_id);
         }
     }

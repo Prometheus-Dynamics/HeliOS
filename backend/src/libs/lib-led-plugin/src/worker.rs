@@ -288,7 +288,7 @@ fn push_unique(paths: &mut Vec<PathBuf>, candidate: PathBuf) {
 
 async fn send_lighting_command(conn: &mut Connection, command: LightingCommand) -> Result<(), String> {
     let command_id = CommandId::new();
-    let cmd = SensorCommand::Lighting { command_id, command };
+    let cmd = SensorCommand::Lighting { command_id, command: command.into() };
     conn.session.send_command(conn.client.journal(), &cmd).await.map_err(|e| e.to_string())?;
 
     let deadline = Instant::now() + COMMAND_TIMEOUT;

@@ -120,11 +120,11 @@ impl ImuSnapshot {
 }
 
 fn snapshot_json(values: &SensorSnapshot, kind: &SensorKind) -> Option<JsonValue> {
-    values.get(kind).and_then(|data| data.to_value().ok())
+    values.get(kind).map(|data| data.to_value())
 }
 
 fn parse_axes(value: Option<&JsonData>) -> Option<ImuAxesPayload> {
-    let value = value?.to_value().ok()?;
+    let value = value?.to_value();
     match value {
         JsonValue::Array(values) if values.len() >= 3 => Some(ImuAxesPayload { x: as_f64(&values[0])?, y: as_f64(&values[1])?, z: as_f64(&values[2])? }),
         _ => None,

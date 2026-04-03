@@ -14,7 +14,7 @@ impl SensorsService {
     pub async fn lighting_command(&self, command: LightingCommand) -> Result<LightingRuntimeState> {
         self.runtimes.lighting_command(command.clone()).await?;
         let state = self.update_lighting_state(command).await;
-        self.publish_event(SensorEvent::LightingState { command_id: None, state: state.clone() });
+        self.publish_event(SensorEvent::LightingState { command_id: None, state: state.clone().into() });
         Ok(state)
     }
 

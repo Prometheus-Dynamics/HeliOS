@@ -127,7 +127,7 @@ impl EngineRuntime {
                 };
                 match solve_localization_request(request).await {
                     Ok(response) => match serde_json::to_value(response) {
-                        Ok(response) => EngineEvent::LocalizationSolved { command_id, response: crate::ipc::JsonWire(response) },
+                        Ok(response) => EngineEvent::LocalizationSolved { command_id, response: crate::ipc::JsonWire::from(response) },
                         Err(err) => EngineEvent::Nack { command_id, code: EngineErrorCode::Internal, reason: format!("failed to encode localization solve response: {err}"), retryable: false },
                     },
                     Err(reason) => EngineEvent::Nack { command_id, code: EngineErrorCode::InvalidInput, reason, retryable: false },
@@ -142,7 +142,7 @@ impl EngineRuntime {
                 };
                 let response = crate::localization::pipeline::status(&request.profile_id).await;
                 match serde_json::to_value(response) {
-                    Ok(response) => EngineEvent::LocalizationPipelineStatus { command_id, response: crate::ipc::JsonWire(response) },
+                    Ok(response) => EngineEvent::LocalizationPipelineStatus { command_id, response: crate::ipc::JsonWire::from(response) },
                     Err(err) => EngineEvent::Nack { command_id, code: EngineErrorCode::Internal, reason: format!("failed to encode localization pipeline status: {err}"), retryable: false },
                 }
             }
@@ -170,7 +170,7 @@ impl EngineRuntime {
                 let fetcher = localization_source_fetcher_from_values(request.source_values.clone());
                 match crate::localization::pipeline::sample_output(&fetcher, &request.profile, &request.sources, &graph, &request.output_key).await {
                     Ok(response) => match serde_json::to_value(response) {
-                        Ok(response) => EngineEvent::LocalizationPipelineOutputSample { command_id, response: crate::ipc::JsonWire(response) },
+                        Ok(response) => EngineEvent::LocalizationPipelineOutputSample { command_id, response: crate::ipc::JsonWire::from(response) },
                         Err(err) => EngineEvent::Nack { command_id, code: EngineErrorCode::Internal, reason: format!("failed to encode localization pipeline sample: {err}"), retryable: false },
                     },
                     Err(reason) => EngineEvent::Nack { command_id, code: localization_pipeline_error_code(&reason), reason, retryable: false },
@@ -249,7 +249,7 @@ impl EngineRuntime {
                 Err(err) => nack_from_error(command_id, err),
             },
             EngineCommand::SetPipelineInputs { command_id, stream_id, pipeline_id, inputs } => {
-                let inputs = inputs.into_iter().map(|(key, value)| (key, value.map(|wire| wire.0))).collect();
+                let inputs = inputs.into_iter().map(|(key, value)| (key, value.map(Into::into))).collect();
                 match self.services.set_pipeline_inputs(stream_id, pipeline_id, inputs).await {
                     Ok(_) => EngineEvent::Ack { command_id, ok: true },
                     Err(err) => nack_from_error(command_id, err),
@@ -260,7 +260,7 @@ impl EngineRuntime {
                 Err(err) => nack_from_error(command_id, err),
             },
             EngineCommand::GetGraphOutputSample { command_id, stream_id, port, fresh } => match self.services.get_graph_output_sample(stream_id, port.clone(), fresh).await {
-                Ok(value) => EngineEvent::GraphOutputSample { command_id, stream_id, port, value: crate::ipc::JsonWire(value) },
+                Ok(value) => EngineEvent::GraphOutputSample { command_id, stream_id, port, value: crate::ipc::JsonWire::from(value) },
                 Err(err) => nack_from_error(command_id, err),
             },
             EngineCommand::SetPipelineLayout { command_id, stream_id, layout } => match self.services.set_pipeline_layout(stream_id, layout).await {
@@ -474,9 +474,9 @@ pub fn build_node_registry_snapshot() -> Result<crate::ipc::NodeRegistrySnapshot
             .into_iter()
             .map(|p| crate::ipc::NodeRegistryPort {
                 name: p.name,
-                ty: crate::ipc::JsonWire(serde_json::to_value(p.ty).unwrap_or(serde_json::Value::Null)),
+                ty: crate::ipc::JsonWire::from(serde_json::to_value(p.ty).unwrap_or(serde_json::Value::Null)),
                 source: p.source,
-                const_value: p.const_value.map(|value| crate::ipc::JsonWire(serde_json::to_value(value).unwrap_or(serde_json::Value::Null))),
+                const_value: p.const_value.map(|value| crate::ipc::JsonWire::from(serde_json::to_value(value).unwrap_or(serde_json::Value::Null))),
             })
             .collect();
         let output_ports: Vec<crate::ipc::NodeRegistryPort> = desc
@@ -484,15 +484,19 @@ pub fn build_node_registry_snapshot() -> Result<crate::ipc::NodeRegistrySnapshot
             .into_iter()
             .map(|p| crate::ipc::NodeRegistryPort {
                 name: p.name,
-                ty: crate::ipc::JsonWire(serde_json::to_value(p.ty).unwrap_or(serde_json::Value::Null)),
+                ty: crate::ipc::JsonWire::from(serde_json::to_value(p.ty).unwrap_or(serde_json::Value::Null)),
                 source: p.source,
-                const_value: p.const_value.map(|value| crate::ipc::JsonWire(serde_json::to_value(value).unwrap_or(serde_json::Value::Null))),
+                const_value: p.const_value.map(|value| crate::ipc::JsonWire::from(serde_json::to_value(value).unwrap_or(serde_json::Value::Null))),
             })
             .collect();
         let fanin_inputs: Vec<crate::ipc::NodeRegistryFanInPort> = desc
             .fanin_inputs
             .into_iter()
-            .map(|fanin| crate::ipc::NodeRegistryFanInPort { prefix: fanin.prefix, start: fanin.start, ty: crate::ipc::JsonWire(serde_json::to_value(fanin.ty).unwrap_or(serde_json::Value::Null)) })
+            .map(|fanin| crate::ipc::NodeRegistryFanInPort {
+                prefix: fanin.prefix,
+                start: fanin.start,
+                ty: crate::ipc::JsonWire::from(serde_json::to_value(fanin.ty).unwrap_or(serde_json::Value::Null)),
+            })
             .collect();
         let inputs = input_ports.iter().map(|p| p.name.clone()).collect();
         let outputs = output_ports.iter().map(|p| p.name.clone()).collect();
@@ -509,7 +513,7 @@ pub fn build_node_registry_snapshot() -> Result<crate::ipc::NodeRegistrySnapshot
             .collect();
         let mut metadata = std::collections::BTreeMap::new();
         for (key, value) in desc.metadata {
-            metadata.insert(key, crate::ipc::JsonWire(serde_json::to_value(value).unwrap_or(serde_json::Value::Null)));
+            metadata.insert(key, crate::ipc::JsonWire::from(serde_json::to_value(value).unwrap_or(serde_json::Value::Null)));
         }
         nodes.push(crate::ipc::NodeRegistryNode {
             id: id.0,
@@ -530,7 +534,7 @@ pub fn build_node_registry_snapshot() -> Result<crate::ipc::NodeRegistrySnapshot
 
     let types = daedalus::data::typing::snapshot_by_rust_name()
         .into_iter()
-        .map(|entry| crate::ipc::TypeRegistryEntry { rust: entry.rust, ty: crate::ipc::JsonWire(serde_json::to_value(entry.expr).unwrap_or(serde_json::Value::Null)) })
+        .map(|entry| crate::ipc::TypeRegistryEntry { rust: entry.rust, ty: crate::ipc::JsonWire::from(serde_json::to_value(entry.expr).unwrap_or(serde_json::Value::Null)) })
         .collect();
 
     let plugin_compatibility = crate::daedalus_registry::plugin_diagnostics();

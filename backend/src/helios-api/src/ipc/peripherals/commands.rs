@@ -52,7 +52,7 @@ impl SensorsConnection {
     pub async fn sensor_snapshot_typed(&self, scope: SensorScope) -> Result<Result<helios_peripherals::dto::SensorSnapshotTyped, String>, ClientTransportError> {
         let command_id = command_id_from_context("snapshot_typed");
         self.run_command(SensorCommand::SnapshotTyped { command_id, scope: scope.clone() }, |event, command_id| match event {
-            SensorEvent::SnapshotTyped { command_id: Some(event_id), scope: event_scope, values } if event_id == command_id && event_scope == scope => Some(Ok(values)),
+            SensorEvent::SnapshotTyped { command_id: Some(event_id), scope: event_scope, values } if event_id == command_id && event_scope == scope => Some(Ok(values.into())),
             SensorEvent::Nack { command_id: event_id, reason, .. } if event_id == command_id => Some(Err(reason)),
             _ => None,
         })
@@ -62,7 +62,7 @@ impl SensorsConnection {
     pub async fn fan_status(&self) -> Result<Result<PeripheralFanStatus, String>, ClientTransportError> {
         let command_id = command_id_from_context("fan_status");
         self.run_command(SensorCommand::FanStatus { command_id }, |event, command_id| match event {
-            SensorEvent::FanStatus { command_id: event_id, status } if event_id == command_id => Some(Ok(status)),
+            SensorEvent::FanStatus { command_id: event_id, status } if event_id == command_id => Some(Ok(status.into())),
             SensorEvent::Nack { command_id: event_id, reason, .. } if event_id == command_id => Some(Err(reason)),
             _ => None,
         })
@@ -72,7 +72,7 @@ impl SensorsConnection {
     pub async fn fan_config(&self) -> Result<Result<PeripheralFanConfig, String>, ClientTransportError> {
         let command_id = command_id_from_context("fan_config");
         self.run_command(SensorCommand::FanConfig { command_id }, |event, command_id| match event {
-            SensorEvent::FanConfig { command_id: event_id, config } if event_id == command_id => Some(Ok(config)),
+            SensorEvent::FanConfig { command_id: event_id, config } if event_id == command_id => Some(Ok(config.into())),
             SensorEvent::Nack { command_id: event_id, reason, .. } if event_id == command_id => Some(Err(reason)),
             _ => None,
         })
@@ -81,7 +81,7 @@ impl SensorsConnection {
 
     pub async fn update_fan_config(&self, config: PeripheralFanConfig) -> Result<Result<(), String>, ClientTransportError> {
         let command_id = command_id_from_context("update_fan_config");
-        self.run_command(SensorCommand::UpdateFanConfig { command_id, config }, |event, command_id| match event {
+        self.run_command(SensorCommand::UpdateFanConfig { command_id, config: config.into() }, |event, command_id| match event {
             SensorEvent::Ack { command_id: event_id, .. } if event_id == command_id => Some(Ok(())),
             SensorEvent::Nack { command_id: event_id, reason, .. } if event_id == command_id => Some(Err(reason)),
             _ => None,
@@ -101,7 +101,7 @@ impl SensorsConnection {
 
     pub async fn lighting_command(&self, command: LightingCommand) -> Result<Result<(), String>, ClientTransportError> {
         let command_id = command_id_from_context("lighting");
-        self.run_command(SensorCommand::Lighting { command_id, command }, |event, command_id| match event {
+        self.run_command(SensorCommand::Lighting { command_id, command: command.into() }, |event, command_id| match event {
             SensorEvent::Ack { command_id: event_id, .. } if event_id == command_id => Some(Ok(())),
             SensorEvent::Nack { command_id: event_id, reason, .. } if event_id == command_id => Some(Err(reason)),
             _ => None,
@@ -112,7 +112,7 @@ impl SensorsConnection {
     pub async fn lighting_state(&self) -> Result<Result<LightingRuntimeState, String>, ClientTransportError> {
         let command_id = command_id_from_context("lighting_state");
         self.run_command(SensorCommand::LightingState { command_id }, |event, command_id| match event {
-            SensorEvent::LightingState { command_id: Some(event_id), state } if event_id == command_id => Some(Ok(state)),
+            SensorEvent::LightingState { command_id: Some(event_id), state } if event_id == command_id => Some(Ok(state.into())),
             SensorEvent::Nack { command_id: event_id, reason, .. } if event_id == command_id => Some(Err(reason)),
             _ => None,
         })

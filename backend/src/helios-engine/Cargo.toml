@@ -67,6 +67,7 @@ futures = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json = { workspace = true, optional = true }
 serde_bytes = { workspace = true, optional = true }
+rkyv = { workspace = true }
 uuid = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }

@@ -128,7 +128,7 @@ pub(crate) async fn configure_sensor_alias(State(state): State<AppState>, Json(r
 }
 
 pub(crate) fn derive_lighting_status(inv: &helios_peripherals::dto::SensorInventory) -> LightingStatus {
-    let present = inv.sensors.iter().any(|sensor| sensor.metadata.as_ref().map(|metadata| metadata.json.to_lowercase().contains("lighting")).unwrap_or(false));
+    let present = inv.sensors.iter().any(|sensor| sensor.metadata.as_ref().map(|metadata| metadata.to_value().to_string().to_lowercase().contains("lighting")).unwrap_or(false));
     LightingStatus { present, last_error: None }
 }
 
@@ -151,7 +151,7 @@ fn map_sensor_descriptor(desc: &helios_peripherals::dto::SensorDescriptor) -> Op
     let info = desc
         .info
         .as_ref()
-        .and_then(|info| info.to_value().ok())
+        .map(|info| info.to_value())
         .and_then(|value| match value {
             Value::Object(map) => Some(map),
             _ => None,
@@ -160,7 +160,7 @@ fn map_sensor_descriptor(desc: &helios_peripherals::dto::SensorDescriptor) -> Op
     let metadata = desc
         .metadata
         .as_ref()
-        .and_then(|meta| meta.to_value().ok())
+        .map(|meta| meta.to_value())
         .and_then(|value| match value {
             Value::Object(map) => Some(map),
             _ => None,

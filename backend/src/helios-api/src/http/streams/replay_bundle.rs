@@ -417,7 +417,7 @@ pub async fn start_replay_bundle(State(state): State<AppState>, AxumPath(id): Ax
                     for port in &ports {
                         let res = state_for_tasks.engine.get_graph_output_sample_event(id, port.clone()).await;
                         if let Ok(EngineEvent::GraphOutputSample { value, .. }) = res {
-                            let v = value.0;
+                            let v: serde_json::Value = value.into();
                             let changed = match last.get(port) {
                                 Some(prev) => prev != &v,
                                 None => true,

@@ -1,9 +1,10 @@
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::types::{FeatureSet, ProtocolVersion, Timestamp};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct ClientHello {
     pub protocol: ProtocolVersion,
     pub client_name: String,
@@ -19,7 +20,7 @@ impl ClientHello {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct ServerHello {
     pub protocol: ProtocolVersion,
     pub server_name: String,
@@ -37,15 +38,16 @@ impl ServerHello {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct HandshakeReject {
     pub protocol: ProtocolVersion,
     pub reason: String,
+    #[rkyv(with = crate::archive::with::SerdeBytes)]
     pub retry_after: Option<Timestamp>,
     pub required_protocol: Option<ProtocolVersion>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum HandshakeResponse {
     Accepted(ServerHello),
     Rejected(HandshakeReject),

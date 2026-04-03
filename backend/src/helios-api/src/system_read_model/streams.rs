@@ -434,7 +434,7 @@ async fn fetch_stream_outputs_ports(state: &Arc<IpcHandles>, stream_id: uuid::Uu
 async fn fetch_stream_output_sample(state: &Arc<IpcHandles>, stream_id: uuid::Uuid, port: String) -> SharedStreamOutputSample {
     let timestamp_ms = chrono::Utc::now().timestamp_millis().max(0) as u64;
     match state.engine.get_graph_output_sample_event(stream_id, port.clone()).await {
-        Ok(EngineEvent::GraphOutputSample { value, .. }) => SharedStreamOutputSample { port, value: Some(value.0), error: None, timestamp_ms },
+        Ok(EngineEvent::GraphOutputSample { value, .. }) => SharedStreamOutputSample { port, value: Some(value.into()), error: None, timestamp_ms },
         Ok(EngineEvent::Nack { code, reason, .. }) => SharedStreamOutputSample { port, value: None, error: Some(format!("{code:?}: {reason}")), timestamp_ms },
         Ok(other) => SharedStreamOutputSample { port, value: None, error: Some(format!("unexpected engine response: {other:?}")), timestamp_ms },
         Err(err) => SharedStreamOutputSample { port, value: None, error: Some(err.to_string()), timestamp_ms },

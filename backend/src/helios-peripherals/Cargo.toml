@@ -11,6 +11,7 @@ dto = [
     "uuid",
     "lib-ipc",
     "derive_more",
+    "chrono",
     "lib-sensors",
     "lib-lighting",
 ]
@@ -65,6 +66,7 @@ clap = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
 lib-ai = { path = "../libs/lib-ai", default-features = false, features = ["engine", "backend-coral", "backend-tflite"], optional = true }
 serde_json = { workspace = true, optional = true }
+rkyv = { workspace = true }
 nix = { version = "0.31", features = ["fs"], optional = true }
 lib-sensors = { path = "../libs/lib-sensors", optional = true }
 lib-math = { path = "../libs/lib-math", optional = true }

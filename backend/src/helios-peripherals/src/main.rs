@@ -191,24 +191,26 @@ async fn print_inventory(config: &SensorsConfig) -> Result<(), Box<dyn std::erro
     println!("Detected {} sensors:", inventory.sensors.len());
     for sensor in &inventory.sensors {
         println!("- {} [{}]", sensor.backend, sensor.identifier);
-        if let Some(info) = sensor.info.as_ref()
-            && let Ok(info_value) = info.to_value()
-            && let Some(details) = json_value_to_map(&info_value)
-            && !details.is_empty()
-        {
-            println!("    info:");
-            for (key, value) in details {
-                println!("        {key}: {value}");
+        if let Some(info) = sensor.info.as_ref() {
+            let info_value = info.to_value();
+            if let Some(details) = json_value_to_map(&info_value)
+                && !details.is_empty()
+            {
+                println!("    info:");
+                for (key, value) in details {
+                    println!("        {key}: {value}");
+                }
             }
         }
-        if let Some(metadata) = sensor.metadata.as_ref()
-            && let Ok(metadata_value) = metadata.to_value()
-            && let Some(details) = json_value_to_map(&metadata_value)
-            && !details.is_empty()
-        {
-            println!("    metadata:");
-            for (key, value) in details {
-                println!("        {key}: {value}");
+        if let Some(metadata) = sensor.metadata.as_ref() {
+            let metadata_value = metadata.to_value();
+            if let Some(details) = json_value_to_map(&metadata_value)
+                && !details.is_empty()
+            {
+                println!("    metadata:");
+                for (key, value) in details {
+                    println!("        {key}: {value}");
+                }
             }
         }
     }

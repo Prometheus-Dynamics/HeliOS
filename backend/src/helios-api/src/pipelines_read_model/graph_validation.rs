@@ -214,7 +214,7 @@ pub(crate) async fn validate_graph_report(state: &AppState, graph: JsonValue, ac
 
 async fn validate_graph_report_via_helper(graph: JsonValue, active_features: Vec<String>, enable_lints: bool) -> Result<GraphValidationReport, GraphValidationRequestError> {
     let engine_bin = super::registry::registry_generator_binary();
-    let request = GraphValidationHelperRequest { graph: JsonWire(graph), active_features, enable_lints };
+    let request = GraphValidationHelperRequest { graph: JsonWire::from(graph), active_features, enable_lints };
     let payload = serde_json::to_vec(&request).map_err(|err| GraphValidationRequestError::Transport(helper_io_error(format!("encode graph validation request failed: {err}"))))?;
 
     let mut child = Command::new(&engine_bin)

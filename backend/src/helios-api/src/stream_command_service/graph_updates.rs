@@ -116,7 +116,7 @@ fn update_graph_binding(manifest: &mut helios_engine::ipc::StreamManifest, pipel
 fn update_graph_patch_binding(manifest: &mut helios_engine::ipc::StreamManifest, pipeline_id: Uuid, patch: serde_json::Value) {
     util::normalize_pipeline_manifest(manifest);
 
-    let patch = JsonWire(patch);
+    let patch = JsonWire::from(patch);
     let mut updated = false;
     for binding in &mut manifest.pipelines {
         if binding.pipeline_id == pipeline_id {

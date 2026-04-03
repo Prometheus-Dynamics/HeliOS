@@ -699,7 +699,7 @@ async fn resolve_pipeline_graph_json(summary: &StreamSummary, pipeline_id: Optio
     if let Some(binding) = summary.manifest.pipelines.iter().find(|binding| binding.pipeline_id == pipeline_id)
         && let Some(graph) = binding.pipeline_graph.as_ref()
     {
-        return Some(graph.as_value().clone());
+        return Some(graph.as_value());
     }
 
     let doc = pipelines::load_graph_document(pipeline_id).await.ok()?;

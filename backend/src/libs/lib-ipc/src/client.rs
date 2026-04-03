@@ -8,7 +8,6 @@ use crate::handshake::{ClientHello, HandshakeReject, HandshakeResponse, ServerHe
 use crate::journal::{JournalEntry, JournalWriter};
 use crate::types::{FeatureSet, ProtocolVersion, RequestIdentity};
 use crate::wire::{FrameFlags, ServiceKind, StreamKind};
-use serde::{Serialize, de::DeserializeOwned};
 use tokio::net::UnixStream;
 use tracing::warn;
 
@@ -34,8 +33,10 @@ where
 impl<C, Request, Event> Client<C, Request, Event>
 where
     C: TransportConfig,
-    Request: Clone + Serialize + DeserializeOwned + RequestIdentity,
-    Event: Serialize + DeserializeOwned,
+    Request: Clone + crate::archive::TransportEncode + RequestIdentity + rkyv::Archive,
+    Request::Archived: for<'a> rkyv::bytecheck::CheckBytes<crate::archive::DecodeValidator<'a>> + rkyv::Deserialize<Request, crate::archive::DecodeStrategy>,
+    Event: rkyv::Archive,
+    Event::Archived: for<'a> rkyv::bytecheck::CheckBytes<crate::archive::DecodeValidator<'a>> + rkyv::Deserialize<Event, crate::archive::DecodeStrategy>,
 {
     pub fn new(config: C) -> io::Result<Self> {
         let journal = JournalWriter::open(config.journal_path(), config.service_kind())?;
@@ -100,8 +101,10 @@ pub struct Session<Request, Event> {
 
 impl<Request, Event> Session<Request, Event>
 where
-    Request: Clone + Serialize + DeserializeOwned + RequestIdentity,
-    Event: Serialize + DeserializeOwned,
+    Request: Clone + crate::archive::TransportEncode + RequestIdentity + rkyv::Archive,
+    Request::Archived: for<'a> rkyv::bytecheck::CheckBytes<crate::archive::DecodeValidator<'a>> + rkyv::Deserialize<Request, crate::archive::DecodeStrategy>,
+    Event: rkyv::Archive,
+    Event::Archived: for<'a> rkyv::bytecheck::CheckBytes<crate::archive::DecodeValidator<'a>> + rkyv::Deserialize<Event, crate::archive::DecodeStrategy>,
 {
     fn new(stream: UnixStream, service: ServiceKind, server: ServerHello) -> Self {
         let protocol = server.protocol;

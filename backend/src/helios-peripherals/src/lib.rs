@@ -28,6 +28,8 @@ pub mod runtime;
 pub mod service;
 #[cfg(feature = "runtime")]
 mod usb_proxy;
+#[cfg(feature = "dto")]
+pub mod wire;
 
 #[cfg(feature = "runtime")]
 mod error;

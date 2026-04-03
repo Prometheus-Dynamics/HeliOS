@@ -1,3 +1,4 @@
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -36,7 +37,7 @@ pub struct EncodedFrame {
     pub ts_ms: u64,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct StreamMetrics {
     pub capture: CaptureStageMetrics,
     pub host: CaptureStageMetrics,
@@ -59,7 +60,7 @@ pub struct StreamMetrics {
     pub pipeline_instances: Option<BTreeMap<String, PipelineGraphMetrics>>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct StreamEncoderDemandMetrics {
     #[serde(default)]
     pub broadcast_receiver_count: u64,
@@ -73,7 +74,7 @@ pub struct StreamEncoderDemandMetrics {
     pub encoder_worker_running: bool,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct StreamFrameDemandMetrics {
     #[serde(default)]
     pub raw_receiver_count: u64,
@@ -93,7 +94,7 @@ pub struct StreamFrameDemandMetrics {
     pub graph_has_executor: bool,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct StreamMemoryMetrics {
     #[serde(default)]
     pub process: Option<StreamProcessMemoryMetrics>,
@@ -113,7 +114,7 @@ pub struct StreamMemoryMetrics {
     pub staging_copy: Option<StreamStagingCopyMetrics>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct StreamQueueMemoryMetrics {
     #[serde(default)]
     pub depth: u64,
@@ -121,7 +122,7 @@ pub struct StreamQueueMemoryMetrics {
     pub capacity: u64,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct StreamExternalBackingMetrics {
     #[serde(default)]
     pub label: String,
@@ -135,7 +136,7 @@ pub struct StreamExternalBackingMetrics {
     pub peak_bytes: u64,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct StreamStagingCopyMetrics {
     #[serde(default)]
     pub copies: u64,
@@ -145,7 +146,7 @@ pub struct StreamStagingCopyMetrics {
     pub peak_copy_bytes: u64,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct StreamProcessMemoryMetrics {
     #[serde(default)]
     pub sampled_at_ms: u64,
@@ -165,7 +166,7 @@ pub struct StreamProcessMemoryMetrics {
     pub swap_bytes: u64,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct StreamRunnerMemoryMetrics {
     #[serde(default)]
     pub current_decoded_frame_bytes: u64,
@@ -185,14 +186,14 @@ pub struct StreamRunnerMemoryMetrics {
     pub peak_frame_working_set_bytes: u64,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct StreamPackedPoolMetrics {
     #[serde(default)]
     pub min_len_bytes: u64,
     pub pool: StreamBufferPoolMetrics,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct StreamBufferPoolMetrics {
     #[serde(default)]
     pub chunk_size_bytes: u64,
@@ -222,7 +223,7 @@ pub struct StreamBufferPoolMetrics {
     pub allocations: u64,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct PipelineNodeMetrics {
     #[serde(default)]
     pub average_time_ms: f64,
@@ -236,7 +237,7 @@ pub struct PipelineNodeMetrics {
     pub last_sample_age_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct PipelineNodePerfMetrics {
     /// Average cache misses per node call (rolling window).
     #[serde(default)]
@@ -255,7 +256,7 @@ pub struct PipelineNodePerfMetrics {
     pub last_sample_age_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct PipelineNodeRuntimeMetrics {
     pub metrics: PipelineNodeMetrics,
     #[serde(default)]
@@ -273,6 +274,7 @@ pub struct PipelineNodeRuntimeMetrics {
     /// Nested metrics for grouped nodes, keyed by node/group id.
     #[schema(no_recursion)]
     #[serde(default)]
+    #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
     pub children: Option<BTreeMap<String, PipelineNodeRuntimeMetrics>>,
     /// Node type identifier (Daedalus node id), e.g. `cv:contour:contours`.
     #[serde(default)]
@@ -295,7 +297,7 @@ pub struct PipelineNodeRuntimeMetrics {
     pub last_error_at: Option<u64>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct PipelineGraphMetrics {
     #[serde(default)]
     pub nodes: BTreeMap<String, PipelineNodeRuntimeMetrics>,
@@ -324,7 +326,7 @@ pub struct PipelineGraphMetrics {
     pub warnings: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct PipelineTimingMetrics {
     #[serde(default)]
     pub average_time_ms: f64,
@@ -338,7 +340,7 @@ pub struct PipelineTimingMetrics {
     pub last_sample_age_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct PipelineImageWorkingSetMetrics {
     #[serde(default)]
     pub input_image_bytes: u64,
@@ -352,7 +354,7 @@ pub struct PipelineImageWorkingSetMetrics {
     pub peak_total_materialized_image_bytes: u64,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct PipelineSampleCacheMetrics {
     #[serde(default)]
     pub image_sample_count: u64,
@@ -374,7 +376,7 @@ pub struct PipelineSampleCacheMetrics {
     pub value_ports: BTreeMap<String, u64>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct PipelineEdgeRuntimeMetrics {
     #[serde(default)]
     pub average_wait_ms: f64,
@@ -424,7 +426,7 @@ pub struct PipelineEdgeRuntimeMetrics {
     pub policy: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct PipelinePerfMetrics {
     /// Average cache misses per graph run (rolling window).
     #[serde(default)]
@@ -443,7 +445,7 @@ pub struct PipelinePerfMetrics {
     pub last_sample_age_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct PipelineFlamegraphMetrics {
     #[serde(default)]
     pub path: String,
@@ -454,7 +456,7 @@ pub struct PipelineFlamegraphMetrics {
     pub captured_at_ms: u64,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CodecMetrics {
     #[serde(default)]
     pub processed: u64,
@@ -481,7 +483,7 @@ pub struct CodecMetrics {
     pub work_last_time_ms: f64,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct StreamPreviewTransportMetrics {
     #[serde(default)]
     pub queue_average_time_ms: f64,

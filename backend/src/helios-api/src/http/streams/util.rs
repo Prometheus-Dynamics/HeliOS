@@ -554,7 +554,7 @@ pub(crate) fn apply_pipeline_host_inputs_update(manifest: &mut StreamManifest, i
             continue;
         }
         if let Some(value) = value {
-            manifest.pipeline_host_inputs.insert(key, JsonWire(value.clone()));
+            manifest.pipeline_host_inputs.insert(key, JsonWire::from(value.clone()));
         } else {
             manifest.pipeline_host_inputs.remove(&key);
         }

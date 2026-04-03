@@ -3,7 +3,6 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use serde::{Serialize, de::DeserializeOwned};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -25,8 +24,9 @@ pub struct MockServer<Command, Event> {
 
 impl<Command, Event> MockServer<Command, Event>
 where
-    Command: Send + 'static + DeserializeOwned,
-    Event: Send + 'static + Serialize,
+    Command: Send + 'static + rkyv::Archive,
+    Command::Archived: for<'a> rkyv::bytecheck::CheckBytes<crate::archive::DecodeValidator<'a>> + rkyv::Deserialize<Command, crate::archive::DecodeStrategy>,
+    Event: Send + 'static + crate::archive::TransportEncode,
 {
     pub async fn bind<P, H>(path: P, service: ServiceKind, handshake: H) -> io::Result<Self>
     where
@@ -84,8 +84,9 @@ async fn serve_connection<Command, Event>(
     handshake: Arc<HandshakeCallback>,
 ) -> io::Result<()>
 where
-    Command: Send + 'static + DeserializeOwned,
-    Event: Send + 'static + Serialize,
+    Command: Send + 'static + rkyv::Archive,
+    Command::Archived: for<'a> rkyv::bytecheck::CheckBytes<crate::archive::DecodeValidator<'a>> + rkyv::Deserialize<Command, crate::archive::DecodeStrategy>,
+    Event: Send + 'static + crate::archive::TransportEncode,
 {
     let mut stream = stream;
     let frame = Frame::read_from(&mut stream).await?.ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "handshake not received"))?;

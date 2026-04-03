@@ -2,6 +2,7 @@ use chrono::Utc;
 
 use crate::dto::{SensorInventory, SensorScope};
 use crate::ipc::SensorEvent;
+use crate::wire::TimestampMicros;
 use tracing::warn;
 
 use super::SensorsService;
@@ -22,7 +23,7 @@ impl SensorsService {
     }
 
     pub fn publish_ack(&self, command_id: lib_ipc::types::CommandId) {
-        publish_event(self, SensorEvent::Ack { command_id, processed_at: Utc::now() });
+        publish_event(self, SensorEvent::Ack { command_id, processed_at: TimestampMicros::from(Utc::now()) });
     }
 
     pub fn publish_nack(&self, command_id: lib_ipc::types::CommandId, reason: String, retryable: bool) {

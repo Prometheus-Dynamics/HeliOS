@@ -639,7 +639,7 @@ fn strip_raw_frame_alias_output(outputs: &mut Vec<GraphOutputPortDescriptor>) {
 )]
 async fn get_pipeline_output_sample(State(state): State<AppState>, Path((id, port)): Path<(Uuid, String)>) -> impl IntoResponse {
     match state.engine.get_graph_output_sample_event(id, port.clone()).await {
-        Ok(EngineEvent::GraphOutputSample { value, .. }) => Json(value.0).into_response(),
+        Ok(EngineEvent::GraphOutputSample { value, .. }) => Json(Into::<serde_json::Value>::into(value)).into_response(),
         Ok(EngineEvent::Nack { code, reason, .. }) => (StatusCode::BAD_REQUEST, Json(util::engine_error_body(Some(code), reason))).into_response(),
         Ok(_) => (StatusCode::BAD_GATEWAY, Json(util::engine_error_body(Some(EngineErrorCode::Internal), "unexpected engine response"))).into_response(),
         Err(err) => util::map_client_error(err),
@@ -829,13 +829,18 @@ async fn set_pipeline_graph_patch(State(state): State<AppState>, Path(id): Path<
                 let mut updated = false;
                 for binding in &mut manifest.pipelines {
                     if binding.pipeline_id == pipeline_id {
-                        binding.pipeline_patch = Some(helios_engine::ipc::JsonWire(patch.clone()));
+                        binding.pipeline_patch = Some(helios_engine::ipc::JsonWire::from(patch.clone()));
                         updated = true;
                         break;
                     }
                 }
                 if !updated {
-                    manifest.pipelines.push(StreamPipelineBinding { pipeline_id, pipeline_graph: None, pipeline_output: None, pipeline_patch: Some(helios_engine::ipc::JsonWire(patch.clone())) });
+                    manifest.pipelines.push(StreamPipelineBinding {
+                        pipeline_id,
+                        pipeline_graph: None,
+                        pipeline_output: None,
+                        pipeline_patch: Some(helios_engine::ipc::JsonWire::from(patch.clone())),
+                    });
                 }
                 manifest.pipeline_enabled = true;
                 if manifest.active_pipeline_id.is_none() {
@@ -854,13 +859,18 @@ async fn set_pipeline_graph_patch(State(state): State<AppState>, Path(id): Path<
                 let mut replaced = false;
                 for binding in &mut manifest.pipelines {
                     if binding.pipeline_id == pipeline_id {
-                        binding.pipeline_patch = Some(helios_engine::ipc::JsonWire(patch.clone()));
+                        binding.pipeline_patch = Some(helios_engine::ipc::JsonWire::from(patch.clone()));
                         replaced = true;
                         break;
                     }
                 }
                 if !replaced {
-                    manifest.pipelines.push(StreamPipelineBinding { pipeline_id, pipeline_graph: None, pipeline_output: None, pipeline_patch: Some(helios_engine::ipc::JsonWire(patch.clone())) });
+                    manifest.pipelines.push(StreamPipelineBinding {
+                        pipeline_id,
+                        pipeline_graph: None,
+                        pipeline_output: None,
+                        pipeline_patch: Some(helios_engine::ipc::JsonWire::from(patch.clone())),
+                    });
                 }
 
                 manifest.pipeline_enabled = true;

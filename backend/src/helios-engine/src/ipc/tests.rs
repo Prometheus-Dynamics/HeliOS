@@ -1,4 +1,5 @@
 use super::*;
+use lib_ipc::archive::{DecodeStrategy, DecodeValidator, TransportEncode};
 use lib_ipc::types::CommandId;
 use lib_ipc::wire::{FrameFlags, ServiceKind, StreamKind};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -53,7 +54,8 @@ where
 
 fn assert_ipc_round_trip<T>(service: ServiceKind, stream: StreamKind, request_id: CommandId, value: &T) -> T
 where
-    T: Serialize + DeserializeOwned,
+    T: TransportEncode + rkyv::Archive,
+    T::Archived: for<'a> rkyv::bytecheck::CheckBytes<DecodeValidator<'a>> + rkyv::Deserialize<T, DecodeStrategy>,
 {
     let frame = lib_ipc::frame::Frame::encode_payload(service, stream, request_id, FrameFlags::empty(), value).expect("encode ipc payload");
     frame.decode_payload().expect("decode ipc payload")

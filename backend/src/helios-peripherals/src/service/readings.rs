@@ -109,7 +109,7 @@ impl SensorsService {
 
     pub async fn update_sensor(&self, scope: &SensorScope, sensor: SensorKind, payload: SensorData) -> Result<()> {
         self.ensure_scope_registered(scope).await;
-        let payload_value = payload.to_value().map_err(|err| Error::InvalidConfig(format!("sensor payload must be valid JSON: {err}")))?;
+        let payload_value = payload.to_value();
         let applied_payload = if sensor == SensorKind::Imu {
             if let Some(settings) = self.apply_imu_config_payload(&payload_value).await? {
                 SensorReading::Imu(Box::new(ImuReading::from_settings(&settings)))

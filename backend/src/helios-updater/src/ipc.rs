@@ -2,11 +2,12 @@ use std::time::Duration;
 
 use crate::artifact::ReleaseManifest;
 use lib_ipc::types::{CommandId, RequestIdentity, Timestamp};
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 use url::Url;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Archive, RkyvSerialize, RkyvDeserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LogLevel {
     Trace,
@@ -40,15 +41,37 @@ impl From<LogLevel> for tracing::Level {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum UpdaterCommand {
-    StageRelease { command_id: CommandId, update_id: Uuid, manifest: ReleaseManifest },
-    Cancel { command_id: CommandId, update_id: Uuid },
-    ApplyRelease { command_id: CommandId, update_id: Uuid, window: MaintenanceWindow },
-    Rollback { command_id: CommandId, update_id: Uuid },
-    QueryState { command_id: CommandId },
-    QueryStorage { command_id: CommandId },
-    PreflightRelease { command_id: CommandId, update_id: Uuid },
+    StageRelease {
+        command_id: CommandId,
+        update_id: Uuid,
+        #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
+        manifest: ReleaseManifest,
+    },
+    Cancel {
+        command_id: CommandId,
+        update_id: Uuid,
+    },
+    ApplyRelease {
+        command_id: CommandId,
+        update_id: Uuid,
+        window: MaintenanceWindow,
+    },
+    Rollback {
+        command_id: CommandId,
+        update_id: Uuid,
+    },
+    QueryState {
+        command_id: CommandId,
+    },
+    QueryStorage {
+        command_id: CommandId,
+    },
+    PreflightRelease {
+        command_id: CommandId,
+        update_id: Uuid,
+    },
 }
 
 impl RequestIdentity for UpdaterCommand {
@@ -65,27 +88,30 @@ impl RequestIdentity for UpdaterCommand {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct MaintenanceWindow {
+    #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
     pub start: Timestamp,
+    #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
     pub duration: Duration,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct UrlArtifact {
+    #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
     pub url: Url,
     pub size_bytes: Option<u64>,
     pub checksum: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct StorageDirectoryReport {
     pub path: String,
     pub usage_bytes: u64,
     pub available_bytes: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct UpdaterStorageReport {
     pub cache: StorageDirectoryReport,
     pub work: StorageDirectoryReport,
@@ -93,7 +119,7 @@ pub struct UpdaterStorageReport {
     pub frontend_releases: StorageDirectoryReport,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateStage {
     Idle,
@@ -106,18 +132,20 @@ pub enum UpdateStage {
     RolledBack,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct UpdateState {
     pub update_id: Uuid,
     pub stage: UpdateStage,
     pub progress_percent: Option<u8>,
     pub last_error: Option<String>,
+    #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
     pub started_at: Option<Timestamp>,
+    #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
     pub finished_at: Option<Timestamp>,
     pub artifacts: Vec<UrlArtifact>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PreflightVerdict {
     Ready,
@@ -132,7 +160,7 @@ pub enum PreflightVerdict {
     SingleSlotDisabled,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct PreflightReport {
     pub update_id: Uuid,
     pub ready: bool,
@@ -150,20 +178,65 @@ pub struct PreflightReport {
     pub single_slot: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum UpdaterEvent {
-    Ack { command_id: CommandId, processed_at: Timestamp },
-    Nack { command_id: CommandId, reason: String, retryable: bool },
-    StageProgress { update_id: Uuid, percent: u8, detail: Option<String> },
-    StageComplete { update_id: Uuid },
-    ApplyScheduled { update_id: Uuid, eta: Timestamp },
-    ApplyComplete { update_id: Uuid, reboot_required: bool },
-    RollbackTriggered { update_id: Uuid, reason: String },
-    StateSnapshot { active_update: Option<UpdateState>, cache_usage_bytes: u64 },
-    StorageReport { report: UpdaterStorageReport },
-    PreflightReport { report: PreflightReport },
-    Heartbeat { uptime_ms: u64, sequence: u64, stage_queue_depth: u32 },
-    LogRecord { level: LogLevel, span: Vec<String>, message: String },
+    Ack {
+        command_id: CommandId,
+        #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
+        processed_at: Timestamp,
+    },
+    Nack {
+        command_id: CommandId,
+        reason: String,
+        retryable: bool,
+    },
+    StageProgress {
+        update_id: Uuid,
+        percent: u8,
+        detail: Option<String>,
+    },
+    StageComplete {
+        update_id: Uuid,
+    },
+    ApplyScheduled {
+        update_id: Uuid,
+        #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
+        eta: Timestamp,
+    },
+    ApplyComplete {
+        update_id: Uuid,
+        reboot_required: bool,
+    },
+    RollbackTriggered {
+        update_id: Uuid,
+        reason: String,
+    },
+    StateSnapshot {
+        active_update: Option<UpdateState>,
+        cache_usage_bytes: u64,
+    },
+    StorageReport {
+        report: UpdaterStorageReport,
+    },
+    PreflightReport {
+        report: PreflightReport,
+    },
+    Heartbeat {
+        uptime_ms: u64,
+        sequence: u64,
+        stage_queue_depth: u32,
+    },
+    LogRecord {
+        level: LogLevel,
+        span: Vec<String>,
+        message: String,
+    },
+}
+
+pub mod wire {
+    pub use super::{
+        LogLevel, MaintenanceWindow, PreflightReport, PreflightVerdict, StorageDirectoryReport, UpdateStage, UpdateState, UpdaterCommand, UpdaterEvent, UpdaterStorageReport, UrlArtifact,
+    };
 }
 
 #[cfg(test)]
@@ -175,7 +248,8 @@ mod tests {
 
     fn assert_ipc_round_trip<T>(stream: StreamKind, value: &T) -> T
     where
-        T: Serialize + for<'de> Deserialize<'de>,
+        T: lib_ipc::archive::TransportEncode + rkyv::Archive,
+        T::Archived: for<'a> rkyv::bytecheck::CheckBytes<lib_ipc::archive::DecodeValidator<'a>> + rkyv::Deserialize<T, lib_ipc::archive::DecodeStrategy>,
     {
         let frame = lib_ipc::frame::Frame::encode_payload(ServiceKind::Updater, stream, CommandId::new(), FrameFlags::empty(), value).expect("encode ipc payload");
         frame.decode_payload().expect("decode ipc payload")
@@ -251,7 +325,8 @@ mod tests {
 
     fn check_round_trip<T>(stream: StreamKind, value: &T) -> Result<(), String>
     where
-        T: Serialize + for<'de> Deserialize<'de> + Clone,
+        T: Serialize + for<'de> Deserialize<'de> + Clone + lib_ipc::archive::TransportEncode + rkyv::Archive,
+        T::Archived: for<'a> rkyv::bytecheck::CheckBytes<lib_ipc::archive::DecodeValidator<'a>> + rkyv::Deserialize<T, lib_ipc::archive::DecodeStrategy>,
     {
         let decoded: T = assert_ipc_round_trip(stream, value);
 

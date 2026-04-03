@@ -148,7 +148,7 @@ async fn run_sensor_events_sampler(tx: broadcast::Sender<Arc<SharedSensorEvent>>
                             let _ = tx.send(Arc::new(SharedSensorEvent::Firmware(payload)));
                         }
                         Ok(Some(SensorEvent::LightingState { state, .. })) => {
-                            let payload = Arc::new(LightingRuntimeStatePayload::from(state));
+                            let payload = Arc::new(LightingRuntimeStatePayload::from(Into::<helios_peripherals::dto::LightingRuntimeState>::into(state)));
                             update_latest_lighting(&latest, payload.clone()).await;
                             let _ = tx.send(Arc::new(SharedSensorEvent::Lighting(payload)));
                         }

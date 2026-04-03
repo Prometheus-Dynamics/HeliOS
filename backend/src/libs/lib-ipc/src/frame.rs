@@ -1,6 +1,5 @@
 use std::io;
 
-use serde::{Serialize, de::DeserializeOwned};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::{
@@ -25,8 +24,8 @@ impl Frame {
         Self { header, payload }
     }
 
-    pub fn encode_payload<T: Serialize>(service: ServiceKind, stream: StreamKind, request_id: CommandId, flags: FrameFlags, payload: &T) -> io::Result<Self> {
-        let payload = archive::encode_serde(payload).map_err(|err| archive_err(err.to_string()))?;
+    pub fn encode_payload<T: archive::TransportEncode>(service: ServiceKind, stream: StreamKind, request_id: CommandId, flags: FrameFlags, payload: &T) -> io::Result<Self> {
+        let payload = archive::encode_to_vec(payload).map_err(|err| archive_err(err.to_string()))?;
         if payload.len() > MAX_PAYLOAD_LENGTH {
             return Err(archive_err(format!("IPC payload exceeds {} bytes", MAX_PAYLOAD_LENGTH)));
         }
@@ -34,8 +33,12 @@ impl Frame {
         Ok(Self::new(header, payload))
     }
 
-    pub fn decode_payload<T: DeserializeOwned>(&self) -> io::Result<T> {
-        archive::decode_serde(&self.payload).map_err(|err| archive_err(err.to_string()))
+    pub fn decode_payload<T>(&self) -> io::Result<T>
+    where
+        T: rkyv::Archive,
+        T::Archived: for<'a> rkyv::bytecheck::CheckBytes<archive::DecodeValidator<'a>> + rkyv::Deserialize<T, archive::DecodeStrategy>,
+    {
+        archive::decode_from_slice(&self.payload).map_err(|err| archive_err(err.to_string()))
     }
 
     pub async fn write_to<S>(&self, stream: &mut S) -> io::Result<()>

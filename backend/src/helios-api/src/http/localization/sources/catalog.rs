@@ -61,7 +61,7 @@ pub(super) async fn list_sources(State(state): State<AppState>) -> ApiResult<Jso
 
         for desc in outputs {
             let output_key = desc.name;
-            let data_type = desc.ty.map(|value| value.0);
+            let data_type = desc.ty.map(Into::into);
             if !is_localization_compatible_output(&output_key, data_type.as_ref()) {
                 continue;
             }

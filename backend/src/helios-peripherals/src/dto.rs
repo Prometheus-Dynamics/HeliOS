@@ -1,28 +1,29 @@
 use std::collections::BTreeMap;
 
+use lib_ipc::json::JsonValue as WireJsonValue;
 use lib_ipc::types::Timestamp;
 use lib_sensors::model::SensorReading;
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
 /// Binary-wire-friendly JSON payload used over IPC.
 ///
-/// `serde_json::Value` relies on `deserialize_any`, so we store JSON as a string for IPC while
-/// still serializing/deserializing as a JSON value for HTTP APIs.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct JsonData {
-    pub json: String,
-}
+/// The archived representation is a real JSON tree, while human-readable serialization still uses
+/// ordinary JSON values.
+#[derive(Debug, Clone, PartialEq, Default, Archive, RkyvSerialize, RkyvDeserialize)]
+pub struct JsonData(pub WireJsonValue);
 
 impl JsonData {
     #[must_use]
     pub fn from_value(value: &JsonValue) -> Self {
-        Self { json: serde_json::to_string(value).unwrap_or_else(|_| "null".into()) }
+        Self(WireJsonValue::from(value))
     }
 
-    pub fn to_value(&self) -> Result<JsonValue, serde_json::Error> {
-        serde_json::from_str(&self.json)
+    #[must_use]
+    pub fn to_value(&self) -> JsonValue {
+        self.0.to_serde()
     }
 }
 
@@ -31,8 +32,7 @@ impl Serialize for JsonData {
     where
         S: serde::Serializer,
     {
-        let value = self.to_value().map_err(serde::ser::Error::custom)?;
-        value.serialize(serializer)
+        serde::Serialize::serialize(&self.0, serializer)
     }
 }
 
@@ -41,8 +41,7 @@ impl<'de> Deserialize<'de> for JsonData {
     where
         D: serde::Deserializer<'de>,
     {
-        let value = JsonValue::deserialize(deserializer)?;
-        Ok(Self::from_value(&value))
+        Ok(Self(WireJsonValue::deserialize(deserializer)?))
     }
 }
 
@@ -50,7 +49,8 @@ impl<'de> Deserialize<'de> for JsonData {
 pub type SensorData = JsonData;
 
 /// Canonical identifier for supported sensor types.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Archive, RkyvSerialize, RkyvDeserialize)]
+#[rkyv(derive(PartialEq, Eq, PartialOrd, Ord))]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub enum SensorKind {
     #[serde(rename = "temperature")]
@@ -72,7 +72,7 @@ pub enum SensorKind {
 }
 
 /// Logical ownership scope for sensor readings.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Archive, RkyvSerialize, RkyvDeserialize)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub enum SensorScope {
     #[serde(rename = "device")]
@@ -86,7 +86,7 @@ pub enum SensorScope {
 }
 
 /// Descriptor used to surface hardware inventory via IPC.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct SensorDescriptor {
     pub backend: String,
@@ -115,7 +115,7 @@ impl SensorDescriptor {
 }
 
 /// Aggregated collection of sensors discovered by the service.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, Archive, RkyvSerialize, RkyvDeserialize)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct SensorInventory {
     pub sensors: Vec<SensorDescriptor>,
@@ -126,7 +126,7 @@ pub type SensorSnapshot = BTreeMap<SensorKind, SensorData>;
 /// Typed snapshot map keyed by sensor kind.
 pub type SensorSnapshotTyped = BTreeMap<SensorKind, SensorReading>;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Archive, RkyvSerialize, RkyvDeserialize)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub enum AiModelFormat {
     TensorFlowLite,
@@ -134,7 +134,7 @@ pub enum AiModelFormat {
     Raw,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Archive, RkyvSerialize, RkyvDeserialize)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct AiModelId(pub Uuid);
 
@@ -151,7 +151,7 @@ impl Default for AiModelId {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub enum AiTensorElementType {
     U8,
@@ -162,7 +162,7 @@ pub enum AiTensorElementType {
     F32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct AiTensorQuantization {
     #[serde(default)]
@@ -171,7 +171,7 @@ pub struct AiTensorQuantization {
     pub scale: Vec<f32>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct AiModelTensorMetadata {
     #[serde(default)]
@@ -183,7 +183,7 @@ pub struct AiModelTensorMetadata {
     pub quantization: Option<AiTensorQuantization>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct AiModelMetadata {
     #[serde(default)]
@@ -202,7 +202,7 @@ pub struct AiModelMetadata {
     pub labels: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct AiModelDescriptor {
     pub id: AiModelId,
     pub format: AiModelFormat,
@@ -212,24 +212,27 @@ pub struct AiModelDescriptor {
     #[serde(default)]
     pub health: AiModelHealth,
     #[serde(default)]
+    #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
     pub created_at: Timestamp,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct AiModelInventory {
     pub models: Vec<AiModelDescriptor>,
     #[serde(default)]
     pub max_upload_bytes: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct AiModelHealth {
     pub status: AiModelHealthStatus,
     #[serde(default)]
     pub last_error: Option<String>,
     #[serde(default)]
+    #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
     pub last_checked_at: Option<Timestamp>,
     #[serde(default)]
+    #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
     pub last_inference_at: Option<Timestamp>,
 }
 
@@ -243,7 +246,7 @@ impl AiModelHealth {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum AiModelHealthStatus {
     #[default]
     Unknown,
@@ -251,7 +254,7 @@ pub enum AiModelHealthStatus {
     Degraded,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct AiModelUpload {
     #[serde(default)]
     pub id: Option<AiModelId>,
@@ -263,14 +266,14 @@ pub struct AiModelUpload {
     pub label_bytes: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, Archive, RkyvSerialize, RkyvDeserialize)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct I2cInventory {
     pub buses: Vec<I2cBusInfo>,
     pub devices: Vec<I2cDeviceInfo>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct I2cBusInfo {
     pub bus: u32,
@@ -283,7 +286,7 @@ pub struct I2cBusInfo {
     pub last_error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct I2cDeviceInfo {
     pub bus: u32,

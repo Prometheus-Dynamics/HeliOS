@@ -1,3 +1,4 @@
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use std::num::NonZeroU32;
@@ -533,7 +534,7 @@ pub fn default_virtual_device() -> ProbedDevice {
     virtual_device_for_mode(&ModeId { format, interval: Some(Interval { numerator: NonZeroU32::new(1).unwrap(), denominator: NonZeroU32::new(30).unwrap() }) })
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, ToSchema)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct CaptureStageMetrics {
     /// Throughput-derived cadence for this stage (`1000 / fps`).
     #[serde(default)]

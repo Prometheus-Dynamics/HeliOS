@@ -4,7 +4,7 @@ use std::time::Duration;
 
 #[test]
 fn localization_commands_use_ephemeral_journal_mode() {
-    let command = EngineCommand::SolveLocalization { command_id: lib_ipc::types::CommandId::new(), request: helios_engine::ipc::JsonWire(serde_json::json!({})) };
+    let command = EngineCommand::SolveLocalization { command_id: lib_ipc::types::CommandId::new(), request: helios_engine::ipc::JsonWire::from(serde_json::json!({})) };
     assert_eq!(JournalMode::for_command(&command), JournalMode::Ephemeral);
 }
 

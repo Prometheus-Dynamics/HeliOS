@@ -5,6 +5,7 @@ pub mod client;
 pub mod frame;
 pub mod handshake;
 pub mod journal;
+pub mod json;
 #[cfg(feature = "mock")]
 pub mod mock;
 pub mod server;

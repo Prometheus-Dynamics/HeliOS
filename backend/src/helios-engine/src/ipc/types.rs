@@ -1,4 +1,5 @@
 use lib_cv::modules::calibration::LensModel;
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
@@ -25,7 +26,7 @@ use styx::BackendKind;
 
 pub type ControlId = u32;
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct GraphOutputPortDescriptor {
     pub name: String,
     #[serde(default)]
@@ -36,54 +37,43 @@ pub struct GraphOutputPortDescriptor {
 /// A serde JSON value that remains JSON in HTTP/OpenAPI payloads, but is encoded as JSON bytes when
 /// serialized over binary IPC transports.
 ///
-/// This avoids binary-codec limitations around `deserialize_any` while keeping the public JSON shape unchanged.
-#[derive(Debug, Clone, PartialEq, ToSchema)]
+/// The archived representation is a real tree, not a JSON blob string or serde-bytes wrapper.
+#[derive(Debug, Clone, PartialEq, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 #[schema(value_type = serde_json::Value)]
-pub struct JsonWire(pub JsonValue);
+pub struct JsonWire(pub lib_ipc::json::JsonValue);
 
 impl JsonWire {
-    pub fn as_value(&self) -> &JsonValue {
-        &self.0
+    pub fn as_value(&self) -> JsonValue {
+        self.0.to_serde()
     }
 }
 
 impl From<JsonValue> for JsonWire {
     fn from(value: JsonValue) -> Self {
-        Self(value)
+        Self(lib_ipc::json::JsonValue::from(value))
     }
 }
 
 impl From<JsonWire> for JsonValue {
     fn from(value: JsonWire) -> Self {
-        value.0
+        value.0.to_serde()
     }
 }
 
 impl Serialize for JsonWire {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        if serializer.is_human_readable() {
-            self.0.serialize(serializer)
-        } else {
-            let bytes = serde_json::to_vec(&self.0).map_err(serde::ser::Error::custom)?;
-            serde_bytes::serialize(&bytes, serializer)
-        }
+        serde::Serialize::serialize(&self.0, serializer)
     }
 }
 
 impl<'de> Deserialize<'de> for JsonWire {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        if deserializer.is_human_readable() {
-            Ok(Self(JsonValue::deserialize(deserializer)?))
-        } else {
-            let bytes: Vec<u8> = serde_bytes::deserialize(deserializer)?;
-            let value = serde_json::from_slice(&bytes).map_err(serde::de::Error::custom)?;
-            Ok(Self(value))
-        }
+        Ok(Self(lib_ipc::json::JsonValue::deserialize(deserializer)?))
     }
 }
 
 #[repr(u16)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum EngineErrorCode {
     Unimplemented = 0,
     InvalidState = 1,
@@ -95,7 +85,7 @@ pub enum EngineErrorCode {
     Internal = 7,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct NodeRegistryPort {
     pub name: String,
     pub ty: JsonWire,
@@ -104,7 +94,7 @@ pub struct NodeRegistryPort {
     pub const_value: Option<JsonWire>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct NodeRegistryFanInPort {
     pub prefix: String,
     #[serde(default)]
@@ -112,7 +102,7 @@ pub struct NodeRegistryFanInPort {
     pub ty: JsonWire,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct NodeRegistryNode {
     pub id: String,
     pub label: Option<String>,
@@ -129,7 +119,7 @@ pub struct NodeRegistryNode {
     pub metadata: std::collections::BTreeMap<String, JsonWire>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct NodeSyncGroup {
     pub name: String,
     pub policy: String,
@@ -138,13 +128,13 @@ pub struct NodeSyncGroup {
     pub backpressure: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct TypeRegistryEntry {
     pub rust: String,
     pub ty: JsonWire,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct PluginCompatibility {
     pub filename: String,
     #[serde(default)]
@@ -166,7 +156,7 @@ pub struct PluginCompatibility {
     pub path: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct NodeRegistrySnapshot {
     pub plugins: Vec<String>,
     pub nodes: Vec<NodeRegistryNode>,
@@ -175,21 +165,21 @@ pub struct NodeRegistrySnapshot {
     pub plugin_compatibility: Vec<PluginCompatibility>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct PlannerDiagnosticSpan {
     pub pass: String,
     pub node: Option<String>,
     pub port: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct PlannerDiagnostic {
     pub code: String,
     pub message: String,
     pub span: PlannerDiagnosticSpan,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct GraphValidationReport {
     pub ok: bool,
     pub diagnostics: Vec<PlannerDiagnostic>,
@@ -205,7 +195,7 @@ fn default_enable_lints() -> bool {
     true
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct GraphValidationHelperRequest {
     pub graph: JsonWire,
     #[serde(default)]
@@ -214,41 +204,41 @@ pub struct GraphValidationHelperRequest {
     pub enable_lints: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum GraphValidationHelperResponse {
     Report { report: GraphValidationReport },
     Error { code: EngineErrorCode, reason: String },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct GraphGpuSegment {
     pub buffer_id: usize,
     pub nodes: Vec<usize>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct GraphGpuEdgeBufferInfo {
     pub edge_index: usize,
     pub gpu_fast_path: bool,
     pub buffer_id: Option<usize>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecordingContainer {
     Mp4,
     Raw,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecordingCodec {
     H264,
     H265,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default, Archive, RkyvSerialize, RkyvDeserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RecordingSource {
     #[default]
@@ -315,14 +305,15 @@ pub struct LocalizationPipelineSampleRequest {
     pub output_key: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct StreamCodecTunables {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub encoder_settings: Option<EncoderSettings>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct StreamCodecCapability {
+    #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
     pub kind: CodecKind,
     pub fourcc: String,
     pub name: String,
@@ -333,7 +324,7 @@ pub struct StreamCodecCapability {
     pub tunables: Option<StreamCodecTunables>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StreamRuntimeCapabilities {
     #[serde(default)]
@@ -344,7 +335,7 @@ pub struct StreamRuntimeCapabilities {
     pub default_decoder_ids_by_capture_format: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum EngineCommand {
     List {
         command_id: CommandId,
@@ -354,6 +345,7 @@ pub enum EngineCommand {
     },
     Start {
         command_id: CommandId,
+        #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
         manifest: Box<ResolvedStreamConfig>,
     },
     /// Update encoder/decoder selection for a running stream without restarting capture.
@@ -367,6 +359,7 @@ pub enum EngineCommand {
     SetCalibration {
         command_id: CommandId,
         stream_id: Uuid,
+        #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
         calibration: Option<StreamCalibration>,
     },
     /// Toggle guided calibration mode (pass-through preview + live detections output) without restarting capture.
@@ -380,6 +373,7 @@ pub enum EngineCommand {
     /// Solve camera intrinsics from calibration images + graph detections.
     SolveCalibration {
         command_id: CommandId,
+        #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
         request: super::CalibrationSolveRequest,
     },
     SolveLocalization {
@@ -406,6 +400,7 @@ pub enum EngineCommand {
         command_id: CommandId,
         stream_id: Uuid,
         control_id: ControlId,
+        #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
         value: CaptureControlValue,
     },
     GetControls {
@@ -544,13 +539,13 @@ pub enum EngineCommand {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct FrameRate {
     pub numerator: u32,
     pub denominator: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct RecordingSettings {
     /// Target recording FPS (best-effort frame dropping).
     #[serde(default)]
@@ -572,7 +567,7 @@ pub struct RecordingSettings {
     pub max_height: Option<u32>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct ResolutionHint {
     pub width: u32,
     pub height: u32,
@@ -587,7 +582,7 @@ enum EncoderSettingsKind {
     H265,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Archive, RkyvSerialize, RkyvDeserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EncoderSettings {
     Turbojpeg {
@@ -713,7 +708,7 @@ impl EncoderSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 enum EncoderSettingsBinaryWire {
     Turbojpeg {
         #[serde(default)]
@@ -881,7 +876,7 @@ fn canonical_encoder_selector(selector: Option<&str>, settings: Option<&EncoderS
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct DecoderSettings {
     /// Optional decoder thread count (codec-dependent).
     #[serde(default)]
@@ -897,7 +892,7 @@ pub struct DecoderSettings {
     pub mirror_horizontal: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum EngineEvent {
     Ack {
         command_id: CommandId,
@@ -911,6 +906,7 @@ pub enum EngineEvent {
     },
     StreamList {
         command_id: CommandId,
+        #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
         streams: Vec<StreamSummary>,
     },
     StreamRuntimeCapabilities {
@@ -920,6 +916,7 @@ pub enum EngineEvent {
     Started {
         command_id: CommandId,
         stream_id: Uuid,
+        #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
         descriptor: CaptureDescriptor,
     },
     Stopped {
@@ -929,6 +926,7 @@ pub enum EngineEvent {
     Controls {
         command_id: CommandId,
         stream_id: Uuid,
+        #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
         controls: Vec<CaptureControlInfo>,
     },
     Metrics {
@@ -960,10 +958,12 @@ pub enum EngineEvent {
     },
     NodeRegistry {
         command_id: CommandId,
+        #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
         snapshot: NodeRegistrySnapshot,
     },
     Discovery {
         command_id: CommandId,
+        #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
         discovery: crate::capture::DiscoveryResult,
     },
     GraphValidation {
@@ -972,6 +972,7 @@ pub enum EngineEvent {
     },
     CalibrationSolved {
         command_id: CommandId,
+        #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
         response: super::CalibrationSolveResponse,
     },
     LocalizationSolved {
@@ -1066,7 +1067,7 @@ impl EngineEvent {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct StreamPipelineBinding {
     pub pipeline_id: Uuid,
     #[serde(default)]
@@ -1079,7 +1080,7 @@ pub struct StreamPipelineBinding {
     pub pipeline_patch: Option<JsonWire>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct StreamPipelineGridSlot {
     pub row: u8,
     pub column: u8,
@@ -1090,7 +1091,7 @@ pub struct StreamPipelineGridSlot {
     pub output_key: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct StreamPipelineLayout {
     pub rows: u8,
     pub columns: u8,
@@ -1102,7 +1103,7 @@ pub struct StreamPipelineLayout {
 ///
 /// This identifies a specific pipeline *instance* (pipeline ID + optional layout `output_key`)
 /// and a port name on that instance.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct StreamPipelineEndpoint {
     pub pipeline_id: Uuid,
     /// Optional instance discriminator when a pipeline appears multiple times with different
@@ -1116,7 +1117,7 @@ pub struct StreamPipelineEndpoint {
 }
 
 /// Wire a port from one pipeline instance into an input port on another pipeline instance.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct StreamPipelineWire {
     pub from: StreamPipelineEndpoint,
     pub to: StreamPipelineEndpoint,
@@ -1139,14 +1140,14 @@ pub struct StreamCalibration {
     pub lens_model: LensModel,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct PoseVector {
     pub x: f64,
     pub y: f64,
     pub z: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct PoseRotation {
     /// Degrees.
     pub roll: f64,
@@ -1156,7 +1157,7 @@ pub struct PoseRotation {
     pub yaw: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct RigPose {
     pub translation: PoseVector,
     pub rotation: PoseRotation,

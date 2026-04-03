@@ -8,6 +8,7 @@ use ed25519_dalek::Signature;
 use futures::StreamExt;
 use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
 use reqwest::Client;
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::fs;
@@ -29,7 +30,7 @@ const fn default_true() -> bool {
     true
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct ReleaseManifest {
     #[serde(default)]
     pub update_id: Option<Uuid>,
@@ -47,7 +48,7 @@ pub struct ReleaseManifest {
     pub metadata_json: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct ReleaseManifestMetadata {
     pub schema_version: u32,
     #[serde(default = "default_true")]
@@ -91,8 +92,9 @@ impl ReleaseManifestMetadata {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct ManifestArtifact {
+    #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
     pub url: Url,
     #[serde(default)]
     pub filename: Option<String>,
@@ -117,21 +119,25 @@ impl ManifestArtifact {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct StagedArtifact {
+    #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
     pub url: Url,
+    #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
     pub local_path: PathBuf,
     pub filename: String,
     pub size_bytes: u64,
     pub sha256: String,
+    #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
     pub staged_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct StagedMetadata {
     pub schema_version: u32,
     pub manifest: ReleaseManifest,
     pub artifacts: Vec<StagedArtifact>,
+    #[rkyv(with = lib_ipc::archive::with::SerdeBytes)]
     pub staged_at: DateTime<Utc>,
 }
 

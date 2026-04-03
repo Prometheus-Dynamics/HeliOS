@@ -1,13 +1,13 @@
 use std::collections::BTreeMap;
 
-use lib_ipc::types::{CommandId, RequestIdentity, Timestamp};
+use lib_ipc::types::{CommandId, RequestIdentity};
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 
-use crate::dto::{AiModelDescriptor, AiModelId, AiModelInventory, AiModelUpload, I2cInventory, LightingCommand, LightingRuntimeState, SensorData, SensorInventory, SensorKind, SensorScope};
-use lib_sensors::fan_config::{FanConfig, FanStatus};
-use lib_sensors::model::SensorReading;
+use crate::dto::{AiModelDescriptor, AiModelId, AiModelInventory, AiModelUpload, I2cInventory, SensorData, SensorInventory, SensorKind, SensorScope};
+use crate::wire::{FanConfigWire, FanStatusWire, LightingCommandWire, LightingRuntimeStateWire, SensorSnapshotTypedWire, TimestampMicros};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FirmwareUpdateStatus {
     Queued,
@@ -16,7 +16,7 @@ pub enum FirmwareUpdateStatus {
     Failed,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct FirmwareUpdate {
     pub device_id: String,
     pub firmware: String,
@@ -33,7 +33,7 @@ pub struct FirmwareUpdate {
 }
 
 /// Commands accepted by the sensor service runtime over IPC.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum SensorCommand {
     /// Perform a discovery pass and refresh the cached hardware inventory.
     #[serde(rename = "discover")]
@@ -78,7 +78,7 @@ pub enum SensorCommand {
     I2cInventory { command_id: CommandId },
     /// Apply a live lighting command (frame/animation) to the LED chain.
     #[serde(rename = "lighting")]
-    Lighting { command_id: CommandId, command: LightingCommand },
+    Lighting { command_id: CommandId, command: LightingCommandWire },
     /// Retrieve the latest applied lighting runtime state.
     #[serde(rename = "lighting_state")]
     LightingState { command_id: CommandId },
@@ -90,15 +90,15 @@ pub enum SensorCommand {
     FanConfig { command_id: CommandId },
     /// Apply a new fan configuration.
     #[serde(rename = "update_fan_config")]
-    UpdateFanConfig { command_id: CommandId, config: FanConfig },
+    UpdateFanConfig { command_id: CommandId, config: FanConfigWire },
 }
 
 /// Events emitted by the sensor service runtime.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum SensorEvent {
     /// Command acknowledgement emitted upon successful processing.
     #[serde(rename = "ack")]
-    Ack { command_id: CommandId, processed_at: Timestamp },
+    Ack { command_id: CommandId, processed_at: TimestampMicros },
     /// Command rejection emitted when processing fails.
     #[serde(rename = "nack")]
     Nack { command_id: CommandId, reason: String, retryable: bool },
@@ -119,7 +119,7 @@ pub enum SensorEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         command_id: Option<CommandId>,
         scope: SensorScope,
-        values: BTreeMap<SensorKind, SensorReading>,
+        values: SensorSnapshotTypedWire,
     },
     /// Confirmation that subscription has been established.
     #[serde(rename = "subscribed")]
@@ -144,16 +144,16 @@ pub enum SensorEvent {
     FirmwareUpdate { update: FirmwareUpdate },
     /// Latest fan status snapshot.
     #[serde(rename = "fan_status")]
-    FanStatus { command_id: CommandId, status: FanStatus },
+    FanStatus { command_id: CommandId, status: FanStatusWire },
     /// Current fan configuration.
     #[serde(rename = "fan_config")]
-    FanConfig { command_id: CommandId, config: FanConfig },
+    FanConfig { command_id: CommandId, config: FanConfigWire },
     /// Latest applied lighting command/runtime state.
     #[serde(rename = "lighting_state")]
     LightingState {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         command_id: Option<CommandId>,
-        state: LightingRuntimeState,
+        state: LightingRuntimeStateWire,
     },
 }
 
@@ -195,7 +195,8 @@ mod tests {
 
     fn assert_ipc_round_trip<T>(stream: StreamKind, value: &T) -> T
     where
-        T: Serialize + for<'de> Deserialize<'de>,
+        T: lib_ipc::archive::TransportEncode + rkyv::Archive,
+        T::Archived: for<'a> rkyv::bytecheck::CheckBytes<lib_ipc::archive::DecodeValidator<'a>> + rkyv::Deserialize<T, lib_ipc::archive::DecodeStrategy>,
     {
         let frame = lib_ipc::frame::Frame::encode_payload(ServiceKind::Peripherals, stream, CommandId::new(), FrameFlags::empty(), value).expect("encode ipc payload");
         frame.decode_payload().expect("decode ipc payload")
@@ -224,7 +225,7 @@ mod tests {
         use lib_sensors::model::{PowerSnapshot, SensorReading};
         let mut values = std::collections::BTreeMap::new();
         values.insert(SensorKind::Power, SensorReading::Power(PowerSnapshot::default()));
-        let event = SensorEvent::SnapshotTyped { command_id: None, scope: SensorScope::Device, values };
+        let event = SensorEvent::SnapshotTyped { command_id: None, scope: SensorScope::Device, values: values.into() };
         let serialized = serde_json::to_string(&event).expect("serialize");
         let deserialized: SensorEvent = serde_json::from_str(&serialized).expect("deserialize");
         assert!(matches!(deserialized, SensorEvent::SnapshotTyped { .. }));

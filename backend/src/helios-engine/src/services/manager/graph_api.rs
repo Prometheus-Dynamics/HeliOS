@@ -54,7 +54,7 @@ impl StreamManager {
             let mut manifest = ctx.manifest.write().await;
             for (key, value) in normalized_inputs {
                 if let Some(value) = value {
-                    manifest.pipeline_host_inputs.insert(key, JsonWire(value));
+                    manifest.pipeline_host_inputs.insert(key, JsonWire::from(value));
                 } else {
                     manifest.pipeline_host_inputs.remove(&key);
                 }
@@ -123,7 +123,7 @@ impl StreamManager {
             manifest_for_build.pipeline_enabled = true;
             manifest_for_build.pipelines = vec![crate::ipc::StreamPipelineBinding {
                 pipeline_id: CALIBRATION_MODE_PIPELINE_UUID,
-                pipeline_graph: Some(crate::ipc::JsonWire(graph_json_for_build.clone())),
+                pipeline_graph: Some(crate::ipc::JsonWire::from(graph_json_for_build.clone())),
                 pipeline_output: Some(output_port.to_string()),
                 pipeline_patch: None,
             }];
@@ -164,7 +164,7 @@ impl StreamManager {
             manifest.pipeline_enabled = true;
             manifest.pipelines = vec![crate::ipc::StreamPipelineBinding {
                 pipeline_id: CALIBRATION_MODE_PIPELINE_UUID,
-                pipeline_graph: Some(crate::ipc::JsonWire(graph_json)),
+                pipeline_graph: Some(crate::ipc::JsonWire::from(graph_json)),
                 pipeline_output: Some(output_port.to_string()),
                 pipeline_patch: None,
             }];
@@ -287,7 +287,7 @@ impl StreamManager {
 
     pub async fn set_graph(&self, stream_id: Uuid, graph_json: serde_json::Value, pipeline_id: Option<Uuid>, output: Option<String>) -> Result<()> {
         let ctx = self.get_stream(stream_id).await?;
-        let graph_wire = crate::ipc::JsonWire(graph_json);
+        let graph_wire = crate::ipc::JsonWire::from(graph_json);
 
         let mut manifest_snapshot = ctx.manifest.read().await.clone();
         manifest_snapshot.pipeline_enabled = true;
@@ -354,7 +354,7 @@ impl StreamManager {
             }
         };
 
-        let patch_wire = JsonWire(patch_json);
+        let patch_wire = JsonWire::from(patch_json);
         let mut updated = false;
         for binding in &mut manifest_snapshot.pipelines {
             if binding.pipeline_id == target_pipeline_id {
