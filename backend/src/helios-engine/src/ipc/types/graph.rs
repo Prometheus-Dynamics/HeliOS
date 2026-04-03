@@ -6,6 +6,8 @@ pub struct GraphOutputPortDescriptor {
     #[serde(default)]
     pub ty: Option<JsonWire>,
     pub previewable: bool,
+    #[serde(default)]
+    pub localization_kind: Option<crate::localization::types::LocalizationSourceKind>,
 }
 
 /// A serde JSON value that remains JSON in HTTP/OpenAPI payloads, but is encoded as JSON bytes when

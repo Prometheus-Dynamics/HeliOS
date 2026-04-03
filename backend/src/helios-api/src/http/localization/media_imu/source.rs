@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::http::AppState;
 use helios_engine::ipc::StreamSummary;
-use helios_engine::localization::types::LocalizationPipelineSource;
+use helios_engine::localization::types::{LocalizationPipelineSource, LocalizationSourceKind};
 
 use super::binding::{MEDIA_IMU_OUTPUT_KEY, parse_media_imu_stream_id, resolve_binding_for_stream};
 
@@ -30,6 +30,7 @@ pub(crate) async fn source_for_stream(state: &AppState, stream: &StreamSummary, 
         pipeline_id: "media-imu".to_string(),
         pipeline_label: "Media IMU".to_string(),
         output_key: MEDIA_IMU_OUTPUT_KEY.to_string(),
+        localization_kind: LocalizationSourceKind::Imu,
         data_type: None,
     })
 }

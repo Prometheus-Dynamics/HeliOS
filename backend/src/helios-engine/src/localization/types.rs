@@ -1,3 +1,4 @@
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -17,6 +18,14 @@ pub struct LocalizationPipelineStatus {
     pub last_run_ms: Option<f64>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalizationSourceKind {
+    Detection,
+    Pose,
+    Imu,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalizationPipelineSource {
@@ -28,6 +37,7 @@ pub struct LocalizationPipelineSource {
     pub pipeline_id: String,
     pub pipeline_label: String,
     pub output_key: String,
+    pub localization_kind: LocalizationSourceKind,
     #[serde(default)]
     pub data_type: Option<serde_json::Value>,
 }

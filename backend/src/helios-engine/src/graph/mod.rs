@@ -108,6 +108,19 @@ fn normalize_preview_output_for_port(output: GraphPreviewOutput, port: &str, hos
     }
 }
 
+fn localization_output_kind_for_type(ty: &DaedalusTypeExpr) -> Option<crate::localization::types::LocalizationSourceKind> {
+    let normalized = ty.clone().normalize();
+    let aruco_detections = lib_cv::daedalus_types::aruco_detections_2d().normalize();
+    let pose_output = lib_cv::daedalus_types::detection_pose_output().normalize();
+    let pose_detection = lib_cv::daedalus_types::detection_pose().normalize();
+
+    if normalized == aruco_detections || normalized == pose_output || normalized == pose_detection {
+        return Some(crate::localization::types::LocalizationSourceKind::Detection);
+    }
+
+    None
+}
+
 impl GraphPreviewOutput {
     pub fn size_bytes(&self) -> u64 {
         match self {
@@ -504,8 +517,9 @@ impl GraphHandle {
                 let key = name.to_ascii_lowercase();
                 let ty = types.get(&key).cloned();
                 let previewable = ty.as_ref().map(is_image_payload).unwrap_or(false);
+                let localization_kind = ty.as_ref().and_then(localization_output_kind_for_type);
                 let ty = ty.and_then(|expr| serde_json::to_value(expr).ok()).map(crate::ipc::JsonWire::from);
-                crate::ipc::GraphOutputPortDescriptor { name, ty, previewable }
+                crate::ipc::GraphOutputPortDescriptor { name, ty, previewable, localization_kind }
             })
             .collect()
     }

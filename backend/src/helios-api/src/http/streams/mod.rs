@@ -619,7 +619,7 @@ fn ensure_raw_undistorted_outputs(outputs: &mut Vec<GraphOutputPortDescriptor>) 
     if let Some(raw) = raw_template
         && !has_undistorted
     {
-        outputs.push(GraphOutputPortDescriptor { name: "undistorted".to_string(), ty: raw.ty, previewable: raw.previewable });
+        outputs.push(GraphOutputPortDescriptor { name: "undistorted".to_string(), ty: raw.ty, previewable: raw.previewable, localization_kind: raw.localization_kind });
     }
 }
 

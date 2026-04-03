@@ -1,12 +1,12 @@
 use axum::{Json, extract::State};
 
-use super::compat::is_localization_compatible_output;
 use super::profile::build_profile_output_sources;
 use super::{IMU_EXTERNAL_ID, PROFILE_STREAM_PREFIX};
 use crate::http::error::{ApiError, ApiResult};
 use crate::http::{AppState, peers, pipelines};
 use helios_engine::ipc::EngineEvent;
-use helios_engine::localization::types::LocalizationPipelineSource;
+use helios_engine::localization::types::{LocalizationPipelineSource, LocalizationSourceKind};
+use serde_json::Value as JsonValue;
 
 pub(super) async fn list_sources(State(state): State<AppState>) -> ApiResult<Json<Vec<LocalizationPipelineSource>>> {
     let streams = state.engine.list_streams().await.map_err(|err| ApiError::bad_gateway(err.to_string()))?;
@@ -61,10 +61,10 @@ pub(super) async fn list_sources(State(state): State<AppState>) -> ApiResult<Jso
 
         for desc in outputs {
             let output_key = desc.name;
-            let data_type = desc.ty.map(Into::into);
-            if !is_localization_compatible_output(&output_key, data_type.as_ref()) {
+            let Some(localization_kind) = desc.localization_kind else {
                 continue;
-            }
+            };
+            let data_type = desc.ty.map(Into::into);
             out.push(LocalizationPipelineSource {
                 id: format!("{stream_id}:{output_key}"),
                 stream_id: stream_id.to_string(),
@@ -74,6 +74,7 @@ pub(super) async fn list_sources(State(state): State<AppState>) -> ApiResult<Jso
                 pipeline_id: pipeline_id.clone(),
                 pipeline_label: pipeline_label.clone(),
                 output_key,
+                localization_kind,
                 data_type,
             });
         }
@@ -105,11 +106,15 @@ pub(super) async fn list_sources(State(state): State<AppState>) -> ApiResult<Jso
             pipeline_id: "external".to_string(),
             pipeline_label: "IMU".to_string(),
             output_key: "imu_pose".to_string(),
+            localization_kind: LocalizationSourceKind::Imu,
             data_type: None,
         });
     }
 
     for source in external_sources {
+        let Some(localization_kind) = localization_kind_from_data_type(source.data_type.as_ref()) else {
+            continue;
+        };
         let source_id = source.id;
         let output_key = source.output_key;
         out.push(LocalizationPipelineSource {
@@ -121,9 +126,21 @@ pub(super) async fn list_sources(State(state): State<AppState>) -> ApiResult<Jso
             pipeline_id: "external".to_string(),
             pipeline_label: source.pipeline_label.unwrap_or_else(|| "External".to_string()),
             output_key,
+            localization_kind,
             data_type: source.data_type,
         });
     }
 
     Ok(Json(out))
+}
+
+fn localization_kind_from_data_type(data_type: Option<&JsonValue>) -> Option<LocalizationSourceKind> {
+    let kind = data_type.and_then(JsonValue::as_object).and_then(|fields| fields.get("kind")).and_then(JsonValue::as_str)?;
+
+    match kind {
+        "localization_detection_pose" => Some(LocalizationSourceKind::Detection),
+        "localization_pose" => Some(LocalizationSourceKind::Pose),
+        "imu_pose" => Some(LocalizationSourceKind::Imu),
+        _ => None,
+    }
 }

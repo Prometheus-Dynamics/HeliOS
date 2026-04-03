@@ -3310,6 +3310,7 @@ export interface components {
             nodes: number[];
         };
         GraphOutputPortDescriptor: {
+            localization_kind?: null | components["schemas"]["LocalizationSourceKind"];
             name: string;
             previewable: boolean;
             ty?: null | components["schemas"]["JsonWire"];
@@ -3867,6 +3868,7 @@ export interface components {
             cameraUid: string;
             dataType?: unknown;
             id: string;
+            localizationKind: components["schemas"]["LocalizationSourceKind"];
             outputKey: string;
             pipelineId: string;
             pipelineLabel: string;
@@ -3911,7 +3913,7 @@ export interface components {
             /** Format: double */
             tagSizeM?: number | null;
             temporalStabilization?: components["schemas"]["LocalizationTemporalStabilizationConfig"];
-            viewEnabled?: boolean;
+            viewEnabled: boolean;
         };
         LocalizationProfilesExportEnvelope: {
             config: components["schemas"]["LocalizationConfig"];
@@ -4152,6 +4154,8 @@ export interface components {
             /** Format: float */
             weight?: number;
         };
+        /** @enum {string} */
+        LocalizationSourceKind: "detection" | "pose" | "imu";
         LocalizationSourcePose: {
             cameraUid: string;
             pose: components["schemas"]["LocalizationPose"];

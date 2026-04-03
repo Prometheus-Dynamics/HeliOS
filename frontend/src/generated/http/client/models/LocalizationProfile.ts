@@ -34,6 +34,6 @@ export type LocalizationProfile = {
     sources?: Array<LocalizationSourceConfig>;
     tagSizeM?: number | null;
     temporalStabilization?: LocalizationTemporalStabilizationConfig;
-    viewEnabled?: boolean;
+    viewEnabled: boolean;
 };
 

@@ -8,10 +8,6 @@ pub(super) fn default_profile_enabled() -> bool {
     true
 }
 
-pub(super) fn default_view_enabled() -> bool {
-    true
-}
-
 pub(super) fn default_solver_configs() -> Vec<LocalizationSolverConfig> {
     vec![LocalizationSolverConfig {
         id: "group".to_string(),

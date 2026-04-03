@@ -29,7 +29,6 @@ import {
 } from '$lib/features/localization/utils';
 import {
   hasDeviceImuExternalStreamPrefix,
-  isDeviceImuCameraUid
 } from '$lib/features/localization/externalSourceIds';
 import { pipelineGraphTotalMs } from '$lib/features/localization/page/localizationMetricsUtils';
 
@@ -294,14 +293,7 @@ export const buildViewerCameras = (options: {
 
   const isImuLikeSource = (source: LocalizationPipelineSource): boolean => {
     const streamId = String(source.streamId ?? '').trim().toLowerCase();
-    const outputKey = String(source.outputKey ?? '').trim().toLowerCase();
-    const cameraUid = String(source.cameraUid ?? '').trim().toLowerCase();
-    return (
-      hasDeviceImuExternalStreamPrefix(streamId) ||
-      streamId.startsWith('external:media-imu-') ||
-      outputKey.includes('imu') ||
-      isDeviceImuCameraUid(cameraUid)
-    );
+    return source.localizationKind === 'imu' || hasDeviceImuExternalStreamPrefix(streamId);
   };
 
   const sourceScoreForGroup = (source: LocalizationPipelineSource, groupKey: string): number => {
@@ -347,8 +339,9 @@ export const buildViewerCameras = (options: {
     const streamId = canonicalStreamIdForGroup(sources);
     const nonImuCameraUid =
       sources
+        .filter((source) => !isImuLikeSource(source))
         .map((source) => String(source.cameraUid ?? '').trim())
-        .find((cameraUid) => cameraUid.length > 0 && !isDeviceImuCameraUid(cameraUid)) ?? null;
+        .find((cameraUid) => cameraUid.length > 0) ?? null;
     const cameraUid = nonImuCameraUid ?? (representative ? String(representative.cameraUid ?? '').trim() || null : null);
     const streamAlias =
       String(group.label ?? '').trim() ||

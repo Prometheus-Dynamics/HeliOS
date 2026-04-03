@@ -1,5 +1,4 @@
 mod catalog;
-mod compat;
 mod profile;
 mod sampling;
 

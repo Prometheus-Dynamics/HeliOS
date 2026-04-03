@@ -8,7 +8,7 @@ use crate::media_read_model::MediaImuSelectionInput;
 use helios_engine::localization::types::PipelineOutputSample;
 use lib_sensors::dto::{ImuAxesPayload, ImuOrientationPayload, ImuStatusPayload};
 
-use super::binding::{MEDIA_IMU_EXTERNAL_PREFIX, MEDIA_IMU_OUTPUT_KEY, MEDIA_IMU_OUTPUT_KEY_LEGACY, parse_media_imu_stream_id, resolve_binding_for_stream};
+use super::binding::{MEDIA_IMU_EXTERNAL_PREFIX, MEDIA_IMU_OUTPUT_KEY, parse_media_imu_stream_id, resolve_binding_for_stream};
 
 pub(crate) async fn fetch_media_imu_sample_for_stream(state: &AppState, stream_id: Uuid, output_key: &str) -> ApiResult<PipelineOutputSample> {
     let source_id = format!("{MEDIA_IMU_EXTERNAL_PREFIX}{stream_id}");
@@ -17,7 +17,7 @@ pub(crate) async fn fetch_media_imu_sample_for_stream(state: &AppState, stream_i
 
 pub(crate) async fn fetch_media_imu_sample(state: &AppState, source_id: &str, output_key: &str) -> ApiResult<PipelineOutputSample> {
     let output = output_key.trim();
-    if !output.eq_ignore_ascii_case(MEDIA_IMU_OUTPUT_KEY) && !output.eq_ignore_ascii_case(MEDIA_IMU_OUTPUT_KEY_LEGACY) {
+    if !output.eq_ignore_ascii_case(MEDIA_IMU_OUTPUT_KEY) {
         return Err(ApiError::bad_request("unsupported output key"));
     }
 

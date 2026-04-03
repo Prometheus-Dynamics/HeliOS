@@ -355,13 +355,7 @@ export const parseImuRotationSample = (value: unknown): ParsedImuRotation | null
 };
 
 export const isImuSource = (source: LocalizationPipelineSource): boolean =>
-  source.streamId.startsWith('external:media-imu-') ||
-  hasImuToken(source.streamId) ||
-  hasImuToken(source.streamLabel) ||
-  hasImuToken(source.cameraUid) ||
-  hasImuToken(source.cameraPath) ||
-  hasImuToken(source.pipelineLabel) ||
-  hasImuToken(source.outputKey);
+  source.localizationKind === 'imu';
 
 export const imuSourcePriority = (source: LocalizationPipelineSource): number => {
   if (source.streamId.startsWith('external:media-imu-')) return 0;

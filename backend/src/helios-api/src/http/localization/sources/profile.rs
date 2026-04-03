@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use super::{ApiLocalizationSourceFetcher, PROFILE_OUTPUT_PREFIX};
 use crate::http::localization::{config, maps, solve};
 use helios_engine::localization::config::{LocalizationConfig, LocalizationPoseSpace, LocalizationProfile, select_profile};
-use helios_engine::localization::types::{LocalizationDetectionPose, LocalizationPipelineSource, LocalizationSolverOutputs};
+use helios_engine::localization::types::{LocalizationDetectionPose, LocalizationPipelineSource, LocalizationSolverOutputs, LocalizationSourceKind};
 
 #[derive(Debug, Clone)]
 struct ProfileOutputSelector {
@@ -63,6 +63,7 @@ pub(super) fn build_profile_output_sources(config: &LocalizationConfig) -> Vec<L
                             pipeline_id: pipeline_id.clone(),
                             pipeline_label: pipeline_label.clone(),
                             output_key,
+                            localization_kind: if is_detection_pose_space(*pose_space) { LocalizationSourceKind::Detection } else { LocalizationSourceKind::Pose },
                             data_type: Some(json!({ "kind": if is_detection_pose_space(*pose_space) { "localization_detection_pose" } else { "localization_pose" } })),
                         });
                     }
@@ -82,6 +83,7 @@ pub(super) fn build_profile_output_sources(config: &LocalizationConfig) -> Vec<L
                     pipeline_id: pipeline_id.clone(),
                     pipeline_label: pipeline_label.clone(),
                     output_key,
+                    localization_kind: LocalizationSourceKind::Pose,
                     data_type: Some(json!({ "kind": "localization_pose" })),
                 });
             }

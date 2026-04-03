@@ -227,6 +227,7 @@ pub(crate) fn imu_pose_to_viewer_frame(pose: PoseTransform) -> PoseTransform {
 mod tests {
     use super::*;
     use crate::localization::config::LocalizationSourceConfig;
+    use nalgebra::{UnitQuaternion, Vector3};
 
     fn source_config() -> LocalizationSourceConfig {
         LocalizationSourceConfig {

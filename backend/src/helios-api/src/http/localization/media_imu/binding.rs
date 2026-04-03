@@ -8,7 +8,6 @@ use helios_engine::ipc::StreamSummary;
 
 pub(super) const MEDIA_IMU_EXTERNAL_PREFIX: &str = "media-imu-";
 pub(crate) const MEDIA_IMU_OUTPUT_KEY: &str = "imu_pose";
-pub(crate) const MEDIA_IMU_OUTPUT_KEY_LEGACY: &str = "pose";
 
 #[derive(Debug, Clone)]
 pub(super) struct MediaImuBinding {

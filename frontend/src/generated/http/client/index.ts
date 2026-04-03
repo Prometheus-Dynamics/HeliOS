@@ -187,6 +187,7 @@ export type { LocalizationSolverResult } from './models/LocalizationSolverResult
 export type { LocalizationSolverRuntimeTuningConfig } from './models/LocalizationSolverRuntimeTuningConfig';
 export type { LocalizationSolveTimings } from './models/LocalizationSolveTimings';
 export type { LocalizationSourceConfig } from './models/LocalizationSourceConfig';
+export type { LocalizationSourceKind } from './models/LocalizationSourceKind';
 export type { LocalizationSourcePose } from './models/LocalizationSourcePose';
 export type { LocalizationSourceSampleStatus } from './models/LocalizationSourceSampleStatus';
 export type { LocalizationTemporalStabilizationConfig } from './models/LocalizationTemporalStabilizationConfig';

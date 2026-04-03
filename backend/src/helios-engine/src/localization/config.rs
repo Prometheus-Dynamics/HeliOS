@@ -47,7 +47,6 @@ pub struct LocalizationProfile {
     pub enabled: bool,
     #[serde(default)]
     pub color: Option<String>,
-    #[serde(default = "default_view_enabled")]
     pub view_enabled: bool,
     #[serde(default)]
     pub temporal_stabilization: LocalizationTemporalStabilizationConfig,

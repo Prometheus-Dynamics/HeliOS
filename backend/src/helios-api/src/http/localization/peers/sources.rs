@@ -8,7 +8,7 @@ use url::Url;
 
 use crate::http::localization::peers::custom as localization_peer_custom;
 use crate::http::peers::{PeerInfo, PeerIntegrationKind, PeerIntegrationMapping};
-use helios_engine::localization::types::{LocalizationPipelineSource, PipelineOutputSample};
+use helios_engine::localization::types::{LocalizationPipelineSource, LocalizationSourceKind, PipelineOutputSample};
 
 static PEER_HTTP: Lazy<reqwest::Client> = Lazy::new(|| crate::http::reqwest_client::build_http_client("HeliOS/localization-peers").expect("reqwest client"));
 static PHOTONVISION_CACHE: Lazy<Mutex<HashMap<String, PhotonvisionCacheEntry>>> = Lazy::new(|| Mutex::new(HashMap::new()));
@@ -46,7 +46,16 @@ pub(crate) async fn list_peer_sources(peer: &PeerInfo) -> Vec<LocalizationPipeli
             if allowlist.is_empty() || allowlist.iter().any(|entry| entry.output_key.as_deref() == Some("tag_poses")) {
                 sources.push(build_peer_source(
                     peer,
-                    PeerSourceArgs { stream_suffix: None, output_key: "tag_poses", pipeline_label: "Peer", label: None, camera_uid: None, camera_path: None, data_type: None },
+                    PeerSourceArgs {
+                        stream_suffix: None,
+                        output_key: "tag_poses",
+                        pipeline_label: "Peer",
+                        label: None,
+                        camera_uid: None,
+                        camera_path: None,
+                        localization_kind: LocalizationSourceKind::Detection,
+                        data_type: None,
+                    },
                 ));
             }
         }
@@ -74,6 +83,7 @@ pub(crate) async fn list_peer_sources(peer: &PeerInfo) -> Vec<LocalizationPipeli
                             label: None,
                             camera_uid: Some(camera_uid.as_str()),
                             camera_path: Some(camera_path.as_str()),
+                            localization_kind: LocalizationSourceKind::Detection,
                             data_type: None,
                         },
                     ));
@@ -81,7 +91,16 @@ pub(crate) async fn list_peer_sources(peer: &PeerInfo) -> Vec<LocalizationPipeli
             } else if allowlist.is_empty() {
                 sources.push(build_peer_source(
                     peer,
-                    PeerSourceArgs { stream_suffix: None, output_key: "tag_poses", pipeline_label: "Peer", label: None, camera_uid: None, camera_path: None, data_type: None },
+                    PeerSourceArgs {
+                        stream_suffix: None,
+                        output_key: "tag_poses",
+                        pipeline_label: "Peer",
+                        label: None,
+                        camera_uid: None,
+                        camera_path: None,
+                        localization_kind: LocalizationSourceKind::Detection,
+                        data_type: None,
+                    },
                 ));
             } else {
                 sources.extend(build_allowlist_sources(peer, &allowlist));
@@ -278,8 +297,9 @@ fn build_allowlist(outputs: &[String]) -> Vec<PeerOutputEntry> {
 fn build_allowlist_sources(peer: &PeerInfo, allowlist: &[PeerOutputEntry]) -> Vec<LocalizationPipelineSource> {
     allowlist
         .iter()
-        .map(|entry| {
-            build_peer_source(
+        .filter_map(|entry| {
+            let localization_kind = entry.localization_kind()?;
+            Some(build_peer_source(
                 peer,
                 PeerSourceArgs {
                     stream_suffix: entry.stream_suffix.as_deref(),
@@ -288,9 +308,10 @@ fn build_allowlist_sources(peer: &PeerInfo, allowlist: &[PeerOutputEntry]) -> Ve
                     label: entry.label.as_deref(),
                     camera_uid: entry.camera_uid.as_deref(),
                     camera_path: entry.camera_path.as_deref(),
+                    localization_kind,
                     data_type: entry.data_type.as_ref(),
                 },
-            )
+            ))
         })
         .collect()
 }
@@ -305,7 +326,7 @@ fn default_custom_outputs(mapping: Option<&PeerIntegrationMapping>) -> Vec<PeerO
             camera_uid: None,
             camera_path: None,
             data_type: Some(serde_json::json!({
-                "type": "pose",
+                "kind": "localization_pose",
             })),
         });
     }
@@ -317,7 +338,7 @@ fn default_custom_outputs(mapping: Option<&PeerIntegrationMapping>) -> Vec<PeerO
             camera_uid: None,
             camera_path: None,
             data_type: Some(serde_json::json!({
-                "type": "aruco",
+                "kind": "localization_detection_pose",
             })),
         });
     }
@@ -358,6 +379,7 @@ struct PeerSourceArgs<'a> {
     label: Option<&'a str>,
     camera_uid: Option<&'a str>,
     camera_path: Option<&'a str>,
+    localization_kind: LocalizationSourceKind,
     data_type: Option<&'a JsonValue>,
 }
 
@@ -379,7 +401,16 @@ fn build_peer_source(peer: &PeerInfo, args: PeerSourceArgs<'_>) -> LocalizationP
         pipeline_id: "peer".to_string(),
         pipeline_label: args.pipeline_label.to_string(),
         output_key: args.output_key.to_string(),
-        data_type: args.data_type.cloned(),
+        localization_kind: args.localization_kind,
+        data_type: args.data_type.cloned().or_else(|| Some(localization_kind_data_type(args.localization_kind))),
+    }
+}
+
+fn localization_kind_data_type(kind: LocalizationSourceKind) -> JsonValue {
+    match kind {
+        LocalizationSourceKind::Detection => serde_json::json!({ "kind": "localization_detection_pose" }),
+        LocalizationSourceKind::Pose => serde_json::json!({ "kind": "localization_pose" }),
+        LocalizationSourceKind::Imu => serde_json::json!({ "kind": "imu_pose" }),
     }
 }
 
@@ -433,5 +464,16 @@ impl PeerOutputEntry {
             }
         }
         true
+    }
+
+    fn localization_kind(&self) -> Option<LocalizationSourceKind> {
+        let kind = self.data_type.as_ref().and_then(JsonValue::as_object).and_then(|fields| fields.get("kind")).and_then(JsonValue::as_str);
+
+        match kind.or(self.output_key.as_deref().map(str::trim)) {
+            Some("localization_detection_pose") | Some("tag_poses") => Some(LocalizationSourceKind::Detection),
+            Some("localization_pose") | Some("pose") => Some(LocalizationSourceKind::Pose),
+            Some("imu_pose") => Some(LocalizationSourceKind::Imu),
+            _ => None,
+        }
     }
 }
