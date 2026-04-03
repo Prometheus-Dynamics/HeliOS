@@ -1,4 +1,3 @@
-use bincode::{Decode, Encode};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue, json};
@@ -7,7 +6,7 @@ use uuid::Uuid;
 use crate::imu::{ImuFusionMethod, ImuRange, ImuSample, ImuSettings, ImuSources};
 use crate::{fan_config, led_config, sensor_config};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct AxesReading {
     pub x: f32,
     pub y: f32,
@@ -20,7 +19,7 @@ impl From<[f32; 3]> for AxesReading {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct ImuSourceLabels {
     pub accel_gyro: Option<String>,
     pub magnetometer: Option<String>,
@@ -32,7 +31,7 @@ impl ImuSourceLabels {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct ImuReading {
     pub orientation: Option<[f32; 3]>,
     pub quaternion: Option<[f32; 4]>,
@@ -57,10 +56,8 @@ pub struct ImuReading {
     pub motion_fast_threshold_g: Option<f32>,
     pub motion_noise_floor_g: Option<f32>,
     pub dr_confidence: Option<f32>,
-    #[bincode(with_serde)]
     pub fusion: Option<ImuFusionMethod>,
     pub dt_seconds: Option<f32>,
-    #[bincode(with_serde)]
     pub updated_at: Option<DateTime<Utc>>,
     pub update_interval_ms: Option<u64>,
     pub dr_velocity_damp_tau_seconds: Option<f32>,
@@ -69,7 +66,6 @@ pub struct ImuReading {
     pub dr_max_speed_mps: Option<f32>,
     pub dr_max_position_m: Option<f32>,
     pub dr_lock_position: Option<bool>,
-    #[bincode(with_serde)]
     pub range: Option<ImuRange>,
     pub sources: ImuSourceLabels,
     pub last_error: Option<String>,
@@ -163,7 +159,7 @@ impl ImuReading {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct PowerSourceReading {
     pub label: String,
     pub bus: u32,
@@ -174,12 +170,11 @@ pub struct PowerSourceReading {
     pub shunt_volts: f32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct PowerSnapshot {
     pub total_watts: f64,
     pub total_amps: f64,
     pub volts: Option<f64>,
-    #[bincode(with_serde)]
     pub updated_at: Option<DateTime<Utc>>,
     pub sources: Vec<PowerSourceReading>,
     pub errors: Vec<String>,
@@ -200,13 +195,12 @@ impl PowerSnapshot {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct FanSnapshot {
-    #[bincode(with_serde)]
     pub status: fan_config::FanStatus,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum SensorReading {
     Accelerometer(AxesReading),
     Gyroscope(AxesReading),
@@ -214,19 +208,16 @@ pub enum SensorReading {
     Imu(Box<ImuReading>),
     Power(PowerSnapshot),
     Fan(FanSnapshot),
-    Raw(#[bincode(with_serde)] JsonValue),
+    Raw(JsonValue),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct SensorDescriptorModel {
     pub backend: String,
     pub identifier: String,
     pub present: bool,
-    #[bincode(with_serde)]
     pub info: JsonMap<String, JsonValue>,
-    #[bincode(with_serde)]
     pub metadata: JsonMap<String, JsonValue>,
-    #[bincode(with_serde)]
     pub stream_id: Option<Uuid>,
     pub value: Option<SensorReading>,
 }

@@ -1,16 +1,15 @@
 use std::{collections::BTreeSet, fmt, str::FromStr};
 
 use chrono::{DateTime, Utc};
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use bincode::{Decode, Encode};
-
 pub type Timestamp = DateTime<Utc>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 #[serde(transparent)]
-pub struct CommandId(#[bincode(with_serde)] Uuid);
+pub struct CommandId(Uuid);
 
 impl CommandId {
     #[must_use]
@@ -53,7 +52,7 @@ impl fmt::Display for CommandId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct ProtocolVersion {
     pub major: u16,
     pub minor: u16,
@@ -116,7 +115,7 @@ impl FromStr for ProtocolVersion {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct FeatureSet {
     features: BTreeSet<String>,
 }
@@ -157,12 +156,12 @@ impl FeatureSet {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct JournalMetadata {
     pub file_name: String,
-    #[bincode(with_serde)]
+    #[rkyv(with = crate::archive::with::SerdeBytes)]
     pub created_at: Timestamp,
-    #[bincode(with_serde)]
+    #[rkyv(with = crate::archive::with::SerdeBytes)]
     pub last_trimmed_at: Option<Timestamp>,
     pub entries: u64,
 }

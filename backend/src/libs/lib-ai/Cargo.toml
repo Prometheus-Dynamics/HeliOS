@@ -30,7 +30,6 @@ thiserror = { workspace = true }
 uuid = { workspace = true }
 lib-schema-migration = { path = "../lib-schema-migration" }
 libloading = { version = "0.9.0" }
-bincode = { workspace = true }
 serde_json = { workspace = true }
 image = { workspace = true, optional = true }
 imageproc = { workspace = true }

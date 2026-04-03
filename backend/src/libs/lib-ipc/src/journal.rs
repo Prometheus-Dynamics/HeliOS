@@ -5,25 +5,31 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::SystemTime;
 
-use chrono::{DateTime, Utc};
-
-use bincode::{
-    Decode, Encode, decode_from_slice, encode_to_vec,
-    error::{DecodeError, EncodeError},
+use crate::{
+    archive,
+    envelope::{TaggedDecodeError, TaggedEncode, TaggedEnvelope},
+    types::JournalMetadata,
 };
-
-use crate::{envelope::bincode_config, types::JournalMetadata};
+use chrono::{DateTime, Utc};
 
 const HEADER_LEN: usize = 4;
 const DEFAULT_MAX_JOURNAL_BYTES: u64 = 8 * 1024 * 1024;
 const MIN_MAX_JOURNAL_BYTES: u64 = 64 * 1024;
 const MAX_MAX_JOURNAL_BYTES: u64 = 256 * 1024 * 1024;
 
-fn map_encode_error(err: EncodeError) -> io::Error {
+fn map_encode_error(err: archive::Result<Vec<u8>>) -> io::Result<Vec<u8>> {
+    err.map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
+}
+
+fn map_decode_error(err: archive::Result<TaggedEnvelope>) -> io::Result<TaggedEnvelope> {
+    err.map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))
+}
+
+fn map_tagged_encode_error(err: crate::envelope::TaggedEncodeError) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, err)
 }
 
-fn map_decode_error(err: DecodeError) -> io::Error {
+fn map_tagged_decode_error(err: TaggedDecodeError) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, err)
 }
 
@@ -84,10 +90,10 @@ impl<T> Journal<T> {
 
     pub fn append(&self, payload: &T) -> io::Result<JournalEntry<T>>
     where
-        T: Encode + Clone,
+        T: Clone + TaggedEncode,
     {
         let mut file = self.file.lock().expect("journal poisoned");
-        let data = encode_to_vec(payload, bincode_config()).map_err(map_encode_error)?;
+        let data = payload.encode_envelope().map_err(map_tagged_encode_error).and_then(|envelope| map_encode_error(archive::encode_to_vec(&envelope)))?;
         if data.len() > u32::MAX as usize {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "journal payload exceeds 4 GiB limit"));
         }
@@ -116,7 +122,7 @@ impl<T> Journal<T> {
     where
         I: IntoIterator,
         I::Item: AsRef<T>,
-        T: Encode + Clone,
+        T: Clone + TaggedEncode,
     {
         let mut file = self.file.lock().expect("journal poisoned");
         let mut entries = Vec::new();
@@ -125,7 +131,7 @@ impl<T> Journal<T> {
 
         for payload in payloads {
             let payload = payload.as_ref();
-            let data = encode_to_vec(payload, bincode_config()).map_err(map_encode_error)?;
+            let data = payload.encode_envelope().map_err(map_tagged_encode_error).and_then(|envelope| map_encode_error(archive::encode_to_vec(&envelope)))?;
             if data.len() > u32::MAX as usize {
                 return Err(io::Error::new(io::ErrorKind::InvalidData, "journal payload exceeds 4 GiB limit"));
             }
@@ -216,7 +222,7 @@ impl<T> Journal<T> {
 
     pub fn replay(&self) -> io::Result<Vec<JournalEntry<T>>>
     where
-        T: Decode<()>,
+        T: TryFrom<TaggedEnvelope, Error = TaggedDecodeError>,
     {
         let mut file = File::open(&self.path)?;
         let mut entries = Vec::new();
@@ -235,7 +241,8 @@ impl<T> Journal<T> {
             let len = u32::from_le_bytes(header) as usize;
             let mut data = vec![0u8; len];
             file.read_exact(&mut data)?;
-            let (payload, _): (T, usize) = decode_from_slice(&data, bincode_config()).map_err(map_decode_error)?;
+            let envelope = map_decode_error(archive::decode_from_slice(&data))?;
+            let payload = T::try_from(envelope).map_err(map_tagged_decode_error)?;
             let next_offset = offset + HEADER_LEN as u64 + len as u64;
             entries.push(JournalEntry { offset, next_offset, payload });
             offset = next_offset;
@@ -244,10 +251,7 @@ impl<T> Journal<T> {
         Ok(entries)
     }
 
-    pub fn metadata(&self) -> io::Result<JournalMetadata>
-    where
-        T: Decode<()>,
-    {
+    pub fn metadata(&self) -> io::Result<JournalMetadata> {
         let meta = std::fs::metadata(&self.path)?;
         let created_at = meta.created().ok().map(system_time_to_timestamp).unwrap_or_else(Utc::now);
         let mut entries = 0u64;
@@ -295,31 +299,59 @@ pub type JournalReader<T> = Journal<T>;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::archive;
     use crate::types::CommandId;
     use serde::{Deserialize, Serialize};
     use tempfile::tempdir;
     use uuid::Uuid;
 
-    #[derive(Debug, Encode, Decode, Serialize, Deserialize, PartialEq)]
-    enum ExampleCommand {
-        Unit,
-        Struct { value: u8 },
+    macro_rules! error {
+        ($($tt:tt)*) => {};
     }
 
-    #[derive(Debug, Clone, Encode, Decode, Serialize, Deserialize, PartialEq)]
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
     enum TestCommand {
-        ApplyInput {
-            command_id: CommandId,
-            #[bincode(with_serde)]
-            pipeline_id: Uuid,
-            port: String,
-            value: i64,
-        },
-        Heartbeat {
-            command_id: CommandId,
-            sequence: u64,
-        },
+        ApplyInput { command_id: CommandId, pipeline_id: Uuid, port: String, value: i64 },
+        Heartbeat { command_id: CommandId, sequence: u64 },
     }
+
+    #[repr(u16)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum TestCommandKind {
+        ApplyInput = 0,
+        Heartbeat = 1,
+    }
+
+    impl TestCommandKind {
+        const fn to_u16(self) -> u16 {
+            self as u16
+        }
+
+        fn from_u16(value: u16) -> Option<Self> {
+            match value {
+                0 => Some(Self::ApplyInput),
+                1 => Some(Self::Heartbeat),
+                _ => None,
+            }
+        }
+    }
+
+    const _: () = {
+        crate::tagged_enum! {
+            impl crate::journal::tests::TestCommand => crate::journal::tests::TestCommandKind {
+                struct ApplyInput {
+                    command_id: CommandId => with_serde,
+                    pipeline_id: Uuid => with_serde,
+                    port: String,
+                    value: i64
+                },
+                struct Heartbeat {
+                    command_id: CommandId => with_serde,
+                    sequence: u64
+                },
+            }
+        }
+    };
 
     fn sample_apply_command() -> (CommandId, TestCommand) {
         let command_id = CommandId::new();
@@ -328,18 +360,10 @@ mod tests {
     }
 
     #[test]
-    fn example_tagged_enum_roundtrip() {
-        let value = ExampleCommand::Struct { value: 7 };
-        let bytes = encode_to_vec(&value, bincode_config()).expect("serialize example");
-        let (decoded, _): (ExampleCommand, usize) = decode_from_slice(&bytes, bincode_config()).expect("deserialize example");
-        assert_eq!(decoded, value);
-    }
-
-    #[test]
     fn test_command_roundtrip() {
         let (_, command) = sample_apply_command();
-        let bytes = encode_to_vec(&command, bincode_config()).expect("serialize engine command");
-        let (decoded, _): (TestCommand, usize) = decode_from_slice(&bytes, bincode_config()).expect("deserialize engine command");
+        let envelope = command.encode_envelope().expect("serialize engine command");
+        let decoded = TestCommand::try_from(envelope).expect("deserialize engine command");
         assert!(matches!(decoded, TestCommand::ApplyInput { .. }));
     }
 
@@ -432,17 +456,16 @@ mod tests {
     #[test]
     fn command_id_roundtrip() {
         let command_id = CommandId::new();
-        let bytes = encode_to_vec(command_id, bincode_config()).expect("serialize command id");
-        let (decoded, _): (CommandId, usize) = decode_from_slice(&bytes, bincode_config()).expect("deserialize command id");
+        let bytes = archive::encode_to_vec(&command_id).expect("serialize command id");
+        let decoded: CommandId = archive::decode_from_slice(&bytes).expect("deserialize command id");
         assert_eq!(decoded, command_id);
     }
 
     #[test]
     fn uuid_roundtrip() {
-        let uuid = Uuid::new_v4();
-        let bytes = encode_to_vec(uuid.as_u128(), bincode_config()).expect("serialize uuid");
-        let (decoded, _): (u128, usize) = decode_from_slice(&bytes, bincode_config()).expect("deserialize uuid");
-        let decoded = Uuid::from_u128(decoded);
+        let uuid = Uuid::new_v4().as_u128();
+        let bytes = archive::encode_to_vec(&uuid).expect("serialize uuid");
+        let decoded: u128 = archive::decode_from_slice(&bytes).expect("deserialize uuid");
         assert_eq!(decoded, uuid);
     }
 }

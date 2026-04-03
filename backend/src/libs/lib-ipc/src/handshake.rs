@@ -1,17 +1,16 @@
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use bincode::{Decode, Encode};
-
 use crate::types::{FeatureSet, ProtocolVersion, Timestamp};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct ClientHello {
     pub protocol: ProtocolVersion,
     pub client_name: String,
     pub client_version: String,
     pub supported_features: FeatureSet,
-    #[bincode(with_serde)]
+    #[rkyv(with = crate::archive::with::SerdeBytes)]
     pub instance_id: Uuid,
 }
 
@@ -22,12 +21,12 @@ impl ClientHello {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct ServerHello {
     pub protocol: ProtocolVersion,
     pub server_name: String,
     pub server_version: String,
-    #[bincode(with_serde)]
+    #[rkyv(with = crate::archive::with::SerdeBytes)]
     pub session_id: Uuid,
     pub accepted_features: FeatureSet,
     pub server_features: FeatureSet,
@@ -51,16 +50,16 @@ impl ServerHello {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct HandshakeReject {
     pub protocol: ProtocolVersion,
     pub reason: String,
-    #[bincode(with_serde)]
+    #[rkyv(with = crate::archive::with::SerdeBytes)]
     pub retry_after: Option<Timestamp>,
     pub required_protocol: Option<ProtocolVersion>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
 pub enum HandshakeResponse {
     Accepted(ServerHello),
     Rejected(HandshakeReject),
@@ -68,24 +67,20 @@ pub enum HandshakeResponse {
 
 pub mod client {
     use super::{ClientHello, HandshakeReject, HandshakeResponse, ServerHello};
-    use crate::envelope::bincode_config;
+    use crate::archive;
     use crate::frame::{Frame, FrameFlags, MessageKind};
     use crate::types::ProtocolVersion;
     use futures::{SinkExt, StreamExt};
+    use rkyv::rancor::Error as ArchiveError;
     use tokio::io::{AsyncRead, AsyncWrite};
     use tokio_util::codec::{Framed, LengthDelimitedCodec};
     use uuid::Uuid;
 
-    use bincode::{
-        decode_from_slice,
-        error::{DecodeError, EncodeError},
-    };
-
     #[derive(Debug)]
     pub enum ClientHandshakeError {
         Io(std::io::Error),
-        BincodeEncode(EncodeError),
-        BincodeDecode(DecodeError),
+        Encode(ArchiveError),
+        Decode(ArchiveError),
         Closed,
         UnexpectedMessage { expected: MessageKind, received: MessageKind },
         Rejected(HandshakeReject),
@@ -96,8 +91,8 @@ pub mod client {
         fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
             match self {
                 Self::Io(err) => write!(fmt, "handshake IO error: {err}"),
-                Self::BincodeEncode(err) => write!(fmt, "handshake serialization error: {err}"),
-                Self::BincodeDecode(err) => write!(fmt, "handshake deserialization error: {err}"),
+                Self::Encode(err) => write!(fmt, "handshake serialization error: {err}"),
+                Self::Decode(err) => write!(fmt, "handshake deserialization error: {err}"),
                 Self::Closed => fmt.write_str("handshake stream closed"),
                 Self::UnexpectedMessage { expected, received } => write!(fmt, "unexpected message kind (expected {expected:?}, received {received:?})"),
                 Self::Rejected(reject) => write!(fmt, "handshake rejected: {}", reject.reason),
@@ -110,8 +105,8 @@ pub mod client {
         fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
             match self {
                 Self::Io(err) => Some(err),
-                Self::BincodeEncode(err) => Some(err),
-                Self::BincodeDecode(err) => Some(err),
+                Self::Encode(err) => Some(err),
+                Self::Decode(err) => Some(err),
                 _ => None,
             }
         }
@@ -125,7 +120,7 @@ pub mod client {
         S: AsyncRead + AsyncWrite + Unpin,
     {
         let expected_protocol = hello.protocol;
-        let frame = Frame::encode(expected_protocol, MessageKind::Handshake, Uuid::new_v4(), FrameFlags::empty(), &hello).map_err(ClientHandshakeError::BincodeEncode)?;
+        let frame = Frame::encode(expected_protocol, MessageKind::Handshake, Uuid::new_v4(), FrameFlags::empty(), &hello).map_err(ClientHandshakeError::Encode)?;
         framed.send(frame).await.map_err(ClientHandshakeError::Io)?;
 
         let response_bytes = match framed.next().await {
@@ -134,12 +129,12 @@ pub mod client {
             None => return Err(ClientHandshakeError::Closed),
         };
 
-        let response_frame = Frame::decode(response_bytes).map_err(ClientHandshakeError::BincodeDecode)?;
+        let response_frame = Frame::decode(response_bytes).map_err(ClientHandshakeError::Decode)?;
         if response_frame.header.message_kind != MessageKind::Handshake {
             return Err(ClientHandshakeError::UnexpectedMessage { expected: MessageKind::Handshake, received: response_frame.header.message_kind });
         }
 
-        let (handshake, _): (HandshakeResponse, usize) = decode_from_slice(response_frame.payload.as_ref(), bincode_config()).map_err(ClientHandshakeError::BincodeDecode)?;
+        let handshake: HandshakeResponse = archive::decode_from_slice(response_frame.payload.as_ref()).map_err(ClientHandshakeError::Decode)?;
         match handshake {
             HandshakeResponse::Accepted(server) => {
                 if !expected_protocol.is_compatible(&server.protocol) {

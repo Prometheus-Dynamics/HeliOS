@@ -1,18 +1,16 @@
 use std::collections::BTreeMap;
 
-use bincode::{Decode, Encode};
 use lib_ipc::types::Timestamp;
 use lib_sensors::model::SensorReading;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
-/// Bincode-friendly JSON payload used over IPC.
+/// Binary-wire-friendly JSON payload used over IPC.
 ///
-/// `serde_json::Value` relies on `deserialize_any`, which `bincode`'s serde bridge does not
-/// support. We store JSON as a string for IPC while still serializing/deserializing as a JSON
-/// value for HTTP APIs.
-#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode, Default)]
+/// `serde_json::Value` relies on `deserialize_any`, so we store JSON as a string for IPC while
+/// still serializing/deserializing as a JSON value for HTTP APIs.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct JsonData {
     pub json: String,
 }
@@ -52,7 +50,7 @@ impl<'de> Deserialize<'de> for JsonData {
 pub type SensorData = JsonData;
 
 /// Canonical identifier for supported sensor types.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub enum SensorKind {
     #[serde(rename = "temperature")]
@@ -74,29 +72,21 @@ pub enum SensorKind {
 }
 
 /// Logical ownership scope for sensor readings.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub enum SensorScope {
     #[serde(rename = "device")]
     Device,
     #[serde(rename = "stream")]
-    Stream {
-        #[bincode(with_serde)]
-        stream_id: Uuid,
-    },
+    Stream { stream_id: Uuid },
     #[serde(rename = "pipeline")]
-    Pipeline {
-        #[bincode(with_serde)]
-        stream_id: Uuid,
-        #[bincode(with_serde)]
-        pipeline_id: Uuid,
-    },
+    Pipeline { stream_id: Uuid, pipeline_id: Uuid },
     #[serde(rename = "custom")]
     Custom { name: String },
 }
 
 /// Descriptor used to surface hardware inventory via IPC.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct SensorDescriptor {
     pub backend: String,
@@ -109,7 +99,6 @@ pub struct SensorDescriptor {
     #[cfg_attr(feature = "schema", schema(value_type = Option<Object>))]
     pub metadata: Option<JsonData>,
     #[serde(default)]
-    #[bincode(with_serde)]
     pub stream_id: Option<Uuid>,
     #[serde(default)]
     #[cfg_attr(feature = "schema", schema(value_type = Option<Object>))]
@@ -126,7 +115,7 @@ impl SensorDescriptor {
 }
 
 /// Aggregated collection of sensors discovered by the service.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct SensorInventory {
     pub sensors: Vec<SensorDescriptor>,
@@ -137,7 +126,7 @@ pub type SensorSnapshot = BTreeMap<SensorKind, SensorData>;
 /// Typed snapshot map keyed by sensor kind.
 pub type SensorSnapshotTyped = BTreeMap<SensorKind, SensorReading>;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub enum AiModelFormat {
     TensorFlowLite,
@@ -145,9 +134,9 @@ pub enum AiModelFormat {
     Raw,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
-pub struct AiModelId(#[bincode(with_serde)] pub Uuid);
+pub struct AiModelId(pub Uuid);
 
 impl AiModelId {
     #[must_use]
@@ -162,7 +151,7 @@ impl Default for AiModelId {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub enum AiTensorElementType {
     U8,
@@ -173,7 +162,7 @@ pub enum AiTensorElementType {
     F32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct AiTensorQuantization {
     #[serde(default)]
@@ -182,7 +171,7 @@ pub struct AiTensorQuantization {
     pub scale: Vec<f32>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct AiModelTensorMetadata {
     #[serde(default)]
@@ -194,7 +183,7 @@ pub struct AiModelTensorMetadata {
     pub quantization: Option<AiTensorQuantization>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct AiModelMetadata {
     #[serde(default)]
@@ -213,7 +202,7 @@ pub struct AiModelMetadata {
     pub labels: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiModelDescriptor {
     pub id: AiModelId,
     pub format: AiModelFormat,
@@ -223,27 +212,24 @@ pub struct AiModelDescriptor {
     #[serde(default)]
     pub health: AiModelHealth,
     #[serde(default)]
-    #[bincode(with_serde)]
     pub created_at: Timestamp,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AiModelInventory {
     pub models: Vec<AiModelDescriptor>,
     #[serde(default)]
     pub max_upload_bytes: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AiModelHealth {
     pub status: AiModelHealthStatus,
     #[serde(default)]
     pub last_error: Option<String>,
     #[serde(default)]
-    #[bincode(with_serde)]
     pub last_checked_at: Option<Timestamp>,
     #[serde(default)]
-    #[bincode(with_serde)]
     pub last_inference_at: Option<Timestamp>,
 }
 
@@ -257,7 +243,7 @@ impl AiModelHealth {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum AiModelHealthStatus {
     #[default]
     Unknown,
@@ -265,7 +251,7 @@ pub enum AiModelHealthStatus {
     Degraded,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiModelUpload {
     #[serde(default)]
     pub id: Option<AiModelId>,
@@ -277,14 +263,14 @@ pub struct AiModelUpload {
     pub label_bytes: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Encode, Decode, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct I2cInventory {
     pub buses: Vec<I2cBusInfo>,
     pub devices: Vec<I2cDeviceInfo>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct I2cBusInfo {
     pub bus: u32,
@@ -297,7 +283,7 @@ pub struct I2cBusInfo {
     pub last_error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct I2cDeviceInfo {
     pub bus: u32,

@@ -1,7 +1,6 @@
-use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Encode, Decode, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct LightingColor {
     pub r: u8,
@@ -11,7 +10,7 @@ pub struct LightingColor {
     pub w: u8,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum LightingAnimation {
@@ -58,7 +57,7 @@ fn default_full_intensity() -> u8 {
     255
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Encode, Decode, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct LightingCommand {
     #[serde(default)]
@@ -69,7 +68,7 @@ pub struct LightingCommand {
     pub animation: Option<LightingAnimation>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Encode, Decode, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
 pub struct LightingRuntimeState {
     #[serde(default)]

@@ -19,7 +19,6 @@ dto = [
     "chrono",
     "thiserror",
     "lib-ipc",
-    "bincode",
     "styx",
     "tokio",
     "tracing",
@@ -44,7 +43,6 @@ runtime = [
     "lib-ipc",
     "styx",
     "image",
-    "bincode",
     "reqwest",
     "daedalus",
     "lib-cv",
@@ -80,7 +78,6 @@ reqwest = { workspace = true, optional = true }
 console-subscriber = { version = "0.5.0", optional = true }
 pprof = { version = "0.15.0", default-features = false, features = ["flamegraph", "prost-codec"], optional = true }
 libc = { workspace = true, optional = true }
-bincode = { workspace = true, optional = true }
 utoipa.workspace = true
 styx = { workspace = true, features = ["async", "hooks", "v4l2", "libcamera", "netcam", "netcam-video", "file-backend", "file-backend-video", "codec-ffmpeg", "codec-turbojpeg", "serde", "schema"], optional = true }
 smallvec = "1.15"

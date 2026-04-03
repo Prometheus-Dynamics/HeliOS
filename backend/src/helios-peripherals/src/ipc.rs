@@ -22,9 +22,7 @@ use crate::dto::{AiModelDescriptor, AiModelId, AiModelInventory, AiModelUpload, 
 use lib_sensors::fan_config::{FanConfig, FanStatus};
 use lib_sensors::model::SensorReading;
 
-use bincode::{Decode, Encode};
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Encode, Decode, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum FirmwareUpdateStatus {
     Queued,
@@ -33,7 +31,7 @@ pub enum FirmwareUpdateStatus {
     Failed,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FirmwareUpdate {
     pub device_id: String,
     pub firmware: String,
@@ -50,7 +48,7 @@ pub struct FirmwareUpdate {
 }
 
 /// Commands accepted by the sensor service runtime over IPC.
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SensorCommand {
     /// Perform a discovery pass and refresh the cached hardware inventory.
     #[serde(rename = "discover")]
@@ -66,13 +64,7 @@ pub enum SensorCommand {
     SnapshotTyped { command_id: CommandId, scope: SensorScope },
     /// Apply a configuration or calibration payload to a sensor.
     #[serde(rename = "update")]
-    Update {
-        command_id: CommandId,
-        scope: SensorScope,
-        sensor: SensorKind,
-        #[bincode(with_serde)]
-        payload: SensorData,
-    },
+    Update { command_id: CommandId, scope: SensorScope, sensor: SensorKind, payload: SensorData },
     /// Begin streaming sensor updates for a given scope.
     #[serde(rename = "subscribe")]
     Subscribe { command_id: CommandId, scope: SensorScope },
@@ -117,13 +109,12 @@ pub enum SensorCommand {
 }
 
 /// Events emitted by the sensor service runtime.
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SensorEvent {
     /// Command acknowledgement emitted upon successful processing.
     #[serde(rename = "ack")]
     Ack {
         command_id: CommandId,
-        #[bincode(with_serde)]
         processed_at: Timestamp,
     },
     /// Command rejection emitted when processing fails.
@@ -145,7 +136,6 @@ pub enum SensorEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         command_id: Option<CommandId>,
         scope: SensorScope,
-        #[bincode(with_serde)]
         values: BTreeMap<SensorKind, SensorData>,
     },
     /// Typed sensor snapshot payload.
@@ -387,22 +377,22 @@ const _: () = {
         impl crate::ipc::SensorCommand => crate::ipc::SensorCommandKind {
             struct Discover { command_id: CommandId, refresh: bool },
             struct Inventory { command_id: CommandId },
-            struct Snapshot { command_id: CommandId, scope: SensorScope },
-            struct SnapshotTyped { command_id: CommandId, scope: SensorScope },
-            struct Update { command_id: CommandId, scope: SensorScope, sensor: SensorKind, payload: SensorData },
-            struct Subscribe { command_id: CommandId, scope: SensorScope },
-            struct Unsubscribe { command_id: CommandId, scope: SensorScope },
+            struct Snapshot { command_id: CommandId, scope: SensorScope => with_serde },
+            struct SnapshotTyped { command_id: CommandId, scope: SensorScope => with_serde },
+            struct Update { command_id: CommandId, scope: SensorScope => with_serde, sensor: SensorKind => with_serde, payload: SensorData => with_serde },
+            struct Subscribe { command_id: CommandId, scope: SensorScope => with_serde },
+            struct Unsubscribe { command_id: CommandId, scope: SensorScope => with_serde },
             struct ConfigureFirmware { command_id: CommandId, device_id: String, firmware: String },
             struct ConfigureAlias { command_id: CommandId, hardware_key: String, alias: String },
             struct AiListModels { command_id: CommandId },
-            struct AiUploadModel { command_id: CommandId, model: AiModelUpload },
-            struct AiDeleteModel { command_id: CommandId, model_id: AiModelId },
+            struct AiUploadModel { command_id: CommandId, model: AiModelUpload => with_serde },
+            struct AiDeleteModel { command_id: CommandId, model_id: AiModelId => with_serde },
             struct I2cInventory { command_id: CommandId },
-            struct Lighting { command_id: CommandId, command: LightingCommand },
+            struct Lighting { command_id: CommandId, command: LightingCommand => with_serde },
             struct LightingState { command_id: CommandId },
             struct FanStatus { command_id: CommandId },
             struct FanConfig { command_id: CommandId },
-            struct UpdateFanConfig { command_id: CommandId, config: FanConfig },
+            struct UpdateFanConfig { command_id: CommandId, config: FanConfig => with_serde },
         }
     }
 
@@ -410,19 +400,19 @@ const _: () = {
         impl crate::ipc::SensorEvent => crate::ipc::SensorEventKind, unknown = Unknown {
             struct Ack { command_id: CommandId, processed_at: Timestamp => with_serde },
             struct Nack { command_id: CommandId, reason: String, retryable: bool },
-            struct Inventory { command_id: CommandId, inventory: SensorInventory },
-            struct Snapshot { command_id: Option<CommandId>, scope: SensorScope, values: BTreeMap<SensorKind, SensorData> },
-            struct SnapshotTyped { command_id: Option<CommandId>, scope: SensorScope, values: BTreeMap<SensorKind, SensorReading> },
-            struct Subscribed { command_id: CommandId, scope: SensorScope },
-            struct Unsubscribed { scope: SensorScope },
-            struct AiModelInventory { command_id: CommandId, inventory: AiModelInventory },
-            struct AiModelUploaded { command_id: CommandId, model: Box<AiModelDescriptor> },
-            struct AiModelDeleted { command_id: CommandId, model_id: AiModelId },
-            struct I2cInventory { command_id: CommandId, inventory: I2cInventory },
-            struct FirmwareUpdate { update: FirmwareUpdate },
-            struct FanStatus { command_id: CommandId, status: FanStatus },
-            struct FanConfig { command_id: CommandId, config: FanConfig },
-            struct LightingState { command_id: Option<CommandId>, state: LightingRuntimeState },
+            struct Inventory { command_id: CommandId, inventory: SensorInventory => with_serde },
+            struct Snapshot { command_id: Option<CommandId>, scope: SensorScope => with_serde, values: BTreeMap<SensorKind, SensorData> => with_serde },
+            struct SnapshotTyped { command_id: Option<CommandId>, scope: SensorScope => with_serde, values: BTreeMap<SensorKind, SensorReading> => with_serde },
+            struct Subscribed { command_id: CommandId, scope: SensorScope => with_serde },
+            struct Unsubscribed { scope: SensorScope => with_serde },
+            struct AiModelInventory { command_id: CommandId, inventory: AiModelInventory => with_serde },
+            struct AiModelUploaded { command_id: CommandId, model: Box<AiModelDescriptor> => with_serde },
+            struct AiModelDeleted { command_id: CommandId, model_id: AiModelId => with_serde },
+            struct I2cInventory { command_id: CommandId, inventory: I2cInventory => with_serde },
+            struct FirmwareUpdate { update: FirmwareUpdate => with_serde },
+            struct FanStatus { command_id: CommandId, status: FanStatus => with_serde },
+            struct FanConfig { command_id: CommandId, config: FanConfig => with_serde },
+            struct LightingState { command_id: Option<CommandId>, state: LightingRuntimeState => with_serde },
         }
     }
 };

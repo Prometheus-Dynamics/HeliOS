@@ -1,10 +1,13 @@
 use std::fmt;
 
-use bincode::{
-    Decode, Encode,
-    config::{self, Fixint, LittleEndian},
-    decode_from_slice, encode_to_vec,
-    error::{DecodeError, EncodeError},
+use rkyv::{
+    Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize,
+    api::high::{HighSerializer, HighValidator},
+    bytecheck::CheckBytes,
+    de::pooling::Pool,
+    rancor::{Error as ArchiveError, Strategy},
+    ser::allocator::ArenaHandle,
+    util::AlignedVec,
 };
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
@@ -12,28 +15,22 @@ use serde::{
     ser::SerializeTuple,
 };
 
-/// Returns the bincode configuration used across IPC envelopes.
-#[inline]
-pub fn bincode_config() -> config::Configuration<LittleEndian, Fixint, config::Limit<{ MAX_BINCODE_BYTES }>> {
-    config::legacy().with_limit::<{ MAX_BINCODE_BYTES }>()
-}
-
-const MAX_BINCODE_BYTES: usize = 8 * 1024 * 1024; // 8 MiB upper bound for decoded payloads
+use crate::archive;
 
 #[derive(Debug)]
 pub struct TaggedEncodeError {
     pub kind: u16,
-    pub source: EncodeError,
+    pub source: ArchiveError,
 }
 
 impl TaggedEncodeError {
     #[must_use]
-    pub fn new(kind: u16, source: EncodeError) -> Self {
+    pub fn new(kind: u16, source: ArchiveError) -> Self {
         Self { kind, source }
     }
 
     #[must_use]
-    pub fn into_inner(self) -> EncodeError {
+    pub fn into_inner(self) -> ArchiveError {
         self.source
     }
 }
@@ -55,7 +52,7 @@ pub trait TaggedEncode {
 }
 
 /// Envelope used to prefix IPC payloads with an explicit variant/tag identifier.
-#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
+#[derive(Debug, Clone, PartialEq, Eq, Archive, RkyvSerialize, RkyvDeserialize)]
 pub struct TaggedEnvelope {
     pub kind: u16,
     pub payload: Vec<u8>,
@@ -112,7 +109,7 @@ impl<'de> Deserialize<'de> for TaggedEnvelope {
 #[derive(Debug)]
 pub enum TaggedDecodeError {
     UnknownKind(u16),
-    Decode { kind: u16, source: DecodeError },
+    Decode { kind: u16, source: ArchiveError },
 }
 
 impl fmt::Display for TaggedDecodeError {
@@ -134,25 +131,31 @@ impl std::error::Error for TaggedDecodeError {
 }
 
 /// Serializes a value into a tagged envelope.
-pub fn serialize_payload<T: Encode>(kind: u16, value: &T) -> Result<TaggedEnvelope, EncodeError> {
-    let payload = encode_to_vec(value, bincode_config())?;
+pub fn serialize_payload<T>(kind: u16, value: &T) -> Result<TaggedEnvelope, ArchiveError>
+where
+    T: for<'a> RkyvSerialize<HighSerializer<AlignedVec, ArenaHandle<'a>, ArchiveError>>,
+{
+    let payload = archive::encode_to_vec(value)?;
     Ok(TaggedEnvelope::new(kind, payload))
 }
 
 /// Deserializes a payload that was previously encoded into an envelope.
-pub fn deserialize_payload<T: Decode<()>>(payload: &[u8]) -> Result<T, DecodeError> {
-    let (value, _) = decode_from_slice(payload, bincode_config())?;
-    Ok(value)
+pub fn deserialize_payload<T>(payload: &[u8]) -> Result<T, ArchiveError>
+where
+    T: Archive,
+    T::Archived: for<'a> CheckBytes<HighValidator<'a, ArchiveError>> + RkyvDeserialize<T, Strategy<Pool, ArchiveError>>,
+{
+    archive::decode_from_slice(payload)
 }
 
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __ipc_tagged_encode_field {
     ($value:expr) => {
-        $value
+        $value.clone()
     };
     ($value:expr, with_serde) => {
-        ::bincode::serde::Compat($value)
+        $crate::archive::encode_serde(&$value).expect("failed to serialize tagged field")
     };
 }
 
@@ -163,18 +166,18 @@ macro_rules! __ipc_tagged_field_type {
         $ty
     };
     ($ty:ty, with_serde) => {
-        ::bincode::serde::Compat<$ty>
+        ::std::vec::Vec<u8>
     };
 }
 
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __ipc_tagged_decode_field {
-    ($value:ident) => {
+    ($value:ident, $kind:expr) => {
         $value
     };
-    ($value:ident, with_serde) => {
-        $value.0
+    ($value:ident, $kind:expr, with_serde) => {
+        $crate::archive::decode_serde(&$value).map_err(|source| $crate::envelope::TaggedDecodeError::Decode { kind: $kind, source })?
     };
 }
 
@@ -292,7 +295,7 @@ macro_rules! tagged_enum {
                                     ) = $crate::envelope::deserialize_payload(&payload)
                                             .map_err(|source| $crate::envelope::TaggedDecodeError::Decode { kind: kind_value, source })?;
                                     let $crate::__ipc_tagged_tuple_pattern!($($sfield),*) = tuple;
-                                    Ok(__TaggedEnum::$svariant { $($sfield: $crate::__ipc_tagged_decode_field!($sfield $(, $smodifier)?)),* })
+                                    Ok(__TaggedEnum::$svariant { $($sfield: $crate::__ipc_tagged_decode_field!($sfield, kind_value $(, $smodifier)?)),* })
                                 }
                             ),*
                             $(

@@ -3,7 +3,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use bincode::{Decode, Encode};
 use lib_schema_migration::{SyncSchemaPlan, migrate_to_current};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -46,7 +45,7 @@ fn default_curve() -> Vec<FanCurvePoint> {
 }
 
 /// Declarative configuration for a PWM fan curve.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Encode, Decode, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema)]
 pub struct FanConfig {
     #[serde(default = "default_enabled")]
     pub enabled: bool,
@@ -93,14 +92,14 @@ impl Default for FanConfig {
 }
 
 /// A single temperature-to-duty breakpoint.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Encode, Decode, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema)]
 pub struct FanCurvePoint {
     pub temp_c: f32,
     pub percent: u8,
 }
 
 /// Fan control mode.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Encode, Decode, Default, ToSchema)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum FanMode {
     Disabled,
@@ -110,7 +109,7 @@ pub enum FanMode {
 }
 
 /// Latest applied fan state.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Encode, Decode, Default, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, ToSchema)]
 pub struct FanStatus {
     pub mode: FanMode,
     pub target_percent: u8,

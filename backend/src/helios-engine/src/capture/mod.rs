@@ -586,7 +586,7 @@ impl CaptureSessionError {
 /// Capture control metadata + last applied value (when known).
 ///
 /// Note: this is intentionally a concrete struct (rather than serde-flattening `CaptureControl`)
-/// because the IPC transport uses `bincode` + serde and does not support serde flatten reliably.
+/// because the IPC transport uses tagged binary envelopes and does not support serde flatten reliably.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CaptureControlInfo {
     pub access: styx::core::controls::Access,

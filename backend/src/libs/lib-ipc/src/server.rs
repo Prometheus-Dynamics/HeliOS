@@ -6,6 +6,7 @@ use futures::{
     SinkExt, StreamExt,
     future::{self, BoxFuture},
 };
+use rkyv::rancor::Error as ArchiveError;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::broadcast;
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
@@ -13,18 +14,14 @@ use tokio_util::sync::CancellationToken;
 use tracing::warn;
 use uuid::Uuid;
 
+use crate::archive;
 use crate::codec::default_codec;
-use crate::envelope::{TaggedDecodeError, TaggedEncode, TaggedEnvelope, bincode_config};
+use crate::envelope::{TaggedDecodeError, TaggedEncode, TaggedEnvelope};
 use crate::frame::{Frame, FrameFlags, MessageKind};
 use crate::handshake::{ClientHello, HandshakeReject, HandshakeResponse, ServerHello};
 use crate::prelude::CommandId;
 use crate::protocol::{AckEvent, ControlEvent, NackEvent};
 use crate::types::{FeatureSet, ProtocolVersion};
-
-use bincode::{
-    decode_from_slice,
-    error::{DecodeError, EncodeError},
-};
 
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
@@ -93,8 +90,8 @@ impl ServerConfig {
 #[derive(Debug)]
 pub enum ServerHandshakeError {
     Io(std::io::Error),
-    BincodeEncode(EncodeError),
-    BincodeDecode(DecodeError),
+    Encode(ArchiveError),
+    Decode(ArchiveError),
     Closed,
     UnexpectedMessage { expected: MessageKind, received: MessageKind },
 }
@@ -103,8 +100,8 @@ impl fmt::Display for ServerHandshakeError {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(err) => write!(fmt, "handshake IO error: {err}"),
-            Self::BincodeEncode(err) => write!(fmt, "handshake serialization error: {err}"),
-            Self::BincodeDecode(err) => write!(fmt, "handshake deserialization error: {err}"),
+            Self::Encode(err) => write!(fmt, "handshake serialization error: {err}"),
+            Self::Decode(err) => write!(fmt, "handshake deserialization error: {err}"),
             Self::Closed => fmt.write_str("handshake stream closed"),
             Self::UnexpectedMessage { expected, received } => {
                 write!(fmt, "unexpected message kind (expected {expected:?}, received {received:?})")
@@ -117,8 +114,8 @@ impl std::error::Error for ServerHandshakeError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io(err) => Some(err),
-            Self::BincodeEncode(err) => Some(err),
-            Self::BincodeDecode(err) => Some(err),
+            Self::Encode(err) => Some(err),
+            Self::Decode(err) => Some(err),
             _ => None,
         }
     }
@@ -127,8 +124,8 @@ impl std::error::Error for ServerHandshakeError {
 #[derive(Debug)]
 pub enum ServerTransportError {
     Io(std::io::Error),
-    BincodeEncode(EncodeError),
-    BincodeDecode(DecodeError),
+    Encode(ArchiveError),
+    Decode(ArchiveError),
     Tagged(TaggedDecodeError),
     MissingControlPayload,
     InvalidEventKind(MessageKind),
@@ -138,8 +135,8 @@ impl fmt::Display for ServerTransportError {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(err) => write!(fmt, "transport IO error: {err}"),
-            Self::BincodeEncode(err) => write!(fmt, "transport serialization error: {err}"),
-            Self::BincodeDecode(err) => write!(fmt, "transport deserialization error: {err}"),
+            Self::Encode(err) => write!(fmt, "transport serialization error: {err}"),
+            Self::Decode(err) => write!(fmt, "transport deserialization error: {err}"),
             Self::Tagged(err) => write!(fmt, "invalid tagged payload: {err}"),
             Self::MissingControlPayload => fmt.write_str("missing control payload for control message"),
             Self::InvalidEventKind(kind) => write!(fmt, "invalid outgoing event kind: {kind:?}"),
@@ -151,8 +148,8 @@ impl std::error::Error for ServerTransportError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io(err) => Some(err),
-            Self::BincodeEncode(err) => Some(err),
-            Self::BincodeDecode(err) => Some(err),
+            Self::Encode(err) => Some(err),
+            Self::Decode(err) => Some(err),
             Self::Tagged(err) => Some(err),
             _ => None,
         }
@@ -267,7 +264,7 @@ where
 
     pub async fn next_frame(&mut self) -> Result<Option<Frame>, ServerTransportError> {
         match self.framed.next().await {
-            Some(Ok(bytes)) => Frame::decode(bytes.freeze()).map(Some).map_err(ServerTransportError::BincodeDecode),
+            Some(Ok(bytes)) => Frame::decode(bytes.freeze()).map(Some).map_err(ServerTransportError::Decode),
             Some(Err(err)) => Err(ServerTransportError::Io(err)),
             None => Ok(None),
         }
@@ -303,17 +300,17 @@ where
                 Frame::encode(self.protocol(), MessageKind::Control, correlation, FrameFlags::empty(), control)
             }
             MessageKind::Event | MessageKind::Heartbeat => {
-                let envelope = event.encode_envelope().map_err(|err| ServerTransportError::BincodeEncode(err.into_inner()))?;
+                let envelope = event.encode_envelope().map_err(|err| ServerTransportError::Encode(err.into_inner()))?;
                 Frame::encode(self.protocol(), kind, correlation, FrameFlags::empty(), &envelope)
             }
             other => return Err(ServerTransportError::InvalidEventKind(other)),
         }
-        .map_err(ServerTransportError::BincodeEncode)?;
+        .map_err(ServerTransportError::Encode)?;
         self.framed.send(frame).await.map_err(ServerTransportError::Io)
     }
 
     pub async fn send_control(&mut self, control: &ControlEvent) -> Result<(), ServerTransportError> {
-        let frame = Frame::encode(self.protocol(), MessageKind::Control, Uuid::new_v4(), FrameFlags::empty(), control).map_err(ServerTransportError::BincodeEncode)?;
+        let frame = Frame::encode(self.protocol(), MessageKind::Control, Uuid::new_v4(), FrameFlags::empty(), control).map_err(ServerTransportError::Encode)?;
         self.framed.send(frame).await.map_err(ServerTransportError::Io)
     }
 
@@ -321,7 +318,7 @@ where
     where
         Command: TryFrom<TaggedEnvelope, Error = TaggedDecodeError>,
     {
-        let (envelope, _): (TaggedEnvelope, usize) = decode_from_slice(frame.payload.as_ref(), bincode_config()).map_err(ServerTransportError::BincodeDecode)?;
+        let envelope: TaggedEnvelope = archive::decode_from_slice(frame.payload.as_ref()).map_err(ServerTransportError::Decode)?;
         Command::try_from(envelope).map_err(ServerTransportError::Tagged)
     }
 
@@ -424,12 +421,12 @@ where
         None => return Err(ServerHandshakeError::Closed),
     };
 
-    let frame = Frame::decode(incoming).map_err(ServerHandshakeError::BincodeDecode)?;
+    let frame = Frame::decode(incoming).map_err(ServerHandshakeError::Decode)?;
     if frame.header.message_kind != MessageKind::Handshake {
         return Err(ServerHandshakeError::UnexpectedMessage { expected: MessageKind::Handshake, received: frame.header.message_kind });
     }
 
-    let (hello, _): (ClientHello, usize) = decode_from_slice(frame.payload.as_ref(), bincode_config()).map_err(ServerHandshakeError::BincodeDecode)?;
+    let hello: ClientHello = archive::decode_from_slice(frame.payload.as_ref()).map_err(ServerHandshakeError::Decode)?;
     if !config.protocol().is_compatible(&hello.protocol) {
         let reject = HandshakeReject {
             protocol: config.protocol(),
@@ -438,7 +435,7 @@ where
             required_protocol: Some(config.protocol()),
         };
         let response = HandshakeResponse::Rejected(reject);
-        let frame = Frame::encode(config.protocol(), MessageKind::Handshake, frame.header.correlation_id, FrameFlags::empty(), &response).map_err(ServerHandshakeError::BincodeEncode)?;
+        let frame = Frame::encode(config.protocol(), MessageKind::Handshake, frame.header.correlation_id, FrameFlags::empty(), &response).map_err(ServerHandshakeError::Encode)?;
         framed.send(frame).await.map_err(ServerHandshakeError::Io)?;
         return Ok(None);
     }
@@ -449,7 +446,7 @@ where
     server.requires_journal_replay = config.requires_journal_replay();
 
     let response = HandshakeResponse::Accepted(server.clone());
-    let response_frame = Frame::encode(config.protocol(), MessageKind::Handshake, frame.header.correlation_id, FrameFlags::empty(), &response).map_err(ServerHandshakeError::BincodeEncode)?;
+    let response_frame = Frame::encode(config.protocol(), MessageKind::Handshake, frame.header.correlation_id, FrameFlags::empty(), &response).map_err(ServerHandshakeError::Encode)?;
     framed.send(response_frame).await.map_err(ServerHandshakeError::Io)?;
 
     Ok(Some(ServerSession::new(framed, server, hello, &config)))

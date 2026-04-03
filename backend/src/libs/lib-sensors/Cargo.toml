@@ -29,4 +29,3 @@ lib-schema-migration = { path = "../lib-schema-migration" }
 lib-math = { path = "../lib-math" }
 uuid = { workspace = true}
 chrono = { workspace = true }
-bincode = { workspace = true, features = ["serde"] }

@@ -3,23 +3,20 @@ use std::io;
 use std::marker::PhantomData;
 use std::path::Path;
 
+use crate::archive;
 use crate::codec::default_codec;
-use crate::envelope::{TaggedDecodeError, TaggedEncode, TaggedEnvelope, bincode_config};
+use crate::envelope::{TaggedDecodeError, TaggedEncode, TaggedEnvelope};
 use crate::frame::{Frame, FrameFlags, MessageKind};
 use crate::handshake::{ClientHello, ServerHello, client};
 use crate::journal::{JournalEntry, JournalWriter};
 use crate::protocol::ControlEvent;
 use crate::types::{FeatureSet, ProtocolVersion};
 use futures::{SinkExt, StreamExt};
+use rkyv::rancor::Error as ArchiveError;
 use tokio::net::UnixStream;
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 use tracing::warn;
 use uuid::Uuid;
-
-use bincode::{
-    Encode, decode_from_slice,
-    error::{DecodeError, EncodeError},
-};
 
 /// Minimal descriptor required to establish an IPC client connection.
 pub trait TransportConfig {
@@ -44,7 +41,7 @@ where
 impl<C, Command, Event> Client<C, Command, Event>
 where
     C: TransportConfig,
-    Command: Encode + Clone + TaggedEncode,
+    Command: Clone + TaggedEncode + TryFrom<TaggedEnvelope, Error = TaggedDecodeError>,
     Event: TryFrom<TaggedEnvelope, Error = TaggedDecodeError> + From<ControlEvent>,
 {
     pub fn new(config: C) -> io::Result<Self> {
@@ -75,7 +72,7 @@ where
 impl<C, Command, Event> fmt::Debug for Client<C, Command, Event>
 where
     C: TransportConfig + fmt::Debug,
-    Command: Encode + Clone + TaggedEncode,
+    Command: Clone + TaggedEncode + TryFrom<TaggedEnvelope, Error = TaggedDecodeError>,
     Event: TryFrom<TaggedEnvelope, Error = TaggedDecodeError> + From<ControlEvent>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -86,7 +83,7 @@ where
 /// Active IPC session that wraps the framed transport.
 pub struct Session<Command, Event>
 where
-    Command: Encode + Clone + TaggedEncode,
+    Command: Clone + TaggedEncode + TryFrom<TaggedEnvelope, Error = TaggedDecodeError>,
     Event: TryFrom<TaggedEnvelope, Error = TaggedDecodeError> + From<ControlEvent>,
 {
     framed: Framed<UnixStream, LengthDelimitedCodec>,
@@ -98,7 +95,7 @@ where
 
 impl<Command, Event> Session<Command, Event>
 where
-    Command: Encode + Clone + TaggedEncode,
+    Command: Clone + TaggedEncode + TryFrom<TaggedEnvelope, Error = TaggedDecodeError>,
     Event: TryFrom<TaggedEnvelope, Error = TaggedDecodeError> + From<ControlEvent>,
 {
     fn new(framed: Framed<UnixStream, LengthDelimitedCodec>, server: ServerHello) -> Self {
@@ -117,8 +114,8 @@ where
     }
 
     async fn send_frame(&mut self, command: &Command) -> Result<(), ClientTransportError> {
-        let envelope = command.encode_envelope().map_err(|err| ClientTransportError::BincodeEncode(err.into_inner()))?;
-        let frame = Frame::encode(self.protocol, MessageKind::Command, Uuid::new_v4(), FrameFlags::ACK_REQUIRED, &envelope).map_err(ClientTransportError::BincodeEncode)?;
+        let envelope = command.encode_envelope().map_err(|err| ClientTransportError::Encode(err.into_inner()))?;
+        let frame = Frame::encode(self.protocol, MessageKind::Command, Uuid::new_v4(), FrameFlags::ACK_REQUIRED, &envelope).map_err(ClientTransportError::Encode)?;
         self.framed.send(frame).await.map_err(ClientTransportError::Io)?;
         Ok(())
     }
@@ -137,10 +134,10 @@ where
         loop {
             match self.framed.next().await {
                 Some(Ok(bytes)) => {
-                    let frame = Frame::decode(bytes.freeze()).map_err(ClientTransportError::BincodeDecode)?;
+                    let frame = Frame::decode(bytes.freeze()).map_err(ClientTransportError::Decode)?;
                     match frame.header.message_kind {
                         MessageKind::Event | MessageKind::Heartbeat => {
-                            let (envelope, _): (TaggedEnvelope, usize) = decode_from_slice(frame.payload.as_ref(), bincode_config()).map_err(ClientTransportError::BincodeDecode)?;
+                            let envelope: TaggedEnvelope = archive::decode_from_slice(frame.payload.as_ref()).map_err(ClientTransportError::Decode)?;
                             match Event::try_from(envelope.clone()) {
                                 Ok(event) => return Ok(Some(event)),
                                 Err(err @ TaggedDecodeError::Decode { .. }) => {
@@ -154,7 +151,7 @@ where
                             }
                         }
                         MessageKind::Control => {
-                            let (control, _): (ControlEvent, usize) = decode_from_slice(frame.payload.as_ref(), bincode_config()).map_err(ClientTransportError::BincodeDecode)?;
+                            let control: ControlEvent = archive::decode_from_slice(frame.payload.as_ref()).map_err(ClientTransportError::Decode)?;
                             return Ok(Some(Event::from(control)));
                         }
                         other => return Err(ClientTransportError::UnexpectedMessage { expected: MessageKind::Event, received: other }),
@@ -169,7 +166,7 @@ where
 
 impl<Command, Event> fmt::Debug for Session<Command, Event>
 where
-    Command: Encode + Clone + TaggedEncode,
+    Command: Clone + TaggedEncode + TryFrom<TaggedEnvelope, Error = TaggedDecodeError>,
     Event: TryFrom<TaggedEnvelope, Error = TaggedDecodeError> + From<ControlEvent>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -181,8 +178,8 @@ where
 #[derive(Debug)]
 pub enum ClientTransportError {
     Io(std::io::Error),
-    BincodeEncode(EncodeError),
-    BincodeDecode(DecodeError),
+    Encode(ArchiveError),
+    Decode(ArchiveError),
     Tagged(TaggedDecodeError),
     TaggedPayload { envelope: TaggedEnvelope, error: TaggedDecodeError },
     UnexpectedMessage { expected: MessageKind, received: MessageKind },
@@ -192,8 +189,8 @@ impl fmt::Display for ClientTransportError {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(err) => write!(fmt, "transport IO error: {err}"),
-            Self::BincodeEncode(err) => write!(fmt, "transport serialization error: {err}"),
-            Self::BincodeDecode(err) => write!(fmt, "transport deserialization error: {err}"),
+            Self::Encode(err) => write!(fmt, "transport serialization error: {err}"),
+            Self::Decode(err) => write!(fmt, "transport deserialization error: {err}"),
             Self::Tagged(err) => write!(fmt, "invalid tagged payload: {err}"),
             Self::TaggedPayload { envelope, error } => write!(fmt, "invalid tagged payload {} ({} bytes): {error}", envelope.kind, envelope.payload.len()),
             Self::UnexpectedMessage { expected, received } => write!(fmt, "unexpected message kind (expected {expected:?}, received {received:?})"),
@@ -205,8 +202,8 @@ impl std::error::Error for ClientTransportError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io(err) => Some(err),
-            Self::BincodeEncode(err) => Some(err),
-            Self::BincodeDecode(err) => Some(err),
+            Self::Encode(err) => Some(err),
+            Self::Decode(err) => Some(err),
             Self::Tagged(err) => Some(err),
             Self::TaggedPayload { error, .. } => Some(error),
             Self::UnexpectedMessage { .. } => None,

@@ -39,9 +39,9 @@ pub struct ReleaseManifest {
     pub artifacts: Vec<ManifestArtifact>,
     /// Optional JSON metadata as a string.
     ///
-    /// This is kept as a plain string because our IPC layer uses `bincode` and
+    /// This is kept as a plain string because our IPC layer uses tagged binary envelopes and
     /// `serde_json::Value` deserialization requires `deserialize_any`, which is
-    /// not supported by bincode's serde adapter (causing the updater IPC
+    /// not supported cleanly by the transport serializer (causing the updater IPC
     /// command decode to fail).
     #[serde(default)]
     pub metadata_json: String,

@@ -18,7 +18,7 @@ serde_json = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 bytes = { workspace = true }
-bincode = { workspace = true }
+rkyv = { workspace = true }
 bitflags = { workspace = true }
 tracing = { workspace = true }
 serde_bytes = { workspace = true }

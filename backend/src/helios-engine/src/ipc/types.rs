@@ -13,8 +13,6 @@ use crate::contracts::stream_ids::RAW_PIPELINE_UUID;
 use crate::identity::DeviceIdentity;
 use crate::stream::{StreamEncoderDemandMetrics, StreamFrameDemandMetrics, StreamMetrics};
 
-use bincode::error::{DecodeError, EncodeError};
-use bincode::{Decode, Encode};
 use lib_ipc::frame::MessageKind;
 use lib_ipc::protocol::ControlEvent;
 use lib_ipc::server::ServerEvent;
@@ -30,20 +28,18 @@ use styx::BackendKind;
 
 pub type ControlId = u32;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, ToSchema, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
 pub struct GraphOutputPortDescriptor {
     pub name: String,
     #[serde(default)]
-    #[bincode(with_serde)]
     pub ty: Option<JsonWire>,
     pub previewable: bool,
 }
 
 /// A serde JSON value that remains JSON in HTTP/OpenAPI payloads, but is encoded as JSON bytes when
-/// serialized over binary transports (e.g. bincode over IPC).
+/// serialized over binary IPC transports.
 ///
-/// This avoids `bincode::serde` limitations around `deserialize_any` while keeping the public JSON
-/// shape unchanged.
+/// This avoids binary-codec limitations around `deserialize_any` while keeping the public JSON shape unchanged.
 #[derive(Debug, Clone, PartialEq, ToSchema)]
 #[schema(value_type = serde_json::Value)]
 pub struct JsonWire(pub JsonValue);
@@ -102,52 +98,24 @@ pub enum EngineErrorCode {
     Internal = 7,
 }
 
-impl Encode for EngineErrorCode {
-    fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-        (*self as u16).encode(encoder)
-    }
-}
-
-impl<Context> Decode<Context> for EngineErrorCode {
-    fn decode<D: bincode::de::Decoder<Context = Context>>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let raw = u16::decode(decoder)?;
-        Ok(match raw {
-            0 => Self::Unimplemented,
-            1 => Self::InvalidState,
-            2 => Self::InvalidInput,
-            3 => Self::NotFound,
-            4 => Self::Conflict,
-            5 => Self::Timeout,
-            6 => Self::Busy,
-            7 => Self::Internal,
-            _ => Self::Internal,
-        })
-    }
-}
-
-bincode::impl_borrow_decode!(EngineErrorCode);
-
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeRegistryPort {
     pub name: String,
-    #[bincode(with_serde)]
     pub ty: JsonWire,
     pub source: Option<String>,
-    #[bincode(with_serde)]
     #[serde(default)]
     pub const_value: Option<JsonWire>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeRegistryFanInPort {
     pub prefix: String,
     #[serde(default)]
     pub start: u32,
-    #[bincode(with_serde)]
     pub ty: JsonWire,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeRegistryNode {
     pub id: String,
     pub label: Option<String>,
@@ -161,11 +129,10 @@ pub struct NodeRegistryNode {
     pub fanin_inputs: Vec<NodeRegistryFanInPort>,
     pub output_ports: Vec<NodeRegistryPort>,
     pub default_compute: String,
-    #[bincode(with_serde)]
     pub metadata: std::collections::BTreeMap<String, JsonWire>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeSyncGroup {
     pub name: String,
     pub policy: String,
@@ -174,14 +141,13 @@ pub struct NodeSyncGroup {
     pub backpressure: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TypeRegistryEntry {
     pub rust: String,
-    #[bincode(with_serde)]
     pub ty: JsonWire,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct PluginCompatibility {
     pub filename: String,
     #[serde(default)]
@@ -203,7 +169,7 @@ pub struct PluginCompatibility {
     pub path: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeRegistrySnapshot {
     pub plugins: Vec<String>,
     pub nodes: Vec<NodeRegistryNode>,
@@ -212,21 +178,21 @@ pub struct NodeRegistrySnapshot {
     pub plugin_compatibility: Vec<PluginCompatibility>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlannerDiagnosticSpan {
     pub pass: String,
     pub node: Option<String>,
     pub port: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlannerDiagnostic {
     pub code: String,
     pub message: String,
     pub span: PlannerDiagnosticSpan,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphValidationReport {
     pub ok: bool,
     pub diagnostics: Vec<PlannerDiagnostic>,
@@ -258,34 +224,34 @@ pub enum GraphValidationHelperResponse {
     Error { code: EngineErrorCode, reason: String },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphGpuSegment {
     pub buffer_id: usize,
     pub nodes: Vec<usize>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphGpuEdgeBufferInfo {
     pub edge_index: usize,
     pub gpu_fast_path: bool,
     pub buffer_id: Option<usize>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Encode, Decode, ToSchema)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RecordingContainer {
     Mp4,
     Raw,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Encode, Decode, ToSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RecordingCodec {
     H264,
     H265,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, ToSchema, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RecordingSource {
     #[default]
@@ -293,54 +259,44 @@ pub enum RecordingSource {
     Raw,
     Pipeline {
         #[serde(default)]
-        #[bincode(with_serde)]
         pipeline_id: Option<Uuid>,
         #[serde(default)]
         output_key: Option<String>,
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalizationSolveSourceValue {
     pub source_id: String,
     #[serde(default)]
-    #[bincode(with_serde)]
     pub value: Option<JsonWire>,
     #[serde(default)]
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalizationSolveRequest {
-    #[bincode(with_serde)]
     pub profile: crate::localization::config::LocalizationProfile,
-    #[bincode(with_serde)]
     pub sources: Vec<crate::localization::config::LocalizationSourceConfig>,
     #[serde(default)]
-    #[bincode(with_serde)]
     pub rig_poses: BTreeMap<String, crate::localization::types::LocalizationPose>,
     #[serde(default)]
-    #[bincode(with_serde)]
     pub field_map: Option<crate::localization::maps::FieldMapDocument>,
     #[serde(default)]
-    #[bincode(with_serde)]
     pub calibrations: BTreeMap<String, StreamCalibration>,
     #[serde(default)]
-    #[bincode(with_serde)]
     pub source_values: Vec<LocalizationSolveSourceValue>,
     pub apply_field_origin: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalizationPipelineStatusRequest {
     pub profile_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalizationPipelineGraphRequest {
-    #[bincode(with_serde)]
     pub profile: crate::localization::config::LocalizationProfile,
-    #[bincode(with_serde)]
     pub graph: JsonWire,
     #[serde(default)]
     pub graph_updated_at_ms: Option<i64>,
@@ -348,20 +304,16 @@ pub struct LocalizationPipelineGraphRequest {
     pub template_mtime_ms: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalizationPipelineSampleRequest {
-    #[bincode(with_serde)]
     pub profile: crate::localization::config::LocalizationProfile,
-    #[bincode(with_serde)]
     pub sources: Vec<crate::localization::config::LocalizationSourceConfig>,
-    #[bincode(with_serde)]
     pub graph: JsonWire,
     #[serde(default)]
     pub graph_updated_at_ms: Option<i64>,
     #[serde(default)]
     pub template_mtime_ms: Option<i64>,
     #[serde(default)]
-    #[bincode(with_serde)]
     pub source_values: Vec<LocalizationSolveSourceValue>,
     pub output_key: String,
 }
@@ -395,110 +347,76 @@ pub struct StreamRuntimeCapabilities {
     pub default_decoder_ids_by_capture_format: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EngineCommand {
     List {
-        #[bincode(with_serde)]
         command_id: CommandId,
     },
     GetStreamRuntimeCapabilities {
-        #[bincode(with_serde)]
         command_id: CommandId,
     },
     Start {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         manifest: Box<ResolvedStreamConfig>,
     },
     /// Update encoder/decoder selection for a running stream without restarting capture.
     SetCodecs {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
-        #[bincode(with_serde)]
         decoder_id: Option<String>,
-        #[bincode(with_serde)]
         encoder_id: Option<String>,
     },
     /// Update saved calibration for a running stream without restarting capture.
     SetCalibration {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
-        #[bincode(with_serde)]
         calibration: Option<StreamCalibration>,
     },
     /// Toggle guided calibration mode (pass-through preview + live detections output) without restarting capture.
     SetCalibrationMode {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
         enabled: bool,
-        #[bincode(with_serde)]
         dictionary: Option<String>,
-        #[bincode(with_serde)]
         mode: Option<String>,
     },
     /// Solve camera intrinsics from calibration images + graph detections.
     SolveCalibration {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         request: super::CalibrationSolveRequest,
     },
     SolveLocalization {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         request: JsonWire,
     },
     GetLocalizationPipelineStatus {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         request: JsonWire,
     },
     ListLocalizationPipelineOutputs {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         request: JsonWire,
     },
     SampleLocalizationPipelineOutput {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         request: JsonWire,
     },
     Stop {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
     },
     SetControl {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
         control_id: ControlId,
-        #[bincode(with_serde)]
         value: CaptureControlValue,
     },
     GetControls {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
     },
     GetMetrics {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
     },
     /// Request a one-off JPEG snapshot from the latest decoded/graph-processed frame.
@@ -506,9 +424,7 @@ pub enum EngineCommand {
     /// This is intended for "take snapshot" flows where quality should be higher than the
     /// stream's live preview/output encoding settings.
     SnapshotJpeg {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
         /// JPEG quality in range 1..=100 (clamped server-side).
         quality: u8,
@@ -517,179 +433,127 @@ pub enum EngineCommand {
         source: Option<RecordingSource>,
     },
     GetNodeRegistry {
-        #[bincode(with_serde)]
         command_id: CommandId,
     },
     DiscoverDevices {
-        #[bincode(with_serde)]
         command_id: CommandId,
     },
     RefreshNodeRegistry {
-        #[bincode(with_serde)]
         command_id: CommandId,
     },
     ValidateGraph {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         graph: JsonWire,
-        #[bincode(with_serde)]
         active_features: Vec<String>,
         enable_lints: bool,
     },
     /// Update the active pipeline graph for a running stream without restarting capture.
     SetGraph {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
-        #[bincode(with_serde)]
         graph: JsonWire,
-        #[bincode(with_serde)]
         pipeline_id: Option<Uuid>,
-        #[bincode(with_serde)]
         output: Option<String>,
     },
     /// Apply a graph patch (node constant overrides) to a running stream without rebuilding.
     SetGraphPatch {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
-        #[bincode(with_serde)]
         patch: JsonWire,
-        #[bincode(with_serde)]
         pipeline_id: Option<Uuid>,
     },
     /// Update which graph output feeds the stream preview/encoder without restarting the stream.
     SetGraphOutput {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
-        #[bincode(with_serde)]
         output: Option<String>,
     },
     /// Update pipeline input values for a running stream without rebuilding the graph.
     SetPipelineInputs {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
-        #[bincode(with_serde)]
         pipeline_id: Option<Uuid>,
-        #[bincode(with_serde)]
         inputs: BTreeMap<String, Option<JsonWire>>,
     },
     /// List host-bridge output ports (graph -> host) exposed by the running stream graph.
     ListGraphOutputs {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
     },
     /// List host-bridge output ports plus solved typing info for the running stream graph.
     // (folded into ListGraphOutputs)
     /// Fetch the latest JSON payload captured from a graph output port.
     GetGraphOutputSample {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
         port: String,
         fresh: bool,
     },
     /// Update multiplex layout (rows/columns/slot assignment) without restarting capture.
     SetPipelineLayout {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
-        #[bincode(with_serde)]
         layout: Option<StreamPipelineLayout>,
     },
     /// Update wiring between pipeline outputs and downstream pipeline inputs.
     SetPipelineWires {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
-        #[bincode(with_serde)]
         wires: Vec<StreamPipelineWire>,
     },
     /// Enable/disable perf counters collection for the running graph.
     SetGraphPerf {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
-        #[bincode(with_serde)]
         pipeline_id: Option<Uuid>,
         enabled: bool,
     },
     /// Reset rolling pipeline metrics (node timings/perf samples/flamegraph).
     ResetGraphMetrics {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
-        #[bincode(with_serde)]
         pipeline_id: Option<Uuid>,
     },
     /// Capture a CPU flamegraph over wall-clock time and store it on disk.
     CaptureGraphFlamegraph {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
-        #[bincode(with_serde)]
         pipeline_id: Option<Uuid>,
         duration_ms: u64,
     },
     /// Start recording a stream to a media file.
     StartRecording {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
         source: RecordingSource,
         output_path: String,
-        #[bincode(with_serde)]
         container: RecordingContainer,
-        #[bincode(with_serde)]
         codec: RecordingCodec,
-        #[bincode(with_serde)]
         duration_ms: Option<u64>,
-        #[bincode(with_serde)]
         settings: Option<RecordingSettings>,
     },
     /// Stop an active recording for a stream.
     StopRecording {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
     },
     /// Capture the last N milliseconds from the shadow recorder buffer.
     CaptureShadowRecording {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
         output_path: String,
-        #[bincode(with_serde)]
         container: RecordingContainer,
         window_ms: u64,
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, ToSchema, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
 pub struct FrameRate {
     pub numerator: u32,
     pub denominator: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, Default, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
 pub struct RecordingSettings {
     /// Target recording FPS (best-effort frame dropping).
     #[serde(default)]
@@ -711,7 +575,7 @@ pub struct RecordingSettings {
     pub max_height: Option<u32>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, ToSchema, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
 pub struct ResolutionHint {
     pub width: u32,
     pub height: u32,
@@ -726,7 +590,7 @@ enum EncoderSettingsKind {
     H265,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, ToSchema, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EncoderSettings {
     Turbojpeg {
@@ -1036,141 +900,97 @@ pub struct DecoderSettings {
     pub mirror_horizontal: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EngineEvent {
     Ack {
-        #[bincode(with_serde)]
         command_id: CommandId,
         ok: bool,
     },
     Nack {
-        #[bincode(with_serde)]
         command_id: CommandId,
         code: EngineErrorCode,
         reason: String,
         retryable: bool,
     },
     StreamList {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         streams: Vec<StreamSummary>,
     },
     StreamRuntimeCapabilities {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         capabilities: StreamRuntimeCapabilities,
     },
     Started {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
-        #[bincode(with_serde)]
         descriptor: CaptureDescriptor,
     },
     Stopped {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
     },
     Controls {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
-        #[bincode(with_serde)]
         controls: Vec<CaptureControlInfo>,
     },
     Metrics {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
-        #[bincode(with_serde)]
         metrics: StreamMetrics,
     },
     SnapshotJpeg {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
         quality: u8,
-        #[bincode(with_serde)]
         bytes: Vec<u8>,
     },
     GraphOutputs {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
-        #[bincode(with_serde)]
         outputs: Vec<GraphOutputPortDescriptor>,
     },
     GraphOutputSample {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         stream_id: Uuid,
         port: String,
-        #[bincode(with_serde)]
         value: JsonWire,
     },
     /// Unsolicited metrics update broadcast by the engine.
     MetricsUpdate {
-        #[bincode(with_serde)]
         stream_id: Uuid,
-        #[bincode(with_serde)]
         metrics: StreamMetrics,
     },
     NodeRegistry {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         snapshot: NodeRegistrySnapshot,
     },
     Discovery {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         discovery: crate::capture::DiscoveryResult,
     },
     GraphValidation {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         report: GraphValidationReport,
     },
     CalibrationSolved {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         response: super::CalibrationSolveResponse,
     },
     LocalizationSolved {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         response: JsonWire,
     },
     LocalizationPipelineStatus {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         response: JsonWire,
     },
     LocalizationPipelineOutputs {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         outputs: Vec<String>,
     },
     LocalizationPipelineOutputSample {
-        #[bincode(with_serde)]
         command_id: CommandId,
-        #[bincode(with_serde)]
         response: JsonWire,
     },
 }
@@ -1407,7 +1227,7 @@ pub struct ResolvedDecoderConfig {
     pub settings_present: bool,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Encode, Decode, ToSchema, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq, Default)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum StreamRecordingMode {
     #[default]

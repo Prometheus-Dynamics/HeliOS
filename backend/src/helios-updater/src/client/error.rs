@@ -13,10 +13,8 @@ pub enum Error {
     Io(std::io::Error),
     #[from]
     SerdeJson(serde_json::Error),
-    #[from]
-    BincodeEncode(bincode::error::EncodeError),
-    #[from]
-    BincodeDecode(bincode::error::DecodeError),
+    Encode(String),
+    Decode(String),
     #[from]
     Tagged(TaggedDecodeError),
     TaggedPayload {
@@ -45,8 +43,8 @@ impl core::fmt::Display for Error {
         match self {
             Self::Io(err) => write!(fmt, "IO error: {err}"),
             Self::SerdeJson(err) => write!(fmt, "Serde JSON error: {err}"),
-            Self::BincodeEncode(err) => write!(fmt, "Bincode encode error: {err}"),
-            Self::BincodeDecode(err) => write!(fmt, "Bincode decode error: {err}"),
+            Self::Encode(err) => write!(fmt, "transport encode error: {err}"),
+            Self::Decode(err) => write!(fmt, "transport decode error: {err}"),
             Self::Tagged(err) => write!(fmt, "Tagged payload error: {err}"),
             Self::TaggedPayload { envelope, error } => write!(fmt, "Tagged payload error {} ({} bytes): {error}", envelope.kind, envelope.payload.len()),
             Self::HandshakeClosed => write!(fmt, "updater closed the connection during handshake"),
@@ -64,8 +62,8 @@ impl From<ClientHandshakeError> for Error {
     fn from(err: ClientHandshakeError) -> Self {
         match err {
             ClientHandshakeError::Io(err) => Self::Io(err),
-            ClientHandshakeError::BincodeEncode(err) => Self::BincodeEncode(err),
-            ClientHandshakeError::BincodeDecode(err) => Self::BincodeDecode(err),
+            ClientHandshakeError::Encode(err) => Self::Encode(err.to_string()),
+            ClientHandshakeError::Decode(err) => Self::Decode(err.to_string()),
             ClientHandshakeError::Closed => Self::HandshakeClosed,
             ClientHandshakeError::UnexpectedMessage { expected, received } => Self::UnexpectedMessage { expected, received },
             ClientHandshakeError::Rejected(reject) => Self::HandshakeRejected { reason: reject.reason },
@@ -78,8 +76,8 @@ impl From<ClientTransportError> for Error {
     fn from(err: ClientTransportError) -> Self {
         match err {
             ClientTransportError::Io(err) => Self::Io(err),
-            ClientTransportError::BincodeEncode(err) => Self::BincodeEncode(err),
-            ClientTransportError::BincodeDecode(err) => Self::BincodeDecode(err),
+            ClientTransportError::Encode(err) => Self::Encode(err.to_string()),
+            ClientTransportError::Decode(err) => Self::Decode(err.to_string()),
             ClientTransportError::Tagged(err) => Self::Tagged(err),
             ClientTransportError::TaggedPayload { envelope, error } => Self::TaggedPayload { envelope, error },
             ClientTransportError::UnexpectedMessage { expected, received } => Self::UnexpectedMessage { expected, received },

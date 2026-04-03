@@ -3,7 +3,6 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use bincode::{Decode, Encode, decode_from_slice};
 use futures::{SinkExt, StreamExt};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc;
@@ -11,8 +10,9 @@ use tokio::task::JoinHandle;
 use tokio_util::codec::Framed;
 use uuid::Uuid;
 
+use crate::archive;
 use crate::codec::default_codec;
-use crate::envelope::bincode_config;
+use crate::envelope::{TaggedDecodeError, TaggedEncode, TaggedEnvelope};
 use crate::frame::{Frame, FrameFlags, MessageKind};
 use crate::handshake::{ClientHello, HandshakeResponse};
 use crate::protocol::ControlEvent;
@@ -31,8 +31,8 @@ pub struct MockServer<Command, Event> {
 
 impl<Command, Event> MockServer<Command, Event>
 where
-    Command: Send + 'static + Decode<()>,
-    Event: Send + 'static + Encode,
+    Command: Send + 'static + TryFrom<TaggedEnvelope, Error = TaggedDecodeError>,
+    Event: Send + 'static + TaggedEncode,
 {
     pub async fn bind<P, H, K, E>(path: P, handshake: H, classify_event: K, extract_control: E) -> io::Result<Self>
     where
@@ -96,8 +96,8 @@ async fn serve_connection<Command, Event>(
     extract_control: Arc<ControlExtractor<Event>>,
 ) -> io::Result<()>
 where
-    Command: Send + 'static + Decode<()>,
-    Event: Send + 'static + Encode,
+    Command: Send + 'static + TryFrom<TaggedEnvelope, Error = TaggedDecodeError>,
+    Event: Send + 'static + TaggedEncode,
 {
     let mut framed = Framed::new(stream, default_codec());
     let incoming = framed.next().await.ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "handshake not received"))??;
@@ -106,7 +106,7 @@ where
         return Err(io::Error::new(io::ErrorKind::InvalidData, "expected handshake frame"));
     }
 
-    let (hello, _): (ClientHello, usize) = decode_from_slice(frame.payload.as_ref(), bincode_config()).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    let hello: ClientHello = archive::decode_from_slice(frame.payload.as_ref()).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
     let response = handshake(hello)?;
 
     let (protocol, server) = match &response {
@@ -128,7 +128,8 @@ where
                     Ok(bytes) => {
                         let frame = Frame::decode(bytes.freeze()).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
                         if frame.header.message_kind == MessageKind::Command {
-                            let (command, _): (Command, usize) = decode_from_slice(frame.payload.as_ref(), bincode_config()).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+                            let envelope: TaggedEnvelope = archive::decode_from_slice(frame.payload.as_ref()).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+                            let command = Command::try_from(envelope).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
                             if command_tx.send(command).await.is_err() {
                                 break;
                             }
@@ -146,8 +147,14 @@ where
                             let control = extract_control(&event).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "missing control payload"))?;
                             Frame::encode(server.protocol, MessageKind::Control, correlation, FrameFlags::empty(), &control)
                         }
-                        MessageKind::Heartbeat => Frame::encode(server.protocol, MessageKind::Heartbeat, correlation, FrameFlags::empty(), &event),
-                        other => Frame::encode(server.protocol, other, correlation, FrameFlags::empty(), &event),
+                        MessageKind::Heartbeat => {
+                            let envelope = event.encode_envelope().map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.into_inner()))?;
+                            Frame::encode(server.protocol, MessageKind::Heartbeat, correlation, FrameFlags::empty(), &envelope)
+                        }
+                        other => {
+                            let envelope = event.encode_envelope().map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.into_inner()))?;
+                            Frame::encode(server.protocol, other, correlation, FrameFlags::empty(), &envelope)
+                        }
                     }
                     .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
                     if let Err(err) = framed.send(frame).await {

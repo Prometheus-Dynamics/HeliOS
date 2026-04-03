@@ -1,20 +1,19 @@
 pub mod introspect;
 
-use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use uuid::Uuid;
 
 use crate::tensor::{TensorElementType, TensorShape};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum ModelFormat {
     TensorFlowLite,
     Onnx,
     Raw,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TensorQuantization {
     #[serde(default)]
     pub zero_point: Vec<i64>,
@@ -22,8 +21,8 @@ pub struct TensorQuantization {
     pub scale: Vec<f32>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Encode, Decode)]
-pub struct ModelId(#[bincode(with_serde)] pub Uuid);
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct ModelId(pub Uuid);
 
 impl ModelId {
     pub fn new() -> Self {
@@ -37,7 +36,7 @@ impl Default for ModelId {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ModelMetadata {
     pub display_name: Option<String>,
     pub description: Option<String>,
@@ -51,7 +50,7 @@ pub struct ModelMetadata {
     pub labels: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelTensorMetadata {
     pub name: Option<String>,
     pub element_type: TensorElementType,

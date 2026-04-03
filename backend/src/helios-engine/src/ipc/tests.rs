@@ -1,6 +1,7 @@
 use super::*;
+use lib_ipc::envelope::TaggedEnvelope;
 use lib_ipc::types::CommandId;
-use serde::Deserialize;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::BTreeSet;
 use styx::codec::{CodecKind, CodecRegistry};
 use styx::prelude::{ColorSpace, FourCc, MediaFormat, Resolution};
@@ -42,38 +43,38 @@ fn sample_manifest() -> StreamManifest {
     }
 }
 
+fn assert_json_round_trip<T>(value: &T) -> T
+where
+    T: Serialize + DeserializeOwned,
+{
+    let encoded = serde_json::to_vec(value).expect("encode json");
+    serde_json::from_slice(&encoded).expect("decode json")
+}
+
 #[test]
-fn start_command_round_trips_over_bincode() {
-    let config = bincode::config::standard();
+fn start_command_round_trips_over_tagged_ipc() {
     let base_manifest = sample_manifest();
 
-    // Prove basic primitives round-trip.
-    let encoded_identity = bincode::serde::encode_to_vec(&base_manifest.identity, config).expect("encode identity");
-    let decoded_identity: crate::identity::DeviceIdentity = bincode::serde::decode_from_slice(&encoded_identity, config).expect("decode identity").0;
+    let decoded_identity: crate::identity::DeviceIdentity = assert_json_round_trip(&base_manifest.identity);
     assert_eq!(decoded_identity.alias, base_manifest.identity.alias);
 
     let capture = &base_manifest.capture;
-    let encoded_handle = bincode::serde::encode_to_vec(&capture.handle, config).expect("encode handle");
-    let decoded_handle: crate::capture::BackendHandle = bincode::serde::decode_from_slice(&encoded_handle, config).expect("decode handle").0;
+    let decoded_handle: crate::capture::BackendHandle = assert_json_round_trip(&capture.handle);
     assert!(matches!(decoded_handle, crate::capture::BackendHandle::Virtual));
-    let encoded_backend = bincode::serde::encode_to_vec(capture.backend, config).expect("encode backend");
-    let decoded_backend: crate::capture::BackendKind = bincode::serde::decode_from_slice(&encoded_backend, config).expect("decode backend").0;
+    let decoded_backend: crate::capture::BackendKind = assert_json_round_trip(&capture.backend);
     assert_eq!(decoded_backend, crate::capture::BackendKind::Virtual);
-    let encoded_mode = bincode::serde::encode_to_vec(capture.mode.clone(), config).expect("encode mode");
-    let decoded_mode: crate::capture::ModeId = bincode::serde::decode_from_slice(&encoded_mode, config).expect("decode mode").0;
+    let decoded_mode: crate::capture::ModeId = assert_json_round_trip(&capture.mode);
     assert_eq!(decoded_mode, capture.mode);
 
-    let encoded_capture = bincode::serde::encode_to_vec(capture, config).expect("encode capture");
-    let decoded_capture: crate::capture::CaptureConfig = bincode::serde::decode_from_slice(&encoded_capture, config).expect("decode capture").0;
+    let decoded_capture: crate::capture::CaptureConfig = assert_json_round_trip(capture);
     assert_eq!(decoded_capture.backend, capture.backend);
 
-    let encoded_manifest = bincode::serde::encode_to_vec(&base_manifest, config).expect("encode manifest");
-    let decoded_manifest: StreamManifest = bincode::serde::decode_from_slice(&encoded_manifest, config).expect("decode manifest").0;
+    let decoded_manifest: StreamManifest = assert_json_round_trip(&base_manifest);
     assert_eq!(decoded_manifest.capture.backend, base_manifest.capture.backend);
 
     let command = EngineCommand::Start { command_id: CommandId::new(), manifest: Box::new(base_manifest.clone().resolve()) };
-    let encoded = bincode::encode_to_vec(command, config).expect("encode command");
-    let (decoded, _): (EngineCommand, usize) = bincode::decode_from_slice(&encoded, config).expect("decode command");
+    let envelope: TaggedEnvelope = (&command).into();
+    let decoded = EngineCommand::try_from(envelope).expect("decode command");
     if let EngineCommand::Start { manifest: round_trip, .. } = decoded {
         assert_eq!(round_trip.capture.backend, base_manifest.capture.backend);
     } else {
@@ -86,9 +87,8 @@ fn stream_list_event_round_trips() {
     let (_, descriptor) = crate::capture::default_virtual_device().backends.into_iter().next().map(|b| b.descriptor).map(|d| ((), d)).unwrap();
     let summary = StreamSummary { stream_id: uuid::Uuid::new_v4(), descriptor, manifest: sample_manifest().resolve(), status: StreamStatus::default(), runtime: StreamRuntimeState::default() };
     let event = EngineEvent::StreamList { command_id: CommandId::new(), streams: vec![summary.clone()] };
-    let config = bincode::config::standard();
-    let encoded = bincode::encode_to_vec(event, config).expect("encode event");
-    let (decoded, _): (EngineEvent, usize) = bincode::decode_from_slice(&encoded, config).expect("decode event");
+    let envelope: TaggedEnvelope = (&event).into();
+    let decoded = EngineEvent::try_from(envelope).expect("decode event");
     match decoded {
         EngineEvent::StreamList { streams, .. } => {
             assert_eq!(streams.len(), 1);
@@ -119,27 +119,20 @@ fn runtime_status_uses_capture_and_recording_state() {
 }
 
 #[test]
-fn runtime_state_round_trips_over_bincode() {
-    let config = bincode::config::standard();
+fn runtime_state_round_trips_over_json() {
     let runtime = StreamRuntimeState::default();
 
-    let encoded_capture = bincode::serde::encode_to_vec(&runtime.capture, config).expect("encode capture runtime");
-    let _: StreamCaptureRuntimeState = bincode::serde::decode_from_slice(&encoded_capture, config).expect("decode capture runtime").0;
+    let _: StreamCaptureRuntimeState = assert_json_round_trip(&runtime.capture);
 
-    let encoded_codecs = bincode::serde::encode_to_vec(&runtime.codecs, config).expect("encode codec runtime");
-    let _: StreamCodecChainRuntimeState = bincode::serde::decode_from_slice(&encoded_codecs, config).expect("decode codec runtime").0;
+    let _: StreamCodecChainRuntimeState = assert_json_round_trip(&runtime.codecs);
 
-    let encoded_demand = bincode::serde::encode_to_vec(&runtime.demand, config).expect("encode demand runtime");
-    let _: StreamDemandRuntimeState = bincode::serde::decode_from_slice(&encoded_demand, config).expect("decode demand runtime").0;
+    let _: StreamDemandRuntimeState = assert_json_round_trip(&runtime.demand);
 
-    let encoded_recording = bincode::serde::encode_to_vec(&runtime.recording, config).expect("encode recording runtime");
-    let _: StreamRecordingRuntimeState = bincode::serde::decode_from_slice(&encoded_recording, config).expect("decode recording runtime").0;
+    let _: StreamRecordingRuntimeState = assert_json_round_trip(&runtime.recording);
 
-    let encoded_pipeline = bincode::serde::encode_to_vec(&runtime.pipeline, config).expect("encode pipeline runtime");
-    let _: StreamPipelineRuntimeState = bincode::serde::decode_from_slice(&encoded_pipeline, config).expect("decode pipeline runtime").0;
+    let _: StreamPipelineRuntimeState = assert_json_round_trip(&runtime.pipeline);
 
-    let encoded = bincode::serde::encode_to_vec(&runtime, config).expect("encode stream runtime");
-    let decoded: StreamRuntimeState = bincode::serde::decode_from_slice(&encoded, config).expect("decode stream runtime").0;
+    let decoded: StreamRuntimeState = assert_json_round_trip(&runtime);
     assert_eq!(decoded.capture.state, StreamCaptureState::Stopped);
 }
 

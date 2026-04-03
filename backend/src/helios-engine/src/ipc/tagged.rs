@@ -156,7 +156,7 @@ const _: () = {
             struct SetControl { command_id: lib_ipc::types::CommandId => with_serde, stream_id: uuid::Uuid => with_serde, control_id: crate::ipc::ControlId, value: crate::capture::CaptureControlValue => with_serde },
             struct GetControls { command_id: lib_ipc::types::CommandId => with_serde, stream_id: uuid::Uuid => with_serde },
             struct GetMetrics { command_id: lib_ipc::types::CommandId => with_serde, stream_id: uuid::Uuid => with_serde },
-            struct SnapshotJpeg { command_id: lib_ipc::types::CommandId => with_serde, stream_id: uuid::Uuid => with_serde, quality: u8, source: Option<crate::ipc::RecordingSource> },
+            struct SnapshotJpeg { command_id: lib_ipc::types::CommandId => with_serde, stream_id: uuid::Uuid => with_serde, quality: u8, source: Option<crate::ipc::RecordingSource> => with_serde },
             struct GetNodeRegistry { command_id: lib_ipc::types::CommandId => with_serde },
             struct DiscoverDevices { command_id: lib_ipc::types::CommandId => with_serde },
             struct RefreshNodeRegistry { command_id: lib_ipc::types::CommandId => with_serde },
@@ -174,7 +174,7 @@ const _: () = {
             struct ListLocalizationPipelineOutputs { command_id: lib_ipc::types::CommandId => with_serde, request: crate::ipc::JsonWire => with_serde },
             struct SampleLocalizationPipelineOutput { command_id: lib_ipc::types::CommandId => with_serde, request: crate::ipc::JsonWire => with_serde },
             struct GetStreamRuntimeCapabilities { command_id: lib_ipc::types::CommandId => with_serde },
-            struct StartRecording { command_id: lib_ipc::types::CommandId => with_serde, stream_id: uuid::Uuid => with_serde, source: crate::ipc::RecordingSource, output_path: String, container: crate::ipc::RecordingContainer => with_serde, codec: crate::ipc::RecordingCodec => with_serde, duration_ms: Option<u64> => with_serde, settings: Option<crate::ipc::RecordingSettings> => with_serde },
+            struct StartRecording { command_id: lib_ipc::types::CommandId => with_serde, stream_id: uuid::Uuid => with_serde, source: crate::ipc::RecordingSource => with_serde, output_path: String, container: crate::ipc::RecordingContainer => with_serde, codec: crate::ipc::RecordingCodec => with_serde, duration_ms: Option<u64> => with_serde, settings: Option<crate::ipc::RecordingSettings> => with_serde },
             struct StopRecording { command_id: lib_ipc::types::CommandId => with_serde, stream_id: uuid::Uuid => with_serde },
             struct CaptureShadowRecording { command_id: lib_ipc::types::CommandId => with_serde, stream_id: uuid::Uuid => with_serde, output_path: String, container: crate::ipc::RecordingContainer => with_serde, window_ms: u64 },
             struct SetPipelineWires { command_id: lib_ipc::types::CommandId => with_serde, stream_id: uuid::Uuid => with_serde, wires: Vec<crate::ipc::StreamPipelineWire> => with_serde },
@@ -187,7 +187,7 @@ const _: () = {
     lib_ipc::tagged_enum! {
         impl crate::ipc::EngineEvent => crate::ipc::EngineEventKind {
             struct Ack { command_id: lib_ipc::types::CommandId => with_serde, ok: bool },
-            struct Nack { command_id: lib_ipc::types::CommandId => with_serde, code: crate::ipc::EngineErrorCode, reason: String, retryable: bool },
+            struct Nack { command_id: lib_ipc::types::CommandId => with_serde, code: crate::ipc::EngineErrorCode => with_serde, reason: String, retryable: bool },
             struct StreamList { command_id: lib_ipc::types::CommandId => with_serde, streams: Vec<crate::ipc::StreamSummary> => with_serde },
             struct Started { command_id: lib_ipc::types::CommandId => with_serde, stream_id: uuid::Uuid => with_serde, descriptor: crate::capture::CaptureDescriptor => with_serde },
             struct Stopped { command_id: lib_ipc::types::CommandId => with_serde, stream_id: uuid::Uuid => with_serde },

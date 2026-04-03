@@ -1,4 +1,3 @@
-use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "schema")]
 use utoipa::ToSchema;
@@ -6,7 +5,7 @@ use utoipa::ToSchema;
 pub type TensorShape = Vec<usize>;
 
 #[cfg_attr(feature = "schema", derive(ToSchema))]
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TensorElementType {
     U8,
     I8,
@@ -16,7 +15,7 @@ pub enum TensorElementType {
     F32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tensor {
     pub name: String,
     pub element_type: TensorElementType,

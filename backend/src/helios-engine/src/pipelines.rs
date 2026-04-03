@@ -100,7 +100,7 @@ const PIPELINE_TEMPLATE_DOCUMENT_SCHEMA_PLAN: SyncSchemaPlan<JsonValue> = SyncSc
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_pipeline_document, decode_pipeline_template_document, CURRENT_PIPELINE_DOCUMENT_SCHEMA_VERSION, CURRENT_PIPELINE_TEMPLATE_DOCUMENT_SCHEMA_VERSION};
+    use super::{decode_pipeline_document, decode_pipeline_template_document, CURRENT_PIPELINE_DOCUMENT_SCHEMA_VERSION};
 
     #[test]
     fn decode_pipeline_document_rejects_missing_schema_version() {

@@ -10,9 +10,7 @@ use tracing::error;
 use url::Url;
 use uuid::Uuid;
 
-use bincode::{Decode, Encode};
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum LogLevel {
     Trace,
@@ -46,67 +44,38 @@ impl From<LogLevel> for tracing::Level {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum UpdaterCommand {
-    StageRelease {
-        command_id: CommandId,
-        #[bincode(with_serde)]
-        update_id: Uuid,
-        #[bincode(with_serde)]
-        manifest: ReleaseManifest,
-    },
-    Cancel {
-        command_id: CommandId,
-        #[bincode(with_serde)]
-        update_id: Uuid,
-    },
-    ApplyRelease {
-        command_id: CommandId,
-        #[bincode(with_serde)]
-        update_id: Uuid,
-        window: MaintenanceWindow,
-    },
-    Rollback {
-        command_id: CommandId,
-        #[bincode(with_serde)]
-        update_id: Uuid,
-    },
-    QueryState {
-        command_id: CommandId,
-    },
-    QueryStorage {
-        command_id: CommandId,
-    },
-    PreflightRelease {
-        command_id: CommandId,
-        #[bincode(with_serde)]
-        update_id: Uuid,
-    },
+    StageRelease { command_id: CommandId, update_id: Uuid, manifest: ReleaseManifest },
+    Cancel { command_id: CommandId, update_id: Uuid },
+    ApplyRelease { command_id: CommandId, update_id: Uuid, window: MaintenanceWindow },
+    Rollback { command_id: CommandId, update_id: Uuid },
+    QueryState { command_id: CommandId },
+    QueryStorage { command_id: CommandId },
+    PreflightRelease { command_id: CommandId, update_id: Uuid },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MaintenanceWindow {
-    #[bincode(with_serde)]
     pub start: Timestamp,
     pub duration: Duration,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct UrlArtifact {
-    #[bincode(with_serde)]
     pub url: Url,
     pub size_bytes: Option<u64>,
     pub checksum: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StorageDirectoryReport {
     pub path: String,
     pub usage_bytes: u64,
     pub available_bytes: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UpdaterStorageReport {
     pub cache: StorageDirectoryReport,
     pub work: StorageDirectoryReport,
@@ -114,7 +83,7 @@ pub struct UpdaterStorageReport {
     pub frontend_releases: StorageDirectoryReport,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateStage {
     Idle,
@@ -127,21 +96,18 @@ pub enum UpdateStage {
     RolledBack,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct UpdateState {
-    #[bincode(with_serde)]
     pub update_id: Uuid,
     pub stage: UpdateStage,
     pub progress_percent: Option<u8>,
     pub last_error: Option<String>,
-    #[bincode(with_serde)]
     pub started_at: Option<Timestamp>,
-    #[bincode(with_serde)]
     pub finished_at: Option<Timestamp>,
     pub artifacts: Vec<UrlArtifact>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PreflightVerdict {
     Ready,
@@ -156,9 +122,8 @@ pub enum PreflightVerdict {
     SingleSlotDisabled,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PreflightReport {
-    #[bincode(with_serde)]
     pub update_id: Uuid,
     pub ready: bool,
     pub verdict: PreflightVerdict,
@@ -175,59 +140,20 @@ pub struct PreflightReport {
     pub single_slot: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum UpdaterEvent {
     Control(ControlEvent),
-    StageProgress {
-        #[bincode(with_serde)]
-        update_id: Uuid,
-        percent: u8,
-        detail: Option<String>,
-    },
-    StageComplete {
-        #[bincode(with_serde)]
-        update_id: Uuid,
-    },
-    ApplyScheduled {
-        #[bincode(with_serde)]
-        update_id: Uuid,
-        #[bincode(with_serde)]
-        eta: Timestamp,
-    },
-    ApplyComplete {
-        #[bincode(with_serde)]
-        update_id: Uuid,
-        reboot_required: bool,
-    },
-    RollbackTriggered {
-        #[bincode(with_serde)]
-        update_id: Uuid,
-        reason: String,
-    },
-    StateSnapshot {
-        active_update: Option<UpdateState>,
-        cache_usage_bytes: u64,
-    },
-    StorageReport {
-        report: UpdaterStorageReport,
-    },
-    PreflightReport {
-        report: PreflightReport,
-    },
-    Heartbeat {
-        uptime_ms: u64,
-        sequence: u64,
-        stage_queue_depth: u32,
-    },
-    LogRecord {
-        level: LogLevel,
-        span: Vec<String>,
-        message: String,
-    },
-    Unknown {
-        kind: u16,
-        payload: Vec<u8>,
-    },
+    StageProgress { update_id: Uuid, percent: u8, detail: Option<String> },
+    StageComplete { update_id: Uuid },
+    ApplyScheduled { update_id: Uuid, eta: Timestamp },
+    ApplyComplete { update_id: Uuid, reboot_required: bool },
+    RollbackTriggered { update_id: Uuid, reason: String },
+    StateSnapshot { active_update: Option<UpdateState>, cache_usage_bytes: u64 },
+    StorageReport { report: UpdaterStorageReport },
+    PreflightReport { report: PreflightReport },
+    Heartbeat { uptime_ms: u64, sequence: u64, stage_queue_depth: u32 },
+    LogRecord { level: LogLevel, span: Vec<String>, message: String },
+    Unknown { kind: u16, payload: Vec<u8> },
 }
 
 impl From<ControlEvent> for UpdaterEvent {
@@ -312,7 +238,7 @@ const _: () = {
         impl crate::ipc::UpdaterCommand => crate::ipc::UpdaterCommandKind {
             struct StageRelease { command_id: CommandId, update_id: Uuid => with_serde, manifest: ReleaseManifest => with_serde },
             struct Cancel { command_id: CommandId, update_id: Uuid => with_serde },
-            struct ApplyRelease { command_id: CommandId, update_id: Uuid => with_serde, window: MaintenanceWindow },
+            struct ApplyRelease { command_id: CommandId, update_id: Uuid => with_serde, window: MaintenanceWindow => with_serde },
             struct Rollback { command_id: CommandId, update_id: Uuid => with_serde },
             struct QueryState { command_id: CommandId },
             struct QueryStorage { command_id: CommandId },
@@ -327,11 +253,11 @@ const _: () = {
             struct ApplyScheduled { update_id: Uuid => with_serde, eta: Timestamp => with_serde },
             struct ApplyComplete { update_id: Uuid => with_serde, reboot_required: bool },
             struct RollbackTriggered { update_id: Uuid => with_serde, reason: String },
-            struct StateSnapshot { active_update: Option<UpdateState>, cache_usage_bytes: u64 },
-            struct StorageReport { report: UpdaterStorageReport },
-            struct PreflightReport { report: PreflightReport },
+            struct StateSnapshot { active_update: Option<UpdateState> => with_serde, cache_usage_bytes: u64 },
+            struct StorageReport { report: UpdaterStorageReport => with_serde },
+            struct PreflightReport { report: PreflightReport => with_serde },
             struct Heartbeat { uptime_ms: u64, sequence: u64, stage_queue_depth: u32 },
-            struct LogRecord { level: LogLevel, span: Vec<String>, message: String },
+            struct LogRecord { level: LogLevel => with_serde, span: Vec<String>, message: String },
             tuple Control (ControlEvent),
         }
     }
