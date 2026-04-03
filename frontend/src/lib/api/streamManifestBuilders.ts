@@ -1,7 +1,7 @@
 import { resolveStreamCreationDefaults } from '$lib/api/streamDefaults';
 import { normalizeRecordingMode } from '$lib/api/streamRecordingMode';
 import { withCurrentStreamManifestSchema } from '$lib/api/streamSchema';
-import type { StreamCapabilitiesResponse, StreamManifest } from '$lib/ts-bindings/http/client';
+import type { StreamCapabilitiesResponse, StreamManifest } from '$lib/api/client';
 
 export type RegisterNetcamStreamInput = {
   url: string;

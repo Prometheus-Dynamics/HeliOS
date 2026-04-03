@@ -1,5 +1,5 @@
 import { apiFetchResponse } from '$lib/api/core/http';
-import type { ErrorHistoryEntry, ErrorHistoryResponse } from '$lib/ts-bindings/http/client';
+import type { ErrorHistoryEntry, ErrorHistoryResponse } from '$lib/api/client';
 
 export type { ErrorHistoryEntry, ErrorHistoryResponse };
 

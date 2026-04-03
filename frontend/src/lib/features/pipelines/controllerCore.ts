@@ -21,7 +21,7 @@ import type {
   PipelineTemplateSummary,
   PipelineTypeDescriptor
 } from '$lib/types/pipeline';
-import type { StreamInfo } from '$lib/ts-bindings/http/client';
+import type { StreamInfo } from '$lib/api/client';
 import type { PipelineGraphEdgeSelection } from '$lib';
 import type { PipelineOutputEntry, PipelinePortEntry } from '../../components/pipelines/types';
 import { applyPaletteToGraphPlan, serializeGraphPlan } from './graph';

@@ -14,7 +14,7 @@ import type {
   SensorPeripheral,
   StreamInfo,
   UsbPeripheral
-} from '$lib/ts-bindings/http/client';
+} from '$lib/api/client';
 import type { CameraCard, CameraStatus, PeripheralEntry, SummaryTile, TaskEntry } from '$lib/types/devices';
 import type { ImuStatus } from '$lib/types/systems';
 import { CORAL_ICON, PERIPHERAL_ROW_LIMIT } from './constants';

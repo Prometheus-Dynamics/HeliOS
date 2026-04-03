@@ -1,4 +1,4 @@
-import { apiUrl } from '$lib/api/httpClient';
+import { apiUrl } from '$lib/api/client';
 import { createDomainResource } from '$lib/api/domainResources';
 import { apiFetch, apiFetchCachedJson } from '$lib/api/core/http';
 import { cacheResourceData, type ResourceCacheContext, type ResourceCacheResult } from '$lib/api/resourceCache';
@@ -20,7 +20,7 @@ import type {
   LocalizationSourcePose as GeneratedLocalizationSourcePose,
   LocalizationSourceSampleStatus as GeneratedLocalizationSourceSampleStatus,
   LocalizationTemporalStabilizationConfig as GeneratedLocalizationTemporalStabilizationConfig
-} from '$lib/ts-bindings/http/client';
+} from '$lib/api/client';
 
 export type LocalizationPoseSpace = GeneratedLocalizationPoseSpace;
 export type LocalizationSolverMode = GeneratedLocalizationSolverMode;

@@ -1,5 +1,5 @@
 import type { StreamsApi as SharedStreamsApi } from '$lib/api/streamsApi';
-import type { StreamInfo } from '$lib/ts-bindings/http/client';
+import type { StreamInfo } from '$lib/api/client';
 import type { PipelineGraphPlan } from '$lib/types/pipeline';
 import { normalizeMultiplexSlots, multiplexKey } from './pipelineMultiplexUtils';
 

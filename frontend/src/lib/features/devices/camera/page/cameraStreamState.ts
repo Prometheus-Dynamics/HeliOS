@@ -1,4 +1,4 @@
-import type { Interval, Mode } from '$lib/ts-bindings/http/client';
+import type { Interval, Mode } from '$lib/api/client';
 
 export function intervalToFps(interval: Interval | undefined | null): number | null {
   if (!interval) return null;

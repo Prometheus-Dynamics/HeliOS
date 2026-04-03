@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Interval, Mode, ProbedDevice } from '$lib/ts-bindings/http/client';
+  import type { Interval, Mode, ProbedDevice } from '$lib/api/client';
 
   type Props = {
     device: ProbedDevice | null;

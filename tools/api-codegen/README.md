@@ -10,8 +10,8 @@ The narrow runtime contract manifests that feed the generated Rust/TypeScript sh
 
 1. Runs `cargo run -p helios-api -- apispec` to emit the OpenAPI (HTTP) and AsyncAPI (WebSocket) specifications into a temporary directory.
 2. Installs / reuses the shared JS toolchain in `tools/api-client` (powered by `bun`).
-3. Uses `openapi-typescript` to create shared DTO typings at `frontend/src/lib/ts-bindings/types.ts`.
-4. Uses `openapi-typescript-codegen` to create a REST client under `frontend/src/lib/ts-bindings/http/client` and copies the AsyncAPI document to `frontend/src/lib/ts-bindings/ws/asyncapi.json`.
+3. Uses `openapi-typescript` to create shared DTO typings at `frontend/src/generated/types.ts`.
+4. Uses `openapi-typescript-codegen` to create a REST client under `frontend/src/generated/http/client` and copies the AsyncAPI document to `frontend/src/generated/ws/asyncapi.json`.
 5. Generates the explicitly owned shared runtime contract outputs from the TOML manifests above.
 
 ## Usage
@@ -23,7 +23,7 @@ The narrow runtime contract manifests that feed the generated Rust/TypeScript sh
 # equivalent Rust entry point
 cargo run --manifest-path backend/Cargo.toml -p xtask -- generate generated-contracts
 
-# or from frontend (wires output straight into src/lib/ts-bindings)
+# or from frontend (wires output straight into src/generated)
 bun run codegen
 ```
 

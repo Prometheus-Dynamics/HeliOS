@@ -1,5 +1,5 @@
 import { writable } from 'svelte/store';
-import type { ValidationIssue } from '$lib/ts-bindings/http/client';
+import type { ValidationIssue } from '$lib/api/client';
 import { readJson, writeJson } from '$lib/utils/storage';
 
 export type NotificationKind = 'error' | 'warning' | 'info';

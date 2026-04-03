@@ -1,6 +1,6 @@
 import { browser } from '$app/environment';
 import { writable } from 'svelte/store';
-import { apiUrl } from '$lib/api/httpClient';
+import { apiUrl } from '$lib/api/client';
 import { updateBackendFeaturesFromHealthPayload } from '$lib/api/backendFeatures';
 import { fetchWithRetry } from '$lib/api/requestUtils';
 

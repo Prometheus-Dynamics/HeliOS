@@ -1,4 +1,4 @@
-import type { StreamInfo, StreamManifest, StreamPipelineBinding } from '$lib/ts-bindings/http/client';
+import type { StreamInfo, StreamManifest, StreamPipelineBinding } from '$lib/api/client';
 import type {
   PipelineDataType,
   PipelineGraphPlan,

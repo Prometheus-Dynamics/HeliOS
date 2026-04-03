@@ -18,8 +18,12 @@ export default defineConfig(({ mode }) => {
 		resolve: {
 			alias: [
 				{
-					find: '$lib/ts-bindings/http/client',
-					replacement: resolvePath(process.cwd(), 'src/lib/ts-bindings/http/client/index.ts')
+					find: '$generated/http/client',
+					replacement: resolvePath(process.cwd(), 'src/generated/http/client/index.ts')
+				},
+				{
+					find: '$generated',
+					replacement: resolvePath(process.cwd(), 'src/generated')
 				}
 			]
 		},
@@ -34,7 +38,7 @@ export default defineConfig(({ mode }) => {
 				},
 				output: {
 					manualChunks(id) {
-						if (id.includes('/src/lib/api/httpClient') || id.includes('/src/lib/ts-bindings/http/client')) {
+						if (id.includes('/src/lib/api/client') || id.includes('/src/lib/api/httpClient') || id.includes('/src/generated/http/client')) {
 							return 'api-client';
 						}
 						if (id.includes('node_modules/three-stdlib')) {

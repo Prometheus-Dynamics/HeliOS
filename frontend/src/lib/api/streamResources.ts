@@ -1,8 +1,8 @@
 import { createDomainResource } from '$lib/api/domainResources';
 import { invalidateStreamPreviewFormat } from '$lib/api/streamPreviewFormat';
 import { streamHealthStatus, streamRecordingActive, streamRecordingSinceMs } from '$lib/api/streamRuntime';
-import type { StreamCapabilitiesResponse } from '$lib/ts-bindings/http/client/models/StreamCapabilitiesResponse';
-import type { StreamInfo } from '$lib/ts-bindings/http/client/models/StreamInfo';
+import type { StreamCapabilitiesResponse } from '$lib/api/client';
+import type { StreamInfo } from '$lib/api/client';
 import { invalidateSWR, invalidateSWRPrefix } from '$lib/utils/swrCache';
 import { resolveStreamAlias, resolveStreamLabel } from '$lib/utils/streamLabels';
 

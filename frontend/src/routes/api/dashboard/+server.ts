@@ -1,5 +1,5 @@
 import type { RequestHandler } from '@sveltejs/kit';
-import { OpenAPI } from '$lib/ts-bindings/http/client';
+import { OpenAPI } from '$lib/api/client';
 import { fetchDashboardPageData } from '$lib/api/dashboardPage';
 
 const JSON_HEADERS = { 'content-type': 'application/json' };

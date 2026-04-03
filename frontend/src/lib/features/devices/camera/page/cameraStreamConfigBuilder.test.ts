@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { ProbedBackend, ProbedDevice, StreamInfo } from '$lib/api/httpClient';
+import type { ProbedBackend, ProbedDevice, StreamInfo } from '$lib/api/client';
 import { createEncoderSettingsDraft } from '$lib/api/streamEncoderSettings';
 import type { StreamCreationDefaults } from '$lib/api/streamDefaults';
 

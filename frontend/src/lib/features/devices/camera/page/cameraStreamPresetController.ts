@@ -1,5 +1,5 @@
-import type { CodecInfo, Interval, Mode, ProbedBackend, ProbedDevice, StreamInfo, StreamManifest } from '$lib/api/httpClient';
-import { OpenAPI, getHttpClientBase } from '$lib/api/httpClient';
+import type { CodecInfo, Interval, Mode, ProbedBackend, ProbedDevice, StreamInfo, StreamManifest } from '$lib/api/client';
+import { OpenAPI, getHttpClientBase } from '$lib/api/client';
 import { extractError } from '$lib/api/errors';
 import type { EncoderSettingsDraft } from '$lib/api/streamEncoderSettings';
 import type { StreamCreationDefaults } from '$lib/api/streamDefaults';

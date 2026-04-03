@@ -1,4 +1,4 @@
-import type { DaedalusRegistryFanInPort } from '$lib/ts-bindings/http/client';
+import type { DaedalusRegistryFanInPort } from '$lib/api/client';
 import type {
   PipelineDataType,
   PipelineFanInPort,

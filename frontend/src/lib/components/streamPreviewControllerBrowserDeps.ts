@@ -1,5 +1,5 @@
 import { buildHttpCandidateUrls } from '$lib/api/httpCandidates';
-import { apiUrl } from '$lib/api/httpClient';
+import { apiUrl } from '$lib/api/client';
 import { fetchPeerStreamFormat } from '$lib/api/peers';
 import { resolveStreamPreviewFormat } from '$lib/api/streamPreviewFormat';
 import { StreamsApi } from '$lib/api/streamsApi';

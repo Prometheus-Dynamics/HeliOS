@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { BootloaderStatus } from '$lib/ts-bindings/http/client';
+import type { BootloaderStatus } from '$lib/api/client';
 import type { ResourceGuardStatus } from '$lib/api/deviceStatusResources';
 
 import {

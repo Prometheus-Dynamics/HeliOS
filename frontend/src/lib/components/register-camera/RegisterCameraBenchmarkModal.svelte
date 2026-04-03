@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ProbedBackend, ProbedDevice } from '$lib/ts-bindings/http/client';
+  import type { ProbedBackend, ProbedDevice } from '$lib/api/client';
   import ModalShell from '$lib/components/ui/ModalShell.svelte';
   import CameraSensorBenchmarkTab from '$lib/features/devices/camera/CameraSensorBenchmarkTab.svelte';
 

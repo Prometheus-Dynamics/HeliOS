@@ -1,4 +1,4 @@
-import type { DaedalusRegistryNode, DaedalusRegistryFanInPort } from '$lib/ts-bindings/http/client';
+import type { DaedalusRegistryNode, DaedalusRegistryFanInPort } from '$lib/api/client';
 import type { PipelineRegistryEntry } from '$lib/types/pipeline';
 import { buildTypeRegistryLookup } from './cache';
 import type { DaedalusRegistryPort, DaedalusRegistryType } from './types';

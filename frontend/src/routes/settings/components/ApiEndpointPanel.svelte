@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getHttpClientBase, resetHttpClientBase, setHttpClientBase } from '$lib/api/httpClient';
+  import { getHttpClientBase, resetHttpClientBase, setHttpClientBase } from '$lib/api/client';
 
   let apiBaseValue = $state('');
   let apiBaseSaving = $state(false);

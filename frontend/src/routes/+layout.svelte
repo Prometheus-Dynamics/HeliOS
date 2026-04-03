@@ -1,6 +1,6 @@
 <script lang="ts">
   import '../app.css';
-  import '$lib/api/httpClient';
+  import '$lib/api/client';
   import { page } from '$app/stores';
   import { Toast } from '@skeletonlabs/skeleton-svelte';
   import type { Snippet } from 'svelte';

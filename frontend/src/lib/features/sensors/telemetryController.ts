@@ -1,5 +1,5 @@
 import { writable, type Readable } from 'svelte/store';
-import { apiUrl } from '$lib/api/httpClient';
+import { apiUrl } from '$lib/api/client';
 import { apiFetch } from '$lib/api/core/http';
 import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
 import { emptyImuStatus, mapImuStatus, refreshImuStatus, updateImuConfig } from '$lib/api/systemsPage';

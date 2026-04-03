@@ -1,5 +1,5 @@
 import { browser } from '$app/environment';
-import { getHttpClientBase } from '$lib/api/httpClient';
+import { getHttpClientBase } from '$lib/api/client';
 import { buildWsUrl, connectWebSocketWithFallback, sendJson, type ManagedWebSocket } from '$lib/api/core/ws';
 
 export type DeviceSensorKind = 'imu' | 'power' | 'firmware';

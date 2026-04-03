@@ -1,6 +1,6 @@
 import type { StreamsApi as SharedStreamsApi } from '$lib/api/streamsApi';
 import { loadOwnedStreams } from '$lib/api/streamResources';
-import type { StreamInfo } from '$lib/ts-bindings/http/client';
+import type { StreamInfo } from '$lib/api/client';
 import type { PipelineGraphPlan, PipelineNodeValue, PipelineOverviewPipeline } from '$lib/types/pipeline';
 import { fromApiGraphPlan } from '$lib/features/pipelines/graphConverters';
 import { serializeGraphPlan } from '$lib/features/pipelines/graph';

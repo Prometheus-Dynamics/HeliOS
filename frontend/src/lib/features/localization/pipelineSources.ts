@@ -1,5 +1,5 @@
 import type { PipelineDataType } from '$lib/types/pipeline';
-import { apiUrl } from '$lib/api/httpClient';
+import { apiUrl } from '$lib/api/client';
 import { apiFetch, apiFetchResponse } from '$lib/api/core/http';
 import {
   DEVICE_IMU_EXTERNAL_SOURCE_ID,
@@ -9,7 +9,7 @@ import {
 import { extractGraphOutputPorts } from '$lib/features/pipelines/graphOutputPorts';
 import { extractGraphOutputPortTypes } from '$lib/features/pipelines/outputFilters';
 import { resolveStreamLabel } from '$lib/utils/streamLabels';
-import type { StreamInfo } from '$lib/api/httpClient';
+import type { StreamInfo } from '$lib/api/client';
 
 export type LocalizationPipelineSource = {
   id: string;

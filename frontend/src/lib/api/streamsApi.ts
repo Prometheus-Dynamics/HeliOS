@@ -1,5 +1,5 @@
-import { EngineStreamsService } from '$lib/ts-bindings/http/client';
-import { apiUrl } from '$lib/api/httpClient';
+import { EngineStreamsService } from '$lib/api/client';
+import { apiUrl } from '$lib/api/client';
 import { apiFetch, apiFetchCachedJson, runApiRequest, type ApiRequestOptions } from '$lib/api/core/http';
 import { DEFAULT_REQUEST_TIMEOUT_MS, fetchWithRetry } from '$lib/api/requestUtils';
 import { makeNetcamManifest } from '$lib/api/streamManifestBuilders';
@@ -10,7 +10,7 @@ import type {
   StreamCapabilitiesResponse,
   StreamManifest,
   StreamPipelineWire
-} from '$lib/ts-bindings/http/client';
+} from '$lib/api/client';
 
 type CacheEntry<T> = {
   fetchedAt: number;

@@ -1,9 +1,7 @@
 import { browser, dev } from '$app/environment';
 import { env } from '$env/dynamic/public';
-import { OpenAPI } from '$lib/ts-bindings/http/client';
+import { OpenAPI } from '$generated/http/client';
 import { readStorage, removeStorage, writeStorage } from '$lib/utils/storage';
-
-export * from '$lib/ts-bindings/http/client';
 
 const API_PREFIX = '/v1';
 const LOCAL_DEV_BASE = 'http://127.0.0.1:5800';

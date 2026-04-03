@@ -1,4 +1,4 @@
-import type { StreamInfo } from '$lib/api/httpClient';
+import type { StreamInfo } from '$lib/api/client';
 import type {
   PipelineDataType,
   PipelineGraphPlan,

@@ -1,6 +1,6 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { fetchCameraConfigDetail } from '$lib/api/cameraConfigPage';
-import { OpenAPI } from '$lib/ts-bindings/http/client';
+import { OpenAPI } from '$lib/api/client';
 
 const JSON_HEADERS = { 'content-type': 'application/json' };
 

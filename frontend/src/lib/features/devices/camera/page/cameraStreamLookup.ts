@@ -1,4 +1,4 @@
-import type { CameraLayoutCameraResponse, DeviceService, StreamInfo } from '$lib/api/httpClient';
+import type { CameraLayoutCameraResponse, DeviceService, StreamInfo } from '$lib/api/client';
 import type { StreamsApi } from '$lib/api/streamsApi';
 import { findOwnedStreamByEffectiveId, loadOwnedStreams, streamLookupKeys } from '$lib/api/streamResources';
 

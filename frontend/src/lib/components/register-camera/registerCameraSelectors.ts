@@ -1,4 +1,4 @@
-import type { CodecInfo, Interval, Mode, ProbedBackend, ProbedDevice, StreamInfo } from '$lib/ts-bindings/http/client';
+import type { CodecInfo, Interval, Mode, ProbedBackend, ProbedDevice, StreamInfo } from '$lib/api/client';
 import { encoderSelectionId } from '$lib/api/streamEncoderSettings';
 
 export function currentDevice(devices: ProbedDevice[], selectedDeviceIndex: number): ProbedDevice | null {

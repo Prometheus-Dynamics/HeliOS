@@ -1,5 +1,5 @@
 import type { StreamsApi as SharedStreamsApi } from '$lib/api/streamsApi';
-import type { ControlMeta, StreamInfo } from '$lib/ts-bindings/http/client';
+import type { ControlMeta, StreamInfo } from '$lib/api/client';
 
 export type TuneControlLoaderDeps = {
   StreamsApi: Pick<typeof SharedStreamsApi, 'getControls'>;

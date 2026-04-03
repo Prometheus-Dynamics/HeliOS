@@ -1,4 +1,4 @@
-import type { StreamMetrics } from '$lib/ts-bindings/http/client';
+import type { StreamMetrics } from '$lib/api/client';
 
 export const pipelineGraphTotalMs = (metrics: StreamMetrics | null | undefined): number | null => {
   const nodes = metrics?.pipeline?.nodes ?? null;

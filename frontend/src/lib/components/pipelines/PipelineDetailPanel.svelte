@@ -2,7 +2,7 @@
 import { createEventDispatcher } from 'svelte';
 import { emptyPipelineGraphPlan } from '$lib/features/pipelines/graph';
 import type { InspectorTabKey } from '$lib/features/pipelines/controller';
-import type { StreamInfo } from '$lib/ts-bindings/http/client';
+import type { StreamInfo } from '$lib/api/client';
   import type { GraphEdgeSelection, GraphPoint, PipelineDetailContext, PipelineOutputEntry, PipelinePortEntry } from './types';
 import type {
   ChannelPolicy,

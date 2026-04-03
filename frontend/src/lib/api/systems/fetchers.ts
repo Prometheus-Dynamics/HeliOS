@@ -1,4 +1,4 @@
-import { apiUrl } from '$lib/api/httpClient';
+import { apiUrl } from '$lib/api/client';
 import { formatFailureReason, requestOptionalJson } from '$lib/api/pagePayload/request';
 import { fetchWithRetry } from '$lib/api/requestUtils';
 import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rigDefaults';
@@ -9,7 +9,7 @@ import type {
   ImuStatusPayload,
   NetworkInterfaceSettings,
   TeamNumberPayload
-} from '$lib/ts-bindings/http/client';
+} from '$lib/api/client';
 import { FAILURE_MESSAGE_ALL, REQUEST_TIMEOUT_MS, SENSOR_REQUEST_TIMEOUT_MS, SYSTEMS_RETRY_OPTIONS } from './constants';
 import { emptyImuStatus, emptySystemsRuntime, mapI2cInventory, mapImuStatus, mapSystemsRuntime } from './mappers';
 

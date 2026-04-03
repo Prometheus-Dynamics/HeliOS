@@ -1,4 +1,4 @@
-import type { StreamInfo, StreamManifest, StreamMetrics } from '$lib/api/httpClient';
+import type { StreamInfo, StreamManifest, StreamMetrics } from '$lib/api/client';
 
 export type CameraPageCoreInput = {
   loading: boolean;

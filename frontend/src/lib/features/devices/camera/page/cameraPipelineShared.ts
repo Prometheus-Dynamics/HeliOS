@@ -1,4 +1,4 @@
-import { RAW_PIPELINE_UUID as DEFAULT_RAW_PIPELINE_UUID } from '$lib/ts-bindings/runtimeContracts';
+import { RAW_PIPELINE_UUID as DEFAULT_RAW_PIPELINE_UUID } from '$lib/contracts/runtimeContracts';
 
 export const PIPELINE_UI_STORAGE_PREFIX = 'helios.camera.pipelineUi.v1.';
 export const PIPELINE_OUTPUT_CELL_KEY = '0:0';

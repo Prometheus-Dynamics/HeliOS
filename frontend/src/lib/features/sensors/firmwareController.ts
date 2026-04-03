@@ -1,6 +1,6 @@
 import { writable, type Readable } from 'svelte/store';
 import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
-import { apiUrl } from '$lib/api/httpClient';
+import { apiUrl } from '$lib/api/client';
 import { apiFetchResponse } from '$lib/api/core/http';
 import type { PeripheralEntry } from '$lib/types/devices';
 import type { FirmwareUpdatePayload } from '$lib/api/deviceSensorsStream';

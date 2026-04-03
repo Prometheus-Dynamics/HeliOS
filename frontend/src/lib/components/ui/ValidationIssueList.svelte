@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ValidationIssue } from '$lib/ts-bindings/http/client';
+  import type { ValidationIssue } from '$lib/api/client';
 
   type Props = {
     issues?: ValidationIssue[] | null;

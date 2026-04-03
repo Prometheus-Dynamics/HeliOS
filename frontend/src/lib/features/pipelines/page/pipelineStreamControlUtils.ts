@@ -1,4 +1,4 @@
-import type { ControlKind, ControlMeta, ControlValue } from '$lib/ts-bindings/http/client';
+import type { ControlKind, ControlMeta, ControlValue } from '$lib/api/client';
 
 export type ControlValueWire = { kind?: string; value?: unknown };
 

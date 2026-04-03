@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ProbedDevice } from '$lib/ts-bindings/http/client';
+  import type { ProbedDevice } from '$lib/api/client';
 
   type Props = {
     devices: ProbedDevice[];

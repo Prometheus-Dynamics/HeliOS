@@ -1,4 +1,4 @@
-import type { StreamInfo, StreamManifest } from '$lib/api/httpClient';
+import type { StreamInfo, StreamManifest } from '$lib/api/client';
 import type { CalibrationParams, CalibrationResult } from '$lib/features/devices/camera/cameraCalibrationTypes';
 
 type SolveDebugView = NonNullable<CalibrationResult['debugViews']>[number];

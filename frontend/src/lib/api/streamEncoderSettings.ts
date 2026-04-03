@@ -1,10 +1,10 @@
-import type { CodecInfo, EncoderSettings, FrameRate, ResolutionHint } from '$lib/api/httpClient';
+import type { CodecInfo, EncoderSettings, FrameRate, ResolutionHint } from '$lib/api/client';
 import {
   STREAM_ENCODER_FAMILIES,
   STREAM_ENCODER_FAMILY_IDS,
   type StreamEncoderFamily,
   type StreamRecordingCodecId
-} from '$lib/ts-bindings/codecFamilies';
+} from '$lib/contracts/codecFamilies';
 
 type CodecLike = {
   implementation?: string | null;

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { FanStatus } from '$lib/ts-bindings/http/client';
+  import type { FanStatus } from '$lib/api/client';
 
   type Props = {
     fanStatus: FanStatus | null;

@@ -1,7 +1,7 @@
-import type { StreamInfo, StreamManifest } from '$lib/api/httpClient';
+import type { StreamInfo, StreamManifest } from '$lib/api/client';
 import { apiFetchResponse } from '$lib/api/core/http';
-import { OpenAPI } from '$lib/ts-bindings/http/client';
-import { getHttpClientBase } from '$lib/api/httpClient';
+import { OpenAPI } from '$lib/api/client';
+import { getHttpClientBase } from '$lib/api/client';
 import type { PipelinesApi } from '$lib/api/pipelinesApi';
 import type { StreamsApi } from '$lib/api/streamsApi';
 import type {
@@ -9,7 +9,7 @@ import type {
   PipelineDocument,
   PipelineTemplateDocument,
   StreamPipelineWire
-} from '$lib/ts-bindings/http/client';
+} from '$lib/api/client';
 import type { PipelineDataType, PipelineGraphPlan } from '$lib/types/pipeline';
 import { normalizeGridSlots, normalizeGridOutputKeys } from './cameraPipelineState';
 import {

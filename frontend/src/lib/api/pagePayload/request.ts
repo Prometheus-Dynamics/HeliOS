@@ -1,4 +1,4 @@
-import { apiUrl, getHttpClientBase } from '$lib/api/httpClient';
+import { apiUrl, getHttpClientBase } from '$lib/api/client';
 import { extractError } from '$lib/api/errors';
 import { DEFAULT_REQUEST_TIMEOUT_MS, fetchWithRetry } from '$lib/api/requestUtils';
 

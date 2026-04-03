@@ -7,7 +7,7 @@ import type {
   ProbedDevice,
   StreamInfo,
   StreamManifest
-} from '$lib/api/httpClient';
+} from '$lib/api/client';
 import { buildEncoderSettingsForSelection, type EncoderSettingsDraft } from '$lib/api/streamEncoderSettings';
 import { defaultPreviewJpegQualityForEncoder, type StreamCreationDefaults } from '$lib/api/streamDefaults';
 import { recordingModeFromToggle } from '$lib/api/streamRecordingMode';

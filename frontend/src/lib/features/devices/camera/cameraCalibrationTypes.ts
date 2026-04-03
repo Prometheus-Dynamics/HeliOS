@@ -2,7 +2,7 @@ import type {
   IpaStatus as GeneratedIpaStatus,
   SolveCalibrationResponse as GeneratedCalibrationResult,
   StreamCalibrationParams as GeneratedCalibrationParams
-} from '$lib/ts-bindings/http/client';
+} from '$lib/api/client';
 
 export type CalibrationBoard = {
   squaresX: number;

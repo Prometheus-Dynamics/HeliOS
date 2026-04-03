@@ -6,7 +6,7 @@
   import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rigDefaults';
   import { rigLayoutStore } from '$lib/stores/rigLayout';
   import type { RigCameraInfo, RobotDimensions } from '$lib/types/rig';
-  import { DeviceService, type UpdateRobotDimensionsRequest } from '$lib/ts-bindings/http/client';
+  import { DeviceService, type UpdateRobotDimensionsRequest } from '$lib/api/client';
   import { buildErrorMessage } from '$lib/ui/errorPolicy';
 
   type RigLayoutViewState = {

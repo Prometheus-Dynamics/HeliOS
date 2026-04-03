@@ -1,4 +1,4 @@
-import { PipelinesService } from '$lib/ts-bindings/http/client';
+import { PipelinesService } from '$lib/api/client';
 import { apiFetchCachedJson, runApiRequest, type ApiRequestOptions } from '$lib/api/core/http';
 import { invalidateSWRPrefix } from '$lib/utils/swrCache';
 

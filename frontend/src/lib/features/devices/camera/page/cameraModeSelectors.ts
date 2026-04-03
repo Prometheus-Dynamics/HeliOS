@@ -1,4 +1,4 @@
-import type { Interval, Mode } from '$lib/api/httpClient';
+import type { Interval, Mode } from '$lib/api/client';
 
 export type CameraModeSelectorDeps = {
   modeKey: (value: unknown) => string | null;

@@ -1,5 +1,5 @@
 <script lang="ts" module>
-  import type { StreamInfo } from '$lib/api/httpClient';
+  import type { StreamInfo } from '$lib/api/client';
   import { toaster } from '$lib';
   import { reportError } from '$lib/ui/errorPolicy';
   import { createCameraCalibrationState } from './cameraCalibrationStore.svelte';

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import type { Interval, Mode, ProbedBackend, ProbedDevice, StreamInfo, StreamManifest } from '$lib/api/httpClient';
+import type { Interval, Mode, ProbedBackend, ProbedDevice, StreamInfo, StreamManifest } from '$lib/api/client';
 import type { StreamCreationDefaults } from '$lib/api/streamDefaults';
 
 import { buildCameraStreamPresetManifest, type CameraStreamPresetManifestInput } from './cameraStreamPresetManifest';

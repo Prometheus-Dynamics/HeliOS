@@ -4,8 +4,8 @@ import type {
   ValidationErrorBody,
   ValidationIssue,
   ValidationWarning
-} from '$lib/ts-bindings/http/client';
-import { ApiError } from '$lib/ts-bindings/http/client/core/ApiError';
+} from '$lib/api/client';
+import { ApiError } from '$lib/api/client';
 
 type ErrorPayload = Partial<ErrorBody> &
   Partial<ValidationErrorBody> &

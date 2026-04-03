@@ -1,4 +1,4 @@
-import type { BootloaderStatus } from '$lib/ts-bindings/http/client';
+import type { BootloaderStatus } from '$lib/api/client';
 import type { OsHealthStatus, ResourceGuardStatus } from '$lib/api/deviceStatusResources';
 
 export const SIDEBAR_COLLAPSED_STORAGE_KEY = 'helios.app.sidebar.collapsed';

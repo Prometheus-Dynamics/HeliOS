@@ -12,7 +12,7 @@
     buildTuneConstantSearchTokens,
     filterTuneConstantGroups
   } from '$lib/features/pipelines/page/pipelineTuneDerived';
-  import type { StreamPipelineLayout, StreamPipelineWire } from '$lib/ts-bindings/http/client';
+  import type { StreamPipelineLayout, StreamPipelineWire } from '$lib/api/client';
 
   type Props = {
     open: boolean;

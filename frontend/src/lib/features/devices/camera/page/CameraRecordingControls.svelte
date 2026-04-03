@@ -2,7 +2,7 @@
   import { onDestroy } from 'svelte';
   import { toaster } from '$lib';
   import { apiFetchResponse } from '$lib/api/core/http';
-  import type { StreamInfo, StreamManifest, StreamPipelineBinding } from '$lib/api/httpClient';
+  import type { StreamInfo, StreamManifest, StreamPipelineBinding } from '$lib/api/client';
   import { streamRecordingActive } from '$lib/api/streamRuntime';
   import { recordingModeEnabled } from '$lib/api/streamRecordingMode';
   import FaIcon from '$lib/components/icons/FaIcon.svelte';

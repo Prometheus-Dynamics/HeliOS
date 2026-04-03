@@ -1,6 +1,6 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
 
-import { OpenAPI } from '$lib/ts-bindings/http/client';
+import { OpenAPI } from '$lib/api/client';
 import { PipelinesApi } from '$lib/api/pipelinesApi';
 import { DEFAULT_REQUEST_TIMEOUT_MS } from '$lib/api/requestUtils';
 import { buildPipelinePayloadFromOverview } from '$lib/api/pipelinesNormalize';

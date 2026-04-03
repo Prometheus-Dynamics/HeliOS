@@ -7,7 +7,7 @@ import {
   streamLookupKeys,
   type OwnedStreamRecord
 } from './streamResources';
-import type { StreamInfo } from '$lib/ts-bindings/http/client/models/StreamInfo';
+import type { StreamInfo } from '$lib/api/client';
 
 function makeStream(overrides: Partial<StreamInfo> = {}): StreamInfo {
   return {

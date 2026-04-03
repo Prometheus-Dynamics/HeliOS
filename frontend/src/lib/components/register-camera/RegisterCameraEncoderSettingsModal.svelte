@@ -6,7 +6,7 @@
     encoderSettingsSupportsVideoControls,
     type EncoderSettingsDraft
   } from '$lib/api/streamEncoderSettings';
-  import type { CodecInfo } from '$lib/ts-bindings/http/client';
+  import type { CodecInfo } from '$lib/api/client';
   import ModalShell from '$lib/components/ui/ModalShell.svelte';
 
   type SourceResolution = { width: number; height: number } | null;

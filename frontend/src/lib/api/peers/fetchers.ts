@@ -10,7 +10,7 @@ import type {
   PeerRemoteStreamsResponse as ApiPeerRemoteStreamsResponse,
   PeerRemovalResponse as ApiRemovalResponse,
   PhotonvisionDiscoverStreamsResponse as ApiPhotonvisionDiscoverStreamsResponse
-} from '$lib/ts-bindings/http/client';
+} from '$lib/api/client';
 import type {
   PeerIntegrationKind,
   PeerProbeInput,

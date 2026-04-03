@@ -1,4 +1,4 @@
-import type { StreamInfo } from '$lib/api/httpClient';
+import type { StreamInfo } from '$lib/api/client';
 import { apiFetchResponse } from '$lib/api/core/http';
 import type { CalibrationBoard, CalibrationImage, CalibrationParams, CalibrationResult, IpaStatus } from '$lib/features/devices/camera/cameraCalibrationTypes';
 import { loadOwnedStreams } from '$lib/api/streamResources';

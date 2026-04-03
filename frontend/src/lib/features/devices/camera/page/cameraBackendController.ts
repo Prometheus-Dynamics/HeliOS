@@ -7,7 +7,7 @@ import type {
   StreamManifest,
   Mode,
   Interval
-} from '$lib/api/httpClient';
+} from '$lib/api/client';
 import type { StreamsApi } from '$lib/api/streamsApi';
 import { createEncoderSettingsDraft, encoderSettingsDraftFromUnknown, type EncoderSettingsDraft } from '$lib/api/streamEncoderSettings';
 import {

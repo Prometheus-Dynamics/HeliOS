@@ -4,7 +4,7 @@ import type {
   StreamManifest,
   StreamMetrics,
   StreamPipelineBinding
-} from '$lib/api/httpClient';
+} from '$lib/api/client';
 import { RAW_PIPELINE_ID, RAW_PIPELINE_UUID } from './cameraPipelineShared';
 
 type UnknownRecord = Record<string, unknown>;

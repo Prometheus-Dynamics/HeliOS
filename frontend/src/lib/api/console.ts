@@ -3,7 +3,7 @@ import type {
   ConsoleSessionListPayload,
   ConsoleSessionSummaryPayload,
   CreateConsoleSessionRequest
-} from '$lib/ts-bindings/http/client';
+} from '$lib/api/client';
 import type { ConsoleSessionSummary } from '$lib/types/console';
 
 export class ConsoleSessionsNotSupportedError extends Error {

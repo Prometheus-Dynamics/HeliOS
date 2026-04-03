@@ -1,4 +1,4 @@
-import type { PeerEndpoint } from '$lib/ts-bindings/http/client';
+import type { PeerEndpoint } from '$lib/api/client';
 import type { PeerEndpointSummary, PeerStatus } from '$lib/types/peer';
 
 export function normalizeStatus(value: unknown): PeerStatus {

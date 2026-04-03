@@ -4,7 +4,7 @@ import type {
   PipelineOverviewPipeline
 } from '$lib/types/pipeline';
 import type { PipelineUi } from '$lib/features/pipelines/pipelineUiTypes';
-import type { StreamInfo } from '$lib/ts-bindings/http/client';
+import type { StreamInfo } from '$lib/api/client';
 import type { TuneMetricsStreamRef } from './pipelineTuneMetricsRuntime';
 
 type TuneBindingsDeps = {

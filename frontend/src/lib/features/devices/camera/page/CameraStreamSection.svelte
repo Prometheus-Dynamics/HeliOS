@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { ComponentProps } from 'svelte';
   import { StreamMetricsPanel, StreamPreview } from '$lib';
-  import type { StreamInfo } from '$lib/api/httpClient';
+  import type { StreamInfo } from '$lib/api/client';
   import { streamHealthStatus, streamRecordingActive } from '$lib/api/streamRuntime';
   import type { StreamMetricsError } from '$lib/api/streamMetrics';
   import StreamMetricsBanners from '$lib/components/StreamMetricsBanners.svelte';

@@ -1,6 +1,6 @@
 import { get, writable, type Readable } from 'svelte/store';
-import { DeviceService } from '$lib/ts-bindings/http/client';
-import type { CameraLayoutResponse } from '$lib/ts-bindings/http/client';
+import { DeviceService } from '$lib/api/client';
+import type { CameraLayoutResponse } from '$lib/api/client';
 import type { RigCameraInfo, RigLayout, RobotDimensions } from '$lib/types/rig';
 import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rigDefaults';
 import { buildErrorMessage } from '$lib/ui/errorPolicy';

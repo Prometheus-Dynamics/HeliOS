@@ -1,7 +1,7 @@
 <script lang="ts" module>
   import { onDestroy, onMount, untrack } from 'svelte';
-  import type { DaedalusRegistryResponse } from '$lib/ts-bindings/http/client';
-  import type { StreamInfo, StreamManifest, StreamMetrics } from '$lib/api/httpClient';
+  import type { DaedalusRegistryResponse } from '$lib/api/client';
+  import type { StreamInfo, StreamManifest, StreamMetrics } from '$lib/api/client';
   import { backendFeatures } from '$lib/api/backendFeatures';
   import type { PipelineUi } from '$lib/features/pipelines/pipelineUiTypes';
   import { createCameraPipelineState } from './cameraPipelineStore.svelte';

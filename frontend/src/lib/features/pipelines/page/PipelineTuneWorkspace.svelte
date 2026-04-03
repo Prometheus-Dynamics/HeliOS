@@ -8,7 +8,7 @@
   import { connectStreamControls, type StreamControlSocket } from '$lib/api/streamControls';
   import type { StreamsApi as SharedStreamsApi } from '$lib/api/streamsApi';
   import { backendFeatures } from '$lib/api/backendFeatures';
-  import type { ControlMeta, StreamInfo, StreamPipelineLayout } from '$lib/ts-bindings/http/client';
+  import type { ControlMeta, StreamInfo, StreamPipelineLayout } from '$lib/api/client';
   import type {
     PipelineDataType,
     PipelineGraphPlan,

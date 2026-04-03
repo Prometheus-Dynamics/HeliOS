@@ -1,5 +1,5 @@
 import type { LocalizationMarker } from '$lib';
-import type { StreamMetrics } from '$lib/ts-bindings/http/client';
+import type { StreamMetrics } from '$lib/api/client';
 import type { RigCameraInfo } from '$lib/types/rig';
 import type { FieldMapDocument } from '$lib/features/localization/fieldMaps';
 import type { CustomField } from '$lib/features/localization/types';

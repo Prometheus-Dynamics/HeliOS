@@ -8,7 +8,7 @@ import type {
   StreamManifest,
   Mode,
   Interval
-} from '$lib/api/httpClient';
+} from '$lib/api/client';
 
 export const asRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === 'object' ? (value as Record<string, unknown>) : null;

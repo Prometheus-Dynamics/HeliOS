@@ -1,7 +1,7 @@
 import { readable } from 'svelte/store';
 import { browser } from '$app/environment';
 import { apiFetch } from '$lib/api/core/http';
-import type { Nt4Settings, Nt4TopicsResponse, TeamNumberPayload } from '$lib/ts-bindings/http/client';
+import type { Nt4Settings, Nt4TopicsResponse, TeamNumberPayload } from '$lib/api/client';
 
 export type RobotConnectionState = {
   status: 'connected' | 'disconnected' | 'unconfigured' | 'subscriptions_disabled';

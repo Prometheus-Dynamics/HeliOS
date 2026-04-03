@@ -1,8 +1,8 @@
 import { apiFetchCachedJson } from '$lib/api/core/http';
-import { getHttpClientBase } from '$lib/api/httpClient';
+import { getHttpClientBase } from '$lib/api/client';
 import { buildWsUrlFromHttpBase, canUseWebSockets } from '$lib/api/core/ws';
 import { cacheResourceData, type ResourceCacheContext, type ResourceCacheResult } from '$lib/api/resourceCache';
-import type { LogSource, LogSourceKind, LogSourcesResponse, ReadModelFreshness, SystemdUnitStatus } from '$lib/ts-bindings/http/client';
+import type { LogSource, LogSourceKind, LogSourcesResponse, ReadModelFreshness, SystemdUnitStatus } from '$lib/api/client';
 
 export type { LogSource, LogSourceKind, LogSourcesResponse, ReadModelFreshness, SystemdUnitStatus };
 

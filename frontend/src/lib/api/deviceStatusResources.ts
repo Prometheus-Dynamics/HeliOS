@@ -10,7 +10,7 @@ import type {
   ResourceGuardActionKind,
   ResourceGuardDegradedStream,
   ResourceGuardStatus
-} from '$lib/ts-bindings/http/client';
+} from '$lib/api/client';
 
 export type { ResourceGuardAction, ResourceGuardActionKind, ResourceGuardDegradedStream, ResourceGuardStatus };
 

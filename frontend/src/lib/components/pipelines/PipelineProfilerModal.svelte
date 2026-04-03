@@ -1,7 +1,7 @@
 <script lang="ts">
   import ModalShell from '$lib/components/ui/ModalShell.svelte';
   import { StreamsApi } from '$lib/api/streamsApi';
-  import { apiUrl } from '$lib/api/httpClient';
+  import { apiUrl } from '$lib/api/client';
 
   type StreamOption = { id: string; label: string };
 

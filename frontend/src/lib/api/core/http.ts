@@ -1,4 +1,4 @@
-import { apiUrl, getHttpClientBase } from '$lib/api/httpClient';
+import { apiUrl, getHttpClientBase } from '$lib/api/client';
 import { connectionMonitor } from '$lib/api/connection';
 import { summarizeErrorBody } from '$lib/api/errors';
 import { DEFAULT_REQUEST_TIMEOUT_MS, cancellableWithTimeout, fetchWithRetry } from '$lib/api/requestUtils';
@@ -9,7 +9,7 @@ import {
   type ResourceCacheMetadata,
   type ResourceCacheResult
 } from '$lib/api/resourceCache';
-import { OpenAPI, type CancelablePromise } from '$lib/ts-bindings/http/client';
+import { OpenAPI, type CancelablePromise } from '$lib/api/client';
 import { recordApiError } from '$lib/utils/errorAnalytics';
 
 export type ApiRequestOptions = {

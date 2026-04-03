@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { PipelineDetailContext } from '$lib/components/pipelines/types';
-  import type { StreamInfo } from '$lib/ts-bindings/http/client';
+  import type { StreamInfo } from '$lib/api/client';
   import type {
     PipelineDiagnosticWarning,
     PipelineGraphPlan,

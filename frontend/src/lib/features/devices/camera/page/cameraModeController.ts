@@ -1,4 +1,4 @@
-import type { CodecInfo, Interval, Mode, StreamInfo } from '$lib/api/httpClient';
+import type { CodecInfo, Interval, Mode, StreamInfo } from '$lib/api/client';
 import {
   cameraIntervalsForSelection,
   cameraFpsLabel,

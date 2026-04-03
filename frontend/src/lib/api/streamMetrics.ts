@@ -1,5 +1,5 @@
 import { buildWsUrlFromHttpBase, canUseWebSockets, connectWebSocketWithFallback, type ManagedWebSocket } from '$lib/api/core/ws';
-import type { StreamMetrics } from '$lib/ts-bindings/http/client';
+import type { StreamMetrics } from '$lib/api/client';
 
 export type StreamMetricsEvent = {
   stream_id: string;

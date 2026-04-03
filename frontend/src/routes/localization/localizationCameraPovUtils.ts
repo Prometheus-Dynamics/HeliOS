@@ -16,7 +16,7 @@ import {
   type Vec3
 } from '$lib/features/localization/poseMath';
 import { mediaImuParentStreamIdForSource } from '$lib/features/localization/utils';
-import type { StreamInfo } from '$lib/ts-bindings/http/client';
+import type { StreamInfo } from '$lib/api/client';
 import type { RigCameraInfo } from '$lib/types/rig';
 import { imuQuaternionToThree } from '$lib/utils/imuFrames';
 

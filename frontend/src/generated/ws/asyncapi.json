@@ -1,0 +1,2701 @@
+{
+  "asyncapi": "3.0.0",
+  "channels": {
+    "console.session": {
+      "address": "console.session",
+      "messages": {
+        "console_session": {
+          "description": "PTY-backed interactive shell session (supports persistent sessions via sessionId).",
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "cmd": {
+                "example": "console.session",
+                "type": "string"
+              },
+              "payload": {
+                "$ref": "#/components/schemas/ConsoleClientEvent"
+              },
+              "sent-at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "cmd",
+              "payload",
+              "sent-at"
+            ],
+            "type": "object"
+          },
+          "summary": "Interactive console",
+          "tags": [
+            {
+              "name": "console"
+            }
+          ]
+        },
+        "console_session_response_0": {
+          "description": "PTY-backed interactive shell session (supports persistent sessions via sessionId).",
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "cmd": {
+                "example": "console.session",
+                "type": "string"
+              },
+              "payload": {
+                "$ref": "#/components/schemas/ConsoleServerEvent"
+              },
+              "sent-at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "cmd",
+              "payload",
+              "sent-at"
+            ],
+            "type": "object"
+          },
+          "summary": "Interactive console",
+          "tags": [
+            {
+              "name": "console"
+            }
+          ]
+        }
+      }
+    },
+    "device.telemetry": {
+      "address": "device.telemetry",
+      "messages": {
+        "device_telemetry": {
+          "description": "Realtime CPU/memory/disk telemetry for the device.",
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "cmd": {
+                "example": "device.telemetry",
+                "type": "string"
+              },
+              "sent-at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "cmd",
+              "sent-at"
+            ],
+            "type": "object"
+          },
+          "summary": "Device telemetry",
+          "tags": [
+            {
+              "name": "device"
+            },
+            {
+              "name": "telemetry"
+            }
+          ]
+        },
+        "device_telemetry_response_0": {
+          "description": "Realtime CPU/memory/disk telemetry for the device.",
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "cmd": {
+                "example": "device.telemetry",
+                "type": "string"
+              },
+              "payload": {
+                "$ref": "#/components/schemas/TelemetrySample"
+              },
+              "sent-at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "cmd",
+              "payload",
+              "sent-at"
+            ],
+            "type": "object"
+          },
+          "summary": "Device telemetry",
+          "tags": [
+            {
+              "name": "device"
+            },
+            {
+              "name": "telemetry"
+            }
+          ]
+        }
+      }
+    },
+    "devices.updates": {
+      "address": "devices.updates",
+      "messages": {
+        "devices_updates": {
+          "description": "Notifies clients when USB peripherals or registered streams change.",
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "cmd": {
+                "example": "devices.updates",
+                "type": "string"
+              },
+              "sent-at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "cmd",
+              "sent-at"
+            ],
+            "type": "object"
+          },
+          "summary": "Peripheral + stream inventory changes",
+          "tags": [
+            {
+              "name": "devices"
+            }
+          ]
+        },
+        "devices_updates_response_0": {
+          "description": "Notifies clients when USB peripherals or registered streams change.",
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "cmd": {
+                "example": "devices.updates",
+                "type": "string"
+              },
+              "payload": {
+                "$ref": "#/components/schemas/DevicesUpdatesEvent"
+              },
+              "sent-at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "cmd",
+              "payload",
+              "sent-at"
+            ],
+            "type": "object"
+          },
+          "summary": "Peripheral + stream inventory changes",
+          "tags": [
+            {
+              "name": "devices"
+            }
+          ]
+        }
+      }
+    },
+    "imu.stream": {
+      "address": "imu.stream",
+      "messages": {
+        "imu_stream": {
+          "description": "Streams realtime IMU status payloads from the device IMU runtime.",
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "cmd": {
+                "example": "imu.stream",
+                "type": "string"
+              },
+              "sent-at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "cmd",
+              "sent-at"
+            ],
+            "type": "object"
+          },
+          "summary": "IMU status stream",
+          "tags": [
+            {
+              "name": "device"
+            },
+            {
+              "name": "imu"
+            }
+          ]
+        },
+        "imu_stream_response_0": {
+          "description": "Streams realtime IMU status payloads from the device IMU runtime.",
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "cmd": {
+                "example": "imu.stream",
+                "type": "string"
+              },
+              "payload": {
+                "$ref": "#/components/schemas/ImuStatusPayload"
+              },
+              "sent-at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "cmd",
+              "payload",
+              "sent-at"
+            ],
+            "type": "object"
+          },
+          "summary": "IMU status stream",
+          "tags": [
+            {
+              "name": "device"
+            },
+            {
+              "name": "imu"
+            }
+          ]
+        }
+      }
+    },
+    "logs.stream": {
+      "address": "logs.stream",
+      "messages": {
+        "logs_stream": {
+          "description": "Stream of log lines from the device.",
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "cmd": {
+                "example": "logs.stream",
+                "type": "string"
+              },
+              "sent-at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "cmd",
+              "sent-at"
+            ],
+            "type": "object"
+          },
+          "summary": "Device logs",
+          "tags": [
+            {
+              "name": "logs"
+            }
+          ]
+        },
+        "logs_stream_response_0": {
+          "description": "Stream of log lines from the device.",
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "cmd": {
+                "example": "logs.stream",
+                "type": "string"
+              },
+              "payload": {
+                "$ref": "#/components/schemas/LogsServerEvent"
+              },
+              "sent-at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "cmd",
+              "payload",
+              "sent-at"
+            ],
+            "type": "object"
+          },
+          "summary": "Device logs",
+          "tags": [
+            {
+              "name": "logs"
+            }
+          ]
+        }
+      }
+    },
+    "ota.stream": {
+      "address": "ota.stream",
+      "messages": {
+        "ota_stream": {
+          "description": "Streams OTA updater state snapshots and progress events.",
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "cmd": {
+                "example": "ota.stream",
+                "type": "string"
+              },
+              "sent-at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "cmd",
+              "sent-at"
+            ],
+            "type": "object"
+          },
+          "summary": "OTA update status stream",
+          "tags": [
+            {
+              "name": "ota"
+            }
+          ]
+        },
+        "ota_stream_response_0": {
+          "description": "Streams OTA updater state snapshots and progress events.",
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "cmd": {
+                "example": "ota.stream",
+                "type": "string"
+              },
+              "payload": {
+                "$ref": "#/components/schemas/UpdaterServerEvent"
+              },
+              "sent-at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "cmd",
+              "payload",
+              "sent-at"
+            ],
+            "type": "object"
+          },
+          "summary": "OTA update status stream",
+          "tags": [
+            {
+              "name": "ota"
+            }
+          ]
+        }
+      }
+    },
+    "processes.stream": {
+      "address": "processes.stream",
+      "messages": {
+        "processes_stream": {
+          "description": "Periodic snapshots of CPU and memory usage per process.",
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "cmd": {
+                "example": "processes.stream",
+                "type": "string"
+              },
+              "sent-at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "cmd",
+              "sent-at"
+            ],
+            "type": "object"
+          },
+          "summary": "Per-process resource usage",
+          "tags": [
+            {
+              "name": "processes"
+            }
+          ]
+        },
+        "processes_stream_response_0": {
+          "description": "Periodic snapshots of CPU and memory usage per process.",
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "cmd": {
+                "example": "processes.stream",
+                "type": "string"
+              },
+              "payload": {
+                "$ref": "#/components/schemas/ProcessesServerEvent"
+              },
+              "sent-at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "cmd",
+              "payload",
+              "sent-at"
+            ],
+            "type": "object"
+          },
+          "summary": "Per-process resource usage",
+          "tags": [
+            {
+              "name": "processes"
+            }
+          ]
+        }
+      }
+    },
+    "sensors.stream": {
+      "address": "sensors.stream",
+      "messages": {
+        "sensors_stream": {
+          "description": "Streams subscribed IMU, power, lighting, and firmware sensor events from the peripherals runtime.",
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "cmd": {
+                "example": "sensors.stream",
+                "type": "string"
+              },
+              "sent-at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "cmd",
+              "sent-at"
+            ],
+            "type": "object"
+          },
+          "summary": "Peripheral sensor stream",
+          "tags": [
+            {
+              "name": "device"
+            },
+            {
+              "name": "sensors"
+            }
+          ]
+        },
+        "sensors_stream_response_0": {
+          "description": "Streams subscribed IMU, power, lighting, and firmware sensor events from the peripherals runtime.",
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "cmd": {
+                "example": "sensors.stream",
+                "type": "string"
+              },
+              "payload": {
+                "$ref": "#/components/schemas/SensorsStreamEvent"
+              },
+              "sent-at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "cmd",
+              "payload",
+              "sent-at"
+            ],
+            "type": "object"
+          },
+          "summary": "Peripheral sensor stream",
+          "tags": [
+            {
+              "name": "device"
+            },
+            {
+              "name": "sensors"
+            }
+          ]
+        }
+      }
+    },
+    "streams.{stream_id}.frames": {
+      "address": "streams.{stream_id}.frames",
+      "messages": {
+        "streams__stream_id__frames": {
+          "description": "Binary encoded frames for the currently active pipeline output (optionally switched for the socket duration).",
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "cmd": {
+                "example": "streams.{stream_id}.frames",
+                "type": "string"
+              },
+              "sent-at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "cmd",
+              "sent-at"
+            ],
+            "type": "object"
+          },
+          "summary": "Stream frames",
+          "tags": [
+            {
+              "name": "streams"
+            }
+          ]
+        }
+      },
+      "parameters": {
+        "stream_id": {
+          "x-schema": {
+            "format": "uuid",
+            "type": "string"
+          }
+        }
+      }
+    },
+    "streams.{stream_id}.metrics": {
+      "address": "streams.{stream_id}.metrics",
+      "messages": {
+        "streams__stream_id__metrics": {
+          "description": "Periodic metrics snapshots for an active stream.",
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "cmd": {
+                "example": "streams.{stream_id}.metrics",
+                "type": "string"
+              },
+              "sent-at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "cmd",
+              "sent-at"
+            ],
+            "type": "object"
+          },
+          "summary": "Stream metrics",
+          "tags": [
+            {
+              "name": "streams"
+            },
+            {
+              "name": "metrics"
+            }
+          ]
+        },
+        "streams__stream_id__metrics_response_0": {
+          "description": "Periodic metrics snapshots for an active stream.",
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "cmd": {
+                "example": "streams.{stream_id}.metrics",
+                "type": "string"
+              },
+              "payload": {
+                "$ref": "#/components/schemas/StreamMetricsEvent"
+              },
+              "sent-at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "cmd",
+              "payload",
+              "sent-at"
+            ],
+            "type": "object"
+          },
+          "summary": "Stream metrics",
+          "tags": [
+            {
+              "name": "streams"
+            },
+            {
+              "name": "metrics"
+            }
+          ]
+        },
+        "streams__stream_id__metrics_response_1": {
+          "description": "Periodic metrics snapshots for an active stream.",
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "cmd": {
+                "example": "streams.{stream_id}.metrics",
+                "type": "string"
+              },
+              "payload": {
+                "$ref": "#/components/schemas/StreamMetricsError"
+              },
+              "sent-at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "cmd",
+              "payload",
+              "sent-at"
+            ],
+            "type": "object"
+          },
+          "summary": "Stream metrics",
+          "tags": [
+            {
+              "name": "streams"
+            },
+            {
+              "name": "metrics"
+            }
+          ]
+        }
+      },
+      "parameters": {
+        "stream_id": {
+          "x-schema": {
+            "format": "uuid",
+            "type": "string"
+          }
+        }
+      }
+    },
+    "updates.stream": {
+      "address": "updates.stream",
+      "messages": {
+        "updates_stream": {
+          "description": "Streams mutating API/WS changes for streams, pipelines, localization, media, and device settings.",
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "cmd": {
+                "example": "updates.stream",
+                "type": "string"
+              },
+              "sent-at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "cmd",
+              "sent-at"
+            ],
+            "type": "object"
+          },
+          "summary": "Global realtime change stream",
+          "tags": [
+            {
+              "name": "updates"
+            }
+          ]
+        },
+        "updates_stream_response_0": {
+          "description": "Streams mutating API/WS changes for streams, pipelines, localization, media, and device settings.",
+          "payload": {
+            "additionalProperties": false,
+            "properties": {
+              "cmd": {
+                "example": "updates.stream",
+                "type": "string"
+              },
+              "payload": {
+                "$ref": "#/components/schemas/RealtimeUpdatesEvent"
+              },
+              "sent-at": {
+                "format": "date-time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "cmd",
+              "payload",
+              "sent-at"
+            ],
+            "type": "object"
+          },
+          "summary": "Global realtime change stream",
+          "tags": [
+            {
+              "name": "updates"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ConsoleClientEvent": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "oneOf": [
+          {
+            "properties": {
+              "data": {
+                "type": "string"
+              },
+              "type": {
+                "const": "input",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "cols": {
+                "format": "uint16",
+                "maximum": 65535,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "rows": {
+                "format": "uint16",
+                "maximum": 65535,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": {
+                "const": "resize",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "cols",
+              "rows"
+            ],
+            "type": "object"
+          }
+        ],
+        "title": "ConsoleClientEvent"
+      },
+      "ConsoleServerEvent": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "oneOf": [
+          {
+            "properties": {
+              "cols": {
+                "format": "uint16",
+                "maximum": 65535,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "rows": {
+                "format": "uint16",
+                "maximum": 65535,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "session_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "shell": {
+                "type": "string"
+              },
+              "type": {
+                "const": "ready",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "session_id",
+              "shell",
+              "cols",
+              "rows"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "data": {
+                "type": "string"
+              },
+              "type": {
+                "const": "output",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "data"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "code": {
+                "format": "int32",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "type": {
+                "const": "exit",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "const": "error",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "message"
+            ],
+            "type": "object"
+          }
+        ],
+        "title": "ConsoleServerEvent"
+      },
+      "DevicesUpdatesEvent": {
+        "$defs": {
+          "DevicesUpdateReason": {
+            "enum": [
+              "api",
+              "pipelines",
+              "localization",
+              "media",
+              "imu",
+              "device",
+              "settings",
+              "usb",
+              "streams"
+            ],
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "oneOf": [
+          {
+            "properties": {
+              "interval_ms": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": {
+                "const": "ready",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "interval_ms"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "reasons": {
+                "items": {
+                  "$ref": "#/$defs/DevicesUpdateReason"
+                },
+                "type": "array"
+              },
+              "timestamp_ms": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": {
+                "const": "update",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "timestamp_ms",
+              "reasons"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "const": "error",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "message"
+            ],
+            "type": "object"
+          }
+        ],
+        "title": "DevicesUpdatesEvent"
+      },
+      "ImuStatusPayload": {
+        "type": "object"
+      },
+      "LogsServerEvent": {
+        "$defs": {
+          "LogSource": {
+            "properties": {
+              "group": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "important": {
+                "type": "boolean"
+              },
+              "kind": {
+                "$ref": "#/$defs/LogSourceKind"
+              },
+              "label": {
+                "type": "string"
+              },
+              "path": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/SystemdUnitStatus"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "unit": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "label",
+              "group",
+              "kind",
+              "important"
+            ],
+            "type": "object"
+          },
+          "LogSourceKind": {
+            "enum": [
+              "journal_system",
+              "journal_unit",
+              "dmesg",
+              "file"
+            ],
+            "type": "string"
+          },
+          "SystemdUnitStatus": {
+            "properties": {
+              "active_state": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "description": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "exec_main_status": {
+                "format": "int32",
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "fragment_path": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "main_pid": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "sub_state": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "unit_file_state": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "oneOf": [
+          {
+            "properties": {
+              "source": {
+                "$ref": "#/$defs/LogSource"
+              },
+              "type": {
+                "const": "ready",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "source"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "line": {
+                "type": "string"
+              },
+              "timestamp_ms": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": {
+                "const": "line",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "timestamp_ms",
+              "line"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "const": "error",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "message"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "type": {
+                "const": "eof",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          }
+        ],
+        "title": "LogsServerEvent"
+      },
+      "ProcessesServerEvent": {
+        "$defs": {
+          "ProcessSample": {
+            "properties": {
+              "cmd": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "cpu_percent": {
+                "format": "float",
+                "type": "number"
+              },
+              "memory_bytes": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "name": {
+                "type": "string"
+              },
+              "pid": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "status": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "virtual_memory_bytes": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "pid",
+              "name",
+              "cpu_percent",
+              "memory_bytes",
+              "virtual_memory_bytes"
+            ],
+            "type": "object"
+          },
+          "ProcessesSnapshot": {
+            "properties": {
+              "processes": {
+                "items": {
+                  "$ref": "#/$defs/ProcessSample"
+                },
+                "type": "array"
+              },
+              "timestamp_ms": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "total_memory_bytes": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "used_memory_bytes": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "timestamp_ms",
+              "total_memory_bytes",
+              "used_memory_bytes",
+              "processes"
+            ],
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "oneOf": [
+          {
+            "properties": {
+              "interval_ms": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": {
+                "const": "ready",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "interval_ms"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "snapshot": {
+                "$ref": "#/$defs/ProcessesSnapshot"
+              },
+              "type": {
+                "const": "snapshot",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "snapshot"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "const": "error",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "message"
+            ],
+            "type": "object"
+          }
+        ],
+        "title": "ProcessesServerEvent"
+      },
+      "RealtimeUpdatesEvent": {
+        "oneOf": [
+          {
+            "properties": {
+              "heartbeat_ms": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": {
+                "enum": [
+                  "ready"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "heartbeat_ms"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "event": {
+                "properties": {
+                  "domain": {
+                    "enum": [
+                      "api",
+                      "device",
+                      "localization",
+                      "media",
+                      "pipelines",
+                      "settings",
+                      "streams"
+                    ],
+                    "type": "string"
+                  },
+                  "entity": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string"
+                  },
+                  "method": {
+                    "type": "string"
+                  },
+                  "operation": {
+                    "enum": [
+                      "create",
+                      "update",
+                      "delete"
+                    ],
+                    "type": "string"
+                  },
+                  "origin": {
+                    "enum": [
+                      "http",
+                      "ws"
+                    ],
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "request_id": {
+                    "type": "string"
+                  },
+                  "resource_id": {
+                    "type": "string"
+                  },
+                  "revision": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "seq": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "timestamp_ms": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "seq",
+                  "timestamp_ms",
+                  "origin",
+                  "domain",
+                  "kind",
+                  "operation",
+                  "entity",
+                  "revision",
+                  "path"
+                ],
+                "type": "object"
+              },
+              "type": {
+                "enum": [
+                  "change"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "event"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "timestamp_ms": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": {
+                "enum": [
+                  "heartbeat"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "timestamp_ms"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "error"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "message"
+            ],
+            "type": "object"
+          }
+        ],
+        "type": "object"
+      },
+      "SensorsStreamEvent": {
+        "type": "object"
+      },
+      "StreamMetricsError": {
+        "properties": {
+          "code": {
+            "example": "stream_not_found",
+            "type": "string"
+          },
+          "detail": {
+            "example": "stream not found",
+            "type": "string"
+          },
+          "error": {
+            "example": "metrics unavailable",
+            "type": "string"
+          },
+          "operation": {
+            "example": "snapshot",
+            "type": "string"
+          },
+          "remediation": {
+            "example": "Restart the stream or check engine connectivity.",
+            "type": "string"
+          },
+          "request_id": {
+            "example": "bd4520d3-2e5c-4b21-84f2-9a0d6d3fbf9e",
+            "type": "string"
+          },
+          "retryable": {
+            "example": false,
+            "type": "boolean"
+          },
+          "source": {
+            "example": "helios-api/ws/streams.metrics",
+            "type": "string"
+          },
+          "stream_id": {
+            "example": "2f1be7d8-5d2d-40a6-a4fb-2ad69d5d4e42",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timestamp_ms": {
+            "example": 1701000000000,
+            "format": "int64",
+            "type": "integer"
+          },
+          "trace_id": {
+            "example": "bd4520d3-2e5c-4b21-84f2-9a0d6d3fbf9e",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "StreamMetricsEvent": {
+        "properties": {
+          "metrics": {
+            "description": "Metrics payload for the stream",
+            "type": "object"
+          },
+          "stream_id": {
+            "example": "2f1be7d8-5d2d-40a6-a4fb-2ad69d5d4e42",
+            "format": "uuid",
+            "type": "string"
+          },
+          "timestamp_ms": {
+            "example": 1701000000000,
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "stream_id",
+          "metrics",
+          "timestamp_ms"
+        ],
+        "type": "object"
+      },
+      "TelemetrySample": {
+        "$defs": {
+          "CpuCoreSample": {
+            "properties": {
+              "frequency_mhz": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "id": {
+                "format": "uint",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "usage_percent": {
+                "format": "float",
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "usage_percent"
+            ],
+            "type": "object"
+          },
+          "CpuTelemetry": {
+            "properties": {
+              "cores": {
+                "items": {
+                  "$ref": "#/$defs/CpuCoreSample"
+                },
+                "type": "array"
+              },
+              "temperature_c": {
+                "format": "float",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "throttle": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/CpuThrottleStatus"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "usage_percent": {
+                "format": "float",
+                "type": "number"
+              }
+            },
+            "required": [
+              "usage_percent",
+              "cores"
+            ],
+            "type": "object"
+          },
+          "CpuThrottleStatus": {
+            "properties": {
+              "frequency_capped": {
+                "type": "boolean"
+              },
+              "frequency_capped_since_boot": {
+                "type": "boolean"
+              },
+              "raw": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "soft_temp_limit": {
+                "type": "boolean"
+              },
+              "soft_temp_limit_since_boot": {
+                "type": "boolean"
+              },
+              "throttled": {
+                "type": "boolean"
+              },
+              "throttled_since_boot": {
+                "type": "boolean"
+              },
+              "undervoltage": {
+                "type": "boolean"
+              },
+              "undervoltage_since_boot": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "raw",
+              "undervoltage",
+              "frequency_capped",
+              "throttled",
+              "soft_temp_limit",
+              "undervoltage_since_boot",
+              "frequency_capped_since_boot",
+              "throttled_since_boot",
+              "soft_temp_limit_since_boot"
+            ],
+            "type": "object"
+          },
+          "DiskPartitionTelemetry": {
+            "properties": {
+              "free_bytes": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "mount": {
+                "type": "string"
+              },
+              "total_bytes": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "used_bytes": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "mount",
+              "total_bytes",
+              "used_bytes",
+              "free_bytes"
+            ],
+            "type": "object"
+          },
+          "DiskTelemetry": {
+            "properties": {
+              "free_bytes": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "total_bytes": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "used_bytes": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "total_bytes",
+              "used_bytes",
+              "free_bytes"
+            ],
+            "type": "object"
+          },
+          "EngineTelemetry": {
+            "properties": {
+              "connected": {
+                "type": "boolean"
+              },
+              "last_disconnect_ms": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "connected"
+            ],
+            "type": "object"
+          },
+          "GpuMemorySample": {
+            "properties": {
+              "free_bytes": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "total_bytes": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "used_bytes": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "total_bytes",
+              "used_bytes",
+              "free_bytes"
+            ],
+            "type": "object"
+          },
+          "GpuTelemetry": {
+            "properties": {
+              "frequency_mhz": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "memory": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/GpuMemorySample"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "temperature_c": {
+                "format": "float",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "usage_percent": {
+                "format": "float",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "MemoryTelemetry": {
+            "properties": {
+              "free_bytes": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "total_bytes": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "used_bytes": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "total_bytes",
+              "used_bytes",
+              "free_bytes"
+            ],
+            "type": "object"
+          },
+          "NetworkInterfaceSample": {
+            "properties": {
+              "mac": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "rx_bytes": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "rx_bytes_per_sec": {
+                "format": "double",
+                "type": "number"
+              },
+              "total_rx_bytes": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "total_tx_bytes": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "tx_bytes": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "tx_bytes_per_sec": {
+                "format": "double",
+                "type": "number"
+              }
+            },
+            "required": [
+              "name",
+              "rx_bytes",
+              "tx_bytes",
+              "total_rx_bytes",
+              "total_tx_bytes",
+              "rx_bytes_per_sec",
+              "tx_bytes_per_sec"
+            ],
+            "type": "object"
+          },
+          "NetworkSample": {
+            "properties": {
+              "interfaces": {
+                "items": {
+                  "$ref": "#/$defs/NetworkInterfaceSample"
+                },
+                "type": "array"
+              },
+              "rx_bytes": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "rx_bytes_per_sec": {
+                "format": "double",
+                "type": "number"
+              },
+              "total_rx_bytes": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "total_tx_bytes": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "tx_bytes": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "tx_bytes_per_sec": {
+                "format": "double",
+                "type": "number"
+              }
+            },
+            "required": [
+              "rx_bytes",
+              "tx_bytes",
+              "total_rx_bytes",
+              "total_tx_bytes",
+              "rx_bytes_per_sec",
+              "tx_bytes_per_sec",
+              "interfaces"
+            ],
+            "type": "object"
+          },
+          "PowerTelemetry": {
+            "properties": {
+              "amps": {
+                "format": "float",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "volts": {
+                "format": "float",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "watts": {
+                "format": "float",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "cpu": {
+            "$ref": "#/$defs/CpuTelemetry"
+          },
+          "disk": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/DiskTelemetry"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "disks": {
+            "items": {
+              "$ref": "#/$defs/DiskPartitionTelemetry"
+            },
+            "type": "array"
+          },
+          "engine": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/EngineTelemetry"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "gpu": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/GpuTelemetry"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "memory": {
+            "$ref": "#/$defs/MemoryTelemetry"
+          },
+          "network": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/NetworkSample"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "power": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/PowerTelemetry"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timestamp_ms": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "timestamp_ms",
+          "cpu",
+          "memory",
+          "disks"
+        ],
+        "title": "TelemetrySample",
+        "type": "object"
+      },
+      "UpdaterServerEvent": {
+        "$defs": {
+          "UpdaterArtifact": {
+            "properties": {
+              "checksum": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "size_bytes": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "url"
+            ],
+            "type": "object"
+          },
+          "UpdaterSnapshot": {
+            "properties": {
+              "artifacts": {
+                "items": {
+                  "$ref": "#/$defs/UpdaterArtifact"
+                },
+                "type": "array"
+              },
+              "finished_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "last_error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "progress_percent": {
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "stage": {
+                "type": "string"
+              },
+              "started_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "update_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "update_id",
+              "stage"
+            ],
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "oneOf": [
+          {
+            "properties": {
+              "cache_usage_bytes": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "state": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/UpdaterSnapshot"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": {
+                "const": "snapshot",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "cache_usage_bytes"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "detail": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "percent": {
+                "format": "uint8",
+                "maximum": 255,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": {
+                "const": "stage_progress",
+                "type": "string"
+              },
+              "update_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "update_id",
+              "percent"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "type": {
+                "const": "stage_complete",
+                "type": "string"
+              },
+              "update_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "update_id"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "eta": {
+                "type": "string"
+              },
+              "type": {
+                "const": "apply_scheduled",
+                "type": "string"
+              },
+              "update_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "update_id",
+              "eta"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "reboot_required": {
+                "type": "boolean"
+              },
+              "type": {
+                "const": "apply_complete",
+                "type": "string"
+              },
+              "update_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "update_id",
+              "reboot_required"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "reason": {
+                "type": "string"
+              },
+              "type": {
+                "const": "rollback_triggered",
+                "type": "string"
+              },
+              "update_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "update_id",
+              "reason"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "const": "error",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "message"
+            ],
+            "type": "object"
+          }
+        ],
+        "title": "UpdaterServerEvent"
+      },
+      "Uuid": {
+        "format": "uuid",
+        "type": "string"
+      }
+    }
+  },
+  "defaultContentType": "application/json",
+  "info": {
+    "description": "WebSocket endpoints for device telemetry, stream metrics, pipeline metrics, logs, and console access.",
+    "summary": "Realtime telemetry and control streams",
+    "tags": [
+      {
+        "description": "Capture streams and metrics",
+        "name": "streams"
+      },
+      {
+        "description": "Peripheral + stream inventory updates",
+        "name": "devices"
+      },
+      {
+        "description": "Device telemetry",
+        "name": "device"
+      },
+      {
+        "description": "Peripheral sensor events",
+        "name": "sensors"
+      },
+      {
+        "description": "Realtime IMU updates",
+        "name": "imu"
+      },
+      {
+        "description": "Console session",
+        "name": "console"
+      },
+      {
+        "description": "Streaming logs",
+        "name": "logs"
+      },
+      {
+        "description": "Process resource usage",
+        "name": "processes"
+      },
+      {
+        "description": "OTA updater state",
+        "name": "ota"
+      },
+      {
+        "description": "Cross-domain realtime update notifications",
+        "name": "updates"
+      }
+    ],
+    "title": "Helios WebSocket API",
+    "version": "1.0.0"
+  },
+  "operations": {
+    "console_session": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/console.session"
+      },
+      "description": "PTY-backed interactive shell session (supports persistent sessions via sessionId).",
+      "messages": [
+        {
+          "$ref": "#/channels/console.session/messages/console_session"
+        }
+      ],
+      "summary": "Interactive console",
+      "tags": [
+        {
+          "name": "console"
+        }
+      ]
+    },
+    "console_session_receive": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/console.session"
+      },
+      "description": "PTY-backed interactive shell session (supports persistent sessions via sessionId).",
+      "messages": [
+        {
+          "$ref": "#/channels/console.session/messages/console_session_response_0"
+        }
+      ],
+      "summary": "Interactive console",
+      "tags": [
+        {
+          "name": "console"
+        }
+      ]
+    },
+    "device_telemetry": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/device.telemetry"
+      },
+      "description": "Realtime CPU/memory/disk telemetry for the device.",
+      "messages": [
+        {
+          "$ref": "#/channels/device.telemetry/messages/device_telemetry"
+        }
+      ],
+      "summary": "Device telemetry",
+      "tags": [
+        {
+          "name": "device"
+        },
+        {
+          "name": "telemetry"
+        }
+      ]
+    },
+    "device_telemetry_receive": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/device.telemetry"
+      },
+      "description": "Realtime CPU/memory/disk telemetry for the device.",
+      "messages": [
+        {
+          "$ref": "#/channels/device.telemetry/messages/device_telemetry_response_0"
+        }
+      ],
+      "summary": "Device telemetry",
+      "tags": [
+        {
+          "name": "device"
+        },
+        {
+          "name": "telemetry"
+        }
+      ]
+    },
+    "devices_updates": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/devices.updates"
+      },
+      "description": "Notifies clients when USB peripherals or registered streams change.",
+      "messages": [
+        {
+          "$ref": "#/channels/devices.updates/messages/devices_updates"
+        }
+      ],
+      "summary": "Peripheral + stream inventory changes",
+      "tags": [
+        {
+          "name": "devices"
+        }
+      ]
+    },
+    "devices_updates_receive": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/devices.updates"
+      },
+      "description": "Notifies clients when USB peripherals or registered streams change.",
+      "messages": [
+        {
+          "$ref": "#/channels/devices.updates/messages/devices_updates_response_0"
+        }
+      ],
+      "summary": "Peripheral + stream inventory changes",
+      "tags": [
+        {
+          "name": "devices"
+        }
+      ]
+    },
+    "imu_stream": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/imu.stream"
+      },
+      "description": "Streams realtime IMU status payloads from the device IMU runtime.",
+      "messages": [
+        {
+          "$ref": "#/channels/imu.stream/messages/imu_stream"
+        }
+      ],
+      "summary": "IMU status stream",
+      "tags": [
+        {
+          "name": "device"
+        },
+        {
+          "name": "imu"
+        }
+      ]
+    },
+    "imu_stream_receive": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/imu.stream"
+      },
+      "description": "Streams realtime IMU status payloads from the device IMU runtime.",
+      "messages": [
+        {
+          "$ref": "#/channels/imu.stream/messages/imu_stream_response_0"
+        }
+      ],
+      "summary": "IMU status stream",
+      "tags": [
+        {
+          "name": "device"
+        },
+        {
+          "name": "imu"
+        }
+      ]
+    },
+    "logs_stream": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/logs.stream"
+      },
+      "description": "Stream of log lines from the device.",
+      "messages": [
+        {
+          "$ref": "#/channels/logs.stream/messages/logs_stream"
+        }
+      ],
+      "summary": "Device logs",
+      "tags": [
+        {
+          "name": "logs"
+        }
+      ]
+    },
+    "logs_stream_receive": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/logs.stream"
+      },
+      "description": "Stream of log lines from the device.",
+      "messages": [
+        {
+          "$ref": "#/channels/logs.stream/messages/logs_stream_response_0"
+        }
+      ],
+      "summary": "Device logs",
+      "tags": [
+        {
+          "name": "logs"
+        }
+      ]
+    },
+    "ota_stream": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/ota.stream"
+      },
+      "description": "Streams OTA updater state snapshots and progress events.",
+      "messages": [
+        {
+          "$ref": "#/channels/ota.stream/messages/ota_stream"
+        }
+      ],
+      "summary": "OTA update status stream",
+      "tags": [
+        {
+          "name": "ota"
+        }
+      ]
+    },
+    "ota_stream_receive": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/ota.stream"
+      },
+      "description": "Streams OTA updater state snapshots and progress events.",
+      "messages": [
+        {
+          "$ref": "#/channels/ota.stream/messages/ota_stream_response_0"
+        }
+      ],
+      "summary": "OTA update status stream",
+      "tags": [
+        {
+          "name": "ota"
+        }
+      ]
+    },
+    "processes_stream": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/processes.stream"
+      },
+      "description": "Periodic snapshots of CPU and memory usage per process.",
+      "messages": [
+        {
+          "$ref": "#/channels/processes.stream/messages/processes_stream"
+        }
+      ],
+      "summary": "Per-process resource usage",
+      "tags": [
+        {
+          "name": "processes"
+        }
+      ]
+    },
+    "processes_stream_receive": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/processes.stream"
+      },
+      "description": "Periodic snapshots of CPU and memory usage per process.",
+      "messages": [
+        {
+          "$ref": "#/channels/processes.stream/messages/processes_stream_response_0"
+        }
+      ],
+      "summary": "Per-process resource usage",
+      "tags": [
+        {
+          "name": "processes"
+        }
+      ]
+    },
+    "sensors_stream": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/sensors.stream"
+      },
+      "description": "Streams subscribed IMU, power, lighting, and firmware sensor events from the peripherals runtime.",
+      "messages": [
+        {
+          "$ref": "#/channels/sensors.stream/messages/sensors_stream"
+        }
+      ],
+      "summary": "Peripheral sensor stream",
+      "tags": [
+        {
+          "name": "device"
+        },
+        {
+          "name": "sensors"
+        }
+      ]
+    },
+    "sensors_stream_receive": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/sensors.stream"
+      },
+      "description": "Streams subscribed IMU, power, lighting, and firmware sensor events from the peripherals runtime.",
+      "messages": [
+        {
+          "$ref": "#/channels/sensors.stream/messages/sensors_stream_response_0"
+        }
+      ],
+      "summary": "Peripheral sensor stream",
+      "tags": [
+        {
+          "name": "device"
+        },
+        {
+          "name": "sensors"
+        }
+      ]
+    },
+    "streams__stream_id__frames": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/streams.{stream_id}.frames"
+      },
+      "description": "Binary encoded frames for the currently active pipeline output (optionally switched for the socket duration).",
+      "messages": [
+        {
+          "$ref": "#/channels/streams.{stream_id}.frames/messages/streams__stream_id__frames"
+        }
+      ],
+      "summary": "Stream frames",
+      "tags": [
+        {
+          "name": "streams"
+        }
+      ]
+    },
+    "streams__stream_id__metrics": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/streams.{stream_id}.metrics"
+      },
+      "description": "Periodic metrics snapshots for an active stream.",
+      "messages": [
+        {
+          "$ref": "#/channels/streams.{stream_id}.metrics/messages/streams__stream_id__metrics"
+        }
+      ],
+      "summary": "Stream metrics",
+      "tags": [
+        {
+          "name": "streams"
+        },
+        {
+          "name": "metrics"
+        }
+      ]
+    },
+    "streams__stream_id__metrics_receive": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/streams.{stream_id}.metrics"
+      },
+      "description": "Periodic metrics snapshots for an active stream.",
+      "messages": [
+        {
+          "$ref": "#/channels/streams.{stream_id}.metrics/messages/streams__stream_id__metrics_response_0"
+        },
+        {
+          "$ref": "#/channels/streams.{stream_id}.metrics/messages/streams__stream_id__metrics_response_1"
+        }
+      ],
+      "summary": "Stream metrics",
+      "tags": [
+        {
+          "name": "streams"
+        },
+        {
+          "name": "metrics"
+        }
+      ]
+    },
+    "updates_stream": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/updates.stream"
+      },
+      "description": "Streams mutating API/WS changes for streams, pipelines, localization, media, and device settings.",
+      "messages": [
+        {
+          "$ref": "#/channels/updates.stream/messages/updates_stream"
+        }
+      ],
+      "summary": "Global realtime change stream",
+      "tags": [
+        {
+          "name": "updates"
+        }
+      ]
+    },
+    "updates_stream_receive": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/updates.stream"
+      },
+      "description": "Streams mutating API/WS changes for streams, pipelines, localization, media, and device settings.",
+      "messages": [
+        {
+          "$ref": "#/channels/updates.stream/messages/updates_stream_response_0"
+        }
+      ],
+      "summary": "Global realtime change stream",
+      "tags": [
+        {
+          "name": "updates"
+        }
+      ]
+    }
+  },
+  "servers": {
+    "primary": {
+      "description": "Primary WebSocket entrypoint",
+      "host": "localhost:5800/v1/ws",
+      "protocol": "ws"
+    }
+  }
+}

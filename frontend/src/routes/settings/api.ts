@@ -1,6 +1,6 @@
 import { extractError, extractMessage, summarizeErrorBody } from '$lib/api/errors';
 import { apiFetch } from '$lib/api/core/http';
-import type { UploadUpdateResponse } from '$lib/ts-bindings/http/client';
+import type { UploadUpdateResponse } from '$lib/api/client';
 
 export const REQUESTED_BY = 'deck-ui';
 

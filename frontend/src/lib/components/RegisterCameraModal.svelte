@@ -11,7 +11,7 @@
   } from '$lib/api/streamEncoderSettings';
   import { normalizeRecordingMode } from '$lib/api/streamRecordingMode';
   import { withCurrentStreamManifestSchema } from '$lib/api/streamSchema';
-  import { ApiError, OpenAPI, PeersService, PeripheralsService } from '$lib/ts-bindings/http/client';
+  import { ApiError, OpenAPI, PeersService, PeripheralsService } from '$lib/api/client';
   import { connectDevicesUpdatesStream } from '$lib/api/devicesUpdates';
   import { PipelinesApi } from '$lib/api/pipelinesApi';
   import {
@@ -35,8 +35,8 @@
     PeerInfo,
     StreamManifest,
     ValidationIssue
-  } from '$lib/ts-bindings/http/client';
-  import type { StreamCapabilitiesResponse } from '$lib/ts-bindings/http/client/models/StreamCapabilitiesResponse';
+  } from '$lib/api/client';
+  import type { StreamCapabilitiesResponse } from '$lib/api/client';
   import { registerCameraModal } from '$lib/stores/modals';
   import ModalShell from '$lib/components/ui/ModalShell.svelte';
   import ValidationIssueList from '$lib/components/ui/ValidationIssueList.svelte';

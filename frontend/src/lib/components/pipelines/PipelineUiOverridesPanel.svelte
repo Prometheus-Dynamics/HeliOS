@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { PipelineDataType, PipelineNodeValue } from '$lib/types/pipeline';
   import type { PipelineUi, PipelineUiItem, PipelineUiNodeDescriptor, PipelineUiControl } from '$lib/features/pipelines/pipelineUiTypes';
-  import type { StreamPipelineLayout } from '$lib/ts-bindings/http/client';
+  import type { StreamPipelineLayout } from '$lib/api/client';
   import OverridesList from '$lib/components/pipelines/overrides/OverridesList.svelte';
   import OverridesEditor from '$lib/components/pipelines/overrides/OverridesEditor.svelte';
   import OverridesPreview from '$lib/components/pipelines/overrides/OverridesPreview.svelte';

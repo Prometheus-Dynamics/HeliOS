@@ -1,5 +1,5 @@
 import { get, writable, type Readable } from 'svelte/store';
-import { OpenAPI } from '$lib/ts-bindings/http/client';
+import { OpenAPI } from '$lib/api/client';
 import { apiFetchResponse } from '$lib/api/core/http';
 import { createDomainResource } from '$lib/api/domainResources';
 import { extractMessage } from '$lib/api/errors';

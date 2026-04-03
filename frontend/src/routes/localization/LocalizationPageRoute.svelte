@@ -5,7 +5,7 @@
   import { subscribeDomainInvalidations } from '$lib/api/invalidation';
   import { apiFetchResponse } from '$lib/api/core/http';
   import { scheduleAfterPaint, scheduleWhenIdle } from '$lib/utils/browserSchedule';
-  import { apiUrl } from '$lib/api/httpClient';
+  import { apiUrl } from '$lib/api/client';
   import { openStreamMetricsSocket } from '$lib/api/streamMetrics';
   import { loadOwnedStreams } from '$lib/api/streamResources';
   import { realtimeUpdateMatchesKind, type RealtimeUpdateEvent } from '$lib/api/realtimeUpdates';
@@ -14,7 +14,7 @@
     type LocalizationCapabilitiesResponse,
     type StreamInfo,
     type StreamMetrics
-  } from '$lib/ts-bindings/http/client';
+  } from '$lib/api/client';
   import type { LocalizationMarker, LocalizationViewMode } from '$lib/features/localization/viewers/localizationViewerTypes';
   import type { RigCameraInfo, RobotDimensions } from '$lib/types/rig';
   import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rigDefaults';

@@ -1,7 +1,7 @@
 import {
   DEVICE_IMU_EXTERNAL_SOURCE_ID,
   LOCALIZATION_EXTERNAL_STREAM_IDS
-} from '$lib/ts-bindings/runtimeContracts';
+} from '$lib/contracts/runtimeContracts';
 
 export { DEVICE_IMU_EXTERNAL_SOURCE_ID };
 

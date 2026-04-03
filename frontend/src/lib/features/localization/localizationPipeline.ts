@@ -1,4 +1,4 @@
-import { apiUrl } from '$lib/api/httpClient';
+import { apiUrl } from '$lib/api/client';
 import { apiFetch, apiFetchResponse } from '$lib/api/core/http';
 import type { PipelineOutputSample } from '$lib/features/localization/pipelineSources';
 

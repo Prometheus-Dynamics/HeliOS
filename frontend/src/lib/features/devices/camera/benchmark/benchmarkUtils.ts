@@ -1,4 +1,4 @@
-import type { Mode } from '$lib/ts-bindings/http/client';
+import type { Mode } from '$lib/api/client';
 
 export type CpuSample = { engine_cpu_avg?: number | null; system_cpu_avg?: number | null };
 export type BenchCodecStat = { implementation: string; avg_ms: number; avg_fps: number; errors?: number };

@@ -1,4 +1,5 @@
 import adapter from '@sveltejs/adapter-static';
+import { resolve as resolvePath } from 'node:path';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 
 const viteScriptPreprocess = vitePreprocess({ script: true });
@@ -25,6 +26,9 @@ const config = {
 		runes: true
 	},
 	kit: {
+		alias: {
+			$generated: resolvePath('src/generated')
+		},
 		adapter: adapter({
 			fallback: 'index.html'
 		}),

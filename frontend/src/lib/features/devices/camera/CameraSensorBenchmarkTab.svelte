@@ -8,7 +8,7 @@
     ProbedDevice,
     SensorBenchmarkListResponse,
     SensorBenchmarkStarted
-  } from '$lib/ts-bindings/http/client';
+  } from '$lib/api/client';
   import { toaster } from '$lib';
   import BenchmarkSetup from './benchmark/BenchmarkSetup.svelte';
   import BenchmarkProgress from './benchmark/BenchmarkProgress.svelte';

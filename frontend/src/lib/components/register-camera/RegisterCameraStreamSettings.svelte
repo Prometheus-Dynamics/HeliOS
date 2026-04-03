@@ -1,6 +1,6 @@
 <script lang="ts">
   import { encoderSelectionId } from '$lib/api/streamEncoderSettings';
-  import type { CodecInfo, ProbedBackend, ProbedDevice } from '$lib/ts-bindings/http/client';
+  import type { CodecInfo, ProbedBackend, ProbedDevice } from '$lib/api/client';
   import type { SensorBenchCodecStat, SensorBenchListItem, SensorBenchModeResult } from './sensorBenchTypes';
   import FormField from '$lib/components/ui/FormField.svelte';
 

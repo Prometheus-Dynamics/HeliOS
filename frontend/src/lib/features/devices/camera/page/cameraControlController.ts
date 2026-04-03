@@ -1,4 +1,4 @@
-import type { ControlMeta, ControlValue, StreamInfo, StreamManifest } from '$lib/api/httpClient';
+import type { ControlMeta, ControlValue, StreamInfo, StreamManifest } from '$lib/api/client';
 import type { StreamsApi } from '$lib/api/streamsApi';
 import type { ResourceSample } from '$lib/api/telemetry';
 

@@ -1,4 +1,4 @@
-import { ApiError } from '$lib/ts-bindings/http/client';
+import { ApiError } from '$lib/api/client';
 import { extractError } from '$lib/api/errors';
 
 type ErrorAnalyticsDetail = {

@@ -6,7 +6,7 @@ import type {
   PlatformFamily,
   SystemsRuntimeSnapshot
 } from '$lib/types/systems';
-import type { I2cInventory as I2cInventoryPayload, ImuStatusPayload } from '$lib/ts-bindings/http/client';
+import type { I2cInventory as I2cInventoryPayload, ImuStatusPayload } from '$lib/api/client';
 
 export type I2cInventoryResponse = I2cInventoryPayload;
 export type ImuStatusResponse = ImuStatusPayload;

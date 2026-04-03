@@ -1,4 +1,4 @@
-import type { Interval, Resolution } from '$lib/ts-bindings/http/client';
+import type { Interval, Resolution } from '$lib/api/client';
 import type { CameraStatus } from './devices';
 
 // Legacy camera-config surface was removed from the OpenAPI. Keep the UI compiling by

@@ -1,4 +1,4 @@
-import type { StreamInfo } from '$lib/ts-bindings/http/client';
+import type { StreamInfo } from '$lib/api/client';
 import type { PipelineTuningConstantEntry, PipelineTuningConstantGroup } from '$lib/components/pipelines/types';
 
 export const buildTuneConstantGroups = (

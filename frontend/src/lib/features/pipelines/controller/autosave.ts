@@ -7,7 +7,7 @@ import { describeError } from './utils';
 import { hydrateGraphWithRegistry } from '../styleHydration';
 import type { Readable, Writable } from 'svelte/store';
 import type { PipelineGraphPlan, PipelineOverviewPipeline, PipelineRegistryEntry } from '$lib/types/pipeline';
-import type { PipelineDocument } from '$lib/ts-bindings/http/client';
+import type { PipelineDocument } from '$lib/api/client';
 
 type PipelineAutosaveDeps = {
   dirtyState: Writable<Record<string, boolean>>;

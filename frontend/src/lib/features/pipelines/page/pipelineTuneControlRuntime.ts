@@ -1,6 +1,6 @@
 import type { StreamsApi as SharedStreamsApi } from '$lib/api/streamsApi';
-import type { StreamInfo } from '$lib/ts-bindings/http/client';
-import type { ControlMeta, ControlValue } from '$lib/ts-bindings/http/client';
+import type { StreamInfo } from '$lib/api/client';
+import type { ControlMeta, ControlValue } from '$lib/api/client';
 import type { StreamControlSocket } from '$lib/api/streamControls';
 
 export type TuneControlRuntimeDeps = {

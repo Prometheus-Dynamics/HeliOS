@@ -2,7 +2,7 @@
   import type { ComponentProps } from 'svelte';
   import type { Writable } from 'svelte/store';
   import type { PipelineOverviewPipeline, PipelineTemplateSummary } from '$lib/types/pipeline';
-  import type { StreamInfo } from '$lib/ts-bindings/http/client';
+  import type { StreamInfo } from '$lib/api/client';
   import { StreamPreview } from '$lib';
   import { streamRecordingActive, streamRuntimeStatusLabel } from '$lib/api/streamRuntime';
   import { buildStreamPreviewProps } from '$lib/components/streamViewerSurface';

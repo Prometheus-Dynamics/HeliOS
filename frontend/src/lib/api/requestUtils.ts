@@ -1,5 +1,5 @@
-import type { CancelablePromise } from '$lib/ts-bindings/http/client';
-import { getHttpClientBase } from '$lib/api/httpClient';
+import type { CancelablePromise } from '$lib/api/client';
+import { getHttpClientBase } from '$lib/api/client';
 
 export const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
 

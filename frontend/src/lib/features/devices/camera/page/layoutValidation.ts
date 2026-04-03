@@ -1,5 +1,5 @@
-import type { StreamManifest, StreamInfo } from '$lib/api/httpClient';
-import type { StreamPipelineLayout } from '$lib/ts-bindings/http/client';
+import type { StreamManifest, StreamInfo } from '$lib/api/client';
+import type { StreamPipelineLayout } from '$lib/api/client';
 import { normalizeGridOutputKeys, normalizeGridSlots, layoutSignature } from './cameraPipelineState';
 import { extractGraphOutputPorts as extractGraphOutputPortsImpl } from '$lib/features/pipelines/graphOutputPorts';
 import { PIPELINE_OUTPUT_CELL_KEY, RAW_PIPELINE_ID, RAW_PIPELINE_UUID } from './cameraPipelineShared';

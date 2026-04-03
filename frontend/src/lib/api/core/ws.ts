@@ -1,5 +1,5 @@
 import { browser } from '$app/environment';
-import { getHttpClientBase } from '$lib/api/httpClient';
+import { getHttpClientBase } from '$lib/api/client';
 
 const WS_CONNECT_FAILURE_COOLDOWN_MS = 8_000;
 const wsConnectFailureUntil = new Map<string, number>();

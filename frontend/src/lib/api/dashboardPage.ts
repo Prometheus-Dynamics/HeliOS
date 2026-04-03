@@ -7,7 +7,7 @@ import { streamHealthStatus } from '$lib/api/streamRuntime';
 import { DeviceApi } from '$lib/api/deviceApi';
 import { DEFAULT_REQUEST_TIMEOUT_MS } from '$lib/api/requestUtils';
 import type { DashboardFetchMeta, DashboardPayload, DashboardSourceStatus, PipelineWatchEntry, StreamGalleryItem, SummaryStat, TimelineItem } from '$lib/types/dashboard';
-import type { DeviceMetricsResponse, PipelineSummary, ProbedDevice, StreamInfo } from '$lib/ts-bindings/http/client';
+import type { DeviceMetricsResponse, PipelineSummary, ProbedDevice, StreamInfo } from '$lib/api/client';
 import { resolveStreamLabel } from '$lib/utils/streamLabels';
 
 const REQUEST_TIMEOUT_MS = DEFAULT_REQUEST_TIMEOUT_MS;

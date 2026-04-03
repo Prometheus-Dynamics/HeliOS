@@ -1,6 +1,6 @@
 <script lang="ts">
   import type PipelineDetailPanel from '$lib/components/pipelines/PipelineDetailPanel.svelte';
-  import type { StreamInfo } from '$lib/ts-bindings/http/client';
+  import type { StreamInfo } from '$lib/api/client';
   import type { InspectorTabKey } from '$lib/features/pipelines/controller';
   import type { PipelineDetailContext, PipelineOutputEntry, PipelinePortEntry } from '$lib/components/pipelines/types';
   import type { PipelineGraphPlan, PipelineOverviewPipeline, PipelineRegistryEntry, PipelineTypeDescriptor } from '$lib/types/pipeline';

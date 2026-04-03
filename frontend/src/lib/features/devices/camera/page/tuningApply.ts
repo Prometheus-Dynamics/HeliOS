@@ -1,4 +1,4 @@
-import type { StreamInfo } from '$lib/api/httpClient';
+import type { StreamInfo } from '$lib/api/client';
 import { StreamsApi } from '$lib/api/streamsApi';
 import type { PipelineGraphPlan, PipelineNodeValue } from '$lib/types/pipeline';
 import { buildDaedalusGraphPatch } from '$lib/features/pipelines/daedalusGraph';

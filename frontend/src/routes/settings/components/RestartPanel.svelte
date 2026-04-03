@@ -1,6 +1,6 @@
 <script lang="ts">
   import { REQUESTED_BY } from '../api';
-  import { DeviceService } from '$lib/ts-bindings/http/client';
+  import { DeviceService } from '$lib/api/client';
   import { buildErrorMessage } from '$lib/ui/errorPolicy';
   import type { RestartTargetId, RestartTile } from '../types';
 

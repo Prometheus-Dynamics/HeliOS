@@ -5,7 +5,7 @@ import type {
   PipelineRegistryEntry,
   PipelineTypeDescriptor
 } from '$lib/types/pipeline';
-import type { DaedalusRegistryNode } from '$lib/ts-bindings/http/client';
+import type { DaedalusRegistryNode } from '$lib/api/client';
 import type { PipelinesStore } from '../pipelinesStore';
 import { ensurePlanPortMetadata } from '$lib/components/flow/pipeline-graph/utils';
 import { replacePlanAtPath, resolvePlanAtPath } from '../nesting';

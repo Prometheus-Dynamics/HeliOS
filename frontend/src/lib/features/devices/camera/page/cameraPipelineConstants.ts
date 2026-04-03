@@ -1,4 +1,4 @@
-import { RAW_PIPELINE_UUID as DEFAULT_RAW_PIPELINE_UUID } from '$lib/ts-bindings/runtimeContracts';
+import { RAW_PIPELINE_UUID as DEFAULT_RAW_PIPELINE_UUID } from '$lib/contracts/runtimeContracts';
 
 export const PIPELINE_OUTPUT_CELL_KEY = '0:0';
 export const RAW_PIPELINE_ID = '__raw__';

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { ApiError } from '$lib/ts-bindings/http/client/core/ApiError';
+import { ApiError } from '$lib/api/client';
 
 import { extractErrorMetadata, extractValidationReport } from './errors';
 

@@ -3,7 +3,7 @@ import { apiFetch } from './api';
 import { buildErrorMessage } from '$lib/ui/errorPolicy';
 import { invalidateSWR, readSWR, primeSWR } from '$lib/utils/swrCache';
 import type { DeviceNetworkInterfaceView, DeviceSettingsData, DeviceSettingsPatchRequest, FanConfig, FanStatus, LedConfig, Nt4Settings, OsReleaseInfo, UsbPowerSettings } from './types';
-import type { HostnamePayload, NetworkInterfaceSettings, TeamNumberPayload } from '$lib/ts-bindings/http/client';
+import type { HostnamePayload, NetworkInterfaceSettings, TeamNumberPayload } from '$lib/api/client';
 
 export type DeviceSettingsState = {
   data: DeviceSettingsData | null;

@@ -3,7 +3,7 @@
 import { normalizeDaedalusRegistry } from '$lib/features/pipelines/controller/daedalusRegistry';
 import { cloneRegistryEntry } from '$lib/features/pipelines/cloneHelpers';
 import { buildRegistryVariants } from '$lib/features/pipelines/registryUtils';
-import type { DaedalusRegistryNode } from '$lib/ts-bindings/http/client';
+import type { DaedalusRegistryNode } from '$lib/api/client';
 import type { PipelineRegistryEntry, PipelineTypeDescriptor } from '$lib/types/pipeline';
 import type { DaedalusRegistryType } from '$lib/features/pipelines/controller/daedalusRegistry/types';
 

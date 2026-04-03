@@ -6,7 +6,7 @@
 	  import { openStreamMetricsSocket, type StreamMetricsError, type StreamMetricsEvent } from '$lib/api/streamMetrics';
 	  import { StreamsApi } from '$lib/api/streamsApi';
 	  import StreamMetricsBanners from '$lib/components/StreamMetricsBanners.svelte';
-	  import type { CaptureStageMetrics, CodecMetrics, StreamMetrics } from '$lib/ts-bindings/http/client';
+	  import type { CaptureStageMetrics, CodecMetrics, StreamMetrics } from '$lib/api/client';
 
   type MetricsSnapshot = {
     average_fps?: number;

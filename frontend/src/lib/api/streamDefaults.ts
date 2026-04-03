@@ -1,4 +1,4 @@
-import type { StreamCapabilitiesResponse } from '$lib/ts-bindings/http/client';
+import type { StreamCapabilitiesResponse } from '$lib/api/client';
 import { defaultRecordingMode, normalizeRecordingMode, type StreamRecordingModeWire } from './streamRecordingMode';
 
 export type StreamCreationDefaults = {

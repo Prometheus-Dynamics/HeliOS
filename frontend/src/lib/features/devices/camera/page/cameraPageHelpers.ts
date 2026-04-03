@@ -1,4 +1,4 @@
-import type { ProbedBackend } from '$lib/api/httpClient';
+import type { ProbedBackend } from '$lib/api/client';
 
 export const buildApiPath = (base: string, path: string): string => {
   const normalizedBase = String(base ?? '').replace(/\/+$/, '');

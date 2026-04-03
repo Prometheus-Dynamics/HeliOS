@@ -1,4 +1,4 @@
-import type { BootloaderStatus } from '$lib/ts-bindings/http/client';
+import type { BootloaderStatus } from '$lib/api/client';
 import type { OsHealthStatus, ResourceGuardStatus } from '$lib/api/deviceStatusResources';
 import { readStorage, writeStorage } from '$lib/utils/storage';
 import { derived, get, readonly, writable } from 'svelte/store';

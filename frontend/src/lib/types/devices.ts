@@ -1,5 +1,5 @@
 import type { StreamPreviewFormat } from '$lib/api/streamPreviewFormat';
-import type { DeviceIdentity, DeviceMetrics, SensorPeripheralFirmwareStatus } from '$lib/ts-bindings/http/client';
+import type { DeviceIdentity, DeviceMetrics, SensorPeripheralFirmwareStatus } from '$lib/api/client';
 
 export type CameraStatus = 'live' | 'degraded' | 'idle' | 'offline';
 

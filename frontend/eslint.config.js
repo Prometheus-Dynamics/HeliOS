@@ -5,7 +5,7 @@ import ts from 'typescript-eslint';
 import svelteConfig from './svelte.config.js';
 
 export default [
-  { ignores: ['src/lib/ts-bindings/**'] },
+  { ignores: ['src/generated/**'] },
   ...ts.config(
     js.configs.recommended,
     ...ts.configs.recommended,
@@ -52,14 +52,28 @@ export default [
     {
       files: ['src/lib/**/*.ts', 'src/lib/**/*.svelte', 'src/routes/**/*.ts', 'src/routes/**/*.svelte'],
       ignores: [
-        'src/lib/ts-bindings/**',
+        'src/generated/**',
         'src/lib/api/core/http.ts',
         'src/lib/api/core/ws.ts',
         'src/lib/api/requestUtils.ts',
+        'src/lib/api/client.ts',
+        'src/lib/api/httpClient.ts',
+        'src/lib/contracts/**/*.ts',
         'src/lib/components/EncodedStreamPlayer.svelte',
         'src/lib/3d/rig.ts'
       ],
       rules: {
+        'no-restricted-imports': [
+          'error',
+          {
+            patterns: [
+              {
+                group: ['$generated/*'],
+                message: 'Import generated bindings through $lib/api/client or $lib/contracts/* instead of raw generated paths.'
+              }
+            ]
+          }
+        ],
         'no-restricted-globals': [
           'error',
           {

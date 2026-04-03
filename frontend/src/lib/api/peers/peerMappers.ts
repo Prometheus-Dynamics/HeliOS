@@ -19,7 +19,7 @@ import type {
   PeerRemovalResponse as ApiRemovalResponse,
   PhotonvisionDiscoverStreamsResponse as ApiPhotonvisionDiscoverStreamsResponse,
   ProbeResult as ApiProbeResult
-} from '$lib/ts-bindings/http/client';
+} from '$lib/api/client';
 import { normalizeCapabilities, normalizeEndpoints, normalizeStatus } from './peerStatusMappers';
 import type {
   DiscoveredStream,

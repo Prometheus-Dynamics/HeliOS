@@ -2,7 +2,7 @@
   import type { PipelineDataType, PipelineGraphPlan, PipelineNodeValue, PipelinePortMetadata } from '$lib/types/pipeline';
   import type { PipelineUi } from '$lib/features/pipelines/pipelineUiTypes';
   import type { ResourceSample } from '$lib/api/telemetry';
-  import type { DaedalusRegistryResponse } from '$lib/ts-bindings/http/client';
+  import type { DaedalusRegistryResponse } from '$lib/api/client';
   import { resourceTelemetryStore } from '$lib/api/telemetry';
   import { get } from 'svelte/store';
   import { fromApiGraphPlan } from '$lib/features/pipelines/graphConverters';

@@ -1,4 +1,4 @@
-import type { CodecInfo } from '$lib/api/httpClient';
+import type { CodecInfo } from '$lib/api/client';
 import { encoderSelectionId } from '$lib/api/streamEncoderSettings';
 
 import { asTrimmedString, normalizeFormatKey } from './cameraBackendSupport';

@@ -1,4 +1,4 @@
-import type { StreamInfo } from '$lib/ts-bindings/http/client';
+import type { StreamInfo } from '$lib/api/client';
 
 export type StreamPreviewFormat = 'mjpeg' | 'h264' | 'h265' | 'unknown';
 const previewFormatCache = new Map<string, Promise<StreamPreviewFormat | null>>();

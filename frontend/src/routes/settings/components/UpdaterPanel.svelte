@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { OpenAPI, type MediaItem, type UpdateAckResponse, type UpdateStateResponse, type UploadUpdateResponse } from '$lib/ts-bindings/http/client';
+  import { OpenAPI, type MediaItem, type UpdateAckResponse, type UpdateStateResponse, type UploadUpdateResponse } from '$lib/api/client';
   import { normalizeUploadError, uploadSizeHeaders, verifyUploadedBytes } from '$lib/api/uploadIntegrity';
   import { apiFetch, REQUESTED_BY, uploadOtaImage } from '../api';
   import { createDomainResource } from '$lib/api/domainResources';

@@ -1,5 +1,5 @@
 import type { LocalizationMarker } from '$lib';
-import type { StreamMetrics } from '$lib/ts-bindings/http/client';
+import type { StreamMetrics } from '$lib/api/client';
 import type { LocalizationPipelineSource } from '$lib/features/localization/pipelineSources';
 import { cameraKeyForSource } from '$lib/features/localization/utils';
 

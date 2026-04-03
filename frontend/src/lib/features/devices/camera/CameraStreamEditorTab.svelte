@@ -4,7 +4,7 @@
   import type { MediaAsset } from '$lib/features/media/api';
   import { subscribeMediaMutations } from '$lib/features/media/mutations';
   import { MEDIA_KIND_OPTIONS, mediaKindLabel } from '$lib/features/media/mediaKind';
-  import { OpenAPI } from '$lib/ts-bindings/http/client';
+  import { OpenAPI } from '$lib/api/client';
   import { reportError } from '$lib/ui/errorPolicy';
   import { apiFetchResponse } from '$lib/api/core/http';
   import {

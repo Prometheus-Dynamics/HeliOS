@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { StreamCapabilitiesResponse } from '$lib/ts-bindings/http/client';
+import type { StreamCapabilitiesResponse } from '$lib/api/client';
 
 import { resolveStreamCreationDefaults } from './streamDefaults';
 import { makeNetcamManifest } from './streamManifestBuilders';

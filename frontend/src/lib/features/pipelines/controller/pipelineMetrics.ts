@@ -5,7 +5,7 @@ import { loadOwnedStreams } from "$lib/api/streamResources";
 import { StreamsApi } from "$lib/api/streamsApi";
 import { cancellableWithTimeout } from "$lib/api/requestUtils";
 import type { Readable, Writable } from "svelte/store";
-import type { StreamInfo } from "$lib/ts-bindings/http/client";
+import type { StreamInfo } from "$lib/api/client";
 import type {
   PipelineOverviewPipeline,
   PipelineStreamNodeMetrics,

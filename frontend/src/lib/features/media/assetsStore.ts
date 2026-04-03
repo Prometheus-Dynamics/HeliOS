@@ -1,5 +1,5 @@
 import { derived, get, writable, type Readable } from 'svelte/store';
-import { DeviceService, type CameraLayoutResponse } from '$lib/ts-bindings/http/client';
+import { DeviceService, type CameraLayoutResponse } from '$lib/api/client';
 import { createDomainResource } from '$lib/api/domainResources';
 import { createMediaListStore, type MediaListStore } from './store';
 import { createSelectionStore, type SelectionStore } from './selectionStore';

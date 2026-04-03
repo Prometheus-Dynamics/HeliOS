@@ -1,4 +1,4 @@
-import type { CodecInfo, Mode } from '$lib/api/httpClient';
+import type { CodecInfo, Mode } from '$lib/api/client';
 import { deriveStreamCodecSelections } from './cameraStreamConfigBuilder';
 import {
   cameraIntervalsForSelection,

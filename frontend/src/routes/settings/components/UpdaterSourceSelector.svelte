@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { MediaItem, UploadUpdateResponse } from '$lib/ts-bindings/http/client';
+  import type { MediaItem, UploadUpdateResponse } from '$lib/api/client';
 
   type ImageSourceKind = 'upload' | 'media' | 'url';
 

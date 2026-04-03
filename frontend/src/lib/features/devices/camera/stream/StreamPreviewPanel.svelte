@@ -1,6 +1,6 @@
 <script lang="ts">
   import CameraSensorBenchmarkTab from '$lib/features/devices/camera/CameraSensorBenchmarkTab.svelte';
-  import type { ProbedBackend, ProbedDevice } from '$lib/ts-bindings/http/client';
+  import type { ProbedBackend, ProbedDevice } from '$lib/api/client';
 
   type BenchCodecStat = { implementation: string; avg_ms: number; avg_fps: number; errors?: number };
   type BenchFormatGroup = {

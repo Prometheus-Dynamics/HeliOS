@@ -1,4 +1,4 @@
-import type { Mode } from '$lib/ts-bindings/http/client';
+import type { Mode } from '$lib/api/client';
 import { codecCountsForMode, type CodecInfo, type SensorBenchmarkStatus } from './benchmarkUtils';
 
 export type EtaEstimator = { lastAtMs: number; lastDone: number; emaMsPerMode: number | null };

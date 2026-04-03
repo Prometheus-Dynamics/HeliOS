@@ -1,4 +1,4 @@
-import type { ReadModelFreshness } from '$lib/ts-bindings/http/client';
+import type { ReadModelFreshness } from '$lib/api/client';
 
 export function readModelFreshnessLabel(freshness: ReadModelFreshness | null | undefined): string {
   switch (freshness?.state) {

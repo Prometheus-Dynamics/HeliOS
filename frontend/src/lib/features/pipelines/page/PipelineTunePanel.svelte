@@ -11,7 +11,7 @@
   import PipelineOutputsPanel from '$lib/components/pipelines/PipelineOutputsPanel.svelte';
   import { streamRecordingActive } from '$lib/api/streamRuntime';
   import { StreamsApi } from '$lib/api/streamsApi';
-  import type { ControlMeta, StreamInfo, StreamPipelineGridSlot, StreamPipelineWire } from '$lib/ts-bindings/http/client';
+  import type { ControlMeta, StreamInfo, StreamPipelineGridSlot, StreamPipelineWire } from '$lib/api/client';
   import type { PipelineOutputEntry, PipelineTuningConstantGroup } from '$lib/components/pipelines/types';
   import type {
     PipelineDataType,

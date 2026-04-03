@@ -41,7 +41,7 @@ export type {
   PipelineRegistryGroup,
   PipelineRegistryView
 } from './components/pipelines/types';
-export * from './api/httpClient';
+export * from './api/client';
 export * from './api/hardwareAlerts';
 export * from './api/peers';
 export {

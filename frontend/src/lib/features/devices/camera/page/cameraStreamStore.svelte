@@ -1,7 +1,7 @@
 <script lang="ts" module>
   import { createEncoderSettingsDraft, type EncoderSettingsDraft } from '$lib/api/streamEncoderSettings';
   import type { StreamCreationDefaults } from '$lib/api/streamDefaults';
-  import type { CodecInfo, ControlMeta, ProbedDevice, StreamInfo, StreamManifest, StreamMetrics } from '$lib/ts-bindings/http/client';
+  import type { CodecInfo, ControlMeta, ProbedDevice, StreamInfo, StreamManifest, StreamMetrics } from '$lib/api/client';
   import type { StreamControlSocket } from '$lib/api/streamControls';
   import type { connectStreamUpdates } from '$lib/api/streamUpdates';
   import { SvelteMap } from 'svelte/reactivity';

@@ -1,5 +1,5 @@
 import { apiFetchCachedJson, type ApiRequestOptions } from '$lib/api/core/http';
-import type { DeviceMetricsResponse } from '$lib/ts-bindings/http/client';
+import type { DeviceMetricsResponse } from '$lib/api/client';
 
 type CacheEntry<T> = {
   fetchedAt: number;

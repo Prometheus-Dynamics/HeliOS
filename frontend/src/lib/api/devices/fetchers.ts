@@ -1,4 +1,4 @@
-import { PeripheralsService } from '$lib/ts-bindings/http/client';
+import { PeripheralsService } from '$lib/api/client';
 import { fetchPeerStreams } from '$lib/api/peers';
 import { loadOwnedStreams } from '$lib/api/streamResources';
 import { PeripheralsApi } from '$lib/api/peripheralsApi';

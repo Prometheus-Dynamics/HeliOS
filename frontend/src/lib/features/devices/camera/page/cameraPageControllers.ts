@@ -2,7 +2,7 @@ import { createCameraModeController } from './cameraModeController';
 import { createCameraControlController } from './cameraControlController';
 import { createCameraBackendController } from './cameraBackendController';
 import { createCameraStreamState } from './cameraStreamStore.svelte';
-import type { Mode } from '$lib/api/httpClient';
+import type { Mode } from '$lib/api/client';
 
 type CameraControlControllerDeps = Parameters<typeof createCameraControlController>[1];
 type CameraBackendControllerDeps = Parameters<typeof createCameraBackendController>[1];

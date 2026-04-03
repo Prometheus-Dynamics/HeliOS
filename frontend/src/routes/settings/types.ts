@@ -21,7 +21,7 @@ import type {
   OsReleaseInfo,
   RestartTargetId,
   UsbPowerSettings
-} from '$lib/ts-bindings/http/client';
+} from '$lib/api/client';
 
 export type Ipv4AssignmentView = {
   address: string;

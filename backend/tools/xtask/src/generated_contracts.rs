@@ -7,13 +7,13 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
 const REQUIRED_FRONTEND_GENERATED_PATHS: &[&str] = &[
-    "frontend/src/lib/ts-bindings/types.ts",
-    "frontend/src/lib/ts-bindings/codecFamilies.ts",
-    "frontend/src/lib/ts-bindings/runtimeContracts.ts",
-    "frontend/src/lib/ts-bindings/http/openapi.json",
-    "frontend/src/lib/ts-bindings/http/client/index.ts",
-    "frontend/src/lib/ts-bindings/http/client/core/OpenAPI.ts",
-    "frontend/src/lib/ts-bindings/ws/asyncapi.json",
+    "frontend/src/generated/types.ts",
+    "frontend/src/generated/codecFamilies.ts",
+    "frontend/src/generated/runtimeContracts.ts",
+    "frontend/src/generated/http/openapi.json",
+    "frontend/src/generated/http/client/index.ts",
+    "frontend/src/generated/http/client/core/OpenAPI.ts",
+    "frontend/src/generated/ws/asyncapi.json",
 ];
 
 const TRACKED_GENERATED_PATHS: &[&str] = &["backend/src/helios-engine/src/contracts/generated_runtime_contracts.rs"];
@@ -88,7 +88,7 @@ pub fn generate(repo_root: &Path) -> Result<()> {
     let backend_dir = repo_root.join("backend");
     let client_template_dir = repo_root.join("tools").join("api-client");
     let overrides_dir = repo_root.join("tools").join("api-codegen").join("overrides");
-    let ts_bindings_root = repo_root.join("frontend").join("src").join("lib").join("ts-bindings");
+    let ts_bindings_root = repo_root.join("frontend").join("src").join("generated");
     let http_bindings_dir = ts_bindings_root.join("http");
     let ws_bindings_dir = ts_bindings_root.join("ws");
     let http_client_dir = http_bindings_dir.join("client");
@@ -151,7 +151,7 @@ pub fn generate(repo_root: &Path) -> Result<()> {
 }
 
 pub fn validate(repo_root: &Path) -> Result<()> {
-    let ts_bindings_root = repo_root.join("frontend").join("src").join("lib").join("ts-bindings");
+    let ts_bindings_root = repo_root.join("frontend").join("src").join("generated");
     log("check", "Removing ignored frontend bindings to simulate a fresh clone");
     remove_path(&ts_bindings_root)?;
 
@@ -177,7 +177,7 @@ fn generate_runtime_contracts(repo_root: &Path) -> Result<()> {
     let spec = load_runtime_contracts_spec(&spec_path)?;
 
     let rust_output_path = repo_root.join("backend").join("src").join("helios-engine").join("src").join("contracts").join("generated_runtime_contracts.rs");
-    let ts_output_path = repo_root.join("frontend").join("src").join("lib").join("ts-bindings").join("runtimeContracts.ts");
+    let ts_output_path = repo_root.join("frontend").join("src").join("generated").join("runtimeContracts.ts");
     write_generated_file(&rust_output_path, &render_runtime_contracts_rust(&spec))?;
     write_generated_file(&ts_output_path, &render_runtime_contracts_ts(&spec))?;
     Ok(())
@@ -187,7 +187,7 @@ fn generate_codec_families(repo_root: &Path) -> Result<()> {
     let spec_path = repo_root.join(CODEC_FAMILIES_SPEC_PATH);
     let spec = load_codec_families_spec(&spec_path)?;
 
-    let ts_output_path = repo_root.join("frontend").join("src").join("lib").join("ts-bindings").join("codecFamilies.ts");
+    let ts_output_path = repo_root.join("frontend").join("src").join("generated").join("codecFamilies.ts");
     write_generated_file(&ts_output_path, &render_codec_families_ts(&spec)?)?;
     Ok(())
 }

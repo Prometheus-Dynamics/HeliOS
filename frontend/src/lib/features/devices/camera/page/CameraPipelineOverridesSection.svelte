@@ -5,7 +5,7 @@
   import { resolveStreamLabel } from '$lib/utils/streamLabels';
   import type { PipelineDataType, PipelineNodeValue } from '$lib/types/pipeline';
   import type { PipelineUi } from '$lib/features/pipelines/pipelineUiTypes';
-  import type { StreamInfo, StreamPipelineEndpoint, StreamPipelineWire } from '$lib/ts-bindings/http/client';
+  import type { StreamInfo, StreamPipelineEndpoint, StreamPipelineWire } from '$lib/api/client';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
   type PipelineTuningPanelState = {

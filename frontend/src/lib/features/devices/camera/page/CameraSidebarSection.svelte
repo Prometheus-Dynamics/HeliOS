@@ -10,7 +10,7 @@
     StreamInfo,
     StreamPipelineEndpoint,
     StreamPipelineWire
-  } from '$lib/ts-bindings/http/client';
+  } from '$lib/api/client';
   import CameraStreamSidebar from './CameraStreamSidebar.svelte';
 
   type StreamSidebarProps = ComponentProps<typeof CameraStreamSidebar>;

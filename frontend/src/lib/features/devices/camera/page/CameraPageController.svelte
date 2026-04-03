@@ -2,7 +2,7 @@
 
   import { onDestroy, onMount, untrack, type ComponentProps, type Snippet } from 'svelte';
   import type { PageData } from '../../../../../routes/devices/[cameraId]/$types';
-  import { DeviceService, OpenAPI, getHttpClientBase } from '$lib/api/httpClient';
+  import { DeviceService, OpenAPI, getHttpClientBase } from '$lib/api/client';
   import { encoderSelectionId } from '$lib/api/streamEncoderSettings';
   import { apiFetchResponse } from '$lib/api/core/http';
   import { PipelinesApi } from '$lib/api/pipelinesApi';

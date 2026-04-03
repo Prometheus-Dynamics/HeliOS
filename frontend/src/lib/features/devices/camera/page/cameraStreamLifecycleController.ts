@@ -1,5 +1,5 @@
-import type { StreamInfo, StreamManifest, ControlMeta } from '$lib/api/httpClient';
-import type { DeviceService } from '$lib/api/httpClient';
+import type { StreamInfo, StreamManifest, ControlMeta } from '$lib/api/client';
+import type { DeviceService } from '$lib/api/client';
 import type { StreamsApi } from '$lib/api/streamsApi';
 import { connectStreamControls, type StreamControlSocket } from '$lib/api/streamControls';
 import { connectStreamUpdates } from '$lib/api/streamUpdates';
