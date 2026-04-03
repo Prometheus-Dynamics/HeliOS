@@ -14,7 +14,6 @@ pub mod nodes {
     #![allow(clippy::ptr_arg)]
 
     use crate::{Pixel, Point};
-    use daedalus::data::model::TypeExpr;
     use daedalus::data::model::Value as DaedalusValue;
     use daedalus::declare_plugin;
     use daedalus::macros::{NodeConfig, node};
@@ -170,14 +169,14 @@ pub mod nodes {
     #[node(
         id = "drawcrosshairat",
         inputs(
-            port(name = "frame", ty = TypeExpr::opaque("image:dynamic")),
+            port(name = "frame", ty = crate::daedalus_types::image_dynamic()),
             port(name = "x", meta(ui_min = 0, ui_max = 4096, ui_step = 1)),
             port(name = "y", meta(ui_min = 0, ui_max = 4096, ui_step = 1)),
             port(name = "size", meta(ui_min = 1, ui_max = 2048, ui_step = 1)),
             port(name = "thickness", meta(ui_min = 1, ui_max = 16, ui_step = 1)),
             port(name = "enabled", default = true)
         ),
-        outputs(port(name = "frame", ty = TypeExpr::opaque("image:dynamic")))
+        outputs(port(name = "frame", ty = crate::daedalus_types::image_dynamic()))
     )]
     fn draw_crosshair_at(frame: Compute<DynamicImage>, x: i64, y: i64, size: u32, thickness: u32, enabled: bool, exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
         if !enabled {

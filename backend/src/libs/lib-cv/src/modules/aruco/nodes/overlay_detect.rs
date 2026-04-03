@@ -352,7 +352,7 @@ pub(crate) fn cv_detect_aruco_detections(frame: Compute<DynamicImage>, cfg: Aruc
     summary = "Decode detections from shared contours.",
     description = "Consumes precomputed contours and runs candidate filtering + decode. Use this when a single contour pass should be shared across branches.",
     inputs(
-        port(name = "frame", ty = TypeExpr::opaque("image:dynamic")),
+        port(name = "frame", ty = crate::daedalus_types::image_dynamic()),
         port(name = "contours", source = "Contours", ty = crate::daedalus_types::contours()),
         port(name = "dictionary", default = "apriltag_16h5"),
         port(name = "max_hamming", default = -1i64, meta(ui_min = -1, ui_max = 4, ui_step = 1)),

@@ -213,7 +213,7 @@ fn cv_aruco_decode_quads_hamming_finalize_detections(
     summary = "Decode quad candidates into marker detections.",
     description = "Stage-split node-group version of the historical `decode_quads_hamming` implementation. Exposes decode/finalization stages as independent profiles.",
     inputs(
-        port(name = "frame", source = "Frame", ty = daedalus::data::model::TypeExpr::opaque("image:gray8")),
+        port(name = "frame", source = "Frame", ty = crate::daedalus_types::image_gray8()),
         port(name = "quads", source = "Quads", ty = crate::daedalus_types::quads()),
         port(name = "dictionary", default = "4x4_1000"),
         port(name = "sample_scale", default = 2i64, meta(ui_min = 1, ui_max = 8, ui_step = 1)),
@@ -545,7 +545,7 @@ fn roi_bounds_or_full(fw: u32, fh: u32, roi_x: i64, roi_y: i64, roi_w: i64, roi_
     id = "decode_quads_hamming_from_roi_frame",
     summary = "Decode quad candidates from an input frame plus ROI inputs.",
     inputs(
-        port(name = "frame", source = "Frame", ty = daedalus::data::model::TypeExpr::opaque("image:dynamic")),
+        port(name = "frame", source = "Frame", ty = crate::daedalus_types::image_dynamic()),
         port(name = "roi_x", default = 0i64, meta(ui_min = 0, ui_max = 4096, ui_step = 1)),
         port(name = "roi_y", default = 0i64, meta(ui_min = 0, ui_max = 4096, ui_step = 1)),
         port(name = "roi_w", default = 0i64, meta(ui_min = 0, ui_max = 4096, ui_step = 1)),

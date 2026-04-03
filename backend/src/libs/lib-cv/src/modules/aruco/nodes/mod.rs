@@ -3,7 +3,7 @@
 use super::{ArucoDetection2D, ArucoDetectionsFilterMode, ArucoDetectionsOrderMode};
 use crate::{BinaryImage, Point};
 use daedalus::FanIn;
-use daedalus::data::model::{StructFieldValue, TypeExpr, Value};
+use daedalus::data::model::{StructFieldValue, Value};
 use daedalus::graph_builder::GraphCtx;
 use daedalus::macros::{NodeConfig, node};
 use daedalus::runtime::NodeError;

@@ -265,13 +265,13 @@ fn cv_aruco_adaptive_quads_pass(
     id = "clahe_gray",
     summary = "Apply CLAHE directly to a grayscale frame.",
     inputs(
-        port(name = "mask", source = "Frame", ty = daedalus::data::model::TypeExpr::opaque("image:gray8")),
+        port(name = "mask", source = "Frame", ty = crate::daedalus_types::image_gray8()),
         port(name = "tile_size", default = 2i64, meta(ui_min = 1, ui_max = 64, ui_step = 1)),
         port(name = "clip_limit", default = 3.5f64, meta(ui_min = 0.0, ui_max = 10.0, ui_step = 0.1)),
         port(name = "mix", default = 1.0f64, meta(ui_min = 0.0, ui_max = 1.0, ui_step = 0.01)),
         port(name = "mode", default = "cpu")
     ),
-    outputs(port(name = "mask", source = "Frame", ty = daedalus::data::model::TypeExpr::opaque("image:gray8")))
+    outputs(port(name = "mask", source = "Frame", ty = crate::daedalus_types::image_gray8()))
 )]
 fn cv_aruco_clahe_gray(mask: &GrayImage, tile_size: i64, clip_limit: f64, mix: f64, _mode: Option<crate::plugin::ExecMode>, exec_ctx: &ExecutionContext) -> Result<GrayImage, NodeError> {
     let gray = mask;
@@ -326,7 +326,7 @@ fn adaptive_border_guarded_gray<'a>(gray: &'a GrayImage, border_guard_px: u32) -
     id = "adaptive_threshold_gray",
     summary = "Adaptive threshold directly on a grayscale frame.",
     inputs(
-        port(name = "frame", source = "Frame", ty = daedalus::data::model::TypeExpr::opaque("image:gray8")),
+        port(name = "frame", source = "Frame", ty = crate::daedalus_types::image_gray8()),
         port(name = "window", default = 9i64, meta(ui_min = 3, ui_max = 101, ui_step = 2)),
         port(name = "offset", default = 0.0f64, meta(ui_min = -50.0, ui_max = 50.0, ui_step = 1.0)),
         port(name = "threshold_offset", default = 0.0f64, meta(ui_min = -50.0, ui_max = 50.0, ui_step = 1.0)),
@@ -334,7 +334,7 @@ fn adaptive_border_guarded_gray<'a>(gray: &'a GrayImage, border_guard_px: u32) -
         port(name = "invert", default = false),
         port(name = "mode", default = "cpu")
     ),
-    outputs(port(name = "mask", source = "Frame", ty = daedalus::data::model::TypeExpr::opaque("image:gray8")))
+    outputs(port(name = "mask", source = "Frame", ty = crate::daedalus_types::image_gray8()))
 )]
 fn cv_aruco_adaptive_threshold_gray(
     frame: &GrayImage,
@@ -629,7 +629,7 @@ fn collect_adaptive_quads(
     id = "adaptive_quads_from_frame",
     summary = "Extract adaptive quads from a frame without materializing intermediate graph images.",
     inputs(
-        port(name = "frame", source = "Frame", ty = daedalus::data::model::TypeExpr::opaque("image:gray8")),
+        port(name = "frame", source = "Frame", ty = crate::daedalus_types::image_gray8()),
         port(name = "enabled", default = true),
         port(name = "tile_size", default = 2i64, meta(ui_min = 1, ui_max = 64, ui_step = 1)),
         port(name = "clip_limit", default = 3.5f64, meta(ui_min = 0.0, ui_max = 10.0, ui_step = 0.1)),
@@ -824,7 +824,7 @@ fn collect_adaptive_quads_from_gray_frame(
     id = "adaptive_quads_from_roi_frame",
     summary = "Extract adaptive quads directly from an input frame plus ROI inputs.",
     inputs(
-        port(name = "frame", source = "Frame", ty = daedalus::data::model::TypeExpr::opaque("image:dynamic")),
+        port(name = "frame", source = "Frame", ty = crate::daedalus_types::image_dynamic()),
         port(name = "roi_x", default = 0i64, meta(ui_min = 0, ui_max = 4096, ui_step = 1)),
         port(name = "roi_y", default = 0i64, meta(ui_min = 0, ui_max = 4096, ui_step = 1)),
         port(name = "roi_w", default = 0i64, meta(ui_min = 0, ui_max = 4096, ui_step = 1)),

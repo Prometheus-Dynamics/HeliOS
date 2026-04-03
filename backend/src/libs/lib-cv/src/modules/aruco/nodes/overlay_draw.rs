@@ -262,11 +262,11 @@ pub(crate) struct ArucoOverlayDetectionsConfig {
 #[node(
     id = "overlay_detections",
     inputs(
-        port(name = "frame", ty = TypeExpr::opaque("image:dynamic")),
+        port(name = "frame", ty = crate::daedalus_types::image_dynamic()),
         port(name = "detections", source = "ArucoDetections2D", ty = crate::daedalus_types::aruco_detections_2d()),
         config = ArucoOverlayDetectionsConfig
     ),
-    outputs(port(name = "frame", ty = TypeExpr::opaque("image:dynamic")))
+    outputs(port(name = "frame", ty = crate::daedalus_types::image_dynamic()))
 )]
 pub(crate) fn cv_aruco_overlay(
     frame: Compute<DynamicImage>,
@@ -356,7 +356,7 @@ pub(crate) fn cv_aruco_overlay(
         port(name = "thickness", default = 2i64, meta(ui_min = 1, ui_max = 16, ui_step = 1)),
         port(name = "max_quads", default = 128i64, meta(ui_min = 1, ui_max = 1024, ui_step = 1))
     ),
-    outputs(port(name = "frame", ty = TypeExpr::opaque("image:dynamic")))
+    outputs(port(name = "frame", ty = crate::daedalus_types::image_dynamic()))
 )]
 pub(crate) fn cv_aruco_overlay_quads(frame: Compute<DynamicImage>, quads: &Vec<Quad>, thickness: i64, max_quads: i64, exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     let thickness = u32::try_from(thickness).unwrap_or(2).clamp(1, 32);
@@ -382,7 +382,7 @@ pub(crate) fn cv_aruco_overlay_quads(frame: Compute<DynamicImage>, quads: &Vec<Q
         "frame",
         port(name = "quads", source = "Quads", ty = crate::daedalus_types::quads())
     ),
-    outputs(port(name = "frame", ty = TypeExpr::opaque("image:dynamic")))
+    outputs(port(name = "frame", ty = crate::daedalus_types::image_dynamic()))
 )]
 pub(crate) fn cv_aruco_overlay_quads_count(frame: Compute<DynamicImage>, quads: &Vec<Quad>, exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     let mut out = expect_cpu_frame(frame, "overlay_quads_count", Some(exec_ctx))?;
@@ -398,7 +398,7 @@ pub(crate) fn cv_aruco_overlay_quads_count(frame: Compute<DynamicImage>, quads: 
         "frame",
         port(name = "detections", source = "ArucoDetections2D", ty = crate::daedalus_types::aruco_detections_2d())
     ),
-    outputs(port(name = "frame", ty = TypeExpr::opaque("image:dynamic")))
+    outputs(port(name = "frame", ty = crate::daedalus_types::image_dynamic()))
 )]
 pub(crate) fn cv_overlay_tags_count(frame: Compute<DynamicImage>, detections: &Vec<ArucoDetection2D>, exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     let _ = exec_ctx;
@@ -416,7 +416,7 @@ pub(crate) fn cv_overlay_tags_count(frame: Compute<DynamicImage>, detections: &V
 #[node(
         id = "detect_overlay",
         inputs("frame", config = ArucoTagOverlayConfig),
-        outputs(port(name = "frame", ty = TypeExpr::opaque("image:dynamic")))
+        outputs(port(name = "frame", ty = crate::daedalus_types::image_dynamic()))
 		    )]
 pub(crate) fn cv_detect_aruco_overlay(frame: Compute<DynamicImage>, cfg: ArucoTagOverlayConfig, exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
     static CALLS: AtomicU64 = AtomicU64::new(0);

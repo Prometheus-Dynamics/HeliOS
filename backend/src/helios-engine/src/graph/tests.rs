@@ -10,7 +10,7 @@ use daedalus::DataCell;
 use image::DynamicImage;
 use image::GenericImageView;
 use image::{GrayImage, Luma, RgbaImage};
-use lib_cv::modules::aruco::ArucoDetection2D;
+use lib_cv::{daedalus_types, modules::aruco::ArucoDetection2D};
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::PathBuf;
@@ -18,14 +18,14 @@ use std::path::PathBuf;
 #[test]
 fn grayscale_input_pref_allows_overlay_dynamic_preview() {
     let host_output_port_types =
-        BTreeMap::from([("overlay".to_string(), TypeExpr::opaque("image:dynamic")), ("clahe".to_string(), TypeExpr::opaque("image:gray8")), ("adaptive".to_string(), TypeExpr::opaque("image:gray8"))]);
+        BTreeMap::from([("overlay".to_string(), daedalus_types::image_dynamic()), ("clahe".to_string(), daedalus_types::image_gray8()), ("adaptive".to_string(), daedalus_types::image_gray8())]);
 
     assert!(super::graph_prefers_grayscale_input(false, &["overlay".to_string()], &host_output_port_types,));
 }
 
 #[test]
 fn grayscale_input_pref_rejects_generic_dynamic_frame_preview() {
-    let host_output_port_types = BTreeMap::from([("frame".to_string(), TypeExpr::opaque("image:dynamic"))]);
+    let host_output_port_types = BTreeMap::from([("frame".to_string(), daedalus_types::image_dynamic())]);
 
     assert!(!super::graph_prefers_grayscale_input(false, &["frame".to_string()], &host_output_port_types,));
 }
@@ -65,7 +65,7 @@ fn fast_overlay_preview_keeps_grayscale_output_for_blank_luma_input() {
 
 #[test]
 fn normalize_preview_output_keeps_overlay_luma_on_gray_fast_path() {
-    let port_types = BTreeMap::from([("overlay".to_string(), TypeExpr::opaque("image:dynamic"))]);
+    let port_types = BTreeMap::from([("overlay".to_string(), daedalus_types::image_dynamic())]);
     let output = super::normalize_preview_output_for_port(super::GraphPreviewOutput::Image(DynamicImage::ImageLuma8(GrayImage::from_pixel(8, 8, Luma([12])))), "overlay", &port_types);
 
     match output {
@@ -76,7 +76,7 @@ fn normalize_preview_output_keeps_overlay_luma_on_gray_fast_path() {
 
 #[test]
 fn normalize_preview_output_converts_overlay_rgba_to_gray_fast_path() {
-    let port_types = BTreeMap::from([("overlay".to_string(), TypeExpr::opaque("image:dynamic"))]);
+    let port_types = BTreeMap::from([("overlay".to_string(), daedalus_types::image_dynamic())]);
     let output =
         super::normalize_preview_output_for_port(super::GraphPreviewOutput::Image(DynamicImage::ImageRgba8(RgbaImage::from_pixel(8, 8, image::Rgba([0, 255, 0, 255])))), "overlay", &port_types);
 
@@ -88,7 +88,7 @@ fn normalize_preview_output_converts_overlay_rgba_to_gray_fast_path() {
 
 #[test]
 fn normalize_preview_output_leaves_generic_dynamic_preview_unchanged() {
-    let port_types = BTreeMap::from([("frame".to_string(), TypeExpr::opaque("image:dynamic"))]);
+    let port_types = BTreeMap::from([("frame".to_string(), daedalus_types::image_dynamic())]);
     let output = super::normalize_preview_output_for_port(super::GraphPreviewOutput::Image(DynamicImage::ImageLuma8(GrayImage::from_pixel(8, 8, Luma([12])))), "frame", &port_types);
 
     match output {
@@ -99,7 +99,7 @@ fn normalize_preview_output_leaves_generic_dynamic_preview_unchanged() {
 
 #[test]
 fn selected_host_output_preview_with_sibling_image_port_emits_frame() {
-    let image_ty = serde_json::to_string(&TypeExpr::opaque("image:dynamic")).expect("image type json");
+    let image_ty = serde_json::to_string(&daedalus_types::image_dynamic()).expect("image type json");
     let graph_json = serde_json::json!({
         "nodes": [
             {
@@ -199,7 +199,7 @@ fn sync_graph_node_port_declarations_repairs_stale_ports() {
     let mut graph: daedalus::planner::Graph = serde_json::from_value(graph_json).expect("graph parse");
 
     let desc = NodeDescriptorBuilder::new("cv:test:target")
-        .input("detections", TypeExpr::opaque("cv:aruco_detection_2d_list"))
+        .input("detections", daedalus_types::aruco_detections_2d())
         .input("frame_width", TypeExpr::scalar(daedalus::data::model::ValueType::Int))
         .input("frame_height", TypeExpr::scalar(daedalus::data::model::ValueType::Int))
         .input("crosshair_x", TypeExpr::scalar(daedalus::data::model::ValueType::Int))
@@ -207,7 +207,7 @@ fn sync_graph_node_port_declarations_repairs_stale_ports() {
         .input("mode", TypeExpr::r#enum(vec![EnumVariant { name: "nearest".to_string(), ty: None }]))
         .input("fallback_to_nearest", TypeExpr::scalar(daedalus::data::model::ValueType::Bool))
         .fanin_input("ins", 0, TypeExpr::scalar(daedalus::data::model::ValueType::Int))
-        .output("target", TypeExpr::opaque("cv:aruco_detection_2d"))
+        .output("target", daedalus_types::aruco_detection_2d())
         .build()
         .expect("descriptor build");
 
@@ -344,7 +344,7 @@ fn raw_stream_graph_can_select_undistorted_output() {
 
 #[test]
 fn host_output_port_types_include_host_bridge_dynamic_outputs() {
-    let frame_ty = TypeExpr::opaque("image:dynamic");
+    let frame_ty = daedalus_types::image_dynamic();
     let frame_json = serde_json::to_string(&frame_ty).expect("type json");
 
     let host_bridge = RuntimeNode {
@@ -390,7 +390,7 @@ fn host_output_port_types_include_host_bridge_dynamic_outputs() {
     let registry = daedalus::registry::store::Registry::new();
     let inferred = infer_host_output_incoming_types(&plan, &registry);
     let output = inferred.get("output").expect("output host alias");
-    assert_eq!(output.get("raw"), Some(&TypeExpr::opaque("image:dynamic")));
+    assert_eq!(output.get("raw"), Some(&daedalus_types::image_dynamic()));
 }
 
 #[test]
@@ -575,7 +575,7 @@ fn pipeline_edge_metrics_fall_back_to_planned_bounded_capacity() {
 
 #[test]
 fn host_bridge_input_port_infers_frame_from_solved_types() {
-    let frame_ty = TypeExpr::opaque("image:dynamic");
+    let frame_ty = daedalus_types::image_dynamic();
     let roi_ty = TypeExpr::opaque("int");
     let frame_ty_json = serde_json::to_string(&frame_ty).expect("frame type json");
     let roi_ty_json = serde_json::to_string(&roi_ty).expect("roi type json");
@@ -666,7 +666,7 @@ fn demand_driven_sinks_skip_non_preview_image_outputs() {
     };
 
     let mut port_types = BTreeMap::new();
-    port_types.insert("overlay".to_string(), TypeExpr::opaque("image:dynamic"));
+    port_types.insert("overlay".to_string(), daedalus_types::image_dynamic());
     port_types.insert("detections".to_string(), TypeExpr::list(TypeExpr::scalar(daedalus::data::model::ValueType::Int)));
 
     let host_output_port_owners = BTreeMap::new();
@@ -753,9 +753,9 @@ fn preview_only_demand_targets_host_output_sink_and_only_overlay_branch() {
     };
 
     let mut port_types = BTreeMap::new();
-    port_types.insert("overlay".to_string(), TypeExpr::opaque("image:dynamic"));
-    port_types.insert("clahe".to_string(), TypeExpr::opaque("image:gray8"));
-    port_types.insert("adaptive".to_string(), TypeExpr::opaque("image:gray8"));
+    port_types.insert("overlay".to_string(), daedalus_types::image_dynamic());
+    port_types.insert("clahe".to_string(), daedalus_types::image_gray8());
+    port_types.insert("adaptive".to_string(), daedalus_types::image_gray8());
 
     let owners = super::infer_host_output_port_owners(&plan, &["Output".to_string()]);
     assert_eq!(owners.get("overlay"), Some(&3));

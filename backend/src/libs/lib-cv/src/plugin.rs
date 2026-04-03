@@ -1,7 +1,5 @@
-use daedalus::data::{model::TypeExpr, typing};
 #[cfg(feature = "gpu")]
 use daedalus::gpu::{Compute, GpuError};
-use daedalus::registry::convert::ConverterBuilder;
 use daedalus::runtime::RuntimeValue;
 use daedalus::runtime::plugins::RegistryPluginExt;
 use daedalus::{Plugin, PluginRegistry};
@@ -92,88 +90,8 @@ impl Plugin for CvPlugin {
         registry.register_enum::<crate::modules::image::nodes::BorderMode>(["zero", "clamp"]);
         registry.register_enum::<crate::modules::image::nodes::UndistortZoomMode>(["manual", "fill"]);
 
-        typing::register_type::<crate::Pixel>(crate::daedalus_types::pixel_rgba());
-        typing::register_type::<crate::BinaryImage>(crate::daedalus_types::binary_image());
-        // Stable, UI-facing schemas + host serializers for common CV data types.
-        daedalus::register_daedalus_values!(
-            registry,
-            crate::Point,
-            crate::Translation3,
-            crate::modules::aruco::ArucoBitGrid,
-            crate::modules::aruco::ArucoDetection2D,
-            crate::modules::aruco::DetectionQuat,
-            crate::modules::aruco::DetectionPoseRotation,
-            crate::modules::aruco::DetectionPose,
-            crate::modules::aruco::DetectionPoseFailureCounts,
-            crate::modules::aruco::DetectionPoseFailureSample,
-            crate::modules::aruco::DetectionPoseCalibrationSummary,
-            crate::modules::aruco::DetectionPoseStats,
-            crate::modules::aruco::DetectionPoseOutput,
-        )?;
-        // Graph pipelines pass calibration via the host bridge; this must be stable + serializable.
-        daedalus::register_daedalus_values!(registry, crate::modules::aruco::detect::CameraCalibration,)?;
-
-        // Container outputs (no separate type key needed).
-        daedalus::register_to_value_serializers!(
-            registry,
-            Vec<crate::modules::aruco::ArucoDetection2D>,
-            Arc<Vec<crate::modules::aruco::ArucoDetection2D>>,
-            Vec<Vec<Point>>,
-            // Used by ArUco internal nodes and tuning graphs.
-            Vec<[Point; 4]>,
-            Arc<Vec<[Point; 4]>>,
-        );
-        // Images: keep a stable, UI-friendly identifier instead of falling back to `rust:<...>`.
-        let img_gray = TypeExpr::opaque("image:gray8");
-        let img_graya = TypeExpr::opaque("image:graya8");
-        let img_rgb = TypeExpr::opaque("image:rgb8");
-        let img_rgba = TypeExpr::opaque("image:rgba8");
-        let img_dynamic = TypeExpr::opaque("image:dynamic");
-        let img_gray_opt = TypeExpr::Optional(Box::new(img_gray.clone()));
-        let img_dynamic_opt = TypeExpr::Optional(Box::new(img_dynamic.clone()));
-
-        typing::register_type::<image::GrayImage>(img_gray.clone());
-        typing::register_type::<image::GrayAlphaImage>(img_graya.clone());
-        typing::register_type::<image::RgbImage>(img_rgb.clone());
-        typing::register_type::<image::RgbaImage>(img_rgba.clone());
-        typing::register_type::<image::DynamicImage>(img_dynamic.clone());
-        typing::register_type::<Option<image::GrayImage>>(img_gray_opt.clone());
-        typing::register_type::<Option<image::DynamicImage>>(img_dynamic_opt.clone());
-        // Treat image flavors as mutually compatible with `image:dynamic`. Runtime coercion is
-        // handled by Daedalus' conversion registry (CPU) and GpuSendable transfers (GPU).
-        registry.register_type_compatibility(img_gray.clone(), img_dynamic.clone());
-        registry.register_type_compatibility(img_dynamic.clone(), img_gray.clone());
-        registry.register_type_compatibility(img_graya.clone(), img_dynamic.clone());
-        registry.register_type_compatibility(img_dynamic.clone(), img_graya.clone());
-        registry.register_type_compatibility(img_rgb.clone(), img_dynamic.clone());
-        registry.register_type_compatibility(img_dynamic.clone(), img_rgb.clone());
-        registry.register_type_compatibility(img_rgba.clone(), img_dynamic.clone());
-        registry.register_type_compatibility(img_dynamic.clone(), img_rgba.clone());
-        // Optional image ports should accept their non-optional counterparts directly.
-        registry.register_type_compatibility(img_dynamic.clone(), img_dynamic_opt);
-        registry.register_type_compatibility(img_gray.clone(), img_gray_opt);
-        typing::register_type::<daedalus::gpu::Compute<image::DynamicImage>>(TypeExpr::opaque("image:dynamic"));
-        typing::register_type::<daedalus::gpu::Compute<image::GrayImage>>(TypeExpr::opaque("image:gray8"));
-
-        // Runtime CPU conversions between image flavors. These are intentionally registered in the
-        // conversion registry (not exposed as nodes) so graphs can focus on the types they want.
-        registry.register_conversion::<DynamicImage, GrayImage>(|img| Some(img.to_luma8()));
-        registry.register_conversion::<DynamicImage, Option<DynamicImage>>(|img| Some(Some(img.clone())));
-        registry.register_conversion::<GrayImage, DynamicImage>(|img| Some(DynamicImage::ImageLuma8(img.clone())));
-        registry.register_conversion::<GrayAlphaImage, DynamicImage>(|img| Some(DynamicImage::ImageLumaA8(img.clone())));
-        registry.register_conversion::<RgbImage, DynamicImage>(|img| Some(DynamicImage::ImageRgb8(img.clone())));
-        registry.register_conversion::<RgbaImage, DynamicImage>(|img| Some(DynamicImage::ImageRgba8(img.clone())));
-        registry.register_conversion::<DynamicImage, GrayAlphaImage>(|img| Some(img.to_luma_alpha8()));
-        registry.register_conversion::<DynamicImage, RgbImage>(|img| Some(img.to_rgb8()));
-        registry.register_conversion::<DynamicImage, RgbaImage>(|img| Some(img.to_rgba8()));
-        registry
-            .registry
-            .register_converter(ConverterBuilder::new("image_gray8_to_dynamic", TypeExpr::opaque("image:gray8"), TypeExpr::opaque("image:dynamic"), Ok).build_boxed())
-            .map_err(|_| "failed to register image:gray8 -> image:dynamic converter")?;
-        registry
-            .registry
-            .register_converter(ConverterBuilder::new("image_dynamic_to_gray8", TypeExpr::opaque("image:dynamic"), TypeExpr::opaque("image:gray8"), Ok).build_boxed())
-            .map_err(|_| "failed to register image:dynamic -> image:gray8 converter")?;
+        crate::daedalus_types::register_cv_host_types(registry)?;
+        crate::daedalus_types::register_image_runtime_types(registry)?;
 
         registry.register_output_mover::<DynamicImage, _>(|img| RuntimeValue::Any(Arc::new(img)));
         registry.register_output_mover::<GrayImage, _>(|img| RuntimeValue::Any(Arc::new(img)));
