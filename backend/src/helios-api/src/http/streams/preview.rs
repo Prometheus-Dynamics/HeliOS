@@ -14,6 +14,7 @@ use tokio::sync::mpsc;
 use tokio::task;
 use tokio::time::Duration;
 use tokio_stream::wrappers::ReceiverStream;
+use utoipa::IntoParams;
 use uuid::Uuid;
 
 use crate::http::AppState;
@@ -27,7 +28,7 @@ use super::types::StreamFormatInfo;
 use super::util::engine_error_body;
 use super::util::fourcc_to_format;
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, IntoParams)]
 pub(crate) struct PreviewSelectionQuery {
     #[serde(default)]
     pub pipeline: Option<Uuid>,
