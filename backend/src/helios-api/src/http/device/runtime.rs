@@ -1,3 +1,4 @@
+use crate::api_observability::{ApiRealtimeDiagnostics, RuntimeBroadcastSnapshot, RuntimeTopicBroadcastSnapshot};
 use axum::{Json, extract::State, http::StatusCode};
 use lib_runtime_policy::{
     HELIOS_API_HARDWARE_READ_MODEL_POLICY, HELIOS_API_LOG_SOURCES_POLICY, HELIOS_API_STARTUP_CACHE_WARM_POLICY, HELIOS_API_STREAMS_POLICY, HELIOS_API_SYSTEM_READ_MODEL_POLICY,
@@ -167,6 +168,34 @@ pub struct CvRuntimeScratchMetricSnapshot {
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct EngineIpcObservabilitySnapshot {
+    pub connected: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_disconnect_ms: Option<u64>,
+    pub request_queue_capacity: usize,
+    pub request_queue_depth: usize,
+    pub request_queue_high_water: usize,
+    pub pending_requests: usize,
+    pub pending_requests_high_water: usize,
+    pub connect_count: u64,
+    pub disconnect_count: u64,
+    pub request_send_timeouts: u64,
+    pub request_send_failures: u64,
+    pub request_timeouts: u64,
+    pub disconnected_pending_requests: u64,
+    pub completed_roundtrips: u64,
+    pub roundtrip_total_ms: u64,
+    pub roundtrip_max_ms: u64,
+    pub unsolicited_events: u64,
+    pub stale_response_drops: u64,
+    pub no_subscriber_event_drops: u64,
+    pub event_subscribers: u64,
+    pub connect_event_subscribers: u64,
+    pub active_streams: usize,
+    pub timeout_scale_ppm: u64,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct DeviceRuntimePoliciesSnapshot {
     pub log_filter: String,
     pub api_tokio: TokioRuntimePolicySnapshot,
@@ -190,6 +219,10 @@ pub struct DeviceRuntimeObservabilitySnapshot {
     pub health: crate::http::health::HealthPayload,
     pub streams: crate::http::health::RuntimeStreamsPayload,
     pub os: super::os_release::OsReleaseInfo,
+    pub engine_ipc: EngineIpcObservabilitySnapshot,
+    pub realtime_updates: RuntimeBroadcastSnapshot,
+    pub api_realtime: ApiRealtimeDiagnostics,
+    pub mjpeg: RuntimeTopicBroadcastSnapshot,
     pub resource_guard: crate::resource_guard::ResourceGuardStatus,
     pub cv_runtime_scratch_high_water: Vec<CvRuntimeScratchMetricSnapshot>,
     pub log_source_count: usize,
@@ -227,6 +260,10 @@ pub async fn runtime(State(state): State<crate::http::AppState>) -> ApiResult<im
         }
     };
     let resource_guard = state.services.runtime.resource_guard().snapshot();
+    let engine_ipc = map_engine_ipc_snapshot(state.engine.observability_snapshot());
+    let realtime_updates = state.updates.snapshot();
+    let api_realtime = state.services.system.realtime_diagnostics().await;
+    let mjpeg = state.services.streams.mjpeg_snapshot().await;
 
     let payload = DeviceRuntimeSnapshot {
         platform: PlatformIdentityPayload { family: platform.family.into(), model: platform.model, architecture: platform.architecture },
@@ -246,6 +283,10 @@ pub async fn runtime(State(state): State<crate::http::AppState>) -> ApiResult<im
             health,
             streams,
             os,
+            engine_ipc,
+            realtime_updates,
+            api_realtime,
+            mjpeg,
             resource_guard,
             cv_runtime_scratch_high_water: lib_cv::runtime_scratch::snapshot_high_water()
                 .into_iter()
@@ -351,6 +392,34 @@ fn map_tokio_runtime_policy(policy: lib_runtime_policy::ResolvedTokioRuntimePoli
         max_blocking_threads: policy.max_blocking_threads,
         thread_stack_bytes: policy.thread_stack_bytes,
         blocking_keep_alive_ms: policy.blocking_keep_alive.map(|value| value.as_millis().min(u64::MAX as u128) as u64),
+    }
+}
+
+fn map_engine_ipc_snapshot(snapshot: crate::ipc::engine::EngineConnectionObservabilitySnapshot) -> EngineIpcObservabilitySnapshot {
+    EngineIpcObservabilitySnapshot {
+        connected: snapshot.connected,
+        last_disconnect_ms: snapshot.last_disconnect_ms,
+        request_queue_capacity: snapshot.request_queue_capacity,
+        request_queue_depth: snapshot.request_queue_depth,
+        request_queue_high_water: snapshot.request_queue_high_water,
+        pending_requests: snapshot.pending_requests,
+        pending_requests_high_water: snapshot.pending_requests_high_water,
+        connect_count: snapshot.connect_count,
+        disconnect_count: snapshot.disconnect_count,
+        request_send_timeouts: snapshot.request_send_timeouts,
+        request_send_failures: snapshot.request_send_failures,
+        request_timeouts: snapshot.request_timeouts,
+        disconnected_pending_requests: snapshot.disconnected_pending_requests,
+        completed_roundtrips: snapshot.completed_roundtrips,
+        roundtrip_total_ms: snapshot.roundtrip_total_ms,
+        roundtrip_max_ms: snapshot.roundtrip_max_ms,
+        unsolicited_events: snapshot.unsolicited_events,
+        stale_response_drops: snapshot.stale_response_drops,
+        no_subscriber_event_drops: snapshot.no_subscriber_event_drops,
+        event_subscribers: snapshot.event_subscribers,
+        connect_event_subscribers: snapshot.connect_event_subscribers,
+        active_streams: snapshot.active_streams,
+        timeout_scale_ppm: snapshot.timeout_scale_ppm,
     }
 }
 

@@ -6,6 +6,7 @@ use tokio::sync::{broadcast, oneshot};
 use tokio::time::{Duration, Instant};
 use tracing::{debug, warn};
 
+use crate::api_observability::RuntimeBroadcastCounters;
 use crate::ipc::IpcHandles;
 use crate::ws::device::{EngineTelemetry, PowerTelemetry};
 
@@ -15,7 +16,7 @@ use super::super::hardware::sample_power_from_peripherals;
 use super::models::{DevicesUpdateReason, SharedDevicesUpdate, SharedProcessesSnapshot};
 use super::reducers::{broadcast_devices_update, build_shared_process_snapshot, reason_for_update_kind, stream_fingerprint, usb_fingerprint};
 
-pub(super) async fn run_devices_updates_sampler(tx: broadcast::Sender<Arc<SharedDevicesUpdate>>, state: Option<Weak<IpcHandles>>) {
+pub(super) async fn run_devices_updates_sampler(tx: broadcast::Sender<Arc<SharedDevicesUpdate>>, state: Option<Weak<IpcHandles>>, metrics: Arc<RuntimeBroadcastCounters>) {
     const MIN_UPDATE_GAP_MS: u64 = 250;
 
     let Some(state) = state.and_then(|weak| weak.upgrade()) else {
@@ -38,6 +39,7 @@ pub(super) async fn run_devices_updates_sampler(tx: broadcast::Sender<Arc<Shared
         let receiver_count = tx.receiver_count();
         saw_receiver |= receiver_count > 0;
         if saw_receiver && receiver_count == 0 {
+            metrics.record_idle_shutdown();
             break;
         }
 
@@ -70,7 +72,9 @@ pub(super) async fn run_devices_updates_sampler(tx: broadcast::Sender<Arc<Shared
                     Ok(update) => {
                         pending.insert(reason_for_update_kind(update.kind.as_str()));
                     }
-                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                        state.updates.record_lagged(skipped);
+                        metrics.record_lagged(skipped);
                         pending.insert(DevicesUpdateReason::Api);
                     }
                     Err(broadcast::error::RecvError::Closed) => break,
@@ -86,12 +90,19 @@ pub(super) async fn run_devices_updates_sampler(tx: broadcast::Sender<Arc<Shared
     }
 }
 
-pub(super) async fn run_telemetry_sampler(tx: broadcast::Sender<Arc<str>>, latest: Arc<StdMutex<Option<Arc<str>>>>, state: Option<Weak<IpcHandles>>, collector: Arc<StdMutex<SystemCollector>>) {
+pub(super) async fn run_telemetry_sampler(
+    tx: broadcast::Sender<Arc<str>>,
+    latest: Arc<StdMutex<Option<Arc<str>>>>,
+    state: Option<Weak<IpcHandles>>,
+    collector: Arc<StdMutex<SystemCollector>>,
+    metrics: Arc<RuntimeBroadcastCounters>,
+) {
     let sample_interval = Duration::from_millis(HELIOS_API_SYSTEM_READ_MODEL_POLICY.resolve().telemetry_sample_interval_ms);
 
     let last_power: Arc<StdMutex<Option<PowerTelemetry>>> = Arc::new(StdMutex::new(None));
 
     let power_state = state.clone();
+    let power_metrics = metrics.clone();
     let power_task = {
         let tx = tx.clone();
         let last_power = last_power.clone();
@@ -105,6 +116,7 @@ pub(super) async fn run_telemetry_sampler(tx: broadcast::Sender<Arc<str>>, lates
                 let receiver_count = tx.receiver_count();
                 saw_receiver |= receiver_count > 0;
                 if saw_receiver && receiver_count == 0 {
+                    power_metrics.record_idle_shutdown();
                     break;
                 }
 
@@ -123,8 +135,9 @@ pub(super) async fn run_telemetry_sampler(tx: broadcast::Sender<Arc<str>>, lates
     let fallback_state = state.clone();
     let fallback_last_power = last_power.clone();
     let fallback_collector = collector.clone();
+    let fallback_metrics = metrics.clone();
     match spawn_api_sampler_thread("helios-api-telemetry", move || {
-        run_telemetry_sys_sampler(tx, latest, state, last_power, collector, sample_interval);
+        run_telemetry_sys_sampler(tx, latest, state, last_power, collector, sample_interval, metrics);
         let _ = sys_done_tx.send(());
     }) {
         Ok(_join) => {
@@ -135,7 +148,10 @@ pub(super) async fn run_telemetry_sampler(tx: broadcast::Sender<Arc<str>>, lates
                 error = %err,
                 "failed to spawn dedicated telemetry sampler thread; falling back to Tokio blocking pool"
             );
-            let _ = tokio::task::spawn_blocking(move || run_telemetry_sys_sampler(fallback_tx, fallback_latest, fallback_state, fallback_last_power, fallback_collector, sample_interval)).await;
+            let _ = tokio::task::spawn_blocking(move || {
+                run_telemetry_sys_sampler(fallback_tx, fallback_latest, fallback_state, fallback_last_power, fallback_collector, sample_interval, fallback_metrics)
+            })
+            .await;
         }
     }
     power_task.abort();
@@ -148,6 +164,7 @@ pub(super) fn run_telemetry_sys_sampler(
     last_power: Arc<StdMutex<Option<PowerTelemetry>>>,
     collector: Arc<StdMutex<SystemCollector>>,
     sample_interval: Duration,
+    metrics: Arc<RuntimeBroadcastCounters>,
 ) {
     let soft_budget = (sample_interval / 5).max(Duration::from_millis(50));
     let hard_budget = sample_interval + Duration::from_millis(50);
@@ -162,6 +179,7 @@ pub(super) fn run_telemetry_sys_sampler(
         let receiver_count = tx.receiver_count();
         saw_receiver |= receiver_count > 0;
         if saw_receiver && receiver_count == 0 {
+            metrics.record_idle_shutdown();
             break;
         }
 
@@ -215,11 +233,15 @@ pub(super) fn run_telemetry_sys_sampler(
         if let Ok(mut guard) = latest.lock() {
             *guard = Some(payload.clone());
         }
-        let _ = tx.send(payload);
+        if tx.send(payload).is_ok() {
+            metrics.record_sent();
+        } else {
+            metrics.record_no_receiver_drop();
+        }
     }
 }
 
-pub(super) fn run_processes_sampler(tx: broadcast::Sender<Arc<SharedProcessesSnapshot>>, latest: Arc<StdMutex<Option<Arc<SharedProcessesSnapshot>>>>) {
+pub(super) fn run_processes_sampler(tx: broadcast::Sender<Arc<SharedProcessesSnapshot>>, latest: Arc<StdMutex<Option<Arc<SharedProcessesSnapshot>>>>, metrics: Arc<RuntimeBroadcastCounters>) {
     let sample_interval = Duration::from_millis(HELIOS_API_SYSTEM_READ_MODEL_POLICY.resolve().processes_sample_interval_ms);
 
     let mut sys = sysinfo::System::new_all();
@@ -231,6 +253,7 @@ pub(super) fn run_processes_sampler(tx: broadcast::Sender<Arc<SharedProcessesSna
         let receiver_count = tx.receiver_count();
         saw_receiver |= receiver_count > 0;
         if saw_receiver && receiver_count == 0 {
+            metrics.record_idle_shutdown();
             break;
         }
 
@@ -246,7 +269,11 @@ pub(super) fn run_processes_sampler(tx: broadcast::Sender<Arc<SharedProcessesSna
         if let Ok(mut guard) = latest.lock() {
             *guard = Some(snapshot.clone());
         }
-        let _ = tx.send(snapshot);
+        if tx.send(snapshot).is_ok() {
+            metrics.record_sent();
+        } else {
+            metrics.record_no_receiver_drop();
+        }
 
         next_tick = sample_interval.saturating_sub(sampling_started.elapsed());
     }

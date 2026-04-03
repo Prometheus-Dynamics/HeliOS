@@ -7,6 +7,7 @@ use tokio::sync::{Mutex, RwLock, broadcast};
 use tokio::task::JoinHandle;
 use tokio::time::{Duration, Instant};
 
+use crate::api_observability::{RuntimeBroadcastCounters, RuntimeTopicBroadcastSnapshot};
 use crate::ipc::IpcHandles;
 
 use super::state::SystemReadModelState;
@@ -47,6 +48,7 @@ pub(super) struct StreamMetricsHub {
     topics: Arc<RwLock<BTreeMap<uuid::Uuid, Arc<StreamMetricsTopic>>>>,
     task: Mutex<Option<JoinHandle<()>>>,
     state: RwLock<Option<Weak<IpcHandles>>>,
+    metrics: Arc<RuntimeBroadcastCounters>,
 }
 
 #[derive(Debug, Clone)]
@@ -61,11 +63,13 @@ struct StreamOutputsTopic {
     latest_ports: Arc<RwLock<Option<Arc<SharedStreamOutputsPortsSnapshot>>>>,
     clients: Arc<RwLock<BTreeMap<uuid::Uuid, StreamOutputsClientConfig>>>,
     task: Mutex<Option<JoinHandle<()>>>,
+    metrics: Arc<RuntimeBroadcastCounters>,
 }
 
 pub(super) struct StreamOutputsHub {
     topics: Arc<RwLock<BTreeMap<uuid::Uuid, Arc<StreamOutputsTopic>>>>,
     state: RwLock<Option<Weak<IpcHandles>>>,
+    metrics: Arc<RuntimeBroadcastCounters>,
 }
 
 impl StreamMetricsTopic {
@@ -76,9 +80,9 @@ impl StreamMetricsTopic {
 }
 
 impl StreamOutputsTopic {
-    fn new() -> Self {
+    fn new(metrics: Arc<RuntimeBroadcastCounters>) -> Self {
         let (tx, _) = broadcast::channel(64);
-        Self { tx, latest_ports: Arc::new(RwLock::new(None)), clients: Arc::new(RwLock::new(BTreeMap::new())), task: Mutex::new(None) }
+        Self { tx, latest_ports: Arc::new(RwLock::new(None)), clients: Arc::new(RwLock::new(BTreeMap::new())), task: Mutex::new(None), metrics }
     }
 
     async fn ensure_task(&self, stream_id: uuid::Uuid, state: Option<Weak<IpcHandles>>) {
@@ -88,7 +92,8 @@ impl StreamOutputsTopic {
             let tx = self.tx.clone();
             let latest_ports = self.latest_ports.clone();
             let clients = self.clients.clone();
-            *guard = Some(tokio::spawn(run_stream_outputs_sampler(stream_id, tx, latest_ports, clients, state)));
+            let metrics = Arc::clone(&self.metrics);
+            *guard = Some(tokio::spawn(run_stream_outputs_sampler(stream_id, tx, latest_ports, clients, state, metrics)));
         }
     }
 
@@ -106,14 +111,18 @@ impl StreamOutputsTopic {
         if guard.is_none() {
             *guard = Some(snapshot.clone());
         }
-        let _ = self.tx.send(Arc::new(SharedStreamOutputsEvent::Ports((*snapshot).clone())));
+        if self.tx.send(Arc::new(SharedStreamOutputsEvent::Ports((*snapshot).clone()))).is_ok() {
+            self.metrics.record_sent();
+        } else {
+            self.metrics.record_no_receiver_drop();
+        }
         Ok(snapshot)
     }
 }
 
 impl StreamMetricsHub {
     pub(super) fn new() -> Self {
-        Self { topics: Arc::new(RwLock::new(BTreeMap::new())), task: Mutex::new(None), state: RwLock::new(None) }
+        Self { topics: Arc::new(RwLock::new(BTreeMap::new())), task: Mutex::new(None), state: RwLock::new(None), metrics: Arc::new(RuntimeBroadcastCounters::default()) }
     }
 
     pub(super) async fn set_state(&self, state: &Arc<IpcHandles>) {
@@ -137,7 +146,8 @@ impl StreamMetricsHub {
         if needs_spawn {
             let topics = self.topics.clone();
             let state = self.state.read().await.clone();
-            *guard = Some(tokio::spawn(run_stream_metrics_sampler(topics, state)));
+            let metrics = self.metrics.clone();
+            *guard = Some(tokio::spawn(run_stream_metrics_sampler(topics, state, metrics)));
         }
     }
 
@@ -151,6 +161,11 @@ impl StreamMetricsHub {
         let topics = guard.len() as u64;
         let subscribers = guard.values().map(|topic| topic.tx.receiver_count() as u64).sum();
         (topics, subscribers)
+    }
+
+    pub(super) async fn snapshot(&self) -> RuntimeTopicBroadcastSnapshot {
+        let (topics, subscribers) = self.stats().await;
+        self.metrics.snapshot_topics(topics, subscribers)
     }
 
     pub(super) async fn unsubscribe(&self, stream_id: uuid::Uuid) {
@@ -184,7 +199,11 @@ impl StreamMetricsHub {
         if guard.is_none() {
             *guard = Some(snapshot.clone());
         }
-        let _ = topic.tx.send(snapshot);
+        if topic.tx.send(snapshot).is_ok() {
+            self.metrics.record_sent();
+        } else {
+            self.metrics.record_no_receiver_drop();
+        }
         Ok(())
     }
 
@@ -195,7 +214,7 @@ impl StreamMetricsHub {
 
 impl StreamOutputsHub {
     pub(super) fn new() -> Self {
-        Self { topics: Arc::new(RwLock::new(BTreeMap::new())), state: RwLock::new(None) }
+        Self { topics: Arc::new(RwLock::new(BTreeMap::new())), state: RwLock::new(None), metrics: Arc::new(RuntimeBroadcastCounters::default()) }
     }
 
     pub(super) async fn set_state(&self, state: &Arc<IpcHandles>) {
@@ -270,7 +289,8 @@ impl StreamOutputsHub {
 
     async fn topic(&self, stream_id: uuid::Uuid) -> Arc<StreamOutputsTopic> {
         let mut guard = self.topics.write().await;
-        guard.entry(stream_id).or_insert_with(|| Arc::new(StreamOutputsTopic::new())).clone()
+        let metrics = self.metrics.clone();
+        guard.entry(stream_id).or_insert_with(|| Arc::new(StreamOutputsTopic::new(metrics))).clone()
     }
 
     async fn find_topic(&self, stream_id: uuid::Uuid) -> Option<Arc<StreamOutputsTopic>> {
@@ -285,6 +305,11 @@ impl StreamOutputsHub {
             subscribers = subscribers.saturating_add(topic.clients.read().await.len() as u64);
         }
         (topic_count, subscribers)
+    }
+
+    pub(super) async fn snapshot(&self) -> RuntimeTopicBroadcastSnapshot {
+        let (topics, subscribers) = self.stats().await;
+        self.metrics.snapshot_topics(topics, subscribers)
     }
 }
 
@@ -327,7 +352,7 @@ impl SystemReadModelState {
     }
 }
 
-async fn run_stream_metrics_sampler(topics: Arc<RwLock<BTreeMap<uuid::Uuid, Arc<StreamMetricsTopic>>>>, state: Option<Weak<IpcHandles>>) {
+async fn run_stream_metrics_sampler(topics: Arc<RwLock<BTreeMap<uuid::Uuid, Arc<StreamMetricsTopic>>>>, state: Option<Weak<IpcHandles>>, metrics: Arc<RuntimeBroadcastCounters>) {
     let Some(state) = state.and_then(|weak| weak.upgrade()) else {
         return;
     };
@@ -339,20 +364,28 @@ async fn run_stream_metrics_sampler(topics: Arc<RwLock<BTreeMap<uuid::Uuid, Arc<
         let has_receivers = stream_metrics_has_receivers(&topics).await;
         saw_receiver |= has_receivers;
         if saw_receiver && !has_receivers {
+            metrics.record_idle_shutdown();
             break;
         }
 
         match events.recv().await {
-            Ok(EngineEvent::Metrics { stream_id, metrics, .. }) | Ok(EngineEvent::MetricsUpdate { stream_id, metrics }) => {
+            Ok(EngineEvent::Metrics { stream_id, metrics: stream_metrics, .. }) | Ok(EngineEvent::MetricsUpdate { stream_id, metrics: stream_metrics }) => {
                 let Some(topic) = stream_metrics_topic(&topics, stream_id).await else {
                     continue;
                 };
-                let snapshot = Arc::new(build_stream_metrics_snapshot(stream_id, metrics));
+                let snapshot = Arc::new(build_stream_metrics_snapshot(stream_id, stream_metrics));
                 *topic.latest.write().await = Some(snapshot.clone());
-                let _ = topic.tx.send(snapshot);
+                if topic.tx.send(snapshot).is_ok() {
+                    metrics.record_sent();
+                } else {
+                    metrics.record_no_receiver_drop();
+                }
             }
             Ok(_) => {}
-            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                metrics.record_lagged(skipped);
+                continue;
+            }
             Err(broadcast::error::RecvError::Closed) => break,
         }
     }
@@ -364,6 +397,7 @@ async fn run_stream_outputs_sampler(
     latest_ports: Arc<RwLock<Option<Arc<SharedStreamOutputsPortsSnapshot>>>>,
     clients: Arc<RwLock<BTreeMap<uuid::Uuid, StreamOutputsClientConfig>>>,
     state: Option<Weak<IpcHandles>>,
+    metrics: Arc<RuntimeBroadcastCounters>,
 ) {
     let Some(state) = state.and_then(|weak| weak.upgrade()) else {
         return;
@@ -384,6 +418,7 @@ async fn run_stream_outputs_sampler(
         let has_activity = receiver_count > 0 || !client_snapshot.is_empty();
         saw_receiver |= has_activity;
         if saw_receiver && !has_activity {
+            metrics.record_idle_shutdown();
             break;
         }
 
@@ -400,7 +435,11 @@ async fn run_stream_outputs_sampler(
                 let changed = latest_ports.read().await.as_ref().map(|current| current.outputs != snapshot.outputs).unwrap_or(true);
                 *latest_ports.write().await = Some(snapshot.clone());
                 if changed {
-                    let _ = tx.send(Arc::new(SharedStreamOutputsEvent::Ports((*snapshot).clone())));
+                    if tx.send(Arc::new(SharedStreamOutputsEvent::Ports((*snapshot).clone()))).is_ok() {
+                        metrics.record_sent();
+                    } else {
+                        metrics.record_no_receiver_drop();
+                    }
                 }
             }
             last_ports_refresh = now;
@@ -412,7 +451,11 @@ async fn run_stream_outputs_sampler(
                 continue;
             }
             let sample = fetch_stream_output_sample(&state, stream_id, port.clone()).await;
-            let _ = tx.send(Arc::new(SharedStreamOutputsEvent::Sample(sample)));
+            if tx.send(Arc::new(SharedStreamOutputsEvent::Sample(sample))).is_ok() {
+                metrics.record_sent();
+            } else {
+                metrics.record_no_receiver_drop();
+            }
             next_samples.insert(port.clone(), now + *interval);
         }
     }

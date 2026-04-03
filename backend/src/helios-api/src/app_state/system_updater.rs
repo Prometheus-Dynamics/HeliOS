@@ -4,7 +4,7 @@ use tokio::process::Child;
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
-use crate::api_observability::{ApiCacheMetric, ApiRealtimeMetrics};
+use crate::api_observability::{ApiCacheMetric, ApiRealtimeDiagnostics, ApiRealtimeMetrics};
 use crate::ipc::updater::UpdaterConnection;
 use crate::logs::LogSource;
 use crate::system_read_model::{ReadModelSnapshot, SharedDevicesUpdate, SharedProcessesSnapshot, SharedStreamMetricsSnapshot, SharedStreamOutputsEvent, SharedStreamOutputsPortsSnapshot};
@@ -108,6 +108,10 @@ impl SystemReadModelService {
 
     pub async fn realtime_metrics(&self) -> ApiRealtimeMetrics {
         self.state.realtime_metrics().await
+    }
+
+    pub async fn realtime_diagnostics(&self) -> ApiRealtimeDiagnostics {
+        self.state.realtime_diagnostics().await
     }
 }
 

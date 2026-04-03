@@ -1,4 +1,4 @@
-use super::{EngineClient, EngineClientConfig, EngineConnection, EngineRequest, EngineSession, disconnected_error, dispatcher::run_engine_dispatcher, mark_disconnected};
+use super::{EngineClient, EngineClientConfig, EngineConnection, EngineConnectionMetrics, EngineRequest, EngineSession, disconnected_error, dispatcher::run_engine_dispatcher, mark_disconnected};
 use crate::ipc::{
     engine::timeouts::{DEV_ENGINE_SOCKET, ENGINE_SOCKET, engine_request_queue_size, timeout_scale_for_streams},
     journal_path,
@@ -105,35 +105,51 @@ fn try_connect_lazy(socket: &Path, journal_path: PathBuf) -> Result<EngineConnec
 }
 
 fn spawn_engine_connection(client: Arc<EngineClient>, stream_count: usize, connected_initial: bool) -> EngineConnection {
-    let (tx, rx) = mpsc::channel(engine_request_queue_size(stream_count));
+    let request_queue_capacity = engine_request_queue_size(stream_count);
+    let (tx, rx) = mpsc::channel(request_queue_capacity);
     let (events, _) = broadcast::channel(64);
     let (connect_events, _) = broadcast::channel(16);
     let connected = Arc::new(AtomicBool::new(connected_initial));
     let last_disconnect_ms = Arc::new(AtomicU64::new(0));
     let timeout_scale_ppm = Arc::new(AtomicU64::new(timeout_scale_for_streams(stream_count)));
     let active_streams = Arc::new(AtomicUsize::new(stream_count));
+    let metrics = Arc::new(EngineConnectionMetrics::new(request_queue_capacity));
     if !connected_initial {
         mark_disconnected(&connected, &last_disconnect_ms);
     }
-    tokio::spawn(run_engine_dispatcher(client.clone(), rx, events.clone(), connect_events.clone(), connected.clone(), last_disconnect_ms.clone(), timeout_scale_ppm.clone(), active_streams.clone()));
-    EngineConnection { requests: tx, events, connect_events, connected, last_disconnect_ms, timeout_scale_ppm, active_streams }
+    tokio::spawn(run_engine_dispatcher(
+        client.clone(),
+        rx,
+        events.clone(),
+        connect_events.clone(),
+        connected.clone(),
+        last_disconnect_ms.clone(),
+        timeout_scale_ppm.clone(),
+        active_streams.clone(),
+        metrics.clone(),
+    ));
+    EngineConnection { requests: tx, request_queue_capacity, events, connect_events, connected, last_disconnect_ms, timeout_scale_ppm, active_streams, metrics }
 }
 
 fn spawn_unavailable_engine() -> EngineConnection {
-    let (tx, mut rx) = mpsc::channel::<EngineRequest>(engine_request_queue_size(0));
+    let request_queue_capacity = engine_request_queue_size(0);
+    let (tx, mut rx) = mpsc::channel::<EngineRequest>(request_queue_capacity);
     let (events, _) = broadcast::channel(64);
     let (connect_events, _) = broadcast::channel(16);
     let connected = Arc::new(AtomicBool::new(false));
     let last_disconnect_ms = Arc::new(AtomicU64::new(0));
     let timeout_scale_ppm = Arc::new(AtomicU64::new(timeout_scale_for_streams(0)));
     let active_streams = Arc::new(AtomicUsize::new(0));
+    let metrics = Arc::new(EngineConnectionMetrics::new(request_queue_capacity));
     mark_disconnected(&connected, &last_disconnect_ms);
+    let task_metrics = metrics.clone();
     tokio::spawn(async move {
         while let Some(req) = rx.recv().await {
+            task_metrics.record_queue_dequeue();
             let _ = req.respond_to.send(Err(disconnected_error()));
         }
     });
-    EngineConnection { requests: tx, events, connect_events, connected, last_disconnect_ms, timeout_scale_ppm, active_streams }
+    EngineConnection { requests: tx, request_queue_capacity, events, connect_events, connected, last_disconnect_ms, timeout_scale_ppm, active_streams, metrics }
 }
 
 fn resolve_engine_sockets() -> Vec<PathBuf> {

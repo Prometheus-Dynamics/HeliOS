@@ -1,4 +1,4 @@
-use super::{EngineClient, EngineRequest, EngineSession, ExpectedEvent, JournalMode, disconnected_error, mark_disconnected};
+use super::{EngineClient, EngineConnectionMetrics, EngineRequest, EngineSession, ExpectedEvent, JournalMode, disconnected_error, mark_disconnected};
 use crate::ipc::engine::timeouts::{ENGINE_RECONNECT_INITIAL, ENGINE_RECONNECT_MAX, engine_command_send_timeout, scale_timeout, timeout_scale_for_streams};
 use helios_engine::ipc::{EngineCommand, EngineEvent};
 use lib_ipc::journal::JournalEntry;
@@ -25,6 +25,7 @@ pub(super) async fn run_engine_dispatcher(
     last_disconnect_ms: Arc<AtomicU64>,
     timeout_scale_ppm: Arc<AtomicU64>,
     active_streams: Arc<AtomicUsize>,
+    metrics: Arc<EngineConnectionMetrics>,
 ) {
     let mut pending: HashMap<CommandId, EngineRequest> = HashMap::new();
     let mut journal_order: VecDeque<(CommandId, JournalEntry<EngineCommand>)> = VecDeque::new();
@@ -42,10 +43,11 @@ pub(super) async fn run_engine_dispatcher(
                     backoff = ENGINE_RECONNECT_INITIAL;
                     let _ = connect_events.send(());
                     connected.store(true, Ordering::Relaxed);
+                    metrics.record_connect();
                 }
                 Ok(Err(err)) => {
                     error!(%err, "engine handshake failed, will retry");
-                    flush_pending_disconnect(&mut pending, &mut journal_order, &mut completed_journal_ids, client.journal());
+                    flush_pending_disconnect(&mut pending, &mut journal_order, &mut completed_journal_ids, client.journal(), &metrics, false);
                     mark_disconnected(&connected, &last_disconnect_ms);
                     sleep(backoff).await;
                     backoff = (backoff * 2).min(ENGINE_RECONNECT_MAX);
@@ -53,7 +55,7 @@ pub(super) async fn run_engine_dispatcher(
                 }
                 Err(_) => {
                     error!("engine handshake timed out, will retry");
-                    flush_pending_disconnect(&mut pending, &mut journal_order, &mut completed_journal_ids, client.journal());
+                    flush_pending_disconnect(&mut pending, &mut journal_order, &mut completed_journal_ids, client.journal(), &metrics, false);
                     mark_disconnected(&connected, &last_disconnect_ms);
                     sleep(backoff).await;
                     backoff = (backoff * 2).min(ENGINE_RECONNECT_MAX);
@@ -73,6 +75,7 @@ pub(super) async fn run_engine_dispatcher(
             maybe_request = rx.recv() => {
                 match maybe_request {
                     Some(request) => {
+                        metrics.record_queue_dequeue();
                         let mut disconnect = false;
                         if let Some(sess) = session.as_mut() {
                             let send_timeout = scale_timeout(
@@ -97,6 +100,7 @@ pub(super) async fn run_engine_dispatcher(
                                         journal_order.push_back((request.command_id, entry));
                                     }
                                     pending.insert(request.command_id, request);
+                                    metrics.set_pending_len(pending.len());
                                 }
                                 Ok(Err(err)) => {
                                     let _ = request.respond_to.send(Err(err));
@@ -134,6 +138,8 @@ pub(super) async fn run_engine_dispatcher(
                                 &mut journal_order,
                                 &mut completed_journal_ids,
                                 client.journal(),
+                                &metrics,
+                                true,
                             );
                             session = None;
                             mark_disconnected(&connected, &last_disconnect_ms);
@@ -162,6 +168,8 @@ pub(super) async fn run_engine_dispatcher(
                             &mut journal_order,
                             &mut completed_journal_ids,
                             client.journal(),
+                            &metrics,
+                            true,
                         );
                         session = None;
                         mark_disconnected(&connected, &last_disconnect_ms);
@@ -174,6 +182,8 @@ pub(super) async fn run_engine_dispatcher(
                             &mut journal_order,
                             &mut completed_journal_ids,
                             client.journal(),
+                            &metrics,
+                            true,
                         );
                         session = None;
                         mark_disconnected(&connected, &last_disconnect_ms);
@@ -186,6 +196,7 @@ pub(super) async fn run_engine_dispatcher(
                     &mut journal_order,
                     &mut completed_journal_ids,
                     client.journal(),
+                    &metrics,
                 );
 
                 update_scale_from_event(&event, &timeout_scale_ppm, &active_streams);
@@ -202,6 +213,7 @@ pub(super) async fn run_engine_dispatcher(
                         pending.insert(command_id, req);
                         delivered = true;
                     } else if req.expected.matches(&event) {
+                        metrics.record_roundtrip(req.issued_at.elapsed());
                         let _ = req.respond_to.send(Ok(event.clone()));
                         retire_journal_entry(
                             command_id,
@@ -209,6 +221,7 @@ pub(super) async fn run_engine_dispatcher(
                             &mut completed_journal_ids,
                             client.journal(),
                         );
+                        metrics.set_pending_len(pending.len());
                         delivered = true;
                     } else {
                         if !matches!(event, EngineEvent::Ack { .. }) {
@@ -228,6 +241,7 @@ pub(super) async fn run_engine_dispatcher(
                         let id = candidates.pop().unwrap();
                         if let Some(req) = pending.remove(&id) {
                             if req.expected.matches(&event) {
+                                metrics.record_roundtrip(req.issued_at.elapsed());
                                 let _ = req.respond_to.send(Ok(event.clone()));
                                 retire_journal_entry(
                                     id,
@@ -235,6 +249,7 @@ pub(super) async fn run_engine_dispatcher(
                                     &mut completed_journal_ids,
                                     client.journal(),
                                 );
+                                metrics.set_pending_len(pending.len());
                                 delivered = true;
                             } else {
                                 pending.insert(id, req);
@@ -247,10 +262,16 @@ pub(super) async fn run_engine_dispatcher(
 
                 if !delivered {
                     if events.receiver_count() > 0 {
-                        let _ = events.send(event.clone());
+                        if events.send(event.clone()).is_ok() {
+                            metrics.record_unsolicited_event();
+                        } else {
+                            metrics.record_no_subscriber_event_drop();
+                        }
                     } else if event.command_id().is_some() {
+                        metrics.record_stale_response_drop();
                         debug!(?event, "dropping stale engine response");
                     } else if !matches!(event, EngineEvent::MetricsUpdate { .. }) {
+                        metrics.record_no_subscriber_event_drop();
                         warn!(?event, "received unsolicited engine event; no subscribers");
                     }
                 }
@@ -267,6 +288,7 @@ pub(super) async fn run_engine_dispatcher(
                     &mut journal_order,
                     &mut completed_journal_ids,
                     client.journal(),
+                    &metrics,
                 );
             }
         }
@@ -314,15 +336,18 @@ fn expire_timeouts(
     journal_order: &mut VecDeque<(CommandId, JournalEntry<EngineCommand>)>,
     completed_journal_ids: &mut HashSet<CommandId>,
     journal: &lib_ipc::journal::JournalWriter<EngineCommand>,
+    metrics: &EngineConnectionMetrics,
 ) {
     let now = Instant::now();
     let expired: Vec<CommandId> = pending.iter().filter_map(|(id, req)| (req.deadline <= now).then_some(*id)).collect();
+    metrics.record_request_timeout(expired.len());
     for id in expired {
         if let Some(req) = pending.remove(&id) {
             let _ = req.respond_to.send(Err(lib_ipc::client::ClientTransportError::Io(io::Error::new(io::ErrorKind::TimedOut, format!("{} timed out waiting for engine event", req.label)))));
             retire_journal_entry(id, journal_order, completed_journal_ids, journal);
         }
     }
+    metrics.set_pending_len(pending.len());
 }
 
 fn flush_pending_disconnect(
@@ -330,8 +355,15 @@ fn flush_pending_disconnect(
     journal_order: &mut VecDeque<(CommandId, JournalEntry<EngineCommand>)>,
     completed_journal_ids: &mut HashSet<CommandId>,
     journal: &lib_ipc::journal::JournalWriter<EngineCommand>,
+    metrics: &EngineConnectionMetrics,
+    count_disconnect: bool,
 ) {
     let drained: Vec<EngineRequest> = pending.drain().map(|(_, req)| req).collect();
+    if count_disconnect {
+        metrics.record_disconnect(drained.len());
+    } else {
+        metrics.set_pending_len(0);
+    }
     for req in drained {
         let command_id = req.command_id;
         let _ = req.respond_to.send(Err(disconnected_error()));

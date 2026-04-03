@@ -14,6 +14,7 @@ use tokio::time::Duration;
 use tracing::warn;
 use uuid::Uuid;
 
+use crate::api_observability::{RuntimeBroadcastCounters, RuntimeTopicBroadcastSnapshot};
 use crate::http::AppState;
 use helios_engine::ipc::EngineErrorCode;
 use helios_engine::stream::{read_latest_frame_with_header_if_newer_than, read_latest_header, touch_stream_preview};
@@ -23,13 +24,19 @@ use super::util::engine_error_body;
 #[derive(Default)]
 pub(crate) struct MjpegFeedsState {
     feeds: tokio::sync::Mutex<HashMap<Uuid, broadcast::Sender<Bytes>>>,
+    metrics: Arc<RuntimeBroadcastCounters>,
+}
+
+pub(crate) struct MjpegFeedSubscription {
+    rx: broadcast::Receiver<Bytes>,
+    metrics: Arc<RuntimeBroadcastCounters>,
 }
 
 impl MjpegFeedsState {
-    pub(crate) async fn subscribe(self: Arc<Self>, stream_id: Uuid) -> broadcast::Receiver<Bytes> {
+    pub(crate) async fn subscribe(self: Arc<Self>, stream_id: Uuid) -> MjpegFeedSubscription {
         let mut feeds = self.feeds.lock().await;
         if let Some(sender) = feeds.get(&stream_id) {
-            return sender.subscribe();
+            return MjpegFeedSubscription { rx: sender.subscribe(), metrics: self.metrics.clone() };
         }
 
         let (sender, rx) = broadcast::channel(8);
@@ -37,12 +44,19 @@ impl MjpegFeedsState {
         drop(feeds);
 
         tokio::spawn(run_mjpeg_feed(self.clone(), stream_id, sender));
-        rx
+        MjpegFeedSubscription { rx, metrics: self.metrics.clone() }
     }
 
     async fn remove(&self, stream_id: Uuid) {
         let mut feeds = self.feeds.lock().await;
         feeds.remove(&stream_id);
+    }
+
+    pub(crate) async fn snapshot(&self) -> RuntimeTopicBroadcastSnapshot {
+        let feeds = self.feeds.lock().await;
+        let topics = feeds.len() as u64;
+        let subscribers = feeds.values().map(|sender| sender.receiver_count() as u64).sum();
+        self.metrics.snapshot_topics(topics, subscribers)
     }
 }
 
@@ -110,12 +124,15 @@ pub(crate) async fn mjpeg_stream(state: AppState, id: Uuid) -> Response {
         .unwrap()
 }
 
-async fn recv_next_frame(rx: &mut broadcast::Receiver<Bytes>) -> Result<Bytes, Response> {
+async fn recv_next_frame(rx: &mut MjpegFeedSubscription) -> Result<Bytes, Response> {
     loop {
-        match rx.recv().await {
+        match rx.rx.recv().await {
             Ok(bytes) if !bytes.is_empty() => return Ok(bytes),
             Ok(_) => continue,
-            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                rx.metrics.record_lagged(skipped);
+                continue;
+            }
             Err(broadcast::error::RecvError::Closed) => {
                 return Err((StatusCode::NOT_FOUND, Json(engine_error_body(Some(EngineErrorCode::NotFound), "mjpeg stream closed"))).into_response());
             }
@@ -124,9 +141,10 @@ async fn recv_next_frame(rx: &mut broadcast::Receiver<Bytes>) -> Result<Bytes, R
 }
 
 async fn run_mjpeg_feed(feeds: Arc<MjpegFeedsState>, stream_id: Uuid, sender: broadcast::Sender<Bytes>) {
+    let metrics = feeds.metrics.clone();
     let poll = mjpeg_poll();
     let sender_for_loop = sender.clone();
-    let loop_result = tokio::task::spawn_blocking(move || run_mjpeg_loop(stream_id, sender_for_loop, poll)).await;
+    let loop_result = tokio::task::spawn_blocking(move || run_mjpeg_loop(stream_id, sender_for_loop, poll, metrics)).await;
     if let Err(err) = loop_result {
         warn!(stream_id = %stream_id, error = %err, "mjpeg feed task panicked");
     }
@@ -134,12 +152,14 @@ async fn run_mjpeg_feed(feeds: Arc<MjpegFeedsState>, stream_id: Uuid, sender: br
     feeds.remove(stream_id).await;
 }
 
-fn run_mjpeg_loop(stream_id: Uuid, sender: broadcast::Sender<Bytes>, poll: Duration) {
+fn run_mjpeg_loop(stream_id: Uuid, sender: broadcast::Sender<Bytes>, poll: Duration, metrics: Arc<RuntimeBroadcastCounters>) {
     let outage = mjpeg_outage();
     let mut first_unavailable_at: Option<std::time::Instant> = None;
     let mut last_touch = std::time::Instant::now().checked_sub(Duration::from_secs(10)).unwrap_or_else(std::time::Instant::now);
     let mut last_seq = 0u64;
+    let mut saw_receiver = sender.receiver_count() > 0;
     while sender.receiver_count() > 0 {
+        saw_receiver |= sender.receiver_count() > 0;
         if last_touch.elapsed() >= Duration::from_millis(500) {
             // Keep the preview heartbeat alive so the engine continues producing preview frames.
             let _ = touch_stream_preview(stream_id);
@@ -206,7 +226,15 @@ fn run_mjpeg_loop(stream_id: Uuid, sender: broadcast::Sender<Bytes>, poll: Durat
         last_seq = frame_header.seq;
 
         // Send the raw JPEG bytes; the HTTP body wraps them with multipart boundaries per-client.
-        let _ = sender.send(Bytes::from(bytes));
+        if sender.send(Bytes::from(bytes)).is_ok() {
+            metrics.record_sent();
+        } else {
+            metrics.record_no_receiver_drop();
+        }
+    }
+
+    if saw_receiver && sender.receiver_count() == 0 {
+        metrics.record_idle_shutdown();
     }
 }
 

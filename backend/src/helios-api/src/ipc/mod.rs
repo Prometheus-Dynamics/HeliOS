@@ -14,6 +14,8 @@ use tokio::sync::{Mutex, RwLock, broadcast};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+use crate::api_observability::{RuntimeBroadcastCounters, RuntimeBroadcastSnapshot};
+
 use self::engine::EngineConnection;
 use self::peripherals::SensorsConnection;
 use self::updater::UpdaterConnection;
@@ -193,12 +195,13 @@ pub struct RealtimeUpdateBus {
     tx: broadcast::Sender<RealtimeUpdateEvent>,
     seq: AtomicU64,
     revisions: StdMutex<HashMap<(RealtimeUpdateKind, Option<String>), u64>>,
+    metrics: RuntimeBroadcastCounters,
 }
 
 impl Default for RealtimeUpdateBus {
     fn default() -> Self {
         let (tx, _) = broadcast::channel(1024);
-        Self { tx, seq: AtomicU64::new(0), revisions: StdMutex::new(HashMap::new()) }
+        Self { tx, seq: AtomicU64::new(0), revisions: StdMutex::new(HashMap::new()), metrics: RuntimeBroadcastCounters::default() }
     }
 }
 
@@ -215,7 +218,19 @@ impl RealtimeUpdateBus {
         let entity = entity_for_event(kind);
         let revision = self.next_revision(kind, resource_id.as_ref());
         let event = RealtimeUpdateEvent { seq, timestamp_ms: now_ms(), origin, domain: kind.domain(), kind, operation, entity, revision, resource_id, path, method, request_id };
-        let _ = self.tx.send(event);
+        if self.tx.send(event).is_ok() {
+            self.metrics.record_sent();
+        } else {
+            self.metrics.record_no_receiver_drop();
+        }
+    }
+
+    pub fn record_lagged(&self, skipped: u64) {
+        self.metrics.record_lagged(skipped);
+    }
+
+    pub fn snapshot(&self) -> RuntimeBroadcastSnapshot {
+        self.metrics.snapshot(self.tx.receiver_count() as u64)
     }
 
     fn next_revision(&self, kind: RealtimeUpdateKind, resource_id: Option<&String>) -> u64 {

@@ -5,15 +5,18 @@ use bytes::Bytes;
 use helios_engine::capture::CaptureControlInfo;
 use helios_engine::ipc::{EngineErrorCode, StreamManifest};
 use serde_json::Value as JsonValue;
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use crate::api_observability::ApiCacheMetric;
+use crate::api_observability::{ApiCacheMetric, RuntimeTopicBroadcastSnapshot};
 use crate::http::pipelines::{PipelineSummary, PlannerDiagnostic};
 use crate::http::streams::recording::RecordingRuntimeState;
 use crate::http::streams::replay_bundle::ReplayBundleSessionsState;
 use crate::http::streams::types::StreamInfo;
-use crate::http::streams::{mjpeg::MjpegFeedsState, snapshot::SnapshotLocksState};
+use crate::http::streams::{
+    mjpeg::{MjpegFeedSubscription, MjpegFeedsState},
+    snapshot::SnapshotLocksState,
+};
 
 #[derive(Clone, Default)]
 pub struct PipelinesReadModelService {
@@ -112,8 +115,12 @@ impl StreamsReadModelService {
         self.state.upsert_cached_stream_manifest(stream_id, manifest).await;
     }
 
-    pub async fn subscribe_mjpeg_feed(&self, stream_id: Uuid) -> broadcast::Receiver<Bytes> {
+    pub async fn subscribe_mjpeg_feed(&self, stream_id: Uuid) -> MjpegFeedSubscription {
         self.mjpeg_feeds.clone().subscribe(stream_id).await
+    }
+
+    pub async fn mjpeg_snapshot(&self) -> RuntimeTopicBroadcastSnapshot {
+        self.mjpeg_feeds.snapshot().await
     }
 
     pub async fn snapshot_guard(&self, stream_id: Uuid) -> Arc<Mutex<()>> {
