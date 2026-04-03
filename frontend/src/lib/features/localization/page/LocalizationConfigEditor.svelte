@@ -11,31 +11,16 @@
   import type { LocalizationPipelineSource } from '$lib/features/localization/pipelineSources';
   import type { FieldMapSummary } from '$lib/features/localization/fieldMaps';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
-
-  type RuntimeTuningFieldKey = Extract<keyof LocalizationSolverRuntimeTuningConfig, string>;
-
-  type SourceGroup = {
-    key: string;
-    kind?: 'stream' | 'profile' | 'peer' | 'peripheral';
-    label: string;
-    path?: string | null;
-    pipelines: Array<{
-      key: string;
-      label: string;
-      sources: LocalizationPipelineSource[];
-    }>;
-  };
-
-  type SourceStatusRow = {
-    source: LocalizationPipelineSource;
-    pollMs: number;
-    detections: number;
-    tagSize: number | null;
-    graphMs: number | null;
-    metricsUpdatedAt: number | null;
-    metricsError: string | null;
-    error: string | null;
-  };
+  import type {
+    RuntimeTuningFieldKey,
+    RuntimeTuningGroup,
+    SourceGroup,
+    SourceStatusRow
+  } from './localizationConfigEditorTypes';
+  import LocalizationConfigSourcesTab from './LocalizationConfigSourcesTab.svelte';
+  import LocalizationConfigSolverTab from './LocalizationConfigSolverTab.svelte';
+  import LocalizationConfigFieldTab from './LocalizationConfigFieldTab.svelte';
+  import LocalizationConfigAdvancedTab from './LocalizationConfigAdvancedTab.svelte';
   type LocalizationConfigPanelProps = {
     open?: boolean;
     onClose?: () => void;
@@ -643,19 +628,6 @@
     onSetSolverRuntimeTuningNumeric?.(field, value);
   }
 
-  type RuntimeTuningFieldSpec = {
-    key: RuntimeTuningFieldKey;
-    label: string;
-    step: string;
-  };
-
-  type RuntimeTuningGroup = {
-    id: string;
-    label: string;
-    description: string;
-    fields: RuntimeTuningFieldSpec[];
-  };
-
   const runtimeTuningGroups: RuntimeTuningGroup[] = [
     {
       id: 'observation',
@@ -783,936 +755,122 @@
 
         <div class="mt-3 min-h-0 flex-1">
           {#if setupTab === 'sources'}
-          <div class="flex h-full min-h-0 flex-col pr-1">
-            <section class="flex min-h-0 flex-1 flex-col rounded border border-surface-800/70 bg-surface-900/40 p-3">
-              <div class="flex flex-wrap items-center justify-between gap-3">
-                <p class="text-micro-tight uppercase tracking-[0.35em] text-surface-500">Input sources</p>
-                <span class="text-micro-tight text-surface-500">{compatibleSelectedCount}/{compatibleSourcesCount} selected</span>
-              </div>
-              <p class="mt-1 text-micro text-surface-500">
-                Showing only localization-supported outputs.
-              </p>
-
-              <div class="mt-3 flex flex-wrap items-center gap-2">
-                <input
-                  class="min-w-[13rem] flex-1 rounded border border-surface-800 bg-surface-950/70 px-3 py-2 text-xs text-surface-100 placeholder:text-surface-600 focus:border-primary-400 focus:outline-none"
-                  placeholder="Search stream, output, pipeline, data type"
-                  bind:value={sourceSearch}
-                />
-                <button
-                  class={`btn btn-2xs uppercase tracking-[0.24em] ${sourceFilter === 'all' ? 'preset-filled-primary-500' : 'preset-tonal'}`}
-                  type="button"
-                  onclick={() => (sourceFilter = 'all')}
-                >
-                  All
-                </button>
-                <button
-                  class={`btn btn-2xs uppercase tracking-[0.24em] ${sourceFilter === 'selected' ? 'preset-filled-primary-500' : 'preset-tonal'}`}
-                  type="button"
-                  onclick={() => (sourceFilter = 'selected')}
-                >
-                  Selected
-                </button>
-              </div>
-
-              {#if filteredSourceGroups.length > 0}
-                <div class="mt-3 flex flex-wrap items-center gap-1.5 rounded border border-surface-800/70 bg-surface-950/50 p-1.5">
-                  <button
-                    class={`rounded border px-2 py-1 text-micro-tight uppercase tracking-[0.22em] ${
-                      activeSourceGroupTab === 'all'
-                        ? 'border-primary-500/40 bg-primary-500/15 text-primary-100'
-                        : 'border-surface-700/70 bg-surface-900/70 text-surface-300 hover:border-surface-500 hover:text-surface-100'
-                    }`}
-                    type="button"
-                    onclick={() => (activeSourceGroupTab = 'all')}
-                  >
-                    All groups
-                  </button>
-                  {#each filteredSourceGroups as group (group.key)}
-                    {@const tabHasCalibrated = group.pipelines.some((pipeline) =>
-                      pipeline.sources.some((source) => isSourceCalibrated(source, calibratedCameraIds))
-                    )}
-                    <button
-                      class={`rounded border px-2 py-1 text-micro-tight uppercase tracking-[0.22em] ${
-                        activeSourceGroupTab === group.key
-                          ? 'border-primary-500/40 bg-primary-500/15 text-primary-100'
-                          : 'border-surface-700/70 bg-surface-900/70 text-surface-300 hover:border-surface-500 hover:text-surface-100'
-                      }`}
-                      type="button"
-                      onclick={() => (activeSourceGroupTab = group.key)}
-                    >
-                      {group.label}
-                      {#if !tabHasCalibrated}
-                        <span class="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full border border-amber-500/40 bg-amber-500/10 text-[0.62rem] text-amber-200">!</span>
-                      {/if}
-                    </button>
-                  {/each}
-                </div>
-              {/if}
-
-              <div class="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
-                {#if filteredSourceGroups.length === 0}
-                  {#if sourcesLoading}
-                    <div class="rounded border border-surface-800/70 bg-surface-950/60 px-3 py-2 text-micro text-surface-500">
-                      Loading sources…
-                    </div>
-                  {:else if sourcesError}
-                    <div class="rounded border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-micro text-rose-200">
-                      {sourcesError}
-                    </div>
-                  {:else}
-                    <div class="rounded border border-surface-800/70 bg-surface-950/60 px-3 py-2 text-micro text-surface-500">
-                      No sources match this filter.
-                    </div>
-                  {/if}
-                {:else}
-                  {#if sourcesLoading}
-                    <div class="rounded border border-surface-800/70 bg-surface-950/60 px-3 py-2 text-micro text-surface-500">
-                      Refreshing sources…
-                    </div>
-                  {/if}
-                  {#if sourcesError}
-                    <div class="rounded border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-micro text-rose-200">
-                      {sourcesError}
-                    </div>
-                  {/if}
-                  {#each visibleSourceGroups as group (group.key)}
-                    {@const groupSelectedCount = group.pipelines.reduce(
-                      (count, pipeline) => count + pipeline.sources.filter((source) => selectedSourceSet.has(source.id)).length,
-                      0
-                    )}
-                    {@const groupCalibrated = group.pipelines.some((pipeline) =>
-                      pipeline.sources.some((source) => isSourceCalibrated(source, calibratedCameraIds))
-                    )}
-                    <div
-                      class={`rounded border border-surface-800/70 ${
-                        groupCalibrated ? 'bg-surface-950/60' : 'bg-surface-950/40 opacity-75'
-                      }`}
-                    >
-                      <button
-                        class={`flex w-full items-start justify-between gap-3 px-3 py-2 text-left ${
-                          groupCalibrated ? 'text-surface-200' : 'text-surface-500'
-                        }`}
-                        type="button"
-                        onclick={() => onToggleSourceGroup?.(group.key)}
-                      >
-                        <div class="min-w-0">
-                          <div class="text-micro uppercase tracking-[0.3em] text-surface-500">
-                            {group.kind ?? (group.key.startsWith('peer:') ? 'peer' : 'stream')}
-                          </div>
-                          <div class="mt-1 truncate text-xs text-surface-100">{group.label}</div>
-                          <div class="mt-1 flex flex-wrap items-center gap-1.5">
-                            <span class="rounded border border-surface-700/60 bg-surface-900/70 px-1.5 py-0.5 text-micro-tight uppercase tracking-[0.22em] text-surface-400">
-                              {group.pipelines.length} pipelines
-                            </span>
-                            <span class="rounded border border-primary-500/35 bg-primary-500/10 px-1.5 py-0.5 text-micro-tight uppercase tracking-[0.22em] text-primary-100">
-                              {groupSelectedCount} selected
-                            </span>
-                            {#if !groupCalibrated}
-                              <span class="inline-flex items-center gap-1 rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-micro-tight uppercase tracking-[0.22em] text-amber-200">
-                                <span class="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-amber-500/40 bg-amber-500/20 text-[0.62rem]">!</span>
-                                Uncalibrated
-                              </span>
-                            {/if}
-                          </div>
-                        </div>
-                        <span class="pt-1 text-[0.7rem] text-surface-400">
-                          {openSourceGroups.includes(group.key) ? '−' : '+'}
-                        </span>
-                      </button>
-
-                      {#if openSourceGroups.includes(group.key)}
-                        <div class="border-t border-surface-800/70 px-3 py-3">
-                          <div class="space-y-2">
-                            {#each group.pipelines as pipeline (pipeline.key)}
-                              <div class="rounded border border-surface-800/70 bg-surface-950/60 px-3 py-3">
-                                <div>
-                                  <div>
-                                    <div class="text-micro uppercase tracking-[0.3em] text-surface-500">Pipeline</div>
-                                    <div class="mt-1 text-xs text-surface-100">{pipeline.label}</div>
-                                  </div>
-                                </div>
-
-                                <div class="mt-2 space-y-1.5">
-                                  {#each pipeline.sources as source (source.id)}
-                                    {@const sourceCalibrated = isSourceCalibrated(source, calibratedCameraIds)}
-                                    {@const sourceSelected = selectedSourceSet.has(source.id)}
-                                    {@const row = sourceStatusById.get(source.id) ?? null}
-                                    {@const sharedProfiles = sourceSharedProfiles(source.id)}
-                                    <label
-                                      class={`grid gap-1.5 rounded border px-2 py-2 text-micro ${
-                                        sourceCardTone(source, row)
-                                      }`}
-                                    >
-                                      <div class="flex items-start justify-between gap-2">
-                                        <div class="min-w-0">
-                                          <div class="truncate text-surface-100">{source.outputKey}</div>
-                                          <div class="truncate text-micro-tight text-surface-500">
-                                            {source.streamLabel || source.streamId} · {dataTypeLabel(source)}
-                                          </div>
-                                          {#if !sourceCalibrated || sharedProfiles.length > 0}
-                                            <div class="mt-1 flex flex-wrap items-center gap-1">
-                                              {#if !sourceCalibrated}
-                                                <span class="inline-flex items-center gap-1 rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-micro-tight uppercase tracking-[0.22em] text-amber-200">
-                                                  <span class="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-amber-500/40 bg-amber-500/20 text-[0.62rem]">!</span>
-                                                  Uncalibrated
-                                                </span>
-                                              {/if}
-                                              {#each sharedProfiles as profileName (profileName)}
-                                                <span class="inline-flex items-center rounded border border-surface-700/70 bg-surface-900/70 px-1.5 py-0.5 text-micro-tight uppercase tracking-[0.22em] text-surface-300">
-                                                  {profileName}
-                                                </span>
-                                              {/each}
-                                            </div>
-                                          {/if}
-                                        </div>
-                                        <input
-                                          type="checkbox"
-                                          checked={sourceSelected}
-                                          disabled={localizationConfigLoading}
-                                          onchange={(event) => handleToggleSource(source.id, event)}
-                                        />
-                                      </div>
-                                      <div class="flex flex-wrap items-center gap-1.5 text-micro-tight uppercase tracking-[0.22em] text-surface-500">
-                                        {#if row}
-                                          {#if isDetectionSource(source)}
-                                            <span class="rounded border border-surface-700/70 bg-surface-900/60 px-1.5 py-0.5 text-surface-200">
-                                              {row.detections} det
-                                            </span>
-                                          {/if}
-                                          <span class="rounded border border-surface-700/70 bg-surface-900/60 px-1.5 py-0.5 text-surface-200">
-                                            poll {row.pollMs.toFixed(1)}ms
-                                          </span>
-                                          {#if row.graphMs != null}
-                                            <span class="rounded border border-surface-700/70 bg-surface-900/60 px-1.5 py-0.5 text-surface-200">
-                                              graph {row.graphMs.toFixed(2)}ms
-                                            </span>
-                                          {/if}
-                                          {#if row.tagSize != null}
-                                            <span class="rounded border border-surface-700/70 bg-surface-900/60 px-1.5 py-0.5">
-                                              tag {row.tagSize.toFixed(4)}m
-                                            </span>
-                                          {/if}
-                                        {:else}
-                                          <span class="rounded border border-surface-700/70 bg-surface-900/60 px-1.5 py-0.5">
-                                            no sample yet
-                                          </span>
-                                        {/if}
-                                      </div>
-                                      {#if row?.error || row?.metricsError}
-                                        <p class="text-micro text-rose-200">{row?.error ?? row?.metricsError}</p>
-                                      {/if}
-                                    </label>
-                                  {/each}
-                                </div>
-                              </div>
-                            {/each}
-                          </div>
-                        </div>
-                      {/if}
-                    </div>
-                  {/each}
-                {/if}
-              </div>
-            </section>
-          </div>
+            <LocalizationConfigSourcesTab
+              compatibleSelectedCount={compatibleSelectedCount}
+              compatibleSourcesCount={compatibleSourcesCount}
+              bind:sourceSearch={sourceSearch}
+              bind:sourceFilter={sourceFilter}
+              {filteredSourceGroups}
+              bind:activeSourceGroupTab={activeSourceGroupTab}
+              {visibleSourceGroups}
+              openSourceGroups={openSourceGroups}
+              {sourcesLoading}
+              {sourcesError}
+              {localizationConfigLoading}
+              calibratedCameraIds={calibratedCameraIds}
+              selectedSourceSet={selectedSourceSet}
+              sourceStatusById={sourceStatusById}
+              {isSourceCalibrated}
+              {dataTypeLabel}
+              {isDetectionSource}
+              {sourceSharedProfiles}
+              {sourceCardTone}
+              onToggleSourceGroup={onToggleSourceGroup}
+              onToggleSource={onToggleSource}
+            />
           {/if}
 
           {#if setupTab !== 'sources'}
           <div class="h-full min-h-0 space-y-4 overflow-y-auto pr-1">
           {#if setupTab === 'solver'}
-          <section class="rounded border border-surface-800/70 bg-surface-900/40 p-3">
-            <div class="flex items-center justify-between">
-              <p class="text-micro-tight uppercase tracking-[0.35em] text-surface-500">Solver + sources</p>
-              <span class="text-micro-tight text-surface-500">
-                {solvePoseSpaces.length} solving · {derivedPoseSpaces.length} derived
-              </span>
-            </div>
-
-            <div class="mt-3 grid gap-3">
-              <div class="rounded border border-surface-800/70 bg-surface-950/60 px-3 py-3">
-                <div class="text-micro-tight uppercase tracking-[0.3em] text-surface-500">Solver</div>
-                {#if solvers.length > 0}
-                  <div class="mt-2 space-y-2">
-                    <select
-                      class="w-full rounded border border-surface-800 bg-surface-950/70 px-3 py-2 text-xs uppercase tracking-[0.3em] text-surface-200 focus:border-primary-400 focus:outline-none"
-                      bind:value={activeSolverId}
-                      onchange={handleSetActiveSolverId}
-                      disabled={localizationConfigLoading}
-                    >
-                      {#each solvers as solver (solver.id)}
-                        <option value={solver.id}>{solver.name}</option>
-                      {/each}
-                    </select>
-                    <div class="flex flex-wrap items-center gap-2">
-                      <button
-                        class="rounded-md border border-surface-700/70 bg-surface-900/70 px-3 py-2 text-micro uppercase tracking-[0.3em] text-surface-200 transition hover:border-surface-500 hover:text-white disabled:cursor-not-allowed disabled:border-surface-800/60 disabled:text-surface-600"
-                        type="button"
-                        onclick={onAddSolver}
-                        disabled={localizationConfigLoading}
-                      >
-                        New
-                      </button>
-                      <button
-                        class="rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-micro uppercase tracking-[0.3em] text-rose-100 transition hover:border-rose-400 hover:text-white disabled:cursor-not-allowed disabled:border-surface-800/60 disabled:text-surface-600 disabled:bg-surface-900/60"
-                        type="button"
-                        onclick={onRemoveActiveSolver}
-                        disabled={localizationConfigLoading || !canRemoveSolver}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                    <input
-                      class="w-full rounded border border-surface-800 bg-surface-950/70 px-3 py-2 text-xs text-surface-100 placeholder:text-surface-600 focus:border-primary-400 focus:outline-none"
-                      placeholder="Solver name"
-                      bind:value={solverNameInput}
-                      onchange={onCommitSolverName}
-                      disabled={localizationConfigLoading}
-                    />
-                    {#if activeSolverMode}
-                      <select
-                        class="w-full rounded border border-surface-800 bg-surface-950/70 px-3 py-2 text-xs uppercase tracking-[0.3em] text-surface-200 focus:border-primary-400 focus:outline-none"
-                        value={activeSolverMode}
-                        onchange={handleSetSolverMode}
-                        disabled={localizationConfigLoading}
-                      >
-                        {#each visibleSolverModes as mode (mode)}
-                          <option value={mode}>
-                            {solverModeDisplayLabel(mode)}
-                            {#if !supportedSolverModeSet.has(mode)} (unsupported by backend){/if}
-                          </option>
-                        {/each}
-                      </select>
-                    {/if}
-                    <div class="rounded border border-surface-800/70 bg-surface-950/50 px-3 py-3">
-                      <div class="text-micro-tight uppercase tracking-[0.3em] text-surface-500">Temporal override</div>
-                      <label class="mt-2 flex items-center justify-between gap-3 text-micro text-surface-300">
-                        <span class="uppercase tracking-[0.3em]">Use solver override</span>
-                        <input
-                          type="checkbox"
-                          checked={solverHasTemporalOverride}
-                          disabled={localizationConfigLoading}
-                          onchange={handleSetSolverTemporalOverrideEnabled}
-                        />
-                      </label>
-                      {#if solverHasTemporalOverride}
-                        <label class="mt-2 flex items-center justify-between gap-3 text-micro text-surface-300">
-                          <span class="uppercase tracking-[0.3em]">Enable smoothing</span>
-                          <input
-                            type="checkbox"
-                            checked={activeSolverTemporalOverride?.enabled ?? false}
-                            disabled={localizationConfigLoading}
-                            onchange={handleSetSolverTemporalEnabled}
-                          />
-                        </label>
-                        <div class="mt-2 grid gap-2 text-micro">
-                          <label class="grid gap-1">
-                            <span class="uppercase tracking-[0.3em] text-surface-500">Single-tag translation alpha</span>
-                            <input
-                              type="number"
-                              step="0.01"
-                              value={activeSolverTemporalOverride?.singleTagTranslationAlpha ?? 0}
-                              disabled={localizationConfigLoading}
-                              onchange={(event) => handleSetSolverTemporalNumeric('singleTagTranslationAlpha', event)}
-                              class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
-                            />
-                          </label>
-                          <label class="grid gap-1">
-                            <span class="uppercase tracking-[0.3em] text-surface-500">Single-tag rotation alpha</span>
-                            <input
-                              type="number"
-                              step="0.01"
-                              value={activeSolverTemporalOverride?.singleTagRotationAlpha ?? 0}
-                              disabled={localizationConfigLoading}
-                              onchange={(event) => handleSetSolverTemporalNumeric('singleTagRotationAlpha', event)}
-                              class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
-                            />
-                          </label>
-                          <label class="grid gap-1">
-                            <span class="uppercase tracking-[0.3em] text-surface-500">Multi-tag translation alpha</span>
-                            <input
-                              type="number"
-                              step="0.01"
-                              value={activeSolverTemporalOverride?.multiTagTranslationAlpha ?? 0}
-                              disabled={localizationConfigLoading}
-                              onchange={(event) => handleSetSolverTemporalNumeric('multiTagTranslationAlpha', event)}
-                              class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
-                            />
-                          </label>
-                          <label class="grid gap-1">
-                            <span class="uppercase tracking-[0.3em] text-surface-500">Multi-tag rotation alpha</span>
-                            <input
-                              type="number"
-                              step="0.01"
-                              value={activeSolverTemporalOverride?.multiTagRotationAlpha ?? 0}
-                              disabled={localizationConfigLoading}
-                              onchange={(event) => handleSetSolverTemporalNumeric('multiTagRotationAlpha', event)}
-                              class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
-                            />
-                          </label>
-                          <label class="grid gap-1">
-                            <span class="uppercase tracking-[0.3em] text-surface-500">Max jump translation (m)</span>
-                            <input
-                              type="number"
-                              step="0.01"
-                              value={activeSolverTemporalOverride?.maxTranslationJumpM ?? 0}
-                              disabled={localizationConfigLoading}
-                              onchange={(event) => handleSetSolverTemporalNumeric('maxTranslationJumpM', event)}
-                              class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
-                            />
-                          </label>
-                          <label class="grid gap-1">
-                            <span class="uppercase tracking-[0.3em] text-surface-500">Max jump rotation (deg)</span>
-                            <input
-                              type="number"
-                              step="0.1"
-                              value={activeSolverTemporalOverride?.maxRotationJumpDeg ?? 0}
-                              disabled={localizationConfigLoading}
-                              onchange={(event) => handleSetSolverTemporalNumeric('maxRotationJumpDeg', event)}
-                              class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
-                            />
-                          </label>
-                          <label class="grid gap-1">
-                            <span class="uppercase tracking-[0.3em] text-surface-500">Reanchor reject window (ms)</span>
-                            <input
-                              type="number"
-                              step="10"
-                              value={activeSolverTemporalOverride?.reanchorRejectWindowMs ?? 0}
-                              disabled={localizationConfigLoading}
-                              onchange={(event) => handleSetSolverTemporalNumeric('reanchorRejectWindowMs', event)}
-                              class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
-                            />
-                          </label>
-                        </div>
-                      {:else}
-                        <p class="mt-2 text-micro text-surface-500">
-                          Using profile temporal settings (single-tag alpha {activeSolverTemporalEffective.singleTagTranslationAlpha.toFixed(2)}).
-                        </p>
-                      {/if}
-                    </div>
-                  </div>
-                {:else}
-                  <p class="mt-2 text-micro text-surface-500">No solver configured for this profile.</p>
-                {/if}
-              </div>
-
-              <div class="rounded border border-surface-800/70 bg-surface-950/60 px-3 py-3">
-                <div class="text-micro-tight uppercase tracking-[0.3em] text-surface-500">Sources</div>
-                <label class="mt-2 flex items-center justify-between gap-3 text-micro text-surface-300">
-                  <span class="uppercase tracking-[0.3em]">Use all input sources</span>
-                  <input
-                    type="checkbox"
-                    checked={solverUsesAllSources}
-                    disabled={localizationConfigLoading}
-                    onchange={handleSetActiveSolverUseAllSources}
-                  />
-                </label>
-                <div class="mt-2 grid gap-2 sm:grid-cols-3">
-                  <div class="rounded border border-surface-800/70 bg-surface-950/50 px-2.5 py-2">
-                    <div class="text-micro-tight uppercase tracking-[0.28em] text-surface-500">Solver mode</div>
-                    <div class="mt-1 text-micro text-surface-100">{solverModeLabel}</div>
-                  </div>
-                  <div class="rounded border border-surface-800/70 bg-surface-950/50 px-2.5 py-2">
-                    <div class="text-micro-tight uppercase tracking-[0.28em] text-surface-500">Groups</div>
-                    <div class="mt-1 text-micro text-surface-100">{solverGroupSummaries.length}</div>
-                  </div>
-                  <div class="rounded border border-surface-800/70 bg-surface-950/50 px-2.5 py-2">
-                    <div class="text-micro-tight uppercase tracking-[0.28em] text-surface-500">Source coverage</div>
-                    <div class="mt-1 text-micro text-surface-100">{solverSourceCount}/{selectedSourceCount} in solver</div>
-                  </div>
-                </div>
-                {#if selectedSourceGroups.length > 0}
-                  <div class="mt-2 flex items-center justify-between gap-2 rounded border border-surface-800/70 bg-surface-950/50 px-2 py-1.5">
-                    <p class="text-micro-tight uppercase tracking-[0.26em] text-surface-500">Group focus</p>
-                    <button
-                      class={`rounded border px-2 py-1 text-micro-tight uppercase tracking-[0.22em] ${
-                        activeSolverGroupTab === 'all'
-                          ? 'border-primary-500/40 bg-primary-500/15 text-primary-100'
-                          : 'border-surface-700/70 bg-surface-900/70 text-surface-300 hover:border-surface-500 hover:text-surface-100'
-                      }`}
-                      type="button"
-                      onclick={() => (activeSolverGroupTab = 'all')}
-                    >
-                      All groups
-                    </button>
-                  </div>
-                  <div class="mt-2 grid gap-2 sm:grid-cols-2">
-                    {#each solverGroupSummaries as groupSummary (groupSummary.key)}
-                      <button
-                        class={`rounded border px-2.5 py-2 text-left transition ${
-                          activeSolverGroupTab === groupSummary.key
-                            ? 'border-primary-500/45 bg-primary-500/12 text-primary-100'
-                            : 'border-surface-800/70 bg-surface-950/55 text-surface-200 hover:border-surface-600/80'
-                        }`}
-                        type="button"
-                        onclick={() => (activeSolverGroupTab = groupSummary.key)}
-                      >
-                        <div class="text-micro-tight uppercase tracking-[0.26em] text-surface-500">{groupSummary.kind}</div>
-                        <div class="mt-1 truncate text-micro text-surface-100">{groupSummary.label}</div>
-                        <div class="mt-1 text-micro-tight uppercase tracking-[0.22em] text-surface-400">
-                          {groupSummary.enabled}/{groupSummary.total} in solver
-                        </div>
-                        {#if groupSummary.uncalibrated > 0}
-                          <div class="mt-1 text-micro-tight uppercase tracking-[0.22em] text-amber-200">
-                            ! {groupSummary.uncalibrated} uncalibrated
-                          </div>
-                        {/if}
-                      </button>
-                    {/each}
-                  </div>
-                {/if}
-                <div class={`mt-2 grid gap-2 ${solverUsesAllSources ? 'opacity-60' : ''}`}>
-                  {#if selectedSourceGroups.length === 0}
-                    <div class="text-micro text-surface-500">No sources selected yet.</div>
-                  {:else}
-                    {#each visibleSolverGroups as group (group.key)}
-                      {@const groupSolverCount = group.pipelines.reduce(
-                        (count, pipeline) => count + pipeline.sources.filter((source) => solverSourceSet.has(source.id)).length,
-                        0
-                      )}
-                      {@const groupTotal = group.pipelines.reduce((count, pipeline) => count + pipeline.sources.length, 0)}
-                      <div class="rounded border border-surface-800/70 bg-surface-950/55 px-2.5 py-2.5">
-                        <div class="flex flex-wrap items-center justify-between gap-2">
-                          <div>
-                            <div class="text-micro-tight uppercase tracking-[0.3em] text-surface-500">
-                              {group.kind ?? (group.key.startsWith('peer:') ? 'peer' : 'stream')}
-                            </div>
-                            <div class="text-xs text-surface-100">{group.label}</div>
-                          </div>
-                          <span class="rounded border border-surface-700/70 bg-surface-900/70 px-1.5 py-0.5 text-micro-tight uppercase tracking-[0.22em] text-surface-300">
-                            {groupSolverCount}/{groupTotal} in solver
-                          </span>
-                        </div>
-                        <div class="mt-2 space-y-2">
-                          {#each group.pipelines as pipeline (pipeline.key)}
-                            <div class="rounded border border-surface-800/70 bg-surface-950/60 px-2 py-2">
-                              <div class="text-micro-tight uppercase tracking-[0.28em] text-surface-500">{pipeline.label}</div>
-                              <div class="mt-2 space-y-1.5">
-                                {#each pipeline.sources as source (source.id)}
-                                  {@const checked = solverSourceSet.has(source.id)}
-                                  {@const sourceCalibrated = isSourceCalibrated(source, calibratedCameraIds)}
-                                  {@const sourceWeight = sourceWeightsById[source.id] ?? 1}
-                                  {@const sharedProfiles = sourceSharedProfiles(source.id)}
-                                  <div class="grid gap-1.5 rounded border border-surface-800/70 bg-surface-950/70 px-2 py-2">
-                                    <div class="flex items-start justify-between gap-2">
-                                      <div class="min-w-0">
-                                        <div class="truncate text-micro text-surface-100">
-                                          {source.streamLabel || source.streamId} · {source.outputKey}
-                                        </div>
-                                        {#if !sourceCalibrated || sharedProfiles.length > 0}
-                                          <div class="mt-1 flex flex-wrap items-center gap-1">
-                                            {#if !sourceCalibrated}
-                                              <span class="inline-flex items-center gap-1 rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-micro-tight uppercase tracking-[0.22em] text-amber-200">
-                                                <span class="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-amber-500/40 bg-amber-500/20 text-[0.62rem]">!</span>
-                                                Uncalibrated
-                                              </span>
-                                            {/if}
-                                            {#each sharedProfiles as profileName (profileName)}
-                                              <span class="inline-flex items-center rounded border border-surface-700/70 bg-surface-900/70 px-1.5 py-0.5 text-micro-tight uppercase tracking-[0.22em] text-surface-300">
-                                                {profileName}
-                                              </span>
-                                            {/each}
-                                          </div>
-                                        {/if}
-                                      </div>
-                                      <input
-                                        type="checkbox"
-                                        checked={checked}
-                                        disabled={localizationConfigLoading || solverUsesAllSources}
-                                        onchange={(event) => handleToggleActiveSolverSource(source.id, event)}
-                                      />
-                                    </div>
-                                    <label class="grid gap-1">
-                                      <span class="text-micro-tight uppercase tracking-[0.26em] text-surface-500">
-                                        Merge weight
-                                      </span>
-                                      <input
-                                        type="number"
-                                        step="0.01"
-                                        value={sourceWeight}
-                                        class="w-full rounded border border-surface-800 bg-surface-950/80 px-2 py-1 text-micro text-surface-100 focus:border-primary-400 focus:outline-none"
-                                        disabled={localizationConfigLoading}
-                                        onchange={(event) => handleSetSourceWeight(source.id, event)}
-                                      />
-                                    </label>
-                                  </div>
-                                {/each}
-                              </div>
-                            </div>
-                          {/each}
-                        </div>
-                      </div>
-                    {/each}
-                  {/if}
-                </div>
-                <div class="mt-2 text-micro text-surface-500">
-                  Merge control: source weights scale each input contribution; set weight to 0 to ignore a source.
-                </div>
-                <div class="mt-1 text-micro text-surface-500">
-                  Solo solve: uncheck "Use all input sources", then keep one source enabled for this solver.
-                </div>
-              </div>
-            </div>
-            <div class="mt-3 rounded border border-surface-800/70 bg-surface-900/40 px-3 py-2 text-micro text-surface-400">
-              <div class="text-micro-tight uppercase tracking-[0.3em] text-surface-500">Target spaces</div>
-              <div class="mt-1 flex flex-wrap gap-2">
-                {#each solvePoseSpaces as space (space)}
-                  <span class="rounded border border-surface-800/70 bg-surface-900/70 px-2 py-1 uppercase tracking-[0.3em] text-surface-200">
-                    {poseSpaceLabel(space)}
-                  </span>
-                {/each}
-              </div>
-              {#if derivedPoseSpaces.length > 0}
-                <div class="mt-2 text-micro-tight uppercase tracking-[0.3em] text-surface-500">Derived outputs</div>
-                <div class="mt-1 flex flex-wrap gap-2">
-                  {#each derivedPoseSpaces as space (space)}
-                    <span class="rounded border border-surface-800/70 bg-surface-900/70 px-2 py-1 uppercase tracking-[0.3em] text-surface-200">
-                      {poseSpaceLabel(space)}
-                    </span>
-                  {/each}
-                </div>
-              {/if}
-              {#if !selectedFieldMapId}
-                <p class="mt-2 text-micro text-surface-500">Add a field map to auto-enable field target spaces.</p>
-              {:else if !calibrationReady}
-                <p class="mt-2 text-micro text-amber-300">
-                  Field space outputs are enrolled, but calibration is missing for {uncalibratedSourcesCount} source(s).
-                </p>
-              {/if}
-            </div>
-          </section>
+            <LocalizationConfigSolverTab
+              {solvePoseSpaces}
+              {derivedPoseSpaces}
+              {poseSpaceLabel}
+              {solvers}
+              bind:activeSolverId={activeSolverId}
+              {localizationConfigLoading}
+              {canRemoveSolver}
+              bind:solverNameInput={solverNameInput}
+              {activeSolverMode}
+              {visibleSolverModes}
+              supportedSolverModeSet={supportedSolverModeSet}
+              {solverModeDisplayLabel}
+              onSetActiveSolverId={onSetActiveSolverId}
+              onAddSolver={onAddSolver}
+              onRemoveActiveSolver={onRemoveActiveSolver}
+              onCommitSolverName={onCommitSolverName}
+              onSetSolverMode={onSetSolverMode}
+              solverHasTemporalOverride={solverHasTemporalOverride}
+              activeSolverTemporalOverride={activeSolverTemporalOverride}
+              activeSolverTemporalEffective={activeSolverTemporalEffective}
+              onSetSolverTemporalOverrideEnabled={onSetSolverTemporalOverrideEnabled}
+              onSetSolverTemporalEnabled={onSetSolverTemporalEnabled}
+              onSetSolverTemporalNumeric={onSetSolverTemporalNumeric}
+              solverUsesAllSources={solverUsesAllSources}
+              onSetActiveSolverUseAllSources={onSetActiveSolverUseAllSources}
+              solverModeLabel={solverModeLabel}
+              solverGroupSummaries={solverGroupSummaries}
+              solverSourceCount={solverSourceCount}
+              selectedSourceCount={selectedSourceCount}
+              selectedSourceGroups={selectedSourceGroups}
+              bind:activeSolverGroupTab={activeSolverGroupTab}
+              visibleSolverGroups={visibleSolverGroups}
+              solverSourceSet={solverSourceSet}
+              sourceWeightsById={sourceWeightsById}
+              calibratedCameraIds={calibratedCameraIds}
+              {isSourceCalibrated}
+              {sourceSharedProfiles}
+              onToggleActiveSolverSource={onToggleActiveSolverSource}
+              onSetSourceWeight={onSetSourceWeight}
+              selectedFieldMapId={selectedFieldMapId}
+              calibrationReady={calibrationReady}
+              uncalibratedSourcesCount={uncalibratedSourcesCount}
+            />
           {/if}
 
           {#if setupTab === 'field'}
-          <section class="rounded border border-surface-800/70 bg-surface-900/40 p-3">
-            <div class="flex items-center justify-between">
-              <p class="text-micro-tight uppercase tracking-[0.35em] text-surface-500">Calibration + field</p>
-              <span class="text-micro-tight text-surface-500">{fieldMaps.length} maps</span>
-            </div>
-            <div class="mt-3 grid gap-3 lg:grid-cols-2">
-              <div class="grid gap-3">
-                <div class="grid gap-2">
-                  <p class="text-micro-tight uppercase tracking-[0.35em] text-surface-500">Tag size</p>
-                  <input
-                    class="w-full rounded border border-surface-800 bg-surface-950/70 px-3 py-2 text-xs text-surface-100 placeholder:text-surface-600 focus:border-primary-400 focus:outline-none"
-                    placeholder="0.03175m or 1.25in"
-                    bind:value={tagSizeInput}
-                    onchange={onCommitTagSize}
-                    disabled={!hasActiveProfile || localizationConfigLoading}
-                  />
-                  {#if tagSizeError}
-                    <p class="text-micro text-rose-200">{tagSizeError}</p>
-                  {/if}
-                  <p class="text-micro text-surface-500">Required for pose solving; field map sizes are ignored.</p>
-                </div>
-
-                <div class="grid gap-2">
-                  <p class="text-micro-tight uppercase tracking-[0.35em] text-surface-500">Excluded tag IDs</p>
-                  <input
-                    class="w-full rounded border border-surface-800 bg-surface-950/70 px-3 py-2 text-xs text-surface-100 placeholder:text-surface-600 focus:border-primary-400 focus:outline-none"
-                    placeholder="e.g. 1, 2 5"
-                    bind:value={excludedTagIdsInput}
-                    onchange={onCommitExcludedTagIds}
-                    disabled={!hasActiveProfile || localizationConfigLoading}
-                  />
-                  {#if excludedTagIdsError}
-                    <p class="text-micro text-rose-200">{excludedTagIdsError}</p>
-                  {/if}
-                  <p class="text-micro text-surface-500">Comma/space-separated IDs to ignore during localization solve.</p>
-                </div>
-
-                <div class="grid gap-2">
-                  <p class="text-micro-tight uppercase tracking-[0.35em] text-surface-500">Field origin</p>
-                  <select
-                    class="w-full rounded border border-surface-800 bg-surface-950/70 px-3 py-2 text-xs uppercase tracking-[0.3em] text-surface-200 focus:border-primary-400 focus:outline-none"
-                    value={fieldOriginMode}
-                    disabled={!hasActiveProfile || localizationConfigLoading}
-                    onchange={handleSetFieldOriginMode}
-                  >
-                    <option value="blue">wpiblue</option>
-                    <option value="red">wpired</option>
-                    <option value="center">center</option>
-                    <option value="custom">custom (from center)</option>
-                  </select>
-                  {#if fieldOriginMode === 'custom'}
-                    <div class="grid gap-2 rounded border border-surface-800/70 bg-surface-950/50 px-3 py-3">
-                      <label class="grid gap-1">
-                        <span class="uppercase tracking-[0.3em] text-surface-500">Custom X (m)</span>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={fieldOriginCustom?.x ?? 0}
-                          disabled={!hasActiveProfile || localizationConfigLoading}
-                          onchange={(event) => handleSetFieldOriginCustomNumeric('x', event)}
-                          class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
-                        />
-                      </label>
-                      <label class="grid gap-1">
-                        <span class="uppercase tracking-[0.3em] text-surface-500">Custom Z (m)</span>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={fieldOriginCustom?.z ?? 0}
-                          disabled={!hasActiveProfile || localizationConfigLoading}
-                          onchange={(event) => handleSetFieldOriginCustomNumeric('z', event)}
-                          class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
-                        />
-                      </label>
-                      <label class="grid gap-1">
-                        <span class="uppercase tracking-[0.3em] text-surface-500">Custom yaw (deg)</span>
-                        <input
-                          type="number"
-                          step="0.1"
-                          value={fieldOriginCustom?.yawDeg ?? 0}
-                          disabled={!hasActiveProfile || localizationConfigLoading}
-                          onchange={(event) => handleSetFieldOriginCustomNumeric('yawDeg', event)}
-                          class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
-                        />
-                      </label>
-                    </div>
-                  {/if}
-                  <p class="text-micro text-surface-500">
-                    Defines the reported field pose frame for this profile, relative to field center.
-                  </p>
-                </div>
-
-                <div class="grid gap-2">
-                  <p class="text-micro-tight uppercase tracking-[0.35em] text-surface-500">Ground snap</p>
-                  <label
-                    class={`flex items-center justify-between gap-3 rounded border px-3 py-2 text-micro ${
-                      snapZToGround
-                        ? 'border-primary-500/40 bg-primary-500/10 text-primary-100'
-                        : 'border-surface-800/70 bg-surface-950/60 text-surface-300'
-                    } ${!hasActiveProfile || localizationConfigLoading ? 'opacity-60' : ''}`}
-                  >
-                    <span class="uppercase tracking-[0.3em]">Snap Z to ground</span>
-                    <input
-                      type="checkbox"
-                      checked={snapZToGround}
-                      disabled={!hasActiveProfile || localizationConfigLoading}
-                      onchange={handleSetSnapZToGround}
-                    />
-                  </label>
-                  <label
-                    class={`flex items-center justify-between gap-3 rounded border px-3 py-2 text-micro ${
-                      snapRollToGround
-                        ? 'border-primary-500/40 bg-primary-500/10 text-primary-100'
-                        : 'border-surface-800/70 bg-surface-950/60 text-surface-300'
-                    } ${!hasActiveProfile || localizationConfigLoading ? 'opacity-60' : ''}`}
-                  >
-                    <span class="uppercase tracking-[0.3em]">Snap roll to level</span>
-                    <input
-                      type="checkbox"
-                      checked={snapRollToGround}
-                      disabled={!hasActiveProfile || localizationConfigLoading}
-                      onchange={handleSetSnapRollToGround}
-                    />
-                  </label>
-                  <label
-                    class={`flex items-center justify-between gap-3 rounded border px-3 py-2 text-micro ${
-                      snapPitchToGround
-                        ? 'border-primary-500/40 bg-primary-500/10 text-primary-100'
-                        : 'border-surface-800/70 bg-surface-950/60 text-surface-300'
-                    } ${!hasActiveProfile || localizationConfigLoading ? 'opacity-60' : ''}`}
-                  >
-                    <span class="uppercase tracking-[0.3em]">Snap pitch to level</span>
-                    <input
-                      type="checkbox"
-                      checked={snapPitchToGround}
-                      disabled={!hasActiveProfile || localizationConfigLoading}
-                      onchange={handleSetSnapPitchToGround}
-                    />
-                  </label>
-                  <p class="text-micro text-surface-500">
-                    Constrains field-space height and/or tilt for more stable solves when tags are sparse.
-                  </p>
-                </div>
-
-              </div>
-
-              <div class="grid gap-2 rounded border border-surface-800/70 bg-surface-950/60 px-3 py-3">
-                <p class="text-micro-tight uppercase tracking-[0.35em] text-surface-500">Field map</p>
-                <select
-                  class="w-full rounded border border-surface-800 bg-surface-950/70 px-3 py-2 text-xs text-surface-100 focus:border-primary-400 focus:outline-none"
-                  bind:value={fieldMapSelection}
-                  onchange={handleSetFieldMapSelection}
-                  disabled={fieldMapsLoading || localizationConfigLoading}
-                >
-                  <option value="">No field map</option>
-                  {#each fieldMaps as map (map.id)}
-                    <option value={map.id}>{map.name}</option>
-                  {/each}
-                </select>
-                <label
-                  class={`inline-flex items-center justify-center rounded-md border px-3 py-2 text-micro-tight uppercase tracking-[0.3em] transition ${
-                    mapUploadBusy || localizationConfigLoading
-                      ? 'cursor-not-allowed border-surface-800/60 text-surface-600'
-                      : 'border-surface-700/70 bg-surface-900/70 text-surface-200 hover:border-surface-500 hover:text-white'
-                  }`}
-                >
-                  {mapUploadBusy ? 'Uploading…' : 'Upload map'}
-                  <input
-                    type="file"
-                    class="sr-only"
-                    onchange={handleUploadMapFile}
-                    disabled={mapUploadBusy || localizationConfigLoading}
-                  />
-                </label>
-                {#if fieldMapsError}
-                  <p class="text-micro text-rose-200">{fieldMapsError}</p>
-                {/if}
-                {#if mapUploadError}
-                  <p class="text-micro text-rose-200">{mapUploadError}</p>
-                {/if}
-              </div>
-            </div>
-          </section>
+            <LocalizationConfigFieldTab
+              {fieldMaps}
+              {fieldMapsLoading}
+              {fieldMapsError}
+              {mapUploadBusy}
+              {mapUploadError}
+              bind:fieldMapSelection={fieldMapSelection}
+              hasActiveProfile={hasActiveProfile}
+              {localizationConfigLoading}
+              bind:tagSizeInput={tagSizeInput}
+              {tagSizeError}
+              bind:excludedTagIdsInput={excludedTagIdsInput}
+              {excludedTagIdsError}
+              {fieldOriginMode}
+              {fieldOriginCustom}
+              {snapZToGround}
+              {snapRollToGround}
+              {snapPitchToGround}
+              onCommitTagSize={onCommitTagSize}
+              onCommitExcludedTagIds={onCommitExcludedTagIds}
+              onSetFieldOriginMode={onSetFieldOriginMode}
+              onSetFieldOriginCustomNumeric={onSetFieldOriginCustomNumeric}
+              onSetSnapZToGround={onSetSnapZToGround}
+              onSetSnapRollToGround={onSetSnapRollToGround}
+              onSetSnapPitchToGround={onSetSnapPitchToGround}
+              onSetFieldMapSelection={onSetFieldMapSelection}
+              onUploadMapFile={onUploadMapFile}
+            />
           {/if}
 
           {#if setupTab === 'advanced'}
-          <section class="rounded border border-surface-800/70 bg-surface-900/40 p-3">
-            <div class="flex items-center justify-between">
-              <p class="text-micro-tight uppercase tracking-[0.35em] text-surface-500">Advanced solver tuning</p>
-            </div>
-            <div class="mt-3 space-y-3">
-              <details class="localization-accordion rounded border border-surface-800/70 bg-surface-950/60">
-                <summary class="flex cursor-pointer items-start gap-3 px-3 py-2.5 text-left transition hover:bg-surface-900/40">
-                  <span class="accordion-chevron mt-[0.18rem] text-[0.7rem] text-surface-400" aria-hidden="true">▶</span>
-                  <div class="min-w-0 flex-1">
-                    <p class="text-micro-tight uppercase tracking-[0.3em] text-surface-400">Temporal profile defaults</p>
-                    <p class="mt-1 text-micro text-surface-500">Base smoothing values used unless a solver override is enabled.</p>
-                  </div>
-                  <span class="rounded border border-surface-700/60 bg-surface-900/70 px-1.5 py-0.5 text-micro-tight uppercase tracking-[0.22em] text-surface-300">
-                    7 knobs
-                  </span>
-                </summary>
-                <div class="border-t border-surface-800/70 px-3 py-3">
-                  <label class={`flex items-center justify-between gap-3 rounded border px-3 py-2 text-micro ${
-                    profileTemporalStabilization.enabled
-                      ? 'border-primary-500/40 bg-primary-500/10 text-primary-100'
-                      : 'border-surface-800/70 bg-surface-950/60 text-surface-300'
-                  } ${!hasActiveProfile || localizationConfigLoading ? 'opacity-60' : ''}`}>
-                    <span class="uppercase tracking-[0.3em]">Enable smoothing</span>
-                    <input
-                      type="checkbox"
-                      checked={profileTemporalStabilization.enabled}
-                      disabled={!hasActiveProfile || localizationConfigLoading}
-                      onchange={handleSetProfileTemporalEnabled}
-                    />
-                  </label>
-                  <div class="mt-2 grid gap-2">
-                    <label class="grid gap-1">
-                      <span class="uppercase tracking-[0.3em] text-surface-500">Single-tag translation alpha</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={profileTemporalStabilization.singleTagTranslationAlpha}
-                        disabled={!hasActiveProfile || localizationConfigLoading}
-                        onchange={(event) => handleSetProfileTemporalNumeric('singleTagTranslationAlpha', event)}
-                        class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
-                      />
-                    </label>
-                    <label class="grid gap-1">
-                      <span class="uppercase tracking-[0.3em] text-surface-500">Single-tag rotation alpha</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={profileTemporalStabilization.singleTagRotationAlpha}
-                        disabled={!hasActiveProfile || localizationConfigLoading}
-                        onchange={(event) => handleSetProfileTemporalNumeric('singleTagRotationAlpha', event)}
-                        class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
-                      />
-                    </label>
-                    <label class="grid gap-1">
-                      <span class="uppercase tracking-[0.3em] text-surface-500">Multi-tag translation alpha</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={profileTemporalStabilization.multiTagTranslationAlpha}
-                        disabled={!hasActiveProfile || localizationConfigLoading}
-                        onchange={(event) => handleSetProfileTemporalNumeric('multiTagTranslationAlpha', event)}
-                        class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
-                      />
-                    </label>
-                    <label class="grid gap-1">
-                      <span class="uppercase tracking-[0.3em] text-surface-500">Multi-tag rotation alpha</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={profileTemporalStabilization.multiTagRotationAlpha}
-                        disabled={!hasActiveProfile || localizationConfigLoading}
-                        onchange={(event) => handleSetProfileTemporalNumeric('multiTagRotationAlpha', event)}
-                        class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
-                      />
-                    </label>
-                    <label class="grid gap-1">
-                      <span class="uppercase tracking-[0.3em] text-surface-500">Max jump translation (m)</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={profileTemporalStabilization.maxTranslationJumpM}
-                        disabled={!hasActiveProfile || localizationConfigLoading}
-                        onchange={(event) => handleSetProfileTemporalNumeric('maxTranslationJumpM', event)}
-                        class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
-                      />
-                    </label>
-                    <label class="grid gap-1">
-                      <span class="uppercase tracking-[0.3em] text-surface-500">Max jump rotation (deg)</span>
-                      <input
-                        type="number"
-                        step="0.1"
-                        value={profileTemporalStabilization.maxRotationJumpDeg}
-                        disabled={!hasActiveProfile || localizationConfigLoading}
-                        onchange={(event) => handleSetProfileTemporalNumeric('maxRotationJumpDeg', event)}
-                        class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
-                      />
-                    </label>
-                    <label class="grid gap-1">
-                      <span class="uppercase tracking-[0.3em] text-surface-500">Reanchor reject window (ms)</span>
-                      <input
-                        type="number"
-                        step="10"
-                        value={profileTemporalStabilization.reanchorRejectWindowMs}
-                        disabled={!hasActiveProfile || localizationConfigLoading}
-                        onchange={(event) => handleSetProfileTemporalNumeric('reanchorRejectWindowMs', event)}
-                        class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
-                      />
-                    </label>
-                  </div>
-                </div>
-              </details>
-
-              {#each runtimeTuningGroups as group (group.id)}
-                <details class="localization-accordion rounded border border-surface-800/70 bg-surface-950/60">
-                  <summary class="flex cursor-pointer items-start gap-3 px-3 py-2.5 text-left transition hover:bg-surface-900/40">
-                    <span class="accordion-chevron mt-[0.18rem] text-[0.7rem] text-surface-400" aria-hidden="true">▶</span>
-                    <div class="min-w-0 flex-1">
-                      <p class="text-micro-tight uppercase tracking-[0.3em] text-surface-400">{group.label}</p>
-                      <p class="mt-1 text-micro text-surface-500">{group.description}</p>
-                    </div>
-                    <span class="rounded border border-surface-700/60 bg-surface-900/70 px-1.5 py-0.5 text-micro-tight uppercase tracking-[0.22em] text-surface-300">
-                      {group.fields.length} knobs
-                    </span>
-                  </summary>
-                  <div class="grid gap-2 border-t border-surface-800/70 px-3 py-3">
-                    {#each group.fields as field (field.key)}
-                      <label class="grid gap-1">
-                        <span class="uppercase tracking-[0.3em] text-surface-500">{field.label}</span>
-                        <input
-                          type="number"
-                          step={field.step}
-                          value={activeSolverRuntimeTuning[field.key]}
-                          disabled={localizationConfigLoading}
-                          onchange={(event) => handleSetSolverRuntimeTuningNumeric(field.key, event)}
-                          class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
-                        />
-                      </label>
-                    {/each}
-                  </div>
-                </details>
-              {/each}
-            </div>
-          </section>
+            <LocalizationConfigAdvancedTab
+              hasActiveProfile={hasActiveProfile}
+              {localizationConfigLoading}
+              profileTemporalStabilization={profileTemporalStabilization}
+              activeSolverRuntimeTuning={activeSolverRuntimeTuning}
+              runtimeTuningGroups={runtimeTuningGroups}
+              onSetProfileTemporalEnabled={onSetProfileTemporalEnabled}
+              onSetProfileTemporalNumeric={onSetProfileTemporalNumeric}
+              onSetSolverRuntimeTuningNumeric={onSetSolverRuntimeTuningNumeric}
+            />
           {/if}
 
         </div>
@@ -1722,22 +880,3 @@
     </aside>
   </div>
 {/if}
-
-<style>
-  .localization-accordion > summary {
-    list-style: none;
-  }
-
-  .localization-accordion > summary::-webkit-details-marker {
-    display: none;
-  }
-
-  .localization-accordion .accordion-chevron {
-    transform: rotate(0deg);
-    transition: transform 150ms ease;
-  }
-
-  .localization-accordion[open] .accordion-chevron {
-    transform: rotate(90deg);
-  }
-</style>

@@ -104,6 +104,8 @@
   import { createLocalizationFeedRuntime } from './localizationFeedRuntime';
   import { createLocalizationPageState } from '$lib/features/localization/page/LocalizationPageState';
   import { createLocalizationPageActions } from '$lib/features/localization/page/localizationPageActions';
+  import LocalizationProfileSidebar from './LocalizationProfileSidebar.svelte';
+  import LocalizationDeleteProfileModal from './LocalizationDeleteProfileModal.svelte';
   import {
     buildActiveCustomField,
     buildActiveFieldDimensions,
@@ -268,7 +270,7 @@
   let profileDeleteBusy = $state(false);
   let profileDeleteError = $state<string | null>(null);
   let profileTransferBusy = $state(false);
-  let profileImportInputEl: HTMLInputElement | null = null;
+  let profileImportInputEl = $state<HTMLInputElement | null>(null);
 
   const localizationStorage = createLocalizationStorageStore();
   const cameraExtrinsics = localizationStorage.cameraExtrinsics;
@@ -3081,191 +3083,29 @@
 
 <div class="flex h-full min-h-0 flex-1 flex-col gap-4 overflow-hidden">
   <section class="flex min-h-0 flex-1 gap-4 overflow-hidden lg:gap-6">
-    <aside class="w-full shrink-0 space-y-3 overflow-visible rounded border border-surface-800/60 bg-surface-950/40 p-3 text-xs text-surface-400 lg:max-w-[16rem] xl:max-w-[16.75rem] 2xl:max-w-[17.5rem]">
-    <div class="space-y-2">
-      <button
-        class="btn btn-xs preset-filled-primary-500 w-full uppercase tracking-[0.22em]"
-        type="button"
-        onclick={addProfile}
-      >
-        New Profile
-      </button>
-      <div class="grid grid-cols-2 gap-1.5">
-        <button
-          class="btn btn-2xs preset-tonal uppercase tracking-[0.22em]"
-          type="button"
-          onclick={() => void exportLocalizationProfiles()}
-          disabled={profileTransferBusy || !$localizationConfig}
-        >
-          Export
-        </button>
-        <button
-          class="btn btn-2xs preset-tonal uppercase tracking-[0.22em]"
-          type="button"
-          onclick={openImportProfilesDialog}
-          disabled={profileTransferBusy}
-        >
-          Import
-        </button>
-      </div>
-      <input
-        type="file"
-        accept=".json,application/json"
-        class="sr-only"
-        bind:this={profileImportInputEl}
-        onchange={handleProfileImportInput}
-      />
-    </div>
-
-    <SidebarSearchSection
-      label="Search profiles"
-      placeholder="Name or id"
-      description="Name, id"
-      bind:value={profileSearch}
-      ariaLabel="Search profiles"
-      size="compact"
+    <LocalizationProfileSidebar
+      profileTransferBusy={profileTransferBusy}
+      canExport={Boolean($localizationConfig)}
+      bind:profileImportInputEl={profileImportInputEl}
+      bind:profileSearch={profileSearch}
+      filteredProfiles={filteredProfiles}
+      activeProfileId={$activeProfileId}
+      {coordinateSpace}
+      {profileSupportedSpacesById}
+      profiles={$profiles}
+      {profileIndexById}
+      onCreateProfile={addProfile}
+      onExportProfiles={exportLocalizationProfiles}
+      onOpenImportProfilesDialog={openImportProfilesDialog}
+      onHandleProfileImportInput={handleProfileImportInput}
+      onSetActiveProfile={setActiveProfile}
+      onSetProfileEnabled={setProfileEnabled}
+      onSetProfileViewEnabled={setProfileViewEnabled}
+      onHandleProfileColorInput={handleProfileColorInput}
+      onOpenDeleteProfileModal={openDeleteProfileModal}
+      bind:showOutputsOverlay={showOutputsOverlay}
+      bind:showMetricsOverlay={showMetricsOverlay}
     />
-
-    <div>
-      <p class="text-micro uppercase tracking-[0.22em] text-surface-500">Profiles</p>
-      <div class="mt-2 space-y-1.5">
-        {#if $profiles.length === 0}
-          <p class="rounded border border-dashed border-surface-700/70 bg-surface-950/40 p-2.5 text-micro-tight text-surface-500">
-            No profiles yet.
-          </p>
-        {:else if filteredProfiles.length === 0}
-          <p class="rounded border border-dashed border-surface-700/70 bg-surface-950/40 p-2.5 text-micro-tight text-surface-500">
-            No profiles match this search/filter.
-          </p>
-        {:else}
-          {#each filteredProfiles as profile (profile.id)}
-            {@const isSelected = $activeProfileId === profile.id}
-            {@const runtimeEnabled = profile.enabled !== false}
-            {@const visible = profile.viewEnabled === true}
-            {@const color = profileColorForId(profile.id, $profiles, profileIndexById, PROFILE_COLORS)}
-            {@const supported = (profileSupportedSpacesById?.[profile.id] ?? []).includes(coordinateSpace)}
-            <div
-              class={`w-full rounded border px-2.5 py-1.5 text-left transition ${
-                isSelected
-                  ? 'border-primary-400/70 bg-primary-500/10 text-white shadow-lg shadow-primary-500/20'
-                  : 'border-surface-700/40 text-surface-300 hover:border-surface-600/80'
-              } ${supported ? '' : 'opacity-60'} ${runtimeEnabled ? '' : 'opacity-70'}`}
-              role="button"
-              tabindex="0"
-              aria-pressed={isSelected ? 'true' : 'false'}
-              onclick={() => void setActiveProfile(profile.id)}
-              onkeydown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  void setActiveProfile(profile.id);
-                }
-              }}
-            >
-              <div class="flex items-start gap-3">
-                <div
-                  class={`relative mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border transition ${
-                    isSelected ? 'border-white/40 hover:border-primary-200' : 'border-white/20 hover:border-primary-200/70'
-                  }`}
-                  title={`Set color for ${profile.name}`}
-                >
-                  <span class="h-3 w-3 rounded-full border border-white/40" style={`background-color: ${color};`}></span>
-                  <input
-                    type="color"
-                    value={color}
-                    class="absolute inset-0 cursor-pointer opacity-0"
-                    aria-label={`Set color for ${profile.name}`}
-                    onchange={(event) => handleProfileColorInput(profile.id, event)}
-                    onclick={(event) => event.stopPropagation()}
-                  />
-                </div>
-                <div class="min-w-0 flex-1">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <p class={`truncate text-xs font-semibold ${isSelected ? 'text-white' : 'text-surface-100'}`}>
-                      {profile.name}
-                    </p>
-                    <button
-                      type="button"
-                      class={`shrink-0 rounded border px-1.5 py-[1px] text-micro-tight uppercase tracking-[0.16em] transition ${
-                        runtimeEnabled
-                          ? 'border-sky-500/60 bg-sky-500/10 text-sky-100 hover:border-sky-400/80 hover:bg-sky-500/20'
-                          : 'border-rose-500/60 bg-rose-500/10 text-rose-100 hover:border-rose-400/80 hover:bg-rose-500/20'
-                      }`}
-                      aria-label={`Toggle ${profile.name} localization runtime`}
-                      title={runtimeEnabled ? `Disable ${profile.name} for localization runtime` : `Enable ${profile.name} for localization runtime`}
-                      onclick={(event) => {
-                        event.stopPropagation();
-                        setProfileEnabled(profile.id, !runtimeEnabled);
-                      }}
-                    >
-                      {runtimeEnabled ? 'Enabled' : 'Disabled'}
-                    </button>
-                    <button
-                      type="button"
-                      class={`shrink-0 rounded border px-1.5 py-[1px] text-micro-tight uppercase tracking-[0.16em] transition ${
-                        visible
-                          ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-100 hover:border-emerald-400/80 hover:bg-emerald-500/20'
-                          : 'border-surface-600/60 bg-surface-800/40 text-surface-300 hover:border-surface-500/80 hover:bg-surface-700/50'
-                      }`}
-                      aria-label={`Toggle ${profile.name} visibility in 3D view`}
-                      title={visible ? `Hide ${profile.name} in 3D view` : `Show ${profile.name} in 3D view`}
-                      onclick={(event) => {
-                        event.stopPropagation();
-                        setProfileViewEnabled(profile.id, !visible);
-                      }}
-                    >
-                      {visible ? 'Visible' : 'Hidden'}
-                    </button>
-                    {#if !supported}
-                      <span class="shrink-0 rounded border border-amber-500/60 bg-amber-500/10 px-1.5 py-[1px] text-micro-tight uppercase tracking-[0.16em] text-amber-100">
-                        Unsupported
-                      </span>
-                    {/if}
-                  </div>
-                </div>
-                <div class="flex items-center gap-1">
-                  <button
-                    class={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-rose-300 transition hover:text-rose-100 disabled:cursor-not-allowed disabled:opacity-40 ${
-                      isSelected
-                        ? 'border-rose-300/40 hover:border-rose-200'
-                        : 'border-rose-500/40 hover:border-rose-400'
-                    }`}
-                    type="button"
-                    aria-label={`Delete profile ${profile.name}`}
-                    title={$profiles.length <= 1 ? 'At least one profile is required' : `Delete profile ${profile.name}`}
-                    disabled={$profiles.length <= 1}
-                    onclick={(event) => {
-                      event.stopPropagation();
-                      openDeleteProfileModal(profile);
-                    }}
-                  >
-                    🗑
-                  </button>
-                  <button
-                    class={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-surface-400 transition hover:text-primary-100 ${
-                      isSelected
-                        ? 'border-white/30 hover:border-primary-300'
-                        : 'border-surface-600/60 hover:border-primary-400'
-                    }`}
-                    type="button"
-                    aria-label={`Open settings for ${profile.name}`}
-                    title={`Open settings for ${profile.name}`}
-                    onclick={(event) => {
-                      event.stopPropagation();
-                      void setActiveProfile(profile.id);
-                      showOutputsOverlay = true;
-                      showMetricsOverlay = false;
-                    }}
-                  >
-                    ⚙
-                  </button>
-                </div>
-              </div>
-            </div>
-          {/each}
-        {/if}
-      </div>
-    </div>
-    </aside>
 
     <div class="min-w-0 flex flex-1 flex-col">
       {#if showLocalizationBootLoading}
@@ -3450,44 +3290,10 @@
   </section>
 </div>
 
-{#if pendingProfileDelete}
-  <div class="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"></div>
-  <div class="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded border border-surface-700 bg-surface-950/95 p-6 shadow-2xl max-h-[85vh] max-h-[85svh] max-h-[85dvh] overflow-y-auto">
-    <div class="flex items-center justify-between gap-3">
-      <div>
-        <p class="text-xs uppercase tracking-[0.3em] text-surface-500">Delete profile</p>
-        <h2 class="text-lg font-semibold text-white">{pendingProfileDelete.name}</h2>
-      </div>
-      <button class="btn btn-3xs preset-outline uppercase tracking-[0.3em]" type="button" onclick={closeDeleteProfileModal} disabled={profileDeleteBusy}>
-        Close
-      </button>
-    </div>
-    <div class="mt-3 space-y-3 text-sm text-surface-300">
-      <p>This action permanently deletes the profile, including its source selection and solver configuration.</p>
-      <p class="text-xs uppercase tracking-[0.25em] text-surface-500">
-        Profile #{pendingProfileDelete.id.slice(0, 8)}
-      </p>
-      {#if profileDeleteError}
-        <p class="text-xs text-error-300">{profileDeleteError}</p>
-      {/if}
-    </div>
-    <div class="mt-6 flex items-center justify-end gap-3">
-      <button
-        class="btn btn-2xs uppercase tracking-[0.3em] bg-surface-800/80 text-white hover:bg-surface-700/80"
-        type="button"
-        onclick={closeDeleteProfileModal}
-        disabled={profileDeleteBusy}
-      >
-        Cancel
-      </button>
-      <button
-        class="btn btn-2xs uppercase tracking-[0.3em] bg-error-600 text-white hover:bg-error-500"
-        type="button"
-        onclick={() => void confirmDeleteProfile()}
-        disabled={profileDeleteBusy}
-      >
-        {profileDeleteBusy ? 'Deleting…' : 'Delete'}
-      </button>
-    </div>
-  </div>
-{/if}
+<LocalizationDeleteProfileModal
+  {pendingProfileDelete}
+  {profileDeleteBusy}
+  {profileDeleteError}
+  onClose={closeDeleteProfileModal}
+  onConfirm={confirmDeleteProfile}
+/>
