@@ -19,11 +19,7 @@ pub(super) fn normalize_file_backend_paths(manifest: &mut StreamManifest, warnin
             continue;
         }
         if !seen.insert(trimmed.to_string()) {
-            warnings.push(warning(
-                format!("/capture/handle/paths/{index}"),
-                "duplicate_path_removed",
-                "removed duplicate file path entry",
-            ));
+            warnings.push(warning(format!("/capture/handle/paths/{index}"), "duplicate_path_removed", "removed duplicate file path entry"));
             continue;
         }
         if trimmed != raw {
@@ -45,11 +41,7 @@ pub(super) fn normalize_reserved_pipeline_ids(manifest: &mut StreamManifest, war
     if manifest.active_pipeline_id == Some(CALIBRATION_MODE_PIPELINE_UUID) {
         manifest.active_pipeline_id = None;
         manifest.active_pipeline_output = None;
-        warnings.push(warning(
-            "/activePipelineId",
-            "reserved_pipeline_removed",
-            "removed reserved calibration-mode active pipeline selection",
-        ));
+        warnings.push(warning("/activePipelineId", "reserved_pipeline_removed", "removed reserved calibration-mode active pipeline selection"));
     }
 
     if let Some(layout) = manifest.pipeline_layout.as_mut() {
@@ -57,19 +49,13 @@ pub(super) fn normalize_reserved_pipeline_ids(manifest: &mut StreamManifest, war
             if slot.pipeline_id == Some(CALIBRATION_MODE_PIPELINE_UUID) {
                 slot.pipeline_id = None;
                 slot.output_key = None;
-                warnings.push(warning(
-                    format!("/pipelineLayout/slots/{index}"),
-                    "reserved_pipeline_removed",
-                    "removed reserved calibration-mode layout slot pipeline",
-                ));
+                warnings.push(warning(format!("/pipelineLayout/slots/{index}"), "reserved_pipeline_removed", "removed reserved calibration-mode layout slot pipeline"));
             }
         }
     }
 
     let before_wires = manifest.pipeline_wires.len();
-    manifest
-        .pipeline_wires
-        .retain(|wire| wire.from.pipeline_id != CALIBRATION_MODE_PIPELINE_UUID && wire.to.pipeline_id != CALIBRATION_MODE_PIPELINE_UUID);
+    manifest.pipeline_wires.retain(|wire| wire.from.pipeline_id != CALIBRATION_MODE_PIPELINE_UUID && wire.to.pipeline_id != CALIBRATION_MODE_PIPELINE_UUID);
     if manifest.pipeline_wires.len() != before_wires {
         warnings.push(warning("/pipelineWires", "reserved_pipeline_removed", "removed wires referencing reserved calibration-mode pipeline"));
     }
@@ -79,12 +65,7 @@ pub(super) fn normalize_pipeline_output_fields(manifest: &mut StreamManifest, wa
     trim_optional_output_field(&mut manifest.active_pipeline_output, "/activePipelineOutput", "active pipeline output", warnings);
 
     for (index, binding) in manifest.pipelines.iter_mut().enumerate() {
-        trim_optional_output_field(
-            &mut binding.pipeline_output,
-            format!("/pipelines/{index}/pipelineOutput"),
-            "pipeline output",
-            warnings,
-        );
+        trim_optional_output_field(&mut binding.pipeline_output, format!("/pipelines/{index}/pipelineOutput"), "pipeline output", warnings);
     }
 
     if let Some(layout) = manifest.pipeline_layout.as_mut() {
@@ -121,24 +102,15 @@ fn capture_control_value_is_enabled(value: &helios_engine::capture::CaptureContr
     }
 }
 
-fn manifest_controls_require_tdn_output(
-    manifest: &StreamManifest,
-    descriptor: &helios_engine::capture::CaptureDescriptor,
-) -> bool {
-    manifest.capture.controls.iter().any(|control| {
-        capture_control_value_is_enabled(&control.value)
-            && descriptor
-                .controls
-                .iter()
-                .find(|meta| meta.id.0 == control.id)
-                .is_some_and(|meta| meta.metadata.requires_tdn_output)
-    })
+fn manifest_controls_require_tdn_output(manifest: &StreamManifest, descriptor: &helios_engine::capture::CaptureDescriptor) -> bool {
+    manifest
+        .capture
+        .controls
+        .iter()
+        .any(|control| capture_control_value_is_enabled(&control.value) && descriptor.controls.iter().find(|meta| meta.id.0 == control.id).is_some_and(|meta| meta.metadata.requires_tdn_output))
 }
 
-pub(super) fn normalize_capture_tdn_output_with_descriptor(
-    manifest: &mut StreamManifest,
-    descriptor: Option<&helios_engine::capture::CaptureDescriptor>,
-) {
+pub(super) fn normalize_capture_tdn_output_with_descriptor(manifest: &mut StreamManifest, descriptor: Option<&helios_engine::capture::CaptureDescriptor>) {
     if manifest.capture.backend != styx::BackendKind::Libcamera || !manifest.capture.enable_tdn_output {
         return;
     }
@@ -177,24 +149,13 @@ pub(super) fn normalize_file_capture_manifest(manifest: &mut StreamManifest) {
         return;
     }
 
-    let replacement_mode = backend
-        .descriptor
-        .modes
-        .iter()
-        .find(|mode| mode.id.format == manifest.capture.mode.format)
-        .or_else(|| backend.descriptor.modes.first())
-        .map(|mode| mode.id.clone());
+    let replacement_mode = backend.descriptor.modes.iter().find(|mode| mode.id.format == manifest.capture.mode.format).or_else(|| backend.descriptor.modes.first()).map(|mode| mode.id.clone());
     if let Some(mode) = replacement_mode {
         manifest.capture.mode = mode;
     }
 }
 
-fn trim_optional_output_field(
-    value: &mut Option<String>,
-    path: impl Into<String>,
-    label: &'static str,
-    warnings: &mut Vec<ValidationWarning>,
-) {
+fn trim_optional_output_field(value: &mut Option<String>, path: impl Into<String>, label: &'static str, warnings: &mut Vec<ValidationWarning>) {
     let path = path.into();
     let original = value.clone();
     let trimmed = value.take().and_then(|raw| {

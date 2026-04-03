@@ -23,7 +23,6 @@ use crate::drivers::{
 };
 use crate::{Error, Result};
 
-
 mod constants;
 mod fusion;
 mod math;
@@ -33,7 +32,6 @@ use fusion::*;
 use math::*;
 #[cfg(test)]
 mod tests;
-
 
 /// Fusion strategy used to combine accelerometer, gyroscope, and magnetometer samples.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]

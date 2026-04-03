@@ -1,4 +1,5 @@
-use std::path::Path;
+use std::io;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -98,6 +99,56 @@ impl StringPolicy {
         std::env::var(self.env_var).ok().map(|value| value.trim().to_string()).filter(|value| !value.is_empty()).unwrap_or_else(|| self.default.to_string())
     }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PersistentDirPolicy {
+    pub env_vars: &'static [&'static str],
+    pub candidates: &'static [&'static str],
+}
+
+impl PersistentDirPolicy {
+    pub fn resolve(self) -> io::Result<PathBuf> {
+        for env_var in self.env_vars {
+            let Ok(raw) = std::env::var(env_var) else {
+                continue;
+            };
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let path = PathBuf::from(trimmed);
+            ensure_directory(&path).map_err(|err| io::Error::new(err.kind(), format!("failed to prepare {} from {env_var}: {err}", path.display())))?;
+            return Ok(path);
+        }
+
+        let mut last_error = None;
+        for candidate in self.candidates {
+            let path = PathBuf::from(candidate);
+            match ensure_directory(&path) {
+                Ok(()) => return Ok(path),
+                Err(err) => {
+                    last_error = Some(io::Error::new(err.kind(), format!("failed to prepare persistent directory {}: {err}", path.display())));
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no persistent directory candidates configured")))
+    }
+}
+
+fn ensure_directory(path: &Path) -> io::Result<()> {
+    std::fs::create_dir_all(path)?;
+    let metadata = std::fs::metadata(path)?;
+    if metadata.is_dir() { Ok(()) } else { Err(io::Error::other(format!("{} is not a directory", path.display()))) }
+}
+
+pub const HELIOS_API_DATA_ROOT_POLICY: PersistentDirPolicy = PersistentDirPolicy { env_vars: &["HELIOS_API_DATA_DIR"], candidates: &["/data/helios/api", "/var/lib/helios/api"] };
+
+pub const HELIOS_PIPELINE_DATA_ROOT_POLICY: PersistentDirPolicy =
+    PersistentDirPolicy { env_vars: &["HELIOS_PIPELINE_DIR", "HELIOS_API_DATA_DIR"], candidates: &["/data/helios/api", "/var/lib/helios/api"] };
+
+pub const HELIOS_SHADOW_RECORD_DATA_ROOT_POLICY: PersistentDirPolicy =
+    PersistentDirPolicy { env_vars: &["HELIOS_SHADOW_RECORD_DIR", "HELIOS_API_DATA_DIR"], candidates: &["/data/helios/api", "/var/lib/helios/api"] };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TokioRuntimePolicy {
@@ -730,11 +781,12 @@ pub use generated::*;
 #[cfg(test)]
 mod tests {
     use super::{
-        EngineExecutorBusyPolicy, HELIOS_API_HARDWARE_READ_MODEL_POLICY, HELIOS_API_LOG_SOURCES_POLICY, HELIOS_API_STARTUP_CACHE_WARM_POLICY, HELIOS_API_STREAMS_POLICY,
+        EngineExecutorBusyPolicy, HELIOS_API_DATA_ROOT_POLICY, HELIOS_API_HARDWARE_READ_MODEL_POLICY, HELIOS_API_LOG_SOURCES_POLICY, HELIOS_API_STARTUP_CACHE_WARM_POLICY, HELIOS_API_STREAMS_POLICY,
         HELIOS_API_SYSTEM_READ_MODEL_POLICY, HELIOS_API_TOKIO_POLICY, HELIOS_ENGINE_CRASH_GUARD_POLICY, HELIOS_ENGINE_GRAPH_POLICY, HELIOS_ENGINE_RECORDING_POLICY, HELIOS_ENGINE_TOKIO_POLICY,
         HELIOS_I2C_INVENTORY_POLICY, HELIOS_IMU_RUNTIME_POLICY, HELIOS_LOG_FILTER_POLICY, HELIOS_PERIPHERALS_POWER_POLICY, HELIOS_PERIPHERALS_TOKIO_POLICY, HELIOS_RESOURCE_GUARD_POLICY,
-        HELIOS_STYX_CAPTURE_TUNABLES_POLICY, PlatformFamily, classify_platform_family,
+        HELIOS_SHADOW_RECORD_DATA_ROOT_POLICY, HELIOS_STYX_CAPTURE_TUNABLES_POLICY, PersistentDirPolicy, PlatformFamily, classify_platform_family,
     };
+    use std::path::PathBuf;
 
     #[test]
     fn api_runtime_policy_defaults_match_expected_values() {
@@ -858,6 +910,42 @@ mod tests {
         assert_eq!(resolved.pool_bytes, None);
         assert_eq!(resolved.pool_spare, None);
         assert!(!resolved.any_overridden());
+    }
+
+    #[test]
+    fn persistent_dir_policy_prefers_configured_env_override() {
+        let dir = std::env::temp_dir().join(format!("helios-runtime-policy-env-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create temp data root");
+        unsafe {
+            std::env::set_var("HELIOS_API_DATA_DIR", &dir);
+        }
+        let resolved = HELIOS_API_DATA_ROOT_POLICY.resolve().expect("resolve data root");
+        assert_eq!(resolved, dir);
+        unsafe {
+            std::env::remove_var("HELIOS_API_DATA_DIR");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn persistent_dir_policy_ignores_empty_env_and_uses_candidates() {
+        let candidate = std::env::temp_dir().join(format!("helios-runtime-policy-candidate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&candidate);
+        let candidate_str: &'static str = Box::leak(candidate.to_string_lossy().into_owned().into_boxed_str());
+        let candidates: &'static [&'static str] = Box::leak(Box::new([candidate_str]));
+        unsafe {
+            std::env::set_var("HELIOS_SHADOW_RECORD_DIR", "   ");
+        }
+        let resolved = PersistentDirPolicy { env_vars: &["HELIOS_SHADOW_RECORD_DIR"], candidates }.resolve().expect("resolve fallback candidate");
+        assert_eq!(resolved, PathBuf::from(&candidate));
+        unsafe {
+            std::env::remove_var("HELIOS_SHADOW_RECORD_DIR");
+        }
+        assert!(candidate.is_dir());
+        let shadow_policy = HELIOS_SHADOW_RECORD_DATA_ROOT_POLICY;
+        assert!(!shadow_policy.candidates.is_empty());
+        let _ = std::fs::remove_dir_all(&candidate);
     }
 
     #[test]

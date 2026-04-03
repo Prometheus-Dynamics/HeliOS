@@ -12,6 +12,7 @@ use uuid::Uuid;
 use crate::http::streams::recording::media::{cleanup_failed_recording_artifacts, frame_timestamps_file_name, update_media_recording_fps_from_frame_ts};
 use crate::http::streams::recording::options::recording_stop_grace_ms;
 use crate::http::streams::recording::sidecar::{stop_imu_sidecar_session, wait_for_frame_timestamps_settle};
+use crate::http::streams::recording::state::ActiveRecordingSession;
 use crate::http::streams::util::{engine_error_body, map_client_error};
 use helios_engine::ipc::{EngineErrorCode, EngineEvent};
 
@@ -27,7 +28,7 @@ use helios_engine::ipc::{EngineErrorCode, EngineEvent};
 )]
 pub(crate) async fn stop_recording(State(state): State<crate::http::AppState>, Path(id): Path<Uuid>) -> Response {
     let recording_runtime = state.services.streams.recording_runtime();
-    let active_session = recording_runtime.remove_active_recording_session(id).await;
+    let active_session: Option<ActiveRecordingSession> = recording_runtime.remove_active_recording_session(id).await;
     let imu_stop_delay = Duration::from_millis(recording_stop_grace_ms());
     let engine_response = state.engine.stop_recording(id).await;
     if let Some(session) = active_session.as_ref() {

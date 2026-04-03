@@ -22,8 +22,11 @@ fn startup_preset_path() -> PathBuf {
     }
 }
 
-pub(super) fn startup_marker_path() -> PathBuf {
-    std::env::var_os(STARTUP_PRESET_MARKER_ENV).map(PathBuf::from).unwrap_or_else(|| storage::data_root_path().join(STARTUP_PRESET_MARKER_NAME))
+pub(super) fn startup_marker_path() -> io::Result<PathBuf> {
+    match std::env::var_os(STARTUP_PRESET_MARKER_ENV) {
+        Some(path) => Ok(PathBuf::from(path)),
+        None => Ok(storage::data_root_path()?.join(STARTUP_PRESET_MARKER_NAME)),
+    }
 }
 
 pub(super) async fn write_marker(path: &Path, marker: StartupPresetMarker) -> io::Result<()> {

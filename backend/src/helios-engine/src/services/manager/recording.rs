@@ -103,7 +103,14 @@ pub(super) async fn start_recording(manager: &StreamManager, stream_id: Uuid, pa
         let fps = settings.as_ref().and_then(|s| s.fps).filter(|v| *v > 0.0).or(measured_fps).or(requested_fps);
 
         let manager = manager.clone();
-        let shadow_dir = super::policy::shadow_dir_for_stream(stream_id);
+        let shadow_dir = match super::policy::shadow_dir_for_stream(stream_id) {
+            Ok(path) => path,
+            Err(err) => {
+                let mut recordings = manager.recordings.lock().await;
+                recordings.remove(&stream_id);
+                return Err(err);
+            }
+        };
         tokio::spawn(async move {
             let result = record_shadow_segments_session(ShadowRecordingSessionRequest {
                 stream_id,
@@ -210,7 +217,7 @@ pub(super) async fn capture_shadow_recording(manager: &StreamManager, stream_id:
     let preroll_ms = super::policy::shadow_segment_ms().max(1_000);
     let capture_ms = window_ms.saturating_add(preroll_ms).min(super::policy::shadow_window_ms());
 
-    let shadow_dir = super::policy::shadow_dir_for_stream(stream_id);
+    let shadow_dir = super::policy::shadow_dir_for_stream(stream_id)?;
     if fs::metadata(&shadow_dir).await.is_err() {
         return Err(Error::NotFound("shadow recorder data not found"));
     }
@@ -258,7 +265,7 @@ pub(super) async fn start_shadow_recorder(manager: &StreamManager, stream_id: Uu
     }
     let preferred_codec = manifest.recording_mode.shadow_buffer_codec().ok_or(Error::InvalidState("shadow recorder requires shadow-buffer recording mode"))?;
     let raw_format = RawRecordingFormat::from_codec(preferred_codec);
-    let shadow_dir = super::policy::shadow_dir_for_stream(stream_id);
+    let shadow_dir = super::policy::shadow_dir_for_stream(stream_id)?;
     let window_ms = super::policy::shadow_window_ms();
     let segment_ms = super::policy::shadow_segment_ms();
     let format_tracker = Arc::new(AtomicU8::new(raw_format.to_u8()));

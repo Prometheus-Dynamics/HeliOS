@@ -36,12 +36,8 @@ pub fn normalize_config(mut config: LocalizationConfig) -> LocalizationConfig {
         profile.allowed_tag_ids = normalize_tag_id_list(std::mem::take(&mut profile.allowed_tag_ids));
         profile.excluded_tag_ids = normalize_tag_id_list(std::mem::take(&mut profile.excluded_tag_ids));
         let has_field_map = profile.field_map_id.as_deref().map(str::trim).is_some_and(|value| !value.is_empty());
-        let enabled_source_refs = profile
-            .sources
-            .iter()
-            .filter(|source| source.enabled)
-            .map(|source| (source.id.trim().to_string(), source.camera_uid.trim().to_ascii_lowercase()))
-            .collect::<Vec<_>>();
+        let enabled_source_refs =
+            profile.sources.iter().filter(|source| source.enabled).map(|source| (source.id.trim().to_string(), source.camera_uid.trim().to_ascii_lowercase())).collect::<Vec<_>>();
         profile.field_origin = profile.field_origin.sanitized();
         profile.temporal_stabilization = profile.temporal_stabilization.sanitized();
         for solver in &mut profile.solvers {
@@ -325,26 +321,12 @@ impl LocalizationSolverRuntimeTuningConfig {
             dt_scale_max,
             switched_single_tag_max_translation_jump_m: clamp_positive(self.switched_single_tag_max_translation_jump_m, default_switched_single_tag_max_translation_jump_m()),
             switched_single_tag_max_rotation_jump_deg: clamp_positive(self.switched_single_tag_max_rotation_jump_deg, default_switched_single_tag_max_rotation_jump_deg()),
-            dropped_multi_to_single_max_translation_jump_m: clamp_positive(
-                self.dropped_multi_to_single_max_translation_jump_m,
-                default_dropped_multi_to_single_max_translation_jump_m(),
-            ),
-            dropped_multi_to_single_max_rotation_jump_deg: clamp_positive(
-                self.dropped_multi_to_single_max_rotation_jump_deg,
-                default_dropped_multi_to_single_max_rotation_jump_deg(),
-            ),
-            switched_single_tag_reject_window_scale: clamp_positive(
-                self.switched_single_tag_reject_window_scale,
-                default_switched_single_tag_reject_window_scale(),
-            ),
+            dropped_multi_to_single_max_translation_jump_m: clamp_positive(self.dropped_multi_to_single_max_translation_jump_m, default_dropped_multi_to_single_max_translation_jump_m()),
+            dropped_multi_to_single_max_rotation_jump_deg: clamp_positive(self.dropped_multi_to_single_max_rotation_jump_deg, default_dropped_multi_to_single_max_rotation_jump_deg()),
+            switched_single_tag_reject_window_scale: clamp_positive(self.switched_single_tag_reject_window_scale, default_switched_single_tag_reject_window_scale()),
             switched_single_tag_reject_window_min_ms: self.switched_single_tag_reject_window_min_ms.max(default_switched_single_tag_reject_window_min_ms()),
-            dropped_multi_to_single_reject_window_scale: clamp_positive(
-                self.dropped_multi_to_single_reject_window_scale,
-                default_dropped_multi_to_single_reject_window_scale(),
-            ),
-            dropped_multi_to_single_reject_window_min_ms: self
-                .dropped_multi_to_single_reject_window_min_ms
-                .max(default_dropped_multi_to_single_reject_window_min_ms()),
+            dropped_multi_to_single_reject_window_scale: clamp_positive(self.dropped_multi_to_single_reject_window_scale, default_dropped_multi_to_single_reject_window_scale()),
+            dropped_multi_to_single_reject_window_min_ms: self.dropped_multi_to_single_reject_window_min_ms.max(default_dropped_multi_to_single_reject_window_min_ms()),
             switched_single_tag_gain_damp: clamp_unit(self.switched_single_tag_gain_damp),
             switched_single_tag_min_translation_gain: clamp_unit(self.switched_single_tag_min_translation_gain),
             switched_single_tag_min_rotation_gain: clamp_unit(self.switched_single_tag_min_rotation_gain),
@@ -391,23 +373,11 @@ impl LocalizationSolverRuntimeTuningConfig {
             imu_rotation_prior_weight,
             imu_rotation_prior_max_delta_deg,
             imu_rotation_prior_min_tags,
-            rotation_consensus_inlier_rotation_scale: clamp_positive(
-                self.rotation_consensus_inlier_rotation_scale,
-                default_rotation_consensus_inlier_rotation_scale(),
-            ),
-            rotation_consensus_inlier_translation_scale: clamp_positive(
-                self.rotation_consensus_inlier_translation_scale,
-                default_rotation_consensus_inlier_translation_scale(),
-            ),
-            translation_consensus_inlier_scale: clamp_positive(
-                self.translation_consensus_inlier_scale,
-                default_translation_consensus_inlier_scale(),
-            ),
+            rotation_consensus_inlier_rotation_scale: clamp_positive(self.rotation_consensus_inlier_rotation_scale, default_rotation_consensus_inlier_rotation_scale()),
+            rotation_consensus_inlier_translation_scale: clamp_positive(self.rotation_consensus_inlier_translation_scale, default_rotation_consensus_inlier_translation_scale()),
+            translation_consensus_inlier_scale: clamp_positive(self.translation_consensus_inlier_scale, default_translation_consensus_inlier_scale()),
             map_consensus_rotation_inlier_deg: clamp_positive(self.map_consensus_rotation_inlier_deg, default_map_consensus_rotation_inlier_deg()),
-            map_consensus_translation_inlier_m: clamp_positive(
-                self.map_consensus_translation_inlier_m,
-                default_map_consensus_translation_inlier_m(),
-            ),
+            map_consensus_translation_inlier_m: clamp_positive(self.map_consensus_translation_inlier_m, default_map_consensus_translation_inlier_m()),
             map_consensus_min_inlier_weight_ratio: clamp_unit(self.map_consensus_min_inlier_weight_ratio),
             map_outlier_weight_scale: clamp_unit(self.map_outlier_weight_scale),
         }

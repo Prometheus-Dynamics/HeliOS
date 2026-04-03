@@ -247,6 +247,11 @@ async fn async_main() {
         return;
     }
 
+    if let Err(err) = http::storage::data_root_path() {
+        error!(%err, "persistent API data root is unavailable");
+        std::process::exit(1);
+    }
+
     info!("helios-api IPC control starting");
 
     if let Err(err) = ipc::ensure_journal_dir() {

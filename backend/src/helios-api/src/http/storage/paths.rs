@@ -1,47 +1,25 @@
+use lib_runtime_policy::HELIOS_API_DATA_ROOT_POLICY;
 use once_cell::sync::Lazy;
+use std::io;
 use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::OnceLock;
-use tracing::{info, warn};
+use tracing::warn;
 
 use super::health::is_mountpoint;
 
 #[cfg(test)]
 static TEST_DATA_ROOT: OnceLock<PathBuf> = OnceLock::new();
 
-/// Resolve a writable data directory for HTTP handlers. Defaults to a temp dir
-/// but can be overridden with `HELIOS_API_DATA_DIR`.
-static DATA_ROOT: Lazy<PathBuf> = Lazy::new(|| {
-    if let Ok(dir) = std::env::var("HELIOS_API_DATA_DIR") {
-        let path = PathBuf::from(dir);
-        info!(path = %path.display(), "using HELIOS_API_DATA_DIR for persistent storage");
-        warn_if_unmounted_data_root(&path);
-        return path;
-    }
-    let root = default_data_root();
+/// Resolve a writable persistent data directory for HTTP handlers. Supports the
+/// explicit `HELIOS_API_DATA_DIR` override, otherwise requires the canonical
+/// mounted data roots.
+static DATA_ROOT: Lazy<Result<PathBuf, String>> = Lazy::new(|| resolve_data_root().map_err(|err| err.to_string()));
+
+fn resolve_data_root() -> io::Result<PathBuf> {
+    let root = HELIOS_API_DATA_ROOT_POLICY.resolve()?;
     warn_if_unmounted_data_root(&root);
-    root
-});
-
-fn default_data_root() -> PathBuf {
-    // TEMP_SHIM: storage-temp-data-root-fallback
-    // Keep the temp-dir escape hatch only until every boot path guarantees a mounted persistent data root before API start.
-    let candidates = [PathBuf::from("/data/helios/api"), PathBuf::from("/var/lib/helios/api"), std::env::temp_dir().join("helios-api")];
-
-    for candidate in candidates {
-        if ensure_dir(&candidate) {
-            if candidate.starts_with("/data") || candidate.starts_with("/var/lib") {
-                info!(path = %candidate.display(), "using persistent data directory");
-            } else {
-                warn!(path = %candidate.display(), "using temporary data directory; persisted streams/pipelines may be lost on restart");
-            }
-            return candidate;
-        }
-    }
-
-    let fallback = std::env::temp_dir().join("helios-api");
-    warn!(path = %fallback.display(), "using temporary data directory; persisted streams/pipelines may be lost on restart");
-    fallback
+    Ok(root)
 }
 
 fn warn_if_unmounted_data_root(path: &Path) {
@@ -66,20 +44,16 @@ fn warn_if_unmounted_data_root(path: &Path) {
     }
 }
 
-fn ensure_dir(path: &PathBuf) -> bool {
-    std::fs::create_dir_all(path).and_then(|_| std::fs::metadata(path)).map(|meta| meta.is_dir()).unwrap_or(false)
-}
-
-fn data_root() -> PathBuf {
+fn data_root() -> io::Result<PathBuf> {
     #[cfg(test)]
     if let Some(path) = TEST_DATA_ROOT.get() {
-        return path.clone();
+        return Ok(path.clone());
     }
-    DATA_ROOT.clone()
+    DATA_ROOT.as_ref().cloned().map_err(|err| io::Error::other(err.clone()))
 }
 
 /// Expose the resolved data root for callers that need to locate the data partition.
-pub fn data_root_path() -> PathBuf {
+pub fn data_root_path() -> io::Result<PathBuf> {
     data_root()
 }
 
@@ -90,14 +64,14 @@ pub fn set_data_root_for_tests(path: PathBuf) {
 
 /// Ensure a named subdirectory exists and return its path.
 pub fn ensure_subdir(name: &str) -> std::io::Result<PathBuf> {
-    let dir = data_root().join(name);
+    let dir = data_root()?.join(name);
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }
 
 /// Async version of [`ensure_subdir`], avoiding blocking calls inside async handlers.
 pub async fn ensure_subdir_async(name: &str) -> std::io::Result<PathBuf> {
-    let dir = data_root().join(name);
+    let dir = data_root()?.join(name);
     tokio::fs::create_dir_all(&dir).await?;
     Ok(dir)
 }

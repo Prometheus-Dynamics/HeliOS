@@ -6,7 +6,6 @@ pub mod stream_ids {
     use uuid::Uuid;
 
     pub const CALIBRATION_MODE_PIPELINE_UUID: Uuid = uuid::uuid!("00000000-0000-0000-0000-00000000c411");
-    pub const LEGACY_RAW_PIPELINE_UUID: Uuid = uuid::uuid!("00000000-0000-0000-0000-0000000000ab");
     pub const RAW_PIPELINE_UUID: Uuid = uuid::uuid!("00000000-0000-0000-0000-0000000000aa");
 }
 

@@ -116,13 +116,15 @@ impl SystemCollector {
         let total_mem = self.sys.total_memory();
         let used_mem = self.sys.used_memory();
         let partitions = collect_disk_partitions(&self.disks);
-        let data_root = storage::data_root_path();
-        let (disk_total, disk_used, disk_free) = filesystem_usage_for_path(&data_root)
-            .or_else(|| {
-                select_disk_for_path(&self.disks, &data_root).map(|disk| {
-                    let total = disk.total_space();
-                    let free = disk.available_space();
-                    (total, total.saturating_sub(free), free)
+        let (disk_total, disk_used, disk_free) = storage::data_root_path()
+            .ok()
+            .and_then(|data_root| {
+                filesystem_usage_for_path(&data_root).or_else(|| {
+                    select_disk_for_path(&self.disks, &data_root).map(|disk| {
+                        let total = disk.total_space();
+                        let free = disk.available_space();
+                        (total, total.saturating_sub(free), free)
+                    })
                 })
             })
             .unwrap_or_else(|| {

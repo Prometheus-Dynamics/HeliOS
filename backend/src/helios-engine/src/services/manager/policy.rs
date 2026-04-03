@@ -1,5 +1,5 @@
 use super::*;
-use lib_runtime_policy::{ResolvedEngineRecordingPolicy, HELIOS_ENGINE_RECORDING_POLICY};
+use lib_runtime_policy::{ResolvedEngineRecordingPolicy, HELIOS_ENGINE_RECORDING_POLICY, HELIOS_SHADOW_RECORD_DATA_ROOT_POLICY};
 
 pub(super) fn recording_policy() -> &'static ResolvedEngineRecordingPolicy {
     static VALUE: OnceLock<ResolvedEngineRecordingPolicy> = OnceLock::new();
@@ -166,24 +166,8 @@ pub(super) fn normalize_shadow_window_ms(requested: u64) -> u64 {
     requested.clamp(HELIOS_ENGINE_RECORDING_POLICY.shadow_window_ms.min, base)
 }
 
-pub(super) fn shadow_data_root() -> PathBuf {
-    SHADOW_DATA_ROOT
-        .get_or_init(|| {
-            if let Ok(dir) = std::env::var("HELIOS_SHADOW_RECORD_DIR") {
-                return PathBuf::from(dir);
-            }
-            if let Ok(dir) = std::env::var("HELIOS_API_DATA_DIR") {
-                return PathBuf::from(dir);
-            }
-            let candidates = [PathBuf::from("/data/helios/api"), PathBuf::from("/var/lib/helios/api"), std::env::temp_dir().join("helios-api")];
-            for candidate in candidates {
-                if candidate.is_dir() || std::fs::create_dir_all(&candidate).is_ok() {
-                    return candidate;
-                }
-            }
-            std::env::temp_dir().join("helios-api")
-        })
-        .clone()
+pub(super) fn shadow_data_root() -> Result<PathBuf> {
+    SHADOW_DATA_ROOT.get_or_init(|| HELIOS_SHADOW_RECORD_DATA_ROOT_POLICY.resolve().map_err(|err| err.to_string())).clone().map_err(Error::InvalidStateOwned)
 }
 
 pub(super) fn shadow_recorder_feature_enabled() -> bool {
@@ -202,16 +186,22 @@ pub(super) fn rewrite_encoded_frame_timestamps_to_wall_enabled() -> bool {
     recording_policy().rewrite_encoded_frame_timestamps_to_wall
 }
 
-pub(super) fn shadow_dir_for_stream(stream_id: Uuid) -> PathBuf {
-    shadow_data_root().join("media").join(".shadow").join(stream_id.to_string())
+pub(super) fn shadow_dir_for_stream(stream_id: Uuid) -> Result<PathBuf> {
+    Ok(shadow_data_root()?.join("media").join(".shadow").join(stream_id.to_string()))
 }
 
-pub(super) fn recording_stage_root() -> PathBuf {
-    shadow_data_root().join("media").join(".recordings")
+pub(super) fn recording_stage_root() -> Result<PathBuf> {
+    Ok(shadow_data_root()?.join("media").join(".recordings"))
 }
 
 pub(super) fn cleanup_recording_stage_root_sync() {
-    let root = recording_stage_root();
+    let root = match recording_stage_root() {
+        Ok(path) => path,
+        Err(err) => {
+            tracing::warn!(error = %err, "recording stage root unavailable during startup cleanup");
+            return;
+        }
+    };
     if std::fs::metadata(&root).is_err() {
         return;
     }

@@ -13,9 +13,9 @@ use uuid::Uuid;
 
 use crate::http::device::imu::imu_status_from_snapshot;
 use crate::http::streams::recording::media::{clear_media_imu_sidecar, media_meta_dir_async, temp_output_path, update_media_imu_sidecar};
-use crate::http::streams::recording::{
+use crate::http::streams::recording::state::{ImuSidecarSession, ImuSidecarSummary, RecordingRuntimeState};
+use crate::http::streams::recording::types::{
     IMU_SIDE_CAR_HISTORY_MAX_SAMPLES, IMU_SIDE_CAR_HISTORY_WINDOW_MS, IMU_SIDE_CAR_STOP_TAIL_IDLE_MS, IMU_SIDE_CAR_STOP_TAIL_MAX_MS, IMU_SIDE_CAR_STOP_WAIT_MAX_MS, IMU_SIDE_CAR_STOP_WAIT_QUIET_MS,
-    ImuSidecarSession, ImuSidecarSummary, RecordingRuntimeState,
 };
 use helios_peripherals::dto::SensorScope;
 

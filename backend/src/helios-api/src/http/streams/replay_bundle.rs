@@ -113,7 +113,7 @@ impl ReplayBundleSessionsState {
 
 #[allow(clippy::result_large_err)]
 fn parse_video_options(req: &StartReplayBundleRequest) -> Result<(RecordingContainer, RecordingCodec), ApiError> {
-    let mut codec = match req.codec.as_deref().unwrap_or("h265").trim().to_ascii_lowercase().as_str() {
+    let codec = match req.codec.as_deref().unwrap_or("h265").trim().to_ascii_lowercase().as_str() {
         "h264" | "avc" => RecordingCodec::H264,
         "h265" | "hevc" => RecordingCodec::H265,
         other => return Err(ApiError::bad_request(format!("unsupported codec: {other}"))),
@@ -122,15 +122,7 @@ fn parse_video_options(req: &StartReplayBundleRequest) -> Result<(RecordingConta
     let container_raw = req.container.as_deref().unwrap_or("mp4").trim().to_ascii_lowercase();
     let container = match container_raw.as_str() {
         "mp4" => RecordingContainer::Mp4,
-        "raw" | "annexb" => RecordingContainer::Raw,
-        "h264" | "avc" => {
-            codec = RecordingCodec::H264;
-            RecordingContainer::Raw
-        }
-        "h265" | "hevc" => {
-            codec = RecordingCodec::H265;
-            RecordingContainer::Raw
-        }
+        "raw" => RecordingContainer::Raw,
         other => return Err(ApiError::bad_request(format!("unsupported container: {other}"))),
     };
 

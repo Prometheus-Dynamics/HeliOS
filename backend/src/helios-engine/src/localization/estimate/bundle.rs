@@ -49,8 +49,7 @@ fn rotation_condition_scale(pairs: &[TranslationPair], runtime_tuning: &Localiza
         runtime_tuning.bundle_condition_low_rotation_scale
     } else if ratio <= mid_ratio {
         let t = ((ratio - low_ratio) / (mid_ratio - low_ratio)).clamp(0.0, 1.0);
-        runtime_tuning.bundle_condition_low_rotation_scale
-            + (runtime_tuning.bundle_condition_mid_rotation_scale - runtime_tuning.bundle_condition_low_rotation_scale) * t
+        runtime_tuning.bundle_condition_low_rotation_scale + (runtime_tuning.bundle_condition_mid_rotation_scale - runtime_tuning.bundle_condition_low_rotation_scale) * t
     } else {
         1.0
     }
@@ -125,12 +124,7 @@ fn bundle_residual_vector(
     DVector::from_vec(residuals)
 }
 
-pub(super) fn bundle_refine_pose(
-    initial: PoseTransform,
-    pairs: &[TranslationPair],
-    rotation_pairs: &[RotationPair],
-    runtime_tuning: &LocalizationSolverRuntimeTuningConfig,
-) -> PoseTransform {
+pub(super) fn bundle_refine_pose(initial: PoseTransform, pairs: &[TranslationPair], rotation_pairs: &[RotationPair], runtime_tuning: &LocalizationSolverRuntimeTuningConfig) -> PoseTransform {
     if !runtime_tuning.bundle_refine_enabled || pairs.len() < 3 {
         return initial;
     }

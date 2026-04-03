@@ -70,7 +70,13 @@ pub(crate) async fn apply_startup_preset(state: AppState) {
     reconcile_persisted_startup_state().await;
     super::localization::maps::seed_bundled_field_maps().await;
 
-    let marker_path = startup_marker_path();
+    let marker_path = match startup_marker_path() {
+        Ok(path) => path,
+        Err(err) => {
+            warn!(error = %err, "failed to resolve startup preset marker path");
+            return;
+        }
+    };
 
     if fs::metadata(&marker_path).await.is_ok() {
         return;

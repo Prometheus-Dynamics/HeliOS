@@ -9,15 +9,15 @@ use tokio::fs;
 use tracing::warn;
 use uuid::Uuid;
 
-mod record;
 mod listing;
 mod pose;
-pub(crate) use record::{PersistedStreamRecord, PersistedStreamReconcileStatus, derived_stream_id};
-pub(crate) use record::{descriptor_snapshot_for_record, ensure_descriptor_snapshot_has_mode, synthesize_descriptor_snapshot_from_manifest};
+mod record;
+use listing::list_records;
 #[cfg(test)]
 use record::CURRENT_PERSISTED_STREAM_RECORD_SCHEMA_VERSION;
+pub(crate) use record::{PersistedStreamReconcileStatus, PersistedStreamRecord, derived_stream_id};
 use record::{canonicalize_resolved_capture_identity, materialize_descriptor_snapshot, parse_persisted_stream_record};
-use listing::list_records;
+pub(crate) use record::{descriptor_snapshot_for_record, ensure_descriptor_snapshot_has_mode, synthesize_descriptor_snapshot_from_manifest};
 
 fn now_rfc3339() -> String {
     Utc::now().to_rfc3339()

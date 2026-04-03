@@ -396,4 +396,3 @@ impl StreamManifest {
         }
     }
 }
-

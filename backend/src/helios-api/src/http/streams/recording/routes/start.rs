@@ -11,12 +11,13 @@ use uuid::Uuid;
 use crate::http::error::ApiError;
 use crate::http::media::{MediaItem, MediaMetadata, write_media_metadata};
 use crate::http::storage;
+use crate::http::streams::recording::StartRecordingRequest;
 use crate::http::streams::recording::media::{
     clear_media_imu_sidecar, content_type_for_extension, ensure_extension, frame_timestamps_file_name, imu_sidecar_file_name, recording_extension, unique_media_name,
 };
 use crate::http::streams::recording::options::{clamp_imu_interval_ms, infer_recording_fps, infer_stream_codec, parse_recording_options, parse_recording_settings};
 use crate::http::streams::recording::sidecar::start_imu_sidecar_session;
-use crate::http::streams::recording::{ActiveRecordingSession, StartRecordingRequest};
+use crate::http::streams::recording::state::ActiveRecordingSession;
 use crate::http::streams::util::{engine_error_body, map_client_error};
 use helios_engine::ipc::{EngineErrorCode, EngineEvent, RecordingCodec, RecordingSource};
 

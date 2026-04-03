@@ -4,9 +4,9 @@ use crate::ipc::{self, engine::connect_engine_at_for_tests};
 use helios_engine::capture::{BackendHandle, BackendKind, CaptureConfig, ModeId};
 use helios_engine::identity::DeviceIdentity;
 use helios_engine::ipc::{
-    EngineCommand, EngineEvent, StreamCaptureRuntimeState, StreamCaptureState, StreamCodecChainRuntimeState, StreamDemandPipelineRuntimeState, StreamDemandRuntimeState,
-    StreamGraphDemandRuntimeState, StreamPipelineRuntimeState, StreamRecordingDemandRuntimeState, StreamRecordingRuntimeState, StreamRuntimeCapabilities, StreamRuntimeState, StreamSummary,
-    StreamViewerDemandRuntimeState, cached_stream_runtime_capabilities,
+    EngineCommand, EngineEvent, StreamCaptureRuntimeState, StreamCaptureState, StreamCodecChainRuntimeState, StreamDemandPipelineRuntimeState, StreamDemandRuntimeState, StreamGraphDemandRuntimeState,
+    StreamPipelineRuntimeState, StreamRecordingDemandRuntimeState, StreamRecordingRuntimeState, StreamRuntimeCapabilities, StreamRuntimeState, StreamSummary, StreamViewerDemandRuntimeState,
+    cached_stream_runtime_capabilities,
 };
 use helios_engine::stream::StreamFrameDemandMetrics;
 use lib_ipc::server;
@@ -212,12 +212,7 @@ fn ensure_descriptor_has_mode_adds_requested_mode_to_existing_snapshot() {
     let manifest = sample_ov9782_manifest();
     let alternate_format = MediaFormat::new(FourCc::new(*b"RGB3"), Resolution::new(640, 480).unwrap(), ColorSpace::Srgb);
     let mut descriptor = helios_engine::capture::CaptureDescriptor {
-        modes: vec![helios_engine::capture::CaptureMode {
-            id: ModeId { format: alternate_format, interval: None },
-            format: alternate_format,
-            intervals: Default::default(),
-            interval_stepwise: None,
-        }],
+        modes: vec![helios_engine::capture::CaptureMode { id: ModeId { format: alternate_format, interval: None }, format: alternate_format, intervals: Default::default(), interval_stepwise: None }],
         controls: Vec::new(),
     };
 
@@ -229,13 +224,7 @@ fn ensure_descriptor_has_mode_adds_requested_mode_to_existing_snapshot() {
 
 fn sample_stream_runtime() -> StreamRuntimeState {
     StreamRuntimeState {
-        capture: StreamCaptureRuntimeState {
-            state: StreamCaptureState::Running,
-            started_at_ms: Some(42),
-            capture_fourcc: Some("YUYV".to_string()),
-            disabled_since_ms: None,
-            disabled_reason: None,
-        },
+        capture: StreamCaptureRuntimeState { state: StreamCaptureState::Running, started_at_ms: Some(42), capture_fourcc: Some("YUYV".to_string()), disabled_since_ms: None, disabled_reason: None },
         codecs: StreamCodecChainRuntimeState {
             capture_input_fourcc: Some("YUYV".to_string()),
             decoder_impl: Some("yuyv-cpu".to_string()),

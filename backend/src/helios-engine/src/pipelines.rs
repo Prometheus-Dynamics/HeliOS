@@ -1,3 +1,4 @@
+use lib_runtime_policy::HELIOS_PIPELINE_DATA_ROOT_POLICY;
 use lib_schema_migration::{normalize_to_current, SyncSchemaPlan};
 use serde_json::Value as JsonValue;
 use std::io;
@@ -5,35 +6,16 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 use uuid::Uuid;
 
-static DATA_ROOT: OnceLock<PathBuf> = OnceLock::new();
+static DATA_ROOT: OnceLock<Result<PathBuf, String>> = OnceLock::new();
 const CURRENT_PIPELINE_DOCUMENT_SCHEMA_VERSION: u32 = 1;
 const CURRENT_PIPELINE_TEMPLATE_DOCUMENT_SCHEMA_VERSION: u32 = 1;
 
-fn data_root() -> PathBuf {
-    DATA_ROOT
-        .get_or_init(|| {
-            if let Ok(dir) = std::env::var("HELIOS_PIPELINE_DIR") {
-                return PathBuf::from(dir);
-            }
-            if let Ok(dir) = std::env::var("HELIOS_API_DATA_DIR") {
-                return PathBuf::from(dir);
-            }
-
-            let candidates = [PathBuf::from("/data/helios/api"), PathBuf::from("/var/lib/helios/api"), std::env::temp_dir().join("helios-api")];
-
-            for candidate in candidates {
-                if candidate.is_dir() || std::fs::create_dir_all(&candidate).is_ok() {
-                    return candidate;
-                }
-            }
-
-            std::env::temp_dir().join("helios-api")
-        })
-        .clone()
+fn data_root() -> io::Result<PathBuf> {
+    DATA_ROOT.get_or_init(|| HELIOS_PIPELINE_DATA_ROOT_POLICY.resolve().map_err(|err| err.to_string())).clone().map_err(|err| io::Error::other(err.clone()))
 }
 
-fn pipeline_dir() -> PathBuf {
-    data_root().join("pipelines")
+fn pipeline_dir() -> io::Result<PathBuf> {
+    Ok(data_root()?.join("pipelines"))
 }
 
 fn template_dir() -> PathBuf {
@@ -50,7 +32,7 @@ fn template_dir() -> PathBuf {
 }
 
 pub(crate) fn load_pipeline_graph_json(pipeline_id: Uuid) -> io::Result<JsonValue> {
-    let path = pipeline_dir().join(format!("{pipeline_id}.json"));
+    let path = pipeline_dir()?.join(format!("{pipeline_id}.json"));
     let data = std::fs::read(&path)?;
     let doc = decode_pipeline_document(&data)?;
     let mut graph = doc.get("graph").cloned().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "pipeline graph missing 'graph' field"))?;

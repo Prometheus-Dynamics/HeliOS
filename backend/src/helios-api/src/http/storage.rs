@@ -11,7 +11,7 @@ pub(crate) fn probe_storage_health() -> StorageHealthSnapshot {
     health::probe_storage_health()
 }
 
-pub(crate) fn data_root_path() -> PathBuf {
+pub(crate) fn data_root_path() -> std::io::Result<PathBuf> {
     paths::data_root_path()
 }
 

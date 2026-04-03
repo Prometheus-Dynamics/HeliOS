@@ -40,7 +40,7 @@ const SNAPSHOT_SOURCE_TIMEOUT: Duration = Duration::from_secs(3);
 const SHADOW_STOP_TIMEOUT: Duration = Duration::from_secs(10);
 const STREAM_RUNTIME_QUERY_TIMEOUT: Duration = Duration::from_millis(250);
 
-static SHADOW_DATA_ROOT: OnceLock<PathBuf> = OnceLock::new();
+static SHADOW_DATA_ROOT: OnceLock<std::result::Result<PathBuf, String>> = OnceLock::new();
 
 #[path = "manager/calibration.rs"]
 mod calibration;

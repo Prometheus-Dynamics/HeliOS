@@ -31,7 +31,11 @@ fn upload_root_candidates_for_override(override_path: Option<PathBuf>) -> Vec<Pa
     if let Some(path) = override_path {
         return vec![path];
     }
-    vec![PathBuf::from(DEFAULT_OTA_UPLOAD_DIR), storage::data_root_path().join("ota-uploads")]
+    let mut candidates = vec![PathBuf::from(DEFAULT_OTA_UPLOAD_DIR)];
+    if let Ok(data_root) = storage::data_root_path() {
+        candidates.push(data_root.join("ota-uploads"));
+    }
+    candidates
 }
 
 pub fn ensure_upload_dir() -> io::Result<PathBuf> {

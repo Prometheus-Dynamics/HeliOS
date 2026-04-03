@@ -1,15 +1,1 @@
-[[required_shims]]
-id = "streams-replay-annexb-remux-compat-cache"
-path = "backend/src/helios-api/src/http/streams/replay.rs"
-owner = "HeliOS"
-delete_by = "2026-12-31"
-reason = "Replay still remuxes raw annex-b H264/H265 captures into MP4 as a compatibility bridge for older/offboard media archives."
-replace_with = "Standardize replay inputs on supported containerized media and remove the on-demand remux cache."
-
-[[required_shims]]
-id = "storage-temp-data-root-fallback"
-path = "backend/src/helios-api/src/http/storage/paths.rs"
-owner = "HeliOS"
-delete_by = "2026-09-30"
-reason = "helios-api still falls back to a temp data root when persistent partitions are unavailable during bring-up or tests."
-replace_with = "Require a mounted persistent data root outside of explicit test overrides and fail startup instead of silently degrading to tmp."
+required_shims = []

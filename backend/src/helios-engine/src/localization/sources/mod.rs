@@ -17,10 +17,7 @@ mod pose;
 mod temporal;
 
 use multitag::apply_multitag_normal_consistency;
-use temporal::{
-    apply_pair_distance_consistency, collapse_duplicate_tag_detections, pose_reliability_quality,
-    smooth_detection_tag_poses,
-};
+use temporal::{apply_pair_distance_consistency, collapse_duplicate_tag_detections, pose_reliability_quality, smooth_detection_tag_poses};
 
 pub enum SourceParse {
     Detections(ParsedDetections),

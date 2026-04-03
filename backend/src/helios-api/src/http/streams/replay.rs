@@ -4,11 +4,9 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use flate2::read::GzDecoder;
 use serde::Deserialize;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -177,17 +175,18 @@ pub(crate) async fn start_media_replay_stream(State(state): State<AppState>, Jso
                 return (StatusCode::BAD_GATEWAY, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("failed to stat media {name}: {err}")))).into_response();
             }
         }
-        let fps_hint = req.fps.map(|value| value as f32).or(replay_fps_hint(&meta_dir, &name, &path).await);
+        if raw_annexb_format_hint(&name).is_some() {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(engine_error_body(Some(EngineErrorCode::InvalidInput), format!("raw annex-b replay is no longer supported for {name}; containerize the capture as mp4 first"))),
+            )
+                .into_response();
+        }
+        let fps_hint = req.fps.map(|value| value as f32).or(replay_fps_hint(&meta_dir, &name).await);
         if req.fps.is_none() && inferred_playback_fps.is_none() {
             inferred_playback_fps = fps_hint;
         }
-        let replay_path = match ensure_replay_compatible_path(&meta_dir, &path, &name, fps_hint).await {
-            Ok(value) => value,
-            Err(reason) => {
-                return (StatusCode::BAD_GATEWAY, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("failed to prepare replay input for {name}: {reason}")))).into_response();
-            }
-        };
-        paths.push(replay_path);
+        paths.push(path);
     }
 
     let fps = req.fps.or_else(|| inferred_playback_fps.map(|value| value.round() as u32)).unwrap_or(30).clamp(1, 240);
@@ -283,20 +282,6 @@ async fn resolve_replay_calibration(state: &AppState, source_stream_id: Option<U
     None
 }
 
-async fn ensure_replay_compatible_path(meta_dir: &Path, source: &Path, source_name: &str, fps_hint: Option<f32>) -> Result<PathBuf, String> {
-    // TEMP_SHIM: streams-replay-annexb-remux-compat-cache
-    // Older/offboard raw annex-b captures still need an MP4 wrapper before the replay stack can consume them reliably.
-    let Some(format_hint) = raw_annexb_format_hint(source_name) else {
-        return Ok(source.to_path_buf());
-    };
-
-    let output = replay_cache_path(meta_dir, source_name, fps_hint);
-    if !replay_cache_fresh(source, &output).await.unwrap_or(false) {
-        remux_raw_to_mp4(source, &output, format_hint, fps_hint).await?;
-    }
-    Ok(output)
-}
-
 fn raw_annexb_format_hint(source_name: &str) -> Option<&'static str> {
     let ext = source_name.rsplit('.').next()?.trim().to_ascii_lowercase();
     match ext.as_str() {
@@ -306,65 +291,7 @@ fn raw_annexb_format_hint(source_name: &str) -> Option<&'static str> {
     }
 }
 
-fn replay_cache_path(meta_dir: &Path, source_name: &str, fps_hint: Option<f32>) -> PathBuf {
-    let fps_tag = fps_hint.filter(|value| value.is_finite() && *value > 0.0).map(|value| format!("{value:.3}").replace('.', "_")).unwrap_or_else(|| "auto".to_string());
-    meta_dir.join(format!("{source_name}.replay.{fps_tag}.mp4"))
-}
-
-async fn replay_cache_fresh(source: &Path, replay: &Path) -> Result<bool, std::io::Error> {
-    let source_meta = tokio::fs::metadata(source).await?;
-    let replay_meta = match tokio::fs::metadata(replay).await {
-        Ok(meta) => meta,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(err) => return Err(err),
-    };
-    let source_modified = source_meta.modified().ok();
-    let replay_modified = replay_meta.modified().ok();
-    Ok(matches!((source_modified, replay_modified), (Some(src), Some(dst)) if dst >= src))
-}
-
-async fn remux_raw_to_mp4(source: &Path, output: &Path, format_hint: &'static str, fps_hint: Option<f32>) -> Result<(), String> {
-    if let Some(parent) = output.parent() {
-        tokio::fs::create_dir_all(parent).await.map_err(|err| format!("replay cache dir create failed: {err}"))?;
-    }
-    let temp = output.with_extension("tmp.mp4");
-    let source_path = source.to_path_buf();
-    let output_path = temp.clone();
-    let fps_hint = fps_hint.filter(|value| value.is_finite() && *value > 0.0);
-
-    tokio::task::spawn_blocking(move || {
-        let mut cmd = Command::new("ffmpeg");
-        cmd.arg("-y").arg("-loglevel").arg("error");
-        cmd.arg("-fflags").arg("+genpts");
-        cmd.arg("-f").arg(format_hint);
-        if let Some(fps) = fps_hint {
-            cmd.arg("-r").arg(format!("{fps:.6}"));
-        }
-        cmd.arg("-i").arg(&source_path);
-        cmd.arg("-an");
-        // Preserve the original bitstream for speed; this wraps annex-b raw into MP4.
-        cmd.arg("-c:v").arg("copy");
-        cmd.arg("-movflags").arg("+faststart");
-        cmd.arg(&output_path);
-        let out = cmd.output().map_err(|err| format!("ffmpeg launch failed: {err}"))?;
-        if out.status.success() {
-            return Ok(());
-        }
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        let reason = stderr.trim();
-        if reason.is_empty() { Err(format!("ffmpeg failed with status {}", out.status)) } else { Err(format!("ffmpeg failed: {reason}")) }
-    })
-    .await
-    .map_err(|_| "ffmpeg replay remux task failed".to_string())??;
-
-    if let Err(err) = tokio::fs::rename(&temp, output).await {
-        let _ = tokio::fs::remove_file(output).await;
-        tokio::fs::rename(&temp, output).await.map_err(|err2| format!("replay cache rename failed after retry ({err}): {err2}"))?;
-    }
-    Ok(())
-}
-
-async fn replay_fps_hint(meta_dir: &Path, name: &str, source_path: &Path) -> Option<f32> {
+async fn replay_fps_hint(meta_dir: &Path, name: &str) -> Option<f32> {
     let bytes = tokio::fs::read(meta_dir.join(format!("{name}.json"))).await.ok()?;
     let meta: MediaMetadata = serde_json::from_slice(&bytes).ok()?;
     let metadata_fps = meta.fps.filter(|fps| fps.is_finite() && *fps > 0.0);
@@ -374,14 +301,7 @@ async fn replay_fps_hint(meta_dir: &Path, name: &str, source_path: &Path) -> Opt
             return Some(fps);
         }
     }
-    let Some(format_hint) = raw_annexb_format_hint(name) else {
-        return metadata_fps;
-    };
-    let Some(sidecar_name) = meta.imu_data_file_name.as_deref().and_then(storage::sanitize_name) else {
-        return metadata_fps;
-    };
-    let sidecar_path = meta_dir.join(sidecar_name);
-    derive_fps_from_sidecar(&sidecar_path, source_path, format_hint).await.or(metadata_fps)
+    metadata_fps
 }
 
 async fn resolve_frame_ts_path(meta_dir: &Path, sidecar_name: &str) -> Option<PathBuf> {
@@ -411,62 +331,6 @@ async fn derive_fps_from_frame_timestamps(path: &Path) -> Option<f32> {
     Some((fps as f32).clamp(1.0, 240.0))
 }
 
-async fn derive_fps_from_sidecar(sidecar_path: &Path, source_path: &Path, format_hint: &'static str) -> Option<f32> {
-    let sidecar_path = sidecar_path.to_path_buf();
-    let span_ms = tokio::task::spawn_blocking(move || imu_sidecar_span_ms_sync(&sidecar_path)).await.ok().flatten()?;
-    if span_ms <= 0 {
-        return None;
-    }
-
-    let source_path = source_path.to_path_buf();
-    let format_hint = format_hint.to_string();
-    let frame_count = tokio::task::spawn_blocking(move || probe_raw_frame_count_sync(&source_path, &format_hint)).await.ok().flatten()?;
-    if frame_count == 0 {
-        return None;
-    }
-
-    let fps = (frame_count as f64 * 1000.0) / (span_ms as f64);
-    if !fps.is_finite() || fps <= 0.0 {
-        return None;
-    }
-    Some((fps as f32).clamp(1.0, 240.0))
-}
-
-fn imu_sidecar_span_ms_sync(path: &Path) -> Option<i64> {
-    let file = std::fs::File::open(path).ok()?;
-    let reader = BufReader::new(GzDecoder::new(file));
-    let mut first: Option<i64> = None;
-    let mut last: Option<i64> = None;
-
-    for line in reader.lines() {
-        let Ok(line) = line else {
-            continue;
-        };
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
-            continue;
-        };
-        let Some(t_ms) = value.get("t_ms").and_then(|value| value.as_i64()) else {
-            continue;
-        };
-        if first.is_none() {
-            first = Some(t_ms);
-        }
-        last = Some(t_ms);
-    }
-
-    let first = first?;
-    let last = last?;
-    (last > first).then_some(last - first)
-}
-
-fn probe_raw_frame_count_sync(path: &Path, format_hint: &str) -> Option<u64> {
-    run_ffprobe_frame_count(path, format_hint, "-count_frames", "nb_read_frames").or_else(|| run_ffprobe_frame_count(path, format_hint, "-count_packets", "nb_read_packets"))
-}
-
 fn frame_timestamp_span_sync(path: &Path) -> Option<(u64, u64, u64)> {
     let file = std::fs::File::open(path).ok()?;
     let reader = BufReader::new(file);
@@ -474,9 +338,10 @@ fn frame_timestamp_span_sync(path: &Path) -> Option<(u64, u64, u64)> {
     let mut first = None;
     let mut last = None;
 
-    for line in reader.lines() {
-        let Ok(line) = line else {
-            continue;
+    for line_result in reader.lines() {
+        let line = match line_result {
+            Ok(line) => line,
+            Err(_) => continue,
         };
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -493,27 +358,4 @@ fn frame_timestamp_span_sync(path: &Path) -> Option<(u64, u64, u64)> {
     }
 
     Some((count, first?, last?))
-}
-
-fn run_ffprobe_frame_count(path: &Path, format_hint: &str, count_mode: &str, field: &str) -> Option<u64> {
-    let output = Command::new("ffprobe")
-        .arg("-v")
-        .arg("error")
-        .arg("-f")
-        .arg(format_hint)
-        .arg(count_mode)
-        .arg("-select_streams")
-        .arg("v:0")
-        .arg("-show_entries")
-        .arg(format!("stream={field}"))
-        .arg("-of")
-        .arg("default=noprint_wrappers=1:nokey=1")
-        .arg(path)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let text = String::from_utf8(output.stdout).ok()?;
-    text.trim().parse::<u64>().ok()
 }

@@ -2,9 +2,10 @@ use helios_engine::ipc::{EngineEvent, RecordingCodec, RecordingContainer};
 use uuid::Uuid;
 
 use crate::http::error::ApiError;
-use crate::http::streams::recording::{
-    CaptureShadowRecordingRequest, IMU_SIDE_CAR_DEFAULT_INTERVAL_MS, IMU_SIDE_CAR_MAX_INTERVAL_MS, IMU_SIDE_CAR_MIN_INTERVAL_MS, RECORDING_STOP_GRACE_DEFAULT_MS, RECORDING_STOP_GRACE_MAX_MS,
-    RECORDING_STOP_GRACE_MIN_MS, StartRecordingRequest,
+use crate::http::streams::recording::{CaptureShadowRecordingRequest, StartRecordingRequest};
+
+use super::types::{
+    IMU_SIDE_CAR_DEFAULT_INTERVAL_MS, IMU_SIDE_CAR_MAX_INTERVAL_MS, IMU_SIDE_CAR_MIN_INTERVAL_MS, RECORDING_STOP_GRACE_DEFAULT_MS, RECORDING_STOP_GRACE_MAX_MS, RECORDING_STOP_GRACE_MIN_MS,
 };
 
 pub(super) fn clamp_imu_interval_ms(value: Option<u64>) -> u64 {
@@ -20,7 +21,7 @@ pub(super) fn recording_stop_grace_ms() -> u64 {
 }
 
 pub(super) fn parse_recording_options(req: &StartRecordingRequest) -> Result<(RecordingContainer, RecordingCodec), Box<ApiError>> {
-    let mut codec = match req.codec.as_deref().unwrap_or("h265").trim().to_ascii_lowercase().as_str() {
+    let codec = match req.codec.as_deref().unwrap_or("h265").trim().to_ascii_lowercase().as_str() {
         "h264" | "avc" => RecordingCodec::H264,
         "h265" | "hevc" => RecordingCodec::H265,
         other => {
@@ -31,15 +32,7 @@ pub(super) fn parse_recording_options(req: &StartRecordingRequest) -> Result<(Re
     let container_raw = req.container.as_deref().unwrap_or("raw").trim().to_ascii_lowercase();
     let container = match container_raw.as_str() {
         "mp4" => RecordingContainer::Mp4,
-        "raw" | "annexb" => RecordingContainer::Raw,
-        "h264" | "avc" => {
-            codec = RecordingCodec::H264;
-            RecordingContainer::Raw
-        }
-        "h265" | "hevc" => {
-            codec = RecordingCodec::H265;
-            RecordingContainer::Raw
-        }
+        "raw" => RecordingContainer::Raw,
         other => {
             return Err(Box::new(ApiError::bad_request(format!("unsupported container: {other}"))));
         }
@@ -52,9 +45,7 @@ pub(super) fn parse_capture_container(req: &CaptureShadowRecordingRequest) -> Re
     let container_raw = req.container.as_deref().unwrap_or("raw").trim().to_ascii_lowercase();
     match container_raw.as_str() {
         "mp4" => Ok(RecordingContainer::Mp4),
-        "raw" | "annexb" => Ok(RecordingContainer::Raw),
-        "h264" | "avc" => Ok(RecordingContainer::Raw),
-        "h265" | "hevc" => Ok(RecordingContainer::Raw),
+        "raw" => Ok(RecordingContainer::Raw),
         other => Err(Box::new(ApiError::bad_request(format!("unsupported container: {other}")))),
     }
 }
@@ -124,4 +115,38 @@ pub(super) fn parse_recording_settings(req: &StartRecordingRequest) -> Option<he
         return None;
     }
     Some(helios_engine::ipc::RecordingSettings { fps, bitrate_bps, gop, quality, max_width, max_height })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{CaptureShadowRecordingRequest, StartRecordingRequest};
+    use super::{parse_capture_container, parse_recording_options};
+
+    #[test]
+    fn recording_container_aliases_are_rejected() {
+        let req = StartRecordingRequest {
+            name: Some("out.h264".into()),
+            source: None,
+            codec: Some("h264".into()),
+            container: Some("annexb".into()),
+            duration_ms: None,
+            fps: None,
+            bitrate_bps: None,
+            gop: None,
+            quality: None,
+            max_width: None,
+            max_height: None,
+            include_imu: None,
+            imu_interval_ms: None,
+        };
+        let err = parse_recording_options(&req).expect_err("annexb alias should be rejected");
+        assert!(err.to_string().contains("unsupported container"));
+    }
+
+    #[test]
+    fn shadow_capture_container_aliases_are_rejected() {
+        let req = CaptureShadowRecordingRequest { window_ms: 1_000, name: Some("shadow.h264".into()), container: Some("h264".into()), codec: None };
+        let err = parse_capture_container(&req).expect_err("codec aliases should not be accepted as containers");
+        assert!(err.to_string().contains("unsupported container"));
+    }
 }

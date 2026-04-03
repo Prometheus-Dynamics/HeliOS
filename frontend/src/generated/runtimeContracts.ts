@@ -3,13 +3,11 @@
 /* localization_external_source_ids owner: HeliOS | boundary: helios-api <-> frontend localization external source ids | source_of_truth: frontend/src/lib/features/localization/externalSourceIds.ts */
 
 export const CALIBRATION_MODE_PIPELINE_UUID = "00000000-0000-0000-0000-00000000c411";
-export const LEGACY_RAW_PIPELINE_UUID = "00000000-0000-0000-0000-0000000000ab";
 export const RAW_PIPELINE_UUID = "00000000-0000-0000-0000-0000000000aa";
 export const DEVICE_IMU_EXTERNAL_SOURCE_ID = "imu";
 
 export const STREAM_PIPELINE_UUIDS = {
   RAW: RAW_PIPELINE_UUID,
-  LEGACY_RAW: LEGACY_RAW_PIPELINE_UUID,
   CALIBRATION_MODE: CALIBRATION_MODE_PIPELINE_UUID
 } as const;
 

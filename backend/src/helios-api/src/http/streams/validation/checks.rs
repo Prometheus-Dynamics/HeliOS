@@ -15,11 +15,7 @@ pub(super) fn validate_explicit_stream_config(manifest: &StreamManifest, issues:
         || manifest.pipeline_layout.is_some()
         || !manifest.pipeline_wires.is_empty();
     if !manifest.pipeline_enabled && has_disabled_pipeline_state {
-        issues.push(issue(
-            "/pipeline_enabled",
-            "pipeline_disabled_with_pipeline_state",
-            "pipeline_enabled=false requires pipelines, active pipeline selection, layout, and wires to be empty",
-        ));
+        issues.push(issue("/pipeline_enabled", "pipeline_disabled_with_pipeline_state", "pipeline_enabled=false requires pipelines, active pipeline selection, layout, and wires to be empty"));
     }
 }
 
@@ -37,53 +33,25 @@ pub(super) fn validate_backend_and_handle(manifest: &StreamManifest, issues: &mu
         issues.push(issue(
             "/capture/handle",
             "backend_handle_mismatch",
-            format!(
-                "capture backend `{}` does not match handle variant `{}`",
-                backend_label(manifest.capture.backend),
-                handle_label(&manifest.capture.handle)
-            ),
+            format!("capture backend `{}` does not match handle variant `{}`", backend_label(manifest.capture.backend), handle_label(&manifest.capture.handle)),
         ));
     }
 }
 
-pub(super) fn validate_stream_feature_compatibility(
-    manifest: &StreamManifest,
-    runtime: &StreamRuntimeCapabilities,
-    issues: &mut Vec<ValidationIssue>,
-) {
+pub(super) fn validate_stream_feature_compatibility(manifest: &StreamManifest, runtime: &StreamRuntimeCapabilities, issues: &mut Vec<ValidationIssue>) {
     validate_requested_codec_compatibility(manifest, runtime, issues);
     validate_recording_mode_compatibility(manifest, runtime, issues);
 }
 
-fn validate_requested_codec_compatibility(
-    manifest: &StreamManifest,
-    runtime: &StreamRuntimeCapabilities,
-    issues: &mut Vec<ValidationIssue>,
-) {
+fn validate_requested_codec_compatibility(manifest: &StreamManifest, runtime: &StreamRuntimeCapabilities, issues: &mut Vec<ValidationIssue>) {
     if !manifest.encoder.is_disabled() {
-        validate_codec_selector_available(
-            styx::prelude::FourCc::new(*b"RG24"),
-            CodecKind::Encoder,
-            manifest.encoder.id(),
-            runtime,
-            "/encoder/id",
-            "encoder_unavailable",
-            issues,
-        );
+        validate_codec_selector_available(styx::prelude::FourCc::new(*b"RG24"), CodecKind::Encoder, manifest.encoder.id(), runtime, "/encoder/id", "encoder_unavailable", issues);
         validate_encoder_settings_compatibility(manifest, runtime, issues);
     }
 
     if !manifest.decoder.is_disabled() {
         let capture_fourcc = manifest.capture.mode.format.code;
-        validate_codec_selector_available(
-            capture_fourcc,
-            CodecKind::Decoder,
-            manifest.decoder.id(),
-            runtime,
-            "/decoder/id",
-            "decoder_unavailable",
-            issues,
-        );
+        validate_codec_selector_available(capture_fourcc, CodecKind::Decoder, manifest.decoder.id(), runtime, "/decoder/id", "decoder_unavailable", issues);
     }
 }
 
@@ -146,11 +114,7 @@ fn validate_encoder_settings_values(settings: &EncoderSettings, issues: &mut Vec
             if let Some(output_resolution) = output_resolution
                 && (output_resolution.width == 0 || output_resolution.height == 0)
             {
-                issues.push(issue(
-                    "/encoder/settings/output_resolution",
-                    "encoder_output_resolution_invalid",
-                    "encoder output resolution width and height must be greater than zero",
-                ));
+                issues.push(issue("/encoder/settings/output_resolution", "encoder_output_resolution_invalid", "encoder output resolution width and height must be greater than zero"));
             }
         }
     }
@@ -182,12 +146,7 @@ fn validate_codec_selector_available(
         CodecKind::Encoder => "Choose an available encoder selector for this stream, or disable encoding.",
         CodecKind::Decoder => "Choose a decoder selector that supports the selected capture format, or disable decoding.",
     };
-    issues.push(issue_with_remediation(
-        pointer,
-        code,
-        format!("{kind_label} `{selector}` is not available for capture format {format_label}"),
-        remediation,
-    ));
+    issues.push(issue_with_remediation(pointer, code, format!("{kind_label} `{selector}` is not available for capture format {format_label}"), remediation));
 }
 
 fn codec_selector_available(runtime: &StreamRuntimeCapabilities, input: styx::prelude::FourCc, kind: CodecKind, selector: &str) -> bool {
@@ -354,11 +313,7 @@ pub(super) async fn validate_file_backend_media_paths(manifest: &StreamManifest,
         }
         if !is_supported_file_replay_path(path) {
             let content_type = file_replay_content_type(path);
-            issues.push(issue(
-                pointer,
-                "unsupported_media_type",
-                format!("unsupported media type `{content_type}` for file replay path: {}", path.display()),
-            ));
+            issues.push(issue(pointer, "unsupported_media_type", format!("unsupported media type `{content_type}` for file replay path: {}", path.display())));
         }
     }
 }
@@ -379,53 +334,29 @@ pub(super) fn validate_pipeline_layout(manifest: &StreamManifest, issues: &mut V
     let mut seen_slots = BTreeSet::<(u8, u8)>::new();
     for (index, slot) in layout.slots.iter().enumerate() {
         if layout.rows > 0 && slot.row >= layout.rows {
-            issues.push(issue(
-                format!("/pipelineLayout/slots/{index}/row"),
-                "slot_out_of_bounds",
-                format!("slot row {} is outside layout row count {}", slot.row, layout.rows),
-            ));
+            issues.push(issue(format!("/pipelineLayout/slots/{index}/row"), "slot_out_of_bounds", format!("slot row {} is outside layout row count {}", slot.row, layout.rows)));
         }
         if layout.columns > 0 && slot.column >= layout.columns {
-            issues.push(issue(
-                format!("/pipelineLayout/slots/{index}/column"),
-                "slot_out_of_bounds",
-                format!("slot column {} is outside layout column count {}", slot.column, layout.columns),
-            ));
+            issues.push(issue(format!("/pipelineLayout/slots/{index}/column"), "slot_out_of_bounds", format!("slot column {} is outside layout column count {}", slot.column, layout.columns)));
         }
         if !seen_slots.insert((slot.row, slot.column)) {
-            issues.push(issue(
-                format!("/pipelineLayout/slots/{index}"),
-                "duplicate_slot",
-                format!("duplicate layout slot at row {}, column {}", slot.row, slot.column),
-            ));
+            issues.push(issue(format!("/pipelineLayout/slots/{index}"), "duplicate_slot", format!("duplicate layout slot at row {}, column {}", slot.row, slot.column)));
         }
 
         if let Some(pipeline_id) = slot.pipeline_id
             && !known_ids.contains(&pipeline_id)
         {
-            issues.push(issue(
-                format!("/pipelineLayout/slots/{index}/pipelineId"),
-                "unknown_pipeline",
-                format!("layout references unknown pipeline id {pipeline_id}"),
-            ));
+            issues.push(issue(format!("/pipelineLayout/slots/{index}/pipelineId"), "unknown_pipeline", format!("layout references unknown pipeline id {pipeline_id}")));
         }
         if slot.pipeline_id.is_none() && slot.output_key.as_deref().is_some_and(|key| !key.trim().is_empty()) {
-            issues.push(issue(
-                format!("/pipelineLayout/slots/{index}/outputKey"),
-                "dangling_output_key",
-                "layout slot has output key but no pipeline id",
-            ));
+            issues.push(issue(format!("/pipelineLayout/slots/{index}/outputKey"), "dangling_output_key", "layout slot has output key but no pipeline id"));
         }
     }
 
     if let Some(active_pipeline_id) = manifest.active_pipeline_id
         && !known_ids.contains(&active_pipeline_id)
     {
-        issues.push(issue(
-            "/activePipelineId",
-            "unknown_pipeline",
-            format!("active pipeline id {active_pipeline_id} is not present in stream bindings"),
-        ));
+        issues.push(issue("/activePipelineId", "unknown_pipeline", format!("active pipeline id {active_pipeline_id} is not present in stream bindings")));
     }
 }
 
@@ -433,18 +364,10 @@ pub(super) fn validate_pipeline_wires(manifest: &StreamManifest, issues: &mut Ve
     let known_ids = known_pipeline_ids(manifest);
     for (index, wire) in manifest.pipeline_wires.iter().enumerate() {
         if !known_ids.contains(&wire.from.pipeline_id) {
-            issues.push(issue(
-                format!("/pipelineWires/{index}/from/pipelineId"),
-                "unknown_pipeline",
-                format!("wire source references unknown pipeline id {}", wire.from.pipeline_id),
-            ));
+            issues.push(issue(format!("/pipelineWires/{index}/from/pipelineId"), "unknown_pipeline", format!("wire source references unknown pipeline id {}", wire.from.pipeline_id)));
         }
         if !known_ids.contains(&wire.to.pipeline_id) {
-            issues.push(issue(
-                format!("/pipelineWires/{index}/to/pipelineId"),
-                "unknown_pipeline",
-                format!("wire destination references unknown pipeline id {}", wire.to.pipeline_id),
-            ));
+            issues.push(issue(format!("/pipelineWires/{index}/to/pipelineId"), "unknown_pipeline", format!("wire destination references unknown pipeline id {}", wire.to.pipeline_id)));
         }
     }
 }
@@ -453,18 +376,10 @@ pub(super) async fn validate_pipeline_bindings(manifest: &StreamManifest, issues
     let mut seen_pipeline_ids = BTreeSet::<Uuid>::new();
     for (index, binding) in manifest.pipelines.iter().enumerate() {
         if binding.pipeline_graph.is_some() {
-            issues.push(issue(
-                format!("/pipelines/{index}/pipelineGraph"),
-                "inline_pipeline_graph_forbidden",
-                "inline pipeline graph payloads are not allowed; persist graph under /pipelines",
-            ));
+            issues.push(issue(format!("/pipelines/{index}/pipelineGraph"), "inline_pipeline_graph_forbidden", "inline pipeline graph payloads are not allowed; persist graph under /pipelines"));
         }
         if !seen_pipeline_ids.insert(binding.pipeline_id) {
-            issues.push(issue(
-                format!("/pipelines/{index}/pipelineId"),
-                "duplicate_pipeline_binding",
-                format!("duplicate pipeline binding for pipeline id {}", binding.pipeline_id),
-            ));
+            issues.push(issue(format!("/pipelines/{index}/pipelineId"), "duplicate_pipeline_binding", format!("duplicate pipeline binding for pipeline id {}", binding.pipeline_id)));
         }
     }
 
@@ -480,18 +395,10 @@ pub(super) async fn validate_pipeline_bindings(manifest: &StreamManifest, issues
         match pipelines::load_graph_document(pipeline_id).await {
             Ok(_) => {}
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                issues.push(issue(
-                    format!("/pipelines/{index}/pipelineId"),
-                    "pipeline_not_found",
-                    format!("pipeline {pipeline_id} is not persisted under /pipelines"),
-                ));
+                issues.push(issue(format!("/pipelines/{index}/pipelineId"), "pipeline_not_found", format!("pipeline {pipeline_id} is not persisted under /pipelines")));
             }
             Err(err) => {
-                issues.push(issue(
-                    format!("/pipelines/{index}/pipelineId"),
-                    "pipeline_lookup_failed",
-                    format!("failed to resolve pipeline {pipeline_id}: {err}"),
-                ));
+                issues.push(issue(format!("/pipelines/{index}/pipelineId"), "pipeline_lookup_failed", format!("failed to resolve pipeline {pipeline_id}: {err}")));
             }
         }
     }

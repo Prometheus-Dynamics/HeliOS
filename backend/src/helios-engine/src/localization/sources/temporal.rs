@@ -204,11 +204,7 @@ pub(super) fn apply_pair_distance_consistency(source: &LocalizationSourceConfig,
             }
 
             let key = detection_pair_state_key(source, left.tag_id, right.tag_id);
-            let state = state_store.entry(key).or_insert_with(|| TagPairDistanceTemporalState {
-                distance_m: observed_distance,
-                updated_at: now,
-                outlier_streak: 0,
-            });
+            let state = state_store.entry(key).or_insert_with(|| TagPairDistanceTemporalState { distance_m: observed_distance, updated_at: now, outlier_streak: 0 });
 
             let stale = now.saturating_duration_since(state.updated_at) > stale_after;
             if stale {
@@ -238,11 +234,8 @@ pub(super) fn apply_pair_distance_consistency(source: &LocalizationSourceConfig,
             if pair_distance_lock_enabled {
                 let left_confidence = ((left.weight as f64).clamp(0.0, 1.0) * (left.quality as f64).clamp(0.0, 1.0)).max(1e-6);
                 let right_confidence = ((right.weight as f64).clamp(0.0, 1.0) * (right.quality as f64).clamp(0.0, 1.0)).max(1e-6);
-                let (adjust_idx, anchor_idx, adjust_confidence, anchor_confidence) = if left_confidence <= right_confidence {
-                    (left_idx, right_idx, left_confidence, right_confidence)
-                } else {
-                    (right_idx, left_idx, right_confidence, left_confidence)
-                };
+                let (adjust_idx, anchor_idx, adjust_confidence, anchor_confidence) =
+                    if left_confidence <= right_confidence { (left_idx, right_idx, left_confidence, right_confidence) } else { (right_idx, left_idx, right_confidence, left_confidence) };
 
                 let disagreement = abs_err > 0.11 || rel_err > 0.12;
                 let confidence_split = adjust_confidence < (anchor_confidence * 0.96) || severe_outlier;
@@ -271,11 +264,7 @@ pub(super) fn apply_pair_distance_consistency(source: &LocalizationSourceConfig,
                             let confidence_term = (anchor_confidence.sqrt() * (1.0 - adjust_confidence).clamp(0.18, 1.0)).clamp(0.12, 1.0);
                             let blend = (pair_distance_lock_strength * rel_disagreement * severity * confidence_term).clamp(0.0, 0.85);
                             if blend > 1e-4 {
-                                let max_shift = if severe_outlier {
-                                    pair_distance_lock_max_shift_m
-                                } else {
-                                    pair_distance_lock_max_shift_m * 0.55
-                                };
+                                let max_shift = if severe_outlier { pair_distance_lock_max_shift_m } else { pair_distance_lock_max_shift_m * 0.55 };
                                 let capped_target = adjust_translation + correction_delta * (max_shift / correction_norm).min(1.0);
                                 correction_accum[adjust_idx] += capped_target * blend;
                                 correction_weight_sum[adjust_idx] += blend;
@@ -310,8 +299,7 @@ pub(super) fn apply_pair_distance_consistency(source: &LocalizationSourceConfig,
                 continue;
             }
             let blend = weight_sum.clamp(0.0, 0.80);
-            detection.camera_from_tag.translation =
-                detection.camera_from_tag.translation + (target - detection.camera_from_tag.translation) * blend;
+            detection.camera_from_tag.translation = detection.camera_from_tag.translation + (target - detection.camera_from_tag.translation) * blend;
         }
     }
 
@@ -346,19 +334,11 @@ fn localization_pair_distance_translation_lock_enabled() -> bool {
 }
 
 fn localization_pair_distance_translation_lock_strength() -> f64 {
-    std::env::var("HELIOS_LOCALIZATION_PAIR_DISTANCE_TRANSLATION_LOCK_STRENGTH")
-        .ok()
-        .and_then(|raw| raw.trim().parse::<f64>().ok())
-        .map(|value| value.clamp(0.0, 1.0))
-        .unwrap_or(0.62)
+    std::env::var("HELIOS_LOCALIZATION_PAIR_DISTANCE_TRANSLATION_LOCK_STRENGTH").ok().and_then(|raw| raw.trim().parse::<f64>().ok()).map(|value| value.clamp(0.0, 1.0)).unwrap_or(0.62)
 }
 
 fn localization_pair_distance_translation_lock_max_shift_m() -> f64 {
-    std::env::var("HELIOS_LOCALIZATION_PAIR_DISTANCE_TRANSLATION_LOCK_MAX_SHIFT_M")
-        .ok()
-        .and_then(|raw| raw.trim().parse::<f64>().ok())
-        .map(|value| value.clamp(0.02, 2.0))
-        .unwrap_or(0.40)
+    std::env::var("HELIOS_LOCALIZATION_PAIR_DISTANCE_TRANSLATION_LOCK_MAX_SHIFT_M").ok().and_then(|raw| raw.trim().parse::<f64>().ok()).map(|value| value.clamp(0.02, 2.0)).unwrap_or(0.40)
 }
 
 pub(super) fn smooth_detection_tag_poses(source: &LocalizationSourceConfig, detections: &mut [LocalizationDetection]) {
@@ -469,15 +449,7 @@ pub(super) fn smooth_detection_tag_poses(source: &LocalizationSourceConfig, dete
         }
 
         detection.camera_from_tag = PoseTransform { translation: smoothed_translation, rotation: smoothed_rotation };
-        state_store.insert(
-            key,
-            TagPoseTemporalState {
-                translation: smoothed_translation,
-                rotation: smoothed_rotation,
-                updated_at: now,
-                outlier_streak: next_outlier_streak,
-            },
-        );
+        state_store.insert(key, TagPoseTemporalState { translation: smoothed_translation, rotation: smoothed_rotation, updated_at: now, outlier_streak: next_outlier_streak });
     }
 
     state_store.retain(|_key, state| now.saturating_duration_since(state.updated_at) <= stale_after);

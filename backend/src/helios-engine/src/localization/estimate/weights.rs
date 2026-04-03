@@ -24,10 +24,7 @@ pub(super) fn rotation_quat(r: &lib_cv::Rotation3) -> UnitQuaternion<f64> {
     UnitQuaternion::from_euler_angles(r.roll, r.pitch, r.yaw)
 }
 
-pub(super) fn rotation_observation_quality(
-    robot_from_tag_t: &Vector3<f64>,
-    runtime_tuning: &LocalizationSolverRuntimeTuningConfig,
-) -> f64 {
+pub(super) fn rotation_observation_quality(robot_from_tag_t: &Vector3<f64>, runtime_tuning: &LocalizationSolverRuntimeTuningConfig) -> f64 {
     if !robot_from_tag_t.iter().all(|value| value.is_finite()) {
         return 0.0;
     }
@@ -66,27 +63,14 @@ pub(super) fn rotation_observation_quality(
     let lateral_ratio = (robot_from_tag_t.x.abs() / depth).clamp(0.0, 10.0);
     quality *= lateral_ratio_scale(
         lateral_ratio,
-        [
-            runtime_tuning.lateral_ratio_mild,
-            runtime_tuning.lateral_ratio_medium,
-            runtime_tuning.lateral_ratio_high,
-            runtime_tuning.lateral_ratio_extreme,
-        ],
-        [
-            runtime_tuning.rotation_lateral_mild_scale,
-            runtime_tuning.rotation_lateral_medium_scale,
-            runtime_tuning.rotation_lateral_high_scale,
-            runtime_tuning.rotation_lateral_extreme_scale,
-        ],
+        [runtime_tuning.lateral_ratio_mild, runtime_tuning.lateral_ratio_medium, runtime_tuning.lateral_ratio_high, runtime_tuning.lateral_ratio_extreme],
+        [runtime_tuning.rotation_lateral_mild_scale, runtime_tuning.rotation_lateral_medium_scale, runtime_tuning.rotation_lateral_high_scale, runtime_tuning.rotation_lateral_extreme_scale],
     );
 
     quality.clamp(floor, 1.0)
 }
 
-pub(super) fn translation_observation_quality(
-    robot_from_tag_t: &Vector3<f64>,
-    runtime_tuning: &LocalizationSolverRuntimeTuningConfig,
-) -> f64 {
+pub(super) fn translation_observation_quality(robot_from_tag_t: &Vector3<f64>, runtime_tuning: &LocalizationSolverRuntimeTuningConfig) -> f64 {
     if !robot_from_tag_t.iter().all(|value| value.is_finite()) {
         return 0.0;
     }
@@ -118,12 +102,7 @@ pub(super) fn translation_observation_quality(
     let lateral_ratio = (robot_from_tag_t.x.abs() / depth).clamp(0.0, 10.0);
     quality *= lateral_ratio_scale(
         lateral_ratio,
-        [
-            runtime_tuning.lateral_ratio_mild,
-            runtime_tuning.lateral_ratio_medium,
-            runtime_tuning.lateral_ratio_high,
-            runtime_tuning.lateral_ratio_extreme,
-        ],
+        [runtime_tuning.lateral_ratio_mild, runtime_tuning.lateral_ratio_medium, runtime_tuning.lateral_ratio_high, runtime_tuning.lateral_ratio_extreme],
         [
             runtime_tuning.translation_lateral_mild_scale,
             runtime_tuning.translation_lateral_medium_scale,

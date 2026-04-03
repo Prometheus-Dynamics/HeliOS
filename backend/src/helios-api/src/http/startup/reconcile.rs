@@ -26,8 +26,20 @@ impl StartupReconcileReport {
 }
 
 pub(super) async fn reconcile_persisted_startup_state() {
-    let data_root = storage::data_root_path();
-    let marker_path = startup_marker_path();
+    let data_root = match storage::data_root_path() {
+        Ok(path) => path,
+        Err(err) => {
+            warn!(error = %err, "failed to resolve persistent API data root during startup reconciliation");
+            return;
+        }
+    };
+    let marker_path = match startup_marker_path() {
+        Ok(path) => path,
+        Err(err) => {
+            warn!(error = %err, "failed to resolve startup preset marker path during startup reconciliation");
+            return;
+        }
+    };
     match reconcile_persisted_startup_state_in_root(&data_root, &marker_path).await {
         Ok(report) if report.changed() => {
             info!(

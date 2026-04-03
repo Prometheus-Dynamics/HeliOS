@@ -13,27 +13,15 @@ fn localization_multitag_normal_lock_enabled() -> bool {
 }
 
 fn localization_multitag_normal_lock_strength() -> f64 {
-    std::env::var("HELIOS_LOCALIZATION_MULTITAG_NORMAL_LOCK_STRENGTH")
-        .ok()
-        .and_then(|raw| raw.trim().parse::<f64>().ok())
-        .map(|value| value.clamp(0.0, 1.0))
-        .unwrap_or(0.78)
+    std::env::var("HELIOS_LOCALIZATION_MULTITAG_NORMAL_LOCK_STRENGTH").ok().and_then(|raw| raw.trim().parse::<f64>().ok()).map(|value| value.clamp(0.0, 1.0)).unwrap_or(0.78)
 }
 
 fn localization_multitag_normal_lock_max_spread_deg() -> f64 {
-    std::env::var("HELIOS_LOCALIZATION_MULTITAG_NORMAL_LOCK_MAX_SPREAD_DEG")
-        .ok()
-        .and_then(|raw| raw.trim().parse::<f64>().ok())
-        .map(|value| value.clamp(8.0, 140.0))
-        .unwrap_or(80.0)
+    std::env::var("HELIOS_LOCALIZATION_MULTITAG_NORMAL_LOCK_MAX_SPREAD_DEG").ok().and_then(|raw| raw.trim().parse::<f64>().ok()).map(|value| value.clamp(8.0, 140.0)).unwrap_or(80.0)
 }
 
 fn localization_multitag_normal_lock_max_depth_spread_m() -> f64 {
-    std::env::var("HELIOS_LOCALIZATION_MULTITAG_NORMAL_LOCK_MAX_DEPTH_SPREAD_M")
-        .ok()
-        .and_then(|raw| raw.trim().parse::<f64>().ok())
-        .map(|value| value.clamp(0.05, 4.0))
-        .unwrap_or(0.85)
+    std::env::var("HELIOS_LOCALIZATION_MULTITAG_NORMAL_LOCK_MAX_DEPTH_SPREAD_M").ok().and_then(|raw| raw.trim().parse::<f64>().ok()).map(|value| value.clamp(0.05, 4.0)).unwrap_or(0.85)
 }
 
 fn localization_multitag_full_lock_same_code_rot_enabled() -> bool {
@@ -47,19 +35,11 @@ fn localization_multitag_full_lock_same_code_rot_enabled() -> bool {
 }
 
 fn localization_multitag_full_lock_strength() -> f64 {
-    std::env::var("HELIOS_LOCALIZATION_MULTITAG_FULL_LOCK_STRENGTH")
-        .ok()
-        .and_then(|raw| raw.trim().parse::<f64>().ok())
-        .map(|value| value.clamp(0.0, 1.0))
-        .unwrap_or(0.62)
+    std::env::var("HELIOS_LOCALIZATION_MULTITAG_FULL_LOCK_STRENGTH").ok().and_then(|raw| raw.trim().parse::<f64>().ok()).map(|value| value.clamp(0.0, 1.0)).unwrap_or(0.62)
 }
 
 fn localization_multitag_full_lock_max_spread_deg() -> f64 {
-    std::env::var("HELIOS_LOCALIZATION_MULTITAG_FULL_LOCK_MAX_SPREAD_DEG")
-        .ok()
-        .and_then(|raw| raw.trim().parse::<f64>().ok())
-        .map(|value| value.clamp(6.0, 120.0))
-        .unwrap_or(50.0)
+    std::env::var("HELIOS_LOCALIZATION_MULTITAG_FULL_LOCK_MAX_SPREAD_DEG").ok().and_then(|raw| raw.trim().parse::<f64>().ok()).map(|value| value.clamp(6.0, 120.0)).unwrap_or(50.0)
 }
 
 fn localization_multitag_coplanar_depth_lock_enabled() -> bool {
@@ -73,19 +53,11 @@ fn localization_multitag_coplanar_depth_lock_enabled() -> bool {
 }
 
 fn localization_multitag_coplanar_depth_lock_strength() -> f64 {
-    std::env::var("HELIOS_LOCALIZATION_MULTITAG_COPLANAR_DEPTH_LOCK_STRENGTH")
-        .ok()
-        .and_then(|raw| raw.trim().parse::<f64>().ok())
-        .map(|value| value.clamp(0.0, 1.0))
-        .unwrap_or(0.72)
+    std::env::var("HELIOS_LOCALIZATION_MULTITAG_COPLANAR_DEPTH_LOCK_STRENGTH").ok().and_then(|raw| raw.trim().parse::<f64>().ok()).map(|value| value.clamp(0.0, 1.0)).unwrap_or(0.72)
 }
 
 fn localization_multitag_coplanar_depth_lock_max_shift_m() -> f64 {
-    std::env::var("HELIOS_LOCALIZATION_MULTITAG_COPLANAR_DEPTH_LOCK_MAX_SHIFT_M")
-        .ok()
-        .and_then(|raw| raw.trim().parse::<f64>().ok())
-        .map(|value| value.clamp(0.01, 2.0))
-        .unwrap_or(0.45)
+    std::env::var("HELIOS_LOCALIZATION_MULTITAG_COPLANAR_DEPTH_LOCK_MAX_SHIFT_M").ok().and_then(|raw| raw.trim().parse::<f64>().ok()).map(|value| value.clamp(0.01, 2.0)).unwrap_or(0.45)
 }
 
 fn rotation_with_locked_normal(current: UnitQuaternion<f64>, target_normal: Vector3<f64>) -> Option<UnitQuaternion<f64>> {
@@ -176,10 +148,8 @@ pub(super) fn apply_multitag_normal_consistency(detections: &mut [LocalizationDe
         }
     }
 
-    let same_code_rotation = detections
-        .first()
-        .and_then(|detection| detection.code_rotation)
-        .is_some_and(|code_rotation| detections.iter().all(|detection| detection.code_rotation == Some(code_rotation)));
+    let same_code_rotation =
+        detections.first().and_then(|detection| detection.code_rotation).is_some_and(|code_rotation| detections.iter().all(|detection| detection.code_rotation == Some(code_rotation)));
 
     if localization_multitag_coplanar_depth_lock_enabled() && same_code_rotation {
         let mut depth_samples: Vec<(usize, f64, f64)> = Vec::with_capacity(detections.len());

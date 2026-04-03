@@ -67,20 +67,11 @@ fn pair_translation_errors(pose: &PoseTransform, pairs: &[TranslationPair]) -> V
         .collect::<Vec<_>>()
 }
 
-pub(super) fn solve_with_rotation_consensus(
-    pairs: &[TranslationPair],
-    rotation_pairs: &[RotationPair],
-    runtime_tuning: &LocalizationSolverRuntimeTuningConfig,
-) -> Option<PoseTransform> {
+pub(super) fn solve_with_rotation_consensus(pairs: &[TranslationPair], rotation_pairs: &[RotationPair], runtime_tuning: &LocalizationSolverRuntimeTuningConfig) -> Option<PoseTransform> {
     solve_with_rotation_consensus_impl(pairs, rotation_pairs, runtime_tuning, true)
 }
 
-fn solve_with_rotation_consensus_impl(
-    pairs: &[TranslationPair],
-    rotation_pairs: &[RotationPair],
-    runtime_tuning: &LocalizationSolverRuntimeTuningConfig,
-    allow_prune: bool,
-) -> Option<PoseTransform> {
+fn solve_with_rotation_consensus_impl(pairs: &[TranslationPair], rotation_pairs: &[RotationPair], runtime_tuning: &LocalizationSolverRuntimeTuningConfig, allow_prune: bool) -> Option<PoseTransform> {
     if pairs.is_empty() || rotation_pairs.is_empty() {
         return None;
     }
@@ -139,9 +130,7 @@ fn solve_with_rotation_consensus_impl(
         let predicted = best.rotation * pair.robot_from_tag_r;
         let rotation_err = predicted.angle_to(&pair.field_from_tag_r).abs();
         let translation_err = pair_t_err[pair.pair_index];
-        if rotation_err <= (r_thresh * runtime_tuning.rotation_consensus_inlier_rotation_scale)
-            && translation_err <= (t_thresh * runtime_tuning.rotation_consensus_inlier_translation_scale)
-        {
+        if rotation_err <= (r_thresh * runtime_tuning.rotation_consensus_inlier_rotation_scale) && translation_err <= (t_thresh * runtime_tuning.rotation_consensus_inlier_translation_scale) {
             let candidate = candidate_pose_from_rotation_pair(pair, pairs);
             rotation_samples.push((candidate.rotation, pair.weight));
         }
@@ -222,11 +211,7 @@ pub(super) fn apply_low_confidence_attitude_guard(
     PoseTransform { translation: blended_translation, rotation: blended_rotation }
 }
 
-pub(super) fn markers_are_coplanar_in_map(
-    observations: &[MarkerObservation],
-    lookup: &HashMap<u32, &MarkerDefinition>,
-    coplanar_delta_m: f64,
-) -> bool {
+pub(super) fn markers_are_coplanar_in_map(observations: &[MarkerObservation], lookup: &HashMap<u32, &MarkerDefinition>, coplanar_delta_m: f64) -> bool {
     if observations.len() < 2 {
         return false;
     }
@@ -324,16 +309,16 @@ pub(super) fn fallback_translation_only(pairs: &[TranslationPair]) -> Result<Pos
     best_pose.ok_or_else(|| "failed translation solve".to_string())
 }
 
-pub(super) fn apply_coplanar_height_weight_penalties(
-    map: &MarkerMap,
-    observations: &[MarkerObservation],
-    runtime_tuning: &LocalizationSolverRuntimeTuningConfig,
-) -> Vec<f64> {
+pub(super) fn apply_coplanar_height_weight_penalties(map: &MarkerMap, observations: &[MarkerObservation], runtime_tuning: &LocalizationSolverRuntimeTuningConfig) -> Vec<f64> {
     let mut adjusted = observations
         .iter()
         .map(|obs| {
             let weight = obs.weight as f64;
-            if weight.is_finite() && weight > 0.0 { weight } else { 0.0 }
+            if weight.is_finite() && weight > 0.0 {
+                weight
+            } else {
+                0.0
+            }
         })
         .collect::<Vec<_>>();
 

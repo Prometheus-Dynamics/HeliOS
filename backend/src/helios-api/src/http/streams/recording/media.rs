@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::http::media::{load_named_media_metadata, write_media_metadata};
 use crate::http::storage;
 
-use super::ActiveRecordingSession;
+use super::state::ActiveRecordingSession;
 
 pub(super) fn imu_sidecar_file_name(media_name: &str) -> String {
     format!("{media_name}.imu.jsonl.gz")
