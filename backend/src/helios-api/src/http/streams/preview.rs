@@ -5,6 +5,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use bytes::Bytes;
+use lib_runtime_policy::HELIOS_API_STREAMS_POLICY;
 use once_cell::sync::Lazy;
 use serde::Deserialize;
 use std::convert::Infallible;
@@ -35,27 +36,11 @@ pub(crate) struct PreviewSelectionQuery {
 }
 
 static PREVIEW_POLL: Lazy<std::time::Duration> = Lazy::new(|| {
-    std::env::var("HELIOS_PREVIEW_POLL_MS")
-        .ok()
-        .and_then(|raw| raw.parse::<u64>().ok())
-        .map(std::time::Duration::from_millis)
-        .map(|d| d.clamp(std::time::Duration::from_millis(5), std::time::Duration::from_millis(100)))
-        .unwrap_or_else(|| std::time::Duration::from_millis(10))
+    let policy = HELIOS_API_STREAMS_POLICY.resolve();
+    policy.preview_poll_ms.map(std::time::Duration::from_millis).unwrap_or_else(|| std::time::Duration::from_millis(10))
 });
 
-static PREVIEW_OUTAGE: Lazy<std::time::Duration> = Lazy::new(|| {
-    // When streams restart (or the engine crashes and later restores streams), the shmem preview
-    // map can temporarily disappear. Keep HTTP preview connections alive long enough for the
-    // stream to come back instead of failing fast and requiring manual client intervention.
-    std::env::var("HELIOS_PREVIEW_OUTAGE_MS")
-        .ok()
-        .and_then(|raw| raw.parse::<u64>().ok())
-        .map(std::time::Duration::from_millis)
-        // Cap aggressively: if preview is down for more than ~15s, something is wrong and we
-        // want clients to reconnect (and surface an error) rather than hanging forever.
-        .map(|d| d.clamp(std::time::Duration::from_secs(1), std::time::Duration::from_secs(15)))
-        .unwrap_or_else(|| std::time::Duration::from_secs(15))
-});
+static PREVIEW_OUTAGE: Lazy<std::time::Duration> = Lazy::new(|| std::time::Duration::from_millis(HELIOS_API_STREAMS_POLICY.resolve().preview_outage_ms));
 
 fn is_mjpeg_fourcc(fourcc: styx::prelude::FourCc) -> bool {
     matches!(&fourcc.to_u32().to_le_bytes(), b"MJPG" | b"JPEG")
@@ -112,12 +97,7 @@ fn snapshot_mjpeg_part_footer() -> Bytes {
 }
 
 fn snapshot_mjpeg_interval() -> Duration {
-    std::env::var("HELIOS_MJPEG_INTERVAL_MS")
-        .ok()
-        .and_then(|raw| raw.parse::<u64>().ok())
-        .map(Duration::from_millis)
-        .map(|d| d.clamp(Duration::from_millis(20), Duration::from_millis(500)))
-        .unwrap_or_else(|| Duration::from_millis(33))
+    Duration::from_millis(HELIOS_API_STREAMS_POLICY.resolve().snapshot_interval_ms)
 }
 
 fn touch_preview_if_due(id: Uuid, last_touch: &mut Instant, interval: Duration) {

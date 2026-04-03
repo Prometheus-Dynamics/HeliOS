@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use futures::future::join_all;
+use lib_runtime_policy::HELIOS_PERIPHERALS_POWER_POLICY;
 use lib_sensors::drivers::{
     ina226::{Ina226, Ina226Config},
     ina238::{Ina238, Ina238Config},
@@ -21,14 +22,11 @@ use crate::error::{Error, Result};
 use crate::service::SensorsService;
 
 fn power_poll_interval() -> Duration {
-    let default_ms: u64 = 100;
-    let ms = std::env::var("HELIOS_POWER_POLL_INTERVAL_MS").ok().and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(default_ms).clamp(20, 10_000);
-    Duration::from_millis(ms)
+    Duration::from_millis(HELIOS_PERIPHERALS_POWER_POLICY.resolve().poll_interval_ms)
 }
 
 fn idle_power_poll_interval() -> Duration {
-    let ms = std::env::var("HELIOS_POWER_IDLE_INTERVAL_MS").ok().and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(1_000).clamp(100, 30_000);
-    Duration::from_millis(ms)
+    Duration::from_millis(HELIOS_PERIPHERALS_POWER_POLICY.resolve().idle_interval_ms)
 }
 
 fn effective_power_poll_interval(active_interval: Duration, idle_interval: Duration, has_live_subscribers: bool) -> Duration {

@@ -2,6 +2,7 @@ mod discovery;
 mod inventory;
 
 use crate::api_observability::{ApiCacheMetric, CacheMetricCounters};
+use lib_runtime_policy::HELIOS_API_HARDWARE_READ_MODEL_POLICY;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, RwLock};
@@ -32,29 +33,24 @@ impl Default for HardwareReadModelState {
     }
 }
 
-fn read_timeout_env(var: &str, default_ms: u64, min_ms: u64, max_ms: u64) -> Duration {
-    let ms = std::env::var(var).ok().and_then(|value| value.trim().parse::<u64>().ok()).unwrap_or(default_ms);
-    Duration::from_millis(ms.clamp(min_ms, max_ms))
-}
-
 pub(super) fn peripheral_inventory_cache_ttl() -> Duration {
     static VALUE: OnceLock<Duration> = OnceLock::new();
-    *VALUE.get_or_init(|| read_timeout_env("HELIOS_PERIPHERALS_CACHE_MS", 1_000, 0, 10_000))
+    *VALUE.get_or_init(|| Duration::from_millis(HELIOS_API_HARDWARE_READ_MODEL_POLICY.resolve().peripherals_cache_ms))
 }
 
 pub(super) fn sensor_ipc_timeout() -> Duration {
     static VALUE: OnceLock<Duration> = OnceLock::new();
-    *VALUE.get_or_init(|| read_timeout_env("HELIOS_PERIPHERALS_TIMEOUT_MS", 1_500, 250, 15_000))
+    *VALUE.get_or_init(|| Duration::from_millis(HELIOS_API_HARDWARE_READ_MODEL_POLICY.resolve().peripherals_timeout_ms))
 }
 
 pub(super) fn camera_discovery_timeout() -> Duration {
     static VALUE: OnceLock<Duration> = OnceLock::new();
-    *VALUE.get_or_init(|| read_timeout_env("HELIOS_CAMERA_DISCOVERY_TIMEOUT_MS", 1_500, 250, 20_000))
+    *VALUE.get_or_init(|| Duration::from_millis(HELIOS_API_HARDWARE_READ_MODEL_POLICY.resolve().camera_discovery_timeout_ms))
 }
 
 pub(super) fn sensor_refresh_timeout() -> Duration {
     static VALUE: OnceLock<Duration> = OnceLock::new();
-    *VALUE.get_or_init(|| read_timeout_env("HELIOS_PERIPHERALS_REFRESH_TIMEOUT_MS", 2_500, 500, 20_000))
+    *VALUE.get_or_init(|| Duration::from_millis(HELIOS_API_HARDWARE_READ_MODEL_POLICY.resolve().peripherals_refresh_timeout_ms))
 }
 
 impl HardwareReadModelState {

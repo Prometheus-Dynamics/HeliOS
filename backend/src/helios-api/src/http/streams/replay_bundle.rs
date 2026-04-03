@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use axum::{
@@ -88,14 +87,28 @@ struct ReplayEvent {
 }
 
 #[derive(Debug)]
-struct ReplayBundleHandle {
+pub(crate) struct ReplayBundleHandle {
     cancel: CancellationToken,
     join: tokio::task::JoinHandle<()>,
 }
 
-fn sessions() -> &'static Mutex<HashMap<Uuid, ReplayBundleHandle>> {
-    static SESSIONS: OnceLock<Mutex<HashMap<Uuid, ReplayBundleHandle>>> = OnceLock::new();
-    SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
+#[derive(Default)]
+pub(crate) struct ReplayBundleSessionsState {
+    sessions: Mutex<HashMap<Uuid, ReplayBundleHandle>>,
+}
+
+impl ReplayBundleSessionsState {
+    pub(crate) async fn contains(&self, stream_id: Uuid) -> bool {
+        self.sessions.lock().await.contains_key(&stream_id)
+    }
+
+    pub(crate) async fn insert(&self, stream_id: Uuid, handle: ReplayBundleHandle) {
+        self.sessions.lock().await.insert(stream_id, handle);
+    }
+
+    pub(crate) async fn remove(&self, stream_id: Uuid) -> Option<ReplayBundleHandle> {
+        self.sessions.lock().await.remove(&stream_id)
+    }
 }
 
 #[allow(clippy::result_large_err)]
@@ -245,14 +258,10 @@ async fn write_event_stream(tmp_path: PathBuf, final_path: PathBuf, rx: std::syn
     )
 )]
 pub async fn start_replay_bundle(State(state): State<AppState>, AxumPath(id): AxumPath<Uuid>, Json(req): Json<StartReplayBundleRequest>) -> Response {
-    // One replay bundle per stream at a time.
-    {
-        let guard = sessions().lock().await;
-        if guard.contains_key(&id) {
-            return (StatusCode::CONFLICT, Json(engine_error_body(Some(EngineErrorCode::Conflict), "replay bundle already active".to_string()))).into_response();
-        }
+    let replay_sessions = state.services.streams.replay_bundle_sessions();
+    if replay_sessions.contains(id).await {
+        return (StatusCode::CONFLICT, Json(engine_error_body(Some(EngineErrorCode::Conflict), "replay bundle already active".to_string()))).into_response();
     }
-
     let (container, codec) = match parse_video_options(&req) {
         Ok(v) => v,
         Err(err) => return err.into_response(),
@@ -617,11 +626,9 @@ pub async fn start_replay_bundle(State(state): State<AppState>, AxumPath(id): Ax
         let _ = done_tx.send(true);
     });
 
-    {
-        let mut guard = sessions().lock().await;
-        guard.insert(id, ReplayBundleHandle { cancel, join });
-    }
+    replay_sessions.insert(id, ReplayBundleHandle { cancel, join }).await;
     // Cleanup task so duration-based stop doesn't permanently block future sessions.
+    let replay_sessions_for_cleanup = replay_sessions.clone();
     tokio::spawn(async move {
         let mut rx = done_rx;
         while !*rx.borrow() {
@@ -629,8 +636,7 @@ pub async fn start_replay_bundle(State(state): State<AppState>, AxumPath(id): Ax
                 return;
             }
         }
-        let mut guard = sessions().lock().await;
-        let _ = guard.remove(&id);
+        let _ = replay_sessions_for_cleanup.remove(id).await;
     });
 
     let video_item = MediaItem {
@@ -690,10 +696,7 @@ pub async fn start_replay_bundle(State(state): State<AppState>, AxumPath(id): Ax
     )
 )]
 pub async fn stop_replay_bundle(State(state): State<AppState>, AxumPath(id): AxumPath<Uuid>) -> Response {
-    let handle = {
-        let mut guard = sessions().lock().await;
-        guard.remove(&id)
-    };
+    let handle = state.services.streams.replay_bundle_sessions().remove(id).await;
     let Some(handle) = handle else {
         return (StatusCode::NOT_FOUND, Json(engine_error_body(Some(EngineErrorCode::NotFound), "replay bundle not active".to_string()))).into_response();
     };

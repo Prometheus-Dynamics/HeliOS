@@ -55,6 +55,19 @@ impl OptionalBoundedU64Policy {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OptionalBoundedF64Policy {
+    pub env_var: &'static str,
+    pub min: f64,
+    pub max: f64,
+}
+
+impl OptionalBoundedF64Policy {
+    pub fn resolve(self) -> Option<f64> {
+        std::env::var(self.env_var).ok().and_then(|value| value.trim().parse::<f64>().ok()).filter(|value| value.is_finite()).map(|value| value.clamp(self.min, self.max))
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BoolPolicy {
     pub env_var: &'static str,
@@ -227,6 +240,162 @@ impl ResourceGuardPolicy {
             allow_stop_fallback: self.allow_stop_fallback.resolve(),
             stop_timeout_ms: self.stop_timeout_ms.resolve(),
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EngineCrashGuardPolicy {
+    pub window_ms: BoundedU64Policy,
+    pub threshold: BoundedUsizePolicy,
+    pub suppress_ms: BoundedU64Policy,
+    pub min_downtime_ms: BoundedU64Policy,
+    pub poll_ms: BoundedU64Policy,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResolvedEngineCrashGuardPolicy {
+    pub window_ms: u64,
+    pub threshold: usize,
+    pub suppress_ms: u64,
+    pub min_downtime_ms: u64,
+    pub poll_ms: u64,
+}
+
+impl EngineCrashGuardPolicy {
+    pub fn resolve(self) -> ResolvedEngineCrashGuardPolicy {
+        ResolvedEngineCrashGuardPolicy {
+            window_ms: self.window_ms.resolve(),
+            threshold: self.threshold.resolve(),
+            suppress_ms: self.suppress_ms.resolve(),
+            min_downtime_ms: self.min_downtime_ms.resolve(),
+            poll_ms: self.poll_ms.resolve(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ApiStreamsPolicy {
+    pub cache_ms: BoundedU64Policy,
+    pub mjpeg_poll_ms: OptionalBoundedU64Policy,
+    pub preview_poll_ms: OptionalBoundedU64Policy,
+    pub mjpeg_interval_ms: OptionalBoundedU64Policy,
+    pub snapshot_interval_ms: BoundedU64Policy,
+    pub preview_max_fps: OptionalBoundedF64Policy,
+    pub preview_outage_ms: BoundedU64Policy,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ResolvedApiStreamsPolicy {
+    pub cache_ms: u64,
+    pub mjpeg_poll_ms: Option<u64>,
+    pub preview_poll_ms: Option<u64>,
+    pub mjpeg_interval_ms: Option<u64>,
+    pub snapshot_interval_ms: u64,
+    pub preview_max_fps: Option<f64>,
+    pub preview_outage_ms: u64,
+}
+
+impl ApiStreamsPolicy {
+    pub fn resolve(self) -> ResolvedApiStreamsPolicy {
+        ResolvedApiStreamsPolicy {
+            cache_ms: self.cache_ms.resolve(),
+            mjpeg_poll_ms: self.mjpeg_poll_ms.resolve(),
+            preview_poll_ms: self.preview_poll_ms.resolve(),
+            mjpeg_interval_ms: self.mjpeg_interval_ms.resolve(),
+            snapshot_interval_ms: self.snapshot_interval_ms.resolve(),
+            preview_max_fps: self.preview_max_fps.resolve(),
+            preview_outage_ms: self.preview_outage_ms.resolve(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ApiHardwareReadModelPolicy {
+    pub peripherals_cache_ms: BoundedU64Policy,
+    pub peripherals_timeout_ms: BoundedU64Policy,
+    pub camera_discovery_timeout_ms: BoundedU64Policy,
+    pub peripherals_refresh_timeout_ms: BoundedU64Policy,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResolvedApiHardwareReadModelPolicy {
+    pub peripherals_cache_ms: u64,
+    pub peripherals_timeout_ms: u64,
+    pub camera_discovery_timeout_ms: u64,
+    pub peripherals_refresh_timeout_ms: u64,
+}
+
+impl ApiHardwareReadModelPolicy {
+    pub fn resolve(self) -> ResolvedApiHardwareReadModelPolicy {
+        ResolvedApiHardwareReadModelPolicy {
+            peripherals_cache_ms: self.peripherals_cache_ms.resolve(),
+            peripherals_timeout_ms: self.peripherals_timeout_ms.resolve(),
+            camera_discovery_timeout_ms: self.camera_discovery_timeout_ms.resolve(),
+            peripherals_refresh_timeout_ms: self.peripherals_refresh_timeout_ms.resolve(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ApiSystemReadModelPolicy {
+    pub sampler_thread_stack_bytes: BoundedUsizePolicy,
+    pub device_metrics_cache_ms: BoundedU64Policy,
+    pub device_updates_stream_poll_ms: BoundedU64Policy,
+    pub process_breakdown_cache_ms: BoundedU64Policy,
+    pub device_metrics_timeout_ms: BoundedU64Policy,
+    pub process_breakdown_limit: BoundedUsizePolicy,
+    pub process_breakdown_budget_ms: BoundedU64Policy,
+    pub process_mapping_limit: BoundedUsizePolicy,
+    pub telemetry_sample_interval_ms: BoundedU64Policy,
+    pub processes_sample_interval_ms: BoundedU64Policy,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResolvedApiSystemReadModelPolicy {
+    pub sampler_thread_stack_bytes: usize,
+    pub device_metrics_cache_ms: u64,
+    pub device_updates_stream_poll_ms: u64,
+    pub process_breakdown_cache_ms: u64,
+    pub device_metrics_timeout_ms: u64,
+    pub process_breakdown_limit: usize,
+    pub process_breakdown_budget_ms: u64,
+    pub process_mapping_limit: usize,
+    pub telemetry_sample_interval_ms: u64,
+    pub processes_sample_interval_ms: u64,
+}
+
+impl ApiSystemReadModelPolicy {
+    pub fn resolve(self) -> ResolvedApiSystemReadModelPolicy {
+        ResolvedApiSystemReadModelPolicy {
+            sampler_thread_stack_bytes: self.sampler_thread_stack_bytes.resolve(),
+            device_metrics_cache_ms: self.device_metrics_cache_ms.resolve(),
+            device_updates_stream_poll_ms: self.device_updates_stream_poll_ms.resolve(),
+            process_breakdown_cache_ms: self.process_breakdown_cache_ms.resolve(),
+            device_metrics_timeout_ms: self.device_metrics_timeout_ms.resolve(),
+            process_breakdown_limit: self.process_breakdown_limit.resolve(),
+            process_breakdown_budget_ms: self.process_breakdown_budget_ms.resolve(),
+            process_mapping_limit: self.process_mapping_limit.resolve(),
+            telemetry_sample_interval_ms: self.telemetry_sample_interval_ms.resolve(),
+            processes_sample_interval_ms: self.processes_sample_interval_ms.resolve(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PeripheralsPowerPolicy {
+    pub poll_interval_ms: BoundedU64Policy,
+    pub idle_interval_ms: BoundedU64Policy,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResolvedPeripheralsPowerPolicy {
+    pub poll_interval_ms: u64,
+    pub idle_interval_ms: u64,
+}
+
+impl PeripheralsPowerPolicy {
+    pub fn resolve(self) -> ResolvedPeripheralsPowerPolicy {
+        ResolvedPeripheralsPowerPolicy { poll_interval_ms: self.poll_interval_ms.resolve(), idle_interval_ms: self.idle_interval_ms.resolve() }
     }
 }
 
@@ -441,6 +610,49 @@ pub const HELIOS_RESOURCE_GUARD_POLICY: ResourceGuardPolicy = ResourceGuardPolic
     stop_timeout_ms: BoundedU64Policy { env_var: "HELIOS_RESOURCE_GUARD_STOP_TIMEOUT_MS", default: 4_000, min: 500, max: 60_000 },
 };
 
+pub const HELIOS_ENGINE_CRASH_GUARD_POLICY: EngineCrashGuardPolicy = EngineCrashGuardPolicy {
+    window_ms: BoundedU64Policy { env_var: "HELIOS_ENGINE_CRASH_GUARD_WINDOW_MS", default: 60_000, min: 5_000, max: 15 * 60_000 },
+    threshold: BoundedUsizePolicy { env_var: "HELIOS_ENGINE_CRASH_GUARD_THRESHOLD", default: 3, min: 1, max: 10 },
+    suppress_ms: BoundedU64Policy { env_var: "HELIOS_ENGINE_CRASH_GUARD_SUPPRESS_MS", default: 300_000, min: 10_000, max: 60 * 60_000 },
+    min_downtime_ms: BoundedU64Policy { env_var: "HELIOS_ENGINE_CRASH_GUARD_MIN_DOWNTIME_MS", default: 2_000, min: 250, max: 60_000 },
+    poll_ms: BoundedU64Policy { env_var: "HELIOS_ENGINE_CRASH_GUARD_POLL_MS", default: 1_000, min: 200, max: 60_000 },
+};
+
+pub const HELIOS_API_STREAMS_POLICY: ApiStreamsPolicy = ApiStreamsPolicy {
+    cache_ms: BoundedU64Policy { env_var: "HELIOS_API_STREAMS_CACHE_MS", default: 750, min: 0, max: 5_000 },
+    mjpeg_poll_ms: OptionalBoundedU64Policy { env_var: "HELIOS_MJPEG_POLL_MS", min: 1, max: 100 },
+    preview_poll_ms: OptionalBoundedU64Policy { env_var: "HELIOS_PREVIEW_POLL_MS", min: 1, max: 100 },
+    mjpeg_interval_ms: OptionalBoundedU64Policy { env_var: "HELIOS_MJPEG_INTERVAL_MS", min: 1, max: 100 },
+    snapshot_interval_ms: BoundedU64Policy { env_var: "HELIOS_MJPEG_INTERVAL_MS", default: 33, min: 20, max: 500 },
+    preview_max_fps: OptionalBoundedF64Policy { env_var: "HELIOS_PREVIEW_MAX_FPS", min: 1.0, max: 120.0 },
+    preview_outage_ms: BoundedU64Policy { env_var: "HELIOS_PREVIEW_OUTAGE_MS", default: 15_000, min: 1_000, max: 15_000 },
+};
+
+pub const HELIOS_API_HARDWARE_READ_MODEL_POLICY: ApiHardwareReadModelPolicy = ApiHardwareReadModelPolicy {
+    peripherals_cache_ms: BoundedU64Policy { env_var: "HELIOS_PERIPHERALS_CACHE_MS", default: 1_000, min: 0, max: 10_000 },
+    peripherals_timeout_ms: BoundedU64Policy { env_var: "HELIOS_PERIPHERALS_TIMEOUT_MS", default: 1_500, min: 250, max: 15_000 },
+    camera_discovery_timeout_ms: BoundedU64Policy { env_var: "HELIOS_CAMERA_DISCOVERY_TIMEOUT_MS", default: 1_500, min: 250, max: 20_000 },
+    peripherals_refresh_timeout_ms: BoundedU64Policy { env_var: "HELIOS_PERIPHERALS_REFRESH_TIMEOUT_MS", default: 2_500, min: 500, max: 20_000 },
+};
+
+pub const HELIOS_API_SYSTEM_READ_MODEL_POLICY: ApiSystemReadModelPolicy = ApiSystemReadModelPolicy {
+    sampler_thread_stack_bytes: BoundedUsizePolicy { env_var: "HELIOS_API_SAMPLER_THREAD_STACK_BYTES", default: 512 * 1024, min: 128 * 1024, max: 4 * 1024 * 1024 },
+    device_metrics_cache_ms: BoundedU64Policy { env_var: "HELIOS_DEVICE_METRICS_CACHE_MS", default: 750, min: 0, max: 10_000 },
+    device_updates_stream_poll_ms: BoundedU64Policy { env_var: "HELIOS_DEVICE_UPDATES_STREAM_POLL_MS", default: 2_000, min: 250, max: 60_000 },
+    process_breakdown_cache_ms: BoundedU64Policy { env_var: "HELIOS_DEVICE_PROCESS_BREAKDOWN_CACHE_MS", default: 5_000, min: 0, max: 60_000 },
+    device_metrics_timeout_ms: BoundedU64Policy { env_var: "HELIOS_DEVICE_METRICS_TIMEOUT_MS", default: 2_000, min: 250, max: 15_000 },
+    process_breakdown_limit: BoundedUsizePolicy { env_var: "HELIOS_DEVICE_PROCESS_BREAKDOWN_LIMIT", default: 16, min: 1, max: 128 },
+    process_breakdown_budget_ms: BoundedU64Policy { env_var: "HELIOS_DEVICE_PROCESS_BREAKDOWN_BUDGET_MS", default: 400, min: 0, max: 5_000 },
+    process_mapping_limit: BoundedUsizePolicy { env_var: "HELIOS_DEVICE_PROCESS_MAPPING_LIMIT", default: 8, min: 1, max: 64 },
+    telemetry_sample_interval_ms: BoundedU64Policy { env_var: "HELIOS_TELEMETRY_SAMPLE_INTERVAL_MS", default: 1_000, min: 250, max: 10_000 },
+    processes_sample_interval_ms: BoundedU64Policy { env_var: "HELIOS_PROCESSES_SAMPLE_INTERVAL_MS", default: 1_000, min: 250, max: 10_000 },
+};
+
+pub const HELIOS_PERIPHERALS_POWER_POLICY: PeripheralsPowerPolicy = PeripheralsPowerPolicy {
+    poll_interval_ms: BoundedU64Policy { env_var: "HELIOS_POWER_POLL_INTERVAL_MS", default: 100, min: 20, max: 10_000 },
+    idle_interval_ms: BoundedU64Policy { env_var: "HELIOS_POWER_IDLE_INTERVAL_MS", default: 1_000, min: 100, max: 30_000 },
+};
+
 pub const HELIOS_STYX_CAPTURE_TUNABLES_POLICY: StyxCaptureTunablesPolicy = StyxCaptureTunablesPolicy {
     queue_depth: OptionalBoundedUsizePolicy { env_var: "HELIOS_STYX_CAPTURE_QUEUE_DEPTH", min: 1, max: 512 },
     pool_min: OptionalBoundedUsizePolicy { env_var: "HELIOS_STYX_CAPTURE_POOL_MIN", min: 1, max: 512 },
@@ -518,8 +730,9 @@ pub use generated::*;
 #[cfg(test)]
 mod tests {
     use super::{
-        EngineExecutorBusyPolicy, HELIOS_API_LOG_SOURCES_POLICY, HELIOS_API_STARTUP_CACHE_WARM_POLICY, HELIOS_API_TOKIO_POLICY, HELIOS_ENGINE_GRAPH_POLICY, HELIOS_ENGINE_RECORDING_POLICY,
-        HELIOS_ENGINE_TOKIO_POLICY, HELIOS_I2C_INVENTORY_POLICY, HELIOS_IMU_RUNTIME_POLICY, HELIOS_LOG_FILTER_POLICY, HELIOS_PERIPHERALS_TOKIO_POLICY, HELIOS_RESOURCE_GUARD_POLICY,
+        EngineExecutorBusyPolicy, HELIOS_API_HARDWARE_READ_MODEL_POLICY, HELIOS_API_LOG_SOURCES_POLICY, HELIOS_API_STARTUP_CACHE_WARM_POLICY, HELIOS_API_STREAMS_POLICY,
+        HELIOS_API_SYSTEM_READ_MODEL_POLICY, HELIOS_API_TOKIO_POLICY, HELIOS_ENGINE_CRASH_GUARD_POLICY, HELIOS_ENGINE_GRAPH_POLICY, HELIOS_ENGINE_RECORDING_POLICY, HELIOS_ENGINE_TOKIO_POLICY,
+        HELIOS_I2C_INVENTORY_POLICY, HELIOS_IMU_RUNTIME_POLICY, HELIOS_LOG_FILTER_POLICY, HELIOS_PERIPHERALS_POWER_POLICY, HELIOS_PERIPHERALS_TOKIO_POLICY, HELIOS_RESOURCE_GUARD_POLICY,
         HELIOS_STYX_CAPTURE_TUNABLES_POLICY, PlatformFamily, classify_platform_family,
     };
 
@@ -590,6 +803,51 @@ mod tests {
         assert_eq!(resolved.metrics_timeout_ms, 300);
         assert!(!resolved.allow_stop_fallback);
         assert_eq!(resolved.stop_timeout_ms, 4_000);
+    }
+
+    #[test]
+    fn engine_crash_guard_policy_defaults_match_expected_values() {
+        let resolved = HELIOS_ENGINE_CRASH_GUARD_POLICY.resolve();
+        assert_eq!(resolved.window_ms, 60_000);
+        assert_eq!(resolved.threshold, 3);
+        assert_eq!(resolved.suppress_ms, 300_000);
+        assert_eq!(resolved.min_downtime_ms, 2_000);
+        assert_eq!(resolved.poll_ms, 1_000);
+    }
+
+    #[test]
+    fn api_streams_policy_defaults_match_expected_values() {
+        let resolved = HELIOS_API_STREAMS_POLICY.resolve();
+        assert_eq!(resolved.cache_ms, 750);
+        assert_eq!(resolved.mjpeg_poll_ms, None);
+        assert_eq!(resolved.snapshot_interval_ms, 33);
+        assert_eq!(resolved.preview_max_fps, None);
+        assert_eq!(resolved.preview_outage_ms, 15_000);
+    }
+
+    #[test]
+    fn api_hardware_read_model_policy_defaults_match_expected_values() {
+        let resolved = HELIOS_API_HARDWARE_READ_MODEL_POLICY.resolve();
+        assert_eq!(resolved.peripherals_cache_ms, 1_000);
+        assert_eq!(resolved.peripherals_timeout_ms, 1_500);
+        assert_eq!(resolved.camera_discovery_timeout_ms, 1_500);
+        assert_eq!(resolved.peripherals_refresh_timeout_ms, 2_500);
+    }
+
+    #[test]
+    fn api_system_read_model_policy_defaults_match_expected_values() {
+        let resolved = HELIOS_API_SYSTEM_READ_MODEL_POLICY.resolve();
+        assert_eq!(resolved.sampler_thread_stack_bytes, 512 * 1024);
+        assert_eq!(resolved.device_metrics_cache_ms, 750);
+        assert_eq!(resolved.process_breakdown_limit, 16);
+        assert_eq!(resolved.processes_sample_interval_ms, 1_000);
+    }
+
+    #[test]
+    fn peripherals_power_policy_defaults_match_expected_values() {
+        let resolved = HELIOS_PERIPHERALS_POWER_POLICY.resolve();
+        assert_eq!(resolved.poll_interval_ms, 100);
+        assert_eq!(resolved.idle_interval_ms, 1_000);
     }
 
     #[test]

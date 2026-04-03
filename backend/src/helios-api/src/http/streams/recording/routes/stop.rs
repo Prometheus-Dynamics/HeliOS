@@ -9,7 +9,6 @@ use axum::{
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::http::streams::recording::active_recording_sessions;
 use crate::http::streams::recording::media::{cleanup_failed_recording_artifacts, frame_timestamps_file_name, update_media_recording_fps_from_frame_ts};
 use crate::http::streams::recording::options::recording_stop_grace_ms;
 use crate::http::streams::recording::sidecar::{stop_imu_sidecar_session, wait_for_frame_timestamps_settle};
@@ -27,10 +26,8 @@ use helios_engine::ipc::{EngineErrorCode, EngineEvent};
     )
 )]
 pub(crate) async fn stop_recording(State(state): State<crate::http::AppState>, Path(id): Path<Uuid>) -> Response {
-    let active_session = {
-        let mut sessions = active_recording_sessions().lock().await;
-        sessions.remove(&id)
-    };
+    let recording_runtime = state.services.streams.recording_runtime();
+    let active_session = recording_runtime.remove_active_recording_session(id).await;
     let imu_stop_delay = Duration::from_millis(recording_stop_grace_ms());
     let engine_response = state.engine.stop_recording(id).await;
     if let Some(session) = active_session.as_ref() {
@@ -40,7 +37,7 @@ pub(crate) async fn stop_recording(State(state): State<crate::http::AppState>, P
     if !imu_stop_delay.is_zero() {
         tokio::time::sleep(imu_stop_delay).await;
     }
-    if let Err(err) = stop_imu_sidecar_session(id).await {
+    if let Err(err) = stop_imu_sidecar_session(recording_runtime.as_ref(), id).await {
         warn!(stream_id = %id, error = %err, "failed to finalize IMU sidecar recording");
     }
     match engine_response {

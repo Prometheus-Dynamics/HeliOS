@@ -1,7 +1,6 @@
 use futures::future::join_all;
 use serde_json;
 use std::collections::{BTreeMap, HashMap};
-use std::sync::OnceLock;
 use std::time::Instant;
 use tokio::sync::RwLock;
 
@@ -20,9 +19,19 @@ struct CachedLocalizationSolveResponse {
     response: LocalizationSolveResponse,
 }
 
-fn localization_solve_cache() -> &'static RwLock<HashMap<String, CachedLocalizationSolveResponse>> {
-    static CACHE: OnceLock<RwLock<HashMap<String, CachedLocalizationSolveResponse>>> = OnceLock::new();
-    CACHE.get_or_init(|| RwLock::new(HashMap::new()))
+#[derive(Default)]
+pub(crate) struct LocalizationSolveCacheState {
+    entries: RwLock<HashMap<String, CachedLocalizationSolveResponse>>,
+}
+
+impl LocalizationSolveCacheState {
+    pub(crate) async fn get_matching(&self, key: &str, signature: &[u8]) -> Option<LocalizationSolveResponse> {
+        self.entries.read().await.get(key).filter(|entry| entry.signature == signature).map(|entry| entry.response.clone())
+    }
+
+    pub(crate) async fn insert(&self, key: String, signature: Vec<u8>, response: LocalizationSolveResponse) {
+        self.entries.write().await.insert(key, CachedLocalizationSolveResponse { signature, response });
+    }
 }
 
 fn localization_solve_cache_key(profile_id: &str, apply_field_origin: bool) -> String {
@@ -47,10 +56,7 @@ pub(crate) async fn solve_via_engine(
     let (request, source_fetch_ms) = build_localization_solve_request(state, profile, sources, rig_poses, field_map, stream_summaries, fetcher, apply_field_origin).await?;
     let cache_key = localization_solve_cache_key(&request.profile.id, request.apply_field_origin);
     let signature = localization_solve_signature(&request)?;
-    if let Some(entry) = localization_solve_cache().read().await.get(&cache_key).cloned()
-        && entry.signature == signature
-    {
-        let mut response = entry.response;
+    if let Some(mut response) = state.services.runtime.localization_solve_cache().get_matching(&cache_key, &signature).await {
         response.timings.cache_hit = true;
         response.timings.source_fetch_ms = source_fetch_ms;
         response.timings.total_ms = request_started.elapsed().as_secs_f64() * 1000.0;
@@ -62,7 +68,7 @@ pub(crate) async fn solve_via_engine(
             response.timings.cache_hit = false;
             response.timings.source_fetch_ms = source_fetch_ms;
             response.timings.total_ms = request_started.elapsed().as_secs_f64() * 1000.0;
-            localization_solve_cache().write().await.insert(cache_key, CachedLocalizationSolveResponse { signature, response: response.clone() });
+            state.services.runtime.localization_solve_cache().insert(cache_key, signature, response.clone()).await;
             Ok(response)
         }
         Ok(EngineEvent::Nack { reason, .. }) => Err(reason),

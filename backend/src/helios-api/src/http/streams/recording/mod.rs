@@ -9,7 +9,6 @@ mod tests;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::OnceLock;
 
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -73,7 +72,7 @@ pub(super) const RECORDING_STOP_GRACE_MIN_MS: u64 = 0;
 pub(super) const RECORDING_STOP_GRACE_MAX_MS: u64 = 2_000;
 
 #[derive(Debug)]
-pub(super) struct ImuSidecarSession {
+pub(crate) struct ImuSidecarSession {
     pub(super) media_name: String,
     pub(super) sidecar_file_name: String,
     pub(super) sidecar_path: PathBuf,
@@ -82,7 +81,7 @@ pub(super) struct ImuSidecarSession {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct ActiveRecordingSession {
+pub(crate) struct ActiveRecordingSession {
     pub(super) media_name: String,
     pub(super) output_path: PathBuf,
 }
@@ -93,12 +92,35 @@ pub(super) struct ImuSidecarSummary {
     pub(super) bytes: u64,
 }
 
-pub(super) fn imu_sidecar_sessions() -> &'static Mutex<HashMap<Uuid, ImuSidecarSession>> {
-    static SESSIONS: OnceLock<Mutex<HashMap<Uuid, ImuSidecarSession>>> = OnceLock::new();
-    SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
+#[derive(Default)]
+pub(crate) struct RecordingRuntimeState {
+    imu_sidecar_sessions: Mutex<HashMap<Uuid, ImuSidecarSession>>,
+    active_recording_sessions: Mutex<HashMap<Uuid, ActiveRecordingSession>>,
 }
 
-pub(super) fn active_recording_sessions() -> &'static Mutex<HashMap<Uuid, ActiveRecordingSession>> {
-    static SESSIONS: OnceLock<Mutex<HashMap<Uuid, ActiveRecordingSession>>> = OnceLock::new();
-    SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
+impl RecordingRuntimeState {
+    pub(crate) async fn has_imu_sidecar_session(&self, stream_id: Uuid) -> bool {
+        self.imu_sidecar_sessions.lock().await.contains_key(&stream_id)
+    }
+
+    pub(crate) async fn insert_imu_sidecar_session(&self, stream_id: Uuid, session: ImuSidecarSession) -> Result<(), ImuSidecarSession> {
+        let mut sessions = self.imu_sidecar_sessions.lock().await;
+        if sessions.contains_key(&stream_id) {
+            return Err(session);
+        }
+        sessions.insert(stream_id, session);
+        Ok(())
+    }
+
+    pub(crate) async fn remove_imu_sidecar_session(&self, stream_id: Uuid) -> Option<ImuSidecarSession> {
+        self.imu_sidecar_sessions.lock().await.remove(&stream_id)
+    }
+
+    pub(crate) async fn insert_active_recording_session(&self, stream_id: Uuid, session: ActiveRecordingSession) {
+        self.active_recording_sessions.lock().await.insert(stream_id, session);
+    }
+
+    pub(crate) async fn remove_active_recording_session(&self, stream_id: Uuid) -> Option<ActiveRecordingSession> {
+        self.active_recording_sessions.lock().await.remove(&stream_id)
+    }
 }

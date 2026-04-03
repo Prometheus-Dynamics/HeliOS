@@ -2,7 +2,6 @@ use helios_engine::ipc::{EngineEvent, StreamManifest, StreamSummary};
 use tokio::time::Duration;
 use tracing::{info, warn};
 
-use crate::engine_guard;
 use crate::http::AppState;
 use crate::http::streams_persist::{self, PersistedStreamReconcileStatus};
 
@@ -37,7 +36,7 @@ async fn mark_running_record(state: &AppState, camera_id: &str, stream_id: uuid:
 }
 
 pub(super) async fn reconcile_startup_streams(state: AppState, reason: &'static str) {
-    if engine_guard::safe_mode_active() {
+    if state.services.runtime.engine_guard().safe_mode_active() {
         warn!(reason, "engine crash guard active; skipping startup stream reconcile");
         return;
     }

@@ -14,66 +14,69 @@ use crate::ipc::IpcHandles;
 use super::scoring::{relief_action_for_stream, rough_stream_score, runtime_stream_score};
 use super::system::{now_ms, read_mem_available_kb};
 use super::{
-    DegradedStream, GuardCommand, GuardConfig, GuardRuntimeState, ReliefAction, ReliefCandidate, ResourceGuardAction, ResourceGuardActionKind, ResourceGuardStage, ResourceGuardStatus, runtime,
+    DegradedStream, GuardCommand, GuardConfig, GuardRuntimeState, ReliefAction, ReliefCandidate, ResourceGuardAction, ResourceGuardActionKind, ResourceGuardRuntime, ResourceGuardStage,
+    ResourceGuardStatus,
 };
 
-pub fn snapshot() -> ResourceGuardStatus {
-    let guard = runtime().state.lock().expect("resource guard state lock");
-    guard.snapshot()
+impl ResourceGuardRuntime {
+    pub fn snapshot(&self) -> ResourceGuardStatus {
+        let guard = self.state.lock().expect("resource guard state lock");
+        guard.snapshot()
+    }
+
+    pub async fn restore_stream(&self, stream_id: Uuid) -> Result<ResourceGuardAction, String> {
+        let tx = {
+            let guard = self.command_tx.lock().expect("resource guard command lock");
+            guard.clone()
+        }
+        .ok_or_else(|| "resource guard command channel unavailable".to_string())?;
+
+        let (reply_tx, reply_rx) = oneshot::channel();
+        tx.send(GuardCommand::Restore { stream_id, respond_to: reply_tx }).map_err(|_| "resource guard command channel closed".to_string())?;
+
+        match timeout(Duration::from_secs(8), reply_rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err("resource guard command canceled".to_string()),
+            Err(_) => Err("resource guard restore command timed out".to_string()),
+        }
+    }
+
+    pub fn spawn_task(self: Arc<Self>, handles: Arc<IpcHandles>) {
+        let cfg = GuardConfig::from_env();
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+        {
+            let mut guard = self.command_tx.lock().expect("resource guard command lock");
+            *guard = Some(cmd_tx);
+        }
+        if !cfg.enabled {
+            let mut guard = self.state.lock().expect("resource guard state lock");
+            *guard = GuardRuntimeState::disabled();
+            info!("resource guard disabled");
+            return;
+        }
+
+        {
+            let mut guard = self.state.lock().expect("resource guard state lock");
+            *guard = GuardRuntimeState::from_config(cfg);
+        }
+
+        info!(
+            poll_ms = cfg.poll_ms,
+            mem_low_kb = cfg.mem_low_kb,
+            mem_recover_kb = cfg.mem_recover_kb,
+            cooldown_ms = cfg.cooldown_ms,
+            metrics_top_n = cfg.metrics_top_n,
+            allow_stop_fallback = cfg.allow_stop_fallback,
+            "resource guard started"
+        );
+
+        tokio::spawn(async move {
+            run_resource_guard_loop(self.clone(), handles, cfg, cmd_rx).await;
+        });
+    }
 }
 
-pub async fn restore_stream(stream_id: Uuid) -> Result<ResourceGuardAction, String> {
-    let tx = {
-        let guard = runtime().command_tx.lock().expect("resource guard command lock");
-        guard.clone()
-    }
-    .ok_or_else(|| "resource guard command channel unavailable".to_string())?;
-
-    let (reply_tx, reply_rx) = oneshot::channel();
-    tx.send(GuardCommand::Restore { stream_id, respond_to: reply_tx }).map_err(|_| "resource guard command channel closed".to_string())?;
-
-    match timeout(Duration::from_secs(8), reply_rx).await {
-        Ok(Ok(result)) => result,
-        Ok(Err(_)) => Err("resource guard command canceled".to_string()),
-        Err(_) => Err("resource guard restore command timed out".to_string()),
-    }
-}
-
-pub fn spawn_resource_guard_task(handles: Arc<IpcHandles>) {
-    let cfg = GuardConfig::from_env();
-    let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
-    {
-        let mut guard = runtime().command_tx.lock().expect("resource guard command lock");
-        *guard = Some(cmd_tx);
-    }
-    if !cfg.enabled {
-        let mut guard = runtime().state.lock().expect("resource guard state lock");
-        *guard = GuardRuntimeState::disabled();
-        info!("resource guard disabled");
-        return;
-    }
-
-    {
-        let mut guard = runtime().state.lock().expect("resource guard state lock");
-        *guard = GuardRuntimeState::from_config(cfg);
-    }
-
-    info!(
-        poll_ms = cfg.poll_ms,
-        mem_low_kb = cfg.mem_low_kb,
-        mem_recover_kb = cfg.mem_recover_kb,
-        cooldown_ms = cfg.cooldown_ms,
-        metrics_top_n = cfg.metrics_top_n,
-        allow_stop_fallback = cfg.allow_stop_fallback,
-        "resource guard started"
-    );
-
-    tokio::spawn(async move {
-        run_resource_guard_loop(handles, cfg, cmd_rx).await;
-    });
-}
-
-async fn run_resource_guard_loop(handles: Arc<IpcHandles>, cfg: GuardConfig, mut cmd_rx: mpsc::UnboundedReceiver<GuardCommand>) {
+async fn run_resource_guard_loop(runtime: Arc<ResourceGuardRuntime>, handles: Arc<IpcHandles>, cfg: GuardConfig, mut cmd_rx: mpsc::UnboundedReceiver<GuardCommand>) {
     let mut degraded: HashMap<Uuid, DegradedStream> = HashMap::new();
     let mut last_action_ms = 0u64;
 
@@ -81,7 +84,7 @@ async fn run_resource_guard_loop(handles: Arc<IpcHandles>, cfg: GuardConfig, mut
         while let Ok(command) = cmd_rx.try_recv() {
             match command {
                 GuardCommand::Restore { stream_id, respond_to } => {
-                    let result = handle_restore_command(&handles, &mut degraded, cfg, stream_id).await;
+                    let result = handle_restore_command(runtime.as_ref(), &handles, &mut degraded, cfg, stream_id).await;
                     let _ = respond_to.send(result);
                 }
             }
@@ -93,7 +96,7 @@ async fn run_resource_guard_loop(handles: Arc<IpcHandles>, cfg: GuardConfig, mut
             continue;
         };
 
-        update_runtime_state(cfg, mem_available_kb, &degraded);
+        update_runtime_state(runtime.as_ref(), cfg, mem_available_kb, &degraded);
 
         if degraded.is_empty() && mem_available_kb > cfg.mem_low_kb {
             continue;
@@ -108,13 +111,13 @@ async fn run_resource_guard_loop(handles: Arc<IpcHandles>, cfg: GuardConfig, mut
         };
 
         degraded.retain(|stream_id, _| running.iter().any(|stream| stream.stream_id == *stream_id));
-        update_runtime_state(cfg, mem_available_kb, &degraded);
+        update_runtime_state(runtime.as_ref(), cfg, mem_available_kb, &degraded);
 
         if mem_available_kb >= cfg.mem_recover_kb {
             let now = now_ms();
-            if !degraded.is_empty() && now.saturating_sub(last_action_ms) >= cfg.cooldown_ms && restore_one_stream(&handles, &running, &mut degraded, cfg, mem_available_kb).await {
+            if !degraded.is_empty() && now.saturating_sub(last_action_ms) >= cfg.cooldown_ms && restore_one_stream(runtime.as_ref(), &handles, &running, &mut degraded, cfg, mem_available_kb).await {
                 last_action_ms = now_ms();
-                update_runtime_state(cfg, mem_available_kb, &degraded);
+                update_runtime_state(runtime.as_ref(), cfg, mem_available_kb, &degraded);
             }
             continue;
         }
@@ -128,10 +131,10 @@ async fn run_resource_guard_loop(handles: Arc<IpcHandles>, cfg: GuardConfig, mut
             continue;
         }
 
-        match relieve_pressure(&handles, &running, &mut degraded, cfg, mem_available_kb).await {
+        match relieve_pressure(runtime.as_ref(), &handles, &running, &mut degraded, cfg, mem_available_kb).await {
             Ok(true) => {
                 last_action_ms = now_ms();
-                update_runtime_state(cfg, mem_available_kb, &degraded);
+                update_runtime_state(runtime.as_ref(), cfg, mem_available_kb, &degraded);
                 warn!(mem_available_kb, mem_low_kb = cfg.mem_low_kb, mem_recover_kb = cfg.mem_recover_kb, degraded_streams = degraded.len(), "resource guard applied pressure relief action");
             }
             Ok(false) => {
@@ -144,8 +147,8 @@ async fn run_resource_guard_loop(handles: Arc<IpcHandles>, cfg: GuardConfig, mut
     }
 }
 
-fn update_runtime_state(cfg: GuardConfig, mem_available_kb: u64, degraded: &HashMap<Uuid, DegradedStream>) {
-    let mut guard = runtime().state.lock().expect("resource guard state lock");
+fn update_runtime_state(runtime: &ResourceGuardRuntime, cfg: GuardConfig, mem_available_kb: u64, degraded: &HashMap<Uuid, DegradedStream>) {
+    let mut guard = runtime.state.lock().expect("resource guard state lock");
     guard.enabled = cfg.enabled;
     guard.poll_ms = cfg.poll_ms;
     guard.cooldown_ms = cfg.cooldown_ms;
@@ -155,17 +158,23 @@ fn update_runtime_state(cfg: GuardConfig, mem_available_kb: u64, degraded: &Hash
     guard.sync_degraded(degraded);
 }
 
-fn update_runtime_degraded_only(degraded: &HashMap<Uuid, DegradedStream>) {
-    let mut guard = runtime().state.lock().expect("resource guard state lock");
+fn update_runtime_degraded_only(runtime: &ResourceGuardRuntime, degraded: &HashMap<Uuid, DegradedStream>) {
+    let mut guard = runtime.state.lock().expect("resource guard state lock");
     guard.sync_degraded(degraded);
 }
 
-fn record_runtime_action(action: ResourceGuardAction) {
-    let mut guard = runtime().state.lock().expect("resource guard state lock");
+fn record_runtime_action(runtime: &ResourceGuardRuntime, action: ResourceGuardAction) {
+    let mut guard = runtime.state.lock().expect("resource guard state lock");
     guard.push_action(action);
 }
 
-async fn handle_restore_command(handles: &Arc<IpcHandles>, degraded: &mut HashMap<Uuid, DegradedStream>, cfg: GuardConfig, stream_id: Uuid) -> Result<ResourceGuardAction, String> {
+async fn handle_restore_command(
+    runtime: &ResourceGuardRuntime,
+    handles: &Arc<IpcHandles>,
+    degraded: &mut HashMap<Uuid, DegradedStream>,
+    cfg: GuardConfig,
+    stream_id: Uuid,
+) -> Result<ResourceGuardAction, String> {
     if !cfg.enabled {
         return Err("resource guard is disabled".to_string());
     }
@@ -178,18 +187,25 @@ async fn handle_restore_command(handles: &Arc<IpcHandles>, degraded: &mut HashMa
         Some(mem) => format!("Manual restore requested while MemAvailable is {}kB (low watermark {}kB, recover watermark {}kB)", mem, cfg.mem_low_kb, cfg.mem_recover_kb),
         None => "Manual restore requested by operator".to_string(),
     };
-    let restored = restore_stream_codecs(handles, degraded, stream_id, reason, mem_available_kb).await?;
+    let restored = restore_stream_codecs(runtime, handles, degraded, stream_id, reason, mem_available_kb).await?;
 
     if let Some(mem) = mem_available_kb {
-        update_runtime_state(cfg, mem, degraded);
+        update_runtime_state(runtime, cfg, mem, degraded);
     } else {
-        update_runtime_degraded_only(degraded);
+        update_runtime_degraded_only(runtime, degraded);
     }
 
     Ok(restored)
 }
 
-async fn relieve_pressure(handles: &Arc<IpcHandles>, running: &[StreamSummary], degraded: &mut HashMap<Uuid, DegradedStream>, cfg: GuardConfig, mem_available_kb: u64) -> Result<bool, String> {
+async fn relieve_pressure(
+    runtime: &ResourceGuardRuntime,
+    handles: &Arc<IpcHandles>,
+    running: &[StreamSummary],
+    degraded: &mut HashMap<Uuid, DegradedStream>,
+    cfg: GuardConfig,
+    mem_available_kb: u64,
+) -> Result<bool, String> {
     let mut candidates: Vec<ReliefCandidate> = running
         .iter()
         .filter(|stream| !stream.manifest.internal)
@@ -239,15 +255,18 @@ async fn relieve_pressure(handles: &Arc<IpcHandles>, running: &[StreamSummary], 
                         DegradedStream { alias: stream.manifest.identity.alias.clone(), original_decoder_id, original_encoder_id, stage: ResourceGuardStage::DecoderDisabled, changed_at_ms: now_ms() },
                     );
 
-                    record_runtime_action(ResourceGuardAction {
-                        at_ms: now_ms(),
-                        kind: ResourceGuardActionKind::DisableDecoder,
-                        stream_id: stream.stream_id,
-                        alias: stream.manifest.identity.alias.clone(),
-                        score: choice.score,
-                        reason,
-                        mem_available_kb: Some(mem_available_kb),
-                    });
+                    record_runtime_action(
+                        runtime,
+                        ResourceGuardAction {
+                            at_ms: now_ms(),
+                            kind: ResourceGuardActionKind::DisableDecoder,
+                            stream_id: stream.stream_id,
+                            alias: stream.manifest.identity.alias.clone(),
+                            score: choice.score,
+                            reason,
+                            mem_available_kb: Some(mem_available_kb),
+                        },
+                    );
 
                     warn!(
                         stream_id = %stream.stream_id,
@@ -275,15 +294,18 @@ async fn relieve_pressure(handles: &Arc<IpcHandles>, running: &[StreamSummary], 
                     DegradedStream { alias: stream.manifest.identity.alias.clone(), original_decoder_id, original_encoder_id, stage: ResourceGuardStage::CodecsDisabled, changed_at_ms: now_ms() },
                 );
 
-                record_runtime_action(ResourceGuardAction {
-                    at_ms: now_ms(),
-                    kind: ResourceGuardActionKind::DisableAllCodecs,
-                    stream_id: stream.stream_id,
-                    alias: stream.manifest.identity.alias.clone(),
-                    score: choice.score,
-                    reason,
-                    mem_available_kb: Some(mem_available_kb),
-                });
+                record_runtime_action(
+                    runtime,
+                    ResourceGuardAction {
+                        at_ms: now_ms(),
+                        kind: ResourceGuardActionKind::DisableAllCodecs,
+                        stream_id: stream.stream_id,
+                        alias: stream.manifest.identity.alias.clone(),
+                        score: choice.score,
+                        reason,
+                        mem_available_kb: Some(mem_available_kb),
+                    },
+                );
 
                 warn!(
                     stream_id = %stream.stream_id,
@@ -301,15 +323,18 @@ async fn relieve_pressure(handles: &Arc<IpcHandles>, running: &[StreamSummary], 
             Ok(EngineEvent::Stopped { .. }) => {
                 degraded.remove(&stream.stream_id);
 
-                record_runtime_action(ResourceGuardAction {
-                    at_ms: now_ms(),
-                    kind: ResourceGuardActionKind::StopStream,
-                    stream_id: stream.stream_id,
-                    alias: stream.manifest.identity.alias.clone(),
-                    score: choice.score,
-                    reason: format!("MemAvailable {}kB is below low watermark {}kB and no further codec reductions were available", mem_available_kb, cfg.mem_low_kb),
-                    mem_available_kb: Some(mem_available_kb),
-                });
+                record_runtime_action(
+                    runtime,
+                    ResourceGuardAction {
+                        at_ms: now_ms(),
+                        kind: ResourceGuardActionKind::StopStream,
+                        stream_id: stream.stream_id,
+                        alias: stream.manifest.identity.alias.clone(),
+                        score: choice.score,
+                        reason: format!("MemAvailable {}kB is below low watermark {}kB and no further codec reductions were available", mem_available_kb, cfg.mem_low_kb),
+                        mem_available_kb: Some(mem_available_kb),
+                    },
+                );
 
                 warn!(
                     stream_id = %stream.stream_id,
@@ -327,6 +352,7 @@ async fn relieve_pressure(handles: &Arc<IpcHandles>, running: &[StreamSummary], 
 }
 
 async fn restore_stream_codecs(
+    runtime: &ResourceGuardRuntime,
     handles: &Arc<IpcHandles>,
     degraded: &mut HashMap<Uuid, DegradedStream>,
     stream_id: Uuid,
@@ -341,7 +367,7 @@ async fn restore_stream_codecs(
         Ok(EngineEvent::Ack { .. }) => {
             degraded.remove(&stream_id);
             let action = ResourceGuardAction { at_ms: now_ms(), kind: ResourceGuardActionKind::RestoreCodecs, stream_id, alias: state.alias.clone(), score: 0.0, reason, mem_available_kb };
-            record_runtime_action(action.clone());
+            record_runtime_action(runtime, action.clone());
             warn!(stream_id = %stream_id, "resource guard restored stream codecs");
             Ok(action)
         }
@@ -351,7 +377,14 @@ async fn restore_stream_codecs(
     }
 }
 
-async fn restore_one_stream(handles: &Arc<IpcHandles>, running: &[StreamSummary], degraded: &mut HashMap<Uuid, DegradedStream>, cfg: GuardConfig, mem_available_kb: u64) -> bool {
+async fn restore_one_stream(
+    runtime: &ResourceGuardRuntime,
+    handles: &Arc<IpcHandles>,
+    running: &[StreamSummary],
+    degraded: &mut HashMap<Uuid, DegradedStream>,
+    cfg: GuardConfig,
+    mem_available_kb: u64,
+) -> bool {
     let mut candidates: Vec<(Uuid, DegradedStream)> =
         degraded.iter().filter_map(|(stream_id, state)| running.iter().find(|stream| stream.stream_id == *stream_id && !stream.manifest.internal).map(|_| (*stream_id, state.clone()))).collect();
 
@@ -364,7 +397,16 @@ async fn restore_one_stream(handles: &Arc<IpcHandles>, running: &[StreamSummary]
         return false;
     };
 
-    match restore_stream_codecs(handles, degraded, stream_id, format!("MemAvailable {}kB recovered above restore watermark {}kB", mem_available_kb, cfg.mem_recover_kb), Some(mem_available_kb)).await {
+    match restore_stream_codecs(
+        runtime,
+        handles,
+        degraded,
+        stream_id,
+        format!("MemAvailable {}kB recovered above restore watermark {}kB", mem_available_kb, cfg.mem_recover_kb),
+        Some(mem_available_kb),
+    )
+    .await
+    {
         Ok(_) => true,
         Err(err) => {
             warn!(stream_id = %stream_id, error = %err, "resource guard auto-restore failed");

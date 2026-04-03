@@ -6,6 +6,7 @@ use crate::http::streams::util::{apply_effective_pipeline_layout, build_stream_i
 use crate::http::streams_persist;
 use helios_engine::capture::CaptureControlInfo;
 use helios_engine::ipc::{StreamManifest, StreamSummary};
+use lib_runtime_policy::HELIOS_API_STREAMS_POLICY;
 use std::collections::{BTreeSet, HashMap};
 use std::time::Instant;
 use tokio::time::Duration;
@@ -33,13 +34,7 @@ pub struct StreamsReadModelState {
 }
 
 fn stream_list_cache_ttl() -> Duration {
-    const DEFAULT_MS: u64 = 750;
-    const MIN_MS: u64 = 0;
-    const MAX_MS: u64 = 5_000;
-
-    let ms = std::env::var("HELIOS_API_STREAMS_CACHE_MS").ok().and_then(|value| value.trim().parse::<u64>().ok()).unwrap_or(DEFAULT_MS);
-
-    Duration::from_millis(ms.clamp(MIN_MS, MAX_MS))
+    Duration::from_millis(HELIOS_API_STREAMS_POLICY.resolve().cache_ms)
 }
 
 fn controls_cache_ttl() -> Duration {

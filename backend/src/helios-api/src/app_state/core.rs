@@ -6,6 +6,7 @@ use crate::ipc::IpcHandles;
 use super::hardware_media::{HardwareReadModelService, MediaReadModelService};
 use super::network_peers::{NetworkService, PeersService};
 use super::pipelines_streams::{PipelinesReadModelService, StreamsReadModelService};
+use super::runtime_coordination::RuntimeCoordinationService;
 use super::system_updater::{SystemReadModelService, UpdaterService};
 
 #[derive(Default)]
@@ -15,6 +16,7 @@ pub struct ApiServices {
     pub network: NetworkService,
     pub peers: PeersService,
     pub pipelines: PipelinesReadModelService,
+    pub runtime: RuntimeCoordinationService,
     pub streams: StreamsReadModelService,
     pub system: SystemReadModelService,
     pub updater: UpdaterService,

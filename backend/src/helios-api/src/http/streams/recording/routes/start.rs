@@ -16,7 +16,7 @@ use crate::http::streams::recording::media::{
 };
 use crate::http::streams::recording::options::{clamp_imu_interval_ms, infer_recording_fps, infer_stream_codec, parse_recording_options, parse_recording_settings};
 use crate::http::streams::recording::sidecar::start_imu_sidecar_session;
-use crate::http::streams::recording::{ActiveRecordingSession, StartRecordingRequest, active_recording_sessions};
+use crate::http::streams::recording::{ActiveRecordingSession, StartRecordingRequest};
 use crate::http::streams::util::{engine_error_body, map_client_error};
 use helios_engine::ipc::{EngineErrorCode, EngineEvent, RecordingCodec, RecordingSource};
 
@@ -79,6 +79,7 @@ pub(crate) async fn start_recording(State(state): State<crate::http::AppState>, 
     let imu_interval_ms = clamp_imu_interval_ms(req.imu_interval_ms);
     let imu_sidecar_name = include_imu.then(|| imu_sidecar_file_name(&filename));
     let frame_ts_name = frame_timestamps_file_name(&filename);
+    let recording_runtime = state.services.streams.recording_runtime();
     info!(
         stream_id = %id,
         source = ?source,
@@ -130,6 +131,7 @@ pub(crate) async fn start_recording(State(state): State<crate::http::AppState>, 
 
     if include_imu
         && let Err(reason) = start_imu_sidecar_session(
+            recording_runtime.as_ref(),
             id,
             &filename,
             ts_ms,
@@ -145,10 +147,7 @@ pub(crate) async fn start_recording(State(state): State<crate::http::AppState>, 
         return (StatusCode::BAD_GATEWAY, Json(engine_error_body(Some(EngineErrorCode::Internal), format!("failed to start IMU sidecar capture: {reason}")))).into_response();
     }
 
-    {
-        let mut sessions = active_recording_sessions().lock().await;
-        sessions.insert(id, ActiveRecordingSession { media_name: filename.clone(), output_path: output_path.clone() });
-    }
+    recording_runtime.insert_active_recording_session(id, ActiveRecordingSession { media_name: filename.clone(), output_path: output_path.clone() }).await;
 
     (
         StatusCode::CREATED,

@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex as StdMutex, Weak};
 use std::time::{Duration as StdDuration, Instant as StdInstant};
 
+use lib_runtime_policy::HELIOS_API_SYSTEM_READ_MODEL_POLICY;
 use tokio::sync::{broadcast, oneshot};
 use tokio::time::{Duration, Instant};
 use tracing::{debug, warn};
@@ -86,12 +87,7 @@ pub(super) async fn run_devices_updates_sampler(tx: broadcast::Sender<Arc<Shared
 }
 
 pub(super) async fn run_telemetry_sampler(tx: broadcast::Sender<Arc<str>>, latest: Arc<StdMutex<Option<Arc<str>>>>, state: Option<Weak<IpcHandles>>, collector: Arc<StdMutex<SystemCollector>>) {
-    let sample_interval = std::env::var("HELIOS_TELEMETRY_SAMPLE_INTERVAL_MS")
-        .ok()
-        .and_then(|raw| raw.parse::<u64>().ok())
-        .map(Duration::from_millis)
-        .map(|duration| duration.clamp(Duration::from_millis(250), Duration::from_millis(10_000)))
-        .unwrap_or_else(|| Duration::from_millis(1_000));
+    let sample_interval = Duration::from_millis(HELIOS_API_SYSTEM_READ_MODEL_POLICY.resolve().telemetry_sample_interval_ms);
 
     let last_power: Arc<StdMutex<Option<PowerTelemetry>>> = Arc::new(StdMutex::new(None));
 
@@ -224,12 +220,7 @@ pub(super) fn run_telemetry_sys_sampler(
 }
 
 pub(super) fn run_processes_sampler(tx: broadcast::Sender<Arc<SharedProcessesSnapshot>>, latest: Arc<StdMutex<Option<Arc<SharedProcessesSnapshot>>>>) {
-    let sample_interval = std::env::var("HELIOS_PROCESSES_SAMPLE_INTERVAL_MS")
-        .ok()
-        .and_then(|raw| raw.parse::<u64>().ok())
-        .map(Duration::from_millis)
-        .map(|duration| duration.clamp(Duration::from_millis(250), Duration::from_millis(10_000)))
-        .unwrap_or_else(|| Duration::from_millis(250));
+    let sample_interval = Duration::from_millis(HELIOS_API_SYSTEM_READ_MODEL_POLICY.resolve().processes_sample_interval_ms);
 
     let mut sys = sysinfo::System::new_all();
     sys.refresh_all();

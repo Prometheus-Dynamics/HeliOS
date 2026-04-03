@@ -5,6 +5,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use bytes::Bytes;
+use lib_runtime_policy::HELIOS_API_STREAMS_POLICY;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -59,27 +60,12 @@ fn mjpeg_poll_for_preview_fps(max_fps: Option<f64>) -> Duration {
 }
 
 fn mjpeg_poll() -> Duration {
-    std::env::var("HELIOS_MJPEG_POLL_MS")
-        .ok()
-        .and_then(|raw| raw.parse::<u64>().ok())
-        .or_else(|| std::env::var("HELIOS_PREVIEW_POLL_MS").ok().and_then(|raw| raw.parse::<u64>().ok()))
-        .or_else(|| std::env::var("HELIOS_MJPEG_INTERVAL_MS").ok().and_then(|raw| raw.parse::<u64>().ok()))
-        .map(Duration::from_millis)
-        .map(|d| d.clamp(Duration::from_millis(1), Duration::from_millis(100)))
-        .unwrap_or_else(|| {
-            let preview_fps = std::env::var("HELIOS_PREVIEW_MAX_FPS").ok().and_then(|raw| raw.parse::<f64>().ok());
-            mjpeg_poll_for_preview_fps(preview_fps)
-        })
+    let policy = HELIOS_API_STREAMS_POLICY.resolve();
+    policy.mjpeg_poll_ms.or(policy.preview_poll_ms).or(policy.mjpeg_interval_ms).map(Duration::from_millis).unwrap_or_else(|| mjpeg_poll_for_preview_fps(policy.preview_max_fps))
 }
 
 fn mjpeg_outage() -> Duration {
-    // Align with the encoded preview outage setting so both preview formats tolerate stream restarts.
-    std::env::var("HELIOS_PREVIEW_OUTAGE_MS")
-        .ok()
-        .and_then(|raw| raw.parse::<u64>().ok())
-        .map(Duration::from_millis)
-        .map(|d| d.clamp(Duration::from_secs(1), Duration::from_secs(15)))
-        .unwrap_or_else(|| Duration::from_secs(15))
+    Duration::from_millis(HELIOS_API_STREAMS_POLICY.resolve().preview_outage_ms)
 }
 
 pub(crate) async fn mjpeg_stream(state: AppState, id: Uuid) -> Response {

@@ -3,12 +3,11 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
+use lib_runtime_policy::HELIOS_API_SYSTEM_READ_MODEL_POLICY;
 use sysinfo::System;
 use tokio::time::{Duration, Instant};
 
 use crate::http::device::metrics::{ProcessMappingMetrics, ProcessMemoryMetrics};
-
-use super::config::read_duration_env;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum ProcessMappingBucket {
@@ -107,17 +106,17 @@ pub(super) fn collect_process_memory_metrics(sys: &System) -> Vec<ProcessMemoryM
 
 fn process_breakdown_limit() -> usize {
     static LIMIT: OnceLock<usize> = OnceLock::new();
-    *LIMIT.get_or_init(|| std::env::var("HELIOS_DEVICE_PROCESS_BREAKDOWN_LIMIT").ok().and_then(|value| value.trim().parse::<usize>().ok()).unwrap_or(16).clamp(1, 128))
+    *LIMIT.get_or_init(|| HELIOS_API_SYSTEM_READ_MODEL_POLICY.resolve().process_breakdown_limit)
 }
 
 fn process_breakdown_budget() -> Duration {
     static BUDGET: OnceLock<Duration> = OnceLock::new();
-    *BUDGET.get_or_init(|| read_duration_env("HELIOS_DEVICE_PROCESS_BREAKDOWN_BUDGET_MS", 400, 0, 5_000))
+    *BUDGET.get_or_init(|| Duration::from_millis(HELIOS_API_SYSTEM_READ_MODEL_POLICY.resolve().process_breakdown_budget_ms))
 }
 
 fn process_mapping_limit() -> usize {
     static LIMIT: OnceLock<usize> = OnceLock::new();
-    *LIMIT.get_or_init(|| std::env::var("HELIOS_DEVICE_PROCESS_MAPPING_LIMIT").ok().and_then(|value| value.trim().parse::<usize>().ok()).unwrap_or(8).clamp(1, 64))
+    *LIMIT.get_or_init(|| HELIOS_API_SYSTEM_READ_MODEL_POLICY.resolve().process_mapping_limit)
 }
 
 fn read_process_memory_attribution(pid: u32) -> ProcessMemoryAttribution {

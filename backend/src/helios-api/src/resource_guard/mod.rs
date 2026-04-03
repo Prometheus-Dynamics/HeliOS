@@ -6,7 +6,7 @@ mod system;
 mod tests;
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 
 use serde::Serialize;
 use tokio::sync::{mpsc, oneshot};
@@ -14,8 +14,6 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use lib_runtime_policy::HELIOS_RESOURCE_GUARD_POLICY;
-
-pub use runtime::{restore_stream, snapshot, spawn_resource_guard_task};
 
 const MAX_RECENT_ACTIONS: usize = 20;
 
@@ -214,12 +212,13 @@ impl GuardRuntimeState {
     }
 }
 
-pub(super) struct ResourceGuardRuntime {
+pub(crate) struct ResourceGuardRuntime {
     state: Mutex<GuardRuntimeState>,
     command_tx: Mutex<Option<mpsc::UnboundedSender<GuardCommand>>>,
 }
 
-pub(super) fn runtime() -> &'static ResourceGuardRuntime {
-    static RUNTIME: OnceLock<ResourceGuardRuntime> = OnceLock::new();
-    RUNTIME.get_or_init(|| ResourceGuardRuntime { state: Mutex::new(GuardRuntimeState::disabled()), command_tx: Mutex::new(None) })
+impl Default for ResourceGuardRuntime {
+    fn default() -> Self {
+        Self { state: Mutex::new(GuardRuntimeState::disabled()), command_tx: Mutex::new(None) }
+    }
 }

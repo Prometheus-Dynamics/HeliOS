@@ -10,6 +10,8 @@ use uuid::Uuid;
 
 use crate::api_observability::ApiCacheMetric;
 use crate::http::pipelines::{PipelineSummary, PlannerDiagnostic};
+use crate::http::streams::recording::RecordingRuntimeState;
+use crate::http::streams::replay_bundle::ReplayBundleSessionsState;
 use crate::http::streams::types::StreamInfo;
 use crate::http::streams::{mjpeg::MjpegFeedsState, snapshot::SnapshotLocksState};
 
@@ -76,6 +78,8 @@ impl PipelinesReadModelService {
 pub struct StreamsReadModelService {
     state: Arc<crate::streams_read_model::StreamsReadModelState>,
     mjpeg_feeds: Arc<MjpegFeedsState>,
+    recording_runtime: Arc<RecordingRuntimeState>,
+    replay_bundle_sessions: Arc<ReplayBundleSessionsState>,
     snapshot_locks: Arc<SnapshotLocksState>,
 }
 
@@ -114,6 +118,14 @@ impl StreamsReadModelService {
 
     pub async fn snapshot_guard(&self, stream_id: Uuid) -> Arc<Mutex<()>> {
         self.snapshot_locks.guard(stream_id).await
+    }
+
+    pub fn recording_runtime(&self) -> Arc<RecordingRuntimeState> {
+        self.recording_runtime.clone()
+    }
+
+    pub fn replay_bundle_sessions(&self) -> Arc<ReplayBundleSessionsState> {
+        self.replay_bundle_sessions.clone()
     }
 
     pub fn stream_list_cache_metrics(&self) -> ApiCacheMetric {

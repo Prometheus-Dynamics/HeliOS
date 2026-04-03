@@ -255,8 +255,7 @@ async fn async_main() {
 
     let handles = Arc::new(ipc::connect_all().await);
     let state = Arc::new(app_state::ApiAppState::new(handles.clone()));
-    engine_guard::spawn_engine_crash_guard_task(handles.clone());
-    resource_guard::spawn_resource_guard_task(handles.clone());
+    state.services.runtime.spawn_background_tasks(&state);
     state.services.network.spawn_team_autodetect_task();
     nt4::bridge::init(handles.clone());
     let update_active = led_status::spawn_update_led_task(handles.clone());

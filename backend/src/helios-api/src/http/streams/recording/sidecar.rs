@@ -15,7 +15,7 @@ use crate::http::device::imu::imu_status_from_snapshot;
 use crate::http::streams::recording::media::{clear_media_imu_sidecar, media_meta_dir_async, temp_output_path, update_media_imu_sidecar};
 use crate::http::streams::recording::{
     IMU_SIDE_CAR_HISTORY_MAX_SAMPLES, IMU_SIDE_CAR_HISTORY_WINDOW_MS, IMU_SIDE_CAR_STOP_TAIL_IDLE_MS, IMU_SIDE_CAR_STOP_TAIL_MAX_MS, IMU_SIDE_CAR_STOP_WAIT_MAX_MS, IMU_SIDE_CAR_STOP_WAIT_QUIET_MS,
-    ImuSidecarSession, ImuSidecarSummary, imu_sidecar_sessions,
+    ImuSidecarSession, ImuSidecarSummary, RecordingRuntimeState,
 };
 use helios_peripherals::dto::SensorScope;
 
@@ -60,6 +60,7 @@ fn select_imu_sample_at_or_before_wall_ms(imu_history: &VecDeque<(i64, lib_senso
 }
 
 pub(super) async fn start_imu_sidecar_session(
+    runtime: &RecordingRuntimeState,
     stream_id: Uuid,
     media_name: &str,
     recording_started_at_ms: i64,
@@ -68,14 +69,11 @@ pub(super) async fn start_imu_sidecar_session(
     sidecar_file_name: String,
     frame_ts_path: PathBuf,
 ) -> Result<(), String> {
-    if let Err(err) = stop_imu_sidecar_session(stream_id).await {
+    if let Err(err) = stop_imu_sidecar_session(runtime, stream_id).await {
         warn!(stream_id = %stream_id, error = %err, "failed to finalize stale IMU sidecar session before starting a new one");
     }
-    {
-        let sessions = imu_sidecar_sessions().lock().await;
-        if sessions.contains_key(&stream_id) {
-            return Err("IMU sidecar recording already active for stream".to_string());
-        }
+    if runtime.has_imu_sidecar_session(stream_id).await {
+        return Err("IMU sidecar recording already active for stream".to_string());
     }
 
     let media_name_owned = media_name.to_string();
@@ -228,21 +226,16 @@ pub(super) async fn start_imu_sidecar_session(
         Ok(ImuSidecarSummary { samples, bytes: writer_summary.bytes })
     });
 
-    let mut sessions = imu_sidecar_sessions().lock().await;
-    if sessions.contains_key(&stream_id) {
-        cancel.cancel();
-        let _ = join.await;
+    if let Err(session) = runtime.insert_imu_sidecar_session(stream_id, ImuSidecarSession { media_name: media_name_owned, sidecar_file_name, sidecar_path, cancel, join }).await {
+        session.cancel.cancel();
+        let _ = session.join.await;
         return Err("IMU sidecar recording already active for stream".to_string());
     }
-    sessions.insert(stream_id, ImuSidecarSession { media_name: media_name_owned, sidecar_file_name, sidecar_path, cancel, join });
     Ok(())
 }
 
-pub(super) async fn stop_imu_sidecar_session(stream_id: Uuid) -> Result<(), String> {
-    let session = {
-        let mut sessions = imu_sidecar_sessions().lock().await;
-        sessions.remove(&stream_id)
-    };
+pub(super) async fn stop_imu_sidecar_session(runtime: &RecordingRuntimeState, stream_id: Uuid) -> Result<(), String> {
+    let session = runtime.remove_imu_sidecar_session(stream_id).await;
     let Some(session) = session else {
         return Ok(());
     };
