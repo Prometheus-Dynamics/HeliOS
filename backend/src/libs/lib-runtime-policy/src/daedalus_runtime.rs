@@ -1,46 +1,6 @@
 use crate::BoundedU64Policy;
-use std::path::{Path, PathBuf};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PathPolicy {
-    pub env_var: &'static str,
-    pub default: &'static str,
-}
-
-impl PathPolicy {
-    pub fn resolve(self) -> PathBuf {
-        std::env::var(self.env_var).ok().map(|value| value.trim().to_string()).filter(|value| !value.is_empty()).map(PathBuf::from).unwrap_or_else(|| PathBuf::from(self.default))
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SearchPathPolicy {
-    pub single_env_var: &'static str,
-    pub list_env_var: &'static str,
-    pub system_fallback: &'static str,
-}
-
-impl SearchPathPolicy {
-    pub fn resolve(self, install_dir: &Path) -> Vec<PathBuf> {
-        if let Ok(single) = std::env::var(self.single_env_var) {
-            let trimmed = single.trim();
-            if !trimmed.is_empty() {
-                return vec![PathBuf::from(trimmed)];
-            }
-        }
-
-        if let Ok(list) = std::env::var(self.list_env_var) {
-            let dirs: Vec<_> = std::env::split_paths(&list).collect();
-            if !dirs.is_empty() {
-                return dirs;
-            }
-        }
-
-        let mut dirs = vec![install_dir.to_path_buf(), PathBuf::from(self.system_fallback)];
-        dirs.dedup();
-        dirs
-    }
-}
+use crate::filesystem::{PathPolicy, SearchPathPolicy};
+use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DaedalusRuntimePolicy {
