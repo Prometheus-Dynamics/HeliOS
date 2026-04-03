@@ -83,6 +83,7 @@ impl ModelRuntimeHandle {
         let request = ModelLoadRequest { id: stored.id.clone(), format: stored.format.clone(), source: ModelSource::File(stored.artifact_path.clone()), metadata: metadata.clone() };
         let runtime = Runtime::with_selection(self.registry, backend_selection(&config.backend));
         let loaded = runtime.load_model_blocking(&request)?;
+        #[cfg(feature = "backend-coral")]
         if let Some(coral_model) = loaded.model.as_any().downcast_ref::<crate::backend::coral::CoralModel>() {
             coral_model.set_preferred_device(config.device_path.clone());
         }

@@ -11,4 +11,4 @@ workspace = true
 
 [dependencies]
 daedalus = { workspace = true, features = ["ffi", "plugins", "gpu"] }
-lib-cv = { path = "../../libs/lib-cv", features = ["gpu"] }
+lib-cv = { path = "../../libs/lib-cv", default-features = false, features = ["engine", "plugins", "gpu", "aruco", "contour", "draw"] }

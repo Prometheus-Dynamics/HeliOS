@@ -11,4 +11,4 @@ workspace = true
 
 [dependencies]
 daedalus = { workspace = true, features = ["ffi", "plugins", "gpu"] }
-lib-ai = { path = "../../libs/lib-ai", features = ["backend-coral"] }
+lib-ai = { path = "../../libs/lib-ai", default-features = false, features = ["plugins", "backend-coral"] }

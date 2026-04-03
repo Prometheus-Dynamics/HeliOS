@@ -201,7 +201,7 @@ impl StorageLayoutManifest {
 
 #[cfg(test)]
 mod tests {
-    use super::{CURRENT_STORAGE_LAYOUT_SCHEMA_VERSION, PartitionRole, SlotScheme, StorageLayoutManifest};
+    use super::{PartitionRole, SlotScheme, StorageLayoutManifest};
     use std::path::PathBuf;
 
     fn fixture(name: &str) -> PathBuf {

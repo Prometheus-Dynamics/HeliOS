@@ -10,10 +10,9 @@ doctest = false
 workspace = true
 
 [features]
-default = ["all", "plugins"]
-all = ["contour", "ai", "draw", "aruco"]
+default = []
+all = ["contour", "draw", "aruco"]
 contour = []
-ai = []
 draw = []
 aruco = []
 engine = ["dep:daedalus", "dep:daedalus-data", "dep:daedalus-macros", "dep:paste", "daedalus/engine", "daedalus/plugins"]

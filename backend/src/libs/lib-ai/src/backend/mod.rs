@@ -16,6 +16,9 @@ pub mod onnx;
 #[cfg(feature = "backend-coral")]
 pub mod coral;
 
+#[cfg(any(feature = "backend-tflite", feature = "backend-coral"))]
+pub(crate) mod tflite_runtime;
+
 #[cfg(any(feature = "backend-tflite", feature = "backend-onnx", feature = "backend-coral"))]
 pub(crate) mod util;
 

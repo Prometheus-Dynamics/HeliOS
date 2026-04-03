@@ -2940,7 +2940,13 @@ name = "helios-daedalus-led-plugin"
 version = "1.0.0"
 dependencies = [
  "daedalus-rs",
- "lib-led-plugin",
+ "helios-peripherals",
+ "lib-ipc",
+ "lib-led-animations",
+ "paste",
+ "serde",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -4041,20 +4047,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
-]
-
-[[package]]
-name = "lib-led-plugin"
-version = "1.0.0"
-dependencies = [
- "daedalus-rs",
- "helios-peripherals",
- "lib-ipc",
- "lib-led-animations",
- "paste",
- "serde",
- "tokio",
- "tracing",
 ]
 
 [[package]]

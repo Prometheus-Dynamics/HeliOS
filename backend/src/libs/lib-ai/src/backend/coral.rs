@@ -2,7 +2,10 @@ use super::{AiBackend, AiModel, BackendCapabilities, BackendFeature, BackendHeal
 #[cfg(feature = "docs")]
 use crate::docs::{BackendDoc, DocumentedBackend};
 use crate::{
-    backend::util::{is_edge_tpu_compiled_model, read_model_bytes},
+    backend::{
+        tflite_runtime,
+        util::{is_edge_tpu_compiled_model, read_model_bytes},
+    },
     error::{AiError, Result},
     model::{ModelFormat, ModelId, ModelLoadRequest, ModelMetadata},
     registry::{self, Registerable},
@@ -26,10 +29,9 @@ use tracing::{info, warn};
 
 mod runtime;
 mod telemetry;
-pub(crate) mod tflite;
 use runtime::{EdgeTpuLib, EdgeTpuOption, RuntimeDeviceRecord, RuntimeDeviceType, RuntimeError, TfLiteDelegate, enumerate_devices, library_handle as edge_library};
 pub use telemetry::{CoralDevfreqStats, CoralDeviceDiagnostics, CoralHwmonMetric, CoralHwmonMetricKind, CoralHwmonStats, collect_device_diagnostics};
-use tflite::{TfLiteType, TfliteError, library as tflite_library};
+use tflite_runtime::{TfLiteType, TfliteError, library as tflite_library};
 
 const GOOGLE_USB_VENDOR_ID: u16 = 0x18d1;
 const CORAL_USB_PRODUCT_IDS: &[u16] = &[0x9302, 0x930b];
@@ -912,7 +914,7 @@ impl EdgeTpuSession {
         let delegate_path = matched_device.as_ref().map(|record| record.path.as_str());
 
         let delegate = EdgeTpuDelegateHandle::new(edge, delegate_device, delegate_path)?;
-        tflite.options_add_delegate(options.ptr.as_ptr(), delegate.ptr);
+        tflite.options_add_delegate(options.ptr.as_ptr(), delegate.ptr.cast());
         let interpreter = InterpreterHandle::new(tflite, model.ptr.as_ptr(), options.ptr.as_ptr())?;
         tflite.allocate_tensors(interpreter.ptr.as_ptr()).map_err(|err| AiError::NotReady { reason: err.to_string() })?;
 
@@ -949,7 +951,7 @@ impl EdgeTpuSession {
     }
 }
 
-fn encode_input_tensor(tflite: &tflite::TfliteLib, tensor_ptr: *mut tflite::TfLiteTensor, tensor: Tensor) -> Result<()> {
+fn encode_input_tensor(tflite: &tflite_runtime::TfliteLib, tensor_ptr: *mut tflite_runtime::TfLiteTensor, tensor: Tensor) -> Result<()> {
     let bytes = tensor.bytes.clone().ok_or_else(|| AiError::InvalidInput { reason: format!("tensor {} missing bytes", tensor.name) })?;
     let expected_type = tflite.tensor_type(tensor_ptr.cast());
     let element_type = map_tflite_type(expected_type)?;
@@ -963,7 +965,7 @@ fn encode_input_tensor(tflite: &tflite::TfliteLib, tensor_ptr: *mut tflite::TfLi
     tflite.tensor_copy_from_buffer(tensor_ptr, bytes.as_ptr(), bytes.len()).map_err(|err| AiError::InvalidInput { reason: err.to_string() })
 }
 
-fn decode_output_tensor(tflite: &tflite::TfliteLib, tensor_ptr: *mut tflite::TfLiteTensor, idx: usize) -> Result<Tensor> {
+fn decode_output_tensor(tflite: &tflite_runtime::TfliteLib, tensor_ptr: *mut tflite_runtime::TfLiteTensor, idx: usize) -> Result<Tensor> {
     let element_type = map_tflite_type(tflite.tensor_type(tensor_ptr.cast()))?;
     let byte_size = tflite.tensor_byte_size(tensor_ptr.cast());
     let mut bytes = vec![0u8; byte_size];
@@ -994,12 +996,12 @@ fn map_tflite_not_ready(err: TfliteError) -> AiError {
 }
 
 struct TfliteModelHandle<'a> {
-    lib: &'a tflite::TfliteLib,
-    ptr: NonNull<tflite::TfLiteModel>,
+    lib: &'a tflite_runtime::TfliteLib,
+    ptr: NonNull<tflite_runtime::TfLiteModel>,
 }
 
 impl<'a> TfliteModelHandle<'a> {
-    fn new(lib: &'a tflite::TfliteLib, bytes: &Arc<Vec<u8>>) -> Result<Self> {
+    fn new(lib: &'a tflite_runtime::TfliteLib, bytes: &Arc<Vec<u8>>) -> Result<Self> {
         let ptr = lib.create_model(bytes.as_ptr() as *const _, bytes.len()).map_err(|err| AiError::ModelLoadFailed { reason: err.to_string() })?;
         Ok(Self { lib, ptr })
     }
@@ -1012,12 +1014,12 @@ impl Drop for TfliteModelHandle<'_> {
 }
 
 struct InterpreterOptionsHandle<'a> {
-    lib: &'a tflite::TfliteLib,
-    ptr: NonNull<tflite::TfLiteInterpreterOptions>,
+    lib: &'a tflite_runtime::TfliteLib,
+    ptr: NonNull<tflite_runtime::TfLiteInterpreterOptions>,
 }
 
 impl<'a> InterpreterOptionsHandle<'a> {
-    fn new(lib: &'a tflite::TfliteLib) -> Result<Self> {
+    fn new(lib: &'a tflite_runtime::TfliteLib) -> Result<Self> {
         let ptr = lib.create_options().map_err(|err| AiError::ModelLoadFailed { reason: err.to_string() })?;
         lib.options_set_threads(ptr.as_ptr(), 1);
         Ok(Self { lib, ptr })
@@ -1031,12 +1033,12 @@ impl Drop for InterpreterOptionsHandle<'_> {
 }
 
 struct InterpreterHandle<'a> {
-    lib: &'a tflite::TfliteLib,
-    ptr: NonNull<tflite::TfLiteInterpreter>,
+    lib: &'a tflite_runtime::TfliteLib,
+    ptr: NonNull<tflite_runtime::TfLiteInterpreter>,
 }
 
 impl<'a> InterpreterHandle<'a> {
-    fn new(lib: &'a tflite::TfliteLib, model: *const tflite::TfLiteModel, options: *const tflite::TfLiteInterpreterOptions) -> Result<Self> {
+    fn new(lib: &'a tflite_runtime::TfliteLib, model: *const tflite_runtime::TfLiteModel, options: *const tflite_runtime::TfLiteInterpreterOptions) -> Result<Self> {
         let ptr = lib.create_interpreter(model, options).map_err(|err| AiError::ModelLoadFailed { reason: err.to_string() })?;
         Ok(Self { lib, ptr })
     }

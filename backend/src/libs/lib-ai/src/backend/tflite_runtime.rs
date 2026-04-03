@@ -3,14 +3,13 @@
 use libloading::Library;
 use std::{env, ffi::c_void, fmt, os::raw::c_int, path::PathBuf, ptr::NonNull, sync::OnceLock};
 
-use super::{bundled_coral_lib_dir, runtime::TfLiteDelegate};
-
 type ModelCreateFn = unsafe extern "C" fn(*const c_void, usize) -> *mut TfLiteModel;
 type ModelDeleteFn = unsafe extern "C" fn(*mut TfLiteModel);
 type OptionsCreateFn = unsafe extern "C" fn() -> *mut TfLiteInterpreterOptions;
 type OptionsDeleteFn = unsafe extern "C" fn(*mut TfLiteInterpreterOptions);
 type OptionsSetThreadsFn = unsafe extern "C" fn(*mut TfLiteInterpreterOptions, c_int);
-type OptionsAddDelegateFn = unsafe extern "C" fn(*mut TfLiteInterpreterOptions, *mut TfLiteDelegate);
+#[cfg(feature = "backend-coral")]
+type OptionsAddDelegateFn = unsafe extern "C" fn(*mut TfLiteInterpreterOptions, *mut c_void);
 type InterpreterCreateFn = unsafe extern "C" fn(*const TfLiteModel, *const TfLiteInterpreterOptions) -> *mut TfLiteInterpreter;
 type InterpreterDeleteFn = unsafe extern "C" fn(*mut TfLiteInterpreter);
 type InterpreterAllocateFn = unsafe extern "C" fn(*mut TfLiteInterpreter) -> TfLiteStatus;
@@ -132,6 +131,7 @@ pub struct TfliteLib {
     options_create: OptionsCreateFn,
     options_delete: OptionsDeleteFn,
     options_set_threads: OptionsSetThreadsFn,
+    #[cfg(feature = "backend-coral")]
     options_add_delegate: OptionsAddDelegateFn,
     interpreter_create: InterpreterCreateFn,
     interpreter_delete: InterpreterDeleteFn,
@@ -187,6 +187,7 @@ impl TfliteLib {
             options_create: load!(b"TfLiteInterpreterOptionsCreate\0", OptionsCreateFn),
             options_delete: load!(b"TfLiteInterpreterOptionsDelete\0", OptionsDeleteFn),
             options_set_threads: load!(b"TfLiteInterpreterOptionsSetNumThreads\0", OptionsSetThreadsFn),
+            #[cfg(feature = "backend-coral")]
             options_add_delegate: load!(b"TfLiteInterpreterOptionsAddDelegate\0", OptionsAddDelegateFn),
             interpreter_create: load!(b"TfLiteInterpreterCreate\0", InterpreterCreateFn),
             interpreter_delete: load!(b"TfLiteInterpreterDelete\0", InterpreterDeleteFn),
@@ -228,7 +229,8 @@ impl TfliteLib {
         unsafe { (self.options_set_threads)(options, threads as c_int) };
     }
 
-    pub fn options_add_delegate(&self, options: *mut TfLiteInterpreterOptions, delegate: *mut TfLiteDelegate) {
+    #[cfg(feature = "backend-coral")]
+    pub fn options_add_delegate(&self, options: *mut TfLiteInterpreterOptions, delegate: *mut c_void) {
         unsafe { (self.options_add_delegate)(options, delegate) };
     }
 
@@ -321,8 +323,10 @@ fn library_candidates() -> Vec<PathBuf> {
     if let Ok(dir_list) = env::var(TFLITE_RUNTIME_LIBRARY_DIRS_ENV) {
         directories.extend(env::split_paths(&dir_list));
     }
-    if let Some(bundled) = bundled_coral_lib_dir() {
-        directories.push(bundled);
+    if let Ok(dir) = env::var("HELIOS_CORAL_LIB_DIR")
+        && !dir.trim().is_empty()
+    {
+        directories.push(PathBuf::from(dir));
     }
     if let Ok(ld_paths) = env::var("LD_LIBRARY_PATH") {
         directories.extend(env::split_paths(&ld_paths));

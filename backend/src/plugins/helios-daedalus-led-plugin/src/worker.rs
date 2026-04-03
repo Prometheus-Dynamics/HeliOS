@@ -1,6 +1,5 @@
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 
 use daedalus::runtime::NodeError;
@@ -98,24 +97,24 @@ async fn run_worker(mut rx: mpsc::UnboundedReceiver<WorkerCommand>) {
                 }
                 if let Some(current) = &mut active
                     && let Some(deadline) = current.deadline
-                        && now >= deadline {
-                            if let Some(next_step) = current.pending.pop_front() {
-                                if apply_command(&mut conn, next_step.command, &mut last_command_at).await {
-                                    current.deadline = next_step
-                                        .duration_ms
-                                        .map(|ms| Instant::now() + Duration::from_millis(ms as u64));
-                                } else {
-                                    active = None;
-                                }
+                    && now >= deadline {
+                        if let Some(next_step) = current.pending.pop_front() {
+                            if apply_command(&mut conn, next_step.command, &mut last_command_at).await {
+                                current.deadline = next_step
+                                    .duration_ms
+                                    .map(|ms| Instant::now() + Duration::from_millis(ms as u64));
                             } else {
                                 active = None;
                             }
+                        } else {
+                            active = None;
                         }
+                    }
                 if active.is_none()
                     && let Some(next) = queue.pop_front()
-                        && let Some(new_active) = apply_entry(&mut conn, &next.entry, &mut last_command_at).await {
-                            active = Some(new_active);
-                        }
+                    && let Some(new_active) = apply_entry(&mut conn, &next.entry, &mut last_command_at).await {
+                        active = Some(new_active);
+                    }
             }
             cmd = rx.recv() => {
                 let Some(cmd) = cmd else { break; };
@@ -216,97 +215,61 @@ impl TransportConfig for SensorsClientConfig {
     fn socket_path(&self) -> &std::path::Path {
         &self.socket_path
     }
+
     fn journal_path(&self) -> &std::path::Path {
         &self.journal_path
-    }
-    fn protocol(&self) -> lib_ipc::types::ProtocolVersion {
-        self.protocol
-    }
-    fn client_name(&self) -> &str {
-        &self.client_name
-    }
-    fn client_version(&self) -> &str {
-        &self.client_version
-    }
-    fn features(&self) -> &FeatureSet {
-        &self.features
     }
 
     fn service_kind(&self) -> ServiceKind {
         ServiceKind::Peripherals
     }
+
+    fn protocol(&self) -> lib_ipc::types::ProtocolVersion {
+        self.protocol
+    }
+
+    fn client_name(&self) -> &str {
+        &self.client_name
+    }
+
+    fn client_version(&self) -> &str {
+        &self.client_version
+    }
+
+    fn features(&self) -> &FeatureSet {
+        &self.features
+    }
 }
 
 struct Connection {
-    client: Arc<SensorsClient>,
     session: SensorsSession,
 }
 
-async fn connect_peripherals() -> Result<Connection, String> {
-    let journal_path = journal_path("peripherals.journal");
-    let mut last_err = None;
-    for socket in resolve_peripherals_socket_candidates() {
-        match try_connect(socket, journal_path.clone()).await {
-            Ok(conn) => return Ok(conn),
-            Err(err) => last_err = Some(err),
-        }
-    }
-    Err(last_err.unwrap_or_else(|| "peripherals IPC connect failed".to_string()))
+async fn connect_peripherals() -> Result<Connection, NodeError> {
+    let socket_path = if PathBuf::from(DEV_PERIPHERALS_SOCKET).exists() { DEV_PERIPHERALS_SOCKET } else { PERIPHERALS_SOCKET };
+    let journal_path = std::env::var_os(IPC_JOURNAL_DIR_ENV).map(PathBuf::from).unwrap_or_else(|| PathBuf::from(DEFAULT_JOURNAL_DIR));
+    let client = SensorsClient::new(SensorsClientConfig::new(socket_path, journal_path)).map_err(|err| NodeError::Handler(format!("connect peripherals failed: {err}")))?;
+    let session = client.handshake().await.map_err(|err| NodeError::Handler(format!("open peripherals session failed: {err}")))?;
+    Ok(Connection { session })
 }
 
-async fn try_connect(socket: PathBuf, journal_path: PathBuf) -> Result<Connection, String> {
-    let client = Arc::new(SensorsClient::new(SensorsClientConfig::new(socket, journal_path)).map_err(|e| e.to_string())?);
-    let session = match timeout(Duration::from_secs(3), client.handshake()).await {
-        Ok(Ok(session)) => session,
-        Ok(Err(err)) => return Err(err.to_string()),
-        Err(_) => return Err("peripherals handshake timed out".to_string()),
-    };
-    Ok(Connection { client, session })
-}
-
-fn resolve_peripherals_socket_candidates() -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
-    for name in ["HELIOS_PERIPHERALS_SOCKET", "PERIPHERALS_SOCKET", "SENSORS_SOCKET", "SENSOR_SOCKET"] {
-        if let Ok(value) = std::env::var(name) {
-            push_unique(&mut candidates, PathBuf::from(value));
-        }
-    }
-    push_unique(&mut candidates, PathBuf::from(DEV_PERIPHERALS_SOCKET));
-    push_unique(&mut candidates, PathBuf::from(PERIPHERALS_SOCKET));
-    candidates
-}
-
-fn journal_path(file_name: &str) -> PathBuf {
-    std::env::var_os(IPC_JOURNAL_DIR_ENV).filter(|value| !value.is_empty()).map(PathBuf::from).unwrap_or_else(|| PathBuf::from(DEFAULT_JOURNAL_DIR)).join(file_name)
-}
-
-fn push_unique(paths: &mut Vec<PathBuf>, candidate: PathBuf) {
-    if !paths.iter().any(|path| path == &candidate) {
-        paths.push(candidate);
-    }
-}
-
-async fn send_lighting_command(conn: &mut Connection, command: LightingCommand) -> Result<(), String> {
+async fn send_lighting_command(connection: &mut Connection, command: LightingCommand) -> Result<(), NodeError> {
     let command_id = CommandId::new();
-    let cmd = SensorCommand::Lighting { command_id, command: command.into() };
-    conn.session.send_command(conn.client.journal(), &cmd).await.map_err(|e| e.to_string())?;
+    connection
+        .session
+        .send_ephemeral_command(&SensorCommand::Lighting { command_id, command: command.into() })
+        .await
+        .map_err(|err| NodeError::Handler(format!("send lighting command failed: {err}")))?;
 
-    let deadline = Instant::now() + COMMAND_TIMEOUT;
-    loop {
-        let now = Instant::now();
-        if now >= deadline {
-            return Err("peripherals lighting command timed out".into());
-        }
-        let remaining = deadline - now;
-        match timeout(remaining, conn.session.next_event()).await {
-            Ok(Ok(Some(event))) => match event {
-                SensorEvent::Ack { command_id: event_id, .. } if event_id == command_id => return Ok(()),
-                SensorEvent::Nack { command_id: event_id, reason, .. } if event_id == command_id => return Err(reason),
-                _ => {}
-            },
-            Ok(Ok(None)) => return Err("peripherals session closed".into()),
-            Ok(Err(err)) => return Err(err.to_string()),
-            Err(_) => return Err("peripherals lighting command timed out".into()),
-        }
+    let event = timeout(COMMAND_TIMEOUT, connection.session.next_event())
+        .await
+        .map_err(|_| NodeError::Handler("timed out waiting for lighting ack".into()))?
+        .map_err(|err| NodeError::Handler(format!("receive lighting ack failed: {err}")))?
+        .ok_or_else(|| NodeError::Handler("lighting IPC closed".into()))?;
+
+    match event {
+        SensorEvent::Ack { command_id: acked, .. } if acked == command_id => Ok(()),
+        SensorEvent::Nack { command_id: failed, reason, .. } if failed == command_id => Err(NodeError::Handler(format!("lighting command rejected: {reason}"))),
+        other => Err(NodeError::Handler(format!("unexpected lighting response: {other:?}"))),
     }
 }

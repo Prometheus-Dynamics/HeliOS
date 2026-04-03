@@ -9,6 +9,16 @@ crate-type = ["cdylib"]
 [lints]
 workspace = true
 
+[features]
+default = ["plugins"]
+plugins = []
+
 [dependencies]
 daedalus = { workspace = true, features = ["ffi", "plugins", "gpu"] }
-lib-led-plugin = { path = "../../libs/lib-led-plugin" }
+helios-peripherals = { path = "../../helios-peripherals", default-features = false, features = ["dto"] }
+lib-ipc = { path = "../../libs/lib-ipc" }
+lib-led-animations = { path = "../../libs/lib-led-animations" }
+paste = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

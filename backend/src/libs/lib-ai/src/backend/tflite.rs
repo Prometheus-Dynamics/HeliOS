@@ -3,7 +3,7 @@ use super::{AiBackend, AiModel, BackendCapabilities, BackendFeature, BackendHeal
 use crate::docs::{BackendDoc, DocumentedBackend};
 use crate::{
     backend::{
-        coral::tflite as tflite_runtime,
+        tflite_runtime,
         util::{guard_edge_tpu_support, read_model_bytes, tensor_into_tract, tract_tensor_into_tensor},
     },
     error::{AiError, Result},
