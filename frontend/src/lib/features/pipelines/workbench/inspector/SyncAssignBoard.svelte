@@ -119,7 +119,7 @@
           <input
             class="input h-8 text-xs"
             value={group.id}
-            oninput={(event) => onRenameGroup(index, (event.currentTarget as HTMLInputElement).value)}
+            oninput={(event) => onRenameGroup(index, event.currentTarget.value)}
           />
         </div>
         <div class="flex flex-wrap gap-2 text-[0.58rem] uppercase tracking-[0.2em]">
@@ -187,7 +187,7 @@
       class="input h-8 text-xs"
       placeholder="Group ID"
       value={newGroupId}
-      oninput={(event) => onUpdateNewGroupId((event.currentTarget as HTMLInputElement).value)}
+      oninput={(event) => onUpdateNewGroupId(event.currentTarget.value)}
     />
     <p class="text-[0.62rem] text-surface-400">New groups get their own accent stripe and become drop targets instantly.</p>
     <button class="btn btn-2xs preset-tonal uppercase tracking-[0.2em]" type="button" onclick={onAddGroup}>

@@ -105,6 +105,12 @@
     onClearSelection?.();
   }
 
+  function handleImagePreviewError(event: Event, fallbackSrc: string): void {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLImageElement)) return;
+    target.src = fallbackSrc;
+  }
+
   export type $$Props = MediaLibraryPanelProps;
 </script>
 
@@ -142,7 +148,7 @@
       <select
         class="input w-48"
         value={sortMode}
-        onchange={(event) => onSortChange?.((event.target as HTMLSelectElement).value)}
+        onchange={(event) => onSortChange?.(event.currentTarget.value)}
       >
         {#each sortOptions as option (option.id)}
           <option value={option.id}>{option.label}</option>
@@ -232,7 +238,7 @@
                       src={assetPreviewSrc}
                       alt={asset.name}
                       draggable="false"
-                      onerror={(event) => ((event.currentTarget as HTMLImageElement).src = assetOriginalSrc)}
+                      onerror={(event) => handleImagePreviewError(event, assetOriginalSrc)}
                     />
                   {:else if asset.kind === 'video'}
                     <img
@@ -327,7 +333,7 @@
                         alt={asset.name}
                         draggable="false"
                         loading="lazy"
-                        onerror={(event) => ((event.currentTarget as HTMLImageElement).src = assetOriginalSrc)}
+                        onerror={(event) => handleImagePreviewError(event, assetOriginalSrc)}
                       />
                     {:else}
                       <div class="flex h-full w-full items-center justify-center bg-gradient-to-br from-surface-900/70 to-surface-950 text-[0.58rem] uppercase tracking-[0.16em] text-surface-300">

@@ -78,6 +78,12 @@
     });
   };
 
+  function handleDashedChange(event: Event): void {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLInputElement)) return;
+    updateStyle({ dashed: target.checked });
+  }
+
   const curveLabel = $derived.by(() => {
     if (resolvedStyle.curvature <= 0.1) return 'Minimal';
     if (resolvedStyle.curvature <= 0.25) return 'Gentle';
@@ -188,7 +194,7 @@
             type="checkbox"
             class="h-4 w-4 rounded border-surface-600/70 bg-surface-800 text-primary-300 focus:ring-primary-300"
             checked={resolvedStyle.dashed}
-            onchange={(event) => updateStyle({ dashed: (event.currentTarget as HTMLInputElement)?.checked })}
+            onchange={handleDashedChange}
           />
           <span>Dashed line</span>
         </label>
@@ -208,7 +214,7 @@
           max="0.8"
           step="0.02"
           value={resolvedStyle.curvature}
-          oninput={(event) => updateStyle({ curvature: Number((event.currentTarget as HTMLInputElement).value) })}
+          oninput={(event) => updateStyle({ curvature: Number(event.currentTarget.value) })}
         />
         <div class="mt-1 flex justify-between text-xs text-surface-400">
           <span>{curveLabel}</span>

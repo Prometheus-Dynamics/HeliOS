@@ -79,7 +79,7 @@
       type="search"
       placeholder="Search constants…"
       value={tuneConstantSearch}
-      oninput={(event) => onSearch((event.currentTarget as HTMLInputElement).value)}
+      oninput={(event) => onSearch(event.currentTarget.value)}
     />
     {#if tuneConstantGroups.length === 0}
       <div class="rounded border border-surface-800/60 bg-surface-900/60 px-3 py-2 text-xs text-surface-400">
@@ -119,9 +119,9 @@
                 {@const pixelHex = pixelToHex(pixelValue)}
                 {@const numericFallback =
                   typeof entry.overrideValue?.value === 'number' && Number.isFinite(entry.overrideValue?.value)
-                    ? (entry.overrideValue?.value as number)
+                    ? (entry.overrideValue?.value)
                     : typeof entry.baseValue?.value === 'number' && Number.isFinite(entry.baseValue?.value)
-                      ? (entry.baseValue?.value as number)
+                      ? (entry.baseValue?.value)
                       : entry.metadata?.uiMin ?? entry.metadata?.min ?? 0}
                 {@const sliderValue = Number.isFinite(Number(draftValue)) ? Number(draftValue) : numericFallback}
                 {@const fallbackStep = typeKeyLower === 'float' || typeKeyLower === 'double' || typeKeyLower === 'number' ? 0.1 : 1}
@@ -182,7 +182,7 @@
                           entry.nodeId,
                           entry.portKey,
                           entry.dataType,
-                          (event.currentTarget as HTMLSelectElement).value
+                          event.currentTarget.value
                         )
                       }
                     >
@@ -201,7 +201,7 @@
                             entry.nodeId,
                             entry.portKey,
                             entry.dataType,
-                            (event.currentTarget as HTMLInputElement).checked ? 'true' : 'false'
+                            event.currentTarget.checked ? 'true' : 'false'
                           )
                         }
                       />
@@ -215,7 +215,7 @@
                         value={pixelHex}
                         disabled={!isSettable}
                         oninput={(event) => {
-                          const hex = (event.currentTarget as HTMLInputElement).value;
+                          const hex = event.currentTarget.value;
                           const rgb = hexToRgb(hex);
                           if (!rgb) return;
                           const next = JSON.stringify({ r: rgb.r, g: rgb.g, b: rgb.b, a: pixelValue.a ?? 255 });
@@ -232,7 +232,7 @@
                             entry.nodeId,
                             entry.portKey,
                             entry.dataType,
-                            (event.currentTarget as HTMLInputElement).value
+                            event.currentTarget.value
                           )
                         }
                       />
@@ -253,7 +253,7 @@
                               entry.nodeId,
                               entry.portKey,
                               entry.dataType,
-                              (event.currentTarget as HTMLInputElement).value
+                              event.currentTarget.value
                             )
                           }
                         />
@@ -270,7 +270,7 @@
                               entry.nodeId,
                               entry.portKey,
                               entry.dataType,
-                              (event.currentTarget as HTMLInputElement).value
+                              event.currentTarget.value
                             )
                           }
                         />
@@ -288,7 +288,7 @@
                             entry.nodeId,
                             entry.portKey,
                             entry.dataType,
-                            (event.currentTarget as HTMLInputElement).value
+                            event.currentTarget.value
                           )
                         }
                       />
@@ -304,7 +304,7 @@
                           entry.nodeId,
                           entry.portKey,
                           entry.dataType,
-                          (event.currentTarget as HTMLInputElement).value
+                          event.currentTarget.value
                         )
                       }
                     />

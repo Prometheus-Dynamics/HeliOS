@@ -103,7 +103,7 @@
                   class="select select-sm mt-1 w-full"
                   value={colorChartPaper}
                   onchange={(e) => {
-                    const value = (e.currentTarget as HTMLSelectElement).value;
+                    const value = e.currentTarget.value;
                     if (value === 'auto' || value === 'letter' || value === 'a4' || value === 'custom') colorChartPaper = value;
                   }}
                 >
@@ -121,7 +121,7 @@
                   value={colorChartOrientation}
                   disabled={colorChartPaper === 'custom'}
                   onchange={(e) => {
-                    const value = (e.currentTarget as HTMLSelectElement).value;
+                    const value = e.currentTarget.value;
                     if (value === 'auto' || value === 'portrait' || value === 'landscape') colorChartOrientation = value;
                   }}
                 >
@@ -144,7 +144,7 @@
                   min="5"
                   step="0.5"
                   value={colorChartPatchMm}
-                  oninput={(e) => (colorChartPatchMm = Number((e.currentTarget as HTMLInputElement).value) || 25)}
+                  oninput={(e) => (colorChartPatchMm = Number(e.currentTarget.value) || 25)}
                 />
               </label>
               <label class="text-sm">
@@ -155,7 +155,7 @@
                   min="0"
                   step="0.5"
                   value={colorChartMarginMm}
-                  oninput={(e) => (colorChartMarginMm = Number((e.currentTarget as HTMLInputElement).value) || 10)}
+                  oninput={(e) => (colorChartMarginMm = Number(e.currentTarget.value) || 10)}
                 />
               </label>
               <label class="text-sm">
@@ -166,7 +166,7 @@
                   min="72"
                   step="1"
                   value={colorChartDpi}
-                  oninput={(e) => (colorChartDpi = Number((e.currentTarget as HTMLInputElement).value) || 300)}
+                  oninput={(e) => (colorChartDpi = Number(e.currentTarget.value) || 300)}
                 />
               </label>
             </div>

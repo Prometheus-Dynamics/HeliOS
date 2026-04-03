@@ -76,6 +76,31 @@
     onSubmit
   }: Props = $props();
 
+  function handleDecoderChange(event: Event): void {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLSelectElement)) {
+      return;
+    }
+    decoderImpl = target.value || null;
+  }
+
+  function handleRotationChange(event: Event): void {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLSelectElement)) {
+      return;
+    }
+    const value = Number(target.value);
+    decoderRotationDegrees = Number.isFinite(value) ? value : 0;
+  }
+
+  function handleEncoderChange(event: Event): void {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLSelectElement)) {
+      return;
+    }
+    encoderImpl = target.value || null;
+  }
+
 </script>
 
 <div class="space-y-4 rounded-lg border border-surface-800 bg-surface-950/60 p-4">
@@ -117,10 +142,7 @@
           class="select w-full bg-surface-950"
           bind:value={decoderImpl}
           disabled={!decodersForFormat().length}
-          onchange={(event) => {
-            const val = (event.currentTarget as HTMLSelectElement).value;
-            decoderImpl = val || null;
-          }}
+          onchange={handleDecoderChange}
         >
           <option value="">Disabled</option>
           {#if !decodersForFormat().length}
@@ -142,10 +164,7 @@
           <select
             class="select w-full bg-surface-950"
             value={decoderRotationDegrees}
-            onchange={(event) => {
-              const value = Number((event.currentTarget as HTMLSelectElement).value);
-              decoderRotationDegrees = Number.isFinite(value) ? value : 0;
-            }}
+            onchange={handleRotationChange}
             disabled={!decoderImpl}
           >
             <option value={0}>0°</option>
@@ -176,10 +195,7 @@
             class="select w-full bg-surface-950"
             bind:value={encoderImpl}
             disabled={codecs.length === 0}
-            onchange={(event) => {
-              const val = (event.currentTarget as HTMLSelectElement).value;
-              encoderImpl = val || null;
-            }}
+            onchange={handleEncoderChange}
           >
             <option value="">Disabled</option>
             {#if codecs.length === 0}

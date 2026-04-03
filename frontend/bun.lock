@@ -9,7 +9,7 @@
         "@fortawesome/free-brands-svg-icons": "^7.2.0",
         "@fortawesome/free-solid-svg-icons": "^7.2.0",
         "@noble/hashes": "^2.0.1",
-        "@xyflow/svelte": "1.5.1",
+        "@xyflow/svelte": "1.5.2",
         "d3": "^7.9.0",
         "fflate": "^0.8.2",
         "svelte-fa": "^4.0.4",
@@ -407,9 +407,9 @@
 
     "@webgpu/types": ["@webgpu/types@0.1.63", "", {}, "sha512-s9Kuh0nE/2+nKrvmKNMB2fE5Zlr3DL2t3OFKM55v5jRcfCOxbkOHhQoshoFum5mmXIfEtRXtLCWmkeTJsVjE9w=="],
 
-    "@xyflow/svelte": ["@xyflow/svelte@1.5.1", "", { "dependencies": { "@svelte-put/shortcut": "^4.1.0", "@xyflow/system": "0.0.75" }, "peerDependencies": { "svelte": "^5.25.0" } }, "sha512-PsurMZxEaTrAwt+PzQtzEkwZwJ9dSc92kusz1rNJTogU1ATxIwheznO2R+RCf2GNuyRuExeDn26WwwBTqkCIhg=="],
+    "@xyflow/svelte": ["@xyflow/svelte@1.5.2", "", { "dependencies": { "@svelte-put/shortcut": "^4.1.0", "@xyflow/system": "0.0.76" }, "peerDependencies": { "svelte": "^5.25.0" } }, "sha512-jPLc2cwRmrkXSv/jvsNDQqTGCsNyTWURKtBl28UCH3BdOAA3CIc0/oQ0EvIcjPdzr0NwvWMgq9TmLdjOIccCEQ=="],
 
-    "@xyflow/system": ["@xyflow/system@0.0.75", "", { "dependencies": { "@types/d3-drag": "^3.0.7", "@types/d3-interpolate": "^3.0.4", "@types/d3-selection": "^3.0.10", "@types/d3-transition": "^3.0.8", "@types/d3-zoom": "^3.0.8", "d3-drag": "^3.0.0", "d3-interpolate": "^3.0.1", "d3-selection": "^3.0.0", "d3-zoom": "^3.0.0" } }, "sha512-iXs+AGFLi8w/VlAoc/iSxk+CxfT6o64Uw/k0CKASOPqjqz6E0rb5jFZgJtXGZCpfQI6OQpu5EnumP5fGxQheaQ=="],
+    "@xyflow/system": ["@xyflow/system@0.0.76", "", { "dependencies": { "@types/d3-drag": "^3.0.7", "@types/d3-interpolate": "^3.0.4", "@types/d3-selection": "^3.0.10", "@types/d3-transition": "^3.0.8", "@types/d3-zoom": "^3.0.8", "d3-drag": "^3.0.0", "d3-interpolate": "^3.0.1", "d3-selection": "^3.0.0", "d3-zoom": "^3.0.0" } }, "sha512-hvwvnRS1B3REwVDlWexsq7YQaPZeG3/mKo1jv38UmnpWmxihp14bW6VtEOuHEwJX2FvzFw8k77LyKSk/wiZVNA=="],
 
     "@zag-js/accordion": ["@zag-js/accordion@1.38.2", "", { "dependencies": { "@zag-js/anatomy": "1.38.2", "@zag-js/core": "1.38.2", "@zag-js/dom-query": "1.38.2", "@zag-js/types": "1.38.2", "@zag-js/utils": "1.38.2" } }, "sha512-lr3K8R4c8cY1ghcU4lpav4dAXCFqFcNOrieqy4lsS5n5CSrpLbL1EFrOdTBux/CCeijmipFp14ddUZGHWHIDJQ=="],
 

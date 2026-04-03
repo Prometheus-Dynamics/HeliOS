@@ -193,7 +193,7 @@
             class="input border border-surface-700 bg-surface-950"
             value={firmwareSelection}
             disabled={firmwareBusy || firmwareLoading}
-            onchange={(event) => onSelectionChange?.((event.currentTarget as HTMLSelectElement).value)}
+            onchange={(event) => onSelectionChange?.(event.currentTarget.value)}
           >
             {#each firmwareOptionsUnique as option (option.name + '::' + (option.path ?? option.variant ?? ''))}
               <option value={optionValue(option.variant)}>{option.name}</option>

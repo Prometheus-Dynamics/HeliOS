@@ -33,6 +33,12 @@
     onDeleteImageAfterApplyChange
   }: UpdaterApplyPanelProps = $props();
 
+  function handleDeleteImageAfterApplyToggle(event: Event) {
+    const input = event.currentTarget;
+    if (!(input instanceof HTMLInputElement)) return;
+    onDeleteImageAfterApplyChange(input.checked);
+  }
+
   export type $$Props = UpdaterApplyPanelProps;
 </script>
 
@@ -82,7 +88,7 @@
     <input
       type="checkbox"
       checked={deleteImageAfterApply}
-      onchange={(event) => onDeleteImageAfterApplyChange((event.currentTarget as HTMLInputElement).checked)}
+      onchange={handleDeleteImageAfterApplyToggle}
     />
     <span>Delete source image after successful update.</span>
   </label>

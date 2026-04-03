@@ -35,7 +35,7 @@
       type="text"
       placeholder="Animation name"
       value={saveName}
-      oninput={(event) => onSaveNameChange((event.target as HTMLInputElement).value)}
+      oninput={(event) => onSaveNameChange(event.currentTarget.value)}
     />
     <input
       class="input w-full"
@@ -45,7 +45,7 @@
       placeholder={animationKind === 'timeline' ? 'Timeline duration override (ms)' : 'Duration (ms)'}
       value={saveDurationMs ?? ''}
       oninput={(event) => {
-        const raw = (event.target as HTMLInputElement).value;
+        const raw = event.currentTarget.value;
         onSaveDurationChange(raw.length ? Number(raw) : null);
       }}
     />

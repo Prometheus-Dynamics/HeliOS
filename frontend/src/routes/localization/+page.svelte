@@ -2609,6 +2609,26 @@
     }
   });
 
+  function handleProfileImportInput(event: Event): void {
+    const input = event.currentTarget;
+    if (!(input instanceof HTMLInputElement)) {
+      return;
+    }
+    const file = input.files?.[0] ?? null;
+    if (!file) {
+      return;
+    }
+    void importLocalizationProfiles(file);
+  }
+
+  function handleProfileColorInput(profileId: string, event: Event): void {
+    const input = event.currentTarget;
+    if (!(input instanceof HTMLInputElement)) {
+      return;
+    }
+    setProfileColor(profileId, input.value);
+  }
+
   const viewerCameraTransformsForRender = $derived.by<Record<string, { position: Vec3; quaternion?: PoseQuaternion }> | null>(() => {
     if (baseFrame !== 'field') return viewerCameraTransforms;
     const live = viewerCameraTransforms ?? null;
@@ -3111,12 +3131,7 @@
         accept=".json,application/json"
         class="sr-only"
         bind:this={profileImportInputEl}
-        onchange={(event) => {
-          const input = event.currentTarget as HTMLInputElement;
-          const file = input.files?.[0] ?? null;
-          if (!file) return;
-          void importLocalizationProfiles(file);
-        }}
+        onchange={handleProfileImportInput}
       />
     </div>
 
@@ -3177,7 +3192,7 @@
                     value={color}
                     class="absolute inset-0 cursor-pointer opacity-0"
                     aria-label={`Set color for ${profile.name}`}
-                    onchange={(event) => setProfileColor(profile.id, (event.currentTarget as HTMLInputElement).value)}
+                    onchange={(event) => handleProfileColorInput(profile.id, event)}
                     onclick={(event) => event.stopPropagation()}
                   />
                 </div>

@@ -56,6 +56,16 @@
     floatingStreamViewer.setStream(null);
   };
 
+  function handleSelectedStreamChange(event: Event): void {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLSelectElement)) {
+      return;
+    }
+    const { value } = target;
+    selectedStreamId = value;
+    applySelectedStream(value);
+  }
+
   async function refreshStreams(): Promise<void> {
     if (!browser) return;
     loadingStreams = true;
@@ -209,11 +219,7 @@
             <select
               class="h-7 min-w-0 flex-1 rounded border border-surface-800/70 bg-surface-950/70 px-2 text-micro leading-none text-surface-200"
               value={selectedStreamId}
-              onchange={(e) => {
-                const value = (e.currentTarget as HTMLSelectElement).value;
-                selectedStreamId = value;
-                applySelectedStream(value);
-              }}
+              onchange={handleSelectedStreamChange}
               onpointerdown={(event) => event.stopPropagation()}
               onclick={(event) => event.stopPropagation()}
               ondblclick={(event) => event.stopPropagation()}

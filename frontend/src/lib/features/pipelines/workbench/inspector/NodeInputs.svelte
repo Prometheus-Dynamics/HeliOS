@@ -460,7 +460,7 @@
           class="flex-1 border-0 bg-transparent text-xs text-surface-100 placeholder:text-surface-500 focus:outline-none"
           placeholder="Filter constants"
           value={nodeParameterSearch}
-          oninput={(event) => (nodeParameterSearch = (event.currentTarget as HTMLInputElement).value)}
+          oninput={(event) => (nodeParameterSearch = event.currentTarget.value)}
         />
       </div>
       {#if nodeParameterRenderItems.length === 0}

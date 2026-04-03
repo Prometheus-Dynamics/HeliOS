@@ -269,7 +269,7 @@
       style={`background: linear-gradient(90deg, #000000, ${hsvToHex(hue, sat, 1)});`}
       disabled={disabled}
       oninput={(event) => {
-        const next = Number((event.currentTarget as HTMLInputElement).value);
+        const next = Number(event.currentTarget.value);
         val = clamp(next, 0, 1);
         drawWheel();
         emitChange();
@@ -288,7 +288,7 @@
       style={`--alpha-gradient: linear-gradient(90deg, ${hsvToHex(hue, sat, val, 0)}, ${hsvToHex(hue, sat, val, 1)});`}
       disabled={disabled}
       oninput={(event) => {
-        const next = Number((event.currentTarget as HTMLInputElement).value);
+        const next = Number(event.currentTarget.value);
         alpha = clamp(next, 0, 1);
         emitChange();
       }}
@@ -301,7 +301,7 @@
       value={Number(alpha.toFixed(2))}
       disabled={disabled}
       oninput={(event) => {
-        const next = Number((event.currentTarget as HTMLInputElement).value);
+        const next = Number(event.currentTarget.value);
         alpha = clamp(next, 0, 1);
         emitChange();
       }}
@@ -318,7 +318,7 @@
         value={Math.round(hue)}
         disabled={disabled}
         oninput={(event) => {
-          const next = Number((event.currentTarget as HTMLInputElement).value);
+          const next = Number(event.currentTarget.value);
           hue = clamp(next, 0, 360);
           drawWheel();
           emitChange();
@@ -335,7 +335,7 @@
         value={Number(sat.toFixed(2))}
         disabled={disabled}
         oninput={(event) => {
-          const next = Number((event.currentTarget as HTMLInputElement).value);
+          const next = Number(event.currentTarget.value);
           sat = clamp(next, 0, 1);
           drawWheel();
           emitChange();
@@ -352,7 +352,7 @@
         value={Number(val.toFixed(2))}
         disabled={disabled}
         oninput={(event) => {
-          const next = Number((event.currentTarget as HTMLInputElement).value);
+          const next = Number(event.currentTarget.value);
           val = clamp(next, 0, 1);
           drawWheel();
           emitChange();
@@ -372,7 +372,7 @@
         disabled={disabled}
         oninput={(event) => {
           const rgb = hsvToRgb(hue, sat, val);
-          const next = clamp(Number((event.currentTarget as HTMLInputElement).value), 0, 255);
+          const next = clamp(Number(event.currentTarget.value), 0, 255);
           const hsv = rgbToHsv(next, rgb.g, rgb.b);
           hue = hsv.h;
           sat = hsv.s;
@@ -393,7 +393,7 @@
         disabled={disabled}
         oninput={(event) => {
           const rgb = hsvToRgb(hue, sat, val);
-          const next = clamp(Number((event.currentTarget as HTMLInputElement).value), 0, 255);
+          const next = clamp(Number(event.currentTarget.value), 0, 255);
           const hsv = rgbToHsv(rgb.r, next, rgb.b);
           hue = hsv.h;
           sat = hsv.s;
@@ -414,7 +414,7 @@
         disabled={disabled}
         oninput={(event) => {
           const rgb = hsvToRgb(hue, sat, val);
-          const next = clamp(Number((event.currentTarget as HTMLInputElement).value), 0, 255);
+          const next = clamp(Number(event.currentTarget.value), 0, 255);
           const hsv = rgbToHsv(rgb.r, rgb.g, next);
           hue = hsv.h;
           sat = hsv.s;

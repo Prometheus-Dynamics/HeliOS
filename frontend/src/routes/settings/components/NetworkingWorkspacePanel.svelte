@@ -119,6 +119,14 @@
     hydrateInterfaceForm(iface);
   }
 
+  function handleInterfaceSelect(event: Event): void {
+    const target = event.target;
+    if (!(target instanceof HTMLSelectElement)) {
+      return;
+    }
+    selectInterface(target.value);
+  }
+
   async function saveIdentity(): Promise<void> {
     if (!deviceState.data) return;
     const trimmed = hostnameInput.trim();
@@ -323,7 +331,7 @@
             <select
               class="select w-full"
               bind:value={selectedInterface}
-              onchange={(event) => selectInterface((event.target as HTMLSelectElement).value)}
+              onchange={handleInterfaceSelect}
             >
               {#each deviceState.data.interfaces as iface (iface.name)}
                 <option value={iface.name}>{iface.name}{iface.mac ? ` · ${iface.mac}` : ''}</option>

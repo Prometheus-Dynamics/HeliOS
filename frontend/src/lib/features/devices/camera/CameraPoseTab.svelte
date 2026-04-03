@@ -410,7 +410,7 @@
                 type="text"
                 placeholder="e.g. 0.2 m or 8&quot;"
                 value={cameraPoseForm.x}
-                oninput={(event) => updateCameraPoseField('x', (event.currentTarget as HTMLInputElement).value)}
+                oninput={(event) => updateCameraPoseField('x', event.currentTarget.value)}
                 disabled={cameraPoseBusy}
               />
             </label>
@@ -421,7 +421,7 @@
                 type="text"
                 placeholder="e.g. 0.0 m"
                 value={cameraPoseForm.y}
-                oninput={(event) => updateCameraPoseField('y', (event.currentTarget as HTMLInputElement).value)}
+                oninput={(event) => updateCameraPoseField('y', event.currentTarget.value)}
                 disabled={cameraPoseBusy}
               />
             </label>
@@ -432,7 +432,7 @@
                 type="text"
                 placeholder="e.g. 0.4 m"
                 value={cameraPoseForm.z}
-                oninput={(event) => updateCameraPoseField('z', (event.currentTarget as HTMLInputElement).value)}
+                oninput={(event) => updateCameraPoseField('z', event.currentTarget.value)}
                 disabled={cameraPoseBusy}
               />
             </label>
@@ -446,7 +446,7 @@
                 type="text"
                 placeholder="e.g. 10 deg"
                 value={cameraPoseForm.roll}
-                oninput={(event) => updateCameraPoseField('roll', (event.currentTarget as HTMLInputElement).value)}
+                oninput={(event) => updateCameraPoseField('roll', event.currentTarget.value)}
                 disabled={cameraPoseBusy}
               />
             </label>
@@ -457,7 +457,7 @@
                 type="text"
                 placeholder="e.g. -5°"
                 value={cameraPoseForm.pitch}
-                oninput={(event) => updateCameraPoseField('pitch', (event.currentTarget as HTMLInputElement).value)}
+                oninput={(event) => updateCameraPoseField('pitch', event.currentTarget.value)}
                 disabled={cameraPoseBusy}
               />
             </label>
@@ -468,7 +468,7 @@
                 type="text"
                 placeholder="e.g. 90"
                 value={cameraPoseForm.yaw}
-                oninput={(event) => updateCameraPoseField('yaw', (event.currentTarget as HTMLInputElement).value)}
+                oninput={(event) => updateCameraPoseField('yaw', event.currentTarget.value)}
                 disabled={cameraPoseBusy}
               />
             </label>

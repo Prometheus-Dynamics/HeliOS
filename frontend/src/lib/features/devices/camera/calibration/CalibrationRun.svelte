@@ -221,7 +221,7 @@
         <select
           class="h-8 w-full rounded border border-surface-700/70 bg-surface-950/70 px-2 text-xs text-surface-200 focus-visible:outline-none sm:min-w-[14rem]"
           value={calibrationImportSourceId}
-          onchange={(event) => onSetCalibrationImportSourceId((event.currentTarget as HTMLSelectElement).value)}
+          onchange={(event) => onSetCalibrationImportSourceId(event.currentTarget.value)}
           disabled={calibrationImporting || calibrationImportSourcesLoading || calibrationImportSources.length === 0}
           aria-label="Select source stream"
         >
@@ -398,7 +398,7 @@
               type="checkbox"
               class="checkbox checkbox-xs"
               checked={calibrationIncludeOverlays}
-              onchange={(e) => onToggleIncludeOverlays((e.currentTarget as HTMLInputElement).checked)}
+              onchange={(e) => onToggleIncludeOverlays(e.currentTarget.checked)}
             />
             Save overlays to media (JPEG)
           </label>
@@ -483,10 +483,10 @@
           <div class="flex items-center gap-3">
             <label class="text-sm">
               <span class="text-2xs uppercase tracking-[0.3em] text-surface-500">CT</span>
-              <input class="input input-sm mt-1 w-36" type="number" min="0" step="1" value={ipaCt} oninput={(e) => setIpaCt(Number((e.currentTarget as HTMLInputElement).value) || 4000)} />
+              <input class="input input-sm mt-1 w-36" type="number" min="0" step="1" value={ipaCt} oninput={(e) => setIpaCt(Number(e.currentTarget.value) || 4000)} />
             </label>
             <label class="mt-5 flex items-center gap-2 text-xs text-surface-400">
-              <input type="checkbox" checked={ipaAdvanced} onchange={(e) => setIpaAdvanced((e.currentTarget as HTMLInputElement).checked)} />
+              <input type="checkbox" checked={ipaAdvanced} onchange={(e) => setIpaAdvanced(e.currentTarget.checked)} />
               Advanced
             </label>
           </div>
@@ -556,7 +556,7 @@
               class="select select-sm mt-1 w-full"
               value={ipaTarget}
               onchange={(e) => {
-                const value = (e.currentTarget as HTMLSelectElement).value;
+                const value = e.currentTarget.value;
                 if (value === 'both' || value === 'pisp' || value === 'vc4') setIpaTarget(value);
               }}
             >
@@ -578,7 +578,7 @@
                   step="0.0001"
                   value={ipaCcm?.[row]?.[col] ?? 0}
                   oninput={(e) => {
-                    const next = Number((e.currentTarget as HTMLInputElement).value);
+                    const next = Number(e.currentTarget.value);
                     const matrix = ipaCcm.map((r) => r.slice());
                     if (!matrix[row]) matrix[row] = [0, 0, 0];
                     matrix[row][col] = Number.isFinite(next) ? next : 0;

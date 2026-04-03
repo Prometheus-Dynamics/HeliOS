@@ -23,6 +23,12 @@
     total,
     onSelect
   }: Props = $props();
+
+  function handleImagePreviewError(event: Event, fallbackSrc: string): void {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLImageElement)) return;
+    target.src = fallbackSrc;
+  }
 </script>
 
 <div class="min-h-0 flex-1 rounded border border-surface-800/60 bg-surface-950/30 p-3">
@@ -58,7 +64,7 @@
                 src={previewSrc}
                 alt={asset.name}
                 loading="lazy"
-                onerror={(event) => ((event.currentTarget as HTMLImageElement).src = originalSrc)}
+                onerror={(event) => handleImagePreviewError(event, originalSrc)}
               />
             {:else if asset.kind === 'video'}
               <img

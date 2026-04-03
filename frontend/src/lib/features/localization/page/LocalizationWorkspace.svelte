@@ -498,6 +498,14 @@
     return cameraPovOptions.find((option) => option.id === selected) ?? null;
   });
 
+  function handleFieldOriginModeChange(event: Event): void {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLSelectElement)) {
+      return;
+    }
+    onSetFieldOriginMode?.(target.value as LocalizationFieldOriginMode);
+  }
+
   async function ensureImuOrientationViewer(): Promise<void> {
     ImuOrientationViewerComponent ??= await imuOrientationViewerLoader.load();
   }
@@ -913,7 +921,7 @@
           <select
             class="min-w-[12rem] rounded border border-surface-800 bg-surface-950/70 px-3 py-2 text-xs uppercase tracking-[0.3em] text-surface-200 focus:border-primary-400 focus:outline-none"
             value={fieldOriginMode}
-            onchange={(event) => onSetFieldOriginMode?.((event.currentTarget as HTMLSelectElement).value as LocalizationFieldOriginMode)}
+            onchange={handleFieldOriginModeChange}
           >
             <option value="blue">wpiblue</option>
             <option value="red">wpired</option>

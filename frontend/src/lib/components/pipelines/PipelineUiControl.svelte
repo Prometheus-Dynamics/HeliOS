@@ -55,6 +55,7 @@
     dataType: PipelineDataType | null;
     draftValue: string;
   };
+  type HsvBindingMap = Partial<Record<string, BoundField>>;
 
   function normalizeNodePortKey(value: string): string {
     return value.trim().toLowerCase();
@@ -297,6 +298,88 @@
     return { value: null, has: false };
   }
 
+  function buildHsvBindingMap(
+    control: PipelineUiControl,
+    bindValue: PipelineUiControlBind | undefined
+  ): HsvBindingMap {
+    const bindings: HsvBindingMap = {};
+    const bindString = typeof bindValue === 'string' ? bindValue.trim() : '';
+    const parsedBind = bindString ? parseBind(bindString) : null;
+    const baseNodeId = parsedBind?.nodeId ?? (bindString && !bindString.includes('.') ? bindString : '');
+    const hsvBind = control.type === 'hsv' && isHsvBind(bindValue) ? bindValue : null;
+    const hsvRangeBind = control.type === 'hsv_range' && isHsvRangeBind(bindValue) ? bindValue : null;
+
+    if (control.type === 'hsv') {
+      if (hsvBind) {
+        const hField = buildBoundField(hsvBind.h);
+        const sField = buildBoundField(hsvBind.s);
+        const vField = buildBoundField(hsvBind.v);
+        if (hField) bindings[`${control.id}:h`] = hField;
+        if (sField) bindings[`${control.id}:s`] = sField;
+        if (vField) bindings[`${control.id}:v`] = vField;
+      } else if (baseNodeId) {
+        const hField = buildBoundField(`${baseNodeId}.h`);
+        const sField = buildBoundField(`${baseNodeId}.s`);
+        const vField = buildBoundField(`${baseNodeId}.v`);
+        if (hField) bindings[`${control.id}:h`] = hField;
+        if (sField) bindings[`${control.id}:s`] = sField;
+        if (vField) bindings[`${control.id}:v`] = vField;
+      }
+    }
+
+    if (control.type === 'hsv_range') {
+      if (hsvRangeBind) {
+        const hMinField = buildBoundField(hsvRangeBind.h.min);
+        const hMaxField = buildBoundField(hsvRangeBind.h.max);
+        const sMinField = buildBoundField(hsvRangeBind.s.min);
+        const sMaxField = buildBoundField(hsvRangeBind.s.max);
+        const vMinField = buildBoundField(hsvRangeBind.v.min);
+        const vMaxField = buildBoundField(hsvRangeBind.v.max);
+        if (hMinField) bindings[`${control.id}:hMin`] = hMinField;
+        if (hMaxField) bindings[`${control.id}:hMax`] = hMaxField;
+        if (sMinField) bindings[`${control.id}:sMin`] = sMinField;
+        if (sMaxField) bindings[`${control.id}:sMax`] = sMaxField;
+        if (vMinField) bindings[`${control.id}:vMin`] = vMinField;
+        if (vMaxField) bindings[`${control.id}:vMax`] = vMaxField;
+      } else if (baseNodeId) {
+        const hMinField = buildBoundField(`${baseNodeId}.h_min`);
+        const hMaxField = buildBoundField(`${baseNodeId}.h_max`);
+        const sMinField = buildBoundField(`${baseNodeId}.s_min`);
+        const sMaxField = buildBoundField(`${baseNodeId}.s_max`);
+        const vMinField = buildBoundField(`${baseNodeId}.v_min`);
+        const vMaxField = buildBoundField(`${baseNodeId}.v_max`);
+        if (hMinField) bindings[`${control.id}:hMin`] = hMinField;
+        if (hMaxField) bindings[`${control.id}:hMax`] = hMaxField;
+        if (sMinField) bindings[`${control.id}:sMin`] = sMinField;
+        if (sMaxField) bindings[`${control.id}:sMax`] = sMaxField;
+        if (vMinField) bindings[`${control.id}:vMin`] = vMinField;
+        if (vMaxField) bindings[`${control.id}:vMax`] = vMaxField;
+      }
+    }
+
+    return bindings;
+  }
+
+  function readBoundHsvValue(bindings: HsvBindingMap, key: string, fallback: string): string {
+    const bound = bindings[key];
+    if (!bound) return readLocalValue(key, fallback);
+    const value = bound.draftValue;
+    return value === '' ? fallback : value;
+  }
+
+  function setBoundHsvValue(bindings: HsvBindingMap, key: string, value: string): void {
+    const bound = bindings[key];
+    if (!bound) {
+      setLocalValue(key, value);
+      return;
+    }
+    updateStreamNodeValue(bound.nodeId, bound.portKey, bound.dataType, value);
+  }
+
+  function metadataOrNull(descriptor: PipelineUiNodeDescriptor | null): PipelinePortMetadata | null {
+    return descriptor?.metadata ?? null;
+  }
+
   type EnumOption = { raw: string; label: string; value: string };
 
   function buildEnumOptions(values: ReadonlyArray<string>): EnumOption[] {
@@ -336,73 +419,9 @@
   {@const bindValue = control.bind}
   {@const hasBinding = typeof bindValue === 'string' && bindValue.trim().length > 0}
   {@const dualBind = isDual && isRangeBind(bindValue) ? bindValue : null}
-  {@const hsvBind = control.type === 'hsv' && isHsvBind(bindValue) ? bindValue : null}
-  {@const hsvRangeBind = control.type === 'hsv_range' && isHsvRangeBind(bindValue) ? bindValue : null}
   {@const dualMinField = dualBind ? buildBoundField(dualBind.min) : null}
   {@const dualMaxField = dualBind ? buildBoundField(dualBind.max) : null}
-  {@const hsvBindings = (() => {
-    const bindings: Record<string, BoundField> = {};
-    const bindString = typeof bindValue === 'string' ? bindValue.trim() : '';
-    const parsedBind = bindString ? parseBind(bindString) : null;
-    const baseNodeId = parsedBind?.nodeId ?? (bindString && !bindString.includes('.') ? bindString : '');
-    if (hsvBind) {
-      const hField = buildBoundField(hsvBind.h);
-      const sField = buildBoundField(hsvBind.s);
-      const vField = buildBoundField(hsvBind.v);
-      if (hField) bindings[`${control.id}:h`] = hField;
-      if (sField) bindings[`${control.id}:s`] = sField;
-      if (vField) bindings[`${control.id}:v`] = vField;
-    } else if (control.type === 'hsv' && baseNodeId) {
-      const hField = buildBoundField(`${baseNodeId}.h`);
-      const sField = buildBoundField(`${baseNodeId}.s`);
-      const vField = buildBoundField(`${baseNodeId}.v`);
-      if (hField) bindings[`${control.id}:h`] = hField;
-      if (sField) bindings[`${control.id}:s`] = sField;
-      if (vField) bindings[`${control.id}:v`] = vField;
-    }
-    if (hsvRangeBind) {
-      const hMinField = buildBoundField(hsvRangeBind.h.min);
-      const hMaxField = buildBoundField(hsvRangeBind.h.max);
-      const sMinField = buildBoundField(hsvRangeBind.s.min);
-      const sMaxField = buildBoundField(hsvRangeBind.s.max);
-      const vMinField = buildBoundField(hsvRangeBind.v.min);
-      const vMaxField = buildBoundField(hsvRangeBind.v.max);
-      if (hMinField) bindings[`${control.id}:hMin`] = hMinField;
-      if (hMaxField) bindings[`${control.id}:hMax`] = hMaxField;
-      if (sMinField) bindings[`${control.id}:sMin`] = sMinField;
-      if (sMaxField) bindings[`${control.id}:sMax`] = sMaxField;
-      if (vMinField) bindings[`${control.id}:vMin`] = vMinField;
-      if (vMaxField) bindings[`${control.id}:vMax`] = vMaxField;
-    } else if (control.type === 'hsv_range' && baseNodeId) {
-      const hMinField = buildBoundField(`${baseNodeId}.h_min`);
-      const hMaxField = buildBoundField(`${baseNodeId}.h_max`);
-      const sMinField = buildBoundField(`${baseNodeId}.s_min`);
-      const sMaxField = buildBoundField(`${baseNodeId}.s_max`);
-      const vMinField = buildBoundField(`${baseNodeId}.v_min`);
-      const vMaxField = buildBoundField(`${baseNodeId}.v_max`);
-      if (hMinField) bindings[`${control.id}:hMin`] = hMinField;
-      if (hMaxField) bindings[`${control.id}:hMax`] = hMaxField;
-      if (sMinField) bindings[`${control.id}:sMin`] = sMinField;
-      if (sMaxField) bindings[`${control.id}:sMax`] = sMaxField;
-      if (vMinField) bindings[`${control.id}:vMin`] = vMinField;
-      if (vMaxField) bindings[`${control.id}:vMax`] = vMaxField;
-    }
-    return bindings;
-  })()}
-  {@const readHsvValue = (key: string, fallback: string) => {
-    const bound = hsvBindings[key];
-    if (!bound) return readLocalValue(key, fallback);
-    const value = bound.draftValue;
-    return value === '' ? fallback : value;
-  }}
-  {@const setHsvValue = (key: string, value: string) => {
-    const bound = hsvBindings[key];
-    if (!bound) {
-      setLocalValue(key, value);
-      return;
-    }
-    updateStreamNodeValue(bound.nodeId, bound.portKey, bound.dataType, value);
-  }}
+  {@const hsvBindings = buildHsvBindingMap(control, bindValue)}
   {@const descriptor = resolveDescriptor(bindValue)}
   {@const nodeId = descriptor?.nodeId ?? ''}
   {@const portKey = descriptor?.portKey ?? ''}
@@ -411,7 +430,7 @@
   {@const typeKey = resolveDataTypeKey(dataType ?? undefined) ?? 'string'}
   {@const typeKeyLower = typeKey.toLowerCase()}
   {@const variants = getDataTypeVariants(dataType ?? undefined)}
-  {@const meta: PipelinePortMetadata | null = descriptor?.metadata ?? null}
+  {@const meta = metadataOrNull(descriptor)}
   {@const metadataOptions = getMetadataEnumOptions(meta)}
   {@const allowedValues =
     control.type === 'select' && control.options && control.options.length
@@ -460,9 +479,9 @@
   {@const pixelHex = pixelToHex(pixelValue)}
   {@const numericFallback =
     typeof overrideValue?.value === 'number' && Number.isFinite(overrideValue?.value)
-      ? (overrideValue?.value as number)
+      ? (overrideValue?.value)
       : typeof baseValue?.value === 'number' && Number.isFinite(baseValue?.value)
-        ? (baseValue?.value as number)
+        ? (baseValue?.value)
         : (control.min ?? 0)}
   {@const sliderValue = Number.isFinite(Number(draftValue)) ? Number(draftValue) : numericFallback}
   {@const fallbackStep = typeKeyLower === 'float' || typeKeyLower === 'double' || typeKeyLower === 'number' ? 0.1 : 1}
@@ -543,14 +562,14 @@
     {@const rangeSpan = maxValue - minValue}
     {@const minPercent = rangeSpan > 0 ? ((minClamped - minValue) / rangeSpan) * 100 : 0}
     {@const maxPercent = rangeSpan > 0 ? ((maxClamped - minValue) / rangeSpan) * 100 : 0}
-    {@const setDualMin = (value: string) => {
+    {@const setDualMin = (value) => {
       if (dualMinField) {
         updateStreamNodeValue(dualMinField.nodeId, dualMinField.portKey, dualMinField.dataType, value);
       } else {
         setLocalValue(minKey, value);
       }
     }}
-    {@const setDualMax = (value: string) => {
+    {@const setDualMax = (value) => {
       if (dualMaxField) {
         updateStreamNodeValue(dualMaxField.nodeId, dualMaxField.portKey, dualMaxField.dataType, value);
       } else {
@@ -568,7 +587,7 @@
           value={minClamped}
           disabled={!isSettable}
           oninput={(event) => {
-            const raw = (event.currentTarget as HTMLInputElement).value;
+            const raw = event.currentTarget.value;
             const next = clampNumber(Number(raw), minValue, maxValue);
             const maxCurrent = Number.isFinite(Number(maxDraft)) ? Number(maxDraft) : maxValue;
             if (next > maxCurrent) {
@@ -592,7 +611,7 @@
             style={thumbVars}
             disabled={!isSettable}
             oninput={(event) => {
-              const raw = (event.currentTarget as HTMLInputElement).value;
+              const raw = event.currentTarget.value;
               const next = clampNumber(Number(raw), minValue, maxValue);
               const maxCurrent = Number.isFinite(Number(maxDraft)) ? Number(maxDraft) : maxValue;
               if (next > maxCurrent) {
@@ -611,7 +630,7 @@
             style={thumbVars}
             disabled={!isSettable}
             oninput={(event) => {
-              const raw = (event.currentTarget as HTMLInputElement).value;
+              const raw = event.currentTarget.value;
               const next = clampNumber(Number(raw), minValue, maxValue);
               const minCurrent = Number.isFinite(Number(minDraft)) ? Number(minDraft) : minValue;
               if (next < minCurrent) {
@@ -630,7 +649,7 @@
           value={maxClamped}
           disabled={!isSettable}
           oninput={(event) => {
-            const raw = (event.currentTarget as HTMLInputElement).value;
+            const raw = event.currentTarget.value;
             const next = clampNumber(Number(raw), minValue, maxValue);
             const minCurrent = Number.isFinite(Number(minDraft)) ? Number(minDraft) : minValue;
             if (next < minCurrent) {
@@ -647,7 +666,7 @@
       value={selectValue}
       disabled={!isSettable}
       onchange={(event) => {
-        const value = (event.currentTarget as HTMLSelectElement).value;
+        const value = event.currentTarget.value;
         if (isBound) {
           updateStreamNodeValue(nodeId, portKey, dataType, value);
         } else {
@@ -677,7 +696,7 @@
             checked={draftValue === 'true'}
             disabled={!isSettable}
             onchange={(event) => {
-              const value = (event.currentTarget as HTMLInputElement).checked ? 'true' : 'false';
+              const value = event.currentTarget.checked ? 'true' : 'false';
               setLocalValue(control.id, value);
             }}
           />
@@ -697,7 +716,7 @@
         checked={draftValue === 'true'}
         disabled={!isSettable}
         onchange={(event) => {
-          const value = (event.currentTarget as HTMLInputElement).checked ? 'true' : 'false';
+          const value = event.currentTarget.checked ? 'true' : 'false';
           if (isBound) {
             updateStreamNodeValue(nodeId, portKey, dataType, value);
           } else {
@@ -719,7 +738,7 @@
         style={`--range-base: ${sliderBase}; --range-fill: ${sliderFill}; --range-progress: ${sliderPercent}%; ${thumbVars}`}
         disabled={!isSettable}
         oninput={(event) => {
-          const value = (event.currentTarget as HTMLInputElement).value;
+          const value = event.currentTarget.value;
           if (isBound) {
             updateStreamNodeValue(nodeId, portKey, dataType, value);
           } else {
@@ -736,7 +755,7 @@
         value={draftValue}
         disabled={!isSettable}
         oninput={(event) => {
-          const value = (event.currentTarget as HTMLInputElement).value;
+          const value = event.currentTarget.value;
           if (isBound) {
             updateStreamNodeValue(nodeId, portKey, dataType, value);
           } else {
@@ -749,8 +768,8 @@
     <PipelineUiHsvControl
       {control}
       {isSettable}
-      readLocalValue={readHsvValue}
-      setLocalValue={setHsvValue}
+      readLocalValue={(key, fallback) => readBoundHsvValue(hsvBindings, key, fallback)}
+      setLocalValue={(key, value) => setBoundHsvValue(hsvBindings, key, value)}
     />
 {:else if control.type === 'color'}
     <PipelineUiColorControl
@@ -784,7 +803,7 @@
       disabled={!isSettable}
       placeholder={baseLabel === 'None' ? 'Default' : baseLabel}
       oninput={(event) => {
-        const value = (event.currentTarget as HTMLInputElement).value;
+        const value = event.currentTarget.value;
         if (isBound) {
           updateStreamNodeValue(nodeId, portKey, dataType, value);
         } else {

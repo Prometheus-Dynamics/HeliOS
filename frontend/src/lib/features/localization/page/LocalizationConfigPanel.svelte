@@ -502,6 +502,147 @@
     return 'border-surface-800/70 bg-surface-950/60';
   }
 
+  function readInputValue(event: Event): string | null {
+    const input = event.currentTarget;
+    return input instanceof HTMLInputElement ? input.value : null;
+  }
+
+  function readInputChecked(event: Event): boolean | null {
+    const input = event.currentTarget;
+    return input instanceof HTMLInputElement ? input.checked : null;
+  }
+
+  function readSelectValue(event: Event): string | null {
+    const select = event.currentTarget;
+    return select instanceof HTMLSelectElement ? select.value : null;
+  }
+
+  function handleProfileNameKeydown(event: KeyboardEvent) {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    onCommitProfileName?.();
+    const input = event.currentTarget;
+    if (input instanceof HTMLInputElement) {
+      input.blur();
+    }
+  }
+
+  function handleToggleSource(sourceId: string, event: Event) {
+    const checked = readInputChecked(event);
+    if (checked == null) return;
+    onToggleSource?.(sourceId, checked);
+  }
+
+  function handleSetActiveSolverId(event: Event) {
+    const value = readSelectValue(event);
+    if (value == null) return;
+    onSetActiveSolverId?.(value);
+  }
+
+  function handleSetSolverMode(event: Event) {
+    const value = readSelectValue(event);
+    if (value == null || !visibleSolverModes.includes(value as LocalizationSolverMode)) return;
+    onSetSolverMode?.(value as LocalizationSolverMode);
+  }
+
+  function handleSetSolverTemporalOverrideEnabled(event: Event) {
+    const checked = readInputChecked(event);
+    if (checked == null) return;
+    onSetSolverTemporalOverrideEnabled?.(checked);
+  }
+
+  function handleSetSolverTemporalEnabled(event: Event) {
+    const checked = readInputChecked(event);
+    if (checked == null) return;
+    onSetSolverTemporalEnabled?.(checked);
+  }
+
+  function handleSetSolverTemporalNumeric(field: string, event: Event) {
+    const value = readInputValue(event);
+    if (value == null) return;
+    onSetSolverTemporalNumeric?.(field, value);
+  }
+
+  function handleSetActiveSolverUseAllSources(event: Event) {
+    const checked = readInputChecked(event);
+    if (checked == null) return;
+    onSetActiveSolverUseAllSources?.(checked);
+  }
+
+  function handleToggleActiveSolverSource(sourceId: string, event: Event) {
+    const checked = readInputChecked(event);
+    if (checked == null) return;
+    onToggleActiveSolverSource?.(sourceId, checked);
+  }
+
+  function handleSetSourceWeight(sourceId: string, event: Event) {
+    const value = readInputValue(event);
+    if (value == null) return;
+    onSetSourceWeight?.(sourceId, value);
+  }
+
+  function handleSetFieldOriginMode(event: Event) {
+    const value = readSelectValue(event);
+    if (value !== 'blue' && value !== 'red' && value !== 'center' && value !== 'custom') return;
+    onSetFieldOriginMode?.(value);
+  }
+
+  function handleSetFieldOriginCustomNumeric(field: 'x' | 'z' | 'yawDeg', event: Event) {
+    const value = readInputValue(event);
+    if (value == null) return;
+    onSetFieldOriginCustomNumeric?.(field, value);
+  }
+
+  function handleSetSnapZToGround(event: Event) {
+    const checked = readInputChecked(event);
+    if (checked == null) return;
+    onSetSnapZToGround?.(checked);
+  }
+
+  function handleSetSnapRollToGround(event: Event) {
+    const checked = readInputChecked(event);
+    if (checked == null) return;
+    onSetSnapRollToGround?.(checked);
+  }
+
+  function handleSetSnapPitchToGround(event: Event) {
+    const checked = readInputChecked(event);
+    if (checked == null) return;
+    onSetSnapPitchToGround?.(checked);
+  }
+
+  function handleSetFieldMapSelection(event: Event) {
+    const value = readSelectValue(event);
+    if (value == null) return;
+    onSetFieldMapSelection?.(value);
+  }
+
+  function handleUploadMapFile(event: Event) {
+    const input = event.currentTarget;
+    if (!(input instanceof HTMLInputElement)) return;
+    const file = input.files?.[0] ?? null;
+    if (!file) return;
+    onUploadMapFile?.(file);
+  }
+
+  function handleSetProfileTemporalEnabled(event: Event) {
+    const checked = readInputChecked(event);
+    if (checked == null) return;
+    onSetProfileTemporalEnabled?.(checked);
+  }
+
+  function handleSetProfileTemporalNumeric(field: string, event: Event) {
+    const value = readInputValue(event);
+    if (value == null) return;
+    onSetProfileTemporalNumeric?.(field, value);
+  }
+
+  function handleSetSolverRuntimeTuningNumeric(field: RuntimeTuningFieldKey, event: Event) {
+    const value = readInputValue(event);
+    if (value == null) return;
+    onSetSolverRuntimeTuningNumeric?.(field, value);
+  }
+
   type RuntimeTuningFieldSpec = {
     key: RuntimeTuningFieldKey;
     label: string;
@@ -634,13 +775,7 @@
               placeholder="Profile name"
               bind:value={profileNameInput}
               onchange={onCommitProfileName}
-              onkeydown={(event) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault();
-                  onCommitProfileName?.();
-                  (event.currentTarget as HTMLInputElement).blur();
-                }
-              }}
+              onkeydown={handleProfileNameKeydown}
               disabled={localizationConfigLoading || !hasActiveProfile}
             />
           </label>
@@ -835,8 +970,7 @@
                                           type="checkbox"
                                           checked={sourceSelected}
                                           disabled={localizationConfigLoading}
-                                          onchange={(event) =>
-                                            onToggleSource?.(source.id, (event.currentTarget as HTMLInputElement).checked)}
+                                          onchange={(event) => handleToggleSource(source.id, event)}
                                         />
                                       </div>
                                       <div class="flex flex-wrap items-center gap-1.5 text-micro-tight uppercase tracking-[0.22em] text-surface-500">
@@ -903,7 +1037,7 @@
                     <select
                       class="w-full rounded border border-surface-800 bg-surface-950/70 px-3 py-2 text-xs uppercase tracking-[0.3em] text-surface-200 focus:border-primary-400 focus:outline-none"
                       bind:value={activeSolverId}
-                      onchange={(event) => onSetActiveSolverId?.((event.currentTarget as HTMLSelectElement).value)}
+                      onchange={handleSetActiveSolverId}
                       disabled={localizationConfigLoading}
                     >
                       {#each solvers as solver (solver.id)}
@@ -939,7 +1073,7 @@
                       <select
                         class="w-full rounded border border-surface-800 bg-surface-950/70 px-3 py-2 text-xs uppercase tracking-[0.3em] text-surface-200 focus:border-primary-400 focus:outline-none"
                         value={activeSolverMode}
-                        onchange={(event) => onSetSolverMode?.((event.currentTarget as HTMLSelectElement).value as LocalizationSolverMode)}
+                        onchange={handleSetSolverMode}
                         disabled={localizationConfigLoading}
                       >
                         {#each visibleSolverModes as mode (mode)}
@@ -958,8 +1092,7 @@
                           type="checkbox"
                           checked={solverHasTemporalOverride}
                           disabled={localizationConfigLoading}
-                          onchange={(event) =>
-                            onSetSolverTemporalOverrideEnabled?.((event.currentTarget as HTMLInputElement).checked)}
+                          onchange={handleSetSolverTemporalOverrideEnabled}
                         />
                       </label>
                       {#if solverHasTemporalOverride}
@@ -969,8 +1102,7 @@
                             type="checkbox"
                             checked={activeSolverTemporalOverride?.enabled ?? false}
                             disabled={localizationConfigLoading}
-                            onchange={(event) =>
-                              onSetSolverTemporalEnabled?.((event.currentTarget as HTMLInputElement).checked)}
+                            onchange={handleSetSolverTemporalEnabled}
                           />
                         </label>
                         <div class="mt-2 grid gap-2 text-micro">
@@ -981,7 +1113,7 @@
                               step="0.01"
                               value={activeSolverTemporalOverride?.singleTagTranslationAlpha ?? 0}
                               disabled={localizationConfigLoading}
-                              onchange={(event) => onSetSolverTemporalNumeric?.('singleTagTranslationAlpha', (event.currentTarget as HTMLInputElement).value)}
+                              onchange={(event) => handleSetSolverTemporalNumeric('singleTagTranslationAlpha', event)}
                               class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
                             />
                           </label>
@@ -992,7 +1124,7 @@
                               step="0.01"
                               value={activeSolverTemporalOverride?.singleTagRotationAlpha ?? 0}
                               disabled={localizationConfigLoading}
-                              onchange={(event) => onSetSolverTemporalNumeric?.('singleTagRotationAlpha', (event.currentTarget as HTMLInputElement).value)}
+                              onchange={(event) => handleSetSolverTemporalNumeric('singleTagRotationAlpha', event)}
                               class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
                             />
                           </label>
@@ -1003,7 +1135,7 @@
                               step="0.01"
                               value={activeSolverTemporalOverride?.multiTagTranslationAlpha ?? 0}
                               disabled={localizationConfigLoading}
-                              onchange={(event) => onSetSolverTemporalNumeric?.('multiTagTranslationAlpha', (event.currentTarget as HTMLInputElement).value)}
+                              onchange={(event) => handleSetSolverTemporalNumeric('multiTagTranslationAlpha', event)}
                               class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
                             />
                           </label>
@@ -1014,7 +1146,7 @@
                               step="0.01"
                               value={activeSolverTemporalOverride?.multiTagRotationAlpha ?? 0}
                               disabled={localizationConfigLoading}
-                              onchange={(event) => onSetSolverTemporalNumeric?.('multiTagRotationAlpha', (event.currentTarget as HTMLInputElement).value)}
+                              onchange={(event) => handleSetSolverTemporalNumeric('multiTagRotationAlpha', event)}
                               class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
                             />
                           </label>
@@ -1025,7 +1157,7 @@
                               step="0.01"
                               value={activeSolverTemporalOverride?.maxTranslationJumpM ?? 0}
                               disabled={localizationConfigLoading}
-                              onchange={(event) => onSetSolverTemporalNumeric?.('maxTranslationJumpM', (event.currentTarget as HTMLInputElement).value)}
+                              onchange={(event) => handleSetSolverTemporalNumeric('maxTranslationJumpM', event)}
                               class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
                             />
                           </label>
@@ -1036,7 +1168,7 @@
                               step="0.1"
                               value={activeSolverTemporalOverride?.maxRotationJumpDeg ?? 0}
                               disabled={localizationConfigLoading}
-                              onchange={(event) => onSetSolverTemporalNumeric?.('maxRotationJumpDeg', (event.currentTarget as HTMLInputElement).value)}
+                              onchange={(event) => handleSetSolverTemporalNumeric('maxRotationJumpDeg', event)}
                               class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
                             />
                           </label>
@@ -1047,7 +1179,7 @@
                               step="10"
                               value={activeSolverTemporalOverride?.reanchorRejectWindowMs ?? 0}
                               disabled={localizationConfigLoading}
-                              onchange={(event) => onSetSolverTemporalNumeric?.('reanchorRejectWindowMs', (event.currentTarget as HTMLInputElement).value)}
+                              onchange={(event) => handleSetSolverTemporalNumeric('reanchorRejectWindowMs', event)}
                               class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
                             />
                           </label>
@@ -1072,7 +1204,7 @@
                     type="checkbox"
                     checked={solverUsesAllSources}
                     disabled={localizationConfigLoading}
-                    onchange={(event) => onSetActiveSolverUseAllSources?.((event.currentTarget as HTMLInputElement).checked)}
+                    onchange={handleSetActiveSolverUseAllSources}
                   />
                 </label>
                 <div class="mt-2 grid gap-2 sm:grid-cols-3">
@@ -1187,8 +1319,7 @@
                                         type="checkbox"
                                         checked={checked}
                                         disabled={localizationConfigLoading || solverUsesAllSources}
-                                        onchange={(event) =>
-                                          onToggleActiveSolverSource?.(source.id, (event.currentTarget as HTMLInputElement).checked)}
+                                        onchange={(event) => handleToggleActiveSolverSource(source.id, event)}
                                       />
                                     </div>
                                     <label class="grid gap-1">
@@ -1201,8 +1332,7 @@
                                         value={sourceWeight}
                                         class="w-full rounded border border-surface-800 bg-surface-950/80 px-2 py-1 text-micro text-surface-100 focus:border-primary-400 focus:outline-none"
                                         disabled={localizationConfigLoading}
-                                        onchange={(event) =>
-                                          onSetSourceWeight?.(source.id, (event.currentTarget as HTMLInputElement).value)}
+                                        onchange={(event) => handleSetSourceWeight(source.id, event)}
                                       />
                                     </label>
                                   </div>
@@ -1297,8 +1427,7 @@
                     class="w-full rounded border border-surface-800 bg-surface-950/70 px-3 py-2 text-xs uppercase tracking-[0.3em] text-surface-200 focus:border-primary-400 focus:outline-none"
                     value={fieldOriginMode}
                     disabled={!hasActiveProfile || localizationConfigLoading}
-                    onchange={(event) =>
-                      onSetFieldOriginMode?.((event.currentTarget as HTMLSelectElement).value as LocalizationFieldOriginMode)}
+                    onchange={handleSetFieldOriginMode}
                   >
                     <option value="blue">wpiblue</option>
                     <option value="red">wpired</option>
@@ -1314,7 +1443,7 @@
                           step="0.01"
                           value={fieldOriginCustom?.x ?? 0}
                           disabled={!hasActiveProfile || localizationConfigLoading}
-                          onchange={(event) => onSetFieldOriginCustomNumeric?.('x', (event.currentTarget as HTMLInputElement).value)}
+                          onchange={(event) => handleSetFieldOriginCustomNumeric('x', event)}
                           class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
                         />
                       </label>
@@ -1325,7 +1454,7 @@
                           step="0.01"
                           value={fieldOriginCustom?.z ?? 0}
                           disabled={!hasActiveProfile || localizationConfigLoading}
-                          onchange={(event) => onSetFieldOriginCustomNumeric?.('z', (event.currentTarget as HTMLInputElement).value)}
+                          onchange={(event) => handleSetFieldOriginCustomNumeric('z', event)}
                           class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
                         />
                       </label>
@@ -1336,8 +1465,7 @@
                           step="0.1"
                           value={fieldOriginCustom?.yawDeg ?? 0}
                           disabled={!hasActiveProfile || localizationConfigLoading}
-                          onchange={(event) =>
-                            onSetFieldOriginCustomNumeric?.('yawDeg', (event.currentTarget as HTMLInputElement).value)}
+                          onchange={(event) => handleSetFieldOriginCustomNumeric('yawDeg', event)}
                           class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
                         />
                       </label>
@@ -1362,7 +1490,7 @@
                       type="checkbox"
                       checked={snapZToGround}
                       disabled={!hasActiveProfile || localizationConfigLoading}
-                      onchange={(event) => onSetSnapZToGround?.((event.currentTarget as HTMLInputElement).checked)}
+                      onchange={handleSetSnapZToGround}
                     />
                   </label>
                   <label
@@ -1377,7 +1505,7 @@
                       type="checkbox"
                       checked={snapRollToGround}
                       disabled={!hasActiveProfile || localizationConfigLoading}
-                      onchange={(event) => onSetSnapRollToGround?.((event.currentTarget as HTMLInputElement).checked)}
+                      onchange={handleSetSnapRollToGround}
                     />
                   </label>
                   <label
@@ -1392,7 +1520,7 @@
                       type="checkbox"
                       checked={snapPitchToGround}
                       disabled={!hasActiveProfile || localizationConfigLoading}
-                      onchange={(event) => onSetSnapPitchToGround?.((event.currentTarget as HTMLInputElement).checked)}
+                      onchange={handleSetSnapPitchToGround}
                     />
                   </label>
                   <p class="text-micro text-surface-500">
@@ -1407,7 +1535,7 @@
                 <select
                   class="w-full rounded border border-surface-800 bg-surface-950/70 px-3 py-2 text-xs text-surface-100 focus:border-primary-400 focus:outline-none"
                   bind:value={fieldMapSelection}
-                  onchange={(event) => onSetFieldMapSelection?.((event.currentTarget as HTMLSelectElement).value)}
+                  onchange={handleSetFieldMapSelection}
                   disabled={fieldMapsLoading || localizationConfigLoading}
                 >
                   <option value="">No field map</option>
@@ -1426,12 +1554,7 @@
                   <input
                     type="file"
                     class="sr-only"
-                    onchange={(event) => {
-                      const input = event.currentTarget as HTMLInputElement;
-                      const file = input.files?.[0] ?? null;
-                      if (!file) return;
-                      onUploadMapFile?.(file);
-                    }}
+                    onchange={handleUploadMapFile}
                     disabled={mapUploadBusy || localizationConfigLoading}
                   />
                 </label>
@@ -1474,7 +1597,7 @@
                       type="checkbox"
                       checked={profileTemporalStabilization.enabled}
                       disabled={!hasActiveProfile || localizationConfigLoading}
-                      onchange={(event) => onSetProfileTemporalEnabled?.((event.currentTarget as HTMLInputElement).checked)}
+                      onchange={handleSetProfileTemporalEnabled}
                     />
                   </label>
                   <div class="mt-2 grid gap-2">
@@ -1485,7 +1608,7 @@
                         step="0.01"
                         value={profileTemporalStabilization.singleTagTranslationAlpha}
                         disabled={!hasActiveProfile || localizationConfigLoading}
-                        onchange={(event) => onSetProfileTemporalNumeric?.('singleTagTranslationAlpha', (event.currentTarget as HTMLInputElement).value)}
+                        onchange={(event) => handleSetProfileTemporalNumeric('singleTagTranslationAlpha', event)}
                         class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
                       />
                     </label>
@@ -1496,7 +1619,7 @@
                         step="0.01"
                         value={profileTemporalStabilization.singleTagRotationAlpha}
                         disabled={!hasActiveProfile || localizationConfigLoading}
-                        onchange={(event) => onSetProfileTemporalNumeric?.('singleTagRotationAlpha', (event.currentTarget as HTMLInputElement).value)}
+                        onchange={(event) => handleSetProfileTemporalNumeric('singleTagRotationAlpha', event)}
                         class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
                       />
                     </label>
@@ -1507,7 +1630,7 @@
                         step="0.01"
                         value={profileTemporalStabilization.multiTagTranslationAlpha}
                         disabled={!hasActiveProfile || localizationConfigLoading}
-                        onchange={(event) => onSetProfileTemporalNumeric?.('multiTagTranslationAlpha', (event.currentTarget as HTMLInputElement).value)}
+                        onchange={(event) => handleSetProfileTemporalNumeric('multiTagTranslationAlpha', event)}
                         class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
                       />
                     </label>
@@ -1518,7 +1641,7 @@
                         step="0.01"
                         value={profileTemporalStabilization.multiTagRotationAlpha}
                         disabled={!hasActiveProfile || localizationConfigLoading}
-                        onchange={(event) => onSetProfileTemporalNumeric?.('multiTagRotationAlpha', (event.currentTarget as HTMLInputElement).value)}
+                        onchange={(event) => handleSetProfileTemporalNumeric('multiTagRotationAlpha', event)}
                         class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
                       />
                     </label>
@@ -1529,7 +1652,7 @@
                         step="0.01"
                         value={profileTemporalStabilization.maxTranslationJumpM}
                         disabled={!hasActiveProfile || localizationConfigLoading}
-                        onchange={(event) => onSetProfileTemporalNumeric?.('maxTranslationJumpM', (event.currentTarget as HTMLInputElement).value)}
+                        onchange={(event) => handleSetProfileTemporalNumeric('maxTranslationJumpM', event)}
                         class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
                       />
                     </label>
@@ -1540,7 +1663,7 @@
                         step="0.1"
                         value={profileTemporalStabilization.maxRotationJumpDeg}
                         disabled={!hasActiveProfile || localizationConfigLoading}
-                        onchange={(event) => onSetProfileTemporalNumeric?.('maxRotationJumpDeg', (event.currentTarget as HTMLInputElement).value)}
+                        onchange={(event) => handleSetProfileTemporalNumeric('maxRotationJumpDeg', event)}
                         class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
                       />
                     </label>
@@ -1551,7 +1674,7 @@
                         step="10"
                         value={profileTemporalStabilization.reanchorRejectWindowMs}
                         disabled={!hasActiveProfile || localizationConfigLoading}
-                        onchange={(event) => onSetProfileTemporalNumeric?.('reanchorRejectWindowMs', (event.currentTarget as HTMLInputElement).value)}
+                        onchange={(event) => handleSetProfileTemporalNumeric('reanchorRejectWindowMs', event)}
                         class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
                       />
                     </label>
@@ -1580,8 +1703,7 @@
                           step={field.step}
                           value={activeSolverRuntimeTuning[field.key]}
                           disabled={localizationConfigLoading}
-                          onchange={(event) =>
-                            onSetSolverRuntimeTuningNumeric?.(field.key, (event.currentTarget as HTMLInputElement).value)}
+                          onchange={(event) => handleSetSolverRuntimeTuningNumeric(field.key, event)}
                           class="w-full rounded border border-surface-800 bg-surface-950/70 px-2 py-1.5 text-surface-100 focus:border-primary-400 focus:outline-none"
                         />
                       </label>

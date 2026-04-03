@@ -95,6 +95,32 @@
     setCursor(nextTime);
   }
 
+  function updateCursorFromClientX(clientX: number): void {
+    if (!timelineTrackEl) return;
+    const rect = timelineTrackEl.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / Math.max(1, rect.width)));
+    const nextTime = Math.round(ratio * timelineMaxMs);
+    setCursor(nextTime);
+  }
+
+  function handleTrackKeydown(event: KeyboardEvent): void {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLElement)) return;
+    const rect = target.getBoundingClientRect();
+    updateCursorFromClientX(rect.left + rect.width / 2);
+  }
+
+  function handleSelectedKeyframeEasingChange(event: Event): void {
+    if (!selectedKeyframe) return;
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLSelectElement)) return;
+    const value = easingOptions.find((option) => option.value === target.value)?.value;
+    if (!value) return;
+    onUpdateKeyframeEasing(selectedKeyframe.id, value);
+  }
+
   function jumpToPreviousKeyframe(): void {
     if (!sortedKeyframes.length) return;
     const current = timelineCursorMs;
@@ -234,7 +260,7 @@
           class="checkbox checkbox-xs"
           type="checkbox"
           checked={timelineLoop}
-          onchange={(event) => onTimelineLoopChange((event.target as HTMLInputElement).checked)}
+          onchange={(event) => onTimelineLoopChange(event.currentTarget.checked)}
         />
         Loop
       </label>
@@ -257,7 +283,7 @@
           min="100"
           step="50"
           value={timelineDurationMs}
-          oninput={(event) => onTimelineDurationChange(Number((event.target as HTMLInputElement).value))}
+          oninput={(event) => onTimelineDurationChange(Number(event.currentTarget.value))}
         />
       </label>
     </div>
@@ -269,7 +295,7 @@
       max={timelineMaxMs}
       step="1"
       value={timelineCursorMs}
-      oninput={(event) => setCursor(Number((event.target as HTMLInputElement).value))}
+      oninput={(event) => setCursor(Number(event.currentTarget.value))}
       aria-label="Timeline cursor"
     />
 
@@ -279,11 +305,7 @@
       onclick={(event) => updateCursorFromPointer(event)}
       role="button"
       tabindex="0"
-      onkeydown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          updateCursorFromPointer(event as unknown as MouseEvent);
-        }
-      }}
+      onkeydown={handleTrackKeydown}
       aria-label="Keyframe track"
     >
       {#if timelineMaxMs > 0}
@@ -332,7 +354,7 @@
           min="20"
           step="10"
           value={timelineSampleMs}
-          oninput={(event) => onTimelineSampleChange(Number((event.target as HTMLInputElement).value))}
+          oninput={(event) => onTimelineSampleChange(Number(event.currentTarget.value))}
         />
         <button class="btn btn-3xs preset-tonal" type="button" onclick={() => nudgeCursor(-1)}>-Step</button>
         <button class="btn btn-3xs preset-tonal" type="button" onclick={() => nudgeCursor(1)}>+Step</button>
@@ -389,7 +411,7 @@
             min="0"
             max={timelineMaxMs}
             value={selectedKeyframe.time_ms}
-            oninput={(event) => onUpdateKeyframeTime(selectedKeyframe.id, Number((event.target as HTMLInputElement).value))}
+            oninput={(event) => onUpdateKeyframeTime(selectedKeyframe.id, Number(event.currentTarget.value))}
           />
         </label>
 
@@ -398,7 +420,7 @@
           <select
             class="input w-full"
             value={selectedKeyframe.easing}
-            onchange={(event) => onUpdateKeyframeEasing(selectedKeyframe.id, (event.target as HTMLSelectElement).value as LightingTimelineEasing)}
+            onchange={handleSelectedKeyframeEasingChange}
           >
             {#each easingOptions as option (option.value)}
               <option value={option.value}>{option.label}</option>

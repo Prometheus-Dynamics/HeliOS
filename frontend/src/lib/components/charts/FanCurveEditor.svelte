@@ -238,7 +238,7 @@
           tabindex="0"
           onpointerdown={(event) => {
             event.preventDefault();
-            (event.currentTarget as SVGCircleElement).setPointerCapture(event.pointerId);
+            event.currentTarget.setPointerCapture(event.pointerId);
             draggingIndex = idx;
             onSelect?.(idx);
           }}

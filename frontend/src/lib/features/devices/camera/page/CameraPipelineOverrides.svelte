@@ -377,7 +377,7 @@
               <select
                 class="mt-1 w-full rounded border border-surface-800/70 bg-surface-900/60 px-3 py-2 text-xs text-surface-200"
                 value={inputCurrentSelection}
-                onchange={(event) => applyInputSelection((event.currentTarget as HTMLSelectElement).value ?? '')}
+                onchange={(event) => applyInputSelection(event.currentTarget.value ?? '')}
               >
                 <option value="raw|raw">Raw stream: raw</option>
                 <option value="raw|undistorted">Raw stream: undistorted</option>
@@ -396,7 +396,7 @@
             type="search"
             placeholder="Search controls…"
             value={uiSearch}
-            oninput={(event) => (uiSearch = (event.currentTarget as HTMLInputElement).value)}
+            oninput={(event) => (uiSearch = event.currentTarget.value)}
           />
           <PipelineUiOverridesPanel
             ui={ui}

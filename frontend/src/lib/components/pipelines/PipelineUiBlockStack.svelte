@@ -114,7 +114,7 @@
           type="button"
           aria-label="Edit stack"
           onclick={(event) =>
-            onEditItem?.(item, { x: (event as MouseEvent).clientX, y: (event as MouseEvent).clientY })
+            onEditItem?.(item, { x: event.clientX, y: event.clientY })
           }
         >
           <FaIcon icon={faGear} class="h-3 w-3" />

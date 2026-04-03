@@ -711,6 +711,11 @@
     heatmapComputationState = next;
   };
 
+  function handleHeatmapViewModeChange(mode: string): void {
+    if (mode !== 'all' && mode !== 'workload' && mode !== 'boundary') return;
+    heatmapViewMode = mode;
+  }
+
   function cancelPendingHeatmapComputation() {
     if (heatmapComputationHandle != null && typeof window !== 'undefined') {
       window.cancelAnimationFrame(heatmapComputationHandle);
@@ -862,7 +867,7 @@
   onHeatmapStreamChange={handleHeatmapStreamChange}
   onHeatmapSelectorEnter={handleHeatmapSelectorEnter}
   onHeatmapSelectorLeave={handleHeatmapSelectorLeave}
-  onSetHeatmapViewMode={(mode) => (heatmapViewMode = mode as HeatmapViewMode)}
+  onSetHeatmapViewMode={handleHeatmapViewModeChange}
   onClearHeatmapFilters={clearHeatmapFilters}
   {formatHeatDuration}
   {formatTimestamp}

@@ -122,7 +122,7 @@
         placeholder="Min"
         step={sliderStep}
         value={minDraft}
-        oninput={(event) => onMinInput((event.currentTarget as HTMLInputElement).value)}
+        oninput={(event) => onMinInput(event.currentTarget.value)}
         disabled={constantsReadOnly}
       />
       <input
@@ -131,7 +131,7 @@
         placeholder="Max"
         step={sliderStep}
         value={maxDraft}
-        oninput={(event) => onMaxInput((event.currentTarget as HTMLInputElement).value)}
+        oninput={(event) => onMaxInput(event.currentTarget.value)}
         disabled={constantsReadOnly}
       />
     </div>

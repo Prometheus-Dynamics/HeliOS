@@ -77,6 +77,21 @@
 
   onMount(() => mediaSupport.start());
 
+  function handleViewFilterSelect(id: string): void {
+    if (!FILTERS.some((filter) => filter.id === id)) return;
+    mediaSupport.handleViewFilterChange(id as FilterOption);
+  }
+
+  function handleSortModeChange(mode: string): void {
+    if (!SORT_OPTIONS.some((option) => option.id === mode)) return;
+    mediaSupport.handleSortChange(mode as SortMode);
+  }
+
+  function handleLayoutModeChange(mode: string): void {
+    if (mode !== 'grid' && mode !== 'list') return;
+    layoutMode = mode;
+  }
+
   $effect(() => {
     mediaSupport.syncSearchQuery(searchQuery);
   });
@@ -152,7 +167,7 @@
       bind:searchValue={searchQuery}
       filters={FILTERS}
       selectedFilter={viewFilter}
-      onSelectFilter={(id) => mediaSupport.handleViewFilterChange(id as FilterOption)}
+      onSelectFilter={handleViewFilterSelect}
       streams={$availableStreams}
       selectedStream={streamFilter}
       onSelectStream={mediaSupport.handleStreamFilterChange}
@@ -173,7 +188,7 @@
           bind:this={manualFileInput}
           multiple
           disabled={uploading}
-          onchange={(event) => mediaSupport.handleFilesSelected((event.currentTarget as HTMLInputElement).files, 'quick')}
+          onchange={(event) => mediaSupport.handleFilesSelected(event.currentTarget.files, 'quick')}
         />
       {/snippet}
       {#snippet footer()}
@@ -193,9 +208,9 @@
         selectedCount={$selectedCount}
         sortMode={sortMode}
         sortOptions={SORT_OPTIONS}
-        onSortChange={(mode) => mediaSupport.handleSortChange(mode as SortMode)}
+        onSortChange={handleSortModeChange}
         layoutMode={layoutMode}
-        onLayoutChange={(mode) => (layoutMode = mode as LayoutMode)}
+        onLayoutChange={handleLayoutModeChange}
         onClearSelection={mediaSupport.clearSelection}
         onCreateMediaStream={() => void mediaSupport.createMediaReplayStream()}
         onDownloadSelected={mediaSupport.downloadSelectedArchive}

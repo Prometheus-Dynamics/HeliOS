@@ -79,7 +79,7 @@
             class="h-10 w-full cursor-pointer rounded border border-surface-700 bg-surface-900"
             type="color"
             value={editorColor}
-            oninput={(event) => onEditorColorChange((event.target as HTMLInputElement).value)}
+            oninput={(event) => onEditorColorChange(event.currentTarget.value)}
           />
         </label>
 
@@ -95,7 +95,7 @@
             max="255"
             step="1"
             value={editorBrightness}
-            oninput={(event) => onEditorBrightnessChange(Number((event.target as HTMLInputElement).value))}
+            oninput={(event) => onEditorBrightnessChange(Number(event.currentTarget.value))}
           />
         </label>
 

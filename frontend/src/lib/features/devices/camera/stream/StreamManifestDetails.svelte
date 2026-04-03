@@ -26,7 +26,7 @@
       <input
         type="checkbox"
         checked={fileBackendLoop}
-        onchange={(e) => onFileBackendLoopChange((e.currentTarget as HTMLInputElement).checked)}
+        onchange={(e) => onFileBackendLoopChange(e.currentTarget.checked)}
       />
       <span class="text-xs uppercase tracking-[0.3em] text-surface-500">Loop forever</span>
     </label>

@@ -65,6 +65,12 @@
 
   const hasMapUploadFile = $derived(Boolean(mapUploadFile));
 
+  function handleMapUploadInput(event: Event) {
+    const input = event.currentTarget;
+    if (!(input instanceof HTMLInputElement)) return;
+    onSetMapUploadFile?.(input.files?.[0] ?? null);
+  }
+
   export type $$Props = FieldMapManagerProps;
 </script>
 
@@ -160,10 +166,7 @@
           class="w-full rounded border border-surface-800 bg-surface-950 px-2 py-1 text-xs text-surface-50 file:mr-3 file:rounded file:border-0 file:bg-surface-900 file:px-2 file:py-1 file:text-xs file:text-surface-200"
           type="file"
           accept=".fmap,.json,application/json"
-          onchange={(event) => {
-            const input = event.currentTarget as HTMLInputElement;
-            onSetMapUploadFile?.(input.files?.[0] ?? null);
-          }}
+          onchange={handleMapUploadInput}
         />
         <button class="btn btn-ghost btn-xs uppercase tracking-[0.3em]" type="button" onclick={onUploadSelectedMapFile} disabled={!hasMapUploadFile || mapUploadBusy}>
           {mapUploadBusy ? 'Uploading…' : 'Upload'}

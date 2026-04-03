@@ -147,7 +147,7 @@
                 class="rounded border border-white/15 bg-surface-950/70 px-2 py-1 text-[0.7rem] font-semibold text-white placeholder:text-surface-500 focus:border-primary-300 focus:outline-none"
                 type="text"
                 value={heatmapFilterQuery}
-                oninput={(event) => (heatmapFilterQuery = (event.currentTarget as HTMLInputElement).value)}
+                oninput={(event) => (heatmapFilterQuery = event.currentTarget.value)}
                 placeholder="Name or node ID"
               />
             </label>
@@ -161,7 +161,7 @@
                   min="0"
                   step="0.1"
                   value={heatmapMinAverageInput}
-                  oninput={(event) => (heatmapMinAverageInput = (event.currentTarget as HTMLInputElement).value)}
+                  oninput={(event) => (heatmapMinAverageInput = event.currentTarget.value)}
                   placeholder="e.g. 2.5"
                 />
               </label>
@@ -174,7 +174,7 @@
                   min="0"
                   step="1"
                   value={heatmapMinSamplesInput}
-                  oninput={(event) => (heatmapMinSamplesInput = (event.currentTarget as HTMLInputElement).value)}
+                  oninput={(event) => (heatmapMinSamplesInput = event.currentTarget.value)}
                   placeholder="e.g. 10"
                 />
               </label>

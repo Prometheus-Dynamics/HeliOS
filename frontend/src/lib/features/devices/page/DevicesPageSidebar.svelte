@@ -22,6 +22,10 @@
     onRegister,
     onClearFilters
   }: Props = $props();
+
+  function handleFilterSelect(id: string): void {
+    cameraFilter = id;
+  }
 </script>
 
 <aside class="w-full shrink-0 space-y-3 overflow-visible rounded border border-surface-800/60 bg-surface-950/40 p-3 text-xs text-surface-400 lg:max-w-[16rem] xl:max-w-[16.75rem] 2xl:max-w-[17.5rem]">
@@ -43,7 +47,7 @@
     <SidebarFilterList
       items={filters}
       selectedId={cameraFilter}
-      onSelect={(id) => (cameraFilter = id as string)}
+      onSelect={handleFilterSelect}
     />
     {#if hasActiveFilters}
       <button

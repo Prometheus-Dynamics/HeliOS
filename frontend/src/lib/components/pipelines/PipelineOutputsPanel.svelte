@@ -39,6 +39,7 @@
 
   let copiedPort = $state<string | null>(null);
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
+  const IDLE_SAMPLE: SampleState = { status: 'idle' };
 
   const expandedSet = $derived.by(() => new Set(expandedPorts));
   const panelVisible = $derived(documentVisible && viewportVisible);
@@ -75,6 +76,14 @@
     if (!sample || sample.status === 'idle') {
       sampleByPort = { ...sampleByPort, [normalized]: { status: 'loading' } };
     }
+  }
+
+  function handlePortSearchInput(event: Event): void {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLInputElement)) {
+      return;
+    }
+    portSearch = target.value;
   }
 
   function sampleText(value: unknown): string {
@@ -271,7 +280,7 @@
         class="h-9 min-w-0 flex-1 rounded border border-surface-800/70 bg-surface-950/70 px-3 text-xs text-surface-200"
         placeholder="Search outputs..."
         value={portSearch}
-        oninput={(e) => (portSearch = (e.currentTarget as HTMLInputElement).value)}
+        oninput={handlePortSearchInput}
       />
     </div>
   </div>
@@ -291,7 +300,7 @@
       <div class="divide-y divide-surface-800/50">
         {#each filteredPorts as port (port)}
           {@const expanded = expandedSet.has(port)}
-          {@const sample = sampleByPort[port] ?? ({ status: 'idle' } as SampleState)}
+          {@const sample = sampleByPort[port] ?? IDLE_SAMPLE}
           <div class="px-3 py-2">
             <button
               type="button"

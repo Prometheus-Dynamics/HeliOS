@@ -125,7 +125,7 @@
           class="input h-9"
           placeholder="Optional (uses graph name)"
           value={$createName}
-          oninput={(event) => createName.set((event.currentTarget as HTMLInputElement).value)}
+          oninput={(event) => createName.set(event.currentTarget.value)}
         />
       </label>
       <div class="space-y-2">

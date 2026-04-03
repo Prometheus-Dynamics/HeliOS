@@ -85,7 +85,7 @@
         min="0"
         max="255"
         value={liveBrightness}
-        oninput={(event) => onBrightnessInput(Number((event.target as HTMLInputElement).value))}
+        oninput={(event) => onBrightnessInput(Number(event.currentTarget.value))}
       />
       <input
         class="input w-24"
@@ -93,7 +93,7 @@
         min="0"
         max="255"
         value={liveBrightness}
-        oninput={(event) => onBrightnessInput(Number((event.target as HTMLInputElement).value))}
+        oninput={(event) => onBrightnessInput(Number(event.currentTarget.value))}
       />
     </div>
   </div>

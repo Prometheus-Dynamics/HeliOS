@@ -1,6 +1,7 @@
 <script lang="ts">
   import { SummaryTiles, DevicesCamerasPanel, DevicesSensorsPanel } from '$lib';
   import type { CameraRow } from '$lib';
+  import type { PeripheralRow } from '$lib/components/devices/DevicesSensorsPanel.svelte';
   import type { PeripheralEntry } from '$lib/types/devices';
   import type { ThrottleBanner, PeripheralItem } from '$lib/features/devices/types';
 
@@ -52,6 +53,10 @@
   }: Props = $props();
 
   const peripheralEmptyMessage = 'No peripherals detected.';
+
+  function handlePeripheralSelect(event: CustomEvent<{ peripheral: PeripheralRow }>): void {
+    onSelectPeripheral((event.detail.peripheral.payload as PeripheralEntry | null | undefined) ?? null);
+  }
 </script>
 
 <div class="flex min-h-0 flex-1 flex-col gap-4">
@@ -196,8 +201,7 @@
     peripherals={peripherals}
     emptyMessage={peripheralEmptyMessage}
     error={peripheralError}
-    on:select={(event) =>
-      onSelectPeripheral((event.detail.peripheral.payload as PeripheralEntry | undefined) ?? null)}
+    on:select={handlePeripheralSelect}
   >
     {#snippet actions()}
       {#if peripheralsLoading}

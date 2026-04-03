@@ -70,7 +70,7 @@
       type="search"
       placeholder="Search constants…"
       value={constantSearch}
-      oninput={(event) => onSearch((event.currentTarget as HTMLInputElement).value)}
+      oninput={(event) => onSearch(event.currentTarget.value)}
     />
     {#if constantGroups.length === 0}
       <div class="rounded border border-surface-800/60 bg-surface-900/60 px-3 py-2 text-xs text-surface-400">
@@ -112,10 +112,10 @@
                 {@const pixelHex = pixelToHex(pixelValue)}
                 {@const numericFallback =
                   typeof overrideValue?.value === 'number' && Number.isFinite(overrideValue?.value)
-                    ? (overrideValue?.value as number)
+                    ? (overrideValue?.value)
                     : typeof baseValue?.value === 'number' && Number.isFinite(baseValue?.value)
-                      ? (baseValue?.value as number)
-                      : (meta?.uiMin as number | undefined) ?? (meta?.min as number | undefined) ?? 0}
+                      ? (baseValue?.value)
+                      : (meta?.uiMin) ?? (meta?.min) ?? 0}
                 {@const sliderValue = Number.isFinite(Number(draftValue)) ? Number(draftValue) : numericFallback}
                 {@const fallbackStep = typeKeyLower === 'float' || typeKeyLower === 'double' || typeKeyLower === 'number' ? 0.1 : 1}
                 {@const numericStep =
@@ -124,13 +124,15 @@
                     : typeof meta?.step === 'number' && Number.isFinite(meta.step) && meta.step > 0
                       ? meta.step
                       : fallbackStep}
+                {@const numericMin = Number(meta?.uiMin ?? meta?.min ?? 0)}
+                {@const numericMax = Number(meta?.uiMax ?? meta?.max ?? 0)}
                 {@const hasNumericBounds = meta?.uiMin !== undefined && meta?.uiMax !== undefined ? true : meta?.min !== undefined && meta?.max !== undefined}
                 <div class="rounded border border-surface-800/70 bg-surface-950/60 p-3 space-y-2">
                   <div class="flex items-start justify-between gap-3">
                     <div class="min-w-0">
                       <p class="truncate text-xs text-surface-100">{entry.portKey}</p>
                       {#if meta?.description}
-                        <p class="mt-0.5 line-clamp-2 text-micro-tight text-surface-500">{meta.description as string}</p>
+                        <p class="mt-0.5 line-clamp-2 text-micro-tight text-surface-500">{meta.description}</p>
                       {/if}
                     </div>
                     {#if hasOverride}
@@ -153,7 +155,7 @@
                           group.nodeId,
                           entry.portKey,
                           entry.dataType,
-                          (event.currentTarget as HTMLSelectElement).value
+                          event.currentTarget.value
                         )
                       }
                     >
@@ -172,7 +174,7 @@
                             group.nodeId,
                             entry.portKey,
                             entry.dataType,
-                            (event.currentTarget as HTMLInputElement).checked ? 'true' : 'false'
+                            event.currentTarget.checked ? 'true' : 'false'
                           )
                         }
                       />
@@ -190,7 +192,7 @@
                             group.nodeId,
                             entry.portKey,
                             entry.dataType,
-                            (event.currentTarget as HTMLInputElement).value
+                            event.currentTarget.value
                           )
                         }
                       />
@@ -209,7 +211,7 @@
                             group.nodeId,
                             entry.portKey,
                             entry.dataType,
-                            (event.currentTarget as HTMLInputElement).value
+                            event.currentTarget.value
                           )
                         }
                       />
@@ -219,8 +221,8 @@
                       <input
                         class="range-input w-full"
                         type="range"
-                        min={(meta?.uiMin ?? meta?.min) as number}
-                        max={(meta?.uiMax ?? meta?.max) as number}
+                        min={numericMin}
+                        max={numericMax}
                         step={numericStep}
                         value={sliderValue}
                         disabled={!isSettable}
@@ -229,15 +231,15 @@
                             group.nodeId,
                             entry.portKey,
                             entry.dataType,
-                            (event.currentTarget as HTMLInputElement).value
+                            event.currentTarget.value
                           )
                         }
                       />
                       <input
                         class="w-24 rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                         type="number"
-                        min={(meta?.uiMin ?? meta?.min) as number}
-                        max={(meta?.uiMax ?? meta?.max) as number}
+                        min={numericMin}
+                        max={numericMax}
                         step={numericStep}
                         value={draftValue}
                         disabled={!isSettable}
@@ -246,7 +248,7 @@
                             group.nodeId,
                             entry.portKey,
                             entry.dataType,
-                            (event.currentTarget as HTMLInputElement).value
+                            event.currentTarget.value
                           )
                         }
                       />
@@ -262,7 +264,7 @@
                           group.nodeId,
                           entry.portKey,
                           entry.dataType,
-                          (event.currentTarget as HTMLInputElement).value
+                          event.currentTarget.value
                         )
                       }
                     />

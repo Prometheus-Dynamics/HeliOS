@@ -24,7 +24,7 @@
     <input
       class="input input-sm w-20 normal-case tracking-normal"
       bind:value={logDownloadWindow}
-      oninput={(event) => onWindowChange((event.currentTarget as HTMLInputElement).value)}
+      oninput={(event) => onWindowChange(event.currentTarget.value)}
     />
     <button
       class="btn btn-xs preset-filled-primary-500 uppercase tracking-[0.3em]"

@@ -10,6 +10,14 @@
 
   const { open, checked, busy, onClose, onToggle, onConfirm }: UpdaterConfirmDialogProps = $props();
 
+  function handleToggle(event: Event): void {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLInputElement)) {
+      return;
+    }
+    onToggle(target.checked);
+  }
+
   export type $$Props = UpdaterConfirmDialogProps;
 </script>
 
@@ -32,7 +40,7 @@
       </div>
 
       <label class="mt-4 flex items-start gap-2 text-xs text-surface-300">
-        <input type="checkbox" checked={checked} onchange={(event) => onToggle((event.currentTarget as HTMLInputElement).checked)} />
+        <input type="checkbox" checked={checked} onchange={handleToggle} />
         <span>I have downloaded any important pipelines or streams.</span>
       </label>
 

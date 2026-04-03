@@ -55,7 +55,7 @@
           step="1"
           value={benchTargetFps}
           oninput={(e) => {
-            const raw = (e.currentTarget as HTMLInputElement).value;
+            const raw = e.currentTarget.value;
             const parsed = raw.trim().length ? Number(raw) : 120;
             benchTargetFps = Number.isFinite(parsed) && parsed > 0 ? parsed : 120;
           }}
@@ -70,7 +70,7 @@
           step="50"
           value={benchSampleMs}
           oninput={(e) => {
-            const raw = (e.currentTarget as HTMLInputElement).value;
+            const raw = e.currentTarget.value;
             const parsed = raw.trim().length ? Number(raw) : 1500;
             benchSampleMs = Number.isFinite(parsed) && parsed >= 250 ? parsed : 1500;
           }}

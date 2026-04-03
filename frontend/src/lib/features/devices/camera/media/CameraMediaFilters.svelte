@@ -25,7 +25,7 @@
       type="search"
       placeholder="Search by filename"
       value={query}
-      oninput={(event) => onQueryChange((event.currentTarget as HTMLInputElement).value)}
+      oninput={(event) => onQueryChange(event.currentTarget.value)}
     />
   </label>
   <label class="flex items-center gap-2 text-micro-tight uppercase tracking-[0.3em] text-surface-500">

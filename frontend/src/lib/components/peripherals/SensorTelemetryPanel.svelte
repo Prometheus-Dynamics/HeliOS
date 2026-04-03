@@ -39,7 +39,7 @@
     <select
       class="input border border-surface-700 bg-surface-950"
       value={sampleRate}
-      onchange={(event) => onSampleRateChange?.((event.currentTarget as HTMLSelectElement).value)}
+      onchange={(event) => onSampleRateChange?.(event.currentTarget.value)}
     >
       <option value="10ms">100 Hz (10ms)</option>
       <option value="20ms">50 Hz (20ms)</option>
@@ -54,7 +54,7 @@
     <input
       type="checkbox"
       checked={streamEnabled}
-      onchange={(event) => onStreamEnabledChange?.((event.currentTarget as HTMLInputElement).checked)}
+      onchange={(event) => onStreamEnabledChange?.(event.currentTarget.checked)}
     />
     <span class="text-surface-200">Enable live telemetry stream</span>
   </label>
@@ -63,7 +63,7 @@
     <input
       type="checkbox"
       checked={orientationLock}
-      onchange={(event) => onOrientationLockChange?.((event.currentTarget as HTMLInputElement).checked)}
+      onchange={(event) => onOrientationLockChange?.(event.currentTarget.checked)}
     />
     <span class="text-surface-200">Lock orientation reference frame</span>
   </label>

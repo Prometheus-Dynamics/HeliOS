@@ -157,6 +157,27 @@
     cancelEditorBootstrap?.();
     cancelEditorBootstrap = null;
   });
+
+  type GraphEditorContextDetail = {
+    type: 'pane' | 'node' | 'palette' | 'port';
+    position: { x: number; y: number };
+    flowPosition: { x: number; y: number };
+    nodeId?: string | null;
+    port?: string | null;
+    direction?: 'input' | 'output';
+  };
+
+  function handleGraphContext(event: CustomEvent<GraphEditorContextDetail>): void {
+    const detail = event.detail;
+    onGraphContext({
+      type: detail.type,
+      position: detail.position,
+      flowPosition: detail.flowPosition,
+      nodeId: detail.nodeId ?? null,
+      port: detail.type === 'port' ? detail.port ?? null : null,
+      direction: detail.type === 'port' ? detail.direction : undefined
+    });
+  }
 </script>
 
 <div class="flex flex-1 min-h-0 min-w-0 flex-col gap-4 xl:flex-row">
@@ -278,24 +299,7 @@
           on:change={(event) => onPlanChange(event.detail.plan)}
           on:select={(event) => onGraphSelect(event.detail)}
           on:edit={(event) => onEnterEmbedded(event.detail.nodeId)}
-          on:context={(event) => {
-            const detail = event.detail as {
-              type: 'pane' | 'node' | 'palette' | 'port';
-              position: { x: number; y: number };
-              flowPosition: { x: number; y: number };
-              nodeId?: string | null;
-              port?: string | null;
-              direction?: 'input' | 'output';
-            };
-            onGraphContext({
-              type: detail.type,
-              position: detail.position,
-              flowPosition: detail.flowPosition,
-              nodeId: detail.nodeId ?? null,
-              port: detail.type === 'port' ? detail.port ?? null : null,
-              direction: detail.type === 'port' ? detail.direction : undefined
-            });
-          }}
+          on:context={handleGraphContext}
           selectedEdgeId={context.graphSelectionEdgeId}
           on:layout={(event) => onGraphLayout(event.detail.nodes)}
           on:runtime={(event) => onRuntime(event.detail)}

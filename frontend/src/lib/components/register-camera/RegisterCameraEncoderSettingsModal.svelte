@@ -41,6 +41,18 @@
     props.encoderSettings.outHeight = scaledSize(src.height, divisor);
   }
 
+  function readNullableInputNumber(event: Event): number | null {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLInputElement)) {
+      return null;
+    }
+    return Number(target.value) || null;
+  }
+
+  function updateEncoderNumber<K extends keyof EncoderSettingsDraft>(key: K, event: Event): void {
+    props.encoderSettings[key] = readNullableInputNumber(event) as EncoderSettingsDraft[K];
+  }
+
 </script>
 
 {#if props.open}
@@ -76,7 +88,7 @@
               max="100"
               step="1"
               value={props.encoderSettings.quality ?? ''}
-              oninput={(e) => (props.encoderSettings.quality = Number((e.currentTarget as HTMLInputElement).value) || null)}
+              oninput={(event) => updateEncoderNumber('quality', event)}
               placeholder="Auto"
             />
           </label>
@@ -90,7 +102,7 @@
                 min="0"
                 step="100000"
                 value={props.encoderSettings.bitrate ?? ''}
-                oninput={(e) => (props.encoderSettings.bitrate = Number((e.currentTarget as HTMLInputElement).value) || null)}
+                oninput={(event) => updateEncoderNumber('bitrate', event)}
                 placeholder="Auto"
               />
             </label>
@@ -102,7 +114,7 @@
                 min="0"
                 step="1"
                 value={props.encoderSettings.gop ?? ''}
-                oninput={(e) => (props.encoderSettings.gop = Number((e.currentTarget as HTMLInputElement).value) || null)}
+                oninput={(event) => updateEncoderNumber('gop', event)}
                 placeholder="Auto"
               />
             </label>
@@ -114,7 +126,7 @@
                 min="0"
                 step="1"
                 value={props.encoderSettings.threadCount ?? ''}
-                oninput={(e) => (props.encoderSettings.threadCount = Number((e.currentTarget as HTMLInputElement).value) || null)}
+                oninput={(event) => updateEncoderNumber('threadCount', event)}
                 placeholder="Auto"
               />
             </label>
@@ -129,7 +141,7 @@
                 min="0"
                 step="1"
                 value={props.encoderSettings.framerateNum ?? ''}
-                oninput={(e) => (props.encoderSettings.framerateNum = Number((e.currentTarget as HTMLInputElement).value) || null)}
+                oninput={(event) => updateEncoderNumber('framerateNum', event)}
                 placeholder="Leave blank"
               />
             </label>
@@ -141,7 +153,7 @@
                 min="0"
                 step="1"
                 value={props.encoderSettings.framerateDen ?? ''}
-                oninput={(e) => (props.encoderSettings.framerateDen = Number((e.currentTarget as HTMLInputElement).value) || null)}
+                oninput={(event) => updateEncoderNumber('framerateDen', event)}
                 placeholder="Leave blank"
               />
             </label>
@@ -173,7 +185,7 @@
                 min="0"
                 step="1"
                 value={props.encoderSettings.outWidth ?? ''}
-                oninput={(e) => (props.encoderSettings.outWidth = Number((e.currentTarget as HTMLInputElement).value) || null)}
+                oninput={(event) => updateEncoderNumber('outWidth', event)}
                 placeholder="Auto"
               />
             </label>
@@ -185,7 +197,7 @@
                 min="0"
                 step="1"
                 value={props.encoderSettings.outHeight ?? ''}
-                oninput={(e) => (props.encoderSettings.outHeight = Number((e.currentTarget as HTMLInputElement).value) || null)}
+                oninput={(event) => updateEncoderNumber('outHeight', event)}
                 placeholder="Auto"
               />
             </label>

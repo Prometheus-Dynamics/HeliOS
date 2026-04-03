@@ -143,7 +143,7 @@
     <label class="flex flex-col gap-1 text-micro uppercase tracking-[0.3em] text-surface-500">
       Value
       {#if entry.variants.length > 0}
-        <select class="input h-9 text-xs" value={draftValue || entry.variants[0] || ''} onchange={(event) => onDraftChange((event.currentTarget as HTMLSelectElement).value)} disabled={constantsReadOnly}>
+        <select class="input h-9 text-xs" value={draftValue || entry.variants[0] || ''} onchange={(event) => onDraftChange(event.currentTarget.value)} disabled={constantsReadOnly}>
           {#each entry.variants as variant (variant)}
             {@const parsedVariant = parseEnumVariant(variant)}
             <option value={variant} title={parsedVariant.value}>{parsedVariant.label}</option>
@@ -169,7 +169,7 @@
             class="h-9 w-16 rounded border border-surface-700 bg-surface-900/70"
             type="color"
             value={draftValue || '#ffffff'}
-            oninput={(event) => onDraftChange((event.currentTarget as HTMLInputElement).value)}
+            oninput={(event) => onDraftChange(event.currentTarget.value)}
             disabled={constantsReadOnly}
           />
           <ColorDropperButton
@@ -188,7 +188,7 @@
             max={sliderMax}
             step={sliderStep}
             value={draftValue || sliderMin}
-            oninput={(event) => onDraftChange((event.currentTarget as HTMLInputElement).value)}
+            oninput={(event) => onDraftChange(event.currentTarget.value)}
             disabled={constantsReadOnly}
           />
           <input
@@ -196,7 +196,7 @@
             type="number"
             placeholder="Value"
             value={draftValue}
-            oninput={(event) => onDraftChange((event.currentTarget as HTMLInputElement).value)}
+            oninput={(event) => onDraftChange(event.currentTarget.value)}
             disabled={constantsReadOnly}
           />
         </div>
@@ -206,7 +206,7 @@
           type="number"
           placeholder="Enter value"
           value={draftValue}
-          oninput={(event) => onDraftChange((event.currentTarget as HTMLInputElement).value)}
+          oninput={(event) => onDraftChange(event.currentTarget.value)}
           disabled={constantsReadOnly}
         />
       {:else}
@@ -214,7 +214,7 @@
           class="input h-9 text-xs"
           placeholder="Enter value"
           value={draftValue}
-          oninput={(event) => onDraftChange((event.currentTarget as HTMLInputElement).value)}
+          oninput={(event) => onDraftChange(event.currentTarget.value)}
           disabled={constantsReadOnly}
         />
       {/if}

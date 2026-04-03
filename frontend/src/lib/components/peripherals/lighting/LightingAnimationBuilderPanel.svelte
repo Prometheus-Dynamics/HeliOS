@@ -75,7 +75,7 @@
           class="h-11 w-full flex-1 cursor-pointer rounded border border-surface-700 bg-surface-900"
           type="color"
           value={animationColor}
-          oninput={(event) => onAnimationColorChange((event.target as HTMLInputElement).value)}
+          oninput={(event) => onAnimationColorChange(event.currentTarget.value)}
         />
         <ColorDropperButton
           title="Pick color from screen"
@@ -92,7 +92,7 @@
         min="0"
         max="255"
         value={animationWhite}
-        oninput={(event) => onAnimationWhiteChange(clampNumber(Number((event.target as HTMLInputElement).value), 0, 255))}
+        oninput={(event) => onAnimationWhiteChange(clampNumber(Number(event.currentTarget.value), 0, 255))}
       />
     </label>
   </div>
@@ -107,7 +107,7 @@
           min="0.1"
           step="0.1"
           value={animationSpeedHz}
-          oninput={(event) => onAnimationSpeedChange(Number((event.target as HTMLInputElement).value))}
+          oninput={(event) => onAnimationSpeedChange(Number(event.currentTarget.value))}
         />
       </label>
       {#if animationKind === 'pulse' || animationKind === 'breathing_rainbow'}
@@ -119,7 +119,7 @@
             min="50"
             step="10"
             value={animationPeriodMs}
-            oninput={(event) => onAnimationPeriodChange(Number((event.target as HTMLInputElement).value))}
+            oninput={(event) => onAnimationPeriodChange(Number(event.currentTarget.value))}
           />
         </label>
         <label class="space-y-1 text-sm">
@@ -130,7 +130,7 @@
             min="0"
             max="255"
             value={animationLow}
-            oninput={(event) => onAnimationLowChange(Number((event.target as HTMLInputElement).value))}
+            oninput={(event) => onAnimationLowChange(Number(event.currentTarget.value))}
           />
         </label>
         <label class="space-y-1 text-sm">
@@ -141,7 +141,7 @@
             min="0"
             max="255"
             value={animationHigh}
-            oninput={(event) => onAnimationHighChange(Number((event.target as HTMLInputElement).value))}
+            oninput={(event) => onAnimationHighChange(Number(event.currentTarget.value))}
           />
         </label>
       {/if}

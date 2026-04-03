@@ -50,7 +50,7 @@
         type="checkbox"
         class="form-checkbox h-4 w-4 border-surface-700 bg-surface-800"
         checked={!!syncDraft}
-        onchange={(event) => onToggleSync((event.currentTarget as HTMLInputElement).checked)}
+        onchange={(event) => onToggleSync(event.currentTarget.checked)}
       />
       <span class="uppercase tracking-[0.22em]">Enable sync</span>
     </label>

@@ -1,5 +1,12 @@
 <script lang="ts">
-  import type { PipelineNodeSyncConfig, PipelineSyncGroupConfig } from '$lib/types/pipeline';
+  import type {
+    PipelineMissingDataPolicy,
+    PipelineNodeSyncConfig,
+    PipelineReadinessPolicy,
+    PipelineSyncDropPolicy,
+    PipelineSyncGroupConfig,
+    PipelineWorkKey
+  } from '$lib/types/pipeline';
 
   type SyncPolicyControlsProps = {
     syncDraft: PipelineNodeSyncConfig;
@@ -32,6 +39,89 @@
   }: SyncPolicyControlsProps = $props();
 
   export type $$Props = SyncPolicyControlsProps;
+
+  function handleTickSourceChange(event: Event): void {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLSelectElement)) return;
+    if (target.value !== 'ports' && target.value !== 'timer') return;
+    onTickSourceChange(target.value);
+  }
+
+  function handleMatchKeyChange(index: number, event: Event): void {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLSelectElement)) return;
+    if (target.value !== 'workId' && target.value !== 'timestamp' && target.value !== 'localId') return;
+    onUpdateGroup(index, (candidate) => {
+      candidate.matchKey = target.value as PipelineWorkKey;
+    });
+  }
+
+  function handleReadinessChange(index: number, event: Event): void {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLSelectElement)) return;
+    if (target.value !== 'allSameKey' && target.value !== 'any') return;
+    onUpdateGroup(index, (candidate) => {
+      candidate.readiness = target.value as PipelineReadinessPolicy;
+    });
+  }
+
+  function handleDropChange(index: number, event: Event): void {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLSelectElement)) return;
+    if (
+      target.value !== 'dropOldest' &&
+      target.value !== 'dropNewest' &&
+      target.value !== 'keepLatest' &&
+      target.value !== 'block'
+    ) {
+      return;
+    }
+    onUpdateGroup(index, (candidate) => {
+      candidate.drop = target.value as PipelineSyncDropPolicy;
+    });
+  }
+
+  function handleStalenessKindChange(index: number, event: Event): void {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLSelectElement)) return;
+    const kind = target.value;
+    if (kind !== 'allowAny' && kind !== 'requireExact' && kind !== 'maxLagCount' && kind !== 'maxLagDuration') {
+      return;
+    }
+    onUpdateGroup(index, (candidate) => {
+      if (kind === 'maxLagCount') {
+        candidate.staleness = {
+          kind,
+          maxDistance:
+            candidate.staleness && 'maxDistance' in candidate.staleness ? candidate.staleness.maxDistance : 3
+        };
+      } else if (kind === 'maxLagDuration') {
+        candidate.staleness = {
+          kind,
+          maxLagMs: candidate.staleness && 'maxLagMs' in candidate.staleness ? candidate.staleness.maxLagMs : 33
+        };
+      } else {
+        candidate.staleness = { kind };
+      }
+    });
+  }
+
+  function handleMissingKindChange(index: number, event: Event): void {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLSelectElement)) return;
+    const kind = target.value;
+    if (kind !== 'allowNone' && kind !== 'skipTick' && kind !== 'wait') return;
+    onUpdateGroup(index, (candidate) => {
+      if (kind === 'wait') {
+        candidate.missing = {
+          kind,
+          timeoutMs: candidate.missing?.kind === 'wait' ? candidate.missing.timeoutMs ?? 10 : 10
+        };
+      } else {
+        candidate.missing = { kind } as PipelineMissingDataPolicy;
+      }
+    });
+  }
 </script>
 
 <div class="grid gap-2 md:grid-cols-2">
@@ -41,7 +131,7 @@
       <select
         class="input h-8 text-xs"
         value={tickSourceKind}
-        onchange={(event) => onTickSourceChange((event.currentTarget as HTMLSelectElement).value as 'ports' | 'timer')}
+        onchange={handleTickSourceChange}
       >
         <option value="ports">Input ports</option>
         <option value="timer">Timer</option>
@@ -53,7 +143,7 @@
           min="1"
           value={tickSourceInterval}
           oninput={(event) =>
-            onTickSourceIntervalChange(Number((event.currentTarget as HTMLInputElement).value) || defaultTimerIntervalMs)}
+            onTickSourceIntervalChange(Number(event.currentTarget.value) || defaultTimerIntervalMs)}
         />
         <span class="text-micro text-surface-400">ms</span>
       {:else}
@@ -73,7 +163,7 @@
         <select
           class="input h-8 text-xs"
           value={primaryGroupSelection ?? ''}
-          onchange={(event) => onPrimaryGroupChange((event.currentTarget as HTMLSelectElement).value)}
+          onchange={(event) => onPrimaryGroupChange(event.currentTarget.value)}
         >
           {#each syncDraft.groups as group (`primary-option-${group.id}`)}
             <option value={group.id}>{group.id}</option>
@@ -104,10 +194,7 @@
             <select
               class="input h-8 text-xs"
               value={group.matchKey}
-              onchange={(event) =>
-                onUpdateGroup(index, (candidate) => {
-                  candidate.matchKey = (event.currentTarget as HTMLSelectElement).value as typeof candidate.matchKey;
-                })}
+              onchange={(event) => handleMatchKeyChange(index, event)}
             >
               <option value="workId">Work ID</option>
               <option value="timestamp">Timestamp</option>
@@ -119,10 +206,7 @@
             <select
               class="input h-8 text-xs"
               value={group.readiness}
-              onchange={(event) =>
-                onUpdateGroup(index, (candidate) => {
-                  candidate.readiness = (event.currentTarget as HTMLSelectElement).value as typeof candidate.readiness;
-                })}
+              onchange={(event) => handleReadinessChange(index, event)}
             >
               <option value="allSameKey">All same key</option>
               <option value="any">Any</option>
@@ -133,10 +217,7 @@
             <select
               class="input h-8 text-xs"
               value={group.drop}
-              onchange={(event) =>
-                onUpdateGroup(index, (candidate) => {
-                  candidate.drop = (event.currentTarget as HTMLSelectElement).value as PipelineSyncGroupConfig['drop'];
-                })}
+              onchange={(event) => handleDropChange(index, event)}
             >
               <option value="dropOldest">Drop oldest</option>
               <option value="dropNewest">Drop newest</option>
@@ -149,30 +230,7 @@
             <select
               class="input h-8 text-xs"
               value={group.staleness?.kind ?? 'allowAny'}
-              onchange={(event) =>
-                onUpdateGroup(index, (candidate) => {
-                  const kind = (event.currentTarget as HTMLSelectElement)
-                    .value as PipelineSyncGroupConfig['staleness']['kind'];
-                  if (kind === 'maxLagCount') {
-                    candidate.staleness = {
-                      kind,
-                      maxDistance:
-                        candidate.staleness && 'maxDistance' in candidate.staleness
-                          ? candidate.staleness.maxDistance
-                          : 3
-                    };
-                  } else if (kind === 'maxLagDuration') {
-                    candidate.staleness = {
-                      kind,
-                      maxLagMs:
-                        candidate.staleness && 'maxLagMs' in candidate.staleness
-                          ? candidate.staleness.maxLagMs
-                          : 33
-                    };
-                  } else {
-                    candidate.staleness = { kind };
-                  }
-                })}
+              onchange={(event) => handleStalenessKindChange(index, event)}
             >
               <option value="allowAny">Allow any</option>
               <option value="requireExact">Require exact</option>
@@ -190,7 +248,7 @@
                     if (candidate.staleness?.kind === 'maxLagCount') {
                       candidate.staleness.maxDistance = Math.max(
                         1,
-                        Number((event.currentTarget as HTMLInputElement).value) || 1
+                        Number(event.currentTarget.value) || 1
                       );
                     }
                   })}
@@ -206,7 +264,7 @@
                     if (candidate.staleness?.kind === 'maxLagDuration') {
                       candidate.staleness.maxLagMs = Math.max(
                         1,
-                        Number((event.currentTarget as HTMLInputElement).value) || 1
+                        Number(event.currentTarget.value) || 1
                       );
                     }
                   })}
@@ -218,20 +276,7 @@
             <select
               class="input h-8 text-xs"
               value={group.missing?.kind ?? 'allowNone'}
-              onchange={(event) =>
-                onUpdateGroup(index, (candidate) => {
-                  const kind = (event.currentTarget as HTMLSelectElement)
-                    .value as PipelineSyncGroupConfig['missing']['kind'];
-                  if (kind === 'wait') {
-                    candidate.missing = {
-                      kind,
-                      timeoutMs:
-                        candidate.missing?.kind === 'wait' ? candidate.missing.timeoutMs ?? 10 : 10
-                    };
-                  } else {
-                    candidate.missing = { kind };
-                  }
-                })}
+              onchange={(event) => handleMissingKindChange(index, event)}
             >
               <option value="allowNone">Allow none</option>
               <option value="skipTick">Skip tick</option>
@@ -248,7 +293,7 @@
                     if (candidate.missing?.kind === 'wait') {
                       candidate.missing.timeoutMs = Math.max(
                         0,
-                        Number((event.currentTarget as HTMLInputElement).value) || 0
+                        Number(event.currentTarget.value) || 0
                       );
                     }
                   })}

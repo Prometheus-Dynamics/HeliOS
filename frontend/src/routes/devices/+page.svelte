@@ -360,6 +360,30 @@
     cameraFilter = 'all';
   }
 
+  function handleSelectPeripheral(peripheral: PeripheralRow | null): void {
+    openPeripheral(peripheral);
+  }
+
+  function handleDownloadManifest(camera: CameraRow): void {
+    void devicesPageSupport.downloadCameraManifest(camera);
+  }
+
+  function handleRequestUnregister(camera: CameraRow): void {
+    devicesPageSupport.requestUnregister(camera);
+  }
+
+  function handleRestoreStreamResources(camera: CameraRow): void {
+    void devicesPageSupport.restoreCameraStreamResources(camera);
+  }
+
+  function handleSessionRefFromCamera(camera: CameraRow): string {
+    return devicesPageSupport.sessionRefFromCamera(camera);
+  }
+
+  function handleIsResourceGuardDegraded(camera: CameraRow): boolean {
+    return isResourceGuardDegraded(camera);
+  }
+
   function clone<T>(value: T): T {
     return JSON.parse(JSON.stringify(value));
   }
@@ -393,15 +417,15 @@
       peripherals={$peripheralItems}
       {peripheralError}
       {peripheralsLoading}
-      onSelectPeripheral={(peripheral) => openPeripheral(peripheral as PeripheralRow | null)}
+      onSelectPeripheral={handleSelectPeripheral}
       onRegisterStream={() => registerCameraModal.set(true)}
       onClearFilters={clearInventoryFilters}
-      onDownloadManifest={(camera) => void devicesPageSupport.downloadCameraManifest(camera as CameraRow)}
-      onRequestUnregister={(camera) => devicesPageSupport.requestUnregister(camera as CameraRow)}
-      onRestoreStreamResources={(camera) => void devicesPageSupport.restoreCameraStreamResources(camera as CameraRow)}
+      onDownloadManifest={handleDownloadManifest}
+      onRequestUnregister={handleRequestUnregister}
+      onRestoreStreamResources={handleRestoreStreamResources}
       actionIsBusy={(id, action) => devicesPageSupport.actionIsBusy(id, action)}
-      sessionRefFromCamera={(camera) => devicesPageSupport.sessionRefFromCamera(camera as CameraRow)}
-      isResourceGuardDegraded={(camera) => isResourceGuardDegraded(camera as CameraRow)}
+      sessionRefFromCamera={handleSessionRefFromCamera}
+      isResourceGuardDegraded={handleIsResourceGuardDegraded}
     />
   </div>
 

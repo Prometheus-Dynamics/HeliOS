@@ -176,7 +176,7 @@
                   class="select select-sm mt-1 w-full"
                   value={boardPaper}
                   onchange={(e) => {
-                    const value = (e.currentTarget as HTMLSelectElement).value;
+                    const value = e.currentTarget.value;
                     if (value === 'auto' || value === 'letter' || value === 'a4' || value === 'custom') boardPaper = value;
                   }}
                 >
@@ -194,7 +194,7 @@
                   value={boardOrientation}
                   disabled={boardPaper === 'custom'}
                   onchange={(e) => {
-                    const value = (e.currentTarget as HTMLSelectElement).value;
+                    const value = e.currentTarget.value;
                     if (value === 'auto' || value === 'portrait' || value === 'landscape') boardOrientation = value;
                   }}
                 >
@@ -236,7 +236,7 @@
                   min="2"
                   step="1"
                   value={calibrationBoard.squaresX}
-                  oninput={(e) => (calibrationBoard.squaresX = Number((e.currentTarget as HTMLInputElement).value) || DEFAULT_BOARD.squaresX)}
+                  oninput={(e) => (calibrationBoard.squaresX = Number(e.currentTarget.value) || DEFAULT_BOARD.squaresX)}
                 />
               </label>
               <label class="text-sm">
@@ -247,7 +247,7 @@
                   min="2"
                   step="1"
                   value={calibrationBoard.squaresY}
-                  oninput={(e) => (calibrationBoard.squaresY = Number((e.currentTarget as HTMLInputElement).value) || DEFAULT_BOARD.squaresY)}
+                  oninput={(e) => (calibrationBoard.squaresY = Number(e.currentTarget.value) || DEFAULT_BOARD.squaresY)}
                 />
               </label>
               <label class="text-sm">
@@ -259,7 +259,7 @@
                   step="0.1"
                   value={calibrationBoard.squareMm}
                   oninput={(e) => {
-                    const next = Number((e.currentTarget as HTMLInputElement).value) || 25;
+                    const next = Number(e.currentTarget.value) || 25;
                     calibrationBoard.squareMm = next;
                     if (!calibrationBoard.markerMm || calibrationBoard.markerMm >= next) {
                       calibrationBoard.markerMm = Math.max(1, Math.round(next * 0.7 * 10) / 10);
@@ -275,7 +275,7 @@
                   min="1"
                   step="0.1"
                   value={calibrationBoard.markerMm}
-                  oninput={(e) => (calibrationBoard.markerMm = Number((e.currentTarget as HTMLInputElement).value) || calibrationBoard.markerMm)}
+                  oninput={(e) => (calibrationBoard.markerMm = Number(e.currentTarget.value) || calibrationBoard.markerMm)}
                 />
               </label>
               <label class="text-sm">
@@ -286,7 +286,7 @@
                   min="0"
                   step="0.5"
                   value={calibrationBoard.marginMm}
-                  oninput={(e) => (calibrationBoard.marginMm = Number((e.currentTarget as HTMLInputElement).value) || DEFAULT_BOARD.marginMm)}
+                  oninput={(e) => (calibrationBoard.marginMm = Number(e.currentTarget.value) || DEFAULT_BOARD.marginMm)}
                 />
               </label>
               <label class="text-sm">
@@ -297,7 +297,7 @@
                   min="72"
                   step="1"
                   value={calibrationBoard.dpi}
-                  oninput={(e) => (calibrationBoard.dpi = Number((e.currentTarget as HTMLInputElement).value) || DEFAULT_BOARD.dpi)}
+                  oninput={(e) => (calibrationBoard.dpi = Number(e.currentTarget.value) || DEFAULT_BOARD.dpi)}
                 />
               </label>
               <label class="text-sm">
@@ -306,7 +306,7 @@
                   class="select select-sm mt-1 w-full"
                   value={calibrationBoard.dictionary || DEFAULT_BOARD.dictionary}
                   onchange={(e) => {
-                    const value = (e.currentTarget as HTMLSelectElement).value;
+                    const value = e.currentTarget.value;
                     calibrationBoard.dictionary = value || DEFAULT_BOARD.dictionary;
                   }}
                 >

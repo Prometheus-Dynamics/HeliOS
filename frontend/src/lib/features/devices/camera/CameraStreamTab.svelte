@@ -381,9 +381,30 @@
     void loadMediaPickerAssets();
   }
 
+  function handleMediaPickerKindClick(option: string): void {
+    if (option === 'all') {
+      updateMediaPickerKind(option);
+      return;
+    }
+    if (!MEDIA_KIND_OPTIONS.includes(option as MediaAsset['kind'])) return;
+    updateMediaPickerKind(option as MediaAsset['kind']);
+  }
+
+  function mediaPickerKindLabel(option: string): string {
+    if (option === 'all') return 'All';
+    return mediaKindLabel(option as MediaAsset['kind']);
+  }
+
   function updateMediaPickerSort(value: 'name' | 'recent'): void {
     mediaPickerSort = value;
     void loadMediaPickerAssets();
+  }
+
+  function handleMediaPickerSortChange(event: Event): void {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLSelectElement)) return;
+    if (target.value !== 'name' && target.value !== 'recent') return;
+    updateMediaPickerSort(target.value);
   }
 
   function handleCameraAliasInput(value: string): void {
@@ -873,7 +894,7 @@
             <input
               type="checkbox"
               checked={Boolean(streamCropGuidesEnabled)}
-              onchange={(event) => (streamCropGuidesEnabled = (event.currentTarget as HTMLInputElement).checked)}
+              onchange={(event) => (streamCropGuidesEnabled = event.currentTarget.checked)}
             />
             Show crop guides in preview
           </label>
@@ -901,8 +922,8 @@
                 max={STREAM_CROP_MAX}
                 step={STREAM_CROP_STEP}
                 value={normalizedStreamCrop[0]}
-                oninput={(event) => updateStreamCropRange('x', 'min', Number((event.currentTarget as HTMLInputElement).value))}
-                onchange={(event) => updateStreamCropRange('x', 'min', Number((event.currentTarget as HTMLInputElement).value), true)}
+                oninput={(event) => updateStreamCropRange('x', 'min', Number(event.currentTarget.value))}
+                onchange={(event) => updateStreamCropRange('x', 'min', Number(event.currentTarget.value), true)}
               />
               <div class="flex-1">
                 <RangeBandSlider
@@ -922,8 +943,8 @@
                 max={STREAM_CROP_MAX}
                 step={STREAM_CROP_STEP}
                 value={normalizedStreamCrop[1]}
-                oninput={(event) => updateStreamCropRange('x', 'max', Number((event.currentTarget as HTMLInputElement).value))}
-                onchange={(event) => updateStreamCropRange('x', 'max', Number((event.currentTarget as HTMLInputElement).value), true)}
+                oninput={(event) => updateStreamCropRange('x', 'max', Number(event.currentTarget.value))}
+                onchange={(event) => updateStreamCropRange('x', 'max', Number(event.currentTarget.value), true)}
               />
             </div>
           </div>
@@ -941,8 +962,8 @@
                 max={STREAM_CROP_MAX}
                 step={STREAM_CROP_STEP}
                 value={normalizedStreamCrop[2]}
-                oninput={(event) => updateStreamCropRange('y', 'min', Number((event.currentTarget as HTMLInputElement).value))}
-                onchange={(event) => updateStreamCropRange('y', 'min', Number((event.currentTarget as HTMLInputElement).value), true)}
+                oninput={(event) => updateStreamCropRange('y', 'min', Number(event.currentTarget.value))}
+                onchange={(event) => updateStreamCropRange('y', 'min', Number(event.currentTarget.value), true)}
               />
               <div class="flex-1">
                 <RangeBandSlider
@@ -962,8 +983,8 @@
                 max={STREAM_CROP_MAX}
                 step={STREAM_CROP_STEP}
                 value={normalizedStreamCrop[3]}
-                oninput={(event) => updateStreamCropRange('y', 'max', Number((event.currentTarget as HTMLInputElement).value))}
-                onchange={(event) => updateStreamCropRange('y', 'max', Number((event.currentTarget as HTMLInputElement).value), true)}
+                oninput={(event) => updateStreamCropRange('y', 'max', Number(event.currentTarget.value))}
+                onchange={(event) => updateStreamCropRange('y', 'max', Number(event.currentTarget.value), true)}
               />
             </div>
           </div>
@@ -987,7 +1008,7 @@
             <input
               type="checkbox"
               checked={Boolean(streamCrosshairEnabled)}
-              onchange={(event) => updateStreamCrosshairEnabled((event.currentTarget as HTMLInputElement).checked)}
+              onchange={(event) => updateStreamCrosshairEnabled(event.currentTarget.checked)}
             />
             Draw crosshair in output
           </label>
@@ -1015,8 +1036,8 @@
                   max={STREAM_CROP_MAX}
                   step={STREAM_CROP_STEP}
                   value={normalizedStreamCrosshair[0]}
-                  oninput={(event) => updateStreamCrosshair('x', Number((event.currentTarget as HTMLInputElement).value))}
-                  onchange={(event) => updateStreamCrosshair('x', Number((event.currentTarget as HTMLInputElement).value), true)}
+                  oninput={(event) => updateStreamCrosshair('x', Number(event.currentTarget.value))}
+                  onchange={(event) => updateStreamCrosshair('x', Number(event.currentTarget.value), true)}
                 />
               </div>
               <input
@@ -1026,8 +1047,8 @@
                 max={STREAM_CROP_MAX}
                 step={STREAM_CROP_STEP}
                 value={normalizedStreamCrosshair[0]}
-                oninput={(event) => updateStreamCrosshair('x', Number((event.currentTarget as HTMLInputElement).value))}
-                onchange={(event) => updateStreamCrosshair('x', Number((event.currentTarget as HTMLInputElement).value), true)}
+                oninput={(event) => updateStreamCrosshair('x', Number(event.currentTarget.value))}
+                onchange={(event) => updateStreamCrosshair('x', Number(event.currentTarget.value), true)}
               />
             </div>
           </div>
@@ -1046,8 +1067,8 @@
                   max={STREAM_CROP_MAX}
                   step={STREAM_CROP_STEP}
                   value={normalizedStreamCrosshair[1]}
-                  oninput={(event) => updateStreamCrosshair('y', Number((event.currentTarget as HTMLInputElement).value))}
-                  onchange={(event) => updateStreamCrosshair('y', Number((event.currentTarget as HTMLInputElement).value), true)}
+                  oninput={(event) => updateStreamCrosshair('y', Number(event.currentTarget.value))}
+                  onchange={(event) => updateStreamCrosshair('y', Number(event.currentTarget.value), true)}
                 />
               </div>
               <input
@@ -1057,8 +1078,8 @@
                 max={STREAM_CROP_MAX}
                 step={STREAM_CROP_STEP}
                 value={normalizedStreamCrosshair[1]}
-                oninput={(event) => updateStreamCrosshair('y', Number((event.currentTarget as HTMLInputElement).value))}
-                onchange={(event) => updateStreamCrosshair('y', Number((event.currentTarget as HTMLInputElement).value), true)}
+                oninput={(event) => updateStreamCrosshair('y', Number(event.currentTarget.value))}
+                onchange={(event) => updateStreamCrosshair('y', Number(event.currentTarget.value), true)}
               />
             </div>
           </div>
@@ -1086,7 +1107,7 @@
         <select
           class="input h-10 w-full"
           value={normalizedStreamOrderingMode}
-          onchange={(event) => updateStreamOrderingMode((event.currentTarget as HTMLSelectElement).value, true)}
+          onchange={(event) => updateStreamOrderingMode(event.currentTarget.value, true)}
         >
           {#each STREAM_ORDERING_MODES as option (option.value)}
             <option value={option.value}>{option.label}</option>
@@ -1145,7 +1166,7 @@
               max="100"
               step="1"
               value={encoderSettings.quality ?? ''}
-              oninput={(e) => (encoderSettings.quality = Number((e.currentTarget as HTMLInputElement).value) || null)}
+              oninput={(e) => (encoderSettings.quality = Number(e.currentTarget.value) || null)}
               placeholder="Auto"
             />
           </label>
@@ -1159,7 +1180,7 @@
                 min="0"
                 step="100000"
                 value={encoderSettings.bitrate ?? ''}
-                oninput={(e) => (encoderSettings.bitrate = Number((e.currentTarget as HTMLInputElement).value) || null)}
+                oninput={(e) => (encoderSettings.bitrate = Number(e.currentTarget.value) || null)}
                 placeholder="4000000"
               />
             </label>
@@ -1171,7 +1192,7 @@
                 min="0"
                 step="1"
                 value={encoderSettings.gop ?? ''}
-                oninput={(e) => (encoderSettings.gop = Number((e.currentTarget as HTMLInputElement).value) || null)}
+                oninput={(e) => (encoderSettings.gop = Number(e.currentTarget.value) || null)}
                 placeholder="Auto"
               />
             </label>
@@ -1183,7 +1204,7 @@
                 min="0"
                 step="1"
                 value={encoderSettings.threadCount ?? ''}
-                oninput={(e) => (encoderSettings.threadCount = Number((e.currentTarget as HTMLInputElement).value) || null)}
+                oninput={(e) => (encoderSettings.threadCount = Number(e.currentTarget.value) || null)}
                 placeholder="Auto"
               />
             </label>
@@ -1214,7 +1235,7 @@
                 min="0"
                 step="1"
                 value={encoderSettings.outWidth ?? ''}
-                oninput={(e) => (encoderSettings.outWidth = Number((e.currentTarget as HTMLInputElement).value) || null)}
+                oninput={(e) => (encoderSettings.outWidth = Number(e.currentTarget.value) || null)}
                 placeholder="Match source"
               />
             </label>
@@ -1226,7 +1247,7 @@
                 min="0"
                 step="1"
                 value={encoderSettings.outHeight ?? ''}
-                oninput={(e) => (encoderSettings.outHeight = Number((e.currentTarget as HTMLInputElement).value) || null)}
+                oninput={(e) => (encoderSettings.outHeight = Number(e.currentTarget.value) || null)}
                 placeholder="Match source"
               />
             </label>
@@ -1276,7 +1297,7 @@
           type="search"
           placeholder="Search media"
           value={mediaPickerQuery}
-          oninput={(e) => updateMediaPickerQuery((e.currentTarget as HTMLInputElement).value)}
+          oninput={(e) => updateMediaPickerQuery(e.currentTarget.value)}
         />
         <button class="btn btn-2xs preset-tonal uppercase tracking-[0.3em]" type="button" onclick={loadMediaPickerAssets}>
           Refresh
@@ -1284,7 +1305,7 @@
         <select
           class="input w-40"
           value={mediaPickerSort}
-          onchange={(event) => updateMediaPickerSort((event.currentTarget as HTMLSelectElement).value as 'name' | 'recent')}
+          onchange={handleMediaPickerSortChange}
         >
           <option value="name">Sort: Name</option>
           <option value="recent">Sort: Recent</option>
@@ -1304,9 +1325,9 @@
               mediaPickerKind === option ? 'preset-filled-primary-500' : 'preset-tonal'
             }`}
             type="button"
-            onclick={() => updateMediaPickerKind(option as 'all' | MediaAsset['kind'])}
+            onclick={() => handleMediaPickerKindClick(option)}
           >
-            {option === 'all' ? 'All' : mediaKindLabel(option as MediaAsset['kind'])}
+            {mediaPickerKindLabel(option)}
           </button>
         {/each}
       </div>

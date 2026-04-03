@@ -91,7 +91,7 @@
           type="search"
           value={controlsQuery}
           placeholder="Exposure, white balance, gain…"
-          oninput={(e) => (controlsQuery = (e.currentTarget as HTMLInputElement).value)}
+          oninput={(e) => (controlsQuery = e.currentTarget.value)}
         />
         {#if hasSearchQuery}
           <button class="btn btn-3xs preset-tonal uppercase tracking-[0.22em]" type="button" onclick={clearSearch}>
@@ -231,7 +231,7 @@
                   value={Number(value ?? 0)}
                   disabled={ctrl.access === 'ReadOnly'}
                   onchange={(e) => {
-                    const next = Number((e.currentTarget as HTMLSelectElement).value);
+                    const next = Number(e.currentTarget.value);
                     controlState = { ...controlState, [ctrl.id]: next };
                     void applyControl(ctrl, next);
                   }}
@@ -258,12 +258,12 @@
                     value={Number(value ?? min ?? 0)}
                     disabled={ctrl.access === 'ReadOnly' || min == null || max == null}
                     oninput={(e) => {
-                      const next = Number((e.currentTarget as HTMLInputElement).value);
+                      const next = Number(e.currentTarget.value);
                       controlState = { ...controlState, [ctrl.id]: next };
                       scheduleControlApply?.(ctrl, next);
                     }}
                     onchange={(e) => {
-                      const next = Number((e.currentTarget as HTMLInputElement).value);
+                      const next = Number(e.currentTarget.value);
                       controlState = { ...controlState, [ctrl.id]: next };
                       void applyControl(ctrl, next, { silent: true });
                     }}
@@ -281,13 +281,13 @@
                     value={value ?? ''}
                     disabled={ctrl.access === 'ReadOnly'}
                     oninput={(e) => {
-                      const raw = (e.currentTarget as HTMLInputElement).value;
+                      const raw = e.currentTarget.value;
                       const next = raw.trim().length ? Number(raw) : null;
                       controlState = { ...controlState, [ctrl.id]: next };
                       scheduleControlApply?.(ctrl, next);
                     }}
                     onchange={(e) => {
-                      const raw = (e.currentTarget as HTMLInputElement).value;
+                      const raw = e.currentTarget.value;
                       const next = raw.trim().length ? Number(raw) : null;
                       controlState = { ...controlState, [ctrl.id]: next };
                       void applyControl(ctrl, next, { silent: true });

@@ -265,6 +265,13 @@
     return `${paperLabel}${suffix}`;
   })());
 
+  function handleIpaChartImageLoad(event: Event): void {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLImageElement)) return;
+    if (!target.naturalWidth || !target.naturalHeight) return;
+    props.setIpaChartNaturalSize({ w: target.naturalWidth, h: target.naturalHeight });
+  }
+
   const boardScalePadMm = 6;
   const boardScaleLabelGapMm = 3.8;
   const boardScaleLenMm = $derived(Math.min(100, Math.max(20, boardLayout.pageWmm - boardScalePadMm * 2)));
@@ -599,11 +606,7 @@
 	                class="block h-auto w-full select-none"
 	                src={apiPath(`/media/${encodeURIComponent(props.ipaChartImage)}`)}
 	                alt={props.ipaChartImage}
-	                onload={(event) => {
-	                  const el = event.currentTarget as HTMLImageElement;
-	                  if (!el?.naturalWidth || !el?.naturalHeight) return;
-	                  props.setIpaChartNaturalSize({ w: el.naturalWidth, h: el.naturalHeight });
-	                }}
+	                onload={handleIpaChartImageLoad}
 	              />
 	            </button>
 	            {#each props.ipaChartCorners as pt, idx (idx)}

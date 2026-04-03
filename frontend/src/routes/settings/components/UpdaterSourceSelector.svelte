@@ -51,6 +51,22 @@
     onImageUrlChange
   }: UpdaterSourceSelectorProps = $props();
 
+  function handleSelectedMediaChange(event: Event): void {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLSelectElement)) {
+      return;
+    }
+    onSelectMedia(target.value);
+  }
+
+  function handleImageUrlInput(event: Event): void {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLInputElement)) {
+      return;
+    }
+    onImageUrlChange(target.value);
+  }
+
   export type $$Props = UpdaterSourceSelectorProps;
 </script>
 
@@ -141,7 +157,7 @@
         <select
           class="input w-full"
           value={selectedMedia}
-          onchange={(event) => onSelectMedia((event.currentTarget as HTMLSelectElement).value)}
+          onchange={handleSelectedMediaChange}
         >
           <option value="">Choose uploaded image…</option>
           {#each filteredMedia as item (item.name)}
@@ -167,7 +183,7 @@
         class="input w-full"
         placeholder="https://… or file:///…"
         value={imageUrlOverride}
-        oninput={(event) => onImageUrlChange((event.currentTarget as HTMLInputElement).value)}
+        oninput={handleImageUrlInput}
       />
       <p class="text-[0.7rem] text-surface-500 break-all">{imageUrlOverride.trim() || '—'}</p>
     </div>

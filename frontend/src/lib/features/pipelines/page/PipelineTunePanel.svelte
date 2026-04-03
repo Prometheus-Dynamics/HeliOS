@@ -657,7 +657,7 @@
                 <select
                   class="mt-1 w-full rounded border border-surface-800/70 bg-surface-900/60 px-3 py-2 text-xs text-surface-200"
                   value={tuneInputCurrentSelection}
-                  onchange={(event) => applyTuneInputSelection((event.currentTarget as HTMLSelectElement).value ?? '')}
+                  onchange={(event) => applyTuneInputSelection(event.currentTarget.value ?? '')}
                 >
                   <option value="raw|raw">Raw stream: raw</option>
                   <option value="raw|undistorted">Raw stream: undistorted</option>

@@ -123,13 +123,13 @@
               min="0"
               max="360"
               value={gradientAngle}
-              oninput={(event) => onUpdateGradientTarget(gradientStops, Number((event.currentTarget as HTMLInputElement).value))}
+              oninput={(event) => onUpdateGradientTarget(gradientStops, Number(event.currentTarget.value))}
             />
             <input
               class="w-20 rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
               type="number"
               value={gradientAngle}
-              oninput={(event) => onUpdateGradientTarget(gradientStops, Number((event.currentTarget as HTMLInputElement).value))}
+              oninput={(event) => onUpdateGradientTarget(gradientStops, Number(event.currentTarget.value))}
             />
           </div>
         </div>
@@ -155,7 +155,7 @@
                 <input
                   class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                   value={selectedGradientStop.color}
-                  oninput={(event) => onUpdateSelectedStopColor((event.currentTarget as HTMLInputElement).value)}
+                  oninput={(event) => onUpdateSelectedStopColor(event.currentTarget.value)}
                 />
               </div>
               <div class="space-y-1">
@@ -166,7 +166,7 @@
                   min="0"
                   max="100"
                   value={selectedGradientStop.position.toFixed(1)}
-                  oninput={(event) => onUpdateSelectedStopPosition(Number((event.currentTarget as HTMLInputElement).value))}
+                  oninput={(event) => onUpdateSelectedStopPosition(Number(event.currentTarget.value))}
                 />
               </div>
             </div>
@@ -214,7 +214,7 @@
           class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
           value={currentPickerColor}
           oninput={(event) => {
-            const value = (event.currentTarget as HTMLInputElement).value;
+            const value = event.currentTarget.value;
             if (!selectedItem) return;
             if (colorPickerTarget === 'thumbBorder') {
               onUpdateSelectedControl({ thumbBorder: value });

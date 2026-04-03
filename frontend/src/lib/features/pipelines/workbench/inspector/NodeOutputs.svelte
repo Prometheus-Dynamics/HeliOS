@@ -240,7 +240,7 @@
         <select
           class="input w-full text-sm"
           value={relinkTarget ?? ''}
-          onchange={(event) => (relinkTarget = (event.currentTarget as HTMLSelectElement).value || null)}
+          onchange={(event) => (relinkTarget = event.currentTarget.value || null)}
         >
           <option value="">Select pipeline…</option>
           {#each relinkOptions as option (option.id)}

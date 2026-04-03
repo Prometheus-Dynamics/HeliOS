@@ -129,6 +129,21 @@
     filtersManuallySet = true;
   }
 
+  function handleSearchInput(event: Event) {
+    const input = event.currentTarget;
+    if (!(input instanceof HTMLInputElement)) return;
+    searchTerm = input.value;
+    dispatch('search', { term: searchTerm });
+  }
+
+  function handleSortChange(event: Event) {
+    const select = event.currentTarget;
+    if (!(select instanceof HTMLSelectElement)) return;
+    const nextSort = select.value;
+    if (nextSort !== 'name-asc' && nextSort !== 'name-desc' && nextSort !== 'id-asc') return;
+    dispatch('changeSort', { sort: nextSort });
+  }
+
 </script>
 
 <div class="flex h-full min-h-0 flex-col gap-4 text-surface-100">
@@ -141,19 +156,14 @@
           placeholder="Name, id, tags, ports..."
           aria-label="Search nodes"
           value={searchTerm}
-          oninput={(event) => {
-            searchTerm = event.currentTarget.value;
-            dispatch('search', { term: searchTerm });
-          }}
+          oninput={handleSearchInput}
         />
       </div>
       <div class="flex items-center gap-1.5 flex-nowrap">
         <select
           class="input h-9 min-w-[144px] text-micro-tight uppercase tracking-[0.2em]"
           bind:value={sort}
-          onchange={(event) =>
-            dispatch('changeSort', { sort: event.currentTarget.value as 'name-asc' | 'name-desc' | 'id-asc' })
-          }
+          onchange={handleSortChange}
         >
           <option value="name-asc">Name A → Z</option>
           <option value="name-desc">Name Z → A</option>

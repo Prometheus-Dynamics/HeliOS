@@ -184,7 +184,7 @@
         value={port.pixelHex}
         bind:this={pixelInput}
         use:pixelColorInputAction={port.handleId}
-        onchange={(event: Event) => handlers.handlePixelColorInput(port, event)}
+        onchange={(event) => handlers.handlePixelColorInput(port, event)}
       />
     </div>
   {:else}

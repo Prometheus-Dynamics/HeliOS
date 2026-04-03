@@ -756,6 +756,14 @@
     simplePipelineSource = 'none';
   }
 
+  function handleSimpleAttachSelectionEvent(event: Event): void {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLSelectElement)) {
+      return;
+    }
+    handleSimpleAttachSelection(target.value);
+  }
+
   function resolveSimpleMode(backend: ProbedBackend | null): Mode | null {
     const matches = (backend?.descriptor?.modes ?? []).filter((mode) => modeMatchesSimpleKind(mode, simpleStreamKind));
     if (!matches.length) return null;
@@ -1220,7 +1228,7 @@
                   id="simple-stream-attach"
                   class="select w-full bg-surface-950"
                   value={simpleAttachSelection}
-                  onchange={(event) => handleSimpleAttachSelection((event.currentTarget as HTMLSelectElement).value)}
+                  onchange={handleSimpleAttachSelectionEvent}
                 >
                   <option value="none">None (raw stream)</option>
                   {#if availablePipelines.length}

@@ -373,7 +373,7 @@
             class="h-4 w-4 accent-primary-400"
             checked={form.invert_pwm}
             onchange={(event) => {
-              form = { ...form, invert_pwm: (event.target as HTMLInputElement).checked };
+              form = { ...form, invert_pwm: event.currentTarget.checked };
               markDirty();
             }}
           />
@@ -417,7 +417,7 @@
               max="100"
               placeholder="Auto curve"
               value={manualInput}
-              oninput={(event) => setManual((event.target as HTMLInputElement).value)}
+              oninput={(event) => setManual(event.currentTarget.value)}
             />
             <input
               class="range range-primary"
@@ -426,7 +426,7 @@
               max="100"
               step="1"
               value={manualInput || '0'}
-              oninput={(event) => setManual((event.target as HTMLInputElement).value)}
+              oninput={(event) => setManual(event.currentTarget.value)}
             />
           </div>
           <p class="text-xs text-surface-500">Leave blank to follow the curve.</p>
@@ -471,7 +471,7 @@
                     max="120"
                     step="0.5"
                     value={point.temp_c}
-                    oninput={(event) => updatePoint(idx, 'temp_c', Number((event.target as HTMLInputElement).value))}
+                    oninput={(event) => updatePoint(idx, 'temp_c', Number(event.currentTarget.value))}
                   />
                 </td>
                 <td class="px-2 py-2">
@@ -481,7 +481,7 @@
                     min={form.min_percent}
                     max={form.max_percent}
                     value={point.percent}
-                    oninput={(event) => updatePoint(idx, 'percent', Number((event.target as HTMLInputElement).value))}
+                    oninput={(event) => updatePoint(idx, 'percent', Number(event.currentTarget.value))}
                   />
                 </td>
                 <td class="px-2 py-2 text-right">

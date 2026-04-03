@@ -82,6 +82,22 @@
     dirty = true;
   }
 
+  function handleUsbAToggle(event: Event): void {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) {
+      return;
+    }
+    toggleField('usb_a_enabled', target.checked);
+  }
+
+  function handleUsbCToggle(event: Event): void {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) {
+      return;
+    }
+    toggleField('usb_c_enabled', target.checked);
+  }
+
   async function saveUsbPower(): Promise<void> {
     busy = true;
     status = null;
@@ -149,7 +165,7 @@
             type="checkbox"
             checked={form.usb_a_enabled}
             disabled={controlsDisabled || !hasUsbAGpio}
-            onchange={(event) => toggleField('usb_a_enabled', (event.target as HTMLInputElement).checked)}
+            onchange={handleUsbAToggle}
           />
           <span class="text-xs uppercase tracking-[0.3em] text-surface-500">Power enabled</span>
         </label>
@@ -163,7 +179,7 @@
             type="checkbox"
             checked={form.usb_c_enabled}
             disabled={controlsDisabled || !hasUsbCGpio}
-            onchange={(event) => toggleField('usb_c_enabled', (event.target as HTMLInputElement).checked)}
+            onchange={handleUsbCToggle}
           />
           <span class="text-xs uppercase tracking-[0.3em] text-surface-500">Power enabled</span>
         </label>

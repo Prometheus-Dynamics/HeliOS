@@ -125,7 +125,7 @@
                 min="1"
                 max="6"
                 value={rows}
-                onchange={(event) => onSetDimensions(Number((event.currentTarget as HTMLInputElement).value), columns)}
+                onchange={(event) => onSetDimensions(Number(event.currentTarget.value), columns)}
               />
             </label>
             <label class="text-sm">
@@ -136,7 +136,7 @@
                 min="1"
                 max="6"
                 value={columns}
-                onchange={(event) => onSetDimensions(rows, Number((event.currentTarget as HTMLInputElement).value))}
+                onchange={(event) => onSetDimensions(rows, Number(event.currentTarget.value))}
               />
             </label>
           </div>

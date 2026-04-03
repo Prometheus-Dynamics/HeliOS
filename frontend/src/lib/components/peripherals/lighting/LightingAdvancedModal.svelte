@@ -142,7 +142,7 @@
             max={maxFreqKhz}
             step="1"
             value={frequencyKhz}
-            oninput={(event) => onFrequencyInput(Number((event.target as HTMLInputElement).value))}
+            oninput={(event) => onFrequencyInput(Number(event.currentTarget.value))}
           />
         </label>
         <label class="space-y-1 text-sm">
@@ -164,7 +164,7 @@
               <select
                 class="input w-full"
                 value={resolveDefaultAnimationForEvent(eventOption.key)}
-                onchange={(event) => onDefaultAnimationChange(eventOption.key, (event.target as HTMLSelectElement).value)}
+                onchange={(event) => onDefaultAnimationChange(eventOption.key, event.currentTarget.value)}
               >
                 <option value="">Built-in default</option>
                 {#each defaultAnimationNameOptions as animationName (animationName)}

@@ -81,6 +81,12 @@
     imageEdit = { ...imageEdit, rotateDegrees: event.detail };
   }
 
+  function handleImagePreviewError(event: Event, fallbackSrc: string): void {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLImageElement)) return;
+    target.src = fallbackSrc;
+  }
+
   function handleVideoStartChange(value: string) {
     videoEdit = { ...videoEdit, startMs: Number(value) };
   }
@@ -155,7 +161,7 @@
                 class="block h-auto w-full"
                 src={assetPreviewSrc}
                 alt={asset.name}
-                onerror={(event) => ((event.currentTarget as HTMLImageElement).src = assetOriginalSrc)}
+                onerror={(event) => handleImagePreviewError(event, assetOriginalSrc)}
               />
             </div>
             <button class="btn btn-3xs mt-3 preset-outline uppercase tracking-[0.3em]" type="button" onclick={() => openAsset(assetOriginalSrc)}>
@@ -232,8 +238,8 @@
       <div class="rounded border border-surface-800/60 bg-surface-900/40 p-3 space-y-2">
         <p class="text-xs uppercase tracking-[0.3em] text-surface-500">Clip range (ms)</p>
         <div class="grid grid-cols-2 gap-2">
-          <input class="input" type="number" placeholder="Start" value={videoEdit.startMs} oninput={(event) => handleVideoStartChange((event.target as HTMLInputElement).value)} />
-          <input class="input" type="number" placeholder="End" value={videoEdit.endMs} oninput={(event) => handleVideoEndChange((event.target as HTMLInputElement).value)} />
+          <input class="input" type="number" placeholder="Start" value={videoEdit.startMs} oninput={(event) => handleVideoStartChange(event.currentTarget.value)} />
+          <input class="input" type="number" placeholder="End" value={videoEdit.endMs} oninput={(event) => handleVideoEndChange(event.currentTarget.value)} />
         </div>
         <button class="btn btn-3xs preset-filled-primary-500 uppercase tracking-[0.3em]" type="button" onclick={onSubmitVideoEdits}>
           Save clip

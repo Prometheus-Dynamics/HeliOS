@@ -208,6 +208,47 @@
     const nextTabs = item.tabs.filter((_, i) => i !== tabIndex);
     updateTabs(index, { tabs: nextTabs });
   }
+
+  function isControlItem(item: PipelineUiItem): item is PipelineUiControl {
+    return (
+      item.type === 'slider' ||
+      item.type === 'dual_slider' ||
+      item.type === 'select' ||
+      item.type === 'toggle' ||
+      item.type === 'input' ||
+      item.type === 'color' ||
+      item.type === 'hsv' ||
+      item.type === 'hsv_range'
+    );
+  }
+
+  function controlItemOf(item: PipelineUiItem): PipelineUiControl {
+    return item as PipelineUiControl;
+  }
+
+  function controlTitleSuffix(item: PipelineUiItem): string {
+    if (!isControlItem(item) || !item.label) return '';
+    return `· ${item.label}`;
+  }
+
+  function rangeBindValue(bind: PipelineUiControl['bind']): { min: string; max: string } {
+    if (
+      bind &&
+      typeof bind === 'object' &&
+      'min' in bind &&
+      'max' in bind &&
+      typeof bind.min === 'string' &&
+      typeof bind.max === 'string'
+    ) {
+      return bind;
+    }
+    return { min: '', max: '' };
+  }
+
+  function parseHsvRangeMode(value: string): 'include' | 'exclude' | null {
+    if (value === 'include' || value === 'exclude') return value;
+    return null;
+  }
 </script>
 
 <div class="ui-builder-list space-y-2">
@@ -230,7 +271,7 @@
       <div class="flex items-center justify-between gap-2">
         <div class="min-w-0">
           <p class="truncate text-xs font-semibold text-surface-100">
-            {item.type} {item.type === 'title' || item.type === 'text' ? '' : ('label' in item ? `· ${(item as PipelineUiControl).label}` : '')}
+            {item.type} {item.type === 'title' || item.type === 'text' ? '' : controlTitleSuffix(item)}
           </p>
           {#if item.id}
             <p class="truncate text-micro-tight text-surface-600">{item.id}</p>
@@ -253,20 +294,20 @@
             <input
               class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
               value={item.text}
-              oninput={(event) => updateItem(index, { text: (event.currentTarget as HTMLInputElement).value })}
+              oninput={(event) => updateItem(index, { text: event.currentTarget.value })}
             />
           {:else if item.type === 'group'}
             <input
               class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
               placeholder="Group title"
               value={item.title}
-              oninput={(event) => updateGroup(index, { title: (event.currentTarget as HTMLInputElement).value })}
+              oninput={(event) => updateGroup(index, { title: event.currentTarget.value })}
             />
             <input
               class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
               placeholder="Description"
               value={item.description ?? ''}
-              oninput={(event) => updateGroup(index, { description: (event.currentTarget as HTMLInputElement).value })}
+              oninput={(event) => updateGroup(index, { description: event.currentTarget.value })}
             />
             <Self
               items={item.items}
@@ -277,19 +318,19 @@
               class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
               placeholder="Accordion title"
               value={item.title}
-              oninput={(event) => updateAccordion(index, { title: (event.currentTarget as HTMLInputElement).value })}
+              oninput={(event) => updateAccordion(index, { title: event.currentTarget.value })}
             />
             <input
               class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
               placeholder="Description"
               value={item.description ?? ''}
-              oninput={(event) => updateAccordion(index, { description: (event.currentTarget as HTMLInputElement).value })}
+              oninput={(event) => updateAccordion(index, { description: event.currentTarget.value })}
             />
             <label class="flex items-center gap-2 text-micro-tight text-surface-400">
               <input
                 type="checkbox"
                 checked={item.defaultOpen ?? false}
-                onchange={(event) => updateAccordion(index, { defaultOpen: (event.currentTarget as HTMLInputElement).checked })}
+                onchange={(event) => updateAccordion(index, { defaultOpen: event.currentTarget.checked })}
               />
               Default open
             </label>
@@ -302,13 +343,13 @@
               class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
               placeholder="Stack title"
               value={item.title ?? ''}
-              oninput={(event) => updateStack(index, { title: (event.currentTarget as HTMLInputElement).value })}
+              oninput={(event) => updateStack(index, { title: event.currentTarget.value })}
             />
             <input
               class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
               placeholder="Description"
               value={item.description ?? ''}
-              oninput={(event) => updateStack(index, { description: (event.currentTarget as HTMLInputElement).value })}
+              oninput={(event) => updateStack(index, { description: event.currentTarget.value })}
             />
             <Self
               items={item.items}
@@ -319,13 +360,13 @@
               class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
               placeholder="Tabs title"
               value={item.title ?? ''}
-              oninput={(event) => updateTabs(index, { title: (event.currentTarget as HTMLInputElement).value })}
+              oninput={(event) => updateTabs(index, { title: event.currentTarget.value })}
             />
             <input
               class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
               placeholder="Description"
               value={item.description ?? ''}
-              oninput={(event) => updateTabs(index, { description: (event.currentTarget as HTMLInputElement).value })}
+              oninput={(event) => updateTabs(index, { description: event.currentTarget.value })}
             />
             <div class="flex flex-wrap gap-2">
               <button class="btn btn-3xs preset-outline" type="button" onclick={() => addTab(index)}>+ Tab</button>
@@ -341,7 +382,7 @@
                         value={tab.title}
                         oninput={(event) => {
                           const nextTabs = item.tabs.map((entry, i) =>
-                            i === tabIndex ? { ...entry, title: (event.currentTarget as HTMLInputElement).value } : entry
+                            i === tabIndex ? { ...entry, title: event.currentTarget.value } : entry
                           );
                           updateTabList(index, nextTabs);
                         }}
@@ -364,40 +405,36 @@
               {/each}
             </div>
           {:else if item.type === 'slider' || item.type === 'dual_slider' || item.type === 'select' || item.type === 'toggle' || item.type === 'input' || item.type === 'color' || item.type === 'hsv' || item.type === 'hsv_range'}
+            {@const controlItem = controlItemOf(item)}
             <input
               class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
               placeholder="Label"
-              value={(item as PipelineUiControl).label}
-              oninput={(event) => updateControl(index, { label: (event.currentTarget as HTMLInputElement).value })}
+              value={controlItem.label}
+              oninput={(event) => updateControl(index, { label: event.currentTarget.value })}
             />
             <input
               class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
               placeholder="Bind (node.port or leave blank)"
-              value={typeof (item as PipelineUiControl).bind === 'string' ? ((item as PipelineUiControl).bind as string) : ''}
-              oninput={(event) => updateControl(index, { bind: (event.currentTarget as HTMLInputElement).value })}
+              value={typeof controlItem.bind === 'string' ? controlItem.bind : ''}
+              oninput={(event) => updateControl(index, { bind: event.currentTarget.value })}
             />
             {#if item.type === 'dual_slider'}
+              {@const dualBind = rangeBindValue(controlItem.bind)}
               <div class="grid grid-cols-2 gap-2">
                 <input
                   class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                   placeholder="Bind min (node.port)"
-                  value={typeof (item as PipelineUiControl).bind === 'object' ? ((item as PipelineUiControl).bind as { min: string; max: string }).min : ''}
+                  value={dualBind.min}
                   oninput={(event) => {
-                    const current = typeof (item as PipelineUiControl).bind === 'object'
-                      ? ((item as PipelineUiControl).bind as { min: string; max: string })
-                      : { min: '', max: '' };
-                    updateControl(index, { bind: { ...current, min: (event.currentTarget as HTMLInputElement).value } });
+                    updateControl(index, { bind: { ...dualBind, min: event.currentTarget.value } });
                   }}
                 />
                 <input
                   class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                   placeholder="Bind max (node.port)"
-                  value={typeof (item as PipelineUiControl).bind === 'object' ? ((item as PipelineUiControl).bind as { min: string; max: string }).max : ''}
+                  value={dualBind.max}
                   oninput={(event) => {
-                    const current = typeof (item as PipelineUiControl).bind === 'object'
-                      ? ((item as PipelineUiControl).bind as { min: string; max: string })
-                      : { min: '', max: '' };
-                    updateControl(index, { bind: { ...current, max: (event.currentTarget as HTMLInputElement).value } });
+                    updateControl(index, { bind: { ...dualBind, max: event.currentTarget.value } });
                   }}
                 />
               </div>
@@ -405,17 +442,17 @@
             <input
               class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
               placeholder="Help text"
-              value={(item as PipelineUiControl).help ?? ''}
-              oninput={(event) => updateControl(index, { help: (event.currentTarget as HTMLInputElement).value })}
+              value={controlItem.help ?? ''}
+              oninput={(event) => updateControl(index, { help: event.currentTarget.value })}
             />
             {#if item.type === 'select'}
               <input
                 class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                 placeholder="Options (comma separated)"
-                value={((item as PipelineUiControl).options ?? []).join(', ')}
+                value={(controlItem.options ?? []).join(', ')}
                 oninput={(event) =>
                   updateControl(index, {
-                    options: (event.currentTarget as HTMLInputElement).value.split(',').map((value) => value.trim()).filter(Boolean)
+                    options: event.currentTarget.value.split(',').map((value) => value.trim()).filter(Boolean)
                   })
                 }
               />
@@ -425,20 +462,20 @@
                 <input
                   class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                   placeholder="Min"
-                  value={(item as PipelineUiControl).min ?? ''}
-                  oninput={(event) => updateControl(index, { min: Number((event.currentTarget as HTMLInputElement).value) })}
+                  value={controlItem.min ?? ''}
+                  oninput={(event) => updateControl(index, { min: Number(event.currentTarget.value) })}
                 />
                 <input
                   class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                   placeholder="Max"
-                  value={(item as PipelineUiControl).max ?? ''}
-                  oninput={(event) => updateControl(index, { max: Number((event.currentTarget as HTMLInputElement).value) })}
+                  value={controlItem.max ?? ''}
+                  oninput={(event) => updateControl(index, { max: Number(event.currentTarget.value) })}
                 />
                 <input
                   class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                   placeholder="Step"
-                  value={(item as PipelineUiControl).step ?? ''}
-                  oninput={(event) => updateControl(index, { step: Number((event.currentTarget as HTMLInputElement).value) })}
+                  value={controlItem.step ?? ''}
+                  oninput={(event) => updateControl(index, { step: Number(event.currentTarget.value) })}
                 />
               </div>
             {/if}
@@ -447,19 +484,19 @@
                 <input
                   class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                   placeholder="Default min"
-                  value={Array.isArray((item as PipelineUiControl).default) ? (item as PipelineUiControl).default?.[0] ?? '' : ''}
+                  value={Array.isArray(controlItem.default) ? controlItem.default?.[0] ?? '' : ''}
                   oninput={(event) => {
-                    const current = Array.isArray((item as PipelineUiControl).default) ? (item as PipelineUiControl).default ?? [0, 0] : [0, 0];
-                    updateControl(index, { default: [Number((event.currentTarget as HTMLInputElement).value), Number(current[1] ?? 0)] });
+                    const current = Array.isArray(controlItem.default) ? controlItem.default ?? [0, 0] : [0, 0];
+                    updateControl(index, { default: [Number(event.currentTarget.value), Number(current[1] ?? 0)] });
                   }}
                 />
                 <input
                   class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                   placeholder="Default max"
-                  value={Array.isArray((item as PipelineUiControl).default) ? (item as PipelineUiControl).default?.[1] ?? '' : ''}
+                  value={Array.isArray(controlItem.default) ? controlItem.default?.[1] ?? '' : ''}
                   oninput={(event) => {
-                    const current = Array.isArray((item as PipelineUiControl).default) ? (item as PipelineUiControl).default ?? [0, 0] : [0, 0];
-                    updateControl(index, { default: [Number(current[0] ?? 0), Number((event.currentTarget as HTMLInputElement).value)] });
+                    const current = Array.isArray(controlItem.default) ? controlItem.default ?? [0, 0] : [0, 0];
+                    updateControl(index, { default: [Number(current[0] ?? 0), Number(event.currentTarget.value)] });
                   }}
                 />
               </div>
@@ -467,42 +504,42 @@
               <input
                 class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                 placeholder="Default value"
-                value={(item as PipelineUiControl).default ?? ''}
-                oninput={(event) => updateControl(index, { default: (event.currentTarget as HTMLInputElement).value })}
+                value={controlItem.default ?? ''}
+                oninput={(event) => updateControl(index, { default: event.currentTarget.value })}
               />
             {/if}
             <div class="grid grid-cols-2 gap-2">
               <input
                 class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                 placeholder="Track gradient"
-                value={(item as PipelineUiControl).trackGradient ?? ''}
-                oninput={(event) => updateControl(index, { trackGradient: (event.currentTarget as HTMLInputElement).value })}
+                value={controlItem.trackGradient ?? ''}
+                oninput={(event) => updateControl(index, { trackGradient: event.currentTarget.value })}
               />
               <input
                 class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                 placeholder="Track fill"
-                value={(item as PipelineUiControl).trackFill ?? ''}
-                oninput={(event) => updateControl(index, { trackFill: (event.currentTarget as HTMLInputElement).value })}
+                value={controlItem.trackFill ?? ''}
+                oninput={(event) => updateControl(index, { trackFill: event.currentTarget.value })}
               />
             </div>
             <div class="grid grid-cols-3 gap-2">
               <input
                 class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                 placeholder="Thumb fill"
-                value={(item as PipelineUiControl).thumbFill ?? ''}
-                oninput={(event) => updateControl(index, { thumbFill: (event.currentTarget as HTMLInputElement).value })}
+                value={controlItem.thumbFill ?? ''}
+                oninput={(event) => updateControl(index, { thumbFill: event.currentTarget.value })}
               />
               <input
                 class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                 placeholder="Thumb border"
-                value={(item as PipelineUiControl).thumbBorder ?? ''}
-                oninput={(event) => updateControl(index, { thumbBorder: (event.currentTarget as HTMLInputElement).value })}
+                value={controlItem.thumbBorder ?? ''}
+                oninput={(event) => updateControl(index, { thumbBorder: event.currentTarget.value })}
               />
               <input
                 class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                 placeholder="Border width"
-                value={(item as PipelineUiControl).thumbBorderWidth ?? ''}
-                oninput={(event) => updateControl(index, { thumbBorderWidth: Number((event.currentTarget as HTMLInputElement).value) })}
+                value={controlItem.thumbBorderWidth ?? ''}
+                oninput={(event) => updateControl(index, { thumbBorderWidth: Number(event.currentTarget.value) })}
               />
             </div>
             {#if item.type === 'hsv'}
@@ -510,28 +547,28 @@
                 <input
                   class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                   placeholder="H"
-                  value={(item as PipelineUiControl).hsvDefaults?.h ?? ''}
+                  value={controlItem.hsvDefaults?.h ?? ''}
                   oninput={(event) => {
-                    const current = (item as PipelineUiControl).hsvDefaults ?? { h: 120, s: 0.7, v: 0.8 };
-                    updateControl(index, { hsvDefaults: { ...current, h: Number((event.currentTarget as HTMLInputElement).value) } });
+                    const current = controlItem.hsvDefaults ?? { h: 120, s: 0.7, v: 0.8 };
+                    updateControl(index, { hsvDefaults: { ...current, h: Number(event.currentTarget.value) } });
                   }}
                 />
                 <input
                   class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                   placeholder="S"
-                  value={(item as PipelineUiControl).hsvDefaults?.s ?? ''}
+                  value={controlItem.hsvDefaults?.s ?? ''}
                   oninput={(event) => {
-                    const current = (item as PipelineUiControl).hsvDefaults ?? { h: 120, s: 0.7, v: 0.8 };
-                    updateControl(index, { hsvDefaults: { ...current, s: Number((event.currentTarget as HTMLInputElement).value) } });
+                    const current = controlItem.hsvDefaults ?? { h: 120, s: 0.7, v: 0.8 };
+                    updateControl(index, { hsvDefaults: { ...current, s: Number(event.currentTarget.value) } });
                   }}
                 />
                 <input
                   class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                   placeholder="V"
-                  value={(item as PipelineUiControl).hsvDefaults?.v ?? ''}
+                  value={controlItem.hsvDefaults?.v ?? ''}
                   oninput={(event) => {
-                    const current = (item as PipelineUiControl).hsvDefaults ?? { h: 120, s: 0.7, v: 0.8 };
-                    updateControl(index, { hsvDefaults: { ...current, v: Number((event.currentTarget as HTMLInputElement).value) } });
+                    const current = controlItem.hsvDefaults ?? { h: 120, s: 0.7, v: 0.8 };
+                    updateControl(index, { hsvDefaults: { ...current, v: Number(event.currentTarget.value) } });
                   }}
                 />
               </div>
@@ -541,16 +578,20 @@
                 <input
                   class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                   placeholder="Mode include/exclude"
-                  value={(item as PipelineUiControl).hsvRangeMode ?? 'include'}
-                  oninput={(event) => updateControl(index, { hsvRangeMode: (event.currentTarget as HTMLInputElement).value as 'include' | 'exclude' })}
+                  value={controlItem.hsvRangeMode ?? 'include'}
+                  oninput={(event) => {
+                    const value = parseHsvRangeMode(event.currentTarget.value);
+                    if (!value) return;
+                    updateControl(index, { hsvRangeMode: value });
+                  }}
                 />
                 <input
                   class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                   placeholder="H range (min,max)"
-                  value={(item as PipelineUiControl).hsvRangeDefaults?.h?.join(',') ?? ''}
+                  value={controlItem.hsvRangeDefaults?.h?.join(',') ?? ''}
                   oninput={(event) => {
-                    const current = (item as PipelineUiControl).hsvRangeDefaults ?? { h: [0, 360], s: [0, 1], v: [0, 1] };
-                    const parts = (event.currentTarget as HTMLInputElement).value.split(',').map((val) => Number(val.trim()));
+                    const current = controlItem.hsvRangeDefaults ?? { h: [0, 360], s: [0, 1], v: [0, 1] };
+                    const parts = event.currentTarget.value.split(',').map((val) => Number(val.trim()));
                     updateControl(index, { hsvRangeDefaults: { ...current, h: [parts[0] ?? 0, parts[1] ?? 360] } });
                   }}
                 />

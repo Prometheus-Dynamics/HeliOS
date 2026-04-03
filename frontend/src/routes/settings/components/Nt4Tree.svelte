@@ -54,8 +54,8 @@
               nodes={node.children ?? []}
               selectedTopic={selectedTopic}
               openFolders={openFolders}
-              toggleFolder={(path: string) => toggle(path)}
-              selectTopic={(topic: string) => select(topic)}
+              toggleFolder={(path) => toggle(path)}
+              selectTopic={(topic) => select(topic)}
               depth={depth + 1}
             />
           </div>

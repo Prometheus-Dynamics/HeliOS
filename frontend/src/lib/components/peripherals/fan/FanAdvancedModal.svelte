@@ -63,7 +63,7 @@
 
     <div class="grid gap-3">
       <label class="flex items-center gap-3 text-sm">
-        <input type="checkbox" class="h-4 w-4 accent-primary-400" checked={form.enabled} onchange={(e) => onSetEnabled((e.target as HTMLInputElement).checked)} />
+        <input type="checkbox" class="h-4 w-4 accent-primary-400" checked={form.enabled} onchange={(e) => onSetEnabled(e.currentTarget.checked)} />
         <div>
           <p class="text-xs uppercase tracking-[0.3em] text-surface-500">Enable fan loop</p>
           <p class="text-xs text-surface-500">Stops writes when disabled.</p>
@@ -79,7 +79,7 @@
           class="h-4 w-4 accent-primary-400"
           checked={form.invert_pwm}
           onchange={(e) => {
-            form = { ...form, invert_pwm: (e.target as HTMLInputElement).checked };
+            form = { ...form, invert_pwm: e.currentTarget.checked };
             onDirty();
           }}
         />

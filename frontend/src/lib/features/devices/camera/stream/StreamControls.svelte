@@ -89,7 +89,7 @@
         <select
           class="control-input w-full rounded-md border border-surface-700 bg-surface-900/70 px-3"
           value={decoderEnabled ? decoderImpl ?? '' : ''}
-          onchange={(event) => onDecoderSelect((event.currentTarget as HTMLSelectElement).value)}
+          onchange={(event) => onDecoderSelect(event.currentTarget.value)}
         >
           <option value="">Disabled</option>
           {#each decoders as dec, idx (`dec-${dec.kind}-${dec.implementation}-${idx}`)}
@@ -105,7 +105,7 @@
           min="0"
           step="0.1"
           value={decoderFpsLimit ?? ''}
-          oninput={(e) => onDecoderFpsInput((e.currentTarget as HTMLInputElement).value)}
+          oninput={(e) => onDecoderFpsInput(e.currentTarget.value)}
           placeholder="Off"
           disabled={!decoderEnabled}
         />
@@ -118,7 +118,7 @@
         <select
           class="control-input w-full rounded-md border border-surface-700 bg-surface-900/70 px-3"
           value={rotationSelectionValue}
-          onchange={(event) => onRotationChange(Number((event.currentTarget as HTMLSelectElement).value))}
+          onchange={(event) => onRotationChange(Number(event.currentTarget.value))}
           disabled={!decoderEnabled}
         >
           {#if rotationHasCustom}
@@ -137,7 +137,7 @@
             class="h-4 w-4"
             type="checkbox"
             checked={decoderMirrorHorizontal}
-            onchange={(event) => onMirrorChange((event.currentTarget as HTMLInputElement).checked)}
+            onchange={(event) => onMirrorChange(event.currentTarget.checked)}
             disabled={!decoderEnabled}
           />
           <span class="text-xs text-surface-400">Horizontal</span>
@@ -152,7 +152,7 @@
         <select
           class="control-input w-full rounded-md border border-surface-700 bg-surface-900/70 px-3"
           value={encoderEnabled ? encoderImpl ?? '' : ''}
-          onchange={(event) => onEncoderSelect((event.currentTarget as HTMLSelectElement).value)}
+          onchange={(event) => onEncoderSelect(event.currentTarget.value)}
         >
           <option value="">Disabled</option>
           {#each encoders as enc, idx (`enc-${enc.kind}-${enc.implementation}-${idx}`)}
@@ -168,7 +168,7 @@
           min="0"
           step="0.1"
           value={encoderFpsLimit ?? ''}
-          oninput={(e) => onEncoderFpsInput((e.currentTarget as HTMLInputElement).value)}
+          oninput={(e) => onEncoderFpsInput(e.currentTarget.value)}
           placeholder="Off"
           disabled={!encoderEnabled}
         />
@@ -198,7 +198,7 @@
           type="number"
           min="1"
           value={hostBuffer}
-          oninput={(e) => onHostBufferInput((e.currentTarget as HTMLInputElement).value)}
+          oninput={(e) => onHostBufferInput(e.currentTarget.value)}
         />
       </label>
       <label class="control-field text-sm">
@@ -210,7 +210,7 @@
           max="100"
           step="1"
           value={previewJpegQuality ?? 65}
-          oninput={(e) => onPreviewJpegQualityInput((e.currentTarget as HTMLInputElement).value)}
+          oninput={(e) => onPreviewJpegQualityInput(e.currentTarget.value)}
         />
       </label>
     </div>
@@ -222,7 +222,7 @@
         <input
           type="checkbox"
           checked={shadowRecorderEnabled}
-          onchange={(event) => onShadowRecorderToggle((event.currentTarget as HTMLInputElement).checked)}
+          onchange={(event) => onShadowRecorderToggle(event.currentTarget.checked)}
         />
         <span class="text-xs text-surface-400">Keep a rolling buffer for capture-last clips.</span>
       </div>

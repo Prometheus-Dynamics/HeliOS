@@ -146,6 +146,65 @@
     void ensureImuOrientationViewer();
   });
 
+  function readSelectValue(event: Event): string | null {
+    const target = event.target;
+    return target instanceof HTMLSelectElement ? target.value : null;
+  }
+
+  function readInputNumber(event: Event): number | null {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) {
+      return null;
+    }
+    const next = Number(target.value);
+    return Number.isFinite(next) ? next : null;
+  }
+
+  function handleFusionSelect(event: Event): void {
+    const value = readSelectValue(event);
+    if (value !== null) onFusionChange(value);
+  }
+
+  function handleRangeSelect(event: Event): void {
+    const value = readSelectValue(event);
+    if (value !== null) onRangeChange(value);
+  }
+
+  function handleIntervalInput(event: Event): void {
+    const value = readInputNumber(event);
+    if (value !== null) onIntervalChange(value);
+  }
+
+  function handleDrLockPositionSelect(event: Event): void {
+    const value = readSelectValue(event);
+    if (value !== null) onDrLockPositionChange(value === 'locked');
+  }
+
+  function handleDrVelocityDampTauInput(event: Event): void {
+    const value = readInputNumber(event);
+    if (value !== null) onDrVelocityDampTauChange(value);
+  }
+
+  function handleDrStillVelocityZeroTauInput(event: Event): void {
+    const value = readInputNumber(event);
+    if (value !== null) onDrStillVelocityZeroTauChange(value);
+  }
+
+  function handleDrMaxAccelWorldInput(event: Event): void {
+    const value = readInputNumber(event);
+    if (value !== null) onDrMaxAccelWorldChange(value);
+  }
+
+  function handleDrMaxSpeedInput(event: Event): void {
+    const value = readInputNumber(event);
+    if (value !== null) onDrMaxSpeedChange(value);
+  }
+
+  function handleDrMaxPositionInput(event: Event): void {
+    const value = readInputNumber(event);
+    if (value !== null) onDrMaxPositionChange(value);
+  }
+
 </script>
 
 <div class="flex min-h-0 flex-1 flex-col gap-3 rounded border border-surface-800 bg-surface-950/30 p-3">
@@ -275,7 +334,7 @@
           <select
             class="w-full rounded border border-surface-800 bg-surface-950 px-3 py-2 text-sm text-surface-100"
             value={imuFusionChoice}
-            onchange={(event) => onFusionChange((event.target as HTMLSelectElement).value)}
+            onchange={handleFusionSelect}
           >
             {#each imuFusionOptions as option (option)}
               <option value={option}>{formatImuFusion(option)}</option>
@@ -288,7 +347,7 @@
           <select
             class="w-full rounded border border-surface-800 bg-surface-950 px-3 py-2 text-sm text-surface-100"
             value={imuRangeChoice}
-            onchange={(event) => onRangeChange((event.target as HTMLSelectElement).value)}
+            onchange={handleRangeSelect}
           >
             {#each imuRangeOptions as option (option)}
               <option value={option}>{formatImuRange(option)}</option>
@@ -305,7 +364,7 @@
             step="1"
             list="imu-intervals"
             value={imuIntervalChoice}
-            oninput={(event) => onIntervalChange(Number((event.target as HTMLInputElement).value))}
+            oninput={handleIntervalInput}
           />
           <datalist id="imu-intervals">
             {#each imuIntervalOptions as option (option)}
@@ -319,7 +378,7 @@
           <select
             class="w-full rounded border border-surface-800 bg-surface-950 px-3 py-2 text-sm text-surface-100"
             value={imuDrLockPositionChoice ? 'locked' : 'unlocked'}
-            onchange={(event) => onDrLockPositionChange((event.target as HTMLSelectElement).value === 'locked')}
+            onchange={handleDrLockPositionSelect}
           >
             <option value="locked">Locked</option>
             <option value="unlocked">Unlocked</option>
@@ -341,7 +400,7 @@
                 max="30"
                 step="0.1"
                 value={imuDrVelocityDampTauChoice}
-                oninput={(event) => onDrVelocityDampTauChange(Number((event.target as HTMLInputElement).value))}
+                oninput={handleDrVelocityDampTauInput}
               />
             </label>
             <label class="space-y-1 text-xs text-surface-300">
@@ -353,7 +412,7 @@
                 max="2"
                 step="0.01"
                 value={imuDrStillVelocityZeroTauChoice}
-                oninput={(event) => onDrStillVelocityZeroTauChange(Number((event.target as HTMLInputElement).value))}
+                oninput={handleDrStillVelocityZeroTauInput}
               />
             </label>
             <label class="space-y-1 text-xs text-surface-300">
@@ -365,7 +424,7 @@
                 max="30"
                 step="0.1"
                 value={imuDrMaxAccelWorldChoice}
-                oninput={(event) => onDrMaxAccelWorldChange(Number((event.target as HTMLInputElement).value))}
+                oninput={handleDrMaxAccelWorldInput}
               />
             </label>
             <label class="space-y-1 text-xs text-surface-300">
@@ -377,7 +436,7 @@
                 max="20"
                 step="0.1"
                 value={imuDrMaxSpeedChoice}
-                oninput={(event) => onDrMaxSpeedChange(Number((event.target as HTMLInputElement).value))}
+                oninput={handleDrMaxSpeedInput}
               />
             </label>
             <label class="space-y-1 text-xs text-surface-300">
@@ -389,7 +448,7 @@
                 max="100"
                 step="0.1"
                 value={imuDrMaxPositionChoice}
-                oninput={(event) => onDrMaxPositionChange(Number((event.target as HTMLInputElement).value))}
+                oninput={handleDrMaxPositionInput}
               />
             </label>
           </div>

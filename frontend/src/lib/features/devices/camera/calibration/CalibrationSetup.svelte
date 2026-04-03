@@ -209,7 +209,7 @@
             <input
               type="checkbox"
               checked={guidedAccumulateLive}
-              onchange={(event) => setGuidedAccumulateLive((event.currentTarget as HTMLInputElement).checked)}
+              onchange={(event) => setGuidedAccumulateLive(event.currentTarget.checked)}
               disabled={!streamUuid}
             />
             Accumulate live coverage
@@ -245,7 +245,7 @@
           <input
             type="checkbox"
             checked={calibrationOwnPhotosOnly}
-            onchange={(event) => onSetCalibrationOwnPhotosOnly((event.currentTarget as HTMLInputElement).checked)}
+            onchange={(event) => onSetCalibrationOwnPhotosOnly(event.currentTarget.checked)}
           />
           Own photos only
         </label>

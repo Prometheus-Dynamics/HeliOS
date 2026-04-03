@@ -115,6 +115,20 @@
     }
     updateGroup(index, { ports: Array.from(set).sort((a, b) => a.localeCompare(b)) });
   };
+
+  function parseSyncPolicy(value: string): DaedalusSyncPolicy | null {
+    if (value === 'AllReady' || value === 'Latest' || value === 'ZipByTag') {
+      return value;
+    }
+    return null;
+  }
+
+  function parseBackpressureStrategy(value: string): DaedalusBackpressureStrategy | null {
+    if (value === 'None' || value === 'BoundedQueues' || value === 'ErrorOnOverflow') {
+      return value;
+    }
+    return null;
+  }
 </script>
 
 <section class="space-y-3 rounded border border-surface-800/70 bg-surface-950/50 p-4">
@@ -173,7 +187,7 @@
                 class="input h-9"
                 type="text"
                 value={group.name}
-                oninput={(event) => updateGroup(index, { name: (event.currentTarget as HTMLInputElement).value })}
+                oninput={(event) => updateGroup(index, { name: event.currentTarget.value })}
                 onblur={persist}
               />
             </label>
@@ -182,8 +196,11 @@
               <select
                 class="select h-9"
                 value={group.policy}
-                onchange={(event) =>
-                  updateGroup(index, { policy: (event.currentTarget as HTMLSelectElement).value as DaedalusSyncPolicy })}
+                onchange={(event) => {
+                  const value = parseSyncPolicy(event.currentTarget.value);
+                  if (!value) return;
+                  updateGroup(index, { policy: value });
+                }}
                 onblur={persist}
               >
                 <option value="AllReady">AllReady</option>
@@ -200,7 +217,7 @@
                 placeholder="inherit"
                 value={group.capacity ?? ''}
                 oninput={(event) => {
-                  const raw = (event.currentTarget as HTMLInputElement).value;
+                  const raw = event.currentTarget.value;
                   const parsed = raw.trim() ? Number(raw) : null;
                   updateGroup(index, { capacity: parsed && Number.isFinite(parsed) ? Math.max(1, Math.floor(parsed)) : null });
                 }}
@@ -213,8 +230,10 @@
                 class="select h-9"
                 value={group.backpressure ?? ''}
                 onchange={(event) => {
-                  const value = (event.currentTarget as HTMLSelectElement).value as DaedalusBackpressureStrategy | '';
-                  updateGroup(index, { backpressure: value ? value : null });
+                  const raw = event.currentTarget.value;
+                  const value = raw ? parseBackpressureStrategy(raw) : null;
+                  if (raw && !value) return;
+                  updateGroup(index, { backpressure: value });
                   persist();
                 }}
               >

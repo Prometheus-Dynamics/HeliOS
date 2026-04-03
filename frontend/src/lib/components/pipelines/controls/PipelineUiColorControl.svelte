@@ -44,7 +44,7 @@
       class="flex-1 rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
       value={textValue}
       disabled={disabled}
-      oninput={(event) => onChange((event.currentTarget as HTMLInputElement).value)}
+      oninput={(event) => onChange(event.currentTarget.value)}
     />
   </div>
   {#if isOpen}

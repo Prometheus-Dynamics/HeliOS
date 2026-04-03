@@ -676,7 +676,7 @@
                   event.preventDefault();
                   return;
                 }
-                dragStartHandlerFor(pipelineId)(event as DragEvent);
+                dragStartHandlerFor(pipelineId)(event);
               }}
               title={pipelineId}
               aria-label={resolvePipelineLabel(pipelineId)}
@@ -795,7 +795,7 @@
             min="1"
             max="6"
             value={pipelineGridRows}
-            onchange={(e) => applyGridDimensions(Number((e.currentTarget as HTMLInputElement).value), pipelineGridColumns)}
+            onchange={(e) => applyGridDimensions(Number(e.currentTarget.value), pipelineGridColumns)}
           />
         </label>
         <label class="text-sm">
@@ -806,7 +806,7 @@
             min="1"
             max="6"
             value={pipelineGridColumns}
-            onchange={(e) => applyGridDimensions(pipelineGridRows, Number((e.currentTarget as HTMLInputElement).value))}
+            onchange={(e) => applyGridDimensions(pipelineGridRows, Number(e.currentTarget.value))}
           />
         </label>
       </div>
@@ -848,7 +848,7 @@
                   return;
                 }
                 if (!cellPipeline) return;
-                dragStartHandlerFor(cellPipeline, { row, column })(event as DragEvent);
+                dragStartHandlerFor(cellPipeline, { row, column })(event);
               }}
               ondragover={applyAllowDrop}
               ondrop={dropHandlerForCell(row, column)}
@@ -951,7 +951,7 @@
                         value={currentInputSelection}
                         onclick={(e) => e.stopPropagation()}
                         onchange={(e) => {
-                          const selection = (e.currentTarget as HTMLSelectElement).value ?? '';
+                          const selection = e.currentTarget.value ?? '';
                           applyInputSelectionForTarget(selection, cellPipeline, targetOutputKey);
                         }}
                       >
@@ -974,7 +974,7 @@
                         disabled={outputOptions.length === 0}
                         onclick={(e) => e.stopPropagation()}
                         onchange={(e) => {
-                          const raw = (e.currentTarget as HTMLSelectElement).value;
+                          const raw = e.currentTarget.value;
                           const trimmed = raw.trim();
                           const next = trimmed.length ? trimmed : outputOptions[0] ?? null;
                           if (isMultiplex) {
@@ -1084,7 +1084,7 @@
             type="search"
             value={pipelineAssignQuery}
             placeholder="name or id…"
-            oninput={(e) => (pipelineAssignQuery = (e.currentTarget as HTMLInputElement).value)}
+            oninput={(e) => (pipelineAssignQuery = e.currentTarget.value)}
           />
         </label>
         <div class="flex items-end gap-2">
@@ -1117,7 +1117,7 @@
                 class="w-full rounded border border-surface-700 bg-surface-900/70 px-3 py-2 text-surface-100"
                 value={pipelineTemplateSelectedId}
                 onchange={(event) => {
-                  pipelineTemplateSelectedId = (event.currentTarget as HTMLSelectElement).value;
+                  pipelineTemplateSelectedId = event.currentTarget.value;
                   pipelineTemplateError = null;
                   pipelineTemplateStatus = null;
                 }}
@@ -1175,7 +1175,7 @@
                   type="checkbox"
                   checked={checked}
                   onchange={(e) => {
-                    const next = (e.currentTarget as HTMLInputElement).checked;
+                    const next = e.currentTarget.checked;
                     const current = new SvelteSet(pipelineAssignDraft);
                     if (next) current.add(id);
                     else current.delete(id);

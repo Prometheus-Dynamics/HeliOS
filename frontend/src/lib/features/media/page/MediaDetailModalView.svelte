@@ -109,6 +109,12 @@
     window.open(path, '_blank', 'noopener,noreferrer');
   }
 
+  function handleImagePreviewError(event: Event, fallbackSrc: string): void {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLImageElement)) return;
+    target.src = fallbackSrc;
+  }
+
   function syncImageEditFromAsset(current: MediaAsset | null) {
     if (!current || current.kind !== 'image') return;
     if (current.imageCrop) {
@@ -465,7 +471,7 @@
                 class="block h-auto w-full"
                 src={assetPreviewSrc}
                 alt={current.name}
-                onerror={(event) => ((event.currentTarget as HTMLImageElement).src = assetOriginalSrc)}
+                onerror={(event) => handleImagePreviewError(event, assetOriginalSrc)}
               />
             </div>
             <button class="btn btn-3xs mt-3 preset-outline uppercase tracking-[0.3em]" type="button" onclick={() => openAsset(assetOriginalSrc)}>
@@ -554,8 +560,8 @@
       <div class="rounded border border-surface-800/60 bg-surface-900/40 p-3 space-y-3 flex min-h-[min(60vh,42rem)] flex-col">
         <p class="text-xs uppercase tracking-[0.3em] text-surface-500">Clip range (ms)</p>
         <div class="grid grid-cols-2 gap-2">
-          <input class="input" type="number" placeholder="Start" value={videoEdit.startMs} oninput={(event) => (videoEdit.startMs = Number((event.target as HTMLInputElement).value))} />
-          <input class="input" type="number" placeholder="End" value={videoEdit.endMs} oninput={(event) => (videoEdit.endMs = Number((event.target as HTMLInputElement).value))} />
+          <input class="input" type="number" placeholder="Start" value={videoEdit.startMs} oninput={(event) => (videoEdit.startMs = Number(event.currentTarget.value))} />
+          <input class="input" type="number" placeholder="End" value={videoEdit.endMs} oninput={(event) => (videoEdit.endMs = Number(event.currentTarget.value))} />
         </div>
         <button class="btn btn-3xs preset-filled-primary-500 uppercase tracking-[0.3em]" type="button" onclick={submitVideoEdits}>
           Save clip

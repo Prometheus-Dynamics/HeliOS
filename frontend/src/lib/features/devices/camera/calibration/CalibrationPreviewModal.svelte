@@ -104,7 +104,7 @@
                 type="checkbox"
                 checked={previewShowOverlay}
                 disabled={!overlayUrlForImage(item.name)}
-                onchange={(e) => (previewShowOverlay = (e.currentTarget as HTMLInputElement).checked)}
+                onchange={(e) => (previewShowOverlay = e.currentTarget.checked)}
               />
               Show overlay
             </label>

@@ -89,7 +89,7 @@
           max="100"
           value={manualInput || String(fixedPercent)}
           oninput={(event) => {
-            const value = (event.target as HTMLInputElement).value;
+            const value = event.currentTarget.value;
             onManualInput(value);
             onFixedPercentChange(Number(value));
           }}
@@ -102,7 +102,7 @@
           step="1"
           value={manualInput || String(fixedPercent)}
           oninput={(event) => {
-            const value = (event.target as HTMLInputElement).value;
+            const value = event.currentTarget.value;
             onManualInput(value);
             onFixedPercentChange(Number(value));
           }}

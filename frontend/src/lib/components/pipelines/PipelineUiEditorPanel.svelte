@@ -263,7 +263,7 @@
             type="search"
             placeholder="Search components or layouts"
             value={librarySearch}
-            oninput={(event) => (librarySearch = (event.currentTarget as HTMLInputElement).value)}
+            oninput={(event) => (librarySearch = event.currentTarget.value)}
           />
           <details class="rounded border border-surface-800/70 bg-surface-900/40 p-2" open>
             <summary class="cursor-pointer text-micro-tight uppercase tracking-[0.2em] text-surface-400">Layouts</summary>

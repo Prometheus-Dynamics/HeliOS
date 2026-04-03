@@ -1,4 +1,6 @@
 <script lang="ts">
+  import type { PipelineInputQueueConfig } from '$lib/types/pipeline';
+
   const {
     direction,
     name,
@@ -21,15 +23,21 @@
     settable?: boolean;
     draftValue?: string;
     error?: string | null;
-    policy?: string;
+    policy?: PipelineInputQueueConfig['policy'];
     capacity?: number;
     channelPolicyOptions?: Array<{ value: string; label: string }>;
-    onPolicyChange?: (value: string) => void;
+    onPolicyChange?: (value: PipelineInputQueueConfig['policy']) => void;
     onCapacityChange?: (capacity: number) => void;
     onDraftChange?: (value: string) => void;
     onApply?: () => void;
     onClear?: () => void;
   } = $props();
+
+  function handlePolicyChange(event: Event): void {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLSelectElement)) return;
+    onPolicyChange?.(target.value as PipelineInputQueueConfig['policy']);
+  }
 </script>
 
 {#if direction === 'input'}
@@ -39,7 +47,7 @@
       <select
         class="input h-8 text-xs"
         value={policy}
-        onchange={(event) => onPolicyChange?.((event.currentTarget as HTMLSelectElement).value)}
+        onchange={handlePolicyChange}
       >
         {#each channelPolicyOptions as option (option.value)}
           <option value={option.value}>{option.label}</option>
@@ -54,7 +62,7 @@
         min="1"
         value={capacity}
         oninput={(event) => {
-          const next = Number.parseInt((event.currentTarget as HTMLInputElement).value, 10);
+          const next = Number.parseInt(event.currentTarget.value, 10);
           if (Number.isFinite(next) && next > 0) {
             onCapacityChange?.(next);
           }
@@ -70,7 +78,7 @@
           <select
             class="input h-8 text-xs"
             value={draftValue ?? variants[0] ?? ''}
-            onchange={(event) => onDraftChange?.((event.currentTarget as HTMLSelectElement).value)}
+            onchange={(event) => onDraftChange?.(event.currentTarget.value)}
           >
             {#each variants as option (option)}
               <option value={option}>{option}</option>
@@ -81,7 +89,7 @@
             class="input h-8 text-xs"
             placeholder="Enter value"
             value={draftValue ?? ''}
-            oninput={(event) => onDraftChange?.((event.currentTarget as HTMLInputElement).value)}
+            oninput={(event) => onDraftChange?.(event.currentTarget.value)}
           />
         {/if}
       </label>
@@ -117,7 +125,7 @@
       min="1"
       value={capacity}
       oninput={(event) => {
-        const next = Number.parseInt((event.currentTarget as HTMLInputElement).value, 10);
+        const next = Number.parseInt(event.currentTarget.value, 10);
         if (Number.isFinite(next) && next > 0) {
           onCapacityChange?.(next);
         }

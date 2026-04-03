@@ -61,6 +61,15 @@
 
   const isRangeBind = (bind: PipelineUiControlBind | undefined): bind is PipelineUiRangeBind =>
     Boolean(bind && typeof bind === 'object' && 'min' in bind && 'max' in bind);
+
+  function selectedControlItem(item: PipelineUiItem): PipelineUiControl {
+    return item as PipelineUiControl;
+  }
+
+  function parseHsvRangeMode(value: string): 'include' | 'exclude' | null {
+    if (value === 'include' || value === 'exclude') return value;
+    return null;
+  }
 </script>
 
 {#if editMode && selectedItem}
@@ -99,7 +108,7 @@
                 <input
                   class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                   value={selectedItem.text}
-                  oninput={(event) => onUpdateSelectedItem({ text: (event.currentTarget as HTMLInputElement).value })}
+                  oninput={(event) => onUpdateSelectedItem({ text: event.currentTarget.value })}
                 />
               {/snippet}
             </FormField>
@@ -116,7 +125,7 @@
                   class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                   placeholder="Title"
                   value={selectedItem.title ?? ''}
-                  oninput={(event) => onUpdateSelectedItem({ title: (event.currentTarget as HTMLInputElement).value })}
+                  oninput={(event) => onUpdateSelectedItem({ title: event.currentTarget.value })}
                 />
               {/snippet}
             </FormField>
@@ -130,7 +139,7 @@
                   class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                   placeholder="Description"
                   value={selectedItem.description ?? ''}
-                  oninput={(event) => onUpdateSelectedItem({ description: (event.currentTarget as HTMLInputElement).value })}
+                  oninput={(event) => onUpdateSelectedItem({ description: event.currentTarget.value })}
                 />
               {/snippet}
             </FormField>
@@ -139,7 +148,7 @@
                 <input
                   type="checkbox"
                   checked={selectedItem.defaultOpen ?? false}
-                  onchange={(event) => onUpdateSelectedItem({ defaultOpen: (event.currentTarget as HTMLInputElement).checked })}
+                  onchange={(event) => onUpdateSelectedItem({ defaultOpen: event.currentTarget.checked })}
                 />
                 Default open
               </label>
@@ -160,7 +169,7 @@
                   class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                   placeholder="Tabs title"
                   value={selectedItem.title ?? ''}
-                  oninput={(event) => onUpdateSelectedItem({ title: (event.currentTarget as HTMLInputElement).value })}
+                  oninput={(event) => onUpdateSelectedItem({ title: event.currentTarget.value })}
                 />
               {/snippet}
             </FormField>
@@ -174,7 +183,7 @@
                   class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                   placeholder="Description"
                   value={selectedItem.description ?? ''}
-                  oninput={(event) => onUpdateSelectedItem({ description: (event.currentTarget as HTMLInputElement).value })}
+                  oninput={(event) => onUpdateSelectedItem({ description: event.currentTarget.value })}
                 />
               {/snippet}
             </FormField>
@@ -191,7 +200,7 @@
                       <input
                         class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                         value={tab.title}
-                        oninput={(event) => onUpdateSelectedTabTitle(tabIndex, (event.currentTarget as HTMLInputElement).value)}
+                        oninput={(event) => onUpdateSelectedTabTitle(tabIndex, event.currentTarget.value)}
                       />
                     {/snippet}
                   </FormField>
@@ -214,13 +223,13 @@
                   class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                   placeholder="Divider label"
                   value={selectedItem.label ?? ''}
-                  oninput={(event) => onUpdateSelectedItem({ label: (event.currentTarget as HTMLInputElement).value })}
+                  oninput={(event) => onUpdateSelectedItem({ label: event.currentTarget.value })}
                 />
               {/snippet}
             </FormField>
           </PanelSection>
         {:else}
-          {@const selectedControl = selectedItem as PipelineUiControl}
+          {@const selectedControl = selectedControlItem(selectedItem)}
           <PanelSection title="Control">
             <FormField
                 label="Label"
@@ -232,7 +241,7 @@
                     class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                     placeholder="Label"
                     value={selectedControl.label ?? ''}
-                    oninput={(event) => onUpdateSelectedControl({ label: (event.currentTarget as HTMLInputElement).value })}
+                    oninput={(event) => onUpdateSelectedControl({ label: event.currentTarget.value })}
                   />
                 {/snippet}
               </FormField>
@@ -257,7 +266,7 @@
                           value={isRangeBind(selectedControl.bind) ? selectedControl.bind.min : ''}
                           oninput={(event) => {
                             const current = isRangeBind(selectedControl.bind) ? selectedControl.bind : { min: '', max: '' };
-                            onUpdateSelectedControl({ bind: { ...current, min: (event.currentTarget as HTMLInputElement).value } });
+                            onUpdateSelectedControl({ bind: { ...current, min: event.currentTarget.value } });
                           }}
                         />
                       {/snippet}
@@ -279,7 +288,7 @@
                           value={isRangeBind(selectedControl.bind) ? selectedControl.bind.max : ''}
                           oninput={(event) => {
                             const current = isRangeBind(selectedControl.bind) ? selectedControl.bind : { min: '', max: '' };
-                            onUpdateSelectedControl({ bind: { ...current, max: (event.currentTarget as HTMLInputElement).value } });
+                            onUpdateSelectedControl({ bind: { ...current, max: event.currentTarget.value } });
                           }}
                         />
                       {/snippet}
@@ -301,7 +310,7 @@
                         class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                         placeholder="node.port"
                         value={typeof selectedControl.bind === 'string' ? selectedControl.bind : ''}
-                        oninput={(event) => onUpdateSelectedControl({ bind: (event.currentTarget as HTMLInputElement).value })}
+                        oninput={(event) => onUpdateSelectedControl({ bind: event.currentTarget.value })}
                       />
                     {/snippet}
                   </FormField>
@@ -314,7 +323,7 @@
                       type="search"
                       placeholder="Search nodes/ports"
                       value={bindingSearch}
-                      oninput={(event) => onBindingSearch((event.currentTarget as HTMLInputElement).value)}
+                      oninput={(event) => onBindingSearch(event.currentTarget.value)}
                     />
                     <div class="max-h-48 space-y-1 overflow-auto">
                       {#if bindingCandidates.length === 0}
@@ -346,7 +355,7 @@
                     class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                     placeholder="Help text"
                     value={selectedControl.help ?? ''}
-                    oninput={(event) => onUpdateSelectedControl({ help: (event.currentTarget as HTMLInputElement).value })}
+                    oninput={(event) => onUpdateSelectedControl({ help: event.currentTarget.value })}
                   />
                 {/snippet}
               </FormField>
@@ -364,7 +373,7 @@
                       value={(selectedControl.options ?? []).join(', ')}
                       oninput={(event) =>
                         onUpdateSelectedControl({
-                          options: (event.currentTarget as HTMLInputElement).value
+                          options: event.currentTarget.value
                             .split(',')
                             .map((value) => value.trim())
                             .filter(Boolean)
@@ -382,19 +391,19 @@
                       class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                       placeholder="Min"
                       value={selectedControl.min ?? ''}
-                      oninput={(event) => onUpdateSelectedControl({ min: Number((event.currentTarget as HTMLInputElement).value) })}
+                      oninput={(event) => onUpdateSelectedControl({ min: Number(event.currentTarget.value) })}
                     />
                     <input
                       class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                       placeholder="Max"
                       value={selectedControl.max ?? ''}
-                      oninput={(event) => onUpdateSelectedControl({ max: Number((event.currentTarget as HTMLInputElement).value) })}
+                      oninput={(event) => onUpdateSelectedControl({ max: Number(event.currentTarget.value) })}
                     />
                     <input
                       class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                       placeholder="Step"
                       value={selectedControl.step ?? ''}
-                      oninput={(event) => onUpdateSelectedControl({ step: Number((event.currentTarget as HTMLInputElement).value) })}
+                      oninput={(event) => onUpdateSelectedControl({ step: Number(event.currentTarget.value) })}
                     />
                   </div>
                 </PanelSection>
@@ -410,7 +419,7 @@
                       oninput={(event) => {
                         const current = Array.isArray(selectedControl.default) ? selectedControl.default ?? [0, 0] : [0, 0];
                         onUpdateSelectedControl({
-                          default: [Number((event.currentTarget as HTMLInputElement).value), Number(current[1] ?? 0)]
+                          default: [Number(event.currentTarget.value), Number(current[1] ?? 0)]
                         });
                       }}
                     />
@@ -421,7 +430,7 @@
                       oninput={(event) => {
                         const current = Array.isArray(selectedControl.default) ? selectedControl.default ?? [0, 0] : [0, 0];
                         onUpdateSelectedControl({
-                          default: [Number(current[0] ?? 0), Number((event.currentTarget as HTMLInputElement).value)]
+                          default: [Number(current[0] ?? 0), Number(event.currentTarget.value)]
                         });
                       }}
                     />
@@ -432,7 +441,7 @@
                   <input
                     type="checkbox"
                     checked={Boolean(selectedControl.default)}
-                    onchange={(event) => onUpdateSelectedControl({ default: (event.currentTarget as HTMLInputElement).checked })}
+                    onchange={(event) => onUpdateSelectedControl({ default: event.currentTarget.checked })}
                   />
                   Default enabled
                 </label>
@@ -448,7 +457,7 @@
                       type="number"
                       placeholder="Default value"
                       value={selectedControl.default ?? ''}
-                      oninput={(event) => onUpdateSelectedControl({ default: Number((event.currentTarget as HTMLInputElement).value) })}
+                      oninput={(event) => onUpdateSelectedControl({ default: Number(event.currentTarget.value) })}
                     />
                   {/snippet}
                 </FormField>
@@ -475,7 +484,7 @@
                       class="flex-1 rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                       placeholder="#RRGGBB"
                       value={selectedControl.default ?? ''}
-                      oninput={(event) => onUpdateSelectedControl({ default: (event.currentTarget as HTMLInputElement).value })}
+                      oninput={(event) => onUpdateSelectedControl({ default: event.currentTarget.value })}
                     />
                   </div>
                 </PanelSection>
@@ -490,7 +499,7 @@
                       class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                       placeholder="Default value"
                       value={selectedControl.default ?? ''}
-                      oninput={(event) => onUpdateSelectedControl({ default: (event.currentTarget as HTMLInputElement).value })}
+                      oninput={(event) => onUpdateSelectedControl({ default: event.currentTarget.value })}
                     />
                   {/snippet}
                 </FormField>
@@ -519,7 +528,7 @@
                               class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                               placeholder="Track gradient"
                               value={selectedControl.trackGradient ?? ''}
-                              oninput={(event) => onUpdateSelectedControl({ trackGradient: (event.currentTarget as HTMLInputElement).value })}
+                              oninput={(event) => onUpdateSelectedControl({ trackGradient: event.currentTarget.value })}
                             />
                           </div>
                         {/snippet}
@@ -544,7 +553,7 @@
                               class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                               placeholder="Track fill"
                               value={selectedControl.trackFill ?? ''}
-                              oninput={(event) => onUpdateSelectedControl({ trackFill: (event.currentTarget as HTMLInputElement).value })}
+                              oninput={(event) => onUpdateSelectedControl({ trackFill: event.currentTarget.value })}
                             />
                           </div>
                         {/snippet}
@@ -571,7 +580,7 @@
                           class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                           placeholder="Thumb fill"
                           value={selectedControl.thumbFill ?? ''}
-                          oninput={(event) => onUpdateSelectedControl({ thumbFill: (event.currentTarget as HTMLInputElement).value })}
+                          oninput={(event) => onUpdateSelectedControl({ thumbFill: event.currentTarget.value })}
                         />
                       </div>
                     </div>
@@ -590,7 +599,7 @@
                           class="w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                           placeholder="Thumb border"
                           value={selectedControl.thumbBorder ?? ''}
-                          oninput={(event) => onUpdateSelectedControl({ thumbBorder: (event.currentTarget as HTMLInputElement).value })}
+                          oninput={(event) => onUpdateSelectedControl({ thumbBorder: event.currentTarget.value })}
                         />
                       </div>
                     </div>
@@ -600,7 +609,7 @@
                         class="w-28 rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                         placeholder="Border width"
                         value={selectedControl.thumbBorderWidth ?? ''}
-                        oninput={(event) => onUpdateSelectedControl({ thumbBorderWidth: Number((event.currentTarget as HTMLInputElement).value) })}
+                        oninput={(event) => onUpdateSelectedControl({ thumbBorderWidth: Number(event.currentTarget.value) })}
                       />
                     </div>
                   </div>
@@ -635,7 +644,7 @@
                       value={selectedControl.hsvDefaults?.h ?? ''}
                       oninput={(event) => {
                         const current = selectedControl.hsvDefaults ?? { h: 120, s: 0.7, v: 0.8 };
-                        onUpdateSelectedControl({ hsvDefaults: { ...current, h: Number((event.currentTarget as HTMLInputElement).value) } });
+                        onUpdateSelectedControl({ hsvDefaults: { ...current, h: Number(event.currentTarget.value) } });
                       }}
                     />
                     <input
@@ -644,7 +653,7 @@
                       value={selectedControl.hsvDefaults?.s ?? ''}
                       oninput={(event) => {
                         const current = selectedControl.hsvDefaults ?? { h: 120, s: 0.7, v: 0.8 };
-                        onUpdateSelectedControl({ hsvDefaults: { ...current, s: Number((event.currentTarget as HTMLInputElement).value) } });
+                        onUpdateSelectedControl({ hsvDefaults: { ...current, s: Number(event.currentTarget.value) } });
                       }}
                     />
                     <input
@@ -653,7 +662,7 @@
                       value={selectedControl.hsvDefaults?.v ?? ''}
                       oninput={(event) => {
                         const current = selectedControl.hsvDefaults ?? { h: 120, s: 0.7, v: 0.8 };
-                        onUpdateSelectedControl({ hsvDefaults: { ...current, v: Number((event.currentTarget as HTMLInputElement).value) } });
+                        onUpdateSelectedControl({ hsvDefaults: { ...current, v: Number(event.currentTarget.value) } });
                       }}
                     />
                   </div>
@@ -666,7 +675,11 @@
                     <select
                       class="rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
                       value={selectedControl.hsvRangeMode ?? 'include'}
-                      onchange={(event) => onUpdateSelectedControl({ hsvRangeMode: (event.currentTarget as HTMLSelectElement).value as 'include' | 'exclude' })}
+                      onchange={(event) => {
+                        const value = parseHsvRangeMode(event.currentTarget.value);
+                        if (!value) return;
+                        onUpdateSelectedControl({ hsvRangeMode: value });
+                      }}
                     >
                       <option value="include">Include</option>
                       <option value="exclude">Exclude</option>
@@ -677,7 +690,7 @@
                       value={selectedControl.hsvRangeDefaults?.h?.join(',') ?? ''}
                       oninput={(event) => {
                         const current = selectedControl.hsvRangeDefaults ?? { h: [0, 360], s: [0, 1], v: [0, 1] };
-                        const parts = (event.currentTarget as HTMLInputElement).value.split(',').map((val) => Number(val.trim()));
+                        const parts = event.currentTarget.value.split(',').map((val) => Number(val.trim()));
                         onUpdateSelectedControl({ hsvRangeDefaults: { ...current, h: [parts[0] ?? 0, parts[1] ?? 360] } });
                       }}
                     />
@@ -691,7 +704,7 @@
                       value={selectedControl.hsvRangeDefaults?.s?.join(',') ?? ''}
                       oninput={(event) => {
                         const current = selectedControl.hsvRangeDefaults ?? { h: [0, 360], s: [0, 1], v: [0, 1] };
-                        const parts = (event.currentTarget as HTMLInputElement).value.split(',').map((val) => Number(val.trim()));
+                        const parts = event.currentTarget.value.split(',').map((val) => Number(val.trim()));
                         onUpdateSelectedControl({ hsvRangeDefaults: { ...current, s: [parts[0] ?? 0, parts[1] ?? 1] } });
                       }}
                     />
@@ -701,7 +714,7 @@
                       value={selectedControl.hsvRangeDefaults?.v?.join(',') ?? ''}
                       oninput={(event) => {
                         const current = selectedControl.hsvRangeDefaults ?? { h: [0, 360], s: [0, 1], v: [0, 1] };
-                        const parts = (event.currentTarget as HTMLInputElement).value.split(',').map((val) => Number(val.trim()));
+                        const parts = event.currentTarget.value.split(',').map((val) => Number(val.trim()));
                         onUpdateSelectedControl({ hsvRangeDefaults: { ...current, v: [parts[0] ?? 0, parts[1] ?? 1] } });
                       }}
                     />

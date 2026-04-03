@@ -80,7 +80,7 @@
         value={hValue}
         disabled={!isSettable}
         style={`--range-fill:${`linear-gradient(90deg, #ff0000 0%, #ffff00 17%, #00ff00 33%, #00ffff 50%, #0000ff 67%, #ff00ff 83%, #ff0000 100%)`}; --range-progress: 100%;`}
-        oninput={(event) => setLocalValue(hKey, (event.currentTarget as HTMLInputElement).value)}
+        oninput={(event) => setLocalValue(hKey, event.currentTarget.value)}
       />
     </label>
     <label class="block space-y-2">
@@ -94,7 +94,7 @@
         value={sValue}
         style={`--range-fill:${`linear-gradient(90deg, ${satStart}, ${satEnd})`}; --range-progress: 100%;`}
         disabled={!isSettable}
-        oninput={(event) => setLocalValue(sKey, (event.currentTarget as HTMLInputElement).value)}
+        oninput={(event) => setLocalValue(sKey, event.currentTarget.value)}
       />
     </label>
     <label class="block space-y-2">
@@ -108,7 +108,7 @@
         value={vValue}
         style={`--range-fill:${`linear-gradient(90deg, #000000, ${valEnd})`}; --range-progress: 100%;`}
         disabled={!isSettable}
-        oninput={(event) => setLocalValue(vKey, (event.currentTarget as HTMLInputElement).value)}
+        oninput={(event) => setLocalValue(vKey, event.currentTarget.value)}
       />
     </label>
   </div>
@@ -155,7 +155,7 @@
               value={hMinVal}
               disabled={!isSettable}
               oninput={(event) => {
-                const next = clampNumber(Number((event.currentTarget as HTMLInputElement).value), 0, 360);
+                const next = clampNumber(Number(event.currentTarget.value), 0, 360);
                 const maxCurrent = Number.isFinite(Number(hMaxVal)) ? Number(hMaxVal) : 360;
                 if (next > maxCurrent) {
                   setLocalValue(hMaxKey, String(next));
@@ -172,7 +172,7 @@
               value={hMaxVal}
               disabled={!isSettable}
               oninput={(event) => {
-                const next = clampNumber(Number((event.currentTarget as HTMLInputElement).value), 0, 360);
+                const next = clampNumber(Number(event.currentTarget.value), 0, 360);
                 const minCurrent = Number.isFinite(Number(hMinVal)) ? Number(hMinVal) : 0;
                 if (next < minCurrent) {
                   setLocalValue(hMinKey, String(next));
@@ -190,7 +190,7 @@
             value={hMaxVal.toFixed(0)}
             disabled={!isSettable}
             oninput={(event) => {
-              const raw = (event.currentTarget as HTMLInputElement).value;
+              const raw = event.currentTarget.value;
               const next = clampNumber(Number(raw), 0, 360);
               const minCurrent = Number.isFinite(Number(hMinVal)) ? Number(hMinVal) : 0;
               if (next < minCurrent) {
@@ -216,7 +216,7 @@
               value={sMinVal}
               disabled={!isSettable}
               oninput={(event) => {
-                const raw = (event.currentTarget as HTMLInputElement).value;
+                const raw = event.currentTarget.value;
                 const next = clampNumber(Number(raw), 0, 1);
                 const maxCurrent = Number.isFinite(Number(sMaxVal)) ? Number(sMaxVal) : 1;
                 if (next > maxCurrent) {
@@ -234,7 +234,7 @@
               value={sMaxVal}
               disabled={!isSettable}
               oninput={(event) => {
-                const raw = (event.currentTarget as HTMLInputElement).value;
+                const raw = event.currentTarget.value;
                 const next = clampNumber(Number(raw), 0, 1);
                 const minCurrent = Number.isFinite(Number(sMinVal)) ? Number(sMinVal) : 0;
                 if (next < minCurrent) {
@@ -253,7 +253,7 @@
             value={sMaxVal.toFixed(2)}
             disabled={!isSettable}
             oninput={(event) => {
-              const raw = (event.currentTarget as HTMLInputElement).value;
+              const raw = event.currentTarget.value;
               const next = clampNumber(Number(raw), 0, 1);
               const minCurrent = Number.isFinite(Number(sMinVal)) ? Number(sMinVal) : 0;
               if (next < minCurrent) {
@@ -279,7 +279,7 @@
               value={vMinVal}
               disabled={!isSettable}
               oninput={(event) => {
-                const raw = (event.currentTarget as HTMLInputElement).value;
+                const raw = event.currentTarget.value;
                 const next = clampNumber(Number(raw), 0, 1);
                 const maxCurrent = Number.isFinite(Number(vMaxVal)) ? Number(vMaxVal) : 1;
                 if (next > maxCurrent) {
@@ -297,7 +297,7 @@
               value={vMaxVal}
               disabled={!isSettable}
               oninput={(event) => {
-                const raw = (event.currentTarget as HTMLInputElement).value;
+                const raw = event.currentTarget.value;
                 const next = clampNumber(Number(raw), 0, 1);
                 const minCurrent = Number.isFinite(Number(vMinVal)) ? Number(vMinVal) : 0;
                 if (next < minCurrent) {
@@ -316,7 +316,7 @@
             value={vMaxVal.toFixed(2)}
             disabled={!isSettable}
             oninput={(event) => {
-              const raw = (event.currentTarget as HTMLInputElement).value;
+              const raw = event.currentTarget.value;
               const next = clampNumber(Number(raw), 0, 1);
               const minCurrent = Number.isFinite(Number(vMinVal)) ? Number(vMinVal) : 0;
               if (next < minCurrent) {

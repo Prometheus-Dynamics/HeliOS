@@ -263,7 +263,7 @@
                   <input
                     class="input h-8 text-xs"
                     value={editDraft.name}
-                    oninput={(event) => updatePortDraft(editKey, { name: (event.currentTarget as HTMLInputElement).value })}
+                    oninput={(event) => updatePortDraft(editKey, { name: event.currentTarget.value })}
                   />
                 </label>
                 <label class="flex flex-col gap-1">
@@ -272,7 +272,7 @@
                     class="input h-8 text-xs"
                     value={editDraft.dataTypeKey}
                     onchange={(event) =>
-                      updatePortDraft(editKey, { dataTypeKey: (event.currentTarget as HTMLSelectElement).value })
+                      updatePortDraft(editKey, { dataTypeKey: event.currentTarget.value })
                     }
                   >
                     {#each boundaryTypeOptions as option (option.key)}
@@ -309,9 +309,7 @@
               policy={entry.queueConfig?.policy ?? 'NewestWins'}
               capacity={entry.queueConfig?.capacity ?? 3}
               channelPolicyOptions={channelPolicyOptions}
-              onPolicyChange={(value) =>
-                updateInputConfig(entry.name, { policy: value as PipelineInputQueueConfig['policy'] })
-              }
+              onPolicyChange={(value) => updateInputConfig(entry.name, { policy: value })}
               onCapacityChange={(value) => updateInputConfig(entry.name, { capacity: value })}
               onDraftChange={(value) => updatePipelineInputDraft(entry.name, value)}
               onApply={() => applyPipelineInputValue(entry.name, entry.dataType)}
@@ -331,12 +329,12 @@
         class="w-full rounded border border-surface-700 bg-surface-900/70 px-3 py-2 text-sm"
         placeholder="name"
         value={newInputName}
-        oninput={(e) => (newInputName = (e.currentTarget as HTMLInputElement).value)}
+        oninput={(e) => (newInputName = e.currentTarget.value)}
       />
       <select
         class="w-full rounded border border-surface-700 bg-surface-900/70 px-3 py-2 text-sm"
         value={newInputTypeKey}
-        onchange={(e) => (newInputTypeKey = (e.currentTarget as HTMLSelectElement).value)}
+        onchange={(e) => (newInputTypeKey = e.currentTarget.value)}
       >
         {#each boundaryTypeOptions as option (option.key)}
           <option value={option.key}>{option.label}</option>
@@ -395,7 +393,7 @@
                   <input
                     class="input h-8 text-xs"
                     value={editDraft.name}
-                    oninput={(event) => updatePortDraft(editKey, { name: (event.currentTarget as HTMLInputElement).value })}
+                    oninput={(event) => updatePortDraft(editKey, { name: event.currentTarget.value })}
                   />
                 </label>
                 <label class="flex flex-col gap-1">
@@ -404,7 +402,7 @@
                     class="input h-8 text-xs"
                     value={editDraft.dataTypeKey}
                     onchange={(event) =>
-                      updatePortDraft(editKey, { dataTypeKey: (event.currentTarget as HTMLSelectElement).value })
+                      updatePortDraft(editKey, { dataTypeKey: event.currentTarget.value })
                     }
                   >
                     {#each boundaryTypeOptions as option (option.key)}
@@ -456,12 +454,12 @@
           class="w-full rounded border border-surface-700 bg-surface-900/70 px-3 py-2 text-sm"
           placeholder="name"
           value={newOutputName}
-          oninput={(e) => (newOutputName = (e.currentTarget as HTMLInputElement).value)}
+          oninput={(e) => (newOutputName = e.currentTarget.value)}
         />
         <select
           class="w-full rounded border border-surface-700 bg-surface-900/70 px-3 py-2 text-sm"
           value={newOutputTypeKey}
-          onchange={(e) => (newOutputTypeKey = (e.currentTarget as HTMLSelectElement).value)}
+          onchange={(e) => (newOutputTypeKey = e.currentTarget.value)}
         >
           {#each boundaryTypeOptions as option (option.key)}
             <option value={option.key}>{option.label}</option>

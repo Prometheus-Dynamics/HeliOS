@@ -18,6 +18,10 @@
     onAddPeer,
     onFilterChange
   }: Props = $props();
+
+  function handleFilterSelect(id: PeerFilterOption): void {
+    onFilterChange(id);
+  }
 </script>
 
 <aside class="w-full shrink-0 space-y-3 overflow-visible rounded border border-surface-800/60 bg-surface-950/40 p-3 text-xs text-surface-400 lg:max-w-[16rem] xl:max-w-[16.75rem] 2xl:max-w-[17.5rem]">
@@ -33,7 +37,7 @@
   />
   <div>
     <p class="text-micro uppercase tracking-[0.22em] text-surface-500">Filter by platform</p>
-    <SidebarFilterList items={filters} selectedId={viewFilter} onSelect={(id) => onFilterChange(id as PeerFilterOption)} />
+    <SidebarFilterList items={filters} selectedId={viewFilter} onSelect={handleFilterSelect} />
   </div>
   <p class="mt-2 text-micro-tight text-surface-500">Focus on the peers contributing localization data from each camera platform.</p>
 </aside>

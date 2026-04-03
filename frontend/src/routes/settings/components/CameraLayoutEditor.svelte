@@ -37,6 +37,14 @@
     onSelectCamera
   }: CameraLayoutEditorProps = $props();
 
+  function handleRobotFieldInput(key: keyof RobotFormState, event: Event): void {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLInputElement)) {
+      return;
+    }
+    onUpdateRobotField(key, target.value);
+  }
+
   export type $$Props = CameraLayoutEditorProps;
 </script>
 
@@ -64,7 +72,7 @@
           type="text"
           placeholder="e.g. 0.6 m or 24&quot;"
           value={robotForm.width}
-          oninput={(event) => onUpdateRobotField('width', (event.currentTarget as HTMLInputElement).value)}
+          oninput={(event) => handleRobotFieldInput('width', event)}
         />
       </label>
       <label class="space-y-1 text-sm">
@@ -74,7 +82,7 @@
           type="text"
           placeholder="e.g. 0.8 m or 30&quot;"
           value={robotForm.length}
-          oninput={(event) => onUpdateRobotField('length', (event.currentTarget as HTMLInputElement).value)}
+          oninput={(event) => handleRobotFieldInput('length', event)}
         />
       </label>
       <label class="space-y-1 text-sm">
@@ -84,7 +92,7 @@
           type="text"
           placeholder="e.g. 4 in"
           value={robotForm.bumperHeight}
-          oninput={(event) => onUpdateRobotField('bumperHeight', (event.currentTarget as HTMLInputElement).value)}
+          oninput={(event) => handleRobotFieldInput('bumperHeight', event)}
         />
       </label>
       <label class="space-y-1 text-sm">
@@ -94,7 +102,7 @@
           type="text"
           placeholder="e.g. 2 in"
           value={robotForm.bumperThickness}
-          oninput={(event) => onUpdateRobotField('bumperThickness', (event.currentTarget as HTMLInputElement).value)}
+          oninput={(event) => handleRobotFieldInput('bumperThickness', event)}
         />
       </label>
       <label class="space-y-1 text-sm">
@@ -104,7 +112,7 @@
           type="text"
           placeholder="e.g. 0.0 m or 1.5 in"
           value={robotForm.groundClearance}
-          oninput={(event) => onUpdateRobotField('groundClearance', (event.currentTarget as HTMLInputElement).value)}
+          oninput={(event) => handleRobotFieldInput('groundClearance', event)}
         />
       </label>
     </div>

@@ -1753,7 +1753,7 @@
               class="input w-full"
               value={selectedLoadAnimationRef}
               disabled={savedBusy || templatesBusy || animationLoadBusy || animationSaveBusy}
-              onchange={(event) => (selectedLoadAnimationRef = (event.target as HTMLSelectElement).value)}
+              onchange={(event) => (selectedLoadAnimationRef = event.currentTarget.value)}
             >
               {#if visibleSavedAnimations.length === 0 && lightingTemplates.length === 0 && fallbackTemplateAnimations.length === 0}
                 <option value="">No saved animations or templates</option>
@@ -1793,7 +1793,7 @@
               placeholder="Animation name"
               value={animationName}
               disabled={animationSaveBusy}
-              oninput={(event) => (animationName = (event.target as HTMLInputElement).value)}
+              oninput={(event) => (animationName = event.currentTarget.value)}
             />
           </label>
 

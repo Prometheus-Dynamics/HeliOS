@@ -529,6 +529,43 @@
     }
   }
 
+  function handleRecordingSourceSelection(event: Event): void {
+    const target = event.target;
+    if (!(target instanceof HTMLSelectElement)) {
+      return;
+    }
+    applyRecordingSelection(target.value);
+  }
+
+  function readRecordingNumber(event: Event): number | null {
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLInputElement)) {
+      return null;
+    }
+    const value = Number(target.value);
+    return Number.isFinite(value) ? value : null;
+  }
+
+  function handleRecordingFpsInput(event: Event): void {
+    const value = readRecordingNumber(event);
+    recordingFps = value !== null && value > 0 ? value : null;
+  }
+
+  function handleRecordingBitrateInput(event: Event): void {
+    const value = readRecordingNumber(event);
+    recordingBitrate = value !== null && value > 0 ? value : null;
+  }
+
+  function handleRecordingGopInput(event: Event): void {
+    const value = readRecordingNumber(event);
+    recordingGop = value !== null && value > 0 ? value : null;
+  }
+
+  function handleRecordingQualityInput(event: Event): void {
+    const value = readRecordingNumber(event);
+    recordingQuality = value !== null && value >= 0 ? Math.min(51, value) : null;
+  }
+
   onDestroy(() => {
     clearRecordingTimer();
   });
@@ -549,7 +586,7 @@
       class="select select-2xs h-8 w-full max-w-full flex-none leading-none text-micro-tight uppercase tracking-[0.3em] text-surface-100 sm:w-56"
       aria-label="Recording source"
       value={recordingSourceSelection}
-      onchange={(event) => applyRecordingSelection((event.target as HTMLSelectElement).value)}
+      onchange={handleRecordingSourceSelection}
     >
       <optgroup label="Stream">
         <option value="multiplex">Multiplex output</option>
@@ -691,10 +728,7 @@
             min="0"
             step="1"
             value={recordingFps ?? ''}
-            oninput={(event) => {
-              const value = Number((event.currentTarget as HTMLInputElement).value);
-              recordingFps = Number.isFinite(value) && value > 0 ? value : null;
-            }}
+            oninput={handleRecordingFpsInput}
           />
           <span class="text-micro-tight uppercase tracking-[0.3em] text-surface-600">default auto</span>
         </label>
@@ -728,10 +762,7 @@
             min="0"
             step="1000"
             value={recordingBitrate ?? ''}
-            oninput={(event) => {
-              const value = Number((event.currentTarget as HTMLInputElement).value);
-              recordingBitrate = Number.isFinite(value) && value > 0 ? value : null;
-            }}
+            oninput={handleRecordingBitrateInput}
           />
           <span class="text-micro-tight uppercase tracking-[0.3em] text-surface-600">optional (ignored for multiplex)</span>
         </label>
@@ -743,10 +774,7 @@
             min="0"
             step="1"
             value={recordingGop ?? ''}
-            oninput={(event) => {
-              const value = Number((event.currentTarget as HTMLInputElement).value);
-              recordingGop = Number.isFinite(value) && value > 0 ? value : null;
-            }}
+            oninput={handleRecordingGopInput}
           />
           <span class="text-micro-tight uppercase tracking-[0.3em] text-surface-600">optional</span>
         </label>
@@ -759,10 +787,7 @@
             max="51"
             step="1"
             value={recordingQuality ?? ''}
-            oninput={(event) => {
-              const value = Number((event.currentTarget as HTMLInputElement).value);
-              recordingQuality = Number.isFinite(value) && value >= 0 ? Math.min(51, value) : null;
-            }}
+            oninput={handleRecordingQualityInput}
           />
           <span class="text-micro-tight uppercase tracking-[0.3em] text-surface-600">optional · lower = higher quality</span>
         </label>

@@ -221,6 +221,52 @@
     }
     closeGraphContextMenu();
   };
+
+  function readInputValue(event: Event): string | null {
+    const input = event.currentTarget;
+    return input instanceof HTMLInputElement ? input.value : null;
+  }
+
+  function readTextareaValue(event: Event): string | null {
+    const textarea = event.currentTarget;
+    return textarea instanceof HTMLTextAreaElement ? textarea.value : null;
+  }
+
+  function handleBoundaryDraftPortNameInput(portId: string, event: Event) {
+    const value = readInputValue(event);
+    if (value == null) return;
+    setBoundaryDraftPortName(portId, value);
+  }
+
+  function handleGroupDraftNameInput(event: Event) {
+    const value = readInputValue(event);
+    if (value == null) return;
+    setGroupDraftName(value);
+  }
+
+  function handleGroupDraftSummaryInput(event: Event) {
+    const value = readTextareaValue(event);
+    if (value == null) return;
+    setGroupDraftSummary(value);
+  }
+
+  function handleGroupDraftColorInput(event: Event) {
+    const value = readInputValue(event);
+    if (value == null) return;
+    setGroupDraftColor(value);
+  }
+
+  function handleNodeNameDraftInput(event: Event) {
+    const value = readInputValue(event);
+    if (value == null) return;
+    nodeNameDraft = value;
+  }
+
+  function handleNodeSummaryDraftInput(event: Event) {
+    const value = readTextareaValue(event);
+    if (value == null) return;
+    nodeSummaryDraft = value;
+  }
 </script>
 
 {#if $graphContextMenu.visible}
@@ -300,7 +346,7 @@
               type="text"
               placeholder="Port name"
               value={port.name}
-              oninput={(event) => setBoundaryDraftPortName(port.id, (event.currentTarget as HTMLInputElement).value)}
+              oninput={(event) => handleBoundaryDraftPortNameInput(port.id, event)}
             />
             <span class="rounded border border-surface-700 bg-surface-950/60 px-2 py-1 text-micro-tight uppercase tracking-[0.2em] text-surface-400">Generic</span>
             <button
@@ -336,7 +382,7 @@
             type="text"
             placeholder="Group name"
             value={draft.name}
-            oninput={(event) => setGroupDraftName((event.currentTarget as HTMLInputElement).value)}
+            oninput={handleGroupDraftNameInput}
           />
         </label>
         <label class="flex flex-col gap-1 text-xs text-surface-200">
@@ -346,7 +392,7 @@
             rows="3"
             placeholder="Summary"
             value={draft.summary}
-            oninput={(event) => setGroupDraftSummary((event.currentTarget as HTMLTextAreaElement).value)}
+            oninput={handleGroupDraftSummaryInput}
           ></textarea>
         </label>
         <label class="flex flex-col gap-1 text-xs text-surface-200">
@@ -356,14 +402,14 @@
               class="h-9 w-12 rounded border border-surface-800 bg-surface-950"
               type="color"
               value={draft.color || '#1f2937'}
-              oninput={(event) => setGroupDraftColor((event.currentTarget as HTMLInputElement).value)}
+              oninput={handleGroupDraftColorInput}
             />
             <input
               class="w-full rounded border border-surface-800 bg-surface-950 px-3 py-2 text-xs text-surface-100"
               type="text"
               placeholder="#1f2937"
               value={draft.color}
-              oninput={(event) => setGroupDraftColor((event.currentTarget as HTMLInputElement).value)}
+              oninput={handleGroupDraftColorInput}
             />
           </div>
         </label>
@@ -462,7 +508,7 @@
             type="text"
             placeholder="Node name"
             value={nodeNameDraft}
-            oninput={(event) => (nodeNameDraft = (event.currentTarget as HTMLInputElement).value)}
+            oninput={handleNodeNameDraftInput}
           />
         </label>
         <label class="flex flex-col gap-1 text-xs text-surface-200">
@@ -472,7 +518,7 @@
             rows="4"
             placeholder="Summary"
             value={nodeSummaryDraft}
-            oninput={(event) => (nodeSummaryDraft = (event.currentTarget as HTMLTextAreaElement).value)}
+            oninput={handleNodeSummaryDraftInput}
           ></textarea>
         </label>
       </div>

@@ -92,7 +92,7 @@
                   max="120"
                   step="0.01"
                   value={point.temp_c}
-                  oninput={(event) => onUpdatePoint(idx, 'temp_c', Number((event.target as HTMLInputElement).value))}
+                  oninput={(event) => onUpdatePoint(idx, 'temp_c', Number(event.currentTarget.value))}
                   disabled={idx === 0 || idx === form.curve.length - 1}
                 />
               </td>
@@ -103,7 +103,7 @@
                   min="0"
                   max="100"
                   value={point.percent}
-                  oninput={(event) => onUpdatePoint(idx, 'percent', Number((event.target as HTMLInputElement).value))}
+                  oninput={(event) => onUpdatePoint(idx, 'percent', Number(event.currentTarget.value))}
                 />
               </td>
               <td class="px-2 py-2 text-right">

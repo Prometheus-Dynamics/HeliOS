@@ -65,7 +65,7 @@
       <input
         class="mt-1 w-full border border-surface-700 bg-surface-900/70 px-3 py-2"
         value={cameraAlias}
-        oninput={(e) => onCameraAliasInput((e.currentTarget as HTMLInputElement).value)}
+        oninput={(e) => onCameraAliasInput(e.currentTarget.value)}
         placeholder="Optional"
       />
     </label>
@@ -74,7 +74,7 @@
       <select
         class="mt-1 w-full border border-surface-700 bg-surface-900/70 px-3 py-2"
         value={selectedBackendIndex}
-        onchange={(event) => onBackendChange(Number((event.currentTarget as HTMLSelectElement).value))}
+        onchange={(event) => onBackendChange(Number(event.currentTarget.value))}
       >
         {#each backends as backend, idx (`${backend?.kind ?? 'backend'}-${idx}`)}
           <option value={idx}>{backendLabel(backend)}</option>
@@ -89,7 +89,7 @@
       <select
         class="mt-1 w-full border border-surface-700 bg-surface-900/70 px-3 py-2"
         value={selectedFormat}
-        onchange={(event) => onFormatChange((event.currentTarget as HTMLSelectElement).value)}
+        onchange={(event) => onFormatChange(event.currentTarget.value)}
         disabled={!formats.length}
       >
         {#each formats as fmt (fmt)}
@@ -102,7 +102,7 @@
       <select
         class="mt-1 w-full border border-surface-700 bg-surface-900/70 px-3 py-2"
         value={selectedResolution}
-        onchange={(event) => onResolutionChange((event.currentTarget as HTMLSelectElement).value)}
+        onchange={(event) => onResolutionChange(event.currentTarget.value)}
         disabled={!resolutions.length}
       >
         {#each resolutions as res (res)}
@@ -119,7 +119,7 @@
           min="1"
           step="1"
           value={libcameraTargetFps ?? ''}
-          oninput={(e) => onLibcameraFpsInput((e.currentTarget as HTMLInputElement).value)}
+          oninput={(e) => onLibcameraFpsInput(e.currentTarget.value)}
           placeholder={intervalToFps(intervals[0])?.toFixed(0) ?? '120'}
         />
       {:else if backendKind === 'File'}
@@ -130,7 +130,7 @@
           min="1"
           step="1"
           value={fileBackendFps ?? ''}
-          oninput={(e) => onFileBackendFpsInput((e.currentTarget as HTMLInputElement).value)}
+          oninput={(e) => onFileBackendFpsInput(e.currentTarget.value)}
           placeholder="30"
         />
       {:else if backendKind === 'Netcam'}
@@ -141,7 +141,7 @@
           min="1"
           step="1"
           value={netcamTargetFps ?? ''}
-          oninput={(e) => onNetcamFpsInput((e.currentTarget as HTMLInputElement).value)}
+          oninput={(e) => onNetcamFpsInput(e.currentTarget.value)}
           placeholder={intervalToFps(intervals[0])?.toFixed(0) ?? '30'}
         />
       {:else}
@@ -149,7 +149,7 @@
         <select
           class="mt-1 w-full border border-surface-700 bg-surface-900/70 px-3 py-2"
           value={selectedIntervalIdx}
-          onchange={(event) => onIntervalChange(Number((event.currentTarget as HTMLSelectElement).value))}
+          onchange={(event) => onIntervalChange(Number(event.currentTarget.value))}
         >
           {#each intervals as interval, idx (`sel-${idx}`)}
             <option value={idx}>{fpsLabel(interval)}</option>
