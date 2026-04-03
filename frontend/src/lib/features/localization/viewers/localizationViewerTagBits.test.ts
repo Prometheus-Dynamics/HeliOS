@@ -25,7 +25,7 @@ describe('normalizeArucoBitGrid', () => {
     expect(grid?.rows[7]).toBe('00000000');
   });
 
-  test('pads legacy data-only rows with the declared border', () => {
+  test('pads data-only rows with the declared border', () => {
     const grid = normalizeArucoBitGrid({
       width: 6,
       border: 1,

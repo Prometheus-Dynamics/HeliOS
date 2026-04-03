@@ -84,7 +84,7 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
       getHttpClientBase();
       return;
     } catch {
-      // fall back to legacy injected base when local storage/env resolution fails
+      // Use the server-provided base when local resolution is unavailable.
     }
     if (!deps.apiBase) return;
     OpenAPI.BASE = deps.apiBase.replace(/\/+$/, '');

@@ -35,12 +35,6 @@
     calibrationGuidedCaptureToken: unknown;
     calibrationGuidedAccumulateLive: boolean;
   };
-  type LegacyStreamManifest = StreamInfo['manifest'] & {
-    pipeline_output?: string | null;
-  };
-  type LegacyStreamIdentity = StreamInfo['manifest']['identity'] & {
-    alias?: string | null;
-  };
   type CameraStreamSectionCtx = {
     streamBindings: StreamBindings;
     stream: StreamInfo | null;
@@ -63,7 +57,7 @@
   const recordingActive = $derived(streamRecordingActive(ctx.stream));
   const streamStatus = $derived.by(() => streamHealthStatus(ctx.stream));
   const streamAlias = $derived.by(() => {
-    const identity = ctx.stream?.manifest?.identity as LegacyStreamIdentity | undefined;
+    const identity = ctx.stream?.manifest?.identity;
     const alias = identity?.alias;
     return typeof alias === 'string' && alias.trim().length > 0 ? alias : null;
   });
@@ -112,7 +106,7 @@
     return `left:${left}px;top:${top}px;width:${width}px;height:${height}px;`;
   });
   const undistortCalibrationWarning = $derived.by(() => {
-    const manifest = (ctx.stream?.manifest as LegacyStreamManifest | null) ?? null;
+    const manifest = ctx.stream?.manifest ?? null;
     if (!manifest) return null;
     const calib = manifest?.calibration ?? null;
     const pipelineState = ctx.pipelineState;
@@ -127,7 +121,7 @@
     }
     if (!outputRaw) outputRaw = pipelineState?.selectedPipelineOutput ?? null;
     if (!outputRaw) {
-      outputRaw = typeof manifest?.active_pipeline_output === 'string' ? manifest.active_pipeline_output : manifest?.pipeline_output;
+      outputRaw = typeof manifest.active_pipeline_output === 'string' ? manifest.active_pipeline_output : null;
     }
     const output = typeof outputRaw === 'string' ? outputRaw.trim().toLowerCase() : '';
     const canonical = output === 'frame' ? 'raw' : output;

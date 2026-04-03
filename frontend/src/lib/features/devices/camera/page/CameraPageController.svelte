@@ -1350,26 +1350,6 @@
         body: JSON.stringify({ crosshair: normalized, enabled: normalizedEnabled })
       });
       if (!response.ok) {
-        if (response.status === 404) {
-          const px = crosshairToPixels(normalized);
-          if (px) {
-            const fallbackResponse = await apiFetchResponse(apiPath(`/streams/${encodeURIComponent(effectiveId)}/pipeline/inputs`), {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({
-                inputs: {
-                  crosshair_x: px.x,
-                  crosshair_y: px.y,
-                  draw_crosshair: normalizedEnabled
-                }
-              })
-            });
-            if (fallbackResponse.ok) {
-              streamState.streamCrosshairWarning = 'Using compatibility crosshair fallback on this device backend.';
-              return;
-            }
-          }
-        }
         const text = await response.text().catch(() => '');
         throw new Error(text || `HTTP ${response.status}`);
       }

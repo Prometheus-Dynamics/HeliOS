@@ -9,9 +9,7 @@ type ManifestLayoutEntry = {
   row?: unknown;
   column?: unknown;
   pipeline_id?: unknown;
-  pipelineId?: unknown;
   output_key?: unknown;
-  outputKey?: unknown;
 };
 
 function asRecord<T extends Record<string, unknown>>(value: unknown): T | null {
@@ -91,11 +89,11 @@ export function parseManifestLayout(
     if (!Number.isFinite(row) || !Number.isFinite(column)) continue;
     if (row < 0 || column < 0) continue;
     if (row >= rows || column >= columns) continue;
-    const pipelineIdRaw = entry.pipeline_id ?? entry.pipelineId ?? null;
+    const pipelineIdRaw = entry.pipeline_id ?? null;
     let pipelineId = typeof pipelineIdRaw === 'string' ? pipelineIdRaw.trim() : '';
     if (pipelineId === options.rawPipelineUuid) pipelineId = options.rawPipelineId;
     slots[`${row}:${column}`] = pipelineId.length ? pipelineId : null;
-    const outputKeyRaw = entry.output_key ?? entry.outputKey ?? null;
+    const outputKeyRaw = entry.output_key ?? null;
     let outputKey = typeof outputKeyRaw === 'string' ? outputKeyRaw.trim() : '';
     if (pipelineId === options.rawPipelineId && outputKey.toLowerCase() === 'frame') {
       outputKey = 'raw';

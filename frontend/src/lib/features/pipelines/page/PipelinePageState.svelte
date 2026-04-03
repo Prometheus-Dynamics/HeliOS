@@ -37,16 +37,16 @@
   import { createPipelineGraphHandlers } from './pipelinePageGraphHandlers';
   import { createPipelineImportExport, PIPELINE_EXPORT_VERSION, SUPPORTED_PIPELINE_EXPORT_VERSIONS } from './pipelineImportExport';
   import { createPipelinePageHelpers } from './pipelinePageHelpers';
-  import { createPipelineIdeState } from './pipelineIdeState';
-  import { setupPipelineRegistryState } from './pipelineRegistryState';
-  import { setupPipelineGraphState } from './pipelineGraphState';
-  import PipelineTuneState from '$lib/features/pipelines/page/PipelineTuneState.svelte';
+  import { createPipelineIdeState } from './pipelineIdeState.svelte';
+  import { setupPipelineRegistryState } from './pipelineRegistryState.svelte';
+  import { setupPipelineGraphState } from './pipelineGraphState.svelte';
+  import PipelineTuneWorkspace from '$lib/features/pipelines/page/PipelineTuneWorkspace.svelte';
   import {
     isPipelineNodeValue,
     isRecord,
     numberFromMetadata,
     portMetadataFromFlatKeys
-  } from './pipelineTuneState';
+  } from './pipelineTuneHelpers';
   import {
     extractInputValues,
     isDaedalusPlan,
@@ -898,7 +898,7 @@
 </script>
 
 
-<PipelineTuneState
+<PipelineTuneWorkspace
   {activeTab}
   {pipelineUpdates}
   {pipelineUpdatesReady}
@@ -933,4 +933,4 @@
     {@const ctx = { ...baseCtx, ...tune }}
     {@render routeChildren?.({ ctx })}
   {/snippet}
-</PipelineTuneState>
+</PipelineTuneWorkspace>

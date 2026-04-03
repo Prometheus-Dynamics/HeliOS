@@ -328,12 +328,11 @@ const collectPipelineIdsForStream = (stream: StreamInfo): string[] => {
     const raw = typeof value === 'string' ? value.trim() : '';
     if (raw) ids.add(raw);
   };
-  add(manifest?.pipeline_id);
   add(manifest?.active_pipeline_id);
   if (Array.isArray(manifest?.pipelines)) {
     manifest.pipelines.forEach((entry) => {
       const binding = asRecord(entry);
-      add(binding?.pipeline_id ?? binding?.pipelineId ?? binding?.id);
+      add(binding?.pipeline_id);
     });
   }
   const pipelineLayout = asRecord(manifest?.pipeline_layout);
@@ -371,7 +370,7 @@ export async function fetchLocalizationPipelineSources(): Promise<LocalizationPi
         if (!graph) {
           const bindings = Array.isArray(stream?.manifest?.pipelines) ? stream.manifest.pipelines : [];
           const binding = bindings.find((entry) => String(asRecord(entry)?.pipeline_id ?? '').trim() === pipelineId);
-          graph = asRecord(binding)?.pipeline_graph ?? asRecord(stream?.manifest)?.pipeline_graph ?? null;
+          graph = asRecord(binding)?.pipeline_graph ?? null;
         }
         if (!graph) {
           try {

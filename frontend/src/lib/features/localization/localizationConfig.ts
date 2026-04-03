@@ -52,7 +52,7 @@ export type LocalizationProfile = {
   snapPitchToGround?: boolean;
   enabled?: boolean;
   color?: string | null;
-  viewEnabled?: boolean;
+  viewEnabled: boolean;
   temporalStabilization?: LocalizationTemporalStabilizationConfig;
   sources: LocalizationSourceConfig[];
   solvers: LocalizationSolverConfig[];

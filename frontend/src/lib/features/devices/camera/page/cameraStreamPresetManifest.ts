@@ -60,9 +60,7 @@ const identityRecordFor = (manifest?: StreamManifest | null): Record<string, unk
 function extractFileHandle(handle: unknown): { fps?: number; loop_forever?: boolean; paths?: string[] } | null {
   const record = asRecord(handle);
   if (!record) return null;
-  const direct = String(record.type ?? '').toLowerCase() === 'file' ? record : null;
-  const legacy = asRecord(record.File);
-  const resolved = direct ?? legacy;
+  const resolved = asRecord(record.File);
   if (!resolved) return null;
   return {
     fps: asPositiveNumber(resolved.fps) ?? undefined,
@@ -197,10 +195,11 @@ export function buildCameraStreamPresetManifest(input: CameraStreamPresetManifes
         ? fallbackFps
         : null;
     captureHandle = {
-      type: 'file',
-      fps,
-      loop_forever: Boolean(input.fileBackendLoop),
-      paths: dedupedPaths.length ? dedupedPaths : fallbackPaths
+      File: {
+        fps,
+        loop_forever: Boolean(input.fileBackendLoop),
+        paths: dedupedPaths.length ? dedupedPaths : fallbackPaths
+      }
     };
   }
 

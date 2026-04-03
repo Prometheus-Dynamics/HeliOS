@@ -11,7 +11,7 @@ import { fromApiGraphPlan } from '$lib/features/pipelines/graphConverters';
 import { decodeDaedalusValue } from '$lib/features/pipelines/daedalusGraph/valueCodec';
 import { getDataTypeVariants } from '$lib/features/pipelines/valueFormatting';
 import { serializeGraphPlan } from '$lib/features/pipelines/graph';
-import { normalizeDaedalusRegistry } from '$lib/features/pipelines/controller/daedalusRegistry';
+import { normalizeDaedalusRegistry } from '$lib/features/pipelines/controller/daedalusRegistry/normalization';
 import { createPipelineTuningApply } from './tuningApply';
 import { createPipelineTuningDrafts } from './tuningDrafts';
 import { clamp, createPipelineTuningPointerHandlers } from './tuningPointers';
@@ -841,26 +841,15 @@ export function createPipelineTuningController(state: PipelineTuningState, deps:
     const manifestRecord = asRecord(manifest);
     const readGraph = (value: unknown) => {
       const record = asRecord(value);
-      return record?.pipeline_graph ?? record?.pipelineGraph ?? record?.graph ?? null;
+      return record?.pipeline_graph ?? null;
     };
     const activeId = asTrimmedString(manifestRecord?.active_pipeline_id);
-    const legacyId = asTrimmedString(manifestRecord?.pipeline_id);
-    if ((activeId && activeId === normalized) || (legacyId && legacyId === normalized)) {
-      return readGraph(manifest);
-    }
+    if (activeId && activeId === normalized) return null;
     if (Array.isArray(manifestRecord?.pipelines)) {
       for (const entry of manifestRecord.pipelines) {
         const entryRecord = asRecord(entry);
         if (!entryRecord) continue;
-        const raw =
-          typeof entryRecord.pipeline_id === 'string'
-            ? entryRecord.pipeline_id
-            : typeof entryRecord.pipelineId === 'string'
-              ? entryRecord.pipelineId
-              : typeof entryRecord.id === 'string'
-                ? entryRecord.id
-                : '';
-        const entryId = raw.trim();
+        const entryId = typeof entryRecord.pipeline_id === 'string' ? entryRecord.pipeline_id.trim() : '';
         if (entryId && entryId === normalized) {
           return readGraph(entry);
         }

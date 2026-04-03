@@ -179,12 +179,8 @@
   });
   const streamWires = $derived.by<StreamPipelineWire[]>(() => {
     const manifest = ctx.stream?.manifest ?? null;
-    const manifestRecord = asRecord(manifest);
-    if (Array.isArray(manifest?.pipeline_wires)) {
-      return manifest.pipeline_wires;
-    }
-    const legacyWires = manifestRecord?.pipelineWires;
-    return Array.isArray(legacyWires) ? legacyWires.filter(isPipelineWire) : [];
+    const wires = manifest?.pipeline_wires;
+    return Array.isArray(wires) ? wires : [];
   });
 </script>
 

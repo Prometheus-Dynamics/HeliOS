@@ -188,10 +188,11 @@ export function buildCameraStreamManifest(
         ? fallbackFps
         : null;
     captureHandle = {
-      type: 'file',
-      fps,
-      loop_forever: Boolean(input.draft.fileBackendLoop),
-      paths: dedupedPaths.length ? dedupedPaths : fallbackPaths
+      File: {
+        fps,
+        loop_forever: Boolean(input.draft.fileBackendLoop),
+        paths: dedupedPaths.length ? dedupedPaths : fallbackPaths
+      }
     };
   }
 

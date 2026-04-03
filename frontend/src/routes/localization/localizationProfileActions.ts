@@ -67,9 +67,7 @@ export const createLocalizationProfileActions = (deps: LocalizationProfileAction
   const setProfileViewEnabled = (profileId: string, enabled: boolean): void => {
     const profile = deps.profiles().find((entry) => entry.id === profileId) ?? null;
     if (!profile) return;
-    // `viewEnabled` must be persisted as an explicit boolean.
-    // Using `Boolean(...)` here breaks the "disable" path when `viewEnabled` is undefined,
-    // because `Boolean(undefined) === false` would early-return and never persist `false`.
+    // `viewEnabled` is canonical UI state and must stay explicit.
     if (profile.viewEnabled === enabled) return;
     void deps.localizationProfiles.persistProfileUpdate({ ...profile, viewEnabled: enabled });
   };

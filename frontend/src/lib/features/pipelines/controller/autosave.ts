@@ -121,18 +121,8 @@ export function createPipelineAutosaveManager(deps: PipelineAutosaveDeps) {
             15_000,
             'Pipeline save'
           );
-        } catch {
-          // Fallback for older backends that only support POST create.
-          return await withTimeout(
-            PipelinesApi.uploadGraph({
-              requestBody: {
-                graph: serialized,
-                name: pipeline.name
-              }
-            }),
-            15_000,
-            'Pipeline save'
-          );
+        } catch (error) {
+          throw error;
         }
       })()) as PipelineDocument;
       const updatedGraph = fromApiGraphPlan(response.graph ?? {});

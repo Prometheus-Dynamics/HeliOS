@@ -849,13 +849,8 @@
     rigLayoutState = state;
   });
 
-  function computeViewProfiles(profiles: LocalizationProfile[], activeProfile: LocalizationProfile | null): LocalizationProfile[] {
+  function computeViewProfiles(profiles: LocalizationProfile[]): LocalizationProfile[] {
     if (profiles.length === 0) return [];
-    const hasExplicit = profiles.some((profile) => typeof profile.viewEnabled === 'boolean');
-    if (!hasExplicit) {
-      // Legacy configs may not have `viewEnabled`; default to showing the active profile until persisted.
-      return activeProfile && activeProfile.enabled !== false ? [activeProfile] : [];
-    }
     // Strict: only explicitly enabled profiles drive 3D marker visibility.
     return profiles.filter((profile) => profile.enabled !== false && profile.viewEnabled === true);
   }
@@ -872,7 +867,7 @@
     activeProfile: LocalizationProfile | null,
     sources: LocalizationPipelineSource[]
   ): LocalizationPipelineSource[] {
-    const viewProfiles = computeViewProfiles(profiles, activeProfile);
+    const viewProfiles = computeViewProfiles(profiles);
     const enabledIds = new Set<string>();
     const enabledStreamOutputs = new Set<string>();
     for (const profile of viewProfiles) {
@@ -1349,7 +1344,7 @@
 
   const activeProfileColor = $derived(computeActiveProfileColor($activeProfile ?? null, $profiles, profileIndexById));
 
-  const viewProfiles = $derived(computeViewProfiles($profiles, $activeProfile ?? null));
+  const viewProfiles = $derived(computeViewProfiles($profiles));
   const filteredProfiles = $derived.by<LocalizationProfile[]>(() => {
     const q = profileSearch.trim().toLowerCase();
     if (!q) return $profiles;
@@ -1835,19 +1830,6 @@
       excludedTagIdsTargetId = profile.id;
       excludedTagIdsError = null;
     }
-  });
-
-  $effect(() => {
-    const config = $localizationConfig;
-    if (!config || config.profiles.length === 0) return;
-    const hasExplicit = config.profiles.some((profile) => typeof profile.viewEnabled === 'boolean');
-    if (hasExplicit) return;
-    const activeId = config.activeProfileId ?? config.profiles[0]?.id ?? null;
-    if (!activeId) return;
-    const nextProfiles = config.profiles.map((profile) =>
-      profile.id === activeId ? { ...profile, viewEnabled: true } : profile
-    );
-    void localizationProfiles.persist({ ...config, profiles: nextProfiles });
   });
 
   $effect(() => {

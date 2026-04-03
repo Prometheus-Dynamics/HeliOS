@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { PipelineController } from '$lib/features/pipelines/controller';
+  import type { PipelineController } from '$lib/features/pipelines/controllerCore';
 
   type RegistryStores = PipelineController['stores']['registry'];
   type RegistryHelpers = PipelineController['helpers']['registry'];

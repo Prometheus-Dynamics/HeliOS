@@ -163,12 +163,8 @@ export function createPipelineMetricsManager(deps: PipelineMetricsManagerDeps) {
           return true;
         }
         const manifest = asRecord(streamInfo.manifest);
-        const direct =
-          String(manifest?.active_pipeline_id ?? "").trim() ||
-          String(manifest?.pipeline_id ?? "").trim() ||
-          String(manifest?.pipelineId ?? "").trim() ||
-          String(asRecord(manifest?.pipeline)?.id ?? "").trim();
-        if (direct && direct === pipelineId) {
+        const direct = String(manifest?.active_pipeline_id ?? '').trim();
+        if (direct === pipelineId) {
           return true;
         }
 
@@ -176,23 +172,9 @@ export function createPipelineMetricsManager(deps: PipelineMetricsManagerDeps) {
         if (Array.isArray(assignments)) {
           return assignments.some((entry) => {
             const entryRecord = asRecord(entry);
-            const resolvedId = String(
-              entryRecord?.pipeline_id ?? entryRecord?.pipelineId ?? asRecord(entryRecord?.pipeline)?.id ?? "",
-            ).trim();
+            const resolvedId = String(entryRecord?.pipeline_id ?? '').trim();
             return resolvedId === pipelineId;
           });
-        }
-        if (assignments && typeof assignments === "object") {
-          return Object.values(assignments).some((entry) => {
-            const entryRecord = asRecord(entry);
-            const id = String(
-              entryRecord?.pipeline_id ?? entryRecord?.pipelineId ?? asRecord(entryRecord?.pipeline)?.id ?? "",
-            ).trim();
-            return id === pipelineId;
-          });
-        }
-        if (aliasMatches(manifest?.pipeline_graph)) {
-          return true;
         }
         if (Array.isArray(manifest?.pipelines)) {
           return manifest.pipelines.some((entry) => aliasMatches(asRecord(entry)?.pipeline_graph));

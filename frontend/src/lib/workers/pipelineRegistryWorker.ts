@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 
-import { normalizeDaedalusRegistry } from '$lib/features/pipelines/controller/daedalusRegistry';
+import { normalizeDaedalusRegistry } from '$lib/features/pipelines/controller/daedalusRegistry/normalization';
 import { cloneRegistryEntry } from '$lib/features/pipelines/cloneHelpers';
 import { buildRegistryVariants } from '$lib/features/pipelines/registryUtils';
 import type { DaedalusRegistryNode } from '$lib/api/client';

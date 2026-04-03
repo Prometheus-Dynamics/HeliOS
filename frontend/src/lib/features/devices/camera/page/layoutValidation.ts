@@ -21,11 +21,6 @@ type ManifestPipelineBinding = {
   pipeline_id?: string | null;
 };
 
-type LegacyPipelineManifest = StreamManifest & {
-  pipeline_id?: string | null;
-  pipelines?: ManifestPipelineBinding[] | null;
-};
-
 export function extractGraphOutputPorts(graph: unknown): string[] {
   return extractGraphOutputPortsImpl(graph);
 }
@@ -53,13 +48,11 @@ export function isPipelineApplied(state: PipelineLayoutValidationState, pipeline
   if (pipelineId === RAW_PIPELINE_ID) return true;
   const normalized = String(pipelineId).trim();
   if (!normalized.length) return false;
-  const manifest = state.manifestState as LegacyPipelineManifest | null;
-  const pipelines = manifest?.pipelines ?? [];
+  const pipelines = state.manifestState?.pipelines ?? [];
   if (Array.isArray(pipelines)) {
     return pipelines.some((entry) => String(entry?.pipeline_id ?? '').trim() === normalized);
   }
-  const legacy = manifest?.pipeline_id;
-  return typeof legacy === 'string' && legacy.trim() === normalized;
+  return false;
 }
 
 export function gridHasUnappliedPipelines(state: PipelineLayoutValidationState): boolean {

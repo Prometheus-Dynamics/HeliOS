@@ -60,9 +60,7 @@ export function isNetcamBackend(kind: unknown): boolean {
 export function extractFileHandle(handle: unknown): { fps?: number; loop_forever?: boolean; paths?: string[] } | null {
   const record = asRecord(handle);
   if (!record) return null;
-  const direct = String(record.type ?? '').toLowerCase() === 'file' ? record : null;
-  const legacy = asRecord(record.File);
-  const resolved = direct ?? legacy;
+  const resolved = asRecord(record.File);
   if (!resolved) return null;
   return {
     fps: asPositiveNumber(resolved.fps) ?? undefined,
@@ -75,9 +73,7 @@ export function extractFileHandle(handle: unknown): { fps?: number; loop_forever
 
 function buildNetcamHandle(handle: unknown, fallbackUrl: string): BackendHandle {
   const record = asRecord(handle);
-  const direct = record && String(record.type ?? '').toLowerCase() === 'netcam' ? record : null;
-  const legacy = record ? asRecord(record.Netcam) : null;
-  const resolved = direct ?? legacy;
+  const resolved = record ? asRecord(record.Netcam) : null;
   return {
     Netcam: {
       url: asTrimmedString(resolved?.url) || fallbackUrl,

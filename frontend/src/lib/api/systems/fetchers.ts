@@ -168,11 +168,6 @@ async function postI2cRescan(timeoutMs: number): Promise<I2cInventoryPayload | n
     { timeoutMs, ...SYSTEMS_RETRY_OPTIONS }
   );
   if (!response.ok) {
-    if (response.status === 404) {
-      // Compatibility: older backends only expose GET /peripherals/i2c.
-      // Treat scan as a no-op and let the caller fetch the latest inventory next.
-      return null;
-    }
     const text = await response.text().catch(() => '');
     throw new Error(text || `I2C rescan failed (${response.status})`);
   }
@@ -210,16 +205,7 @@ async function fetchImuStatus(timeoutMs: number): Promise<ImuStatusPayload> {
 }
 
 export async function refreshImuStatus(): Promise<ImuStatus> {
-  try {
-    return mapImuStatus(await fetchImuStatus(SENSOR_REQUEST_TIMEOUT_MS));
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err ?? '');
-    // Gracefully degrade if the IMU endpoint isn’t present or disabled.
-    if (message.includes('404')) {
-      return emptyImuStatus();
-    }
-    throw err;
-  }
+  return mapImuStatus(await fetchImuStatus(SENSOR_REQUEST_TIMEOUT_MS));
 }
 
 export async function updateImuConfig(request: {

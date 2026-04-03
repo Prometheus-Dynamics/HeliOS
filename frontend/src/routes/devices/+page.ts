@@ -1,6 +1,6 @@
-import { fetchDevicesPageData } from '$lib/api/devicesPage';
+import { fetchDevicesPageData } from '$lib/api/devices/fetchers';
 import type { PageLoad } from './$types';
-import type { DevicesPayload } from '$lib/api/devicesPage';
+import type { DevicesPayload } from '$lib/api/devices/types';
 
 const EMPTY_DEVICES: DevicesPayload = {
   summary: [],

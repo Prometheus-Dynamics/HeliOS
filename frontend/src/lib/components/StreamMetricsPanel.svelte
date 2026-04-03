@@ -394,10 +394,8 @@
     try {
       const stream = await StreamsApi.getStream({ id: captureSessionId }).catch(() => null);
       const manifest = stream?.manifest ?? null;
-      const manifestRecord = asRecord(manifest);
       const pipelineId =
         (typeof manifest?.active_pipeline_id === 'string' && manifest.active_pipeline_id.trim()) ||
-        (typeof manifestRecord?.pipeline_id === 'string' && manifestRecord.pipeline_id.trim()) ||
         (typeof manifest?.pipelines?.[0]?.pipeline_id === 'string' && manifest.pipelines[0].pipeline_id.trim()) ||
         null;
       if (!pipelineId) return;

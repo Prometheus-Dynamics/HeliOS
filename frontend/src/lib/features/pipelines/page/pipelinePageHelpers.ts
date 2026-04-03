@@ -19,55 +19,8 @@ export type PipelinePageHelpersDeps = {
   RAW_STREAM_PIPELINE_ID: string;
 };
 
-type UnknownRecord = Record<string, unknown>;
-type LegacyPipelineBinding = {
-  pipelineId?: string | null;
-  id?: string | null;
-  pipeline?: { id?: string | null; graph?: unknown } | null;
-  pipelineGraph?: unknown;
-  pipeline_graph?: unknown;
-};
-
-const asRecord = (value: unknown): UnknownRecord | null =>
-  value && typeof value === 'object' ? (value as UnknownRecord) : null;
-
-const readString = (record: UnknownRecord | null, ...keys: string[]): string | null => {
-  for (const key of keys) {
-    const value = record?.[key];
-    if (typeof value === 'string' && value.trim()) {
-      return value.trim();
-    }
-  }
-  return null;
-};
-
-const pipelineAssignments = (manifest: StreamManifest): Array<StreamPipelineBinding | LegacyPipelineBinding> => {
-  if (Array.isArray(manifest.pipelines)) {
-    return manifest.pipelines;
-  }
-  const legacyAssignments = asRecord(manifest)?.pipelines;
-  if (Array.isArray(legacyAssignments)) {
-    return legacyAssignments.filter((entry): entry is LegacyPipelineBinding => asRecord(entry) !== null);
-  }
-  const assignmentsRecord = asRecord(legacyAssignments);
-  if (!assignmentsRecord) {
-    return [];
-  }
-  return Object.values(assignmentsRecord).filter((entry): entry is LegacyPipelineBinding => asRecord(entry) !== null);
-};
-
-const bindingPipelineId = (binding: StreamPipelineBinding | LegacyPipelineBinding): string | null => {
-  const bindingRecord = asRecord(binding);
-  return (
-    readString(bindingRecord, 'pipeline_id', 'pipelineId', 'id') ??
-    readString(asRecord(bindingRecord?.pipeline), 'id')
-  );
-};
-
-const bindingPipelineGraph = (binding: StreamPipelineBinding | LegacyPipelineBinding): unknown | null => {
-  const bindingRecord = asRecord(binding);
-  return bindingRecord?.pipeline_graph ?? bindingRecord?.pipelineGraph ?? asRecord(bindingRecord?.pipeline)?.graph ?? null;
-};
+const pipelineAssignments = (manifest: StreamManifest): StreamPipelineBinding[] =>
+  Array.isArray(manifest.pipelines) ? manifest.pipelines : [];
 
 export const createPipelinePageHelpers = (deps: PipelinePageHelpersDeps) => {
   const pipelineLabelById = (pipelineId: string | null): string => {
@@ -102,17 +55,8 @@ export const createPipelinePageHelpers = (deps: PipelinePageHelpersDeps) => {
     if (!pipelineId) return false;
     const manifest = stream.manifest ?? null;
     if (!manifest) return false;
-    const manifestRecord = asRecord(manifest);
-    const direct =
-      String(
-        manifest.active_pipeline_id ??
-          readString(manifestRecord, 'pipeline_id', 'activePipelineId', 'pipelineId') ??
-          readString(asRecord(manifestRecord?.pipeline), 'id') ??
-          ''
-      ).trim();
-    if (direct && direct === pipelineId) return true;
-
-    return pipelineAssignments(manifest).some((binding) => bindingPipelineId(binding) === pipelineId);
+    if (manifest.active_pipeline_id?.trim() === pipelineId) return true;
+    return pipelineAssignments(manifest).some((binding) => binding.pipeline_id.trim() === pipelineId);
   };
 
   const streamLabel = (stream: StreamInfo): string => resolveStreamLabel(stream, 'Stream');
@@ -120,30 +64,11 @@ export const createPipelinePageHelpers = (deps: PipelinePageHelpersDeps) => {
   const streamGraphForPipeline = (stream: StreamInfo, pipelineId: string): unknown | null => {
     const manifest = stream.manifest ?? null;
     if (!manifest) return null;
-    const manifestRecord = asRecord(manifest);
-    const directId =
-      String(
-        readString(manifestRecord, 'pipeline_id', 'pipelineId') ??
-          ''
-      ).trim();
-    if (directId && directId === pipelineId) return manifestRecord?.pipeline_graph ?? null;
-
-    const activeId =
-      String(
-        manifest.active_pipeline_id ??
-          readString(manifestRecord, 'activePipelineId') ??
-          ''
-      ).trim();
-    if (activeId && activeId === pipelineId) {
-      const direct = manifestRecord?.pipeline_graph ?? null;
-      if (direct) return direct;
-    }
-
     for (const binding of pipelineAssignments(manifest)) {
-      if (bindingPipelineId(binding) !== pipelineId) {
+      if (binding.pipeline_id.trim() !== pipelineId) {
         continue;
       }
-      const graph = bindingPipelineGraph(binding);
+      const graph = binding.pipeline_graph ?? null;
       if (graph) {
         return graph;
       }

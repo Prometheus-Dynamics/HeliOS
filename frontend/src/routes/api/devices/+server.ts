@@ -1,6 +1,6 @@
 import type { RequestHandler } from '@sveltejs/kit';
 
-import { fetchDevicesPageData } from '$lib/api/devicesPage';
+import { fetchDevicesPageData } from '$lib/api/devices/fetchers';
 
 const JSON_HEADERS = { 'content-type': 'application/json' };
 

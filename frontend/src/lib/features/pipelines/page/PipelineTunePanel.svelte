@@ -377,11 +377,7 @@
     return normalized;
   };
   const readManifestWires = (stream: StreamInfo | null | undefined): StreamPipelineWire[] => {
-    const manifestRecord =
-      stream?.manifest && typeof stream.manifest === 'object'
-        ? (stream.manifest as Record<string, unknown>)
-        : null;
-    const wires = stream?.manifest?.pipeline_wires ?? manifestRecord?.pipelineWires ?? [];
+    const wires = stream?.manifest?.pipeline_wires ?? [];
     return Array.isArray(wires) ? wires : [];
   };
   const buildNextPipelineWires = (

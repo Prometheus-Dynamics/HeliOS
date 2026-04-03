@@ -1,5 +1,4 @@
-// Lightweight compatibility types for the legacy pipeline UI.
-// These mirror the old API shapes but are decoupled from the removed bindings.
+// Frontend-owned pipeline DTOs for UI state and server payload mapping.
 
 export type ChannelPolicy = 'NewestWins' | 'OldestWins' | 'DropAll';
 

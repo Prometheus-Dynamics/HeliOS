@@ -104,9 +104,9 @@ const nodeSyncPortAssignments = $derived.by<PortSyncAssignments>(() => {
   if (!showDetailedNode || !nodeSyncOverlay?.enabled) {
     return assignments;
   }
-  const legacyGroups = node?.sync?.groups ?? null;
-  if (legacyGroups && legacyGroups.length > 0) {
-    legacyGroups.forEach((group: PipelineSyncGroupConfig, index: number) => {
+  const syncGroups = node?.sync?.groups ?? null;
+  if (syncGroups && syncGroups.length > 0) {
+    syncGroups.forEach((group: PipelineSyncGroupConfig, index: number) => {
       const groupId = group.id ?? `group-${index + 1}`;
       const color = SYNC_GROUP_COLORS[index % SYNC_GROUP_COLORS.length];
       group.ports?.forEach((port: string) => {

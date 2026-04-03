@@ -42,7 +42,7 @@ const collectPorts = (value: unknown, ports: Set<string>) => {
 export const extractGraphOutputPorts = (graph: unknown): string[] => {
   const graphRecord = asRecord(graph);
   if (!graphRecord) return [];
-  const nested = graphRecord.graph ?? graphRecord.pipeline_graph ?? graphRecord.pipelineGraph;
+  const nested = graphRecord.graph;
   const nestedRecord = asRecord(nested);
   if (nestedRecord && nested !== graph) {
     return extractGraphOutputPorts(nestedRecord);

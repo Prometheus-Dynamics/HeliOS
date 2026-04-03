@@ -1,6 +1,6 @@
 import { writable } from 'svelte/store';
 import { createPipelineUpdatesStore } from './updatesStore';
-import { createPipelineController } from './controller';
+import { createPipelineController } from './controllerCore';
 import type { PipelinePagePayload } from '$lib/types/pipeline';
 
 export type PipelineActiveTab = 'pipeline' | 'tune';

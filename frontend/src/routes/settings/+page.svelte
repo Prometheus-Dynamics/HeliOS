@@ -56,10 +56,6 @@
     firmware: faMicrochip
   };
 
-  const LEGACY_WORKSPACE_TAB_ALIASES: Record<string, WorkspaceTabId> = {
-    snapshots: 'diagnostics'
-  };
-
   let activeWorkspaceTab = $state<WorkspaceTabId>('network');
   let bootloaderStatus = $state<BootloaderStatus | null>(null);
   let bootloaderError = $state<string | null>(null);
@@ -164,9 +160,6 @@
   function normalizeWorkspaceTab(value: string | null): WorkspaceTabId | null {
     if (!value) return null;
     const normalized = value.trim().toLowerCase();
-    if (normalized in LEGACY_WORKSPACE_TAB_ALIASES) {
-      return LEGACY_WORKSPACE_TAB_ALIASES[normalized];
-    }
     const match = workspaceTabs.find((tab) => tab.id === normalized);
     return match?.id ?? null;
   }

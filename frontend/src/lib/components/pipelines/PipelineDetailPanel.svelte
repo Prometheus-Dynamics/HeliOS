@@ -1,7 +1,7 @@
 <script lang="ts">
 import { createEventDispatcher } from 'svelte';
 import { emptyPipelineGraphPlan } from '$lib/features/pipelines/graph';
-import type { InspectorTabKey } from '$lib/features/pipelines/controller';
+import type { InspectorTabKey } from '$lib/features/pipelines/controller/types';
 import type { StreamInfo } from '$lib/api/client';
   import type { GraphEdgeSelection, GraphPoint, PipelineDetailContext, PipelineOutputEntry, PipelinePortEntry } from './types';
 import type {
@@ -39,11 +39,6 @@ import type {
   type GraphEditorHandle = {
     focusOnGraphCenter?: () => void;
     focusOnNode?: (nodeId: string, options?: { port?: string | null }) => void;
-  };
-  type LegacyPipelineRef = {
-    pipeline_id?: unknown;
-    pipelineId?: unknown;
-    id?: unknown;
   };
 
   const props = $props<{
@@ -103,27 +98,19 @@ const metricsInspectorActive = $derived.by(() => activeInspectorTab === 'metrics
 const normalizedGraphSearchQuery = $derived.by(() => graphSearchQuery.trim());
 	const canShowEngineConfig = $derived.by(() => graphPlan?.format === 'daedalus');
   const normalizeId = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
-  const asRecord = (value: unknown): Record<string, unknown> | null =>
-    value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
-  const legacyPipelineId = (value: unknown): string => {
-    const record = asRecord(value) as LegacyPipelineRef | null;
-    return normalizeId(record?.pipeline_id ?? record?.pipelineId ?? record?.id);
-  };
 
 	type ProfilerStreamOption = { id: string; label: string };
 	const streamUsesPipeline = (device: CaptureDeviceStatus, pipelineId: string): boolean => {
 	  if (!device || !pipelineId) return false;
 	  const manifest = device.manifest ?? null;
 	  if (!manifest) return false;
-	  const manifestRecord = asRecord(manifest);
 	  const target = normalizeId(pipelineId);
 	  if (!target) return false;
 	  if (normalizeId(manifest.active_pipeline_id) === target) return true;
-	  if (normalizeId(manifestRecord?.pipeline_id) === target) return true;
 	  const pipelines = manifest?.pipelines;
 	  if (Array.isArray(pipelines)) {
 	    for (const entry of pipelines) {
-	      const id = normalizeId(entry?.pipeline_id) || legacyPipelineId(entry);
+	      const id = normalizeId(entry?.pipeline_id);
 	      if (id === target) return true;
 	    }
 	  }

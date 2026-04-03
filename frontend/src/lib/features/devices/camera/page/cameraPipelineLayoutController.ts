@@ -218,7 +218,7 @@ export function createPipelineLayoutController(state: PipelineLayoutState, deps:
       getHttpClientBase();
       return;
     } catch {
-      // fall back to legacy injected base when local storage/env resolution fails
+      // Use the injected base when local storage/env resolution fails.
     }
     if (!deps.apiBase) return;
     OpenAPI.BASE = deps.apiBase.replace(/\/+$/, '');
@@ -260,21 +260,14 @@ export function createPipelineLayoutController(state: PipelineLayoutState, deps:
       const normalized = String(pipelineId ?? '').trim();
       if (!normalized.length) return null;
       const activeId = asTrimmedString(manifest.active_pipeline_id);
-      const legacyId = asTrimmedString(manifest.pipeline_id);
-      if ((activeId && activeId === normalized) || (legacyId && legacyId === normalized)) {
-        return manifest.pipeline_graph ?? manifest.pipelineGraph ?? manifest.graph ?? null;
-      }
+      if (activeId && activeId === normalized) return null;
       const bindings = Array.isArray(manifest.pipelines) ? manifest.pipelines : [];
       for (const entry of bindings) {
         const binding = asRecord(entry);
         if (!binding) continue;
-        const raw =
-          asTrimmedString(binding.pipeline_id) ||
-          asTrimmedString(binding.pipelineId) ||
-          asTrimmedString(binding.id);
-        const entryId = raw.trim();
+        const entryId = asTrimmedString(binding.pipeline_id);
         if (entryId && entryId === normalized) {
-          return binding.pipeline_graph ?? binding.pipelineGraph ?? binding.graph ?? null;
+          return binding.pipeline_graph ?? null;
         }
       }
       return null;
@@ -801,7 +794,7 @@ export function createPipelineLayoutController(state: PipelineLayoutState, deps:
 
   function currentPipelineWires(): StreamPipelineWire[] {
     const manifest = asRecord(state.manifestState);
-    const wires = manifest?.pipeline_wires ?? manifest?.pipelineWires ?? null;
+    const wires = manifest?.pipeline_wires ?? null;
     return Array.isArray(wires) ? wires : [];
   }
 

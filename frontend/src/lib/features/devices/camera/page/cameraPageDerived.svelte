@@ -8,7 +8,7 @@
   import { fromApiGraphPlan } from '$lib/features/pipelines/graphConverters';
   import { createRegistryResolver } from '$lib/components/flow/pipeline-graph/registry';
   import { getDataTypeVariants, resolveDataTypeKey } from '$lib/features/pipelines/valueFormatting';
-  import { normalizeDaedalusRegistry } from '$lib/features/pipelines/controller/daedalusRegistry';
+  import { normalizeDaedalusRegistry } from '$lib/features/pipelines/controller/daedalusRegistry/normalization';
   import { hydrateGraphWithRegistry } from '$lib/features/pipelines/styleHydration';
   import { parseMetadataValue } from './cameraStateUtils';
   import {
@@ -138,15 +138,6 @@
       const connections = (graph as { connections?: unknown }).connections;
       if (nodes && typeof nodes === 'object' && !Array.isArray(nodes) && Array.isArray(connections)) {
         return graph as PipelineGraphPlan;
-      }
-      if (Array.isArray(nodes)) {
-        const hasLegacyInfo = nodes.some(
-          (node) =>
-            node &&
-            typeof node === 'object' &&
-            ('info' in (node as Record<string, unknown>) || 'values' in (node as Record<string, unknown>))
-        );
-        if (hasLegacyInfo) return null;
       }
       try {
         const plan = fromApiGraphPlan(graph);

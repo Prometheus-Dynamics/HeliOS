@@ -8,11 +8,6 @@ import type {
 import { RAW_PIPELINE_ID, RAW_PIPELINE_UUID } from './cameraPipelineShared';
 
 type UnknownRecord = Record<string, unknown>;
-type LegacyPipelineBinding = {
-  pipelineId?: string | null;
-  id?: string | null;
-  pipeline?: { id?: string | null; graph?: unknown } | null;
-};
 
 type PipelineMetricsState = {
   get manifestState(): StreamManifest | null;
@@ -22,38 +17,8 @@ type PipelineMetricsState = {
 const asRecord = (value: unknown): UnknownRecord | null =>
   value && typeof value === 'object' ? (value as UnknownRecord) : null;
 
-const readString = (record: UnknownRecord | null, ...keys: string[]): string | null => {
-  for (const key of keys) {
-    const value = record?.[key];
-    if (typeof value === 'string' && value.trim()) {
-      return value.trim();
-    }
-  }
-  return null;
-};
-
-const pipelineIdFromBinding = (binding: StreamPipelineBinding | LegacyPipelineBinding): string | null => {
-  const bindingRecord = asRecord(binding);
-  return (
-    readString(bindingRecord, 'pipeline_id', 'pipelineId', 'id') ??
-    readString(asRecord(bindingRecord?.pipeline), 'id')
-  );
-};
-
-const manifestBindings = (manifest: StreamManifest | null): Array<StreamPipelineBinding | LegacyPipelineBinding> => {
-  if (Array.isArray(manifest?.pipelines)) {
-    return manifest.pipelines;
-  }
-  const legacyBindings = asRecord(manifest)?.pipelines;
-  if (Array.isArray(legacyBindings)) {
-    return legacyBindings.filter((entry): entry is LegacyPipelineBinding => asRecord(entry) !== null);
-  }
-  const bindingsRecord = asRecord(legacyBindings);
-  if (!bindingsRecord) {
-    return [];
-  }
-  return Object.values(bindingsRecord).filter((entry): entry is LegacyPipelineBinding => asRecord(entry) !== null);
-};
+const manifestBindings = (manifest: StreamManifest | null): StreamPipelineBinding[] =>
+  Array.isArray(manifest?.pipelines) ? manifest.pipelines : [];
 
 const asPipelineGraphMetrics = (value: unknown): PipelineGraphMetrics | null =>
   asRecord(value) ? (value as PipelineGraphMetrics) : null;
@@ -67,11 +32,7 @@ export function createCameraPipelineMetricsController(state: PipelineMetricsStat
   }
 
   function activePipelineWireId(): string | null {
-    const manifestRecord = asRecord(state.manifestState);
-    const active =
-      state.manifestState?.active_pipeline_id ??
-      readString(manifestRecord, 'pipeline_id', 'activePipelineId', 'pipelineId');
-    return normalizePipelineIdForMetrics(active ?? null);
+    return normalizePipelineIdForMetrics(state.manifestState?.active_pipeline_id ?? null);
   }
 
   function pipelineMetricsForId(metrics: StreamMetrics | null, pipelineId: string | null): PipelineGraphMetrics | null {
@@ -90,7 +51,7 @@ export function createCameraPipelineMetricsController(state: PipelineMetricsStat
     }
     // Fallback: when manifest active pipeline lags briefly, still map single-pipeline metrics.
     const bindingIds = manifestBindings(state.manifestState)
-      .map((entry) => normalizePipelineIdForMetrics(pipelineIdFromBinding(entry)))
+      .map((entry) => normalizePipelineIdForMetrics(entry.pipeline_id))
       .filter((id: string | null): id is string => typeof id === 'string' && id.length > 0);
     if (bindingIds.length === 1 && bindingIds[0] === wireId) {
       return metrics.pipeline ?? null;

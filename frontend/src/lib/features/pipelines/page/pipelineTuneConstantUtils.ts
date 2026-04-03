@@ -13,7 +13,7 @@ import {
   isRecord,
   normalizePortKey,
   portMetadataFromFlatKeys
-} from './pipelineTuneState';
+} from './pipelineTuneHelpers';
 
 const GENERIC_TYPE_KEYS = new Set(['generic', 'any', 'unknown', 'dynamic']);
 

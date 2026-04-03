@@ -45,7 +45,7 @@ import {
 } from './boundary';
 import { describeError, truncatedPlanHashFromRevision, generateNodeId } from './controller/utils';
 import { buildPipelineInputEntries, buildPipelineOutputEntries } from './controller/planEntries';
-import { normalizeDaedalusRegistry } from './controller/daedalusRegistry';
+import { normalizeDaedalusRegistry } from './controller/daedalusRegistry/normalization';
 import { reportError } from '$lib/ui/errorPolicy';
 import { createPipelineAutosaveManager } from './controller/autosave';
 import {
@@ -967,7 +967,7 @@ export function createPipelineController(initial: PipelinePagePayload, options: 
     assignModalOpen.set(false);
   }
 
-  // Legacy template/external pipeline creation helpers removed in favor of `PipelinesApi.uploadGraph`.
+  // Template/external pipeline creation routes through `PipelinesApi.uploadGraph`.
 
   function runPipelineRefresh(options: { preserveDirty?: boolean } = {}) {
     if (!pipelineRefreshPromise) {

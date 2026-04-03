@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
-  import { apiUrl } from '$lib/api/openapiBase';
+  import { apiUrl } from '$lib/api/client';
   import type { Terminal as XtermTerminal } from 'xterm';
   import type { FitAddon as XtermFitAddon } from 'xterm-addon-fit';
   import { createTerminal, loadXtermDeps, type XtermDeps } from '$lib/components/terminal/xtermUtils';

@@ -11,7 +11,7 @@ import { StreamsApi } from '$lib/api/streamsApi';
 import { apiFetch } from '$lib/api/core/http';
 import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
 import { createBackoffTimer } from '$lib/utils/backoff';
-import { fetchDevicesCamerasSnapshot, fetchDevicesPeripheralsSnapshot } from '$lib/api/devicesPage';
+import { fetchDevicesCamerasSnapshot, fetchDevicesPeripheralsSnapshot } from '$lib/api/devices/fetchers';
 import { localizationConfigResource, type LocalizationConfig } from '$lib/features/localization/localizationConfig';
 
 const AUTO_REFRESH_MS = 10_000;

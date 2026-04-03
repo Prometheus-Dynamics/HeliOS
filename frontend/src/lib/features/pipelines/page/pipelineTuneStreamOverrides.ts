@@ -11,7 +11,7 @@ import {
   extractNodeOverridesFromGraph,
   nodeValueSignature,
   normalizePortKey
-} from './pipelineTuneState';
+} from './pipelineTuneHelpers';
 
 type StreamsApi = Pick<typeof SharedStreamsApi, 'setPipelineGraphPatch' | 'setPipelineGraph' | 'setPipelineInputs'>;
 

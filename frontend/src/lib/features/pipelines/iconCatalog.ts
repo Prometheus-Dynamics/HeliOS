@@ -16,7 +16,6 @@ import {
   faShareNodes,
   faSatelliteDish,
   faSitemap,
-  faTrashCan,
   faWaveSquare
 } from '@fortawesome/free-solid-svg-icons';
 
@@ -41,29 +40,9 @@ export const PIPELINE_ICON_OPTIONS: PipelineIconOption[] = [
   { id: 'share', label: 'Share', icon: faShareNodes }
 ];
 
-const LEGACY_ICON_OPTIONS: Record<string, PipelineIconOption> = {
-  trash: { id: 'trash', label: 'Trash', icon: faTrashCan }
-};
-
 const PIPELINE_ICON_OPTION_MAP = Object.fromEntries(
   PIPELINE_ICON_OPTIONS.map((option) => [option.id, option])
 ) as Record<string, PipelineIconOption>;
-
-for (const option of Object.values(LEGACY_ICON_OPTIONS)) {
-  PIPELINE_ICON_OPTION_MAP[option.id] = option;
-}
-
-const PIPELINE_ICON_ALIASES: Record<string, string> = {
-  bolt: 'burst',
-  camera: 'capture',
-  microchip: 'compute',
-  wave: 'signal',
-  sitemap: 'graph',
-  cubes: 'nodes',
-  satellite: 'uplink',
-  bullseye: 'target',
-  'code-branch': 'branch'
-};
 
 export const PIPELINE_ICON_COLORS = [
   '#0f172a',
@@ -105,8 +84,7 @@ export function defaultColorForPipeline(pipelineId: string, revision?: string | 
 }
 
 export function resolvePipelineIconOption(id: string) {
-  const canonicalId = PIPELINE_ICON_ALIASES[id] ?? id;
-  return PIPELINE_ICON_OPTION_MAP[canonicalId] ?? PIPELINE_ICON_OPTION_MAP[DEFAULT_PIPELINE_ICON_ID];
+  return PIPELINE_ICON_OPTION_MAP[id] ?? PIPELINE_ICON_OPTION_MAP[DEFAULT_PIPELINE_ICON_ID];
 }
 
 export function pipelineIconConfig(pipelineId: string, appearance?: PipelineAppearance | null, revision?: string | null) {

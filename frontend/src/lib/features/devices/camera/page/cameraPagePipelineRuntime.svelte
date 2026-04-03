@@ -337,13 +337,11 @@
         if (Object.prototype.hasOwnProperty.call(pipelineOutputOptionsCache, normalized)) return;
         ids.add(normalized);
       };
-      const manifestRecord = asRecord(manifest);
       add(manifest.active_pipeline_id);
-      add(manifestRecord?.pipeline_id);
-      if (Array.isArray(manifestRecord?.pipelines)) {
-        manifestRecord.pipelines.forEach((entry) => {
+      if (Array.isArray(manifest.pipelines)) {
+        manifest.pipelines.forEach((entry) => {
           const pipeline = asRecord(entry);
-          add(pipeline?.pipeline_id ?? pipeline?.pipelineId ?? pipeline?.id);
+          add(pipeline?.pipeline_id);
         });
       }
       if (!ids.size) return;

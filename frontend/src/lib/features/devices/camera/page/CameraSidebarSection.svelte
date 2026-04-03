@@ -118,10 +118,6 @@
     ipaChartNaturalSize: CalibrationTabProps['ipaChartNaturalSize'];
   };
 
-  type LegacyPipelineWireManifest = StreamInfo['manifest'] & {
-    pipelineWires?: unknown;
-  };
-
   type CameraSidebarSectionCtx = {
     tabs: StreamSidebarProps['tabs'];
     streamBindings: StreamBindings;
@@ -330,11 +326,8 @@
   });
 
   const pipelineWires = $derived.by<StreamPipelineWire[]>(() => {
-    const manifest = (ctx.stream?.manifest as LegacyPipelineWireManifest | null) ?? null;
-    if (Array.isArray(manifest?.pipeline_wires)) {
-      return manifest.pipeline_wires;
-    }
-    return Array.isArray(manifest?.pipelineWires) ? manifest.pipelineWires.filter(isPipelineWire) : [];
+    const manifest = ctx.stream?.manifest ?? null;
+    return Array.isArray(manifest?.pipeline_wires) ? manifest.pipeline_wires.filter(isPipelineWire) : [];
   });
 
   const activeTabLabel = $derived.by(

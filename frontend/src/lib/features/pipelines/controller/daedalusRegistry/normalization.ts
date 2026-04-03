@@ -38,8 +38,7 @@ export function normalizeDaedalusRegistry(
       const descriptions = extractPortDescriptions(metadataRecord);
       const portMetadata = extractPortMetadata(metadataRecord);
       const faninInputs = normalizeFanInPorts(
-        (node as unknown as { fanin_inputs?: DaedalusRegistryFanInPort[] }).fanin_inputs ??
-          (node as unknown as { faninInputs?: DaedalusRegistryFanInPort[] }).faninInputs,
+        (node as unknown as { fanin_inputs?: DaedalusRegistryFanInPort[] }).fanin_inputs,
         typeRegistry
       );
       if (Array.isArray(node.input_ports)) {
@@ -52,9 +51,6 @@ export function normalizeDaedalusRegistry(
         ? node.feature_flags.filter((flag): flag is string => typeof flag === 'string' && flag.trim().length > 0)
         : [];
       const categories = [];
-      const legacyRecord = node as unknown as Record<string, unknown>;
-      const legacyInputPorts = Array.isArray(legacyRecord.inputPorts) ? (legacyRecord.inputPorts as unknown[]) : null;
-      const legacyOutputPorts = Array.isArray(legacyRecord.outputPorts) ? (legacyRecord.outputPorts as unknown[]) : null;
       const entry: PipelineRegistryEntry = {
         id,
         metadata: {
@@ -70,22 +66,18 @@ export function normalizeDaedalusRegistry(
         inputs: toPortMap(
           Array.isArray(node.input_ports)
             ? (node.input_ports ?? [])
-            : legacyInputPorts
-              ? (legacyInputPorts as unknown as Array<string | { name?: string }>)
-              : Array.isArray(node.inputs)
-                ? node.inputs
-                : [],
+            : Array.isArray(node.inputs)
+              ? node.inputs
+              : [],
           descriptions.inputs,
           typeRegistry
         ),
         outputs: toPortMap(
           Array.isArray(node.output_ports)
             ? (node.output_ports ?? [])
-            : legacyOutputPorts
-              ? (legacyOutputPorts as unknown as Array<string | { name?: string }>)
-              : Array.isArray(node.outputs)
-                ? node.outputs
-                : [],
+            : Array.isArray(node.outputs)
+              ? node.outputs
+              : [],
           descriptions.outputs,
           typeRegistry
         )

@@ -76,7 +76,7 @@ export const extractGraphOutputPortTypes = (graph: unknown): Record<string, Pipe
   const types: Record<string, PipelineDataType> = {};
   const graphRecord = asRecord(graph);
   if (!graphRecord) return types;
-  const nested = graphRecord.graph ?? graphRecord.pipeline_graph ?? graphRecord.pipelineGraph;
+  const nested = graphRecord.graph;
   const nestedRecord = asRecord(nested);
   const target = nestedRecord && nested !== graph ? nestedRecord : graphRecord;
   applyPortTypes(types, asRecord(target.pipelineOutputs ?? target.pipeline_outputs), true);

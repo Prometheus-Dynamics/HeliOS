@@ -203,32 +203,24 @@ export function createCameraBackendController(state: BackendState, deps: Backend
   const requestedEncoderRecordFor = (manifest?: StreamManifest | null): Record<string, unknown> | null =>
     asRecord(asRecord(manifest)?.encoder);
   const requestedEncoderIdFor = (manifest?: StreamManifest | null): string | null => {
-    const requestedId = asTrimmedString(requestedEncoderRecordFor(manifest)?.id);
-    if (requestedId) return requestedId;
-    const legacyId = asTrimmedString(asRecord(manifest)?.encoder_id);
-    return legacyId || null;
+    return asTrimmedString(requestedEncoderRecordFor(manifest)?.id) || null;
   };
   const requestedEncoderStateFor = (manifest?: StreamManifest | null): 'enabled' | 'disabled' | null => {
     const requestedState = asTrimmedString(requestedEncoderRecordFor(manifest)?.state).toLowerCase();
     if (requestedState === 'enabled' || requestedState === 'disabled') return requestedState;
-    const legacyEnabled = asRecord(manifest)?.encoder_enabled;
-    return typeof legacyEnabled === 'boolean' ? (legacyEnabled ? 'enabled' : 'disabled') : null;
+    return null;
   };
   const requestedEncoderSettingsFor = (manifest?: StreamManifest | null): EncoderSettings | Record<string, unknown> | null =>
     ((requestedEncoderRecordFor(manifest)?.settings as EncoderSettings | undefined) ?? asRecord(asRecord(manifest)?.encoder_settings));
   const requestedDecoderRecordFor = (manifest?: StreamManifest | null): Record<string, unknown> | null =>
     asRecord(asRecord(manifest)?.decoder);
   const requestedDecoderIdFor = (manifest?: StreamManifest | null): string | null => {
-    const requestedId = asTrimmedString(requestedDecoderRecordFor(manifest)?.id);
-    if (requestedId) return requestedId;
-    const legacyId = asTrimmedString(asRecord(manifest)?.decoder_id);
-    return legacyId || null;
+    return asTrimmedString(requestedDecoderRecordFor(manifest)?.id) || null;
   };
   const requestedDecoderStateFor = (manifest?: StreamManifest | null): 'enabled' | 'disabled' | null => {
     const requestedState = asTrimmedString(requestedDecoderRecordFor(manifest)?.state).toLowerCase();
     if (requestedState === 'enabled' || requestedState === 'disabled') return requestedState;
-    const legacyEnabled = asRecord(manifest)?.decoder_enabled;
-    return typeof legacyEnabled === 'boolean' ? (legacyEnabled ? 'enabled' : 'disabled') : null;
+    return null;
   };
   const requestedDecoderSettingsFor = (manifest?: StreamManifest | null): Record<string, unknown> | null =>
     asRecord(requestedDecoderRecordFor(manifest)?.settings) ?? asRecord(asRecord(manifest)?.decoder_settings);
@@ -399,12 +391,9 @@ export function createCameraBackendController(state: BackendState, deps: Backend
       (isLibcamera ? deps.DEFAULT_LIBCAMERA_TARGET_FPS : null);
     const netcamHandleFps = (() => {
       const handle = asRecord(capture?.handle);
-      const direct = handle && String(handle.type ?? '').toLowerCase() === 'netcam' ? handle : null;
-      const legacy = handle ? asRecord(handle.Netcam) : null;
-      const fps = asPositiveNumber(direct?.fps);
+      const netcam = handle ? asRecord(handle.Netcam) : null;
+      const fps = asPositiveNumber(netcam?.fps);
       if (fps) return Math.round(fps);
-      const legacyFps = asPositiveNumber(legacy?.fps);
-      if (legacyFps) return Math.round(legacyFps);
       return null;
     })();
     state.netcamTargetFps = netcamHandleFps ?? deps.intervalToFps(wantedInterval) ?? deps.intervalToFps(intervals[state.selectedIntervalIdx]) ?? null;
@@ -433,7 +422,6 @@ export function createCameraBackendController(state: BackendState, deps: Backend
       ? false
       : recordingModeEnabled(manifest?.recording_mode ?? streamDefaults?.defaultRecordingMode);
     state.cameraAlias = asTrimmedString(identityRecord?.alias ?? identityRecord?.display);
-    const encoderEnabledFlag = manifestRecord?.encoder_enabled;
     const selections = deriveStreamCodecSelections({
       encoders: state.encoders,
       decoders: state.decoders,
@@ -457,9 +445,7 @@ export function createCameraBackendController(state: BackendState, deps: Backend
         ? true
         : requestedEncoderState === 'disabled'
           ? false
-          : typeof encoderEnabledFlag === 'boolean'
-            ? Boolean(encoderEnabledFlag)
-            : streamDefaults?.defaultEncoderEnabled ?? Boolean(nextEncoderId);
+          : streamDefaults?.defaultEncoderEnabled ?? Boolean(nextEncoderId);
     state.decoderEnabled = typeof resolvedDecoder?.enabled === 'boolean'
       ? resolvedDecoder.enabled
       : requestedDecoderState === 'enabled'
@@ -506,9 +492,9 @@ export function createCameraBackendController(state: BackendState, deps: Backend
 
     const pipelineEnabled = manifest?.pipeline_enabled ?? manifestRecord?.pipeline_enabled ?? false;
     state.selectedPipelineId =
-      !pipelineEnabled ? null : asTrimmedString(manifestRecord?.active_pipeline_id ?? manifestRecord?.pipeline_id) || null;
+      !pipelineEnabled ? null : asTrimmedString(manifestRecord?.active_pipeline_id) || null;
     state.selectedPipelineOutput =
-      !pipelineEnabled ? null : asTrimmedString(manifestRecord?.active_pipeline_output ?? manifestRecord?.pipeline_output) || null;
+      !pipelineEnabled ? null : asTrimmedString(manifestRecord?.active_pipeline_output) || null;
 
     const normalizedSelected = state.selectedPipelineId ? String(state.selectedPipelineId).trim() : '';
     state.selectedPipelineId = normalizedSelected.length ? normalizedSelected : null;
@@ -614,15 +600,7 @@ export function createCameraBackendController(state: BackendState, deps: Backend
           .map((p) => {
             const record = asRecord(p);
             if (!record) return '';
-            const raw =
-              typeof record.pipeline_id === 'string'
-                ? record.pipeline_id
-                : typeof record.pipelineId === 'string'
-                  ? record.pipelineId
-                  : typeof record.id === 'string'
-                    ? record.id
-                    : '';
-            const id = raw.trim();
+            const id = typeof record.pipeline_id === 'string' ? record.pipeline_id.trim() : '';
             return id === RAW_PIPELINE_UUID ? RAW_PIPELINE_ID : id;
           })
           .filter(Boolean);
@@ -630,14 +608,7 @@ export function createCameraBackendController(state: BackendState, deps: Backend
         pipelines.forEach((p) => {
           const record = asRecord(p);
           if (!record) return;
-          let id =
-            typeof record.pipeline_id === 'string'
-              ? record.pipeline_id.trim()
-              : typeof record.pipelineId === 'string'
-                ? record.pipelineId.trim()
-                : typeof record.id === 'string'
-                  ? record.id.trim()
-                  : '';
+          let id = typeof record.pipeline_id === 'string' ? record.pipeline_id.trim() : '';
           if (id === RAW_PIPELINE_UUID) id = RAW_PIPELINE_ID;
           if (!id.length) return;
           const out = typeof record.pipeline_output === 'string' ? record.pipeline_output.trim() : '';
