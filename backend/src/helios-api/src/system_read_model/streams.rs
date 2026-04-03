@@ -523,6 +523,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stream_outputs_unsubscribe_keeps_topic_while_other_clients_exist() {
+        let hub = StreamOutputsHub::new();
+        let stream_id = uuid::Uuid::new_v4();
+        let topic = hub.topic(stream_id).await;
+        let first_client = uuid::Uuid::new_v4();
+        let second_client = uuid::Uuid::new_v4();
+
+        topic.clients.write().await.insert(first_client, StreamOutputsClientConfig { ports: Vec::new(), sample_interval: Duration::from_millis(10), ports_interval: Duration::from_millis(20) });
+        topic
+            .clients
+            .write()
+            .await
+            .insert(second_client, StreamOutputsClientConfig { ports: vec!["pose".into()], sample_interval: Duration::from_millis(30), ports_interval: Duration::from_millis(40) });
+
+        hub.unsubscribe(stream_id, first_client).await;
+
+        let (topic_count, subscriber_count) = hub.stats().await;
+        assert_eq!(topic_count, 1);
+        assert_eq!(subscriber_count, 1);
+        assert!(hub.find_topic(stream_id).await.is_some());
+
+        hub.unsubscribe(stream_id, second_client).await;
+
+        let (topic_count, subscriber_count) = hub.stats().await;
+        assert_eq!(topic_count, 0);
+        assert_eq!(subscriber_count, 0);
+        assert!(hub.find_topic(stream_id).await.is_none());
+    }
+
+    #[tokio::test]
     async fn stream_metrics_unsubscribe_prunes_idle_topic() {
         let hub = StreamMetricsHub::new();
         let stream_id = uuid::Uuid::new_v4();
@@ -531,6 +561,30 @@ mod tests {
         *topic.latest.write().await = Some(latest);
 
         let receiver = topic.tx.subscribe();
+        assert!(hub.find_topic(stream_id).await.is_some());
+
+        drop(receiver);
+        hub.unsubscribe(stream_id).await;
+
+        let (topic_count, subscriber_count) = hub.stats().await;
+        assert_eq!(topic_count, 0);
+        assert_eq!(subscriber_count, 0);
+        assert!(hub.find_topic(stream_id).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn stream_metrics_unsubscribe_keeps_topic_while_receiver_alive() {
+        let hub = StreamMetricsHub::new();
+        let stream_id = uuid::Uuid::new_v4();
+        let topic = hub.topic(stream_id).await;
+        *topic.latest.write().await = Some(Arc::new(SharedStreamMetricsSnapshot { stream_id, metrics: StreamMetrics::default(), timestamp_ms: 1 }));
+
+        let receiver = topic.tx.subscribe();
+        hub.unsubscribe(stream_id).await;
+
+        let (topic_count, subscriber_count) = hub.stats().await;
+        assert_eq!(topic_count, 1);
+        assert_eq!(subscriber_count, 1);
         assert!(hub.find_topic(stream_id).await.is_some());
 
         drop(receiver);

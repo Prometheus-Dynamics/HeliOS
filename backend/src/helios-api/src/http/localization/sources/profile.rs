@@ -99,22 +99,8 @@ pub(crate) async fn fetch_profile_output(fetcher: &ApiLocalizationSourceFetcher,
         return Err("profile id is required".to_string());
     }
 
-    {
-        let mut stack = fetcher.profile_resolve_stack.lock().await;
-        if stack.iter().any(|entry| entry == profile_id) {
-            return Err(format!("profile source cycle detected for '{profile_id}'"));
-        }
-        stack.push(profile_id.to_string());
-    }
-
-    let result = fetch_profile_output_inner(fetcher, profile_id, output_key).await;
-
-    let mut stack = fetcher.profile_resolve_stack.lock().await;
-    if let Some(index) = stack.iter().rposition(|entry| entry == profile_id) {
-        stack.remove(index);
-    }
-
-    result
+    let _guard = fetcher.profile_resolve_stack.enter(profile_id)?;
+    fetch_profile_output_inner(fetcher, profile_id, output_key).await
 }
 
 async fn fetch_profile_output_inner(fetcher: &ApiLocalizationSourceFetcher, profile_id: &str, output_key: &str) -> Result<JsonValue, String> {

@@ -4,12 +4,12 @@ version.workspace = true
 edition = "2024"
 
 [features]
-default = ["engine", "backend-cpu", "plugins"]
+default = ["backend-cpu"]
 
 api = []
 schema = ["dep:utoipa"]
 
-engine = ["api", "dep:image", "dep:paste", "daedalus/engine", "daedalus/plugins"]
+engine = ["api", "dep:image", "dep:paste", "dep:daedalus", "daedalus/engine", "daedalus/plugins"]
 plugins = ["engine"]
 backend-cpu = ["backend-tflite", "backend-onnx"]
 backend-tflite = ["dep:tract-tflite", "dep:tract-core"]
@@ -38,7 +38,7 @@ lib-cv = { path = "../lib-cv", default-features = false }
 tracing = { workspace = true }
 rayon = { workspace = true }
 bytemuck = { workspace = true }
-daedalus = { workspace = true, features = ["engine", "plugins"] }
+daedalus = { workspace = true, features = ["engine", "plugins"], optional = true }
 paste = { workspace = true, optional = true }
 utoipa = { workspace = true, optional = true }
 

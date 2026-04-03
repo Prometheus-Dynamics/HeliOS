@@ -256,3 +256,40 @@ async fn resolve_ipv4(host: &str, port: u16) -> Result<Ipv4Addr, String> {
     }
     Err(format!("no ipv4 address found for host {host}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subscribe_json_reuses_existing_slot_for_repeated_topic_subscriptions() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let values = Arc::new(Mutex::new(HashMap::new()));
+        let handle = Nt4WorkerHandle { tx, values: Arc::clone(&values) };
+
+        assert_eq!(handle.subscribe_json("topic/a".into()), "");
+        assert_eq!(handle.subscribe_json("topic/a".into()), "");
+
+        let stored_slot = values.lock().expect("values mutex poisoned").get("topic/a").expect("slot").clone();
+        assert_eq!(values.lock().expect("values mutex poisoned").len(), 1);
+
+        let first = rx.try_recv().expect("first subscribe command");
+        let second = rx.try_recv().expect("second subscribe command");
+
+        match first {
+            Command::SubscribeJson { topic, slot } => {
+                assert_eq!(topic, "topic/a");
+                assert!(Arc::ptr_eq(&slot, &stored_slot));
+            }
+            Command::Publish { .. } => panic!("unexpected publish command"),
+        }
+
+        match second {
+            Command::SubscribeJson { topic, slot } => {
+                assert_eq!(topic, "topic/a");
+                assert!(Arc::ptr_eq(&slot, &stored_slot));
+            }
+            Command::Publish { .. } => panic!("unexpected publish command"),
+        }
+    }
+}
