@@ -105,10 +105,10 @@ clap = { version = "4.6.0", features = ["derive", "env"] }
 actix-web = "4.13.0"
 actix-web-actors = "4.3.1"
 actix = "0.13.5"
-styx = { git = "https://github.com/Prometheus-Dynamics/Styx.git", rev = "ef3810b8b87118489a02b3506313be1e2b3b76e3", default-features = false }
-daedalus = { package = "daedalus-rs", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "e334908a343779ac71e0dee7f0efd8d4e430e995" }
-daedalus-data = { package = "daedalus-data", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "e334908a343779ac71e0dee7f0efd8d4e430e995" }
-daedalus-macros = { package = "daedalus-macros", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "e334908a343779ac71e0dee7f0efd8d4e430e995" }
+styx = { git = "https://github.com/Prometheus-Dynamics/Styx.git", branch = "main", default-features = false }
+daedalus = { package = "daedalus-rs", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "main" }
+daedalus-data = { package = "daedalus-data", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "main" }
+daedalus-macros = { package = "daedalus-macros", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", branch = "main" }
 geo = { version = "0.32.0", default-features = false }
 linux-embedded-hal = "0.4.1"
 rand = "0.10.0"
