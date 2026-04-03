@@ -101,6 +101,11 @@ HeliOS exposes an HTTP API under the `/v1` prefix.
 | `POST` | `/v1/device/resource-guard/restore/{stream_id}` | Resource guard stream restore action | `200` |
 | `POST` | `/v1/device/restart` | Restart queued | `200, 502` |
 | `PATCH` | `/v1/device/robot-dimensions` | Updated camera layout snapshot | `200` |
+| `GET` | `/v1/device/runtime` | Platform capabilities, resolved runtime policy, and observability snapshot | `200` |
+| `GET` | `/v1/device/snapshots` | List diagnostics snapshots | `200` |
+| `POST` | `/v1/device/snapshots` | Snapshot captured | `200` |
+| `DELETE` | `/v1/device/snapshots/{id}` | Snapshot deleted | `204` |
+| `GET` | `/v1/device/snapshots/{id}/download` | Snapshot archive | `200` |
 | `GET` | `/v1/device/team` | Team number | `200` |
 | `POST` | `/v1/device/team` | Team updated | `204, 400` |
 | `GET` | `/v1/device/usb-power` | USB power settings | `200` |
@@ -178,9 +183,12 @@ HeliOS exposes an HTTP API under the `/v1` prefix.
 | `GET` | `/v1/peers` | Known peers | `200` |
 | `POST` | `/v1/peers` | Peer registered | `201, 400` |
 | `DELETE` | `/v1/peers/{id}` | Peer removed | `200, 404` |
+| `POST` | `/v1/peers/{id}/pipelines/sync` | Peer pipelines synchronized into local storage | `200, 400, 404` |
+| `GET` | `/v1/peers/{id}/streams` | Remote Helios stream inventory for one peer | `200, 400, 404` |
 | `POST` | `/v1/peers/discover` | Discovery scheduled | `200` |
 | `POST` | `/v1/peers/integrations/photonvision/streams` | Discovered streams | `200, 400` |
 | `POST` | `/v1/peers/probe` | Probe result | `200, 400` |
+| `GET` | `/v1/peers/streams` | Aggregated remote Helios stream inventory | `200` |
 
 ### NT4
 

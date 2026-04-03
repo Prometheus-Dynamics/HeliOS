@@ -97,19 +97,23 @@ export function findOwnedStreamByEffectiveId(streams: StreamInfo[], effectiveId:
 }
 
 function streamPipelineId(stream: StreamInfo): string | null {
-  return (
-    stream.manifest?.active_pipeline_id ??
-    (Array.isArray(stream.manifest?.pipelines) ? stream.manifest.pipelines[0]?.pipeline_id ?? null : null) ??
-    null
-  );
+  if (stream.manifest?.active_pipeline_id) {
+    return stream.manifest.active_pipeline_id;
+  }
+  if (Array.isArray(stream.manifest?.pipelines)) {
+    return stream.manifest.pipelines[0]?.pipeline_id ?? null;
+  }
+  return null;
 }
 
 function streamPipelineOutput(stream: StreamInfo): string | null {
-  return (
-    stream.manifest?.active_pipeline_output ??
-    (Array.isArray(stream.manifest?.pipelines) ? stream.manifest.pipelines[0]?.pipeline_output ?? null : null) ??
-    null
-  );
+  if (stream.manifest?.active_pipeline_output) {
+    return stream.manifest.active_pipeline_output;
+  }
+  if (Array.isArray(stream.manifest?.pipelines)) {
+    return stream.manifest.pipelines[0]?.pipeline_output ?? null;
+  }
+  return null;
 }
 
 function streamCameraUid(stream: StreamInfo): string | null {

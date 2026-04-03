@@ -124,6 +124,21 @@ fn to_repo_relative(path: &Path, repo_root: &Path) -> String {
 }
 
 fn discover_shims_with_git_grep(repo_root: &Path, scan_roots: &[&str]) -> Option<Vec<DiscoveredShim>> {
+    let repo_check = Command::new("git").args(["rev-parse", "--show-toplevel"]).current_dir(repo_root).output().ok()?;
+    if !repo_check.status.success() {
+        return None;
+    }
+    let git_root = PathBuf::from(String::from_utf8_lossy(&repo_check.stdout).trim());
+    let Ok(expected_root) = fs::canonicalize(repo_root) else {
+        return None;
+    };
+    let Ok(actual_root) = fs::canonicalize(git_root) else {
+        return None;
+    };
+    if actual_root != expected_root {
+        return None;
+    }
+
     let output = Command::new("git").args(["grep", "-n", MARKER_TOKEN, "--"]).args(scan_roots).current_dir(repo_root).output().ok()?;
 
     if !matches!(output.status.code(), Some(0 | 1)) {

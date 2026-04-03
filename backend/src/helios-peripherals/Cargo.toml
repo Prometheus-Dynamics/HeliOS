@@ -72,7 +72,7 @@ nix = { version = "0.31", features = ["fs"], optional = true }
 lib-sensors = { path = "../libs/lib-sensors", optional = true }
 lib-math = { path = "../libs/lib-math", optional = true }
 linux-embedded-hal = { workspace = true, optional = true }
-toml = { version = "1.0", optional = true }
+toml = { version = "1.1", optional = true }
 utoipa = { workspace = true, optional = true }
 
 [dev-dependencies]

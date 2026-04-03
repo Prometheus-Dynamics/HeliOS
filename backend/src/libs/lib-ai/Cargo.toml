@@ -52,4 +52,4 @@ libc = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
-tempfile = "3.26.0"
+tempfile = "3.27.0"

@@ -8,5 +8,5 @@ anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 lib-storage-layout = { path = "../../src/libs/lib-storage-layout" }
 serde = { workspace = true, features = ["derive"] }
-toml = "1.0.6"
+toml = "1.1.2"
 thiserror = { workspace = true }

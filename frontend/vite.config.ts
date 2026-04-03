@@ -3,6 +3,29 @@ import tailwindcss from '@tailwindcss/vite';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig, loadEnv } from 'vite';
 
+function xyflowSvelteCompat() {
+	const wrapperSuffix = '/node_modules/@xyflow/svelte/dist/lib/container/SvelteFlow/Wrapper.svelte';
+
+	return {
+		name: 'xyflow-svelte-compat',
+		enforce: 'pre' as const,
+		transform(code: string, id: string) {
+			const normalizedId = id.replaceAll('\\', '/');
+			if (!normalizedId.endsWith(wrapperSuffix)) {
+				return null;
+			}
+
+			return {
+				code: code.replace(
+					'{...divAttributes satisfies OnlyDivAttributes<typeof divAttributes>}',
+					'{...divAttributes}'
+				),
+				map: null
+			};
+		}
+	};
+}
+
 export default defineConfig(({ mode }) => {
 	const env = loadEnv(mode, process.cwd(), '');
 	const proxyTarget =
@@ -13,18 +36,18 @@ export default defineConfig(({ mode }) => {
 		(message.includes('@zag-js/svelte') || message.includes('@xyflow/svelte')) &&
 		message.includes('never used');
 
-		return {
-			plugins: [tailwindcss(), sveltekit()],
-			resolve: {
-				alias: [
-					{
-						find: '$lib/ts-bindings/http/client',
-						replacement: resolvePath(process.cwd(), 'src/lib/ts-bindings/http/client/index.ts')
-					}
-				]
-			},
-			build: {
-				rollupOptions: {
+	return {
+		plugins: [tailwindcss(), xyflowSvelteCompat(), sveltekit()],
+		resolve: {
+			alias: [
+				{
+					find: '$lib/ts-bindings/http/client',
+					replacement: resolvePath(process.cwd(), 'src/lib/ts-bindings/http/client/index.ts')
+				}
+			]
+		},
+		build: {
+			rollupOptions: {
 				onwarn(warning, warn) {
 					const message = typeof warning === 'string' ? warning : (warning.message ?? '');
 					if (isKnownVendorNoise(message)) {

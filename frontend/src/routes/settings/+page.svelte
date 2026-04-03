@@ -254,15 +254,10 @@
     value={activeWorkspaceTab}
     onValueChange={handleWorkspaceChange}
     activationMode="manual"
-    base="flex w-full flex-1 min-h-0 h-full flex-col gap-4 overflow-hidden lg:min-h-0 lg:flex-row"
-    listBase="order-2 w-full shrink-0 lg:order-1 lg:max-w-sm"
-    listBorder=""
-    listMargin=""
-    listGap=""
-    contentBase="order-1 flex-1 min-h-0 h-full overflow-hidden lg:order-2"
+    class="flex h-full min-h-0 w-full flex-1 flex-col gap-4 overflow-hidden lg:min-h-0 lg:flex-row"
   >
-    {#snippet list()}
-      <aside class="space-y-4 border border-surface-700/60 bg-surface-900/30 p-4 text-sm text-surface-300 min-h-0 overflow-y-auto lg:h-full">
+    <aside class="order-2 w-full shrink-0 border border-surface-700/60 bg-surface-900/30 p-4 text-sm text-surface-300 lg:order-1 lg:h-full lg:max-w-sm">
+      <Tabs.List class="space-y-4">
         <div class="border border-surface-700/60 bg-surface-950/45 p-3">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
@@ -286,15 +281,9 @@
             </div>
             <div class="space-y-1">
               {#each workspaceSurfaces.filter((tab) => group.tabs.includes(tab.id)) as tab (tab.id)}
-                <Tabs.Control
+                <Tabs.Trigger
                   value={tab.id}
-                  base="w-full text-left"
-                  padding="p-0"
-                  translateX=""
-                  classes="w-full"
-                  labelBase="w-full"
-                  stateLabelInactive=""
-                  stateLabelActive=""
+                  class="w-full text-left"
                 >
                   <div
                     class={`flex items-start justify-between gap-3 border px-3 py-2 transition ${
@@ -318,7 +307,7 @@
                       </span>
                     {/if}
                   </div>
-                </Tabs.Control>
+                </Tabs.Trigger>
               {/each}
             </div>
           </div>
@@ -330,25 +319,23 @@
             <RestartPanel />
           </div>
         </div>
-      </aside>
-    {/snippet}
+      </Tabs.List>
+    </aside>
 
-    {#snippet content()}
-      <Panel
-        className="flex min-h-0 h-full flex-1 flex-col overflow-hidden"
-        tone="default"
-      >
-        <div class="flex-1 min-h-0 h-full overflow-y-auto">
-          {#each workspaceSurfaces as tab (tab.id)}
-            <Tabs.Panel value={tab.id} classes="flex h-full min-h-0 flex-col">
-              {@const TabComponent = tab.component}
-              <div class="flex h-full min-h-0 w-full flex-col gap-4 px-1 sm:px-0 lg:gap-5">
-                <TabComponent />
-              </div>
-            </Tabs.Panel>
-          {/each}
-        </div>
-      </Panel>
-    {/snippet}
+    <Panel
+      className="order-1 flex h-full min-h-0 flex-1 flex-col overflow-hidden lg:order-2"
+      tone="default"
+    >
+      <div class="flex-1 min-h-0 h-full overflow-y-auto">
+        {#each workspaceSurfaces as tab (tab.id)}
+          <Tabs.Content value={tab.id} class="flex h-full min-h-0 flex-col">
+            {@const TabComponent = tab.component}
+            <div class="flex h-full min-h-0 w-full flex-col gap-4 px-1 sm:px-0 lg:gap-5">
+              <TabComponent />
+            </div>
+          </Tabs.Content>
+        {/each}
+      </div>
+    </Panel>
   </Tabs>
 </section>

@@ -53,11 +53,11 @@ utoipa.workspace = true
 anyhow = { workspace = true }
 sha2 = { workspace = true }
 hex = "0.4"
-tempfile = "3.26"
+tempfile = "3.27"
 blake3 = "1.8"
 nix = { version = "0.31", default-features = false, features = ["process", "term", "fs"] }
 rustix = { version = "1.1.4", features = ["process", "termios"] }
-toml = "1.0.6"
+toml = "1.1.2"
 styx = { workspace = true, features = ["serde", "schema", "codec-turbojpeg"] }
 mime_guess = "2.0.5"
 image = { workspace = true }
@@ -66,9 +66,9 @@ daedalus = { workspace = true, features = ["ffi"] }
 lib-cv = { path = "../libs/lib-cv" }
 lib-ai = { path = "../libs/lib-ai", default-features = false, features = ["engine", "backend-tflite", "backend-onnx", "backend-coral"] }
 nalgebra = { workspace = true }
-lopdf = "0.39.0"
+lopdf = "0.40.0"
 flate2 = "1.1.9"
-zip = { version = "8.2.0", default-features = false, features = ["deflate"] }
+zip = { version = "8.5.0", default-features = false, features = ["deflate"] }
 reqwest.workspace = true
 webpki-root-certs = "1.0.6"
 nt_client = "0.5.1"
@@ -82,6 +82,6 @@ pprof = ["dep:pprof"]
 
 [dev-dependencies]
 helios-engine = { path = "../helios-engine", default-features = false, features = ["runtime"] }
-tempfile = "3.26.0"
+tempfile = "3.27.0"
 lib-test.workspace = true
 tower = "0.5.3"
