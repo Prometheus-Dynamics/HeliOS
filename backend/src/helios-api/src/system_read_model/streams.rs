@@ -9,6 +9,7 @@ use tokio::time::{Duration, Instant};
 
 use crate::api_observability::{RuntimeBroadcastCounters, RuntimeTopicBroadcastSnapshot};
 use crate::ipc::IpcHandles;
+use crate::system_read_model::hub::{TopicRegistry, bind_async_state, ensure_task};
 
 use super::state::SystemReadModelState;
 
@@ -45,7 +46,7 @@ struct StreamMetricsTopic {
 }
 
 pub(super) struct StreamMetricsHub {
-    topics: Arc<RwLock<BTreeMap<uuid::Uuid, Arc<StreamMetricsTopic>>>>,
+    topics: TopicRegistry<uuid::Uuid, StreamMetricsTopic>,
     task: Mutex<Option<JoinHandle<()>>>,
     state: RwLock<Option<Weak<IpcHandles>>>,
     metrics: Arc<RuntimeBroadcastCounters>,
@@ -67,7 +68,7 @@ struct StreamOutputsTopic {
 }
 
 pub(super) struct StreamOutputsHub {
-    topics: Arc<RwLock<BTreeMap<uuid::Uuid, Arc<StreamOutputsTopic>>>>,
+    topics: TopicRegistry<uuid::Uuid, StreamOutputsTopic>,
     state: RwLock<Option<Weak<IpcHandles>>>,
     metrics: Arc<RuntimeBroadcastCounters>,
 }
@@ -86,15 +87,14 @@ impl StreamOutputsTopic {
     }
 
     async fn ensure_task(&self, stream_id: uuid::Uuid, state: Option<Weak<IpcHandles>>) {
-        let mut guard = self.task.lock().await;
-        let needs_spawn = guard.as_ref().map(|handle| handle.is_finished()).unwrap_or(true);
-        if needs_spawn {
+        ensure_task(&self.task, || {
             let tx = self.tx.clone();
             let latest_ports = self.latest_ports.clone();
             let clients = self.clients.clone();
             let metrics = Arc::clone(&self.metrics);
-            *guard = Some(tokio::spawn(run_stream_outputs_sampler(stream_id, tx, latest_ports, clients, state, metrics)));
-        }
+            tokio::spawn(run_stream_outputs_sampler(stream_id, tx, latest_ports, clients, state, metrics))
+        })
+        .await;
     }
 
     async fn prime_ports(&self, stream_id: uuid::Uuid, state: Option<Weak<IpcHandles>>) -> Result<Arc<SharedStreamOutputsPortsSnapshot>, String> {
@@ -122,14 +122,11 @@ impl StreamOutputsTopic {
 
 impl StreamMetricsHub {
     pub(super) fn new() -> Self {
-        Self { topics: Arc::new(RwLock::new(BTreeMap::new())), task: Mutex::new(None), state: RwLock::new(None), metrics: Arc::new(RuntimeBroadcastCounters::default()) }
+        Self { topics: TopicRegistry::new(), task: Mutex::new(None), state: RwLock::new(None), metrics: Arc::new(RuntimeBroadcastCounters::default()) }
     }
 
     pub(super) async fn set_state(&self, state: &Arc<IpcHandles>) {
-        let mut guard = self.state.write().await;
-        if guard.as_ref().and_then(|weak| weak.upgrade()).is_none() {
-            *guard = Some(Arc::downgrade(state));
-        }
+        bind_async_state(&self.state, state).await;
     }
 
     pub(super) async fn subscribe(&self, stream_id: uuid::Uuid) -> Result<(broadcast::Receiver<Arc<SharedStreamMetricsSnapshot>>, Option<Arc<SharedStreamMetricsSnapshot>>), String> {
@@ -141,26 +138,21 @@ impl StreamMetricsHub {
     }
 
     async fn ensure_task(&self) {
-        let mut guard = self.task.lock().await;
-        let needs_spawn = guard.as_ref().map(|handle| handle.is_finished()).unwrap_or(true);
-        if needs_spawn {
-            let topics = self.topics.clone();
-            let state = self.state.read().await.clone();
-            let metrics = self.metrics.clone();
-            *guard = Some(tokio::spawn(run_stream_metrics_sampler(topics, state, metrics)));
-        }
+        let topics = self.topics.clone();
+        let state = self.state.read().await.clone();
+        let metrics = self.metrics.clone();
+        ensure_task(&self.task, || tokio::spawn(run_stream_metrics_sampler(topics, state, metrics))).await;
     }
 
     async fn topic(&self, stream_id: uuid::Uuid) -> Arc<StreamMetricsTopic> {
-        let mut guard = self.topics.write().await;
-        guard.entry(stream_id).or_insert_with(|| Arc::new(StreamMetricsTopic::new())).clone()
+        self.topics.get_or_insert_with(stream_id, StreamMetricsTopic::new).await
     }
 
     pub(super) async fn stats(&self) -> (u64, u64) {
-        let guard = self.topics.read().await;
-        let topics = guard.len() as u64;
-        let subscribers = guard.values().map(|topic| topic.tx.receiver_count() as u64).sum();
-        (topics, subscribers)
+        let topics = self.topics.values().await;
+        let topic_count = topics.len() as u64;
+        let subscribers = topics.iter().map(|topic| topic.tx.receiver_count() as u64).sum();
+        (topic_count, subscribers)
     }
 
     pub(super) async fn snapshot(&self) -> RuntimeTopicBroadcastSnapshot {
@@ -176,7 +168,7 @@ impl StreamMetricsHub {
             return;
         }
         topic.latest.write().await.take();
-        self.topics.write().await.remove(&stream_id);
+        self.topics.remove_if_same(&stream_id, &topic).await;
     }
 
     async fn prime_topic(&self, stream_id: uuid::Uuid, topic: &Arc<StreamMetricsTopic>) -> Result<(), String> {
@@ -208,20 +200,17 @@ impl StreamMetricsHub {
     }
 
     async fn find_topic(&self, stream_id: uuid::Uuid) -> Option<Arc<StreamMetricsTopic>> {
-        self.topics.read().await.get(&stream_id).cloned()
+        self.topics.get(&stream_id).await
     }
 }
 
 impl StreamOutputsHub {
     pub(super) fn new() -> Self {
-        Self { topics: Arc::new(RwLock::new(BTreeMap::new())), state: RwLock::new(None), metrics: Arc::new(RuntimeBroadcastCounters::default()) }
+        Self { topics: TopicRegistry::new(), state: RwLock::new(None), metrics: Arc::new(RuntimeBroadcastCounters::default()) }
     }
 
     pub(super) async fn set_state(&self, state: &Arc<IpcHandles>) {
-        let mut guard = self.state.write().await;
-        if guard.as_ref().and_then(|weak| weak.upgrade()).is_none() {
-            *guard = Some(Arc::downgrade(state));
-        }
+        bind_async_state(&self.state, state).await;
     }
 
     pub(super) async fn subscribe(
@@ -273,11 +262,7 @@ impl StreamOutputsHub {
         }
 
         *topic.latest_ports.write().await = None;
-
-        let mut topics = self.topics.write().await;
-        if topics.get(&stream_id).is_some_and(|current| Arc::ptr_eq(current, &topic)) {
-            topics.remove(&stream_id);
-        }
+        self.topics.remove_if_same(&stream_id, &topic).await;
     }
 
     pub(super) async fn current_ports(&self, stream_id: uuid::Uuid) -> Result<Arc<SharedStreamOutputsPortsSnapshot>, String> {
@@ -288,17 +273,16 @@ impl StreamOutputsHub {
     }
 
     async fn topic(&self, stream_id: uuid::Uuid) -> Arc<StreamOutputsTopic> {
-        let mut guard = self.topics.write().await;
         let metrics = self.metrics.clone();
-        guard.entry(stream_id).or_insert_with(|| Arc::new(StreamOutputsTopic::new(metrics))).clone()
+        self.topics.get_or_insert_with(stream_id, move || StreamOutputsTopic::new(metrics)).await
     }
 
     async fn find_topic(&self, stream_id: uuid::Uuid) -> Option<Arc<StreamOutputsTopic>> {
-        self.topics.read().await.get(&stream_id).cloned()
+        self.topics.get(&stream_id).await
     }
 
     pub(super) async fn stats(&self) -> (u64, u64) {
-        let topics = self.topics.read().await.values().cloned().collect::<Vec<_>>();
+        let topics = self.topics.values().await;
         let topic_count = topics.len() as u64;
         let mut subscribers = 0_u64;
         for topic in topics {
@@ -352,7 +336,7 @@ impl SystemReadModelState {
     }
 }
 
-async fn run_stream_metrics_sampler(topics: Arc<RwLock<BTreeMap<uuid::Uuid, Arc<StreamMetricsTopic>>>>, state: Option<Weak<IpcHandles>>, metrics: Arc<RuntimeBroadcastCounters>) {
+async fn run_stream_metrics_sampler(topics: TopicRegistry<uuid::Uuid, StreamMetricsTopic>, state: Option<Weak<IpcHandles>>, metrics: Arc<RuntimeBroadcastCounters>) {
     let Some(state) = state.and_then(|weak| weak.upgrade()) else {
         return;
     };
@@ -505,12 +489,12 @@ fn aggregate_stream_outputs_ports_interval(clients: &BTreeMap<uuid::Uuid, Stream
     clients.values().map(|client| client.ports_interval).min().unwrap_or_else(|| Duration::from_secs(2))
 }
 
-async fn stream_metrics_topic(topics: &Arc<RwLock<BTreeMap<uuid::Uuid, Arc<StreamMetricsTopic>>>>, stream_id: uuid::Uuid) -> Option<Arc<StreamMetricsTopic>> {
-    topics.read().await.get(&stream_id).cloned()
+async fn stream_metrics_topic(topics: &TopicRegistry<uuid::Uuid, StreamMetricsTopic>, stream_id: uuid::Uuid) -> Option<Arc<StreamMetricsTopic>> {
+    topics.get(&stream_id).await
 }
 
-async fn stream_metrics_has_receivers(topics: &Arc<RwLock<BTreeMap<uuid::Uuid, Arc<StreamMetricsTopic>>>>) -> bool {
-    topics.read().await.values().any(|topic| topic.tx.receiver_count() > 0)
+async fn stream_metrics_has_receivers(topics: &TopicRegistry<uuid::Uuid, StreamMetricsTopic>) -> bool {
+    topics.values().await.iter().any(|topic| topic.tx.receiver_count() > 0)
 }
 
 #[cfg(test)]

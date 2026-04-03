@@ -129,7 +129,7 @@ export const createGraphMutations = (deps: PipelineMutationsDeps) => {
   function setGraphConnectionPolicy(connection: PipelineGraphEdgeSelection | null, policy: ChannelPolicy) {
     const pipeline = get(selectedPipeline);
     if (!pipeline || !connection) return;
-    if (pipeline.graph?.format === 'daedalus' || pipeline.graph?.daedalus) return;
+    if (pipeline.graph?.format === 'daedalus') return;
     updateCurrentPlan((plan) => {
       const match = plan.connections.find(
         (candidate) =>

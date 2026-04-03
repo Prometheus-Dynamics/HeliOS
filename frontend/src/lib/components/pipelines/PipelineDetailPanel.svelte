@@ -87,7 +87,7 @@ let syncOverlayEnabled = $state(false);
 	let profilerOpen = $state(false);
 	let profilerStreamId = $state<string | null>(null);
 
-	const isDaedalusPlan = $derived.by(() => Boolean(graphPlan?.format === 'daedalus' || graphPlan?.daedalus));
+	const isDaedalusPlan = $derived.by(() => Boolean(graphPlan?.format === 'daedalus'));
 const allowedDaedalusTabs: InspectorTabKey[] = ['pipeline', 'node', 'boundary', 'run', 'metrics'];
 const requestedInspectorTab = $derived.by<InspectorTabKey>(() => props.inspectorTab ?? 'pipeline');
 const activeInspectorTab = $derived.by<InspectorTabKey>(() => {

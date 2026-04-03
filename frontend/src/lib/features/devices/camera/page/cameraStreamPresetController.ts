@@ -1,5 +1,5 @@
 import type { CodecInfo, Interval, Mode, ProbedBackend, ProbedDevice, StreamInfo, StreamManifest } from '$lib/api/client';
-import { OpenAPI, getHttpClientBase } from '$lib/api/client';
+import { withHttpClientBase } from '$lib/api/client';
 import { extractError } from '$lib/api/errors';
 import type { EncoderSettingsDraft } from '$lib/api/streamEncoderSettings';
 import type { StreamCreationDefaults } from '$lib/api/streamDefaults';
@@ -79,17 +79,6 @@ type PresetDeps = {
 };
 
 export function createCameraStreamPresetController(state: PresetState, deps: PresetDeps) {
-  function ensureApiBase(): void {
-    try {
-      getHttpClientBase();
-      return;
-    } catch {
-      // Use the server-provided base when local resolution is unavailable.
-    }
-    if (!deps.apiBase) return;
-    OpenAPI.BASE = deps.apiBase.replace(/\/+$/, '');
-  }
-
   function scheduleStreamPresetApply(): void {
     if (state.streamPresetApplyTimer != null) {
       clearTimeout(state.streamPresetApplyTimer);
@@ -101,7 +90,6 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
   }
 
   async function applyStreamPreset(options: { silent?: boolean } = {}): Promise<void> {
-    ensureApiBase();
     const backend = deps.currentBackend();
     const device = deps.currentDevice();
     const mode = deps.currentMode();
@@ -161,7 +149,7 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
         outputSelectionForPipeline: deps.outputSelectionForPipeline
       });
 
-      await deps.streamsApi.startStream({ requestBody: payload });
+      await withHttpClientBase(deps.apiBase, () => deps.streamsApi.startStream({ requestBody: payload }));
       deps.onExternalLayoutApplied?.();
       if (!options.silent) {
         deps.toaster.success({ title: 'Stream updated', description: 'Pipeline & capture settings applied.' });

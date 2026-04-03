@@ -1,5 +1,5 @@
 import { get, writable, type Readable } from 'svelte/store';
-import { OpenAPI } from '$lib/api/client';
+import { apiUrl } from '$lib/api/client';
 import { apiFetchResponse } from '$lib/api/core/http';
 import { createDomainResource } from '$lib/api/domainResources';
 import { extractMessage } from '$lib/api/errors';
@@ -208,7 +208,7 @@ export function createLogsStore(): LogsStore {
   async function fetchLogSnapshot(streamId: string, lineCount: number): Promise<LogEntry[]> {
     const params = new URLSearchParams();
     params.set('lines', lineCount.toString());
-    const url = `${OpenAPI.BASE}/logs/${streamId}/tail?${params.toString()}`;
+    const url = apiUrl(`/logs/${streamId}/tail?${params.toString()}`);
     const response = await apiFetchResponse(url);
     if (!response.ok) {
       const text = await response.text().catch(() => '');
@@ -260,7 +260,7 @@ export function createLogsStore(): LogsStore {
     } else {
       params.set('lines', Math.min(500, Math.max(10, Math.round(DEFAULT_TAIL_SNAPSHOT_LINES))).toString());
     }
-    const url = `${OpenAPI.BASE}/logs/${streamId}/events?${params.toString()}`;
+    const url = apiUrl(`/logs/${streamId}/events?${params.toString()}`);
 
     try {
       const source = new EventSource(url);
@@ -384,9 +384,7 @@ export function createLogsStore(): LogsStore {
         params.set('window', windowExpr);
       }
       const query = params.toString();
-      const response = await apiFetchResponse(
-        `${OpenAPI.BASE}/logs/${snapshot.selectedLogStream}/download${query ? `?${query}` : ''}`
-      );
+      const response = await apiFetchResponse(apiUrl(`/logs/${snapshot.selectedLogStream}/download${query ? `?${query}` : ''}`));
       if (!response.ok) {
         const text = await response.text().catch(() => '');
         throw new Error(extractMessage(text) || `Download failed (${response.status})`);

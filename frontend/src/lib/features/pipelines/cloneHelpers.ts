@@ -377,7 +377,7 @@ export function cloneNodeSyncConfig(
 
 export function cloneGraphPlan(plan: PipelineGraphPlan, palette: Palette): PipelineGraphPlan {
   const cloned: PipelineGraphPlan = {
-    ...(plan.format ? { format: plan.format } : {}),
+    format: 'daedalus',
     ...(plan.daedalus ? { daedalus: { ...(plan.daedalus ?? {}) } } : {}),
     nodes: Object.fromEntries(Object.entries(plan.nodes ?? {}).map(([id, node]) => [id, cloneGraphNode(node, palette)])),
     connections: Array.isArray(plan.connections)

@@ -18,7 +18,7 @@ export const createPipelineIoConfigMutations = (deps: PipelineMutationsDeps) => 
   function setPipelineInputValue(name: string, value: PipelineNodeValue | null) {
     const pipeline = get(selectedPipeline);
     if (!pipeline) return;
-    if (pipeline.graph?.format === 'daedalus' || pipeline.graph?.daedalus) return;
+    if (pipeline.graph?.format === 'daedalus') return;
     const portName = normalizePipelinePortName(name);
     if (!portName) return;
     updateCurrentPlan((plan) => {
@@ -40,7 +40,7 @@ export const createPipelineIoConfigMutations = (deps: PipelineMutationsDeps) => 
   ) {
     const pipeline = get(selectedPipeline);
     if (!pipeline) return;
-    if (pipeline.graph?.format === 'daedalus' || pipeline.graph?.daedalus) return;
+    if (pipeline.graph?.format === 'daedalus') return;
     const portName = normalizePipelinePortName(name);
     if (!portName) return;
     updateCurrentPlan((plan) => {

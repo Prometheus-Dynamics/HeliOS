@@ -102,7 +102,7 @@ fn try_connect_lazy(socket: &Path, journal_path: PathBuf) -> Result<EngineConnec
     Ok(spawn_engine_connection(client, 0, false))
 }
 
-fn spawn_engine_connection(client: Arc<EngineClient>, stream_count: usize, connected_initial: bool) -> EngineConnection {
+fn build_engine_connection(stream_count: usize, connected_initial: bool) -> (EngineConnection, mpsc::Receiver<EngineRequest>) {
     let request_queue_capacity = HELIOS_ENGINE_IPC_POLICY.resolve().request_queue_size(stream_count);
     let (tx, rx) = mpsc::channel(request_queue_capacity);
     let (events, _) = broadcast::channel(64);
@@ -115,39 +115,35 @@ fn spawn_engine_connection(client: Arc<EngineClient>, stream_count: usize, conne
     if !connected_initial {
         mark_disconnected(&connected, &last_disconnect_ms);
     }
+    (EngineConnection { requests: tx, request_queue_capacity, events, connect_events, connected, last_disconnect_ms, timeout_scale_ppm, active_streams, metrics }, rx)
+}
+
+fn spawn_engine_connection(client: Arc<EngineClient>, stream_count: usize, connected_initial: bool) -> EngineConnection {
+    let (connection, rx) = build_engine_connection(stream_count, connected_initial);
     tokio::spawn(run_engine_dispatcher(
         client.clone(),
         rx,
-        events.clone(),
-        connect_events.clone(),
-        connected.clone(),
-        last_disconnect_ms.clone(),
-        timeout_scale_ppm.clone(),
-        active_streams.clone(),
-        metrics.clone(),
+        connection.events.clone(),
+        connection.connect_events.clone(),
+        connection.connected.clone(),
+        connection.last_disconnect_ms.clone(),
+        connection.timeout_scale_ppm.clone(),
+        connection.active_streams.clone(),
+        connection.metrics.clone(),
     ));
-    EngineConnection { requests: tx, request_queue_capacity, events, connect_events, connected, last_disconnect_ms, timeout_scale_ppm, active_streams, metrics }
+    connection
 }
 
 fn spawn_unavailable_engine() -> EngineConnection {
-    let request_queue_capacity = HELIOS_ENGINE_IPC_POLICY.resolve().request_queue_size(0);
-    let (tx, mut rx) = mpsc::channel::<EngineRequest>(request_queue_capacity);
-    let (events, _) = broadcast::channel(64);
-    let (connect_events, _) = broadcast::channel(16);
-    let connected = Arc::new(AtomicBool::new(false));
-    let last_disconnect_ms = Arc::new(AtomicU64::new(0));
-    let timeout_scale_ppm = Arc::new(AtomicU64::new(HELIOS_ENGINE_IPC_POLICY.resolve().timeout_scale_for_streams(0)));
-    let active_streams = Arc::new(AtomicUsize::new(0));
-    let metrics = Arc::new(EngineConnectionMetrics::new(request_queue_capacity));
-    mark_disconnected(&connected, &last_disconnect_ms);
-    let task_metrics = metrics.clone();
+    let (connection, mut rx) = build_engine_connection(0, false);
+    let task_metrics = connection.metrics.clone();
     tokio::spawn(async move {
         while let Some(req) = rx.recv().await {
             task_metrics.record_queue_dequeue();
             let _ = req.respond_to.send(Err(disconnected_error()));
         }
     });
-    EngineConnection { requests: tx, request_queue_capacity, events, connect_events, connected, last_disconnect_ms, timeout_scale_ppm, active_streams, metrics }
+    connection
 }
 
 fn resolve_engine_sockets() -> Vec<PathBuf> {

@@ -6,6 +6,7 @@ use tracing::warn;
 
 use crate::api_observability::{ApiRealtimeDiagnostics, ApiRealtimeMetrics, RuntimeBroadcastCounters};
 use crate::ipc::IpcHandles;
+use crate::system_read_model::hub::{bind_sync_state, clone_sync_latest, ensure_task};
 
 use super::super::collector::SystemCollector;
 use super::super::state::SystemReadModelState;
@@ -41,28 +42,24 @@ impl TelemetryHub {
     }
 
     pub(in crate::system_read_model) fn set_state(&self, state: &Arc<IpcHandles>) {
-        let mut guard = self.state.lock().expect("telemetry state poisoned");
-        if guard.as_ref().and_then(|weak| weak.upgrade()).is_none() {
-            *guard = Some(Arc::downgrade(state));
-        }
+        bind_sync_state(&self.state, state, "telemetry state poisoned");
     }
 
     pub(in crate::system_read_model) async fn subscribe(&self, collector: Arc<StdMutex<SystemCollector>>) -> (broadcast::Receiver<Arc<str>>, Option<Arc<str>>) {
         self.ensure_task(collector).await;
-        let latest = self.latest.lock().ok().and_then(|guard| guard.clone());
+        let latest = clone_sync_latest(&self.latest, "telemetry latest poisoned");
         (self.tx.subscribe(), latest)
     }
 
     async fn ensure_task(&self, collector: Arc<StdMutex<SystemCollector>>) {
-        let mut guard = self.task.lock().await;
-        let needs_spawn = guard.as_ref().map(|handle| handle.is_finished()).unwrap_or(true);
-        if needs_spawn {
+        ensure_task(&self.task, || {
             let tx = self.tx.clone();
             let latest = self.latest.clone();
             let state = self.state.lock().expect("telemetry state poisoned").clone();
             let metrics = self.metrics.clone();
-            *guard = Some(tokio::spawn(run_telemetry_sampler(tx, latest, state, collector, metrics)));
-        }
+            tokio::spawn(run_telemetry_sampler(tx, latest, state, collector, metrics))
+        })
+        .await;
     }
 
     pub(in crate::system_read_model) fn subscriber_count(&self) -> u64 {
@@ -81,10 +78,7 @@ impl DevicesUpdatesHub {
     }
 
     pub(in crate::system_read_model) fn set_state(&self, state: &Arc<IpcHandles>) {
-        let mut guard = self.state.lock().expect("devices updates state poisoned");
-        if guard.as_ref().and_then(|weak| weak.upgrade()).is_none() {
-            *guard = Some(Arc::downgrade(state));
-        }
+        bind_sync_state(&self.state, state, "devices updates state poisoned");
     }
 
     pub(in crate::system_read_model) async fn subscribe(&self) -> broadcast::Receiver<Arc<SharedDevicesUpdate>> {
@@ -93,14 +87,13 @@ impl DevicesUpdatesHub {
     }
 
     async fn ensure_task(&self) {
-        let mut guard = self.task.lock().await;
-        let needs_spawn = guard.as_ref().map(|handle| handle.is_finished()).unwrap_or(true);
-        if needs_spawn {
+        ensure_task(&self.task, || {
             let tx = self.tx.clone();
             let state = self.state.lock().expect("devices updates state poisoned").clone();
             let metrics = self.metrics.clone();
-            *guard = Some(tokio::spawn(run_devices_updates_sampler(tx, state, metrics)));
-        }
+            tokio::spawn(run_devices_updates_sampler(tx, state, metrics))
+        })
+        .await;
     }
 
     pub(in crate::system_read_model) fn subscriber_count(&self) -> u64 {
@@ -120,18 +113,16 @@ impl ProcessesHub {
 
     pub(in crate::system_read_model) async fn subscribe(&self) -> (broadcast::Receiver<Arc<SharedProcessesSnapshot>>, Option<Arc<SharedProcessesSnapshot>>) {
         self.ensure_task().await;
-        let latest = self.latest.lock().ok().and_then(|guard| guard.clone());
+        let latest = clone_sync_latest(&self.latest, "process latest poisoned");
         (self.tx.subscribe(), latest)
     }
 
     async fn ensure_task(&self) {
-        let mut guard = self.task.lock().await;
-        let needs_spawn = guard.as_ref().map(|handle| handle.is_finished()).unwrap_or(true);
-        if needs_spawn {
+        ensure_task(&self.task, || {
             let tx = self.tx.clone();
             let latest = self.latest.clone();
             let metrics = self.metrics.clone();
-            *guard = Some(tokio::spawn(async move {
+            tokio::spawn(async move {
                 let (done_tx, done_rx) = oneshot::channel();
                 let fallback_tx = tx.clone();
                 let fallback_latest = latest.clone();
@@ -151,8 +142,9 @@ impl ProcessesHub {
                         let _ = tokio::task::spawn_blocking(move || run_processes_sampler(fallback_tx, fallback_latest, fallback_metrics)).await;
                     }
                 }
-            }));
-        }
+            })
+        })
+        .await;
     }
 
     pub(in crate::system_read_model) fn subscriber_count(&self) -> u64 {

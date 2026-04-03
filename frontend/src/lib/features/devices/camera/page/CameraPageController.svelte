@@ -2,7 +2,7 @@
 
   import { onDestroy, onMount, untrack, type ComponentProps, type Snippet } from 'svelte';
   import type { PageData } from '../../../../../routes/devices/[cameraId]/$types';
-  import { DeviceService, OpenAPI, getHttpClientBase } from '$lib/api/client';
+  import { DeviceService, apiUrl, getHttpClientApiBase } from '$lib/api/client';
   import { encoderSelectionId } from '$lib/api/streamEncoderSettings';
   import { apiFetchResponse } from '$lib/api/core/http';
   import { PipelinesApi } from '$lib/api/pipelinesApi';
@@ -35,7 +35,7 @@
     PIPELINE_UI_METADATA_KEY,
     type CameraPageTabId
   } from './cameraPageStateTypes';
-  import { backendLabel, buildApiPath, isTimeoutError, modeKey } from './cameraPageHelpers';
+  import { backendLabel, isTimeoutError, modeKey } from './cameraPageHelpers';
   import { resolvePoseCameraRef, normalizeCalibrationSolveResult, extractCurrentCalibrationParams, parseMetadataValue } from './cameraStateUtils';
   import { normalizeGridSlots, normalizeGridOutputKeys, layoutSignature, parseManifestLayout as parsePipelineManifestLayout } from './cameraPipelineState';
   import { fpsToFrameRate, frameRateToFps, gcd, intervalToFps, mediaFormatMatches, normalizeFpsLimit, normalizeRotationDegrees } from './cameraStreamState';
@@ -71,16 +71,8 @@
   const streamId = $derived.by(() => data.streamId);
   const asRecord = (value: unknown): Record<string, unknown> | null =>
     value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
-  const resolveApiBase = (): string => {
-    try {
-      return `${getHttpClientBase()}/v1`;
-    } catch {
-      const current = String(OpenAPI.BASE ?? '').replace(/\/+$/, '');
-      return current.length ? current : '/v1';
-    }
-  };
-  const apiPath = (path: string): string => buildApiPath(resolveApiBase(), path);
-  const apiBase = resolveApiBase();
+  const apiPath = (path: string): string => apiUrl(path);
+  const apiBase = getHttpClientApiBase();
   type TabId = CameraPageTabId;
   type StreamCrop = [number, number, number, number];
   type StreamCrosshair = [number, number];
@@ -983,7 +975,7 @@
     {
       streamsApi: StreamsApi,
       deviceService: DeviceService,
-      getHttpClientBase,
+      getHttpClientApiBase,
       toaster,
       reportError,
       loadBackends,
@@ -1547,7 +1539,6 @@
   );
 
   const services = {
-      OpenAPI,
       PipelinesApi,
       StreamsApi,
       connectStreamControls,

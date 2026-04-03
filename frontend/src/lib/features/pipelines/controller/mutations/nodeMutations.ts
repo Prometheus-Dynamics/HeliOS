@@ -70,7 +70,7 @@ export const createNodeMutations = (deps: PipelineMutationsDeps) => {
     const trimmedNodeId = nodeId.trim();
     if (!trimmedNodeId) return;
     updateCurrentPlan((plan) => {
-      if (!(plan.format === 'daedalus' || plan.daedalus)) {
+      if (plan.format !== 'daedalus') {
         return;
       }
       const nodeEntry = plan.nodes?.[trimmedNodeId];
@@ -107,7 +107,7 @@ export const createNodeMutations = (deps: PipelineMutationsDeps) => {
     const trimmedPrefix = prefix.trim();
     if (!trimmedPrefix) return;
     updateCurrentPlan((plan) => {
-      if (!(plan.format === 'daedalus' || plan.daedalus)) {
+      if (plan.format !== 'daedalus') {
         return;
       }
       const nodeEntry = plan.nodes?.[trimmedNodeId];

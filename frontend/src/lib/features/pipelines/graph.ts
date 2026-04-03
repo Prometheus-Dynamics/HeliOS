@@ -120,7 +120,7 @@ const toApiNodeSyncConfig = (
 };
 
 export function serializeGraphPlan(plan: PipelineGraphPlan, options?: SerializeOptions): unknown {
-  if (plan.format === 'daedalus' || plan.daedalus) {
+  if (plan.format === 'daedalus') {
     return toDaedalusGraph(plan);
   }
 
@@ -377,7 +377,7 @@ export function applyPaletteToGraphPlan(
   };
 
   return {
-    ...(plan.format ? { format: plan.format } : {}),
+    format: 'daedalus',
     ...(plan.daedalus ? { daedalus: { ...(plan.daedalus ?? {}) } } : {}),
     nodes: decoratedNodes,
     connections: plan.connections ?? [],

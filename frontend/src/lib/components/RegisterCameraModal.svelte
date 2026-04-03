@@ -11,7 +11,7 @@
   } from '$lib/api/streamEncoderSettings';
   import { normalizeRecordingMode } from '$lib/api/streamRecordingMode';
   import { withCurrentStreamManifestSchema } from '$lib/api/streamSchema';
-  import { ApiError, OpenAPI, PeersService, PeripheralsService } from '$lib/api/client';
+  import { ApiError, PeersService, PeripheralsService, apiUrl } from '$lib/api/client';
   import { connectDevicesUpdatesStream } from '$lib/api/devicesUpdates';
   import { PipelinesApi } from '$lib/api/pipelinesApi';
   import {
@@ -78,6 +78,7 @@
   const dispatch = createEventDispatcher<{ create: { streamId?: string; descriptor?: unknown } }>();
   const asRecord = (value: unknown): Record<string, unknown> | null =>
     value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+  const apiPath = (path: string): string => apiUrl(path);
 
   let { registeredIds = [], registeredHardwareIds = [] } = $props();
 
@@ -309,12 +310,6 @@
   });
 
   const close = () => registerCameraModal.set(false);
-
-  function apiPath(path: string): string {
-    const base = String(OpenAPI.BASE ?? '').replace(/\/+$/, '');
-    const normalized = path.startsWith('/') ? path : `/${path}`;
-    return `${base}${normalized}`;
-  }
 
   async function loadDevices(options: { preserveSelection?: boolean; silent?: boolean } | Event = {}): Promise<void> {
     const silent =

@@ -694,7 +694,7 @@ export function createPipelineController(initial: PipelinePagePayload, options: 
     if (!spanNode) return null;
     const trimmed = spanNode.trim();
     if (!trimmed) return null;
-    if ((plan.format === 'daedalus' || plan.daedalus) && /^\d+$/u.test(trimmed)) {
+    if (plan.format === 'daedalus' && /^\d+$/u.test(trimmed)) {
       const index = Number.parseInt(trimmed, 10);
       if (Number.isFinite(index)) {
         const order = resolveNodeOrder(plan);

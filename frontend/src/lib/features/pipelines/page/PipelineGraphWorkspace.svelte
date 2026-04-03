@@ -79,7 +79,7 @@
     inspectorTab,
     captureDevices = [],
     selectedPipeline = null,
-    emptyPlan = () => ({ nodes: {}, connections: [] }),
+    emptyPlan = () => ({ format: 'daedalus', nodes: {}, connections: [] }),
     onOrganize = () => {},
     onAssign = () => {},
     onSave = () => {},

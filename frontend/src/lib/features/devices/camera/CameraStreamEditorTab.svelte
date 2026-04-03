@@ -4,7 +4,7 @@
   import type { MediaAsset } from '$lib/features/media/api';
   import { subscribeMediaMutations } from '$lib/features/media/mutations';
   import { MEDIA_KIND_OPTIONS, mediaKindLabel } from '$lib/features/media/mediaKind';
-  import { OpenAPI } from '$lib/api/client';
+  import { apiUrl } from '$lib/api/client';
   import { reportError } from '$lib/ui/errorPolicy';
   import { apiFetchResponse } from '$lib/api/core/http';
   import {
@@ -95,6 +95,7 @@
   } = $props();
 
   const MEDIA_ROOT = '/var/lib/helios/api-data/media';
+  const apiPath = (path: string): string => apiUrl(path);
 
   let mediaPickerOpen = $state(false);
   let mediaPickerLoading = $state(false);
@@ -215,12 +216,6 @@
     }
     mediaPickerSearchTimer = cancelDebounce(mediaPickerSearchTimer);
   });
-
-  function apiPath(path: string): string {
-    const base = String(OpenAPI.BASE ?? '').replace(/\/+$/, '');
-    const normalized = path.startsWith('/') ? path : `/${path}`;
-    return `${base}${normalized}`;
-  }
 
   const selectedMediaNames = $derived((() => {
     const names = new SvelteSet<string>();

@@ -105,7 +105,7 @@ export interface PipelineNodeSyncConfig {
 }
 
 export interface PipelineGraphPlan {
-  format?: 'daedalus';
+  format: 'daedalus';
   daedalus?: { metadata?: Record<string, string> };
   nodes: Record<string, PipelineGraphNode>;
   connections: PipelineConnection[];

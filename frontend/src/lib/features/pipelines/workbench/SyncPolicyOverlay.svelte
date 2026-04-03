@@ -29,7 +29,7 @@
 
   const isDaedalusGraph = $derived.by(() => {
     const graph = context.pipeline?.graph;
-    return Boolean(graph?.format === 'daedalus' || graph?.daedalus);
+    return Boolean(graph?.format === 'daedalus');
   });
 
   const metadataHints = $derived.by(() => metadataAlignedPortHints(selectedNode));

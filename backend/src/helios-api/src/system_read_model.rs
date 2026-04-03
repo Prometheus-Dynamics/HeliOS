@@ -3,6 +3,7 @@ mod config;
 mod device_metrics;
 mod freshness;
 mod hardware;
+pub(crate) mod hub;
 mod log_sources;
 mod processes;
 mod realtime;

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { OpenAPI, type MediaItem, type UpdateAckResponse, type UpdateStateResponse, type UploadUpdateResponse } from '$lib/api/client';
+  import { apiUrl, type MediaItem, type UpdateAckResponse, type UpdateStateResponse, type UploadUpdateResponse } from '$lib/api/client';
   import { normalizeUploadError, uploadSizeHeaders, verifyUploadedBytes } from '$lib/api/uploadIntegrity';
   import { apiFetch, REQUESTED_BY, uploadOtaImage } from '../api';
   import { createDomainResource } from '$lib/api/domainResources';
@@ -82,11 +82,11 @@
     kinds: ['media']
   });
 
-  const apiBaseLabel = $derived(OpenAPI.BASE || '—');
+  const apiBaseLabel = $derived(apiUrl(''));
 
   const filteredMedia = $derived(mediaItems.filter((item) => /\.(img|tar\.gz|zip|bin|xz)$/i.test(item.name || '')));
 
-  const selectedMediaUrl = $derived(selectedMedia ? `${OpenAPI.BASE}/media/${encodeURIComponent(selectedMedia)}` : '');
+  const selectedMediaUrl = $derived(selectedMedia ? apiUrl(`/media/${encodeURIComponent(selectedMedia)}`) : '');
 
   const imageUrl = $derived((() => {
     if (sourceKind === 'url') return imageUrlOverride.trim();

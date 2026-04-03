@@ -1,2 +1,9 @@
 export * from '$generated/http/client';
-export { apiUrl, getHttpClientBase, resetHttpClientBase, setHttpClientBase } from './httpClient';
+export {
+  apiUrl,
+  getHttpClientApiBase,
+  getHttpClientBase,
+  resetHttpClientBase,
+  setHttpClientBase,
+  withHttpClientBase
+} from './httpClient';

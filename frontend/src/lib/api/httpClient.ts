@@ -46,27 +46,17 @@ function applyBase(normalized: string): string {
   return normalized;
 }
 
+export function getHttpClientApiBase(): string {
+  if (browser) {
+    getHttpClientBase();
+  }
+  return String(OpenAPI.BASE || `${getHttpClientBase()}${API_PREFIX}`).replace(/\/+$/, '');
+}
+
 function loadSavedBase(): string | null {
   if (!browser) return null;
   const stored = readStorage(STORAGE_KEY);
   return stored && stored.trim().length > 0 ? stored : null;
-}
-
-function shouldIgnoreStoredBase(stored: string): boolean {
-  // Keep this migration shim scoped to dev so production users can intentionally
-  // target :5801 directly when :5800 proxy upgrades are unavailable.
-  if (!dev) return false;
-  if (!browser) return false;
-  const origin = globalThis.location?.origin?.trim();
-  if (!origin) return false;
-  try {
-    const storedUrl = new URL(normalizeBase(stored));
-    const originUrl = new URL(origin);
-    if (storedUrl.hostname !== originUrl.hostname) return false;
-    return storedUrl.port === '5801' && originUrl.port === '5800';
-  } catch {
-    return false;
-  }
 }
 
 function storeBase(base: string): boolean {
@@ -91,11 +81,7 @@ export function resetHttpClientBase(): void {
 }
 
 export function getHttpClientBase(): string {
-  let stored = loadSavedBase();
-  if (stored && shouldIgnoreStoredBase(stored)) {
-    if (browser) removeStorage(STORAGE_KEY);
-    stored = null;
-  }
+  const stored = loadSavedBase();
   if (stored) {
     try {
       const normalized = normalizeBase(stored);
@@ -128,13 +114,31 @@ export function getHttpClientBase(): string {
   }
 }
 
-export function apiUrl(path: string): string {
-  if (browser) {
-    getHttpClientBase();
+export function apiUrl(path = ''): string {
+  const base = getHttpClientApiBase();
+  const trimmedPath = String(path ?? '').trim();
+  if (!trimmedPath.length) {
+    return base;
   }
-  const base = String(OpenAPI.BASE || `${getHttpClientBase()}${API_PREFIX}`).replace(/\/+$/, '');
-  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  const normalizedPath = trimmedPath.startsWith('/') ? trimmedPath : `/${trimmedPath}`;
   return `${base}${normalizedPath}`;
+}
+
+export async function withHttpClientBase<T>(
+  base: string | null | undefined,
+  run: () => Promise<T> | T
+): Promise<T> {
+  const trimmed = typeof base === 'string' ? base.trim() : '';
+  if (!trimmed.length) {
+    return await run();
+  }
+  const previous = OpenAPI.BASE;
+  applyBase(normalizeBase(trimmed));
+  try {
+    return await run();
+  } finally {
+    OpenAPI.BASE = previous;
+  }
 }
 
 // Initialize OpenAPI.BASE once at module import.

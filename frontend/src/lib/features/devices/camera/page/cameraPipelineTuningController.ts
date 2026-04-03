@@ -616,7 +616,7 @@ export function safeCloneGraph<T>(value: T): T {
 }
 
 export const isDaedalusPlan = (plan: PipelineGraphPlan | null | undefined): boolean =>
-  Boolean(plan && (plan.format === 'daedalus' || plan.daedalus));
+  Boolean(plan?.format === 'daedalus');
 
 export function applyDaedalusNodeOverrides(
   plan: PipelineGraphPlan,

@@ -196,7 +196,7 @@ type FlattenResult = {
 
 export function flattenPipelineChildGroups(plan: PipelineGraphPlan): FlattenResult {
   const base: PipelineGraphPlan = {
-    ...(plan.format ? { format: plan.format } : {}),
+    format: 'daedalus',
     ...(plan.daedalus ? { daedalus: { ...(plan.daedalus ?? {}) } } : {}),
     nodes: { ...(plan.nodes ?? {}) },
     connections: Array.isArray(plan.connections) ? plan.connections.map((c) => ({ ...c, from: { ...c.from }, to: { ...c.to }, ...(c.style ? { style: { ...c.style } } : {}) })) : [],

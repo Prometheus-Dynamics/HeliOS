@@ -3,6 +3,7 @@ use crate::http::device::imu::imu_status_from_snapshot;
 use crate::http::device::lighting::LightingRuntimeStatePayload;
 use crate::http::device::power::{PowerStatusPayload, power_status_from_snapshot};
 use crate::ipc::IpcHandles;
+use crate::system_read_model::hub::{bind_async_state, ensure_task};
 use helios_peripherals::dto::SensorScope;
 use helios_peripherals::ipc::{FirmwareUpdate, SensorCommand, SensorEvent};
 use lib_ipc::types::CommandId;
@@ -31,10 +32,7 @@ impl Default for SensorEventsState {
 
 impl SensorEventsState {
     pub(crate) async fn bind_state(&self, state: &AppState) {
-        let mut guard = self.state.write().await;
-        if guard.as_ref().and_then(|weak| weak.upgrade()).is_none() {
-            *guard = Some(Arc::downgrade(state.ipc()));
-        }
+        bind_async_state(&self.state, state.ipc()).await;
     }
 
     pub(crate) async fn subscribe(&self) -> (broadcast::Receiver<Arc<SharedSensorEvent>>, SharedSensorLatest) {
@@ -44,14 +42,13 @@ impl SensorEventsState {
     }
 
     async fn ensure_task(&self) {
-        let mut guard = self.task.lock().await;
-        let needs_spawn = guard.as_ref().map(|handle| handle.is_finished()).unwrap_or(true);
-        if needs_spawn {
+        let state = self.state.read().await.clone();
+        ensure_task(&self.task, || {
             let tx = self.tx.clone();
             let latest = self.latest.clone();
-            let state = self.state.read().await.clone();
-            *guard = Some(tokio::spawn(run_sensor_events_sampler(tx, latest, state)));
-        }
+            tokio::spawn(run_sensor_events_sampler(tx, latest, state))
+        })
+        .await;
     }
 }
 

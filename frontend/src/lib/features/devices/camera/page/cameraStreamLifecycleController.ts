@@ -44,7 +44,7 @@ type StreamLifecycleState = {
 type StreamLifecycleDeps = {
   streamsApi: typeof StreamsApi;
   deviceService: typeof DeviceService;
-  getHttpClientBase: () => string | null;
+  getHttpClientApiBase: () => string | null;
   toaster: {
     success: (payload: { title: string; description?: string }) => void;
   };
@@ -66,7 +66,7 @@ export function createCameraStreamLifecycleController(state: StreamLifecycleStat
     try {
       const effectiveId = state.stream?.id ?? state.streamId;
       state.streamLookupDebug = null;
-      state.streamApiBase = deps.getHttpClientBase();
+      state.streamApiBase = deps.getHttpClientApiBase();
       const lookup = await resolveStreamInfo({ effectiveId, streamsApi: deps.streamsApi, deviceService: deps.deviceService });
       if (lookup.error) {
         state.streamLookupDebug = lookup.debug;

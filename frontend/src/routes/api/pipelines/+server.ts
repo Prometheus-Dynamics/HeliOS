@@ -1,6 +1,6 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
 
-import { OpenAPI } from '$lib/api/client';
+import { withHttpClientBase } from '$lib/api/client';
 import { PipelinesApi } from '$lib/api/pipelinesApi';
 import { DEFAULT_REQUEST_TIMEOUT_MS } from '$lib/api/requestUtils';
 import { buildPipelinePayloadFromOverview } from '$lib/api/pipelinesNormalize';
@@ -11,8 +11,7 @@ const REQUEST_TIMEOUT_MS = DEFAULT_REQUEST_TIMEOUT_MS;
 
 export const GET: RequestHandler = async ({ url }) => {
   try {
-    OpenAPI.BASE = url.origin;
-    const payload = await buildPipelinePayload();
+    const payload = await withHttpClientBase(url.origin, () => buildPipelinePayload());
     return json(payload);
   } catch (error) {
     console.error('Failed to load pipeline payload', error);

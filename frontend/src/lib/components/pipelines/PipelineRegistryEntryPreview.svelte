@@ -65,6 +65,7 @@
   const buildPreviewPlan = (source: PipelineRegistryEntry): PipelineGraphPlan => {
     const node = buildPreviewNode(source);
     return {
+      format: 'daedalus',
       nodes: {
         [node.id]: node
       },
@@ -72,7 +73,7 @@
     };
   };
 
-  let previewPlan = $state<PipelineGraphPlan>({ nodes: {}, connections: [] });
+  let previewPlan = $state<PipelineGraphPlan>({ format: 'daedalus', nodes: {}, connections: [] });
 
   $effect(() => {
     const plan = buildPreviewPlan(entry);
