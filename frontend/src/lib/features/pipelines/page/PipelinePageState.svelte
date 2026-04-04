@@ -1,5 +1,4 @@
 <script lang="ts">
-
   import { browser } from '$app/environment';
   import { onDestroy, onMount, untrack, type Snippet } from 'svelte';
   import { derived, get, writable } from 'svelte/store';
@@ -40,6 +39,7 @@
   import { createPipelineIdeState } from './pipelineIdeState.svelte';
   import { setupPipelineRegistryState } from './pipelineRegistryState.svelte';
   import { setupPipelineGraphState } from './pipelineGraphState.svelte';
+  import { createPipelinePageViewState } from './pipelinePageViewState.svelte';
   import PipelineTuneWorkspace from '$lib/features/pipelines/page/PipelineTuneWorkspace.svelte';
   import {
     isPipelineNodeValue,
@@ -62,6 +62,7 @@
     graphPlanHasWorkspaceData,
     handlePipelineCardKeydown as handlePipelineCardKeydownSupport
   } from './pipelinePageSupport';
+  import { createPipelinePageBaseContext } from './pipelinePageContext';
 
   const {
     data,
@@ -81,77 +82,16 @@
   const pipelineUpdatesReady = pipelineUpdates.pipelineReady;
   const streamUpdatesReadyById = pipelineUpdates.streamReadyById;
   const getStreamUpdatesSocket = pipelineUpdates.getStreamUpdatesSocket;
-  const {
-    pipeline: pipelineStores,
-    graph: graphStores,
-    inspector: inspectorStores,
-    registry: registryStores,
-    modals: modalStores
-  } = controller.stores;
-  type DetailPanelHandle = {
-    focusOnNode?: (nodeId: string, options?: { port?: string | null }) => void;
-  };
-  let detailPanelRef = $state<DetailPanelHandle | null>(null);
-
-  let PipelineDetailPanelComponent = $state<
-    (typeof import('$lib/components/pipelines/PipelineDetailPanel.svelte'))['default'] | null
-  >(null);
-  let PipelineListPanelComponent = $state<
-    (typeof import('$lib/features/pipelines/page/PipelineListPanel.svelte'))['default'] | null
-  >(null);
-  let PipelineInspectorPanelComponent = $state<
-    (typeof import('$lib/features/pipelines/page/PipelineInspectorPanel.svelte'))['default'] | null
-  >(null);
-  let PipelineModalsComponent = $state<
-    (typeof import('$lib/features/pipelines/page/PipelineModals.svelte'))['default'] | null
-  >(null);
-  let PipelineGraphWorkspaceComponent = $state<
-    (typeof import('$lib/features/pipelines/page/PipelineGraphWorkspace.svelte'))['default'] | null
-  >(null);
-  let PipelineGraphContextMenuComponent = $state<
-    (typeof import('$lib/features/pipelines/page/PipelineGraphContextMenu.svelte'))['default'] | null
-  >(null);
-  let PipelineTunePanelComponent = $state<
-    (typeof import('$lib/features/pipelines/page/PipelineTunePanel.svelte'))['default'] | null
-  >(null);
-
+  const { pipeline: pipelineStores, graph: graphStores, inspector: inspectorStores, registry: registryStores, modals: modalStores } =
+    controller.stores;
+  const pageViewState = createPipelinePageViewState(browser);
   const {
     loadPipelineDetailPanel,
     loadPipelineShellComponents,
     loadPipelineGraphComponents,
     loadPipelineTunePanel,
     loadPipelineModals
-  } = createPipelinePageComponentLoaders({
-    browser,
-    getPipelineDetailPanel: () => PipelineDetailPanelComponent,
-    setPipelineDetailPanel: (component) => {
-      PipelineDetailPanelComponent = component;
-    },
-    getPipelineListPanel: () => PipelineListPanelComponent,
-    setPipelineListPanel: (component) => {
-      PipelineListPanelComponent = component;
-    },
-    getPipelineInspectorPanel: () => PipelineInspectorPanelComponent,
-    setPipelineInspectorPanel: (component) => {
-      PipelineInspectorPanelComponent = component;
-    },
-    getPipelineModals: () => PipelineModalsComponent,
-    setPipelineModals: (component) => {
-      PipelineModalsComponent = component;
-    },
-    getPipelineGraphWorkspace: () => PipelineGraphWorkspaceComponent,
-    setPipelineGraphWorkspace: (component) => {
-      PipelineGraphWorkspaceComponent = component;
-    },
-    getPipelineGraphContextMenu: () => PipelineGraphContextMenuComponent,
-    setPipelineGraphContextMenu: (component) => {
-      PipelineGraphContextMenuComponent = component;
-    },
-    getPipelineTunePanel: () => PipelineTunePanelComponent,
-    setPipelineTunePanel: (component) => {
-      PipelineTunePanelComponent = component;
-    }
-  });
+  } = pageViewState;
   const { registry: registryHelpers } = controller.helpers;
 
   const RAW_STREAM_PIPELINE_ID = '__raw__';
@@ -316,7 +256,6 @@
   const pipelinesRefreshing = $derived(pipelineRefreshCount > 0);
   const isInitialLoading = $derived(!pipelineUiReady || (!pipelinesBootstrapped && pipelinesRefreshing));
 
-  let importInput = $state<HTMLInputElement | null>(null);
   const {
     state: ideState,
     visiblePlugins,
@@ -348,14 +287,7 @@
       ideState.pluginProjectLanguage = value;
     }
   });
-  const graphBindings = $state({
-    get detailPanelRef() {
-      return detailPanelRef;
-    },
-    set detailPanelRef(value: DetailPanelHandle | null) {
-      detailPanelRef = value;
-    }
-  });
+  const graphBindings = pageViewState.graphBindings;
   const graphState = setupPipelineGraphState({
     graphContextMenu,
     graphSelection,
@@ -402,32 +334,7 @@
     }
   }
 
-  let iconModalOpen = $state(false);
-  let iconModalPipelineId = $state<string | null>(null);
-  let iconModalIconId = $state<string>(DEFAULT_PIPELINE_ICON_ID);
-  let iconModalColor = $state<string>(DEFAULT_PIPELINE_COLOR);
-  let iconModalSaving = $state(false);
-  let iconModalError = $state<string | null>(null);
-  const modalBindings = $state({
-    get iconModalIconId() {
-      return iconModalIconId;
-    },
-    set iconModalIconId(value: string) {
-      iconModalIconId = value;
-    },
-    get iconModalColor() {
-      return iconModalColor;
-    },
-    set iconModalColor(value: string) {
-      iconModalColor = value;
-    },
-    get importInput() {
-      return importInput;
-    },
-    set importInput(value: HTMLInputElement | null) {
-      importInput = value;
-    }
-  });
+  const modalBindings = pageViewState.modalBindings;
 
   function organizeGraphNodes() {
     organizeCurrentGraph();
@@ -445,27 +352,27 @@
           description: pipelineLabel
         });
       },
-      getIconModalOpen: () => iconModalOpen,
+      getIconModalOpen: () => pageViewState.iconModalOpen,
       setIconModalOpen: (open) => {
-        iconModalOpen = open;
+        pageViewState.iconModalOpen = open;
       },
-      getIconModalPipelineId: () => iconModalPipelineId,
+      getIconModalPipelineId: () => pageViewState.iconModalPipelineId,
       setIconModalPipelineId: (pipelineId) => {
-        iconModalPipelineId = pipelineId;
+        pageViewState.iconModalPipelineId = pipelineId;
       },
-      getIconModalIconId: () => iconModalIconId,
+      getIconModalIconId: () => pageViewState.iconModalIconId,
       setIconModalIconId: (iconId) => {
-        iconModalIconId = iconId;
+        pageViewState.iconModalIconId = iconId;
       },
-      getIconModalColor: () => iconModalColor,
+      getIconModalColor: () => pageViewState.iconModalColor,
       setIconModalColor: (color) => {
-        iconModalColor = color;
+        pageViewState.iconModalColor = color;
       },
       setIconModalSaving: (saving) => {
-        iconModalSaving = saving;
+        pageViewState.iconModalSaving = saving;
       },
       setIconModalError: (message) => {
-        iconModalError = message;
+        pageViewState.iconModalError = message;
       }
     });
 
@@ -550,7 +457,7 @@
     activeTab.set(tab);
     if (tab !== 'pipeline') {
       registryDrawerOpen.set(false);
-      iconModalOpen = false;
+      pageViewState.iconModalOpen = false;
       deleteModalOpen.set(false);
       closeAssignModal();
       closeGraphContextMenu();
@@ -569,7 +476,7 @@
     setPendingPipelineFocus: (request) => {
       pendingPipelineFocus = request;
     },
-    getDetailPanelRef: () => detailPanelRef,
+    getDetailPanelRef: () => pageViewState.detailPanelRef,
     loadPipelineOverview,
     loadStreamCapabilities,
     refreshCaptureDevices,
@@ -584,7 +491,7 @@
     },
     getActiveTab: () => $activeTab,
     getRegistryDrawerOpen: () => $registryDrawerOpen,
-    getIconModalOpen: () => iconModalOpen,
+    getIconModalOpen: () => pageViewState.iconModalOpen,
     getPluginProjectModalOpen: () => ideState.pluginProjectModalOpen,
     getCreateModalOpen: () => $createModalOpen,
     getDeleteModalOpen: () => $deleteModalOpen,
@@ -612,7 +519,7 @@
   }
 
   function triggerPipelineImport() {
-    importInput?.click();
+    pageViewState.importInput?.click();
   }
 
   const { handlePipelineImport, exportCurrentPipeline } = createPipelineImportExport({
@@ -673,231 +580,186 @@
     pipelinePageRuntime.destroy();
   });
 
-  const baseCtx = $derived.by(() => ({
-    IDE_ENABLED_FALLBACK: ideState.IDE_ENABLED_FALLBACK,
-    IDE_PORT_FALLBACK: ideState.IDE_PORT_FALLBACK,
-    IDE_PROJECTS_DIR_FALLBACK: ideState.IDE_PROJECTS_DIR_FALLBACK,
-    IDE_WORKSPACE_DIR_FALLBACK: ideState.IDE_WORKSPACE_DIR_FALLBACK,
-    OpenAPI,
-    PIPELINE_EXPORT_VERSION,
-    PIPELINE_FOCUS_REQUEST_KEY,
-    PipelineDetailPanelComponent,
-    PipelineGraphContextMenu: PipelineGraphContextMenuComponent,
-    PipelineGraphWorkspace: PipelineGraphWorkspaceComponent,
-    PipelineInspectorPanel: PipelineInspectorPanelComponent,
-    PipelineListPanel: PipelineListPanelComponent,
-    PipelineModals: PipelineModalsComponent,
-    PipelineTunePanel: PipelineTunePanelComponent,
-    PipelinesApi,
-    RAW_STREAM_PIPELINE_ID,
-    RAW_STREAM_PIPELINE_UUID: rawStreamPipelineUuid,
-    SUPPORTED_PIPELINE_EXPORT_VERSIONS,
-    StreamsApi,
-    accessBadgeClass,
-    accessLabel,
-    applyPaletteToGraphPlan,
-    browser,
-    buildDaedalusGraphPatch,
-    buildErrorMessage,
-    clampNumber,
-    closeDeleteModal,
-    closePipelineIconModal,
-    closePluginProjectModal,
-    collectPipelineOutputs,
-    confirmDeletePipeline,
-    consumePipelineFocusRequest: pipelinePageRuntime.consumePipelineFocusRequest,
-    createPipelinePageStore,
-    createPluginProject,
-    createRegistryResolver,
-    customNodeSearch: ideState.customNodeSearch,
-    ideBindings,
-    deleteModalBusy,
-    deleteModalError,
-    deleteModalOpen,
-    deleteModalPipeline,
-    deletePipelineById,
-    derived,
-    describePortType,
-    detailPanelRef,
-    graphBindings,
-    graphContextMenu,
-    graphContextSearch,
-    emptyPipelineGraphPlan,
-    exportCurrentPipeline,
-    extractInputValues,
-    fromApiGraphPlan,
-    get,
-    getStreamUpdatesSocket,
-    graphContextMenuElement: graphState.graphContextMenuElement,
-    graphSelection,
-    groupSelection,
-    handleEdgePolicy,
-    handleEdgeStyle,
-    handleEnterEmbedded,
-    handleExitEmbedded,
-    handleHostIoPortAdd,
-    handleHostIoPortRemove,
-    handleNodeConstantValue,
-    handlePanelGraphContext,
-    handlePanelGraphLayout,
-    handlePanelGraphSelect,
-    handlePanelPlanChange,
-    handlePipelineCardKeydown,
-    handlePipelineImport,
-    handlePipelinePortAdd,
-    handlePipelinePortConfig,
-    handlePipelinePortEdit,
-    handlePipelinePortRemove,
-    handlePipelinePortValue,
-    handlePipelineRename,
-    handlePipelineValidate,
-    iconModalColor,
-    iconModalError,
-    iconModalIconId,
-    iconModalOpen,
-    iconModalPipelineId,
-    iconModalSaving,
-    ideEnabled: ideState.ideEnabled,
-    ideIframeUrl: ideState.ideIframeUrl,
-    idePort: ideState.idePort,
-    ideProjects: ideState.ideProjects,
-    ideProjectsDir: ideState.ideProjectsDir,
-    ideUrl: ideState.ideUrl,
-    ideWorkspaceDir: ideState.ideWorkspaceDir,
-    importInput,
-    modalBindings,
-    initial,
-    isDaedalusPlan,
-    isInitialLoading,
-    isPipelineNodeValue,
-    isRecord,
-    loadPipelineDetailPanel,
-    loadPipelineOverview,
-    numberFromMetadata,
-    onDestroy,
-    onMount,
-    openActionMenu,
-    openBoundaryEditor,
-    openBoundaryMenu,
-    openDeleteModal,
-    openIde,
-    openPipelineIconModal,
-    openRegistryPalette,
-    openGroupEditor,
-    openPluginInIde,
-    openPluginProjectModal,
-    organizeGraphNodes,
-    outputOptionsForPipeline,
-    pageStore,
-    pendingPipelineFocus,
-    pipelineForSource,
-    pipelineLabelById,
-    pipelineMap,
-    pipelineRefreshCount,
-    pipelineUpdatesReady,
-    pipelinesBootstrapped,
-    pipelinesRefreshing,
-    pluginProjectBusy: ideState.pluginProjectBusy,
-    pluginProjectError: ideState.pluginProjectError,
-    pluginProjectLanguage: ideState.pluginProjectLanguage,
-    pluginProjectModalOpen: ideState.pluginProjectModalOpen,
-    pluginProjectName: ideState.pluginProjectName,
-    portMetadataForConstant,
-    portMetadataFromFlatKeys,
-    refreshIdeInfo,
-    refreshIdeProjects,
-    refreshPipelineIoCaches,
-    reportError,
-    resolveRegistryEntryForNode,
-    safeClonePlan,
-    savePipelineIconSelection,
-    serializeGraphPlan,
-    setActiveTab,
-    setBoundaryDraftDirection,
-    setBoundaryDraftPortName,
-    setBoundaryDraftPortType,
-    setGraphContextMenuElement,
-    setGroupDraftColor,
-    setGroupDraftName,
-    setGroupDraftSummary,
-    streamGraphForPipeline,
-    streamLabel,
-    streamUpdatesReadyById,
-    streamUsesPipeline,
-    templateForSource,
-    toaster,
-    triggerPipelineImport,
-    addNodeFromRegistry,
-    addBoundaryDraftPort,
-    applyBoundaryDraft,
-    applyGroupDraft,
-    closeGraphContextMenu,
-    contextRegistryOptions,
-    removeBoundaryDraftPort,
-    removeGraphConnection,
-    removeGraphNode,
-    ungroupSelection,
-    activeTab,
-    registryDrawerOpen,
-    pipelines,
-    pipelineListItems,
-    selectedPipelineId,
-    pipelineSearch,
-    loadError,
-    dataTypes,
-    selectedPipeline,
-    templates,
-    detailContext,
-    editingPlan,
-    editingBreadcrumbs,
-    pipelineInputEntries,
-    pipelineOutputEntries,
-    inspectorTab,
-    captureDevices,
-    registry,
-    registryLoading,
-    registryError,
-    registrySort,
-    registryView,
-    registryStores,
-    registryHelpers,
-    setSelectedPipeline,
-    openAssignModal,
-    closeAssignModal,
-    attachPipelineToDevice,
-    saveCurrentPipeline,
-    clearValidation,
-    setNodeConstantValue,
-    handlePlanChange,
-    refreshPipelineMetrics,
-    setNodeSyncConfig,
-    setDaedalusNodeRuntime,
-    setNodeMetadata,
-    closeCreateModal,
-    createPipeline,
-    updateRegistryFilters,
-    selectRegistryGroup,
-    resetRegistryFilters,
-    refreshRegistry,
-    formatPipelineValue,
-    setSelectedCaptureSession,
-    createModalOpen,
-    createMode,
-    createName,
-    createSourcePipelineId,
-    createSourceTemplateId,
-    createBusy,
-    createError,
-    assignModalOpen,
-    assignError,
-    assignBusy,
-    selectedCaptureSessionId,
-    openCreateModal,
-    visiblePlugins,
-  }));
+  const baseCtx = $derived.by(() =>
+    createPipelinePageBaseContext({
+      config: {
+        IDE_ENABLED_FALLBACK: ideState.IDE_ENABLED_FALLBACK,
+        IDE_PORT_FALLBACK: ideState.IDE_PORT_FALLBACK,
+        IDE_PROJECTS_DIR_FALLBACK: ideState.IDE_PROJECTS_DIR_FALLBACK,
+        IDE_WORKSPACE_DIR_FALLBACK: ideState.IDE_WORKSPACE_DIR_FALLBACK,
+        OpenAPI,
+        PIPELINE_EXPORT_VERSION,
+        PIPELINE_FOCUS_REQUEST_KEY,
+        PipelinesApi,
+        RAW_STREAM_PIPELINE_ID,
+        RAW_STREAM_PIPELINE_UUID: rawStreamPipelineUuid,
+        SUPPORTED_PIPELINE_EXPORT_VERSIONS,
+        StreamsApi,
+        browser,
+        derived,
+        emptyPipelineGraphPlan,
+        get,
+        initial,
+        modalBindings,
+        onDestroy,
+        onMount,
+        pageStore,
+        pipelineMap,
+        reportError,
+        serializeGraphPlan,
+        toaster
+      },
+      components: {
+        PipelineDetailPanelComponent: pageViewState.PipelineDetailPanelComponent,
+        PipelineGraphContextMenu: pageViewState.PipelineGraphContextMenuComponent,
+        PipelineGraphWorkspace: pageViewState.PipelineGraphWorkspaceComponent,
+        PipelineInspectorPanel: pageViewState.PipelineInspectorPanelComponent,
+        PipelineListPanel: pageViewState.PipelineListPanelComponent,
+        PipelineModals: pageViewState.PipelineModalsComponent,
+        PipelineTunePanel: pageViewState.PipelineTunePanelComponent
+      },
+      controller,
+      state: {
+        activeTab,
+        assignBusy,
+        assignError,
+        assignModalOpen,
+        captureDevices,
+        createBusy,
+        createError,
+        createModalOpen,
+        createMode,
+        createName,
+        createSourcePipelineId,
+        createSourceTemplateId,
+        deleteModalBusy,
+        deleteModalError,
+        deleteModalOpen,
+        deleteModalPipeline,
+        detailPanelRef: pageViewState.detailPanelRef,
+        graphContextMenu,
+        graphContextSearch,
+        graphSelection,
+        iconModalColor: pageViewState.iconModalColor,
+        iconModalError: pageViewState.iconModalError,
+        iconModalIconId: pageViewState.iconModalIconId,
+        iconModalOpen: pageViewState.iconModalOpen,
+        iconModalPipelineId: pageViewState.iconModalPipelineId,
+        iconModalSaving: pageViewState.iconModalSaving,
+        importInput: pageViewState.importInput,
+        isInitialLoading,
+        pendingPipelineFocus,
+        pipelineRefreshCount,
+        pipelineUpdatesReady,
+        pipelinesBootstrapped,
+        pipelinesRefreshing,
+        registryDrawerOpen,
+        registryHelpers,
+        selectedCaptureSessionId,
+        streamUpdatesReadyById,
+        getStreamUpdatesSocket
+      },
+      ide: {
+        createPluginProject,
+        customNodeSearch: ideState.customNodeSearch,
+        ideBindings,
+        ideEnabled: ideState.ideEnabled,
+        ideIframeUrl: ideState.ideIframeUrl,
+        idePort: ideState.idePort,
+        ideProjects: ideState.ideProjects,
+        ideProjectsDir: ideState.ideProjectsDir,
+        ideUrl: ideState.ideUrl,
+        ideWorkspaceDir: ideState.ideWorkspaceDir,
+        openIde,
+        openPluginInIde,
+        openPluginProjectModal,
+        closePluginProjectModal,
+        pluginProjectBusy: ideState.pluginProjectBusy,
+        pluginProjectError: ideState.pluginProjectError,
+        pluginProjectLanguage: ideState.pluginProjectLanguage,
+        pluginProjectModalOpen: ideState.pluginProjectModalOpen,
+        pluginProjectName: ideState.pluginProjectName,
+        refreshIdeInfo,
+        refreshIdeProjects,
+        visiblePlugins
+      },
+      graph: {
+        graphBindings,
+        graphContextMenuElement: graphState.graphContextMenuElement,
+        setGraphContextMenuElement
+      },
+      localActions: {
+        closeDeleteModal,
+        closePipelineIconModal,
+        confirmDeletePipeline,
+        consumePipelineFocusRequest: pipelinePageRuntime.consumePipelineFocusRequest,
+        deletePipelineById,
+        describePortType,
+        exportCurrentPipeline,
+        handleEdgePolicy,
+        handleEdgeStyle,
+        handleEnterEmbedded,
+        handleExitEmbedded,
+        handleHostIoPortAdd,
+        handleHostIoPortRemove,
+        handleNodeConstantValue,
+        handlePanelGraphContext,
+        handlePanelGraphLayout,
+        handlePanelGraphSelect,
+        handlePanelPlanChange,
+        handlePipelineCardKeydown,
+        handlePipelineImport,
+        handlePipelinePortAdd,
+        handlePipelinePortConfig,
+        handlePipelinePortEdit,
+        handlePipelinePortRemove,
+        handlePipelinePortValue,
+        handlePipelineRename,
+        handlePipelineValidate,
+        loadPipelineDetailPanel,
+        loadPipelineOverview,
+        openDeleteModal,
+        openPipelineIconModal,
+        organizeGraphNodes,
+        savePipelineIconSelection,
+        setActiveTab,
+        triggerPipelineImport
+      },
+      localHelpers: {
+        accessBadgeClass,
+        accessLabel,
+        applyPaletteToGraphPlan,
+        buildDaedalusGraphPatch,
+        buildErrorMessage,
+        buildNodeValueFromInput,
+        clampNumber,
+        collectPipelineOutputs,
+        createPipelinePageStore,
+        createRegistryResolver,
+        extractInputValues,
+        extractTuneConstantEntries,
+        formatPipelineValue,
+        fromApiGraphPlan,
+        isDaedalusPlan,
+        isPipelineNodeValue,
+        isRecord,
+        numberFromMetadata,
+        outputOptionsForPipeline,
+        pipelineForSource,
+        pipelineLabelById,
+        portMetadataForConstant,
+        portMetadataFromFlatKeys,
+        refreshPipelineIoCaches,
+        resolveRegistryEntryForNode,
+        safeClonePlan,
+        streamGraphForPipeline,
+        streamLabel,
+        streamUsesPipeline,
+        templateForSource
+      }
+    })
+  );
 </script>
-
-
 <PipelineTuneWorkspace
   {activeTab}
   {pipelineUpdates}

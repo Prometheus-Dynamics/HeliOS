@@ -5,8 +5,6 @@
   import { subscribeMediaMutations } from '$lib/features/media/mutations';
   import { MEDIA_KIND_OPTIONS, mediaKindLabel } from '$lib/features/media/mediaKind';
   import { apiUrl } from '$lib/api/client';
-  import { reportError } from '$lib/ui/errorPolicy';
-  import { apiFetchResponse } from '$lib/api/core/http';
   import {
     encoderSelectionId,
     encoderSettingsKindForCodec,
@@ -15,7 +13,6 @@
     encoderSettingsSupportsVideoControls
   } from '$lib/api/streamEncoderSettings';
   import { cancelDebounce, scheduleDebounce, type DebounceHandle } from '$lib/utils/debounce';
-  import { toaster } from '$lib';
   import StreamConfigPanel from './stream/StreamConfigPanel.svelte';
   import StreamManifestDetails from './stream/StreamManifestDetails.svelte';
   import StreamControls from './stream/StreamControls.svelte';
@@ -43,6 +40,27 @@
     type CameraStreamEditorState,
     type StreamSelectionMode
   } from './page/cameraStreamEditorReducer';
+  import {
+    applyOutputScaleToEncoderSettings,
+    clampStreamCropValue,
+    fetchStreamFormatBenchmark,
+    formatCropValue,
+    normalizeStreamOrderingMode,
+    normalizeStreamCrop,
+    normalizeStreamCrosshair,
+    parseSelectedResolution,
+    readStreamCrop,
+    readStreamCrosshair,
+    STREAM_CROP_MAX,
+    STREAM_CROP_MIN,
+    STREAM_CROP_STEP,
+    STREAM_ORDERING_MODES,
+    type BenchFormatGroup,
+    type StreamCrop,
+    type StreamCrosshair,
+    type StreamModeDescriptor,
+    type StreamOrderingMode
+  } from './stream/streamEditorSupport';
 
   let {
     cameraAlias = $bindable(),
@@ -131,53 +149,9 @@
   let benchSampleMs = $state(1500);
   let benchTargetFps = $state<number>(120);
 
-  type BenchCodecStat = { implementation: string; avg_ms: number; avg_fps: number; errors?: number };
-  type BenchFormatGroup = {
-    format: string;
-    capture_avg_fps: number;
-    host_avg_fps: number;
-    decoders?: BenchCodecStat[];
-    encoders?: BenchCodecStat[];
-  };
-  type StreamModeDescriptor = { id: string } & Record<string, unknown>;
-  type StreamCrop = [number, number, number, number];
-  type StreamCrosshair = [number, number];
-  type StreamOrderingMode =
-    | 'none'
-    | 'largest_to_smallest'
-    | 'smallest_to_largest'
-    | 'top_most'
-    | 'bottom_most'
-    | 'left_most'
-    | 'right_most'
-    | 'top_left'
-    | 'top_right'
-    | 'bottom_left'
-    | 'bottom_right'
-    | 'center_most'
-    | 'crosshair';
-
   const STREAM_CROP_APPLY_DEBOUNCE_MS = 150;
   const STREAM_CROSSHAIR_APPLY_DEBOUNCE_MS = 150;
   const STREAM_ORDERING_APPLY_DEBOUNCE_MS = 120;
-  const STREAM_CROP_MIN = -1;
-  const STREAM_CROP_MAX = 1;
-  const STREAM_CROP_STEP = 0.01;
-  const STREAM_ORDERING_MODES: Array<{ value: StreamOrderingMode; label: string }> = [
-    { value: 'none', label: 'None (input order)' },
-    { value: 'largest_to_smallest', label: 'Largest to smallest' },
-    { value: 'smallest_to_largest', label: 'Smallest to largest' },
-    { value: 'top_most', label: 'Top most' },
-    { value: 'bottom_most', label: 'Bottom most' },
-    { value: 'left_most', label: 'Left most' },
-    { value: 'right_most', label: 'Right most' },
-    { value: 'top_left', label: 'Top left' },
-    { value: 'top_right', label: 'Top right' },
-    { value: 'bottom_left', label: 'Bottom left' },
-    { value: 'bottom_right', label: 'Bottom right' },
-    { value: 'center_most', label: 'Center most' },
-    { value: 'crosshair', label: 'Crosshair nearest' }
-  ];
 
   let streamCropApplyTimer: ReturnType<typeof setTimeout> | null = null;
   let streamCrosshairApplyTimer: ReturnType<typeof setTimeout> | null = null;
@@ -198,8 +172,8 @@
   });
   const selectedEncoderSettingsKind = $derived.by(() => encoderSettingsKindForCodec(selectedEncoder));
   const selectedEncoderDefaultsSummary = $derived.by(() => encoderSettingsSummary(selectedEncoder?.tunables?.encoder_settings ?? null));
-  const normalizedStreamCrop = $derived.by(() => normalizeStreamCrop(readStreamCrop()));
-  const normalizedStreamCrosshair = $derived.by(() => normalizeStreamCrosshair(readStreamCrosshair()));
+  const normalizedStreamCrop = $derived.by(() => normalizeStreamCrop(readStreamCrop(streamCrop)));
+  const normalizedStreamCrosshair = $derived.by(() => normalizeStreamCrosshair(readStreamCrosshair(streamCrosshair)));
   const normalizedStreamOrderingMode = $derived.by(() => normalizeStreamOrderingMode(streamOrderingMode));
 
   const unsubscribeMediaMutations = subscribeMediaMutations(() => {
@@ -505,36 +479,6 @@
     previewJpegQuality = parsed && Number.isFinite(parsed) ? Math.min(100, Math.max(1, Math.trunc(parsed))) : 65;
   }
 
-  function readStreamCrop(): StreamCrop {
-    if (!Array.isArray(streamCrop) || streamCrop.length !== 4) return [-1, 1, -1, 1];
-    return [
-      Number(streamCrop[0] ?? -1),
-      Number(streamCrop[1] ?? 1),
-      Number(streamCrop[2] ?? -1),
-      Number(streamCrop[3] ?? 1)
-    ];
-  }
-
-  function clampStreamCropValue(value: number): number {
-    if (!Number.isFinite(value)) return 0;
-    return Math.max(STREAM_CROP_MIN, Math.min(STREAM_CROP_MAX, value));
-  }
-
-  function normalizeStreamCrop(crop: StreamCrop): StreamCrop {
-    let [x0, x1, y0, y1] = crop;
-    x0 = clampStreamCropValue(x0);
-    x1 = clampStreamCropValue(x1);
-    y0 = clampStreamCropValue(y0);
-    y1 = clampStreamCropValue(y1);
-    if (x1 < x0) [x0, x1] = [x1, x0];
-    if (y1 < y0) [y0, y1] = [y1, y0];
-    return [x0, x1, y0, y1];
-  }
-
-  function formatCropValue(value: number): string {
-    return value.toFixed(2);
-  }
-
   async function flushStreamCropApply(crop: StreamCrop): Promise<void> {
     if (typeof applyStreamCrop !== 'function') return;
     await applyStreamCrop(crop);
@@ -545,7 +489,7 @@
       clearTimeout(streamCropApplyTimer);
       streamCropApplyTimer = null;
     }
-    const crop = normalizeStreamCrop(readStreamCrop());
+    const crop = normalizeStreamCrop(readStreamCrop(streamCrop));
     if (immediate) {
       void flushStreamCropApply(crop);
       return;
@@ -557,7 +501,7 @@
   }
 
   function updateStreamCropRange(axis: 'x' | 'y', bound: 'min' | 'max', rawValue: number, immediate = false): void {
-    const next = normalizeStreamCrop(readStreamCrop());
+    const next = normalizeStreamCrop(readStreamCrop(streamCrop));
     const value = clampStreamCropValue(rawValue);
     if (axis === 'x') {
       if (bound === 'min') {
@@ -580,7 +524,7 @@
   }
 
   function updateStreamCropBand(axis: 'x' | 'y', minRawValue: number, maxRawValue: number, immediate = false): void {
-    const next = normalizeStreamCrop(readStreamCrop());
+    const next = normalizeStreamCrop(readStreamCrop(streamCrop));
     const minValue = clampStreamCropValue(minRawValue);
     const maxValue = clampStreamCropValue(maxRawValue);
     if (axis === 'x') {
@@ -601,17 +545,6 @@
     scheduleStreamCropApply(true);
   }
 
-  function readStreamCrosshair(): StreamCrosshair {
-    if (!Array.isArray(streamCrosshair) || streamCrosshair.length !== 2) return [0, 0];
-    return [Number(streamCrosshair[0] ?? 0), Number(streamCrosshair[1] ?? 0)];
-  }
-
-  function normalizeStreamCrosshair(crosshair: StreamCrosshair): StreamCrosshair {
-    const x = clampStreamCropValue(crosshair[0]);
-    const y = clampStreamCropValue(crosshair[1]);
-    return [x, y];
-  }
-
   async function flushStreamCrosshairApply(crosshair: StreamCrosshair, enabled: boolean): Promise<void> {
     if (typeof applyStreamCrosshair !== 'function') return;
     await applyStreamCrosshair(crosshair, enabled);
@@ -622,7 +555,7 @@
       clearTimeout(streamCrosshairApplyTimer);
       streamCrosshairApplyTimer = null;
     }
-    const crosshair = normalizeStreamCrosshair(readStreamCrosshair());
+    const crosshair = normalizeStreamCrosshair(readStreamCrosshair(streamCrosshair));
     const enabled = Boolean(streamCrosshairEnabled);
     if (immediate) {
       void flushStreamCrosshairApply(crosshair, enabled);
@@ -635,7 +568,7 @@
   }
 
   function updateStreamCrosshair(axis: 'x' | 'y', rawValue: number, immediate = false): void {
-    const [currentX, currentY] = normalizeStreamCrosshair(readStreamCrosshair());
+    const [currentX, currentY] = normalizeStreamCrosshair(readStreamCrosshair(streamCrosshair));
     const value = clampStreamCropValue(rawValue);
     const next: StreamCrosshair = axis === 'x' ? [value, currentY] : [currentX, value];
     streamCrosshair = normalizeStreamCrosshair(next);
@@ -653,16 +586,6 @@
     streamCrosshairEnabled = Boolean(rawValue);
     streamCrosshairError = null;
     scheduleStreamCrosshairApply(true);
-  }
-
-  function normalizeStreamOrderingMode(mode: unknown): StreamOrderingMode {
-    const normalized = String(mode ?? 'none')
-      .trim()
-      .toLowerCase()
-      .replaceAll('-', '_')
-      .replaceAll(' ', '_');
-    const allowed = STREAM_ORDERING_MODES.map((entry) => entry.value);
-    return (allowed as string[]).includes(normalized) ? (normalized as StreamOrderingMode) : 'none';
   }
 
   async function flushStreamOrderingApply(mode: StreamOrderingMode): Promise<void> {
@@ -693,84 +616,34 @@
     scheduleStreamOrderingApply(next, immediate);
   }
 
-  function parseSelectedResolution(): { width: number; height: number } | null {
-    const parts = String(selectedResolution ?? '').split('x');
-    if (parts.length !== 2) return null;
-    const width = Number(parts[0]);
-    const height = Number(parts[1]);
-    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
-    return { width: Math.trunc(width), height: Math.trunc(height) };
-  }
-
-  function scaledSize(value: number, divisor: number): number {
-    const scaled = Math.max(16, Math.round(value / Math.max(1, divisor)));
-    return scaled % 2 === 0 ? scaled : scaled - 1;
-  }
-
   function applyOutputScale(divisor: number): void {
-    const src = parseSelectedResolution();
-    if (!src) return;
-    encoderSettings.outWidth = scaledSize(src.width, divisor);
-    encoderSettings.outHeight = scaledSize(src.height, divisor);
+    applyOutputScaleToEncoderSettings(encoderSettings, selectedResolution, divisor);
   }
 
   async function runFormatBenchmark(): Promise<void> {
-    const backend = currentBackend();
-    const device = currentDevice();
-    const res = parseSelectedResolution();
-    if (!backend || !device || !res) {
-      toaster.error({ title: 'Benchmark failed', description: 'Select a device/backend + resolution first.' });
-      return;
-    }
     if (benchRunning) return;
     benchRunning = true;
     benchError = null;
     benchWarnings = [];
     benchResults = [];
     try {
-      const fps = Math.max(1, Math.trunc(Number(benchTargetFps) || 120));
-      const sampleMs = Math.max(250, Math.trunc(Number(benchSampleMs) || 1500));
-      const descriptorModes = effectiveModes() as StreamModeDescriptor[];
-      const selectedModes = descriptorModes
-        .filter((mode) => resolutionKey(mode) === selectedResolution)
-        .map((mode) => ({ id: mode.id }));
-
-      const payload = {
-        backend: backend.kind,
-        handle: backend.handle,
-        device_keys: device.identity?.keys ?? [],
-        modes: selectedModes,
-        width: res.width,
-        height: res.height,
-        target_fps: fps,
-        sample_ms: sampleMs,
-        restore_existing: true,
-        controls: []
-      };
-
-      const resp = await apiFetchResponse(apiPath('/streams/bench/formats'), {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (!resp.ok) {
-        const text = await resp.text().catch(() => '');
-        throw new Error(text || `HTTP ${resp.status}`);
-      }
-      const json = await resp.json();
-      benchWarnings = Array.isArray(json?.warnings) ? json.warnings : [];
-      benchResults = Array.isArray(json?.formats) ? json.formats : [];
-      benchResults = [...benchResults].sort((a, b) => Number(b.capture_avg_fps ?? 0) - Number(a.capture_avg_fps ?? 0));
-    } catch (err) {
-      console.error('Benchmark failed', err);
-      reportError({
-        title: 'Benchmark failed',
-        error: err,
-        fallback: 'Unable to run the benchmark right now.',
-        inline: (message) => {
+      const result = await fetchStreamFormatBenchmark({
+        currentBackend,
+        currentDevice,
+        selectedResolution,
+        benchTargetFps,
+        benchSampleMs,
+        effectiveModes: () => effectiveModes() as StreamModeDescriptor[],
+        resolutionKey: (mode) => resolutionKey(mode),
+        apiPath,
+        setBenchError: (message) => {
           benchError = message;
         }
       });
+      if (result) {
+        benchWarnings = result.warnings;
+        benchResults = result.results;
+      }
     } finally {
       benchRunning = false;
     }
@@ -893,7 +766,7 @@
   encoderSettings={encoderSettings}
   selectedEncoderSettingsKind={selectedEncoderSettingsKind}
   selectedEncoderDefaultsSummary={selectedEncoderDefaultsSummary}
-  parseSelectedResolution={parseSelectedResolution}
+  parseSelectedResolution={() => parseSelectedResolution(selectedResolution)}
   applyOutputScale={applyOutputScale}
   onClose={() => (encoderSettingsOpen = false)}
 />
