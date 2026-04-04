@@ -14,14 +14,10 @@ use crate::{
 use async_trait::async_trait;
 use rusb::{Context, DeviceDescriptor, DeviceHandle, Speed, UsbContext};
 use std::{
-    cell::RefCell,
-    collections::{HashMap, HashSet, hash_map::DefaultHasher},
-    env, fs,
-    hash::{Hash, Hasher},
-    io,
+    collections::{HashMap, HashSet},
+    env, fs, io,
     os::unix::io::AsRawFd,
     path::{Path, PathBuf},
-    ptr::NonNull,
     sync::{Arc, Mutex, OnceLock},
     time::Duration,
 };

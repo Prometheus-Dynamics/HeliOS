@@ -20,7 +20,6 @@ use crate::error::{Error, Result};
 /// Default character device exposed by the ws2812-pio-rp1 driver when using the
 /// upstream dev-name template ("leds%d").
 pub const DEFAULT_LED_DEVICE: &str = "/dev/leds0";
-const DEFAULT_LED_INDEX_OFFSET: isize = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LedChannel {
