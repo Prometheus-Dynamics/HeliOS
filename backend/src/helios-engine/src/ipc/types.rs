@@ -4,7 +4,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
 use std::str::FromStr;
-use std::sync::OnceLock;
+use std::sync::{LazyLock, Mutex};
 use utoipa::ToSchema;
 use uuid::Uuid;
 

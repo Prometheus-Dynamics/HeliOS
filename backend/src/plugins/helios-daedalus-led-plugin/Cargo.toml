@@ -6,12 +6,12 @@ edition = "2024"
 [lib]
 crate-type = ["cdylib"]
 
-[lints]
-workspace = true
-
 [features]
 default = ["plugins"]
 plugins = []
+
+[lints]
+workspace = true
 
 [dependencies]
 daedalus = { workspace = true, features = ["ffi", "plugins", "gpu"] }

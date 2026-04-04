@@ -177,6 +177,33 @@ fn stream_runtime_capabilities_match_enabled_registry() {
 }
 
 #[test]
+fn cached_stream_runtime_capabilities_exposes_cache_metrics() {
+    reset_stream_runtime_capabilities_cache_for_tests();
+
+    let initial = stream_runtime_capabilities_cache_snapshot();
+    assert_eq!(initial.entries, 0);
+    assert_eq!(initial.hits, 0);
+    assert_eq!(initial.misses, 0);
+    assert_eq!(initial.refreshes, 0);
+
+    let first = cached_stream_runtime_capabilities().expect("runtime capabilities");
+    let after_first = stream_runtime_capabilities_cache_snapshot();
+    assert_eq!(after_first.entries, 1);
+    assert_eq!(after_first.hits, 0);
+    assert_eq!(after_first.misses, 1);
+    assert_eq!(after_first.refreshes, 1);
+    assert!(after_first.last_error.is_none());
+
+    let second = cached_stream_runtime_capabilities().expect("runtime capabilities");
+    let after_second = stream_runtime_capabilities_cache_snapshot();
+    assert_eq!(after_second.entries, 1);
+    assert_eq!(after_second.hits, 1);
+    assert_eq!(after_second.misses, 1);
+    assert_eq!(after_second.refreshes, 1);
+    assert_eq!(first.codecs, second.codecs);
+}
+
+#[test]
 fn encoder_settings_kind_for_selector_supports_generated_runtime_ids() {
     assert!(matches!(empty_encoder_settings_for_selector(Some("h264_v4l2m2m")), Some(EncoderSettings::H264 { .. })));
     assert!(matches!(empty_encoder_settings_for_selector(Some("hevc_v4l2m2m")), Some(EncoderSettings::H265 { .. })));

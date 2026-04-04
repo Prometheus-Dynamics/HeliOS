@@ -1,10 +1,33 @@
-use crate::filesystem::PathPolicy;
+use crate::{BoundedU64Policy, filesystem::PathPolicy};
 use lib_schema_migration::{SyncSchemaPlan, normalize_to_current};
 use serde::{Deserialize, Serialize};
 
 pub const HELIOS_NT4_SETTINGS_FILE_POLICY: PathPolicy = PathPolicy { env_var: "HELIOS_NT4_SETTINGS_FILE", default: "/var/lib/helios/nt4.json" };
 
 pub const HELIOS_TEAM_FILE_POLICY: PathPolicy = PathPolicy { env_var: "HELIOS_TEAM_FILE", default: "/var/lib/helios/team" };
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Nt4SettingsCachePolicy {
+    pub refresh_interval_ms: BoundedU64Policy,
+    pub max_file_bytes: BoundedU64Policy,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResolvedNt4SettingsCachePolicy {
+    pub refresh_interval_ms: u64,
+    pub max_file_bytes: usize,
+}
+
+impl Nt4SettingsCachePolicy {
+    pub fn resolve(self) -> ResolvedNt4SettingsCachePolicy {
+        ResolvedNt4SettingsCachePolicy { refresh_interval_ms: self.refresh_interval_ms.resolve(), max_file_bytes: self.max_file_bytes.resolve().min(usize::MAX as u64) as usize }
+    }
+}
+
+pub const HELIOS_NT4_SETTINGS_CACHE_POLICY: Nt4SettingsCachePolicy = Nt4SettingsCachePolicy {
+    refresh_interval_ms: BoundedU64Policy { env_var: "HELIOS_NT4_SETTINGS_REFRESH_INTERVAL_MS", default: 250, min: 50, max: 10_000 },
+    max_file_bytes: BoundedU64Policy { env_var: "HELIOS_NT4_SETTINGS_MAX_FILE_BYTES", default: 64 * 1024, min: 256, max: 1024 * 1024 },
+};
 
 const CURRENT_NT4_SETTINGS_SCHEMA_VERSION: u32 = 1;
 

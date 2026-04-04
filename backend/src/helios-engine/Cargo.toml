@@ -8,6 +8,7 @@ autobins = false
 [[bin]]
 name = "helios-engine"
 path = "src/main.rs"
+required-features = ["runtime"]
 
 [features]
 default = ["runtime"]

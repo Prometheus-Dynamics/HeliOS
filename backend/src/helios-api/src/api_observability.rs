@@ -52,6 +52,14 @@ pub struct ApiRealtimeDiagnostics {
 }
 
 #[derive(Debug, Clone, Default, Serialize, ToSchema)]
+pub struct RuntimeLockRegistrySnapshot {
+    pub active_entries: u64,
+    pub peak_entries: u64,
+    pub acquires: u64,
+    pub pruned_entries: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, ToSchema)]
 pub struct LocalizationSolveCacheSnapshot {
     pub entries: u64,
     pub hits: u64,

@@ -411,10 +411,64 @@ pub fn stream_runtime_capabilities() -> Result<StreamRuntimeCapabilities, String
     Ok(StreamRuntimeCapabilities { codecs, default_encoder_id: runtime.default_encoder_selector, default_decoder_ids_by_capture_format: runtime.default_decoder_ids_by_capture_format })
 }
 
-static STREAM_RUNTIME_CAPABILITIES_CACHE: OnceLock<Result<StreamRuntimeCapabilities, String>> = OnceLock::new();
+#[derive(Debug, Clone, Serialize, ToSchema, Default)]
+pub struct StreamRuntimeCapabilitiesCacheSnapshot {
+    pub entries: u64,
+    pub hits: u64,
+    pub misses: u64,
+    pub refreshes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Default)]
+struct StreamRuntimeCapabilitiesCacheState {
+    cached: Option<Result<StreamRuntimeCapabilities, String>>,
+    hits: u64,
+    misses: u64,
+    refreshes: u64,
+}
+
+fn stream_runtime_capabilities_cache() -> &'static Mutex<StreamRuntimeCapabilitiesCacheState> {
+    static CACHE: LazyLock<Mutex<StreamRuntimeCapabilitiesCacheState>> = LazyLock::new(|| Mutex::new(StreamRuntimeCapabilitiesCacheState::default()));
+    &CACHE
+}
 
 pub fn cached_stream_runtime_capabilities() -> Result<StreamRuntimeCapabilities, String> {
-    STREAM_RUNTIME_CAPABILITIES_CACHE.get_or_init(stream_runtime_capabilities).clone()
+    {
+        let mut state = stream_runtime_capabilities_cache().lock().expect("stream runtime capabilities cache poisoned");
+        if let Some(cached) = state.cached.clone() {
+            state.hits = state.hits.saturating_add(1);
+            return cached;
+        }
+        state.misses = state.misses.saturating_add(1);
+    }
+
+    let computed = stream_runtime_capabilities();
+    let mut state = stream_runtime_capabilities_cache().lock().expect("stream runtime capabilities cache poisoned");
+    if let Some(cached) = state.cached.clone() {
+        state.hits = state.hits.saturating_add(1);
+        return cached;
+    }
+    state.refreshes = state.refreshes.saturating_add(1);
+    state.cached = Some(computed.clone());
+    computed
+}
+
+pub fn stream_runtime_capabilities_cache_snapshot() -> StreamRuntimeCapabilitiesCacheSnapshot {
+    let state = stream_runtime_capabilities_cache().lock().expect("stream runtime capabilities cache poisoned");
+    StreamRuntimeCapabilitiesCacheSnapshot {
+        entries: u64::from(state.cached.is_some()),
+        hits: state.hits,
+        misses: state.misses,
+        refreshes: state.refreshes,
+        last_error: state.cached.as_ref().and_then(|cached| cached.as_ref().err().cloned()),
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn reset_stream_runtime_capabilities_cache_for_tests() {
+    *stream_runtime_capabilities_cache().lock().expect("stream runtime capabilities cache poisoned") = StreamRuntimeCapabilitiesCacheState::default();
 }
 
 pub(super) fn default_encoder_output_resolution(capture_resolution: Resolution) -> ResolutionHint {

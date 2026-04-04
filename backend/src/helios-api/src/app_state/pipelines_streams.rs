@@ -8,7 +8,7 @@ use serde_json::Value as JsonValue;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use crate::api_observability::{ApiCacheMetric, RuntimeTopicBroadcastSnapshot};
+use crate::api_observability::{ApiCacheMetric, RuntimeLockRegistrySnapshot, RuntimeTopicBroadcastSnapshot};
 use crate::http::pipelines::{PipelineSummary, PlannerDiagnostic};
 use crate::http::streams::recording::RecordingRuntimeState;
 use crate::http::streams::replay_bundle::ReplayBundleSessionsState;
@@ -131,6 +131,10 @@ impl StreamsReadModelService {
 
     pub async fn release_snapshot_guard(&self, stream_id: Uuid, lock: Arc<Mutex<()>>) {
         self.snapshot_locks.release(stream_id, lock).await;
+    }
+
+    pub async fn snapshot_lock_metrics(&self) -> RuntimeLockRegistrySnapshot {
+        self.snapshot_locks.snapshot().await
     }
 
     pub fn sensor_benchmark_jobs(&self) -> Arc<SensorBenchmarkJobsState> {

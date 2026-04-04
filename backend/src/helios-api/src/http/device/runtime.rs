@@ -1,13 +1,14 @@
 use crate::api_observability::{
     ApiRealtimeDiagnostics, LocalizationSampleRefreshSnapshot, LocalizationSolveCacheSnapshot, Nt4BridgeObservabilitySnapshot, Nt4PoolObservabilitySnapshot, RuntimeBroadcastSnapshot,
-    RuntimeTopicBroadcastSnapshot,
+    RuntimeLockRegistrySnapshot, RuntimeTopicBroadcastSnapshot,
 };
 use axum::{Json, extract::State, http::StatusCode};
 use helios_peripherals::dto::SensorScope;
 use lib_runtime_policy::{
     HELIOS_API_HARDWARE_READ_MODEL_POLICY, HELIOS_API_LOG_SOURCES_POLICY, HELIOS_API_STARTUP_CACHE_WARM_POLICY, HELIOS_API_STREAMS_POLICY, HELIOS_API_SYSTEM_READ_MODEL_POLICY,
     HELIOS_API_TOKIO_POLICY, HELIOS_ENGINE_CRASH_GUARD_POLICY, HELIOS_ENGINE_TOKIO_POLICY, HELIOS_I2C_INVENTORY_POLICY, HELIOS_IMU_RUNTIME_POLICY, HELIOS_LOG_FILTER_POLICY,
-    HELIOS_PERIPHERALS_POWER_POLICY, HELIOS_PERIPHERALS_TOKIO_POLICY, HELIOS_RESOURCE_GUARD_POLICY, HELIOS_STYX_CAPTURE_TUNABLES_POLICY, PlatformFamily, detect_platform_identity,
+    HELIOS_NT4_SETTINGS_CACHE_POLICY, HELIOS_PERIPHERALS_POWER_POLICY, HELIOS_PERIPHERALS_TOKIO_POLICY, HELIOS_RESOURCE_GUARD_POLICY, HELIOS_STYX_CAPTURE_TUNABLES_POLICY, PlatformFamily,
+    detect_platform_identity,
 };
 use lib_sensors::model::SensorReading;
 use serde::Serialize;
@@ -86,6 +87,12 @@ pub struct I2cInventoryPolicySnapshot {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ImuRuntimePolicySnapshot {
     pub idle_interval_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct Nt4SettingsCachePolicySnapshot {
+    pub refresh_interval_ms: u64,
+    pub max_file_bytes: usize,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -208,6 +215,7 @@ pub struct DeviceRuntimePoliciesSnapshot {
     pub peripherals_tokio: TokioRuntimePolicySnapshot,
     pub startup_cache_warm: StartupCacheWarmPolicySnapshot,
     pub log_sources: LogSourcesPolicySnapshot,
+    pub nt4_settings_cache: Nt4SettingsCachePolicySnapshot,
     pub i2c_inventory: I2cInventoryPolicySnapshot,
     pub imu: ImuRuntimePolicySnapshot,
     pub engine_crash_guard: EngineCrashGuardPolicySnapshot,
@@ -230,6 +238,9 @@ pub struct DeviceRuntimeObservabilitySnapshot {
     pub imu: ImuRuntimeObservabilitySnapshot,
     pub realtime_updates: RuntimeBroadcastSnapshot,
     pub api_realtime: ApiRealtimeDiagnostics,
+    pub stream_runtime_capabilities_cache: helios_engine::ipc::StreamRuntimeCapabilitiesCacheSnapshot,
+    pub json_store_locks: RuntimeLockRegistrySnapshot,
+    pub snapshot_locks: RuntimeLockRegistrySnapshot,
     pub mjpeg: RuntimeTopicBroadcastSnapshot,
     pub resource_guard: crate::resource_guard::ResourceGuardStatus,
     pub cv_runtime_scratch_high_water: Vec<CvRuntimeScratchMetricSnapshot>,
@@ -349,6 +360,9 @@ pub async fn runtime(State(state): State<crate::http::AppState>) -> ApiResult<im
     };
     let realtime_updates = state.updates.snapshot();
     let api_realtime = state.services.system.realtime_diagnostics().await;
+    let stream_runtime_capabilities_cache = helios_engine::ipc::stream_runtime_capabilities_cache_snapshot();
+    let json_store_locks = crate::http::json_store::runtime_snapshot().await;
+    let snapshot_locks = state.services.streams.snapshot_lock_metrics().await;
     let mjpeg = state.services.streams.mjpeg_snapshot().await;
 
     let payload = DeviceRuntimeSnapshot {
@@ -375,6 +389,9 @@ pub async fn runtime(State(state): State<crate::http::AppState>) -> ApiResult<im
             imu,
             realtime_updates,
             api_realtime,
+            stream_runtime_capabilities_cache,
+            json_store_locks,
+            snapshot_locks,
             mjpeg,
             resource_guard,
             cv_runtime_scratch_high_water: lib_cv::runtime_scratch::snapshot_high_water()
@@ -396,6 +413,7 @@ fn build_policies_snapshot() -> DeviceRuntimePoliciesSnapshot {
     let peripherals_tokio = HELIOS_PERIPHERALS_TOKIO_POLICY.resolve();
     let startup_cache_warm = HELIOS_API_STARTUP_CACHE_WARM_POLICY.resolve();
     let log_sources = HELIOS_API_LOG_SOURCES_POLICY.resolve();
+    let nt4_settings_cache = HELIOS_NT4_SETTINGS_CACHE_POLICY.resolve();
     let i2c_inventory = HELIOS_I2C_INVENTORY_POLICY.resolve();
     let imu = HELIOS_IMU_RUNTIME_POLICY.resolve();
     let engine_crash_guard = HELIOS_ENGINE_CRASH_GUARD_POLICY.resolve();
@@ -417,6 +435,7 @@ fn build_policies_snapshot() -> DeviceRuntimePoliciesSnapshot {
             attempts: startup_cache_warm.attempts,
         },
         log_sources: LogSourcesPolicySnapshot { cache_ms: log_sources.cache_ms, refresh_timeout_ms: log_sources.refresh_timeout_ms },
+        nt4_settings_cache: Nt4SettingsCachePolicySnapshot { refresh_interval_ms: nt4_settings_cache.refresh_interval_ms, max_file_bytes: nt4_settings_cache.max_file_bytes },
         i2c_inventory: I2cInventoryPolicySnapshot { timeout_ms: i2c_inventory.timeout_ms, cache_ttl_ms: i2c_inventory.cache_ttl_ms },
         imu: ImuRuntimePolicySnapshot { idle_interval_ms: imu.idle_interval_ms },
         engine_crash_guard: EngineCrashGuardPolicySnapshot {

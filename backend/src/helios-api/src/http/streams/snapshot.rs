@@ -9,10 +9,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path as StdPath;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::Mutex;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use crate::api_observability::RuntimeLockRegistrySnapshot;
 use helios_engine::ipc::{EngineEvent, RecordingSource, StreamSummary};
 use lib_ipc::client::ClientTransportError;
 
@@ -29,12 +31,18 @@ use super::util::is_engine_unavailable;
 #[derive(Default)]
 pub(crate) struct SnapshotLocksState {
     locks: Mutex<HashMap<Uuid, Arc<Mutex<()>>>>,
+    peak_entries: AtomicU64,
+    acquires: AtomicU64,
+    pruned_entries: AtomicU64,
 }
 
 impl SnapshotLocksState {
     pub(crate) async fn guard(&self, stream_id: Uuid) -> Arc<Mutex<()>> {
         let mut guard = self.locks.lock().await;
-        guard.entry(stream_id).or_insert_with(|| Arc::new(Mutex::new(()))).clone()
+        let lock = guard.entry(stream_id).or_insert_with(|| Arc::new(Mutex::new(()))).clone();
+        self.acquires.fetch_add(1, Ordering::Relaxed);
+        update_peak_entries(&self.peak_entries, guard.len() as u64);
+        lock
     }
 
     pub(crate) async fn release(&self, stream_id: Uuid, lock: Arc<Mutex<()>>) {
@@ -44,6 +52,26 @@ impl SnapshotLocksState {
         let mut guard = self.locks.lock().await;
         if guard.get(&stream_id).is_some_and(|existing| Arc::ptr_eq(existing, &lock) && Arc::strong_count(existing) == 2) {
             guard.remove(&stream_id);
+            self.pruned_entries.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    pub(crate) async fn snapshot(&self) -> RuntimeLockRegistrySnapshot {
+        RuntimeLockRegistrySnapshot {
+            active_entries: self.locks.lock().await.len() as u64,
+            peak_entries: self.peak_entries.load(Ordering::Relaxed),
+            acquires: self.acquires.load(Ordering::Relaxed),
+            pruned_entries: self.pruned_entries.load(Ordering::Relaxed),
+        }
+    }
+}
+
+fn update_peak_entries(peak: &AtomicU64, observed: u64) {
+    let mut current = peak.load(Ordering::Relaxed);
+    while observed > current {
+        match peak.compare_exchange(current, observed, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => break,
+            Err(actual) => current = actual,
         }
     }
 }
@@ -250,6 +278,7 @@ mod tests {
     #[tokio::test]
     async fn snapshot_locks_are_pruned_after_last_holder_releases() {
         let state = SnapshotLocksState::default();
+        let before = state.snapshot().await;
         let stream_id = Uuid::new_v4();
 
         let lock = state.guard(stream_id).await;
@@ -258,6 +287,11 @@ mod tests {
         state.release(stream_id, lock).await;
 
         assert_eq!(state.locks.lock().await.len(), 0);
+        let after = state.snapshot().await;
+        assert_eq!(after.active_entries, 0);
+        assert!(after.acquires >= before.acquires + 1);
+        assert!(after.pruned_entries >= before.pruned_entries + 1);
+        assert!(after.peak_entries >= before.peak_entries.max(1));
     }
 }
 

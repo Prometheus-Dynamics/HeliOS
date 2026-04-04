@@ -1,3 +1,4 @@
+use crate::api_observability::RuntimeLockRegistrySnapshot;
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -5,12 +6,16 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::fs;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
 struct JsonStoreRuntime {
     locks: Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>,
+    peak_entries: AtomicU64,
+    acquires: AtomicU64,
+    pruned_entries: AtomicU64,
 }
 
 fn json_store_runtime() -> &'static JsonStoreRuntime {
@@ -18,13 +23,18 @@ fn json_store_runtime() -> &'static JsonStoreRuntime {
     // same path without threading a lock registry through every caller. The registry prunes
     // itself when the last waiter for a path releases its Arc, so it remains bounded to the
     // currently active set of in-flight writers.
-    static RUNTIME: Lazy<JsonStoreRuntime> = Lazy::new(|| JsonStoreRuntime { locks: Mutex::new(HashMap::new()) });
+    static RUNTIME: Lazy<JsonStoreRuntime> =
+        Lazy::new(|| JsonStoreRuntime { locks: Mutex::new(HashMap::new()), peak_entries: AtomicU64::new(0), acquires: AtomicU64::new(0), pruned_entries: AtomicU64::new(0) });
     &RUNTIME
 }
 
 async fn lock_for(path: &Path) -> Arc<Mutex<()>> {
-    let mut locks = json_store_runtime().locks.lock().await;
-    locks.entry(path.to_path_buf()).or_insert_with(|| Arc::new(Mutex::new(()))).clone()
+    let runtime = json_store_runtime();
+    let mut locks = runtime.locks.lock().await;
+    let lock = locks.entry(path.to_path_buf()).or_insert_with(|| Arc::new(Mutex::new(()))).clone();
+    runtime.acquires.fetch_add(1, Ordering::Relaxed);
+    update_peak_entries(&runtime.peak_entries, locks.len() as u64);
+    lock
 }
 
 async fn release_lock(path: &Path, lock: Arc<Mutex<()>>) {
@@ -34,6 +44,28 @@ async fn release_lock(path: &Path, lock: Arc<Mutex<()>>) {
     let mut locks = json_store_runtime().locks.lock().await;
     if locks.get(path).is_some_and(|existing| Arc::ptr_eq(existing, &lock) && Arc::strong_count(existing) == 2) {
         locks.remove(path);
+        json_store_runtime().pruned_entries.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+fn update_peak_entries(peak: &AtomicU64, observed: u64) {
+    let mut current = peak.load(Ordering::Relaxed);
+    while observed > current {
+        match peak.compare_exchange(current, observed, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => break,
+            Err(actual) => current = actual,
+        }
+    }
+}
+
+pub(crate) async fn runtime_snapshot() -> RuntimeLockRegistrySnapshot {
+    let runtime = json_store_runtime();
+    let active_entries = runtime.locks.lock().await.len() as u64;
+    RuntimeLockRegistrySnapshot {
+        active_entries,
+        peak_entries: runtime.peak_entries.load(Ordering::Relaxed),
+        acquires: runtime.acquires.load(Ordering::Relaxed),
+        pruned_entries: runtime.pruned_entries.load(Ordering::Relaxed),
     }
 }
 
@@ -141,11 +173,12 @@ async fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{json_store_runtime, lock_for, release_lock};
+    use super::{json_store_runtime, lock_for, release_lock, runtime_snapshot};
     use std::path::PathBuf;
 
     #[tokio::test]
     async fn lock_registry_prunes_idle_paths() {
+        let before = runtime_snapshot().await;
         let path = PathBuf::from("/tmp/helios-json-store-test.json");
         let lock = lock_for(&path).await;
         let guard = lock.lock().await;
@@ -153,5 +186,10 @@ mod tests {
         release_lock(&path, lock).await;
 
         assert!(!json_store_runtime().locks.lock().await.contains_key(&path));
+        let after = runtime_snapshot().await;
+        assert_eq!(after.active_entries, 0);
+        assert!(after.acquires >= before.acquires + 1);
+        assert!(after.pruned_entries >= before.pruned_entries + 1);
+        assert!(after.peak_entries >= before.peak_entries.max(1));
     }
 }
