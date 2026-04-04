@@ -1,5 +1,3 @@
-#![allow(unsafe_code)]
-
 pub(crate) mod diagnostics;
 pub mod math;
 

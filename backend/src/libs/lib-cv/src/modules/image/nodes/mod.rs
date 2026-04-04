@@ -1,5 +1,3 @@
-#![allow(clippy::needless_return, clippy::too_many_arguments, clippy::collapsible_if)]
-
 use crate::Pixel;
 use daedalus::core::compute::ComputeAffinity;
 use daedalus::macros::node;

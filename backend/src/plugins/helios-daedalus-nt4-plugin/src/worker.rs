@@ -221,17 +221,14 @@ async fn connect(host: &str, port: u16) -> Result<Connection, String> {
     let addr = resolve_ipv4(host, port).await?;
     let ready = Arc::new(Notify::new());
     let ready_connect = ready.clone();
-    #[allow(clippy::needless_update)]
-    let options = NewClientOptions {
-        addr: NTAddr::Custom(addr),
-        unsecure_port: port,
-        secure_port: None,
-        name: "HeliOS".to_string(),
-        response_timeout: Duration::from_millis(750),
-        ping_interval: Duration::from_millis(200),
-        update_time_interval: Duration::from_secs(5),
-        ..Default::default()
-    };
+    let mut options = NewClientOptions::default();
+    options.addr = NTAddr::Custom(addr);
+    options.unsecure_port = port;
+    options.secure_port = None;
+    options.name = "HeliOS".to_string();
+    options.response_timeout = Duration::from_millis(750);
+    options.ping_interval = Duration::from_millis(200);
+    options.update_time_interval = Duration::from_secs(5);
 
     let client = Client::new(options);
     let handle = client.handle().clone();

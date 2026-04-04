@@ -549,7 +549,6 @@ pub(crate) async fn rewrite_timestamp_file(path: &Path, start_ms: u64, end_ms: u
     .map_err(|_| "recording timestamp rewrite task failed".to_string())?
 }
 
-#[allow(dead_code)]
 pub(crate) async fn probe_prefix_from_segments(selection: &[(u64, PathBuf)], codec: RecordingCodec) -> Option<Vec<u8>> {
     let mut cache = RecordingConfigCache::default();
     let mut scanned = 0usize;

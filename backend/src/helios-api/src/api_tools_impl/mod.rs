@@ -11,10 +11,8 @@ use image::GenericImageView;
 
 use crate::api_tools_protocol::{ApiToolsRequest, ApiToolsResponse, CalibrationBoardParams, CalibrationBoardPdfParams, IpaChartParams, IpaChartPdfParams};
 
-#[allow(unused_imports)]
 #[cfg(test)]
 pub(crate) use boards::resolve_board_square_mm_default;
-#[allow(unused_imports)]
 #[cfg(test)]
 pub(crate) use pdf::{A4_H_MM, A4_W_MM, LETTER_H_MM, LETTER_W_MM};
 

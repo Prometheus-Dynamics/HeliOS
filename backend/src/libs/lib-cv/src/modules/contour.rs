@@ -14,8 +14,6 @@ pub(crate) fn release_runtime_scratch_on_idle() {
 
 #[cfg(feature = "engine")]
 pub mod nodes {
-    #![allow(clippy::ptr_arg)]
-
     use memchr::{memchr, memrchr};
 
     use crate::Point;
@@ -174,7 +172,7 @@ pub mod nodes {
         out
     }
 
-    fn polygon_area(contour: &Vec<Point>) -> f64 {
+    fn polygon_area(contour: &[Point]) -> f64 {
         if contour.len() < 3 {
             return 0.0;
         }
@@ -202,6 +200,7 @@ pub mod nodes {
 	            description = "Largest contour, or empty if none found."
 	        ))
 	    )]
+    #[allow(clippy::ptr_arg)]
     fn cv_select_largest_contour(contours: &Vec<Vec<Point>>) -> Result<Vec<Point>, NodeError> {
         Ok(contours.iter().max_by(|a, b| polygon_area(a).partial_cmp(&polygon_area(b)).unwrap_or(std::cmp::Ordering::Equal)).cloned().unwrap_or_default())
     }
@@ -215,6 +214,7 @@ pub mod nodes {
 	        ),
 	        outputs(port(name = "contour", source = "Contour", ty = crate::daedalus_types::contour(), description = "Simplified contour."))
 	    )]
+    #[allow(clippy::ptr_arg)]
     fn cv_approx_poly_dp(contour: &Vec<Point>, epsilon: f64) -> Result<Vec<Point>, NodeError> {
         if contour.len() < 4 || epsilon <= 0.0 {
             return Ok(contour.clone());
@@ -232,6 +232,7 @@ pub mod nodes {
 	        ),
 	        outputs(port(name = "contours", source = "Contours", ty = crate::daedalus_types::contours(), description = "Simplified contours."))
 	    )]
+    #[allow(clippy::ptr_arg)]
     fn cv_approx_contours_dp(contours: &Vec<Vec<Point>>, epsilon: f64) -> Result<Vec<Vec<Point>>, NodeError> {
         let eps = epsilon.max(0.0) as f32;
         if eps <= 0.0 {
@@ -256,6 +257,7 @@ pub mod nodes {
         inputs(port(name = "contours", source = "Contours", ty = crate::daedalus_types::contours())),
         outputs("frame")
     )]
+    #[allow(clippy::ptr_arg)]
     fn cv_contours_to_frame(contours: &Vec<Vec<Point>>) -> Result<DynamicImage, NodeError> {
         if contours.is_empty() {
             let img: GrayImage = GrayImage::from_pixel(1, 1, Luma([0]));
@@ -264,7 +266,7 @@ pub mod nodes {
         Ok(contours_to_frame(contours))
     }
 
-    fn contours_to_frame(contours: &Vec<Vec<Point>>) -> DynamicImage {
+    fn contours_to_frame(contours: &[Vec<Point>]) -> DynamicImage {
         let v = (contours.len().min(255)) as u8;
         let img: GrayImage = GrayImage::from_pixel(1, 1, Luma([v]));
         DynamicImage::ImageLuma8(img)

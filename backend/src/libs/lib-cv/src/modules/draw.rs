@@ -11,8 +11,6 @@ pub mod utils;
 
 #[cfg(feature = "engine")]
 pub mod nodes {
-    #![allow(clippy::ptr_arg)]
-
     use crate::{Pixel, Point};
     use daedalus::data::model::Value as DaedalusValue;
     use daedalus::declare_plugin;
@@ -307,6 +305,7 @@ pub mod nodes {
     }
 
     #[node(id = "drawpoints", inputs("frame", "points", port(name = "thickness", meta(ui_min = 1, ui_max = 16, ui_step = 1)), "color"), outputs("frame"))]
+    #[allow(clippy::ptr_arg)]
     fn draw_points(frame: DynamicImage, points: &Vec<Point>, thickness: u32, color: Pixel) -> Result<DynamicImage, NodeError> {
         if points.is_empty() {
             return Ok(frame);
@@ -330,6 +329,7 @@ pub mod nodes {
         ),
         outputs("frame")
     )]
+    #[allow(clippy::ptr_arg)]
     fn draw_contours(frame: Compute<DynamicImage>, contours: &Vec<Vec<Point>>, thickness: i64, color: DaedalusValue, exec_ctx: &ExecutionContext) -> Result<DynamicImage, NodeError> {
         let mut out = expect_cpu_frame(frame, "drawcontours", Some(exec_ctx))?;
         if contours.iter().all(|contour| contour.is_empty()) {

@@ -1,5 +1,3 @@
-#![allow(unsafe_code)]
-
 use image::GrayImage;
 use rayon::prelude::*;
 use std::cell::RefCell;
@@ -24,18 +22,13 @@ fn clahe_should_parallelize(width: u32, height: u32) -> bool {
     (width as usize).saturating_mul(height as usize) >= clahe_apply_parallel_min_pixels() && rayon::current_num_threads() > 1
 }
 
+#[derive(Default)]
 pub struct ClaheTiles {
     pub luts: Vec<[u8; 256]>,
     pub tiles_x: u32,
     pub tiles_y: u32,
     pub tile_w: u32,
     pub tile_h: u32,
-}
-
-impl Default for ClaheTiles {
-    fn default() -> Self {
-        Self { luts: Vec::new(), tiles_x: 0, tiles_y: 0, tile_w: 0, tile_h: 0 }
-    }
 }
 
 /// Precompute per-tile LUTs for CLAHE.
@@ -151,18 +144,22 @@ fn release_clahe_scratch_current_thread() {
 }
 
 #[inline]
+#[allow(unsafe_code)]
 pub(crate) fn alloc_gray_image_for_overwrite(width: u32, height: u32) -> GrayImage {
     if width == 0 || height == 0 {
         return GrayImage::new(width, height);
     }
 
     let len = (width as usize).saturating_mul(height as usize);
-    let mut buf = Vec::with_capacity(len);
-    // The hot paths that use this helper fully overwrite every pixel before the image is read.
+    let mut buf = Vec::<std::mem::MaybeUninit<u8>>::with_capacity(len);
+    // SAFETY: the hot paths that use this helper fully overwrite every pixel before the image is
+    // read, and `MaybeUninit<u8>` preserves the allocation/layout while avoiding pre-zeroing.
     unsafe {
         buf.set_len(len);
+        let mut buf = std::mem::ManuallyDrop::new(buf);
+        let raw = Vec::from_raw_parts(buf.as_mut_ptr().cast::<u8>(), buf.len(), buf.capacity());
+        return GrayImage::from_raw(width, height, raw).expect("gray image dimensions must match allocated buffer");
     }
-    GrayImage::from_raw(width, height, buf).expect("gray image dimensions must match allocated buffer")
 }
 
 /// Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) with bilinear blending between tiles.
@@ -360,6 +357,7 @@ fn build_weight_fp(length: u32, tile_extent: u32, tiles: u32, max_coord: u32) ->
 
 #[cfg(target_arch = "aarch64")]
 #[inline(always)]
+#[allow(unsafe_code)]
 fn compute_vertical_luts_into(out: &mut [u16], row0_luts: &[[u8; 256]], row1_luts: &[[u8; 256]], wy: i32, use_neon: bool) {
     let tiles_x = row0_luts.len().min(row1_luts.len());
     if tiles_x == 0 {
@@ -414,8 +412,8 @@ fn compute_vertical_lut_scalar(out: &mut [u16], top: &[u8; 256], bottom: &[u8; 2
 }
 
 #[cfg(target_arch = "aarch64")]
-#[allow(unsafe_op_in_unsafe_fn)]
 #[target_feature(enable = "neon")]
+#[allow(unsafe_code)]
 unsafe fn compute_vertical_lut_neon(out: &mut [u16], top: &[u8; 256], bottom: &[u8; 256], wy: i32) {
     use core::arch::aarch64::*;
 
@@ -429,24 +427,26 @@ unsafe fn compute_vertical_lut_neon(out: &mut [u16], top: &[u8; 256], bottom: &[
 
     // 8 pixels at a time (u8x8 → u16x8).
     for i in (0..256).step_by(8) {
-        let t8 = vld1_u8(top_ptr.add(i));
-        let b8 = vld1_u8(bottom_ptr.add(i));
-        let t16_u = vmovl_u8(t8);
-        let b16_u = vmovl_u8(b8);
+        unsafe {
+            let t8 = vld1_u8(top_ptr.add(i));
+            let b8 = vld1_u8(bottom_ptr.add(i));
+            let t16_u = vmovl_u8(t8);
+            let b16_u = vmovl_u8(b8);
 
-        // Values are <= 255, so reinterpreting as i16 is safe and keeps the numeric value.
-        let t16 = vreinterpretq_s16_u16(t16_u);
-        let b16 = vreinterpretq_s16_u16(b16_u);
-        let diff16 = vsubq_s16(b16, t16);
+            // Values are <= 255, so reinterpreting as i16 is safe and keeps the numeric value.
+            let t16 = vreinterpretq_s16_u16(t16_u);
+            let b16 = vreinterpretq_s16_u16(b16_u);
+            let diff16 = vsubq_s16(b16, t16);
 
-        // Q8 fixed-point: t*256 + (b - t)*wy
-        let mut lo = vmull_n_s16(vget_low_s16(t16), 256);
-        lo = vmlal_n_s16(lo, vget_low_s16(diff16), wy);
-        let mut hi = vmull_n_s16(vget_high_s16(t16), 256);
-        hi = vmlal_n_s16(hi, vget_high_s16(diff16), wy);
+            // Q8 fixed-point: t*256 + (b - t)*wy
+            let mut lo = vmull_n_s16(vget_low_s16(t16), 256);
+            lo = vmlal_n_s16(lo, vget_low_s16(diff16), wy);
+            let mut hi = vmull_n_s16(vget_high_s16(t16), 256);
+            hi = vmlal_n_s16(hi, vget_high_s16(diff16), wy);
 
-        let res = vcombine_u16(vqmovun_s32(lo), vqmovun_s32(hi));
-        vst1q_u16(out_ptr.add(i), res);
+            let res = vcombine_u16(vqmovun_s32(lo), vqmovun_s32(hi));
+            vst1q_u16(out_ptr.add(i), res);
+        }
     }
 }
 
@@ -537,6 +537,7 @@ fn apply_clahe_row_segmented_vert(dst_row: &mut [u8], src_row: &[u8], col_weight
     }
 }
 
+#[allow(unsafe_code)]
 fn compute_tile_lut(src: &GrayImage, x0: u32, y0: u32, x1: u32, y1: u32, clip_limit: f32, lut: &mut [u8; 256]) {
     let width = src.width() as usize;
     let tile_pixels = ((x1 - x0) * (y1 - y0)).max(1);

@@ -189,8 +189,8 @@ struct OtaBeginParams {
     size: u64,
     sha256: String,
     version: Option<String>,
-    #[allow(dead_code)]
-    slot: Option<String>,
+    #[serde(rename = "slot")]
+    _slot: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
