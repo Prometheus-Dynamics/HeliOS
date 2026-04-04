@@ -1,10 +1,11 @@
 use std::{
-    env, fs,
+    fs,
     io::ErrorKind,
     path::{Path, PathBuf},
     time::Duration,
 };
 
+use lib_runtime_policy::HELIOS_PERIPHERALS_LIGHTING_POLICY;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
@@ -219,8 +220,7 @@ fn led_index_offset(count: usize) -> usize {
     if count == 0 {
         return 0;
     }
-    let raw = env::var("HELIOS_LED_INDEX_OFFSET").ok();
-    let offset = raw.as_deref().and_then(|value| value.parse::<isize>().ok()).unwrap_or(DEFAULT_LED_INDEX_OFFSET);
+    let offset = HELIOS_PERIPHERALS_LIGHTING_POLICY.resolve().index_offset;
     let modulus = count as isize;
     let normalized = ((offset % modulus) + modulus) % modulus;
     normalized as usize
@@ -249,9 +249,10 @@ fn detect_led_device_path(current: Option<&Path>) -> Option<PathBuf> {
 
 fn led_device_candidates(current: Option<&Path>) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
+    let lighting_policy = HELIOS_PERIPHERALS_LIGHTING_POLICY.resolve();
 
-    if let Ok(path) = env::var("HELIOS_LED_DEVICE") {
-        push_candidate(&mut candidates, PathBuf::from(path));
+    if let Some(path) = lighting_policy.device {
+        push_candidate(&mut candidates, path);
     }
     if let Some(path) = current {
         push_candidate(&mut candidates, path.to_path_buf());

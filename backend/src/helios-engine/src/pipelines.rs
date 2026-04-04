@@ -1,4 +1,4 @@
-use lib_runtime_policy::HELIOS_PIPELINE_DATA_ROOT_POLICY;
+use lib_runtime_policy::{resolve_pipeline_template_dir, HELIOS_PIPELINE_DATA_ROOT_POLICY};
 use lib_schema_migration::{normalize_to_current, SyncSchemaPlan};
 use serde_json::Value as JsonValue;
 use std::io;
@@ -19,16 +19,7 @@ fn pipeline_dir() -> io::Result<PathBuf> {
 }
 
 fn template_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("HELIOS_PIPELINE_TEMPLATE_DIR") {
-        return PathBuf::from(dir);
-    }
-    if let Ok(cwd) = std::env::current_dir() {
-        let dev = cwd.join("configs").join("templates");
-        if dev.is_dir() {
-            return dev;
-        }
-    }
-    PathBuf::from("/usr/share/helios/pipeline-templates")
+    resolve_pipeline_template_dir().unwrap_or_else(|_| PathBuf::from("/usr/share/helios/pipeline-templates"))
 }
 
 pub(crate) fn load_pipeline_graph_json(pipeline_id: Uuid) -> io::Result<JsonValue> {

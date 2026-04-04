@@ -1,9 +1,9 @@
-use std::env;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::ipc::{UpdateStage, UpdaterEvent};
+use lib_runtime_policy::HELIOS_UPDATER_APPLY_POLICY;
 use tokio::fs;
 use tokio::process::Command;
 use tokio::sync::{RwLock, broadcast::Sender};
@@ -87,20 +87,12 @@ const PERSISTED_FILE_SYNCS: &[PersistedFileSync] = &[
 
 #[cfg(test)]
 fn fake_apply_requested() -> bool {
-    std::env::var_os("UPDATER_FAKE_APPLY").is_some() || TEST_FAKE_APPLY.load(Ordering::Relaxed) > 0
+    HELIOS_UPDATER_APPLY_POLICY.resolve().fake_apply || TEST_FAKE_APPLY.load(Ordering::Relaxed) > 0
 }
 
 #[cfg(not(test))]
 fn fake_apply_requested() -> bool {
-    std::env::var_os("UPDATER_FAKE_APPLY").is_some()
-}
-
-fn parse_env_flag(raw: &str) -> bool {
-    matches!(raw.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")
-}
-
-fn env_flag_enabled(name: &str) -> bool {
-    env::var(name).map(|v| parse_env_flag(&v)).unwrap_or(false)
+    HELIOS_UPDATER_APPLY_POLICY.resolve().fake_apply
 }
 
 #[cfg(test)]
@@ -136,14 +128,15 @@ async fn run_apply_job(config: Arc<UpdaterConfig>, state: Arc<RwLock<ServiceStat
 }
 
 async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<ServiceState>>, events: &Sender<UpdaterEvent>, update_id: Uuid) -> Result<()> {
+    let apply_policy = HELIOS_UPDATER_APPLY_POLICY.resolve();
     let metadata = load_metadata(config, update_id).await?;
     let manifest_metadata = ReleaseManifestMetadata::from_manifest(&metadata.manifest).map_err(Error::InvalidState)?;
     let artifact_kind = metadata.manifest.artifacts.first().and_then(|artifact| artifact.kind.as_deref());
     info!(%update_id, staged = %metadata_path(config, update_id).display(), "applying staged release");
 
     // Some platforms can't switch root via bootloader; allow forcing single-slot mode detection.
-    let single_slot_requested = env::var_os("UPDATER_SINGLE_SLOT").is_some();
-    let allow_single_slot_inplace = env_flag_enabled("UPDATER_ALLOW_SINGLE_SLOT_INPLACE");
+    let single_slot_requested = apply_policy.single_slot_requested;
+    let allow_single_slot_inplace = apply_policy.allow_single_slot_inplace;
 
     {
         let mut guard = state.write().await;
@@ -186,7 +179,7 @@ async fn apply_job_inner(config: &Arc<UpdaterConfig>, state: &Arc<RwLock<Service
             apply_service_bundle(config, update_id, &staged_path).await?
         }
     } else {
-        apply_disk_image_release(config, state, events, update_id, &metadata, simulate, &work_dir, single_slot_requested, allow_single_slot_inplace).await?
+        apply_disk_image_release(config, state, events, update_id, &metadata, simulate, &work_dir, single_slot_requested, allow_single_slot_inplace, apply_policy.stream_flash_requested).await?
     };
 
     if fs::metadata(&work_dir).await.is_ok() {
@@ -253,6 +246,7 @@ async fn apply_disk_image_release(
     work_dir: &Path,
     mut single_slot: bool,
     allow_single_slot_inplace: bool,
+    stream_flash_requested: bool,
 ) -> Result<BundleApplyOutcome> {
     if !simulate {
         ensure_directory(config.work_dir()).await?;
@@ -284,7 +278,7 @@ async fn apply_disk_image_release(
         let staged_artifact = metadata.artifacts.first().ok_or_else(|| Error::InvalidState("no staged artifact found".into()))?;
         let staged_path = PathBuf::from(&staged_artifact.local_path);
         let compression = detect_compression_kind(&staged_path).map_err(Error::Io)?;
-        let stream_flash_requested = env::var_os("UPDATER_STREAM_FLASH").is_some() && slot_selection.scheme == SlotScheme::Ext4Labels;
+        let stream_flash_requested = stream_flash_requested && slot_selection.scheme == SlotScheme::Ext4Labels;
         let mut temp_file = false;
         let mut expanded_path: Option<PathBuf> = None;
         let mut streamed = false;

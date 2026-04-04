@@ -7,6 +7,7 @@ use std::time::Instant;
 
 use futures::FutureExt;
 use lib_led_animations::{LED_ANIMATIONS_PATH, command_for_animation_name, load_led_animations, sequence_for_animation_name};
+use lib_runtime_policy::{HELIOS_PERIPHERALS_BOOT_LIGHTING_POLICY, HELIOS_PERIPHERALS_RUNTIME_FLAGS_POLICY};
 use lib_sensors::led_config::{DEFAULT_ANIMATION_EVENT_STARTUP, DEFAULT_ANIMATION_EVENT_STARTUP_IDLE, LedConfig};
 use tokio::fs as tokio_fs;
 use tokio::net::UnixListener;
@@ -24,8 +25,6 @@ use crate::usb_proxy;
 
 use self::session::handle_connection;
 use self::shutdown::wait_for_shutdown;
-
-const MEMORY_TRACE_ENV: &str = "HELIOS_PERIPHERALS_MEMORY_TRACE";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RuntimeState {
@@ -59,11 +58,12 @@ struct BootLightingConfig {
 
 impl BootLightingConfig {
     fn from_env() -> Self {
+        let policy = HELIOS_PERIPHERALS_BOOT_LIGHTING_POLICY.resolve();
         Self {
-            enabled: env_bool("HELIOS_LED_BOOT_ENABLE", true),
-            color: env_color("HELIOS_LED_BOOT_COLOR", LightingColor { r: 160, g: 0, b: 255, w: 0 }),
-            step_delay: Duration::from_millis(env_u64("HELIOS_LED_BOOT_STEP_MS", 80).max(10)),
-            hold_delay: Duration::from_millis(env_u64("HELIOS_LED_BOOT_HOLD_MS", 200)),
+            enabled: policy.enabled,
+            color: LightingColor { r: policy.color_rgba[0], g: policy.color_rgba[1], b: policy.color_rgba[2], w: policy.color_rgba[3] },
+            step_delay: Duration::from_millis(policy.step_delay_ms),
+            hold_delay: Duration::from_millis(policy.hold_delay_ms),
         }
     }
 }
@@ -363,41 +363,8 @@ async fn wait_or_cancel(delay: Duration, shutdown: &CancellationToken) -> bool {
     }
 }
 
-fn env_bool(key: &str, default: bool) -> bool {
-    match std::env::var(key) {
-        Ok(value) => matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"),
-        Err(_) => default,
-    }
-}
-
-fn env_u64(key: &str, default: u64) -> u64 {
-    std::env::var(key).ok().and_then(|value| value.trim().parse::<u64>().ok()).unwrap_or(default)
-}
-
-fn env_color(key: &str, default: LightingColor) -> LightingColor {
-    let Ok(raw) = std::env::var(key) else {
-        return default;
-    };
-    let parts: Vec<_> = raw.split(',').map(|part| part.trim()).collect();
-    if parts.len() < 3 {
-        return default;
-    }
-    let parse = |idx| parts.get(idx).and_then(|v: &&str| v.parse::<u8>().ok());
-    let Some(r) = parse(0) else {
-        return default;
-    };
-    let Some(g) = parse(1) else {
-        return default;
-    };
-    let Some(b) = parse(2) else {
-        return default;
-    };
-    let w = parse(3).unwrap_or(default.w);
-    LightingColor { r, g, b, w }
-}
-
 fn log_memory_checkpoint(phase: &str) {
-    if !env_bool(MEMORY_TRACE_ENV, true) {
+    if !HELIOS_PERIPHERALS_RUNTIME_FLAGS_POLICY.resolve().memory_trace {
         return;
     }
 

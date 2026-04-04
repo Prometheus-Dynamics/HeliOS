@@ -12,6 +12,7 @@ mod primitives;
 mod runtime;
 #[cfg(test)]
 mod tests;
+mod updater;
 
 pub use api::*;
 pub use cv::*;
@@ -25,3 +26,4 @@ pub use peripherals::*;
 pub use platform::*;
 pub use primitives::*;
 pub use runtime::*;
+pub use updater::*;

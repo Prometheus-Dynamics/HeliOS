@@ -1,4 +1,6 @@
 use super::*;
+use std::io;
+use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EngineExecutorBusyPolicy {
@@ -173,4 +175,178 @@ pub const HELIOS_ENGINE_RECORDING_POLICY: EngineRecordingPolicy = EngineRecordin
     recording_encoded_passthrough: BoolPolicy { env_var: "HELIOS_RECORDING_USE_ENCODED_PASSTHROUGH", default: false },
     recording_shadow_start_stop: BoolPolicy { env_var: "HELIOS_RECORDING_USE_SHADOW_START_STOP", default: false },
     rewrite_encoded_frame_timestamps_to_wall: BoolPolicy { env_var: "HELIOS_RECORDING_REWRITE_FRAME_TS_TO_WALL", default: false },
+};
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EngineStreamRuntimePolicy {
+    pub default_libcamera_fps: BoundedU64Policy,
+    pub encoded_channel_size: BoundedUsizePolicy,
+    pub viewer_idle_timeout_ms: BoundedU64Policy,
+    pub viewer_check_interval_ms: BoundedU64Policy,
+    pub idle_compaction_interval_ms: BoundedU64Policy,
+    pub software_encoder_fps_cap: OptionalBoundedF64Policy,
+    pub capture_stall_ms: BoundedU64Policy,
+    pub capture_active_stall_ms: BoundedU64Policy,
+    pub capture_first_frame_stall_ms: BoundedU64Policy,
+    pub encoded_consumer_stale_ms: BoundedU64Policy,
+    pub metrics_stale_base_ms: BoundedU64Policy,
+    pub usb_power_setup_script: StringPolicy,
+    pub usb_power_recovery_settle_ms: BoundedU64Policy,
+    pub software_encoder_threads: OptionalBoundedUsizePolicy,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResolvedEngineStreamRuntimePolicy {
+    pub default_libcamera_fps: u32,
+    pub encoded_channel_size: usize,
+    pub viewer_idle_timeout_ms: u64,
+    pub viewer_check_interval_ms: u64,
+    pub idle_compaction_interval_ms: u64,
+    pub software_encoder_fps_cap: Option<f64>,
+    pub capture_stall_ms: u64,
+    pub capture_active_stall_ms: u64,
+    pub capture_first_frame_stall_ms: u64,
+    pub encoded_consumer_stale_ms: u64,
+    pub metrics_stale_base_ms: u64,
+    pub usb_power_setup_script: String,
+    pub usb_power_recovery_settle_ms: u64,
+    pub software_encoder_threads: Option<usize>,
+}
+
+impl EngineStreamRuntimePolicy {
+    pub fn resolve(self) -> ResolvedEngineStreamRuntimePolicy {
+        ResolvedEngineStreamRuntimePolicy {
+            default_libcamera_fps: self.default_libcamera_fps.resolve().min(u64::from(u32::MAX)) as u32,
+            encoded_channel_size: self.encoded_channel_size.resolve(),
+            viewer_idle_timeout_ms: self.viewer_idle_timeout_ms.resolve(),
+            viewer_check_interval_ms: self.viewer_check_interval_ms.resolve(),
+            idle_compaction_interval_ms: self.idle_compaction_interval_ms.resolve(),
+            software_encoder_fps_cap: self.software_encoder_fps_cap.resolve().or(Some(12.0)).filter(|value| value.is_finite() && *value > 0.0),
+            capture_stall_ms: self.capture_stall_ms.resolve(),
+            capture_active_stall_ms: self.capture_active_stall_ms.resolve(),
+            capture_first_frame_stall_ms: self.capture_first_frame_stall_ms.resolve(),
+            encoded_consumer_stale_ms: self.encoded_consumer_stale_ms.resolve(),
+            metrics_stale_base_ms: self.metrics_stale_base_ms.resolve(),
+            usb_power_setup_script: self.usb_power_setup_script.resolve(),
+            usb_power_recovery_settle_ms: self.usb_power_recovery_settle_ms.resolve(),
+            software_encoder_threads: self.software_encoder_threads.resolve(),
+        }
+    }
+}
+
+pub const HELIOS_ENGINE_STREAM_RUNTIME_POLICY: EngineStreamRuntimePolicy = EngineStreamRuntimePolicy {
+    default_libcamera_fps: BoundedU64Policy { env_var: "HELIOS_DEFAULT_LIBCAMERA_FPS", default: 30, min: 1, max: u32::MAX as u64 },
+    encoded_channel_size: BoundedUsizePolicy { env_var: "HELIOS_ENCODED_CHANNEL_SIZE", default: 8, min: 1, max: 1024 },
+    viewer_idle_timeout_ms: BoundedU64Policy { env_var: "HELIOS_STREAM_VIEWER_IDLE_TIMEOUT_MS", default: 2_500, min: 250, max: 60_000 },
+    viewer_check_interval_ms: BoundedU64Policy { env_var: "HELIOS_STREAM_VIEWER_CHECK_INTERVAL_MS", default: 250, min: 50, max: 5_000 },
+    idle_compaction_interval_ms: BoundedU64Policy { env_var: "HELIOS_STREAM_IDLE_COMPACTION_INTERVAL_MS", default: 1_000, min: 50, max: 60_000 },
+    software_encoder_fps_cap: OptionalBoundedF64Policy { env_var: "HELIOS_SOFTWARE_ENCODER_FPS_CAP", min: 0.0, max: 1_000.0 },
+    capture_stall_ms: BoundedU64Policy { env_var: "HELIOS_CAPTURE_STALL_MS", default: 1_500, min: 50, max: 10_000 },
+    capture_active_stall_ms: BoundedU64Policy { env_var: "HELIOS_CAPTURE_ACTIVE_STALL_MS", default: 1_000, min: 250, max: 10_000 },
+    capture_first_frame_stall_ms: BoundedU64Policy { env_var: "HELIOS_CAPTURE_FIRST_FRAME_STALL_MS", default: 8_000, min: 1_000, max: 120_000 },
+    encoded_consumer_stale_ms: BoundedU64Policy { env_var: "HELIOS_ENCODED_CONSUMER_STALE_MS", default: 5_000, min: 500, max: 60_000 },
+    metrics_stale_base_ms: BoundedU64Policy { env_var: "HELIOS_STREAM_METRICS_STALE_MS", default: 1_500, min: 250, max: 60_000 },
+    usb_power_setup_script: StringPolicy { env_var: "HELIOS_USB_POWER_SETUP_SCRIPT", default: "/usr/local/bin/helios-usb-power-setup.sh" },
+    usb_power_recovery_settle_ms: BoundedU64Policy { env_var: "HELIOS_USB_POWER_RECOVERY_SETTLE_MS", default: 2_500, min: 100, max: 10_000 },
+    software_encoder_threads: OptionalBoundedUsizePolicy { env_var: "HELIOS_SOFTWARE_ENCODER_THREADS", min: 1, max: usize::MAX },
+};
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EngineCalibrationPolicy {
+    pub disable_charuco: BoolPolicy,
+    pub force_parity: StringPolicy,
+    pub force_ordering: StringPolicy,
+    pub overlay_jpeg_quality: BoundedU64Policy,
+    pub overlay_save_mode: StringPolicy,
+    pub min_tag_area_ratio: BoundedF64Policy,
+    pub min_tag_area_median_ratio: BoundedF64Policy,
+    pub min_tag_area_px: OptionalBoundedF64Policy,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResolvedEngineCalibrationPolicy {
+    pub disable_charuco: bool,
+    pub force_parity: String,
+    pub force_ordering: String,
+    pub overlay_jpeg_quality: u8,
+    pub overlay_save_mode: String,
+    pub min_tag_area_ratio: f64,
+    pub min_tag_area_median_ratio: f64,
+    pub min_tag_area_px: Option<f64>,
+}
+
+impl EngineCalibrationPolicy {
+    pub fn resolve(self) -> ResolvedEngineCalibrationPolicy {
+        ResolvedEngineCalibrationPolicy {
+            disable_charuco: self.disable_charuco.resolve(),
+            force_parity: self.force_parity.resolve(),
+            force_ordering: self.force_ordering.resolve(),
+            overlay_jpeg_quality: self.overlay_jpeg_quality.resolve().min(u64::from(u8::MAX)) as u8,
+            overlay_save_mode: self.overlay_save_mode.resolve(),
+            min_tag_area_ratio: self.min_tag_area_ratio.resolve(),
+            min_tag_area_median_ratio: self.min_tag_area_median_ratio.resolve(),
+            min_tag_area_px: self.min_tag_area_px.resolve(),
+        }
+    }
+}
+
+pub const HELIOS_ENGINE_CALIBRATION_POLICY: EngineCalibrationPolicy = EngineCalibrationPolicy {
+    disable_charuco: BoolPolicy { env_var: "HELIOS_CALIBRATION_DISABLE_CHARUCO", default: false },
+    force_parity: StringPolicy { env_var: "HELIOS_CALIBRATION_FORCE_PARITY", default: "" },
+    force_ordering: StringPolicy { env_var: "HELIOS_CALIBRATION_FORCE_ORDERING", default: "" },
+    overlay_jpeg_quality: BoundedU64Policy { env_var: "HELIOS_CALIBRATION_OVERLAY_JPEG_QUALITY", default: 85, min: 1, max: 100 },
+    overlay_save_mode: StringPolicy { env_var: "HELIOS_CALIBRATION_OVERLAY_SAVE_MODE", default: "graph" },
+    min_tag_area_ratio: BoundedF64Policy { env_var: "HELIOS_CALIBRATION_MIN_TAG_AREA_RATIO", default: 0.0, min: 0.0, max: 0.1 },
+    min_tag_area_median_ratio: BoundedF64Policy { env_var: "HELIOS_CALIBRATION_MIN_TAG_AREA_MEDIAN_RATIO", default: 0.0, min: 0.0, max: 3.0 },
+    min_tag_area_px: OptionalBoundedF64Policy { env_var: "HELIOS_CALIBRATION_MIN_TAG_AREA_PX", min: 0.0, max: f64::MAX },
+};
+
+pub fn resolve_pipeline_template_dir() -> io::Result<PathBuf> {
+    if let Ok(raw) = std::env::var("HELIOS_PIPELINE_TEMPLATE_DIR") {
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() {
+            return Ok(PathBuf::from(trimmed));
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let dev = cwd.join("configs").join("templates");
+        if dev.is_dir() {
+            return Ok(dev);
+        }
+    }
+    Ok(PathBuf::from("/usr/share/helios/pipeline-templates"))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EngineDaedalusEnvOverridePolicy {
+    pub metrics_level: OptionalStringPolicy,
+    pub force_cpu: OptionalStringPolicy,
+    pub gpu_backend: OptionalStringPolicy,
+    pub planner_enable_gpu: OptionalStringPolicy,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedEngineDaedalusEnvOverridePolicy {
+    pub metrics_level: Option<String>,
+    pub force_cpu: Option<String>,
+    pub gpu_backend: Option<String>,
+    pub planner_enable_gpu: Option<String>,
+}
+
+impl EngineDaedalusEnvOverridePolicy {
+    pub fn resolve(self) -> ResolvedEngineDaedalusEnvOverridePolicy {
+        ResolvedEngineDaedalusEnvOverridePolicy {
+            metrics_level: self.metrics_level.resolve(),
+            force_cpu: self.force_cpu.resolve(),
+            gpu_backend: self.gpu_backend.resolve(),
+            planner_enable_gpu: self.planner_enable_gpu.resolve(),
+        }
+    }
+}
+
+pub const HELIOS_ENGINE_DAEDALUS_ENV_OVERRIDE_POLICY: EngineDaedalusEnvOverridePolicy = EngineDaedalusEnvOverridePolicy {
+    metrics_level: OptionalStringPolicy { env_var: "DAEDALUS_METRICS_LEVEL" },
+    force_cpu: OptionalStringPolicy { env_var: "HELIOS_DAEDALUS_FORCE_CPU" },
+    gpu_backend: OptionalStringPolicy { env_var: "HELIOS_DAEDALUS_GPU_BACKEND" },
+    planner_enable_gpu: OptionalStringPolicy { env_var: "HELIOS_DAEDALUS_PLANNER_ENABLE_GPU" },
 };

@@ -6,6 +6,7 @@ use lib_cv::modules::aruco::tag::{ArucoTagDecoding, ArucoTagFamily};
 use lib_cv::modules::aruco::ArucoDetection2D;
 use lib_cv::modules::aruco::{aruco_dictionary_from_name, ArucoDictionary};
 use lib_cv::Point;
+use lib_runtime_policy::HELIOS_ENGINE_CALIBRATION_POLICY;
 use nalgebra::{DMatrix, Matrix3};
 use serde_json::Value as JsonValue;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -313,7 +314,7 @@ fn solve_calibration_sync(request: CalibrationSolveRequest) -> Result<Calibratio
     // a useful signal and matches competitor behavior (OpenCV supports fisheye + ChArUco).
     //
     // Can be disabled for debugging via `HELIOS_CALIBRATION_DISABLE_CHARUCO=1`.
-    let allow_charuco = !std::env::var("HELIOS_CALIBRATION_DISABLE_CHARUCO").ok().map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes")).unwrap_or(false);
+    let allow_charuco = !HELIOS_ENGINE_CALIBRATION_POLICY.resolve().disable_charuco;
     let mut processed_entries: Vec<DebugEntry> = Vec::with_capacity(debug_entries.len());
     for entry in debug_entries {
         match entry {
@@ -435,19 +436,15 @@ fn solve_calibration_sync(request: CalibrationSolveRequest) -> Result<Calibratio
         }
     }
 
-    if let Ok(raw) = std::env::var("HELIOS_CALIBRATION_FORCE_PARITY") {
-        match raw.to_ascii_lowercase().as_str() {
-            "odd" => chosen_parity = BoardParity::OddSquares,
-            "even" => chosen_parity = BoardParity::EvenSquares,
-            _ => {}
-        }
+    match HELIOS_ENGINE_CALIBRATION_POLICY.resolve().force_parity.to_ascii_lowercase().as_str() {
+        "odd" => chosen_parity = BoardParity::OddSquares,
+        "even" => chosen_parity = BoardParity::EvenSquares,
+        _ => {}
     }
-    if let Ok(raw) = std::env::var("HELIOS_CALIBRATION_FORCE_ORDERING") {
-        match raw.to_ascii_lowercase().as_str() {
-            "row" | "rowmajor" => chosen_ordering = BoardOrdering::RowMajor,
-            "col" | "colmajor" => chosen_ordering = BoardOrdering::ColMajor,
-            _ => {}
-        }
+    match HELIOS_ENGINE_CALIBRATION_POLICY.resolve().force_ordering.to_ascii_lowercase().as_str() {
+        "row" | "rowmajor" => chosen_ordering = BoardOrdering::RowMajor,
+        "col" | "colmajor" => chosen_ordering = BoardOrdering::ColMajor,
+        _ => {}
     }
 
     let chosen_area_stats = match chosen_parity {

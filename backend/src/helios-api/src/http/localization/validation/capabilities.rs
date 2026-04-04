@@ -1,4 +1,5 @@
 use helios_engine::localization::config::{LocalizationPoseSpace, LocalizationSolverMode};
+use lib_runtime_policy::HELIOS_API_LOCALIZATION_POLICY;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -56,6 +57,5 @@ pub fn localization_capabilities() -> LocalizationCapabilitiesResponse {
 }
 
 pub(super) fn max_map_upload_bytes() -> u64 {
-    const DEFAULT_MB: u64 = 5;
-    std::env::var("HELIOS_API_MAX_MAP_UPLOAD_MB").ok().and_then(|raw| raw.parse::<u64>().ok()).filter(|v| *v > 0).map(|mb| mb.saturating_mul(1024 * 1024)).unwrap_or(DEFAULT_MB * 1024 * 1024)
+    HELIOS_API_LOCALIZATION_POLICY.resolve().max_map_upload_bytes
 }

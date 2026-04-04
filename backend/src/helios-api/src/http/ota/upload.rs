@@ -1,4 +1,5 @@
 use super::*;
+use lib_runtime_policy::HELIOS_API_UPLOAD_POLICY;
 
 #[utoipa::path(
     post,
@@ -196,6 +197,5 @@ fn insufficient_storage_response(error: String) -> axum::response::Response {
 }
 
 fn max_ota_bytes() -> u64 {
-    const DEFAULT_MB: u64 = 2 * 1024; // 2GB default
-    env::var("HELIOS_OTA_MAX_UPLOAD_MB").ok().and_then(|raw| raw.parse::<u64>().ok()).filter(|v| *v > 0).map(|mb| mb.saturating_mul(1024 * 1024)).unwrap_or(DEFAULT_MB * 1024 * 1024)
+    HELIOS_API_UPLOAD_POLICY.resolve().ota_upload_bytes
 }

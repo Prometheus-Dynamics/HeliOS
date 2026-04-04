@@ -1,6 +1,5 @@
 import { browser, dev } from '$app/environment';
 import { env } from '$env/dynamic/public';
-import { OpenAPI } from '$generated/http/client';
 import { readStorage, removeStorage, writeStorage } from '$lib/utils/storage';
 
 const API_PREFIX = '/v1';
@@ -41,11 +40,6 @@ function normalizeBase(raw: string): string {
   }
 }
 
-function syncOpenApiBase(normalized: string): string {
-  OpenAPI.BASE = `${normalized}${API_PREFIX}`;
-  return normalized;
-}
-
 function resolveNormalizedBase(baseOverride?: string | null | undefined): string {
   const trimmed = typeof baseOverride === 'string' ? baseOverride.trim() : '';
   if (trimmed.length > 0) {
@@ -71,7 +65,6 @@ function storeBase(base: string): boolean {
 
 export function setHttpClientBase(base: string): string {
   const normalized = normalizeBase(base);
-  syncOpenApiBase(normalized);
   const stored = storeBase(normalized);
   if (!stored) {
     throw new Error('Unable to persist API base (local storage unavailable).');
@@ -80,8 +73,7 @@ export function setHttpClientBase(base: string): string {
 }
 
 export function resetHttpClientBase(): void {
-  const normalized = normalizeBase(DEFAULT_API_BASE);
-  syncOpenApiBase(normalized);
+  normalizeBase(DEFAULT_API_BASE);
   if (browser) removeStorage(STORAGE_KEY);
 }
 
@@ -124,12 +116,4 @@ export function apiUrl(path = '', baseOverride?: string | null): string {
   }
   const normalizedPath = trimmedPath.startsWith('/') ? trimmedPath : `/${trimmedPath}`;
   return `${base}${normalizedPath}`;
-}
-
-// Initialize OpenAPI.BASE once at module import.
-try {
-  syncOpenApiBase(getHttpClientBase());
-  OpenAPI.ENCODE_PATH = encodeURIComponent;
-} catch {
-  // ignore
 }

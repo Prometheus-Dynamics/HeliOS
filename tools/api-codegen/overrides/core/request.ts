@@ -9,6 +9,7 @@ import { CancelablePromise } from './CancelablePromise';
 import type { OnCancel } from './CancelablePromise';
 import type { OpenAPIConfig } from './OpenAPI';
 import { buildHttpCandidateUrls } from '../../../../lib/api/httpCandidates';
+import { getHttpClientBase } from '../../../../lib/api/httpClient';
 
 type ExtendedApiRequestOptions = ApiRequestOptions & {
     timeout?: number;
@@ -110,7 +111,13 @@ const getUrl = (config: OpenAPIConfig, options: ApiRequestOptions): string => {
     // The device image serves the SPA at `/` and reverse-proxies the API under `/v1/*`.
     // The generated bindings target the API root (e.g. `/streams`), so transparently
     // prefix `/v1` unless the configured base URL already includes it.
-    const normalizedBase = String(config.BASE ?? '').replace(/\/+$/, '');
+    const normalizedBase = (() => {
+        try {
+            return String(getHttpClientBase()).replace(/\/+$/, '');
+        } catch {
+            return String(config.BASE ?? '').replace(/\/+$/, '');
+        }
+    })();
     const baseAlreadyHasV1 = (() => {
         if (!normalizedBase) return false;
         if (/(^|\/)v1$/.test(normalizedBase)) return true;
@@ -125,7 +132,7 @@ const getUrl = (config: OpenAPIConfig, options: ApiRequestOptions): string => {
         path = `/v1${path.startsWith('/') ? '' : '/'}${path}`;
     }
 
-    const url = `${config.BASE}${path}`;
+    const url = `${normalizedBase}${path}`;
     if (options.query) {
         return `${url}${getQueryString(options.query)}`;
     }

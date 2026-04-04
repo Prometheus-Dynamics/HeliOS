@@ -1,7 +1,8 @@
-use std::{env, path::Path, path::PathBuf, str::FromStr, time::Duration};
+use std::{path::Path, path::PathBuf, str::FromStr, time::Duration};
 
 use lib_ipc::types::{FeatureSet, ProtocolVersion};
 use lib_math::linalg::Quaternion;
+use lib_runtime_policy::HELIOS_PERIPHERALS_SERVICE_POLICY;
 use lib_sensors::imu::{ImuFusionMethod, ImuRange};
 use lib_sensors::sensor_config;
 
@@ -52,76 +53,64 @@ impl SensorsConfig {
     #[must_use]
     pub fn from_env() -> Self {
         let mut config = Self::new();
+        let policy = HELIOS_PERIPHERALS_SERVICE_POLICY.resolve();
 
-        if let Some(paths) = env_var_any(&["PERIPHERALS_CONFIG_PATHS", "ENGINE_PERIPHERALS_CONFIG_PATHS", "SENSOR_CONFIG_PATHS", "ENGINE_SENSOR_CONFIG_PATHS"]) {
-            let parsed: Vec<PathBuf> = paths.split(':').map(|entry| entry.trim()).filter(|entry| !entry.is_empty()).map(PathBuf::from).collect();
-            if !parsed.is_empty() {
-                config.config_paths = parsed;
-            }
+        if let Some(paths) = policy.config_paths {
+            config.config_paths = paths;
         }
 
-        if let Some(socket) = env_var_any(&["PERIPHERALS_SOCKET", "SENSORS_SOCKET", "SENSOR_SOCKET"]) {
-            config.socket_path = PathBuf::from(socket);
+        if let Some(socket) = policy.socket_path {
+            config.socket_path = socket;
         }
 
-        if let Some(protocol) = env_var_any(&["PERIPHERALS_PROTOCOL_VERSION", "SENSORS_PROTOCOL_VERSION"])
+        if let Some(protocol) = policy.protocol_version.as_deref()
             && let Ok(parsed) = ProtocolVersion::from_str(protocol.trim())
         {
             config.protocol = parsed;
         }
 
-        if let Some(name) = env_var_any(&["PERIPHERALS_SERVER_NAME", "SENSORS_SERVER_NAME"]) {
+        if let Some(name) = policy.server_name {
             config.server_name = name;
         }
 
-        if let Some(version) = env_var_any(&["PERIPHERALS_SERVER_VERSION", "SENSORS_SERVER_VERSION"]) {
+        if let Some(version) = policy.server_version {
             config.server_version = version;
         }
 
-        if let Some(features) = env_var_any(&["PERIPHERALS_FEATURES", "SENSORS_FEATURES"]) {
-            let set = features.split(',').map(|entry| entry.trim()).filter(|entry| !entry.is_empty()).map(str::to_owned).collect::<Vec<_>>();
-            config.features = FeatureSet::new(set);
+        if let Some(features) = policy.features {
+            config.features = FeatureSet::new(features);
         }
 
-        if let Ok(val) = env::var("ICM_GYRO_RANGE_DPS")
-            && let Ok(parsed) = val.parse::<u16>()
-        {
+        if let Some(parsed) = policy.icm_gyro_range_dps {
             config.icm_gyro_range_dps = parsed;
         }
 
-        if let Ok(val) = env::var("ICM_ACCEL_RANGE_G")
-            && let Ok(parsed) = val.parse::<u16>()
-        {
+        if let Some(parsed) = policy.icm_accel_range_g {
             config.icm_accel_range_g = parsed;
         }
 
-        if let Ok(val) = env::var("IMU_ANGLE_RANGE")
-            && let Ok(range) = ImuRange::from_str(&val)
+        if let Some(val) = policy.imu_angle_range.as_deref()
+            && let Ok(range) = ImuRange::from_str(val)
         {
             config.imu_range = range;
         }
 
-        if let Ok(val) = env::var("IMU_UPDATE_INTERVAL_MS")
-            && let Ok(ms) = val.parse::<u64>()
-        {
-            config.imu_update_interval = Duration::from_millis(ms.max(1));
+        if let Some(interval) = policy.imu_update_interval {
+            config.imu_update_interval = interval;
         }
 
-        if let Ok(val) = env::var("IMU_FUSION")
-            && let Ok(method) = ImuFusionMethod::from_str(&val)
+        if let Some(val) = policy.imu_fusion.as_deref()
+            && let Ok(method) = ImuFusionMethod::from_str(val)
         {
             config.imu_fusion = method;
         }
 
-        if let Ok(val) = env::var("IMU_YAW_OFFSET_DEG")
-            && let Ok(parsed) = val.parse::<f32>()
-            && parsed.is_finite()
-        {
+        if let Some(parsed) = policy.imu_yaw_offset_deg {
             config.imu_yaw_offset_deg = parsed;
         }
 
-        if let Ok(val) = env::var("IMU_MOUNT_CORRECTION_WXYZ")
-            && let Some(parsed) = parse_quat_wxyz(&val)
+        if let Some(val) = policy.imu_mount_correction_wxyz.as_deref()
+            && let Some(parsed) = parse_quat_wxyz(val)
         {
             config.imu_mount_correction = parsed;
         }
@@ -335,18 +324,6 @@ fn parse_quat_wxyz(raw: &str) -> Option<Quaternion> {
     }
     let q = Quaternion::new(values.remove(0), values.remove(0), values.remove(0), values.remove(0));
     q.normalized().ok()
-}
-
-fn env_var_any(names: &[&str]) -> Option<String> {
-    for name in names {
-        if let Ok(value) = env::var(name) {
-            let trimmed = value.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_owned());
-            }
-        }
-    }
-    None
 }
 
 impl Default for SensorsConfig {

@@ -3,6 +3,7 @@ use std::sync::{Arc, OnceLock};
 
 use chrono::Utc;
 use lib_ai::backend::coral;
+use lib_runtime_policy::HELIOS_CORAL_INVENTORY_POLICY;
 use serde_json::{Map as JsonMap, Value as JsonValue, json};
 use tokio::sync::{Mutex, broadcast};
 use tokio::time::{Duration, Instant, interval, timeout};
@@ -105,8 +106,8 @@ pub(crate) async fn build_coral_descriptors(store: &Arc<Mutex<SensorConfigStore>
                 };
 
                 if should_spawn {
-                    let progress_tick_ms = env_u64("HELIOS_CORAL_FLASH_PROGRESS_TICK_MS", 2000).clamp(500, 10_000);
-                    let progress_estimate_ms = env_u64("HELIOS_CORAL_FLASH_PROGRESS_ESTIMATE_MS", 90_000).clamp(10_000, 600_000);
+                    let progress_tick_ms = cfg.flash_progress_tick_ms;
+                    let progress_estimate_ms = cfg.flash_progress_estimate_ms;
                     if let Some(sender) = event_sender.as_ref() {
                         let progress_pct = estimate_flash_progress(0, progress_estimate_ms);
                         let update = FirmwareUpdate {
@@ -280,15 +281,20 @@ struct CoralInventoryConfig {
     diagnostics_enabled: bool,
     auto_flash: bool,
     discovery_timeout: Duration,
+    flash_progress_tick_ms: u64,
+    flash_progress_estimate_ms: u64,
 }
 
 impl CoralInventoryConfig {
     fn from_env() -> Self {
+        let policy = HELIOS_CORAL_INVENTORY_POLICY.resolve();
         Self {
-            enabled: env_bool("HELIOS_CORAL_INVENTORY_ENABLE", true),
-            diagnostics_enabled: env_bool("HELIOS_CORAL_DIAGNOSTICS_ENABLE", true),
-            auto_flash: env_bool("HELIOS_CORAL_AUTO_FLASH", true),
-            discovery_timeout: Duration::from_millis(env_u64("HELIOS_CORAL_DISCOVERY_TIMEOUT_MS", 2500).max(250)),
+            enabled: policy.enabled,
+            diagnostics_enabled: policy.diagnostics_enabled,
+            auto_flash: policy.auto_flash,
+            discovery_timeout: Duration::from_millis(policy.discovery_timeout_ms),
+            flash_progress_tick_ms: policy.flash_progress_tick_ms,
+            flash_progress_estimate_ms: policy.flash_progress_estimate_ms,
         }
     }
 }
@@ -304,17 +310,6 @@ fn estimate_flash_progress(elapsed_ms: u64, estimate_ms: u64) -> u8 {
     let range = (FLASH_PROGRESS_MAX_PCT - FLASH_PROGRESS_MIN_PCT) as f64;
     let value = FLASH_PROGRESS_MIN_PCT as f64 + range * clamped;
     value.round().clamp(f64::from(FLASH_PROGRESS_MIN_PCT), f64::from(FLASH_PROGRESS_MAX_PCT)) as u8
-}
-
-fn env_bool(key: &str, default: bool) -> bool {
-    match std::env::var(key) {
-        Ok(value) => matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "y" | "on"),
-        Err(_) => default,
-    }
-}
-
-fn env_u64(key: &str, default: u64) -> u64 {
-    std::env::var(key).ok().and_then(|val| val.trim().parse::<u64>().ok()).unwrap_or(default)
 }
 
 fn coral_identifier_base(device: &coral::CoralUsbDevice) -> String {

@@ -9,7 +9,7 @@ import {
   type ResourceCacheMetadata,
   type ResourceCacheResult
 } from '$lib/api/resourceCache';
-import { OpenAPI, type CancelablePromise } from '$lib/api/client';
+import type { CancelablePromise } from '$lib/api/client';
 import { recordApiError } from '$lib/utils/errorAnalytics';
 
 export type ApiRequestOptions = {
@@ -242,7 +242,6 @@ export function withAbort<T>(task: (controller: AbortController) => Promise<T>):
 
 try {
   getHttpClientBase();
-  OpenAPI.ENCODE_PATH = encodeURIComponent;
 } catch {
   // ignore
 }

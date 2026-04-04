@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use lib_runtime_policy::HELIOS_API_LOCALIZATION_POLICY;
 use tokio::fs;
 use uuid::Uuid;
 
@@ -7,11 +8,8 @@ use super::super::super::error::{ApiError, ApiResult};
 use super::super::super::media::{MediaMetadata, load_media_metadata, write_media_metadata};
 use super::super::super::storage;
 
-const DEFAULT_MEDIA_SEED_DIR: &str = "/usr/share/helios/media";
-const MEDIA_SEED_DIR_ENV: &str = "HELIOS_API_MEDIA_SEED_DIR";
-
 pub(super) fn field_map_seed_dir() -> String {
-    std::env::var(MEDIA_SEED_DIR_ENV).ok().map(|value| value.trim().to_string()).filter(|value| !value.is_empty()).unwrap_or_else(|| DEFAULT_MEDIA_SEED_DIR.to_string())
+    HELIOS_API_LOCALIZATION_POLICY.resolve().media_seed_dir.display().to_string()
 }
 
 pub(super) fn seeded_map_id_for_filename(filename: &str) -> String {
@@ -59,8 +57,7 @@ pub(super) fn derive_map_name(filename: &str) -> String {
 }
 
 pub(super) fn max_upload_bytes() -> u64 {
-    const DEFAULT_MB: u64 = 5;
-    std::env::var("HELIOS_API_MAX_MAP_UPLOAD_MB").ok().and_then(|raw| raw.parse::<u64>().ok()).filter(|v| *v > 0).map(|mb| mb.saturating_mul(1024 * 1024)).unwrap_or(DEFAULT_MB * 1024 * 1024)
+    HELIOS_API_LOCALIZATION_POLICY.resolve().max_map_upload_bytes
 }
 
 #[cfg(test)]

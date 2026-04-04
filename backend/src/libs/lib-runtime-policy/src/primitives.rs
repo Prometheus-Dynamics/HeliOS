@@ -65,6 +65,20 @@ impl OptionalBoundedF64Policy {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BoundedF64Policy {
+    pub env_var: &'static str,
+    pub default: f64,
+    pub min: f64,
+    pub max: f64,
+}
+
+impl BoundedF64Policy {
+    pub fn resolve(self) -> f64 {
+        std::env::var(self.env_var).ok().and_then(|value| value.trim().parse::<f64>().ok()).filter(|value| value.is_finite()).unwrap_or(self.default).clamp(self.min, self.max)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BoolPolicy {
     pub env_var: &'static str,
@@ -93,5 +107,16 @@ pub struct StringPolicy {
 impl StringPolicy {
     pub fn resolve(self) -> String {
         std::env::var(self.env_var).ok().map(|value| value.trim().to_string()).filter(|value| !value.is_empty()).unwrap_or_else(|| self.default.to_string())
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OptionalStringPolicy {
+    pub env_var: &'static str,
+}
+
+impl OptionalStringPolicy {
+    pub fn resolve(self) -> Option<String> {
+        std::env::var(self.env_var).ok().map(|value| value.trim().to_string()).filter(|value| !value.is_empty())
     }
 }

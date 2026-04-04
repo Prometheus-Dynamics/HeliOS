@@ -1,5 +1,6 @@
 use chrono::Utc;
 use flate2::read::GzDecoder;
+use lib_runtime_policy::HELIOS_API_UPLOAD_POLICY;
 use lib_schema_migration::{SyncSchemaPlan, normalize_to_current};
 use mime_guess::MimeGuess;
 use std::io::{BufRead, BufReader, Cursor};
@@ -169,8 +170,7 @@ pub(super) fn guess_content_type(name: &str) -> String {
 }
 
 pub(super) fn max_upload_bytes() -> u64 {
-    const DEFAULT_MB: u64 = 512;
-    std::env::var("HELIOS_API_MAX_UPLOAD_MB").ok().and_then(|raw| raw.parse::<u64>().ok()).map(|mb| mb.saturating_mul(1024 * 1024)).filter(|&bytes| bytes > 0).unwrap_or(DEFAULT_MB * 1024 * 1024)
+    HELIOS_API_UPLOAD_POLICY.resolve().media_upload_bytes
 }
 
 #[cfg(test)]

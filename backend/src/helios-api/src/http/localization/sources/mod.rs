@@ -1,8 +1,8 @@
 mod catalog;
 mod profile;
 mod profile_stack;
-mod sampling;
 mod sample_refresh;
+mod sampling;
 
 pub(crate) use profile::fetch_profile_output;
 use profile_stack::ProfileResolveStack;

@@ -1,8 +1,8 @@
-use std::env;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Duration;
 
+use lib_runtime_policy::HELIOS_ENGINE_STREAM_RUNTIME_POLICY;
 use styx::prelude::FourCc;
 use tokio::sync::broadcast;
 
@@ -13,17 +13,6 @@ use crate::ipc::{DecoderSettings, EncoderSettings};
 use super::super::ShmemWriter;
 use super::StreamRunner;
 
-const ENV_ENCODED_CHANNEL_SIZE: &str = "HELIOS_ENCODED_CHANNEL_SIZE";
-const DEFAULT_ENCODED_CHANNEL_SIZE: usize = 8;
-const ENV_DEFAULT_LIBCAMERA_FPS: &str = "HELIOS_DEFAULT_LIBCAMERA_FPS";
-// Default conservatively: high FPS at full resolution can overwhelm embedded memory/CPU and
-// create pathological backpressure (appearing as "register hangs" in the UI).
-// Users can override via `HELIOS_DEFAULT_LIBCAMERA_FPS` when they explicitly want higher rates.
-const DEFAULT_LIBCAMERA_FPS: u32 = 30;
-const ENV_VIEWER_IDLE_TIMEOUT_MS: &str = "HELIOS_STREAM_VIEWER_IDLE_TIMEOUT_MS";
-const DEFAULT_VIEWER_IDLE_TIMEOUT_MS: u64 = 2_500;
-const ENV_VIEWER_CHECK_INTERVAL_MS: &str = "HELIOS_STREAM_VIEWER_CHECK_INTERVAL_MS";
-const DEFAULT_VIEWER_CHECK_INTERVAL_MS: u64 = 250;
 pub struct StreamRunnerConfig {
     pub capture_config: CaptureConfig,
     pub graph: GraphHandle,
@@ -40,9 +29,9 @@ impl StreamRunner {
     pub fn new(config: StreamRunnerConfig) -> Self {
         let StreamRunnerConfig { mut capture_config, graph, encoder_id, mut decoder_id, encoder_settings, decoder_settings, preview_jpeg_quality: _preview_jpeg_quality, mut shmem, stream_id } =
             config;
+        let runtime_policy = HELIOS_ENGINE_STREAM_RUNTIME_POLICY.resolve();
         if capture_config.backend == BackendKind::Libcamera && capture_config.target_fps.is_none() && capture_config.interval.is_none() {
-            let fps = env::var(ENV_DEFAULT_LIBCAMERA_FPS).ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or(DEFAULT_LIBCAMERA_FPS);
-            capture_config.target_fps = Some(fps.max(1));
+            capture_config.target_fps = Some(runtime_policy.default_libcamera_fps.max(1));
         }
         if let Some(fallback_mode) = find_v4l2_usb_compressed_mode_for_config(&capture_config) {
             let from = capture_config.mode.format.code;
@@ -140,17 +129,15 @@ impl StreamRunner {
 }
 
 fn encoded_channel_size() -> usize {
-    env::var(ENV_ENCODED_CHANNEL_SIZE).ok().and_then(|v| v.parse().ok()).filter(|v| *v > 0).unwrap_or(DEFAULT_ENCODED_CHANNEL_SIZE)
+    HELIOS_ENGINE_STREAM_RUNTIME_POLICY.resolve().encoded_channel_size
 }
 
 fn viewer_idle_timeout() -> Duration {
-    let millis = env::var(ENV_VIEWER_IDLE_TIMEOUT_MS).ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(DEFAULT_VIEWER_IDLE_TIMEOUT_MS);
-    Duration::from_millis(millis.clamp(250, 60_000))
+    Duration::from_millis(HELIOS_ENGINE_STREAM_RUNTIME_POLICY.resolve().viewer_idle_timeout_ms)
 }
 
 fn viewer_check_interval() -> Duration {
-    let millis = env::var(ENV_VIEWER_CHECK_INTERVAL_MS).ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(DEFAULT_VIEWER_CHECK_INTERVAL_MS);
-    Duration::from_millis(millis.clamp(50, 5_000))
+    Duration::from_millis(HELIOS_ENGINE_STREAM_RUNTIME_POLICY.resolve().viewer_check_interval_ms)
 }
 
 fn find_nv12_mode_for_config(config: &CaptureConfig) -> Option<ModeId> {

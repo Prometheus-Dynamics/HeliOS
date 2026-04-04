@@ -1,8 +1,8 @@
-use std::env;
 use std::path::{Path, PathBuf};
 
 use ed25519_dalek::VerifyingKey;
 use lib_ipc::types::{FeatureSet, ProtocolVersion};
+use lib_runtime_policy::{HELIOS_UPDATER_FILESYSTEM_POLICY, updater_api_healthcheck_url, updater_frontend_healthcheck_url};
 
 #[derive(Debug, Clone, Default)]
 pub enum SignaturePolicy {
@@ -58,7 +58,8 @@ impl UpdaterConfig {
         P: Into<PathBuf>,
         Q: Into<PathBuf>,
     {
-        let data_dir = default_data_dir();
+        let filesystem_policy = HELIOS_UPDATER_FILESYSTEM_POLICY.resolve();
+        let data_dir = filesystem_policy.data_dir;
         let cache_dir = data_dir.join("ota").join("cache");
         let work_dir = data_dir.join("ota").join("work");
         Self {
@@ -71,23 +72,22 @@ impl UpdaterConfig {
             data_dir,
             cache_dir,
             work_dir,
-            service_releases_dir: default_service_releases_dir(),
-            service_bin_dir: default_service_bin_dir(),
-            frontend_releases_dir: default_frontend_releases_dir(),
-            frontend_active_path: default_frontend_active_path(),
-            frontend_service_unit: default_frontend_service_unit(),
-            frontend_healthcheck_url: default_frontend_healthcheck_url(),
-            updater_service_unit: default_updater_service_unit(),
-            api_healthcheck_url: default_api_healthcheck_url(),
+            service_releases_dir: filesystem_policy.service_releases_dir,
+            service_bin_dir: filesystem_policy.service_bin_dir,
+            frontend_releases_dir: filesystem_policy.frontend_releases_dir,
+            frontend_active_path: filesystem_policy.frontend_active_path,
+            frontend_service_unit: filesystem_policy.frontend_service_unit,
+            frontend_healthcheck_url: updater_frontend_healthcheck_url(),
+            updater_service_unit: filesystem_policy.updater_service_unit,
+            api_healthcheck_url: updater_api_healthcheck_url(),
             signature_policy: SignaturePolicy::default(),
             user_agent: format!("helios-updater/{}", env!("CARGO_PKG_VERSION")),
         }
     }
 
     pub fn from_env() -> Self {
-        let socket = env::var("UPDATER_SOCKET").unwrap_or_else(|_| "/run/helios/updater.sock".into());
-        let journal = env::var("UPDATER_JOURNAL_PATH").unwrap_or_else(|_| "/var/lib/helios/journal/updater.log".into());
-        Self::new(socket, journal)
+        let filesystem_policy = HELIOS_UPDATER_FILESYSTEM_POLICY.resolve();
+        Self::new(filesystem_policy.socket_path, filesystem_policy.journal_path)
     }
 
     pub fn with_protocol(mut self, protocol: ProtocolVersion) -> Self {
@@ -245,53 +245,5 @@ impl UpdaterConfig {
 impl Default for UpdaterConfig {
     fn default() -> Self {
         Self::from_env()
-    }
-}
-
-fn default_data_dir() -> PathBuf {
-    env::var("UPDATER_DATA_DIR").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/var/lib/helios"))
-}
-
-fn default_frontend_releases_dir() -> PathBuf {
-    env::var("UPDATER_FRONTEND_RELEASES_DIR").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/opt/helios/releases/frontend"))
-}
-
-fn default_service_releases_dir() -> PathBuf {
-    env::var("UPDATER_SERVICE_RELEASES_DIR").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/opt/helios/releases/services"))
-}
-
-fn default_service_bin_dir() -> PathBuf {
-    env::var("UPDATER_SERVICE_BIN_DIR").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/usr/bin"))
-}
-
-fn default_frontend_active_path() -> PathBuf {
-    env::var("UPDATER_FRONTEND_ACTIVE_PATH").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/opt/helios/frontend"))
-}
-
-fn default_frontend_service_unit() -> String {
-    env::var("UPDATER_FRONTEND_SERVICE_UNIT").unwrap_or_else(|_| "helios-frontend.service".into())
-}
-
-fn default_updater_service_unit() -> String {
-    env::var("UPDATER_UPDATER_SERVICE_UNIT").unwrap_or_else(|_| "helios-updater.service".into())
-}
-
-fn default_frontend_healthcheck_url() -> Option<String> {
-    match env::var("UPDATER_FRONTEND_HEALTHCHECK_URL") {
-        Ok(value) => {
-            let trimmed = value.trim();
-            if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
-        }
-        Err(_) => Some("http://127.0.0.1/".into()),
-    }
-}
-
-fn default_api_healthcheck_url() -> Option<String> {
-    match env::var("UPDATER_API_HEALTHCHECK_URL") {
-        Ok(value) => {
-            let trimmed = value.trim();
-            if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
-        }
-        Err(_) => Some("http://127.0.0.1/v1".into()),
     }
 }

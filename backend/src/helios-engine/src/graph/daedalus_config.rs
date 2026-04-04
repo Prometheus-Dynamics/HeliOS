@@ -2,6 +2,7 @@ use daedalus::data::model::Value as DaedalusValue;
 use daedalus::engine::{EngineConfig, GpuBackend, RuntimeMode};
 use daedalus::planner::Graph;
 use daedalus::runtime::{BackpressureStrategy, EdgePolicyKind, MetricsLevel};
+use lib_runtime_policy::HELIOS_ENGINE_DAEDALUS_ENV_OVERRIDE_POLICY;
 use tracing::warn;
 
 const PREFIX: &str = "helios.daedalus.";
@@ -17,11 +18,6 @@ const KEY_RUNTIME_POOL_SIZE: &str = "helios.daedalus.runtime.pool_size";
 pub(crate) const KEY_RUNTIME_DEFAULT_POLICY: &str = "helios.daedalus.runtime.default_policy";
 pub(crate) const KEY_RUNTIME_BACKPRESSURE: &str = "helios.daedalus.runtime.backpressure";
 const KEY_RUNTIME_LOCKFREE_QUEUES: &str = "helios.daedalus.runtime.lockfree_queues";
-
-const ENV_FORCE_CPU: &str = "HELIOS_DAEDALUS_FORCE_CPU";
-const ENV_GPU_BACKEND: &str = "HELIOS_DAEDALUS_GPU_BACKEND";
-const ENV_PLANNER_ENABLE_GPU: &str = "HELIOS_DAEDALUS_PLANNER_ENABLE_GPU";
-const ENV_METRICS_LEVEL: &str = "DAEDALUS_METRICS_LEVEL";
 
 fn parse_bool(raw: &str) -> Option<bool> {
     match raw.trim().to_ascii_lowercase().as_str() {
@@ -180,42 +176,44 @@ pub fn apply_daedalus_engine_config_overrides(cfg: &mut EngineConfig, graph: &Gr
 /// These are applied after graph metadata so operators can enforce a runtime policy
 /// during incident mitigation (for example, force CPU backend globally).
 pub fn apply_daedalus_engine_env_overrides(cfg: &mut EngineConfig) {
-    if let Ok(raw) = std::env::var(ENV_METRICS_LEVEL) {
+    let env_policy = HELIOS_ENGINE_DAEDALUS_ENV_OVERRIDE_POLICY.resolve();
+
+    if let Some(raw) = env_policy.metrics_level {
         if let Some(level) = parse_metrics_level(&raw) {
             cfg.runtime.metrics_level = level;
         } else {
-            warn!(env = ENV_METRICS_LEVEL, raw, "invalid daedalus metrics level override");
+            warn!(env = "DAEDALUS_METRICS_LEVEL", raw, "invalid daedalus metrics level override");
         }
     }
 
-    if let Ok(raw) = std::env::var(ENV_FORCE_CPU) {
+    if let Some(raw) = env_policy.force_cpu.clone() {
         match parse_bool(&raw) {
             Some(true) => {
                 cfg.gpu = GpuBackend::Cpu;
                 cfg.planner.enable_gpu = false;
             }
             Some(false) => {}
-            None => warn!(env = ENV_FORCE_CPU, raw, "invalid boolean override"),
+            None => warn!(env = "HELIOS_DAEDALUS_FORCE_CPU", raw, "invalid boolean override"),
         }
     }
 
-    if let Ok(raw) = std::env::var(ENV_GPU_BACKEND) {
+    if let Some(raw) = env_policy.gpu_backend {
         if let Some(backend) = parse_gpu_backend(&raw) {
             cfg.gpu = backend;
         } else {
-            warn!(env = ENV_GPU_BACKEND, raw, "invalid daedalus gpu backend override");
+            warn!(env = "HELIOS_DAEDALUS_GPU_BACKEND", raw, "invalid daedalus gpu backend override");
         }
     }
 
-    if let Ok(raw) = std::env::var(ENV_PLANNER_ENABLE_GPU) {
+    if let Some(raw) = env_policy.planner_enable_gpu {
         if let Some(flag) = parse_bool(&raw) {
             cfg.planner.enable_gpu = flag;
         } else {
-            warn!(env = ENV_PLANNER_ENABLE_GPU, raw, "invalid boolean override");
+            warn!(env = "HELIOS_DAEDALUS_PLANNER_ENABLE_GPU", raw, "invalid boolean override");
         }
     }
 
-    if let Ok(raw) = std::env::var(ENV_FORCE_CPU) {
+    if let Some(raw) = env_policy.force_cpu {
         if parse_bool(&raw) == Some(true) {
             // Force-cpu stays authoritative even if other env vars request GPU.
             cfg.gpu = GpuBackend::Cpu;

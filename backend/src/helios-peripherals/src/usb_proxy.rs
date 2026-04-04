@@ -2,6 +2,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use lib_runtime_policy::HELIOS_PERIPHERALS_USB_PROXY_POLICY;
 use tokio::fs;
 use tokio::net::TcpStream;
 use tokio::process::Command;
@@ -23,15 +24,16 @@ struct UsbProxyConfig {
 
 impl UsbProxyConfig {
     fn from_env() -> Self {
+        let policy = HELIOS_PERIPHERALS_USB_PROXY_POLICY.resolve();
         Self {
-            enabled: env_bool("HELIOS_USB_PROXY_ENABLE", true),
-            usb_subnet_cidr: env_string("HELIOS_USB_PROXY_SUBNET", "172.31.250.0/24"),
-            usb_bridge_interface: env_string("HELIOS_USB_PROXY_CLIENT_BRIDGE", "usbbr0"),
-            helios_usb_vendor_id: env_hex_u16("HELIOS_USB_PROXY_USB_VENDOR_ID", 0x1209),
-            helios_usb_product_id: env_hex_u16("HELIOS_USB_PROXY_USB_PRODUCT_ID", 0xF001),
-            parent_gateway_ip: env_ipv4("HELIOS_USB_PROXY_GATEWAY_IP", Ipv4Addr::new(172, 31, 250, 2)),
-            parent_api_port: env_u16("HELIOS_USB_PROXY_PARENT_API_PORT", 5801),
-            force_default_route: env_bool("HELIOS_USB_PROXY_FORCE_DEFAULT_ROUTE", false),
+            enabled: policy.enabled,
+            usb_subnet_cidr: policy.subnet,
+            usb_bridge_interface: policy.bridge_interface,
+            helios_usb_vendor_id: policy.vendor_id,
+            helios_usb_product_id: policy.product_id,
+            parent_gateway_ip: policy.gateway_ip,
+            parent_api_port: policy.parent_api_port,
+            force_default_route: policy.force_default_route,
         }
     }
 }
@@ -310,31 +312,6 @@ async fn run_capture(program: &str, args: &[&str]) -> Result<String, String> {
         return Err(format!("{program} exited with status {}", output.status));
     }
     String::from_utf8(output.stdout).map_err(|e| e.to_string())
-}
-
-fn env_string(key: &str, default: &str) -> String {
-    std::env::var(key).ok().filter(|val| !val.trim().is_empty()).unwrap_or_else(|| default.to_string())
-}
-
-fn env_bool(key: &str, default: bool) -> bool {
-    match std::env::var(key) {
-        Ok(value) => matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "y" | "on"),
-        Err(_) => default,
-    }
-}
-
-fn env_u16(key: &str, default: u16) -> u16 {
-    std::env::var(key).ok().and_then(|val| val.trim().parse::<u16>().ok()).unwrap_or(default)
-}
-
-fn env_hex_u16(key: &str, default: u16) -> u16 {
-    std::env::var(key).ok().and_then(|val| parse_hex_u16(val.trim())).unwrap_or(default)
-}
-
-fn env_ipv4(key: &str, default: Ipv4Addr) -> Ipv4Addr {
-    let Ok(raw) = std::env::var(key) else { return default };
-    let Ok(ip) = raw.trim().parse::<Ipv4Addr>() else { return default };
-    ip
 }
 
 #[cfg(test)]

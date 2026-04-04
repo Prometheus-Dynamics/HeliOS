@@ -1,4 +1,5 @@
 use super::*;
+use lib_runtime_policy::HELIOS_ENGINE_CALIBRATION_POLICY;
 
 pub(super) fn validate_board(board: &CalibrationBoard) -> Result<(), CalibrationSolveFailure> {
     if board.squares_x < 2 || board.squares_y < 2 {
@@ -240,7 +241,7 @@ pub(super) fn read_u8(value: &DaedalusValue) -> Option<u8> {
 }
 
 pub(super) fn overlay_jpeg_quality() -> u8 {
-    std::env::var("HELIOS_CALIBRATION_OVERLAY_JPEG_QUALITY").ok().and_then(|raw| raw.parse::<u8>().ok()).unwrap_or(85).clamp(1, 100)
+    HELIOS_ENGINE_CALIBRATION_POLICY.resolve().overlay_jpeg_quality
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -266,7 +267,7 @@ pub(super) fn overlay_save_mode_from_request(request: &CalibrationSolveRequest) 
 }
 
 pub(super) fn overlay_save_mode() -> OverlaySaveMode {
-    let raw = std::env::var("HELIOS_CALIBRATION_OVERLAY_SAVE_MODE").ok().unwrap_or_default();
+    let raw = HELIOS_ENGINE_CALIBRATION_POLICY.resolve().overlay_save_mode;
     match raw.trim().to_ascii_lowercase().as_str() {
         "copy" | "bytes" => OverlaySaveMode::Copy,
         "input" | "raw" | "decoded" | "passthrough" => OverlaySaveMode::Input,
@@ -389,18 +390,16 @@ pub(super) fn parse_pnm_output(bytes: &[u8]) -> Option<DynamicImage> {
 }
 
 pub(super) fn calibration_min_tag_area_ratio() -> f64 {
-    std::env::var("HELIOS_CALIBRATION_MIN_TAG_AREA_RATIO").ok().and_then(|raw| raw.parse::<f64>().ok()).unwrap_or(0.0).clamp(0.0, 0.1)
+    HELIOS_ENGINE_CALIBRATION_POLICY.resolve().min_tag_area_ratio
 }
 
 pub(super) fn calibration_min_tag_area_median_ratio() -> f64 {
-    std::env::var("HELIOS_CALIBRATION_MIN_TAG_AREA_MEDIAN_RATIO").ok().and_then(|raw| raw.parse::<f64>().ok()).unwrap_or(0.0).clamp(0.0, 3.0)
+    HELIOS_ENGINE_CALIBRATION_POLICY.resolve().min_tag_area_median_ratio
 }
 
 pub(super) fn calibration_min_tag_area_px(width: u32, height: u32) -> f64 {
-    if let Ok(raw) = std::env::var("HELIOS_CALIBRATION_MIN_TAG_AREA_PX") {
-        if let Ok(px) = raw.parse::<f64>() {
-            return px.max(0.0);
-        }
+    if let Some(px) = HELIOS_ENGINE_CALIBRATION_POLICY.resolve().min_tag_area_px {
+        return px.max(0.0);
     }
     let denom = (width as f64) * (height as f64);
     if denom <= 0.0 {

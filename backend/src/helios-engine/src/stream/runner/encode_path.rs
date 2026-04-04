@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use lib_runtime_policy::HELIOS_ENGINE_STREAM_RUNTIME_POLICY;
 use metrics::histogram;
 use styx::codec::ffmpeg::{FfmpegEncoderOptions, FfmpegH264Encoder, FfmpegH265Encoder, FfmpegMjpegEncoder};
 use styx::codec::{Codec, CodecKind, CodecPolicy, CodecRegistry};
@@ -33,7 +34,7 @@ fn capture_session_error_to_engine_error(err: crate::capture::CaptureSessionErro
 
 impl StreamRunner {
     fn encoded_consumer_stale_ms() -> u64 {
-        std::env::var("HELIOS_ENCODED_CONSUMER_STALE_MS").ok().and_then(|raw| raw.parse::<u64>().ok()).unwrap_or(5_000).clamp(500, 60_000)
+        HELIOS_ENGINE_STREAM_RUNTIME_POLICY.resolve().encoded_consumer_stale_ms
     }
 
     fn parse_proc_key_bytes(text: &str, key: &str) -> Option<u64> {
@@ -142,7 +143,7 @@ impl StreamRunner {
     }
 
     fn metrics_stale_base_ms() -> u64 {
-        std::env::var("HELIOS_STREAM_METRICS_STALE_MS").ok().and_then(|raw| raw.parse::<u64>().ok()).unwrap_or(1_500).clamp(250, 60_000)
+        HELIOS_ENGINE_STREAM_RUNTIME_POLICY.resolve().metrics_stale_base_ms
     }
 
     fn stale_threshold_for_fps(fps: f64) -> Duration {
@@ -737,12 +738,13 @@ impl StreamRunner {
         if !self.uses_usb_v4l2_capture() {
             return false;
         }
-        let script = std::env::var("HELIOS_USB_POWER_SETUP_SCRIPT").unwrap_or_else(|_| "/usr/local/bin/helios-usb-power-setup.sh".to_string());
+        let stream_policy = HELIOS_ENGINE_STREAM_RUNTIME_POLICY.resolve();
+        let script = stream_policy.usb_power_setup_script;
         if !std::path::Path::new(&script).exists() {
             tracing::warn!(script = %script, "usb power recovery script not found");
             return false;
         }
-        let settle_ms = std::env::var("HELIOS_USB_POWER_RECOVERY_SETTLE_MS").ok().and_then(|raw| raw.parse::<u64>().ok()).unwrap_or(2_500).clamp(100, 10_000);
+        let settle_ms = stream_policy.usb_power_recovery_settle_ms;
         let run = |enabled: bool| -> bool {
             let status = Command::new(&script).env("USB_POWER_USB_A_ENABLED", if enabled { "1" } else { "0" }).status();
             match status {
@@ -772,7 +774,7 @@ impl StreamRunner {
     }
 
     fn software_encoder_thread_limit() -> usize {
-        if let Some(value) = std::env::var("HELIOS_SOFTWARE_ENCODER_THREADS").ok().and_then(|raw| raw.parse::<usize>().ok()).filter(|value| *value > 0) {
+        if let Some(value) = HELIOS_ENGINE_STREAM_RUNTIME_POLICY.resolve().software_encoder_threads {
             return value;
         }
 

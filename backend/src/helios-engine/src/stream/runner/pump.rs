@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use lib_runtime_policy::HELIOS_ENGINE_STREAM_RUNTIME_POLICY;
 use metrics::histogram;
 use styx::capture::prelude::RecvOutcome;
 use styx::codec::decoder::frame_to_dynamic_image;
@@ -14,11 +15,6 @@ use super::StreamRunner;
 use styx::prelude::{transform_packed_frame, FourCc, FrameTransform, Rotation90};
 
 const CAPTURE_IDLE_SLEEP: Duration = Duration::from_millis(1);
-const DEFAULT_CAPTURE_STALL_MS: u64 = 1_500;
-const DEFAULT_CAPTURE_ACTIVE_STALL_MS: u64 = 1_000;
-const DEFAULT_CAPTURE_FIRST_FRAME_STALL_MS: u64 = 8_000;
-const DEFAULT_IDLE_COMPACTION_INTERVAL_MS: u64 = 1_000;
-
 impl StreamRunner {
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     #[allow(unsafe_code)]
@@ -37,7 +33,7 @@ impl StreamRunner {
         let millis = if cached != u64::MAX {
             cached
         } else {
-            let value = std::env::var("HELIOS_STREAM_IDLE_COMPACTION_INTERVAL_MS").ok().and_then(|raw| raw.trim().parse::<u64>().ok()).unwrap_or(DEFAULT_IDLE_COMPACTION_INTERVAL_MS).clamp(50, 60_000);
+            let value = HELIOS_ENGINE_STREAM_RUNTIME_POLICY.resolve().idle_compaction_interval_ms;
             VALUE_MS.store(value, Ordering::Relaxed);
             value
         };
@@ -133,10 +129,7 @@ impl StreamRunner {
     }
 
     fn software_encoder_fps_cap() -> Option<f64> {
-        // Cap software ffmpeg encoder throughput by default so capture/pipeline work remains
-        // realtime under sustained encoded demand (for example shadow recorder subscriptions).
-        // Set to 0 (or negative) to disable the cap.
-        std::env::var("HELIOS_SOFTWARE_ENCODER_FPS_CAP").ok().and_then(|value| value.parse::<f64>().ok()).or(Some(12.0)).filter(|value| value.is_finite() && *value > 0.0)
+        HELIOS_ENGINE_STREAM_RUNTIME_POLICY.resolve().software_encoder_fps_cap
     }
 
     fn effective_encode_fps_limit(&self) -> Option<f64> {
@@ -449,8 +442,7 @@ impl StreamRunner {
                 Ok(true)
             }
             RecvOutcome::Empty => {
-                let first_frame_stall_ms =
-                    std::env::var("HELIOS_CAPTURE_FIRST_FRAME_STALL_MS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(DEFAULT_CAPTURE_FIRST_FRAME_STALL_MS).clamp(1_000, 120_000);
+                let first_frame_stall_ms = HELIOS_ENGINE_STREAM_RUNTIME_POLICY.resolve().capture_first_frame_stall_ms;
                 let now = Instant::now();
                 let awaiting_first_frame = self.last_capture_wall.is_none();
                 let first_frame_elapsed_ms = self.capture_started_wall.map(|started| now.saturating_duration_since(started).as_millis().min(u64::MAX as u128) as u64);
@@ -463,8 +455,9 @@ impl StreamRunner {
                         return Err(Error::InvalidState("capture stalled"));
                     }
                 }
-                let stall_ms = std::env::var("HELIOS_CAPTURE_STALL_MS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(DEFAULT_CAPTURE_STALL_MS).clamp(50, 10_000);
-                let active_stall_ms = std::env::var("HELIOS_CAPTURE_ACTIVE_STALL_MS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(DEFAULT_CAPTURE_ACTIVE_STALL_MS).clamp(250, 10_000);
+                let stream_policy = HELIOS_ENGINE_STREAM_RUNTIME_POLICY.resolve();
+                let stall_ms = stream_policy.capture_stall_ms;
+                let active_stall_ms = stream_policy.capture_active_stall_ms;
                 let graph_has_image_output = self.graph.has_image_output();
                 let graph_has_executor = self.graph.has_executor();
                 let graph_host = self.graph.host();

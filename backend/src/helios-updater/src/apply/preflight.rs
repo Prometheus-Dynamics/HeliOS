@@ -1,13 +1,13 @@
-use std::env;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
+use lib_runtime_policy::HELIOS_UPDATER_APPLY_POLICY;
 use tokio::fs;
 use tracing::warn;
 use uuid::Uuid;
 
 use super::repartition::{OfflineDataBorrowAssessment, OfflineDataBorrowBlocker, assess_offline_data_borrow, offline_data_borrow_blocked_summary, offline_data_borrow_summary};
-use super::{SquashfsPreflightContext, SquashfsSlotResizePlan, env_flag_enabled};
+use super::{SquashfsPreflightContext, SquashfsSlotResizePlan};
 use crate::artifact::{ReleaseManifest, ReleaseManifestMetadata, load_metadata};
 use crate::bundle::{is_frontend_bundle, is_service_bundle};
 use crate::config::UpdaterConfig;
@@ -39,8 +39,9 @@ pub(crate) async fn preflight_staged_release(config: &UpdaterConfig, update_id: 
         return Ok(simple_preflight_report(update_id, artifact_kind, None, false, PreflightVerdict::InvalidArtifact, format!("staged artifact {} is missing", staged_path.display())));
     }
 
-    let single_slot_requested = env::var_os("UPDATER_SINGLE_SLOT").is_some();
-    let allow_single_slot_inplace = env_flag_enabled("UPDATER_ALLOW_SINGLE_SLOT_INPLACE");
+    let apply_policy = HELIOS_UPDATER_APPLY_POLICY.resolve();
+    let single_slot_requested = apply_policy.single_slot_requested;
+    let allow_single_slot_inplace = apply_policy.allow_single_slot_inplace;
     let slot_selection = select_target_slot(single_slot_requested)?;
     let work_dir_available_bytes = available_bytes_for_path(config.work_dir()).await?.unwrap_or(0);
 
