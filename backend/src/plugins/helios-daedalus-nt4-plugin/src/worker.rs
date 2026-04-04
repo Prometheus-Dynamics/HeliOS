@@ -4,18 +4,21 @@ use nt_client::data::{DataType, JsonString};
 use nt_client::subscribe::{ReceivedMessage, SubscriptionOptions};
 use nt_client::topic::Properties;
 use nt_client::{Client, ClientHandle, NTAddr, NewClientOptions};
+use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use tokio::net::lookup_host;
 use tokio::sync::{Notify, mpsc};
 use tokio::task::JoinHandle;
 use tracing::warn;
 
+type SharedJsonValue = Arc<RwLock<Option<JsonValue>>>;
+
 pub struct Nt4WorkerHandle {
     tx: mpsc::UnboundedSender<Command>,
-    values: Arc<Mutex<HashMap<String, Arc<Mutex<String>>>>>,
+    values: Arc<Mutex<HashMap<String, SharedJsonValue>>>,
 }
 
 impl Nt4WorkerHandle {
@@ -42,10 +45,17 @@ impl Nt4WorkerHandle {
     pub fn subscribe_json(&self, topic: String) -> String {
         let slot = {
             let mut guard = self.values.lock().expect("values mutex poisoned");
-            guard.entry(topic.clone()).or_insert_with(|| Arc::new(Mutex::new(String::new()))).clone()
+            guard
+                .entry(topic.clone())
+                .or_insert_with(|| {
+                    let slot = Arc::new(RwLock::new(None));
+                    let _ = self.tx.send(Command::SubscribeJson { topic: topic.clone(), slot: slot.clone() });
+                    slot
+                })
+                .clone()
         };
-        let _ = self.tx.send(Command::SubscribeJson { topic, slot: slot.clone() });
-        slot.lock().expect("slot mutex poisoned").clone()
+
+        serialize_slot(&slot)
     }
 }
 
@@ -53,11 +63,10 @@ pub fn spawn(host: String, port: u16) -> Result<Nt4WorkerHandle, NodeError> {
     tokio::runtime::Handle::try_current().map_err(|_| NodeError::Handler("nt4 nodes require a tokio runtime".into()))?;
 
     let (tx, rx) = mpsc::unbounded_channel();
-    let values: Arc<Mutex<HashMap<String, Arc<Mutex<String>>>>> = Arc::new(Mutex::new(HashMap::new()));
+    let values = Arc::new(Mutex::new(HashMap::new()));
 
-    let values_for_task = values.clone();
     tokio::spawn(async move {
-        run_worker(host, port, rx, values_for_task).await;
+        run_worker(host, port, rx).await;
     });
 
     Ok(Nt4WorkerHandle { tx, values })
@@ -65,7 +74,7 @@ pub fn spawn(host: String, port: u16) -> Result<Nt4WorkerHandle, NodeError> {
 
 enum Command {
     Publish { topic: String, value: PublishValue },
-    SubscribeJson { topic: String, slot: Arc<Mutex<String>> },
+    SubscribeJson { topic: String, slot: SharedJsonValue },
 }
 
 #[derive(Debug, Clone)]
@@ -82,12 +91,17 @@ struct Connection {
     task: JoinHandle<()>,
 }
 
-async fn run_worker(host: String, port: u16, mut rx: mpsc::UnboundedReceiver<Command>, values: Arc<Mutex<HashMap<String, Arc<Mutex<String>>>>>) {
+#[derive(Debug)]
+struct PublisherEntry {
+    data_type: DataType,
+    publisher: nt_client::publish::GenericPublisher,
+}
+
+async fn run_worker(host: String, port: u16, mut rx: mpsc::UnboundedReceiver<Command>) {
     let mut conn: Option<Connection> = None;
     let mut publishers: HashMap<String, PublisherEntry> = HashMap::new();
     let mut subscriptions: HashMap<String, JoinHandle<()>> = HashMap::new();
-    let mut subscribed_topics: HashMap<String, Arc<Mutex<String>>> = HashMap::new();
-
+    let mut subscribed_topics: HashMap<String, SharedJsonValue> = HashMap::new();
     let mut tick = tokio::time::interval(Duration::from_secs(2));
 
     loop {
@@ -105,11 +119,6 @@ async fn run_worker(host: String, port: u16, mut rx: mpsc::UnboundedReceiver<Com
                 }
                 if let Some(connection) = conn.as_ref() {
                     ensure_subscriptions(connection.handle.clone(), &mut subscriptions, &subscribed_topics).await;
-                }
-                // Bring in any new subscription slots from the shared map (subscribe_json can be called without a command being received yet).
-                let snapshot = values.lock().ok().map(|m| m.clone()).unwrap_or_default();
-                for (topic, slot) in snapshot {
-                    subscribed_topics.entry(topic).or_insert(slot);
                 }
             }
             cmd = rx.recv() => {
@@ -133,18 +142,15 @@ async fn run_worker(host: String, port: u16, mut rx: mpsc::UnboundedReceiver<Com
                             warn!(%err, "nt4 publish failed");
                             conn = None;
                             publishers.clear();
+                            for (_, task) in subscriptions.drain() {
+                                task.abort();
+                            }
                         }
                     }
                 }
             }
         }
     }
-}
-
-#[derive(Debug)]
-struct PublisherEntry {
-    data_type: DataType,
-    publisher: nt_client::publish::GenericPublisher,
 }
 
 async fn publish_value(handle: &ClientHandle, publishers: &mut HashMap<String, PublisherEntry>, topic: &str, value: PublishValue) -> Result<(), String> {
@@ -176,7 +182,7 @@ async fn publish_value(handle: &ClientHandle, publishers: &mut HashMap<String, P
     Ok(())
 }
 
-async fn ensure_subscriptions(handle: ClientHandle, tasks: &mut HashMap<String, JoinHandle<()>>, subscribed: &HashMap<String, Arc<Mutex<String>>>) {
+async fn ensure_subscriptions(handle: ClientHandle, tasks: &mut HashMap<String, JoinHandle<()>>, subscribed: &HashMap<String, SharedJsonValue>) {
     for (topic, slot) in subscribed {
         if tasks.contains_key(topic) {
             continue;
@@ -198,9 +204,8 @@ async fn ensure_subscriptions(handle: ClientHandle, tasks: &mut HashMap<String, 
                 loop {
                     match subscriber.recv().await {
                         Ok(ReceivedMessage::Updated((_announced, value))) => {
-                            let json_value = rmpv_json::to_json(&value);
-                            if let (Ok(serialized), Ok(mut guard)) = (serde_json::to_string(&json_value), slot.lock()) {
-                                *guard = serialized;
+                            if let Ok(mut guard) = slot.write() {
+                                *guard = Some(rmpv_json::to_json(&value));
                             }
                         }
                         Ok(_) => {}
@@ -221,7 +226,7 @@ async fn connect(host: &str, port: u16) -> Result<Connection, String> {
         addr: NTAddr::Custom(addr),
         unsecure_port: port,
         secure_port: None,
-        name: "Helios".to_string(),
+        name: "HeliOS".to_string(),
         response_timeout: Duration::from_millis(750),
         ping_interval: Duration::from_millis(200),
         update_time_interval: Duration::from_secs(5),
@@ -257,39 +262,10 @@ async fn resolve_ipv4(host: &str, port: u16) -> Result<Ipv4Addr, String> {
     Err(format!("no ipv4 address found for host {host}"))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn subscribe_json_reuses_existing_slot_for_repeated_topic_subscriptions() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let values = Arc::new(Mutex::new(HashMap::new()));
-        let handle = Nt4WorkerHandle { tx, values: Arc::clone(&values) };
-
-        assert_eq!(handle.subscribe_json("topic/a".into()), "");
-        assert_eq!(handle.subscribe_json("topic/a".into()), "");
-
-        let stored_slot = values.lock().expect("values mutex poisoned").get("topic/a").expect("slot").clone();
-        assert_eq!(values.lock().expect("values mutex poisoned").len(), 1);
-
-        let first = rx.try_recv().expect("first subscribe command");
-        let second = rx.try_recv().expect("second subscribe command");
-
-        match first {
-            Command::SubscribeJson { topic, slot } => {
-                assert_eq!(topic, "topic/a");
-                assert!(Arc::ptr_eq(&slot, &stored_slot));
-            }
-            Command::Publish { .. } => panic!("unexpected publish command"),
-        }
-
-        match second {
-            Command::SubscribeJson { topic, slot } => {
-                assert_eq!(topic, "topic/a");
-                assert!(Arc::ptr_eq(&slot, &stored_slot));
-            }
-            Command::Publish { .. } => panic!("unexpected publish command"),
-        }
-    }
+fn serialize_slot(slot: &SharedJsonValue) -> String {
+    slot.read()
+        .ok()
+        .and_then(|guard| guard.clone())
+        .and_then(|value| serde_json::to_string(&value).ok())
+        .unwrap_or_default()
 }

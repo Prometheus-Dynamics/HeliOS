@@ -2466,7 +2466,6 @@ export interface components {
         };
         CancelUpdateRequest: {
             requested_by?: string | null;
-            /** @description Optional update id to cancel. When omitted, the currently active update is canceled. */
             update_id?: string | null;
         };
         CaptureConfig: {
@@ -2909,11 +2908,14 @@ export interface components {
             cv_runtime_scratch_high_water: components["schemas"]["CvRuntimeScratchMetricSnapshot"][];
             engine_ipc: components["schemas"]["EngineIpcObservabilitySnapshot"];
             health: components["schemas"]["HealthPayload"];
+            imu: components["schemas"]["ImuRuntimeObservabilitySnapshot"];
+            localization: components["schemas"]["LocalizationObservabilitySnapshot"];
             log_source_count: number;
             log_sources_freshness: components["schemas"]["ReadModelFreshness"];
             /** Format: int64 */
             log_sources_revision: number;
             mjpeg: components["schemas"]["RuntimeTopicBroadcastSnapshot"];
+            nt4: components["schemas"]["Nt4ObservabilitySnapshot"];
             os: components["schemas"]["OsReleaseInfo"];
             realtime_updates: components["schemas"]["RuntimeBroadcastSnapshot"];
             resource_guard: components["schemas"]["ResourceGuardStatus"];
@@ -3413,6 +3415,30 @@ export interface components {
             /** Format: double */
             z: number;
         };
+        ImuRuntimeObservabilitySnapshot: {
+            accel_gyro_source?: string | null;
+            /** Format: float */
+            angular_speed_dps?: number | null;
+            available: boolean;
+            /** Format: float */
+            dr_confidence?: number | null;
+            fusion?: string | null;
+            is_moving?: boolean | null;
+            is_still?: boolean | null;
+            last_error?: string | null;
+            /** Format: float */
+            linear_speed_mps?: number | null;
+            magnetometer_source?: string | null;
+            /** Format: float */
+            motion_fast_g?: number | null;
+            /** Format: float */
+            motion_g?: number | null;
+            /** Format: float */
+            stillness_confidence?: number | null;
+            /** Format: int64 */
+            update_interval_ms?: number | null;
+            updated_at?: string | null;
+        };
         ImuRuntimePolicySnapshot: {
             /** Format: int64 */
             idle_interval_ms: number;
@@ -3863,6 +3889,10 @@ export interface components {
         };
         /** @enum {string} */
         LocalizationFieldOriginMode: "center" | "blue" | "red" | "custom";
+        LocalizationObservabilitySnapshot: {
+            sample_refresh: components["schemas"]["LocalizationSampleRefreshSnapshot"];
+            solve_cache: components["schemas"]["LocalizationSolveCacheSnapshot"];
+        };
         LocalizationPipelineSource: {
             cameraPath: string;
             cameraUid: string;
@@ -3943,6 +3973,26 @@ export interface components {
             roll: number;
             /** Format: double */
             yaw: number;
+        };
+        LocalizationSampleRefreshSnapshot: {
+            /** Format: int64 */
+            pruned_entries: number;
+            /** Format: int64 */
+            refresh_grants: number;
+            /** Format: int64 */
+            throttled_requests: number;
+            /** Format: int64 */
+            tracked_outputs: number;
+        };
+        LocalizationSolveCacheSnapshot: {
+            /** Format: int64 */
+            entries: number;
+            /** Format: int64 */
+            hits: number;
+            /** Format: int64 */
+            inserts: number;
+            /** Format: int64 */
+            misses: number;
         };
         LocalizationSolveResponse: {
             profileId: string;
@@ -4401,6 +4451,25 @@ export interface components {
             /** @default null */
             vlan: null | components["schemas"]["VlanConfig"];
         };
+        Nt4BridgeObservabilitySnapshot: {
+            active_target?: string | null;
+            /** Format: int64 */
+            last_entry_id?: number | null;
+            /** Format: int64 */
+            last_publish_success_ms?: number | null;
+            /** Format: int64 */
+            publish_cycles: number;
+            /** Format: int64 */
+            publish_failures: number;
+            /** Format: int64 */
+            reconnects: number;
+            /** Format: int64 */
+            skipped_ticks: number;
+        };
+        Nt4ObservabilitySnapshot: {
+            bridge: components["schemas"]["Nt4BridgeObservabilitySnapshot"];
+            pool: components["schemas"]["Nt4PoolObservabilitySnapshot"];
+        };
         Nt4PeerProbe: {
             error?: string | null;
             host: string;
@@ -4408,6 +4477,22 @@ export interface components {
             /** Format: int32 */
             port: number;
             roots?: string[];
+        };
+        Nt4PoolObservabilitySnapshot: {
+            /** Format: int64 */
+            client_slots: number;
+            /** Format: int64 */
+            connect_attempts: number;
+            /** Format: int64 */
+            connect_failures: number;
+            /** Format: int64 */
+            connect_reuses: number;
+            /** Format: int64 */
+            connect_successes: number;
+            /** Format: int64 */
+            connected_clients: number;
+            /** Format: int64 */
+            disconnects: number;
         };
         Nt4Settings: {
             /** @description Enable Limelight-compatible API emulation (per-stream adapters). */
@@ -9073,8 +9158,26 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Staging removed */
-            410: {
+            /** @description Update staged */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateAckResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadUpdateError"];
+                };
+            };
+            /** @description Updater unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10956,7 +11059,10 @@ export interface operations {
     };
     preview_stream: {
         parameters: {
-            query?: never;
+            query?: {
+                pipeline?: string | null;
+                output?: string | null;
+            };
             header?: never;
             path: {
                 /** @description Stream ID */

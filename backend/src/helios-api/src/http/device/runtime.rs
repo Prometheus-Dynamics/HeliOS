@@ -1,10 +1,15 @@
-use crate::api_observability::{ApiRealtimeDiagnostics, RuntimeBroadcastSnapshot, RuntimeTopicBroadcastSnapshot};
+use crate::api_observability::{
+    ApiRealtimeDiagnostics, LocalizationSampleRefreshSnapshot, LocalizationSolveCacheSnapshot, Nt4BridgeObservabilitySnapshot, Nt4PoolObservabilitySnapshot, RuntimeBroadcastSnapshot,
+    RuntimeTopicBroadcastSnapshot,
+};
 use axum::{Json, extract::State, http::StatusCode};
+use helios_peripherals::dto::SensorScope;
 use lib_runtime_policy::{
     HELIOS_API_HARDWARE_READ_MODEL_POLICY, HELIOS_API_LOG_SOURCES_POLICY, HELIOS_API_STARTUP_CACHE_WARM_POLICY, HELIOS_API_STREAMS_POLICY, HELIOS_API_SYSTEM_READ_MODEL_POLICY,
     HELIOS_API_TOKIO_POLICY, HELIOS_ENGINE_CRASH_GUARD_POLICY, HELIOS_ENGINE_TOKIO_POLICY, HELIOS_I2C_INVENTORY_POLICY, HELIOS_IMU_RUNTIME_POLICY, HELIOS_LOG_FILTER_POLICY,
     HELIOS_PERIPHERALS_POWER_POLICY, HELIOS_PERIPHERALS_TOKIO_POLICY, HELIOS_RESOURCE_GUARD_POLICY, HELIOS_STYX_CAPTURE_TUNABLES_POLICY, PlatformFamily, detect_platform_identity,
 };
+use lib_sensors::model::SensorReading;
 use serde::Serialize;
 use utoipa::ToSchema;
 
@@ -220,6 +225,9 @@ pub struct DeviceRuntimeObservabilitySnapshot {
     pub streams: crate::http::health::RuntimeStreamsPayload,
     pub os: super::os_release::OsReleaseInfo,
     pub engine_ipc: EngineIpcObservabilitySnapshot,
+    pub localization: LocalizationObservabilitySnapshot,
+    pub nt4: Nt4ObservabilitySnapshot,
+    pub imu: ImuRuntimeObservabilitySnapshot,
     pub realtime_updates: RuntimeBroadcastSnapshot,
     pub api_realtime: ApiRealtimeDiagnostics,
     pub mjpeg: RuntimeTopicBroadcastSnapshot,
@@ -228,6 +236,51 @@ pub struct DeviceRuntimeObservabilitySnapshot {
     pub log_source_count: usize,
     pub log_sources_freshness: crate::system_read_model::ReadModelFreshness,
     pub log_sources_revision: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, ToSchema)]
+pub struct LocalizationObservabilitySnapshot {
+    pub solve_cache: LocalizationSolveCacheSnapshot,
+    pub sample_refresh: LocalizationSampleRefreshSnapshot,
+}
+
+#[derive(Debug, Clone, Default, Serialize, ToSchema)]
+pub struct Nt4ObservabilitySnapshot {
+    pub pool: Nt4PoolObservabilitySnapshot,
+    pub bridge: Nt4BridgeObservabilitySnapshot,
+}
+
+#[derive(Debug, Clone, Default, Serialize, ToSchema)]
+pub struct ImuRuntimeObservabilitySnapshot {
+    pub available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fusion: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update_interval_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stillness_confidence: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub motion_g: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub motion_fast_g: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub angular_speed_dps: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub linear_speed_mps: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dr_confidence: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_moving: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_still: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accel_gyro_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub magnetometer_source: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -247,7 +300,8 @@ pub struct DeviceRuntimeSnapshot {
 )]
 pub async fn runtime(State(state): State<crate::http::AppState>) -> ApiResult<impl axum::response::IntoResponse> {
     let platform = detect_platform_identity();
-    let sensors_available = state.ensure_sensors().await.is_some();
+    let sensors = state.ensure_sensors().await;
+    let sensors_available = sensors.is_some();
     let updater_available = state.updater.lock().await.is_some();
     let health = crate::http::health::build_health_payload();
     let streams = crate::http::health::build_runtime_streams_payload(&state).await;
@@ -261,6 +315,38 @@ pub async fn runtime(State(state): State<crate::http::AppState>) -> ApiResult<im
     };
     let resource_guard = state.services.runtime.resource_guard().snapshot();
     let engine_ipc = map_engine_ipc_snapshot(state.engine.observability_snapshot());
+    let localization = LocalizationObservabilitySnapshot {
+        solve_cache: state.services.runtime.localization_solve_cache().snapshot().await,
+        sample_refresh: crate::http::localization::sources::localization_stream_sample_refresh_snapshot(),
+    };
+    let nt4 = Nt4ObservabilitySnapshot { pool: crate::nt4::pool().snapshot().await, bridge: crate::nt4::bridge::snapshot() };
+    let imu = match sensors {
+        Some(conn) => match conn.sensor_snapshot_typed(SensorScope::Device).await {
+            Ok(Ok(snapshot)) => match snapshot.get(&helios_peripherals::dto::SensorKind::Imu) {
+                Some(SensorReading::Imu(imu)) => ImuRuntimeObservabilitySnapshot {
+                    available: true,
+                    updated_at: imu.updated_at.map(|value| value.to_rfc3339()),
+                    fusion: imu.fusion.map(|value| value.to_string()),
+                    update_interval_ms: imu.update_interval_ms,
+                    last_error: imu.last_error.clone(),
+                    stillness_confidence: imu.stillness_confidence,
+                    motion_g: imu.motion_g,
+                    motion_fast_g: imu.motion_fast_g,
+                    angular_speed_dps: imu.angular_speed_dps,
+                    linear_speed_mps: imu.linear_speed_mps,
+                    dr_confidence: imu.dr_confidence,
+                    is_moving: imu.is_moving,
+                    is_still: imu.is_still,
+                    accel_gyro_source: imu.sources.accel_gyro.clone(),
+                    magnetometer_source: imu.sources.magnetometer.clone(),
+                },
+                _ => ImuRuntimeObservabilitySnapshot { available: true, last_error: Some("IMU reading not present in sensor snapshot".into()), ..Default::default() },
+            },
+            Ok(Err(reason)) => ImuRuntimeObservabilitySnapshot { available: true, last_error: Some(reason), ..Default::default() },
+            Err(error) => ImuRuntimeObservabilitySnapshot { available: true, last_error: Some(error.to_string()), ..Default::default() },
+        },
+        None => ImuRuntimeObservabilitySnapshot::default(),
+    };
     let realtime_updates = state.updates.snapshot();
     let api_realtime = state.services.system.realtime_diagnostics().await;
     let mjpeg = state.services.streams.mjpeg_snapshot().await;
@@ -284,6 +370,9 @@ pub async fn runtime(State(state): State<crate::http::AppState>) -> ApiResult<im
             streams,
             os,
             engine_ipc,
+            localization,
+            nt4,
+            imu,
             realtime_updates,
             api_realtime,
             mjpeg,

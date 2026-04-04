@@ -52,6 +52,47 @@ pub struct ApiRealtimeDiagnostics {
 }
 
 #[derive(Debug, Clone, Default, Serialize, ToSchema)]
+pub struct LocalizationSolveCacheSnapshot {
+    pub entries: u64,
+    pub hits: u64,
+    pub misses: u64,
+    pub inserts: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, ToSchema)]
+pub struct LocalizationSampleRefreshSnapshot {
+    pub tracked_outputs: u64,
+    pub refresh_grants: u64,
+    pub throttled_requests: u64,
+    pub pruned_entries: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, ToSchema)]
+pub struct Nt4PoolObservabilitySnapshot {
+    pub client_slots: u64,
+    pub connected_clients: u64,
+    pub connect_attempts: u64,
+    pub connect_reuses: u64,
+    pub connect_successes: u64,
+    pub connect_failures: u64,
+    pub disconnects: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, ToSchema)]
+pub struct Nt4BridgeObservabilitySnapshot {
+    pub publish_cycles: u64,
+    pub publish_failures: u64,
+    pub reconnects: u64,
+    pub skipped_ticks: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_target: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_entry_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_publish_success_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, ToSchema)]
 pub struct ApiMediaCacheMetrics {
     pub imu_event_entries: u64,
     pub frame_timeline_entries: u64,

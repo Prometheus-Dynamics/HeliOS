@@ -2953,8 +2953,18 @@ dependencies = [
 name = "helios-daedalus-nt4-plugin"
 version = "1.0.0"
 dependencies = [
+ "base64 0.22.1",
  "daedalus-rs",
- "lib-nt4-plugin",
+ "lib-net",
+ "lib-runtime-policy",
+ "lib-schema-migration",
+ "nt_client",
+ "paste",
+ "rmpv",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -4123,24 +4133,6 @@ dependencies = [
  "quote",
  "serde_json",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "lib-nt4-plugin"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "daedalus-rs",
- "lib-net",
- "lib-schema-migration",
- "nt_client",
- "once_cell",
- "paste",
- "rmpv",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
 ]
 
 [[package]]

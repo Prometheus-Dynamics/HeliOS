@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::ipc::{UpdateStage, UpdaterEvent};
 use lib_runtime_policy::HELIOS_UPDATER_APPLY_POLICY;
+use lib_storage_layout::StorageLayoutManifest;
 use tokio::fs;
 use tokio::process::Command;
 use tokio::sync::{RwLock, broadcast::Sender};
@@ -17,8 +18,8 @@ use crate::config::UpdaterConfig;
 use crate::error::{Error, Result};
 use crate::state::ServiceState;
 use crate::util::{
-    BlockPartitionInfo, ProgressSender, SlotScheme, SlotSelection, StreamFlashOutcome, blockdev_size_bytes, decompress_if_needed, detect_compression_kind, ensure_directory,
-    flash_compressed_image_to_target, select_target_slot, sync_filesystem,
+    BlockPartitionInfo, ProgressSender, SlotScheme, SlotSelection, StreamFlashOutcome, available_bytes_for_path, blockdev_size_bytes, decompress_if_needed, detect_compression_kind,
+    detect_squashfs_partition_in_disk_image, ensure_directory, flash_compressed_image_to_target, inspect_adjacent_partition, inspect_block_partition, select_target_slot, sync_filesystem,
 };
 
 mod preflight;
@@ -29,10 +30,11 @@ mod sync;
 pub(crate) use preflight::preflight_staged_release;
 use progress::{publish_snapshot, start_apply_progress};
 pub(crate) use repartition::{clear_queued_repartition_resume, load_queued_repartition_resume};
+use repartition::{OfflineDataBorrowAssessment, assess_offline_data_borrow, queue_offline_data_borrow_repartition};
 pub(crate) use sync::purge_update_dirs;
 use sync::{
-    cleanup_source_media_after_apply, clear_completed_update_state, flash_image_to_target, relabel_target_filesystem, sync_boot_from_artifact, sync_boot_from_target, sync_persisted_state,
-    update_boot_markers, validate_bootable_squashfs_root,
+    cleanup_source_media_after_apply, clear_completed_update_state, flash_image_to_target, plan_squashfs_slot_resize, relabel_target_filesystem, sync_boot_from_artifact,
+    sync_boot_from_target, sync_persisted_state, update_boot_markers, validate_bootable_squashfs_root,
 };
 
 #[cfg(test)]
@@ -332,6 +334,9 @@ async fn apply_disk_image_release(
                 && !streamed
             {
                 let expanded_path = expanded_path.as_ref().ok_or_else(|| Error::InvalidState("expanded OTA image missing".into()))?;
+                if let Some(outcome) = maybe_queue_offline_data_borrow_apply(config, update_id, &metadata.manifest, &slot_selection, expanded_path).await? {
+                    return Ok(outcome);
+                }
                 info!(%update_id, target_slot = %slot_selection.target_slot, target_device = %slot_selection.target_device, "writing staged image");
                 flash_image_to_target(expanded_path, &slot_selection, config.data_dir(), Some(progress_sender.clone())).await?;
             }
@@ -404,6 +409,48 @@ async fn apply_disk_image_release(
     }
 
     Ok(BundleApplyOutcome::disk_image(!single_slot))
+}
+
+async fn maybe_queue_offline_data_borrow_apply(
+    config: &UpdaterConfig,
+    update_id: Uuid,
+    manifest: &crate::artifact::ReleaseManifest,
+    slot_selection: &SlotSelection,
+    expanded_path: &Path,
+) -> Result<Option<BundleApplyOutcome>> {
+    if slot_selection.scheme != SlotScheme::SquashfsAb {
+        return Ok(None);
+    }
+
+    let Some((_, image_size_bytes)) = detect_squashfs_partition_in_disk_image(expanded_path).await? else {
+        return Ok(None);
+    };
+    let Some(target_info) = inspect_block_partition(&slot_selection.target_device).await? else {
+        return Ok(None);
+    };
+    let next_partition = inspect_adjacent_partition(&slot_selection.target_device, 1).await?;
+    let data_dir_available_bytes = available_bytes_for_path(config.data_dir()).await?.unwrap_or(0);
+
+    let plan = plan_squashfs_slot_resize(&target_info, next_partition.as_ref(), image_size_bytes, data_dir_available_bytes);
+    let (required_growth_bytes, gap_after_bytes, additional_from_data_bytes) = match plan {
+        SquashfsSlotResizePlan::NeedsDataResize { required_growth_bytes, gap_after_bytes, additional_from_data_bytes, .. }
+        | SquashfsSlotResizePlan::ClearDataDir { required_growth_bytes, gap_after_bytes, additional_from_data_bytes, .. } => {
+            (required_growth_bytes, gap_after_bytes, additional_from_data_bytes)
+        }
+        _ => return Ok(None),
+    };
+
+    let layout = StorageLayoutManifest::load_system().map_err(|err| Error::InvalidState(err.to_string()))?;
+    let assessment =
+        assess_offline_data_borrow(config, &layout, manifest, &target_info, next_partition.as_ref(), required_growth_bytes, gap_after_bytes, additional_from_data_bytes);
+
+    match assessment {
+        OfflineDataBorrowAssessment::Supported(plan) => {
+            queue_offline_data_borrow_repartition(config, update_id, manifest, &layout, slot_selection, &plan).await?;
+            Ok(Some(BundleApplyOutcome::disk_image(false)))
+        }
+        _ => Ok(None),
+    }
 }
 
 fn ensure_artifacts_present(update_id: Uuid, metadata: &StagedMetadata) -> Result<()> {

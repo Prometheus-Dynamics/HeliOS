@@ -618,17 +618,25 @@ export class EngineStreamsService {
      */
     public static previewStream({
         id,
+        pipeline,
+        output,
     }: {
         /**
          * Stream ID
          */
         id: string,
+        pipeline?: string | null,
+        output?: string | null,
     }): CancelablePromise<any> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/streams/{id}/preview',
             path: {
                 'id': id,
+            },
+            query: {
+                'pipeline': pipeline,
+                'output': output,
             },
         });
     }

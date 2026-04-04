@@ -254,6 +254,7 @@ pub struct ImuFusionState {
     stillness_confident_time_seconds: f32,
     still_time_seconds: f32,
     relevel_time_seconds: f32,
+    still_yaw_anchor_deg: Option<f32>,
     initialized: bool,
 }
 
@@ -282,6 +283,7 @@ impl Default for ImuFusionState {
             stillness_confident_time_seconds: 0.0,
             still_time_seconds: 0.0,
             relevel_time_seconds: 0.0,
+            still_yaw_anchor_deg: None,
             initialized: false,
         }
     }

@@ -53,21 +53,22 @@ export class OtaService {
         });
     }
     /**
-     * @returns void
+     * @returns UpdateAckResponse Update staged
      * @throws ApiError
      */
     public static stageUpdate({
         requestBody,
     }: {
         requestBody: StageUpdateRequest,
-    }): CancelablePromise<void> {
+    }): CancelablePromise<UpdateAckResponse> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/ota/stage',
             body: requestBody,
             mediaType: 'application/json',
             errors: {
-                410: `Staging removed`,
+                400: `Invalid request`,
+                503: `Updater unavailable`,
             },
         });
     }

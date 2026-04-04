@@ -435,7 +435,7 @@ mod tests {
     }
 }
 
-pub(crate) fn find_backend_for_config<'a>(config: &CaptureConfig, devices: &'a [ProbedDevice]) -> Option<&'a ProbedBackend> {
+pub fn find_backend_for_config<'a>(config: &CaptureConfig, devices: &'a [ProbedDevice]) -> Option<&'a ProbedBackend> {
     find_device_backend_for_config(config, devices).map(|(_, backend)| backend)
 }
 

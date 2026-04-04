@@ -2,8 +2,10 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-export type CancelUpdateRequest = {
-    requested_by?: string | null;
-    update_id?: string | null;
+export type LocalizationSolveCacheSnapshot = {
+    entries: number;
+    hits: number;
+    inserts: number;
+    misses: number;
 };
 

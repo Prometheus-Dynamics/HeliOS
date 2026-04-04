@@ -606,9 +606,6 @@ needs_plugin_build() {
     helios-daedalus-ai-plugin)
       watch_paths+=("$ROOT_DIR/backend/src/libs/lib-ai")
       ;;
-    helios-daedalus-nt4-plugin)
-      watch_paths+=("$ROOT_DIR/backend/src/libs/lib-nt4-plugin")
-      ;;
     helios-daedalus-led-plugin)
       watch_paths+=("$ROOT_DIR/backend/src/libs/lib-led-plugin" "$ROOT_DIR/backend/src/libs/lib-led-animations")
       ;;

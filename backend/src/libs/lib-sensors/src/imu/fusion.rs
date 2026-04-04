@@ -271,6 +271,35 @@ pub(super) fn fuse_orientation_stateful(
         state.relevel_time_seconds = 0.0;
     }
 
+    // Without a magnetometer there is no absolute yaw reference, so post-stop gyro bias
+    // cleanup needs to happen aggressively once the normal bias-update gate considers the
+    // device still enough. Use a faster Z-axis path here instead of the stricter relevel
+    // gate so constant post-stop gyro bias does not just integrate into yaw drift.
+    if mag_for_fusion.is_none()
+        && bias_update_allowed
+        && gyro_stillness_norm <= STILL_GYRO_LP_MAX_DPS_FOR_BIAS
+    {
+        state.gyro_bias_deg_per_sec[2] =
+            lowpass_scalar(state.gyro_bias_deg_per_sec[2], gyro_deg_per_sec_raw[2], dt_seconds, NO_MAG_STILL_YAW_BIAS_TAU_SECONDS);
+    }
+
+    if mag_for_fusion.is_none()
+        && state.rotation_recovery_seconds > 0.0
+        && gyro_stillness_norm <= STILL_GYRO_LP_MAX_DPS_FOR_BIAS
+        && accel_mag_error <= STILL_ACCEL_MAG_ERROR_G
+        && motion_g <= STILL_LINEAR_ACCEL_LAX_G
+    {
+        let (_, _, yaw_current) = quat_to_euler_deg(fused_quat);
+        let yaw_anchor = state.still_yaw_anchor_deg.get_or_insert(yaw_current);
+        let (roll_current, pitch_current, _) = quat_to_euler_deg(fused_quat);
+        let target = euler_deg_to_quat(roll_current, pitch_current, *yaw_anchor);
+        let alpha = 1.0 - (-dt_seconds / NO_MAG_STILL_YAW_HOLD_TAU_SECONDS).exp();
+        fused_quat = quat_slerp(fused_quat, target, alpha);
+        state.quaternion = fused_quat;
+    } else {
+        state.still_yaw_anchor_deg = None;
+    }
+
     // "Still" output should reflect bias-corrected gyro (to avoid reporting motion due to a steady bias).
     let is_still = (gyro_lp_corrected_norm <= STILL_GYRO_LP_MAX_DPS && accel_mag_error <= STILL_ACCEL_MAG_ERROR_G && motion_g <= STILL_LINEAR_ACCEL_LAX_G)
         || (state.stillness_confidence_lp >= STILLNESS_CONFIDENCE_IS_STILL_MIN && confident_still);

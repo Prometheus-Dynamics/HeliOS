@@ -16,7 +16,6 @@ members = [
     "src/libs/lib-api/lib-transport",
     "src/libs/lib-lighting",
     "src/libs/lib-led-animations",
-    "src/libs/lib-nt4-plugin",
     "src/libs/lib-net",
     "src/libs/lib-math",
     "src/libs/lib-schema-migration",

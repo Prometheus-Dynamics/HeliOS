@@ -42,6 +42,8 @@ pub(super) const ACCEL_BIAS_MAX_G: f32 = 0.08;
 // device has a few dps of constant gyro offset (see `STILL_GYRO_LP_MAX_DPS_FOR_BIAS`).
 // After detecting motion, hold off bias updates briefly to avoid learning the deceleration tail.
 pub(super) const POST_MOTION_BIAS_HOLD_SECONDS: f32 = 0.20;
+pub(super) const NO_MAG_STILL_YAW_BIAS_TAU_SECONDS: f32 = 0.18;
+pub(super) const NO_MAG_STILL_YAW_HOLD_TAU_SECONDS: f32 = 0.10;
 pub(super) const GYRO_STILL_LP_TAU_SECONDS: f32 = 0.45;
 pub(super) const FAN_REJECT_ACCEL_LP_TAU_SECONDS: f32 = 0.75;
 pub(super) const STILL_LINEAR_ACCEL_LP_TAU_SECONDS: f32 = 0.28;

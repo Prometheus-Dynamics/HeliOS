@@ -8,18 +8,35 @@ pub(super) const LOCALIZATION_STREAM_SAMPLE_REFRESH_MS: u64 = 1_000;
 #[derive(Default)]
 struct LocalizationStreamSampleRefreshState {
     refreshed_at_ms: BTreeMap<String, u64>,
+    refresh_grants: u64,
+    throttled_requests: u64,
+    pruned_entries: u64,
 }
 
 impl LocalizationStreamSampleRefreshState {
     fn needs_refresh(&mut self, stream_id: Uuid, output_key: &str, now_ms: u64) -> bool {
         let key = localization_stream_sample_key(stream_id, output_key);
+        let before = self.refreshed_at_ms.len();
         self.refreshed_at_ms.retain(|_, refreshed_at_ms| now_ms.saturating_sub(*refreshed_at_ms) <= LOCALIZATION_STREAM_SAMPLE_REFRESH_MS.saturating_mul(8));
+        self.pruned_entries += before.saturating_sub(self.refreshed_at_ms.len()) as u64;
 
         let needs_refresh = self.refreshed_at_ms.get(&key).copied().map(|refreshed_at_ms| now_ms.saturating_sub(refreshed_at_ms) >= LOCALIZATION_STREAM_SAMPLE_REFRESH_MS).unwrap_or(true);
         if needs_refresh {
             self.refreshed_at_ms.insert(key, now_ms);
+            self.refresh_grants += 1;
+        } else {
+            self.throttled_requests += 1;
         }
         needs_refresh
+    }
+
+    fn snapshot(&self) -> crate::api_observability::LocalizationSampleRefreshSnapshot {
+        crate::api_observability::LocalizationSampleRefreshSnapshot {
+            tracked_outputs: self.refreshed_at_ms.len() as u64,
+            refresh_grants: self.refresh_grants,
+            throttled_requests: self.throttled_requests,
+            pruned_entries: self.pruned_entries,
+        }
     }
 }
 
@@ -38,6 +55,10 @@ fn now_ms() -> u64 {
 
 pub(super) fn localization_stream_sample_needs_refresh(stream_id: Uuid, output_key: &str) -> bool {
     localization_stream_sample_refreshes().lock().expect("localization stream sample refresh mutex poisoned").needs_refresh(stream_id, output_key, now_ms())
+}
+
+pub(crate) fn localization_stream_sample_refresh_snapshot() -> crate::api_observability::LocalizationSampleRefreshSnapshot {
+    localization_stream_sample_refreshes().lock().expect("localization stream sample refresh mutex poisoned").snapshot()
 }
 
 #[cfg(test)]

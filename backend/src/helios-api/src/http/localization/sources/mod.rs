@@ -6,6 +6,7 @@ mod sampling;
 
 pub(crate) use profile::fetch_profile_output;
 use profile_stack::ProfileResolveStack;
+pub(crate) use sample_refresh::localization_stream_sample_refresh_snapshot;
 pub(crate) use sampling::{fetch_peer_output, fetch_stream_output};
 
 use axum::{

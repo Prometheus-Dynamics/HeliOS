@@ -1,6 +1,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
+use lib_runtime_policy::HELIOS_TEAM_FILE_POLICY;
 use tokio::fs;
 use uuid::Uuid;
 
@@ -11,10 +12,7 @@ pub(crate) fn data_root_file(name: &str) -> PathBuf {
 }
 
 pub(crate) fn team_file_path() -> PathBuf {
-    match std::env::var_os("HELIOS_TEAM_FILE") {
-        Some(path) => PathBuf::from(path),
-        None => data_root_file("team"),
-    }
+    HELIOS_TEAM_FILE_POLICY.resolve()
 }
 
 pub(crate) async fn read_team_number() -> io::Result<Option<u32>> {

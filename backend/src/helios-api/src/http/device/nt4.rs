@@ -1,4 +1,5 @@
 use axum::{Json, http::StatusCode, response::IntoResponse};
+use lib_runtime_policy::HELIOS_NT4_SETTINGS_FILE_POLICY;
 use lib_schema_migration::{SyncSchemaPlan, normalize_to_current};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -66,10 +67,7 @@ fn parse_nt4_settings_file(bytes: &[u8]) -> Result<(StoredNt4SettingsFile, bool)
 }
 
 fn settings_path() -> PathBuf {
-    match std::env::var_os("HELIOS_NT4_SETTINGS_FILE") {
-        Some(path) => PathBuf::from(path),
-        None => persisted_files::data_root_file("nt4.json"),
-    }
+    HELIOS_NT4_SETTINGS_FILE_POLICY.resolve()
 }
 
 pub(crate) async fn load_settings() -> Nt4Settings {

@@ -82,6 +82,11 @@ impl Nt4ClientEntry {
 #[derive(Debug, Default)]
 pub struct Nt4ClientPool {
     clients: Arc<Mutex<HashMap<Nt4ClientKey, Nt4ClientSlot>>>,
+    connect_attempts: Arc<AtomicU64>,
+    connect_reuses: Arc<AtomicU64>,
+    connect_successes: Arc<AtomicU64>,
+    connect_failures: Arc<AtomicU64>,
+    disconnects: Arc<AtomicU64>,
 }
 
 #[derive(Debug)]
@@ -93,7 +98,14 @@ struct Nt4ClientSlot {
 
 impl Nt4ClientPool {
     pub fn new() -> Self {
-        Self { clients: Arc::new(Mutex::new(HashMap::new())) }
+        Self {
+            clients: Arc::new(Mutex::new(HashMap::new())),
+            connect_attempts: Arc::new(AtomicU64::new(0)),
+            connect_reuses: Arc::new(AtomicU64::new(0)),
+            connect_successes: Arc::new(AtomicU64::new(0)),
+            connect_failures: Arc::new(AtomicU64::new(0)),
+            disconnects: Arc::new(AtomicU64::new(0)),
+        }
     }
 
     pub async fn get_or_connect(&self, host: &str, port: u16, name: &str) -> Result<Arc<Nt4ClientEntry>, String> {
@@ -103,10 +115,12 @@ impl Nt4ClientPool {
         {
             let clients = self.clients.lock().await;
             if let Some(existing) = clients.get(&key) {
+                self.connect_reuses.fetch_add(1, Ordering::Relaxed);
                 return Ok(existing.entry.clone());
             }
         }
 
+        self.connect_attempts.fetch_add(1, Ordering::Relaxed);
         let id = NEXT_CLIENT_ID.fetch_add(1, Ordering::Relaxed);
         let ready = Arc::new(Notify::new());
 
@@ -126,6 +140,8 @@ impl Nt4ClientPool {
         let entry = Arc::new(Nt4ClientEntry { id, handle, ready, connected: AtomicBool::new(false) });
 
         let clients_cleanup = self.clients.clone();
+        let connect_successes = self.connect_successes.clone();
+        let connect_failures = self.connect_failures.clone();
         let key_cleanup = key.clone();
         let entry_cleanup = entry.clone();
         let connect_task = tokio::spawn(async move {
@@ -133,11 +149,15 @@ impl Nt4ClientPool {
                 .connect_setup(|_| {
                     entry_cleanup.connected.store(true, Ordering::Release);
                     entry_cleanup.ready.notify_waiters();
+                    connect_successes.fetch_add(1, Ordering::Relaxed);
                 })
                 .await;
 
             // Any exit path (disconnect / error) should mark the slot unhealthy so we retry next time.
             if connect_result.is_err() || entry_cleanup.connected.swap(false, Ordering::AcqRel) {
+                if connect_result.is_err() {
+                    connect_failures.fetch_add(1, Ordering::Relaxed);
+                }
                 entry_cleanup.ready.notify_waiters();
             }
 
@@ -163,9 +183,24 @@ impl Nt4ClientPool {
         };
         if let Some(slot) = slot {
             slot.connect_task.abort();
+            self.disconnects.fetch_add(1, Ordering::Relaxed);
             return Ok(true);
         }
         Ok(false)
+    }
+
+    pub async fn snapshot(&self) -> crate::api_observability::Nt4PoolObservabilitySnapshot {
+        let clients = self.clients.lock().await;
+        let connected_clients = clients.values().filter(|slot| slot.entry.connected.load(Ordering::Acquire)).count() as u64;
+        crate::api_observability::Nt4PoolObservabilitySnapshot {
+            client_slots: clients.len() as u64,
+            connected_clients,
+            connect_attempts: self.connect_attempts.load(Ordering::Relaxed),
+            connect_reuses: self.connect_reuses.load(Ordering::Relaxed),
+            connect_successes: self.connect_successes.load(Ordering::Relaxed),
+            connect_failures: self.connect_failures.load(Ordering::Relaxed),
+            disconnects: self.disconnects.load(Ordering::Relaxed),
+        }
     }
 }
 
