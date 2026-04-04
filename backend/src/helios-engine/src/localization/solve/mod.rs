@@ -18,12 +18,12 @@ use super::fetch::LocalizationSourceFetcher;
 use super::maps::FieldMapDocument;
 use super::math::PoseTransform;
 use super::solvers::{SolverContext, SolverRegistry};
-use super::sources::{fetch_source_samples_with_registry, SourceParserRegistry, SourceSample};
+use super::sources::{SourceParserRegistry, SourceSample, fetch_source_samples_with_registry};
 use super::types::{LocalizationSolveResponse, LocalizationSolveTimings, LocalizationSolverOutputs, LocalizationSolverResult, LocalizationSourceSampleStatus};
 use marker_map::marker_map_from_field_map;
 use postprocess::apply_profile_postprocessing;
 #[cfg(test)]
-use smoothing::{smooth_localization_pose, LocalizationPoseSmoothingInput};
+use smoothing::{LocalizationPoseSmoothingInput, smooth_localization_pose};
 use solver_scope::filter_solver_output_spaces_for_scope;
 
 #[derive(Debug, Clone)]
@@ -39,15 +39,34 @@ pub(super) struct TemporalPoseState {
 
 struct SolverTemporalRuntime {
     state: Mutex<HashMap<String, TemporalPoseState>>,
+    stale_after: std::time::Duration,
+    max_entries: usize,
 }
 
 fn solver_temporal_runtime() -> &'static SolverTemporalRuntime {
+    // Solver smoothing needs cross-solve memory, so this stays process-global, but the keyed map
+    // is explicitly pruned by age and total size so inactive profiles cannot accumulate forever.
     static RUNTIME: OnceLock<SolverTemporalRuntime> = OnceLock::new();
-    RUNTIME.get_or_init(|| SolverTemporalRuntime { state: Mutex::new(HashMap::new()) })
+    RUNTIME.get_or_init(|| SolverTemporalRuntime { state: Mutex::new(HashMap::new()), stale_after: std::time::Duration::from_secs(5), max_entries: 256 })
 }
 
 pub(super) fn solver_temporal_state() -> &'static Mutex<HashMap<String, TemporalPoseState>> {
     &solver_temporal_runtime().state
+}
+
+pub(super) fn prune_solver_temporal_state(state_store: &mut HashMap<String, TemporalPoseState>, now: Instant) {
+    let runtime = solver_temporal_runtime();
+    state_store.retain(|_, state| now.saturating_duration_since(state.updated_at) <= runtime.stale_after);
+    if state_store.len() <= runtime.max_entries {
+        return;
+    }
+
+    let remove_count = state_store.len().saturating_sub(runtime.max_entries);
+    let mut oldest = state_store.iter().map(|(key, state)| (state.updated_at, key.clone())).collect::<Vec<_>>();
+    oldest.sort_unstable_by_key(|(updated_at, _)| *updated_at);
+    for (_, key) in oldest.into_iter().take(remove_count) {
+        state_store.remove(&key);
+    }
 }
 
 #[cfg(test)]
@@ -55,6 +74,12 @@ pub(super) fn clear_solver_temporal_state() {
     if let Ok(mut map) = solver_temporal_state().lock() {
         map.clear();
     }
+}
+
+#[cfg(test)]
+pub(super) fn solver_temporal_runtime_limits() -> (std::time::Duration, usize) {
+    let runtime = solver_temporal_runtime();
+    (runtime.stale_after, runtime.max_entries)
 }
 
 pub async fn solve_localization<F: LocalizationSourceFetcher>(

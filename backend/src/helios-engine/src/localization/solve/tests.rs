@@ -5,7 +5,7 @@ use nalgebra::{Quaternion, UnitQuaternion};
 
 use super::*;
 use crate::localization::config::{LocalizationPoseSpace, LocalizationSolverConfig, LocalizationSolverMode, LocalizationSolverRuntimeTuningConfig, LocalizationTemporalStabilizationConfig};
-use crate::localization::math::{compose_transforms, PoseTransform};
+use crate::localization::math::{PoseTransform, compose_transforms};
 use crate::localization::types::{LocalizationPose, LocalizationQuaternion, LocalizationRotation, LocalizationSolverOutputs, LocalizationSolverPose, LocalizationSolverResult, LocalizationVector};
 
 fn dummy_pose(x: f64, y: f64, z: f64) -> LocalizationPose {
@@ -71,6 +71,18 @@ fn source_sample_with_tag_ids(tag_ids: &[u32]) -> SourceSample {
         poll_ms: 0.0,
         tag_size: None,
         error: None,
+    }
+}
+
+fn sample_temporal_state(updated_at: Instant) -> TemporalPoseState {
+    TemporalPoseState {
+        translation: nalgebra::Vector3::zeros(),
+        rotation: nalgebra::UnitQuaternion::identity(),
+        updated_at,
+        last_multi_tag_at: None,
+        last_tag_ids: Vec::new(),
+        reject_streak: 0,
+        first_reject_at: None,
     }
 }
 
@@ -911,4 +923,40 @@ fn temporal_stabilization_reanchors_after_persistent_single_tag_switch() {
     }
 
     assert!(latest.translation.x > 1.0, "persistent single-tag regime should eventually re-anchor, got {}", latest.translation.x);
+}
+
+#[test]
+fn solver_temporal_runtime_prunes_stale_entries_across_profiles() {
+    clear_temporal_state();
+    let (stale_after, _) = solver_temporal_runtime_limits();
+    let now = Instant::now();
+
+    let mut state = solver_temporal_state().lock().expect("solver temporal state lock poisoned");
+    state.insert("profile-a:solver:robot".into(), sample_temporal_state(now - stale_after - Duration::from_millis(1)));
+    state.insert("profile-b:solver:robot".into(), sample_temporal_state(now));
+
+    prune_solver_temporal_state(&mut state, now);
+    assert!(!state.contains_key("profile-a:solver:robot"));
+    assert!(state.contains_key("profile-b:solver:robot"));
+    drop(state);
+    clear_temporal_state();
+}
+
+#[test]
+fn solver_temporal_runtime_caps_entry_count_to_runtime_limit() {
+    clear_temporal_state();
+    let (_, max_entries) = solver_temporal_runtime_limits();
+    let now = Instant::now();
+
+    let mut state = solver_temporal_state().lock().expect("solver temporal state lock poisoned");
+    for idx in 0..(max_entries + 8) {
+        state.insert(format!("profile:solver:{idx}"), sample_temporal_state(now - Duration::from_millis((max_entries + 8 - idx) as u64)));
+    }
+
+    prune_solver_temporal_state(&mut state, now);
+    assert_eq!(state.len(), max_entries);
+    assert!(!state.contains_key("profile:solver:0"));
+    assert!(state.contains_key(&format!("profile:solver:{}", max_entries + 7)));
+    drop(state);
+    clear_temporal_state();
 }

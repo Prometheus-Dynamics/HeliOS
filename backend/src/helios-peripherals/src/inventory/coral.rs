@@ -14,14 +14,67 @@ use crate::ipc::{FirmwareUpdate, FirmwareUpdateStatus, SensorEvent};
 
 use super::coral_diagnostics::{diagnostics_to_json_value, find_device_diagnostics};
 
-fn flash_in_flight() -> &'static Mutex<HashSet<String>> {
-    static IN_FLIGHT: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-    IN_FLIGHT.get_or_init(|| Mutex::new(HashSet::new()))
+#[derive(Debug, Clone)]
+struct CoralFlashCompletionRecord {
+    completion_key: String,
 }
 
-fn flash_completion_sent() -> &'static Mutex<HashMap<String, String>> {
-    static SENT: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
-    SENT.get_or_init(|| Mutex::new(HashMap::new()))
+struct CoralFlashRuntime {
+    in_flight: Mutex<HashSet<String>>,
+    completion_sent: Mutex<HashMap<String, CoralFlashCompletionRecord>>,
+}
+
+impl CoralFlashRuntime {
+    async fn try_start(&self, identifier: &str) -> bool {
+        let mut in_flight = self.in_flight.lock().await;
+        if in_flight.contains(identifier) {
+            false
+        } else {
+            in_flight.insert(identifier.to_string());
+            true
+        }
+    }
+
+    async fn finish(&self, identifier: &str, completion_key: String) {
+        self.completion_sent.lock().await.insert(identifier.to_string(), CoralFlashCompletionRecord { completion_key });
+        self.in_flight.lock().await.remove(identifier);
+    }
+
+    async fn should_emit_completion(&self, identifier: &str, completion_key: &str) -> bool {
+        let mut sent = self.completion_sent.lock().await;
+        match sent.get(identifier) {
+            Some(prev) if prev.completion_key == completion_key => false,
+            _ => {
+                sent.insert(identifier.to_string(), CoralFlashCompletionRecord { completion_key: completion_key.to_string() });
+                true
+            }
+        }
+    }
+
+    async fn prune_completed(&self, active_ids: &HashSet<String>) {
+        self.completion_sent.lock().await.retain(|identifier, _| active_ids.contains(identifier));
+    }
+
+    #[cfg(test)]
+    async fn reset_for_tests(&self) {
+        self.in_flight.lock().await.clear();
+        self.completion_sent.lock().await.clear();
+    }
+
+    #[cfg(test)]
+    async fn snapshot_for_tests(&self) -> (HashSet<String>, HashMap<String, String>) {
+        let in_flight = self.in_flight.lock().await.clone();
+        let completion_sent = self.completion_sent.lock().await.iter().map(|(identifier, record)| (identifier.clone(), record.completion_key.clone())).collect();
+        (in_flight, completion_sent)
+    }
+}
+
+fn coral_flash_runtime() -> &'static CoralFlashRuntime {
+    // Inventory refreshes are periodic, but firmware flash tasks outlive a single poll. Keep one
+    // explicit runtime owner so in-flight dedupe spans polls while completion records stay bounded
+    // to currently enumerated devices via `prune_completed`.
+    static RUNTIME: OnceLock<CoralFlashRuntime> = OnceLock::new();
+    RUNTIME.get_or_init(|| CoralFlashRuntime { in_flight: Mutex::new(HashSet::new()), completion_sent: Mutex::new(HashMap::new()) })
 }
 
 pub(crate) async fn build_coral_descriptors(store: &Arc<Mutex<SensorConfigStore>>, event_sender: Option<broadcast::Sender<SensorEvent>>) -> Vec<SensorDescriptor> {
@@ -44,6 +97,7 @@ pub(crate) async fn build_coral_descriptors(store: &Arc<Mutex<SensorConfigStore>
     };
 
     if snapshot.devices.is_empty() {
+        coral_flash_runtime().prune_completed(&HashSet::new()).await;
         return Vec::new();
     }
 
@@ -58,6 +112,7 @@ pub(crate) async fn build_coral_descriptors(store: &Arc<Mutex<SensorConfigStore>
     let mut ordinal_tracker: BTreeMap<String, usize> = BTreeMap::new();
     let mut descriptors = Vec::new();
     let mut store_dirty = false;
+    let mut active_identifiers = HashSet::new();
 
     for (device, base_identifier) in device_entries.into_iter() {
         let count = base_counts.get(&base_identifier).copied().unwrap_or(1);
@@ -87,6 +142,7 @@ pub(crate) async fn build_coral_descriptors(store: &Arc<Mutex<SensorConfigStore>
         store_dirty |= default_dirty;
 
         let identifier_key = identifier.to_string();
+        active_identifiers.insert(identifier_key.clone());
         let final_overrides = overrides.clone();
         if cfg.auto_flash
             && let Some(desired_fw) = overrides.firmware.clone()
@@ -95,15 +151,7 @@ pub(crate) async fn build_coral_descriptors(store: &Arc<Mutex<SensorConfigStore>
             let prev_flashed = overrides.last_flashed_firmware.clone();
             let needs_flash = device.bootloader || overrides.last_flashed_firmware.as_deref().is_some_and(|last| last != desired_fw.as_str());
             if needs_flash {
-                let should_spawn = {
-                    let mut in_flight = flash_in_flight().lock().await;
-                    if in_flight.contains(&identifier_key) {
-                        false
-                    } else {
-                        in_flight.insert(identifier_key.clone());
-                        true
-                    }
-                };
+                let should_spawn = coral_flash_runtime().try_start(&identifier_key).await;
 
                 if should_spawn {
                     let progress_tick_ms = cfg.flash_progress_tick_ms;
@@ -190,26 +238,13 @@ pub(crate) async fn build_coral_descriptors(store: &Arc<Mutex<SensorConfigStore>
                             let _ = sender.send(SensorEvent::FirmwareUpdate { update });
                         }
 
-                        let mut sent = flash_completion_sent().lock().await;
-                        let key = if last_error_snapshot.is_some() { format!("{}::failed", desired_fw_label) } else { format!("{}::complete", desired_fw_label) };
-                        sent.insert(identifier_key.clone(), key);
-
-                        let mut in_flight = flash_in_flight().lock().await;
-                        in_flight.remove(&in_flight_key);
+                        let completion_key = if last_error_snapshot.is_some() { format!("{}::failed", desired_fw_label) } else { format!("{}::complete", desired_fw_label) };
+                        coral_flash_runtime().finish(&in_flight_key, completion_key).await;
                     });
                 }
             } else if let Some(sender) = event_sender.as_ref() {
                 let completion_key = if overrides.last_error.is_some() { format!("{}::failed", desired_fw_label) } else { format!("{}::complete", desired_fw_label) };
-                let should_notify = {
-                    let mut sent = flash_completion_sent().lock().await;
-                    match sent.get(&identifier_key) {
-                        Some(prev) if prev == &completion_key => false,
-                        _ => {
-                            sent.insert(identifier_key.clone(), completion_key.clone());
-                            true
-                        }
-                    }
-                };
+                let should_notify = coral_flash_runtime().should_emit_completion(&identifier_key, &completion_key).await;
                 if should_notify {
                     let status = if overrides.last_error.is_some() { FirmwareUpdateStatus::Failed } else { FirmwareUpdateStatus::Complete };
                     let detail = if overrides.last_error.is_some() { "Firmware update failed".to_string() } else { "Firmware already active".to_string() };
@@ -245,6 +280,8 @@ pub(crate) async fn build_coral_descriptors(store: &Arc<Mutex<SensorConfigStore>
             telemetry,
         ));
     }
+
+    coral_flash_runtime().prune_completed(&active_identifiers).await;
 
     if store_dirty {
         let guard = store.lock().await;
@@ -440,5 +477,53 @@ fn descriptor_from_coral(
         metadata: Some(JsonData::from_value(&JsonValue::Object(metadata))),
         stream_id: None,
         value: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::coral_flash_runtime;
+    use std::collections::HashSet;
+    use std::sync::{Mutex, OnceLock};
+
+    fn test_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().expect("coral flash test lock poisoned")
+    }
+
+    #[tokio::test]
+    async fn coral_flash_runtime_deduplicates_in_flight_starts() {
+        let _guard = test_lock();
+        coral_flash_runtime().reset_for_tests().await;
+        assert!(coral_flash_runtime().try_start("dev0").await);
+        assert!(!coral_flash_runtime().try_start("dev0").await);
+        coral_flash_runtime().finish("dev0", "standard::complete".into()).await;
+        assert!(coral_flash_runtime().try_start("dev0").await);
+        coral_flash_runtime().reset_for_tests().await;
+    }
+
+    #[tokio::test]
+    async fn coral_flash_runtime_deduplicates_completion_notifications() {
+        let _guard = test_lock();
+        coral_flash_runtime().reset_for_tests().await;
+        assert!(coral_flash_runtime().should_emit_completion("dev0", "standard::complete").await);
+        assert!(!coral_flash_runtime().should_emit_completion("dev0", "standard::complete").await);
+        assert!(coral_flash_runtime().should_emit_completion("dev0", "max::complete").await);
+        coral_flash_runtime().reset_for_tests().await;
+    }
+
+    #[tokio::test]
+    async fn coral_flash_runtime_prunes_completed_entries_for_missing_devices() {
+        let _guard = test_lock();
+        coral_flash_runtime().reset_for_tests().await;
+        coral_flash_runtime().finish("dev0", "standard::complete".into()).await;
+        coral_flash_runtime().finish("dev1", "max::failed".into()).await;
+        coral_flash_runtime().prune_completed(&HashSet::from([String::from("dev1")])).await;
+
+        let (in_flight, completions) = coral_flash_runtime().snapshot_for_tests().await;
+        assert!(in_flight.is_empty());
+        assert!(!completions.contains_key("dev0"));
+        assert_eq!(completions.get("dev1").map(String::as_str), Some("max::failed"));
+        coral_flash_runtime().reset_for_tests().await;
     }
 }

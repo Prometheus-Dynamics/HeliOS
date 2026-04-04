@@ -4,7 +4,7 @@ use nalgebra::{Quaternion, UnitQuaternion};
 
 use crate::localization::config::{LocalizationFieldOriginMode, LocalizationProfile};
 use crate::localization::maps::FieldMapDocument;
-use crate::localization::math::{compose_transforms, invert_transform, PoseTransform};
+use crate::localization::math::{PoseTransform, compose_transforms, invert_transform};
 use crate::localization::types::{LocalizationPose, LocalizationSolverOutputs, LocalizationSolverResult};
 
 use super::smoothing::{apply_temporal_pose_stabilization, localization_pose_components, update_localization_pose};

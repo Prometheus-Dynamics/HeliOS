@@ -1,12 +1,12 @@
+use daedalus::PluginLibrary;
 use daedalus::data::model::Value as DaedalusValue;
 use daedalus::ffi::{FFI_VERSION, PLUGIN_ABI_VERSION};
 use daedalus::planner::Graph;
 use daedalus::registry::store::NodeDescriptorBuilder;
 use daedalus::runtime::handler_registry::HandlerRegistry as DaedalusHandlers;
 use daedalus::runtime::host_bridge::HostBridgeManager as DaedalusBridgeManager;
-use daedalus::runtime::host_bridge::{bridge_handler, HOST_BRIDGE_META_KEY};
+use daedalus::runtime::host_bridge::{HOST_BRIDGE_META_KEY, bridge_handler};
 use daedalus::runtime::plugins::PluginRegistry;
-use daedalus::PluginLibrary;
 use lib_runtime_policy::HELIOS_DAEDALUS_RUNTIME_POLICY;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -163,6 +163,13 @@ fn dynamic_plugin_runtime() -> &'static DynamicPluginRuntime {
     // namespaces are visible for the rest of the process.
     static RUNTIME: OnceLock<DynamicPluginRuntime> = OnceLock::new();
     RUNTIME.get_or_init(|| DynamicPluginRuntime { cache: Mutex::new(DynamicPluginCache::default()) })
+}
+
+#[cfg(test)]
+fn reset_dynamic_plugin_runtime_for_tests() {
+    if let Ok(mut guard) = dynamic_plugin_runtime().cache.lock() {
+        *guard = DynamicPluginCache::default();
+    }
 }
 
 fn current_disabled_plugins() -> BTreeMap<String, PathBuf> {
@@ -410,4 +417,55 @@ fn install_typed_host_output(registry: &mut PluginRegistry, manager: DaedalusBri
     let mut handler = bridge_handler(manager);
     registry.handlers.on_stateful(&qualified_id, move |node, ctx, io| handler(node, ctx, io));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{plugin_diagnostics, reset_dynamic_plugin_runtime_for_tests};
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().expect("env lock poisoned")
+    }
+
+    #[allow(unsafe_code)]
+    fn set_env_var<K: AsRef<std::ffi::OsStr>, V: AsRef<std::ffi::OsStr>>(key: K, value: V) {
+        unsafe {
+            std::env::set_var(key, value);
+        }
+    }
+
+    #[allow(unsafe_code)]
+    fn remove_env_var<K: AsRef<std::ffi::OsStr>>(key: K) {
+        unsafe {
+            std::env::remove_var(key);
+        }
+    }
+
+    #[test]
+    fn plugin_diagnostics_refreshes_disabled_plugin_state_for_current_dirs() {
+        let _guard = env_lock();
+        let dir_a = tempfile::tempdir().expect("tempdir a");
+        let dir_b = tempfile::tempdir().expect("tempdir b");
+        std::fs::write(dir_a.path().join("helios_a.so.disabled"), b"").expect("write disabled plugin a");
+        std::fs::write(dir_b.path().join("helios_b.so.disabled"), b"").expect("write disabled plugin b");
+
+        set_env_var("HELIOS_DAEDALUS_PLUGIN_DIR", dir_a.path());
+        remove_env_var("HELIOS_DAEDALUS_PLUGIN_DIRS");
+        reset_dynamic_plugin_runtime_for_tests();
+
+        let first = plugin_diagnostics();
+        assert!(first.iter().any(|diag| diag.filename == "helios_a.so" && diag.status == "disabled"));
+        assert!(!first.iter().any(|diag| diag.filename == "helios_b.so"));
+
+        set_env_var("HELIOS_DAEDALUS_PLUGIN_DIR", dir_b.path());
+        let second = plugin_diagnostics();
+        assert!(!second.iter().any(|diag| diag.filename == "helios_a.so"));
+        assert!(second.iter().any(|diag| diag.filename == "helios_b.so" && diag.status == "disabled"));
+
+        remove_env_var("HELIOS_DAEDALUS_PLUGIN_DIR");
+        remove_env_var("HELIOS_DAEDALUS_PLUGIN_DIRS");
+        reset_dynamic_plugin_runtime_for_tests();
+    }
 }

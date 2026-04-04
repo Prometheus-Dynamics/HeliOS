@@ -6,11 +6,10 @@ use nalgebra::{Quaternion, UnitQuaternion};
 use crate::localization::config::{LocalizationProfile, LocalizationSolverRuntimeTuningConfig, LocalizationTemporalStabilizationConfig};
 use crate::localization::types::{LocalizationPose, LocalizationSolverOutputs, LocalizationSolverResult};
 
-use super::{solver_temporal_state, TemporalPoseState};
+use super::{TemporalPoseState, prune_solver_temporal_state, solver_temporal_state};
 
 pub(super) fn apply_temporal_pose_stabilization(profile: &LocalizationProfile, solver_results: &mut [LocalizationSolverResult]) {
     let now = Instant::now();
-    let stale_after = Duration::from_secs(5);
     let profile_prefix = format!("{}:", profile.id);
 
     let mut solver_settings = HashMap::new();
@@ -50,12 +49,7 @@ pub(super) fn apply_temporal_pose_stabilization(profile: &LocalizationProfile, s
         }
     }
 
-    state_store.retain(|key, state| {
-        if !key.starts_with(&profile_prefix) {
-            return true;
-        }
-        now.saturating_duration_since(state.updated_at) <= stale_after
-    });
+    prune_solver_temporal_state(&mut state_store, now);
 }
 
 fn solver_tag_ids(outputs: &LocalizationSolverOutputs) -> Vec<u32> {

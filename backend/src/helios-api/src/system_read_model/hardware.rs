@@ -106,13 +106,25 @@ struct GpuBusyState {
     last: Option<GpuStatsSnapshot>,
 }
 
-fn read_gpu_busy_percent_from_stats() -> Option<f32> {
-    static STATE: OnceLock<StdMutex<GpuBusyState>> = OnceLock::new();
-    let snapshot = read_gpu_stats_snapshot()?;
-    let state = STATE.get_or_init(|| StdMutex::new(GpuBusyState::default()));
-    let mut guard = state.lock().ok()?;
+struct GpuBusyRuntime {
+    state: StdMutex<GpuBusyState>,
+}
 
-    let percent = match guard.last {
+fn gpu_busy_runtime() -> &'static GpuBusyRuntime {
+    // This fallback derives utilization from cumulative kernel counters, so it needs exactly one
+    // previous sample for the process. Keep that singleton explicit and bounded to one snapshot.
+    static RUNTIME: OnceLock<GpuBusyRuntime> = OnceLock::new();
+    RUNTIME.get_or_init(|| GpuBusyRuntime { state: StdMutex::new(GpuBusyState::default()) })
+}
+
+fn read_gpu_busy_percent_from_stats() -> Option<f32> {
+    let snapshot = read_gpu_stats_snapshot()?;
+    let mut guard = gpu_busy_runtime().state.lock().ok()?;
+    Some(update_gpu_busy_state(&mut guard, snapshot))
+}
+
+fn update_gpu_busy_state(state: &mut GpuBusyState, snapshot: GpuStatsSnapshot) -> f32 {
+    let percent = match state.last {
         None => 0.0,
         Some(prev) => {
             let dt = snapshot.timestamp.saturating_sub(prev.timestamp);
@@ -121,8 +133,15 @@ fn read_gpu_busy_percent_from_stats() -> Option<f32> {
         }
     };
 
-    guard.last = Some(snapshot);
-    Some(percent)
+    state.last = Some(snapshot);
+    percent
+}
+
+#[cfg(test)]
+fn reset_gpu_busy_runtime_for_tests() {
+    if let Ok(mut guard) = gpu_busy_runtime().state.lock() {
+        *guard = GpuBusyState::default();
+    }
 }
 
 fn read_gpu_stats_snapshot() -> Option<GpuStatsSnapshot> {
@@ -296,5 +315,21 @@ mod tests {
         let snapshot = parse_gpu_stats_file(tmp.path()).expect("snapshot");
         assert_eq!(snapshot.timestamp, 20);
         assert_eq!(snapshot.jobs, 6);
+    }
+
+    #[test]
+    fn gpu_busy_runtime_returns_zero_for_first_sample() {
+        reset_gpu_busy_runtime_for_tests();
+        let mut state = GpuBusyState::default();
+        assert_eq!(update_gpu_busy_state(&mut state, GpuStatsSnapshot { timestamp: 10, jobs: 5 }), 0.0);
+    }
+
+    #[test]
+    fn gpu_busy_runtime_reports_busy_only_when_jobs_advance() {
+        reset_gpu_busy_runtime_for_tests();
+        let mut state = GpuBusyState::default();
+        assert_eq!(update_gpu_busy_state(&mut state, GpuStatsSnapshot { timestamp: 10, jobs: 5 }), 0.0);
+        assert_eq!(update_gpu_busy_state(&mut state, GpuStatsSnapshot { timestamp: 20, jobs: 8 }), 100.0);
+        assert_eq!(update_gpu_busy_state(&mut state, GpuStatsSnapshot { timestamp: 30, jobs: 8 }), 0.0);
     }
 }
