@@ -148,12 +148,7 @@ pub(crate) fn inject_pipeline_alias_metadata(graph: &mut serde_json::Value, name
 }
 
 pub(super) fn pipeline_graph_alias(graph: &serde_json::Value) -> Option<&str> {
-    graph
-        .get("metadata")
-        .and_then(|meta| meta.as_object())
-        .and_then(|meta| meta.get("helios.pipeline.alias").and_then(|v| v.as_str()))
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
+    graph.get("metadata").and_then(|meta| meta.as_object()).and_then(|meta| meta.get("helios.pipeline.alias").and_then(|v| v.as_str())).map(str::trim).filter(|v| !v.is_empty())
 }
 
 pub(crate) fn normalize_graph_node_ids(graph: &mut daedalus::planner::Graph) {

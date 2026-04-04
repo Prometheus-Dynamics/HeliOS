@@ -40,7 +40,7 @@ pub(crate) fn sanitize_segment(raw: &str, fallback: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{META_PIPELINE_ALIAS, pipeline_alias_from_graph};
+    use super::{pipeline_alias_from_graph, META_PIPELINE_ALIAS};
     use serde_json::json;
 
     #[test]
