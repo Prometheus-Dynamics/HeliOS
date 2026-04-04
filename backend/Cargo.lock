@@ -4149,6 +4149,8 @@ dependencies = [
  "lib-schema-migration",
  "serde",
  "serde_json",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]

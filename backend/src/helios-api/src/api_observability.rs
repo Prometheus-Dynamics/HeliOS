@@ -102,6 +102,21 @@ pub struct Nt4BridgeObservabilitySnapshot {
 }
 
 #[derive(Debug, Clone, Default, Serialize, ToSchema)]
+pub struct Nt4SettingsCacheObservabilitySnapshot {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_modified_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_loaded_bytes: Option<u64>,
+    pub hits: u64,
+    pub misses: u64,
+    pub refreshes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, ToSchema)]
 pub struct ApiMediaCacheMetrics {
     pub imu_event_entries: u64,
     pub frame_timeline_entries: u64,

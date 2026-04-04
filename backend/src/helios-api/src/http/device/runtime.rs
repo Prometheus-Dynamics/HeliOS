@@ -1,6 +1,6 @@
 use crate::api_observability::{
-    ApiRealtimeDiagnostics, LocalizationSampleRefreshSnapshot, LocalizationSolveCacheSnapshot, Nt4BridgeObservabilitySnapshot, Nt4PoolObservabilitySnapshot, RuntimeBroadcastSnapshot,
-    RuntimeLockRegistrySnapshot, RuntimeTopicBroadcastSnapshot,
+    ApiRealtimeDiagnostics, LocalizationSampleRefreshSnapshot, LocalizationSolveCacheSnapshot, Nt4BridgeObservabilitySnapshot, Nt4PoolObservabilitySnapshot, Nt4SettingsCacheObservabilitySnapshot,
+    RuntimeBroadcastSnapshot, RuntimeLockRegistrySnapshot, RuntimeTopicBroadcastSnapshot,
 };
 use axum::{Json, extract::State, http::StatusCode};
 use helios_peripherals::dto::SensorScope;
@@ -259,6 +259,7 @@ pub struct LocalizationObservabilitySnapshot {
 pub struct Nt4ObservabilitySnapshot {
     pub pool: Nt4PoolObservabilitySnapshot,
     pub bridge: Nt4BridgeObservabilitySnapshot,
+    pub settings_cache: Nt4SettingsCacheObservabilitySnapshot,
 }
 
 #[derive(Debug, Clone, Default, Serialize, ToSchema)]
@@ -330,7 +331,11 @@ pub async fn runtime(State(state): State<crate::http::AppState>) -> ApiResult<im
         solve_cache: state.services.runtime.localization_solve_cache().snapshot().await,
         sample_refresh: state.services.runtime.localization_sample_refresh().snapshot(),
     };
-    let nt4 = Nt4ObservabilitySnapshot { pool: state.services.runtime.nt4_pool().snapshot().await, bridge: crate::nt4::bridge::snapshot() };
+    let nt4 = Nt4ObservabilitySnapshot {
+        pool: state.services.runtime.nt4_pool().snapshot().await,
+        bridge: crate::nt4::bridge::snapshot(),
+        settings_cache: map_nt4_settings_cache_snapshot(lib_runtime_policy::nt4_settings_cache_snapshot()),
+    };
     let imu = match sensors {
         Some(conn) => match conn.sensor_snapshot_typed(SensorScope::Device).await {
             Ok(Ok(snapshot)) => match snapshot.get(&helios_peripherals::dto::SensorKind::Imu) {
@@ -531,14 +536,48 @@ fn map_engine_ipc_snapshot(snapshot: crate::ipc::engine::EngineConnectionObserva
     }
 }
 
+fn map_nt4_settings_cache_snapshot(snapshot: lib_runtime_policy::Nt4SettingsCacheObservabilitySnapshot) -> Nt4SettingsCacheObservabilitySnapshot {
+    Nt4SettingsCacheObservabilitySnapshot {
+        source_path: snapshot.source_path,
+        source_modified_ms: snapshot.source_modified_ms,
+        last_loaded_bytes: snapshot.last_loaded_bytes,
+        hits: snapshot.hits,
+        misses: snapshot.misses,
+        refreshes: snapshot.refreshes,
+        last_error: snapshot.last_error,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::PlatformFamilyPayload;
+    use super::{PlatformFamilyPayload, map_nt4_settings_cache_snapshot};
 
     #[test]
     fn platform_family_payload_matches_runtime_policy_family() {
         assert!(matches!(PlatformFamilyPayload::from(lib_runtime_policy::PlatformFamily::RaspberryPi), PlatformFamilyPayload::RaspberryPi));
         assert!(matches!(PlatformFamilyPayload::from(lib_runtime_policy::PlatformFamily::GenericLinux), PlatformFamilyPayload::GenericLinux));
         assert!(matches!(PlatformFamilyPayload::from(lib_runtime_policy::PlatformFamily::Unknown), PlatformFamilyPayload::Unknown));
+    }
+
+    #[test]
+    fn nt4_settings_cache_snapshot_mapping_preserves_fields() {
+        let snapshot = lib_runtime_policy::Nt4SettingsCacheObservabilitySnapshot {
+            source_path: Some("/var/lib/helios/nt4.json".into()),
+            source_modified_ms: Some(42),
+            last_loaded_bytes: Some(128),
+            hits: 3,
+            misses: 4,
+            refreshes: 5,
+            last_error: Some("bad json".into()),
+        };
+
+        let mapped = map_nt4_settings_cache_snapshot(snapshot);
+        assert_eq!(mapped.source_path.as_deref(), Some("/var/lib/helios/nt4.json"));
+        assert_eq!(mapped.source_modified_ms, Some(42));
+        assert_eq!(mapped.last_loaded_bytes, Some(128));
+        assert_eq!(mapped.hits, 3);
+        assert_eq!(mapped.misses, 4);
+        assert_eq!(mapped.refreshes, 5);
+        assert_eq!(mapped.last_error.as_deref(), Some("bad json"));
     }
 }
