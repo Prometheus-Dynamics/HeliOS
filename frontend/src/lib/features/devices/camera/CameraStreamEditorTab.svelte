@@ -16,11 +16,26 @@
   } from '$lib/api/streamEncoderSettings';
   import { cancelDebounce, scheduleDebounce, type DebounceHandle } from '$lib/utils/debounce';
   import { toaster } from '$lib';
-  import RangeBandSlider from '$lib/components/controls/RangeBandSlider.svelte';
   import StreamConfigPanel from './stream/StreamConfigPanel.svelte';
   import StreamManifestDetails from './stream/StreamManifestDetails.svelte';
   import StreamControls from './stream/StreamControls.svelte';
   import StreamPreviewPanel from './stream/StreamPreviewPanel.svelte';
+  import StreamOverlayControls from './stream/StreamOverlayControls.svelte';
+  import StreamEncoderSettingsModal from './stream/StreamEncoderSettingsModal.svelte';
+  import StreamMediaPickerModal from './stream/StreamMediaPickerModal.svelte';
+  import {
+    addMediaPickerSelectionState,
+    applyMediaPickerSelectionText,
+    buildMediaPickerSelection,
+    normalizeMediaName,
+    normalizeMediaPickerKind,
+    normalizeMediaPickerSort,
+    rangeSelectMediaPickerState,
+    selectAllVisibleMedia,
+    selectedMediaNamesFromText,
+    singleMediaPickerSelection,
+    toggleMediaPickerSelectionState
+  } from './stream/streamMediaPickerHelpers';
   import { SvelteSet } from 'svelte/reactivity';
   import { modeKey } from './page/cameraPageHelpers';
   import {
@@ -217,33 +232,10 @@
     mediaPickerSearchTimer = cancelDebounce(mediaPickerSearchTimer);
   });
 
-  const selectedMediaNames = $derived((() => {
-    const names = new SvelteSet<string>();
-    const lines = String(fileBackendPathsText ?? '').split('\n');
-    for (const line of lines) {
-      const name = normalizeMediaName(line);
-      if (name) names.add(name);
-    }
-    return Array.from(names);
-  })());
-
-  function normalizeMediaName(value: string): string {
-    const trimmed = String(value ?? '').trim();
-    if (!trimmed) return '';
-    const parts = trimmed.split('/');
-    return parts[parts.length - 1] ?? '';
-  }
-
-  function toMediaPath(name: string): string {
-    return `${MEDIA_ROOT}/${name}`;
-  }
+  const selectedMediaNames = $derived(selectedMediaNamesFromText(fileBackendPathsText ?? '', new SvelteSet<string>()));
 
   function hydrateMediaPickerSelection(): void {
-    const next: Record<string, boolean> = {};
-    selectedMediaNames.forEach((name) => {
-      next[name] = true;
-    });
-    mediaPickerSelected = next;
+    mediaPickerSelected = buildMediaPickerSelection(selectedMediaNames);
   }
 
   async function loadMediaPickerAssets(): Promise<void> {
@@ -278,54 +270,37 @@
   }
 
   function toggleMediaPickerSelection(name: string): void {
-    const key = normalizeMediaName(name);
-    if (!key) return;
-    const next = { ...mediaPickerSelected };
-    if (next[key]) delete next[key];
-    else next[key] = true;
-    mediaPickerSelected = next;
-    mediaPickerAnchorName = key;
+    const next = toggleMediaPickerSelectionState(mediaPickerSelected, name);
+    if (!next) return;
+    mediaPickerSelected = next.selected;
+    mediaPickerAnchorName = next.anchorName;
   }
 
   function setMediaPickerSelectionOnly(name: string): void {
-    const key = normalizeMediaName(name);
-    if (!key) return;
-    mediaPickerSelected = { [key]: true };
-    mediaPickerAnchorName = key;
+    const next = singleMediaPickerSelection(name);
+    if (!next) return;
+    mediaPickerSelected = next.selected;
+    mediaPickerAnchorName = next.anchorName;
   }
 
   function addMediaPickerSelection(name: string): void {
-    const key = normalizeMediaName(name);
-    if (!key) return;
-    if (mediaPickerSelected[key]) {
-      mediaPickerAnchorName = key;
-      return;
-    }
-    mediaPickerSelected = { ...mediaPickerSelected, [key]: true };
-    mediaPickerAnchorName = key;
+    const next = addMediaPickerSelectionState(mediaPickerSelected, name);
+    if (!next) return;
+    mediaPickerSelected = next.selected;
+    mediaPickerAnchorName = next.anchorName;
   }
 
   function rangeSelectMediaPicker(name: string, mode: 'replace' | 'add'): void {
-    const key = normalizeMediaName(name);
-    if (!key) return;
-    const anchor = mediaPickerAnchorName;
-    const list = mediaPickerAssets ?? [];
-    const toIndex = list.findIndex((asset) => normalizeMediaName(asset.name) === key);
-    const anchorIndex = anchor ? list.findIndex((asset) => normalizeMediaName(asset.name) === anchor) : -1;
-    if (toIndex < 0 || anchorIndex < 0) {
-      if (mode === 'replace') setMediaPickerSelectionOnly(key);
-      else addMediaPickerSelection(key);
-      return;
-    }
-    const start = Math.min(toIndex, anchorIndex);
-    const end = Math.max(toIndex, anchorIndex);
-    const next = mode === 'replace' ? {} : { ...mediaPickerSelected };
-    for (let i = start; i <= end; i += 1) {
-      const id = normalizeMediaName(list[i]?.name ?? '');
-      if (id) next[id] = true;
-    }
-    mediaPickerSelected = next;
-    mediaPickerAnchorName = key;
+    const next = rangeSelectMediaPickerState({
+      name,
+      mode,
+      anchorName: mediaPickerAnchorName,
+      assets: mediaPickerAssets ?? [],
+      selected: mediaPickerSelected
+    });
+    if (!next) return;
+    mediaPickerSelected = next.selected;
+    mediaPickerAnchorName = next.anchorName;
   }
 
   function handleMediaPickerItemClick(asset: MediaAsset, event: MouseEvent): void {
@@ -345,8 +320,7 @@
   }
 
   function applyMediaPickerSelection(): void {
-    const names = Object.keys(mediaPickerSelected).filter((key) => mediaPickerSelected[key]);
-    fileBackendPathsText = names.map((name) => toMediaPath(name)).join('\n');
+    fileBackendPathsText = applyMediaPickerSelectionText(mediaPickerSelected, MEDIA_ROOT);
     closeMediaPicker();
   }
 
@@ -356,12 +330,7 @@
   }
 
   function selectAllMediaPickerVisible(): void {
-    const next = { ...mediaPickerSelected };
-    for (const asset of mediaPickerAssets) {
-      const key = normalizeMediaName(asset.name);
-      if (key) next[key] = true;
-    }
-    mediaPickerSelected = next;
+    mediaPickerSelected = selectAllVisibleMedia(mediaPickerSelected, mediaPickerAssets);
   }
 
   function updateMediaPickerQuery(value: string): void {
@@ -377,17 +346,9 @@
   }
 
   function handleMediaPickerKindClick(option: string): void {
-    if (option === 'all') {
-      updateMediaPickerKind(option);
-      return;
-    }
-    if (!MEDIA_KIND_OPTIONS.includes(option as MediaAsset['kind'])) return;
-    updateMediaPickerKind(option as MediaAsset['kind']);
-  }
-
-  function mediaPickerKindLabel(option: string): string {
-    if (option === 'all') return 'All';
-    return mediaKindLabel(option as MediaAsset['kind']);
+    const normalized = normalizeMediaPickerKind(option);
+    if (!normalized) return;
+    updateMediaPickerKind(normalized);
   }
 
   function updateMediaPickerSort(value: 'name' | 'recent'): void {
@@ -398,8 +359,9 @@
   function handleMediaPickerSortChange(event: Event): void {
     const target = event.currentTarget;
     if (!(target instanceof HTMLSelectElement)) return;
-    if (target.value !== 'name' && target.value !== 'recent') return;
-    updateMediaPickerSort(target.value);
+    const normalized = normalizeMediaPickerSort(target.value);
+    if (!normalized) return;
+    updateMediaPickerSort(normalized);
   }
 
   function handleCameraAliasInput(value: string): void {
@@ -880,242 +842,34 @@
       onPreviewJpegQualityInput={handlePreviewJpegQualityInput}
       onApplyPreset={() => applyStreamPreset()}
     />
-    <details class="rounded border border-surface-800 bg-surface-950/40 p-4" open>
-      <summary class="cursor-pointer select-none text-sm text-surface-300">Crop</summary>
-      <div class="mt-3 space-y-3">
-        <p class="text-micro-tight text-surface-500">Normalized stream crop bounds (-1 to 1)</p>
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <label class="flex items-center gap-2 text-micro-tight text-surface-400">
-            <input
-              type="checkbox"
-              checked={Boolean(streamCropGuidesEnabled)}
-              onchange={(event) => (streamCropGuidesEnabled = event.currentTarget.checked)}
-            />
-            Show crop guides in preview
-          </label>
-          <div class="flex items-center gap-2">
-            {#if streamCropApplying}
-              <span class="text-micro-tight text-surface-500">Applying…</span>
-            {/if}
-            <button class="btn btn-3xs preset-tonal uppercase tracking-[0.3em]" type="button" onclick={resetStreamCrop}>
-              Full frame
-            </button>
-          </div>
-        </div>
-
-        <div class="space-y-4">
-          <div class="space-y-2">
-            <div class="flex items-center justify-between text-micro-tight uppercase tracking-[0.22em] text-surface-500">
-              <span>Horizontal (x)</span>
-              <span>{formatCropValue(normalizedStreamCrop[0])} to {formatCropValue(normalizedStreamCrop[1])}</span>
-            </div>
-            <div class="flex items-center gap-2">
-              <input
-                class="input h-9 w-24 text-xs"
-                type="number"
-                min={STREAM_CROP_MIN}
-                max={STREAM_CROP_MAX}
-                step={STREAM_CROP_STEP}
-                value={normalizedStreamCrop[0]}
-                oninput={(event) => updateStreamCropRange('x', 'min', Number(event.currentTarget.value))}
-                onchange={(event) => updateStreamCropRange('x', 'min', Number(event.currentTarget.value), true)}
-              />
-              <div class="flex-1">
-                <RangeBandSlider
-                  min={STREAM_CROP_MIN}
-                  max={STREAM_CROP_MAX}
-                  step={STREAM_CROP_STEP}
-                  valueMin={normalizedStreamCrop[0]}
-                  valueMax={normalizedStreamCrop[1]}
-                  gradient="var(--color-primary-500)"
-                  on:change={(event) => updateStreamCropBand('x', Number(event.detail.min), Number(event.detail.max))}
-                />
-              </div>
-              <input
-                class="input h-9 w-24 text-xs"
-                type="number"
-                min={STREAM_CROP_MIN}
-                max={STREAM_CROP_MAX}
-                step={STREAM_CROP_STEP}
-                value={normalizedStreamCrop[1]}
-                oninput={(event) => updateStreamCropRange('x', 'max', Number(event.currentTarget.value))}
-                onchange={(event) => updateStreamCropRange('x', 'max', Number(event.currentTarget.value), true)}
-              />
-            </div>
-          </div>
-
-          <div class="space-y-2">
-            <div class="flex items-center justify-between text-micro-tight uppercase tracking-[0.22em] text-surface-500">
-              <span>Vertical (y)</span>
-              <span>{formatCropValue(normalizedStreamCrop[2])} to {formatCropValue(normalizedStreamCrop[3])}</span>
-            </div>
-            <div class="flex items-center gap-2">
-              <input
-                class="input h-9 w-24 text-xs"
-                type="number"
-                min={STREAM_CROP_MIN}
-                max={STREAM_CROP_MAX}
-                step={STREAM_CROP_STEP}
-                value={normalizedStreamCrop[2]}
-                oninput={(event) => updateStreamCropRange('y', 'min', Number(event.currentTarget.value))}
-                onchange={(event) => updateStreamCropRange('y', 'min', Number(event.currentTarget.value), true)}
-              />
-              <div class="flex-1">
-                <RangeBandSlider
-                  min={STREAM_CROP_MIN}
-                  max={STREAM_CROP_MAX}
-                  step={STREAM_CROP_STEP}
-                  valueMin={normalizedStreamCrop[2]}
-                  valueMax={normalizedStreamCrop[3]}
-                  gradient="var(--color-primary-500)"
-                  on:change={(event) => updateStreamCropBand('y', Number(event.detail.min), Number(event.detail.max))}
-                />
-              </div>
-              <input
-                class="input h-9 w-24 text-xs"
-                type="number"
-                min={STREAM_CROP_MIN}
-                max={STREAM_CROP_MAX}
-                step={STREAM_CROP_STEP}
-                value={normalizedStreamCrop[3]}
-                oninput={(event) => updateStreamCropRange('y', 'max', Number(event.currentTarget.value))}
-                onchange={(event) => updateStreamCropRange('y', 'max', Number(event.currentTarget.value), true)}
-              />
-            </div>
-          </div>
-        </div>
-        {#if streamCropError}
-          <p class="text-xs text-error-300">{streamCropError}</p>
-        {/if}
-        {#if streamCropWarning}
-          <p class="text-xs text-amber-300">{streamCropWarning}</p>
-        {/if}
-      </div>
-    </details>
-
-    <details class="rounded border border-surface-800 bg-surface-950/40 p-4">
-      <summary class="cursor-pointer select-none text-sm text-surface-300">Crosshair</summary>
-      <div class="mt-3 space-y-3">
-        <p class="text-micro-tight text-surface-500">Normalized crosshair position (-1 to 1)</p>
-        <p class="text-micro-tight text-surface-500">Crosshair is rendered by the active pipeline graph on the stream output frame.</p>
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <label class="flex items-center gap-2 text-micro-tight text-surface-400">
-            <input
-              type="checkbox"
-              checked={Boolean(streamCrosshairEnabled)}
-              onchange={(event) => updateStreamCrosshairEnabled(event.currentTarget.checked)}
-            />
-            Draw crosshair in output
-          </label>
-          <div class="flex items-center gap-2">
-            {#if streamCrosshairApplying}
-              <span class="text-micro-tight text-surface-500">Applying…</span>
-            {/if}
-            <button class="btn btn-3xs preset-tonal uppercase tracking-[0.3em]" type="button" onclick={resetStreamCrosshair}>
-              Center
-            </button>
-          </div>
-        </div>
-        <div class="space-y-4">
-          <div class="space-y-2">
-            <div class="flex items-center justify-between text-micro-tight uppercase tracking-[0.22em] text-surface-500">
-              <span>Horizontal (x)</span>
-              <span>{formatCropValue(normalizedStreamCrosshair[0])}</span>
-            </div>
-            <div class="flex items-center gap-2">
-              <div class="flex-1">
-                <input
-                  class="h-2 w-full cursor-pointer accent-primary-500"
-                  type="range"
-                  min={STREAM_CROP_MIN}
-                  max={STREAM_CROP_MAX}
-                  step={STREAM_CROP_STEP}
-                  value={normalizedStreamCrosshair[0]}
-                  oninput={(event) => updateStreamCrosshair('x', Number(event.currentTarget.value))}
-                  onchange={(event) => updateStreamCrosshair('x', Number(event.currentTarget.value), true)}
-                />
-              </div>
-              <input
-                class="input h-9 w-24 text-xs"
-                type="number"
-                min={STREAM_CROP_MIN}
-                max={STREAM_CROP_MAX}
-                step={STREAM_CROP_STEP}
-                value={normalizedStreamCrosshair[0]}
-                oninput={(event) => updateStreamCrosshair('x', Number(event.currentTarget.value))}
-                onchange={(event) => updateStreamCrosshair('x', Number(event.currentTarget.value), true)}
-              />
-            </div>
-          </div>
-
-          <div class="space-y-2">
-            <div class="flex items-center justify-between text-micro-tight uppercase tracking-[0.22em] text-surface-500">
-              <span>Vertical (y)</span>
-              <span>{formatCropValue(normalizedStreamCrosshair[1])}</span>
-            </div>
-            <div class="flex items-center gap-2">
-              <div class="flex-1">
-                <input
-                  class="h-2 w-full cursor-pointer accent-primary-500"
-                  type="range"
-                  min={STREAM_CROP_MIN}
-                  max={STREAM_CROP_MAX}
-                  step={STREAM_CROP_STEP}
-                  value={normalizedStreamCrosshair[1]}
-                  oninput={(event) => updateStreamCrosshair('y', Number(event.currentTarget.value))}
-                  onchange={(event) => updateStreamCrosshair('y', Number(event.currentTarget.value), true)}
-                />
-              </div>
-              <input
-                class="input h-9 w-24 text-xs"
-                type="number"
-                min={STREAM_CROP_MIN}
-                max={STREAM_CROP_MAX}
-                step={STREAM_CROP_STEP}
-                value={normalizedStreamCrosshair[1]}
-                oninput={(event) => updateStreamCrosshair('y', Number(event.currentTarget.value))}
-                onchange={(event) => updateStreamCrosshair('y', Number(event.currentTarget.value), true)}
-              />
-            </div>
-          </div>
-        </div>
-
-        {#if streamCrosshairError}
-          <p class="text-xs text-error-300">{streamCrosshairError}</p>
-        {/if}
-        {#if streamCrosshairWarning}
-          <p class="text-xs text-amber-300">{streamCrosshairWarning}</p>
-        {/if}
-      </div>
-    </details>
-
-    <details class="rounded border border-surface-800 bg-surface-950/40 p-4" open>
-      <summary class="cursor-pointer select-none text-sm text-surface-300">Ordering</summary>
-      <div class="mt-3 space-y-3">
-        <p class="text-micro-tight text-surface-500">Order detections before downstream targeting/filtering.</p>
-        <div class="flex items-center justify-between gap-2">
-          <span class="text-micro-tight uppercase tracking-[0.22em] text-surface-500">Mode</span>
-          {#if streamOrderingApplying}
-            <span class="text-micro-tight text-surface-500">Applying…</span>
-          {/if}
-        </div>
-        <select
-          class="input h-10 w-full"
-          value={normalizedStreamOrderingMode}
-          onchange={(event) => updateStreamOrderingMode(event.currentTarget.value, true)}
-        >
-          {#each STREAM_ORDERING_MODES as option (option.value)}
-            <option value={option.value}>{option.label}</option>
-          {/each}
-        </select>
-        {#if streamOrderingError}
-          <p class="text-xs text-error-300">{streamOrderingError}</p>
-        {/if}
-        {#if streamOrderingWarning}
-          <p class="text-xs text-amber-300">{streamOrderingWarning}</p>
-        {/if}
-      </div>
-    </details>
+    <StreamOverlayControls
+      bind:streamCropGuidesEnabled={streamCropGuidesEnabled}
+      streamCropApplying={streamCropApplying}
+      streamCropError={streamCropError}
+      streamCropWarning={streamCropWarning}
+      normalizedStreamCrop={normalizedStreamCrop}
+      formatCropValue={formatCropValue}
+      updateStreamCropRange={updateStreamCropRange}
+      updateStreamCropBand={updateStreamCropBand}
+      resetStreamCrop={resetStreamCrop}
+      streamCrosshairEnabled={streamCrosshairEnabled}
+      streamCrosshairApplying={streamCrosshairApplying}
+      streamCrosshairError={streamCrosshairError}
+      streamCrosshairWarning={streamCrosshairWarning}
+      normalizedStreamCrosshair={normalizedStreamCrosshair}
+      updateStreamCrosshair={updateStreamCrosshair}
+      updateStreamCrosshairEnabled={updateStreamCrosshairEnabled}
+      resetStreamCrosshair={resetStreamCrosshair}
+      streamOrderingApplying={streamOrderingApplying}
+      streamOrderingError={streamOrderingError}
+      streamOrderingWarning={streamOrderingWarning}
+      normalizedStreamOrderingMode={normalizedStreamOrderingMode}
+      streamOrderingModes={STREAM_ORDERING_MODES}
+      updateStreamOrderingMode={updateStreamOrderingMode}
+      streamCropMin={STREAM_CROP_MIN}
+      streamCropMax={STREAM_CROP_MAX}
+      streamCropStep={STREAM_CROP_STEP}
+    />
   </div>
 
   <StreamPreviewPanel
@@ -1132,241 +886,37 @@
   />
 </div>
 
-{#if encoderSettingsOpen}
-  <div class="fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-4 py-6" role="dialog" aria-modal="true" aria-label="Encoder settings">
-    <div class="w-full max-w-2xl rounded-lg border border-surface-800 bg-surface-950 p-5 shadow-2xl">
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p class="text-2xs uppercase tracking-[0.3em] text-surface-500">Encoder settings</p>
-          <p class="mt-1 text-sm text-surface-300">{selectedEncoder?.name ?? 'Encoder'}</p>
-          <p class="text-xs text-surface-500">{encoderImpl ?? ''}</p>
-        </div>
-        <button class="btn btn-3xs preset-tonal uppercase tracking-[0.3em]" type="button" onclick={() => (encoderSettingsOpen = false)}>
-          Close
-        </button>
-      </div>
+<StreamEncoderSettingsModal
+  open={encoderSettingsOpen}
+  selectedEncoder={selectedEncoder}
+  encoderImpl={encoderImpl}
+  encoderSettings={encoderSettings}
+  selectedEncoderSettingsKind={selectedEncoderSettingsKind}
+  selectedEncoderDefaultsSummary={selectedEncoderDefaultsSummary}
+  parseSelectedResolution={parseSelectedResolution}
+  applyOutputScale={applyOutputScale}
+  onClose={() => (encoderSettingsOpen = false)}
+/>
 
-      {#if selectedEncoderDefaultsSummary}
-        <p class="mt-2 text-micro text-surface-500">{selectedEncoderDefaultsSummary}</p>
-      {/if}
-
-      <div class="mt-4 space-y-3">
-        {#if encoderSettingsSupportsQuality(selectedEncoderSettingsKind)}
-          <label class="text-sm">
-            <span class="text-2xs uppercase tracking-[0.3em] text-surface-500">Quality</span>
-            <input
-              class="mt-1 w-full border border-surface-700 bg-surface-900/70 px-3 py-2"
-              type="number"
-              min="1"
-              max="100"
-              step="1"
-              value={encoderSettings.quality ?? ''}
-              oninput={(e) => (encoderSettings.quality = Number(e.currentTarget.value) || null)}
-              placeholder="Auto"
-            />
-          </label>
-        {:else if encoderSettingsSupportsVideoControls(selectedEncoderSettingsKind)}
-          <div class="grid gap-3 md:grid-cols-3">
-            <label class="text-sm">
-              <span class="text-2xs uppercase tracking-[0.3em] text-surface-500">Bitrate (bps)</span>
-              <input
-                class="mt-1 w-full border border-surface-700 bg-surface-900/70 px-3 py-2"
-                type="number"
-                min="0"
-                step="100000"
-                value={encoderSettings.bitrate ?? ''}
-                oninput={(e) => (encoderSettings.bitrate = Number(e.currentTarget.value) || null)}
-                placeholder="4000000"
-              />
-            </label>
-            <label class="text-sm">
-              <span class="text-2xs uppercase tracking-[0.3em] text-surface-500">GOP</span>
-              <input
-                class="mt-1 w-full border border-surface-700 bg-surface-900/70 px-3 py-2"
-                type="number"
-                min="0"
-                step="1"
-                value={encoderSettings.gop ?? ''}
-                oninput={(e) => (encoderSettings.gop = Number(e.currentTarget.value) || null)}
-                placeholder="Auto"
-              />
-            </label>
-            <label class="text-sm">
-              <span class="text-2xs uppercase tracking-[0.3em] text-surface-500">Threads</span>
-              <input
-                class="mt-1 w-full border border-surface-700 bg-surface-900/70 px-3 py-2"
-                type="number"
-                min="0"
-                step="1"
-                value={encoderSettings.threadCount ?? ''}
-                oninput={(e) => (encoderSettings.threadCount = Number(e.currentTarget.value) || null)}
-                placeholder="Auto"
-              />
-            </label>
-          </div>
-          <div class="space-y-2">
-            <div class="flex flex-wrap items-center gap-2">
-              <span class="text-2xs uppercase tracking-[0.3em] text-surface-500">Output scale</span>
-              <button class="btn btn-3xs preset-tonal uppercase tracking-[0.3em]" type="button" onclick={() => applyOutputScale(1)}>1x</button>
-              <button class="btn btn-3xs preset-tonal uppercase tracking-[0.3em]" type="button" onclick={() => applyOutputScale(2)}>2x</button>
-              <button class="btn btn-3xs preset-tonal uppercase tracking-[0.3em]" type="button" onclick={() => applyOutputScale(3)}>3x</button>
-              <button class="btn btn-3xs preset-tonal uppercase tracking-[0.3em]" type="button" onclick={() => applyOutputScale(4)}>4x</button>
-            </div>
-            <p class="text-micro text-surface-500">
-              {#if parseSelectedResolution()}
-                Source {parseSelectedResolution()?.width}x{parseSelectedResolution()?.height} · 2x-4x is recommended for higher encode FPS.
-              {:else}
-                Select a stream resolution to enable scale presets.
-              {/if}
-            </p>
-          </div>
-
-          <div class="grid gap-3 md:grid-cols-2">
-            <label class="text-sm">
-              <span class="text-2xs uppercase tracking-[0.3em] text-surface-500">Output width</span>
-              <input
-                class="mt-1 w-full border border-surface-700 bg-surface-900/70 px-3 py-2"
-                type="number"
-                min="0"
-                step="1"
-                value={encoderSettings.outWidth ?? ''}
-                oninput={(e) => (encoderSettings.outWidth = Number(e.currentTarget.value) || null)}
-                placeholder="Match source"
-              />
-            </label>
-            <label class="text-sm">
-              <span class="text-2xs uppercase tracking-[0.3em] text-surface-500">Output height</span>
-              <input
-                class="mt-1 w-full border border-surface-700 bg-surface-900/70 px-3 py-2"
-                type="number"
-                min="0"
-                step="1"
-                value={encoderSettings.outHeight ?? ''}
-                oninput={(e) => (encoderSettings.outHeight = Number(e.currentTarget.value) || null)}
-                placeholder="Match source"
-              />
-            </label>
-          </div>
-        {/if}
-      </div>
-    </div>
-  </div>
-{/if}
-
-{#if mediaPickerOpen}
-  <div
-    class="fixed inset-0 z-50 flex items-center justify-center bg-surface-950/70 px-4"
-    role="dialog"
-    aria-modal="true"
-    onclick={(event) => {
-      if (event.target === event.currentTarget) closeMediaPicker();
-    }}
-    onkeydown={(event) => {
-      if (event.key === 'Escape') closeMediaPicker();
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
-        event.preventDefault();
-        selectAllMediaPickerVisible();
-      }
-    }}
-    tabindex="-1"
-  >
-    <div class="w-full max-w-5xl rounded border border-surface-800/70 bg-surface-950/95 p-6 text-sm text-surface-400 shadow-2xl max-h-[90vh] max-h-[90svh] max-h-[90dvh] overflow-y-auto">
-      <div class="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <p class="text-xs uppercase tracking-[0.3em] text-surface-500">Media library</p>
-          <p class="text-sm text-surface-300">{mediaPickerSelectedCount} selected</p>
-        </div>
-        <div class="flex gap-2">
-          <button class="btn btn-2xs preset-outline uppercase tracking-[0.3em]" type="button" onclick={closeMediaPicker}>
-            Cancel
-          </button>
-          <button class="btn btn-2xs preset-filled-primary-500 uppercase tracking-[0.3em]" type="button" onclick={applyMediaPickerSelection}>
-            Apply selection
-          </button>
-        </div>
-      </div>
-
-      <div class="mt-4 flex flex-wrap gap-3">
-        <input
-          class="input flex-1 min-w-[220px]"
-          type="search"
-          placeholder="Search media"
-          value={mediaPickerQuery}
-          oninput={(e) => updateMediaPickerQuery(e.currentTarget.value)}
-        />
-        <button class="btn btn-2xs preset-tonal uppercase tracking-[0.3em]" type="button" onclick={loadMediaPickerAssets}>
-          Refresh
-        </button>
-        <select
-          class="input w-40"
-          value={mediaPickerSort}
-          onchange={handleMediaPickerSortChange}
-        >
-          <option value="name">Sort: Name</option>
-          <option value="recent">Sort: Recent</option>
-        </select>
-        <button class="btn btn-2xs preset-outline uppercase tracking-[0.3em]" type="button" onclick={clearMediaPickerSelection}>
-          Clear
-        </button>
-        <button class="btn btn-2xs preset-tonal uppercase tracking-[0.3em]" type="button" onclick={selectAllMediaPickerVisible}>
-          Select all
-        </button>
-      </div>
-
-      <div class="mt-3 flex flex-wrap gap-2">
-        {#each ['all', ...MEDIA_KIND_OPTIONS] as option (option)}
-          <button
-            class={`btn btn-2xs uppercase tracking-[0.3em] ${
-              mediaPickerKind === option ? 'preset-filled-primary-500' : 'preset-tonal'
-            }`}
-            type="button"
-            onclick={() => handleMediaPickerKindClick(option)}
-          >
-            {mediaPickerKindLabel(option)}
-          </button>
-        {/each}
-      </div>
-
-      {#if mediaPickerLoading}
-        <div class="mt-6 text-sm text-surface-500">Loading media…</div>
-      {:else if mediaPickerError}
-        <div class="mt-6 text-sm text-error-200">{mediaPickerError}</div>
-      {:else if !mediaPickerAssets.length}
-        <div class="mt-6 text-sm text-surface-500">No media files found.</div>
-      {:else}
-        <div class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {#each mediaPickerAssets as asset (asset.id)}
-            {@const isSelected = Boolean(mediaPickerSelected[asset.name])}
-            <button
-              class={`flex items-center gap-3 rounded border px-3 py-2 text-left transition ${
-                isSelected ? 'border-primary-400 bg-primary-500/10' : 'border-surface-800/60 bg-surface-950/40 hover:border-primary-400/60'
-              }`}
-              type="button"
-              onclick={(event) => handleMediaPickerItemClick(asset, event)}
-            >
-              {#if asset.previewUrl}
-                <img class="h-12 w-16 rounded object-cover" src={asset.previewUrl} alt={asset.name} loading="lazy" />
-              {:else}
-                <div class="flex h-12 w-16 items-center justify-center rounded bg-surface-900 text-micro-tight uppercase tracking-[0.2em] text-surface-400">
-                  {mediaKindLabel(asset.kind)}
-                </div>
-              {/if}
-              <div class="min-w-0 flex-1">
-                <p class="truncate text-sm text-surface-200">{asset.name}</p>
-                <p class="text-xs text-surface-500">{mediaKindLabel(asset.kind)}</p>
-              </div>
-              <input
-                type="checkbox"
-                checked={isSelected}
-                aria-label={isSelected ? 'Deselect media' : 'Select media'}
-                onclick={(e) => e.stopPropagation()}
-                onchange={() => toggleMediaPickerSelection(asset.name)}
-              />
-            </button>
-          {/each}
-        </div>
-      {/if}
-      <p class="mt-4 text-xs text-surface-500">Selected files map to `{MEDIA_ROOT}/&lt;name&gt;` when the stream starts.</p>
-    </div>
-  </div>
-{/if}
+<StreamMediaPickerModal
+  open={mediaPickerOpen}
+  mediaRoot={MEDIA_ROOT}
+  selectedCount={mediaPickerSelectedCount}
+  {mediaPickerQuery}
+  {mediaPickerSort}
+  {mediaPickerKind}
+  {mediaPickerLoading}
+  {mediaPickerError}
+  mediaPickerAssets={mediaPickerAssets}
+  mediaPickerSelected={mediaPickerSelected}
+  onClose={closeMediaPicker}
+  onApplySelection={applyMediaPickerSelection}
+  onRefresh={loadMediaPickerAssets}
+  onClearSelection={clearMediaPickerSelection}
+  onSelectAll={selectAllMediaPickerVisible}
+  onQueryChange={updateMediaPickerQuery}
+  onSortChange={handleMediaPickerSortChange}
+  onKindClick={handleMediaPickerKindClick}
+  onItemClick={handleMediaPickerItemClick}
+  onToggleSelection={toggleMediaPickerSelection}
+/>
