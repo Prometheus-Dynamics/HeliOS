@@ -10,7 +10,7 @@ import type { RigCameraInfo } from '$lib/types/rig';
 import { DEFAULT_ROBOT_DIMENSIONS } from '$lib/3d/rigDefaults';
 import { rigLayoutStore } from '$lib/stores/rigLayout';
 import { formatMeters, parseLengthToMeters } from '$lib/utils/units';
-import { composeTransforms, eulerDegreesToQuaternionXYZ, invertTransform, normalizeQuaternion, quaternionToEulerDegreesXYZ, yawDegreesToQuaternion, type PoseQuaternion, type Vec3 } from '$lib/features/localization/poseMath';
+import { composeTransforms, eulerDegreesToQuaternionXYZ, invertTransform, normalizeQuaternion, quaternionToEulerDegreesXYZ, yawDegreesToQuaternion, type PoseQuaternion, type PoseTransform, type Vec3 } from '$lib/features/localization/poseMath';
 import { fetchPipelineOutputSample, isLocalizationCompatibleSource, isLocalizationDetectionSource, isLocalizationImuSource, type LocalizationPipelineSource } from '$lib/features/localization/pipelineSources';
 import { DEVICE_IMU_EXTERNAL_STREAM_ID } from '$lib/features/localization/externalSourceIds';
 import { fetchLocalizationProfilesExport, importLocalizationProfiles as importLocalizationProfilesApi, type LocalizationConfig, type LocalizationCustomFieldOrigin, type LocalizationFieldOriginConfig, type LocalizationFieldOriginMode, type LocalizationPoseSpace, type LocalizationProfile, type LocalizationProfilesExportEnvelope, type LocalizationSolveResponse, type LocalizationSolverConfig, type LocalizationSolverMode, type LocalizationSourceConfig, type LocalizationSourceSampleStatus } from '$lib/features/localization/localizationConfig';
@@ -33,6 +33,7 @@ import { createLocalizationFeedRuntime } from './localizationFeedRuntime';
 import type { CameraPovFovMode, CameraPovIntrinsics, CameraPovState } from './localizationCameraPovUtils';
 import type { FieldSpacePoseOverlayEntry, LocalTagPoseOverlayEntry } from './localizationViewerOverlayState';
 import { asRecord, BUMPER_ID, buildSourceConfigFromSource, DEFAULT_LOCALIZATION_CALIBRATION, type FeedStatus, type ImuRotationSample, type LocalizationCoordinateSpace, type RigLayoutViewState, UUID_LIKE_RE } from './localizationPageRouteSupport';
+import type { CustomField } from '$lib/features/localization/types';
 
 export function createLocalizationPageRouteCore() {
   const localizationProfiles = createLocalizationProfileStore();
@@ -518,6 +519,12 @@ export function createLocalizationPageRouteCore() {
     applySourceSelectionImpl?.(nextIds);
   };
 
+  let getActiveSolverConfig = (): LocalizationSolverConfig | null => null;
+  let getPrimaryCameraKey = (): string | null => null;
+  let getOriginFromFieldCenterForEditor = (): PoseTransform | null => null;
+  let getSelectedCustomField = (): CustomField | null => null;
+  let getMaxMapUploadBytes = (): number | null => null;
+
   const {
     loadLocalizationConfig,
     loadSources,
@@ -685,65 +692,35 @@ export function createLocalizationPageRouteCore() {
     setApplySourceSelectionImpl: (next: ((nextIds: string[]) => void) | null) => {
       applySourceSelectionImpl = next;
     },
+    setDerivedStateBindings: (bindings: {
+      getActiveSolverConfig: () => LocalizationSolverConfig | null;
+      getPrimaryCameraKey: () => string | null;
+      getOriginFromFieldCenterForEditor: () => PoseTransform | null;
+      getSelectedCustomField: () => CustomField | null;
+      getMaxMapUploadBytes: () => number | null;
+    }) => {
+      getActiveSolverConfig = bindings.getActiveSolverConfig;
+      getPrimaryCameraKey = bindings.getPrimaryCameraKey;
+      getOriginFromFieldCenterForEditor = bindings.getOriginFromFieldCenterForEditor;
+      getSelectedCustomField = bindings.getSelectedCustomField;
+      getMaxMapUploadBytes = bindings.getMaxMapUploadBytes;
+    },
     get activeSolverConfig(): LocalizationSolverConfig | null {
-      return null;
+      return getActiveSolverConfig();
     },
     get primaryCameraKey(): string | null {
-      return null;
+      return getPrimaryCameraKey();
     },
     get originFromFieldCenterForEditor() {
-      return null;
+      return getOriginFromFieldCenterForEditor();
     },
     get selectedCustomField() {
-      return null;
+      return getSelectedCustomField();
     },
     get maxMapUploadBytes(): number | null {
-      return null;
+      return getMaxMapUploadBytes();
     }
   };
-
-  const attachMethod = <K extends string, V>(key: K, value: V): void => {
-    Object.defineProperty(state, key, {
-      configurable: true,
-      enumerable: true,
-      writable: true,
-      value
-    });
-  };
-
-  attachMethod('openDeleteProfileModal', openDeleteProfileModal);
-  attachMethod('closeDeleteProfileModal', closeDeleteProfileModal);
-  attachMethod('confirmDeleteProfile', confirmDeleteProfile);
-  attachMethod('exportLocalizationProfiles', exportLocalizationProfiles);
-  attachMethod('openImportProfilesDialog', openImportProfilesDialog);
-  attachMethod('commitProfileName', commitProfileName);
-  attachMethod('commitTagSize', commitTagSize);
-  attachMethod('commitExcludedTagIds', commitExcludedTagIds);
-  attachMethod('setProfileEnabled', setProfileEnabled);
-  attachMethod('setProfileViewEnabled', setProfileViewEnabled);
-  attachMethod('setProfileColor', setProfileColor);
-  attachMethod('setActiveProfile', setActiveProfile);
-  attachMethod('addProfile', addProfile);
-  attachMethod('setProfileFieldOriginMode', setProfileFieldOriginMode);
-  attachMethod('setProfileFieldOriginCustomNumeric', setProfileFieldOriginCustomNumeric);
-  attachMethod('setSnapZToGround', setSnapZToGround);
-  attachMethod('setSnapRollToGround', setSnapRollToGround);
-  attachMethod('setSnapPitchToGround', setSnapPitchToGround);
-  attachMethod('setProfileTemporalEnabled', setProfileTemporalEnabled);
-  attachMethod('setProfileTemporalNumeric', setProfileTemporalNumeric);
-  attachMethod('setSolverTemporalOverrideEnabled', setSolverTemporalOverrideEnabled);
-  attachMethod('setSolverTemporalEnabled', setSolverTemporalEnabled);
-  attachMethod('setSolverTemporalNumeric', setSolverTemporalNumeric);
-  attachMethod('setSolverRuntimeTuningNumeric', setSolverRuntimeTuningNumeric);
-  attachMethod('createCustomField', createCustomField);
-  attachMethod('loadFieldMapList', loadFieldMapList);
-  attachMethod('ensureFieldMapLoaded', ensureFieldMapLoaded);
-  attachMethod('assignMapToSelectedField', assignMapToSelectedField);
-  attachMethod('handleMapUploadFile', handleMapUploadFile);
-  attachMethod('uploadSelectedMapFile', uploadSelectedMapFile);
-  attachMethod('addOriginToSelectedField', addOriginToSelectedField);
-  attachMethod('applyPrimaryCameraPose', applyPrimaryCameraPose);
-  attachMethod('resetPrimaryCameraPoseInputs', resetPrimaryCameraPoseInputs);
 
   return core;
 }

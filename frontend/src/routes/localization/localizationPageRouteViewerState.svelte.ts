@@ -47,6 +47,7 @@ import type { LocalizationPageRouteCore } from './localizationPageRouteCore.svel
 import type { LocalizationPageRouteProfileState } from './localizationPageRouteProfileState.svelte';
 import { createLocalizationPageRouteViewerBaseState } from './localizationPageRouteViewerBaseState.svelte';
 import { detectionPosesForSpace } from '$lib/features/localization/markerUtils';
+import { createMergedView } from '$lib/utils/liveView';
 
 export function createLocalizationPageRouteViewerState(
   core: LocalizationPageRouteCore,
@@ -764,8 +765,7 @@ export function createLocalizationPageRouteViewerState(
     }
   };
 
-  return Object.defineProperties(api, Object.getOwnPropertyDescriptors(base)) as typeof api &
-    typeof base;
+  return createMergedView<typeof api & typeof base>(base, api);
 }
 
 export type LocalizationPageRouteViewerState = ReturnType<typeof createLocalizationPageRouteViewerState>;

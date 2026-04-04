@@ -1,27 +1,30 @@
 <script lang="ts">
-  const { ctx } = $props<{ ctx: Record<string, unknown> }>();
+  import type { PipelineTuneWorkspaceContext } from './pipelineTuneWorkspaceContext.svelte';
+  import type { PipelinePageContentBaseContext } from './pipelinePageTypes';
 
-  const PipelineDetailPanelComponent = $derived.by(() => ctx.PipelineDetailPanelComponent);
-  const PipelineGraphContextMenu = $derived.by(() => ctx.PipelineGraphContextMenu);
-  const PipelineGraphWorkspace = $derived.by(() => ctx.PipelineGraphWorkspace);
-  const PipelineInspectorPanel = $derived.by(() => ctx.PipelineInspectorPanel);
-  const PipelineTunePanel = $derived.by(() => ctx.PipelineTunePanel);
+  const { base, tune } = $props<{ base: PipelinePageContentBaseContext; tune: PipelineTuneWorkspaceContext }>();
 
-  const activeTab = $derived.by(() => ctx.activeTab);
-  const loadError = $derived.by(() => ctx.loadError);
-  const registryLoading = $derived.by(() => ctx.registryLoading);
-  const registryError = $derived.by(() => ctx.registryError);
-  const registry = $derived.by(() => ctx.registry);
-  const detailContext = $derived.by(() => ctx.detailContext);
-  const editingPlan = $derived.by(() => ctx.editingPlan);
-  const editingBreadcrumbs = $derived.by(() => ctx.editingBreadcrumbs);
-  const dataTypes = $derived.by(() => ctx.dataTypes);
-  const pipelines = $derived.by(() => ctx.pipelines);
-  const pipelineInputEntries = $derived.by(() => ctx.pipelineInputEntries);
-  const pipelineOutputEntries = $derived.by(() => ctx.pipelineOutputEntries);
-  const inspectorTab = $derived.by(() => ctx.inspectorTab);
-  const captureDevices = $derived.by(() => ctx.captureDevices);
-  const selectedPipeline = $derived.by(() => ctx.selectedPipeline);
+  const PipelineDetailPanelComponent = $derived.by(() => base.PipelineDetailPanelComponent);
+  const PipelineGraphContextMenu = $derived.by(() => base.PipelineGraphContextMenu);
+  const PipelineGraphWorkspace = $derived.by(() => base.PipelineGraphWorkspace);
+  const PipelineInspectorPanel = $derived.by(() => base.PipelineInspectorPanel);
+  const PipelineTunePanel = $derived.by(() => base.PipelineTunePanel);
+
+  const activeTab = $derived.by(() => base.activeTab);
+  const loadError = $derived.by(() => base.loadError);
+  const registryLoading = $derived.by(() => base.registryLoading);
+  const registryError = $derived.by(() => base.registryError);
+  const registry = $derived.by(() => base.registry);
+  const detailContext = $derived.by(() => base.detailContext);
+  const editingPlan = $derived.by(() => base.editingPlan);
+  const editingBreadcrumbs = $derived.by(() => base.editingBreadcrumbs);
+  const dataTypes = $derived.by(() => base.dataTypes);
+  const pipelines = $derived.by(() => base.pipelines);
+  const pipelineInputEntries = $derived.by(() => base.pipelineInputEntries);
+  const pipelineOutputEntries = $derived.by(() => base.pipelineOutputEntries);
+  const inspectorTab = $derived.by(() => base.inspectorTab);
+  const captureDevices = $derived.by(() => base.captureDevices);
+  const selectedPipeline = $derived.by(() => base.selectedPipeline);
 </script>
 
 {#snippet content()}
@@ -155,7 +158,7 @@
     tuneUiMode,
     updateGlobalNodeValue,
     updateStreamNodeValue
-  } = ctx}
+  } = tune}
 
   {#if PipelineInspectorPanel}
     {@const InspectorPanel = PipelineInspectorPanel}

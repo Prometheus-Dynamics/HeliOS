@@ -78,14 +78,14 @@
   {@const PipelinePageContent = PipelinePageContentComponent}
   {@const PipelinePageModalsView = PipelinePageModalsViewComponent}
   <PipelinePageState {data} initialPipelineId={requestedPipelineId}>
-    {#snippet children({ ctx })}
+    {#snippet children({ base, tune })}
       <div class="flex h-full min-h-0 flex-1 flex-col gap-4 overflow-hidden">
         <div class="flex min-h-0 flex-1 gap-4 overflow-hidden lg:gap-6">
-          <PipelinePageSidebar {ctx} />
-          <PipelinePageContent {ctx} />
+          <PipelinePageSidebar {base} />
+          <PipelinePageContent {base} {tune} />
         </div>
       </div>
-      <PipelinePageModalsView {ctx} />
+      <PipelinePageModalsView {base} />
     {/snippet}
   </PipelinePageState>
 {:else}

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { browser } from '$app/environment';
-  import { onDestroy, onMount, untrack, type Snippet } from 'svelte';
+  import { onDestroy, onMount, untrack } from 'svelte';
   import { derived, get, writable } from 'svelte/store';
   import { toaster, OpenAPI } from '$lib';
   import { buildErrorMessage, reportError } from '$lib/ui/errorPolicy';
@@ -63,12 +63,13 @@
     handlePipelineCardKeydown as handlePipelineCardKeydownSupport
   } from './pipelinePageSupport';
   import { createPipelinePageBaseContext } from './pipelinePageContext';
+  import type { PipelinePageBaseContext, PipelinePageRouteChildrenSnippet } from './pipelinePageTypes';
 
   const {
     data,
     initialPipelineId = null,
     children: routeChildren
-  } = $props<{ data: PageData; initialPipelineId?: string | null; children?: Snippet<[ { ctx: Record<string, unknown> } ]> }>();
+  } = $props<{ data: PageData; initialPipelineId?: string | null; children?: PipelinePageRouteChildrenSnippet }>();
   const initial = untrack(() => data as PipelinePagePayload);
   const hasInitialPipelineData = Boolean(
     initial.registry.length ||
@@ -580,183 +581,99 @@
     pipelinePageRuntime.destroy();
   });
 
-  const baseCtx = $derived.by(() =>
+  const baseCtx = $derived.by<PipelinePageBaseContext>(() =>
     createPipelinePageBaseContext({
-      config: {
-        IDE_ENABLED_FALLBACK: ideState.IDE_ENABLED_FALLBACK,
-        IDE_PORT_FALLBACK: ideState.IDE_PORT_FALLBACK,
-        IDE_PROJECTS_DIR_FALLBACK: ideState.IDE_PROJECTS_DIR_FALLBACK,
-        IDE_WORKSPACE_DIR_FALLBACK: ideState.IDE_WORKSPACE_DIR_FALLBACK,
-        OpenAPI,
-        PIPELINE_EXPORT_VERSION,
-        PIPELINE_FOCUS_REQUEST_KEY,
-        PipelinesApi,
-        RAW_STREAM_PIPELINE_ID,
-        RAW_STREAM_PIPELINE_UUID: rawStreamPipelineUuid,
-        SUPPORTED_PIPELINE_EXPORT_VERSIONS,
-        StreamsApi,
-        browser,
-        derived,
-        emptyPipelineGraphPlan,
-        get,
-        initial,
-        modalBindings,
-        onDestroy,
-        onMount,
-        pageStore,
-        pipelineMap,
-        reportError,
-        serializeGraphPlan,
-        toaster
-      },
-      components: {
-        PipelineDetailPanelComponent: pageViewState.PipelineDetailPanelComponent,
-        PipelineGraphContextMenu: pageViewState.PipelineGraphContextMenuComponent,
-        PipelineGraphWorkspace: pageViewState.PipelineGraphWorkspaceComponent,
-        PipelineInspectorPanel: pageViewState.PipelineInspectorPanelComponent,
-        PipelineListPanel: pageViewState.PipelineListPanelComponent,
-        PipelineModals: pageViewState.PipelineModalsComponent,
-        PipelineTunePanel: pageViewState.PipelineTunePanelComponent
-      },
-      controller,
-      state: {
-        activeTab,
-        assignBusy,
-        assignError,
-        assignModalOpen,
-        captureDevices,
-        createBusy,
-        createError,
-        createModalOpen,
-        createMode,
-        createName,
-        createSourcePipelineId,
-        createSourceTemplateId,
-        deleteModalBusy,
-        deleteModalError,
-        deleteModalOpen,
-        deleteModalPipeline,
-        detailPanelRef: pageViewState.detailPanelRef,
-        graphContextMenu,
-        graphContextSearch,
-        graphSelection,
-        iconModalColor: pageViewState.iconModalColor,
-        iconModalError: pageViewState.iconModalError,
-        iconModalIconId: pageViewState.iconModalIconId,
-        iconModalOpen: pageViewState.iconModalOpen,
-        iconModalPipelineId: pageViewState.iconModalPipelineId,
-        iconModalSaving: pageViewState.iconModalSaving,
-        importInput: pageViewState.importInput,
-        isInitialLoading,
-        pendingPipelineFocus,
-        pipelineRefreshCount,
-        pipelineUpdatesReady,
-        pipelinesBootstrapped,
-        pipelinesRefreshing,
-        registryDrawerOpen,
-        registryHelpers,
-        selectedCaptureSessionId,
-        streamUpdatesReadyById,
-        getStreamUpdatesSocket
-      },
-      ide: {
-        createPluginProject,
+      PipelineDetailPanelComponent: pageViewState.PipelineDetailPanelComponent,
+      PipelineGraphContextMenu: pageViewState.PipelineGraphContextMenuComponent,
+      PipelineGraphWorkspace: pageViewState.PipelineGraphWorkspaceComponent,
+      PipelineInspectorPanel: pageViewState.PipelineInspectorPanelComponent,
+      PipelineListPanel: pageViewState.PipelineListPanelComponent,
+      PipelineModals: pageViewState.PipelineModalsComponent,
+      PipelineTunePanel: pageViewState.PipelineTunePanelComponent,
+      activeTab,
+      assignBusy,
+      assignError,
+      assignModalOpen,
+      captureDevices,
+      closeAssignModal,
+      closeCreateModal,
+      closeDeleteModal,
+      closePipelineIconModal,
+      closePluginProjectModal,
+      confirmDeletePipeline,
+      createBusy,
+      createError,
+      createModalOpen,
+      createMode,
+      createName,
+      createPipeline,
+      createPluginProject,
+      createSourcePipelineId,
+      createSourceTemplateId,
+      dataTypes: dataTypes as PipelinePageBaseContext['dataTypes'],
+      deleteModalBusy,
+      deleteModalError,
+      deleteModalOpen,
+      deleteModalPipeline,
+      detailContext: detailContext as PipelinePageBaseContext['detailContext'],
+      editingBreadcrumbs,
+      editingPlan,
+      handlePipelineCardKeydown,
+      handlePipelineImport,
+      iconModalError: pageViewState.iconModalError,
+      iconModalOpen: pageViewState.iconModalOpen,
+      iconModalPipelineId: pageViewState.iconModalPipelineId,
+      iconModalSaving: pageViewState.iconModalSaving,
+      ideBindings: {
         customNodeSearch: ideState.customNodeSearch,
-        ideBindings,
-        ideEnabled: ideState.ideEnabled,
-        ideIframeUrl: ideState.ideIframeUrl,
-        idePort: ideState.idePort,
-        ideProjects: ideState.ideProjects,
-        ideProjectsDir: ideState.ideProjectsDir,
-        ideUrl: ideState.ideUrl,
-        ideWorkspaceDir: ideState.ideWorkspaceDir,
-        openIde,
-        openPluginInIde,
-        openPluginProjectModal,
-        closePluginProjectModal,
-        pluginProjectBusy: ideState.pluginProjectBusy,
-        pluginProjectError: ideState.pluginProjectError,
         pluginProjectLanguage: ideState.pluginProjectLanguage,
-        pluginProjectModalOpen: ideState.pluginProjectModalOpen,
-        pluginProjectName: ideState.pluginProjectName,
-        refreshIdeInfo,
-        refreshIdeProjects,
-        visiblePlugins
+        pluginProjectName: ideState.pluginProjectName
       },
-      graph: {
-        graphBindings,
-        graphContextMenuElement: graphState.graphContextMenuElement,
-        setGraphContextMenuElement
+      inspectorTab,
+      isInitialLoading,
+      loadError,
+      modalBindings: {
+        iconModalColor: pageViewState.iconModalColor,
+        iconModalIconId: pageViewState.iconModalIconId,
+        importInput: pageViewState.importInput
       },
-      localActions: {
-        closeDeleteModal,
-        closePipelineIconModal,
-        confirmDeletePipeline,
-        consumePipelineFocusRequest: pipelinePageRuntime.consumePipelineFocusRequest,
-        deletePipelineById,
-        describePortType,
-        exportCurrentPipeline,
-        handleEdgePolicy,
-        handleEdgeStyle,
-        handleEnterEmbedded,
-        handleExitEmbedded,
-        handleHostIoPortAdd,
-        handleHostIoPortRemove,
-        handleNodeConstantValue,
-        handlePanelGraphContext,
-        handlePanelGraphLayout,
-        handlePanelGraphSelect,
-        handlePanelPlanChange,
-        handlePipelineCardKeydown,
-        handlePipelineImport,
-        handlePipelinePortAdd,
-        handlePipelinePortConfig,
-        handlePipelinePortEdit,
-        handlePipelinePortRemove,
-        handlePipelinePortValue,
-        handlePipelineRename,
-        handlePipelineValidate,
-        loadPipelineDetailPanel,
-        loadPipelineOverview,
-        openDeleteModal,
-        openPipelineIconModal,
-        organizeGraphNodes,
-        savePipelineIconSelection,
-        setActiveTab,
-        triggerPipelineImport
-      },
-      localHelpers: {
-        accessBadgeClass,
-        accessLabel,
-        applyPaletteToGraphPlan,
-        buildDaedalusGraphPatch,
-        buildErrorMessage,
-        buildNodeValueFromInput,
-        clampNumber,
-        collectPipelineOutputs,
-        createPipelinePageStore,
-        createRegistryResolver,
-        extractInputValues,
-        extractTuneConstantEntries,
-        formatPipelineValue,
-        fromApiGraphPlan,
-        isDaedalusPlan,
-        isPipelineNodeValue,
-        isRecord,
-        numberFromMetadata,
-        outputOptionsForPipeline,
-        pipelineForSource,
-        pipelineLabelById,
-        portMetadataForConstant,
-        portMetadataFromFlatKeys,
-        refreshPipelineIoCaches,
-        resolveRegistryEntryForNode,
-        safeClonePlan,
-        streamGraphForPipeline,
-        streamLabel,
-        streamUsesPipeline,
-        templateForSource
-      }
+      openCreateModal,
+      openDeleteModal,
+      openPipelineIconModal,
+      pipelineForSource,
+      pipelineInputEntries: pipelineInputEntries as PipelinePageBaseContext['pipelineInputEntries'],
+      pipelineLabelById,
+      pipelineListItems,
+      pipelineMap,
+      pipelineOutputEntries: pipelineOutputEntries as PipelinePageBaseContext['pipelineOutputEntries'],
+      pipelineSearch,
+      pipelines,
+      pipelinesRefreshing,
+      pluginProjectBusy: ideState.pluginProjectBusy,
+      pluginProjectError: ideState.pluginProjectError,
+      pluginProjectModalOpen: ideState.pluginProjectModalOpen,
+      refreshRegistry,
+      registry: registryStores.entries,
+      registryDrawerOpen,
+      registryError: registryStores.error,
+      registryLoading: registryStores.loading,
+      registrySort: registryStores.sort,
+      registryStores,
+      registryView: registryStores.view,
+      resetRegistryFilters,
+      savePipelineIconSelection,
+      selectRegistryGroup,
+      selectedCaptureSessionId,
+      selectedPipeline,
+      selectedPipelineId,
+      setSelectedCaptureSession,
+      setSelectedPipeline,
+      templateForSource,
+      templates,
+      triggerPipelineImport,
+      updateRegistryFilters,
+      addNodeFromRegistry,
+      attachPipelineToDevice
     })
   );
 </script>
@@ -792,7 +709,6 @@
   {StreamsApi}
 >
   {#snippet children({ tune })}
-    {@const ctx = { ...baseCtx, ...tune }}
-    {@render routeChildren?.({ ctx })}
+    {@render routeChildren?.({ base: baseCtx, tune })}
   {/snippet}
 </PipelineTuneWorkspace>

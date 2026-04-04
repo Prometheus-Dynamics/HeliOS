@@ -1,4 +1,3 @@
-import type { Snippet } from 'svelte';
 import type { Readable } from 'svelte/store';
 import type { StreamInfo } from '$lib/api/client';
 import type { StreamsApi as SharedStreamsApi } from '$lib/api/streamsApi';
@@ -34,7 +33,6 @@ export type StreamsApi = Pick<
 >;
 
 export type TuneDeps = {
-  children?: Snippet<[ { tune: Record<string, unknown> } ]>;
   activeTab: Readable<'pipeline' | 'tune'>;
   pipelineUpdates: PipelineUpdates;
   pipelineUpdatesReady: Readable<boolean>;

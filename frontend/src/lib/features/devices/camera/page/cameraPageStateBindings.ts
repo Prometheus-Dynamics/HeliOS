@@ -12,23 +12,36 @@ function createAccessorBindings<TTarget extends object, const TKeys extends read
   keys: TKeys,
   transforms: Partial<{ [K in TKeys[number]]: AccessorTransform }> = {}
 ): AccessorBindings<TTarget, TKeys> {
-  const bindings = {} as AccessorBindings<TTarget, TKeys>;
-  for (const key of keys) {
-    Object.defineProperty(bindings, key, {
-      enumerable: true,
-      configurable: true,
-      get() {
-        const value = target[key];
-        return transforms[key]?.get ? transforms[key].get!(value) : value;
-      },
-      set(value: unknown) {
-        (target as { [K in keyof TTarget]: TTarget[K] })[key] = (
-          transforms[key]?.set ? transforms[key].set!(value) : value
-        ) as TTarget[typeof key];
-      }
-    });
-  }
-  return bindings;
+  const allowedKeys = new Set<string>(keys);
+  return new Proxy({} as AccessorBindings<TTarget, TKeys>, {
+    get(_bindings, property) {
+      if (typeof property !== 'string' || !allowedKeys.has(property)) return undefined;
+      const key = property as TKeys[number];
+      const value = target[key];
+      return transforms[key]?.get ? transforms[key].get!(value) : value;
+    },
+    set(_bindings, property, value: unknown) {
+      if (typeof property !== 'string' || !allowedKeys.has(property)) return false;
+      const key = property as TKeys[number];
+      (target as { [K in keyof TTarget]: TTarget[K] })[key] = (
+        transforms[key]?.set ? transforms[key].set!(value) : value
+      ) as TTarget[typeof key];
+      return true;
+    },
+    has(_bindings, property) {
+      return typeof property === 'string' && allowedKeys.has(property);
+    },
+    ownKeys() {
+      return [...keys];
+    },
+    getOwnPropertyDescriptor(_bindings, property) {
+      if (typeof property !== 'string' || !allowedKeys.has(property)) return undefined;
+      return {
+        configurable: true,
+        enumerable: true
+      };
+    }
+  });
 }
 
 const PIPELINE_STATE_KEYS = [
@@ -108,8 +121,10 @@ const PIPELINE_MODAL_KEYS = [
   'pipelineAssignDraft'
 ] as const;
 
+type CameraPagePipelineBindingKey = (typeof PIPELINE_STATE_KEYS)[number] | (typeof PIPELINE_MODAL_KEYS)[number];
+
 export type CameraPagePipelineBindingTarget = {
-  [K in (typeof PIPELINE_STATE_KEYS)[number]]: unknown;
+  [K in CameraPagePipelineBindingKey]: unknown;
 };
 
 export type CameraPageStreamBindingTarget = {

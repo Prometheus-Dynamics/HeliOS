@@ -2,6 +2,7 @@
   import { onDestroy, onMount } from 'svelte';
   import { subscribeDomainInvalidations } from '$lib/api/invalidation';
   import { scheduleAfterPaint, scheduleWhenIdle } from '$lib/utils/browserSchedule';
+  import { createMergedView } from '$lib/utils/liveView';
   import LocalizationPageRouteContent from './LocalizationPageRouteContent.svelte';
   import type { LocalizationPageRouteState } from './localizationPageRouteTypes';
   import { createLocalizationPageRouteCore } from './localizationPageRouteCore.svelte';
@@ -16,42 +17,44 @@
 
   const core = createLocalizationPageRouteCore();
   const profile = createLocalizationPageRouteProfileState(core);
-  Object.defineProperties(core, {
-    activeSolverConfig: { configurable: true, get: () => profile.activeSolverConfig },
-    maxMapUploadBytes: { configurable: true, get: () => profile.maxMapUploadBytes }
-  });
   const viewer = createLocalizationPageRouteViewerState(core, profile);
-  Object.defineProperties(core, {
-    originFromFieldCenterForEditor: { configurable: true, get: () => viewer.originFromFieldCenterForEditor },
-    primaryCameraKey: { configurable: true, get: () => profile.primaryCameraKey },
-    selectedCustomField: { configurable: true, get: () => viewer.selectedCustomField }
+  core.setDerivedStateBindings({
+    getActiveSolverConfig: () => profile.activeSolverConfig,
+    getPrimaryCameraKey: () => profile.primaryCameraKey,
+    getOriginFromFieldCenterForEditor: () => viewer.originFromFieldCenterForEditor,
+    getSelectedCustomField: () => viewer.selectedCustomField,
+    getMaxMapUploadBytes: () => profile.maxMapUploadBytes
   });
 
-  const coreDescriptors = Object.getOwnPropertyDescriptors(core);
-  delete coreDescriptors.state;
-  const state = core.state as LocalizationPageRouteState;
-  Object.defineProperties(state, {
-    ...coreDescriptors,
-    ...Object.getOwnPropertyDescriptors(profile),
-    ...Object.getOwnPropertyDescriptors(viewer),
-    activeProfile: { configurable: true, enumerable: true, get: () => core.activeProfile.current },
-    activeProfileId: { configurable: true, enumerable: true, get: () => core.activeProfileId.current },
-    localizationConfig: { configurable: true, enumerable: true, get: () => core.localizationConfig.current },
-    localizationConfigLoading: { configurable: true, enumerable: true, get: () => core.localizationConfigLoading.current },
-    profiles: { configurable: true, enumerable: true, get: () => core.profiles.current },
-    hasLocalizationBootstrapData: {
-      configurable: true,
-      enumerable: true,
-      get: () => Boolean((core.localizationConfig.current?.profiles?.length ?? 0) || state.sources.length || state.fieldMaps.length)
+  const derivedState = {
+    get activeProfile() {
+      return core.activeProfile.current;
     },
-    showLocalizationBootLoading: {
-      configurable: true,
-      enumerable: true,
-      get: () => state.localizationBootLoading && !state.hasLocalizationBootstrapData
+    get activeProfileId() {
+      return core.activeProfileId.current;
     },
-    isSourceCalibrated: { configurable: true, enumerable: true, value: core.isSourceCalibrated },
-    poseSpaceLabel: { configurable: true, enumerable: true, value: core.poseSpaceLabel }
-  });
+    get localizationConfig() {
+      return core.localizationConfig.current;
+    },
+    get localizationConfigLoading() {
+      return core.localizationConfigLoading.current;
+    },
+    get profiles() {
+      return core.profiles.current;
+    },
+    get hasLocalizationBootstrapData() {
+      return Boolean((core.localizationConfig.current?.profiles?.length ?? 0) || state.sources.length || state.fieldMaps.length);
+    },
+    get showLocalizationBootLoading() {
+      return state.localizationBootLoading && !state.hasLocalizationBootstrapData;
+    },
+    get isSourceCalibrated() {
+      return core.isSourceCalibrated;
+    },
+    get poseSpaceLabel() {
+      return core.poseSpaceLabel;
+    }
+  };
 
   const handleProfileImportInput = (event: Event): void => {
     const input = event.currentTarget;
@@ -124,11 +127,20 @@
     }, 1);
   };
 
-  Object.assign(state, {
+  const routeHandlers = {
     handleProfileColorInput,
     handleProfileImportInput,
     retryLocalizationBootstrap
-  });
+  };
+
+  const state = createMergedView<LocalizationPageRouteState>(
+    core.state,
+    core,
+    profile,
+    viewer,
+    derivedState,
+    routeHandlers
+  );
 
   $effect(() => {
     void profile.hasAnyFeedSources;
