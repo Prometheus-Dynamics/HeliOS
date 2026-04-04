@@ -3,7 +3,6 @@ use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
-use std::env;
 use std::str::FromStr;
 use std::sync::OnceLock;
 use utoipa::ToSchema;

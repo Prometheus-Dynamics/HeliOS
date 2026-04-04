@@ -1,4 +1,4 @@
-use crate::{BoolPolicy, BoundedU64Policy, BoundedUsizePolicy, OptionalStringPolicy, StringPolicy};
+use crate::{BoolPolicy, BoundedF64Policy, BoundedU64Policy, BoundedUsizePolicy, OptionalStringPolicy, StringPolicy};
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -62,6 +62,40 @@ pub const HELIOS_I2C_INVENTORY_POLICY: I2cInventoryPolicy = I2cInventoryPolicy {
 
 pub const HELIOS_IMU_RUNTIME_POLICY: ImuRuntimePolicy = ImuRuntimePolicy { idle_interval_ms: BoundedU64Policy { env_var: "HELIOS_IMU_IDLE_INTERVAL_MS", default: 100, min: 20, max: 5_000 } };
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ImuFusionPolicy {
+    pub frame_correction_wxyz: OptionalStringPolicy,
+    pub mag_norm_rel_tol: BoundedF64Policy,
+    pub mag_norm_lp_tau_seconds: BoundedF64Policy,
+    pub mag_min_horizontal: BoundedF64Policy,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResolvedImuFusionPolicy {
+    pub frame_correction_wxyz: Option<String>,
+    pub mag_norm_rel_tol: f32,
+    pub mag_norm_lp_tau_seconds: f32,
+    pub mag_min_horizontal: f32,
+}
+
+impl ImuFusionPolicy {
+    pub fn resolve(self) -> ResolvedImuFusionPolicy {
+        ResolvedImuFusionPolicy {
+            frame_correction_wxyz: self.frame_correction_wxyz.resolve(),
+            mag_norm_rel_tol: self.mag_norm_rel_tol.resolve() as f32,
+            mag_norm_lp_tau_seconds: self.mag_norm_lp_tau_seconds.resolve() as f32,
+            mag_min_horizontal: self.mag_min_horizontal.resolve() as f32,
+        }
+    }
+}
+
+pub const HELIOS_IMU_FUSION_POLICY: ImuFusionPolicy = ImuFusionPolicy {
+    frame_correction_wxyz: OptionalStringPolicy { env_var: "HELIOS_IMU_FRAME_CORRECTION_WXYZ" },
+    mag_norm_rel_tol: BoundedF64Policy { env_var: "HELIOS_IMU_MAG_NORM_REL_TOL", default: 0.45, min: 0.0, max: 5.0 },
+    mag_norm_lp_tau_seconds: BoundedF64Policy { env_var: "HELIOS_IMU_MAG_NORM_LP_TAU_SECONDS", default: 6.0, min: 0.05, max: 60.0 },
+    mag_min_horizontal: BoundedF64Policy { env_var: "HELIOS_IMU_MAG_MIN_HORIZONTAL", default: 0.15, min: 0.0, max: 1.0 },
+};
+
 pub const HELIOS_PERIPHERALS_POWER_POLICY: PeripheralsPowerPolicy = PeripheralsPowerPolicy {
     poll_interval_ms: BoundedU64Policy { env_var: "HELIOS_POWER_POLL_INTERVAL_MS", default: 100, min: 20, max: 10_000 },
     idle_interval_ms: BoundedU64Policy { env_var: "HELIOS_POWER_IDLE_INTERVAL_MS", default: 1_000, min: 100, max: 30_000 },
@@ -73,7 +107,7 @@ pub struct PeripheralsServicePolicy;
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedPeripheralsServicePolicy {
     pub config_paths: Option<Vec<PathBuf>>,
-    pub socket_path: Option<PathBuf>,
+    pub socket_path: PathBuf,
     pub protocol_version: Option<String>,
     pub server_name: Option<String>,
     pub server_version: Option<String>,
@@ -88,27 +122,31 @@ pub struct ResolvedPeripheralsServicePolicy {
 }
 
 impl PeripheralsServicePolicy {
+    pub fn default_socket_path(self) -> PathBuf {
+        PathBuf::from("/run/helios/peripherals.sock")
+    }
+
     pub fn resolve(self) -> ResolvedPeripheralsServicePolicy {
-        let config_paths = resolve_any_non_empty(&["PERIPHERALS_CONFIG_PATHS", "ENGINE_PERIPHERALS_CONFIG_PATHS", "SENSOR_CONFIG_PATHS", "ENGINE_SENSOR_CONFIG_PATHS"])
+        let config_paths = resolve_any_non_empty(&["HELIOS_PERIPHERALS_CONFIG_PATHS"])
             .map(|raw| raw.split(':').map(str::trim).filter(|entry| !entry.is_empty()).map(PathBuf::from).collect::<Vec<_>>())
             .filter(|paths| !paths.is_empty());
 
         ResolvedPeripheralsServicePolicy {
             config_paths,
-            socket_path: resolve_any_non_empty(&["PERIPHERALS_SOCKET", "SENSORS_SOCKET", "SENSOR_SOCKET"]).map(PathBuf::from),
-            protocol_version: resolve_any_non_empty(&["PERIPHERALS_PROTOCOL_VERSION", "SENSORS_PROTOCOL_VERSION"]),
-            server_name: resolve_any_non_empty(&["PERIPHERALS_SERVER_NAME", "SENSORS_SERVER_NAME"]),
-            server_version: resolve_any_non_empty(&["PERIPHERALS_SERVER_VERSION", "SENSORS_SERVER_VERSION"]),
-            features: resolve_any_non_empty(&["PERIPHERALS_FEATURES", "SENSORS_FEATURES"])
+            socket_path: resolve_any_non_empty(&["HELIOS_PERIPHERALS_SOCKET"]).map(PathBuf::from).unwrap_or_else(|| self.default_socket_path()),
+            protocol_version: resolve_any_non_empty(&["HELIOS_PERIPHERALS_PROTOCOL_VERSION"]),
+            server_name: resolve_any_non_empty(&["HELIOS_PERIPHERALS_SERVER_NAME"]),
+            server_version: resolve_any_non_empty(&["HELIOS_PERIPHERALS_SERVER_VERSION"]),
+            features: resolve_any_non_empty(&["HELIOS_PERIPHERALS_FEATURES"])
                 .map(|raw| raw.split(',').map(str::trim).filter(|entry| !entry.is_empty()).map(str::to_owned).collect::<Vec<_>>())
                 .filter(|features| !features.is_empty()),
-            icm_gyro_range_dps: resolve_u16("ICM_GYRO_RANGE_DPS"),
-            icm_accel_range_g: resolve_u16("ICM_ACCEL_RANGE_G"),
-            imu_angle_range: resolve_any_non_empty(&["IMU_ANGLE_RANGE"]),
-            imu_update_interval: resolve_u64("IMU_UPDATE_INTERVAL_MS").map(|ms| Duration::from_millis(ms.max(1))),
-            imu_fusion: resolve_any_non_empty(&["IMU_FUSION"]),
-            imu_yaw_offset_deg: resolve_f32("IMU_YAW_OFFSET_DEG").filter(|value| value.is_finite()),
-            imu_mount_correction_wxyz: resolve_any_non_empty(&["IMU_MOUNT_CORRECTION_WXYZ"]),
+            icm_gyro_range_dps: resolve_u16("HELIOS_ICM_GYRO_RANGE_DPS"),
+            icm_accel_range_g: resolve_u16("HELIOS_ICM_ACCEL_RANGE_G"),
+            imu_angle_range: resolve_any_non_empty(&["HELIOS_IMU_ANGLE_RANGE"]),
+            imu_update_interval: resolve_u64("HELIOS_IMU_UPDATE_INTERVAL_MS").map(|ms| Duration::from_millis(ms.max(1))),
+            imu_fusion: resolve_any_non_empty(&["HELIOS_IMU_FUSION"]),
+            imu_yaw_offset_deg: resolve_f32("HELIOS_IMU_YAW_OFFSET_DEG").filter(|value| value.is_finite()),
+            imu_mount_correction_wxyz: resolve_any_non_empty(&["HELIOS_IMU_MOUNT_CORRECTION_WXYZ"]),
         }
     }
 }

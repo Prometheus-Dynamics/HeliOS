@@ -12,6 +12,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+lib-runtime-policy = { path = "../lib-runtime-policy" }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 linux-embedded-hal = { workspace = true }

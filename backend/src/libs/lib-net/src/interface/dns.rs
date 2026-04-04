@@ -1,9 +1,10 @@
-use std::env;
 use std::net::IpAddr;
 use std::path::PathBuf;
 
 #[cfg(test)]
 use std::sync::{Mutex, OnceLock};
+
+use lib_runtime_policy::HELIOS_DNS_POLICY;
 
 use super::{DnsConfig, Error, Result};
 
@@ -16,7 +17,7 @@ fn dns_config_path() -> PathBuf {
         return path;
     }
 
-    if let Ok(path) = env::var("HELIOS_DNS_CONF") { PathBuf::from(path) } else { PathBuf::from("/etc/resolv.conf") }
+    HELIOS_DNS_POLICY.resolve().config_path
 }
 
 pub(super) async fn read_dns_config() -> Result<DnsConfig> {

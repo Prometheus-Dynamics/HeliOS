@@ -1,11 +1,52 @@
+#![allow(unsafe_code)]
+
 use super::{
-    EngineExecutorBusyPolicy, HELIOS_API_DATA_ROOT_POLICY, HELIOS_API_HARDWARE_READ_MODEL_POLICY, HELIOS_API_LOG_SOURCES_POLICY, HELIOS_API_STARTUP_CACHE_WARM_POLICY, HELIOS_API_STREAMS_POLICY,
-    HELIOS_API_SYSTEM_READ_MODEL_POLICY, HELIOS_API_TOKIO_POLICY, HELIOS_DAEDALUS_RUNTIME_POLICY, HELIOS_ENGINE_CRASH_GUARD_POLICY, HELIOS_ENGINE_GRAPH_POLICY, HELIOS_ENGINE_IPC_POLICY,
-    HELIOS_ENGINE_RECORDING_POLICY, HELIOS_ENGINE_TOKIO_POLICY, HELIOS_I2C_INVENTORY_POLICY, HELIOS_IMU_RUNTIME_POLICY, HELIOS_LOG_FILTER_POLICY, HELIOS_PERIPHERALS_POWER_POLICY,
-    HELIOS_PERIPHERALS_TOKIO_POLICY, HELIOS_RESOURCE_GUARD_POLICY, HELIOS_SHADOW_RECORD_DATA_ROOT_POLICY, HELIOS_STYX_CAPTURE_TUNABLES_POLICY, PersistentDirPolicy, PlatformFamily,
-    classify_platform_family,
+    EngineExecutorBusyPolicy, HELIOS_API_DATA_ROOT_POLICY, HELIOS_API_HARDWARE_READ_MODEL_POLICY, HELIOS_API_LIGHTING_TEMPLATES_POLICY, HELIOS_API_LOG_SOURCES_POLICY, HELIOS_API_SERVER_POLICY,
+    HELIOS_API_STARTUP_CACHE_WARM_POLICY, HELIOS_API_STREAMS_POLICY, HELIOS_API_SYSTEM_READ_MODEL_POLICY, HELIOS_API_TOKIO_POLICY, HELIOS_DAEDALUS_RUNTIME_POLICY, HELIOS_DNS_POLICY,
+    HELIOS_ENGINE_CRASH_GUARD_POLICY, HELIOS_ENGINE_GRAPH_POLICY, HELIOS_ENGINE_IPC_POLICY, HELIOS_ENGINE_RECORDING_POLICY, HELIOS_ENGINE_STREAM_RUNTIME_POLICY, HELIOS_ENGINE_TOKIO_POLICY,
+    HELIOS_I2C_INVENTORY_POLICY, HELIOS_IMU_FUSION_POLICY, HELIOS_IMU_RUNTIME_POLICY, HELIOS_IPC_JOURNAL_POLICY, HELIOS_LOG_FILTER_POLICY, HELIOS_PERIPHERALS_POWER_POLICY,
+    HELIOS_PERIPHERALS_SERVICE_POLICY, HELIOS_PERIPHERALS_TOKIO_POLICY, HELIOS_RESOURCE_GUARD_POLICY, HELIOS_SHADOW_RECORD_DATA_ROOT_POLICY, HELIOS_STYX_CAPTURE_TUNABLES_POLICY,
+    HELIOS_UPDATER_FILESYSTEM_POLICY, PersistentDirPolicy, PlatformFamily, classify_platform_family,
 };
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+
+fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(())).lock().expect("env lock poisoned")
+}
+
+#[test]
+fn api_server_policy_defaults_match_expected_values() {
+    let resolved = HELIOS_API_SERVER_POLICY.resolve();
+    assert_eq!(resolved.bind_addr.to_string(), "0.0.0.0:5800");
+}
+
+#[test]
+fn api_server_policy_prefers_namespaced_bind_override() {
+    let _lock = env_lock();
+    unsafe {
+        std::env::set_var("HELIOS_API__SERVER__BIND", "127.0.0.1:5812");
+    }
+    let resolved = HELIOS_API_SERVER_POLICY.resolve();
+    assert_eq!(resolved.bind_addr.to_string(), "127.0.0.1:5812");
+    unsafe {
+        std::env::remove_var("HELIOS_API__SERVER__BIND");
+    }
+}
+
+#[test]
+fn api_lighting_templates_policy_prefers_namespaced_env_override() {
+    let _lock = env_lock();
+    unsafe {
+        std::env::set_var("HELIOS_API_LIGHTING_TEMPLATE_DIR", "/tmp/helios-lighting-templates");
+    }
+    let resolved = HELIOS_API_LIGHTING_TEMPLATES_POLICY.resolve(None);
+    assert_eq!(resolved.template_dir, PathBuf::from("/tmp/helios-lighting-templates"));
+    unsafe {
+        std::env::remove_var("HELIOS_API_LIGHTING_TEMPLATE_DIR");
+    }
+}
 
 #[test]
 fn api_runtime_policy_defaults_match_expected_values() {
@@ -60,6 +101,51 @@ fn i2c_inventory_policy_defaults_match_expected_values() {
 fn imu_runtime_policy_defaults_match_expected_values() {
     let resolved = HELIOS_IMU_RUNTIME_POLICY.resolve();
     assert_eq!(resolved.idle_interval_ms, 100);
+}
+
+#[test]
+fn imu_fusion_policy_defaults_match_expected_values() {
+    let resolved = HELIOS_IMU_FUSION_POLICY.resolve();
+    assert_eq!(resolved.frame_correction_wxyz, None);
+    assert_eq!(resolved.mag_norm_rel_tol, 0.45);
+    assert_eq!(resolved.mag_norm_lp_tau_seconds, 6.0);
+    assert_eq!(resolved.mag_min_horizontal, 0.15);
+}
+
+#[test]
+fn ipc_journal_policy_defaults_match_expected_values() {
+    let resolved = HELIOS_IPC_JOURNAL_POLICY.resolve();
+    assert_eq!(resolved.dir, PathBuf::from("/var/lib/helios/journal/ipc"));
+    assert_eq!(resolved.max_bytes, 8 * 1024 * 1024);
+}
+
+#[test]
+fn dns_policy_defaults_match_expected_values() {
+    let resolved = HELIOS_DNS_POLICY.resolve();
+    assert_eq!(resolved.config_path, PathBuf::from("/etc/resolv.conf"));
+}
+
+#[test]
+fn updater_filesystem_policy_defaults_match_expected_values() {
+    let resolved = HELIOS_UPDATER_FILESYSTEM_POLICY.resolve();
+    assert_eq!(resolved.socket_path, PathBuf::from("/run/helios/updater.sock"));
+    assert_eq!(resolved.journal_path, PathBuf::from("/var/lib/helios/journal/updater.log"));
+    assert_eq!(resolved.data_dir, PathBuf::from("/var/lib/helios"));
+}
+
+#[test]
+fn peripherals_service_policy_defaults_match_expected_values() {
+    let resolved = HELIOS_PERIPHERALS_SERVICE_POLICY.resolve();
+    assert_eq!(resolved.socket_path, PathBuf::from("/run/helios/peripherals.sock"));
+    assert_eq!(resolved.config_paths, None);
+}
+
+#[test]
+fn engine_stream_runtime_policy_defaults_match_expected_values() {
+    let resolved = HELIOS_ENGINE_STREAM_RUNTIME_POLICY.resolve();
+    assert_eq!(resolved.host_buffer_default, 2);
+    assert_eq!(resolved.host_buffer_max, 64);
+    assert_eq!(resolved.preview_jpeg_quality_override, None);
 }
 
 #[test]
@@ -133,6 +219,7 @@ fn styx_capture_policy_is_optional_by_default() {
 
 #[test]
 fn persistent_dir_policy_prefers_configured_env_override() {
+    let _lock = env_lock();
     let dir = std::env::temp_dir().join(format!("helios-runtime-policy-env-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("create temp data root");
@@ -149,6 +236,7 @@ fn persistent_dir_policy_prefers_configured_env_override() {
 
 #[test]
 fn persistent_dir_policy_ignores_empty_env_and_uses_candidates() {
+    let _lock = env_lock();
     let candidate = std::env::temp_dir().join(format!("helios-runtime-policy-candidate-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&candidate);
     let candidate_str: &'static str = Box::leak(candidate.to_string_lossy().into_owned().into_boxed_str());
@@ -180,6 +268,7 @@ fn daedalus_runtime_policy_defaults_match_expected_values() {
 
 #[test]
 fn daedalus_runtime_policy_prefers_single_plugin_dir_override() {
+    let _lock = env_lock();
     unsafe {
         std::env::set_var("HELIOS_DAEDALUS_PLUGIN_DIR", "/tmp/helios-plugin-override");
         std::env::remove_var("HELIOS_DAEDALUS_PLUGIN_DIRS");

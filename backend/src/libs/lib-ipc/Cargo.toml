@@ -14,6 +14,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+lib-runtime-policy = { path = "../lib-runtime-policy" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }

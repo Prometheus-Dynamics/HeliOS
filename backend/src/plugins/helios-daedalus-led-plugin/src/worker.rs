@@ -9,14 +9,12 @@ use lib_ipc::client::{Client as GenericClient, Session as GenericSession, Transp
 use lib_ipc::types::{CommandId, FeatureSet};
 use lib_ipc::wire::ServiceKind;
 use lib_led_animations::LedAnimationEntry;
+use lib_runtime_policy::{HELIOS_IPC_JOURNAL_POLICY, HELIOS_PERIPHERALS_SERVICE_POLICY};
 use tokio::sync::mpsc;
 use tokio::time::{Instant, timeout};
 use tracing::warn;
 
-const PERIPHERALS_SOCKET: &str = "/run/helios/peripherals.sock";
 const DEV_PERIPHERALS_SOCKET: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/target/dev/run/peripherals.sock");
-const DEFAULT_JOURNAL_DIR: &str = "/var/lib/helios/journal/ipc";
-const IPC_JOURNAL_DIR_ENV: &str = "HELIOS_IPC_JOURNAL_DIR";
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(2);
 const TICK_INTERVAL: Duration = Duration::from_millis(50);
 const CONNECTION_IDLE_TIMEOUT: Duration = Duration::from_millis(500);
@@ -246,8 +244,16 @@ struct Connection {
 }
 
 async fn connect_peripherals() -> Result<Connection, NodeError> {
-    let socket_path = if PathBuf::from(DEV_PERIPHERALS_SOCKET).exists() { DEV_PERIPHERALS_SOCKET } else { PERIPHERALS_SOCKET };
-    let journal_path = std::env::var_os(IPC_JOURNAL_DIR_ENV).map(PathBuf::from).unwrap_or_else(|| PathBuf::from(DEFAULT_JOURNAL_DIR));
+    let peripherals_policy = HELIOS_PERIPHERALS_SERVICE_POLICY.resolve();
+    let default_socket = HELIOS_PERIPHERALS_SERVICE_POLICY.default_socket_path();
+    let socket_path = if PathBuf::from(DEV_PERIPHERALS_SOCKET).exists() {
+        PathBuf::from(DEV_PERIPHERALS_SOCKET)
+    } else if peripherals_policy.socket_path != default_socket {
+        peripherals_policy.socket_path
+    } else {
+        default_socket
+    };
+    let journal_path = HELIOS_IPC_JOURNAL_POLICY.resolve().dir;
     let client = SensorsClient::new(SensorsClientConfig::new(socket_path, journal_path)).map_err(|err| NodeError::Handler(format!("connect peripherals failed: {err}")))?;
     let session = client.handshake().await.map_err(|err| NodeError::Handler(format!("open peripherals session failed: {err}")))?;
     Ok(Connection { session })

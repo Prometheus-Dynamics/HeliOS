@@ -14,51 +14,51 @@ use tracing_subscriber::{EnvFilter, fmt};
 #[command(author, version, about = "Helios updater service", long_about = None)]
 struct UpdaterArgs {
     /// Unix domain socket path exposed for updater IPC clients.
-    #[arg(long, env = "UPDATER_SOCKET", default_value = "/run/helios/updater.sock")]
+    #[arg(long, env = "HELIOS_UPDATER_SOCKET", default_value = "/run/helios/updater.sock")]
     socket: PathBuf,
 
     /// Path to the append-only journal used for command replay.
-    #[arg(long, env = "UPDATER_JOURNAL_PATH", default_value = "/var/lib/helios/journal/updater.log")]
+    #[arg(long, env = "HELIOS_UPDATER_JOURNAL_PATH", default_value = "/var/lib/helios/journal/updater.log")]
     journal: PathBuf,
 
     /// Protocol version advertised during IPC handshake.
-    #[arg(long, env = "UPDATER_PROTOCOL_VERSION")]
+    #[arg(long, env = "HELIOS_UPDATER_PROTOCOL_VERSION")]
     protocol: Option<ProtocolVersion>,
 
     /// Server name surfaced to clients as part of the handshake response.
-    #[arg(long, env = "UPDATER_SERVER_NAME", default_value = "helios-updater")]
+    #[arg(long, env = "HELIOS_UPDATER_SERVER_NAME", default_value = "helios-updater")]
     server_name: String,
 
     /// Server version surfaced to clients during handshake.
-    #[arg(long, env = "UPDATER_SERVER_VERSION", default_value = env!("CARGO_PKG_VERSION"))]
+    #[arg(long, env = "HELIOS_UPDATER_SERVER_VERSION", default_value = env!("CARGO_PKG_VERSION"))]
     server_version: String,
 
     /// Feature flags supported by this updater instance.
-    #[arg(long = "feature", env = "UPDATER_FEATURES", value_delimiter = ',', action = ArgAction::Append)]
+    #[arg(long = "feature", env = "HELIOS_UPDATER_FEATURES", value_delimiter = ',', action = ArgAction::Append)]
     features: Vec<String>,
 
     /// Directory containing persisted updater state and cache directories.
-    #[arg(long, env = "UPDATER_DATA_DIR", default_value = "/var/lib/helios")]
+    #[arg(long, env = "HELIOS_UPDATER_DATA_DIR", default_value = "/var/lib/helios")]
     data_dir: PathBuf,
 
     /// Override the default cache directory (data_dir/ota/cache).
-    #[arg(long, env = "UPDATER_CACHE_DIR")]
+    #[arg(long, env = "HELIOS_UPDATER_CACHE_DIR")]
     cache_dir: Option<PathBuf>,
 
     /// Override the default work directory (data_dir/ota/work).
-    #[arg(long, env = "UPDATER_WORK_DIR")]
+    #[arg(long, env = "HELIOS_UPDATER_WORK_DIR")]
     work_dir: Option<PathBuf>,
 
     /// Base64-encoded Ed25519 verifying keys used for artifact signature verification.
-    #[arg(long = "signature-key", env = "UPDATER_SIGNATURE_KEYS", value_delimiter = ',', action = ArgAction::Append)]
+    #[arg(long = "signature-key", env = "HELIOS_UPDATER_SIGNATURE_KEYS", value_delimiter = ',', action = ArgAction::Append)]
     signature_keys: Vec<String>,
 
     /// Require every artifact to provide a matching signature before staging.
-    #[arg(long, env = "UPDATER_REQUIRE_SIGNATURES", default_value_t = false)]
+    #[arg(long, env = "HELIOS_UPDATER_REQUIRE_SIGNATURES", default_value_t = false)]
     require_signatures: bool,
 
     /// Override the default HTTP user agent used when fetching manifests/artifacts.
-    #[arg(long, env = "UPDATER_USER_AGENT")]
+    #[arg(long, env = "HELIOS_UPDATER_USER_AGENT")]
     user_agent: Option<String>,
 }
 

@@ -1,4 +1,5 @@
 use super::*;
+use lib_runtime_policy::HELIOS_ENGINE_STREAM_RUNTIME_POLICY;
 
 impl ResolvedStreamConfig {
     pub fn host_buffer(&self) -> usize {
@@ -269,9 +270,8 @@ pub struct StreamStatus {
 pub fn default_host_buffer() -> usize {
     // The host bridge buffers full frames for late subscribers. At full resolution this can
     // balloon RSS quickly (e.g. RGBA at 2K+). Default small to keep memory predictable; users can
-    // still override via `HELIOS_HOST_BUFFER` or per-stream `host_buffer`.
-    let requested = env::var("HELIOS_HOST_BUFFER").ok().and_then(|v| v.parse().ok()).filter(|v| *v > 0).unwrap_or(2);
-    requested.min(max_host_buffer())
+    // still override via runtime policy or per-stream `host_buffer`.
+    HELIOS_ENGINE_STREAM_RUNTIME_POLICY.resolve().host_buffer_default
 }
 
 const DEFAULT_PREVIEW_JPEG_QUALITY: u8 = 65;
@@ -281,7 +281,7 @@ const DEFAULT_STREAM_PREVIEW_JPEG_QUALITY: u8 = 30;
 pub const DEFAULT_STREAM_PIPELINE_ENABLED_WHEN_BINDINGS_PRESENT: bool = true;
 
 fn default_preview_jpeg_quality_override() -> Option<u8> {
-    env::var("HELIOS_PREVIEW_JPEG_QUALITY").ok().and_then(|v| v.parse::<u8>().ok())
+    HELIOS_ENGINE_STREAM_RUNTIME_POLICY.resolve().preview_jpeg_quality_override
 }
 
 pub fn default_requested_preview_jpeg_quality_enabled() -> u8 {
@@ -321,7 +321,7 @@ pub fn preview_format_for_encoder_selector(selector: Option<&str>) -> &'static s
 }
 
 pub(super) fn max_host_buffer() -> usize {
-    env::var("HELIOS_HOST_BUFFER_MAX").ok().and_then(|v| v.parse().ok()).filter(|v| *v > 0).unwrap_or(64)
+    HELIOS_ENGINE_STREAM_RUNTIME_POLICY.resolve().host_buffer_max
 }
 
 fn manifest_prefers_default_stream_encoder(manifest: &StreamManifest) -> bool {

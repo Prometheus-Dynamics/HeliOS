@@ -1,6 +1,7 @@
-use std::{io, path::PathBuf};
+use std::{io, path::PathBuf, sync::OnceLock};
 
 use axum::{Json, extract::Path, response::IntoResponse};
+use lib_runtime_policy::HELIOS_API_LIGHTING_TEMPLATES_POLICY;
 use lib_schema_migration::{SyncSchemaPlan, normalize_to_current};
 use tokio::fs;
 
@@ -8,7 +9,6 @@ use crate::http::error::{ApiError, ApiResult, ErrorBody};
 
 use super::{LightingAnimationPayload, LightingAnimationTemplateDocument, LightingAnimationTemplateSummary, LightingColorPayload, LightingFramePayload, LightingTimelinePayload};
 
-const LIGHTING_TEMPLATE_DIR: &str = "/usr/share/helios/lighting-templates";
 const CURRENT_LIGHTING_TEMPLATE_DOCUMENT_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -124,16 +124,8 @@ pub async fn fetch_lighting_template(Path(id): Path<String>) -> ApiResult<impl I
 }
 
 fn lighting_template_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("HELIOS_LIGHTING_TEMPLATE_DIR") {
-        return PathBuf::from(dir);
-    }
-    if let Ok(cwd) = std::env::current_dir() {
-        let dev = cwd.join("configs").join("lighting").join("templates");
-        if dev.is_dir() {
-            return dev;
-        }
-    }
-    PathBuf::from(LIGHTING_TEMPLATE_DIR)
+    static CACHED: OnceLock<PathBuf> = OnceLock::new();
+    CACHED.get_or_init(|| HELIOS_API_LIGHTING_TEMPLATES_POLICY.resolve(std::env::current_dir().ok().as_deref()).template_dir).clone()
 }
 
 pub(super) fn normalize_template_id(raw: &str) -> Option<String> {

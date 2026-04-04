@@ -1529,10 +1529,28 @@ owner = "HeliOS"
 review_note = "Peripherals IPC command methods and response decoding now live here; keep transport config and pooled-session orchestration separate."
 
 [[line_limits]]
-path = "backend/src/helios-api/src/ipc/peripherals/tests.rs"
+path = "backend/src/helios-api/src/ipc/peripherals/tests/mod.rs"
+max_lines = 20
+owner = "HeliOS"
+review_note = "Peripherals IPC regression tests are split into transport, socket-candidate, and session modules; keep the test root as a thin module list."
+
+[[line_limits]]
+path = "backend/src/helios-api/src/ipc/peripherals/tests/transport.rs"
 max_lines = 50
 owner = "HeliOS"
-review_note = "Peripherals IPC config and socket-candidate regression tests now live here; keep them isolated from production modules."
+review_note = "Peripherals IPC transport regression tests live here; keep candidate and session policy coverage separate."
+
+[[line_limits]]
+path = "backend/src/helios-api/src/ipc/peripherals/tests/socket_candidates.rs"
+max_lines = 50
+owner = "HeliOS"
+review_note = "Peripherals IPC socket-candidate regression tests live here; keep transport shape and idle-timeout policy coverage separate."
+
+[[line_limits]]
+path = "backend/src/helios-api/src/ipc/peripherals/tests/session.rs"
+max_lines = 40
+owner = "HeliOS"
+review_note = "Peripherals IPC idle-timeout policy regression tests live here; keep socket-candidate and transport coverage separate."
 
 [[forbidden_paths]]
 path = "backend/src/helios-api/src/system_read_model/realtime.rs"

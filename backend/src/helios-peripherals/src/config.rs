@@ -41,7 +41,7 @@ impl SensorsConfig {
             icm_accel_range_g: 16,
             imu_range: ImuRange::ZeroTo360,
             // Default to a modest polling rate so the service stays cheap when nothing is actively
-            // consuming IMU data. Override via `IMU_UPDATE_INTERVAL_MS` when high-rate sampling is needed.
+            // consuming IMU data. Override via `HELIOS_IMU_UPDATE_INTERVAL_MS` when high-rate sampling is needed.
             imu_update_interval: Duration::from_millis(20),
             imu_fusion: ImuFusionMethod::MadgwickNoMag,
             imu_yaw_offset_deg: 0.0,
@@ -59,9 +59,7 @@ impl SensorsConfig {
             config.config_paths = paths;
         }
 
-        if let Some(socket) = policy.socket_path {
-            config.socket_path = socket;
-        }
+        config.socket_path = policy.socket_path;
 
         if let Some(protocol) = policy.protocol_version.as_deref()
             && let Ok(parsed) = ProtocolVersion::from_str(protocol.trim())

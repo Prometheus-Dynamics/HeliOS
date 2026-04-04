@@ -15,7 +15,7 @@ state without shelling out to `ip`.
 - `set_interface()` applies static and dynamic IPv4/IPv6 settings, installs
   gateways using rtnetlink APIs, and safely manages `dhclient` when switching to
   DHCP. DNS updates are written to `/etc/resolv.conf` (configurable via
-  `HELIOS_DNS_CONF`).
+  `HELIOS_DNS_CONFIG_PATH`).
 - Convenience helpers for reading/setting the device hostname.
 - mDNS and subnet-based discovery utilities for locating peers.
 

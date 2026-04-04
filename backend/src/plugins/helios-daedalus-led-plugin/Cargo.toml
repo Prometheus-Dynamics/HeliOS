@@ -18,6 +18,7 @@ daedalus = { workspace = true, features = ["ffi", "plugins", "gpu"] }
 helios-peripherals = { path = "../../helios-peripherals", default-features = false, features = ["dto"] }
 lib-ipc = { path = "../../libs/lib-ipc" }
 lib-led-animations = { path = "../../libs/lib-led-animations" }
+lib-runtime-policy = { path = "../../libs/lib-runtime-policy" }
 paste = { workspace = true }
 serde = { workspace = true }
 tokio = { workspace = true }

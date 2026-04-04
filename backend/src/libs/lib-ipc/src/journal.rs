@@ -9,10 +9,8 @@ use crate::archive;
 use crate::types::{CommandId, JournalMetadata, RequestIdentity};
 use crate::wire::{SCHEMA_VERSION, ServiceKind};
 use chrono::{DateTime, Utc};
+use lib_runtime_policy::HELIOS_IPC_JOURNAL_POLICY;
 const HEADER_LEN: usize = 24;
-const DEFAULT_MAX_JOURNAL_BYTES: u64 = 8 * 1024 * 1024;
-const MIN_MAX_JOURNAL_BYTES: u64 = 64 * 1024;
-const MAX_MAX_JOURNAL_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct JournalEntry<T> {
@@ -52,7 +50,8 @@ pub struct JournalOptions {
 
 impl Default for JournalOptions {
     fn default() -> Self {
-        Self { sync_on_append: false, buffer_capacity: 64 * 1024, max_bytes: journal_max_bytes_from_env().or(Some(DEFAULT_MAX_JOURNAL_BYTES)) }
+        let journal_policy = HELIOS_IPC_JOURNAL_POLICY.resolve();
+        Self { sync_on_append: false, buffer_capacity: 64 * 1024, max_bytes: Some(journal_policy.max_bytes) }
     }
 }
 
@@ -227,10 +226,6 @@ impl<T> Journal<T> {
     }
 }
 
-fn journal_max_bytes_from_env() -> Option<u64> {
-    std::env::var("HELIOS_IPC_JOURNAL_MAX_BYTES").ok().and_then(|raw| raw.trim().parse::<u64>().ok()).map(|value| value.clamp(MIN_MAX_JOURNAL_BYTES, MAX_MAX_JOURNAL_BYTES))
-}
-
 fn reset_writer(file: &mut BufWriter<File>, sync_on_append: bool) -> io::Result<()> {
     file.flush()?;
     file.get_ref().set_len(0)?;
@@ -296,5 +291,11 @@ mod tests {
         let entries = journal.replay().expect("replay");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].payload, second);
+    }
+
+    #[test]
+    fn default_options_use_runtime_policy_defaults() {
+        let options = JournalOptions::default();
+        assert_eq!(options.max_bytes, Some(8 * 1024 * 1024));
     }
 }

@@ -181,6 +181,8 @@ pub const HELIOS_ENGINE_RECORDING_POLICY: EngineRecordingPolicy = EngineRecordin
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EngineStreamRuntimePolicy {
     pub default_libcamera_fps: BoundedU64Policy,
+    pub host_buffer_default: BoundedUsizePolicy,
+    pub host_buffer_max: BoundedUsizePolicy,
     pub encoded_channel_size: BoundedUsizePolicy,
     pub viewer_idle_timeout_ms: BoundedU64Policy,
     pub viewer_check_interval_ms: BoundedU64Policy,
@@ -194,6 +196,7 @@ pub struct EngineStreamRuntimePolicy {
     pub usb_power_setup_script: StringPolicy,
     pub usb_power_recovery_settle_ms: BoundedU64Policy,
     pub software_encoder_threads: OptionalBoundedUsizePolicy,
+    pub preview_jpeg_quality_override: OptionalBoundedU64Policy,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -212,12 +215,18 @@ pub struct ResolvedEngineStreamRuntimePolicy {
     pub usb_power_setup_script: String,
     pub usb_power_recovery_settle_ms: u64,
     pub software_encoder_threads: Option<usize>,
+    pub host_buffer_default: usize,
+    pub host_buffer_max: usize,
+    pub preview_jpeg_quality_override: Option<u8>,
 }
 
 impl EngineStreamRuntimePolicy {
     pub fn resolve(self) -> ResolvedEngineStreamRuntimePolicy {
+        let host_buffer_max = self.host_buffer_max.resolve();
         ResolvedEngineStreamRuntimePolicy {
             default_libcamera_fps: self.default_libcamera_fps.resolve().min(u64::from(u32::MAX)) as u32,
+            host_buffer_default: self.host_buffer_default.resolve().min(host_buffer_max),
+            host_buffer_max,
             encoded_channel_size: self.encoded_channel_size.resolve(),
             viewer_idle_timeout_ms: self.viewer_idle_timeout_ms.resolve(),
             viewer_check_interval_ms: self.viewer_check_interval_ms.resolve(),
@@ -231,12 +240,15 @@ impl EngineStreamRuntimePolicy {
             usb_power_setup_script: self.usb_power_setup_script.resolve(),
             usb_power_recovery_settle_ms: self.usb_power_recovery_settle_ms.resolve(),
             software_encoder_threads: self.software_encoder_threads.resolve(),
+            preview_jpeg_quality_override: self.preview_jpeg_quality_override.resolve().map(|value| value.min(u64::from(u8::MAX)) as u8),
         }
     }
 }
 
 pub const HELIOS_ENGINE_STREAM_RUNTIME_POLICY: EngineStreamRuntimePolicy = EngineStreamRuntimePolicy {
     default_libcamera_fps: BoundedU64Policy { env_var: "HELIOS_DEFAULT_LIBCAMERA_FPS", default: 30, min: 1, max: u32::MAX as u64 },
+    host_buffer_default: BoundedUsizePolicy { env_var: "HELIOS_HOST_BUFFER", default: 2, min: 1, max: usize::MAX },
+    host_buffer_max: BoundedUsizePolicy { env_var: "HELIOS_HOST_BUFFER_MAX", default: 64, min: 1, max: usize::MAX },
     encoded_channel_size: BoundedUsizePolicy { env_var: "HELIOS_ENCODED_CHANNEL_SIZE", default: 8, min: 1, max: 1024 },
     viewer_idle_timeout_ms: BoundedU64Policy { env_var: "HELIOS_STREAM_VIEWER_IDLE_TIMEOUT_MS", default: 2_500, min: 250, max: 60_000 },
     viewer_check_interval_ms: BoundedU64Policy { env_var: "HELIOS_STREAM_VIEWER_CHECK_INTERVAL_MS", default: 250, min: 50, max: 5_000 },
@@ -250,6 +262,7 @@ pub const HELIOS_ENGINE_STREAM_RUNTIME_POLICY: EngineStreamRuntimePolicy = Engin
     usb_power_setup_script: StringPolicy { env_var: "HELIOS_USB_POWER_SETUP_SCRIPT", default: "/usr/local/bin/helios-usb-power-setup.sh" },
     usb_power_recovery_settle_ms: BoundedU64Policy { env_var: "HELIOS_USB_POWER_RECOVERY_SETTLE_MS", default: 2_500, min: 100, max: 10_000 },
     software_encoder_threads: OptionalBoundedUsizePolicy { env_var: "HELIOS_SOFTWARE_ENCODER_THREADS", min: 1, max: usize::MAX },
+    preview_jpeg_quality_override: OptionalBoundedU64Policy { env_var: "HELIOS_PREVIEW_JPEG_QUALITY", min: 1, max: 100 },
 };
 
 #[derive(Clone, Copy, Debug, PartialEq)]

@@ -10,6 +10,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+lib-runtime-policy = { path = "../lib-runtime-policy" }
 tokio = {workspace = true}
 futures = {workspace = true}
 tracing = {workspace = true}

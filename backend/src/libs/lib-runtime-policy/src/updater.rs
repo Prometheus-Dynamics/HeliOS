@@ -42,18 +42,22 @@ impl UpdaterFilesystemPolicy {
             updater_service_unit: self.updater_service_unit.resolve(),
         }
     }
+
+    pub fn default_socket_path(self) -> PathBuf {
+        PathBuf::from(self.socket_path.default)
+    }
 }
 
 pub const HELIOS_UPDATER_FILESYSTEM_POLICY: UpdaterFilesystemPolicy = UpdaterFilesystemPolicy {
-    socket_path: PathPolicy { env_var: "UPDATER_SOCKET", default: "/run/helios/updater.sock" },
-    journal_path: PathPolicy { env_var: "UPDATER_JOURNAL_PATH", default: "/var/lib/helios/journal/updater.log" },
-    data_dir: PathPolicy { env_var: "UPDATER_DATA_DIR", default: "/var/lib/helios" },
-    frontend_releases_dir: PathPolicy { env_var: "UPDATER_FRONTEND_RELEASES_DIR", default: "/opt/helios/releases/frontend" },
-    service_releases_dir: PathPolicy { env_var: "UPDATER_SERVICE_RELEASES_DIR", default: "/opt/helios/releases/services" },
-    service_bin_dir: PathPolicy { env_var: "UPDATER_SERVICE_BIN_DIR", default: "/usr/bin" },
-    frontend_active_path: PathPolicy { env_var: "UPDATER_FRONTEND_ACTIVE_PATH", default: "/opt/helios/frontend" },
-    frontend_service_unit: StringPolicy { env_var: "UPDATER_FRONTEND_SERVICE_UNIT", default: "helios-frontend.service" },
-    updater_service_unit: StringPolicy { env_var: "UPDATER_UPDATER_SERVICE_UNIT", default: "helios-updater.service" },
+    socket_path: PathPolicy { env_var: "HELIOS_UPDATER_SOCKET", default: "/run/helios/updater.sock" },
+    journal_path: PathPolicy { env_var: "HELIOS_UPDATER_JOURNAL_PATH", default: "/var/lib/helios/journal/updater.log" },
+    data_dir: PathPolicy { env_var: "HELIOS_UPDATER_DATA_DIR", default: "/var/lib/helios" },
+    frontend_releases_dir: PathPolicy { env_var: "HELIOS_UPDATER_FRONTEND_RELEASES_DIR", default: "/opt/helios/releases/frontend" },
+    service_releases_dir: PathPolicy { env_var: "HELIOS_UPDATER_SERVICE_RELEASES_DIR", default: "/opt/helios/releases/services" },
+    service_bin_dir: PathPolicy { env_var: "HELIOS_UPDATER_SERVICE_BIN_DIR", default: "/usr/bin" },
+    frontend_active_path: PathPolicy { env_var: "HELIOS_UPDATER_FRONTEND_ACTIVE_PATH", default: "/opt/helios/frontend" },
+    frontend_service_unit: StringPolicy { env_var: "HELIOS_UPDATER_FRONTEND_SERVICE_UNIT", default: "helios-frontend.service" },
+    updater_service_unit: StringPolicy { env_var: "HELIOS_UPDATER_SERVICE_UNIT", default: "helios-updater.service" },
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -84,14 +88,14 @@ impl UpdaterApplyPolicy {
 }
 
 pub const HELIOS_UPDATER_APPLY_POLICY: UpdaterApplyPolicy = UpdaterApplyPolicy {
-    fake_apply: BoolPolicy { env_var: "UPDATER_FAKE_APPLY", default: false },
-    allow_single_slot_inplace: BoolPolicy { env_var: "UPDATER_ALLOW_SINGLE_SLOT_INPLACE", default: false },
-    single_slot_requested: BoolPolicy { env_var: "UPDATER_SINGLE_SLOT", default: false },
-    stream_flash_requested: BoolPolicy { env_var: "UPDATER_STREAM_FLASH", default: false },
+    fake_apply: BoolPolicy { env_var: "HELIOS_UPDATER_FAKE_APPLY", default: false },
+    allow_single_slot_inplace: BoolPolicy { env_var: "HELIOS_UPDATER_ALLOW_SINGLE_SLOT_INPLACE", default: false },
+    single_slot_requested: BoolPolicy { env_var: "HELIOS_UPDATER_SINGLE_SLOT", default: false },
+    stream_flash_requested: BoolPolicy { env_var: "HELIOS_UPDATER_STREAM_FLASH", default: false },
 };
 
 pub fn updater_frontend_healthcheck_url() -> Option<String> {
-    match std::env::var("UPDATER_FRONTEND_HEALTHCHECK_URL") {
+    match std::env::var("HELIOS_UPDATER_FRONTEND_HEALTHCHECK_URL") {
         Ok(value) => {
             let trimmed = value.trim();
             if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
@@ -101,7 +105,7 @@ pub fn updater_frontend_healthcheck_url() -> Option<String> {
 }
 
 pub fn updater_api_healthcheck_url() -> Option<String> {
-    match std::env::var("UPDATER_API_HEALTHCHECK_URL") {
+    match std::env::var("HELIOS_UPDATER_API_HEALTHCHECK_URL") {
         Ok(value) => {
             let trimmed = value.trim();
             if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }

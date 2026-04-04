@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{fs, sync::Arc};
 
+use lib_runtime_policy::HELIOS_IPC_JOURNAL_POLICY;
 use serde::Serialize;
 use tokio::sync::{Mutex, RwLock, broadcast};
 use tracing::{error, info, warn};
@@ -19,13 +20,6 @@ use crate::api_observability::{RuntimeBroadcastCounters, RuntimeBroadcastSnapsho
 use self::engine::EngineConnection;
 use self::peripherals::SensorsConnection;
 use self::updater::UpdaterConnection;
-
-/// Default IPC socket locations for each runtime.
-pub const PERIPHERALS_SOCKET: &str = "/run/helios/peripherals.sock";
-pub const UPDATER_SOCKET: &str = "/run/helios/updater.sock";
-
-pub const DEFAULT_JOURNAL_DIR: &str = "/var/lib/helios/journal/ipc";
-pub const IPC_JOURNAL_DIR_ENV: &str = "HELIOS_IPC_JOURNAL_DIR";
 
 /// Live handles into each service connection.
 pub struct IpcHandles {
@@ -416,7 +410,7 @@ pub fn ensure_journal_dir() -> std::io::Result<()> {
 }
 
 pub fn journal_dir() -> PathBuf {
-    std::env::var_os(IPC_JOURNAL_DIR_ENV).filter(|value| !value.is_empty()).map(PathBuf::from).unwrap_or_else(|| PathBuf::from(DEFAULT_JOURNAL_DIR))
+    HELIOS_IPC_JOURNAL_POLICY.resolve().dir
 }
 
 pub fn journal_path(file_name: &str) -> PathBuf {

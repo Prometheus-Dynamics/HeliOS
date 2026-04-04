@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
-use super::config::SensorsClientConfig;
-use super::config::push_unique;
+use super::super::config::{SensorsClientConfig, push_unique};
 
 #[test]
 fn push_unique_deduplicates_socket_candidates() {

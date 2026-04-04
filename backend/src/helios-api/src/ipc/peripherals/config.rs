@@ -3,11 +3,9 @@ use std::{path::PathBuf, time::Duration};
 use lib_ipc::client::TransportConfig;
 use lib_ipc::types::FeatureSet;
 use lib_ipc::wire::ServiceKind;
-
-use crate::ipc::PERIPHERALS_SOCKET;
+use lib_runtime_policy::{HELIOS_API_PERIPHERALS_CLIENT_POLICY, HELIOS_PERIPHERALS_SERVICE_POLICY};
 
 pub(super) const DEV_PERIPHERALS_SOCKET: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/target/dev/run/peripherals.sock");
-pub(super) const DEFAULT_SESSION_IDLE_MS: u64 = 0;
 pub(super) const MAX_SESSION_IDLE_MS: u64 = 2_000;
 pub(super) const MAX_IDLE_SESSIONS: usize = 4;
 
@@ -65,19 +63,19 @@ impl TransportConfig for SensorsClientConfig {
 }
 
 pub(super) fn session_idle_timeout() -> Duration {
-    let raw = std::env::var("HELIOS_PERIPHERALS_SESSION_IDLE_MS").ok().and_then(|value| value.parse::<u64>().ok()).unwrap_or(DEFAULT_SESSION_IDLE_MS);
-    Duration::from_millis(raw).clamp(Duration::from_millis(0), Duration::from_millis(MAX_SESSION_IDLE_MS))
+    let raw = HELIOS_API_PERIPHERALS_CLIENT_POLICY.resolve().session_idle_ms;
+    Duration::from_millis(raw.min(MAX_SESSION_IDLE_MS))
 }
 
 pub(super) fn resolve_peripherals_socket_candidates() -> Vec<PathBuf> {
     let mut candidates = Vec::new();
-    for name in ["HELIOS_PERIPHERALS_SOCKET", "PERIPHERALS_SOCKET", "SENSORS_SOCKET", "SENSOR_SOCKET"] {
-        if let Ok(value) = std::env::var(name) {
-            push_unique(&mut candidates, PathBuf::from(value));
-        }
+    let service_policy = HELIOS_PERIPHERALS_SERVICE_POLICY.resolve();
+    let default_socket = HELIOS_PERIPHERALS_SERVICE_POLICY.default_socket_path();
+    if service_policy.socket_path != default_socket {
+        push_unique(&mut candidates, service_policy.socket_path);
     }
     push_unique(&mut candidates, PathBuf::from(DEV_PERIPHERALS_SOCKET));
-    push_unique(&mut candidates, PathBuf::from(PERIPHERALS_SOCKET));
+    push_unique(&mut candidates, default_socket);
     candidates
 }
 

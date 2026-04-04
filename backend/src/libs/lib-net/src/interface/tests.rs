@@ -1,7 +1,15 @@
+#![allow(unsafe_code)]
+
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::sync::{Mutex, OnceLock};
 
 use super::*;
 use rtnetlink::packet_route::link::{BondMode, LinkMessage};
+
+fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(())).lock().expect("env lock poisoned")
+}
 
 #[test]
 fn parse_link_info_extracts_vlan_and_bond() {
@@ -26,6 +34,7 @@ fn parse_link_info_extracts_vlan_and_bond() {
 
 #[test]
 fn dns_config_roundtrip() {
+    let _lock = env_lock();
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("resolv.conf");
     super::dns::set_test_dns_path(Some(path.clone()));
@@ -40,6 +49,29 @@ fn dns_config_roundtrip() {
     });
 
     super::dns::set_test_dns_path(None);
+}
+
+#[test]
+fn dns_config_uses_namespaced_env_override() {
+    let _lock = env_lock();
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("custom-resolv.conf");
+    std::fs::write(&path, "nameserver 8.8.8.8\nsearch lab.local\n").expect("write resolv.conf");
+    super::dns::set_test_dns_path(None);
+    unsafe {
+        std::env::set_var("HELIOS_DNS_CONFIG_PATH", &path);
+    }
+
+    let runtime = tokio::runtime::Runtime::new().expect("runtime");
+    runtime.block_on(async {
+        let read = super::dns::read_dns_config().await.expect("read dns");
+        assert_eq!(read.servers, vec![IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))]);
+        assert_eq!(read.search, vec!["lab.local".to_string()]);
+    });
+
+    unsafe {
+        std::env::remove_var("HELIOS_DNS_CONFIG_PATH");
+    }
 }
 
 #[test]

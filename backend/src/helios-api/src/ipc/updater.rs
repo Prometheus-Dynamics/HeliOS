@@ -3,10 +3,11 @@ use std::{path::PathBuf, sync::Arc};
 use helios_updater::client::Error as UpdaterError;
 use helios_updater::client::{UpdaterClient, UpdaterClientConfig, UpdaterSession};
 use helios_updater::ipc::{UpdaterCommand, UpdaterEvent};
+use lib_runtime_policy::HELIOS_UPDATER_FILESYSTEM_POLICY;
 use tokio::time::{Duration, timeout};
 use tracing::{error, info};
 
-use crate::ipc::{UPDATER_SOCKET, journal_path};
+use crate::ipc::journal_path;
 
 const DEV_UPDATER_SOCKET: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/target/dev/run/updater.sock");
 
@@ -73,18 +74,62 @@ async fn handshake_with_timeout(client: &UpdaterClient) -> Result<UpdaterSession
 
 fn resolve_updater_socket_candidates() -> Vec<PathBuf> {
     let mut candidates = Vec::new();
-    for name in ["HELIOS_UPDATER_SOCKET", "UPDATER_SOCKET"] {
-        if let Ok(value) = std::env::var(name) {
-            push_unique(&mut candidates, PathBuf::from(value));
-        }
+    let filesystem_policy = HELIOS_UPDATER_FILESYSTEM_POLICY.resolve();
+    let default_socket = HELIOS_UPDATER_FILESYSTEM_POLICY.default_socket_path();
+    if filesystem_policy.socket_path != default_socket {
+        push_unique(&mut candidates, filesystem_policy.socket_path);
     }
     push_unique(&mut candidates, PathBuf::from(DEV_UPDATER_SOCKET));
-    push_unique(&mut candidates, PathBuf::from(UPDATER_SOCKET));
+    push_unique(&mut candidates, default_socket);
     candidates
 }
 
 fn push_unique(paths: &mut Vec<PathBuf>, candidate: PathBuf) {
     if !paths.iter().any(|path| path == &candidate) {
         paths.push(candidate);
+    }
+}
+
+#[cfg(test)]
+#[allow(unsafe_code)]
+mod tests {
+    use super::{DEV_UPDATER_SOCKET, resolve_updater_socket_candidates};
+    use std::path::PathBuf;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().expect("env lock poisoned")
+    }
+
+    #[test]
+    fn updater_candidates_prefer_canonical_socket_override() {
+        let _lock = env_lock();
+        unsafe {
+            std::env::set_var("HELIOS_UPDATER_SOCKET", "/tmp/policy-updater.sock");
+        }
+
+        let candidates = resolve_updater_socket_candidates();
+        assert_eq!(candidates, vec![PathBuf::from("/tmp/policy-updater.sock"), PathBuf::from(DEV_UPDATER_SOCKET), PathBuf::from("/run/helios/updater.sock"),]);
+
+        unsafe {
+            std::env::remove_var("HELIOS_UPDATER_SOCKET");
+        }
+    }
+
+    #[test]
+    fn updater_candidates_ignore_removed_socket_alias() {
+        let _lock = env_lock();
+        unsafe {
+            std::env::remove_var("HELIOS_UPDATER_SOCKET");
+            std::env::set_var("UPDATER_SOCKET", "/tmp/legacy-updater.sock");
+        }
+
+        let candidates = resolve_updater_socket_candidates();
+        assert_eq!(candidates, vec![PathBuf::from(DEV_UPDATER_SOCKET), PathBuf::from("/run/helios/updater.sock")]);
+
+        unsafe {
+            std::env::remove_var("UPDATER_SOCKET");
+        }
     }
 }

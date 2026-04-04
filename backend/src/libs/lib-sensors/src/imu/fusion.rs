@@ -1,4 +1,5 @@
 use super::*;
+use lib_runtime_policy::{HELIOS_IMU_FUSION_POLICY, ResolvedImuFusionPolicy};
 
 pub(super) struct ImuAxes {
     pub(super) accel: [f32; 3],
@@ -40,18 +41,23 @@ pub(super) fn remap_sensor_to_backend(v: [f32; 3]) -> [f32; 3] {
 pub(super) fn imu_frame_correction() -> Quaternion {
     static CACHED: OnceLock<Quaternion> = OnceLock::new();
     *CACHED.get_or_init(|| {
-        let Ok(raw) = std::env::var("IMU_FRAME_CORRECTION_WXYZ") else {
+        let Some(raw) = imu_fusion_policy().frame_correction_wxyz.as_deref() else {
             return IMU_FRAME_CORRECTION;
         };
 
-        match parse_quat_wxyz(&raw) {
+        match parse_quat_wxyz(raw) {
             Some(q) => q,
             None => {
-                warn!(value = %raw, "Invalid IMU_FRAME_CORRECTION_WXYZ; using built-in correction");
+                warn!(value = %raw, "Invalid HELIOS_IMU_FRAME_CORRECTION_WXYZ; using built-in correction");
                 IMU_FRAME_CORRECTION
             }
         }
     })
+}
+
+fn imu_fusion_policy() -> &'static ResolvedImuFusionPolicy {
+    static CACHED: OnceLock<ResolvedImuFusionPolicy> = OnceLock::new();
+    CACHED.get_or_init(|| HELIOS_IMU_FUSION_POLICY.resolve())
 }
 
 pub(super) fn parse_quat_wxyz(raw: &str) -> Option<Quaternion> {
@@ -502,18 +508,15 @@ pub(super) fn fuse_orientation_stateful(
 }
 
 pub(super) fn mag_norm_rel_tol() -> f32 {
-    static CACHED: OnceLock<f32> = OnceLock::new();
-    *CACHED.get_or_init(|| std::env::var("HELIOS_IMU_MAG_NORM_REL_TOL").ok().and_then(|raw| raw.parse::<f32>().ok()).map(|v| v.clamp(0.0, 5.0)).unwrap_or(0.45))
+    imu_fusion_policy().mag_norm_rel_tol
 }
 
 pub(super) fn mag_norm_lp_tau_seconds() -> f32 {
-    static CACHED: OnceLock<f32> = OnceLock::new();
-    *CACHED.get_or_init(|| std::env::var("HELIOS_IMU_MAG_NORM_LP_TAU_SECONDS").ok().and_then(|raw| raw.parse::<f32>().ok()).map(|v| v.clamp(0.05, 60.0)).unwrap_or(6.0))
+    imu_fusion_policy().mag_norm_lp_tau_seconds
 }
 
 pub(super) fn mag_min_horizontal_component() -> f32 {
-    static CACHED: OnceLock<f32> = OnceLock::new();
-    *CACHED.get_or_init(|| std::env::var("HELIOS_IMU_MAG_MIN_HORIZONTAL").ok().and_then(|raw| raw.parse::<f32>().ok()).map(|v| v.clamp(0.0, 1.0)).unwrap_or(0.15))
+    imu_fusion_policy().mag_min_horizontal
 }
 
 pub(super) fn select_mag_for_fusion(
