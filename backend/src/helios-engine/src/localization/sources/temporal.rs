@@ -28,6 +28,8 @@ struct LocalizationTemporalRuntime {
 }
 
 fn localization_temporal_runtime() -> &'static LocalizationTemporalRuntime {
+    // Temporal smoothing has to outlive individual parse calls, so this keeps one keyed runtime
+    // cache for the process and prunes entries by staleness during updates.
     static RUNTIME: OnceLock<LocalizationTemporalRuntime> = OnceLock::new();
     RUNTIME.get_or_init(|| LocalizationTemporalRuntime { tag_pose_state: Mutex::new(HashMap::new()), tag_pair_distance_state: Mutex::new(HashMap::new()) })
 }

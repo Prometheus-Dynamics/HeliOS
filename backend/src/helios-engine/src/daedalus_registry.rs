@@ -151,6 +151,8 @@ struct DynamicPluginRuntime {
 }
 
 fn dynamic_plugin_runtime(requested_namespaces: Option<&BTreeSet<String>>) -> &'static DynamicPluginRuntime {
+    // Plugin discovery/loading is intentionally process-global because upstream keeps loaded
+    // dylibs resident for process lifetime anyway; this cache prevents repeated scans and dlopen.
     static RUNTIME: OnceLock<DynamicPluginRuntime> = OnceLock::new();
     RUNTIME.get_or_init(|| DynamicPluginRuntime { cache: Mutex::new(init_dynamic_plugin_cache(requested_namespaces)) })
 }

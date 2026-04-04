@@ -64,6 +64,8 @@ struct UndistortedFisheyeModelRuntime {
 }
 
 fn undistorted_fisheye_model_runtime() -> &'static UndistortedFisheyeModelRuntime {
+    // Daedalus source parsing is stateless from the graph's perspective, so the per-source
+    // fisheye model vote cache lives in one keyed runtime that naturally expires stale entries.
     static RUNTIME: OnceLock<UndistortedFisheyeModelRuntime> = OnceLock::new();
     RUNTIME.get_or_init(|| UndistortedFisheyeModelRuntime { state: Mutex::new(HashMap::new()) })
 }
