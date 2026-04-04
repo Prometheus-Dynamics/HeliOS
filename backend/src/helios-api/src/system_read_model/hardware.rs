@@ -64,12 +64,15 @@ pub(super) async fn sample_power_from_peripherals(state: Option<&Weak<IpcHandles
 
     let handles = state?.upgrade()?;
     let sensors = handles.ensure_sensors().await?;
-    let response = tokio::time::timeout(tokio::time::Duration::from_millis(250), sensors.sensor_snapshot(SensorScope::Device)).await.ok()?;
+    let response = tokio::time::timeout(tokio::time::Duration::from_millis(750), sensors.sensor_snapshot(SensorScope::Device)).await.ok()?;
     let response = response.ok()?;
     let snapshot = response.ok()?;
     let status = power_status_from_snapshot(&snapshot);
-
-    Some(PowerTelemetry { watts: status.watts.map(|value| value as f32), volts: status.volts.map(|value| value as f32), amps: status.amps.map(|value| value as f32) })
+    let telemetry = PowerTelemetry { watts: status.watts.map(|value| value as f32), volts: status.volts.map(|value| value as f32), amps: status.amps.map(|value| value as f32) };
+    if telemetry.watts.is_none() && telemetry.volts.is_none() && telemetry.amps.is_none() {
+        return None;
+    }
+    Some(telemetry)
 }
 
 fn read_gpu_busy_percent() -> Option<f32> {

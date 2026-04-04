@@ -4,8 +4,10 @@
 /* eslint-disable */
 import type { Nt4BridgeObservabilitySnapshot } from './Nt4BridgeObservabilitySnapshot';
 import type { Nt4PoolObservabilitySnapshot } from './Nt4PoolObservabilitySnapshot';
+import type { Nt4SettingsCacheObservabilitySnapshot } from './Nt4SettingsCacheObservabilitySnapshot';
 export type Nt4ObservabilitySnapshot = {
     bridge: Nt4BridgeObservabilitySnapshot;
     pool: Nt4PoolObservabilitySnapshot;
+    settings_cache: Nt4SettingsCacheObservabilitySnapshot;
 };
 

@@ -97,10 +97,23 @@ pub enum FieldMapSource {
 const FIELD_MAP_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan::strict("field map document", CURRENT_FIELD_MAP_SCHEMA_VERSION);
 
 pub fn parse_field_map_document(bytes: &[u8]) -> Result<(FieldMapDocument, bool), String> {
-    let raw = serde_json::from_slice::<serde_json::Value>(bytes).map_err(|err| format!("failed to decode field map document: {err}"))?;
+    let mut raw = serde_json::from_slice::<serde_json::Value>(bytes).map_err(|err| format!("failed to decode field map document: {err}"))?;
+    let mut dirty = false;
+    if let Some(object) = raw.as_object_mut() {
+        // Older persisted map docs and some seeded/generated writers emit the
+        // schema field in camelCase because the struct is serialized with
+        // `rename_all = "camelCase"`, while schema migration expects the
+        // canonical snake_case key.
+        if !object.contains_key("schema_version") {
+            if let Some(value) = object.get("schemaVersion").cloned() {
+                object.insert("schema_version".to_string(), value);
+                dirty = true;
+            }
+        }
+    }
     let migrated = normalize_to_current(raw.clone(), &FIELD_MAP_SCHEMA_PLAN)?;
     let parsed = serde_json::from_value::<FieldMapDocument>(migrated.clone()).map_err(|err| format!("failed to parse field map document: {err}"))?;
-    Ok((parsed, migrated != raw))
+    Ok((parsed, dirty || migrated != raw))
 }
 
 pub fn hydrate_map_document(doc: &mut FieldMapDocument) {
@@ -184,5 +197,22 @@ mod tests {
         .expect("encode field map");
         let err = parse_field_map_document(&bytes).expect_err("future field map should fail");
         assert!(err.contains("unsupported field map document schema_version"));
+    }
+
+    #[test]
+    fn parse_field_map_document_accepts_camel_case_schema_version() {
+        let bytes = serde_json::to_vec(&json!({
+            "schemaVersion": CURRENT_FIELD_MAP_SCHEMA_VERSION,
+            "id": "field-a",
+            "name": "Field A",
+            "widthM": 1.0,
+            "depthM": 2.0,
+            "markers": [],
+            "source": { "kind": "limelightFmap" }
+        }))
+        .expect("encode field map");
+        let (parsed, dirty) = parse_field_map_document(&bytes).expect("camelCase field map should decode");
+        assert_eq!(parsed.id, "field-a");
+        assert!(dirty);
     }
 }

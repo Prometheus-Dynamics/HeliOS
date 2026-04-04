@@ -311,6 +311,8 @@ pub struct DeviceRuntimeSnapshot {
     responses((status = 200, description = "Platform capabilities, resolved runtime policy, and observability snapshot", body = DeviceRuntimeSnapshot))
 )]
 pub async fn runtime(State(state): State<crate::http::AppState>) -> ApiResult<impl axum::response::IntoResponse> {
+    const SENSOR_TIMEOUT_MS: u64 = 750;
+
     let platform = detect_platform_identity();
     let sensors = state.ensure_sensors().await;
     let sensors_available = sensors.is_some();
@@ -337,8 +339,8 @@ pub async fn runtime(State(state): State<crate::http::AppState>) -> ApiResult<im
         settings_cache: map_nt4_settings_cache_snapshot(lib_runtime_policy::nt4_settings_cache_snapshot()),
     };
     let imu = match sensors {
-        Some(conn) => match conn.sensor_snapshot_typed(SensorScope::Device).await {
-            Ok(Ok(snapshot)) => match snapshot.get(&helios_peripherals::dto::SensorKind::Imu) {
+        Some(conn) => match tokio::time::timeout(tokio::time::Duration::from_millis(SENSOR_TIMEOUT_MS), conn.sensor_snapshot_typed(SensorScope::Device)).await {
+            Ok(Ok(Ok(snapshot))) => match snapshot.get(&helios_peripherals::dto::SensorKind::Imu) {
                 Some(SensorReading::Imu(imu)) => ImuRuntimeObservabilitySnapshot {
                     available: true,
                     updated_at: imu.updated_at.map(|value| value.to_rfc3339()),
@@ -358,8 +360,13 @@ pub async fn runtime(State(state): State<crate::http::AppState>) -> ApiResult<im
                 },
                 _ => ImuRuntimeObservabilitySnapshot { available: true, last_error: Some("IMU reading not present in sensor snapshot".into()), ..Default::default() },
             },
-            Ok(Err(reason)) => ImuRuntimeObservabilitySnapshot { available: true, last_error: Some(reason), ..Default::default() },
-            Err(error) => ImuRuntimeObservabilitySnapshot { available: true, last_error: Some(error.to_string()), ..Default::default() },
+            Ok(Ok(Err(reason))) => ImuRuntimeObservabilitySnapshot { available: true, last_error: Some(reason), ..Default::default() },
+            Ok(Err(error)) => ImuRuntimeObservabilitySnapshot { available: true, last_error: Some(error.to_string()), ..Default::default() },
+            Err(_) => ImuRuntimeObservabilitySnapshot {
+                available: true,
+                last_error: Some(format!("timed out after {SENSOR_TIMEOUT_MS} ms while reading IMU observability")),
+                ..Default::default()
+            },
         },
         None => ImuRuntimeObservabilitySnapshot::default(),
     };

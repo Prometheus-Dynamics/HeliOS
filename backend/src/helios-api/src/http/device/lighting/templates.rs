@@ -43,7 +43,15 @@ use serde::Deserialize;
 
 impl LightingAnimationTemplateDocumentRaw {
     pub(super) fn decode_str(raw: &str) -> Result<Self, String> {
-        let value = serde_json::from_str::<serde_json::Value>(raw).map_err(|err| format!("failed to decode lighting template: {err}"))?;
+        let mut value = serde_json::from_str::<serde_json::Value>(raw).map_err(|err| format!("failed to decode lighting template: {err}"))?;
+        // Built-in templates shipped in Gaia predate explicit schema tagging.
+        // Treat them as current-version documents when the schema key is absent.
+        if let Some(object) = value.as_object_mut()
+            && !object.contains_key("schema_version")
+            && !object.contains_key("schemaVersion")
+        {
+            object.insert("schema_version".to_string(), serde_json::Value::from(CURRENT_LIGHTING_TEMPLATE_DOCUMENT_SCHEMA_VERSION));
+        }
         let migrated = normalize_to_current(value, &LIGHTING_TEMPLATE_DOCUMENT_SCHEMA_PLAN)?;
         let mut parsed: Self = serde_json::from_value(migrated).map_err(|err| format!("failed to parse lighting template: {err}"))?;
         parsed.schema_version = CURRENT_LIGHTING_TEMPLATE_DOCUMENT_SCHEMA_VERSION;

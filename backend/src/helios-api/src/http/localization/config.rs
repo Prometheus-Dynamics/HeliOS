@@ -174,16 +174,32 @@ pub(crate) async fn load_config() -> ApiResult<LocalizationConfig> {
     let path = config_path().await.map_err(|err| ApiError::internal(format!("failed to resolve localization config: {err}")))?;
     let bytes = match tokio::fs::read(&path).await {
         Ok(bytes) => bytes,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(LocalizationConfig::default()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(default_config_with_seeded_map().await),
         Err(err) => return Err(ApiError::internal(format!("failed to read localization config: {err}"))),
     };
     match decode_localization_config(&bytes) {
         Ok(config) => Ok(config),
         Err(err) => {
             warn!(path = %path.display(), %err, "invalid persisted localization config; using defaults");
-            Ok(LocalizationConfig::default())
+            Ok(default_config_with_seeded_map().await)
         }
     }
+}
+
+async fn default_config_with_seeded_map() -> LocalizationConfig {
+    let mut config = LocalizationConfig::default();
+    let Ok(maps) = super::maps::list_map_summaries().await else {
+        return config;
+    };
+    let Some(default_map_id) = maps.first().map(|map| map.id.clone()) else {
+        return config;
+    };
+    for profile in &mut config.profiles {
+        if profile.field_map_id.as_deref().is_none_or(|value| value.trim().is_empty()) {
+            profile.field_map_id = Some(default_map_id.clone());
+        }
+    }
+    normalize_config(config)
 }
 
 async fn config_path() -> std::io::Result<PathBuf> {

@@ -9,6 +9,7 @@ import type { EngineCrashGuardPolicySnapshot } from './EngineCrashGuardPolicySna
 import type { I2cInventoryPolicySnapshot } from './I2cInventoryPolicySnapshot';
 import type { ImuRuntimePolicySnapshot } from './ImuRuntimePolicySnapshot';
 import type { LogSourcesPolicySnapshot } from './LogSourcesPolicySnapshot';
+import type { Nt4SettingsCachePolicySnapshot } from './Nt4SettingsCachePolicySnapshot';
 import type { PeripheralsPowerPolicySnapshot } from './PeripheralsPowerPolicySnapshot';
 import type { ResourceGuardPolicySnapshot } from './ResourceGuardPolicySnapshot';
 import type { StartupCacheWarmPolicySnapshot } from './StartupCacheWarmPolicySnapshot';
@@ -25,6 +26,7 @@ export type DeviceRuntimePoliciesSnapshot = {
     imu: ImuRuntimePolicySnapshot;
     log_filter: string;
     log_sources: LogSourcesPolicySnapshot;
+    nt4_settings_cache: Nt4SettingsCachePolicySnapshot;
     peripherals_power: PeripheralsPowerPolicySnapshot;
     peripherals_tokio: TokioRuntimePolicySnapshot;
     resource_guard: ResourceGuardPolicySnapshot;

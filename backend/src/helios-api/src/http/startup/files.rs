@@ -10,7 +10,7 @@ use crate::http::storage;
 #[cfg(test)]
 mod tests;
 
-const DEFAULT_STARTUP_PRESET_TOML_PATH: &str = "/var/lib/helios/startup.toml";
+const DEFAULT_STARTUP_PRESET_TOML_PATH: &str = "/etc/helios/startup.toml";
 const STARTUP_PRESET_FILE_ENV: &str = "HELIOS_STARTUP_PRESET_FILE";
 const STARTUP_PRESET_MARKER_ENV: &str = "HELIOS_STARTUP_PRESET_MARKER";
 const STARTUP_PRESET_MARKER_NAME: &str = ".startup-preset-applied-v1.json";

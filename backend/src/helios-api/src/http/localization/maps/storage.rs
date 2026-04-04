@@ -91,7 +91,7 @@ pub(super) async fn find_map_id_for_source_file(filename: &str) -> ApiResult<Opt
     Ok(None)
 }
 
-pub(super) async fn list_map_summaries() -> ApiResult<Vec<FieldMapSummary>> {
+pub(crate) async fn list_map_summaries() -> ApiResult<Vec<FieldMapSummary>> {
     let dir = map_storage_dir().await?;
     let mut reader = fs::read_dir(&dir).await.map_err(|err| ApiError::internal(format!("failed to list map storage: {err}")))?;
     let mut out = Vec::new();

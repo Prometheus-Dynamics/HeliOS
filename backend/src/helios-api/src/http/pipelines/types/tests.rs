@@ -38,15 +38,16 @@ fn pipeline_document_encode_stamps_current_schema_version() {
 }
 
 #[test]
-fn pipeline_template_document_decode_rejects_missing_schema_version() {
+fn pipeline_template_document_decode_accepts_builtin_template_without_schema_version() {
     let raw = serde_json::json!({
         "id": "demo",
         "name": "Demo Template",
         "graph": { "nodes": [], "edges": [] }
     });
 
-    let err = PipelineTemplateDocumentRaw::decode_str(&serde_json::to_string(&raw).expect("encode")).expect_err("missing schema version should fail");
-    assert!(err.contains("missing required schema_version"));
+    let parsed = PipelineTemplateDocumentRaw::decode_str(&serde_json::to_string(&raw).expect("encode")).expect("builtin template without schema_version should decode");
+    assert_eq!(parsed.schema_version, CURRENT_PIPELINE_TEMPLATE_DOCUMENT_SCHEMA_VERSION);
+    assert_eq!(parsed.id.as_deref(), Some("demo"));
 }
 
 #[test]

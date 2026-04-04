@@ -2909,6 +2909,7 @@ export interface components {
             engine_ipc: components["schemas"]["EngineIpcObservabilitySnapshot"];
             health: components["schemas"]["HealthPayload"];
             imu: components["schemas"]["ImuRuntimeObservabilitySnapshot"];
+            json_store_locks: components["schemas"]["RuntimeLockRegistrySnapshot"];
             localization: components["schemas"]["LocalizationObservabilitySnapshot"];
             log_source_count: number;
             log_sources_freshness: components["schemas"]["ReadModelFreshness"];
@@ -2919,6 +2920,8 @@ export interface components {
             os: components["schemas"]["OsReleaseInfo"];
             realtime_updates: components["schemas"]["RuntimeBroadcastSnapshot"];
             resource_guard: components["schemas"]["ResourceGuardStatus"];
+            snapshot_locks: components["schemas"]["RuntimeLockRegistrySnapshot"];
+            stream_runtime_capabilities_cache: components["schemas"]["StreamRuntimeCapabilitiesCacheSnapshot"];
             streams: components["schemas"]["RuntimeStreamsPayload"];
         };
         DeviceRuntimePoliciesSnapshot: {
@@ -2932,6 +2935,7 @@ export interface components {
             imu: components["schemas"]["ImuRuntimePolicySnapshot"];
             log_filter: string;
             log_sources: components["schemas"]["LogSourcesPolicySnapshot"];
+            nt4_settings_cache: components["schemas"]["Nt4SettingsCachePolicySnapshot"];
             peripherals_power: components["schemas"]["PeripheralsPowerPolicySnapshot"];
             peripherals_tokio: components["schemas"]["TokioRuntimePolicySnapshot"];
             resource_guard: components["schemas"]["ResourceGuardPolicySnapshot"];
@@ -3988,6 +3992,8 @@ export interface components {
             /** Format: int64 */
             entries: number;
             /** Format: int64 */
+            evictions: number;
+            /** Format: int64 */
             hits: number;
             /** Format: int64 */
             inserts: number;
@@ -4469,6 +4475,7 @@ export interface components {
         Nt4ObservabilitySnapshot: {
             bridge: components["schemas"]["Nt4BridgeObservabilitySnapshot"];
             pool: components["schemas"]["Nt4PoolObservabilitySnapshot"];
+            settings_cache: components["schemas"]["Nt4SettingsCacheObservabilitySnapshot"];
         };
         Nt4PeerProbe: {
             error?: string | null;
@@ -4506,6 +4513,25 @@ export interface components {
             server_port?: number | null;
             /** @description When disabled, HeliOS will avoid subscribing to NetworkTables topics (used by explorer + peer telemetry). */
             subscriptions_enabled?: boolean;
+        };
+        Nt4SettingsCacheObservabilitySnapshot: {
+            /** Format: int64 */
+            hits: number;
+            last_error?: string | null;
+            /** Format: int64 */
+            last_loaded_bytes?: number | null;
+            /** Format: int64 */
+            misses: number;
+            /** Format: int64 */
+            refreshes: number;
+            /** Format: int64 */
+            source_modified_ms?: number | null;
+            source_path?: string | null;
+        };
+        Nt4SettingsCachePolicySnapshot: {
+            max_file_bytes: number;
+            /** Format: int64 */
+            refresh_interval_ms: number;
         };
         Nt4TopicInfo: {
             data_type: string;
@@ -5485,6 +5511,16 @@ export interface components {
             /** Format: int64 */
             subscribers: number;
         };
+        RuntimeLockRegistrySnapshot: {
+            /** Format: int64 */
+            acquires: number;
+            /** Format: int64 */
+            active_entries: number;
+            /** Format: int64 */
+            peak_entries: number;
+            /** Format: int64 */
+            pruned_entries: number;
+        };
         RuntimeStreamsPayload: {
             capabilities: components["schemas"]["StreamCapabilitiesResponse"];
             codecs: components["schemas"]["CodecInfo"][];
@@ -6164,6 +6200,17 @@ export interface components {
             peak_processed_frame_bytes?: number;
             /** Format: int64 */
             peak_raw_clone_bytes?: number;
+        };
+        StreamRuntimeCapabilitiesCacheSnapshot: {
+            /** Format: int64 */
+            entries: number;
+            /** Format: int64 */
+            hits: number;
+            last_error?: string | null;
+            /** Format: int64 */
+            misses: number;
+            /** Format: int64 */
+            refreshes: number;
         };
         StreamRuntimeState: {
             capture?: components["schemas"]["StreamCaptureRuntimeState"];

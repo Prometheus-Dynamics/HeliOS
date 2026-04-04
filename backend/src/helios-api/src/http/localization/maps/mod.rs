@@ -5,7 +5,7 @@ mod storage;
 mod support;
 
 pub(crate) use seed::seed_bundled_field_maps;
-pub(crate) use storage::load_map_document;
+pub(crate) use storage::{list_map_summaries, load_map_document};
 
 use axum::{
     Json, Router,
@@ -21,7 +21,6 @@ use uuid::Uuid;
 use self::{
     convert::{LimelightFmap, convert_limelight_fmap},
     overlay::extract_overlay,
-    storage::list_map_summaries,
     support::{derive_map_name, max_upload_bytes, store_map_media_copy},
 };
 use super::super::AppState;

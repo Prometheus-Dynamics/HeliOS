@@ -53,9 +53,6 @@ export default defineConfig(({ mode }) => {
 						if (id.includes('node_modules/three/examples/jsm/')) {
 							return 'vendor-three-extras';
 						}
-						if (id.includes('node_modules/@xyflow')) {
-							return 'vendor-xyflow';
-						}
 						if (id.includes('node_modules/xterm')) {
 							return 'vendor-xterm';
 						}

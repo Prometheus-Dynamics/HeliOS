@@ -2,11 +2,11 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-export type LocalizationSolveCacheSnapshot = {
+export type StreamRuntimeCapabilitiesCacheSnapshot = {
     entries: number;
-    evictions: number;
     hits: number;
-    inserts: number;
+    last_error?: string | null;
     misses: number;
+    refreshes: number;
 };
 

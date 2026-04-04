@@ -55,14 +55,16 @@ fn entry_to_response_preserves_sequence_and_animation() {
 }
 
 #[test]
-fn lighting_template_decode_rejects_missing_schema_version() {
+fn lighting_template_decode_accepts_builtin_template_without_schema_version() {
     let raw = serde_json::json!({
         "name": "Pulse",
         "frame": [{ "r": 255, "g": 0, "b": 0, "w": 0 }]
     });
 
-    let err = LightingAnimationTemplateDocumentRaw::decode_str(&serde_json::to_string(&raw).expect("encode")).expect_err("missing schema version should fail");
-    assert!(err.contains("missing required schema_version"));
+    let parsed = LightingAnimationTemplateDocumentRaw::decode_str(&serde_json::to_string(&raw).expect("encode"))
+        .expect("builtin lighting template without schema_version should decode");
+    assert_eq!(parsed.schema_version, 1);
+    assert_eq!(parsed.name.as_deref(), Some("Pulse"));
 }
 
 #[test]
