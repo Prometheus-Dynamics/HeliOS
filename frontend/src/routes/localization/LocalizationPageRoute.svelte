@@ -3,6 +3,7 @@
   import { subscribeDomainInvalidations } from '$lib/api/invalidation';
   import { scheduleAfterPaint, scheduleWhenIdle } from '$lib/utils/browserSchedule';
   import LocalizationPageRouteContent from './LocalizationPageRouteContent.svelte';
+  import type { LocalizationPageRouteState } from './localizationPageRouteTypes';
   import { createLocalizationPageRouteCore } from './localizationPageRouteCore.svelte';
   import { createLocalizationPageRouteProfileState } from './localizationPageRouteProfileState.svelte';
   import { createLocalizationPageRouteViewerState } from './localizationPageRouteViewerState.svelte';
@@ -26,8 +27,11 @@
     selectedCustomField: { configurable: true, get: () => viewer.selectedCustomField }
   });
 
-  const state = core.state as Record<string, any>;
+  const coreDescriptors = Object.getOwnPropertyDescriptors(core);
+  delete coreDescriptors.state;
+  const state = core.state as LocalizationPageRouteState;
   Object.defineProperties(state, {
+    ...coreDescriptors,
     ...Object.getOwnPropertyDescriptors(profile),
     ...Object.getOwnPropertyDescriptors(viewer),
     activeProfile: { configurable: true, enumerable: true, get: () => core.activeProfile.current },

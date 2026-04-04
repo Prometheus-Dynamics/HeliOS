@@ -1,9 +1,10 @@
 <script lang="ts">
   import LocalizationWorkspace from '$lib/features/localization/page/LocalizationWorkspace.svelte';
+  import type { LocalizationPageRouteState } from './localizationPageRouteTypes';
   import LocalizationProfileSidebar from './LocalizationProfileSidebar.svelte';
   import LocalizationDeleteProfileModal from './LocalizationDeleteProfileModal.svelte';
 
-  let { state }: { state: Record<string, any> } = $props();
+  let { state }: { state: LocalizationPageRouteState } = $props();
 </script>
 
 <div class="flex h-full min-h-0 flex-1 flex-col gap-4 overflow-hidden">

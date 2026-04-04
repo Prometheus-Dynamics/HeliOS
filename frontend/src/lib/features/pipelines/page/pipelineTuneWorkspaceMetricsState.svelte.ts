@@ -19,6 +19,7 @@ import {
 import { runTuneMetricsRefresh } from './pipelineTuneEffects';
 
 type StreamsApi = Pick<typeof SharedStreamsApi, 'getMetrics'>;
+type UnknownObject = { [key: string]: unknown };
 
 type Args = {
   activeTab: Readable<'pipeline' | 'tune'>;
@@ -32,7 +33,7 @@ type Args = {
   streamUsesPipeline: (stream: StreamInfo, pipelineId: string) => boolean;
   streamLabel: (stream: StreamInfo) => string;
   extractGraphAlias: (graph: unknown) => string | null;
-  asRecord: (value: unknown) => Record<string, unknown> | null;
+  asRecord: (value: unknown) => UnknownObject | null;
   asStreamInfo: (value: unknown) => StreamInfo | null;
   refreshPipelineMetrics: () => void;
 };
@@ -188,7 +189,7 @@ export function createTuneWorkspaceMetricsState(args: Args) {
         );
         if (!isMounted) return;
         upsertSnapshot(
-          buildTuneMetricsSnapshot(ref, (metrics ?? {}) as Record<string, unknown>, {
+          buildTuneMetricsSnapshot(ref, metrics, {
             pipelineId: get(selectedPipeline)?.id ?? null
           })
         );
@@ -229,7 +230,7 @@ export function createTuneWorkspaceMetricsState(args: Args) {
             sawAnyMetrics = true;
             reconnectAttempts = 0;
             upsertSnapshot(
-              buildTuneMetricsSnapshot(ref, (event.metrics ?? {}) as Record<string, unknown>, {
+              buildTuneMetricsSnapshot(ref, event.metrics, {
                 pipelineId: get(selectedPipeline)?.id ?? null
               })
             );
@@ -436,10 +437,18 @@ export function createTuneWorkspaceMetricsState(args: Args) {
   return {
     TUNE_METRICS_POLL_MS,
     fetchTuneMetricsSnapshots,
-    metricsSource,
-    metricsStatusLabel,
-    metricsUpdatedLabel,
-    pipelineMetricsSummary,
+    get metricsSource() {
+      return metricsSource;
+    },
+    get metricsStatusLabel() {
+      return metricsStatusLabel;
+    },
+    get metricsUpdatedLabel() {
+      return metricsUpdatedLabel;
+    },
+    get pipelineMetricsSummary() {
+      return pipelineMetricsSummary;
+    },
     get tuneMetricsError() {
       return tuneMetricsError;
     },

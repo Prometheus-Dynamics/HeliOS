@@ -1,3 +1,7 @@
 <script module lang="ts">
-  export { createPipelineTuneWorkspaceContext } from './pipelineTuneWorkspaceContextState.svelte';
+  export {
+    createPipelineTuneWorkspaceContext,
+    type PipelineTuneWorkspaceContext,
+    type PipelineTuneWorkspaceContextGetter
+  } from './pipelineTuneWorkspaceContextState.svelte';
 </script>

@@ -663,6 +663,7 @@ export function createLocalizationPageRouteProfileState(core: LocalizationPageRo
     outputsForProfile,
     removeActiveSolver,
     resolveProfileSourceId,
+    setFieldMapSelection: localizationActions.setFieldMapSelection,
     setActiveSolverIdForUi,
     setActiveSolverMode,
     setActiveSolverUseAllSources,
@@ -699,6 +700,9 @@ export function createLocalizationPageRouteProfileState(core: LocalizationPageRo
     },
     get compatibleSources() {
       return compatibleSources;
+    },
+    get derivedPoseSpaces() {
+      return derivedPoseSpaces;
     },
     get filteredProfiles() {
       return filteredProfiles;

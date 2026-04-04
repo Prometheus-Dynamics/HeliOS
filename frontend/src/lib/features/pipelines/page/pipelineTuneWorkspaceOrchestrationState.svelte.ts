@@ -85,21 +85,21 @@ type Args = {
   derivedState: DerivedState;
   editorState: EditorState;
   interactionState: InteractionState;
-  lastTunePipelineId: string | null;
+  getLastTunePipelineId: () => string | null;
   setLastTunePipelineId: (next: string | null) => void;
   getTuneScopeTab: () => 'global' | string;
   setTuneScopeTab: (next: 'global' | string) => void;
   getTuneStreams: () => StreamInfo[];
   setTuneStreams: (next: StreamInfo[]) => void;
-  tuneStreamsLoaded: boolean;
+  getTuneStreamsLoaded: () => boolean;
   setTuneStreamsLoaded: (next: boolean) => void;
-  tuneStreamsLoading: boolean;
+  getTuneStreamsLoading: () => boolean;
   setTuneStreamsLoading: (next: boolean) => void;
-  tuneStreamsError: string | null;
+  getTuneStreamsError: () => string | null;
   setTuneStreamsError: (next: string | null) => void;
-  tuneStreamsRetryTimer: number | null;
+  getTuneStreamsRetryTimer: () => number | null;
   setTuneStreamsRetryTimer: (next: number | null) => void;
-  tuneAssignBusySeen: boolean;
+  getTuneAssignBusySeen: () => boolean;
   setTuneAssignBusySeen: (next: boolean) => void;
   getTuneNodeDrafts: () => Record<string, Record<string, string>>;
   setTuneNodeDrafts: (next: Record<string, Record<string, string>>) => void;
@@ -225,7 +225,7 @@ export function createTuneWorkspaceOrchestrationState(args: Args) {
   $effect(() => {
     runTunePipelineReset({
       currentPipelineId: get(args.selectedPipeline)?.id ?? null,
-      lastPipelineId: args.lastTunePipelineId,
+      lastPipelineId: args.getLastTunePipelineId(),
       setLastPipelineId: args.setLastTunePipelineId,
       reset: () =>
         resetTuneState({
@@ -271,8 +271,8 @@ export function createTuneWorkspaceOrchestrationState(args: Args) {
   $effect(() => {
     runTuneStreamsLoad({
       activeTab: get(args.activeTab),
-      tuneStreamsLoaded: args.tuneStreamsLoaded,
-      tuneStreamsLoading: args.tuneStreamsLoading,
+      tuneStreamsLoaded: args.getTuneStreamsLoaded(),
+      tuneStreamsLoading: args.getTuneStreamsLoading(),
       setTuneStreamsLoaded: args.setTuneStreamsLoaded,
       setTuneStreamsLoading: args.setTuneStreamsLoading,
       setTuneStreamsError: args.setTuneStreamsError,
@@ -288,7 +288,7 @@ export function createTuneWorkspaceOrchestrationState(args: Args) {
       args.setTuneAssignBusySeen(true);
       return;
     }
-    if (!args.tuneAssignBusySeen) return;
+    if (!args.getTuneAssignBusySeen()) return;
     args.setTuneAssignBusySeen(false);
 
     if (get(args.activeTab) !== 'tune') {
@@ -323,10 +323,10 @@ export function createTuneWorkspaceOrchestrationState(args: Args) {
   $effect(() => {
     if (!args.browser) return;
     if (get(args.activeTab) !== 'tune') return;
-    if (!args.tuneStreamsError) return;
-    if (args.tuneStreamsLoading) return;
+    if (!args.getTuneStreamsError()) return;
+    if (args.getTuneStreamsLoading()) return;
     if (args.getTuneStreams().length > 0) return;
-    if (args.tuneStreamsRetryTimer) return;
+    if (args.getTuneStreamsRetryTimer()) return;
 
     args.setTuneStreamsRetryTimer(
       window.setTimeout(() => {
@@ -338,7 +338,7 @@ export function createTuneWorkspaceOrchestrationState(args: Args) {
     );
 
     return () => {
-      const timer = args.tuneStreamsRetryTimer;
+      const timer = args.getTuneStreamsRetryTimer();
       if (timer) {
         clearTimeout(timer);
         args.setTuneStreamsRetryTimer(null);

@@ -3,12 +3,16 @@ type AccessorTransform = {
   set?: (value: unknown) => unknown;
 };
 
-function createAccessorBindings(
-  target: Record<string, unknown>,
-  keys: readonly string[],
-  transforms: Record<string, AccessorTransform> = {}
-): Record<string, unknown> {
-  const bindings: Record<string, unknown> = {};
+type AccessorBindings<TTarget extends object, TKeys extends readonly (keyof TTarget & string)[]> = {
+  [K in TKeys[number]]: TTarget[K];
+};
+
+function createAccessorBindings<TTarget extends object, const TKeys extends readonly (keyof TTarget & string)[]>(
+  target: TTarget,
+  keys: TKeys,
+  transforms: Partial<{ [K in TKeys[number]]: AccessorTransform }> = {}
+): AccessorBindings<TTarget, TKeys> {
+  const bindings = {} as AccessorBindings<TTarget, TKeys>;
   for (const key of keys) {
     Object.defineProperty(bindings, key, {
       enumerable: true,
@@ -18,7 +22,9 @@ function createAccessorBindings(
         return transforms[key]?.get ? transforms[key].get!(value) : value;
       },
       set(value: unknown) {
-        target[key] = transforms[key]?.set ? transforms[key].set!(value) : value;
+        (target as { [K in keyof TTarget]: TTarget[K] })[key] = (
+          transforms[key]?.set ? transforms[key].set!(value) : value
+        ) as TTarget[typeof key];
       }
     });
   }
@@ -102,13 +108,21 @@ const PIPELINE_MODAL_KEYS = [
   'pipelineAssignDraft'
 ] as const;
 
+export type CameraPagePipelineBindingTarget = {
+  [K in (typeof PIPELINE_STATE_KEYS)[number]]: unknown;
+};
+
+export type CameraPageStreamBindingTarget = {
+  [K in (typeof STREAM_STATE_KEYS)[number]]: unknown;
+};
+
 export function createCameraPageStateBindings({
   streamState,
   pipelineState,
   normalizeStreamOrderingMode
 }: {
-  streamState: Record<string, unknown>;
-  pipelineState: Record<string, unknown>;
+  streamState: CameraPageStreamBindingTarget;
+  pipelineState: CameraPagePipelineBindingTarget;
   normalizeStreamOrderingMode: (value: unknown) => unknown;
 }) {
   return {

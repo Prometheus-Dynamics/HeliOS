@@ -16,7 +16,7 @@
   };
 
   let props: Props = $props();
-  const state = createLocalizationViewersState(props);
+  const state = createLocalizationViewersState(() => props);
 </script>
 
 <div class="relative h-full min-h-0 w-full overflow-hidden">

@@ -76,11 +76,11 @@ export const tuneRuntimeFromStats = (
 
 export const buildTuneMetricsSnapshot = (
   stream: TuneMetricsStreamRef,
-  metrics: Record<string, unknown> | null,
+  metrics: unknown,
   options: { error?: string | null; errorAt?: number | null; pipelineId?: string | null } = {}
 ): PipelineStreamNodeMetrics => {
   const nodeMetrics: Record<string, PipelineNodeRuntimeMetrics> = {};
-  const metricsRecord = metrics ?? null;
+  const metricsRecord = asRecord(metrics);
   nodeMetrics['capture'] = tuneRuntimeFromStats(
     asRecord(metricsRecord?.['capture']),
     options.error ?? null,
@@ -207,7 +207,7 @@ export const createTuneMetricsRuntime = (deps: TuneMetricsRuntimeDeps) => {
             () => deps.StreamsApi.getMetrics({ id: stream.id }),
             TUNE_METRICS_REQUEST_TIMEOUT_MS
           );
-          return buildTuneMetricsSnapshot(stream, metrics as Record<string, unknown> | null, { pipelineId });
+          return buildTuneMetricsSnapshot(stream, metrics, { pipelineId });
         })
       );
       if (deps.getTuneMetricsRequestId() !== requestId) return;

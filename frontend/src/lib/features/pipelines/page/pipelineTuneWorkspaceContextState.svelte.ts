@@ -27,38 +27,38 @@
   import { serializeGraphPlan } from '$lib/features/pipelines/graph';
   import { SvelteMap } from 'svelte/reactivity';
 
-  export function createPipelineTuneWorkspaceContext(deps: TuneDeps): Record<string, unknown> {
-    const {
-      activeTab,
-      pipelineUpdates,
-      pipelineUpdatesReady,
-      streamUpdatesReadyById,
-      getStreamUpdatesSocket,
-      selectedPipeline,
-      editingPlan,
-      detailContext,
-      pipelines,
-      pipelineLabelById,
-      streamUsesPipeline,
-      streamLabel,
-      streamGraphForPipeline,
-      outputOptionsForPipeline,
-      handlePlanChange,
-      setNodeConstantValue,
-      saveCurrentPipeline,
-      openAssignModal,
-      assignBusy,
-      refreshPipelineMetrics,
-      resolveDataTypeKey,
-      getDataTypeVariants,
-      resolveRegistryEntryForNode,
-      buildNodeValueFromInput,
-      extractTuneConstantEntries,
-      RAW_STREAM_PIPELINE_ID,
-      RAW_STREAM_PIPELINE_UUID,
-      PipelinesApi,
-      StreamsApi
-    }: TuneDeps = deps;
+  export function createPipelineTuneWorkspaceContext(getDeps: () => TuneDeps) {
+  const {
+    activeTab,
+    pipelineUpdates,
+    pipelineUpdatesReady,
+    streamUpdatesReadyById,
+    getStreamUpdatesSocket,
+    selectedPipeline,
+    editingPlan,
+    detailContext,
+    pipelines,
+    pipelineLabelById,
+    streamUsesPipeline,
+    streamLabel,
+    streamGraphForPipeline,
+    outputOptionsForPipeline,
+    handlePlanChange,
+    setNodeConstantValue,
+    saveCurrentPipeline,
+    openAssignModal,
+    assignBusy,
+    refreshPipelineMetrics,
+    resolveDataTypeKey,
+    getDataTypeVariants,
+    resolveRegistryEntryForNode,
+    buildNodeValueFromInput,
+    extractTuneConstantEntries,
+    RAW_STREAM_PIPELINE_ID,
+    RAW_STREAM_PIPELINE_UUID,
+    PipelinesApi,
+    StreamsApi
+  }: TuneDeps = untrack(getDeps);
   untrack(() => detailContext);
 
   const PIPELINE_UI_METADATA_KEY = 'helios.pipeline.ui';
@@ -441,7 +441,7 @@
       closeTuneControlSocket: interactionState.closeTuneControlSocket,
       ensureTuneControlSocket: interactionState.ensureTuneControlSocket
     },
-    lastTunePipelineId,
+    getLastTunePipelineId: () => lastTunePipelineId,
     setLastTunePipelineId: (next) => {
       lastTunePipelineId = next;
     },
@@ -453,23 +453,23 @@
     setTuneStreams: (next) => {
       tuneStreams = next;
     },
-    tuneStreamsLoaded,
+    getTuneStreamsLoaded: () => tuneStreamsLoaded,
     setTuneStreamsLoaded: (next) => {
       tuneStreamsLoaded = next;
     },
-    tuneStreamsLoading,
+    getTuneStreamsLoading: () => tuneStreamsLoading,
     setTuneStreamsLoading: (next) => {
       tuneStreamsLoading = next;
     },
-    tuneStreamsError,
+    getTuneStreamsError: () => tuneStreamsError,
     setTuneStreamsError: (next) => {
       tuneStreamsError = next;
     },
-    tuneStreamsRetryTimer,
+    getTuneStreamsRetryTimer: () => tuneStreamsRetryTimer,
     setTuneStreamsRetryTimer: (next) => {
       tuneStreamsRetryTimer = next;
     },
-    tuneAssignBusySeen,
+    getTuneAssignBusySeen: () => tuneAssignBusySeen,
     setTuneAssignBusySeen: (next) => {
       tuneAssignBusySeen = next;
     },
@@ -794,5 +794,8 @@
     updateStreamNodeValue: orchestrationState.updateStreamNodeValue
   }));
 
-    return ctx;
-  }
+  return () => ctx;
+}
+
+export type PipelineTuneWorkspaceContextGetter = ReturnType<typeof createPipelineTuneWorkspaceContext>;
+export type PipelineTuneWorkspaceContext = ReturnType<PipelineTuneWorkspaceContextGetter>;

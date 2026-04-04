@@ -48,6 +48,10 @@
     type StreamOrderingMode
   } from './cameraPageContextUtils';
   import { createCameraPageStateBindings } from './cameraPageStateBindings';
+  import type {
+    CameraPagePipelineBindingTarget,
+    CameraPageStreamBindingTarget
+  } from './cameraPageStateBindings';
   import { createCameraStreamOverlayRuntime } from './cameraStreamOverlayRuntime';
   import {
     DEFAULT_LIBCAMERA_TARGET_FPS,
@@ -169,8 +173,8 @@
   const parseManifestLayout = (layout: unknown) =>
     parsePipelineManifestLayout(layout, { rawPipelineId: RAW_PIPELINE_ID, rawPipelineUuid });
   const { pipelineStateBindings, streamBindings, pipelineBindings } = createCameraPageStateBindings({
-    streamState: streamState as Record<string, unknown>,
-    pipelineState: pipelineState as Record<string, unknown>,
+    streamState: streamState as CameraPageStreamBindingTarget,
+    pipelineState: pipelineState as CameraPagePipelineBindingTarget,
     normalizeStreamOrderingMode
   });
 
@@ -687,7 +691,7 @@
     updatePipelineNodeValue
   });
 
-  const ctx = $derived.by(() =>
+  const ctx = untrack(() =>
     mergeCameraPageContext<CameraPageCtx>(
       core,
       streamState,

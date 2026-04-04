@@ -1,4 +1,3 @@
-type AnyRecord = Record<string, any>;
 type PipelinePageModalStores = {
   create: {
     modalOpen: unknown;
@@ -17,30 +16,178 @@ type PipelinePageModalStores = {
     error: unknown;
   };
 };
-type PipelinePageBaseContextArgs = {
-  config: AnyRecord;
-  components: AnyRecord;
-  controller: {
-    stores: {
-      pipeline: AnyRecord;
-      graph: AnyRecord;
-      inspector: AnyRecord;
-      registry: AnyRecord;
-      modals: PipelinePageModalStores;
-    };
-    actions: AnyRecord;
-    helpers: {
-      registry: AnyRecord;
-    };
-  };
-  state: AnyRecord;
-  ide: AnyRecord;
-  graph: AnyRecord;
-  localActions: AnyRecord;
-  localHelpers: AnyRecord;
+
+type PipelinePagePipelineStores = {
+  pipelines: unknown;
+  pipelineListItems: unknown;
+  selectedPipelineId: unknown;
+  pipelineSearch: unknown;
+  loadError: unknown;
+  dataTypes: unknown;
+  selectedPipeline: unknown;
+  templates: unknown;
 };
 
-export function createPipelinePageBaseContext(args: PipelinePageBaseContextArgs) {
+type PipelinePageGraphStores = {
+  editingPlan: unknown;
+  editingBreadcrumbs: unknown;
+  contextRegistryOptions: unknown;
+};
+
+type PipelinePageInspectorStores = {
+  detailContext: unknown;
+  pipelineInputEntries: unknown;
+  pipelineOutputEntries: unknown;
+  tab: unknown;
+};
+
+type PipelinePageRegistryStores = {
+  entries: unknown;
+  loading: unknown;
+  error: unknown;
+  sort: unknown;
+  view: unknown;
+};
+
+type PipelinePageActions = {
+  setSelectedPipeline: unknown;
+  openAssignModal: unknown;
+  closeAssignModal: unknown;
+  attachPipelineToDevice: unknown;
+  saveCurrentPipeline: unknown;
+  clearValidation: unknown;
+  setNodeConstantValue: unknown;
+  handlePlanChange: unknown;
+  refreshPipelineMetrics: unknown;
+  setNodeSyncConfig: unknown;
+  setDaedalusNodeRuntime: unknown;
+  setNodeMetadata: unknown;
+  addNodeFromRegistry: unknown;
+  addBoundaryDraftPort: unknown;
+  applyBoundaryDraft: unknown;
+  applyGroupDraft: unknown;
+  closeGraphContextMenu: unknown;
+  removeBoundaryDraftPort: unknown;
+  removeGraphConnection: unknown;
+  removeGraphNode: unknown;
+  ungroupSelection: unknown;
+  setSelectedCaptureSession: unknown;
+  openCreateModal: unknown;
+  closeCreateModal: unknown;
+  createPipeline: unknown;
+  updateRegistryFilters: unknown;
+  selectRegistryGroup: unknown;
+  resetRegistryFilters: unknown;
+  refreshRegistry: unknown;
+  setGraphContextSearch: unknown;
+  handleGraphSelect: unknown;
+  updateGraphLayout: unknown;
+  openGraphContext: unknown;
+  openRegistryPalette: unknown;
+  openActionMenu: unknown;
+  openBoundaryMenu: unknown;
+  openBoundaryEditor: unknown;
+  setBoundaryDraftPortName: unknown;
+  setBoundaryDraftPortType: unknown;
+  setBoundaryDraftDirection: unknown;
+  openGroupEditor: unknown;
+  setGroupDraftName: unknown;
+  setGroupDraftSummary: unknown;
+  setGroupDraftColor: unknown;
+  renamePipeline: unknown;
+  setPipelineAppearance: unknown;
+  enterEmbeddedNode: unknown;
+  exitEmbedded: unknown;
+  groupSelection: unknown;
+  removeHostIoPort: unknown;
+  removePipelinePort: unknown;
+  editPipelinePort: unknown;
+  setPipelineInputValue: unknown;
+  setPipelinePortConfig: unknown;
+  refreshPipelines: unknown;
+  scheduleRegistryRefresh: unknown;
+  refreshCaptureDevices: unknown;
+};
+
+type PipelinePageRegistryHelpers = {
+  resetFilters: unknown;
+  refresh: unknown;
+};
+
+type PipelinePageController = {
+  stores: {
+    pipeline: PipelinePagePipelineStores;
+    graph: PipelinePageGraphStores;
+    inspector: PipelinePageInspectorStores;
+    registry: PipelinePageRegistryStores;
+    modals: PipelinePageModalStores;
+  };
+  actions: PipelinePageActions;
+  helpers: {
+    registry: PipelinePageRegistryHelpers;
+  };
+};
+
+type PipelinePageBaseContextArgs<
+  TConfig extends object,
+  TComponents extends object,
+  TState extends {
+    activeTab: unknown;
+    registryDrawerOpen: unknown;
+    registryHelpers: unknown;
+  },
+  TIde extends {
+    refreshIdeInfo: unknown;
+    refreshIdeProjects: unknown;
+    openIde: unknown;
+    openPluginInIde: unknown;
+    openPluginProjectModal: unknown;
+    closePluginProjectModal: unknown;
+    createPluginProject: unknown;
+  },
+  TGraph extends object,
+  TLocalActions extends object,
+  TLocalHelpers extends object
+> = {
+  config: TConfig;
+  components: TComponents;
+  controller: PipelinePageController;
+  state: TState;
+  ide: TIde;
+  graph: TGraph;
+  localActions: TLocalActions;
+  localHelpers: TLocalHelpers;
+};
+
+export function createPipelinePageBaseContext<
+  TConfig extends object,
+  TComponents extends object,
+  TState extends {
+    activeTab: unknown;
+    registryDrawerOpen: unknown;
+    registryHelpers: unknown;
+  },
+  TIde extends {
+    refreshIdeInfo: unknown;
+    refreshIdeProjects: unknown;
+    openIde: unknown;
+    openPluginInIde: unknown;
+    openPluginProjectModal: unknown;
+    closePluginProjectModal: unknown;
+    createPluginProject: unknown;
+  },
+  TGraph extends object,
+  TLocalActions extends object,
+  TLocalHelpers extends object
+>(args: PipelinePageBaseContextArgs<
+  TConfig,
+  TComponents,
+  TState,
+  TIde,
+  TGraph,
+  TLocalActions,
+  TLocalHelpers
+>) {
   const { config, components, controller, state, ide, graph, localActions, localHelpers } = args;
   const pipelineStores = controller.stores.pipeline;
   const graphStores = controller.stores.graph;

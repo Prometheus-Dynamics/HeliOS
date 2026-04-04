@@ -71,54 +71,47 @@ type LocalizationViewerStateProps = LocalizationViewerProps & {
   onMetricsToggle?: (() => void) | null;
 };
 
-export function createLocalizationViewersState(props: LocalizationViewerStateProps) {
-  const {
-    markers = [],
-    tagLineMarkers = [],
-    referenceMarkers = [],
-    mode = 'isolated',
-    showOriginAxes = true,
-    showTagLines = false,
-    showFieldImage = true,
-    showMinimapTrail = true,
-    bumperNumber = '0000',
-    bumperColor = null,
-    robotOverlays = [],
-    robot = {
+export function createLocalizationViewersState(getProps: () => LocalizationViewerStateProps) {
+  const markers = $derived.by(() => getProps().markers ?? []);
+  const tagLineMarkers = $derived.by(() => getProps().tagLineMarkers ?? []);
+  const referenceMarkers = $derived.by(() => getProps().referenceMarkers ?? []);
+  const mode = $derived.by<LocalizationViewerProps['mode']>(() => getProps().mode ?? 'isolated');
+  const showOriginAxes = $derived.by(() => getProps().showOriginAxes ?? true);
+  const showTagLines = $derived.by(() => getProps().showTagLines ?? false);
+  const showFieldImage = $derived.by(() => getProps().showFieldImage ?? true);
+  const showMinimapTrail = $derived.by(() => getProps().showMinimapTrail ?? true);
+  const bumperNumber = $derived.by(() => getProps().bumperNumber ?? '0000');
+  const bumperColor = $derived.by<string | null>(() => getProps().bumperColor ?? null);
+  const robotOverlays = $derived.by(() => getProps().robotOverlays ?? []);
+  const robot = $derived.by<RobotDimensions>(() =>
+    getProps().robot ?? {
       width: DEFAULT_ROBOT_WIDTH_M,
       length: DEFAULT_ROBOT_LENGTH_M,
       bumperThickness: BUMPER_THICKNESS_M,
       bumperHeight: ROBOT_HEIGHT_M,
       groundClearance: GROUND_CLEARANCE_M
-    },
-    cameras = [],
-    customField = null,
-    showRobot = true,
-    showCameras = true,
-    cameraGhostActive = false,
-    sceneTransform = null,
-    robotTransform = null,
-    cameraTransforms = null,
-    cameraHighlightColor = null,
-    minimapPoseDot = null,
-    cameraPovEnabled = false,
-    cameraPovTransform = null,
-    cameraPovIntrinsics = null,
-    cameraPovApplyFov = true,
-    cameraPovForwardSign = 1,
-    robotFollowPovEnabled = false,
-    footerStatus,
-    minimapControls,
-    metricsActive = false,
-    onMetricsToggle
-  }: LocalizationViewerProps & {
-    robot?: RobotDimensions;
-    cameras?: RigCameraInfo[];
-    footerStatus?: Snippet;
-    minimapControls?: Snippet;
-    metricsActive?: boolean;
-    onMetricsToggle?: (() => void) | null;
-  } = props;
+    }
+  );
+  const cameras = $derived.by(() => getProps().cameras ?? []);
+  const customField = $derived.by<LocalizationFieldDefinition | null>(() => getProps().customField ?? null);
+  const showRobot = $derived.by(() => getProps().showRobot ?? true);
+  const showCameras = $derived.by(() => getProps().showCameras ?? true);
+  const cameraGhostActive = $derived.by(() => getProps().cameraGhostActive ?? false);
+  const sceneTransform = $derived.by(() => getProps().sceneTransform ?? null);
+  const robotTransform = $derived.by(() => getProps().robotTransform ?? null);
+  const cameraTransforms = $derived.by(() => getProps().cameraTransforms ?? null);
+  const cameraHighlightColor = $derived.by<string | null>(() => getProps().cameraHighlightColor ?? null);
+  const minimapPoseDot = $derived.by(() => getProps().minimapPoseDot ?? null);
+  const cameraPovEnabled = $derived.by(() => getProps().cameraPovEnabled ?? false);
+  const cameraPovTransform = $derived.by(() => getProps().cameraPovTransform ?? null);
+  const cameraPovIntrinsics = $derived.by(() => getProps().cameraPovIntrinsics ?? null);
+  const cameraPovApplyFov = $derived.by(() => getProps().cameraPovApplyFov ?? true);
+  const cameraPovForwardSign = $derived.by(() => getProps().cameraPovForwardSign ?? 1);
+  const robotFollowPovEnabled = $derived.by(() => getProps().robotFollowPovEnabled ?? false);
+  const footerStatus = $derived.by<Snippet | undefined>(() => getProps().footerStatus);
+  const minimapControls = $derived.by<Snippet | undefined>(() => getProps().minimapControls);
+  const metricsActive = $derived.by(() => getProps().metricsActive ?? false);
+  const onMetricsToggle = $derived.by<(() => void) | null | undefined>(() => getProps().onMetricsToggle);
 
   let mainCanvas = $state<HTMLCanvasElement | null>(null);
   let topCanvas = $state<HTMLCanvasElement | null>(null);
@@ -782,3 +775,5 @@ export function createLocalizationViewersState(props: LocalizationViewerStatePro
     }
   };
 }
+
+export type LocalizationViewersState = ReturnType<typeof createLocalizationViewersState>;
