@@ -345,13 +345,7 @@ fn localization_undistorted_fisheye_model_override() -> Option<UndistortedFishey
 }
 
 fn localization_tag_pose_method() -> TagPoseMethod {
-    match aruco_policy().tag_pose_method.trim().to_ascii_lowercase().as_str() {
-        "pnp" | "pnp_refine" | "pnp_iter" | "refine" => TagPoseMethod::PnpRefine,
-        "homography_v2" | "homography2" | "h2" => TagPoseMethod::HomographyV2,
-        "homography_v1" | "homography1" | "h1" => TagPoseMethod::HomographyV1,
-        "auto" => TagPoseMethod::Auto,
-        _ => TagPoseMethod::HomographyV2,
-    }
+    TagPoseMethod::parse(&aruco_policy().tag_pose_method)
 }
 
 fn fisheye_model_state_key(source: &LocalizationSourceConfig) -> String {

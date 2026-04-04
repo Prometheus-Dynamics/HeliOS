@@ -37,9 +37,10 @@ impl TagPoseMethod {
     pub fn parse(raw: &str) -> Self {
         let normalized = raw.trim().to_ascii_lowercase();
         match normalized.as_str() {
-            "" | "auto" | "v2" | "homography_v2" | "homography2" => Self::Auto,
-            "v1" | "homography_v1" | "homography1" | "legacy" => Self::HomographyV1,
-            "pnp" | "pnp_refine" | "pnp_iter" | "pnp_iterative" | "refine" | "refined" => Self::PnpRefine,
+            "" | "auto" => Self::Auto,
+            "homography_v1" => Self::HomographyV1,
+            "homography_v2" => Self::HomographyV2,
+            "pnp_refine" => Self::PnpRefine,
             other => {
                 warn!(method = other, "aruco:tag_poses unknown solver method; defaulting to homography_v2");
                 Self::Auto
@@ -722,4 +723,30 @@ fn estimate_pinhole_intrinsics_from_detections(detections: &[ArucoDetection2D], 
     });
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TagPoseMethod;
+
+    #[test]
+    fn tag_pose_method_parse_accepts_only_canonical_names() {
+        assert_eq!(TagPoseMethod::parse("auto"), TagPoseMethod::Auto);
+        assert_eq!(TagPoseMethod::parse("homography_v1"), TagPoseMethod::HomographyV1);
+        assert_eq!(TagPoseMethod::parse("homography_v2"), TagPoseMethod::HomographyV2);
+        assert_eq!(TagPoseMethod::parse("pnp_refine"), TagPoseMethod::PnpRefine);
+    }
+
+    #[test]
+    fn tag_pose_method_parse_rejects_legacy_aliases() {
+        assert_eq!(TagPoseMethod::parse("legacy"), TagPoseMethod::Auto);
+        assert_eq!(TagPoseMethod::parse("v1"), TagPoseMethod::Auto);
+        assert_eq!(TagPoseMethod::parse("v2"), TagPoseMethod::Auto);
+        assert_eq!(TagPoseMethod::parse("homography1"), TagPoseMethod::Auto);
+        assert_eq!(TagPoseMethod::parse("homography2"), TagPoseMethod::Auto);
+        assert_eq!(TagPoseMethod::parse("h1"), TagPoseMethod::Auto);
+        assert_eq!(TagPoseMethod::parse("h2"), TagPoseMethod::Auto);
+        assert_eq!(TagPoseMethod::parse("pnp"), TagPoseMethod::Auto);
+        assert_eq!(TagPoseMethod::parse("refine"), TagPoseMethod::Auto);
+    }
 }

@@ -21,7 +21,7 @@ pub(crate) fn pipeline_alias_from_graph(graph_json: &Value, fallback: &str) -> S
     let candidate = graph_json
         .get("metadata")
         .and_then(|meta| meta.as_object())
-        .and_then(|meta| meta.get(META_PIPELINE_ALIAS).and_then(|v| v.as_str()).or_else(|| meta.get("pipeline_alias").and_then(|v| v.as_str())))
+        .and_then(|meta| meta.get(META_PIPELINE_ALIAS).and_then(|v| v.as_str()))
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .unwrap_or(fallback);
@@ -35,5 +35,33 @@ pub(crate) fn sanitize_segment(raw: &str, fallback: &str) -> String {
         fallback.to_string()
     } else {
         filtered
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{META_PIPELINE_ALIAS, pipeline_alias_from_graph};
+    use serde_json::json;
+
+    #[test]
+    fn pipeline_alias_from_graph_reads_canonical_metadata_key() {
+        let graph = json!({
+            "metadata": {
+                META_PIPELINE_ALIAS: "canonical-name"
+            }
+        });
+
+        assert_eq!(pipeline_alias_from_graph(&graph, "fallback"), "canonical-name");
+    }
+
+    #[test]
+    fn pipeline_alias_from_graph_ignores_legacy_metadata_key() {
+        let graph = json!({
+            "metadata": {
+                "pipeline_alias": "legacy-name"
+            }
+        });
+
+        assert_eq!(pipeline_alias_from_graph(&graph, "fallback"), "fallback");
     }
 }

@@ -151,7 +151,7 @@ pub(super) fn pipeline_graph_alias(graph: &serde_json::Value) -> Option<&str> {
     graph
         .get("metadata")
         .and_then(|meta| meta.as_object())
-        .and_then(|meta| meta.get("helios.pipeline.alias").and_then(|v| v.as_str()).or_else(|| meta.get("pipeline_alias").and_then(|v| v.as_str())))
+        .and_then(|meta| meta.get("helios.pipeline.alias").and_then(|v| v.as_str()))
         .map(str::trim)
         .filter(|v| !v.is_empty())
 }
@@ -190,4 +190,30 @@ pub(super) fn map_planner_diagnostics(diagnostics: Vec<helios_engine::ipc::Plann
         .into_iter()
         .map(|diag| PlannerDiagnostic { code: diag.code, message: diag.message, span: PlannerDiagnosticSpan { pass: diag.span.pass, node: diag.span.node, port: diag.span.port } })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pipeline_graph_alias;
+    use serde_json::json;
+
+    #[test]
+    fn pipeline_graph_alias_reads_canonical_metadata_key() {
+        let graph = json!({
+            "metadata": {
+                "helios.pipeline.alias": "canonical-name"
+            }
+        });
+        assert_eq!(pipeline_graph_alias(&graph), Some("canonical-name"));
+    }
+
+    #[test]
+    fn pipeline_graph_alias_ignores_legacy_metadata_key() {
+        let graph = json!({
+            "metadata": {
+                "pipeline_alias": "legacy-name"
+            }
+        });
+        assert_eq!(pipeline_graph_alias(&graph), None);
+    }
 }
