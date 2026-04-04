@@ -7,6 +7,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use collect::{SnapshotBuilder, SnapshotConfig};
+use lib_runtime_policy::HELIOS_DIAGNOSTICS_DAEMON_POLICY;
 use tracing::{error, info};
 
 use crate::error::Result;
@@ -65,10 +66,6 @@ struct Cli {
     #[arg(long = "base-dir")]
     base_dir: Option<PathBuf>,
 
-    /// Override runtime directory
-    #[arg(long = "run-dir")]
-    run_dir: Option<PathBuf>,
-
     /// Store snapshots as tar.gz archives
     #[arg(long, conflicts_with = "no_tar")]
     tar: bool,
@@ -97,21 +94,17 @@ async fn main() {
 
 async fn run() -> Result<()> {
     let args = Cli::parse();
-    let mut cfg = SnapshotConfig::default();
-    if let Some(b) = args.base_dir.clone() {
-        cfg.base_dir = b;
-    }
-    if let Some(r) = args.run_dir.clone() {
-        cfg.run_dir = r;
-    }
-    if args.tar {
-        cfg.tar = true;
+    let policy = HELIOS_DIAGNOSTICS_DAEMON_POLICY.resolve();
+    let tar = if args.tar {
+        true
     } else if args.no_tar {
-        cfg.tar = false;
-    }
-    // Retention: CLI overrides env; defaults are safe
-    let keep = args.keep.or_else(|| std::env::var("SNAPSHOT_KEEP").ok().and_then(|s| s.parse::<usize>().ok())).unwrap_or(8);
-    let max_bytes = args.max_mb.or_else(|| std::env::var("SNAPSHOT_MAX_MB").ok().and_then(|s| s.parse::<u64>().ok())).map(|m| m * 1024 * 1024);
+        false
+    } else {
+        policy.tar
+    };
+    let cfg = SnapshotConfig { base_dir: args.base_dir.unwrap_or(policy.base_dir), tar, max_cmd_bytes: policy.max_cmd_bytes, cmd_timeout: policy.cmd_timeout };
+    let keep = args.keep.unwrap_or(policy.keep);
+    let max_bytes = args.max_mb.or(policy.max_mb).map(|m| m * 1024 * 1024);
 
     let trigger: Trigger = args.trigger.into();
     let unit = match trigger {

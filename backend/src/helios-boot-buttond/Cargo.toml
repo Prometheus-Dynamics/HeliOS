@@ -6,5 +6,6 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0"
 evdev = "0.13"
+lib-runtime-policy = { path = "../libs/lib-runtime-policy" }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

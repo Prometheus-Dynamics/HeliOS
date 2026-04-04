@@ -1,6 +1,7 @@
 mod api;
 mod cv;
 mod daedalus_runtime;
+mod daemons;
 mod engine;
 mod engine_ipc;
 mod engine_localization;
@@ -21,6 +22,7 @@ mod updater;
 pub use api::*;
 pub use cv::*;
 pub use daedalus_runtime::*;
+pub use daemons::*;
 pub use engine::*;
 pub use engine_ipc::*;
 pub use engine_localization::*;

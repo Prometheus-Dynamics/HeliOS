@@ -32,7 +32,6 @@ pub struct Summary {
 #[derive(Debug, Clone)]
 pub struct SnapshotConfig {
     pub base_dir: PathBuf,
-    pub run_dir: PathBuf,
     pub tar: bool,
     pub max_cmd_bytes: usize,
     pub cmd_timeout: Duration,
@@ -42,7 +41,6 @@ impl Default for SnapshotConfig {
     fn default() -> Self {
         Self {
             base_dir: PathBuf::from("/var/lib/helios/diagnostics"),
-            run_dir: PathBuf::from("/run/helios-diagnostics"),
             tar: true,
             max_cmd_bytes: 1_000_000, // 1 MiB per stream
             cmd_timeout: Duration::from_secs(15),

@@ -8,6 +8,7 @@ anyhow = "1.0"
 base64 = { workspace = true }
 clap = { workspace = true }
 helios-updater = { path = "../helios-updater", default-features = false, features = ["dto", "updater-ipc"] }
+lib-runtime-policy = { path = "../libs/lib-runtime-policy" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

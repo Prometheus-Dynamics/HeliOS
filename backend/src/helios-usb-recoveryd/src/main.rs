@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::unix::fs::OpenOptionsExt;
@@ -12,6 +13,7 @@ use base64::Engine;
 use clap::Parser;
 use helios_updater::client::UpdaterClientConfig;
 use helios_updater::update_core::{IpcUpdateCoreBackend, ManualUpdateArtifact, PreparedApply, UpdateArtifactKind, UpdateSource, apply_prepared_update, prepare_update_for_apply};
+use lib_runtime_policy::HELIOS_USB_RECOVERY_DAEMON_POLICY;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -25,44 +27,44 @@ use uuid::Uuid;
 #[command(author, version, about = "Helios USB recovery daemon", long_about = None)]
 struct Args {
     /// Comma-separated gadget ACM TTY paths to serve
-    #[arg(long, env = "HELIOS_USB_RECOVERY_PORTS", default_value = "/dev/ttyGS0,/dev/ttyGS1")]
-    ports: String,
+    #[arg(long)]
+    ports: Option<String>,
 
     /// Serial baud rate for ACM links
-    #[arg(long, env = "HELIOS_USB_RECOVERY_BAUD", default_value_t = 115_200)]
-    baud: u32,
+    #[arg(long)]
+    baud: Option<u32>,
 
     /// Directory used to stage OTA uploads
-    #[arg(long, env = "HELIOS_USB_RECOVERY_STAGING_DIR", default_value = "/var/lib/helios/usb-recovery")]
-    staging_dir: PathBuf,
+    #[arg(long)]
+    staging_dir: Option<PathBuf>,
 
     /// Command used for reboot.request mode=normal
-    #[arg(long, env = "HELIOS_USB_RECOVERY_REBOOT_NORMAL_CMD", default_value = "systemctl reboot")]
-    reboot_normal_cmd: String,
+    #[arg(long)]
+    reboot_normal_cmd: Option<String>,
 
     /// Command used for reboot.request mode=bootloader
-    #[arg(long, env = "HELIOS_USB_RECOVERY_REBOOT_BOOTLOADER_CMD")]
+    #[arg(long)]
     reboot_bootloader_cmd: Option<String>,
 
     /// Optional fixed device identifier returned by status.get
-    #[arg(long, env = "HELIOS_USB_RECOVERY_DEVICE_ID")]
+    #[arg(long)]
     device_id: Option<String>,
 
     /// Updater IPC socket used for ota.activate orchestration
-    #[arg(long, env = "HELIOS_USB_RECOVERY_UPDATER_SOCKET", default_value = "/run/helios/updater.sock")]
-    updater_socket: PathBuf,
+    #[arg(long)]
+    updater_socket: Option<PathBuf>,
 
     /// Journal file used by updater IPC commands issued from recovery mode
-    #[arg(long, env = "HELIOS_USB_RECOVERY_UPDATER_JOURNAL", default_value = "/var/lib/helios/journal/ipc/updater-usb-recoveryd.journal")]
-    updater_journal_path: PathBuf,
+    #[arg(long)]
+    updater_journal_path: Option<PathBuf>,
 
     /// Maximum accepted JSON line size
-    #[arg(long, env = "HELIOS_USB_RECOVERY_MAX_LINE_BYTES", default_value_t = 1_048_576)]
-    max_line_bytes: usize,
+    #[arg(long)]
+    max_line_bytes: Option<usize>,
 
     /// Drop partial request data when no new bytes arrive for this duration
-    #[arg(long, env = "HELIOS_USB_RECOVERY_PENDING_RESET_IDLE_MS", default_value_t = 3_000)]
-    pending_reset_idle_ms: u64,
+    #[arg(long)]
+    pending_reset_idle_ms: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -219,29 +221,12 @@ fn main() -> Result<()> {
 
     tracing_subscriber::fmt().with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"))).with_target(false).compact().init();
 
-    let ports = args.ports.split(',').map(str::trim).filter(|value| !value.is_empty()).map(ToOwned::to_owned).collect::<Vec<_>>();
+    let cfg = build_config(args)?;
 
-    if ports.is_empty() {
-        return Err(anyhow::anyhow!("no USB ACM ports configured"));
-    }
-
-    fs::create_dir_all(&args.staging_dir).with_context(|| format!("failed to create staging directory {}", args.staging_dir.display()))?;
-    if let Some(parent) = args.updater_journal_path.parent() {
+    fs::create_dir_all(&cfg.staging_dir).with_context(|| format!("failed to create staging directory {}", cfg.staging_dir.display()))?;
+    if let Some(parent) = cfg.updater_journal_path.parent() {
         fs::create_dir_all(parent).with_context(|| format!("failed to create updater journal directory {}", parent.display()))?;
     }
-
-    let cfg = Config {
-        ports,
-        baud: args.baud,
-        staging_dir: args.staging_dir,
-        reboot_normal_cmd: args.reboot_normal_cmd,
-        reboot_bootloader_cmd: args.reboot_bootloader_cmd,
-        device_id: args.device_id,
-        updater_socket: args.updater_socket,
-        updater_journal_path: args.updater_journal_path,
-        max_line_bytes: args.max_line_bytes,
-        pending_reset_idle: Duration::from_millis(args.pending_reset_idle_ms),
-    };
 
     let app = Arc::new(App { cfg, started_at: Instant::now(), state: Mutex::new(RuntimeState::default()) });
 
@@ -258,6 +243,31 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn build_config(args: Args) -> Result<Config> {
+    let policy = HELIOS_USB_RECOVERY_DAEMON_POLICY.resolve();
+    let ports = args.ports.as_deref().map(parse_port_list).unwrap_or(policy.ports);
+    if ports.is_empty() {
+        return Err(anyhow::anyhow!("no USB ACM ports configured"));
+    }
+
+    Ok(Config {
+        ports,
+        baud: args.baud.unwrap_or(policy.baud),
+        staging_dir: args.staging_dir.unwrap_or(policy.staging_dir),
+        reboot_normal_cmd: args.reboot_normal_cmd.unwrap_or(policy.reboot_normal_cmd),
+        reboot_bootloader_cmd: args.reboot_bootloader_cmd.or(policy.reboot_bootloader_cmd),
+        device_id: args.device_id.or(policy.device_id),
+        updater_socket: args.updater_socket.unwrap_or(policy.updater_socket),
+        updater_journal_path: args.updater_journal_path.unwrap_or(policy.updater_journal_path),
+        max_line_bytes: args.max_line_bytes.unwrap_or(policy.max_line_bytes),
+        pending_reset_idle: args.pending_reset_idle_ms.map(Duration::from_millis).unwrap_or(policy.pending_reset_idle),
+    })
+}
+
+fn parse_port_list(raw: &str) -> Vec<String> {
+    raw.split(',').map(str::trim).filter(|value| !value.is_empty()).map(ToOwned::to_owned).collect()
 }
 
 fn run_port(app: Arc<App>, port_path: String) {
@@ -568,7 +578,7 @@ impl App {
             return Err(ApiError::bad_state("received byte count does not match expected size"));
         }
 
-        let digest_hex = format!("{:x}", active.hasher.finalize());
+        let digest_hex = hex_digest(active.hasher.finalize());
         if digest_hex != active.expected_sha256 {
             let _ = fs::remove_file(&active.path);
             state.last_error = Some(format!("sha256 mismatch for transfer {} (expected {}, got {})", active.transfer_id, active.expected_sha256, digest_hex));
@@ -742,7 +752,16 @@ fn hash_file_sha256(path: &Path) -> Result<String> {
         }
         hasher.update(&buffer[..read]);
     }
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(hex_digest(hasher.finalize()))
+}
+
+fn hex_digest(bytes: impl AsRef<[u8]>) -> String {
+    let bytes = bytes.as_ref();
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        let _ = write!(&mut out, "{byte:02x}");
+    }
+    out
 }
 
 fn max_chunk_bytes_for_line_limit(max_line_bytes: usize) -> usize {

@@ -2,11 +2,11 @@
 
 use super::{
     EngineExecutorBusyPolicy, HELIOS_API_DATA_ROOT_POLICY, HELIOS_API_HARDWARE_READ_MODEL_POLICY, HELIOS_API_LIGHTING_TEMPLATES_POLICY, HELIOS_API_LOG_SOURCES_POLICY, HELIOS_API_SERVER_POLICY,
-    HELIOS_API_STARTUP_CACHE_WARM_POLICY, HELIOS_API_STREAMS_POLICY, HELIOS_API_SYSTEM_READ_MODEL_POLICY, HELIOS_API_TOKIO_POLICY, HELIOS_DAEDALUS_RUNTIME_POLICY, HELIOS_DNS_POLICY,
-    HELIOS_ENGINE_CRASH_GUARD_POLICY, HELIOS_ENGINE_GRAPH_POLICY, HELIOS_ENGINE_IPC_POLICY, HELIOS_ENGINE_RECORDING_POLICY, HELIOS_ENGINE_STREAM_RUNTIME_POLICY, HELIOS_ENGINE_TOKIO_POLICY,
-    HELIOS_I2C_INVENTORY_POLICY, HELIOS_IMU_FUSION_POLICY, HELIOS_IMU_RUNTIME_POLICY, HELIOS_IPC_JOURNAL_POLICY, HELIOS_LOG_FILTER_POLICY, HELIOS_PERIPHERALS_POWER_POLICY,
-    HELIOS_PERIPHERALS_SERVICE_POLICY, HELIOS_PERIPHERALS_TOKIO_POLICY, HELIOS_RESOURCE_GUARD_POLICY, HELIOS_SHADOW_RECORD_DATA_ROOT_POLICY, HELIOS_STYX_CAPTURE_TUNABLES_POLICY,
-    HELIOS_UPDATER_FILESYSTEM_POLICY, PersistentDirPolicy, PlatformFamily, classify_platform_family,
+    HELIOS_API_STARTUP_CACHE_WARM_POLICY, HELIOS_API_STREAMS_POLICY, HELIOS_API_SYSTEM_READ_MODEL_POLICY, HELIOS_API_TOKIO_POLICY, HELIOS_BOOT_BUTTON_DAEMON_POLICY, HELIOS_DAEDALUS_RUNTIME_POLICY,
+    HELIOS_DIAGNOSTICS_DAEMON_POLICY, HELIOS_DNS_POLICY, HELIOS_ENGINE_CRASH_GUARD_POLICY, HELIOS_ENGINE_GRAPH_POLICY, HELIOS_ENGINE_IPC_POLICY, HELIOS_ENGINE_RECORDING_POLICY,
+    HELIOS_ENGINE_STREAM_RUNTIME_POLICY, HELIOS_ENGINE_TOKIO_POLICY, HELIOS_I2C_INVENTORY_POLICY, HELIOS_IMU_FUSION_POLICY, HELIOS_IMU_RUNTIME_POLICY, HELIOS_IPC_JOURNAL_POLICY,
+    HELIOS_LOG_FILTER_POLICY, HELIOS_PERIPHERALS_POWER_POLICY, HELIOS_PERIPHERALS_SERVICE_POLICY, HELIOS_PERIPHERALS_TOKIO_POLICY, HELIOS_RESOURCE_GUARD_POLICY, HELIOS_SHADOW_RECORD_DATA_ROOT_POLICY,
+    HELIOS_STYX_CAPTURE_TUNABLES_POLICY, HELIOS_UPDATER_FILESYSTEM_POLICY, HELIOS_USB_RECOVERY_DAEMON_POLICY, PersistentDirPolicy, PlatformFamily, classify_platform_family,
 };
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
@@ -45,6 +45,42 @@ fn api_lighting_templates_policy_prefers_namespaced_env_override() {
     assert_eq!(resolved.template_dir, PathBuf::from("/tmp/helios-lighting-templates"));
     unsafe {
         std::env::remove_var("HELIOS_API_LIGHTING_TEMPLATE_DIR");
+    }
+}
+
+#[test]
+fn boot_button_daemon_policy_defaults_match_expected_values() {
+    let resolved = HELIOS_BOOT_BUTTON_DAEMON_POLICY.resolve();
+    assert_eq!(resolved.key_tokens, vec!["KEY_RESTART", "KEY_CONFIG", "KEY_POWER"]);
+    assert_eq!(resolved.hold_duration.as_secs(), 5);
+    assert_eq!(resolved.cooldown.as_secs(), 15);
+    assert_eq!(resolved.device_hint, None);
+    assert_eq!(resolved.reset_command, "/usr/local/bin/helios-network-reset.sh");
+}
+
+#[test]
+fn usb_recovery_daemon_policy_defaults_match_expected_values() {
+    let resolved = HELIOS_USB_RECOVERY_DAEMON_POLICY.resolve();
+    assert_eq!(resolved.ports, vec!["/dev/ttyGS0", "/dev/ttyGS1"]);
+    assert_eq!(resolved.baud, 115_200);
+    assert_eq!(resolved.staging_dir, PathBuf::from("/var/lib/helios/usb-recovery"));
+    assert_eq!(resolved.updater_socket, PathBuf::from("/run/helios/updater.sock"));
+    assert_eq!(resolved.updater_journal_path, PathBuf::from("/var/lib/helios/journal/ipc/updater-usb-recoveryd.journal"));
+}
+
+#[test]
+fn diagnostics_daemon_policy_prefers_namespaced_override() {
+    let _lock = env_lock();
+    unsafe {
+        std::env::set_var("HELIOS_DIAGNOSTICS_KEEP", "16");
+        std::env::set_var("HELIOS_DIAGNOSTICS_MAX_MB", "128");
+    }
+    let resolved = HELIOS_DIAGNOSTICS_DAEMON_POLICY.resolve();
+    assert_eq!(resolved.keep, 16);
+    assert_eq!(resolved.max_mb, Some(128));
+    unsafe {
+        std::env::remove_var("HELIOS_DIAGNOSTICS_KEEP");
+        std::env::remove_var("HELIOS_DIAGNOSTICS_MAX_MB");
     }
 }
 

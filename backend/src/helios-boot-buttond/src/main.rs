@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::env;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -8,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use evdev::{Device, EventType, KeyCode};
+use lib_runtime_policy::HELIOS_BOOT_BUTTON_DAEMON_POLICY;
 use tracing::{error, info, warn};
 
 #[derive(Clone)]
@@ -15,6 +15,8 @@ struct Config {
     keys: HashSet<KeyCode>,
     hold_duration: Duration,
     cooldown: Duration,
+    discovery_retry: Duration,
+    idle_poll: Duration,
     device_hint: Option<String>,
     reset_command: String,
 }
@@ -53,8 +55,8 @@ fn run(cfg: Config) -> Result<()> {
     loop {
         let mut devices = discover_devices(&cfg)?;
         if devices.is_empty() {
-            warn!("no input devices matched boot button filters; retrying in 5s");
-            thread::sleep(Duration::from_secs(5));
+            warn!(retry_ms = cfg.discovery_retry.as_millis(), "no input devices matched boot button filters; retrying");
+            thread::sleep(cfg.discovery_retry);
             continue;
         }
 
@@ -129,7 +131,7 @@ fn run(cfg: Config) -> Result<()> {
             }
 
             if !had_event {
-                thread::sleep(Duration::from_millis(25));
+                thread::sleep(cfg.idle_poll);
             }
         }
     }
@@ -200,26 +202,28 @@ fn discover_devices(cfg: &Config) -> Result<Vec<WatchedDevice>> {
 }
 
 fn load_config() -> Config {
-    let keys = parse_key_list(env::var("HELIOS_BOOT_BUTTON_KEYS").ok());
-    let hold_secs = env::var("HELIOS_BOOT_BUTTON_HOLD_SECS").ok().and_then(|raw| raw.parse::<u64>().ok()).unwrap_or(5);
-    let cooldown_secs = env::var("HELIOS_BOOT_BUTTON_COOLDOWN_SECS").ok().and_then(|raw| raw.parse::<u64>().ok()).unwrap_or(15);
-    let device_hint = env::var("HELIOS_BOOT_BUTTON_DEVICE").ok().filter(|s| !s.is_empty());
-    let reset_command = env::var("HELIOS_BOOT_BUTTON_RESET_CMD").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/usr/local/bin/helios-network-reset.sh".to_string());
-
-    Config { keys, hold_duration: Duration::from_secs(hold_secs), cooldown: Duration::from_secs(cooldown_secs), device_hint, reset_command }
+    let resolved = HELIOS_BOOT_BUTTON_DAEMON_POLICY.resolve();
+    Config {
+        keys: parse_key_list(&resolved.key_tokens),
+        hold_duration: resolved.hold_duration,
+        cooldown: resolved.cooldown,
+        discovery_retry: resolved.discovery_retry,
+        idle_poll: resolved.idle_poll,
+        device_hint: resolved.device_hint,
+        reset_command: resolved.reset_command,
+    }
 }
 
-fn parse_key_list(raw: Option<String>) -> HashSet<KeyCode> {
+fn parse_key_list(tokens: &[String]) -> HashSet<KeyCode> {
     let mut keys = HashSet::new();
     let defaults = vec![KeyCode::KEY_RESTART, KeyCode::KEY_CONFIG, KeyCode::KEY_POWER];
-    let tokens: Vec<String> = raw.as_ref().map(|s| s.split(',').map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect()).unwrap_or_default();
     if tokens.is_empty() {
         keys.extend(defaults);
         return keys;
     }
 
     for token in tokens {
-        match parse_key(&token) {
+        match parse_key(token) {
             Some(code) => {
                 keys.insert(code);
             }
