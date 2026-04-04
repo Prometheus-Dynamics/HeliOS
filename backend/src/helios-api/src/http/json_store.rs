@@ -15,7 +15,9 @@ struct JsonStoreRuntime {
 
 fn json_store_runtime() -> &'static JsonStoreRuntime {
     // This stays process-global so unrelated request handlers coordinate atomic writes for the
-    // same path without threading a lock registry through every caller.
+    // same path without threading a lock registry through every caller. The registry prunes
+    // itself when the last waiter for a path releases its Arc, so it remains bounded to the
+    // currently active set of in-flight writers.
     static RUNTIME: Lazy<JsonStoreRuntime> = Lazy::new(|| JsonStoreRuntime { locks: Mutex::new(HashMap::new()) });
     &RUNTIME
 }
@@ -135,4 +137,21 @@ async fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         return Err(err);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{json_store_runtime, lock_for, release_lock};
+    use std::path::PathBuf;
+
+    #[tokio::test]
+    async fn lock_registry_prunes_idle_paths() {
+        let path = PathBuf::from("/tmp/helios-json-store-test.json");
+        let lock = lock_for(&path).await;
+        let guard = lock.lock().await;
+        drop(guard);
+        release_lock(&path, lock).await;
+
+        assert!(!json_store_runtime().locks.lock().await.contains_key(&path));
+    }
 }

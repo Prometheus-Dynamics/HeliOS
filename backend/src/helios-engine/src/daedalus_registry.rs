@@ -146,72 +146,23 @@ struct DynamicPluginCache {
     diagnostics: BTreeMap<String, PluginCompatibility>,
 }
 
+impl Default for DynamicPluginCache {
+    fn default() -> Self {
+        Self { libs: Vec::new(), diagnostics: BTreeMap::new() }
+    }
+}
+
 struct DynamicPluginRuntime {
-    cache: Mutex<Result<DynamicPluginCache, String>>,
+    cache: Mutex<DynamicPluginCache>,
 }
 
-fn dynamic_plugin_runtime(requested_namespaces: Option<&BTreeSet<String>>) -> &'static DynamicPluginRuntime {
+fn dynamic_plugin_runtime() -> &'static DynamicPluginRuntime {
     // Plugin discovery/loading is intentionally process-global because upstream keeps loaded
-    // dylibs resident for process lifetime anyway; this cache prevents repeated scans and dlopen.
+    // dylibs resident for process lifetime anyway. Keep one explicit runtime cache and refresh it
+    // in place so the first graph that happens to build does not permanently decide which plugin
+    // namespaces are visible for the rest of the process.
     static RUNTIME: OnceLock<DynamicPluginRuntime> = OnceLock::new();
-    RUNTIME.get_or_init(|| DynamicPluginRuntime { cache: Mutex::new(init_dynamic_plugin_cache(requested_namespaces)) })
-}
-
-fn init_dynamic_plugin_cache(requested_namespaces: Option<&BTreeSet<String>>) -> Result<DynamicPluginCache, String> {
-    let dirs = parse_plugin_dirs();
-    let mut disabled = BTreeMap::new();
-    for dir in &dirs {
-        if dir.exists() {
-            disabled.extend(collect_disabled_plugins_with_paths(dir));
-        }
-    }
-
-    let mut by_name: std::collections::BTreeMap<String, PathBuf> = std::collections::BTreeMap::new();
-    for dir in dirs {
-        if !dir.exists() {
-            continue;
-        }
-        for path in collect_shared_objects(&dir) {
-            let Some(name) = path.file_name().and_then(|v| v.to_str()).map(ToString::to_string) else {
-                continue;
-            };
-            if disabled.contains_key(&name) {
-                continue;
-            }
-            if !plugin_requested_for_graph(&name, requested_namespaces) {
-                continue;
-            }
-            // Preserve first-seen directory priority so writable install dirs (e.g. /var/lib)
-            // can intentionally override read-only system plugin copies (e.g. /usr/lib).
-            by_name.entry(name).or_insert(path);
-        }
-    }
-
-    let mut diagnostics = BTreeMap::new();
-    for (name, path) in &disabled {
-        diagnostics.insert(name.clone(), plugin_diag_disabled(name, path));
-    }
-
-    let mut libs = Vec::new();
-    for (name, path) in by_name {
-        #[allow(unsafe_code)]
-        match unsafe { PluginLibrary::load(&path) } {
-            Ok(lib) => {
-                let diag = plugin_diag_from_lib(&lib, &path, &name);
-                if diag.status == "ok" {
-                    libs.push((lib, path, name.clone()));
-                }
-                diagnostics.insert(name, diag);
-            }
-            Err(err) => {
-                warn!(path = ?path, error = %err, "daedalus plugin load failed");
-                let diag = plugin_diag_load_failed(&name, &path, &err);
-                diagnostics.insert(name, diag);
-            }
-        }
-    }
-
-    Ok(DynamicPluginCache { libs, diagnostics })
+    RUNTIME.get_or_init(|| DynamicPluginRuntime { cache: Mutex::new(DynamicPluginCache::default()) })
 }
 
 fn current_disabled_plugins() -> BTreeMap<String, PathBuf> {
@@ -290,8 +241,8 @@ fn refresh_dynamic_plugin_cache(cache: &mut DynamicPluginCache, requested_namesp
 
 fn install_dynamic_plugins_cached(registry: &mut PluginRegistry, graph: Option<&Graph>) -> Result<Vec<String>, &'static str> {
     let requested_namespaces = graph_plugin_namespaces(graph);
-    let mut guard = dynamic_plugin_runtime(requested_namespaces.as_ref()).cache.lock().map_err(|_| "dynamic plugin cache lock poisoned")?;
-    let cache = guard.as_mut().map_err(|_| "dynamic plugin load failed")?;
+    let mut guard = dynamic_plugin_runtime().cache.lock().map_err(|_| "dynamic plugin cache lock poisoned")?;
+    let cache = &mut *guard;
     refresh_dynamic_plugin_cache(cache, requested_namespaces.as_ref());
     let disabled = current_disabled_plugins();
     tracing::info!(plugins = cache.libs.len(), disabled = disabled.len(), requested_namespaces = ?requested_namespaces, "daedalus plugin scan complete");
@@ -322,14 +273,11 @@ fn install_dynamic_plugins_cached(registry: &mut PluginRegistry, graph: Option<&
 }
 
 pub fn plugin_diagnostics() -> Vec<PluginCompatibility> {
-    let mut guard = match dynamic_plugin_runtime(None).cache.lock() {
+    let mut guard = match dynamic_plugin_runtime().cache.lock() {
         Ok(guard) => guard,
         Err(_) => return Vec::new(),
     };
-    let cache = match guard.as_mut() {
-        Ok(cache) => cache,
-        Err(_) => return Vec::new(),
-    };
+    let cache = &mut *guard;
     refresh_dynamic_plugin_cache(cache, None);
     cache.diagnostics.values().cloned().collect()
 }

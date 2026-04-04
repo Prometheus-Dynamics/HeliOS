@@ -36,6 +36,16 @@ impl SnapshotLocksState {
         let mut guard = self.locks.lock().await;
         guard.entry(stream_id).or_insert_with(|| Arc::new(Mutex::new(()))).clone()
     }
+
+    pub(crate) async fn release(&self, stream_id: Uuid, lock: Arc<Mutex<()>>) {
+        if Arc::strong_count(&lock) != 2 {
+            return;
+        }
+        let mut guard = self.locks.lock().await;
+        if guard.get(&stream_id).is_some_and(|existing| Arc::ptr_eq(existing, &lock) && Arc::strong_count(existing) == 2) {
+            guard.remove(&stream_id);
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
@@ -217,14 +227,38 @@ pub(crate) async fn capture_snapshot_for_stream(state: &AppState, stream_id: Uui
     let kind = normalize_snapshot_kind(req.kind.as_deref()).map_err(ApiError::bad_request)?;
     let snapshot_lock = state.services.streams.snapshot_guard(stream_id).await;
     let _snapshot_guard = snapshot_lock.lock().await;
-
-    // Calibration snapshots default to RAW if caller did not specify a source.
-    let mut source = req.source.clone();
-    if kind == "calibration" && source.is_none() {
-        source = Some(RecordingSource::Raw);
+    let result = async {
+        // Calibration snapshots default to RAW if caller did not specify a source.
+        let mut source = req.source.clone();
+        if kind == "calibration" && source.is_none() {
+            source = Some(RecordingSource::Raw);
+        }
+        let jpeg = capture_snapshot_jpeg(state, stream_id, source).await?;
+        save_snapshot_media(stream_id, req.name.as_deref(), kind, &jpeg).await
     }
-    let jpeg = capture_snapshot_jpeg(state, stream_id, source).await?;
-    save_snapshot_media(stream_id, req.name.as_deref(), kind, &jpeg).await
+    .await;
+    drop(_snapshot_guard);
+    state.services.streams.release_snapshot_guard(stream_id, snapshot_lock).await;
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SnapshotLocksState;
+    use uuid::Uuid;
+
+    #[tokio::test]
+    async fn snapshot_locks_are_pruned_after_last_holder_releases() {
+        let state = SnapshotLocksState::default();
+        let stream_id = Uuid::new_v4();
+
+        let lock = state.guard(stream_id).await;
+        let guard = lock.lock().await;
+        drop(guard);
+        state.release(stream_id, lock).await;
+
+        assert_eq!(state.locks.lock().await.len(), 0);
+    }
 }
 
 pub(crate) async fn apply_stream_crop(state: &AppState, stream_id: Uuid, crop: [f64; 4]) -> ApiResult<SetStreamCropResponse> {

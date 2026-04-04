@@ -443,7 +443,7 @@ async fn preflight_stream_runtime_activation(state: &AppState, manifest: &Stream
     if let Ok(active) = state.engine.list_streams().await
         && let Some(conflict) = active.iter().find(|s| s.manifest.internal && manifests_conflict(&s.manifest, manifest))
     {
-        if sensor_bench::is_active_benchmark_stream(conflict.stream_id).await {
+        if sensor_bench::is_active_benchmark_stream(state, conflict.stream_id).await {
             return Some((StatusCode::CONFLICT, Json(engine_error_body(Some(helios_engine::ipc::EngineErrorCode::Busy), "device is busy (sensor benchmark is active)"))).into_response());
         }
 

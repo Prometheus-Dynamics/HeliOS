@@ -29,7 +29,9 @@ struct LocalizationTemporalRuntime {
 
 fn localization_temporal_runtime() -> &'static LocalizationTemporalRuntime {
     // Temporal smoothing has to outlive individual parse calls, so this keeps one keyed runtime
-    // cache for the process and prunes entries by staleness during updates.
+    // cache for the process and prunes entries by staleness during updates. Keys are scoped by
+    // stream/source/tag identifiers, so the map stays bounded to recently active localization
+    // sources instead of growing forever across requests.
     static RUNTIME: OnceLock<LocalizationTemporalRuntime> = OnceLock::new();
     RUNTIME.get_or_init(|| LocalizationTemporalRuntime { tag_pose_state: Mutex::new(HashMap::new()), tag_pair_distance_state: Mutex::new(HashMap::new()) })
 }
@@ -45,6 +47,16 @@ fn tag_pair_distance_temporal_state() -> &'static Mutex<HashMap<String, TagPairD
 fn temporal_policy() -> &'static ResolvedEngineLocalizationTemporalPolicy {
     static VALUE: OnceLock<ResolvedEngineLocalizationTemporalPolicy> = OnceLock::new();
     VALUE.get_or_init(|| HELIOS_ENGINE_LOCALIZATION_TEMPORAL_POLICY.resolve())
+}
+
+#[cfg(test)]
+pub(super) fn clear_localization_temporal_state() {
+    if let Ok(mut state) = tag_pose_temporal_state().lock() {
+        state.clear();
+    }
+    if let Ok(mut state) = tag_pair_distance_temporal_state().lock() {
+        state.clear();
+    }
 }
 
 pub(super) fn pose_reliability_quality(camera_from_tag: &PoseTransform) -> f32 {
@@ -470,4 +482,67 @@ pub(super) fn smooth_detection_tag_poses(source: &LocalizationSourceConfig, dete
     }
 
     state_store.retain(|_key, state| now.saturating_duration_since(state.updated_at) <= stale_after);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn source_config() -> LocalizationSourceConfig {
+        LocalizationSourceConfig {
+            id: "cam-front".to_string(),
+            stream_id: "stream-a".to_string(),
+            output_key: "detections".to_string(),
+            camera_uid: "cam-front".to_string(),
+            pose_space: None,
+            input_key: None,
+            enabled: true,
+            weight: 1.0,
+        }
+    }
+
+    fn detection(tag_id: u32, quality: f32, x: f64, y: f64, z: f64) -> LocalizationDetection {
+        LocalizationDetection {
+            source_id: String::new(),
+            camera_uid: String::new(),
+            tag_id,
+            camera_from_tag: PoseTransform { translation: Vector3::new(x, y, z), rotation: UnitQuaternion::identity() },
+            tag_size: Some(0.165),
+            code_rotation: Some(0),
+            tag_bits: None,
+            weight: 1.0,
+            quality,
+        }
+    }
+
+    #[test]
+    fn pair_distance_state_prunes_stale_entries() {
+        clear_localization_temporal_state();
+        let source = source_config();
+        let stale_key = detection_pair_state_key(&source, 1, 2);
+        tag_pair_distance_temporal_state().lock().unwrap().insert(stale_key, TagPairDistanceTemporalState { distance_m: 1.0, updated_at: Instant::now() - Duration::from_secs(3), outlier_streak: 0 });
+
+        let mut detections = vec![detection(1, 0.9, 0.0, 0.0, 2.0), detection(2, 0.9, 0.1, 0.0, 2.0)];
+        apply_pair_distance_consistency(&source, &mut detections);
+
+        assert!(tag_pair_distance_temporal_state().lock().unwrap().len() <= 1);
+        clear_localization_temporal_state();
+    }
+
+    #[test]
+    fn pose_state_prunes_stale_entries() {
+        clear_localization_temporal_state();
+        let source = source_config();
+        let stale_key = detection_pose_state_key(&source, &detection(1, 0.9, 0.0, 0.0, 2.0));
+        tag_pose_temporal_state().lock().unwrap().insert(
+            stale_key,
+            TagPoseTemporalState { translation: Vector3::new(0.0, 0.0, 2.0), rotation: UnitQuaternion::identity(), updated_at: Instant::now() - Duration::from_secs(3), outlier_streak: 0 },
+        );
+
+        let mut detections = vec![detection(1, 0.9, 0.1, 0.0, 2.0)];
+        smooth_detection_tag_poses(&source, &mut detections);
+
+        assert_eq!(tag_pose_temporal_state().lock().unwrap().len(), 1);
+        clear_localization_temporal_state();
+    }
 }

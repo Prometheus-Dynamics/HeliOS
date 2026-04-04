@@ -1,11 +1,13 @@
+mod cache;
 mod inputs;
 mod request;
 mod rig;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use cache::LocalizationSolveCacheState;
 pub(crate) use inputs::{dedupe_enabled_sources, enrich_source_input_keys_from_streams};
-pub(crate) use request::{LocalizationSolveCacheState, fetch_localization_source_values, solve_via_engine};
+pub(crate) use request::{fetch_localization_source_values, solve_via_engine};
 pub(crate) use rig::{inject_imu_leveling_rig_pose, load_rig_poses_from_streams};
 
 use axum::{

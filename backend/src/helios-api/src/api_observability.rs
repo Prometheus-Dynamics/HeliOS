@@ -57,6 +57,7 @@ pub struct LocalizationSolveCacheSnapshot {
     pub hits: u64,
     pub misses: u64,
     pub inserts: u64,
+    pub evictions: u64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, ToSchema)]

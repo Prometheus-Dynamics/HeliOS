@@ -258,21 +258,25 @@ mod tests {
 
     #[test]
     fn collapse_duplicates_keeps_best_quality_detection() {
+        temporal::clear_localization_temporal_state();
         let source = source_config();
         let mut detections = vec![detection(7, 0.25, 0.0, 0.0, 2.0), detection(7, 0.91, 0.12, 0.0, 2.1)];
         collapse_duplicate_tag_detections(&source, &mut detections);
         assert_eq!(detections.len(), 1);
         assert_eq!(detections[0].tag_id, 7);
         assert!((detections[0].camera_from_tag.translation.x - 0.12).abs() < 1e-6);
+        temporal::clear_localization_temporal_state();
     }
 
     #[test]
     fn collapse_duplicates_penalizes_ambiguous_far_apart_candidates() {
+        temporal::clear_localization_temporal_state();
         let source = source_config();
         let mut detections = vec![detection(3, 0.90, 0.0, 0.0, 2.0), detection(3, 0.82, 1.45, 0.0, 2.0)];
         collapse_duplicate_tag_detections(&source, &mut detections);
         assert_eq!(detections.len(), 1);
         assert_eq!(detections[0].tag_id, 3);
         assert!(detections[0].quality <= 0.5);
+        temporal::clear_localization_temporal_state();
     }
 }

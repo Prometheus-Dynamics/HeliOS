@@ -1,9 +1,7 @@
 use futures::future::join_all;
 use serde_json;
 use std::collections::{BTreeMap, HashMap};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
-use tokio::sync::RwLock;
 
 use super::super::sources::ApiLocalizationSourceFetcher;
 use crate::http::AppState;
@@ -13,46 +11,6 @@ use helios_engine::localization::fetch::LocalizationSourceFetcher;
 use helios_engine::localization::maps::FieldMapDocument;
 use helios_engine::localization::math::{PoseTransform, transform_to_pose};
 use helios_engine::localization::types::LocalizationSolveResponse;
-
-#[derive(Clone)]
-struct CachedLocalizationSolveResponse {
-    signature: Vec<u8>,
-    response: LocalizationSolveResponse,
-}
-
-#[derive(Default)]
-pub(crate) struct LocalizationSolveCacheState {
-    entries: RwLock<HashMap<String, CachedLocalizationSolveResponse>>,
-    hits: AtomicU64,
-    misses: AtomicU64,
-    inserts: AtomicU64,
-}
-
-impl LocalizationSolveCacheState {
-    pub(crate) async fn get_matching(&self, key: &str, signature: &[u8]) -> Option<LocalizationSolveResponse> {
-        let response = self.entries.read().await.get(key).filter(|entry| entry.signature == signature).map(|entry| entry.response.clone());
-        if response.is_some() {
-            self.hits.fetch_add(1, Ordering::Relaxed);
-        } else {
-            self.misses.fetch_add(1, Ordering::Relaxed);
-        }
-        response
-    }
-
-    pub(crate) async fn insert(&self, key: String, signature: Vec<u8>, response: LocalizationSolveResponse) {
-        self.entries.write().await.insert(key, CachedLocalizationSolveResponse { signature, response });
-        self.inserts.fetch_add(1, Ordering::Relaxed);
-    }
-
-    pub(crate) async fn snapshot(&self) -> crate::api_observability::LocalizationSolveCacheSnapshot {
-        crate::api_observability::LocalizationSolveCacheSnapshot {
-            entries: self.entries.read().await.len() as u64,
-            hits: self.hits.load(Ordering::Relaxed),
-            misses: self.misses.load(Ordering::Relaxed),
-            inserts: self.inserts.load(Ordering::Relaxed),
-        }
-    }
-}
 
 fn localization_solve_cache_key(profile_id: &str, apply_field_origin: bool) -> String {
     format!("{}|{}", profile_id.trim(), if apply_field_origin { "field" } else { "raw" })

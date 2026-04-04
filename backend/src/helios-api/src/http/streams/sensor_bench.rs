@@ -15,7 +15,7 @@ use std::{
     collections::HashMap,
     path::PathBuf,
     sync::{
-        Arc, OnceLock,
+        Arc,
         atomic::{AtomicBool, Ordering},
     },
     time::Duration,
@@ -178,9 +178,66 @@ enum SensorBenchmarkInternalStatus {
     Failed(String),
 }
 
-fn jobs() -> &'static Arc<Mutex<HashMap<Uuid, JobState>>> {
-    static JOBS: OnceLock<Arc<Mutex<HashMap<Uuid, JobState>>>> = OnceLock::new();
-    JOBS.get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
+#[derive(Default)]
+pub(crate) struct SensorBenchmarkJobsState {
+    jobs: Mutex<HashMap<Uuid, JobState>>,
+}
+
+impl SensorBenchmarkJobsState {
+    async fn insert(&self, benchmark_id: Uuid, job: JobState) {
+        let mut jobs = self.jobs.lock().await;
+        jobs.insert(benchmark_id, job);
+        Self::prune_terminal_jobs(&mut jobs);
+    }
+
+    async fn update(&self, benchmark_id: Uuid, update: impl FnOnce(&mut JobState)) {
+        let mut jobs = self.jobs.lock().await;
+        if let Some(job) = jobs.get_mut(&benchmark_id) {
+            update(job);
+        }
+        Self::prune_terminal_jobs(&mut jobs);
+    }
+
+    async fn get(&self, benchmark_id: &Uuid) -> Option<JobState> {
+        self.jobs.lock().await.get(benchmark_id).cloned()
+    }
+
+    async fn cancel(&self, benchmark_id: &Uuid) -> bool {
+        let mut jobs = self.jobs.lock().await;
+        let Some(job) = jobs.get_mut(benchmark_id) else {
+            return false;
+        };
+        job.cancel.store(true, Ordering::Relaxed);
+        true
+    }
+
+    async fn remove(&self, benchmark_id: &Uuid) {
+        self.jobs.lock().await.remove(benchmark_id);
+    }
+
+    async fn cancel_handle(&self, benchmark_id: &Uuid) -> Option<Arc<AtomicBool>> {
+        self.jobs.lock().await.get(benchmark_id).map(|job| job.cancel.clone())
+    }
+
+    async fn is_active_stream(&self, stream_id: Uuid) -> bool {
+        self.jobs.lock().await.values().any(|job| matches!(job.status, SensorBenchmarkInternalStatus::Running) && job.active_stream_id == Some(stream_id))
+    }
+
+    fn prune_terminal_jobs(jobs: &mut HashMap<Uuid, JobState>) {
+        const MAX_TERMINAL_JOBS: usize = 16;
+
+        let terminal_count = jobs.values().filter(|job| !matches!(job.status, SensorBenchmarkInternalStatus::Running)).count();
+        if terminal_count <= MAX_TERMINAL_JOBS {
+            return;
+        }
+
+        let mut terminal = jobs.iter().filter(|(_, job)| !matches!(job.status, SensorBenchmarkInternalStatus::Running)).map(|(id, job)| (*id, job.started_at)).collect::<Vec<_>>();
+        terminal.sort_by_key(|(_, started_at)| *started_at);
+
+        for (id, _) in terminal.into_iter().take(terminal_count - MAX_TERMINAL_JOBS) {
+            jobs.remove(&id);
+        }
+    }
 }
 
 fn bench_dir_name() -> &'static str {
@@ -362,31 +419,24 @@ async fn read_benchmark_file(path: &PathBuf) -> Result<SensorBenchmarkResult, St
     serde_json::from_slice(&bytes).map_err(|e| e.to_string())
 }
 
-async fn update_job(id: Uuid, update: impl FnOnce(&mut JobState)) {
-    let mut guard = jobs().lock().await;
-    if let Some(job) = guard.get_mut(&id) {
-        update(job);
-    }
-}
-
-pub(crate) async fn is_active_benchmark_stream(stream_id: Uuid) -> bool {
-    let guard = jobs().lock().await;
-    guard.values().any(|job| matches!(job.status, SensorBenchmarkInternalStatus::Running) && job.active_stream_id == Some(stream_id))
+pub(crate) async fn is_active_benchmark_stream(state: &AppState, stream_id: Uuid) -> bool {
+    state.services.streams.sensor_benchmark_jobs().is_active_stream(stream_id).await
 }
 
 async fn run_benchmark_job(state: AppState, benchmark_id: Uuid, req: StartSensorBenchmarkRequest) {
+    let jobs = state.services.streams.sensor_benchmark_jobs();
     let started_at = Utc::now();
     let mut warnings: Vec<String> = Vec::new();
     let window = sample_window_from_req(&req);
     let mut cpu_sampler = CpuSampler::new();
-    let cancel = { jobs().lock().await.get(&benchmark_id).map(|j| j.cancel.clone()) };
+    let cancel = jobs.cancel_handle(&benchmark_id).await;
     let Some(cancel) = cancel else {
         return;
     };
 
     let devices = discover_devices(&state).await;
     let Some((device, backend)) = find_matching_backend(&devices, req.backend, &req.handle, &req.device_keys) else {
-        update_job(benchmark_id, |job| job.status = SensorBenchmarkInternalStatus::Failed("device/backend not found".into())).await;
+        jobs.update(benchmark_id, |job| job.status = SensorBenchmarkInternalStatus::Failed("device/backend not found".into())).await;
         return;
     };
     let keys = if req.device_keys.is_empty() { device.identity.keys.clone() } else { req.device_keys.clone() };
@@ -395,7 +445,7 @@ async fn run_benchmark_job(state: AppState, benchmark_id: Uuid, req: StartSensor
     let descriptor_modes = backend.descriptor.modes.clone();
     let selected_modes: Vec<styx::capture::Mode> =
         if req.mode_ids.is_empty() { descriptor_modes.clone() } else { descriptor_modes.iter().filter(|mode| req.mode_ids.iter().any(|want| want == &mode.id)).cloned().collect() };
-    update_job(benchmark_id, |job| job.progress.total_modes = selected_modes.len()).await;
+    jobs.update(benchmark_id, |job| job.progress.total_modes = selected_modes.len()).await;
 
     let mut restored: Vec<StreamManifest> = Vec::new();
     if req.restore_existing {
@@ -414,7 +464,7 @@ async fn run_benchmark_job(state: AppState, benchmark_id: Uuid, req: StartSensor
         let format = fourcc.to_string();
         let resolution = format_resolution_label(mode);
 
-        update_job(benchmark_id, |job| {
+        jobs.update(benchmark_id, |job| {
             job.progress.completed_modes = idx;
             job.progress.current_format = Some(format.clone());
             job.progress.current_resolution = Some(resolution.clone());
@@ -439,7 +489,7 @@ async fn run_benchmark_job(state: AppState, benchmark_id: Uuid, req: StartSensor
                 continue;
             }
         };
-        update_job(benchmark_id, |job| job.active_stream_id = Some(stream_id)).await;
+        jobs.update(benchmark_id, |job| job.active_stream_id = Some(stream_id)).await;
 
         // Baseline metrics and baseline CPU (capture-only).
         let (baseline_metrics, baseline_cpu) = match sample_metrics_and_cpu(&state, stream_id, window, false, &mut cpu_sampler).await {
@@ -529,10 +579,10 @@ async fn run_benchmark_job(state: AppState, benchmark_id: Uuid, req: StartSensor
         });
 
         stop_stream_best_effort(&state, stream_id).await;
-        update_job(benchmark_id, |job| job.active_stream_id = None).await;
+        jobs.update(benchmark_id, |job| job.active_stream_id = None).await;
     }
 
-    update_job(benchmark_id, |job| {
+    jobs.update(benchmark_id, |job| {
         job.progress.completed_modes = job.progress.total_modes;
         job.progress.current_format = None;
         job.progress.current_resolution = None;
@@ -552,15 +602,15 @@ async fn run_benchmark_job(state: AppState, benchmark_id: Uuid, req: StartSensor
     match bench_file_path(benchmark_id).await {
         Ok(path) => {
             if let Err(err) = write_benchmark_file(&path, &result).await {
-                update_job(benchmark_id, |job| job.status = SensorBenchmarkInternalStatus::Failed(err)).await;
+                jobs.update(benchmark_id, |job| job.status = SensorBenchmarkInternalStatus::Failed(err)).await;
                 return;
             }
-            update_job(benchmark_id, |job| job.status = SensorBenchmarkInternalStatus::Completed(path)).await;
+            jobs.update(benchmark_id, |job| job.status = SensorBenchmarkInternalStatus::Completed(path)).await;
             // Persisted on disk; drop in-memory state to avoid unbounded growth.
-            jobs().lock().await.remove(&benchmark_id);
+            jobs.remove(&benchmark_id).await;
         }
         Err(err) => {
-            update_job(benchmark_id, |job| job.status = SensorBenchmarkInternalStatus::Failed(err.to_string())).await;
+            jobs.update(benchmark_id, |job| job.status = SensorBenchmarkInternalStatus::Failed(err.to_string())).await;
         }
     };
 }
@@ -583,7 +633,7 @@ pub async fn start_sensor_benchmark(State(state): State<AppState>, Json(req): Js
         cancel: Arc::new(AtomicBool::new(false)),
         active_stream_id: None,
     };
-    jobs().lock().await.insert(benchmark_id, job);
+    state.services.streams.sensor_benchmark_jobs().insert(benchmark_id, job).await;
 
     tokio::spawn(run_benchmark_job(state, benchmark_id, req));
 
@@ -601,7 +651,7 @@ pub async fn start_sensor_benchmark(State(state): State<AppState>, Json(req): Js
     )
 )]
 pub async fn get_sensor_benchmark(State(_state): State<AppState>, axum::extract::Path(id): axum::extract::Path<Uuid>) -> Response {
-    let job_opt = { jobs().lock().await.get(&id).cloned() };
+    let job_opt = _state.services.streams.sensor_benchmark_jobs().get(&id).await;
 
     if let Some(job) = job_opt {
         match job.status {
@@ -643,11 +693,9 @@ pub async fn get_sensor_benchmark(State(_state): State<AppState>, axum::extract:
     )
 )]
 pub async fn cancel_sensor_benchmark(State(_state): State<AppState>, Path(id): Path<Uuid>) -> Response {
-    let mut guard = jobs().lock().await;
-    let Some(job) = guard.get_mut(&id) else {
+    if !_state.services.streams.sensor_benchmark_jobs().cancel(&id).await {
         return (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "benchmark not found" }))).into_response();
-    };
-    job.cancel.store(true, Ordering::Relaxed);
+    }
     (StatusCode::ACCEPTED, Json(serde_json::json!({ "ok": true }))).into_response()
 }
 
@@ -698,4 +746,31 @@ pub async fn list_sensor_benchmarks(State(_state): State<AppState>) -> Response 
 
     benchmarks.sort_by(|a, b| b.summary.completed_at.cmp(&a.summary.completed_at));
     (StatusCode::OK, Json(SensorBenchmarkListResponse { benchmarks })).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn terminal_job(started_at: DateTime<Utc>) -> JobState {
+        JobState {
+            started_at,
+            progress: SensorBenchmarkProgress { total_modes: 0, completed_modes: 0, current_format: None, current_resolution: None },
+            status: SensorBenchmarkInternalStatus::Failed("failed".into()),
+            cancel: Arc::new(AtomicBool::new(false)),
+            active_stream_id: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn sensor_benchmark_runtime_prunes_old_terminal_jobs() {
+        let state = SensorBenchmarkJobsState::default();
+        for idx in 0..20 {
+            state.insert(Uuid::new_v4(), terminal_job(Utc::now() + chrono::TimeDelta::seconds(idx))).await;
+        }
+
+        let jobs = state.jobs.lock().await;
+        assert!(jobs.len() <= 16);
+        assert!(jobs.values().all(|job| !matches!(job.status, SensorBenchmarkInternalStatus::Running)));
+    }
 }

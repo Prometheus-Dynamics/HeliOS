@@ -15,6 +15,7 @@ use crate::http::streams::replay_bundle::ReplayBundleSessionsState;
 use crate::http::streams::types::StreamInfo;
 use crate::http::streams::{
     mjpeg::{MjpegFeedSubscription, MjpegFeedsState},
+    sensor_bench::SensorBenchmarkJobsState,
     snapshot::SnapshotLocksState,
 };
 
@@ -83,6 +84,7 @@ pub struct StreamsReadModelService {
     mjpeg_feeds: Arc<MjpegFeedsState>,
     recording_runtime: Arc<RecordingRuntimeState>,
     replay_bundle_sessions: Arc<ReplayBundleSessionsState>,
+    sensor_benchmark_jobs: Arc<SensorBenchmarkJobsState>,
     snapshot_locks: Arc<SnapshotLocksState>,
 }
 
@@ -125,6 +127,14 @@ impl StreamsReadModelService {
 
     pub async fn snapshot_guard(&self, stream_id: Uuid) -> Arc<Mutex<()>> {
         self.snapshot_locks.guard(stream_id).await
+    }
+
+    pub async fn release_snapshot_guard(&self, stream_id: Uuid, lock: Arc<Mutex<()>>) {
+        self.snapshot_locks.release(stream_id, lock).await;
+    }
+
+    pub fn sensor_benchmark_jobs(&self) -> Arc<SensorBenchmarkJobsState> {
+        self.sensor_benchmark_jobs.clone()
     }
 
     pub fn recording_runtime(&self) -> Arc<RecordingRuntimeState> {
