@@ -41,16 +41,21 @@ function normalizeBase(raw: string): string {
   }
 }
 
-function applyBase(normalized: string): string {
+function syncOpenApiBase(normalized: string): string {
   OpenAPI.BASE = `${normalized}${API_PREFIX}`;
   return normalized;
 }
 
-export function getHttpClientApiBase(): string {
-  if (browser) {
-    getHttpClientBase();
+function resolveNormalizedBase(baseOverride?: string | null | undefined): string {
+  const trimmed = typeof baseOverride === 'string' ? baseOverride.trim() : '';
+  if (trimmed.length > 0) {
+    return normalizeBase(trimmed);
   }
-  return String(OpenAPI.BASE || `${getHttpClientBase()}${API_PREFIX}`).replace(/\/+$/, '');
+  return getHttpClientBase();
+}
+
+export function getHttpClientApiBase(): string {
+  return `${getHttpClientBase()}${API_PREFIX}`.replace(/\/+$/, '');
 }
 
 function loadSavedBase(): string | null {
@@ -66,7 +71,7 @@ function storeBase(base: string): boolean {
 
 export function setHttpClientBase(base: string): string {
   const normalized = normalizeBase(base);
-  applyBase(normalized);
+  syncOpenApiBase(normalized);
   const stored = storeBase(normalized);
   if (!stored) {
     throw new Error('Unable to persist API base (local storage unavailable).');
@@ -76,7 +81,7 @@ export function setHttpClientBase(base: string): string {
 
 export function resetHttpClientBase(): void {
   const normalized = normalizeBase(DEFAULT_API_BASE);
-  applyBase(normalized);
+  syncOpenApiBase(normalized);
   if (browser) removeStorage(STORAGE_KEY);
 }
 
@@ -84,16 +89,13 @@ export function getHttpClientBase(): string {
   const stored = loadSavedBase();
   if (stored) {
     try {
-      const normalized = normalizeBase(stored);
-      return applyBase(normalized);
+      return normalizeBase(stored);
     } catch {
       // fall through to derived defaults
     }
   }
-  const candidate = OpenAPI.BASE ?? DEFAULT_API_BASE;
   try {
-    const normalized = normalizeBase(candidate);
-    return applyBase(normalized);
+    return normalizeBase(DEFAULT_API_BASE);
   } catch {
     // In dev, allow same-origin `/v1` fallback only when both stored and current OpenAPI base
     // are unavailable/invalid.
@@ -101,7 +103,7 @@ export function getHttpClientBase(): string {
       const origin = globalThis.location?.origin?.trim();
       if (origin) {
         try {
-          return applyBase(normalizeBase(origin));
+          return normalizeBase(origin);
         } catch {
           // keep falling through to default
         }
@@ -110,12 +112,12 @@ export function getHttpClientBase(): string {
     if (stored && browser) {
       removeStorage(STORAGE_KEY);
     }
-    return applyBase(normalizeBase(DEFAULT_API_BASE));
+    return normalizeBase(DEFAULT_API_BASE);
   }
 }
 
-export function apiUrl(path = ''): string {
-  const base = getHttpClientApiBase();
+export function apiUrl(path = '', baseOverride?: string | null): string {
+  const base = `${resolveNormalizedBase(baseOverride)}${API_PREFIX}`.replace(/\/+$/, '');
   const trimmedPath = String(path ?? '').trim();
   if (!trimmedPath.length) {
     return base;
@@ -124,26 +126,9 @@ export function apiUrl(path = ''): string {
   return `${base}${normalizedPath}`;
 }
 
-export async function withHttpClientBase<T>(
-  base: string | null | undefined,
-  run: () => Promise<T> | T
-): Promise<T> {
-  const trimmed = typeof base === 'string' ? base.trim() : '';
-  if (!trimmed.length) {
-    return await run();
-  }
-  const previous = OpenAPI.BASE;
-  applyBase(normalizeBase(trimmed));
-  try {
-    return await run();
-  } finally {
-    OpenAPI.BASE = previous;
-  }
-}
-
 // Initialize OpenAPI.BASE once at module import.
 try {
-  getHttpClientBase();
+  syncOpenApiBase(getHttpClientBase());
   OpenAPI.ENCODE_PATH = encodeURIComponent;
 } catch {
   // ignore

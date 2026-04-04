@@ -17,6 +17,7 @@ export type ApiRequestOptions = {
   maxAttempts?: number;
   label?: string;
   endpoint?: string;
+  baseUrl?: string;
   onError?: (error: unknown) => void;
   cacheMs?: number;
   forceRefresh?: boolean;
@@ -43,7 +44,7 @@ function readResponseCacheMetadata(response: Response): ResourceCacheMetadata {
   };
 }
 
-function resolveRequestUrl(pathOrUrl: string): string {
+function resolveRequestUrl(pathOrUrl: string, baseUrl?: string): string {
   const trimmed = String(pathOrUrl ?? '').trim();
   if (!trimmed.length) {
     throw new Error('Request path is required');
@@ -51,7 +52,7 @@ function resolveRequestUrl(pathOrUrl: string): string {
   if (/^https?:\/\//i.test(trimmed)) {
     return trimmed;
   }
-  return apiUrl(trimmed);
+  return apiUrl(trimmed, baseUrl);
 }
 
 function isBodyInit(value: unknown): value is BodyInit {
@@ -91,7 +92,7 @@ function prepareRequest(init: ApiFetchInit = {}): { headers: Headers; body: Body
 }
 
 async function executeRequest(pathOrUrl: string, init: ApiFetchInit = {}, options: ApiRequestOptions = {}): Promise<Response> {
-  const url = resolveRequestUrl(pathOrUrl);
+  const url = resolveRequestUrl(pathOrUrl, options.baseUrl);
   const { headers, body } = prepareRequest(init);
   const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const recordConnection = options.recordConnection ?? false;

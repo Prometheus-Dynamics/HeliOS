@@ -1,5 +1,4 @@
 import type { CodecInfo, Interval, Mode, ProbedBackend, ProbedDevice, StreamInfo, StreamManifest } from '$lib/api/client';
-import { withHttpClientBase } from '$lib/api/client';
 import { extractError } from '$lib/api/errors';
 import type { EncoderSettingsDraft } from '$lib/api/streamEncoderSettings';
 import type { StreamCreationDefaults } from '$lib/api/streamDefaults';
@@ -149,7 +148,7 @@ export function createCameraStreamPresetController(state: PresetState, deps: Pre
         outputSelectionForPipeline: deps.outputSelectionForPipeline
       });
 
-      await withHttpClientBase(deps.apiBase, () => deps.streamsApi.startStream({ requestBody: payload }));
+      await deps.streamsApi.startStream({ requestBody: payload }, { baseUrl: deps.apiBase });
       deps.onExternalLayoutApplied?.();
       if (!options.silent) {
         deps.toaster.success({ title: 'Stream updated', description: 'Pipeline & capture settings applied.' });

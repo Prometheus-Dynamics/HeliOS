@@ -12,12 +12,13 @@ import { resolveStreamLabel } from '$lib/utils/streamLabels';
 
 const REQUEST_TIMEOUT_MS = DEFAULT_REQUEST_TIMEOUT_MS;
 
-export async function fetchDashboardPageData(): Promise<DashboardPayload> {
+export async function fetchDashboardPageData(options: { baseUrl?: string } = {}): Promise<DashboardPayload> {
+  const apiOptions = { baseUrl: options.baseUrl, timeoutMs: REQUEST_TIMEOUT_MS };
   const [streamsResult, camerasResult, pipelinesResult, metricsResult] = await Promise.allSettled([
-    loadOwnedStreams({ preferCached: false }),
-    PeripheralsApi.listCameras({ timeoutMs: REQUEST_TIMEOUT_MS }),
-    PipelinesApi.listGraphs({ timeoutMs: REQUEST_TIMEOUT_MS }),
-    DeviceApi.metrics({ timeoutMs: REQUEST_TIMEOUT_MS })
+    loadOwnedStreams({ preferCached: false, baseUrl: options.baseUrl }),
+    PeripheralsApi.listCameras(apiOptions),
+    PipelinesApi.listGraphs(apiOptions),
+    DeviceApi.metrics(apiOptions)
   ]);
 
   const failures = [streamsResult, camerasResult, pipelinesResult, metricsResult].filter((result) => result.status === 'rejected').length;

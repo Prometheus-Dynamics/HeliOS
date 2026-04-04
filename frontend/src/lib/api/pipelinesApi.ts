@@ -1,5 +1,5 @@
 import { PipelinesService } from '$lib/api/client';
-import { apiFetchCachedJson, runApiRequest, type ApiRequestOptions } from '$lib/api/core/http';
+import { apiFetch, apiFetchCachedJson, runApiRequest, type ApiRequestOptions } from '$lib/api/core/http';
 import { invalidateSWRPrefix } from '$lib/utils/swrCache';
 
 type CacheEntry<T> = {
@@ -31,6 +31,9 @@ function resolveCacheMs(options: ApiRequestOptions | undefined, defaultMs: numbe
 }
 
 async function listRegistrySingleflight(options?: ApiRequestOptions) {
+  if (options?.baseUrl) {
+    return apiFetch<RegistrySnapshot>('/pipelines/registry', { headers: { Accept: 'application/json' } }, { label: 'listRegistry', ...options });
+  }
   const cacheMs = resolveCacheMs(options, DEFAULT_REGISTRY_CACHE_MS);
   const now = Date.now();
   if (!options?.forceRefresh && cacheMs > 0 && registryCache && now - registryCache.fetchedAt < cacheMs) {
@@ -76,6 +79,9 @@ async function listRegistrySingleflight(options?: ApiRequestOptions) {
 }
 
 async function listGraphsSingleflight(options?: ApiRequestOptions) {
+  if (options?.baseUrl) {
+    return apiFetch<GraphList>('/pipelines/graphs', { headers: { Accept: 'application/json' } }, { label: 'listGraphs', ...options });
+  }
   const cacheMs = resolveCacheMs(options, DEFAULT_GRAPHS_CACHE_MS);
   const now = Date.now();
   if (!options?.forceRefresh && cacheMs > 0 && graphsCache && now - graphsCache.fetchedAt < cacheMs) {
@@ -121,6 +127,9 @@ async function listGraphsSingleflight(options?: ApiRequestOptions) {
 }
 
 async function listTemplatesSingleflight(options?: ApiRequestOptions) {
+  if (options?.baseUrl) {
+    return apiFetch<TemplateList>('/pipelines/templates', { headers: { Accept: 'application/json' } }, { label: 'listTemplates', ...options });
+  }
   const cacheMs = resolveCacheMs(options, DEFAULT_TEMPLATES_CACHE_MS);
   const now = Date.now();
   if (!options?.forceRefresh && cacheMs > 0 && templatesCache && now - templatesCache.fetchedAt < cacheMs) {
@@ -154,17 +163,39 @@ function invalidateGraphsCache(): void {
 export const PipelinesApi = {
   listRegistry: (options?: ApiRequestOptions) => listRegistrySingleflight(options),
   fetchGraph: (args: Parameters<typeof PipelinesService.fetchGraph>[0], options?: ApiRequestOptions) =>
-    runApiRequest(() => PipelinesService.fetchGraph(args), { label: 'fetchGraph', ...options }),
+    options?.baseUrl
+      ? apiFetch<Awaited<ReturnType<typeof PipelinesService.fetchGraph>>>(
+          `/pipelines/graphs/${encodeURIComponent(args.id)}`,
+          { headers: { Accept: 'application/json' } },
+          { label: 'fetchGraph', ...options }
+        )
+      : runApiRequest(() => PipelinesService.fetchGraph(args), { label: 'fetchGraph', ...options }),
   listGraphs: (options?: ApiRequestOptions) => listGraphsSingleflight(options),
   listTemplates: (options?: ApiRequestOptions) => listTemplatesSingleflight(options),
   uploadGraph: async (args: Parameters<typeof PipelinesService.uploadGraph>[0], options?: ApiRequestOptions) => {
-    const result = await runApiRequest(() => PipelinesService.uploadGraph(args), { label: 'uploadGraph', ...options });
+    const result = options?.baseUrl
+      ? await apiFetch<Awaited<ReturnType<typeof PipelinesService.uploadGraph>>>(
+          '/pipelines/graphs',
+          {
+            method: 'POST',
+            body: args.requestBody,
+            headers: { Accept: 'application/json' }
+          },
+          { label: 'uploadGraph', ...options }
+        )
+      : await runApiRequest(() => PipelinesService.uploadGraph(args), { label: 'uploadGraph', ...options });
     invalidateGraphsCache();
     invalidateSWRPrefix('pipelines:');
     return result;
   },
   fetchTemplate: (args: Parameters<typeof PipelinesService.fetchTemplate>[0], options?: ApiRequestOptions) =>
-    runApiRequest(() => PipelinesService.fetchTemplate(args), { label: 'fetchTemplate', ...options }),
+    options?.baseUrl
+      ? apiFetch<Awaited<ReturnType<typeof PipelinesService.fetchTemplate>>>(
+          `/pipelines/templates/${encodeURIComponent(args.id)}`,
+          { headers: { Accept: 'application/json' } },
+          { label: 'fetchTemplate', ...options }
+        )
+      : runApiRequest(() => PipelinesService.fetchTemplate(args), { label: 'fetchTemplate', ...options }),
   deleteGraph: async (args: Parameters<typeof PipelinesService.deleteGraph>[0], options?: ApiRequestOptions) => {
     const result = await runApiRequest(() => PipelinesService.deleteGraph(args), { label: 'deleteGraph', ...options });
     invalidateGraphsCache();

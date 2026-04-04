@@ -135,14 +135,7 @@ pub fn aruco_bits_for_family(family_label: &str, id: u32) -> Option<FieldMapTagB
 
 fn normalize_aruco_family_label(raw: &str) -> Option<&'static str> {
     let value = raw.trim().to_ascii_lowercase();
-    let direct = lib_cv::modules::aruco::tag::ArucoTagFamily::available().iter().find(|&&label| value == label).copied();
-    if direct.is_some() {
-        return direct;
-    }
-
-    // Limelight/WPILib family strings often embed the code family, e.g. "apriltag3_36h11_classic".
-    // Accept common aliases by substring match.
-    lib_cv::modules::aruco::tag::ArucoTagFamily::available().iter().find(|&&label| value.contains(label)).copied()
+    lib_cv::modules::aruco::tag::ArucoTagFamily::available().iter().find(|&&label| value == label).copied()
 }
 
 #[cfg(test)]
@@ -151,7 +144,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn limelight_family_strings_produce_bits() {
+    fn only_canonical_family_labels_produce_bits() {
         let bits = aruco_bits_for_family("36h11", 1);
         assert!(bits.is_some());
         let bits = bits.unwrap();
@@ -159,12 +152,7 @@ mod tests {
         assert_eq!(bits.rows.len(), bits.width as usize);
         assert!(bits.rows.iter().all(|row| row.len() == bits.width as usize));
 
-        let bits = aruco_bits_for_family("apriltag3_36h11_classic", 1);
-        assert!(bits.is_some());
-
-        // FRC tags are typically indexed as 1..N; ensure common ids resolve.
-        assert!(aruco_bits_for_family("apriltag3_36h11_classic", 15).is_some());
-        assert!(aruco_bits_for_family("apriltag3_36h11_classic", 16).is_some());
+        assert!(aruco_bits_for_family("apriltag3_36h11_classic", 1).is_none());
     }
 
     #[test]

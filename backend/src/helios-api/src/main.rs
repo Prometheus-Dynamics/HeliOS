@@ -186,14 +186,12 @@ async fn async_main() {
 
     // Spec generation shortcut:
     //   helios-api apispec [--http <path>|-] [--ws <path>|-]
-    // Backwards compatibility: `helios-api apispec [http_path] [ws_path]`
     let mut args = std::env::args().skip(1);
     if let Some(cmd) = args.next()
         && cmd == "apispec"
     {
         let mut http_path: Option<String> = None;
         let mut ws_path: Option<String> = None;
-        let mut positionals: Vec<String> = Vec::new();
 
         while let Some(arg) = args.next() {
             match arg.as_str() {
@@ -203,13 +201,11 @@ async fn async_main() {
                     println!("usage: helios-api apispec [--http <path>|-] [--ws <path>|-]");
                     return;
                 }
-                _ => positionals.push(arg),
+                _ => {
+                    eprintln!("unknown apispec argument: {arg}");
+                    std::process::exit(2);
+                }
             }
-        }
-
-        if http_path.is_none() && ws_path.is_none() {
-            http_path = positionals.first().cloned();
-            ws_path = positionals.get(1).cloned();
         }
 
         let openapi = http::ApiDoc::openapi();

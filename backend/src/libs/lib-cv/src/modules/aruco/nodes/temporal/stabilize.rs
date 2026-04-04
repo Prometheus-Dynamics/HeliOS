@@ -24,10 +24,6 @@ pub(super) struct ArucoTemporalStabilizeDetectionsConfig {
     // Scale applied to predicted-center search radius for passthrough-support quad matching.
     #[port(default = 1.0f64, meta(ui_min = 0.5, ui_max = 4.0, ui_step = 0.1))]
     pub(super) carry_quad_search_radius_scale: f64,
-    // Backward-compatibility knob from the previous temporal implementation.
-    // Current implementation does not blend active detections with historical corners.
-    #[port(default = 1.0f64, meta(ui_min = 0.0, ui_max = 1.0, ui_step = 0.01))]
-    pub(super) current_corner_weight: f64,
     // Only attempt temporal rescue when at least one detection exists in the current frame.
     #[port(default = true)]
     pub(super) carry_requires_current: bool,
@@ -171,7 +167,6 @@ pub(super) fn cv_aruco_temporal_stabilize_detections(
     exec_ctx: &ExecutionContext,
 ) -> Result<Vec<ArucoDetection2D>, NodeError> {
     const STATE_KEY: &str = "cv:aruco:temporal_stabilize_detections:state";
-    let _ = cfg.current_corner_weight; // kept only for backwards-compatible graphs/UI.
     let hold_frames = u64::try_from(cfg.hold_frames.max(0)).unwrap_or(0);
     let carry_passthrough_frames = u64::try_from(cfg.carry_passthrough_frames.max(0)).unwrap_or(0);
     let max_tracks = usize::try_from(cfg.max_tracks.clamp(4, 512)).unwrap_or(64);

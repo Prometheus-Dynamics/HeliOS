@@ -10,12 +10,6 @@ fn cv_resize(frame: DynamicImage, width: u32, height: u32) -> Result<DynamicImag
     Ok(resize_fast(&frame, width, height))
 }
 
-// Backwards-compat: older pipeline graphs reference `cv:image:to_gray`.
-#[node(id = "to_gray", inputs("frame"), outputs("mask"))]
-fn cv_to_gray(frame: DynamicImage) -> Result<GrayImage, NodeError> {
-    Ok(frame.to_luma8())
-}
-
 #[cfg_attr(
     feature = "gpu",
     node(

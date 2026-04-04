@@ -322,64 +322,6 @@ fn cv_adaptive_threshold(
     }
 }
 
-// Backwards-compat: older pipeline graphs reference `cv:image:adaptive_threshold_fast`.
-// This is a thin alias of `adaptive_threshold` (same parameters).
-#[cfg_attr(
-    feature = "gpu",
-    node(
-        id = "adaptive_threshold_fast",
-        compute(ComputeAffinity::GpuPreferred),
-        inputs(
-            "frame",
-            port(name = "window", default = 9, meta(ui_min = 3, ui_max = 101, ui_step = 2)),
-            port(name = "offset", default = 0.0, meta(ui_min = -50.0, ui_max = 50.0, ui_step = 1.0)),
-            port(name = "threshold_offset", default = 0.0, meta(ui_min = -50.0, ui_max = 50.0, ui_step = 1.0)),
-            port(name = "border_guard_px", default = 0, meta(ui_min = 0, ui_max = 32, ui_step = 1)),
-            port(name = "invert", default = false),
-            port(name = "mode", default = "auto")
-        ),
-        outputs("mask"),
-        shaders(BoxBlurHorizontalBindings, BoxBlurVerticalBindings, MaskThresholdShaderBindings)
-    )
-)]
-#[cfg_attr(
-    not(feature = "gpu"),
-    node(
-        id = "adaptive_threshold_fast",
-        compute(ComputeAffinity::GpuPreferred),
-        inputs(
-            "frame",
-            port(name = "window", default = 9, meta(ui_min = 3, ui_max = 101, ui_step = 2)),
-            port(name = "offset", default = 0.0, meta(ui_min = -50.0, ui_max = 50.0, ui_step = 1.0)),
-            port(name = "threshold_offset", default = 0.0, meta(ui_min = -50.0, ui_max = 50.0, ui_step = 1.0)),
-            port(name = "border_guard_px", default = 0, meta(ui_min = 0, ui_max = 32, ui_step = 1)),
-            port(name = "invert", default = false),
-            port(name = "mode", default = "auto")
-        ),
-        outputs("mask")
-    )
-)]
-fn cv_adaptive_threshold_fast(
-    frame: Compute<DynamicImage>,
-    window: u32,
-    offset: f32,
-    threshold_offset: f32,
-    border_guard_px: u32,
-    invert: bool,
-    mode: ExecMode,
-    #[cfg(feature = "gpu")] ctx: ShaderContext,
-    _exec_ctx: &ExecutionContext,
-) -> Result<Compute<DynamicImage>, NodeError> {
-    #[cfg(feature = "gpu")]
-    {
-        adaptive_threshold_impl(frame, window, offset, threshold_offset, border_guard_px, invert, mode, ctx, _exec_ctx)
-    }
-    #[cfg(not(feature = "gpu"))]
-    {
-        adaptive_threshold_impl(frame, window, offset, threshold_offset, border_guard_px, invert, mode, _exec_ctx)
-    }
-}
-
 #[cfg_attr(feature = "gpu", node(id = "sobel_edge", compute(ComputeAffinity::GpuPreferred), inputs("frame", port(name = "mode", default = "auto")), outputs("mask"), shaders(SobelShaderBindings)))]
 #[cfg_attr(not(feature = "gpu"), node(id = "sobel_edge", compute(ComputeAffinity::GpuPreferred), inputs("frame", port(name = "mode", default = "auto")), outputs("mask")))]
 fn cv_sobel(frame: Compute<DynamicImage>, mode: ExecMode, #[cfg(feature = "gpu")] ctx: ShaderContext, _exec_ctx: &ExecutionContext) -> Result<Compute<DynamicImage>, NodeError> {
@@ -582,9 +524,9 @@ fn cv_otsu_level(frame: DynamicImage) -> Result<u32, NodeError> {
     Ok(otsu_level(&frame) as u32)
 }
 
-// NOTE: `adaptive_threshold_fast` / `adaptive_threshold_mask` used to exist as separate nodes.
-// They were conversion-only / API-only variants; Daedalus already handles conversions, so we
-// keep a single `adaptive_threshold` node with the superset of parameters.
+// NOTE: `adaptive_threshold_mask` used to exist as a separate node. It was a conversion-only
+// variant; Daedalus already handles conversions, so we keep a single `adaptive_threshold`
+// node with the superset of parameters.
 
 fn apply_clahe_cached(gray: &GrayImage, tile_size: u32, clip_limit: f32) -> GrayImage {
     // Reusing prepared tiles across different frames can preserve the wrong local histogram

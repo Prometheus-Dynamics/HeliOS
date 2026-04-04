@@ -1,6 +1,5 @@
 import type { StreamInfo, StreamManifest } from '$lib/api/client';
 import { apiFetchResponse } from '$lib/api/core/http';
-import { withHttpClientBase } from '$lib/api/client';
 import type { PipelinesApi } from '$lib/api/pipelinesApi';
 import type { StreamsApi } from '$lib/api/streamsApi';
 import type {
@@ -139,8 +138,7 @@ const stringArraysEqual = (left: string[] | undefined, right: string[]): boolean
 };
 
 export function createPipelineLayoutController(state: PipelineLayoutState, deps: PipelineLayoutDeps) {
-  const runWithApiBase = <T>(operation: () => Promise<T>): Promise<T> =>
-    withHttpClientBase(deps.apiBase, operation);
+  const apiOptions = { baseUrl: deps.apiBase };
   const pipelineOutputsLoadPromises = new Map<string, Promise<void>>();
   const asRecord = (value: unknown): Record<string, unknown> | null =>
     value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
@@ -217,7 +215,7 @@ export function createPipelineLayoutController(state: PipelineLayoutState, deps:
   async function ensurePipelineRegistry(): Promise<DaedalusRegistryResponse | null> {
     if (state.pipelineRegistrySnapshot) return state.pipelineRegistrySnapshot;
     try {
-      const registry = await runWithApiBase(() => deps.pipelinesApi.listRegistry()).catch(() => null);
+      const registry = await deps.pipelinesApi.listRegistry(apiOptions).catch(() => null);
       state.pipelineRegistrySnapshot = registry ?? null;
     } catch {
       state.pipelineRegistrySnapshot = null;
@@ -263,7 +261,7 @@ export function createPipelineLayoutController(state: PipelineLayoutState, deps:
     let graphJson = !forceRefresh && hasCachedGraph ? cachedGraph : manifestGraph ?? null;
     if (forceRefresh || (!graphJson && !hasCachedGraph)) {
       try {
-        const fetched = (await runWithApiBase(() => deps.pipelinesApi.fetchGraph({ id: pipelineId }))).graph ?? null;
+        const fetched = (await deps.pipelinesApi.fetchGraph({ id: pipelineId }, apiOptions)).graph ?? null;
         if (fetched) {
           graphJson = fetched;
         }
@@ -301,7 +299,7 @@ export function createPipelineLayoutController(state: PipelineLayoutState, deps:
     }
     if (!filtered.length && pipelineId !== RAW_PIPELINE_ID) {
       try {
-        const doc = await runWithApiBase(() => deps.pipelinesApi.fetchGraph({ id: pipelineId }));
+        const doc = await deps.pipelinesApi.fetchGraph({ id: pipelineId }, apiOptions);
         const docGraph = normalizeGraphDocument(doc.graph ?? null);
         if (docGraph) {
           const docRawOutputs = extractGraphOutputPortsFn(docGraph);
@@ -330,7 +328,7 @@ export function createPipelineLayoutController(state: PipelineLayoutState, deps:
       const matchesActive = normalizedId && normalizedId === activeId;
       if (streamId && matchesActive) {
         try {
-          const outputs = await runWithApiBase(() => deps.streamsApi.listPipelineOutputs({ id: streamId }));
+          const outputs = await deps.streamsApi.listPipelineOutputs({ id: streamId }, apiOptions);
           const normalizedOutputs = Array.isArray(outputs)
             ? outputs
                 .map((value) => {
@@ -525,21 +523,21 @@ export function createPipelineLayoutController(state: PipelineLayoutState, deps:
     try {
       const output = outputSelectionForPipelineFn(state, normalized);
       if (normalized === RAW_PIPELINE_ID) {
-        await runWithApiBase(() => deps.streamsApi.setPipelineGraph({
+        await deps.streamsApi.setPipelineGraph({
           id: state.stream.id,
           requestBody: { graph: RAW_LOOPBACK_GRAPH, pipeline_id: RAW_PIPELINE_UUID, output: output ?? null }
-        }));
+        }, apiOptions);
       } else {
-        const doc = await runWithApiBase(() => deps.pipelinesApi.fetchGraph({ id: normalized }));
+        const doc = await deps.pipelinesApi.fetchGraph({ id: normalized }, apiOptions);
         const graph = doc.graph ?? null;
         if (!graph) {
           throw new Error(`Pipeline graph missing: ${normalized}`);
         }
         const graphWithOverrides = deps.applyPipelineOverridesToGraph(normalized, graph);
-        await runWithApiBase(() => deps.streamsApi.setPipelineGraph({
+        await deps.streamsApi.setPipelineGraph({
           id: state.stream.id,
           requestBody: { graph: graphWithOverrides, pipeline_id: normalized, output: output ?? null }
-        }));
+        }, apiOptions);
       }
       await deps.refresh();
       return true;
@@ -625,7 +623,7 @@ export function createPipelineLayoutController(state: PipelineLayoutState, deps:
         if (!applied) return;
       }
       try {
-        await runWithApiBase(() => deps.streamsApi.setPipelineLayout({ id: state.stream!.id, requestBody: { pipeline_layout: nextLayout } }));
+        await deps.streamsApi.setPipelineLayout({ id: state.stream!.id, requestBody: { pipeline_layout: nextLayout } }, apiOptions);
         await deps.refresh();
         deps.onExternalLayoutApplied?.();
       } catch (err) {
@@ -658,7 +656,7 @@ export function createPipelineLayoutController(state: PipelineLayoutState, deps:
     state.pipelineGraphLoading = true;
     state.pipelineGraphError = null;
     try {
-      const graphs = await runWithApiBase(() => deps.pipelinesApi.listGraphs());
+      const graphs = await deps.pipelinesApi.listGraphs(apiOptions);
       const normalized = normalizePipelineSummaries(graphs);
       if (!normalized.length && state.pipelineGraphs.length) {
         return state.pipelineGraphs;
@@ -676,7 +674,7 @@ export function createPipelineLayoutController(state: PipelineLayoutState, deps:
   }
 
   async function listPipelineTemplatesForAssign(): Promise<PipelineTemplateEntry[]> {
-    const templates = await runWithApiBase(() => deps.pipelinesApi.listTemplates());
+    const templates = await deps.pipelinesApi.listTemplates(apiOptions);
     return normalizeTemplateSummaries(templates);
   }
 
@@ -686,7 +684,7 @@ export function createPipelineLayoutController(state: PipelineLayoutState, deps:
       throw new Error('Select a template first.');
     }
     try {
-      const template: PipelineTemplateDocument = await runWithApiBase(() => deps.pipelinesApi.fetchTemplate({ id: normalizedTemplateId }));
+      const template: PipelineTemplateDocument = await deps.pipelinesApi.fetchTemplate({ id: normalizedTemplateId }, apiOptions);
       const graph = normalizeGraphDocument(template.graph ?? null);
       if (!graph || typeof graph !== 'object') {
         throw new Error('Template graph is empty.');
@@ -696,12 +694,12 @@ export function createPipelineLayoutController(state: PipelineLayoutState, deps:
           ? template.name.trim()
           : `Template ${normalizedTemplateId}`;
       const uploadName = nextTemplatePipelineName(baseName);
-      const created: PipelineDocument = await runWithApiBase(() => deps.pipelinesApi.uploadGraph({
+      const created: PipelineDocument = await deps.pipelinesApi.uploadGraph({
         requestBody: {
           graph,
           name: uploadName
         }
-      }));
+      }, apiOptions);
       const createdId = String(created.id ?? '').trim();
       if (!createdId.length) {
         throw new Error('Created pipeline did not return an id.');
@@ -827,7 +825,7 @@ export function createPipelineLayoutController(state: PipelineLayoutState, deps:
     }
 
     try {
-      await runWithApiBase(() => deps.streamsApi.setPipelineWires({ id: state.stream.id, requestBody: { wires: next } }));
+      await deps.streamsApi.setPipelineWires({ id: state.stream.id, requestBody: { wires: next } }, apiOptions);
       await deps.refresh();
     } catch (err) {
       console.warn('Failed to set pipeline wires', err);

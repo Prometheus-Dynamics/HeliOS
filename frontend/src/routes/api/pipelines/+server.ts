@@ -1,6 +1,5 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
 
-import { withHttpClientBase } from '$lib/api/client';
 import { PipelinesApi } from '$lib/api/pipelinesApi';
 import { DEFAULT_REQUEST_TIMEOUT_MS } from '$lib/api/requestUtils';
 import { buildPipelinePayloadFromOverview } from '$lib/api/pipelinesNormalize';
@@ -11,7 +10,7 @@ const REQUEST_TIMEOUT_MS = DEFAULT_REQUEST_TIMEOUT_MS;
 
 export const GET: RequestHandler = async ({ url }) => {
   try {
-    const payload = await withHttpClientBase(url.origin, () => buildPipelinePayload());
+    const payload = await buildPipelinePayload(url.origin);
     return json(payload);
   } catch (error) {
     console.error('Failed to load pipeline payload', error);
@@ -19,11 +18,11 @@ export const GET: RequestHandler = async ({ url }) => {
   }
 };
 
-async function buildPipelinePayload(): Promise<PipelinePagePayload> {
-  void REQUEST_TIMEOUT_MS;
+async function buildPipelinePayload(baseUrl: string): Promise<PipelinePagePayload> {
+  const apiOptions = { baseUrl, timeoutMs: REQUEST_TIMEOUT_MS };
   const [summaries, templates] = await Promise.all([
-    PipelinesApi.listGraphs(),
-    PipelinesApi.listTemplates().catch((error) => {
+    PipelinesApi.listGraphs(apiOptions),
+    PipelinesApi.listTemplates(apiOptions).catch((error) => {
       console.warn('Failed to load pipeline templates', error);
       return [];
     })
@@ -37,7 +36,7 @@ async function buildPipelinePayload(): Promise<PipelinePagePayload> {
       : null;
   const bootstrapGraph =
     bootstrapPipelineId
-      ? await PipelinesApi.fetchGraph({ id: bootstrapPipelineId }).catch((error) => {
+      ? await PipelinesApi.fetchGraph({ id: bootstrapPipelineId }, apiOptions).catch((error) => {
           console.warn(`Failed to load bootstrap graph for ${bootstrapPipelineId}`, error);
           return null;
         })

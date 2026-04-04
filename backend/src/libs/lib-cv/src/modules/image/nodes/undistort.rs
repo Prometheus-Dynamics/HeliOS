@@ -544,15 +544,12 @@ fn cv_undistort_optional(
     frame: Compute<DynamicImage>,
     calibration: Option<daedalus::data::model::Value>,
     border_mode: BorderMode,
-    // Treat `zoom_mode` as optional at runtime to remain compatible with older graphs/hosts
-    // that don't wire or const-bind the port (Daedalus may not apply node defaults here).
-    zoom_mode: Option<UndistortZoomMode>,
+    zoom_mode: UndistortZoomMode,
     zoom: f64,
     fill_margin: f64,
     _exec_ctx: &ExecutionContext,
 ) -> Result<Compute<DynamicImage>, NodeError> {
     let border_clamp = border_mode.is_clamp();
-    let zoom_mode = zoom_mode.unwrap_or(UndistortZoomMode::Manual);
     let Some(calibration) = calibration else {
         return Ok(frame);
     };

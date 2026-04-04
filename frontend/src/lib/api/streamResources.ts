@@ -177,8 +177,14 @@ export function readOwnedStreams(): StreamInfo[] | null {
   return streamInventoryResource.read()?.data ?? null;
 }
 
-export async function loadOwnedStreams(options: { force?: boolean; preferCached?: boolean } = {}): Promise<StreamInfo[]> {
-  const { force = false, preferCached = true } = options;
+export async function loadOwnedStreams(options: { force?: boolean; preferCached?: boolean; baseUrl?: string } = {}): Promise<StreamInfo[]> {
+  const { force = false, preferCached = true, baseUrl } = options;
+  if (baseUrl) {
+    const { StreamsApi } = await import('$lib/api/streamsApi');
+    return normalizeResolvedStreams(
+      await StreamsApi.resolvedStreams({ timeoutMs: REQUEST_TIMEOUT_MS, forceRefresh: force, baseUrl })
+    );
+  }
   if (!force && preferCached) {
     const cached = readOwnedStreams();
     if (cached) return cached;
@@ -189,6 +195,7 @@ export async function loadOwnedStreams(options: { force?: boolean; preferCached?
 export async function loadOwnedStreamRecords(options: {
   force?: boolean;
   preferCached?: boolean;
+  baseUrl?: string;
 } = {}): Promise<OwnedStreamRecord[]> {
   return buildOwnedStreamRecords(await loadOwnedStreams(options));
 }

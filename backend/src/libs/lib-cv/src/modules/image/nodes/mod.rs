@@ -381,7 +381,6 @@ impl CvImagePlugin {
         registry.merge::<filters::cv_otsu>()?;
         registry.merge::<filters::cv_otsu_level>()?;
         registry.merge::<filters::cv_adaptive_threshold>()?;
-        registry.merge::<filters::cv_adaptive_threshold_fast>()?;
         registry.merge::<filters::cv_clahe>()?;
         registry.merge::<filters::cv_equalize>()?;
         registry.merge::<filters::cv_gamma>()?;
@@ -400,7 +399,6 @@ impl CvImagePlugin {
 
         registry.merge::<geometry::cv_resize>()?;
         registry.merge::<geometry::cv_downscale>()?;
-        registry.merge::<geometry::cv_to_gray>()?;
         registry.merge::<geometry::cv_invert>()?;
         registry.merge::<geometry::cv_rotate90>()?;
         registry.merge::<geometry::cv_crop>()?;

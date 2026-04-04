@@ -4,6 +4,5 @@ export {
   getHttpClientApiBase,
   getHttpClientBase,
   resetHttpClientBase,
-  setHttpClientBase,
-  withHttpClientBase
+  setHttpClientBase
 } from './httpClient';

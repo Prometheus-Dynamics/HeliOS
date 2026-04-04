@@ -92,6 +92,14 @@ function primeRuntimeStatusCaches(payload: RootStatusPayload, fetchedAt: number)
 }
 
 async function runtimeStatusSingleflight(options?: ApiRequestOptions): Promise<RootStatusPayload> {
+  if (options?.baseUrl) {
+    return apiFetch<RootStatusPayload>(
+      apiUrl('/').replace(/\/+$/, ''),
+      { headers: { Accept: 'application/json' } },
+      { label: 'runtimeStatus', ...options }
+    );
+  }
+
   const cacheMs = resolveStreamCapabilitiesCacheMs(options);
   const now = Date.now();
   if (!options?.forceRefresh && cacheMs > 0 && runtimeStatusCache && now - runtimeStatusCache.fetchedAt < cacheMs) {
@@ -125,6 +133,14 @@ async function runtimeStatusSingleflight(options?: ApiRequestOptions): Promise<R
 }
 
 async function listStreamsSingleflight(options?: ApiRequestOptions) {
+  if (options?.baseUrl) {
+    return apiFetch<StreamsList>(
+      '/streams',
+      { headers: { Accept: 'application/json' } },
+      { label: 'listStreams', ...options }
+    );
+  }
+
   const cacheMs = resolveStreamsCacheMs(options);
   const now = Date.now();
   if (!options?.forceRefresh && cacheMs > 0 && streamsCache && now - streamsCache.fetchedAt < cacheMs) {
@@ -238,7 +254,13 @@ export const StreamsApi = {
   setPipelineOutput: (args: Parameters<typeof EngineStreamsService.setPipelineOutput>[0], options?: ApiRequestOptions) =>
     runApiRequest(() => EngineStreamsService.setPipelineOutput(args), { label: 'setPipelineOutput', ...options }),
   setPipelineGraph: (args: Parameters<typeof EngineStreamsService.setPipelineGraph>[0], options?: ApiRequestOptions) =>
-    runApiRequest(() => EngineStreamsService.setPipelineGraph(args), { label: 'setPipelineGraph', ...options }),
+    options?.baseUrl
+      ? apiFetch<Awaited<ReturnType<typeof EngineStreamsService.setPipelineGraph>>>(`/streams/${encodeURIComponent(args.id)}/pipeline/graph`, {
+          method: 'POST',
+          body: args.requestBody,
+          headers: { Accept: 'application/json' }
+        }, { label: 'setPipelineGraph', ...options })
+      : runApiRequest(() => EngineStreamsService.setPipelineGraph(args), { label: 'setPipelineGraph', ...options }),
   setPipelineGraphPatch: (
     args: { id: string; requestBody: { patch: unknown; pipeline_id?: string | null } },
     options: ApiRequestOptions = {}
@@ -266,7 +288,13 @@ export const StreamsApi = {
       { label: 'setPipelineInputs', endpoint: `/streams/${args.id}/pipeline/inputs`, ...options }
     ),
   setPipelineLayout: (args: Parameters<typeof EngineStreamsService.setPipelineLayout>[0], options?: ApiRequestOptions) =>
-    runApiRequest(() => EngineStreamsService.setPipelineLayout(args), { label: 'setPipelineLayout', ...options }),
+    options?.baseUrl
+      ? apiFetch<Awaited<ReturnType<typeof EngineStreamsService.setPipelineLayout>>>(`/streams/${encodeURIComponent(args.id)}/pipeline/layout`, {
+          method: 'POST',
+          body: args.requestBody,
+          headers: { Accept: 'application/json' }
+        }, { label: 'setPipelineLayout', ...options })
+      : runApiRequest(() => EngineStreamsService.setPipelineLayout(args), { label: 'setPipelineLayout', ...options }),
   setPipelineWires: (
     args: { id: string; requestBody: { wires: StreamPipelineWire[] } },
     options: ApiRequestOptions = {}
@@ -338,7 +366,11 @@ export const StreamsApi = {
   smokePipelineGraph: (args: Parameters<typeof EngineStreamsService.smokePipelineGraph>[0], options?: ApiRequestOptions) =>
     runApiRequest(() => EngineStreamsService.smokePipelineGraph(args), { label: 'smokePipelineGraph', ...options }),
   listPipelineOutputs: (args: Parameters<typeof EngineStreamsService.listPipelineOutputs>[0], options?: ApiRequestOptions) =>
-    runApiRequest(() => EngineStreamsService.listPipelineOutputs(args), { label: 'listPipelineOutputs', ...options }),
+    options?.baseUrl
+      ? apiFetch<Awaited<ReturnType<typeof EngineStreamsService.listPipelineOutputs>>>(`/streams/${encodeURIComponent(args.id)}/pipeline/outputs`, {
+          headers: { Accept: 'application/json' }
+        }, { label: 'listPipelineOutputs', ...options })
+      : runApiRequest(() => EngineStreamsService.listPipelineOutputs(args), { label: 'listPipelineOutputs', ...options }),
   getPipelineOutputSample: (
     args: Parameters<typeof EngineStreamsService.getPipelineOutputSample>[0],
     options?: ApiRequestOptions
@@ -351,7 +383,13 @@ export const StreamsApi = {
     runApiRequest(() => EngineStreamsService.listBackends(), { label: 'listBackends', ...options }),
   listCodecs: (options?: ApiRequestOptions) => codecInventorySingleflight(options),
   startStream: (args: Parameters<typeof EngineStreamsService.startStream>[0], options?: ApiRequestOptions) =>
-    runApiRequest(() => EngineStreamsService.startStream(args), { label: 'startStream', timeoutMs: 45_000, ...options }),
+    options?.baseUrl
+      ? apiFetch<Awaited<ReturnType<typeof EngineStreamsService.startStream>>>('/streams', {
+          method: 'POST',
+          body: args.requestBody,
+          headers: { Accept: 'application/json' }
+        }, { label: 'startStream', timeoutMs: 45_000, ...options })
+      : runApiRequest(() => EngineStreamsService.startStream(args), { label: 'startStream', timeoutMs: 45_000, ...options }),
   updateStream: (args: Parameters<typeof EngineStreamsService.updateStream>[0], options?: ApiRequestOptions) =>
     runApiRequest(() => EngineStreamsService.updateStream(args), { label: 'updateStream', timeoutMs: 45_000, ...options }),
   registerNetcamStream: async (input: RegisterNetcamStreamInput, options?: ApiRequestOptions) => {

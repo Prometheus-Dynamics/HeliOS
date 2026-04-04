@@ -39,13 +39,6 @@ pub(super) fn apply_profile_postprocessing(
                         apply_field_pose_snaps(&mut entry.pose, snap_height, snap_roll, snap_pitch);
                     }
                 }
-            } else if let Some(list) = solver.outputs.camera_in_field.as_mut() {
-                // Preserve legacy behavior for cameras that have no rig pose configured.
-                for entry in list {
-                    if !rig_poses.contains_key(&entry.camera_uid) {
-                        apply_field_pose_snaps(&mut entry.pose, snap_height, snap_roll, snap_pitch);
-                    }
-                }
             }
         }
     }
