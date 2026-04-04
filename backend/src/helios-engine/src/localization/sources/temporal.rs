@@ -29,10 +29,7 @@ struct LocalizationTemporalRuntime {
 
 fn localization_temporal_runtime() -> &'static LocalizationTemporalRuntime {
     static RUNTIME: OnceLock<LocalizationTemporalRuntime> = OnceLock::new();
-    RUNTIME.get_or_init(|| LocalizationTemporalRuntime {
-        tag_pose_state: Mutex::new(HashMap::new()),
-        tag_pair_distance_state: Mutex::new(HashMap::new()),
-    })
+    RUNTIME.get_or_init(|| LocalizationTemporalRuntime { tag_pose_state: Mutex::new(HashMap::new()), tag_pair_distance_state: Mutex::new(HashMap::new()) })
 }
 
 fn tag_pose_temporal_state() -> &'static Mutex<HashMap<String, TagPoseTemporalState>> {

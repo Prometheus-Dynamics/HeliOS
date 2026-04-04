@@ -57,12 +57,7 @@ pub(super) fn host_candidates(host: &str) -> Vec<String> {
     deduped
 }
 
-pub(super) async fn connect_nt4_target(
-    pool: &crate::nt4::pool::Nt4ClientPool,
-    requested_host: &str,
-    port: u16,
-    timeout_ms: u64,
-) -> Result<(Arc<crate::nt4::pool::Nt4ClientEntry>, String), String> {
+pub(super) async fn connect_nt4_target(pool: &crate::nt4::pool::Nt4ClientPool, requested_host: &str, port: u16, timeout_ms: u64) -> Result<(Arc<crate::nt4::pool::Nt4ClientEntry>, String), String> {
     let candidates = host_candidates(requested_host);
     if candidates.is_empty() {
         return Err("host is required".to_string());

@@ -5,7 +5,7 @@ use nt_client::subscribe::{ReceivedMessage, SubscriptionOptions};
 use nt_client::topic::Properties;
 use nt_client::{Client, ClientHandle, NTAddr, NewClientOptions};
 use serde_json::Value as JsonValue;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
@@ -14,11 +14,15 @@ use tokio::sync::{Notify, mpsc};
 use tokio::task::JoinHandle;
 use tracing::warn;
 
-type SharedJsonValue = Arc<RwLock<Option<JsonValue>>>;
+#[derive(Default)]
+struct SubscriptionState {
+    topics: Mutex<HashSet<String>>,
+    values: RwLock<HashMap<String, JsonValue>>,
+}
 
 pub struct Nt4WorkerHandle {
     tx: mpsc::UnboundedSender<Command>,
-    values: Arc<Mutex<HashMap<String, SharedJsonValue>>>,
+    state: Arc<SubscriptionState>,
 }
 
 impl Nt4WorkerHandle {
@@ -43,19 +47,14 @@ impl Nt4WorkerHandle {
     }
 
     pub fn subscribe_json(&self, topic: String) -> String {
-        let slot = {
-            let mut guard = self.values.lock().expect("values mutex poisoned");
-            guard
-                .entry(topic.clone())
-                .or_insert_with(|| {
-                    let slot = Arc::new(RwLock::new(None));
-                    let _ = self.tx.send(Command::SubscribeJson { topic: topic.clone(), slot: slot.clone() });
-                    slot
-                })
-                .clone()
+        let should_subscribe = {
+            let mut topics = self.state.topics.lock().expect("nt4 topics mutex poisoned");
+            topics.insert(topic.clone())
         };
-
-        serialize_slot(&slot)
+        if should_subscribe {
+            let _ = self.tx.send(Command::SubscribeJson { topic: topic.clone() });
+        }
+        serialize_value(self.state.values.read().ok().and_then(|guard| guard.get(&topic).cloned()))
     }
 }
 
@@ -63,18 +62,19 @@ pub fn spawn(host: String, port: u16) -> Result<Nt4WorkerHandle, NodeError> {
     tokio::runtime::Handle::try_current().map_err(|_| NodeError::Handler("nt4 nodes require a tokio runtime".into()))?;
 
     let (tx, rx) = mpsc::unbounded_channel();
-    let values = Arc::new(Mutex::new(HashMap::new()));
+    let state = Arc::new(SubscriptionState::default());
+    let worker_state = state.clone();
 
     tokio::spawn(async move {
-        run_worker(host, port, rx).await;
+        run_worker(host, port, rx, worker_state).await;
     });
 
-    Ok(Nt4WorkerHandle { tx, values })
+    Ok(Nt4WorkerHandle { tx, state })
 }
 
 enum Command {
     Publish { topic: String, value: PublishValue },
-    SubscribeJson { topic: String, slot: SharedJsonValue },
+    SubscribeJson { topic: String },
 }
 
 #[derive(Debug, Clone)]
@@ -97,11 +97,11 @@ struct PublisherEntry {
     publisher: nt_client::publish::GenericPublisher,
 }
 
-async fn run_worker(host: String, port: u16, mut rx: mpsc::UnboundedReceiver<Command>) {
+async fn run_worker(host: String, port: u16, mut rx: mpsc::UnboundedReceiver<Command>, state: Arc<SubscriptionState>) {
     let mut conn: Option<Connection> = None;
     let mut publishers: HashMap<String, PublisherEntry> = HashMap::new();
     let mut subscriptions: HashMap<String, JoinHandle<()>> = HashMap::new();
-    let mut subscribed_topics: HashMap<String, SharedJsonValue> = HashMap::new();
+    let mut subscribed_topics: HashSet<String> = HashSet::new();
     let mut tick = tokio::time::interval(Duration::from_secs(2));
 
     loop {
@@ -118,19 +118,19 @@ async fn run_worker(host: String, port: u16, mut rx: mpsc::UnboundedReceiver<Com
                     conn = connect(&host, port).await.ok();
                 }
                 if let Some(connection) = conn.as_ref() {
-                    ensure_subscriptions(connection.handle.clone(), &mut subscriptions, &subscribed_topics).await;
+                    ensure_subscriptions(connection.handle.clone(), &mut subscriptions, &subscribed_topics, state.clone()).await;
                 }
             }
             cmd = rx.recv() => {
                 let Some(cmd) = cmd else { break; };
                 match cmd {
-                    Command::SubscribeJson { topic, slot } => {
-                        subscribed_topics.insert(topic.clone(), slot);
+                    Command::SubscribeJson { topic } => {
+                        subscribed_topics.insert(topic.clone());
                         if conn.is_none() {
                             conn = connect(&host, port).await.ok();
                         }
                         if let Some(connection) = conn.as_ref() {
-                            ensure_subscriptions(connection.handle.clone(), &mut subscriptions, &subscribed_topics).await;
+                            ensure_subscriptions(connection.handle.clone(), &mut subscriptions, &subscribed_topics, state.clone()).await;
                         }
                     }
                     Command::Publish { topic, value } => {
@@ -182,13 +182,13 @@ async fn publish_value(handle: &ClientHandle, publishers: &mut HashMap<String, P
     Ok(())
 }
 
-async fn ensure_subscriptions(handle: ClientHandle, tasks: &mut HashMap<String, JoinHandle<()>>, subscribed: &HashMap<String, SharedJsonValue>) {
-    for (topic, slot) in subscribed {
+async fn ensure_subscriptions(handle: ClientHandle, tasks: &mut HashMap<String, JoinHandle<()>>, subscribed: &HashSet<String>, state: Arc<SubscriptionState>) {
+    for topic in subscribed {
         if tasks.contains_key(topic) {
             continue;
         }
         let topic_name = topic.clone();
-        let slot = slot.clone();
+        let state = state.clone();
         let handle = handle.clone();
         tasks.insert(
             topic.clone(),
@@ -204,8 +204,8 @@ async fn ensure_subscriptions(handle: ClientHandle, tasks: &mut HashMap<String, 
                 loop {
                     match subscriber.recv().await {
                         Ok(ReceivedMessage::Updated((_announced, value))) => {
-                            if let Ok(mut guard) = slot.write() {
-                                *guard = Some(rmpv_json::to_json(&value));
+                            if let Ok(mut guard) = state.values.write() {
+                                guard.insert(topic_name.clone(), rmpv_json::to_json(&value));
                             }
                         }
                         Ok(_) => {}
@@ -262,10 +262,6 @@ async fn resolve_ipv4(host: &str, port: u16) -> Result<Ipv4Addr, String> {
     Err(format!("no ipv4 address found for host {host}"))
 }
 
-fn serialize_slot(slot: &SharedJsonValue) -> String {
-    slot.read()
-        .ok()
-        .and_then(|guard| guard.clone())
-        .and_then(|value| serde_json::to_string(&value).ok())
-        .unwrap_or_default()
+fn serialize_value(value: Option<JsonValue>) -> String {
+    value.and_then(|value| serde_json::to_string(&value).ok()).unwrap_or_default()
 }

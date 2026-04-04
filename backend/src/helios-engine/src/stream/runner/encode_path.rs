@@ -4,8 +4,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use lib_runtime_policy::HELIOS_ENGINE_STREAM_RUNTIME_POLICY;
 use ::metrics::histogram;
+use lib_runtime_policy::HELIOS_ENGINE_STREAM_RUNTIME_POLICY;
 use styx::codec::ffmpeg::{FfmpegEncoderOptions, FfmpegH264Encoder, FfmpegH265Encoder, FfmpegMjpegEncoder};
 use styx::codec::{Codec, CodecKind, CodecPolicy, CodecRegistry};
 use styx::prelude::{FourCc, TurbojpegEncoder};
@@ -621,7 +621,6 @@ impl StreamRunner {
 
         self.encode_fourcc.and_then(make)
     }
-
 }
 
 #[cfg(test)]

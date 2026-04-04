@@ -1,5 +1,7 @@
 use super::*;
 
+mod state;
+
 impl GraphExecutor for DaedalusGraphExecutor {
     fn set_calibration(&self, calibration: Option<crate::ipc::StreamCalibration>) {
         if let Ok(mut guard) = self.calibration_payload.write() {
@@ -764,13 +766,7 @@ impl GraphExecutor for DaedalusGraphExecutor {
     }
 
     fn pipeline_metrics(&self) -> Option<PipelineGraphMetrics> {
-        self.metrics.lock().ok().map(|metrics| {
-            let mut snapshot = metrics.snapshot();
-            snapshot.sample_cache = sample_cache_metrics(&self.image_samples, &self.value_samples, &self.typed_samples);
-            snapshot.image_working_set = self.image_working_set.snapshot();
-            annotate_retained_output_metrics(&mut snapshot, &self.host_output_port_owners);
-            snapshot
-        })
+        self.pipeline_metrics_impl()
     }
 
     fn host_output_ports(&self) -> Option<Vec<String>> {
@@ -798,102 +794,38 @@ impl GraphExecutor for DaedalusGraphExecutor {
     }
 
     fn sample_json_output(&self, port: &str) -> Option<Value> {
-        let key = port.to_ascii_lowercase();
-        if let Some(value) = self.value_samples.lock().ok()?.get(&key).cloned() {
-            return daedalus_value_to_json(&value);
-        }
-        self.typed_samples.lock().ok()?.get(&key).and_then(TypedHostOutputSample::to_json)
+        self.sample_json_output_impl(port)
     }
 
     fn sample_value_output(&self, port: &str) -> Option<DaedalusValue> {
-        let key = port.to_ascii_lowercase();
-        if let Some(value) = self.value_samples.lock().ok()?.get(&key).cloned() {
-            return Some(value);
-        }
-        self.typed_samples.lock().ok()?.get(&key).and_then(TypedHostOutputSample::to_daedalus_value)
+        self.sample_value_output_impl(port)
     }
 
     fn sample_image_output(&self, port: &str) -> Option<DynamicImage> {
-        let key = port.to_ascii_lowercase();
-        self.image_samples.lock().ok()?.get(&key).cloned()
+        self.sample_image_output_impl(port)
     }
 
     fn disabled_state(&self) -> GraphDisabledState {
-        let disabled = self.disabled.load(Ordering::Relaxed);
-        if !disabled {
-            return GraphDisabledState::default();
-        }
-        let disabled_since_ms = self.disabled_since_ms.load(Ordering::Relaxed);
-        let reason = self.last_error_detail.read().ok().map(|guard| guard.trim().to_string()).filter(|text| !text.is_empty());
-        GraphDisabledState { disabled, disabled_since_ms: if disabled_since_ms == 0 { None } else { Some(disabled_since_ms) }, disabled_reason: reason }
+        self.disabled_state_impl()
     }
 
     fn clear_disabled(&self) {
-        self.disabled.store(false, Ordering::Relaxed);
-        self.disabled_since_ms.store(0, Ordering::Relaxed);
-        self.failure_count.store(0, Ordering::Relaxed);
+        self.clear_disabled_impl();
     }
 
     fn set_perf_enabled(&self, _pipeline_id: Option<uuid::Uuid>, enabled: bool) {
-        // If the feature isn't compiled in, keep it off.
-        if !cfg!(all(feature = "perf-counters", target_os = "linux")) {
-            self.perf_enabled.store(false, Ordering::Relaxed);
-            return;
-        }
-        self.perf_enabled.store(enabled, Ordering::Relaxed);
+        self.set_perf_enabled_impl(enabled);
     }
 
     fn reset_pipeline_metrics(&self, _pipeline_id: Option<uuid::Uuid>) {
-        if let Ok(mut metrics) = self.metrics.lock() {
-            metrics.reset();
-        }
+        self.reset_pipeline_metrics_impl();
     }
 
     fn release_idle_retention(&self) {
-        if let Ok(mut metrics) = self.metrics.lock() {
-            metrics.release_idle_retention();
-        }
-        self.image_working_set.clear_current();
-        if let Ok(mut guard) = self.image_samples.lock() {
-            guard.clear();
-        }
-        if let Ok(mut guard) = self.value_samples.lock() {
-            guard.clear();
-        }
-        if let Ok(mut guard) = self.typed_samples.lock() {
-            guard.clear();
-        }
-        if let Ok(mut guard) = self.requested_sample_ports.lock() {
-            guard.clear();
-        }
-        if let Ok(exec) = self.executor.lock() {
-            let _ = exec.on_idle();
-        }
-        for alias in &self.output_hosts {
-            let Some(output_host) = self.host_mgr.handle(alias) else {
-                continue;
-            };
-            for port in output_host.incoming_ports() {
-                let _ = output_host.clear(port.name());
-            }
-        }
+        self.release_idle_retention_impl();
     }
 
     fn capture_flamegraph(&self, _pipeline_id: Option<uuid::Uuid>, duration_ms: u64) -> Result<(), String> {
-        if duration_ms == 0 {
-            return Err("duration_ms must be > 0".into());
-        }
-        if !cfg!(feature = "pprof") {
-            return Err("pprof feature not enabled".into());
-        }
-
-        // Reject concurrent captures (keeps metrics predictable + avoids racing guard).
-        if self.pprof_pending.swap(true, Ordering::Relaxed) {
-            return Err("flamegraph capture already in progress".into());
-        }
-        // Clear frame-based mode and use wall-clock duration.
-        self.pprof_remaining.store(0, Ordering::Relaxed);
-        self.pprof_until_ms.store(now_ms().saturating_add(duration_ms), Ordering::Relaxed);
-        Ok(())
+        self.capture_flamegraph_impl(duration_ms)
     }
 }

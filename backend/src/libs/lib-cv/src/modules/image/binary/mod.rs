@@ -51,16 +51,19 @@ struct ManagedAdaptiveBuffers {
     buffers: AdaptiveBuffers,
 }
 
+#[cfg(feature = "engine")]
 #[inline(always)]
 fn adaptive_buffers_bytes(buffers: &AdaptiveBuffers) -> usize {
     buffers.hsum_ring.capacity() * size_of::<u16>() + buffers.col_sum.capacity() * size_of::<i32>()
 }
 
+#[cfg(feature = "engine")]
 #[inline(always)]
 fn adaptive_buffers_live_bytes(buffers: &AdaptiveBuffers) -> usize {
     buffers.hsum_ring.len() * size_of::<u16>() + buffers.col_sum.len() * size_of::<i32>()
 }
 
+#[cfg(feature = "engine")]
 #[inline(always)]
 fn clear_adaptive_buffers_live(buffers: &mut AdaptiveBuffers) {
     buffers.hsum_ring.clear();

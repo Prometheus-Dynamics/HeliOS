@@ -29,12 +29,12 @@ mod sync;
 
 pub(crate) use preflight::preflight_staged_release;
 use progress::{publish_snapshot, start_apply_progress};
-pub(crate) use repartition::{clear_queued_repartition_resume, load_queued_repartition_resume};
 use repartition::{OfflineDataBorrowAssessment, assess_offline_data_borrow, queue_offline_data_borrow_repartition};
+pub(crate) use repartition::{clear_queued_repartition_resume, load_queued_repartition_resume};
 pub(crate) use sync::purge_update_dirs;
 use sync::{
-    cleanup_source_media_after_apply, clear_completed_update_state, flash_image_to_target, plan_squashfs_slot_resize, relabel_target_filesystem, sync_boot_from_artifact,
-    sync_boot_from_target, sync_persisted_state, update_boot_markers, validate_bootable_squashfs_root,
+    cleanup_source_media_after_apply, clear_completed_update_state, flash_image_to_target, plan_squashfs_slot_resize, relabel_target_filesystem, sync_boot_from_artifact, sync_boot_from_target,
+    sync_persisted_state, update_boot_markers, validate_bootable_squashfs_root,
 };
 
 #[cfg(test)]
@@ -439,15 +439,12 @@ async fn maybe_queue_offline_data_borrow_apply(
     let plan = plan_squashfs_slot_resize(&target_info, next_partition.as_ref(), image_size_bytes, data_dir_available_bytes);
     let (required_growth_bytes, gap_after_bytes, additional_from_data_bytes) = match plan {
         SquashfsSlotResizePlan::NeedsDataResize { required_growth_bytes, gap_after_bytes, additional_from_data_bytes, .. }
-        | SquashfsSlotResizePlan::ClearDataDir { required_growth_bytes, gap_after_bytes, additional_from_data_bytes, .. } => {
-            (required_growth_bytes, gap_after_bytes, additional_from_data_bytes)
-        }
+        | SquashfsSlotResizePlan::ClearDataDir { required_growth_bytes, gap_after_bytes, additional_from_data_bytes, .. } => (required_growth_bytes, gap_after_bytes, additional_from_data_bytes),
         _ => return Ok(None),
     };
 
     let layout = StorageLayoutManifest::load_system().map_err(|err| Error::InvalidState(err.to_string()))?;
-    let assessment =
-        assess_offline_data_borrow(config, &layout, manifest, &target_info, next_partition.as_ref(), required_growth_bytes, gap_after_bytes, additional_from_data_bytes);
+    let assessment = assess_offline_data_borrow(config, &layout, manifest, &target_info, next_partition.as_ref(), required_growth_bytes, gap_after_bytes, additional_from_data_bytes);
 
     match assessment {
         OfflineDataBorrowAssessment::Supported(plan) => {

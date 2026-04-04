@@ -4138,6 +4138,11 @@ dependencies = [
 [[package]]
 name = "lib-runtime-policy"
 version = "1.0.0"
+dependencies = [
+ "lib-schema-migration",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "lib-schema-migration"

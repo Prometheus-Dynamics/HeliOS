@@ -288,10 +288,7 @@ fn refresh_dynamic_plugin_cache(cache: &mut DynamicPluginCache, requested_namesp
 
 fn install_dynamic_plugins_cached(registry: &mut PluginRegistry, graph: Option<&Graph>) -> Result<Vec<String>, &'static str> {
     let requested_namespaces = graph_plugin_namespaces(graph);
-    let mut guard = dynamic_plugin_runtime(requested_namespaces.as_ref())
-        .cache
-        .lock()
-        .map_err(|_| "dynamic plugin cache lock poisoned")?;
+    let mut guard = dynamic_plugin_runtime(requested_namespaces.as_ref()).cache.lock().map_err(|_| "dynamic plugin cache lock poisoned")?;
     let cache = guard.as_mut().map_err(|_| "dynamic plugin load failed")?;
     refresh_dynamic_plugin_cache(cache, requested_namespaces.as_ref());
     let disabled = current_disabled_plugins();

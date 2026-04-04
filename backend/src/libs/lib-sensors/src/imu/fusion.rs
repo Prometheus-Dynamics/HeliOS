@@ -275,12 +275,8 @@ pub(super) fn fuse_orientation_stateful(
     // cleanup needs to happen aggressively once the normal bias-update gate considers the
     // device still enough. Use a faster Z-axis path here instead of the stricter relevel
     // gate so constant post-stop gyro bias does not just integrate into yaw drift.
-    if mag_for_fusion.is_none()
-        && bias_update_allowed
-        && gyro_stillness_norm <= STILL_GYRO_LP_MAX_DPS_FOR_BIAS
-    {
-        state.gyro_bias_deg_per_sec[2] =
-            lowpass_scalar(state.gyro_bias_deg_per_sec[2], gyro_deg_per_sec_raw[2], dt_seconds, NO_MAG_STILL_YAW_BIAS_TAU_SECONDS);
+    if mag_for_fusion.is_none() && bias_update_allowed && gyro_stillness_norm <= STILL_GYRO_LP_MAX_DPS_FOR_BIAS {
+        state.gyro_bias_deg_per_sec[2] = lowpass_scalar(state.gyro_bias_deg_per_sec[2], gyro_deg_per_sec_raw[2], dt_seconds, NO_MAG_STILL_YAW_BIAS_TAU_SECONDS);
     }
 
     if mag_for_fusion.is_none()

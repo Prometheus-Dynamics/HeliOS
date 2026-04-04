@@ -51,11 +51,7 @@ fn fast_overlay_preview_keeps_grayscale_output_for_blank_luma_input() {
 #[test]
 fn normalize_preview_output_keeps_overlay_luma_on_gray_fast_path() {
     let port_types = BTreeMap::from([("overlay".to_string(), daedalus_types::image_dynamic())]);
-    let output = super::super::normalize_preview_output_for_port(
-        super::super::GraphPreviewOutput::Image(DynamicImage::ImageLuma8(GrayImage::from_pixel(8, 8, Luma([12])))),
-        "overlay",
-        &port_types,
-    );
+    let output = super::super::normalize_preview_output_for_port(super::super::GraphPreviewOutput::Image(DynamicImage::ImageLuma8(GrayImage::from_pixel(8, 8, Luma([12])))), "overlay", &port_types);
 
     match output {
         super::super::GraphPreviewOutput::Gray(gray) => assert_eq!(gray.dimensions(), (8, 8)),
@@ -81,11 +77,7 @@ fn normalize_preview_output_converts_overlay_rgba_to_gray_fast_path() {
 #[test]
 fn normalize_preview_output_leaves_generic_dynamic_preview_unchanged() {
     let port_types = BTreeMap::from([("frame".to_string(), daedalus_types::image_dynamic())]);
-    let output = super::super::normalize_preview_output_for_port(
-        super::super::GraphPreviewOutput::Image(DynamicImage::ImageLuma8(GrayImage::from_pixel(8, 8, Luma([12])))),
-        "frame",
-        &port_types,
-    );
+    let output = super::super::normalize_preview_output_for_port(super::super::GraphPreviewOutput::Image(DynamicImage::ImageLuma8(GrayImage::from_pixel(8, 8, Luma([12])))), "frame", &port_types);
 
     match output {
         super::super::GraphPreviewOutput::Image(DynamicImage::ImageLuma8(gray)) => assert_eq!(gray.dimensions(), (8, 8)),
@@ -258,41 +250,41 @@ fn sync_graph_node_port_declarations_rejects_plus_suffix_fanin_names() {
 #[ignore = "requires the dynamic Daedalus CV plugin (cv:image:undistort_optional) to be installed/loaded"]
 fn raw_stream_graph_can_select_undistorted_output() {
     let graph_json = serde_json::json!({
-            "nodes": [
-                {
-                    "id": "io.host_bridge",
-                    "label": "Input:frame+calibration",
-                    "inputs": [],
-                    "outputs": ["frame", "calibration"],
-                    "metadata": { "host_bridge": { "type": "Bool", "value": true } }
-                },
-                {
-                    "id": "cv:image:undistort_optional",
-                    "label": "Undistort (calibration)",
-                    "inputs": ["frame", "calibration", "border_mode", "zoom_mode", "zoom", "fill_margin"],
-                    "outputs": ["frame"],
-                    "const_inputs": [
-                        ["border_mode", { "type": "String", "value": "clamp" }],
-                        ["zoom_mode", { "type": "String", "value": "fill" }],
-                        ["fill_margin", { "type": "Float", "value": 1.0 }]
-                    ]
-                },
-                {
-                    "id": "io.host_output",
-                    "label": "Output:raw+undistorted",
-                    "inputs": ["frame", "raw", "undistorted"],
-                    "outputs": [],
-                    "metadata": { "host_bridge": { "type": "Bool", "value": true } }
-                }
-            ],
-            "edges": [
-                { "from": { "node": 0, "port": "frame" }, "to": { "node": 2, "port": "frame" } },
-                { "from": { "node": 0, "port": "frame" }, "to": { "node": 2, "port": "raw" } },
-                { "from": { "node": 0, "port": "frame" }, "to": { "node": 1, "port": "frame" } },
-                { "from": { "node": 0, "port": "calibration" }, "to": { "node": 1, "port": "calibration" } },
-                { "from": { "node": 1, "port": "frame" }, "to": { "node": 2, "port": "undistorted" } }
-            ]
-        });
+        "nodes": [
+            {
+                "id": "io.host_bridge",
+                "label": "Input:frame+calibration",
+                "inputs": [],
+                "outputs": ["frame", "calibration"],
+                "metadata": { "host_bridge": { "type": "Bool", "value": true } }
+            },
+            {
+                "id": "cv:image:undistort_optional",
+                "label": "Undistort (calibration)",
+                "inputs": ["frame", "calibration", "border_mode", "zoom_mode", "zoom", "fill_margin"],
+                "outputs": ["frame"],
+                "const_inputs": [
+                    ["border_mode", { "type": "String", "value": "clamp" }],
+                    ["zoom_mode", { "type": "String", "value": "fill" }],
+                    ["fill_margin", { "type": "Float", "value": 1.0 }]
+                ]
+            },
+            {
+                "id": "io.host_output",
+                "label": "Output:raw+undistorted",
+                "inputs": ["frame", "raw", "undistorted"],
+                "outputs": [],
+                "metadata": { "host_bridge": { "type": "Bool", "value": true } }
+            }
+        ],
+        "edges": [
+            { "from": { "node": 0, "port": "frame" }, "to": { "node": 2, "port": "frame" } },
+            { "from": { "node": 0, "port": "frame" }, "to": { "node": 2, "port": "raw" } },
+            { "from": { "node": 0, "port": "frame" }, "to": { "node": 1, "port": "frame" } },
+            { "from": { "node": 0, "port": "calibration" }, "to": { "node": 1, "port": "calibration" } },
+            { "from": { "node": 1, "port": "frame" }, "to": { "node": 2, "port": "undistorted" } }
+        ]
+    });
 
     let (w, h) = (160u32, 120u32);
     let mut rgba = image::RgbaImage::new(w, h);

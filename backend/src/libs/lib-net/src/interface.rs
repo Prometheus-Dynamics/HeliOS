@@ -25,8 +25,8 @@ use rtnetlink::{
     },
 };
 use serde::{Deserialize, Serialize};
-use tokio::time::Duration;
 use tokio::task;
+use tokio::time::Duration;
 
 use self::dhcp::{start_dhcp_client, stop_dhcp_client};
 use self::dns::{apply_dns_config, read_dns_config};

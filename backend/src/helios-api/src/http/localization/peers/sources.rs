@@ -4,8 +4,8 @@ use serde_json::Value as JsonValue;
 use std::collections::HashSet;
 use url::Url;
 
-use crate::http::localization::peers::custom as localization_peer_custom;
 use crate::http::AppState;
+use crate::http::localization::peers::custom as localization_peer_custom;
 use crate::http::peers::{PeerInfo, PeerIntegrationKind, PeerIntegrationMapping};
 use helios_engine::localization::types::{LocalizationPipelineSource, LocalizationSourceKind, PipelineOutputSample};
 
@@ -102,22 +102,12 @@ pub(crate) async fn list_peer_sources(state: &AppState, peer: &PeerInfo) -> Vec<
     sources
 }
 
-pub(crate) async fn fetch_peer_output_value(
-    state: &AppState,
-    peer: &PeerInfo,
-    stream_suffix: Option<&str>,
-    output_key: &str,
-) -> Result<JsonValue, String> {
+pub(crate) async fn fetch_peer_output_value(state: &AppState, peer: &PeerInfo, stream_suffix: Option<&str>, output_key: &str) -> Result<JsonValue, String> {
     let sample = fetch_peer_output_sample(state, peer, stream_suffix, output_key).await?;
     Ok(sample.value)
 }
 
-pub(crate) async fn fetch_peer_output_sample(
-    state: &AppState,
-    peer: &PeerInfo,
-    stream_suffix: Option<&str>,
-    output_key: &str,
-) -> Result<PipelineOutputSample, String> {
+pub(crate) async fn fetch_peer_output_sample(state: &AppState, peer: &PeerInfo, stream_suffix: Option<&str>, output_key: &str) -> Result<PipelineOutputSample, String> {
     match peer.integration.kind {
         PeerIntegrationKind::LimelightOs => fetch_limelight_tag_poses(peer).await.map(|value| PipelineOutputSample { data_type: None, value }),
         PeerIntegrationKind::Photonvision => fetch_photonvision_tag_poses(state, peer, stream_suffix).await.map(|value| PipelineOutputSample { data_type: None, value }),
@@ -192,11 +182,7 @@ pub(crate) async fn fetch_limelight_tag_poses(peer: &PeerInfo) -> Result<JsonVal
     }))
 }
 
-pub(crate) async fn fetch_photonvision_tag_poses(
-    state: &AppState,
-    peer: &PeerInfo,
-    stream_suffix: Option<&str>,
-) -> Result<JsonValue, String> {
+pub(crate) async fn fetch_photonvision_tag_poses(state: &AppState, peer: &PeerInfo, stream_suffix: Option<&str>) -> Result<JsonValue, String> {
     let host = resolve_peer_host(peer).ok_or_else(|| "peer api_base_url missing host".to_string())?;
     let camera = stream_suffix.unwrap_or("front");
     crate::nt4::photonvision::fetch_tag_poses(state.services.runtime.nt4_pool(), &host, 5810, camera, 700).await

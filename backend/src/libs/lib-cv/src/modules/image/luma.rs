@@ -148,6 +148,7 @@ fn rgba_to_luma_into(dst: &mut [u8], src: &[u8]) {
     }
 }
 
+#[cfg(feature = "engine")]
 fn with_gray_scratch<R>(width: u32, height: u32, label: &'static str, fill: impl FnOnce(&mut [u8]), f: impl FnOnce(&GrayImage) -> R) -> R {
     let needed = (width as usize).saturating_mul(height as usize);
     with_luma_scratch(needed, label, |buf| {
@@ -159,6 +160,7 @@ fn with_gray_scratch<R>(width: u32, height: u32, label: &'static str, fill: impl
     })
 }
 
+#[cfg(feature = "engine")]
 pub(crate) fn crop_luma8_frame(frame: &DynamicImage, x: u32, y: u32, width: u32, height: u32) -> GrayImage {
     if width == 0 || height == 0 {
         return GrayImage::new(0, 0);
@@ -244,10 +246,12 @@ pub(crate) fn crop_luma8_frame(frame: &DynamicImage, x: u32, y: u32, width: u32,
     }
 }
 
+#[cfg(feature = "engine")]
 pub(crate) fn crop_luma8_image(frame: &DynamicImage, x: u32, y: u32, width: u32, height: u32) -> GrayImage {
     crop_luma8_frame(frame, x, y, width, height)
 }
 
+#[cfg(feature = "engine")]
 pub(crate) fn with_cropped_luma8_frame<R>(frame: &DynamicImage, x: u32, y: u32, width: u32, height: u32, f: impl FnOnce(&GrayImage) -> R) -> R {
     if width == 0 || height == 0 {
         let img = GrayImage::new(0, 0);

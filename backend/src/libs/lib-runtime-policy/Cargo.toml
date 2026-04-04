@@ -8,3 +8,6 @@ publish = false
 workspace = true
 
 [dependencies]
+lib-schema-migration = { path = "../lib-schema-migration" }
+serde.workspace = true
+serde_json.workspace = true

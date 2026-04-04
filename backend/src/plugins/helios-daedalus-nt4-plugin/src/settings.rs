@@ -1,43 +1,16 @@
 use daedalus::runtime::NodeError;
-use lib_runtime_policy::{HELIOS_NT4_SETTINGS_FILE_POLICY, HELIOS_TEAM_FILE_POLICY};
-use lib_schema_migration::{SyncSchemaPlan, normalize_to_current};
-use serde::Deserialize;
+use lib_runtime_policy::{HELIOS_NT4_SETTINGS_FILE_POLICY, HELIOS_TEAM_FILE_POLICY, Nt4Settings, parse_nt4_settings_file};
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant, SystemTime};
-
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub struct Nt4SettingsFile {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default = "default_subscriptions_enabled")]
-    pub subscriptions_enabled: bool,
-    #[serde(default)]
-    pub server_host: Option<String>,
-    #[serde(default)]
-    pub server_port: Option<u16>,
-}
-
-const CURRENT_NT4_SETTINGS_SCHEMA_VERSION: u32 = 1;
-
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-struct StoredNt4SettingsFile {
-    schema_version: u32,
-    #[serde(default)]
-    settings: Nt4SettingsFile,
-}
-
-const NT4_SETTINGS_SCHEMA_PLAN: SyncSchemaPlan<serde_json::Value> = SyncSchemaPlan::strict("nt4 settings file", CURRENT_NT4_SETTINGS_SCHEMA_VERSION);
 
 #[derive(Debug)]
 struct SettingsCache {
     last_check: Instant,
     source_path: Option<PathBuf>,
     modified: Option<SystemTime>,
-    value: Nt4SettingsFile,
+    value: Nt4Settings,
 }
 
 struct Nt4SettingsRuntime {
@@ -47,17 +20,10 @@ struct Nt4SettingsRuntime {
 impl Nt4SettingsRuntime {
     fn new() -> Self {
         let now = Instant::now();
-        Self {
-            cache: Mutex::new(SettingsCache {
-                last_check: now.checked_sub(Duration::from_secs(10)).unwrap_or(now),
-                source_path: None,
-                modified: None,
-                value: Nt4SettingsFile::default(),
-            }),
-        }
+        Self { cache: Mutex::new(SettingsCache { last_check: now.checked_sub(Duration::from_secs(10)).unwrap_or(now), source_path: None, modified: None, value: Nt4Settings::default() }) }
     }
 
-    fn cached_settings(&self) -> Nt4SettingsFile {
+    fn cached_settings(&self) -> Nt4Settings {
         let mut guard = self.cache.lock().expect("nt4 settings cache lock poisoned");
         let now = Instant::now();
         if now.saturating_duration_since(guard.last_check) < Duration::from_millis(250) {
@@ -83,7 +49,7 @@ fn nt4_settings_runtime() -> &'static Nt4SettingsRuntime {
     &RUNTIME
 }
 
-pub fn resolve_target(settings: &Nt4SettingsFile) -> Result<(String, u16), NodeError> {
+pub fn resolve_target(settings: &Nt4Settings) -> Result<(String, u16), NodeError> {
     if !settings.enabled {
         return Err(NodeError::InvalidInput("nt4 is disabled (enable it in device settings)".into()));
     }
@@ -107,7 +73,7 @@ pub fn resolve_topic(hostname: &str, stream_alias: &str, pipeline_alias: &str, t
     format!("/{hostname}/streams/{stream}/pipelines/{pipeline}/{suffix}")
 }
 
-pub fn cached_settings() -> Nt4SettingsFile {
+pub fn cached_settings() -> Nt4Settings {
     nt4_settings_runtime().cached_settings()
 }
 
@@ -125,20 +91,8 @@ fn team_file_path() -> PathBuf {
     HELIOS_TEAM_FILE_POLICY.resolve()
 }
 
-fn parse_nt4_settings(raw: &str) -> Nt4SettingsFile {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) else {
-        return Nt4SettingsFile::default();
-    };
-    let Ok(migrated) = normalize_to_current(value, &NT4_SETTINGS_SCHEMA_PLAN) else {
-        return Nt4SettingsFile::default();
-    };
-    let Ok(stored) = serde_json::from_value::<StoredNt4SettingsFile>(migrated) else {
-        return Nt4SettingsFile::default();
-    };
-    if stored.schema_version != CURRENT_NT4_SETTINGS_SCHEMA_VERSION {
-        return Nt4SettingsFile::default();
-    }
-    stored.settings
+fn parse_nt4_settings(raw: &str) -> Nt4Settings {
+    parse_nt4_settings_file(raw.as_bytes()).map(|(stored, _)| stored.settings).unwrap_or_default()
 }
 
 fn current_settings_source(path: &PathBuf) -> Option<PathBuf> {
@@ -148,16 +102,12 @@ fn current_settings_source(path: &PathBuf) -> Option<PathBuf> {
     None
 }
 
-fn read_settings_file() -> Nt4SettingsFile {
+fn read_settings_file() -> Nt4Settings {
     let path = settings_path();
     let Ok(data) = std::fs::read_to_string(&path) else {
-        return Nt4SettingsFile::default();
+        return Nt4Settings::default();
     };
     parse_nt4_settings(&data)
-}
-
-fn default_subscriptions_enabled() -> bool {
-    true
 }
 
 fn default_nt4_server_host_from_team_file() -> Option<String> {

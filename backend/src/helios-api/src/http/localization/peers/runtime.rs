@@ -15,11 +15,7 @@ pub(crate) struct LocalizationPeerSourceRuntime {
 }
 
 impl LocalizationPeerSourceRuntime {
-    pub(crate) async fn photonvision_snapshot(
-        &self,
-        pool: &crate::nt4::pool::Nt4ClientPool,
-        host: &str,
-    ) -> Option<crate::nt4::photonvision::PhotonvisionNt4Snapshot> {
+    pub(crate) async fn photonvision_snapshot(&self, pool: &crate::nt4::pool::Nt4ClientPool, host: &str) -> Option<crate::nt4::photonvision::PhotonvisionNt4Snapshot> {
         let now = Instant::now();
         {
             let cache = self.photonvision_cache.lock().await;

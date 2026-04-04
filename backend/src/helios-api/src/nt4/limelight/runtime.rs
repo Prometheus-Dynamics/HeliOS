@@ -141,11 +141,7 @@ fn resolve_adapter<'a>(state: &'a LimelightRuntimeState, table: &str) -> Option<
     None
 }
 
-async fn reconcile_once(
-    handles: &Arc<IpcHandles>,
-    pool: &crate::nt4::pool::Nt4ClientPool,
-    publish_runtime: &mut LimelightPublishRuntime,
-) -> Result<(), String> {
+async fn reconcile_once(handles: &Arc<IpcHandles>, pool: &crate::nt4::pool::Nt4ClientPool, publish_runtime: &mut LimelightPublishRuntime) -> Result<(), String> {
     let settings = device_nt4::load_settings().await;
     if !(settings.enabled && settings.emulate_limelight_api) {
         publish_runtime.clear();
