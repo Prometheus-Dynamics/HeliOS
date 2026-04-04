@@ -1,8 +1,7 @@
 <script lang="ts">
-  import { PipelineIcon } from '$lib';
-  import FaIcon from '$lib/components/icons/FaIcon.svelte';
+  import CameraPipelinesGridSection from '$lib/features/devices/camera/CameraPipelinesGridSection.svelte';
+  import CameraPipelinesModals from '$lib/features/devices/camera/CameraPipelinesModals.svelte';
   import PipelineProfilerModal from '$lib/components/pipelines/PipelineProfilerModal.svelte';
-  import { faCamera, faCode, faPlus, faSliders, faStopwatch, faTrash, faTriangleExclamation } from '@fortawesome/free-solid-svg-icons';
   import { floatingPipelineOutputsViewer } from '$lib/stores/floatingPipelineOutputsViewer';
   import { extractGraphOutputPortTypes } from '$lib/features/pipelines/outputFilters';
   import type { PipelineDataType, PipelineTemplateSummary } from '$lib/types/pipeline';
@@ -621,404 +620,114 @@
       pipelineAssignQuery = '';
     }
   });
+
+  function toggleAssignDraft(pipelineId: string, checked: boolean): void {
+    const current = new SvelteSet(pipelineAssignDraft);
+    if (checked) current.add(pipelineId);
+    else current.delete(pipelineId);
+    pipelineAssignDraft = Array.from(current);
+  }
+
+  const gridSectionState = $derived.by(() => ({
+    showAssignControls,
+    openPipelineAssignModal,
+    pipelineGraphLoading,
+    pipelineGraphError,
+    assignedPipelineList,
+    dragStartHandlerFor,
+    RAW_PIPELINE_ID,
+    resolvePipelineLabel,
+    outputsIconEnabled,
+    openOutputsViewerForPipeline,
+    openPipelineTuningPanel,
+    normalizedStreamId,
+    openProfilerPanel,
+    showRemoveControls,
+    openPipelineRemoveModal,
+    get pipelineGridRows() {
+      return pipelineGridRows;
+    },
+    set pipelineGridRows(value: number) {
+      pipelineGridRows = value;
+    },
+    get pipelineGridColumns() {
+      return pipelineGridColumns;
+    },
+    set pipelineGridColumns(value: number) {
+      pipelineGridColumns = value;
+    },
+    applyGridDimensions,
+    safeRows,
+    safeColumns,
+    gridSignature,
+    pipelineGridRowIndices: rowIndices,
+    pipelineGridColumnIndices: columnIndices,
+    readPipelineForCell,
+    readOutputKeyForCell,
+    readOutputSelectionForPipeline,
+    pipelineOutputOptionsCache,
+    pipelineGridIsSingle,
+    get selectedPipelineOutput() {
+      return selectedPipelineOutput;
+    },
+    set selectedPipelineOutput(value: string | null) {
+      selectedPipelineOutput = value;
+    },
+    pipelineWires: normalizedPipelineWires,
+    setFrameSourceForPipelineInstance,
+    gridPipelineEntries,
+    setOutputKeyForCell,
+    clearGridCell,
+    applyAllowDrop,
+    dropHandlerForCell,
+    setLiveOutputSelection
+  }));
+
+  const modalState = $derived.by(() => ({
+    showRemoveControls,
+    pipelineRemoveModalOpen,
+    resolvePipelineLabel,
+    pipelineRemoveCandidateId,
+    closePipelineRemoveModal,
+    confirmPipelineRemove,
+    showAssignControls,
+    pipelineAssignModalOpen,
+    get pipelineAssignQuery() {
+      return pipelineAssignQuery;
+    },
+    set pipelineAssignQuery(value: string) {
+      pipelineAssignQuery = value;
+    },
+    refreshPipelineGraphs: () => void refreshPipelineGraphsSnapshot(),
+    pipelineAssignFilteredGraphs: pipelineAssignList,
+    normalizeId,
+    get pipelineAssignDraft() {
+      return pipelineAssignDraft;
+    },
+    set pipelineAssignDraft(value: string[]) {
+      pipelineAssignDraft = value;
+    },
+    toggleAssignDraft,
+    get pipelineTemplateSelectedId() {
+      return pipelineTemplateSelectedId;
+    },
+    set pipelineTemplateSelectedId(value: string) {
+      pipelineTemplateSelectedId = value;
+      pipelineTemplateError = null;
+      pipelineTemplateStatus = null;
+    },
+    pipelineTemplateLoading,
+    pipelineTemplateOptions,
+    pipelineTemplateBusy: pipelineTemplateLoading || pipelineTemplateCreating,
+    pipelineTemplateError: pipelineTemplateError ?? pipelineTemplateStatus,
+    handleTemplateAssign: () => createPipelineFromTemplate(),
+    closePipelineAssignModal,
+    savePipelineAssignModal
+  }));
 </script>
 
-<div class="flex flex-col gap-3 min-h-0 h-full">
-  <div class="flex flex-col gap-3 min-h-0 flex-1">
-    <div class="rounded border border-surface-800/70 bg-surface-950/70 p-4">
-      <div class="flex items-start justify-between gap-3">
-        <div>
-          <p class="text-2xs uppercase tracking-[0.3em] text-surface-500">Palette</p>
-          <p class="mt-1 text-xs text-surface-400">Drag attached pipelines into the grid. Use trash to detach.</p>
-          {#if pipelineGraphError}
-            <p class="mt-1 text-xs text-error-300">{pipelineGraphError}</p>
-          {/if}
-        </div>
-        {#if showAssignControls}
-          <button
-            class="btn btn-3xs preset-tonal uppercase tracking-[0.3em] flex items-center gap-2"
-            type="button"
-            onclick={openPipelineAssignModal}
-            disabled={pipelineGraphLoading}
-            aria-label="Attach pipeline"
-          >
-            <FaIcon icon={faPlus} class="h-3.5 w-3.5" />
-            Add
-          </button>
-        {/if}
-      </div>
-
-      <div class="mt-3 flex gap-2 overflow-x-auto pb-1" role="list" aria-label="Pipeline palette">
-        <div
-          class="group flex shrink-0 items-center gap-2 rounded border border-surface-800/70 bg-surface-900/40 px-2 py-1 text-surface-200 hover:border-primary-500/40"
-          role="button"
-          tabindex="0"
-          draggable="true"
-          ondragstart={dragStartHandlerFor(RAW_PIPELINE_ID)}
-          title="Raw stream"
-          aria-label="Raw stream"
-        >
-          <span class="flex h-8 w-8 items-center justify-center rounded-full border border-white/15 bg-black/40 text-surface-100">
-            <FaIcon icon={faCamera} class="h-4 w-4" />
-          </span>
-          <span class="max-w-[180px] truncate text-xs">Raw stream</span>
-        </div>
-
-        {#each assignedPipelineList as pipelineId (pipelineId)}
-          {@const issueCount = issueCountForPipeline(pipelineId)}
-            <div
-              class="group flex shrink-0 items-center gap-2 rounded border border-surface-800/70 bg-surface-900/40 px-2 py-1 text-surface-200 hover:border-primary-500/40"
-              role="button"
-              tabindex="0"
-              draggable="true"
-              ondragstart={(event) => {
-                if (suppressDrag) {
-                  event.preventDefault();
-                  return;
-                }
-                dragStartHandlerFor(pipelineId)(event);
-              }}
-              title={pipelineId}
-              aria-label={resolvePipelineLabel(pipelineId)}
-            >
-            <PipelineIcon
-              pipelineId={pipelineId}
-              size="sm"
-              className="shrink-0"
-              ariaLabel={resolvePipelineLabel(pipelineId)}
-              title={pipelineId}
-            />
-            <span class="max-w-[180px] truncate text-xs">{resolvePipelineLabel(pipelineId)}</span>
-            {#if issueCount > 0}
-              <span
-                class="inline-flex h-6 w-6 items-center justify-center rounded-full border border-amber-500/60 bg-amber-500/10 text-amber-200"
-                title={`Pipeline has ${issueCount} validation issue${issueCount === 1 ? '' : 's'}.`}
-                aria-label={`${issueCount} validation issue${issueCount === 1 ? '' : 's'}`}
-              >
-                <FaIcon icon={faTriangleExclamation} class="h-3 w-3" />
-              </span>
-            {/if}
-            {#if openPipelineTuningPanel}
-              <button
-                class="ml-1 inline-flex h-6 w-6 items-center justify-center rounded border border-transparent text-surface-400 hover:border-primary-500/40 hover:text-primary-200"
-                type="button"
-                draggable="false"
-                onpointerdown={startTunerInteraction}
-                onpointerup={endTunerInteraction}
-                onpointercancel={endTunerInteraction}
-                onpointerleave={endTunerInteraction}
-                onclick={openTunerPanel(pipelineId)}
-                ondragstart={(e) => e.preventDefault()}
-                aria-label="Open pipeline tuner"
-                title="Open pipeline tuner"
-              >
-                <FaIcon icon={faSliders} class="h-3.5 w-3.5" />
-              </button>
-            {/if}
-            <button
-              class="ml-1 inline-flex h-6 w-6 items-center justify-center rounded border border-transparent text-surface-400 hover:border-primary-500/40 hover:text-primary-200 disabled:opacity-50"
-              type="button"
-              draggable="false"
-              onpointerdown={startTunerInteraction}
-              onpointerup={endTunerInteraction}
-              onpointercancel={endTunerInteraction}
-              onpointerleave={endTunerInteraction}
-              onclick={openProfilerPanel(pipelineId)}
-              ondragstart={(e) => e.preventDefault()}
-              aria-label="Open profiler"
-              title="Open profiler"
-              disabled={!normalizedStreamId}
-            >
-              <FaIcon icon={faStopwatch} class="h-3.5 w-3.5" />
-            </button>
-            {#if outputsIconEnabled}
-              <button
-                class="ml-1 inline-flex h-6 w-6 items-center justify-center rounded border border-transparent text-surface-400 hover:border-primary-500/40 hover:text-primary-200"
-                type="button"
-                draggable="false"
-                onpointerdown={startTunerInteraction}
-                onpointerup={endTunerInteraction}
-                onpointercancel={endTunerInteraction}
-                onpointerleave={endTunerInteraction}
-                onclick={(e) => {
-                  e.stopPropagation();
-                  void openOutputsViewerForPipeline(pipelineId);
-                }}
-                ondragstart={(e) => e.preventDefault()}
-                aria-label="Open outputs viewer"
-                title="Open outputs viewer"
-                disabled={!streamId}
-              >
-                <FaIcon icon={faCode} class="h-3.5 w-3.5" />
-              </button>
-            {/if}
-            {#if showRemoveControls}
-              <button
-                class="ml-1 inline-flex h-6 w-6 items-center justify-center rounded border border-transparent text-surface-400 hover:border-error-500/40 hover:text-error-200"
-                type="button"
-                onclick={(e) => {
-                  e.stopPropagation();
-                  openPipelineRemoveModal(pipelineId);
-                }}
-                aria-label="Remove pipeline"
-                title="Remove pipeline"
-              >
-                <FaIcon icon={faTrash} class="h-3.5 w-3.5" />
-              </button>
-            {/if}
-          </div>
-        {/each}
-      </div>
-    </div>
-
-    <div class="rounded border border-surface-800/70 bg-surface-950/70 p-4 flex flex-col min-h-0 flex-1">
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p class="text-2xs uppercase tracking-[0.3em] text-surface-500">Layout</p>
-          <p class="mt-1 text-xs text-surface-400">
-            {pipelineGridIsSingle ? 'Single view (1×1).' : 'Multiplex view.'} Drag pipelines into slots.
-          </p>
-        </div>
-        <div class="flex flex-wrap items-center gap-2">
-          <button class="btn btn-3xs preset-tonal uppercase tracking-[0.3em]" type="button" onclick={() => applyGridDimensions(1, 1)}>
-            1×1
-          </button>
-        </div>
-      </div>
-
-      <div class="mt-3 grid gap-3 sm:grid-cols-2">
-        <label class="text-sm">
-          <span class="text-2xs uppercase tracking-[0.3em] text-surface-500">Rows</span>
-          <input
-            class="mt-1 w-full rounded border border-surface-700 bg-surface-900/70 px-3 py-2"
-            type="number"
-            min="1"
-            max="6"
-            value={pipelineGridRows}
-            onchange={(e) => applyGridDimensions(Number(e.currentTarget.value), pipelineGridColumns)}
-          />
-        </label>
-        <label class="text-sm">
-          <span class="text-2xs uppercase tracking-[0.3em] text-surface-500">Columns</span>
-          <input
-            class="mt-1 w-full rounded border border-surface-700 bg-surface-900/70 px-3 py-2"
-            type="number"
-            min="1"
-            max="6"
-            value={pipelineGridColumns}
-            onchange={(e) => applyGridDimensions(pipelineGridRows, Number(e.currentTarget.value))}
-          />
-        </label>
-      </div>
-
-      <div
-        class="mt-4 grid gap-2 flex-1 min-h-0"
-        style={`grid-template-columns: repeat(${safeColumns}, minmax(0, 1fr)); grid-template-rows: repeat(${safeRows}, minmax(140px, 1fr)); min-height: ${safeRows * 140}px; grid-auto-flow: row;`}
-        data-grid-signature={gridSignature ?? ''}
-        role="grid"
-        aria-label="Pipeline layout grid"
-      >
-        {#each rowIndices as row (row)}
-          {#each columnIndices as column (column)}
-            {@const cellPipeline = readPipelineForCell(row, column)}
-            {@const isOutputCell = row === 0 && column === 0}
-            {@const isMultiplex = safeRows * safeColumns > 1}
-            {@const outputValue = cellPipeline ? (isMultiplex ? readOutputKeyForCell(row, column) : readOutputSelectionForPipeline(cellPipeline)) : null}
-            {@const outputOptions =
-              cellPipeline
-                ? (cellPipeline === RAW_PIPELINE_ID ? ['raw', 'undistorted'] : pipelineOutputOptionsCache[cellPipeline] ?? outputOptionsFallback[cellPipeline] ?? [])
-                : []}
-            {@const canonicalOutputValue =
-              cellPipeline === RAW_PIPELINE_ID && typeof outputValue === 'string' && outputValue.trim().toLowerCase() === 'frame'
-                ? 'raw'
-                : outputValue}
-            {@const resolvedOutputValue = canonicalOutputValue ?? outputOptions[0] ?? ''}
-            {@const targetOutputKey = typeof outputValue === 'string' && outputValue.trim().length ? outputValue.trim() : null}
-            {@const currentInputSelection = cellPipeline ? currentInputSelectionForTarget(cellPipeline, targetOutputKey) : 'raw|raw'}
-            {@const outputDurationLabel = cellPipeline ? outputDurationForCell?.(row, column, cellPipeline, resolvedOutputValue) ?? null : null}
-            <div
-              class="group relative overflow-hidden rounded border border-surface-800/70 bg-surface-900/40 min-h-0"
-              role="gridcell"
-              tabindex="0"
-              aria-label={`Pipeline slot ${row + 1}:${column + 1}`}
-              draggable={Boolean(cellPipeline)}
-              ondragstart={(event) => {
-                if (suppressDrag) {
-                  event.preventDefault();
-                  return;
-                }
-                if (!cellPipeline) return;
-                dragStartHandlerFor(cellPipeline, { row, column })(event);
-              }}
-              ondragover={applyAllowDrop}
-              ondrop={dropHandlerForCell(row, column)}
-            >
-              <div class="absolute right-2 top-2 flex items-center gap-2">
-                {#if cellPipeline}
-                  <button
-                    class="btn btn-3xs preset-tonal uppercase tracking-[0.3em] opacity-0 group-hover:opacity-100"
-                    type="button"
-                    onclick={(e) => {
-                      e.stopPropagation();
-                      clearGridCell(row, column);
-                    }}
-                  >
-                    Clear
-                  </button>
-                {/if}
-              </div>
-              {#if cellPipeline && (outputsIconEnabled || (openPipelineTuningPanel && cellPipeline !== RAW_PIPELINE_ID) || normalizedStreamId)}
-                <div class="absolute bottom-2 right-2 flex items-center gap-2">
-                  {#if outputsIconEnabled}
-                    <button
-                      class="inline-flex h-7 w-7 items-center justify-center rounded-full border border-surface-700/70 bg-surface-900/80 text-surface-200 shadow hover:border-primary-400/60 hover:text-primary-200"
-                      type="button"
-                      draggable="false"
-                      onpointerdown={startTunerInteraction}
-                      onpointerup={endTunerInteraction}
-                      onpointercancel={endTunerInteraction}
-                      onpointerleave={endTunerInteraction}
-                      onclick={(e) => {
-                        e.stopPropagation();
-                        void openOutputsViewerForPipeline(cellPipeline);
-                      }}
-                      ondragstart={(e) => e.preventDefault()}
-                      aria-label="Open outputs viewer"
-                      title="Open outputs viewer"
-                      disabled={!streamId}
-                    >
-                      <FaIcon icon={faCode} class="h-3.5 w-3.5" />
-                    </button>
-                  {/if}
-                  {#if openPipelineTuningPanel && cellPipeline !== RAW_PIPELINE_ID}
-                    <button
-                      class="inline-flex h-7 w-7 items-center justify-center rounded-full border border-surface-700/70 bg-surface-900/80 text-surface-200 shadow hover:border-primary-400/60 hover:text-primary-200"
-                      type="button"
-                      draggable="false"
-                      onpointerdown={startTunerInteraction}
-                      onpointerup={endTunerInteraction}
-                      onpointercancel={endTunerInteraction}
-                      onpointerleave={endTunerInteraction}
-                      onclick={openTunerPanel(cellPipeline)}
-                      ondragstart={(e) => e.preventDefault()}
-                      aria-label="Open pipeline controls"
-                      title="Pipeline controls"
-                    >
-                      <FaIcon icon={faSliders} class="h-3.5 w-3.5" />
-                    </button>
-                  {/if}
-                  <button
-                    class="inline-flex h-7 w-7 items-center justify-center rounded-full border border-surface-700/70 bg-surface-900/80 text-surface-200 shadow hover:border-primary-400/60 hover:text-primary-200 disabled:opacity-50"
-                    type="button"
-                    draggable="false"
-                    onpointerdown={startTunerInteraction}
-                    onpointerup={endTunerInteraction}
-                    onpointercancel={endTunerInteraction}
-                    onpointerleave={endTunerInteraction}
-                    onclick={openProfilerPanel(cellPipeline)}
-                    ondragstart={(e) => e.preventDefault()}
-                    aria-label="Open profiler"
-                    title="Open profiler"
-                    disabled={!normalizedStreamId}
-                  >
-                    <FaIcon icon={faStopwatch} class="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              {/if}
-
-              <div class="flex h-full flex-col gap-2 p-3 min-h-0">
-                {#if cellPipeline}
-                  <div class="flex flex-1 min-h-0 items-center justify-center">
-                    {#if cellPipeline === RAW_PIPELINE_ID}
-                      <span class="flex h-16 w-16 items-center justify-center rounded-full border border-white/15 bg-black/40 text-surface-100">
-                        <FaIcon icon={faCamera} class="h-8 w-8" />
-                      </span>
-                    {:else}
-                      <PipelineIcon
-                        pipelineId={cellPipeline}
-                        size="lg"
-                        className={pipelineGridIsSingle ? 'h-24 w-24' : 'h-16 w-16'}
-                        ariaLabel={resolvePipelineLabel(cellPipeline)}
-                        title={cellPipeline}
-                      />
-                    {/if}
-                  </div>
-                  <div class="min-w-0">
-                    {#if cellPipeline !== RAW_PIPELINE_ID}
-                      <span class="block text-micro-tight uppercase tracking-[0.3em] text-surface-500">Input</span>
-                      <select
-                        class="mt-1 w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
-                        value={currentInputSelection}
-                        onclick={(e) => e.stopPropagation()}
-                        onchange={(e) => {
-                          const selection = e.currentTarget.value ?? '';
-                          applyInputSelectionForTarget(selection, cellPipeline, targetOutputKey);
-                        }}
-                      >
-                        <option value="raw|raw">Raw stream: raw</option>
-                        <option value="raw|undistorted">Raw stream: undistorted</option>
-                        {#each gridPipelineEntries as source (`${source.row}:${source.column}`)}
-                          {#if source.pipelineId !== cellPipeline && source.pipelineId !== RAW_PIPELINE_ID}
-                            <option value={`pipe|${source.pipelineId}|${source.outputKey ?? ''}|${source.resolvedPort}`}>
-                              {resolvePipelineLabel(source.pipelineId)} ({source.row + 1}:{source.column + 1}) - {source.resolvedPort}
-                            </option>
-                          {/if}
-                        {/each}
-                      </select>
-                    {/if}
-                    <span class={`block text-micro-tight uppercase tracking-[0.3em] text-surface-500 ${isMultiplex && cellPipeline !== RAW_PIPELINE_ID ? 'mt-2' : ''}`}>Output</span>
-                    {#if outputOptions.length > 1}
-                      <select
-                        class="mt-1 w-full rounded border border-surface-700 bg-surface-900/70 px-2 py-1 text-xs"
-                        value={isMultiplex ? resolvedOutputValue : (isOutputCell ? selectedPipelineOutput ?? resolvedOutputValue : resolvedOutputValue)}
-                        disabled={outputOptions.length === 0}
-                        onclick={(e) => e.stopPropagation()}
-                        onchange={(e) => {
-                          const raw = e.currentTarget.value;
-                          const trimmed = raw.trim();
-                          const next = trimmed.length ? trimmed : outputOptions[0] ?? null;
-                          if (isMultiplex) {
-                            setOutputKeyForCell?.(row, column, next);
-                            schedulePipelineLayoutApply?.();
-                          } else {
-                            setOutputSelection(cellPipeline, next);
-                            if (isOutputCell) {
-                              selectedPipelineOutput = next;
-                              void setLiveOutputSelection(next);
-                            }
-                          }
-                        }}
-                      >
-                        {#each outputOptions as port (port)}
-                          <option value={port}>{port}</option>
-                        {/each}
-                      </select>
-                    {:else if outputOptions.length === 1}
-                      <p class="mt-1 truncate text-xs text-surface-300">{outputOptions[0]}</p>
-                    {:else}
-                      <p class="mt-1 text-micro-tight text-surface-600">No host output ports</p>
-                    {/if}
-                    {#if outputDurationLabel}
-                      <p class="mt-1 text-micro-tight uppercase tracking-[0.3em] text-surface-400">Avg {outputDurationLabel}</p>
-                    {/if}
-                  </div>
-                  <div class="min-w-0">
-                    <p class="truncate text-xs text-surface-200">{resolvePipelineLabel(cellPipeline)}</p>
-                    <p class="truncate text-micro-tight text-surface-500">{cellPipeline}</p>
-                  </div>
-                {:else}
-                  <div class="flex flex-1 flex-col items-center justify-center gap-2">
-                    <span class="text-xs text-surface-500">Drop pipeline</span>
-                    <span class="text-micro-tight uppercase tracking-[0.3em] text-surface-600">{row + 1}:{column + 1}</span>
-                  </div>
-                {/if}
-              </div>
-            </div>
-          {/each}
-        {/each}
-      </div>
-    </div>
-  </div>
+<div class="flex h-full min-h-0 flex-col gap-3">
+  <CameraPipelinesGridSection state={gridSectionState} />
 </div>
 
 <PipelineProfilerModal
@@ -1035,190 +744,4 @@
   }}
 />
 
-{#if showRemoveControls && pipelineRemoveModalOpen}
-  {@const pipelineId = pipelineRemoveCandidateId}
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-6" role="dialog" aria-modal="true" aria-label="Remove pipeline">
-    <div class="w-full max-w-md rounded-lg border border-surface-800 bg-surface-950 p-5 shadow-2xl">
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div class="min-w-0">
-          <p class="text-2xs uppercase tracking-[0.3em] text-surface-500">Remove pipeline</p>
-          <p class="mt-1 text-sm text-surface-200">Remove this pipeline from the stream?</p>
-          {#if pipelineId}
-            <p class="mt-1 text-xs text-surface-500">{resolvePipelineLabel(pipelineId)}</p>
-          {/if}
-          <p class="mt-2 text-xs text-surface-500">It will be detached and removed from any grid slots.</p>
-        </div>
-      </div>
-
-      <div class="mt-4 flex flex-wrap items-center justify-end gap-2">
-        <button class="btn btn-3xs preset-tonal uppercase tracking-[0.3em]" type="button" onclick={closePipelineRemoveModal}>
-          Cancel
-        </button>
-        <button class="btn btn-3xs preset-filled-error-500 uppercase tracking-[0.3em]" type="button" onclick={confirmPipelineRemove}>
-          Remove
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}
-
-{#if showAssignControls && pipelineAssignModalOpen}
-  <div class="fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-4 py-6" role="dialog" aria-modal="true" aria-label="Assign pipelines">
-    <div class="w-full max-w-2xl rounded-lg border border-surface-800 bg-surface-950 p-5 shadow-2xl">
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p class="text-2xs uppercase tracking-[0.3em] text-surface-500">Pipelines</p>
-          <p class="mt-1 text-sm text-surface-300">Assign pipelines to this camera.</p>
-          <p class="text-xs text-surface-500">Drag assigned pipelines into the grid on the Pipelines tab.</p>
-        </div>
-        <button class="btn btn-3xs preset-tonal uppercase tracking-[0.3em]" type="button" onclick={closePipelineAssignModal}>
-          Close
-        </button>
-      </div>
-
-      <div class="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
-        <label class="text-sm">
-          <span class="text-2xs uppercase tracking-[0.3em] text-surface-500">Search</span>
-          <input
-            class="mt-1 w-full rounded border border-surface-700 bg-surface-900/70 px-3 py-2"
-            type="search"
-            value={pipelineAssignQuery}
-            placeholder="name or id…"
-            oninput={(e) => (pipelineAssignQuery = e.currentTarget.value)}
-          />
-        </label>
-        <div class="flex items-end gap-2">
-          <button
-            class="btn btn-3xs preset-tonal uppercase tracking-[0.3em]"
-            type="button"
-            onclick={() => (pipelineAssignDraft = pipelineGraphsList.map((g) => String(g.id)))}
-            disabled={pipelineGraphsList.length === 0}
-          >
-            All
-          </button>
-          <button
-            class="btn btn-3xs preset-tonal uppercase tracking-[0.3em]"
-            type="button"
-            onclick={() => (pipelineAssignDraft = [])}
-            disabled={pipelineAssignDraft.length === 0}
-          >
-            None
-          </button>
-        </div>
-      </div>
-
-      {#if listPipelineTemplatesForAssign && createPipelineFromTemplateAndAssign}
-        <div class="mt-3 rounded border border-surface-800/70 bg-surface-900/40 p-3">
-          <p class="text-2xs uppercase tracking-[0.3em] text-surface-500">Add from template</p>
-          <div class="mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
-            <label class="text-sm">
-              <span class="sr-only">Template</span>
-              <select
-                class="w-full rounded border border-surface-700 bg-surface-900/70 px-3 py-2 text-surface-100"
-                value={pipelineTemplateSelectedId}
-                onchange={(event) => {
-                  pipelineTemplateSelectedId = event.currentTarget.value;
-                  pipelineTemplateError = null;
-                  pipelineTemplateStatus = null;
-                }}
-                disabled={pipelineTemplateLoading || pipelineTemplateCreating || pipelineTemplateOptions.length === 0}
-              >
-                {#if pipelineTemplateOptions.length === 0}
-                  <option value="" disabled>
-                    {pipelineTemplateLoading ? 'Loading templates…' : 'No templates available'}
-                  </option>
-                {:else}
-                  {#each pipelineTemplateOptions as template (template.templateId)}
-                    <option value={template.templateId}>{template.name}</option>
-                  {/each}
-                {/if}
-              </select>
-            </label>
-            <button
-              class="btn btn-3xs preset-filled-primary-500 uppercase tracking-[0.3em]"
-              type="button"
-              onclick={() => void createPipelineFromTemplate()}
-              disabled={pipelineTemplateLoading || pipelineTemplateCreating || pipelineTemplateOptions.length === 0}
-            >
-              {pipelineTemplateCreating ? 'Creating…' : 'Create + select'}
-            </button>
-          </div>
-          {#if pipelineTemplateError}
-            <p class="mt-2 text-xs text-error-300">{pipelineTemplateError}</p>
-          {:else if pipelineTemplateStatus}
-            <p class="mt-2 text-xs text-surface-400">{pipelineTemplateStatus}</p>
-          {/if}
-        </div>
-      {/if}
-
-      <div class="mt-4 max-h-[50vh] max-h-[50svh] max-h-[50dvh] overflow-y-auto rounded border border-surface-800/70 bg-surface-900/40 p-3">
-        {#if pipelineGraphError}
-          <p class="mb-2 text-xs text-error-300">{pipelineGraphError}</p>
-        {/if}
-        {#if pipelineGraphsList.length === 0}
-          {#if pipelineGraphLoading}
-            <p class="text-xs text-surface-500">Loading pipelines…</p>
-          {:else}
-            <p class="text-xs text-surface-500">No graphs found. Create one on the Pipelines page.</p>
-          {/if}
-        {:else if pipelineAssignList.length === 0}
-          <p class="text-xs text-surface-500">No pipelines match your search.</p>
-        {:else}
-          <div class="space-y-2">
-            {#each pipelineAssignList as graph (graph.id)}
-              {@const id = String(graph.id)}
-              {@const checked = pipelineAssignDraft.includes(id)}
-              {@const issueCount = issueCountForGraph(graph)}
-              <label class="flex items-start gap-3 rounded border border-surface-800/60 bg-surface-950/30 px-3 py-2 text-sm text-surface-200 hover:border-primary-500/40">
-                <input
-                  class="mt-1"
-                  type="checkbox"
-                  checked={checked}
-                  onchange={(e) => {
-                    const next = e.currentTarget.checked;
-                    const current = new SvelteSet(pipelineAssignDraft);
-                    if (next) current.add(id);
-                    else current.delete(id);
-                    pipelineAssignDraft = Array.from(current);
-                  }}
-                />
-                <PipelineIcon
-                  pipelineId={id}
-                  size="sm"
-                  className="mt-0.5 shrink-0"
-                  ariaLabel={graph.name?.trim?.() ? graph.name : graph.id}
-                  title={graph.id}
-                />
-                <span class="min-w-0 flex-1">
-                  <span class="block truncate">{graph.name?.trim?.() ? graph.name : graph.id}</span>
-                  <span class="block truncate text-xs text-surface-500">{graph.id}</span>
-                </span>
-                {#if issueCount > 0}
-                  <span
-                    class="mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full border border-amber-500/60 bg-amber-500/10 text-amber-200"
-                    title={`Pipeline has ${issueCount} validation issue${issueCount === 1 ? '' : 's'}.`}
-                    aria-label={`${issueCount} validation issue${issueCount === 1 ? '' : 's'}`}
-                  >
-                    <FaIcon icon={faTriangleExclamation} class="h-2.5 w-2.5" />
-                  </span>
-                {/if}
-              </label>
-            {/each}
-          </div>
-        {/if}
-      </div>
-
-      <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
-        <p class="text-xs text-surface-500">{pipelineAssignDraft.length} assigned</p>
-        <div class="flex gap-2">
-          <button class="btn btn-3xs preset-tonal uppercase tracking-[0.3em]" type="button" onclick={closePipelineAssignModal}>
-            Cancel
-          </button>
-          <button class="btn btn-3xs preset-filled-primary-500 uppercase tracking-[0.3em]" type="button" onclick={savePipelineAssignModal}>
-            Save
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-{/if}
+<CameraPipelinesModals state={modalState} />

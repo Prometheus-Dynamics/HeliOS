@@ -1,269 +1,23 @@
 <script lang="ts">
   import { browser } from '$app/environment';
-  import type { LocalizationMarker, LocalizationViewMode, LocalizationFieldDefinition } from '$lib/features/localization/viewers/localizationViewerTypes';
-  import type {
-    LocalizationCustomFieldOrigin,
-    LocalizationFieldOriginMode,
-    LocalizationPoseSpace,
-    LocalizationSolverConfig,
-    LocalizationSolverRuntimeTuningConfig,
-    LocalizationSolverMode,
-    LocalizationTemporalStabilizationConfig
-  } from '$lib/features/localization/localizationConfig';
-  import type { LocalizationPipelineSource } from '$lib/features/localization/pipelineSources';
-  import type { FieldMapSummary } from '$lib/features/localization/fieldMaps';
-  import type { RigCameraInfo, RobotDimensions } from '$lib/types/rig';
-  import type { CustomField } from '$lib/features/localization/types';
-  import type { PoseQuaternion, Vec3 } from '$lib/features/localization/poseMath';
+  import type { LocalizationFieldOriginMode, LocalizationPoseSpace } from '$lib/features/localization/localizationConfig';
   import type { SensorOrientation } from '$lib/types/devices';
-  import type LocalizationViewers from '$lib/components/LocalizationViewers.svelte';
-  import LocalizationConfigPanel from '$lib/features/localization/page/LocalizationConfigEditor.svelte';
-  import SolverPanel from '$lib/features/localization/page/SolverPanel.svelte';
-  import CameraPoseOverlay from '$lib/features/localization/page/CameraPoseOverlay.svelte';
-  import FieldMapManager from '$lib/features/localization/page/FieldMapManager.svelte';
+  import LocalizationWorkspacePanels from '$lib/features/localization/page/LocalizationWorkspacePanels.svelte';
+  import LocalizationWorkspaceViewer from '$lib/features/localization/page/LocalizationWorkspaceViewer.svelte';
   import { createLazySvelteComponentLoader } from '$lib/utils/lazySvelteComponent';
+  import { ROBOT_FOLLOW_POV_OPTION_ID } from './localizationWorkspaceTypes';
+  import type {
+    CameraPovFovMode,
+    CameraPovOption,
+    CameraPovOptionGroup,
+    LocalizationWorkspaceProps
+  } from './localizationWorkspaceTypes';
 
   type ImuOrientationViewerComponent = (typeof import('$lib/components/ImuOrientationViewer.svelte'))['default'];
 
   const imuOrientationViewerLoader = createLazySvelteComponentLoader<ImuOrientationViewerComponent>(
     () => import('$lib/components/ImuOrientationViewer.svelte')
   );
-
-  type ViewerTransform = { position: Vec3; quaternion?: PoseQuaternion } | null;
-  type ViewProfileOverlay = {
-    id: string;
-    label?: string;
-    color?: string;
-    transform: ViewerTransform;
-  };
-  type CameraPovOption = {
-    id: string;
-    groupLabel: string;
-    subgroupLabel: string;
-    label: string;
-    available: boolean;
-    ghost: boolean;
-  };
-  type CameraPovFovMode = 'undistorted' | 'raw' | 'none';
-  type CameraPovOptionSubgroup = { label: string; options: CameraPovOption[] };
-  type CameraPovOptionGroup = { label: string; subgroups: CameraPovOptionSubgroup[] };
-  const ROBOT_FOLLOW_POV_OPTION_ID = '__robot_follow__';
-  type RuntimeTuningFieldKey = Extract<keyof LocalizationSolverRuntimeTuningConfig, string>;
-
-  type SourceGroup = {
-    key: string;
-    kind?: 'stream' | 'profile' | 'peer' | 'peripheral';
-    label: string;
-    path?: string | null;
-    pipelines: Array<{
-      key: string;
-      label: string;
-      sources: LocalizationPipelineSource[];
-    }>;
-  };
-
-  type SourceStatusRow = {
-    source: LocalizationPipelineSource;
-    pollMs: number;
-    detections: number;
-    tagSize: number | null;
-    graphMs: number | null;
-    metricsUpdatedAt: number | null;
-    metricsError: string | null;
-    error: string | null;
-  };
-  type ProfileTimingRow = {
-    profileId: string;
-    label: string;
-    active: boolean;
-    visible: boolean;
-    solverMs: number | null;
-    engineMs: number | null;
-    totalMs: number | null;
-    sourceFetchMs: number | null;
-    sourceParseMs: number | null;
-    cacheHit: boolean;
-  };
-  type ImuRotationOverlayData = {
-    sourceId: string;
-    sourceLabel: string;
-    outputKey: string;
-    roll: number;
-    pitch: number;
-    yaw: number;
-    quaternion: PoseQuaternion | null;
-    translation: { x: number; y: number; z: number } | null;
-    sampleTimestampMs: number | null;
-    ageMs: number;
-  };
-
-  type LocalizationWorkspaceProps = {
-    viewersComponent?: typeof LocalizationViewers | null;
-    markers?: LocalizationMarker[];
-    tagLineMarkers?: LocalizationMarker[];
-    referenceMarkers?: LocalizationMarker[];
-    mode?: LocalizationViewMode;
-    bumperNumber?: string;
-    bumperColor?: string | null;
-    robotOverlays?: ViewProfileOverlay[];
-    robot?: RobotDimensions;
-    cameras?: RigCameraInfo[];
-    cameraTransforms?: Record<string, { position: Vec3; quaternion?: PoseQuaternion }> | null;
-    robotTransform?: ViewerTransform;
-    sceneTransform?: { position: Vec3; quaternion: PoseQuaternion } | null;
-    customField?: CustomField | LocalizationFieldDefinition | null;
-    showRobot?: boolean;
-    showCameras?: boolean;
-    cameraGhostActive?: boolean;
-    cameraHighlightColor?: string | null;
-    minimapPoseDot?: { position: Vec3; color?: string | null } | null;
-    cameraPovEnabled?: boolean;
-    cameraPovTransform?: { position: Vec3; quaternion?: PoseQuaternion } | null;
-    cameraPovIntrinsics?: { fx: number; fy: number; cx: number; cy: number; width: number; height: number } | null;
-    cameraPovApplyFov?: boolean;
-    cameraPovForwardSign?: 1 | -1;
-    feedStatus?: string;
-    selectedSourceCount?: number;
-    liveMarkerCount?: number;
-    lastPollMs?: number | null;
-    activeSolveMs?: number | null;
-    pollHz?: number;
-    pollHzMin?: number;
-    pollHzMax?: number;
-    pollHzStep?: number;
-    feedMessage?: string | null;
-    targetSpaceOverlay?: {
-      header: string;
-      rows: Array<{
-        key: string;
-        color: string;
-        label: string;
-        values: string;
-        stale?: boolean;
-      }>;
-    } | null;
-    showOriginAxes?: boolean;
-    showTagLines?: boolean;
-    showFieldImage?: boolean;
-    showMinimapTrail?: boolean;
-    baseFrame?: 'camera' | 'robot' | 'field';
-    activeProfileId?: string | null;
-	    fieldSpaceAllowed?: boolean;
-	    coordinateSpace?: LocalizationPoseSpace;
-	    availableCoordinateSpaces?: LocalizationPoseSpace[];
-	    cameraPovOptions?: CameraPovOption[];
-	    cameraPovSelectionId?: string;
-      cameraPovFovMode?: CameraPovFovMode;
-    poseSpaceLabel?: (space: LocalizationPoseSpace) => string;
-    fieldOriginMode?: LocalizationFieldOriginMode;
-    showOutputsOverlay?: boolean;
-    showMetricsOverlay?: boolean;
-    localizationConfigLoading?: boolean;
-    profileNameInput?: string;
-    onCommitProfileName?: () => void;
-    activeSolverId?: string;
-    solvers?: LocalizationSolverConfig[];
-    onSetActiveSolverId?: (solverId: string) => void;
-    onAddSolver?: () => void;
-    onRemoveActiveSolver?: () => void;
-    solverNameInput?: string;
-    onCommitSolverName?: () => void;
-    activeSolverMode?: LocalizationSolverMode | null;
-    supportedSolverModes?: LocalizationSolverMode[];
-    onSetSolverMode?: (mode: LocalizationSolverMode) => void;
-    activeSolverSourceIds?: string[];
-    onSetActiveSolverUseAllSources?: (useAll: boolean) => void;
-    onToggleActiveSolverSource?: (sourceId: string, enabled: boolean) => void;
-    solvePoseSpaces?: LocalizationPoseSpace[];
-    derivedPoseSpaces?: LocalizationPoseSpace[];
-    selectedFieldMapId?: string | null;
-    calibrationReady?: boolean;
-    uncalibratedSourcesCount?: number;
-    tagSizeInput?: string;
-    tagSizeError?: string | null;
-    onCommitTagSize?: () => void;
-    excludedTagIdsInput?: string;
-    excludedTagIdsError?: string | null;
-    onCommitExcludedTagIds?: () => void;
-    fieldOriginCustom?: LocalizationCustomFieldOrigin | null;
-    onSetFieldOriginMode?: (mode: LocalizationFieldOriginMode) => void;
-    onSetFieldOriginCustomNumeric?: (field: 'x' | 'z' | 'yawDeg', value: string) => void;
-    snapZToGround?: boolean;
-    snapRollToGround?: boolean;
-    snapPitchToGround?: boolean;
-    onSetSnapZToGround?: (enabled: boolean) => void;
-    onSetSnapRollToGround?: (enabled: boolean) => void;
-    onSetSnapPitchToGround?: (enabled: boolean) => void;
-    profileTemporalStabilization?: LocalizationTemporalStabilizationConfig;
-    onSetProfileTemporalEnabled?: (enabled: boolean) => void;
-    onSetProfileTemporalNumeric?: (field: string, value: string) => void;
-    activeSolverTemporalOverride?: LocalizationTemporalStabilizationConfig | null;
-    activeSolverTemporalEffective?: LocalizationTemporalStabilizationConfig;
-    onSetSolverTemporalOverrideEnabled?: (enabled: boolean) => void;
-    onSetSolverTemporalEnabled?: (enabled: boolean) => void;
-    onSetSolverTemporalNumeric?: (field: string, value: string) => void;
-    activeSolverRuntimeTuning?: LocalizationSolverRuntimeTuningConfig;
-    onSetSolverRuntimeTuningNumeric?: (field: RuntimeTuningFieldKey, value: string) => void;
-    fieldMaps?: FieldMapSummary[];
-    fieldMapsLoading?: boolean;
-    fieldMapsError?: string | null;
-    mapUploadBusy?: boolean;
-    mapUploadError?: string | null;
-    fieldMapSelection?: string;
-    onSetFieldMapSelection?: (value: string) => void;
-    onUploadMapFile?: (file: File) => void;
-    compatibleSourcesCount?: number;
-    sourcesLoading?: boolean;
-    sourcesError?: string | null;
-    groupedSources?: SourceGroup[];
-    openSourceGroups?: string[];
-    onToggleSourceGroup?: (key: string) => void;
-    calibratedCameraIds?: Set<string>;
-    isSourceCalibrated?: (source: LocalizationPipelineSource, calibrated: Set<string>) => boolean;
-    selectedSourceIds?: string[];
-    onToggleSource?: (sourceId: string, enabled: boolean) => void;
-    sourceWeightsById?: Record<string, number>;
-    onSetSourceWeight?: (sourceId: string, value: string) => void;
-    sourceUsedByProfilesById?: Record<string, string[]>;
-    sourceStatusRows?: SourceStatusRow[];
-    profileTimingRows?: ProfileTimingRow[];
-    showCameraPoseOverlay?: boolean;
-    showCustomFieldsOverlay?: boolean;
-    showImuRotationOverlay?: boolean;
-    imuRotationData?: ImuRotationOverlayData | null;
-    imuRotationStatusMessage?: string | null;
-    primaryCameraKey?: string | null;
-    cameraPoseXInput?: string;
-    cameraPoseYInput?: string;
-    cameraPoseZInput?: string;
-    cameraPosePitchDeg?: string;
-    cameraPoseYawDeg?: string;
-    cameraPoseRollDeg?: string;
-    cameraPoseEditorError?: string | null;
-    onResetPrimaryCameraPoseInputs?: () => void;
-    onApplyPrimaryCameraPose?: () => void;
-    newCustomFieldName?: string;
-    newCustomFieldWidth?: string;
-    newCustomFieldDepth?: string;
-    newCustomFieldError?: string | null;
-    onCreateCustomField?: () => void;
-    newOriginName?: string;
-    newOriginX?: string;
-    newOriginZ?: string;
-    newOriginYaw?: string;
-    newOriginError?: string | null;
-    onAddOrigin?: () => void;
-    selectedCustomField?: CustomField | null;
-    activeFieldMapBitsStatus?: string | null;
-    onRefreshMaps?: () => void;
-    mapUploadFile?: File | null;
-    mapAssignId?: string;
-    onAssignMap?: (mapId: string | null) => void;
-    fieldMapDocErrors?: Record<string, string>;
-    hasActiveProfile?: boolean;
-    onSetMapUploadFile?: (file: File | null) => void;
-    onUploadSelectedMapFile?: () => void;
-  };
 
   let {
     viewersComponent = null,
@@ -736,117 +490,53 @@
     return `(${pos}) (${rot})`;
   }
 
-  function toggleMetrics() {
-    showMetricsOverlay = !showMetricsOverlay;
-    showOutputsOverlay = false;
-  }
-
-  function formatFixed(value: number, digits = 2): string {
-    return Number.isFinite(value) ? value.toFixed(digits) : '—';
-  }
-
-  function formatSigned(value: number, digits = 2): string {
-    if (!Number.isFinite(value)) return '—';
-    return `${value >= 0 ? '+' : ''}${value.toFixed(digits)}`;
-  }
-
-  export type $$Props = LocalizationWorkspaceProps;
 </script>
 
 <svelte:window onresize={onImuWindowViewportResize} />
 
 <div class="relative flex-1 min-h-0 overflow-hidden" bind:this={workspaceRootEl}>
-  {#if ViewersComponent}
-    <ViewersComponent
-      {markers}
-      tagLineMarkers={tagLineMarkers}
-      referenceMarkers={referenceMarkers}
-      mode={mode}
-      bumperNumber={bumperNumber}
-      bumperColor={bumperColor}
-      robotOverlays={robotOverlays}
-      robot={robot}
-      cameras={cameras}
-      cameraTransforms={cameraTransforms}
-      robotTransform={robotTransform}
-      sceneTransform={sceneTransform}
-      customField={customField}
-      showRobot={showRobot}
-      showCameras={showCameras}
-      cameraGhostActive={cameraGhostActive}
-      showOriginAxes={showOriginAxes}
-      showTagLines={showTagLines}
-      showFieldImage={showFieldImage}
-      showMinimapTrail={showMinimapTrail}
-      cameraHighlightColor={cameraHighlightColor}
-      minimapPoseDot={minimapPoseDot}
-      cameraPovEnabled={cameraPovEnabled}
-      cameraPovTransform={cameraPovTransform}
-      cameraPovIntrinsics={cameraPovIntrinsics}
-      cameraPovApplyFov={cameraPovApplyFov}
-      cameraPovForwardSign={cameraPovForwardSign}
-      robotFollowPovEnabled={robotFollowPovEnabled}
-      metricsActive={showMetricsOverlay}
-      onMetricsToggle={toggleMetrics}
-    >
-      {#snippet footerStatus()}
-        <div class="grid grid-cols-[12ch_8ch_8ch_10ch_10ch_7ch_minmax(0,1fr)] items-center gap-x-2 text-micro-tight tracking-[0.3em] text-surface-400">
-          <span class="whitespace-nowrap font-semibold uppercase text-surface-50">{feedStatus}</span>
-          <span class="whitespace-nowrap text-right font-mono tabular-nums">{selectedSourceCount} src</span>
-          <span class="whitespace-nowrap text-right font-mono tabular-nums">{liveMarkerCount} tags</span>
-          <span class="whitespace-nowrap text-right font-mono tabular-nums">{lastPollMs != null ? `${lastPollMs.toFixed(1)}ms` : '—'}</span>
-          <span class="whitespace-nowrap text-right font-mono tabular-nums">{activeSolveMs != null ? `${activeSolveMs.toFixed(1)}ms` : '—'}</span>
-          <span class="whitespace-nowrap text-right font-mono tabular-nums">{pollHz}Hz</span>
-          <span class={`min-w-0 truncate ${feedMessage ? 'text-error-300' : 'text-surface-500'}`}>{feedMessage ?? ''}</span>
-        </div>
-      {/snippet}
-
-      {#snippet minimapControls()}
-        <div class="pointer-events-auto w-full space-y-2">
-          <div class="w-full rounded border border-surface-800 bg-surface-950/70 p-3 text-xs text-surface-300 shadow-xl backdrop-blur">
-            <div class="flex items-center justify-between gap-3">
-              <div>
-                <p class="text-micro uppercase tracking-[0.35em] text-surface-500">Update rate</p>
-                <span class="text-micro font-semibold text-surface-50">{pollHz} Hz</span>
-              </div>
-            </div>
-            <input
-              type="range"
-              min={pollHzMin}
-              max={pollHzMax}
-              step={pollHzStep}
-              class="range range-xs mt-2 w-full"
-              bind:value={pollHz}
-            />
-
-            <div class="mt-3 border-t border-surface-800/70 pt-3">
-              <p class="text-micro uppercase tracking-[0.35em] text-surface-500">Viewer</p>
-              <div class="mt-2 flex flex-col gap-2">
-                <label class="flex items-center justify-between gap-3">
-                  <span class="text-surface-500">Show origin axes</span>
-                  <input type="checkbox" bind:checked={showOriginAxes} />
-                </label>
-                <label class="flex items-center justify-between gap-3">
-                  <span class="text-surface-500">Draw tag lines</span>
-                  <input type="checkbox" bind:checked={showTagLines} />
-                </label>
-                <label class="flex items-center justify-between gap-3">
-                  <span class="text-surface-500">Show field image</span>
-                  <input type="checkbox" bind:checked={showFieldImage} />
-                </label>
-                <label class="flex items-center justify-between gap-3">
-                  <span class="text-surface-500">Show minimap trail</span>
-                  <input type="checkbox" bind:checked={showMinimapTrail} />
-                </label>
-              </div>
-            </div>
-          </div>
-        </div>
-      {/snippet}
-    </ViewersComponent>
-  {:else}
-    <div class="flex h-full w-full items-center justify-center text-sm text-surface-500">Loading viewer...</div>
-  {/if}
+  <LocalizationWorkspaceViewer
+    {ViewersComponent}
+    {markers}
+    {tagLineMarkers}
+    {referenceMarkers}
+    {mode}
+    {bumperNumber}
+    {bumperColor}
+    {robotOverlays}
+    {robot}
+    {cameras}
+    {cameraTransforms}
+    {robotTransform}
+    {sceneTransform}
+    {customField}
+    {showRobot}
+    {showCameras}
+    {cameraGhostActive}
+    bind:showOriginAxes
+    bind:showTagLines
+    bind:showFieldImage
+    bind:showMinimapTrail
+    {cameraHighlightColor}
+    {minimapPoseDot}
+    {cameraPovEnabled}
+    {cameraPovTransform}
+    {cameraPovIntrinsics}
+    {cameraPovApplyFov}
+    {cameraPovForwardSign}
+    {robotFollowPovEnabled}
+    bind:showMetricsOverlay
+    {feedStatus}
+    {selectedSourceCount}
+    {liveMarkerCount}
+    {lastPollMs}
+    {activeSolveMs}
+    bind:pollHz
+    {pollHzMin}
+    {pollHzMax}
+    {pollHzStep}
+    {feedMessage}
+  />
 
   <div class="absolute left-4 top-4 z-40 flex max-w-[92vw] flex-col gap-2">
     <div class="grid gap-3 rounded border border-surface-800 bg-surface-950/70 p-3 text-xs text-surface-200 shadow-xl backdrop-blur">
@@ -966,265 +656,127 @@
     <!-- Anchor/tag-frame viewer controls removed for now (camera_in_tag/robot_in_tag are not exposed). -->
   </div>
 
-  {#if !showImuRotationOverlay}
-    <div class="pointer-events-auto absolute bottom-20 right-4 z-[69]">
-      <button
-        type="button"
-        class="rounded border border-surface-700/70 bg-surface-950/88 px-3 py-2 text-micro-tight uppercase tracking-[0.24em] text-surface-200 shadow-lg transition hover:border-primary-400/80 hover:text-primary-100"
-        onclick={openImuRotationOverlay}
-      >
-        IMU Viewer
-      </button>
-    </div>
-  {/if}
-
-  {#if showImuRotationOverlay}
-    <div
-      bind:this={imuWindowEl}
-      class="pointer-events-auto absolute z-[70] max-w-[96vw] overflow-hidden rounded border border-surface-800 bg-surface-950/80 text-xs text-surface-200 shadow-xl backdrop-blur"
-      style={imuWindowStyle()}
-    >
-      {#if imuRotationData}
-        <div class="relative h-full w-full">
-          {#if ImuOrientationViewerComponent}
-            <ImuOrientationViewerComponent
-              orientation={imuOrientationForViewer}
-              showReferenceControls={false}
-              showLegend={false}
-              showWorldDecorations={false}
-              showGroundPlane={true}
-              cameraDistanceScale={0.22}
-            />
-          {:else}
-            <div class="flex h-full w-full items-center justify-center bg-surface-950/60 text-xs text-surface-500">
-              Loading IMU viewer…
-            </div>
-          {/if}
-          <div class="pointer-events-none absolute inset-0 flex flex-col justify-between p-3">
-            <div class="flex items-start justify-between gap-2">
-              <div
-                class="pointer-events-auto max-w-[75%] cursor-move select-none rounded border border-surface-700/70 bg-surface-950/72 px-2 py-1.5"
-                style="touch-action:none;"
-                role="presentation"
-                onpointerdown={beginImuWindowDrag}
-              >
-                <p class="text-micro-tight uppercase tracking-[0.3em] text-surface-300">IMU Rotation</p>
-                <p class="truncate text-[0.65rem] text-surface-400">{imuRotationData.sourceLabel} · {imuRotationData.outputKey}</p>
-              </div>
-              <button
-                type="button"
-                class="pointer-events-auto rounded border border-surface-700/70 bg-surface-950/72 px-2 py-0.5 text-micro-tight uppercase tracking-[0.2em] text-surface-300 transition hover:border-primary-400/80 hover:text-primary-100"
-                onclick={() => (showImuRotationOverlay = false)}
-              >
-                Close
-              </button>
-            </div>
-
-            <div class="space-y-2">
-              <div class="rounded border border-surface-700/70 bg-surface-950/72 px-2 py-1.5 font-mono tabular-nums text-[0.67rem]">
-                <p>
-                  <span style="color: var(--axis-roll)">R {formatSigned(imuRotationData.roll, 2)}°</span>
-                  <span class="mx-1 text-surface-600">|</span>
-                  <span style="color: var(--axis-pitch)">P {formatSigned(imuRotationData.pitch, 2)}°</span>
-                  <span class="mx-1 text-surface-600">|</span>
-                  <span style="color: var(--axis-yaw)">Y {formatSigned(imuRotationData.yaw, 2)}°</span>
-                </p>
-                {#if imuRotationData.quaternion}
-                  <p class="truncate text-[0.62rem] text-surface-400">
-                    q ({formatFixed(imuRotationData.quaternion.x, 3)}, {formatFixed(imuRotationData.quaternion.y, 3)}, {formatFixed(imuRotationData.quaternion.z, 3)}, {formatFixed(imuRotationData.quaternion.w, 3)})
-                  </p>
-                {/if}
-                {#if imuRotationData.translation}
-                  <p class="truncate text-[0.62rem] text-surface-400">
-                    t ({formatFixed(imuRotationData.translation.x, 3)}, {formatFixed(imuRotationData.translation.y, 3)}, {formatFixed(imuRotationData.translation.z, 3)})
-                  </p>
-                {/if}
-              </div>
-              <div class="flex items-center justify-between rounded border border-surface-700/70 bg-surface-950/72 px-2 py-1 font-mono tabular-nums text-[0.62rem] text-surface-400">
-                <span>age {Math.max(0, imuRotationData.ageMs).toFixed(0)} ms</span>
-                <span>sample {imuRotationData.sampleTimestampMs != null ? `${imuRotationData.sampleTimestampMs.toFixed(0)} ms` : '—'}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      {:else}
-        <div class="relative h-full w-full bg-surface-950/90">
-          <div class="absolute left-3 top-3">
-            <div
-              class="cursor-move select-none rounded border border-surface-700/70 bg-surface-950/72 px-2 py-0.5 text-micro-tight uppercase tracking-[0.2em] text-surface-300"
-              style="touch-action:none;"
-              role="presentation"
-              onpointerdown={beginImuWindowDrag}
-            >
-              IMU Rotation
-            </div>
-          </div>
-          <div class="absolute right-3 top-3">
-            <button
-              type="button"
-              class="rounded border border-surface-700/70 bg-surface-950/72 px-2 py-0.5 text-micro-tight uppercase tracking-[0.2em] text-surface-300 transition hover:border-primary-400/80 hover:text-primary-100"
-              onclick={() => (showImuRotationOverlay = false)}
-            >
-              Close
-            </button>
-          </div>
-          <div class="flex h-full items-center justify-center p-4 text-micro-tight text-surface-400">
-            {imuRotationStatusMessage ?? 'Waiting for IMU sample...'}
-          </div>
-        </div>
-      {/if}
-      <div
-        class="absolute bottom-0 right-0 h-5 w-5 cursor-se-resize pointer-events-auto"
-        style="touch-action:none;"
-        role="presentation"
-        onpointerdown={beginImuWindowResize}
-      >
-        <div class="absolute bottom-1 right-1 h-2.5 w-2.5 border-b border-r border-surface-400/80"></div>
-      </div>
-    </div>
-  {/if}
-
-  {#if showOutputsOverlay}
-    <LocalizationConfigPanel
-      open={showOutputsOverlay}
-      onClose={() => (showOutputsOverlay = false)}
-      activeProfileId={activeProfileId}
-      localizationConfigLoading={localizationConfigLoading}
-      bind:profileNameInput={profileNameInput}
-      onCommitProfileName={onCommitProfileName}
-      {activeSolverId}
-      {solvers}
-      onSetActiveSolverId={onSetActiveSolverId}
-      onAddSolver={onAddSolver}
-      onRemoveActiveSolver={onRemoveActiveSolver}
-      bind:solverNameInput={solverNameInput}
-      onCommitSolverName={onCommitSolverName}
-      activeSolverMode={activeSolverMode}
-      supportedSolverModes={supportedSolverModes}
-      onSetSolverMode={onSetSolverMode}
-      activeSolverSourceIds={activeSolverSourceIds}
-      onSetActiveSolverUseAllSources={onSetActiveSolverUseAllSources}
-      onToggleActiveSolverSource={onToggleActiveSolverSource}
-      solvePoseSpaces={solvePoseSpaces}
-      derivedPoseSpaces={derivedPoseSpaces}
-      poseSpaceLabel={poseSpaceLabel}
-      selectedFieldMapId={selectedFieldMapId}
-      calibrationReady={calibrationReady}
-      uncalibratedSourcesCount={uncalibratedSourcesCount}
-      bind:tagSizeInput={tagSizeInput}
-      tagSizeError={tagSizeError}
-      onCommitTagSize={onCommitTagSize}
-      bind:excludedTagIdsInput={excludedTagIdsInput}
-      excludedTagIdsError={excludedTagIdsError}
-      onCommitExcludedTagIds={onCommitExcludedTagIds}
-      fieldOriginMode={fieldOriginMode}
-      fieldOriginCustom={fieldOriginCustom}
-      onSetFieldOriginMode={onSetFieldOriginMode}
-      onSetFieldOriginCustomNumeric={onSetFieldOriginCustomNumeric}
-      snapZToGround={snapZToGround}
-      snapRollToGround={snapRollToGround}
-      snapPitchToGround={snapPitchToGround}
-      onSetSnapZToGround={onSetSnapZToGround}
-      onSetSnapRollToGround={onSetSnapRollToGround}
-      onSetSnapPitchToGround={onSetSnapPitchToGround}
-      profileTemporalStabilization={profileTemporalStabilization}
-      onSetProfileTemporalEnabled={onSetProfileTemporalEnabled}
-      onSetProfileTemporalNumeric={onSetProfileTemporalNumeric}
-      activeSolverTemporalOverride={activeSolverTemporalOverride}
-      activeSolverTemporalEffective={activeSolverTemporalEffective}
-      onSetSolverTemporalOverrideEnabled={onSetSolverTemporalOverrideEnabled}
-      onSetSolverTemporalEnabled={onSetSolverTemporalEnabled}
-      onSetSolverTemporalNumeric={onSetSolverTemporalNumeric}
-      activeSolverRuntimeTuning={activeSolverRuntimeTuning}
-      onSetSolverRuntimeTuningNumeric={onSetSolverRuntimeTuningNumeric}
-      fieldMaps={fieldMaps}
-      fieldMapsLoading={fieldMapsLoading}
-      fieldMapsError={fieldMapsError}
-      mapUploadBusy={mapUploadBusy}
-      mapUploadError={mapUploadError}
-      bind:fieldMapSelection={fieldMapSelection}
-      onSetFieldMapSelection={onSetFieldMapSelection}
-      onUploadMapFile={onUploadMapFile}
-      compatibleSourcesCount={compatibleSourcesCount}
-      sourcesLoading={sourcesLoading}
-      sourcesError={sourcesError}
-      groupedSources={groupedSources}
-      openSourceGroups={openSourceGroups}
-      onToggleSourceGroup={onToggleSourceGroup}
-      calibratedCameraIds={calibratedCameraIds}
-      isSourceCalibrated={isSourceCalibrated}
-      selectedSourceIds={selectedSourceIds}
-      onToggleSource={onToggleSource}
-      sourceWeightsById={sourceWeightsById}
-      onSetSourceWeight={onSetSourceWeight}
-      sourceUsedByProfilesById={sourceUsedByProfilesById}
-      sourceStatusRows={sourceStatusRows}
-    />
-  {/if}
-
-  <SolverPanel
-    open={showMetricsOverlay}
+  <LocalizationWorkspacePanels
+    bind:showImuRotationOverlay
+    {openImuRotationOverlay}
+    bind:imuWindowEl
+    {imuWindowStyle}
+    {ImuOrientationViewerComponent}
+    {imuOrientationForViewer}
+    {imuRotationData}
+    {imuRotationStatusMessage}
+    {beginImuWindowDrag}
+    {beginImuWindowResize}
+    bind:showOutputsOverlay
+    {activeProfileId}
+    {localizationConfigLoading}
+    bind:profileNameInput
+    {onCommitProfileName}
+    {activeSolverId}
+    {solvers}
+    {onSetActiveSolverId}
+    {onAddSolver}
+    {onRemoveActiveSolver}
+    bind:solverNameInput
+    {onCommitSolverName}
+    {activeSolverMode}
+    {supportedSolverModes}
+    {onSetSolverMode}
+    {activeSolverSourceIds}
+    {onSetActiveSolverUseAllSources}
+    {onToggleActiveSolverSource}
+    {solvePoseSpaces}
+    {derivedPoseSpaces}
+    {poseSpaceLabel}
+    {selectedFieldMapId}
+    {calibrationReady}
+    {uncalibratedSourcesCount}
+    bind:tagSizeInput
+    {tagSizeError}
+    {onCommitTagSize}
+    bind:excludedTagIdsInput
+    {excludedTagIdsError}
+    {onCommitExcludedTagIds}
+    bind:fieldOriginMode
+    {fieldOriginCustom}
+    {onSetFieldOriginMode}
+    {onSetFieldOriginCustomNumeric}
+    {snapZToGround}
+    {snapRollToGround}
+    {snapPitchToGround}
+    {onSetSnapZToGround}
+    {onSetSnapRollToGround}
+    {onSetSnapPitchToGround}
+    {profileTemporalStabilization}
+    {onSetProfileTemporalEnabled}
+    {onSetProfileTemporalNumeric}
+    {activeSolverTemporalOverride}
+    {activeSolverTemporalEffective}
+    {onSetSolverTemporalOverrideEnabled}
+    {onSetSolverTemporalEnabled}
+    {onSetSolverTemporalNumeric}
+    {activeSolverRuntimeTuning}
+    {onSetSolverRuntimeTuningNumeric}
+    {fieldMaps}
+    {fieldMapsLoading}
+    {fieldMapsError}
+    {mapUploadBusy}
+    {mapUploadError}
+    bind:fieldMapSelection
+    {onSetFieldMapSelection}
+    {onUploadMapFile}
+    {compatibleSourcesCount}
+    {sourcesLoading}
+    {sourcesError}
+    {groupedSources}
+    {openSourceGroups}
+    {onToggleSourceGroup}
+    {calibratedCameraIds}
+    {isSourceCalibrated}
+    {selectedSourceIds}
+    {onToggleSource}
+    {sourceWeightsById}
+    {onSetSourceWeight}
+    {sourceUsedByProfilesById}
+    {sourceStatusRows}
+    bind:showMetricsOverlay
     {feedStatus}
     {pollHz}
     {lastPollMs}
     {activeSolveMs}
-    sourceStatusRows={sourceStatusRows}
-    profileTimingRows={profileTimingRows}
-    onClose={() => (showMetricsOverlay = false)}
+    {profileTimingRows}
+    bind:showCameraPoseOverlay
+    {primaryCameraKey}
+    bind:cameraPoseXInput
+    bind:cameraPoseYInput
+    bind:cameraPoseZInput
+    bind:cameraPosePitchDeg
+    bind:cameraPoseYawDeg
+    bind:cameraPoseRollDeg
+    {cameraPoseEditorError}
+    {onResetPrimaryCameraPoseInputs}
+    {onApplyPrimaryCameraPose}
+    bind:showCustomFieldsOverlay
+    bind:newCustomFieldName
+    bind:newCustomFieldWidth
+    bind:newCustomFieldDepth
+    {newCustomFieldError}
+    {onCreateCustomField}
+    bind:newOriginName
+    bind:newOriginX
+    bind:newOriginZ
+    bind:newOriginYaw
+    {newOriginError}
+    {onAddOrigin}
+    {selectedCustomField}
+    {activeFieldMapBitsStatus}
+    {onRefreshMaps}
+    {mapUploadFile}
+    bind:mapAssignId
+    {onAssignMap}
+    {fieldMapDocErrors}
+    {hasActiveProfile}
+    {onSetMapUploadFile}
+    {onUploadSelectedMapFile}
   />
-
-  {#if showCameraPoseOverlay || showCustomFieldsOverlay}
-    <div class="absolute inset-4 z-50 pointer-events-none">
-      <div class="grid max-h-full grid-cols-1 content-start gap-3 lg:grid-cols-2">
-        {#if showCameraPoseOverlay}
-          <CameraPoseOverlay
-            onClose={() => (showCameraPoseOverlay = false)}
-            primaryCameraKey={primaryCameraKey}
-            bind:cameraPoseXInput={cameraPoseXInput}
-            bind:cameraPoseYInput={cameraPoseYInput}
-            bind:cameraPoseZInput={cameraPoseZInput}
-            bind:cameraPosePitchDeg={cameraPosePitchDeg}
-            bind:cameraPoseYawDeg={cameraPoseYawDeg}
-            bind:cameraPoseRollDeg={cameraPoseRollDeg}
-            cameraPoseEditorError={cameraPoseEditorError}
-            onReset={onResetPrimaryCameraPoseInputs}
-            onApply={onApplyPrimaryCameraPose}
-          />
-        {/if}
-
-        {#if showCustomFieldsOverlay}
-          <FieldMapManager
-            onClose={() => (showCustomFieldsOverlay = false)}
-            bind:newCustomFieldName={newCustomFieldName}
-            bind:newCustomFieldWidth={newCustomFieldWidth}
-            bind:newCustomFieldDepth={newCustomFieldDepth}
-            newCustomFieldError={newCustomFieldError}
-            onCreateCustomField={onCreateCustomField}
-            bind:newOriginName={newOriginName}
-            bind:newOriginX={newOriginX}
-            bind:newOriginZ={newOriginZ}
-            bind:newOriginYaw={newOriginYaw}
-            newOriginError={newOriginError}
-            onAddOrigin={onAddOrigin}
-            hasSelectedCustomField={Boolean(selectedCustomField)}
-            activeFieldMapBitsStatus={activeFieldMapBitsStatus}
-            onRefreshMaps={onRefreshMaps}
-            fieldMapsLoading={fieldMapsLoading}
-            mapUploadFile={mapUploadFile}
-            mapUploadBusy={mapUploadBusy}
-            mapUploadError={mapUploadError}
-            fieldMapsError={fieldMapsError}
-            fieldMaps={fieldMaps}
-            bind:mapAssignId={mapAssignId}
-            onAssignMap={onAssignMap}
-            selectedFieldMapId={selectedFieldMapId}
-            fieldMapDocErrors={fieldMapDocErrors}
-            hasActiveProfile={hasActiveProfile}
-            onSetMapUploadFile={onSetMapUploadFile}
-            onUploadSelectedMapFile={onUploadSelectedMapFile}
-          />
-        {/if}
-      </div>
-    </div>
-  {/if}
 </div>
