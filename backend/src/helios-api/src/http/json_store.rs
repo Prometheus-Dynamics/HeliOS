@@ -9,10 +9,17 @@ use tokio::fs;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-static FILE_LOCKS: Lazy<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+struct JsonStoreRuntime {
+    locks: Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>,
+}
+
+fn json_store_runtime() -> &'static JsonStoreRuntime {
+    static RUNTIME: Lazy<JsonStoreRuntime> = Lazy::new(|| JsonStoreRuntime { locks: Mutex::new(HashMap::new()) });
+    &RUNTIME
+}
 
 async fn lock_for(path: &Path) -> Arc<Mutex<()>> {
-    let mut locks = FILE_LOCKS.lock().await;
+    let mut locks = json_store_runtime().locks.lock().await;
     locks.entry(path.to_path_buf()).or_insert_with(|| Arc::new(Mutex::new(()))).clone()
 }
 

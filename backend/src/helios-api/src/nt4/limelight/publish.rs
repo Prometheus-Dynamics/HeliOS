@@ -34,7 +34,12 @@ pub(super) struct PublishOutcome {
     pub(super) last_error: Option<String>,
 }
 
-pub(super) async fn publish_read_topics(settings: &device_nt4::Nt4Settings, runtime: &mut LimelightPublishRuntime, adapters: &mut BTreeMap<String, LimelightAdapterRuntime>) -> PublishOutcome {
+pub(super) async fn publish_read_topics(
+    pool: &crate::nt4::pool::Nt4ClientPool,
+    settings: &device_nt4::Nt4Settings,
+    runtime: &mut LimelightPublishRuntime,
+    adapters: &mut BTreeMap<String, LimelightAdapterRuntime>,
+) -> PublishOutcome {
     let host_override = settings.server_host.as_ref().map(|value| value.trim().to_string()).filter(|value| !value.is_empty());
     let host = match host_override {
         Some(host) => Some(host),
@@ -50,13 +55,13 @@ pub(super) async fn publish_read_topics(settings: &device_nt4::Nt4Settings, runt
     let target = (host.clone(), port, client_name.clone());
 
     if runtime.last_target.as_ref() != Some(&target) {
-        let _ = crate::nt4::pool().disconnect(&host, port).await;
+        let _ = pool.disconnect(&host, port).await;
         runtime.last_target = Some(target);
         runtime.last_entry_id = None;
         runtime.publishers.clear();
     }
 
-    let entry = match crate::nt4::pool().get_or_connect(&host, port, &client_name).await {
+    let entry = match pool.get_or_connect(&host, port, &client_name).await {
         Ok(entry) => entry,
         Err(err) => {
             runtime.publishers.clear();
@@ -64,7 +69,7 @@ pub(super) async fn publish_read_topics(settings: &device_nt4::Nt4Settings, runt
         }
     };
     if entry.wait_ready(Duration::from_millis(1500)).await.is_err() {
-        let _ = crate::nt4::pool().disconnect(&host, port).await;
+        let _ = pool.disconnect(&host, port).await;
         runtime.last_entry_id = None;
         runtime.publishers.clear();
         return PublishOutcome { phase: "nt_unreachable".to_string(), ready: false, last_error: None };

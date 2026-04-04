@@ -6,11 +6,3 @@ pub mod photonvision;
 pub mod photonvision_packet;
 pub mod pool;
 pub mod support;
-
-use once_cell::sync::Lazy;
-
-static NT4_POOL: Lazy<pool::Nt4ClientPool> = Lazy::new(pool::Nt4ClientPool::new);
-
-pub fn pool() -> &'static pool::Nt4ClientPool {
-    &NT4_POOL
-}

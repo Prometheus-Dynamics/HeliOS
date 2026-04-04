@@ -37,7 +37,25 @@ pub(super) struct TemporalPoseState {
     first_reject_at: Option<Instant>,
 }
 
-pub(super) static SOLVER_TEMPORAL_STATE: OnceLock<Mutex<HashMap<String, TemporalPoseState>>> = OnceLock::new();
+struct SolverTemporalRuntime {
+    state: Mutex<HashMap<String, TemporalPoseState>>,
+}
+
+fn solver_temporal_runtime() -> &'static SolverTemporalRuntime {
+    static RUNTIME: OnceLock<SolverTemporalRuntime> = OnceLock::new();
+    RUNTIME.get_or_init(|| SolverTemporalRuntime { state: Mutex::new(HashMap::new()) })
+}
+
+pub(super) fn solver_temporal_state() -> &'static Mutex<HashMap<String, TemporalPoseState>> {
+    &solver_temporal_runtime().state
+}
+
+#[cfg(test)]
+pub(super) fn clear_solver_temporal_state() {
+    if let Ok(mut map) = solver_temporal_state().lock() {
+        map.clear();
+    }
+}
 
 pub async fn solve_localization<F: LocalizationSourceFetcher>(
     profile: &LocalizationProfile,

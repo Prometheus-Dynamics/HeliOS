@@ -14,8 +14,8 @@ use utoipa::ToSchema;
 use super::limelight_types::{LimelightControlState, LimelightReadSnapshot};
 use crate::ipc::IpcHandles;
 
-pub fn init(handles: Arc<IpcHandles>) {
-    runtime::init(handles);
+pub fn init(handles: Arc<IpcHandles>, pool: crate::nt4::pool::Nt4ClientPool) {
+    runtime::init(handles, pool);
 }
 
 pub async fn registry_status() -> LimelightAdapterRegistryStatus {

@@ -1,4 +1,4 @@
-use axum::{Json, http::StatusCode, response::IntoResponse};
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use nt_client::subscribe::{ReceivedMessage, SubscriptionOptions};
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -24,7 +24,7 @@ fn topic_info_from_announced(announced: &nt_client::topic::AnnouncedTopic) -> Nt
         (status = 502, description = "NT4 error", body = EngineErrorBody)
     )
 )]
-pub(crate) async fn list_topics(Json(req): Json<Nt4TopicsRequest>) -> axum::response::Response {
+pub(crate) async fn list_topics(State(state): State<crate::http::AppState>, Json(req): Json<Nt4TopicsRequest>) -> axum::response::Response {
     let settings = crate::http::device::nt4::load_settings().await;
     if !settings.subscriptions_enabled {
         return (StatusCode::CONFLICT, Json(engine_error_body(None, "nt4 subscriptions are disabled in device settings"))).into_response();
@@ -40,7 +40,7 @@ pub(crate) async fn list_topics(Json(req): Json<Nt4TopicsRequest>) -> axum::resp
     let scan_ms = req.scan_ms.unwrap_or(350).clamp(50, 5000);
     let limit = req.limit.unwrap_or(512).clamp(1, 10_000);
 
-    let (entry, connected_host) = match connect_nt4_target(host, port, timeout_ms).await {
+    let (entry, connected_host) = match connect_nt4_target(state.services.runtime.nt4_pool(), host, port, timeout_ms).await {
         Ok(result) => result,
         Err(err) => {
             return (StatusCode::BAD_GATEWAY, Json(engine_error_body(None, err))).into_response();

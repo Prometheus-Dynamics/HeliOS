@@ -4,7 +4,7 @@ use axum::{
 };
 use daedalus::ffi::{FFI_VERSION, PLUGIN_ABI_VERSION, PluginLibrary};
 use helios_engine::ipc::PluginCompatibility;
-use lib_runtime_policy::HELIOS_DAEDALUS_RUNTIME_POLICY;
+use lib_runtime_policy::{HELIOS_DAEDALUS_RUNTIME_POLICY, ResolvedDaedalusRuntimePolicy};
 use mime_guess::MimeGuess;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -226,15 +226,15 @@ pub(crate) fn guess_content_type(name: &str) -> String {
 }
 
 pub(crate) fn install_dir() -> PathBuf {
-    HELIOS_DAEDALUS_RUNTIME_POLICY.resolve().install_dir
+    resolved_install_dir(&HELIOS_DAEDALUS_RUNTIME_POLICY.resolve())
 }
 
 pub(crate) fn plugin_dirs() -> Vec<PathBuf> {
-    HELIOS_DAEDALUS_RUNTIME_POLICY.resolve().plugin_search_dirs
+    resolved_plugin_dirs(&HELIOS_DAEDALUS_RUNTIME_POLICY.resolve())
 }
 
 pub(crate) fn upload_dir() -> PathBuf {
-    HELIOS_DAEDALUS_RUNTIME_POLICY.resolve().upload_dir
+    resolved_upload_dir(&HELIOS_DAEDALUS_RUNTIME_POLICY.resolve())
 }
 
 pub(crate) async fn ensure_install_dir() -> ApiResult<PathBuf> {
@@ -268,7 +268,7 @@ pub(crate) fn map_io_error(err: std::io::Error, context: &str) -> ApiError {
 }
 
 pub(crate) fn max_upload_bytes() -> u64 {
-    HELIOS_DAEDALUS_RUNTIME_POLICY.resolve().max_plugin_upload_bytes
+    resolved_max_upload_bytes(&HELIOS_DAEDALUS_RUNTIME_POLICY.resolve())
 }
 
 pub(crate) fn build_compatibility_map(compatibility: Vec<PluginCompatibility>) -> BTreeMap<String, PluginCompatibility> {
@@ -281,4 +281,20 @@ pub(crate) fn build_compatibility_map(compatibility: Vec<PluginCompatibility>) -
 
 pub(crate) fn finalize_upload_response(upload: UploadedTemp) -> PluginUploadResponse {
     PluginUploadResponse { name: upload.name, size_bytes: upload.size_bytes, sha256: upload.sha256 }
+}
+
+pub(crate) fn resolved_install_dir(policy: &ResolvedDaedalusRuntimePolicy) -> PathBuf {
+    policy.install_dir.clone()
+}
+
+pub(crate) fn resolved_plugin_dirs(policy: &ResolvedDaedalusRuntimePolicy) -> Vec<PathBuf> {
+    policy.plugin_search_dirs.clone()
+}
+
+pub(crate) fn resolved_upload_dir(policy: &ResolvedDaedalusRuntimePolicy) -> PathBuf {
+    policy.upload_dir.clone()
+}
+
+pub(crate) fn resolved_max_upload_bytes(policy: &ResolvedDaedalusRuntimePolicy) -> u64 {
+    policy.max_plugin_upload_bytes
 }

@@ -57,7 +57,12 @@ pub(super) fn host_candidates(host: &str) -> Vec<String> {
     deduped
 }
 
-pub(super) async fn connect_nt4_target(requested_host: &str, port: u16, timeout_ms: u64) -> Result<(Arc<crate::nt4::pool::Nt4ClientEntry>, String), String> {
+pub(super) async fn connect_nt4_target(
+    pool: &crate::nt4::pool::Nt4ClientPool,
+    requested_host: &str,
+    port: u16,
+    timeout_ms: u64,
+) -> Result<(Arc<crate::nt4::pool::Nt4ClientEntry>, String), String> {
     let candidates = host_candidates(requested_host);
     if candidates.is_empty() {
         return Err("host is required".to_string());
@@ -75,7 +80,7 @@ pub(super) async fn connect_nt4_target(requested_host: &str, port: u16, timeout_
         let per_candidate = std::cmp::max(Duration::from_millis(150), remaining / remaining_candidates);
         let wait = std::cmp::min(remaining, per_candidate);
 
-        let entry = match crate::nt4::pool().get_or_connect(candidate, port, "HeliOS-nt4").await {
+        let entry = match pool.get_or_connect(candidate, port, "HeliOS-nt4").await {
             Ok(entry) => entry,
             Err(err) => {
                 attempts.push(format!("{candidate}: {err}"));
@@ -87,7 +92,7 @@ pub(super) async fn connect_nt4_target(requested_host: &str, port: u16, timeout_
             Ok(()) => return Ok((entry, candidate.clone())),
             Err(err) => {
                 attempts.push(format!("{candidate}: {err}"));
-                let _ = crate::nt4::pool().disconnect(candidate, port).await;
+                let _ = pool.disconnect(candidate, port).await;
             }
         }
     }

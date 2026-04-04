@@ -258,7 +258,7 @@ async fn async_main() {
     let state = Arc::new(app_state::ApiAppState::new(handles.clone()));
     state.services.runtime.spawn_background_tasks(&state);
     state.services.network.spawn_team_autodetect_task();
-    nt4::bridge::init(handles.clone());
+    nt4::bridge::init(handles.clone(), state.services.runtime.nt4_pool().clone());
     let update_active = led_status::spawn_update_led_task(handles.clone());
     led_status::spawn_engine_crash_led_task(handles.clone(), update_active);
     if features::warm_pipeline_registry_enabled() {

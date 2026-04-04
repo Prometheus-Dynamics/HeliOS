@@ -49,6 +49,11 @@ const PERSIST_NETWORKD_DIR: &str = "/var/lib/helios/networkd";
 const PERSIST_NETWORKD_PREFIX: &str = "00-helios-persisted-";
 const REQUIRED_BOOTABLE_ROOT_PATHS: &[&str] = &["/sbin/init", "/bin/sh", "/lib", "/lib64", "/usr/lib/systemd/systemd", "/etc/os-release"];
 
+#[cfg(test)]
+fn parse_env_flag(raw: &str) -> bool {
+    matches!(raw.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SquashfsSlotResizePlan {
     Fits,

@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use nalgebra::{Quaternion, UnitQuaternion};
@@ -7,7 +6,7 @@ use nalgebra::{Quaternion, UnitQuaternion};
 use crate::localization::config::{LocalizationProfile, LocalizationSolverRuntimeTuningConfig, LocalizationTemporalStabilizationConfig};
 use crate::localization::types::{LocalizationPose, LocalizationSolverOutputs, LocalizationSolverResult};
 
-use super::{TemporalPoseState, SOLVER_TEMPORAL_STATE};
+use super::{TemporalPoseState, solver_temporal_state};
 
 pub(super) fn apply_temporal_pose_stabilization(profile: &LocalizationProfile, solver_results: &mut [LocalizationSolverResult]) {
     let now = Instant::now();
@@ -23,7 +22,7 @@ pub(super) fn apply_temporal_pose_stabilization(profile: &LocalizationProfile, s
         solver_runtime_tuning.insert(solver.id.as_str(), runtime_tuning);
     }
 
-    let state_store = SOLVER_TEMPORAL_STATE.get_or_init(|| Mutex::new(HashMap::new()));
+    let state_store = solver_temporal_state();
     let Ok(mut state_store) = state_store.lock() else {
         return;
     };

@@ -1,43 +1,17 @@
 use once_cell::sync::Lazy;
 use reqwest::header::ACCEPT;
 use serde_json::Value as JsonValue;
-use std::collections::{HashMap, HashSet};
-use std::time::{Duration, Instant};
-use tokio::sync::Mutex;
+use std::collections::HashSet;
 use url::Url;
 
 use crate::http::localization::peers::custom as localization_peer_custom;
+use crate::http::AppState;
 use crate::http::peers::{PeerInfo, PeerIntegrationKind, PeerIntegrationMapping};
 use helios_engine::localization::types::{LocalizationPipelineSource, LocalizationSourceKind, PipelineOutputSample};
 
 static PEER_HTTP: Lazy<reqwest::Client> = Lazy::new(|| crate::http::reqwest_client::build_http_client("HeliOS/localization-peers").expect("reqwest client"));
-static PHOTONVISION_CACHE: Lazy<Mutex<HashMap<String, PhotonvisionCacheEntry>>> = Lazy::new(|| Mutex::new(HashMap::new()));
-const PHOTONVISION_CACHE_TTL: Duration = Duration::from_secs(2);
 
-#[derive(Clone)]
-struct PhotonvisionCacheEntry {
-    updated_at: Instant,
-    snapshot: Option<crate::nt4::photonvision::PhotonvisionNt4Snapshot>,
-}
-
-async fn photonvision_snapshot_cached(host: &str) -> Option<crate::nt4::photonvision::PhotonvisionNt4Snapshot> {
-    let now = Instant::now();
-    {
-        let cache = PHOTONVISION_CACHE.lock().await;
-        if let Some(entry) = cache.get(host)
-            && now.duration_since(entry.updated_at) <= PHOTONVISION_CACHE_TTL
-        {
-            return entry.snapshot.clone();
-        }
-    }
-
-    let snapshot = crate::nt4::photonvision::snapshot(host, 5810, 600).await.ok();
-    let mut cache = PHOTONVISION_CACHE.lock().await;
-    cache.insert(host.to_string(), PhotonvisionCacheEntry { updated_at: now, snapshot: snapshot.clone() });
-    snapshot
-}
-
-pub(crate) async fn list_peer_sources(peer: &PeerInfo) -> Vec<LocalizationPipelineSource> {
+pub(crate) async fn list_peer_sources(state: &AppState, peer: &PeerInfo) -> Vec<LocalizationPipelineSource> {
     let mut sources = Vec::new();
     let allowlist = build_allowlist(&peer.integration.localization_outputs);
 
@@ -62,7 +36,7 @@ pub(crate) async fn list_peer_sources(peer: &PeerInfo) -> Vec<LocalizationPipeli
         PeerIntegrationKind::Photonvision => {
             let host = resolve_peer_host(peer);
             if let Some(host) = host
-                && let Some(snapshot) = photonvision_snapshot_cached(&host).await
+                && let Some(snapshot) = state.services.runtime.localization_peer_sources().photonvision_snapshot(state.services.runtime.nt4_pool(), &host).await
             {
                 let allowed_entries: Vec<&PeerOutputEntry> = allowlist.iter().filter(|entry| entry.output_key.as_deref() == Some("tag_poses")).collect();
                 let allow_all = allowed_entries.is_empty() || allowed_entries.iter().any(|entry| entry.stream_suffix.is_none());
@@ -128,15 +102,25 @@ pub(crate) async fn list_peer_sources(peer: &PeerInfo) -> Vec<LocalizationPipeli
     sources
 }
 
-pub(crate) async fn fetch_peer_output_value(peer: &PeerInfo, stream_suffix: Option<&str>, output_key: &str) -> Result<JsonValue, String> {
-    let sample = fetch_peer_output_sample(peer, stream_suffix, output_key).await?;
+pub(crate) async fn fetch_peer_output_value(
+    state: &AppState,
+    peer: &PeerInfo,
+    stream_suffix: Option<&str>,
+    output_key: &str,
+) -> Result<JsonValue, String> {
+    let sample = fetch_peer_output_sample(state, peer, stream_suffix, output_key).await?;
     Ok(sample.value)
 }
 
-pub(crate) async fn fetch_peer_output_sample(peer: &PeerInfo, stream_suffix: Option<&str>, output_key: &str) -> Result<PipelineOutputSample, String> {
+pub(crate) async fn fetch_peer_output_sample(
+    state: &AppState,
+    peer: &PeerInfo,
+    stream_suffix: Option<&str>,
+    output_key: &str,
+) -> Result<PipelineOutputSample, String> {
     match peer.integration.kind {
         PeerIntegrationKind::LimelightOs => fetch_limelight_tag_poses(peer).await.map(|value| PipelineOutputSample { data_type: None, value }),
-        PeerIntegrationKind::Photonvision => fetch_photonvision_tag_poses(peer, stream_suffix).await.map(|value| PipelineOutputSample { data_type: None, value }),
+        PeerIntegrationKind::Photonvision => fetch_photonvision_tag_poses(state, peer, stream_suffix).await.map(|value| PipelineOutputSample { data_type: None, value }),
         PeerIntegrationKind::Helios => fetch_helios_output(peer, stream_suffix, output_key).await,
         PeerIntegrationKind::Custom => fetch_custom_output(peer, output_key).await,
     }
@@ -208,10 +192,14 @@ pub(crate) async fn fetch_limelight_tag_poses(peer: &PeerInfo) -> Result<JsonVal
     }))
 }
 
-pub(crate) async fn fetch_photonvision_tag_poses(peer: &PeerInfo, stream_suffix: Option<&str>) -> Result<JsonValue, String> {
+pub(crate) async fn fetch_photonvision_tag_poses(
+    state: &AppState,
+    peer: &PeerInfo,
+    stream_suffix: Option<&str>,
+) -> Result<JsonValue, String> {
     let host = resolve_peer_host(peer).ok_or_else(|| "peer api_base_url missing host".to_string())?;
     let camera = stream_suffix.unwrap_or("front");
-    crate::nt4::photonvision::fetch_tag_poses(&host, 5810, camera, 700).await
+    crate::nt4::photonvision::fetch_tag_poses(state.services.runtime.nt4_pool(), &host, 5810, camera, 700).await
 }
 
 async fn fetch_helios_sources(peer: &PeerInfo) -> Result<Vec<LocalizationPipelineSource>, String> {

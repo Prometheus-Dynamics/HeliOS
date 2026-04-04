@@ -1,4 +1,4 @@
-use axum::{Json, http::StatusCode, response::IntoResponse};
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use base64::Engine;
 use nt_client::subscribe::{ReceivedMessage, SubscriptionOptions};
 use std::time::Duration;
@@ -58,7 +58,7 @@ pub(super) fn rmpv_to_json(value: &rmpv::Value) -> serde_json::Value {
         (status = 502, description = "NT4 error", body = EngineErrorBody)
     )
 )]
-pub(crate) async fn read_value(Json(req): Json<Nt4ValueRequest>) -> axum::response::Response {
+pub(crate) async fn read_value(State(state): State<crate::http::AppState>, Json(req): Json<Nt4ValueRequest>) -> axum::response::Response {
     let settings = crate::http::device::nt4::load_settings().await;
     if !settings.subscriptions_enabled {
         return (StatusCode::CONFLICT, Json(engine_error_body(None, "nt4 subscriptions are disabled in device settings"))).into_response();
@@ -75,7 +75,7 @@ pub(crate) async fn read_value(Json(req): Json<Nt4ValueRequest>) -> axum::respon
     }
     let timeout_ms = req.timeout_ms.unwrap_or(1200).clamp(150, 15_000);
 
-    let (entry, connected_host) = match connect_nt4_target(host, port, timeout_ms).await {
+    let (entry, connected_host) = match connect_nt4_target(state.services.runtime.nt4_pool(), host, port, timeout_ms).await {
         Ok(result) => result,
         Err(err) => {
             return (StatusCode::BAD_GATEWAY, Json(engine_error_body(None, err))).into_response();

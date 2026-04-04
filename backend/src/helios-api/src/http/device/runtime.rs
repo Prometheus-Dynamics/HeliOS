@@ -319,7 +319,7 @@ pub async fn runtime(State(state): State<crate::http::AppState>) -> ApiResult<im
         solve_cache: state.services.runtime.localization_solve_cache().snapshot().await,
         sample_refresh: state.services.runtime.localization_sample_refresh().snapshot(),
     };
-    let nt4 = Nt4ObservabilitySnapshot { pool: crate::nt4::pool().snapshot().await, bridge: crate::nt4::bridge::snapshot() };
+    let nt4 = Nt4ObservabilitySnapshot { pool: state.services.runtime.nt4_pool().snapshot().await, bridge: crate::nt4::bridge::snapshot() };
     let imu = match sensors {
         Some(conn) => match conn.sensor_snapshot_typed(SensorScope::Device).await {
             Ok(Ok(snapshot)) => match snapshot.get(&helios_peripherals::dto::SensorKind::Imu) {

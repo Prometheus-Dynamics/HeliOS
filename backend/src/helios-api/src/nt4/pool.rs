@@ -79,7 +79,7 @@ impl Nt4ClientEntry {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Nt4ClientPool {
     clients: Arc<Mutex<HashMap<Nt4ClientKey, Nt4ClientSlot>>>,
     connect_attempts: Arc<AtomicU64>,
@@ -97,17 +97,6 @@ struct Nt4ClientSlot {
 }
 
 impl Nt4ClientPool {
-    pub fn new() -> Self {
-        Self {
-            clients: Arc::new(Mutex::new(HashMap::new())),
-            connect_attempts: Arc::new(AtomicU64::new(0)),
-            connect_reuses: Arc::new(AtomicU64::new(0)),
-            connect_successes: Arc::new(AtomicU64::new(0)),
-            connect_failures: Arc::new(AtomicU64::new(0)),
-            disconnects: Arc::new(AtomicU64::new(0)),
-        }
-    }
-
     pub async fn get_or_connect(&self, host: &str, port: u16, name: &str) -> Result<Arc<Nt4ClientEntry>, String> {
         let addr = resolve_ipv4(host, port).await?;
         let key = Nt4ClientKey { addr, port };

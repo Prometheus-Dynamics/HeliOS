@@ -1,8 +1,20 @@
 use std::path::PathBuf;
 
 use crate::http::error::ApiError;
+use lib_runtime_policy::ResolvedDaedalusRuntimePolicy;
 
-use super::support::{DISABLED_SUFFIX, PLUGIN_SUFFIX, build_compatibility_map, ensure_plugin_filename, guess_content_type, max_upload_bytes, plugin_dirs};
+use super::support::{DISABLED_SUFFIX, PLUGIN_SUFFIX, build_compatibility_map, ensure_plugin_filename, guess_content_type, resolved_max_upload_bytes, resolved_plugin_dirs};
+
+fn sample_runtime_policy() -> ResolvedDaedalusRuntimePolicy {
+    ResolvedDaedalusRuntimePolicy {
+        install_dir: PathBuf::from("/var/lib/helios/plugins/daedalus"),
+        upload_dir: PathBuf::from("/var/lib/helios/plugins/uploads"),
+        registry_snapshot_path: PathBuf::from("/var/lib/helios/state/node-registry.snapshot.json"),
+        registry_generator_binary: PathBuf::from("/usr/bin/helios-engine"),
+        plugin_search_dirs: vec![PathBuf::from("/usr/lib/helios/plugins/daedalus")],
+        max_plugin_upload_bytes: 64 * 1024 * 1024,
+    }
+}
 
 #[test]
 fn ensure_plugin_filename_requires_shared_object_suffix() {
@@ -13,48 +25,25 @@ fn ensure_plugin_filename_requires_shared_object_suffix() {
 
 #[test]
 fn plugin_dirs_prefers_single_dir_override() {
-    unsafe {
-        std::env::set_var("HELIOS_DAEDALUS_PLUGIN_DIR", "/tmp/custom-plugin-dir");
-    }
-    unsafe {
-        std::env::remove_var("HELIOS_DAEDALUS_PLUGIN_DIRS");
-    }
-
-    let dirs = plugin_dirs();
+    let mut policy = sample_runtime_policy();
+    policy.plugin_search_dirs = vec![PathBuf::from("/tmp/custom-plugin-dir")];
+    let dirs = resolved_plugin_dirs(&policy);
     assert_eq!(dirs, vec![PathBuf::from("/tmp/custom-plugin-dir")]);
-
-    unsafe {
-        std::env::remove_var("HELIOS_DAEDALUS_PLUGIN_DIR");
-    }
 }
 
 #[test]
 fn plugin_dirs_uses_split_paths_override() {
-    unsafe {
-        std::env::remove_var("HELIOS_DAEDALUS_PLUGIN_DIR");
-    }
-    let joined = std::env::join_paths([PathBuf::from("/tmp/plugin-a"), PathBuf::from("/tmp/plugin-b")]).expect("join paths");
-    unsafe {
-        std::env::set_var("HELIOS_DAEDALUS_PLUGIN_DIRS", &joined);
-    }
-
-    let dirs = plugin_dirs();
+    let mut policy = sample_runtime_policy();
+    policy.plugin_search_dirs = vec![PathBuf::from("/tmp/plugin-a"), PathBuf::from("/tmp/plugin-b")];
+    let dirs = resolved_plugin_dirs(&policy);
     assert_eq!(dirs, vec![PathBuf::from("/tmp/plugin-a"), PathBuf::from("/tmp/plugin-b")]);
-
-    unsafe {
-        std::env::remove_var("HELIOS_DAEDALUS_PLUGIN_DIRS");
-    }
 }
 
 #[test]
 fn max_upload_bytes_accepts_positive_mb_override() {
-    unsafe {
-        std::env::set_var("HELIOS_API_MAX_PLUGIN_MB", "12");
-    }
-    assert_eq!(max_upload_bytes(), 12 * 1024 * 1024);
-    unsafe {
-        std::env::remove_var("HELIOS_API_MAX_PLUGIN_MB");
-    }
+    let mut policy = sample_runtime_policy();
+    policy.max_plugin_upload_bytes = 12 * 1024 * 1024;
+    assert_eq!(resolved_max_upload_bytes(&policy), 12 * 1024 * 1024);
 }
 
 #[test]

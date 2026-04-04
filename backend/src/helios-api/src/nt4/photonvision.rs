@@ -17,16 +17,16 @@ pub struct PhotonvisionNt4Snapshot {
     pub cameras: Vec<PhotonvisionCameraSnapshot>,
 }
 
-pub async fn snapshot(host: &str, port: u16, timeout_ms: u64) -> Result<PhotonvisionNt4Snapshot, String> {
+pub async fn snapshot(pool: &crate::nt4::pool::Nt4ClientPool, host: &str, port: u16, timeout_ms: u64) -> Result<PhotonvisionNt4Snapshot, String> {
     let settings = crate::http::device::nt4::load_settings().await;
     if !settings.subscriptions_enabled {
         return Err("nt4 subscriptions are disabled in device settings".into());
     }
 
     let timeout_duration = Duration::from_millis(timeout_ms.clamp(150, 10_000));
-    let entry = crate::nt4::pool().get_or_connect(host, port, "HeliOS-photonvision").await?;
+    let entry = pool.get_or_connect(host, port, "HeliOS-photonvision").await?;
     if let Err(err) = entry.wait_ready(timeout_duration.min(Duration::from_millis(1200))).await {
-        let _ = crate::nt4::pool().disconnect(host, port).await;
+        let _ = pool.disconnect(host, port).await;
         return Err(err);
     }
 
@@ -41,16 +41,16 @@ pub async fn snapshot(host: &str, port: u16, timeout_ms: u64) -> Result<Photonvi
     Ok(PhotonvisionNt4Snapshot { cameras: camera_snapshots })
 }
 
-pub async fn fetch_tag_poses(host: &str, port: u16, camera: &str, timeout_ms: u64) -> Result<serde_json::Value, String> {
+pub async fn fetch_tag_poses(pool: &crate::nt4::pool::Nt4ClientPool, host: &str, port: u16, camera: &str, timeout_ms: u64) -> Result<serde_json::Value, String> {
     let settings = crate::http::device::nt4::load_settings().await;
     if !settings.subscriptions_enabled {
         return Err("nt4 subscriptions are disabled in device settings".into());
     }
 
     let timeout_duration = Duration::from_millis(timeout_ms.clamp(200, 10_000));
-    let entry = crate::nt4::pool().get_or_connect(host, port, "HeliOS-photonvision").await?;
+    let entry = pool.get_or_connect(host, port, "HeliOS-photonvision").await?;
     if let Err(err) = entry.wait_ready(timeout_duration.min(Duration::from_millis(1200))).await {
-        let _ = crate::nt4::pool().disconnect(host, port).await;
+        let _ = pool.disconnect(host, port).await;
         return Err(err);
     }
 

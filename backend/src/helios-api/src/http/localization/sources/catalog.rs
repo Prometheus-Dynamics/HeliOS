@@ -91,7 +91,7 @@ pub(super) async fn list_sources(State(state): State<AppState>) -> ApiResult<Jso
 
     let peers = peers::snapshot_peers(&state).await;
     for peer in peers {
-        out.extend(super::super::peers::sources::list_peer_sources(&peer).await);
+        out.extend(super::super::peers::sources::list_peer_sources(&state, &peer).await);
     }
 
     let external_sources = super::super::external::list_external_sources_snapshot(&state).await;

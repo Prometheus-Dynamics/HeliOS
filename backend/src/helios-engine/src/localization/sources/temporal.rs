@@ -22,8 +22,26 @@ struct TagPairDistanceTemporalState {
     outlier_streak: u8,
 }
 
-static TAG_POSE_TEMPORAL_STATE: OnceLock<Mutex<HashMap<String, TagPoseTemporalState>>> = OnceLock::new();
-static TAG_PAIR_DISTANCE_TEMPORAL_STATE: OnceLock<Mutex<HashMap<String, TagPairDistanceTemporalState>>> = OnceLock::new();
+struct LocalizationTemporalRuntime {
+    tag_pose_state: Mutex<HashMap<String, TagPoseTemporalState>>,
+    tag_pair_distance_state: Mutex<HashMap<String, TagPairDistanceTemporalState>>,
+}
+
+fn localization_temporal_runtime() -> &'static LocalizationTemporalRuntime {
+    static RUNTIME: OnceLock<LocalizationTemporalRuntime> = OnceLock::new();
+    RUNTIME.get_or_init(|| LocalizationTemporalRuntime {
+        tag_pose_state: Mutex::new(HashMap::new()),
+        tag_pair_distance_state: Mutex::new(HashMap::new()),
+    })
+}
+
+fn tag_pose_temporal_state() -> &'static Mutex<HashMap<String, TagPoseTemporalState>> {
+    &localization_temporal_runtime().tag_pose_state
+}
+
+fn tag_pair_distance_temporal_state() -> &'static Mutex<HashMap<String, TagPairDistanceTemporalState>> {
+    &localization_temporal_runtime().tag_pair_distance_state
+}
 
 fn temporal_policy() -> &'static ResolvedEngineLocalizationTemporalPolicy {
     static VALUE: OnceLock<ResolvedEngineLocalizationTemporalPolicy> = OnceLock::new();
@@ -96,7 +114,7 @@ pub(super) fn collapse_duplicate_tag_detections(source: &LocalizationSourceConfi
 
     let now = Instant::now();
     let stale_after = Duration::from_millis(900);
-    let state_store = TAG_POSE_TEMPORAL_STATE.get_or_init(|| Mutex::new(HashMap::new()));
+    let state_store = tag_pose_temporal_state();
     let mut prior_translation_by_tag = HashMap::<u32, Vector3<f64>>::new();
     if let Ok(state_store) = state_store.lock() {
         for (tag_id, group) in &grouped {
@@ -185,7 +203,7 @@ pub(super) fn apply_pair_distance_consistency(source: &LocalizationSourceConfig,
         return;
     }
 
-    let state_store = TAG_PAIR_DISTANCE_TEMPORAL_STATE.get_or_init(|| Mutex::new(HashMap::new()));
+    let state_store = tag_pair_distance_temporal_state();
     let Ok(mut state_store) = state_store.lock() else {
         return;
     };
@@ -345,7 +363,7 @@ pub(super) fn smooth_detection_tag_poses(source: &LocalizationSourceConfig, dete
     if detections.is_empty() {
         return;
     }
-    let state_store = TAG_POSE_TEMPORAL_STATE.get_or_init(|| Mutex::new(HashMap::new()));
+    let state_store = tag_pose_temporal_state();
     let Ok(mut state_store) = state_store.lock() else {
         return;
     };

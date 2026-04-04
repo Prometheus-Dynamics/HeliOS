@@ -16,11 +16,7 @@ fn dummy_pose(x: f64, y: f64, z: f64) -> LocalizationPose {
 }
 
 fn clear_temporal_state() {
-    if let Some(store) = SOLVER_TEMPORAL_STATE.get() {
-        if let Ok(mut map) = store.lock() {
-            map.clear();
-        }
-    }
+    clear_solver_temporal_state();
 }
 
 fn quat_from_frontend_xyz_degrees(pitch_deg: f64, yaw_deg: f64, roll_deg: f64) -> UnitQuaternion<f64> {

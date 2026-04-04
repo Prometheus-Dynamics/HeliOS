@@ -146,7 +146,14 @@ struct DynamicPluginCache {
     diagnostics: BTreeMap<String, PluginCompatibility>,
 }
 
-static DYNAMIC_PLUGIN_CACHE: OnceLock<Mutex<Result<DynamicPluginCache, String>>> = OnceLock::new();
+struct DynamicPluginRuntime {
+    cache: Mutex<Result<DynamicPluginCache, String>>,
+}
+
+fn dynamic_plugin_runtime(requested_namespaces: Option<&BTreeSet<String>>) -> &'static DynamicPluginRuntime {
+    static RUNTIME: OnceLock<DynamicPluginRuntime> = OnceLock::new();
+    RUNTIME.get_or_init(|| DynamicPluginRuntime { cache: Mutex::new(init_dynamic_plugin_cache(requested_namespaces)) })
+}
 
 fn init_dynamic_plugin_cache(requested_namespaces: Option<&BTreeSet<String>>) -> Result<DynamicPluginCache, String> {
     let dirs = parse_plugin_dirs();
@@ -281,8 +288,10 @@ fn refresh_dynamic_plugin_cache(cache: &mut DynamicPluginCache, requested_namesp
 
 fn install_dynamic_plugins_cached(registry: &mut PluginRegistry, graph: Option<&Graph>) -> Result<Vec<String>, &'static str> {
     let requested_namespaces = graph_plugin_namespaces(graph);
-    let cache = DYNAMIC_PLUGIN_CACHE.get_or_init(|| Mutex::new(init_dynamic_plugin_cache(requested_namespaces.as_ref())));
-    let mut guard = cache.lock().map_err(|_| "dynamic plugin cache lock poisoned")?;
+    let mut guard = dynamic_plugin_runtime(requested_namespaces.as_ref())
+        .cache
+        .lock()
+        .map_err(|_| "dynamic plugin cache lock poisoned")?;
     let cache = guard.as_mut().map_err(|_| "dynamic plugin load failed")?;
     refresh_dynamic_plugin_cache(cache, requested_namespaces.as_ref());
     let disabled = current_disabled_plugins();
@@ -314,8 +323,7 @@ fn install_dynamic_plugins_cached(registry: &mut PluginRegistry, graph: Option<&
 }
 
 pub fn plugin_diagnostics() -> Vec<PluginCompatibility> {
-    let cache = DYNAMIC_PLUGIN_CACHE.get_or_init(|| Mutex::new(init_dynamic_plugin_cache(None)));
-    let mut guard = match cache.lock() {
+    let mut guard = match dynamic_plugin_runtime(None).cache.lock() {
         Ok(guard) => guard,
         Err(_) => return Vec::new(),
     };

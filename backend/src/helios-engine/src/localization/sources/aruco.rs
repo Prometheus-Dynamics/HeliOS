@@ -59,7 +59,18 @@ struct UndistortedFisheyeModelState {
     switch_votes: u8,
 }
 
-static UNDISTORTED_FISHEYE_MODEL_STATE: OnceLock<Mutex<HashMap<String, UndistortedFisheyeModelState>>> = OnceLock::new();
+struct UndistortedFisheyeModelRuntime {
+    state: Mutex<HashMap<String, UndistortedFisheyeModelState>>,
+}
+
+fn undistorted_fisheye_model_runtime() -> &'static UndistortedFisheyeModelRuntime {
+    static RUNTIME: OnceLock<UndistortedFisheyeModelRuntime> = OnceLock::new();
+    RUNTIME.get_or_init(|| UndistortedFisheyeModelRuntime { state: Mutex::new(HashMap::new()) })
+}
+
+fn undistorted_fisheye_model_state() -> &'static Mutex<HashMap<String, UndistortedFisheyeModelState>> {
+    &undistorted_fisheye_model_runtime().state
+}
 
 fn aruco_policy() -> &'static ResolvedEngineLocalizationArucoPolicy {
     static VALUE: OnceLock<ResolvedEngineLocalizationArucoPolicy> = OnceLock::new();
@@ -360,7 +371,7 @@ fn select_fisheye_model_with_hysteresis(source: &LocalizationSourceConfig, nativ
     let preferred = preferred_undistorted_model(native_count, native_quality, pinhole_count, pinhole_quality);
     let key = fisheye_model_state_key(source);
     let now = Instant::now();
-    let store = UNDISTORTED_FISHEYE_MODEL_STATE.get_or_init(|| Mutex::new(HashMap::new()));
+    let store = undistorted_fisheye_model_state();
     let Ok(mut store) = store.lock() else {
         return preferred;
     };

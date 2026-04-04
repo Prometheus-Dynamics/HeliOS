@@ -23,8 +23,8 @@ use self::publish::{BridgePublishRuntime, publish_bridge_payloads};
 use self::topics::publish_prefix_from_hostname;
 pub use observability::snapshot;
 
-pub fn init(handles: Arc<IpcHandles>) {
-    crate::nt4::limelight::init(handles.clone());
+pub fn init(handles: Arc<IpcHandles>, pool: crate::nt4::pool::Nt4ClientPool) {
+    crate::nt4::limelight::init(handles.clone(), pool.clone());
 
     let api_port = ApiConfig::from_env().bind_addr.port();
     tokio::spawn(async move {
@@ -57,16 +57,16 @@ pub fn init(handles: Arc<IpcHandles>) {
             let target = (host.clone(), port, client_name.clone());
             if publish_runtime.last_target.as_ref() != Some(&target) {
                 if let Some((prev_host, prev_port, _)) = publish_runtime.last_target.as_ref() {
-                    let _ = crate::nt4::pool().disconnect(prev_host, *prev_port).await;
+                    let _ = pool.disconnect(prev_host, *prev_port).await;
                 }
-                let _ = crate::nt4::pool().disconnect(&host, port).await;
+                let _ = pool.disconnect(&host, port).await;
                 publish_runtime.last_target = Some(target);
                 publish_runtime.last_entry_id = None;
                 publish_runtime.publishers.clear();
                 record_bridge_reconnect(Some(format!("{host}:{port}")));
             }
 
-            let entry = match crate::nt4::pool().get_or_connect(&host, port, &client_name).await {
+            let entry = match pool.get_or_connect(&host, port, &client_name).await {
                 Ok(entry) => entry,
                 Err(err) => {
                     record_bridge_publish_failure(format!("{host}:{port}"), None);
@@ -75,7 +75,7 @@ pub fn init(handles: Arc<IpcHandles>) {
                 }
             };
             if entry.wait_ready(Duration::from_millis(1500)).await.is_err() {
-                let _ = crate::nt4::pool().disconnect(&host, port).await;
+                let _ = pool.disconnect(&host, port).await;
                 publish_runtime.last_entry_id = None;
                 publish_runtime.publishers.clear();
                 record_bridge_publish_failure(format!("{host}:{port}"), Some(entry.id()));
@@ -102,7 +102,7 @@ pub fn init(handles: Arc<IpcHandles>) {
                     %err,
                     "nt4 publish failed; forcing reconnect"
                 );
-                let _ = crate::nt4::pool().disconnect(&host, port).await;
+                let _ = pool.disconnect(&host, port).await;
                 publish_runtime.last_entry_id = None;
                 publish_runtime.publishers.clear();
                 record_bridge_reconnect(Some(format!("{host}:{port}")));

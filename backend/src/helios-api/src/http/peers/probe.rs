@@ -243,7 +243,7 @@ pub(crate) async fn probe_peer(State(state): State<AppState>, Json(req): Json<Pe
         .or_else(|| req.device_ip.as_deref().and_then(normalize_device_host))
         .or_else(|| req.api_base_url.as_deref().and_then(|value| Url::parse(value).ok()).and_then(|url| url.host_str().map(|host| host.to_string())));
     if let Some(nt4_host) = nt4_host {
-        nt4 = Some(probe_nt4(&nt4_host, 5810, timeout_ms.min(2500)).await);
+        nt4 = Some(probe_nt4(state.services.runtime.nt4_pool(), &nt4_host, 5810, timeout_ms.min(2500)).await);
     }
 
     if let Some(first) = candidate_stream_urls.first() {
@@ -256,20 +256,20 @@ pub(crate) async fn probe_peer(State(state): State<AppState>, Json(req): Json<Pe
     (StatusCode::OK, Json(PeerProbeResponse { kind: req.kind, api, management, stream, streams, photonvision, nt4 })).into_response()
 }
 
-async fn probe_nt4(host: &str, port: u16, timeout_ms: u64) -> Nt4PeerProbe {
+async fn probe_nt4(pool: &crate::nt4::pool::Nt4ClientPool, host: &str, port: u16, timeout_ms: u64) -> Nt4PeerProbe {
     let settings = crate::http::device::nt4::load_settings().await;
     if !settings.subscriptions_enabled {
         return Nt4PeerProbe { host: host.to_string(), port, ok: false, roots: Vec::new(), error: Some("nt4 subscriptions are disabled in device settings".into()) };
     }
 
-    let entry = match crate::nt4::pool().get_or_connect(host, port, "HeliOS-peers-probe").await {
+    let entry = match pool.get_or_connect(host, port, "HeliOS-peers-probe").await {
         Ok(entry) => entry,
         Err(err) => {
             return Nt4PeerProbe { host: host.to_string(), port, ok: false, roots: Vec::new(), error: Some(err) };
         }
     };
     if let Err(err) = entry.wait_ready(std::time::Duration::from_millis(timeout_ms)).await {
-        let _ = crate::nt4::pool().disconnect(host, port).await;
+        let _ = pool.disconnect(host, port).await;
         return Nt4PeerProbe { host: host.to_string(), port, ok: false, roots: Vec::new(), error: Some(err) };
     }
     let topics = entry.list_topics_prefix("/", std::time::Duration::from_millis(250)).await.unwrap_or_default();

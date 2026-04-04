@@ -40,10 +40,48 @@ struct SettingsCache {
     value: Nt4SettingsFile,
 }
 
-static SETTINGS_CACHE: LazyLock<Mutex<SettingsCache>> = LazyLock::new(|| {
-    let now = Instant::now();
-    Mutex::new(SettingsCache { last_check: now.checked_sub(Duration::from_secs(10)).unwrap_or(now), source_path: None, modified: None, value: Nt4SettingsFile::default() })
-});
+struct Nt4SettingsRuntime {
+    cache: Mutex<SettingsCache>,
+}
+
+impl Nt4SettingsRuntime {
+    fn new() -> Self {
+        let now = Instant::now();
+        Self {
+            cache: Mutex::new(SettingsCache {
+                last_check: now.checked_sub(Duration::from_secs(10)).unwrap_or(now),
+                source_path: None,
+                modified: None,
+                value: Nt4SettingsFile::default(),
+            }),
+        }
+    }
+
+    fn cached_settings(&self) -> Nt4SettingsFile {
+        let mut guard = self.cache.lock().expect("nt4 settings cache lock poisoned");
+        let now = Instant::now();
+        if now.saturating_duration_since(guard.last_check) < Duration::from_millis(250) {
+            return guard.value.clone();
+        }
+        guard.last_check = now;
+
+        let path = settings_path();
+        let source_path = current_settings_source(&path);
+        let modified = source_path.as_ref().and_then(|source| std::fs::metadata(source).ok()).and_then(|meta| meta.modified().ok());
+        if modified != guard.modified || source_path != guard.source_path {
+            guard.source_path = source_path;
+            guard.modified = modified;
+            guard.value = read_settings_file();
+        }
+
+        guard.value.clone()
+    }
+}
+
+fn nt4_settings_runtime() -> &'static Nt4SettingsRuntime {
+    static RUNTIME: LazyLock<Nt4SettingsRuntime> = LazyLock::new(Nt4SettingsRuntime::new);
+    &RUNTIME
+}
 
 pub fn resolve_target(settings: &Nt4SettingsFile) -> Result<(String, u16), NodeError> {
     if !settings.enabled {
@@ -70,23 +108,7 @@ pub fn resolve_topic(hostname: &str, stream_alias: &str, pipeline_alias: &str, t
 }
 
 pub fn cached_settings() -> Nt4SettingsFile {
-    let mut guard = SETTINGS_CACHE.lock().expect("nt4 settings cache lock poisoned");
-    let now = Instant::now();
-    if now.saturating_duration_since(guard.last_check) < Duration::from_millis(250) {
-        return guard.value.clone();
-    }
-    guard.last_check = now;
-
-    let path = settings_path();
-    let source_path = current_settings_source(&path);
-    let modified = source_path.as_ref().and_then(|source| std::fs::metadata(source).ok()).and_then(|meta| meta.modified().ok());
-    if modified != guard.modified || source_path != guard.source_path {
-        guard.source_path = source_path;
-        guard.modified = modified;
-        guard.value = read_settings_file();
-    }
-
-    guard.value.clone()
+    nt4_settings_runtime().cached_settings()
 }
 
 pub fn sanitize_segment(raw: &str, fallback: &str) -> String {

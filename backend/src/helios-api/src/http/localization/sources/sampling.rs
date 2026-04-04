@@ -39,7 +39,7 @@ pub(super) async fn sample_peer_output(State(state): State<AppState>, Path((id, 
         return (StatusCode::NOT_FOUND, Json(engine_error_body(Some(EngineErrorCode::NotFound), "peer not found"))).into_response();
     };
 
-    match super::super::peers::sources::fetch_peer_output_sample(&peer, camera.as_deref(), &output_key).await {
+    match super::super::peers::sources::fetch_peer_output_sample(&state, &peer, camera.as_deref(), &output_key).await {
         Ok(sample) => Json(sample).into_response(),
         Err(err) => (StatusCode::BAD_GATEWAY, Json(engine_error_body(Some(EngineErrorCode::Internal), err))).into_response(),
     }
@@ -83,5 +83,5 @@ pub(crate) async fn fetch_peer_output(state: &AppState, stream_id: &str, output_
         return Err("peer not found".to_string());
     };
 
-    super::super::peers::sources::fetch_peer_output_value(&peer, camera.as_deref(), output_key).await
+    super::super::peers::sources::fetch_peer_output_value(state, &peer, camera.as_deref(), output_key).await
 }

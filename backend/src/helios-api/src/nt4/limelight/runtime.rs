@@ -49,7 +49,7 @@ static LIMELIGHT_STATE: Lazy<RwLock<LimelightRuntimeState>> = Lazy::new(|| {
 
 static LIMELIGHT_TASK_STARTED: AtomicBool = AtomicBool::new(false);
 
-pub(super) fn init(handles: Arc<IpcHandles>) {
+pub(super) fn init(handles: Arc<IpcHandles>, pool: crate::nt4::pool::Nt4ClientPool) {
     if LIMELIGHT_TASK_STARTED.swap(true, Ordering::AcqRel) {
         return;
     }
@@ -60,7 +60,7 @@ pub(super) fn init(handles: Arc<IpcHandles>) {
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tick.tick().await;
-            if let Err(err) = reconcile_once(&handles, &mut publish_runtime).await {
+            if let Err(err) = reconcile_once(&handles, &pool, &mut publish_runtime).await {
                 warn!(%err, "limelight adapter reconcile failed");
                 let mut state = LIMELIGHT_STATE.write().await;
                 state.last_error = Some(err);
@@ -141,7 +141,11 @@ fn resolve_adapter<'a>(state: &'a LimelightRuntimeState, table: &str) -> Option<
     None
 }
 
-async fn reconcile_once(handles: &Arc<IpcHandles>, publish_runtime: &mut LimelightPublishRuntime) -> Result<(), String> {
+async fn reconcile_once(
+    handles: &Arc<IpcHandles>,
+    pool: &crate::nt4::pool::Nt4ClientPool,
+    publish_runtime: &mut LimelightPublishRuntime,
+) -> Result<(), String> {
     let settings = device_nt4::load_settings().await;
     if !(settings.enabled && settings.emulate_limelight_api) {
         publish_runtime.clear();
@@ -177,7 +181,7 @@ async fn reconcile_once(handles: &Arc<IpcHandles>, publish_runtime: &mut Limelig
         adapters.insert(runtime.id.table_name.clone(), runtime);
     }
 
-    let publish_outcome = publish_read_topics(&settings, publish_runtime, &mut adapters).await;
+    let publish_outcome = publish_read_topics(pool, &settings, publish_runtime, &mut adapters).await;
 
     let mut state = LIMELIGHT_STATE.write().await;
     state.emulate_enabled = true;
