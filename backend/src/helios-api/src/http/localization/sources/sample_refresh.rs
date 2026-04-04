@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
@@ -40,11 +40,6 @@ impl LocalizationStreamSampleRefreshState {
     }
 }
 
-fn localization_stream_sample_refreshes() -> &'static Mutex<LocalizationStreamSampleRefreshState> {
-    static STATE: OnceLock<Mutex<LocalizationStreamSampleRefreshState>> = OnceLock::new();
-    STATE.get_or_init(|| Mutex::new(LocalizationStreamSampleRefreshState::default()))
-}
-
 fn localization_stream_sample_key(stream_id: Uuid, output_key: &str) -> String {
     format!("{stream_id}:{}", output_key.trim().to_ascii_lowercase())
 }
@@ -53,17 +48,24 @@ fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|dur| dur.as_millis() as u64).unwrap_or(0)
 }
 
-pub(super) fn localization_stream_sample_needs_refresh(stream_id: Uuid, output_key: &str) -> bool {
-    localization_stream_sample_refreshes().lock().expect("localization stream sample refresh mutex poisoned").needs_refresh(stream_id, output_key, now_ms())
+#[derive(Default)]
+pub(crate) struct LocalizationStreamSampleRefreshRuntime {
+    state: Mutex<LocalizationStreamSampleRefreshState>,
 }
 
-pub(crate) fn localization_stream_sample_refresh_snapshot() -> crate::api_observability::LocalizationSampleRefreshSnapshot {
-    localization_stream_sample_refreshes().lock().expect("localization stream sample refresh mutex poisoned").snapshot()
+impl LocalizationStreamSampleRefreshRuntime {
+    pub(crate) fn needs_refresh(&self, stream_id: Uuid, output_key: &str) -> bool {
+        self.state.lock().expect("localization stream sample refresh mutex poisoned").needs_refresh(stream_id, output_key, now_ms())
+    }
+
+    pub(crate) fn snapshot(&self) -> crate::api_observability::LocalizationSampleRefreshSnapshot {
+        self.state.lock().expect("localization stream sample refresh mutex poisoned").snapshot()
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{LOCALIZATION_STREAM_SAMPLE_REFRESH_MS, LocalizationStreamSampleRefreshState, localization_stream_sample_key};
+    use super::{LOCALIZATION_STREAM_SAMPLE_REFRESH_MS, LocalizationStreamSampleRefreshRuntime, LocalizationStreamSampleRefreshState, localization_stream_sample_key};
     use uuid::Uuid;
 
     #[test]
@@ -88,5 +90,18 @@ mod tests {
 
         assert!(!state.refreshed_at_ms.contains_key(&localization_stream_sample_key(old_stream, "tag_poses")));
         assert!(state.refreshed_at_ms.contains_key(&localization_stream_sample_key(fresh_stream, "tag_poses")));
+    }
+
+    #[test]
+    fn runtime_exposes_snapshot_and_throttle_state() {
+        let runtime = LocalizationStreamSampleRefreshRuntime::default();
+        let stream_id = Uuid::nil();
+
+        assert!(runtime.needs_refresh(stream_id, "tag_poses"));
+        assert!(!runtime.needs_refresh(stream_id, "tag_poses"));
+
+        let snapshot = runtime.snapshot();
+        assert_eq!(snapshot.refresh_grants, 1);
+        assert_eq!(snapshot.throttled_requests, 1);
     }
 }

@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use uuid::Uuid;
 
-const ENV_SHMEM_DIR: &str = "HELIOS_SHMEM_DIR";
 pub(super) const PRIMARY_SHMEM_DIR: &str = "/dev/shm/helios";
 pub(super) const FALLBACK_SHMEM_DIR: &str = "/tmp/helios-shm";
 
@@ -69,14 +68,7 @@ fn preview_file_name(stream_id: Uuid) -> String {
 }
 
 fn env_shmem_root() -> Option<PathBuf> {
-    std::env::var(ENV_SHMEM_DIR).ok().and_then(|dir| {
-        let trimmed = dir.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(PathBuf::from(trimmed))
-        }
-    })
+    super::shmem_dir_override().cloned()
 }
 
 fn primary_shmem_root() -> PathBuf {

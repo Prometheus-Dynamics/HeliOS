@@ -34,7 +34,7 @@ pub(crate) async fn fetch_external_value(state: &AppState, source_id: &str, outp
 }
 
 pub(crate) async fn fetch_external_sample(state: &AppState, source_id: &str, output_key: &str) -> ApiResult<PipelineOutputSample> {
-    match helios_engine::localization::external::fetch_sample(source_id, output_key).await {
+    match state.services.runtime.localization_external_sources().fetch_sample(source_id, output_key).await {
         Ok(sample) => Ok(sample),
         Err(err) if source_id == IMU_EXTERNAL_ID && err == "external source not found" => fetch_device_imu_sample(state).await,
         Err(err) if err == "external source not found" && media_imu::is_media_imu_source_id(source_id) => media_imu::fetch_media_imu_sample(state, source_id, output_key).await,

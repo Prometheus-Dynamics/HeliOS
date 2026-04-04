@@ -1,7 +1,7 @@
 use crate::ipc::{EngineCommand, EngineErrorCode, EngineEvent};
 use crate::services::EngineServices;
 use crate::stream::read_latest_frame_async;
-use lib_runtime_policy::HELIOS_ENGINE_IPC_POLICY;
+use lib_runtime_policy::{HELIOS_ENGINE_IPC_POLICY, HELIOS_ENGINE_RUNTIME_FLAGS_POLICY};
 use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 use tokio::sync::RwLock;
@@ -13,6 +13,7 @@ use crate::daedalus_registry::build_daedalus_runtime_registry;
 pub struct EngineRuntime {
     pub services: EngineServices,
     node_registry_snapshot: RwLock<Option<crate::ipc::NodeRegistrySnapshot>>,
+    localization_pipeline: crate::localization::pipeline::LocalizationPipelineExecutor,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,21 +29,9 @@ const START_STREAM_TIMEOUT: Duration = Duration::from_secs(60);
 const STOP_STREAM_TIMEOUT: Duration = Duration::from_secs(30);
 const METRICS_TIMEOUT: Duration = Duration::from_secs(3);
 
-fn env_flag_enabled(var: &str, default_value: bool) -> bool {
-    let raw = match std::env::var(var) {
-        Ok(v) => v,
-        Err(_) => return default_value,
-    };
-    let v = raw.trim().to_ascii_lowercase();
-    if v.is_empty() {
-        return default_value;
-    }
-    matches!(v.as_str(), "1" | "true" | "yes" | "y" | "on" | "enabled")
-}
-
 fn cache_node_registry_snapshot_enabled() -> bool {
     static VALUE: OnceLock<bool> = OnceLock::new();
-    *VALUE.get_or_init(|| env_flag_enabled("HELIOS_ENGINE_CACHE_NODE_REGISTRY", false))
+    *VALUE.get_or_init(|| HELIOS_ENGINE_RUNTIME_FLAGS_POLICY.resolve().cache_node_registry_snapshot)
 }
 
 fn calibration_solve_timeout() -> Duration {
@@ -62,7 +51,7 @@ fn timeout_nack(command_id: lib_ipc::types::CommandId, reason: String) -> Engine
 
 impl EngineRuntime {
     pub fn new() -> Self {
-        Self { services: EngineServices::new(), node_registry_snapshot: RwLock::new(None) }
+        Self { services: EngineServices::new(), node_registry_snapshot: RwLock::new(None), localization_pipeline: crate::localization::pipeline::LocalizationPipelineExecutor::default() }
     }
 
     pub async fn subscribe_encoded(&self, stream_id: uuid::Uuid) -> crate::error::Result<tokio::sync::broadcast::Receiver<crate::stream::EncodedFrame>> {
@@ -137,7 +126,7 @@ impl EngineRuntime {
                         return EngineEvent::Nack { command_id, code: EngineErrorCode::InvalidInput, reason: format!("invalid localization pipeline status request: {err}"), retryable: false };
                     }
                 };
-                let response = crate::localization::pipeline::status(&request.profile_id).await;
+                let response = self.localization_pipeline.status(&request.profile_id).await;
                 match serde_json::to_value(response) {
                     Ok(response) => EngineEvent::LocalizationPipelineStatus { command_id, response: crate::ipc::JsonWire::from(response) },
                     Err(err) => EngineEvent::Nack { command_id, code: EngineErrorCode::Internal, reason: format!("failed to encode localization pipeline status: {err}"), retryable: false },
@@ -151,7 +140,7 @@ impl EngineRuntime {
                     }
                 };
                 let graph = localization_pipeline_graph_from_request(&request);
-                match crate::localization::pipeline::list_outputs(&request.profile, &graph).await {
+                match self.localization_pipeline.list_outputs(&request.profile, &graph).await {
                     Ok(outputs) => EngineEvent::LocalizationPipelineOutputs { command_id, outputs },
                     Err(reason) => EngineEvent::Nack { command_id, code: EngineErrorCode::InvalidInput, reason, retryable: false },
                 }
@@ -165,7 +154,7 @@ impl EngineRuntime {
                 };
                 let graph = localization_pipeline_sample_graph_from_request(&request);
                 let fetcher = localization_source_fetcher_from_values(request.source_values.clone());
-                match crate::localization::pipeline::sample_output(&fetcher, &request.profile, &request.sources, &graph, &request.output_key).await {
+                match self.localization_pipeline.sample_output(&fetcher, &request.profile, &request.sources, &graph, &request.output_key).await {
                     Ok(response) => match serde_json::to_value(response) {
                         Ok(response) => EngineEvent::LocalizationPipelineOutputSample { command_id, response: crate::ipc::JsonWire::from(response) },
                         Err(err) => EngineEvent::Nack { command_id, code: EngineErrorCode::Internal, reason: format!("failed to encode localization pipeline sample: {err}"), retryable: false },

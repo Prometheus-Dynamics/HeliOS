@@ -1,5 +1,6 @@
 mod registry;
 mod sampling;
+mod store;
 #[cfg(test)]
 mod tests;
 
@@ -8,6 +9,7 @@ pub(crate) use registry::{
     list_external_sources_snapshot, update_external_sample, upsert_external_source,
 };
 pub(crate) use sampling::{__path_sample_external_output, fetch_external_value, sample_external_output};
+pub(crate) use store::LocalizationExternalSourceRegistry;
 
 use axum::{
     Router,

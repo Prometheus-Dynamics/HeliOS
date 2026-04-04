@@ -2,6 +2,8 @@ use std::io;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use lib_runtime_policy::{ResolvedEngineFlamegraphPolicy, HELIOS_ENGINE_FLAMEGRAPH_POLICY};
+
 #[derive(Debug, Clone, Default)]
 pub struct FlamegraphCapture {
     pub path: String,
@@ -22,7 +24,7 @@ pub struct FlamegraphGuard;
 impl FlamegraphGuard {
     pub fn start(path: PathBuf) -> io::Result<Self> {
         let mut builder = pprof::ProfilerGuardBuilder::default();
-        let freq = std::env::var("HELIOS_PPROF_FREQ").ok().and_then(|v| v.parse::<i32>().ok()).filter(|v| *v > 0);
+        let freq = flamegraph_policy().frequency;
         if let Some(freq) = freq {
             builder = builder.frequency(freq);
         }
@@ -51,11 +53,16 @@ impl FlamegraphGuard {
     }
 }
 
+fn flamegraph_policy() -> &'static ResolvedEngineFlamegraphPolicy {
+    static VALUE: std::sync::OnceLock<ResolvedEngineFlamegraphPolicy> = std::sync::OnceLock::new();
+    VALUE.get_or_init(|| HELIOS_ENGINE_FLAMEGRAPH_POLICY.resolve())
+}
+
 pub fn build_flamegraph_path(call_idx: u64) -> PathBuf {
-    if let Ok(path) = std::env::var("HELIOS_PPROF_PATH") {
-        return PathBuf::from(path);
+    if let Some(path) = flamegraph_policy().path.as_ref() {
+        return path.clone();
     }
-    let dir = std::env::var("HELIOS_PPROF_DIR").map(PathBuf::from).unwrap_or_else(|_| std::env::temp_dir());
+    let dir = flamegraph_policy().dir.clone().unwrap_or_else(std::env::temp_dir);
     let ts = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
     dir.join(format!("helios-flamegraph-{call_idx}-{ts}.svg"))
 }

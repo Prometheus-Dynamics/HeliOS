@@ -317,7 +317,7 @@ pub async fn runtime(State(state): State<crate::http::AppState>) -> ApiResult<im
     let engine_ipc = map_engine_ipc_snapshot(state.engine.observability_snapshot());
     let localization = LocalizationObservabilitySnapshot {
         solve_cache: state.services.runtime.localization_solve_cache().snapshot().await,
-        sample_refresh: crate::http::localization::sources::localization_stream_sample_refresh_snapshot(),
+        sample_refresh: state.services.runtime.localization_sample_refresh().snapshot(),
     };
     let nt4 = Nt4ObservabilitySnapshot { pool: crate::nt4::pool().snapshot().await, bridge: crate::nt4::bridge::snapshot() };
     let imu = match sensors {

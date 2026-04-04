@@ -5,6 +5,8 @@ pub struct RuntimeCoordinationService {
     engine_guard: Arc<crate::engine_guard::EngineCrashGuardService>,
     resource_guard: Arc<crate::resource_guard::ResourceGuardRuntime>,
     localization_solve_cache: Arc<crate::http::localization::solve::LocalizationSolveCacheState>,
+    localization_sample_refresh: Arc<crate::http::localization::sources::LocalizationStreamSampleRefreshRuntime>,
+    localization_external_sources: Arc<crate::http::localization::external::LocalizationExternalSourceRegistry>,
 }
 
 impl RuntimeCoordinationService {
@@ -23,5 +25,13 @@ impl RuntimeCoordinationService {
 
     pub fn localization_solve_cache(&self) -> &crate::http::localization::solve::LocalizationSolveCacheState {
         self.localization_solve_cache.as_ref()
+    }
+
+    pub fn localization_sample_refresh(&self) -> &crate::http::localization::sources::LocalizationStreamSampleRefreshRuntime {
+        self.localization_sample_refresh.as_ref()
+    }
+
+    pub fn localization_external_sources(&self) -> &crate::http::localization::external::LocalizationExternalSourceRegistry {
+        self.localization_external_sources.as_ref()
     }
 }

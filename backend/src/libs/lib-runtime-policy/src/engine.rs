@@ -1,6 +1,7 @@
 use super::*;
 use std::io;
 use std::path::PathBuf;
+use std::time::Duration;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EngineExecutorBusyPolicy {
@@ -349,4 +350,117 @@ pub const HELIOS_ENGINE_DAEDALUS_ENV_OVERRIDE_POLICY: EngineDaedalusEnvOverrideP
     force_cpu: OptionalStringPolicy { env_var: "HELIOS_DAEDALUS_FORCE_CPU" },
     gpu_backend: OptionalStringPolicy { env_var: "HELIOS_DAEDALUS_GPU_BACKEND" },
     planner_enable_gpu: OptionalStringPolicy { env_var: "HELIOS_DAEDALUS_PLANNER_ENABLE_GPU" },
+};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EngineRuntimeFlagsPolicy {
+    pub cache_node_registry_snapshot: BoolPolicy,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResolvedEngineRuntimeFlagsPolicy {
+    pub cache_node_registry_snapshot: bool,
+}
+
+impl EngineRuntimeFlagsPolicy {
+    pub fn resolve(self) -> ResolvedEngineRuntimeFlagsPolicy {
+        ResolvedEngineRuntimeFlagsPolicy { cache_node_registry_snapshot: self.cache_node_registry_snapshot.resolve() }
+    }
+}
+
+pub const HELIOS_ENGINE_RUNTIME_FLAGS_POLICY: EngineRuntimeFlagsPolicy =
+    EngineRuntimeFlagsPolicy { cache_node_registry_snapshot: BoolPolicy { env_var: "HELIOS_ENGINE_CACHE_NODE_REGISTRY", default: false } };
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EngineUsbPowerRecoveryPolicy {
+    pub enabled: BoolPolicy,
+    pub trigger_attempts: BoundedU64Policy,
+    pub cooldown_ms: BoundedU64Policy,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedEngineUsbPowerRecoveryPolicy {
+    pub enabled: bool,
+    pub trigger_attempts: u32,
+    pub cooldown: Duration,
+}
+
+impl EngineUsbPowerRecoveryPolicy {
+    pub fn resolve(self) -> ResolvedEngineUsbPowerRecoveryPolicy {
+        ResolvedEngineUsbPowerRecoveryPolicy {
+            enabled: self.enabled.resolve(),
+            trigger_attempts: self.trigger_attempts.resolve().min(u64::from(u32::MAX)) as u32,
+            cooldown: Duration::from_millis(self.cooldown_ms.resolve()),
+        }
+    }
+}
+
+pub const HELIOS_ENGINE_USB_POWER_RECOVERY_POLICY: EngineUsbPowerRecoveryPolicy = EngineUsbPowerRecoveryPolicy {
+    enabled: BoolPolicy { env_var: "HELIOS_USB_POWER_RECOVERY_ENABLED", default: false },
+    trigger_attempts: BoundedU64Policy { env_var: "HELIOS_USB_POWER_RECOVERY_TRIGGER_ATTEMPTS", default: 4, min: 1, max: 20 },
+    cooldown_ms: BoundedU64Policy { env_var: "HELIOS_USB_POWER_RECOVERY_COOLDOWN_MS", default: 30_000, min: 1_000, max: 300_000 },
+};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EngineShmemPolicy {
+    pub dir: OptionalStringPolicy,
+    pub capacity_bytes: BoundedUsizePolicy,
+    pub read_timeout_ms: BoundedU64Policy,
+    pub read_retry_ms: BoundedU64Policy,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedEngineShmemPolicy {
+    pub dir: Option<PathBuf>,
+    pub capacity_bytes: usize,
+    pub read_timeout: Duration,
+    pub read_retry: Duration,
+}
+
+impl EngineShmemPolicy {
+    pub fn resolve(self) -> ResolvedEngineShmemPolicy {
+        ResolvedEngineShmemPolicy {
+            dir: self.dir.resolve().map(PathBuf::from),
+            capacity_bytes: self.capacity_bytes.resolve(),
+            read_timeout: Duration::from_millis(self.read_timeout_ms.resolve()),
+            read_retry: Duration::from_millis(self.read_retry_ms.resolve()),
+        }
+    }
+}
+
+pub const HELIOS_ENGINE_SHMEM_POLICY: EngineShmemPolicy = EngineShmemPolicy {
+    dir: OptionalStringPolicy { env_var: "HELIOS_SHMEM_DIR" },
+    capacity_bytes: BoundedUsizePolicy { env_var: "HELIOS_SHMEM_CAPACITY_BYTES", default: 8 * 1024 * 1024, min: 1, max: usize::MAX },
+    read_timeout_ms: BoundedU64Policy { env_var: "HELIOS_SHMEM_READ_TIMEOUT_MS", default: 1_000, min: 1, max: u64::MAX },
+    read_retry_ms: BoundedU64Policy { env_var: "HELIOS_SHMEM_READ_RETRY_MS", default: 25, min: 1, max: u64::MAX },
+};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EngineFlamegraphPolicy {
+    pub frequency: OptionalBoundedU64Policy,
+    pub path: OptionalStringPolicy,
+    pub dir: OptionalStringPolicy,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedEngineFlamegraphPolicy {
+    pub frequency: Option<i32>,
+    pub path: Option<PathBuf>,
+    pub dir: Option<PathBuf>,
+}
+
+impl EngineFlamegraphPolicy {
+    pub fn resolve(self) -> ResolvedEngineFlamegraphPolicy {
+        ResolvedEngineFlamegraphPolicy {
+            frequency: self.frequency.resolve().and_then(|value| i32::try_from(value).ok()),
+            path: self.path.resolve().map(PathBuf::from),
+            dir: self.dir.resolve().map(PathBuf::from),
+        }
+    }
+}
+
+pub const HELIOS_ENGINE_FLAMEGRAPH_POLICY: EngineFlamegraphPolicy = EngineFlamegraphPolicy {
+    frequency: OptionalBoundedU64Policy { env_var: "HELIOS_PPROF_FREQ", min: 1, max: i32::MAX as u64 },
+    path: OptionalStringPolicy { env_var: "HELIOS_PPROF_PATH" },
+    dir: OptionalStringPolicy { env_var: "HELIOS_PPROF_DIR" },
 };

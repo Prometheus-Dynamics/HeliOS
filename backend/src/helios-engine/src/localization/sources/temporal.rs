@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use lib_runtime_policy::{ResolvedEngineLocalizationTemporalPolicy, HELIOS_ENGINE_LOCALIZATION_TEMPORAL_POLICY};
 use nalgebra::{UnitQuaternion, Vector3};
 
 use super::*;
@@ -23,6 +24,11 @@ struct TagPairDistanceTemporalState {
 
 static TAG_POSE_TEMPORAL_STATE: OnceLock<Mutex<HashMap<String, TagPoseTemporalState>>> = OnceLock::new();
 static TAG_PAIR_DISTANCE_TEMPORAL_STATE: OnceLock<Mutex<HashMap<String, TagPairDistanceTemporalState>>> = OnceLock::new();
+
+fn temporal_policy() -> &'static ResolvedEngineLocalizationTemporalPolicy {
+    static VALUE: OnceLock<ResolvedEngineLocalizationTemporalPolicy> = OnceLock::new();
+    VALUE.get_or_init(|| HELIOS_ENGINE_LOCALIZATION_TEMPORAL_POLICY.resolve())
+}
 
 pub(super) fn pose_reliability_quality(camera_from_tag: &PoseTransform) -> f32 {
     if !camera_from_tag.translation.iter().all(|value| value.is_finite()) {
@@ -324,21 +330,15 @@ fn scale_alpha_for_dt(alpha: f64, dt_s: f64) -> f64 {
 }
 
 fn localization_pair_distance_translation_lock_enabled() -> bool {
-    std::env::var("HELIOS_LOCALIZATION_PAIR_DISTANCE_TRANSLATION_LOCK")
-        .ok()
-        .map(|raw| {
-            let value = raw.trim().to_ascii_lowercase();
-            value == "1" || value == "true" || value == "yes" || value == "on"
-        })
-        .unwrap_or(true)
+    temporal_policy().pair_distance_translation_lock_enabled
 }
 
 fn localization_pair_distance_translation_lock_strength() -> f64 {
-    std::env::var("HELIOS_LOCALIZATION_PAIR_DISTANCE_TRANSLATION_LOCK_STRENGTH").ok().and_then(|raw| raw.trim().parse::<f64>().ok()).map(|value| value.clamp(0.0, 1.0)).unwrap_or(0.62)
+    temporal_policy().pair_distance_translation_lock_strength
 }
 
 fn localization_pair_distance_translation_lock_max_shift_m() -> f64 {
-    std::env::var("HELIOS_LOCALIZATION_PAIR_DISTANCE_TRANSLATION_LOCK_MAX_SHIFT_M").ok().and_then(|raw| raw.trim().parse::<f64>().ok()).map(|value| value.clamp(0.02, 2.0)).unwrap_or(0.40)
+    temporal_policy().pair_distance_translation_lock_max_shift_m
 }
 
 pub(super) fn smooth_detection_tag_poses(source: &LocalizationSourceConfig, detections: &mut [LocalizationDetection]) {

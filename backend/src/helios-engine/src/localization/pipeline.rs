@@ -28,54 +28,56 @@ struct LocalizationPipelineRuntime {
     template_mtime_ms: Option<i64>,
 }
 
-static LOCALIZATION_PIPELINE: OnceLock<Mutex<LocalizationPipelineRuntime>> = OnceLock::new();
-
-fn pipeline_runtime() -> &'static Mutex<LocalizationPipelineRuntime> {
-    LOCALIZATION_PIPELINE.get_or_init(|| Mutex::new(LocalizationPipelineRuntime::default()))
+#[derive(Default)]
+pub struct LocalizationPipelineExecutor {
+    runtime: Mutex<LocalizationPipelineRuntime>,
 }
 
-pub async fn status(profile_id: &str) -> LocalizationPipelineStatus {
-    let runtime = pipeline_runtime().lock().await;
-    let matches_runtime = runtime.profile_id.as_deref() == Some(profile_id);
-    LocalizationPipelineStatus {
-        configured: true,
-        profile_id: Some(profile_id.to_string()),
-        last_error: matches_runtime.then(|| runtime.last_error.clone()).flatten(),
-        last_run_ms: matches_runtime.then_some(runtime.last_run_ms).flatten(),
+impl LocalizationPipelineExecutor {
+    pub async fn status(&self, profile_id: &str) -> LocalizationPipelineStatus {
+        let runtime = self.runtime.lock().await;
+        let matches_runtime = runtime.profile_id.as_deref() == Some(profile_id);
+        LocalizationPipelineStatus {
+            configured: true,
+            profile_id: Some(profile_id.to_string()),
+            last_error: matches_runtime.then(|| runtime.last_error.clone()).flatten(),
+            last_run_ms: matches_runtime.then_some(runtime.last_run_ms).flatten(),
+        }
     }
-}
 
-pub async fn list_outputs(profile: &LocalizationProfile, graph_doc: &LoadedPipelineGraph) -> Result<Vec<String>, String> {
-    let mut runtime = pipeline_runtime().lock().await;
-    ensure_graph(&mut runtime, profile, graph_doc).await?;
-    Ok(runtime.graph.as_ref().and_then(|graph| graph.host_output_ports()).unwrap_or_default())
-}
-
-pub async fn sample_output<F: LocalizationSourceFetcher>(
-    fetcher: &F,
-    profile: &LocalizationProfile,
-    sources: &[LocalizationSourceConfig],
-    graph_doc: &LoadedPipelineGraph,
-    output_key: &str,
-) -> Result<PipelineOutputSample, String> {
-    let mut runtime = pipeline_runtime().lock().await;
-    ensure_graph(&mut runtime, profile, graph_doc).await?;
-
-    let inputs = collect_inputs(fetcher, sources).await?;
-
-    let run_start = Instant::now();
-    if let Some(graph) = runtime.graph.as_ref() {
-        graph.set_pipeline_inputs(None, &inputs);
-        let _ = graph.process(dummy_image());
+    pub async fn list_outputs(&self, profile: &LocalizationProfile, graph_doc: &LoadedPipelineGraph) -> Result<Vec<String>, String> {
+        let mut runtime = self.runtime.lock().await;
+        ensure_graph(&mut runtime, profile, graph_doc).await?;
+        Ok(runtime.graph.as_ref().and_then(|graph| graph.host_output_ports()).unwrap_or_default())
     }
-    runtime.last_run_ms = Some(run_start.elapsed().as_secs_f64() * 1000.0);
 
-    let Some(graph) = runtime.graph.as_ref() else {
-        return Err("localization pipeline not initialized".to_string());
-    };
-    match graph.read_json_output(output_key, false) {
-        Some(value) => Ok(PipelineOutputSample { data_type: None, value }),
-        None => Err("output sample not available".to_string()),
+    pub async fn sample_output<F: LocalizationSourceFetcher>(
+        &self,
+        fetcher: &F,
+        profile: &LocalizationProfile,
+        sources: &[LocalizationSourceConfig],
+        graph_doc: &LoadedPipelineGraph,
+        output_key: &str,
+    ) -> Result<PipelineOutputSample, String> {
+        let mut runtime = self.runtime.lock().await;
+        ensure_graph(&mut runtime, profile, graph_doc).await?;
+
+        let inputs = collect_inputs(fetcher, sources).await?;
+
+        let run_start = Instant::now();
+        if let Some(graph) = runtime.graph.as_ref() {
+            graph.set_pipeline_inputs(None, &inputs);
+            let _ = graph.process(dummy_image());
+        }
+        runtime.last_run_ms = Some(run_start.elapsed().as_secs_f64() * 1000.0);
+
+        let Some(graph) = runtime.graph.as_ref() else {
+            return Err("localization pipeline not initialized".to_string());
+        };
+        match graph.read_json_output(output_key, false) {
+            Some(value) => Ok(PipelineOutputSample { data_type: None, value }),
+            None => Err("output sample not available".to_string()),
+        }
     }
 }
 

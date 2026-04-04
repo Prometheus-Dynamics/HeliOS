@@ -9,7 +9,6 @@ use uuid::Uuid;
 
 use super::ApiLocalizationSourceFetcher;
 use super::profile::fetch_profile_output;
-use super::sample_refresh::localization_stream_sample_needs_refresh;
 use crate::http::streams::util::{engine_error_body, map_client_error};
 use crate::http::{AppState, peers};
 use helios_engine::ipc::{EngineErrorCode, EngineEvent};
@@ -62,7 +61,7 @@ pub(super) async fn sample_profile_output(State(state): State<AppState>, Path((i
 
 pub(crate) async fn fetch_stream_output(state: &AppState, stream_id: &str, output_key: &str) -> Result<JsonValue, String> {
     let stream_uuid = Uuid::parse_str(stream_id).map_err(|_| "invalid stream id".to_string())?;
-    let fresh = localization_stream_sample_needs_refresh(stream_uuid, output_key);
+    let fresh = state.services.runtime.localization_sample_refresh().needs_refresh(stream_uuid, output_key);
     let event = match state.engine.get_graph_output_sample_event_with_mode(stream_uuid, output_key.to_string(), fresh).await {
         Ok(event) => event,
         Err(err) => return Err(err.to_string()),

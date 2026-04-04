@@ -1,8 +1,10 @@
 use std::sync::mpsc::{self, RecvTimeoutError, SyncSender, TryRecvError};
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use lib_runtime_policy::{ResolvedEngineUsbPowerRecoveryPolicy, HELIOS_ENGINE_USB_POWER_RECOVERY_POLICY};
 use std::sync::atomic::AtomicU64;
 use tokio::sync::broadcast::Sender;
 use tokio::sync::watch;
@@ -16,26 +18,18 @@ use crate::ipc::ControlId;
 use crate::stream::{EncodedFrame, StreamMetrics, StreamRunner};
 
 const COMMAND_IDLE_MIN: Duration = Duration::from_millis(5);
-const DEFAULT_USB_POWER_RECOVERY_TRIGGER_ATTEMPTS: u32 = 4;
-const DEFAULT_USB_POWER_RECOVERY_COOLDOWN_MS: u64 = 30_000;
 
-fn usb_power_recovery_enabled() -> bool {
-    std::env::var("HELIOS_USB_POWER_RECOVERY_ENABLED")
-        .ok()
-        .map(|raw| {
-            let normalized = raw.trim().to_ascii_lowercase();
-            matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
-        })
-        .unwrap_or(false)
+fn usb_power_recovery_policy() -> &'static ResolvedEngineUsbPowerRecoveryPolicy {
+    static VALUE: OnceLock<ResolvedEngineUsbPowerRecoveryPolicy> = OnceLock::new();
+    VALUE.get_or_init(|| HELIOS_ENGINE_USB_POWER_RECOVERY_POLICY.resolve())
 }
 
 fn usb_power_recovery_trigger_attempts() -> u32 {
-    std::env::var("HELIOS_USB_POWER_RECOVERY_TRIGGER_ATTEMPTS").ok().and_then(|raw| raw.parse::<u32>().ok()).unwrap_or(DEFAULT_USB_POWER_RECOVERY_TRIGGER_ATTEMPTS).clamp(1, 20)
+    usb_power_recovery_policy().trigger_attempts
 }
 
 fn usb_power_recovery_cooldown() -> Duration {
-    let millis = std::env::var("HELIOS_USB_POWER_RECOVERY_COOLDOWN_MS").ok().and_then(|raw| raw.parse::<u64>().ok()).unwrap_or(DEFAULT_USB_POWER_RECOVERY_COOLDOWN_MS).clamp(1_000, 300_000);
-    Duration::from_millis(millis)
+    usb_power_recovery_policy().cooldown
 }
 
 pub(crate) struct StreamContext {
@@ -167,7 +161,7 @@ pub(crate) fn run_stream_worker(mut runner: StreamRunner, command_rx: mpsc::Rece
     let mut no_demand_since: Option<Instant> = None;
     let mut restart_attempts = 0u32;
     let mut last_restart = Instant::now().checked_sub(Duration::from_secs(60)).unwrap_or_else(Instant::now);
-    let usb_recovery_enabled = usb_power_recovery_enabled();
+    let usb_recovery_enabled = usb_power_recovery_policy().enabled;
     let usb_recovery_attempts = usb_power_recovery_trigger_attempts();
     let usb_recovery_cooldown = usb_power_recovery_cooldown();
     let mut last_usb_recovery = Instant::now().checked_sub(usb_recovery_cooldown).unwrap_or_else(Instant::now);

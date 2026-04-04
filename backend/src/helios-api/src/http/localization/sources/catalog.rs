@@ -94,7 +94,7 @@ pub(super) async fn list_sources(State(state): State<AppState>) -> ApiResult<Jso
         out.extend(super::super::peers::sources::list_peer_sources(&peer).await);
     }
 
-    let external_sources = super::super::external::list_external_sources_snapshot().await;
+    let external_sources = super::super::external::list_external_sources_snapshot(&state).await;
     let has_external_imu = external_sources.iter().any(|source| source.id == IMU_EXTERNAL_ID);
     if !has_external_imu {
         out.push(LocalizationPipelineSource {

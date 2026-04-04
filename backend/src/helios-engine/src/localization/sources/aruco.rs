@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use lib_cv::modules::aruco::pose::{detections_to_tag_pose_output, TagPoseCalibration, TagPoseMethod};
 use lib_cv::modules::aruco::{ArucoDetection2D, DetectionPoseOutput};
 use lib_cv::modules::calibration::LensModel;
+use lib_runtime_policy::{ResolvedEngineLocalizationArucoPolicy, HELIOS_ENGINE_LOCALIZATION_ARUCO_POLICY};
 
 use super::{LocalizationSourceConfig, LocalizationSourceParser, SourceParse, SourceParserContext};
 
@@ -59,6 +60,11 @@ struct UndistortedFisheyeModelState {
 }
 
 static UNDISTORTED_FISHEYE_MODEL_STATE: OnceLock<Mutex<HashMap<String, UndistortedFisheyeModelState>>> = OnceLock::new();
+
+fn aruco_policy() -> &'static ResolvedEngineLocalizationArucoPolicy {
+    static VALUE: OnceLock<ResolvedEngineLocalizationArucoPolicy> = OnceLock::new();
+    VALUE.get_or_init(|| HELIOS_ENGINE_LOCALIZATION_ARUCO_POLICY.resolve())
+}
 
 fn detection_quality_queues(detections: &[ArucoDetection2D]) -> HashMap<(u32, u8), VecDeque<f32>> {
     let mut queues = HashMap::new();
@@ -309,27 +315,15 @@ fn scale_calibration_focal(mut calibration: TagPoseCalibration, scale: f64) -> T
 }
 
 fn localization_pose_scale_sweep_enabled() -> bool {
-    std::env::var("HELIOS_LOCALIZATION_POSE_SCALE_SWEEP")
-        .ok()
-        .map(|raw| {
-            let value = raw.trim().to_ascii_lowercase();
-            value == "1" || value == "true" || value == "yes" || value == "on"
-        })
-        .unwrap_or(false)
+    aruco_policy().pose_scale_sweep
 }
 
 fn localization_dual_model_eval_enabled() -> bool {
-    std::env::var("HELIOS_LOCALIZATION_DUAL_MODEL_EVAL")
-        .ok()
-        .map(|raw| {
-            let value = raw.trim().to_ascii_lowercase();
-            value == "1" || value == "true" || value == "yes" || value == "on"
-        })
-        .unwrap_or(false)
+    aruco_policy().dual_model_eval
 }
 
 fn localization_undistorted_fisheye_model_override() -> Option<UndistortedFisheyeModel> {
-    std::env::var("HELIOS_LOCALIZATION_UNDISTORTED_FISHEYE_MODEL").ok().and_then(|raw| match raw.trim().to_ascii_lowercase().as_str() {
+    aruco_policy().undistorted_fisheye_model.as_deref().and_then(|raw| match raw.trim().to_ascii_lowercase().as_str() {
         "native" | "fisheye" => Some(UndistortedFisheyeModel::Native),
         "pinhole" => Some(UndistortedFisheyeModel::Pinhole),
         "auto" | "" => None,
@@ -338,17 +332,13 @@ fn localization_undistorted_fisheye_model_override() -> Option<UndistortedFishey
 }
 
 fn localization_tag_pose_method() -> TagPoseMethod {
-    std::env::var("HELIOS_LOCALIZATION_TAG_POSE_METHOD")
-        .ok()
-        .and_then(|raw| match raw.trim().to_ascii_lowercase().as_str() {
-            "pnp" | "pnp_refine" | "pnp_iter" | "refine" => Some(TagPoseMethod::PnpRefine),
-            "homography_v2" | "homography2" | "h2" => Some(TagPoseMethod::HomographyV2),
-            "homography_v1" | "homography1" | "h1" => Some(TagPoseMethod::HomographyV1),
-            "auto" => Some(TagPoseMethod::Auto),
-            _ => None,
-        })
-        // Default to homography_v2 for better long-range stability in localization.
-        .unwrap_or(TagPoseMethod::HomographyV2)
+    match aruco_policy().tag_pose_method.trim().to_ascii_lowercase().as_str() {
+        "pnp" | "pnp_refine" | "pnp_iter" | "refine" => TagPoseMethod::PnpRefine,
+        "homography_v2" | "homography2" | "h2" => TagPoseMethod::HomographyV2,
+        "homography_v1" | "homography1" | "h1" => TagPoseMethod::HomographyV1,
+        "auto" => TagPoseMethod::Auto,
+        _ => TagPoseMethod::HomographyV2,
+    }
 }
 
 fn fisheye_model_state_key(source: &LocalizationSourceConfig) -> String {

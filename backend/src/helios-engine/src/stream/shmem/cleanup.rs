@@ -4,8 +4,6 @@ use uuid::Uuid;
 
 use super::paths::{FALLBACK_SHMEM_DIR, PRIMARY_SHMEM_DIR};
 
-const ENV_SHMEM_DIR: &str = "HELIOS_SHMEM_DIR";
-
 pub fn cleanup_stream_files(stream_id: Uuid) {
     for dir in candidate_dirs() {
         let _ = std::fs::remove_file(dir.join(frame_file_name(stream_id)));
@@ -54,11 +52,8 @@ fn cleanup_dir(dir: &Path) {
 fn candidate_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
 
-    if let Ok(raw) = std::env::var(ENV_SHMEM_DIR) {
-        let trimmed = raw.trim();
-        if !trimmed.is_empty() {
-            dirs.push(PathBuf::from(trimmed));
-        }
+    if let Some(dir) = super::shmem_dir_override() {
+        dirs.push(dir.clone());
     }
 
     dirs.push(PathBuf::from(PRIMARY_SHMEM_DIR));

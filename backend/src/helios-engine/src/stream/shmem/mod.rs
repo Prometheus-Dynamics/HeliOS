@@ -16,22 +16,16 @@ pub use reader::{read_latest_frame, read_latest_frame_with_header, read_latest_f
 pub use viewer::{preview_active_recently, touch_stream_preview, touch_stream_viewer, viewer_active_recently};
 pub use writer::ShmemWriter;
 
-use std::env;
+use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use crate::error::{Error, Result};
+use lib_runtime_policy::{ResolvedEngineShmemPolicy, HELIOS_ENGINE_SHMEM_POLICY};
 use styx::prelude::FourCc;
 
 const HEADER_SIZE: usize = 40; // magic(4) + seq(u64) + ts(u64) + len(u32) + w(u32) + h(u32) + fourcc(u32) + reserved(u32)
 const MAGIC: [u8; 4] = *b"SHM1";
-
-const DEFAULT_CAPACITY_BYTES: usize = 8 * 1024 * 1024; // 8MB payload buffer
-const DEFAULT_READ_TIMEOUT_MS: u64 = 1_000;
-const DEFAULT_READ_RETRY_MS: u64 = 25;
-
-const ENV_SHMEM_CAPACITY: &str = "HELIOS_SHMEM_CAPACITY_BYTES";
-const ENV_SHMEM_READ_TIMEOUT: &str = "HELIOS_SHMEM_READ_TIMEOUT_MS";
-const ENV_SHMEM_READ_RETRY: &str = "HELIOS_SHMEM_READ_RETRY_MS";
 
 /// Metadata describing the latest frame stored in the shmem map.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,18 +38,25 @@ pub struct ShmemFrameHeader {
     pub fourcc: FourCc,
 }
 
+fn shmem_policy() -> &'static ResolvedEngineShmemPolicy {
+    static VALUE: OnceLock<ResolvedEngineShmemPolicy> = OnceLock::new();
+    VALUE.get_or_init(|| HELIOS_ENGINE_SHMEM_POLICY.resolve())
+}
+
 fn shmem_capacity() -> usize {
-    env::var(ENV_SHMEM_CAPACITY).ok().and_then(|v| v.parse().ok()).filter(|v: &usize| *v > 0).unwrap_or(DEFAULT_CAPACITY_BYTES)
+    shmem_policy().capacity_bytes
 }
 
 fn shmem_read_timeout() -> Duration {
-    let millis = env::var(ENV_SHMEM_READ_TIMEOUT).ok().and_then(|v| v.parse().ok()).unwrap_or(DEFAULT_READ_TIMEOUT_MS);
-    Duration::from_millis(millis)
+    shmem_policy().read_timeout
 }
 
 fn shmem_read_retry() -> Duration {
-    let millis = env::var(ENV_SHMEM_READ_RETRY).ok().and_then(|v| v.parse().ok()).unwrap_or(DEFAULT_READ_RETRY_MS);
-    Duration::from_millis(millis)
+    shmem_policy().read_retry
+}
+
+pub(super) fn shmem_dir_override() -> Option<&'static PathBuf> {
+    shmem_policy().dir.as_ref()
 }
 
 fn build_header(seq: u64, ts: u64, len: u32, dims: (u32, u32), fourcc_u32: u32) -> [u8; HEADER_SIZE] {

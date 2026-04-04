@@ -35,6 +35,10 @@ pub struct SharedOwnerItem {
     #[serde(default)]
     pub pinned_revisions: BTreeMap<String, String>,
     #[serde(default)]
+    pub tracking_branch: String,
+    #[serde(default)]
+    pub tracking_branches: BTreeMap<String, String>,
+    #[serde(default)]
     pub notes: String,
 }
 
@@ -114,11 +118,11 @@ pub fn evaluate_guardrails(repo_root: &Path, config: &SharedOwnerConfig) -> Vec<
             continue;
         }
 
-        if item.pinned_revision.trim().is_empty() && item.pinned_revisions.is_empty() {
+        if item.pinned_revision.trim().is_empty() && item.pinned_revisions.is_empty() && item.tracking_branch.trim().is_empty() && item.tracking_branches.is_empty() {
             violations.push(Violation {
                 code: "SHARED_OWNER_PIN_MISSING".into(),
                 path: path.clone(),
-                message: format!("{} is marked landed for {} but has no pinned_revision", item.title, item.owner),
+                message: format!("{} is marked landed for {} but has no pinned revision or tracking branch expectation", item.title, item.owner),
             });
             continue;
         }
@@ -133,31 +137,43 @@ pub fn evaluate_guardrails(repo_root: &Path, config: &SharedOwnerConfig) -> Vec<
         };
 
         for dependency_name in &item.dependency_names {
-            let Some(expected_revision) = expected_revision(item, dependency_name) else {
+            let expected_revision = expected_revision(item, dependency_name);
+            let expected_branch = expected_branch(item, dependency_name);
+            if expected_revision.is_none() && expected_branch.is_none() {
                 violations.push(Violation {
                     code: "SHARED_OWNER_PIN_MISSING".into(),
                     path: path.clone(),
-                    message: format!("{} is marked landed for {} but has no pinned revision for dependency {}", item.title, item.owner, dependency_name),
+                    message: format!("{} is marked landed for {} but has no pinned revision or tracking branch for dependency {}", item.title, item.owner, dependency_name),
                 });
                 continue;
-            };
+            }
             match workspace_dependency(manifest, dependency_name) {
                 Some(dep) => {
                     let rev = dep.get("rev").and_then(toml::Value::as_str);
                     let branch = dep.get("branch").and_then(toml::Value::as_str);
-                    if rev != Some(expected_revision) {
-                        violations.push(Violation {
-                            code: "SHARED_OWNER_DEP_NOT_PINNED".into(),
-                            path: path.clone(),
-                            message: format!("{} expected workspace dependency {} to pin rev {}, found {:?}", item.title, dependency_name, expected_revision, rev),
-                        });
-                    }
-                    if branch.is_some() {
-                        violations.push(Violation {
-                            code: "SHARED_OWNER_DEP_STILL_TRACKS_BRANCH".into(),
-                            path: path.clone(),
-                            message: format!("{} still tracks branch for workspace dependency {}", item.title, dependency_name),
-                        });
+                    if let Some(expected_branch) = expected_branch {
+                        if branch != Some(expected_branch) {
+                            violations.push(Violation {
+                                code: "SHARED_OWNER_DEP_BRANCH_MISMATCH".into(),
+                                path: path.clone(),
+                                message: format!("{} expected workspace dependency {} to track branch {}, found {:?}", item.title, dependency_name, expected_branch, branch),
+                            });
+                        }
+                    } else if let Some(expected_revision) = expected_revision {
+                        if rev != Some(expected_revision) {
+                            violations.push(Violation {
+                                code: "SHARED_OWNER_DEP_NOT_PINNED".into(),
+                                path: path.clone(),
+                                message: format!("{} expected workspace dependency {} to pin rev {}, found {:?}", item.title, dependency_name, expected_revision, rev),
+                            });
+                        }
+                        if branch.is_some() {
+                            violations.push(Violation {
+                                code: "SHARED_OWNER_DEP_STILL_TRACKS_BRANCH".into(),
+                                path: path.clone(),
+                                message: format!("{} still tracks branch for workspace dependency {}", item.title, dependency_name),
+                            });
+                        }
                     }
                 }
                 None => violations.push(Violation {
@@ -192,6 +208,13 @@ fn expected_revision<'a>(item: &'a SharedOwnerItem, dependency_name: &str) -> Op
     item.pinned_revisions.get(dependency_name).map(String::as_str).or_else(|| {
         let revision = item.pinned_revision.trim();
         (!revision.is_empty()).then_some(revision)
+    })
+}
+
+fn expected_branch<'a>(item: &'a SharedOwnerItem, dependency_name: &str) -> Option<&'a str> {
+    item.tracking_branches.get(dependency_name).map(String::as_str).or_else(|| {
+        let branch = item.tracking_branch.trim();
+        (!branch.is_empty()).then_some(branch)
     })
 }
 
@@ -312,6 +335,8 @@ mod tests {
                 proof_reference: String::new(),
                 pinned_revision: "abcd".into(),
                 pinned_revisions: BTreeMap::new(),
+                tracking_branch: String::new(),
+                tracking_branches: BTreeMap::new(),
                 notes: String::new(),
             }],
         };
@@ -349,6 +374,8 @@ mod tests {
                 proof_reference: "https://example.com/pr/9".into(),
                 pinned_revision: "abcd".into(),
                 pinned_revisions: BTreeMap::new(),
+                tracking_branch: String::new(),
+                tracking_branches: BTreeMap::new(),
                 notes: String::new(),
             }],
         };
@@ -389,6 +416,8 @@ mod tests {
                 proof_reference: "https://example.com/pr/9".into(),
                 pinned_revision: "abcd".into(),
                 pinned_revisions: BTreeMap::new(),
+                tracking_branch: String::new(),
+                tracking_branches: BTreeMap::new(),
                 notes: String::new(),
             }],
         };
@@ -396,6 +425,44 @@ mod tests {
         let violations = evaluate_guardrails(temp_dir.path(), &config);
         assert_eq!(violations.len(), 1);
         assert_eq!(violations[0].code, "SHARED_OWNER_LOCAL_PATCH_PRESENT");
+    }
+
+    #[test]
+    fn evaluate_accepts_expected_branch_tracking_for_landed_item() {
+        let temp_dir = tempdir().expect("tempdir");
+        fs::create_dir_all(temp_dir.path().join("backend")).expect("mkdir backend");
+        fs::write(
+            temp_dir.path().join("backend/Cargo.toml"),
+            r#"
+                [workspace]
+
+                [workspace.dependencies]
+                styx = { git = "https://example.com/styx.git", branch = "main" }
+            "#,
+        )
+        .expect("write manifest");
+
+        let config = SharedOwnerConfig {
+            items: vec![SharedOwnerItem {
+                id: 9,
+                title: "Styx capture ownership".into(),
+                owner: "Styx".into(),
+                status: SharedOwnerStatus::Landed,
+                repo: Some("styx".into()),
+                dependency_names: vec!["styx".into()],
+                patch_table: None,
+                patch_dependency_names: Vec::new(),
+                proof_reference: "https://example.com/pr/9".into(),
+                pinned_revision: String::new(),
+                pinned_revisions: BTreeMap::new(),
+                tracking_branch: "main".into(),
+                tracking_branches: BTreeMap::new(),
+                notes: String::new(),
+            }],
+        };
+
+        let violations = evaluate_guardrails(temp_dir.path(), &config);
+        assert!(violations.is_empty());
     }
 
     #[test]
@@ -426,6 +493,8 @@ mod tests {
                 proof_reference: String::new(),
                 pinned_revision: String::new(),
                 pinned_revisions: BTreeMap::new(),
+                tracking_branch: String::new(),
+                tracking_branches: BTreeMap::new(),
                 notes: String::new(),
             }],
         };
@@ -464,6 +533,8 @@ mod tests {
                 proof_reference: "repo policy".into(),
                 pinned_revision: String::new(),
                 pinned_revisions: BTreeMap::from([(String::from("styx"), String::from("styxrev")), (String::from("daedalus"), String::from("dae-rev"))]),
+                tracking_branch: String::new(),
+                tracking_branches: BTreeMap::new(),
                 notes: String::new(),
             }],
         };
@@ -491,6 +562,8 @@ mod tests {
                 proof_reference: String::new(),
                 pinned_revision: String::new(),
                 pinned_revisions: BTreeMap::new(),
+                tracking_branch: String::new(),
+                tracking_branches: BTreeMap::new(),
                 notes: String::new(),
             }],
         };
