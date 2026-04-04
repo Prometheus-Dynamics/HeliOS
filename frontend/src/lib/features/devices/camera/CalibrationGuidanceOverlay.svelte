@@ -1,74 +1,35 @@
-<script lang="ts" module>
-  import { SvelteMap as ModuleSvelteMap } from 'svelte/reactivity';
-
-  type CaptureStatsState = {
-    total: number;
-    close: number;
-    far: number;
-    skew: number;
-    corners: number;
-    cornerMask: number;
-    cornersUnique: number;
-    coverageAvg: number;
-    coverageSamples: number;
-  };
-
-  type GuidedOverlayState = {
-    captureStats: CaptureStatsState;
-    coverage: Float32Array;
-    grid: { cols: number; rows: number };
-    lastCaptureAt: number;
-    lastGridKey: string;
-  };
-
-  const guidedStateByStream = new ModuleSvelteMap<string, GuidedOverlayState>();
-
-  function emptyCaptureStats(): CaptureStatsState {
-    return { total: 0, close: 0, far: 0, skew: 0, corners: 0, cornerMask: 0, cornersUnique: 0, coverageAvg: 0, coverageSamples: 0 };
-  }
-
-  function defaultGuidedState(): GuidedOverlayState {
-    return {
-      captureStats: emptyCaptureStats(),
-      coverage: new Float32Array(0),
-      grid: { cols: 12, rows: 8 },
-      lastCaptureAt: 0,
-      lastGridKey: ''
-    };
-  }
-
-  function getGuidedState(streamUuid: string): GuidedOverlayState {
-    const existing = guidedStateByStream.get(streamUuid);
-    if (existing) return existing;
-    const fresh = defaultGuidedState();
-    guidedStateByStream.set(streamUuid, fresh);
-    return fresh;
-  }
-
-  function clearGuidedState(streamUuid: string): void {
-    guidedStateByStream.delete(streamUuid);
-  }
-</script>
-
 <script lang="ts">
   import { onDestroy, untrack } from 'svelte';
   import { SvelteMap } from 'svelte/reactivity';
   import { PipelinesApi } from '$lib/api/pipelinesApi';
   import { loadOwnedStreamCapabilities } from '$lib/api/streamResources';
   import { StreamsApi } from '$lib/api/streamsApi';
-
-  type Corner2D = { x: number; y: number };
-
-  type Detection = {
-    id: number;
-    rotation: number;
-    corners: Corner2D[];
-  };
-
-  type GuidanceStatus = {
-    label: string;
-    tone: 'good' | 'warn' | 'bad';
-  };
+  import {
+    averageAreaRatio,
+    averageSkewRatio,
+    bitCount,
+    clamp,
+    colorForId,
+    computeGuidanceStatus,
+    cornerCoverageCount,
+    cornerCoverageMask,
+    detectionExtentRatio,
+    edgeCoverageCount,
+    frameCoverageRatio,
+    normalizeDetections,
+    quadArea,
+    scoreSnapshot,
+    statusColor,
+    type Corner2D,
+    type Detection,
+    type GuidanceStatus
+  } from './calibrationGuidanceAnalysis';
+  import {
+    clearGuidedState,
+    defaultCaptureStats,
+    getGuidedState,
+    type CaptureStatsState
+  } from './calibrationGuidanceStore';
 
   type ContentRect = { x: number; y: number; width: number; height: number };
 
@@ -108,30 +69,10 @@
   let loadedStream: string | null = null;
   let lastResetToken: number | null = null;
   let lastCaptureToken: number | null = null;
-  let captureStats = $state({
-    total: 0,
-    close: 0,
-    far: 0,
-    skew: 0,
-    corners: 0,
-    cornerMask: 0,
-    cornersUnique: 0,
-    coverageAvg: 0,
-    coverageSamples: 0
-  });
+  let captureStats = $state<CaptureStatsState>(defaultCaptureStats());
 
-  const MIN_TAGS = 2;
-  const TARGET_TAGS = 6;
-  const MIN_AREA_RATIO = 0.003;
-  const MAX_AREA_RATIO = 0.08;
-  const MIN_PLAUSIBLE_AREA_RATIO = 0.00006;
-  const MAX_PLAUSIBLE_AREA_RATIO = 0.35;
-  const MIN_PLAUSIBLE_SIDE_PX = 5;
-  const MIN_PLAUSIBLE_SIDE_RATIO = 0.18;
   const CLOSE_EXTENT_RATIO = 0.12;
   const FAR_EXTENT_RATIO = 0.05;
-  const MIN_FRAME_COVERAGE = 0.12;
-  const EDGE_PAD_RATIO = 0.08;
   const TARGET_CLOSE = 1;
   const TARGET_FAR = 1;
   const TARGET_SKEW = 1;
@@ -161,7 +102,7 @@
     if (token === lastResetToken) return;
     lastResetToken = token;
     resetCoverage(untrack(() => grid));
-    captureStats = { total: 0, close: 0, far: 0, skew: 0, corners: 0, cornerMask: 0, cornersUnique: 0, coverageAvg: 0, coverageSamples: 0 };
+    captureStats = defaultCaptureStats();
     lastCaptureAt = 0;
     if (props.streamUuid) {
       clearGuidedState(props.streamUuid);
@@ -226,299 +167,17 @@
     draw();
   });
 
-  function colorForId(id: number): string {
-    const hue = ((id * 2654435761) >>> 0) % 360;
-    return `hsl(${hue}, 92%, 60%)`;
-  }
-
-  function clamp(v: number, lo: number, hi: number): number {
-    return Math.max(lo, Math.min(hi, v));
-  }
-
-  function quadArea(corners: Array<{ x: number; y: number }>): number {
-    if (corners.length < 4) return 0;
-    let sum = 0;
-    for (let i = 0; i < corners.length; i++) {
-      const a = corners[i];
-      const b = corners[(i + 1) % corners.length];
-      sum += a.x * b.y - b.x * a.y;
-    }
-    return Math.abs(sum) / 2;
-  }
-
-  function sideLengths(corners: Corner2D[]): number[] {
-    if (corners.length < 4) return [];
-    const lengths: number[] = [];
-    for (let i = 0; i < 4; i++) {
-      const a = corners[i];
-      const b = corners[(i + 1) % 4];
-      const len = Math.hypot(a.x - b.x, a.y - b.y);
-      if (Number.isFinite(len) && len > 0) lengths.push(len);
-    }
-    return lengths;
-  }
-
-  function parseCorner(raw: unknown): Corner2D | null {
-    if (!raw || typeof raw !== 'object') return null;
-    const x = Number((raw as { x?: unknown }).x);
-    const y = Number((raw as { y?: unknown }).y);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-    return { x, y };
-  }
-
-  function isPlausibleDetection(corners: Corner2D[]): boolean {
-    if (corners.length < 4) return false;
-
-    const lengths = sideLengths(corners);
-    if (lengths.length < 4) return false;
-    const minLen = Math.min(...lengths);
-    const maxLen = Math.max(...lengths);
-    if (!Number.isFinite(minLen) || !Number.isFinite(maxLen) || minLen < MIN_PLAUSIBLE_SIDE_PX || maxLen <= 0) return false;
-    if ((minLen / maxLen) < MIN_PLAUSIBLE_SIDE_RATIO) return false;
-
-    const res = props.sourceResolution;
-    if (!res || !Number.isFinite(res.width) || !Number.isFinite(res.height) || res.width <= 0 || res.height <= 0) return true;
-
-    const boundX = res.width * 0.5;
-    const boundY = res.height * 0.5;
-    for (const c of corners) {
-      if (c.x < -boundX || c.x > res.width + boundX || c.y < -boundY || c.y > res.height + boundY) return false;
-    }
-
-    const area = quadArea(corners);
-    const frameArea = res.width * res.height;
-    if (!Number.isFinite(area) || !Number.isFinite(frameArea) || area <= 0 || frameArea <= 0) return false;
-    const areaRatio = area / frameArea;
-    if (areaRatio < MIN_PLAUSIBLE_AREA_RATIO || areaRatio > MAX_PLAUSIBLE_AREA_RATIO) return false;
-    return true;
-  }
-
-  function normalizeDetections(raw: unknown): Detection[] {
-    if (!Array.isArray(raw)) return [];
-    const out: Detection[] = [];
-    for (const item of raw) {
-      if (!item || typeof item !== 'object') continue;
-      const cornersRaw = Array.isArray((item as { corners?: unknown }).corners)
-        ? ((item as { corners: unknown[] }).corners)
-        : [];
-      const corners = cornersRaw.map(parseCorner).filter((corner): corner is Corner2D => corner !== null);
-      if (corners.length < 4) continue;
-      if (!isPlausibleDetection(corners)) continue;
-      const idRaw = Number((item as { id?: unknown }).id);
-      const rotationRaw = Number((item as { rotation?: unknown }).rotation ?? 0);
-      out.push({
-        id: Number.isFinite(idRaw) ? idRaw : 0,
-        rotation: Number.isFinite(rotationRaw) ? rotationRaw : 0,
-        corners
-      });
-    }
-    return out;
-  }
-
-  function frameCoverageRatio(dets: Detection[]): number {
-    const res = props.sourceResolution;
-    if (!res) return 0;
-    const visited = new Uint8Array(grid.cols * grid.rows);
-    const mark = (xPx: number, yPx: number) => {
-      const nx = clamp(xPx / res.width, 0, 0.999999);
-      const ny = clamp(yPx / res.height, 0, 0.999999);
-      const col = Math.floor(nx * grid.cols);
-      const row = Math.floor(ny * grid.rows);
-      const idx = row * grid.cols + col;
-      if (idx < 0 || idx >= visited.length) return;
-      visited[idx] = 1;
-    };
-    for (const det of dets) {
-      const corners = det.corners ?? [];
-      if (corners.length < 4) continue;
-      let cx = 0;
-      let cy = 0;
-      for (const c of corners) {
-        mark(c.x, c.y);
-        cx += c.x;
-        cy += c.y;
-      }
-      mark(cx / corners.length, cy / corners.length);
-    }
-    let count = 0;
-    for (const v of visited) if (v) count += 1;
-    return visited.length > 0 ? count / visited.length : 0;
-  }
-
-  function detectionExtentRatio(dets: Detection[]): number {
-    const res = props.sourceResolution;
-    if (!res) return 0;
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const det of dets) {
-      for (const c of det.corners ?? []) {
-        if (!Number.isFinite(c.x) || !Number.isFinite(c.y)) continue;
-        minX = Math.min(minX, c.x);
-        minY = Math.min(minY, c.y);
-        maxX = Math.max(maxX, c.x);
-        maxY = Math.max(maxY, c.y);
-      }
-    }
-    if (!Number.isFinite(minX) || !Number.isFinite(minY)) return 0;
-    const w = Math.max(0, maxX - minX);
-    const h = Math.max(0, maxY - minY);
-    const area = w * h;
-    const frame = res.width * res.height;
-    if (!Number.isFinite(area) || area <= 0 || !Number.isFinite(frame) || frame <= 0) return 0;
-    return area / frame;
-  }
-
-  function averageAreaRatio(dets: Detection[]): number {
-    const res = props.sourceResolution;
-    if (!res) return 0;
-    const imgArea = res.width * res.height;
-    if (!Number.isFinite(imgArea) || imgArea <= 0) return 0;
-    let sum = 0;
-    let count = 0;
-    for (const det of dets) {
-      const corners = det.corners ?? [];
-      if (corners.length < 4) continue;
-      const area = quadArea(corners);
-      if (!Number.isFinite(area) || area <= 0) continue;
-      sum += area;
-      count += 1;
-    }
-    if (count === 0) return 0;
-    return sum / count / imgArea;
-  }
-
-  function edgeCoverageCount(dets: Detection[]): number {
-    const res = props.sourceResolution;
-    if (!res) return 0;
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const det of dets) {
-      for (const c of det.corners ?? []) {
-        if (!Number.isFinite(c.x) || !Number.isFinite(c.y)) continue;
-        minX = Math.min(minX, c.x);
-        minY = Math.min(minY, c.y);
-        maxX = Math.max(maxX, c.x);
-        maxY = Math.max(maxY, c.y);
-      }
-    }
-    if (!Number.isFinite(minX) || !Number.isFinite(minY)) return 0;
-    const left = minX <= res.width * EDGE_PAD_RATIO;
-    const right = maxX >= res.width * (1 - EDGE_PAD_RATIO);
-    const top = minY <= res.height * EDGE_PAD_RATIO;
-    const bottom = maxY >= res.height * (1 - EDGE_PAD_RATIO);
-    return Number(left) + Number(right) + Number(top) + Number(bottom);
-  }
-
-  function cornerCoverageCount(dets: Detection[]): number {
-    const res = props.sourceResolution;
-    if (!res) return 0;
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const det of dets) {
-      for (const c of det.corners ?? []) {
-        if (!Number.isFinite(c.x) || !Number.isFinite(c.y)) continue;
-        minX = Math.min(minX, c.x);
-        minY = Math.min(minY, c.y);
-        maxX = Math.max(maxX, c.x);
-        maxY = Math.max(maxY, c.y);
-      }
-    }
-    if (!Number.isFinite(minX) || !Number.isFinite(minY)) return 0;
-    const left = minX <= res.width * EDGE_PAD_RATIO;
-    const right = maxX >= res.width * (1 - EDGE_PAD_RATIO);
-    const top = minY <= res.height * EDGE_PAD_RATIO;
-    const bottom = maxY >= res.height * (1 - EDGE_PAD_RATIO);
-    let corners = 0;
-    if (left && top) corners += 1;
-    if (left && bottom) corners += 1;
-    if (right && top) corners += 1;
-    if (right && bottom) corners += 1;
-    return corners;
-  }
-
-  function cornerCoverageMask(dets: Detection[]): number {
-    const res = props.sourceResolution;
-    if (!res) return 0;
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const det of dets) {
-      for (const c of det.corners ?? []) {
-        if (!Number.isFinite(c.x) || !Number.isFinite(c.y)) continue;
-        minX = Math.min(minX, c.x);
-        minY = Math.min(minY, c.y);
-        maxX = Math.max(maxX, c.x);
-        maxY = Math.max(maxY, c.y);
-      }
-    }
-    if (!Number.isFinite(minX) || !Number.isFinite(minY)) return 0;
-    const left = minX <= res.width * EDGE_PAD_RATIO;
-    const right = maxX >= res.width * (1 - EDGE_PAD_RATIO);
-    const top = minY <= res.height * EDGE_PAD_RATIO;
-    const bottom = maxY >= res.height * (1 - EDGE_PAD_RATIO);
-    let mask = 0;
-    if (left && top) mask |= 1; // TL
-    if (right && top) mask |= 2; // TR
-    if (left && bottom) mask |= 4; // BL
-    if (right && bottom) mask |= 8; // BR
-    return mask;
-  }
-
-  function bitCount(mask: number): number {
-    let count = 0;
-    let value = mask >>> 0;
-    while (value) {
-      count += value & 1;
-      value >>>= 1;
-    }
-    return count;
-  }
-
-  function averageSkewRatio(dets: Detection[]): number {
-    if (!dets.length) return 1;
-    let sum = 0;
-    let count = 0;
-    for (const det of dets) {
-      const corners = det.corners ?? [];
-      if (corners.length < 4) continue;
-      const lengths: number[] = [];
-      for (let i = 0; i < 4; i++) {
-        const a = corners[i];
-        const b = corners[(i + 1) % 4];
-        const dx = a.x - b.x;
-        const dy = a.y - b.y;
-        const len = Math.hypot(dx, dy);
-        if (Number.isFinite(len) && len > 0) lengths.push(len);
-      }
-      if (lengths.length < 4) continue;
-      const min = Math.min(...lengths);
-      const max = Math.max(...lengths);
-      if (max <= 0) continue;
-      sum += min / max;
-      count += 1;
-    }
-    if (count === 0) return 1;
-    return sum / count;
-  }
-
   function updateCaptureStats(dets: Detection[], countIfEmpty: boolean): void {
-    const frameCoverage = frameCoverageRatio(dets);
-    const extentRatio = detectionExtentRatio(dets);
-    const corners = cornerCoverageCount(dets);
+    const frameCoverage = frameCoverageRatio(dets, props.sourceResolution, grid);
+    const extentRatio = detectionExtentRatio(dets, props.sourceResolution);
+    const corners = cornerCoverageCount(dets, props.sourceResolution);
     const skewRatio = averageSkewRatio(dets);
 
     const close = extentRatio >= CLOSE_EXTENT_RATIO;
     const far = extentRatio > 0 && extentRatio < FAR_EXTENT_RATIO;
     const skew = skewRatio < 0.8;
     const hitCorners = corners > 0;
-    const nextCornerMask = captureStats.cornerMask | cornerCoverageMask(dets);
+    const nextCornerMask = captureStats.cornerMask | cornerCoverageMask(dets, props.sourceResolution);
     const nextCornersUnique = bitCount(nextCornerMask);
 
     const hasDetections = dets.length > 0;
@@ -549,44 +208,6 @@
       return lastNonEmptyDetections;
     }
     return lastDetections;
-  }
-
-  function sizeScoreFromRatio(ratio: number): number {
-    if (!Number.isFinite(ratio) || ratio <= 0) return 0;
-    if (ratio < MIN_AREA_RATIO) return clamp(ratio / MIN_AREA_RATIO, 0, 1);
-    if (ratio > MAX_AREA_RATIO) return clamp(MAX_AREA_RATIO / ratio, 0, 1);
-    return 1;
-  }
-
-  function computeGuidanceStatus(dets: Detection[]): GuidanceStatus {
-    const tags = dets.length;
-    if (tags === 0) return { label: 'No tags detected', tone: 'bad' };
-
-    const extentRatio = detectionExtentRatio(dets);
-    const far = extentRatio > 0 && extentRatio < FAR_EXTENT_RATIO * 0.8;
-    const close = extentRatio > CLOSE_EXTENT_RATIO * 1.2;
-    if (far) return { label: 'Move closer', tone: 'warn' };
-    if (close) return { label: 'Move farther', tone: 'warn' };
-    if (tags < MIN_TAGS) return { label: 'Need more tags in view', tone: 'warn' };
-    return { label: 'Capture a snapshot', tone: 'good' };
-  }
-
-  function scoreSnapshot(dets: Detection[], avgArea: number, coverageRatio: number, edges: number): number {
-    const tagScore = clamp(dets.length / TARGET_TAGS, 0, 1);
-    const sizeScore = sizeScoreFromRatio(avgArea);
-    const coverageScore = clamp(coverageRatio / Math.max(MIN_FRAME_COVERAGE, 0.01), 0, 1);
-    const edgeScore = clamp(edges / 4, 0, 1);
-    return clamp(tagScore * 0.35 + sizeScore * 0.3 + coverageScore * 0.25 + edgeScore * 0.1, 0, 1);
-  }
-
-  function statusColor(tone: GuidanceStatus['tone']): { fill: string; stroke: string; text: string } {
-    if (tone === 'good') {
-      return { fill: 'rgba(24, 180, 90, 0.75)', stroke: 'rgba(140, 255, 185, 0.8)', text: 'rgba(255,255,255,0.98)' };
-    }
-    if (tone === 'warn') {
-      return { fill: 'rgba(245, 158, 11, 0.8)', stroke: 'rgba(255, 226, 140, 0.8)', text: 'rgba(18,18,18,0.95)' };
-    }
-    return { fill: 'rgba(239, 68, 68, 0.85)', stroke: 'rgba(255, 150, 150, 0.85)', text: 'rgba(255,255,255,0.98)' };
   }
 
   function setCanvasSize(): void {
@@ -776,11 +397,11 @@
     ctx2d.fillText(line1, textX, textY);
     ctx2d.fillText(line2, textX, textY + hudFont + lineGap);
 
-    const avgArea = averageAreaRatio(lastDetections);
-    const frameCoverage = frameCoverageRatio(lastDetections);
-    const edges = edgeCoverageCount(lastDetections);
+    const avgArea = averageAreaRatio(lastDetections, props.sourceResolution);
+    const frameCoverage = frameCoverageRatio(lastDetections, props.sourceResolution, grid);
+    const edges = edgeCoverageCount(lastDetections, props.sourceResolution);
     const score = scoreSnapshot(lastDetections, avgArea, frameCoverage, edges);
-    const status = computeGuidanceStatus(lastDetections);
+    const status = computeGuidanceStatus(lastDetections, props.sourceResolution);
 
     const hue = Math.round(10 + score * 110);
     const borderColor = `hsla(${hue}, 85%, 55%, 0.75)`;
@@ -1024,7 +645,7 @@
             )
               ? ((value as { detections: unknown[] }).detections)
               : [];
-      const dets = normalizeDetections(detsRaw);
+      const dets = normalizeDetections(detsRaw, props.sourceResolution);
       if (dets.length) {
         lastNonEmptyDetections = dets;
         lastNonEmptyAt = Date.now();
