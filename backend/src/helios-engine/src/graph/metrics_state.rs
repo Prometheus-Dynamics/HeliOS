@@ -27,9 +27,25 @@ impl TypedHostOutputSample {
 
     pub(super) fn size_bytes(&self) -> u64 {
         match self {
-            Self::ArucoDetections(detections) => serde_json::to_vec(detections.as_ref()).map(|bytes| bytes.len() as u64).unwrap_or(0),
+            // Sample-cache metrics are retained working-set numbers, not wire-format bytes. Use a
+            // direct in-memory estimate here so pipeline metrics do not serialize detections to
+            // JSON on every snapshot just to approximate cache pressure.
+            Self::ArucoDetections(detections) => aruco_detections_retained_bytes(detections),
         }
     }
+}
+
+fn aruco_detections_retained_bytes(detections: &Arc<Vec<ArucoDetection2D>>) -> u64 {
+    let base = std::mem::size_of::<Vec<ArucoDetection2D>>() as u64 + detections.capacity() as u64 * std::mem::size_of::<ArucoDetection2D>() as u64;
+    base + detections.iter().map(aruco_detection_nested_bytes).sum::<u64>()
+}
+
+fn aruco_detection_nested_bytes(detection: &ArucoDetection2D) -> u64 {
+    detection.bits.as_ref().map(aruco_bit_grid_bytes).unwrap_or(0)
+}
+
+fn aruco_bit_grid_bytes(bits: &lib_cv::modules::aruco::ArucoBitGrid) -> u64 {
+    bits.rows.capacity() as u64 * std::mem::size_of::<String>() as u64 + bits.rows.iter().map(|row| row.capacity() as u64).sum::<u64>()
 }
 
 impl GraphImageWorkingSetTracker {

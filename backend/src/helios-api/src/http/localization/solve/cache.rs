@@ -1,15 +1,15 @@
 use helios_engine::localization::types::LocalizationSolveResponse;
 use lib_runtime_policy::HELIOS_API_LOCALIZATION_POLICY;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::RwLock;
 
-#[derive(Clone)]
 struct CachedLocalizationSolveResponse {
-    signature: Vec<u8>,
-    response: LocalizationSolveResponse,
-    last_access_tick: u64,
+    signature: Box<[u8]>,
+    response: Arc<LocalizationSolveResponse>,
+    last_access_tick: AtomicU64,
 }
 
 #[derive(Default)]
@@ -25,9 +25,9 @@ pub(crate) struct LocalizationSolveCacheState {
 impl LocalizationSolveCacheState {
     pub(crate) async fn get_matching(&self, key: &str, signature: &[u8]) -> Option<LocalizationSolveResponse> {
         let access_tick = self.next_access_tick();
-        let response = self.entries.write().await.get_mut(key).filter(|entry| entry.signature == signature).map(|entry| {
-            entry.last_access_tick = access_tick;
-            entry.response.clone()
+        let response = self.entries.read().await.get(key).filter(|entry| entry.signature.as_ref() == signature).map(|entry| {
+            entry.last_access_tick.store(access_tick, Ordering::Relaxed);
+            entry.response.as_ref().clone()
         });
         if response.is_some() {
             self.hits.fetch_add(1, Ordering::Relaxed);
@@ -42,12 +42,12 @@ impl LocalizationSolveCacheState {
         let mut entries = self.entries.write().await;
         if !entries.contains_key(&key)
             && entries.len() >= localization_solve_cache_entry_limit()
-            && let Some(evict_key) = entries.iter().min_by_key(|(_, entry)| entry.last_access_tick).map(|(key, _)| key.clone())
+            && let Some(evict_key) = entries.iter().min_by_key(|(_, entry)| entry.last_access_tick.load(Ordering::Relaxed)).map(|(key, _)| key.clone())
         {
             entries.remove(&evict_key);
             self.evictions.fetch_add(1, Ordering::Relaxed);
         }
-        entries.insert(key, CachedLocalizationSolveResponse { signature, response, last_access_tick: access_tick });
+        entries.insert(key, CachedLocalizationSolveResponse { signature: signature.into_boxed_slice(), response: Arc::new(response), last_access_tick: AtomicU64::new(access_tick) });
         self.inserts.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -90,5 +90,24 @@ mod tests {
         assert_eq!(snapshot.entries as usize, localization_solve_cache_entry_limit());
         assert_eq!(snapshot.evictions, 1);
         assert!(cache.get_matching("profile-0", &[0]).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn localization_solve_cache_hit_refreshes_lru_order_before_eviction() {
+        let cache = LocalizationSolveCacheState::default();
+        let limit = localization_solve_cache_entry_limit();
+        if limit < 2 {
+            return;
+        }
+
+        for idx in 0..limit {
+            cache.insert(format!("profile-{idx}"), vec![idx as u8], response()).await;
+        }
+
+        assert!(cache.get_matching("profile-0", &[0]).await.is_some());
+        cache.insert(format!("profile-{limit}"), vec![limit as u8], response()).await;
+
+        assert!(cache.get_matching("profile-0", &[0]).await.is_some());
+        assert!(cache.get_matching("profile-1", &[1]).await.is_none());
     }
 }

@@ -1,4 +1,6 @@
 use super::*;
+use lib_cv::Point;
+use lib_cv::modules::aruco::{ArucoBitGrid, ArucoDetection2D};
 
 #[test]
 fn demand_driven_sinks_skip_non_preview_image_outputs() {
@@ -315,4 +317,34 @@ fn rolling_graph_metrics_release_idle_retention_clears_samples_but_keeps_warning
     assert!(metrics.edge_samples.is_empty());
     assert_eq!(metrics.warnings.len(), 1);
     assert_eq!(metrics.warnings.back().map(|(_, msg)| msg.as_str()), Some("keep me"));
+}
+
+#[test]
+fn typed_host_output_sample_size_bytes_tracks_retained_detection_storage() {
+    let base_detection = ArucoDetection2D {
+        id: 1,
+        rotation: 0,
+        corners: [Point::from((0.0, 0.0)), Point::from((1.0, 0.0)), Point::from((1.0, 1.0)), Point::from((0.0, 1.0))],
+        score: Some(0.9),
+        best_distance: Some(1),
+        second_distance: Some(2),
+        border_mismatches: Some(0),
+        contrast_range: Some(0.5),
+        border_width: Some(1),
+        data_width: Some(6),
+        bits: None,
+    };
+    let base_bytes = super::super::TypedHostOutputSample::ArucoDetections(std::sync::Arc::new(vec![base_detection.clone()])).size_bytes();
+
+    let mut reserved = Vec::with_capacity(4);
+    reserved.push(base_detection.clone());
+    let reserved_bytes = super::super::TypedHostOutputSample::ArucoDetections(std::sync::Arc::new(reserved)).size_bytes();
+
+    let mut with_bits_detection = base_detection;
+    with_bits_detection.bits = Some(ArucoBitGrid { width: 6, border: 1, rows: vec!["010101".to_string(); 6] });
+    let with_bits = super::super::TypedHostOutputSample::ArucoDetections(std::sync::Arc::new(vec![with_bits_detection])).size_bytes();
+
+    assert!(reserved_bytes > base_bytes);
+    assert!(with_bits > base_bytes);
+    assert!(reserved_bytes >= (std::mem::size_of::<Vec<ArucoDetection2D>>() + 4 * std::mem::size_of::<ArucoDetection2D>()) as u64);
 }
