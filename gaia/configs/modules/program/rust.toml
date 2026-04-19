@@ -13,13 +13,26 @@ build_command = ["cargo", "build", "-p", "helios-api", "--bin", "helios-api", "-
 output_path = "../.gaia-target/aarch64-linux/aarch64-unknown-linux-gnu/release/helios-api"
 
 [[rust.artifacts]]
-id = "helios-api-tools"
-package = "helios-api"
+id = "helios-diagnostics"
+package = "helios-diagnostics"
 kind = "bin"
 profile = "aarch64-linux"
 mode = "auto"
-build_command = ["cargo", "build", "-p", "helios-api", "--bin", "helios-api-tools", "--release", "--target", "aarch64-unknown-linux-gnu"]
-output_path = "../.gaia-target/aarch64-linux/aarch64-unknown-linux-gnu/release/helios-api-tools"
+
+[[rust.artifacts]]
+id = "orion-node"
+package = "orion-node"
+bin = "orion-node"
+kind = "bin"
+profile = "aarch64-linux"
+mode = "auto"
+source = { kind = "git", repo = "https://github.com/Prometheus-Dynamics/Orion.git", ref = "main" }
+
+[rust.artifacts.cargo.profile]
+lto = "fat"
+codegen_units = 1
+opt_level = "z"
+strip = "symbols"
 
 [[rust.artifacts]]
 id = "helios-engine"
@@ -36,22 +49,8 @@ profile = "aarch64-linux"
 mode = "auto"
 
 [[rust.artifacts]]
-id = "helios-usb-recoveryd"
-package = "helios-usb-recoveryd"
-kind = "bin"
-profile = "aarch64-linux"
-mode = "auto"
-
-[[rust.artifacts]]
 id = "helios-peripherals"
 package = "helios-peripherals"
-kind = "bin"
-profile = "aarch64-linux"
-mode = "auto"
-
-[[rust.artifacts]]
-id = "helios-boot-buttond"
-package = "helios-boot-buttond"
 kind = "bin"
 profile = "aarch64-linux"
 mode = "auto"
@@ -60,33 +59,5 @@ mode = "auto"
 id = "helios-provision"
 package = "helios-provision"
 kind = "bin"
-profile = "aarch64-linux"
-mode = "auto"
-
-[[rust.artifacts]]
-id = "daedalus-cv"
-package = "helios-daedalus-cv-plugin"
-kind = "cdylib"
-profile = "aarch64-linux"
-mode = "auto"
-
-[[rust.artifacts]]
-id = "daedalus-ai"
-package = "helios-daedalus-ai-plugin"
-kind = "cdylib"
-profile = "aarch64-linux"
-mode = "auto"
-
-[[rust.artifacts]]
-id = "daedalus-nt4"
-package = "helios-daedalus-nt4-plugin"
-kind = "cdylib"
-profile = "aarch64-linux"
-mode = "auto"
-
-[[rust.artifacts]]
-id = "daedalus-led"
-package = "helios-daedalus-led-plugin"
-kind = "cdylib"
 profile = "aarch64-linux"
 mode = "auto"
