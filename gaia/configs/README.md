@@ -1,63 +1,35 @@
-# Configuration Layout
+# HeliOS Gaia Configs
 
-Active build entrypoints live in `configs/builds/`.
+Use `configs/builds/` for concrete build entrypoints. Everything else under
+`configs/` is a reusable layer imported by those builds.
 
-- `builds/` – top-level build definitions (currently `HeliOS-cm5.toml`).
-- `workspace/` – workspace-level defaults (`root_dir`, `build_dir`, `out_dir`, path aliases, cleanup mode).
-- `distros/` – distro composition (HeliOS module imports).
-- `platforms/` – board/CPU platform overlays (Raspberry Pi CM5 config).
-- `modules/` – reusable module configs for `buildroot`, `program`, and `stage`.
-- `env/` – imported environment sets used by staged services.
+## Build Entrypoints
 
-`configs/` is TOML-centric. Non-TOML runtime/build assets live under `assets/`
-(Buildroot tree, services, overlays, templates, SDK cache, etc.).
+- `builds/base-os-cm5.toml`: minimal CM5 OS image
+- `builds/base-os-cm4.toml`: minimal CM4 OS image
+- `builds/base-os-generic-aarch64-linux.toml`: minimal generic aarch64 Linux image
+- `builds/full-cm5.toml`: full CM5 appliance image
+- `builds/full-cm4.toml`: full CM4 appliance image
+- `builds/full-generic-aarch64-linux.toml`: full generic aarch64 Linux image
 
-## Path Resolution
+From this `gaia/` directory, Gaia can resolve a build by short name:
 
-Path-like fields now resolve in this order:
-- `@alias/...` from `[workspace.paths]` (plus built-ins: `@root`, `@build`, `@out`)
-- absolute path
-- relative path under `[workspace].root_dir` (default: current working directory)
-
-Example:
-
-```toml
-[workspace]
-root_dir = "."
-build_dir = "build"
-out_dir = "output"
-
-[workspace.paths]
-assets = "assets"
-packages = "assets/buildroot/packages"
-helios = ".."
+```bash
+gaia tui base-os-cm5
+gaia validate full-cm5
+gaia run full-cm5
 ```
 
-Useful `buildroot` output controls live in `configs/modules/buildroot/base.toml`:
-- `collect_out_dir` (where collected images are copied),
-- `shrink_ext` (shrink copied ext rootfs images),
-- `archive_format`/`archive_mode`/`archive_name` (create archives, including flashable `img.xz`),
-- `report`/`report_hashes` (emit `image-report.json` with sizes and hashes).
+Running `gaia tui` without a build opens the TUI on the first build entrypoint
+and lets you switch between entries in `configs/builds/`.
 
-Build output paths support templates:
-- `{build}` -> build filename stem (for `configs/builds/HeliOS-cm5.toml`, this is `HeliOS-cm5`)
-- `{version}` -> `[build].version` from the build file
+## Layer Directories
 
-Example:
-
-```toml
-[build]
-version = "1.20250915"
-
-[buildroot]
-collect_out_dir = "output/{build}/{version}/images"
-archive_mode = "image"
-archive_format = "img.xz"
-archive_name = "{build}-{version}-sdcard"
-```
-
-The current CM5 build file is:
-- `configs/builds/HeliOS-cm5.toml`
-
-It produces the squashfs/overlay image used for both release and live-deploy
-development workflows.
+- `workspace/`: workspace, output, provider, execution, and failure defaults
+- `os/`: base OS and image output mode layers
+- `platform-families/`: shared platform-family layers
+- `targets/`: thin target selections
+- `layers/`: reusable compositions
+- `hardware/`, `network/`, `identity/`, `storage/`: domain layers
+- `payloads/`, `runtime-config/`, `runtime-services/`: application/runtime layers
+- `ops/`: diagnostics and maintenance layers
