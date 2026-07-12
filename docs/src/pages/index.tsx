@@ -78,8 +78,8 @@ function HomepageHeader() {
             <span className={styles.heroPanelFooterDot} aria-hidden="true">
               ·
             </span>
-            <Link className={styles.heroPanelFooterLink} to="/guides/create-your-first-stream">
-              first stream
+            <Link className={styles.heroPanelFooterLink} to="/os/pipelines/overview">
+              pipelines
             </Link>
           </div>
           <div className={styles.heroPulse} aria-hidden="true" />

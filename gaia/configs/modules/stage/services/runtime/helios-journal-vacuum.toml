@@ -1,8 +1,0 @@
-[units."helios-journal-vacuum"]
-enabled = true
-src = "assets/services/systemd/helios-journal-vacuum.service"
-targets = ["multi-user"]
-assets = [
-  { src = "assets/services/systemd/60-helios-journald-memory.conf", dst = "/etc/systemd/journald.conf.d/60-helios-memory.conf", mode = 420 },
-  { src = "assets/services/systemd/helios-journal-vacuum.sh", dst = "/usr/local/bin/helios-journal-vacuum.sh", mode = 493 },
-]

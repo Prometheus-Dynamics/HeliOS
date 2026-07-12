@@ -16,7 +16,7 @@ const REQUIRED_FRONTEND_GENERATED_PATHS: &[&str] = &[
     "frontend/src/generated/ws/asyncapi.json",
 ];
 
-const TRACKED_GENERATED_PATHS: &[&str] = &["backend/src/helios-engine/src/contracts/generated_runtime_contracts.rs"];
+const TRACKED_GENERATED_PATHS: &[&str] = &["backend/src/helios/engine/src/contracts/generated_runtime_contracts.rs"];
 const RUNTIME_CONTRACTS_SPEC_PATH: &str = "tools/api-codegen/runtime-contracts.toml";
 const CODEC_FAMILIES_SPEC_PATH: &str = "tools/api-codegen/codec-families.toml";
 
@@ -451,12 +451,12 @@ mod tests {
         let spec = RuntimeContractsSpec {
             schema_version: 1,
             reserved_pipeline_ids: ReservedPipelineIdsContract {
-                metadata: ContractMetadata { owner: String::new(), boundary: "helios-engine <-> frontend".into(), source_of_truth: "backend/src/helios-engine/src/contracts.rs".into() },
+                metadata: ContractMetadata { owner: String::new(), boundary: "helios-engine <-> frontend".into(), source_of_truth: "backend/src/helios/engine/src/contracts.rs".into() },
                 raw_pipeline_uuid: "00000000-0000-0000-0000-0000000000aa".into(),
                 calibration_mode_pipeline_uuid: "00000000-0000-0000-0000-00000000c411".into(),
             },
             localization_external_source_ids: LocalizationExternalSourceIdsContract {
-                metadata: ContractMetadata { owner: "HeliOS".into(), boundary: "helios-api <-> frontend".into(), source_of_truth: "backend/src/helios-api/src/http/localization/config.rs".into() },
+                metadata: ContractMetadata { owner: "HeliOS".into(), boundary: "helios-api <-> frontend".into(), source_of_truth: "backend/src/helios/api/src/http/localization/config.rs".into() },
                 device_imu_external_source_id: "imu".into(),
             },
         };
@@ -496,12 +496,12 @@ output_fourcc_aliases = ["MJPG", "JPEG"]
         let spec = RuntimeContractsSpec {
             schema_version: 1,
             reserved_pipeline_ids: ReservedPipelineIdsContract {
-                metadata: ContractMetadata { owner: "HeliOS".into(), boundary: "helios-engine <-> frontend".into(), source_of_truth: "backend/src/helios-engine/src/contracts.rs".into() },
+                metadata: ContractMetadata { owner: "HeliOS".into(), boundary: "helios-engine <-> frontend".into(), source_of_truth: "backend/src/helios/engine/src/contracts.rs".into() },
                 raw_pipeline_uuid: "00000000-0000-0000-0000-0000000000aa".into(),
                 calibration_mode_pipeline_uuid: "00000000-0000-0000-0000-00000000c411".into(),
             },
             localization_external_source_ids: LocalizationExternalSourceIdsContract {
-                metadata: ContractMetadata { owner: "HeliOS".into(), boundary: "helios-api <-> frontend".into(), source_of_truth: "backend/src/helios-api/src/http/localization/config.rs".into() },
+                metadata: ContractMetadata { owner: "HeliOS".into(), boundary: "helios-api <-> frontend".into(), source_of_truth: "backend/src/helios/api/src/http/localization/config.rs".into() },
                 device_imu_external_source_id: "imu".into(),
             },
         };

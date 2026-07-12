@@ -51,6 +51,7 @@ fn srgb_to_luma_u8(r: u8, g: u8, b: u8) -> u8 {
 }
 
 #[cfg(target_arch = "aarch64")]
+#[allow(unsafe_code)]
 #[allow(unsafe_op_in_unsafe_fn)]
 #[target_feature(enable = "neon")]
 unsafe fn rgb_to_luma_neon(dst: &mut [u8], src: &[u8]) {
@@ -83,6 +84,7 @@ unsafe fn rgb_to_luma_neon(dst: &mut [u8], src: &[u8]) {
 }
 
 #[cfg(target_arch = "aarch64")]
+#[allow(unsafe_code)]
 #[allow(unsafe_op_in_unsafe_fn)]
 #[target_feature(enable = "neon")]
 unsafe fn rgba_to_luma_neon(dst: &mut [u8], src: &[u8]) {
@@ -115,34 +117,16 @@ unsafe fn rgba_to_luma_neon(dst: &mut [u8], src: &[u8]) {
 }
 
 #[inline(always)]
+#[allow(unsafe_code)]
 fn rgb_to_luma_into(dst: &mut [u8], src: &[u8]) {
-    #[cfg(target_arch = "aarch64")]
-    {
-        if crate::simd::neon_enabled() {
-            // SAFETY: guarded by runtime feature detection.
-            unsafe {
-                rgb_to_luma_neon(dst, src);
-            }
-            return;
-        }
-    }
     for (px, dst_px) in src.chunks_exact(3).zip(dst.iter_mut()) {
         *dst_px = srgb_to_luma_u8(px[0], px[1], px[2]);
     }
 }
 
 #[inline(always)]
+#[allow(unsafe_code)]
 fn rgba_to_luma_into(dst: &mut [u8], src: &[u8]) {
-    #[cfg(target_arch = "aarch64")]
-    {
-        if crate::simd::neon_enabled() {
-            // SAFETY: guarded by runtime feature detection.
-            unsafe {
-                rgba_to_luma_neon(dst, src);
-            }
-            return;
-        }
-    }
     for (px, dst_px) in src.chunks_exact(4).zip(dst.iter_mut()) {
         *dst_px = srgb_to_luma_u8(px[0], px[1], px[2]);
     }

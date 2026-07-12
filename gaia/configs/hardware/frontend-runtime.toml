@@ -1,0 +1,8 @@
+description = "Shared frontend runtime package layer: web server packages required by the staged frontend service."
+
+[image]
+kind = "buildroot"
+config_overrides = [
+  ["BR2_PACKAGE_LIGHTTPD", "y"],
+  ["BR2_PACKAGE_LIGHTTPD_PCRE", "y"],
+]

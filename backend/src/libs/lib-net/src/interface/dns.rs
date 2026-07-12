@@ -4,8 +4,6 @@ use std::path::PathBuf;
 #[cfg(test)]
 use std::sync::{Mutex, OnceLock};
 
-use lib_runtime_policy::HELIOS_DNS_POLICY;
-
 use super::{DnsConfig, Error, Result};
 
 #[cfg(test)]
@@ -17,7 +15,7 @@ fn dns_config_path() -> PathBuf {
         return path;
     }
 
-    HELIOS_DNS_POLICY.resolve().config_path
+    PathBuf::from("/etc/resolv.conf")
 }
 
 pub(super) async fn read_dns_config() -> Result<DnsConfig> {

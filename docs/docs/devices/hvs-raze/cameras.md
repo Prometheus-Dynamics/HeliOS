@@ -16,8 +16,9 @@ capture modes and controls.
 ## Notes
 
 - Some modules may report an OV9281 chip ID even when wired as OV9782; the driver accepts this.
-- For low-level behavior (controls, link frequency, timings), refer to the OV9782 kernel driver in this repo:
-  - `configs/buildroot/linux/ov9782/drivers/media/i2c/ov9782.c`
+- For low-level behavior (controls, link frequency, timings), refer to the OV9782 variant patch for the upstream
+  OV9282 kernel driver:
+  - `gaia/assets/buildroot/linux/ov9782/0001-media-i2c-ov9282-add-ov9782-variant-draft.patch`
 
 ## External USB Cameras
 

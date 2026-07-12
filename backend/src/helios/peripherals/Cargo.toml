@@ -1,0 +1,42 @@
+[package]
+name = "helios-peripherals"
+version.workspace = true
+edition.workspace = true
+autobins = false
+
+[lib]
+name = "helios_peripherals"
+path = "src/lib.rs"
+doctest = false
+
+[[bin]]
+name = "helios-peripherals"
+path = "src/main.rs"
+
+[[bin]]
+name = "peripherals_mem_probe"
+path = "src/bin/peripherals_mem_probe.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_bytes = { workspace = true }
+serde_json = { workspace = true }
+memmap2 = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+notify = { workspace = true }
+
+orion = { workspace = true, default-features = false, features = ["client", "control-plane", "macros", "transport-ipc"] }
+lemnos = { workspace = true, default-features = false, features = ["builtin-drivers", "linux", "linux-hotplug", "tokio"] }
+styx = { workspace = true, default-features = false, features = ["v4l2", "libcamera-vendor-rpi", "serde", "hotplug", "async", "codec-ffmpeg", "codec-turbojpeg"] }
+nix = { workspace = true, features = ["fs"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }

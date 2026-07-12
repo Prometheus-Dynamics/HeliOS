@@ -1,0 +1,25 @@
+[package]
+name = "helios-diagnostics"
+version.workspace = true
+edition = "2024"
+
+[lib]
+name = "helios_diagnostics"
+path = "src/lib.rs"
+
+[[bin]]
+name = "helios-diagnostics"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+glob = { workspace = true }
+flate2 = { workspace = true }
+tar = { workspace = true }

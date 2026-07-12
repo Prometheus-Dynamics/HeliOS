@@ -1,0 +1,112 @@
+description = "Shared ops layer: diagnostics, journald policy, self-check, and other non-target-specific field operations."
+
+[[stage.files]]
+id = "ops-journald-memory-conf"
+src = "@assets/ops/core/etc/systemd/journald.conf.d/60-helios-memory.conf"
+dest = "/etc/systemd/journald.conf.d/60-helios-memory.conf"
+origin = "static-asset"
+
+[[stage.files]]
+id = "ops-getty-override"
+src = "@assets/ops/core/etc/systemd/system/getty@tty1.service.d/override.conf"
+dest = "/etc/systemd/system/getty@tty1.service.d/override.conf"
+origin = "static-asset"
+
+[[stage.files]]
+id = "ops-api-diagnostics-conf"
+src = "@assets/ops/core/etc/systemd/system/helios-api.service.d/diagnostics.conf"
+dest = "/etc/systemd/system/helios-api.service.d/diagnostics.conf"
+origin = "static-asset"
+
+[[stage.files]]
+id = "ops-engine-diagnostics-conf"
+src = "@assets/ops/core/etc/systemd/system/helios-engine.service.d/diagnostics.conf"
+dest = "/etc/systemd/system/helios-engine.service.d/diagnostics.conf"
+origin = "static-asset"
+
+[[stage.files]]
+id = "ops-peripherals-diagnostics-conf"
+src = "@assets/ops/core/etc/systemd/system/helios-peripherals.service.d/diagnostics.conf"
+dest = "/etc/systemd/system/helios-peripherals.service.d/diagnostics.conf"
+origin = "static-asset"
+
+[[stage.files]]
+id = "ops-updater-diagnostics-conf"
+src = "@assets/ops/core/etc/systemd/system/helios-updater.service.d/diagnostics.conf"
+dest = "/etc/systemd/system/helios-updater.service.d/diagnostics.conf"
+origin = "static-asset"
+
+[[stage.files]]
+id = "ops-set-governor-script"
+src = "@assets/ops/core/usr/local/bin/set-governor.sh"
+dest = "/opt/set-governor.sh"
+origin = "static-asset"
+mode = 493
+
+[[stage.files]]
+id = "ops-os-self-check-script"
+src = "@assets/ops/core/usr/local/bin/helios-os-self-check.sh"
+dest = "/usr/local/bin/helios-os-self-check.sh"
+origin = "static-asset"
+mode = 493
+
+[[stage.files]]
+id = "ops-login-banner-script"
+src = "@assets/ops/core/usr/local/bin/helios-update-issue.sh"
+dest = "/opt/helios-update-issue.sh"
+origin = "static-asset"
+mode = 493
+
+[[stage.services]]
+id = "ops-diagnostics-service"
+name = "helios-diagnostics@.service"
+unit_path = "@assets/ops/core/systemd/helios-diagnostics@.service"
+
+[[stage.services]]
+id = "ops-journal-prepare-service"
+name = "helios-journal-prepare.service"
+unit_path = "@assets/ops/core/systemd/helios-journal-prepare.service"
+
+[[stage.services]]
+id = "ops-var-log-journal-mount"
+name = "var-log-journal.mount"
+unit_path = "@assets/ops/core/systemd/var-log-journal.mount"
+
+[[stage.services]]
+id = "ops-set-governor-service"
+name = "helios-set-governor.service"
+unit_path = "@assets/ops/core/systemd/helios-set-governor.service"
+
+[[stage.services]]
+id = "ops-os-self-check-service"
+name = "helios-os-self-check.service"
+unit_path = "@assets/ops/core/systemd/helios-os-self-check.service"
+
+[[stage.services]]
+id = "ops-login-banner-service"
+name = "helios-update-issue.service"
+unit_path = "@assets/ops/core/systemd/helios-update-issue.service"
+
+[image]
+kind = "buildroot"
+
+[image.feed]
+stage_files = [
+  "ops-journald-memory-conf",
+  "ops-getty-override",
+  "ops-api-diagnostics-conf",
+  "ops-engine-diagnostics-conf",
+  "ops-peripherals-diagnostics-conf",
+  "ops-updater-diagnostics-conf",
+  "ops-set-governor-script",
+  "ops-os-self-check-script",
+  "ops-login-banner-script",
+]
+stage_services = [
+  "ops-diagnostics-service",
+  "ops-journal-prepare-service",
+  "ops-var-log-journal-mount",
+  "ops-set-governor-service",
+  "ops-os-self-check-service",
+  "ops-login-banner-service",
+]

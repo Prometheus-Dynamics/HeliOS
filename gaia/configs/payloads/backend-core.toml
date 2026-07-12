@@ -1,0 +1,252 @@
+description = "Shared backend-core payload layer: cross-target Rust control-plane and updater binaries reused by cm4, cm5, and generic aarch64 Linux targets."
+
+[providers.rust]
+allow_nested_build = true
+timeout_seconds = 7200
+
+[[sources]]
+id = "backend-workspace"
+kind = "path"
+path = "backend"
+identity_ignore = ["target", ".gaia"]
+refresh = "never"
+pin = "locked"
+
+[[sources]]
+id = "orion-workspace"
+kind = "git"
+repo = "https://github.com/Prometheus-Dynamics/Orion.git"
+branch = "main"
+refresh = "never"
+pin = "locked"
+
+[[artifacts]]
+id = "helios-api"
+kind = "rust"
+package = "helios-api"
+source = "backend-workspace"
+target = "aarch64-unknown-linux-gnu"
+profile = "release"
+install_name = "helios-api"
+install_class = "binary"
+install_dest_hint = "/usr/bin/helios-api"
+output_path = "gaia/output/${build.name}/artifacts/helios-api"
+
+[artifacts.execution]
+backend = "docker"
+
+[artifacts.execution.docker]
+image = "helios-cross-rust194"
+
+[[artifacts]]
+id = "helios-engine"
+kind = "rust"
+package = "helios-engine"
+source = "backend-workspace"
+target = "aarch64-unknown-linux-gnu"
+profile = "release"
+install_name = "helios-engine"
+install_class = "binary"
+install_dest_hint = "/usr/bin/helios-engine"
+output_path = "gaia/output/${build.name}/artifacts/helios-engine"
+
+[artifacts.execution]
+backend = "docker"
+
+[artifacts.execution.docker]
+image = "helios-cross-rust194"
+
+[[artifacts]]
+id = "helios-updater"
+kind = "rust"
+package = "helios-updater"
+source = "backend-workspace"
+target = "aarch64-unknown-linux-gnu"
+profile = "release"
+install_name = "helios-updater"
+install_class = "binary"
+install_dest_hint = "/usr/bin/helios-updater"
+output_path = "gaia/output/${build.name}/artifacts/helios-updater"
+
+[artifacts.execution]
+backend = "docker"
+
+[artifacts.execution.docker]
+image = "helios-cross-rust194"
+
+[[artifacts]]
+id = "helios-diagnostics"
+kind = "rust"
+package = "helios-diagnostics"
+source = "backend-workspace"
+target = "aarch64-unknown-linux-gnu"
+profile = "release"
+install_name = "helios-diagnostics"
+install_class = "binary"
+install_dest_hint = "/usr/bin/helios-diagnostics"
+output_path = "gaia/output/${build.name}/artifacts/helios-diagnostics"
+
+[artifacts.execution]
+backend = "docker"
+
+[artifacts.execution.docker]
+image = "helios-cross-rust194"
+
+[[artifacts]]
+id = "heliosctl"
+kind = "rust"
+package = "heliosctl"
+source = "backend-workspace"
+target = "aarch64-unknown-linux-gnu"
+profile = "release"
+install_name = "heliosctl"
+install_class = "binary"
+install_dest_hint = "/usr/bin/heliosctl"
+output_path = "gaia/output/${build.name}/artifacts/heliosctl"
+
+[artifacts.execution]
+backend = "docker"
+
+[artifacts.execution.docker]
+image = "helios-cross-rust194"
+
+[[artifacts]]
+id = "orion-node"
+kind = "rust"
+package = "orion-node"
+source = "orion-workspace"
+target = "aarch64-unknown-linux-gnu"
+profile = "release"
+install_name = "orion-node"
+install_class = "binary"
+install_dest_hint = "/usr/bin/orion-node"
+output_path = "gaia/output/${build.name}/artifacts/orion-node"
+
+[artifacts.execution]
+backend = "docker"
+
+[artifacts.execution.docker]
+image = "helios-cross-rust194"
+
+[[artifacts]]
+id = "orionctl"
+kind = "rust"
+package = "orionctl"
+source = "orion-workspace"
+target = "aarch64-unknown-linux-gnu"
+profile = "release"
+install_name = "orionctl"
+install_class = "binary"
+install_dest_hint = "/usr/bin/orionctl"
+output_path = "gaia/output/${build.name}/artifacts/orionctl"
+
+[artifacts.execution]
+backend = "docker"
+
+[artifacts.execution.docker]
+image = "helios-cross-rust194"
+
+[[artifacts]]
+id = "helios-provision"
+kind = "rust"
+package = "helios-provision"
+source = "backend-workspace"
+target = "aarch64-unknown-linux-gnu"
+profile = "release"
+install_name = "helios-provision"
+install_class = "binary"
+install_dest_hint = "/usr/local/bin/helios-provision"
+output_path = "gaia/output/${build.name}/artifacts/helios-provision"
+
+[artifacts.execution]
+backend = "docker"
+
+[artifacts.execution.docker]
+image = "helios-cross-rust194"
+
+[[install]]
+id = "install-helios-api"
+artifact = "helios-api"
+dest = "/usr/bin/helios-api"
+replace = true
+mode = 493
+owner = "root"
+group = "root"
+
+[[install]]
+id = "install-helios-engine"
+artifact = "helios-engine"
+dest = "/usr/bin/helios-engine"
+replace = true
+mode = 493
+owner = "root"
+group = "root"
+
+[[install]]
+id = "install-helios-updater"
+artifact = "helios-updater"
+dest = "/usr/bin/helios-updater"
+replace = true
+mode = 493
+owner = "root"
+group = "root"
+
+[[install]]
+id = "install-helios-diagnostics"
+artifact = "helios-diagnostics"
+dest = "/usr/bin/helios-diagnostics"
+replace = true
+mode = 493
+owner = "root"
+group = "root"
+
+[[install]]
+id = "install-heliosctl"
+artifact = "heliosctl"
+dest = "/usr/bin/heliosctl"
+replace = true
+mode = 493
+owner = "root"
+group = "root"
+
+[[install]]
+id = "install-orion-node"
+artifact = "orion-node"
+dest = "/usr/bin/orion-node"
+replace = true
+mode = 493
+owner = "root"
+group = "root"
+
+[[install]]
+id = "install-orionctl"
+artifact = "orionctl"
+dest = "/usr/bin/orionctl"
+replace = true
+mode = 493
+owner = "root"
+group = "root"
+
+[[install]]
+id = "install-helios-provision"
+artifact = "helios-provision"
+dest = "/usr/local/bin/helios-provision"
+replace = true
+mode = 493
+owner = "root"
+group = "root"
+
+[image]
+kind = "buildroot"
+
+[image.feed]
+install_entries = [
+  "install-helios-api",
+  "install-helios-engine",
+  "install-helios-updater",
+  "install-helios-diagnostics",
+  "install-heliosctl",
+  "install-orion-node",
+  "install-orionctl",
+  "install-helios-provision",
+]

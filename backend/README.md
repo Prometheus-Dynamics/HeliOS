@@ -4,9 +4,9 @@ Helios is a Rust workspace that implements a full featured backend for camera ca
 
 ## Repository Layout
 
-- **src/helios-api** – API binary exposing JSON‑RPC/REST/WS endpoints and orchestration logic.
-- **src/helios-engine** – standalone engine crate that owns the runtime, IPC server, and reusable client for pipeline orchestration.
-- **src/helios-updater** – updater crate that owns the OTA runtime, state machine, IPC server, and reusable client APIs.
+- **src/helios/api** – API binary exposing JSON‑RPC/REST/WS endpoints and orchestration logic.
+- **src/helios/engine** – standalone engine crate that owns the runtime, IPC server, and reusable client for pipeline orchestration.
+- **src/helios/updater** – updater crate that owns the OTA runtime, state machine, IPC server, and reusable client APIs.
 - **src/libs** – collection of library crates covering capture, codecs, computer vision, networking and the pipeline framework.
 - **configs** – Buildroot and init configuration templates consumed by the image builder.
 
@@ -62,7 +62,7 @@ cargo --config .cargo/local-overrides.toml check --manifest-path backend/Cargo.t
 
 The repo does not auto-load that file. If you need a sibling checkout override, you must opt into it explicitly per command.
 
-The live deploy helper accepts the same override explicitly:
+The live deploy helper accepts the same override explicitly. It now uploads binaries over SSH and activates them through `helios-updater` on the device instead of publishing them as OTA bundles:
 
 ```bash
 HELIOS_CARGO_CONFIG=.cargo/local-overrides.toml \
@@ -108,6 +108,62 @@ gaia tui --builds-dir configs/builds
 ```
 
 The helper script expects Gaia at `../gaia` (or `GAIA_ROOT` override) and requires `gaia` on your `PATH`. Full setup is documented in `../BUILD.md`.
+
+### Running canonical workload templates on a live device
+
+Use the canonical workload template API for repeatable device runs instead of hand-assembling workload/artifact JSON.
+
+The repository includes a small harness that:
+- invokes `POST /v1/templates/workloads/{template_id}/run`
+- polls canonical workload/runtime/system routes
+- saves the captured JSON under `artifacts/device-runtime/cm5/`
+
+Example:
+
+```bash
+./tools/run-device-template.sh \
+  --api-base http://172.31.250.1 \
+  --template imu_pose_9axis_graph \
+  --workload-local imu-pose-9 \
+  --consume virtual_cm5exp_imu-bmi088-bus4 \
+  --label imu9 \
+  --stop
+```
+
+This is the preferred path for graph-template device validation because it exercises the same API contract the rest of the system uses.
+
+For a broader graph-template sweep against a live resource stream, use the matrix runner:
+
+```bash
+./tools/run-device-template-matrix.sh \
+  --api-base http://172.31.250.1 \
+  --consume virtual_cm5exp_imu-bmi088-bus4
+```
+
+The matrix currently runs:
+- `stream_batch_count_graph`
+- `imu_pose_3axis_graph`
+- `imu_pose_6axis_graph`
+- `imu_pose_9axis_graph`
+- `localization_centroid_graph`
+
+Each run captures canonical workload/runtime/system/stream JSON plus curl timing data for cold and warm API reads.
+
+If the resident device image is behind the repo, stage the current API/engine/peripherals binaries into an isolated `/tmp` runtime first:
+
+```bash
+./tools/run-device-isolated-runtime.sh start \
+  --bins-dir output/cm5/binaries \
+  --api-port 5802
+
+./tools/run-device-template-matrix.sh \
+  --api-base http://172.31.250.1:5802 \
+  --consume virtual_cm5exp_imu-bmi088-bus4
+
+./tools/run-device-isolated-runtime.sh stop
+```
+
+This avoids touching the resident systemd services while still exercising the current canonical API and graph runtime on real hardware.
 
 ### Export bindings
 
@@ -178,7 +234,7 @@ Notes:
 
 ## Application structure
 
-The `helios-api` crate under `src/helios-api` is the main server entry point while runtime logic lives in `helios-engine` and `helios-updater`. It is split into several sections:
+The `helios-api` crate under `src/helios/api` is the main server entry point while runtime logic lives in `helios-engine` and `helios-updater`. It is split into several sections:
 
 - **api** – exposes HTTP endpoints, a JSON‑RPC service, WebSocket streaming and an NT4 (NetworkTables) server. Individual modules under `api/http` implement routes for device information, sensor control, streaming operations and system services.
 - **pipeline** – orchestrates one or more processing pipelines using `lib-pipeline-core`. Built‑in pipeline nodes live in `pipeline/nodes` and are registered on startup.
@@ -226,7 +282,7 @@ Examples are:
 - `{ "type": "metrics", "uuid": "...", "metrics": { ... } }`
 - `{ "type": "video-info", "width": 640, "height": 480, "fps": 30 }`
 
-See `src/helios-api/src/api/ws/types.rs` for the full set of request and response
+See `src/helios/api/src/api/ws/types.rs` for the full set of request and response
 structures.
 
 ## Generating AsyncAPI docs
@@ -258,8 +314,6 @@ the document.
 This workspace now includes a USB serial recovery path that runs in parallel
 with the USB network gadget.
 
-- Device daemon: `helios-usb-recoveryd` (`src/helios-usb-recoveryd`)
-- Host CLI: `helios-usbctl` (`tools/helios-usbctl`)
 - Transport: newline-delimited JSON over gadget ACM (`/dev/ttyGS*` on device,
   `/dev/ttyACM*` on host)
 
@@ -277,7 +331,4 @@ channel.
 Example host usage:
 
 ```bash
-cargo run -p helios-usbctl -- status
-cargo run -p helios-usbctl -- reboot --mode normal
-cargo run -p helios-usbctl -- ota push /path/to/update.img --activate
 ```

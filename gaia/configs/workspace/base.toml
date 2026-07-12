@@ -1,15 +1,35 @@
 [workspace]
-# Defaults to the directory where `gaia` is run.
-# Set this if your config/assets live in another workspace folder.
 root_dir = "."
-build_dir = "build"
-out_dir = "output"
-# One of: "none", "build", "out", "all"
-clean = "none"
+build_dir = "gaia/build/${build.name}"
+out_dir = "gaia/output/${build.name}"
 
-[workspace.paths]
-# Optional named roots referenced as `@name/...` in path fields.
-# Examples:
-# assets = "assets"
-# packages = "assets/buildroot/packages"
-# helios = ".."
+[[workspace.named_paths]]
+alias = "assets"
+path = "gaia/assets"
+kind = "host"
+
+[reporting]
+summary = true
+provenance = true
+manifest = true
+
+[providers.git]
+allow_remote_resolution = true
+retry_attempts = 1
+retry_backoff_ms = 0
+retry_backoff_strategy = "fixed"
+timeout_seconds = 1800
+
+[providers.buildroot]
+retry_attempts = 1
+retry_backoff_ms = 0
+retry_backoff_strategy = "fixed"
+timeout_seconds = 14400
+
+[execution]
+jobs = 0
+
+[failure]
+rollback_on_error = true
+preserve_failed_outputs = true
+rollback_domains = ["artifacts", "installs", "stage", "checkpoints"]

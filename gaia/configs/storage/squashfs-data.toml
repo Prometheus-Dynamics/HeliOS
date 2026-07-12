@@ -1,0 +1,109 @@
+description = "Shared squashfs writable-state layer: provisioning, storage layout, and service override data for the squashfs appliance mode."
+
+[[stage.files]]
+id = "storage-layout-toml"
+src = "@assets/storage/squashfs/etc/helios/storage-layout.toml"
+dest = "/etc/helios/storage-layout.toml"
+origin = "static-asset"
+
+[[stage.files]]
+id = "storage-layout-env"
+src = "@assets/storage/squashfs/etc/helios/storage-layout.env"
+dest = "/etc/helios/storage-layout.env"
+origin = "static-asset"
+
+[[stage.files]]
+id = "storage-bootloader-conf"
+src = "@assets/storage/squashfs/etc/helios/bootloader.conf"
+dest = "/etc/helios/bootloader.conf"
+origin = "static-asset"
+
+[[stage.files]]
+id = "storage-bootloader-upd"
+src = "@assets/storage/squashfs/usr/share/helios/bootloader/pieeprom-2025-12-08.upd"
+dest = "/usr/share/helios/bootloader/pieeprom-2025-12-08.upd"
+origin = "static-asset"
+
+[[stage.files]]
+id = "storage-bootloader-sig"
+src = "@assets/storage/squashfs/usr/share/helios/bootloader/pieeprom-2025-12-08.sig"
+dest = "/usr/share/helios/bootloader/pieeprom-2025-12-08.sig"
+origin = "static-asset"
+
+[[stage.files]]
+id = "storage-provision-script"
+src = "@assets/storage/squashfs/usr/local/bin/helios-provision-squashfs.sh"
+dest = "/usr/local/bin/helios-provision-squashfs.sh"
+origin = "static-asset"
+mode = 493
+
+[[stage.files]]
+id = "storage-orion-node-override"
+src = "@assets/storage/squashfs/systemd/service-overrides/orion-node.override.conf"
+dest = "/etc/systemd/system/orion-node.service.d/override.conf"
+origin = "static-asset"
+
+[[stage.files]]
+id = "storage-helios-api-override"
+src = "@assets/storage/squashfs/systemd/service-overrides/helios-api.override.conf"
+dest = "/etc/systemd/system/helios-api.service.d/override.conf"
+origin = "static-asset"
+
+[[stage.files]]
+id = "storage-helios-engine-override"
+src = "@assets/storage/squashfs/systemd/service-overrides/helios-engine.override.conf"
+dest = "/etc/systemd/system/helios-engine.service.d/override.conf"
+origin = "static-asset"
+
+[[stage.files]]
+id = "storage-helios-peripherals-override"
+src = "@assets/storage/squashfs/systemd/service-overrides/helios-peripherals.override.conf"
+dest = "/etc/systemd/system/helios-peripherals.service.d/override.conf"
+origin = "static-asset"
+
+[[stage.files]]
+id = "storage-helios-updater-override"
+src = "@assets/storage/squashfs/systemd/service-overrides/helios-updater.override.conf"
+dest = "/etc/systemd/system/helios-updater.service.d/override.conf"
+origin = "static-asset"
+
+[[stage.files]]
+id = "storage-networkd-wait-online-override"
+src = "@assets/storage/squashfs/systemd/service-overrides/systemd-networkd-wait-online.override.conf"
+dest = "/etc/systemd/system/systemd-networkd-wait-online.service.d/override.conf"
+origin = "static-asset"
+
+[[stage.services]]
+id = "storage-helios-provision"
+name = "helios-provision.service"
+unit_path = "@assets/storage/squashfs/systemd/helios-provision.service"
+
+[[stage.services]]
+id = "storage-helios-provision-target"
+name = "helios-provision.target"
+unit_path = "@assets/storage/squashfs/systemd/helios-provision.target"
+
+[[stage.services]]
+id = "storage-helios-ota-confirm"
+name = "helios-ota-confirm.service"
+unit_path = "@assets/storage/squashfs/systemd/helios-ota-confirm.service"
+
+[image]
+kind = "buildroot"
+
+[image.feed]
+stage_files = [
+  "storage-layout-toml",
+  "storage-layout-env",
+  "storage-bootloader-conf",
+  "storage-bootloader-upd",
+  "storage-bootloader-sig",
+  "storage-provision-script",
+  "storage-orion-node-override",
+  "storage-helios-api-override",
+  "storage-helios-engine-override",
+  "storage-helios-peripherals-override",
+  "storage-helios-updater-override",
+  "storage-networkd-wait-online-override",
+]
+stage_services = ["storage-helios-provision", "storage-helios-provision-target", "storage-helios-ota-confirm"]

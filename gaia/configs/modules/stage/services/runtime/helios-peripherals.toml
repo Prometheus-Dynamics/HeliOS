@@ -1,6 +1,0 @@
-[units."helios-peripherals"]
-enabled = true
-src = "assets/services/helios-peripherals/helios-peripherals.service"
-targets = ["multi-user"]
-env_set = "helios-peripherals"
-env_file = "/etc/default/helios-peripherals"

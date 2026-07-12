@@ -16,7 +16,7 @@ You are done when the stream preview shows the correct pipeline output.
 
 If you do not have a stream yet:
 
-- [Create your first stream](/guides/create-your-first-stream)
+- [OS > Devices](/os/devices/overview)
 
 ## Step 1: Attach The Pipeline
 

@@ -1,0 +1,29 @@
+description = "Shared Raspberry Pi vision/media overlay: libcamera IPA and tuning assets used by CM4 and CM5."
+
+[[stage.files]]
+id = "pi-libcamera-pisp-ov9782"
+src = "@assets/hardware/runtime/usr/share/libcamera/ipa/rpi/pisp/ov9782.json"
+dest = "/usr/share/libcamera/ipa/rpi/pisp/ov9782.json"
+origin = "static-asset"
+
+[[stage.files]]
+id = "pi-libcamera-vc4-ov9782"
+src = "@assets/hardware/runtime/usr/share/libcamera/ipa/rpi/vc4/ov9782.json"
+dest = "/usr/share/libcamera/ipa/rpi/vc4/ov9782.json"
+origin = "static-asset"
+
+[[stage.files]]
+id = "pi-libcamera-tuning-ov9782"
+src = "@assets/hardware/runtime/usr/share/libcamera/tuning/ov9782.overrides.json"
+dest = "/usr/share/libcamera/tuning/ov9782.overrides.json"
+origin = "static-asset"
+
+[image]
+kind = "buildroot"
+
+[image.feed]
+stage_files = [
+  "pi-libcamera-pisp-ov9782",
+  "pi-libcamera-vc4-ov9782",
+  "pi-libcamera-tuning-ov9782",
+]

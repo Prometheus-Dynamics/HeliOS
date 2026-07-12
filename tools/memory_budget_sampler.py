@@ -20,7 +20,6 @@ DEFAULT_PROCESSES = [
     "helios-api",
     "helios-peripherals",
     "helios-updater",
-    "helios-usb-recoveryd",
 ]
 
 

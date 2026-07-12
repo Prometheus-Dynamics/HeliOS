@@ -1,0 +1,5 @@
+HOSTNAME=helios
+OS_ID=helios
+OS_NAME=Helios
+OS_PRETTY_NAME=Helios
+CPU_GOVERNOR=performance

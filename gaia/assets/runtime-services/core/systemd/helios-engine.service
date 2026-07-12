@@ -1,0 +1,45 @@
+[Unit]
+Description=Helios Engine Service
+After=network.target
+Wants=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios
+ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios/panics
+ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios/engine
+ExecStartPre=/usr/bin/install -d -m0755 /var/lib/helios/state
+ExecStartPre=/usr/bin/install -d -m0755 /usr/lib/helios/plugins/daedalus
+ExecStartPre=/usr/bin/install -d -m0755 /var/lib/helios/plugins/daedalus
+Environment=ENGINE_SOCKET=/run/helios/engine.sock
+Environment=ENGINE_JOURNAL_PATH=/var/log/helios/engine/engine.log
+Environment=HELIOS_ENGINE_CACHE_NODE_REGISTRY=0
+Environment=HELIOS_NODE_REGISTRY_SNAPSHOT_PATH=/var/lib/helios/state/node-registry.snapshot.json
+Environment=STYX_LIBCAMERA_STOP_WHEN_IDLE=1
+Environment=HELIOS_STYX_CAPTURE_QUEUE_DEPTH=1
+Environment=HELIOS_STREAM_PREVIEW_ENCODE_INTERVAL_MS=4
+Environment=HELIOS_DAEDALUS_DEMAND_DRIVEN=1
+Environment=HELIOS_DAEDALUS_PLUGIN_DIRS=/usr/lib/helios/plugins/daedalus:/var/lib/helios/plugins/daedalus
+Environment=DAEDALUS_METRICS_LEVEL=detailed
+EnvironmentFile=-/etc/default/helios-engine.env
+ExecStart=/var/lib/helios/bin/helios-engine
+Restart=always
+RestartSec=2
+TimeoutStopSec=45
+User=root
+Group=root
+WorkingDirectory=/var/lib/helios
+StateDirectory=helios helios/state
+LogsDirectory=helios
+LimitNOFILE=65536
+TasksMax=infinity
+OOMScoreAdjust=-500
+IOSchedulingClass=realtime
+IOSchedulingPriority=1
+CPUAffinity=1 2 3
+Nice=-5
+
+[Install]
+WantedBy=multi-user.target

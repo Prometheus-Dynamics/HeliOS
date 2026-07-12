@@ -1,0 +1,8 @@
+description = "Shared network runtime package layer: networkd and gadget-network services that higher product layers rely on."
+
+[image]
+kind = "buildroot"
+config_overrides = [
+  ["BR2_PACKAGE_SYSTEMD_NETWORKD", "y"],
+  ["BR2_PACKAGE_DNSMASQ", "y"],
+]

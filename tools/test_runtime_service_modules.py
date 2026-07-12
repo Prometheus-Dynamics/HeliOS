@@ -12,10 +12,10 @@ SQUASHFS_DISTRO = REPO_ROOT / "gaia/configs/distros/helios/squashfs.toml"
 RUNTIME_MODULE_DIR = REPO_ROOT / "gaia/configs/modules/stage/services/runtime"
 LEGACY_RUNTIME_CORE = REPO_ROOT / "gaia/configs/modules/stage/services/runtime_core.toml"
 EXPECTED_RUNTIME_MODULES = (
+    "helios-usb-shell.toml",
+    "orion-node.toml",
     "helios-engine.toml",
     "helios-updater.toml",
-    "helios-usb-recoveryd.toml",
-    "helios-boot-buttond.toml",
     "helios-peripherals.toml",
     "helios-fan-overlays.toml",
     "helios-os-self-check.toml",

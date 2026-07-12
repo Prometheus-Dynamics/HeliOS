@@ -2,7 +2,9 @@
 
 Active build entrypoints live in `configs/builds/`.
 
-- `builds/` – top-level build definitions (currently `HeliOS-cm5.toml`).
+- `builds/` – one top-level build definition per hardware target:
+  `cm5.toml`, `cm4.toml`, and `generic-aarch64-linux.toml`.
+  Each build exposes a `profile` input with `base-os` and `full` choices.
 - `workspace/` – workspace-level defaults (`root_dir`, `build_dir`, `out_dir`, path aliases, cleanup mode).
 - `distros/` – distro composition (HeliOS module imports).
 - `platforms/` – board/CPU platform overlays (Raspberry Pi CM5 config).
@@ -36,7 +38,7 @@ helios = ".."
 Useful `buildroot` output controls live in `configs/modules/buildroot/base.toml`:
 - `collect_out_dir` (where collected images are copied),
 - `shrink_ext` (shrink copied ext rootfs images),
-- `archive_format`/`archive_mode`/`archive_name` (create archives, including flashable `img.xz`),
+- `archive_name` (create release artifacts, including flashable compressed `.img.xz` images),
 - `report`/`report_hashes` (emit `image-report.json` with sizes and hashes).
 
 Build output paths support templates:
@@ -56,8 +58,10 @@ archive_format = "img.xz"
 archive_name = "{build}-{version}-sdcard"
 ```
 
-The current CM5 build file is:
-- `configs/builds/HeliOS-cm5.toml`
+Current build entrypoints:
+- `configs/builds/cm5.toml`
+- `configs/builds/cm4.toml`
+- `configs/builds/generic-aarch64-linux.toml`
 
-It produces the squashfs/overlay image used for both release and live-deploy
-development workflows.
+Run `gaia tui` from the `gaia/` directory to pick a target build, then use the
+Profile setup item to cycle between `base-os` and `full`.

@@ -1,0 +1,21 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "brcm,bcm2712";
+
+	fragment@0 {
+		target-path = "/cooling_fan";
+		__overlay__ {
+			status = "okay";
+			cooling-levels = <0 75 125 175 250>;
+		};
+	};
+
+	fragment@1 {
+		target-path = "/axi/pcie@1000120000/rp1/pwm@9c000";
+		__overlay__ {
+			status = "okay";
+		};
+	};
+};

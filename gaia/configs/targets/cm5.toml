@@ -1,0 +1,306 @@
+description = "CM5 target: board selection only. Keep deploy-image specifics out of the shared OS layers."
+target = "cm5"
+
+[image]
+kind = "buildroot"
+defconfig = "raspberrypicm5io_defconfig"
+config_overrides = [
+  ["BR2_LINUX_KERNEL_CUSTOM_TARBALL", "y"],
+    ["BR2_LINUX_KERNEL_CUSTOM_TARBALL_LOCATION", "\"https://github.com/raspberrypi/linux/archive/refs/tags/stable_20250916.tar.gz\""],
+    ["BR2_GLOBAL_PATCH_DIR", "\"board/raspberrypi/patches gaia/assets/buildroot/patches\""],
+    ["BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES", "\"board/raspberrypi/linux-4k-page-size.fragment ${project.root_dir}/gaia/assets/buildroot/boards/helios-pi-squashfs/linux-squashfs-initramfs.fragment ${project.root_dir}/gaia/assets/buildroot/boards/helios-pi-squashfs/linux-no-wireless.fragment\""],
+    ["BR2_LINUX_KERNEL_EXT_OV9782", "y"],
+    ["BR2_ROOTFS_POST_IMAGE_SCRIPT", "\"\""],
+    ["BR2_PACKAGE_RPI_FIRMWARE_CONFIG_FILE", "\"${project.root_dir}/gaia/assets/buildroot/boards/helios-pi-squashfs/config.txt\""],
+    ["BR2_PACKAGE_RPI_FIRMWARE_CMDLINE_FILE", "\"${project.root_dir}/gaia/assets/buildroot/boards/helios-pi-squashfs/cmdline.txt\""],
+    ["BR2_TARGET_ROOTFS_EXT2", "n"],
+]
+
+[[image.expected_images]]
+name = "sdcard.img"
+format = "raw"
+required = true
+
+[image.assembly]
+work_dir = "${workspace.build_dir}/assembly"
+out_dir = "$provider.images"
+
+[[image.assembly.trees]]
+id = "boot"
+path = "$assembly.work/boot"
+
+[[image.assembly.trees]]
+id = "initramfs"
+path = "$assembly.work/initramfs"
+
+[[image.assembly.files]]
+tree = "boot"
+src = "@assets/buildroot/boards/helios-pi-squashfs/config.txt"
+dest = "config.txt"
+
+[[image.assembly.files]]
+tree = "boot"
+src = "@assets/buildroot/boards/helios-pi-squashfs/cmdline.txt"
+dest = "cmdline.txt"
+
+[[image.assembly.files]]
+tree = "boot"
+src = "@assets/buildroot/boards/helios-pi-squashfs/os_config.json"
+dest = "os_config.json"
+
+[[image.assembly.files]]
+tree = "boot"
+src = "$provider.buildroot_output/images/rpi-firmware/start4.elf"
+dest = "start4.elf"
+
+[[image.assembly.files]]
+tree = "boot"
+src = "$provider.buildroot_output/images/rpi-firmware/fixup4.dat"
+dest = "fixup4.dat"
+
+[[image.assembly.files]]
+tree = "boot"
+src_glob = "$provider.buildroot_output/build/rpi-firmware-*/boot/bcm2712-d-rpi-5-b.dtb"
+dest = "."
+optional = true
+
+[[image.assembly.files]]
+tree = "boot"
+src_glob = "$provider.buildroot_output/build/rpi-firmware-*/boot/bcm2712-rpi-5-b.dtb"
+dest = "."
+optional = true
+
+[[image.assembly.files]]
+tree = "boot"
+src_glob = "$provider.buildroot_output/build/rpi-firmware-*/boot/bcm2712-rpi-500.dtb"
+dest = "."
+optional = true
+
+[[image.assembly.files]]
+tree = "boot"
+src_glob = "$provider.buildroot_output/build/rpi-firmware-*/boot/bcm2712-rpi-cm5-cm4io.dtb"
+dest = "."
+optional = true
+
+[[image.assembly.files]]
+tree = "boot"
+src_glob = "$provider.buildroot_output/build/rpi-firmware-*/boot/bcm2712-rpi-cm5-cm5io.dtb"
+dest = "."
+optional = true
+
+[[image.assembly.files]]
+tree = "boot"
+src_glob = "$provider.buildroot_output/build/rpi-firmware-*/boot/bcm2712-rpi-cm5l-cm4io.dtb"
+dest = "."
+optional = true
+
+[[image.assembly.files]]
+tree = "boot"
+src_glob = "$provider.buildroot_output/build/rpi-firmware-*/boot/bcm2712-rpi-cm5l-cm5io.dtb"
+dest = "."
+optional = true
+
+[[image.assembly.files]]
+tree = "boot"
+src_glob = "$provider.buildroot_output/build/rpi-firmware-*/boot/bcm2712d0-rpi-5-b.dtb"
+dest = "."
+optional = true
+
+[[image.assembly.files]]
+tree = "boot"
+src_glob = "$provider.buildroot_output/images/bcm*.dtb"
+dest = "."
+
+[[image.assembly.files]]
+tree = "boot"
+src = "$provider.buildroot_output/images/rpi-firmware/overlays/bcm2712d0.dtbo"
+dest = "overlays/bcm2712d0.dtbo"
+optional = true
+
+[[image.assembly.files]]
+tree = "boot"
+src = "$provider.buildroot_output/images/rpi-firmware/overlays/disable-wifi.dtbo"
+dest = "overlays/disable-wifi.dtbo"
+optional = true
+
+[[image.assembly.files]]
+tree = "boot"
+src = "$provider.buildroot_output/images/rpi-firmware/overlays/disable-wifi-pi5.dtbo"
+dest = "overlays/disable-wifi-pi5.dtbo"
+optional = true
+
+[[image.assembly.files]]
+tree = "boot"
+src = "$provider.buildroot_output/images/rpi-firmware/overlays/disable-bt.dtbo"
+dest = "overlays/disable-bt.dtbo"
+optional = true
+
+[[image.assembly.files]]
+tree = "boot"
+src = "$provider.buildroot_output/images/rpi-firmware/overlays/disable-bt-pi5.dtbo"
+dest = "overlays/disable-bt-pi5.dtbo"
+optional = true
+
+[[image.assembly.files]]
+tree = "boot"
+src = "$provider.buildroot_output/images/rpi-firmware/overlays/dwc2.dtbo"
+dest = "overlays/dwc2.dtbo"
+optional = true
+
+[[image.assembly.files]]
+tree = "boot"
+src = "$provider.buildroot_output/images/rpi-firmware/overlays/i2c1-pi5.dtbo"
+dest = "overlays/i2c1-pi5.dtbo"
+optional = true
+
+[[image.assembly.files]]
+tree = "boot"
+src = "$provider.buildroot_output/images/rpi-firmware/overlays/i2c-gpio.dtbo"
+dest = "overlays/i2c-gpio.dtbo"
+optional = true
+
+[[image.assembly.files]]
+tree = "boot"
+src = "$provider.buildroot_output/images/rpi-firmware/overlays/ws2812-pio.dtbo"
+dest = "overlays/ws2812-pio.dtbo"
+optional = true
+
+[[image.assembly.files]]
+tree = "boot"
+src = "$provider.buildroot_output/images/rpi-firmware/overlays/vc4-kms-v3d-pi5.dtbo"
+dest = "overlays/vc4-kms-v3d-pi5.dtbo"
+optional = true
+
+[[image.assembly.files]]
+tree = "boot"
+src = "$provider.buildroot_output/images/rpi-firmware/overlays/overlay_map.dtb"
+dest = "overlays/overlay_map.dtb"
+optional = true
+
+[[image.assembly.files]]
+tree = "boot"
+src_glob = "$provider.buildroot_output/build/rpi-firmware-*/boot/overlays/hat_map.dtb"
+dest = "overlays/hat_map.dtb"
+optional = true
+
+[[image.assembly.dirs]]
+tree = "initramfs"
+path = "dev"
+
+[[image.assembly.dirs]]
+tree = "initramfs"
+path = "proc"
+
+[[image.assembly.dirs]]
+tree = "initramfs"
+path = "sys"
+
+[[image.assembly.dirs]]
+tree = "initramfs"
+path = "mnt/data"
+
+[[image.assembly.dirs]]
+tree = "initramfs"
+path = "mnt/lower"
+
+[[image.assembly.dirs]]
+tree = "initramfs"
+path = "newroot"
+
+[[image.assembly.symlinks]]
+tree = "initramfs"
+path = "lib64"
+target = "lib"
+
+[[image.assembly.symlinks]]
+tree = "initramfs"
+path = "usr/lib64"
+target = "../lib"
+
+[[image.assembly.files]]
+tree = "initramfs"
+src = "@assets/buildroot/boards/helios-pi-squashfs/init-overlay-root.sh"
+dest = "init"
+mode = "0755"
+
+[[image.assembly.files]]
+tree = "initramfs"
+src = "$provider.target/etc/helios/storage-layout.env"
+dest = "etc/helios/storage-layout.env"
+optional = true
+
+[[image.assembly.files]]
+tree = "initramfs"
+src = "$provider.target/lib/ld-linux-aarch64.so.1"
+dest = "lib/ld-linux-aarch64.so.1"
+mode = "0755"
+
+[[image.assembly.files]]
+tree = "initramfs"
+src = "$provider.target/lib/libc.so.6"
+dest = "lib/libc.so.6"
+
+[[image.assembly.files]]
+tree = "initramfs"
+src = "$provider.target/lib/libresolv.so.2"
+dest = "lib/libresolv.so.2"
+
+[[image.assembly.transforms]]
+kind = "gzip"
+src = "$provider.buildroot_output/images/Image"
+dest = "$assembly.tree.boot/kernel8.img"
+deterministic = true
+
+[[image.assembly.transforms]]
+kind = "compile-dts"
+src = "@assets/buildroot/dt-overlays/ov9782-overlay.dts"
+dest = "$assembly.tree.boot/overlays/ov9782-overlay.dtbo"
+
+[[image.assembly.transforms]]
+kind = "compile-dts"
+src = "@assets/buildroot/dt-overlays/helios-usb-power.dts"
+dest = "$assembly.tree.boot/overlays/helios-usb-power.dtbo"
+
+[[image.assembly.transforms]]
+kind = "compile-dts"
+src = "@assets/buildroot/dt-overlays/helios-cm5-fan.dts"
+dest = "$assembly.tree.boot/overlays/helios-cm5-fan.dtbo"
+
+[[image.assembly.busybox_initramfs]]
+tree = "initramfs"
+busybox = "$provider.target/bin/busybox"
+include_runtime_libs = false
+applets = ["sh", "mount", "mkdir", "sleep", "sync", "switch_root", "cat", "umount", "insmod"]
+
+[[image.assembly.filesystems]]
+id = "initramfs8"
+kind = "cpio-gzip"
+source_tree = "initramfs"
+output = "$assembly.tree.boot/initramfs8"
+deterministic = true
+
+[[image.assembly.filesystems]]
+id = "boot"
+kind = "vfat"
+source_tree = "boot"
+output = "$provider.images/boot.vfat"
+size = "18M"
+
+[[image.assembly.disks]]
+id = "sdcard"
+output = "$provider.images/sdcard.img"
+partition_table = "mbr"
+signature = "0x48454c49"
+first_lba = 1
+alignment_lba = 1
+
+[[image.assembly.disks.partitions]]
+name = "boot"
+type_alias = "fat32-lba"
+bootable = true
+image = "$provider.images/boot.vfat"
+
+[[image.assembly.disks.partitions]]
+name = "rootfs"
+type_alias = "linux"
+image = "$provider.images/rootfs.squashfs"

@@ -1,0 +1,36 @@
+description = "Shared runtime hardware-data layer for the appliance payloads: fan/sensor config plus shared pipeline and lighting templates."
+
+[[stage.files]]
+id = "hardware-fan-config"
+src = "@assets/hardware/runtime/etc/helios/fan.toml"
+dest = "/etc/helios/fan.toml"
+origin = "static-asset"
+
+[[stage.files]]
+id = "hardware-sensors-config"
+src = "@assets/hardware/runtime/etc/helios/sensors.toml"
+dest = "/etc/helios/sensors.toml"
+origin = "static-asset"
+
+[[stage.files]]
+id = "hardware-pipeline-templates"
+src = "@assets/hardware/runtime/usr/share/helios/pipeline-templates"
+dest = "/usr/share/helios/pipeline-templates"
+origin = "static-asset"
+
+[[stage.files]]
+id = "hardware-lighting-templates"
+src = "@assets/hardware/runtime/usr/share/helios/lighting-templates"
+dest = "/usr/share/helios/lighting-templates"
+origin = "static-asset"
+
+[image]
+kind = "buildroot"
+
+[image.feed]
+stage_files = [
+  "hardware-fan-config",
+  "hardware-sensors-config",
+  "hardware-pipeline-templates",
+  "hardware-lighting-templates",
+]

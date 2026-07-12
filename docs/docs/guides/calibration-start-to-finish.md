@@ -21,7 +21,7 @@ You are done when:
 
 If you do not have a stream yet:
 
-- [Create your first stream](/guides/create-your-first-stream)
+- [OS > Devices](/os/devices/overview)
 
 ## Step 1: Generate And Print A Board (ChArUco)
 

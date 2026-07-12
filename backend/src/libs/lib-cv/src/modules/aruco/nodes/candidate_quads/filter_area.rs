@@ -84,7 +84,7 @@ pub(super) fn cv_aruco_candidate_quads_filter_area(
             filtered_quads.push(*quad);
         }
 
-        let mut output = Vec::with_capacity(filtered_quads.capacity());
+        let mut output = Vec::with_capacity(filtered_quads.len());
         std::mem::swap(&mut output, filtered_quads);
         output
     });

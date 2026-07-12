@@ -1,0 +1,6 @@
+description = "Firmware/hardware layer for Raspberry Pi targets: board firmware, Pi runtime packages, camera tuning, gadget networking hardware, and Pi field-access units."
+target = "raspberry-pi"
+
+imports = [
+  "../platform-families/raspberry-pi/base.toml",
+]

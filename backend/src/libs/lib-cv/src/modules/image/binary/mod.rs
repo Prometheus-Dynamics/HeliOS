@@ -229,6 +229,7 @@ pub fn binary_image_slice(buffer: &ImageBuffer<Rgb<u8>, &[u8]>, threshold: u8) -
     output
 }
 
+#[allow(unsafe_code)]
 pub fn binary_image_gray_simd(image: &GrayImage, threshold: u8) -> GrayImage {
     let (width, height) = (image.width(), image.height());
     let src_pixels = image.as_raw();
@@ -386,6 +387,7 @@ fn ensure_mask_buffer(mask: &mut MaskBuffer, width: u32, height: u32) -> &mut [u
     &mut mask.buf[..]
 }
 
+#[allow(unsafe_code)]
 fn threshold_into(dst: &mut [u8], src: &[u8], threshold: u8, invert: bool) {
     #[cfg(target_arch = "aarch64")]
     if crate::simd::neon_enabled() {

@@ -1,0 +1,31 @@
+description = "Generic aarch64 Linux target: non-Pi board selection only."
+target = "generic-aarch64-linux"
+
+[image]
+kind = "buildroot"
+defconfig = "qemu_aarch64_virt_defconfig"
+config_overrides = [
+  ["BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES", "\"${project.root_dir}/gaia/configs/targets/linux-no-modules.fragment\""],
+  ["BR2_ROOTFS_POST_IMAGE_SCRIPT", "\"\""],
+  ["BR2_TARGET_ROOTFS_EXT2", "n"],
+]
+
+[[image.expected_images]]
+name = "sdcard.img"
+format = "raw"
+required = true
+
+[image.assembly]
+work_dir = "${workspace.build_dir}/assembly"
+out_dir = "$provider.images"
+
+[[image.assembly.disks]]
+id = "sdcard"
+output = "$provider.images/sdcard.img"
+partition_table = "mbr"
+signature = "0x48454c49"
+
+[[image.assembly.disks.partitions]]
+name = "rootfs"
+type_alias = "linux"
+image = "$provider.images/rootfs.squashfs"

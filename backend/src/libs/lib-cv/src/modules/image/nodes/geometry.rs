@@ -186,6 +186,44 @@ fn cv_crop_roi(frame: DynamicImage, roi_x: i64, roi_y: i64, roi_w: i64, roi_h: i
 }
 
 #[node(
+    id = "passthrough_roi",
+    summary = "Pass frame through and report zero ROI offsets.",
+    description = "Compatibility shim for graphs that include an ROI stage but are currently running with ROI disabled. The frame is passed through unchanged and offsets are zeroed.",
+    inputs(
+        "frame",
+        port(name = "roi_x", default = 0i64, meta(ui_min = 0, ui_max = 4096, ui_step = 1)),
+        port(name = "roi_y", default = 0i64, meta(ui_min = 0, ui_max = 4096, ui_step = 1)),
+        port(name = "roi_w", default = 0i64, meta(ui_min = 0, ui_max = 4096, ui_step = 1)),
+        port(name = "roi_h", default = 0i64, meta(ui_min = 0, ui_max = 4096, ui_step = 1))
+    ),
+    outputs("frame", "offset_x", "offset_y")
+)]
+fn cv_passthrough_roi(frame: DynamicImage, _roi_x: i64, _roi_y: i64, _roi_w: i64, _roi_h: i64) -> Result<(DynamicImage, i64, i64), NodeError> {
+    Ok((frame, 0, 0))
+}
+
+#[node(
+    id = "passthrough_roi_gray",
+    summary = "Convert frame to grayscale and report zero ROI offsets.",
+    description = "Compatibility shim for graphs that include a grayscale ROI crop stage but are currently running with ROI disabled. The full frame is converted to GrayImage and offsets are zeroed.",
+    inputs(
+        "frame",
+        port(name = "roi_x", default = 0i64, meta(ui_min = 0, ui_max = 4096, ui_step = 1)),
+        port(name = "roi_y", default = 0i64, meta(ui_min = 0, ui_max = 4096, ui_step = 1)),
+        port(name = "roi_w", default = 0i64, meta(ui_min = 0, ui_max = 4096, ui_step = 1)),
+        port(name = "roi_h", default = 0i64, meta(ui_min = 0, ui_max = 4096, ui_step = 1))
+    ),
+    outputs("frame", "offset_x", "offset_y")
+)]
+fn cv_passthrough_roi_gray(frame: DynamicImage, _roi_x: i64, _roi_y: i64, _roi_w: i64, _roi_h: i64) -> Result<(GrayImage, i64, i64), NodeError> {
+    let (fw, fh) = frame.dimensions();
+    if fw == 0 || fh == 0 {
+        return Ok((GrayImage::new(0, 0), 0, 0));
+    }
+    Ok((crate::modules::image::luma::crop_luma8_image(&frame, 0, 0, fw, fh), 0, 0))
+}
+
+#[node(
     id = "crop_roi_gray",
     summary = "Crop to ROI bounds as grayscale with passthrough disable semantics.",
     description = "Crops the frame to roi_x/roi_y/roi_w/roi_h and converts directly to GrayImage. If roi_w or roi_h is <= 0, ROI is treated as disabled and the full grayscale frame is returned with zero offsets.",
@@ -198,16 +236,16 @@ fn cv_crop_roi(frame: DynamicImage, roi_x: i64, roi_y: i64, roi_w: i64, roi_h: i
     ),
     outputs("frame", "offset_x", "offset_y")
 )]
-fn cv_crop_roi_gray(frame: &DynamicImage, roi_x: i64, roi_y: i64, roi_w: i64, roi_h: i64) -> Result<(GrayImage, i64, i64), NodeError> {
+fn cv_crop_roi_gray(frame: DynamicImage, roi_x: i64, roi_y: i64, roi_w: i64, roi_h: i64) -> Result<(GrayImage, i64, i64), NodeError> {
     let (fw, fh) = frame.dimensions();
     if fw == 0 || fh == 0 {
         return Ok((image::GrayImage::new(0, 0), 0, 0));
     }
 
     if let Some((x, y, w, h)) = roi_crop_bounds(fw, fh, roi_x, roi_y, roi_w, roi_h) {
-        Ok((crate::modules::image::luma::crop_luma8_image(frame, x, y, w, h), i64::from(x), i64::from(y)))
+        Ok((crate::modules::image::luma::crop_luma8_image(&frame, x, y, w, h), i64::from(x), i64::from(y)))
     } else {
-        Ok((crate::modules::image::luma::crop_luma8_image(frame, 0, 0, fw, fh), 0, 0))
+        Ok((crate::modules::image::luma::crop_luma8_image(&frame, 0, 0, fw, fh), 0, 0))
     }
 }
 

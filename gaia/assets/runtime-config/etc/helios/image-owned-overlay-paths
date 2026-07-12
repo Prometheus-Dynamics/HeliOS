@@ -1,0 +1,9 @@
+/usr/bin/helios-api
+/usr/bin/helios-engine
+/usr/bin/helios-peripherals
+/usr/bin/helios-updater
+/usr/bin/heliosctl
+/usr/bin/helios-provision
+/usr/bin/orion-node
+/usr/bin/orionctl
+/usr/local/bin/helios-provision-squashfs.sh

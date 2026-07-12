@@ -1,0 +1,30 @@
+description = "Shared frontend runtime-service layer: frontend service plus lighttpd runtime config."
+
+[[stage.files]]
+id = "frontend-lighttpd-config"
+src = "@assets/runtime-services/full/etc/lighttpd/helios-frontend.conf"
+dest = "/etc/lighttpd/helios-frontend.conf"
+origin = "static-asset"
+
+[[stage.files]]
+id = "frontend-lighttpd-proxy-config"
+src = "@assets/runtime-services/full/etc/lighttpd/conf-enabled/90-helios-frontend-proxy.conf"
+dest = "/etc/lighttpd/conf-enabled/90-helios-frontend-proxy.conf"
+origin = "static-asset"
+
+[[stage.services]]
+id = "helios-frontend-service"
+name = "helios-frontend.service"
+unit_path = "@assets/runtime-services/full/systemd/helios-frontend.service"
+
+[image]
+kind = "buildroot"
+
+[image.feed]
+stage_files = [
+  "frontend-lighttpd-config",
+  "frontend-lighttpd-proxy-config",
+]
+stage_services = [
+  "helios-frontend-service",
+]

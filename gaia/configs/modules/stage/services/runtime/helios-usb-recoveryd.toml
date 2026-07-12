@@ -1,6 +1,0 @@
-[units."helios-usb-recoveryd"]
-enabled = true
-src = "assets/services/helios-usb-recoveryd/helios-usb-recoveryd.service"
-targets = ["sysinit", "basic", "multi-user"]
-env_set = "helios-usb-recoveryd"
-env_file = "/etc/default/helios-usb-recoveryd"

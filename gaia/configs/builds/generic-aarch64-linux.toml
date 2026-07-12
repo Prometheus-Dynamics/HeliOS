@@ -1,0 +1,18 @@
+build_name = "helios-${input.profile}-generic-aarch64-linux"
+version = "v2026.2.0"
+description = "HeliOS generic aarch64 Linux image. Use the profile input to switch between base OS and full appliance builds."
+profile = "${input.profile}"
+
+imports = [
+  "../layers/base-os.toml",
+  "../layers/firmware-hardware-generic-aarch64-linux.toml",
+  { path = "../layers/app-layer.toml", when = { profile = "full" } },
+  { path = "../layers/release-layer.toml", when = { profile = "full" } },
+  "../targets/generic-aarch64-linux.toml",
+]
+
+[inputs.profile]
+description = "Build profile"
+kind = "enum"
+default = "base-os"
+choices = ["base-os", "full"]

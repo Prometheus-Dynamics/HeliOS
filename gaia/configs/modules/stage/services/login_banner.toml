@@ -1,8 +1,0 @@
-[units."helios-update-issue"]
-enabled = true
-src = "assets/services/login-banner/helios-update-issue.service"
-assets = [
-  { src = "helios-update-issue.sh", dst = "/opt/helios-update-issue.sh", mode = 493 },
-  { src = "getty-override.conf", dst = "/etc/systemd/system/getty@tty1.service.d/override.conf", mode = 420 },
-]
-

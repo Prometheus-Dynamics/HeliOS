@@ -1,0 +1,1 @@
+description = "Shared runtime service graph placeholder. Units, sockets, targets, and drop-ins should be composed here after payloads exist."

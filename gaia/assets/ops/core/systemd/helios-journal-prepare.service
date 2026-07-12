@@ -1,0 +1,16 @@
+[Unit]
+Description=Prepare persistent DATA journal directory
+Documentation=man:systemd.service(5)
+DefaultDependencies=no
+Requires=var-lib-helios.mount
+After=systemd-remount-fs.service var-lib-helios.mount
+Before=var-log-journal.mount systemd-journal-flush.service local-fs.target
+ConditionPathIsMountPoint=/var/lib/helios
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/install -d -m2755 -o root -g systemd-journal /var/lib/helios/journal
+RemainAfterExit=yes
+
+[Install]
+WantedBy=local-fs.target

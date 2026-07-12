@@ -18,7 +18,7 @@ You are done when you can keep a live preview visible while tuning pipelines or 
 
 If you do not have a stream yet:
 
-- [Create your first stream](/guides/create-your-first-stream)
+- [OS > Devices](/os/devices/overview)
 
 ## Open It (Pop Out)
 

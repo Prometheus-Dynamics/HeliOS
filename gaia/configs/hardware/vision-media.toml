@@ -1,0 +1,33 @@
+description = "Shared vision/media hardware package layer: ffmpeg, libcamera, codec, TPU, and tracing packages required by the peripherals and plugin runtime."
+
+[image]
+kind = "buildroot"
+config_overrides = [
+  ["BR2_PACKAGE_FFMPEG", "y"],
+  ["BR2_PACKAGE_FFMPEG_GPL", "y"],
+  ["BR2_PACKAGE_FFMPEG_SWSCALE", "y"],
+  ["BR2_PACKAGE_FFMPEG_ENCODERS", "\"mjpeg libx264 libopenh264 libx265\""],
+  ["BR2_PACKAGE_FFMPEG_DECODERS", "\"mjpeg h264 h264_v4l2m2m hevc hevc_v4l2m2m\""],
+  ["BR2_PACKAGE_FFMPEG_PROTOCOLS", "\"file\""],
+  ["BR2_PACKAGE_FFMPEG_FILTERS", "\"scale\""],
+  ["BR2_PACKAGE_LIBCAMERA", "y"],
+  ["BR2_PACKAGE_LIBCAMERA_V4L2", "y"],
+  ["BR2_PACKAGE_LIBCAMERA_PIPELINE_RPI_VC4", "y"],
+  ["BR2_PACKAGE_LIBCAMERA_PIPELINE_RPI_PISP", "y"],
+  ["BR2_PACKAGE_LIBCAMERA_PIPELINE_UVCVIDEO", "y"],
+  ["BR2_PACKAGE_LIBCAMERA_PIPELINE_VIMC", "y"],
+  ["BR2_PACKAGE_LIBCAMERA_PIPELINE_SIMPLE", "y"],
+  ["BR2_PACKAGE_LIBDRM", "y"],
+  ["BR2_PACKAGE_LIBOPENH264", "y"],
+  ["BR2_PACKAGE_LIBPISP", "y"],
+  ["BR2_PACKAGE_LIBURCU", "y"],
+  ["BR2_PACKAGE_LIBYUV", "y"],
+  ["BR2_PACKAGE_LTTNG_LIBUST", "y"],
+  ["BR2_PACKAGE_NUMACTL", "y"],
+  ["BR2_PACKAGE_ELFUTILS", "y"],
+  ["BR2_PACKAGE_BZIP2", "y"],
+  ["BR2_PACKAGE_X264", "y"],
+  ["BR2_PACKAGE_X265", "y"],
+  ["BR2_PACKAGE_CORALTPU", "y"],
+  ["BR2_PACKAGE_TENSORFLOW_LITE", "y"],
+]

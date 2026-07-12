@@ -1,0 +1,14 @@
+description = "Shared peripherals runtime-service layer: installs the helios-peripherals systemd unit."
+
+[[stage.services]]
+id = "helios-peripherals-service"
+name = "helios-peripherals.service"
+unit_path = "@assets/runtime-services/core/systemd/helios-peripherals.service"
+
+[image]
+kind = "buildroot"
+
+[image.feed]
+stage_services = [
+  "helios-peripherals-service",
+]

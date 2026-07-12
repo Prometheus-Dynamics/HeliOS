@@ -1,0 +1,10 @@
+[Unit]
+Description=Helios Provisioning
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/true
+
+[Install]
+WantedBy=multi-user.target

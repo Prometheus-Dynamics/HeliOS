@@ -1,0 +1,34 @@
+[Unit]
+Description=Helios API Service
+After=network.target
+Wants=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios
+ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios/panics
+ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios/api
+ExecStartPre=/usr/bin/install -d -m0755 /var/lib/helios/state
+ExecStartPre=/usr/bin/install -d -m0755 /usr/lib/helios/plugins/daedalus
+ExecStartPre=/usr/bin/install -d -m0755 /var/lib/helios/plugins/daedalus
+Environment=RUST_LOG=info
+Environment=HELIOS_API_BIND=0.0.0.0:5801
+EnvironmentFile=-/etc/default/helios-api.env
+ExecStart=/var/lib/helios/bin/helios-api
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=2
+TimeoutStopSec=45
+User=root
+Group=root
+WorkingDirectory=/var/lib/helios
+StateDirectory=helios
+LogsDirectory=helios
+LimitNOFILE=65536
+TasksMax=infinity
+OOMScoreAdjust=-300
+
+[Install]
+WantedBy=multi-user.target

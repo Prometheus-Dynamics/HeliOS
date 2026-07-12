@@ -1,0 +1,6 @@
+description = "Firmware/hardware layer for generic aarch64 Linux targets."
+target = "generic-aarch64-linux"
+
+imports = [
+  "../platform-families/aarch64-linux/base.toml",
+]

@@ -1,0 +1,33 @@
+[Unit]
+Description=Orion Node Service
+After=network.target local-fs.target
+Wants=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+RuntimeDirectory=orion
+RuntimeDirectoryMode=0755
+ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios/orion
+Environment=ORION_NODE_IPC_SOCKET=/run/orion/control.sock
+Environment=ORION_NODE_IPC_STREAM_SOCKET=/run/orion/control-stream.sock
+Environment=ORION_NODE_ID=node-local
+Environment=ORION_NODE_HTTP_ADDR=127.0.0.1:9100
+Environment=ORION_NODE_STATE_DIR=/var/lib/helios/orion
+EnvironmentFile=-/etc/default/orion-node.env
+ExecStart=/var/lib/helios/bin/orion-node
+Restart=always
+RestartSec=2
+TimeoutStopSec=30
+User=root
+Group=root
+WorkingDirectory=/var/lib/helios
+StateDirectory=helios
+LogsDirectory=helios
+LimitNOFILE=65536
+TasksMax=infinity
+OOMScoreAdjust=-700
+
+[Install]
+WantedBy=multi-user.target

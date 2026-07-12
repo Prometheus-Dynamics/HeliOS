@@ -1,0 +1,19 @@
+[Unit]
+Description=Bind persistent DATA journal to /var/log/journal
+Documentation=man:systemd.mount(5)
+DefaultDependencies=no
+Requires=var-lib-helios.mount
+Requires=helios-journal-prepare.service
+After=systemd-remount-fs.service var-lib-helios.mount helios-journal-prepare.service
+Before=systemd-journal-flush.service local-fs.target
+ConditionPathIsDirectory=/var/lib/helios/journal
+
+[Mount]
+What=/var/lib/helios/journal
+Where=/var/log/journal
+Type=none
+Options=bind
+TimeoutSec=10s
+
+[Install]
+WantedBy=local-fs.target

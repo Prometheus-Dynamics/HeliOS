@@ -29,11 +29,11 @@ serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 uuid = { workspace = true }
 lib-schema-migration = { path = "../lib-schema-migration" }
-libloading = { version = "0.9.0" }
+libloading = { workspace = true }
 serde_json = { workspace = true }
 image = { workspace = true, optional = true }
 imageproc = { workspace = true }
-ab_glyph = "0.2.32"
+ab_glyph = { workspace = true }
 lib-cv = { path = "../lib-cv", default-features = false }
 tracing = { workspace = true }
 rayon = { workspace = true }
@@ -42,13 +42,13 @@ daedalus = { workspace = true, features = ["engine", "plugins"], optional = true
 paste = { workspace = true, optional = true }
 utoipa = { workspace = true, optional = true }
 
-tract-core = { version = "0.22.1", optional = true }
-tract-tflite = { version = "0.22.1", optional = true }
-tract-onnx = { version = "0.22.1", optional = true }
-rusb = { version = "0.9.4", optional = true }
+tract-core = { workspace = true, optional = true }
+tract-tflite = { workspace = true, optional = true }
+tract-onnx = { workspace = true, optional = true }
+rusb = { workspace = true, optional = true }
 tokio = { workspace = true }
 libc = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
-tempfile = "3.27.0"
+tempfile = { workspace = true }

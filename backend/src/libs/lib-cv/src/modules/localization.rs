@@ -154,7 +154,7 @@ impl Default for PnpRefineConfig {
 }
 
 /// Pixel-space coordinates associated with a marker detection.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct PixelCoordinate {
     pub u: f64,
     pub v: f64,
@@ -167,7 +167,7 @@ impl PixelCoordinate {
 }
 
 /// Observation describing either Euclidean or pixel-space marker data.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MarkerObservation {
     pub id: u32,
     pub translation: Option<Translation3>,

@@ -45,6 +45,7 @@ TEMPLATES_DIR_REMOTE="${TEMPLATES_DIR_REMOTE:-/usr/share/helios/pipeline-templat
 FRONTEND_DIR_LOCAL="${FRONTEND_DIR_LOCAL:-$ROOT_DIR/frontend/build}"
 OTA_BASE_URL="${OTA_BASE_URL:-}"
 OTA_REQUESTED_BY="${OTA_REQUESTED_BY:-deploy-live}"
+BINARY_REVISION="${BINARY_REVISION:-}"
 
 ONLY="all" # all|binaries|plugins|frontend
 STRICT_BINARIES_ONLY="0"
@@ -60,10 +61,11 @@ REQUIRES_SSH="0"
 
 usage() {
   cat <<EOF
-Build + deploy Helios CM5 binaries and Daedalus plugins to a device, then restart services.
+Build + deploy Helios CM5 binaries and Daedalus plugins to a device.
+Binary deploys upload over SSH and activate through helios-updater-managed service revisions.
 
 Usage:
-  ./scripts/deploy-cm5.sh [options]
+  ./tools/deploy-live.sh [options]
 
 Options:
   --ssh <user@host>     SSH target (default: $SSH_TARGET_DEFAULT)
@@ -87,6 +89,7 @@ Options:
   --no-frontend         Skip uploading frontend assets
   --frontend-dir <dir>  Local frontend build dir (default: $FRONTEND_DIR_LOCAL)
   --ota-base-url <url>  OTA API base URL (default: derived from --ssh as http://host/v1)
+  --binary-revision <r> Explicit revision string for binary activation (default: generated)
   --no-strip            Do not strip debug sections from built artifacts before upload
   --fast-upload         Upload everything without hashing (default)
   --slow-upload         Hash local/remote to avoid uploading unchanged artifacts
@@ -102,6 +105,7 @@ Env vars (optional):
   RUSTFLAGS             Passed through to build scripts
   PLUGIN_DIR_REMOTE      Remote plugin dir
   OTA_BASE_URL           OTA API base URL override
+  BINARY_REVISION        Explicit revision string for binary activation
   DAEDALUS_HOST_PATH     Host path to a Daedalus checkout (optional dev override)
   STYX_HOST_PATH         Host path to a Styx checkout (optional dev override)
   LIBCAMERA_RS_HOST_PATH Host path to a libcamera-rs checkout (optional dev override)
@@ -219,6 +223,7 @@ while [[ $# -gt 0 ]]; do
       die "$1 has been removed; binaries and frontend now publish only through OTA"
       ;;
     --ota-base-url) OTA_BASE_URL="${2:-}"; shift 2 ;;
+    --binary-revision) BINARY_REVISION="${2:-}"; shift 2 ;;
     --no-strip) STRIP_DEBUG="0"; shift ;;
     --fast-upload) FAST_UPLOAD="1"; shift ;;
     --slow-upload) FAST_UPLOAD="0"; shift ;;
@@ -300,9 +305,7 @@ ensure_deps() {
       fi
     fi
     if [[ "$do_binaries" == "1" ]]; then
-      command -v curl >/dev/null 2>&1 || die "curl is required for binary OTA deploys"
-      command -v python3 >/dev/null 2>&1 || die "python3 is required for binary OTA deploys"
-      [[ -f "$OTA_RELEASE_PUBLISHER" ]] || die "missing OTA release publisher: $OTA_RELEASE_PUBLISHER"
+      needs_ssh="1"
     fi
     if [[ "$UPLOAD_FRONTEND" == "1" && "$do_frontend" == "1" ]]; then
       command -v curl >/dev/null 2>&1 || die "curl is required for frontend OTA deploys"
@@ -466,7 +469,7 @@ copy_plugins_out() {
   local profile_dir
   profile_dir=$(profile_dir_from_flag "$profile_flag")
 
-  local so_glob="$TARGET_BUILD_DIR/$target_triple/$profile_dir/libhelios_daedalus_*_plugin.so"
+  local so_glob="$TARGET_BUILD_DIR/$target_triple/$profile_dir/lib*_plugin.so"
   shopt -s nullglob
   local so_files=( $so_glob )
   shopt -u nullglob
@@ -539,7 +542,7 @@ needs_binary_build() {
   # (This avoids stale deployments when only the shared engine crate changes.)
   case "$package" in
     helios-api)
-      watch_paths+=("$ROOT_DIR/backend/src/helios-engine")
+      watch_paths+=("$ROOT_DIR/backend/src/helios/engine")
       ;;
   esac
 
@@ -587,7 +590,7 @@ needs_plugin_build() {
   local -a watch_paths=(
     "$ROOT_DIR/backend/Cargo.toml"
     "$ROOT_DIR/backend/Cargo.lock"
-    "$ROOT_DIR/backend/src/plugins/$package"
+    "$ROOT_DIR/backend/src/plugins/daedalus/$package"
   )
   if [[ -n "${DAEDALUS_HOST_PATH// }" ]]; then
     watch_paths+=("$DAEDALUS_HOST_PATH")
@@ -600,14 +603,11 @@ needs_plugin_build() {
   fi
 
   case "$package" in
-    helios-daedalus-cv-plugin)
+    cv-plugin)
       watch_paths+=("$ROOT_DIR/backend/src/libs/lib-cv")
       ;;
-    helios-daedalus-ai-plugin)
+    ai-plugin)
       watch_paths+=("$ROOT_DIR/backend/src/libs/lib-ai")
-      ;;
-    helios-daedalus-led-plugin)
-      watch_paths+=("$ROOT_DIR/backend/src/libs/lib-led-plugin" "$ROOT_DIR/backend/src/libs/lib-led-animations")
       ;;
   esac
 
@@ -637,10 +637,9 @@ if [[ "$BUILD" == "1" ]]; then
   if [[ "$do_plugins" == "1" ]]; then
     echo "Building Daedalus plugins ($TARGET_TRIPLE) $(profile_label)..."
     packages=(
-      "helios-daedalus-cv-plugin"
-      "helios-daedalus-ai-plugin"
-      "helios-daedalus-nt4-plugin"
-      "helios-daedalus-led-plugin"
+      "cv-plugin"
+      "ai-plugin"
+      "nt4-plugin"
     )
     pkg=""
     for pkg in "${packages[@]}"; do
@@ -658,7 +657,6 @@ if [[ "$BUILD" == "1" ]]; then
     bin_specs=(
       "helios-engine:helios-engine"
       "helios-api:helios-api"
-      "helios-api:helios-api-tools"
       "helios-peripherals:helios-peripherals"
       "helios-updater:helios-updater"
     )
@@ -839,7 +837,7 @@ if [[ "$UPLOAD" == "1" ]]; then
   }
 
   if [[ "$do_binaries" == "1" ]]; then
-    bins=("helios-engine" "helios-api" "helios-api-tools" "helios-peripherals" "helios-updater")
+    bins=("helios-engine" "helios-api" "helios-peripherals" "helios-updater")
     b=""
     for b in "${bins[@]}"; do
       [[ -f "$BINS_DIR/$b" ]] || die "missing binary: $BINS_DIR/$b"
@@ -855,7 +853,7 @@ if [[ "$UPLOAD" == "1" ]]; then
     fi
 
     if [[ "${#bins_to_upload[@]}" -gt 0 ]]; then
-      echo "Preparing ${#bins_to_upload[@]} binary artifact(s) for OTA publish..."
+      echo "Preparing ${#bins_to_upload[@]} binary artifact(s) for live updater activation..."
     else
       echo "Binaries unchanged; skipping binary upload."
     fi
@@ -958,8 +956,28 @@ if [[ "$UPLOAD" == "1" ]]; then
 
   if [[ "$do_binaries" == "1" ]]; then
     if [[ "${#bins_to_upload[@]}" -gt 0 ]]; then
-      echo "Publishing ${#bins_to_upload[@]} binary artifact(s) via OTA -> $OTA_BASE_URL"
-      ota_publish_release "service_bundle" "$BINS_DIR" "$OTA_BASE_URL" "${bins_to_upload[@]}"
+      revision="$BINARY_REVISION"
+      if [[ -z "${revision// }" ]]; then
+        revision="dev-$(date +%Y%m%d-%H%M%S)"
+      fi
+      remote_incoming="/var/lib/helios/releases/incoming/$revision"
+      echo "Uploading ${#bins_to_upload[@]} binary artifact(s) -> $SSH_TARGET:$remote_incoming"
+      ssh_exec "install -d -m0755 '$remote_incoming'"
+      ssh_upload_tar "$BINS_DIR" "$remote_incoming" "${bins_to_upload[@]}"
+      ssh_exec "chmod 0755 $(
+        for b in "${bins_to_upload[@]}"; do
+          printf '%q ' "$remote_incoming/$b"
+        done
+      )"
+
+      for b in "${bins_to_upload[@]}"; do
+        echo "Activating $b -> revision $revision"
+        activate_cmd="helios-updater service activate --name \"$b\" --revision \"$revision\""
+        if [[ "$RESTART_SERVICES" == "0" ]]; then
+          activate_cmd="$activate_cmd --restart false"
+        fi
+        ssh_exec "sh -lc 'helios-updater service stage --name \"$b\" --revision \"$revision\" --binary \"$remote_incoming/$b\" && $activate_cmd'"
+      done
     fi
   fi
 fi

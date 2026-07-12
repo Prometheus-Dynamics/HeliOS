@@ -29,7 +29,7 @@ Reason:
 
 If you are unsure where to set this:
 
-- [Create your first stream](/guides/create-your-first-stream)
+- [OS > Devices](/os/devices/overview)
 - [Stream tab](/os/devices/streams/stream-tab)
 
 ## Step 1: Camera Controls (Get A Clean, Sharp Image)

@@ -5,11 +5,12 @@ build/
 output/
 gaia/build/
 gaia/output/
+.gaia/
+backend/.gaia/
 backend/third_party
 */.codex-*/*
 .cache/
 .vscode/
-*target*/
 tmp/
 __pycache__/
 *.pyc

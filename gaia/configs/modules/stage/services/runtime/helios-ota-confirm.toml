@@ -1,6 +1,0 @@
-[units."helios-ota-confirm"]
-enabled = true
-src = "assets/services/ota/helios-ota-confirm.service"
-assets = [
-  { src = "assets/services/ota/helios-ota-confirm.sh", dst = "/usr/local/bin/helios-ota-confirm.sh", mode = 493 },
-]

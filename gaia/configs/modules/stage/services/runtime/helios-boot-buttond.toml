@@ -1,9 +1,0 @@
-[units."helios-boot-buttond"]
-enabled = true
-src = "assets/services/helios-boot-buttond/helios-boot-buttond.service"
-targets = ["multi-user"]
-env_set = "helios-boot-buttond"
-env_file = "/etc/default/helios-boot-buttond"
-assets = [
-  { src = "assets/services/helios-boot-buttond/helios-network-reset.sh", dst = "/usr/local/bin/helios-network-reset.sh", mode = 493 },
-]

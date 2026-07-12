@@ -1,0 +1,122 @@
+description = "Shared identity/access layer: hostname, OS identity files, locale, timezone, SSH policy, and watchdog defaults."
+
+[stage]
+
+[[stage.files]]
+id = "identity-hostname"
+src = "@assets/identity/etc/hostname"
+dest = "/etc/hostname"
+origin = "static-asset"
+
+[[stage.files]]
+id = "identity-hosts"
+src = "@assets/identity/etc/hosts"
+dest = "/etc/hosts"
+origin = "static-asset"
+
+[[stage.files]]
+id = "identity-nsswitch"
+src = "@assets/identity/etc/nsswitch.conf"
+dest = "/etc/nsswitch.conf"
+origin = "static-asset"
+
+[[stage.files]]
+id = "identity-os-release"
+src = "@assets/identity/etc/os-release"
+dest = "/etc/os-release"
+origin = "static-asset"
+
+[[stage.files]]
+id = "identity-version"
+src = "@assets/identity/etc/helios/version"
+dest = "/etc/helios/version"
+origin = "static-asset"
+
+[[stage.files]]
+id = "identity-build-id"
+src = "@assets/identity/etc/helios/build-id"
+dest = "/etc/helios/build-id"
+origin = "static-asset"
+
+[[stage.files]]
+id = "identity-build-epoch"
+src = "@assets/identity/etc/helios/build.epoch"
+dest = "/etc/helios/build.epoch"
+origin = "static-asset"
+
+[[stage.files]]
+id = "identity-defaults"
+src = "@assets/identity/etc/default/helios-identity"
+dest = "/etc/default/helios-identity"
+origin = "static-asset"
+
+[[stage.files]]
+id = "identity-locale-conf"
+src = "@assets/identity/etc/locale.conf"
+dest = "/etc/locale.conf"
+origin = "static-asset"
+
+[[stage.files]]
+id = "identity-default-locale"
+src = "@assets/identity/etc/default/locale"
+dest = "/etc/default/locale"
+origin = "static-asset"
+
+[[stage.files]]
+id = "identity-timezone"
+src = "@assets/identity/etc/timezone"
+dest = "/etc/timezone"
+origin = "static-asset"
+
+[[stage.files]]
+id = "identity-sshd-config"
+src = "@assets/identity/etc/ssh/sshd_config"
+dest = "/etc/ssh/sshd_config"
+origin = "static-asset"
+
+[[stage.files]]
+id = "identity-sshd-service-dropin"
+src = "@assets/identity/etc/systemd/system/sshd.service.d/10-helios.conf"
+dest = "/etc/systemd/system/sshd.service.d/10-helios.conf"
+origin = "static-asset"
+
+[[stage.files]]
+id = "identity-watchdog"
+src = "@assets/identity/etc/systemd/system.conf.d/50-helios-watchdog.conf"
+dest = "/etc/systemd/system.conf.d/50-helios-watchdog.conf"
+origin = "static-asset"
+
+[[stage.files]]
+id = "identity-set-build-time-script"
+src = "@assets/identity/usr/local/bin/helios-set-build-time.sh"
+dest = "/usr/local/bin/helios-set-build-time.sh"
+origin = "static-asset"
+mode = 493
+
+[[stage.services]]
+id = "identity-set-build-time-service"
+name = "helios-set-build-time.service"
+unit_path = "@assets/identity/etc/systemd/system/helios-set-build-time.service"
+
+[image]
+kind = "buildroot"
+
+[image.feed]
+stage_files = [
+  "identity-hostname",
+  "identity-hosts",
+  "identity-nsswitch",
+  "identity-os-release",
+  "identity-version",
+  "identity-build-id",
+  "identity-build-epoch",
+  "identity-defaults",
+  "identity-locale-conf",
+  "identity-default-locale",
+  "identity-timezone",
+  "identity-sshd-config",
+  "identity-sshd-service-dropin",
+  "identity-watchdog",
+  "identity-set-build-time-script",
+]
+stage_services = ["identity-set-build-time-service"]

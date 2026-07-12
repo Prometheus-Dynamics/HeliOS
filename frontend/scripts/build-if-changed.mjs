@@ -140,7 +140,10 @@ function runFrontendBuild() {
   const result = spawnSync('bun', ['run', 'build'], {
     cwd: frontendDir,
     stdio: 'inherit',
-    env: process.env
+    env: {
+      ...process.env,
+      SKIP_DOCS_SYNC: process.env.SKIP_DOCS_SYNC ?? '1'
+    }
   });
   if (result.status !== 0) {
     process.exit(result.status ?? 1);

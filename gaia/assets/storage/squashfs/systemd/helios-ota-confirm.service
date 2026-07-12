@@ -1,0 +1,18 @@
+[Unit]
+Description=Confirm prepared HeliOS OTA boot
+After=helios-provision.target local-fs.target var-lib-helios.mount
+Wants=helios-provision.target
+Before=helios-updater.service
+ConditionPathExists=/var/lib/helios/ota/confirm-request.env
+
+[Service]
+Type=oneshot
+ExecStart=/var/lib/helios/bin/helios-updater confirm-boot
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+TimeoutStartSec=30
+StandardOutput=journal+console
+StandardError=journal+console
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

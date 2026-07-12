@@ -1,0 +1,6 @@
+description = "Aggregated full runtime-service layer: frontend and peripherals runtime wiring."
+
+imports = [
+  "./frontend.toml",
+  "./peripherals.toml",
+]

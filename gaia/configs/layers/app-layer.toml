@@ -1,0 +1,12 @@
+description = "Application layer: architectural aarch64 builds of the backend, peripherals, plugins, frontend bundle, app services, and app runtime package dependencies."
+target = "aarch64-linux"
+
+imports = [
+  "../network/runtime-packages.toml",
+  "../hardware/vision-media.toml",
+  "../hardware/frontend-runtime.toml",
+  "../payloads/backend-core.toml",
+  "../payloads/full.toml",
+  "../runtime-services/backend-core.toml",
+  "../runtime-services/full.toml",
+]

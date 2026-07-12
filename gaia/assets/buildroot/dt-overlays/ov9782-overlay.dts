@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// Raspberry Pi camera overlay for OmniVision OV9782 on CSI connector
+// Raspberry Pi camera overlay for OmniVision OV9782 on CSI connector.
+// The kernel binds this through the ov9282 driver using the ovti,ov9782 variant.
 /dts-v1/;
 /plugin/;
 

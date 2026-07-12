@@ -1,0 +1,17 @@
+description = "Shared frontend payload layer: installs the prebuilt frontend bundle into the runtime image."
+
+[stage]
+
+[[stage.files]]
+id = "frontend-prebuilt-bundle"
+src = "frontend/build"
+dest = "/opt/helios/frontend"
+origin = "static-asset"
+
+[image]
+kind = "buildroot"
+
+[image.feed]
+stage_files = [
+  "frontend-prebuilt-bundle",
+]

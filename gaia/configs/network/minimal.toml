@@ -1,0 +1,15 @@
+description = "Shared minimal network layer: Ethernet DHCP only."
+
+[stage]
+
+[[stage.files]]
+id = "network-ethernet-dhcp"
+src = "@assets/network/etc/systemd/network/10-eth0.network"
+dest = "/etc/systemd/network/10-eth0.network"
+origin = "static-asset"
+
+[image]
+kind = "buildroot"
+
+[image.feed]
+stage_files = ["network-ethernet-dhcp"]

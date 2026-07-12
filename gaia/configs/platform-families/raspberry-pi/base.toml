@@ -1,0 +1,9 @@
+description = "Shared Raspberry Pi platform-family defaults for aarch64 appliance targets."
+target = "raspberry-pi"
+
+imports = [
+  "./hardware.toml",
+  "./hardware-vision.toml",
+  "./network-gadget.toml",
+  "./ops-gadget.toml",
+]

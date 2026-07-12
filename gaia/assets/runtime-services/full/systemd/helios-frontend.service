@@ -1,0 +1,18 @@
+[Unit]
+Description=Helios Frontend (static bundle)
+After=network.target local-fs.target
+Wants=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/helios/frontend
+ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios
+ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios/frontend
+ExecStart=/usr/sbin/lighttpd -D -f /etc/lighttpd/helios-frontend.conf
+Restart=on-failure
+RestartSec=2
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target

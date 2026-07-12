@@ -10,22 +10,21 @@ doctest = false
 workspace = true
 
 [dependencies]
-lib-runtime-policy = { path = "../lib-runtime-policy" }
 tokio = {workspace = true}
 futures = {workspace = true}
 tracing = {workspace = true}
-default-net = "0.22.0"
-rtnetlink = "0.20.0"
-netlink-packet-route = "0.29.0"
-hostname = {version = "0.4.2", features = ["set"]}
+default-net = { workspace = true }
+rtnetlink = { workspace = true }
+netlink-packet-route = { workspace = true }
+hostname = { workspace = true }
 thiserror = {workspace = true}
 serde = {workspace = true}
-get_if_addrs = "0.5.3"
-mdns-sd = "0.18.2"
+get_if_addrs = { workspace = true }
+mdns-sd = { workspace = true }
 utoipa = { workspace = true }
 async-trait = { workspace = true }
 libc = { workspace = true }
-nix = { version = "0.31.2", default-features = false, features = ["signal", "process"] }
+nix = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3.27"
+tempfile = { workspace = true }

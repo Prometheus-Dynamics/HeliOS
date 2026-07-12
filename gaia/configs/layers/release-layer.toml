@@ -1,0 +1,10 @@
+description = "Release layer: product identity, defaults, env policy, writable-state policy, generic runtime data, diagnostics, maintenance, and release-specific service policy."
+target = "aarch64-linux"
+
+imports = [
+  "../identity/base.toml",
+  "../hardware/minimal.toml",
+  "../storage/squashfs-data.toml",
+  "../runtime-config/base.toml",
+  "../ops/base.toml",
+]

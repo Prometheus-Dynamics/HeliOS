@@ -1,0 +1,31 @@
+description = "Shared Raspberry Pi gadget-network overlay. CM4 and CM5 can share this without copying network fabric files into target layers."
+
+[stage]
+
+[[stage.files]]
+id = "network-usbbr0-netdev"
+src = "@assets/network/etc/systemd/network/10-usbbr0.netdev"
+dest = "/etc/systemd/network/10-usbbr0.netdev"
+origin = "static-asset"
+
+[[stage.files]]
+id = "network-usb0-bridge"
+src = "@assets/network/etc/systemd/network/10-usb0.network"
+dest = "/etc/systemd/network/10-usb0.network"
+origin = "static-asset"
+
+[[stage.files]]
+id = "network-usbbr0-address"
+src = "@assets/network/etc/systemd/network/12-usbbr0.network"
+dest = "/etc/systemd/network/12-usbbr0.network"
+origin = "static-asset"
+
+[image]
+kind = "buildroot"
+
+[image.feed]
+stage_files = [
+  "network-usbbr0-netdev",
+  "network-usb0-bridge",
+  "network-usbbr0-address",
+]

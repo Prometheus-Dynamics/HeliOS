@@ -401,6 +401,8 @@ impl CvImagePlugin {
         registry.merge::<geometry::cv_rotate90>()?;
         registry.merge::<geometry::cv_crop>()?;
         registry.merge::<geometry::cv_crop_roi>()?;
+        registry.merge::<geometry::cv_passthrough_roi>()?;
+        registry.merge::<geometry::cv_passthrough_roi_gray>()?;
         registry.merge::<geometry::cv_crop_roi_gray>()?;
         registry.merge::<geometry::cv_roi_offsets>()?;
         registry.merge::<geometry::cv_roi>()?;

@@ -1,0 +1,60 @@
+description = "Shared backend-core runtime-service layer: core backend units, sockets, and tightly-coupled service assets."
+
+[[stage.files]]
+id = "runtime-api-startup"
+src = "@assets/runtime-services/core/etc/helios/startup.toml"
+dest = "/etc/helios/startup.toml"
+origin = "static-asset"
+
+[[stage.files]]
+id = "runtime-api-default-fmap"
+src = "@assets/runtime-services/core/usr/share/helios/media/FRC2026_ANDYMARK.fmap"
+dest = "/usr/share/helios/media/FRC2026_ANDYMARK.fmap"
+origin = "static-asset"
+
+[[stage.services]]
+id = "orion-node-service"
+name = "orion-node.service"
+unit_path = "@assets/runtime-services/core/systemd/orion-node.service"
+
+[[stage.services]]
+id = "helios-api-service"
+name = "helios-api.service"
+unit_path = "@assets/runtime-services/core/systemd/helios-api.service"
+
+[[stage.services]]
+id = "helios-engine-service"
+name = "helios-engine.service"
+unit_path = "@assets/runtime-services/core/systemd/helios-engine.service"
+
+[[stage.services]]
+id = "helios-engine-socket"
+name = "helios-engine.socket"
+unit_path = "@assets/runtime-services/core/systemd/helios-engine.socket"
+
+[[stage.services]]
+id = "helios-updater-service"
+name = "helios-updater.service"
+unit_path = "@assets/runtime-services/core/systemd/helios-updater.service"
+
+[[stage.services]]
+id = "helios-updater-socket"
+name = "helios-updater.socket"
+unit_path = "@assets/runtime-services/core/systemd/helios-updater.socket"
+
+[image]
+kind = "buildroot"
+
+[image.feed]
+stage_files = [
+  "runtime-api-startup",
+  "runtime-api-default-fmap",
+]
+stage_services = [
+  "orion-node-service",
+  "helios-api-service",
+  "helios-engine-service",
+  "helios-engine-socket",
+  "helios-updater-service",
+  "helios-updater-socket",
+]

@@ -3,7 +3,7 @@ schema_version = 1
 [reserved_pipeline_ids]
 owner = "HeliOS"
 boundary = "helios-engine <-> frontend reserved runtime pipeline ids"
-source_of_truth = "backend/src/helios-engine/src/contracts.rs"
+source_of_truth = "backend/src/helios/engine/src/contracts.rs"
 raw_pipeline_uuid = "00000000-0000-0000-0000-0000000000aa"
 calibration_mode_pipeline_uuid = "00000000-0000-0000-0000-00000000c411"
 

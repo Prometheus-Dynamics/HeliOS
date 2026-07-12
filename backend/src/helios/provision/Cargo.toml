@@ -1,0 +1,12 @@
+[package]
+name = "helios-provision"
+version = "0.1.1"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+lib-schema-migration = { path = "../../libs/lib-schema-migration" }
+serde = { workspace = true, features = ["derive"] }
+toml = { workspace = true }
+thiserror = { workspace = true }

@@ -1,0 +1,7 @@
+[Match]
+Property=DEVTYPE=gadget
+
+[Network]
+Bridge=usbbr0
+LinkLocalAddressing=no
+ConfigureWithoutCarrier=yes

@@ -1,0 +1,9 @@
+description = "Base OS layer: shared Buildroot source, core packages, squashfs rootfs mode, and OS features used by every target."
+target = "aarch64-linux"
+
+imports = [
+  "../workspace/base.toml",
+  "../os/base.toml",
+  "../os/storage/squashfs.toml",
+  "../network/minimal.toml",
+]

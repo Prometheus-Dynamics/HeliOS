@@ -1,7 +1,0 @@
-[units."helios-set-build-time"]
-enabled = true
-src = "assets/services/time/helios-set-build-time.service"
-targets = ["sysinit"]
-assets = [
-  { src = "assets/services/time/helios-set-build-time.sh", dst = "/usr/local/bin/helios-set-build-time.sh", mode = 493 },
-]

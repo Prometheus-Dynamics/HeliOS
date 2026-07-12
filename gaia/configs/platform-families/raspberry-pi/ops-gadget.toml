@@ -1,0 +1,104 @@
+description = "Shared Raspberry Pi gadget and USB-power operations overlay for CM4 and CM5."
+
+[[stage.files]]
+id = "pi-gadget-dnsmasq-conf"
+src = "@assets/platform-families/raspberry-pi/gadget/etc/dnsmasq.d/usb0.conf"
+dest = "/etc/dnsmasq.d/usb0.conf"
+origin = "static-asset"
+
+[[stage.files]]
+id = "pi-gadget-usb-power-rules"
+src = "@assets/platform-families/raspberry-pi/gadget/etc/udev/rules.d/99-helios-usb-power.rules"
+dest = "/etc/udev/rules.d/99-helios-usb-power.rules"
+origin = "static-asset"
+
+[[stage.files]]
+id = "pi-gadget-modules-load"
+src = "@assets/platform-families/raspberry-pi/gadget/etc/modules-load.d/usb-gadget.conf"
+dest = "/etc/modules-load.d/usb-gadget.conf"
+origin = "static-asset"
+
+[[stage.files]]
+id = "pi-gadget-debug-dropin"
+src = "@assets/platform-families/raspberry-pi/gadget/etc/systemd/system/helios-usb-gadget.service.d/debug.conf"
+dest = "/etc/systemd/system/helios-usb-gadget.service.d/debug.conf"
+origin = "static-asset"
+
+[[stage.files]]
+id = "pi-gadget-diagnostics-dropin"
+src = "@assets/platform-families/raspberry-pi/gadget/etc/systemd/system/helios-usb-gadget.service.d/diagnostics.conf"
+dest = "/etc/systemd/system/helios-usb-gadget.service.d/diagnostics.conf"
+origin = "static-asset"
+
+[[stage.files]]
+id = "pi-dnsmasq-diagnostics-dropin"
+src = "@assets/platform-families/raspberry-pi/gadget/etc/systemd/system/helios-dnsmasq.service.diagnostics.conf"
+dest = "/etc/systemd/system/helios-dnsmasq.service.d/diagnostics.conf"
+origin = "static-asset"
+
+[[stage.files]]
+id = "pi-gadget-setup-script"
+src = "@assets/platform-families/raspberry-pi/gadget/usr/local/bin/usb-gadget-setup.sh"
+dest = "/usr/local/bin/usb-gadget-setup.sh"
+origin = "static-asset"
+
+[[stage.files]]
+id = "pi-gadget-reset-script"
+src = "@assets/platform-families/raspberry-pi/gadget/usr/local/bin/usb-gadget-reset.sh"
+dest = "/usr/local/bin/usb-gadget-reset.sh"
+origin = "static-asset"
+
+[[stage.files]]
+id = "pi-gadget-watchdog-script"
+src = "@assets/platform-families/raspberry-pi/gadget/usr/local/bin/usb-gadget-watchdog.sh"
+dest = "/usr/local/bin/usb-gadget-watchdog.sh"
+origin = "static-asset"
+
+[[stage.files]]
+id = "pi-usb-power-setup-script"
+src = "@assets/platform-families/raspberry-pi/gadget/usr/local/bin/helios-usb-power-setup.sh"
+dest = "/usr/local/bin/helios-usb-power-setup.sh"
+origin = "static-asset"
+
+[[stage.services]]
+id = "pi-usb-power-service"
+name = "helios-usb-power.service"
+unit_path = "@assets/platform-families/raspberry-pi/gadget/systemd/helios-usb-power.service"
+
+[[stage.services]]
+id = "pi-usb-gadget-service"
+name = "helios-usb-gadget.service"
+unit_path = "@assets/platform-families/raspberry-pi/gadget/systemd/helios-usb-gadget.service"
+
+[[stage.services]]
+id = "pi-usb-gadget-watchdog-service"
+name = "helios-usb-gadget-watchdog.service"
+unit_path = "@assets/platform-families/raspberry-pi/gadget/systemd/helios-usb-gadget-watchdog.service"
+
+[[stage.services]]
+id = "pi-dnsmasq-service"
+name = "helios-dnsmasq.service"
+unit_path = "@assets/platform-families/raspberry-pi/gadget/systemd/helios-dnsmasq.service"
+
+[image]
+kind = "buildroot"
+
+[image.feed]
+stage_files = [
+  "pi-gadget-dnsmasq-conf",
+  "pi-gadget-usb-power-rules",
+  "pi-gadget-modules-load",
+  "pi-gadget-debug-dropin",
+  "pi-gadget-diagnostics-dropin",
+  "pi-dnsmasq-diagnostics-dropin",
+  "pi-gadget-setup-script",
+  "pi-gadget-reset-script",
+  "pi-gadget-watchdog-script",
+  "pi-usb-power-setup-script",
+]
+stage_services = [
+  "pi-usb-power-service",
+  "pi-usb-gadget-service",
+  "pi-usb-gadget-watchdog-service",
+  "pi-dnsmasq-service",
+]

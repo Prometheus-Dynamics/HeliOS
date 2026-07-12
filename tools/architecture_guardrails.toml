@@ -1022,19 +1022,7 @@ review_note = "Engine IPC dispatcher state, journal retirement, reconnect handli
 path = "backend/src/helios-api/src/ipc/engine/rpc.rs"
 max_lines = 820
 owner = "HeliOS"
-review_note = "Engine IPC RPC wrappers now live here; keep transport/session bootstrap, dispatcher internals, and runtime-policy definitions out of this request surface."
-
-[[line_limits]]
-path = "backend/src/libs/lib-runtime-policy/src/engine_ipc.rs"
-max_lines = 180
-owner = "HeliOS"
-review_note = "Engine IPC socket discovery policy, timeout constants, queue sizing, and scaling policy now live here; keep request dispatch and transport bootstrap separate."
-
-[[line_limits]]
-path = "backend/src/libs/lib-runtime-policy/src/daedalus_runtime.rs"
-max_lines = 140
-owner = "HeliOS"
-review_note = "Daedalus plugin install roots, upload roots, registry snapshot ownership, and plugin search paths now live here; keep API/engine registry consumers free of local env parsing."
+review_note = "Engine IPC RPC wrappers now live here; keep transport/session bootstrap, dispatcher internals, and generated runtime env definitions out of this request surface."
 
 [[line_limits]]
 path = "backend/src/helios-api/src/ipc/engine/transport.rs"

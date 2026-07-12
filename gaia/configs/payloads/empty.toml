@@ -1,0 +1,1 @@
+description = "Empty payload layer for the bare base OS. Application artifacts and install wiring belong in non-base product compositions."

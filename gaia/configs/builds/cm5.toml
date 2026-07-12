@@ -1,0 +1,18 @@
+build_name = "helios-${input.profile}-cm5"
+version = "v2026.2.0"
+description = "HeliOS CM5 image. Use the profile input to switch between base OS and full appliance builds."
+profile = "${input.profile}"
+
+imports = [
+  "../layers/base-os.toml",
+  "../layers/firmware-hardware-pi.toml",
+  { path = "../layers/app-layer.toml", when = { profile = "full" } },
+  { path = "../layers/release-layer.toml", when = { profile = "full" } },
+  "../targets/cm5.toml",
+]
+
+[inputs.profile]
+description = "Build profile"
+kind = "enum"
+default = "full"
+choices = ["base-os", "full"]

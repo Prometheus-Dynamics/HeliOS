@@ -22,8 +22,6 @@ gpu = ["engine", "daedalus/gpu-wgpu"]
 [dependencies]
 tokio = {workspace = true}
 tracing = {workspace = true}
-image = {workspace = true}
-imageproc = {workspace = true}
 rayon = {workspace = true}
 ffmpeg = {workspace = true}
 async-trait = {workspace = true}
@@ -34,21 +32,19 @@ daedalus = { workspace = true, features = ["engine", "plugins", "gpu"], optional
 daedalus-data = { workspace = true, optional = true }
 daedalus-macros = { workspace = true, optional = true }
 
-fast_image_resize = { version = "6.0.0", features = ["image", "rayon"] }
-libblur = { version = "0.23.3", features = ["image"] }
-num = "0.4.3"
-ab_glyph = "0.2.32"
+num = { workspace = true }
+ab_glyph = { workspace = true }
 serde_json = {workspace = true}
-bytemuck = "1.25.0"
-wide = "1.2.0"
+bytemuck = { workspace = true }
+wide = { workspace = true }
 geo = { workspace = true }
-nalgebra = "0.34.2"
+nalgebra = { workspace = true }
 rand = { workspace = true }
 once_cell = { workspace = true }
 serde_bytes = { workspace = true }
 paste = { workspace = true, optional = true }
-memchr = "2.8.0"
-smallvec = "1.15.1"
+memchr = { workspace = true }
+smallvec = { workspace = true }
 
 [dev-dependencies]
-criterion = { version = "0.8", features = ["html_reports"] }
+criterion = { workspace = true }

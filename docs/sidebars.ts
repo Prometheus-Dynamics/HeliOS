@@ -65,11 +65,9 @@ const sidebars: SidebarsConfig = {
           label: 'Streams',
           items: [
             'guides/camera-setup',
-            'guides/create-your-first-stream',
             'guides/ov9782-best-practices',
             'guides/usb-cameras',
             'guides/recording-and-capture-last',
-            'guides/stream-performance',
           ],
         },
         {
@@ -86,10 +84,9 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: 'category',
-          label: 'Calibration + Rig',
+          label: 'Calibration',
           items: [
             'guides/calibration-start-to-finish',
-            'guides/pose-and-rig-layout',
           ],
         },
         {
@@ -116,8 +113,6 @@ const sidebars: SidebarsConfig = {
           label: 'Integrations',
           items: [
             'guides/networktables-nt4',
-            'guides/peers-discovery-and-registration',
-            'guides/helios-interdevice-protocol',
           ],
         },
       ],
@@ -183,16 +178,6 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: 'category',
-          label: 'Peers',
-          items: [
-            'os/peers/overview',
-            'os/peers/discovery',
-            'os/peers/registration',
-            'os/peers/monitoring',
-          ],
-        },
-        {
-          type: 'category',
           label: 'Media',
           items: [
             'os/media/overview',
@@ -232,7 +217,6 @@ const sidebars: SidebarsConfig = {
           items: [
             'os/settings/overview',
             'os/settings/networking',
-            'os/settings/rig-layout',
             'os/settings/diagnostics',
             'os/settings/updater',
             'os/settings/plugins',

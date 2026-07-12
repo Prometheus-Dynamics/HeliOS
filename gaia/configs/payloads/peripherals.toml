@@ -1,0 +1,48 @@
+description = "Shared peripherals payload layer: installs the helios-peripherals binary."
+
+[providers.rust]
+allow_nested_build = true
+timeout_seconds = 7200
+
+[[sources]]
+id = "backend-workspace"
+kind = "path"
+path = "backend"
+identity_ignore = ["target", ".gaia"]
+refresh = "never"
+pin = "locked"
+
+[[artifacts]]
+id = "helios-peripherals"
+kind = "rust"
+package = "helios-peripherals"
+source = "backend-workspace"
+target = "aarch64-unknown-linux-gnu"
+profile = "release"
+install_name = "helios-peripherals"
+install_class = "binary"
+install_dest_hint = "/usr/bin/helios-peripherals"
+output_path = "gaia/output/${build.name}/artifacts/helios-peripherals"
+
+[artifacts.execution]
+backend = "docker"
+
+[artifacts.execution.docker]
+image = "helios-cross-rust194"
+
+[[install]]
+id = "install-helios-peripherals"
+artifact = "helios-peripherals"
+dest = "/usr/bin/helios-peripherals"
+replace = true
+mode = 493
+owner = "root"
+group = "root"
+
+[image]
+kind = "buildroot"
+
+[image.feed]
+install_entries = [
+  "install-helios-peripherals",
+]

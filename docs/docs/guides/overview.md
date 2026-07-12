@@ -16,7 +16,7 @@ These guides are written for teams using **HVS - Raze** devices running premade 
 1. Get the device powered and physically connected.
 2. Get it reachable from your laptop.
 3. Log in and confirm the device is actually healthy.
-4. Create your first stream.
+4. Open the runtime surfaces and confirm resources are present.
 5. Attach a pipeline and confirm you are viewing the right output.
 6. Tune camera controls and the pipeline so detections are stable.
 
@@ -25,7 +25,6 @@ Suggested order:
 - [Hardware setup](/guides/hardware-setup)
 - [Get online](/guides/get-online)
 - [First login and sanity check](/guides/first-login-and-sanity-check)
-- [Create your first stream](/guides/create-your-first-stream)
 - [Attach pipeline and select output](/guides/pipeline-attach-and-output-select)
 - [Tune for detection](/guides/tune-for-detection)
 - [ArUco quickstart](/guides/aruco-quickstart)

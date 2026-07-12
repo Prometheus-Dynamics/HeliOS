@@ -1,7 +1,0 @@
-[units."helios-fan-overlays"]
-enabled = true
-src = "assets/services/fan-overlays/helios-fan-overlays.service"
-targets = ["sysinit", "multi-user"]
-assets = [
-  { src = "assets/services/fan-overlays/helios-fan-overlays.sh", dst = "/usr/local/bin/helios-fan-overlays.sh", mode = 493 },
-]

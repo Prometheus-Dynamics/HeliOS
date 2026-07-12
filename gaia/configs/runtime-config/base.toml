@@ -1,0 +1,117 @@
+description = "Shared runtime-config layer: static env files plus the generated runtime tuning env sets for core services."
+
+[stage]
+
+[[stage.files]]
+id = "runtime-user-env"
+src = "@assets/runtime-config/etc/helios/user.env"
+dest = "/etc/helios/user.env"
+origin = "static-asset"
+
+[[stage.files]]
+id = "runtime-gadget-env"
+src = "@assets/runtime-config/etc/helios/gadget.env"
+dest = "/etc/helios/gadget.env"
+origin = "static-asset"
+
+[[stage.files]]
+id = "runtime-gadget-watchdog-env"
+src = "@assets/runtime-config/etc/helios/gadget-watchdog.env"
+dest = "/etc/helios/gadget-watchdog.env"
+origin = "static-asset"
+
+[[stage.files]]
+id = "runtime-usb-power-env"
+src = "@assets/runtime-config/etc/helios/usb-power.env"
+dest = "/etc/helios/usb-power.env"
+origin = "static-asset"
+
+[[stage.files]]
+id = "runtime-image-owned-overlay-paths"
+src = "@assets/runtime-config/etc/helios/image-owned-overlay-paths"
+dest = "/etc/helios/image-owned-overlay-paths"
+origin = "static-asset"
+
+[[stage.env_sets]]
+id = "runtime-helios-api"
+name = "helios-api"
+entries = [
+  ["HELIOS_API_BLOCKING_KEEP_ALIVE_MS", "500"],
+  ["HELIOS_API_MAX_BLOCKING_THREADS", "4"],
+  ["HELIOS_API_THREAD_STACK_BYTES", "1048576"],
+  ["HELIOS_API_WORKER_THREADS", "2"],
+  ["MALLOC_ARENA_MAX", "1"],
+  ["MALLOC_MMAP_THRESHOLD_", "65536"],
+  ["MALLOC_TOP_PAD_", "65536"],
+  ["MALLOC_TRIM_THRESHOLD_", "65536"],
+  ["RUST_MIN_STACK", "1048576"],
+  ["LIBCAMERA_LOG_LEVELS", "*:WARN"],
+  ["LIBCAMERA_IPA_LOG_LEVELS", "*:WARN"],
+  ["APP_LOG_MAX_MIB", "32"],
+  ["LIBCAMERA_LOG_MAX_MIB", "64"],
+  ["LOG_GUARD_INTERVAL_SECS", "60"],
+  ["LOG_GUARD_HEADROOM_BYTES", "262144"],
+  ["LOG_TRUNCATION_HEADER", "[helios] log truncated because it exceeded configured limit"],
+  ["LOG_FOLDER", "/var/log/helios"],
+  ["HELIOS_API__SERVER__BIND", "0.0.0.0:5801"],
+  ["HELIOS_API__GRPC__BIND", "0.0.0.0:5802"],
+  ["HELIOS_API__METRICS__BIND", "0.0.0.0:5803"],
+  ["METRICS_BIND_ADDR", "0.0.0.0:5803"],
+  ["LD_LIBRARY_PATH", "/usr/lib/edgetpu:/usr/lib"],
+]
+
+[[stage.env_sets]]
+id = "runtime-helios-engine"
+name = "helios-engine"
+entries = [
+  ["HELIOS_ENGINE_BLOCKING_KEEP_ALIVE_MS", "3000"],
+  ["HELIOS_ENGINE_MAX_BLOCKING_THREADS", "4"],
+  ["HELIOS_ENGINE_THREAD_STACK_BYTES", "2097152"],
+  ["HELIOS_ENGINE_WORKER_THREADS", "4"],
+  ["MALLOC_ARENA_MAX", "1"],
+  ["MALLOC_MMAP_THRESHOLD_", "65536"],
+  ["MALLOC_TOP_PAD_", "65536"],
+  ["MALLOC_TRIM_THRESHOLD_", "65536"],
+  ["RAYON_NUM_THREADS", "4"],
+  ["RUST_MIN_STACK", "2097152"],
+  ["LOG_FOLDER", "/var/log/helios"],
+  ["LD_LIBRARY_PATH", "/usr/lib/edgetpu:/usr/lib"],
+  ["HELIOS_CAPTURE_STALL_MS", "6000"],
+  ["HELIOS_CAPTURE_ACTIVE_STALL_MS", "5000"],
+]
+
+[[stage.env_sets]]
+id = "runtime-helios-peripherals"
+name = "helios-peripherals"
+entries = [
+  ["HELIOS_PERIPHERALS_MAX_BLOCKING_THREADS", "1"],
+  ["HELIOS_PERIPHERALS_WORKER_THREADS", "1"],
+  ["MALLOC_ARENA_MAX", "2"],
+  ["MALLOC_TRIM_THRESHOLD_", "131072"],
+  ["ORION_NODE_IPC_SOCKET", "/run/orion/control.sock"],
+  ["ORION_NODE_IPC_STREAM_SOCKET", "/run/orion/control-stream.sock"],
+  ["IMU_ANGLE_RANGE", "+-180"],
+  ["IMU_UPDATE_INTERVAL_MS", "20"],
+  ["ICM_GYRO_RANGE_DPS", "2000"],
+  ["ICM_ACCEL_RANGE_G", "16"],
+  ["IMU_FUSION", "madgwick"],
+  ["IMU_FRAME_CORRECTION_WXYZ", "0.004166289,-0.97154006,0.23672845,-0.007224368"],
+  ["IMU_MOUNT_CORRECTION_WXYZ", "0.67425072,0.16264445,0.70176886,0.16264445"],
+]
+
+[image]
+kind = "buildroot"
+
+[image.feed]
+stage_files = [
+  "runtime-user-env",
+  "runtime-gadget-env",
+  "runtime-gadget-watchdog-env",
+  "runtime-usb-power-env",
+  "runtime-image-owned-overlay-paths",
+]
+stage_env_sets = [
+  "runtime-helios-api",
+  "runtime-helios-engine",
+  "runtime-helios-peripherals",
+]
