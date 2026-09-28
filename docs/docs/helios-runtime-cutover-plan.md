@@ -416,41 +416,15 @@ Tasks:
 
 ## `lib-cv`
 
-Current role:
-
-- CV algorithms and Daedalus CV plugin support.
-
-Current concerns:
-
-- Should not be touched for the current transport demo.
-- Must not introduce conversion-only nodes or accidental GPU/CPU transfer churn.
-- `DynamicImage` should not remain the long-term graph boundary if frame-native execution is the target.
-
-Tasks:
-
-- Keep current graph/CV behavior out of the transport investigation.
-- Later migrate graph image boundaries toward `FrameLease` or typed frame views.
-- Put conversions in Daedalus conversion registry, not plumbing nodes.
-- Re-enable and test plugins only after runtime transport is stable.
-- Preserve profiling visibility by using proper node groups, not mega nodes.
+Removed. The old local CV implementation and its pipeline templates were not
+part of the retained architecture. Replacement CV nodes must use the generic
+Daedalus plugin boundary and frame-native Styx types.
 
 ## `lib-ai`
 
-Current role:
-
-- AI inference backends and Daedalus AI plugin support.
-
-Current concerns:
-
-- Should follow the same frame boundary direction as `lib-cv`.
-- Avoid reintroducing `DynamicImage` as the standard inference input boundary.
-
-Tasks:
-
-- Later consume frame leases or typed frame views directly where possible.
-- Keep Coral/TFLite/ONNX backend costs feature-gated.
-- Do not load inference backends in processes that are not using inference.
-- Re-enable plugin after runtime and frame boundary work is stable.
+Retained only as excluded source reference material pending a replacement. It
+is not built, tested, packaged, installed, or used by the runtime. The old AI
+plugin has been removed.
 
 ## `lib-math`
 
@@ -469,18 +443,7 @@ Tasks:
 
 ## `lib-net`
 
-Current role:
-
-- Network interface/discovery support.
-
-Current concerns:
-
-- No direct involvement in current stream path.
-
-Tasks:
-
-- Keep separate from media/runtime transport.
-- Use only where network/device discovery requires it.
+Removed. Its only remaining consumer was the obsolete NT4 plugin.
 
 ## `lib-schema-migration`
 
@@ -499,21 +462,9 @@ Tasks:
 
 ## Daedalus Plugins
 
-Current role:
-
-- CV/AI/NT4 graph plugin integration.
-
-Current concerns:
-
-- Currently out of scope for the demo.
-- Re-enabling before transport/memory cleanup will hide the current problems.
-
-Tasks:
-
-- Keep disabled until runtime stream path is stable.
-- Re-enable one plugin at a time.
-- Measure memory and execution cost per plugin.
-- Verify frame-native boundaries before real graph workloads return.
+The obsolete in-repository CV, AI, and NT4 plugins have been removed. The
+engine's generic dynamic-plugin loading boundary remains for future replacement
+implementations.
 
 ## Orion
 

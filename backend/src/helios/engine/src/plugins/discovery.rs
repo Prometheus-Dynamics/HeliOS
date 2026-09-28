@@ -53,9 +53,9 @@ mod tests {
         let first = tempfile::tempdir().expect("first tempdir");
         let second = tempfile::tempdir().expect("second tempdir");
 
-        let first_path = first.path().join("cv-plugin.so");
-        let second_path = second.path().join("cv-plugin.so");
-        let second_unique = second.path().join("nt4-plugin.so");
+        let first_path = first.path().join("example-plugin.so");
+        let second_path = second.path().join("example-plugin.so");
+        let second_unique = second.path().join("other-plugin.so");
 
         std::fs::write(&first_path, b"first").expect("first plugin");
         std::fs::write(&second_path, b"second").expect("second plugin");

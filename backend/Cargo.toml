@@ -5,11 +5,11 @@ unsafe_code = "warn"
 [workspace]
 resolver = "3"
 exclude = [
+    # Retained source-only reference code. This is not part of the active
+    # workspace, product build, or shipped image.
+    "src/libs/lib-ai",
 ]
 members = [
-    "src/libs/lib-ai",
-    "src/libs/lib-cv",
-    "src/libs/lib-net",
     "src/libs/lib-schema-migration",
     "src/helios/api",
     "src/helios/engine",
@@ -18,9 +18,6 @@ members = [
     "src/helios/diagnostics",
     "src/helios/ctl",
     "src/helios/provision",
-    "src/plugins/daedalus/cv-plugin",
-    "src/plugins/daedalus/ai-plugin",
-    "src/plugins/daedalus/nt4-plugin",
     "tools/xtask",
 ]
 

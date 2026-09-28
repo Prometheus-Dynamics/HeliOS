@@ -1,4 +1,4 @@
-description = "Shared vision/media hardware package layer: ffmpeg, libcamera, codec, TPU, and tracing packages required by the peripherals and plugin runtime."
+description = "Shared vision/media hardware package layer: ffmpeg, libcamera, codec and TPU packages. AI packages are retained for future replacement work but no AI runtime or plugin is currently shipped."
 
 [image]
 kind = "buildroot"
@@ -20,11 +20,7 @@ config_overrides = [
   ["BR2_PACKAGE_LIBDRM", "y"],
   ["BR2_PACKAGE_LIBOPENH264", "y"],
   ["BR2_PACKAGE_LIBPISP", "y"],
-  ["BR2_PACKAGE_LIBURCU", "y"],
   ["BR2_PACKAGE_LIBYUV", "y"],
-  ["BR2_PACKAGE_LTTNG_LIBUST", "y"],
-  ["BR2_PACKAGE_NUMACTL", "y"],
-  ["BR2_PACKAGE_ELFUTILS", "y"],
   ["BR2_PACKAGE_BZIP2", "y"],
   ["BR2_PACKAGE_X264", "y"],
   ["BR2_PACKAGE_X265", "y"],

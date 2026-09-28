@@ -12,10 +12,8 @@ struct BuildProfileCheck {
 }
 
 const CHECKS: &[BuildProfileCheck] = &[
-    BuildProfileCheck { name: "helios-engine lib profile", package: "helios-engine", target: "--lib", features: "" },
     BuildProfileCheck { name: "helios-peripherals lib profile", package: "helios-peripherals", target: "--lib", features: "" },
     BuildProfileCheck { name: "helios-updater updater-ipc profile", package: "helios-updater", target: "--lib", features: "updater-ipc" },
-    BuildProfileCheck { name: "lib-cv minimal profile", package: "lib-cv", target: "--lib", features: "" },
 ];
 
 pub(crate) fn validate(repo_root: &Path) -> Result<()> {

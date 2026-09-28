@@ -23,14 +23,6 @@ tracking_branch = "main"
 notes = "HeliOS no longer depends on the local-only Daedalus host output filter API and now tracks the upstream Daedalus main branch explicitly."
 
 [[items]]
-id = 11
-title = "Shared frame scratch or arena contract"
-owner = "Shared HeliOS/Daedalus"
-status = "landed"
-proof_reference = "lib-cv runtime scratch ownership is explicit in backend/src/libs/lib-cv/src/runtime_scratch.rs and surfaced live via /v1/device/runtime."
-notes = "Resolved by splitting the claim honestly: lib-cv owns its runtime scratch pools and high-water telemetry locally, and the systems runtime surface now exposes those metrics directly instead of implying a shared Daedalus arena contract."
-
-[[items]]
 id = 12
 title = "Normal integration without hidden local path patching"
 owner = "Shared HeliOS/Styx/Daedalus"

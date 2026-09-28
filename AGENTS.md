@@ -1,8 +1,11 @@
 # Agent Notes (Daedalus Types, Payloads, Conversions)
 
-This repo integrates Daedalus graphs/plugins in performance-critical CV paths. Most past regressions have come from incorrect assumptions about how Daedalus handles **types** and **GPU/CPU conversions**.
+This repo integrates Daedalus graphs and dynamically loaded nodes in
+performance-critical paths. Most past regressions have come from incorrect
+assumptions about how Daedalus handles **types** and **GPU/CPU conversions**.
 
-If you touch nodes/graphs in `backend/src/libs/lib-cv`, read this first.
+The former `backend/src/libs/lib-cv` implementation has been removed. Apply
+these rules to replacement nodes and graphs.
 
 ## Mental Model
 

@@ -4,7 +4,8 @@ This repository contains everything needed to produce a bootable HeliOS image fo
 
 ## Daedalus Type System Notes (Performance-Critical)
 
-HeliOS uses Daedalus to run CV graphs. If you work on `backend/src/libs/lib-cv` (nodes, node-groups, types), read `AGENTS.md` first.
+HeliOS uses Daedalus to run graphs. The former in-repository `lib-cv` and its
+plugins have been removed; replacement graph nodes must follow `AGENTS.md`.
 
 Two key points:
 

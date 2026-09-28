@@ -2,6 +2,14 @@
 name = "lib-ai"
 version.workspace = true
 edition = "2024"
+publish = false
+
+# RETAINED, INACTIVE REFERENCE CODE
+#
+# This crate is deliberately excluded from the backend workspace. It is not
+# built, tested, packaged, or shipped. Its former lib-cv dependency has been
+# removed from the repository, so this manifest is preserved only alongside
+# the source until a replacement AI architecture is implemented.
 
 [features]
 default = ["backend-cpu"]
@@ -34,7 +42,6 @@ serde_json = { workspace = true }
 image = { workspace = true, optional = true }
 imageproc = { workspace = true }
 ab_glyph = { workspace = true }
-lib-cv = { path = "../lib-cv", default-features = false }
 tracing = { workspace = true }
 rayon = { workspace = true }
 bytemuck = { workspace = true }

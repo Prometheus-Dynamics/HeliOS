@@ -33,35 +33,25 @@ LIBCAMERA_RS_HOST_PATH="${LIBCAMERA_RS_HOST_PATH:-}"
 HELIOS_CARGO_CONFIG="${HELIOS_CARGO_CONFIG:-}"
 
 BINS_DIR_DEFAULT="$ROOT_DIR/output/cm5/binaries"
-PLUGINS_DIR_DEFAULT="$ROOT_DIR/output/cm5/plugins/daedalus"
 BINS_DIR="$BINS_DIR_DEFAULT"
-PLUGINS_DIR="$PLUGINS_DIR_DEFAULT"
 
-# Daedalus plugins are large (especially debug builds). Default to /var/lib/helios (separate partition on CM5)
-# to avoid filling the root filesystem.
-PLUGIN_DIR_REMOTE="${PLUGIN_DIR_REMOTE:-/var/lib/helios/plugins/daedalus}"
-TEMPLATES_DIR_LOCAL="${TEMPLATES_DIR_LOCAL:-$ROOT_DIR/gaia/assets/templates}"
-TEMPLATES_DIR_REMOTE="${TEMPLATES_DIR_REMOTE:-/usr/share/helios/pipeline-templates}"
 FRONTEND_DIR_LOCAL="${FRONTEND_DIR_LOCAL:-$ROOT_DIR/frontend/build}"
 OTA_BASE_URL="${OTA_BASE_URL:-}"
 OTA_REQUESTED_BY="${OTA_REQUESTED_BY:-deploy-live}"
 BINARY_REVISION="${BINARY_REVISION:-}"
 
-ONLY="all" # all|binaries|plugins|frontend
-STRICT_BINARIES_ONLY="0"
+ONLY="all" # all|binaries|frontend
 BUILD="1"
 UPLOAD="1"
 RESTART_SERVICES="1"
 DRY_RUN="0"
-FAST_UPLOAD="${FAST_UPLOAD:-1}"
-UPLOAD_TEMPLATES="1"
 UPLOAD_FRONTEND="1"
 STRIP_DEBUG="1"
 REQUIRES_SSH="0"
 
 usage() {
   cat <<EOF
-Build + deploy Helios CM5 binaries and Daedalus plugins to a device.
+Build + deploy Helios CM5 binaries and frontend assets to a device.
 Binary deploys upload over SSH and activate through helios-updater-managed service revisions.
 
 Usage:
@@ -74,25 +64,16 @@ Options:
                         Build profile (default: dev-release)
   --engine-features <f> Cargo features for helios-engine (default: $ENGINE_FEATURES)
   --api-features <f>   Cargo features for helios-api (default: $API_FEATURES)
-  --only <what>         all|binaries|plugins|frontend (default: all)
-  --strict-binaries-only
-                        Do not auto-sync Daedalus plugins when deploying binaries
+  --only <what>         all|binaries|frontend (default: all)
   --no-build            Skip build; only upload/restart
   --no-upload           Only build; skip upload/restart
   --no-restart          Upload but do not restart services
   --bins-dir <dir>      Local binaries dir (default: $BINS_DIR_DEFAULT)
-  --plugins-dir <dir>   Local plugins dir (default: $PLUGINS_DIR_DEFAULT)
-  --plugin-dir <dir>    Remote plugin dir (default: $PLUGIN_DIR_REMOTE)
-  --no-templates        Skip uploading pipeline templates
-  --templates-dir <dir> Local templates dir (default: $TEMPLATES_DIR_LOCAL)
-  --templates-remote <dir> Remote templates dir (default: $TEMPLATES_DIR_REMOTE)
   --no-frontend         Skip uploading frontend assets
   --frontend-dir <dir>  Local frontend build dir (default: $FRONTEND_DIR_LOCAL)
   --ota-base-url <url>  OTA API base URL (default: derived from --ssh as http://host/v1)
   --binary-revision <r> Explicit revision string for binary activation (default: generated)
   --no-strip            Do not strip debug sections from built artifacts before upload
-  --fast-upload         Upload everything without hashing (default)
-  --slow-upload         Hash local/remote to avoid uploading unchanged artifacts
   --target <triple>     Rust target triple (default: $TARGET_TRIPLE)
   --dockerfile <path>   Cross-builder dockerfile (default: $DOCKERFILE)
   --docker-context <p>  Docker build context for cross image (default: $DOCKER_CONTEXT)
@@ -103,7 +84,6 @@ Options:
 
 Env vars (optional):
   RUSTFLAGS             Passed through to build scripts
-  PLUGIN_DIR_REMOTE      Remote plugin dir
   OTA_BASE_URL           OTA API base URL override
   BINARY_REVISION        Explicit revision string for binary activation
   DAEDALUS_HOST_PATH     Host path to a Daedalus checkout (optional dev override)
@@ -201,16 +181,10 @@ while [[ $# -gt 0 ]]; do
     --engine-features) ENGINE_FEATURES="${2:-}"; shift 2 ;;
     --api-features) API_FEATURES="${2:-}"; shift 2 ;;
     --only) ONLY="${2:-}"; shift 2 ;;
-    --strict-binaries-only) STRICT_BINARIES_ONLY="1"; shift ;;
     --no-build) BUILD="0"; shift ;;
     --no-upload) UPLOAD="0"; shift ;;
     --no-restart) RESTART_SERVICES="0"; shift ;;
     --bins-dir) BINS_DIR="${2:-}"; shift 2 ;;
-    --plugins-dir) PLUGINS_DIR="${2:-}"; shift 2 ;;
-    --plugin-dir) PLUGIN_DIR_REMOTE="${2:-}"; shift 2 ;;
-    --no-templates) UPLOAD_TEMPLATES="0"; shift ;;
-    --templates-dir) TEMPLATES_DIR_LOCAL="${2:-}"; shift 2 ;;
-    --templates-remote) TEMPLATES_DIR_REMOTE="${2:-}"; shift 2 ;;
     --no-frontend) UPLOAD_FRONTEND="0"; shift ;;
     --frontend-dir) FRONTEND_DIR_LOCAL="${2:-}"; shift 2 ;;
     --bin-dir|--frontend-remote)
@@ -225,8 +199,6 @@ while [[ $# -gt 0 ]]; do
     --ota-base-url) OTA_BASE_URL="${2:-}"; shift 2 ;;
     --binary-revision) BINARY_REVISION="${2:-}"; shift 2 ;;
     --no-strip) STRIP_DEBUG="0"; shift ;;
-    --fast-upload) FAST_UPLOAD="1"; shift ;;
-    --slow-upload) FAST_UPLOAD="0"; shift ;;
     --target) TARGET_TRIPLE="${2:-}"; shift 2 ;;
     --dockerfile) DOCKERFILE="${2:-}"; shift 2 ;;
     --docker-context) DOCKER_CONTEXT="${2:-}"; shift 2 ;;
@@ -249,23 +221,17 @@ if [[ ( "$PROFILE_FLAG" == "--release" || "$PROFILE_FLAG" == "--profile dev-rele
 fi
 
 case "$ONLY" in
-  all|binaries|plugins|frontend) ;;
-  *) die "--only must be one of: all, binaries, plugins, frontend" ;;
+  all|binaries|frontend) ;;
+  *) die "--only must be one of: all, binaries, frontend" ;;
 esac
 
 do_binaries="0"
-do_plugins="0"
 do_frontend="0"
 case "$ONLY" in
-  all) do_binaries="1"; do_plugins="1"; do_frontend="1" ;;
+  all) do_binaries="1"; do_frontend="1" ;;
   binaries) do_binaries="1" ;;
-  plugins) do_plugins="1" ;;
   frontend) do_frontend="1" ;;
 esac
-
-if [[ "$do_binaries" == "1" && "$ONLY" == "binaries" && "$STRICT_BINARIES_ONLY" != "1" ]]; then
-  do_plugins="1"
-fi
 
 docker_image_built="0"
 
@@ -291,10 +257,7 @@ ensure_deps() {
   fi
   if [[ "$UPLOAD" == "1" ]]; then
     needs_ssh="0"
-    if [[ "$UPLOAD_TEMPLATES" == "1" ]]; then
-      needs_ssh="1"
-    fi
-    if [[ "$do_plugins" == "1" ]]; then
+    if [[ "$do_binaries" == "1" ]]; then
       needs_ssh="1"
     fi
     if [[ "$needs_ssh" == "1" ]]; then
@@ -303,9 +266,6 @@ ensure_deps() {
       if [[ -n "${SSH_PASS// }" ]]; then
         command -v sshpass >/dev/null 2>&1 || die "sshpass is required when using --pass"
       fi
-    fi
-    if [[ "$do_binaries" == "1" ]]; then
-      needs_ssh="1"
     fi
     if [[ "$UPLOAD_FRONTEND" == "1" && "$do_frontend" == "1" ]]; then
       command -v curl >/dev/null 2>&1 || die "curl is required for frontend OTA deploys"
@@ -461,33 +421,6 @@ strip_debug_in_place() {
   fi
 }
 
-copy_plugins_out() {
-  local profile_flag="$1"
-  local target_triple="$2"
-  local out_dir="$3"
-
-  local profile_dir
-  profile_dir=$(profile_dir_from_flag "$profile_flag")
-
-  local so_glob="$TARGET_BUILD_DIR/$target_triple/$profile_dir/lib*_plugin.so"
-  shopt -s nullglob
-  local so_files=( $so_glob )
-  shopt -u nullglob
-
-  if [[ "${#so_files[@]}" -eq 0 ]]; then
-    die "no plugin .so files found at: $so_glob"
-  fi
-
-  run mkdir -p "$out_dir"
-  local so
-  for so in "${so_files[@]}"; do
-    run cp -f "$so" "$out_dir/"
-    local out_path="$out_dir/$(basename "$so")"
-    strip_debug_in_place "$out_path"
-    echo "Wrote: $out_path"
-  done
-}
-
 latest_mtime() {
   local latest=0
   local path=""
@@ -564,93 +497,10 @@ needs_binary_build() {
   return 1
 }
 
-plugin_output_path() {
-  local package="$1"
-  local profile_flag="$2"
-  local target_triple="$3"
-
-  local profile_dir
-  profile_dir=$(profile_dir_from_flag "$profile_flag")
-
-  local crate_name="${package//-/_}"
-  echo "$TARGET_BUILD_DIR/$target_triple/$profile_dir/lib${crate_name}.so"
-}
-
-needs_plugin_build() {
-  local package="$1"
-  local profile_flag="$2"
-  local target_triple="$3"
-  local output_path
-  output_path=$(plugin_output_path "$package" "$profile_flag" "$target_triple")
-
-  if [[ ! -f "$output_path" ]]; then
-    return 0
-  fi
-
-  local -a watch_paths=(
-    "$ROOT_DIR/backend/Cargo.toml"
-    "$ROOT_DIR/backend/Cargo.lock"
-    "$ROOT_DIR/backend/src/plugins/daedalus/$package"
-  )
-  if [[ -n "${DAEDALUS_HOST_PATH// }" ]]; then
-    watch_paths+=("$DAEDALUS_HOST_PATH")
-  fi
-  if [[ -n "${STYX_HOST_PATH// }" ]]; then
-    watch_paths+=("$STYX_HOST_PATH")
-  fi
-  if [[ -n "${LIBCAMERA_RS_HOST_PATH// }" ]]; then
-    watch_paths+=("$LIBCAMERA_RS_HOST_PATH")
-  fi
-
-  case "$package" in
-    cv-plugin)
-      watch_paths+=("$ROOT_DIR/backend/src/libs/lib-cv")
-      ;;
-    ai-plugin)
-      watch_paths+=("$ROOT_DIR/backend/src/libs/lib-ai")
-      ;;
-  esac
-
-  local latest
-  latest=$(latest_mtime "${watch_paths[@]}")
-  if [[ -z "$latest" ]]; then
-    return 0
-  fi
-
-  local out_mtime
-  out_mtime=$(stat -c %Y "$output_path" 2>/dev/null || true)
-  [[ -z "$out_mtime" ]] && return 0
-
-  if [[ "$latest" -gt "$out_mtime" ]]; then
-    return 0
-  fi
-
-  return 1
-}
-
 if [[ "$BUILD" == "1" ]]; then
-  if [[ "$do_binaries" == "1" || "$do_plugins" == "1" ]]; then
+  if [[ "$do_binaries" == "1" ]]; then
     run mkdir -p "$TARGET_BUILD_DIR" "$CROSS_CARGO_HOME" "$CROSS_SCCACHE_DIR"
     ensure_docker_image
-  fi
-
-  if [[ "$do_plugins" == "1" ]]; then
-    echo "Building Daedalus plugins ($TARGET_TRIPLE) $(profile_label)..."
-    packages=(
-      "cv-plugin"
-      "ai-plugin"
-      "nt4-plugin"
-    )
-    pkg=""
-    for pkg in "${packages[@]}"; do
-      if needs_plugin_build "$pkg" "$PROFILE_FLAG" "$TARGET_TRIPLE"; then
-        echo "- $pkg"
-        docker_run_cargo_build "$pkg" "$TARGET_TRIPLE" "$PROFILE_FLAG" "$ROOT_DIR"
-      else
-        echo "- $pkg (up to date)"
-      fi
-    done
-    copy_plugins_out "$PROFILE_FLAG" "$TARGET_TRIPLE" "$PLUGINS_DIR"
   fi
 
   if [[ "$do_binaries" == "1" ]]; then
@@ -686,10 +536,6 @@ if [[ "$BUILD" == "1" ]]; then
 fi
 
 if [[ "$UPLOAD" == "1" ]]; then
-  if [[ "$do_plugins" == "1" ]]; then
-    [[ -d "$PLUGINS_DIR" ]] || die "local plugin dir not found: $PLUGINS_DIR"
-  fi
-
   if [[ "$do_binaries" == "1" ]]; then
     [[ -d "$BINS_DIR" ]] || die "local binaries dir not found: $BINS_DIR"
   fi
@@ -730,20 +576,6 @@ if [[ "$UPLOAD" == "1" ]]; then
     fi
   }
   trap ssh_control_cleanup EXIT
-
-  ssh_cat_upload() {
-    local local_path="$1"
-    local remote_path="$2"
-    if [[ "$DRY_RUN" == "1" ]]; then
-      printf '+ upload %q -> %q:%q\n' "$local_path" "$SSH_TARGET" "$remote_path"
-      return 0
-    fi
-    if [[ -n "${SSH_PASS// }" ]]; then
-      sshpass -p "$SSH_PASS" ssh "${ssh_opts[@]}" "$SSH_TARGET" "sh -lc 'cat > \"$remote_path\"'" <"$local_path"
-    else
-      ssh "${ssh_opts[@]}" "$SSH_TARGET" "sh -lc 'cat > \"$remote_path\"'" <"$local_path"
-    fi
-  }
 
   ssh_upload_tar() {
     local base_dir="$1"
@@ -797,45 +629,6 @@ if [[ "$UPLOAD" == "1" ]]; then
     run "${cmd[@]}"
   }
 
-  ensure_remote_plugin_env() {
-    # Keep engine/api pointed at both the writable deploy plugin dir and the system plugin dir.
-    # Do not set HELIOS_DAEDALUS_PLUGIN_DIR here: that single-dir override masks system plugins.
-    local plugin_dirs="${PLUGIN_DIR_REMOTE}:/usr/lib/helios/plugins/daedalus"
-    ssh_exec "sh -lc 'install -d -m0755 \"$PLUGIN_DIR_REMOTE\"; \
-      for f in /etc/default/helios-engine /etc/default/helios-api; do \
-        touch \"\$f\"; \
-        sed -i \"/^HELIOS_DAEDALUS_PLUGIN_DIR=/d\" \"\$f\"; \
-        if grep -q \"^HELIOS_DAEDALUS_PLUGIN_DIRS=\" \"\$f\"; then \
-          sed -i \"s|^HELIOS_DAEDALUS_PLUGIN_DIRS=.*|HELIOS_DAEDALUS_PLUGIN_DIRS=$plugin_dirs|\" \"\$f\"; \
-        else \
-          echo \"HELIOS_DAEDALUS_PLUGIN_DIRS=$plugin_dirs\" >> \"\$f\"; \
-        fi; \
-      done'"
-  }
-
-  should_upload() {
-    if [[ "$FAST_UPLOAD" == "1" ]]; then
-      return 0
-    fi
-    local local_path="$1"
-    local remote_path="$2"
-    local local_hash=""
-    local remote_hash=""
-
-    if [[ "$DRY_RUN" == "1" ]]; then
-      return 0
-    fi
-
-    local_hash="$(sha256sum "$local_path" | awk '{print $1}')"
-    remote_hash="$(ssh_exec "sh -lc 'sha256sum \"$remote_path\" 2>/dev/null | awk \"{print \\$1}\"'")"
-
-    if [[ -z "${remote_hash// }" ]]; then
-      return 0
-    fi
-
-    [[ "$local_hash" != "$remote_hash" ]]
-  }
-
   if [[ "$do_binaries" == "1" ]]; then
     bins=("helios-engine" "helios-api" "helios-peripherals" "helios-updater")
     b=""
@@ -843,42 +636,12 @@ if [[ "$UPLOAD" == "1" ]]; then
       [[ -f "$BINS_DIR/$b" ]] || die "missing binary: $BINS_DIR/$b"
     done
 
-    bins_to_upload=()
-    if [[ "$FAST_UPLOAD" == "1" ]]; then
-      bins_to_upload=( "${bins[@]}" )
-    else
-      for b in "${bins[@]}"; do
-        bins_to_upload+=("$b")
-      done
-    fi
+    bins_to_upload=( "${bins[@]}" )
 
     if [[ "${#bins_to_upload[@]}" -gt 0 ]]; then
       echo "Preparing ${#bins_to_upload[@]} binary artifact(s) for live updater activation..."
     else
       echo "Binaries unchanged; skipping binary upload."
-    fi
-  fi
-
-  if [[ "$UPLOAD_TEMPLATES" == "1" ]]; then
-    if [[ ! -d "$TEMPLATES_DIR_LOCAL" ]]; then
-      die "local templates dir not found: $TEMPLATES_DIR_LOCAL"
-    fi
-    shopt -s nullglob
-    templates=( "$TEMPLATES_DIR_LOCAL"/*.json )
-    shopt -u nullglob
-    if [[ "${#templates[@]}" -gt 0 ]]; then
-      echo "Uploading ${#templates[@]} template(s) -> $SSH_TARGET:$TEMPLATES_DIR_REMOTE"
-      ssh_exec "install -d -m0755 '$TEMPLATES_DIR_REMOTE'"
-      tmpl_names=()
-      for t in "${templates[@]}"; do
-        tmpl_names+=( "$(basename "$t")" )
-      done
-      ssh_upload_tar "$TEMPLATES_DIR_LOCAL" "$TEMPLATES_DIR_REMOTE" "${tmpl_names[@]}"
-      ssh_exec "chmod 0644 $(
-        for t in "${tmpl_names[@]}"; do
-          printf '%q ' "$TEMPLATES_DIR_REMOTE/$t"
-        done
-      )"
     fi
   fi
 
@@ -893,65 +656,6 @@ if [[ "$UPLOAD" == "1" ]]; then
       frontend_root_url="${OTA_BASE_URL%/}/"
     fi
     ota_publish_release "frontend_bundle" "$FRONTEND_DIR_LOCAL" "$frontend_root_url" "."
-  fi
-
-  if [[ "$do_plugins" == "1" ]]; then
-    shopt -s nullglob
-    plugins=( "$PLUGINS_DIR"/*.so )
-    shopt -u nullglob
-    [[ "${#plugins[@]}" -gt 0 ]] || die "no .so files found in: $PLUGINS_DIR"
-
-    any_plugin_uploaded="0"
-    plugins_to_upload=()
-
-    so=""
-    for so in "${plugins[@]}"; do
-      name="$(basename "$so")"
-      if [[ "$FAST_UPLOAD" == "1" ]]; then
-        if [[ "$any_plugin_uploaded" == "0" ]]; then
-          echo "Uploading ${#plugins[@]} plugin(s) -> $SSH_TARGET:$PLUGIN_DIR_REMOTE"
-          ssh_exec "install -d -m0755 '$PLUGIN_DIR_REMOTE'"
-        fi
-        echo "- $name (changed)"
-        plugins_to_upload+=( "$name" )
-        any_plugin_uploaded="1"
-      else
-        if should_upload "$so" "$PLUGIN_DIR_REMOTE/$name"; then
-          if [[ "$any_plugin_uploaded" == "0" ]]; then
-            echo "Uploading ${#plugins[@]} plugin(s) -> $SSH_TARGET:$PLUGIN_DIR_REMOTE"
-            ssh_exec "install -d -m0755 '$PLUGIN_DIR_REMOTE'"
-          fi
-          echo "- $name (changed)"
-          plugins_to_upload+=( "$name" )
-          any_plugin_uploaded="1"
-        else
-          echo "- $name (unchanged)"
-        fi
-      fi
-    done
-    if [[ "${#plugins_to_upload[@]}" -gt 0 ]]; then
-      # Avoid updating .so files while services are running.
-      # (Engine/API restarts happen below, but stopping up front prevents in-place file changes.)
-      ssh_exec "systemctl stop helios-api.service helios-engine.service || true"
-      ssh_upload_tar "$PLUGINS_DIR" "$PLUGIN_DIR_REMOTE" "${plugins_to_upload[@]}"
-      ssh_exec "chmod 0644 $(
-        for so in "${plugins_to_upload[@]}"; do
-          printf '%q ' "$PLUGIN_DIR_REMOTE/$so"
-        done
-      )"
-      ensure_remote_plugin_env
-    fi
-
-    if [[ "$do_binaries" != "1" && "$RESTART_SERVICES" != "0" ]]; then
-      if [[ "$any_plugin_uploaded" == "1" ]]; then
-        echo "Restarting services (engine/api)..."
-        ssh_exec "systemctl restart helios-engine.service helios-api.service"
-      else
-        echo "No plugin changes; skipping restart."
-      fi
-    elif [[ "$do_binaries" != "1" ]]; then
-      echo "Skipping restart (RESTART_SERVICES=0)"
-    fi
   fi
 
   if [[ "$do_binaries" == "1" ]]; then

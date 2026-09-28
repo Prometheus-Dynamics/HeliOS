@@ -224,13 +224,13 @@ Notes:
 
 ## Library crates
 
-- **lib-cv** – computer vision primitives (contours, ArUco helpers, drawing, filters) with optional AI/gpu support via Daedalus.
-- **lib-ai** – AI model runtimes, tensor types, and detection primitives.
-- **lib-net** – small helpers built on `rtnetlink` for configuring network interfaces programmatically.
-- **lib-ipc** – protocol definitions and helpers for engine/API IPC.
-- Capture/codec/graph orchestration now rely on external crates (Styx for capture/codec, Daedalus for graphs); legacy lib-capture/lib-codec/lib-format/lib-pipeline have been removed.
-- **lib-sensors** – drivers for optional sensors like the ICM-42688P.
-- **lib-pipeline-core** – asynchronous processing framework that executes graph based pipelines. The accompanying **lib-pipeline-macro** crate provides procedural macros for defining nodes.
+- **lib-schema-migration** – versioned schema migration support.
+- Capture/codec/graph orchestration relies on external crates: Styx for
+  capture/codec and Daedalus for graphs.
+
+The former `lib-cv`, `lib-net`, and concrete CV/AI/NT4 plugin crates have been
+removed. `src/libs/lib-ai` is retained as excluded, source-only reference
+material pending a replacement and is not built, packaged, or used.
 
 ## Application structure
 
