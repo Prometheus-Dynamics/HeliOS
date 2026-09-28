@@ -10,8 +10,7 @@ The highest-priority concerns are:
 
 - `helios-peripherals` memory is too high for the active single-stream workload.
 - `orion-node` appears to have a real memory growth issue under the current update pattern.
-- `helios-engine` is currently coupled to `helios-peripherals`, which pulls media stack costs into engine.
-- HeliOS has duplicated frame lease transport structs and logic instead of leaning fully on Styx/Orion.
+- HeliOS has duplicated frame lease transport structs and logic instead of leaning fully on Styx/Orion: engine `stream_io.rs` and peripherals `provider/streams.rs` each carry their own copy of the FrameLease fd-transport code.
 - `DynamicImage` must be removed from runtime transport paths.
 
 ## Hard Constraints
@@ -136,9 +135,28 @@ What exists today:
 - `helios-peripherals` also publishes an MJPEG preview socket.
 - Orion carries resource/control-plane state and endpoint metadata.
 - `helios-engine` imports the raw frame lease and republishes an output stream.
-- `helios-engine` currently reuses `helios_peripherals::provider::streams::PeripheralStreamWriter`.
+- `helios-engine` has its own FrameLease import/publish code in `backend/src/helios/engine/src/stream_io.rs` and no dependency on `helios-peripherals`.
 
-The last point is wrong. Engine should not depend on peripherals and should not pull the peripherals media stack into blank passthrough.
+The open issue is duplication, not coupling. Engine `stream_io.rs` and peripherals `provider/streams.rs` duplicate the FrameLease fd-transport code (`FrameLeaseTransportMessage`/`Backing`/`Plane` and the socket/metadata handling). Both should move to the Orion/Styx transport APIs listed below instead of converging on a shared HeliOS transport layer.
+
+## Dependency Integration Status
+
+HeliOS is moving to pinned revs of the `helios-integration` branches of Orion, Lemnos, and Daedalus. The new upstream APIs are:
+
+| Dependency | New in `helios-integration` |
+|---|---|
+| Orion | IPC-only appliance profile (`ORION_NODE_HTTP_ADDR=off`, `ORION_NODE_RUNTIME_WORKER_THREADS`); latest-value fd channel (`UnixFdLatestServer`/`UnixFdLatestClient`); `ResourceEndpoint::Custom` schemes; typed client views; `orionctl get memory`; fixes for an fd_frame async busy-spin and dropped batched events |
+| Lemnos | async hotplug watcher; bind policy; unbound device status; built-in hwmon fan driver; `ErrorKind`; `Value::flatten_labels`; mock hwmon |
+| Daedalus | restored dylib plugin loading (`dylib-plugins`); host port introspection; `inspect_payload`; input-driven `drive`; versioned `GraphDocument` |
+
+Follow-up migrations in engine and peripherals are pending:
+
+- [ ] Use the new APIs above in `helios-engine` and `helios-peripherals`.
+- [ ] Remove the 250 ms polling loops (peripherals runtime loops, engine execution interval) in favour of the hotplug watcher, Orion events, and input-driven `drive`.
+- [ ] Remove the per-frame metadata file write from the frame publish path.
+- [ ] Remove the duplicated FrameLease transport structs from engine `stream_io.rs` and peripherals `provider/streams.rs`, and use the Orion latest-value fd channel.
+
+The Atlas-facing application API (device identity, OTA upload/apply/status, update events) is not defined on this branch. `helios-api` is currently a `/v1/health` stub. This blocks the Atlas Hardware Manager OTA path.
 
 ## Correct Ownership Model
 
@@ -308,7 +326,7 @@ Current concerns:
 Tasks:
 
 - Verify `helios-engine` has no remaining direct or transitive `image` dependency in CI.
-- Replace any remaining peripherals-owned stream writer usage with proper Orion/Styx stream/resource APIs.
+- Replace the engine-local FrameLease transport code in `stream_io.rs` with Orion/Styx stream/resource APIs (see Dependency Integration Status).
 - Confirm whether Orion already provides the stream endpoint/framing abstraction engine needs.
 - If Orion/Styx is missing an API, document the exact missing API and add it there, not in a new HeliOS transport layer.
 - Keep blank passthrough as a first-class test/runtime path.
@@ -326,6 +344,7 @@ Current role:
 
 Current concerns:
 
+- `helios-api` is currently a `/v1/health` stub. The Atlas-facing application API (identity, OTA upload/apply/status, update events) is undefined, which blocks the Atlas Hardware Manager OTA path.
 - Current demo code resolves Orion state directly.
 - API should not become an Orion control-plane client if it is meant to be application-level only.
 - Polling fallback for preview files is not acceptable for live streams.
@@ -510,7 +529,7 @@ Tasks:
 
 1. Finish `helios-peripherals` codec-mode breakdown: H.264 and H.265 selected paths.
 2. Decouple raw FrameLease publishing from MJPEG/output encoding policy.
-3. Remove duplicated frame lease transport structs by using Styx/Orion APIs.
+3. Remove the duplicated FrameLease transport code in engine `stream_io.rs` and peripherals `provider/streams.rs` by using Styx/Orion APIs.
 4. Prove a long Orion soak with stable PSS and useful in-memory metrics.
 5. Verify engine/API blank passthrough metrics and no media/image dependency regressions.
 6. Verify/extend diagnostics bundle for repeatable memory/perf captures.

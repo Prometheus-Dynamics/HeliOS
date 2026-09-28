@@ -91,8 +91,7 @@ function runtimeWithCapabilities(
         observedAtMs: 0,
         lastSuccessAtMs: null
       },
-      logSourcesRevision: 0,
-      cvRuntimeScratchHighWater: []
+      logSourcesRevision: 0
     }
   };
 }
