@@ -1,75 +1,69 @@
 # HeliOS Image Build (Gaia)
 
-Use Gaia as the image builder for HeliOS. The Gaia buildchain is vendored in this repo under `gaia/`.
+HeliOS images are built with the Gaia builder CLI (`gaia`). The build
+configuration lives in this repo under `gaia/`.
 
-## 1) Install Gaia CLI
+## 1) Prerequisites
+
+Install the Gaia CLI:
+
+```bash
+cargo install --git https://github.com/Prometheus-Dynamics/Gaia-Image-Builder gaia
+```
+
+It installs into `~/.cargo/bin`; make sure that is on your `PATH`.
+
+You also need Docker (Rust artifacts are cross-compiled inside the
+`helios-cross-rust194` image) and Bun (the full profile stages the frontend
+bundle from `frontend/build`).
+
+## 2) Build An Image
 
 ```bash
 # from the HeliOS repo root
-cargo install --locked --git https://github.com/Prometheus-Dynamics/Gaia-Image-Builder --package gaia-image-builder --bin gaia --force
+./tools/build-os.sh                # Gaia TUI with every HeliOS build
+./tools/build-os.sh cm5            # full cm5 image, non-interactive
+./tools/build-os.sh cm5 base-os    # base OS only
 ```
 
-This installs `gaia` (typically into `~/.cargo/bin`).
+Targets are the files in `gaia/configs/builds/` (`cm5`, `cm4`,
+`generic-aarch64-linux`). Each exposes a `profile` input: `base-os` or `full`.
 
-If needed, add Cargo bin to your shell `PATH`:
+Before running Gaia, the script:
+
+- builds the `helios-cross-rust194` Docker image from
+  `gaia/docker/aarch64/Dockerfile.aarch64-rpi4` if it does not exist yet
+  (`REBUILD_CROSS=1` forces a rebuild; Gaia cannot build images itself);
+- rebuilds `frontend/build` when its inputs changed
+  (`FORCE_FRONTEND_BUILD=1` forces a rebuild).
+
+Direct Gaia invocation, from the repo root:
 
 ```bash
-export PATH="$HOME/.cargo/bin:$PATH"
+gaia validate gaia/configs/builds/cm5.toml --set input.profile=full
+gaia plan gaia/configs/builds/cm5.toml --set input.profile=full
+gaia run gaia/configs/builds/cm5.toml --set input.profile=full
 ```
 
-Verify install:
+## 3) Output Paths
 
-```bash
-gaia --help
-```
+For build `helios-<profile>-<target>` (for example `helios-full-cm5`):
 
-## 2) Build The HeliOS CM5 Image
+- Build state: `gaia/build/helios-full-cm5/`
+- Rust artifacts: `gaia/output/helios-full-cm5/artifacts/`
+- Images: `gaia/output/helios-full-cm5/images/` (`sdcard.img`, `boot.vfat`,
+  `rootfs.squashfs`)
+- Reports: `gaia/output/helios-full-cm5/.gaia/reports/`
 
-Recommended:
+## 4) Flashing
 
-```bash
-# from the HeliOS repo root
-./tools/build-os.sh cm5
-```
-
-This opens Gaia TUI with HeliOS builds loaded.
-
-Direct Gaia invocation:
-
-```bash
-# from the HeliOS repo root
-cd gaia
-gaia tui --builds-dir configs/builds
-```
-
-## 3) Useful Commands
-
-```bash
-cd gaia
-
-# inspect merged config
-gaia resolve configs/builds/HeliOS-cm5.toml
-
-# print task plan
-gaia plan configs/builds/HeliOS-cm5.toml
-```
-
-## 4) Output Paths
-
-- Build state: `gaia/build`
-- Artifacts/images: `gaia/output`
-
-## 5) Flashing
-
-Recommended: flash the generated image using Atlas Hardware Manager for HeliOS devices.
-
-Image path to select in Atlas Hardware Manager:
-
-- `gaia/output/HeliOS-cm5/<version>/images/*.img` (or the archived `.img.xz`)
+Flash `gaia/output/helios-full-cm5/images/sdcard.img` with Atlas Hardware
+Manager.
 
 ## Notes
 
-- Current production target is CM5 via `gaia/configs/builds/HeliOS-cm5.toml`.
-- HeliOS image customization is done in `gaia/configs` and `gaia/assets`.
-- Gaia frontend artifact builds are input-aware: `program.custom` now runs `frontend/scripts/build-if-changed.mjs`, which fingerprints frontend + docs + API-codegen/schema inputs and skips rebuilds when unchanged.
-- To force a frontend rebuild on the next Gaia run: `FORCE_FRONTEND_BUILD=1 ./tools/build-os.sh cm5`.
+- Image customization lives in `gaia/configs` and `gaia/assets`; see
+  `gaia/configs/README.md` for the layer layout.
+- Git sources are pinned with `rev`. Gaia has no lockfile, so a
+  branch-tracking source freezes at whatever revision each machine fetched
+  first.

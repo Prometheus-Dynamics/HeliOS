@@ -1,67 +1,48 @@
 # Configuration Layout
 
-Active build entrypoints live in `configs/builds/`.
+HeliOS images are Gaia v2 builds. Run Gaia from the repository root; see
+`BUILD.md` for commands.
 
-- `builds/` – one top-level build definition per hardware target:
-  `cm5.toml`, `cm4.toml`, and `generic-aarch64-linux.toml`.
-  Each build exposes a `profile` input with `base-os` and `full` choices.
-- `workspace/` – workspace-level defaults (`root_dir`, `build_dir`, `out_dir`, path aliases, cleanup mode).
-- `distros/` – distro composition (HeliOS module imports).
-- `platforms/` – board/CPU platform overlays (Raspberry Pi CM5 config).
-- `modules/` – reusable module configs for `buildroot`, `program`, and `stage`.
-- `env/` – imported environment sets used by staged services.
+## Entry points
 
-`configs/` is TOML-centric. Non-TOML runtime/build assets live under `assets/`
-(Buildroot tree, services, overlays, templates, SDK cache, etc.).
+`builds/` holds one build per hardware target: `cm5.toml`, `cm4.toml` and
+`generic-aarch64-linux.toml`. Each build is named
+`helios-${input.profile}-<target>` and exposes a `profile` input:
 
-## Path Resolution
+- `base-os` imports `layers/base-os.toml`, the target's firmware/hardware layer
+  and `targets/<target>.toml`.
+- `full` additionally imports `layers/app-layer.toml` and
+  `layers/release-layer.toml` (`when = { profile = "full" }`).
 
-Path-like fields now resolve in this order:
-- `@alias/...` from `[workspace.paths]` (plus built-ins: `@root`, `@build`, `@out`)
-- absolute path
-- relative path under `[workspace].root_dir` (default: current working directory)
+## Directories
 
-Example:
+- `layers/` – the composition units the builds import:
+  - `base-os.toml`: workspace, Buildroot OS baseline, squashfs rootfs, minimal network.
+  - `firmware-hardware-pi.toml` / `firmware-hardware-generic-aarch64-linux.toml`:
+    platform-family layers.
+  - `app-layer.toml`: Rust payloads, frontend bundle, runtime services and their
+    package dependencies.
+  - `release-layer.toml`: identity, hardware data, writable-state storage,
+    runtime config and ops.
+- `targets/` – board selection only (defconfig, kernel, image assembly).
+- `platform-families/` – shared defaults for `raspberry-pi` and `aarch64-linux`.
+- `workspace/` – `root_dir`, `build_dir`/`out_dir` (`gaia/build/${build.name}`,
+  `gaia/output/${build.name}`), the `@assets` alias, reporting and failure policy.
+- `os/`, `network/`, `hardware/`, `identity/`, `ops/`, `storage/`,
+  `runtime-config/` – layer fragments imported by `layers/`.
+- `payloads/` – what gets built and installed: Rust artifacts (built in the
+  `helios-cross-rust194` Docker image), `orion-node`/`orionctl` from a pinned Orion
+  revision, and the prebuilt frontend bundle.
+- `runtime-services/` – systemd units, sockets and service assets for those payloads.
 
-```toml
-[workspace]
-root_dir = "."
-build_dir = "build"
-out_dir = "output"
+Non-TOML inputs (the Buildroot external tree, systemd units, overlays, tuning
+files) live under `gaia/assets/`. The cross-build image lives under
+`gaia/docker/`.
 
-[workspace.paths]
-assets = "assets"
-packages = "assets/buildroot/packages"
-helios = ".."
-```
+## Conventions
 
-Useful `buildroot` output controls live in `configs/modules/buildroot/base.toml`:
-- `collect_out_dir` (where collected images are copied),
-- `shrink_ext` (shrink copied ext rootfs images),
-- `archive_name` (create release artifacts, including flashable compressed `.img.xz` images),
-- `report`/`report_hashes` (emit `image-report.json` with sizes and hashes).
-
-Build output paths support templates:
-- `{build}` -> build filename stem (for `configs/builds/HeliOS-cm5.toml`, this is `HeliOS-cm5`)
-- `{version}` -> `[build].version` from the build file
-
-Example:
-
-```toml
-[build]
-version = "1.20250915"
-
-[buildroot]
-collect_out_dir = "output/{build}/{version}/images"
-archive_mode = "image"
-archive_format = "img.xz"
-archive_name = "{build}-{version}-sdcard"
-```
-
-Current build entrypoints:
-- `configs/builds/cm5.toml`
-- `configs/builds/cm4.toml`
-- `configs/builds/generic-aarch64-linux.toml`
-
-Run `gaia tui` from the `gaia/` directory to pick a target build, then use the
-Profile setup item to cycle between `base-os` and `full`.
+- Keep target files limited to board selection; shared behaviour belongs in a
+  layer or platform family.
+- Pin git sources with `rev`. `pin = "locked"` alone only stops re-fetching;
+  the revision is not recorded anywhere.
+- Paths use `@assets/...` or are relative to the repository root.

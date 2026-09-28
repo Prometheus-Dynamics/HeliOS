@@ -67,7 +67,7 @@ The live deploy helper accepts the same override explicitly. It now uploads bina
 ```bash
 HELIOS_CARGO_CONFIG=.cargo/local-overrides.toml \
 STYX_HOST_PATH=/absolute/path/to/Styx \
-./tools/deploy-live.sh --dev-release --only binaries --strict-binaries-only --no-upload --no-restart --no-templates --no-frontend
+./tools/deploy-live.sh --dev-release --only binaries --no-upload --no-restart --no-frontend
 ```
 
 `xtask validate build-profiles` also honors `HELIOS_CARGO_CONFIG` for the same explicit local-only override path.
@@ -93,21 +93,14 @@ Daedalus and Styx are fetched from public GitHub repositories via HTTPS during t
 
 ### Building the OS image
 
-OS images are built with Gaia from the in-repo buildchain under `../gaia`.
+OS images are built with Gaia from the build configuration under `../gaia`:
 
 ```bash
 # from the HeliOS repository root
 ./tools/build-os.sh cm5
 ```
 
-Or open Gaia TUI directly:
-
-```bash
-cd ../gaia
-gaia tui --builds-dir configs/builds
-```
-
-The helper script expects Gaia at `../gaia` (or `GAIA_ROOT` override) and requires `gaia` on your `PATH`. Full setup is documented in `../BUILD.md`.
+Run `./tools/build-os.sh` with no arguments for the Gaia TUI. It needs `gaia`, Docker and Bun on your `PATH`. Full setup is documented in `../BUILD.md`.
 
 ### Running canonical workload templates on a live device
 
