@@ -13,8 +13,18 @@ ExecStartPre=/usr/bin/install -d -m0755 /var/log/helios/orion
 Environment=ORION_NODE_IPC_SOCKET=/run/orion/control.sock
 Environment=ORION_NODE_IPC_STREAM_SOCKET=/run/orion/control-stream.sock
 Environment=ORION_NODE_ID=node-local
-Environment=ORION_NODE_HTTP_ADDR=127.0.0.1:9100
+# Single-node appliance profile: local IPC only, small runtime, bounded retention.
+# Starting values; revisit against the orion-node memory soak.
+Environment=ORION_NODE_HTTP_ADDR=off
 Environment=ORION_NODE_STATE_DIR=/var/lib/helios/orion
+Environment=ORION_NODE_RUNTIME_WORKER_THREADS=2
+Environment=ORION_NODE_RUNTIME_MAX_BLOCKING_THREADS=4
+Environment=ORION_NODE_MAX_MUTATION_HISTORY=64
+Environment=ORION_NODE_MAX_MUTATION_HISTORY_BYTES=262144
+Environment=ORION_NODE_LOCAL_CLIENT_EVENT_QUEUE_LIMIT=128
+Environment=ORION_NODE_OBSERVABILITY_EVENT_LIMIT=64
+Environment=ORION_NODE_AUDIT_LOG_QUEUE_CAPACITY=256
+Environment=MALLOC_ARENA_MAX=2
 EnvironmentFile=-/etc/default/orion-node.env
 ExecStart=/var/lib/helios/bin/orion-node
 Restart=always
