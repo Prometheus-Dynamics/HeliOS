@@ -184,13 +184,13 @@ mod tests {
     use super::{SlotScheme, StorageLayoutManifest};
     use std::path::PathBuf;
 
-    fn fixture(name: &str) -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../gaia/assets/generated/storage-layouts").join(name)
+    fn shipped_squashfs_layout() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../gaia/assets/storage/squashfs/etc/helios/storage-layout.toml")
     }
 
     #[test]
     fn parses_squashfs_ab_layout() {
-        let layout = StorageLayoutManifest::load_from_path(&fixture("squashfs-ab.toml")).expect("squashfs manifest");
+        let layout = StorageLayoutManifest::load_from_path(&shipped_squashfs_layout()).expect("squashfs manifest");
         assert_eq!(layout.layout_id, "squashfs_ab");
         assert_eq!(layout.slot_scheme, SlotScheme::SquashfsAb);
         assert_eq!(layout.slot_partition_numbers().unwrap(), (2, 3));

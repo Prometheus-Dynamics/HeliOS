@@ -13,7 +13,7 @@ use tracing::{info, warn};
 
 use crate::{
     config::EngineConfig,
-    execution::ResidentExecutionSet,
+    execution::{ExecutionPlugins, ResidentExecutionSet},
     model::{EngineSnapshot, ExecutionSessionState, ExecutionSessionStatus, ExecutionWorkload, GraphRef},
     plugins::{PluginLoadError, PluginLoadResult, discover_plugin_libraries, load_plugins},
     provider::{EnginePublishError, OrionEnginePublisher},
@@ -32,7 +32,7 @@ pub enum EngineRuntimeError {
 
 enum RuntimeEvent {
     WorkloadsChanged(Vec<WorkloadRecord>),
-    StateSnapshotUpdated(StateSnapshot),
+    StateSnapshotUpdated(Box<StateSnapshot>),
     WorkloadWatchStopped(ClientError),
     StateWatchStopped(ClientError),
 }
@@ -197,7 +197,7 @@ impl EngineApp {
                                 &decode_execution_workloads(&snapshot_workloads, &self.config.node_id, now_ms()).runnable,
                             );
                             current_workloads = snapshot_workloads;
-                            current_state_snapshot = Some(snapshot);
+                            current_state_snapshot = Some(*snapshot);
                             if should_publish {
                                 self.publish_snapshot_resilient(&plugins, &mut execution_sessions, &current_workloads, current_state_snapshot.as_ref()).await?;
                             }
@@ -244,7 +244,13 @@ impl EngineApp {
             }
         };
         let loaded_plugins = plugins.builtins.iter().cloned().chain(plugins.libraries.iter().map(|plugin| plugin.metadata().clone())).collect::<Vec<_>>();
-        let mut execution = execution_sessions.tick_workloads(&self.config, &plugins.registry, &plugins.host_manager, &loaded_plugins, &decoded.runnable, state_snapshot, observed_at_ms);
+        let mut execution = execution_sessions.tick_workloads(
+            &self.config,
+            &ExecutionPlugins { registry: &plugins.registry, host_manager: &plugins.host_manager, loaded_plugins: &loaded_plugins },
+            &decoded.runnable,
+            state_snapshot,
+            observed_at_ms,
+        );
         execution.sessions.extend(decoded.decode_failures);
         let snapshot = EngineSnapshot {
             node_id: self.config.node_id.clone(),
@@ -300,7 +306,7 @@ async fn watch_state_snapshots(mut subscription: ControlPlaneEventStream, event_
             Ok(events) => {
                 for event in events {
                     if let ClientEventKind::StateSnapshot(snapshot) = event.event
-                        && event_tx.send(RuntimeEvent::StateSnapshotUpdated(*snapshot)).is_err()
+                        && event_tx.send(RuntimeEvent::StateSnapshotUpdated(snapshot)).is_err()
                     {
                         return Ok(());
                     }

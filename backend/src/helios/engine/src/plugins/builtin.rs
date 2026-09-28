@@ -51,7 +51,7 @@ fn summary_json(input_value: f64, output_value: f64) -> Result<String, NodeError
         "input_value": input_value,
         "output_value": output_value,
     }))
-    .map_err(|error| NodeError::Handler(format!("failed to encode summary json: {error}").into()))
+    .map_err(|error| NodeError::Handler(format!("failed to encode summary json: {error}")))
 }
 
 declare_plugin!(HeliosBuiltinUtilityPlugin, "helios.builtin.utility", [resource_action_numeric, resource_label_numeric, double_f64, summary_json]);

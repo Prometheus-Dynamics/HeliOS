@@ -53,8 +53,7 @@ impl UpdaterConfig {
         V: Into<String>,
     {
         let env = iter.into_iter().map(|(key, value)| (key.into(), value.into())).collect::<std::collections::BTreeMap<String, String>>();
-        let mut config = Self::default();
-        config.node_id = env.get("HELIOS_NODE_ID").cloned().unwrap_or_else(|| DEFAULT_NODE_ID.to_string());
+        let mut config = Self { node_id: env.get("HELIOS_NODE_ID").cloned().unwrap_or_else(|| DEFAULT_NODE_ID.to_string()), ..Self::default() };
         if let Some(value) = env.get("HELIOS_UPDATER_SERVICE_RELEASES_DIR").filter(|value| !value.trim().is_empty()) {
             config.service_releases_dir = value.into();
         }

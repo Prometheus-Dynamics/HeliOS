@@ -99,7 +99,7 @@ pub fn confirm_boot(config: &BootConfirmConfig) -> Result<BootConfirmOutcome, Bo
     sync_path(config, &config.local_ota_dir)?;
 
     Ok(match result.status {
-        "confirmed" => BootConfirmOutcome::Confirmed { update_id: result.request.update_id, selector: result.active.unwrap_or_else(|| result.request.expected_selector) },
+        "confirmed" => BootConfirmOutcome::Confirmed { update_id: result.request.update_id, selector: result.active.unwrap_or(result.request.expected_selector) },
         _ => BootConfirmOutcome::Mismatch { update_id: result.request.update_id, expected: result.request.expected_selector, active: result.active },
     })
 }

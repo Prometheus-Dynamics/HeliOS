@@ -108,13 +108,13 @@ mod tests {
 
     use crate::storage_layout::StorageLayoutManifest;
 
-    fn fixture(name: &str) -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../gaia/assets/generated/storage-layouts").join(name)
+    fn shipped_squashfs_layout() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../gaia/assets/storage/squashfs/etc/helios/storage-layout.toml")
     }
 
     #[test]
     fn resolves_squashfs_layout_fixture() {
-        let layout = StorageLayoutManifest::load_from_path(&fixture("squashfs-ab.toml")).expect("squashfs layout");
+        let layout = StorageLayoutManifest::load_from_path(&shipped_squashfs_layout()).expect("squashfs layout");
         assert_eq!(layout.layout_id, "squashfs_ab");
         assert_eq!(layout.slot_a().unwrap().number, 2);
         assert_eq!(layout.slot_b().unwrap().number, 3);
@@ -129,7 +129,7 @@ mod tests {
 
     #[test]
     fn mirrored_slot_source_uses_noop_ab_partition() {
-        let layout = StorageLayoutManifest::load_from_path(&fixture("squashfs-ab.toml")).expect("squashfs layout");
+        let layout = StorageLayoutManifest::load_from_path(&shipped_squashfs_layout()).expect("squashfs layout");
         let mut swapped = layout.clone();
         for partition in &mut swapped.partitions {
             match partition.role {

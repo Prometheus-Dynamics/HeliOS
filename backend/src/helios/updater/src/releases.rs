@@ -164,10 +164,10 @@ impl ServiceReleaseManager {
         if let Ok(entries) = fs::read_dir(&self.releases_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.join(name).is_file() {
-                    if let Some(revision) = entry.file_name().to_str() {
-                        staged_revisions.push(revision.to_string());
-                    }
+                if path.join(name).is_file()
+                    && let Some(revision) = entry.file_name().to_str()
+                {
+                    staged_revisions.push(revision.to_string());
                 }
             }
         }

@@ -127,13 +127,18 @@ pub fn execute_workloads(
     ExecutionSnapshot { sessions, artifacts }
 }
 
+/// The plugin registry, host bridge and plugin metadata a workload is compiled against.
+pub struct ExecutionPlugins<'a> {
+    pub registry: &'a PluginRegistry,
+    pub host_manager: &'a HostBridgeManager,
+    pub loaded_plugins: &'a [LoadedPlugin],
+}
+
 impl ResidentExecutionSet {
     pub fn tick_workloads(
         &mut self,
         config: &EngineConfig,
-        registry: &PluginRegistry,
-        host_manager: &HostBridgeManager,
-        loaded_plugins: &[LoadedPlugin],
+        plugins: &ExecutionPlugins<'_>,
         workloads: &[ExecutionWorkload],
         state_snapshot: Option<&StateSnapshot>,
         observed_at_ms: u64,
@@ -147,7 +152,7 @@ impl ResidentExecutionSet {
 
         for workload in workloads {
             if !self.sessions.contains_key(workload.workload_id.as_str()) {
-                match build_resident_execution(config, registry, host_manager, loaded_plugins, workload) {
+                match build_resident_execution(config, plugins.registry, plugins.host_manager, plugins.loaded_plugins, workload) {
                     Ok(resident) => {
                         self.sessions.insert(workload.workload_id.clone(), resident);
                     }
@@ -226,11 +231,13 @@ fn execute_workload(
         output_host_alias.as_deref().or(Some("host")),
         &output_ports,
         observed_at_ms,
-        telemetry_count,
-        planning_elapsed_ms,
-        binding_elapsed_ms,
-        execution_elapsed_ms,
-        started_at.elapsed().as_secs_f64() * 1000.0,
+        &ExecutionTelemetry {
+            node_metrics_count: telemetry_count,
+            planning_ms: planning_elapsed_ms,
+            binding_ms: binding_elapsed_ms,
+            execution_ms: execution_elapsed_ms,
+            before_artifacts_ms: started_at.elapsed().as_secs_f64() * 1000.0,
+        },
     )?;
     let artifact_elapsed_ms = artifact_started_at.elapsed().as_secs_f64() * 1000.0;
     let total_elapsed_ms = started_at.elapsed().as_secs_f64() * 1000.0;
@@ -364,11 +371,13 @@ fn tick_resident_execution(
         resident.output_host_alias.as_deref().or(Some("host")),
         &resident.output_ports,
         observed_at_ms,
-        telemetry_count,
-        resident.planning_elapsed_ms,
-        binding_elapsed_ms,
-        execution_elapsed_ms,
-        started_at.elapsed().as_secs_f64() * 1000.0,
+        &ExecutionTelemetry {
+            node_metrics_count: telemetry_count,
+            planning_ms: resident.planning_elapsed_ms,
+            binding_ms: binding_elapsed_ms,
+            execution_ms: execution_elapsed_ms,
+            before_artifacts_ms: started_at.elapsed().as_secs_f64() * 1000.0,
+        },
     )?;
     let artifact_elapsed_ms = artifact_started_at.elapsed().as_secs_f64() * 1000.0;
     let total_elapsed_ms = started_at.elapsed().as_secs_f64() * 1000.0;
@@ -520,6 +529,15 @@ fn resource_config_to_json(config: &orion::control_plane::ResourceConfigState) -
     })
 }
 
+/// Node metric count and per-stage timings reported in a session's telemetry artifact.
+struct ExecutionTelemetry {
+    node_metrics_count: u64,
+    planning_ms: f64,
+    binding_ms: f64,
+    execution_ms: f64,
+    before_artifacts_ms: f64,
+}
+
 fn collect_artifacts(
     config: &EngineConfig,
     workload: &ExecutionWorkload,
@@ -527,11 +545,7 @@ fn collect_artifacts(
     host_alias: Option<&str>,
     output_ports: &[String],
     observed_at_ms: u64,
-    telemetry_count: u64,
-    planning_elapsed_ms: f64,
-    binding_elapsed_ms: f64,
-    execution_elapsed_ms: f64,
-    elapsed_before_artifacts_ms: f64,
+    telemetry: &ExecutionTelemetry,
 ) -> Result<Vec<ExecutionArtifactRecord>, ExecutionError> {
     let Some(host) = host_alias.and_then(|alias| host_manager.handle(alias)).or_else(|| host_manager.handle("host")) else {
         return Ok(Vec::new());
@@ -561,12 +575,12 @@ fn collect_artifacts(
         observed_at_ms,
         message: Some(
             serde_json::json!({
-                "node_metrics_count": telemetry_count,
+                "node_metrics_count": telemetry.node_metrics_count,
                 "timings_ms": {
-                    "planning": planning_elapsed_ms,
-                    "binding_injection": binding_elapsed_ms,
-                    "execution": execution_elapsed_ms,
-                    "before_artifact_collection_total": elapsed_before_artifacts_ms
+                    "planning": telemetry.planning_ms,
+                    "binding_injection": telemetry.binding_ms,
+                    "execution": telemetry.execution_ms,
+                    "before_artifact_collection_total": telemetry.before_artifacts_ms
                 }
             })
             .to_string(),
@@ -919,7 +933,13 @@ mod tests {
         let loaded_plugins = vec![LoadedPlugin { path: "<test>".into(), plugin_name: Some("engine.test".into()), plugin_version: None, abi_version: None }];
         let mut resident = ResidentExecutionSet::default();
 
-        let first = resident.tick_workloads(&config, &plugins, &host_manager, &loaded_plugins, std::slice::from_ref(&workload), Some(&state_snapshot), 500);
+        let first = resident.tick_workloads(
+            &config,
+            &ExecutionPlugins { registry: &plugins, host_manager: &host_manager, loaded_plugins: &loaded_plugins },
+            std::slice::from_ref(&workload),
+            Some(&state_snapshot),
+            500,
+        );
         assert_eq!(first.sessions[0].status, ExecutionSessionStatus::Running);
         assert!(first.sessions[0].message.as_deref().is_some_and(|message| message.contains("\"tick_count\":1")));
         let first_artifact = first.artifacts.iter().find(|artifact| artifact.kind == "stream.channel:processed").expect("first frame output artifact");
@@ -928,14 +948,26 @@ mod tests {
 
         let updated_frame = test_frame(628);
         let (_input_path, _input_endpoints) = stream_io::publish_output_frame(temp.path(), "resident-input-frame", &updated_frame).expect("publish updated input frame");
-        let second = resident.tick_workloads(&config, &plugins, &host_manager, &loaded_plugins, std::slice::from_ref(&workload), Some(&state_snapshot), 750);
+        let second = resident.tick_workloads(
+            &config,
+            &ExecutionPlugins { registry: &plugins, host_manager: &host_manager, loaded_plugins: &loaded_plugins },
+            std::slice::from_ref(&workload),
+            Some(&state_snapshot),
+            750,
+        );
         assert_eq!(second.sessions[0].status, ExecutionSessionStatus::Running);
         assert!(second.sessions[0].message.as_deref().is_some_and(|message| message.contains("\"tick_count\":2")));
         let second_artifact = second.artifacts.iter().find(|artifact| artifact.kind == "stream.channel:processed").expect("second frame output artifact");
         let second_output_frame = stream_io::import_latest_frame_from_resource_endpoints(&second_artifact.endpoints).expect("import second output frame");
         assert_eq!(second_output_frame.meta().timestamp, 628);
 
-        let idle = resident.tick_workloads(&config, &plugins, &host_manager, &loaded_plugins, std::slice::from_ref(&workload), Some(&state_snapshot), 1000);
+        let idle = resident.tick_workloads(
+            &config,
+            &ExecutionPlugins { registry: &plugins, host_manager: &host_manager, loaded_plugins: &loaded_plugins },
+            std::slice::from_ref(&workload),
+            Some(&state_snapshot),
+            1000,
+        );
         assert_eq!(idle.sessions[0].status, ExecutionSessionStatus::Running);
         assert!(idle.sessions[0].message.as_deref().is_some_and(|message| message.contains("\"skipped_unchanged_inputs\":true")));
         assert!(idle.sessions[0].message.as_deref().is_some_and(|message| message.contains("\"tick_count\":2")));
@@ -1001,7 +1033,13 @@ mod tests {
         let loaded_plugins = vec![LoadedPlugin { path: "<test>".into(), plugin_name: Some("engine.test".into()), plugin_version: None, abi_version: None }];
         let mut resident = ResidentExecutionSet::default();
 
-        let first = resident.tick_workloads(&config, &plugins, &host_manager, &loaded_plugins, std::slice::from_ref(&workload), Some(&state_snapshot), 100);
+        let first = resident.tick_workloads(
+            &config,
+            &ExecutionPlugins { registry: &plugins, host_manager: &host_manager, loaded_plugins: &loaded_plugins },
+            std::slice::from_ref(&workload),
+            Some(&state_snapshot),
+            100,
+        );
         assert!(first.artifacts.iter().any(|artifact| artifact.message.as_deref().is_some_and(|message| message.contains("imu-a") && message.contains("\"timestamp\":900"))));
 
         let imu_resource = ResourceRecord::builder(imu_resource_id.clone(), "imu.sensor", "provider.peripherals.node-local")
@@ -1015,7 +1053,13 @@ mod tests {
         resources.insert(imu_resource_id.clone(), imu_resource);
         state_snapshot.state.observed.resources = resources;
 
-        let second = resident.tick_workloads(&config, &plugins, &host_manager, &loaded_plugins, std::slice::from_ref(&workload), Some(&state_snapshot), 200);
+        let second = resident.tick_workloads(
+            &config,
+            &ExecutionPlugins { registry: &plugins, host_manager: &host_manager, loaded_plugins: &loaded_plugins },
+            std::slice::from_ref(&workload),
+            Some(&state_snapshot),
+            200,
+        );
         assert!(second.artifacts.iter().any(|artifact| artifact.message.as_deref().is_some_and(|message| message.contains("imu-b") && message.contains("\"timestamp\":900"))));
         assert!(second.sessions[0].message.as_deref().is_some_and(|message| message.contains("\"tick_count\":2")));
     }

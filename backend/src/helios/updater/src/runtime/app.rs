@@ -131,7 +131,7 @@ impl UpdaterApp {
         loop {
             match control.fetch_state_snapshot().await {
                 Ok(snapshot) => {
-                    let workloads = snapshot.state.desired.workloads.values().filter(|record| matches!(decode_assigned_workload(record, &self.config.node_id), Ok(_))).cloned().collect::<Vec<_>>();
+                    let workloads = snapshot.state.desired.workloads.values().filter(|record| decode_assigned_workload(record, &self.config.node_id).is_ok()).cloned().collect::<Vec<_>>();
                     return Ok(workloads);
                 }
                 Err(error) => {
@@ -386,7 +386,7 @@ impl UpdaterApp {
 }
 
 fn has_assigned_update_workload(workloads: &[WorkloadRecord], node_id: &str) -> bool {
-    workloads.iter().any(|record| matches!(decode_assigned_workload(record, node_id), Ok(_)))
+    workloads.iter().any(|record| decode_assigned_workload(record, node_id).is_ok())
 }
 
 async fn pump_assigned_workloads(mut subscription: orion::client::LocalExecutorSubscription, event_tx: mpsc::UnboundedSender<RuntimeEvent>) -> Result<(), ClientError> {
@@ -419,7 +419,7 @@ mod tests {
         };
         let snapshot = StateSnapshot { state: ClusterStateEnvelope::new(DesiredClusterState::default(), ObservedClusterState::default(), AppliedClusterState::default()) };
 
-        let (executions, run_state) = app.plan_assigned_updates(&[workload.clone()], Some(&snapshot)).await;
+        let (executions, run_state) = app.plan_assigned_updates(std::slice::from_ref(&workload), Some(&snapshot)).await;
 
         assert_eq!(executions.len(), 1);
         assert_eq!(executions[0].phase, UpdatePhase::Preflight);

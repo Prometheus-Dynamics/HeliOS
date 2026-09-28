@@ -67,9 +67,8 @@ pub fn collect_health_report(config: &DiagnosticsConfig) -> Result<HealthReport>
         || !ota.os_image_ready
         || runtime.processes.iter().any(|process| process.process_count > 1)
         || services.iter().any(|service| service.unit.starts_with("helios-") && !service.uses_managed_bin && service.exec_start.iter().any(|exec| exec.contains("/usr/bin/helios-")))
+        || services.iter().any(|service| !service_is_healthy(service))
     {
-        status = HealthStatus::Degraded;
-    } else if services.iter().any(|service| !service_is_healthy(service)) {
         status = HealthStatus::Degraded;
     }
 

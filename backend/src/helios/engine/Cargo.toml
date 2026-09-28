@@ -20,8 +20,8 @@ serde_json = { workspace = true }
 paste = { workspace = true }
 memmap2 = { workspace = true }
 notify = { workspace = true }
-orion = { workspace = true, default-features = false, features = ["client", "control-plane", "core", "macros", "transport-ipc"] }
-daedalus = { workspace = true, features = ["engine", "ffi", "plugins", "gpu"] }
+orion = { workspace = true, default-features = false, features = ["client", "macros", "transport-ipc"] }
+daedalus = { workspace = true, features = ["engine", "dylib-plugins"] }
 styx = { workspace = true, default-features = false, features = ["framelease"] }
 
 [dev-dependencies]

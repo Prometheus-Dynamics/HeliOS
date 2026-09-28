@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use daedalus::{
-    FfiPluginError, HostBridgeInstallError, PluginLibrary, PluginRegistry,
+    HostBridgeInstallError, PluginLibrary, PluginLibraryError, PluginRegistry,
     host_bridge::install_host_bridge,
     runtime::{HostBridgeManager, plugins::PluginError},
 };
@@ -16,7 +16,7 @@ pub enum PluginLoadError {
     #[error("failed to install built-in plugin: {0}")]
     Builtin(#[from] PluginError),
     #[error("failed to load Daedalus plugin library {path}: {source}")]
-    Library { path: PathBuf, source: FfiPluginError },
+    Library { path: PathBuf, source: PluginLibraryError },
 }
 
 pub struct LoadedPluginLibrary {
@@ -55,9 +55,9 @@ fn load_plugin_library(path: &Path, registry: &mut PluginRegistry) -> Result<Loa
     let info = library.info();
     let metadata = LoadedPlugin {
         path: path.to_path_buf(),
-        plugin_name: info.as_ref().and_then(|info| info.plugin_name.as_str().map(ToOwned::to_owned)),
-        plugin_version: info.as_ref().and_then(|info| info.plugin_version.as_str().map(ToOwned::to_owned)),
-        abi_version: library.abi_version(),
+        plugin_name: info.plugin_name.as_str().map(ToOwned::to_owned),
+        plugin_version: info.plugin_version.as_str().map(ToOwned::to_owned),
+        abi_version: Some(library.abi_version()),
     };
 
     Ok(LoadedPluginLibrary { metadata, _library: library })

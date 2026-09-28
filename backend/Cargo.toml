@@ -116,12 +116,12 @@ tar = "0.4.44"
 tempfile = "3.27.0"
 
 # External repos
-daedalus = { package = "daedalus-rs", version = "2.0.0", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "ae98541285caeb48da7ff2fa3c101d5daf15e482" }
-daedalus-data = { version = "2.0.0", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "ae98541285caeb48da7ff2fa3c101d5daf15e482" }
-daedalus-macros = { version = "2.0.0", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "ae98541285caeb48da7ff2fa3c101d5daf15e482" }
-lemnos = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", branch = "main", default-features = false }
-orion = { git = "https://github.com/Prometheus-Dynamics/Orion.git", branch = "dev", default-features = false }
-styx = { version = "2.0.0", git = "https://github.com/Prometheus-Dynamics/Styx.git", branch = "dev", default-features = false }
+daedalus = { package = "daedalus-rs", version = "2.0.0", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "c472a29e37bc6b5ce00d038f9eb1c8c7ad72d9f6" }
+daedalus-data = { version = "2.0.0", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "c472a29e37bc6b5ce00d038f9eb1c8c7ad72d9f6" }
+daedalus-macros = { version = "2.0.0", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "c472a29e37bc6b5ce00d038f9eb1c8c7ad72d9f6" }
+lemnos = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", rev = "0e706c0b8371a3c9c32e92ff4e21344e4a4d765a", default-features = false }
+orion = { git = "https://github.com/Prometheus-Dynamics/Orion.git", rev = "976bc39631a68cfc772129e13f8a3489f48fcf3b", default-features = false }
+styx = { version = "2.0.0", git = "https://github.com/Prometheus-Dynamics/Styx.git", rev = "54ff6e19e9caa35dd4e25f5f66344bb156493fa2", default-features = false }
 
 [profile.release]
 opt-level = "z"

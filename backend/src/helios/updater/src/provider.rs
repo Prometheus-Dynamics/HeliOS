@@ -164,7 +164,7 @@ mod tests {
 
     #[test]
     fn execution_resources_declare_source_workload() {
-        let workloads = vec![UpdateWorkload {
+        let workloads = [UpdateWorkload {
             workload_id: "update.node-local.1".into(),
             artifact_id: "artifact.os".into(),
             assigned_node_id: "node-local".into(),

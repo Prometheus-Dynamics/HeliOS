@@ -251,14 +251,14 @@ impl UpdateExecutor {
             }));
         }
 
-        if let Some(result) = self.confirm_result_for(&state.update_id)? {
-            if result.status == "confirmed" {
-                self.mark_outcome(workload_id, PreparedOutcome::Completed)?;
-                let Some(updated) = self.load_prepared(workload_id)? else {
-                    return Ok(Some(PreparedObservation::Completed { message: state.message }));
-                };
-                return Ok(Some(PreparedObservation::Completed { message: updated.message }));
-            }
+        if let Some(result) = self.confirm_result_for(&state.update_id)?
+            && result.status == "confirmed"
+        {
+            self.mark_outcome(workload_id, PreparedOutcome::Completed)?;
+            let Some(updated) = self.load_prepared(workload_id)? else {
+                return Ok(Some(PreparedObservation::Completed { message: state.message }));
+            };
+            return Ok(Some(PreparedObservation::Completed { message: updated.message }));
         }
 
         let pending_selector = self.pending_selector()?;

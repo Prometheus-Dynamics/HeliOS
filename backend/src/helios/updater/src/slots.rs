@@ -74,10 +74,11 @@ fn probe_slot_layout_with(config: SlotProbeConfig) -> Result<SlotLayout, SlotPro
     let active_name = slot_name(&layout, active);
     let inactive_name = slot_name(&layout, inactive);
 
-    if let Some(reserve_name) = reserve_name.as_deref() {
-        if reserve_name != inactive_name && reserve_name != active_name {
-            return Err(SlotProbeError::UnknownActiveSlot);
-        }
+    if let Some(reserve_name) = reserve_name.as_deref()
+        && reserve_name != inactive_name
+        && reserve_name != active_name
+    {
+        return Err(SlotProbeError::UnknownActiveSlot);
     }
 
     let active_device = resolve_slot_device(&layout, active)?;
@@ -191,10 +192,10 @@ fn slot_matches_value(root: &str, layout: &StorageLayoutEnv, slot: UpdateSlot) -
         return Ok(true);
     }
 
-    if let Some(label) = slot_label {
-        if root == format!("LABEL={label}") {
-            return Ok(true);
-        }
+    if let Some(label) = slot_label
+        && root == format!("LABEL={label}")
+    {
+        return Ok(true);
     }
 
     let canonical_device = canonicalize_path(&slot_device);
@@ -295,10 +296,8 @@ fn disk_from_partition(path: &Path) -> PathBuf {
 fn strip_partition_suffix(value: &str) -> Option<&str> {
     if let Some(index) = value.rfind('p') {
         let suffix = &value[index + 1..];
-        if value.starts_with("/dev/mmcblk") || value.starts_with("/dev/nvme") {
-            if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
-                return Some(&value[..index]);
-            }
+        if (value.starts_with("/dev/mmcblk") || value.starts_with("/dev/nvme")) && !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit()) {
+            return Some(&value[..index]);
         }
     }
 

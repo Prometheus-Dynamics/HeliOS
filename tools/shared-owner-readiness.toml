@@ -17,18 +17,17 @@ repo = "daedalus"
 dependency_names = ["daedalus", "daedalus-data", "daedalus-macros"]
 patch_table = "https://github.com/Prometheus-Dynamics/Daedalus.git"
 patch_dependency_names = ["daedalus-rs", "daedalus-data", "daedalus-macros"]
-pinned_revision = "910b6b83ce82fef75a4789750e7a85401f2864dc"
-proof_reference = "https://github.com/Prometheus-Dynamics/Daedalus/commit/910b6b83ce82fef75a4789750e7a85401f2864dc"
-tracking_branch = "main"
-notes = "HeliOS no longer depends on the local-only Daedalus host output filter API and now tracks the upstream Daedalus main branch explicitly."
+pinned_revision = "c472a29e37bc6b5ce00d038f9eb1c8c7ad72d9f6"
+proof_reference = "https://github.com/Prometheus-Dynamics/Daedalus/commit/c472a29e37bc6b5ce00d038f9eb1c8c7ad72d9f6"
+notes = "HeliOS pins the Daedalus 2.0 helios-integration revision (dylib plugin loading, host port introspection, GraphDocument). Conversions are Daedalus adapters; HeliOS no longer depends on the local-only host output filter API."
 
 [[items]]
 id = 12
 title = "Normal integration without hidden local path patching"
-owner = "Shared HeliOS/Styx/Daedalus"
+owner = "Shared HeliOS/Styx/Daedalus/Orion/Lemnos"
 status = "landed"
-repo = "styx+daedalus"
-dependency_names = ["styx", "daedalus", "daedalus-data", "daedalus-macros"]
-tracking_branches = { styx = "main", daedalus = "main", daedalus-data = "main", daedalus-macros = "main" }
-proof_reference = "backend/README.md and tools/deploy-live.sh now require explicit cargo --config / HELIOS_CARGO_CONFIG opt-in for local sibling overrides, while committed manifests stay pinned to upstream git revisions with no path patches."
-notes = "Hidden local path patching is no longer part of the normal integration story. The repo no longer relies on an auto-loaded .cargo/config.toml, local sibling overrides live only in uncommitted files such as .cargo/local-overrides.toml, helper tooling accepts them only through explicit opt-in flags or env vars, and committed manifests track upstream main branches directly."
+repo = "styx+daedalus+orion+lemnos"
+dependency_names = ["styx", "daedalus", "daedalus-data", "daedalus-macros", "orion", "lemnos"]
+pinned_revisions = { styx = "54ff6e19e9caa35dd4e25f5f66344bb156493fa2", daedalus = "c472a29e37bc6b5ce00d038f9eb1c8c7ad72d9f6", daedalus-data = "c472a29e37bc6b5ce00d038f9eb1c8c7ad72d9f6", daedalus-macros = "c472a29e37bc6b5ce00d038f9eb1c8c7ad72d9f6", orion = "976bc39631a68cfc772129e13f8a3489f48fcf3b", lemnos = "0e706c0b8371a3c9c32e92ff4e21344e4a4d765a" }
+proof_reference = "backend/Cargo.toml pins every shared-owner git dependency to an exact rev with no path patches; local sibling overrides stay in uncommitted files and are opted into per command."
+notes = "Committed manifests pin exact upstream revisions instead of tracking branches, so builds are reproducible and Cargo.lock only moves on an explicit pin bump. Orion, Lemnos and Daedalus revs come from their helios-integration branches."
