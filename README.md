@@ -49,7 +49,7 @@ See [BUILD.md](BUILD.md) for Gaia install/build steps. In short:
 ```bash
 ./tools/build-os.sh raze            # image in gaia/output/helios-full-raze/images/
 # against a local Atlas checkout (until the pinned Atlas commit is pushed):
-./tools/build-os.sh raze full --set sources.atlas.path=../Atlas-Hardware-Manager
+./tools/build-os.sh raze full --set sources.atlas.path=$PWD/../Atlas-Hardware-Manager
 ```
 
 ## License

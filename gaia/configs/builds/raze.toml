@@ -11,7 +11,7 @@ target = "raze"
 # gadget, identity endpoint) comes from the Raze device package in Atlas
 # (devices/raze). HeliOS layers are imported after it, so they override its
 # defaults. Local development against an Atlas checkout:
-#   --set sources.atlas.path=../Atlas-Hardware-Manager
+#   --set sources.atlas.path=$PWD/../Atlas-Hardware-Manager
 imports = [
   "../layers/base-os.toml",
   { source = "atlas", path = "devices/raze/gaia/device.toml", when = { target = "raze" } },

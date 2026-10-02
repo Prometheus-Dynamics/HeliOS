@@ -95,7 +95,7 @@ OS images are built with Gaia from the build configuration under `../gaia`:
 # from the HeliOS repository root
 ./tools/build-os.sh raze
 # against a local Atlas checkout for the Raze device package:
-./tools/build-os.sh raze full --set sources.atlas.path=../Atlas-Hardware-Manager
+./tools/build-os.sh raze full --set sources.atlas.path=$PWD/../Atlas-Hardware-Manager
 ```
 
 The only target is `raze`; the image lands in `gaia/output/helios-full-raze/images/`. Raze device support (kernel, OV9782, libcamera, overlays, USB gadget) comes from Atlas `devices/raze`.

@@ -19,7 +19,7 @@ Output:   gaia/output/helios-<profile>-<target>/images/ (e.g. helios-full-raze)
 
 Raze device support comes from the Atlas device package (devices/raze), fetched
 at the rev pinned in $BUILDS_DIR/raze.toml. To use a local Atlas checkout:
-  tools/build-os.sh raze full --set sources.atlas.path=../Atlas-Hardware-Manager
+  tools/build-os.sh raze full --set sources.atlas.path=$PWD/../Atlas-Hardware-Manager
 
 Env:
   FORCE_FRONTEND_BUILD=1

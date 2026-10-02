@@ -34,7 +34,8 @@ pinned by `rev` in `builds/raze.toml`:
 HeliOS layers are imported after it and override its defaults. HeliOS keeps
 its own hostname (`helios`), so the package's `raze-{serial8}` default does not
 apply. For a local Atlas checkout use
-`--set sources.atlas.path=../Atlas-Hardware-Manager`.
+`--set sources.atlas.path=$PWD/../Atlas-Hardware-Manager` (the path must be absolute;
+Gaia rejects workspace-relative paths outside the repository).
 
 ## Directories
 

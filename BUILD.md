@@ -56,9 +56,9 @@ checkout instead (for example while changing the device package, or before
 the pinned commit is pushed), point the `atlas` source at it:
 
 ```bash
-./tools/build-os.sh raze full --set sources.atlas.path=../Atlas-Hardware-Manager
+./tools/build-os.sh raze full --set sources.atlas.path=$PWD/../Atlas-Hardware-Manager
 gaia plan gaia/configs/builds/raze.toml --set input.profile=full \
-  --set sources.atlas.path=../Atlas-Hardware-Manager
+  --set sources.atlas.path=$PWD/../Atlas-Hardware-Manager
 ```
 
 The path is absolute or relative to the repo root. Do not run `gaia lock`
