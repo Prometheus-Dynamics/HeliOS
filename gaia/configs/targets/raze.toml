@@ -5,14 +5,6 @@ imports = [
   "../ops/usb-gadget-watchdog.toml",
 ]
 
-[stage]
-
-[[stage.files]]
-id = "hardware-i2c-dev"
-src = "@assets/hardware/etc/modules-load.d/i2c-dev.conf"
-dest = "/etc/modules-load.d/i2c-dev.conf"
-origin = "static-asset"
-
 [image]
 kind = "buildroot"
 # Device tree first, so its @source: token resolves; Gaia takes one value and
@@ -28,12 +20,8 @@ config_overrides = [
   ["BR2_PACKAGE_RPI_FIRMWARE_CONFIG_FILE", "\"${project.root_dir}/gaia/assets/buildroot/boards/helios-pi-squashfs/config.txt\""],
   ["BR2_PACKAGE_RPI_FIRMWARE_CMDLINE_FILE", "\"${project.root_dir}/gaia/assets/buildroot/boards/helios-pi-squashfs/cmdline.txt\""],
   ["BR2_PACKAGE_RPI_FIRMWARE_VARIANT_PI4", "y"],
-  ["BR2_PACKAGE_LINUX_FIRMWARE_RP2", "y"],
   ["BR2_TARGET_ROOTFS_EXT2", "n"],
 ]
-
-[image.feed]
-stage_files = ["hardware-i2c-dev"]
 
 [[image.expected_images]]
 name = "sdcard.img"

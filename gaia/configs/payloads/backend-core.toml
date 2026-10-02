@@ -17,7 +17,7 @@ id = "orion-workspace"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Orion.git"
 # Must match the orion rev in backend/Cargo.toml: orion-node and the client libs share the snapshot layout.
-rev = "976bc39631a68cfc772129e13f8a3489f48fcf3b"
+rev = "59f91ed97681bd0421f9d32bed82be21b2786642"
 refresh = "never"
 pin = "locked"
 

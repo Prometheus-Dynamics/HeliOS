@@ -377,7 +377,7 @@ fn log_loaded_plugins(plugins: &PluginLoadResult) {
             plugin_path = %plugin.path.display(),
             plugin_name = plugin.plugin_name.as_deref().unwrap_or("unknown"),
             plugin_version = plugin.plugin_version.as_deref().unwrap_or("builtin"),
-            abi_version = plugin.abi_version.unwrap_or_default(),
+            daedalus_version = plugin.daedalus_version.as_deref().unwrap_or("builtin"),
             "loaded built-in Daedalus plugin"
         );
     }
@@ -388,7 +388,7 @@ fn log_loaded_plugins(plugins: &PluginLoadResult) {
             plugin_path = %metadata.path.display(),
             plugin_name = metadata.plugin_name.as_deref().unwrap_or("unknown"),
             plugin_version = metadata.plugin_version.as_deref().unwrap_or("unknown"),
-            abi_version = metadata.abi_version.unwrap_or_default(),
+            daedalus_version = metadata.daedalus_version.as_deref().unwrap_or("unknown"),
             "loaded external Daedalus plugin"
         );
     }

@@ -485,9 +485,10 @@ fn prepare_binding_input(binding: &ExecutionBinding, resources: &BTreeMap<Resour
 }
 
 fn push_prepared_binding(host: &daedalus::runtime::HostBridgeHandle, input: PreparedBindingInput) {
+    let port = input.input;
     match input.payload {
-        PreparedBindingPayload::Payload(payload) => host.push_payload(input.input.as_str(), payload),
-        PreparedBindingPayload::AnyString(payload) => host.push_any(input.input.as_str(), payload),
+        PreparedBindingPayload::Payload(payload) => host.feed_payload(port, payload),
+        PreparedBindingPayload::AnyString(payload) => host.push(port, payload),
     };
 }
 
@@ -750,7 +751,7 @@ mod tests {
             &EngineConfig::default(),
             &plugins,
             &host_manager,
-            &[LoadedPlugin { path: "<test>".into(), plugin_name: Some("engine.test".into()), plugin_version: None, abi_version: None }],
+            &[LoadedPlugin { path: "<test>".into(), plugin_name: Some("engine.test".into()), plugin_version: None, daedalus_version: None }],
             &[ExecutionWorkload {
                 workload_id: "workload.inline".into(),
                 artifact_id: "artifact.inline".into(),
@@ -810,7 +811,7 @@ mod tests {
             &EngineConfig::default(),
             &plugins,
             &host_manager,
-            &[LoadedPlugin { path: "<test>".into(), plugin_name: Some("engine.test".into()), plugin_version: None, abi_version: None }],
+            &[LoadedPlugin { path: "<test>".into(), plugin_name: Some("engine.test".into()), plugin_version: None, daedalus_version: None }],
             &[ExecutionWorkload {
                 workload_id: "workload.bound.state".into(),
                 artifact_id: "artifact.bound.state".into(),
@@ -867,7 +868,7 @@ mod tests {
             &config,
             &plugins,
             &host_manager,
-            &[LoadedPlugin { path: "<test>".into(), plugin_name: Some("engine.test".into()), plugin_version: None, abi_version: None }],
+            &[LoadedPlugin { path: "<test>".into(), plugin_name: Some("engine.test".into()), plugin_version: None, daedalus_version: None }],
             &[ExecutionWorkload {
                 workload_id: "workload.frame-pass".into(),
                 artifact_id: "artifact.frame-pass".into(),
@@ -930,7 +931,7 @@ mod tests {
             bindings: vec![ExecutionBinding { input: "camera".into(), resource_id: stream_resource_id.as_str().to_string(), node_id: "node-local".into() }],
             plugin_requirements: Vec::new(),
         };
-        let loaded_plugins = vec![LoadedPlugin { path: "<test>".into(), plugin_name: Some("engine.test".into()), plugin_version: None, abi_version: None }];
+        let loaded_plugins = vec![LoadedPlugin { path: "<test>".into(), plugin_name: Some("engine.test".into()), plugin_version: None, daedalus_version: None }];
         let mut resident = ResidentExecutionSet::default();
 
         let first = resident.tick_workloads(
@@ -1030,7 +1031,7 @@ mod tests {
             ],
             plugin_requirements: Vec::new(),
         };
-        let loaded_plugins = vec![LoadedPlugin { path: "<test>".into(), plugin_name: Some("engine.test".into()), plugin_version: None, abi_version: None }];
+        let loaded_plugins = vec![LoadedPlugin { path: "<test>".into(), plugin_name: Some("engine.test".into()), plugin_version: None, daedalus_version: None }];
         let mut resident = ResidentExecutionSet::default();
 
         let first = resident.tick_workloads(

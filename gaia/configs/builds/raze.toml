@@ -20,12 +20,12 @@ imports = [
   "../targets/raze.toml",
 ]
 
-# Raze device package 1.0.3.
+# Raze device package 1.0.4.
 [[sources]]
 id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
-rev = "d1f91182351693f9dff8d0938954f5fc1c3ac5d4"
+rev = "e677094af57c5e6eff116b7f6035a214f6e43241"
 
 [inputs.profile]
 description = "Build profile"

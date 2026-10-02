@@ -17,8 +17,8 @@ repo = "daedalus"
 dependency_names = ["daedalus", "daedalus-data", "daedalus-macros"]
 patch_table = "https://github.com/Prometheus-Dynamics/Daedalus.git"
 patch_dependency_names = ["daedalus-rs", "daedalus-data", "daedalus-macros"]
-pinned_revision = "c472a29e37bc6b5ce00d038f9eb1c8c7ad72d9f6"
-proof_reference = "https://github.com/Prometheus-Dynamics/Daedalus/commit/c472a29e37bc6b5ce00d038f9eb1c8c7ad72d9f6"
+pinned_revision = "ac5fd56b33fb002902b4ba9964a5ed542bdffd21"
+proof_reference = "https://github.com/Prometheus-Dynamics/Daedalus/commit/ac5fd56b33fb002902b4ba9964a5ed542bdffd21"
 notes = "HeliOS pins the Daedalus 2.0 helios-integration revision (dylib plugin loading, host port introspection, GraphDocument). Conversions are Daedalus adapters; HeliOS no longer depends on the local-only host output filter API."
 
 [[items]]
@@ -28,6 +28,6 @@ owner = "Shared HeliOS/Styx/Daedalus/Orion/Lemnos"
 status = "landed"
 repo = "styx+daedalus+orion+lemnos"
 dependency_names = ["styx", "daedalus", "daedalus-data", "daedalus-macros", "orion", "lemnos"]
-pinned_revisions = { styx = "54ff6e19e9caa35dd4e25f5f66344bb156493fa2", daedalus = "c472a29e37bc6b5ce00d038f9eb1c8c7ad72d9f6", daedalus-data = "c472a29e37bc6b5ce00d038f9eb1c8c7ad72d9f6", daedalus-macros = "c472a29e37bc6b5ce00d038f9eb1c8c7ad72d9f6", orion = "976bc39631a68cfc772129e13f8a3489f48fcf3b", lemnos = "0e706c0b8371a3c9c32e92ff4e21344e4a4d765a" }
+pinned_revisions = { styx = "54ff6e19e9caa35dd4e25f5f66344bb156493fa2", daedalus = "ac5fd56b33fb002902b4ba9964a5ed542bdffd21", daedalus-data = "ac5fd56b33fb002902b4ba9964a5ed542bdffd21", daedalus-macros = "ac5fd56b33fb002902b4ba9964a5ed542bdffd21", orion = "59f91ed97681bd0421f9d32bed82be21b2786642", lemnos = "0e706c0b8371a3c9c32e92ff4e21344e4a4d765a" }
 proof_reference = "backend/Cargo.toml pins every shared-owner git dependency to an exact rev with no path patches; local sibling overrides stay in uncommitted files and are opted into per command."
 notes = "Committed manifests pin exact upstream revisions instead of tracking branches, so builds are reproducible and Cargo.lock only moves on an explicit pin bump. Orion, Lemnos and Daedalus revs come from their helios-integration branches."

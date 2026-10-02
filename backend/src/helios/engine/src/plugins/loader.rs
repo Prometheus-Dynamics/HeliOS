@@ -57,7 +57,7 @@ fn load_plugin_library(path: &Path, registry: &mut PluginRegistry) -> Result<Loa
         path: path.to_path_buf(),
         plugin_name: info.plugin_name.as_str().map(ToOwned::to_owned),
         plugin_version: info.plugin_version.as_str().map(ToOwned::to_owned),
-        abi_version: Some(library.abi_version()),
+        daedalus_version: info.daedalus_version.as_str().map(ToOwned::to_owned),
     };
 
     Ok(LoadedPluginLibrary { metadata, _library: library })

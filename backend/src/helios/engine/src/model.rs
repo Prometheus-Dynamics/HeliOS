@@ -19,7 +19,7 @@ pub struct LoadedPlugin {
     pub path: PathBuf,
     pub plugin_name: Option<String>,
     pub plugin_version: Option<String>,
-    pub abi_version: Option<u32>,
+    pub daedalus_version: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

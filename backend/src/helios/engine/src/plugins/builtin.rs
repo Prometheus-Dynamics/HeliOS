@@ -59,5 +59,5 @@ declare_plugin!(HeliosBuiltinUtilityPlugin, "helios.builtin.utility", [resource_
 pub fn install_builtin_plugins(registry: &mut PluginRegistry) -> Result<Vec<LoadedPlugin>, PluginError> {
     let plugin = HeliosBuiltinUtilityPlugin::new();
     registry.install_plugin(&plugin)?;
-    Ok(vec![LoadedPlugin { path: PathBuf::from("<builtin>/helios-utility"), plugin_name: Some("helios.builtin.utility".into()), plugin_version: None, abi_version: None }])
+    Ok(vec![LoadedPlugin { path: PathBuf::from("<builtin>/helios-utility"), plugin_name: Some("helios.builtin.utility".into()), plugin_version: None, daedalus_version: None }])
 }
