@@ -9,24 +9,6 @@ dest = "/etc/helios/user.env"
 origin = "static-asset"
 
 [[stage.files]]
-id = "runtime-gadget-env"
-src = "@assets/runtime-config/etc/helios/gadget.env"
-dest = "/etc/helios/gadget.env"
-origin = "static-asset"
-
-[[stage.files]]
-id = "runtime-gadget-watchdog-env"
-src = "@assets/runtime-config/etc/helios/gadget-watchdog.env"
-dest = "/etc/helios/gadget-watchdog.env"
-origin = "static-asset"
-
-[[stage.files]]
-id = "runtime-usb-power-env"
-src = "@assets/runtime-config/etc/helios/usb-power.env"
-dest = "/etc/helios/usb-power.env"
-origin = "static-asset"
-
-[[stage.files]]
 id = "runtime-image-owned-overlay-paths"
 src = "@assets/runtime-config/etc/helios/image-owned-overlay-paths"
 dest = "/etc/helios/image-owned-overlay-paths"
@@ -105,9 +87,6 @@ kind = "buildroot"
 [image.feed]
 stage_files = [
   "runtime-user-env",
-  "runtime-gadget-env",
-  "runtime-gadget-watchdog-env",
-  "runtime-usb-power-env",
   "runtime-image-owned-overlay-paths",
 ]
 stage_env_sets = [

@@ -1,8 +1,7 @@
-description = "Shared network runtime package layer: networkd and gadget-network services that higher product layers rely on."
+description = "Shared network runtime package layer: networkd for the product layers. The USB gadget network (and its dnsmasq) comes from the device package."
 
 [image]
 kind = "buildroot"
 config_overrides = [
   ["BR2_PACKAGE_SYSTEMD_NETWORKD", "y"],
-  ["BR2_PACKAGE_DNSMASQ", "y"],
 ]

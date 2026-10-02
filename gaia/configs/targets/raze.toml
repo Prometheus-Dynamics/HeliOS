@@ -1,20 +1,39 @@
-description = "CM4 target: board selection only. Keep deploy-image specifics out of the shared OS layers."
-target = "cm4"
+description = "Raze target: HeliOS on the Raze device package. The package (imported before this file) provides the kernel, OV9782 support, libcamera/libpisp, raze-device.txt and its overlays; this file adds HeliOS's own boot files, kernel fragments, initramfs and image assembly."
+target = "raze"
+
+imports = [
+  "../ops/usb-gadget-watchdog.toml",
+]
+
+[stage]
+
+[[stage.files]]
+id = "hardware-i2c-dev"
+src = "@assets/hardware/etc/modules-load.d/i2c-dev.conf"
+dest = "/etc/modules-load.d/i2c-dev.conf"
+origin = "static-asset"
 
 [image]
 kind = "buildroot"
-defconfig = "raspberrypicm4io_64_defconfig"
+# Device tree first, so its @source: token resolves; Gaia takes one value and
+# the last import wins. Package overrides in HeliOS's packages/ would win over
+# the device's; HeliOS keeps none of the device's (libcamera, libpisp).
+external_tree = "@source:atlas/devices/raze/gaia/buildroot-external:gaia/assets/buildroot"
+external_tree_mode = "required"
+# defconfig, kernel tarball and hash, OV9782 extension, rpi-firmware overlays,
+# rpi-userland and host-dtc come from the device package.
 config_overrides = [
-  ["BR2_LINUX_KERNEL_CUSTOM_TARBALL", "y"],
-    ["BR2_LINUX_KERNEL_CUSTOM_TARBALL_LOCATION", "\"https://github.com/raspberrypi/linux/archive/refs/tags/stable_20250916.tar.gz\""],
-    ["BR2_GLOBAL_PATCH_DIR", "\"board/raspberrypi/patches gaia/assets/buildroot/patches\""],
-    ["BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES", "\"board/raspberrypi/linux-4k-page-size.fragment ${project.root_dir}/gaia/assets/buildroot/boards/helios-pi-squashfs/linux-squashfs-initramfs.fragment ${project.root_dir}/gaia/assets/buildroot/boards/helios-pi-squashfs/linux-no-wireless.fragment\""],
-    ["BR2_LINUX_KERNEL_EXT_OV9782", "y"],
-    ["BR2_ROOTFS_POST_IMAGE_SCRIPT", "\"\""],
-    ["BR2_PACKAGE_RPI_FIRMWARE_CONFIG_FILE", "\"${project.root_dir}/gaia/assets/buildroot/boards/helios-pi-squashfs/config.txt\""],
-    ["BR2_PACKAGE_RPI_FIRMWARE_CMDLINE_FILE", "\"${project.root_dir}/gaia/assets/buildroot/boards/helios-pi-squashfs/cmdline.txt\""],
-    ["BR2_TARGET_ROOTFS_EXT2", "n"],
+  ["BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES", "\"board/raspberrypi/linux-4k-page-size.fragment ${project.root_dir}/gaia/assets/buildroot/boards/helios-pi-squashfs/linux-squashfs-initramfs.fragment ${project.root_dir}/gaia/assets/buildroot/boards/helios-pi-squashfs/linux-no-wireless.fragment\""],
+  ["BR2_ROOTFS_POST_IMAGE_SCRIPT", "\"\""],
+  ["BR2_PACKAGE_RPI_FIRMWARE_CONFIG_FILE", "\"${project.root_dir}/gaia/assets/buildroot/boards/helios-pi-squashfs/config.txt\""],
+  ["BR2_PACKAGE_RPI_FIRMWARE_CMDLINE_FILE", "\"${project.root_dir}/gaia/assets/buildroot/boards/helios-pi-squashfs/cmdline.txt\""],
+  ["BR2_PACKAGE_RPI_FIRMWARE_VARIANT_PI4", "y"],
+  ["BR2_PACKAGE_LINUX_FIRMWARE_RP2", "y"],
+  ["BR2_TARGET_ROOTFS_EXT2", "n"],
 ]
+
+[image.feed]
+stage_files = ["hardware-i2c-dev"]
 
 [[image.expected_images]]
 name = "sdcard.img"
@@ -25,6 +44,9 @@ required = true
 work_dir = "${workspace.build_dir}/assembly"
 out_dir = "$provider.images"
 
+# The device package adds raze-device.txt, its overlays (ov9782, raze-fan,
+# raze-usb-power) and the stock overlays it loads (dwc2, i2c1-pi5, i2c-gpio,
+# ws2812-pio, vc4-kms-v3d-pi5) to this tree; config.txt includes it.
 [[image.assembly.trees]]
 id = "boot"
 path = "$assembly.work/boot"
@@ -60,37 +82,22 @@ dest = "fixup4.dat"
 
 [[image.assembly.files]]
 tree = "boot"
-src_glob = "$provider.buildroot_output/build/rpi-firmware-*/boot/bcm2711-rpi-cm4-io.dtb"
+src_glob = "$provider.buildroot_output/build/rpi-firmware-*/boot/bcm2712-rpi-cm5-cm5io.dtb"
 dest = "."
 optional = true
 
-[[image.assembly.files]]
-tree = "boot"
-src_glob = "$provider.buildroot_output/build/rpi-firmware-*/boot/bcm2711-rpi-4-b.dtb"
-dest = "."
-optional = true
-
-[[image.assembly.files]]
-tree = "boot"
-src_glob = "$provider.buildroot_output/build/rpi-firmware-*/boot/bcm2711-rpi-400.dtb"
-dest = "."
-optional = true
-
+# Kernel-built DTBs (bcm2712-rpi-cm5-cm5io, bcm2712-rpi-cm5l-cm5io); these
+# replace the firmware copy above.
 [[image.assembly.files]]
 tree = "boot"
 src_glob = "$provider.buildroot_output/images/bcm*.dtb"
 dest = "."
 
+# Loaded by HeliOS's config.txt; the device package does not ship it.
 [[image.assembly.files]]
 tree = "boot"
 src = "$provider.buildroot_output/images/rpi-firmware/overlays/bcm2712d0.dtbo"
 dest = "overlays/bcm2712d0.dtbo"
-optional = true
-
-[[image.assembly.files]]
-tree = "boot"
-src = "$provider.buildroot_output/images/rpi-firmware/overlays/disable-wifi.dtbo"
-dest = "overlays/disable-wifi.dtbo"
 optional = true
 
 [[image.assembly.files]]
@@ -101,44 +108,8 @@ optional = true
 
 [[image.assembly.files]]
 tree = "boot"
-src = "$provider.buildroot_output/images/rpi-firmware/overlays/disable-bt.dtbo"
-dest = "overlays/disable-bt.dtbo"
-optional = true
-
-[[image.assembly.files]]
-tree = "boot"
 src = "$provider.buildroot_output/images/rpi-firmware/overlays/disable-bt-pi5.dtbo"
 dest = "overlays/disable-bt-pi5.dtbo"
-optional = true
-
-[[image.assembly.files]]
-tree = "boot"
-src = "$provider.buildroot_output/images/rpi-firmware/overlays/dwc2.dtbo"
-dest = "overlays/dwc2.dtbo"
-optional = true
-
-[[image.assembly.files]]
-tree = "boot"
-src = "$provider.buildroot_output/images/rpi-firmware/overlays/i2c1-pi5.dtbo"
-dest = "overlays/i2c1-pi5.dtbo"
-optional = true
-
-[[image.assembly.files]]
-tree = "boot"
-src = "$provider.buildroot_output/images/rpi-firmware/overlays/i2c-gpio.dtbo"
-dest = "overlays/i2c-gpio.dtbo"
-optional = true
-
-[[image.assembly.files]]
-tree = "boot"
-src = "$provider.buildroot_output/images/rpi-firmware/overlays/ws2812-pio.dtbo"
-dest = "overlays/ws2812-pio.dtbo"
-optional = true
-
-[[image.assembly.files]]
-tree = "boot"
-src = "$provider.buildroot_output/images/rpi-firmware/overlays/vc4-kms-v3d-pi5.dtbo"
-dest = "overlays/vc4-kms-v3d-pi5.dtbo"
 optional = true
 
 [[image.assembly.files]]
@@ -220,21 +191,6 @@ kind = "gzip"
 src = "$provider.buildroot_output/images/Image"
 dest = "$assembly.tree.boot/kernel8.img"
 deterministic = true
-
-[[image.assembly.transforms]]
-kind = "compile-dts"
-src = "@assets/buildroot/dt-overlays/ov9782-overlay.dts"
-dest = "$assembly.tree.boot/overlays/ov9782-overlay.dtbo"
-
-[[image.assembly.transforms]]
-kind = "compile-dts"
-src = "@assets/buildroot/dt-overlays/helios-usb-power.dts"
-dest = "$assembly.tree.boot/overlays/helios-usb-power.dtbo"
-
-[[image.assembly.transforms]]
-kind = "compile-dts"
-src = "@assets/buildroot/dt-overlays/helios-cm5-fan.dts"
-dest = "$assembly.tree.boot/overlays/helios-cm5-fan.dtbo"
 
 [[image.assembly.busybox_initramfs]]
 tree = "initramfs"

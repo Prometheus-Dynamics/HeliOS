@@ -13,8 +13,13 @@ Usage:
   tools/build-os.sh <target> [profile] [gaia run args...]
                                              Run one build non-interactively
 
-Targets:  $(cd "$ROOT_DIR/$BUILDS_DIR" && ls *.toml | sed 's/\.toml$//' | tr '\n' ' ')
+Targets:  $(cd "$ROOT_DIR/$BUILDS_DIR" && ls *.toml | sed 's/\.toml$//' | tr '\n' ' ')(HeliOS supports the Raze only)
 Profiles: base-os | full (default: full)
+Output:   gaia/output/helios-<profile>-<target>/images/ (e.g. helios-full-raze)
+
+Raze device support comes from the Atlas device package (devices/raze), fetched
+at the rev pinned in $BUILDS_DIR/raze.toml. To use a local Atlas checkout:
+  tools/build-os.sh raze full --set sources.atlas.path=../Atlas-Hardware-Manager
 
 Env:
   FORCE_FRONTEND_BUILD=1

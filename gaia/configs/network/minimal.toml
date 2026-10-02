@@ -1,4 +1,4 @@
-description = "Shared minimal network layer: Ethernet DHCP only."
+description = "Shared minimal network layer: Ethernet DHCP with mDNS, answered by systemd-resolved (no avahi)."
 
 [stage]
 
@@ -10,6 +10,13 @@ origin = "static-asset"
 
 [image]
 kind = "buildroot"
+# systemd-resolved is the mDNS responder (the device package turns it on in
+# resolved.conf.d and advertises _pd-device._tcp); avahi would contend for
+# port 5353.
+config_overrides = [
+  ["BR2_PACKAGE_SYSTEMD_RESOLVED", "y"],
+  ["BR2_PACKAGE_AVAHI", "n"],
+]
 
 [image.feed]
 stage_files = ["network-ethernet-dhcp"]

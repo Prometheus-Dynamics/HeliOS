@@ -1,1 +1,4 @@
-# HeliOS currently uses this br2-external tree for Linux extensions.
+# HeliOS br2-external tree. It is listed after the Raze device package's tree
+# (external_tree in gaia/configs/targets/raze.toml). HeliOS's package overrides
+# in packages/ are staged into Buildroot by Gaia; the OV9782 Linux extension
+# and the libcamera/libpisp overrides come from the device package.

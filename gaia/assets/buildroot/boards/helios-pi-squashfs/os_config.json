@@ -2,7 +2,7 @@
   "name": "HeliOS",
   "version": "v0.1.5",
   "release_date": "2025-12-12",
-  "description": "HeliOS for Raspberry Pi 5 / CM5",
+  "description": "HeliOS for Raze (Raspberry Pi CM5)",
   "url": "https://helios.example.com",
   "supports_secureboot": false,
   "supported_models": [

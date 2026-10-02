@@ -1,4 +1,4 @@
-description = "Shared backend-core payload layer: cross-target Rust control-plane and updater binaries reused by cm4, cm5, and generic aarch64 Linux targets."
+description = "Shared backend-core payload layer: cross-target Rust control-plane and updater binaries for the Raze target."
 
 [providers.rust]
 allow_nested_build = true

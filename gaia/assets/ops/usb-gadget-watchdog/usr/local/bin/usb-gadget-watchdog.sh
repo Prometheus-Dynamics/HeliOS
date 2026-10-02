@@ -7,24 +7,29 @@ set -eu
 # This mitigates dwc2/configfs-gadget hangs that otherwise require a physical
 # cable replug.
 
-GADGET_ENV=/etc/helios/gadget.env
+# The gadget itself is set up by the Raze device package
+# (pd-device-usb-gadget.service): defaults in /usr/lib/pd-device, overrides in
+# /etc/pd-device.
 CONF=/etc/helios/gadget-watchdog.env
 
-if [ -f "$GADGET_ENV" ]; then
-  # shellcheck disable=SC1090
-  . "$GADGET_ENV"
-fi
-if [ -f "$CONF" ]; then
-  # shellcheck disable=SC1090
-  . "$CONF"
+for f in /usr/lib/pd-device/usb-gadget.env /etc/pd-device/usb-gadget.env "$CONF"; do
+  if [ -f "$f" ]; then
+    # shellcheck disable=SC1090
+    . "$f"
+  fi
+done
+
+if [ "${USB_GADGET_ENABLED:-1}" != 1 ]; then
+  echo "[usb-gadget-watchdog] USB gadget is disabled (USB_GADGET_ENABLED=${USB_GADGET_ENABLED}); nothing to watch"
+  exit 0
 fi
 
-GADGET_NAME=${GADGET_NAME:-g1}
+GADGET_NAME=${USB_GADGET_NAME:-g1}
 LOGF=${GADGET_WATCHDOG_LOGFILE:-/var/log/usb-gadget-watchdog.log}
 CHECK_INTERVAL_SEC=${GADGET_WATCHDOG_CHECK_INTERVAL_SEC:-2}
 FAIL_THRESHOLD=${GADGET_WATCHDOG_FAIL_THRESHOLD:-3}
 MIN_RESET_INTERVAL_SEC=${GADGET_WATCHDOG_MIN_RESET_INTERVAL_SEC:-30}
-PING_IFACE=${GADGET_WATCHDOG_PING_IFACE:-usbbr0}
+PING_IFACE=${GADGET_WATCHDOG_PING_IFACE:-${USB_GADGET_BRIDGE:-usbbr0}}
 PING_TIMEOUT_SEC=${GADGET_WATCHDOG_PING_TIMEOUT_SEC:-1}
 PING_TARGET=${GADGET_WATCHDOG_PING_TARGET:-AUTO}
 
@@ -55,6 +60,7 @@ udc_state() {
 leases_ip() {
   # Prefer dnsmasq leases if present; fall back to ARP neighbors on the bridge.
   for f in \
+    /run/pd-device/usb-gadget-dhcp.leases \
     /var/lib/helios/state/dnsmasq.leases \
     /var/lib/misc/dnsmasq.leases \
     /var/lib/dnsmasq/dnsmasq.leases \

@@ -1,4 +1,4 @@
-description = "Shared vision/media hardware package layer: ffmpeg, libcamera, codec and TPU packages. AI packages are retained for future replacement work but no AI runtime or plugin is currently shipped."
+description = "Shared vision/media hardware package layer: ffmpeg, libcamera pipelines, codec and TPU packages (libcamera and libpisp themselves, with the OV9782 patches, come from the device package). AI packages are retained for future replacement work but no AI runtime or plugin is currently shipped."
 
 [image]
 kind = "buildroot"
@@ -12,7 +12,6 @@ config_overrides = [
   ["BR2_PACKAGE_FFMPEG_FILTERS", "\"scale\""],
   ["BR2_PACKAGE_LIBCAMERA", "y"],
   ["BR2_PACKAGE_LIBCAMERA_V4L2", "y"],
-  ["BR2_PACKAGE_LIBCAMERA_PIPELINE_RPI_VC4", "y"],
   ["BR2_PACKAGE_LIBCAMERA_PIPELINE_RPI_PISP", "y"],
   ["BR2_PACKAGE_LIBCAMERA_PIPELINE_UVCVIDEO", "y"],
   ["BR2_PACKAGE_LIBCAMERA_PIPELINE_VIMC", "y"],

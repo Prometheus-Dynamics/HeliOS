@@ -1,0 +1,34 @@
+gaia_version = ">=2.1.0"
+build_name = "helios-${input.profile}-raze"
+version = "v2026.2.0"
+description = "HeliOS image for the Raze (CM5 + OV9782). Use the profile input to switch between base OS and full appliance builds."
+profile = "${input.profile}"
+# Set here (not only in targets/raze.toml): `when = { target = ... }` imports
+# are matched against the build entrypoint's metadata.
+target = "raze"
+
+# Device support (kernel, OV9782 driver, libcamera/libpisp, boot overlays, USB
+# gadget, identity endpoint) comes from the Raze device package in Atlas
+# (devices/raze). HeliOS layers are imported after it, so they override its
+# defaults. Local development against an Atlas checkout:
+#   --set sources.atlas.path=../Atlas-Hardware-Manager
+imports = [
+  "../layers/base-os.toml",
+  { source = "atlas", path = "devices/raze/gaia/device.toml", when = { target = "raze" } },
+  { path = "../layers/app-layer.toml", when = { profile = "full" } },
+  { path = "../layers/release-layer.toml", when = { profile = "full" } },
+  "../targets/raze.toml",
+]
+
+# Raze device package 1.0.3.
+[[sources]]
+id = "atlas"
+kind = "git"
+repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
+rev = "d1f91182351693f9dff8d0938954f5fc1c3ac5d4"
+
+[inputs.profile]
+description = "Build profile"
+kind = "enum"
+default = "full"
+choices = ["base-os", "full"]

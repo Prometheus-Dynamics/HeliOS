@@ -11,22 +11,23 @@ pin = "locked"
 [image]
 kind = "buildroot"
 source = "buildroot-source"
-external_tree = "gaia/assets/buildroot"
-external_tree_mode = "required"
+# external_tree is set by targets/raze.toml: it must list the device package's
+# tree as well, after the device layer is imported.
 config_overrides = [
   ["BR2_INIT_SYSTEMD", "y"],
   ["BR2_INIT_BUSYBOX", "n"],
   ["BR2_INIT_NONE", "n"],
+  # HeliOS names its devices itself; a stock hostname would let the device
+  # package apply raze-{serial8}. The full profile also stages /etc/hostname.
+  ["BR2_TARGET_GENERIC_HOSTNAME", "\"helios\""],
   ["BR2_TARGET_ENABLE_ROOT_LOGIN", "y"],
   ["BR2_TARGET_GENERIC_ROOT_PASSWD", "\"root\""],
   ["BR2_PACKAGE_BASH", "y"],
   ["BR2_PACKAGE_BUSYBOX_SHOW_OTHERS", "y"],
   ["BR2_PACKAGE_CA_CERTIFICATES", "y"],
+  # e2fsck, mke2fs and tune2fs are always built; resize2fs is optional.
   ["BR2_PACKAGE_E2FSPROGS", "y"],
-  ["BR2_PACKAGE_E2FSPROGS_E2FSCK", "y"],
-  ["BR2_PACKAGE_E2FSPROGS_MKE2FS", "y"],
   ["BR2_PACKAGE_E2FSPROGS_RESIZE2FS", "y"],
-  ["BR2_PACKAGE_E2FSPROGS_TUNE2FS", "y"],
   ["BR2_PACKAGE_LINUX_FIRMWARE", "y"],
   ["BR2_PACKAGE_OPENSSH", "y"],
   ["BR2_PACKAGE_PARTED", "y"],

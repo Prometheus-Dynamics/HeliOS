@@ -5,19 +5,18 @@ set -eu
 # unbinding and rebinding the UDC. This is the fastest recovery path when the
 # gadget stops communicating but the system is otherwise alive.
 
-GADGET_ENV=/etc/helios/gadget.env
+# The gadget is set up by the Raze device package (pd-device-usb-gadget.service);
+# a full reconfigure restarts that service.
 WATCHDOG_ENV=/etc/helios/gadget-watchdog.env
 
-if [ -f "$GADGET_ENV" ]; then
-  # shellcheck disable=SC1090
-  . "$GADGET_ENV"
-fi
-if [ -f "$WATCHDOG_ENV" ]; then
-  # shellcheck disable=SC1090
-  . "$WATCHDOG_ENV"
-fi
+for f in /usr/lib/pd-device/usb-gadget.env /etc/pd-device/usb-gadget.env "$WATCHDOG_ENV"; do
+  if [ -f "$f" ]; then
+    # shellcheck disable=SC1090
+    . "$f"
+  fi
+done
 
-GADGET_NAME=${GADGET_NAME:-g1}
+GADGET_NAME=${USB_GADGET_NAME:-g1}
 LOGF=${GADGET_RESET_LOGFILE:-/var/log/usb-gadget-watchdog.log}
 DISCONNECT_DELAY_SEC=${GADGET_RESET_DISCONNECT_DELAY_SEC:-1}
 
@@ -80,10 +79,8 @@ reset_platform_driver() {
 
 G="/sys/kernel/config/usb_gadget/$GADGET_NAME"
 if [ ! -d "$G" ]; then
-  log "no gadget at $G; attempting full reconfigure via usb-gadget-setup.sh"
-  if [ -x /usr/local/bin/usb-gadget-setup.sh ]; then
-    /bin/sh /usr/local/bin/usb-gadget-setup.sh || true
-  fi
+  log "no gadget at $G; attempting full reconfigure via pd-device-usb-gadget.service"
+  systemctl restart pd-device-usb-gadget.service >/dev/null 2>&1 || true
 fi
 
 if [ ! -d "$G" ] || [ ! -f "$G/UDC" ]; then
@@ -111,21 +108,19 @@ if ! echo "$UDC" > "$G/UDC" 2>/dev/null; then
   reset_platform_driver "$UDC" || true
   mountpoint -q /sys/kernel/config 2>/dev/null || mount -t configfs configfs /sys/kernel/config 2>/dev/null || true
   # Recreate gadget to ensure configfs state is consistent after controller reset.
-  if [ -x /usr/local/bin/usb-gadget-setup.sh ]; then
-    /bin/sh /usr/local/bin/usb-gadget-setup.sh || true
-  fi
+  systemctl restart pd-device-usb-gadget.service >/dev/null 2>&1 || true
   # Final attempt
   echo "$UDC" > "$G/UDC" 2>/dev/null || true
 fi
 
 # Best-effort: bring gadget-facing interfaces up; do not fail reset if ip is missing.
-for ifc in usbbr0 usb0 usb1; do
+for ifc in "${USB_GADGET_BRIDGE:-usbbr0}" usb0 usb1; do
   ip link set dev "$ifc" up 2>/dev/null || true
 done
 
 # Best-effort: nudge dnsmasq in case it got stuck due to the link flap.
 if command -v systemctl >/dev/null 2>&1; then
-  systemctl restart helios-dnsmasq.service >/dev/null 2>&1 || true
+  systemctl restart pd-device-usb-gadget-dhcp.service >/dev/null 2>&1 || true
 fi
 
 log "reset: complete"

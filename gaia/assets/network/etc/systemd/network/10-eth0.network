@@ -3,3 +3,6 @@ Name=end0 end1 eth0 eth1
 
 [Network]
 DHCP=yes
+# mDNS (systemd-resolved) on Ethernet, for <hostname>.local and the device
+# package's _pd-device._tcp advertisement.
+MulticastDNS=yes

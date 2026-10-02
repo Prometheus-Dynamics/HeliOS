@@ -1,6 +1,6 @@
 # HeliOS OS Image Build Guide
 
-This repository contains everything needed to produce a bootable HeliOS image for Raspberry Pi Compute Modules. Image builds are orchestrated by the Gaia builder CLI (`gaia`) using the in-repo buildchain under `gaia/`.
+This repository contains everything needed to produce a bootable HeliOS image for the Raze (Raspberry Pi CM5 with an OV9782 camera), the only device HeliOS supports. Image builds are orchestrated by the Gaia builder CLI (`gaia`) using the in-repo buildchain under `gaia/`; device support comes from the Raze device package in Atlas Hardware Manager (`devices/raze`).
 
 ## Daedalus Type System Notes (Performance-Critical)
 
@@ -44,7 +44,13 @@ cargo run --manifest-path backend/Cargo.toml -p xtask -- validate all
 
 ## Build Instructions
 
-See [BUILD.md](BUILD.md) for Gaia install/build steps.
+See [BUILD.md](BUILD.md) for Gaia install/build steps. In short:
+
+```bash
+./tools/build-os.sh raze            # image in gaia/output/helios-full-raze/images/
+# against a local Atlas checkout (until the pinned Atlas commit is pushed):
+./tools/build-os.sh raze full --set sources.atlas.path=../Atlas-Hardware-Manager
+```
 
 ## License
 

@@ -1,0 +1,37 @@
+description = "USB gadget watchdog: soft-resets the Raze USB gadget (set up by the device package's pd-device-usb-gadget.service) when the host link wedges. The device package has no equivalent."
+
+[[stage.files]]
+id = "ops-gadget-watchdog-env"
+src = "@assets/ops/usb-gadget-watchdog/gadget-watchdog.env"
+dest = "/etc/helios/gadget-watchdog.env"
+origin = "static-asset"
+
+[[stage.files]]
+id = "ops-gadget-reset-script"
+src = "@assets/ops/usb-gadget-watchdog/usr/local/bin/usb-gadget-reset.sh"
+dest = "/usr/local/bin/usb-gadget-reset.sh"
+origin = "static-asset"
+mode = 493
+
+[[stage.files]]
+id = "ops-gadget-watchdog-script"
+src = "@assets/ops/usb-gadget-watchdog/usr/local/bin/usb-gadget-watchdog.sh"
+dest = "/usr/local/bin/usb-gadget-watchdog.sh"
+origin = "static-asset"
+mode = 493
+
+[[stage.services]]
+id = "ops-usb-gadget-watchdog-service"
+name = "helios-usb-gadget-watchdog.service"
+unit_path = "@assets/ops/usb-gadget-watchdog/systemd/helios-usb-gadget-watchdog.service"
+
+[image]
+kind = "buildroot"
+
+[image.feed]
+stage_files = [
+  "ops-gadget-watchdog-env",
+  "ops-gadget-reset-script",
+  "ops-gadget-watchdog-script",
+]
+stage_services = ["ops-usb-gadget-watchdog-service"]

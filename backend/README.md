@@ -79,11 +79,7 @@ That override is a local development convenience only and should never be commit
 Use [`cross`](https://github.com/cross-rs/cross) to target Raspberry Pi boards. Example commands:
 
 ```bash
-# Build for the CM4 (cortex‑a72)
-RUSTFLAGS="-C target-cpu=cortex-a72 -Z threads=16" \
-    cross build --target aarch64-unknown-linux-gnu --release --package helios-api
-
-# Build for the CM5 (cortex‑a76)
+# Build for the Raze (CM5, cortex‑a76)
 RUSTFLAGS="-C target-cpu=cortex-a76 -Z threads=16" \
     cross build --target aarch64-unknown-linux-gnu --release --package helios-api
 ```
@@ -97,8 +93,12 @@ OS images are built with Gaia from the build configuration under `../gaia`:
 
 ```bash
 # from the HeliOS repository root
-./tools/build-os.sh cm5
+./tools/build-os.sh raze
+# against a local Atlas checkout for the Raze device package:
+./tools/build-os.sh raze full --set sources.atlas.path=../Atlas-Hardware-Manager
 ```
+
+The only target is `raze`; the image lands in `gaia/output/helios-full-raze/images/`. Raze device support (kernel, OV9782, libcamera, overlays, USB gadget) comes from Atlas `devices/raze`.
 
 Run `./tools/build-os.sh` with no arguments for the Gaia TUI. It needs `gaia`, Docker and Bun on your `PATH`. Full setup is documented in `../BUILD.md`.
 
@@ -184,7 +184,7 @@ If no paths are provided, both documents are printed to stdout.
 When developing locally, prefer `cargo run -p helios-api --profile dev-release` for faster rebuilds and linking. Use `--release` when validating production performance. The first run will create a `.env` file populated with default configuration values if none exists. On the target device the built API binary is started by systemd and listens on multiple ports for HTTP, JSON‑RPC, WebSocket and NetworkTables.
 
 Hardware specific kernel modules can be loaded automatically by setting the `OPTIONAL_KERNEL_MODULES` environment variable. Provide a comma separated list of module names and the server will attempt to `modprobe` each one without failing if a module is missing.
-External sensors are configured in the Buildroot TOML under `[sensors]` and copied to `/etc/helios/sensors.toml` on the device. The application loads all devices defined there on startup.
+The Raze sensor description (IMU, magnetometer, power monitor and their I2C buses) is shipped by the Raze device package at `/usr/share/pd-device/raze/sensors.toml`. HeliOS no longer stages `/etc/helios/sensors.toml`; `helios-peripherals` watches the files listed in `HELIOS_SENSOR_CONFIG_PATHS` (comma separated, unset by default in the image).
 
 ### First-Boot Stream/Pipeline Startup Preset
 

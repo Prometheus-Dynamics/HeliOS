@@ -1,7 +1,7 @@
 [Unit]
 Description=Helios USB gadget watchdog (auto-reset on hang)
-After=helios-usb-gadget.service helios-dnsmasq.service sys-kernel-config.mount
-Wants=helios-usb-gadget.service helios-dnsmasq.service sys-kernel-config.mount
+After=pd-device-usb-gadget.service pd-device-usb-gadget-dhcp.service sys-kernel-config.mount
+Wants=sys-kernel-config.mount
 Requires=sys-kernel-config.mount
 OnFailure=helios-diagnostics@%n.service
 
@@ -13,7 +13,7 @@ SyslogIdentifier=usb-gadget-watchdog
 StandardOutput=journal+console
 StandardError=journal+console
 ExecStart=/bin/sh /usr/local/bin/usb-gadget-watchdog.sh
-Restart=always
+Restart=on-failure
 RestartSec=2
 
 [Install]
