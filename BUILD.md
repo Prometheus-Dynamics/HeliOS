@@ -8,14 +8,15 @@ configuration lives in this repo under `gaia/`.
 Install the Gaia CLI:
 
 ```bash
-cargo install --git https://github.com/Prometheus-Dynamics/Gaia-Image-Builder gaia
+cargo install --git https://github.com/Prometheus-Dynamics/Gaia-Image-Builder --branch dev gaia
 ```
 
-It installs into `~/.cargo/bin`; make sure that is on your `PATH`.
+It installs into `~/.cargo/bin`; make sure that is on your `PATH`. The builds
+require Gaia 2.1.0 or newer (`gaia_version` in each build file).
 
-You also need Docker (Rust artifacts are cross-compiled inside the
-`helios-cross-rust194` image) and Bun (the full profile stages the frontend
-bundle from `frontend/build`).
+You also need Docker (Gaia cross-compiles the Rust artifacts in an image it
+builds from `gaia/docker/aarch64/Dockerfile.aarch64-rpi4` when missing) and Bun
+(the full profile stages the frontend bundle from `frontend/build`).
 
 ## 2) Build An Image
 
@@ -29,13 +30,8 @@ bundle from `frontend/build`).
 Targets are the files in `gaia/configs/builds/` (`cm5`, `cm4`,
 `generic-aarch64-linux`). Each exposes a `profile` input: `base-os` or `full`.
 
-Before running Gaia, the script:
-
-- builds the `helios-cross-rust194` Docker image from
-  `gaia/docker/aarch64/Dockerfile.aarch64-rpi4` if it does not exist yet
-  (`REBUILD_CROSS=1` forces a rebuild; Gaia cannot build images itself);
-- rebuilds `frontend/build` when its inputs changed
-  (`FORCE_FRONTEND_BUILD=1` forces a rebuild).
+Before running Gaia, the script rebuilds `frontend/build` when its inputs
+changed (`FORCE_FRONTEND_BUILD=1` forces a rebuild).
 
 Direct Gaia invocation, from the repo root:
 
@@ -64,6 +60,6 @@ Manager.
 
 - Image customization lives in `gaia/configs` and `gaia/assets`; see
   `gaia/configs/README.md` for the layer layout.
-- Git sources are pinned with `rev`. Gaia has no lockfile, so a
-  branch-tracking source freezes at whatever revision each machine fetched
-  first.
+- Git sources are pinned with `rev` or a tag, and `gaia lock` records the
+  resolved commits in `<build>.gaia.lock` next to each build file. Commit the
+  lock files; refresh them with `gaia lock <build> --update`.

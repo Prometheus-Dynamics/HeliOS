@@ -123,7 +123,7 @@ ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 # 7. Clean up to reduce image size
 RUN apt-get clean && rm -rf /var/lib/apt/lists/*
 
-COPY docker/aarch64/toolchain.cmake /opt/toolchain.cmake
+COPY aarch64/toolchain.cmake /opt/toolchain.cmake
 
 FROM debian-arm64-base AS rpi4-linux
 
@@ -139,7 +139,7 @@ RUN git clone --branch ${LIBCAMERA_BRANCH} https://git.libcamera.org/libcamera/l
 
 WORKDIR /libcamera
 
-COPY docker/aarch64/aarch64_cross.txt .
+COPY aarch64/aarch64_cross.txt .
 RUN meson setup cross-build --cross-file aarch64_cross.txt --prefix=/usr/aarch64-linux-gnu
 RUN ninja -C cross-build install
 

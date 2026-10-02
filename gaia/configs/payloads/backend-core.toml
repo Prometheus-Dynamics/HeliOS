@@ -38,6 +38,8 @@ backend = "docker"
 
 [artifacts.execution.docker]
 image = "helios-cross-rust194"
+dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
+context = "gaia/docker"
 
 [[artifacts]]
 id = "helios-engine"
@@ -56,6 +58,8 @@ backend = "docker"
 
 [artifacts.execution.docker]
 image = "helios-cross-rust194"
+dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
+context = "gaia/docker"
 
 [[artifacts]]
 id = "helios-updater"
@@ -74,6 +78,8 @@ backend = "docker"
 
 [artifacts.execution.docker]
 image = "helios-cross-rust194"
+dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
+context = "gaia/docker"
 
 [[artifacts]]
 id = "helios-diagnostics"
@@ -92,6 +98,8 @@ backend = "docker"
 
 [artifacts.execution.docker]
 image = "helios-cross-rust194"
+dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
+context = "gaia/docker"
 
 [[artifacts]]
 id = "heliosctl"
@@ -110,12 +118,16 @@ backend = "docker"
 
 [artifacts.execution.docker]
 image = "helios-cross-rust194"
+dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
+context = "gaia/docker"
 
 [[artifacts]]
 id = "orion-node"
 kind = "rust"
 package = "orion-node"
 source = "orion-workspace"
+# Single-node appliance build: drops the TCP and QUIC data-plane transports.
+no_default_features = true
 target = "aarch64-unknown-linux-gnu"
 profile = "release"
 install_name = "orion-node"
@@ -128,6 +140,8 @@ backend = "docker"
 
 [artifacts.execution.docker]
 image = "helios-cross-rust194"
+dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
+context = "gaia/docker"
 
 [[artifacts]]
 id = "orionctl"
@@ -146,6 +160,8 @@ backend = "docker"
 
 [artifacts.execution.docker]
 image = "helios-cross-rust194"
+dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
+context = "gaia/docker"
 
 [[artifacts]]
 id = "helios-provision"
@@ -164,6 +180,8 @@ backend = "docker"
 
 [artifacts.execution.docker]
 image = "helios-cross-rust194"
+dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
+context = "gaia/docker"
 
 [[install]]
 id = "install-helios-api"

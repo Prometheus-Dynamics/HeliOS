@@ -29,6 +29,8 @@ backend = "docker"
 
 [artifacts.execution.docker]
 image = "helios-cross-rust194"
+dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
+context = "gaia/docker"
 
 [[install]]
 id = "install-helios-peripherals"
