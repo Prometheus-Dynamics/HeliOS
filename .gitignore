@@ -6,12 +6,14 @@ output/
 gaia/build/
 gaia/output/
 .gaia/
+.gaia-target/
 backend/.gaia/
 backend/third_party
 */.codex-*/*
 .cache/
 .vscode/
 tmp/
+.tmp/
 __pycache__/
 *.pyc
 configs/sdk/offline
