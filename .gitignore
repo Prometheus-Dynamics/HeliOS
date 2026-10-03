@@ -15,3 +15,15 @@ tmp/
 __pycache__/
 *.pyc
 configs/sdk/offline
+
+# Local-only Cargo overrides for sibling checkouts (see backend/README.md)
+backend/.cargo/local-overrides.toml
+# Frontend test runs
+frontend/test-results/
+frontend/playwright-report/
+# Python virtualenvs
+.venv/
+venv/
+# Stray disk images outside gaia/output
+*.img
+*.img.xz
