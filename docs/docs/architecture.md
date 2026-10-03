@@ -1,70 +1,124 @@
 ---
 title: Architecture
-description: Multi-device-first architecture direction for the HeliOS rewrite.
+description: How HeliOS is put together on the Raze, and what it owns versus the libraries it builds on.
 ---
 
-This page describes the target architecture direction for the HeliOS rewrite.
+HeliOS is the vision OS for the Raze (CM5 + OV9782). Most of the platform is
+now provided by shared projects. HeliOS is the product layer that composes
+them, runs vision workloads on the device, and exposes them to users and to
+Atlas.
 
-The previous model mixed a single-device product, a stream-centric runtime, and bolted-on multi-device behavior. That is being removed.
+## Ownership
 
-The replacement model is multi-device-first:
+| Concern | Owner | HeliOS's part |
+|---|---|---|
+| Image build | Gaia | `gaia/configs/builds/raze.toml`: OS layers, services, payloads |
+| Device support: kernel, OV9782, overlays, fan, LEDs, USB gadget, identity, EEPROM | Atlas `devices/raze` (device package) | imports it; overrides defaults only |
+| Flashing, recovery, discovery, fleet | Atlas Hardware Manager | serves the identity contract (`/.well-known/pd-device`) |
+| Camera capture, ISP, FrameLease, frame transport, codecs | Styx | runs Styx's camera service; never decodes or copies frames itself |
+| Hardware inventory and control (fan, GPIO, I2C, sensors) | Lemnos | maps Lemnos devices to Orion resources |
+| State, resources, workloads, assignment | Orion | provider and executor services; IPC-only node |
+| Graph runtime, nodes, plugins | Daedalus | vision node plugins and the FrameLease glue |
+| Vision algorithms (ArUco, AprilTag, ...) | **HeliOS** (`helios-vision`) | Daedalus plugins, frame-native |
+| Product API, OTA, provisioning, diagnostics | **HeliOS** | `helios-api`, `helios-updater`, `helios-provision`, `helios-diagnostics` |
 
-- every device is a full HeliOS node
-- every node runs the same full API/runtime host
-- nodes have two roles only: `coordinator` and `follower`
-- a single device running alone is just a `coordinator` of one
-- cluster control is coordinated centrally, but runtime data flow stays peer-to-peer
-- Daedalus becomes the universal runtime substrate for domain logic
+## Processes on the device
 
-## Core Model
+```text
+                         orion-node (IPC only: state, resources, workloads)
+                          ^          ^              ^
+              provider    |          | executor     | client
+                          |          |              |
+  Lemnos ── helios-peripherals   helios-engine    helios-api ── HTTP (users, Atlas)
+  Styx  ──  (camera service)  ──>  (Daedalus)  ──>   (results, streams)
+             frames: Styx frame server (dmabuf fds over a Unix socket)
+```
 
-The core architecture vocabulary is now:
+- **orion-node** holds desired and observed state. It is built IPC-only
+  (no HTTP/TCP/QUIC) with a 2-thread runtime. Every HeliOS crate and
+  `orion-node` come from the same Orion rev (control protocol v2).
+- **helios-peripherals** owns hardware. It inventories Lemnos devices and
+  Styx cameras and publishes them as Orion resources. For each camera it
+  runs a Styx `CameraService` on a Unix socket; the camera resource
+  advertises that socket as a custom endpoint `styx-frames+unix://<path>`.
+  Peripherals never encodes or copies frames.
+- **helios-engine** is the Orion executor for vision workloads. A workload's
+  config is a Daedalus `GraphDocument` plus bindings from graph host inputs
+  to resources. For a camera binding the engine opens a Styx `FrameClient`
+  on the resource's endpoint, requesting exactly what the graph needs (for
+  ArUco: luma at the configured resolution), and feeds frames into the graph
+  as they arrive (`set_latest_input` + `drive_blocking`), with no polling
+  timer. Results are published as workload observed state at a bounded rate
+  and on the engine's own result stream.
+- **helios-api** is the application surface: identity and status, results,
+  camera and debug streams, and later OTA. It reads Orion as a client and
+  proxies bytes; it never decodes frames.
 
-- `Node`
-- `Resource`
-- `Artifact`
-- `Workload`
+## Frames
 
-Everything else should be derived from those four concepts.
+A frame is a Styx `FrameLease` from capture to the last node that reads it.
 
-`Resource` is intentionally broad. It covers low-level hardware/control surfaces, semantic device capabilities, graph-visible endpoints, and transport-facing channels.
+- Peripherals to engine: Styx's frame server. The connection stays open and
+  dmabuf mappings are cached per connection, so a frame costs no copy and no
+  per-frame mmap.
+- Into Daedalus: wrapped with `Payload::shared_with` under the type key
+  `styx:framelease` (`Residency::External` for dmabuf). The type is
+  registered once with a structured descriptor (`FrameMeta`) and a value
+  serializer, so it can be inspected.
+- CPU vision reads the luma plane in place (`FrameLease::luma_rows`). An
+  `#[adapt]` adapter provides the `GrayView` input that CPU nodes take, so
+  graphs never contain conversion nodes.
+- No decoded image types (`DynamicImage`, RGB buffers) cross a process or
+  graph boundary.
 
-## Cluster Behavior
+## Vision workloads
 
-Every node keeps a replicated copy of global desired state.
+A vision pipeline is a node-group of real stages, so per-stage timings show
+where time goes. ArUco:
 
-One preferred primary node is expected to coordinate the cluster, with fallback nodes able to promote near-instantly if the primary disappears.
+| Node | Input | Output |
+|---|---|---|
+| `vision.adaptive_threshold` | `GrayView` (luma) | `BinaryImage` |
+| `vision.find_quads` | `BinaryImage` | `Vec<Quad>` |
+| `aruco.decode` | `GrayView`, `Vec<Quad>`, config | `Vec<Marker>` |
+| `aruco.detect` | node-group of the three above | `Vec<Marker>` |
 
-Failback is not immediate. A recovered preferred primary must rejoin as a follower first, then wait through a stabilization lease window before it can reclaim leadership.
+Results (`Marker { id, corners, hamming }`) are structured `TypeExpr`s with
+stable keys, so they are inspectable and serializable without extra glue.
 
-## Data Flow
+Nodes live in `helios-vision`, built as a Daedalus dylib plugin that the
+engine loads from its plugin directories, and as an rlib for tests and
+tools.
 
-The coordinator does not proxy node-to-node runtime traffic.
+## Device contract
 
-Runtime data movement is peer-to-peer:
+HeliOS serves the Raze identity contract from the device package (port 5899,
+`_pd-device._tcp`) with `os.name = "helios"`. Atlas reads optional fields
+when present; HeliOS adds them as they land:
 
-- the coordinator manages desired state, placement, and policy
-- nodes exchange runtime data directly when workloads need remote resources
-- compute should stay near the producing node by default
-- raw/decoded media should move only when explicitly required by policy
+- `endpoints.metrics`, `endpoints.logs`, `endpoints.actions` (`locate`, `restart`)
+- `camera_stream`: an MJPEG preview served by helios-api from a Styx codec
+- an OTA update method once helios-api exposes upload/apply/status
 
-## Execution Model
+## Memory budget
 
-Daedalus is the universal runtime substrate for domain logic such as:
+The old stack used about 140 MiB doing real work. The target leaves room
+for vision:
 
-- vision processing
-- localization
-- sensor fusion
-- IMU conditioning
-- transforms and publishers
-- simulation
+| Process | Budget (PSS) |
+|---|---:|
+| orion-node | ≤ 20 MiB |
+| helios-peripherals with one camera | ≤ 35 MiB |
+| helios-engine with an ArUco graph | ≤ 25 MiB |
+| helios-api, updater | ≤ 10 MiB |
 
-The default runtime shape is one shared engine host per node, with optional isolated sidecar workers only where stronger isolation is worth the extra cost.
+## Testing
 
-## Current Status
-
-This architecture is the rewrite target, not a statement that the entire runtime already matches it.
-
-Old stream-centric, peer-centric, and rig-centric docs are being removed as part of the transition.
-
-The detailed rewrite plan currently lives in the repo root as `MULTI_DEVICE_REWRITE_PLAN.md`.
+1. Vision nodes: unit tests on synthetic markers (rendered, rotated,
+   perspective-warped, noisy).
+2. Graph: the ArUco `GraphDocument` compiled and driven on the host with
+   synthetic frames.
+3. Device probe: a standalone binary that captures from the OV9782 with Styx,
+   runs the same graph and reports detections and per-stage timings.
+4. Full stack on the device: orion-node, peripherals and engine, with the
+   workload assigned through Orion.

@@ -62,7 +62,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -73,7 +73,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -190,29 +190,6 @@ name = "base64ct"
 version = "1.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
-
-[[package]]
-name = "bindgen"
-version = "0.65.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfdf7b466f9a4903edc73f95d6d2bcd5baf8ae620638762244d3f60143643cc5"
-dependencies = [
- "bitflags 1.3.2",
- "cexpr",
- "clang-sys",
- "lazy_static",
- "lazycell",
- "log",
- "peeking_take_while",
- "prettyplease",
- "proc-macro2",
- "quote",
- "regex",
- "rustc-hash 1.1.0",
- "shlex",
- "syn",
- "which",
-]
 
 [[package]]
 name = "bindgen"
@@ -927,7 +904,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -935,17 +912,6 @@ name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
-
-[[package]]
-name = "ffmpeg-next"
-version = "8.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7c4bd5ab1ac61f29c634df1175d350ded29cf74c3c6d4f7030431a5ae3c7d5d"
-dependencies = [
- "bitflags 2.11.1",
- "ffmpeg-sys-next",
- "libc",
-]
 
 [[package]]
 name = "ffmpeg-sys-next"
@@ -1344,6 +1310,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-vision"
+version = "1.0.0"
+dependencies = [
+ "daedalus-rs",
+ "styx",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "heliosctl"
 version = "1.0.0"
 dependencies = [
@@ -1368,15 +1343,6 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
-
-[[package]]
-name = "home"
-version = "0.5.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc627f471c528ff0c4a49e1d5e60450c8f6461dd6d10ba9dcd3a61d3dff7728d"
-dependencies = [
- "windows-sys 0.61.2",
-]
 
 [[package]]
 name = "http"
@@ -1823,12 +1789,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
-name = "lazycell"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
-
-[[package]]
 name = "leb128fmt"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2090,12 +2050,6 @@ dependencies = [
 
 [[package]]
 name = "linux-raw-sys"
-version = "0.4.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d26c52dbd32dccf2d10cac7725f8eae5296885fb5703b261f7d0a0739ec807ab"
-
-[[package]]
-name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
@@ -2312,7 +2266,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2515,12 +2469,6 @@ name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
-
-[[package]]
-name = "peeking_take_while"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19b17cddbe7ec3f8bc800887bab5e717348c95ea2ca0b1bf0837fb964dc67099"
 
 [[package]]
 name = "percent-encoding"
@@ -2952,19 +2900,6 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "0.38.44"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fdb5bc1ae2baa591800df16c9ca78619bf65c0488b41b96ccec5d11220d8c154"
-dependencies = [
- "bitflags 2.11.1",
- "errno",
- "libc",
- "linux-raw-sys 0.4.15",
- "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "rustix"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6fe4565b9518b83ef4f91bb47ce29620ca828bd32cb7e408f0062e9930ba190"
@@ -2972,8 +2907,8 @@ dependencies = [
  "bitflags 2.11.1",
  "errno",
  "libc",
- "linux-raw-sys 0.12.1",
- "windows-sys 0.59.0",
+ "linux-raw-sys",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3030,7 +2965,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3315,7 +3250,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3354,7 +3289,7 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 [[package]]
 name = "styx"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=54ff6e19e9caa35dd4e25f5f66344bb156493fa2#54ff6e19e9caa35dd4e25f5f66344bb156493fa2"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e#7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e"
 dependencies = [
  "futures-core",
  "futures-util",
@@ -3368,19 +3303,19 @@ dependencies = [
  "styx-capture",
  "styx-codec",
  "styx-core-rs",
+ "styx-kernel",
  "styx-libcamera",
  "styx-v4l2",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
  "tracing",
- "v4l",
 ]
 
 [[package]]
 name = "styx-capture"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=54ff6e19e9caa35dd4e25f5f66344bb156493fa2#54ff6e19e9caa35dd4e25f5f66344bb156493fa2"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e#7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e"
 dependencies = [
  "serde",
  "smallvec",
@@ -3390,9 +3325,9 @@ dependencies = [
 [[package]]
 name = "styx-codec"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=54ff6e19e9caa35dd4e25f5f66344bb156493fa2#54ff6e19e9caa35dd4e25f5f66344bb156493fa2"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e#7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e"
 dependencies = [
- "ffmpeg-next",
+ "ffmpeg-sys-next",
  "libc",
  "parking_lot",
  "rayon",
@@ -3400,6 +3335,7 @@ dependencies = [
  "smallvec",
  "styx-capture",
  "styx-core-rs",
+ "styx-softisp",
  "thiserror 2.0.18",
  "turbojpeg",
  "yuvutils-rs",
@@ -3408,7 +3344,7 @@ dependencies = [
 [[package]]
 name = "styx-core-rs"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=54ff6e19e9caa35dd4e25f5f66344bb156493fa2#54ff6e19e9caa35dd4e25f5f66344bb156493fa2"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e#7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e"
 dependencies = [
  "crossbeam-queue",
  "libc",
@@ -3421,10 +3357,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "styx-kernel"
+version = "2.0.0"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e#7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "styx-libcamera"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=54ff6e19e9caa35dd4e25f5f66344bb156493fa2#54ff6e19e9caa35dd4e25f5f66344bb156493fa2"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e#7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e"
 dependencies = [
+ "libc",
  "libcamera",
  "libcamera-sys",
  "smallvec",
@@ -3434,14 +3379,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "styx-softisp"
+version = "2.0.0"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e#7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e"
+dependencies = [
+ "serde",
+ "styx-core-rs",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "styx-v4l2"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=54ff6e19e9caa35dd4e25f5f66344bb156493fa2#54ff6e19e9caa35dd4e25f5f66344bb156493fa2"
+source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e#7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e"
 dependencies = [
+ "libc",
  "smallvec",
  "styx-capture",
  "styx-core-rs",
- "v4l",
+ "styx-kernel",
+ "tracing",
 ]
 
 [[package]]
@@ -3522,8 +3479,8 @@ dependencies = [
  "fastrand",
  "getrandom 0.4.2",
  "once_cell",
- "rustix 1.1.4",
- "windows-sys 0.59.0",
+ "rustix",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3947,26 +3904,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "v4l"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8fbfea44a46799d62c55323f3c55d06df722fbe577851d848d328a1041c3403"
-dependencies = [
- "bitflags 1.3.2",
- "libc",
- "v4l2-sys-mit",
-]
-
-[[package]]
-name = "v4l2-sys-mit"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6779878362b9bacadc7893eac76abe69612e8837ef746573c4a5239daf11990b"
-dependencies = [
- "bindgen 0.65.1",
-]
-
-[[package]]
 name = "valuable"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4159,24 +4096,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "which"
-version = "4.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87ba24419a2078cd2b0f2ede2691b6c66d8e47836da3b6db8265ebad47afbfc7"
-dependencies = [
- "either",
- "home",
- "once_cell",
- "rustix 0.38.44",
-]
-
-[[package]]
 name = "winapi-util"
 version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4272,15 +4197,6 @@ name = "windows-sys"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d"
-dependencies = [
- "windows-targets 0.52.6",
-]
-
-[[package]]
-name = "windows-sys"
-version = "0.59.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b"
 dependencies = [
  "windows-targets 0.52.6",
 ]
@@ -4665,7 +4581,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32e45ad4206f6d2479085147f02bc2ef834ac85886624a23575ae137c8aa8156"
 dependencies = [
  "libc",
- "rustix 1.1.4",
+ "rustix",
 ]
 
 [[package]]

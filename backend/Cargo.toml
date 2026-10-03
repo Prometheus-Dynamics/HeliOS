@@ -17,6 +17,7 @@ members = [
     "src/helios/updater",
     "src/helios/diagnostics",
     "src/helios/ctl",
+    "src/helios/vision",
     "src/helios/provision",
     "tools/xtask",
 ]
@@ -121,7 +122,7 @@ daedalus-data = { version = "2.0.0", git = "https://github.com/Prometheus-Dynami
 daedalus-macros = { version = "2.0.0", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "ac5fd56b33fb002902b4ba9964a5ed542bdffd21" }
 lemnos = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", rev = "0e706c0b8371a3c9c32e92ff4e21344e4a4d765a", default-features = false }
 orion = { git = "https://github.com/Prometheus-Dynamics/Orion.git", rev = "59f91ed97681bd0421f9d32bed82be21b2786642", default-features = false }
-styx = { version = "2.0.0", git = "https://github.com/Prometheus-Dynamics/Styx.git", rev = "54ff6e19e9caa35dd4e25f5f66344bb156493fa2", default-features = false }
+styx = { version = "2.0.0", git = "https://github.com/Prometheus-Dynamics/Styx.git", rev = "7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e", default-features = false }
 
 [profile.release]
 opt-level = "z"
