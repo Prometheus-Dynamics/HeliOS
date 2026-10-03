@@ -55,6 +55,10 @@ pub struct QuadValue {
 #[derive(Clone, Debug, Default, PartialEq, DaedalusTypeExpr, DaedalusToValue)]
 #[daedalus(type_key = "helios:quads")]
 pub struct QuadList {
+    /// Size of the image the quads were found in; the decoder rescales
+    /// corners when it decodes on a larger image.
+    pub image_width: i64,
+    pub image_height: i64,
     pub quads: Vec<QuadValue>,
 }
 
@@ -106,6 +110,13 @@ pub struct ThresholdParams {
 }
 
 #[derive(Clone, Debug, NodeConfig)]
+pub struct DownscaleParams {
+    /// Shrink factor: 1, 2 or 4 (rounded down to a power of two).
+    #[port(default = 2, min = 1, max = 4, policy = "clamp")]
+    pub factor: i64,
+}
+
+#[derive(Clone, Debug, NodeConfig)]
 pub struct QuadParams {
     /// Minimum quad perimeter, in thousandths of the larger image side.
     #[port(default = 30, min = 1, max = 4000, policy = "clamp")]
@@ -142,6 +153,18 @@ pub fn framelease_to_gray(frame: &FrameLease) -> Result<Gray, TransportError> {
     Ok(Gray(Arc::new(image)))
 }
 
+/// Shrink an image by averaging blocks, so quad search runs on fewer pixels.
+#[node(id = "vision.downscale", inputs("gray", config = DownscaleParams), outputs("gray"))]
+pub fn downscale(gray: &Gray, params: DownscaleParams) -> Result<Gray, NodeError> {
+    let mut out = gray.clone();
+    let mut factor = 1;
+    while factor * 2 <= params.factor {
+        out = Gray(Arc::new(out.0.downscale2()));
+        factor *= 2;
+    }
+    Ok(out)
+}
+
 #[node(id = "vision.adaptive_threshold", inputs("gray", config = ThresholdParams), outputs("binary"))]
 pub fn adaptive_threshold(gray: &Gray, params: ThresholdParams) -> Result<Binary, NodeError> {
     let config = ThresholdConfig { window: params.window as usize, offset: params.offset as i32 };
@@ -153,19 +176,28 @@ pub fn find_quads(binary: &Binary, params: QuadParams) -> Result<QuadList, NodeE
     let config =
         quads::QuadConfig { min_perimeter_rate: params.min_perimeter_permille as f32 / 1000.0, max_perimeter_rate: params.max_perimeter_permille as f32 / 1000.0, ..quads::QuadConfig::default() };
     let found = quads::find_quads(&binary.0, &config);
-    Ok(QuadList { quads: found.iter().map(|q| QuadValue { corners: q.corners.iter().copied().map(point).collect() }).collect() })
+    Ok(QuadList {
+        image_width: binary.0.width() as i64,
+        image_height: binary.0.height() as i64,
+        quads: found.iter().map(|q| QuadValue { corners: q.corners.iter().copied().map(point).collect() }).collect(),
+    })
 }
 
 #[node(id = "aruco.decode", inputs("gray", "quads", config = DecodeParams), outputs("markers"))]
-pub fn decode(gray: &Gray, quads: &QuadList, params: DecodeParams) -> Result<MarkerList, NodeError> {
+pub fn decode(gray: &Gray, list: &QuadList, params: DecodeParams) -> Result<MarkerList, NodeError> {
     let dictionary = Dictionary::by_name(&params.dictionary).ok_or_else(|| NodeError::InvalidInput(format!("unknown marker dictionary '{}'", params.dictionary)))?;
     let config = DecodeConfig { dictionary, min_contrast: params.min_contrast as f32, max_correction: u32::try_from(params.max_correction).ok(), ..DecodeConfig::default() };
-    let quads: Vec<Quad> = quads
+    let quads: Vec<Quad> = list
         .quads
         .iter()
         .filter(|q| q.corners.len() == 4)
         .map(|q| Quad { corners: [from_point(&q.corners[0]), from_point(&q.corners[1]), from_point(&q.corners[2]), from_point(&q.corners[3])] })
         .collect();
+    let quads = if quads.is_empty() || list.image_width <= 0 || list.image_width as usize == gray.0.width() {
+        quads
+    } else {
+        quads::scale_quads(&quads, (gray.0.width() as f32 / list.image_width as f32).round())
+    };
     let markers = aruco::decode_quads(&gray.0, &quads, &config);
     Ok(MarkerList { markers: markers.iter().map(MarkerValue::from).collect() })
 }
@@ -194,7 +226,7 @@ fn install(registry: &mut PluginRegistry) -> daedalus::runtime::plugins::PluginR
     install = install,
     types(Gray, Binary),
     values(QuadList, MarkerList),
-    nodes(adaptive_threshold, find_quads, decode),
+    nodes(downscale, adaptive_threshold, find_quads, decode),
     adapters(framelease_to_gray)
 )]
 pub struct VisionPlugin;

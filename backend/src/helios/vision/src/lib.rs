@@ -7,10 +7,13 @@
 pub mod aruco;
 pub mod contour;
 pub mod geometry;
+#[cfg(feature = "plugin")]
+pub mod graphs;
 pub mod image;
 #[cfg(feature = "plugin")]
 pub mod plugin;
 pub mod quads;
+pub mod refine;
 pub mod threshold;
 
 pub use aruco::{DecodeConfig, DetectorConfig, Dictionary, Marker, detect};

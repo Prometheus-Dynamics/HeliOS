@@ -20,34 +20,40 @@ impl Default for ThresholdConfig {
 
 /// Mark pixels darker than their local mean by more than `offset` as
 /// foreground. Uses an integral image, so the cost is independent of the
-/// window size.
+/// window size. The comparison `pixel + offset < sum / count` is done as
+/// `(pixel + offset) * count < sum` to avoid a division per pixel.
 pub fn adaptive_threshold(gray: &GrayImage, config: &ThresholdConfig) -> BinaryImage {
     let (width, height) = (gray.width(), gray.height());
-    let radius = (config.window.max(3) / 2) as isize;
+    let radius = config.window.max(3) / 2;
     let stride = width + 1;
     let mut integral = vec![0u32; stride * (height + 1)];
     for y in 0..height {
-        let mut row_sum = 0u32;
         let row = &gray.data()[y * width..(y + 1) * width];
-        for (x, &value) in row.iter().enumerate() {
-            row_sum += value as u32;
-            integral[(y + 1) * stride + x + 1] = integral[y * stride + x + 1] + row_sum;
+        let (above, current) = integral.split_at_mut((y + 1) * stride);
+        let above = &above[y * stride..];
+        let mut row_sum = 0u32;
+        for x in 0..width {
+            row_sum += row[x] as u32;
+            current[x + 1] = above[x + 1] + row_sum;
         }
     }
 
+    let offset = config.offset as i64;
     let mut out = vec![0u8; width * height];
     for y in 0..height {
-        let y0 = (y as isize - radius).max(0) as usize;
-        let y1 = ((y as isize + radius + 1) as usize).min(height);
+        let y0 = y.saturating_sub(radius);
+        let y1 = (y + radius + 1).min(height);
+        let top = &integral[y0 * stride..(y0 + 1) * stride];
+        let bottom = &integral[y1 * stride..(y1 + 1) * stride];
+        let rows = (y1 - y0) as i64;
+        let pixels = &gray.data()[y * width..(y + 1) * width];
+        let out_row = &mut out[y * width..(y + 1) * width];
         for x in 0..width {
-            let x0 = (x as isize - radius).max(0) as usize;
-            let x1 = ((x as isize + radius + 1) as usize).min(width);
-            let sum = integral[y1 * stride + x1] + integral[y0 * stride + x0] - integral[y0 * stride + x1] - integral[y1 * stride + x0];
-            let count = ((x1 - x0) * (y1 - y0)) as u32;
-            let mean = (sum / count) as i32;
-            if (gray.get(x, y) as i32) < mean - config.offset {
-                out[y * width + x] = 1;
-            }
+            let x0 = x.saturating_sub(radius);
+            let x1 = (x + radius + 1).min(width);
+            let sum = (bottom[x1] + top[x0]) as i64 - (top[x1] + bottom[x0]) as i64;
+            let count = rows * (x1 - x0) as i64;
+            out_row[x] = u8::from((pixels[x] as i64 + offset) * count < sum);
         }
     }
     BinaryImage::new(width, height, out).expect("size matches")

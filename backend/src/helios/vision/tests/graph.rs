@@ -4,7 +4,6 @@
 use std::{num::NonZeroU32, str::FromStr, sync::Arc};
 
 use daedalus::{
-    data::model::TypeExpr,
     engine::{Engine, EngineConfig},
     planner::GraphDocument,
     runtime::plugins::PluginRegistry,
@@ -15,6 +14,7 @@ use helios_vision::{
         DICT_4X4_50,
         render::{paste_warped, render_marker},
     },
+    graphs::aruco_graph_document,
     image::GrayImage,
     plugin::{FRAMELEASE_TYPE_KEY, MarkerList, VisionPlugin},
 };
@@ -33,34 +33,6 @@ fn grey_frame(image: &GrayImage) -> FrameLease {
     frame
 }
 
-fn aruco_document(registry: &PluginRegistry, plugin: &VisionPlugin) -> GraphDocument {
-    let threshold = plugin.adaptive_threshold.clone().alias("threshold");
-    let quads = plugin.find_quads.clone().alias("quads");
-    let decode = plugin.decode.clone().alias("decode");
-    let graph = registry
-        .graph_builder()
-        .unwrap()
-        .input_as("frame", TypeExpr::opaque(FRAMELEASE_TYPE_KEY))
-        .try_node(&threshold)
-        .unwrap()
-        .try_node(&quads)
-        .unwrap()
-        .try_node(&decode)
-        .unwrap()
-        .try_connect("frame", &threshold.inputs.gray)
-        .unwrap()
-        .try_connect("frame", &decode.inputs.gray)
-        .unwrap()
-        .try_connect(&threshold.outputs.binary, &quads.inputs.binary)
-        .unwrap()
-        .try_connect(&quads.outputs.quads, &decode.inputs.quads)
-        .unwrap()
-        .try_connect(&decode.outputs.markers, "markers")
-        .unwrap()
-        .build();
-    registry.graph_document(graph)
-}
-
 #[test]
 fn aruco_graph_detects_marker_in_a_camera_frame() {
     let plugin = VisionPlugin::new();
@@ -68,7 +40,7 @@ fn aruco_graph_detects_marker_in_a_camera_frame() {
     registry.install(&plugin).expect("install vision plugin");
 
     // Round-trip through the versioned JSON form the engine receives.
-    let json = aruco_document(&registry, &plugin).to_json().expect("serialize document");
+    let json = aruco_graph_document(&registry, &plugin, "4x4_50").expect("build graph").to_json().expect("serialize document");
     assert!(json.contains("\"daedalus.graph\""), "{json}");
     let document = GraphDocument::from_json(&json).expect("parse document");
 
@@ -89,4 +61,42 @@ fn aruco_graph_detects_marker_in_a_camera_frame() {
     assert_eq!(markers.markers[0].id, 17);
     assert_eq!(markers.markers[0].dictionary, "4x4_50");
     assert_eq!(markers.markers[0].corners.len(), 4);
+}
+
+/// `graphs/aruco-4x4_50.graph.json` is the document engine workloads use.
+/// Regenerate it with `UPDATE_GOLDEN=1 cargo test -p helios-vision --test graph`.
+#[test]
+fn aruco_graph_document_matches_golden_file() {
+    let plugin = VisionPlugin::new();
+    let mut registry = PluginRegistry::new();
+    registry.install(&plugin).expect("install vision plugin");
+    for dictionary in ["4x4_50", "36h11"] {
+        let json = aruco_graph_document(&registry, &plugin, dictionary).expect("build graph").to_json().expect("serialize document");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("graphs/aruco-{dictionary}.graph.json"));
+        if std::env::var_os("UPDATE_GOLDEN").is_some() {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, format!("{json}\n")).unwrap();
+        }
+        let golden = std::fs::read_to_string(&path).unwrap_or_default();
+        assert_eq!(golden.trim_end(), json, "{} is stale; regenerate with UPDATE_GOLDEN=1", path.display());
+        GraphDocument::from_json(&golden).expect("golden document parses");
+    }
+}
+
+#[test]
+fn apriltag_graph_detects_36h11() {
+    let plugin = VisionPlugin::new();
+    let mut registry = PluginRegistry::new();
+    registry.install(&plugin).expect("install vision plugin");
+    let document = aruco_graph_document(&registry, &plugin, "36h11").expect("build graph");
+    let mut host = Engine::new(EngineConfig::default()).unwrap().compile_document(&registry, document).expect("compile");
+    let mut scene = GrayImage::filled(640, 480, 120);
+    let marker = render_marker(&helios_vision::aruco::TAG_36H11, 586, 14, 1).unwrap();
+    assert!(paste_warped(&mut scene, &marker, [[180.0, 100.0], [420.0, 110.0], [410.0, 360.0], [170.0, 350.0]]));
+    let frame = grey_frame(&scene);
+    let bytes = frame.payload_bytes() as u64;
+    host.push_payload("frame", Payload::shared_with(TypeKey::new(FRAMELEASE_TYPE_KEY), Arc::new(frame), Residency::Cpu, None, Some(bytes)));
+    host.tick().expect("tick");
+    let markers: MarkerList = host.take("markers").expect("markers output");
+    assert_eq!(markers.markers.iter().map(|m| (m.dictionary.as_str(), m.id)).collect::<Vec<_>>(), vec![("36h11", 586)]);
 }

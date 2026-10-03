@@ -7,7 +7,8 @@ pub use dictionary::{DICT_4X4_50, Dictionary, TAG_36H11};
 
 use crate::geometry::{Homography, Point, distance};
 use crate::image::GrayImage;
-use crate::quads::{Quad, QuadConfig, find_quads};
+use crate::quads::{Quad, QuadConfig, find_quads, scale_quads};
+use crate::refine::refine_corners;
 use crate::threshold::{ThresholdConfig, adaptive_threshold};
 
 /// A decoded marker. `corners[0]` is the marker's top-left corner as printed;
@@ -51,17 +52,32 @@ impl Default for DecodeConfig {
 }
 
 /// Parameters for the whole [`detect`] pipeline.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DetectorConfig {
+    /// Find quads on the image downscaled by this factor (1, 2 or 4);
+    /// markers are always decoded at full resolution.
+    pub decimate: u32,
     pub threshold: ThresholdConfig,
     pub quads: QuadConfig,
     pub decode: DecodeConfig,
 }
 
+impl Default for DetectorConfig {
+    fn default() -> Self {
+        Self { decimate: 2, threshold: ThresholdConfig::default(), quads: QuadConfig::default(), decode: DecodeConfig::default() }
+    }
+}
+
 /// Threshold, find quads and decode markers in one call.
 pub fn detect(gray: &GrayImage, config: &DetectorConfig) -> Vec<Marker> {
-    let binary = adaptive_threshold(gray, &config.threshold);
-    let quads = find_quads(&binary, &config.quads);
+    let mut small = None;
+    let mut factor = 1;
+    while factor < config.decimate.min(4) {
+        small = Some(small.as_ref().unwrap_or(gray).downscale2());
+        factor *= 2;
+    }
+    let binary = adaptive_threshold(small.as_ref().unwrap_or(gray), &config.threshold);
+    let quads = scale_quads(&find_quads(&binary, &config.quads), factor as f32);
     decode_quads(gray, &quads, &config.decode)
 }
 
@@ -88,20 +104,26 @@ fn decode_quad(gray: &GrayImage, quad: &Quad, config: &DecodeConfig) -> Option<M
     let n = dict.total_width() as usize;
     // Contour corners are the centres of the outermost marker pixels; the
     // marker edge is half a pixel further out.
-    let corners = expand(quad.corners, 0.5);
-
-    let cells = sample_cells(gray, corners, n)?;
-    let (min, max) = cells.iter().fold((f32::MAX, f32::MIN), |(lo, hi), &v| (lo.min(v), hi.max(v)));
-    if max - min < config.min_contrast {
-        return None;
-    }
-    let threshold = otsu(&cells);
-
-    let border_cells: Vec<f32> = (0..n * n).filter(|&i| is_border(i % n, i / n, n)).map(|i| cells[i]).collect();
-    let border_errors = border_cells.iter().filter(|&&v| v >= threshold).count();
-    if border_errors as f32 > config.max_border_error_rate * border_cells.len() as f32 {
-        return None;
-    }
+    let coarse = expand(quad.corners, 0.5);
+    let border_ok = |corners: [Point; 4]| -> Option<(Vec<f32>, f32)> {
+        let cells = sample_cells(gray, corners, n)?;
+        let (min, max) = cells.iter().fold((f32::MAX, f32::MIN), |(lo, hi), &v| (lo.min(v), hi.max(v)));
+        if max - min < config.min_contrast {
+            return None;
+        }
+        let threshold = otsu(&cells);
+        let border_cells: Vec<f32> = (0..n * n).filter(|&i| is_border(i % n, i / n, n)).map(|i| cells[i]).collect();
+        let border_errors = border_cells.iter().filter(|&&v| v >= threshold).count();
+        if border_errors as f32 > config.max_border_error_rate * border_cells.len() as f32 {
+            return None;
+        }
+        Some((cells, threshold))
+    };
+    // Reject with the coarse corners, then move the survivors onto the
+    // sub-pixel edges and sample again.
+    border_ok(coarse)?;
+    let corners = refine_corners(gray, coarse).unwrap_or(coarse);
+    let (cells, threshold) = border_ok(corners)?;
 
     let max_correction = config.max_correction.unwrap_or(dict.max_correction);
     let mut best: Option<(u32, u32, usize)> = None; // (hamming, id, rotation)
@@ -121,7 +143,7 @@ fn decode_quad(gray: &GrayImage, quad: &Quad, config: &DecodeConfig) -> Option<M
         }
     }
     let (hamming, id, rotation) = best?;
-    Some(Marker { dictionary: dict.name, id, corners: rotate(quad.corners, rotation), hamming })
+    Some(Marker { dictionary: dict.name, id, corners: rotate(corners, rotation), hamming })
 }
 
 fn is_border(x: usize, y: usize, n: usize) -> bool {

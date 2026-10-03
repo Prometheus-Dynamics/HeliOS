@@ -31,6 +31,15 @@ impl Default for QuadConfig {
     }
 }
 
+/// Map quads found in an image downscaled by `scale` (e.g. by repeated
+/// [`crate::image::GrayImage::downscale2`]) back to full-resolution pixel
+/// coordinates. Block averaging maps pixel centres as
+/// `full = scale * small + (scale - 1) / 2`.
+pub fn scale_quads(quads: &[Quad], scale: f32) -> Vec<Quad> {
+    let shift = (scale - 1.0) / 2.0;
+    quads.iter().map(|quad| Quad { corners: quad.corners.map(|p| [scale * p[0] + shift, scale * p[1] + shift]) }).collect()
+}
+
 /// Find convex quadrilaterals outlining foreground components.
 pub fn find_quads(binary: &BinaryImage, config: &QuadConfig) -> Vec<Quad> {
     let (width, height) = (binary.width() as f32, binary.height() as f32);

@@ -72,6 +72,21 @@ impl GrayImage {
         self.data[y * self.width + x] = value;
     }
 
+    /// Halve both dimensions by averaging 2x2 blocks (an odd last row or
+    /// column is dropped). Pixel centres map as `full = 2 * half + 0.5`.
+    pub fn downscale2(&self) -> GrayImage {
+        let (w, h) = (self.width / 2, self.height / 2);
+        let mut data = Vec::with_capacity(w * h);
+        for y in 0..h {
+            let top = &self.data[2 * y * self.width..2 * y * self.width + 2 * w];
+            let bottom = &self.data[(2 * y + 1) * self.width..(2 * y + 1) * self.width + 2 * w];
+            for (t, b) in top.chunks_exact(2).zip(bottom.chunks_exact(2)) {
+                data.push(((t[0] as u16 + t[1] as u16 + b[0] as u16 + b[1] as u16 + 2) / 4) as u8);
+            }
+        }
+        GrayImage { width: w, height: h, data }
+    }
+
     /// Bilinear sample at a sub-pixel position (pixel centres are at integer
     /// coordinates). Positions outside the image are clamped to the edge.
     pub fn sample(&self, x: f32, y: f32) -> f32 {
@@ -142,6 +157,14 @@ mod tests {
         let plane = [1, 2, 9, 3, 4, 9];
         let image = GrayImage::from_strided(2, 2, 3, &plane).unwrap();
         assert_eq!(image.data(), &[1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn downscale2_averages_blocks() {
+        let image = GrayImage::new(4, 2, vec![0, 4, 8, 8, 4, 0, 8, 8]).unwrap();
+        let half = image.downscale2();
+        assert_eq!((half.width(), half.height()), (2, 1));
+        assert_eq!(half.data(), &[2, 8]);
     }
 
     #[test]
