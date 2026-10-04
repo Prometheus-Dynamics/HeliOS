@@ -141,7 +141,7 @@ impl EngineApp {
 
         loop {
             tokio::select! {
-                _ = signal::ctrl_c() => {
+                _ = shutdown_requested() => {
                     return Ok(());
                 }
                 _ = reconcile_tick.tick() => {
@@ -394,4 +394,21 @@ fn now_ms() -> u64 {
 
 fn is_retryable_no_message(error: &EngineRuntimeError) -> bool {
     matches!(error, EngineRuntimeError::Client(ClientError::NoMessageAvailable)) || matches!(error, EngineRuntimeError::Publish(EnginePublishError::Client(ClientError::NoMessageAvailable)))
+}
+
+/// Resolves on SIGINT or SIGTERM (what `systemctl stop` sends), so shutdown runs the same
+/// cleanup either way.
+async fn shutdown_requested() {
+    let mut terminate = match signal::unix::signal(signal::unix::SignalKind::terminate()) {
+        Ok(stream) => stream,
+        Err(error) => {
+            tracing::warn!(error = %error, "cannot listen for SIGTERM; only SIGINT stops the service");
+            let _ = signal::ctrl_c().await;
+            return;
+        }
+    };
+    tokio::select! {
+        _ = signal::ctrl_c() => {}
+        _ = terminate.recv() => {}
+    }
 }

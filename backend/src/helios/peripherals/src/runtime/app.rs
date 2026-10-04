@@ -270,7 +270,7 @@ impl PeripheralRuntime {
 
         loop {
             tokio::select! {
-                _ = signal::ctrl_c() => return Ok(()),
+                _ = shutdown_requested() => return Ok(()),
                 maybe_event = event_rx.recv() => {
                     match maybe_event {
                         Some(RuntimeEvent::RefreshRequested) => {
@@ -674,6 +674,23 @@ fn spi_request(resource: &ResourceDescriptor, workload: &WorkloadRecord, spec: &
         _ => return Err(PeripheralRuntimeError::InvalidResourceActionWorkload { workload_id: workload.workload_id.as_str().to_string(), message: "action kind does not match SPI resource".into() }),
     };
     Ok(ResourceControlRequest::Spi(SpiControlRequest { resource_id: resource.id.clone(), owner, lease_generation, control }))
+}
+
+/// Resolves on SIGINT or SIGTERM (what `systemctl stop` sends), so shutdown runs the same
+/// cleanup either way.
+async fn shutdown_requested() {
+    let mut terminate = match signal::unix::signal(signal::unix::SignalKind::terminate()) {
+        Ok(stream) => stream,
+        Err(error) => {
+            tracing::warn!(error = %error, "cannot listen for SIGTERM; only SIGINT stops the service");
+            let _ = signal::ctrl_c().await;
+            return;
+        }
+    };
+    tokio::select! {
+        _ = signal::ctrl_c() => {}
+        _ = terminate.recv() => {}
+    }
 }
 
 #[cfg(test)]
