@@ -6,7 +6,7 @@ pub mod render;
 pub use dictionary::{DICT_4X4_50, Dictionary, TAG_36H11};
 
 use crate::geometry::{Homography, Point, distance};
-use crate::image::GrayImage;
+use crate::image::{GrayImage, GrayView};
 use crate::quads::{Quad, QuadConfig, find_quads, scale_quads};
 use crate::refine::refine_corners;
 use crate::threshold::{ThresholdConfig, adaptive_threshold};
@@ -78,12 +78,12 @@ pub fn detect(gray: &GrayImage, config: &DetectorConfig) -> Vec<Marker> {
     }
     let binary = adaptive_threshold(small.as_ref().unwrap_or(gray), &config.threshold);
     let quads = scale_quads(&find_quads(&binary, &config.quads), factor as f32);
-    decode_quads(gray, &quads, &config.decode)
+    decode_quads(gray.view(), &quads, &config.decode)
 }
 
 /// Decode each candidate quad against the dictionary. Quads that are not
 /// markers are dropped; duplicate detections of a marker are merged.
-pub fn decode_quads(gray: &GrayImage, quads: &[Quad], config: &DecodeConfig) -> Vec<Marker> {
+pub fn decode_quads(gray: GrayView<'_>, quads: &[Quad], config: &DecodeConfig) -> Vec<Marker> {
     let mut markers: Vec<Marker> = Vec::new();
     for quad in quads {
         let Some(marker) = decode_quad(gray, quad, config) else { continue };
@@ -99,7 +99,7 @@ pub fn decode_quads(gray: &GrayImage, quads: &[Quad], config: &DecodeConfig) -> 
     markers
 }
 
-fn decode_quad(gray: &GrayImage, quad: &Quad, config: &DecodeConfig) -> Option<Marker> {
+fn decode_quad(gray: GrayView<'_>, quad: &Quad, config: &DecodeConfig) -> Option<Marker> {
     let dict = config.dictionary;
     let n = dict.total_width() as usize;
     // Contour corners are the centres of the outermost marker pixels; the
@@ -166,7 +166,7 @@ fn expand(corners: [Point; 4], amount: f32) -> [Point; 4] {
 
 /// Mean intensity of each of the `n x n` grid cells inside the quad,
 /// row-major in the quad's own frame (corner 0 at the grid origin).
-fn sample_cells(gray: &GrayImage, corners: [Point; 4], n: usize) -> Option<Vec<f32>> {
+fn sample_cells(gray: GrayView<'_>, corners: [Point; 4], n: usize) -> Option<Vec<f32>> {
     let side = n as f32;
     let h = Homography::from_points([[0.0, 0.0], [side, 0.0], [side, side], [0.0, side]], corners)?;
     // Sample the central part of each cell, away from its edges.

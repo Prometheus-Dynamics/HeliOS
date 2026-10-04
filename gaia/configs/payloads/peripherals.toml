@@ -28,7 +28,7 @@ output_path = "gaia/output/${build.name}/artifacts/helios-peripherals"
 backend = "docker"
 
 [artifacts.execution.docker]
-image = "helios-cross-rust194"
+image = "helios-cross"
 dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
 context = "gaia/docker"
 

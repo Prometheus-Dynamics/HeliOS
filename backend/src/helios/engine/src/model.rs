@@ -29,11 +29,25 @@ pub enum GraphRef {
     InlineSpec(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ExecutionBinding {
     pub input: String,
     pub resource_id: String,
     pub node_id: String,
+    /// What to ask a camera frame source for; ignored for other resources.
+    pub frame_request: FrameRequestOptions,
+}
+
+/// Optional per-binding frame requirements. The default asks for 8-bit luma at the
+/// camera's native size from the service's first camera.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FrameRequestOptions {
+    /// Camera name (or part of it, or an identity key) when the service serves several.
+    pub camera: Option<String>,
+    /// Frame size the graph works at; the camera service scales to it.
+    pub output_resolution: Option<(u32, u32)>,
+    /// Half-size pyramid levels to attach to each frame (the first from the ISP where it can).
+    pub pyramid_levels: Option<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,9 +1,10 @@
 //! Daedalus nodes for the vision stages.
 //!
-//! The graph carries a camera frame (`styx:framelease`) into the CPU stages
-//! through the `helios.vision.framelease_to_gray` adapter, which reads the
-//! frame's luma plane. Stage outputs are structured types with stable keys
-//! so they can be inspected and stored.
+//! The graph carries a camera frame (`styx:framelease`) to the stages that
+//! need full-resolution pixels; they read its luma plane in place
+//! ([`luma_view`]). `vision.downscale` uses the ISP's half-size pyramid
+//! companion when the frame has one. Stage outputs are structured types with
+//! stable keys so they can be inspected and stored.
 
 use std::sync::Arc;
 
@@ -19,7 +20,7 @@ use styx::imports::framelease::FrameLease;
 
 use crate::aruco::{self, DecodeConfig, Dictionary};
 use crate::geometry::Point;
-use crate::image::{BinaryImage, GrayImage};
+use crate::image::{BinaryImage, GrayImage, GrayView};
 use crate::quads::{self, Quad};
 use crate::threshold::{self, ThresholdConfig};
 
@@ -139,30 +140,44 @@ pub struct DecodeParams {
     pub max_correction: i64,
 }
 
-/// Read a camera frame's luma plane into a grayscale image.
-#[adapt(id = "helios.vision.framelease_to_gray", from = "styx:framelease", to = "helios:gray8", kind = daedalus::transport::AdapterKind::Materialize)]
-pub fn framelease_to_gray(frame: &FrameLease) -> Result<Gray, TransportError> {
-    let rows = frame.luma_rows().map_err(|error| TransportError::Unsupported(format!("frame has no readable luma plane: {error}")))?;
-    let (width, height) = (rows.row_bytes(), rows.len());
-    let mut data = Vec::with_capacity(width * height);
-    for row in rows.iter() {
-        let bytes = row.data();
-        data.extend_from_slice(&bytes[..width.min(bytes.len())]);
+/// The luma plane of a camera frame, read in place.
+pub fn luma_view(frame: &FrameLease) -> Result<GrayView<'_>, String> {
+    if !frame.has_luma_plane() {
+        return Err(format!("frame format {} has no luma plane", frame.meta().format.code));
     }
-    let image = GrayImage::new(width, height, data).map_err(|error| TransportError::Unsupported(error.to_string()))?;
-    Ok(Gray(Arc::new(image)))
+    let resolution = frame.meta().format.resolution;
+    let planes = frame.planes();
+    let plane = planes.first().ok_or("frame has no planes")?;
+    GrayView::new(resolution.width.get() as usize, resolution.height.get() as usize, plane.stride(), plane.data()).map_err(|error| error.to_string())
 }
 
-/// Shrink an image by averaging blocks, so quad search runs on fewer pixels.
-#[node(id = "vision.downscale", inputs("gray", config = DownscaleParams), outputs("gray"))]
-pub fn downscale(gray: &Gray, params: DownscaleParams) -> Result<Gray, NodeError> {
-    let mut out = gray.clone();
-    let mut factor = 1;
+/// Copy a camera frame's luma plane into a grayscale image.
+#[adapt(id = "helios.vision.framelease_to_gray", from = "styx:framelease", to = "helios:gray8", kind = daedalus::transport::AdapterKind::Materialize)]
+pub fn framelease_to_gray(frame: &FrameLease) -> Result<Gray, TransportError> {
+    let view = luma_view(frame).map_err(TransportError::Unsupported)?;
+    Ok(Gray(Arc::new(view.to_image())))
+}
+
+/// Shrink a frame's luma by averaging blocks, so quad search runs on fewer
+/// pixels. The first halving comes from the ISP when the frame carries a
+/// half-size pyramid companion; otherwise it is computed from the frame in
+/// place.
+#[node(id = "vision.downscale", inputs("frame", config = DownscaleParams), outputs("gray"))]
+pub fn downscale(frame: &FrameLease, params: DownscaleParams) -> Result<Gray, NodeError> {
+    let full = luma_view(frame).map_err(NodeError::InvalidInput)?;
+    if params.factor < 2 {
+        return Ok(Gray(Arc::new(full.to_image())));
+    }
+    let mut out = match frame.pyramid_level(1) {
+        Some(half) => luma_view(half).map_err(NodeError::InvalidInput)?.to_image(),
+        None => full.downscale2(),
+    };
+    let mut factor = 2;
     while factor * 2 <= params.factor {
-        out = Gray(Arc::new(out.0.downscale2()));
+        out = out.downscale2();
         factor *= 2;
     }
-    Ok(out)
+    Ok(Gray(Arc::new(out)))
 }
 
 #[node(id = "vision.adaptive_threshold", inputs("gray", config = ThresholdParams), outputs("binary"))]
@@ -183,8 +198,10 @@ pub fn find_quads(binary: &Binary, params: QuadParams) -> Result<QuadList, NodeE
     })
 }
 
-#[node(id = "aruco.decode", inputs("gray", "quads", config = DecodeParams), outputs("markers"))]
-pub fn decode(gray: &Gray, list: &QuadList, params: DecodeParams) -> Result<MarkerList, NodeError> {
+/// Decode markers from quads on the frame's full-resolution luma, read in place.
+#[node(id = "aruco.decode", inputs("frame", "quads", config = DecodeParams), outputs("markers"))]
+pub fn decode(frame: &FrameLease, list: &QuadList, params: DecodeParams) -> Result<MarkerList, NodeError> {
+    let gray = luma_view(frame).map_err(NodeError::InvalidInput)?;
     let dictionary = Dictionary::by_name(&params.dictionary).ok_or_else(|| NodeError::InvalidInput(format!("unknown marker dictionary '{}'", params.dictionary)))?;
     let config = DecodeConfig { dictionary, min_contrast: params.min_contrast as f32, max_correction: u32::try_from(params.max_correction).ok(), ..DecodeConfig::default() };
     let quads: Vec<Quad> = list
@@ -193,12 +210,12 @@ pub fn decode(gray: &Gray, list: &QuadList, params: DecodeParams) -> Result<Mark
         .filter(|q| q.corners.len() == 4)
         .map(|q| Quad { corners: [from_point(&q.corners[0]), from_point(&q.corners[1]), from_point(&q.corners[2]), from_point(&q.corners[3])] })
         .collect();
-    let quads = if quads.is_empty() || list.image_width <= 0 || list.image_width as usize == gray.0.width() {
+    let quads = if quads.is_empty() || list.image_width <= 0 || list.image_width as usize == gray.width() {
         quads
     } else {
-        quads::scale_quads(&quads, (gray.0.width() as f32 / list.image_width as f32).round())
+        quads::scale_quads(&quads, (gray.width() as f32 / list.image_width as f32).round())
     };
-    let markers = aruco::decode_quads(&gray.0, &quads, &config);
+    let markers = aruco::decode_quads(gray, &quads, &config);
     Ok(MarkerList { markers: markers.iter().map(MarkerValue::from).collect() })
 }
 
@@ -214,7 +231,16 @@ fn image_summary(kind: &str, width: usize, height: usize) -> Value {
     ImageSummary { kind: kind.to_string(), width: width as i64, height: height as i64 }.to_value()
 }
 
+/// Give `FrameLease` its stable key, so node ports taking a frame match the
+/// `styx:framelease` payloads the engine feeds (registration is global and
+/// idempotent; the engine's frame glue registers the same key).
+pub fn register_frame_type() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| daedalus::data::typing::register_type::<FrameLease>(daedalus::data::model::TypeExpr::opaque(FRAMELEASE_TYPE_KEY)));
+}
+
 fn install(registry: &mut PluginRegistry) -> daedalus::runtime::plugins::PluginResult<()> {
+    register_frame_type();
     registry.register_value_serializer::<Gray, _>(|gray| image_summary("gray8", gray.0.width(), gray.0.height()));
     registry.register_value_serializer::<Binary, _>(|binary| image_summary("binary", binary.0.width(), binary.0.height()));
     Ok(())

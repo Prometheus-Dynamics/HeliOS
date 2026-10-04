@@ -23,126 +23,136 @@ impl Default for ComponentFilter {
 /// Trace the outer boundary of every 8-connected foreground component whose
 /// bounding box passes `filter`. Each contour is a closed list of boundary
 /// pixels in clockwise order (y down), without repeating the first pixel.
+///
+/// Components are found on horizontal runs rather than pixels, and the
+/// tracer reads the binary image directly: every foreground 8-neighbour of a
+/// component's boundary pixel belongs to that component, so no label map is
+/// needed.
 pub fn outer_contours(binary: &BinaryImage, filter: &ComponentFilter) -> Vec<Vec<(i32, i32)>> {
-    let (width, height) = (binary.width(), binary.height());
-    let labels = label_components(binary);
-    let count = labels.count;
-    if count == 0 {
-        return Vec::new();
-    }
-
-    // Bounding box and first (top-most, then left-most) pixel per component.
-    let mut boxes = vec![(usize::MAX, usize::MAX, 0usize, 0usize); count];
-    let mut starts = vec![None; count];
-    for y in 0..height {
-        for x in 0..width {
-            let label = labels.map[y * width + x];
-            if label == 0 {
-                continue;
-            }
-            let index = (label - 1) as usize;
-            let b = &mut boxes[index];
-            b.0 = b.0.min(x);
-            b.1 = b.1.min(y);
-            b.2 = b.2.max(x);
-            b.3 = b.3.max(y);
-            if starts[index].is_none() {
-                starts[index] = Some((x, y));
-            }
-        }
-    }
-
+    let runs = Runs::find(binary);
     let mut contours = Vec::new();
-    for (index, start) in starts.iter().enumerate() {
-        let Some((sx, sy)) = *start else { continue };
-        let (x0, y0, x1, y1) = boxes[index];
+    for component in runs.components() {
+        let (x0, y0, x1, y1) = component.bounds;
         let box_perimeter = 2 * ((x1 - x0 + 1) + (y1 - y0 + 1));
         if box_perimeter < filter.min_box_perimeter || box_perimeter > filter.max_box_perimeter {
             continue;
         }
-        contours.push(trace(&labels, width, height, index as u32 + 1, sx as isize, sy as isize));
+        contours.push(trace(binary, component.start.0 as isize, component.start.1 as isize));
     }
     contours
 }
 
-struct Labels {
-    map: Vec<u32>,
-    count: usize,
+/// A horizontal run of foreground pixels `[start, end)` on row `y`.
+#[derive(Clone, Copy)]
+struct Run {
+    y: u32,
+    start: u32,
+    end: u32,
 }
 
-/// 8-connected component labelling with union-find. Labels are 1-based and
-/// dense; 0 is background.
-fn label_components(binary: &BinaryImage) -> Labels {
-    let (width, height) = (binary.width(), binary.height());
-    let mut provisional = vec![0u32; width * height];
-    let mut parent: Vec<u32> = vec![0];
+/// A connected component: bounding box `(x0, y0, x1, y1)` (inclusive) and its
+/// top-most, left-most pixel.
+struct Component {
+    bounds: (usize, usize, usize, usize),
+    start: (usize, usize),
+}
 
-    fn find(parent: &mut [u32], mut a: u32) -> u32 {
-        while parent[a as usize] != a {
-            parent[a as usize] = parent[parent[a as usize] as usize];
-            a = parent[a as usize];
-        }
-        a
-    }
+/// Foreground runs of a binary image joined into 8-connected components with
+/// union-find.
+struct Runs {
+    runs: Vec<Run>,
+    parent: Vec<u32>,
+}
 
-    for y in 0..height {
-        for x in 0..width {
-            if binary.data()[y * width + x] == 0 {
-                continue;
+impl Runs {
+    fn find(binary: &BinaryImage) -> Self {
+        let width = binary.width();
+        let mut runs: Vec<Run> = Vec::new();
+        let mut parent: Vec<u32> = Vec::new();
+        let mut previous = 0..0; // runs of the row above
+        for (y, row) in binary.data().chunks_exact(width.max(1)).enumerate() {
+            let row_start = runs.len();
+            let mut x = 0;
+            while x < width {
+                // Skip background eight bytes at a time.
+                while x + 8 <= width && u64::from_ne_bytes(row[x..x + 8].try_into().expect("8 bytes")) == 0 {
+                    x += 8;
+                }
+                while x < width && row[x] == 0 {
+                    x += 1;
+                }
+                if x == width {
+                    break;
+                }
+                let start = x;
+                while x < width && row[x] != 0 {
+                    x += 1;
+                }
+                runs.push(Run { y: y as u32, start: start as u32, end: x as u32 });
+                parent.push((runs.len() - 1) as u32);
             }
-            // Already-visited neighbours: W, NW, N, NE.
-            let mut neighbours = [0u32; 4];
-            let mut n = 0;
-            for (dx, dy) in [(-1isize, 0isize), (-1, -1), (0, -1), (1, -1)] {
-                let (nx, ny) = (x as isize + dx, y as isize + dy);
-                if nx >= 0 && ny >= 0 && (nx as usize) < width {
-                    let label = provisional[ny as usize * width + nx as usize];
-                    if label != 0 {
-                        neighbours[n] = label;
-                        n += 1;
-                    }
+            // Join with 8-connected runs of the row above.
+            let mut j = previous.start;
+            for i in row_start..runs.len() {
+                let run = runs[i];
+                while j < previous.end && runs[j].end < run.start {
+                    j += 1;
+                }
+                let mut k = j;
+                while k < previous.end && runs[k].start <= run.end {
+                    union(&mut parent, i as u32, k as u32);
+                    k += 1;
                 }
             }
-            let label = if n == 0 {
-                let next = parent.len() as u32;
-                parent.push(next);
-                next
+            previous = row_start..runs.len();
+        }
+        Self { runs, parent }
+    }
+
+    fn components(mut self) -> Vec<Component> {
+        let mut index = vec![u32::MAX; self.runs.len()];
+        let mut components: Vec<Component> = Vec::new();
+        for i in 0..self.runs.len() {
+            let root = root(&mut self.parent, i as u32) as usize;
+            let run = self.runs[i];
+            let (y, x0, x1) = (run.y as usize, run.start as usize, run.end as usize - 1);
+            if index[root] == u32::MAX {
+                // Runs come in scan order, so a component's first run holds
+                // its top-most, left-most pixel.
+                index[root] = components.len() as u32;
+                components.push(Component { bounds: (x0, y, x1, y), start: (x0, y) });
             } else {
-                let mut root = find(&mut parent, neighbours[0]);
-                for &other in &neighbours[1..n] {
-                    let other_root = find(&mut parent, other);
-                    if other_root != root {
-                        let (lo, hi) = (root.min(other_root), root.max(other_root));
-                        parent[hi as usize] = lo;
-                        root = lo;
-                    }
-                }
-                root
-            };
-            provisional[y * width + x] = label;
+                let b = &mut components[index[root] as usize].bounds;
+                b.0 = b.0.min(x0);
+                b.2 = b.2.max(x1);
+                b.3 = y;
+            }
         }
+        components
     }
+}
 
-    let mut dense = vec![0u32; parent.len()];
-    let mut count = 0u32;
-    for label in 1..parent.len() as u32 {
-        let root = find(&mut parent, label);
-        if dense[root as usize] == 0 {
-            count += 1;
-            dense[root as usize] = count;
-        }
-        dense[label as usize] = dense[root as usize];
+fn root(parent: &mut [u32], mut a: u32) -> u32 {
+    while parent[a as usize] != a {
+        parent[a as usize] = parent[parent[a as usize] as usize];
+        a = parent[a as usize];
     }
-    for value in provisional.iter_mut() {
-        *value = dense[*value as usize];
+    a
+}
+
+fn union(parent: &mut [u32], a: u32, b: u32) {
+    let (ra, rb) = (root(parent, a), root(parent, b));
+    if ra != rb {
+        let (lo, hi) = (ra.min(rb), ra.max(rb));
+        parent[hi as usize] = lo;
     }
-    Labels { map: provisional, count: count as usize }
 }
 
 /// Moore-neighbour tracing of one component's outer boundary, starting at its
 /// top-most, left-most pixel (whose west neighbour is background).
-fn trace(labels: &Labels, width: usize, height: usize, label: u32, sx: isize, sy: isize) -> Vec<(i32, i32)> {
-    let is_member = |x: isize, y: isize| x >= 0 && y >= 0 && (x as usize) < width && (y as usize) < height && labels.map[y as usize * width + x as usize] == label;
+fn trace(binary: &BinaryImage, sx: isize, sy: isize) -> Vec<(i32, i32)> {
+    let (width, height) = (binary.width(), binary.height());
+    let is_member = |x: isize, y: isize| binary.is_set(x, y);
 
     let start = (sx, sy);
     let mut contour = vec![(sx as i32, sy as i32)];

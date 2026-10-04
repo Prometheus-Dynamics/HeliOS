@@ -54,7 +54,7 @@ Gaia rejects workspace-relative paths outside the repository).
 - `os/`, `network/`, `hardware/`, `identity/`, `ops/`, `storage/`,
   `runtime-config/` – layer fragments imported by `layers/` and the target.
 - `payloads/` – what gets built and installed: Rust artifacts (built in the
-  `helios-cross-rust194` Docker image), `orion-node`/`orionctl` from a pinned Orion
+  `helios-cross` Docker image), `orion-node`/`orionctl` from a pinned Orion
   revision, and the prebuilt frontend bundle.
 - `runtime-services/` – systemd units, sockets and service assets for those payloads.
 

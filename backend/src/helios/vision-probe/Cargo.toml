@@ -15,5 +15,5 @@ path = "src/main.rs"
 [dependencies]
 helios-vision = { path = "../vision" }
 daedalus = { workspace = true, features = ["engine", "plugins"] }
-styx = { workspace = true, default-features = false, features = ["framelease", "native", "v4l2", "libcamera-vendor-rpi"] }
+styx = { workspace = true, default-features = false, features = ["native", "v4l2", "raw-decoders"] }
 serde_json = { workspace = true }

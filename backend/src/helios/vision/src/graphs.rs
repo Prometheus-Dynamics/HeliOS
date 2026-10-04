@@ -11,8 +11,8 @@ pub const MARKERS_OUTPUT: &str = "markers";
 
 /// The ArUco detection graph: frame -> downscale -> adaptive threshold ->
 /// quads -> decode -> markers. Quads are searched on the downscaled image
-/// and decoded on the full-resolution frame; the planner inserts the luma
-/// adapter on each frame edge.
+/// and decoded on the full-resolution frame; both frame consumers read the
+/// frame's luma in place.
 pub fn aruco_graph_document(registry: &PluginRegistry, plugin: &VisionPlugin, dictionary: &str) -> Result<GraphDocument, Box<dyn std::error::Error + Send + Sync>> {
     let downscale = plugin.downscale.clone().alias("downscale");
     let threshold = plugin.adaptive_threshold.clone().alias("threshold");
@@ -25,9 +25,9 @@ pub fn aruco_graph_document(registry: &PluginRegistry, plugin: &VisionPlugin, di
         .try_node(&threshold)?
         .try_node(&quads)?
         .try_node(&decode)?
-        .try_connect(FRAME_INPUT, &downscale.inputs.gray)?
+        .try_connect(FRAME_INPUT, &downscale.inputs.frame)?
         .try_connect(&downscale.outputs.gray, &threshold.inputs.gray)?
-        .try_connect(FRAME_INPUT, &decode.inputs.gray)?
+        .try_connect(FRAME_INPUT, &decode.inputs.frame)?
         .try_connect(&threshold.outputs.binary, &quads.inputs.binary)?
         .try_connect(&quads.outputs.quads, &decode.inputs.quads)?
         .try_connect(&decode.outputs.markers, MARKERS_OUTPUT)?

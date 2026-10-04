@@ -72,16 +72,83 @@ impl GrayImage {
         self.data[y * self.width + x] = value;
     }
 
+    /// A borrowed view of this image.
+    pub fn view(&self) -> GrayView<'_> {
+        GrayView { width: self.width, height: self.height, stride: self.width, data: &self.data }
+    }
+
+    /// Halve both dimensions by averaging 2x2 blocks; see [`GrayView::downscale2`].
+    pub fn downscale2(&self) -> GrayImage {
+        self.view().downscale2()
+    }
+
+    /// Bilinear sample; see [`GrayView::sample`].
+    pub fn sample(&self, x: f32, y: f32) -> f32 {
+        self.view().sample(x, y)
+    }
+}
+
+/// A borrowed 8-bit grayscale image with a row stride, e.g. the luma plane
+/// of a camera frame read in place.
+#[derive(Clone, Copy, Debug)]
+pub struct GrayView<'a> {
+    width: usize,
+    height: usize,
+    stride: usize,
+    data: &'a [u8],
+}
+
+impl<'a> GrayView<'a> {
+    /// A view of `height` rows of `width` pixels, `stride` bytes apart.
+    pub fn new(width: usize, height: usize, stride: usize, data: &'a [u8]) -> Result<Self, ImageError> {
+        if stride < width {
+            return Err(ImageError::StrideTooSmall { width, stride });
+        }
+        let needed = if height == 0 { 0 } else { stride * (height - 1) + width };
+        if data.len() < needed {
+            return Err(ImageError::SizeMismatch { width, height, expected: needed, actual: data.len() });
+        }
+        Ok(Self { width, height, stride, data })
+    }
+
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
+    pub fn height(&self) -> usize {
+        self.height
+    }
+
+    /// Row `y` (exactly `width` pixels).
+    pub fn row(&self, y: usize) -> &'a [u8] {
+        &self.data[y * self.stride..][..self.width]
+    }
+
+    pub fn get(&self, x: usize, y: usize) -> u8 {
+        self.data[y * self.stride + x]
+    }
+
+    /// Copy into an owned, unpadded image.
+    pub fn to_image(&self) -> GrayImage {
+        let mut data = Vec::with_capacity(self.width * self.height);
+        for y in 0..self.height {
+            data.extend_from_slice(self.row(y));
+        }
+        GrayImage { width: self.width, height: self.height, data }
+    }
+
     /// Halve both dimensions by averaging 2x2 blocks (an odd last row or
     /// column is dropped). Pixel centres map as `full = 2 * half + 0.5`.
     pub fn downscale2(&self) -> GrayImage {
         let (w, h) = (self.width / 2, self.height / 2);
-        let mut data = Vec::with_capacity(w * h);
-        for y in 0..h {
-            let top = &self.data[2 * y * self.width..2 * y * self.width + 2 * w];
-            let bottom = &self.data[(2 * y + 1) * self.width..(2 * y + 1) * self.width + 2 * w];
-            for (t, b) in top.chunks_exact(2).zip(bottom.chunks_exact(2)) {
-                data.push(((t[0] as u16 + t[1] as u16 + b[0] as u16 + b[1] as u16 + 2) / 4) as u8);
+        let mut data = vec![0u8; w * h];
+        for (y, out) in data.chunks_exact_mut(w.max(1)).enumerate().take(h) {
+            let top = &self.row(2 * y)[..2 * w];
+            let bottom = &self.row(2 * y + 1)[..2 * w];
+            // Indexed form so LLVM emits de-interleaving vector loads.
+            for x in 0..w {
+                let sum = top[2 * x] as u16 + top[2 * x + 1] as u16 + bottom[2 * x] as u16 + bottom[2 * x + 1] as u16;
+                out[x] = ((sum + 2) >> 2) as u8;
             }
         }
         GrayImage { width: w, height: h, data }

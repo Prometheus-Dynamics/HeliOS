@@ -18,9 +18,11 @@ session state, artifacts, and telemetry back into Orion.
 - Orion workload assignments targeting execution
 - Orion lease and ownership state
 - external Daedalus plugins from configured plugin directories
-- inline graph specifications carried by execution workloads
+- inline Daedalus `GraphDocument`s (`format: "daedalus.graph"`) carried by
+  execution workloads
 - resource bindings carried by execution workloads
-- `stream.channel` resources carrying `styx-frame-lease-v1` endpoints
+- camera resources carrying a `styx-frames+unix://<socket>` endpoint (a Styx
+  `CameraService` run by peripherals)
 
 ## Own
 
@@ -30,7 +32,7 @@ session state, artifacts, and telemetry back into Orion.
 - plugin requirement validation before graph execution
 - local execution session lifecycle and failure reporting
 - resource binding injection into graph inputs
-- frame lease import/export for generic stream resources
+- per-workload frame drivers that request frames from camera services
 - resident Daedalus graph ticking for assigned workloads
 - publication of executor/provider state back into Orion
 
@@ -62,29 +64,39 @@ session state, artifacts, and telemetry back into Orion.
   disappearing from provider state.
 - plugin requirements are checked before execution and missing or incompatible
   plugins fail the session clearly.
-- inline Daedalus graph specs execute through resident local Daedalus hosts.
-- graph outputs are collected as Orion execution artifacts and session telemetry.
-- bound `stream.channel` resources are imported as Styx `FrameLease` payloads and
-  pushed into Daedalus host inputs without copying frame bytes into Orion state.
-- Daedalus host outputs that are `FrameLease` payloads are published as
-  `execution.artifact` resources with reusable stream endpoints.
-- assigned workload graphs stay compiled until the decoded workload changes or
-  disappears.
-- the runtime ticks resident graphs at `HELIOS_ENGINE_EXECUTION_INTERVAL_MS`.
-  Stable stream endpoints are polled for fresh frame leases, so frame processing
-  does not depend on Orion state changing once per frame.
-- resident execution fingerprints bound inputs. If no input changed, the graph
-  stays resident but the tick is skipped and duplicate artifacts are not
-  published.
-- when any binding changes, all bound inputs are pushed for that tick. This keeps
-  fusion workloads sane: a newer IMU sample can be processed with the current
-  camera frame even if the camera frame endpoint did not change.
-- workload record changes, including config and binding changes, rebuild the
-  resident graph for the affected workload.
+- inline graphs must be versioned `GraphDocument`s; bare graph JSON is rejected.
+  Document `requires` are checked against the loaded plugins before compiling.
+- each workload's graph is compiled once, with a host bridge of its own, and
+  stays resident until the decoded workload changes or disappears.
+- frame-driven workloads: a binding whose resource has a `styx-frames+unix://`
+  endpoint makes the workload frame-driven. A dedicated thread per workload
+  keeps a reconnecting Styx `FrameClient` (luma at native size by default;
+  `binding.<input>.camera`, `.output_width`/`.output_height` adjust the request),
+  blocks on each frame, feeds it as a `styx:framelease` payload (latest-only
+  input) to the graph, ticks it and keeps the latest host outputs. Leases are
+  released when the tick returns. Non-frame bindings of the same workload are
+  pushed with every frame as resource-state JSON. The thread stops when the
+  workload is removed or changed, or when its camera endpoint changes.
+- other workloads are ticked at `HELIOS_ENGINE_EXECUTION_INTERVAL_MS` when a
+  bound resource changed (every interval when they have no bindings). All bound
+  inputs are pushed on each run, so multi-input nodes always see a full set.
+- graph host outputs are published as `execution.artifact` resources
+  `engine.artifact.session.<workload_id>.<port>` (kind `host_output:<port>`,
+  config `message` = the output as JSON through the registry's value
+  serializers). `engine.artifact.session.<workload_id>.telemetry` carries stats
+  (frames processed/failed, last tick ms, fps, camera connection and plan).
+  Frame-driven outputs are snapshotted on the execution interval, latest wins.
+  `FrameLease` outputs are described (size, fourcc, timestamp), never copied.
+- Daedalus dylib plugins must be built in the same cargo invocation as the
+  engine (`cargo build -p helios-engine -p helios-vision --features
+  helios-vision/dylib`): separately resolved feature sets give shared types
+  such as `FrameLease` different type ids, and frames then fail to downcast in
+  plugin adapters even though the Daedalus build fingerprint matches.
 
 Known boundaries:
 
 - `artifact_id` and `resource_id` graph references are intentionally rejected
   until Orion-backed graph artifact/resource loading is defined.
 - engine does not own camera decode/encode or preview publishing; peripherals
-  owns the local camera publication path.
+  owns the camera services.
+- graph `FrameLease` outputs are not re-served to other processes yet.

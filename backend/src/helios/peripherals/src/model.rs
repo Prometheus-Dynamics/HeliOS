@@ -17,7 +17,6 @@ pub enum ResourceKind {
     UsbInterface,
     CaptureDevice,
     Virtual,
-    Channel,
 }
 
 impl ResourceKind {
@@ -36,7 +35,6 @@ impl ResourceKind {
             Self::UsbInterface => "usb_interface",
             Self::CaptureDevice => "capture_device",
             Self::Virtual => "virtual",
-            Self::Channel => "channel",
         }
     }
 }

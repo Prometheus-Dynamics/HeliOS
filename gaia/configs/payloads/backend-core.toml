@@ -37,7 +37,7 @@ output_path = "gaia/output/${build.name}/artifacts/helios-api"
 backend = "docker"
 
 [artifacts.execution.docker]
-image = "helios-cross-rust194"
+image = "helios-cross"
 dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
 context = "gaia/docker"
 
@@ -57,7 +57,7 @@ output_path = "gaia/output/${build.name}/artifacts/helios-engine"
 backend = "docker"
 
 [artifacts.execution.docker]
-image = "helios-cross-rust194"
+image = "helios-cross"
 dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
 context = "gaia/docker"
 
@@ -77,7 +77,7 @@ output_path = "gaia/output/${build.name}/artifacts/helios-updater"
 backend = "docker"
 
 [artifacts.execution.docker]
-image = "helios-cross-rust194"
+image = "helios-cross"
 dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
 context = "gaia/docker"
 
@@ -97,7 +97,7 @@ output_path = "gaia/output/${build.name}/artifacts/helios-diagnostics"
 backend = "docker"
 
 [artifacts.execution.docker]
-image = "helios-cross-rust194"
+image = "helios-cross"
 dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
 context = "gaia/docker"
 
@@ -117,7 +117,7 @@ output_path = "gaia/output/${build.name}/artifacts/heliosctl"
 backend = "docker"
 
 [artifacts.execution.docker]
-image = "helios-cross-rust194"
+image = "helios-cross"
 dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
 context = "gaia/docker"
 
@@ -139,7 +139,7 @@ output_path = "gaia/output/${build.name}/artifacts/orion-node"
 backend = "docker"
 
 [artifacts.execution.docker]
-image = "helios-cross-rust194"
+image = "helios-cross"
 dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
 context = "gaia/docker"
 
@@ -159,7 +159,7 @@ output_path = "gaia/output/${build.name}/artifacts/orionctl"
 backend = "docker"
 
 [artifacts.execution.docker]
-image = "helios-cross-rust194"
+image = "helios-cross"
 dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
 context = "gaia/docker"
 
@@ -179,7 +179,7 @@ output_path = "gaia/output/${build.name}/artifacts/helios-provision"
 backend = "docker"
 
 [artifacts.execution.docker]
-image = "helios-cross-rust194"
+image = "helios-cross"
 dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
 context = "gaia/docker"
 

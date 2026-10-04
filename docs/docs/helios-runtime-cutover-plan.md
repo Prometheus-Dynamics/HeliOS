@@ -131,8 +131,7 @@ peripherals capture -> raw FrameLease stream -> engine blank passthrough -> outp
 What exists today:
 
 - `helios-peripherals` captures through Styx/libcamera.
-- `helios-peripherals` publishes raw frame lease stream metadata and a Unix socket endpoint.
-- `helios-peripherals` also publishes an MJPEG preview socket.
+- `helios-peripherals` serves each camera through a Styx `CameraService` and advertises its socket on the `camera.device` resource as `styx-frames+unix://<absolute socket path>`. The derived `stream.channel.<camera>.raw` resource, its `.stream.json` metadata file and the MJPEG preview socket are gone.
 - Orion carries resource/control-plane state and endpoint metadata.
 - `helios-engine` imports the raw frame lease and republishes an output stream.
 - `helios-engine` has its own FrameLease import/publish code in `backend/src/helios/engine/src/stream_io.rs` and no dependency on `helios-peripherals`.
@@ -182,8 +181,7 @@ Current role:
 - Own live hardware resources.
 - Keep requested camera capture resources alive.
 - Use Styx/libcamera for capture.
-- Publish raw `FrameLease` endpoints.
-- Publish preview/output MJPEG streams when requested.
+- Serve each camera through a Styx `CameraService` (`styx-frames+unix` endpoint on the camera resource).
 
 Current concerns:
 
@@ -191,7 +189,6 @@ Current concerns:
 - Live capture alone still costs roughly 29-30 MiB PSS because libcamera/PiSP allocates the fixed camera buffer set.
 - Queue depth `1`, `2`, and `4` produced effectively the same DMABUF count and PSS on this PiSP path.
 - DMABUF mappings are now explained as the libcamera/PiSP backing set: ~8.67 MiB PSS in the current build.
-- Raw frame lease publishing and MJPEG preview encoding are still coupled in `PeripheralStreamWriter`.
 - Some frame lease transport structs may duplicate Styx/Orion concepts.
 - Styx `hooks` no longer pulling `image` means hooks can be re-evaluated if needed, but `image` should still not return as a HeliOS runtime transport dependency.
 

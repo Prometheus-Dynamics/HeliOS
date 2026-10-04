@@ -18,7 +18,7 @@ pub struct PeripheralConfig {
     pub driver_sample_cache_ttl_ms: u64,
     pub driver_sample_interval_ms: u64,
     pub lease_ttl_ms: u64,
-    pub camera_no_frame_timeout_ms: u64,
+    pub camera_idle_pause_ms: u64,
 }
 
 impl Default for PeripheralConfig {
@@ -35,7 +35,7 @@ impl Default for PeripheralConfig {
             driver_sample_cache_ttl_ms: 25,
             driver_sample_interval_ms: 250,
             lease_ttl_ms: 5_000,
-            camera_no_frame_timeout_ms: 2_000,
+            camera_idle_pause_ms: 2_000,
         }
     }
 }
@@ -82,8 +82,8 @@ impl PeripheralConfig {
         if let Some(value) = env.get("HELIOS_LEASE_TTL_MS").or_else(|| env.get("HELIOS_CLAIM_TTL_MS")).and_then(|v| v.parse::<u64>().ok()) {
             config.lease_ttl_ms = value;
         }
-        if let Some(value) = env.get("HELIOS_CAMERA_NO_FRAME_TIMEOUT_MS").and_then(|v| v.parse::<u64>().ok()) {
-            config.camera_no_frame_timeout_ms = value;
+        if let Some(value) = env.get("HELIOS_CAMERA_IDLE_PAUSE_MS").and_then(|v| v.parse::<u64>().ok()) {
+            config.camera_idle_pause_ms = value;
         }
         config
     }
@@ -118,7 +118,7 @@ mod tests {
             ("HELIOS_DRIVER_SAMPLE_CACHE_TTL_MS", "50"),
             ("HELIOS_DRIVER_SAMPLE_INTERVAL_MS", "125"),
             ("HELIOS_LEASE_TTL_MS", "7500"),
-            ("HELIOS_CAMERA_NO_FRAME_TIMEOUT_MS", "3000"),
+            ("HELIOS_CAMERA_IDLE_PAUSE_MS", "3000"),
         ]);
         assert_eq!(config.node_id, "node-a");
         assert_eq!(config.ipc_dir, PathBuf::from("/tmp/helios-peripherals"));
@@ -130,7 +130,7 @@ mod tests {
         assert_eq!(config.driver_sample_cache_ttl_ms, 50);
         assert_eq!(config.driver_sample_interval_ms, 125);
         assert_eq!(config.lease_ttl_ms, 7_500);
-        assert_eq!(config.camera_no_frame_timeout_ms, 3_000);
+        assert_eq!(config.camera_idle_pause_ms, 3_000);
     }
 
     #[test]

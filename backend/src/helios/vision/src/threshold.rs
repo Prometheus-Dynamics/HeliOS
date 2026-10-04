@@ -19,41 +19,71 @@ impl Default for ThresholdConfig {
 }
 
 /// Mark pixels darker than their local mean by more than `offset` as
-/// foreground. Uses an integral image, so the cost is independent of the
-/// window size. The comparison `pixel + offset < sum / count` is done as
-/// `(pixel + offset) * count < sum` to avoid a division per pixel.
+/// foreground. A running sum per column over the window's rows, plus a
+/// prefix sum along each row, gives every window sum in O(1). The test
+/// `pixel + offset < sum / count` is done as `(pixel + offset) * count < sum`;
+/// away from the borders `count` is constant, so the inner loop vectorises.
 pub fn adaptive_threshold(gray: &GrayImage, config: &ThresholdConfig) -> BinaryImage {
     let (width, height) = (gray.width(), gray.height());
     let radius = config.window.max(3) / 2;
-    let stride = width + 1;
-    let mut integral = vec![0u32; stride * (height + 1)];
-    for y in 0..height {
-        let row = &gray.data()[y * width..(y + 1) * width];
-        let (above, current) = integral.split_at_mut((y + 1) * stride);
-        let above = &above[y * stride..];
-        let mut row_sum = 0u32;
-        for x in 0..width {
-            row_sum += row[x] as u32;
-            current[x + 1] = above[x + 1] + row_sum;
-        }
+    let offset = config.offset;
+    let data = gray.data();
+    let mut out = vec![0u8; width * height];
+    if width == 0 || height == 0 {
+        return BinaryImage::new(width, height, out).expect("size matches");
     }
 
-    let offset = config.offset as i64;
-    let mut out = vec![0u8; width * height];
+    // Column sums over rows [0, radius] to start with.
+    let mut columns = vec![0u32; width];
+    for row in data.chunks_exact(width).take(radius.min(height - 1) + 1) {
+        for (sum, &p) in columns.iter_mut().zip(row) {
+            *sum += p as u32;
+        }
+    }
+    let mut prefix = vec![0u32; width + 1];
     for y in 0..height {
-        let y0 = y.saturating_sub(radius);
-        let y1 = (y + radius + 1).min(height);
-        let top = &integral[y0 * stride..(y0 + 1) * stride];
-        let bottom = &integral[y1 * stride..(y1 + 1) * stride];
-        let rows = (y1 - y0) as i64;
-        let pixels = &gray.data()[y * width..(y + 1) * width];
+        if y > 0 {
+            if let Some(add) = (y + radius < height).then(|| &data[(y + radius) * width..(y + radius + 1) * width]) {
+                for (sum, &p) in columns.iter_mut().zip(add) {
+                    *sum += p as u32;
+                }
+            }
+            if y > radius {
+                let remove = &data[(y - radius - 1) * width..(y - radius) * width];
+                for (sum, &p) in columns.iter_mut().zip(remove) {
+                    *sum -= p as u32;
+                }
+            }
+        }
+        let rows = ((y + radius).min(height - 1) + 1 - y.saturating_sub(radius)) as i32;
+        let mut running = 0u32;
+        for (x, &column) in columns.iter().enumerate() {
+            running += column;
+            prefix[x + 1] = running;
+        }
+
+        let pixels = &data[y * width..(y + 1) * width];
         let out_row = &mut out[y * width..(y + 1) * width];
-        for x in 0..width {
-            let x0 = x.saturating_sub(radius);
-            let x1 = (x + radius + 1).min(width);
-            let sum = (bottom[x1] + top[x0]) as i64 - (top[x1] + bottom[x0]) as i64;
-            let count = rows * (x1 - x0) as i64;
-            out_row[x] = u8::from((pixels[x] as i64 + offset) * count < sum);
+        let test = |x: usize| {
+            let (x0, x1) = (x.saturating_sub(radius), (x + radius + 1).min(width));
+            let sum = (prefix[x1] - prefix[x0]) as i32;
+            u8::from((pixels[x] as i32 + offset) * rows * ((x1 - x0) as i32) < sum)
+        };
+        let full = 2 * radius + 1;
+        if width <= full {
+            for (x, value) in out_row.iter_mut().enumerate() {
+                *value = test(x);
+            }
+            continue;
+        }
+        let count = rows * full as i32;
+        for x in (0..radius).chain(width - radius..width) {
+            out_row[x] = test(x);
+        }
+        let interior = radius..width - radius;
+        let sums = prefix[interior.start + radius + 1..].iter().zip(&prefix[interior.start - radius..]).map(|(hi, lo)| (hi - lo) as i32);
+        for ((value, &p), sum) in out_row[interior.clone()].iter_mut().zip(&pixels[interior]).zip(sums) {
+            *value = u8::from((p as i32 + offset) * count < sum);
         }
     }
     BinaryImage::new(width, height, out).expect("size matches")
@@ -75,6 +105,45 @@ mod tests {
         assert!(binary.is_set(15, 15));
         assert!(binary.is_set(24, 24));
         assert!(!binary.is_set(5, 5));
+    }
+
+    /// The straightforward definition, for comparison.
+    fn reference(gray: &GrayImage, config: &ThresholdConfig) -> Vec<u8> {
+        let radius = config.window.max(3) / 2;
+        let (w, h) = (gray.width(), gray.height());
+        let mut out = vec![0u8; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let (mut sum, mut count) = (0i32, 0i32);
+                for yy in y.saturating_sub(radius)..(y + radius + 1).min(h) {
+                    for xx in x.saturating_sub(radius)..(x + radius + 1).min(w) {
+                        sum += gray.get(xx, yy) as i32;
+                        count += 1;
+                    }
+                }
+                out[y * w + x] = u8::from((gray.get(x, y) as i32 + config.offset) * count < sum);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn matches_the_reference_definition() {
+        let mut state = 7u32;
+        for (w, h) in [(64, 48), (23, 31), (5, 7), (1, 1), (40, 3)] {
+            let data = (0..w * h)
+                .map(|_| {
+                    state ^= state << 13;
+                    state ^= state >> 17;
+                    state ^= state << 5;
+                    (state % 256) as u8
+                })
+                .collect();
+            let gray = GrayImage::new(w, h, data).unwrap();
+            for config in [ThresholdConfig::default(), ThresholdConfig { window: 3, offset: -2 }, ThresholdConfig { window: 9, offset: 0 }] {
+                assert_eq!(adaptive_threshold(&gray, &config).data(), reference(&gray, &config).as_slice(), "{w}x{h} {config:?}");
+            }
+        }
     }
 
     #[test]

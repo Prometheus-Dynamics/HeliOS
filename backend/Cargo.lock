@@ -192,44 +192,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
-name = "bindgen"
-version = "0.70.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f49d8fed880d473ea71efb9bf597651e77201bdd4893efe54c9e5d65ae04ce6f"
-dependencies = [
- "bitflags 2.11.1",
- "cexpr",
- "clang-sys",
- "itertools",
- "log",
- "prettyplease",
- "proc-macro2",
- "quote",
- "regex",
- "rustc-hash 1.1.0",
- "shlex",
- "syn 2.0.117",
-]
-
-[[package]]
-name = "bindgen"
-version = "0.72.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "993776b509cfb49c750f11b8f07a46fa23e0a1386ffc01fb1e7d343efc387895"
-dependencies = [
- "bitflags 2.11.1",
- "cexpr",
- "clang-sys",
- "itertools",
- "proc-macro2",
- "quote",
- "regex",
- "rustc-hash 2.1.2",
- "shlex",
- "syn 2.0.117",
-]
-
-[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -340,15 +302,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d43a04d8753f35258c91f8ec639f792891f748a1edbd759cf1dcea3382ad83c"
 
 [[package]]
-name = "cexpr"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6fac387a98bb7c37292057cffc56d62ecb629900026402633ae9160df93a8766"
-dependencies = [
- "nom",
-]
-
-[[package]]
 name = "cfg-if"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -372,17 +325,6 @@ dependencies = [
  "serde",
  "wasm-bindgen",
  "windows-link",
-]
-
-[[package]]
-name = "clang-sys"
-version = "1.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b023947811758c97c59bf9d1c188fd619ad4718dcaa767947df1cadb14f39f4"
-dependencies = [
- "glob",
- "libc",
- "libloading",
 ]
 
 [[package]]
@@ -616,7 +558,6 @@ dependencies = [
 [[package]]
 name = "daedalus-core"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=ac5fd56b33fb002902b4ba9964a5ed542bdffd21#ac5fd56b33fb002902b4ba9964a5ed542bdffd21"
 dependencies = [
  "crossbeam-queue",
  "serde",
@@ -626,7 +567,6 @@ dependencies = [
 [[package]]
 name = "daedalus-data"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=ac5fd56b33fb002902b4ba9964a5ed542bdffd21#ac5fd56b33fb002902b4ba9964a5ed542bdffd21"
 dependencies = [
  "base64",
  "parking_lot",
@@ -638,7 +578,6 @@ dependencies = [
 [[package]]
 name = "daedalus-engine"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=ac5fd56b33fb002902b4ba9964a5ed542bdffd21#ac5fd56b33fb002902b4ba9964a5ed542bdffd21"
 dependencies = [
  "daedalus-data",
  "daedalus-planner",
@@ -655,7 +594,6 @@ dependencies = [
 [[package]]
 name = "daedalus-ffi-core"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=ac5fd56b33fb002902b4ba9964a5ed542bdffd21#ac5fd56b33fb002902b4ba9964a5ed542bdffd21"
 dependencies = [
  "daedalus-data",
  "daedalus-transport",
@@ -668,7 +606,6 @@ dependencies = [
 [[package]]
 name = "daedalus-ffi-host"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=ac5fd56b33fb002902b4ba9964a5ed542bdffd21#ac5fd56b33fb002902b4ba9964a5ed542bdffd21"
 dependencies = [
  "daedalus-data",
  "daedalus-ffi-core",
@@ -685,11 +622,10 @@ dependencies = [
 [[package]]
 name = "daedalus-macros"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=ac5fd56b33fb002902b4ba9964a5ed542bdffd21#ac5fd56b33fb002902b4ba9964a5ed542bdffd21"
 dependencies = [
  "daedalus-runtime",
  "daedalus-wgsl-infer",
- "proc-macro-crate 3.5.0",
+ "proc-macro-crate",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -698,7 +634,6 @@ dependencies = [
 [[package]]
 name = "daedalus-nodes"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=ac5fd56b33fb002902b4ba9964a5ed542bdffd21#ac5fd56b33fb002902b4ba9964a5ed542bdffd21"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -714,7 +649,6 @@ dependencies = [
 [[package]]
 name = "daedalus-planner"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=ac5fd56b33fb002902b4ba9964a5ed542bdffd21#ac5fd56b33fb002902b4ba9964a5ed542bdffd21"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -731,7 +665,6 @@ dependencies = [
 [[package]]
 name = "daedalus-registry"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=ac5fd56b33fb002902b4ba9964a5ed542bdffd21#ac5fd56b33fb002902b4ba9964a5ed542bdffd21"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -744,7 +677,6 @@ dependencies = [
 [[package]]
 name = "daedalus-rs"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=ac5fd56b33fb002902b4ba9964a5ed542bdffd21#ac5fd56b33fb002902b4ba9964a5ed542bdffd21"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -765,7 +697,6 @@ dependencies = [
 [[package]]
 name = "daedalus-runtime"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=ac5fd56b33fb002902b4ba9964a5ed542bdffd21#ac5fd56b33fb002902b4ba9964a5ed542bdffd21"
 dependencies = [
  "daedalus-core",
  "daedalus-data",
@@ -784,7 +715,6 @@ dependencies = [
 [[package]]
 name = "daedalus-transport"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=ac5fd56b33fb002902b4ba9964a5ed542bdffd21#ac5fd56b33fb002902b4ba9964a5ed542bdffd21"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
@@ -793,7 +723,6 @@ dependencies = [
 [[package]]
 name = "daedalus-wgsl-infer"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Daedalus.git?rev=ac5fd56b33fb002902b4ba9964a5ed542bdffd21#ac5fd56b33fb002902b4ba9964a5ed542bdffd21"
 
 [[package]]
 name = "der"
@@ -861,12 +790,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "drm-fourcc"
-version = "2.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0aafbcdb8afc29c1a7ee5fbe53b5d62f4565b35a042a662ca9fecd0b54dae6f4"
-
-[[package]]
 name = "dunce"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -903,6 +826,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
+name = "embedded-hal"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "361a90feb7004eca4019fb28352a9465666b24f840f5c3cddf0ff13920590b89"
+
+[[package]]
+name = "embedded-hal-async"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c4c685bbef7fe13c3c6dd4da26841ed3980ef33e841cddfa15ce8a8fb3f1884"
+dependencies = [
+ "embedded-hal",
+]
+
+[[package]]
 name = "encoding_rs"
 version = "0.8.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -932,20 +870,6 @@ name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
-
-[[package]]
-name = "ffmpeg-sys-next"
-version = "8.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a314bc0e022a33a99567ed4bd2576bd58ffd8fcff7891c29194cfecc26a62547"
-dependencies = [
- "bindgen 0.72.1",
- "cc",
- "libc",
- "num_cpus",
- "pkg-config",
- "vcpkg",
-]
 
 [[package]]
 name = "fiat-crypto"
@@ -1248,6 +1172,7 @@ name = "helios-engine"
 version = "1.0.0"
 dependencies = [
  "daedalus-rs",
+ "helios-vision",
  "memmap2",
  "notify",
  "orion",
@@ -1267,15 +1192,10 @@ name = "helios-peripherals"
 version = "1.0.0"
 dependencies = [
  "chrono",
- "futures",
  "lemnos",
- "memmap2",
- "nix 0.31.2",
  "notify",
  "orion",
  "serde",
- "serde_bytes",
- "serde_json",
  "styx",
  "tempfile",
  "thiserror 2.0.18",
@@ -1361,12 +1281,6 @@ dependencies = [
  "sha2 0.11.0",
  "tokio",
 ]
-
-[[package]]
-name = "hermit-abi"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc0fef456e4baa96da950455cd02c081ca953b141298e41db3fc7e36b1da849c"
 
 [[package]]
 name = "hex"
@@ -1712,15 +1626,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
-name = "itertools"
-version = "0.10.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0fd2260e829bddf4cb6ea802289de2f86d6a7a690192fbe91b3f46e0f2c8473"
-dependencies = [
- "either",
-]
-
-[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1827,7 +1732,6 @@ checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
 [[package]]
 name = "lemnos"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=0e706c0b8371a3c9c32e92ff4e21344e4a4d765a#0e706c0b8371a3c9c32e92ff4e21344e4a4d765a"
 dependencies = [
  "lemnos-bus",
  "lemnos-core",
@@ -1848,7 +1752,6 @@ dependencies = [
 [[package]]
 name = "lemnos-bus"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=0e706c0b8371a3c9c32e92ff4e21344e4a4d765a#0e706c0b8371a3c9c32e92ff4e21344e4a4d765a"
 dependencies = [
  "lemnos-core",
  "thiserror 2.0.18",
@@ -1857,7 +1760,6 @@ dependencies = [
 [[package]]
 name = "lemnos-core"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=0e706c0b8371a3c9c32e92ff4e21344e4a4d765a#0e706c0b8371a3c9c32e92ff4e21344e4a4d765a"
 dependencies = [
  "ordered-float",
  "thiserror 2.0.18",
@@ -1866,7 +1768,6 @@ dependencies = [
 [[package]]
 name = "lemnos-discovery"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=0e706c0b8371a3c9c32e92ff4e21344e4a4d765a#0e706c0b8371a3c9c32e92ff4e21344e4a4d765a"
 dependencies = [
  "lemnos-core",
  "thiserror 2.0.18",
@@ -1875,7 +1776,6 @@ dependencies = [
 [[package]]
 name = "lemnos-driver-manifest"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=0e706c0b8371a3c9c32e92ff4e21344e4a4d765a#0e706c0b8371a3c9c32e92ff4e21344e4a4d765a"
 dependencies = [
  "lemnos-core",
  "thiserror 2.0.18",
@@ -1884,7 +1784,6 @@ dependencies = [
 [[package]]
 name = "lemnos-driver-sdk"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=0e706c0b8371a3c9c32e92ff4e21344e4a4d765a#0e706c0b8371a3c9c32e92ff4e21344e4a4d765a"
 dependencies = [
  "lemnos-bus",
  "lemnos-core",
@@ -1895,7 +1794,6 @@ dependencies = [
 [[package]]
 name = "lemnos-drivers-gpio"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=0e706c0b8371a3c9c32e92ff4e21344e4a4d765a#0e706c0b8371a3c9c32e92ff4e21344e4a4d765a"
 dependencies = [
  "lemnos-bus",
  "lemnos-core",
@@ -1906,7 +1804,6 @@ dependencies = [
 [[package]]
 name = "lemnos-drivers-i2c"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=0e706c0b8371a3c9c32e92ff4e21344e4a4d765a#0e706c0b8371a3c9c32e92ff4e21344e4a4d765a"
 dependencies = [
  "lemnos-bus",
  "lemnos-core",
@@ -1917,7 +1814,6 @@ dependencies = [
 [[package]]
 name = "lemnos-drivers-pwm"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=0e706c0b8371a3c9c32e92ff4e21344e4a4d765a#0e706c0b8371a3c9c32e92ff4e21344e4a4d765a"
 dependencies = [
  "lemnos-bus",
  "lemnos-core",
@@ -1928,7 +1824,6 @@ dependencies = [
 [[package]]
 name = "lemnos-drivers-spi"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=0e706c0b8371a3c9c32e92ff4e21344e4a4d765a#0e706c0b8371a3c9c32e92ff4e21344e4a4d765a"
 dependencies = [
  "lemnos-bus",
  "lemnos-core",
@@ -1939,7 +1834,6 @@ dependencies = [
 [[package]]
 name = "lemnos-drivers-uart"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=0e706c0b8371a3c9c32e92ff4e21344e4a4d765a#0e706c0b8371a3c9c32e92ff4e21344e4a4d765a"
 dependencies = [
  "lemnos-bus",
  "lemnos-core",
@@ -1950,7 +1844,6 @@ dependencies = [
 [[package]]
 name = "lemnos-drivers-usb"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=0e706c0b8371a3c9c32e92ff4e21344e4a4d765a#0e706c0b8371a3c9c32e92ff4e21344e4a4d765a"
 dependencies = [
  "lemnos-bus",
  "lemnos-core",
@@ -1961,7 +1854,6 @@ dependencies = [
 [[package]]
 name = "lemnos-linux"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=0e706c0b8371a3c9c32e92ff4e21344e4a4d765a#0e706c0b8371a3c9c32e92ff4e21344e4a4d765a"
 dependencies = [
  "gpio-cdev",
  "i2cdev",
@@ -1978,7 +1870,6 @@ dependencies = [
 [[package]]
 name = "lemnos-registry"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=0e706c0b8371a3c9c32e92ff4e21344e4a4d765a#0e706c0b8371a3c9c32e92ff4e21344e4a4d765a"
 dependencies = [
  "lemnos-core",
  "lemnos-driver-manifest",
@@ -1989,7 +1880,6 @@ dependencies = [
 [[package]]
 name = "lemnos-runtime"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=0e706c0b8371a3c9c32e92ff4e21344e4a4d765a#0e706c0b8371a3c9c32e92ff4e21344e4a4d765a"
 dependencies = [
  "lemnos-bus",
  "lemnos-core",
@@ -2017,34 +1907,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48f5d2a454e16a5ea0f4ced81bd44e4cfc7bd3a507b61887c99fd3538b28e4af"
 
 [[package]]
-name = "libcamera"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0af3de3417824209a2f1619bce9c2b19aca5bdeb4233376208fcea87e6104f36"
-dependencies = [
- "bitflags 2.11.1",
- "drm-fourcc",
- "libc",
- "libcamera-sys",
- "num_enum",
- "pkg-config",
- "semver",
- "smallvec",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "libcamera-sys"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb33a6d621530b7d10c25d8871d86615e84249854d8e5974812ca77458df9253"
-dependencies = [
- "bindgen 0.70.1",
- "cc",
- "pkg-config",
-]
-
-[[package]]
 name = "libloading"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2053,6 +1915,12 @@ dependencies = [
  "cfg-if",
  "windows-link",
 ]
+
+[[package]]
+name = "libm"
+version = "0.2.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "libredox"
@@ -2157,12 +2025,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
-name = "minimal-lexical"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
-
-[[package]]
 name = "miniz_oxide"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2250,28 +2112,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nix"
-version = "0.31.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d6d0705320c1e6ba1d912b5e37cf18071b6c2e9b7fa8215a1e8a7651966f5d3"
-dependencies = [
- "bitflags 2.11.1",
- "cfg-if",
- "cfg_aliases",
- "libc",
-]
-
-[[package]]
-name = "nom"
-version = "7.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a"
-dependencies = [
- "memchr",
- "minimal-lexical",
-]
-
-[[package]]
 name = "notify"
 version = "6.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2309,37 +2149,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "num_cpus"
-version = "1.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91df4bbde75afed763b708b7eee1e8e7651e02d97f6d5dd763e89367e957b23b"
-dependencies = [
- "hermit-abi",
- "libc",
-]
-
-[[package]]
-name = "num_enum"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a015b430d3c108a207fd776d2e2196aaf8b1cf8cf93253e3a097ff3085076a1"
-dependencies = [
- "num_enum_derive",
-]
-
-[[package]]
-name = "num_enum_derive"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96667db765a921f7b295ffee8b60472b686a51d4f21c2ee4ffdb94c7013b65a6"
-dependencies = [
- "proc-macro-crate 1.3.1",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2369,7 +2178,6 @@ dependencies = [
 [[package]]
 name = "orion"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Orion.git?rev=59f91ed97681bd0421f9d32bed82be21b2786642#59f91ed97681bd0421f9d32bed82be21b2786642"
 dependencies = [
  "orion-client",
  "orion-control-plane",
@@ -2383,7 +2191,6 @@ dependencies = [
 [[package]]
 name = "orion-client"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Orion.git?rev=59f91ed97681bd0421f9d32bed82be21b2786642#59f91ed97681bd0421f9d32bed82be21b2786642"
 dependencies = [
  "orion-control-plane",
  "orion-core",
@@ -2397,7 +2204,6 @@ dependencies = [
 [[package]]
 name = "orion-control-plane"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Orion.git?rev=59f91ed97681bd0421f9d32bed82be21b2786642#59f91ed97681bd0421f9d32bed82be21b2786642"
 dependencies = [
  "orion-core",
  "rkyv",
@@ -2410,7 +2216,6 @@ dependencies = [
 [[package]]
 name = "orion-core"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Orion.git?rev=59f91ed97681bd0421f9d32bed82be21b2786642#59f91ed97681bd0421f9d32bed82be21b2786642"
 dependencies = [
  "rkyv",
  "serde",
@@ -2420,7 +2225,6 @@ dependencies = [
 [[package]]
 name = "orion-data-plane"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Orion.git?rev=59f91ed97681bd0421f9d32bed82be21b2786642#59f91ed97681bd0421f9d32bed82be21b2786642"
 dependencies = [
  "orion-core",
  "rkyv",
@@ -2431,7 +2235,6 @@ dependencies = [
 [[package]]
 name = "orion-macros"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Orion.git?rev=59f91ed97681bd0421f9d32bed82be21b2786642#59f91ed97681bd0421f9d32bed82be21b2786642"
 dependencies = [
  "quote",
  "syn 2.0.117",
@@ -2440,7 +2243,6 @@ dependencies = [
 [[package]]
 name = "orion-runtime"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Orion.git?rev=59f91ed97681bd0421f9d32bed82be21b2786642#59f91ed97681bd0421f9d32bed82be21b2786642"
 dependencies = [
  "orion-control-plane",
  "orion-core",
@@ -2450,7 +2252,6 @@ dependencies = [
 [[package]]
 name = "orion-transport-common"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Orion.git?rev=59f91ed97681bd0421f9d32bed82be21b2786642#59f91ed97681bd0421f9d32bed82be21b2786642"
 dependencies = [
  "tokio",
 ]
@@ -2458,7 +2259,6 @@ dependencies = [
 [[package]]
 name = "orion-transport-ipc"
 version = "1.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Orion.git?rev=59f91ed97681bd0421f9d32bed82be21b2786642#59f91ed97681bd0421f9d32bed82be21b2786642"
 dependencies = [
  "libc",
  "orion-control-plane",
@@ -2564,21 +2364,11 @@ dependencies = [
 
 [[package]]
 name = "proc-macro-crate"
-version = "1.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f4c021e1093a56626774e81216a4ce732a735e5bad4868a03f3ed65ca0c3919"
-dependencies = [
- "once_cell",
- "toml_edit 0.19.15",
-]
-
-[[package]]
-name = "proc-macro-crate"
 version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e67ba7e9b2b56446f1d419b1d807906278ffa1a658a8a5d8a39dcb1f5a78614f"
 dependencies = [
- "toml_edit 0.25.10+spec-1.1.0",
+ "toml_edit",
 ]
 
 [[package]]
@@ -2621,7 +2411,7 @@ dependencies = [
  "pin-project-lite",
  "quinn-proto",
  "quinn-udp",
- "rustc-hash 2.1.2",
+ "rustc-hash",
  "rustls",
  "socket2",
  "thiserror 2.0.18",
@@ -2642,7 +2432,7 @@ dependencies = [
  "lru-slab",
  "rand",
  "ring",
- "rustc-hash 2.1.2",
+ "rustc-hash",
  "rustls",
  "rustls-pki-types",
  "slab",
@@ -2773,18 +2563,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "regex"
-version = "1.12.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e10754a14b9137dd7b1e3e5b0493cc9171fdd105e0ab477f51b72e7f3ac0e276"
-dependencies = [
- "aho-corasick",
- "memchr",
- "regex-automata",
- "regex-syntax",
-]
-
-[[package]]
 name = "regex-automata"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2906,12 +2684,6 @@ dependencies = [
  "libc",
  "libusb1-sys",
 ]
-
-[[package]]
-name = "rustc-hash"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
 
 [[package]]
 name = "rustc-hash"
@@ -3089,16 +2861,6 @@ checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
  "serde_core",
  "serde_derive",
-]
-
-[[package]]
-name = "serde_bytes"
-version = "0.11.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5d440709e79d88e51ac01c4b72fc6cb7314017bb7da9eeff678aa94c10e3ea8"
-dependencies = [
- "serde",
- "serde_core",
 ]
 
 [[package]]
@@ -3319,13 +3081,11 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 [[package]]
 name = "styx"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e#7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e"
 dependencies = [
  "futures-core",
  "futures-util",
  "inotify 0.11.1",
  "libc",
- "libcamera",
  "parking_lot",
  "reqwest",
  "serde",
@@ -3334,8 +3094,8 @@ dependencies = [
  "styx-capture",
  "styx-codec",
  "styx-core-rs",
+ "styx-dng",
  "styx-kernel",
- "styx-libcamera",
  "styx-native",
  "styx-pipeline",
  "styx-pisp",
@@ -3350,8 +3110,8 @@ dependencies = [
 [[package]]
 name = "styx-algo"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e#7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e"
 dependencies = [
+ "libm",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -3361,7 +3121,6 @@ dependencies = [
 [[package]]
 name = "styx-capture"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e#7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e"
 dependencies = [
  "serde",
  "smallvec",
@@ -3371,10 +3130,7 @@ dependencies = [
 [[package]]
 name = "styx-codec"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e#7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e"
 dependencies = [
- "ffmpeg-sys-next",
- "libc",
  "parking_lot",
  "rayon",
  "serde",
@@ -3390,10 +3146,10 @@ dependencies = [
 [[package]]
 name = "styx-core-rs"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e#7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e"
 dependencies = [
  "crossbeam-queue",
  "libc",
+ "libm",
  "parking_lot",
  "serde",
  "smallvec",
@@ -3403,9 +3159,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "styx-dng"
+version = "2.0.0"
+dependencies = [
+ "libm",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "styx-graph"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e#7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e"
 dependencies = [
  "futures-core",
  "libc",
@@ -3413,31 +3176,24 @@ dependencies = [
 ]
 
 [[package]]
-name = "styx-kernel"
+name = "styx-hal"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e#7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e"
 dependencies = [
- "libc",
+ "embedded-hal",
+ "embedded-hal-async",
 ]
 
 [[package]]
-name = "styx-libcamera"
+name = "styx-kernel"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e#7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e"
 dependencies = [
+ "embedded-hal",
  "libc",
- "libcamera",
- "libcamera-sys",
- "smallvec",
- "styx-capture",
- "styx-core-rs",
- "tracing",
 ]
 
 [[package]]
 name = "styx-native"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e#7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e"
 dependencies = [
  "futures-core",
  "libc",
@@ -3450,13 +3206,13 @@ dependencies = [
 [[package]]
 name = "styx-pipeline"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e#7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e"
 dependencies = [
  "bytemuck",
  "serde",
  "serde_json",
  "styx-algo",
  "styx-core-rs",
+ "styx-dng",
  "styx-kernel",
  "styx-native",
  "styx-pisp",
@@ -3468,18 +3224,21 @@ dependencies = [
 [[package]]
 name = "styx-pisp"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e#7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e"
 dependencies = [
  "bytemuck",
+ "libm",
  "styx-kernel",
 ]
 
 [[package]]
 name = "styx-sensor"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e#7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e"
 dependencies = [
+ "embedded-hal",
+ "embedded-hal-async",
+ "libm",
  "serde",
+ "styx-hal",
  "thiserror 2.0.18",
  "toml",
 ]
@@ -3487,8 +3246,8 @@ dependencies = [
 [[package]]
 name = "styx-softisp"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e#7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e"
 dependencies = [
+ "libm",
  "serde",
  "styx-core-rs",
  "thiserror 2.0.18",
@@ -3497,7 +3256,6 @@ dependencies = [
 [[package]]
 name = "styx-v4l2"
 version = "2.0.0"
-source = "git+https://github.com/Prometheus-Dynamics/Styx.git?rev=7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e#7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e"
 dependencies = [
  "libc",
  "smallvec",
@@ -3733,17 +3491,11 @@ dependencies = [
  "indexmap",
  "serde_core",
  "serde_spanned",
- "toml_datetime 1.1.1+spec-1.1.0",
+ "toml_datetime",
  "toml_parser",
  "toml_writer",
- "winnow 1.0.1",
+ "winnow",
 ]
-
-[[package]]
-name = "toml_datetime"
-version = "0.6.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22cddaf88f4fbc13c51aebbf5f8eceb5c7c5a9da2ac40a13519eb5b0a0e8f11c"
 
 [[package]]
 name = "toml_datetime"
@@ -3756,25 +3508,14 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.19.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
-dependencies = [
- "indexmap",
- "toml_datetime 0.6.11",
- "winnow 0.5.40",
-]
-
-[[package]]
-name = "toml_edit"
 version = "0.25.10+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a82418ca169e235e6c399a84e395ab6debeb3bc90edc959bf0f48647c6a32d1b"
 dependencies = [
  "indexmap",
- "toml_datetime 1.1.1+spec-1.1.0",
+ "toml_datetime",
  "toml_parser",
- "winnow 1.0.1",
+ "winnow",
 ]
 
 [[package]]
@@ -3783,7 +3524,7 @@ version = "1.1.2+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2abe9b86193656635d2411dc43050282ca48aa31c2451210f4202550afb7526"
 dependencies = [
- "winnow 1.0.1",
+ "winnow",
 ]
 
 [[package]]
@@ -4578,15 +4319,6 @@ name = "windows_x86_64_msvc"
 version = "0.53.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
-
-[[package]]
-name = "winnow"
-version = "0.5.40"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f593a95398737aeed53e489c785df13f3618e41dbcd6718c6addbf1395aa6876"
-dependencies = [
- "memchr",
-]
 
 [[package]]
 name = "winnow"

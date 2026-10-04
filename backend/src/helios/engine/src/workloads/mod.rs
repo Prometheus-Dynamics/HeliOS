@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use orion::control_plane::{ConfigDecodeError, DesiredState, WorkloadRecord, deserialize_config};
 use serde::Deserialize;
 
-use crate::model::{EngineExecutionRuntime, ExecutionBinding, ExecutionWorkload, GraphRef, PluginRequirement};
+use crate::model::{EngineExecutionRuntime, ExecutionBinding, ExecutionWorkload, FrameRequestOptions, GraphRef, PluginRequirement};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
@@ -42,6 +42,17 @@ enum GraphKind {
 #[serde(deny_unknown_fields)]
 struct BindingConfig {
     resource_id: String,
+    /// Camera frame sources only: which camera of the service to request.
+    #[serde(default)]
+    camera: Option<String>,
+    /// Camera frame sources only: frame size the graph works at (both or neither).
+    #[serde(default)]
+    output_width: Option<u32>,
+    #[serde(default)]
+    output_height: Option<u32>,
+    /// Camera frame sources only: half-size pyramid levels to attach to each frame.
+    #[serde(default)]
+    pyramid: Option<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -119,7 +130,8 @@ fn decode_bindings(record: &WorkloadRecord, decoded: &EngineWorkloadConfig) -> R
     let mut bindings = Vec::new();
     for (input, binding) in &decoded.binding {
         let node_id = bound_nodes.get(&binding.resource_id).cloned().unwrap_or_else(|| record.assigned_node_id.as_ref().map(|node| node.as_str().to_string()).unwrap_or_default());
-        bindings.push(ExecutionBinding { input: input.clone(), resource_id: binding.resource_id.clone(), node_id });
+        let frame_request = decode_frame_request(record, input, binding)?;
+        bindings.push(ExecutionBinding { input: input.clone(), resource_id: binding.resource_id.clone(), node_id, frame_request });
     }
 
     if bindings.is_empty() {
@@ -127,10 +139,26 @@ fn decode_bindings(record: &WorkloadRecord, decoded: &EngineWorkloadConfig) -> R
             input: binding.resource_id.as_str().to_string(),
             resource_id: binding.resource_id.as_str().to_string(),
             node_id: binding.node_id.as_str().to_string(),
+            frame_request: FrameRequestOptions::default(),
         }));
     }
 
     Ok(bindings)
+}
+
+fn decode_frame_request(record: &WorkloadRecord, input: &str, binding: &BindingConfig) -> Result<FrameRequestOptions, WorkloadDecodeError> {
+    let output_resolution = match (binding.output_width, binding.output_height) {
+        (None, None) => None,
+        (Some(width), Some(height)) if width > 0 && height > 0 => Some((width, height)),
+        _ => {
+            return Err(WorkloadDecodeError::InvalidField {
+                workload_id: record.workload_id.as_str().to_string(),
+                field: format!("binding.{input}.output_width"),
+                message: "output_width and output_height must both be set and non-zero".into(),
+            });
+        }
+    };
+    Ok(FrameRequestOptions { camera: binding.camera.clone().filter(|camera| !camera.is_empty()), output_resolution, pyramid_levels: binding.pyramid.filter(|levels| *levels > 0) })
 }
 
 fn decode_plugin_requirements(decoded: &EngineWorkloadConfig) -> Vec<PluginRequirement> {
@@ -204,6 +232,36 @@ mod tests {
         assert_eq!(decoded.bindings.len(), 2);
         assert!(decoded.bindings.iter().any(|binding| binding.input == "camera" && binding.resource_id == "resource.camera" && binding.node_id == NODE_ID));
         assert!(decoded.bindings.iter().any(|binding| binding.input == "depth" && binding.resource_id == "resource.depth" && binding.node_id == NODE_ID));
+    }
+
+    #[test]
+    fn decode_assigned_workload_reads_frame_request_options() {
+        let record = WorkloadRecord::builder(WorkloadId::new("workload.frames"), EngineExecutionRuntime::runtime_type(), ArtifactId::new("artifact.frames"))
+            .desired_state(DesiredState::Running)
+            .assigned_to(NODE_ID)
+            .config(
+                WorkloadConfig::new("schema.exec")
+                    .field("graph.kind", TypedConfigValue::String("inline".into()))
+                    .field("graph.inline", TypedConfigValue::String("{}".into()))
+                    .field("binding.frame.resource_id", TypedConfigValue::String("camera.front".into()))
+                    .field("binding.frame.camera", TypedConfigValue::String("front".into()))
+                    .field("binding.frame.output_width", TypedConfigValue::Int(640))
+                    .field("binding.frame.output_height", TypedConfigValue::Int(480)),
+            )
+            .build();
+
+        let decoded = decode_assigned_workload(&record, NODE_ID).expect("decode");
+        assert_eq!(decoded.graph_ref, GraphRef::InlineSpec("{}".into()));
+        assert_eq!(decoded.bindings[0].frame_request, FrameRequestOptions { camera: Some("front".into()), output_resolution: Some((640, 480)), pyramid_levels: None });
+
+        let half = WorkloadRecord::builder(WorkloadId::new("workload.half"), EngineExecutionRuntime::runtime_type(), ArtifactId::new("artifact.half"))
+            .desired_state(DesiredState::Running)
+            .assigned_to(NODE_ID)
+            .config(
+                WorkloadConfig::new("schema.exec").field("binding.frame.resource_id", TypedConfigValue::String("camera.front".into())).field("binding.frame.output_width", TypedConfigValue::Int(640)),
+            )
+            .build();
+        assert!(matches!(decode_assigned_workload(&half, NODE_ID), Err(WorkloadDecodeError::InvalidField { .. })));
     }
 
     #[test]

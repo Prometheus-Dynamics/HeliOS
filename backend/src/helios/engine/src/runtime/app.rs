@@ -244,13 +244,7 @@ impl EngineApp {
             }
         };
         let loaded_plugins = plugins.builtins.iter().cloned().chain(plugins.libraries.iter().map(|plugin| plugin.metadata().clone())).collect::<Vec<_>>();
-        let mut execution = execution_sessions.tick_workloads(
-            &self.config,
-            &ExecutionPlugins { registry: &plugins.registry, host_manager: &plugins.host_manager, loaded_plugins: &loaded_plugins },
-            &decoded.runnable,
-            state_snapshot,
-            observed_at_ms,
-        );
+        let mut execution = execution_sessions.tick_workloads(&ExecutionPlugins { registry: &plugins.registry, loaded_plugins: &loaded_plugins }, &decoded.runnable, state_snapshot, observed_at_ms);
         execution.sessions.extend(decoded.decode_failures);
         let snapshot = EngineSnapshot {
             node_id: self.config.node_id.clone(),

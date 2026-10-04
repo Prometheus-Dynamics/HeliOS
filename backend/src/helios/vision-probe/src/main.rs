@@ -36,10 +36,15 @@ struct Args {
     frames: usize,
     camera: Option<String>,
     save: Option<PathBuf>,
+    /// Time the stages directly every 30th frame (adds CPU; off for clean
+    /// process measurements).
+    stage_sampling: bool,
+    /// Ask the ISP for a half-size luma companion (the downscale node uses it).
+    pyramid: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
-    let mut args = Args { dictionary: "4x4_50".into(), size: (1280, 800), fps: 30, frames: 300, camera: None, save: None };
+    let mut args = Args { dictionary: "4x4_50".into(), size: (1280, 800), fps: 30, frames: 300, camera: None, save: None, stage_sampling: true, pyramid: true };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
         let mut value = || it.next().ok_or_else(|| format!("{flag} needs a value"));
@@ -54,7 +59,11 @@ fn parse_args() -> Result<Args, String> {
             "--frames" => args.frames = value()?.parse().map_err(|_| "bad --frames")?,
             "--camera" => args.camera = Some(value()?),
             "--save" => args.save = Some(PathBuf::from(value()?)),
-            "-h" | "--help" => return Err("usage: helios-vision-probe [--dict 4x4_50|36h11] [--size WxH] [--fps N] [--frames N] [--camera NAME] [--save DIR]".into()),
+            "--no-stage-sampling" => args.stage_sampling = false,
+            "--no-pyramid" => args.pyramid = false,
+            "-h" | "--help" => {
+                return Err("usage: helios-vision-probe [--dict 4x4_50|36h11] [--size WxH] [--fps N] [--frames N] [--camera NAME] [--save DIR] [--no-stage-sampling] [--no-pyramid]".into());
+            }
             other => return Err(format!("unknown argument {other}")),
         }
     }
@@ -84,6 +93,7 @@ struct Stats {
     with_markers: usize,
     tick_total: Duration,
     tick_max: Duration,
+    ticks_ms: Vec<f64>,
     ids: std::collections::BTreeMap<String, usize>,
     stage_samples: usize,
     stage_total: [Duration; 4],
@@ -121,8 +131,12 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let filter = filter.to_lowercase();
         cameras.retain(|c| std::iter::once(&c.identity.display).chain(&c.identity.keys).any(|k| k.to_lowercase().contains(&filter)));
     }
-    let wants = FrameRequirements::luma().output_resolution(args.size.0, args.size.1).min_fps(args.fps).priority(Priority::Power);
-    let plan = styx::planner::plan_best(&cameras, &wants)?;
+    let mut wants = Frames::gray().size(args.size.0, args.size.1).fps(args.fps).latest();
+    if args.pyramid {
+        wants = wants.pyramid(1);
+    }
+    let plan = wants.plan_best(&cameras)?;
+    println!("delivered: {:?}", plan.delivered());
     print!("{plan}");
     let mut frames = plan.start()?;
 
@@ -130,6 +144,7 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let decode_config = DecodeConfig { dictionary, ..DecodeConfig::default() };
     let mut stats = Stats::default();
     let started = Instant::now();
+    let process_at_start = ProcessSample::read();
     let mut last_report = Instant::now();
     let mut last_ids = String::new();
 
@@ -140,7 +155,7 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         };
         stats.frames += 1;
         let first_or_last = stats.frames == 1 || stats.frames == args.frames;
-        let sample_stages = stats.frames % 30 == 1;
+        let sample_stages = args.stage_sampling && stats.frames % 30 == 1;
         let gray = if first_or_last || sample_stages { Some(framelease_to_gray(&frame)?.0) } else { None };
 
         let bytes = frame.payload_bytes() as u64;
@@ -152,6 +167,7 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let tick = tick_started.elapsed();
         stats.tick_total += tick;
         stats.tick_max = stats.tick_max.max(tick);
+        stats.ticks_ms.push(tick.as_secs_f64() * 1e3);
         let markers: MarkerList = host.take(MARKERS_OUTPUT).unwrap_or_default();
         if !markers.markers.is_empty() {
             stats.with_markers += 1;
@@ -178,7 +194,7 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 let t1 = Instant::now();
                 let quads = scale_quads(&find_quads(&binary, &QuadConfig::default()), 2.0);
                 let t2 = Instant::now();
-                let _ = aruco::decode_quads(gray, &quads, &decode_config);
+                let _ = aruco::decode_quads(gray.view(), &quads, &decode_config);
                 let t3 = Instant::now();
                 stats.stage_samples += 1;
                 stats.stage_total[0] += t1 - t0;
@@ -196,6 +212,8 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 
     let elapsed = started.elapsed().as_secs_f64();
+    let process = ProcessSample::read();
+    let cpu_seconds = process.cpu_seconds - process_at_start.cpu_seconds;
     let samples = stats.stage_samples.max(1) as f64;
     let ms = |d: Duration| d.as_secs_f64() * 1e3 / samples;
     let summary = serde_json::json!({
@@ -204,6 +222,14 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "frames_with_markers": stats.with_markers,
         "tick_ms_avg": stats.tick_total.as_secs_f64() * 1e3 / stats.frames.max(1) as f64,
         "tick_ms_max": stats.tick_max.as_secs_f64() * 1e3,
+        "tick_ms_percentiles": percentiles(&mut stats.ticks_ms),
+        "process": {
+            "cpu_percent_of_one_core": 100.0 * cpu_seconds / elapsed,
+            "cpu_ms_per_frame": cpu_seconds * 1e3 / stats.frames.max(1) as f64,
+            "rss_mib": process.rss_kib as f64 / 1024.0,
+            "peak_rss_mib": process.peak_rss_kib as f64 / 1024.0,
+            "threads": process.threads,
+        },
         "stage_ms_avg": {
             "threshold": ms(stats.stage_total[0]),
             "find_quads": ms(stats.stage_total[1]),
@@ -214,6 +240,35 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     });
     println!("summary {summary}");
     Ok(())
+}
+
+/// p50/p90/p95/p99 of the given samples (sorted in place).
+fn percentiles(values: &mut [f64]) -> serde_json::Value {
+    values.sort_by(f64::total_cmp);
+    let at = |q: f64| values.get(((values.len() as f64 - 1.0) * q).round() as usize).copied().unwrap_or(0.0);
+    serde_json::json!({ "p50": at(0.50), "p90": at(0.90), "p95": at(0.95), "p99": at(0.99) })
+}
+
+/// CPU time, memory and threads of this process from /proc.
+struct ProcessSample {
+    cpu_seconds: f64,
+    rss_kib: u64,
+    peak_rss_kib: u64,
+    threads: u64,
+}
+
+impl ProcessSample {
+    fn read() -> Self {
+        let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+        let field = |name: &str| status.lines().find_map(|line| line.strip_prefix(name)).and_then(|rest| rest.split_whitespace().next()).and_then(|v| v.parse().ok()).unwrap_or(0);
+        // utime and stime are fields 14 and 15, after the parenthesised command name.
+        let stat = std::fs::read_to_string("/proc/self/stat").unwrap_or_default();
+        let after_comm = stat.rsplit_once(')').map(|(_, rest)| rest).unwrap_or("");
+        let fields: Vec<&str> = after_comm.split_whitespace().collect();
+        let ticks = |i: usize| fields.get(i).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+        const CLOCK_TICKS_PER_SECOND: f64 = 100.0;
+        Self { cpu_seconds: (ticks(11) + ticks(12)) as f64 / CLOCK_TICKS_PER_SECOND, rss_kib: field("VmRSS:"), peak_rss_kib: field("VmHWM:"), threads: field("Threads:") }
+    }
 }
 
 fn markers_json(markers: &MarkerList) -> serde_json::Value {

@@ -1,7 +1,9 @@
 //! Sub-pixel corner refinement for dark quads on a light background.
 
 use crate::geometry::{Point, distance};
+#[cfg(test)]
 use crate::image::GrayImage;
+use crate::image::GrayView;
 
 /// Edge search radius as a fraction of the side length, for the first pass.
 /// Polygon approximation can cut a corner by several percent of the side;
@@ -21,12 +23,12 @@ const POLISH_RADIUS: f32 = 1.5;
 /// `None` when an edge is too weak or the result moves too far, in which
 /// case the coarse corners should be kept. A wide first pass recovers cut
 /// corners, a narrow second pass polishes the fit.
-pub fn refine_corners(gray: &GrayImage, corners: [Point; 4]) -> Option<[Point; 4]> {
+pub fn refine_corners(gray: GrayView<'_>, corners: [Point; 4]) -> Option<[Point; 4]> {
     let first = refine_pass(gray, corners, None)?;
     Some(refine_pass(gray, first, Some(POLISH_RADIUS)).unwrap_or(first))
 }
 
-fn refine_pass(gray: &GrayImage, corners: [Point; 4], radius: Option<f32>) -> Option<[Point; 4]> {
+fn refine_pass(gray: GrayView<'_>, corners: [Point; 4], radius: Option<f32>) -> Option<[Point; 4]> {
     let mut max_radius = 0.0f32;
     let centre = [corners.iter().map(|c| c[0]).sum::<f32>() / 4.0, corners.iter().map(|c| c[1]).sum::<f32>() / 4.0];
     let mut lines = [([0.0f32; 2], [0.0f32; 2]); 4];
@@ -70,7 +72,7 @@ fn refine_pass(gray: &GrayImage, corners: [Point; 4], radius: Option<f32>) -> Op
 
 /// Signed distance along `normal` from `p` to the strongest dark-to-light
 /// step within `radius`, with parabolic sub-sample interpolation.
-fn edge_offset(gray: &GrayImage, p: Point, normal: Point, radius: f32) -> Option<f32> {
+fn edge_offset(gray: GrayView<'_>, p: Point, normal: Point, radius: f32) -> Option<f32> {
     const STEP: f32 = 0.5;
     const MIN_STEP: f32 = 4.0;
     let n = (2.0 * radius / STEP) as usize + 1;
@@ -134,7 +136,7 @@ mod tests {
             }
         }
         let coarse = [[21.2, 18.9], [58.4, 20.8], [60.7, 58.6], [18.8, 60.3]];
-        let refined = refine_corners(&gray, coarse).unwrap();
+        let refined = refine_corners(gray.view(), coarse).unwrap();
         for (corner, expected) in refined.iter().zip([[19.5, 19.5], [59.5, 19.5], [59.5, 59.5], [19.5, 59.5]]) {
             assert!(distance(*corner, expected) < 0.25, "{corner:?} vs {expected:?}");
         }
@@ -150,13 +152,13 @@ mod tests {
         }
         // Corner 1 cut 10 px short along the top edge.
         let coarse = [[19.5, 19.5], [129.5, 19.5], [139.5, 139.5], [19.5, 139.5]];
-        let refined = refine_corners(&gray, coarse).unwrap();
+        let refined = refine_corners(gray.view(), coarse).unwrap();
         assert!(distance(refined[1], [139.5, 19.5]) < 0.3, "{:?}", refined[1]);
     }
 
     #[test]
     fn flat_image_does_not_refine() {
         let gray = GrayImage::filled(80, 80, 128);
-        assert!(refine_corners(&gray, [[20.0, 20.0], [60.0, 20.0], [60.0, 60.0], [20.0, 60.0]]).is_none());
+        assert!(refine_corners(gray.view(), [[20.0, 20.0], [60.0, 20.0], [60.0, 60.0], [20.0, 60.0]]).is_none());
     }
 }

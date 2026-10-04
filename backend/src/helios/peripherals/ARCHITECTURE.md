@@ -2,14 +2,14 @@
 
 `helios-peripherals` is the Orion provider that projects local hardware into
 stable Orion resources, realizes leased desired hardware actions against Lemnos
-and Styx, and publishes local camera stream resources for API/frontend use.
+and Styx, and serves local cameras to other processes through Styx.
 
 It should only do five things:
 
 - provide canonical local `resources`
 - consume Orion `workloads` and leases
 - publish provider/resource/state updates back into Orion
-- publish camera preview/stream resources produced from local Styx capture
+- serve local cameras through Styx `CameraService`s and advertise their sockets
 - run the local reconciliation loop
 
 It should not be:
@@ -44,8 +44,8 @@ Peripherals owns:
 - workload decoding and lease validation
 - local reconcile/apply
 - observed state publication
-- local camera capture publisher lifecycle
-- Orion stream resource records and stream channels that API can expose
+- local camera service lifecycle (one Styx `CameraService` per camera)
+- the `styx-frames+unix` endpoint on each camera resource
 
 Engine owns:
 - Daedalus graph execution
@@ -67,10 +67,14 @@ src/
 ## Current State
 
 - resource ids use Orion ids directly; old local id wrappers are gone.
-- camera stream publication remains inside peripherals so frontend/API can
-  consume stream resources without making engine or API own camera capture.
-- camera stream resources expose a `styx-frame-lease+unix` endpoint for
-  zero-copy-ish FD handoff and an `mjpeg+unix` preview endpoint for display.
+- each camera is served by a Styx `CameraService` owned by peripherals, so
+  engine and API read frames without owning camera capture. Services start and
+  stop with hotplug refreshes; a camera pauses after
+  `HELIOS_CAMERA_IDLE_PAUSE_MS` (default 2000) without a reading client.
+- the `camera.device` resource advertises its service socket as
+  `styx-frames+unix://<stream_dir>/<resource id>.styx.sock` (absolute path);
+  consumers connect with a Styx `FrameClient`. There is no derived
+  `stream.channel` resource and no MJPEG preview socket.
 - resource action workloads reconcile against Orion leases before touching
   hardware.
 - direct frontend API exposure should go through API/orchestrated resources, not

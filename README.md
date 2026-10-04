@@ -21,10 +21,10 @@ For the concrete rules and code-level references, see `AGENTS.md`.
 
 ## Requirements
 
-- Rust `1.94.1`, Cargo and `cross` installed.
+- Rust `1.97.1`, Cargo and `cross` installed.
 - Node `22.20.0`.
 - Bun `1.2.9`.
-- Standard native build packages: `pkg-config`, `libcamera-devel`, `turbojpeg-devel`, `nasm`, `cmake`, `ffmpeg-devel`.
+- Standard native build packages: `pkg-config`, `turbojpeg-devel`, `nasm`, `cmake`. Cameras go through Styx alone, so neither libcamera nor FFmpeg is needed.
 - Docker or Podman for the `cross` container build stage.
 - Enough disk space for Gaia Buildroot caches (`gaia/build`) and final images (`gaia/output`).
 
@@ -33,8 +33,8 @@ For the concrete rules and code-level references, see `AGENTS.md`.
 Use the pinned local toolchains before running repo validation:
 
 ```bash
-rustup toolchain install 1.94.1
-rustup default 1.94.1
+rustup toolchain install 1.97.1
+rustup default 1.97.1
 nvm install 22.20.0
 nvm use 22.20.0
 bun install --cwd frontend

@@ -65,30 +65,70 @@ A frame is a Styx `FrameLease` from capture to the last node that reads it.
   `styx:framelease` (`Residency::External` for dmabuf). The type is
   registered once with a structured descriptor (`FrameMeta`) and a value
   serializer, so it can be inspected.
-- CPU vision reads the luma plane in place (`FrameLease::luma_rows`). An
-  `#[adapt]` adapter provides the `GrayView` input that CPU nodes take, so
-  graphs never contain conversion nodes.
+- Nodes that need full-resolution pixels take the frame itself and read its
+  luma plane in place (`helios_vision::plugin::luma_view`, a strided view of
+  plane 0). Styx maps frames CPU-cached and syncs once per frame, so in-place
+  reads cost the same as heap memory. Engines request frames with
+  `Frames::gray().pyramid(1)`: the PiSP back end's second output adds a
+  half-size luma companion, which `vision.downscale` uses instead of a CPU
+  downscale. The `helios.vision.framelease_to_gray` adapter (one copy into
+  `helios:gray8`) remains for nodes that need an owned image.
 - No decoded image types (`DynamicImage`, RGB buffers) cross a process or
   graph boundary.
 
 ## Vision workloads
 
-A vision pipeline is a node-group of real stages, so per-stage timings show
-where time goes. ArUco:
+A vision pipeline is a graph of real stages, so per-stage timings show
+where time goes. The ArUco graph (`helios_vision::graphs::aruco_graph_document`,
+golden copies in `backend/src/helios/vision/graphs/`):
+
+```text
+frame ─┬─> vision.downscale ─> vision.adaptive_threshold ─> vision.find_quads ─┐
+       └───────────────────────────────────────────────────────────> aruco.decode ─> markers
+```
 
 | Node | Input | Output |
 |---|---|---|
-| `vision.adaptive_threshold` | `GrayView` (luma) | `BinaryImage` |
-| `vision.find_quads` | `BinaryImage` | `Vec<Quad>` |
-| `aruco.decode` | `GrayView`, `Vec<Quad>`, config | `Vec<Marker>` |
-| `aruco.detect` | node-group of the three above | `Vec<Marker>` |
+| `vision.downscale` | frame (ISP half-size companion when present), factor (default 2) | `helios:gray8` |
+| `vision.adaptive_threshold` | `helios:gray8`, window, offset | `helios:binary` |
+| `vision.find_quads` | `helios:binary`, perimeter limits | `helios:quads` (with the image size they were found in) |
+| `aruco.decode` | frame (full-size luma in place), `helios:quads`, dictionary | `helios:aruco_markers` |
 
-Results (`Marker { id, corners, hamming }`) are structured `TypeExpr`s with
-stable keys, so they are inspectable and serializable without extra glue.
+Quads are searched on the half-size image and decoded on the full frame:
+`aruco.decode` rescales the corners, refines them onto the sub-pixel marker
+edges (line fits along each side) and samples the bit cells. Dictionaries:
+`4x4_50` (OpenCV `DICT_4X4_50`) and `36h11` (AprilTag, FRC fields).
 
-Nodes live in `helios-vision`, built as a Daedalus dylib plugin that the
-engine loads from its plugin directories, and as an rlib for tests and
-tools.
+Results (`MarkerList { markers: [MarkerValue { dictionary, id, corners,
+center, hamming }] }`) are structured `TypeExpr`s with stable keys, so they
+are inspectable and serializable without extra glue.
+
+Nodes live in `helios-vision`, built as a Daedalus dylib plugin
+(`--features dylib`) that the engine loads from its plugin directories, and
+as an rlib for tests and tools (`helios-vision-probe`, examples).
+
+### Measured (CM5, OV9782 1280x800 at 60 fps, one thread)
+
+Live graph tick through the probe, empty scene:
+
+| Step | p50 | p99 | Process CPU |
+|---|---:|---:|---:|
+| First version | 5.19 ms | 5.56 ms | 33% of a core |
+| Faster ops, `opt-level = 3` | 1.58 ms | 2.00 ms | 11% |
+| Frame read in place (no luma copies) | 1.43 ms | 1.78 ms | 12% |
+| ISP half-size companion | 1.28 ms | 1.56 ms | 12% |
+
+Detection runs on one thread; the process has three more, Styx's capture
+threads, which are nearly idle. RSS is about 21 MiB.
+
+Fat LTO optimises the whole program at the final binary's opt-level, so a
+per-crate override does not reach vision code linked into a size-optimised
+binary. Binaries that run vision (the engine, the probe) are built with
+`opt-level = 3`; at `"z"` the same detector takes twice as long.
+
+On real OV9782 frames with composited markers the detector finds what
+OpenCV finds (54 vs 55 of 60, no false positives) with corners within
+0.2 px (median) of OpenCV's sub-pixel corners.
 
 ## Device contract
 

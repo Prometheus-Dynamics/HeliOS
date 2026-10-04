@@ -118,12 +118,14 @@ tar = "0.4.44"
 tempfile = "3.27.0"
 
 # External repos
-daedalus = { package = "daedalus-rs", version = "2.0.0", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "ac5fd56b33fb002902b4ba9964a5ed542bdffd21" }
-daedalus-data = { version = "2.0.0", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "ac5fd56b33fb002902b4ba9964a5ed542bdffd21" }
-daedalus-macros = { version = "2.0.0", git = "https://github.com/Prometheus-Dynamics/Daedalus.git", rev = "ac5fd56b33fb002902b4ba9964a5ed542bdffd21" }
-lemnos = { git = "https://github.com/Prometheus-Dynamics/Lemnos.git", rev = "0e706c0b8371a3c9c32e92ff4e21344e4a4d765a", default-features = false }
-orion = { git = "https://github.com/Prometheus-Dynamics/Orion.git", rev = "59f91ed97681bd0421f9d32bed82be21b2786642", default-features = false }
-styx = { version = "2.0.0", git = "https://github.com/Prometheus-Dynamics/Styx.git", rev = "7a722d09b59d7d4ba88cdd4ab4b01e05fcf8566e", default-features = false }
+# Prometheus Dynamics crates are pinned to sibling checkouts while the
+# stack is integrated locally; switch back to git revs before release.
+daedalus = { package = "daedalus-rs", version = "2.0.0", path = "../../Daedalus/crates/daedalus" }
+daedalus-data = { version = "2.0.0", path = "../../Daedalus/crates/data" }
+daedalus-macros = { version = "2.0.0", path = "../../Daedalus/crates/macros" }
+lemnos = { path = "../../lemnos/crates/lemnos", default-features = false }
+orion = { path = "../../Orion/crates/orion", default-features = false }
+styx = { version = "2.0.0", path = "../../Styx/crates/styx", default-features = false }
 
 [profile.release]
 opt-level = "z"
@@ -131,6 +133,18 @@ lto = "fat"
 codegen-units = 1
 strip = "symbols"
 panic = "unwind"
+
+# Services are built for size; binaries that run vision per frame are built
+# for speed. Fat LTO optimises the whole program at the final binary's level,
+# so the override must be on the binary, not only on helios-vision.
+[profile.release.package.helios-vision]
+opt-level = 3
+
+[profile.release.package.helios-engine]
+opt-level = 3
+
+[profile.release.package.helios-vision-probe]
+opt-level = 3
 
 [profile.dev]
 opt-level = 0

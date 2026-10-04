@@ -34,7 +34,7 @@ fn main() {
             let b = Instant::now();
             let quads = scale_quads(&find_quads(&binary, &QuadConfig::default()), decimate as f32);
             let c = Instant::now();
-            found = aruco::decode_quads(&scene, &quads, &decode).len();
+            found = aruco::decode_quads(scene.view(), &quads, &decode).len();
             let d = Instant::now();
             t_th += (b - a).as_secs_f64();
             t_q += (c - b).as_secs_f64();

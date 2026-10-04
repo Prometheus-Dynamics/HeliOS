@@ -43,6 +43,7 @@ too.
 
 ## HeliOS backend
 
+- [ ] MJPEG camera preview: serve from helios-api as a Styx FrameClient + codec consumer of the peripherals CameraService.
 - [ ] Peripherals: move to the Lemnos APIs (async hotplug instead of the 250 ms poll, bind policy, typed errors, `Value::flatten_labels`, mock hwmon in tests).
 - [ ] Peripherals and engine: replace the duplicated FrameLease socket transport with Orion's `UnixFdLatestServer`/`Client`; drop the per-frame metadata file write; use `ResourceEndpoint::Custom` for `styx-frame-lease+unix`.
 - [ ] Engine: graphs as Daedalus `GraphDocument`, host port introspection, `inspect_payload`, input-driven `drive` instead of the 250 ms tick, and a stable FrameLease `TypeExpr` with an inspection path.

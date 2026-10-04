@@ -195,7 +195,7 @@ fn resource_from_lemnos(context: &DiscoveryContext, device: &DeviceDescriptor, s
         _ => return Ok(None),
     };
 
-    let local = device.local_id.as_ref().map(|value| value.as_str()).or_else(|| device.display_name.as_deref()).unwrap_or_else(|| device.id.as_str());
+    let local = device.local_id.as_ref().map(|value| value.as_str()).or(device.display_name.as_deref()).unwrap_or_else(|| device.id.as_str());
 
     let display_name = device.display_name.clone().unwrap_or_else(|| device.id.as_str().to_string());
     let mut builder = ResourceBuilder::new(context.local_node_id.clone(), kind, sanitize_local_component(local), display_name)

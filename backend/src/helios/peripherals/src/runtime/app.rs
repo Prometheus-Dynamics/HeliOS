@@ -12,34 +12,26 @@ use orion::{
 };
 use serde::Deserialize;
 use styx::watch::{CompositeWatcher, LinuxVideoFsWatcher, WatchRuntime};
-use styx::{
-    BackendHandle, BackendKind, ProbedBackend, ProbedDevice,
-    core::buffer::FrameLease,
-    prelude::{CaptureHandle, CaptureRequest, CaptureStartPolicy, RecvOutcome, StyxConfig},
-    probe_all_with_errors,
-};
 use tokio::{
     signal,
     sync::{Notify, mpsc},
     task::JoinHandle,
-    time::{Duration, sleep, timeout},
+    time::{Duration, sleep},
 };
-use tracing::{info, warn};
+use tracing::warn;
 
 use crate::{
     config::PeripheralConfig,
     model::{
         GpioControl, GpioControlRequest, GpioDirection, I2cControl, I2cControlRequest, NodeId, PwmControl, PwmControlRequest, ResourceControlRequest, ResourceDescriptor, SpiControl, SpiControlRequest,
     },
-    provider::streams::PeripheralStreamWriter,
-    provider::{OrionPeripheralPublisher, OrionPublishError, ResourceActionFeedback},
+    provider::{CameraServices, OrionPeripheralPublisher, OrionPublishError, ResourceActionFeedback},
     resources::{DiscoverySnapshot, LemnosPeripheralStack, PeripheralInventoryService},
     workloads::{PeripheralManager, ResourceControlError},
 };
 
 const PERIPHERAL_RESOURCE_ACTION_RUNTIME_TYPE: &str = "helios.peripheral.resource_action.v1";
 const PROVIDER_EVENT_RETRY_DELAY: Duration = Duration::from_millis(200);
-const DEFAULT_CAPTURE_QUEUE_DEPTH: usize = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ResourceActionSpec {
@@ -151,7 +143,7 @@ impl RefreshHandle {
 enum RuntimeEvent {
     RefreshRequested,
     LeaseUpdate(Vec<LeaseRecord>),
-    DesiredStateSnapshot(StateSnapshot),
+    DesiredStateSnapshot(Box<StateSnapshot>),
     ProviderWatchStopped(ClientError),
     RefreshWatchStopped(String),
 }
@@ -171,6 +163,7 @@ pub struct PeripheralRuntime {
 #[derive(Default)]
 struct RuntimeState {
     resource_action_feedback: BTreeMap<String, ResourceActionFeedback>,
+    camera_services: CameraServices,
 }
 
 impl PeripheralRuntime {
@@ -258,8 +251,7 @@ impl PeripheralRuntime {
         };
         let mut state = RuntimeState::default();
         let mut current_snapshot = self.refresh_inventory_with_state(&current_leases, &state).await?;
-        let mut capture_stream_publishers = BTreeMap::<String, JoinHandle<()>>::new();
-        self.sync_capture_stream_publishers(&current_snapshot, &mut capture_stream_publishers);
+        state.camera_services.sync(&self.config, &current_snapshot.resources);
         let mut current_state_snapshot = match next_provider_event_retrying(&mut provider_subscription).await? {
             LocalProviderEvent::BootstrapStateSnapshot(snapshot) | LocalProviderEvent::StateSnapshot { snapshot, .. } => {
                 self.reconcile_controls(&current_snapshot, &snapshot, &mut state)?;
@@ -278,15 +270,12 @@ impl PeripheralRuntime {
 
         loop {
             tokio::select! {
-                _ = signal::ctrl_c() => {
-                    abort_capture_stream_publishers(&mut capture_stream_publishers);
-                    return Ok(());
-                }
+                _ = signal::ctrl_c() => return Ok(()),
                 maybe_event = event_rx.recv() => {
                     match maybe_event {
                         Some(RuntimeEvent::RefreshRequested) => {
                             current_snapshot = self.refresh_inventory_with_state(&current_leases, &state).await?;
-                            self.sync_capture_stream_publishers(&current_snapshot, &mut capture_stream_publishers);
+                            state.camera_services.sync(&self.config, &current_snapshot.resources);
                             if let Some(snapshot) = current_state_snapshot.as_ref() {
                                 self.reconcile_controls(&current_snapshot, snapshot, &mut state)?;
                                 self.publish_snapshot(&current_snapshot, &current_leases, &state).await?;
@@ -303,7 +292,7 @@ impl PeripheralRuntime {
                         Some(RuntimeEvent::DesiredStateSnapshot(snapshot)) => {
                             self.reconcile_controls(&current_snapshot, &snapshot, &mut state)?;
                             self.publish_snapshot(&current_snapshot, &current_leases, &state).await?;
-                            current_state_snapshot = Some(snapshot);
+                            current_state_snapshot = Some(*snapshot);
                         }
                         Some(RuntimeEvent::ProviderWatchStopped(error)) => warn!(node_id = %self.config.node_id, error = %error, "provider watch stopped"),
                         Some(RuntimeEvent::RefreshWatchStopped(error)) => warn!(node_id = %self.config.node_id, error = %error, "refresh watch stopped"),
@@ -369,27 +358,6 @@ impl PeripheralRuntime {
             state.resource_action_feedback.insert(resource.id.as_str().to_string(), feedback);
         }
         Ok(())
-    }
-
-    fn sync_capture_stream_publishers(&self, snapshot: &DiscoverySnapshot, publishers: &mut BTreeMap<String, JoinHandle<()>>) {
-        let wanted = snapshot.resources.iter().filter(|resource| should_publish_capture_channel(resource)).map(|resource| resource.id.as_str().to_string()).collect::<BTreeSet<_>>();
-        publishers.retain(|resource_id, handle| {
-            if wanted.contains(resource_id) {
-                true
-            } else {
-                handle.abort();
-                false
-            }
-        });
-        for resource in snapshot.resources.iter().filter(|resource| should_publish_capture_channel(resource)) {
-            if publishers.contains_key(resource.id.as_str()) {
-                continue;
-            }
-            let Some(stream_path) = self.publisher.derived_channel_path(resource) else {
-                continue;
-            };
-            publishers.insert(resource.id.as_str().to_string(), spawn_capture_stream_publisher(self.config.node_id.clone(), resource.clone(), stream_path));
-        }
     }
 
     fn spawn_lemnos_hotplug_task(&self, event_tx: mpsc::UnboundedSender<RuntimeEvent>) -> Option<JoinHandle<()>> {
@@ -466,7 +434,7 @@ async fn watch_provider_updates(mut subscription: orion::client::LocalProviderSu
                 }
             }
             LocalProviderEvent::BootstrapStateSnapshot(snapshot) | LocalProviderEvent::StateSnapshot { snapshot, .. } => {
-                if event_tx.send(RuntimeEvent::DesiredStateSnapshot(snapshot)).is_err() {
+                if event_tx.send(RuntimeEvent::DesiredStateSnapshot(Box::new(snapshot))).is_err() {
                     return Ok(());
                 }
             }
@@ -484,288 +452,6 @@ async fn next_provider_event_retrying(subscription: &mut orion::client::LocalPro
             Err(error) => return Err(error),
         }
     }
-}
-
-const CAPTURE_SESSION_RETRY_DELAY: Duration = Duration::from_millis(200);
-const CAPTURE_SESSION_FIRST_FRAME_TIMEOUT: Duration = Duration::from_millis(1500);
-const CAPTURE_STYX_METRICS_INTERVAL_FRAMES: u64 = 30;
-
-fn spawn_capture_stream_publisher(node_id: String, resource: ResourceDescriptor, stream_path: PathBuf) -> JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut writer = match PeripheralStreamWriter::create_capture_channel(&stream_path, &node_id, &resource) {
-            Ok(writer) => writer,
-            Err(error) => {
-                warn!(resource_id = resource.id.as_str(), path = %stream_path.display(), error = %error, "failed to create capture stream publisher");
-                return;
-            }
-        };
-        let mut sequence = 0_u64;
-        let mut published_frame = false;
-        loop {
-            match start_capture_stream_session(&resource).await {
-                Ok((handle, first_frame)) => {
-                    if let Err(error) = publish_captured_frame(&mut writer, &resource, &stream_path, &mut sequence, &first_frame) {
-                        warn!(resource_id = resource.id.as_str(), error = %error, "failed to publish first capture frame");
-                    } else {
-                        published_frame = true;
-                        log_capture_styx_metrics(&handle, &resource, sequence);
-                    }
-                    drop(first_frame);
-
-                    let handle = handle;
-                    loop {
-                        match handle.recv_async().await {
-                            RecvOutcome::Data(frame) => {
-                                if let Err(error) = publish_captured_frame(&mut writer, &resource, &stream_path, &mut sequence, &frame) {
-                                    warn!(resource_id = resource.id.as_str(), error = %error, "failed to publish capture stream frame");
-                                } else {
-                                    published_frame = true;
-                                    log_capture_styx_metrics(&handle, &resource, sequence);
-                                }
-                            }
-                            RecvOutcome::Empty => continue,
-                            RecvOutcome::Closed => {
-                                warn!(resource_id = resource.id.as_str(), "capture stream closed; restarting session");
-                                break;
-                            }
-                        }
-                    }
-                }
-                Err(error) => {
-                    sequence += 1;
-                    let produced_at_ms = chrono::Utc::now().timestamp_millis().max(0) as u64;
-                    warn!(resource_id = resource.id.as_str(), error = %error, "failed to start persistent capture session");
-                    if !published_frame && let Err(error) = writer.publish_capture_heartbeat(&resource, sequence, produced_at_ms) {
-                        warn!(resource_id = resource.id.as_str(), path = %stream_path.display(), error = %error, "failed to publish capture stream heartbeat");
-                    }
-                }
-            }
-            sleep(CAPTURE_SESSION_RETRY_DELAY).await;
-        }
-    })
-}
-
-fn log_capture_styx_metrics(handle: &CaptureHandle, resource: &ResourceDescriptor, sequence: u64) {
-    if sequence == 0 || sequence % CAPTURE_STYX_METRICS_INTERVAL_FRAMES != 0 {
-        return;
-    }
-
-    let health = handle.health_report();
-    let memory = handle.memory_stats();
-    let runtime_memory = handle.runtime_memory_report();
-    let capture = handle.metrics().snapshot();
-    let external_current_buffers = memory.external_backings.iter().map(|stats| stats.current_buffers).sum::<u64>();
-    let external_current_bytes = memory.external_backings.iter().map(|stats| stats.current_bytes).sum::<u64>();
-    let external_peak_buffers = memory.external_backings.iter().map(|stats| stats.peak_buffers).sum::<u64>();
-    let external_peak_bytes = memory.external_backings.iter().map(|stats| stats.peak_bytes).sum::<u64>();
-
-    warn!(
-        resource_id = resource.id.as_str(),
-        sequence,
-        backend = ?handle.backend(),
-        mode = ?handle.mode(),
-        interval = ?handle.interval(),
-        capture_samples = capture.samples,
-        capture_total_samples = capture.total_samples,
-        capture_fps = capture.fps,
-        capture_wait_last_ms = capture.last_millis,
-        capture_wait_avg_ms = capture.avg_millis,
-        capture_wait_p50_ms = health.capture_wait_p50_ms,
-        capture_wait_p95_ms = health.capture_wait_p95_ms,
-        capture_queue_depth = health.capture_queue_depth,
-        capture_queue_capacity = health.capture_queue_capacity,
-        capture_backpressure_count = health.capture_backpressure_count,
-        capture_drop_count = health.drop_count,
-        capture_async_send_waits = health.capture_async_send_waits,
-        capture_async_recv_waits = health.capture_async_recv_waits,
-        capture_async_send_wakes = health.capture_async_send_wakes,
-        capture_async_recv_wakes = health.capture_async_recv_wakes,
-        external_current_buffers,
-        external_current_mib = bytes_to_mib(external_current_bytes),
-        external_peak_buffers,
-        external_peak_mib = bytes_to_mib(external_peak_bytes),
-        external_backings = ?memory.external_backings,
-        capture_queue_memory = ?memory.capture_queue,
-        transform_pool = ?memory.transform_pool,
-        shared_decode_pool = ?memory.shared_decode_pool,
-        shared_encode_pool = ?memory.shared_encode_pool,
-        process_pss_mib = runtime_memory.process.pss_bytes.map(bytes_to_mib),
-        process_rss_mib = runtime_memory.process.rss_bytes.map(bytes_to_mib),
-        process_private_clean_mib = runtime_memory.process.private_clean_bytes.map(bytes_to_mib),
-        process_private_dirty_mib = runtime_memory.process.private_dirty_bytes.map(bytes_to_mib),
-        process_dmabuf_fd_count = runtime_memory.fds.dmabuf.fd_count,
-        process_dmabuf_unique_buffers = runtime_memory.fds.dmabuf.unique_buffers,
-        process_dmabuf_total_mib = bytes_to_mib(runtime_memory.fds.dmabuf.total_bytes),
-        process_dmabuf_exporters = ?runtime_memory.fds.dmabuf.exporters,
-        fd_total = runtime_memory.fds.total,
-        fd_classes = ?runtime_memory.fds.classes,
-        kernel_dmabuf_total_buffers = runtime_memory.kernel_dmabuf.total_buffers,
-        kernel_dmabuf_total_mib = runtime_memory.kernel_dmabuf.total_bytes.map(bytes_to_mib),
-        kernel_dmabuf_exporters = ?runtime_memory.kernel_dmabuf.exporters,
-        memory_mappings = ?runtime_memory.mappings,
-        unexplained_pss_mib = runtime_memory.unexplained_pss_bytes.map(bytes_to_mib),
-        memory_warnings = ?runtime_memory.warnings,
-        drop_reasons = ?health.drop_reasons,
-        recent_stage_errors = ?health.recent_stage_errors,
-        capture_retries = ?health.capture_retries,
-        "styx capture health"
-    );
-}
-
-fn bytes_to_mib(bytes: u64) -> f64 {
-    bytes as f64 / 1024.0 / 1024.0
-}
-
-fn publish_captured_frame(writer: &mut PeripheralStreamWriter, resource: &ResourceDescriptor, stream_path: &Path, sequence: &mut u64, frame: &FrameLease) -> Result<(), String> {
-    *sequence += 1;
-    writer.publish_capture_frame(frame).map_err(|error| format!("failed to publish frame for resource '{}' at '{}': {error}", resource.id.as_str(), stream_path.display()))
-}
-
-async fn start_capture_stream_session(resource: &ResourceDescriptor) -> Result<(CaptureHandle, FrameLease), String> {
-    let device = find_capture_device(resource)?;
-    let backend = select_capture_backend(&device, resource)?;
-    let capture_queue_depth = capture_queue_depth();
-    let capture_max_width = capture_optional_u32("HELIOS_CAPTURE_MAX_WIDTH");
-    let capture_max_height = capture_optional_u32("HELIOS_CAPTURE_MAX_HEIGHT");
-    let capture_config = StyxConfig::new().capture_queue_depth(capture_queue_depth);
-    let mut mode_candidates = backend.descriptor.modes.clone();
-    let unfiltered_mode_candidates = mode_candidates.clone();
-    mode_candidates.retain(|mode| {
-        let resolution = mode.id.format.resolution;
-        capture_max_width.is_none_or(|max_width| resolution.width.get() <= max_width) && capture_max_height.is_none_or(|max_height| resolution.height.get() <= max_height)
-    });
-    if mode_candidates.is_empty() {
-        warn!(resource_id = resource.id.as_str(), capture_max_width, capture_max_height, "capture mode filter matched no modes; falling back to all advertised modes");
-        mode_candidates = unfiltered_mode_candidates;
-    }
-    mode_candidates.sort_by_key(|mode| {
-        let resolution = mode.id.format.resolution;
-        (capture_mode_rank(mode), std::cmp::Reverse(u64::from(resolution.width.get()) * u64::from(resolution.height.get())))
-    });
-
-    let mut last_error = String::from("no decodable capture mode succeeded");
-    for mode in mode_candidates {
-        let handle = match CaptureRequest::new(&device).backend(backend.kind).mode(mode.id.clone()).config(capture_config.clone()).start_with_policy(CaptureStartPolicy::resilient()) {
-            Ok(handle) => handle,
-            Err(error) => {
-                last_error = error.to_string();
-                continue;
-            }
-        };
-        let first_frame = match timeout(CAPTURE_SESSION_FIRST_FRAME_TIMEOUT, handle.recv_async()).await {
-            Ok(RecvOutcome::Data(frame)) => frame,
-            Ok(RecvOutcome::Empty) => {
-                handle.stop();
-                last_error = format!("capture mode {:?} produced no frame", mode.id.format.code);
-                continue;
-            }
-            Ok(RecvOutcome::Closed) => {
-                handle.stop();
-                last_error = format!("capture mode {:?} closed before first frame", mode.id.format.code);
-                continue;
-            }
-            Err(_) => {
-                handle.stop();
-                last_error = format!("capture mode {:?} timed out waiting for first frame", mode.id.format.code);
-                continue;
-            }
-        };
-        info!(
-            resource_id = resource.id.as_str(),
-            backend = ?backend.kind,
-            format = %mode.id.format.code,
-            width = mode.id.format.resolution.width.get(),
-            height = mode.id.format.resolution.height.get(),
-            fps = mode.id.interval.as_ref().map(|interval| interval.fps()),
-            capture_queue_depth,
-            capture_max_width,
-            capture_max_height,
-            "capture stream started"
-        );
-        return Ok((handle, first_frame));
-    }
-
-    Err(last_error)
-}
-
-fn capture_queue_depth() -> usize {
-    std::env::var("HELIOS_CAPTURE_QUEUE_DEPTH").ok().and_then(|value| value.parse::<usize>().ok()).filter(|depth| *depth > 0).unwrap_or(DEFAULT_CAPTURE_QUEUE_DEPTH)
-}
-
-fn capture_optional_u32(name: &str) -> Option<u32> {
-    std::env::var(name).ok().and_then(|value| value.parse::<u32>().ok()).filter(|value| *value > 0)
-}
-
-fn capture_mode_rank(mode: &styx::prelude::Mode) -> u8 {
-    match mode.id.format.code.to_string().as_str() {
-        "NV12" => 0,
-        "RGB3" | "RGB4" | "BGR3" | "BGR4" | "YUYV" | "UYVY" | "NV21" | "YU12" | "YV12" | "GREY" => 1,
-        code if code.contains("RAW") || code.contains("SRG") || code.contains("SBG") || code.contains("BYR") => 2,
-        _ => 3,
-    }
-}
-
-fn find_capture_device(resource: &ResourceDescriptor) -> Result<ProbedDevice, String> {
-    let mut probe = probe_all_with_errors();
-    for error in probe.errors.drain(..) {
-        warn!(resource_id = resource.id.as_str(), error = %error, "styx capture probe error during frame capture");
-    }
-    for device in styx::prelude::probe_libcamera() {
-        let device_id = device.id.clone();
-        let already_present = probe.devices.iter().any(|existing| existing.backends.iter().any(|backend| matches!(&backend.handle, BackendHandle::Libcamera { id } if id == &device_id)));
-        if already_present {
-            continue;
-        }
-        probe.devices.push(styx::ProbedDevice {
-            identity: styx::DeviceIdentity { display: device_id.clone(), keys: vec![device_id.clone()] },
-            backends: vec![styx::ProbedBackend {
-                kind: styx::BackendKind::Libcamera,
-                handle: BackendHandle::Libcamera { id: device_id },
-                descriptor: device.descriptor,
-                properties: device.properties,
-            }],
-        });
-    }
-
-    probe
-        .devices
-        .into_iter()
-        .find(|device| device.identity.display == resource.display_name.as_ref() || device.backends.iter().any(|backend| backend_matches_resource(backend, resource)))
-        .ok_or_else(|| format!("no Styx capture device matched '{}'", resource.display_name))
-}
-
-fn select_capture_backend<'a>(device: &'a ProbedDevice, resource: &ResourceDescriptor) -> Result<&'a ProbedBackend, String> {
-    let preferred_kind = match resource.label("styx.backend") {
-        Some("libcamera") => Some(BackendKind::Libcamera),
-        Some("v4l2") => Some(BackendKind::V4l2),
-        _ => None,
-    };
-    device
-        .backends
-        .iter()
-        .find(|backend| preferred_kind.is_none_or(|kind| backend.kind == kind) && backend_matches_resource(backend, resource))
-        .or_else(|| device.backends.iter().find(|backend| preferred_kind.is_none_or(|kind| backend.kind == kind)))
-        .ok_or_else(|| format!("no Styx backend matched resource '{}'", resource.id.as_str()))
-}
-
-fn backend_matches_resource(backend: &ProbedBackend, resource: &ResourceDescriptor) -> bool {
-    let dev_endpoint = resource.endpoint("dev");
-    match (&backend.handle, dev_endpoint) {
-        (BackendHandle::V4l2 { path }, Some(dev)) => path == dev,
-        (BackendHandle::Libcamera { id }, _) => id == resource.display_name.as_ref(),
-        _ => backend.properties.iter().any(|(key, value)| (key == "devnode" || key == "device") && Some(value.as_str()) == dev_endpoint),
-    }
-}
-
-fn abort_capture_stream_publishers(publishers: &mut BTreeMap<String, JoinHandle<()>>) {
-    for handle in publishers.values() {
-        handle.abort();
-    }
-    publishers.clear();
-}
-
-fn should_publish_capture_channel(resource: &ResourceDescriptor) -> bool {
-    resource.kind == crate::model::ResourceKind::CaptureDevice && resource.label("capture_role").unwrap_or("camera_stream") == "camera_stream"
 }
 
 fn spawn_config_refresh_watchers(config: &PeripheralConfig, event_tx: mpsc::UnboundedSender<RuntimeEvent>) -> Vec<RecommendedWatcher> {

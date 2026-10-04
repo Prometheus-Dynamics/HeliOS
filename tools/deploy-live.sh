@@ -17,7 +17,7 @@ API_FEATURES="${API_FEATURES:-}"
 
 DOCKERFILE="${DOCKERFILE:-gaia/docker/aarch64/Dockerfile.aarch64-rpi4}"
 DOCKER_CONTEXT="${DOCKER_CONTEXT:-$ROOT_DIR/gaia/docker}"
-IMAGE_TAG="${IMAGE_TAG:-helios-cross-rust194}"
+IMAGE_TAG="${IMAGE_TAG:-helios-cross}"
 REBUILD_IMAGE="0"
 
 CROSS_BUILD_ROOT_DEFAULT="/var/tmp/helios-cross/${IMAGE_TAG}"

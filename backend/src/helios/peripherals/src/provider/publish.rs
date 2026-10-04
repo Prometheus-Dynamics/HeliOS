@@ -2,18 +2,18 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use orion::{
-    client::{ClientError, DerivedResource, LocalNodeRuntime, LocalRuntimePublisher, ProviderResource},
+    client::{ClientError, LocalNodeRuntime, LocalRuntimePublisher, ProviderResource},
     control_plane::{
-        AvailabilityState, ExecutorRecord, HealthState, LeaseRecord, LeaseState, ProviderRecord, ResourceActionResult, ResourceActionStatus, ResourceCapability, ResourceOwnershipMode, ResourceRecord,
-        ResourceState, TypedConfigValue,
+        AvailabilityState, CustomEndpointScheme, ExecutorRecord, HealthState, LeaseRecord, LeaseState, ProviderRecord, ResourceActionResult, ResourceActionStatus, ResourceCapability,
+        ResourceOwnershipMode, ResourceRecord, ResourceState, TypedConfigValue,
     },
-    core::{CapabilityId, ExecutorId, NodeId, ProviderId, ResourceId},
+    core::{CapabilityId, ExecutorId, NodeId, ProviderId},
 };
 
 use crate::{
     config::PeripheralConfig,
     model::{ControlStatus, ResourceControlData, ResourceControlResult, ResourceDescriptor, ResourceKind, ResourceStatus},
-    provider::streams::stream_mjpeg_socket_path,
+    provider::camera_service::{StyxFramesEndpoint, camera_service_socket_path, serves_camera_frames},
     resources::DiscoverySnapshot,
 };
 
@@ -128,29 +128,9 @@ impl OrionPeripheralPublisher {
         builder.build()
     }
 
-    pub fn derived_channel_local_name(&self, resource: &ResourceDescriptor) -> Option<String> {
-        (resource.kind == ResourceKind::CaptureDevice).then(|| format!("{}.raw", resource.id.as_str()))
-    }
-
-    pub fn derived_channel_path(&self, resource: &ResourceDescriptor) -> Option<PathBuf> {
-        let local_name = self.derived_channel_local_name(resource)?;
-        Some(self.stream_dir.join(format!("{}:none:{}.stream.json", resource.owner, local_name)))
-    }
-
-    pub fn derived_channel_resource_id(&self, resource: &ResourceDescriptor) -> Option<String> {
-        (resource.kind == ResourceKind::CaptureDevice).then(|| format!("stream.channel.{}.raw", resource.id.as_str()))
-    }
-
     pub fn resource_records(&self, snapshot: &DiscoverySnapshot, leases: &[LeaseRecord], feedback: &BTreeMap<String, ResourceActionFeedback>) -> Vec<ResourceRecord> {
         let lease_states = lease_state_map(leases);
-        let mut records =
-            snapshot.resources.iter().map(|resource| self.resource_record(resource, lease_states.get(resource.id.as_str()).copied(), feedback.get(resource.id.as_str()))).collect::<Vec<_>>();
-        for resource in &snapshot.resources {
-            if let Some(channel) = self.derived_channel_record(resource) {
-                records.push(channel);
-            }
-        }
-        records
+        snapshot.resources.iter().map(|resource| self.resource_record(resource, lease_states.get(resource.id.as_str()).copied(), feedback.get(resource.id.as_str()))).collect()
     }
 
     pub fn resource_record(&self, resource: &ResourceDescriptor, lease_state: Option<LeaseState>, feedback: Option<&ResourceActionFeedback>) -> ResourceRecord {
@@ -178,6 +158,10 @@ impl OrionPeripheralPublisher {
             builder = builder.endpoint(endpoint_value(endpoint.protocol.as_ref(), endpoint.address.as_ref()));
         }
 
+        if serves_camera_frames(resource) {
+            builder = builder.endpoint(StyxFramesEndpoint::endpoint_string(camera_service_socket_path(&self.stream_dir, resource).display()));
+        }
+
         for link in &resource.links {
             builder = builder.label(format!("{LINK_PREFIX}{}={}", link.relation, link.target));
         }
@@ -187,28 +171,6 @@ impl OrionPeripheralPublisher {
         }
 
         builder.build()
-    }
-
-    fn derived_channel_record(&self, resource: &ResourceDescriptor) -> Option<ResourceRecord> {
-        let stream_path = self.derived_channel_path(resource)?;
-        let channel_id = self.derived_channel_resource_id(resource)?;
-        let frame_socket_path = crate::provider::streams::stream_socket_path(&stream_path);
-        let preview_socket_path = stream_mjpeg_socket_path(&stream_path);
-        Some(
-            DerivedResource::new(ResourceId::new(channel_id), "stream.channel", ProviderId::new(self.provider_id.clone()))
-                .source_resource(resource.id.clone())
-                .ownership_mode(ResourceOwnershipMode::SharedRead)
-                .health(health_for(resource.status))
-                .availability(availability_for(resource.status))
-                .lease_state(LeaseState::Unleased)
-                .label(format!("{DISPLAY_NAME_LABEL}={} Raw Stream", resource.display_name))
-                .label(format!("{KIND_LABEL}=channel"))
-                .label("helios.channel.kind=raw_capture")
-                .endpoint(endpoint_value("styx-frame-lease+unix", &frame_socket_path.display().to_string()))
-                .endpoint(endpoint_value("shm", &stream_path.display().to_string()))
-                .endpoint(endpoint_value("mjpeg+unix", &preview_socket_path.display().to_string()))
-                .build(),
-        )
     }
 
     pub async fn publish_snapshot_with_feedback(&self, snapshot: &DiscoverySnapshot, leases: &[LeaseRecord], feedback: &BTreeMap<String, ResourceActionFeedback>) -> Result<(), OrionPublishError> {
@@ -259,14 +221,12 @@ fn resource_type_for(kind: ResourceKind) -> &'static str {
         ResourceKind::UsbInterface => "usb.interface",
         ResourceKind::CaptureDevice => "camera.device",
         ResourceKind::Virtual => "virtual.resource",
-        ResourceKind::Channel => "stream.channel",
     }
 }
 
 fn ownership_mode_for(kind: ResourceKind) -> ResourceOwnershipMode {
     match kind {
-        ResourceKind::CaptureDevice => ResourceOwnershipMode::ExclusiveOwnerPublishesDerived,
-        ResourceKind::Channel => ResourceOwnershipMode::SharedRead,
+        ResourceKind::CaptureDevice => ResourceOwnershipMode::SharedRead,
         _ => ResourceOwnershipMode::Exclusive,
     }
 }
@@ -315,14 +275,21 @@ mod tests {
     }
 
     #[test]
-    fn capture_devices_publish_derived_stream_channel_resources() {
+    fn camera_resources_advertise_their_styx_frames_endpoint() {
         let owner = NodeId::new("node1");
-        let resource = ResourceBuilder::new(owner, ResourceKind::CaptureDevice, "cam0", "Front Camera").expect("camera").build();
-        let publisher = OrionPeripheralPublisher::new("client", "node1");
-        let derived = publisher.derived_channel_record(&resource).expect("channel");
-        assert_eq!(derived.resource_type.as_str(), "stream.channel");
-        assert!(derived.endpoints.iter().any(|endpoint| endpoint.starts_with("styx-frame-lease+unix://")));
-        assert!(derived.endpoints.iter().any(|endpoint| endpoint.starts_with("shm://")));
+        let camera = ResourceBuilder::new(owner.clone(), ResourceKind::CaptureDevice, "cam0", "Front Camera").expect("camera").build();
+        let gpio = ResourceBuilder::new(owner, ResourceKind::GpioLine, "gpio17", "GPIO 17").expect("gpio").build();
+        let publisher = OrionPeripheralPublisher::new("client", "node1").with_stream_dir("/run/helios/streams");
+        let records = publisher.resource_records(&DiscoverySnapshot::new(vec![camera, gpio]), &[], &BTreeMap::new());
+        assert_eq!(records.len(), 2, "cameras no longer publish a derived stream channel");
+
+        let camera = records.iter().find(|record| record.resource_type.as_str() == "camera.device").expect("camera record");
+        assert!(camera.endpoints.iter().any(|endpoint| endpoint == "styx-frames+unix:///run/helios/streams/capture_device_node1_cam0.styx.sock"));
+        let endpoint = camera.endpoint::<StyxFramesEndpoint>().expect("typed styx frames endpoint");
+        assert_eq!(endpoint.socket_path, PathBuf::from("/run/helios/streams/capture_device_node1_cam0.styx.sock"));
+
+        let gpio = records.iter().find(|record| record.resource_type.as_str() == "gpio.line").expect("gpio record");
+        assert!(gpio.endpoints.iter().all(|endpoint| !endpoint.starts_with("styx-frames+unix://")));
     }
 
     #[test]

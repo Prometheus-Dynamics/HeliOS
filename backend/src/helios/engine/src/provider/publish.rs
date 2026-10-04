@@ -1,7 +1,7 @@
 use orion::{
     client::{ClientError, DerivedResource, LocalNodeRuntime, LocalRuntimePublisher, ProviderResource},
     control_plane::{AvailabilityState, ExecutorRecord, HealthState, LeaseState, ProviderRecord, ResourceConfigState, ResourceOwnershipMode, ResourceRecord, ResourceState, WorkloadRecord},
-    core::{ExecutorId, NodeId, ProviderId, ResourceId, ResourceType, WorkloadId},
+    core::{ExecutorId, NodeId, ProviderId, ResourceId, WorkloadId},
 };
 use std::collections::BTreeMap;
 
@@ -155,8 +155,7 @@ fn artifact_resources<'a>(executor_id: &'a str, provider_id: &'a str, artifacts:
         if let Some(message) = &artifact.message {
             config = config.field("message", orion::control_plane::TypedConfigValue::String(message.clone()));
         }
-        let resource_type = if artifact.kind.starts_with("stream.channel:") { ResourceType::new("stream.channel") } else { ExecutionArtifactResource::resource_type() };
-        let mut builder = DerivedResource::new(ResourceId::new(format!("engine.artifact.{}", artifact.artifact_id)), resource_type, ProviderId::new(provider_id))
+        let mut builder = DerivedResource::new(ResourceId::new(format!("engine.artifact.{}", artifact.artifact_id)), ExecutionArtifactResource::resource_type(), ProviderId::new(provider_id))
             .realized_by_executor(ExecutorId::new(executor_id))
             .realized_for_workload(WorkloadId::new(artifact.workload_id.clone()))
             .source_workload(WorkloadId::new(artifact.workload_id.clone()))
@@ -223,24 +222,6 @@ mod tests {
         assert_eq!(resource.realized_for_workload_id.as_ref().map(ToString::to_string), Some("workload.test".into()));
         assert_eq!(resource.source_workload_id.as_ref().map(ToString::to_string), Some("workload.test".into()));
         assert_eq!(resource.state.as_ref().and_then(|state| state.config.as_ref()).and_then(|config| config.payload.get("message")).and_then(|value| value.as_str()), Some("{\"value\":42}"));
-    }
-
-    #[test]
-    fn frame_artifacts_publish_as_stream_channel_resources() {
-        let artifacts = vec![ExecutionArtifactRecord {
-            workload_id: "workload.stream".into(),
-            session_id: "session.workload.stream".into(),
-            artifact_id: "artifact.stream".into(),
-            kind: "stream.channel:frame".into(),
-            observed_at_ms: 456,
-            message: None,
-            endpoints: vec!["styx-frame-lease+unix:///tmp/frame.sock".into()],
-        }];
-
-        let resource = artifact_resources("executor.test", "provider.test", &artifacts).next().expect("stream resource should be produced");
-
-        assert_eq!(resource.resource_type.as_str(), "stream.channel");
-        assert!(resource.endpoints.iter().any(|endpoint| endpoint.starts_with("styx-frame-lease+unix://")));
     }
 
     #[test]
