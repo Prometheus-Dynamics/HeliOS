@@ -12,12 +12,12 @@ use daedalus::{
     runtime::{NodeError, plugins::RegistryPluginExt},
 };
 use helios_vision::{
-    aruco::{
+    image::GrayImage,
+    plugin::VisionPlugin,
+    testing::{
         DICT_4X4_50,
         render::{paste_warped, render_marker},
     },
-    image::GrayImage,
-    plugin::VisionPlugin,
 };
 use orion::control_plane::{ClusterStateEnvelope, ObservedClusterState, ResourceActionResult, ResourceActionStatus, ResourceRecord, ResourceState, TypedConfigValue};
 use styx::{

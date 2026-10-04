@@ -3,7 +3,7 @@ name = "helios-vision"
 version.workspace = true
 edition.workspace = true
 publish = false
-description = "HeliOS vision algorithms (ArUco/AprilTag) and their Daedalus nodes"
+description = "HeliOS vision nodes: Eidos marker detection as Daedalus graph stages"
 
 [lints]
 workspace = true
@@ -12,16 +12,18 @@ workspace = true
 crate-type = ["rlib", "cdylib"]
 
 [features]
-default = ["plugin"]
-# Daedalus nodes and the Styx frame adapter.
-plugin = ["dep:daedalus", "dep:styx"]
 # Export the plugin from the cdylib for the engine's dylib loader.
-dylib = ["plugin", "daedalus/dylib-plugins"]
+dylib = ["daedalus/dylib-plugins"]
 
 [dependencies]
 thiserror = { workspace = true }
-daedalus = { workspace = true, optional = true, features = ["plugins"] }
-styx = { workspace = true, optional = true, default-features = false, features = ["framelease"] }
+daedalus = { workspace = true, features = ["plugins"] }
+styx = { workspace = true, default-features = false }
+eidos-aruco = { workspace = true, features = ["simd"] }
+eidos-core = { workspace = true }
+
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+eidos-aruco = { workspace = true, features = ["simd", "neon"] }
 
 [dev-dependencies]
 daedalus = { workspace = true, features = ["engine", "plugins"] }

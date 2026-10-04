@@ -20,12 +20,9 @@ use daedalus::{
     transport::{Payload, Residency, TypeKey},
 };
 use helios_vision::{
-    aruco::{self, DecodeConfig, Dictionary},
     graphs::{FRAME_INPUT, MARKERS_OUTPUT, aruco_graph_document},
     image::GrayImage,
-    plugin::{FRAMELEASE_TYPE_KEY, MarkerList, VisionPlugin, framelease_to_gray},
-    quads::{QuadConfig, find_quads, scale_quads},
-    threshold::{ThresholdConfig, adaptive_threshold},
+    plugin::{FRAMELEASE_TYPE_KEY, MarkerList, VisionPlugin, dictionary_kind, luma_view},
 };
 use styx::prelude::*;
 
@@ -36,15 +33,12 @@ struct Args {
     frames: usize,
     camera: Option<String>,
     save: Option<PathBuf>,
-    /// Time the stages directly every 30th frame (adds CPU; off for clean
-    /// process measurements).
-    stage_sampling: bool,
     /// Ask the ISP for a half-size luma companion (the downscale node uses it).
     pyramid: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
-    let mut args = Args { dictionary: "4x4_50".into(), size: (1280, 800), fps: 30, frames: 300, camera: None, save: None, stage_sampling: true, pyramid: true };
+    let mut args = Args { dictionary: "4x4_50".into(), size: (1280, 800), fps: 30, frames: 300, camera: None, save: None, pyramid: true };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
         let mut value = || it.next().ok_or_else(|| format!("{flag} needs a value"));
@@ -59,15 +53,14 @@ fn parse_args() -> Result<Args, String> {
             "--frames" => args.frames = value()?.parse().map_err(|_| "bad --frames")?,
             "--camera" => args.camera = Some(value()?),
             "--save" => args.save = Some(PathBuf::from(value()?)),
-            "--no-stage-sampling" => args.stage_sampling = false,
             "--no-pyramid" => args.pyramid = false,
             "-h" | "--help" => {
-                return Err("usage: helios-vision-probe [--dict 4x4_50|36h11] [--size WxH] [--fps N] [--frames N] [--camera NAME] [--save DIR] [--no-stage-sampling] [--no-pyramid]".into());
+                return Err("usage: helios-vision-probe [--dict 4x4_50|36h11] [--size WxH] [--fps N] [--frames N] [--camera NAME] [--save DIR] [--no-pyramid]".into());
             }
             other => return Err(format!("unknown argument {other}")),
         }
     }
-    if Dictionary::by_name(&args.dictionary).is_none() {
+    if dictionary_kind(&args.dictionary).is_none() {
         return Err(format!("unknown dictionary {}", args.dictionary));
     }
     Ok(args)
@@ -95,8 +88,6 @@ struct Stats {
     tick_max: Duration,
     ticks_ms: Vec<f64>,
     ids: std::collections::BTreeMap<String, usize>,
-    stage_samples: usize,
-    stage_total: [Duration; 4],
 }
 
 fn main() {
@@ -140,8 +131,6 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     print!("{plan}");
     let mut frames = plan.start()?;
 
-    let dictionary = Dictionary::by_name(&args.dictionary).expect("checked");
-    let decode_config = DecodeConfig { dictionary, ..DecodeConfig::default() };
     let mut stats = Stats::default();
     let started = Instant::now();
     let process_at_start = ProcessSample::read();
@@ -155,8 +144,7 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         };
         stats.frames += 1;
         let first_or_last = stats.frames == 1 || stats.frames == args.frames;
-        let sample_stages = args.stage_sampling && stats.frames % 30 == 1;
-        let gray = if first_or_last || sample_stages { Some(framelease_to_gray(&frame)?.0) } else { None };
+        let gray = if first_or_last && args.save.is_some() { Some(luma_view(&frame)?.to_image()) } else { None };
 
         let bytes = frame.payload_bytes() as u64;
         let residency = residency(&frame);
@@ -186,36 +174,17 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             last_report = Instant::now();
         }
 
-        if let Some(gray) = &gray {
-            if sample_stages {
-                let t0 = Instant::now();
-                let small = gray.downscale2();
-                let binary = adaptive_threshold(&small, &ThresholdConfig::default());
-                let t1 = Instant::now();
-                let quads = scale_quads(&find_quads(&binary, &QuadConfig::default()), 2.0);
-                let t2 = Instant::now();
-                let _ = aruco::decode_quads(gray.view(), &quads, &decode_config);
-                let t3 = Instant::now();
-                stats.stage_samples += 1;
-                stats.stage_total[0] += t1 - t0;
-                stats.stage_total[1] += t2 - t1;
-                stats.stage_total[2] += t3 - t2;
-                stats.stage_total[3] += Duration::from_nanos(quads.len() as u64);
-            }
-            if first_or_last && let Some(dir) = &args.save {
-                std::fs::create_dir_all(dir)?;
-                let name = if stats.frames == 1 { "first" } else { "last" };
-                save_pgm(&dir.join(format!("{name}.pgm")), gray)?;
-                std::fs::write(dir.join(format!("{name}.json")), serde_json::to_string_pretty(&markers_json(&markers))?)?;
-            }
+        if let (Some(gray), Some(dir)) = (&gray, &args.save) {
+            std::fs::create_dir_all(dir)?;
+            let name = if stats.frames == 1 { "first" } else { "last" };
+            save_pgm(&dir.join(format!("{name}.pgm")), gray)?;
+            std::fs::write(dir.join(format!("{name}.json")), serde_json::to_string_pretty(&markers_json(&markers))?)?;
         }
     }
 
     let elapsed = started.elapsed().as_secs_f64();
     let process = ProcessSample::read();
     let cpu_seconds = process.cpu_seconds - process_at_start.cpu_seconds;
-    let samples = stats.stage_samples.max(1) as f64;
-    let ms = |d: Duration| d.as_secs_f64() * 1e3 / samples;
     let summary = serde_json::json!({
         "frames": stats.frames,
         "fps": stats.frames as f64 / elapsed,
@@ -229,12 +198,6 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             "rss_mib": process.rss_kib as f64 / 1024.0,
             "peak_rss_mib": process.peak_rss_kib as f64 / 1024.0,
             "threads": process.threads,
-        },
-        "stage_ms_avg": {
-            "threshold": ms(stats.stage_total[0]),
-            "find_quads": ms(stats.stage_total[1]),
-            "decode": ms(stats.stage_total[2]),
-            "quads_per_frame": stats.stage_total[3].as_nanos() as f64 / samples,
         },
         "detections": stats.ids,
     });

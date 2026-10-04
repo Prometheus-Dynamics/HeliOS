@@ -176,45 +176,6 @@ impl<'a> GrayView<'a> {
     }
 }
 
-/// A binary mask, row-major: 1 marks a foreground (dark) pixel, 0 background.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BinaryImage {
-    width: usize,
-    height: usize,
-    data: Vec<u8>,
-}
-
-impl BinaryImage {
-    pub fn new(width: usize, height: usize, data: Vec<u8>) -> Result<Self, ImageError> {
-        let expected = width * height;
-        if data.len() != expected {
-            return Err(ImageError::SizeMismatch { width, height, expected, actual: data.len() });
-        }
-        Ok(Self { width, height, data })
-    }
-
-    pub fn width(&self) -> usize {
-        self.width
-    }
-
-    pub fn height(&self) -> usize {
-        self.height
-    }
-
-    pub fn data(&self) -> &[u8] {
-        &self.data
-    }
-
-    /// Foreground test with out-of-bounds pixels treated as background.
-    pub fn is_set(&self, x: isize, y: isize) -> bool {
-        x >= 0 && y >= 0 && (x as usize) < self.width && (y as usize) < self.height && self.data[y as usize * self.width + x as usize] != 0
-    }
-
-    pub fn count_set(&self) -> usize {
-        self.data.iter().filter(|&&v| v != 0).count()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

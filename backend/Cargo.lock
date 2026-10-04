@@ -272,12 +272,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "byteorder"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
-
-[[package]]
 name = "bytes"
 version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -820,6 +814,89 @@ dependencies = [
 ]
 
 [[package]]
+name = "eidos-aruco"
+version = "1.0.0"
+dependencies = [
+ "eidos-calibration",
+ "eidos-contour",
+ "eidos-core",
+ "eidos-frame",
+ "eidos-geometry",
+ "eidos-mask",
+ "eidos-sampling",
+ "eidos-scratch",
+ "rayon",
+ "smallvec",
+]
+
+[[package]]
+name = "eidos-calibration"
+version = "1.0.0"
+dependencies = [
+ "eidos-core",
+]
+
+[[package]]
+name = "eidos-contour"
+version = "1.0.0"
+dependencies = [
+ "eidos-core",
+ "eidos-frame",
+ "eidos-geometry",
+ "eidos-mask",
+ "smallvec",
+]
+
+[[package]]
+name = "eidos-core"
+version = "1.0.0"
+dependencies = [
+ "styx-core-rs",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "eidos-frame"
+version = "1.0.0"
+dependencies = [
+ "eidos-core",
+ "smallvec",
+ "styx-core-rs",
+ "wide",
+]
+
+[[package]]
+name = "eidos-geometry"
+version = "1.0.0"
+dependencies = [
+ "eidos-core",
+ "eidos-frame",
+ "eidos-sampling",
+]
+
+[[package]]
+name = "eidos-mask"
+version = "1.0.0"
+dependencies = [
+ "eidos-core",
+ "eidos-frame",
+ "eidos-geometry",
+ "eidos-scratch",
+]
+
+[[package]]
+name = "eidos-sampling"
+version = "1.0.0"
+dependencies = [
+ "eidos-core",
+ "eidos-frame",
+]
+
+[[package]]
+name = "eidos-scratch"
+version = "1.0.0"
+
+[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1091,17 +1168,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
-name = "gpio-cdev"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09831ec59b80be69e75d29cf36e16afbbe5fd1af9c1bf4689ad91c77db5aa6a6"
-dependencies = [
- "bitflags 2.11.1",
- "libc",
- "nix 0.27.1",
-]
-
-[[package]]
 name = "h2"
 version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1254,6 +1320,8 @@ name = "helios-vision"
 version = "1.0.0"
 dependencies = [
  "daedalus-rs",
+ "eidos-aruco",
+ "eidos-core",
  "styx",
  "thiserror 2.0.18",
 ]
@@ -1403,18 +1471,6 @@ dependencies = [
  "tower-service",
  "tracing",
  "windows-registry",
-]
-
-[[package]]
-name = "i2cdev"
-version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b940f7497c4f95b863b21cd34c3737b53a67d80d94cf29055d7f7eeca6ffdb4"
-dependencies = [
- "bitflags 2.11.1",
- "byteorder",
- "libc",
- "nix 0.26.4",
 ]
 
 [[package]]
@@ -1731,11 +1787,11 @@ checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
 
 [[package]]
 name = "lemnos"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
- "lemnos-bus",
- "lemnos-core",
- "lemnos-discovery",
+ "lemnos-bus 2.0.0",
+ "lemnos-core 2.0.0",
+ "lemnos-discovery 2.0.0",
  "lemnos-driver-manifest",
  "lemnos-driver-sdk",
  "lemnos-drivers-gpio",
@@ -1744,134 +1800,228 @@ dependencies = [
  "lemnos-drivers-spi",
  "lemnos-drivers-uart",
  "lemnos-drivers-usb",
- "lemnos-linux",
+ "lemnos-hal 2.0.0",
+ "lemnos-linux 2.0.0",
  "lemnos-runtime",
  "tokio",
 ]
 
 [[package]]
 name = "lemnos-bus"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
- "lemnos-core",
+ "embedded-hal",
+ "lemnos-core 2.0.0",
+ "lemnos-hal 2.0.0",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "lemnos-bus"
+version = "2.0.0"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=b39232f1c9755db5babdaac61ae040109342b4d7#b39232f1c9755db5babdaac61ae040109342b4d7"
+dependencies = [
+ "embedded-hal",
+ "lemnos-core 2.0.0 (git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=b39232f1c9755db5babdaac61ae040109342b4d7)",
+ "lemnos-hal 2.0.0 (git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=b39232f1c9755db5babdaac61ae040109342b4d7)",
  "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "lemnos-core"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
+ "lemnos-hal 2.0.0",
  "ordered-float",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "lemnos-core"
+version = "2.0.0"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=b39232f1c9755db5babdaac61ae040109342b4d7#b39232f1c9755db5babdaac61ae040109342b4d7"
+dependencies = [
+ "lemnos-hal 2.0.0 (git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=b39232f1c9755db5babdaac61ae040109342b4d7)",
+ "ordered-float",
+ "serde",
  "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "lemnos-discovery"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
- "lemnos-core",
+ "lemnos-core 2.0.0",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "lemnos-discovery"
+version = "2.0.0"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=b39232f1c9755db5babdaac61ae040109342b4d7#b39232f1c9755db5babdaac61ae040109342b4d7"
+dependencies = [
+ "lemnos-core 2.0.0 (git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=b39232f1c9755db5babdaac61ae040109342b4d7)",
  "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "lemnos-driver-manifest"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
- "lemnos-core",
+ "lemnos-core 2.0.0",
+ "serde",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "lemnos-driver-sdk"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
- "lemnos-bus",
- "lemnos-core",
+ "lemnos-bus 2.0.0",
+ "lemnos-core 2.0.0",
  "lemnos-driver-manifest",
  "thiserror 2.0.18",
 ]
 
 [[package]]
 name = "lemnos-drivers-gpio"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
- "lemnos-bus",
- "lemnos-core",
+ "lemnos-bus 2.0.0",
+ "lemnos-core 2.0.0",
  "lemnos-driver-manifest",
  "lemnos-driver-sdk",
 ]
 
 [[package]]
 name = "lemnos-drivers-i2c"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
- "lemnos-bus",
- "lemnos-core",
+ "lemnos-bus 2.0.0",
+ "lemnos-core 2.0.0",
  "lemnos-driver-manifest",
  "lemnos-driver-sdk",
 ]
 
 [[package]]
 name = "lemnos-drivers-pwm"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
- "lemnos-bus",
- "lemnos-core",
+ "lemnos-bus 2.0.0",
+ "lemnos-core 2.0.0",
  "lemnos-driver-manifest",
  "lemnos-driver-sdk",
 ]
 
 [[package]]
 name = "lemnos-drivers-spi"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
- "lemnos-bus",
- "lemnos-core",
+ "lemnos-bus 2.0.0",
+ "lemnos-core 2.0.0",
  "lemnos-driver-manifest",
  "lemnos-driver-sdk",
 ]
 
 [[package]]
 name = "lemnos-drivers-uart"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
- "lemnos-bus",
- "lemnos-core",
+ "lemnos-bus 2.0.0",
+ "lemnos-core 2.0.0",
  "lemnos-driver-manifest",
  "lemnos-driver-sdk",
 ]
 
 [[package]]
 name = "lemnos-drivers-usb"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
- "lemnos-bus",
- "lemnos-core",
+ "lemnos-bus 2.0.0",
+ "lemnos-core 2.0.0",
  "lemnos-driver-manifest",
  "lemnos-driver-sdk",
 ]
 
 [[package]]
-name = "lemnos-linux"
-version = "1.0.0"
+name = "lemnos-drivers-vcm"
+version = "2.0.0"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=b39232f1c9755db5babdaac61ae040109342b4d7#b39232f1c9755db5babdaac61ae040109342b4d7"
 dependencies = [
- "gpio-cdev",
- "i2cdev",
- "inotify 0.11.1",
- "lemnos-bus",
- "lemnos-core",
- "lemnos-discovery",
+ "embedded-hal",
+ "embedded-hal-async",
+ "lemnos-hal 2.0.0 (git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=b39232f1c9755db5babdaac61ae040109342b4d7)",
+]
+
+[[package]]
+name = "lemnos-hal"
+version = "2.0.0"
+dependencies = [
+ "embedded-hal",
+ "embedded-hal-async",
+]
+
+[[package]]
+name = "lemnos-hal"
+version = "2.0.0"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=b39232f1c9755db5babdaac61ae040109342b4d7#b39232f1c9755db5babdaac61ae040109342b4d7"
+dependencies = [
+ "embedded-hal",
+ "embedded-hal-async",
+]
+
+[[package]]
+name = "lemnos-linux"
+version = "2.0.0"
+dependencies = [
+ "embedded-hal",
+ "embedded-hal-async",
+ "lemnos-bus 2.0.0",
+ "lemnos-core 2.0.0",
+ "lemnos-discovery 2.0.0",
+ "lemnos-hal 2.0.0",
+ "lemnos-linux-sys 2.0.0",
  "rusb",
  "serialport",
- "spidev",
  "tokio",
 ]
 
 [[package]]
-name = "lemnos-registry"
-version = "1.0.0"
+name = "lemnos-linux"
+version = "2.0.0"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=b39232f1c9755db5babdaac61ae040109342b4d7#b39232f1c9755db5babdaac61ae040109342b4d7"
 dependencies = [
- "lemnos-core",
+ "embedded-hal",
+ "embedded-hal-async",
+ "lemnos-bus 2.0.0 (git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=b39232f1c9755db5babdaac61ae040109342b4d7)",
+ "lemnos-core 2.0.0 (git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=b39232f1c9755db5babdaac61ae040109342b4d7)",
+ "lemnos-discovery 2.0.0 (git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=b39232f1c9755db5babdaac61ae040109342b4d7)",
+ "lemnos-hal 2.0.0 (git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=b39232f1c9755db5babdaac61ae040109342b4d7)",
+ "lemnos-linux-sys 2.0.0 (git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=b39232f1c9755db5babdaac61ae040109342b4d7)",
+]
+
+[[package]]
+name = "lemnos-linux-sys"
+version = "2.0.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "lemnos-linux-sys"
+version = "2.0.0"
+source = "git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=b39232f1c9755db5babdaac61ae040109342b4d7#b39232f1c9755db5babdaac61ae040109342b4d7"
+dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "lemnos-registry"
+version = "2.0.0"
+dependencies = [
+ "lemnos-core 2.0.0",
  "lemnos-driver-manifest",
  "lemnos-driver-sdk",
  "thiserror 2.0.18",
@@ -1879,11 +2029,11 @@ dependencies = [
 
 [[package]]
 name = "lemnos-runtime"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
- "lemnos-bus",
- "lemnos-core",
- "lemnos-discovery",
+ "lemnos-bus 2.0.0",
+ "lemnos-core 2.0.0",
+ "lemnos-discovery 2.0.0",
  "lemnos-driver-sdk",
  "lemnos-registry",
  "thiserror 2.0.18",
@@ -1902,9 +2052,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.184"
+version = "0.2.190"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48f5d2a454e16a5ea0f4ced81bd44e4cfc7bd3a507b61887c99fd3538b28e4af"
+checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
 
 [[package]]
 name = "libloading"
@@ -2085,29 +2235,6 @@ checksum = "598beaf3cc6fdd9a5dfb1630c2800c7acd31df7aaf0f565796fba2b53ca1af1b"
 dependencies = [
  "bitflags 1.3.2",
  "cfg-if",
- "libc",
-]
-
-[[package]]
-name = "nix"
-version = "0.27.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2eb04e9c688eff1c89d72b407f168cf79bb9e867a9d3323ed6c01519eb9cc053"
-dependencies = [
- "bitflags 2.11.1",
- "cfg-if",
- "libc",
-]
-
-[[package]]
-name = "nix"
-version = "0.29.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
-dependencies = [
- "bitflags 2.11.1",
- "cfg-if",
- "cfg_aliases",
  "libc",
 ]
 
@@ -2801,6 +2928,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
+name = "safe_arch"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42c6efa15875e6ecb39ca61fb0b0c1a40b84fac5a5ffe71eef7d1000c8eb3f5f"
+dependencies = [
+ "bytemuck",
+]
+
+[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2940,7 +3076,7 @@ dependencies = [
  "core-foundation-sys",
  "io-kit-sys",
  "mach2",
- "nix 0.26.4",
+ "nix",
  "scopeguard",
  "unescaper",
  "windows-sys 0.52.0",
@@ -3043,17 +3179,6 @@ checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "spidev"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f611021817865236902d15bdf8d729b0bd232141b568d56bb88409a8dc27397"
-dependencies = [
- "bitflags 2.11.1",
- "libc",
- "nix 0.29.0",
 ]
 
 [[package]]
@@ -3181,13 +3306,13 @@ version = "2.0.0"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
+ "lemnos-hal 2.0.0 (git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=b39232f1c9755db5babdaac61ae040109342b4d7)",
 ]
 
 [[package]]
 name = "styx-kernel"
 version = "2.0.0"
 dependencies = [
- "embedded-hal",
  "libc",
 ]
 
@@ -3196,6 +3321,8 @@ name = "styx-native"
 version = "2.0.0"
 dependencies = [
  "futures-core",
+ "lemnos-drivers-vcm",
+ "lemnos-linux 2.0.0 (git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=b39232f1c9755db5babdaac61ae040109342b4d7)",
  "libc",
  "styx-graph",
  "styx-kernel",
@@ -3236,6 +3363,8 @@ version = "2.0.0"
 dependencies = [
  "embedded-hal",
  "embedded-hal-async",
+ "lemnos-drivers-vcm",
+ "lemnos-hal 2.0.0 (git+https://github.com/Prometheus-Dynamics/Lemnos.git?rev=b39232f1c9755db5babdaac61ae040109342b4d7)",
  "libm",
  "serde",
  "styx-hal",
@@ -3951,6 +4080,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "804f18a4ac2676ffb4e8b5b5fa9ae38af06df08162314f96a68d2a363e21a8ca"
 dependencies = [
  "rustls-pki-types",
+]
+
+[[package]]
+name = "wide"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9479f84a757f819cfab37295955906479181395de83add28f74975fde083141"
+dependencies = [
+ "bytemuck",
+ "safe_arch",
 ]
 
 [[package]]

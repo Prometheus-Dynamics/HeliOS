@@ -79,56 +79,55 @@ A frame is a Styx `FrameLease` from capture to the last node that reads it.
 ## Vision workloads
 
 A vision pipeline is a graph of real stages, so per-stage timings show
-where time goes. The ArUco graph (`helios_vision::graphs::aruco_graph_document`,
-golden copies in `backend/src/helios/vision/graphs/`):
+where time goes and a UI can edit it. The stages are Eidos operations
+(Eidos is the computer-vision library); `helios-vision` only wraps them as
+Daedalus nodes, keeping each Eidos stage and its scratch in node state. When
+Eidos is missing something, it is added to Eidos, not to HeliOS. The ArUco
+graph (`helios_vision::graphs::aruco_graph_document`, golden copies in
+`backend/src/helios/vision/graphs/`):
 
 ```text
-frame ─┬─> vision.downscale ─> vision.adaptive_threshold ─> vision.find_quads ─┐
-       └───────────────────────────────────────────────────────────> aruco.decode ─> markers
+frame ─┬─> vision.aruco_mask ─> vision.find_quads ─> aruco.decode ─> vision.refine_corners ─> markers
+       ├──────────────────────────────────────────────────┘                  │
+       └─────────────────────────────────────────────────────────────────────┘
 ```
 
-| Node | Input | Output |
-|---|---|---|
-| `vision.downscale` | frame (ISP half-size companion when present), factor (default 2) | `helios:gray8` |
-| `vision.adaptive_threshold` | `helios:gray8`, window, offset | `helios:binary` |
-| `vision.find_quads` | `helios:binary`, perimeter limits | `helios:quads` (with the image size they were found in) |
-| `aruco.decode` | frame (full-size luma in place), `helios:quads`, dictionary | `helios:aruco_markers` |
+| Node | Eidos stage | Input | Output |
+|---|---|---|---|
+| `vision.aruco_mask` | `ArucoMaskPrep` | frame (ISP half-size companion when present), radius, offset | `eidos:mask` |
+| `vision.find_quads` | `CandidateQuadFinder` | mask, min size, approximation | `helios:quads` (with the size they were found at) |
+| `aruco.decode` | `QuadDetectionDecoder` (Mean3x3 sampling) | frame (full size, in place), quads, dictionary | `helios:aruco_markers` |
+| `vision.refine_corners` | HeliOS edge fit, until Eidos has a sub-pixel stage | frame, markers | `helios:aruco_markers` |
 
-Quads are searched on the half-size image and decoded on the full frame:
-`aruco.decode` rescales the corners, refines them onto the sub-pixel marker
-edges (line fits along each side) and samples the bit cells. Dictionaries:
-`4x4_50` (OpenCV `DICT_4X4_50`) and `36h11` (AprilTag, FRC fields).
+Frames are read in place; Styx maps them CPU-cached, and Eidos reads
+CPU-mapped dma-bufs. Results (`MarkerList { markers: [MarkerValue {
+dictionary, id, corners, center, hamming }] }`) are structured `TypeExpr`s
+with stable keys.
 
-Results (`MarkerList { markers: [MarkerValue { dictionary, id, corners,
-center, hamming }] }`) are structured `TypeExpr`s with stable keys, so they
-are inspectable and serializable without extra glue.
-
-Nodes live in `helios-vision`, built as a Daedalus dylib plugin
-(`--features dylib`) that the engine loads from its plugin directories, and
-as an rlib for tests and tools (`helios-vision-probe`, examples).
+`helios-vision` builds as a Daedalus dylib plugin (`--features dylib`) for
+the engine's plugin directories, built in the same cargo invocation as the
+engine so both see the same `FrameLease` type.
 
 ### Measured (CM5, OV9782 1280x800 at 60 fps, one thread)
 
-Live graph tick through the probe, empty scene:
+Live graph tick through the probe:
 
 | Step | p50 | p99 | Process CPU |
 |---|---:|---:|---:|
-| First version | 5.19 ms | 5.56 ms | 33% of a core |
-| Faster ops, `opt-level = 3` | 1.58 ms | 2.00 ms | 11% |
-| Frame read in place (no luma copies) | 1.43 ms | 1.78 ms | 12% |
-| ISP half-size companion | 1.28 ms | 1.56 ms | 12% |
+| First HeliOS-only version | 5.19 ms | 5.56 ms | 33% of a core |
+| Faster ops, `opt-level = 3`, frames read in place, ISP half-size plane | 1.28 ms | 1.56 ms | 12% |
+| Eidos stages | 1.20 ms | 1.66 ms | 12% |
 
 Detection runs on one thread; the process has three more, Styx's capture
-threads, which are nearly idle. RSS is about 21 MiB.
+threads, which are nearly idle. RSS is about 21 MiB. On replay frames (real
+OV9782 backgrounds with composited markers) the graph finds 55/60 (4x4_50)
+and 58/60 (36h11) with no false positives, corners 0.2 px (median) from
+OpenCV's sub-pixel corners. Open: a monitor UI widget is a false 4x4_50 id
+17 on a live scene (raised with Eidos).
 
-Fat LTO optimises the whole program at the final binary's opt-level, so a
-per-crate override does not reach vision code linked into a size-optimised
-binary. Binaries that run vision (the engine, the probe) are built with
-`opt-level = 3`; at `"z"` the same detector takes twice as long.
-
-On real OV9782 frames with composited markers the detector finds what
-OpenCV finds (54 vs 55 of 60, no false positives) with corners within
-0.2 px (median) of OpenCV's sub-pixel corners.
+Both opt-levels matter under fat LTO: the Eidos crates' own (at `"z"` the
+graph was 4x slower) and the final binary's (engine, probe). Both are set
+to 3 in `backend/Cargo.toml`.
 
 ## Device contract
 

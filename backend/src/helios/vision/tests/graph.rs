@@ -10,13 +10,13 @@ use daedalus::{
     transport::{Payload, Residency, TypeKey},
 };
 use helios_vision::{
-    aruco::{
-        DICT_4X4_50,
-        render::{paste_warped, render_marker},
-    },
     graphs::aruco_graph_document,
     image::GrayImage,
     plugin::{FRAMELEASE_TYPE_KEY, MarkerList, VisionPlugin},
+    testing::{
+        DICT_4X4_50,
+        render::{paste_warped, render_marker},
+    },
 };
 use styx::{
     core::prelude::{BufferPool, ColorSpace, FourCc, FrameMeta, MediaFormat, Resolution, plane_layout_from_dims},
@@ -91,7 +91,7 @@ fn apriltag_graph_detects_36h11() {
     let document = aruco_graph_document(&registry, &plugin, "36h11").expect("build graph");
     let mut host = Engine::new(EngineConfig::default()).unwrap().compile_document(&registry, document).expect("compile");
     let mut scene = GrayImage::filled(640, 480, 120);
-    let marker = render_marker(&helios_vision::aruco::TAG_36H11, 586, 14, 1).unwrap();
+    let marker = render_marker(&helios_vision::testing::TAG_36H11, 586, 14, 1).unwrap();
     assert!(paste_warped(&mut scene, &marker, [[180.0, 100.0], [420.0, 110.0], [410.0, 360.0], [170.0, 350.0]]));
     let frame = grey_frame(&scene);
     let bytes = frame.payload_bytes() as u64;

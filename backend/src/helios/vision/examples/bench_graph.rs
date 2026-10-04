@@ -1,6 +1,8 @@
-//! Graph overhead: the compiled ArUco GraphDocument against the same stages
-//! called directly, on PGM frames wrapped as Styx frames.
+//! The ArUco GraphDocument on PGM frames wrapped as Styx frames: per-frame
+//! graph tick percentiles, process CPU and the markers found per file.
 //! `cargo run --release -p helios-vision --example bench_graph -- 4x4_50 <runs> a.pgm ...`
+//! With `HALF=1` each frame carries a CPU-made half-size pyramid companion,
+//! as the ISP provides on the device.
 
 use std::{num::NonZeroU32, str::FromStr, sync::Arc, time::Instant};
 
@@ -10,13 +12,12 @@ use daedalus::{
     transport::{Payload, Residency, TypeKey},
 };
 use helios_vision::{
-    aruco::{self, DecodeConfig, DetectorConfig, Dictionary},
-    graphs::aruco_graph_document,
+    graphs::{FRAME_INPUT, MARKERS_OUTPUT, aruco_graph_document},
     image::GrayImage,
-    plugin::{FRAMELEASE_TYPE_KEY, MarkerList, VisionPlugin, framelease_to_gray},
+    plugin::{FRAMELEASE_TYPE_KEY, MarkerList, VisionPlugin},
 };
 use styx::{
-    core::prelude::{BufferPool, ColorSpace, FourCc, FrameMeta, MediaFormat, Resolution, plane_layout_from_dims},
+    core::prelude::{BufferPool, ColorSpace, CompanionKind, FourCc, FrameMeta, MediaFormat, Resolution, plane_layout_from_dims},
     imports::framelease::FrameLease,
 };
 
@@ -33,51 +34,65 @@ fn grey_frame(image: &GrayImage) -> FrameLease {
     frame
 }
 
-fn report(name: &str, values: &mut [f64]) {
-    values.sort_by(f64::total_cmp);
-    let at = |q: f64| values[((values.len() - 1) as f64 * q).round() as usize];
-    let avg = values.iter().sum::<f64>() / values.len() as f64;
-    println!("{name:<16} avg {avg:.3} p50 {:.3} p90 {:.3} p95 {:.3} p99 {:.3} ms", at(0.5), at(0.9), at(0.95), at(0.99));
+fn cpu_seconds() -> f64 {
+    let stat = std::fs::read_to_string("/proc/self/stat").unwrap_or_default();
+    let fields: Vec<&str> = stat.rsplit_once(')').map(|(_, rest)| rest).unwrap_or("").split_whitespace().collect();
+    let ticks = |i: usize| fields.get(i).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+    (ticks(11) + ticks(12)) as f64 / 100.0
 }
 
 fn main() {
     let mut args = std::env::args().skip(1);
-    let dictionary_name = args.next().expect("dictionary");
-    let dictionary = Dictionary::by_name(&dictionary_name).expect("known dictionary");
+    let dictionary = args.next().expect("dictionary");
     let runs: usize = args.next().expect("runs").parse().expect("runs");
-    let frames: Vec<Arc<FrameLease>> = args.map(|path| Arc::new(grey_frame(&read_pgm(&path)))).collect();
+    let files: Vec<String> = args.collect();
+    let with_half = std::env::var_os("HALF").is_some();
+    let frames: Vec<Arc<FrameLease>> = files
+        .iter()
+        .map(|path| {
+            let image = read_pgm(path);
+            let frame = grey_frame(&image);
+            let frame = if with_half { frame.with_companion(CompanionKind::Pyramid { level: 1 }, grey_frame(&image.downscale2())).expect("companion") } else { frame };
+            Arc::new(frame)
+        })
+        .collect();
 
     let plugin = VisionPlugin::new();
     let mut registry = PluginRegistry::new();
     registry.install(&plugin).expect("install");
-    let document = aruco_graph_document(&registry, &plugin, &dictionary_name).expect("graph");
+    let document = aruco_graph_document(&registry, &plugin, &dictionary).expect("graph");
     let mut host = Engine::new(EngineConfig::default()).unwrap().compile_document(&registry, document).expect("compile");
-    host.set_latest_input("frame").unwrap();
+    host.set_latest_input(FRAME_INPUT).unwrap();
 
-    let config = DetectorConfig { decode: DecodeConfig { dictionary, ..DecodeConfig::default() }, ..DetectorConfig::default() };
-    let (mut graph, mut direct, mut copy) = (Vec::new(), Vec::new(), Vec::new());
-    let (mut graph_markers, mut direct_markers) = (0, 0);
-    for _ in 0..runs {
-        for frame in &frames {
+    let mut ticks = Vec::with_capacity(runs * frames.len());
+    let cpu_start = cpu_seconds();
+    let started = Instant::now();
+    for run in 0..runs {
+        for (frame, file) in frames.iter().zip(&files) {
             let t0 = Instant::now();
             let payload = Payload::shared_with(TypeKey::new(FRAMELEASE_TYPE_KEY), frame.clone(), Residency::Cpu, None, Some(frame.payload_bytes() as u64));
-            host.push_payload("frame", payload);
+            host.push_payload(FRAME_INPUT, payload);
             host.tick().expect("tick");
-            let markers: MarkerList = host.take("markers").unwrap_or_default();
-            graph_markers += markers.markers.len();
-            let t1 = Instant::now();
-            let gray = framelease_to_gray(frame).expect("luma");
-            let t2 = Instant::now();
-            direct_markers += aruco::detect(&gray.0, &config).len();
-            let t3 = Instant::now();
-            graph.push((t1 - t0).as_secs_f64() * 1e3);
-            copy.push((t2 - t1).as_secs_f64() * 1e3);
-            direct.push((t3 - t1).as_secs_f64() * 1e3);
+            let markers: MarkerList = host.take(MARKERS_OUTPUT).unwrap_or_default();
+            ticks.push(t0.elapsed().as_secs_f64() * 1e3);
+            if run == 0 {
+                let list: Vec<String> = markers.markers.iter().map(|m| format!("[{},{}]", m.id, m.corners.iter().map(|c| format!("[{:.2},{:.2}]", c.x, c.y)).collect::<Vec<_>>().join(","))).collect();
+                println!("{{\"file\":\"{file}\",\"markers\":[{}]}}", list.join(","));
+            }
         }
     }
-    let n = runs * frames.len();
-    println!("{n} frames; markers graph {graph_markers} direct {direct_markers}");
-    report("graph tick", &mut graph);
-    report("direct (copy+det)", &mut direct);
-    report("luma copy", &mut copy);
+    let (elapsed, cpu) = (started.elapsed().as_secs_f64(), cpu_seconds() - cpu_start);
+    ticks.sort_by(f64::total_cmp);
+    let at = |q: f64| ticks[((ticks.len() - 1) as f64 * q).round() as usize];
+    let avg = ticks.iter().sum::<f64>() / ticks.len() as f64;
+    eprintln!(
+        "{} frames{}: tick avg {avg:.3} p50 {:.3} p90 {:.3} p95 {:.3} p99 {:.3} ms; cpu {:.1}% of one core",
+        ticks.len(),
+        if with_half { " (with half-size companion)" } else { "" },
+        at(0.5),
+        at(0.9),
+        at(0.95),
+        at(0.99),
+        100.0 * cpu / elapsed
+    );
 }

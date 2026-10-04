@@ -126,6 +126,14 @@ daedalus-macros = { version = "2.0.0", path = "../../Daedalus/crates/macros" }
 lemnos = { path = "../../lemnos/crates/lemnos", default-features = false }
 orion = { path = "../../Orion/crates/orion", default-features = false }
 styx = { version = "2.0.0", path = "../../Styx/crates/styx", default-features = false }
+eidos-aruco = { path = "../../Eidos/crates/aruco", default-features = false }
+eidos-core = { path = "../../Eidos/crates/core", default-features = false }
+
+# Eidos depends on Styx by git; send it to the same local checkout so there is
+# one FrameLease type.
+[patch."https://github.com/Prometheus-Dynamics/Styx.git"]
+styx = { path = "../../Styx/crates/styx" }
+styx-core-rs = { path = "../../Styx/crates/core" }
 
 [profile.release]
 opt-level = "z"
@@ -134,9 +142,9 @@ codegen-units = 1
 strip = "symbols"
 panic = "unwind"
 
-# Services are built for size; binaries that run vision per frame are built
-# for speed. Fat LTO optimises the whole program at the final binary's level,
-# so the override must be on the binary, not only on helios-vision.
+# Services are built for size; per-frame vision code is built for speed. Both
+# levels matter under fat LTO: each crate's own (Eidos at "z" made the ArUco
+# graph 4x slower) and the final binary's (the engine and probe link vision).
 [profile.release.package.helios-vision]
 opt-level = 3
 
@@ -144,6 +152,34 @@ opt-level = 3
 opt-level = 3
 
 [profile.release.package.helios-vision-probe]
+opt-level = 3
+
+# Eidos (per-frame CV) is built for speed too.
+[profile.release.package.eidos-aruco]
+opt-level = 3
+
+[profile.release.package.eidos-calibration]
+opt-level = 3
+
+[profile.release.package.eidos-contour]
+opt-level = 3
+
+[profile.release.package.eidos-core]
+opt-level = 3
+
+[profile.release.package.eidos-frame]
+opt-level = 3
+
+[profile.release.package.eidos-geometry]
+opt-level = 3
+
+[profile.release.package.eidos-mask]
+opt-level = 3
+
+[profile.release.package.eidos-sampling]
+opt-level = 3
+
+[profile.release.package.eidos-scratch]
 opt-level = 3
 
 [profile.dev]
