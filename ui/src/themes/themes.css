@@ -1,0 +1,254 @@
+/*
+ * Themes. A theme is one block of tokens; components only ever use tokens, so
+ * a new theme is a new block (or a JSON of the same names, applied at runtime
+ * by `theme.svelte.ts`). Density and accent are separate knobs on <html>.
+ *
+ * Contract (every theme sets these):
+ *   surfaces  --s0 app · --s1 pane · --s2 raised/header · --s3 hover · --inset field
+ *   lines     --line · --line-strong
+ *   text      --fg · --fg-2 · --fg-3 · --fg-4 (disabled)
+ *   accent    --accent · --accent-fg (text on surfaces) · --on-accent
+ *   status    --ok · --warn · --err · --info
+ *   identity  --id-1 … --id-12 (object colours: cameras, pipelines, devices)
+ *   shape     --r-1 · --r-2 · --r-3
+ *   shadow    --shadow
+ */
+
+:root,
+[data-theme="glass"] {
+  color-scheme: dark;
+  --s0: #121419;
+  --s1: #171a20;
+  --s2: #1d2028;
+  --s3: #252935;
+  --inset: #0f1115;
+  --line: rgba(255, 255, 255, 0.07);
+  --line-strong: rgba(255, 255, 255, 0.14);
+  --fg: #eef0f5;
+  --fg-2: #a3a9b7;
+  --fg-3: #6f7686;
+  --fg-4: #4d5260;
+  --accent: #ff6b6b;
+  --accent-fg: #ff8a8a;
+  --on-accent: #ffffff;
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --err: #fb7185;
+  --info: #60a5fa;
+  --r-1: 3px;
+  --r-2: 5px;
+  --r-3: 7px;
+  --shadow: 0 18px 50px -12px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="graphite"] {
+  color-scheme: dark;
+  --s0: #0e0f11;
+  --s1: #141518;
+  --s2: #1a1b1f;
+  --s3: #222328;
+  --inset: #0a0b0c;
+  --line: #24262b;
+  --line-strong: #33363d;
+  --fg: #e6e7ea;
+  --fg-2: #9b9ea6;
+  --fg-3: #686b73;
+  --fg-4: #45474d;
+  --accent: #f5a524;
+  --accent-fg: #f7b955;
+  --on-accent: #17120a;
+  --ok: #3ccf7e;
+  --warn: #e8c547;
+  --err: #f0605d;
+  --info: #5aa9f7;
+  --r-1: 2px;
+  --r-2: 4px;
+  --r-3: 6px;
+  --shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.7);
+}
+
+[data-theme="midnight"] {
+  color-scheme: dark;
+  --s0: #000000;
+  --s1: #07090d;
+  --s2: #0d1118;
+  --s3: #141a24;
+  --inset: #000000;
+  --line: #161c27;
+  --line-strong: #243045;
+  --fg: #e8eefc;
+  --fg-2: #8d9ab3;
+  --fg-3: #5a6680;
+  --fg-4: #39425a;
+  --accent: #4c8dff;
+  --accent-fg: #7aaaff;
+  --on-accent: #ffffff;
+  --ok: #34d399;
+  --warn: #facc15;
+  --err: #f87171;
+  --info: #38bdf8;
+  --r-1: 3px;
+  --r-2: 4px;
+  --r-3: 6px;
+  --shadow: 0 16px 48px -10px rgba(40, 90, 200, 0.25);
+}
+
+[data-theme="daylight"] {
+  color-scheme: light;
+  --s0: #eef0f3;
+  --s1: #ffffff;
+  --s2: #f6f7f9;
+  --s3: #eceef2;
+  --inset: #f2f4f7;
+  --line: #e1e4ea;
+  --line-strong: #c9ced8;
+  --fg: #16191f;
+  --fg-2: #4d5563;
+  --fg-3: #7c8494;
+  --fg-4: #b3b9c4;
+  --accent: #e2453c;
+  --accent-fg: #c9342c;
+  --on-accent: #ffffff;
+  --ok: #16a34a;
+  --warn: #b7791f;
+  --err: #dc2626;
+  --info: #2563eb;
+  --r-1: 3px;
+  --r-2: 5px;
+  --r-3: 7px;
+  --shadow: 0 14px 40px -12px rgba(20, 30, 50, 0.22), 0 1px 3px rgba(20, 30, 50, 0.08);
+}
+
+/* Field: outdoors and pit lighting. Highest contrast, larger text, no subtlety. */
+[data-theme="field"] {
+  color-scheme: light;
+  --s0: #f4f4f0;
+  --s1: #ffffff;
+  --s2: #fbfbf8;
+  --s3: #ececE6;
+  --inset: #ffffff;
+  --line: #9a9a92;
+  --line-strong: #2a2a26;
+  --fg: #000000;
+  --fg-2: #1d1d1a;
+  --fg-3: #45453f;
+  --fg-4: #85857c;
+  --accent: #0047ff;
+  --accent-fg: #0038cc;
+  --on-accent: #ffffff;
+  --ok: #007a2e;
+  --warn: #9a5b00;
+  --err: #c40018;
+  --info: #0047ff;
+  --r-1: 2px;
+  --r-2: 3px;
+  --r-3: 4px;
+  --shadow: 0 0 0 2px #000000;
+  --font-size: 15px;
+}
+
+[data-theme="ember"] {
+  color-scheme: dark;
+  --s0: #141010;
+  --s1: #1b1514;
+  --s2: #221a18;
+  --s3: #2c221f;
+  --inset: #100c0c;
+  --line: rgba(255, 210, 190, 0.08);
+  --line-strong: rgba(255, 210, 190, 0.16);
+  --fg: #f5ebe6;
+  --fg-2: #bfa9a0;
+  --fg-3: #85716a;
+  --fg-4: #5a4a45;
+  --accent: #ff7a3d;
+  --accent-fg: #ff9a6b;
+  --on-accent: #1a0c05;
+  --ok: #8bd17c;
+  --warn: #f2c14e;
+  --err: #ff6b6b;
+  --info: #7fb3ff;
+  --r-1: 3px;
+  --r-2: 4px;
+  --r-3: 6px;
+  --shadow: 0 18px 50px -12px rgba(0, 0, 0, 0.65);
+}
+
+/* Identity colours: shared by all themes unless a theme overrides them. */
+:root {
+  --id-1: #ff6b6b;
+  --id-2: #ffa94d;
+  --id-3: #ffd43b;
+  --id-4: #a9e34b;
+  --id-5: #51cf66;
+  --id-6: #38d9a9;
+  --id-7: #3bc9db;
+  --id-8: #4dabf7;
+  --id-9: #748ffc;
+  --id-10: #9775fa;
+  --id-11: #da77f2;
+  --id-12: #f783ac;
+
+  --font-ui: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-code: "JetBrains Mono", ui-monospace, "SFMono-Regular", "Cascadia Code", Menlo, Consolas, monospace;
+
+  /* Density: the height of one control row. Compact is the default. */
+  --row: 26px;
+  --gap: 6px;
+  --pad: 10px;
+
+  --t-fast: 80ms;
+  --t-med: 130ms;
+  --ease-out: cubic-bezier(0.2, 0.9, 0.3, 1);
+
+  /* Legacy names used by the Atlas components, mapped onto the contract. */
+  --bg: var(--s0);
+  --rail: var(--s0);
+  --hairline: var(--line);
+  --glass: var(--s2);
+  --glass-hover: var(--s3);
+  --glass-strong: var(--s3);
+  --glass-border: var(--line);
+  --glass-border-strong: var(--line-strong);
+  --layer: var(--s2);
+  --layer-solid: var(--s2);
+  --scrim: rgba(0, 0, 0, 0.35);
+  --shadow-layer: var(--shadow);
+  --shadow-lift: var(--shadow);
+  --fg-muted: var(--fg-2);
+  --fg-faint: var(--fg-3);
+  --fg-disabled: var(--fg-4);
+  --accent-hover: color-mix(in oklab, var(--accent) 88%, white);
+  --accent-press: color-mix(in oklab, var(--accent) 88%, black);
+  --accent-text: var(--accent-fg);
+  --accent-text-strong: var(--accent-fg);
+  --accent-tint: color-mix(in oklab, var(--accent) 12%, transparent);
+  --accent-tint-hover: color-mix(in oklab, var(--accent) 18%, transparent);
+  --accent-tint-strong: color-mix(in oklab, var(--accent) 24%, transparent);
+  --accent-ring: color-mix(in oklab, var(--accent) 60%, transparent);
+  --accent-glow: color-mix(in oklab, var(--accent) 35%, transparent);
+  --ok-bg: color-mix(in oklab, var(--ok) 13%, transparent);
+  --ok-fg: var(--ok);
+  --warn-bg: color-mix(in oklab, var(--warn) 14%, transparent);
+  --warn-fg: var(--warn);
+  --err-bg: color-mix(in oklab, var(--err) 13%, transparent);
+  --err-fg: var(--err);
+  --info-bg: color-mix(in oklab, var(--info) 13%, transparent);
+  --info-fg: var(--info);
+  --neutral-bg: var(--s3);
+  --offline: var(--fg-4);
+  --r-sm: var(--r-1);
+  --r-md: var(--r-2);
+  --r-card: var(--r-3);
+  --r-panel: var(--r-3);
+  --r-pill: 99px;
+  --t-enter: 0ms;
+  --t-data: 0ms;
+  --stagger: 0ms;
+}
+
+:root[data-density="comfortable"] {
+  --row: 32px;
+  --gap: 8px;
+  --pad: 14px;
+}
+

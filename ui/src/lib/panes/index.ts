@@ -1,0 +1,60 @@
+// Every pane this build provides. Adding a pane: write the component, add a
+// line here; it appears in every "Add pane" menu and the palette.
+
+import { identity } from "$lib/core/identity.svelte";
+import { cluster } from "$lib/stores/cluster.svelte";
+import { definePane } from "$lib/workspace/panes";
+import BoardPane from "./BoardPane.svelte";
+import CalibrationPane from "./CalibrationPane.svelte";
+import CameraControlsPane from "./CameraControlsPane.svelte";
+import CameraListPane from "./CameraListPane.svelte";
+import CameraMosaicPane from "./CameraMosaicPane.svelte";
+import CameraViewPane from "./CameraViewPane.svelte";
+import CatalogPane from "./CatalogPane.svelte";
+import DevicesPane from "./DevicesPane.svelte";
+import FieldPane from "./FieldPane.svelte";
+import GraphPane from "./GraphPane.svelte";
+import InspectorPane from "./InspectorPane.svelte";
+import LogsPane from "./LogsPane.svelte";
+import MountsPane from "./MountsPane.svelte";
+import PeripheralsPane from "./PeripheralsPane.svelte";
+import PipelinesPane from "./PipelinesPane.svelte";
+import ProcessesPane from "./ProcessesPane.svelte";
+import ProfilerPane from "./ProfilerPane.svelte";
+import Robot3DPane from "./Robot3DPane.svelte";
+import SettingsPane from "./SettingsPane.svelte";
+import SetupPane from "./SetupPane.svelte";
+import StatusPane from "./StatusPane.svelte";
+import StreamsPane from "./StreamsPane.svelte";
+import SystemPane from "./SystemPane.svelte";
+import WelcomePane from "./WelcomePane.svelte";
+
+const pinnedCamera = (p: Record<string, unknown>) => (p.camera ? identity.name(p.camera as string, cluster.camera(p.camera as string)?.name ?? "") : null);
+const pinnedWorkload = (p: Record<string, unknown>) => (p.workload ? identity.name(p.workload as string, cluster.workload(p.workload as string)?.name ?? "") : null);
+const pinnedDevice = (p: Record<string, unknown>) => (p.device ? identity.name(p.device as string, cluster.node(p.device as string)?.name ?? "") : null);
+const id = (k: string) => (p: Record<string, unknown>) => (p[k] as string) ?? null;
+
+definePane({ type: "setup", title: "Setup checklist", icon: "list-check", group: "System", summary: "What this robot still needs, step by step", component: SetupPane });
+definePane({ type: "status", title: "Robot status", icon: "heartbeat", group: "System", summary: "What needs attention, and every device's load", component: StatusPane });
+definePane({ type: "camera", title: "Camera", icon: "camera", group: "Vision", summary: "One live camera with overlays, ROI and histogram", component: CameraViewPane, label: pinnedCamera, identityOf: id("camera") });
+definePane({ type: "mosaic", title: "All cameras", icon: "layout-grid", group: "Vision", summary: "Every camera at once, tiled to fit", component: CameraMosaicPane });
+definePane({ type: "cameras", title: "Cameras", icon: "aperture", group: "Vision", summary: "List of cameras by device", component: CameraListPane });
+definePane({ type: "camera-controls", title: "Camera controls", icon: "adjustments-horizontal", group: "Vision", summary: "Exposure, gain, ISP, ROI and transport", component: CameraControlsPane, label: (p) => (pinnedCamera(p) ? `${pinnedCamera(p)} controls` : null), identityOf: id("camera") });
+definePane({ type: "calibration", title: "Calibration", icon: "grid-4x4", group: "Vision", summary: "Guided camera calibration", component: CalibrationPane });
+definePane({ type: "board", title: "Board maker", icon: "printer", group: "Vision", summary: "Printable chessboard, ChArUco or AprilGrid", component: BoardPane });
+definePane({ type: "pipelines", title: "Pipelines", icon: "list-details", group: "Pipelines", summary: "Every pipeline with its state and speed", component: PipelinesPane });
+definePane({ type: "graph", title: "Graph", icon: "schema", group: "Pipelines", summary: "Edit a pipeline's node graph", component: GraphPane, label: pinnedWorkload, identityOf: id("workload") });
+definePane({ type: "catalog", title: "Nodes", icon: "box-multiple", group: "Pipelines", summary: "Node types from the installed plugins", component: CatalogPane });
+definePane({ type: "profiler", title: "Profiler", icon: "stopwatch", group: "Pipelines", summary: "Per-node timing against the frame budget", component: ProfilerPane, label: pinnedWorkload, identityOf: id("workload") });
+definePane({ type: "streams", title: "Streams", icon: "broadcast", group: "Pipelines", summary: "What pipelines publish and where it goes", component: StreamsPane });
+definePane({ type: "robot3d", title: "Robot 3D", icon: "cube", group: "Robot", summary: "Cameras, fields of view, tags and your CAD", component: Robot3DPane });
+definePane({ type: "mounts", title: "Mounts", icon: "ruler-2", group: "Robot", summary: "Camera positions on the robot and the CAD model", component: MountsPane });
+definePane({ type: "field", title: "Field", icon: "map", group: "Robot", summary: "Field layout editor (WPILib JSON)", component: FieldPane });
+definePane({ type: "devices", title: "Devices", icon: "server", group: "Hardware", summary: "Every device with live load", component: DevicesPane });
+definePane({ type: "processes", title: "Processes", icon: "terminal-2", group: "Hardware", summary: "Cores and processes: pause, kill, pin", component: ProcessesPane, label: pinnedDevice, identityOf: id("device") });
+definePane({ type: "peripherals", title: "Peripherals", icon: "plug", group: "Hardware", summary: "Fan curve, LEDs, GPIO, IMU, power", component: PeripheralsPane, label: pinnedDevice, identityOf: id("device") });
+definePane({ type: "system", title: "Updates & recovery", icon: "versions", group: "Hardware", summary: "Boot slots, updates, services, recovery", component: SystemPane, label: pinnedDevice, identityOf: id("device") });
+definePane({ type: "inspector", title: "Inspector", icon: "info-circle", group: "Tools", summary: "Whatever is selected, editable", component: InspectorPane });
+definePane({ type: "logs", title: "Logs", icon: "file-text", group: "Tools", summary: "Logs from every device", component: LogsPane });
+definePane({ type: "settings", title: "Settings", icon: "settings", group: "System", summary: "Themes, names and colours, layouts, backup", component: SettingsPane });
+definePane({ type: "welcome", title: "Empty", icon: "plus", group: "Tools", summary: "Pick a pane for this spot", component: WelcomePane });
