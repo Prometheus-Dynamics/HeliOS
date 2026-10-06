@@ -122,12 +122,14 @@ A camera:
                    "latency_p95_ms": 10.4, "cpu_per_frame_us": 300, "exposure_us": 2200,
                    "analogue_gain": 4, "digital_gain": 1, "ae_state": "converged" }]
   },
-  "live_error": null, "settings_writable": true, "preview_available": false
+  "live_error": null, "service_online": true, "settings_writable": true, "preview_available": false
 }
 ```
 
 `settings_writable` is true when the camera has a Styx camera service; its settings say which
-controls can be changed.
+controls can be changed. `service_online` says whether the API's control client of that
+service is connected now (from Styx's connection events; `null` before the API made one); each
+change is also sent as a `camera` event (`change: "online"` or `"offline"`).
 
 #### Camera settings and controls
 

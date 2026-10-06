@@ -81,6 +81,9 @@ pub struct Camera {
     /// Live facts from the camera service; `null` with `live_error` when it did not answer.
     pub live: Option<CameraLive>,
     pub live_error: Option<String>,
+    /// Whether the API's control client is connected to the camera service now (Styx's
+    /// connection events); `null` when the API keeps no client for the camera.
+    pub service_online: Option<bool>,
     /// Whether settings can be changed through the API: the camera has a Styx camera service
     /// (which controls are writable is in its settings).
     pub settings_writable: bool,
@@ -114,6 +117,7 @@ fn base_camera(record: &orion::control_plane::ResourceRecord, view: &StateView, 
         frames_endpoint,
         live: None,
         live_error: None,
+        service_online: None,
         id,
     }
 }
@@ -159,7 +163,8 @@ pub async fn live_facts(socket: PathBuf) -> Result<CameraLive, String> {
     }
 }
 
-async fn with_live(mut camera: Camera, record: &orion::control_plane::ResourceRecord) -> Camera {
+async fn with_live(state: &SharedState, mut camera: Camera, record: &orion::control_plane::ResourceRecord) -> Camera {
+    camera.service_online = state.cameras.online(&camera.id).await;
     match frames_socket(&record.endpoints) {
         Some(socket) => match live_facts(socket).await {
             Ok(live) => camera.live = Some(live),
@@ -173,7 +178,7 @@ async fn with_live(mut camera: Camera, record: &orion::control_plane::ResourceRe
 pub async fn list(State(state): State<SharedState>) -> ApiResult<Json<Vec<Camera>>> {
     let view = state.orion.view().await?;
     let mounts = state.store.mounts().await?;
-    let futures = camera_records(&view).map(|record| with_live(base_camera(record, &view, &state.config.node_id, &mounts), record));
+    let futures = camera_records(&view).map(|record| with_live(&state, base_camera(record, &view, &state.config.node_id, &mounts), record));
     Ok(Json(futures_util::future::join_all(futures).await))
 }
 
@@ -187,7 +192,7 @@ async fn find(state: &SharedState, id: &str) -> ApiResult<(StateView, orion::con
 pub async fn get_one(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Json<Camera>> {
     let (view, record) = find(&state, &id).await?;
     let mounts = state.store.mounts().await?;
-    Ok(Json(with_live(base_camera(&record, &view, &state.config.node_id, &mounts), &record).await))
+    Ok(Json(with_live(&state, base_camera(&record, &view, &state.config.node_id, &mounts), &record).await))
 }
 
 /// A camera's settings: its controls as the camera service lists them (range, default, value
