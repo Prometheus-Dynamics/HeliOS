@@ -3,7 +3,7 @@
 //! ```sh
 //! helios-vision-probe [--dict 36h11|4x4_50 | --graph FILE] [--plugin LIB] [--size 1280x800]
 //!                     [--fps 30] [--frames 300] [--camera <name filter>] [--no-pyramid]
-//!                     [--metrics off|basic|timing|detailed|profile]
+//!                     [--metrics off|basic|timing|detailed|profile] [--frame-overhead TICKS]
 //! ```
 //!
 //! Loads the Eidos plugin library (`libhelios_eidos_plugin.so`, built in the same cargo build as
@@ -12,7 +12,10 @@
 //! drives the graph from them: the capture thread pushes each `FrameLease` into a latest-only
 //! host input without copying it, and the graph thread runs `HostGraph::drive_blocking`, one
 //! tick per frame. It prints detections, the frame rate, the push-to-outputs latency and, with
-//! `--metrics`, Daedalus's per-node timings, then a JSON summary.
+//! `--metrics`, Daedalus's per-node timings, then a JSON summary. `--frame-overhead` adds
+//! Daedalus's `FrameOverheadReport` over the last TICKS ticks (host push and take, input
+//! collection, adapters, handlers, framing, drain, per-edge queue time, copies), the breakdown
+//! helios-engine publishes in a session's `metrics` artifact.
 //!
 //! Timings are only meaningful on the target board (the Raze CM5); build with
 //! `cargo build --release -p helios-vision-probe -p helios-eidos-plugin`.
@@ -28,7 +31,7 @@ use daedalus::{
     dylib::InstallPath,
     engine::{Engine, EngineConfig, GpuBackend, MetricsLevel, RuntimeMode},
     planner::GraphDocument,
-    runtime::{ExecutionTelemetry, plugins::PluginRegistry},
+    runtime::{ExecutionTelemetry, FrameOverheadReport, plugins::PluginRegistry},
 };
 use styx::core::daedalus::{StyxFramesPlugin, frame_payload};
 use styx::prelude::*;
@@ -40,7 +43,8 @@ const FRAME_INPUT: &str = "frame";
 const DETECTIONS_OUTPUT: &str = "detections";
 const PLUGIN_FILE: &str = "libhelios_eidos_plugin.so";
 const PLUGIN_DIR: &str = "/usr/lib/helios/plugins/daedalus";
-const USAGE: &str = "usage: helios-vision-probe [--dict 36h11|4x4_50 | --graph FILE] [--plugin LIB] [--size WxH] [--fps N] [--frames N] [--camera NAME] [--no-pyramid] [--metrics LEVEL]";
+const USAGE: &str =
+    "usage: helios-vision-probe [--dict 36h11|4x4_50 | --graph FILE] [--plugin LIB] [--size WxH] [--fps N] [--frames N] [--camera NAME] [--no-pyramid] [--metrics LEVEL] [--frame-overhead TICKS]";
 
 struct Args {
     document: String,
@@ -52,6 +56,8 @@ struct Args {
     /// Ask the ISP for a half-size luma companion (mask prep thresholds it).
     pyramid: bool,
     metrics: MetricsLevel,
+    /// Record Daedalus's frame-path overhead over this many ticks.
+    frame_overhead: Option<usize>,
 }
 
 fn default_plugin() -> PathBuf {
@@ -74,7 +80,8 @@ fn parse_metrics(value: &str) -> Result<MetricsLevel, String> {
 }
 
 fn parse_args() -> Result<Args, String> {
-    let mut args = Args { document: APRILTAG_DOCUMENT.into(), plugin: default_plugin(), size: (1280, 800), fps: 30, frames: 300, camera: None, pyramid: true, metrics: MetricsLevel::Off };
+    let mut args =
+        Args { document: APRILTAG_DOCUMENT.into(), plugin: default_plugin(), size: (1280, 800), fps: 30, frames: 300, camera: None, pyramid: true, metrics: MetricsLevel::Off, frame_overhead: None };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
         let mut value = || it.next().ok_or_else(|| format!("{flag} needs a value"));
@@ -101,6 +108,7 @@ fn parse_args() -> Result<Args, String> {
             "--camera" => args.camera = Some(value()?),
             "--no-pyramid" => args.pyramid = false,
             "--metrics" => args.metrics = parse_metrics(&value()?)?,
+            "--frame-overhead" => args.frame_overhead = Some(value()?.parse().map_err(|_| "bad --frame-overhead")?),
             "-h" | "--help" => return Err(USAGE.into()),
             other => return Err(format!("unknown argument {other}\n{USAGE}")),
         }
@@ -146,13 +154,17 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut config = EngineConfig { gpu: GpuBackend::Cpu, ..EngineConfig::default() }.with_metrics_level(args.metrics);
     config.planner.enable_gpu = false;
     config.runtime.mode = RuntimeMode::Serial;
+    if let Some(window) = args.frame_overhead {
+        config = config.with_frame_overhead(window);
+    }
     let mut host = Engine::new(config)?.compile_document(&registry, document)?;
     host.set_latest_input(FRAME_INPUT)?;
     let explanation = host.explain_plan();
     let labels: Vec<String> = explanation.nodes.iter().map(|node| node.label.clone().unwrap_or_else(|| node.id.clone())).collect();
     for edge in &explanation.edges {
         if !edge.adapter_steps.is_empty() {
-            println!("plan: {}.{} -> {}.{} adapters {:?}", labels[edge.from_node], edge.from_port, labels[edge.to_node], edge.to_port, edge.adapter_steps);
+            let flags = [(edge.copies_frame, " copies_frame"), (edge.crosses_residency, " crosses_residency")].iter().filter(|(set, _)| *set).map(|(_, flag)| *flag).collect::<String>();
+            println!("plan: {}.{} -> {}.{} adapters {:?}{flags}", labels[edge.from_node], edge.from_port, labels[edge.to_node], edge.to_port, edge.adapter_steps);
         }
     }
     println!("plan: {} nodes, {} edges, {} with adapters", explanation.nodes.len(), explanation.edges.len(), explanation.edges.iter().filter(|edge| !edge.adapter_steps.is_empty()).count());
@@ -177,7 +189,7 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let pushed_at: Arc<Mutex<Option<Instant>>> = Arc::default();
     let graph_thread = {
         let (stop, pushed_at) = (stop.clone(), pushed_at.clone());
-        std::thread::Builder::new().name("probe-graph".into()).spawn(move || -> Result<Stats, String> {
+        std::thread::Builder::new().name("probe-graph".into()).spawn(move || -> Result<(Stats, Option<FrameOverheadReport>), String> {
             let mut stats = Stats::default();
             let mut last_report = Instant::now();
             host.drive_blocking(&stop, |host, turn| {
@@ -203,7 +215,7 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 Ok(())
             })
             .map_err(|error| error.to_string())?;
-            Ok(stats)
+            Ok((stats, host.frame_overhead()))
         })?
     };
 
@@ -222,7 +234,10 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Let the last frame finish, then stop the graph thread.
     std::thread::sleep(Duration::from_millis(200));
     stop.stop();
-    let mut stats = graph_thread.join().map_err(|_| "graph thread panicked")??;
+    let (mut stats, frame_overhead) = graph_thread.join().map_err(|_| "graph thread panicked")??;
+    if let Some(report) = &frame_overhead {
+        print!("{report}");
+    }
 
     let elapsed = started.elapsed().as_secs_f64();
     let process = ProcessSample::read();
@@ -240,6 +255,7 @@ fn run(args: Args) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "graph_ms": if stats.graph_ms.is_empty() { serde_json::Value::Null } else { percentiles(&mut stats.graph_ms) },
         "metrics_level": format!("{:?}", args.metrics),
         "nodes": nodes,
+        "frame_overhead": frame_overhead,
         "process": {
             "cpu_percent_of_one_core": 100.0 * cpu_seconds / elapsed,
             "cpu_ms_per_frame": cpu_seconds * 1e3 / captured.max(1) as f64,
