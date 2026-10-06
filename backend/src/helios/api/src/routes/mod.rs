@@ -55,7 +55,7 @@ pub fn router(state: SharedState) -> Router {
         // Cameras
         .route("/v1/cameras", get(cameras::list))
         .route("/v1/cameras/{id}", get(cameras::get_one))
-        .route("/v1/cameras/{id}/settings", get(cameras::get_settings).patch(cameras::set_settings))
+        .route("/v1/cameras/{id}/settings", get(cameras::get_settings).patch(cameras::set_settings).delete(cameras::reset_settings))
         .route("/v1/cameras/{id}/mount", get(cameras::get_mount).put(cameras::put_mount).delete(cameras::delete_mount))
         .route("/v1/cameras/{id}/preview", get(cameras::preview))
         .route("/v1/cameras/{id}/calibration", get(cameras::calibration).post(cameras::calibration))

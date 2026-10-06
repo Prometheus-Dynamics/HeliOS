@@ -1,5 +1,5 @@
 use anyhow::Context;
-use helios_api::{ApiConfig, AppState, events, router};
+use helios_api::{ApiConfig, AppState, events, router, routes};
 use tracing::info;
 
 #[tokio::main]
@@ -9,6 +9,8 @@ async fn main() -> anyhow::Result<()> {
     let bind = config.bind;
     let state = AppState::new(config);
     let _watcher = events::spawn_state_watcher(state.clone());
+    // Stored camera settings are applied whenever a camera service appears.
+    let _cameras = routes::cameras::spawn_camera_settings_keeper(state.clone());
     let listener = tokio::net::TcpListener::bind(bind).await.with_context(|| format!("failed to bind {bind}"))?;
     info!(%bind, "helios-api listening");
     info!(mode = state.auth.mode().as_str(), "device security");

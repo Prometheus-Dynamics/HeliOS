@@ -97,8 +97,9 @@ as unavailable and not retry.
 |---|---|---|---|
 | `GET` | `/v1/cameras` | Orion + Styx | Camera resources with `live` facts, or `live_error` when the camera service did not answer |
 | `GET` | `/v1/cameras/{id}` | Orion + Styx | One camera |
-| `GET` | `/v1/cameras/{id}/settings` | Styx | The camera's controls (range, default, value now, standard control, `writable`) plus the capture's mode, fps and measured exposure and gains |
-| `PATCH` | `/v1/cameras/{id}/settings` | Styx | Change controls: `{"ae": false, "exposure_us": 8000}`. Returns what is in effect (`clamped`, `deferred`, `restarted`). Resolution and pyramid levels are set per pipeline (see bindings) |
+| `GET` | `/v1/cameras/{id}/settings` | Styx + API store | The camera's controls (range, default, value now, standard control, `writable`, `persisted`) plus the capture's mode, fps and measured exposure and gains, and the values kept across reboots (`persisted`) |
+| `PATCH` | `/v1/cameras/{id}/settings` | Styx + API store | Change controls: `{"ae": false, "exposure_us": 8000}`. Returns what is in effect (`clamped`, `deferred`, `restarted`) and the values now kept across reboots. Resolution and pyramid levels are set per pipeline (see bindings) |
+| `DELETE` | `/v1/cameras/{id}/settings` | Styx + API store | Reset to defaults: every writable control back to its default, and the stored values forgotten. Same answer as `PATCH` |
 | `GET` `PUT` `DELETE` | `/v1/cameras/{id}/mount` | API store | Robot-frame mount: `{x, y, z, roll, pitch, yaw}` in metres and degrees (x forward, y left, z up) |
 | `GET` | `/v1/cameras/{id}/preview` | — | **501**. A future MJPEG stream fed from Styx frames, never decoded images in JSON |
 | `GET` `POST` | `/v1/cameras/{id}/calibration` | — | **501** |
@@ -140,12 +141,15 @@ those did not answer):
   "writable": true,
   "controls": [
     { "id": 4093640705, "name": "exposure_time_us", "kind": "uint", "read_only": false, "min": 10, "max": 33000,
-      "default": 10, "step": null, "menu": null, "current": 8000, "standard": "exposure_us", "writable": true },
+      "default": 10, "step": null, "menu": null, "current": 8000, "standard": "exposure_us", "writable": true,
+      "persisted": true },
     { "id": 4093640709, "name": "ae_enable", "kind": "bool", "read_only": false, "min": false, "max": true,
-      "default": true, "step": null, "menu": null, "current": false, "standard": "ae", "writable": true }
+      "default": true, "step": null, "menu": null, "current": false, "standard": "ae", "writable": true,
+      "persisted": true }
   ],
   "mode": "1280x800 GREY @60", "fps": 60, "exposure_us": 8000, "analogue_gain": 4, "digital_gain": 1,
-  "ae_state": "idle", "live_error": null
+  "ae_state": "idle", "live_error": null,
+  "persisted": { "ae": false, "exposure_us": 8000 }
 }
 ```
 
@@ -174,7 +178,8 @@ lists each change in the order applied:
 { "applied": [
   { "control": "ae", "id": 4093640709, "requested": false, "value": false, "clamped": false, "deferred": false, "restarted": false, "frame": null },
   { "control": "exposure_us", "id": 4093640705, "requested": 100000, "value": 33000, "clamped": true, "deferred": false, "restarted": false, "frame": 1532 }
-] }
+],
+  "persisted": { "ae": false, "exposure_us": 100000 } }
 ```
 
 `deferred`: the camera is not streaming and the value applies when it starts. `frame`: on
@@ -186,9 +191,26 @@ client of the camera, is sent as a `camera` event (`change: "control"`, see
 [Event stream](./websockets.md)). Changes need a signed-in session or token when the device is
 secured, like every mutation.
 
-The API is one client of each camera service: it asks for the luma frames the engine asks for
-by default and drops each one as it arrives (Styx serves controls to frame clients only), so
-it shows up in the camera's `clients`.
+The API talks to each camera service with a Styx control client: it takes no frames, so it
+never joins the camera's capture plan, holds no buffers, never starts or restarts the capture
+by connecting, and does not show up in the camera's `clients`. It connects in the background
+and comes back when the camera service restarts.
+
+##### Settings persist across reboots
+
+HeliOS keeps the values set through the API: every accepted change (standard keys, and the
+camera's own controls by name, as asked for; not `af_trigger`, which is an action) is stored
+in the API's state directory (`/var/lib/helios/api/camera-settings.json`, on the data
+partition, so it survives reboots and OTA updates). Whenever the camera service appears (at
+boot, or after it restarted) the API applies the stored values again, modes first, and sends a
+`camera` event (`change: "restored"`, with what was applied and any key the camera no
+longer takes). A camera that is not streaming takes them as deferred values, applied when its
+capture starts. `persisted` in the settings lists the stored values, and each control says
+whether one is kept for it (`persisted: true`).
+
+`DELETE /v1/cameras/{id}/settings` resets the camera to defaults: it forgets the stored
+values and sets every writable control back to its default, and answers like `PATCH`
+(`persisted` is then empty). Changes made by other clients of the camera are not stored.
 
 ### Pipelines and outputs
 

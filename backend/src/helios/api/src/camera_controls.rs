@@ -1,36 +1,44 @@
-//! Camera controls through each camera's Styx camera service: list, read and set them
-//! (`FrameClient::controls`, `set_control`), and forward every control change on the camera, by
-//! any client, as an SSE `camera` event (`FrameClient::control_events`).
+//! Camera controls through each camera's Styx camera service: list, read and set them, forward
+//! every control change on the camera, by any client, as an SSE `camera` event, and keep the
+//! values set through the API across reboots.
 //!
-//! Styx serves controls to a camera's frame clients only, so the API keeps one client per camera
-//! service, opened on first use and kept: it asks for the luma frames the engine asks for by
-//! default (so joining does not make the camera service plan another capture) and drops each
-//! frame as it arrives, so it never holds camera buffers. Control requests are blocking IPC and
-//! run on Tokio's blocking pool.
+//! The API keeps one Styx `ControlClient` per camera (`ControlClient::options(path)
+//! .reconnecting().controls_nonblocking()`): it makes no frame request, so it never joins the
+//! camera's frame plan, holds no buffers and never starts or restarts the capture by connecting
+//! (Styx `docs/frame-server.md`, "Control clients (no frames)"). It connects in the background
+//! and comes back after the camera service restarts. Requests are awaited on Styx's reactor
+//! (`controls_async`, `set_control_async`), never blocking a runtime thread.
+//!
+//! **Persistence:** the values set through the API (standard keys and the camera's own controls,
+//! by name) are stored in the API's state directory (`Store::persist_camera_settings`, on the
+//! data partition) and re-applied every time the client (re)connects to the camera service: at
+//! boot, and after the camera service restarts. A camera that is not streaming takes them as
+//! deferred values, applied when its capture starts. Resetting to defaults forgets them.
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
+    future::poll_fn,
     path::{Path, PathBuf},
     sync::Arc,
+    task::Poll,
     time::Duration,
 };
 
 use serde::Serialize;
 use styx::{
-    ipc::{AppliedControl, ControlDescriptor, ControlEvent, ControlEvents, ControlRefusal, ControlTarget, FrameClient, IpcError, SERVICE_FRAME_RATE, StandardControl},
-    prelude::{Access, ControlId, ControlKind, ControlValue, Frames, RecvOutcome},
+    ipc::{AppliedControl, ControlClient, ControlDescriptor, ControlEvent, ControlRefusal, ControlTarget, IpcError, SERVICE_FRAME_RATE, StandardControl},
+    prelude::{Access, ControlId, ControlKind, ControlValue, RecvOutcome},
 };
-use tokio::{io::unix::AsyncFd, sync::Mutex};
+use tokio::{sync::Mutex, task::JoinHandle};
 
 use crate::{
     error::{ApiError, ApiResult},
     events::EventHub,
+    store::Store,
 };
 
-/// How long opening the camera service, or one control request, may take.
+/// How long one connection attempt to the camera service, or one control request, may take.
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(3);
-/// Between attempts to follow a camera service's control changes again after it went away.
-const RESUBSCRIBE_EVERY: Duration = Duration::from_secs(2);
 
 /// The API's names for Styx's standard controls (in Styx's units), and how values are sent.
 const STANDARD: [(&str, StandardControl); 12] = [
@@ -50,6 +58,9 @@ const STANDARD: [(&str, StandardControl); 12] = [
 
 /// Modes are applied before the values they gate (`{"ae": false, "exposure_us": 8000}`).
 const MODES_FIRST: [StandardControl; 3] = [StandardControl::AeEnable, StandardControl::AwbEnable, StandardControl::AfMode];
+
+/// Control kinds a value can be stored and reset for.
+const SCALAR_KINDS: [ControlKind; 6] = [ControlKind::Bool, ControlKind::Int, ControlKind::Uint, ControlKind::Float, ControlKind::Menu, ControlKind::IntMenu];
 
 pub fn standard_key(control: StandardControl) -> &'static str {
     STANDARD.iter().find(|(_, standard)| *standard == control).map_or("", |(key, _)| key)
@@ -76,11 +87,14 @@ pub struct CameraControl {
     pub standard: Option<&'static str>,
     /// The camera service lets the API change it.
     pub writable: bool,
+    /// A value set through the API is stored for it and re-applied after a reboot.
+    pub persisted: bool,
 }
 
-impl From<&ControlDescriptor> for CameraControl {
-    fn from(descriptor: &ControlDescriptor) -> Self {
+impl CameraControl {
+    fn new(descriptor: &ControlDescriptor, persisted: &BTreeMap<String, serde_json::Value>) -> Self {
         let meta = &descriptor.meta;
+        let standard = descriptor.standard.map(standard_key);
         Self {
             id: meta.id.0,
             name: meta.name.clone(),
@@ -92,7 +106,8 @@ impl From<&ControlDescriptor> for CameraControl {
             step: meta.step.as_ref().map(value_json),
             menu: meta.menu.clone(),
             current: descriptor.current.as_ref().map(value_json),
-            standard: descriptor.standard.map(standard_key),
+            persisted: persisted.contains_key(meta.name.as_str()) || standard.is_some_and(|key| persisted.contains_key(key)),
+            standard,
             writable: descriptor.writable,
         }
     }
@@ -138,47 +153,80 @@ pub struct ControlChange {
     pub key: String,
     pub target: ControlTarget,
     pub value: ControlValue,
+    /// Where its value is stored: the standard key, or the control's listed name; `None` for an
+    /// action (an AF trigger), which is not kept.
+    pub persist_as: Option<String>,
 }
 
-/// The camera clients the API keeps, one per camera service socket.
-#[derive(Default)]
+/// The camera clients the API keeps, one per camera.
 pub struct CameraControls {
-    clients: Mutex<HashMap<PathBuf, Arc<ControlClient>>>,
+    clients: Mutex<HashMap<String, Arc<CameraClient>>>,
+    store: Arc<Store>,
+    events: Arc<EventHub>,
 }
 
-/// The API's client of one camera service.
-pub struct ControlClient {
-    client: Arc<FrameClient>,
+/// The API's client of one camera's service.
+pub struct CameraClient {
+    camera_id: String,
+    socket: PathBuf,
+    client: Arc<ControlClient>,
+    store: Arc<Store>,
+    /// Follows the camera's control changes and re-applies the stored values on (re)connect.
+    follower: Option<JoinHandle<()>>,
+}
+
+impl Drop for CameraClient {
+    fn drop(&mut self) {
+        if let Some(follower) = self.follower.take() {
+            follower.abort();
+        }
+    }
 }
 
 impl CameraControls {
-    /// The client of the camera service at `socket` (opened, and its control changes followed as
-    /// `camera` events for `camera_id`, on first use).
-    pub async fn client(&self, camera_id: &str, socket: &Path, events: Arc<EventHub>) -> ApiResult<Arc<ControlClient>> {
+    pub fn new(store: Arc<Store>, events: Arc<EventHub>) -> Self {
+        Self { clients: Mutex::new(HashMap::new()), store, events }
+    }
+
+    /// The client of camera `camera_id`'s service at `socket`: made on first use (or when the
+    /// camera moved to another socket) without waiting for the service; its control changes are
+    /// followed as `camera` events and the stored values applied whenever it connects.
+    pub async fn client(&self, camera_id: &str, socket: &Path) -> ApiResult<Arc<CameraClient>> {
         let mut clients = self.clients.lock().await;
-        if let Some(client) = clients.get(socket) {
+        if let Some(client) = clients.get(camera_id)
+            && client.socket == socket
+        {
             return Ok(client.clone());
         }
-        let path = socket.to_path_buf();
-        let (client, subscription) = blocking(move || {
-            let client = FrameClient::options(&path).timeout(CONTROL_TIMEOUT).reconnecting().request(&Frames::gray().latest())?;
-            let subscription = client.control_events()?;
-            Ok((Arc::new(client), subscription))
-        })
-        .await?;
-        tokio::spawn(follow(camera_id.to_string(), client.clone(), subscription, events));
-        let client = Arc::new(ControlClient { client });
-        clients.insert(socket.to_path_buf(), client.clone());
+        let control = ControlClient::options(socket).timeout(CONTROL_TIMEOUT).reconnecting().controls_nonblocking().map_err(|error| control_error("", &[], error))?;
+        let mut client = CameraClient { camera_id: camera_id.to_string(), socket: socket.to_path_buf(), client: Arc::new(control), store: self.store.clone(), follower: None };
+        client.follower = Some(tokio::spawn(follow(client.detached(), self.events.clone())));
+        let client = Arc::new(client);
+        clients.insert(camera_id.to_string(), client.clone());
         Ok(client)
     }
 }
 
-impl ControlClient {
-    /// The camera's controls, with their values now.
+impl CameraClient {
+    /// The same camera client without the follower (for the follower itself).
+    fn detached(&self) -> Self {
+        Self { camera_id: self.camera_id.clone(), socket: self.socket.clone(), client: self.client.clone(), store: self.store.clone(), follower: None }
+    }
+
+    /// The camera's controls, with their values now and whether a stored value is kept for each.
     pub async fn controls(&self) -> ApiResult<Vec<CameraControl>> {
-        let client = self.client.clone();
-        let descriptors = blocking(move || client.controls()).await?;
-        Ok(descriptors.iter().map(CameraControl::from).collect())
+        let persisted = self.store.camera_settings(&self.camera_id).await?;
+        self.controls_with(&persisted).await
+    }
+
+    async fn controls_with(&self, persisted: &BTreeMap<String, serde_json::Value>) -> ApiResult<Vec<CameraControl>> {
+        let descriptors = self.client.controls_async().await.map_err(|error| control_error("", &[], error))?;
+        Ok(descriptors.iter().map(|descriptor| CameraControl::new(descriptor, persisted)).collect())
+    }
+
+    /// The values stored for this camera.
+    pub async fn persisted(&self) -> ApiResult<BTreeMap<String, serde_json::Value>> {
+        self.store.camera_settings(&self.camera_id).await
     }
 
     /// Resolve `{"key": value, ...}` into control changes, modes first: standard keys
@@ -191,51 +239,122 @@ impl ControlClient {
         let mut listed: Option<Vec<CameraControl>> = None;
         let mut changes = Vec::with_capacity(request.len());
         for (key, value) in request {
-            let change = match STANDARD.iter().find(|(name, _)| name == key) {
-                Some((_, standard)) => ControlChange { key: key.clone(), target: ControlTarget::Standard(*standard), value: standard_value(*standard, value)? },
-                None => {
-                    if listed.is_none() {
-                        listed = Some(self.controls().await?);
-                    }
-                    let controls = listed.as_deref().unwrap_or_default();
-                    let control = controls
-                        .iter()
-                        .find(|control| control.name == *key || control.id.to_string() == *key || format!("{:#x}", control.id) == key.to_ascii_lowercase())
-                        .ok_or_else(|| ApiError::bad_request(format!("the camera has no control {key:?} (GET the settings for its controls)")))?;
-                    ControlChange { key: key.clone(), target: ControlTarget::Id(ControlId(control.id)), value: backend_value(key, value)? }
-                }
-            };
-            changes.push(change);
+            changes.push(self.resolve_one(key, value, &mut listed).await?);
         }
-        changes.sort_by_key(|change| !matches!(change.target, ControlTarget::Standard(standard) if MODES_FIRST.contains(&standard)));
+        sort_modes_first(&mut changes);
         Ok(changes)
     }
 
-    /// Apply `changes` in order. A refusal stops there (the changes before it stay applied, and
-    /// were announced as events).
+    /// One `key: value`; `listed` caches the camera's controls for keys that are not standard.
+    async fn resolve_one(&self, key: &str, value: &serde_json::Value, listed: &mut Option<Vec<CameraControl>>) -> ApiResult<ControlChange> {
+        if let Some((_, standard)) = STANDARD.iter().find(|(name, _)| *name == key) {
+            let persist_as = (*standard != StandardControl::AfTrigger).then(|| key.to_string());
+            return Ok(ControlChange { key: key.to_string(), target: ControlTarget::Standard(*standard), value: standard_value(*standard, value)?, persist_as });
+        }
+        if listed.is_none() {
+            *listed = Some(self.controls_with(&BTreeMap::new()).await?);
+        }
+        let controls = listed.as_deref().unwrap_or_default();
+        let control = controls
+            .iter()
+            .find(|control| control.name == key || control.id.to_string() == key || format!("{:#x}", control.id) == key.to_ascii_lowercase())
+            .ok_or_else(|| ApiError::bad_request(format!("the camera has no control {key:?} (GET the settings for its controls)")))?;
+        // Kept under its own name: the value is in the backend's units, not the standard ones.
+        let persist_as = (control.standard != Some("af_trigger")).then(|| control.name.clone());
+        Ok(ControlChange { key: key.to_string(), target: ControlTarget::Id(ControlId(control.id)), value: backend_value(key, value)?, persist_as })
+    }
+
+    /// Apply `changes` in order and store the values now in effect, so they are applied again
+    /// after a reboot. A refusal stops there (the changes before it stay applied and stored,
+    /// and were announced as events).
     pub async fn apply(&self, changes: Vec<ControlChange>) -> ApiResult<Vec<AppliedCameraControl>> {
-        let client = self.client.clone();
-        blocking(move || {
-            let mut applied = Vec::with_capacity(changes.len());
-            for change in changes {
-                match client.set_control(change.target, change.value) {
-                    Ok(result) => applied.push(AppliedCameraControl::new(change.key, &result)),
-                    Err(error) => return Ok(Err(control_error(&change.key, &applied, error))),
+        let (applied, stored, refused) = self.set_all(changes).await;
+        if !stored.is_empty() {
+            self.store.persist_camera_settings(&self.camera_id, stored).await?;
+        }
+        match refused {
+            Some(error) => Err(error),
+            None => Ok(applied),
+        }
+    }
+
+    /// Put every writable control back to its default and forget the stored values.
+    pub async fn reset(&self) -> ApiResult<Vec<AppliedCameraControl>> {
+        self.store.clear_camera_settings(&self.camera_id).await?;
+        let descriptors = self.client.controls_async().await.map_err(|error| control_error("", &[], error))?;
+        let mut defaults =
+            descriptors.iter().filter(|descriptor| descriptor.writable && descriptor.standard != Some(StandardControl::AfTrigger) && SCALAR_KINDS.contains(&descriptor.meta.kind)).collect::<Vec<_>>();
+        // Modes first; by id, as defaults are in the backend's units.
+        defaults.sort_by_key(|descriptor| !descriptor.standard.is_some_and(|standard| MODES_FIRST.contains(&standard)));
+        let changes = defaults
+            .into_iter()
+            .map(|descriptor| {
+                let key = descriptor.standard.map_or_else(|| descriptor.meta.name.clone(), |standard| standard_key(standard).to_string());
+                ControlChange { key, target: ControlTarget::Id(descriptor.meta.id), value: descriptor.meta.default.clone(), persist_as: None }
+            })
+            .collect::<Vec<_>>();
+        let (applied, _, refused) = self.set_all(changes).await;
+        match refused {
+            Some(error) => Err(error),
+            None => Ok(applied),
+        }
+    }
+
+    /// Apply the stored values (after the client connected). Keys the camera no longer has, or
+    /// refuses, are skipped and reported.
+    async fn reapply(&self) -> (Vec<AppliedCameraControl>, Vec<String>) {
+        let stored = match self.store.camera_settings(&self.camera_id).await {
+            Ok(stored) => stored,
+            Err(error) => return (Vec::new(), vec![error.message]),
+        };
+        let mut listed = None;
+        let mut changes = Vec::with_capacity(stored.len());
+        let mut errors = Vec::new();
+        for (key, value) in &stored {
+            match self.resolve_one(key, value, &mut listed).await {
+                Ok(change) => changes.push(change),
+                Err(error) => errors.push(format!("{key}: {}", error.message)),
+            }
+        }
+        sort_modes_first(&mut changes);
+        let mut applied = Vec::with_capacity(changes.len());
+        for change in changes {
+            match self.client.set_control_async(change.target, change.value).await {
+                Ok(result) => applied.push(AppliedCameraControl::new(change.key, &result)),
+                Err(error) => errors.push(format!("{}: {error}", change.key)),
+            }
+        }
+        (applied, errors)
+    }
+
+    /// Apply `changes` in order until one is refused: what was applied, the values to store for
+    /// it, and the refusal.
+    async fn set_all(&self, changes: Vec<ControlChange>) -> (Vec<AppliedCameraControl>, Vec<(String, serde_json::Value)>, Option<ApiError>) {
+        let mut applied = Vec::with_capacity(changes.len());
+        let mut stored = Vec::with_capacity(changes.len());
+        for change in changes {
+            // The value as asked for, in the units it was asked in: applied again, it is
+            // clamped again the same way.
+            let asked = value_json(&change.value);
+            match self.client.set_control_async(change.target, change.value).await {
+                Ok(result) => {
+                    if let Some(key) = change.persist_as {
+                        stored.push((key, asked));
+                    }
+                    applied.push(AppliedCameraControl::new(change.key, &result));
+                }
+                Err(error) => {
+                    let refused = control_error(&change.key, &applied, error);
+                    return (applied, stored, Some(refused));
                 }
             }
-            Ok(Ok(applied))
-        })
-        .await?
+        }
+        (applied, stored, None)
     }
 }
 
-/// Run blocking camera service IPC off the async runtime.
-async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T, IpcError> + Send + 'static) -> ApiResult<T> {
-    match tokio::task::spawn_blocking(work).await {
-        Ok(Ok(value)) => Ok(value),
-        Ok(Err(error)) => Err(control_error("", &[], error)),
-        Err(error) => Err(ApiError::internal(error.to_string())),
-    }
+fn sort_modes_first(changes: &mut [ControlChange]) {
+    changes.sort_by_key(|change| !matches!(change.target, ControlTarget::Standard(standard) if MODES_FIRST.contains(&standard)));
 }
 
 fn control_error(key: &str, applied: &[AppliedCameraControl], error: IpcError) -> ApiError {
@@ -249,44 +368,47 @@ fn control_error(key: &str, applied: &[AppliedCameraControl], error: IpcError) -
     }
 }
 
-/// Follow the camera's control changes and publish them as `camera` events; drop the frames the
-/// client gets as they arrive. Runs as long as the API.
-async fn follow(camera_id: String, client: Arc<FrameClient>, subscription: ControlEvents, hub: Arc<EventHub>) {
-    let mut events = AsyncFd::new(subscription).map_err(|error| tracing::warn!(camera = %camera_id, %error, "cannot follow camera control changes")).ok();
-    let mut resubscribe = tokio::time::interval(RESUBSCRIBE_EVERY);
+/// What the follower learns from the client next.
+enum News {
+    Event(ControlEvent),
+    /// The connection came up or went away.
+    Connection(bool),
+    /// The client gave up (it reconnects, so only when its descriptors failed).
+    Closed,
+}
+
+/// Follow the camera's control changes and publish them as `camera` events, and apply the
+/// stored values each time the client connects (the camera service appeared or restarted).
+/// Runs until the client is dropped.
+async fn follow(camera: CameraClient, hub: Arc<EventHub>) {
+    let mut connected = false;
     loop {
-        tokio::select! {
-            // Dropped at once: the API never holds the camera's buffers.
-            frame = client.next() => {
-                if matches!(frame, RecvOutcome::Closed) {
-                    tokio::time::sleep(RESUBSCRIBE_EVERY).await;
-                }
-            }
-            ready = async { events.as_ref().expect("guarded").readable().await }, if events.is_some() => {
-                let Ok(mut guard) = ready else {
-                    events = None;
-                    continue;
-                };
-                loop {
-                    match guard.get_inner().try_recv() {
-                        RecvOutcome::Data(event) => hub.publish("camera", control_event_json(&camera_id, &event)),
-                        RecvOutcome::Empty => {
-                            guard.clear_ready();
-                            break;
-                        }
-                        RecvOutcome::Closed => {
-                            drop(guard);
-                            events = None;
-                            break;
-                        }
+        let news = poll_fn(|cx| match camera.client.poll_event(cx) {
+            Poll::Ready(RecvOutcome::Data(event)) => Poll::Ready(News::Event(event)),
+            Poll::Ready(_) => Poll::Ready(News::Closed),
+            // `poll_event` (re)connects as it goes; its waker is registered either way.
+            Poll::Pending if camera.client.is_connected() != connected => Poll::Ready(News::Connection(!connected)),
+            Poll::Pending => Poll::Pending,
+        })
+        .await;
+        match news {
+            News::Event(event) => hub.publish("camera", control_event_json(&camera.camera_id, &event)),
+            News::Connection(now) => {
+                connected = now;
+                if now {
+                    let (applied, errors) = camera.reapply().await;
+                    if !errors.is_empty() {
+                        tracing::warn!(camera = %camera.camera_id, ?errors, "stored camera settings not applied");
+                    }
+                    if !applied.is_empty() || !errors.is_empty() {
+                        tracing::info!(camera = %camera.camera_id, restored = applied.len(), "stored camera settings applied");
+                        hub.publish("camera", serde_json::json!({ "id": camera.camera_id, "change": "restored", "applied": applied, "errors": errors }));
                     }
                 }
             }
-            _ = resubscribe.tick(), if events.is_none() => {
-                let client = client.clone();
-                if let Ok(Ok(subscription)) = tokio::task::spawn_blocking(move || client.control_events()).await {
-                    events = AsyncFd::new(subscription).ok();
-                }
+            News::Closed => {
+                tracing::warn!(camera = %camera.camera_id, error = ?camera.client.last_error(), "camera control client closed");
+                return;
             }
         }
     }
@@ -439,20 +561,46 @@ mod tests {
         styx::ipc::CameraService::new(device).keep_streaming().serve(socket).expect("serve camera")
     }
 
+    fn controls_for(dir: &Path, hub: &Arc<EventHub>) -> CameraControls {
+        CameraControls::new(Arc::new(Store::new(dir.join("state"))), hub.clone())
+    }
+
+    fn current(controls: &[CameraControl], name: &str) -> Option<serde_json::Value> {
+        controls.iter().find(|control| control.name == name).and_then(|control| control.current.clone())
+    }
+
+    /// Wait until the camera's controls read `exposure_time_us` = `exposure` and `sharpness` =
+    /// `sharpness` (re-applied by the follower once it reconnected).
+    async fn wait_for_values(client: &CameraClient, exposure: u32, sharpness: i32) {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if let Ok(controls) = client.controls().await
+                    && current(&controls, "exposure_time_us") == Some(serde_json::json!(exposure))
+                    && current(&controls, "sharpness") == Some(serde_json::json!(sharpness))
+                {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("exposure {exposure} and sharpness {sharpness} were not applied"));
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn controls_are_listed_applied_and_announced() {
         let dir = tempfile::tempdir().expect("tempdir");
         let socket = dir.path().join("cam.sock");
-        let _service = camera_service(&socket);
+        let service = camera_service(&socket);
         let hub = Arc::new(EventHub::new(16));
         let mut events = hub.subscribe();
-        let cameras = CameraControls::default();
-        let client = cameras.client("cam0", &socket, hub.clone()).await.expect("camera client");
-        assert!(Arc::ptr_eq(&client, &cameras.client("cam0", &socket, hub.clone()).await.expect("again")), "one client per camera service");
+        let cameras = controls_for(dir.path(), &hub);
+        let client = cameras.client("cam0", &socket).await.expect("camera client");
+        assert!(Arc::ptr_eq(&client, &cameras.client("cam0", &socket).await.expect("again")), "one client per camera");
 
         let controls = client.controls().await.expect("controls");
         let exposure = controls.iter().find(|control| control.standard == Some("exposure_us")).expect("exposure listed");
-        assert!(exposure.writable && exposure.kind == "uint" && exposure.max == serde_json::json!(33_000), "{exposure:?}");
+        assert!(exposure.writable && exposure.kind == "uint" && exposure.max == serde_json::json!(33_000) && !exposure.persisted, "{exposure:?}");
         assert!(controls.iter().any(|control| control.name == "sensor_temperature" && control.read_only));
 
         // Modes first; out-of-range values are clamped; backend controls by name.
@@ -486,5 +634,71 @@ mod tests {
         let changes = client.resolve(serde_json::json!({ "sensor_temperature": 41 }).as_object().expect("object")).await.expect("resolve");
         let refused = client.apply(changes).await.expect_err("read only");
         assert_eq!(refused.code, crate::error::ErrorCode::Unprocessable, "{refused:?}");
+
+        // A control client: never one of the camera's frame clients, so it never joined (or
+        // changed) the capture plan and holds no buffers.
+        assert_eq!(service.stats().clients, 0);
+    }
+
+    /// Values set through the API are stored and applied again when the camera service comes
+    /// back (a restart, a reboot); a reset puts the defaults back and forgets them.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn settings_persist_and_are_reapplied_when_the_camera_service_returns() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket = dir.path().join("cam.sock");
+        let hub = Arc::new(EventHub::new(64));
+        let service = camera_service(&socket);
+        let cameras = controls_for(dir.path(), &hub);
+        let client = cameras.client("cam0", &socket).await.expect("camera client");
+
+        let request = serde_json::json!({ "exposure_us": 5000, "sharpness": 4 });
+        let changes = client.resolve(request.as_object().expect("object")).await.expect("resolve");
+        client.apply(changes).await.expect("apply");
+        let stored = client.persisted().await.expect("stored");
+        assert_eq!(stored, BTreeMap::from([("exposure_us".to_string(), serde_json::json!(5000)), ("sharpness".to_string(), serde_json::json!(4))]));
+        // Actions are not stored.
+        let trigger = client.resolve(serde_json::json!({ "af_trigger": "start" }).as_object().expect("object")).await.expect("resolve");
+        assert_eq!(trigger[0].persist_as, None);
+        let controls = client.controls().await.expect("controls");
+        assert!(controls.iter().any(|control| control.name == "exposure_time_us" && control.persisted));
+        assert!(controls.iter().any(|control| control.name == "sharpness" && control.persisted));
+        assert!(controls.iter().any(|control| control.name == "gain" && !control.persisted));
+
+        // The camera service restarts with its defaults; the API's client reconnects and applies
+        // the stored values.
+        drop(service);
+        let _ = std::fs::remove_file(&socket);
+        let mut events = hub.subscribe();
+        let service = camera_service(&socket);
+        wait_for_values(&client, 5000, 4).await;
+        let restored = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let event = events.recv().await.expect("event");
+                if event.data["change"] == "restored" {
+                    return event;
+                }
+            }
+        })
+        .await
+        .expect("restored event");
+        assert_eq!(restored.data["id"], "cam0");
+
+        // After a reboot: a new API (a new client, the same state directory) and a new service.
+        drop(cameras);
+        drop(client);
+        drop(service);
+        let _ = std::fs::remove_file(&socket);
+        let _service = camera_service(&socket);
+        let cameras = controls_for(dir.path(), &hub);
+        let client = cameras.client("cam0", &socket).await.expect("camera client");
+        wait_for_values(&client, 5000, 4).await;
+
+        // Reset: defaults back, nothing stored.
+        client.reset().await.expect("reset");
+        assert!(client.persisted().await.expect("stored").is_empty());
+        let controls = client.controls().await.expect("controls");
+        assert_eq!(current(&controls, "exposure_time_us"), Some(serde_json::json!(10)));
+        assert_eq!(current(&controls, "sharpness"), Some(serde_json::json!(0)));
+        assert!(controls.iter().all(|control| !control.persisted));
     }
 }

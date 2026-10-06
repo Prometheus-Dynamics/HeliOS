@@ -27,10 +27,10 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub struct AppState {
     pub config: ApiConfig,
     pub orion: orion::Orion,
-    pub store: store::Store,
+    pub store: Arc<store::Store>,
     pub cpu: host::CpuSampler,
     pub events: Arc<events::EventHub>,
-    /// One Styx client per camera service, for camera controls (opened on first use).
+    /// One Styx control client per camera, for camera controls and their persisted values.
     pub cameras: camera_controls::CameraControls,
     /// Device security: open (default) or secured.
     pub auth: auth::Auth,
@@ -42,12 +42,14 @@ pub type SharedState = Arc<AppState>;
 
 impl AppState {
     pub fn new(config: ApiConfig) -> SharedState {
+        let store = Arc::new(store::Store::new(config.state_dir.clone()));
+        let events = Arc::new(events::EventHub::new(256));
         Arc::new(Self {
             orion: orion::Orion::new(config.orion_socket.clone(), config.orion_stream_socket.clone()),
-            store: store::Store::new(config.state_dir.clone()),
+            cameras: camera_controls::CameraControls::new(store.clone(), events.clone()),
+            store,
             cpu: host::CpuSampler::default(),
-            events: Arc::new(events::EventHub::new(256)),
-            cameras: camera_controls::CameraControls::default(),
+            events,
             auth: auth::Auth::new(config.auth_file.clone()),
             update_lock: Mutex::new(()),
             config,

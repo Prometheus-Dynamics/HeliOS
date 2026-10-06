@@ -13,7 +13,7 @@ use serde::Serialize;
 
 use crate::{
     SharedState,
-    camera_controls::{AppliedCameraControl, CameraControl, ControlClient},
+    camera_controls::{AppliedCameraControl, CameraClient, CameraControl},
     error::{ApiError, ApiResult},
     orion::{StateView, enum_name, label_map},
     store::CameraMount,
@@ -24,6 +24,8 @@ use super::{check_id, pipelines};
 pub const CAMERA_RESOURCE_TYPE: &str = "camera.device";
 const STYX_ENDPOINT_PREFIX: &str = "styx-frames+unix://";
 const LIVE_TIMEOUT: Duration = Duration::from_secs(3);
+/// How often the camera settings keeper looks for cameras in Orion.
+const CAMERA_SCAN_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct CameraSource {
@@ -204,19 +206,48 @@ pub struct CameraSettings {
     pub ae_state: Option<String>,
     /// Why `mode`..`ae_state` are missing (the camera service's metrics did not answer).
     pub live_error: Option<String>,
+    /// The values set through the API that are kept across reboots and applied again whenever
+    /// the camera service starts (standard keys, or the camera's control names).
+    pub persisted: BTreeMap<String, serde_json::Value>,
 }
 
-/// What `PATCH /v1/cameras/{id}/settings` did, in the order applied.
+/// What `PATCH` (or `DELETE`) `/v1/cameras/{id}/settings` did, in the order applied, and the
+/// values kept for the camera now.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct SettingsApplied {
     pub applied: Vec<AppliedCameraControl>,
+    pub persisted: BTreeMap<String, serde_json::Value>,
 }
 
 /// The API's client of the camera's service, and its socket.
-async fn control_client(state: &SharedState, id: &str) -> ApiResult<(std::sync::Arc<ControlClient>, PathBuf)> {
+async fn control_client(state: &SharedState, id: &str) -> ApiResult<(std::sync::Arc<CameraClient>, PathBuf)> {
     let (_, record) = find(state, id).await?;
     let socket = frames_socket(&record.endpoints).ok_or_else(|| ApiError::backend(format!("{id} has no Styx frames endpoint")))?;
-    Ok((state.cameras.client(id, &socket, state.events.clone()).await?, socket))
+    Ok((state.cameras.client(id, &socket).await?, socket))
+}
+
+/// Keep a camera control client for every camera with a Styx camera service, so the values
+/// stored for a camera are applied as soon as its service appears (at boot, after it
+/// restarted), not only once someone opens its settings. Checks Orion's cameras every few
+/// seconds; a client is made without waiting for its service.
+pub fn spawn_camera_settings_keeper(state: SharedState) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(CAMERA_SCAN_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            interval.tick().await;
+            let Ok(view) = state.orion.view().await else {
+                continue;
+            };
+            for record in camera_records(&view) {
+                if let Some(socket) = frames_socket(&record.endpoints)
+                    && let Err(error) = state.cameras.client(record.resource_id.as_str(), &socket).await
+                {
+                    tracing::warn!(camera = %record.resource_id, error = %error.message, "camera control client");
+                }
+            }
+        }
+    })
 }
 
 pub async fn get_settings(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Json<CameraSettings>> {
@@ -237,6 +268,7 @@ pub async fn get_settings(State(state): State<SharedState>, Path(id): Path<Strin
         ae_state: capture.and_then(|c| c.ae_state.clone()),
         live_error,
         controls,
+        persisted: client.persisted().await?,
     }))
 }
 
@@ -248,7 +280,16 @@ pub async fn set_settings(State(state): State<SharedState>, Path(id): Path<Strin
     };
     let (client, _) = control_client(&state, &id).await?;
     let changes = client.resolve(&request).await?;
-    Ok(Json(SettingsApplied { applied: client.apply(changes).await? }))
+    let applied = client.apply(changes).await?;
+    Ok(Json(SettingsApplied { applied, persisted: client.persisted().await? }))
+}
+
+/// Reset to defaults: every writable control back to its default, and the stored values
+/// forgotten (the camera starts with its defaults after a reboot).
+pub async fn reset_settings(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Json<SettingsApplied>> {
+    let (client, _) = control_client(&state, &id).await?;
+    let applied = client.reset().await?;
+    Ok(Json(SettingsApplied { applied, persisted: client.persisted().await? }))
 }
 
 pub async fn get_mount(State(state): State<SharedState>, Path(id): Path<String>) -> ApiResult<Json<Option<CameraMount>>> {

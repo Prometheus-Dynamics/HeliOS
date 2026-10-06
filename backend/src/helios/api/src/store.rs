@@ -1,5 +1,7 @@
-//! What only the API owns, persisted under its state directory: the revision history of each
-//! pipeline (for rollback) and where each camera is mounted on the robot.
+//! What only the API owns, persisted under its state directory (`/var/lib/helios/api`, on the
+//! data partition, so it survives reboots and OTA updates): the revision history of each
+//! pipeline (for rollback), where each camera is mounted on the robot, and the camera control
+//! values set through the API.
 
 use std::{
     collections::BTreeMap,
@@ -142,6 +144,45 @@ impl Store {
         }
         write_json(&path, &mounts).await
     }
+
+    /// The control values set through the API for `camera` (standard keys and the camera's
+    /// control names), re-applied whenever its camera service appears.
+    pub async fn camera_settings(&self, camera: &str) -> ApiResult<BTreeMap<String, serde_json::Value>> {
+        let _guard = self.lock.lock().await;
+        let mut all: BTreeMap<String, BTreeMap<String, serde_json::Value>> = read_json(&self.camera_settings_path()).await?.unwrap_or_default();
+        Ok(all.remove(camera).unwrap_or_default())
+    }
+
+    /// Remember `values` for `camera` (replacing earlier values of the same keys) and return
+    /// everything stored for it.
+    pub async fn persist_camera_settings(&self, camera: &str, values: impl IntoIterator<Item = (String, serde_json::Value)>) -> ApiResult<BTreeMap<String, serde_json::Value>> {
+        let _guard = self.lock.lock().await;
+        let path = self.camera_settings_path();
+        let mut all: BTreeMap<String, BTreeMap<String, serde_json::Value>> = read_json(&path).await?.unwrap_or_default();
+        let stored = all.entry(camera.to_string()).or_default();
+        let before = stored.clone();
+        stored.extend(values);
+        let stored = stored.clone();
+        if stored != before {
+            write_json(&path, &all).await?;
+        }
+        Ok(stored)
+    }
+
+    /// Forget every value stored for `camera` (back to the camera's defaults on its next start).
+    pub async fn clear_camera_settings(&self, camera: &str) -> ApiResult<()> {
+        let _guard = self.lock.lock().await;
+        let path = self.camera_settings_path();
+        let mut all: BTreeMap<String, BTreeMap<String, serde_json::Value>> = read_json(&path).await?.unwrap_or_default();
+        if all.remove(camera).is_some() {
+            write_json(&path, &all).await?;
+        }
+        Ok(())
+    }
+
+    fn camera_settings_path(&self) -> PathBuf {
+        self.dir.join("camera-settings.json")
+    }
 }
 
 fn file_stem(id: &str) -> String {
@@ -199,5 +240,23 @@ mod tests {
         store.set_mount("camera.a", None).await.expect("clear");
         assert!(store.mounts().await.expect("mounts").is_empty());
         assert!(CameraMount { x: 50.0, ..mount }.validate().is_err());
+    }
+
+    #[tokio::test]
+    async fn camera_settings_merge_survive_a_new_store_and_clear() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::new(dir.path());
+        assert!(store.camera_settings("camera.a").await.expect("empty").is_empty());
+        store.persist_camera_settings("camera.a", [("exposure_us".to_string(), serde_json::json!(8000)), ("ae".to_string(), serde_json::json!(false))]).await.expect("persist");
+        let merged = store.persist_camera_settings("camera.a", [("exposure_us".to_string(), serde_json::json!(4000))]).await.expect("persist");
+        assert_eq!(merged, BTreeMap::from([("ae".to_string(), serde_json::json!(false)), ("exposure_us".to_string(), serde_json::json!(4000))]));
+        store.persist_camera_settings("camera.b", [("gain".to_string(), serde_json::json!(2.0))]).await.expect("persist");
+
+        // As after a reboot: a new store on the same directory.
+        let store = Store::new(dir.path());
+        assert_eq!(store.camera_settings("camera.a").await.expect("settings"), merged);
+        store.clear_camera_settings("camera.a").await.expect("clear");
+        assert!(store.camera_settings("camera.a").await.expect("cleared").is_empty());
+        assert_eq!(store.camera_settings("camera.b").await.expect("other camera kept").len(), 1);
     }
 }
