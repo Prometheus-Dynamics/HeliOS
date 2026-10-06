@@ -9,14 +9,41 @@ default-run = "helios-api"
 [lints]
 workspace = true
 
+[lib]
+name = "helios_api"
+path = "src/lib.rs"
+doctest = false
+
 [[bin]]
 name = "helios-api"
 path = "src/main.rs"
 
 [dependencies]
-axum = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true, features = ["multipart"] }
+futures-util = { workspace = true }
+hex = { workspace = true }
+libc = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
 tokio = { workspace = true }
+tokio-stream = { workspace = true, features = ["sync"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-anyhow = { workspace = true }
+
+# Graph documents are validated with Daedalus's own parser (versioned `GraphDocument`).
+daedalus-planner = { workspace = true, features = ["std"] }
+# Orion is the device's state store: resources, workloads, the updater and host facts.
+orion = { workspace = true, default-features = false, features = ["client"] }
+# Camera list and live camera metrics from the Styx camera services (no capture backends).
+styx = { workspace = true, default-features = false, features = ["facade", "metrics-serde"] }
+
+heliosctl = { path = "../ctl" }
+helios-diagnostics = { path = "../diagnostics" }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tower = { version = "0.5", default-features = false, features = ["util"] }
