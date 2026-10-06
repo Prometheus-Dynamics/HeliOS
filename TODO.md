@@ -11,8 +11,8 @@ PhotonVision Raze image; orion-node comes from Orion's own Gaia layer.
 | Piece | Where | State |
 |---|---|---|
 | HeliOS | branch `architecture-overhaul` | recipe validates (`gaia validate`, both profiles); no image built since the migration |
-| Backend deps | `backend/Cargo.lock` | git deps, pinned: Daedalus 3.0 `dev` (e7e88fc), Styx `dev` (3ab3707), Eidos `main` (47e9f1d), Orion v4 `main` (98bb58a), Lemnos `dev` (9102681) |
-| UI | `ui/` (SvelteKit) | new UI on mock data; the image still stages the old `frontend/` |
+| Backend deps | `backend/Cargo.lock` | git deps, pinned: Daedalus 3.0 `dev` (b6be6d4, plugin ABI 9), Styx `dev` (02a6824), Eidos `main` (41df1d8), Orion v4 `main` (aa13499), Lemnos `dev` (10269f9) |
+| UI | `ui/` (SvelteKit) | new UI on the API (mocks behind `?mock=1`); the image still stages the old `frontend/` |
 | Raze device package | Atlas `dev`, 1.0.10 (f98489f) | pinned by HeliOS and PhotonVision |
 | PhotonVision Raze image | photon-image-modifier `raze-boot-fixes` | boots; LEDs and fan verified on a Raze; A/B updates wait on a Gaia disk-layout feature |
 | Gaia | `dev` (2.1.0) | installed in `~/.cargo/bin` |
@@ -40,18 +40,26 @@ PhotonVision Raze image; orion-node comes from Orion's own Gaia layer.
 - [ ] MJPEG camera preview: serve from helios-api as a Styx FrameClient plus codec consumer of the peripherals CameraService.
 - [x] Engine on Daedalus 3: graphs as `GraphDocument`s whose `requires` must cover their nodes, input-driven execution (a frame or a resource change ticks the graph; no timer), and per session `plan` (host ports, `explain_plan()`, adapter edges) and `metrics` (`HELIOS_ENGINE_METRICS_LEVEL`) artifacts. FrameLease's `TypeExpr` and inspection are Styx's (`styx.frames`).
 - [x] Vision nodes are Eidos's Daedalus plugin (`libhelios_eidos_plugin.so`); `helios-vision` removed; stored graphs are Eidos's templates.
-- [ ] Measure the Eidos plugin graph on the CM5 with `helios-vision-probe --metrics detailed`; use Daedalus's `FrameOverheadReport` in the engine's `metrics` artifact once Daedalus has it.
+- [ ] Measure the Eidos plugin graph on the CM5: `helios-vision-probe --metrics detailed --frame-overhead 512` (Daedalus's `FrameOverheadReport`; the engine publishes the same report in a session's `metrics` artifact with `HELIOS_ENGINE_METRICS_LEVEL` set). Check the `plan` artifact's `copying_edges`/`crossing_edges` stay empty.
+- [x] Engine on Daedalus held inputs and batches: context inputs are held (declared in the document before planning), resource-driven graphs get one batch per change, a secondary camera's frame is batched with the primary frame; `drive_blocking`/`drive` replace the custom waiter loop.
+- [x] Engine: no feeder thread per camera; each graph thread awaits its camera's pollable Styx `FrameClient` and the Daedalus drive loop together (`styx_graph::rt::block_on`).
+- [ ] Engine: measure on the CM5 that the thread-less camera path keeps the old per-frame latency (`helios-vision-probe` drives from a capture thread; the engine's `telemetry` artifact has `last_tick_ms`, input push to tick end).
 - [ ] Engine: `inspect_payload`, typed resource values instead of JSON strings.
-- [ ] Engine: drop the context re-push workaround once Daedalus has a held host input or an atomic multi-port push.
 - [ ] Peripherals: finish the Lemnos move (bind policy, typed errors, mock hwmon in tests); read `/usr/share/pd-device/raze/sensors.toml`.
 - [x] Application API v1 (docs/docs/api/http.md) and the UI on it (mocks behind `?mock=1`); Atlas's identity and OTA (`/v1/identity`, `/v1/update/*`, `/v1/ota/*`).
-- [ ] helios-api: backends for the 501 endpoints (camera controls, preview, calibration, node catalog from the engine's registry, fan/LEDs/IMU, safe mode, slot switch); engine to publish plugin versions.
+- [x] helios-api camera controls: `GET`/`PATCH /v1/cameras/{id}/settings` on Styx `FrameClient` controls, changes as SSE `camera` events; the UI's camera pane uses them in live mode.
+- [ ] Camera controls on hardware: check the OV9782's controls (exposure, gain, AE, frame rate by capture restart) through the API, that the API's client does not make the camera service restart the capture when it joins, and its CPU cost (it drops every frame it gets).
+- [ ] Persist camera control values across reboots (the camera service keeps them across capture restarts only); decide whether HeliOS or peripherals owns that.
+- [ ] helios-api: backends for the 501 endpoints (preview, calibration, node catalog from the engine's registry, fan/LEDs/IMU, safe mode, slot switch); engine to publish plugin versions.
 - [x] Device security, off by default: open (FRC) or secured with a device password (session cookie + CSRF) and API tokens; `/v1/auth/*`, the UI's Open/Secured indicator, Settings toggle and first-run step; state in `/var/lib/helios/auth/auth.json`; recovery with `heliosctl auth reset` (docs/docs/api/http.md, Device security).
 - [ ] Security follow-ups: check on hardware that `/var/lib/helios/auth` survives an OTA and a rootfs reflash; Atlas to send a bearer token when `helios.auth.mode` is `secured` (and to its `/v1/device/os` reconnect probe); end open SSE streams on logout/revoke; optional signed-out read-only view; TLS (per-device certificate) as a later option.
 - [ ] helios-api listens on :5801 but the identity's `manage_url` and the UI expect :5800; serve the built `ui/` from the API or the image.
 - [ ] OTA: require sha256 in update manifests, optional signatures, report boot-confirm results over the API.
 
 ## Upstream
+
+- [ ] Styx: a controls-only `FrameClient` (no frame request), so helios-api can list/set controls and follow `control_events` without joining the camera's capture plan and draining frames; and a non-blocking first `request` for reconnecting clients (today the first open blocks for its timeout, on the engine's graph thread for a camera that is not up yet).
+- [ ] Daedalus: mark host inputs held on an existing `Graph`/`GraphDocument` (the engine edits `daedalus.host_held_inputs` itself; `GraphBuilder::held_input` only works while building), and an fd or waker hook on `InboundWaiter` for hosts that poll(2) instead of using an async executor.
 
 - [ ] Orion: an optional `orionctl` in `packaging/gaia/`; a way to admit root clients (or supplementary groups) under `same-user-or-group`.
 - [ ] Atlas: `pd-device-ssh-keys` cannot find the boot partition on an overlay root (HeliOS sets `SSH_KEYS_BOOT_PARTITION`); `PD_DEVICE_PACKAGE_COMMIT` stays empty for git-source imports (Gaia now exposes `${source.atlas.commit}`).
