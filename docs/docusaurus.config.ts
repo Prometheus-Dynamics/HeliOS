@@ -27,7 +27,14 @@ const config: Config = {
 
   // Future flags, see https://docusaurus.io/docs/api/docusaurus-config#future
   future: {
-    v4: true, // Improve compatibility with the upcoming Docusaurus v4
+    // Improve compatibility with the upcoming Docusaurus v4. These are the
+    // flags `v4: true` meant up to 3.9; since 3.10 it also switches on the
+    // Rspack bundler (@docusaurus/faster) and drops MDX1 HTML comments, which
+    // the API pages use.
+    v4: {
+      removeLegacyPostBuildHeadAttribute: true,
+      useCssCascadeLayers: true,
+    },
   },
 
   // Set the production url of your site here
