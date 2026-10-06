@@ -237,11 +237,7 @@ fn align_up(val: u64, align: u64) -> u64 {
 }
 
 fn align_down(val: u64, align: u64) -> u64 {
-    if align == 0 {
-        val
-    } else {
-        (val / align) * align
-    }
+    val.checked_div(align).map_or(val, |blocks| blocks * align)
 }
 
 pub fn build_plan(cfg: &Config, ab_start: u64, ab_end: u64, data_start: u64, total_mib: u64) -> Result<Vec<PartPlan>> {
