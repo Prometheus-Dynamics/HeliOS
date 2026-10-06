@@ -17,16 +17,17 @@
 
 use std::{
     collections::{BTreeMap, HashMap},
-    future::poll_fn,
     path::{Path, PathBuf},
-    sync::Arc,
-    task::Poll,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
 use serde::Serialize;
 use styx::{
-    ipc::{AppliedControl, ControlClient, ControlDescriptor, ControlEvent, ControlRefusal, ControlTarget, IpcError, SERVICE_FRAME_RATE, StandardControl},
+    ipc::{AppliedControl, ClientEvent, ControlClient, ControlDescriptor, ControlEvent, ControlRefusal, ControlTarget, IpcError, SERVICE_FRAME_RATE, StandardControl},
     prelude::{Access, ControlId, ControlKind, ControlValue, RecvOutcome},
 };
 use tokio::{sync::Mutex, task::JoinHandle};
@@ -171,6 +172,8 @@ pub struct CameraClient {
     socket: PathBuf,
     client: Arc<ControlClient>,
     store: Arc<Store>,
+    /// Connected to the camera service now (the follower sets it from the client's events).
+    online: Arc<AtomicBool>,
     /// Follows the camera's control changes and re-applies the stored values on (re)connect.
     follower: Option<JoinHandle<()>>,
 }
@@ -199,18 +202,30 @@ impl CameraControls {
             return Ok(client.clone());
         }
         let control = ControlClient::options(socket).timeout(CONTROL_TIMEOUT).reconnecting().controls_nonblocking().map_err(|error| control_error("", &[], error))?;
-        let mut client = CameraClient { camera_id: camera_id.to_string(), socket: socket.to_path_buf(), client: Arc::new(control), store: self.store.clone(), follower: None };
+        let mut client = CameraClient { camera_id: camera_id.to_string(), socket: socket.to_path_buf(), client: Arc::new(control), store: self.store.clone(), online: Arc::default(), follower: None };
         client.follower = Some(tokio::spawn(follow(client.detached(), self.events.clone())));
         let client = Arc::new(client);
         clients.insert(camera_id.to_string(), client.clone());
         Ok(client)
+    }
+
+    /// Whether the API's client of camera `camera_id` is connected to its camera service (from
+    /// Styx's connection events); `None` when the API keeps no client for it.
+    pub async fn online(&self, camera_id: &str) -> Option<bool> {
+        self.clients.lock().await.get(camera_id).map(|client| client.online())
     }
 }
 
 impl CameraClient {
     /// The same camera client without the follower (for the follower itself).
     fn detached(&self) -> Self {
-        Self { camera_id: self.camera_id.clone(), socket: self.socket.clone(), client: self.client.clone(), store: self.store.clone(), follower: None }
+        Self { camera_id: self.camera_id.clone(), socket: self.socket.clone(), client: self.client.clone(), store: self.store.clone(), online: self.online.clone(), follower: None }
+    }
+
+    /// Whether the client is connected to the camera service: set on Styx's `Connected`,
+    /// cleared on `Disconnected`.
+    pub fn online(&self) -> bool {
+        self.online.load(Ordering::Acquire)
     }
 
     /// The camera's controls, with their values now and whether a stored value is kept for each.
@@ -368,45 +383,34 @@ fn control_error(key: &str, applied: &[AppliedCameraControl], error: IpcError) -
     }
 }
 
-/// What the follower learns from the client next.
-enum News {
-    Event(ControlEvent),
-    /// The connection came up or went away.
-    Connection(bool),
-    /// The client gave up (it reconnects, so only when its descriptors failed).
-    Closed,
-}
-
-/// Follow the camera's control changes and publish them as `camera` events, and apply the
-/// stored values each time the client connects (the camera service appeared or restarted).
-/// Runs until the client is dropped.
+/// Follow the client's Styx `ClientEvent`s (each connection change exactly once, in order with
+/// the control changes): publish control changes as `camera` events, apply the stored values on
+/// every `Connected` (the camera service appeared or restarted), and mark the camera offline on
+/// `Disconnected`. Runs until the client is dropped.
 async fn follow(camera: CameraClient, hub: Arc<EventHub>) {
-    let mut connected = false;
     loop {
-        let news = poll_fn(|cx| match camera.client.poll_event(cx) {
-            Poll::Ready(RecvOutcome::Data(event)) => Poll::Ready(News::Event(event)),
-            Poll::Ready(_) => Poll::Ready(News::Closed),
-            // `poll_event` (re)connects as it goes; its waker is registered either way.
-            Poll::Pending if camera.client.is_connected() != connected => Poll::Ready(News::Connection(!connected)),
-            Poll::Pending => Poll::Pending,
-        })
-        .await;
-        match news {
-            News::Event(event) => hub.publish("camera", control_event_json(&camera.camera_id, &event)),
-            News::Connection(now) => {
-                connected = now;
-                if now {
-                    let (applied, errors) = camera.reapply().await;
-                    if !errors.is_empty() {
-                        tracing::warn!(camera = %camera.camera_id, ?errors, "stored camera settings not applied");
-                    }
-                    if !applied.is_empty() || !errors.is_empty() {
-                        tracing::info!(camera = %camera.camera_id, restored = applied.len(), "stored camera settings applied");
-                        hub.publish("camera", serde_json::json!({ "id": camera.camera_id, "change": "restored", "applied": applied, "errors": errors }));
-                    }
+        match camera.client.next_client_event().await {
+            RecvOutcome::Data(ClientEvent::Data(event)) => hub.publish("camera", control_event_json(&camera.camera_id, &event)),
+            RecvOutcome::Data(ClientEvent::Connected { reconnects }) => {
+                camera.online.store(true, Ordering::Release);
+                hub.publish("camera", serde_json::json!({ "id": camera.camera_id, "change": "online", "reconnects": reconnects }));
+                let (applied, errors) = camera.reapply().await;
+                if !errors.is_empty() {
+                    tracing::warn!(camera = %camera.camera_id, ?errors, "stored camera settings not applied");
+                }
+                if !applied.is_empty() || !errors.is_empty() {
+                    tracing::info!(camera = %camera.camera_id, restored = applied.len(), "stored camera settings applied");
+                    hub.publish("camera", serde_json::json!({ "id": camera.camera_id, "change": "restored", "applied": applied, "errors": errors }));
                 }
             }
-            News::Closed => {
+            RecvOutcome::Data(ClientEvent::Disconnected { error }) => {
+                camera.online.store(false, Ordering::Release);
+                tracing::info!(camera = %camera.camera_id, %error, "camera service connection lost");
+                hub.publish("camera", serde_json::json!({ "id": camera.camera_id, "change": "offline", "error": error.to_string() }));
+            }
+            // The client gave up (it reconnects, so only when its descriptors failed).
+            _ => {
+                camera.online.store(false, Ordering::Release);
                 tracing::warn!(camera = %camera.camera_id, error = ?camera.client.last_error(), "camera control client closed");
                 return;
             }
@@ -664,24 +668,40 @@ mod tests {
         assert!(controls.iter().any(|control| control.name == "sharpness" && control.persisted));
         assert!(controls.iter().any(|control| control.name == "gain" && !control.persisted));
 
-        // The camera service restarts with its defaults; the API's client reconnects and applies
-        // the stored values.
+        // The follower handled the first Connected event.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !client.online() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("camera online");
+
+        // The camera service restarts with its defaults; the API's client sees the connection go
+        // (offline), reconnects (online) and applies the stored values, in that order.
+        let mut events = hub.subscribe();
         drop(service);
         let _ = std::fs::remove_file(&socket);
-        let mut events = hub.subscribe();
         let service = camera_service(&socket);
         wait_for_values(&client, 5000, 4).await;
-        let restored = tokio::time::timeout(Duration::from_secs(5), async {
+        let (changes, restored) = tokio::time::timeout(Duration::from_secs(5), async {
+            let mut changes = Vec::new();
             loop {
                 let event = events.recv().await.expect("event");
+                let change = event.data["change"].as_str().unwrap_or_default().to_string();
+                if ["offline", "online", "restored"].contains(&change.as_str()) {
+                    changes.push(change);
+                }
                 if event.data["change"] == "restored" {
-                    return event;
+                    return (changes, event);
                 }
             }
         })
         .await
         .expect("restored event");
+        assert_eq!(changes, ["offline", "online", "restored"]);
         assert_eq!(restored.data["id"], "cam0");
+        assert!(client.online());
 
         // After a reboot: a new API (a new client, the same state directory) and a new service.
         drop(cameras);

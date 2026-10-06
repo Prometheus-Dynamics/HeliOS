@@ -195,6 +195,8 @@ export interface Camera {
   mount: CameraMount | null;
   live: { sources: { name: string; keys: string[]; in_use: boolean }[]; clients: number; frames_sent: number; frames_skipped: number; restarts: number; captures: CaptureLive[] } | null;
   live_error: string | null;
+  /** The API's control client is connected to the camera service; null when it keeps none. */
+  service_online: boolean | null;
   settings_writable: boolean;
   preview_available: boolean;
 }
