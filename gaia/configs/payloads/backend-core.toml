@@ -112,6 +112,37 @@ image = "helios-cross"
 dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
 context = "gaia/docker"
 
+# The vision nodes (Eidos marker detection) as a Daedalus dynamic plugin, which
+# helios-engine loads from /usr/lib/helios/plugins/daedalus at startup. The
+# `dylib` feature exports the plugin from the cdylib.
+#
+# The engine installs it on the Rust-ABI path only when both were built with
+# the same Daedalus build fingerprint and the same Rust types behind the
+# boundary type keys (styx:framelease). Gaia builds artifacts with different
+# feature flags in separate cargo invocations, so check the engine log for the
+# install path after a build (see TODO.md).
+[[artifacts]]
+id = "helios-vision-plugin"
+kind = "rust"
+package = "helios-vision"
+source = "backend-workspace"
+features = ["dylib"]
+target = "aarch64-unknown-linux-gnu"
+profile = "release"
+target_name = "libhelios_vision.so"
+install_name = "libhelios_vision.so"
+install_class = "library"
+install_dest_hint = "/usr/lib/helios/plugins/daedalus/libhelios_vision.so"
+output_path = "gaia/output/${build.name}/artifacts/libhelios_vision.so"
+
+[artifacts.execution]
+backend = "docker"
+
+[artifacts.execution.docker]
+image = "helios-cross"
+dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
+context = "gaia/docker"
+
 # orion-node itself comes from Orion's Gaia layer (packaging/gaia/orion-node.toml,
 # imported by builds/raze.toml). Its layer has no orionctl, so the CLI is built
 # here from the same pinned `orion` source, in Orion's own cross image.
@@ -201,6 +232,15 @@ owner = "root"
 group = "root"
 
 [[install]]
+id = "install-helios-vision-plugin"
+artifact = "helios-vision-plugin"
+dest = "/usr/lib/helios/plugins/daedalus/libhelios_vision.so"
+replace = true
+mode = 420
+owner = "root"
+group = "root"
+
+[[install]]
 id = "install-orionctl"
 artifact = "orionctl"
 dest = "/usr/bin/orionctl"
@@ -228,6 +268,7 @@ install_entries = [
   "install-helios-updater",
   "install-helios-diagnostics",
   "install-heliosctl",
+  "install-helios-vision-plugin",
   "install-orionctl",
   "install-helios-provision",
 ]
