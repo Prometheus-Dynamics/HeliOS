@@ -83,7 +83,7 @@ export function registerScreens() {
       ),
     ),
   );
-  workspaces.registerPreset("settings", ws("settings", "Settings", "settings", 9, "Theme, names and colours, layouts, backup.", stack(pane("settings"))));
+  workspaces.registerPreset("settings", ws("settings", "Settings", "settings", 9, "Security, theme, names and colours, layouts, backup.", stack(pane("settings"))));
 }
 
 /** Prebuilt groups of panes you can drop into any screen. */

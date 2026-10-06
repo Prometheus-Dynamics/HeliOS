@@ -36,6 +36,7 @@ const INTENTS: { title: string; words: string; icon: IconName; run: () => void }
   { title: "Install an update / roll back", words: "update upgrade install slot rollback version", icon: "cloud-download", run: go("hardware") },
   { title: "Something crashed or is stuck", words: "crash stuck broken restart reboot frozen quarantined error", icon: "lifebuoy", run: go("overview") },
   { title: "Setup checklist", words: "setup start new first checklist getting started", icon: "list-check", run: open("setup") },
+  { title: "Secure this device / password / API tokens", words: "security secure password lock login sign token atlas open", icon: "lock", run: go("settings") },
   { title: "Theme, density, backup", words: "theme dark light density backup export import restore", icon: "settings", run: go("settings") },
 ];
 

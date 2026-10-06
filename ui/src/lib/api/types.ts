@@ -7,13 +7,44 @@ export interface ApiErrorBody {
 
 export type ApiErrorCode =
   | "bad_request"
+  | "unauthorized"
+  | "forbidden"
   | "not_found"
   | "conflict"
   | "unprocessable"
   | "payload_too_large"
+  | "too_many_requests"
   | "not_available"
   | "backend_unavailable"
   | "internal";
+
+/** `GET /v1/auth/status`. Open devices allow everything; secured ones need a session or a token. */
+export interface AuthStatus {
+  mode: "open" | "secured";
+  authenticated: boolean;
+  via: "open" | "session" | "token" | null;
+  /** Sent as X-Helios-CSRF on mutations made with the session cookie. */
+  csrf_token?: string;
+  session_expires_at_ms?: number;
+  password_set_at_ms?: number;
+  tokens?: number;
+  /** The device's auth file is unreadable; only `heliosctl auth reset` on the device fixes it. */
+  problem?: string;
+}
+
+export interface ApiToken {
+  id: string;
+  label: string;
+  /** The token's first characters, to recognise it. */
+  prefix: string;
+  created_at_ms: number;
+  last_used_at_ms: number | null;
+}
+
+/** A new token: `token` is in this answer only. */
+export interface NewApiToken extends ApiToken {
+  token: string;
+}
 
 export interface Health {
   service: string;

@@ -22,6 +22,8 @@
   import StatusBar from "$lib/shell/StatusBar.svelte";
   import TipHost from "$lib/shell/TipHost.svelte";
   import TopBar from "$lib/shell/TopBar.svelte";
+  import SignIn from "$lib/shell/SignIn.svelte";
+  import { auth } from "$lib/stores/auth.svelte";
   import { cluster } from "$lib/stores/cluster.svelte";
   import { system } from "$lib/stores/system.svelte";
   import Workspace from "$lib/workspace/Workspace.svelte";
@@ -44,9 +46,16 @@
     if (!selection.last.device && cluster.nodes[0]) selection.last.device = { kind: "device", id: cluster.nodes[0].id };
   });
 
+  // Device security first: a secured device shows the sign-in screen, and the
+  // stores start only once this browser may read the device.
+  $effect(() => {
+    untrack(() => auth.refresh());
+  });
+
   // Separate from the effects above, and untracked: those re-run as live data
   // arrives, and restarting the stores on every change would refetch in a loop.
   $effect(() => {
+    if (!auth.ready) return;
     const stopCluster = untrack(() => cluster.start());
     const stopSystem = untrack(() => system.start());
     return () => {
@@ -106,7 +115,11 @@
 <MenuHost />
 <Palette />
 <Gallery />
-<Onboarding />
+{#if auth.needsSignIn}
+  <SignIn />
+{:else}
+  <Onboarding />
+{/if}
 <Tour />
 <TipHost />
 <Toasts />

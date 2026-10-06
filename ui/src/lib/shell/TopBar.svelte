@@ -10,6 +10,7 @@
   import { shell } from "$lib/core/shell.svelte";
   import { workspaces } from "$lib/core/workspace.svelte";
   import IconButton from "$lib/kit/IconButton.svelte";
+  import { auth } from "$lib/stores/auth.svelte";
   import { cluster } from "$lib/stores/cluster.svelte";
   import { showAddPane } from "$lib/workspace/library";
   import { exportWorkspace, importWorkspace } from "./workspace-actions";
@@ -119,6 +120,18 @@
   </div>
 
   <div class="right">
+    {#if auth.status}
+      <button
+        type="button"
+        class="sec"
+        class:open={auth.open}
+        onclick={() => shell.go("settings")}
+        data-tour="security"
+        data-tip={auth.open ? "Open: anyone on this network can change this device, update it or reboot it. Click to secure it with a password." : `Secured: a password or API token is needed.${auth.status.via === "session" ? " You are signed in." : ""} Click for security settings.`}
+      >
+        <Icon name={auth.open ? "lock-open" : "lock"} size={13} />{auth.open ? "Open" : "Secured"}
+      </button>
+    {/if}
     <IconButton icon={cluster.playing ? "player-pause" : "player-play"} label={cluster.playing ? "Pause live feeds" : "Resume live feeds"} shortcut="Space" onclick={() => (cluster.playing = !cluster.playing)} />
     <button type="button" class="search" onclick={() => (commands.open = true)} data-tour="search">
       <Icon name="search" size={13} />
@@ -274,6 +287,26 @@
     display: flex;
     align-items: center;
     gap: 4px;
+  }
+  .sec {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    height: 24px;
+    padding: 0 8px;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--ok);
+    border: 1px solid color-mix(in oklab, var(--ok) 40%, transparent);
+    border-radius: var(--r-1);
+    white-space: nowrap;
+  }
+  .sec.open {
+    color: var(--warn);
+    border-color: color-mix(in oklab, var(--warn) 40%, transparent);
+  }
+  .sec:hover {
+    background: var(--s2);
   }
   .search {
     display: flex;

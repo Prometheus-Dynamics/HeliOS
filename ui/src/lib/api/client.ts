@@ -7,7 +7,9 @@ import type {
   ApiErrorBody,
   ApiErrorCode,
   ApiEvent,
+  ApiToken,
   ApplyResponse,
+  AuthStatus,
   Binding,
   Camera,
   CameraMount,
@@ -16,6 +18,7 @@ import type {
   Identity,
   LogLine,
   Metrics,
+  NewApiToken,
   Pipeline,
   PipelineOutput,
   PipelineSpec,
@@ -66,8 +69,26 @@ function url(path: string, query?: Query): string {
 
 const enc = encodeURIComponent;
 
+// Device security. On a secured device the browser signs in with the device
+// password and gets an HttpOnly session cookie; mutations must also carry the
+// session's CSRF token, which the auth store keeps here. A 401 means the
+// session ended (or the device was just secured), and the auth store shows
+// the sign-in screen.
+let csrfToken: string | null = null;
+let onUnauthorized: (() => void) | null = null;
+
+export const session = {
+  setCsrf(token: string | null | undefined) {
+    csrfToken = token ?? null;
+  },
+  onUnauthorized(handler: (() => void) | null) {
+    onUnauthorized = handler;
+  },
+};
+
 async function request<T>(method: string, path: string, options: { query?: Query; body?: unknown; raw?: BodyInit; headers?: Record<string, string> } = {}): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json", ...(options.headers ?? {}) };
+  if (csrfToken && method !== "GET" && method !== "HEAD") headers["X-Helios-CSRF"] = csrfToken;
   let body: BodyInit | undefined = options.raw;
   if (options.body !== undefined) {
     headers["Content-Type"] = "application/json";
@@ -75,7 +96,7 @@ async function request<T>(method: string, path: string, options: { query?: Query
   }
   let response: Response;
   try {
-    response = await fetch(url(path, options.query), { method, headers, body });
+    response = await fetch(url(path, options.query), { method, headers, body, credentials: "same-origin" });
   } catch (error) {
     throw new ApiError(0, "network", `Cannot reach the device: ${(error as Error).message}`);
   }
@@ -84,6 +105,7 @@ async function request<T>(method: string, path: string, options: { query?: Query
   const json = text ? safeJson(text) : undefined;
   if (!response.ok) {
     const err = (json as ApiErrorBody | undefined)?.error;
+    if (response.status === 401 && !path.startsWith("/v1/auth/")) onUnauthorized?.();
     throw new ApiError(response.status, err?.code ?? "internal", err?.message ?? `${method} ${path} failed with HTTP ${response.status}`, err?.needs);
   }
   return json as T;
@@ -114,6 +136,17 @@ function subscribe(path: string, query: Query | undefined, handlers: { onEvent: 
 export const EVENT_TYPES = ["hello", "pipeline", "resource", "update", "camera", "metrics", "orion", "lagged"];
 
 export const api = {
+  // Device security
+  authStatus: () => request<AuthStatus>("GET", "/v1/auth/status"),
+  login: (password: string) => request<AuthStatus>("POST", "/v1/auth/login", { body: { password } }),
+  logout: () => request<void>("POST", "/v1/auth/logout"),
+  enableAuth: (password: string) => request<AuthStatus>("POST", "/v1/auth/enable", { body: { password } }),
+  disableAuth: (password?: string) => request<AuthStatus>("POST", "/v1/auth/disable", { body: password === undefined ? {} : { password } }),
+  changePassword: (current_password: string, new_password: string) => request<AuthStatus>("POST", "/v1/auth/password", { body: { current_password, new_password } }),
+  tokens: () => request<ApiToken[]>("GET", "/v1/auth/tokens"),
+  createToken: (label: string) => request<NewApiToken>("POST", "/v1/auth/tokens", { body: { label } }),
+  revokeToken: (id: string) => request<void>("DELETE", `/v1/auth/tokens/${enc(id)}`),
+
   // Device and system
   health: () => request<Health>("GET", "/v1/health"),
   identity: () => request<Identity>("GET", "/v1/identity"),

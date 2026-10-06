@@ -8,6 +8,8 @@
   import { shell } from "$lib/core/shell.svelte";
   import { team } from "$lib/core/team.svelte";
   import { workspaces } from "$lib/core/workspace.svelte";
+  import SecureForm from "$lib/components/security/SecureForm.svelte";
+  import { auth } from "$lib/stores/auth.svelte";
   import { cluster } from "$lib/stores/cluster.svelte";
   import Feed from "$lib/vision/Feed.svelte";
   import { DEFAULT_OVERLAYS } from "$lib/vision/overlays";
@@ -16,7 +18,14 @@
   let step = $state(0);
   let simple = $state(true);
   let teamText = $state(team.number ? String(team.number) : "");
-  const STEPS = ["Team", "Cameras", "Screens", "Done"];
+  const STEPS = ["Team", "Cameras", "Screens", "Security", "Done"];
+  const SECURITY = 3;
+  const LAST = STEPS.length - 1;
+  // FRC robots run open; anything else is offered a password first. The
+  // choice is explicit either way, and the top bar always shows the result.
+  let secureChoice = $state<"open" | "secure" | null>(null);
+  const choice = $derived(secureChoice ?? (Number(teamText) > 0 ? "open" : "secure"));
+  const blocked = $derived(step === SECURITY && choice === "secure" && auth.open);
   const overlays = { ...DEFAULT_OVERLAYS, histogram: false, hud: false };
 
   function finish(tour: boolean) {
@@ -99,8 +108,35 @@
             <em>For teams who know what they want</em>
           </button>
         </div>
+      {:else if step === SECURITY}
+        <h2>Who can change this device</h2>
+        {#if auth.secured}
+          <div class="found"><Icon name="lock" size={14} />This device is secured with a password. Manage it in Settings, Security.</div>
+        {:else}
+          <p>Open devices need no login: anyone on the robot network can change pipelines, install updates and reboot. That is normal on an FRC robot. Anywhere else, secure it with a password.</p>
+          <div class="choices">
+            <button type="button" class="choice" class:on={choice === "open"} onclick={() => (secureChoice = "open")}>
+              <Icon name="lock-open" size={20} />
+              <b>Leave it open</b>
+              <span>No password and no tokens. The top bar shows <b>Open</b> as a reminder. You can secure it any time in Settings.</span>
+              <em>FRC robots on the field</em>
+            </button>
+            <button type="button" class="choice" class:on={choice === "secure"} onclick={() => (secureChoice = "secure")}>
+              <Icon name="lock" size={20} />
+              <b>Secure this device</b>
+              <span>One device password for people using HeliOS; API tokens for tools like Atlas. Turn it off again in Settings.</span>
+              <em>Labs, classrooms, shared networks</em>
+            </button>
+          </div>
+          {#if choice === "secure"}
+            <div class="secure-form"><SecureForm ondone={() => step++} /></div>
+          {/if}
+        {/if}
       {:else}
         <h2>Ready</h2>
+        <p>
+          {#if auth.secured}This device is <b>secured</b>: HeliOS asks for the password in new browsers.{:else}This device is <b>open</b>; the top bar says so, and Settings can secure it.{/if}
+        </p>
         <p>Two things are still needed before matches, and the <b>Setup checklist</b> keeps track of them:</p>
         <ul>
           <li><b>Calibrate each camera</b> with a printed board (about two minutes each).</li>
@@ -113,8 +149,8 @@
     <div class="foot">
       {#if step > 0}<button type="button" onclick={() => step--}>Back</button>{/if}
       <span class="grow"></span>
-      {#if step < 3}
-        <button type="button" class="primary" onclick={() => step++}>Next<Icon name="arrow-right" size={13} /></button>
+      {#if step < LAST}
+        <button type="button" class="primary" disabled={blocked} data-tip={blocked ? "Set a password above, or choose Leave it open" : undefined} onclick={() => step++}>Next<Icon name="arrow-right" size={13} /></button>
       {:else}
         <button type="button" onclick={() => finish(false)}>Finish</button>
         <button type="button" class="primary" onclick={() => finish(true)}><Icon name="rocket" size={13} />Take the tour</button>
@@ -372,5 +408,11 @@
     color: var(--on-accent);
     background: var(--accent);
     border-color: var(--accent);
+  }
+  .foot .primary:disabled {
+    opacity: 0.5;
+  }
+  .secure-form {
+    margin-top: 14px;
   }
 </style>

@@ -45,7 +45,9 @@ PhotonVision Raze image; orion-node comes from Orion's own Gaia layer.
 - [ ] Engine: drop the context re-push workaround once Daedalus has a held host input or an atomic multi-port push.
 - [ ] Peripherals: finish the Lemnos move (bind policy, typed errors, mock hwmon in tests); read `/usr/share/pd-device/raze/sensors.toml`.
 - [x] Application API v1 (docs/docs/api/http.md) and the UI on it (mocks behind `?mock=1`); Atlas's identity and OTA (`/v1/identity`, `/v1/update/*`, `/v1/ota/*`).
-- [ ] helios-api: backends for the 501 endpoints (camera controls, preview, calibration, node catalog from the engine's registry, fan/LEDs/IMU, safe mode, slot switch); engine to publish plugin versions; authentication (OTA and reboot are open today).
+- [ ] helios-api: backends for the 501 endpoints (camera controls, preview, calibration, node catalog from the engine's registry, fan/LEDs/IMU, safe mode, slot switch); engine to publish plugin versions.
+- [x] Device security, off by default: open (FRC) or secured with a device password (session cookie + CSRF) and API tokens; `/v1/auth/*`, the UI's Open/Secured indicator, Settings toggle and first-run step; state in `/var/lib/helios/auth/auth.json`; recovery with `heliosctl auth reset` (docs/docs/api/http.md, Device security).
+- [ ] Security follow-ups: check on hardware that `/var/lib/helios/auth` survives an OTA and a rootfs reflash; Atlas to send a bearer token when `helios.auth.mode` is `secured` (and to its `/v1/device/os` reconnect probe); end open SSE streams on logout/revoke; optional signed-out read-only view; TLS (per-device certificate) as a later option.
 - [ ] helios-api listens on :5801 but the identity's `manage_url` and the UI expect :5800; serve the built `ui/` from the API or the image.
 - [ ] OTA: require sha256 in update manifests, optional signatures, report boot-confirm results over the API.
 

@@ -1,6 +1,8 @@
 <script lang="ts">
-  // Look and feel, names and colours for everything, layouts, and backups.
+  // Device security, look and feel, names and colours for everything, layouts,
+  // and backups.
   import Icon from "$lib/components/common/Icon.svelte";
+  import SecuritySection from "$lib/components/security/SecuritySection.svelte";
   import { exportAll, importAll } from "$lib/core/backup";
   import { colorVar, identity } from "$lib/core/identity.svelte";
   import { prefs, THEMES } from "$lib/core/prefs.svelte";
@@ -43,6 +45,8 @@
 </script>
 
 <div class="settings">
+  <SecuritySection />
+
   <Section title="Robot" key="set-robot">
     <Prop label="Team number" help="Sets where robot code is expected (NetworkTables server).">
       <Num value={team.number ?? 0} min={0} max={99999} width={90} label="Team number" onchange={(v) => (team.number = v || null)} />

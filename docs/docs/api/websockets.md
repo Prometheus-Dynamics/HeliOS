@@ -12,6 +12,11 @@ helios-api pushes live changes as **Server-Sent Events** (SSE). A browser subscr
 `new EventSource("/v1/events")`; anything that speaks HTTP can read the stream. There is no
 WebSocket endpoint.
 
+On a [secured device](./http.md#device-security) every stream needs credentials: the browser's
+session cookie (sent by `EventSource` on the same origin) or `Authorization: Bearer <token>` from
+a tool. A stream that is already open keeps running after a logout or token revocation until it
+reconnects.
+
 | Stream | Events |
 |---|---|
 | `GET /v1/events?types=a,b` | Everything below. `types` filters by event type |

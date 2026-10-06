@@ -36,6 +36,8 @@ pub struct ApiConfig {
     pub cors_origin: Option<String>,
     /// Largest accepted OTA upload.
     pub max_upload_bytes: u64,
+    /// Device security state (password hash, API token hashes). Absent means open.
+    pub auth_file: PathBuf,
 }
 
 impl Default for ApiConfig {
@@ -52,6 +54,7 @@ impl Default for ApiConfig {
             pd_identity_path: DEFAULT_PD_IDENTITY_PATH.into(),
             cors_origin: None,
             max_upload_bytes: 8 << 30,
+            auth_file: heliosctl::auth_state::DEFAULT_AUTH_FILE.into(),
         }
     }
 }
@@ -102,6 +105,9 @@ impl ApiConfig {
         }
         if let Some(value) = env.get("HELIOS_API_MAX_UPLOAD_BYTES") {
             config.max_upload_bytes = value.parse()?;
+        }
+        if let Some(value) = env.get(heliosctl::auth_state::AUTH_FILE_ENV) {
+            config.auth_file = value.into();
         }
         Ok(config)
     }

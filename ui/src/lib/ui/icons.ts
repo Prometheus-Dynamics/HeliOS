@@ -50,7 +50,9 @@ import ILayoutGrid from "@tabler/icons-svelte-runes/icons/layout-grid";
 import ILayoutList from "@tabler/icons-svelte-runes/icons/layout-list";
 import IListCheck from "@tabler/icons-svelte-runes/icons/list-check";
 import ILoader2 from "@tabler/icons-svelte-runes/icons/loader-2";
+import ILock from "@tabler/icons-svelte-runes/icons/lock";
 import ILockOpen from "@tabler/icons-svelte-runes/icons/lock-open";
+import ILogout from "@tabler/icons-svelte-runes/icons/logout";
 import IPackage from "@tabler/icons-svelte-runes/icons/package";
 import IPencil from "@tabler/icons-svelte-runes/icons/pencil";
 import IPhotoOff from "@tabler/icons-svelte-runes/icons/photo-off";
@@ -322,7 +324,9 @@ export const ICONS = {
   "layout-list": ILayoutList,
   "list-check": IListCheck,
   "loader-2": ILoader2,
+  "lock": ILock,
   "lock-open": ILockOpen,
+  "logout": ILogout,
   "package": IPackage,
   "pencil": IPencil,
   "photo-off": IPhotoOff,

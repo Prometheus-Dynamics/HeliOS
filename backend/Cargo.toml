@@ -74,6 +74,10 @@ nt_client = { version = "0.5.1", features = ["publish_bypass"] }
 reqwest = { version = "0.13.5", features = ["json", "rustls", "stream"] }
 rtnetlink = "0.23.0"
 sha2 = "0.11.0"
+# Device security in helios-api: argon2id password hashes, OS randomness, constant-time compares.
+argon2 = { version = "0.5.3", default-features = false, features = ["alloc", "password-hash"] }
+getrandom = "0.4.3"
+subtle = "2.6.1"
 webpki-root-certs = "1.0.9"
 
 # Math and geometry

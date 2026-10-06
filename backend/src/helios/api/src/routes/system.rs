@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use axum::{
-    Json,
+    Extension, Json,
     extract::{Path, State},
     http::StatusCode,
 };
@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     API_VERSION, SharedState, VERSION,
+    auth::Caller,
     config::MANAGED_UNITS,
     error::{ApiError, ApiResult},
     host::{self, DiskUsage, UnitStatus, now_ms, read_trimmed},
@@ -36,12 +37,29 @@ const DEVICE_PACKAGE_ENV: &str = "/usr/lib/pd-device/device-package.env";
 /// The device identity: the Raze device package's identity document (the same JSON as
 /// `:5899/.well-known/pd-device`), with a `helios` section describing this API. When the device
 /// package has not written it, the same fields are read from the system.
-pub async fn identity(State(state): State<SharedState>) -> Json<serde_json::Value> {
+///
+/// Identity is public so Atlas can discover the device. On a secured device a caller that is not
+/// signed in gets only [`PUBLIC_IDENTITY_FIELDS`]; `helios.auth.mode` tells it to bring a token.
+pub async fn identity(State(state): State<SharedState>, caller: Option<Extension<Caller>>) -> Json<serde_json::Value> {
     let path = state.config.pd_identity_path.clone();
     let node_id = state.config.node_id.clone();
-    let doc = tokio::task::spawn_blocking(move || identity_document(&path, &node_id)).await.unwrap_or_else(|_| serde_json::json!({}));
+    let mut doc = tokio::task::spawn_blocking(move || identity_document(&path, &node_id)).await.unwrap_or_else(|_| serde_json::json!({}));
+    let mode = state.auth.mode();
+    let authenticated = caller.is_some_and(|Extension(caller)| caller.is_authenticated());
+    if let Some(object) = doc.as_object_mut() {
+        if !authenticated {
+            object.retain(|key, _| PUBLIC_IDENTITY_FIELDS.contains(&key.as_str()));
+        }
+        if let Some(helios) = object.get_mut("helios").and_then(|h| h.as_object_mut()) {
+            helios.insert("auth".into(), serde_json::json!({ "mode": mode.as_str(), "status": "/v1/auth/status" }));
+        }
+    }
     Json(doc)
 }
+
+/// What a signed-out caller sees of the identity on a secured device: enough for discovery, the
+/// model, the OS and the update methods. MACs, endpoints and actions are left out.
+pub const PUBLIC_IDENTITY_FIELDS: &[&str] = &["contract", "model", "rev", "serial", "hostname", "os", "device_package", "update_methods", "manage_url", "helios"];
 
 pub fn identity_document(pd_identity_path: &std::path::Path, node_id: &str) -> serde_json::Value {
     let (mut doc, source) = match std::fs::read_to_string(pd_identity_path).ok().and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok()).filter(|v| v.is_object()) {

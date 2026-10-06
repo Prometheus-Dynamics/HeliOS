@@ -14,7 +14,8 @@ Manager use it. Everything lives under `/v1`; breaking changes get a new prefix.
 - **Address**: `HELIOS_API_BIND` (the image sets `0.0.0.0:5801`; the default is `127.0.0.1:5800`).
 - **Format**: JSON with `snake_case` fields. Timestamps are `*_ms` (Unix milliseconds).
 - **Events**: Server-Sent Events. See [Event stream](./websockets.md).
-- **Auth**: none yet. Treat the API as reachable by anyone on the robot network.
+- **Auth**: off by default (the device is **open**). One switch secures it with a device password
+  and API tokens. See [Device security](#device-security).
 - **CORS**: off by default. Set `HELIOS_API_CORS_ORIGIN` to allow a UI served from another origin.
 
 ## Where the data comes from
@@ -31,7 +32,8 @@ The API keeps very little state of its own. It reads other parts of the device a
 | OS updates | **helios-updater**, through the same path as `heliosctl update apply` |
 
 The API stores only two things itself, under `HELIOS_API_STATE_DIR` (`/var/lib/helios/api`):
-pipeline revision history (used for rollback) and camera mounts.
+pipeline revision history (used for rollback) and camera mounts. The device security file is
+separate (`/var/lib/helios/auth/auth.json`, see below).
 
 ## Errors
 
@@ -44,10 +46,13 @@ Every error has the same body:
 | HTTP | `code` | Meaning |
 |---|---|---|
 | 400 | `bad_request` | Malformed request or invalid id |
+| 401 | `unauthorized` | The device is secured and the request has no valid session or token, or a wrong password at sign-in |
+| 403 | `forbidden` | A session mutation without the right `X-Helios-CSRF` header, or a wrong re-entered password |
 | 404 | `not_found` | No such route or object |
 | 409 | `conflict` | Orion rejected the change, a resource is leased, or an update is already being prepared |
 | 413 | `payload_too_large` | The upload exceeds `HELIOS_API_MAX_UPLOAD_BYTES` |
 | 422 | `unprocessable` | Validation failed (invalid graph document, unknown binding resource, checksum mismatch, ...) |
+| 429 | `too_many_requests` | Too many failed sign-ins from this address; wait and retry |
 | 501 | `not_available` | The feature has no backend on the device yet. `needs` names what has to land first |
 | 503 | `backend_unavailable` | The backend exists but is unreachable right now (Orion down, systemctl or journalctl missing, camera service silent) |
 | 500 | `internal` | A bug |
@@ -62,7 +67,8 @@ as unavailable and not retry.
 | Method | Path | Backend | Notes |
 |---|---|---|---|
 | `GET` | `/v1/health` | — | `{service, status, api_version, version}`. Liveness probe; Atlas checks it during OTA reconnect |
-| `GET` | `/v1/identity` | pd-device | Device identity document (below) |
+| `GET` | `/v1/identity` | pd-device | Device identity document (below). Public; trimmed for signed-out callers on a secured device |
+| `GET` `POST` `DELETE` | `/v1/auth/*` | API | Device security: status, enable/disable, login/logout, password, tokens. See [Device security](#device-security) |
 | `GET` | `/v1/device` | Orion, kernel | node id, hostname, model, serial, OS, uptime, Orion revisions and peers, clock sync |
 | `GET` | `/v1/device/os` | os-release | `{name, version, pretty_name, build_id, kernel}` |
 | `GET` | `/v1/nodes` | Orion | The nodes Orion knows (this device and its peers), with host and clock facts |
@@ -274,6 +280,94 @@ becomes `installing`, `switching_boot` becomes `committing`, `awaiting_boot_succ
 `rebooting`, `finalizing` stays `finalizing`, `completed` becomes `complete`, `rolling_back`
 becomes `rolled_back`, and `failed` stays `failed`.
 
+## Device security
+
+Security is built in and **off by default**. An FRC robot runs **open**: no login, no tokens,
+every request allowed, exactly as before. Anywhere else, one switch **secures** the device: the
+"Secure this device" toggle in Settings (or the Security step of first-run setup), or
+`POST /v1/auth/enable` with a password. The UI's top bar always shows **Open** or **Secured**.
+
+| Mode | Who may call | How |
+|---|---|---|
+| `open` (default) | everyone on the network | nothing to send |
+| `secured` | people with the device password | `POST /v1/auth/login`, then the `helios_session` cookie (HttpOnly, SameSite=Strict, 7 days) plus `X-Helios-CSRF` on mutations |
+| `secured` | tools (Atlas, scripts) with an API token | `Authorization: Bearer helios_…` on every request |
+
+There are only these two levels: a password or a token gives full access. A signed-out caller on
+a secured device may call only:
+
+- `GET /v1/health`
+- `GET /v1/identity`, trimmed to `contract`, `model`, `rev`, `serial`, `hostname`, `os`,
+  `device_package`, `update_methods`, `manage_url` and `helios` (no MACs, endpoints or actions)
+- `GET /v1/auth/status`, `POST /v1/auth/login`, `POST /v1/auth/logout`
+
+Everything else under `/v1` answers 401, including OTA upload and apply, reboot, logs, metrics,
+the event streams (`/v1/events`, `/v1/logs/stream`, `/v1/update/events`) and the Atlas OTA
+routes. Paths outside `/v1` are not part of the API (a static UI served there loads without a
+session and then shows the sign-in screen).
+
+### Endpoints
+
+| Method | Path | Who | Notes |
+|---|---|---|---|
+| `GET` | `/v1/auth/status` | anyone | `{mode, authenticated, via, csrf_token?, session_expires_at_ms?, password_set_at_ms?, tokens?, problem?}`. `via` is `open`, `session`, `token` or `null` |
+| `POST` | `/v1/auth/enable` | anyone, open only | `{password}` (8 to 256 characters). Secures the device and signs the caller in (cookie + status). 409 when already secured |
+| `POST` | `/v1/auth/login` | anyone | `{password}`. Sets the session cookie and answers the status with `csrf_token`. 401 on a wrong password, 429 after 5 failures in 5 minutes from one address |
+| `POST` | `/v1/auth/logout` | anyone | Ends the caller's session and clears the cookie. 204 |
+| `POST` | `/v1/auth/disable` | session or token | Back to open: removes the password, every token and every session. A session must send `{password}` again (403 when missing or wrong); a token needs no body |
+| `POST` | `/v1/auth/password` | session or token | `{current_password, new_password}`. Ends every session and signs the caller in again; tokens keep working |
+| `GET` | `/v1/auth/tokens` | session or token | `[{id, label, prefix, created_at_ms, last_used_at_ms}]` |
+| `POST` | `/v1/auth/tokens` | session or token | `{label}` → 201 `{id, label, prefix, created_at_ms, last_used_at_ms, token}`. **`token` appears only in this answer**; store it then. At most 64 tokens |
+| `DELETE` | `/v1/auth/tokens/{id}` | session or token | Revoke. 204 |
+
+A browser session's mutations (`POST`, `PUT`, `PATCH`, `DELETE`) must carry
+`X-Helios-CSRF: <csrf_token>`, which the UI reads from `/v1/auth/status` or the login answer.
+Requests with a bearer token need no CSRF header.
+
+### How a tool authenticates (Atlas, scripts)
+
+1. Make a token in the UI (Settings, Security, **New token**) or with
+   `curl -X POST http://raze.local:5801/v1/auth/tokens -H 'authorization: Bearer <existing token>' -H 'content-type: application/json' -d '{"label":"Atlas"}'`.
+2. Send it on every request: `Authorization: Bearer helios_<64 hex digits>`. This includes the SSE
+   streams, so the client must be able to set headers (a browser `EventSource` cannot; the UI
+   uses its cookie instead).
+3. Discovery stays unauthenticated: `GET /v1/identity` carries
+   `helios.auth.mode` (`open` or `secured`), so a tool knows whether it needs a token before it
+   calls anything else. A 401 has `WWW-Authenticate: Bearer realm="helios"`.
+
+Atlas's reconnect probes after an OTA reboot (`/v1/health`, `/v1/device/os`) need the token too
+for `/v1/device/os`; only `/v1/health` and `/v1/identity` are public.
+
+### Storage
+
+One file on the data partition, so it survives OS updates and root filesystem reflashes:
+`/var/lib/helios/auth/auth.json` (`HELIOS_API_AUTH_FILE`), mode 0600 in a 0700 directory, written
+atomically. No file means open. It holds the argon2id hash of the password (RustCrypto `argon2`,
+default parameters: 19 MiB, t=2, p=1) and, per token, its label and the SHA-256 of the token
+(tokens are 256 random bits from the OS, so a fast hash is enough). Comparisons are constant-time.
+Sessions are kept in memory only: restarting helios-api or rebooting signs browsers out. An
+unreadable file fails closed: everything but the public routes is refused, and
+`/v1/auth/status` reports `problem`.
+
+### Recovery: lost password
+
+From a root shell on the device (the USB serial console on `ttyGS0`, or SSH with a key from
+`pd-device/authorized_keys`):
+
+```sh
+heliosctl auth status   # mode: open | secured, and the token count
+heliosctl auth reset    # back to open: forgets the password, all API tokens and all sessions
+```
+
+`reset` removes the auth file; helios-api notices on its next request (no restart needed). Secure
+the device again from the UI afterwards.
+
+### Transport
+
+The API is plain HTTP on the robot network. Passwords, cookies and tokens cross it in the clear,
+so anyone who can capture that traffic can reuse them. TLS (a per-device certificate) is a
+possible later step and is not built.
+
 ## Identity
 
 `GET /v1/identity` returns the Raze device package's identity document, the same JSON that
@@ -282,7 +376,7 @@ becomes `rolled_back`, and `failed` stays `failed`.
 `actions`). Two things are added:
 
 - `"helios-ota"` in `update_methods`
-- a `helios` object: `{source, api_version, version, node_id, endpoints}`. `source` is
+- a `helios` object: `{source, api_version, version, node_id, endpoints, auth: {mode, status}}`. `source` is
   `pd-device`, or `helios-api` when the package has not written `/run/pd-device/identity.json`
   and the API read the same facts from the system itself
 
@@ -295,9 +389,13 @@ becomes `rolled_back`, and `failed` stays `failed`.
   "helios": { "source": "pd-device", "api_version": "v1", "version": "1.0.0", "node_id": "node-local",
               "endpoints": { "health": "/v1/health", "metrics": "/v1/metrics", "logs": "/v1/logs", "events": "/v1/events",
                              "ota_upload": "/v1/update/uploads", "ota_apply": "/v1/update/apply",
-                             "ota_status": "/v1/update/status", "ota_events": "/v1/update/events" } }
+                             "ota_status": "/v1/update/status", "ota_events": "/v1/update/events" },
+              "auth": { "mode": "open", "status": "/v1/auth/status" } }
 }
 ```
+
+On a secured device a caller without a session or token gets the same document without `macs`,
+`endpoints`, `actions`, `bootloader` and `update` (see [Device security](#device-security)).
 
 ## Configuration
 
@@ -313,3 +411,4 @@ becomes `rolled_back`, and `failed` stays `failed`.
 | `HELIOS_PD_IDENTITY_PATH` | `/run/pd-device/identity.json` |
 | `HELIOS_API_MAX_UPLOAD_BYTES` | 8 GiB |
 | `HELIOS_API_CORS_ORIGIN` | unset (no CORS headers) |
+| `HELIOS_API_AUTH_FILE` | `/var/lib/helios/auth/auth.json` (device security; absent means open). `heliosctl auth` reads the same variable |

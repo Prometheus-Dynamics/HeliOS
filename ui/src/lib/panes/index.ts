@@ -56,5 +56,5 @@ definePane({ type: "peripherals", title: "Peripherals", icon: "plug", group: "Ha
 definePane({ type: "system", title: "Updates & recovery", icon: "versions", group: "Hardware", summary: "Boot slots, updates, services, recovery", component: SystemPane, label: pinnedDevice, identityOf: id("device") });
 definePane({ type: "inspector", title: "Inspector", icon: "info-circle", group: "Tools", summary: "Whatever is selected, editable", component: InspectorPane });
 definePane({ type: "logs", title: "Logs", icon: "file-text", group: "Tools", summary: "Logs from every device", component: LogsPane });
-definePane({ type: "settings", title: "Settings", icon: "settings", group: "System", summary: "Themes, names and colours, layouts, backup", component: SettingsPane });
+definePane({ type: "settings", title: "Settings", icon: "settings", group: "System", summary: "Security, themes, names and colours, layouts, backup", component: SettingsPane });
 definePane({ type: "welcome", title: "Empty", icon: "plus", group: "Tools", summary: "Pick a pane for this spot", component: WelcomePane });
