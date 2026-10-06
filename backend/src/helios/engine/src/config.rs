@@ -22,7 +22,8 @@ pub struct EngineConfig {
     pub publish_interval_ms: u64,
     /// Daedalus telemetry level of workload graphs (`HELIOS_ENGINE_METRICS_LEVEL`). `Off` records
     /// nothing; `Detailed` adds per-node handler timing and per-edge waits, adapters and copies,
-    /// published as each session's `metrics` artifact.
+    /// published as each session's `metrics` artifact. Any level above `Off` also records
+    /// Daedalus's frame-path overhead (`FrameOverheadReport`) into that artifact.
     pub metrics_level: MetricsLevel,
 }
 

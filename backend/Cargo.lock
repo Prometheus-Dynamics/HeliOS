@@ -1417,6 +1417,7 @@ dependencies = [
  "serde",
  "serde_json",
  "styx",
+ "styx-graph",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",

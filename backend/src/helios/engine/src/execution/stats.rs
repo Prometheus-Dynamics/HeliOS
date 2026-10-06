@@ -7,7 +7,7 @@ use std::{
 
 use daedalus::{
     engine::MetricsLevel,
-    runtime::{ExecutionTelemetry, RuntimePlanExplanation},
+    runtime::{ExecutionTelemetry, FrameOverheadReport, RuntimePlanExplanation},
 };
 
 use super::frame_source::FrameSourceStatus;
@@ -174,6 +174,8 @@ pub(crate) struct GraphMetrics {
     window_started: Instant,
     last_window: Option<(MetricsTotals, Duration)>,
     total: MetricsTotals,
+    /// Daedalus's latest `FrameOverheadReport`, as JSON.
+    frame_overhead: Option<serde_json::Value>,
 }
 
 impl GraphMetrics {
@@ -187,7 +189,7 @@ impl GraphMetrics {
                 (edge.index, (format!("{}.{} -> {}.{}", label(edge.from_node), edge.from_port, label(edge.to_node), edge.to_port), edge.adapter_steps.iter().map(ToString::to_string).collect()))
             })
             .collect();
-        Self { level, node_names, edge_names, window: MetricsTotals::default(), window_started: Instant::now(), last_window: None, total: MetricsTotals::default() }
+        Self { level, node_names, edge_names, window: MetricsTotals::default(), window_started: Instant::now(), last_window: None, total: MetricsTotals::default(), frame_overhead: None }
     }
 
     pub fn enabled(&self) -> bool {
@@ -207,6 +209,11 @@ impl GraphMetrics {
         }
     }
 
+    /// Keep Daedalus's frame-path overhead report (`HostGraph::frame_overhead`) for the artifact.
+    pub fn set_frame_overhead(&mut self, report: &FrameOverheadReport) {
+        self.frame_overhead = serde_json::to_value(report).ok();
+    }
+
     /// The `metrics` artifact: the last complete window (or the current one before the first
     /// completes) and the totals since the graph started.
     pub fn to_json(&self) -> serde_json::Value {
@@ -218,9 +225,10 @@ impl GraphMetrics {
             "metrics_level": format!("{:?}", self.level),
             "window": window,
             "total": self.totals_json(&self.total, None),
-            // Daedalus's per-frame overhead breakdown (bridge push, queue wait, adapters,
-            // copies, graph overhead) once the pinned Daedalus has it; see `frame_overhead`.
-            "frame_overhead": frame_overhead(),
+            // Daedalus's frame-path overhead over its rolling window: p50/p99/max/mean of host
+            // push and take, input collection, adapters, handlers, framing, drain and dispatch,
+            // per-tick copies, and per-edge queue and adapter time.
+            "frame_overhead": self.frame_overhead,
         })
     }
 
@@ -278,12 +286,4 @@ impl GraphMetrics {
             "edges": edges,
         })
     }
-}
-
-/// Hook for Daedalus's `FrameOverheadReport` (bridge push, queue wait, adapters, copies and
-/// graph overhead per frame). It is not on the pinned Daedalus (`dev` @ e7e88fc): when it is,
-/// enable it in `graph::daedalus_engine_config` (`EngineConfig::with_frame_overhead(window)`),
-/// read `HostGraph::frame_overhead()` on the driver thread after each tick and report it here.
-fn frame_overhead() -> serde_json::Value {
-    serde_json::Value::Null
 }

@@ -1,21 +1,24 @@
 //! Input-driven execution of a resident workload graph.
 //!
-//! Every workload runs its graph on a thread of its own, serially (no worker pool), and only when
-//! input arrives, the way Daedalus's host-driven model and its `external_frame_source` template
-//! do it:
+//! Every workload runs its graph on one thread of its own, serially (no worker pool), and only
+//! when input arrives, with Daedalus's drive loops (`HostGraph::drive_blocking` and its async
+//! twin `HostGraph::drive`):
 //!
-//! - **Frame-driven** workloads (a binding to a `styx-frames+unix://` camera service) have a
-//!   feeder thread that blocks on the Styx `FrameClient` and pushes each `FrameLease` into the
-//!   graph's latest-only host input, zero-copy (`styx::core::daedalus::frame_payload`). The graph
-//!   thread waits on the host bridge (`HostGraph::inbound_waiter`) and ticks once per frame; a
-//!   graph slower than the camera sees the newest frame, never a queue of stale ones.
-//! - **Resource-driven** workloads tick when a bound resource changes: the engine updates the held
-//!   inputs and wakes the graph thread.
-//! - Graphs without host inputs run once.
-//!
-//! The non-frame inputs (resource state, a secondary camera's latest frame) are pushed by the
-//! graph thread itself right before each tick, so a tick always sees a full set of inputs and the
-//! frame push alone decides when the graph runs.
+//! - **Frame-driven** workloads (a binding to a `styx-frames+unix://` camera service): the graph
+//!   thread awaits its camera's Styx `FrameClient` (pollable; Styx `docs/frame-server.md`,
+//!   "Without a thread per client") and the graph's inbound wake together, on one
+//!   `styx_graph::rt::block_on`. Each frame goes into the graph's latest-only host input,
+//!   zero-copy (`styx::core::daedalus::frame_payload`), and wakes the drive loop, which ticks
+//!   once; frames that arrived during a tick are drained to the newest, so a graph slower than
+//!   the camera never sees a queue of stale ones. A secondary camera's latest frame is pushed in
+//!   one atomic batch with the primary frame (`HostGraph::batch`), so both land in the same tick.
+//!   Resource inputs are **held** host inputs (`set_held_input`): the engine pushes a resource
+//!   when it changes and every tick sees its latest value, without re-pushing and without
+//!   ticking on its own. No feeder thread runs per camera.
+//! - **Resource-driven** workloads tick when a bound resource changes: the engine pushes the
+//!   full set of resource inputs as one batch into latest-only inputs, and the graph thread's
+//!   `drive_blocking` ticks once per batch.
+//! - Graphs without bindings run once.
 //!
 //! The graph thread never waits on Orion: it keeps the latest outputs, stats and metrics and
 //! signals `outputs_ready`; the engine publishes them, at most every publish interval. Frame
@@ -24,14 +27,20 @@
 
 use std::{
     collections::BTreeMap,
+    future::{Future, poll_fn},
+    pin::pin,
     sync::{Arc, Mutex, MutexGuard},
+    task::{Context, Poll},
     thread::JoinHandle,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use daedalus::{
-    engine::{HostGraphPayloadInput, HostGraphStopHandle},
-    runtime::host_bridge::{HostBridgeHandle, InboundWait, ValueSerializerMap},
+    engine::{EngineError, HostGraphStopHandle, HostGraphTurn},
+    runtime::{
+        ExecutionTelemetry,
+        host_bridge::{HostBridgeHandle, ValueSerializerMap},
+    },
     transport::Payload,
 };
 use styx::imports::framelease::FrameLease;
@@ -40,8 +49,8 @@ use tokio::sync::Notify;
 use super::{
     ExecutionError,
     bindings::{FrameSourceSpec, ResourceInput},
-    frame_source::{FrameReceive, FrameSource},
-    graph::CompiledWorkloadGraph,
+    frame_source::{FrameReceive, FrameSource, FrameSourceStatus},
+    graph::{CompiledWorkloadGraph, ResidentHostGraph},
     outputs::{METRICS_ARTIFACT_KIND, PLAN_ARTIFACT_KIND, TELEMETRY_ARTIFACT_KIND, output_artifact, payload_message, session_artifact, session_id_for},
     stats::{DriverStats, FpsWindow, GraphMetrics},
 };
@@ -50,16 +59,15 @@ use crate::{
     stream_io,
 };
 
-/// How long the feeder blocks for a frame before checking whether it should stop.
-const FRAME_RECV_TIMEOUT: Duration = Duration::from_millis(200);
 /// A secondary camera's last frame is reused for at most this long (Styx servers reclaim held
 /// leases after ~2 s).
 const SECONDARY_FRAME_MAX_AGE: Duration = Duration::from_millis(500);
+/// Daedalus's frame-overhead report is read from the graph at most this often.
+const FRAME_OVERHEAD_INTERVAL: Duration = Duration::from_secs(1);
 
-/// State the driver threads share with the engine's publishing loop.
+/// State the graph thread shares with the engine's publishing loop.
 struct DriverShared {
     state: Mutex<DriverState>,
-    held: Mutex<HeldInputs>,
     outputs_ready: Arc<Notify>,
 }
 
@@ -68,16 +76,10 @@ struct DriverState {
     fps: FpsWindow,
     outputs: BTreeMap<String, LatestOutput>,
     metrics: GraphMetrics,
-}
-
-/// Inputs the graph thread pushes before every tick.
-#[derive(Default)]
-struct HeldInputs {
-    /// Bumped whenever `resources` changes; resource-driven graphs tick on it.
-    generation: u64,
-    resources: BTreeMap<String, ResourceInput>,
-    /// The latest frame of each secondary camera, with when it arrived.
-    secondary: Vec<Option<(Payload, Instant)>>,
+    /// Bumped per tick; outputs carry the tick that produced them.
+    sequence: u64,
+    /// When the input that the next tick consumes was pushed (tick latency).
+    last_input_at: Option<Instant>,
 }
 
 #[derive(Clone)]
@@ -95,7 +97,17 @@ enum OutputValue {
     Message(String),
 }
 
-/// A resident workload: its graph thread, and its frame feeder when it is frame-driven.
+/// What makes a workload's graph tick.
+enum Trigger {
+    /// Camera frames; the first source paces the graph.
+    Frames(Vec<Box<dyn FrameSource>>),
+    /// Changes of the bound resources.
+    Resources,
+    /// Nothing: the graph runs once.
+    Once,
+}
+
+/// A resident workload and its graph thread.
 pub(crate) struct WorkloadDriver {
     pub workload: ExecutionWorkload,
     pub sources: Vec<FrameSourceSpec>,
@@ -107,7 +119,9 @@ pub(crate) struct WorkloadDriver {
     planning_ms: f64,
     started_at_ms: u64,
     rendered: BTreeMap<String, (u64, String)>,
-    threads: Vec<JoinHandle<()>>,
+    /// The revision of each resource input last pushed.
+    revisions: BTreeMap<String, String>,
+    thread: Option<JoinHandle<()>>,
 }
 
 impl WorkloadDriver {
@@ -115,20 +129,31 @@ impl WorkloadDriver {
     /// graph) when there are any, otherwise from the bound resources.
     pub fn start(workload: ExecutionWorkload, graph: CompiledWorkloadGraph, frames: Vec<(FrameSourceSpec, Box<dyn FrameSource>)>, outputs_ready: Arc<Notify>) -> Result<Self, ExecutionError> {
         let (sources, frame_sources): (Vec<_>, Vec<_>) = frames.into_iter().unzip();
-        for spec in &sources {
-            graph.host_graph.set_latest_input(spec.input.clone()).map_err(|error| ExecutionError::Plan(format!("frame input '{}': {error}", spec.input)))?;
-        }
+        let frame_inputs = sources.iter().map(|spec| spec.input.clone()).collect::<Vec<_>>();
+        let latest = |port: &String| graph.host_graph.set_latest_input(port.clone()).map_err(|error| ExecutionError::Plan(format!("host input '{port}': {error}")));
+        frame_inputs.iter().try_for_each(latest)?;
+        let mut context_inputs = graph.input_ports.iter().filter(|port| !frame_inputs.contains(port));
+        let trigger = if !frame_sources.is_empty() {
+            context_inputs.for_each(|port| graph.host_graph.set_held_input(port.clone()));
+            Trigger::Frames(frame_sources)
+        } else if workload.bindings.is_empty() {
+            Trigger::Once
+        } else {
+            context_inputs.try_for_each(latest)?;
+            Trigger::Resources
+        };
+
         let started_at_ms = now_ms();
         let metrics = GraphMetrics::new(graph.metrics_level, &graph.host_graph.explain_plan());
-        let held = HeldInputs {
-            // A workload with no bindings at all runs its graph once.
-            generation: u64::from(workload.bindings.is_empty()),
-            resources: BTreeMap::new(),
-            secondary: vec![None; sources.len().saturating_sub(1)],
-        };
         let shared = Arc::new(DriverShared {
-            state: Mutex::new(DriverState { stats: DriverStats { updated_at_ms: started_at_ms, ..DriverStats::default() }, fps: FpsWindow::default(), outputs: BTreeMap::new(), metrics }),
-            held: Mutex::new(held),
+            state: Mutex::new(DriverState {
+                stats: DriverStats { updated_at_ms: started_at_ms, ..DriverStats::default() },
+                fps: FpsWindow::default(),
+                outputs: BTreeMap::new(),
+                metrics,
+                sequence: 0,
+                last_input_at: None,
+            }),
             outputs_ready,
         });
         let host = graph.host_graph.host().clone();
@@ -136,40 +161,41 @@ impl WorkloadDriver {
         let serializers = graph.host_graph.value_serializers().clone();
         let plan_message = graph.plan.to_string();
         let planning_ms = graph.planning_ms;
-        let frame_inputs = sources.iter().map(|spec| spec.input.clone()).collect::<Vec<_>>();
-        let feeder = frame_inputs.first().map(|primary| Feeder { input: graph.host_graph.bind_payload_input(primary.clone()), sources: frame_sources, shared: shared.clone(), stop: stop.clone() });
-
-        let mut threads = Vec::with_capacity(2);
-        let graph_loop = GraphLoop { graph, frame_inputs, shared: shared.clone(), stop: stop.clone() };
-        threads.push(spawn_thread(format!("helios-graph-{}", workload.workload_id), move || graph_loop.run())?);
-        if let Some(feeder) = feeder {
-            match spawn_thread(format!("helios-frames-{}", workload.workload_id), move || feeder.run()) {
-                Ok(thread) => threads.push(thread),
-                Err(error) => {
-                    stop.stop();
-                    threads.into_iter().for_each(|thread| drop(thread.join()));
-                    return Err(error);
-                }
-            }
-        }
-        Ok(Self { workload, sources, shared, host, stop, serializers, plan_message, planning_ms, started_at_ms, rendered: BTreeMap::new(), threads })
+        let graph_loop = GraphLoop { recorder: TickRecorder::new(&graph, shared.clone()), graph, frame_inputs, shared: shared.clone(), stop: stop.clone() };
+        let thread = std::thread::Builder::new()
+            .name(format!("helios-graph-{}", workload.workload_id))
+            .spawn(move || graph_loop.run(trigger))
+            .map_err(|error| ExecutionError::Execute(format!("failed to start workload driver thread: {error}")))?;
+        Ok(Self { workload, sources, shared, host, stop, serializers, plan_message, planning_ms, started_at_ms, rendered: BTreeMap::new(), revisions: BTreeMap::new(), thread: Some(thread) })
     }
 
-    /// Replace the resource inputs pushed with each tick. A resource-driven graph ticks when one
-    /// of them changed.
-    pub fn update_context(&self, inputs: Vec<ResourceInput>) {
-        let changed = {
-            let mut held = lock(&self.shared.held);
-            let changed = held.resources.len() != inputs.len() || inputs.iter().any(|input| held.resources.get(&input.input).is_none_or(|current| current.revision != input.revision));
-            if changed {
-                held.resources = inputs.into_iter().map(|input| (input.input.clone(), input)).collect();
-                held.generation += 1;
-            }
-            changed
-        };
-        if changed && self.sources.is_empty() {
-            self.host.wake_inbound_waiters();
+    /// Hand the bound resources to the graph when one of them changed: a frame-driven graph's
+    /// held inputs take the changed values (and its next frame sees them); a resource-driven
+    /// graph gets the full set in one batch and ticks once.
+    pub fn update_context(&mut self, inputs: Vec<ResourceInput>) {
+        let changed = self.revisions.len() != inputs.len() || inputs.iter().any(|input| self.revisions.get(&input.input) != Some(&input.revision));
+        if !changed {
+            return;
         }
+        if self.sources.is_empty() {
+            let batch = inputs.iter().fold(self.host.batch(), |batch, input| batch.push(input.input.clone(), input.payload.clone()));
+            lock(&self.shared.state).last_input_at = Some(Instant::now());
+            if let Err(rejected) = batch.commit() {
+                self.record_error(format!("resource inputs rejected: {rejected}"));
+            }
+        } else {
+            for input in inputs.iter().filter(|input| self.revisions.get(&input.input) != Some(&input.revision)) {
+                self.host.push(input.input.clone(), input.payload.clone());
+            }
+        }
+        self.revisions = inputs.into_iter().map(|input| (input.input, input.revision)).collect();
+    }
+
+    fn record_error(&self, error: String) {
+        tracing::warn!(workload_id = %self.workload.workload_id, %error, "workload input");
+        let mut state = lock(&self.shared.state);
+        state.stats.last_error = Some(error);
+        state.stats.updated_at_ms = now_ms();
     }
 
     #[cfg(test)]
@@ -181,7 +207,13 @@ impl WorkloadDriver {
     /// rendered once), the driver's stats, the plan and, when enabled, the graph metrics.
     pub fn snapshot(&mut self) -> (ExecutionSessionState, Vec<ExecutionArtifactRecord>) {
         let (stats, outputs, metrics) = {
-            let state = lock(&self.shared.state);
+            let mut state = lock(&self.shared.state);
+            // The rate decays to zero when frames stop, with no timer on the graph thread.
+            let fps = state.fps.fps();
+            if state.stats.fps != fps {
+                state.stats.fps = fps;
+                state.stats.updated_at_ms = now_ms();
+            }
             let metrics = state.metrics.enabled().then(|| state.metrics.to_json());
             (state.stats.clone(), state.outputs.clone(), metrics)
         };
@@ -232,87 +264,41 @@ impl WorkloadDriver {
 
 impl Drop for WorkloadDriver {
     fn drop(&mut self) {
-        // Sets the flag and wakes the graph thread; the feeder sees it within one receive wait.
+        // Sets the flag and wakes the graph thread's drive loop (or its connect backoff).
         self.stop.stop();
-        for thread in self.threads.drain(..) {
-            if thread.join().is_err() {
-                tracing::warn!(workload_id = %self.workload.workload_id, "workload driver thread panicked");
-            }
+        if let Some(thread) = self.thread.take()
+            && thread.join().is_err()
+        {
+            tracing::warn!(workload_id = %self.workload.workload_id, "workload driver thread panicked");
         }
     }
-}
-
-fn spawn_thread(name: String, run: impl FnOnce() + Send + 'static) -> Result<JoinHandle<()>, ExecutionError> {
-    std::thread::Builder::new().name(name).spawn(run).map_err(|error| ExecutionError::Execute(format!("failed to start workload driver thread: {error}")))
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// The graph thread: waits on the host bridge and ticks when input is there.
-struct GraphLoop {
-    graph: CompiledWorkloadGraph,
-    /// Frame inputs, the primary (pacing) one first.
-    frame_inputs: Vec<String>,
+/// Records each tick's outputs, stats and metrics for the publishing loop.
+struct TickRecorder {
+    output_ports: Vec<String>,
     shared: Arc<DriverShared>,
-    stop: HostGraphStopHandle,
+    /// When to read Daedalus's frame-overhead report next (`None`: not recorded).
+    next_overhead: Option<Instant>,
 }
 
-impl GraphLoop {
-    fn run(mut self) {
-        let frame_driven = !self.frame_inputs.is_empty();
-        let has_host_inputs = !self.graph.input_ports.is_empty();
-        let mut seen_generation = 0;
-        let mut sequence = 0_u64;
-        loop {
-            // Created before the checks, so input (or a stop) arriving in between still wakes it.
-            let waiter = self.graph.host_graph.inbound_waiter();
-            if self.stop.is_stopped() {
-                break;
-            }
-            let ready = if frame_driven { self.graph.host_graph.host().has_pending_inbound() } else { lock(&self.shared.held).generation != seen_generation };
-            if !ready {
-                if waiter.wait(None) == InboundWait::Closed {
-                    break;
-                }
-                continue;
-            }
-            seen_generation = self.push_held_inputs();
-            let started_at = Instant::now();
-            let result = if has_host_inputs { self.graph.host_graph.tick() } else { self.graph.host_graph.run_executor_once().map(|run| run.telemetry) };
-            sequence += 1;
-            self.finish_tick(result, started_at, sequence);
-        }
+impl TickRecorder {
+    fn new(graph: &CompiledWorkloadGraph, shared: Arc<DriverShared>) -> Self {
+        let next_overhead = graph.host_graph.frame_overhead_enabled().then(Instant::now);
+        Self { output_ports: graph.output_ports.clone(), shared, next_overhead }
     }
 
-    /// Push the resource inputs and the secondary cameras' latest frames; returns the resource
-    /// generation pushed.
-    fn push_held_inputs(&mut self) -> u64 {
-        let mut held = lock(&self.shared.held);
-        for (port, input) in &held.resources {
-            self.graph.host_graph.push(port.clone(), input.payload.clone());
-        }
-        let host_graph = &self.graph.host_graph;
-        for (slot, input) in held.secondary.iter_mut().zip(self.frame_inputs.iter().skip(1)) {
-            if slot.as_ref().is_some_and(|(_, received_at)| received_at.elapsed() > SECONDARY_FRAME_MAX_AGE) {
-                *slot = None;
-            }
-            if let Some((payload, _)) = slot {
-                host_graph.push_payload(input.clone(), payload.clone());
-            }
-        }
-        held.generation
-    }
-
-    fn finish_tick(&mut self, result: Result<daedalus::runtime::ExecutionTelemetry, daedalus::engine::EngineError>, started_at: Instant, sequence: u64) {
+    fn record(&mut self, graph: &ResidentHostGraph, result: Result<&ExecutionTelemetry, String>) {
         let now = Instant::now();
-        let tick_ms = now.duration_since(started_at).as_secs_f64() * 1000.0;
         let updated_at_ms = now_ms();
         let mut outputs = Vec::new();
-        for port in &self.graph.output_ports {
+        for port in &self.output_ports {
             let mut latest = None;
-            while let Some(payload) = self.graph.host_graph.take_payload(port) {
+            while let Some(payload) = graph.take_payload(port) {
                 latest = Some(payload);
             }
             if let Some(payload) = latest {
@@ -320,100 +306,257 @@ impl GraphLoop {
                     Some(frame) => OutputValue::Message(stream_io::framelease_descriptor_json(frame).to_string()),
                     None => OutputValue::Payload(payload),
                 };
-                outputs.push((port.clone(), LatestOutput { sequence, updated_at_ms, value }));
+                outputs.push((port.clone(), value));
             }
         }
+        let frame_overhead = match self.next_overhead {
+            Some(due) if now >= due => {
+                self.next_overhead = Some(now + FRAME_OVERHEAD_INTERVAL);
+                graph.frame_overhead()
+            }
+            _ => None,
+        };
 
         {
             let mut state = lock(&self.shared.state);
             let state = &mut *state;
-            state.outputs.extend(outputs);
+            state.sequence += 1;
+            let sequence = state.sequence;
+            state.outputs.extend(outputs.into_iter().map(|(port, value)| (port, LatestOutput { sequence, updated_at_ms, value })));
             state.fps.record_frame(now);
             state.stats.fps = state.fps.fps();
-            state.stats.last_tick_ms = tick_ms;
+            state.stats.last_tick_ms = state.last_input_at.take().map_or(0.0, |pushed| now.duration_since(pushed).as_secs_f64() * 1000.0);
             state.stats.updated_at_ms = updated_at_ms;
             match result {
                 Ok(telemetry) => {
                     state.stats.ticks_processed += 1;
                     state.stats.last_error = None;
-                    state.metrics.record(&telemetry, now);
+                    state.metrics.record(telemetry, now);
                 }
                 Err(error) => {
                     state.stats.ticks_failed += 1;
                     state.stats.last_error = Some(format!("graph tick failed: {error}"));
                 }
             }
+            if let Some(report) = frame_overhead {
+                state.metrics.set_frame_overhead(&report);
+            }
         }
         self.shared.outputs_ready.notify_one();
     }
+
+    /// Record a tick that finished (`turn`) from a drive loop.
+    fn record_turn(&mut self, graph: &ResidentHostGraph, turn: &HostGraphTurn) -> Result<(), EngineError> {
+        if let Some(telemetry) = &turn.telemetry {
+            self.record(graph, Ok(telemetry));
+        }
+        Ok(())
+    }
 }
 
-/// The frame feeder: blocks on the primary camera and pushes each frame into the graph.
-struct Feeder {
-    input: HostGraphPayloadInput,
-    sources: Vec<Box<dyn FrameSource>>,
+/// The graph thread.
+struct GraphLoop {
+    graph: CompiledWorkloadGraph,
+    recorder: TickRecorder,
+    /// Frame inputs, the primary (pacing) one first.
+    frame_inputs: Vec<String>,
     shared: Arc<DriverShared>,
     stop: HostGraphStopHandle,
 }
 
-impl Feeder {
-    fn run(mut self) {
-        while !self.stop.is_stopped() {
-            let frame = match self.sources[0].recv(FRAME_RECV_TIMEOUT) {
-                FrameReceive::Frame(frame) => frame,
-                FrameReceive::Idle => {
-                    self.record_idle(None);
-                    continue;
-                }
-                FrameReceive::Unavailable(reason) => {
-                    self.record_idle(Some(reason));
-                    continue;
-                }
-            };
-            if self.sources.len() > 1 {
-                let mut held = lock(&self.shared.held);
-                for (index, source) in self.sources.iter_mut().enumerate().skip(1) {
-                    while let FrameReceive::Frame(newer) = source.recv(Duration::ZERO) {
-                        held.secondary[index - 1] = Some((stream_io::framelease_payload(newer), Instant::now()));
-                    }
-                }
-            }
-            let timestamp = frame.meta().timestamp;
-            let size = (frame.meta().format.resolution.width.get(), frame.meta().format.resolution.height.get());
-            let status = self.sources[0].status();
-            {
-                let mut state = lock(&self.shared.state);
-                let stats = &mut state.stats;
-                stats.frames_received += 1;
-                stats.last_frame_timestamp = Some(timestamp);
-                stats.last_frame_size = Some(size);
-                stats.source = status;
-            }
-            // Latest-only: a frame the graph has not taken yet is replaced (and released).
-            self.input.push(stream_io::framelease_payload(frame));
+/// Why a connected frame-driven run ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RunExit {
+    Stopped,
+    /// The primary camera's connection is gone; connect again.
+    SourceClosed,
+}
+
+impl GraphLoop {
+    fn run(self, trigger: Trigger) {
+        match trigger {
+            Trigger::Once => self.run_once(),
+            Trigger::Resources => self.drive_resources(),
+            Trigger::Frames(sources) => self.drive_frames(sources),
         }
     }
 
-    fn record_idle(&self, reason: Option<String>) {
-        let status = self.sources[0].status();
-        let changed = {
-            let mut state = lock(&self.shared.state);
-            let fps = state.fps.fps();
-            let stats = &mut state.stats;
-            let changed = stats.source != status || stats.fps != fps || (reason.is_some() && stats.last_error != reason);
-            if changed {
-                stats.source = status;
-                stats.fps = fps;
-                if reason.is_some() {
-                    stats.last_error = reason;
-                }
-                stats.updated_at_ms = now_ms();
-            }
-            changed
-        };
-        if changed {
-            self.shared.outputs_ready.notify_one();
+    fn run_once(mut self) {
+        lock(&self.shared.state).last_input_at = Some(Instant::now());
+        let host_graph = &mut self.graph.host_graph;
+        let result = if self.graph.input_ports.is_empty() { host_graph.run_executor_once().map(|run| run.telemetry) } else { host_graph.tick() };
+        match result {
+            Ok(telemetry) => self.recorder.record(host_graph, Ok(&telemetry)),
+            Err(error) => self.recorder.record(host_graph, Err(error.to_string())),
         }
+    }
+
+    /// `drive_blocking` until stopped; a failed tick is recorded and the loop resumes.
+    fn drive_resources(mut self) {
+        loop {
+            let recorder = &mut self.recorder;
+            match self.graph.host_graph.drive_blocking(&self.stop, |graph, turn| recorder.record_turn(graph, turn)) {
+                Ok(_) => return,
+                Err(error) => self.recorder.record(&self.graph.host_graph, Err(error.to_string())),
+            }
+        }
+    }
+
+    /// Connect to the primary camera (backing off while it is not there), then await its frames
+    /// and the graph's drive loop together on this thread until stopped or disconnected.
+    fn drive_frames(mut self, mut sources: Vec<Box<dyn FrameSource>>) {
+        let host = self.graph.host_graph.host().clone();
+        loop {
+            // Created before the stop check, so a stop in between still wakes the backoff wait.
+            let waiter = self.graph.host_graph.inbound_waiter();
+            if self.stop.is_stopped() {
+                return;
+            }
+            if let Err((reason, retry_in)) = sources[0].connect() {
+                record_source_status(&self.shared, sources[0].status(), Some(reason));
+                let _ = waiter.wait(Some(retry_in));
+                continue;
+            }
+            drop(waiter);
+            record_source_status(&self.shared, sources[0].status(), None);
+            let pump = FramePump { sources: &mut sources, host: &host, inputs: &self.frame_inputs, shared: &self.shared, secondary: vec![None; self.frame_inputs.len().saturating_sub(1)] };
+            let exit = styx_graph::rt::block_on(run_connected(&mut self.graph.host_graph, &self.stop, pump, &mut self.recorder));
+            // A frame pushed right before the connection went away is not left pending.
+            self.frame_inputs.iter().for_each(|input| host.clear_input(input));
+            if exit == RunExit::Stopped {
+                return;
+            }
+        }
+    }
+}
+
+/// The graph's async drive loop and the camera pump, polled together (the pump first, so frames
+/// that arrived during a tick are in before the drive loop looks). A failed tick is recorded and
+/// the drive loop resumes.
+async fn run_connected(graph: &mut ResidentHostGraph, stop: &HostGraphStopHandle, pump: FramePump<'_>, recorder: &mut TickRecorder) -> RunExit {
+    let mut pump = pin!(pump.run());
+    loop {
+        let result = {
+            let mut drive = pin!(graph.drive(stop, |graph, turn| recorder.record_turn(graph, turn)));
+            poll_fn(|cx| {
+                if pump.as_mut().poll(cx).is_ready() {
+                    return Poll::Ready(None);
+                }
+                drive.as_mut().poll(cx).map(Some)
+            })
+            .await
+        };
+        match result {
+            None => return RunExit::SourceClosed,
+            Some(Ok(_)) => return RunExit::Stopped,
+            Some(Err(error)) => recorder.record(graph, Err(error.to_string())),
+        }
+    }
+}
+
+/// Moves camera frames into the graph's host inputs on the graph thread.
+struct FramePump<'a> {
+    /// The primary source first.
+    sources: &'a mut [Box<dyn FrameSource>],
+    host: &'a HostBridgeHandle,
+    /// The host input of each source.
+    inputs: &'a [String],
+    shared: &'a DriverShared,
+    /// Each secondary camera's latest frame, with when it arrived.
+    secondary: Vec<Option<(Payload, Instant)>>,
+}
+
+impl FramePump<'_> {
+    /// Completes when the primary camera's connection is gone.
+    async fn run(mut self) {
+        poll_fn(|cx| self.poll(cx)).await;
+    }
+
+    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+        let mut newest = None;
+        let closed = loop {
+            match self.sources[0].poll_frame(cx) {
+                // Latest-only: an older frame drained here is released at once.
+                Poll::Ready(FrameReceive::Frame(frame)) => newest = Some(frame),
+                Poll::Ready(FrameReceive::Closed(reason)) => break Some(reason),
+                Poll::Ready(FrameReceive::Idle) => {
+                    cx.waker().wake_by_ref();
+                    break None;
+                }
+                Poll::Pending => break None,
+            }
+        };
+        match newest {
+            Some(frame) => self.push(frame),
+            None => record_source_status(self.shared, self.sources[0].status(), None),
+        }
+        match closed {
+            Some(reason) => {
+                record_source_status(self.shared, self.sources[0].status(), Some(reason));
+                Poll::Ready(())
+            }
+            None => Poll::Pending,
+        }
+    }
+
+    /// Push `frame`, with the secondary cameras' latest frames in the same batch.
+    fn push(&mut self, frame: FrameLease) {
+        let timestamp = frame.meta().timestamp;
+        let size = (frame.meta().format.resolution.width.get(), frame.meta().format.resolution.height.get());
+        let status = self.sources[0].status();
+        {
+            let mut state = lock(&self.shared.state);
+            state.last_input_at = Some(Instant::now());
+            let stats = &mut state.stats;
+            stats.frames_received += 1;
+            stats.last_frame_timestamp = Some(timestamp);
+            stats.last_frame_size = Some(size);
+            stats.source = status;
+        }
+        let payload = stream_io::framelease_payload(frame);
+        if self.sources.len() == 1 {
+            // Latest-only: a frame the graph has not taken yet is replaced (and released).
+            self.host.feed_payload(self.inputs[0].clone(), payload);
+            return;
+        }
+        let mut batch = self.host.batch().push_payload(self.inputs[0].clone(), payload);
+        for (index, source) in self.sources.iter_mut().enumerate().skip(1) {
+            let slot = &mut self.secondary[index - 1];
+            while let FrameReceive::Frame(newer) = source.try_frame() {
+                *slot = Some((stream_io::framelease_payload(newer), Instant::now()));
+            }
+            if slot.as_ref().is_some_and(|(_, received_at)| received_at.elapsed() > SECONDARY_FRAME_MAX_AGE) {
+                *slot = None;
+            }
+            if let Some((payload, _)) = slot {
+                batch = batch.push_payload(self.inputs[index].clone(), payload.clone());
+            }
+        }
+        if let Err(rejected) = batch.commit() {
+            record_source_status(self.shared, self.sources[0].status(), Some(format!("frames rejected: {rejected}")));
+        }
+    }
+}
+
+/// Note the primary camera's connection state (and why it has none); publishes when it changed.
+fn record_source_status(shared: &DriverShared, status: FrameSourceStatus, reason: Option<String>) {
+    let changed = {
+        let mut state = lock(&shared.state);
+        let fps = state.fps.fps();
+        let stats = &mut state.stats;
+        let changed = stats.source != status || stats.fps != fps || (reason.is_some() && stats.last_error != reason);
+        if changed {
+            stats.source = status;
+            stats.fps = fps;
+            if reason.is_some() {
+                stats.last_error = reason;
+            }
+            stats.updated_at_ms = now_ms();
+        }
+        changed
+    };
+    if changed {
+        shared.outputs_ready.notify_one();
     }
 }
 

@@ -27,6 +27,8 @@ orion = { workspace = true, default-features = false, features = ["client", "mac
 daedalus = { workspace = true, features = ["engine", "dylib-plugins", "metrics"] }
 # `facade` provides `styx::ipc::FrameClient`; no capture backends are needed.
 styx = { workspace = true, default-features = false, features = ["facade", "daedalus"] }
+# `rt::block_on`: a graph thread awaits its camera's `FrameClient` and its drive loop together.
+styx-graph = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

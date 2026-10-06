@@ -32,7 +32,8 @@ session state, artifacts, and telemetry back into Orion.
 - plugin requirement validation before graph execution
 - local execution session lifecycle and failure reporting
 - resource binding injection into graph inputs
-- per-workload frame feeders that request frames from camera services
+- requesting frames from camera services for each workload (on the workload's graph
+  thread; no thread per camera)
 - input-driven execution of resident Daedalus graphs for assigned workloads
 - publication of executor/provider state back into Orion
 
@@ -80,24 +81,34 @@ session state, artifacts, and telemetry back into Orion.
   (`UPDATE_GOLDEN=1 cargo test -p helios-engine graph_documents_are_eidos_templates`).
 - each workload's graph is compiled once, with a host bridge of its own, and
   stays resident until the decoded workload changes or disappears.
-- **input-driven execution**: every workload graph runs serially on a driver
-  thread of its own and ticks only when its input arrives
-  (`execution::driver`), following Daedalus's host-driven model
-  (`HostGraph::inbound_waiter`, latest-only host inputs) and its
-  `external_frame_source` template. No timer runs graphs.
+- **input-driven execution**: every workload graph runs serially on one thread of
+  its own and ticks only when its input arrives (`execution::driver`), with
+  Daedalus's drive loops (`HostGraph::drive_blocking`, and its async twin
+  `HostGraph::drive` for cameras) and latest-only host inputs. No timer runs
+  graphs.
   - frame-driven workloads: a binding whose resource has a
-    `styx-frames+unix://` endpoint makes the workload frame-driven. A feeder
+    `styx-frames+unix://` endpoint makes the workload frame-driven. The graph
     thread keeps a reconnecting Styx `FrameClient` (luma at native size by
     default; `binding.<input>.camera`, `.output_width`/`.output_height`,
-    `.pyramid` adjust the request) and pushes each frame as a zero-copy
-    `styx:framelease` payload into the latest-only host input; the graph
-    thread ticks once per frame, so a slow graph sees the newest frame and
-    stale ones are released. Leases are released when the tick returns.
-  - resource-driven workloads tick when a bound resource changes; graphs
-    without host inputs run once.
-  - non-frame inputs (resource state as JSON, a secondary camera's latest
-    frame) are pushed by the graph thread right before each tick, so every
-    tick sees a full set of inputs.
+    `.pyramid` adjust the request) and awaits it and the graph's inbound wake
+    together on one `styx_graph::rt::block_on` (the client is pollable; Styx
+    `docs/frame-server.md`, "Without a thread per client"). Each frame goes
+    into the latest-only host input as a zero-copy `styx:framelease` payload
+    and the drive loop ticks once; frames that arrived during a tick are
+    drained to the newest, so a slow graph sees the newest frame and stale
+    ones are released. Leases are released when the tick returns. While the
+    camera service is not up, the thread backs off (100 ms to 2 s) waiting on
+    the graph's inbound waiter, so a stop still ends it at once.
+  - context: in a frame-driven workload every other host input is declared
+    held in the document before planning (`daedalus.host_held_inputs`), so
+    the planner branches it for by-value consumers. The engine pushes a
+    resource input when it changes; every tick sees its latest value and a
+    held push never ticks the graph. A secondary camera's latest frame goes in
+    one atomic batch (`HostGraph::batch`) with the primary frame, so both land
+    in the same tick.
+  - resource-driven workloads: the bound resources are pushed as one batch
+    into latest-only inputs whenever one changes, and `drive_blocking` ticks
+    once per batch. Graphs without bindings run once.
 - publication: the graph threads keep the latest outputs, stats and metrics
   and signal the engine, which publishes them to Orion at most every
   `HELIOS_ENGINE_PUBLISH_INTERVAL_MS` (default 250; the old
@@ -113,16 +124,22 @@ session state, artifacts, and telemetry back into Orion.
   - `.plan` (kind `execution.plan`, format `helios.engine.plan.v1`): the host
     ports with their `TypeExpr`/`TypeKey` and connections
     (`host_inputs()`/`host_outputs()`), the document's `requires`, the full
-    `explain_plan()` (nodes, edges, policies, handoffs) and `adapter_edges`,
-    every edge the planner inserted adapters on, so conversions and device
-    transfers are visible.
+    `explain_plan()` (nodes, edges, policies, handoffs, and each edge's
+    `copies_frame`/`crosses_residency`), `adapter_edges` (every edge the
+    planner inserted adapters on) and `copying_edges`/`crossing_edges` (edges
+    whose adapters copy a frame or move it between residencies), so
+    conversions and device transfers are visible.
   - `.metrics` (kind `execution.metrics`, only with
     `HELIOS_ENGINE_METRICS_LEVEL` = `basic`, `timing`, `detailed`, `profile`
     or `trace`; default `off`): Daedalus per-node calls and handler time and
     per-edge waits, adapter time, transport bytes, copies, clones, drops and
-    GPU transfers, over the last 1 s window and since start. `frame_overhead`
-    is reserved for Daedalus's `FrameOverheadReport`, which is not on the
-    pinned Daedalus yet (`execution::stats::frame_overhead`).
+    GPU transfers, over the last 1 s window and since start, and
+    `frame_overhead`: Daedalus's `FrameOverheadReport` over its rolling window
+    (512 ticks; `EngineConfig::with_frame_overhead`), read at most once a
+    second: p50/p99/max/mean of host push and take, input collection,
+    adapters, handlers, framing, drain and dispatch, per-tick copies, and
+    per-edge queue and adapter time. `helios-vision-probe --frame-overhead N`
+    prints the same report for a live camera.
 
 Known boundaries:
 
@@ -131,5 +148,6 @@ Known boundaries:
 - engine does not own camera decode/encode or preview publishing; peripherals
   owns the camera services.
 - graph `FrameLease` outputs are not re-served to other processes yet.
-- Daedalus has no host-input policy that keeps a value across ticks, so the
-  engine re-pushes context inputs before every tick (see the driver docs).
+- opening a camera service the first time blocks the graph thread for up to
+  its 2 s timeout (Styx's first `request` is blocking; only reconnecting is
+  not), including a secondary camera that is not up yet.
