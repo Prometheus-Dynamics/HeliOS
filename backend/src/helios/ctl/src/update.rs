@@ -30,26 +30,102 @@ pub struct ApplyUpdateArgs {
     pub socket: PathBuf,
 }
 
+/// An OS image checked and described, ready to hand to Orion as an update artifact + workload.
+#[derive(Debug, Clone)]
+pub struct PreparedUpdate {
+    pub artifact: ArtifactRecord,
+    pub workload: WorkloadRecord,
+    pub node: NodeRecord,
+    pub summary: SubmittedUpdate,
+}
+
+/// What was (or will be) submitted, for callers to report.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubmittedUpdate {
+    pub artifact_id: String,
+    pub workload_id: String,
+    pub version: String,
+    pub image_url: String,
+    pub size_bytes: u64,
+    pub sha256: String,
+    pub inactive_slot_min_bytes: Option<u64>,
+    pub boot_assets: usize,
+    pub node_id: String,
+}
+
+/// Options for [`prepare_update`].
+#[derive(Debug, Clone)]
+pub struct PrepareUpdateOptions {
+    pub image: PathBuf,
+    pub version: Option<String>,
+    pub artifact_id: Option<String>,
+    pub workload_id: Option<String>,
+    pub node_id: String,
+    /// Already-known sha256 of the image (hex); skips hashing it again.
+    pub known_sha256: Option<String>,
+}
+
 pub fn apply_update(args: ApplyUpdateArgs) -> Result<()> {
     let rt = tokio::runtime::Builder::new_current_thread().enable_io().enable_time().build().context("failed to create async runtime")?;
     rt.block_on(apply_update_async(args))
 }
 
 async fn apply_update_async(args: ApplyUpdateArgs) -> Result<()> {
-    let image = normalize_image_path(&args.image)?;
+    let prepared =
+        prepare_update(PrepareUpdateOptions { image: args.image, version: args.version, artifact_id: args.artifact_id, workload_id: args.workload_id, node_id: args.node_id, known_sha256: None })?;
+    let client = LocalControlPlaneClient::connect_at(&args.socket, "heliosctl.update.apply").with_context(|| format!("failed to connect to Orion at {}", args.socket.display()))?;
+    let summary = submit_update(&client, prepared).await?;
+
+    println!("update_submitted=true");
+    println!("artifact_id={}", summary.artifact_id);
+    println!("workload_id={}", summary.workload_id);
+    println!("version={}", summary.version);
+    println!("image_url={}", summary.image_url);
+    println!("size_bytes={}", summary.size_bytes);
+    if let Some(inactive_slot_min_bytes) = summary.inactive_slot_min_bytes {
+        println!("inactive_slot_min_bytes={inactive_slot_min_bytes}");
+    }
+    println!("boot_assets={}", summary.boot_assets);
+    println!("sha256={}", summary.sha256);
+    println!("node_id={}", summary.node_id);
+    Ok(())
+}
+
+/// Hand a prepared update to Orion (one mutation batch: node, artifact, workload).
+pub async fn submit_update(client: &LocalControlPlaneClient, prepared: PreparedUpdate) -> Result<SubmittedUpdate> {
+    let snapshot = client.fetch_state_snapshot().await.context("failed to fetch Orion desired-state snapshot")?;
+    client
+        .apply_mutations(MutationBatch {
+            base_revision: snapshot.state.desired.revision,
+            mutations: vec![DesiredStateMutation::PutNode(prepared.node), DesiredStateMutation::PutArtifact(prepared.artifact), DesiredStateMutation::PutWorkload(prepared.workload)],
+            // Unstamped: the node assigns HLC stamps on apply.
+            stamps: Vec::new(),
+        })
+        .await
+        .context("failed to submit update artifact/workload to Orion")?;
+    Ok(prepared.summary)
+}
+
+/// Check an OS image and build the Orion records the updater executes. Blocking: hashes the
+/// image and stages its boot assets (mounting the boot partition, so it needs root).
+pub fn prepare_update(options: PrepareUpdateOptions) -> Result<PreparedUpdate> {
+    let image = normalize_image_path(&options.image)?;
     let metadata = fs::metadata(&image).with_context(|| format!("failed to stat update image {}", image.display()))?;
     if !metadata.is_file() {
         bail!("update image is not a regular file: {}", image.display());
     }
 
-    let version = args.version.or_else(|| infer_version_from_path(&image)).ok_or_else(|| anyhow!("could not infer update version from {}; pass --version", image.display()))?;
+    let version = options.version.or_else(|| infer_version_from_path(&image)).ok_or_else(|| anyhow!("could not infer update version from {}; pass --version", image.display()))?;
     let image_url = file_url(&image)?;
     let size_bytes = metadata.len();
-    let sha256 = sha256_hex(&image)?;
+    let sha256 = match options.known_sha256 {
+        Some(known) => known,
+        None => sha256_hex(&image)?,
+    };
     let inactive_slot_min_bytes = inactive_slot_min_bytes(&image, size_bytes)?;
     let boot_assets = stage_boot_assets_from_image(&image, &sha256)?;
-    let artifact_id = args.artifact_id.unwrap_or_else(|| format!("artifact.os.{}", sanitize_component(&version)));
-    let workload_id = args.workload_id.unwrap_or_else(|| format!("update.{}.{}", sanitize_component(&args.node_id), sanitize_component(&version)));
+    let artifact_id = options.artifact_id.unwrap_or_else(|| format!("artifact.os.{}", sanitize_component(&version)));
+    let workload_id = options.workload_id.unwrap_or_else(|| format!("update.{}.{}", sanitize_component(&options.node_id), sanitize_component(&version)));
 
     let mut artifact = ArtifactRecord::builder(ArtifactId::new(artifact_id.clone()))
         .content_type(UPDATE_CONTENT_TYPE)
@@ -71,11 +147,11 @@ async fn apply_update_async(args: ApplyUpdateArgs) -> Result<()> {
             .label(format!("helios.update.boot.{index}.sha256={}", asset.sha256));
     }
     let artifact = artifact.build();
-    let node = NodeRecord::builder(NodeId::new(args.node_id.clone())).build();
+    let node = NodeRecord::builder(NodeId::new(options.node_id.clone())).build();
 
     let workload = WorkloadRecord::builder(WorkloadId::new(workload_id.clone()), RuntimeType::new(UPDATE_RUNTIME_TYPE), ArtifactId::new(artifact_id.clone()))
         .desired_state(DesiredState::Running)
-        .assigned_to(NodeId::new(args.node_id.clone()))
+        .assigned_to(NodeId::new(options.node_id.clone()))
         .config(
             WorkloadConfig::new(UPDATE_CONFIG_SCHEMA)
                 .field("update.version", TypedConfigValue::String(version.clone()))
@@ -83,31 +159,8 @@ async fn apply_update_async(args: ApplyUpdateArgs) -> Result<()> {
         )
         .build();
 
-    let client = LocalControlPlaneClient::connect_at(&args.socket, "heliosctl.update.apply").with_context(|| format!("failed to connect to Orion at {}", args.socket.display()))?;
-    let snapshot = client.fetch_state_snapshot().await.context("failed to fetch Orion desired-state snapshot")?;
-    client
-        .apply_mutations(MutationBatch {
-            base_revision: snapshot.state.desired.revision,
-            mutations: vec![DesiredStateMutation::PutNode(node), DesiredStateMutation::PutArtifact(artifact), DesiredStateMutation::PutWorkload(workload)],
-            // Unstamped: the node assigns HLC stamps on apply.
-            stamps: Vec::new(),
-        })
-        .await
-        .context("failed to submit update artifact/workload to Orion")?;
-
-    println!("update_submitted=true");
-    println!("artifact_id={artifact_id}");
-    println!("workload_id={workload_id}");
-    println!("version={version}");
-    println!("image_url={image_url}");
-    println!("size_bytes={size_bytes}");
-    if let Some(inactive_slot_min_bytes) = inactive_slot_min_bytes {
-        println!("inactive_slot_min_bytes={inactive_slot_min_bytes}");
-    }
-    println!("boot_assets={}", boot_assets.len());
-    println!("sha256={sha256}");
-    println!("node_id={}", args.node_id);
-    Ok(())
+    let summary = SubmittedUpdate { artifact_id, workload_id, version, image_url, size_bytes, sha256, inactive_slot_min_bytes, boot_assets: boot_assets.len(), node_id: options.node_id };
+    Ok(PreparedUpdate { artifact, workload, node, summary })
 }
 
 fn normalize_image_path(path: &Path) -> Result<PathBuf> {
@@ -115,7 +168,8 @@ fn normalize_image_path(path: &Path) -> Result<PathBuf> {
     Ok(absolute)
 }
 
-fn infer_version_from_path(path: &Path) -> Option<String> {
+/// The `v…` component of an image file name (`helios-raze-v2026.4.0.img.xz` -> `v2026.4.0`).
+pub fn infer_version_from_path(path: &Path) -> Option<String> {
     let name = path.file_name()?.to_str()?;
     let without_xz = name.strip_suffix(".xz").unwrap_or(name);
     let without_img = without_xz.strip_suffix(".img").unwrap_or(without_xz);
@@ -127,7 +181,7 @@ fn file_url(path: &Path) -> Result<String> {
     Ok(format!("file://{}", text))
 }
 
-fn sha256_hex(path: &Path) -> Result<String> {
+pub fn sha256_hex(path: &Path) -> Result<String> {
     let mut file = fs::File::open(path).with_context(|| format!("failed to open update image {}", path.display()))?;
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];

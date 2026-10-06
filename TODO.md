@@ -21,7 +21,7 @@ PhotonVision Raze image; orion-node comes from Orion's own Gaia layer.
 
 - [ ] Build the HeliOS Raze image (`./tools/build-os.sh raze`) on a free machine. First build of the backend with git deps inside `helios-cross`: needs network, and `backend/.cargo/config.toml` (sccache, clang linker) must agree with the container.
 - [ ] Hardware checks: boot, camera, fan under load, LEDs, USB gadget (172.31.250.1, serial console on ttyGS0), `/.well-known/pd-device` on :5899, SSH keys from `pd-device/authorized_keys`, hardware watchdog, Atlas discovery and recovery.
-- [ ] Build `libhelios_eidos_plugin.so` in the same cargo invocation as `helios-engine` with Gaia's `build_group` (coming in Gaia), install it to `/usr/lib/helios/plugins/daedalus`, and check the engine installs it on the Rust-ABI path (a separate build can resolve `styx` differently and conflict on `styx:framelease`).
+- [ ] All backend packages build in one cargo invocation (Gaia `build_group = "helios-backend"`). Install to `/usr/lib/helios/plugins/daedalus`, and check the engine installs it on the Rust-ABI path (a separate build can resolve `styx` differently and conflict on `styx:framelease`).
 - [ ] Check orion-node under Orion's unit: runs as `orion`, state in `/var/lib/helios/orion`, HeliOS services connect with `Group=orion`. `heliosctl` from a root shell has gid 0 and is refused; decide how operators reach the node.
 - [ ] Measure memory and per-frame timings on the CM5. Check transparent huge pages for orion-node; set `transparent_hugepage=madvise` if they dominate.
 - [ ] Hostname: HeliOS keeps `helios` on every board, so several boards collide on `helios.local`. Consider letting the package's `raze-{serial8}` apply.
@@ -44,7 +44,9 @@ PhotonVision Raze image; orion-node comes from Orion's own Gaia layer.
 - [ ] Engine: `inspect_payload`, typed resource values instead of JSON strings.
 - [ ] Engine: drop the context re-push workaround once Daedalus has a held host input or an atomic multi-port push.
 - [ ] Peripherals: finish the Lemnos move (bind policy, typed errors, mock hwmon in tests); read `/usr/share/pd-device/raze/sensors.toml`.
-- [ ] Application API for Atlas: identity, OTA upload/apply/status, update events (`helios-api` only has `/v1/health`).
+- [x] Application API v1 (docs/docs/api/http.md) and the UI on it (mocks behind `?mock=1`); Atlas's identity and OTA (`/v1/identity`, `/v1/update/*`, `/v1/ota/*`).
+- [ ] helios-api: backends for the 501 endpoints (camera controls, preview, calibration, node catalog from the engine's registry, fan/LEDs/IMU, safe mode, slot switch); engine to publish plugin versions; authentication (OTA and reboot are open today).
+- [ ] helios-api listens on :5801 but the identity's `manage_url` and the UI expect :5800; serve the built `ui/` from the API or the image.
 - [ ] OTA: require sha256 in update manifests, optional signatures, report boot-confirm results over the API.
 
 ## Upstream

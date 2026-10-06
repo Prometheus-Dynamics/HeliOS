@@ -13,6 +13,7 @@
   import Prop from "$lib/kit/Prop.svelte";
   import Section from "$lib/kit/Section.svelte";
   import { cluster } from "$lib/stores/cluster.svelte";
+  import { liveState } from "$lib/stores/live.svelte";
   import { system } from "$lib/stores/system.svelte";
   import { toasts } from "$lib/stores/toasts.svelte";
   import PaneBar from "$lib/workspace/PaneBar.svelte";
@@ -22,7 +23,9 @@
   let { pane, ws }: PaneProps = $props();
   const target = follow(() => pane, () => ws, "device", () => cluster.nodes[0]?.id);
   const node = $derived(target.id ? cluster.node(target.id) : undefined);
-  const available = $derived(node?.kind === "raze" ? "2026.5.0" : node?.kind === "mcu" ? "0.3.1" : null);
+  // The simulated robot offers a release; a real device installs an image file you pick.
+  const available = $derived(!cluster.mock ? null : node?.kind === "raze" ? "2026.5.0" : node?.kind === "mcu" ? "0.3.1" : null);
+  const update = $derived(liveState.update);
   let confirmSafe = $state(false);
 
   function exportConfig() {
@@ -97,6 +100,21 @@
             <Icon name="cloud-download" size={14} />
             <span><b>{available}</b> is available. It is written to the spare slot and boots on trial; a failed health check falls back by itself.</span>
             <IconButton icon="download" label="Install {available}" text="Install" tone="accent" size={24} onclick={() => cluster.installUpdate(node.id, available)} />
+          </div>
+        {/if}
+        {#if !cluster.mock}
+          <div class="update">
+            <Icon name="cloud-download" size={14} />
+            <span>
+              {#if update && update.phase !== "idle" && update.phase !== "unknown"}
+                <b>{update.active?.version ?? "Update"}</b>: {update.phase.replaceAll("_", " ")}{#if update.progress_percent != null} · {update.progress_percent}%{/if}{#if update.active?.message} · {update.active.message}{/if}
+              {:else if update?.last_error}
+                Last update: {update.last_error}
+              {:else}
+                Install an OS image: it is written to the spare slot and boots on trial; a failed health check falls back by itself.
+              {/if}
+            </span>
+            <IconButton icon="download" label="Install an image file" text="Install image" tone="accent" size={24} onclick={() => cluster.installUpdate(node.id, "")} />
           </div>
         {/if}
       </Section>

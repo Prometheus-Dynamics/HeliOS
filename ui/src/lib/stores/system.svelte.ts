@@ -1,7 +1,11 @@
 // Per-device internals for the deep views: cores, processes, fan, LEDs, GPIO,
-// IMU and power rails. Simulated next to the cluster; on a robot these come
-// from each node's agent (Lemnos-backed resources).
+// IMU and power rails. Live: cores and processes come from helios-api; fan,
+// LEDs, IMU and power rails have no device backend yet and stay empty.
+// With `?mock=1` everything is simulated next to the mock cluster.
 
+import { api, errorText, isNotAvailable } from "$lib/api/client";
+import { MOCK } from "$lib/api/mode";
+import type * as W from "$lib/api/types";
 import { cluster } from "./cluster.svelte";
 import { toasts } from "./toasts.svelte";
 
@@ -153,12 +157,95 @@ function defaultHw(nodeId: string): DeviceHw {
   };
 }
 
+function procState(state: string): Proc["state"] {
+  if (state === "R") return "running";
+  if (state === "T" || state === "t") return "stopped";
+  if (state === "Z") return "zombie";
+  return "sleeping";
+}
+
+function singleCore(list: string | null): number | null {
+  return list && /^\d+$/.test(list) ? Number(list) : null;
+}
+
 class SystemStore {
   hw = $state<Record<string, DeviceHw>>({});
   private timer = 0;
+  private lastCpu = new Map<number, { ms: number; at: number }>();
+  private warned = new Set<string>();
+
+  private async liveTick() {
+    const node = cluster.nodes[0];
+    if (!node) return;
+    let processes: W.ProcessInfo[] = [];
+    let metrics: W.Metrics | null = null;
+    try {
+      [processes, metrics] = await Promise.all([api.processes(), api.metrics()]);
+    } catch {
+      return;
+    }
+    const now = Date.now();
+    const bootAt = now - (metrics.uptime_s ?? node.uptimeS) * 1000;
+    const procs: Proc[] = processes.map((p) => {
+      const last = this.lastCpu.get(p.pid);
+      const cpu = last && now > last.at ? Math.max(0, (p.cpu_time_ms - last.ms) / (now - last.at)) : 0;
+      this.lastCpu.set(p.pid, { ms: p.cpu_time_ms, at: now });
+      const unit = p.unit?.replace(/\.service$/, "");
+      return {
+        pid: p.pid,
+        nodeId: node.id,
+        name: p.name,
+        owner: unit ? { kind: "service", id: unit } : p.name.startsWith("kworker") || p.rss_bytes === 0 ? { kind: "kernel", id: "kernel" } : { kind: "user", id: "user" },
+        state: procState(p.state),
+        cpu,
+        memMiB: p.rss_bytes / 1024 / 1024,
+        threads: p.threads,
+        core: singleCore(p.cpus_allowed),
+        nice: p.nice,
+        startedAt: bootAt + p.started_after_boot_ms,
+      };
+    });
+    const prev = this.hw[node.id];
+    const cores = metrics.cpu_cores;
+    this.hw[node.id] = {
+      cores,
+      coreHistory: cores.map((c, i) => [...(prev?.coreHistory[i] ?? []), c].slice(-40)),
+      freqMHz: cores.map(() => 0),
+      procs,
+      fan: null,
+      leds: [],
+      gpio: [],
+      imu: null,
+      power: [],
+      throttled: metrics.throttled != null && (metrics.throttled & 0x4) !== 0,
+    };
+  }
+
+  private async liveAct(feature: string, run: () => Promise<unknown>, success?: string) {
+    try {
+      await run();
+      if (success) toasts.success(success);
+    } catch (error) {
+      if (isNotAvailable(error)) {
+        if (!this.warned.has(feature)) {
+          this.warned.add(feature);
+          toasts.info(`${error.message}. Not available on this device yet.`);
+        }
+      } else toasts.error(`${feature}: ${errorText(error)}`);
+    }
+    void this.liveTick();
+  }
 
   start() {
     if (this.timer || typeof window === "undefined") return () => {};
+    if (!MOCK) {
+      void this.liveTick();
+      this.timer = window.setInterval(() => void this.liveTick(), 2000);
+      return () => {
+        clearInterval(this.timer);
+        this.timer = 0;
+      };
+    }
     for (const n of cluster.nodes) this.hw[n.id] = defaultHw(n.id);
     this.timer = window.setInterval(() => this.tick(), 1000);
     return () => {
@@ -219,6 +306,7 @@ class SystemStore {
   // --- Actions -----------------------------------------------------------
 
   async kill(nodeId: string, pid: number, signal: "TERM" | "KILL" = "TERM") {
+    if (!MOCK) return this.liveAct("Signal", () => api.signal(pid, signal), `SIG${signal} sent to ${pid}`);
     const h = this.hw[nodeId];
     const p = h?.procs.find((x) => x.pid === pid);
     if (!h || !p) return;
@@ -240,6 +328,10 @@ class SystemStore {
   }
 
   setState(nodeId: string, pid: number, state: "running" | "stopped") {
+    if (!MOCK) {
+      void this.liveAct("Signal", () => api.signal(pid, state === "stopped" ? "STOP" : "CONT"), `${pid} ${state === "stopped" ? "paused (SIGSTOP)" : "resumed (SIGCONT)"}`);
+      return;
+    }
     const p = this.hw[nodeId]?.procs.find((x) => x.pid === pid);
     if (!p) return;
     p.state = state;
@@ -248,6 +340,10 @@ class SystemStore {
   }
 
   pin(nodeId: string, pid: number, core: number | null) {
+    if (!MOCK) {
+      void this.liveAct("CPU affinity", () => api.setAffinity(pid, core));
+      return;
+    }
     const p = this.hw[nodeId]?.procs.find((x) => x.pid === pid);
     if (!p) return;
     p.core = core;
@@ -255,6 +351,7 @@ class SystemStore {
   }
 
   async calibrateGyro(nodeId: string) {
+    if (!MOCK) return this.liveAct("IMU", () => Promise.reject(new Error("no IMU on this device")));
     const imu = this.hw[nodeId]?.imu;
     if (!imu) return;
     toasts.info("Calibrating gyro: keep the robot still for 3 s");
@@ -264,6 +361,10 @@ class SystemStore {
   }
 
   renice(nodeId: string, pid: number, nice: number) {
+    if (!MOCK) {
+      void this.liveAct("Priority", () => api.setNice(pid, nice));
+      return;
+    }
     const p = this.hw[nodeId]?.procs.find((x) => x.pid === pid);
     if (p) p.nice = Math.max(-20, Math.min(19, nice));
   }

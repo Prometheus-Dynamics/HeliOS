@@ -1,8 +1,11 @@
-// The live cluster: everything the screens read, plus the actions they take.
-// Backed by the simulated robot for now; every action is a method a real
-// Orion/agent client implements the same way.
+// The cluster: everything the screens read, plus the actions they take. Live
+// by default: the device's helios-api through LiveCluster (live.svelte.ts).
+// With `?mock=1` (or VITE_HELIOS_MOCK=1) it runs the simulated robot from
+// mock.ts instead, for UI work without a device.
 
 import { CAMERAS, LOGS, NODES, RESOURCES, STREAMS, WORKLOADS } from "$lib/api/mock";
+import { MOCK } from "$lib/api/mode";
+import { LiveCluster } from "./live.svelte";
 import type { Camera, CameraSettings, ClusterNode, Detection, GraphDocument, LogLine, Resource, Stream, TagPose, Workload } from "$lib/api/model";
 import { toasts } from "./toasts.svelte";
 
@@ -32,18 +35,22 @@ function push(history: number[], value: number, cap = 60) {
 }
 
 class ClusterStore {
-  nodes = $state<ClusterNode[]>(clone(NODES));
-  cameras = $state<Camera[]>(clone(CAMERAS));
-  workloads = $state<Workload[]>(clone(WORKLOADS));
-  streams = $state<Stream[]>(clone(STREAMS));
-  resources = $state<Resource[]>(clone(RESOURCES));
-  logs = $state<LogLine[]>(clone(LOGS));
+  /** True while running the simulated robot (`?mock=1`). */
+  readonly mock = MOCK;
+  nodes = $state<ClusterNode[]>(MOCK ? clone(NODES) : []);
+  cameras = $state<Camera[]>(MOCK ? clone(CAMERAS) : []);
+  workloads = $state<Workload[]>(MOCK ? clone(WORKLOADS) : []);
+  streams = $state<Stream[]>(MOCK ? clone(STREAMS) : []);
+  resources = $state<Resource[]>(MOCK ? clone(RESOURCES) : []);
+  logs = $state<LogLine[]>(MOCK ? clone(LOGS) : []);
   /** Advances FEED_FPS times a second; every camera view follows it. */
   frame = $state(0);
   playing = $state(true);
   feed = $state<FeedData | null>(null);
   poses = $state<PoseData | null>(null);
   private started = false;
+  /** The device backend; null in mock mode. */
+  readonly live: LiveCluster | null = MOCK ? null : new LiveCluster(this);
   /** Earlier deployed revisions per workload, newest last (the device keeps these for rollback). */
   private revisions = new Map<string, { revision: number; graph: GraphDocument }[]>(
     WORKLOADS.filter((w) => w.revision > 1).map((w) => [w.id, [{ revision: w.revision - 1, graph: clone(w.graph) }]]),
@@ -52,6 +59,13 @@ class ClusterStore {
   start() {
     if (this.started || typeof window === "undefined") return () => {};
     this.started = true;
+    if (this.live) {
+      const stop = this.live.start();
+      return () => {
+        stop();
+        this.started = false;
+      };
+    }
     fetch("/mock/robot/detections.json").then((r) => r.json()).then((d) => (this.feed = d)).catch(() => {});
     fetch("/mock/robot/poses.json").then((r) => r.json()).then((d) => (this.poses = d)).catch(() => {});
     const frames = setInterval(() => {
@@ -156,6 +170,7 @@ class ClusterStore {
   // --- Actions -----------------------------------------------------------
 
   async restartWorkload(id: string) {
+    if (this.live) return this.live.restartWorkload(id);
     const w = this.workload(id);
     if (!w) return;
     w.state = "starting";
@@ -168,6 +183,7 @@ class ClusterStore {
   }
 
   async stopWorkload(id: string) {
+    if (this.live) return this.live.stopWorkload(id);
     const w = this.workload(id);
     if (!w) return;
     await this.later(300);
@@ -177,6 +193,7 @@ class ClusterStore {
   }
 
   async saveGraph(id: string, graph: GraphDocument) {
+    if (this.live) return this.live.saveGraph(id, graph);
     const w = this.workload(id);
     if (!w) return;
     await this.later(500);
@@ -190,10 +207,12 @@ class ClusterStore {
 
   /** Whether an earlier revision is available to roll back to. */
   canRollBack(id: string): boolean {
+    if (this.live) return this.live.canRollBack(id);
     return (this.revisions.get(id)?.length ?? 0) > 0;
   }
 
   async rollBackWorkload(id: string) {
+    if (this.live) return this.live.rollBackWorkload(id);
     const w = this.workload(id);
     const previous = this.revisions.get(id)?.pop();
     if (!w || !previous) return;
@@ -208,6 +227,7 @@ class ClusterStore {
   }
 
   async bindInput(id: string, input: string, resourceId: string) {
+    if (this.live) return this.live.bindInput(id, input, resourceId);
     const w = this.workload(id);
     if (!w) return;
     w.bindings = { ...w.bindings, [input]: resourceId };
@@ -215,6 +235,7 @@ class ClusterStore {
   }
 
   async createWorkload(name: string, nodeId: string, cameraId: string, graph: GraphDocument): Promise<string> {
+    if (this.live) return this.live.createWorkload(name, nodeId, cameraId, graph);
     await this.later(500);
     const id = `wl-${Math.random().toString(36).slice(2, 7)}`;
     this.workloads.push({
@@ -235,6 +256,10 @@ class ClusterStore {
 
   /** Applies camera settings live (controls call this as you drag). */
   setCamera(id: string, settings: Partial<CameraSettings>, extra?: Record<string, number | string | boolean>) {
+    if (this.live) {
+      void this.live.setCamera(id, { ...settings, ...(extra ?? {}) });
+      return;
+    }
     const c = this.camera(id);
     if (!c) return;
     Object.assign(c.settings, settings);
@@ -243,6 +268,7 @@ class ClusterStore {
   }
 
   async updateCamera(id: string, settings: Partial<CameraSettings>) {
+    if (this.live) return this.live.setCamera(id, settings);
     const c = this.camera(id);
     if (!c) return;
     await this.later(250);
@@ -251,6 +277,7 @@ class ClusterStore {
   }
 
   async reboot(nodeId: string) {
+    if (this.live) return this.live.reboot(nodeId);
     const n = this.node(nodeId);
     if (!n) return;
     n.health = "offline";
@@ -264,6 +291,7 @@ class ClusterStore {
   }
 
   async restartService(nodeId: string, service: string) {
+    if (this.live) return this.live.restartService(service);
     const s = this.node(nodeId)?.services.find((x) => x.name === service);
     if (!s) return;
     s.state = "restarting";
@@ -274,6 +302,7 @@ class ClusterStore {
   }
 
   async switchSlot(nodeId: string) {
+    if (this.live) return this.live.switchSlot();
     const n = this.node(nodeId);
     if (!n || n.slots.length < 2) return;
     const target = n.slots.find((s) => !s.active)!;
@@ -290,6 +319,7 @@ class ClusterStore {
   }
 
   async installUpdate(nodeId: string, version: string) {
+    if (this.live) return this.live.installImage();
     const n = this.node(nodeId);
     if (!n || n.slots.length < 2) return;
     const target = n.slots.find((s) => !s.active)!;
@@ -301,6 +331,7 @@ class ClusterStore {
   }
 
   async safeMode(nodeId: string) {
+    if (this.live) return this.live.safeMode();
     const n = this.node(nodeId);
     if (!n) return;
     await this.later(500);
