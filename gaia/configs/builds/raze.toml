@@ -10,12 +10,18 @@ target = "raze"
 # Device support (kernel, OV9782 driver, libcamera/libpisp, boot overlays, fan,
 # LED ring, USB gadget, identity endpoint, SSH keys from the boot partition,
 # hardware watchdog) comes from the Raze device package in Atlas
-# (devices/raze). HeliOS layers are imported after it, so they override its
-# defaults. Local development against an Atlas checkout:
+# (devices/raze), and orion-node from Orion's own Gaia layer. HeliOS layers are
+# imported after both, so they override their defaults. Local development
+# against checkouts:
 #   --set sources.atlas.path=$PWD/../Atlas-Hardware-Manager
+#   --set sources.orion.path=$PWD/../Orion
 imports = [
   "../layers/base-os.toml",
   { source = "atlas", path = "devices/raze/gaia/device.toml", when = { target = "raze" } },
+  # Builds and installs orion-node and stages its unit, env file, sysusers
+  # entry and preset. The app layer redeclares `orion-node-env` with HeliOS's
+  # appliance settings; the release layer adds a drop-in for its state.
+  { source = "orion", path = "packaging/gaia/orion-node.toml", when = { profile = "full" } },
   { path = "../layers/app-layer.toml", when = { profile = "full" } },
   { path = "../layers/release-layer.toml", when = { profile = "full" } },
   "../targets/raze.toml",
@@ -28,6 +34,14 @@ id = "atlas"
 kind = "git"
 repo = "https://github.com/Prometheus-Dynamics/Atlas-Hardware-Manager.git"
 rev = "f98489fa20f17fc626a3d0977073a71f6f559338"
+
+# Orion v4 (main). Must be the commit backend/Cargo.lock pins for the `orion`
+# crate: orion-node and the HeliOS services speak the same control protocol.
+[[sources]]
+id = "orion"
+kind = "git"
+repo = "https://github.com/Prometheus-Dynamics/Orion.git"
+rev = "98bb58affa9a8863417304af841bdfb727e0a5ca"
 
 [inputs.profile]
 description = "Build profile"

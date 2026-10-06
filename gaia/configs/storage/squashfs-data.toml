@@ -37,10 +37,12 @@ dest = "/usr/local/bin/helios-provision-squashfs.sh"
 origin = "static-asset"
 mode = 493
 
+# A drop-in on Orion's orion-node.service (Orion's layer recommends drop-ins
+# over an edited unit): state on the DATA partition.
 [[stage.files]]
-id = "storage-orion-node-override"
-src = "@assets/storage/squashfs/systemd/service-overrides/orion-node.override.conf"
-dest = "/etc/systemd/system/orion-node.service.d/override.conf"
+id = "storage-orion-node-state"
+src = "@assets/storage/squashfs/systemd/service-overrides/orion-node-state.conf"
+dest = "/etc/systemd/system/orion-node.service.d/10-helios-state.conf"
 origin = "static-asset"
 
 [[stage.files]]
@@ -99,7 +101,7 @@ stage_files = [
   "storage-bootloader-upd",
   "storage-bootloader-sig",
   "storage-provision-script",
-  "storage-orion-node-override",
+  "storage-orion-node-state",
   "storage-helios-api-override",
   "storage-helios-engine-override",
   "storage-helios-peripherals-override",

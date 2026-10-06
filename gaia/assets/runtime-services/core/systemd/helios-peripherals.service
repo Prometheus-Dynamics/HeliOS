@@ -1,7 +1,7 @@
 [Unit]
 Description=Helios Peripherals Service
-After=network.target
-Wants=network.target
+After=network.target orion-node.service
+Wants=network.target orion-node.service
 StartLimitIntervalSec=60
 StartLimitBurst=5
 
@@ -15,7 +15,8 @@ Restart=always
 RestartSec=2
 TimeoutStopSec=30
 User=root
-Group=root
+# Primary group orion: orion-node admits it (ORION_NODE_LOCAL_AUTH=same-user-or-group).
+Group=orion
 WorkingDirectory=/var/lib/helios
 StateDirectory=helios
 LogsDirectory=helios

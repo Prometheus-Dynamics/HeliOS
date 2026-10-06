@@ -1,4 +1,4 @@
-description = "Shared backend-core payload layer: cross-target Rust control-plane and updater binaries for the Raze target."
+description = "Backend-core payload layer: the HeliOS services and tools built from the backend workspace (Daedalus, Styx, Eidos, Orion and Lemnos as git dependencies pinned by backend/Cargo.lock), plus orionctl."
 
 [providers.rust]
 allow_nested_build = true
@@ -9,15 +9,6 @@ id = "backend-workspace"
 kind = "path"
 path = "backend"
 identity_ignore = ["target", ".gaia"]
-refresh = "never"
-pin = "locked"
-
-[[sources]]
-id = "orion-workspace"
-kind = "git"
-repo = "https://github.com/Prometheus-Dynamics/Orion.git"
-# Must match the orion rev in backend/Cargo.toml: orion-node and the client libs share the snapshot layout.
-rev = "59f91ed97681bd0421f9d32bed82be21b2786642"
 refresh = "never"
 pin = "locked"
 
@@ -121,33 +112,14 @@ image = "helios-cross"
 dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
 context = "gaia/docker"
 
-[[artifacts]]
-id = "orion-node"
-kind = "rust"
-package = "orion-node"
-source = "orion-workspace"
-# Single-node appliance build: drops the TCP and QUIC data-plane transports.
-no_default_features = true
-target = "aarch64-unknown-linux-gnu"
-profile = "release"
-install_name = "orion-node"
-install_class = "binary"
-install_dest_hint = "/usr/bin/orion-node"
-output_path = "gaia/output/${build.name}/artifacts/orion-node"
-
-[artifacts.execution]
-backend = "docker"
-
-[artifacts.execution.docker]
-image = "helios-cross"
-dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
-context = "gaia/docker"
-
+# orion-node itself comes from Orion's Gaia layer (packaging/gaia/orion-node.toml,
+# imported by builds/raze.toml). Its layer has no orionctl, so the CLI is built
+# here from the same pinned `orion` source, in Orion's own cross image.
 [[artifacts]]
 id = "orionctl"
 kind = "rust"
 package = "orionctl"
-source = "orion-workspace"
+source = "orion"
 target = "aarch64-unknown-linux-gnu"
 profile = "release"
 install_name = "orionctl"
@@ -159,9 +131,9 @@ output_path = "gaia/output/${build.name}/artifacts/orionctl"
 backend = "docker"
 
 [artifacts.execution.docker]
-image = "helios-cross"
-dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
-context = "gaia/docker"
+image = "orion-aarch64-cross"
+dockerfile = "@source:orion/packaging/gaia/docker/aarch64-cross.Dockerfile"
+context = "@source:orion/packaging/gaia/docker"
 
 [[artifacts]]
 id = "helios-provision"
@@ -229,15 +201,6 @@ owner = "root"
 group = "root"
 
 [[install]]
-id = "install-orion-node"
-artifact = "orion-node"
-dest = "/usr/bin/orion-node"
-replace = true
-mode = 493
-owner = "root"
-group = "root"
-
-[[install]]
 id = "install-orionctl"
 artifact = "orionctl"
 dest = "/usr/bin/orionctl"
@@ -265,7 +228,6 @@ install_entries = [
   "install-helios-updater",
   "install-helios-diagnostics",
   "install-heliosctl",
-  "install-orion-node",
   "install-orionctl",
   "install-helios-provision",
 ]

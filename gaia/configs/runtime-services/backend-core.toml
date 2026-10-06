@@ -1,4 +1,4 @@
-description = "Shared backend-core runtime-service layer: core backend units, sockets, and tightly-coupled service assets."
+description = "Shared backend-core runtime-service layer: core backend units, sockets, tightly-coupled service assets, and HeliOS's settings for Orion's orion-node unit."
 
 [[stage.files]]
 id = "runtime-api-startup"
@@ -12,10 +12,17 @@ src = "@assets/runtime-services/core/usr/share/helios/media/FRC2026_ANDYMARK.fma
 dest = "/usr/share/helios/media/FRC2026_ANDYMARK.fmap"
 origin = "static-asset"
 
-[[stage.services]]
-id = "orion-node-service"
-name = "orion-node.service"
-unit_path = "@assets/runtime-services/core/systemd/orion-node.service"
+# orion-node.service, its sysusers entry and preset come from Orion's layer
+# (imported before this one). HeliOS replaces only the environment file, by
+# redeclaring its id with the same dest, as that layer documents: the
+# single-node appliance profile, plus group access for the HeliOS services
+# and state on the data partition.
+[[stage.files]]
+id = "orion-node-env"
+src = "@assets/runtime-services/core/etc/default/orion-node.env"
+dest = "/etc/default/orion-node.env"
+mode = 420
+origin = "static-asset"
 
 [[stage.services]]
 id = "helios-api-service"
@@ -44,6 +51,13 @@ unit_path = "@assets/runtime-services/core/systemd/helios-updater.socket"
 
 [image]
 kind = "buildroot"
+# orion-node.service runs as the `orion` user. The root filesystem is a
+# read-only squashfs, so the user is created at build time rather than by
+# systemd-sysusers (Orion packaging/README.md, "The orion user"). Gaia cannot
+# expand @source: inside a quoted Buildroot value, so the table is HeliOS's.
+config_overrides = [
+  ["BR2_ROOTFS_USERS_TABLES", "\"${project.root_dir}/gaia/assets/buildroot/users.table\""],
+]
 
 [image.feed]
 stage_files = [
@@ -51,7 +65,6 @@ stage_files = [
   "runtime-api-default-fmap",
 ]
 stage_services = [
-  "orion-node-service",
   "helios-api-service",
   "helios-engine-service",
   "helios-engine-socket",
