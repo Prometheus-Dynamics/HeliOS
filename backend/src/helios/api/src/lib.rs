@@ -5,6 +5,7 @@
 //! the kernel for device facts. Features without a backend answer 501 with
 //! `{"error": {"code": "not_available", "needs": "..."}}`. See `docs/docs/api/http.md`.
 
+pub mod auth;
 pub mod config;
 pub mod error;
 pub mod events;
@@ -28,6 +29,8 @@ pub struct AppState {
     pub store: store::Store,
     pub cpu: host::CpuSampler,
     pub events: events::EventHub,
+    /// Device security: open (default) or secured.
+    pub auth: auth::Auth,
     /// Held while an OTA image is being prepared and submitted.
     pub update_lock: Mutex<()>,
 }
@@ -41,6 +44,7 @@ impl AppState {
             store: store::Store::new(config.state_dir.clone()),
             cpu: host::CpuSampler::default(),
             events: events::EventHub::new(256),
+            auth: auth::Auth::new(config.auth_file.clone()),
             update_lock: Mutex::new(()),
             config,
         })

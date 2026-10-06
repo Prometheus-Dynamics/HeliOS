@@ -12,10 +12,17 @@ use serde::Serialize;
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
     BadRequest,
+    /// The device is secured and the request carries no valid session or token (401).
+    Unauthorized,
+    /// Authenticated, but the request is refused: a missing CSRF header, or the password
+    /// re-confirmation failed (403).
+    Forbidden,
     NotFound,
     Conflict,
     Unprocessable,
     PayloadTooLarge,
+    /// Too many failed sign-in attempts from this address (429).
+    TooManyRequests,
     /// The backend for this endpoint does not exist yet (501).
     NotAvailable,
     /// The backend exists but is not reachable right now, e.g. Orion is down (503).
@@ -27,10 +34,13 @@ impl ErrorCode {
     pub fn status(self) -> StatusCode {
         match self {
             Self::BadRequest => StatusCode::BAD_REQUEST,
+            Self::Unauthorized => StatusCode::UNAUTHORIZED,
+            Self::Forbidden => StatusCode::FORBIDDEN,
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::Conflict => StatusCode::CONFLICT,
             Self::Unprocessable => StatusCode::UNPROCESSABLE_ENTITY,
             Self::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
+            Self::TooManyRequests => StatusCode::TOO_MANY_REQUESTS,
             Self::NotAvailable => StatusCode::NOT_IMPLEMENTED,
             Self::BackendUnavailable => StatusCode::SERVICE_UNAVAILABLE,
             Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
@@ -62,6 +72,18 @@ impl ApiError {
         Self::new(ErrorCode::BadRequest, message)
     }
 
+    pub fn unauthorized(message: impl Into<String>) -> Self {
+        Self::new(ErrorCode::Unauthorized, message)
+    }
+
+    pub fn forbidden(message: impl Into<String>) -> Self {
+        Self::new(ErrorCode::Forbidden, message)
+    }
+
+    pub fn too_many_requests(message: impl Into<String>) -> Self {
+        Self::new(ErrorCode::TooManyRequests, message)
+    }
+
     pub fn not_found(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::NotFound, message)
     }
@@ -90,7 +112,11 @@ impl ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (self.code.status(), Json(ErrorBody { error: &self })).into_response()
+        let mut response = (self.code.status(), Json(ErrorBody { error: &self })).into_response();
+        if self.code == ErrorCode::Unauthorized {
+            response.headers_mut().insert(axum::http::header::WWW_AUTHENTICATE, axum::http::HeaderValue::from_static("Bearer realm=\"helios\""));
+        }
+        response
     }
 }
 

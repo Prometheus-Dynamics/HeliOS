@@ -1,5 +1,6 @@
 //! The `/v1` routes.
 
+pub mod auth;
 pub mod cameras;
 pub mod logs;
 pub mod pipelines;
@@ -25,6 +26,15 @@ pub fn router(state: SharedState) -> Router {
         // Device, identity, system
         .route("/v1/health", get(system::health))
         .route("/v1/identity", get(system::identity))
+        // Device security (open by default; see auth.rs)
+        .route("/v1/auth/status", get(auth::status))
+        .route("/v1/auth/login", post(auth::login))
+        .route("/v1/auth/logout", post(auth::logout))
+        .route("/v1/auth/enable", post(auth::enable))
+        .route("/v1/auth/disable", post(auth::disable))
+        .route("/v1/auth/password", post(auth::change_password))
+        .route("/v1/auth/tokens", get(auth::list_tokens).post(auth::create_token))
+        .route("/v1/auth/tokens/{id}", delete(auth::revoke_token))
         .route("/v1/device", get(system::device))
         .route("/v1/device/os", get(system::device_os))
         .route("/v1/nodes", get(system::nodes))
@@ -81,6 +91,8 @@ pub fn router(state: SharedState) -> Router {
         .route("/v1/ota/state", get(update::atlas_state))
         .merge(uploads)
         .fallback(not_found)
+        // CORS is outermost so preflights are answered before auth.
+        .layer(middleware::from_fn_with_state(state.clone(), auth::middleware))
         .layer(middleware::from_fn_with_state(state.clone(), cors))
         .with_state(state)
 }
@@ -101,7 +113,7 @@ async fn cors(State(state): State<SharedState>, request: Request, next: Next) ->
         headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, value);
     }
     headers.insert(header::ACCESS_CONTROL_ALLOW_METHODS, HeaderValue::from_static("GET, POST, PUT, PATCH, DELETE, OPTIONS"));
-    headers.insert(header::ACCESS_CONTROL_ALLOW_HEADERS, HeaderValue::from_static("content-type, x-helios-sha256, x-helios-filename, x-helios-version"));
+    headers.insert(header::ACCESS_CONTROL_ALLOW_HEADERS, HeaderValue::from_static("authorization, content-type, x-helios-csrf, x-helios-sha256, x-helios-filename, x-helios-version"));
     response
 }
 
@@ -116,3 +128,6 @@ pub fn check_id(id: &str) -> Result<(), ApiError> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod auth_tests;

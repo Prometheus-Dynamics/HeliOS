@@ -18,6 +18,7 @@ fn test_state(dir: &std::path::Path) -> crate::SharedState {
         updater_dir: dir.join("updater"),
         upload_dir: dir.join("uploads"),
         pd_identity_path: dir.join("identity.json"),
+        auth_file: dir.join("auth").join("auth.json"),
         ..ApiConfig::default()
     })
 }

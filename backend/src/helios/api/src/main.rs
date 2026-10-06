@@ -11,7 +11,9 @@ async fn main() -> anyhow::Result<()> {
     let _watcher = events::spawn_state_watcher(state.clone());
     let listener = tokio::net::TcpListener::bind(bind).await.with_context(|| format!("failed to bind {bind}"))?;
     info!(%bind, "helios-api listening");
-    axum::serve(listener, router(state)).with_graceful_shutdown(shutdown_requested()).await.context("helios-api server failed")?;
+    info!(mode = state.auth.mode().as_str(), "device security");
+    // Peer addresses feed the per-client sign-in rate limit.
+    axum::serve(listener, router(state).into_make_service_with_connect_info::<std::net::SocketAddr>()).with_graceful_shutdown(shutdown_requested()).await.context("helios-api server failed")?;
     Ok(())
 }
 
