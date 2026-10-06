@@ -21,7 +21,7 @@ PhotonVision Raze image; orion-node comes from Orion's own Gaia layer.
 
 - [ ] Build the HeliOS Raze image (`./tools/build-os.sh raze`) on a free machine. First build of the backend with git deps inside `helios-cross`: needs network, and `backend/.cargo/config.toml` (sccache, clang linker) must agree with the container.
 - [ ] Hardware checks: boot, camera, fan under load, LEDs, USB gadget (172.31.250.1, serial console on ttyGS0), `/.well-known/pd-device` on :5899, SSH keys from `pd-device/authorized_keys`, hardware watchdog, Atlas discovery and recovery.
-- [ ] Check that helios-engine installs `libhelios_vision.so` on the Rust-ABI path. Gaia builds the plugin in a separate cargo invocation from the engine, so a different `styx` feature set can give a boundary type conflict on `styx:framelease`.
+- [ ] Build `libhelios_eidos_plugin.so` in the same cargo invocation as `helios-engine` with Gaia's `build_group` (coming in Gaia), install it to `/usr/lib/helios/plugins/daedalus`, and check the engine installs it on the Rust-ABI path (a separate build can resolve `styx` differently and conflict on `styx:framelease`).
 - [ ] Check orion-node under Orion's unit: runs as `orion`, state in `/var/lib/helios/orion`, HeliOS services connect with `Group=orion`. `heliosctl` from a root shell has gid 0 and is refused; decide how operators reach the node.
 - [ ] Measure memory and per-frame timings on the CM5. Check transparent huge pages for orion-node; set `transparent_hugepage=madvise` if they dominate.
 - [ ] Hostname: HeliOS keeps `helios` on every board, so several boards collide on `helios.local`. Consider letting the package's `raze-{serial8}` apply.
@@ -38,7 +38,11 @@ PhotonVision Raze image; orion-node comes from Orion's own Gaia layer.
 - [ ] LEDs: nothing drives the ring yet; use the package's `raze-leds` (status, locate) rather than writing `/dev/leds0`.
 - [ ] Per-service releases in `/var/lib/helios/bin` no longer reach orion-node (it runs `/usr/bin/orion-node`); update Orion with the image.
 - [ ] MJPEG camera preview: serve from helios-api as a Styx FrameClient plus codec consumer of the peripherals CameraService.
-- [ ] Engine: input-driven `drive` instead of the 250 ms tick, `inspect_payload`, typed resource values instead of JSON strings.
+- [x] Engine on Daedalus 3: graphs as `GraphDocument`s whose `requires` must cover their nodes, input-driven execution (a frame or a resource change ticks the graph; no timer), and per session `plan` (host ports, `explain_plan()`, adapter edges) and `metrics` (`HELIOS_ENGINE_METRICS_LEVEL`) artifacts. FrameLease's `TypeExpr` and inspection are Styx's (`styx.frames`).
+- [x] Vision nodes are Eidos's Daedalus plugin (`libhelios_eidos_plugin.so`); `helios-vision` removed; stored graphs are Eidos's templates.
+- [ ] Measure the Eidos plugin graph on the CM5 with `helios-vision-probe --metrics detailed`; use Daedalus's `FrameOverheadReport` in the engine's `metrics` artifact once Daedalus has it.
+- [ ] Engine: `inspect_payload`, typed resource values instead of JSON strings.
+- [ ] Engine: drop the context re-push workaround once Daedalus has a held host input or an atomic multi-port push.
 - [ ] Peripherals: finish the Lemnos move (bind policy, typed errors, mock hwmon in tests); read `/usr/share/pd-device/raze/sensors.toml`.
 - [ ] Application API for Atlas: identity, OTA upload/apply/status, update events (`helios-api` only has `/v1/health`).
 - [ ] OTA: require sha256 in update manifests, optional signatures, report boot-confirm results over the API.

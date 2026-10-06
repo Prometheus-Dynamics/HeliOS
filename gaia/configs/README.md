@@ -88,7 +88,7 @@ later layers, as that file describes:
   `runtime-config/` – layer fragments imported by `layers/` and the target.
 - `payloads/` – what gets built and installed: the HeliOS services and tools
   from the backend workspace (built in the `helios-cross` Docker image), the
-  `helios-vision` Daedalus plugin (`/usr/lib/helios/plugins/daedalus`),
+  Eidos Daedalus plugin (`helios-eidos-plugin`) (`/usr/lib/helios/plugins/daedalus`),
   `orionctl` from the `orion` source, and the prebuilt frontend bundle.
 - `runtime-services/` – systemd units, sockets and service assets for those payloads.
 

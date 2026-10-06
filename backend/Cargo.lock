@@ -884,6 +884,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "eidos-color"
+version = "1.0.0"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=main#47e9f1d10ef915849963f9372efa1d36889737f1"
+dependencies = [
+ "eidos-core",
+ "eidos-frame",
+ "eidos-mask",
+]
+
+[[package]]
 name = "eidos-contour"
 version = "1.0.0"
 source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=main#47e9f1d10ef915849963f9372efa1d36889737f1"
@@ -900,9 +910,73 @@ version = "1.0.0"
 source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=main#47e9f1d10ef915849963f9372efa1d36889737f1"
 dependencies = [
  "eidos-macros",
+ "serde",
  "spin",
  "styx-core-rs",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "eidos-daedalus"
+version = "1.0.0"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=main#47e9f1d10ef915849963f9372efa1d36889737f1"
+dependencies = [
+ "daedalus-rs",
+ "eidos-aruco",
+ "eidos-calibration",
+ "eidos-color",
+ "eidos-contour",
+ "eidos-core",
+ "eidos-detectors",
+ "eidos-draw",
+ "eidos-filter",
+ "eidos-frame",
+ "eidos-geometry",
+ "eidos-io",
+ "eidos-mask",
+ "eidos-motion",
+ "eidos-sampling",
+ "serde",
+ "styx-core-rs",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "eidos-detectors"
+version = "1.0.0"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=main#47e9f1d10ef915849963f9372efa1d36889737f1"
+dependencies = [
+ "eidos-aruco",
+ "eidos-contour",
+ "eidos-core",
+ "eidos-frame",
+ "eidos-mask",
+]
+
+[[package]]
+name = "eidos-draw"
+version = "1.0.0"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=main#47e9f1d10ef915849963f9372efa1d36889737f1"
+dependencies = [
+ "eidos-aruco",
+ "eidos-calibration",
+ "eidos-contour",
+ "eidos-core",
+ "eidos-frame",
+ "eidos-geometry",
+ "eidos-mask",
+ "eidos-motion",
+]
+
+[[package]]
+name = "eidos-filter"
+version = "1.0.0"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=main#47e9f1d10ef915849963f9372efa1d36889737f1"
+dependencies = [
+ "eidos-core",
+ "eidos-frame",
+ "eidos-sampling",
+ "eidos-scratch",
 ]
 
 [[package]]
@@ -927,6 +1001,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "eidos-io"
+version = "1.0.0"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=main#47e9f1d10ef915849963f9372efa1d36889737f1"
+dependencies = [
+ "eidos-core",
+ "eidos-frame",
+ "serde",
+ "serde_json",
+ "smallvec",
+]
+
+[[package]]
 name = "eidos-macros"
 version = "1.0.0"
 source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=main#47e9f1d10ef915849963f9372efa1d36889737f1"
@@ -940,6 +1026,16 @@ dependencies = [
  "eidos-frame",
  "eidos-geometry",
  "eidos-scratch",
+]
+
+[[package]]
+name = "eidos-motion"
+version = "1.0.0"
+source = "git+https://github.com/Prometheus-Dynamics/Eidos.git?branch=main#47e9f1d10ef915849963f9372efa1d36889737f1"
+dependencies = [
+ "eidos-core",
+ "eidos-frame",
+ "eidos-mask",
 ]
 
 [[package]]
@@ -1278,11 +1374,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "helios-eidos-plugin"
+version = "1.0.0"
+dependencies = [
+ "daedalus-rs",
+ "eidos-daedalus",
+ "styx",
+]
+
+[[package]]
 name = "helios-engine"
 version = "1.0.0"
 dependencies = [
  "daedalus-rs",
- "helios-vision",
+ "eidos-aruco",
+ "eidos-daedalus",
+ "helios-eidos-plugin",
  "memmap2",
  "notify",
  "orion",
@@ -1360,22 +1467,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "helios-vision"
-version = "1.0.0"
-dependencies = [
- "daedalus-rs",
- "eidos-aruco",
- "eidos-core",
- "styx",
- "thiserror 2.0.21",
-]
-
-[[package]]
 name = "helios-vision-probe"
 version = "1.0.0"
 dependencies = [
  "daedalus-rs",
- "helios-vision",
  "serde_json",
  "styx",
 ]

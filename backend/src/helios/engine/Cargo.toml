@@ -21,10 +21,20 @@ paste = { workspace = true }
 memmap2 = { workspace = true }
 notify = { workspace = true }
 orion = { workspace = true, default-features = false, features = ["client", "macros", "transport-ipc"] }
-daedalus = { workspace = true, features = ["engine", "dylib-plugins"] }
+# `engine` (serial executor, no worker pool: graphs run on their driver thread),
+# `dylib-plugins` (plugin libraries) and `metrics` (per-node/per-edge telemetry,
+# off unless `HELIOS_ENGINE_METRICS_LEVEL` turns it on).
+daedalus = { workspace = true, features = ["engine", "dylib-plugins", "metrics"] }
 # `facade` provides `styx::ipc::FrameClient`; no capture backends are needed.
 styx = { workspace = true, default-features = false, features = ["facade", "daedalus"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-helios-vision = { path = "../vision" }
+# Marker bit patterns for synthetic test scenes.
+eidos-aruco = { workspace = true }
+# Eidos's graph templates, to check the stored graph documents against. The nodes come from
+# the plugin library below, loaded like in production; nothing installs Eidos statically.
+eidos-daedalus = { workspace = true, features = ["dylib", "simd"] }
+# Built by `cargo test` before the engine's tests, in the same build, so the tests can load
+# `libhelios_eidos_plugin.so` through the engine's plugin loader.
+helios-eidos-plugin = { path = "../eidos-plugin" }

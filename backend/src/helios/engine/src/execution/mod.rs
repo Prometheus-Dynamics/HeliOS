@@ -1,37 +1,38 @@
-//! Resident execution of assigned workloads.
+//! Resident, input-driven execution of assigned workloads.
 //!
-//! Each workload's `GraphDocument` is compiled once and kept until the workload changes. A
-//! workload bound to a camera (a resource with a `styx-frames+unix://` endpoint) is
-//! frame-driven: a thread of its own feeds every frame to the graph ([`frame_driver`]). Other
-//! workloads are ticked on the engine's execution interval when their bound resources change
-//! ([`polled`]).
+//! Each workload's `GraphDocument` is compiled once and kept until the workload changes. Its
+//! graph runs on a driver thread of its own and ticks only when input arrives ([`driver`]): a
+//! camera frame for workloads bound to a Styx camera service (a resource with a
+//! `styx-frames+unix://` endpoint), a change of the bound resources otherwise. The engine
+//! publishes the latest outputs, stats, plan and metrics of every workload as Orion artifacts.
 
 mod bindings;
-mod frame_driver;
+mod driver;
 mod frame_source;
 mod graph;
 mod outputs;
-mod polled;
 mod stats;
 #[cfg(test)]
 mod tests;
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 use daedalus::runtime::plugins::PluginRegistry;
 use orion::{
     ResourceId,
     control_plane::{ResourceRecord, StateSnapshot},
 };
+use tokio::sync::Notify;
 
 pub use bindings::STYX_FRAMES_ENDPOINT_SCHEME;
+pub use graph::GraphSettings;
 
 use crate::model::{ExecutionArtifactRecord, ExecutionSessionState, ExecutionSessionStatus, ExecutionWorkload, LoadedPlugin};
 use bindings::resolve_bindings;
-use frame_driver::FrameDrivenExecution;
+use driver::WorkloadDriver;
+use frame_source::{FrameSource, StyxFrameSource};
 use graph::compile_workload_graph;
 use outputs::session_id_for;
-use polled::PolledExecution;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ExecutionSnapshot {
@@ -67,69 +68,75 @@ pub struct ExecutionPlugins<'a> {
     pub loaded_plugins: &'a [LoadedPlugin],
 }
 
-/// Workloads with a compiled graph, kept across execution ticks.
-#[derive(Default)]
+/// Workloads with a compiled graph and a running driver, kept across Orion updates.
 pub struct ResidentExecutionSet {
-    polled: BTreeMap<String, PolledExecution>,
-    frame_driven: BTreeMap<String, FrameDrivenExecution>,
+    drivers: BTreeMap<String, WorkloadDriver>,
+    settings: GraphSettings,
+    outputs_ready: Arc<Notify>,
+}
+
+impl Default for ResidentExecutionSet {
+    fn default() -> Self {
+        Self::new(GraphSettings::default())
+    }
 }
 
 impl ResidentExecutionSet {
-    /// Bring the resident set in line with `workloads` and report every workload's session and
-    /// the artifacts to publish now. Removed or changed workloads are dropped (stopping their
-    /// frame drivers).
-    pub fn tick_workloads(&mut self, plugins: &ExecutionPlugins<'_>, workloads: &[ExecutionWorkload], state_snapshot: Option<&StateSnapshot>, observed_at_ms: u64) -> ExecutionSnapshot {
+    pub fn new(settings: GraphSettings) -> Self {
+        Self { drivers: BTreeMap::new(), settings, outputs_ready: Arc::new(Notify::new()) }
+    }
+
+    /// Signalled whenever a workload graph produced outputs (or its driver's state changed), so
+    /// the engine can publish a new snapshot.
+    pub fn outputs_ready(&self) -> Arc<Notify> {
+        self.outputs_ready.clone()
+    }
+
+    /// Bring the resident set in line with `workloads`, hand the bound resources to their graphs
+    /// and report every workload's session and the artifacts to publish now. Removed or changed
+    /// workloads are dropped (stopping their drivers).
+    pub fn sync_workloads(&mut self, plugins: &ExecutionPlugins<'_>, workloads: &[ExecutionWorkload], state_snapshot: Option<&StateSnapshot>, observed_at_ms: u64) -> ExecutionSnapshot {
         let resources = state_snapshot.map(resources_for_execution).unwrap_or_default();
         let workload_by_id = workloads.iter().map(|workload| (workload.workload_id.as_str(), workload)).collect::<BTreeMap<_, _>>();
-        let unchanged = |workload_id: &String, resident: &ExecutionWorkload| workload_by_id.get(workload_id.as_str()).is_some_and(|workload| resident == *workload);
-        self.polled.retain(|workload_id, resident| unchanged(workload_id, &resident.workload));
-        self.frame_driven.retain(|workload_id, resident| unchanged(workload_id, &resident.workload));
+        self.drivers.retain(|workload_id, resident| workload_by_id.get(workload_id.as_str()).is_some_and(|workload| resident.workload == **workload));
 
         let mut snapshot = ExecutionSnapshot { sessions: Vec::with_capacity(workloads.len()), artifacts: Vec::new() };
         for workload in workloads {
-            match self.tick_workload(plugins, workload, &resources, observed_at_ms) {
+            match self.sync_workload(plugins, workload, &resources) {
                 Ok((session, artifacts)) => {
                     snapshot.sessions.push(session);
                     snapshot.artifacts.extend(artifacts);
                 }
-                Err(error) => snapshot.sessions.push(failed_session(workload, observed_at_ms, error)),
+                Err(error) => {
+                    self.drivers.remove(&workload.workload_id);
+                    snapshot.sessions.push(failed_session(workload, observed_at_ms, error));
+                }
             }
         }
         snapshot
     }
 
-    fn tick_workload(
+    fn sync_workload(
         &mut self,
         plugins: &ExecutionPlugins<'_>,
         workload: &ExecutionWorkload,
         resources: &BTreeMap<ResourceId, ResourceRecord>,
-        observed_at_ms: u64,
     ) -> Result<(ExecutionSessionState, Vec<ExecutionArtifactRecord>), ExecutionError> {
         let id = workload.workload_id.as_str();
         let resolved = resolve_bindings(workload, resources)?;
-        if resolved.frames.is_empty() {
-            self.frame_driven.remove(id);
-            if !self.polled.contains_key(id) {
-                let graph = compile_workload_graph(plugins.registry, plugins.loaded_plugins, workload)?;
-                self.polled.insert(id.to_string(), PolledExecution::new(workload.clone(), graph));
-            }
-            let resident = self.polled.get_mut(id).expect("polled execution was just ensured");
-            return resident.tick(resolved.resources, observed_at_ms);
+        // A camera that moved to another socket (or a changed request) restarts the driver.
+        if self.drivers.get(id).is_some_and(|resident| resident.sources != resolved.frames) {
+            self.drivers.remove(id);
         }
-
-        self.polled.remove(id);
-        // A camera that moved to another socket (or changed request) restarts the driver.
-        if self.frame_driven.get(id).is_some_and(|resident| resident.sources != resolved.frames) {
-            self.frame_driven.remove(id);
+        if !self.drivers.contains_key(id) {
+            let graph = compile_workload_graph(plugins.registry, plugins.loaded_plugins, workload, self.settings)?;
+            let frames = resolved.frames.iter().map(|spec| (spec.clone(), Box::new(StyxFrameSource::new(spec.clone())) as Box<dyn FrameSource>)).collect();
+            let driver = WorkloadDriver::start(workload.clone(), graph, frames, self.outputs_ready.clone())?;
+            self.drivers.insert(id.to_string(), driver);
         }
-        if !self.frame_driven.contains_key(id) {
-            let graph = compile_workload_graph(plugins.registry, plugins.loaded_plugins, workload)?;
-            let resident = FrameDrivenExecution::start(workload.clone(), graph, resolved.frames)?;
-            self.frame_driven.insert(id.to_string(), resident);
-        }
-        let resident = self.frame_driven.get_mut(id).expect("frame driver was just ensured");
-        resident.update_context(resolved.resources);
-        Ok(resident.snapshot())
+        let driver = self.drivers.get_mut(id).expect("driver was just ensured");
+        driver.update_context(resolved.resources);
+        Ok(driver.snapshot())
     }
 }
 

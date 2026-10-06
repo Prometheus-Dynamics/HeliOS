@@ -18,8 +18,8 @@ Atlas.
 | Camera capture, ISP, FrameLease, frame transport, codecs | Styx | runs Styx's camera service; never decodes or copies frames itself |
 | Hardware inventory and control (fan, GPIO, I2C, sensors) | Lemnos | maps Lemnos devices to Orion resources |
 | State, resources, workloads, assignment | Orion | provider and executor services; IPC-only node |
-| Graph runtime, nodes, plugins | Daedalus | vision node plugins and the FrameLease glue |
-| Vision algorithms (ArUco, AprilTag, ...) | **HeliOS** (`helios-vision`) | Daedalus plugins, frame-native |
+| Graph runtime, nodes, plugins | Daedalus | loads plugin libraries, runs graphs input-driven |
+| Vision algorithms and their graph nodes (ArUco, AprilTag, ...) | Eidos (`eidos-daedalus`) | ships Eidos's plugin as `libhelios_eidos_plugin.so`; stores its graph documents |
 | Product API, OTA, provisioning, diagnostics | **HeliOS** | `helios-api`, `helios-updater`, `helios-provision`, `helios-diagnostics` |
 
 ## Processes on the device
@@ -65,52 +65,64 @@ A frame is a Styx `FrameLease` from capture to the last node that reads it.
   `styx:framelease` (`Residency::External` for dmabuf). The type is
   registered once with a structured descriptor (`FrameMeta`) and a value
   serializer, so it can be inspected.
-- Nodes that need full-resolution pixels take the frame itself and read its
-  luma plane in place (`helios_vision::plugin::luma_view`, a strided view of
-  plane 0). Styx maps frames CPU-cached and syncs once per frame, so in-place
+- Nodes that need pixels take the frame itself and read its luma plane in
+  place. Styx maps frames CPU-cached and syncs once per frame, so in-place
   reads cost the same as heap memory. Engines request frames with
   `Frames::gray().pyramid(1)`: the PiSP back end's second output adds a
-  half-size luma companion, which `vision.downscale` uses instead of a CPU
-  downscale. The `helios.vision.framelease_to_gray` adapter (one copy into
-  `helios:gray8`) remains for nodes that need an owned image.
+  half-size luma companion, which Eidos's mask prep thresholds instead of
+  downscaling on the CPU.
 - No decoded image types (`DynamicImage`, RGB buffers) cross a process or
   graph boundary.
 
 ## Vision workloads
 
 A vision pipeline is a graph of real stages, so per-stage timings show
-where time goes and a UI can edit it. The stages are Eidos operations
-(Eidos is the computer-vision library); `helios-vision` only wraps them as
-Daedalus nodes, keeping each Eidos stage and its scratch in node state. When
-Eidos is missing something, it is added to Eidos, not to HeliOS. The ArUco
-graph (`helios_vision::graphs::aruco_graph_document`, golden copies in
-`backend/src/helios/vision/graphs/`):
+where time goes and a UI can edit it. HeliOS has no vision nodes of its
+own: the nodes, their hand-off types and the ready-made graphs are Eidos's
+Daedalus plugin (`eidos_daedalus::EidosPlugin`, plugin id `eidos`, node ids
+`eidos:*`, see Eidos's `docs/daedalus.md`). When Eidos is missing something,
+it is added to Eidos, not to HeliOS.
+
+The plugin ships as a native plugin library, `libhelios_eidos_plugin.so`
+(`backend/src/helios/eidos-plugin`, a leaf `cdylib` with Eidos's
+`export_plugin!` line), installed into the engine's plugin directories. It
+must come from the same cargo build as the engine
+(`cargo build --release -p helios-engine -p helios-eidos-plugin`): its frame
+and hand-off types are Rust types, which only Daedalus's Rust-ABI install
+path carries, and the engine refuses a library whose `FrameLease` differs.
+
+The stored graphs are Eidos's detector templates as `GraphDocument`s
+(`backend/src/helios/engine/graphs/`, checked against the templates by the
+engine's tests): AprilTag 36h11 and ArUco 4x4_50.
 
 ```text
-frame ─┬─> vision.aruco_mask ─> vision.find_quads ─> aruco.decode ─> vision.refine_corners ─> markers
-       ├──────────────────────────────────────────────────┘                  │
-       └─────────────────────────────────────────────────────────────────────┘
+frame ─┬─> mask_prep (runs) ─> quads ─> decode ─> validate ─┬─> detections
+       ├──────────────────────────────────┘          │      ├─> rejected
+       ├─────────────────────────────────────────────┘      └─> refine ─> refined_corners
+       └────────────────────────────────────────────────────────┘
 ```
 
-| Node | Eidos stage | Input | Output |
-|---|---|---|---|
-| `vision.aruco_mask` | `ArucoMaskPrep` | frame (ISP half-size companion when present), radius, offset | `eidos:mask` |
-| `vision.find_quads` | `CandidateQuadFinder` | mask, min size, approximation | `helios:quads` (with the size they were found at) |
-| `aruco.decode` | `QuadDetectionDecoder` (Mean3x3 sampling) | frame (full size, in place), quads, dictionary | `helios:aruco_markers` |
-| `vision.refine_corners` | HeliOS edge fit, until Eidos has a sub-pixel stage | frame, markers | `helios:aruco_markers` |
+| Node | Eidos stage | Output |
+|---|---|---|
+| `eidos:aruco.mask_prep_runs` | `ArucoMaskPrep` on the half-size companion | `eidos:runs` |
+| `eidos:aruco.quads_from_runs` | `CandidateQuadFinder`, rescaled to the full frame | `eidos:quads` |
+| `eidos:aruco.decode` | `QuadDetectionDecoder` on the full frame, in place | `eidos:detections` |
+| `eidos:aruco.validate` | `MarkerValidator` | `eidos:detections`, `eidos:rejected_markers` |
+| `eidos:aruco.refine` | `CornerRefiner` (sub-pixel corners) | `eidos:refined_corners` |
 
-Frames are read in place; Styx maps them CPU-cached, and Eidos reads
-CPU-mapped dma-bufs. Results (`MarkerList { markers: [MarkerValue {
-dictionary, id, corners, center, hamming }] }`) are structured `TypeExpr`s
-with stable keys.
+The plan has no adapter steps: every frame edge hands on the same
+`FrameLease` (the engine publishes each session's plan, see
+`backend/src/helios/engine/ARCHITECTURE.md`).
 
-`helios-vision` builds as a Daedalus dylib plugin (`--features dylib`) for
-the engine's plugin directories, built in the same cargo invocation as the
-engine so both see the same `FrameLease` type.
+`helios-vision-probe` runs a stored graph on a live camera the way the
+engine does (plugin library, latest-only input, `drive_blocking`) and
+prints detections, push-to-outputs latency and per-node timings.
 
 ### Measured (CM5, OV9782 1280x800 at 60 fps, one thread)
 
-Live graph tick through the probe:
+Measured before the move to Eidos's plugin, with HeliOS's former
+`helios-vision` nodes over Eidos stages (live graph tick through the probe).
+The Eidos plugin graph has not been measured on the CM5 yet.
 
 | Step | p50 | p99 | Process CPU |
 |---|---:|---:|---:|
@@ -118,16 +130,14 @@ Live graph tick through the probe:
 | Faster ops, `opt-level = 3`, frames read in place, ISP half-size plane | 1.28 ms | 1.56 ms | 12% |
 | Eidos stages | 1.20 ms | 1.66 ms | 12% |
 
-Detection runs on one thread; the process has three more, Styx's capture
-threads, which are nearly idle. RSS is about 21 MiB. On replay frames (real
-OV9782 backgrounds with composited markers) the graph finds 55/60 (4x4_50)
-and 58/60 (36h11) with no false positives, corners 0.2 px (median) from
-OpenCV's sub-pixel corners. Open: a monitor UI widget is a false 4x4_50 id
-17 on a live scene (raised with Eidos).
+Detection ran on one thread; the process had three more, Styx's capture
+threads, which were nearly idle. RSS was about 21 MiB. On replay frames
+(real OV9782 backgrounds with composited markers) the graph found 55/60
+(4x4_50) and 58/60 (36h11) with no false positives.
 
 Both opt-levels matter under fat LTO: the Eidos crates' own (at `"z"` the
-graph was 4x slower) and the final binary's (engine, probe). Both are set
-to 3 in `backend/Cargo.toml`.
+graph was 4x slower) and the final artifact's (the plugin library, engine,
+probe). Both are set to 3 in `backend/Cargo.toml`.
 
 ## Device contract
 

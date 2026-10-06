@@ -1,0 +1,935 @@
+{
+  "format": "daedalus.graph",
+  "schema_version": 1,
+  "requires": [
+    {
+      "id": "eidos"
+    }
+  ],
+  "metadata": {
+    "title": "Eidos apriltag_36h11 detector"
+  },
+  "graph": {
+    "nodes": [
+      {
+        "id": "io.host_bridge",
+        "bundle": null,
+        "label": "host",
+        "inputs": [
+          "rejected",
+          "detections",
+          "refined_corners"
+        ],
+        "outputs": [
+          "frame"
+        ],
+        "compute": "CpuOnly",
+        "const_inputs": [],
+        "metadata": {
+          "daedalus.host_input_types": {
+            "type": "Map",
+            "value": [
+              [
+                {
+                  "type": "String",
+                  "value": "frame"
+                },
+                {
+                  "type": "String",
+                  "value": "{\"Opaque\":\"styx:framelease\"}"
+                }
+              ]
+            ]
+          },
+          "dynamic_inputs": {
+            "type": "String",
+            "value": "generic"
+          },
+          "dynamic_outputs": {
+            "type": "String",
+            "value": "generic"
+          },
+          "host_bridge": {
+            "type": "Bool",
+            "value": true
+          }
+        }
+      },
+      {
+        "id": "eidos:aruco.mask_prep_runs",
+        "bundle": "eidos:aruco.mask_prep_runs",
+        "label": "mask_prep",
+        "inputs": [
+          "downscale_missing",
+          "frame",
+          "invert",
+          "offset",
+          "pyramid_level",
+          "radius"
+        ],
+        "outputs": [
+          "runs"
+        ],
+        "compute": "CpuOnly",
+        "const_inputs": [
+          [
+            "downscale_missing",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ],
+          [
+            "invert",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ],
+          [
+            "offset",
+            {
+              "type": "Int",
+              "value": 7
+            }
+          ],
+          [
+            "radius",
+            {
+              "type": "Int",
+              "value": 3
+            }
+          ],
+          [
+            "pyramid_level",
+            {
+              "type": "Int",
+              "value": 1
+            }
+          ]
+        ],
+        "metadata": {
+          "daedalus.node.execution": {
+            "type": "String",
+            "value": "handler_required"
+          },
+          "inputs.downscale_missing.description": {
+            "type": "String",
+            "value": "When the frame carries no companion at `pyramid_level`: true box-downscales the frame in the node, false thresholds the full frame."
+          },
+          "inputs.frame.access": {
+            "type": "String",
+            "value": "borrowed"
+          },
+          "inputs.invert.description": {
+            "type": "String",
+            "value": "Mark pixels darker than the local mean (marker borders) as foreground."
+          },
+          "inputs.offset.description": {
+            "type": "String",
+            "value": "Subtracted from the local mean before comparing."
+          },
+          "inputs.offset.max": {
+            "type": "Int",
+            "value": 255
+          },
+          "inputs.offset.min": {
+            "type": "Int",
+            "value": -255
+          },
+          "inputs.pyramid_level.description": {
+            "type": "String",
+            "value": "Pyramid level to threshold: 0 is the full frame, 1 the half-size level, 2 the quarter-size one."
+          },
+          "inputs.pyramid_level.max": {
+            "type": "Int",
+            "value": 3
+          },
+          "inputs.pyramid_level.min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.radius.description": {
+            "type": "String",
+            "value": "Window radius in pixels; the mean window is `2 * radius + 1` wide."
+          },
+          "inputs.radius.max": {
+            "type": "Int",
+            "value": 15
+          },
+          "inputs.radius.min": {
+            "type": "Int",
+            "value": 1
+          },
+          "summary": {
+            "type": "String",
+            "value": "ArUco mask prep: adaptive-mean threshold into foreground runs"
+          }
+        }
+      },
+      {
+        "id": "eidos:aruco.quads_from_runs",
+        "bundle": "eidos:aruco.quads_from_runs",
+        "label": "quads",
+        "inputs": [
+          "dp_fraction_x1000",
+          "dp_min_x100",
+          "hull_fallback_min_side",
+          "min_height",
+          "min_points",
+          "min_width",
+          "runs",
+          "solid_max_side",
+          "subpixel"
+        ],
+        "outputs": [
+          "quads"
+        ],
+        "compute": "CpuOnly",
+        "const_inputs": [
+          [
+            "dp_fraction_x1000",
+            {
+              "type": "Int",
+              "value": 50
+            }
+          ],
+          [
+            "dp_min_x100",
+            {
+              "type": "Int",
+              "value": 100
+            }
+          ],
+          [
+            "hull_fallback_min_side",
+            {
+              "type": "Int",
+              "value": 16
+            }
+          ],
+          [
+            "min_height",
+            {
+              "type": "Int",
+              "value": 4
+            }
+          ],
+          [
+            "min_points",
+            {
+              "type": "Int",
+              "value": 4
+            }
+          ],
+          [
+            "min_width",
+            {
+              "type": "Int",
+              "value": 4
+            }
+          ],
+          [
+            "solid_max_side",
+            {
+              "type": "Int",
+              "value": 12
+            }
+          ],
+          [
+            "subpixel",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ]
+        ],
+        "metadata": {
+          "daedalus.node.execution": {
+            "type": "String",
+            "value": "handler_required"
+          },
+          "inputs.dp_fraction_x1000.description": {
+            "type": "String",
+            "value": "Douglas-Peucker tolerance as a fraction of the contour perimeter, in thousandths."
+          },
+          "inputs.dp_fraction_x1000.max": {
+            "type": "Int",
+            "value": 500
+          },
+          "inputs.dp_fraction_x1000.min": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.dp_min_x100.description": {
+            "type": "String",
+            "value": "Smallest Douglas-Peucker tolerance, in hundredths of a pixel."
+          },
+          "inputs.dp_min_x100.max": {
+            "type": "Int",
+            "value": 10000
+          },
+          "inputs.dp_min_x100.min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.hull_fallback_min_side.description": {
+            "type": "String",
+            "value": "Contours from this bounding-box side on that Douglas-Peucker leaves with 5 to 8 vertices are retried on the hull of those vertices; 0 turns it off."
+          },
+          "inputs.hull_fallback_min_side.max": {
+            "type": "Int",
+            "value": 65535
+          },
+          "inputs.hull_fallback_min_side.min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.min_height.description": {
+            "type": "String",
+            "value": "Smallest bounding-box height of a candidate."
+          },
+          "inputs.min_height.max": {
+            "type": "Int",
+            "value": 4096
+          },
+          "inputs.min_height.min": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.min_points.description": {
+            "type": "String",
+            "value": "Fewest contour points of a candidate."
+          },
+          "inputs.min_points.max": {
+            "type": "Int",
+            "value": 100000
+          },
+          "inputs.min_points.min": {
+            "type": "Int",
+            "value": 4
+          },
+          "inputs.min_width.description": {
+            "type": "String",
+            "value": "Smallest bounding-box width of a candidate."
+          },
+          "inputs.min_width.max": {
+            "type": "Int",
+            "value": 4096
+          },
+          "inputs.min_width.min": {
+            "type": "Int",
+            "value": 1
+          },
+          "inputs.runs.access": {
+            "type": "String",
+            "value": "borrowed"
+          },
+          "inputs.solid_max_side.description": {
+            "type": "String",
+            "value": "Runs route: skip components without a hole whose larger bounding-box side reaches this; 0 traces all, like the mask route."
+          },
+          "inputs.solid_max_side.max": {
+            "type": "Int",
+            "value": 65535
+          },
+          "inputs.solid_max_side.min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.subpixel.description": {
+            "type": "String",
+            "value": "Also output sub-pixel corners (pixel-edge outline, centre-correct rescale), which decode samples at."
+          },
+          "summary": {
+            "type": "String",
+            "value": "ArUco candidate quads from foreground runs"
+          }
+        }
+      },
+      {
+        "id": "eidos:aruco.decode",
+        "bundle": "eidos:aruco.decode",
+        "label": "decode",
+        "inputs": [
+          "dictionary",
+          "frame",
+          "max_correction_bits",
+          "quads",
+          "refine_weak",
+          "require_dark_border",
+          "sampler",
+          "threshold",
+          "validate"
+        ],
+        "outputs": [
+          "detections"
+        ],
+        "compute": "CpuOnly",
+        "const_inputs": [
+          [
+            "max_correction_bits",
+            {
+              "type": "Int",
+              "value": -1
+            }
+          ],
+          [
+            "refine_weak",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ],
+          [
+            "require_dark_border",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ],
+          [
+            "sampler",
+            {
+              "type": "String",
+              "value": "mean3x3_otsu"
+            }
+          ],
+          [
+            "threshold",
+            {
+              "type": "Int",
+              "value": 128
+            }
+          ],
+          [
+            "dictionary",
+            {
+              "type": "Enum",
+              "value": {
+                "name": "apriltag_36h11",
+                "value": null
+              }
+            }
+          ],
+          [
+            "validate",
+            {
+              "type": "Bool",
+              "value": false
+            }
+          ]
+        ],
+        "metadata": {
+          "daedalus.node.execution": {
+            "type": "String",
+            "value": "handler_required"
+          },
+          "inputs.dictionary.description": {
+            "type": "String",
+            "value": "Marker dictionary, ArUco or AprilTag."
+          },
+          "inputs.frame.access": {
+            "type": "String",
+            "value": "borrowed"
+          },
+          "inputs.max_correction_bits.description": {
+            "type": "String",
+            "value": "Most bits the decoder corrects; -1 uses the dictionary's own maximum."
+          },
+          "inputs.max_correction_bits.max": {
+            "type": "Int",
+            "value": 64
+          },
+          "inputs.max_correction_bits.min": {
+            "type": "Int",
+            "value": -1
+          },
+          "inputs.quads.access": {
+            "type": "String",
+            "value": "borrowed"
+          },
+          "inputs.refine_weak.description": {
+            "type": "String",
+            "value": "Refine the corners of weak decodes (one bit past the correction limit, or more corrections than validation allows) and decode them again."
+          },
+          "inputs.require_dark_border.description": {
+            "type": "String",
+            "value": "Reject quads whose sampled border is mostly bright (Otsu level) before the dictionary lookup."
+          },
+          "inputs.sampler.description": {
+            "type": "String",
+            "value": "How each bit cell is read and thresholded."
+          },
+          "inputs.threshold.description": {
+            "type": "String",
+            "value": "Fixed threshold of the fixed-threshold samplers, and the fallback of the adaptive ones."
+          },
+          "inputs.threshold.max": {
+            "type": "Int",
+            "value": 255
+          },
+          "inputs.threshold.min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.validate.description": {
+            "type": "String",
+            "value": "Run the decoder's built-in marker validation (default gates); turn it off when an `aruco.validate` node follows."
+          },
+          "summary": {
+            "type": "String",
+            "value": "ArUco/AprilTag decode: bit-grid sampling and dictionary lookup"
+          }
+        }
+      },
+      {
+        "id": "eidos:aruco.validate",
+        "bundle": "eidos:aruco.validate",
+        "label": "validate",
+        "inputs": [
+          "detections",
+          "dictionary",
+          "error_correction_percent",
+          "frame",
+          "max_border_error_percent",
+          "min_contrast",
+          "min_corner_distance_permille",
+          "min_distance_to_border",
+          "min_perimeter_permille",
+          "require_convex"
+        ],
+        "outputs": [
+          "detections",
+          "rejected"
+        ],
+        "compute": "CpuOnly",
+        "const_inputs": [
+          [
+            "error_correction_percent",
+            {
+              "type": "Int",
+              "value": 60
+            }
+          ],
+          [
+            "max_border_error_percent",
+            {
+              "type": "Int",
+              "value": 35
+            }
+          ],
+          [
+            "min_contrast",
+            {
+              "type": "Int",
+              "value": 20
+            }
+          ],
+          [
+            "min_corner_distance_permille",
+            {
+              "type": "Int",
+              "value": 50
+            }
+          ],
+          [
+            "min_distance_to_border",
+            {
+              "type": "Int",
+              "value": 3
+            }
+          ],
+          [
+            "min_perimeter_permille",
+            {
+              "type": "Int",
+              "value": 30
+            }
+          ],
+          [
+            "require_convex",
+            {
+              "type": "Bool",
+              "value": true
+            }
+          ],
+          [
+            "dictionary",
+            {
+              "type": "Enum",
+              "value": {
+                "name": "apriltag_36h11",
+                "value": null
+              }
+            }
+          ]
+        ],
+        "metadata": {
+          "daedalus.node.execution": {
+            "type": "String",
+            "value": "handler_required"
+          },
+          "inputs.detections.access": {
+            "type": "String",
+            "value": "borrowed"
+          },
+          "inputs.dictionary.description": {
+            "type": "String",
+            "value": "Marker dictionary the detections were decoded with."
+          },
+          "inputs.error_correction_percent.description": {
+            "type": "String",
+            "value": "Corrected bits allowed, in percent of the dictionary's maximum, rounded down."
+          },
+          "inputs.error_correction_percent.max": {
+            "type": "Int",
+            "value": 100
+          },
+          "inputs.error_correction_percent.min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.frame.access": {
+            "type": "String",
+            "value": "borrowed"
+          },
+          "inputs.max_border_error_percent.description": {
+            "type": "String",
+            "value": "Largest share of border cells, in percent, that may read bright."
+          },
+          "inputs.max_border_error_percent.max": {
+            "type": "Int",
+            "value": 100
+          },
+          "inputs.max_border_error_percent.min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.min_contrast.description": {
+            "type": "String",
+            "value": "Smallest luma difference between the mean bright and mean dark cells."
+          },
+          "inputs.min_contrast.max": {
+            "type": "Int",
+            "value": 255
+          },
+          "inputs.min_contrast.min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.min_corner_distance_permille.description": {
+            "type": "String",
+            "value": "Smallest distance between neighbouring corners, in per mille of the perimeter; 0 turns the gate off."
+          },
+          "inputs.min_corner_distance_permille.max": {
+            "type": "Int",
+            "value": 250
+          },
+          "inputs.min_corner_distance_permille.min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.min_distance_to_border.description": {
+            "type": "String",
+            "value": "Smallest distance of every corner from the frame edge, in pixels."
+          },
+          "inputs.min_distance_to_border.max": {
+            "type": "Int",
+            "value": 1000
+          },
+          "inputs.min_distance_to_border.min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.min_perimeter_permille.description": {
+            "type": "String",
+            "value": "Smallest quad perimeter, in per mille of the frame's larger dimension; 0 turns the gate off."
+          },
+          "inputs.min_perimeter_permille.max": {
+            "type": "Int",
+            "value": 4000
+          },
+          "inputs.min_perimeter_permille.min": {
+            "type": "Int",
+            "value": 0
+          },
+          "inputs.require_convex.description": {
+            "type": "String",
+            "value": "Reject quads that are not strictly convex."
+          },
+          "summary": {
+            "type": "String",
+            "value": "ArUco/AprilTag marker validation gates"
+          }
+        }
+      },
+      {
+        "id": "eidos:aruco.refine",
+        "bundle": "eidos:aruco.refine",
+        "label": "refine",
+        "inputs": [
+          "detections",
+          "frame",
+          "max_radius",
+          "max_side_samples",
+          "min_radius",
+          "min_step",
+          "polish_radius",
+          "search_rate"
+        ],
+        "outputs": [
+          "refined_corners"
+        ],
+        "compute": "CpuOnly",
+        "const_inputs": [
+          [
+            "max_radius",
+            {
+              "type": "Float",
+              "value": 12.0
+            }
+          ],
+          [
+            "max_side_samples",
+            {
+              "type": "Int",
+              "value": 32
+            }
+          ],
+          [
+            "min_radius",
+            {
+              "type": "Float",
+              "value": 3.0
+            }
+          ],
+          [
+            "min_step",
+            {
+              "type": "Float",
+              "value": 4.0
+            }
+          ],
+          [
+            "polish_radius",
+            {
+              "type": "Float",
+              "value": 1.5
+            }
+          ],
+          [
+            "search_rate",
+            {
+              "type": "Float",
+              "value": 0.06
+            }
+          ]
+        ],
+        "metadata": {
+          "daedalus.node.execution": {
+            "type": "String",
+            "value": "handler_required"
+          },
+          "inputs.detections.access": {
+            "type": "String",
+            "value": "borrowed"
+          },
+          "inputs.frame.access": {
+            "type": "String",
+            "value": "borrowed"
+          },
+          "inputs.max_radius.description": {
+            "type": "String",
+            "value": "Upper bound of the first-pass radius, in pixels."
+          },
+          "inputs.max_radius.max": {
+            "type": "Float",
+            "value": 15.75
+          },
+          "inputs.max_radius.min": {
+            "type": "Float",
+            "value": 0.5
+          },
+          "inputs.max_side_samples.description": {
+            "type": "String",
+            "value": "Most edge points per side."
+          },
+          "inputs.max_side_samples.max": {
+            "type": "Int",
+            "value": 64
+          },
+          "inputs.max_side_samples.min": {
+            "type": "Int",
+            "value": 4
+          },
+          "inputs.min_radius.description": {
+            "type": "String",
+            "value": "Lower bound of the first-pass radius, in pixels."
+          },
+          "inputs.min_radius.max": {
+            "type": "Float",
+            "value": 15.75
+          },
+          "inputs.min_radius.min": {
+            "type": "Float",
+            "value": 0.5
+          },
+          "inputs.min_step.description": {
+            "type": "String",
+            "value": "Weakest accepted edge step, as the luma difference across one pixel."
+          },
+          "inputs.min_step.max": {
+            "type": "Float",
+            "value": 255.0
+          },
+          "inputs.min_step.min": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "inputs.polish_radius.description": {
+            "type": "String",
+            "value": "Radius of the second, polishing pass; 0 skips it."
+          },
+          "inputs.polish_radius.max": {
+            "type": "Float",
+            "value": 15.75
+          },
+          "inputs.polish_radius.min": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "inputs.search_rate.description": {
+            "type": "String",
+            "value": "First-pass search radius as a fraction of the side length."
+          },
+          "inputs.search_rate.max": {
+            "type": "Float",
+            "value": 0.5
+          },
+          "inputs.search_rate.min": {
+            "type": "Float",
+            "value": 0.0
+          },
+          "summary": {
+            "type": "String",
+            "value": "ArUco/AprilTag sub-pixel corner refinement"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from": {
+          "node": 0,
+          "port": "frame"
+        },
+        "to": {
+          "node": 1,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 1,
+          "port": "runs"
+        },
+        "to": {
+          "node": 2,
+          "port": "runs"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "frame"
+        },
+        "to": {
+          "node": 3,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 2,
+          "port": "quads"
+        },
+        "to": {
+          "node": 3,
+          "port": "quads"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "frame"
+        },
+        "to": {
+          "node": 4,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 3,
+          "port": "detections"
+        },
+        "to": {
+          "node": 4,
+          "port": "detections"
+        }
+      },
+      {
+        "from": {
+          "node": 4,
+          "port": "rejected"
+        },
+        "to": {
+          "node": 0,
+          "port": "rejected"
+        }
+      },
+      {
+        "from": {
+          "node": 4,
+          "port": "detections"
+        },
+        "to": {
+          "node": 0,
+          "port": "detections"
+        }
+      },
+      {
+        "from": {
+          "node": 0,
+          "port": "frame"
+        },
+        "to": {
+          "node": 5,
+          "port": "frame"
+        }
+      },
+      {
+        "from": {
+          "node": 4,
+          "port": "detections"
+        },
+        "to": {
+          "node": 5,
+          "port": "detections"
+        }
+      },
+      {
+        "from": {
+          "node": 5,
+          "port": "refined_corners"
+        },
+        "to": {
+          "node": 0,
+          "port": "refined_corners"
+        }
+      }
+    ],
+    "metadata": {}
+  }
+}

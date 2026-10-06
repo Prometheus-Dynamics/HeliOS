@@ -7,13 +7,13 @@ use orion::{
 use tokio::{
     signal,
     sync::mpsc,
-    time::{Duration, interval, sleep},
+    time::{Duration, Instant, interval, sleep, sleep_until},
 };
 use tracing::{info, warn};
 
 use crate::{
     config::EngineConfig,
-    execution::{ExecutionPlugins, ResidentExecutionSet},
+    execution::{ExecutionPlugins, GraphSettings, ResidentExecutionSet},
     model::{EngineSnapshot, ExecutionSessionState, ExecutionSessionStatus, ExecutionWorkload, GraphRef},
     plugins::{PluginLoadError, PluginLoadResult, discover_plugin_libraries, load_plugins},
     provider::{EnginePublishError, OrionEnginePublisher},
@@ -127,9 +127,14 @@ impl EngineApp {
         });
 
         let mut current_state_snapshot = self.node_runtime.control_plane(format!("{}-control", self.publisher.executor_client_name()))?.fetch_state_snapshot().await.ok();
-        let mut execution_sessions = ResidentExecutionSet::default();
+        let mut execution_sessions = ResidentExecutionSet::new(GraphSettings { metrics_level: self.config.metrics_level });
+        // Graphs run on their own threads when their input arrives; they signal here when they
+        // produced something, and what they produced is published at most once per interval.
+        let outputs_ready = execution_sessions.outputs_ready();
+        let publish_interval = Duration::from_millis(self.config.publish_interval_ms.max(1));
+        let mut publish_due: Option<Instant> = None;
+        let mut last_publish = Instant::now();
         let mut reconcile_tick = interval(ENGINE_RECONCILE_INTERVAL);
-        let mut execution_tick = interval(Duration::from_millis(self.config.execution_interval_ms.max(1)));
         self.publish_snapshot_resilient(&plugins, &mut execution_sessions, &current_workloads, current_state_snapshot.as_ref()).await?;
         info!(
             node_id = %self.config.node_id,
@@ -173,7 +178,12 @@ impl EngineApp {
                         }
                     }
                 }
-                _ = execution_tick.tick() => {
+                _ = outputs_ready.notified(), if publish_due.is_none() => {
+                    publish_due = Some(Instant::max(Instant::now(), last_publish + publish_interval));
+                }
+                _ = sleep_until(publish_due.unwrap_or_else(Instant::now)), if publish_due.is_some() => {
+                    publish_due = None;
+                    last_publish = Instant::now();
                     self.publish_snapshot_resilient(&plugins, &mut execution_sessions, &current_workloads, current_state_snapshot.as_ref()).await?;
                 }
                 maybe_event = event_rx.recv() => {
@@ -244,7 +254,7 @@ impl EngineApp {
             }
         };
         let loaded_plugins = plugins.builtins.iter().cloned().chain(plugins.libraries.iter().map(|plugin| plugin.metadata().clone())).collect::<Vec<_>>();
-        let mut execution = execution_sessions.tick_workloads(&ExecutionPlugins { registry: &plugins.registry, loaded_plugins: &loaded_plugins }, &decoded.runnable, state_snapshot, observed_at_ms);
+        let mut execution = execution_sessions.sync_workloads(&ExecutionPlugins { registry: &plugins.registry, loaded_plugins: &loaded_plugins }, &decoded.runnable, state_snapshot, observed_at_ms);
         execution.sessions.extend(decoded.decode_failures);
         let snapshot = EngineSnapshot {
             node_id: self.config.node_id.clone(),

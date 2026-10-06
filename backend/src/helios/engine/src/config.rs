@@ -1,10 +1,12 @@
 use std::path::PathBuf;
 
+use daedalus::engine::MetricsLevel;
+
 pub const DEFAULT_NODE_ID: &str = "node-local";
 const DEFAULT_ORION_IPC_SOCKET_PATH: &str = "/run/orion/control.sock";
 const DEFAULT_ORION_IPC_STREAM_SOCKET_PATH: &str = "/run/orion/control-stream.sock";
 const DEFAULT_ENGINE_SOCKET_PATH: &str = "/run/helios/engine.sock";
-const DEFAULT_EXECUTION_INTERVAL_MS: u64 = 250;
+const DEFAULT_PUBLISH_INTERVAL_MS: u64 = 250;
 const DEFAULT_PLUGIN_DIRS: &[&str] = &["/usr/lib/helios/plugins/daedalus", "/var/lib/helios/plugins/daedalus"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,7 +17,13 @@ pub struct EngineConfig {
     pub plugin_dirs: Vec<PathBuf>,
     pub orion_ipc_socket_path: PathBuf,
     pub orion_ipc_stream_socket_path: PathBuf,
-    pub execution_interval_ms: u64,
+    /// Shortest time between two publications of graph outputs to Orion. Graphs run when their
+    /// input arrives; this only coalesces what they produced in between into one publication.
+    pub publish_interval_ms: u64,
+    /// Daedalus telemetry level of workload graphs (`HELIOS_ENGINE_METRICS_LEVEL`). `Off` records
+    /// nothing; `Detailed` adds per-node handler timing and per-edge waits, adapters and copies,
+    /// published as each session's `metrics` artifact.
+    pub metrics_level: MetricsLevel,
 }
 
 impl Default for EngineConfig {
@@ -27,7 +35,8 @@ impl Default for EngineConfig {
             plugin_dirs: DEFAULT_PLUGIN_DIRS.iter().map(PathBuf::from).collect(),
             orion_ipc_socket_path: PathBuf::from(DEFAULT_ORION_IPC_SOCKET_PATH),
             orion_ipc_stream_socket_path: PathBuf::from(DEFAULT_ORION_IPC_STREAM_SOCKET_PATH),
-            execution_interval_ms: DEFAULT_EXECUTION_INTERVAL_MS,
+            publish_interval_ms: DEFAULT_PUBLISH_INTERVAL_MS,
+            metrics_level: MetricsLevel::Off,
         }
     }
 }
@@ -64,12 +73,33 @@ impl EngineConfig {
         if let Some(value) = env.get("ORION_NODE_IPC_STREAM_SOCKET") {
             config.orion_ipc_stream_socket_path = PathBuf::from(value);
         }
-        if let Some(value) = env.get("HELIOS_ENGINE_EXECUTION_INTERVAL_MS").and_then(|value| value.parse::<u64>().ok()) {
-            config.execution_interval_ms = value.max(1);
+        // `HELIOS_ENGINE_EXECUTION_INTERVAL_MS` is the name from when graphs were ticked on it.
+        if let Some(value) = env.get("HELIOS_ENGINE_PUBLISH_INTERVAL_MS").or_else(|| env.get("HELIOS_ENGINE_EXECUTION_INTERVAL_MS")).and_then(|value| value.parse::<u64>().ok()) {
+            config.publish_interval_ms = value.max(1);
+        }
+        if let Some(value) = env.get("HELIOS_ENGINE_METRICS_LEVEL") {
+            match parse_metrics_level(value) {
+                Some(level) => config.metrics_level = level,
+                None => tracing::warn!(value = %value, "unknown HELIOS_ENGINE_METRICS_LEVEL; metrics stay off"),
+            }
         }
 
         config
     }
+}
+
+/// `off`, `basic`, `timing`, `detailed`, `hardware`, `profile` or `trace` (case-insensitive).
+pub fn parse_metrics_level(value: &str) -> Option<MetricsLevel> {
+    Some(match value.trim().to_ascii_lowercase().as_str() {
+        "off" | "none" | "0" | "" => MetricsLevel::Off,
+        "basic" => MetricsLevel::Basic,
+        "timing" => MetricsLevel::Timing,
+        "detailed" => MetricsLevel::Detailed,
+        "hardware" => MetricsLevel::Hardware,
+        "profile" => MetricsLevel::Profile,
+        "trace" => MetricsLevel::Trace,
+        _ => return None,
+    })
 }
 
 fn parse_path_list(value: &str) -> Vec<PathBuf> {
@@ -89,7 +119,8 @@ mod tests {
             ("HELIOS_DAEDALUS_PLUGIN_DIRS", "/tmp/plugins-a:/tmp/plugins-b"),
             ("ORION_NODE_IPC_SOCKET", "/tmp/orion/control.sock"),
             ("ORION_NODE_IPC_STREAM_SOCKET", "/tmp/orion/control-stream.sock"),
-            ("HELIOS_ENGINE_EXECUTION_INTERVAL_MS", "500"),
+            ("HELIOS_ENGINE_PUBLISH_INTERVAL_MS", "500"),
+            ("HELIOS_ENGINE_METRICS_LEVEL", "Detailed"),
         ]);
 
         assert_eq!(config.node_id, "node-a");
@@ -98,6 +129,15 @@ mod tests {
         assert_eq!(config.plugin_dirs, vec![PathBuf::from("/tmp/plugins-a"), PathBuf::from("/tmp/plugins-b")]);
         assert_eq!(config.orion_ipc_socket_path, PathBuf::from("/tmp/orion/control.sock"));
         assert_eq!(config.orion_ipc_stream_socket_path, PathBuf::from("/tmp/orion/control-stream.sock"));
-        assert_eq!(config.execution_interval_ms, 500);
+        assert_eq!(config.publish_interval_ms, 500);
+        assert_eq!(config.metrics_level, MetricsLevel::Detailed);
+    }
+
+    #[test]
+    fn config_defaults_metrics_off_and_reads_the_legacy_interval() {
+        let config = EngineConfig::from_env_iter([("HELIOS_ENGINE_EXECUTION_INTERVAL_MS", "40")]);
+        assert_eq!(config.metrics_level, MetricsLevel::Off);
+        assert_eq!(config.publish_interval_ms, 40);
+        assert_eq!(parse_metrics_level("bogus"), None);
     }
 }

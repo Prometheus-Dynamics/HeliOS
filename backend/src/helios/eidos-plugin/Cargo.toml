@@ -1,0 +1,27 @@
+[package]
+name = "helios-eidos-plugin"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "Eidos's Daedalus plugin (eidos_daedalus::EidosPlugin) as the native plugin library HeliOS installs"
+
+[lints]
+workspace = true
+
+# A leaf `cdylib` with the one `export_plugin!` line, as Daedalus's
+# `docs/dynamic-plugins.md` asks: the plugin itself (nodes, types, templates)
+# is Eidos's `eidos-daedalus`. Build it in the same cargo build as
+# helios-engine, so its Rust types (`FrameLease`, the Eidos hand-off types)
+# are the engine's and it installs through the Rust-ABI path.
+[lib]
+crate-type = ["cdylib"]
+test = false
+doctest = false
+
+[dependencies]
+daedalus = { workspace = true, features = ["dylib-plugins"] }
+eidos-daedalus = { workspace = true, features = ["dylib", "simd"] }
+styx = { workspace = true, default-features = false, features = ["daedalus"] }
+
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+eidos-daedalus = { workspace = true, features = ["dylib", "simd", "neon"] }

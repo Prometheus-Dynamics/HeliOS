@@ -17,7 +17,7 @@ members = [
     "src/helios/updater",
     "src/helios/diagnostics",
     "src/helios/ctl",
-    "src/helios/vision",
+    "src/helios/eidos-plugin",
     "src/helios/vision-probe",
     "src/helios/provision",
     "tools/xtask",
@@ -132,6 +132,7 @@ orion = { git = "https://github.com/Prometheus-Dynamics/Orion.git", branch = "ma
 styx = { version = "2.0.0", git = "https://github.com/Prometheus-Dynamics/Styx.git", branch = "dev", default-features = false }
 eidos-aruco = { git = "https://github.com/Prometheus-Dynamics/Eidos.git", branch = "main", default-features = false }
 eidos-core = { git = "https://github.com/Prometheus-Dynamics/Eidos.git", branch = "main", default-features = false }
+eidos-daedalus = { git = "https://github.com/Prometheus-Dynamics/Eidos.git", branch = "main", default-features = false }
 
 [profile.release]
 opt-level = "z"
@@ -142,8 +143,9 @@ panic = "unwind"
 
 # Services are built for size; per-frame vision code is built for speed. Both
 # levels matter under fat LTO: each crate's own (Eidos at "z" made the ArUco
-# graph 4x slower) and the final binary's (the engine and probe link vision).
-[profile.release.package.helios-vision]
+# graph 4x slower) and the final artifact's (the engine and probe run the
+# graph; the Eidos plugin library links the stages).
+[profile.release.package.helios-eidos-plugin]
 opt-level = 3
 
 [profile.release.package.helios-engine]
@@ -153,16 +155,31 @@ opt-level = 3
 opt-level = 3
 
 # Eidos (per-frame CV) is built for speed too.
+[profile.release.package.eidos-daedalus]
+opt-level = 3
+
 [profile.release.package.eidos-aruco]
 opt-level = 3
 
 [profile.release.package.eidos-calibration]
 opt-level = 3
 
+[profile.release.package.eidos-color]
+opt-level = 3
+
 [profile.release.package.eidos-contour]
 opt-level = 3
 
 [profile.release.package.eidos-core]
+opt-level = 3
+
+[profile.release.package.eidos-detectors]
+opt-level = 3
+
+[profile.release.package.eidos-draw]
+opt-level = 3
+
+[profile.release.package.eidos-filter]
 opt-level = 3
 
 [profile.release.package.eidos-frame]
@@ -172,6 +189,9 @@ opt-level = 3
 opt-level = 3
 
 [profile.release.package.eidos-mask]
+opt-level = 3
+
+[profile.release.package.eidos-motion]
 opt-level = 3
 
 [profile.release.package.eidos-sampling]

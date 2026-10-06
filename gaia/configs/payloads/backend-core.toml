@@ -112,9 +112,10 @@ image = "helios-cross"
 dockerfile = "gaia/docker/aarch64/Dockerfile.aarch64-rpi4"
 context = "gaia/docker"
 
-# The vision nodes (Eidos marker detection) as a Daedalus dynamic plugin, which
-# helios-engine loads from /usr/lib/helios/plugins/daedalus at startup. The
-# `dylib` feature exports the plugin from the cdylib.
+# The vision nodes as a Daedalus dynamic plugin: Eidos's own plugin
+# (eidos_daedalus::EidosPlugin), exported by the one-line leaf cdylib
+# helios-eidos-plugin, which helios-engine loads from
+# /usr/lib/helios/plugins/daedalus at startup.
 #
 # The engine installs it on the Rust-ABI path only when both were built with
 # the same Daedalus build fingerprint and the same Rust types behind the
@@ -122,18 +123,17 @@ context = "gaia/docker"
 # feature flags in separate cargo invocations, so check the engine log for the
 # install path after a build (see TODO.md).
 [[artifacts]]
-id = "helios-vision-plugin"
+id = "helios-eidos-plugin"
 kind = "rust"
-package = "helios-vision"
+package = "helios-eidos-plugin"
 source = "backend-workspace"
-features = ["dylib"]
 target = "aarch64-unknown-linux-gnu"
 profile = "release"
-target_name = "libhelios_vision.so"
-install_name = "libhelios_vision.so"
+target_name = "libhelios_eidos_plugin.so"
+install_name = "libhelios_eidos_plugin.so"
 install_class = "library"
-install_dest_hint = "/usr/lib/helios/plugins/daedalus/libhelios_vision.so"
-output_path = "gaia/output/${build.name}/artifacts/libhelios_vision.so"
+install_dest_hint = "/usr/lib/helios/plugins/daedalus/libhelios_eidos_plugin.so"
+output_path = "gaia/output/${build.name}/artifacts/libhelios_eidos_plugin.so"
 
 [artifacts.execution]
 backend = "docker"
@@ -232,9 +232,9 @@ owner = "root"
 group = "root"
 
 [[install]]
-id = "install-helios-vision-plugin"
-artifact = "helios-vision-plugin"
-dest = "/usr/lib/helios/plugins/daedalus/libhelios_vision.so"
+id = "install-helios-eidos-plugin"
+artifact = "helios-eidos-plugin"
+dest = "/usr/lib/helios/plugins/daedalus/libhelios_eidos_plugin.so"
 replace = true
 mode = 420
 owner = "root"
@@ -268,7 +268,7 @@ install_entries = [
   "install-helios-updater",
   "install-helios-diagnostics",
   "install-heliosctl",
-  "install-helios-vision-plugin",
+  "install-helios-eidos-plugin",
   "install-orionctl",
   "install-helios-provision",
 ]
