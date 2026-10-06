@@ -9,7 +9,7 @@ use helios_diagnostics::{collect_failure_snapshot, collect_health_report, config
 
 mod local;
 
-use heliosctl::update;
+use heliosctl::{auth_state, update};
 
 #[derive(Debug, Parser)]
 #[command(name = "heliosctl")]
@@ -35,6 +35,11 @@ enum Command {
         #[command(subcommand)]
         command: DiagnosticsCommand,
     },
+    /// Device security (helios-api password and API tokens).
+    Auth {
+        #[command(subcommand)]
+        command: AuthCommand,
+    },
     Orion {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
@@ -55,6 +60,22 @@ enum UpdateCommand {
         node_id: String,
         #[arg(long, default_value = "/run/orion/control.sock")]
         socket: PathBuf,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum AuthCommand {
+    /// Show whether the device is open or secured.
+    Status {
+        /// The auth file (default: $HELIOS_API_AUTH_FILE or /var/lib/helios/auth/auth.json).
+        #[arg(long)]
+        file: Option<PathBuf>,
+    },
+    /// Return the device to open mode: forget the password, all API tokens and all sessions.
+    /// Recovery for a lost password; run it from a root shell on the device.
+    Reset {
+        #[arg(long)]
+        file: Option<PathBuf>,
     },
 }
 
@@ -123,6 +144,30 @@ fn run() -> Result<ExitCode> {
             DiagnosticsCommand::Onfailure { unit, trigger } => {
                 let path = collect_failure_snapshot(&config, &unit, &trigger)?;
                 println!("{}", path.display());
+                Ok(ExitCode::SUCCESS)
+            }
+        },
+        Command::Auth { command } => match command {
+            AuthCommand::Status { file } => {
+                let path = file.unwrap_or_else(auth_state::auth_file_from_env);
+                let summary = auth_state::summary(&path)?;
+                println!("mode: {}", summary.mode.as_str());
+                if summary.mode == auth_state::AuthMode::Secured {
+                    println!("api tokens: {}", summary.tokens);
+                }
+                if let Some(problem) = summary.unreadable {
+                    println!("problem: {} is unreadable ({problem}); every protected request is refused. Run `heliosctl auth reset`.", path.display());
+                }
+                Ok(ExitCode::SUCCESS)
+            }
+            AuthCommand::Reset { file } => {
+                let path = file.unwrap_or_else(auth_state::auth_file_from_env);
+                if auth_state::reset(&path)? {
+                    println!("Device security reset: the device is open again. The password, API tokens and sessions are gone.");
+                    println!("Secure it again from the HeliOS UI (Settings, Security) or POST /v1/auth/enable.");
+                } else {
+                    println!("The device is already open; nothing to reset.");
+                }
                 Ok(ExitCode::SUCCESS)
             }
         },
