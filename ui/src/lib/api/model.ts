@@ -77,6 +77,24 @@ export interface CameraSettings {
   roi: { x: number; y: number; w: number; h: number } | null;
 }
 
+/** A camera control the device lists (live mode), for generic editors. */
+export interface CameraControlInfo {
+  id: number;
+  name: string;
+  kind: "bool" | "int" | "uint" | "float" | "menu" | "int_menu" | "rectangle" | "none" | "unknown";
+  min?: number;
+  max?: number;
+  step?: number;
+  menu?: string[];
+  default: number | boolean | null;
+  /** The value now (null when it cannot be read or is not a scalar). */
+  value: number | boolean | null;
+  /** The standard control it answers (`exposure_us`, `gain`, `ae`, ...). */
+  standard: string | null;
+  /** The device lets the UI change it. */
+  writable: boolean;
+}
+
 export interface Camera {
   resourceId: string;
   name: string;
@@ -90,6 +108,10 @@ export interface Camera {
   foreign?: string;
   /** Deeper sensor, ISP and transport controls, by name. */
   extra?: Record<string, number | string | boolean>;
+  /** Live mode: the camera's controls as its camera service lists them. */
+  controls?: CameraControlInfo[];
+  /** Live mode: why the controls could not be read. */
+  controlsError?: string;
 }
 
 export interface GraphNode {

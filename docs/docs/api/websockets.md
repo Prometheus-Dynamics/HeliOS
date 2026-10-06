@@ -37,7 +37,7 @@ Each message's `event:` field is the event type. Its `data:` is a JSON object:
 | `pipeline` | A pipeline is added, changes state, or is removed | `{id, change: "added" \| "updated" \| "removed", value?: {state, enabled, session}}` |
 | `resource` | A resource is added, changes health, availability or lease, or is removed | `{id, change, value?: {type, health, availability, lease_state, leased_by}}` |
 | `update` | The update status changes, an image is uploaded, or an update is submitted | the update status (as from `GET /v1/update/status`), or `{change: "uploaded", upload}`, or `{change: "submitted", update_id, version}` |
-| `camera` | A camera mount changes | `{id, change: "mount", mount}` |
+| `camera` | A camera mount changes, or a camera control changes (by any client of the camera, the API included) | `{id, change: "mount", mount}` or `{id, change: "control", control: {id, standard, value, frame, by, frame_rate_restart}}` |
 | `metrics` | Every 2 s | the `GET /v1/metrics` object |
 | `orion` | Orion becomes reachable or unreachable | `{reachable, desired_revision?, message?}` |
 | `log` | `/v1/logs/stream` only | `{at_ms, level, unit, message, pid}` |

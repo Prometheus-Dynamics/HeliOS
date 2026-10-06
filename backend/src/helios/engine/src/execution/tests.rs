@@ -2,7 +2,8 @@ use std::{
     num::NonZeroU32,
     path::PathBuf,
     str::FromStr,
-    sync::{Arc, mpsc},
+    sync::Arc,
+    task::{Context, Poll},
     time::{Duration, Instant},
 };
 
@@ -23,7 +24,7 @@ use styx::{
     core::prelude::{BufferPool, ColorSpace, FourCc, FrameMeta, MediaFormat, Resolution, plane_layout_from_dims},
     imports::framelease::FrameLease,
 };
-use tokio::sync::Notify;
+use tokio::sync::{Notify, mpsc};
 
 use super::{
     bindings::{FrameSourceSpec, ResourceInput},
@@ -59,21 +60,28 @@ fn frame_context(frame: FrameLease, context: String) -> Result<String, NodeError
     Ok(serde_json::json!({ "timestamp": frame.meta().timestamp, "context": context }).to_string())
 }
 
-declare_plugin!(EngineTestPlugin, "engine.test", [source, echo, frame_passthrough, frame_context]);
+#[node(id = "test.frame_pair", inputs("primary", "secondary"), outputs("out"))]
+fn frame_pair(primary: &FrameLease, secondary: Option<&FrameLease>) -> Result<String, NodeError> {
+    Ok(serde_json::json!({ "primary": primary.meta().timestamp, "secondary": secondary.map(|frame| frame.meta().timestamp) }).to_string())
+}
 
-/// Frames handed over in-process, standing in for a camera service socket.
-struct ChannelFrameSource(mpsc::Receiver<FrameLease>);
+declare_plugin!(EngineTestPlugin, "engine.test", [source, echo, frame_passthrough, frame_context, frame_pair]);
+
+/// Frames handed over in-process, standing in for a camera service socket (pollable like a
+/// Styx `FrameClient`).
+struct ChannelFrameSource(mpsc::UnboundedReceiver<FrameLease>);
 
 impl FrameSource for ChannelFrameSource {
-    fn recv(&mut self, wait: Duration) -> FrameReceive {
-        match self.0.recv_timeout(wait) {
-            Ok(frame) => FrameReceive::Frame(frame),
-            Err(mpsc::RecvTimeoutError::Timeout) => FrameReceive::Idle,
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                std::thread::sleep(wait);
-                FrameReceive::Unavailable("test channel closed".into())
-            }
-        }
+    fn connect(&mut self) -> Result<(), (String, Duration)> {
+        Ok(())
+    }
+
+    fn poll_frame(&mut self, cx: &mut Context<'_>) -> Poll<FrameReceive> {
+        self.0.poll_recv(cx).map(|frame| frame.map_or_else(|| FrameReceive::Closed("test channel closed".into()), FrameReceive::Frame))
+    }
+
+    fn try_frame(&mut self) -> FrameReceive {
+        self.0.try_recv().map_or(FrameReceive::Idle, FrameReceive::Frame)
     }
 
     fn status(&self) -> FrameSourceStatus {
@@ -219,9 +227,9 @@ fn frame_spec(input: &str) -> FrameSourceSpec {
 }
 
 /// Start a driver for `workload` fed through the returned sender.
-fn spawn_channel_driver(plugins: &TestPlugins, workload: ExecutionWorkload, input: &str, settings: GraphSettings) -> (WorkloadDriver, mpsc::Sender<FrameLease>) {
-    let graph = graph::compile_workload_graph(plugins.registry(), &plugins.metadata, &workload, settings).expect("compile graph");
-    let (sender, receiver) = mpsc::channel();
+fn spawn_channel_driver(plugins: &TestPlugins, workload: ExecutionWorkload, input: &str, settings: GraphSettings) -> (WorkloadDriver, mpsc::UnboundedSender<FrameLease>) {
+    let graph = graph::compile_workload_graph(plugins.registry(), &plugins.metadata, &workload, &[input.to_string()], settings).expect("compile graph");
+    let (sender, receiver) = mpsc::unbounded_channel();
     let driver = WorkloadDriver::start(workload, graph, vec![(frame_spec(input), Box::new(ChannelFrameSource(receiver)) as Box<dyn FrameSource>)], Arc::new(Notify::new())).expect("start driver");
     (driver, sender)
 }
@@ -400,6 +408,52 @@ fn frame_driver_pushes_context_with_each_frame() {
     assert!(second.contains("imu-b") && second.contains("\"timestamp\":901"), "{second}");
 }
 
+/// A secondary camera's latest frame goes in one batch with each primary frame (the primary paces
+/// the graph), on the graph thread: no feeder thread per camera.
+#[test]
+fn secondary_camera_frames_pair_with_the_primary_frame() {
+    let plugins = TestPlugins::load();
+    let pair = EngineTestPlugin::new().frame_pair.clone().alias("pair");
+    let graph = plugins
+        .registry()
+        .graph_builder()
+        .expect("graph builder")
+        .host_bridge("host")
+        .node(&pair)
+        .connect(&host_port("host", "front"), &pair.inputs.primary)
+        .connect(&host_port("host", "side"), &pair.inputs.secondary)
+        .connect(&pair.outputs.out, &host_port("host", "result"))
+        .build();
+    let document = plugins.registry().graph_document(graph).to_json().expect("document json");
+    let workload = workload("workload.pair", document, Vec::new());
+    let compiled = graph::compile_workload_graph(plugins.registry(), &plugins.metadata, &workload, &["front".to_string(), "side".to_string()], GraphSettings::default()).expect("compile graph");
+    let (front, front_frames) = mpsc::unbounded_channel();
+    let (side, side_frames) = mpsc::unbounded_channel();
+    let sources =
+        vec![(frame_spec("front"), Box::new(ChannelFrameSource(front_frames)) as Box<dyn FrameSource>), (frame_spec("side"), Box::new(ChannelFrameSource(side_frames)) as Box<dyn FrameSource>)];
+    let mut driver = WorkloadDriver::start(workload, compiled, sources, Arc::new(Notify::new())).expect("start driver");
+    let result = |driver: &mut WorkloadDriver| artifact_json(&driver.snapshot().1, "host_output:result");
+
+    // A side frame alone does not tick the graph; the next front frame carries it.
+    side.send(flat_frame(4, 4, 50)).expect("send side");
+    std::thread::sleep(Duration::from_millis(50));
+    assert_eq!(driver.stats().ticks_processed, 0);
+    front.send(flat_frame(4, 4, 100)).expect("send front");
+    wait_for("the first pair", || driver.stats().ticks_processed == 1);
+    assert_eq!(result(&mut driver), serde_json::json!({ "primary": 100, "secondary": 50 }));
+
+    // The side camera's newest frame is reused until a newer one arrives.
+    front.send(flat_frame(4, 4, 101)).expect("send front");
+    wait_for("the second pair", || driver.stats().ticks_processed == 2);
+    assert_eq!(result(&mut driver), serde_json::json!({ "primary": 101, "secondary": 50 }));
+    side.send(flat_frame(4, 4, 51)).expect("send side");
+    side.send(flat_frame(4, 4, 52)).expect("send side");
+    front.send(flat_frame(4, 4, 102)).expect("send front");
+    wait_for("the third pair", || driver.stats().ticks_processed == 3);
+    assert_eq!(result(&mut driver), serde_json::json!({ "primary": 102, "secondary": 52 }));
+    assert_eq!(driver.stats().frames_received, 3);
+}
+
 #[test]
 fn frame_outputs_are_described_not_copied() {
     let plugins = TestPlugins::load();
@@ -473,7 +527,13 @@ fn apriltag_graph_detects_markers_through_the_frame_driver() {
         assert!(nodes.iter().any(|node| node["label"] == stage && node["calls"] == 3), "{stage} metrics in {metrics}");
     }
     assert_eq!(metrics["total"]["ticks"], 3);
-    assert!(metrics["frame_overhead"].is_null());
+    // Daedalus's frame-path overhead rides along whenever metrics are on.
+    assert_eq!(plan["frame_overhead"], true);
+    let overhead = &metrics["frame_overhead"];
+    assert!(overhead["recorded"].as_u64().is_some_and(|recorded| recorded >= 1), "{overhead}");
+    assert!(overhead["stages"].as_array().is_some_and(|stages| stages.iter().any(|stage| stage["name"] == "tick")), "{overhead}");
+    assert!(plan["copying_edges"].is_array() && plan["crossing_edges"].is_array(), "{plan}");
+    assert!(plan["plan"]["edges"].as_array().is_some_and(|edges| edges.iter().all(|edge| edge["copies_frame"].is_boolean())), "{plan}");
 }
 
 /// End to end over a real Styx camera service: a virtual camera served on a socket, bound

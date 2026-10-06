@@ -4,9 +4,9 @@ use std::time::Instant;
 
 use daedalus::{
     data::model::Value,
-    engine::{Engine, EngineConfig as DaedalusEngineConfig, GpuBackend, HostGraph, MetricsLevel, RuntimeMode},
+    engine::{DEFAULT_FRAME_OVERHEAD_WINDOW, Engine, EngineConfig as DaedalusEngineConfig, GpuBackend, HostGraph, MetricsLevel, RuntimeMode},
     planner::GraphDocument,
-    runtime::{BackpressureStrategy, HostBridgeManager, handler_registry::HandlerRegistry, plugins::PluginRegistry},
+    runtime::{BackpressureStrategy, HOST_HELD_INPUTS_KEY, HostBridgeManager, RuntimeEdgeExplanation, handler_registry::HandlerRegistry, plugins::PluginRegistry},
 };
 
 use super::ExecutionError;
@@ -46,15 +46,23 @@ pub(crate) struct CompiledWorkloadGraph {
 
 /// Validate plugin requirements, parse the workload's `GraphDocument` and compile it against
 /// `registry` with a host bridge of its own, so workloads never share host ports.
+///
+/// `frame_inputs` are the host inputs camera frames go into; when there are any, every other
+/// host input is context and is declared held in the document before planning, so the planner
+/// can branch it for consumers that take it by value (a runtime-only `set_held_input` cannot).
 pub(crate) fn compile_workload_graph(
     registry: &PluginRegistry,
     loaded_plugins: &[LoadedPlugin],
     workload: &ExecutionWorkload,
+    frame_inputs: &[String],
     settings: GraphSettings,
 ) -> Result<CompiledWorkloadGraph, ExecutionError> {
     validate_plugin_requirements(workload, loaded_plugins)?;
-    let document = graph_document_for(workload)?;
+    let mut document = graph_document_for(workload)?;
     validate_document_requires(registry, &document)?;
+    if !frame_inputs.is_empty() {
+        declare_context_held(&mut document, frame_inputs);
+    }
     let requires = serde_json::to_value(&document.requires).unwrap_or_default();
     let host_alias = host_alias(&document);
     let engine = Engine::new(daedalus_engine_config(settings)).map_err(|error| ExecutionError::Engine(error.to_string()))?;
@@ -73,29 +81,35 @@ pub(crate) fn compile_workload_graph(
 pub(crate) fn plan_introspection(host_graph: &ResidentHostGraph, requires: serde_json::Value, metrics_level: MetricsLevel) -> serde_json::Value {
     let explanation = host_graph.explain_plan();
     let label = |index: usize| explanation.nodes.get(index).map(|node| node.label.clone().unwrap_or_else(|| node.id.clone())).unwrap_or_default();
-    let adapter_edges = explanation
-        .edges
-        .iter()
-        .filter(|edge| !edge.adapter_steps.is_empty())
-        .map(|edge| {
-            serde_json::json!({
-                "edge": edge.index,
-                "from": format!("{}.{}", label(edge.from_node), edge.from_port),
-                "to": format!("{}.{}", label(edge.to_node), edge.to_port),
-                "steps": edge.adapter_steps,
-                "handoff": edge.handoff,
-                "reason": edge.handoff_reason,
-            })
+    let edge_json = |edge: &RuntimeEdgeExplanation| {
+        serde_json::json!({
+            "edge": edge.index,
+            "from": format!("{}.{}", label(edge.from_node), edge.from_port),
+            "to": format!("{}.{}", label(edge.to_node), edge.to_port),
+            "steps": edge.adapter_steps,
+            "handoff": edge.handoff,
+            "reason": edge.handoff_reason,
+            "copies_frame": edge.copies_frame,
+            "crosses_residency": edge.crosses_residency,
         })
-        .collect::<Vec<_>>();
+    };
+    let edges_where = |keep: fn(&RuntimeEdgeExplanation) -> bool| explanation.edges.iter().filter(|edge| keep(edge)).map(edge_json).collect::<Vec<_>>();
+    let adapter_edges = edges_where(|edge| !edge.adapter_steps.is_empty());
+    // Edges whose adapters copy a frame or move it between residencies (CPU, GPU, dma-buf):
+    // what to look at first when a frame path is slower than it should be.
+    let copying_edges = edges_where(|edge| edge.copies_frame);
+    let crossing_edges = edges_where(|edge| edge.crosses_residency);
     serde_json::json!({
         "format": PLAN_FORMAT,
         "host_alias": host_graph.host_alias(),
         "requires": requires,
         "metrics_level": format!("{metrics_level:?}"),
+        "frame_overhead": host_graph.frame_overhead_enabled(),
         "host_inputs": host_graph.host_inputs(),
         "host_outputs": host_graph.host_outputs(),
         "adapter_edges": adapter_edges,
+        "copying_edges": copying_edges,
+        "crossing_edges": crossing_edges,
         "plan": explanation,
     })
 }
@@ -121,6 +135,29 @@ fn validate_document_requires(registry: &PluginRegistry, document: &GraphDocumen
     Err(ExecutionError::GraphDocument(format!("`requires` does not list plugin(s) {} that provide its nodes; build documents with PluginRegistry::graph_document", missing.join(", "))))
 }
 
+/// Declare every host input of `document` except `frame_inputs` held (`HOST_HELD_INPUTS_KEY` on
+/// its host bridge node, as `GraphBuilder::held_input` records it), keeping what it declares.
+fn declare_context_held(document: &mut GraphDocument, frame_inputs: &[String]) {
+    let graph = &mut document.graph;
+    let Some(host) = graph.nodes.iter().position(|node| matches!(node.metadata.get("host_bridge"), Some(Value::Bool(true)))) else {
+        return;
+    };
+    let mut context = graph.edges.iter().filter(|edge| edge.from.node.0 == host && !frame_inputs.contains(&edge.from.port)).map(|edge| edge.from.port.clone()).collect::<Vec<_>>();
+    context.sort();
+    context.dedup();
+    if context.is_empty() {
+        return;
+    }
+    let held = graph.nodes[host].metadata.entry(HOST_HELD_INPUTS_KEY.to_string()).or_insert_with(|| Value::List(Vec::new()));
+    if let Value::List(ports) = held {
+        for port in context {
+            if !ports.iter().any(|listed| listed.as_str() == Some(port.as_str())) {
+                ports.push(Value::String(port.into()));
+            }
+        }
+    }
+}
+
 /// The alias of the document's host bridge node (its label, else its id).
 fn host_alias(document: &GraphDocument) -> String {
     document
@@ -132,9 +169,13 @@ fn host_alias(document: &GraphDocument) -> String {
         .unwrap_or_else(|| DEFAULT_HOST_ALIAS.to_string())
 }
 
-/// Serial execution on the workload's own driver thread: no worker pool, no GPU.
+/// Serial execution on the workload's own driver thread: no worker pool, no GPU. With metrics on,
+/// Daedalus also records each tick's frame-path overhead (`HostGraph::frame_overhead`).
 fn daedalus_engine_config(settings: GraphSettings) -> DaedalusEngineConfig {
     let mut engine_config = DaedalusEngineConfig { gpu: GpuBackend::Cpu, ..DaedalusEngineConfig::default() }.with_metrics_level(settings.metrics_level);
+    if settings.metrics_level != MetricsLevel::Off {
+        engine_config = engine_config.with_frame_overhead(DEFAULT_FRAME_OVERHEAD_WINDOW);
+    }
     engine_config.planner.enable_gpu = false;
     engine_config.runtime.mode = RuntimeMode::Serial;
     engine_config.runtime.backpressure = BackpressureStrategy::None;

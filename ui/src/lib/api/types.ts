@@ -199,6 +199,70 @@ export interface Camera {
   preview_available: boolean;
 }
 
+/** Styx's standard camera controls, by the API's key (same units whatever the camera). */
+export type CameraStandardControl = "exposure_us" | "gain" | "ae" | "ev" | "fps" | "awb" | "colour_temperature" | "red_gain" | "blue_gain" | "af_mode" | "af_trigger" | "lens_position";
+
+/** A rectangle control value. */
+export interface ControlRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export type ControlValue = null | boolean | number | ControlRect | ControlRect[];
+
+/** A camera control as the camera service lists it (`GET /v1/cameras/{id}/settings`). */
+export interface CameraControl {
+  id: number;
+  name: string;
+  kind: "bool" | "int" | "uint" | "float" | "menu" | "int_menu" | "rectangle" | "none" | "unknown";
+  read_only: boolean;
+  min: ControlValue;
+  max: ControlValue;
+  default: ControlValue;
+  step: ControlValue | null;
+  menu: string[] | null;
+  /** The value now; null when it cannot be read. */
+  current: ControlValue | null;
+  standard: CameraStandardControl | null;
+  /** The camera service lets the API change it. */
+  writable: boolean;
+}
+
+export interface CameraSettings {
+  writable: boolean;
+  controls: CameraControl[];
+  mode: string | null;
+  fps: number | null;
+  exposure_us: number | null;
+  analogue_gain: number | null;
+  digital_gain: number | null;
+  ae_state: string | null;
+  live_error: string | null;
+}
+
+/** `PATCH /v1/cameras/{id}/settings` body: standard keys, or a control's `name` or `id`. */
+export type CameraControlChanges = Record<string, boolean | number | string>;
+
+export interface AppliedCameraControl {
+  control: string;
+  id: number;
+  requested: ControlValue;
+  value: ControlValue;
+  clamped: boolean;
+  deferred: boolean;
+  restarted: boolean;
+  frame: number | null;
+}
+
+/** `camera` event data for a control change (by any client of the camera). */
+export interface CameraControlEvent {
+  id: string;
+  change: "control";
+  control: { id: number; standard: CameraStandardControl | null; value: ControlValue; frame: number | null; by: number | null; frame_rate_restart: boolean };
+}
+
 /** A Daedalus value in its tagged form. */
 export type DaedalusValue =
   | { type: "Unit" }

@@ -25,7 +25,7 @@ The API keeps very little state of its own. It reads other parts of the device a
 | Data | Backend |
 |---|---|
 | Pipelines, resources, peripheral actions, update requests | **Orion**, over its local IPC socket (`HELIOS_ORION_IPC_SOCKET`) |
-| Camera sources and live camera metrics | each camera's **Styx camera service** (the `styx-frames+unix://` endpoint on its resource) |
+| Camera sources, live camera metrics and camera controls | each camera's **Styx camera service** (the `styx-frames+unix://` endpoint on its resource) |
 | Services, reboot, logs | **systemd** and the **journal** |
 | CPU, temperature, disk, processes | the **kernel** (`/proc`, `/sys`). Memory, load and uptime come from Orion's host metrics |
 | Identity | the **Raze device package** (`/run/pd-device/identity.json`) |
@@ -97,8 +97,8 @@ as unavailable and not retry.
 |---|---|---|---|
 | `GET` | `/v1/cameras` | Orion + Styx | Camera resources with `live` facts, or `live_error` when the camera service did not answer |
 | `GET` | `/v1/cameras/{id}` | Orion + Styx | One camera |
-| `GET` | `/v1/cameras/{id}/settings` | Styx | Current mode, fps, exposure (µs) and gains as the camera reports them. `writable: false` |
-| `PATCH` | `/v1/cameras/{id}/settings` | — | **501**. Needs control requests on the Styx camera service. Resolution and pyramid levels are set per pipeline (see bindings) |
+| `GET` | `/v1/cameras/{id}/settings` | Styx | The camera's controls (range, default, value now, standard control, `writable`) plus the capture's mode, fps and measured exposure and gains |
+| `PATCH` | `/v1/cameras/{id}/settings` | Styx | Change controls: `{"ae": false, "exposure_us": 8000}`. Returns what is in effect (`clamped`, `deferred`, `restarted`). Resolution and pyramid levels are set per pipeline (see bindings) |
 | `GET` `PUT` `DELETE` | `/v1/cameras/{id}/mount` | API store | Robot-frame mount: `{x, y, z, roll, pitch, yaw}` in metres and degrees (x forward, y left, z up) |
 | `GET` | `/v1/cameras/{id}/preview` | — | **501**. A future MJPEG stream fed from Styx frames, never decoded images in JSON |
 | `GET` `POST` | `/v1/cameras/{id}/calibration` | — | **501** |
@@ -121,9 +121,74 @@ A camera:
                    "latency_p95_ms": 10.4, "cpu_per_frame_us": 300, "exposure_us": 2200,
                    "analogue_gain": 4, "digital_gain": 1, "ae_state": "converged" }]
   },
-  "live_error": null, "settings_writable": false, "preview_available": false
+  "live_error": null, "settings_writable": true, "preview_available": false
 }
 ```
+
+`settings_writable` is true when the camera has a Styx camera service; its settings say which
+controls can be changed.
+
+#### Camera settings and controls
+
+The settings come from the camera's Styx camera service: every control it lists, with its
+type, range, default, value now, the standard control it answers and whether the API may
+change it, and the capture's mode and measured 3A from its live metrics (`live_error` when
+those did not answer):
+
+```json
+{
+  "writable": true,
+  "controls": [
+    { "id": 4093640705, "name": "exposure_time_us", "kind": "uint", "read_only": false, "min": 10, "max": 33000,
+      "default": 10, "step": null, "menu": null, "current": 8000, "standard": "exposure_us", "writable": true },
+    { "id": 4093640709, "name": "ae_enable", "kind": "bool", "read_only": false, "min": false, "max": true,
+      "default": true, "step": null, "menu": null, "current": false, "standard": "ae", "writable": true }
+  ],
+  "mode": "1280x800 GREY @60", "fps": 60, "exposure_us": 8000, "analogue_gain": 4, "digital_gain": 1,
+  "ae_state": "idle", "live_error": null
+}
+```
+
+`PATCH` takes an object of controls. Keys are standard controls, in the same units whatever the
+camera, or a control's listed `name` or `id`:
+
+| Key | Value |
+|---|---|
+| `exposure_us` | exposure time in µs (turn `ae` off for it to hold) |
+| `gain` | total gain as a ratio (1: none) |
+| `ae` | automatic exposure, `true`/`false` |
+| `ev` | exposure compensation in stops |
+| `fps` | frame rate. Where the camera cannot change it while streaming, the camera service restarts the capture for every client (`restarted: true`) |
+| `awb` | automatic white balance, `true`/`false` |
+| `colour_temperature` | kelvin, used while `awb` is off |
+| `red_gain`, `blue_gain` | relative to green, used while `awb` is off |
+| `af_mode` | `manual`, `auto` or `continuous` |
+| `af_trigger` | `start` or `cancel` (in `auto`) |
+| `lens_position` | dioptres (0: infinity), in `manual` |
+
+Modes (`ae`, `awb`, `af_mode`) are applied first, then the rest. Nothing is applied when a key
+is unknown or a value has the wrong type (400). Out-of-range values are clamped. The answer
+lists each change in the order applied:
+
+```json
+{ "applied": [
+  { "control": "ae", "id": 4093640709, "requested": false, "value": false, "clamped": false, "deferred": false, "restarted": false, "frame": null },
+  { "control": "exposure_us", "id": 4093640705, "requested": 100000, "value": 33000, "clamped": true, "deferred": false, "restarted": false, "frame": 1532 }
+] }
+```
+
+`deferred`: the camera is not streaming and the value applies when it starts. `frame`: on
+frame-exact cameras, the sensor sequence of the first frame using the value. A control the
+camera does not have, a read-only control or an unusable value is refused with 422, a change
+the camera service's policy does not allow with 403; the request stops there and the changes
+before it stay applied (the message names them). Every accepted change, by the API or any other
+client of the camera, is sent as a `camera` event (`change: "control"`, see
+[Event stream](./websockets.md)). Changes need a signed-in session or token when the device is
+secured, like every mutation.
+
+The API is one client of each camera service: it asks for the luma frames the engine asks for
+by default and drops each one as it arrives (Styx serves controls to frame clients only), so
+it shows up in the camera's `clients`.
 
 ### Pipelines and outputs
 
